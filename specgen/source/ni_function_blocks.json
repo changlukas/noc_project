@@ -5,8 +5,7 @@
     "source_format": "hand-written; do not auto-gen",
     "authored_from": [
       "spec/ni/README.md §Features",
-      "spec/ni/doc/theory_of_operation.md",
-      "spec_validate/docs/guide/NI.jpg"
+      "spec/ni/doc/theory_of_operation.md"
     ]
   },
   "blocks": [
