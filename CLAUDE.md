@@ -1,21 +1,15 @@
-# CLAUDE.md — NoC c_model + RTL Integration Project
+# CLAUDE.md — NoC C++ Behavior Model
 
 ## Project Overview
 
-**Top-level layout** (this repo's root):
-- `c_model/` — C++ behavior model (Stage 2 AXI subsystem complete; Stage 3 NMU/NSU/Router 進行中)
-- `specgen/` — NI spec single source of truth + codegen (golden-gated `.h` / `.sv`)
-- `spec/` — NI spec markdown source (specgen 讀入)
-- `rtl/` — SystemVerilog RTL (NMU/NSU stub + Stage 5 router 預留)
-- `cosim/` — Verilator + DPI bridges (Stage 5)
-- `docs/noc_cmodel_rtl_plan.md` — **主 plan**：Stage 2/3/4/5 roadmap
+**Namespace**: `noc::`
 
-**Current stage**: Stage 2 (純 AXI subsystem) 完工 — 182/182 sequential ctest。下一步 Stage 3 NMU/NSU 內部單元，從 `c_model/include/nmu/packetize.hpp` 起頭。詳見 `NEXT_STEPS.md`。
+**Architecture**: User Code → NocSystem Public API → Internal Components → Co-Sim Bridge (DPI-C)
 
-**架構準則** (主 plan §0 結論)：
-- NMU/NSU 對 AXI 是**透明 transport**：valid/ready handshake + 完整 AXI channel 屬性原樣搬運 + wlast/rlast burst framing + per-ID response 重排 + address translation + QoS/VC 仲裁 + CDC。
-- **不**做：per-beat 位址生成、memory bounds 檢查、OOB DECERR 生成、slave 端 burst 拆解。這些屬 memory endpoint，住在 testbench 端 (`c_model/include/axi/`)。
-- Hot-swap 邊界在 **NoC flit link**，不在 AXI port。
+- **Uniform Router**: No Edge/Compute distinction; all routers identical.
+- **Dual Flow Control**: Valid/Ready (Version A) AND Credit-Based (Version B), compile-time template.
+- **Factory Pattern**: JSON config → factory function → template instantiation (analogous to RTL parameter).
+- **Hot-Swap Interface**: `Router_Interface<Mode>` / `NI_Interface<Mode>` abstract base classes.
 
 **Build**: C++17, CMake, GoogleTest.
 - Use `py -3` instead of `python3` (Windows).
@@ -29,10 +23,8 @@
 ## Key Design Docs
 
 - `docs/noc_cmodel_rtl_plan.md` — **main plan**: NoC c_model + RTL integration roadmap (Stage 2/3/4/5)
-- `NEXT_STEPS.md` — current Stage 3 next-step concrete tasks
-
-Phase B / Phase C design specs (historical reference) live in the old
-`noc-sim` repo; not carried into this project.
+- `docs/superpowers/specs/2026-05-31-pure-axi-subsystem-phase-b-design.md` — Phase B reference
+- `docs/superpowers/specs/2026-05-31-pure-axi-subsystem-phase-c-design.md` — Phase C reference
 
 ## Doc Writing Rules
 
