@@ -1,0 +1,23 @@
+# NMU/NSU transparent transport port parameters.
+#
+# Single source of truth for the AxiSlavePort (NMU side) and AxiMasterPort
+# (NSU side) internal per-channel FIFO depths. The port classes do not
+# hard-code queue depths in headers — tests load this file and pass a
+# PortParams struct into the constructor.
+#
+# Depths chosen to match Stage 2 axi/axi_slave.hpp default (32). The two
+# ports mirror each other so use the same defaults for both sides; size
+# pressure tests can override these values via inline PortParams literals.
+#
+# Fields (all per-channel, unit = beats):
+#   aw_queue_depth : AW channel internal FIFO capacity
+#   w_queue_depth  : W  channel internal FIFO capacity
+#   ar_queue_depth : AR channel internal FIFO capacity
+#   b_queue_depth  : B  channel internal FIFO capacity
+#   r_queue_depth  : R  channel internal FIFO capacity
+
+aw_queue_depth: 32
+w_queue_depth: 32
+ar_queue_depth: 32
+b_queue_depth: 32
+r_queue_depth: 32
