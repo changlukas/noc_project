@@ -130,3 +130,30 @@ NoC 邊界先用 responder stub（直接 loopback / 零延遲），後續 Stage 
 - `c_model/NEXT_STEPS.md` — c_model 內部限制與已知 follow-up（Stage 2 audit 留下的）
 
 GitHub Action 自動跑 specgen pytest + codegen + inventory drift gates。
+
+---
+
+## 開新 session 的最小 onboarding
+
+開新 session 前先把舊 session 累積的 saved memory 搬過去（11 條 memory 含 OSS-first、不重新設計 protocol、bus semantics 等）：
+
+```
+# Windows path 編碼規則: 把絕對路徑的 : 與 / \ 都換成 -
+# 例：clone 到 E:\06_NoC\noc_project\  → E--06-NoC-noc-project
+
+cp -r "C:\Users\USER\.claude\projects\E--05-NoC-noc-sim\memory" \
+      "C:\Users\USER\.claude\projects\<新 encoded path>\memory"
+```
+
+新 session 第一條訊息 (推薦)：
+
+```
+Read CLAUDE.md, NEXT_STEPS.md, docs/noc_cmodel_rtl_plan.md.
+
+Then survey:
+- ls c_model/include/{axi,nmu,nsu}/
+- 看 specgen/generated/cpp/ni_flit_constants.h + ni_signals.h 的 ni::header 結構
+
+Then propose answer to NEXT_STEPS open question #1 (port 與 packetize/depacketize
+之間 stub interface 型態)，等我確認後再進 implementation.
+```
