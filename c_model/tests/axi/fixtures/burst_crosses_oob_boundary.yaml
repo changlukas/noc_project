@@ -1,0 +1,13 @@
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x1FE0
+    id: 0x9
+    len: 1
+    size: 5
+    burst: INCR
+    data_file: fixtures/burst_incr_2beat_data.txt

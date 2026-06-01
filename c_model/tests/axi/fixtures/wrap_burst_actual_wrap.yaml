@@ -1,0 +1,20 @@
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x1060
+    id: 0x5
+    len: 3
+    size: 5
+    burst: WRAP
+    data_file: fixtures/wrap_burst_actual_wrap_data.txt
+  - op: read
+    addr: 0x1060
+    id: 0x5
+    len: 3
+    size: 5
+    burst: WRAP
+    dump_file: unused

@@ -1,0 +1,22 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# C++ build artifacts (platform-specific binaries — regenerate via tools/codegen.py + g++)
+*.exe
+*.o
+*.obj
+
+# Editor / OS clutter
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Codegen output (regen via tools/codegen.py)
+include/
+rtl_pkg/
+
+# Codegen --check mode scratch
+/tmp_codegen/

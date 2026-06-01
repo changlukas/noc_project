@@ -1,0 +1,13 @@
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: read
+    addr: 0x3000
+    id: 0x8
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ni_registers.schema.json",
+  "type": "object",
+  "required": ["$schema_version", "meta", "csr_policy", "registers"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema_version": {"const": "ni-spec/2.0"},
+    "meta": {
+      "type": "object",
+      "required": ["spec_version"],
+      "additionalProperties": true,
+      "properties": {
+        "spec_version": {"type": "string", "pattern": "^v\\d+\\.\\d+\\.\\d+$"}
+      }
+    },
+    "csr_policy": {
+      "type": "object",
+      "required": ["sub_word_write", "unmapped_read", "misaligned", "wo_read"],
+      "additionalProperties": false,
+      "properties": {
+        "sub_word_write": {"enum": ["decerr", "ignored", "slverr"]},
+        "unmapped_read": {"enum": ["decerr", "zero"]},
+        "misaligned": {"enum": ["decerr", "lower-aligned", "slverr"]},
+        "wo_read": {"enum": ["zero", "decerr"]}
+      }
+    },
+    "registers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["offset", "name", "kind"],
+        "additionalProperties": false,
+        "properties": {
+          "offset": {"type": "string", "pattern": "^0x[0-9A-Fa-f]+$"},
+          "name": {"type": "string"},
+          "kind": {"enum": ["register", "reserved"]},
+          "access": {"type": ["string", "null"], "enum": ["RO", "RW", "RW1C", "WO", "WC", null]},
+          "reset_expr": {"type": ["string", "null"]},
+          "width_expr": {"type": ["string", "null"]},
+          "conditional_presence": {
+            "type": ["object", "null"],
+            "additionalProperties": false,
+            "properties": {"condition_text": {"type": "string"}}
+          },
+          "reserved_bits_policy": {"type": "string"},
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["name", "bit_high", "bit_low"],
+              "additionalProperties": false,
+              "properties": {
+                "name": {"type": "string"},
+                "bit_high": {"type": "integer", "minimum": 0, "maximum": 31},
+                "bit_low": {"type": "integer", "minimum": 0, "maximum": 31},
+                "access": {"type": "string", "enum": ["RO", "RW", "RW1C", "WO", "WC"]},
+                "reset": {"type": "string"},
+                "description": {"type": "string"}
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"kind": {"const": "register"}}},
+            "then": {"required": ["access", "reset_expr"]}
+          }
+        ]
+      }
+    }
+  }
+}

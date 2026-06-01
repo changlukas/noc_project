@@ -1,0 +1,139 @@
+{
+  "$schema_version": "ni-spec/2.0",
+  "meta": {
+    "spec_version": "v0.4.0",
+    "source_format": "hand-written; do not auto-gen",
+    "authored_from": [
+      "spec/ni/README.md §Features",
+      "spec/ni/doc/theory_of_operation.md",
+      "spec_validate/docs/guide/NI.jpg"
+    ]
+  },
+  "blocks": [
+    {
+      "name": "NMU",
+      "fullname": "Network Master Unit",
+      "role": "AXI-side injection / response sink",
+      "features": [
+        {
+          "id": "FEAT-NMU-AXI_SLAVE_PORT",
+          "summary": "AXI4 full-protocol slave port (AW/W/AR/B/R) with built-in async data boundary crossing between aclk_i and noc_clk_i.",
+          "modes": ["Active", "Passive"],
+          "compile_time_params": {},
+          "uses_packet_fields": ["AW", "W", "AR", "B", "R"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-ADDR_TRANS", "FEAT-NMU-PACKETIZE", "FEAT-NMU-DEPACKETIZE"]
+        },
+        {
+          "id": "FEAT-NMU-ADDR_TRANS",
+          "summary": "Converts AXI awaddr/araddr to NoC dst_id + local_addr using XY-extraction, SourceRouting, or IDRouting (SAM table lookup).",
+          "modes": ["XYRouting", "SourceRouting", "IDRouting"],
+          "compile_time_params": {},
+          "uses_packet_fields": ["dst_id", "src_id"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-PACKETIZE"]
+        },
+        {
+          "id": "FEAT-NMU-PACKETIZE",
+          "summary": "Assembles AXI AW/W/AR transactions into NoC request flit streams (header + payload), tagging dst_id, src_id, awid/arid, last, and rob_idx.",
+          "modes": [],
+          "compile_time_params": {},
+          "uses_packet_fields": ["AW", "W", "AR", "dst_id", "src_id", "last", "rob_idx"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-ADDR_TRANS", "FEAT-NMU-VC_MAPPING"]
+        },
+        {
+          "id": "FEAT-NMU-VC_MAPPING",
+          "summary": "Maps outbound flits to a VC at flit-construct time (design-time fixed policy; req-VC=0, rsp-VC=0 for NUM_VC=1). VC egress arbitration is in FEAT-NMU-VC_ARB.",
+          "modes": [],
+          "compile_time_params": {},
+          "uses_packet_fields": ["vc_id", "last"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-VC_ARB", "FEAT-NMU-PACKETIZE"]
+        },
+        {
+          "id": "FEAT-NMU-VC_ARB",
+          "summary": "Round-robin arbitration across populated VCs at NMU REQ_OUT egress. Selects which VC's flit is emitted onto the NoC link each cycle, subject to per-VC credit availability.",
+          "modes": ["RoundRobin"],
+          "compile_time_params": {},
+          "uses_packet_fields": ["vc_id"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-VC_MAPPING"]
+        },
+        {
+          "id": "FEAT-NMU-ROB",
+          "summary": "Per-AXI-ID response reordering for the read path. Variants: NoRoB (pass-through), SimpleRoB (issue-order), NormalRoB (per-ID linked-list with prev_dest adaptive bypass).",
+          "modes": ["NoRoB", "SimpleRoB", "NormalRoB"],
+          "compile_time_params": {
+            "B_ROB_TYPE": "NoRoB",
+            "R_ROB_TYPE": "NoRoB"
+          },
+          "uses_packet_fields": ["rob_req", "rob_idx", "B", "R"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-DEPACKETIZE"]
+        },
+        {
+          "id": "FEAT-NMU-DEPACKETIZE",
+          "summary": "Parses inbound NoC response flit streams into AXI B/R beats (with last) before delivery to the AXI slave port.",
+          "modes": [],
+          "compile_time_params": {},
+          "uses_packet_fields": ["B", "R", "last"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-ROB"]
+        }
+      ]
+    },
+    {
+      "name": "NSU",
+      "fullname": "Network Slave Unit",
+      "role": "NoC-side reception / AXI-side master",
+      "features": [
+        {
+          "id": "FEAT-NSU-AXI_MASTER_PORT",
+          "summary": "AXI4 full-protocol master port (AW/W/AR/B/R) with built-in async data boundary crossing between noc_clk_i and aclk_i.",
+          "modes": ["Active", "Passive"],
+          "compile_time_params": {},
+          "uses_packet_fields": ["AW", "W", "AR", "B", "R"],
+          "configured_by": [],
+          "related_features": ["FEAT-NSU-DEPACKETIZE", "FEAT-NSU-PACKETIZE", "FEAT-NSU-META_BUFFER"]
+        },
+        {
+          "id": "FEAT-NSU-DEPACKETIZE",
+          "summary": "Parses inbound NoC request flit streams into AXI AW/W/AR transactions before delivery to the AXI master port.",
+          "modes": [],
+          "compile_time_params": {},
+          "uses_packet_fields": ["AW", "W", "AR", "last", "src_id"],
+          "configured_by": [],
+          "related_features": ["FEAT-NSU-AXI_MASTER_PORT", "FEAT-NSU-META_BUFFER"]
+        },
+        {
+          "id": "FEAT-NSU-META_BUFFER",
+          "summary": "Snapshots request flit metadata (rob_idx, src_id, awid/arid) on AW/AR flit reception; retrieved at response injection time to reconstruct the return path.",
+          "modes": [],
+          "compile_time_params": {},
+          "uses_packet_fields": ["rob_idx", "src_id", "AW", "AR"],
+          "configured_by": [],
+          "related_features": ["FEAT-NSU-AXI_MASTER_PORT", "FEAT-NSU-DEPACKETIZE", "FEAT-NSU-PACKETIZE"]
+        },
+        {
+          "id": "FEAT-NSU-PACKETIZE",
+          "summary": "Assembles AXI B/R beats from the local slave into NoC response flit streams, using META_BUFFER for dst_id / rob_idx / bid|rid return-path reconstruction.",
+          "modes": [],
+          "compile_time_params": {},
+          "uses_packet_fields": ["B", "R", "dst_id", "rob_idx", "vc_id", "last"],
+          "configured_by": [],
+          "related_features": ["FEAT-NSU-AXI_MASTER_PORT", "FEAT-NSU-META_BUFFER", "FEAT-NSU-VC_ARB"]
+        },
+        {
+          "id": "FEAT-NSU-VC_ARB",
+          "summary": "Round-robin arbitration across populated VCs at NSU RSP_OUT egress. Selects which VC's response flit is emitted onto the NoC return link, subject to per-VC credit availability.",
+          "modes": ["RoundRobin"],
+          "compile_time_params": {},
+          "uses_packet_fields": ["vc_id"],
+          "configured_by": [],
+          "related_features": ["FEAT-NSU-PACKETIZE"]
+        }
+      ]
+    }
+  ]
+}

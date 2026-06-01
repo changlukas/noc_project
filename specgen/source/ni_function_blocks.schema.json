@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ni_function_blocks.schema.json",
+  "type": "object",
+  "required": ["$schema_version", "meta", "blocks"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema_version": {"const": "ni-spec/2.0"},
+    "meta": {
+      "type": "object",
+      "required": ["spec_version", "source_format"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_version": {"type": "string", "pattern": "^v\\d+\\.\\d+\\.\\d+$"},
+        "source_format": {"type": "string"},
+        "authored_from": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "fullname", "role", "features"],
+        "additionalProperties": false,
+        "properties": {
+          "name": {"enum": ["NMU", "NSU"]},
+          "fullname": {"type": "string"},
+          "role": {"type": "string"},
+          "features": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "summary", "modes"],
+              "additionalProperties": false,
+              "properties": {
+                "id": {"type": "string", "pattern": "^FEAT-(NMU|NSU)-[A-Z][A-Z0-9_]*$"},
+                "summary": {"type": "string", "maxLength": 200},
+                "modes": {
+                  "type": "array",
+                  "uniqueItems": true,
+                  "items": {"type": "string", "pattern": "^[A-Z][A-Za-z0-9_]*$"}
+                },
+                "compile_time_params": {
+                  "type": "object",
+                  "additionalProperties": {"type": ["integer", "string"]}
+                },
+                "uses_packet_fields": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+                "configured_by": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+                "related_features": {"type": "array", "uniqueItems": true, "items": {"type": "string"}}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

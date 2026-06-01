@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ni_protocol_rule_index.schema.json",
+  "type": "object",
+  "required": ["$schema_version", "meta", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema_version": {"const": "ni-spec/2.0"},
+    "meta": {
+      "type": "object",
+      "required": ["spec_version"],
+      "additionalProperties": false,
+      "properties": {
+        "spec_version": {"type": "string", "pattern": "^v\\d+\\.\\d+\\.\\d+$"}
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "source_section", "source_line", "proto"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
+          "severity": {"enum": ["MUST", "MUST NOT", "SHOULD", "SHOULD NOT", "MAY"]},
+          "source_section": {"type": "string"},
+          "source_line": {"type": "integer", "minimum": 1},
+          "proto": {"enum": ["RESET", "CDC", "AXI4", "NOC", "CSR", "CONFIG", "INTERRUPT"]}
+        }
+      }
+    }
+  }
+}

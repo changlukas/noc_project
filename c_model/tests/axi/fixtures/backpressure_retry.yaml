@@ -1,0 +1,67 @@
+# Backpressure retry: high latency + several outstanding writes so memory's
+# pending-queue policy and AxiSlave's submit_write retry path get exercised.
+# Reads stay serialized (max_outstanding_read=1) to keep dump order deterministic.
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 5
+  read_latency: 1
+  max_outstanding_write: 4
+  max_outstanding_read: 1
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: fixtures/backpressure_retry_data_1.txt
+  - op: write
+    addr: 0x1020
+    id: 0x2
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: fixtures/backpressure_retry_data_2.txt
+  - op: write
+    addr: 0x1040
+    id: 0x3
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: fixtures/backpressure_retry_data_3.txt
+  - op: write
+    addr: 0x1060
+    id: 0x4
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: fixtures/backpressure_retry_data_4.txt
+  - op: read
+    addr: 0x1000
+    id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1020
+    id: 0x2
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1040
+    id: 0x3
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1060
+    id: 0x4
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused

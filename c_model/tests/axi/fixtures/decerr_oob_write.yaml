@@ -1,0 +1,13 @@
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x2000
+    id: 0x7
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: fixtures/decerr_oob_write_data.txt
