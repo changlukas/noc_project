@@ -253,9 +253,30 @@ def _find_header_field(spec: dict, name: str) -> dict:
 
 
 def header_field_width(spec: dict, name: str) -> int:
-    """Resolve width by evaluating width_param against field_widths."""
+    """Resolve width by evaluating width_param against field_widths.
+
+    Special case ``width_param == "derived"`` mirrors payload's derived
+    handling: the field's width is computed as
+    ``HEADER_TOTAL_WIDTH - sum(other fields' widths)``. This anchors a
+    fixed-size header layout; the derived field acts as compile-time
+    padding to keep HEADER_WIDTH constant regardless of which optional
+    fields are enabled. At most one ``derived`` field per header_fields
+    (enforced in invariants).
+    """
     f = _find_header_field(spec, name)
-    return packet_eval_expr(spec, f["width_param"])
+    wp = f["width_param"]
+    if wp == "derived":
+        total = packet_param_value(spec, "HEADER_TOTAL_WIDTH")
+        others_sum = 0
+        for of in spec["flit"]["header_fields"]:
+            if of["name"] == name:
+                continue
+            owp = of["width_param"]
+            if owp == "derived":
+                continue
+            others_sum += packet_eval_expr(spec, owp)
+        return total - others_sum
+    return packet_eval_expr(spec, wp)
 
 
 def header_field_position(spec: dict, name: str):
@@ -352,8 +373,18 @@ def flit_width_resolved(spec: dict) -> int:
 
 
 def link_width_resolved(spec: dict) -> int:
-    """LINK_WIDTH = FLIT_WIDTH + 1 (valid signal). Per spec/ni/doc/packet_format.md:112."""
-    return flit_width_resolved(spec) + 1
+    """LINK_WIDTH = FLIT_WIDTH + 1 (valid) + NUM_VC (per-VC credit return).
+
+    The forward bundle on a NoC link carries the flit plus a valid signal;
+    the reverse bundle returns one credit bit per VC. Total wire count for
+    one logical link is therefore FLIT_WIDTH + 1 + NUM_VC.
+
+    NUM_VC defaults to 1 (single-VC); override via flit.field_widths.NUM_VC.
+    Per spec/ni/doc/packet_format.md and ni_signals.json NOC_REQ_OUT /
+    NOC_RSP_OUT (noc_*_valid + noc_*_flit + noc_*_credit signals)."""
+    fw = spec["flit"].get("field_widths", {})
+    num_vc = int(fw.get("NUM_VC", 1))
+    return flit_width_resolved(spec) + 1 + num_vc
 
 
 def flit_data_width_resolved(spec: dict) -> int:

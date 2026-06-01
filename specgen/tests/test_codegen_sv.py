@@ -99,12 +99,14 @@ class TestSvPacketEmit:
         assert "_ENABLED" in text
 
     def test_padding_fields_enabled_zero(self):
-        """Fields declared as padding must emit ENABLED = 1'b0 in SV package."""
+        """Fields declared as padding must emit ENABLED = 1'b0 in SV package.
+
+        Post fixed-56b refactor: only the synthetic ``rsvd`` field is padding.
+        """
         text = _sv_text("ni_flit_pkg.sv")
-        for field in ("ROUTE_PAR", "RSVD_COMMTYPE", "MULTICAST", "FLIT_ECC"):
-            assert f"localparam bit          {field}_ENABLED = 1'b0;" in text, (
-                f"Expected {field}_ENABLED = 1'b0; not found in ni_flit_pkg.sv"
-            )
+        assert "localparam bit          RSVD_ENABLED = 1'b0;" in text, (
+            "Expected RSVD_ENABLED = 1'b0; not found in ni_flit_pkg.sv"
+        )
 
     def test_functional_fields_enabled_one(self):
         """Functional fields must emit ENABLED = 1'b1 in SV package."""

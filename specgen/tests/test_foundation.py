@@ -36,14 +36,21 @@ def test_header_field_enabled_returns_true_for_functional():
 
 
 def test_header_field_enabled_returns_false_for_padding():
-    """header_field_enabled returns False for padding fields."""
+    """header_field_enabled returns False for padding fields.
+
+    Post fixed-56b header refactor: the only enabled=false field is the
+    synthetic ``rsvd`` (derived padding that anchors HEADER_TOTAL_WIDTH=56).
+    All previously-disabled fields (route_par, commtype, multicast, flit_ecc)
+    are now enabled per docs/image/header.jpg.
+    """
     spec = _load_packet()
-    assert C.header_field_enabled(spec, "route_par") is False
-    assert C.header_field_enabled(spec, "rsvd_commtype") is False
-    assert C.header_field_enabled(spec, "multicast") is False
-    assert C.header_field_enabled(spec, "flit_ecc") is False
-    # axi_ch is functional (MUST for AXI request/response routing)
+    assert C.header_field_enabled(spec, "rsvd") is False
+    # All other fields are functional (driven by hardware)
     assert C.header_field_enabled(spec, "axi_ch") is True
+    assert C.header_field_enabled(spec, "route_par") is True
+    assert C.header_field_enabled(spec, "commtype") is True
+    assert C.header_field_enabled(spec, "multicast") is True
+    assert C.header_field_enabled(spec, "flit_ecc") is True
 
 
 def test_header_field_enabled_raises_for_unknown():
@@ -55,10 +62,13 @@ def test_header_field_enabled_raises_for_unknown():
 
 
 def test_header_fields_padding_list():
-    """header_fields_padding returns exactly the four padding field names."""
+    """header_fields_padding returns the single derived padding field.
+
+    Post fixed-56b refactor: only the synthetic ``rsvd`` field is padding.
+    """
     spec = _load_packet()
     padding = C.header_fields_padding(spec)
-    assert set(padding) == {"route_par", "rsvd_commtype", "multicast", "flit_ecc"}
+    assert set(padding) == {"rsvd"}
 
 
 def test_header_fields_padding_json_has_enabled_bool():

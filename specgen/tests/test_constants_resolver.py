@@ -75,28 +75,23 @@ def test_header_field_width_expression(packet_spec):
     assert C.header_field_width(packet_spec, "src_id") == 8
 
 
-def test_header_field_width_zero(packet_spec):
-    assert C.header_field_width(packet_spec, "noc_qos") == 0
-
-
 def test_header_field_position_cumulative(packet_spec):
-    assert C.header_field_position(packet_spec, "axi_ch") == (0, 2)
-    assert C.header_field_position(packet_spec, "src_id") == (3, 10)
-
-
-def test_header_field_position_zero_width_returns_none(packet_spec):
-    assert C.header_field_position(packet_spec, "noc_qos") is None
+    # Post fixed-56b refactor (noc_qos enabled, width=4): all positions shift +4.
+    assert C.header_field_position(packet_spec, "axi_ch") == (4, 6)
+    assert C.header_field_position(packet_spec, "src_id") == (7, 14)
 
 
 def test_header_field_position_disabled_still_positioned(packet_spec):
-    pos = C.header_field_position(packet_spec, "route_par")
+    # rsvd is the lone disabled (derived padding) field; sits at the end.
+    pos = C.header_field_position(packet_spec, "rsvd")
     assert pos is not None
-    assert pos[1] - pos[0] == 0
+    # width=2 (HEADER_TOTAL_WIDTH 56 - sum of enabled 54), so MSB-LSB == 1.
+    assert pos[1] - pos[0] == 1
 
 
 def test_header_field_enabled(packet_spec):
     assert C.header_field_enabled(packet_spec, "src_id") is True
-    assert C.header_field_enabled(packet_spec, "route_par") is False
+    assert C.header_field_enabled(packet_spec, "rsvd") is False
 
 
 def test_header_field_not_found(packet_spec):
@@ -150,6 +145,14 @@ def test_flit_width_is_header_plus_payload(packet_spec):
                + C.payload_width_resolved(packet_spec))
 
 
-def test_link_width_is_flit_width_plus_valid_bit(packet_spec):
-    """LINK_WIDTH == FLIT_WIDTH + 1 (the valid signal). Per packet_format.md:112."""
-    assert C.link_width_resolved(packet_spec) == C.flit_width_resolved(packet_spec) + 1
+def test_link_width_includes_valid_and_credit(packet_spec):
+    """LINK_WIDTH == FLIT_WIDTH + 1 (valid) + NUM_VC (per-VC credit return).
+
+    The forward bundle is valid + flit; the reverse bundle is NUM_VC credit
+    bits. NUM_VC defaults to 1 (single-VC) when not present in field_widths.
+    Per ni_signals.json NOC_REQ_OUT / NOC_RSP_OUT signal definitions.
+    """
+    fw = packet_spec["flit"].get("field_widths", {})
+    num_vc = int(fw.get("NUM_VC", 1))
+    assert (C.link_width_resolved(packet_spec)
+            == C.flit_width_resolved(packet_spec) + 1 + num_vc)

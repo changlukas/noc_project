@@ -153,7 +153,10 @@ def test_use_constants_cpp_compiles_and_runs(tmp_path):
         [str(exe)], capture_output=True, text=True,
     )
     assert run_result.returncode == 0, run_result.stderr
-    assert "0x000000000F80902A" in run_result.stdout, (
+    # Post fixed-56b refactor: noc_qos enabled (width=4) shifts every other
+    # field +4 bits, so packed hex of (axi_ch=2, src_id=5, dst_id=0x12,
+    # last=1, rob_req=1, rob_idx=7) is the old value left-shifted by 4.
+    assert "0x00000000F80902A0" in run_result.stdout, (
         f"Expected header value not found in output:\n{run_result.stdout}"
     )
 
@@ -198,13 +201,15 @@ def test_packet_cpp_has_enabled_constants():
 
 
 def test_packet_cpp_padding_fields_have_enabled_false():
-    """Fields declared as padding must emit ENABLED = false in C++ header."""
+    """Fields declared as padding must emit ENABLED = false in C++ header.
+
+    Post fixed-56b refactor: only the synthetic ``rsvd`` field is padding
+    (derived width = HEADER_TOTAL_WIDTH - sum(enabled fields)).
+    """
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
-    # These four are marked enabled=false per user direction (stubbed to zero, future-impl)
-    for field in ("ROUTE_PAR", "RSVD_COMMTYPE", "MULTICAST", "FLIT_ECC"):
-        assert f"constexpr bool {field}_ENABLED = false;" in text, (
-            f"Expected {field}_ENABLED = false; not found in ni_flit_constants.h"
-        )
+    assert "constexpr bool RSVD_ENABLED = false;" in text, (
+        "Expected RSVD_ENABLED = false; not found in ni_flit_constants.h"
+    )
 
 
 def test_packet_cpp_functional_fields_have_enabled_true():
@@ -228,8 +233,8 @@ def test_padding_fields_array_elaborated():
     assert "struct PaddingFieldPos" in text, "missing PaddingFieldPos struct"
     assert "constexpr PaddingFieldPos PADDING_FIELDS[]" in text, "missing PADDING_FIELDS array"
     assert "constexpr std::size_t PADDING_FIELDS_COUNT" in text, "missing PADDING_FIELDS_COUNT"
-    assert "route_par" in text or "flit_ecc" in text, \
-        "expected at least one of route_par / flit_ecc in PADDING_FIELDS"
+    assert "rsvd" in text, \
+        "expected synthetic 'rsvd' padding field in PADDING_FIELDS"
 
 
 # ---------------------------------------------------------------------------

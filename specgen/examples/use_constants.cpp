@@ -26,8 +26,8 @@ int main() {
     std::printf("\n");
 
     std::printf("=== Header field bit positions ===\n");
-    // noc_qos: NOC_QOS_WIDTH=0 (reserved placeholder, not in flit)
-    std::printf("noc_qos   width=%d (reserved placeholder, not bit-addressable)\n",
+    std::printf("noc_qos   at [%2d:%2d] (width %d)\n",
+                ni::header::NOC_QOS_MSB, ni::header::NOC_QOS_LSB,
                 ni::header::NOC_QOS_WIDTH);
     std::printf("axi_ch    at [%2d:%2d] (width %d)\n",
                 ni::header::AXI_CH_MSB, ni::header::AXI_CH_LSB,
@@ -50,7 +50,7 @@ int main() {
     // Demo: 用 constexpr 常數實際打包一個 AR header
     // 假設目的地 dst_id=0x12 (x=2, y=1), src_id=0x05, axi_ch=AR(2),
     //         last=1, rob_req=1, rob_idx=7
-    // (noc_qos removed — NOC_QOS_WIDTH=0, no bits to pack)
+    // (noc_qos / vc_id / route_par / commtype / multicast / flit_ecc 留 0 不 demo 打包)
     std::printf("=== Demo: pack an AR header using compile-time constants ===\n");
     uint64_t hdr_lo = 0;  // bits 0..63 of header
     hdr_lo |= (uint64_t)(0x2) << ni::header::AXI_CH_LSB;  // AR

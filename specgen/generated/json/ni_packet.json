@@ -8,7 +8,7 @@
     "field_widths": {
       "X_WIDTH": 4,
       "Y_WIDTH": 4,
-      "NOC_QOS_WIDTH": 0,
+      "NOC_QOS_WIDTH": 4,
       "AXI_CH_WIDTH": 3,
       "LAST_WIDTH": 1,
       "ROB_REQ_WIDTH": 1,
@@ -31,8 +31,8 @@
       "AXI_REGION_WIDTH": 4,
       "AXI_RESP_WIDTH": 2,
       "AXI_LAST_WIDTH": 1,
-      "RSVD_MC_STATUS_WIDTH": 2,
-      "WSTRB_WIDTH": 32
+      "WSTRB_WIDTH": 32,
+      "HEADER_TOTAL_WIDTH": 56
     },
     "header_fields": [
       {
@@ -63,7 +63,7 @@
       {
         "name": "route_par",
         "width_param": "ROUTE_PAR_WIDTH",
-        "enabled": false
+        "enabled": true
       },
       {
         "name": "last",
@@ -81,18 +81,23 @@
         "enabled": true
       },
       {
-        "name": "rsvd_commtype",
+        "name": "commtype",
         "width_param": "RSVD_COMMTYPE_WIDTH",
-        "enabled": false
+        "enabled": true
       },
       {
         "name": "multicast",
         "width_param": "MULTICAST_WIDTH",
-        "enabled": false
+        "enabled": true
       },
       {
         "name": "flit_ecc",
         "width_param": "FLIT_ECC_WIDTH",
+        "enabled": true
+      },
+      {
+        "name": "rsvd",
+        "width_param": "derived",
         "enabled": false
       }
     ],
@@ -213,12 +218,12 @@
             "width_param": "AXI_USER_WIDTH"
           },
           {
-            "name": "wdata",
-            "width_param": "NOC_DATA_WIDTH"
-          },
-          {
             "name": "wstrb",
             "width_param": "WSTRB_WIDTH"
+          },
+          {
+            "name": "wdata",
+            "width_param": "NOC_DATA_WIDTH"
           },
           {
             "name": "w_rsvd",
@@ -242,10 +247,6 @@
           {
             "name": "buser",
             "width_param": "AXI_USER_WIDTH"
-          },
-          {
-            "name": "rsvd_mc_status",
-            "width_param": "RSVD_MC_STATUS_WIDTH"
           },
           {
             "name": "b_rsvd",
