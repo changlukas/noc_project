@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: 9ed018f23a88
 // Generator version: v1.0.0
-// Generated at: 2026-06-01T10:25:23Z
+// Generated at: 2026-06-01T11:36:17Z
 // ----------------------------------------------------------------------------
 `ifndef NI_SIGNALS_PKG_SVH
 `define NI_SIGNALS_PKG_SVH
@@ -108,7 +108,7 @@ endinterface : ni_axi_slave_port_intf
 
 interface ni_noc_req_out_intf;
   logic noc_req_valid;
-  logic [401:0] noc_req_flit;
+  logic [407:0] noc_req_flit;
   logic noc_req_credit;
 
   modport endpoint (
@@ -119,7 +119,7 @@ endinterface : ni_noc_req_out_intf
 
 interface ni_noc_rsp_in_intf;
   logic noc_rsp_valid;
-  logic [401:0] noc_rsp_flit;
+  logic [407:0] noc_rsp_flit;
   logic noc_rsp_credit;
 
   modport endpoint (
@@ -172,7 +172,7 @@ endinterface : ni_csr_intf
 
 interface ni_noc_req_in_intf;
   logic noc_req_valid;
-  logic [401:0] noc_req_flit;
+  logic [407:0] noc_req_flit;
   logic noc_req_credit;
 
   modport endpoint (
@@ -225,7 +225,7 @@ endinterface : ni_axi_master_port_intf
 
 interface ni_noc_rsp_out_intf;
   logic noc_rsp_valid;
-  logic [401:0] noc_rsp_flit;
+  logic [407:0] noc_rsp_flit;
   logic noc_rsp_credit;
 
   modport endpoint (

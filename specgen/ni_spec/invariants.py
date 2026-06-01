@@ -117,6 +117,14 @@ def check_flit_arithmetic(packet_spec) -> List[Issue]:
             issues.append(_err(TAG, f"route_par_coverage references '{cov}' "
                                     f"which is not a header field"))
 
+    # 5) Header derived padding: at most one field may declare width_param='derived'.
+    #    The derived field anchors a fixed-size header (HEADER_TOTAL_WIDTH); allowing
+    #    multiple derived fields would make the remainder split ambiguous.
+    derived_hdr = [f["name"] for f in hdr if f.get("width_param") == "derived"]
+    if len(derived_hdr) > 1:
+        issues.append(_err(TAG, f"header: multiple 'derived' fields {derived_hdr}; "
+                                f"at most one allowed (anchors HEADER_TOTAL_WIDTH)"))
+
     return issues
 
 
