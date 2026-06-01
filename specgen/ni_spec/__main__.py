@@ -1,8 +1,8 @@
 """CLI 入口: python -m ni_spec <md_dir>
 
 Path B 流程：
-  1. generator 讀 <md_dir>/packet_format.md → generated/ni_packet.json
-  2. generator 讀 <md_dir>/signal_interface.md → generated/ni_signals.json
+  1. generator 讀 <md_dir>/packet_format.md → generated/json/ni_packet.json
+  2. generator 讀 <md_dir>/signal_interface.md → generated/json/ni_signals.json
   3. Layer 1 (JSON Schema) 驗各 generated JSON
   4. Layer 2 (semantic / arithmetic) 驗
   5. 印 report、回傳 exit code
@@ -30,8 +30,8 @@ for _s in (sys.stdout, sys.stderr):
         _s.reconfigure(encoding="utf-8", errors="replace")
 
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-GENERATED_DIR = SPEC_VALIDATE / "generated"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+GENERATED_DIR = SPECGEN_ROOT / "generated" / "json"
 
 PACKET_JSON = GENERATED_DIR / "ni_packet.json"
 PACKET_SCHEMA = GENERATED_DIR / "ni_packet.schema.json"
@@ -42,9 +42,9 @@ SIGNALS_SCHEMA = GENERATED_DIR / "ni_signals.schema.json"
 REGISTERS_JSON = GENERATED_DIR / "ni_registers.json"
 REGISTERS_SCHEMA = GENERATED_DIR / "ni_registers.schema.json"
 
-AUTHORED_DIR = SPEC_VALIDATE / "authored"
-FB_JSON = AUTHORED_DIR / "ni_function_blocks.json"
-FB_SCHEMA = AUTHORED_DIR / "ni_function_blocks.schema.json"
+SOURCE_DIR = SPECGEN_ROOT / "source"
+FB_JSON = SOURCE_DIR / "ni_function_blocks.json"
+FB_SCHEMA = SOURCE_DIR / "ni_function_blocks.schema.json"
 
 PROTO_JSON = GENERATED_DIR / "ni_protocol_rule_index.json"
 PROTO_SCHEMA = GENERATED_DIR / "ni_protocol_rule_index.schema.json"
@@ -54,8 +54,8 @@ def main() -> int:
     if len(sys.argv) < 2:
         print("用法: python -m ni_spec <md_dir>", file=sys.stderr)
         print("  md_dir: 含 packet_format.md + signal_interface.md 的目錄", file=sys.stderr)
-        print(f"           例（從 noc-sim/spec_validate/ 跑）: ../spec/ni/doc", file=sys.stderr)
-        print(f"  輸出: {GENERATED_DIR.relative_to(SPEC_VALIDATE)}/ni_*.json", file=sys.stderr)
+        print(f"           例（從 noc_project/specgen/ 跑）: ../../spec/ni/doc", file=sys.stderr)
+        print(f"  輸出: {GENERATED_DIR.relative_to(SPECGEN_ROOT)}/ni_*.json", file=sys.stderr)
         return 2
 
     md_dir = sys.argv[1]

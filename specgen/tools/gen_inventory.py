@@ -14,9 +14,9 @@ import json
 import sys
 from pathlib import Path
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-JSON_PATH    = SPEC_VALIDATE / "authored" / "ni_function_blocks.json"
-DEFAULT_OUT  = SPEC_VALIDATE.parent / "c_model" / "FEATURE_INVENTORY.md"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+JSON_PATH    = SPECGEN_ROOT / "source" / "ni_function_blocks.json"
+DEFAULT_OUT  = SPECGEN_ROOT.parent / "c_model" / "FEATURE_INVENTORY.md"
 
 
 def _expected_header(feat_id: str) -> str:

@@ -10,7 +10,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
 GOLDEN_DIR    = Path(__file__).resolve().parent / "golden"
 
 
@@ -40,9 +40,9 @@ def _regen(target: str, domain: str, out_dir: Path) -> str:
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         result = subprocess.run(
-            [sys.executable, str(SPEC_VALIDATE / "tools" / "codegen.py"),
+            [sys.executable, str(SPECGEN_ROOT / "tools" / "codegen.py"),
              "--target", target, "--domain", domain, "--out", tmp],
-            capture_output=True, text=True, cwd=str(SPEC_VALIDATE),
+            capture_output=True, text=True, cwd=str(SPECGEN_ROOT),
         )
         assert result.returncode == 0, f"codegen failed: {result.stderr}"
         files = list(Path(tmp).iterdir())

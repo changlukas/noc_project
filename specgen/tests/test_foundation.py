@@ -4,8 +4,8 @@ from pathlib import Path
 from ni_spec import loader
 from ni_spec import constants as C
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-PACKET_JSON = SPEC_VALIDATE / "generated" / "ni_packet.json"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+PACKET_JSON = SPECGEN_ROOT / "generated" / "json" / "ni_packet.json"
 
 
 def test_load_spec_version_returns_string():
@@ -72,7 +72,7 @@ def test_header_fields_padding_json_has_enabled_bool():
 def test_parser_extracts_enabled_from_md():
     """parser extracts Enabled column correctly from packet_format.md."""
     from ni_spec.generator import parse_header_fields
-    md_path = SPEC_VALIDATE.parent / "spec" / "ni" / "doc" / "packet_format.md"
+    md_path = SPECGEN_ROOT.parent / "spec" / "ni" / "doc" / "packet_format.md"
     md_text = md_path.read_text(encoding="utf-8")
     fields = parse_header_fields(md_text)
     field_map = {f["name"]: f["enabled"] for f in fields}

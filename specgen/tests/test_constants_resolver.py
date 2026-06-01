@@ -8,12 +8,12 @@ from ni_spec.exceptions import (
     ExprSyntaxError, ExprNameError, ExprNotAllowedError, FieldNotFoundError,
 )
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture
 def packet_spec():
-    return load_doc(SPEC_VALIDATE / "generated" / "ni_packet.json")
+    return load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_packet.json")
 
 
 # -- packet_eval_expr -----------------------------------------------

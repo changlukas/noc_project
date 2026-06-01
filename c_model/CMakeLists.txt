@@ -5,20 +5,20 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Locate elaborated headers from spec_validate
-set(SPEC_VALIDATE_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../spec_validate/include")
-if(NOT EXISTS "${SPEC_VALIDATE_INCLUDE}/ni_flit_constants.h")
-  message(FATAL_ERROR "spec_validate include dir not found: ${SPEC_VALIDATE_INCLUDE}")
+# Locate elaborated headers from specgen
+set(SPECGEN_CPP_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../specgen/generated/cpp")
+if(NOT EXISTS "${SPECGEN_CPP_INCLUDE}/ni_flit_constants.h")
+  message(FATAL_ERROR "specgen generated/cpp dir not found: ${SPECGEN_CPP_INCLUDE}")
 endif()
 
 # Drift gate: refuse to build if codegen output is stale.
 add_custom_target(codegen_check
-  COMMAND py -3 ${CMAKE_CURRENT_SOURCE_DIR}/../spec_validate/tools/codegen.py --check
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../spec_validate
+  COMMAND py -3 ${CMAKE_CURRENT_SOURCE_DIR}/../specgen/tools/codegen.py --check
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../specgen
   COMMENT "Verifying codegen artifacts are not stale"
 )
 
-include_directories(${SPEC_VALIDATE_INCLUDE})
+include_directories(${SPECGEN_CPP_INCLUDE})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 include(FetchContent)

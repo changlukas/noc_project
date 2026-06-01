@@ -2,12 +2,12 @@
 """Unified codegen entry point.
 
 Usage:
-    py -3 tools/codegen.py --target cpp --domain packet --out include/
-    py -3 tools/codegen.py --target cpp --domain signals --out include/
-    py -3 tools/codegen.py --target cpp --domain registers --out include/
-    py -3 tools/codegen.py --target sv --domain packet --out rtl_pkg/
-    py -3 tools/codegen.py --target sv --domain signals --out rtl_pkg/
-    py -3 tools/codegen.py --target sv --domain registers --out rtl_pkg/
+    py -3 tools/codegen.py --target cpp --domain packet --out generated/cpp/
+    py -3 tools/codegen.py --target cpp --domain signals --out generated/cpp/
+    py -3 tools/codegen.py --target cpp --domain registers --out generated/cpp/
+    py -3 tools/codegen.py --target sv --domain packet --out generated/sv/
+    py -3 tools/codegen.py --target sv --domain signals --out generated/sv/
+    py -3 tools/codegen.py --target sv --domain registers --out generated/sv/
     py -3 tools/codegen.py --check        # regen + diff vs committed; exit 1 on drift
     py -3 tools/codegen.py --lint-sv      # verilator lint smoke test (skips if not in PATH)
 """
@@ -20,9 +20,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Ensure spec_validate/ is on the import path.
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(SPEC_VALIDATE))
+# Ensure specgen/ is on the import path.
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SPECGEN_ROOT))
 # Ensure tools/ sub-packages are importable as "tools.elaborate.*".
 TOOLS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS_DIR.parent))
@@ -34,32 +34,32 @@ from tools.elaborate import sv_packet, sv_signals, sv_registers
 
 
 # Maps (target, domain) -> (emitter_func, output_filename, source_json_rel)
-# source_json_rel is relative to SPEC_VALIDATE/.
+# source_json_rel is relative to SPECGEN_ROOT/.
 DOMAIN_TO_EMITTER: dict[tuple[str, str], tuple] = {
-    ("cpp", "packet"):    (cpp_packet.emit,    "ni_flit_constants.h", "generated/ni_packet.json"),
-    ("cpp", "signals"):   (cpp_signals.emit,   "ni_signals.h",        "generated/ni_signals.json"),
-    ("cpp", "registers"): (cpp_registers.emit, "ni_regs.h",           "generated/ni_registers.json"),
-    ("sv",  "packet"):    (sv_packet.emit,    "ni_flit_pkg.sv",       "generated/ni_packet.json"),
-    ("sv",  "signals"):   (sv_signals.emit,   "ni_signals_pkg.sv",    "generated/ni_signals.json"),
-    ("sv",  "registers"): (sv_registers.emit, "ni_regs_pkg.sv",       "generated/ni_registers.json"),
+    ("cpp", "packet"):    (cpp_packet.emit,    "ni_flit_constants.h", "generated/json/ni_packet.json"),
+    ("cpp", "signals"):   (cpp_signals.emit,   "ni_signals.h",        "generated/json/ni_signals.json"),
+    ("cpp", "registers"): (cpp_registers.emit, "ni_regs.h",           "generated/json/ni_registers.json"),
+    ("sv",  "packet"):    (sv_packet.emit,    "ni_flit_pkg.sv",       "generated/json/ni_packet.json"),
+    ("sv",  "signals"):   (sv_signals.emit,   "ni_signals_pkg.sv",    "generated/json/ni_signals.json"),
+    ("sv",  "registers"): (sv_registers.emit, "ni_regs_pkg.sv",       "generated/json/ni_registers.json"),
 }
 
 # Default output directories per target.
 _DEFAULT_OUT: dict[str, str] = {
-    "cpp": "include",
-    "sv":  "rtl_pkg",
+    "cpp": "generated/cpp",
+    "sv":  "generated/sv",
 }
 
 # Committed snapshot directories per target (for --check).
 _COMMITTED_DIR: dict[str, Path] = {
-    "cpp": SPEC_VALIDATE / "include",
-    "sv":  SPEC_VALIDATE / "rtl_pkg",
+    "cpp": SPECGEN_ROOT / "generated" / "cpp",
+    "sv":  SPECGEN_ROOT / "generated" / "sv",
 }
 
 
 def _resolve_source(src_rel: str) -> Path:
-    """Resolve a source JSON path relative to SPEC_VALIDATE/."""
-    return SPEC_VALIDATE / src_rel
+    """Resolve a source JSON path relative to SPECGEN_ROOT/."""
+    return SPECGEN_ROOT / src_rel
 
 
 def run_emit(target: str, domain: str, out_dir: Path) -> Path:
@@ -96,8 +96,8 @@ def _check_cpp_sv_paired(out_dir: Path) -> list[str]:
     """
     import re
     errors: list[str] = []
-    cpp_text = (out_dir / "include" / "ni_signals.h").read_text(encoding="ascii")
-    sv_text  = (out_dir / "rtl_pkg" / "ni_signals_pkg.sv").read_text(encoding="ascii")
+    cpp_text = (out_dir / "generated" / "cpp" / "ni_signals.h").read_text(encoding="ascii")
+    sv_text  = (out_dir / "generated" / "sv" / "ni_signals_pkg.sv").read_text(encoding="ascii")
 
     # C++: struct <Name>Pins { ... };   fields are either uint*-scalar or std::array<...> array.
     cpp_bundles: dict[str, set[str]] = {}
@@ -135,7 +135,7 @@ def cmd_emit(args: argparse.Namespace) -> int:
         print("ERROR: --domain is required with --target", file=sys.stderr)
         return 2
 
-    out_dir = Path(args.out) if args.out else SPEC_VALIDATE / _DEFAULT_OUT[args.target]
+    out_dir = Path(args.out) if args.out else SPECGEN_ROOT / _DEFAULT_OUT[args.target]
     try:
         written = run_emit(args.target, args.domain, out_dir)
         print(f"wrote {written}", file=sys.stderr)
@@ -197,7 +197,7 @@ def cmd_check(_args: argparse.Namespace) -> int:
     # Paired check: C++ pin-bundle struct fields must match SV interface
     # signal names one-to-one. Operates on COMMITTED files -- drift in either
     # the .h or .sv that breaks the pairing is a hard error.
-    paired_errors = _check_cpp_sv_paired(SPEC_VALIDATE)
+    paired_errors = _check_cpp_sv_paired(SPECGEN_ROOT)
     if paired_errors:
         all_ok = False
         print("[paired-check] C++ ni_signals.h <-> SV ni_signals_pkg.sv mismatch:")
@@ -208,7 +208,7 @@ def cmd_check(_args: argparse.Namespace) -> int:
 
 
 def cmd_lint_sv(_args: argparse.Namespace) -> int:
-    """Run verilator lint-only smoke test on rtl_pkg/*.sv.
+    """Run verilator lint-only smoke test on generated/sv/*.sv.
 
     Skips gracefully if verilator is not in PATH.
     """
@@ -217,10 +217,10 @@ def cmd_lint_sv(_args: argparse.Namespace) -> int:
         print("[skip] verilator not in PATH -- SV lint smoke test skipped", file=sys.stderr)
         return 0
 
-    sv_dir = SPEC_VALIDATE / "rtl_pkg"
+    sv_dir = SPECGEN_ROOT / "generated" / "sv"
     sv_files = sorted(sv_dir.glob("*.sv"))
     if not sv_files:
-        print("[skip] no .sv files found in rtl_pkg/ -- run --target sv first", file=sys.stderr)
+        print("[skip] no .sv files found in generated/sv/ -- run --target sv first", file=sys.stderr)
         return 0
 
     cmd = [verilator, "--lint-only", "--Wall"] + [str(f) for f in sv_files]
@@ -251,7 +251,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--out", default=None,
-        help="output directory (default: spec_validate/include/ for cpp, spec_validate/rtl_pkg/ for sv)",
+        help="output directory (default: specgen/generated/cpp/ for cpp, specgen/generated/sv/ for sv)",
     )
     parser.add_argument(
         "--check", action="store_true",
@@ -259,7 +259,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--lint-sv", action="store_true",
-        help="run verilator --lint-only on rtl_pkg/*.sv; skips gracefully if verilator not in PATH",
+        help="run verilator --lint-only on generated/sv/*.sv; skips gracefully if verilator not in PATH",
     )
     args = parser.parse_args()
 

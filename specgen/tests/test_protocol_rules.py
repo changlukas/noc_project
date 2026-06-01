@@ -4,10 +4,10 @@ import json
 import pytest
 from ni_spec import generator, invariants, loader
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-MD_DIR = SPEC_VALIDATE.parent / "spec" / "ni" / "doc"
-PROTO_JSON = SPEC_VALIDATE / "generated" / "ni_protocol_rule_index.json"
-PROTO_SCHEMA = SPEC_VALIDATE / "generated" / "ni_protocol_rule_index.schema.json"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+MD_DIR = SPECGEN_ROOT.parent / "spec" / "ni" / "doc"
+PROTO_JSON = SPECGEN_ROOT / "generated" / "json" / "ni_protocol_rule_index.json"
+PROTO_SCHEMA = SPECGEN_ROOT / "generated" / "json" / "ni_protocol_rule_index.schema.json"
 
 
 def test_parser_finds_at_least_50_rules():

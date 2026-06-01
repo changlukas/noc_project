@@ -3,11 +3,11 @@ from pathlib import Path
 import pytest
 from ni_spec import loader, constants, invariants
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
 
 
 def test_every_signal_has_pin_name():
-    spec = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_signals.json")
+    spec = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_signals.json")
     for iface in spec["interfaces"]:
         for ch in iface.get("channels", []):
             for sig in ch["signals"]:
@@ -17,7 +17,7 @@ def test_every_signal_has_pin_name():
 
 
 def test_every_signal_has_reset_behavior():
-    spec = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_signals.json")
+    spec = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_signals.json")
     for iface in spec["interfaces"]:
         for ch in iface.get("channels", []):
             for sig in ch["signals"]:
@@ -32,7 +32,7 @@ def test_every_signal_has_reset_behavior():
 
 def test_input_wires_are_external_driven():
     """At least one AXI input wire (e.g. axi_awid_i) must be external_driven with no value."""
-    spec = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_signals.json")
+    spec = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_signals.json")
     sig = constants.signals_signal_by_pin(spec, "axi_awid_i")
     assert sig is not None, "axi_awid_i not found"
     assert sig["reset_behavior"]["kind"] == "external_driven"
@@ -40,7 +40,7 @@ def test_input_wires_are_external_driven():
 
 
 def test_pin_name_uniqueness():
-    spec = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_signals.json")
+    spec = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_signals.json")
     pins = constants.signals_pin_names(spec)
     assert len(pins) == len(set(pins)), f"duplicate pin_name detected: {[p for p in pins if pins.count(p) > 1]}"
 

@@ -17,9 +17,9 @@ from pathlib import Path
 
 import pytest
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-CODEGEN = SPEC_VALIDATE / "tools" / "codegen.py"
-RTL_PKG_DIR = SPEC_VALIDATE / "rtl_pkg"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+CODEGEN = SPECGEN_ROOT / "tools" / "codegen.py"
+RTL_PKG_DIR = SPECGEN_ROOT / "generated" / "sv"
 
 
 def run_codegen(*args: str) -> subprocess.CompletedProcess:
@@ -27,7 +27,7 @@ def run_codegen(*args: str) -> subprocess.CompletedProcess:
         [sys.executable, str(CODEGEN), *args],
         capture_output=True,
         text=True,
-        cwd=str(SPEC_VALIDATE),
+        cwd=str(SPECGEN_ROOT),
     )
 
 
@@ -294,7 +294,7 @@ class TestLintSv:
             capture_output=True,
             text=True,
             env=env,
-            cwd=str(SPEC_VALIDATE),
+            cwd=str(SPECGEN_ROOT),
         )
         assert result.returncode == 0, f"Expected exit 0, got {result.returncode}.\nstderr: {result.stderr}"
         assert "skip" in result.stderr.lower(), (
@@ -305,7 +305,7 @@ class TestLintSv:
 def test_sv_access_mode_typedef_and_per_reg_emitted():
     """ni_regs_pkg.sv must expose typedef access_mode_e + per-reg <REG>_ACCESS."""
     from pathlib import Path
-    text = (Path(__file__).resolve().parent.parent / "rtl_pkg" / "ni_regs_pkg.sv").read_text()
+    text = (Path(__file__).resolve().parent.parent / "generated" / "sv" / "ni_regs_pkg.sv").read_text()
     assert "typedef enum logic [1:0] { ACCESS_RO, ACCESS_RW, ACCESS_RW1C, ACCESS_WO } access_mode_e;" in text, \
         "missing access_mode_e typedef"
     assert "localparam access_mode_e ERR_STATUS_ACCESS" in text and "ACCESS_RW1C" in text

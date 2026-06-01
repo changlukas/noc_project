@@ -8,9 +8,9 @@ import json
 import re
 from pathlib import Path
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-HEADER_PATH = SPEC_VALIDATE / "include" / "ni_flit_constants.h"
-JSON_PATH   = SPEC_VALIDATE / "generated" / "ni_packet.json"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+HEADER_PATH = SPECGEN_ROOT / "generated" / "cpp" / "ni_flit_constants.h"
+JSON_PATH   = SPECGEN_ROOT / "generated" / "json" / "ni_packet.json"
 
 
 def _field_widths_section(text: str) -> str:

@@ -4,9 +4,9 @@ import json
 import re
 from ni_spec import loader, invariants
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-FB_JSON = SPEC_VALIDATE / "authored" / "ni_function_blocks.json"
-FB_SCHEMA = SPEC_VALIDATE / "authored" / "ni_function_blocks.schema.json"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+FB_JSON = SPECGEN_ROOT / "source" / "ni_function_blocks.json"
+FB_SCHEMA = SPECGEN_ROOT / "source" / "ni_function_blocks.schema.json"
 
 
 def test_function_blocks_json_exists():
@@ -60,7 +60,7 @@ def test_mode_identifiers_valid_for_cpp_sv():
 
 def test_xref_packet_fields_exist():
     fb = json.loads(FB_JSON.read_text(encoding="utf-8"))
-    pkt = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_packet.json")
+    pkt = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_packet.json")
     issues = invariants.check_blocks_xref_packet(fb, pkt)
     err = [i for i in issues if i.severity == "ERROR"]
     assert not err, f"cross-ref errors to packet: {[i.message for i in err]}"
@@ -68,7 +68,7 @@ def test_xref_packet_fields_exist():
 
 def test_xref_registers_exist():
     fb = json.loads(FB_JSON.read_text(encoding="utf-8"))
-    regs = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_registers.json")
+    regs = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_registers.json")
     issues = invariants.check_blocks_xref_registers(fb, regs)
     err = [i for i in issues if i.severity == "ERROR"]
     assert not err, f"cross-ref errors to registers: {[i.message for i in err]}"

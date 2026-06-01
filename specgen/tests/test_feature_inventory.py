@@ -5,10 +5,10 @@ import subprocess
 import sys
 from pathlib import Path
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-WORKTREE_ROOT = SPEC_VALIDATE.parent
-INVENTORY_MD  = WORKTREE_ROOT / "c_model" / "FEATURE_INVENTORY.md"
-GENERATOR     = SPEC_VALIDATE / "tools" / "gen_inventory.py"
+SPECGEN_ROOT  = Path(__file__).resolve().parent.parent
+PROJECT_ROOT  = SPECGEN_ROOT.parent
+INVENTORY_MD  = PROJECT_ROOT / "c_model" / "FEATURE_INVENTORY.md"
+GENERATOR     = SPECGEN_ROOT / "tools" / "gen_inventory.py"
 
 
 def test_inventory_md_exists():
@@ -26,7 +26,7 @@ def test_inventory_md_up_to_date():
 
 
 def test_inventory_covers_all_features_in_json():
-    spec = json.loads((SPEC_VALIDATE / "authored" / "ni_function_blocks.json").read_text(encoding="utf-8"))
+    spec = json.loads((SPECGEN_ROOT / "source" / "ni_function_blocks.json").read_text(encoding="utf-8"))
     md   = INVENTORY_MD.read_text(encoding="utf-8")
     for block in spec["blocks"]:
         for feat in block["features"]:

@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 from ni_spec import generator, constants, loader
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-MD_DIR = SPEC_VALIDATE.parent / "spec" / "ni" / "doc"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+MD_DIR = SPECGEN_ROOT.parent / "spec" / "ni" / "doc"
 
 
 def test_extract_reset_signals_returns_arst_and_noc_rst():
@@ -30,7 +30,7 @@ def test_signals_reset_domains_after_extract():
 
 def test_regenerated_ni_signals_has_pin_name_field():
     """After regen, every signal entry has pin_name key (non-null since Task 3)."""
-    spec = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_signals.json")
+    spec = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_signals.json")
     for iface in spec["interfaces"]:
         for ch in iface.get("channels", []):
             for sig in ch["signals"]:
@@ -42,7 +42,7 @@ def test_regenerated_ni_signals_has_pin_name_field():
 
 def test_regenerated_ni_signals_has_meta_reset_signals():
     """After regen, meta.reset_signals is populated."""
-    spec = loader.load_doc(SPEC_VALIDATE / "generated" / "ni_signals.json")
+    spec = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_signals.json")
     assert "reset_signals" in spec["meta"]
     assert "arst_ni" in spec["meta"]["reset_signals"]
 
@@ -53,7 +53,7 @@ def test_pins_bundle_struct_emitted_per_interface():
     Interface names in ni_signals.json are UPPERCASE_SNAKE
     (e.g. AXI_SLAVE_PORT, NOC_REQ_OUT). PascalCase + 'Pins' suffix.
     """
-    header = SPEC_VALIDATE / "include" / "ni_signals.h"
+    header = SPECGEN_ROOT / "generated" / "cpp" / "ni_signals.h"
     text = header.read_text(encoding="ascii")
     expected_bundles = (
         "AxiSlavePortPins",

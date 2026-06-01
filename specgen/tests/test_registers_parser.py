@@ -3,8 +3,8 @@ from pathlib import Path
 import pytest
 from ni_spec import generator
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-MD_DIR = SPEC_VALIDATE.parent / "spec" / "ni" / "doc"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+MD_DIR = SPECGEN_ROOT.parent / "spec" / "ni" / "doc"
 
 
 def test_parse_csr_policy_has_four_keys():
@@ -57,7 +57,7 @@ def test_parse_register_fields_err_status():
 def test_csr_policy_elaborated_as_constexpr():
     """ni_regs.h must expose csr_policy fields as constexpr in ni::regs::csr_policy."""
     from pathlib import Path
-    text = (Path(__file__).resolve().parent.parent / "include" / "ni_regs.h").read_text()
+    text = (Path(__file__).resolve().parent.parent / "generated" / "cpp" / "ni_regs.h").read_text()
     ns_idx = text.find("namespace csr_policy")
     assert ns_idx != -1, "missing namespace csr_policy"
     body = text[ns_idx:]
@@ -71,7 +71,7 @@ def test_csr_policy_elaborated_as_constexpr():
 def test_per_register_reset_const_elaborated():
     """ni_regs.h must expose <REG>_RESET constexpr per non-reserved register."""
     from pathlib import Path
-    text = (Path(__file__).resolve().parent.parent / "include" / "ni_regs.h").read_text()
+    text = (Path(__file__).resolve().parent.parent / "generated" / "cpp" / "ni_regs.h").read_text()
     assert "constexpr uint32_t TXN_MIN_LATENCY_RESET = 0xFFFF" in text, \
         "non-zero reset for TXN_MIN_LATENCY missing or wrong"
     assert "constexpr uint32_t PKT_PROBE_EN_RESET = 0x0" in text or \
@@ -82,7 +82,7 @@ def test_per_register_reset_const_elaborated():
 def test_all_offsets_array_elaborated():
     """ni_regs.h must expose constexpr uint32_t ALL_OFFSETS[] and ALL_OFFSETS_COUNT."""
     from pathlib import Path
-    text = (Path(__file__).resolve().parent.parent / "include" / "ni_regs.h").read_text()
+    text = (Path(__file__).resolve().parent.parent / "generated" / "cpp" / "ni_regs.h").read_text()
     assert "constexpr uint32_t ALL_OFFSETS[]" in text
     assert "constexpr std::size_t ALL_OFFSETS_COUNT" in text
 
@@ -91,7 +91,7 @@ def test_access_mode_enum_class_emitted():
     """ni_regs.h must expose enum class AccessMode { RO, RW, RW1C, WO } and
     per-register <REG>_ACCESS constexpr instead of 30 single-value enum classes."""
     from pathlib import Path
-    text = (Path(__file__).resolve().parent.parent / "include" / "ni_regs.h").read_text()
+    text = (Path(__file__).resolve().parent.parent / "generated" / "cpp" / "ni_regs.h").read_text()
     assert "enum class AccessMode { RO, RW, RW1C, WO };" in text, \
         "missing single AccessMode enum class"
     assert "constexpr AccessMode ERR_STATUS_ACCESS              = AccessMode::RW1C;" in text or \

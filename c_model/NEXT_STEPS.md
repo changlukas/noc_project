@@ -1,6 +1,6 @@
 # c_model — Next Session Handoff
 
-**Status (2026-06-01)**：Stage 2 Phase C 完工（pure AXI subsystem + AXI4 exclusive access）；~181/181 tests pass (sequential)；spec_validate 三 domain 純 symbolic，0 error / 0 warning；GitHub Action drift gate 在線。
+**Status (2026-06-01)**：Stage 2 Phase C 完工（pure AXI subsystem + AXI4 exclusive access）；182/182 tests pass (sequential)；specgen 三 domain 純 symbolic，0 error / 0 warning；GitHub Action drift gate 在線。
 
 ---
 
@@ -80,24 +80,25 @@ gaps to address in a future stage:
 ## Drift gates — every commit must pass
 
 ```
-cd spec_validate
+cd ../specgen
 py -3 -m pytest -q                         # 159 tests
 py -3 tools/codegen.py --check             # byte-identical .h / .sv
 py -3 tools/gen_inventory.py --check       # FEATURE_INVENTORY drift
-cd ../c_model && cmake --build build && ctest --test-dir build  # ~181/181 sequential
+cd ../c_model && cmake --build build && ctest --test-dir build -j 1  # 182/182 sequential
 ```
 
-GitHub Action 自動跑前 3 條 + `py -3 -m ni_spec ../spec/ni/doc`（要求 0 error / 0 warning）。本機 pre-commit hook 啟用：`git config core.hooksPath scripts/git-hooks`。
+GitHub Action 自動跑前 3 條 + `py -3 -m ni_spec ../spec/ni/doc`（要求 0 error / 0 warning）。
 
 ---
 
 ## Inputs the next session should consult
 
-- `docs/superpowers/specs/2026-05-31-pure-axi-subsystem-phase-b-design.md` — Phase B design spec + Phase C roadmap
-- `docs/superpowers/plans/2026-05-31-pure-axi-subsystem-phase-b.md` — Phase B 完整實作 plan（reference for Phase C planning style）
-- `spec_validate/include/{ni_signals.h, ni_flit_constants.h}` — codegen 常數（`ni::WSTRB_WIDTH`、`ni::width::*`）
-- `c_model/include/axi/ATTRIBUTION.md` — cocotbext-axi MIT port mapping
-- `c_model/include/axi/*.hpp` — Phase B 既有 class，仿照 style 擴展 Phase C
+- `../../docs/noc_cmodel_rtl_plan.md` — NoC c_model + RTL integration plan
+- `../../docs/superpowers/specs/2026-05-31-pure-axi-subsystem-phase-b-design.md` — Phase B design
+- `../../docs/superpowers/specs/2026-05-31-pure-axi-subsystem-phase-c-design.md` — Phase C design
+- `../specgen/generated/cpp/{ni_signals.h, ni_flit_constants.h}` — codegen 常數
+- `include/axi/ATTRIBUTION.md` — cocotbext-axi MIT port mapping
+- `include/axi/*.hpp` — Phase A/B/C class，仿照 style 擴展 Stage 3 (NMU/NSU)
 
 ---
 

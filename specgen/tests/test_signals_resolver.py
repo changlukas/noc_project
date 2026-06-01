@@ -16,17 +16,17 @@ from ni_spec.loader import load_doc
 from ni_spec import constants as C
 from ni_spec.exceptions import ExprNameError, FieldNotFoundError
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(scope="module")
 def signals_spec():
-    return load_doc(SPEC_VALIDATE / "generated" / "ni_signals.json")
+    return load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_signals.json")
 
 
 @pytest.fixture(scope="module")
 def packet_spec():
-    return load_doc(SPEC_VALIDATE / "generated" / "ni_packet.json")
+    return load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_packet.json")
 
 
 # -- accessors -----------------------------------------------------

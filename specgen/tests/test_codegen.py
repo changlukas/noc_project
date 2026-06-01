@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent
-CODEGEN = SPEC_VALIDATE / "tools" / "codegen.py"
-INCLUDE_DIR = SPEC_VALIDATE / "include"
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+CODEGEN = SPECGEN_ROOT / "tools" / "codegen.py"
+INCLUDE_DIR = SPECGEN_ROOT / "generated" / "cpp"
 
 
 def run_codegen(*args: str) -> subprocess.CompletedProcess:
@@ -25,7 +25,7 @@ def run_codegen(*args: str) -> subprocess.CompletedProcess:
         [sys.executable, str(CODEGEN), *args],
         capture_output=True,
         text=True,
-        cwd=str(SPEC_VALIDATE),
+        cwd=str(SPECGEN_ROOT),
     )
 
 
@@ -136,7 +136,7 @@ def test_use_constants_cpp_compiles_and_runs(tmp_path):
     run_codegen("--target", "cpp", "--domain", "packet", "--out", str(INCLUDE_DIR))
 
     exe = tmp_path / "use_constants_test.exe"
-    src = SPEC_VALIDATE / "examples" / "use_constants.cpp"
+    src = SPECGEN_ROOT / "examples" / "use_constants.cpp"
 
     compile_result = subprocess.run(
         ["g++", "-std=c++17",
@@ -224,7 +224,7 @@ def test_packet_cpp_functional_fields_have_enabled_true():
 def test_padding_fields_array_elaborated():
     """ni_flit_constants.h must expose PaddingFieldPos struct + PADDING_FIELDS array."""
     from pathlib import Path
-    text = (Path(__file__).resolve().parent.parent / "include" / "ni_flit_constants.h").read_text()
+    text = (Path(__file__).resolve().parent.parent / "generated" / "cpp" / "ni_flit_constants.h").read_text()
     assert "struct PaddingFieldPos" in text, "missing PaddingFieldPos struct"
     assert "constexpr PaddingFieldPos PADDING_FIELDS[]" in text, "missing PADDING_FIELDS array"
     assert "constexpr std::size_t PADDING_FIELDS_COUNT" in text, "missing PADDING_FIELDS_COUNT"
@@ -244,7 +244,7 @@ def test_pins_bundle_compiles_with_gxx(tmp_path):
     # Regenerate signals header so the test reflects the current spec.
     run_codegen("--target", "cpp", "--domain", "signals", "--out", str(INCLUDE_DIR))
 
-    src = SPEC_VALIDATE / "tests" / "cpp_smoke" / "test_pins_compile.cpp"
+    src = SPECGEN_ROOT / "tests" / "cpp_smoke" / "test_pins_compile.cpp"
     exe = tmp_path / "test_pins_compile.exe"
     r = subprocess.run(
         ["g++", "-std=c++17",

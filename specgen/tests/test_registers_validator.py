@@ -58,7 +58,7 @@ def test_all_four_validators_pass_on_real_data():
     """Run all 4 L2 validators on the real generated ni_registers.json — must all PASS."""
     from pathlib import Path
     import json
-    gen_dir = Path(__file__).resolve().parent.parent / "generated"
+    gen_dir = Path(__file__).resolve().parent.parent / "generated" / "json"
     regs_path = gen_dir / "ni_registers.json"
     if not regs_path.exists():
         pytest.skip("ni_registers.json not yet generated")
