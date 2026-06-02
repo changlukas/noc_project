@@ -35,8 +35,8 @@ axi::ArBeat make_ar(uint8_t id, uint64_t addr) {
 TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
   LoopbackNoc noc(/*req*/16, /*rsp*/16);
   Packetize pkt(noc.req_out(), kSrcId);
-  // addr 0x340000DEADBEEF → dst = (addr >> 16) & 0xFF = 0x34 (LSB of high half)
-  // For this legacy test we just verify packetize stamps src + axi_ch + last.
+  // Legacy test: only verifies packetize stamps src + axi_ch + last + awid +
+  // awaddr. dst_id derivation is covered by WMetaFifoInheritsAwDst below.
   ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0xDEADBEEFCAFEBABEull)));
 
   auto flit_opt = noc.req_in().pop_flit();

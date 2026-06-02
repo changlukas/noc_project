@@ -17,8 +17,7 @@ add_custom_command(TARGET test_port_pair_loopback POST_BUILD
 # Stage 2 Scoreboard sees zero mismatch on each fixture.
 add_cmodel_test(test_request_response_loopback)
 target_link_libraries(test_request_response_loopback PRIVATE yaml-cpp::yaml-cpp)
-# Pick up tests/common/{loopback_noc,test_packetize_adapter}.hpp via
-# "common/..." includes.
+# Pick up tests/common/loopback_noc.hpp via "common/..." includes.
 target_include_directories(test_request_response_loopback PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 # Same fixture / config staging as the port-pair test — the binary loads

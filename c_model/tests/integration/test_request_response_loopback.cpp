@@ -10,7 +10,7 @@
 //   AxiSlavePort (NMU)                    |
 //      | (Packetizer pushes)              | (Depacketizer pops)
 //      v                                  |
-//   TestPacketize ---> nmu::Packetize     nmu::Depacketize
+//   nmu::Packetize                        nmu::Depacketize
 //      |                                  ^
 //      v push_flit                        | pop_flit
 //   LoopbackNoc (req_out -> req_in,  rsp_out -> rsp_in,  optional N-cycle delay)

@@ -54,6 +54,9 @@ public:
     auto t = addr_trans::xy_route(b.addr);
     return push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0});
   }
+  // INVARIANT: caller must push_aw before push_w for the same write txn. W
+  // FIFO ordering inherits AW issue order; Rob layer enforces this via
+  // w_burst_credit_ in Disabled mode (Task 7).
   bool push_w (const axi::WBeat&  b) override;
   bool push_ar(const axi::ArBeat& b) override {
     auto t = addr_trans::xy_route(b.addr);
@@ -113,6 +116,9 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
   return true;
 }
 
+// INVARIANT: caller must push_aw before push_w for the same write txn. W
+// FIFO ordering inherits AW issue order; Rob layer enforces this via
+// w_burst_credit_ in Disabled mode (Task 7).
 inline bool Packetize::push_w(const axi::WBeat& b) {
   assert(!w_meta_fifo_.empty() && "push_w called before any push_aw");
   const auto& meta = w_meta_fifo_.front();
