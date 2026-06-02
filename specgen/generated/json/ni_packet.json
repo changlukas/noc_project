@@ -43,7 +43,8 @@
       {
         "name": "axi_ch",
         "width_param": "AXI_CH_WIDTH",
-        "enabled": true
+        "enabled": true,
+        "encoding": { "0": "AW", "1": "W", "2": "AR", "3": "B", "4": "R" }
       },
       {
         "name": "src_id",
