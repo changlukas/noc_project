@@ -539,7 +539,7 @@ meta_buffer:
 | `c_model/tests/nmu/test_depacketize.cpp` | ~12 | pop_b/r decode; demux mixed flits; per-channel backpressure (B full vs R progressing); **pending-flit head-of-line blocking** (B full → R flit behind cannot demux progress); FIFO order |
 | `c_model/tests/nsu/test_depacketize.cpp` | ~12 | mirror of NMU depacketize tests + MetaBuffer snapshot side-effects on AW/AR demux; **HoL test**: W full → AW/AR behind blocked at NocReqIn ingress |
 | `c_model/tests/nsu/test_packetize.cpp` | ~14 | push_b/r decode; metadata consume/peek; assert when no matching outstanding |
-| `c_model/tests/nsu/test_meta_buffer.cpp` (optional, may inline above) | ~6 | snapshot_write/read; consume_write; peek_read+commit_read; per-ID FIFO ordering; depth boundary |
+| `c_model/tests/nsu/test_meta_buffer.cpp` (optional, may inline above) | ~6 | snapshot_write/read; peek_write+commit_write; peek_read+commit_read; per-ID FIFO ordering; depth boundary; peek-without-commit retry safety |
 
 **Bit-perfect tests**: pack a beat, then decode the resulting flit bytes via `Flit::get_payload_field` / `get_header_field`, assert every field matches input. Repeat per-channel.
 
@@ -600,6 +600,9 @@ for (cycle = 0; !master.done() || /* in-flight not drained */; ++cycle) {
   while (!w_holdover .empty() && slave.push_w (w_holdover .front())) w_holdover .pop_front();
   while (!ar_holdover.empty() && slave.push_ar(ar_holdover.front())) ar_holdover.pop_front();
   // Response: slave.pop_* -> nsu_port.push_*
+  // (Drains *previous-cycle* responses — this cycle's slave.tick() runs below;
+  //  responses it generates will be drained on the NEXT iteration. Adds 1-cycle
+  //  latency to response path, not a deadlock.)
   while (auto b = slave.pop_b()) b_holdover.push_back(*b);
   while (auto r = slave.pop_r()) r_holdover.push_back(*r);
   while (!b_holdover.empty() && nsu_port.push_b(b_holdover.front())) b_holdover.pop_front();
