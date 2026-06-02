@@ -184,14 +184,19 @@ class Packetize : public Packetizer {  // Packetizer from port-pair task (frozen
 public:
   Packetize(noc::NocReqOut& req_out, uint8_t src_id);
 
-  // ---- Packetizer interface (called by AxiSlavePort) ----
+  // ---- Packetizer interface — request methods are real on NMU side ----
   bool push_aw(const axi::AwBeat& b) override;
   bool push_w (const axi::WBeat&  b) override;
   bool push_ar(const axi::ArBeat& b) override;
+  // ---- Packetizer interface — response methods assert false (NMU never emits responses) ----
+  bool push_b (const axi::BBeat&)  override { assert(false && "NMU packetize: B not applicable"); return false; }
+  bool push_r (const axi::RBeat&)  override { assert(false && "NMU packetize: R not applicable"); return false; }
 
   // ---- Per-txn header setter (sticky, fail-loud) ----
   // Caller MUST call set_aw_header_extras() before each push_aw(); double-set without consume asserts.
-  // No setter for W: dst_id/rob_* for W beats are read from the internal write-metadata FIFO (populated by push_aw).
+  // No setter for W: W has no caller-supplied routing intent. W routing is exclusively determined by
+  // AW FIFO order (the write-metadata FIFO populated by push_aw). Mismatches are caught only by
+  // upstream AXI4 AW/W ordering tests in the AXI subsystem.
   void set_aw_header_extras(uint8_t dst_id, uint8_t rob_req = 0, uint8_t rob_idx = 0);
   void set_ar_header_extras(uint8_t dst_id, uint8_t rob_req = 0, uint8_t rob_idx = 0);
 
@@ -239,9 +244,13 @@ public:
   // Pull flits from rsp_in, demux into per-channel queues
   void tick();
 
-  // Depacketizer interface (called by AxiSlavePort)
+  // Depacketizer interface — response methods are real on NMU side
   std::optional<axi::BBeat> pop_b() override;
   std::optional<axi::RBeat> pop_r() override;
+  // Depacketizer interface — request methods return nullopt (NMU never receives requests on this side)
+  std::optional<axi::AwBeat> pop_aw() override { assert(false && "NMU depacketize: AW not applicable"); return std::nullopt; }
+  std::optional<axi::WBeat>  pop_w () override { assert(false && "NMU depacketize: W  not applicable"); return std::nullopt; }
+  std::optional<axi::ArBeat> pop_ar() override { assert(false && "NMU depacketize: AR not applicable"); return std::nullopt; }
 
 private:
   noc::NocRspIn& rsp_in_;
@@ -295,9 +304,13 @@ public:
   Depacketize(noc::NocReqIn& req_in, MetaBuffer& meta,
               std::size_t aw_q_depth, std::size_t w_q_depth, std::size_t ar_q_depth);
   void tick();
+  // Depacketizer interface — request methods are real on NSU side
   std::optional<axi::AwBeat> pop_aw() override;
   std::optional<axi::WBeat>  pop_w()  override;
   std::optional<axi::ArBeat> pop_ar() override;
+  // Depacketizer interface — response methods return nullopt (NSU never receives responses on this side)
+  std::optional<axi::BBeat> pop_b() override { assert(false && "NSU depacketize: B not applicable"); return std::nullopt; }
+  std::optional<axi::RBeat> pop_r() override { assert(false && "NSU depacketize: R not applicable"); return std::nullopt; }
 private:
   noc::NocReqIn& req_in_;
   MetaBuffer& meta_;
@@ -340,15 +353,19 @@ private:
 
 **Interface mis-fit note**: `Packetizer` from the port-pair task carries both request (push_aw/w/ar) and response (push_b/r) halves so a single LoopbackPacketizer could serve both ports. For NSU's response-only role, push_aw/w/ar assert false — `AxiMasterPort` never calls them. If this assert-false pattern accumulates pain across more NSU-only consumers, split `Packetizer` into `RequestPacketizer` + `ResponsePacketizer` sub-interfaces in a follow-up.
 
-**push_b state machine**:
-1. Look up metadata: `auto meta_opt = meta_.consume_write(b.id);`. Assert `meta_opt` not nullopt ("B with no matching outstanding AW").
+**push_b state machine** (peek+commit pattern, prevents MetaBuffer desync on response backpressure):
+1. `auto meta_opt = meta_.peek_write(b.id);`. Assert `meta_opt` not nullopt ("B with no matching outstanding AW").
 2. Build flit with axi_ch=B, dst_id=meta.src_id, src_id=`src_id_`, bid=b.id, bresp=b.resp, buser=b.user, rob_req/rob_idx=meta.rob_*, last=1.
-3. `rsp_out_.push_flit(f)`. If false: return false. **Caveat**: `consume_write` already popped the metadata; on failed push we lose it. Mitigation: peek-only path — `peek_write(id)` to read without pop, push first, then `consume_write` on success. Spec implementation uses **peek+consume** pattern (see also push_r below).
-4. On success: `meta_.consume_write(b.id)`; return true.
+3. `rsp_out_.push_flit(f)`. If false: return false (MetaBuffer untouched, retry next tick).
+4. On success: `meta_.commit_write(b.id)` (pops the entry); return true.
 
-**push_r state machine**: similar — for multi-beat R bursts, `peek_read(r.id)` to fetch metadata for every R flit; `commit_read(r.id)` only when `r.last == 1`.
+**push_r state machine** (same pattern):
+1. `auto meta_opt = meta_.peek_read(r.id);`. Assert not nullopt.
+2. Build flit with axi_ch=R, dst_id=meta.src_id, src_id=`src_id_`, rid=r.id, rresp=r.resp, rdata=r.data, ruser=r.user, rlast=r.last, rob_req/rob_idx=meta.rob_*.
+3. `rsp_out_.push_flit(f)`. If false: return false.
+4. On success: if `r.last == 1`, `meta_.commit_read(r.id)` (multi-beat R burst shares one metadata entry, committed only on tail beat); return true.
 
-Both methods follow the same **peek-before-push, commit-on-success** pattern, so a failed `NocRspOut.push_flit()` never desynchronizes MetaBuffer.
+Both follow **peek-before-push, commit-on-success** — a failed `NocRspOut.push_flit()` never desynchronizes MetaBuffer.
 
 ### 4.7 `nsu::MetaBuffer`
 
@@ -365,12 +382,12 @@ public:
   // On AR flit: store entry for arid.
   void snapshot_read (uint8_t arid, MetaEntry e);
 
-  // On B with bid: pop front entry for bid (per AXI4 in-order-per-id semantics).
-  // Returns nullopt if no matching entry (caller asserts).
-  std::optional<MetaEntry> consume_write(uint8_t bid);
-  // On R with rid: peek front entry; pop only when rlast=1 (call peek_read + commit_read).
-  std::optional<MetaEntry> peek_read (uint8_t rid) const;
-  void                     commit_read(uint8_t rid);
+  // For B and R: peek front entry; pop only after successful push_flit (avoids desync
+  // on response backpressure). Both halves use the peek+commit pattern uniformly.
+  std::optional<MetaEntry> peek_write (uint8_t bid) const;
+  void                     commit_write(uint8_t bid);
+  std::optional<MetaEntry> peek_read  (uint8_t rid) const;
+  void                     commit_read (uint8_t rid);
 
 private:
   std::array<std::deque<MetaEntry>, 256> write_;  // per awid FIFO
@@ -518,9 +535,9 @@ meta_buffer:
 
 | Test file | Count | Coverage |
 |---|---|---|
-| `c_model/tests/nmu/test_packetize.cpp` | ~14 | push_aw/w/ar bit-perfect; sticky setter fail-loud (assert on missing/double set); write-metadata FIFO; NocReqOut backpressure; multiple-AW interleaved-W routing |
-| `c_model/tests/nmu/test_depacketize.cpp` | ~12 | pop_b/r decode; demux mixed flits; per-channel backpressure (B full vs R progressing); **pending-flit head-of-line blocking** (W full → AR behind cannot progress); FIFO order |
-| `c_model/tests/nsu/test_depacketize.cpp` | ~12 | mirror of NMU depacketize tests + MetaBuffer snapshot side-effects on AW/AR demux |
+| `c_model/tests/nmu/test_packetize.cpp` | ~14 | push_aw/w/ar bit-perfect; sticky setter fail-loud — **4 death tests**: AW missing-set, AW double-set, AR missing-set, AR double-set; write-metadata FIFO; NocReqOut backpressure; multiple-AW interleaved-W routing |
+| `c_model/tests/nmu/test_depacketize.cpp` | ~12 | pop_b/r decode; demux mixed flits; per-channel backpressure (B full vs R progressing); **pending-flit head-of-line blocking** (B full → R flit behind cannot demux progress); FIFO order |
+| `c_model/tests/nsu/test_depacketize.cpp` | ~12 | mirror of NMU depacketize tests + MetaBuffer snapshot side-effects on AW/AR demux; **HoL test**: W full → AW/AR behind blocked at NocReqIn ingress |
 | `c_model/tests/nsu/test_packetize.cpp` | ~14 | push_b/r decode; metadata consume/peek; assert when no matching outstanding |
 | `c_model/tests/nsu/test_meta_buffer.cpp` (optional, may inline above) | ~6 | snapshot_write/read; consume_write; peek_read+commit_read; per-ID FIFO ordering; depth boundary |
 
@@ -553,16 +570,41 @@ Scoreboard   scoreboard;
 master.on_write_completed([&](auto& w){ scoreboard.observe_write(w); });
 master.on_read_observed  ([&](auto& r){ scoreboard.observe_read(r); });
 
+// Holdover queues bridge AxiMasterPort <-> AxiSlave (same pattern as port-pair
+// integration test). Required because nsu_port exposes pop_*/push_* and slave
+// has its own push_*/pop_*; we manually shuttle one beat per cycle and re-queue
+// if the slave applies backpressure.
+std::deque<axi::AwBeat> aw_holdover;
+std::deque<axi::WBeat>  w_holdover;
+std::deque<axi::ArBeat> ar_holdover;
+std::deque<axi::BBeat>  b_holdover;
+std::deque<axi::RBeat>  r_holdover;
+
 // Per cycle — tick once in canonical order (each module ticks once per cycle)
 for (cycle = 0; !master.done() || /* in-flight not drained */; ++cycle) {
-  // === Drain side: response path (deepest → shallowest) ===
+  // === Drain side: response path (deepest -> shallowest) ===
   nmu_depkt.tick();    // pull rsp flits, demux into B/R queues
   loopback.tick();     // age delayed flits in both pipes
   nsu_depkt.tick();    // pull req flits, demux into AW/W/AR queues + snapshot MetaBuffer
 
-  // === Per-module tick (port-pair tick + Stage 2 tick) ===
+  // === Per-module tick ===
   nmu_port.tick();     // upstream port forwards AW/W/AR to test_nmu_pkt; pops B/R from nmu_depkt
   nsu_port.tick();     // pops AW/W/AR from nsu_depkt; forwards B/R to nsu_pkt
+
+  // === AxiMasterPort <-> AxiSlave glue (drain pop side into slave; drain slave into push side) ===
+  // Request: nsu_port.pop_* -> slave.push_*
+  while (auto aw = nsu_port.pop_aw()) aw_holdover.push_back(*aw);
+  while (auto w  = nsu_port.pop_w ()) w_holdover .push_back(*w);
+  while (auto ar = nsu_port.pop_ar()) ar_holdover.push_back(*ar);
+  while (!aw_holdover.empty() && slave.push_aw(aw_holdover.front())) aw_holdover.pop_front();
+  while (!w_holdover .empty() && slave.push_w (w_holdover .front())) w_holdover .pop_front();
+  while (!ar_holdover.empty() && slave.push_ar(ar_holdover.front())) ar_holdover.pop_front();
+  // Response: slave.pop_* -> nsu_port.push_*
+  while (auto b = slave.pop_b()) b_holdover.push_back(*b);
+  while (auto r = slave.pop_r()) r_holdover.push_back(*r);
+  while (!b_holdover.empty() && nsu_port.push_b(b_holdover.front())) b_holdover.pop_front();
+  while (!r_holdover.empty() && nsu_port.push_r(r_holdover.front())) r_holdover.pop_front();
+
   slave.tick();        // accepts AW/W/AR, generates B/R
   memory.tick();
   master.tick();       // drives next scenario_txn
@@ -571,7 +613,9 @@ for (cycle = 0; !master.done() || /* in-flight not drained */; ++cycle) {
 }
 ```
 
-**Ordering rationale**: drain depacketize side BEFORE port/slave tick to free queue space; packetize calls happen inside port.tick() and don't need separate scheduling.
+**Ordering rationale**: drain depacketize side BEFORE port tick to free queue space. Holdover queues prevent beat loss when downstream stalls (mirrors Stage 3 port-pair integration test pattern). Packetize calls happen inside port.tick() and don't need separate scheduling.
+
+**TestPacketize wrapper dependency**: this rig works for the chosen Stage 2 fixtures (single-NMU, single-dst loopback) because `AxiMaster` emits W beats in AW/sub-burst issue order, which matches the W-meta FIFO consumption order in `nmu::Packetize`. The fixed-dst constant in `TestPacketize(real, fixed_dst=0x02)` is acceptable since all fixtures route to the same downstream NSU. Multi-dst scenarios (future addr_trans task) replace `TestPacketize` with a real address-translation layer.
 
 Test rig wraps the sticky-setter-per-push pattern via a **`TestPacketize` adapter** (defined in test code only):
 
