@@ -10,3 +10,12 @@ add_custom_command(TARGET test_axi_master_port POST_BUILD
     $<TARGET_FILE_DIR:test_axi_master_port>/config)
 
 add_cmodel_test(test_meta_buffer)
+
+# Note: distinct target name from nmu/test_packetize to avoid CMake target
+# collision (add_cmodel_test creates a bare-named target). Source file mirrors
+# the target name; gtest suite name remains NsuPacketize.
+add_cmodel_test(test_nsu_packetize)
+# Pick up the shared loopback fixtures from tests/common/ via
+# "common/loopback_*.hpp".
+target_include_directories(test_nsu_packetize PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
