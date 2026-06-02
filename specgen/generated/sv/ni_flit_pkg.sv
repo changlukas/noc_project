@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: 9befc208c425
 // Generator version: v1.0.0
-// Generated at: 2026-06-02T02:35:53Z
+// Generated at: 2026-06-02T02:45:51Z
 // ----------------------------------------------------------------------------
 `ifndef NI_FLIT_PKG_SVH
 `define NI_FLIT_PKG_SVH
@@ -81,6 +81,9 @@ package ni_flit_pkg;
   localparam int unsigned R_WIDTH = 352;
 
   // --- payload field bit positions (from flit.payload_channels) ---
+  // Note: per-channel width consistency is gated by static_assert in
+  //       ni_flit_constants.h (cpp_packet.py); SV emits no $fatal equivalent
+  //       since both languages share the same ni_packet.json source.
   localparam int unsigned AW_AWID_LSB     = 0;
   localparam int unsigned AW_AWID_MSB     = 7;
   localparam int unsigned AW_AWID_WIDTH   = 8;

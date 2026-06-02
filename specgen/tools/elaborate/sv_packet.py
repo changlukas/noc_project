@@ -71,10 +71,17 @@ def emit(packet_json: Path, spec_version: str) -> str:
     out.append("")
 
     out.append("  // --- payload field bit positions (from flit.payload_channels) ---")
+    out.append("  // Note: per-channel width consistency is gated by static_assert in")
+    out.append("  //       ni_flit_constants.h (cpp_packet.py); SV emits no $fatal equivalent")
+    out.append("  //       since both languages share the same ni_packet.json source.")
     for ch in spec["flit"]["payload_channels"]:
         for f in ch["fields"]:
             pos = C.payload_field_position(spec, ch["name"], f["name"])
             n = f["name"].upper()
+            if pos is None:
+                # width=0 reserved placeholder: emit WIDTH only; no LSB/MSB (field not bit-addressable)
+                emit_param(f"  localparam int unsigned {ch['name']}_{n}_WIDTH   = 0;  // reserved placeholder (width=0 -- not in flit)", f"{ch['name']}_{n}_WIDTH")
+                continue
             emit_param(f"  localparam int unsigned {ch['name']}_{n}_LSB     = {pos[0]};", f"{ch['name']}_{n}_LSB")
             emit_param(f"  localparam int unsigned {ch['name']}_{n}_MSB     = {pos[1]};", f"{ch['name']}_{n}_MSB")
             emit_param(f"  localparam int unsigned {ch['name']}_{n}_WIDTH   = {pos[1] - pos[0] + 1};", f"{ch['name']}_{n}_WIDTH")

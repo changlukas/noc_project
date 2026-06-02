@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: 9befc208c425
 // Generator version: v1.0.0
-// Generated at: 2026-06-02T02:35:52Z
+// Generated at: 2026-06-02T02:45:50Z
 // ----------------------------------------------------------------------------
 #pragma once
 #include <cstddef>

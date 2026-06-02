@@ -93,16 +93,22 @@ def emit(packet_json: Path, spec_version: str) -> str:
     for ch in spec["flit"]["payload_channels"]:
         ch_lower = ch["name"].lower()
         out.append(f"namespace payload::{ch_lower} {{")
+        last_positioned = None  # last field that actually occupies bits (for static_assert)
         for f in ch["fields"]:
             pos = C.payload_field_position(spec, ch["name"], f["name"])
             n = f["name"].upper()
+            if pos is None:
+                # width=0 reserved placeholder: emit WIDTH only; no LSB/MSB (field not bit-addressable)
+                out.append(f"constexpr int {n}_WIDTH   = 0;  // reserved placeholder (width=0 -- not in flit)")
+                continue
             out.append(f"constexpr int {n}_LSB     = {pos[0]};")
             out.append(f"constexpr int {n}_MSB     = {pos[1]};")
             out.append(f"constexpr int {n}_WIDTH   = {pos[1] - pos[0] + 1};")
-        # static_assert: last field's MSB + 1 == channel's payload_width
-        last_name = ch["fields"][-1]["name"].upper()
-        out.append(f"static_assert({last_name}_MSB + 1 == ni::payload::{ch['name']}_WIDTH, "
-                   f"\"payload[{ch['name']}] field positions inconsistent with channel width\");")
+            last_positioned = n
+        # static_assert: last positioned field's MSB + 1 == channel's payload_width
+        if last_positioned is not None:
+            out.append(f"static_assert({last_positioned}_MSB + 1 == ni::payload::{ch['name']}_WIDTH, "
+                       f"\"payload[{ch['name']}] field positions inconsistent with channel width\");")
         out.append(f"}}  // namespace payload::{ch_lower}")
         out.append("")
 
