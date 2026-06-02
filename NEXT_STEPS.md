@@ -1,6 +1,8 @@
-# Next Steps — Stage 3 Bootstrap (NMU/NSU internal units)
+## Current status (2026-06-02)
 
-**Current status (2026-06-01)**: Stage 2（純 AXI subsystem）完工，182/182 sequential ctest 全綠，specgen 三 domain 純 symbolic（pytest 159），drift gates clean。
+Stage 3 packetize + depacketize 完工：nmu/{packetize, depacketize}, nsu/{packetize, depacketize, meta_buffer}, c_model/include/{ni/flit, noc/noc_req_*, noc/noc_rsp_*} 全綠。具備 request+response e2e Scoreboard 通過 5 個 Stage 2 fixture + 1 delayed-loopback variant。260/260 ctest (sequential)。
+
+**Next task per plan §3.1**: NMU/NSU `vc_arb` (MUX 3→1 + per-VC credit + round-robin arbitration). 後續 `addr_trans`、`rob` 各自獨立 task。`route_par` / `flit_ecc` 兩個算法 helper 任何時間都可獨立做。
 
 **主 plan**: `docs/noc_cmodel_rtl_plan.md`（Stage 2/3/4/5 roadmap，本文件接續 §3 與 §8）。
 
