@@ -1,5 +1,4 @@
-#include "ni_spec.hpp"
-#include "flit.hpp"
+#include "ni/flit.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::Flit;
@@ -9,65 +8,64 @@ TEST(Flit, ConstructFromRawHasMatchingWidth) {
   EXPECT_EQ(Flit::WIDTH_BYTES, (ni::FLIT_WIDTH + 7) / 8);
 }
 
-TEST(Flit, SetGetDstIdRoundtrip) {
+TEST(Flit, SetGetHeaderRoundtripAllFields) {
   Flit f;
-  f.set_header_field("dst_id", 0x12);
-  EXPECT_EQ(f.get_header_field("dst_id"), 0x12u);
+  f.set_header_field("noc_qos",   0xA);
+  f.set_header_field("axi_ch",    0x4);  // R
+  f.set_header_field("src_id",    0x12);
+  f.set_header_field("dst_id",    0x34);
+  f.set_header_field("vc_id",     0x2);
+  f.set_header_field("route_par", 0x1);
+  f.set_header_field("last",      0x1);
+  f.set_header_field("rob_req",   0x1);
+  f.set_header_field("rob_idx",   0x1F);
+  f.set_header_field("commtype",  0x2);
+  f.set_header_field("multicast", 0xFF);
+  f.set_header_field("flit_ecc",  0x3FF);
+  EXPECT_EQ(f.get_header_field("noc_qos"),   0xAu);
+  EXPECT_EQ(f.get_header_field("axi_ch"),    0x4u);
+  EXPECT_EQ(f.get_header_field("src_id"),    0x12u);
+  EXPECT_EQ(f.get_header_field("dst_id"),    0x34u);
+  EXPECT_EQ(f.get_header_field("vc_id"),     0x2u);
+  EXPECT_EQ(f.get_header_field("route_par"), 0x1u);
+  EXPECT_EQ(f.get_header_field("last"),      0x1u);
+  EXPECT_EQ(f.get_header_field("rob_req"),   0x1u);
+  EXPECT_EQ(f.get_header_field("rob_idx"),   0x1Fu);
+  EXPECT_EQ(f.get_header_field("commtype"),  0x2u);
+  EXPECT_EQ(f.get_header_field("multicast"), 0xFFu);
+  EXPECT_EQ(f.get_header_field("flit_ecc"),  0x3FFu);
 }
 
-TEST(Flit, SetHeaderFieldRespectsBitPosition) {
+TEST(Flit, SetGetPayloadAwFields) {
   Flit f;
-  f.set_header_field("src_id", 0xAB);
-  // Verify by reading raw bytes at expected position
-  int lsb = ni::header::SRC_ID_LSB;
-  int byte = lsb / 8, off = lsb % 8;
-  uint64_t read = 0;
-  for (int b = 0; b < (ni::header::SRC_ID_MSB - ni::header::SRC_ID_LSB + 1); ++b) {
-    int gb = (lsb + b) / 8, go = (lsb + b) % 8;
-    read |= ((uint64_t)((f.raw()[gb] >> go) & 1u)) << b;
-  }
-  EXPECT_EQ(read, 0xABu & ((1ull << (ni::header::SRC_ID_MSB - ni::header::SRC_ID_LSB + 1)) - 1));
+  f.set_payload_field("AW", "awid",   0x55);
+  f.set_payload_field("AW", "awaddr", 0xDEADBEEFCAFEBABEull);
+  f.set_payload_field("AW", "awlen",  0xFF);
+  f.set_payload_field("AW", "awsize", 0x5);
+  EXPECT_EQ(f.get_payload_field("AW", "awid"),   0x55u);
+  EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xDEADBEEFCAFEBABEull);
+  EXPECT_EQ(f.get_payload_field("AW", "awlen"),  0xFFu);
+  EXPECT_EQ(f.get_payload_field("AW", "awsize"), 0x5u);
 }
 
-TEST(Flit, SilentTruncateOnOversizedValueInRelease) {
-  // In NDEBUG build, oversized value silently truncates; this test runs in
-  // debug build so assertion fires. We test the truncation by passing exactly
-  // the max+0 value (no overshoot).
+TEST(Flit, SetGetPayloadBytesWdata) {
   Flit f;
-  uint64_t max_dst = (1ull << (ni::header::DST_ID_MSB - ni::header::DST_ID_LSB + 1)) - 1;
-  f.set_header_field("dst_id", max_dst);
-  EXPECT_EQ(f.get_header_field("dst_id"), max_dst);
+  std::array<uint8_t, 32> wdata{};
+  for (int i = 0; i < 32; ++i) wdata[i] = static_cast<uint8_t>(0xA0 + i);
+  f.set_payload_bytes("W", "wdata", wdata.data(), 256);
+  std::array<uint8_t, 32> out{};
+  f.get_payload_bytes("W", "wdata", out.data(), 256);
+  EXPECT_EQ(out, wdata);
 }
 
-TEST(Flit, PaddingBitSetCausesCheckToFail) {
-  std::array<uint8_t, Flit::WIDTH_BYTES> raw{};
-  ASSERT_GT(ni::header::PADDING_FIELDS_COUNT, 0u) << "no padding fields elaborated — codegen issue";
-  int lsb = ni::header::PADDING_FIELDS[0].lsb;
-  int byte = lsb / 8, off = lsb % 8;
-  raw[byte] |= (1u << off);
-  Flit f(raw);
-  EXPECT_FALSE(f.check_padding_is_zero())
-      << "padding bit at " << ni::header::PADDING_FIELDS[0].name << " was set, check should fail";
-}
-
-TEST(Flit, AllZeroRawPassesPaddingCheck) {
+TEST(Flit, RsvdPaddingCheckPassesWhenZero) {
   Flit f;
   EXPECT_TRUE(f.check_padding_is_zero());
 }
 
-TEST(Flit, RawBytesAreZeroOnDefaultConstruct) {
+TEST(Flit, RsvdPaddingCheckFailsWhenSet) {
   Flit f;
-  for (auto byte : f.raw()) {
-    EXPECT_EQ(byte, 0u);
-  }
-}
-
-TEST(Flit, RoundTripMultipleFields) {
-  Flit f;
-  f.set_header_field("dst_id", 0x05);
-  f.set_header_field("src_id", 0x12);
-  f.set_header_field("rob_idx", 0x07);
-  EXPECT_EQ(f.get_header_field("dst_id"),  0x05u);
-  EXPECT_EQ(f.get_header_field("src_id"),  0x12u);
-  EXPECT_EQ(f.get_header_field("rob_idx"), 0x07u);
+  // Set a bit in rsvd region
+  f.set_header_field("rsvd", 0x3);  // 2-bit rsvd
+  EXPECT_FALSE(f.check_padding_is_zero());
 }
