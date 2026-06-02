@@ -23,3 +23,5 @@ add_cmodel_test(test_depacketize)
 # "common/loopback_*.hpp".
 target_include_directories(test_depacketize PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_addr_trans)
