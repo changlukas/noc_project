@@ -43,7 +43,6 @@
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
 #include "common/loopback_noc.hpp"
-#include "common/test_packetize_adapter.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
@@ -99,11 +98,11 @@ LoopbackResult run_fixture(const std::string& yaml_path,
                              params.depkt_b_q_depth,
                              params.depkt_r_q_depth);
 
-  // Request-path packetizer (NMU side): the real packetizer pushes onto
-  // loopback.req_out(); TestPacketize is the sticky-setter adapter that
-  // AxiSlavePort sees through the Packetizer interface.
+  // Request-path packetizer (NMU side): Packetize self-computes dst via
+  // addr_trans::xy_route, so the AxiSlavePort talks to it directly through
+  // the Packetizer interface (no adapter needed). Task 8 will wrap this in
+  // a Rob instance to add ROB-stall coverage.
   nmu::Packetize    real_nmu_pkt(loopback.req_out(), /*src_id=*/kNmuSrcId);
-  test::TestPacketize nmu_pkt_adapter(real_nmu_pkt, /*fixed_dst=*/kNsuSrcId);
 
   // Per-AXI-ID metadata FIFO shared between nsu::Depacketize (snapshot on
   // AW/AR ingress) and nsu::Packetize (peek+commit on B/R egress).
@@ -117,11 +116,11 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   nsu::Packetize   nsu_pkt(loopback.rsp_out(), nsu_meta, /*src_id=*/kNsuSrcId);
 
   // Ports straddle the packetize / depacketize stacks. The NMU port hands
-  // requests to the adapter (which in turn calls real_nmu_pkt) and pops
-  // responses from nmu_depkt. The NSU port pops requests from nsu_depkt
-  // and pushes responses into nsu_pkt.
-  nmu::AxiSlavePort  nmu_port(nmu_pkt_adapter, nmu_depkt, params);
-  nsu::AxiMasterPort nsu_port(nsu_depkt,       nsu_pkt,   params);
+  // requests to real_nmu_pkt directly and pops responses from nmu_depkt.
+  // The NSU port pops requests from nsu_depkt and pushes responses into
+  // nsu_pkt.
+  nmu::AxiSlavePort  nmu_port(real_nmu_pkt, nmu_depkt, params);
+  nsu::AxiMasterPort nsu_port(nsu_depkt,    nsu_pkt,   params);
 
   // Stage 2 endpoints + oracle.
   axi::AxiMasterT<nmu::AxiSlavePort> master(yaml_path, nmu_port, read_dump_path,

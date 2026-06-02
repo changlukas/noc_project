@@ -35,7 +35,8 @@ axi::ArBeat make_ar(uint8_t id, uint64_t addr) {
 TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
   LoopbackNoc noc(/*req*/16, /*rsp*/16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(/*dst*/0x34, /*rob_req*/0, /*rob_idx*/0);
+  // addr 0x340000DEADBEEF → dst = (addr >> 16) & 0xFF = 0x34 (LSB of high half)
+  // For this legacy test we just verify packetize stamps src + axi_ch + last.
   ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0xDEADBEEFCAFEBABEull)));
 
   auto flit_opt = noc.req_in().pop_flit();
@@ -43,44 +44,17 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
   const auto& f = *flit_opt;
   EXPECT_EQ(f.get_header_field("axi_ch"),   ni::AXI_CH_AW);
   EXPECT_EQ(f.get_header_field("src_id"),   kSrcId);
-  EXPECT_EQ(f.get_header_field("dst_id"),   0x34u);
   EXPECT_EQ(f.get_header_field("vc_id"),    0u);
   EXPECT_EQ(f.get_header_field("last"),     1u);
   EXPECT_EQ(f.get_payload_field("AW", "awid"),   0x05u);
   EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xDEADBEEFCAFEBABEull);
 }
 
-TEST(NmuPacketize, StickySetterAssertMissingSet) {
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
-  EXPECT_DEATH(pkt.push_aw(make_aw(0, 0)), "set_aw_header_extras");
-}
-
-TEST(NmuPacketize, StickySetterAssertDoubleSet) {
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(0x10);
-  EXPECT_DEATH(pkt.set_aw_header_extras(0x20), "previous set_aw_header_extras not yet consumed");
-}
-
-TEST(NmuPacketize, StickySetterArMissingSet) {
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
-  EXPECT_DEATH(pkt.push_ar(make_ar(0, 0)), "set_ar_header_extras");
-}
-
-TEST(NmuPacketize, StickySetterArDoubleSet) {
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_ar_header_extras(0x10);
-  EXPECT_DEATH(pkt.set_ar_header_extras(0x20), "previous set_ar_header_extras not yet consumed");
-}
-
 TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(/*dst*/0x34);
-  ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x1000)));
+  // addr 0x340000 → dst = (0x340000 >> 16) & 0xFF = 0x34
+  ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x340000)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/true)));
 
   noc.req_in().pop_flit();  // discard AW
@@ -93,10 +67,9 @@ TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
 TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(0x34);
-  ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x1000)));
-  pkt.set_aw_header_extras(0x56);
-  ASSERT_TRUE(pkt.push_aw(make_aw(0x06, 0x2000)));
+  // addr 0x340000 → dst=0x34;  addr 0x560000 → dst=0x56.
+  ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x340000)));
+  ASSERT_TRUE(pkt.push_aw(make_aw(0x06, 0x560000)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFF, /*last*/true)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFF, /*last*/true)));
 
@@ -112,9 +85,7 @@ TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
 TEST(NmuPacketize, PushAwFailsOnNocFull) {
   LoopbackNoc noc(/*req*/1, /*rsp*/16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(0x10);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
-  pkt.set_aw_header_extras(0x20);
   EXPECT_FALSE(pkt.push_aw(make_aw(1, 0)));
   noc.req_in().pop_flit();
   EXPECT_TRUE(pkt.push_aw(make_aw(1, 0)));
@@ -123,7 +94,6 @@ TEST(NmuPacketize, PushAwFailsOnNocFull) {
 TEST(NmuPacketize, AwPayloadBitPerfect) {
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(0x34);
   auto aw = make_aw(/*id*/0xAB, /*addr*/0x123456789ABCDEF0ull, /*len*/0xFF);
   aw.size = 5; aw.burst = axi::Burst::WRAP; aw.cache = 0xF; aw.lock = 1;
   aw.prot = 0x7; aw.region = 0xF; aw.user = 0xFF; aw.qos = 0xF;
@@ -144,7 +114,6 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
 TEST(NmuPacketize, WPayloadBitPerfect) {
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(0x34);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
   auto w = make_w(0xDEADBEEF, /*last*/true);
   w.user = 0xAB;
@@ -162,21 +131,22 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
 TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_ar_header_extras(/*dst*/0x99, /*rob_req*/1, /*rob_idx*/0x15);
-  ASSERT_TRUE(pkt.push_ar(make_ar(0x07, 0x4000)));
+  // addr 0x990000 → dst = (0x990000 >> 16) & 0xFF = 0x99.
+  // Frozen interface auto-fills rob_req/rob_idx = 0; Rob-driven path uses
+  // push_ar_with_meta (covered by PushAwWithMeta_OverrideDefault).
+  ASSERT_TRUE(pkt.push_ar(make_ar(0x07, 0x994000)));
   auto f = *noc.req_in().pop_flit();
   EXPECT_EQ(f.get_header_field("axi_ch"),   ni::AXI_CH_AR);
   EXPECT_EQ(f.get_header_field("dst_id"),   0x99u);
-  EXPECT_EQ(f.get_header_field("rob_req"),  1u);
-  EXPECT_EQ(f.get_header_field("rob_idx"),  0x15u);
+  EXPECT_EQ(f.get_header_field("rob_req"),  0u);
+  EXPECT_EQ(f.get_header_field("rob_idx"),  0u);
   EXPECT_EQ(f.get_payload_field("AR", "arid"),   0x07u);
-  EXPECT_EQ(f.get_payload_field("AR", "araddr"), 0x4000u);
+  EXPECT_EQ(f.get_payload_field("AR", "araddr"), 0x994000u);
 }
 
 TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
-  pkt.set_aw_header_extras(0x34);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
   auto f = *noc.req_in().pop_flit();
   EXPECT_EQ(f.get_header_field("commtype"),  0u);
@@ -185,4 +155,33 @@ TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
   EXPECT_EQ(f.get_header_field("route_par"), 0u);
   EXPECT_EQ(f.get_header_field("flit_ecc"),  0u);
   EXPECT_TRUE(f.check_padding_is_zero());
+}
+
+TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
+  LoopbackNoc noc(/*req*/16, /*rsp*/16);
+  Packetize pkt(noc.req_out(), /*src=*/0x01);
+  axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100);  // addr → dst=0 by default
+  ni::cmodel::nmu::AwHeaderMeta meta{
+      /*dst_id=*/0x42,
+      /*local_addr=*/0x9999,
+      /*rob_req=*/1,
+      /*rob_idx=*/0x07
+  };
+  ASSERT_TRUE(pkt.push_aw_with_meta(b, meta));
+  auto f = *noc.req_in().pop_flit();
+  EXPECT_EQ(f.get_header_field("dst_id"),  0x42u);
+  EXPECT_EQ(f.get_header_field("rob_req"), 1u);
+  EXPECT_EQ(f.get_header_field("rob_idx"), 0x07u);
+  EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x9999u);  // meta.local_addr, NOT b.addr
+}
+
+TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
+  LoopbackNoc noc(16, 16);
+  Packetize pkt(noc.req_out(), /*src=*/0x01);
+  // addr 0x10100 → addr_trans gives dst=1
+  axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x10100);
+  ASSERT_TRUE(pkt.push_aw(b));  // frozen interface auto-computes
+  auto f = *noc.req_in().pop_flit();
+  EXPECT_EQ(f.get_header_field("dst_id"), 0x01u);  // from addr_trans::xy_route
+  EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x10100u);  // local_addr = addr
 }
