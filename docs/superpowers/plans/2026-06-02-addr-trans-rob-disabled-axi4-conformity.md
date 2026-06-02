@@ -22,6 +22,8 @@ cd ../c_model && cmake --build build && ctest --test-dir build -j 1
 
 ## Phase A: Stage 2 AxiMaster AXI4 conformity
 
+**Phase A TDD framing**: Tasks 1-3 form a SINGLE TDD cycle (one failing test → implementation across 3 task scopes → one passing commit at end of Task 3). Tasks 1-2 are implementation substeps that do not commit independently; Task 3 step 10 commits all three atomically. Task 4 is reactive cleanup of pre-existing tests broken by the relaxation — not a fresh TDD cycle.
+
 ### Task 1: AxiMaster per-id FIFO + total-count counter + admission relaxation
 
 **Files:**
@@ -101,11 +103,13 @@ while (next_txn_idx_ < sc_.transactions.size()) {
     if (txn.op == ScenarioTransaction::Op::Write) {
         if (active_write_ops_.size() >= max_out_w_) break;
         if (active_write_ops_.count(txn.id)) break;       // ← DELETE this line
-        // ... build op + active_write_ops_.emplace(txn.id, std::move(op));
+        // [existing code unchanged: construct OperationContext op (loads data_file
+        //  + strb_file, calls split_into_sub_bursts) and emplace into active_write_ops_]
     } else {
         if (active_read_ops_.size() >= max_out_r_) break;
         if (active_read_ops_.count(txn.id)) break;        // ← DELETE this line
-        // ... build op + active_read_ops_.emplace(txn.id, std::move(op));
+        // [existing code unchanged: construct OperationContext op (calls
+        //  split_into_sub_bursts) and emplace into active_read_ops_]
     }
     ++next_txn_idx_;
 }
@@ -149,7 +153,7 @@ Expected: compile errors mentioning `active_write_ops_[...]` used in B handling 
 
 ---
 
-### Task 2: AxiMaster ordered same-id W/R request push (`push_writes_`/`push_reads_` bool return)
+### Task 2: AxiMaster ordered same-id W/R request push (`push_writes_`/`push_reads_` bool return) — IMPLEMENTATION SUBSTEP, no own failing test (Task 1's test still failing, Task 3 makes it pass)
 
 **Files:**
 - Modify: `c_model/include/axi/axi_master.hpp` (push_writes_/push_reads_ signature + outer iteration)
@@ -161,7 +165,7 @@ Expected: compile errors mentioning `active_write_ops_[...]` used in B handling 
 Add to `OperationContext` struct (or as free helpers operating on it):
 ```cpp
 struct OperationContext {
-    // ... existing fields ...
+    // [all existing OperationContext fields unchanged — see current axi_master.hpp]
 
     bool write_request_done() const {
         // All sub-bursts' AWs pushed AND all W beats for all sub-bursts pushed
@@ -179,7 +183,7 @@ struct OperationContext {
 Find:
 ```cpp
 void push_writes_(uint8_t id, OperationContext& op) {
-    // ... existing logic ...
+    // [existing function body unchanged in logic — see current axi_master.hpp impl]
 }
 ```
 
@@ -189,8 +193,10 @@ Change to:
 // is fully pushed downstream. Outer iteration breaks on first false to preserve
 // AXI4 W stream ordering: same-id ops MUST emit their W phase in AW issue order.
 bool push_writes_(uint8_t id, OperationContext& op) {
-    // ... existing body unchanged in logic ...
-    // ... at end of function:
+    // [existing function body unchanged from current impl — pushes AW and W beats
+    //  through slave_.push_aw / slave_.push_w, advancing op.next_aw_sub_idx_,
+    //  op.cur_w_sub_idx_, op.w_pushed_in_cur_ as appropriate]
+    // At end of function, replace each existing `return;` with:
     return op.write_request_done();
 }
 ```
@@ -202,7 +208,8 @@ If existing function has early `return;` statements, replace each with `return o
 If `push_reads_` exists as a function (or inline in the read-side admit loop), same pattern:
 ```cpp
 bool push_reads_(uint8_t id, OperationContext& op) {
-    // ... walk sub-bursts, push AR for each via slave_.push_ar(ar) ...
+    // [walk op.sub_bursts in order, push each sub-burst's AR via slave_.push_ar(ar),
+    //  advancing op.next_ar_sub_idx_; break on slave push backpressure (return false)]
     return op.read_request_done();
 }
 ```
@@ -245,7 +252,7 @@ Expected: errors only on B/R handling paths. STOP, no commit yet.
 
 ---
 
-### Task 3: AxiMaster B/R routing via FIFO front + protocol_rules template helpers
+### Task 3: AxiMaster B/R routing via FIFO front + protocol_rules template helpers — closes Phase A TDD cycle (Task 1's failing test now passes; commit all Tasks 1+2+3 atomically)
 
 **Files:**
 - Modify: `c_model/include/axi/axi_master.hpp` (B/R handling)
@@ -364,7 +371,9 @@ while (auto b = slave_.pop_b()) {
     auto it = active_write_ops_.find(b->id);
     if (it == active_write_ops_.end()) continue;
     auto& op = it->second;
-    // ... b_count_ logic, op.worst_resp_, on complete: callback + erase ...
+    // [existing B drain body — increment op.b_count_, update op.worst_resp_ from
+    //  b->resp, on op.b_count_ == op.sub_bursts.size() fire wcb_(WriteResult{...})
+    //  callback then erase active_write_ops_ entry]
 }
 ```
 
@@ -400,7 +409,11 @@ while (auto r = slave_.pop_r()) {
     auto it = active_read_ops_.find(r->id);
     if (it == active_read_ops_.end()) continue;
     auto& op = it->second;
-    // ... r_beats_in_cur_ logic, on r->last advance sub-burst, on complete: callback + erase ...
+    // [existing R drain body — accumulate r->data into op.read_accumulator with
+    //  lane-positioned-bus offset (DATA_BYTES width), increment op.r_beats_in_cur_,
+    //  update op.worst_resp_, on r->last advance op.cur_r_sub_idx_ + reset
+    //  op.r_beats_in_cur_, on op.cur_r_sub_idx_ == op.sub_bursts.size() dump to
+    //  read_dump_ and fire rcb_(ReadResult{...}) callback then erase]
 }
 ```
 
@@ -431,7 +444,8 @@ while (auto r = slave_.pop_r()) {
         op.r_beats_in_cur_ = 0;
     }
     if (op.cur_r_sub_idx_ == op.sub_bursts.size()) {
-        // ... existing read_dump + rcb_ callback logic ...
+        // [existing read_dump file write of op.read_accumulator + rcb_(ReadResult{...})
+        //  callback fire, same as current implementation]
         if (rcb_) rcb_(ReadResult{op.src_txn.addr, op.src_txn.size,
             op.src_txn.len, op.src_txn.burst, op.read_accumulator,
             op.worst_resp_, r->id, op.src_txn.scenario_line});
@@ -497,7 +511,7 @@ git commit -m "feat(axi): AXI4 conformity — same-id concurrent admission + per
 
 ---
 
-### Task 4: Update Stage 2 AxiMaster tests affected by relaxation
+### Task 4: Update Stage 2 AxiMaster tests affected by relaxation — REACTIVE CLEANUP (not TDD-first; existing tests broken by Tasks 1-3 type/behavior changes, repair them)
 
 **Files:**
 - Modify: `c_model/tests/axi/test_axi_master.cpp` (5-8 affected tests)
@@ -896,24 +910,52 @@ cd c_model && cmake --build build && ctest --test-dir build -R NmuPacketize -j 1
 ```
 Expected: ~10 tests PASS (8 unchanged + 2 new; 4 sticky death deleted).
 
-- [ ] **Step 6: Full ctest sweep**
+- [ ] **Step 6: Retire TestPacketize NOW (Packetize self-computes dst; wrapper is useless)**
+
+With Packetize self-computing dst via addr_trans, `TestPacketize` becomes a no-op pass-through wrapper. Delete it and route integration test through `real_nmu_pkt` directly. This keeps Task 6's commit clean (no broken intermediate state for the drift gate).
 
 ```bash
-ctest --test-dir build -j 1
+git rm c_model/tests/common/test_packetize_adapter.hpp
 ```
-Expected: all PASS. NB: the existing integration test (`test_request_response_loopback.cpp`) still uses `TestPacketize` adapter; it should continue to work because `TestPacketize.push_aw` calls `real_.set_aw_header_extras(...)` then `real_.push_aw(b)` — but those calls no longer exist on `nmu::Packetize`. **THIS WILL BREAK INTEGRATION TEST.** Task 7+8 fix.
 
-If you see integration test FAIL here, that's expected — don't commit. Continue to Task 7.
+Edit `c_model/tests/integration/test_request_response_loopback.cpp`:
 
-If you need to commit Task 6 separately before Task 7, temporarily comment out TestPacketize wiring OR delete `test_packetize_adapter.hpp` now. Recommend: commit Task 5+6 atomically with a known-failing integration test, document in commit message; OR roll forward to Task 7 first.
+Remove include:
+```cpp
+// DELETE:
+#include "common/test_packetize_adapter.hpp"
+```
 
-Decision: commit Task 6 NOW, leave integration test temporarily broken (will fix in Task 8).
+Remove TestPacketize construction + replace AxiSlavePort wiring:
+```cpp
+// BEFORE (Task 12 from prior round):
+nmu::Packetize     real_nmu_pkt(loopback.req_out(), /*src=*/0x01);
+test::TestPacketize test_pkt(real_nmu_pkt, /*fixed_dst=*/0x02);
+nmu::AxiSlavePort  nmu_port(test_pkt, nmu_depkt, params);
 
-- [ ] **Step 7: Commit Task 6**
+// AFTER (this task — no Rob yet, just direct Packetize):
+nmu::Packetize     real_nmu_pkt(loopback.req_out(), /*src=*/0x01);
+nmu::AxiSlavePort  nmu_port(real_nmu_pkt, nmu_depkt, params);
+```
+
+The existing 6 integration fixtures all use single-dst awaddrs (≤ 0xFFFF → all dst=0 via XYRouting), so Packetize's auto-computed dst behaves identically to TestPacketize's hardcoded `fixed_dst=0x02`. Scoreboard still zero mismatch.
+
+Task 8 will replace `real_nmu_pkt` with `Rob` wrapping `real_nmu_pkt` once Rob class exists (Task 7).
+
+- [ ] **Step 7: Full ctest sweep — confirm clean**
 
 ```bash
-git add c_model/include/nmu/packetize.hpp c_model/tests/nmu/test_packetize.cpp
-git commit -m "feat(c_model/nmu/packetize): drop sticky setter, add push_*_with_meta
+cd c_model && cmake --build build && ctest --test-dir build -j 1
+```
+Expected: all PASS including existing 6 integration fixtures. Drift gates clean.
+
+- [ ] **Step 8: Commit Task 6**
+
+```bash
+git add c_model/include/nmu/packetize.hpp c_model/tests/nmu/test_packetize.cpp \
+        c_model/tests/integration/test_request_response_loopback.cpp
+git rm c_model/tests/common/test_packetize_adapter.hpp
+git commit -m "feat(c_model/nmu/packetize): drop sticky setter, add push_*_with_meta; retire TestPacketize
 
 Packetize self-computes dst via addr_trans::xy_route in frozen Packetizer
 interface path. push_aw_with_meta / push_ar_with_meta accept full AwHeaderMeta
@@ -921,8 +963,10 @@ interface path. push_aw_with_meta / push_ar_with_meta accept full AwHeaderMeta
 mode supplies rob_idx via this path. Payload uses meta.local_addr (not
 beat.addr) for future remap safety.
 
-NOTE: integration test temporarily broken (TestPacketize calls deleted
-sticky-setter API). Task 7+8 wire Rob in pipeline and retire TestPacketize."
+TestPacketize wrapper (test_packetize_adapter.hpp) deleted — became no-op
+once sticky setter retired. Integration test now passes real_nmu_pkt directly
+to AxiSlavePort. Existing 6 fixtures pass unchanged (single-dst, no ROB stall
+to trigger). Task 8 will wrap real_nmu_pkt with Rob to add ROB stall coverage."
 ```
 
 ---
@@ -1341,15 +1385,16 @@ abort paths."
 
 ---
 
-### Task 8: Wire Rob into integration test + multi_dst_stress.yaml + delete TestPacketize
+### Task 8: Wire Rob into integration test + multi_dst_stress.yaml
 
 **Files:**
 - Modify: `c_model/tests/integration/test_request_response_loopback.cpp`
 - Create: `c_model/tests/axi/fixtures/multi_dst_stress.yaml`
-- Create: `c_model/tests/axi/fixtures/multi_dst_stress_data.txt` (data bytes for the writes)
-- Delete: `c_model/tests/common/test_packetize_adapter.hpp`
+- Create: `c_model/tests/axi/fixtures/multi_dst_stress_data.txt`
 
-**Goal:** Integration test wires Rob into pipeline (replaces TestPacketize wrapper hack). New fixture exercises ROB Disabled stall path end-to-end.
+**Goal:** Wrap the now-direct `real_nmu_pkt` (Task 6 already wired Packetize directly) with Rob in the integration test rig. Add new fixture exercising ROB Disabled stall path end-to-end.
+
+**Note:** TestPacketize already deleted in Task 6. This task only wraps `real_nmu_pkt` with Rob and adds the new fixture.
 
 - [ ] **Step 1: Create new fixture data file**
 
@@ -1382,35 +1427,29 @@ transactions:
       data_file: multi_dst_stress_data.txt, strb_file: "" }
 ```
 
-- [ ] **Step 3: Update integration test — replace TestPacketize with Rob**
+- [ ] **Step 3: Wrap `real_nmu_pkt` with Rob in the integration test rig**
 
 In `c_model/tests/integration/test_request_response_loopback.cpp`:
 
-Find the test rig setup (around the existing TestPacketize wiring):
+After Task 6 the rig is:
 ```cpp
 nmu::Packetize     real_nmu_pkt(loopback.req_out(), /*src=*/0x01);
-test::TestPacketize test_pkt(real_nmu_pkt, /*fixed_dst=*/0x02);
 nmu::Depacketize   nmu_depkt(loopback.rsp_in(), params.depkt_b_q_depth, params.depkt_r_q_depth);
-// ...
-nmu::AxiSlavePort  nmu_port(test_pkt, nmu_depkt, params);
+// [intervening nsu_pkt / nsu_depkt construction unchanged — see existing rig]
+nmu::AxiSlavePort  nmu_port(real_nmu_pkt, nmu_depkt, params);
 ```
 
-Replace with:
+Wrap with Rob (insert Rob construction line, then change the AxiSlavePort args):
 ```cpp
 nmu::Packetize     real_nmu_pkt(loopback.req_out(), /*src=*/0x01);
 nmu::Depacketize   nmu_depkt(loopback.rsp_in(), params.depkt_b_q_depth, params.depkt_r_q_depth);
 nmu::Rob           rob(real_nmu_pkt, nmu_depkt,
-                       nmu::RobMode::Disabled, nmu::RobMode::Disabled);
-// ...
+    nmu::RobMode::Disabled, nmu::RobMode::Disabled);
+// [intervening nsu_pkt / nsu_depkt construction unchanged]
 nmu::AxiSlavePort  nmu_port(rob, rob, params);  // Rob is both Packetizer and Depacketizer
 ```
 
-Remove:
-```cpp
-#include "common/test_packetize_adapter.hpp"
-```
-
-Add:
+Add include:
 ```cpp
 #include "nmu/rob.hpp"
 ```
@@ -1471,57 +1510,48 @@ Change `size` to `0x12000` (~73 KB; covers up to 0x10100 + buffer):
 axi::Memory memory(/*base=*/0, /*size=*/0x12000, /*write_lat=*/0, /*read_lat=*/0);
 ```
 
-- [ ] **Step 7: Delete TestPacketize**
-
-```bash
-git rm c_model/tests/common/test_packetize_adapter.hpp
-```
-
-- [ ] **Step 8: Build + run integration test**
+- [ ] **Step 7: Build + run integration test**
 
 ```bash
 cd c_model && cmake --build build && ctest --test-dir build -R PacketizeLoopback -j 1
 ```
 Expected: 7 tests PASS (6 existing + 1 new multi_dst_stress).
 
-- [ ] **Step 9: Full ctest sweep**
+- [ ] **Step 8: Full ctest sweep**
 
 ```bash
 ctest --test-dir build -j 1
 ```
 Expected: all PASS. Total ctest count: ~285-300 (depending on Stage 2 test impact).
 
-- [ ] **Step 10: Drift gates**
+- [ ] **Step 9: Drift gates**
 
 ```bash
 cd ../specgen && py -3 -m pytest -q && py -3 tools/codegen.py --check && py -3 tools/gen_inventory.py --check
 ```
 Expected: all clean.
 
-- [ ] **Step 11: Commit Task 8**
+- [ ] **Step 10: Commit Task 8**
 
 ```bash
 git add c_model/tests/integration/test_request_response_loopback.cpp \
         c_model/tests/axi/fixtures/multi_dst_stress.yaml \
         c_model/tests/axi/fixtures/multi_dst_stress_data.txt
-git rm c_model/tests/common/test_packetize_adapter.hpp
-git commit -m "feat(c_model/tests/integration): wire Rob into pipeline, add multi_dst_stress fixture
+git commit -m "feat(c_model/tests/integration): wrap real_nmu_pkt with Rob, add multi_dst_stress fixture
 
-Replace TestPacketize wrapper hack with real Rob(Disabled, Disabled) in
-the e2e loopback test rig. AxiSlavePort takes 'rob, rob' (same Rob instance
-as both Packetizer and Depacketizer via multi-inheritance).
+Wrap Packetize with Rob(Disabled, Disabled) in the e2e loopback test rig.
+AxiSlavePort takes 'rob, rob' (same Rob instance as both Packetizer and
+Depacketizer via multi-inheritance). TestPacketize was already retired
+in Task 6 (became no-op once Packetize self-computes dst).
 
 New multi_dst_stress.yaml fixture: 2 same-id writes at different XYRouting
 dst boundaries (0x100 → dst=0, 0x10100 → dst=1). With AxiMaster relaxed
-to admit same-id concurrent, ROB sees both AWs in-flight and stalls 2nd
-until 1st B returns. Scoreboard zero mismatch confirms ROB serializes
-correctly. Memory size scaled to 0x12000 to cover both addrs.
+to admit same-id concurrent (Tasks 1-3), ROB sees both AWs in-flight and
+stalls 2nd until 1st B returns. Scoreboard zero mismatch confirms ROB
+serializes correctly. Memory size scaled to 0x12000 to cover both addrs.
 
 Per-fixture max_outstanding_write override in rig (no YAML schema change):
 multi_dst_stress requires max_out_w >= 2 to exercise stall path.
-
-TestPacketize adapter (c_model/tests/common/test_packetize_adapter.hpp)
-deleted — Rob in pipeline replaces it.
 
 Integration test count: 6 → 7 fixture variants."
 ```
@@ -1661,17 +1691,24 @@ After writing the plan, verified:
   - §4.7 ROB responsibility boundary → Rob class header doc-comment
   - §5.1-5.6 test plan → Tasks 5 (addr_trans), 6 (packetize updates), 7 (rob), 3 (protocol_rules), 4 (axi_master), 8 (integration)
   - §6 open follow-ups → Task 9 NEXT_STEPS update
-- **Placeholder scan**: clean (no TBD / "implement later" / handwave). Code blocks present in every code step.
+- **Placeholder scan**: clean. No TBD / "implement later" / handwave. Every code block is concrete; "[existing X unchanged]" prose comments mark in-place edits where the surrounding body is not being changed.
+- **Test count consistency (spec §5 vs. plan)**:
+  - addr_trans: spec 3 / plan 3 (`XyRoute_LowBitsAreLocalAddr`, `XyRoute_HighBitsDecodeXY`, `XyRoute_LocalAddrPassesThroughFullWidth`) — match
+  - protocol_rules death: spec 2 / plan 2 (`CheckBFrontNoOutstandingOrFullyResponded_Rejects`, `CheckRFrontBadBeatTimingOrRlast_Rejects`) — match
+  - rob: spec 10 / plan 10 (9 × `NmuRob, Disabled_*` + 1 × `NmuRobDeath, Disabled_AbortPaths`) — match
+  - packetize: spec 2 / plan 2 (`PushAwWithMeta_OverrideDefault`, `AddrTransIntegratedDstIdInHeader`) — match
+  - integration fixture: spec adds 1 (`multi_dst_stress.yaml`) → INSTANTIATE rises from 6 → 7 — match
 - **Type consistency**:
   - `AwHeaderMeta` defined in Task 6 (packetize.hpp); used in Tasks 6, 7 (Rob.push_aw)
   - `OutstandingEntry` defined in Task 7 (rob.hpp); future Enabled mode adds rob_idx (commented forward-compat)
   - `Translated` defined in Task 5 (addr_trans.hpp); used in Tasks 6 (Packetize), 7 (Rob)
   - `check_b_front_can_accept_response` / `check_r_front_can_accept_beat` defined in Task 3 (protocol_rules.hpp); used in Tasks 3 (AxiMaster), tested in Task 3 (test_protocol_rules)
   - `RobMode` enum (Disabled / Enabled) defined in Task 7; used by integration in Task 8
-- **Cross-references valid**:
+- **Commit atomicity (no broken intermediate state)**:
   - Tasks 1-3 are atomic (AxiMaster compiles only after all three). Task 1 step 6 + Task 2 step 5 explicitly say "don't commit yet"; Task 3 step 10 commits all atomically.
-  - Task 6 commits with temporarily-broken integration test (documented in commit msg); Task 8 fixes.
-  - Task 7's Rob unit tests work standalone (no AxiSlavePort needed — uses LoopbackNoc + Packetize + Depacketize directly).
+  - Task 6 deletes `TestPacketize`, refactors Packetize, and updates the integration test rig + fixture YAML + `INSTANTIATE_TEST_SUITE_P` entries together in a single commit so the drift gate stays green.
+  - Task 7's Rob unit tests work standalone (no AxiSlavePort needed — uses LoopbackNoc + Packetize + Depacketize directly), so Task 7 commits cleanly before Task 8 integration.
+  - Task 8 adds the Rob wrap + `multi_dst_stress` fixture entry; integration was already green after Task 6, so Task 8 only adds new coverage.
 
 ---
 
