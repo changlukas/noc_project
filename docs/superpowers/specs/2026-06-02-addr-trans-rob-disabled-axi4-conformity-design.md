@@ -412,26 +412,34 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
 }
 ```
 
-**pop_b** (Disabled mode: pop FIFO front to free dst):
+**pop_b** (Disabled mode: pop FIFO front to free dst; Enabled mode stubbed for next round):
 ```cpp
 inline std::optional<axi::BBeat> Rob::pop_b() {
+    if (mode_w_ == RobMode::Enabled) {
+        assert(false && "Rob: Enabled mode pop_b not yet implemented (next round)");
+        std::abort();
+    }
     auto opt = next_depkt_.pop_b();
     if (!opt) return std::nullopt;
-    if (mode_w_ == RobMode::Disabled) {
-        auto& s = write_[opt->id];
-        assert(!s.outstanding.empty() && "B for id with no outstanding write");
-        s.outstanding.pop_front();
-    }
+    // Disabled mode
+    auto& s = write_[opt->id];
+    assert(!s.outstanding.empty() && "B for id with no outstanding write");
+    s.outstanding.pop_front();
     return opt;
 }
 ```
 
-**pop_r** (multi-beat; pop FIFO only on `rlast=1`):
+**pop_r** (multi-beat; pop FIFO only on `rlast=1`; Enabled mode stubbed for next round):
 ```cpp
 inline std::optional<axi::RBeat> Rob::pop_r() {
+    if (mode_r_ == RobMode::Enabled) {
+        assert(false && "Rob: Enabled mode pop_r not yet implemented (next round)");
+        std::abort();
+    }
     auto opt = next_depkt_.pop_r();
     if (!opt) return std::nullopt;
-    if (mode_r_ == RobMode::Disabled && opt->last) {
+    // Disabled mode
+    if (opt->last) {
         auto& s = read_[opt->id];
         assert(!s.outstanding.empty() && "R(last) for id with no outstanding read");
         s.outstanding.pop_front();
@@ -529,7 +537,7 @@ Dropped (per Codex round-8 + simplification): `BackpressureAtomicityPushAr` (mir
 - Existing 6 fixtures unchanged (awaddrs ≤ 0xFFFF → all dst=0 → no stall) — verify no regression
 - ADD 1 new fixture `multi_dst_stress.yaml`:
   - 2 same-id writes (id=0x05) at addr 0x100 (dst=0) + 0x10100 (dst=1)
-  - YAML config sets `max_outstanding_write: 2` (scenario_parser may need optional schema field)
+  - **No YAML schema change**: the integration test rig overrides `max_outstanding_write` parameter to 2 specifically for this fixture (in the `INSTANTIATE_TEST_SUITE_P` tuple or via a small per-fixture override map in the rig — concrete decision deferred to implementation phase). Existing fixtures keep their YAML-config-driven defaults; only multi_dst_stress needs the override.
   - Memory size in test rig scaled to ≥ 0x11000 to cover both addrs
   - Expected: AxiMaster admits both concurrently → ROB stalls 2nd → B1 returns → outstanding empty → ROB releases 2nd → scoreboard zero mismatch
 
