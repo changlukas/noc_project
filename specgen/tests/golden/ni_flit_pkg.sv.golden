@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: 9befc208c425
 // Generator version: v1.0.0
-// Generated at: 2026-06-02T02:20:26Z
+// Generated at: 2026-06-02T02:26:57Z
 // ----------------------------------------------------------------------------
 `ifndef NI_FLIT_PKG_SVH
 `define NI_FLIT_PKG_SVH
@@ -98,6 +98,13 @@ package ni_flit_pkg;
   localparam int unsigned AXI_RESP_WIDTH         = 2;
   localparam int unsigned AXI_LAST_WIDTH         = 1;
   localparam int unsigned HEADER_TOTAL_WIDTH     = 56;
+
+  // --- axi_ch encoding (from flit.header_fields[axi_ch].encoding) ---
+  localparam int unsigned AXI_CH_AW  = 0;
+  localparam int unsigned AXI_CH_W   = 1;
+  localparam int unsigned AXI_CH_AR  = 2;
+  localparam int unsigned AXI_CH_B   = 3;
+  localparam int unsigned AXI_CH_R   = 4;
 
 endpackage
 

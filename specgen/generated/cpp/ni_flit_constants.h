@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: 9befc208c425
 // Generator version: v1.0.0
-// Generated at: 2026-06-02T02:23:26Z
+// Generated at: 2026-06-02T02:27:23Z
 // ----------------------------------------------------------------------------
 #pragma once
 #include <cstddef>
@@ -122,6 +122,13 @@ constexpr int AXI_LAST_WIDTH         = 1;
 constexpr int WSTRB_WIDTH            = 32;
 constexpr int HEADER_TOTAL_WIDTH     = 56;
 }  // namespace width
+
+// --- axi_ch encoding (from flit.header_fields[axi_ch].encoding) ---
+constexpr int AXI_CH_AW  = 0;
+constexpr int AXI_CH_W   = 1;
+constexpr int AXI_CH_AR  = 2;
+constexpr int AXI_CH_B   = 3;
+constexpr int AXI_CH_R   = 4;
 
 // --- static_assert: arithmetic equality invariants (design doc sec 6.4) ---
 static_assert(FLIT_WIDTH == HEADER_WIDTH + PAYLOAD_WIDTH, "Flit width arithmetic inconsistent: HEADER_WIDTH + PAYLOAD_WIDTH must equal FLIT_WIDTH");

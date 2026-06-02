@@ -95,6 +95,14 @@ def emit(packet_json: Path, spec_version: str) -> str:
     out.append("}  // namespace width")
     out.append("")
 
+    # --- axi_ch encoding (from header_fields[axi_ch].encoding) ---
+    enc = C.axi_channel_encoding(spec)
+    if enc:
+        out.append("// --- axi_ch encoding (from flit.header_fields[axi_ch].encoding) ---")
+        for name, value in sorted(enc.items(), key=lambda kv: kv[1]):
+            out.append(f"constexpr int AXI_CH_{name:<3} = {value};")
+        out.append("")
+
     # --- static_assert arithmetic invariants (design doc sec 6.4) ---
     # Only equality invariants; no tiling/cross-ref/width_param eval.
     out.append("// --- static_assert: arithmetic equality invariants (design doc sec 6.4) ---")
