@@ -5,6 +5,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <optional>
 #include <string_view>
@@ -20,24 +21,24 @@ public:
   explicit Flit(const std::array<uint8_t, WIDTH_BYTES>& raw) : raw_(raw) {}
 
   // ---- Header field access ----
-  void     set_header_field(std::string_view name, uint64_t value);
-  uint64_t get_header_field(std::string_view name) const;
+  void     set_header_field(std::string_view name, uint64_t value) noexcept;
+  uint64_t get_header_field(std::string_view name) const noexcept;
 
   // ---- Payload field access ----
   // channel: "AW" | "AR" | "W" | "B" | "R" (case-insensitive accepted)
-  void     set_payload_field(std::string_view channel, std::string_view field, uint64_t value);
-  uint64_t get_payload_field(std::string_view channel, std::string_view field) const;
+  void     set_payload_field(std::string_view channel, std::string_view field, uint64_t value) noexcept;
+  uint64_t get_payload_field(std::string_view channel, std::string_view field) const noexcept;
 
   // ---- Bulk payload bytes for wide fields (wdata 256-bit, rdata 256-bit) ----
   void set_payload_bytes(std::string_view channel, std::string_view field,
-                         const uint8_t* src, std::size_t bit_width);
+                         const uint8_t* src, std::size_t bit_width) noexcept;
   void get_payload_bytes(std::string_view channel, std::string_view field,
-                         uint8_t* dst, std::size_t bit_width) const;
+                         uint8_t* dst, std::size_t bit_width) const noexcept;
 
   const std::array<uint8_t, WIDTH_BYTES>& raw() const noexcept { return raw_; }
   std::array<uint8_t, WIDTH_BYTES>&       raw()       noexcept { return raw_; }
 
-  bool check_padding_is_zero() const;
+  bool check_padding_is_zero() const noexcept;
 
 private:
   std::array<uint8_t, WIDTH_BYTES> raw_{};
@@ -63,7 +64,7 @@ inline FieldPos header_field_pos(std::string_view name) {
   if (name == "flit_ecc")   return {ni::header::FLIT_ECC_LSB,   ni::header::FLIT_ECC_MSB};
   if (name == "rsvd")       return {ni::header::RSVD_LSB,       ni::header::RSVD_MSB};
   assert(false && "unknown header field");
-  return {-1, -1};
+  std::abort();  // release-build safety: prevents UB shifts on {-1,-1} fallthrough
 }
 
 // Payload field dispatch -- 5 channels, dispatched into per-channel inner namespace
@@ -142,12 +143,12 @@ inline FieldPos payload_field_pos(std::string_view channel, std::string_view fie
     if (field == "r_rsvd")   return {ni::payload::r::R_RSVD_LSB,    ni::payload::r::R_RSVD_MSB};
   }
   assert(false && "unknown payload field");
-  return {-1, -1};
+  std::abort();  // release-build safety: prevents UB shifts on {-1,-1} fallthrough
 }
 
 }  // namespace detail
 
-inline void Flit::set_header_field(std::string_view name, uint64_t value) {
+inline void Flit::set_header_field(std::string_view name, uint64_t value) noexcept {
   auto p = detail::header_field_pos(name);
   int width = p.msb - p.lsb + 1;
   uint64_t mask = (width >= 64) ? ~uint64_t{0} : ((1ull << width) - 1);
@@ -155,12 +156,12 @@ inline void Flit::set_header_field(std::string_view name, uint64_t value) {
   detail::write_bits(raw_, p.lsb, p.msb, value & mask);
 }
 
-inline uint64_t Flit::get_header_field(std::string_view name) const {
+inline uint64_t Flit::get_header_field(std::string_view name) const noexcept {
   auto p = detail::header_field_pos(name);
   return detail::read_bits(raw_, p.lsb, p.msb);
 }
 
-inline void Flit::set_payload_field(std::string_view channel, std::string_view field, uint64_t value) {
+inline void Flit::set_payload_field(std::string_view channel, std::string_view field, uint64_t value) noexcept {
   auto p = detail::payload_field_pos(channel, field);
   int abs_lsb = ni::HEADER_WIDTH + p.lsb;
   int abs_msb = ni::HEADER_WIDTH + p.msb;
@@ -170,7 +171,7 @@ inline void Flit::set_payload_field(std::string_view channel, std::string_view f
   detail::write_bits(raw_, abs_lsb, abs_msb, value & mask);
 }
 
-inline uint64_t Flit::get_payload_field(std::string_view channel, std::string_view field) const {
+inline uint64_t Flit::get_payload_field(std::string_view channel, std::string_view field) const noexcept {
   auto p = detail::payload_field_pos(channel, field);
   int abs_lsb = ni::HEADER_WIDTH + p.lsb;
   int abs_msb = ni::HEADER_WIDTH + p.msb;
@@ -178,7 +179,7 @@ inline uint64_t Flit::get_payload_field(std::string_view channel, std::string_vi
 }
 
 inline void Flit::set_payload_bytes(std::string_view channel, std::string_view field,
-                                    const uint8_t* src, std::size_t bit_width) {
+                                    const uint8_t* src, std::size_t bit_width) noexcept {
   auto p = detail::payload_field_pos(channel, field);
   int abs_lsb = ni::HEADER_WIDTH + p.lsb;
   assert(static_cast<int>(bit_width) == p.msb - p.lsb + 1 && "bit_width mismatch");
@@ -192,7 +193,7 @@ inline void Flit::set_payload_bytes(std::string_view channel, std::string_view f
 }
 
 inline void Flit::get_payload_bytes(std::string_view channel, std::string_view field,
-                                    uint8_t* dst, std::size_t bit_width) const {
+                                    uint8_t* dst, std::size_t bit_width) const noexcept {
   auto p = detail::payload_field_pos(channel, field);
   int abs_lsb = ni::HEADER_WIDTH + p.lsb;
   assert(static_cast<int>(bit_width) == p.msb - p.lsb + 1 && "bit_width mismatch");
@@ -206,7 +207,7 @@ inline void Flit::get_payload_bytes(std::string_view channel, std::string_view f
   }
 }
 
-inline bool Flit::check_padding_is_zero() const {
+inline bool Flit::check_padding_is_zero() const noexcept {
   for (std::size_t i = 0; i < ni::header::PADDING_FIELDS_COUNT; ++i) {
     int lsb = ni::header::PADDING_FIELDS[i].lsb;
     int msb = ni::header::PADDING_FIELDS[i].msb;

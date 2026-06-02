@@ -69,3 +69,23 @@ TEST(Flit, RsvdPaddingCheckFailsWhenSet) {
   f.set_header_field("rsvd", 0x3);  // 2-bit rsvd
   EXPECT_FALSE(f.check_padding_is_zero());
 }
+
+TEST(Flit, SetGetPayloadBFields) {
+  Flit f;
+  f.set_payload_field("B", "bid",   0x42);
+  f.set_payload_field("B", "bresp", 0x2);  // SLVERR
+  f.set_payload_field("B", "buser", 0x55);
+  EXPECT_EQ(f.get_payload_field("B", "bid"),   0x42u);
+  EXPECT_EQ(f.get_payload_field("B", "bresp"), 0x2u);
+  EXPECT_EQ(f.get_payload_field("B", "buser"), 0x55u);
+}
+
+TEST(Flit, SetGetPayloadRFields) {
+  Flit f;
+  f.set_payload_field("R", "rid",   0x37);
+  f.set_payload_field("R", "rresp", 0x3);  // DECERR
+  f.set_payload_field("R", "rlast", 0x1);
+  EXPECT_EQ(f.get_payload_field("R", "rid"),   0x37u);
+  EXPECT_EQ(f.get_payload_field("R", "rresp"), 0x3u);
+  EXPECT_EQ(f.get_payload_field("R", "rlast"), 0x1u);
+}
