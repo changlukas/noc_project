@@ -174,6 +174,41 @@ inline bool check_r_id_match_outstanding(
   return it != outstanding.end() && detail::entry_non_empty(it->second);
 }
 
+// AXI4 IHI 0022 §A5.3: a response for an AXI ID routes to the OLDEST
+// outstanding operation for that id (per-id FIFO). This helper verifies the
+// FIFO invariant before B routing: deque non-empty AND front op has not yet
+// received all B responses (b_count_ < sub_bursts.size()).
+//
+// OpType is structurally typed (avoids leaking AxiMasterT's private nested
+// OperationContext into this header). Caller must supply a type with members
+// `b_count_` (integral) and `sub_bursts` (sized container).
+template <typename OpType>
+inline bool check_b_front_can_accept_response(
+    uint8_t bid,
+    const std::map<uint8_t, std::deque<OpType>>& active_write_ops) {
+  auto it = active_write_ops.find(bid);
+  if (it == active_write_ops.end() || it->second.empty()) return false;
+  const auto& op = it->second.front();
+  return op.b_count_ < op.sub_bursts.size();
+}
+
+// R mirror with multi-beat semantics. RLAST must occur iff the current beat
+// is the final beat of the current sub-burst (r_beats_in_cur_ == sub.len).
+// OpType structural requirements: `cur_r_sub_idx_`, `r_beats_in_cur_`,
+// `sub_bursts[i].len`.
+template <typename OpType>
+inline bool check_r_front_can_accept_beat(
+    uint8_t rid, bool rlast,
+    const std::map<uint8_t, std::deque<OpType>>& active_read_ops) {
+  auto it = active_read_ops.find(rid);
+  if (it == active_read_ops.end() || it->second.empty()) return false;
+  const auto& op = it->second.front();
+  if (op.cur_r_sub_idx_ >= op.sub_bursts.size()) return false;
+  const auto& sub = op.sub_bursts[op.cur_r_sub_idx_];
+  if (op.r_beats_in_cur_ > sub.len) return false;
+  return rlast == (op.r_beats_in_cur_ == sub.len);
+}
+
 // SAME_ID_W_ORDER — same-ID write responses must come back in issue order.
 // Structurally enforced by the slave's per-ID FIFO (front = oldest); the rule
 // is preserved as a tautology to document the invariant.

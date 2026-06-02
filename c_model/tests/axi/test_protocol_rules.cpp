@@ -346,3 +346,67 @@ TEST_F(AxiProtocolDeath, ExclusiveValid_WRAP_4Beat_Size5) {
 }
 
 #endif  // NDEBUG
+
+// ============================================================================
+// Phase A: per-id FIFO B/R routing helpers (always compiled — no death tests).
+// ============================================================================
+
+namespace {
+// Minimal stand-in matching the structural contract the new template helpers
+// require: b_count_, sub_bursts (sized), cur_r_sub_idx_, r_beats_in_cur_,
+// sub_bursts[i].len. Decoupled from AxiMasterT::OperationContext so the rule
+// unit tests don't drag the master into this translation unit.
+struct FakeSub { std::size_t len = 0; };
+struct FakeOp {
+  std::size_t           b_count_ = 0;
+  std::vector<FakeSub>  sub_bursts;
+  std::size_t           cur_r_sub_idx_ = 0;
+  std::size_t           r_beats_in_cur_ = 0;
+};
+}  // namespace
+
+TEST(ProtocolRulesFifo, CheckBFrontNoOutstandingOrFullyResponded_Rejects) {
+  std::map<uint8_t, std::deque<FakeOp>> m;
+  // Case 1: id not present in map at all.
+  EXPECT_FALSE(rules::check_b_front_can_accept_response(/*bid=*/0x05, m));
+  // Case 2: id present but deque empty (defensive — current code erases empty
+  // entries, but the helper must still reject).
+  m[0x05];
+  EXPECT_FALSE(rules::check_b_front_can_accept_response(0x05, m));
+  // Case 3: front op already fully responded (b_count_ == sub_bursts.size()).
+  FakeOp op;
+  op.sub_bursts.resize(2);
+  op.b_count_ = 2;
+  m[0x05].push_back(op);
+  EXPECT_FALSE(rules::check_b_front_can_accept_response(0x05, m));
+  // Positive control: front op with one more B response outstanding.
+  FakeOp op_open;
+  op_open.sub_bursts.resize(2);
+  op_open.b_count_ = 1;
+  std::map<uint8_t, std::deque<FakeOp>> m2;
+  m2[0x07].push_back(op_open);
+  EXPECT_TRUE(rules::check_b_front_can_accept_response(0x07, m2));
+}
+
+TEST(ProtocolRulesFifo, CheckRFrontBadBeatTimingOrRlast_Rejects) {
+  std::map<uint8_t, std::deque<FakeOp>> m;
+  // Case 1: id not present.
+  EXPECT_FALSE(rules::check_r_front_can_accept_beat(/*rid=*/0x05,
+                                                    /*rlast=*/false, m));
+  // Case 2: rlast=true on an intermediate beat (sub.len=3, so 4 beats; this
+  // is beat 1 of 4 — RLAST belongs on beat index 3).
+  FakeOp op;
+  op.sub_bursts.push_back(FakeSub{3});
+  op.r_beats_in_cur_ = 1;
+  m[0x05].push_back(op);
+  EXPECT_FALSE(rules::check_r_front_can_accept_beat(0x05, /*rlast=*/true, m));
+  // Case 3: rlast=false on the FINAL beat (r_beats_in_cur_ == sub.len).
+  m[0x05].clear();
+  FakeOp op_last;
+  op_last.sub_bursts.push_back(FakeSub{3});
+  op_last.r_beats_in_cur_ = 3;
+  m[0x05].push_back(op_last);
+  EXPECT_FALSE(rules::check_r_front_can_accept_beat(0x05, /*rlast=*/false, m));
+  // Positive control: rlast=true on the final beat is legal.
+  EXPECT_TRUE(rules::check_r_front_can_accept_beat(0x05, /*rlast=*/true, m));
+}

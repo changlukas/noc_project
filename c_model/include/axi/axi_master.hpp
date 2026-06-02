@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <map>
@@ -118,14 +119,11 @@ public:
     while (auto b = slave_.pop_b()) {
       AXI_PROTOCOL_ASSERT(rules::check_resp_encoding(b->resp),
                           "RESP_ENCODING: B response must be a legal AXI4 response");
-      AXI_PROTOCOL_ASSERT(rules::check_b_id_match_outstanding(b->id, active_write_ops_),
-                          "B_ID_MATCH_OUTSTANDING: B id must match an in-flight write operation");
-      auto it = active_write_ops_.find(b->id);
-      if (it == active_write_ops_.end()) continue;
-      auto& op = it->second;
       AXI_PROTOCOL_ASSERT(
-          rules::check_b_one_response_per_write(op.b_count_ + 1, op.sub_bursts.size()),
-          "B_ONE_RESPONSE_PER_WRITE: B responses exceed the operation's expected count");
+          rules::check_b_front_can_accept_response(b->id, active_write_ops_),
+          "B_FRONT_CAN_ACCEPT: id deque empty or front op already fully responded");
+      auto& deq = active_write_ops_[b->id];
+      auto& op  = deq.front();
       ++op.b_count_;
       if (static_cast<uint8_t>(b->resp) > static_cast<uint8_t>(op.worst_resp_))
         op.worst_resp_ = b->resp;
@@ -143,7 +141,9 @@ public:
                                     op.worst_resp_,
                                     b->id,
                                     op.src_txn.scenario_line});
-        active_write_ops_.erase(it);
+        deq.pop_front();
+        --active_write_count_;
+        if (deq.empty()) active_write_ops_.erase(b->id);
       }
     }
 
@@ -154,9 +154,11 @@ public:
     // r_beats_in_cur_; advance to the next sub-burst on r->last. Operation
     // completes when cur_r_sub_idx_ reaches sub_bursts.size().
     while (auto r = slave_.pop_r()) {
-      auto it = active_read_ops_.find(r->id);
-      if (it == active_read_ops_.end()) continue;
-      auto& op = it->second;
+      AXI_PROTOCOL_ASSERT(
+          rules::check_r_front_can_accept_beat(r->id, r->last, active_read_ops_),
+          "R_FRONT_CAN_ACCEPT: bad beat timing or rlast mismatch with sub-burst length");
+      auto& deq = active_read_ops_[r->id];
+      auto& op  = deq.front();
       const auto& sub = op.sub_bursts[op.cur_r_sub_idx_];
       const std::size_t bpb = 1ull << sub.size;
       // Lane-positioned bus: byte j on the bus is at lane (byte_lane + j),
@@ -208,20 +210,22 @@ public:
                                     op.read_accumulator,
                                     op.worst_resp_, r->id,
                                     op.src_txn.scenario_line});
-        active_read_ops_.erase(it);
+        deq.pop_front();
+        --active_read_count_;
+        if (deq.empty()) active_read_ops_.erase(r->id);
       }
     }
 
     // ===== Admission =====
     //
-    // One OperationContext per scenario_txn. Same-id concurrent operations
-    // remain disallowed (operation-level ordering) — sub-burst stacking
-    // happens within ONE operation via slave's per-id FIFO.
+    // One OperationContext per scenario_txn. AXI4 IHI 0022 §A5.3 permits
+    // multiple in-flight ops with the same AXI ID; per-id deque preserves
+    // submission order so B/R routing can take .front() (oldest outstanding).
+    // active_*_count_ tracks total ops across all ids for max_outstanding.
     while (next_txn_idx_ < sc_.transactions.size()) {
       const auto& txn = sc_.transactions[next_txn_idx_];
       if (txn.op == ScenarioTransaction::Op::Write) {
-        if (active_write_ops_.size() >= max_out_w_) break;
-        if (active_write_ops_.count(txn.id)) break;
+        if (active_write_count_ >= max_out_w_) break;
         OperationContext op;
         op.src_txn = txn;
         op.sub_bursts = split_into_sub_bursts(txn);
@@ -229,54 +233,48 @@ public:
                                     static_cast<std::size_t>(txn.len + 1u) * (1ull << txn.size));
         op.strb_per_beat = load_strb_file_(txn.strb_file,
                                             static_cast<std::size_t>(txn.len + 1u));
-        active_write_ops_.emplace(txn.id, std::move(op));
+        active_write_ops_[txn.id].push_back(std::move(op));
+        ++active_write_count_;
       } else {
-        if (active_read_ops_.size() >= max_out_r_) break;
-        if (active_read_ops_.count(txn.id)) break;
+        if (active_read_count_ >= max_out_r_) break;
         OperationContext op;
         op.src_txn = txn;
         op.sub_bursts = split_into_sub_bursts(txn);
-        active_read_ops_.emplace(txn.id, std::move(op));
+        active_read_ops_[txn.id].push_back(std::move(op));
+        ++active_read_count_;
       }
       ++next_txn_idx_;
     }
 
     // ===== Push AW + W beats per operation =====
     //
-    // Walk each operation's sub-bursts in order. For the current sub-burst:
+    // Walk each id's per-id FIFO in submission order. Within one op, walk its
+    // sub-bursts in order. For the current sub-burst:
     //   - Push its AW if not yet pushed.
     //   - Push its W beats up to its len+1; the W payload is a slice of the
     //     operation-level packed user buffer starting at op-level beat index
     //     (which == sum of preceding sub-bursts' beat counts + cur_w_in_sub_).
-    // Advance to the next sub-burst when the current sub-burst's W beats are
-    // fully pushed.
-    for (auto& [id, op] : active_write_ops_) {
-      push_writes_(id, op);
+    // Break on the first op whose request phase is incomplete — AXI4 W has no
+    // WID, so same-id ops MUST emit W in AW issue order (IHI 0022 §A5.3).
+    for (auto& [id, deq] : active_write_ops_) {
+      for (auto& op : deq) {
+        if (!push_writes_(id, op)) break;
+      }
     }
 
     // ===== Push AR per operation =====
     //
-    // Walk sub-bursts in order. Push each sub-burst's AR — slave's per-id
-    // FIFO accepts multi-outstanding same-id ARs.
-    for (auto& [id, op] : active_read_ops_) {
-      while (op.next_ar_sub_idx_ < op.sub_bursts.size()) {
-        const auto& sub = op.sub_bursts[op.next_ar_sub_idx_];
-        ArBeat ar{};
-        ar.id = id;
-        // Align AR addr DOWN to (1<<size) boundary, symmetric with AW.
-        ar.addr = sub.addr & ~((1ull << sub.size) - 1);
-        ar.len = sub.len; ar.size = sub.size; ar.burst = sub.burst;
-        // Phase C: wire-through scenario_txn.lock onto AR.lock (1-bit).
-        ar.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
-        if (!slave_.push_ar(ar)) break;
-        ++op.next_ar_sub_idx_;
+    // Same-id FIFO order: AR for op[0] must be fully pushed before op[1]'s AR.
+    for (auto& [id, deq] : active_read_ops_) {
+      for (auto& op : deq) {
+        if (!push_reads_(id, op)) break;
       }
     }
   }
 
   bool done() const {
     return next_txn_idx_ >= sc_.transactions.size()
-        && active_write_ops_.empty() && active_read_ops_.empty();
+        && active_write_count_ == 0 && active_read_count_ == 0;
   }
 
   void on_write_completed(std::function<void(const WriteResult&)> cb) { wcb_ = std::move(cb); }
@@ -341,13 +339,30 @@ private:
     std::size_t cur_r_sub_idx_   = 0;      // sub-burst currently absorbing R beats
     std::size_t r_beats_in_cur_  = 0;
     std::vector<uint8_t> read_accumulator; // packed user bytes, full operation
+
+    // Phase A: request-phase completion predicates. The outer FIFO loop in
+    // tick() breaks on the first op whose request phase is incomplete so
+    // same-id ops emit their AW + W stream in submission order (AXI4 W has
+    // no WID; W beats follow AW issue order — IHI 0022 §A5.3).
+    bool write_request_done() const {
+      return next_aw_sub_idx_ == sub_bursts.size()
+          && cur_w_sub_idx_   == sub_bursts.size();
+    }
+    bool read_request_done() const {
+      return next_ar_sub_idx_ == sub_bursts.size();
+    }
   };
 
   // Per-operation W push: walk sub-bursts in order, pushing AW + W beats.
   // The operation-level beat index (used to slice op.data / op.strb_per_beat)
   // is the running sum of preceding sub-bursts' beat counts plus the current
   // sub-burst's in-progress index.
-  void push_writes_(uint8_t id, OperationContext& op) {
+  //
+  // Returns true iff op's write request phase (all AWs + all W beats across
+  // all sub-bursts) is fully pushed downstream. The outer FIFO loop breaks
+  // on the first false to preserve AXI4 W stream ordering: same-id ops MUST
+  // emit their W phase in AW issue order (AXI4 W has no WID — IHI 0022 §A5.3).
+  bool push_writes_(uint8_t id, OperationContext& op) {
     // Pre-compute prefix sum of sub-burst beat counts so the operation-level
     // beat offset for sub-burst k is op_beat_base[k].
     std::size_t op_beat_base = 0;
@@ -369,7 +384,7 @@ private:
         // AxLOCK is 1-bit; LockType::Exclusive maps to 1, Normal to 0. Every
         // sub-burst of one operation carries the same lock value.
         aw.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
-        if (!slave_.push_aw(aw)) return;  // backpressure: retry next tick
+        if (!slave_.push_aw(aw)) return op.write_request_done();
         ++op.next_aw_sub_idx_;
       }
       const std::size_t bpb = 1ull << sub.size;
@@ -395,7 +410,7 @@ private:
             static_cast<uint32_t>(((1ull << bpb) - 1) << byte_lane);
         w.strb = op.strb_per_beat[op_beat] & lane_mask;
         w.last = (op.w_pushed_in_cur_ == sub.len);
-        if (!slave_.push_w(w)) return;  // backpressure
+        if (!slave_.push_w(w)) return op.write_request_done();
         ++op.w_pushed_in_cur_;
       }
       // Current sub-burst's W beats fully pushed; advance to the next.
@@ -403,6 +418,27 @@ private:
       ++op.cur_w_sub_idx_;
       op.w_pushed_in_cur_ = 0;
     }
+    return op.write_request_done();
+  }
+
+  // Per-operation AR push: walk sub-bursts in order, pushing one AR per
+  // sub-burst. Returns true iff all sub-bursts' ARs have been pushed
+  // downstream. The outer FIFO loop breaks on the first false to preserve
+  // submission order for same-id reads (R responses route to per-id .front()).
+  bool push_reads_(uint8_t id, OperationContext& op) {
+    while (op.next_ar_sub_idx_ < op.sub_bursts.size()) {
+      const auto& sub = op.sub_bursts[op.next_ar_sub_idx_];
+      ArBeat ar{};
+      ar.id = id;
+      // Align AR addr DOWN to (1<<size) boundary, symmetric with AW.
+      ar.addr = sub.addr & ~((1ull << sub.size) - 1);
+      ar.len = sub.len; ar.size = sub.size; ar.burst = sub.burst;
+      // Phase C: wire-through scenario_txn.lock onto AR.lock (1-bit).
+      ar.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
+      if (!slave_.push_ar(ar)) return op.read_request_done();
+      ++op.next_ar_sub_idx_;
+    }
+    return op.read_request_done();
   }
 
   Scenario   sc_;
@@ -412,8 +448,16 @@ private:
   std::ofstream read_dump_;
   std::function<void(const WriteResult&)> wcb_;
   std::function<void(const ReadResult&)>  rcb_;
-  std::map<uint8_t, OperationContext> active_write_ops_;
-  std::map<uint8_t, OperationContext> active_read_ops_;
+  // Per-AXI-ID FIFO of outstanding ops (post AXI4 conformity fix — same-id
+  // concurrent allowed). AXI4 IHI 0022 §A5.3: responses for same id complete
+  // in submission order; per-id deque preserves submission order; B/R routing
+  // uses .front().
+  std::map<uint8_t, std::deque<OperationContext>> active_write_ops_;
+  std::map<uint8_t, std::deque<OperationContext>> active_read_ops_;
+
+  // Total active op counters (map.size() now counts active *ids*, not ops).
+  std::size_t active_write_count_ = 0;
+  std::size_t active_read_count_  = 0;
 };
 
 class AxiSlave;
