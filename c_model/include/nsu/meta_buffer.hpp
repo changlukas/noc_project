@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -22,14 +23,16 @@ struct MetaEntry {
 // Atomic-ID tagging is OUT OF SCOPE — a per-ID FIFO suffices for tested fixtures.
 class MetaBuffer {
 public:
-  explicit MetaBuffer(std::size_t per_id_depth) : per_id_depth_(per_id_depth) {}
+  explicit MetaBuffer(std::size_t per_id_depth) : per_id_depth_(per_id_depth) {
+    assert(per_id_depth > 0 && "MetaBuffer: per_id_depth must be positive");
+  }
 
   // -- Write side (AW snapshot + B consume) --
   void snapshot_write(uint8_t awid, MetaEntry e) {
     assert(write_[awid].size() < per_id_depth_ && "MetaBuffer: per-ID depth exceeded");
     write_[awid].push_back(e);
   }
-  std::optional<MetaEntry> peek_write(uint8_t bid) const {
+  std::optional<MetaEntry> peek_write(uint8_t bid) const noexcept {
     if (write_[bid].empty()) return std::nullopt;
     return write_[bid].front();
   }
@@ -44,7 +47,7 @@ public:
     assert(read_[arid].size() < per_id_depth_ && "MetaBuffer: per-ID depth exceeded");
     read_[arid].push_back(e);
   }
-  std::optional<MetaEntry> peek_read(uint8_t rid) const {
+  std::optional<MetaEntry> peek_read(uint8_t rid) const noexcept {
     if (read_[rid].empty()) return std::nullopt;
     return read_[rid].front();
   }
@@ -54,6 +57,7 @@ public:
   }
 
 private:
+  // ~40KB per MetaBuffer (256 empty deques x ~80B each); assumes sparse-id usage
   std::array<std::deque<MetaEntry>, 256> write_;  // per awid
   std::array<std::deque<MetaEntry>, 256> read_;   // per arid
   std::size_t per_id_depth_;
