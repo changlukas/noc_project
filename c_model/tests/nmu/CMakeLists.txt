@@ -11,3 +11,9 @@ add_custom_command(TARGET test_axi_slave_port POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/../../config
     $<TARGET_FILE_DIR:test_axi_slave_port>/config)
+
+add_cmodel_test(test_packetize)
+# Pick up the shared loopback fixtures from tests/common/ via
+# "common/loopback_*.hpp".
+target_include_directories(test_packetize PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
