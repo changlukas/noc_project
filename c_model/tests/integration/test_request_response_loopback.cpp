@@ -46,10 +46,12 @@
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
+#include "nmu/rob.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "nsu/packetize.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <deque>
 #include <gtest/gtest.h>
@@ -99,10 +101,13 @@ LoopbackResult run_fixture(const std::string& yaml_path,
                              params.depkt_r_q_depth);
 
   // Request-path packetizer (NMU side): Packetize self-computes dst via
-  // addr_trans::xy_route, so the AxiSlavePort talks to it directly through
-  // the Packetizer interface (no adapter needed). Task 8 will wrap this in
-  // a Rob instance to add ROB-stall coverage.
+  // addr_trans::xy_route. Wrapped in Rob (Disabled mode) so the e2e rig
+  // exercises ROB same-id stall path for the multi_dst_stress fixture.
+  // Rob implements both Packetizer (request gate) and Depacketizer (response
+  // observe) and forwards to real_nmu_pkt / nmu_depkt respectively.
   nmu::Packetize    real_nmu_pkt(loopback.req_out(), /*src_id=*/kNmuSrcId);
+  nmu::Rob          rob(real_nmu_pkt, nmu_depkt,
+                        nmu::RobMode::Disabled, nmu::RobMode::Disabled);
 
   // Per-AXI-ID metadata FIFO shared between nsu::Depacketize (snapshot on
   // AW/AR ingress) and nsu::Packetize (peek+commit on B/R egress).
@@ -116,16 +121,27 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   nsu::Packetize   nsu_pkt(loopback.rsp_out(), nsu_meta, /*src_id=*/kNsuSrcId);
 
   // Ports straddle the packetize / depacketize stacks. The NMU port hands
-  // requests to real_nmu_pkt directly and pops responses from nmu_depkt.
-  // The NSU port pops requests from nsu_depkt and pushes responses into
-  // nsu_pkt.
-  nmu::AxiSlavePort  nmu_port(real_nmu_pkt, nmu_depkt, params);
+  // requests to Rob (which forwards to real_nmu_pkt) and pops responses
+  // from Rob (which forwards to nmu_depkt). Rob serves as both Packetizer
+  // and Depacketizer via multi-inheritance. The NSU port pops requests
+  // from nsu_depkt and pushes responses into nsu_pkt.
+  nmu::AxiSlavePort  nmu_port(rob, rob, params);
   nsu::AxiMasterPort nsu_port(nsu_depkt,    nsu_pkt,   params);
+
+  // Per-fixture override for ROB stall coverage: multi_dst_stress needs
+  // max_outstanding_write >= 2 so AxiMaster admits both same-id writes
+  // concurrently, forcing Rob to stall the 2nd until the 1st B returns.
+  // ScenarioConfig defaults to 1 outstanding when the YAML omits the field,
+  // so keep the override rig-side rather than adding a YAML knob.
+  std::size_t mow = sc.config.max_outstanding_write;
+  std::size_t mor = sc.config.max_outstanding_read;
+  if (yaml_path.find("multi_dst_stress.yaml") != std::string::npos) {
+    mow = std::max<std::size_t>(mow, 2);
+  }
 
   // Stage 2 endpoints + oracle.
   axi::AxiMasterT<nmu::AxiSlavePort> master(yaml_path, nmu_port, read_dump_path,
-                                            sc.config.max_outstanding_write,
-                                            sc.config.max_outstanding_read);
+                                            mow, mor);
 
   axi::Scoreboard sb;
   master.on_write_completed([&](const axi::WriteResult& wr) {
@@ -257,7 +273,12 @@ INSTANTIATE_TEST_SUITE_P(
         // 2-cycle request delay + 3-cycle response delay exercises
         // multi-cycle in-flight ordering and surfaces one-cycle
         // registration bugs that the zero-latency path hides.
-        FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u}),
+        FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u},
+        // ROB stall path coverage: 2 same-id writes at different XYRouting
+        // dst boundaries (0x100 -> dst=0, 0x10100 -> dst=1). The rig
+        // overrides max_outstanding_write to 2 for this fixture so AxiMaster
+        // admits both AWs concurrently, forcing Rob to stall AW2 until B1.
+        FixtureParam{"multi_dst_stress.yaml",         0u, 0u}),
     [](const ::testing::TestParamInfo<FixtureParam>& info) {
       auto n = info.param.yaml;
       auto dot = n.rfind('.');

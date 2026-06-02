@@ -1,0 +1,29 @@
+# multi_dst_stress: exercises ROB Disabled stall path end-to-end.
+#
+# AxiMaster (post AXI4 conformity fix) admits both same-id writes concurrently.
+# ROB sees AW1 (id=5, addr=0x100 -> dst=0) pass, AW2 (id=5, addr=0x10100 -> dst=1)
+# stall until AW1's B response returns. After B1 arrives, ROB releases AW2,
+# 2nd write completes. Scoreboard verifies both writes' data integrity.
+#
+# Integration test rig overrides max_outstanding_write to 2 for this fixture
+# (no YAML schema change required).
+config:
+  memory_base: 0x0
+  memory_size: 0x12000
+  write_latency: 0
+  read_latency: 0
+transactions:
+  - op: write
+    addr: 0x100
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: fixtures/multi_dst_stress_data.txt
+  - op: write
+    addr: 0x10100
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: fixtures/multi_dst_stress_data.txt
