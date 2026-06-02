@@ -51,11 +51,13 @@ struct PortParams {
 
 // Load PortParams from c_model/config/port_params.yaml.
 //
-// The current YAML schema is a single flat set of 5 keys shared by both
-// sides (NMU AxiSlavePort and NSU AxiMasterPort use the same depths). The
-// `side` parameter is reserved for a future schema that splits per-side
-// blocks (e.g. `nmu:` / `nsu:` sub-maps); today it is unused. Callers should
-// still pass "nmu" or "nsu" so a future split is a header-only change.
+// The current YAML schema is a flat block of port-pair keys plus three
+// sub-maps (depacketize / loopback_noc / meta_buffer); all values are shared
+// by both sides (NMU AxiSlavePort and NSU AxiMasterPort load identical
+// PortParams). The `side` parameter is reserved for a future schema that
+// splits per-side blocks (e.g. `nmu:` / `nsu:` sub-maps); today it is
+// unused. Callers should still pass "nmu" or "nsu" so a future split is a
+// header-only change.
 inline PortParams load_port_params_yaml(const std::string& path,
                                         const std::string& /*side*/) {
   auto root = YAML::LoadFile(path);
