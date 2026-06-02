@@ -88,6 +88,24 @@ def emit(packet_json: Path, spec_version: str) -> str:
     out.append("}  // namespace payload")
     out.append("")
 
+    # --- payload field bit positions per channel ---
+    out.append("// --- payload field bit positions (from flit.payload_channels) ---")
+    for ch in spec["flit"]["payload_channels"]:
+        ch_lower = ch["name"].lower()
+        out.append(f"namespace payload::{ch_lower} {{")
+        for f in ch["fields"]:
+            pos = C.payload_field_position(spec, ch["name"], f["name"])
+            n = f["name"].upper()
+            out.append(f"constexpr int {n}_LSB     = {pos[0]};")
+            out.append(f"constexpr int {n}_MSB     = {pos[1]};")
+            out.append(f"constexpr int {n}_WIDTH   = {pos[1] - pos[0] + 1};")
+        # static_assert: last field's MSB + 1 == channel's payload_width
+        last_name = ch["fields"][-1]["name"].upper()
+        out.append(f"static_assert({last_name}_MSB + 1 == ni::payload::{ch['name']}_WIDTH, "
+                   f"\"payload[{ch['name']}] field positions inconsistent with channel width\");")
+        out.append(f"}}  // namespace payload::{ch_lower}")
+        out.append("")
+
     out.append("// --- all field widths (from flit.field_widths) ---")
     out.append("namespace width {")
     for name, val in spec["flit"].get("field_widths", {}).items():

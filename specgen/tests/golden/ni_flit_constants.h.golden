@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: 9befc208c425
 // Generator version: v1.0.0
-// Generated at: 2026-06-02T02:26:57Z
+// Generated at: 2026-06-02T02:34:46Z
 // ----------------------------------------------------------------------------
 #pragma once
 #include <cstddef>
@@ -91,6 +91,138 @@ constexpr int W_WIDTH = 352;
 constexpr int B_WIDTH = 64;
 constexpr int R_WIDTH = 352;
 }  // namespace payload
+
+// --- payload field bit positions (from flit.payload_channels) ---
+namespace payload::aw {
+constexpr int AWID_LSB     = 0;
+constexpr int AWID_MSB     = 7;
+constexpr int AWID_WIDTH   = 8;
+constexpr int AWADDR_LSB     = 8;
+constexpr int AWADDR_MSB     = 71;
+constexpr int AWADDR_WIDTH   = 64;
+constexpr int AWLEN_LSB     = 72;
+constexpr int AWLEN_MSB     = 79;
+constexpr int AWLEN_WIDTH   = 8;
+constexpr int AWSIZE_LSB     = 80;
+constexpr int AWSIZE_MSB     = 82;
+constexpr int AWSIZE_WIDTH   = 3;
+constexpr int AWBURST_LSB     = 83;
+constexpr int AWBURST_MSB     = 84;
+constexpr int AWBURST_WIDTH   = 2;
+constexpr int AWCACHE_LSB     = 85;
+constexpr int AWCACHE_MSB     = 88;
+constexpr int AWCACHE_WIDTH   = 4;
+constexpr int AWLOCK_LSB     = 89;
+constexpr int AWLOCK_MSB     = 89;
+constexpr int AWLOCK_WIDTH   = 1;
+constexpr int AWPROT_LSB     = 90;
+constexpr int AWPROT_MSB     = 92;
+constexpr int AWPROT_WIDTH   = 3;
+constexpr int AWREGION_LSB     = 93;
+constexpr int AWREGION_MSB     = 96;
+constexpr int AWREGION_WIDTH   = 4;
+constexpr int AWUSER_LSB     = 97;
+constexpr int AWUSER_MSB     = 104;
+constexpr int AWUSER_WIDTH   = 8;
+constexpr int AW_RSVD_LSB     = 105;
+constexpr int AW_RSVD_MSB     = 107;
+constexpr int AW_RSVD_WIDTH   = 3;
+static_assert(AW_RSVD_MSB + 1 == ni::payload::AW_WIDTH, "payload[AW] field positions inconsistent with channel width");
+}  // namespace payload::aw
+
+namespace payload::ar {
+constexpr int ARID_LSB     = 0;
+constexpr int ARID_MSB     = 7;
+constexpr int ARID_WIDTH   = 8;
+constexpr int ARADDR_LSB     = 8;
+constexpr int ARADDR_MSB     = 71;
+constexpr int ARADDR_WIDTH   = 64;
+constexpr int ARLEN_LSB     = 72;
+constexpr int ARLEN_MSB     = 79;
+constexpr int ARLEN_WIDTH   = 8;
+constexpr int ARSIZE_LSB     = 80;
+constexpr int ARSIZE_MSB     = 82;
+constexpr int ARSIZE_WIDTH   = 3;
+constexpr int ARBURST_LSB     = 83;
+constexpr int ARBURST_MSB     = 84;
+constexpr int ARBURST_WIDTH   = 2;
+constexpr int ARCACHE_LSB     = 85;
+constexpr int ARCACHE_MSB     = 88;
+constexpr int ARCACHE_WIDTH   = 4;
+constexpr int ARLOCK_LSB     = 89;
+constexpr int ARLOCK_MSB     = 89;
+constexpr int ARLOCK_WIDTH   = 1;
+constexpr int ARPROT_LSB     = 90;
+constexpr int ARPROT_MSB     = 92;
+constexpr int ARPROT_WIDTH   = 3;
+constexpr int ARREGION_LSB     = 93;
+constexpr int ARREGION_MSB     = 96;
+constexpr int ARREGION_WIDTH   = 4;
+constexpr int ARUSER_LSB     = 97;
+constexpr int ARUSER_MSB     = 104;
+constexpr int ARUSER_WIDTH   = 8;
+constexpr int AR_RSVD_LSB     = 105;
+constexpr int AR_RSVD_MSB     = 107;
+constexpr int AR_RSVD_WIDTH   = 3;
+static_assert(AR_RSVD_MSB + 1 == ni::payload::AR_WIDTH, "payload[AR] field positions inconsistent with channel width");
+}  // namespace payload::ar
+
+namespace payload::w {
+constexpr int WLAST_LSB     = 0;
+constexpr int WLAST_MSB     = 0;
+constexpr int WLAST_WIDTH   = 1;
+constexpr int WUSER_LSB     = 1;
+constexpr int WUSER_MSB     = 8;
+constexpr int WUSER_WIDTH   = 8;
+constexpr int WSTRB_LSB     = 9;
+constexpr int WSTRB_MSB     = 40;
+constexpr int WSTRB_WIDTH   = 32;
+constexpr int WDATA_LSB     = 41;
+constexpr int WDATA_MSB     = 296;
+constexpr int WDATA_WIDTH   = 256;
+constexpr int W_RSVD_LSB     = 297;
+constexpr int W_RSVD_MSB     = 351;
+constexpr int W_RSVD_WIDTH   = 55;
+static_assert(W_RSVD_MSB + 1 == ni::payload::W_WIDTH, "payload[W] field positions inconsistent with channel width");
+}  // namespace payload::w
+
+namespace payload::b {
+constexpr int BID_LSB     = 0;
+constexpr int BID_MSB     = 7;
+constexpr int BID_WIDTH   = 8;
+constexpr int BRESP_LSB     = 8;
+constexpr int BRESP_MSB     = 9;
+constexpr int BRESP_WIDTH   = 2;
+constexpr int BUSER_LSB     = 10;
+constexpr int BUSER_MSB     = 17;
+constexpr int BUSER_WIDTH   = 8;
+constexpr int B_RSVD_LSB     = 18;
+constexpr int B_RSVD_MSB     = 63;
+constexpr int B_RSVD_WIDTH   = 46;
+static_assert(B_RSVD_MSB + 1 == ni::payload::B_WIDTH, "payload[B] field positions inconsistent with channel width");
+}  // namespace payload::b
+
+namespace payload::r {
+constexpr int RLAST_LSB     = 0;
+constexpr int RLAST_MSB     = 0;
+constexpr int RLAST_WIDTH   = 1;
+constexpr int RID_LSB     = 1;
+constexpr int RID_MSB     = 8;
+constexpr int RID_WIDTH   = 8;
+constexpr int RRESP_LSB     = 9;
+constexpr int RRESP_MSB     = 10;
+constexpr int RRESP_WIDTH   = 2;
+constexpr int RUSER_LSB     = 11;
+constexpr int RUSER_MSB     = 18;
+constexpr int RUSER_WIDTH   = 8;
+constexpr int RDATA_LSB     = 19;
+constexpr int RDATA_MSB     = 274;
+constexpr int RDATA_WIDTH   = 256;
+constexpr int R_RSVD_LSB     = 275;
+constexpr int R_RSVD_MSB     = 351;
+constexpr int R_RSVD_WIDTH   = 77;
+static_assert(R_RSVD_MSB + 1 == ni::payload::R_WIDTH, "payload[R] field positions inconsistent with channel width");
+}  // namespace payload::r
 
 // --- all field widths (from flit.field_widths) ---
 namespace width {

@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: 9befc208c425
 // Generator version: v1.0.0
-// Generated at: 2026-06-02T02:27:24Z
+// Generated at: 2026-06-02T02:35:53Z
 // ----------------------------------------------------------------------------
 `ifndef NI_FLIT_PKG_SVH
 `define NI_FLIT_PKG_SVH
@@ -79,6 +79,119 @@ package ni_flit_pkg;
   localparam int unsigned W_WIDTH = 352;
   localparam int unsigned B_WIDTH = 64;
   localparam int unsigned R_WIDTH = 352;
+
+  // --- payload field bit positions (from flit.payload_channels) ---
+  localparam int unsigned AW_AWID_LSB     = 0;
+  localparam int unsigned AW_AWID_MSB     = 7;
+  localparam int unsigned AW_AWID_WIDTH   = 8;
+  localparam int unsigned AW_AWADDR_LSB     = 8;
+  localparam int unsigned AW_AWADDR_MSB     = 71;
+  localparam int unsigned AW_AWADDR_WIDTH   = 64;
+  localparam int unsigned AW_AWLEN_LSB     = 72;
+  localparam int unsigned AW_AWLEN_MSB     = 79;
+  localparam int unsigned AW_AWLEN_WIDTH   = 8;
+  localparam int unsigned AW_AWSIZE_LSB     = 80;
+  localparam int unsigned AW_AWSIZE_MSB     = 82;
+  localparam int unsigned AW_AWSIZE_WIDTH   = 3;
+  localparam int unsigned AW_AWBURST_LSB     = 83;
+  localparam int unsigned AW_AWBURST_MSB     = 84;
+  localparam int unsigned AW_AWBURST_WIDTH   = 2;
+  localparam int unsigned AW_AWCACHE_LSB     = 85;
+  localparam int unsigned AW_AWCACHE_MSB     = 88;
+  localparam int unsigned AW_AWCACHE_WIDTH   = 4;
+  localparam int unsigned AW_AWLOCK_LSB     = 89;
+  localparam int unsigned AW_AWLOCK_MSB     = 89;
+  localparam int unsigned AW_AWLOCK_WIDTH   = 1;
+  localparam int unsigned AW_AWPROT_LSB     = 90;
+  localparam int unsigned AW_AWPROT_MSB     = 92;
+  localparam int unsigned AW_AWPROT_WIDTH   = 3;
+  localparam int unsigned AW_AWREGION_LSB     = 93;
+  localparam int unsigned AW_AWREGION_MSB     = 96;
+  localparam int unsigned AW_AWREGION_WIDTH   = 4;
+  localparam int unsigned AW_AWUSER_LSB     = 97;
+  localparam int unsigned AW_AWUSER_MSB     = 104;
+  localparam int unsigned AW_AWUSER_WIDTH   = 8;
+  localparam int unsigned AW_AW_RSVD_LSB     = 105;
+  localparam int unsigned AW_AW_RSVD_MSB     = 107;
+  localparam int unsigned AW_AW_RSVD_WIDTH   = 3;
+  localparam int unsigned AR_ARID_LSB     = 0;
+  localparam int unsigned AR_ARID_MSB     = 7;
+  localparam int unsigned AR_ARID_WIDTH   = 8;
+  localparam int unsigned AR_ARADDR_LSB     = 8;
+  localparam int unsigned AR_ARADDR_MSB     = 71;
+  localparam int unsigned AR_ARADDR_WIDTH   = 64;
+  localparam int unsigned AR_ARLEN_LSB     = 72;
+  localparam int unsigned AR_ARLEN_MSB     = 79;
+  localparam int unsigned AR_ARLEN_WIDTH   = 8;
+  localparam int unsigned AR_ARSIZE_LSB     = 80;
+  localparam int unsigned AR_ARSIZE_MSB     = 82;
+  localparam int unsigned AR_ARSIZE_WIDTH   = 3;
+  localparam int unsigned AR_ARBURST_LSB     = 83;
+  localparam int unsigned AR_ARBURST_MSB     = 84;
+  localparam int unsigned AR_ARBURST_WIDTH   = 2;
+  localparam int unsigned AR_ARCACHE_LSB     = 85;
+  localparam int unsigned AR_ARCACHE_MSB     = 88;
+  localparam int unsigned AR_ARCACHE_WIDTH   = 4;
+  localparam int unsigned AR_ARLOCK_LSB     = 89;
+  localparam int unsigned AR_ARLOCK_MSB     = 89;
+  localparam int unsigned AR_ARLOCK_WIDTH   = 1;
+  localparam int unsigned AR_ARPROT_LSB     = 90;
+  localparam int unsigned AR_ARPROT_MSB     = 92;
+  localparam int unsigned AR_ARPROT_WIDTH   = 3;
+  localparam int unsigned AR_ARREGION_LSB     = 93;
+  localparam int unsigned AR_ARREGION_MSB     = 96;
+  localparam int unsigned AR_ARREGION_WIDTH   = 4;
+  localparam int unsigned AR_ARUSER_LSB     = 97;
+  localparam int unsigned AR_ARUSER_MSB     = 104;
+  localparam int unsigned AR_ARUSER_WIDTH   = 8;
+  localparam int unsigned AR_AR_RSVD_LSB     = 105;
+  localparam int unsigned AR_AR_RSVD_MSB     = 107;
+  localparam int unsigned AR_AR_RSVD_WIDTH   = 3;
+  localparam int unsigned W_WLAST_LSB     = 0;
+  localparam int unsigned W_WLAST_MSB     = 0;
+  localparam int unsigned W_WLAST_WIDTH   = 1;
+  localparam int unsigned W_WUSER_LSB     = 1;
+  localparam int unsigned W_WUSER_MSB     = 8;
+  localparam int unsigned W_WUSER_WIDTH   = 8;
+  localparam int unsigned W_WSTRB_LSB     = 9;
+  localparam int unsigned W_WSTRB_MSB     = 40;
+  localparam int unsigned W_WSTRB_WIDTH   = 32;
+  localparam int unsigned W_WDATA_LSB     = 41;
+  localparam int unsigned W_WDATA_MSB     = 296;
+  localparam int unsigned W_WDATA_WIDTH   = 256;
+  localparam int unsigned W_W_RSVD_LSB     = 297;
+  localparam int unsigned W_W_RSVD_MSB     = 351;
+  localparam int unsigned W_W_RSVD_WIDTH   = 55;
+  localparam int unsigned B_BID_LSB     = 0;
+  localparam int unsigned B_BID_MSB     = 7;
+  localparam int unsigned B_BID_WIDTH   = 8;
+  localparam int unsigned B_BRESP_LSB     = 8;
+  localparam int unsigned B_BRESP_MSB     = 9;
+  localparam int unsigned B_BRESP_WIDTH   = 2;
+  localparam int unsigned B_BUSER_LSB     = 10;
+  localparam int unsigned B_BUSER_MSB     = 17;
+  localparam int unsigned B_BUSER_WIDTH   = 8;
+  localparam int unsigned B_B_RSVD_LSB     = 18;
+  localparam int unsigned B_B_RSVD_MSB     = 63;
+  localparam int unsigned B_B_RSVD_WIDTH   = 46;
+  localparam int unsigned R_RLAST_LSB     = 0;
+  localparam int unsigned R_RLAST_MSB     = 0;
+  localparam int unsigned R_RLAST_WIDTH   = 1;
+  localparam int unsigned R_RID_LSB     = 1;
+  localparam int unsigned R_RID_MSB     = 8;
+  localparam int unsigned R_RID_WIDTH   = 8;
+  localparam int unsigned R_RRESP_LSB     = 9;
+  localparam int unsigned R_RRESP_MSB     = 10;
+  localparam int unsigned R_RRESP_WIDTH   = 2;
+  localparam int unsigned R_RUSER_LSB     = 11;
+  localparam int unsigned R_RUSER_MSB     = 18;
+  localparam int unsigned R_RUSER_WIDTH   = 8;
+  localparam int unsigned R_RDATA_LSB     = 19;
+  localparam int unsigned R_RDATA_MSB     = 274;
+  localparam int unsigned R_RDATA_WIDTH   = 256;
+  localparam int unsigned R_R_RSVD_LSB     = 275;
+  localparam int unsigned R_R_RSVD_MSB     = 351;
+  localparam int unsigned R_R_RSVD_WIDTH   = 77;
 
   // --- all field widths (from flit.field_widths) ---
   localparam int unsigned X_WIDTH                = 4;

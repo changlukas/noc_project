@@ -46,6 +46,22 @@ def test_field_widths_declaration_order_preserved_in_header():
     )
 
 
+def _header_namespace_section(text: str) -> str:
+    """Slice the `namespace header { ... }  // namespace header` block.
+
+    Per-payload-field _LSB constants live in `namespace payload::<ch> { ... }`
+    blocks emitted further down; scoping to the header namespace is required
+    so this invariant only inspects header fields.
+    """
+    m = re.search(
+        r"namespace\s+header\s*\{(.*?)\}\s*//\s*namespace header",
+        text,
+        flags=re.DOTALL,
+    )
+    assert m, "header namespace block missing from generated header"
+    return m.group(1)
+
+
 def test_header_fields_declaration_order_preserved():
     """Header fields (DST_ID_LSB, SRC_ID_LSB, ...) must appear in declaration order.
 
@@ -57,7 +73,8 @@ def test_header_fields_declaration_order_preserved():
     from ni_spec import constants as C
     spec = json.loads(JSON_PATH.read_text(encoding="utf-8"))
     text = HEADER_PATH.read_text(encoding="utf-8")
-    lsb_order = re.findall(r"constexpr\s+int\s+(\w+)_LSB\s*=", text)
+    section = _header_namespace_section(text)
+    lsb_order = re.findall(r"constexpr\s+int\s+(\w+)_LSB\s*=", section)
     expected = []
     for f in spec["flit"]["header_fields"]:
         if C.header_field_width(spec, f["name"]) != 0:

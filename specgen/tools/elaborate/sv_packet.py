@@ -70,6 +70,16 @@ def emit(packet_json: Path, spec_version: str) -> str:
         emit_param(f"  localparam int unsigned {ch['name']}_WIDTH = {C.payload_channel_width(spec, ch['name'])};", f"{ch['name']}_WIDTH")
     out.append("")
 
+    out.append("  // --- payload field bit positions (from flit.payload_channels) ---")
+    for ch in spec["flit"]["payload_channels"]:
+        for f in ch["fields"]:
+            pos = C.payload_field_position(spec, ch["name"], f["name"])
+            n = f["name"].upper()
+            emit_param(f"  localparam int unsigned {ch['name']}_{n}_LSB     = {pos[0]};", f"{ch['name']}_{n}_LSB")
+            emit_param(f"  localparam int unsigned {ch['name']}_{n}_MSB     = {pos[1]};", f"{ch['name']}_{n}_MSB")
+            emit_param(f"  localparam int unsigned {ch['name']}_{n}_WIDTH   = {pos[1] - pos[0] + 1};", f"{ch['name']}_{n}_WIDTH")
+    out.append("")
+
     out.append("  // --- all field widths (from flit.field_widths) ---")
     for name, val in spec["flit"].get("field_widths", {}).items():
         emit_param(f"  localparam int unsigned {name:<22} = {val};", name)
