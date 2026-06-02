@@ -1,0 +1,62 @@
+#pragma once
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <deque>
+#include <optional>
+
+namespace ni::cmodel::nsu {
+
+struct MetaEntry {
+  uint8_t src_id;
+  uint8_t rob_req;
+  uint8_t rob_idx;
+};
+
+// Per-AXI-ID FIFO of {src_id, rob_req, rob_idx} snapshots captured at AW/AR
+// flit ingress. Looked up at B/R flit egress via peek+commit pattern.
+//
+// AXI4 ordering: per-ID transactions complete in issue order. Each FIFO front
+// is the oldest outstanding for that ID. Different IDs are independent.
+//
+// Atomic-ID tagging is OUT OF SCOPE — a per-ID FIFO suffices for tested fixtures.
+class MetaBuffer {
+public:
+  explicit MetaBuffer(std::size_t per_id_depth) : per_id_depth_(per_id_depth) {}
+
+  // -- Write side (AW snapshot + B consume) --
+  void snapshot_write(uint8_t awid, MetaEntry e) {
+    assert(write_[awid].size() < per_id_depth_ && "MetaBuffer: per-ID depth exceeded");
+    write_[awid].push_back(e);
+  }
+  std::optional<MetaEntry> peek_write(uint8_t bid) const {
+    if (write_[bid].empty()) return std::nullopt;
+    return write_[bid].front();
+  }
+  void commit_write(uint8_t bid) {
+    assert(!write_[bid].empty() && "commit_write on empty queue");
+    write_[bid].pop_front();
+  }
+
+  // -- Read side (AR snapshot + R consume) --
+  // Multi-beat R burst: peek every beat, commit only on rlast.
+  void snapshot_read(uint8_t arid, MetaEntry e) {
+    assert(read_[arid].size() < per_id_depth_ && "MetaBuffer: per-ID depth exceeded");
+    read_[arid].push_back(e);
+  }
+  std::optional<MetaEntry> peek_read(uint8_t rid) const {
+    if (read_[rid].empty()) return std::nullopt;
+    return read_[rid].front();
+  }
+  void commit_read(uint8_t rid) {
+    assert(!read_[rid].empty() && "commit_read on empty queue");
+    read_[rid].pop_front();
+  }
+
+private:
+  std::array<std::deque<MetaEntry>, 256> write_;  // per awid
+  std::array<std::deque<MetaEntry>, 256> read_;   // per arid
+  std::size_t per_id_depth_;
+};
+
+}  // namespace ni::cmodel::nsu

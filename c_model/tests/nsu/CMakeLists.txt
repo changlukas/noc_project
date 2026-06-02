@@ -8,3 +8,5 @@ add_custom_command(TARGET test_axi_master_port POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/../../config
     $<TARGET_FILE_DIR:test_axi_master_port>/config)
+
+add_cmodel_test(test_meta_buffer)
