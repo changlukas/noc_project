@@ -119,10 +119,14 @@ public:
     while (auto b = slave_.pop_b()) {
       AXI_PROTOCOL_ASSERT(rules::check_resp_encoding(b->resp),
                           "RESP_ENCODING: B response must be a legal AXI4 response");
+      // AXI4 IHI 0022 §A5.3: response routes to oldest outstanding for that id.
       AXI_PROTOCOL_ASSERT(
           rules::check_b_front_can_accept_response(b->id, active_write_ops_),
           "B_FRONT_CAN_ACCEPT: id deque empty or front op already fully responded");
-      auto& deq = active_write_ops_[b->id];
+      // .at() (not operator[]) so a malformed bid throws in release builds —
+      // NDEBUG strips the AXI_PROTOCOL_ASSERT above, and operator[] would
+      // silently insert an empty deque → deque.front() UB.
+      auto& deq = active_write_ops_.at(b->id);
       auto& op  = deq.front();
       ++op.b_count_;
       if (static_cast<uint8_t>(b->resp) > static_cast<uint8_t>(op.worst_resp_))
@@ -157,7 +161,8 @@ public:
       AXI_PROTOCOL_ASSERT(
           rules::check_r_front_can_accept_beat(r->id, r->last, active_read_ops_),
           "R_FRONT_CAN_ACCEPT: bad beat timing or rlast mismatch with sub-burst length");
-      auto& deq = active_read_ops_[r->id];
+      // .at() (not operator[]) — see B-drain rationale above.
+      auto& deq = active_read_ops_.at(r->id);
       auto& op  = deq.front();
       const auto& sub = op.sub_bursts[op.cur_r_sub_idx_];
       const std::size_t bpb = 1ull << sub.size;
@@ -221,7 +226,8 @@ public:
     // One OperationContext per scenario_txn. AXI4 IHI 0022 §A5.3 permits
     // multiple in-flight ops with the same AXI ID; per-id deque preserves
     // submission order so B/R routing can take .front() (oldest outstanding).
-    // active_*_count_ tracks total ops across all ids for max_outstanding.
+    // active_*_count_ tracks TOTAL ops across all ids (not per-id) — gated
+    // against max_outstanding_{write,read} below.
     while (next_txn_idx_ < sc_.transactions.size()) {
       const auto& txn = sc_.transactions[next_txn_idx_];
       if (txn.op == ScenarioTransaction::Op::Write) {
@@ -276,6 +282,11 @@ public:
     return next_txn_idx_ >= sc_.transactions.size()
         && active_write_count_ == 0 && active_read_count_ == 0;
   }
+
+  // Diagnostic accessors for tests: visibility into in-flight op counters so
+  // a regression test can assert N ops are concurrently admitted mid-run.
+  std::size_t active_write_count() const { return active_write_count_; }
+  std::size_t active_read_count()  const { return active_read_count_;  }
 
   void on_write_completed(std::function<void(const WriteResult&)> cb) { wcb_ = std::move(cb); }
   void on_read_observed  (std::function<void(const ReadResult&)>  cb) { rcb_ = std::move(cb); }
@@ -452,6 +463,8 @@ private:
   // concurrent allowed). AXI4 IHI 0022 §A5.3: responses for same id complete
   // in submission order; per-id deque preserves submission order; B/R routing
   // uses .front().
+  // NOTE: std::map is used as a stable per-id container; its ordered iteration
+  // is NOT relied upon for correctness (AXI4 has no cross-id ordering).
   std::map<uint8_t, std::deque<OperationContext>> active_write_ops_;
   std::map<uint8_t, std::deque<OperationContext>> active_read_ops_;
 

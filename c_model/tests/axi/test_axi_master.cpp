@@ -1,5 +1,7 @@
 // Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/scenario_parser.hpp"
+#include "axi/axi_slave.hpp"
+#include "axi/memory.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
 #include <sstream>
@@ -996,18 +998,75 @@ transactions:
   EXPECT_EQ(mock.captured_aw[0].lock, 0u);
 }
 
-#include "axi/axi_slave.hpp"
-#include "axi/memory.hpp"
+// Phase A (Task 1): two same-id writes must be admitted into the AxiMaster
+// pipeline CONCURRENTLY (per AXI4 IHI 0022 §A5.3 — same-id multiple outstanding
+// is legal).
+//
+// Pre-fix AxiMaster gated same-id admission with an early `break` on the
+// admission loop, so only one same-id write was in flight at a time and the
+// second was held in the scenario queue until the first's B drained. Both
+// writes still eventually completed, so a simple done()-within-budget check
+// would NOT detect the regression. This test directly observes the in-flight
+// counter mid-run to gate the regression.
+TEST_F(AxiMasterTest, SameIdConcurrentAdmissionVisibleInPipeline) {
+  auto wpath = write_hex_tmp_data(
+      "same_id_concurrent_obs",
+      "AB CD EF 12 34 56 78 9A BC DE F0 11 22 33 44 55 "
+      "66 77 88 99 AA BB CC DD EE FF 00 11 22 33 44 55");
+  auto yaml = write_tmp(std::string(R"YAML(
+config:
+  memory_base: 0x0
+  memory_size: 0x20000
+  max_outstanding_write: 2
+transactions:
+  - op: write
+    addr: 0x100
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: )YAML") + wpath + R"YAML(
+  - op: write
+    addr: 0x10100
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: )YAML" + wpath + "\n");
 
-// Phase A (Task 1): two same-id writes must be admitted concurrently.
-// Pre-fix AxiMaster gated same-id admission (1 op at a time per id) — an AXI4
-// IHI 0022 §A5.3 violation. Post-fix the master uses a per-id deque; both
-// writes are admitted, both AWs issue, B responses route to the deque front
-// in submission order. End-to-end check via Memory + AxiSlave: both writes
-// commit, master.done() flips true within a bounded cycle budget.
-TEST_F(AxiMasterTest, SameIdConcurrentAdmissionWithFifoOrderedB) {
-  // 32 bytes per write (1 beat × size=5). Same data for both writes; the
-  // content is not under test, only that both ops complete in flight together.
+  axi::Memory   memory(0, 0x20000, 0, 0);
+  axi::AxiSlave slave(memory);
+  slave.set_memory_bounds(0, 0x20000);
+  axi::AxiMasterT<axi::AxiSlave> master(
+      yaml, slave, std::string(::testing::TempDir()) + "/r_same_id_concurrent_obs.txt",
+      /*max_out_w=*/2, /*max_out_r=*/2);
+
+  // One tick is enough for the admission loop to pull BOTH scenario_txns into
+  // active_write_ops_ (admission has no per-cycle throttling beyond
+  // max_outstanding). Pre-fix code would `break` on same-id after admitting
+  // op #1, leaving op #2 stuck in the scenario queue → count == 1.
+  master.tick();
+  ASSERT_EQ(master.active_write_count(), 2u)
+      << "both same-id writes must be admitted concurrently after tick #1; "
+         "pre-fix code would serialize them (count == 1)";
+
+  // Drive to completion to confirm the rest of the pipeline still works
+  // end-to-end with the new admission policy.
+  constexpr int kMaxCycles = 500;
+  int cycles = 0;
+  for (; cycles < kMaxCycles && !master.done(); ++cycles) {
+    master.tick();
+    slave.tick();
+    memory.tick();
+  }
+  EXPECT_TRUE(master.done()) << "master did not complete after " << cycles
+                              << " cycles";
+}
+
+// Scenario smoke coverage: same-id multi-write scenario completes end-to-end
+// against Memory + AxiSlave (B responses route to the per-id deque front in
+// submission order). Companion to the concurrency-observing test above.
+TEST_F(AxiMasterTest, SameIdMultiWriteScenarioCompletes) {
   auto wpath = write_hex_tmp_data(
       "same_id_concurrent",
       "AB CD EF 12 34 56 78 9A BC DE F0 11 22 33 44 55 "
@@ -1040,7 +1099,6 @@ transactions:
       yaml, slave, std::string(::testing::TempDir()) + "/r_same_id_concurrent.txt",
       /*max_out_w=*/2, /*max_out_r=*/2);
 
-  // Bounded cycle budget; both writes should complete well within this window.
   constexpr int kMaxCycles = 500;
   int cycles = 0;
   for (; cycles < kMaxCycles && !master.done(); ++cycles) {
@@ -1049,6 +1107,5 @@ transactions:
     memory.tick();
   }
   EXPECT_TRUE(master.done()) << "master did not complete after " << cycles
-                              << " cycles — same-id concurrent admission likely "
-                                 "still blocked";
+                              << " cycles";
 }
