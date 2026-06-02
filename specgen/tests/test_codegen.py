@@ -262,3 +262,29 @@ def test_pins_bundle_compiles_with_gxx(tmp_path):
     # Also actually run the binary so reset_outputs() actually executes.
     run_result = subprocess.run([str(exe)], capture_output=True, text=True)
     assert run_result.returncode == 0, run_result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Per-payload-field LSB/MSB constants (Task 3)
+# ---------------------------------------------------------------------------
+
+def test_packet_cpp_emits_payload_field_positions():
+    """ni_flit_constants.h must contain per-channel payload field LSB/MSB constants."""
+    text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
+    # Per-channel namespace presence
+    for ch_lower in ("aw", "ar", "w", "b", "r"):
+        assert f"namespace payload::{ch_lower}" in text, (
+            f"missing namespace payload::{ch_lower} block"
+        )
+    # Representative constant from each channel
+    assert "constexpr int AWID_LSB" in text
+    assert "constexpr int WDATA_LSB" in text
+    assert "constexpr int BID_LSB" in text
+    assert "constexpr int RDATA_LSB" in text
+
+
+def test_packet_cpp_has_payload_static_assert():
+    """Each payload channel must have a static_assert that field positions sum to channel width."""
+    text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
+    for ch in ("AW", "AR", "W", "B", "R"):
+        assert f"ni::payload::{ch}_WIDTH" in text, f"missing static_assert for {ch}"

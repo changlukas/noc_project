@@ -118,6 +118,28 @@ def test_payload_field_position(packet_spec):
     assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 7)
 
 
+# -- payload field positions (added with codegen extension) -----------
+def test_payload_field_position_aw(packet_spec):
+    assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 7)
+    assert C.payload_field_position(packet_spec, "AW", "awaddr") == (8, 71)
+
+
+def test_payload_field_position_w_with_reorder(packet_spec):
+    # wstrb comes before wdata per ni_packet.json layout
+    assert C.payload_field_position(packet_spec, "W", "wlast") == (0, 0)
+    assert C.payload_field_position(packet_spec, "W", "wuser") == (1, 8)
+    assert C.payload_field_position(packet_spec, "W", "wstrb") == (9, 40)
+    assert C.payload_field_position(packet_spec, "W", "wdata") == (41, 296)
+
+
+def test_payload_field_position_b_after_rsvd_mc_status_removed(packet_spec):
+    assert C.payload_field_position(packet_spec, "B", "bid")   == (0, 7)
+    assert C.payload_field_position(packet_spec, "B", "bresp") == (8, 9)
+    assert C.payload_field_position(packet_spec, "B", "buser") == (10, 17)
+    # b_rsvd absorbs the removed rsvd_mc_status (46-bit derived)
+    assert C.payload_field_position(packet_spec, "B", "b_rsvd") == (18, 63)
+
+
 # -- derived totals -------------------------------------------------
 # PP-6: flit.derived no longer exists in JSON. These tests now assert
 # self-consistency between the resolved helpers and the symbolic source

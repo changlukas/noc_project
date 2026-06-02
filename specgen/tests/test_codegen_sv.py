@@ -117,6 +117,16 @@ class TestSvPacketEmit:
                 f"Expected {field}_ENABLED = 1'b1; not found in ni_flit_pkg.sv"
             )
 
+    def test_payload_field_positions_emitted(self):
+        """ni_flit_pkg.sv must contain per-channel-prefixed payload field constants."""
+        text = _sv_text("ni_flit_pkg.sv")
+        # Representative constants from each channel
+        for sig in ("AW_AWID_LSB", "AR_ARID_LSB", "W_WDATA_LSB",
+                    "B_BID_LSB", "R_RDATA_LSB"):
+            assert f"localparam int unsigned {sig}" in text, (
+                f"missing {sig} in ni_flit_pkg.sv"
+            )
+
 
 class TestSvSignalsEmit:
     def setup_method(self):
