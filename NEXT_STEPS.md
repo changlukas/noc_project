@@ -1,10 +1,19 @@
 ## Current status (2026-06-02)
 
-Stage 3 packetize + depacketize 完工：nmu/{packetize, depacketize}, nsu/{packetize, depacketize, meta_buffer}, c_model/include/{ni/flit, noc/noc_req_*, noc/noc_rsp_*} 全綠。具備 request+response e2e Scoreboard 通過 5 個 Stage 2 fixture + 1 delayed-loopback variant。260/260 ctest (sequential)。
+Stage 3 addr_trans + ROB Disabled + AXI4 conformity 完工：
+- Stage 2 AxiMaster 修 AXI4 IHI 0022 §A5.3 違規（同 id concurrent 解禁，per-id FIFO + total counter, B/R 走 FIFO front）
+- nmu/addr_trans.hpp pure helper (XYRouting)
+- nmu/rob.hpp Packetizer + Depacketizer multi-inherit (per-id deque, W burst credit, Disabled mode complete, Enabled mode 全 stub)
+- nmu/packetize.hpp 拿掉 sticky setter, +push_*_with_meta (Rob 與未來 Enabled mode 用)
+- TestPacketize 完全退場（Rob 在 pipeline 取代）
+- Integration test 7 fixtures (6 既有 + 1 新 multi_dst_stress 驗 ROB stall e2e)
+- ~285+ ctest sequential, drift gates clean
 
-**Next task per plan §3.1**: NMU/NSU `vc_arb` (MUX 3→1 + per-VC credit + round-robin arbitration). 後續 `addr_trans`、`rob` 各自獨立 task。`route_par` / `flit_ecc` 兩個算法 helper 任何時間都可獨立做。
+**Next task per plan §3.1**: ROB Enabled mode — per-AXI-ID reorder buffer (Read 用 burst-aware reorder buffer, Write 用 FIFO metadata buffer)。
+參考 FlooNoC `floo_rob.sv` (full SRAM RoB) + `floo_simple_rob.sv` (write metadata) + `tb_floo_rob.sv` (variable-latency slave test pattern)。
+配套 LoopbackNoc per-dst latency 擴展（自然產生 out-of-order response）。
 
-**主 plan**: `docs/noc_cmodel_rtl_plan.md`（Stage 2/3/4/5 roadmap，本文件接續 §3 與 §8）。
+後續 `vc_arb` / `vc_mapping` / `route_par` / `flit_ecc` / `nmu.hpp` top-level assembly 各自獨立 round。
 
 ---
 
