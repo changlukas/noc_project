@@ -938,7 +938,7 @@ nmu::Packetize     real_nmu_pkt(loopback.req_out(), /*src=*/0x01);
 nmu::AxiSlavePort  nmu_port(real_nmu_pkt, nmu_depkt, params);
 ```
 
-The existing 6 integration fixtures all use single-dst awaddrs (≤ 0xFFFF → all dst=0 via XYRouting), so Packetize's auto-computed dst behaves identically to TestPacketize's hardcoded `fixed_dst=0x02`. Scoreboard still zero mismatch.
+The existing 6 integration fixtures all use single-dst awaddrs (≤ 0xFFFF → addr[23:16] = 0 → all dst=0 via XYRouting). LoopbackNoc routes req_out → rsp_in straight-through regardless of dst value (TestPacketize's prior hardcoded `fixed_dst=0x02` was also ignored by LoopbackNoc), so the Scoreboard sees identical data integrity end-to-end. Different header byte, identical observable behavior.
 
 Task 8 will replace `real_nmu_pkt` with `Rob` wrapping `real_nmu_pkt` once Rob class exists (Task 7).
 
@@ -1366,7 +1366,7 @@ Expected: 10 PASS (9 behavior + 1 death).
 ```bash
 ctest --test-dir build -j 1
 ```
-Expected: most PASS. Integration test may still be broken from Task 6 (TestPacketize calls deleted API). Task 8 fixes.
+Expected: all PASS. Integration was already updated in Task 6 (TestPacketize deleted, rig routes through `real_nmu_pkt` directly), so the only change here is +10 Rob unit tests; integration coverage is unchanged until Task 8 adds the Rob wrap + `multi_dst_stress` fixture.
 
 - [ ] **Step 7: Commit Task 7**
 
@@ -1706,9 +1706,9 @@ After writing the plan, verified:
   - `RobMode` enum (Disabled / Enabled) defined in Task 7; used by integration in Task 8
 - **Commit atomicity (no broken intermediate state)**:
   - Tasks 1-3 are atomic (AxiMaster compiles only after all three). Task 1 step 6 + Task 2 step 5 explicitly say "don't commit yet"; Task 3 step 10 commits all atomically.
-  - Task 6 deletes `TestPacketize`, refactors Packetize, and updates the integration test rig + fixture YAML + `INSTANTIATE_TEST_SUITE_P` entries together in a single commit so the drift gate stays green.
-  - Task 7's Rob unit tests work standalone (no AxiSlavePort needed — uses LoopbackNoc + Packetize + Depacketize directly), so Task 7 commits cleanly before Task 8 integration.
-  - Task 8 adds the Rob wrap + `multi_dst_stress` fixture entry; integration was already green after Task 6, so Task 8 only adds new coverage.
+  - Task 6 deletes `TestPacketize`, refactors Packetize, AND updates the integration test rig (bypasses TestPacketize → routes through `real_nmu_pkt` directly) in a single commit so the drift gate stays green. Task 6 does NOT add fixture YAML or extend `INSTANTIATE_TEST_SUITE_P` — those belong to Task 8.
+  - Task 7's Rob unit tests work standalone (no AxiSlavePort needed — uses LoopbackNoc + Packetize + Depacketize directly), so Task 7 commits cleanly before Task 8 integration. Full ctest at end of Task 7 should still be green (Task 6 already updated the rig).
+  - Task 8 adds the Rob wrap into the integration rig + `multi_dst_stress.yaml` fixture + extends `INSTANTIATE_TEST_SUITE_P` from 6 → 7 entries. Integration was green entering Task 8, so Task 8 only adds new coverage.
 
 ---
 
