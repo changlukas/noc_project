@@ -13,3 +13,7 @@ add_cmodel_test(test_test_logger)
 target_include_directories(test_test_logger PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(test_test_logger PRIVATE yaml-cpp::yaml-cpp)
+
+add_cmodel_test(test_loopback_noc_per_vc_credit)
+target_include_directories(test_loopback_noc_per_vc_credit PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)

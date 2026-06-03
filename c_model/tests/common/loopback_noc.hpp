@@ -26,6 +26,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <limits>
 #include <optional>
 #include <random>
 #include <utility>
@@ -108,6 +109,19 @@ public:
     }
     void set_random_seed(uint64_t seed) noexcept { rng_.seed(seed); }
 
+    // Per-VC credit depth configuration and introspection.
+    void set_per_vc_depth(std::size_t depth) noexcept {
+        assert(depth > 0);
+        per_vc_depth_ = depth;
+    }
+    std::size_t per_vc_depth() const noexcept { return per_vc_depth_; }
+    std::size_t nmu_req_per_vc_in_flight(uint8_t vc_id) const noexcept {
+        return nmu_req_per_vc_in_flight_[vc_id];
+    }
+    std::size_t nsu_rsp_per_vc_in_flight(uint8_t vc_id) const noexcept {
+        return nsu_rsp_per_vc_in_flight_[vc_id];
+    }
+
     // Legacy global delay (preserved for single-NSU fixtures only;
     // multi-NSU mode uses set_nsu_latency instead -- these assert if mixed).
     void set_req_delay(unsigned cycles) noexcept {
@@ -169,7 +183,13 @@ public:
     std::size_t rsp_pipe_size() const noexcept { return rsp_pipe_.size(); }
 
 private:
-    static constexpr std::size_t DST_ID_SPACE = 1u << ni::header::DST_ID_WIDTH;
+    static constexpr std::size_t DST_ID_SPACE   = 1u << ni::header::DST_ID_WIDTH;
+    static constexpr std::size_t NUM_VC_MAX        = 1u << ni::header::VC_ID_WIDTH;  // 8
+    // Default per-VC depth is effectively unlimited so that existing fixtures
+    // that push more than any small sentinel to one VC are unaffected.
+    // Tests that want to exercise credit exhaustion call set_per_vc_depth().
+    static constexpr std::size_t kDefaultPerVcDepth =
+        std::numeric_limits<std::size_t>::max();
 
     struct NsuLatencyConfig {
         bool        is_random = false;
@@ -184,9 +204,11 @@ private:
         LoopbackNoc* p;
         explicit NmuReqOutAdapter(LoopbackNoc* parent) : p(parent) {}
         bool push_flit(const Flit& f) override {
+            uint8_t vc  = static_cast<uint8_t>(f.get_header_field("vc_id"));
             uint8_t dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
-            int8_t nsu = p->dst_to_nsu_[dst];
+            int8_t  nsu = p->dst_to_nsu_[dst];
             assert(nsu >= 0 && "LoopbackNoc: unmapped dst_id");
+            if (p->nmu_req_per_vc_in_flight_[vc] >= p->per_vc_depth_) return false;
             // Legacy global req delay path (single-NSU mode only; req_delay_
             // is gated by set_req_delay's num_nsu_==1 assert).
             if (p->req_delay_ > 0) {
@@ -195,13 +217,18 @@ private:
                     return false;
                 }
                 p->req_pipe_.emplace_back(f, p->req_delay_);
+                ++p->nmu_req_per_vc_in_flight_[vc];
                 return true;
             }
             if (p->nsu_req_q_[nsu].size() >= p->req_q_depth_per_nsu_) {
                 return false;
             }
             p->nsu_req_q_[nsu].push_back(f);
+            ++p->nmu_req_per_vc_in_flight_[vc];
             return true;
+        }
+        bool credit_avail(uint8_t vc_id) const override {
+            return p->nmu_req_per_vc_in_flight_[vc_id] < p->per_vc_depth_;
         }
     };
     struct NsuReqInAdapter : noc::NocReqIn {
@@ -215,11 +242,17 @@ private:
             if (i == 0 && !p->req_q_.empty()) {
                 Flit f = p->req_q_.front();
                 p->req_q_.pop_front();
+                uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+                assert(p->nmu_req_per_vc_in_flight_[vc] > 0);
+                --p->nmu_req_per_vc_in_flight_[vc];
                 return f;
             }
             if (p->nsu_req_q_[i].empty()) return std::nullopt;
             Flit f = p->nsu_req_q_[i].front();
             p->nsu_req_q_[i].pop_front();
+            uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+            assert(p->nmu_req_per_vc_in_flight_[vc] > 0);
+            --p->nmu_req_per_vc_in_flight_[vc];
             return f;
         }
     };
@@ -229,6 +262,8 @@ private:
         NsuRspOutAdapter(LoopbackNoc* parent, std::size_t idx)
             : p(parent), i(idx) {}
         bool push_flit(const Flit& f) override {
+            uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+            if (p->nsu_rsp_per_vc_in_flight_[vc] >= p->per_vc_depth_) return false;
             const auto& cfg = p->nsu_latency_[i];
             std::size_t latency;
             if (cfg.is_random) {
@@ -250,6 +285,7 @@ private:
                     if (p->rsp_q_.size() >= p->rsp_q_depth_total_) return false;
                     p->rsp_q_.push_back(f);
                 }
+                ++p->nsu_rsp_per_vc_in_flight_[vc];
                 return true;
             }
             // Per-NSU delay path. Aggregate capacity:
@@ -261,7 +297,11 @@ private:
             }
             p->nsu_rsp_delay_q_[i].push_back({f, latency});
             ++p->total_delayed_rsp_count_;
+            ++p->nsu_rsp_per_vc_in_flight_[vc];
             return true;
+        }
+        bool credit_avail(uint8_t vc_id) const override {
+            return p->nsu_rsp_per_vc_in_flight_[vc_id] < p->per_vc_depth_;
         }
     };
     struct NmuRspInAdapter : noc::NocRspIn {
@@ -271,6 +311,9 @@ private:
             if (p->rsp_q_.empty()) return std::nullopt;
             Flit f = p->rsp_q_.front();
             p->rsp_q_.pop_front();
+            uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+            assert(p->nsu_rsp_per_vc_in_flight_[vc] > 0);
+            --p->nsu_rsp_per_vc_in_flight_[vc];
             return f;
         }
     };
@@ -278,6 +321,9 @@ private:
     std::size_t      num_nsu_;
     std::size_t      req_q_depth_per_nsu_;
     std::size_t      rsp_q_depth_total_;
+    std::size_t      per_vc_depth_ = kDefaultPerVcDepth;
+    std::array<std::size_t, NUM_VC_MAX> nmu_req_per_vc_in_flight_{};
+    std::array<std::size_t, NUM_VC_MAX> nsu_rsp_per_vc_in_flight_{};
     std::array<int8_t, DST_ID_SPACE>        dst_to_nsu_{};
     std::vector<std::deque<Flit>>           nsu_req_q_;
     std::deque<Flit>                        rsp_q_;
