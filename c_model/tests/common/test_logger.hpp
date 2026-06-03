@@ -72,8 +72,15 @@ public:
 
     // RAII fallback: print summary if not already printed so a forgotten
     // explicit call does not lose context (especially in failure paths).
+    // print_summary() does heap-alloc (failures_.push_back, std::to_string)
+    // and stream IO; if it throws while the stack is already unwinding from
+    // a test failure, std::terminate fires. Swallow during unwind so the
+    // original test failure surfaces instead of an opaque terminate.
     ~AxiMasterObserver() {
-        if (!summary_printed_) print_summary();
+        if (!summary_printed_) {
+            try { print_summary(); }
+            catch (...) { /* swallow during unwind; never std::terminate */ }
+        }
     }
 
     // Explicit summary print. Sets summary_printed_=true on entry so the
@@ -134,12 +141,25 @@ private:
     }
 
     void on_write(const axi::WriteResult& wr) {
-        ++obs_seq_;
         ++aw_count_;       // logical AW issued (callback fires on burst complete)
         ++b_count_;        // logical B observed
         if (wr.resp != axi::Resp::OKAY) ++mismatches_;
         check_b_order(wr.id, wr.scenario_line);
         if (verbose_) {
+            // Spec §6.2: emit AW then B per write completion. WriteResult
+            // carries the original AW info (addr/size/len/burst) so the
+            // trace pair can be reconstructed from a single callback.
+            // obs_seq increments per emitted line so the AW/B pair gets
+            // obs_seq=N, N+1.
+            ++obs_seq_;
+            std::cout << "[axi:" << name_ << "] obs_seq=" << obs_seq_
+                      << " ch=AW id=0x" << hex_byte(wr.id)
+                      << " addr=0x" << std::hex << wr.addr << std::dec
+                      << " size=" << static_cast<unsigned>(wr.size)
+                      << " len="  << static_cast<unsigned>(wr.len)
+                      << " burst=" << burst_str(wr.burst)
+                      << " scenario_line=" << wr.scenario_line << '\n';
+            ++obs_seq_;
             std::cout << "[axi:" << name_ << "] obs_seq=" << obs_seq_
                       << " ch=B  id=0x" << hex_byte(wr.id)
                       << " resp=" << resp_str(wr.resp)
@@ -148,12 +168,20 @@ private:
     }
 
     void on_read(const axi::ReadResult& rr) {
-        ++obs_seq_;
         ++ar_count_;
         ++r_count_;
         if (rr.resp != axi::Resp::OKAY) ++mismatches_;
         check_r_order(rr.id, rr.scenario_line);
         if (verbose_) {
+            ++obs_seq_;
+            std::cout << "[axi:" << name_ << "] obs_seq=" << obs_seq_
+                      << " ch=AR id=0x" << hex_byte(rr.id)
+                      << " addr=0x" << std::hex << rr.addr << std::dec
+                      << " size=" << static_cast<unsigned>(rr.size)
+                      << " len="  << static_cast<unsigned>(rr.len)
+                      << " burst=" << burst_str(rr.burst)
+                      << " scenario_line=" << rr.scenario_line << '\n';
+            ++obs_seq_;
             std::cout << "[axi:" << name_ << "] obs_seq=" << obs_seq_
                       << " ch=R  id=0x" << hex_byte(rr.id)
                       << " resp=" << resp_str(rr.resp)
@@ -202,6 +230,15 @@ private:
             case axi::Resp::EXOKAY: return "EXOKAY";
             case axi::Resp::SLVERR: return "SLVERR";
             case axi::Resp::DECERR: return "DECERR";
+        }
+        return "UNKNOWN";
+    }
+
+    static const char* burst_str(axi::Burst b) {
+        switch (b) {
+            case axi::Burst::FIXED: return "FIXED";
+            case axi::Burst::INCR:  return "INCR";
+            case axi::Burst::WRAP:  return "WRAP";
         }
         return "UNKNOWN";
     }
