@@ -242,17 +242,20 @@ All sizes derive from codegen-generated `ni_flit_constants.h` — no hardcoded m
 **`push_ar` Enabled** (per-beat allocation key):
 ```
 1. n = beat.len + 1
-2. base = find_consecutive_free(free_read_entries_, n)
-3. if base < 0                                       → return false (no consecutive run)
-4. ok = next_pkt_.push_ar_with_meta(beat,
+2. if n > ROB_CAPACITY                               → return false (oversized burst; upstream stalls indefinitely)
+3. base = find_consecutive_free(free_read_entries_, n)
+4. if base < 0                                       → return false (no consecutive run)
+5. ok = next_pkt_.push_ar_with_meta(beat,
             {dst, local_addr, rob_req=1, rob_idx=base})
-5. if !ok                                            → return false (state unchanged)
-6. for i in [0, n):
+6. if !ok                                            → return false (state unchanged)
+7. for i in [0, n):
        free_read_entries_.reset(base+i)
        read_entries_[base+i] = {occupied=true, ready=false, axi_id=id}
-7. read_order_by_id_[id].push_back({base, n})
-8. return true
+8. read_order_by_id_[id].push_back({base, n})
+9. return true
 ```
+
+Oversized burst note: `MAX_AXI_LEN_PLUS1 = 256` (from `ni::width::AXI_LEN_WIDTH = 8`) but `ROB_CAPACITY = 32`. An AR with `len + 1 > ROB_CAPACITY` (e.g., AXI4 INCR `len=31` or higher) cannot be admitted at all. Upstream `AxiMaster` is expected to issue bursts of `len ≤ 15` (AXI4 INCR conventional cap). If a fixture sends an oversized AR, `push_ar` returns false every cycle and the upstream stalls indefinitely; this is a configuration error visible via watchdog timeout, not a silent bug.
 
 **`push_w` Enabled**: identical to Disabled mode (uses `w_burst_credit_` gate; Rob doesn't per-slot track W).
 
@@ -262,7 +265,7 @@ All sizes derive from codegen-generated `ni_flit_constants.h` — no hardcoded m
 2. opt = next_depkt_.pop_b_with_meta()
 3. if !opt                                            → return nullopt
 4. (b, meta) = *opt
-5. if meta.rob_req == 0                              → return b (Disabled passthrough)
+5. assert(meta.rob_req == 1 && "Enabled Rob received Disabled flit")  // §6.5 contract
 6. assert(meta.rob_idx < ROB_CAPACITY)               // defensive
 7. slot = write_entries_[meta.rob_idx]
    assert(slot.occupied && !slot.ready)              // programmer error if duplicate
@@ -286,7 +289,7 @@ All sizes derive from codegen-generated `ni_flit_constants.h` — no hardcoded m
 2. opt = next_depkt_.pop_r_with_meta()
 3. if !opt                                            → return nullopt
 4. (r, meta) = *opt
-5. if meta.rob_req == 0                              → return r
+5. assert(meta.rob_req == 1 && "Enabled Rob received Disabled flit")  // §6.5 contract
 6. assert(meta.rob_idx < ROB_CAPACITY)
 7. slot = read_entries_[meta.rob_idx]
    assert(slot.occupied)
@@ -327,7 +330,14 @@ First-fit (lowest base). Acceptable fragmentation at `ROB_CAPACITY = 32`. If a l
 - **`mode_*` = Disabled**: all flits in that direction must have `rob_req = 0`. Rob touches only Disabled-mode state members.
 - **`mode_*` = Enabled**: all flits in that direction must have `rob_req = 1`. Rob touches only Enabled-mode state members.
 - **Mid-stream switching is not supported**: mode is fixed at ctor; runtime change would corrupt state.
-- **Contract violation**: Enabled-mode `pop_b/r` with `rob_req=0` is passthrough (no assert); Disabled-mode `pop_b/r` receiving `rob_req=1` would still treat it as Disabled (no rob_idx use), potentially mis-routing — caller's responsibility to ensure mode consistency.
+
+**Contract violation (strict, asserts in debug)**:
+- Enabled-mode `pop_b/r` receiving `rob_req = 0`: **`assert(false && "Enabled Rob received Disabled flit; check Depacketize wiring or response-side packetizer")`**. This catches misconfiguration (e.g., Rob-aware Depacketize not connected, or NSU Packetize forgot to stamp `rob_req=1`).
+- Disabled-mode `pop_b/r` receiving `rob_req = 1`: same assert pattern. Catches the symmetric misconfig.
+
+Rationale: silent passthrough on contract violation would hide testbench bugs. Strict assert + death-test makes wiring errors fail fast.
+
+In release builds (NDEBUG), the assert is stripped and behavior degenerates to silent passthrough — accepted as "production performance > defensive overhead". For c_model testing, all builds are debug.
 
 ## 7. `LoopbackNoc` multi-NSU + per-NSU latency
 
@@ -450,7 +460,8 @@ private:
 ```
 - For each i in [0, num_nsu_):
       for each entry in nsu_rsp_delay_q_[i]: --cycles_remaining
-      while nsu_rsp_delay_q_[i].front().cycles_remaining == 0
+      while !nsu_rsp_delay_q_[i].empty()                            // CRITICAL: empty-check before front()
+             AND nsu_rsp_delay_q_[i].front().cycles_remaining == 0
              AND rsp_q_.size() < rsp_q_depth_total_:
           rsp_q_.push_back(front.flit)
           pop_front
@@ -458,13 +469,15 @@ private:
 - Legacy req_pipe_ / rsp_pipe_ aging (for backward compat with set_req_delay/set_rsp_delay)
 ```
 
+**Per-NSU latency vs legacy global `set_rsp_delay` composition**: NOT additive. Legacy global delay applies to flits that bypass per-NSU path (i.e., when `nsu_latency_[i].value == 0 && !is_random`, the flit takes legacy path through `rsp_pipe_` if `rsp_delay_ > 0`). Per-NSU latency replaces global for that NSU. Spec rationale: legacy global is for old fixtures that haven't configured per-NSU; new per-NSU is for multi-NSU testbench. Mixing in a single fixture is not a supported configuration.
+
 ### 7.4 Backward-compat invariants (Commit 4 critical gate)
 
 Single-NSU ctor (`LoopbackNoc(req_depth, rsp_depth)`) MUST satisfy:
 
 1. **All 256 `dst_id` slots default-route to `NSU_0`** (`dst_to_nsu_` initialized to `0` everywhere, not `-1`). Legacy fixtures don't call `set_dst_route()`, so unmapped-assert would break them.
-2. **Legacy aliases (`req_in() / req_out() / rsp_in() / rsp_out()`) are byte-identical to** `nsu_req_in(0) / nmu_req_out() / nmu_rsp_in() / nsu_rsp_out(0)`.
-3. **Legacy `set_req_delay(N) / set_rsp_delay(N)`** continue as global delay API; apply to ALL flits regardless of NSU. Per-NSU latency is additional, not replacement.
+2. **Legacy aliases (`req_in() / req_out() / rsp_in() / rsp_out()`) return the same adapter object/reference as** `nsu_req_in(0) / nmu_req_out() / nmu_rsp_in() / nsu_rsp_out(0)`, **and preserve identical observable FIFO behavior** (push/pop order, depth check semantics, return values).
+3. **Legacy `set_req_delay(N) / set_rsp_delay(N)`** continue as global delay API; apply to ALL flits when per-NSU latency is unset (i.e., `nsu_latency_[i]` default). Per-NSU latency overrides global for the configured NSU (NOT additive; see §7.3 composition note).
 
 Multi-NSU ctor (`LoopbackNoc(num_nsu, ...)`) MUST require explicit `set_dst_route()` (default `-1`); unmapped push asserts.
 
@@ -485,13 +498,15 @@ Random latency samples once at push time and stays fixed for that flit's lifetim
 | `PopBWithMeta_ExtractsRobIdxAndRobReq` | B flit with `rob_idx=5, rob_req=1` → `pop_b_with_meta()` returns `(BBeat, {5, 1})` |
 | `PopRWithMeta_ExtractsPerBeatRobIdx` | Multi-beat R: flits with `rob_idx=5,6,7,8` (consecutive enumeration) → each `pop_r_with_meta()` returns matching meta |
 
-**`c_model/tests/nmu/test_rob.cpp`** (+10 tests):
+**`c_model/tests/nmu/test_rob.cpp`** (+13 tests):
 
 | Test | Invariant |
 |---|---|
 | `Enabled_PushAw_AllocatesSlotAndStampsRobIdx` | 1 AW → 1 free_write_entries_ bit reset; downstream Packetize receives stamped `rob_idx` |
 | `Enabled_PushAr_AllocatesConsecutiveSlotsForBurst` | AR `len=3` (4 beats) → 4 consecutive `free_read_entries_` bits reset; first slot's `rob_idx` stamped to AR flit |
 | `Enabled_PushAr_PoolFragmented_FailWhenNoConsecutiveRun` | Pool has 4 free slots but at indices {0, 2, 4, 6} (fragmented) → AR `len=3` returns false |
+| `Enabled_PushAr_OversizedBurst_ReturnFalse` | AR `len=31` (32 beats) > `ROB_CAPACITY` (32) → return false; no state mutation |
+| `Enabled_PushAr_DownstreamBackpressure_AtomicRollback` | `find_consecutive_free` succeeds but Packetize push fails → free bits + read_order_by_id_ unchanged |
 | `Enabled_PushAw_PoolFull_ReturnFalseAtomic` | All 32 slots occupied → push_aw returns false; `free_write_entries_` unchanged |
 | `Enabled_PushAw_DownstreamBackpressure_AtomicRollback` | Packetize push fails → `free_write_entries_` and `write_order_by_id_` unchanged |
 | `Enabled_PopB_InOrder_ImmediateCommit` | B for head rob_idx arrives → committed_b_queue gains beat; subsequent `pop_b` returns it |
@@ -499,6 +514,7 @@ Random latency samples once at push time and stays fixed for that flit's lifetim
 | `Enabled_PopR_MultiBeatBurstCommitInOrder` | id=5 has AR1 (4 beats) + AR2 (2 beats); beats arrive {slot 4, 5, 0, 1, 2, 3} → committed_r_queue order is `r_beat[0..3]` then `r_beat[4..5]` |
 | `Enabled_DifferentIdsInterleaveAtTransactionBoundary` | id=5 AR + id=6 AR both in flight, beats arrive interleaved → each id commits as its range completes; different ids interleave at AR boundary |
 | `EnabledDeath_PopBWithUnallocatedRobIdx_Abort` | Inject B with `rob_idx` whose slot is not occupied → assert+abort |
+| `EnabledDeath_PopBWithDisabledFlit_Abort` | Enabled Rob receives B flit with `rob_req=0` → assert+abort (§6.5 contract violation) |
 
 **`c_model/tests/common/test_loopback_latency.cpp`** (new, +5 tests):
 
@@ -516,11 +532,11 @@ Random latency samples once at push time and stays fixed for that flit's lifetim
 
 - testbench branch detects fixture name, switches to multi-NSU mode (4 NSU instances `{0x10..0x13}`)
 - Routing: `set_dst_route(0, 0)` (dst=0 from `addr=0x100`), `set_dst_route(1, 1)` (dst=1 from `addr=0x10100`)
-- Per-NSU latency: NSU_0 high (e.g. 10 cycles), NSU_1 low (1-3 random)
+- Per-NSU latency (exact values, deterministic): `set_nsu_latency(0, 10)` (NSU_0 = 10 cycles static), `set_nsu_latency(1, 2)` (NSU_1 = 2 cycles static)
 - Rob set to Enabled mode (`mode_w = mode_r = Enabled`)
-- Expected: AW2 (dst=1) B beat arrives before AW1 (dst=0) B; Rob reorders; Scoreboard sees correct submission order; data integrity passes
+- Expected: AW2 (dst=1) B beat arrives at LoopbackNoc 2 cycles after NSU_1 produces it; AW1 (dst=0) B beat arrives 10 cycles after NSU_0 produces it. AW2's B reaches NMU first (~8 cycles before AW1's B). Without Rob reorder, AxiMaster would see B2 before B1 → AXI4 §A5.3 violation. With Rob Enabled, ordering preserved.
 
-**Positive ordering assertion**: testbench adds a per-id B/R order tracker that confirms B/R beats reach AxiMaster in original submission order. This is the formal regression gate (better than expected-failure-on-Disabled).
+**Positive ordering assertion**: testbench adds a per-id B/R order tracker that confirms B/R beats reach AxiMaster in original submission order. Specifically: for `multi_dst_stress` fixture, tracker records the order AxiMaster receives B beats for `id=0x05` and asserts the order matches `[AW1, AW2]` (submission order), regardless of physical NoC latency. This is the formal regression gate (better than expected-failure-on-Disabled).
 
 Other 6 fixtures stay single-NSU mode (testbench conditionally builds single-NSU or multi-NSU based on fixture name).
 
@@ -529,12 +545,12 @@ Other 6 fixtures stay single-NSU mode (testbench conditionally builds single-NSU
 | Source | Count |
 |---|---|
 | `test_depacketize.cpp` | +2 |
-| `test_rob.cpp` | +10 (5 push + 4 pop + 1 death) |
+| `test_rob.cpp` | +13 (7 push + 4 pop + 2 death) |
 | `test_loopback_latency.cpp` | +5 (new file) |
 | Integration fixture variants | 0 new, 1 graduated |
-| **Total new tests** | **17** |
+| **Total new tests** | **20** |
 | Prior round total | 276 |
-| **Final ctest target** | **293/293 pass** |
+| **Final ctest target** | **296/296 pass** |
 
 ### 8.4 Drift gates (per commit)
 
@@ -547,7 +563,7 @@ Expected at HEAD:
 - specgen pytest: 163 passed (untouched)
 - codegen --check: clean
 - gen_inventory --check: clean
-- ctest: 293/293
+- ctest: 296/296
 
 ## 9. Commit boundary plan
 
@@ -571,7 +587,7 @@ Expected at HEAD:
 
 **⚠ Caveat**: After commit 2, Enabled mode is **intentionally push-only**. Do NOT wire any e2e fixture to Enabled mode until commit 3. Unit tests only.
 
-**Acceptance**: 278 → 283 ctest pass.
+**Acceptance**: 278 → 285 ctest pass (+7 push-side tests including oversized AR + AR downstream rollback).
 
 #### Commit 3: `feat(nmu/rob): add Enabled mode pop paths + commit logic`
 
@@ -579,7 +595,7 @@ Expected at HEAD:
 
 **Content**: Implement `pop_b`/`pop_r` Enabled paths with In-order Path bypass + chain-flush reorder commit logic. Add 5 pop-side tests (4 behavior + 1 death).
 
-**Acceptance**: 283 → 288 ctest pass. Enabled mode complete in Rob; e2e regression gate still pending (LoopbackNoc still single-NSU).
+**Acceptance**: 285 → 291 ctest pass (+6: 4 pop-side + 2 death tests including mixed-mode contract). Enabled mode complete in Rob; e2e regression gate still pending (LoopbackNoc still single-NSU).
 
 #### Commit 4: `feat(tests/common/loopback_noc): multi-NSU refactor + per-NSU latency`
 
@@ -589,7 +605,7 @@ Expected at HEAD:
 
 **Critical**: Backward compat MUST satisfy the three invariants in §7.4 (default route to NSU_0; aliases byte-identical; legacy global delay preserved).
 
-**Acceptance**: 288 → 293 ctest pass. 270 prior tests stay green via single-NSU compatibility path. Multi_dst_stress still in single-NSU mode (smoke test, graduates in commit 5).
+**Acceptance**: 291 → 296 ctest pass (+5 LoopbackNoc tests). 270 prior tests stay green via single-NSU compatibility path. Multi_dst_stress still in single-NSU mode (smoke test, graduates in commit 5).
 
 **Parallelization note**: Independent of Commits 1-3.
 
@@ -599,7 +615,7 @@ Expected at HEAD:
 
 **Content**: testbench branch on fixture name. For `multi_dst_stress`, build multi-NSU mode (4 NSU stacks, src_ids `{0x10..0x13}`, routing setup, per-NSU latency config), Rob in Enabled mode. Add positive per-id B/R ordering assertion (formal regression gate). Other 6 fixtures stay single-NSU.
 
-**Acceptance**: 293/293 ctest pass. Sanity-check (reviewer manual validation, NOT committed): temp swap Rob to Disabled, run multi_dst_stress, confirm Scoreboard or ordering assertion catches violation, revert.
+**Acceptance**: 296/296 ctest pass. Sanity-check (reviewer manual validation, NOT committed): temp swap Rob to Disabled, run multi_dst_stress, confirm Scoreboard or ordering assertion catches violation, revert.
 
 #### Commit 6: `docs(NEXT_STEPS): ROB Enabled + multi-NSU testbench done; next is vc_arb`
 
@@ -607,7 +623,7 @@ Expected at HEAD:
 
 **Content**: Karpathy 4-lens summary + flip pointer to next round (main plan §3.1 successors: `vc_arb`, `vc_mapping`, `route_par`, `flit_ecc`, `nmu.hpp` top-level assembly).
 
-**Acceptance**: drift gates all clean, ctest 293/293.
+**Acceptance**: drift gates all clean, ctest 296/296.
 
 ### 9.2 Commit ordering / parallelization
 
@@ -651,7 +667,9 @@ Parallel waves for subagent-driven-development:
 - Prior round design: `docs/superpowers/specs/2026-06-02-addr-trans-rob-disabled-axi4-conformity-design.md`
 - Main plan: `docs/noc_cmodel_rtl_plan.md` §3.1
 - FlooNoC paper: arXiv:2305.08562 (Fischer et al., "FlooNoC: A Multi-Tbps Wide NoC for Heterogeneous AXI4 Traffic", 2023)
-- FlooNoC RoB module: `pulp-platform/FlooNoC/hw/floo_rob.sv` (RoBSize=64, MaxRoTxnsPerId=32, per-beat slot SRAM)
-- FlooNoC RoB testbench: `pulp-platform/FlooNoC/hw/tb/tb_floo_rob.sv` (4 slave instances with `{Fast, Fast, Slow, Mixed}` latency profiles)
-- AXI4 spec: ARM IHI 0022 §A5.3 (same-ID response ordering)
-- ni_packet.json: `specgen/generated/json/ni_packet.json` (`ROB_IDX_WIDTH = 5`, `AXI_ID_WIDTH = 8`)
+- FlooNoC RoB module: `pulp-platform/FlooNoC/hw/floo_rob.sv:18` (`RoBSize = 64`, `MaxRoTxnsPerId = 32`); `:122-127` (`tc_sram_impl` per-beat slot SRAM); `:144` (`rsp_meta_t` FF array)
+- FlooNoC simple RoB: `pulp-platform/FlooNoC/hw/floo_simple_rob.sv:18-24` (write metadata RoB, default `RoBSize = 64`)
+- FlooNoC RoB testbench: `pulp-platform/FlooNoC/hw/tb/tb_floo_rob.sv:156-178` (`floo_axi_test_node` master); `:278-281` (4 slave types `{FastSlave, FastSlave, SlowSlave, MixedSlave}`); `:281-307` (slave chimneys generate block); `:309-326` (`floo_axi_rand_slave` 4 instances); `:328-354` (`axi_reorder_compare` assertion module)
+- FlooNoC top-level config: `pulp-platform/FlooNoC/hw/floo_pkg.sv:44-64` (`rob_type_e {NormalRoB, SimpleRoB, NoRoB}`); `:296-305` (`BRoBType/RRoBType/BRoBSize/RRoBSize`); `:345-348` (system defaults `NoRoB, size 0`)
+- AXI4 spec: ARM IHI 0022 §A5.3 (same-ID response ordering); §A3.4 (transaction ordering); §A4.3 (burst length encoding: `awlen`/`arlen` 8 bits = 1..256 beats for INCR, 2/4/8/16 for WRAP)
+- ni_packet.json: `specgen/generated/json/ni_packet.json` (`ROB_IDX_WIDTH = 5`, `AXI_ID_WIDTH = 8`, `DST_ID_WIDTH = 8`, `AXI_LEN_WIDTH = 8`)
