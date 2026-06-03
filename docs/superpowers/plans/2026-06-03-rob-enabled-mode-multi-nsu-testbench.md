@@ -32,9 +32,9 @@ cd ../c_model && cmake --build build && ctest --test-dir build -j 1
 | 1 | `feat(ni/depacketizer): add pop_*_with_meta` | 276 → 278 ctest |
 | 2 | `feat(nmu/rob): Enabled push paths` | 278 → 285 ctest |
 | 3 | `feat(nmu/rob): Enabled pop paths` | 285 → 291 ctest |
-| 4 | `feat(tests/common/loopback_noc): multi-NSU` | 291 → 296 ctest |
-| 5 | `feat(tests/integration): multi-NSU testbench + multi_dst_stress gate` | 296/296 ctest |
-| 6 | `docs(NEXT_STEPS): round done; next is vc_arb` | 296/296 |
+| 4 | `feat(tests/common/loopback_noc): multi-NSU` | 291 → 297 ctest |
+| 5 | `feat(tests/integration): multi-NSU testbench + multi_dst_stress gate` | 297/297 ctest |
+| 6 | `docs(NEXT_STEPS): round done; next is vc_arb` | 297/297 |
 
 **Parallel waves** (for subagent-driven-development):
 - Wave 1: Tasks 1, 2, 4 (independent)
@@ -47,7 +47,7 @@ cd ../c_model && cmake --build build && ctest --test-dir build -j 1
 ## File structure (overview)
 
 ### New files
-- `c_model/tests/common/test_loopback_latency.cpp` (5 unit tests for multi-NSU + per-NSU latency)
+- `c_model/tests/common/test_loopback_latency.cpp` (6 unit tests for multi-NSU + per-NSU latency + 1 backward-compat invariant test)
 
 ### Modified files
 - `c_model/include/ni/depacketizer.hpp` — add `struct ResponseMeta` + virtual `pop_*_with_meta()` with default impl
@@ -173,7 +173,11 @@ Expected: compile error mentioning `pop_b_with_meta` / `pop_r_with_meta` / `Resp
 
 - [ ] **Step 5: Add `ResponseMeta` + virtual methods to `ni/depacketizer.hpp`**
 
-Edit `c_model/include/ni/depacketizer.hpp`. Find the existing class definition and add INSIDE it (above `};`):
+Edit `c_model/include/ni/depacketizer.hpp`.
+
+First, add `#include <utility>` near the top with the other includes (for `std::pair`).
+
+Then add `struct ResponseMeta` at **NAMESPACE scope** (BEFORE `class Depacketizer`, inside `namespace ni::cmodel`):
 
 ```cpp
 // Response-side metadata extracted from flit header.
@@ -183,7 +187,11 @@ struct ResponseMeta {
     uint8_t rob_idx;
     uint8_t rob_req;
 };
+```
 
+Inside the `class Depacketizer` body (above `};`), add the virtual methods that reference `ResponseMeta`:
+
+```cpp
 // Default impl forwards to pop_b/pop_r and returns meta={0,0}.
 // Concrete depacketizers (e.g. nmu::Depacketize) may override to extract
 // rob_idx / rob_req from the flit header before decode.
@@ -199,7 +207,7 @@ virtual std::optional<std::pair<axi::RBeat, ResponseMeta>> pop_r_with_meta() {
 }
 ```
 
-Also add `#include <utility>` near the top if not present (for `std::pair`).
+Because `ResponseMeta` is at namespace scope, the unqualified name resolves cleanly inside `class Depacketizer` and inside concrete derived classes (like `nmu::Depacketize`).
 
 - [ ] **Step 6: Build to verify base class compiles**
 
@@ -424,26 +432,30 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
 }
 ```
 
-- [ ] **Step 4: Write failing test `Enabled_PushAr_PoolFragmented_FailWhenNoConsecutiveRun`**
+- [ ] **Step 4: Write failing test `Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun`**
+
+`find_consecutive_free` will be exposed as `public static` (Step 11) to enable direct unit testing of the fragmentation algorithm. Engineering a fragmented `free_read_entries_` state via push_ar + pop_r is hard (chain-flush commit semantics merge frees), so the cleaner approach is to test the helper directly.
+
+Note: this replaces the spec §8.1 entry name `Enabled_PushAr_PoolFragmented_FailWhenNoConsecutiveRun`; same invariant, different test surface. Spec self-review will be updated in Task 6 if needed.
 
 ```cpp
-TEST(NmuRob, Enabled_PushAr_PoolFragmented_FailWhenNoConsecutiveRun) {
-    LoopbackNoc noc(16, 16);
-    Packetize   pkt(noc.req_out(), kSrcId);
-    Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
+    std::bitset<Rob::ROB_CAPACITY> free;
+    // Fragmented free state: bits 1 at positions 0, 2, 4, 6 only.
+    free.set(0); free.set(2); free.set(4); free.set(6);
 
-    // Fill the entire pool with 1-beat ARs (32 slots, all used).
-    for (int i = 0; i < 32; ++i) {
-        axi::ArBeat ar = make_ar(static_cast<uint8_t>(i & 0xFF), 0x100);
-        ar.len = 0;
-        ASSERT_TRUE(rob.push_ar(ar)) << "fill iteration " << i;
-        noc.req_in().pop_flit();   // drain to keep req_q free
-    }
-    // 33rd AR (any size) must fail — pool exhausted
-    axi::ArBeat ar_extra = make_ar(0x33, 0x100);
-    ar_extra.len = 0;
-    EXPECT_FALSE(rob.push_ar(ar_extra));
+    // 4 total free bits, but no run of 2+ consecutive.
+    EXPECT_EQ(Rob::find_consecutive_free(free, 3), -1);
+    EXPECT_EQ(Rob::find_consecutive_free(free, 2), -1);
+
+    // n=1 always finds position 0 first.
+    EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
+
+    // All free (32 free bits): n up to 32 succeeds at base=0; n=33 fails (over capacity).
+    free.set();
+    EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
+    EXPECT_EQ(Rob::find_consecutive_free(free, 32), 0);
+    EXPECT_EQ(Rob::find_consecutive_free(free, 33), -1);
 }
 ```
 
@@ -553,9 +565,20 @@ Edit `c_model/include/nmu/rob.hpp`. Add includes near top (after existing includ
 Inside the `class Rob` body, after the existing `// future Enabled mode: uint8_t rob_idx;` comment block (around line 80), add the Enabled-mode state section:
 
 ```cpp
-    // === Enabled mode (per-beat slot pool) ===
+public:
+    // === Enabled mode public constants (for testing + caller info) ===
     static constexpr std::size_t ROB_CAPACITY      = 1u << ni::header::ROB_IDX_WIDTH;  // 32
     static constexpr std::size_t AXI_ID_SPACE      = 1u << ni::width::AXI_ID_WIDTH;    // 256
+
+    // Linear scan for first run of n consecutive 1s in bitset<ROB_CAPACITY>.
+    // Returns base index (0..ROB_CAPACITY-1), or -1 if no such run exists.
+    // O(ROB_CAPACITY) worst case. Public for direct unit testing (TDD).
+    static int find_consecutive_free(
+        const std::bitset<ROB_CAPACITY>& free,
+        std::size_t n);
+
+private:
+    // === Enabled mode (per-beat slot pool) ===
 
     struct WriteEntry {
         bool        occupied = false;
@@ -612,22 +635,9 @@ Rob(Packetize& next_pkt,
 }
 ```
 
-- [ ] **Step 11: Add `find_consecutive_free` helper**
+- [ ] **Step 11: Add `find_consecutive_free` inline definition**
 
-Add as a private static member function inside `class Rob` (declaration in class body, implementation right after the class):
-
-In class body, add declaration:
-
-```cpp
-    // Linear scan for first run of n consecutive 1s in bitset<ROB_CAPACITY>.
-    // Returns base index (0..ROB_CAPACITY-1), or -1 if no such run exists.
-    // O(ROB_CAPACITY) worst case.
-    static int find_consecutive_free(
-        const std::bitset<ROB_CAPACITY>& free,
-        std::size_t n);
-```
-
-After the class body (after the closing `};`), add the inline definition:
+Declaration already added to `class Rob` public section in Step 10 (along with `ROB_CAPACITY` / `AXI_ID_SPACE`). Now add the inline definition AFTER the class body (after the closing `};`):
 
 ```cpp
 inline int Rob::find_consecutive_free(
@@ -649,7 +659,7 @@ inline int Rob::find_consecutive_free(
 
 - [ ] **Step 12: Replace `push_aw` Enabled-mode body**
 
-Find the existing `push_aw` implementation (around line 97):
+Find the existing `push_aw` implementation (around line 97). Current form:
 
 ```cpp
 inline bool Rob::push_aw(const axi::AwBeat& b) {
@@ -657,12 +667,12 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         assert(false && "Rob: Enabled mode push_aw not yet implemented (next round)");
         std::abort();
     }
-    auto t = addr_trans::xy_route(b.addr);
-    // ... (Disabled mode body unchanged) ...
+    // [existing Disabled-mode body unchanged from prior round —
+    //  xy_route + per-id deque dst gate + push_aw_with_meta + outstanding.push_back + ++w_burst_credit_]
 }
 ```
 
-Replace the Enabled-mode block (the `if (mode_w_ == RobMode::Enabled) { assert; abort; }` block) with the actual Enabled implementation:
+Replace ONLY the Enabled-mode block (the `if (mode_w_ == RobMode::Enabled) { assert; abort; }` block) with the actual Enabled implementation below. Keep all Disabled-mode body lines verbatim.
 
 ```cpp
 inline bool Rob::push_aw(const axi::AwBeat& b) {
@@ -1199,7 +1209,7 @@ Refs: docs/superpowers/specs/2026-06-03-rob-enabled-mode-multi-nsu-testbench-des
 - Create: `c_model/tests/common/test_loopback_latency.cpp`
 - Modify: `c_model/tests/common/CMakeLists.txt`
 
-**Goal:** Rewrite `LoopbackNoc` to support multi-NSU topology with per-NSU response latency. Preserve full backward compatibility — existing single-NSU `(req_depth, rsp_depth)` constructor still works; all `dst_id` default-route to NSU_0; legacy `req_in/req_out/rsp_in/rsp_out` accessors preserved as aliases. Add 5 unit tests for new multi-NSU behavior.
+**Goal:** Rewrite `LoopbackNoc` to support multi-NSU topology with per-NSU response latency. Preserve full backward compatibility — existing single-NSU `(req_depth, rsp_depth)` constructor still works; all `dst_id` default-route to NSU_0; legacy `req_in/req_out/rsp_in/rsp_out` accessors preserved as aliases. Add 6 unit tests for new multi-NSU behavior + explicit backward-compat invariant.
 
 - [ ] **Step 1: Read existing `loopback_noc.hpp` to understand baseline**
 
@@ -1360,6 +1370,40 @@ TEST(LoopbackNocMultiNsu, PerNsuQueueFull_DoesNotBlockOtherNsu) {
 }
 ```
 
+- [ ] **Step 7b: Write failing backward-compat test `SingleNsuCtor_LegacyAccessAndDelayPreserved`**
+
+Explicit narrow test covering spec §7.4 three backward-compat invariants. Faster failure signal than relying on full ctest sweep alone.
+
+```cpp
+TEST(LoopbackNocBackwardCompat, SingleNsuCtor_LegacyAccessAndDelayPreserved) {
+    // Single-NSU ctor: dst_to_nsu_ defaults to all NSU_0
+    LoopbackNoc noc(/*req_depth=*/4, /*rsp_depth=*/4);
+
+    // Invariant 1: dst defaults route to NSU_0 (no set_dst_route needed)
+    ASSERT_TRUE(noc.nmu_req_out().push_flit(make_req_flit(0x10, 0x55, 0, 0)));
+    auto f = noc.nsu_req_in(0).pop_flit();
+    ASSERT_TRUE(f.has_value());
+    EXPECT_EQ(f->get_header_field("dst_id"), 0x55u);
+
+    // Invariant 2: legacy aliases (req_in/req_out/rsp_in/rsp_out) point at
+    // NSU_0 endpoints (same observable behavior). Push via alias req_out,
+    // pop via alias req_in — both go through NSU_0.
+    ASSERT_TRUE(noc.req_out().push_flit(make_req_flit(0x10, 0x77, 0, 0)));
+    auto f2 = noc.req_in().pop_flit();
+    ASSERT_TRUE(f2.has_value());
+    EXPECT_EQ(f2->get_header_field("dst_id"), 0x77u);
+
+    // Invariant 3: legacy set_rsp_delay still works (global delay applies)
+    noc.set_rsp_delay(2);
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_rsp_flit(0x10, 0x01, 0, 0)));
+    EXPECT_FALSE(noc.rsp_in().pop_flit().has_value());   // not visible yet
+    noc.tick(); noc.tick();   // age 2 cycles
+    auto f3 = noc.rsp_in().pop_flit();
+    ASSERT_TRUE(f3.has_value());
+    EXPECT_EQ(f3->get_header_field("src_id"), 0x10u);
+}
+```
+
 - [ ] **Step 8: Register test in CMakeLists.txt**
 
 Edit `c_model/tests/common/CMakeLists.txt` (create if missing, mirroring `c_model/tests/nmu/CMakeLists.txt` pattern). If the file exists with `add_cmodel_test(...)` lines, append:
@@ -1487,9 +1531,20 @@ public:
     }
     void set_random_seed(uint64_t seed) noexcept { rng_.seed(seed); }
 
-    // Legacy global delay (preserved for non-multi-NSU fixtures)
-    void set_req_delay(unsigned cycles) noexcept { req_delay_ = cycles; }
-    void set_rsp_delay(unsigned cycles) noexcept { rsp_delay_ = cycles; }
+    // Legacy global delay (preserved for single-NSU fixtures only;
+    // multi-NSU mode uses set_nsu_latency instead — these assert if mixed).
+    void set_req_delay(unsigned cycles) noexcept {
+        assert(num_nsu_ == 1 &&
+               "set_req_delay only supported in single-NSU mode; "
+               "use set_nsu_latency in multi-NSU mode");
+        req_delay_ = cycles;
+    }
+    void set_rsp_delay(unsigned cycles) noexcept {
+        assert(num_nsu_ == 1 &&
+               "set_rsp_delay only supported in single-NSU mode; "
+               "use set_nsu_latency in multi-NSU mode");
+        rsp_delay_ = cycles;
+    }
 
     void tick() {
         // Per-NSU response delay aging
@@ -1665,7 +1720,7 @@ Expected: 5 PASS (4 behavior + 1 death).
 ctest --test-dir build -j 1 2>&1 | tail -10
 ```
 
-Expected: **296/296 passed** (291 prior + 5 new). The 270 prior tests using legacy single-NSU ctor + `req_in()/req_out()/rsp_in()/rsp_out()` aliases MUST stay green. If any test fails, the backward-compat ctor / alias semantics drifted — fix before proceeding.
+Expected: **297/297 passed** (291 prior + 6 new — 5 multi-NSU tests + 1 backward-compat invariant test). The 270 prior tests using legacy single-NSU ctor + `req_in()/req_out()/rsp_in()/rsp_out()` aliases MUST stay green. If any test fails, the backward-compat ctor / alias semantics drifted — fix before proceeding.
 
 - [ ] **Step 13: Drift gates**
 
@@ -1723,32 +1778,37 @@ Refs: docs/superpowers/specs/2026-06-03-rob-enabled-mode-multi-nsu-testbench-des
 
 **Goal:** Refactor the integration testbench so that the `multi_dst_stress.yaml` fixture path builds 4 NSU stacks (each with own src_id, own Packetize/Depacketize/AxiMasterPort/MetaBuffer), sets per-NSU latency to produce out-of-order responses, switches Rob to Enabled mode, and adds a positive per-id B/R ordering assertion that catches AXI4 §A5.3 violations. Other 6 fixtures stay single-NSU mode via the existing path.
 
-- [ ] **Step 1: Read existing integration testbench to find branch points**
+- [ ] **Step 1: Read existing integration testbench**
 
 ```bash
-grep -n "multi_dst_stress\|kNumNsu\|nsu_pkt\|nsu_depkt\|nsu_port\|LoopbackNoc loopback" \
-    c_model/tests/integration/test_request_response_loopback.cpp | head -30
+sed -n '60,160p' c_model/tests/integration/test_request_response_loopback.cpp
+sed -n '270,290p' c_model/tests/integration/test_request_response_loopback.cpp
 ```
 
-Identify:
-- Where `LoopbackNoc loopback(...)` is constructed
-- Where `nmu::Rob rob(...)` is constructed
-- Where `nsu::Packetize / nsu::Depacketize / nsu::AxiMasterPort` are constructed
-- Where `multi_dst_stress.yaml` is detected (existing `mow` override)
-- Where the AxiMaster + Scoreboard setup happens
+Note the structure (verified ground truth):
+- Lines 70-71: `constexpr uint8_t kNmuSrcId = 0x01; constexpr uint8_t kNsuSrcId = 0x02;`
+- Line 92-93: `test::LoopbackNoc loopback(params.loopback_noc_req_depth, params.loopback_noc_rsp_depth);`
+- Lines 108-110: `nmu::Packetize real_nmu_pkt(loopback.req_out(), kNmuSrcId); nmu::Rob rob(real_nmu_pkt, nmu_depkt, RobMode::Disabled, RobMode::Disabled);`
+- Lines 117-129: `nsu::Depacketize nsu_depkt(loopback.req_in(), nsu_meta, ...); nsu::Packetize nsu_pkt(loopback.rsp_out(), nsu_meta, kNsuSrcId); nsu::AxiMasterPort nsu_port(nsu_depkt, nsu_pkt, params);`
+- Line 138: existing `if (yaml_path.find("multi_dst_stress.yaml") != std::string::npos)` (the `mow` override block)
+- Line 281: `FixtureParam{"multi_dst_stress.yaml", 0u, 0u}` in `INSTANTIATE_TEST_SUITE_P`
+- Existing rig uses single-NSU pattern with `loopback.req_out()` / `loopback.req_in()` / `loopback.rsp_out()` / `loopback.rsp_in()` legacy aliases (Task 4 preserves these for backward compat — they map to NSU_0 endpoints when `num_nsu_=1`).
 
-- [ ] **Step 2: Add a positive ordering assertion helper at top of file**
+The refactor approach: keep single-NSU path intact for the 6 non-`multi_dst_stress` fixtures (so their wiring code unchanged), add a parallel multi-NSU build branch for the `multi_dst_stress` fixture only.
 
-Add a free-function helper near the top of `c_model/tests/integration/test_request_response_loopback.cpp` (before any test class):
+- [ ] **Step 2: Add `PerIdOrderTracker` helper before the test class**
+
+Insert in the anonymous namespace (around line 80, after `kNsuSrcId` constant):
 
 ```cpp
-namespace {
-
-// Track the order B beats arrive for each AXI ID. multi_dst_stress fixture
-// must see B beats in submission order regardless of physical NoC latency.
-// (AXI4 IHI 0022 §A5.3: same-id responses come back in issue order.)
+// PerIdOrderTracker — verifies per-id B/R beat arrival order at AxiMaster.
+// multi_dst_stress: id=0x05 B beats must arrive in submission order (AW1, AW2)
+// regardless of physical NoC latency (AXI4 IHI 0022 §A5.3). Without Rob
+// Enabled mode reordering, NSU_1 (faster) returns B2 before NSU_0's B1,
+// violating the per-id order. We assert this directly to act as the regression
+// gate (positive ordering check, not expected-failure pattern).
 struct PerIdOrderTracker {
-    std::array<std::vector<uint64_t>, 256> b_seq;   // per-id sequence numbers
+    std::array<std::vector<uint64_t>, 256> b_seq;
     std::array<std::vector<uint64_t>, 256> r_seq;
     void record_b(uint8_t id, uint64_t marker) { b_seq[id].push_back(marker); }
     void record_r(uint8_t id, uint64_t marker) { r_seq[id].push_back(marker); }
@@ -1767,115 +1827,129 @@ struct PerIdOrderTracker {
         return true;
     }
 };
-
-}  // namespace
 ```
 
-(The exact integration point depends on the existing test class structure — adapt placement so the helper is visible to the test body.)
+- [ ] **Step 3: Add multi-NSU constants in the anonymous namespace (after kNsuSrcId)**
 
-- [ ] **Step 3: Detect `multi_dst_stress` fixture path and build multi-NSU stacks**
+Insert right after `constexpr uint8_t kNsuSrcId = 0x02;` (around line 72):
 
-Find the existing testbench section that builds `LoopbackNoc loopback(...)` + `nsu_pkt / nsu_depkt / nsu_port` instances. Wrap with a branch on fixture filename. Sketch (adapt to actual code organization):
+```cpp
+constexpr std::size_t kNumNsuMulti = 4;
+constexpr std::array<uint8_t, kNumNsuMulti> kNsuSrcIdsMulti = {0x10, 0x11, 0x12, 0x13};
+```
+
+- [ ] **Step 4: Refactor testbench construction (lines 92-129) for multi_dst_stress branch**
+
+Replace the existing construction block (lines 92-129, approximately) with the branching version below. The `yaml_path` variable should already be in scope (used for the existing `mow` override at line 138):
 
 ```cpp
 const bool is_multi_dst = yaml_path.find("multi_dst_stress.yaml") != std::string::npos;
-constexpr std::size_t kNumNsu = 4;
-constexpr std::array<uint8_t, kNumNsu> kNsuSrcIds = {0x10, 0x11, 0x12, 0x13};
-
-LoopbackNoc loopback = is_multi_dst
-    ? LoopbackNoc(kNumNsu, /*req_per_nsu=*/16, /*rsp_total=*/64)
-    : LoopbackNoc(/*req=*/16, /*rsp=*/16);
-
 const RobMode rob_mode = is_multi_dst ? RobMode::Enabled : RobMode::Disabled;
 
-nmu::Packetize     real_nmu_pkt(loopback.nmu_req_out(), kNmuSrcId);
-nmu::Depacketize   nmu_depkt(loopback.nmu_rsp_in(),
-                             params.depkt_b_q_depth, params.depkt_r_q_depth);
-nmu::Rob           rob(real_nmu_pkt, nmu_depkt, rob_mode, rob_mode);
-nmu::AxiSlavePort  nmu_port(rob, rob, params);
-```
+// LoopbackNoc construction — single-NSU for legacy fixtures, multi-NSU for multi_dst_stress
+test::LoopbackNoc loopback = is_multi_dst
+    ? test::LoopbackNoc(/*num_nsu=*/kNumNsuMulti,
+                        /*req_per_nsu=*/params.loopback_noc_req_depth,
+                        /*rsp_total=*/params.loopback_noc_rsp_depth)
+    : test::LoopbackNoc(params.loopback_noc_req_depth,
+                        params.loopback_noc_rsp_depth);
 
-(If the existing rig uses `loopback.req_out()` etc., they still work via the legacy alias for single-NSU mode.)
+if (is_multi_dst) {
+    // multi_dst_stress addresses: 0x100 → dst=0, 0x10100 → dst=1
+    loopback.set_dst_route(0x00, 0);
+    loopback.set_dst_route(0x01, 1);
+    loopback.set_dst_route(0x02, 2);
+    loopback.set_dst_route(0x03, 3);
+    // Per-NSU response latency: NSU_0 slow (10c), NSU_1 fast (2c) — exposes
+    // out-of-order B arrival; Rob Enabled mode must reorder to preserve AXI4.
+    loopback.set_nsu_latency(0, 10);
+    loopback.set_nsu_latency(1, 2);
+    loopback.set_nsu_latency(2, 5);
+    loopback.set_nsu_latency(3, 3);
+}
 
-For NSU stacks, build 4 instances when `is_multi_dst`:
+// NMU stack (uses legacy aliases for single-NSU; uses nmu_* accessors for multi-NSU
+// — both resolve to NSU_0 endpoints when num_nsu_=1, so we can always use nmu_*)
+nmu::Packetize    real_nmu_pkt(loopback.nmu_req_out(), kNmuSrcId);
+nmu::Depacketize  nmu_depkt(loopback.nmu_rsp_in(),
+                            params.depkt_b_q_depth, params.depkt_r_q_depth);
+nmu::Rob          rob(real_nmu_pkt, nmu_depkt, rob_mode, rob_mode);
+nmu::AxiSlavePort nmu_port(rob, rob, params);
 
-```cpp
-std::vector<std::unique_ptr<nsu::MetaBuffer>>     nsu_metas;
-std::vector<std::unique_ptr<nsu::Depacketize>>    nsu_depkts;
-std::vector<std::unique_ptr<nsu::Packetize>>      nsu_pkts;
-std::vector<std::unique_ptr<nsu::AxiMasterPort>>  nsu_ports;
-
-const std::size_t nsu_count = is_multi_dst ? kNumNsu : 1;
+// NSU stacks: 1 for legacy, 4 for multi_dst_stress
+const std::size_t nsu_count = is_multi_dst ? kNumNsuMulti : 1;
+std::vector<std::unique_ptr<nsu::MetaBuffer>>    nsu_metas;
+std::vector<std::unique_ptr<nsu::Depacketize>>   nsu_depkts;
+std::vector<std::unique_ptr<nsu::Packetize>>     nsu_pkts;
+std::vector<std::unique_ptr<nsu::AxiMasterPort>> nsu_ports;
+nsu_metas.reserve(nsu_count);
+nsu_depkts.reserve(nsu_count);
+nsu_pkts.reserve(nsu_count);
+nsu_ports.reserve(nsu_count);
 for (std::size_t i = 0; i < nsu_count; ++i) {
+    const uint8_t this_nsu_src = is_multi_dst ? kNsuSrcIdsMulti[i] : kNsuSrcId;
     nsu_metas.emplace_back(std::make_unique<nsu::MetaBuffer>());
     nsu_depkts.emplace_back(std::make_unique<nsu::Depacketize>(
-        loopback.nsu_req_in(i), 16, 16));
+        loopback.nsu_req_in(i), *nsu_metas[i],
+        params.nsu_depkt_aw_q_depth, params.nsu_depkt_ar_q_depth,
+        params.nsu_depkt_w_q_depth));
     nsu_pkts.emplace_back(std::make_unique<nsu::Packetize>(
-        loopback.nsu_rsp_out(i), *nsu_metas[i],
-        is_multi_dst ? kNsuSrcIds[i] : kNsuSrcId));
+        loopback.nsu_rsp_out(i), *nsu_metas[i], this_nsu_src));
     nsu_ports.emplace_back(std::make_unique<nsu::AxiMasterPort>(
-        *nsu_depkts[i], *nsu_pkts[i], *nsu_metas[i], params));
+        *nsu_depkts[i], *nsu_pkts[i], params));
 }
+
+PerIdOrderTracker tracker;   // populated below
 ```
 
-(For single-NSU mode, `nsu_count=1` and src_id falls back to the existing `kNsuSrcId` constant — preserves prior behavior.)
+Note: `nsu::Depacketize` ctor signature may differ in your repo — check existing line 117-119 (`nsu::Depacketize nsu_depkt(loopback.req_in(), nsu_meta, ...)`) and mirror the actual signature. The above is the conceptual shape.
 
-For routing + latency, when `is_multi_dst`:
+- [ ] **Step 5: Update response shuttle to loop over all NSU instances**
 
-```cpp
-if (is_multi_dst) {
-    loopback.set_dst_route(/*dst=*/0x00, /*nsu_idx=*/0);
-    loopback.set_dst_route(/*dst=*/0x01, /*nsu_idx=*/1);
-    loopback.set_dst_route(/*dst=*/0x02, /*nsu_idx=*/2);
-    loopback.set_dst_route(/*dst=*/0x03, /*nsu_idx=*/3);
-    loopback.set_nsu_latency(/*nsu_idx=*/0, /*cycles=*/10);  // slow
-    loopback.set_nsu_latency(/*nsu_idx=*/1, /*cycles=*/2);   // fast
-    loopback.set_nsu_latency(/*nsu_idx=*/2, /*cycles=*/5);
-    loopback.set_nsu_latency(/*nsu_idx=*/3, /*cycles=*/3);
-}
-```
-
-- [ ] **Step 4: Wire response shuttling for multi-NSU**
-
-The existing testbench has a loop that pulls B/R beats from `nsu_port` and pushes back to the AxiSlave callback. For multi-NSU, the shuttle must drain ALL `nsu_ports[i]` each tick. Sketch:
+The existing testbench loop (around lines 195-220 in the current file — the `nsu_port.pop_b/pop_r` + AxiSlave callback shuttle) must now drain ALL `nsu_ports[i]`. Find the existing shuttle block (search for `nsu_port.pop_b` or `b_holdover`) and replace single-instance access with vector iteration:
 
 ```cpp
+// Before (single NSU):
+//   while (auto b = nsu_port.pop_b()) { ... }
+//   while (auto r = nsu_port.pop_r()) { ... }
+// After (vector of NSU ports):
+std::vector<std::deque<axi::BBeat>> b_holdovers(nsu_count);
+std::vector<std::deque<axi::RBeat>> r_holdovers(nsu_count);
+
+// In tick loop:
 for (std::size_t i = 0; i < nsu_count; ++i) {
     auto* port = nsu_ports[i].get();
-    while (auto b = port->pop_b()) {
-        if (!nsu_port_shared_axi_slave.push_b(*b)) {
-            b_holdover[i].push_back(*b);
-            break;
-        }
+    while (!b_holdovers[i].empty()) {
+        // (existing single-port logic, but using b_holdovers[i] instead of b_holdover)
+        ...
     }
-    // (same for R)
+    while (auto b = port->pop_b()) {
+        // Record for per-id ordering tracker (multi_dst_stress only; for
+        // legacy single-NSU fixtures, tracker is unused).
+        if (is_multi_dst) tracker.record_b(b->id, b->id);  // marker = id; sufficient for AW1/AW2 order
+        // (existing AxiSlave forwarding logic, using b_holdovers[i])
+        ...
+    }
+    // Same pattern for R beats; tracker.record_r if is_multi_dst.
 }
 ```
 
-(Reuse existing shuttle logic; just loop over `nsu_count` instances. Maintain `b_holdover` / `r_holdover` as `std::vector<std::deque<...>>` indexed by NSU.)
+(Implementer: open the existing test_request_response_loopback.cpp shuttle block once, vectorize each per-NSU drain. The tracker.record_* calls are simple additions inside the existing `while (auto b = port->pop_b())` body.)
 
-The shared `axi::AxiSlave + axi::Memory` backend stays unchanged — all NSUs converge into one memory.
+- [ ] **Step 6: Add positive ordering assertion after test loop**
 
-- [ ] **Step 5: Add positive ordering assertion in test body**
-
-After the test loop completes for `multi_dst_stress.yaml`, verify per-id B/R order:
+At the END of the test body (after AxiMaster finishes + Scoreboard checks), add:
 
 ```cpp
 if (is_multi_dst) {
     EXPECT_TRUE(tracker.verify_b_in_order(0x05))
-        << "multi_dst_stress: id=0x05 B beats arrived out of submission order; "
-        << "Rob Enabled mode failed to reorder.";
+        << "multi_dst_stress fixture: id=0x05 B beats arrived out of "
+        << "submission order at AxiMaster. Rob Enabled mode failed to "
+        << "reorder despite per-NSU latency variance (NSU_0=10c, NSU_1=2c).";
 }
 ```
 
-To populate `tracker`, hook into the AxiMaster's B/R callback path:
-- When the testbench observes a B beat handed to AxiMaster for `id=0x05`, call `tracker.record_b(0x05, sequence_number)` where `sequence_number` is the order it was issued (AxiMaster maintains this).
-
-If the existing AxiMaster + Scoreboard doesn't expose issue order easily, simpler: use the YAML `scenario_line` field already carried in `WriteResult` / `ReadResult` callbacks. Record those in order; assert monotonically increasing.
-
-(Implementer: adapt to the existing callback hook layout.)
-
-- [ ] **Step 6: Build + run integration test for multi_dst_stress**
+- [ ] **Step 7: Build + run integration test for multi_dst_stress**
 
 ```bash
 cd c_model && cmake --build build && ctest --test-dir build -R "multi_dst_stress" -j 1
@@ -1883,15 +1957,15 @@ cd c_model && cmake --build build && ctest --test-dir build -R "multi_dst_stress
 
 Expected: 1 PASS (`multi_dst_stress_q0_s0`).
 
-- [ ] **Step 7: Full ctest sweep**
+- [ ] **Step 8: Full ctest sweep**
 
 ```bash
 ctest --test-dir build -j 1 2>&1 | tail -3
 ```
 
-Expected: 296/296 passed. No new tests added by this task (multi_dst_stress already existed); the assertion is the new behavior.
+Expected: 297/297 passed. No new tests added by this task (multi_dst_stress already existed); the assertion is the new behavior.
 
-- [ ] **Step 8: Manual sanity-check (reviewer step — NOT committed)**
+- [ ] **Step 9: Manual sanity-check (reviewer step — NOT committed)**
 
 Temporarily change in the multi_dst_stress branch:
 
@@ -1904,7 +1978,7 @@ Run `ctest -R multi_dst_stress -j 1`. Expected: **FAIL** — without Rob Enabled
 
 Revert the change before committing.
 
-- [ ] **Step 9: Drift gates**
+- [ ] **Step 10: Drift gates**
 
 ```bash
 cd ../specgen && py -3 -m pytest -q && py -3 tools/codegen.py --check && py -3 tools/gen_inventory.py --check
@@ -1912,7 +1986,7 @@ cd ../specgen && py -3 -m pytest -q && py -3 tools/codegen.py --check && py -3 t
 
 Expected: pytest 163, codegen / gen_inventory clean.
 
-- [ ] **Step 10: Commit Task 5**
+- [ ] **Step 11: Commit Task 5**
 
 ```bash
 cd ..
@@ -1958,7 +2032,7 @@ Expected:
 - specgen pytest: 163 passed
 - codegen --check: clean (exit 0)
 - gen_inventory --check: clean (exit 0)
-- ctest: 296 passed, 0 failed
+- ctest: 297 passed, 0 failed (276 prior + 21 new: 2 depacketize + 13 rob + 6 loopback)
 
 If any gate fails, STOP and report BLOCKED.
 
@@ -2015,7 +2089,7 @@ Stage 3 ROB Enabled mode + multi-NSU testbench 完工：
 - nmu/depacketize.hpp override pop_*_with_meta()，抽 rob_idx / rob_req from flit header
 - tests/common/loopback_noc.hpp 重寫成 multi-NSU testbench（4 NSU instances, per-NSU routing, per-NSU response latency static + random hybrid），backward-compat single-NSU ctor 保留 → 270 prior tests 零受影響
 - integration testbench：multi_dst_stress.yaml 升級為 real regression gate（4 NSU instances {0x10..0x13}, per-NSU latency {10, 2, 5, 3} cycles, Rob Enabled, positive PerIdOrderTracker）
-- 296 ctest sequential pass, drift gates clean
+- 297 ctest sequential pass (276 prior + 21 new), drift gates clean
 
 **Next task per main plan §3.1**: `vc_arb` virtual channel arbitration (per-VC backpressure, round-robin or weighted scheduling, integrate with router fabric)。
 
@@ -2051,7 +2125,7 @@ Drift gates final state:
 - specgen pytest: 163 passed
 - codegen.py --check: clean
 - gen_inventory.py --check: clean
-- c_model ctest: 296 sequential
+- c_model ctest: 297 sequential (276 prior + 21 new this round)
 
 6 commits complete, all per implementation plan
 docs/superpowers/plans/2026-06-03-rob-enabled-mode-multi-nsu-testbench.md.
@@ -2088,7 +2162,7 @@ After writing the plan, verified:
   - §9.1 commit boundary plan → 6 tasks match 6 commits
   - §9.2 parallel waves → header notes Wave 1/2/3/4
   - §10 open follow-ups → noted as deferred in Task 6 NEXT_STEPS update
-- **Placeholder scan**: no TBD / "implement later" / handwave. Code blocks complete in every code step. The Task 5 Step 3-5 sketches say "adapt to actual code organization" which is acknowledged guidance not a placeholder — implementer needs to read the existing integration testbench to wire callbacks.
+- **Placeholder scan**: no TBD / "implement later" / handwave. Code blocks complete in every code step. Task 5 Step 4 provides concrete construction code anchored at existing file lines (verified by Step 1 read); Step 5 provides explicit shuttle-loop refactor pattern (vectorize per-NSU). `// [existing X unchanged]` prose comments in BEFORE blocks (Task 2 Steps 12-13) describe the original code that is preserved verbatim, not skipped.
 - **Type consistency**:
   - `ResponseMeta { uint8_t rob_idx; uint8_t rob_req; }` defined in Task 1; used in Tasks 1, 3
   - `WriteEntry` / `ReadEntry` / `BeatRange` defined in Task 2; used in Tasks 2, 3
@@ -2102,8 +2176,8 @@ After writing the plan, verified:
   - Task 3 depends on Task 1's `pop_*_with_meta` AND Task 2's state; commit ordering enforces
   - Task 4 independent of Tasks 1-3 (no shared types); can run in parallel
   - Task 5 depends on Tasks 3 + 4 (full Enabled Rob + multi-NSU LoopbackNoc); cannot start until both land
-- **Drift gates per commit**: every task ends with full ctest + specgen pytest + codegen check + gen_inventory check; counts monotonic 276→278→285→291→296.
-- **Acceptance counts in commit messages**: match self-review counts 278, 285, 291, 296.
+- **Drift gates per commit**: every task ends with full ctest + specgen pytest + codegen check + gen_inventory check; counts monotonic 276→278→285→291→297.
+- **Acceptance counts in commit messages**: match self-review counts 278, 285, 291, 297.
 
 ---
 
