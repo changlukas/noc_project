@@ -14,6 +14,7 @@
 //     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
 #include "common/loopback_depacketizer.hpp"
 #include "common/loopback_packetizer.hpp"
+#include "common/scenario.hpp"
 #include "ni/port_params.hpp"
 #include "nsu/axi_master_port.hpp"
 #include <cstdint>
@@ -81,6 +82,7 @@ struct PortFixture {
 // 1. Basic per-channel handshake: NoC delivers N AW beats, port surfaces N.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, AwBasicHandshake_PushPopNoLoss) {
+  SCENARIO("NSU AxiMasterPort: 8 AW beats arrive from depacketizer, all surface via pop_aw in order");
   PortFixture fx;
   for (uint8_t i = 0; i < 8; ++i) fx.ch.aw.push_back(make_aw(i, 0x1000 + i*32));
   fx.port.tick();
@@ -92,6 +94,7 @@ TEST(NsuAxiMasterPort, AwBasicHandshake_PushPopNoLoss) {
 }
 
 TEST(NsuAxiMasterPort, ArBasicHandshake_PushPopNoLoss) {
+  SCENARIO("NSU AxiMasterPort: 8 AR beats arrive from depacketizer, all surface via pop_ar in order");
   PortFixture fx;
   for (uint8_t i = 0; i < 8; ++i) fx.ch.ar.push_back(make_ar(i, 0x2000 + i*32));
   fx.port.tick();
@@ -103,6 +106,7 @@ TEST(NsuAxiMasterPort, ArBasicHandshake_PushPopNoLoss) {
 }
 
 TEST(NsuAxiMasterPort, WBasicHandshake_PushPopNoLoss) {
+  SCENARIO("NSU AxiMasterPort: 8 W beats arrive from depacketizer, all surface via pop_w with payload");
   PortFixture fx;
   for (uint8_t i = 0; i < 8; ++i)
     fx.ch.w.push_back(make_w(0x10 + i, 0xFFFFFFFFu, i == 7, i));
@@ -119,6 +123,7 @@ TEST(NsuAxiMasterPort, WBasicHandshake_PushPopNoLoss) {
 //    draining via packetizer frees room.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, BBackpressure_FullThenDrainThenAcceptOne) {
+  SCENARIO("NSU AxiMasterPort: B queue full rejects push; drain one to packetizer reopens slot");
   PortFixture fx;
   fx.set_loopback_caps(32, 32, 32, /*b*/ 0, /*r*/ 32);
   for (std::size_t i = 0; i < fx.params.b_queue_depth; ++i)
@@ -134,6 +139,7 @@ TEST(NsuAxiMasterPort, BBackpressure_FullThenDrainThenAcceptOne) {
 // 3. Queue boundary: failed push_b retried 3 times must not duplicate.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, BBoundary_FailedPushDoesNotDuplicateOnRetry) {
+  SCENARIO("NSU AxiMasterPort: failed push_b retries do not silently land; retry counts as one");
   PortFixture fx;
   fx.set_loopback_caps(32, 32, 32, 0, 32);
   for (std::size_t i = 0; i < fx.params.b_queue_depth; ++i)
@@ -158,6 +164,7 @@ TEST(NsuAxiMasterPort, BBoundary_FailedPushDoesNotDuplicateOnRetry) {
 // 4. AW channel FIFO order preserved end-to-end (mixed ids).
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, AwFifoOrder_PreservedAcrossMixedIds) {
+  SCENARIO("NSU AxiMasterPort: AW channel FIFO order preserved across mixed AXI ids (no per-id reorder)");
   PortFixture fx;
   // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
   // Cross-ID completion ordering / per-ID response reordering is the ROB
@@ -176,6 +183,7 @@ TEST(NsuAxiMasterPort, AwFifoOrder_PreservedAcrossMixedIds) {
 // 5. AR channel FIFO order preserved end-to-end (mixed ids).
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, ArFifoOrder_PreservedAcrossMixedIds) {
+  SCENARIO("NSU AxiMasterPort: AR channel FIFO order preserved across mixed AXI ids (no per-id reorder)");
   PortFixture fx;
   // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
   // Cross-ID completion ordering / per-ID response reordering is the ROB
@@ -194,6 +202,7 @@ TEST(NsuAxiMasterPort, ArFifoOrder_PreservedAcrossMixedIds) {
 // 6. W beats pass-through bit-for-bit unchanged.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, WPassthroughBitForBit) {
+  SCENARIO("NSU AxiMasterPort: W beat passes through with data/strb/last/user bit-for-bit preserved");
   PortFixture fx;
   axi::WBeat in{};
   for (std::size_t i = 0; i < axi::DATA_BYTES; ++i)
@@ -215,6 +224,7 @@ TEST(NsuAxiMasterPort, WPassthroughBitForBit) {
 // 7. B beats pass-through bit-for-bit unchanged.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, BPassthroughBitForBit) {
+  SCENARIO("NSU AxiMasterPort: B beat passes through to packetizer with id/resp/user preserved");
   PortFixture fx;
   axi::BBeat in = make_b(0x42, axi::Resp::EXOKAY, 0x91);
   ASSERT_TRUE(fx.port.push_b(in));
@@ -230,6 +240,7 @@ TEST(NsuAxiMasterPort, BPassthroughBitForBit) {
 // 8. R beats pass-through bit-for-bit unchanged.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, RPassthroughBitForBit) {
+  SCENARIO("NSU AxiMasterPort: R beat passes through to packetizer with all fields preserved");
   PortFixture fx;
   axi::RBeat in{};
   in.id = 0x37;
@@ -253,6 +264,7 @@ TEST(NsuAxiMasterPort, RPassthroughBitForBit) {
 // 9. AW + AR beats pass-through bit-for-bit unchanged (all fields).
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, AwArPassthroughBitForBit) {
+  SCENARIO("NSU AxiMasterPort: AW and AR pass through with every field (id/addr/len/.../qos) preserved");
   PortFixture fx;
   axi::AwBeat aw_in = make_aw(0x5A, 0xCAFE'BABE'DEAD'BEEFull, 7, 5,
                                 axi::Burst::WRAP, 0xC, 1, 0x7, 0xF, 0xAB, 0xE);
@@ -284,6 +296,7 @@ TEST(NsuAxiMasterPort, AwArPassthroughBitForBit) {
 //     full while R packetizer still draining — R progresses, B holds.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, IndependentBRBackpressure_RProgressesWhileBHolds) {
+  SCENARIO("NSU AxiMasterPort: B-side packetizer full does not block R-side draining (channels independent)");
   PortFixture fx;
   fx.set_loopback_caps(32, 32, 32, /*b*/ 0, /*r*/ 32);
   for (uint8_t i = 0; i < 4; ++i)
@@ -310,6 +323,7 @@ TEST(NsuAxiMasterPort, IndependentBRBackpressure_RProgressesWhileBHolds) {
 //     hands off all three eligible request channels into the port queues.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, SimultaneousAwWArForwardProgressInOneTick) {
+  SCENARIO("NSU AxiMasterPort: AW, W, AR all ingested from depacketizer in same tick");
   PortFixture fx;
   fx.ch.aw.push_back(make_aw(0x1, 0x1000));
   fx.ch.w.push_back (make_w (0xAA, 0xFFFFFFFFu, true, 0x3C));
@@ -328,6 +342,7 @@ TEST(NsuAxiMasterPort, SimultaneousAwWArForwardProgressInOneTick) {
 //     AR must still drain from the depacketizer (5 channels independent).
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, AwBackpressure_DoesNotBlockAr) {
+  SCENARIO("NSU AxiMasterPort: AW queue full does not block AR channel ingestion (independent per AXI4)");
   PortFixture fx;
   // Fill the port's AW internal queue but leave AR slack.
   for (std::size_t i = 0; i < fx.params.aw_queue_depth + 4; ++i)

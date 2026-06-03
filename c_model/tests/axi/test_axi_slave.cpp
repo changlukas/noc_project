@@ -1,5 +1,6 @@
 // Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/axi_slave.hpp"
+#include "common/scenario.hpp"
 #include "mock_memory_port.hpp"
 #include <gtest/gtest.h>
 
@@ -7,6 +8,7 @@ namespace axi = ni::cmodel::axi;
 namespace test = ni::cmodel::axi::testing;
 
 TEST(AxiSlave, ConstructsAndAcceptsEmptyTick) {
+  SCENARIO("AxiSlave: empty tick produces no captured writes/reads (no spurious activity)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   EXPECT_EQ(slave.aw_q_size(), 0u);
@@ -15,6 +17,7 @@ TEST(AxiSlave, ConstructsAndAcceptsEmptyTick) {
 }
 
 TEST(AxiSlave, WriteBurstSingleBeatInBoundsOkay) {
+  SCENARIO("AxiSlave: 1-beat in-bounds write forwards to memory port and emits OKAY B");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
 
@@ -44,6 +47,7 @@ TEST(AxiSlave, WriteBurstSingleBeatInBoundsOkay) {
 }
 
 TEST(AxiSlave, WriteBurstIncr8Beat_InBounds) {
+  SCENARIO("AxiSlave: 8-beat INCR forwards each beat with per-beat addr increment of 32B");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
 
@@ -78,6 +82,7 @@ TEST(AxiSlave, WriteBurstIncr8Beat_InBounds) {
 }
 
 TEST(AxiSlave, AwWIndependence_WBeforeAw) {
+  SCENARIO("AxiSlave: W beats queued before AW are held, then forwarded once AW arrives");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
 
@@ -102,6 +107,7 @@ TEST(AxiSlave, AwWIndependence_WBeforeAw) {
 }
 
 TEST(AxiSlave, WriteBurstAtomicOob_PushesDecerrSkipsMemory) {
+  SCENARIO("AxiSlave: atomic write fully OOB → emits DECERR B without touching memory");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x100);  // 256 bytes
@@ -124,6 +130,7 @@ TEST(AxiSlave, WriteBurstAtomicOob_PushesDecerrSkipsMemory) {
 }
 
 TEST(AxiSlave, ReadBurstSingleBeatInBoundsOkay) {
+  SCENARIO("AxiSlave: 1-beat in-bounds read forwards AR to memory, returns OKAY R with payload");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -149,6 +156,7 @@ TEST(AxiSlave, ReadBurstSingleBeatInBoundsOkay) {
 }
 
 TEST(AxiSlave, ReadBurstIncr4Beat_InBounds) {
+  SCENARIO("AxiSlave: 4-beat INCR read emits 4 R beats in order with RLAST on beat 3");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -176,6 +184,7 @@ TEST(AxiSlave, ReadBurstIncr4Beat_InBounds) {
 }
 
 TEST(AxiSlave, ReadBurstAtomicOob_AllBeatsDecerr) {
+  SCENARIO("AxiSlave: atomic OOB read → every R beat returns DECERR, none submitted to memory");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x100);
@@ -193,6 +202,7 @@ TEST(AxiSlave, ReadBurstAtomicOob_AllBeatsDecerr) {
 }
 
 TEST(AxiSlave, BackpressureRetry_NoBeatDropped) {
+  SCENARIO("AxiSlave: memory port at capacity=1 → slave retries next beat on each tick, no drops");
   test::MockMemoryPort mem;
   mem.write_capacity = 1;
   axi::AxiSlave slave(mem);
@@ -225,6 +235,7 @@ TEST(AxiSlave, BackpressureRetry_NoBeatDropped) {
 }
 
 TEST(AxiSlave, WriteBurstWorstRespAccumulatedAcrossBeats) {
+  SCENARIO("AxiSlave: write B picks worst per-beat resp (arithmetic max, DECERR > SLVERR > OKAY)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
 
@@ -252,6 +263,7 @@ TEST(AxiSlave, WriteBurstWorstRespAccumulatedAcrossBeats) {
 }
 
 TEST(AxiSlave, SequentialBurstsDifferentIds) {
+  SCENARIO("AxiSlave: sequential bursts with distinct ids each complete cleanly without interference");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -284,6 +296,7 @@ TEST(AxiSlave, SequentialBurstsDifferentIds) {
 // without slave-side reinterpretation. AxiSlave just propagates the W beats
 // to the memory port; addr increments by bpb per INCR beat.
 TEST(AxiSlave, NarrowTransferForwardedToMemory) {
+  SCENARIO("AxiSlave: narrow burst (size=2, bpb=4) propagates per-beat addr+strb to memory unchanged");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -314,6 +327,7 @@ TEST(AxiSlave, NarrowTransferForwardedToMemory) {
 // unchanged. AxiSlave does not interpret WSTRB; the memory port records the
 // exact mask the master emitted so per-byte enable semantics survive.
 TEST(AxiSlave, SparseStrbForwardedToMemory) {
+  SCENARIO("AxiSlave: WSTRB on W passes through verbatim to MemWriteReq.strb (no reinterpretation)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -338,6 +352,7 @@ TEST(AxiSlave, SparseStrbForwardedToMemory) {
 // are fully forwarded — not wait for the B drain. Otherwise the second burst's
 // W beats are mis-routed to (or overwrite) the first burst's address space.
 TEST(AxiSlave, ConcurrentBurstsDifferentIds_WRoutingAdvances) {
+  SCENARIO("AxiSlave: 3 queued AWs+Ws all reach memory with correct id/addr routing before any B drains");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -376,6 +391,7 @@ TEST(AxiSlave, ConcurrentBurstsDifferentIds_WRoutingAdvances) {
 // to (1<<size); the parser enforces these, so the slave can assume total is
 // a power of 2.
 TEST(AxiSlave, WrapBurstLen3_4BeatActualWrap) {
+  SCENARIO("AxiSlave WRAP len=3: 4 beats wrap at wrap_upper, beats 1-3 land at wrap_lower onward");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -394,6 +410,7 @@ TEST(AxiSlave, WrapBurstLen3_4BeatActualWrap) {
 }
 
 TEST(AxiSlave, WrapBurstLen1_2BeatNoWrap) {
+  SCENARIO("AxiSlave WRAP len=1: 2 beats stay inside window, no actual wrap occurs");
   // 2-beat WRAP that stays inside the wrap window without crossing wrap_upper.
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
@@ -410,6 +427,7 @@ TEST(AxiSlave, WrapBurstLen1_2BeatNoWrap) {
 }
 
 TEST(AxiSlave, WrapBurstLen7_8BeatActualWrap) {
+  SCENARIO("AxiSlave WRAP len=7: 8 beats wrap mid-burst (start mid-window), correct address order");
   // 8-beat WRAP, addr mid-window.
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
@@ -428,6 +446,7 @@ TEST(AxiSlave, WrapBurstLen7_8BeatActualWrap) {
 }
 
 TEST(AxiSlave, WrapBurstLen15_16Beat) {
+  SCENARIO("AxiSlave WRAP len=15: 16-beat narrow (size=4, bpb=16) wraps at 256B window");
   // 16-beat narrow WRAP — size=4 (bpb=16, burst total = 16*16 = 256).
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
@@ -449,6 +468,7 @@ TEST(AxiSlave, WrapBurstLen15_16Beat) {
 // AWs are admitted (no exclusion) and W beats route to the oldest in-flight
 // burst at that id via aw_issue_order_.
 TEST(AxiSlave, SameIdMultiOutstanding_FifoOrder) {
+  SCENARIO("AxiSlave: 3 same-id outstanding writes admitted, W beats route per per-id FIFO order");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -488,6 +508,7 @@ TEST(AxiSlave, SameIdMultiOutstanding_FifoOrder) {
 // B1.4.3). Memory sees N writes at addr; last-beat-wins semantics emerge
 // from sequential storage updates.
 TEST(AxiSlave, FixedBurstAllBeatsSameAddr) {
+  SCENARIO("AxiSlave FIXED: every beat targets the same address (no increment, last-beat-wins)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -572,6 +593,7 @@ inline void drain_exclusive_read(test::MockMemoryPort& mem,
 }  // namespace
 
 TEST(AxiSlaveExclusive, ExclusiveAR_SetsTag_NotReady) {
+  SCENARIO("AxiSlave exclusive: AR.lock=1 records tag with addr range, ready=false until RLAST");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -587,6 +609,7 @@ TEST(AxiSlaveExclusive, ExclusiveAR_SetsTag_NotReady) {
 }
 
 TEST(AxiSlaveExclusive, ExclusiveAR_RComplete_TagBecomesReady) {
+  SCENARIO("AxiSlave exclusive: tag.ready flips to true after exclusive AR's RLAST drains");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -599,6 +622,7 @@ TEST(AxiSlaveExclusive, ExclusiveAR_RComplete_TagBecomesReady) {
 }
 
 TEST(AxiSlaveExclusive, NormalWrite_NoOverlap_TagSurvives) {
+  SCENARIO("AxiSlave exclusive: normal AW outside tag window does not invalidate the tag");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -621,6 +645,7 @@ TEST(AxiSlaveExclusive, NormalWrite_NoOverlap_TagSurvives) {
 }
 
 TEST(AxiSlaveExclusive, NormalWrite_Overlap_TagCleared) {
+  SCENARIO("AxiSlave exclusive: normal AW overlapping tag window invalidates the tag (§A7.2.4)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -642,6 +667,7 @@ TEST(AxiSlaveExclusive, NormalWrite_Overlap_TagCleared) {
 }
 
 TEST(AxiSlaveExclusive, ExclusivePair_FullMatch_EXOKAY_CommitsMemory) {
+  SCENARIO("AxiSlave exclusive: AR+AW pair with full attribute match → EXOKAY B, memory committed");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -668,6 +694,7 @@ TEST(AxiSlaveExclusive, ExclusivePair_FullMatch_EXOKAY_CommitsMemory) {
 }
 
 TEST(AxiSlaveExclusive, ExclusiveWrite_NoPriorRead_OKAY_NoCommit) {
+  SCENARIO("AxiSlave exclusive: exclusive AW with no prior exclusive AR → OKAY, no memory commit");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -685,6 +712,7 @@ TEST(AxiSlaveExclusive, ExclusiveWrite_NoPriorRead_OKAY_NoCommit) {
 }
 
 TEST(AxiSlaveExclusive, ExclusiveWrite_BeforeReady_OKAY_NoCommit) {
+  SCENARIO("AxiSlave exclusive: exclusive AW before tag.ready=true → OKAY, no commit");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -704,6 +732,7 @@ TEST(AxiSlaveExclusive, ExclusiveWrite_BeforeReady_OKAY_NoCommit) {
 }
 
 TEST(AxiSlaveExclusive, ExclusiveWrite_SizeMismatch_OKAY_NoCommit) {
+  SCENARIO("AxiSlave exclusive: AW size != tag.size → attribute mismatch, OKAY, tag still consumed");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -726,6 +755,7 @@ TEST(AxiSlaveExclusive, ExclusiveWrite_SizeMismatch_OKAY_NoCommit) {
 }
 
 TEST(AxiSlaveExclusive, ExclusiveWriteOnOob_DECERR) {
+  SCENARIO("AxiSlave exclusive: OOB pre-check trumps exclusive resp → DECERR (not OKAY/EXOKAY)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x100);  // 256 bytes
@@ -755,6 +785,7 @@ TEST(AxiSlaveExclusive, ExclusiveWriteOnOob_DECERR) {
 }
 
 TEST(AxiSlaveExclusive, ExclusiveWRAP_TagRangeIsWrapWindow) {
+  SCENARIO("AxiSlave exclusive WRAP: tag's addr_range equals the wrap window, burst field stored");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -775,6 +806,7 @@ TEST(AxiSlaveExclusive, ExclusiveWRAP_TagRangeIsWrapWindow) {
 }
 
 TEST(AxiSlaveExclusive, MultiId_NormalWriteErasesMultipleTags_IteratorSafe) {
+  SCENARIO("AxiSlave exclusive: normal AW overlapping multiple tags erases each safely (iterator-safe)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -816,6 +848,7 @@ TEST(AxiSlaveExclusive, MultiId_NormalWriteErasesMultipleTags_IteratorSafe) {
 }
 
 TEST(AxiSlaveExclusive, ExclusiveAR_SameId_SecondOverwritesFirst) {
+  SCENARIO("AxiSlave exclusive: 2nd exclusive AR same id overwrites prior tag (§A7.2.3 one-per-id)");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -839,6 +872,7 @@ TEST(AxiSlaveExclusive, ExclusiveAR_SameId_SecondOverwritesFirst) {
 // the new tag to ready. The new tag should only become ready after its OWN
 // RLAST. pending_rlasts accounts for in-flight RLASTs ahead of the new tag.
 TEST(AxiSlaveExclusive, ExclusiveAR_SameId_RaceBetweenOverwriteAndOldRLAST) {
+  SCENARIO("AxiSlave exclusive: new same-id tag tracks pending_rlasts so old RLAST does not promote it");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);
@@ -898,6 +932,7 @@ TEST(AxiSlaveExclusive, ExclusiveAR_SameId_RaceBetweenOverwriteAndOldRLAST) {
 }
 
 TEST(AxiSlaveExclusive, DifferentId_ExclusiveAW_DoesNotAffectOtherTag) {
+  SCENARIO("AxiSlave exclusive: exclusive AW on id=1 consumes id=1 tag only, id=2 tag survives");
   test::MockMemoryPort mem;
   axi::AxiSlave slave(mem);
   slave.set_memory_bounds(0x1000, 0x1000);

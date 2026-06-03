@@ -1,14 +1,17 @@
 #include "ni/flit.hpp"
+#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::Flit;
 
 TEST(Flit, ConstructFromRawHasMatchingWidth) {
+  SCENARIO("Flit: WIDTH_BITS/WIDTH_BYTES match codegen FLIT_WIDTH constant");
   EXPECT_EQ(Flit::WIDTH_BITS,  ni::FLIT_WIDTH);
   EXPECT_EQ(Flit::WIDTH_BYTES, (ni::FLIT_WIDTH + 7) / 8);
 }
 
 TEST(Flit, SetGetHeaderRoundtripAllFields) {
+  SCENARIO("Flit: every header field (noc_qos/axi_ch/src_id/.../flit_ecc) set/get bit-perfect");
   Flit f;
   f.set_header_field("noc_qos",   0xA);
   f.set_header_field("axi_ch",    0x4);  // R
@@ -37,6 +40,7 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
 }
 
 TEST(Flit, SetGetPayloadAwFields) {
+  SCENARIO("Flit: AW payload fields (awid/awaddr/awlen/awsize) set/get bit-perfect");
   Flit f;
   f.set_payload_field("AW", "awid",   0x55);
   f.set_payload_field("AW", "awaddr", 0xDEADBEEFCAFEBABEull);
@@ -49,6 +53,7 @@ TEST(Flit, SetGetPayloadAwFields) {
 }
 
 TEST(Flit, SetGetPayloadBytesWdata) {
+  SCENARIO("Flit: W payload wdata (32B) byte-array set/get round-trips bit-perfect");
   Flit f;
   std::array<uint8_t, 32> wdata{};
   for (int i = 0; i < 32; ++i) wdata[i] = static_cast<uint8_t>(0xA0 + i);
@@ -59,11 +64,13 @@ TEST(Flit, SetGetPayloadBytesWdata) {
 }
 
 TEST(Flit, RsvdPaddingCheckPassesWhenZero) {
+  SCENARIO("Flit: default-constructed flit has all rsvd/padding bits zero");
   Flit f;
   EXPECT_TRUE(f.check_padding_is_zero());
 }
 
 TEST(Flit, RsvdPaddingCheckFailsWhenSet) {
+  SCENARIO("Flit: setting any rsvd bit makes check_padding_is_zero return false");
   Flit f;
   // Set a bit in rsvd region
   f.set_header_field("rsvd", 0x3);  // 2-bit rsvd
@@ -71,6 +78,7 @@ TEST(Flit, RsvdPaddingCheckFailsWhenSet) {
 }
 
 TEST(Flit, SetGetPayloadBFields) {
+  SCENARIO("Flit: B payload fields (bid/bresp/buser) set/get bit-perfect");
   Flit f;
   f.set_payload_field("B", "bid",   0x42);
   f.set_payload_field("B", "bresp", 0x2);  // SLVERR
@@ -81,6 +89,7 @@ TEST(Flit, SetGetPayloadBFields) {
 }
 
 TEST(Flit, SetGetPayloadRFields) {
+  SCENARIO("Flit: R payload fields (rid/rresp/rlast) set/get bit-perfect");
   Flit f;
   f.set_payload_field("R", "rid",   0x37);
   f.set_payload_field("R", "rresp", 0x3);  // DECERR

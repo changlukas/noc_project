@@ -29,6 +29,7 @@
 #include "axi/memory.hpp"
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
+#include "common/scenario.hpp"
 #include "ni/depacketizer.hpp"
 #include "ni/packetizer.hpp"
 #include "ni/port_params.hpp"
@@ -246,6 +247,7 @@ struct FixtureParam {
 class PortPairLoopbackP : public ::testing::TestWithParam<FixtureParam> {};
 
 TEST_P(PortPairLoopbackP, EndToEndZeroMismatch) {
+  SCENARIO("port-pair loopback: NMU+NSU port pair end-to-end fixture run produces zero scoreboard mismatches");
   auto p = GetParam();
   std::string yaml_path = "fixtures/" + p.yaml;
   std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml +

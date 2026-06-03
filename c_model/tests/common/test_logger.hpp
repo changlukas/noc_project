@@ -22,6 +22,11 @@
 // See docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md
 #pragma once
 
+// SCENARIO macro lives in the standalone scenario.hpp so tests that only need
+// the per-TEST description can include it without dragging in the AxiMaster +
+// yaml-cpp dependency chain pulled in by AxiMasterObserver below.
+#include "common/scenario.hpp"
+
 #include "axi/axi_master.hpp"
 #include "axi/types.hpp"
 
@@ -33,20 +38,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-namespace ni::cmodel::testing {
-
-// Always-emitted one-line scenario description (no env var gate).
-// Output: "[scenario] <desc>"
-inline void print_scenario(const char* desc) {
-    std::cout << "[scenario] " << desc << '\n';
-}
-
-}  // namespace ni::cmodel::testing
-
-// Wrap to a single statement so SCENARIO("...") can sit on its own line
-// inside any TEST() body without surprising the surrounding control flow.
-#define SCENARIO(desc) ::ni::cmodel::testing::print_scenario(desc)
 
 namespace ni::cmodel::testing {
 

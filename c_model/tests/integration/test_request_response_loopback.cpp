@@ -49,6 +49,7 @@
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
 #include "common/loopback_noc.hpp"
+#include "common/scenario.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
@@ -402,6 +403,7 @@ class PacketizeLoopbackFixture
     : public ::testing::TestWithParam<FixtureParam> {};
 
 TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
+  SCENARIO("req/rsp loopback: NMU+NSU packetize/depacketize + LoopbackNoc end-to-end zero mismatch");
   auto p = GetParam();
   std::string yaml_path = "fixtures/" + p.yaml;
   std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml +

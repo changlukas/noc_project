@@ -1,4 +1,5 @@
 #include "axi/scoreboard.hpp"
+#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 namespace axi = ni::cmodel::axi;
@@ -8,6 +9,7 @@ namespace axi = ni::cmodel::axi;
 // pass size=5, len=0, burst=INCR (1-beat, full-bus) unless the case requires
 // otherwise — that combination matches Phase A's only-supported geometry.
 TEST(Scoreboard, NoUpdateOnDecerr) {
+  SCENARIO("scoreboard: DECERR write does not update expected_, so later read sees no mismatch");
   axi::Scoreboard sb;
   std::vector<uint32_t> strb1(1, 0xFFFF'FFFFu);
   sb.handle_write_completed(
@@ -23,6 +25,7 @@ TEST(Scoreboard, NoUpdateOnDecerr) {
 }
 
 TEST(Scoreboard, MismatchDetected) {
+  SCENARIO("scoreboard: read returning altered byte vs OKAY-written data raises 1 mismatch");
   axi::Scoreboard sb;
   std::vector<uint32_t> strb1(1, 0xFFFF'FFFFu);
   std::vector<uint8_t> wdata(axi::DATA_BYTES, 0x00u);
@@ -41,6 +44,7 @@ TEST(Scoreboard, MismatchDetected) {
 }
 
 TEST(Scoreboard, MatchPassesSilent) {
+  SCENARIO("scoreboard: exact write-then-read byte match produces zero mismatches");
   axi::Scoreboard sb;
   std::vector<uint32_t> strb1(1, 0xFFFF'FFFFu);
   std::vector<uint8_t> wdata(axi::DATA_BYTES, 0x00u);
@@ -59,6 +63,7 @@ TEST(Scoreboard, MatchPassesSilent) {
 }
 
 TEST(Scoreboard, ReadFromUnwrittenAddrReturnsFillDefault) {
+  SCENARIO("scoreboard: read of never-written addr returning fill-default value is not a mismatch");
   axi::Scoreboard sb;
   sb.handle_read_observed(
       axi::ReadResult{0x400, /*size*/5, /*len*/0, axi::Burst::INCR,
@@ -67,6 +72,7 @@ TEST(Scoreboard, ReadFromUnwrittenAddrReturnsFillDefault) {
 }
 
 TEST(Scoreboard, SparseWstrbByteMerge) {
+  SCENARIO("scoreboard: sparse WSTRB (0x0F) merges only enabled byte lanes into expected_");
   // 1-beat write with strb=0x0F: only byte lanes 0-3 land in expected_;
   // the remaining bytes stay at the default-fill (0x00). A subsequent read
   // observing 0xAA in lanes 0-3 and 0x00 elsewhere must produce zero mismatches.

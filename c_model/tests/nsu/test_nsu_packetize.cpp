@@ -1,6 +1,7 @@
 #include "nsu/packetize.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "common/loopback_noc.hpp"
+#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
@@ -28,6 +29,7 @@ axi::RBeat make_r(uint8_t id, bool last, axi::Resp resp = axi::Resp::OKAY) {
 }
 
 TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
+  SCENARIO("NSU Packetize: push_b reads MetaBuffer (src/rob_req/rob_idx) and stamps onto B flit header");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   mb.snapshot_write(0x05, {/*src=*/0x12, /*rob_req=*/1, /*rob_idx=*/3});
@@ -48,6 +50,7 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
 }
 
 TEST(NsuPacketize, PushBAssertsWithoutMatchingMeta) {
+  SCENARIO("NSU Packetize: push_b without matching MetaBuffer entry aborts (B for unknown AW)");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Packetize pkt(noc.rsp_out(), mb, kNsuSrcId);
@@ -55,6 +58,7 @@ TEST(NsuPacketize, PushBAssertsWithoutMatchingMeta) {
 }
 
 TEST(NsuPacketize, PushBNoCommitOnNocFull) {
+  SCENARIO("NSU Packetize: push_b fail on NoC full keeps MetaBuffer entry (peek-then-commit, no desync)");
   LoopbackNoc noc(/*req*/16, /*rsp*/1);
   MetaBuffer mb(4);
   mb.snapshot_write(0x05, {0x12, 0, 0});
@@ -73,6 +77,7 @@ TEST(NsuPacketize, PushBNoCommitOnNocFull) {
 }
 
 TEST(NsuPacketize, PushRMultiBeatPeekUntilRLast) {
+  SCENARIO("NSU Packetize: push_r leaves MetaBuffer entry until rlast=1, then commits (multi-beat read)");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   mb.snapshot_read(0x03, {0x12, 0, 5});
@@ -87,6 +92,7 @@ TEST(NsuPacketize, PushRMultiBeatPeekUntilRLast) {
 }
 
 TEST(NsuPacketize, RPayloadBitPerfect) {
+  SCENARIO("NSU Packetize: R payload (rid/rresp/rlast/32B rdata) round-trips bit-perfect through flit");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   mb.snapshot_read(0x03, {0x12, 0, 0});
@@ -102,6 +108,7 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
 }
 
 TEST(NsuPacketize, PushAwAssertFalse) {
+  SCENARIO("NSU Packetize: push_aw aborts (AW is request-direction; NSU only emits B/R responses)");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Packetize pkt(noc.rsp_out(), mb, kNsuSrcId);

@@ -1,5 +1,6 @@
 #include "nmu/packetize.hpp"
 #include "common/loopback_noc.hpp"
+#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
@@ -33,6 +34,7 @@ axi::ArBeat make_ar(uint8_t id, uint64_t addr) {
 }
 
 TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
+  SCENARIO("NMU Packetize: push_aw stamps src_id/axi_ch=AW/vc=0/last=1/awid/awaddr on emitted flit");
   LoopbackNoc noc(/*req*/16, /*rsp*/16);
   Packetize pkt(noc.req_out(), kSrcId);
   // Legacy test: only verifies packetize stamps src + axi_ch + last + awid +
@@ -51,6 +53,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
 }
 
 TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
+  SCENARIO("NMU Packetize: W flit inherits dst_id from preceding AW via W-meta FIFO");
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
   // addr 0x340000 → dst = (0x340000 >> 16) & 0xFF = 0x34
@@ -65,6 +68,7 @@ TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
 }
 
 TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
+  SCENARIO("NMU Packetize: 2 outstanding AWs (different dst), each W inherits its own AW's dst");
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
   // addr 0x340000 → dst=0x34;  addr 0x560000 → dst=0x56.
@@ -83,6 +87,7 @@ TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
 }
 
 TEST(NmuPacketize, PushAwFailsOnNocFull) {
+  SCENARIO("NMU Packetize: push_aw returns false when NoC req channel is full; succeeds after drain");
   LoopbackNoc noc(/*req*/1, /*rsp*/16);
   Packetize pkt(noc.req_out(), kSrcId);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
@@ -92,6 +97,7 @@ TEST(NmuPacketize, PushAwFailsOnNocFull) {
 }
 
 TEST(NmuPacketize, AwPayloadBitPerfect) {
+  SCENARIO("NMU Packetize: every AW payload field (id/addr/len/size/burst/cache/lock/prot/...) bit-perfect");
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
   auto aw = make_aw(/*id*/0xAB, /*addr*/0x123456789ABCDEF0ull, /*len*/0xFF);
@@ -112,6 +118,7 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
 }
 
 TEST(NmuPacketize, WPayloadBitPerfect) {
+  SCENARIO("NMU Packetize: W payload (wdata/wstrb/wlast/wuser) round-trips bit-perfect through flit");
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
@@ -129,6 +136,7 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
 }
 
 TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
+  SCENARIO("NMU Packetize: AR flit stamps axi_ch=AR, dst from addr_trans, rob_req/rob_idx defaults to 0");
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
   // addr 0x990000 → dst = (0x990000 >> 16) & 0xFF = 0x99.
@@ -145,6 +153,7 @@ TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
 }
 
 TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
+  SCENARIO("NMU Packetize: rsvd/disabled header fields (commtype/multicast/noc_qos/...) all zero");
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), kSrcId);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
@@ -158,6 +167,7 @@ TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
 }
 
 TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
+  SCENARIO("NMU Packetize: push_aw_with_meta overrides dst_id/local_addr/rob_req/rob_idx from meta");
   LoopbackNoc noc(/*req*/16, /*rsp*/16);
   Packetize pkt(noc.req_out(), /*src=*/0x01);
   axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100);  // addr → dst=0 by default
@@ -176,6 +186,7 @@ TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
 }
 
 TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
+  SCENARIO("NMU Packetize: frozen push_aw runs addr_trans::xy_route to fill dst_id and local_addr");
   LoopbackNoc noc(16, 16);
   Packetize pkt(noc.req_out(), /*src=*/0x01);
   // addr 0x10100 → addr_trans gives dst=1

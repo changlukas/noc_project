@@ -1,6 +1,7 @@
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "common/loopback_noc.hpp"
+#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
@@ -49,6 +50,7 @@ ni::cmodel::Flit make_ar_flit(uint8_t arid, uint64_t addr, uint8_t src_id = 0x10
 }
 
 TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
+  SCENARIO("NSU Depacketize: AW flit snapshots src_id/rob_req/rob_idx into MetaBuffer + emits AW beat");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, /*aw*/16, /*w*/16, /*ar*/16);
@@ -68,6 +70,7 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
 }
 
 TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
+  SCENARIO("NSU Depacketize: AR flit snapshots read-side meta into MetaBuffer + emits AR beat");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
@@ -79,6 +82,7 @@ TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
 }
 
 TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
+  SCENARIO("NSU Depacketize: W flit emits W beat but does NOT touch MetaBuffer (write-meta belongs to AW)");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
@@ -90,6 +94,7 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
 }
 
 TEST(NsuDepacketize, DemuxMixedAwWAr) {
+  SCENARIO("NSU Depacketize: interleaved AW/W/AR flits demux to per-channel queues by axi_ch header");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
@@ -103,6 +108,7 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
 }
 
 TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
+  SCENARIO("NSU Depacketize: HoL W queue full holds pending W; AW behind blocked until W drained");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, /*aw*/16, /*w cap*/1, /*ar*/16);
@@ -120,6 +126,7 @@ TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
 }
 
 TEST(NsuDepacketize, PopBAssertFalse) {
+  SCENARIO("NSU Depacketize: pop_b asserts false (B is response-direction only, not request)");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
@@ -127,6 +134,7 @@ TEST(NsuDepacketize, PopBAssertFalse) {
 }
 
 TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
+  SCENARIO("NSU Depacketize: AW queue preserves NoC arrival order across 3 sequential AW flits");
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, 16, 16, 16);

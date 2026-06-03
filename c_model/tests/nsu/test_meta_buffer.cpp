@@ -1,10 +1,12 @@
 #include "nsu/meta_buffer.hpp"
+#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nsu::MetaBuffer;
 using ni::cmodel::nsu::MetaEntry;
 
 TEST(MetaBuffer, WriteSnapshotPeekCommit) {
+  SCENARIO("MetaBuffer: snapshot_write -> peek_write returns entry; commit_write erases it");
   MetaBuffer mb(/*per_id_depth=*/4);
   mb.snapshot_write(0x05, {0x10, 1, 7});
   auto e = mb.peek_write(0x05);
@@ -23,6 +25,7 @@ TEST(MetaBuffer, WriteSnapshotPeekCommit) {
 }
 
 TEST(MetaBuffer, MultiOutstandingSameIdFifoOrder) {
+  SCENARIO("MetaBuffer: 3 same-id writes returned by peek+commit in FIFO order (rob_idx 1,2,3)");
   MetaBuffer mb(4);
   mb.snapshot_write(0x05, {0x10, 0, 1});
   mb.snapshot_write(0x05, {0x10, 0, 2});
@@ -34,6 +37,7 @@ TEST(MetaBuffer, MultiOutstandingSameIdFifoOrder) {
 }
 
 TEST(MetaBuffer, DifferentIdsIndependent) {
+  SCENARIO("MetaBuffer: id=0x05 ops do not touch id=0x07 state (per-id deques are independent)");
   MetaBuffer mb(4);
   mb.snapshot_write(0x05, {0x10, 0, 0});
   mb.snapshot_write(0x07, {0x20, 0, 0});
@@ -42,6 +46,7 @@ TEST(MetaBuffer, DifferentIdsIndependent) {
 }
 
 TEST(MetaBuffer, ReadPeekCommitMultiBeat) {
+  SCENARIO("MetaBuffer: read entry survives repeated peek_read; commit_read on rlast erases");
   MetaBuffer mb(4);
   mb.snapshot_read(0x03, {0x10, 0, 5});
   // R burst: peek twice for r0/r1, commit only on r1 (last)
@@ -52,12 +57,14 @@ TEST(MetaBuffer, ReadPeekCommitMultiBeat) {
 }
 
 TEST(MetaBuffer, PeekEmptyReturnsNullopt) {
+  SCENARIO("MetaBuffer: peek_write/peek_read on unknown id returns nullopt (no spurious entry)");
   MetaBuffer mb(4);
   EXPECT_FALSE(mb.peek_write(0xAA).has_value());
   EXPECT_FALSE(mb.peek_read(0xBB).has_value());
 }
 
 TEST(MetaBuffer, SnapshotOverDepthAsserts) {
+  SCENARIO("MetaBuffer: per-id depth exceeded triggers assert (defensive bound on outstanding count)");
   // Document depth limit behavior — depth=2, insert 3 should assert (debug build)
   MetaBuffer mb(/*per_id_depth=*/2);
   mb.snapshot_write(0x01, {0, 0, 0});

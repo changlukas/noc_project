@@ -2,6 +2,7 @@
 #include "nmu/packetize.hpp"
 #include "nmu/depacketize.hpp"
 #include "common/loopback_noc.hpp"
+#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <array>
 #include <bitset>
@@ -68,6 +69,7 @@ struct RobRig {
 // === ROB-specific core behavior (4 tests) ===
 
 TEST(NmuRob, Disabled_StallSameIdDiffDst) {
+    SCENARIO("Rob Disabled: same-id AW to different dst stalls until 1st AW's B response returns");
     RobRig r;
     // 1st AW: id=5, addr=0x100 -> dst=0
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
@@ -76,6 +78,7 @@ TEST(NmuRob, Disabled_StallSameIdDiffDst) {
 }
 
 TEST(NmuRob, Disabled_StallReleaseOnBComplete) {
+    SCENARIO("Rob Disabled: stall on same-id-diff-dst AW released when matching B arrives via pop_b");
     RobRig r;
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
     EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x10100)));
@@ -90,6 +93,7 @@ TEST(NmuRob, Disabled_StallReleaseOnBComplete) {
 }
 
 TEST(NmuRob, Disabled_StallReleaseOnRlast) {
+    SCENARIO("Rob Disabled: AR stall on same-id-diff-dst released when matching R(rlast=1) arrives");
     RobRig r;
     ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
     EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x10100)));
@@ -103,6 +107,7 @@ TEST(NmuRob, Disabled_StallReleaseOnRlast) {
 }
 
 TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
+    SCENARIO("Rob Disabled: W-burst credit starts at 0; push_w before any push_aw returns false");
     RobRig r;
     // No push_aw yet -> credit=0 -> push_w must return false
     EXPECT_FALSE(r.rob.push_w(make_w(/*last=*/true)));
@@ -111,6 +116,7 @@ TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
 // === ROB invariants (3 tests) ===
 
 TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
+    SCENARIO("Rob Disabled: push_aw failing on downstream backpressure leaves ROB state unchanged");
     // Force downstream NoC full via small req_depth
     LoopbackNoc noc(/*req*/1, /*rsp*/16);
     Packetize pkt(noc.req_out(), kSrcId);
@@ -127,6 +133,7 @@ TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
 }
 
 TEST(NmuRob, Disabled_MultiOutstandingSameIdSameDst_NoFalseStall) {
+    SCENARIO("Rob Disabled: two same-id same-dst AWs both admitted (no false stall when dst matches)");
     RobRig r;
     // 2 AWs same id, same dst (both addr in 0x100-0xFFFF range -> dst=0)
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
@@ -135,6 +142,7 @@ TEST(NmuRob, Disabled_MultiOutstandingSameIdSameDst_NoFalseStall) {
 }
 
 TEST(NmuRob, Disabled_WCreditMultiOutstandingCorrectDecrement) {
+    SCENARIO("Rob Disabled: W credit increments per AW, decrements per wlast=1; 3rd wlast fails at 0");
     RobRig r;
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x200)));
@@ -148,6 +156,7 @@ TEST(NmuRob, Disabled_WCreditMultiOutstandingCorrectDecrement) {
 // === Edge cases (2 tests) ===
 
 TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
+    SCENARIO("Rob Disabled: push_w failing on downstream backpressure preserves W credit (no decrement)");
     // Trigger backpressure: small req_depth fills after AW + W beats
     LoopbackNoc noc(/*req*/2, /*rsp*/16);
     Packetize pkt(noc.req_out(), kSrcId);
@@ -164,6 +173,7 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
 }
 
 TEST(NmuRob, Disabled_DifferentIdsIndependentNoInterference) {
+    SCENARIO("Rob Disabled: id=5 stalled does not block id=6; per-id state is independent");
     RobRig r;
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
     EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x10100)));  // id=5 stalled
@@ -174,6 +184,7 @@ TEST(NmuRob, Disabled_DifferentIdsIndependentNoInterference) {
 // === Defensive (1 test) ===
 
 TEST(NmuRobDeath, Disabled_AbortPaths) {
+    SCENARIO("Rob: push_b/push_r and pop_aw/pop_w/pop_ar all abort (wrong-direction APIs)");
     RobRig r;
     EXPECT_DEATH(r.rob.push_b(axi::BBeat{}), "Rob: push_b");
     EXPECT_DEATH(r.rob.push_r(axi::RBeat{}), "Rob: push_r");
@@ -185,6 +196,7 @@ TEST(NmuRobDeath, Disabled_AbortPaths) {
 // === ROB Enabled mode: push-side tests (Task 2) ===
 
 TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
+    SCENARIO("Rob Enabled: push_aw allocates ROB slot, stamps rob_req=1 + rob_idx on AW header");
     LoopbackNoc noc(/*req=*/16, /*rsp=*/16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -198,6 +210,7 @@ TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
 }
 
 TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
+    SCENARIO("Rob Enabled: AR len=3 (4 beats) -> 4 consecutive ROB slots, base rob_idx stamped to AR header");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -220,6 +233,7 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
 }
 
 TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
+    SCENARIO("Rob Enabled: find_consecutive_free returns -1 when fragmented free pool lacks a run of n");
     std::bitset<Rob::ROB_CAPACITY> free;
     // Fragmented free state: bits 1 at positions 0, 2, 4, 6 only.
     free.set(0); free.set(2); free.set(4); free.set(6);
@@ -239,6 +253,7 @@ TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
 }
 
 TEST(NmuRob, Enabled_PushAr_OversizedBurst_ReturnFalse) {
+    SCENARIO("Rob Enabled: AR burst > ROB_CAPACITY rejected (return false), no state mutation");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -256,6 +271,7 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_ReturnFalse) {
 }
 
 TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
+    SCENARIO("Rob Enabled: push_ar rolled back on downstream backpressure; slots stay free for retry");
     // req queue depth = 1: pkt.push_ar_with_meta will fail after 1st push
     LoopbackNoc noc(/*req=*/1, /*rsp=*/16);
     Packetize   pkt(noc.req_out(), kSrcId);
@@ -281,6 +297,7 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
 }
 
 TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
+    SCENARIO("Rob Enabled: 32 AWs fill write pool to ROB_CAPACITY; 33rd push_aw returns false");
     LoopbackNoc noc(64, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -295,6 +312,7 @@ TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
 }
 
 TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
+    SCENARIO("Rob Enabled: push_aw rolled back on downstream backpressure; slot stays free for retry");
     LoopbackNoc noc(/*req=*/1, /*rsp=*/16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -309,6 +327,7 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
 // === ROB Enabled mode: pop-side tests (Task 3) ===
 
 TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
+    SCENARIO("Rob Enabled: B for rob_idx=0 (per-id head) commits immediately on pop_b");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -332,6 +351,7 @@ TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
 }
 
 TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
+    SCENARIO("Rob Enabled: out-of-order B (slot 1 before 0) held; chain-flushes when head (0) arrives");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -364,6 +384,7 @@ TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
 }
 
 TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
+    SCENARIO("Rob Enabled: AR1 4-beat then AR2 2-beat R flits arrive reversed; commit in submission order");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -415,6 +436,7 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
 }
 
 TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
+    SCENARIO("Rob Enabled: different-id Rs may commit interleaved (per-id order preserved within each id)");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -453,6 +475,7 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
 }
 
 TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
+    SCENARIO("Rob Enabled: pop_b on B flit with unallocated rob_idx aborts (defensive assert)");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -473,6 +496,7 @@ TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
 }
 
 TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
+    SCENARIO("Rob Enabled: pop_b on Disabled-mode flit (rob_req=0) aborts (mode mismatch)");
     LoopbackNoc noc(16, 16);
     Packetize   pkt(noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);

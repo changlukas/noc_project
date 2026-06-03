@@ -4,6 +4,7 @@
 #include "axi/memory.hpp"
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
+#include "common/scenario.hpp"
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
@@ -81,6 +82,7 @@ struct FixtureName {
 class IntegrationP : public ::testing::TestWithParam<FixtureParam> {};
 
 TEST_P(IntegrationP, RunFixture) {
+  SCENARIO("axi integration: end-to-end YAML fixture runs Master+Slave+Mem to completion under watchdog");
   auto p = GetParam();
   std::string yaml_path = "fixtures/" + p.yaml;
   std::string wpath     = p.write_data.empty() ? std::string{} : ("fixtures/" + p.write_data);

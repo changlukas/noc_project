@@ -12,6 +12,7 @@
 //     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
 #include "common/loopback_depacketizer.hpp"
 #include "common/loopback_packetizer.hpp"
+#include "common/scenario.hpp"
 #include "ni/port_params.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include <cstdint>
@@ -84,6 +85,7 @@ struct PortFixture {
 // 1. Basic per-channel handshake: push N beats, tick, drain N beats out.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, AwBasicHandshake_PushPopNoLoss) {
+  SCENARIO("NMU AxiSlavePort: 8 AW pushes forward to packetizer in original order, no loss");
   PortFixture fx;
   for (uint8_t i = 0; i < 8; ++i)
     ASSERT_TRUE(fx.port.push_aw(make_aw(i, 0x1000 + i * 32)));
@@ -93,6 +95,7 @@ TEST(NmuAxiSlavePort, AwBasicHandshake_PushPopNoLoss) {
 }
 
 TEST(NmuAxiSlavePort, ArBasicHandshake_PushPopNoLoss) {
+  SCENARIO("NMU AxiSlavePort: 8 AR pushes forward to packetizer in original order, no loss");
   PortFixture fx;
   for (uint8_t i = 0; i < 8; ++i)
     ASSERT_TRUE(fx.port.push_ar(make_ar(i, 0x2000 + i * 32)));
@@ -102,6 +105,7 @@ TEST(NmuAxiSlavePort, ArBasicHandshake_PushPopNoLoss) {
 }
 
 TEST(NmuAxiSlavePort, WBasicHandshake_PushPopNoLoss) {
+  SCENARIO("NMU AxiSlavePort: 8 W beat pushes forward to packetizer with payload preserved");
   PortFixture fx;
   for (uint8_t i = 0; i < 8; ++i)
     ASSERT_TRUE(fx.port.push_w(make_w(0x10 + i, 0xFFFFFFFFu, i == 7, i)));
@@ -115,6 +119,7 @@ TEST(NmuAxiSlavePort, WBasicHandshake_PushPopNoLoss) {
 //    must return false; draining one frees room and the next push succeeds.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, AwBackpressure_FullThenDrainThenAcceptOne) {
+  SCENARIO("NMU AxiSlavePort: AW queue full rejects push; drain one freeing slot lets next AW in");
   PortFixture fx;
   fx.set_loopback_caps(0, 0, 0, 0, 0);  // packetizer cannot accept anything
   for (std::size_t i = 0; i < fx.params.aw_queue_depth; ++i)
@@ -132,6 +137,7 @@ TEST(NmuAxiSlavePort, AwBackpressure_FullThenDrainThenAcceptOne) {
 //    duplicate-enqueue when retried later.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, AwBoundary_FailedPushDoesNotDuplicateOnRetry) {
+  SCENARIO("NMU AxiSlavePort: failed AW pushes do not silently land; retry counts as exactly one");
   PortFixture fx;
   fx.set_loopback_caps(0, 0, 0, 0, 0);
   for (std::size_t i = 0; i < fx.params.aw_queue_depth; ++i)
@@ -160,6 +166,7 @@ TEST(NmuAxiSlavePort, AwBoundary_FailedPushDoesNotDuplicateOnRetry) {
 // 4. AW channel FIFO order preserved end-to-end (mixed ids).
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, AwFifoOrder_PreservedAcrossMixedIds) {
+  SCENARIO("NMU AxiSlavePort: AW channel FIFO order preserved across mixed AXI ids (no per-id reorder)");
   PortFixture fx;
   // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
   // Cross-ID completion ordering / per-ID response reordering is the ROB
@@ -176,6 +183,7 @@ TEST(NmuAxiSlavePort, AwFifoOrder_PreservedAcrossMixedIds) {
 // 5. AR channel FIFO order preserved end-to-end (mixed ids).
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, ArFifoOrder_PreservedAcrossMixedIds) {
+  SCENARIO("NMU AxiSlavePort: AR channel FIFO order preserved across mixed AXI ids (no per-id reorder)");
   PortFixture fx;
   // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
   // Cross-ID completion ordering / per-ID response reordering is the ROB
@@ -192,6 +200,7 @@ TEST(NmuAxiSlavePort, ArFifoOrder_PreservedAcrossMixedIds) {
 // 6. W beats pass-through bit-for-bit unchanged.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, WPassthroughBitForBit) {
+  SCENARIO("NMU AxiSlavePort: W beat passes through with data/strb/last/user bit-for-bit preserved");
   PortFixture fx;
   axi::WBeat in{};
   for (std::size_t i = 0; i < axi::DATA_BYTES; ++i)
@@ -213,6 +222,7 @@ TEST(NmuAxiSlavePort, WPassthroughBitForBit) {
 // 7. B beats pass-through bit-for-bit unchanged.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, BPassthroughBitForBit) {
+  SCENARIO("NMU AxiSlavePort: B beat passes through with id/resp/user bit-for-bit preserved");
   PortFixture fx;
   axi::BBeat in = make_b(0x42, axi::Resp::EXOKAY, 0x91);
   fx.ch.b.push_back(in);
@@ -228,6 +238,7 @@ TEST(NmuAxiSlavePort, BPassthroughBitForBit) {
 // 8. R beats pass-through bit-for-bit unchanged.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, RPassthroughBitForBit) {
+  SCENARIO("NMU AxiSlavePort: R beat passes through with all fields (id/data/resp/last/user) preserved");
   PortFixture fx;
   axi::RBeat in{};
   in.id = 0x37;
@@ -251,6 +262,7 @@ TEST(NmuAxiSlavePort, RPassthroughBitForBit) {
 // 9. AW + AR beats pass-through bit-for-bit unchanged (all fields).
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, AwArPassthroughBitForBit) {
+  SCENARIO("NMU AxiSlavePort: AW and AR pass through with every field (id/addr/len/.../qos) preserved");
   PortFixture fx;
   axi::AwBeat aw_in = make_aw(0x5A, 0xCAFE'BABE'DEAD'BEEFull, 7, 5,
                                 axi::Burst::WRAP, 0xC, 1, 0x7, 0xF, 0xAB, 0xE);
@@ -282,6 +294,7 @@ TEST(NmuAxiSlavePort, AwArPassthroughBitForBit) {
 //     still draining — R progresses, B holds, no cross-channel contamination.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, IndependentBRBackpressure_RProgressesWhileBHolds) {
+  SCENARIO("NMU AxiSlavePort: B queue full does not block R ingestion (independent channels)");
   // Custom params: tiny B queue (1), normal R queue.
   test::LoopbackChannelSet ch{};
   test::LoopbackPacketizer pkt{ch};
@@ -317,6 +330,7 @@ TEST(NmuAxiSlavePort, IndependentBRBackpressure_RProgressesWhileBHolds) {
 //     request channels make forward progress.
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, SimultaneousAwWArForwardProgressInOneTick) {
+  SCENARIO("NMU AxiSlavePort: AW, W, AR all forward in same tick when packetizer has room");
   PortFixture fx;
   ASSERT_TRUE(fx.port.push_aw(make_aw(0x1, 0x1000)));
   ASSERT_TRUE(fx.port.push_w (make_w (0xAA, 0xFFFFFFFFu, true, 0x3C)));
@@ -335,6 +349,7 @@ TEST(NmuAxiSlavePort, SimultaneousAwWArForwardProgressInOneTick) {
 //     accepts new beats (per AXI4 IHI 0022: 5 channels are independent).
 // -------------------------------------------------------------------------
 TEST(NmuAxiSlavePort, WBackpressure_DoesNotBlockAw) {
+  SCENARIO("NMU AxiSlavePort: W queue full does not block AW channel (independent per AXI4 §A3.4)");
   PortFixture fx;
   fx.set_loopback_caps(/*aw*/ 32, /*w*/ 0, /*ar*/ 32, /*b*/ 32, /*r*/ 32);
   for (std::size_t i = 0; i < fx.params.w_queue_depth; ++i)
