@@ -31,3 +31,7 @@ add_cmodel_test(test_rob)
 # "common/loopback_*.hpp".
 target_include_directories(test_rob PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_vc_arb)
+target_include_directories(test_vc_arb PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)

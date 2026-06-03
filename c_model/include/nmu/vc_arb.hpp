@@ -1,0 +1,182 @@
+#pragma once
+// NMU virtual channel arbiter. Decorator pattern over NocReqOut: receives
+// packetized flits from nmu::Packetize, decides which VC each flit goes
+// into (per-axi_ch mapping), enqueues into a per-VC pending queue, and
+// drains to the wrapped downstream via tick() using credit-gated
+// round-robin.
+//
+// Two modes (compile-time selected via factory):
+//   Mode A (ReadWriteSplit, default): AW/W → write_vc; AR → read_vc.
+//   Mode B (MultiCandidate): per-axi_ch candidate VC list; first VC with
+//     pending space AND downstream credit wins.
+//
+// W-follows-AW invariant (both modes): all W beats of a burst route to
+// the same VC as their preceding AW. Implementation mirrors Packetize's
+// w_meta_fifo_ via a std::deque<uint8_t> pending_w_routes_ (push on AW,
+// pop on W with payload.W.wlast=1).
+//
+// NUM_VC=1 degenerate behavior: both modes route everything to VC=0 and
+// are observationally identical to the prior-round single-VC pipeline.
+//
+// References:
+//   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md
+//   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
+//   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
+//   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
+#include "ni/flit.hpp"
+#include "ni_flit_constants.h"
+#include "noc/noc_req_out.hpp"
+#include <array>
+#include <cassert>
+#include <cstdint>
+#include <cstdlib>
+#include <deque>
+#include <optional>
+#include <utility>
+#include <vector>
+
+namespace ni::cmodel::nmu {
+
+enum class VcMode {
+    ReadWriteSplit,
+    MultiCandidate,
+};
+
+class VcArb : public noc::NocReqOut {
+public:
+    static constexpr std::size_t NUM_VC_MAX   = 1u << ni::header::VC_ID_WIDTH;  // 8
+    static constexpr std::size_t AXI_CH_COUNT = 5;  // AW, W, AR, B, R (B/R unused on NMU)
+    static constexpr std::size_t kDefaultPendingDepth = 4;
+
+    static VcArb read_write_split(noc::NocReqOut& downstream,
+                                  std::size_t num_vc,
+                                  uint8_t write_vc,
+                                  uint8_t read_vc,
+                                  std::size_t pending_depth = kDefaultPendingDepth) {
+        std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
+        return VcArb(downstream, num_vc, VcMode::ReadWriteSplit,
+                     write_vc, read_vc, std::move(empty_candidates), pending_depth);
+    }
+
+    static VcArb multi_candidate(noc::NocReqOut& downstream,
+                                 std::size_t num_vc,
+                                 std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
+                                 std::size_t pending_depth = kDefaultPendingDepth) {
+        return VcArb(downstream, num_vc, VcMode::MultiCandidate,
+                     /*write_vc*/0, /*read_vc*/0, std::move(candidate_vcs), pending_depth);
+    }
+
+    // NocReqOut decorator interface
+    bool push_flit(const Flit& flit) override;
+    bool credit_avail(uint8_t vc_id) const override;
+
+    void tick();
+
+    // Test introspection
+    std::size_t pending_size(uint8_t vc_id) const noexcept { return pending_[vc_id].size(); }
+    uint8_t     round_robin_ptr() const noexcept { return round_robin_ptr_; }
+    std::size_t pending_w_routes_size() const noexcept { return pending_w_routes_.size(); }
+
+private:
+    VcArb(noc::NocReqOut& downstream,
+          std::size_t num_vc,
+          VcMode mode,
+          uint8_t write_vc,
+          uint8_t read_vc,
+          std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
+          std::size_t pending_depth)
+        : downstream_(downstream),
+          num_vc_(num_vc),
+          mode_(mode),
+          write_vc_(write_vc),
+          read_vc_(read_vc),
+          candidate_vcs_(std::move(candidate_vcs)),
+          pending_depth_(pending_depth) {
+        assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
+        assert(write_vc_ < num_vc_);
+        assert(read_vc_ < num_vc_);
+    }
+
+    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch);
+
+    noc::NocReqOut&                                  downstream_;
+    std::size_t                                      num_vc_;
+    VcMode                                           mode_;
+    uint8_t                                          write_vc_;
+    uint8_t                                          read_vc_;
+    std::array<std::vector<uint8_t>, AXI_CH_COUNT>   candidate_vcs_;
+    std::array<std::deque<Flit>, NUM_VC_MAX>         pending_;
+    std::size_t                                      pending_depth_;
+    uint8_t                                          round_robin_ptr_ = 0;
+    std::deque<uint8_t>                              pending_w_routes_;
+};
+
+inline std::optional<uint8_t> VcArb::select_vc_for_axi_ch(uint8_t axi_ch) {
+    if (num_vc_ == 1) return uint8_t{0};
+
+    if (axi_ch == ni::AXI_CH_W) {
+        if (pending_w_routes_.empty()) {
+            assert(false && "nmu::VcArb::push_flit: W arrived with empty pending_w_routes_ -- Packetize w_meta_fifo invariant violated (W before AW); check upstream Rob credit gate or AxiSlavePort routing");
+            std::abort();
+        }
+        return pending_w_routes_.front();
+    }
+
+    if (mode_ == VcMode::ReadWriteSplit) {
+        if (axi_ch == ni::AXI_CH_AW) return write_vc_;
+        if (axi_ch == ni::AXI_CH_AR) return read_vc_;
+        return std::nullopt;
+    }
+
+    // Mode B: MultiCandidate
+    for (uint8_t vc : candidate_vcs_[axi_ch]) {
+        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) {
+            return vc;
+        }
+    }
+    return std::nullopt;
+}
+
+inline bool VcArb::push_flit(const Flit& flit) {
+    uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
+    auto vc_opt = select_vc_for_axi_ch(axi_ch);
+    if (!vc_opt.has_value()) return false;
+    uint8_t vc_id = *vc_opt;
+    if (pending_[vc_id].size() >= pending_depth_) return false;
+
+    // Update W-follows-AW deque only after pass conditions (atomicity)
+    if (axi_ch == ni::AXI_CH_AW) {
+        pending_w_routes_.push_back(vc_id);
+    } else if (axi_ch == ni::AXI_CH_W) {
+        if (flit.get_payload_field("W", "wlast") != 0) {
+            pending_w_routes_.pop_front();
+        }
+    }
+
+    Flit stamped = flit;
+    stamped.set_header_field("vc_id", vc_id);
+    pending_[vc_id].push_back(stamped);
+    return true;
+}
+
+inline bool VcArb::credit_avail(uint8_t vc_id) const {
+    return pending_[vc_id].size() < pending_depth_;
+}
+
+inline void VcArb::tick() {
+    for (std::size_t k = 0; k < num_vc_; ++k) {
+        uint8_t vc = static_cast<uint8_t>((round_robin_ptr_ + k) % num_vc_);
+        if (!pending_[vc].empty() && downstream_.credit_avail(vc)) {
+            bool ok = downstream_.push_flit(pending_[vc].front());
+            assert(ok && "nmu::VcArb::tick: downstream returned credit_avail=true "
+                         "but push_flit refused — protocol violation, downstream "
+                         "must not lie about credit availability");
+            if (!ok) std::abort();  // belt-and-braces for NDEBUG
+            pending_[vc].pop_front();
+            round_robin_ptr_ = static_cast<uint8_t>((vc + 1) % num_vc_);
+            return;
+        }
+    }
+}
+
+}  // namespace ni::cmodel::nmu
