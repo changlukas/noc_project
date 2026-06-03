@@ -27,7 +27,7 @@ Test name is a C++ identifier — can't be Chinese, can't be free-form. User rea
 
 This round delivers:
 
-1. **`SCENARIO("<English description>")` macro** added to every existing 46 tests + new tests going forward — always-printed one-line human description.
+1. **`SCENARIO("<English description>")` macro** added to every existing 240 TEST declarations + new tests going forward — always-printed one-line human description. (Initial spec estimated 46; actual grep `^TEST(_F|_P)?\(` count revealed 240 across all subsystems including Stage 2 axi tests. User confirmed full retrofit scope.)
 2. **`AxiMasterObserver` class** — opt-in observer that hooks `AxiMaster` callbacks for integration tests; counts AW/W/AR/B/R logical transactions, tracks per-id submission order, prints summary at test end. Verbose mode (`NOC_LOG=1`) adds per-transaction trace.
 3. **Auto-fail context dumps** — Observer detects AXI4 §A5.3 per-id ordering violations and emits structured FAIL context (expected vs observed, possible causes).
 4. **Production assert message audit** — bare `assert(false && "impossible")` strings replaced with cause + likely-cause hint.
@@ -46,7 +46,7 @@ Anchored decisions (all pre-debated; do not re-open without justification):
 **In scope**:
 - New `c_model/tests/common/test_logger.hpp` with `SCENARIO` macro + `AxiMasterObserver` class
 - 4 unit tests for `AxiMasterObserver`
-- Retrofit 46 existing tests with `SCENARIO("…")` first line
+- Retrofit 240 existing TEST declarations with `SCENARIO("…")` first line (all subsystems including Stage 2 axi/, Stage 3 nmu/nsu/common, integration, test_flit)
 - Wire `AxiMasterObserver` into 7 integration testbench fixtures
 - Audit `c_model/include/{axi,ni,nmu,nsu}/*.hpp` for bare `assert(false && "impossible")` → add cause + possible-cause hints (~10-15 spots)
 
@@ -368,23 +368,35 @@ Goal: when the assert fires, the user reads the message and gets immediate conte
 
 Each test uses a tiny test fixture (`MockAxiMaster` or mocked `WriteResult` injection). Implementation detail: can avoid full AxiMaster by directly calling `on_write` / `on_read` private methods via friend class, OR use a minimal `AxiMaster` with hand-crafted callback fires.
 
-### 10.2 SCENARIO retrofit (46 existing tests)
+### 10.2 SCENARIO retrofit (240 existing TEST declarations)
 
-One-by-one read each test body, write a concise English scenario description, prepend `SCENARIO("…");` as first line. Estimated 2 hours of focused work (not 30 min — quality requires reading + thinking).
+One-by-one read each test body, write a concise English scenario description, prepend `SCENARIO("…");` as first line. Estimated ~10 hours of focused work (each test 2-3 min). 240 actual count from `grep -rcE "^TEST(_F|_P)?\(" c_model/tests --include="*.cpp"`.
 
-| File | Test count to retrofit |
+| File | TEST decl count |
 |---|---|
-| `c_model/tests/axi/test_axi_master.cpp` | ~5 |
-| `c_model/tests/axi/test_protocol_rules.cpp` | ~2 |
+| `c_model/tests/axi/test_axi_master.cpp` | 40 |
+| `c_model/tests/axi/test_axi_slave.cpp` | 34 |
+| `c_model/tests/axi/test_integration.cpp` | 1 |
+| `c_model/tests/axi/test_memory.cpp` | 8 |
+| `c_model/tests/axi/test_protocol_rules.cpp` | 38 |
+| `c_model/tests/axi/test_scaffold.cpp` | 6 |
+| `c_model/tests/axi/test_scoreboard.cpp` | 5 |
 | `c_model/tests/nmu/test_addr_trans.cpp` | 3 |
-| `c_model/tests/nmu/test_depacketize.cpp` | ~7 |
-| `c_model/tests/nmu/test_packetize.cpp` | ~10 |
-| `c_model/tests/nmu/test_rob.cpp` | ~23 |
+| `c_model/tests/nmu/test_axi_slave_port.cpp` | 14 |
+| `c_model/tests/nmu/test_depacketize.cpp` | 9 |
+| `c_model/tests/nmu/test_packetize.cpp` | 10 |
+| `c_model/tests/nmu/test_rob.cpp` | 23 |
+| `c_model/tests/nsu/test_axi_master_port.cpp` | 14 |
+| `c_model/tests/nsu/test_meta_buffer.cpp` | 6 |
+| `c_model/tests/nsu/test_nsu_depacketize.cpp` | 7 |
+| `c_model/tests/nsu/test_nsu_packetize.cpp` | 6 |
 | `c_model/tests/common/test_loopback_latency.cpp` | 6 |
-| `c_model/tests/integration/test_request_response_loopback.cpp` | 1 (the parameterized fixture) |
-| **Total** | **~46** (rounding errors OK) |
+| `c_model/tests/integration/test_port_pair_loopback.cpp` | 1 |
+| `c_model/tests/integration/test_request_response_loopback.cpp` | 1 (parameterized) |
+| `c_model/tests/test_flit.cpp` | 8 |
+| **Total** | **240** |
 
-Plan task will list the actual test names per file (after grepping `TEST\(` patterns).
+Plan retrofit task uses these counts per file. Each `TEST(...)`/`TEST_F(...)`/`TEST_P(...)` body gets one `SCENARIO("…");` as first statement. Note: 297 ctest is the runtime count (includes TEST_P × N instantiations); 240 is the source-level declaration count (what we retrofit).
 
 ### 10.3 Integration testbench wiring
 
@@ -427,9 +439,11 @@ Expected at HEAD:
 
 **Acceptance**: 297 → 301 ctest. Standalone framework, no existing tests touched.
 
-### Commit 2: `test: retrofit SCENARIO to 46 existing tests`
+### Commit 2: `test: retrofit SCENARIO to 240 existing TEST declarations`
 
-**Files**: 8 test files listed in §10.2.
+**Files**: 20 test files listed in §10.2 spanning Stage 2 axi/ + Stage 3 nmu/nsu/common + integration.
+
+Sub-commits worth considering (per Codex Important#5 split-by-subsystem heuristic): Commit 2 may split into 2a (Stage 2 axi/), 2b (Stage 3 nmu/), 2c (Stage 3 nsu/), 2d (common + integration + test_flit) — each smaller and per-domain reviewable. Plan implementer to decide based on PR size preference; default keep as 1 commit unless reviewing > 200 lines feels unmanageable.
 
 **Acceptance**: 301/301 ctest unchanged. Pure description-add, no behavior change. Each test's body adds 1 line (`SCENARIO("…");`) as first line.
 
