@@ -1761,7 +1761,7 @@ tick() ages per-NSU delay queues independently (NSU 0 blocked does
 not stall NSU 1). Aggregate capacity: total_delayed_rsp_count_ +
 rsp_pipe_.size() + rsp_q_.size() <= rsp_q_depth_total_.
 
-5 new tests in test_loopback_latency.cpp covering routing, unmapped-dst
+6 new tests in test_loopback_latency.cpp covering routing, unmapped-dst
 assert, static delay, random bounded range, and per-NSU isolation.
 
 270 prior tests stay green via single-NSU compatibility path.
@@ -1891,8 +1891,9 @@ for (std::size_t i = 0; i < nsu_count; ++i) {
     nsu_metas.emplace_back(std::make_unique<nsu::MetaBuffer>());
     nsu_depkts.emplace_back(std::make_unique<nsu::Depacketize>(
         loopback.nsu_req_in(i), *nsu_metas[i],
-        params.nsu_depkt_aw_q_depth, params.nsu_depkt_ar_q_depth,
-        params.nsu_depkt_w_q_depth));
+        params.depkt_aw_q_depth,
+        params.depkt_w_q_depth,
+        params.depkt_ar_q_depth));
     nsu_pkts.emplace_back(std::make_unique<nsu::Packetize>(
         loopback.nsu_rsp_out(i), *nsu_metas[i], this_nsu_src));
     nsu_ports.emplace_back(std::make_unique<nsu::AxiMasterPort>(
@@ -1902,7 +1903,10 @@ for (std::size_t i = 0; i < nsu_count; ++i) {
 PerIdOrderTracker tracker;   // populated below
 ```
 
-Note: `nsu::Depacketize` ctor signature may differ in your repo — check existing line 117-119 (`nsu::Depacketize nsu_depkt(loopback.req_in(), nsu_meta, ...)`) and mirror the actual signature. The above is the conceptual shape.
+Ctor signatures verified against current repo (`c_model/include/nsu/depacketize.hpp:29-30` and existing rig at line 117-121):
+- `nsu::Depacketize(noc::NocReqIn&, MetaBuffer&, aw_q_depth, w_q_depth, ar_q_depth)` — parameter order is **aw, w, ar** (NOT aw, ar, w).
+- `nsu::Packetize(noc::NocRspOut&, MetaBuffer&, src_id)` — `src_id` is 3rd arg, `uint8_t`.
+- `nsu::AxiMasterPort(Depacketize&, Packetize&, params)` — params struct is the test rig's `params`.
 
 - [ ] **Step 5: Update response shuttle to loop over all NSU instances**
 
@@ -2066,7 +2070,7 @@ Walk through commits 1-5 and assess:
 - multi_dst_stress as regression gate assumes deterministic per-NSU latency (10 vs 2 cycles)
 
 **Verifiable success**:
-- 20 new tests pass (2 + 13 + 5)
+- 21 new tests pass (2 + 13 + 6)
 - multi_dst_stress is real regression gate (manual sanity-check confirmed Rob Disabled → FAIL)
 - 270 prior tests stay green (backward compat)
 
@@ -2117,7 +2121,7 @@ Karpathy 4-lens summary (per Task 6):
   hardcoded); per-beat model caps in-flight max-burst reads at 2;
   mixed-mode strict assert; multi_dst_stress gate assumes deterministic
   per-NSU latency
-- Verifiable success: 20 new tests pass; multi_dst_stress is real
+- Verifiable success: 21 new tests pass; multi_dst_stress is real
   regression gate (Rob Disabled sanity-check FAILS as expected); 270
   prior tests unchanged
 
@@ -2157,7 +2161,7 @@ After writing the plan, verified:
   - §6 Rob Enabled mode → Tasks 2 (push) + 3 (pop)
   - §7 LoopbackNoc multi-NSU + per-NSU latency → Task 4
   - §7.4 backward-compat invariants → Task 4 Step 10 + Step 12 verify
-  - §8 test plan (20 new tests) → distributed across Tasks 1-5
+  - §8 test plan (21 new tests, 1 more than spec §8.3 due to added BC invariant test) → distributed across Tasks 1-5
   - §8.2 multi_dst_stress graduation → Task 5
   - §9.1 commit boundary plan → 6 tasks match 6 commits
   - §9.2 parallel waves → header notes Wave 1/2/3/4
