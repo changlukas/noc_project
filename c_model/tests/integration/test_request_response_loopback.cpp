@@ -50,6 +50,7 @@
 #include "axi/scoreboard.hpp"
 #include "common/loopback_noc.hpp"
 #include "common/scenario.hpp"
+#include "common/test_logger.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
@@ -233,6 +234,22 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   axi::AxiMasterT<nmu::AxiSlavePort> master(yaml_path, nmu_port, read_dump_path,
                                             mow, mor);
 
+  // Observability hook: AxiMasterObserver tracks per-transaction counts,
+  // AXI4 IHI 0022 §A5.3 per-id ordering, and (under NOC_LOG=1) emits a
+  // parse-friendly trace line per AW/B/AR/R. RAII dtor prints
+  // [summary:NMU] at scope exit; ok()-driven hard fail deferred to a
+  // future round per plan Task 3 spec.
+  //
+  // Wiring note: this testbench uses AxiMasterT<nmu::AxiSlavePort> (not
+  // the default AxiMasterT<AxiSlave> = axi::AxiMaster type expected by
+  // the observer's master-binding ctor), so we use the test-only ctor
+  // and chain test_inject_write_result / test_inject_read_result into
+  // the existing scoreboard callbacks below. This keeps the master's
+  // single on_write_completed / on_read_observed slot owned by the
+  // scoreboard (the test's primary oracle) while still feeding the
+  // observer one event per completed transaction.
+  test::AxiMasterObserver obs("NMU");
+
   axi::Scoreboard sb;
   PerIdOrderTracker tracker;
   // Submission-order markers: use scenario_line (strictly increasing in
@@ -244,10 +261,12 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   master.on_write_completed([&](const axi::WriteResult& wr) {
     sb.handle_write_completed(wr, wr.data, wr.strb_per_beat);
     tracker.record_b(wr.id, wr.scenario_line);
+    obs.test_inject_write_result(wr);
   });
   master.on_read_observed([&](const axi::ReadResult& rr) {
     sb.handle_read_observed(rr);
     tracker.record_r(rr.id, rr.scenario_line);
+    obs.test_inject_read_result(rr);
   });
 
   // Per-run AxiMasterPort <-> AxiSlave holdovers (one deque per NSU): when
