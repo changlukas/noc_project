@@ -45,7 +45,7 @@ The behavioral guarantee from spec (per-VC credit-based flow control gating push
 | `c_model/tests/nmu/test_vc_arb.cpp` | Create | 12 tests for `nmu::VcArb` (10 functional + 2 EXPECT_DEATH) |
 | `c_model/tests/nsu/test_nsu_vc_arb.cpp` | Create | 5 tests for `nsu::VcArb` (target name distinct from nmu/test_vc_arb to avoid CMake target collision) |
 | `c_model/tests/nmu/CMakeLists.txt` | Modify | Register `test_vc_arb` |
-| `c_model/tests/nsu/CMakeLists.txt` | Modify | Register `test_vc_arb` |
+| `c_model/tests/nsu/CMakeLists.txt` | Modify | Register `test_nsu_vc_arb` (distinct target name from nmu/test_vc_arb) |
 | `c_model/tests/integration/test_request_response_loopback.cpp` | Modify | Insert VcArb between Packetize and LoopbackNoc adapter |
 | `NEXT_STEPS.md` | Modify | Karpathy 4-lens summary + flip pointer to next round |
 
