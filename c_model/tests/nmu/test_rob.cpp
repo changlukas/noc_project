@@ -186,11 +186,11 @@ TEST(NmuRob, Disabled_DifferentIdsIndependentNoInterference) {
 TEST(NmuRobDeath, Disabled_AbortPaths) {
     SCENARIO("Rob: push_b/push_r and pop_aw/pop_w/pop_ar all abort (wrong-direction APIs)");
     RobRig r;
-    EXPECT_DEATH(r.rob.push_b(axi::BBeat{}), "Rob: push_b");
-    EXPECT_DEATH(r.rob.push_r(axi::RBeat{}), "Rob: push_r");
-    EXPECT_DEATH(r.rob.pop_aw(), "Rob: pop_aw");
-    EXPECT_DEATH(r.rob.pop_w(),  "Rob: pop_w");
-    EXPECT_DEATH(r.rob.pop_ar(), "Rob: pop_ar");
+    EXPECT_DEATH(r.rob.push_b(axi::BBeat{}), "nmu::Rob::push_b");
+    EXPECT_DEATH(r.rob.push_r(axi::RBeat{}), "nmu::Rob::push_r");
+    EXPECT_DEATH(r.rob.pop_aw(), "nmu::Rob::pop_aw");
+    EXPECT_DEATH(r.rob.pop_w(),  "nmu::Rob::pop_w");
+    EXPECT_DEATH(r.rob.pop_ar(), "nmu::Rob::pop_ar");
 }
 
 // === ROB Enabled mode: push-side tests (Task 2) ===

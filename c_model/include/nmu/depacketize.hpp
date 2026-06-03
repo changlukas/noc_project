@@ -34,9 +34,33 @@ public:
   std::optional<std::pair<axi::BBeat, ResponseMeta>> pop_b_with_meta() override;
   std::optional<std::pair<axi::RBeat, ResponseMeta>> pop_r_with_meta() override;
   // Request methods assert false
-  std::optional<axi::AwBeat> pop_aw() override { assert(false && "NMU depacketize: AW not applicable"); std::abort(); return std::nullopt; }
-  std::optional<axi::WBeat>  pop_w () override { assert(false && "NMU depacketize: W  not applicable"); std::abort(); return std::nullopt; }
-  std::optional<axi::ArBeat> pop_ar() override { assert(false && "NMU depacketize: AR not applicable"); std::abort(); return std::nullopt; }
+  std::optional<axi::AwBeat> pop_aw() override {
+      assert(false && "nmu::Depacketize::pop_aw: NMU depacketizer handles response side only "
+                      "(B/R from NocRspIn) — AW belongs on the request side "
+                      "(NSU Depacketize or testbench bypass). Likely cause: "
+                      "AxiSlavePort wiring routed a request-channel pop into the NMU "
+                      "depacketizer, or test fixture invoked the wrong Depacketizer instance.");
+      std::abort();
+      return std::nullopt;
+  }
+  std::optional<axi::WBeat>  pop_w () override {
+      assert(false && "nmu::Depacketize::pop_w: NMU depacketizer handles response side only "
+                      "(B/R from NocRspIn) — W belongs on the request side "
+                      "(NSU Depacketize or testbench bypass). Likely cause: "
+                      "AxiSlavePort wiring routed a request-channel pop into the NMU "
+                      "depacketizer, or test fixture invoked the wrong Depacketizer instance.");
+      std::abort();
+      return std::nullopt;
+  }
+  std::optional<axi::ArBeat> pop_ar() override {
+      assert(false && "nmu::Depacketize::pop_ar: NMU depacketizer handles response side only "
+                      "(B/R from NocRspIn) — AR belongs on the request side "
+                      "(NSU Depacketize or testbench bypass). Likely cause: "
+                      "AxiSlavePort wiring routed a request-channel pop into the NMU "
+                      "depacketizer, or test fixture invoked the wrong Depacketizer instance.");
+      std::abort();
+      return std::nullopt;
+  }
 
 private:
   struct BWithMeta { axi::BBeat beat; ResponseMeta meta; };
@@ -101,7 +125,11 @@ inline void Depacketize::tick() {
         break;
       }
       default:
-        assert(false && "NMU depacketize: NocRspIn delivered non-B/non-R flit");
+        assert(false && "nmu::Depacketize::tick: NocRspIn delivered flit with axi_ch outside "
+                        "{B, R} — NMU response path only accepts response channels. Likely cause: "
+                        "NSU packetizer stamped wrong axi_ch into a response flit, NoC fabric "
+                        "misrouted a request flit into the response ingress, or codegen drift "
+                        "changed ni::AXI_CH_* encoding without rebuilding both sides.");
         std::abort();
     }
     pending_.reset();

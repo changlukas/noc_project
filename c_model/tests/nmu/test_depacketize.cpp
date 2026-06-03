@@ -84,7 +84,7 @@ TEST(NmuDepacketize, PopAwAssertFalse) {
   SCENARIO("NMU Depacketize: pop_aw asserts false (AW is request-direction only, not response)");
   LoopbackNoc noc(16, 16);
   Depacketize depkt(noc.rsp_in(), 16, 16);
-  EXPECT_DEATH(depkt.pop_aw(), "NMU depacketize: AW not applicable");
+  EXPECT_DEATH(depkt.pop_aw(), "nmu::Depacketize::pop_aw");
 }
 
 TEST(NmuDepacketize, BFifoOrderPreserved) {

@@ -56,23 +56,53 @@ public:
     bool push_w (const axi::WBeat&  b) override;
     bool push_ar(const axi::ArBeat& b) override;
     bool push_b(const axi::BBeat&) override {
-        assert(false && "Rob: push_b not applicable"); std::abort(); return false;
+        assert(false && "nmu::Rob::push_b: Rob multi-inheritance Packetizer side rejects "
+                        "response beats (B is response, not request). Likely cause: "
+                        "AxiSlavePort dispatched a response into the Packetizer base of Rob "
+                        "instead of the Depacketizer base — wiring or vtable-routing bug "
+                        "in the slave-port adapter.");
+        std::abort();
+        return false;
     }
     bool push_r(const axi::RBeat&) override {
-        assert(false && "Rob: push_r not applicable"); std::abort(); return false;
+        assert(false && "nmu::Rob::push_r: Rob multi-inheritance Packetizer side rejects "
+                        "response beats (R is response, not request). Likely cause: "
+                        "AxiSlavePort dispatched a response into the Packetizer base of Rob "
+                        "instead of the Depacketizer base — wiring or vtable-routing bug "
+                        "in the slave-port adapter.");
+        std::abort();
+        return false;
     }
 
     // ===== Depacketizer interface (response side; AW/W/AR assert+abort) =====
     std::optional<axi::BBeat> pop_b() override;
     std::optional<axi::RBeat> pop_r() override;
     std::optional<axi::AwBeat> pop_aw() override {
-        assert(false && "Rob: pop_aw not applicable"); std::abort(); return std::nullopt;
+        assert(false && "nmu::Rob::pop_aw: Rob multi-inheritance Depacketizer side rejects "
+                        "request-channel pops (AW is request, not response). Likely cause: "
+                        "AxiSlavePort routed a request-side pop into the Depacketizer base of "
+                        "Rob instead of the Packetizer base — wiring or vtable-routing bug "
+                        "in the slave-port adapter.");
+        std::abort();
+        return std::nullopt;
     }
     std::optional<axi::WBeat>  pop_w()  override {
-        assert(false && "Rob: pop_w not applicable"); std::abort(); return std::nullopt;
+        assert(false && "nmu::Rob::pop_w: Rob multi-inheritance Depacketizer side rejects "
+                        "request-channel pops (W is request, not response). Likely cause: "
+                        "AxiSlavePort routed a request-side pop into the Depacketizer base of "
+                        "Rob instead of the Packetizer base — wiring or vtable-routing bug "
+                        "in the slave-port adapter.");
+        std::abort();
+        return std::nullopt;
     }
     std::optional<axi::ArBeat> pop_ar() override {
-        assert(false && "Rob: pop_ar not applicable"); std::abort(); return std::nullopt;
+        assert(false && "nmu::Rob::pop_ar: Rob multi-inheritance Depacketizer side rejects "
+                        "request-channel pops (AR is request, not response). Likely cause: "
+                        "AxiSlavePort routed a request-side pop into the Depacketizer base of "
+                        "Rob instead of the Packetizer base — wiring or vtable-routing bug "
+                        "in the slave-port adapter.");
+        std::abort();
+        return std::nullopt;
     }
 
     // === Enabled mode public constants (for testing + caller info) ===
