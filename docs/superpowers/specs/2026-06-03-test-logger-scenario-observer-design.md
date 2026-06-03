@@ -357,12 +357,13 @@ Goal: when the assert fires, the user reads the message and gets immediate conte
 
 ## 10. Test plan
 
-### 10.1 New unit tests (4) for `AxiMasterObserver`
+### 10.1 New unit tests (5) for `AxiMasterObserver`
 
 | Test | Invariant |
 |---|---|
 | `AxiMasterObserver.OrderedBPass` | 2 same-id writes, in-order B → `ok() == true`, `b_order_violations == 0` |
 | `AxiMasterObserver.OutOfOrderBFail` | 2 same-id writes, reversed B order → `ok() == false`, `b_order_violations == 1`, FAIL context emitted |
+| `AxiMasterObserver.OutOfOrderRFail` | 2 same-id reads, reversed R order → `ok() == false`, `r_order_violations == 1`, FAIL context emitted (covers spec §8 invariant #2) |
 | `AxiMasterObserver.NonOkayResp` | B with `resp=SLVERR` → `mismatches == 1`, FAIL not triggered (test-side decision) |
 | `AxiMasterObserver.StuckCountMismatch` | 1 AW issued, 0 B at test end → `print_summary()` fires `[FAIL:…] stuck` context |
 
@@ -406,13 +407,13 @@ Add 1 line to construct `AxiMasterObserver obs(master, "NMU");` after the existi
 
 | Source | Count |
 |---|---|
-| New `test_logger.cpp` (Observer unit tests) | +4 |
+| New `test_logger.cpp` (Observer unit tests) | +5 |
 | SCENARIO retrofit (46 existing tests) | 0 new tests (description-only) |
 | Integration testbench Observer wiring | 0 new tests (observability-only) |
 | Production assert audit | 0 new tests |
-| **Total new tests** | **4** |
+| **Total new tests** | **5** |
 | Prior round total | 297 |
-| **Final ctest target** | **301/301** |
+| **Final ctest target** | **302/302** |
 
 ### 10.5 Drift gates (per commit)
 
@@ -425,7 +426,7 @@ Expected at HEAD:
 - specgen pytest: 163 passed
 - codegen --check: clean
 - gen_inventory --check: clean
-- ctest: 301/301
+- ctest: 302/302
 
 ## 11. Commit boundary plan
 
@@ -445,14 +446,14 @@ Expected at HEAD:
 
 Sub-commits worth considering (per Codex Important#5 split-by-subsystem heuristic): Commit 2 may split into 2a (Stage 2 axi/), 2b (Stage 3 nmu/), 2c (Stage 3 nsu/), 2d (common + integration + test_flit) — each smaller and per-domain reviewable. Plan implementer to decide based on PR size preference; default keep as 1 commit unless reviewing > 200 lines feels unmanageable.
 
-**Acceptance**: 301/301 ctest unchanged. Pure description-add, no behavior change. Each test's body adds 1 line (`SCENARIO("…");`) as first line.
+**Acceptance**: 302/302 ctest unchanged. Pure description-add, no behavior change. Each test's body adds 1 line (`SCENARIO("…");`) as first line.
 
 ### Commit 3: `test(tests/integration): wire AxiMasterObserver into PacketizeLoopback fixtures`
 
 **Files**:
 - Modify `c_model/tests/integration/test_request_response_loopback.cpp` (~5 LOC)
 
-**Acceptance**: 301/301 ctest unchanged. Observer added but `EXPECT_TRUE(obs.ok())` is optional — initial commit doesn't enforce hard fail, just adds observability. Summary lines visible in `ctest -V`.
+**Acceptance**: 302/302 ctest unchanged. Observer added but `EXPECT_TRUE(obs.ok())` is optional — initial commit doesn't enforce hard fail, just adds observability. Summary lines visible in `ctest -V`.
 
 ### Commit 4: `fix(c_model): tighten assert messages with cause + possible-cause context`
 
@@ -464,13 +465,13 @@ Sub-commits worth considering (per Codex Important#5 split-by-subsystem heuristi
 
 OR keep as single Commit 4 if audit reveals ≤5 spots total (heuristic: split iff total spots > 5).
 
-**Acceptance**: 301/301 ctest unchanged. Behavior identical (assert strings only).
+**Acceptance**: 302/302 ctest unchanged. Behavior identical (assert strings only).
 
 ### Commit 5: `docs(NEXT_STEPS): test logger done; next is vc_arb`
 
 **Files**: `NEXT_STEPS.md`
 
-**Acceptance**: drift gates clean, ctest 301/301.
+**Acceptance**: drift gates clean, ctest 302/302.
 
 ### Commit count: 5 (or 8 if Commit 4 splits per subsystem)
 

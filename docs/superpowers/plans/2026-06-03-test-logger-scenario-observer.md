@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a `SCENARIO("<English description>")` macro to make 240 cryptic test names human-readable, plus a `nmu::cmodel::testing::AxiMasterObserver` class that hooks `AxiMaster` callbacks to auto-detect AXI4 §A5.3 per-id ordering violations and emit parse-friendly per-transaction trace under `NOC_LOG=1`. Audit and tighten 10-15 bare `assert(false && "impossible")` messages with cause hints.
+**Goal:** Add a `SCENARIO("<English description>")` macro to make 240 cryptic test names human-readable, plus a `ni::cmodel::testing::AxiMasterObserver` class that hooks `AxiMaster` callbacks to auto-detect AXI4 §A5.3 per-id ordering violations and emit parse-friendly per-transaction trace under `NOC_LOG=1`. Audit and tighten 19 bare `assert(false && "impossible")` messages with cause hints.
 
 **Architecture:** `SCENARIO` is a one-line macro printing to stdout; always emitted. `AxiMasterObserver` is a standalone class in `tests/common/` that subscribes to `AxiMaster::on_write_completed` / `on_read_observed` callbacks (already exist in production code — zero AxiMaster modification). Observer counts logical AW/W/AR/B/R per-transaction, tracks per-id `scenario_line` sequences, auto-detects ordering violations, emits FAIL context. RAII destructor prints summary as fallback.
 
@@ -28,10 +28,10 @@ cd ../c_model && cmake --build build && ctest --test-dir build -j 1
 
 | Task | Commit | Acceptance |
 |---|---|---|
-| 1 | `feat(tests/common): add SCENARIO macro + AxiMasterObserver` | 297 → 301 ctest |
-| 2 | `test: retrofit SCENARIO to 240 TEST declarations` | 301/301 ctest (description-only) |
-| 3 | `test(tests/integration): wire AxiMasterObserver` | 301/301 ctest |
-| 4 | `fix(c_model): tighten assert messages with cause hints` | 301/301 ctest |
+| 1 | `feat(tests/common): add SCENARIO macro + AxiMasterObserver` | 297 → 302 ctest |
+| 2 | `test: retrofit SCENARIO to 240 TEST declarations` | 302/302 ctest (description-only) |
+| 3 | `test(tests/integration): wire AxiMasterObserver` | 302/302 ctest |
+| 4 | `fix(c_model): tighten assert messages with cause hints` | 302/302 ctest |
 | 5 | `docs(NEXT_STEPS): test logger done; next is vc_arb` | 301/301 |
 
 ---
@@ -181,7 +181,7 @@ TEST(AxiMasterObserver, OutOfOrderBFail) {
 
 (The `#define`-include-`#undef` pattern is one way to expose test-only entry points; alternative is `friend class AxiMasterObserverTest` declared in observer header. Implementer chooses. Recommendation: friend-class approach for cleaner header. See Step 5 below.)
 
-- [ ] **Step 4: Write failing tests 3 and 4 `NonOkayResp` + `StuckCountMismatch`**
+- [ ] **Step 4: Write failing tests 3, 4, and 5 (`NonOkayResp`, `StuckCountMismatch`, `OutOfOrderRFail`)**
 
 Append:
 
@@ -214,6 +214,20 @@ TEST(AxiMasterObserver, StuckCountMismatch) {
     // but absence of crash + FAIL context in captured output is sufficient.
     // This is a smoke test for the RAII path.
     SUCCEED();
+}
+
+TEST(AxiMasterObserver, OutOfOrderRFail) {
+    SCENARIO("Observer: same-id R arrives out of submission order → ok()=false, R-order FAIL");
+    AxiMasterObserver obs("Test");
+    obs.test_inject_read_result(axi::ReadResult{
+        /*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+        /*data=*/{}, /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/7});
+    obs.test_inject_read_result(axi::ReadResult{
+        /*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+        /*data=*/{}, /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/5});
+    EXPECT_FALSE(obs.ok());
+    EXPECT_EQ(obs.failures().size(), 1u);
+    // Should contain "R" in the failure string (vs OutOfOrderBFail which says "B")
 }
 ```
 
@@ -474,7 +488,7 @@ Expected: 4 PASS.
 ctest --test-dir build -j 1 2>&1 | tail -3
 ```
 
-Expected: 301/301 passed (297 prior + 4 new).
+Expected: 302/302 passed (297 prior + 4 new).
 
 - [ ] **Step 11: Drift gates**
 
@@ -526,7 +540,11 @@ Refs: docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md 
 
 **Goal:** Every `TEST(...)` / `TEST_F(...)` / `TEST_P(...)` body in the project has `SCENARIO("...")` as its first statement.
 
-**Strategy:** This task is **bulk mechanical work** with thoughtful per-test descriptions. Implementer reads each test body, writes 1-line English description summarizing the invariant or scenario, prepends `SCENARIO("...");` after the `TEST(...) {` opening brace. Description follows guidelines from spec §4.4:
+**Strategy:** This task is **bulk mechanical work** with thoughtful per-test descriptions. Implementer reads each test body, writes 1-line English description summarizing the invariant or scenario, prepends `SCENARIO("...");` after the `TEST(...) {` opening brace.
+
+**Step granularity exception**: For mechanical retrofit, file-level steps are larger than the usual ≤5 min target (largest = `test_axi_master.cpp` 40 tests ≈ 80-120 min). Large files (`test_axi_master.cpp` 40, `test_axi_slave.cpp` 34, `test_protocol_rules.cpp` 38, `test_rob.cpp` 23) should be split mid-file at natural boundaries (test fixture / scenario group / comment header) into 2 sub-steps of ~20 each. Smaller files (≤15 tests) stay as single step. Implementer commits the WHOLE task once after all files retrofitted (or per spec §11.2 sub-commit option).
+
+Description follows guidelines from spec §4.4:
 - Concise: ≤80 chars
 - English-only
 - Describe invariant or scenario, not implementation
@@ -547,9 +565,11 @@ Default: keep as single commit unless PR review surface ≥ 200 lines.
 cd c_model && cmake --build build && ctest --test-dir build -j 1 2>&1 | tail -3
 ```
 
-Expected: 301/301 PASS.
+Expected: 302/302 PASS.
 
-- [ ] **Step 2: Retrofit `c_model/tests/axi/test_axi_master.cpp` (40 tests)**
+- [ ] **Step 2a: Retrofit `c_model/tests/axi/test_axi_master.cpp` first half (~20 tests, ScenarioParser block)**
+
+- [ ] **Step 2b: Retrofit `c_model/tests/axi/test_axi_master.cpp` second half (~20 tests, AxiMasterTest / SplitIntoSubBursts blocks)**
 
 Add `#include "common/test_logger.hpp"` near the existing test includes. Then for each `TEST_F(...) {` / `TEST_P(...) {` opening brace, insert `SCENARIO("...");` as the first body statement.
 
@@ -590,7 +610,9 @@ TEST_F(AxiMasterTest, SameIdConcurrentAdmissionVisibleInPipeline) {
 
 (Implementer applies one SCENARIO per test for all 40 tests in this file. Each description ~30 sec to write after reading the test body.)
 
-- [ ] **Step 3: Retrofit `c_model/tests/axi/test_axi_slave.cpp` (34 tests)**
+- [ ] **Step 3a: Retrofit `c_model/tests/axi/test_axi_slave.cpp` first half (~17 tests, WriteBurst / ReadBurst basics)**
+
+- [ ] **Step 3b: Retrofit `c_model/tests/axi/test_axi_slave.cpp` second half (~17 tests, Wrap / Same-id / Exclusive)**
 
 Same pattern. Examples:
 ```cpp
@@ -612,7 +634,9 @@ Read test body; add 1 SCENARIO line summarizing the e2e integration scenario.
 
 Same pattern; each Memory test description focuses on read/write/strb/bounds behavior.
 
-- [ ] **Step 6: Retrofit `c_model/tests/axi/test_protocol_rules.cpp` (38 tests)**
+- [ ] **Step 6a: Retrofit `c_model/tests/axi/test_protocol_rules.cpp` first half (~19 tests, basic rules)**
+
+- [ ] **Step 6b: Retrofit `c_model/tests/axi/test_protocol_rules.cpp` second half (~19 tests, FIFO / advanced rules)**
 
 This file has both EXPECT_DEATH-style asserts and the new `ProtocolRulesFifo` predicate tests. SCENARIO each.
 
@@ -640,7 +664,9 @@ Include the 2 new tests from prior round (`PopBWithMeta_ExtractsRobIdxAndRobReq`
 
 - [ ] **Step 12: Retrofit `c_model/tests/nmu/test_packetize.cpp` (10 tests)**
 
-- [ ] **Step 13: Retrofit `c_model/tests/nmu/test_rob.cpp` (23 tests)**
+- [ ] **Step 13a: Retrofit `c_model/tests/nmu/test_rob.cpp` first half (~12 tests, Disabled mode + Enabled push)**
+
+- [ ] **Step 13b: Retrofit `c_model/tests/nmu/test_rob.cpp` second half (~11 tests, Enabled pop + Death)**
 
 This is the file user originally complained about. Examples:
 ```cpp
@@ -700,7 +726,7 @@ TEST_P(PacketizeLoopbackFixture, RunsFixture) {
 cd c_model && cmake --build build && ctest --test-dir build -j 1 2>&1 | tail -3
 ```
 
-Expected: **301/301 PASS unchanged** (description-only retrofit; no behavior change). Inspect output: every test now prints `[scenario] <desc>` line before `[ OK ]`.
+Expected: **302/302 PASS unchanged** (description-only retrofit; no behavior change). Inspect output: every test now prints `[scenario] <desc>` line before `[ OK ]`.
 
 - [ ] **Step 23: Drift gates**
 
@@ -731,7 +757,7 @@ Coverage (20 files, 240 declarations):
 - tests/integration/: 2 (port_pair_loopback 1, request_response_loopback 1)
 - tests/test_flit.cpp: 8
 
-Description-only; no behavior change. 301/301 ctest unchanged.
+Description-only; no behavior change. 302/302 ctest unchanged.
 
 Refs: docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md §4.4, §10.2"
 ```
@@ -793,7 +819,7 @@ Expected output contains:
 ctest --test-dir build -j 1 2>&1 | tail -3
 ```
 
-Expected: 301/301 PASS unchanged.
+Expected: 302/302 PASS unchanged.
 
 - [ ] **Step 7: Drift gates**
 
@@ -816,7 +842,7 @@ NOC_LOG=1 ctest --test-dir build -R multi_dst_stress -V demonstrates
 the full per-transaction trace (parse-friendly key=value format).
 
 Hard fail on ordering violation (EXPECT_TRUE(obs.ok())) deferred to a
-future round — initial wiring is observability-only. 301/301 ctest
+future round — initial wiring is observability-only. 302/302 ctest
 unchanged.
 
 Refs: docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md §10.3"
@@ -840,7 +866,7 @@ Refs: docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md 
 grep -rnE "assert\(false" c_model/include --include="*.hpp"
 ```
 
-**Per spec §11.4 heuristic**: 19 > 5 → recommended split into sub-commits per subsystem. Default to 4 sub-commits: 4a (ni/flit), 4b (nmu/), 4c (nsu/), 4d (final summary commit). Implementer may keep as single commit if reviewing all 19 spots together is preferred.
+**Per spec §11.4 heuristic**: 19 > 5 → recommended split into 3 sub-commits per subsystem: 4a (ni/flit, 2 spots), 4b (nmu/, 11 spots), 4c (nsu/, 6 spots). NO 4d summary commit (each sub-commit stands alone). Implementer may keep as single commit if reviewing all 19 spots together is preferred.
 
 - [ ] **Step 1: Pull fresh list of assert(false) spots**
 
@@ -929,7 +955,7 @@ std::abort();
 cd c_model && cmake --build build && ctest --test-dir build -j 1 2>&1 | tail -3
 ```
 
-Expected: 301/301 PASS unchanged. Assert messages are stripped at runtime under NDEBUG, so PASS is necessary but not sufficient. Spot-check: temporarily trigger one assert path manually (e.g. construct `nmu::Depacketize` and call `pop_aw()` — should abort with the new message visible in test output).
+Expected: 302/302 PASS unchanged. Assert messages are stripped at runtime under NDEBUG, so PASS is necessary but not sufficient. Spot-check: temporarily trigger one assert path manually (e.g. construct `nmu::Depacketize` and call `pop_aw()` — should abort with the new message visible in test output).
 
 - [ ] **Step 9: Drift gates**
 
@@ -959,16 +985,15 @@ Spots audited (19 total):
 - nsu/depacketize.hpp:41,42,140 (mirror of nmu pattern)
 - nsu/packetize.hpp:27,28,29 (mirror)
 
-Behavior identical (assert message is text only); 301/301 ctest unchanged.
+Behavior identical (assert message is text only); 302/302 ctest unchanged.
 
 Refs: docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md §9, §11.4"
 ```
 
-If sub-commits 4a/4b/4c/4d per spec §11.4 heuristic, split as:
+If sub-commits 4a/4b/4c per spec §11.4 heuristic, split as:
 - 4a: `git add c_model/include/ni/flit.hpp` (2 spots) — `fix(ni/flit): tighten assert message context`
 - 4b: `git add c_model/include/nmu/` (11 spots) — `fix(nmu): tighten assert message context (depacketize, packetize, rob)`
 - 4c: `git add c_model/include/nsu/` (6 spots) — `fix(nsu): tighten assert message context (depacketize, packetize)`
-- (4d optional final summary commit only if needed; default no 4d)
 
 ---
 
@@ -991,7 +1016,7 @@ Expected:
 - specgen pytest: 163 passed
 - codegen --check: clean (no output)
 - gen_inventory --check: clean (no output)
-- ctest: 301/301 passed
+- ctest: 302/302 passed
 
 - [ ] **Step 2: Read current `NEXT_STEPS.md`**
 
@@ -1044,7 +1069,7 @@ Karpathy 4-lens summary (per Task 5):
   cycle); single global rng_ for random latency (NOT used here, just
   refers to LoopbackNoc's, separate)
 - Verifiable success: 4 new Observer unit tests, 240 retrofit
-  description-only, 19 assert spots tightened, 301/301 ctest unchanged
+  description-only, 19 assert spots tightened, 302/302 ctest unchanged
 
 Drift gates final state:
 - specgen pytest: 163 passed
