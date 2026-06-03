@@ -110,3 +110,67 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
   EXPECT_EQ(r->last, true);
   EXPECT_EQ(r->data, data);
 }
+
+TEST(NmuDepacketize, PopBWithMeta_ExtractsRobIdxAndRobReq) {
+  using namespace ni::cmodel;
+  LoopbackNoc loopback(/*req_depth=*/16, /*rsp_depth=*/16);
+  nmu::Depacketize depkt(loopback.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
+
+  Flit f;
+  f.set_header_field("axi_ch",  ni::AXI_CH_B);
+  f.set_header_field("src_id",  0x10);
+  f.set_header_field("dst_id",  0x01);
+  f.set_header_field("vc_id",   0);
+  f.set_header_field("last",    1);
+  f.set_header_field("rob_req", 1);
+  f.set_header_field("rob_idx", 5);
+  f.set_payload_field("B", "bid",   0x42);
+  f.set_payload_field("B", "bresp", 0);
+  f.set_payload_field("B", "buser", 0);
+
+  ASSERT_TRUE(loopback.rsp_out().push_flit(f));
+  depkt.tick();
+
+  auto opt = depkt.pop_b_with_meta();
+  ASSERT_TRUE(opt.has_value());
+  auto [b, meta] = *opt;
+  EXPECT_EQ(b.id, 0x42u);
+  EXPECT_EQ(meta.rob_idx, 5u);
+  EXPECT_EQ(meta.rob_req, 1u);
+}
+
+TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatRobIdx) {
+  using namespace ni::cmodel;
+  LoopbackNoc loopback(/*req_depth=*/16, /*rsp_depth=*/16);
+  nmu::Depacketize depkt(loopback.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
+
+  for (uint8_t i = 0; i < 4; ++i) {
+    Flit f;
+    f.set_header_field("axi_ch",  ni::AXI_CH_R);
+    f.set_header_field("src_id",  0x10);
+    f.set_header_field("dst_id",  0x01);
+    f.set_header_field("vc_id",   0);
+    f.set_header_field("last",    1);
+    f.set_header_field("rob_req", 1);
+    f.set_header_field("rob_idx", 5 + i);
+    f.set_payload_field("R", "rid",   0x42);
+    f.set_payload_field("R", "rresp", 0);
+    f.set_payload_field("R", "ruser", 0);
+    f.set_payload_field("R", "rlast", (i == 3) ? 1u : 0u);
+    std::array<uint8_t, 32> data{};
+    data[0] = static_cast<uint8_t>(0xA0 + i);
+    f.set_payload_bytes("R", "rdata", data.data(), 256);
+    ASSERT_TRUE(loopback.rsp_out().push_flit(f));
+  }
+  depkt.tick();
+
+  for (uint8_t i = 0; i < 4; ++i) {
+    auto opt = depkt.pop_r_with_meta();
+    ASSERT_TRUE(opt.has_value()) << "beat " << static_cast<int>(i);
+    auto [r, meta] = *opt;
+    EXPECT_EQ(meta.rob_idx, 5u + i);
+    EXPECT_EQ(meta.rob_req, 1u);
+    EXPECT_EQ(r.last, i == 3);
+    EXPECT_EQ(r.data[0], 0xA0u + i);
+  }
+}

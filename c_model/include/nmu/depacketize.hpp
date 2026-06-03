@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <deque>
 #include <optional>
+#include <utility>
 
 namespace ni::cmodel::nmu {
 
@@ -30,15 +31,20 @@ public:
   // Depacketizer interface — response methods are real
   std::optional<axi::BBeat> pop_b() override;
   std::optional<axi::RBeat> pop_r() override;
+  std::optional<std::pair<axi::BBeat, ResponseMeta>> pop_b_with_meta() override;
+  std::optional<std::pair<axi::RBeat, ResponseMeta>> pop_r_with_meta() override;
   // Request methods assert false
   std::optional<axi::AwBeat> pop_aw() override { assert(false && "NMU depacketize: AW not applicable"); std::abort(); return std::nullopt; }
   std::optional<axi::WBeat>  pop_w () override { assert(false && "NMU depacketize: W  not applicable"); std::abort(); return std::nullopt; }
   std::optional<axi::ArBeat> pop_ar() override { assert(false && "NMU depacketize: AR not applicable"); std::abort(); return std::nullopt; }
 
 private:
+  struct BWithMeta { axi::BBeat beat; ResponseMeta meta; };
+  struct RWithMeta { axi::RBeat beat; ResponseMeta meta; };
+
   noc::NocRspIn& rsp_in_;
-  std::deque<axi::BBeat> b_q_;
-  std::deque<axi::RBeat> r_q_;
+  std::deque<BWithMeta> b_q_;
+  std::deque<RWithMeta> r_q_;
   std::size_t b_q_depth_, r_q_depth_;
   std::optional<Flit> pending_;
 
@@ -76,14 +82,24 @@ inline void Depacketize::tick() {
     }
     uint64_t ch = f.get_header_field("axi_ch");
     switch (ch) {
-      case ni::AXI_CH_B:
+      case ni::AXI_CH_B: {
         if (b_q_.size() >= b_q_depth_) { pending_ = f; return; }
-        b_q_.push_back(decode_b(f));
+        ResponseMeta meta{
+            static_cast<uint8_t>(f.get_header_field("rob_idx")),
+            static_cast<uint8_t>(f.get_header_field("rob_req"))
+        };
+        b_q_.push_back({decode_b(f), meta});
         break;
-      case ni::AXI_CH_R:
+      }
+      case ni::AXI_CH_R: {
         if (r_q_.size() >= r_q_depth_) { pending_ = f; return; }
-        r_q_.push_back(decode_r(f));
+        ResponseMeta meta{
+            static_cast<uint8_t>(f.get_header_field("rob_idx")),
+            static_cast<uint8_t>(f.get_header_field("rob_req"))
+        };
+        r_q_.push_back({decode_r(f), meta});
         break;
+      }
       default:
         assert(false && "NMU depacketize: NocRspIn delivered non-B/non-R flit");
         std::abort();
@@ -94,16 +110,32 @@ inline void Depacketize::tick() {
 
 inline std::optional<axi::BBeat> Depacketize::pop_b() {
   if (b_q_.empty()) return std::nullopt;
-  auto b = b_q_.front();
+  auto entry = b_q_.front();
   b_q_.pop_front();
-  return b;
+  return entry.beat;
 }
 
 inline std::optional<axi::RBeat> Depacketize::pop_r() {
   if (r_q_.empty()) return std::nullopt;
-  auto r = r_q_.front();
+  auto entry = r_q_.front();
   r_q_.pop_front();
-  return r;
+  return entry.beat;
+}
+
+inline std::optional<std::pair<axi::BBeat, ResponseMeta>>
+Depacketize::pop_b_with_meta() {
+  if (b_q_.empty()) return std::nullopt;
+  auto entry = b_q_.front();
+  b_q_.pop_front();
+  return std::make_pair(entry.beat, entry.meta);
+}
+
+inline std::optional<std::pair<axi::RBeat, ResponseMeta>>
+Depacketize::pop_r_with_meta() {
+  if (r_q_.empty()) return std::nullopt;
+  auto entry = r_q_.front();
+  r_q_.pop_front();
+  return std::make_pair(entry.beat, entry.meta);
 }
 
 }  // namespace ni::cmodel::nmu
