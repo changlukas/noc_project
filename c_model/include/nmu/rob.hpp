@@ -2,14 +2,17 @@
 #include "axi/types.hpp"
 #include "ni/depacketizer.hpp"
 #include "ni/packetizer.hpp"
+#include "ni_flit_constants.h"
 #include "nmu/addr_trans.hpp"
 #include "nmu/packetize.hpp"
 #include <array>
+#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
 #include <optional>
+#include <utility>
 
 namespace ni::cmodel::nmu {
 
@@ -43,7 +46,10 @@ public:
         RobMode mode_w,
         RobMode mode_r)
         : next_pkt_(next_pkt), next_depkt_(next_depkt),
-          mode_w_(mode_w), mode_r_(mode_r) {}
+          mode_w_(mode_w), mode_r_(mode_r) {
+        free_write_entries_.set();
+        free_read_entries_.set();
+    }
 
     // ===== Packetizer interface (request side; B/R assert+abort) =====
     bool push_aw(const axi::AwBeat& b) override;
@@ -69,6 +75,17 @@ public:
         assert(false && "Rob: pop_ar not applicable"); std::abort(); return std::nullopt;
     }
 
+    // === Enabled mode public constants (for testing + caller info) ===
+    static constexpr std::size_t ROB_CAPACITY = 1u << ni::header::ROB_IDX_WIDTH;  // 32
+    static constexpr std::size_t AXI_ID_SPACE = 1u << ni::width::AXI_ID_WIDTH;    // 256
+
+    // Linear scan for first run of n consecutive 1s in bitset<ROB_CAPACITY>.
+    // Returns base index (0..ROB_CAPACITY-1), or -1 if no such run exists.
+    // O(ROB_CAPACITY) worst case. Public for direct unit testing (TDD).
+    static int find_consecutive_free(
+        const std::bitset<ROB_CAPACITY>& free,
+        std::size_t n);
+
 private:
     Packetize&     next_pkt_;
     Depacketizer&  next_depkt_;
@@ -90,14 +107,77 @@ private:
     // their corresponding AW has been ROB-accepted. Single counter (not per-id)
     // because AXI4 W beats follow AW issue order strictly (no WID).
     uint32_t w_burst_credit_ = 0;
+
+    // === Enabled mode (per-beat slot pool) ===
+
+    struct WriteEntry {
+        bool       occupied = false;
+        bool       ready    = false;
+        uint8_t    axi_id   = 0;
+        axi::BBeat b_beat   = {};
+    };
+    struct ReadEntry {
+        bool       occupied = false;
+        bool       ready    = false;
+        uint8_t    axi_id   = 0;
+        axi::RBeat r_beat   = {};
+    };
+    std::array<WriteEntry, ROB_CAPACITY> write_entries_;
+    std::array<ReadEntry,  ROB_CAPACITY> read_entries_;
+    std::bitset<ROB_CAPACITY>            free_write_entries_;
+    std::bitset<ROB_CAPACITY>            free_read_entries_;
+
+    // Per-id ordered range list. AW = {base, 1}; AR = {base, len+1}.
+    struct BeatRange {
+        uint8_t base;
+        uint8_t len_plus_1;
+    };
+    std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
+    std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
+
+    // Ready-to-emit beats drained by pop_b / pop_r (Task 3).
+    std::deque<axi::BBeat> committed_b_queue_;
+    std::deque<axi::RBeat> committed_r_queue_;
 };
+
+// Linear scan for n consecutive free slots. See declaration above.
+inline int Rob::find_consecutive_free(
+        const std::bitset<ROB_CAPACITY>& free,
+        std::size_t n) {
+    if (n == 0 || n > ROB_CAPACITY) return -1;
+    std::size_t run = 0;
+    for (std::size_t i = 0; i < ROB_CAPACITY; ++i) {
+        if (free.test(i)) {
+            ++run;
+            if (run == n) return static_cast<int>(i - n + 1);
+        } else {
+            run = 0;
+        }
+    }
+    return -1;
+}
 
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
     if (mode_w_ == RobMode::Enabled) {
-        assert(false && "Rob: Enabled mode push_aw not yet implemented (next round)");
-        std::abort();
+        // Pool full? Cannot allocate.
+        if (free_write_entries_.none()) return false;
+        // Find first free slot.
+        int base = find_consecutive_free(free_write_entries_, 1);
+        if (base < 0) return false;
+        auto t = addr_trans::xy_route(b.addr);
+        if (!next_pkt_.push_aw_with_meta(b,
+                {t.dst_id, t.local_addr, /*rob_req=*/1,
+                 /*rob_idx=*/static_cast<uint8_t>(base)})) {
+            return false;   // downstream backpressure: no state mutation
+        }
+        free_write_entries_.reset(static_cast<std::size_t>(base));
+        write_entries_[base] = WriteEntry{
+            /*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
+        write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1});
+        ++w_burst_credit_;
+        return true;
     }
     auto t = addr_trans::xy_route(b.addr);
     auto& s = write_[b.id];
@@ -121,8 +201,25 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (mode_r_ == RobMode::Enabled) {
-        assert(false && "Rob: Enabled mode push_ar not yet implemented (next round)");
-        std::abort();
+        std::size_t n = static_cast<std::size_t>(b.len) + 1u;
+        // Oversized burst: cannot fit in pool at all.
+        if (n > ROB_CAPACITY) return false;
+        int base = find_consecutive_free(free_read_entries_, n);
+        if (base < 0) return false;   // no consecutive run
+        auto t = addr_trans::xy_route(b.addr);
+        if (!next_pkt_.push_ar_with_meta(b,
+                {t.dst_id, t.local_addr, /*rob_req=*/1,
+                 /*rob_idx=*/static_cast<uint8_t>(base)})) {
+            return false;   // downstream backpressure: no state mutation
+        }
+        for (std::size_t i = 0; i < n; ++i) {
+            free_read_entries_.reset(static_cast<std::size_t>(base) + i);
+            read_entries_[base + i] = ReadEntry{
+                /*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
+        }
+        read_order_by_id_[b.id].push_back(
+            {static_cast<uint8_t>(base), static_cast<uint8_t>(n)});
+        return true;
     }
     auto t = addr_trans::xy_route(b.addr);
     auto& s = read_[b.id];

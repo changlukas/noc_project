@@ -3,6 +3,7 @@
 #include "nmu/depacketize.hpp"
 #include "common/loopback_noc.hpp"
 #include "axi/types.hpp"
+#include <bitset>
 #include <gtest/gtest.h>
 
 using ni::cmodel::testing::LoopbackNoc;
@@ -176,4 +177,128 @@ TEST(NmuRobDeath, Disabled_AbortPaths) {
     EXPECT_DEATH(r.rob.pop_aw(), "Rob: pop_aw");
     EXPECT_DEATH(r.rob.pop_w(),  "Rob: pop_w");
     EXPECT_DEATH(r.rob.pop_ar(), "Rob: pop_ar");
+}
+
+// === ROB Enabled mode: push-side tests (Task 2) ===
+
+TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
+    LoopbackNoc noc(/*req=*/16, /*rsp=*/16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));
+    auto f = *noc.req_in().pop_flit();
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AW);
+    EXPECT_EQ(f.get_header_field("rob_req"), 1u);
+    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);  // first allocated slot
+}
+
+TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // AR len=3 → 4 beats → 4 consecutive slots
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 3;
+    ASSERT_TRUE(rob.push_ar(ar));
+    auto f = *noc.req_in().pop_flit();
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AR);
+    EXPECT_EQ(f.get_header_field("rob_req"), 1u);
+    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);  // base = 0
+    // Next AR should allocate slot 4 (slots 0-3 occupied)
+    axi::ArBeat ar2 = make_ar(0x06, 0x200);
+    ar2.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar2));
+    auto f2 = *noc.req_in().pop_flit();
+    EXPECT_EQ(f2.get_header_field("rob_idx"), 4u);
+}
+
+TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
+    std::bitset<Rob::ROB_CAPACITY> free;
+    // Fragmented free state: bits 1 at positions 0, 2, 4, 6 only.
+    free.set(0); free.set(2); free.set(4); free.set(6);
+
+    // 4 total free bits, but no run of 2+ consecutive.
+    EXPECT_EQ(Rob::find_consecutive_free(free, 3), -1);
+    EXPECT_EQ(Rob::find_consecutive_free(free, 2), -1);
+
+    // n=1 always finds position 0 first.
+    EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
+
+    // All free (32 free bits): n up to 32 succeeds at base=0; n=33 fails (over capacity).
+    free.set();
+    EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
+    EXPECT_EQ(Rob::find_consecutive_free(free, 32), 0);
+    EXPECT_EQ(Rob::find_consecutive_free(free, 33), -1);
+}
+
+TEST(NmuRob, Enabled_PushAr_OversizedBurst_ReturnFalse) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // AR len=31 → 32 beats = ROB_CAPACITY; len=32 → 33 beats > ROB_CAPACITY.
+    // Use len=255 (AXI4 INCR max) for an obviously-oversized burst.
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 255;   // 256 beats, exceeds ROB_CAPACITY (32)
+    EXPECT_FALSE(rob.push_ar(ar));
+    // No state mutation: a normal-sized AR should still succeed.
+    axi::ArBeat ar_ok = make_ar(0x06, 0x200);
+    ar_ok.len = 3;
+    EXPECT_TRUE(rob.push_ar(ar_ok));
+}
+
+TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
+    // req queue depth = 1: pkt.push_ar_with_meta will fail after 1st push
+    LoopbackNoc noc(/*req=*/1, /*rsp=*/16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 3;   // 4 beats
+    ASSERT_TRUE(rob.push_ar(ar));   // fills req queue 1/1
+    // Drain to allow next push to find consecutive free + downstream available
+    noc.req_in().pop_flit();
+    // Refill: push to fill queue again, then push another AR — downstream rejects
+    axi::ArBeat ar2 = make_ar(0x06, 0x200);
+    ar2.len = 3;
+    ASSERT_TRUE(rob.push_ar(ar2));
+    // Now downstream full. Next push_ar must return false WITHOUT touching free_read_entries_.
+    axi::ArBeat ar3 = make_ar(0x07, 0x300);
+    ar3.len = 1;   // 2 beats
+    EXPECT_FALSE(rob.push_ar(ar3));
+    // Drain, then ar3 retry must succeed (proving state was atomic — slots 8-9 still available)
+    noc.req_in().pop_flit();
+    EXPECT_TRUE(rob.push_ar(ar3));
+}
+
+TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
+    LoopbackNoc noc(64, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // 32 single-beat AWs fill the write pool entirely
+    for (int i = 0; i < 32; ++i) {
+        ASSERT_TRUE(rob.push_aw(make_aw(static_cast<uint8_t>(i & 0xFF), 0x100)));
+    }
+    // 33rd AW must fail
+    EXPECT_FALSE(rob.push_aw(make_aw(0x33, 0x200)));
+}
+
+TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
+    LoopbackNoc noc(/*req=*/1, /*rsp=*/16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));   // fills req queue 1/1
+    EXPECT_FALSE(rob.push_aw(make_aw(0x06, 0x200))); // downstream full, state unchanged
+    noc.req_in().pop_flit();                          // drain
+    EXPECT_TRUE(rob.push_aw(make_aw(0x06, 0x200))); // retry succeeds with slot still available
 }
