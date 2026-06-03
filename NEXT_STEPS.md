@@ -1,19 +1,16 @@
-## Current status (2026-06-02)
+## Current status (2026-06-03)
 
-Stage 3 addr_trans + ROB Disabled + AXI4 conformity 完工：
-- Stage 2 AxiMaster 修 AXI4 IHI 0022 §A5.3 違規（同 id concurrent 解禁，per-id FIFO + total counter, B/R 走 FIFO front）
-- nmu/addr_trans.hpp pure helper (XYRouting)
-- nmu/rob.hpp Packetizer + Depacketizer multi-inherit (per-id deque, W burst credit, Disabled mode complete, Enabled mode 全 stub)
-- nmu/packetize.hpp 拿掉 sticky setter, +push_*_with_meta (Rob 與未來 Enabled mode 用)
-- TestPacketize 完全退場（Rob 在 pipeline 取代）
-- Integration test 7 fixtures (6 既有 + 1 新 multi_dst_stress 驗 ROB stall e2e)
-- ~285+ ctest sequential, drift gates clean
+Stage 3 ROB Enabled mode + multi-NSU testbench 完工：
+- nmu/rob.hpp Enabled mode complete（per-beat slot pool, 32 slots from ROB_IDX_WIDTH=5, dynamic free-list allocator, per-id BeatRange commit sequence, in-order Path chain-flush, mixed-mode strict assert）
+- ni/depacketizer.hpp 加 `pop_*_with_meta()` virtual + `ResponseMeta` struct（default impl 是 no-op forwarder, backward compat）
+- nmu/depacketize.hpp override `pop_*_with_meta()`，抽 `rob_idx` / `rob_req` from flit header
+- tests/common/loopback_noc.hpp 重寫成 multi-NSU testbench（4 NSU instances, per-NSU routing, per-NSU response latency static + random hybrid），backward-compat single-NSU ctor 保留 → 270 prior tests 零受影響
+- integration testbench：`multi_dst_stress.yaml` 在 multi-NSU + per-NSU latency 下執行，positive `PerIdOrderTracker` 驗 Rob 不破壞 AXI4 §A5.3 同 id submission order（注意：Disabled mode 同樣保留 ordering，只是用 stall 而非 reorder — 本 fixture 是 positive ordering gate 而非 Disabled-vs-Enabled discriminator）
+- 297 ctest sequential pass (276 prior + 21 new: 2 depacketize + 13 rob + 6 loopback), drift gates clean
 
-**Next task per plan §3.1**: ROB Enabled mode — per-AXI-ID reorder buffer (Read 用 burst-aware reorder buffer, Write 用 FIFO metadata buffer)。
-參考 FlooNoC `floo_rob.sv` (full SRAM RoB) + `floo_simple_rob.sv` (write metadata) + `tb_floo_rob.sv` (variable-latency slave test pattern)。
-配套 LoopbackNoc per-dst latency 擴展（自然產生 out-of-order response）。
+**Next task per main plan §3.1**: `vc_arb` virtual channel arbitration（per-VC backpressure, round-robin or weighted scheduling, integrate with router fabric）。
 
-後續 `vc_arb` / `vc_mapping` / `route_par` / `flit_ecc` / `nmu.hpp` top-level assembly 各自獨立 round。
+後續 `vc_mapping` / `route_par` / `flit_ecc` / `nmu.hpp` top-level assembly 各自獨立 round。
 
 ---
 
