@@ -55,10 +55,12 @@
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
+#include "nmu/vc_arb.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "nsu/packetize.hpp"
+#include "nsu/vc_arb.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -180,7 +182,12 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   // Request-path packetizer (NMU side): Packetize self-computes dst via
   // addr_trans::xy_route. Wrapped in Rob (Disabled for legacy fixtures,
   // Enabled for multi_dst_stress so per-id B/R reorder runs across NSUs).
-  nmu::Packetize    real_nmu_pkt(loopback.nmu_req_out(), /*src_id=*/kNmuSrcId);
+  //
+  // NMU VcArb decorator. NUM_VC=1, Mode A (ReadWriteSplit) -- observationally
+  // transparent to all existing fixtures; future rounds may up NUM_VC.
+  auto nmu_arb = nmu::VcArb::read_write_split(
+      loopback.nmu_req_out(), /*num_vc=*/1, /*write_vc=*/0, /*read_vc=*/0);
+  nmu::Packetize    real_nmu_pkt(nmu_arb, /*src_id=*/kNmuSrcId);
   nmu::Rob          rob(real_nmu_pkt, nmu_depkt, rob_mode, rob_mode);
 
   // Ports straddle the packetize / depacketize stacks. The NMU port hands
@@ -196,10 +203,12 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   const std::size_t nsu_count = is_multi_dst ? kNumNsuMulti : 1u;
   std::vector<std::unique_ptr<nsu::MetaBuffer>>    nsu_metas;
   std::vector<std::unique_ptr<nsu::Depacketize>>   nsu_depkts;
+  std::vector<std::unique_ptr<nsu::VcArb>>         nsu_arbs;
   std::vector<std::unique_ptr<nsu::Packetize>>     nsu_pkts;
   std::vector<std::unique_ptr<nsu::AxiMasterPort>> nsu_ports;
   nsu_metas.reserve(nsu_count);
   nsu_depkts.reserve(nsu_count);
+  nsu_arbs.reserve(nsu_count);
   nsu_pkts.reserve(nsu_count);
   nsu_ports.reserve(nsu_count);
   for (std::size_t i = 0; i < nsu_count; ++i) {
@@ -212,8 +221,15 @@ LoopbackResult run_fixture(const std::string& yaml_path,
         params.depkt_aw_q_depth,
         params.depkt_w_q_depth,
         params.depkt_ar_q_depth));
+    // NSU VcArb decorator. NUM_VC=1, Mode A. Move-constructs from factory
+    // return into unique_ptr so the arbiter outlives the packetizer that
+    // holds it by reference.
+    nsu_arbs.emplace_back(std::make_unique<nsu::VcArb>(
+        nsu::VcArb::read_write_split(
+            loopback.nsu_rsp_out(i), /*num_vc=*/1,
+            /*write_rsp_vc=*/0, /*read_rsp_vc=*/0)));
     nsu_pkts.emplace_back(std::make_unique<nsu::Packetize>(
-        loopback.nsu_rsp_out(i), *nsu_metas[i], this_nsu_src));
+        *nsu_arbs[i], *nsu_metas[i], this_nsu_src));
     nsu_ports.emplace_back(std::make_unique<nsu::AxiMasterPort>(
         *nsu_depkts[i], *nsu_pkts[i], params));
   }
@@ -386,6 +402,16 @@ LoopbackResult run_fixture(const std::string& yaml_path,
       if (!r_holdovers[i].empty() || !nsu_ports[i]->push_r(*r)) {
         r_holdovers[i].push_back(*r);
       }
+    }
+
+    // Advance VcArb pending queues before loopback ages: VcArb drains its
+    // per-VC pending into loopback's per-NSU queues, then loopback ages its
+    // per-cycle delay pipes. Same-cycle ordering matches the request-side
+    // pipeline (Packetize -> VcArb.push_flit during nmu_port.tick(), then
+    // VcArb.tick() pushes into loopback in the same cycle).
+    nmu_arb.tick();
+    for (std::size_t i = 0; i < nsu_count; ++i) {
+      nsu_arbs[i]->tick();
     }
 
     // Advance the loopback's per-cycle delay pipes after all producers /
