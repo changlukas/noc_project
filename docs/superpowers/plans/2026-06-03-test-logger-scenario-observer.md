@@ -32,7 +32,7 @@ cd ../c_model && cmake --build build && ctest --test-dir build -j 1
 | 2 | `test: retrofit SCENARIO to 240 TEST declarations` | 302/302 ctest (description-only) |
 | 3 | `test(tests/integration): wire AxiMasterObserver` | 302/302 ctest |
 | 4 | `fix(c_model): tighten assert messages with cause hints` | 302/302 ctest |
-| 5 | `docs(NEXT_STEPS): test logger done; next is vc_arb` | 301/301 |
+| 5 | `docs(NEXT_STEPS): test logger done; next is vc_arb` | 302/302 |
 
 ---
 
@@ -488,7 +488,7 @@ Expected: 4 PASS.
 ctest --test-dir build -j 1 2>&1 | tail -3
 ```
 
-Expected: 302/302 passed (297 prior + 4 new).
+Expected: 302/302 passed (297 prior + 5 new).
 
 - [ ] **Step 11: Drift gates**
 
@@ -536,7 +536,7 @@ Refs: docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md 
 
 ## Task 2: Retrofit SCENARIO to 240 existing TEST declarations
 
-**Files:** 20 test files (per spec §10.2 table). Description-only change; no behavior modification; ctest count unchanged at 301.
+**Files:** 20 test files (per spec §10.2 table). Description-only change; no behavior modification; ctest count unchanged at 302.
 
 **Goal:** Every `TEST(...)` / `TEST_F(...)` / `TEST_P(...)` body in the project has `SCENARIO("...")` as its first statement.
 
@@ -1041,7 +1041,7 @@ Stage 3 test logger (SCENARIO + AxiMasterObserver) 完工：
   33 nsu + 6 common + 2 integration + 8 test_flit)
 - Verbose mode (NOC_LOG=1) 加 parse-friendly per-transaction trace (key=value 風格)
 - Production assert message audit: 19 個 bare assert(false) 加 cause + 可能原因 hint
-- 301 ctest sequential pass (297 prior + 4 new Observer tests), drift gates clean
+- 302 ctest sequential pass (297 prior + 5 new Observer tests), drift gates clean
 
 **Next task per main plan §3.1**: `vc_arb` virtual channel arbitration
 (per-VC backpressure, round-robin or weighted scheduling, integrate with router fabric)。
@@ -1075,7 +1075,7 @@ Drift gates final state:
 - specgen pytest: 163 passed
 - codegen.py --check: clean
 - gen_inventory.py --check: clean
-- c_model ctest: 301 sequential
+- c_model ctest: 302 sequential
 
 5 commits complete (or 8 if Task 2 + Task 4 split per subsystem):
 - 1: feat(tests/common): add SCENARIO macro + AxiMasterObserver
@@ -1124,7 +1124,7 @@ After writing the plan, verified:
   - `test_inject_write_result` / `test_inject_read_result` / `test_set_aw_count` / `test_set_ar_count` declared in Task 1 Step 6 public API; used in Task 1 Steps 3-4 unit tests
   - `axi::WriteResult` / `axi::ReadResult` fields (addr/size/len/burst/lock/data/strb_per_beat/resp/id/scenario_line) match `c_model/include/axi/axi_master.hpp:64-90`
   - `axi::Resp::OKAY|EXOKAY|SLVERR|DECERR` enum values (used in `resp_str` helper)
-- **Acceptance counts**: 297 → 301 (Task 1 adds 4) → 301 (Tasks 2-5 no test count change). Monotonic, internally consistent.
+- **Acceptance counts**: 297 → 302 (Task 1 adds 5) → 302 (Tasks 2-5 no test count change). Monotonic, internally consistent.
 - **Cross-references**: Task 1 establishes API; Task 2 uses SCENARIO (no observer); Task 3 uses observer; Task 4 independent; Task 5 final sweep. No forward references to undefined symbols.
 
 ---

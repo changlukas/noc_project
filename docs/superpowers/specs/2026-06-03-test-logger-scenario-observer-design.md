@@ -438,7 +438,7 @@ Expected at HEAD:
 - Create `c_model/tests/common/test_test_logger.cpp` (4 Observer unit tests)
 - Modify `c_model/tests/common/CMakeLists.txt` (register test_test_logger)
 
-**Acceptance**: 297 → 301 ctest. Standalone framework, no existing tests touched.
+**Acceptance**: 297 → 302 ctest (Task 1 adds 5 Observer tests: OrderedBPass, OutOfOrderBFail, OutOfOrderRFail, NonOkayResp, StuckCountMismatch). Standalone framework, no existing tests touched.
 
 ### Commit 2: `test: retrofit SCENARIO to 240 existing TEST declarations`
 
