@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add NMU + NSU virtual-channel arbiter with two modes (ReadWriteSplit, MultiCandidate), per-VC credit-gated round-robin, W-follows-AW invariant, plus a FlooNoC-aligned `header.last` fix in `nmu/packetize.hpp` — across 7 commits, growing ctest from 302 to 320.
+**Goal:** Add NMU + NSU virtual-channel arbiter with two modes (ReadWriteSplit, MultiCandidate), per-VC credit-gated round-robin, W-follows-AW invariant, plus a FlooNoC-aligned `header.last` fix in `nmu/packetize.hpp` — across 7 commits, growing ctest from 302 to 324 (spec §13.4 target was 320; +4 from Task 2 dedicated LoopbackNoc tests not separately counted in spec).
 
 **Architecture:** Decorator pattern — `VcArb` implements `NocReqOut`/`NocRspOut` and wraps the real downstream (LoopbackNoc). NMU `Packetize` keeps its existing `NocReqOut&` injection; the reference now points at a `VcArb` instance which routes per-axi_ch to a per-VC pending queue, then round-robin drains to downstream gated by per-VC credit availability.
 
@@ -43,7 +43,7 @@ The behavioral guarantee from spec (per-VC credit-based flow control gating push
 |---|---|---|
 | `c_model/tests/nmu/test_packetize.cpp` | Modify | Update line 50 expectation; add `WHeaderLastMatchesWlast` test |
 | `c_model/tests/nmu/test_vc_arb.cpp` | Create | 12 tests for `nmu::VcArb` (10 functional + 2 EXPECT_DEATH) |
-| `c_model/tests/nsu/test_vc_arb.cpp` | Create | 5 tests for `nsu::VcArb` |
+| `c_model/tests/nsu/test_nsu_vc_arb.cpp` | Create | 5 tests for `nsu::VcArb` (target name distinct from nmu/test_vc_arb to avoid CMake target collision) |
 | `c_model/tests/nmu/CMakeLists.txt` | Modify | Register `test_vc_arb` |
 | `c_model/tests/nsu/CMakeLists.txt` | Modify | Register `test_vc_arb` |
 | `c_model/tests/integration/test_request_response_loopback.cpp` | Modify | Insert VcArb between Packetize and LoopbackNoc adapter |
@@ -665,6 +665,7 @@ This is the largest task. To stay bite-sized, build the class skeleton + 1 test 
 #include <cstdlib>
 #include <deque>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace ni::cmodel::nmu {
@@ -853,27 +854,45 @@ Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0,
 }  // namespace
 
 TEST(NmuVcArb, Degenerate_NumVc1_AllModesPassthrough) {
-    SCENARIO("NMU VcArb: NUM_VC=1, both modes route every axi_ch → VC=0; "
-             "behavior observationally identical to direct Packetize → LoopbackNoc");
-    LoopbackNoc noc(/*req*/32, /*rsp*/32);
-    auto arb = VcArb::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    SCENARIO("NMU VcArb: NUM_VC=1, both Mode A (read_write_split) and Mode B "
+             "(multi_candidate) route every axi_ch → VC=0; behavior "
+             "observationally identical to direct Packetize → LoopbackNoc");
 
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-
-    EXPECT_EQ(arb.pending_size(0), 3u);
-    EXPECT_EQ(arb.pending_size(1), 0u);
-
-    arb.tick();
-    arb.tick();
-    arb.tick();
-    EXPECT_EQ(arb.pending_size(0), 0u);
-
-    for (int i = 0; i < 3; ++i) {
-        auto f = noc.req_in().pop_flit();
-        ASSERT_TRUE(f.has_value());
-        EXPECT_EQ(f->get_header_field("vc_id"), 0u);
+    // Mode A
+    {
+        LoopbackNoc noc(/*req*/32, /*rsp*/32);
+        auto arb = VcArb::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
+        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+        EXPECT_EQ(arb.pending_size(0), 3u);
+        arb.tick(); arb.tick(); arb.tick();
+        EXPECT_EQ(arb.pending_size(0), 0u);
+        for (int i = 0; i < 3; ++i) {
+            auto f = noc.req_in().pop_flit();
+            ASSERT_TRUE(f.has_value());
+            EXPECT_EQ(f->get_header_field("vc_id"), 0u);
+        }
+    }
+    // Mode B — even with multi_candidate, num_vc=1 forces VC=0.
+    {
+        LoopbackNoc noc(/*req*/32, /*rsp*/32);
+        std::array<std::vector<uint8_t>, VcArb::AXI_CH_COUNT> candidates{};
+        candidates[ni::AXI_CH_AW] = {0};
+        candidates[ni::AXI_CH_W]  = {0};
+        candidates[ni::AXI_CH_AR] = {0};
+        auto arb = VcArb::multi_candidate(noc.req_out(), /*num_vc=*/1, candidates);
+        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
+        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+        EXPECT_EQ(arb.pending_size(0), 3u);
+        arb.tick(); arb.tick(); arb.tick();
+        EXPECT_EQ(arb.pending_size(0), 0u);
+        for (int i = 0; i < 3; ++i) {
+            auto f = noc.req_in().pop_flit();
+            ASSERT_TRUE(f.has_value());
+            EXPECT_EQ(f->get_header_field("vc_id"), 0u);
+        }
     }
 }
 ```
@@ -1380,7 +1399,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 
 **Files:**
 - Create: `c_model/include/nsu/vc_arb.hpp`
-- Create: `c_model/tests/nsu/test_vc_arb.cpp`
+- Create: `c_model/tests/nsu/test_nsu_vc_arb.cpp` (NOTE: must be `test_nsu_vc_arb` not `test_vc_arb` — CMake target names are global; would collide with Task 4's `test_vc_arb` in nmu/CMakeLists.txt. Same convention as `test_nsu_packetize` vs `test_packetize` in existing tree.)
 - Modify: `c_model/tests/nsu/CMakeLists.txt`
 
 - [ ] **Step 1: Create `c_model/include/nsu/vc_arb.hpp`**
@@ -1406,6 +1425,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 #include <cstdlib>
 #include <deque>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace ni::cmodel::nsu {
@@ -1531,7 +1551,7 @@ inline void VcArb::tick() {
 }  // namespace ni::cmodel::nsu
 ```
 
-- [ ] **Step 2: Create `c_model/tests/nsu/test_vc_arb.cpp` with all 5 tests**
+- [ ] **Step 2: Create `c_model/tests/nsu/test_nsu_vc_arb.cpp` with all 5 tests**
 
 ```cpp
 #include "nsu/vc_arb.hpp"
@@ -1563,19 +1583,35 @@ Flit make_rsp_flit(uint8_t axi_ch, uint8_t initial_vc = 0) {
 }  // namespace
 
 TEST(NsuVcArb, Nsu_Degenerate_NumVc1_Passthrough) {
-    SCENARIO("NSU VcArb: NUM_VC=1, both modes route B + R → VC=0");
-    LoopbackNoc noc(/*req*/32, /*rsp*/32);
-    auto arb = VcArb::read_write_split(noc.rsp_out(), /*num_vc=*/1, 0, 0);
+    SCENARIO("NSU VcArb: NUM_VC=1, both Mode A (read_write_split) and Mode B "
+             "(multi_candidate) route B + R → VC=0");
 
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
-    EXPECT_EQ(arb.pending_size(0), 2u);
-
-    arb.tick(); arb.tick();
-    EXPECT_EQ(arb.pending_size(0), 0u);
-    for (int i = 0; i < 2; ++i) {
-        auto f = noc.rsp_in().pop_flit(); ASSERT_TRUE(f.has_value());
-        EXPECT_EQ(f->get_header_field("vc_id"), 0u);
+    // Mode A
+    {
+        LoopbackNoc noc(/*req*/32, /*rsp*/32);
+        auto arb = VcArb::read_write_split(noc.rsp_out(), /*num_vc=*/1, 0, 0);
+        ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
+        ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
+        arb.tick(); arb.tick();
+        for (int i = 0; i < 2; ++i) {
+            auto f = noc.rsp_in().pop_flit(); ASSERT_TRUE(f.has_value());
+            EXPECT_EQ(f->get_header_field("vc_id"), 0u);
+        }
+    }
+    // Mode B
+    {
+        LoopbackNoc noc(/*req*/32, /*rsp*/32);
+        std::array<std::vector<uint8_t>, VcArb::AXI_CH_COUNT> candidates{};
+        candidates[ni::AXI_CH_B] = {0};
+        candidates[ni::AXI_CH_R] = {0};
+        auto arb = VcArb::multi_candidate(noc.rsp_out(), /*num_vc=*/1, candidates);
+        ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
+        ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
+        arb.tick(); arb.tick();
+        for (int i = 0; i < 2; ++i) {
+            auto f = noc.rsp_in().pop_flit(); ASSERT_TRUE(f.has_value());
+            EXPECT_EQ(f->get_header_field("vc_id"), 0u);
+        }
     }
 }
 
@@ -1656,13 +1692,16 @@ TEST(NsuVcArb, Nsu_CreditGating) {
 }
 ```
 
-- [ ] **Step 3: Register `test_vc_arb` in `c_model/tests/nsu/CMakeLists.txt`**
+- [ ] **Step 3: Register `test_nsu_vc_arb` in `c_model/tests/nsu/CMakeLists.txt`**
 
 Append:
 
 ```cmake
-add_cmodel_test(test_vc_arb)
-target_include_directories(test_vc_arb PRIVATE
+# Note: distinct target name from nmu/test_vc_arb to avoid CMake target
+# collision (add_cmodel_test creates a bare-named target). Source file
+# mirrors the target name; gtest suite name remains NsuVcArb.
+add_cmodel_test(test_nsu_vc_arb)
+target_include_directories(test_nsu_vc_arb PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 ```
 
@@ -1682,7 +1721,7 @@ Note: spec §13.4 target was 320; actual is 324 because Task 2 introduced 4 Loop
 
 ```powershell
 git add c_model/include/nsu/vc_arb.hpp `
-        c_model/tests/nsu/test_vc_arb.cpp `
+        c_model/tests/nsu/test_nsu_vc_arb.cpp `
         c_model/tests/nsu/CMakeLists.txt
 git commit -m @'
 feat(nsu/vc_arb): VcArb class (NSU mirror) + 5 unit tests
@@ -1708,61 +1747,111 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
 
 ## Task 6: Wire VcArb into integration testbench
 
-**Goal:** Insert `nmu::VcArb` between `nmu::Packetize` and the LoopbackNoc req side, and `nsu::VcArb` between `nsu::Packetize` and the LoopbackNoc rsp side, in `test_request_response_loopback.cpp`. NUM_VC=1, Mode A (default). All existing integration tests should pass unchanged because NUM_VC=1 makes VcArb observationally transparent.
+**Goal:** Insert `nmu::VcArb` between `nmu::Packetize` and the LoopbackNoc req side, and a `nsu::VcArb` per NSU between `nsu::Packetize` and the LoopbackNoc rsp side, in `test_request_response_loopback.cpp`. NUM_VC=1, Mode A (default). All existing integration tests should pass unchanged because NUM_VC=1 makes VcArb observationally transparent.
+
+**Lifetime concern**: the NSU side stores packetizers in `std::vector<std::unique_ptr<nsu::Packetize>>` (line 199, 215 of current fixture). NSU VcArbs must outlive the packetizers that hold a reference to them — they need parallel `std::unique_ptr` storage in a vector declared BEFORE `nsu_pkts`. NMU side is simpler (single stack instance).
 
 **Files:**
 - Modify: `c_model/tests/integration/test_request_response_loopback.cpp`
 
-- [ ] **Step 1: Read current integration fixture to find Packetize wiring points**
+- [ ] **Step 1: Add includes near top of file**
 
-Run: `Grep` for `Packetize` in `c_model/tests/integration/test_request_response_loopback.cpp` to locate the constructor calls.
-
-Expected: finds `nmu::Packetize pkt(noc.req_out(), ...)` and `nsu::Packetize nsu_pkt(noc.rsp_out(...), ...)` style call sites. Note exact line numbers.
-
-- [ ] **Step 2: Add includes + wire VcArb into NMU pipeline**
-
-Add near top of file (after existing includes):
+After the existing `nmu::*` / `nsu::*` includes, add:
 
 ```cpp
 #include "nmu/vc_arb.hpp"
 #include "nsu/vc_arb.hpp"
 ```
 
-At each NMU `Packetize` construction site, insert a `VcArb` between Packetize and `noc.req_out()`:
+- [ ] **Step 2: Insert NMU VcArb before `real_nmu_pkt` construction**
+
+Locate line 183 (currently `nmu::Packetize real_nmu_pkt(loopback.nmu_req_out(), /*src_id=*/kNmuSrcId);`).
+
+Replace it with:
 
 ```cpp
-// Before:
-// nmu::Packetize pkt(noc.req_out(), src_id);
-
-// After:
-auto nmu_arb = nmu::VcArb::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-nmu::Packetize pkt(nmu_arb, src_id);
+  // NMU VcArb decorator. NUM_VC=1, Mode A (ReadWriteSplit) — observationally
+  // transparent to all existing fixtures; future rounds may up NUM_VC.
+  auto nmu_arb = nmu::VcArb::read_write_split(
+      loopback.nmu_req_out(), /*num_vc=*/1, /*write_vc=*/0, /*read_vc=*/0);
+  nmu::Packetize    real_nmu_pkt(nmu_arb, /*src_id=*/kNmuSrcId);
 ```
 
-Apply analogous wrapping at each NSU `Packetize` construction site:
+- [ ] **Step 3: Add NSU VcArb vector before NSU packetizer vector + emplace per NSU**
+
+Locate the block of `std::vector<std::unique_ptr<...>>` declarations starting at line 197. Add a new vector declaration immediately BEFORE `nsu_pkts`:
 
 ```cpp
-// Before:
-// nsu::Packetize nsu_pkt(noc.rsp_out(), nsu_src_id);
-
-// After:
-auto nsu_arb = nsu::VcArb::read_write_split(noc.rsp_out(), /*num_vc=*/1, 0, 0);
-nsu::Packetize nsu_pkt(nsu_arb, nsu_src_id);
+  std::vector<std::unique_ptr<nsu::VcArb>>         nsu_arbs;
 ```
 
-Also: the fixture's tick loop must now call `nmu_arb.tick()` and `nsu_arb.tick()` once per cycle to drain VcArb's pending queue to LoopbackNoc. Locate the per-cycle loop (likely `noc.tick()` and similar) and add VcArb ticks immediately before `noc.tick()`.
+Add the reserve immediately before `nsu_pkts.reserve(nsu_count);`:
 
-- [ ] **Step 3: Build + run integration tests — expect all PASS unchanged**
+```cpp
+  nsu_arbs.reserve(nsu_count);
+```
+
+Inside the per-NSU `for` loop, insert the VcArb emplacement BEFORE the `nsu_pkts.emplace_back(...)` call (currently line 215). The full updated emplacement block becomes:
+
+```cpp
+    nsu_metas.emplace_back(
+        std::make_unique<nsu::MetaBuffer>(params.meta_buffer_per_id_depth));
+    nsu_depkts.emplace_back(std::make_unique<nsu::Depacketize>(
+        loopback.nsu_req_in(i), *nsu_metas[i],
+        params.depkt_aw_q_depth,
+        params.depkt_w_q_depth,
+        params.depkt_ar_q_depth));
+    // NSU VcArb decorator. NUM_VC=1, Mode A. Move-constructs from factory
+    // return into unique_ptr so the arbiter outlives the packetizer that
+    // holds it by reference.
+    nsu_arbs.emplace_back(std::make_unique<nsu::VcArb>(
+        nsu::VcArb::read_write_split(
+            loopback.nsu_rsp_out(i), /*num_vc=*/1, /*write_rsp_vc=*/0, /*read_rsp_vc=*/0)));
+    nsu_pkts.emplace_back(std::make_unique<nsu::Packetize>(
+        *nsu_arbs[i], *nsu_metas[i], this_nsu_src));
+    nsu_ports.emplace_back(std::make_unique<nsu::AxiMasterPort>(
+        *nsu_depkts[i], *nsu_pkts[i], params));
+```
+
+- [ ] **Step 4: Add VcArb tick calls into per-cycle tick loop**
+
+Locate the per-cycle while loop (line 289-393). The `loopback.tick();` call sits at line 393 just before the timeout check. Add VcArb tick calls IMMEDIATELY BEFORE `loopback.tick();`. Replace:
+
+```cpp
+    // Advance the loopback's per-cycle delay pipes after all producers /
+    // consumers have run for this cycle. Mirrors port-pair test ordering.
+    loopback.tick();
+```
+
+with:
+
+```cpp
+    // Advance VcArb pending queues before loopback ages: VcArb drains its
+    // per-VC pending into loopback's per-NSU queues, then loopback ages its
+    // per-cycle delay pipes. Same-cycle ordering matches the request-side
+    // pipeline (Packetize → VcArb.push_flit during nmu_port.tick(), then
+    // VcArb.tick() pushes into loopback in the same cycle).
+    nmu_arb.tick();
+    for (std::size_t i = 0; i < nsu_count; ++i) {
+      nsu_arbs[i]->tick();
+    }
+
+    // Advance the loopback's per-cycle delay pipes after all producers /
+    // consumers have run for this cycle. Mirrors port-pair test ordering.
+    loopback.tick();
+```
+
+- [ ] **Step 5: Build + run integration tests — expect all PASS unchanged**
 
 Run: `cmake --build c_model/build && ctest --test-dir c_model/build -R Loopback -V`
 Expected: all `Loopback*` integration tests pass (counts unchanged from pre-task-6).
 
-- [ ] **Step 4: Run full ctest — expect 324/324 unchanged**
+- [ ] **Step 6: Run full ctest — expect 324/324 unchanged**
 
 Run: `ctest --test-dir c_model/build -j 1`
 Expected: `324 tests passed`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```powershell
 git add c_model/tests/integration/test_request_response_loopback.cpp
