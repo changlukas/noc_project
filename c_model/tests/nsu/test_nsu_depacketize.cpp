@@ -130,7 +130,7 @@ TEST(NsuDepacketize, PopBAssertFalse) {
   LoopbackNoc noc(16, 16);
   MetaBuffer mb(4);
   Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
-  EXPECT_DEATH(depkt.pop_b(), "NSU depacketize: B not applicable");
+  EXPECT_DEATH(depkt.pop_b(), "nsu::Depacketize::pop_b");
 }
 
 TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {

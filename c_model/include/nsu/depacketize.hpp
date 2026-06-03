@@ -38,8 +38,24 @@ public:
   std::optional<axi::WBeat>  pop_w()  override;
   std::optional<axi::ArBeat> pop_ar() override;
   // Response methods assert false
-  std::optional<axi::BBeat> pop_b() override { assert(false && "NSU depacketize: B not applicable"); std::abort(); return std::nullopt; }
-  std::optional<axi::RBeat> pop_r() override { assert(false && "NSU depacketize: R not applicable"); std::abort(); return std::nullopt; }
+  std::optional<axi::BBeat> pop_b() override {
+      assert(false && "nsu::Depacketize::pop_b: NSU depacketizer handles request side only "
+                      "(AW/W/AR from NocReqIn) — B belongs on the response side "
+                      "(NMU Depacketize). Likely cause: AxiMasterPort wiring routed a "
+                      "response-channel pop into the NSU depacketizer, or test fixture "
+                      "invoked the wrong Depacketizer instance.");
+      std::abort();
+      return std::nullopt;
+  }
+  std::optional<axi::RBeat> pop_r() override {
+      assert(false && "nsu::Depacketize::pop_r: NSU depacketizer handles request side only "
+                      "(AW/W/AR from NocReqIn) — R belongs on the response side "
+                      "(NMU Depacketize). Likely cause: AxiMasterPort wiring routed a "
+                      "response-channel pop into the NSU depacketizer, or test fixture "
+                      "invoked the wrong Depacketizer instance.");
+      std::abort();
+      return std::nullopt;
+  }
 
 private:
   noc::NocReqIn& req_in_;
@@ -137,7 +153,11 @@ inline void Depacketize::tick() {
         }
         break;
       default:
-        assert(false && "NSU depacketize: NocReqIn delivered non-AW/W/AR flit");
+        assert(false && "nsu::Depacketize::tick: NocReqIn delivered flit with axi_ch outside "
+                        "{AW, W, AR} — NSU request path only accepts request channels. Likely "
+                        "cause: NMU packetizer stamped wrong axi_ch into a request flit, NoC "
+                        "fabric misrouted a response flit into the request ingress, or codegen "
+                        "drift changed ni::AXI_CH_* encoding without rebuilding both sides.");
         std::abort();
     }
     pending_.reset();

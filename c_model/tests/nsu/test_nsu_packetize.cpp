@@ -113,5 +113,5 @@ TEST(NsuPacketize, PushAwAssertFalse) {
   MetaBuffer mb(4);
   Packetize pkt(noc.rsp_out(), mb, kNsuSrcId);
   axi::AwBeat dummy{};
-  EXPECT_DEATH(pkt.push_aw(dummy), "NSU packetize: AW not applicable");
+  EXPECT_DEATH(pkt.push_aw(dummy), "nsu::Packetize::push_aw");
 }
