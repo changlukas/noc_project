@@ -146,7 +146,7 @@ In default `ctest` mode (no `-V`), the scenario line is suppressed (GoogleTest c
 
 ### 4.4 Description guidelines
 
-- **Concise**: aim ≤80 chars per line. If invariant needs more, second SCENARIO call OK.
+- **Concise**: must fit ≤80 chars per line. If invariant needs more, split into multiple SCENARIO calls, each ≤80 chars.
 - **English only**: no Chinese / no special chars beyond standard ASCII.
 - **Describe invariant or scenario, not implementation**: "expects 4 consecutive ROB slots allocated" not "calls find_consecutive_free with n=4".
 - **Mention `Enabled mode` / `Disabled mode`** explicitly when relevant — context for mode-specific tests.
@@ -194,6 +194,7 @@ public:
     }
 
     // Explicit summary print (optional; destructor auto-prints if not called).
+    // Sets summary_printed_ = true on entry to prevent destructor double-print.
     void print_summary();
 
     // Test-side query for hard-fail assertion.
@@ -447,7 +448,7 @@ Expected at HEAD:
 - Sub-commit 4c: `c_model/include/nmu/*.hpp`
 - Sub-commit 4d: `c_model/include/nsu/*.hpp`
 
-OR keep as single Commit 4 if audit reveals <5 spots total. Plan-author decides based on actual scope.
+OR keep as single Commit 4 if audit reveals ≤5 spots total (heuristic: split iff total spots > 5).
 
 **Acceptance**: 301/301 ctest unchanged. Behavior identical (assert strings only).
 
