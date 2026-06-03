@@ -1,12 +1,12 @@
 ## Current status (2026-06-03)
 
-Stage 3 ROB Enabled mode + multi-NSU testbench 完工：
-- nmu/rob.hpp Enabled mode complete（per-beat slot pool, 32 slots from ROB_IDX_WIDTH=5, dynamic free-list allocator, per-id BeatRange commit sequence, in-order Path chain-flush, mixed-mode strict assert）
-- ni/depacketizer.hpp 加 `pop_*_with_meta()` virtual + `ResponseMeta` struct（default impl 是 no-op forwarder, backward compat）
-- nmu/depacketize.hpp override `pop_*_with_meta()`，抽 `rob_idx` / `rob_req` from flit header
-- tests/common/loopback_noc.hpp 重寫成 multi-NSU testbench（4 NSU instances, per-NSU routing, per-NSU response latency static + random hybrid），backward-compat single-NSU ctor 保留 → 270 prior tests 零受影響
-- integration testbench：`multi_dst_stress.yaml` 在 multi-NSU + per-NSU latency 下執行，positive `PerIdOrderTracker` 驗 Rob 不破壞 AXI4 §A5.3 同 id submission order（注意：Disabled mode 同樣保留 ordering，只是用 stall 而非 reorder — 本 fixture 是 positive ordering gate 而非 Disabled-vs-Enabled discriminator）
-- 297 ctest sequential pass (276 prior + 21 new: 2 depacketize + 13 rob + 6 loopback), drift gates clean
+Stage 3 test logger (SCENARIO + AxiMasterObserver) 完工：
+- `tests/common/scenario.hpp`：`SCENARIO("…")` macro 一行人類描述，retrofit 全 240 個 TEST declarations (132 axi + 59 nmu + 33 nsu + 6 common + 2 integration + 8 test_flit)
+- `tests/common/test_logger.hpp`：`AxiMasterObserver` class hooks `AxiMaster` 的 `on_write_completed` / `on_read_observed` callbacks（zero production change）；counts logical AW/W/AR/B/R、tracks per-id `scenario_line` sequences、auto-detect AXI4 §A5.3 ordering violations + non-OKAY resp + stuck txns；RAII destructor 印 summary 作 fallback
+- Verbose mode (`NOC_LOG=1`) 加 parse-friendly per-transaction trace（key=value 風格, AW/B 對 + AR/R 對）
+- 整合 testbench: wired `AxiMasterObserver` 進 `PacketizeLoopback` fixtures（test_inject_* path；AxiMaster single callback slot 已被 Scoreboard 占用）
+- Production assert message audit：19 個 bare `assert(false)` 加 cause + Likely-cause hint（ni/flit + nmu + nsu 三 sub-commits per subsystem）
+- 302 ctest sequential pass (297 prior + 5 new Observer tests), drift gates clean (specgen 163, codegen --check 0, gen_inventory --check 0)
 
 **Next task per main plan §3.1**: `vc_arb` virtual channel arbitration（per-VC backpressure, round-robin or weighted scheduling, integrate with router fabric）。
 
