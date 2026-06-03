@@ -3,7 +3,10 @@
 #include "nmu/depacketize.hpp"
 #include "common/loopback_noc.hpp"
 #include "axi/types.hpp"
+#include <array>
 #include <bitset>
+#include <set>
+#include <vector>
 #include <gtest/gtest.h>
 
 using ni::cmodel::testing::LoopbackNoc;
@@ -301,4 +304,191 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
     EXPECT_FALSE(rob.push_aw(make_aw(0x06, 0x200))); // downstream full, state unchanged
     noc.req_in().pop_flit();                          // drain
     EXPECT_TRUE(rob.push_aw(make_aw(0x06, 0x200))); // retry succeeds with slot still available
+}
+
+// === ROB Enabled mode: pop-side tests (Task 3) ===
+
+TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));   // allocates slot 0
+    // Inject B with rob_idx=0, matching the head of id=5's sequence
+    ni::cmodel::Flit f;
+    f.set_header_field("axi_ch",  ni::AXI_CH_B);
+    f.set_header_field("dst_id",  kSrcId);
+    f.set_header_field("last",    1);
+    f.set_header_field("rob_req", 1);
+    f.set_header_field("rob_idx", 0);
+    f.set_payload_field("B", "bid",   0x05);
+    f.set_payload_field("B", "bresp", 0);
+    ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    depkt.tick();
+    auto b = rob.pop_b();
+    ASSERT_TRUE(b.has_value());
+    EXPECT_EQ(b->id, 0x05u);
+}
+
+TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // id=5: two AWs in flight, slots 0 + 1
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x10100)));
+    auto push_b = [&](uint8_t rob_idx, uint8_t bresp) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch",  ni::AXI_CH_B);
+        f.set_header_field("dst_id",  kSrcId);
+        f.set_header_field("last",    1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", rob_idx);
+        f.set_payload_field("B", "bid",   0x05);
+        f.set_payload_field("B", "bresp", bresp);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+    push_b(/*rob_idx=*/1, /*bresp=*/0);   // B for AW2 arrives first
+    depkt.tick();
+    EXPECT_FALSE(rob.pop_b().has_value());  // not head, held
+    push_b(/*rob_idx=*/0, /*bresp=*/0);   // B for AW1 arrives second
+    depkt.tick();
+    auto b1 = rob.pop_b();
+    ASSERT_TRUE(b1.has_value());           // chain-flush: AW1's B
+    auto b2 = rob.pop_b();
+    ASSERT_TRUE(b2.has_value());           // then AW2's B
+    EXPECT_FALSE(rob.pop_b().has_value()); // empty
+}
+
+TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // id=5: AR1 len=3 -> slots 0..3; AR2 len=1 -> slots 4..5
+    axi::ArBeat ar1 = make_ar(0x05, 0x100); ar1.len = 3;
+    axi::ArBeat ar2 = make_ar(0x05, 0x200); ar2.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar1));
+    ASSERT_TRUE(rob.push_ar(ar2));
+    auto push_r = [&](uint8_t rob_idx, bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch",  ni::AXI_CH_R);
+        f.set_header_field("dst_id",  kSrcId);
+        f.set_header_field("last",    1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", rob_idx);
+        f.set_payload_field("R", "rid",   0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+    // Arrive in order: slot 4, 5 (AR2), then 0, 1, 2, 3 (AR1)
+    push_r(4, false, 0xB0); push_r(5, true,  0xB1);
+    push_r(0, false, 0xA0); push_r(1, false, 0xA1);
+    push_r(2, false, 0xA2); push_r(3, true,  0xA3);
+    depkt.tick();
+    // pop_r pulls one downstream flit per call; commits happen when a range
+    // is fully ready. Drain by polling, collecting all returned beats in order.
+    // Bound iterations to avoid infinite loop on bug.
+    std::vector<uint8_t> got;
+    for (int i = 0; i < 32 && got.size() < 6; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got.push_back(r->data[0]);
+    }
+    // AR1 must commit first (it was issued first); markers 0xA0..0xA3,
+    // then AR2: markers 0xB0..0xB1
+    ASSERT_EQ(got.size(), 6u);
+    EXPECT_EQ(got[0], 0xA0u);
+    EXPECT_EQ(got[1], 0xA1u);
+    EXPECT_EQ(got[2], 0xA2u);
+    EXPECT_EQ(got[3], 0xA3u);
+    EXPECT_EQ(got[4], 0xB0u);
+    EXPECT_EQ(got[5], 0xB1u);
+    EXPECT_FALSE(rob.pop_r().has_value());
+}
+
+TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // id=5 AR slot 0; id=6 AR slot 1
+    ASSERT_TRUE(rob.push_ar(make_ar(0x05, 0x100)));   // len=0 -> 1 beat
+    ASSERT_TRUE(rob.push_ar(make_ar(0x06, 0x100)));   // slot 1
+    auto push_r = [&](uint8_t rob_idx, uint8_t rid) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch",  ni::AXI_CH_R);
+        f.set_header_field("dst_id",  kSrcId);
+        f.set_header_field("last",    1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", rob_idx);
+        f.set_payload_field("R", "rid",   rid);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", 1u);
+        std::array<uint8_t, 32> d{}; d[0] = rid;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+    push_r(1, 0x06);   // id=6 R arrives first
+    push_r(0, 0x05);   // id=5 R arrives second
+    depkt.tick();
+    // Both committable (each is head of its own per-id sequence).
+    auto r1 = rob.pop_r();
+    ASSERT_TRUE(r1.has_value());
+    auto r2 = rob.pop_r();
+    ASSERT_TRUE(r2.has_value());
+    // Both 0x05 and 0x06 must appear (order between ids is implementation-defined
+    // but each id's beats must be in submission order -- here each id has 1 beat).
+    std::set<uint8_t> ids{r1->id, r2->id};
+    EXPECT_EQ(ids.size(), 2u);
+    EXPECT_TRUE(ids.count(0x05) && ids.count(0x06));
+}
+
+TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // Inject B with rob_idx=7, but no AW allocated that slot -> assert fires
+    ni::cmodel::Flit f;
+    f.set_header_field("axi_ch",  ni::AXI_CH_B);
+    f.set_header_field("dst_id",  kSrcId);
+    f.set_header_field("last",    1);
+    f.set_header_field("rob_req", 1);
+    f.set_header_field("rob_idx", 7);
+    f.set_payload_field("B", "bid",   0x05);
+    f.set_payload_field("B", "bresp", 0);
+    ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    depkt.tick();
+    EXPECT_DEATH(rob.pop_b(), "");
+}
+
+TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
+    LoopbackNoc noc(16, 16);
+    Packetize   pkt(noc.req_out(), kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));   // allocates slot 0
+    // Inject B with rob_req=0 (Disabled-mode flit) into Enabled Rob -> assert
+    ni::cmodel::Flit f;
+    f.set_header_field("axi_ch",  ni::AXI_CH_B);
+    f.set_header_field("dst_id",  kSrcId);
+    f.set_header_field("last",    1);
+    f.set_header_field("rob_req", 0);
+    f.set_header_field("rob_idx", 0);
+    f.set_payload_field("B", "bid",   0x05);
+    f.set_payload_field("B", "bresp", 0);
+    ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    depkt.tick();
+    EXPECT_DEATH(rob.pop_b(), "");
 }

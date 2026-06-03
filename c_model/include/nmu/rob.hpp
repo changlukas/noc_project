@@ -235,8 +235,39 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
 
 inline std::optional<axi::BBeat> Rob::pop_b() {
     if (mode_w_ == RobMode::Enabled) {
-        assert(false && "Rob: Enabled mode pop_b not yet implemented (next round)");
-        std::abort();
+        // Drain already-committed beats first.
+        if (!committed_b_queue_.empty()) {
+            auto b = committed_b_queue_.front();
+            committed_b_queue_.pop_front();
+            return b;
+        }
+        // Pull next response from downstream.
+        auto opt = next_depkt_.pop_b_with_meta();
+        if (!opt) return std::nullopt;
+        auto [b, meta] = *opt;
+        assert(meta.rob_req == 1 && "Enabled Rob received Disabled flit");
+        assert(meta.rob_idx < ROB_CAPACITY && "rob_idx out of range");
+        auto& slot = write_entries_[meta.rob_idx];
+        assert(slot.occupied && !slot.ready &&
+               "B for unallocated or already-completed rob_idx");
+        slot.b_beat = b;
+        slot.ready = true;
+        // In-order Path: chain-flush ready heads of this id's sequence.
+        uint8_t id = slot.axi_id;
+        while (!write_order_by_id_[id].empty()) {
+            BeatRange head = write_order_by_id_[id].front();
+            if (!write_entries_[head.base].ready) break;
+            committed_b_queue_.push_back(write_entries_[head.base].b_beat);
+            free_write_entries_.set(head.base);
+            write_entries_[head.base].occupied = false;
+            write_order_by_id_[id].pop_front();
+        }
+        if (!committed_b_queue_.empty()) {
+            auto out = committed_b_queue_.front();
+            committed_b_queue_.pop_front();
+            return out;
+        }
+        return std::nullopt;
     }
     auto opt = next_depkt_.pop_b();
     if (!opt) return std::nullopt;
@@ -248,8 +279,47 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
 
 inline std::optional<axi::RBeat> Rob::pop_r() {
     if (mode_r_ == RobMode::Enabled) {
-        assert(false && "Rob: Enabled mode pop_r not yet implemented (next round)");
-        std::abort();
+        // Drain already-committed beats first.
+        if (!committed_r_queue_.empty()) {
+            auto r = committed_r_queue_.front();
+            committed_r_queue_.pop_front();
+            return r;
+        }
+        // Pull next response from downstream.
+        auto opt = next_depkt_.pop_r_with_meta();
+        if (!opt) return std::nullopt;
+        auto [r, meta] = *opt;
+        assert(meta.rob_req == 1 && "Enabled Rob received Disabled flit");
+        assert(meta.rob_idx < ROB_CAPACITY && "rob_idx out of range");
+        auto& slot = read_entries_[meta.rob_idx];
+        assert(slot.occupied && "R for unallocated rob_idx");
+        slot.r_beat = r;
+        slot.ready = true;
+        // Chain-flush ready ranges (whole burst) of this id's sequence.
+        uint8_t id = slot.axi_id;
+        while (!read_order_by_id_[id].empty()) {
+            BeatRange head = read_order_by_id_[id].front();
+            bool all_ready = true;
+            for (uint8_t i = 0; i < head.len_plus_1; ++i) {
+                if (!read_entries_[head.base + i].ready) {
+                    all_ready = false;
+                    break;
+                }
+            }
+            if (!all_ready) break;
+            for (uint8_t i = 0; i < head.len_plus_1; ++i) {
+                committed_r_queue_.push_back(read_entries_[head.base + i].r_beat);
+                free_read_entries_.set(head.base + i);
+                read_entries_[head.base + i].occupied = false;
+            }
+            read_order_by_id_[id].pop_front();
+        }
+        if (!committed_r_queue_.empty()) {
+            auto out = committed_r_queue_.front();
+            committed_r_queue_.pop_front();
+            return out;
+        }
+        return std::nullopt;
     }
     auto opt = next_depkt_.pop_r();
     if (!opt) return std::nullopt;
