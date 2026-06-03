@@ -8,9 +8,36 @@ Stage 3 test logger (SCENARIO + AxiMasterObserver) 完工：
 - Production assert message audit：19 個 bare `assert(false)` 加 cause + Likely-cause hint（ni/flit + nmu + nsu 三 sub-commits per subsystem）
 - 302 ctest sequential pass (297 prior + 5 new Observer tests), drift gates clean (specgen 163, codegen --check 0, gen_inventory --check 0)
 
-**Next task per main plan §3.1**: `vc_arb` virtual channel arbitration（per-VC backpressure, round-robin or weighted scheduling, integrate with router fabric）。
+## Just done (this round): vc_arb multi-mode + header.last wormhole fix
 
-後續 `vc_mapping` / `route_par` / `flit_ecc` / `nmu.hpp` top-level assembly 各自獨立 round。
+**Karpathy 4-lens summary**:
+- **What we shipped**: nmu::VcArb + nsu::VcArb classes with Mode A
+  (ReadWriteSplit) + Mode B (MultiCandidate); per-VC credit-gated
+  round-robin; W-follows-AW invariant via pending_w_routes_ deque;
+  LoopbackNoc per-VC credit counter; FlooNoC-aligned header.last fix
+  in nmu/packetize.hpp (AW=0, W=wlast). 22 new tests; ctest 302->324.
+- **What we proved**: parameterized for NUM_VC=1..8; test matrix covers
+  all values; Mode B avoids HoL blocking; decorator transparent at
+  NUM_VC=1 (existing tests pass unchanged); EXPECT_DEATH guards on
+  W-before-AW + lying-downstream invariants survive NDEBUG.
+- **What we owe**: defer to future rounds -- wormhole_arbiter equivalent
+  at NoC fabric level; multi-NSU testbench routing through VcArb (NUM_VC>=2);
+  weighted/priority RR; VC starvation detection; dynamic per-cycle
+  remapping; YAML-driven candidate_vcs config.
+- **Why it matters now**: per main plan §3 file structure, vc_mapping +
+  vc_arb are gating items for Stage 3 NoC fabric integration;
+  per spec §1, FlooNoC-aligned wormhole semantic prevents AXI4 W
+  interleaving corruption in future multi-master + per-link arbiter scenarios.
+
+## Next round: TBD -- choose from main plan §3 unimplemented rows
+
+Candidates (per `docs/noc_cmodel_rtl_plan.md` §3):
+- route_par (header field; multi-path routing)
+- nmu.hpp top-level (assembles addr_trans + Packetize + Rob + VcArb)
+- nsu.hpp top-level (assembles Depacketize + MetaBuffer + Packetize + VcArb)
+- wormhole_arbiter at NoC fabric layer (consumes header.last from §12 fix)
+
+Open: ask user which to pursue next at start of next session.
 
 ---
 
