@@ -146,7 +146,7 @@ In default `ctest` mode (no `-V`), the scenario line is suppressed (GoogleTest c
 
 ### 4.4 Description guidelines
 
-- **Concise**: must fit ≤80 chars per line. If invariant needs more, split into multiple SCENARIO calls, each ≤80 chars.
+- **Concise**: should fit ≤100 chars per line. If invariant needs more than ~100 chars, split into multiple SCENARIO calls, each ≤100 chars. (Original draft said 80; relaxed to 100 after Task 2 retrofit showed many real descriptions naturally land in 80-100 range without becoming verbose.)
 - **English only**: no Chinese / no special chars beyond standard ASCII.
 - **Describe invariant or scenario, not implementation**: "expects 4 consecutive ROB slots allocated" not "calls find_consecutive_free with n=4".
 - **Mention `Enabled mode` / `Disabled mode`** explicitly when relevant — context for mode-specific tests.
