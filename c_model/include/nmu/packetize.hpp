@@ -12,7 +12,10 @@
 //                 inherited from the AW write-meta FIFO front.
 //   vc_id       — hardcoded 0 (NUM_VC=1)
 //   axi_ch      — implicit per push_* method
-//   last        — always 1 (1 beat = 1 flit = 1 packet)
+//   last        — wormhole packet boundary marker (FlooNoC pattern):
+//                 AW=0 (start of AW+W wormhole packet);
+//                 W=wlast (end on last W beat of burst);
+//                 AR=1 (single-flit read request packet).
 //   rob_req,
 //   rob_idx     — 0 in frozen interface path (Disabled mode); Rob path
 //                 supplies via AwHeaderMeta (future Enabled mode).
@@ -106,7 +109,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
   f.set_header_field("src_id",  src_id_);
   f.set_header_field("dst_id",  meta.dst_id);
   f.set_header_field("vc_id",   0);
-  f.set_header_field("last",    1);
+  f.set_header_field("last",    0);  // AW starts wormhole packet (FlooNoC pattern)
   f.set_header_field("rob_req", meta.rob_req);
   f.set_header_field("rob_idx", meta.rob_idx);
   f.set_payload_field("AW", "awid",     b.id);
@@ -135,7 +138,7 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
   f.set_header_field("src_id",  src_id_);
   f.set_header_field("dst_id",  meta.dst_id);
   f.set_header_field("vc_id",   0);
-  f.set_header_field("last",    1);
+  f.set_header_field("last",    b.last ? 1u : 0u);  // W's wlast ends wormhole packet (FlooNoC)
   f.set_header_field("rob_req", meta.rob_req);
   f.set_header_field("rob_idx", meta.rob_idx);
   f.set_payload_field("W", "wlast", b.last ? 1u : 0u);

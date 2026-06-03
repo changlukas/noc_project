@@ -34,7 +34,7 @@ axi::ArBeat make_ar(uint8_t id, uint64_t addr) {
 }
 
 TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
-  SCENARIO("NMU Packetize: push_aw stamps src_id/axi_ch=AW/vc=0/last=1/awid/awaddr on emitted flit");
+  SCENARIO("NMU Packetize: push_aw stamps src_id/axi_ch=AW/vc=0/last=0/awid/awaddr on emitted flit (AW starts wormhole packet)");
   LoopbackNoc noc(/*req*/16, /*rsp*/16);
   Packetize pkt(noc.req_out(), kSrcId);
   // Legacy test: only verifies packetize stamps src + axi_ch + last + awid +
@@ -47,7 +47,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
   EXPECT_EQ(f.get_header_field("axi_ch"),   ni::AXI_CH_AW);
   EXPECT_EQ(f.get_header_field("src_id"),   kSrcId);
   EXPECT_EQ(f.get_header_field("vc_id"),    0u);
-  EXPECT_EQ(f.get_header_field("last"),     1u);
+  EXPECT_EQ(f.get_header_field("last"),     0u);  // AW starts wormhole packet (FlooNoC)
   EXPECT_EQ(f.get_payload_field("AW", "awid"),   0x05u);
   EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xDEADBEEFCAFEBABEull);
 }
@@ -84,6 +84,29 @@ TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
   auto w2 = noc.req_in().pop_flit();
   EXPECT_EQ(w1->get_header_field("dst_id"), 0x34u);
   EXPECT_EQ(w2->get_header_field("dst_id"), 0x56u);
+}
+
+TEST(NmuPacketize, WHeaderLastMatchesWlast) {
+  SCENARIO("NMU Packetize: header.last on W flits matches payload.wlast — "
+           "intermediate W beats stamp 0, terminal beat stamps 1 "
+           "(FlooNoC wormhole packet boundary semantic; "
+           "fixes pre-existing bug where every W flit stamped header.last=1)");
+  LoopbackNoc noc(16, 16);
+  Packetize pkt(noc.req_out(), kSrcId);
+  ASSERT_TRUE(pkt.push_aw(make_aw(0x07, 0x340000, /*len*/2)));
+  ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/false)));
+  ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/false)));
+  ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/true)));
+
+  noc.req_in().pop_flit();  // discard AW
+  for (int i = 0; i < 3; ++i) {
+    auto f = noc.req_in().pop_flit();
+    ASSERT_TRUE(f.has_value());
+    uint64_t expected_last = (i == 2) ? 1u : 0u;
+    EXPECT_EQ(f->get_header_field("last"), expected_last)
+        << "W beat " << i << ": header.last expected " << expected_last;
+    EXPECT_EQ(f->get_payload_field("W", "wlast"), expected_last);
+  }
 }
 
 TEST(NmuPacketize, PushAwFailsOnNocFull) {
