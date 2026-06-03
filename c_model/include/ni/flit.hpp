@@ -63,7 +63,10 @@ inline FieldPos header_field_pos(std::string_view name) {
   if (name == "multicast")  return {ni::header::MULTICAST_LSB,  ni::header::MULTICAST_MSB};
   if (name == "flit_ecc")   return {ni::header::FLIT_ECC_LSB,   ni::header::FLIT_ECC_MSB};
   if (name == "rsvd")       return {ni::header::RSVD_LSB,       ni::header::RSVD_MSB};
-  assert(false && "unknown header field");
+  assert(false && "ni::cmodel::detail::header_field_pos: name not found in codegen-generated "
+                  "header layout — check ni::header::* declarations in "
+                  "specgen/generated/cpp/ni_flit_constants.h or rerun codegen "
+                  "(spec field added/renamed without regen?)");
   std::abort();  // release-build safety: prevents UB shifts on {-1,-1} fallthrough
 }
 
@@ -142,7 +145,12 @@ inline FieldPos payload_field_pos(std::string_view channel, std::string_view fie
     if (field == "rdata")    return {ni::payload::r::RDATA_LSB,     ni::payload::r::RDATA_MSB};
     if (field == "r_rsvd")   return {ni::payload::r::R_RSVD_LSB,    ni::payload::r::R_RSVD_MSB};
   }
-  assert(false && "unknown payload field");
+  assert(false && "ni::cmodel::detail::payload_field_pos: (channel, field) pair not found in "
+                  "codegen-generated payload layout — check channel spelling "
+                  "(AW|AR|W|B|R, case-insensitive) and field name against "
+                  "ni::payload::{aw,ar,w,b,r}::* in "
+                  "specgen/generated/cpp/ni_flit_constants.h, or rerun codegen "
+                  "(spec field added/renamed without regen?)");
   std::abort();  // release-build safety: prevents UB shifts on {-1,-1} fallthrough
 }
 
