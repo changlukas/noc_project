@@ -70,3 +70,29 @@ TEST(LoopbackNocPerVcCredit, RspSidePerVcCreditMirrorsReq) {
     ASSERT_TRUE(f.has_value());
     EXPECT_TRUE(noc.rsp_out().credit_avail(0));
 }
+
+TEST(LoopbackNocPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
+    SCENARIO("LoopbackNoc: credit_avail must return false when per-NSU queue is "
+             "full even if per-VC counter still has room (contract: credit_avail=true "
+             "must imply push_flit will succeed; otherwise VcArb tick aborts on "
+             "the 'lying downstream' guard)");
+    // 1-NSU, req-queue depth 2, default per_vc_depth (unlimited)
+    LoopbackNoc noc(/*req*/2, /*rsp*/32);
+    // Fill the per-NSU queue to capacity on VC=0.
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
+    EXPECT_FALSE(noc.req_out().credit_avail(0))
+        << "Per-NSU queue full; credit_avail must mirror push_flit";
+    EXPECT_FALSE(noc.req_out().credit_avail(1))
+        << "Per-NSU queue full means NO vc can push (conservative contract)";
+}
+
+TEST(LoopbackNocPerVcCredit, RspSideCreditAvailMatchesPushFlitForRspQueueFull) {
+    SCENARIO("LoopbackNoc rsp side: credit_avail returns false when rsp_q is full "
+             "even if per-VC counter has room (same contract as req side)");
+    LoopbackNoc noc(/*req*/32, /*rsp*/2);
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
+    EXPECT_FALSE(noc.rsp_out().credit_avail(0));
+    EXPECT_FALSE(noc.rsp_out().credit_avail(1));
+}

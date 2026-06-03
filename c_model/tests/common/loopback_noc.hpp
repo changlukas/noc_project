@@ -228,7 +228,19 @@ private:
             return true;
         }
         bool credit_avail(uint8_t vc_id) const override {
-            return p->nmu_req_per_vc_in_flight_[vc_id] < p->per_vc_depth_;
+            if (p->nmu_req_per_vc_in_flight_[vc_id] >= p->per_vc_depth_) return false;
+            // Legacy req delay path (single-NSU mode only)
+            if (p->req_delay_ > 0) {
+                return (p->req_pipe_.size() + p->req_q_.size()) < p->req_q_depth_per_nsu_;
+            }
+            // Conservative: dst is not known at this call site, so require that
+            // EVERY per-NSU queue have at least one slot. This honors the
+            // VcArb contract that credit_avail=true implies push_flit will
+            // succeed regardless of the flit's dst_id.
+            for (std::size_t i = 0; i < p->num_nsu_; ++i) {
+                if (p->nsu_req_q_[i].size() >= p->req_q_depth_per_nsu_) return false;
+            }
+            return true;
         }
     };
     struct NsuReqInAdapter : noc::NocReqIn {
@@ -301,7 +313,11 @@ private:
             return true;
         }
         bool credit_avail(uint8_t vc_id) const override {
-            return p->nsu_rsp_per_vc_in_flight_[vc_id] < p->per_vc_depth_;
+            if (p->nsu_rsp_per_vc_in_flight_[vc_id] >= p->per_vc_depth_) return false;
+            // Per-NSU rsp delay path: must have aggregate response-side capacity
+            // (matching push_flit's check at the per-NSU delay path).
+            return (p->total_delayed_rsp_count_ + p->rsp_pipe_.size()
+                    + p->rsp_q_.size()) < p->rsp_q_depth_total_;
         }
     };
     struct NmuRspInAdapter : noc::NocRspIn {
