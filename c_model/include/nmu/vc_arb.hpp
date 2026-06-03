@@ -169,7 +169,7 @@ inline void VcArb::tick() {
         if (!pending_[vc].empty() && downstream_.credit_avail(vc)) {
             bool ok = downstream_.push_flit(pending_[vc].front());
             assert(ok && "nmu::VcArb::tick: downstream returned credit_avail=true "
-                         "but push_flit refused — protocol violation, downstream "
+                         "but push_flit refused -- protocol violation, downstream "
                          "must not lie about credit availability");
             if (!ok) std::abort();  // belt-and-braces for NDEBUG
             pending_[vc].pop_front();
