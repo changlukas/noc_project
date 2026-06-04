@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Encapsulate Stage 3 NI manual integration wiring (~7 NMU sub-modules + 6 NSU + tick orchestration) into single `nmu::Nmu` and `nsu::Nsu` classes each with one `tick()` entrypoint — across 3 commits, ctest 336/336 unchanged.
+**Goal:** Encapsulate Stage 3 NI manual integration wiring (~7 NMU sub-modules + 6 NSU + tick orchestration) into single `nmu::Nmu` and `nsu::Nsu` classes each with one `tick()` entrypoint — across 3 commits, ctest 336 → 338 (+2 smoke tests for Nmu/Nsu ctor sequence verification).
 
 **Architecture:** Stack-member composition (delete move/copy because WormholeArbiter is non-movable). NMU pipeline: `AxiSlavePort → Rob → Packetize → WormholeArbiter → VcArbiter → external NocReqOut`, plus `Depacketize ← external NocRspIn`. NSU pipeline: `Depacketize → AxiMasterPort → external AXI slave`, plus `Packetize → WormholeArbiter → VcArbiter → external NocRspOut`, with `MetaBuffer` shared between Depacketize and Packetize. AXI side exposed via getter (`axi_slave_port()` / `axi_master_port()`) — NOT ctor-bound, due to template type mismatch with testbench's `AxiMasterT<AxiSlavePort>`.
 
@@ -219,17 +219,68 @@ Expected: clean build (no errors, no warnings from new header). If `VcArbiter::r
 
 Note: if compile fails on `make_vc_arbiter` helper because VcArbiter has private ctor + only factories, the inline `detail::make_vc_arbiter` helper IS the factory call site — should work via prvalue mandatory elision.
 
-- [ ] **Step 4: Run full ctest — expect 336/336 unchanged**
+- [ ] **Step 4: Create smoke test `c_model/tests/nmu/test_nmu.cpp`** (per spec §8 commit 1 smoke test requirement)
+
+```cpp
+// Smoke test: Nmu class constructs cleanly + tick() doesn't crash.
+// Verifies ctor sequence (member init order, factory return-by-value via
+// detail::make_vc_arbiter, sub-module ref dependencies) before Task 3
+// integration. Does NOT exercise full e2e flow; that's integration testbench.
+#include "common/loopback_noc.hpp"
+#include "common/scenario.hpp"
+#include "nmu/nmu.hpp"
+#include <gtest/gtest.h>
+
+using ni::cmodel::nmu::Nmu;
+using ni::cmodel::nmu::NmuConfig;
+using ni::cmodel::testing::LoopbackNoc;
+
+TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
+    SCENARIO("Nmu top-level smoke: NUM_VC=1 default config, construct + tick 10x "
+             "should not crash. Verifies ctor sequence + member init order.");
+    LoopbackNoc loopback(/*req*/64, /*rsp*/64);
+    NmuConfig cfg{};
+    cfg.src_id = 0x12;
+    Nmu nmu(cfg, loopback.nmu_req_out(), loopback.nmu_rsp_in());
+
+    EXPECT_EQ(&nmu.axi_slave_port(), &nmu.axi_slave_port())
+        << "axi_slave_port() returns stable reference";
+
+    for (int i = 0; i < 10; ++i) {
+        nmu.tick();
+        loopback.tick();
+    }
+    SUCCEED();  // reaching here means no abort during ctor or tick
+}
+```
+
+- [ ] **Step 5: Register smoke test in `c_model/tests/nmu/CMakeLists.txt`**
+
+Append:
+```cmake
+add_cmodel_test(test_nmu)
+target_include_directories(test_nmu PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+```
+
+- [ ] **Step 6: Run clang-format on smoke test**
 
 ```bash
+clang-format -i c_model/tests/nmu/test_nmu.cpp
+```
+
+- [ ] **Step 7: Run full ctest — expect 337/337**
+
+```bash
+cmake --build c_model/build -j 1
 ctest --test-dir c_model/build -j 1
 ```
-Expected: 336/336. No existing test uses `nmu.hpp` yet, so test count unchanged; build verification only.
+Expected: 337/337 (336 baseline + 1 new smoke test). If smoke test fails, ctor sequence has a bug — investigate before committing.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add c_model/include/nmu/nmu.hpp
+git add c_model/include/nmu/nmu.hpp c_model/tests/nmu/test_nmu.cpp c_model/tests/nmu/CMakeLists.txt
 git commit -m "$(cat <<'EOF'
 feat(nmu): add Nmu top-level class encapsulating sub-modules
 
@@ -251,7 +302,9 @@ NmuConfig struct centralizes all sub-module config (src_id, rob modes,
 NUM_VC, vc_mode, pairings, depths). Sensible defaults; testbench overrides
 only what it needs.
 
-Pure addition; existing tests untouched. ctest 336/336 unchanged.
+Pure addition; existing tests untouched. 1 smoke test added (Nmu
+constructs + ticks without crash, verifying ctor sequence + member
+init order before Task 3 integration). ctest 336 -> 337.
 Integration testbench refactor lands in commit 3 of this round.
 
 Refs: docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
@@ -425,16 +478,68 @@ clang-format -i c_model/include/nsu/nsu.hpp
 cmake --build c_model/build -j 1
 ```
 
-- [ ] **Step 4: Run full ctest — expect 336/336 unchanged**
+- [ ] **Step 4: Create smoke test `c_model/tests/nsu/test_nsu.cpp`** (per spec §8 commit 2 smoke test requirement)
 
-```bash
-ctest --test-dir c_model/build -j 1
+```cpp
+// Smoke test: Nsu class constructs cleanly + tick() doesn't crash.
+// Verifies ctor sequence (member init order, factory return-by-value, no-Rob
+// asymmetry vs Nmu) before Task 3 integration.
+#include "common/loopback_noc.hpp"
+#include "common/scenario.hpp"
+#include "nsu/nsu.hpp"
+#include <gtest/gtest.h>
+
+using ni::cmodel::nsu::Nsu;
+using ni::cmodel::nsu::NsuConfig;
+using ni::cmodel::testing::LoopbackNoc;
+
+TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
+    SCENARIO("Nsu top-level smoke: NUM_VC=1 default config, construct + tick 10x "
+             "should not crash. Verifies ctor sequence (no Rob, MetaBuffer shared "
+             "between Depacketize and Packetize).");
+    LoopbackNoc loopback(/*req*/64, /*rsp*/64);
+    NsuConfig cfg{};
+    cfg.src_id = 0x34;
+    Nsu nsu(cfg, loopback.nsu_req_in(0), loopback.nsu_rsp_out(0));
+
+    EXPECT_EQ(&nsu.axi_master_port(), &nsu.axi_master_port())
+        << "axi_master_port() returns stable reference";
+
+    for (int i = 0; i < 10; ++i) {
+        nsu.tick();
+        loopback.tick();
+    }
+    SUCCEED();
+}
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Register smoke test in `c_model/tests/nsu/CMakeLists.txt`**
+
+Append:
+```cmake
+add_cmodel_test(test_nsu)
+target_include_directories(test_nsu PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+```
+
+- [ ] **Step 6: Run clang-format on smoke test**
 
 ```bash
-git add c_model/include/nsu/nsu.hpp
+clang-format -i c_model/tests/nsu/test_nsu.cpp
+```
+
+- [ ] **Step 7: Run full ctest — expect 338/338**
+
+```bash
+cmake --build c_model/build -j 1
+ctest --test-dir c_model/build -j 1
+```
+Expected: 338/338 (337 after Task 1 + 1 new NSU smoke test). If smoke fails, debug ctor sequence before committing.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add c_model/include/nsu/nsu.hpp c_model/tests/nsu/test_nsu.cpp c_model/tests/nsu/CMakeLists.txt
 git commit -m "$(cat <<'EOF'
 feat(nsu): add Nsu top-level class (NSU mirror, no Rob)
 
@@ -453,7 +558,10 @@ matching.
 NsuConfig uses write_rsp_vc / read_rsp_vc naming (rsp infix) per NSU
 VcArbiter convention. No Rob fields.
 
-Pure addition; existing tests untouched. ctest 336/336 unchanged.
+1 smoke test added (Nsu constructs + ticks without crash, verifies
+no-Rob ctor sequence + MetaBuffer sharing). ctest 337 -> 338.
+
+Pure addition; existing tests untouched. ctest 337/337 unchanged.
 
 Refs: docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
       docs/noc_cmodel_rtl_plan.md section 3 row 173
@@ -599,13 +707,13 @@ Common compile errors expected during this refactor:
 - AxiMaster template binding — verify `AxiMasterT<nmu::AxiSlavePort>` constructor takes `Nmu::axi_slave_port()` correctly (it should; getter returns `AxiSlavePort&`).
 - Unused variable warnings (e.g., for old vectors) — remove dead declarations.
 
-- [ ] **Step 7: Run full ctest — expect 336/336 unchanged**
+- [ ] **Step 7: Run full ctest — expect 338/338 unchanged**
 
 ```bash
 ctest --test-dir c_model/build -j 1
 ```
 
-Expected: 336 tests pass. Integration tests (PacketizeLoopbackFixture.ScoreboardZeroMismatch/...) are the e2e validation. If any fail, the refactor changed observable behavior — debug the wiring.
+Expected: 338 tests pass (baseline after Tasks 1+2 smoke tests). Integration tests (PacketizeLoopbackFixture.ScoreboardZeroMismatch/...) are the e2e validation. If any fail, the refactor changed observable behavior — debug the wiring.
 
 - [ ] **Step 8: Per-file diff review (Spec §6 risk mitigation)**
 
@@ -642,7 +750,7 @@ What stayed in testbench (LoopbackNoc-specific): set_dst_route multi-NSU
 routing, per-NSU latency config, per-NSU shuttle logic (slave <-> port
 B/R owner tracking), AxiMaster/AxiSlave/Memory construction.
 
-Pure wiring refactor: ctest 336/336 unchanged; zero test logic /
+Pure wiring refactor: ctest 338/338 unchanged; zero test logic /
 scoreboard / scenario changes. Stage 3 NI architecture now fully
 encapsulated; ready for next follow-up (NUM_VC>1 e2e stress) and
 subsequent Stage 5 axi_checker.sv co-sim (new session).
@@ -670,7 +778,7 @@ git log --oneline 77c1f5b..HEAD
 
 Expected:
 - Build clean
-- ctest 336/336
+- ctest 338/338
 - 3 commits on `stage3/packetize-depacketize`
 
 ---

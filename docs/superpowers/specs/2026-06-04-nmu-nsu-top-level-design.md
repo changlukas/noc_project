@@ -134,9 +134,8 @@ struct NmuConfig {
     RobMode read_rob_mode = RobMode::Disabled;
     RobMode write_rob_mode = RobMode::Disabled;
     PortParams port_params{};                    // AxiSlavePort config (loaded from yaml elsewhere)
-    std::size_t depkt_aw_q_depth = 16;           // Depacketize per-channel depths
-    std::size_t depkt_w_q_depth = 16;
-    std::size_t depkt_ar_q_depth = 16;
+    std::size_t depkt_b_q_depth = 16;            // NMU Depacketize: B response queue
+    std::size_t depkt_r_q_depth = 16;            // NMU Depacketize: R response queue
     std::size_t num_vc = 1;
     VcMode vc_mode = VcMode::ReadWriteSplit;
     uint8_t write_vc = 0;
