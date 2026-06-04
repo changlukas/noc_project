@@ -1,0 +1,139 @@
+#pragma once
+// NMU top-level assembly. Encapsulates Stage 3 NI sub-modules into one
+// class with a single tick() entrypoint, hiding the manual wiring that
+// previously lived in test_request_response_loopback.cpp.
+//
+// Pipeline (req path):
+//   external AXI master ──> AxiSlavePort ──> Rob ──> Packetize{aw,w,ar}
+//     ──> WormholeArbiter<NocReqOut>(3 in, pairing {{0,1}}) ──> VcArbiter
+//     ──> external NocReqOut (LoopbackNoc or DPI bridge)
+//
+// Pipeline (rsp path):
+//   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort
+//     ──> back to external AXI master
+//
+// Per-cycle tick order (upstream-first; matches vc_arb/wormhole_arbiter
+// round established pattern):
+//   depacketize_.tick(); axi_slave_port_.tick();
+//   wormhole_arbiter_.tick(); vc_arbiter_.tick();
+//
+// Lifetime: Nmu deletes move/copy (WormholeArbiter is non-movable).
+// Member declaration order respects ctor ref dependencies — see private
+// section comment for explanation.
+//
+// AXI binding: NOT via ctor (AxiMasterT<AxiSlavePort> template type
+// collision in testbench). Use axi_slave_port() getter to obtain the
+// AxiSlavePort& for the testbench's AxiMaster<AxiSlavePort> wiring.
+//
+// References:
+//   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
+//   docs/noc_cmodel_rtl_plan.md section 3 row 168
+#include "ni/port_params.hpp"
+#include "nmu/axi_slave_port.hpp"
+#include "nmu/depacketize.hpp"
+#include "nmu/packetize.hpp"
+#include "nmu/rob.hpp"
+#include "nmu/vc_arbiter.hpp"
+#include "noc/noc_req_out.hpp"
+#include "noc/noc_rsp_in.hpp"
+#include "noc/wormhole_arbiter.hpp"
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <utility>
+#include <vector>
+
+namespace ni::cmodel::nmu {
+
+struct NmuConfig {
+    uint8_t src_id = 0;
+    RobMode read_rob_mode = RobMode::Disabled;
+    RobMode write_rob_mode = RobMode::Disabled;
+    PortParams port_params{};
+    std::size_t depkt_b_q_depth = 16;  // NMU Depacketize: B response queue
+    std::size_t depkt_r_q_depth = 16;  // NMU Depacketize: R response queue
+    std::size_t num_vc = 1;
+    VcMode vc_mode = VcMode::ReadWriteSplit;
+    uint8_t write_vc = 0;
+    uint8_t read_vc = 0;
+    // Mode B candidate arrays; ignored when vc_mode == ReadWriteSplit.
+    // Indexed by axi_ch (AW=0, W=1, AR=2, B=3, R=4 per ni_flit_constants).
+    std::array<std::vector<uint8_t>, 5> vc_candidates{};
+    std::size_t wormhole_per_input_depth = 4;
+    std::size_t vc_arbiter_pending_depth = 4;
+};
+
+class Nmu {
+  public:
+    Nmu(NmuConfig cfg, noc::NocReqOut& downstream_req, noc::NocRspIn& downstream_rsp);
+
+    Nmu(const Nmu&) = delete;
+    Nmu(Nmu&&) = delete;
+    Nmu& operator=(const Nmu&) = delete;
+    Nmu& operator=(Nmu&&) = delete;
+
+    // AXI facade for testbench wiring (AxiMaster<AxiSlavePort> binds here).
+    AxiSlavePort& axi_slave_port() noexcept { return axi_slave_port_; }
+
+    // Per-cycle tick — orchestrates sub-modules in upstream-first order.
+    void tick();
+
+    // Test introspection (optional getters; add only as test code needs)
+    const Rob& rob() const noexcept { return rob_; }
+    const VcArbiter& vc_arbiter() const noexcept { return vc_arbiter_; }
+
+  private:
+    // Declaration order respects ctor ref dependencies:
+    //   1. cfg_ + external downstream refs (no deps).
+    //   2. vc_arbiter_ wraps downstream_req_.
+    //   3. wormhole_arbiter_ wraps vc_arbiter_ as its Downstream.
+    //   4. depacketize_ wraps downstream_rsp_ (req path independent).
+    //   5. packetize_ takes wormhole_arbiter_.input(0/1/2) (req path).
+    //   6. rob_ takes packetize_ + depacketize_.
+    //   7. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
+    NmuConfig cfg_;
+    noc::NocReqOut& downstream_req_;
+    noc::NocRspIn& downstream_rsp_;
+    VcArbiter vc_arbiter_;
+    noc::WormholeArbiter<noc::NocReqOut> wormhole_arbiter_;
+    Depacketize depacketize_;
+    Packetize packetize_;
+    Rob rob_;
+    AxiSlavePort axi_slave_port_;
+};
+
+namespace detail {
+
+inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, noc::NocReqOut& downstream) {
+    if (cfg.vc_mode == VcMode::ReadWriteSplit) {
+        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
+                                           cfg.vc_arbiter_pending_depth);
+    }
+    auto candidates = cfg.vc_candidates;  // copy; factory consumes by value
+    return VcArbiter::multi_candidate(downstream, cfg.num_vc, std::move(candidates),
+                                      cfg.vc_arbiter_pending_depth);
+}
+
+}  // namespace detail
+
+inline Nmu::Nmu(NmuConfig cfg, noc::NocReqOut& downstream_req, noc::NocRspIn& downstream_rsp)
+    : cfg_(std::move(cfg)),
+      downstream_req_(downstream_req),
+      downstream_rsp_(downstream_rsp),
+      vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_req_)),
+      wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/3, std::vector<noc::ChannelPairing>{{0, 1}},
+                        cfg_.wormhole_per_input_depth),
+      depacketize_(downstream_rsp_, cfg_.depkt_b_q_depth, cfg_.depkt_r_q_depth),
+      packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
+                 cfg_.src_id),
+      rob_(packetize_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode),
+      axi_slave_port_(rob_, rob_, cfg_.port_params) {}
+
+inline void Nmu::tick() {
+    depacketize_.tick();
+    axi_slave_port_.tick();
+    wormhole_arbiter_.tick();
+    vc_arbiter_.tick();
+}
+
+}  // namespace ni::cmodel::nmu
