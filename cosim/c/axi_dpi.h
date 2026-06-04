@@ -37,19 +37,19 @@ int cmodel_scoreboard_clean(void);
 // addr:  svBitVecVal[2]  — [0]=bits[31:0], [1]=bits[63:32]
 // data:  svBitVecVal[8]  — [0]=bytes[3:0], ..., [7]=bytes[31:28]
 // strb:  svBitVecVal     — 32-bit WSTRB, fits in one word
-// All narrow fields (id/len/size/burst/lock/cache/prot/qos/resp) fit in one
-// svBitVecVal each.
+// Multi-bit narrow fields (id/len/size/burst/cache/prot/qos/resp) fit in one
+// svBitVecVal each. Single-bit fields (valid/ready/last/lock) use svBit.
 // ---------------------------------------------------------------------------
 
 void cmodel_nmu_get_aw(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos);
 
 void cmodel_nmu_get_w(svBit* valid, svBit* ready, svBitVecVal* data, svBitVecVal* strb,
                       svBit* last);
 
 void cmodel_nmu_get_ar(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos);
 
 void cmodel_nmu_get_b(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* resp);
@@ -62,14 +62,14 @@ void cmodel_nmu_get_r(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* 
 // ---------------------------------------------------------------------------
 
 void cmodel_nsu_get_aw(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos);
 
 void cmodel_nsu_get_w(svBit* valid, svBit* ready, svBitVecVal* data, svBitVecVal* strb,
                       svBit* last);
 
 void cmodel_nsu_get_ar(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos);
 
 void cmodel_nsu_get_b(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* resp);
