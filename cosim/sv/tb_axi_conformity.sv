@@ -12,14 +12,16 @@
 // f_past_valid: both faxi_slave.v and faxi_master.v declare
 //   "initial f_past_valid = 1'b0;" internally — no TB init required.
 
-module tb_axi_conformity;
+// Clock and reset are driven from the C++ harness (main.cpp) so the SV side
+// uses no #-delay constructs and compiles with Verilator --no-timing.
+module tb_axi_conformity(
+    input logic clk,
+    input logic rst_n
+);
     localparam int ID_WIDTH   = 8;
     localparam int ADDR_WIDTH = 64;
     localparam int DATA_WIDTH = 256;
     localparam int F_LGDEPTH  = 10;
-
-    logic clk;
-    logic rst_n;
 
     string scenario_path;
 
@@ -35,13 +37,6 @@ module tb_axi_conformity;
             $finish(1);
         end
         cmodel_init(scenario_path);
-    end
-
-    // Clock + reset -------------------------------------------------------
-    initial begin clk = 0; forever #5 clk = ~clk; end
-    initial begin
-        rst_n = 0;
-        #20 rst_n = 1;
     end
 
     // AXI bundle interfaces -----------------------------------------------
@@ -93,10 +88,13 @@ module tb_axi_conformity;
     // wb2axip: NMU side — faxi_slave checks that NMU behaves as a
     // well-formed AXI4 master (assume master-driven channels, assert
     // slave-driven channels).
+    // OPT_EXCLUSIVE=0: exclusive-access state machine omitted; the c_model
+    // does not generate lock transactions in this testbench.
     faxi_slave #(
         .C_AXI_ID_WIDTH(ID_WIDTH),
         .C_AXI_DATA_WIDTH(DATA_WIDTH),
-        .C_AXI_ADDR_WIDTH(ADDR_WIDTH)
+        .C_AXI_ADDR_WIDTH(ADDR_WIDTH),
+        .OPT_EXCLUSIVE(0)
     ) u_nmu_check (
         .i_clk(clk),
         .i_axi_reset_n(rst_n),
@@ -152,10 +150,13 @@ module tb_axi_conformity;
     // wb2axip: NSU side — faxi_master checks that NSU behaves as a
     // well-formed AXI4 slave (assume slave-driven channels, assert
     // master-driven channels — roles inverted relative to faxi_slave).
+    // OPT_EXCLUSIVE=0: exclusive-access state machine omitted; the c_model
+    // does not generate lock transactions in this testbench.
     faxi_master #(
         .C_AXI_ID_WIDTH(ID_WIDTH),
         .C_AXI_DATA_WIDTH(DATA_WIDTH),
-        .C_AXI_ADDR_WIDTH(ADDR_WIDTH)
+        .C_AXI_ADDR_WIDTH(ADDR_WIDTH),
+        .OPT_EXCLUSIVE(0)
     ) u_nsu_check (
         .i_clk(clk),
         .i_axi_reset_n(rst_n),
@@ -223,12 +224,7 @@ module tb_axi_conformity;
         end
     end
 
-    // Safety timeout ------------------------------------------------------
-    initial begin
-        #1_000_000;
-        $display("FAIL: timeout (1ms simulated)");
-        cmodel_finalize();
-        $finish(1);
-    end
+    // Safety timeout is enforced from the C++ harness (main.cpp) via a
+    // max-cycle counter.  No #-delay block needed here.
 
 endmodule
