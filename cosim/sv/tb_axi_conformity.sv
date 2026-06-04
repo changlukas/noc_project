@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 `include "wb2axip/sim_wrapper.svh"
 
 // tb_axi_conformity — AXI4 boundary conformity testbench
@@ -210,14 +211,15 @@ module tb_axi_conformity;
     // Exit when scenario complete -----------------------------------------
     always @(posedge clk) begin
         if (rst_n && cmodel_done()) begin
-            if (cmodel_scoreboard_clean())
+            if (cmodel_scoreboard_clean()) begin
                 $display("PASS: scenario complete, scoreboard clean");
-            else begin
+                cmodel_finalize();
+                $finish(0);
+            end else begin
                 $display("FAIL: scoreboard mismatch");
+                cmodel_finalize();
                 $finish(1);
             end
-            cmodel_finalize();
-            $finish(0);
         end
     end
 
@@ -225,6 +227,7 @@ module tb_axi_conformity;
     initial begin
         #1_000_000;
         $display("FAIL: timeout (1ms simulated)");
+        cmodel_finalize();
         $finish(1);
     end
 
