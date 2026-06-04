@@ -49,8 +49,11 @@ struct AwHeaderMeta {
 
 class Packetize : public Packetizer {
 public:
-  Packetize(noc::NocReqOut& req_out, uint8_t src_id)
-      : req_out_(req_out), src_id_(src_id) {}
+  Packetize(noc::NocReqOut& aw_out,
+            noc::NocReqOut& w_out,
+            noc::NocReqOut& ar_out,
+            uint8_t src_id)
+      : aw_out_(aw_out), w_out_(w_out), ar_out_(ar_out), src_id_(src_id) {}
 
   // ---- Packetizer interface (request methods are real) ----
   bool push_aw(const axi::AwBeat& b) override {
@@ -92,7 +95,9 @@ public:
   bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta);
 
 private:
-  noc::NocReqOut& req_out_;
+  noc::NocReqOut& aw_out_;
+  noc::NocReqOut& w_out_;
+  noc::NocReqOut& ar_out_;
   uint8_t src_id_;
 
   // W FIFO carries the meta inherited from AW. local_addr NOT stored:
@@ -122,7 +127,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
   f.set_payload_field("AW", "awprot",   b.prot);
   f.set_payload_field("AW", "awregion", b.region);
   f.set_payload_field("AW", "awuser",   b.user);
-  if (!req_out_.push_flit(f)) return false;
+  if (!aw_out_.push_flit(f)) return false;
   w_meta_fifo_.push_back({meta.dst_id, meta.rob_req, meta.rob_idx});
   return true;
 }
@@ -145,7 +150,7 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
   f.set_payload_field("W", "wuser", b.user);
   f.set_payload_field("W", "wstrb", b.strb);
   f.set_payload_bytes("W", "wdata", b.data.data(), 256);
-  if (!req_out_.push_flit(f)) return false;
+  if (!w_out_.push_flit(f)) return false;
   if (b.last) w_meta_fifo_.pop_front();
   return true;
 }
@@ -169,7 +174,7 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
   f.set_payload_field("AR", "arprot",   b.prot);
   f.set_payload_field("AR", "arregion", b.region);
   f.set_payload_field("AR", "aruser",   b.user);
-  if (!req_out_.push_flit(f)) return false;
+  if (!ar_out_.push_flit(f)) return false;
   return true;
 }
 

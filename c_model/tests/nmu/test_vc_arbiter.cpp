@@ -1,5 +1,6 @@
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/packetize.hpp"
+#include "noc/wormhole_arbiter.hpp"
 #include "axi/types.hpp"
 #include "common/loopback_noc.hpp"
 #include "common/scenario.hpp"
@@ -348,11 +349,16 @@ TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
 
 TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
     SCENARIO("NMU VcArbiter decorator is transparent to nmu::Packetize: wire "
-             "Packetize -> VcArbiter -> LoopbackNoc with NUM_VC=1 and verify "
-             "Packetize-emitted AW + W flits arrive intact at NSU side.");
+             "Packetize -> WormholeArbiter -> VcArbiter -> LoopbackNoc with "
+             "NUM_VC=1 and verify Packetize-emitted AW + W flits arrive intact "
+             "at NSU side.");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-    ni::cmodel::nmu::Packetize pkt(arb, /*src_id=*/0x12);
+    auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> wh_arb(
+        vc_arb, /*num_inputs=*/3,
+        std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
+    ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1),
+                                   wh_arb.input(2), /*src_id=*/0x12);
 
     ni::cmodel::axi::AwBeat aw{};
     aw.id = 0x07; aw.addr = 0x340000; aw.len = 0; aw.size = 5;
@@ -364,8 +370,10 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
     w.strb = 0xFFFFFFFF; w.last = true;
     ASSERT_TRUE(pkt.push_w(w));
 
-    arb.tick();
-    arb.tick();
+    wh_arb.tick();  // AW drains from wh_arb input(0) to vc_arb; locks to input(1)
+    wh_arb.tick();  // W drains from wh_arb input(1) to vc_arb; unlocks
+    vc_arb.tick();
+    vc_arb.tick();
     auto f_aw = noc.req_in().pop_flit(); ASSERT_TRUE(f_aw.has_value());
     auto f_w  = noc.req_in().pop_flit(); ASSERT_TRUE(f_w.has_value());
     EXPECT_EQ(f_aw->get_header_field("axi_ch"), ni::AXI_CH_AW);
@@ -375,12 +383,17 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
 }
 
 TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
-    SCENARIO("NMU VcArbiter: header.last on W flits emitted via Packetize -> VcArbiter "
-             "-> downstream matches payload.wlast (verifies §12 packetize fix "
-             "is preserved end-to-end through the decorator pipeline).");
+    SCENARIO("NMU VcArbiter: header.last on W flits emitted via Packetize -> "
+             "WormholeArbiter -> VcArbiter -> downstream matches payload.wlast "
+             "(verifies §12 packetize fix is preserved end-to-end through the "
+             "decorator pipeline).");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-    ni::cmodel::nmu::Packetize pkt(arb, /*src_id=*/0x12);
+    auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> wh_arb(
+        vc_arb, /*num_inputs=*/3,
+        std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
+    ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1),
+                                   wh_arb.input(2), /*src_id=*/0x12);
 
     ni::cmodel::axi::AwBeat aw{};
     aw.id = 0x07; aw.addr = 0x340000; aw.len = 2; aw.size = 5;
@@ -396,8 +409,9 @@ TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
     ASSERT_TRUE(pkt.push_w(make_w(false)));
     ASSERT_TRUE(pkt.push_w(make_w(true)));
 
-    // Drain AW + 3 W flits through tick().
-    for (int i = 0; i < 4; ++i) arb.tick();
+    // Drain AW + 3 W flits: wh_arb ticks first, then vc_arb ticks.
+    for (int i = 0; i < 4; ++i) wh_arb.tick();
+    for (int i = 0; i < 4; ++i) vc_arb.tick();
 
     noc.req_in().pop_flit();  // discard AW
     for (int i = 0; i < 3; ++i) {

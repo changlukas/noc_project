@@ -1,10 +1,12 @@
 #include "nmu/packetize.hpp"
 #include "common/loopback_noc.hpp"
+#include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ReqCapture;
 using ni::cmodel::nmu::Packetize;
 namespace axi = ni::cmodel::axi;
 
@@ -35,13 +37,13 @@ axi::ArBeat make_ar(uint8_t id, uint64_t addr) {
 
 TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
   SCENARIO("NMU Packetize: push_aw stamps src_id/axi_ch=AW/vc=0/last=0/awid/awaddr on emitted flit (AW starts wormhole packet)");
-  LoopbackNoc noc(/*req*/16, /*rsp*/16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   // Legacy test: only verifies packetize stamps src + axi_ch + last + awid +
   // awaddr. dst_id derivation is covered by WMetaFifoInheritsAwDst below.
   ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0xDEADBEEFCAFEBABEull)));
 
-  auto flit_opt = noc.req_in().pop_flit();
+  auto flit_opt = aw_cap.pop();
   ASSERT_TRUE(flit_opt.has_value());
   const auto& f = *flit_opt;
   EXPECT_EQ(f.get_header_field("axi_ch"),   ni::AXI_CH_AW);
@@ -54,14 +56,14 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
 
 TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
   SCENARIO("NMU Packetize: W flit inherits dst_id from preceding AW via W-meta FIFO");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   // addr 0x340000 → dst = (0x340000 >> 16) & 0xFF = 0x34
   ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x340000)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/true)));
 
-  noc.req_in().pop_flit();  // discard AW
-  auto w_flit_opt = noc.req_in().pop_flit();
+  aw_cap.pop();  // discard AW
+  auto w_flit_opt = w_cap.pop();
   ASSERT_TRUE(w_flit_opt.has_value());
   EXPECT_EQ(w_flit_opt->get_header_field("dst_id"), 0x34u);
   EXPECT_EQ(w_flit_opt->get_header_field("axi_ch"), ni::AXI_CH_W);
@@ -69,19 +71,19 @@ TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
 
 TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
   SCENARIO("NMU Packetize: 2 outstanding AWs (different dst), each W inherits its own AW's dst");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   // addr 0x340000 → dst=0x34;  addr 0x560000 → dst=0x56.
   ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x340000)));
   ASSERT_TRUE(pkt.push_aw(make_aw(0x06, 0x560000)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFF, /*last*/true)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFF, /*last*/true)));
 
-  ASSERT_EQ(noc.req_q_size(), 4u);
-  noc.req_in().pop_flit();  // AW1
-  noc.req_in().pop_flit();  // AW2
-  auto w1 = noc.req_in().pop_flit();
-  auto w2 = noc.req_in().pop_flit();
+  ASSERT_EQ(aw_cap.size() + w_cap.size() + ar_cap.size(), 4u);
+  aw_cap.pop();  // AW1
+  aw_cap.pop();  // AW2
+  auto w1 = w_cap.pop();
+  auto w2 = w_cap.pop();
   EXPECT_EQ(w1->get_header_field("dst_id"), 0x34u);
   EXPECT_EQ(w2->get_header_field("dst_id"), 0x56u);
 }
@@ -91,16 +93,16 @@ TEST(NmuPacketize, WHeaderLastMatchesWlast) {
            "intermediate W beats stamp 0, terminal beat stamps 1 "
            "(FlooNoC wormhole packet boundary semantic; "
            "fixes pre-existing bug where every W flit stamped header.last=1)");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   ASSERT_TRUE(pkt.push_aw(make_aw(0x07, 0x340000, /*len*/2)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/false)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/false)));
   ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/true)));
 
-  noc.req_in().pop_flit();  // discard AW
+  aw_cap.pop();  // discard AW
   for (int i = 0; i < 3; ++i) {
-    auto f = noc.req_in().pop_flit();
+    auto f = w_cap.pop();
     ASSERT_TRUE(f.has_value());
     uint64_t expected_last = (i == 2) ? 1u : 0u;
     EXPECT_EQ(f->get_header_field("last"), expected_last)
@@ -112,7 +114,8 @@ TEST(NmuPacketize, WHeaderLastMatchesWlast) {
 TEST(NmuPacketize, PushAwFailsOnNocFull) {
   SCENARIO("NMU Packetize: push_aw returns false when NoC req channel is full; succeeds after drain");
   LoopbackNoc noc(/*req*/1, /*rsp*/16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture w_cap, ar_cap;
+  Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
   EXPECT_FALSE(pkt.push_aw(make_aw(1, 0)));
   noc.req_in().pop_flit();
@@ -121,13 +124,13 @@ TEST(NmuPacketize, PushAwFailsOnNocFull) {
 
 TEST(NmuPacketize, AwPayloadBitPerfect) {
   SCENARIO("NMU Packetize: every AW payload field (id/addr/len/size/burst/cache/lock/prot/...) bit-perfect");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   auto aw = make_aw(/*id*/0xAB, /*addr*/0x123456789ABCDEF0ull, /*len*/0xFF);
   aw.size = 5; aw.burst = axi::Burst::WRAP; aw.cache = 0xF; aw.lock = 1;
   aw.prot = 0x7; aw.region = 0xF; aw.user = 0xFF; aw.qos = 0xF;
   ASSERT_TRUE(pkt.push_aw(aw));
-  auto f = *noc.req_in().pop_flit();
+  auto f = *aw_cap.pop();
   EXPECT_EQ(f.get_payload_field("AW", "awid"),     0xABu);
   EXPECT_EQ(f.get_payload_field("AW", "awaddr"),   0x123456789ABCDEF0ull);
   EXPECT_EQ(f.get_payload_field("AW", "awlen"),    0xFFu);
@@ -142,14 +145,14 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
 
 TEST(NmuPacketize, WPayloadBitPerfect) {
   SCENARIO("NMU Packetize: W payload (wdata/wstrb/wlast/wuser) round-trips bit-perfect through flit");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
   auto w = make_w(0xDEADBEEF, /*last*/true);
   w.user = 0xAB;
   ASSERT_TRUE(pkt.push_w(w));
-  noc.req_in().pop_flit();  // discard AW
-  auto f = *noc.req_in().pop_flit();
+  aw_cap.pop();  // discard AW
+  auto f = *w_cap.pop();
   EXPECT_EQ(f.get_payload_field("W", "wlast"),  1u);
   EXPECT_EQ(f.get_payload_field("W", "wstrb"),  0xDEADBEEFu);
   EXPECT_EQ(f.get_payload_field("W", "wuser"),  0xABu);
@@ -160,13 +163,13 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
 
 TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
   SCENARIO("NMU Packetize: AR flit stamps axi_ch=AR, dst from addr_trans, rob_req/rob_idx defaults to 0");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   // addr 0x990000 → dst = (0x990000 >> 16) & 0xFF = 0x99.
   // Frozen interface auto-fills rob_req/rob_idx = 0; Rob-driven path uses
   // push_ar_with_meta (covered by PushAwWithMeta_OverrideDefault).
   ASSERT_TRUE(pkt.push_ar(make_ar(0x07, 0x994000)));
-  auto f = *noc.req_in().pop_flit();
+  auto f = *ar_cap.pop();
   EXPECT_EQ(f.get_header_field("axi_ch"),   ni::AXI_CH_AR);
   EXPECT_EQ(f.get_header_field("dst_id"),   0x99u);
   EXPECT_EQ(f.get_header_field("rob_req"),  0u);
@@ -177,10 +180,10 @@ TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
 
 TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
   SCENARIO("NMU Packetize: rsvd/disabled header fields (commtype/multicast/noc_qos/...) all zero");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), kSrcId);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
   ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
-  auto f = *noc.req_in().pop_flit();
+  auto f = *aw_cap.pop();
   EXPECT_EQ(f.get_header_field("commtype"),  0u);
   EXPECT_EQ(f.get_header_field("multicast"), 0u);
   EXPECT_EQ(f.get_header_field("noc_qos"),   0u);
@@ -191,8 +194,8 @@ TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
 
 TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
   SCENARIO("NMU Packetize: push_aw_with_meta overrides dst_id/local_addr/rob_req/rob_idx from meta");
-  LoopbackNoc noc(/*req*/16, /*rsp*/16);
-  Packetize pkt(noc.req_out(), /*src=*/0x01);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, /*src=*/0x01);
   axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100);  // addr → dst=0 by default
   ni::cmodel::nmu::AwHeaderMeta meta{
       /*dst_id=*/0x42,
@@ -201,7 +204,7 @@ TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
       /*rob_idx=*/0x07
   };
   ASSERT_TRUE(pkt.push_aw_with_meta(b, meta));
-  auto f = *noc.req_in().pop_flit();
+  auto f = *aw_cap.pop();
   EXPECT_EQ(f.get_header_field("dst_id"),  0x42u);
   EXPECT_EQ(f.get_header_field("rob_req"), 1u);
   EXPECT_EQ(f.get_header_field("rob_idx"), 0x07u);
@@ -210,12 +213,12 @@ TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
 
 TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
   SCENARIO("NMU Packetize: frozen push_aw runs addr_trans::xy_route to fill dst_id and local_addr");
-  LoopbackNoc noc(16, 16);
-  Packetize pkt(noc.req_out(), /*src=*/0x01);
+  ReqCapture aw_cap, w_cap, ar_cap;
+  Packetize pkt(aw_cap, w_cap, ar_cap, /*src=*/0x01);
   // addr 0x10100 → addr_trans gives dst=1
   axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x10100);
   ASSERT_TRUE(pkt.push_aw(b));  // frozen interface auto-computes
-  auto f = *noc.req_in().pop_flit();
+  auto f = *aw_cap.pop();
   EXPECT_EQ(f.get_header_field("dst_id"), 0x01u);  // from addr_trans::xy_route
   EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x10100u);  // local_addr = addr
 }

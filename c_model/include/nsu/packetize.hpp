@@ -16,8 +16,11 @@ namespace ni::cmodel::nsu {
 // false (NSU never emits requests).
 class Packetize : public Packetizer {
 public:
-  Packetize(noc::NocRspOut& rsp_out, MetaBuffer& meta, uint8_t src_id)
-      : rsp_out_(rsp_out), meta_(meta), src_id_(src_id) {}
+  Packetize(noc::NocRspOut& b_out,
+            noc::NocRspOut& r_out,
+            MetaBuffer& meta,
+            uint8_t src_id)
+      : b_out_(b_out), r_out_(r_out), meta_(meta), src_id_(src_id) {}
 
   // ---- Packetizer interface (response methods are real) ----
   bool push_b(const axi::BBeat& b) override;
@@ -53,7 +56,8 @@ public:
   }
 
 private:
-  noc::NocRspOut& rsp_out_;
+  noc::NocRspOut& b_out_;
+  noc::NocRspOut& r_out_;
   MetaBuffer& meta_;
   uint8_t src_id_;
 };
@@ -74,7 +78,7 @@ inline bool Packetize::push_b(const axi::BBeat& b) {
   f.set_payload_field("B", "bid",   b.id);
   f.set_payload_field("B", "bresp", static_cast<uint64_t>(b.resp));
   f.set_payload_field("B", "buser", b.user);
-  if (!rsp_out_.push_flit(f)) return false;
+  if (!b_out_.push_flit(f)) return false;
   meta_.commit_write(b.id);
   return true;
 }
@@ -97,7 +101,7 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
   f.set_payload_field("R", "ruser", b.user);
   f.set_payload_field("R", "rlast", b.last ? 1u : 0u);
   f.set_payload_bytes("R", "rdata", b.data.data(), 256);
-  if (!rsp_out_.push_flit(f)) return false;
+  if (!r_out_.push_flit(f)) return false;
   if (b.last) meta_.commit_read(b.id);
   return true;
 }

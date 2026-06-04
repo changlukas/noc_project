@@ -56,6 +56,7 @@
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
 #include "nmu/vc_arbiter.hpp"
+#include "noc/wormhole_arbiter.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
@@ -187,7 +188,13 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   // transparent to all existing fixtures; future rounds may up NUM_VC.
   auto nmu_arb = nmu::VcArbiter::read_write_split(
       loopback.nmu_req_out(), /*num_vc=*/1, /*write_vc=*/0, /*read_vc=*/0);
-  nmu::Packetize    real_nmu_pkt(nmu_arb, /*src_id=*/kNmuSrcId);
+  ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> nmu_wh_arb(
+      nmu_arb, /*num_inputs=*/3,
+      std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
+  nmu::Packetize    real_nmu_pkt(nmu_wh_arb.input(0),
+                                 nmu_wh_arb.input(1),
+                                 nmu_wh_arb.input(2),
+                                 /*src_id=*/kNmuSrcId);
   nmu::Rob          rob(real_nmu_pkt, nmu_depkt, rob_mode, rob_mode);
 
   // Ports straddle the packetize / depacketize stacks. The NMU port hands
@@ -204,11 +211,14 @@ LoopbackResult run_fixture(const std::string& yaml_path,
   std::vector<std::unique_ptr<nsu::MetaBuffer>>    nsu_metas;
   std::vector<std::unique_ptr<nsu::Depacketize>>   nsu_depkts;
   std::vector<std::unique_ptr<nsu::VcArbiter>>         nsu_arbs;
+  std::vector<std::unique_ptr<
+      ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocRspOut>>> nsu_wh_arbs;
   std::vector<std::unique_ptr<nsu::Packetize>>     nsu_pkts;
   std::vector<std::unique_ptr<nsu::AxiMasterPort>> nsu_ports;
   nsu_metas.reserve(nsu_count);
   nsu_depkts.reserve(nsu_count);
   nsu_arbs.reserve(nsu_count);
+  nsu_wh_arbs.reserve(nsu_count);
   nsu_pkts.reserve(nsu_count);
   nsu_ports.reserve(nsu_count);
   for (std::size_t i = 0; i < nsu_count; ++i) {
@@ -228,8 +238,16 @@ LoopbackResult run_fixture(const std::string& yaml_path,
         nsu::VcArbiter::read_write_split(
             loopback.nsu_rsp_out(i), /*num_vc=*/1,
             /*write_rsp_vc=*/0, /*read_rsp_vc=*/0)));
+    nsu_wh_arbs.emplace_back(std::make_unique<
+        ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocRspOut>>(
+        *nsu_arbs[i], /*num_inputs=*/2,
+        std::vector<ni::cmodel::noc::ChannelPairing>{},
+        /*per_input_depth=*/4));
     nsu_pkts.emplace_back(std::make_unique<nsu::Packetize>(
-        *nsu_arbs[i], *nsu_metas[i], this_nsu_src));
+        nsu_wh_arbs[i]->input(0),  // b_out
+        nsu_wh_arbs[i]->input(1),  // r_out
+        *nsu_metas[i],
+        this_nsu_src));
     nsu_ports.emplace_back(std::make_unique<nsu::AxiMasterPort>(
         *nsu_depkts[i], *nsu_pkts[i], params));
   }
@@ -402,6 +420,15 @@ LoopbackResult run_fixture(const std::string& yaml_path,
       if (!r_holdovers[i].empty() || !nsu_ports[i]->push_r(*r)) {
         r_holdovers[i].push_back(*r);
       }
+    }
+
+    // Advance WormholeArbiter stages first: each wh_arb drains one flit per
+    // tick from its per-input pending into the downstream VcArbiter.
+    // Must tick before VcArbiter so the pipeline is: Packetize -> wh_arb ->
+    // vc_arb -> loopback in the same cycle.
+    nmu_wh_arb.tick();
+    for (std::size_t i = 0; i < nsu_count; ++i) {
+      nsu_wh_arbs[i]->tick();
     }
 
     // Advance VcArbiter pending queues before loopback ages: VcArbiter drains its
