@@ -202,15 +202,15 @@ inline void AxiDpiAdapter::init(const std::string& scenario_yaml_path) {
         scenario_yaml_path, nmu_->axi_slave_port(), read_dump_path, sc.config.max_outstanding_write,
         sc.config.max_outstanding_read);
 
+    // Reset scoreboard before registering callbacks so init() is idempotent.
+    scoreboard_ = axi::Scoreboard{};
+
     // Scoreboard callbacks (exact copy of integration testbench wiring).
     master_->on_write_completed([this](const axi::WriteResult& wr) {
         scoreboard_.handle_write_completed(wr, wr.data, wr.strb_per_beat);
     });
     master_->on_read_observed(
         [this](const axi::ReadResult& rr) { scoreboard_.handle_read_observed(rr); });
-
-    // Reset all per-run state so init() is idempotent (safe to call twice).
-    scoreboard_ = axi::Scoreboard{};
     b_holdover_.clear();
     r_holdover_.clear();
     for (auto& dq : b_owner_nsu_) dq.clear();
@@ -269,9 +269,12 @@ inline void AxiDpiAdapter::tick() {
     }
     while (auto ar = nsu_port.pop_ar()) {
         uint8_t id = ar->id;
-        if (slave_->push_ar(*ar)) {
-            r_owner_nsu_[id].push_back(0);
+        if (!slave_->push_ar(*ar)) {
+            throw std::runtime_error(
+                "AxiDpiAdapter::tick(): AR channel: slave rejected push_ar for id=" +
+                std::to_string(id) + " — slave queue full or not ready");
         }
+        r_owner_nsu_[id].push_back(0);
     }
 
     // Step 6: Slave + memory tick.
