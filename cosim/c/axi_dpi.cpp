@@ -58,7 +58,7 @@ inline void pack_data(const std::array<uint8_t, N>& src, svBitVecVal* out) {
 // ---------------------------------------------------------------------------
 
 void pack_aw(const AwPins& p, svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-             svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+             svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
              svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos) {
     *valid = p.valid ? 1 : 0;
     *ready = p.ready ? 1 : 0;
@@ -67,7 +67,7 @@ void pack_aw(const AwPins& p, svBit* valid, svBit* ready, svBitVecVal* id, svBit
     *len = p.len;
     *size = p.size;
     *burst = p.burst;
-    *lock = p.lock;
+    *lock = p.lock ? 1 : 0;
     *cache = p.cache;
     *prot = p.prot;
     *qos = p.qos;
@@ -83,7 +83,7 @@ void pack_w(const WPins& p, svBit* valid, svBit* ready, svBitVecVal* data, svBit
 }
 
 void pack_ar(const ArPins& p, svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-             svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+             svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
              svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos) {
     *valid = p.valid ? 1 : 0;
     *ready = p.ready ? 1 : 0;
@@ -92,7 +92,7 @@ void pack_ar(const ArPins& p, svBit* valid, svBit* ready, svBitVecVal* id, svBit
     *len = p.len;
     *size = p.size;
     *burst = p.burst;
-    *lock = p.lock;
+    *lock = p.lock ? 1 : 0;
     *cache = p.cache;
     *prot = p.prot;
     *qos = p.qos;
@@ -149,7 +149,7 @@ int cmodel_scoreboard_clean(void) {
 // --- NMU channel getters ----------------------------------------------------
 
 void cmodel_nmu_get_aw(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos) {
     AwPins p{};
     if (g_adapter) g_adapter->get_nmu_aw(p);
@@ -164,7 +164,7 @@ void cmodel_nmu_get_w(svBit* valid, svBit* ready, svBitVecVal* data, svBitVecVal
 }
 
 void cmodel_nmu_get_ar(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos) {
     ArPins p{};
     if (g_adapter) g_adapter->get_nmu_ar(p);
@@ -187,7 +187,7 @@ void cmodel_nmu_get_r(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* 
 // --- NSU channel getters ----------------------------------------------------
 
 void cmodel_nsu_get_aw(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos) {
     AwPins p{};
     if (g_adapter) g_adapter->get_nsu_aw(p);
@@ -202,7 +202,7 @@ void cmodel_nsu_get_w(svBit* valid, svBit* ready, svBitVecVal* data, svBitVecVal
 }
 
 void cmodel_nsu_get_ar(svBit* valid, svBit* ready, svBitVecVal* id, svBitVecVal* addr,
-                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBitVecVal* lock,
+                       svBitVecVal* len, svBitVecVal* size, svBitVecVal* burst, svBit* lock,
                        svBitVecVal* cache, svBitVecVal* prot, svBitVecVal* qos) {
     ArPins p{};
     if (g_adapter) g_adapter->get_nsu_ar(p);
