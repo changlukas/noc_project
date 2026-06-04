@@ -30,7 +30,7 @@ Architectural intent matches FlooNoC chimney; collapses FlooNoC's separate SelW 
 ## 2. Scope
 
 **In scope**:
-- New module `noc/wormhole_arbiter.hpp` + 9 unit tests (8 functional + 3 EXPECT_DEATH + 1 lock-leak/idle-stall)
+- New module `noc/wormhole_arbiter.hpp` + 9 unit tests (6 functional incl. lock-leak/idle-stall + 3 EXPECT_DEATH)
 - NMU `Packetize` ctor multi-output (3 NocReqOut refs); NSU 2 outputs
 - NMU `VcArbiter` simplification (deque → optional + assert)
 - `VcArb` → `VcArbiter` rename (file + class + CMake target)
