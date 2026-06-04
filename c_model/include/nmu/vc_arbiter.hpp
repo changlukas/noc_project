@@ -10,10 +10,11 @@
 //   Mode B (MultiCandidate): per-axi_ch candidate VC list; first VC with
 //     pending space AND downstream credit wins.
 //
-// W-follows-AW invariant (both modes): all W beats of a burst route to
-// the same VC as their preceding AW. Implementation mirrors Packetize's
-// w_meta_fifo_ via a std::deque<uint8_t> pending_w_routes_ (push on AW,
-// pop on W with payload.W.wlast=1).
+// W-follows-AW invariant (Constraint A1): this arbiter MUST be downstream
+// of a WormholeArbiter that serializes AW and all its W beats before
+// admitting the next AW. Given that guarantee, a single
+// std::optional<uint8_t> current_aw_vc_ is sufficient to track the in-flight
+// burst's VC (push on AW, reset on W with payload.W.wlast=1).
 //
 // NUM_VC=1 degenerate behavior: both modes route everything to VC=0 and
 // are observationally identical to the prior-round single-VC pipeline.
@@ -75,7 +76,7 @@ public:
     // Test introspection
     std::size_t pending_size(uint8_t vc_id) const noexcept { return pending_[vc_id].size(); }
     uint8_t     round_robin_ptr() const noexcept { return round_robin_ptr_; }
-    std::size_t pending_w_routes_size() const noexcept { return pending_w_routes_.size(); }
+    bool        has_current_aw() const noexcept { return current_aw_vc_.has_value(); }
 
 private:
     VcArbiter(noc::NocReqOut& downstream,
@@ -108,19 +109,24 @@ private:
     std::array<std::deque<Flit>, NUM_VC_MAX>         pending_;
     std::size_t                                      pending_depth_;
     uint8_t                                          round_robin_ptr_ = 0;
-    std::deque<uint8_t>                              pending_w_routes_;
+    std::optional<uint8_t>                           current_aw_vc_;
 };
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
-    if (num_vc_ == 1) return uint8_t{0};
-
+    // W invariant fires regardless of NUM_VC (Constraint A1: must be
+    // downstream of WormholeArbiter; W must always follow AW)
     if (axi_ch == ni::AXI_CH_W) {
-        if (pending_w_routes_.empty()) {
-            assert(false && "nmu::VcArbiter::push_flit: W arrived with empty pending_w_routes_ -- Packetize w_meta_fifo invariant violated (W before AW); check upstream Rob credit gate or AxiSlavePort routing");
+        if (!current_aw_vc_.has_value()) {
+            assert(false && "nmu::VcArbiter::push_flit: W arrived with no current AW VC -- "
+                            "Constraint A1 violated: must be downstream of WormholeArbiter "
+                            "(which serializes AW + all W beats before next AW). Standalone "
+                            "VcArbiter use without upstream serialization is unsupported.");
             std::abort();
         }
-        return pending_w_routes_.front();
+        return *current_aw_vc_;
     }
+
+    if (num_vc_ == 1) return uint8_t{0};
 
     if (mode_ == VcMode::ReadWriteSplit) {
         if (axi_ch == ni::AXI_CH_AW) return write_vc_;
@@ -144,12 +150,16 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
 
-    // Update W-follows-AW deque only after pass conditions (atomicity)
+    // Update W-follows-AW optional only after pass conditions (atomicity)
     if (axi_ch == ni::AXI_CH_AW) {
-        pending_w_routes_.push_back(vc_id);
+        assert(!current_aw_vc_.has_value() &&
+               "nmu::VcArbiter::push_flit: AW arrived while previous AW's W burst "
+               "still in progress -- Constraint A1 violated: must be downstream of "
+               "WormholeArbiter (which holds next AW until current W burst ends).");
+        current_aw_vc_ = vc_id;
     } else if (axi_ch == ni::AXI_CH_W) {
         if (flit.get_payload_field("W", "wlast") != 0) {
-            pending_w_routes_.pop_front();
+            current_aw_vc_.reset();
         }
     }
 

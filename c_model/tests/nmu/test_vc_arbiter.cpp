@@ -69,126 +69,108 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
 // MultiCandidate HoL-avoidance.
 // Candidate lists are adapted to num_vc:
 //   num_vc=1  : single-VC, no multi-candidate overflow possible; skip
-//   num_vc=2  : AW/W={0,1}, AR={0}  — AW has 2 candidates; AR shares VC=0
-//   num_vc=4  : AW/W={0,1}, AR={2,3}
-//   num_vc=8  : AW/W={0,1,2,3}, AR={4,5,6,7}
-// The scenario: saturate the first AW candidate VC, verify the next AW
-// spills to the second candidate VC.
+//   num_vc=2  : AR={0,1}
+//   num_vc=4  : AR={0,1,2,3}
+//   num_vc=8  : AR={0,1,2,3,4,5,6,7}
+// The scenario: saturate the first AR candidate VC (VC=0) with pending_depth=2,
+// verify the next AR spills to VC=1 (second candidate). AR has no Constraint
+// A1 restriction (no AW/W pairing needed), so multiple ARs can be pushed freely.
 TEST_P(NmuVcArbParam, MultiCandidate_HoLAvoidance) {
     const std::size_t num_vc = GetParam();
-    if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 for multi-candidate AW overflow";
+    if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 for multi-candidate AR overflow";
 
-    SCENARIO("NMU VcArbiter Mode B: saturate first AW candidate VC -> next AW "
-             "picks second candidate VC, avoiding head-of-line block");
+    SCENARIO("NMU VcArbiter Mode B: saturate first AR candidate VC (VC=0) -> "
+             "next AR picks second candidate VC (VC=1), avoiding head-of-line block");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
 
-    // AW/W always get 2 candidates (VC=0 and VC=1); AR fills the remainder
-    // (or shares VC=0 when num_vc=2 and there is no separate upper half).
+    // AR spans all VCs in order; AW/W get a single VC=0 candidate.
     std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
-    candidates[ni::AXI_CH_AW] = {0, 1};
-    candidates[ni::AXI_CH_W]  = {0, 1};
-    if (num_vc > 2) {
-        for (std::size_t i = num_vc / 2; i < num_vc; ++i) {
-            candidates[ni::AXI_CH_AR].push_back(static_cast<uint8_t>(i));
-        }
-    } else {
-        candidates[ni::AXI_CH_AR] = {0};  // num_vc=2: AR shares VC=0
+    candidates[ni::AXI_CH_AW] = {0};
+    candidates[ni::AXI_CH_W]  = {0};
+    for (std::size_t i = 0; i < num_vc; ++i) {
+        candidates[ni::AXI_CH_AR].push_back(static_cast<uint8_t>(i));
     }
     auto arb = VcArbiter::multi_candidate(noc.req_out(), num_vc,
                                       candidates, /*pending_depth=*/2);
 
-    // Fill VC=0 pending to capacity (2 AWs land on VC=0).
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+    // Fill VC=0 pending to capacity (2 ARs land on VC=0).
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
     EXPECT_EQ(arb.pending_size(0), 2u);
     EXPECT_EQ(arb.pending_size(1), 0u);
 
-    // Next AW: VC=0 full -> candidate fallback picks VC=1.
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+    // Next AR: VC=0 full -> candidate fallback picks VC=1.
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
     EXPECT_EQ(arb.pending_size(1), 1u);
 }
 
-// W follows AW invariant: W flits route to the same VC as their paired AW.
-// Requires num_vc ≥ 2 so that AW overflow to a second candidate VC is
-// possible and the per-burst routing table is exercised.
-// AW/W always use candidates {0,1} (2 VCs); AR fills the upper half or VC=0.
+// W follows AW invariant: all W beats of a burst route to the same VC as
+// their paired AW. With Constraint A1 (WormholeArbiter upstream serializes
+// AW + all W beats before next AW), a single outstanding AW at a time is
+// the supported pattern. Requires num_vc >= 2 so the AW vs W VC assignment
+// is observable (write_vc=0 for both in Mode A; read_vc=1 for AR).
 TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
     const std::size_t num_vc = GetParam();
-    if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 for AW spill + W-routing check";
+    if (num_vc < 2) GTEST_SKIP() << "needs num_vc >= 2";
 
-    SCENARIO("NMU VcArbiter Mode B: AW burst spills across candidate VCs; "
-             "W beats route to matching VCs via pending_w_routes_");
+    SCENARIO("NMU VcArbiter NUM_VC=2: single outstanding AW + 3 W beats (last "
+             "with wlast=1) — all W beats route to AW's VC. After W with wlast, "
+             "current_aw_vc_ resets, allowing next AW to be pushed.");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
+    auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+    EXPECT_TRUE(arb.has_current_aw());
 
-    std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
-    candidates[ni::AXI_CH_AW] = {0, 1};
-    candidates[ni::AXI_CH_W]  = {0, 1};
-    if (num_vc > 2) {
-        for (std::size_t i = num_vc / 2; i < num_vc; ++i) {
-            candidates[ni::AXI_CH_AR].push_back(static_cast<uint8_t>(i));
-        }
-    } else {
-        candidates[ni::AXI_CH_AR] = {0};  // num_vc=2: AR shares VC=0
-    }
-    auto arb = VcArbiter::multi_candidate(noc.req_out(), num_vc,
-                                      candidates, /*pending_depth=*/4);
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/0)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/0)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
+    EXPECT_FALSE(arb.has_current_aw());  // reset after wlast
 
-    // Push 5 AWs: fill VC=0 (depth=4), then spill 1 to VC=1.
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));  // VC=0
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));  // VC=0 (still room)
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));  // VC=0
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));  // VC=0 (full now)
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));  // VC=1 (overflow)
+    // All 4 flits land on VC=0 (write_vc)
     EXPECT_EQ(arb.pending_size(0), 4u);
-    EXPECT_EQ(arb.pending_size(1), 1u);
-    EXPECT_EQ(arb.pending_w_routes_size(), 5u);
+    EXPECT_EQ(arb.pending_size(1), 0u);
 
-    // Drain all AWs.
-    for (int i = 0; i < 5; ++i) { arb.tick(); auto _ = noc.req_in().pop_flit(); }
+    // Drain all 4 to make room, then verify next AW can be pushed.
+    for (int i = 0; i < 4; ++i) { arb.tick(); noc.req_in().pop_flit(); }
+    EXPECT_EQ(arb.pending_size(0), 0u);
 
-    // Push 5 W beats (one per burst, wlast=1).
-    for (int i = 0; i < 5; ++i) {
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
-    }
-    // First 4 W beats correspond to AWs that landed on VC=0; 5th to AW on VC=1.
-    EXPECT_EQ(arb.pending_size(0), 4u);
-    EXPECT_EQ(arb.pending_size(1), 1u);
-    EXPECT_EQ(arb.pending_w_routes_size(), 0u);  // all popped on wlast=1
+    // Next AW can now be pushed (current_aw_vc_ is clear, pending is empty)
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
 }
 
-// pending_w_routes_ pops based on payload.W.wlast, NOT header.last.
-// Requires num_vc ≥ 2 (uses read_write_split with write_vc=0, read_vc=1).
+// current_aw_vc_ resets based on payload.W.wlast, NOT header.last.
+// Requires num_vc >= 2 (uses read_write_split with write_vc=0, read_vc=1).
 TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 (uses write_vc=0, read_vc=1)";
 
-    SCENARIO("NMU VcArbiter: pending_w_routes_ pops based on payload.W.wlast, "
+    SCENARIO("NMU VcArbiter: current_aw_vc_ resets based on payload.W.wlast, "
              "NOT header.last. Push AW + 3 W beats; only the 3rd has "
-             "payload.wlast=1; verify deque only pops on the 3rd.");
+             "payload.wlast=1; verify current_aw_vc_ only resets on the 3rd.");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
-    EXPECT_EQ(arb.pending_w_routes_size(), 1u);
+    EXPECT_TRUE(arb.has_current_aw());
 
     // Beat 1: payload.wlast=0 (intermediate W beat); even if header.last=1 in
-    // the input flit (legacy bug shape), pending_w_routes_ MUST NOT pop.
+    // the input flit (legacy bug shape), current_aw_vc_ MUST NOT reset.
     Flit w1; w1.set_header_field("axi_ch", ni::AXI_CH_W);
              w1.set_header_field("last", 1);   // bait: legacy bug-shape header.last
              w1.set_payload_field("W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w1));
-    EXPECT_EQ(arb.pending_w_routes_size(), 1u) << "wlast=0 -> must not pop";
+    EXPECT_TRUE(arb.has_current_aw()) << "wlast=0 -> must not reset";
 
     Flit w2; w2.set_header_field("axi_ch", ni::AXI_CH_W);
              w2.set_header_field("last", 1);
              w2.set_payload_field("W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w2));
-    EXPECT_EQ(arb.pending_w_routes_size(), 1u);
+    EXPECT_TRUE(arb.has_current_aw());
 
     Flit w3; w3.set_header_field("axi_ch", ni::AXI_CH_W);
              w3.set_header_field("last", 1);
              w3.set_payload_field("W", "wlast", 1);  // genuine burst end
     ASSERT_TRUE(arb.push_flit(w3));
-    EXPECT_EQ(arb.pending_w_routes_size(), 0u);
+    EXPECT_FALSE(arb.has_current_aw());
 }
 
 // Round-robin fairness: num_vc ARs pre-routed to num_vc distinct VCs via
@@ -433,16 +415,16 @@ public:
 }  // namespace
 
 TEST(NmuVcArbDeath, WFollowsAW_WBeforeAW_DeathTest) {
-    SCENARIO("NMU VcArbiter: push_flit(W) before any push_flit(AW) violates the "
-             "W-follows-AW invariant; pending_w_routes_ is empty so VcArbiter "
-             "must assert+abort instead of UB on front().");
+    SCENARIO("NMU VcArbiter: push_flit(W) before any push_flit(AW) violates "
+             "Constraint A1; current_aw_vc_ has no value so VcArbiter must "
+             "assert+abort instead of UB.");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/2, 0, 1);
     EXPECT_DEATH({
         Flit w; w.set_header_field("axi_ch", ni::AXI_CH_W);
                 w.set_payload_field("W", "wlast", 1);
         arb.push_flit(w);
-    }, "nmu::VcArbiter::push_flit: W arrived with empty pending_w_routes_");
+    }, "must be downstream of WormholeArbiter");
 }
 
 TEST(NmuVcArbDeath, ProtocolViolation_LyingDownstream_DeathTest) {
