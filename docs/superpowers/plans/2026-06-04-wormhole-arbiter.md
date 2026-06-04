@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `noc/wormhole_arbiter.hpp` (N-to-1 lock arbiter with AW→W pairing config), refactor NMU/NSU `Packetize` to per-AXI-channel multi-output, simplify NMU `VcArbiter` (deque→optional, enabled by upstream wormhole serialization), and rename `VcArb`→`VcArbiter` for full-word naming consistency — across 5 commits, growing ctest from 359 to 368.
+**Goal:** Add `noc/wormhole_arbiter.hpp` (N-to-1 lock arbiter with AW→W pairing config), refactor NMU/NSU `Packetize` to per-AXI-channel multi-output, simplify NMU `VcArbiter` (deque→optional, enabled by upstream wormhole serialization), and rename `VcArb`→`VcArbiter` for full-word naming consistency — across 5 commits, growing ctest from 359 to 370 (+11 new wormhole tests).
 
 **Architecture:** Pipeline `Packetize{aw_out,w_out,ar_out} → WormholeArbiter<NocReqOut> → VcArbiter → NocReqOut`. NSU mirror with 2 inputs and no pairing (B/R per-flit packets). WormholeArbiter absorbs FlooNoC's SelW state machine + wormhole_arbiter into one module with 3 inputs and an optional `ChannelPairing` config.
 
@@ -40,7 +40,7 @@ EOF
 | `c_model/include/nsu/vc_arb.hpp` → `vc_arbiter.hpp` | RENAME | File + class rename (no logic change) |
 | `c_model/tests/common/per_channel_capture.hpp` | CREATE | Template `PerChannelCapture<Interface>` mock — captures flits per output |
 | `c_model/tests/noc/CMakeLists.txt` | CREATE | New test dir for noc/ unit tests |
-| `c_model/tests/noc/test_wormhole_arbiter.cpp` | CREATE | 9 unit tests (6 functional + 3 EXPECT_DEATH) |
+| `c_model/tests/noc/test_wormhole_arbiter.cpp` | CREATE | 11 unit tests (7 functional + 4 EXPECT_DEATH) |
 | `c_model/tests/nmu/test_packetize.cpp` | MODIFY | Fixture: 3× PerChannelCapture instead of LoopbackNoc |
 | `c_model/tests/nsu/test_nsu_packetize.cpp` | MODIFY | Fixture: 2× PerChannelCapture |
 | `c_model/tests/nmu/test_rob.cpp` | MODIFY | Fixture: pass 3 capture refs into Packetize |
@@ -144,7 +144,7 @@ EOF
 
 ---
 
-## Task 2: Add `WormholeArbiter` module + `PerChannelCapture` mock + 9 unit tests
+## Task 2: Add `WormholeArbiter` module + `PerChannelCapture` mock + 11 unit tests
 
 **Goal:** Create the new arbiter module with full test coverage. Standalone — does not modify any existing module.
 
@@ -514,7 +514,8 @@ TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock) {
 
 TEST(NocWormholeArbiter, MultiBeatWBurstFlowsAndUnlocks) {
     SCENARIO("WormholeArbiter NMU mode: AW + 3 W beats (last 2 non-wlast, 3rd "
-             "wlast) flow through in order; arbiter unlocks after W with wlast");
+             "wlast) flow through in ORDER (AW, W, W, W-last) and arbiter "
+             "unlocks after W with wlast");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::noc::NocReqOut> arb(
         down, /*num_inputs=*/3, {{0, 1}});
@@ -525,7 +526,40 @@ TEST(NocWormholeArbiter, MultiBeatWBurstFlowsAndUnlocks) {
     ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_W,  /*last=*/1, /*wlast=*/1)));
 
     for (int i = 0; i < 4; ++i) arb.tick();
-    EXPECT_EQ(down.size(), 4u);
+    ASSERT_EQ(down.size(), 4u);
+    EXPECT_FALSE(arb.is_locked());
+
+    // Verify emission ORDER + per-flit header.last is correct
+    auto f1 = down.pop(); ASSERT_TRUE(f1.has_value());
+    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_AW);
+    EXPECT_EQ(f1->get_header_field("last"),   0u);
+
+    auto f2 = down.pop(); ASSERT_TRUE(f2.has_value());
+    EXPECT_EQ(f2->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(f2->get_header_field("last"),   0u);
+
+    auto f3 = down.pop(); ASSERT_TRUE(f3.has_value());
+    EXPECT_EQ(f3->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(f3->get_header_field("last"),   0u);
+
+    auto f4 = down.pop(); ASSERT_TRUE(f4.has_value());
+    EXPECT_EQ(f4->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(f4->get_header_field("last"),   1u);
+}
+
+TEST(NocWormholeArbiter, NocRspOutVariantPassThrough) {
+    SCENARIO("WormholeArbiter<NocRspOut> NSU instantiation: 2 inputs (B + R), "
+             "no pairing, each flit is its own packet; verify template "
+             "compiles + behaves identically for NocRspOut downstream type");
+    using ni::cmodel::testing::RspCapture;
+    RspCapture down;
+    WormholeArbiter<ni::cmodel::noc::NocRspOut> arb(down, /*num_inputs=*/2, {});
+
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_B, /*last=*/1)));
+    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_R, /*last=*/1)));
+    arb.tick();
+    arb.tick();
+    EXPECT_EQ(down.size(), 2u);
     EXPECT_FALSE(arb.is_locked());
 }
 
@@ -599,24 +633,51 @@ TEST(NocWormholeArbiterDeath, LyingDownstream) {
     ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*last=*/1)));
     EXPECT_DEATH({ arb.tick(); }, "lying downstream");
 }
+
+TEST(NocWormholeArbiterDeath, CtorPairingValidation) {
+    SCENARIO("WormholeArbiter ctor validates pairings: out-of-range index, "
+             "from==to, duplicate from, nested chain (to is also a from). "
+             "Each violation triggers assert+abort.");
+    ReqCapture down;
+    // Out of range
+    EXPECT_DEATH({
+        WormholeArbiter<ni::cmodel::noc::NocReqOut> arb(
+            down, /*num_inputs=*/2, {{0, 5}});  // to=5 >= num_inputs
+    }, "pairing out of range");
+    // from == to
+    EXPECT_DEATH({
+        WormholeArbiter<ni::cmodel::noc::NocReqOut> arb(
+            down, /*num_inputs=*/2, {{1, 1}});
+    }, "pairing from == to");
+    // Duplicate from
+    EXPECT_DEATH({
+        WormholeArbiter<ni::cmodel::noc::NocReqOut> arb(
+            down, /*num_inputs=*/3, {{0, 1}, {0, 2}});
+    }, "duplicate pairing.from");
+    // Nested chain: to of one pairing is from of another
+    EXPECT_DEATH({
+        WormholeArbiter<ni::cmodel::noc::NocReqOut> arb(
+            down, /*num_inputs=*/3, {{0, 1}, {1, 2}});
+    }, "nested pairing chain");
+}
 ```
 
-- [ ] **Step 6: Build + run new tests — expect 9/9 PASS**
+- [ ] **Step 6: Build + run new tests — expect 11/11 PASS**
 
 ```bash
 cmake --build c_model/build
 ctest --test-dir c_model/build -R NocWormholeArbiter -V
 ```
 
-Expected: 9 tests pass (6 functional + 3 death).
+Expected: 11 tests pass (7 functional incl. NocRspOut variant + 4 death incl. ctor pairing validation).
 
-- [ ] **Step 7: Run full ctest — expect 368/368**
+- [ ] **Step 7: Run full ctest — expect 370/370**
 
 ```bash
 ctest --test-dir c_model/build -j 1
 ```
 
-Expected: 368 tests pass (359 prior + 9 new).
+Expected: 370 tests pass (359 prior + 11 new).
 
 - [ ] **Step 8: Commit**
 
@@ -649,11 +710,13 @@ std::vector). Documented in header.
 New testbench mock PerChannelCapture<Interface> template captures flits
 per output channel; used by NMU/NSU Packetize tests in next commit.
 
-9 unit tests: 6 functional (pass-through, AW lock, AR no-interleave,
-multi-beat W burst + unlock, backpressure, lock-leak idle stall) + 3
-EXPECT_DEATH (W-before-AW, malformed AW, lying downstream).
+11 unit tests: 7 functional (pass-through NocReqOut, AW lock, AR
+no-interleave, multi-beat W burst + unlock with ordered emission
+asserts, backpressure, lock-leak idle stall, NocRspOut variant
+pass-through) + 4 EXPECT_DEATH (W-before-AW, malformed AW, lying
+downstream, ctor pairing validation x4 sub-cases).
 
-New tests dir: c_model/tests/noc/. ctest: 359 -> 368.
+New tests dir: c_model/tests/noc/. ctest: 359 -> 370.
 
 Refs: docs/superpowers/specs/2026-06-04-wormhole-arbiter-design.md §5 §8
 
@@ -813,12 +876,20 @@ If Packetize is constructed there, apply 2-capture pattern. Otherwise leave unto
 
 - [ ] **Step 8: Update `c_model/tests/nmu/test_vc_arbiter.cpp` Packetize fixtures**
 
-Find `EnabledModeMixedWith_PriorRoundTests` and `WHeaderLastMatchesWlast` tests. They construct Packetize. Wrap in 3-capture pattern but then funnel into VcArbiter via a small adapter (or directly via WormholeArbiter for the integration-style ones). Choose: for these tests, since the goal is to verify Packetize → VcArbiter end-to-end, use WormholeArbiter as the intermediary (matches new architecture):
+Find `EnabledModeMixedWith_PriorRoundTests` and `WHeaderLastMatchesWlast` tests. They construct Packetize. Funnel into VcArbiter via WormholeArbiter (matches new architecture).
 
+Add include near top of file:
 ```cpp
-LoopbackNoc noc(...);
+#include "noc/wormhole_arbiter.hpp"
+```
+
+Then in each affected test, rewire as:
+```cpp
+LoopbackNoc noc(/*req*/64, /*rsp*/64);
 auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-WormholeArbiter<noc::NocReqOut> wh_arb(vc_arb, /*num_inputs=*/3, {{0, 1}});
+ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> wh_arb(
+    vc_arb, /*num_inputs=*/3,
+    std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
 Packetize pkt(wh_arb.input(0), wh_arb.input(1), wh_arb.input(2), kSrcId);
 // tick loop: wh_arb.tick() then vc_arb.tick()
 ```
@@ -893,13 +964,28 @@ cmake --build c_model/build 2>&1 | head -50
 
 Compile errors will be in callsites missing the new ctor pattern. Fix file by file. Each fixture rewire should ONLY change wiring, NOT test logic.
 
-- [ ] **Step 11: Run full ctest — expect 368/368**
+- [ ] **Step 11: Run full ctest — expect 370/370**
 
 ```bash
 ctest --test-dir c_model/build -j 1
 ```
 
-Expected: 368 tests pass (no new tests in this commit; only fixture rewiring + production ctor change). If any test fails, investigate root cause (likely fixture missed a callsite or wiring detail).
+Expected: 370 tests pass (no new tests in this commit; only fixture rewiring + production ctor change). If any test fails, investigate root cause (likely fixture missed a callsite or wiring detail).
+
+- [ ] **Step 11.5: Per-file diff review (spec §9 risk mitigation for indivisible commit)**
+
+This commit is large (10+ files). Spec §9 requires per-file review to ensure each touched file is **wiring-only, no test logic change**. Run:
+
+```bash
+git diff --stat
+```
+
+For each touched test file, manually verify:
+- Production files (`packetize.hpp` × 2): ctor signature + per-output routing only; no other logic change.
+- Test files: fixture construction switched to `PerChannelCapture` and pop sites switched accordingly; **NO** changes to `EXPECT_EQ` / `ASSERT_TRUE` assertion VALUES or test names.
+- Integration testbench: only insertion of WormholeArbiter wiring + tick calls; existing Rob/Packetize/VcArbiter wiring unchanged where compatible.
+
+If any file's diff goes beyond wiring (e.g., assertion expected value changed), STOP, investigate, and either confirm it's required by the refactor or revert. Do not commit until each file's diff is wiring-only confirmed.
 
 - [ ] **Step 12: Commit**
 
@@ -942,7 +1028,7 @@ Test logic unchanged; only construction/assertion sites updated.
 Indivisible commit: Packetize ctor signature change has no compile-clean
 intermediate state. All Packetize callers updated together.
 
-ctest: 368/368 unchanged.
+ctest: 370/370 unchanged.
 
 Refs: docs/superpowers/specs/2026-06-04-wormhole-arbiter-design.md §6 §9
 
@@ -985,28 +1071,38 @@ std::size_t pending_w_routes_size() const noexcept { return pending_w_routes_.si
 bool has_current_aw() const noexcept { return current_aw_vc_.has_value(); }
 ```
 
-Replace `select_vc_for_axi_ch` W-branch (lines 117-123):
+Replace `select_vc_for_axi_ch` — move W invariant check BEFORE `num_vc_==1` fast path so the assert fires regardless of NUM_VC (Constraint A1 holds universally). Replace the entire method body (lines ~114-138) with:
 
 ```cpp
-// Before:
-if (axi_ch == ni::AXI_CH_W) {
-    if (pending_w_routes_.empty()) {
-        assert(false && "nmu::VcArbiter::push_flit: W arrived with empty pending_w_routes_ -- ...");
-        std::abort();
+inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
+    // W invariant fires regardless of NUM_VC (Constraint A1: must be
+    // downstream of WormholeArbiter; W must always follow AW)
+    if (axi_ch == ni::AXI_CH_W) {
+        if (!current_aw_vc_.has_value()) {
+            assert(false && "nmu::VcArbiter::push_flit: W arrived with no current AW VC -- "
+                            "Constraint A1 violated: must be downstream of WormholeArbiter "
+                            "(which serializes AW + all W beats before next AW). Standalone "
+                            "VcArbiter use without upstream serialization is unsupported.");
+            std::abort();
+        }
+        return *current_aw_vc_;
     }
-    return pending_w_routes_.front();
-}
 
-// After:
-if (axi_ch == ni::AXI_CH_W) {
-    if (!current_aw_vc_.has_value()) {
-        assert(false && "nmu::VcArbiter::push_flit: W arrived with no current AW VC -- "
-                        "Constraint A1 violated: must be downstream of WormholeArbiter "
-                        "(which serializes AW + all W beats before next AW). Standalone "
-                        "VcArbiter use without upstream serialization is unsupported.");
-        std::abort();
+    if (num_vc_ == 1) return uint8_t{0};
+
+    if (mode_ == VcMode::ReadWriteSplit) {
+        if (axi_ch == ni::AXI_CH_AW) return write_vc_;
+        if (axi_ch == ni::AXI_CH_AR) return read_vc_;
+        return std::nullopt;
     }
-    return *current_aw_vc_;
+
+    // Mode B: MultiCandidate
+    for (uint8_t vc : candidate_vcs_[axi_ch]) {
+        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) {
+            return vc;
+        }
+    }
+    return std::nullopt;
 }
 ```
 
@@ -1088,13 +1184,13 @@ ctest --test-dir c_model/build -R "NmuVcArbiter\|NmuVcArbiterParam\|NmuVcArbiter
 
 Expected: all pass. If `WFollowsAW_InvariantEnforced` was previously testing multi-AW scenarios in unparameterized form, those instantiations would now fail assert (Constraint A1) — that means the test SHOULD be restructured per Step 2, not adapted to bypass.
 
-- [ ] **Step 4: Run full ctest — expect 368/368**
+- [ ] **Step 4: Run full ctest — expect 370/370**
 
 ```bash
 ctest --test-dir c_model/build -j 1
 ```
 
-Expected: 368/368 (no count change; just internal refactor).
+Expected: 370/370 (no count change; just internal refactor).
 
 - [ ] **Step 5: Commit**
 
@@ -1121,7 +1217,7 @@ WFollowsAW_WBeforeAW_DeathTest unchanged (still catches violation).
 
 NSU VcArbiter unchanged (no AW/W concept).
 
-ctest: 368/368 unchanged.
+ctest: 370/370 unchanged.
 
 Refs: docs/superpowers/specs/2026-06-04-wormhole-arbiter-design.md §7 §10
 
@@ -1204,7 +1300,7 @@ Find the line listing NMU files (around line 167) and append after it a brief no
 
 (Skip if main plan editing is out of scope; commit message records the architectural decision either way.)
 
-- [ ] **Step 4: Run full ctest — expect 368/368 unchanged**
+- [ ] **Step 4: Run full ctest — expect 370/370 unchanged**
 
 ```bash
 ctest --test-dir c_model/build -j 1
@@ -1254,7 +1350,7 @@ git log --oneline e72bb43..HEAD
 Expected:
 - specgen pytest: 163 passed
 - codegen / inventory: clean
-- ctest: 368/368
+- ctest: 370/370
 - git log: 5 commits on `stage3/packetize-depacketize`
 
 ---
