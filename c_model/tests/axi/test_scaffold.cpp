@@ -6,50 +6,57 @@
 namespace axi = ni::cmodel::axi;
 
 TEST(AxiScaffold, ConstantsFromCodegen) {
-  SCENARIO("axi scaffold: DATA_BYTES/DATA_WIDTH align with codegen NOC width constants");
-  EXPECT_EQ(axi::DATA_BYTES, ni::WSTRB_WIDTH);
-  EXPECT_EQ(axi::DATA_WIDTH, ni::width::NOC_DATA_WIDTH);
-  EXPECT_EQ(axi::DATA_BYTES * 8, axi::DATA_WIDTH);
+    SCENARIO("axi scaffold: DATA_BYTES/DATA_WIDTH align with codegen NOC width constants");
+    EXPECT_EQ(axi::DATA_BYTES, ni::WSTRB_WIDTH);
+    EXPECT_EQ(axi::DATA_WIDTH, ni::width::NOC_DATA_WIDTH);
+    EXPECT_EQ(axi::DATA_BYTES * 8, axi::DATA_WIDTH);
 }
 
 TEST(AxiScaffold, BurstEnumValues) {
-  SCENARIO("axi scaffold: Burst enum encodes FIXED=0, INCR=1, WRAP=2 (AXI4 IHI 0022 §A3.4.1)");
-  EXPECT_EQ(static_cast<int>(axi::Burst::FIXED), 0);
-  EXPECT_EQ(static_cast<int>(axi::Burst::INCR),  1);
-  EXPECT_EQ(static_cast<int>(axi::Burst::WRAP),  2);
+    SCENARIO("axi scaffold: Burst enum encodes FIXED=0, INCR=1, WRAP=2 (AXI4 IHI 0022 §A3.4.1)");
+    EXPECT_EQ(static_cast<int>(axi::Burst::FIXED), 0);
+    EXPECT_EQ(static_cast<int>(axi::Burst::INCR), 1);
+    EXPECT_EQ(static_cast<int>(axi::Burst::WRAP), 2);
 }
 
 TEST(AxiScaffold, RespEnumValues) {
-  SCENARIO("axi scaffold: Resp enum encodes OKAY=0, EXOKAY=1, SLVERR=2, DECERR=3");
-  EXPECT_EQ(static_cast<int>(axi::Resp::OKAY),   0);
-  EXPECT_EQ(static_cast<int>(axi::Resp::EXOKAY), 1);
-  EXPECT_EQ(static_cast<int>(axi::Resp::SLVERR), 2);
-  EXPECT_EQ(static_cast<int>(axi::Resp::DECERR), 3);
+    SCENARIO("axi scaffold: Resp enum encodes OKAY=0, EXOKAY=1, SLVERR=2, DECERR=3");
+    EXPECT_EQ(static_cast<int>(axi::Resp::OKAY), 0);
+    EXPECT_EQ(static_cast<int>(axi::Resp::EXOKAY), 1);
+    EXPECT_EQ(static_cast<int>(axi::Resp::SLVERR), 2);
+    EXPECT_EQ(static_cast<int>(axi::Resp::DECERR), 3);
 }
 
 TEST(AxiScaffold, BeatStructsAreConstructible) {
-  SCENARIO("axi scaffold: AW/W/AR/B/R beat POD structs default-construct without error");
-  axi::AwBeat aw{};
-  axi::WBeat  w{};
-  axi::ArBeat ar{};
-  axi::BBeat  b{};
-  axi::RBeat  r{};
-  (void)aw; (void)w; (void)ar; (void)b; (void)r;
-  SUCCEED();
+    SCENARIO("axi scaffold: AW/W/AR/B/R beat POD structs default-construct without error");
+    axi::AwBeat aw{};
+    axi::WBeat w{};
+    axi::ArBeat ar{};
+    axi::BBeat b{};
+    axi::RBeat r{};
+    (void)aw;
+    (void)w;
+    (void)ar;
+    (void)b;
+    (void)r;
+    SUCCEED();
 }
 
 TEST(AxiScaffold, WBeatDataArrayMatchesDataBytes) {
-  SCENARIO("axi scaffold: WBeat.data std::array size equals DATA_BYTES");
-  axi::WBeat w{};
-  EXPECT_EQ(w.data.size(), static_cast<std::size_t>(axi::DATA_BYTES));
+    SCENARIO("axi scaffold: WBeat.data std::array size equals DATA_BYTES");
+    axi::WBeat w{};
+    EXPECT_EQ(w.data.size(), static_cast<std::size_t>(axi::DATA_BYTES));
 }
 
 TEST(AxiScaffold, MemoryPortStructsAreConstructible) {
-  SCENARIO("axi scaffold: MemWriteReq/Resp and MemReadReq/Resp default-construct without error");
-  axi::MemWriteReq  wr{};
-  axi::MemWriteResp wresp{};
-  axi::MemReadReq   rr{};
-  axi::MemReadResp  rresp{};
-  (void)wr; (void)wresp; (void)rr; (void)rresp;
-  SUCCEED();
+    SCENARIO("axi scaffold: MemWriteReq/Resp and MemReadReq/Resp default-construct without error");
+    axi::MemWriteReq wr{};
+    axi::MemWriteResp wresp{};
+    axi::MemReadReq rr{};
+    axi::MemReadResp rresp{};
+    (void)wr;
+    (void)wresp;
+    (void)rr;
+    (void)rresp;
+    SUCCEED();
 }

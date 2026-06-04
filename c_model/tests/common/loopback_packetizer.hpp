@@ -31,45 +31,50 @@
 namespace ni::cmodel::testing {
 
 struct LoopbackChannelSet {
-  std::size_t aw_capacity = 32;
-  std::size_t w_capacity  = 32;
-  std::size_t ar_capacity = 32;
-  std::size_t b_capacity  = 32;
-  std::size_t r_capacity  = 32;
-  std::deque<axi::AwBeat> aw;
-  std::deque<axi::WBeat>  w;
-  std::deque<axi::ArBeat> ar;
-  std::deque<axi::BBeat>  b;
-  std::deque<axi::RBeat>  r;
+    std::size_t aw_capacity = 32;
+    std::size_t w_capacity = 32;
+    std::size_t ar_capacity = 32;
+    std::size_t b_capacity = 32;
+    std::size_t r_capacity = 32;
+    std::deque<axi::AwBeat> aw;
+    std::deque<axi::WBeat> w;
+    std::deque<axi::ArBeat> ar;
+    std::deque<axi::BBeat> b;
+    std::deque<axi::RBeat> r;
 };
 
 class LoopbackPacketizer : public Packetizer {
- public:
-  explicit LoopbackPacketizer(LoopbackChannelSet& ch) : ch_(ch) {}
+  public:
+    explicit LoopbackPacketizer(LoopbackChannelSet& ch) : ch_(ch) {}
 
-  bool push_aw(const axi::AwBeat& b) override {
-    if (ch_.aw.size() >= ch_.aw_capacity) return false;
-    ch_.aw.push_back(b); return true;
-  }
-  bool push_w(const axi::WBeat& b) override {
-    if (ch_.w.size() >= ch_.w_capacity) return false;
-    ch_.w.push_back(b); return true;
-  }
-  bool push_ar(const axi::ArBeat& b) override {
-    if (ch_.ar.size() >= ch_.ar_capacity) return false;
-    ch_.ar.push_back(b); return true;
-  }
-  bool push_b(const axi::BBeat& b) override {
-    if (ch_.b.size() >= ch_.b_capacity) return false;
-    ch_.b.push_back(b); return true;
-  }
-  bool push_r(const axi::RBeat& b) override {
-    if (ch_.r.size() >= ch_.r_capacity) return false;
-    ch_.r.push_back(b); return true;
-  }
+    bool push_aw(const axi::AwBeat& b) override {
+        if (ch_.aw.size() >= ch_.aw_capacity) return false;
+        ch_.aw.push_back(b);
+        return true;
+    }
+    bool push_w(const axi::WBeat& b) override {
+        if (ch_.w.size() >= ch_.w_capacity) return false;
+        ch_.w.push_back(b);
+        return true;
+    }
+    bool push_ar(const axi::ArBeat& b) override {
+        if (ch_.ar.size() >= ch_.ar_capacity) return false;
+        ch_.ar.push_back(b);
+        return true;
+    }
+    bool push_b(const axi::BBeat& b) override {
+        if (ch_.b.size() >= ch_.b_capacity) return false;
+        ch_.b.push_back(b);
+        return true;
+    }
+    bool push_r(const axi::RBeat& b) override {
+        if (ch_.r.size() >= ch_.r_capacity) return false;
+        ch_.r.push_back(b);
+        return true;
+    }
 
- private:
-  LoopbackChannelSet& ch_;
+  private:
+    LoopbackChannelSet& ch_;
 };
 
 }  // namespace ni::cmodel::testing

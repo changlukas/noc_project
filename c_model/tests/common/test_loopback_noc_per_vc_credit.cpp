@@ -13,17 +13,18 @@ Flit make_flit_on_vc(uint8_t vc_id, uint8_t dst_id, uint8_t axi_ch) {
     Flit f;
     f.set_header_field("axi_ch", axi_ch);
     f.set_header_field("dst_id", dst_id);
-    f.set_header_field("vc_id",  vc_id);
-    f.set_header_field("last",   1);
+    f.set_header_field("vc_id", vc_id);
+    f.set_header_field("last", 1);
     return f;
 }
 
 }  // namespace
 
 TEST(LoopbackNocPerVcCredit, ConfiguredDepth16ExhaustsAfter16Pushes) {
-    SCENARIO("LoopbackNoc: set_per_vc_depth(16) -> 16 successive pushes on VC=0 "
-             "exhaust credit; 17th push_flit and credit_avail both return false");
-    LoopbackNoc noc(/*req*/32, /*rsp*/32);
+    SCENARIO(
+        "LoopbackNoc: set_per_vc_depth(16) -> 16 successive pushes on VC=0 "
+        "exhaust credit; 17th push_flit and credit_avail both return false");
+    LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(16);
     for (int i = 0; i < 16; ++i) {
         EXPECT_TRUE(noc.req_out().credit_avail(0));
@@ -34,9 +35,10 @@ TEST(LoopbackNocPerVcCredit, ConfiguredDepth16ExhaustsAfter16Pushes) {
 }
 
 TEST(LoopbackNocPerVcCredit, PerVcDepthEnforcedIndependently) {
-    SCENARIO("LoopbackNoc: per_vc_depth=2 -> 2 pushes on VC=0 exhaust credit; "
-             "VC=1 still has full credit (per-VC counters independent)");
-    LoopbackNoc noc(/*req*/32, /*rsp*/32);
+    SCENARIO(
+        "LoopbackNoc: per_vc_depth=2 -> 2 pushes on VC=0 exhaust credit; "
+        "VC=1 still has full credit (per-VC counters independent)");
+    LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
@@ -45,9 +47,10 @@ TEST(LoopbackNocPerVcCredit, PerVcDepthEnforcedIndependently) {
 }
 
 TEST(LoopbackNocPerVcCredit, PopReleasesCredit) {
-    SCENARIO("LoopbackNoc: pop_flit on NSU side decrements NMU per-VC counter, "
-             "restoring credit_avail for the popped flit's VC");
-    LoopbackNoc noc(/*req*/32, /*rsp*/32);
+    SCENARIO(
+        "LoopbackNoc: pop_flit on NSU side decrements NMU per-VC counter, "
+        "restoring credit_avail for the popped flit's VC");
+    LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
@@ -59,9 +62,10 @@ TEST(LoopbackNocPerVcCredit, PopReleasesCredit) {
 }
 
 TEST(LoopbackNocPerVcCredit, RspSidePerVcCreditMirrorsReq) {
-    SCENARIO("LoopbackNoc: NSU rsp side has symmetric per-VC credit; "
-             "credit_avail on NSU rsp_out queries response-direction counter");
-    LoopbackNoc noc(/*req*/32, /*rsp*/32);
+    SCENARIO(
+        "LoopbackNoc: NSU rsp side has symmetric per-VC credit; "
+        "credit_avail on NSU rsp_out queries response-direction counter");
+    LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
     ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
@@ -72,12 +76,13 @@ TEST(LoopbackNocPerVcCredit, RspSidePerVcCreditMirrorsReq) {
 }
 
 TEST(LoopbackNocPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
-    SCENARIO("LoopbackNoc: credit_avail must return false when per-NSU queue is "
-             "full even if per-VC counter still has room (contract: credit_avail=true "
-             "must imply push_flit will succeed; otherwise VcArbiter tick aborts on "
-             "the 'lying downstream' guard)");
+    SCENARIO(
+        "LoopbackNoc: credit_avail must return false when per-NSU queue is "
+        "full even if per-VC counter still has room (contract: credit_avail=true "
+        "must imply push_flit will succeed; otherwise VcArbiter tick aborts on "
+        "the 'lying downstream' guard)");
     // 1-NSU, req-queue depth 2, default per_vc_depth (unlimited)
-    LoopbackNoc noc(/*req*/2, /*rsp*/32);
+    LoopbackNoc noc(/*req*/ 2, /*rsp*/ 32);
     // Fill the per-NSU queue to capacity on VC=0.
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
@@ -88,9 +93,10 @@ TEST(LoopbackNocPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
 }
 
 TEST(LoopbackNocPerVcCredit, RspSideCreditAvailMatchesPushFlitForRspQueueFull) {
-    SCENARIO("LoopbackNoc rsp side: credit_avail returns false when rsp_q is full "
-             "even if per-VC counter has room (same contract as req side)");
-    LoopbackNoc noc(/*req*/32, /*rsp*/2);
+    SCENARIO(
+        "LoopbackNoc rsp side: credit_avail returns false when rsp_q is full "
+        "even if per-VC counter has room (same contract as req side)");
+    LoopbackNoc noc(/*req*/ 32, /*rsp*/ 2);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
     ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
     EXPECT_FALSE(noc.rsp_out().credit_avail(0));

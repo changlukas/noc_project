@@ -33,29 +33,25 @@ enum class VcMode {
 };
 
 class VcArbiter : public noc::NocRspOut {
-public:
-    static constexpr std::size_t NUM_VC_MAX         = 1u << ni::header::VC_ID_WIDTH;  // 8
-    static constexpr std::size_t AXI_CH_COUNT       = 5;  // AW, W, AR, B, R (AW/W/AR unused on NSU)
+  public:
+    static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
+    static constexpr std::size_t AXI_CH_COUNT = 5;  // AW, W, AR, B, R (AW/W/AR unused on NSU)
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
-    static VcArbiter read_write_split(noc::NocRspOut& downstream,
-                                      std::size_t num_vc,
-                                      uint8_t write_rsp_vc,
-                                      uint8_t read_rsp_vc,
+    static VcArbiter read_write_split(noc::NocRspOut& downstream, std::size_t num_vc,
+                                      uint8_t write_rsp_vc, uint8_t read_rsp_vc,
                                       std::size_t pending_depth = kDefaultPendingDepth) {
         std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
-        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit,
-                         write_rsp_vc, read_rsp_vc,
+        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit, write_rsp_vc, read_rsp_vc,
                          std::move(empty_candidates), pending_depth);
     }
 
-    static VcArbiter multi_candidate(noc::NocRspOut& downstream,
-                                     std::size_t num_vc,
+    static VcArbiter multi_candidate(noc::NocRspOut& downstream, std::size_t num_vc,
                                      std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
                                      std::size_t pending_depth = kDefaultPendingDepth) {
         return VcArbiter(downstream, num_vc, VcMode::MultiCandidate,
-                         /*write_rsp_vc*/0, /*read_rsp_vc*/0,
-                         std::move(candidate_vcs), pending_depth);
+                         /*write_rsp_vc*/ 0, /*read_rsp_vc*/ 0, std::move(candidate_vcs),
+                         pending_depth);
     }
 
     // NocRspOut decorator interface
@@ -66,15 +62,11 @@ public:
 
     // Test introspection
     std::size_t pending_size(uint8_t vc_id) const noexcept { return pending_[vc_id].size(); }
-    uint8_t     round_robin_ptr() const noexcept { return round_robin_ptr_; }
+    uint8_t round_robin_ptr() const noexcept { return round_robin_ptr_; }
 
-private:
-    VcArbiter(noc::NocRspOut& downstream,
-              std::size_t num_vc,
-              VcMode mode,
-              uint8_t write_rsp_vc,
-              uint8_t read_rsp_vc,
-              std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
+  private:
+    VcArbiter(noc::NocRspOut& downstream, std::size_t num_vc, VcMode mode, uint8_t write_rsp_vc,
+              uint8_t read_rsp_vc, std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
               std::size_t pending_depth)
         : downstream_(downstream),
           num_vc_(num_vc),
@@ -90,15 +82,15 @@ private:
 
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch);
 
-    noc::NocRspOut&                                  downstream_;
-    std::size_t                                      num_vc_;
-    VcMode                                           mode_;
-    uint8_t                                          write_rsp_vc_;
-    uint8_t                                          read_rsp_vc_;
-    std::array<std::vector<uint8_t>, AXI_CH_COUNT>   candidate_vcs_;
-    std::array<std::deque<Flit>, NUM_VC_MAX>         pending_;
-    std::size_t                                      pending_depth_;
-    uint8_t                                          round_robin_ptr_ = 0;
+    noc::NocRspOut& downstream_;
+    std::size_t num_vc_;
+    VcMode mode_;
+    uint8_t write_rsp_vc_;
+    uint8_t read_rsp_vc_;
+    std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs_;
+    std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
+    std::size_t pending_depth_;
+    uint8_t round_robin_ptr_ = 0;
 };
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
@@ -140,9 +132,10 @@ inline void VcArbiter::tick() {
         uint8_t vc = static_cast<uint8_t>((round_robin_ptr_ + k) % num_vc_);
         if (!pending_[vc].empty() && downstream_.credit_avail(vc)) {
             bool ok = downstream_.push_flit(pending_[vc].front());
-            assert(ok && "nsu::VcArbiter::tick: downstream returned credit_avail=true "
-                         "but push_flit refused -- protocol violation, downstream "
-                         "must not lie about credit availability");
+            assert(ok &&
+                   "nsu::VcArbiter::tick: downstream returned credit_avail=true "
+                   "but push_flit refused -- protocol violation, downstream "
+                   "must not lie about credit availability");
             if (!ok) std::abort();  // belt-and-braces for NDEBUG
             pending_[vc].pop_front();
             round_robin_ptr_ = static_cast<uint8_t>((vc + 1) % num_vc_);

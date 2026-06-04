@@ -28,12 +28,12 @@ namespace {
 // YAML body. Backing files (data, scenario, read dump) live under TempDir so
 // the harness cleans up.
 struct TestRig {
-    axi::Memory                       memory{0, 0x10000, 0, 0};
-    axi::AxiSlave                     slave{memory};
-    std::string                       yaml_path;
-    std::string                       data_path;
-    std::string                       dump_path;
-    std::unique_ptr<axi::AxiMaster>   master;
+    axi::Memory memory{0, 0x10000, 0, 0};
+    axi::AxiSlave slave{memory};
+    std::string yaml_path;
+    std::string data_path;
+    std::string dump_path;
+    std::unique_ptr<axi::AxiMaster> master;
 
     TestRig(std::size_t max_out_w = 2, std::size_t max_out_r = 2) {
         const std::string tmp = ::testing::TempDir();
@@ -70,8 +70,8 @@ struct TestRig {
                << "    strb_file: \"\"\n";
         }
 
-        master = std::make_unique<axi::AxiMaster>(
-            yaml_path, slave, dump_path, max_out_w, max_out_r);
+        master =
+            std::make_unique<axi::AxiMaster>(yaml_path, slave, dump_path, max_out_w, max_out_r);
     }
 
     void run_to_completion(int max_cycles = 200) {
@@ -92,23 +92,24 @@ TEST(AxiMasterObserver, OrderedBPass) {
     rig.run_to_completion();
     EXPECT_TRUE(obs.ok());
     EXPECT_EQ(obs.aw_count(), 2u);
-    EXPECT_EQ(obs.b_count(),  2u);
+    EXPECT_EQ(obs.b_count(), 2u);
     EXPECT_EQ(obs.mismatches(), 0u);
 }
 
 TEST(AxiMasterObserver, OutOfOrderBFail) {
-    SCENARIO("Observer: same-id B arrives out of submission order -> ok()=false, FAIL context emitted");
+    SCENARIO(
+        "Observer: same-id B arrives out of submission order -> ok()=false, FAIL context emitted");
     AxiMasterObserver obs("Test");
     // First B: scenario_line=7 (later submission).
-    obs.test_inject_write_result(axi::WriteResult{
-        /*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
-        axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
-        /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/7});
+    obs.test_inject_write_result(
+        axi::WriteResult{/*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+                         axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
+                         /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/7});
     // Second B: scenario_line=5 (older submission) -> violation.
-    obs.test_inject_write_result(axi::WriteResult{
-        /*addr=*/0x200, /*size=*/5, /*len=*/0, axi::Burst::INCR,
-        axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
-        /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/5});
+    obs.test_inject_write_result(
+        axi::WriteResult{/*addr=*/0x200, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+                         axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
+                         /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/5});
     EXPECT_FALSE(obs.ok());
     EXPECT_EQ(obs.failures().size(), 1u);
 }
@@ -116,21 +117,21 @@ TEST(AxiMasterObserver, OutOfOrderBFail) {
 TEST(AxiMasterObserver, NonOkayResp) {
     SCENARIO("Observer: B with SLVERR -> mismatches++, no FAIL by default");
     AxiMasterObserver obs("Test");
-    obs.test_inject_write_result(axi::WriteResult{
-        /*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
-        axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
-        /*resp=*/axi::Resp::SLVERR, /*id=*/0x05, /*scenario_line=*/5});
-    EXPECT_TRUE(obs.ok());           // mismatches alone don't fail
+    obs.test_inject_write_result(
+        axi::WriteResult{/*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+                         axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
+                         /*resp=*/axi::Resp::SLVERR, /*id=*/0x05, /*scenario_line=*/5});
+    EXPECT_TRUE(obs.ok());  // mismatches alone don't fail
     EXPECT_EQ(obs.mismatches(), 1u);
 }
 
 TEST(AxiMasterObserver, StuckCountMismatch) {
     SCENARIO("Observer: aw_count > b_count at end of test -> stuck-write FAIL surfaced");
     AxiMasterObserver obs("Test");
-    obs.test_inject_write_result(axi::WriteResult{
-        /*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
-        axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
-        /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/5});
+    obs.test_inject_write_result(
+        axi::WriteResult{/*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+                         axi::LockType::Normal, /*data=*/{}, /*strb_per_beat=*/{},
+                         /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/5});
     // Synthetic: 2 AWs issued, only 1 B observed.
     obs.test_set_aw_count(2);
     obs.print_summary();
@@ -142,15 +143,14 @@ TEST(AxiMasterObserver, StuckCountMismatch) {
 TEST(AxiMasterObserver, OutOfOrderRFail) {
     SCENARIO("Observer: same-id R arrives out of submission order -> ok()=false, R-order FAIL");
     AxiMasterObserver obs("Test");
-    obs.test_inject_read_result(axi::ReadResult{
-        /*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
-        /*data=*/{}, /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/7});
-    obs.test_inject_read_result(axi::ReadResult{
-        /*addr=*/0x200, /*size=*/5, /*len=*/0, axi::Burst::INCR,
-        /*data=*/{}, /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/5});
+    obs.test_inject_read_result(
+        axi::ReadResult{/*addr=*/0x100, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+                        /*data=*/{}, /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/7});
+    obs.test_inject_read_result(
+        axi::ReadResult{/*addr=*/0x200, /*size=*/5, /*len=*/0, axi::Burst::INCR,
+                        /*data=*/{}, /*resp=*/axi::Resp::OKAY, /*id=*/0x05, /*scenario_line=*/5});
     EXPECT_FALSE(obs.ok());
     ASSERT_EQ(obs.failures().size(), 1u);
     // Distinguishes from B-order: failure context says "R" not "B".
-    EXPECT_NE(obs.failures()[0].find("expected R in submission order"),
-              std::string::npos);
+    EXPECT_NE(obs.failures()[0].find("expected R in submission order"), std::string::npos);
 }

@@ -36,7 +36,7 @@
 namespace ni::cmodel::testing {
 
 class LoopbackNoc {
-public:
+  public:
     // Backward-compat single-NSU ctor. Defaults all dst_id to NSU_0.
     LoopbackNoc(std::size_t req_depth, std::size_t rsp_depth)
         : LoopbackNoc(/*num_nsu=*/1, req_depth, rsp_depth) {
@@ -47,9 +47,7 @@ public:
     }
 
     // Multi-NSU ctor. Caller must call set_dst_route() for each dst_id used.
-    LoopbackNoc(std::size_t num_nsu,
-                std::size_t req_q_depth_per_nsu,
-                std::size_t rsp_q_depth_total)
+    LoopbackNoc(std::size_t num_nsu, std::size_t req_q_depth_per_nsu, std::size_t rsp_q_depth_total)
         : num_nsu_(num_nsu),
           req_q_depth_per_nsu_(req_q_depth_per_nsu),
           rsp_q_depth_total_(rsp_q_depth_total),
@@ -69,10 +67,10 @@ public:
 
     // NMU-side (single)
     noc::NocReqOut& nmu_req_out() noexcept { return nmu_req_out_adapter_; }
-    noc::NocRspIn&  nmu_rsp_in()  noexcept { return nmu_rsp_in_adapter_;  }
+    noc::NocRspIn& nmu_rsp_in() noexcept { return nmu_rsp_in_adapter_; }
 
     // NSU-side (per-NSU). 0-indexed; bounds-asserted.
-    noc::NocReqIn&  nsu_req_in(std::size_t nsu_idx) noexcept {
+    noc::NocReqIn& nsu_req_in(std::size_t nsu_idx) noexcept {
         assert(nsu_idx < num_nsu_);
         return nsu_req_in_adapters_[nsu_idx];
     }
@@ -83,9 +81,9 @@ public:
 
     // Legacy aliases -- single-NSU compatibility (point at NSU_0)
     noc::NocReqOut& req_out() noexcept { return nmu_req_out(); }
-    noc::NocReqIn&  req_in()  noexcept { return nsu_req_in(0); }
+    noc::NocReqIn& req_in() noexcept { return nsu_req_in(0); }
     noc::NocRspOut& rsp_out() noexcept { return nsu_rsp_out(0); }
-    noc::NocRspIn&  rsp_in()  noexcept { return nmu_rsp_in(); }
+    noc::NocRspIn& rsp_in() noexcept { return nmu_rsp_in(); }
 
     // Routing: dst_id -> nsu_idx
     void set_dst_route(uint8_t dst_id, std::size_t nsu_idx) noexcept {
@@ -96,17 +94,13 @@ public:
     // Per-NSU response latency (static)
     void set_nsu_latency(std::size_t nsu_idx, std::size_t cycles) noexcept {
         assert(nsu_idx < num_nsu_);
-        nsu_latency_[nsu_idx] = NsuLatencyConfig{
-            /*is_random=*/false, cycles, 0, 0};
+        nsu_latency_[nsu_idx] = NsuLatencyConfig{/*is_random=*/false, cycles, 0, 0};
     }
     // Per-NSU response latency (random uniform in [min, max] inclusive)
-    void set_nsu_latency_range(std::size_t nsu_idx,
-                               std::size_t min,
-                               std::size_t max) noexcept {
+    void set_nsu_latency_range(std::size_t nsu_idx, std::size_t min, std::size_t max) noexcept {
         assert(nsu_idx < num_nsu_);
         assert(min <= max);
-        nsu_latency_[nsu_idx] = NsuLatencyConfig{
-            /*is_random=*/true, 0, min, max};
+        nsu_latency_[nsu_idx] = NsuLatencyConfig{/*is_random=*/true, 0, min, max};
     }
     void set_random_seed(uint64_t seed) noexcept { rng_.seed(seed); }
 
@@ -144,22 +138,21 @@ public:
             for (auto& e : nsu_rsp_delay_q_[i]) {
                 if (e.cycles_remaining > 0) --e.cycles_remaining;
             }
-            while (!nsu_rsp_delay_q_[i].empty()
-                   && nsu_rsp_delay_q_[i].front().cycles_remaining == 0
-                   && rsp_q_.size() < rsp_q_depth_total_) {
+            while (!nsu_rsp_delay_q_[i].empty() &&
+                   nsu_rsp_delay_q_[i].front().cycles_remaining == 0 &&
+                   rsp_q_.size() < rsp_q_depth_total_) {
                 rsp_q_.push_back(nsu_rsp_delay_q_[i].front().flit);
                 nsu_rsp_delay_q_[i].pop_front();
                 --total_delayed_rsp_count_;
             }
         }
         // Legacy req/rsp pipe aging
-        auto age = [](std::deque<std::pair<Flit, unsigned>>& pipe,
-                      std::deque<Flit>& visible, std::size_t cap) {
+        auto age = [](std::deque<std::pair<Flit, unsigned>>& pipe, std::deque<Flit>& visible,
+                      std::size_t cap) {
             for (auto& e : pipe) {
                 if (e.second > 0) --e.second;
             }
-            while (!pipe.empty() && pipe.front().second == 0
-                   && visible.size() < cap) {
+            while (!pipe.empty() && pipe.front().second == 0 && visible.size() < cap) {
                 visible.push_back(pipe.front().first);
                 pipe.pop_front();
             }
@@ -169,45 +162,43 @@ public:
     }
 
     // Test introspection
-    std::size_t nsu_req_q_size(std::size_t i) const noexcept {
-        return nsu_req_q_[i].size();
-    }
+    std::size_t nsu_req_q_size(std::size_t i) const noexcept { return nsu_req_q_[i].size(); }
     std::size_t rsp_q_size() const noexcept { return rsp_q_.size(); }
 
     // Legacy single-NSU introspection (preserved for backward compat).
     // req_q_size() returns the visible NSU_0 request-queue size, plus any
     // in-flight req_q_ from the legacy global-delay path.
-    std::size_t req_q_size() const noexcept {
-        return nsu_req_q_[0].size() + req_q_.size();
-    }
+    std::size_t req_q_size() const noexcept { return nsu_req_q_[0].size() + req_q_.size(); }
     std::size_t req_pipe_size() const noexcept { return req_pipe_.size(); }
     std::size_t rsp_pipe_size() const noexcept { return rsp_pipe_.size(); }
 
-private:
-    static constexpr std::size_t DST_ID_SPACE   = 1u << ni::header::DST_ID_WIDTH;
-    static constexpr std::size_t NUM_VC_MAX        = 1u << ni::header::VC_ID_WIDTH;  // 8
+  private:
+    static constexpr std::size_t DST_ID_SPACE = 1u << ni::header::DST_ID_WIDTH;
+    static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
     // Default per-VC depth is effectively unlimited so that existing fixtures
     // that push more than any small sentinel to one VC are unaffected.
     // Tests that want to exercise credit exhaustion call set_per_vc_depth().
-    static constexpr std::size_t kDefaultPerVcDepth =
-        std::numeric_limits<std::size_t>::max();
+    static constexpr std::size_t kDefaultPerVcDepth = std::numeric_limits<std::size_t>::max();
 
     struct NsuLatencyConfig {
-        bool        is_random = false;
-        std::size_t value     = 0;
-        std::size_t min       = 0;
-        std::size_t max       = 0;
+        bool is_random = false;
+        std::size_t value = 0;
+        std::size_t min = 0;
+        std::size_t max = 0;
     };
 
-    struct DelayedFlit { Flit flit; std::size_t cycles_remaining; };
+    struct DelayedFlit {
+        Flit flit;
+        std::size_t cycles_remaining;
+    };
 
     struct NmuReqOutAdapter : noc::NocReqOut {
         LoopbackNoc* p;
         explicit NmuReqOutAdapter(LoopbackNoc* parent) : p(parent) {}
         bool push_flit(const Flit& f) override {
-            uint8_t vc  = static_cast<uint8_t>(f.get_header_field("vc_id"));
+            uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
             uint8_t dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
-            int8_t  nsu = p->dst_to_nsu_[dst];
+            int8_t nsu = p->dst_to_nsu_[dst];
             if (!(nsu >= 0)) {
                 assert(false && "LoopbackNoc: unmapped dst_id");
                 std::abort();  // belt-and-braces for NDEBUG
@@ -216,8 +207,7 @@ private:
             // Legacy global req delay path (single-NSU mode only; req_delay_
             // is gated by set_req_delay's num_nsu_==1 assert).
             if (p->req_delay_ > 0) {
-                if (p->req_pipe_.size() + p->req_q_.size()
-                        >= p->req_q_depth_per_nsu_) {
+                if (p->req_pipe_.size() + p->req_q_.size() >= p->req_q_depth_per_nsu_) {
                     return false;
                 }
                 p->req_pipe_.emplace_back(f, p->req_delay_);
@@ -249,9 +239,8 @@ private:
     };
     struct NsuReqInAdapter : noc::NocReqIn {
         LoopbackNoc* p;
-        std::size_t  i;
-        NsuReqInAdapter(LoopbackNoc* parent, std::size_t idx)
-            : p(parent), i(idx) {}
+        std::size_t i;
+        NsuReqInAdapter(LoopbackNoc* parent, std::size_t idx) : p(parent), i(idx) {}
         std::optional<Flit> pop_flit() override {
             // Legacy global req delay path drains via req_q_ (single-NSU
             // only -- NSU_0 is the sole NSU when req_delay_ is non-zero).
@@ -274,9 +263,8 @@ private:
     };
     struct NsuRspOutAdapter : noc::NocRspOut {
         LoopbackNoc* p;
-        std::size_t  i;
-        NsuRspOutAdapter(LoopbackNoc* parent, std::size_t idx)
-            : p(parent), i(idx) {}
+        std::size_t i;
+        NsuRspOutAdapter(LoopbackNoc* parent, std::size_t idx) : p(parent), i(idx) {}
         bool push_flit(const Flit& f) override {
             uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
             if (p->nsu_rsp_per_vc_in_flight_[vc] >= p->per_vc_depth_) return false;
@@ -292,8 +280,7 @@ private:
                 // Fast path: bypass per-NSU delay queue.
                 if (p->rsp_delay_ > 0) {
                     // Legacy global rsp delay (single-NSU mode only).
-                    if (p->rsp_pipe_.size() + p->rsp_q_.size()
-                            >= p->rsp_q_depth_total_) {
+                    if (p->rsp_pipe_.size() + p->rsp_q_.size() >= p->rsp_q_depth_total_) {
                         return false;
                     }
                     p->rsp_pipe_.emplace_back(f, p->rsp_delay_);
@@ -307,8 +294,8 @@ private:
             // Per-NSU delay path. Aggregate capacity:
             //   total_delayed_rsp_count_ + rsp_pipe_.size() + rsp_q_.size()
             //       <= rsp_q_depth_total_
-            if (p->total_delayed_rsp_count_ + p->rsp_pipe_.size()
-                    + p->rsp_q_.size() >= p->rsp_q_depth_total_) {
+            if (p->total_delayed_rsp_count_ + p->rsp_pipe_.size() + p->rsp_q_.size() >=
+                p->rsp_q_depth_total_) {
                 return false;
             }
             p->nsu_rsp_delay_q_[i].push_back({f, latency});
@@ -320,8 +307,8 @@ private:
             if (p->nsu_rsp_per_vc_in_flight_[vc_id] >= p->per_vc_depth_) return false;
             // Per-NSU rsp delay path: must have aggregate response-side capacity
             // (matching push_flit's check at the per-NSU delay path).
-            return (p->total_delayed_rsp_count_ + p->rsp_pipe_.size()
-                    + p->rsp_q_.size()) < p->rsp_q_depth_total_;
+            return (p->total_delayed_rsp_count_ + p->rsp_pipe_.size() + p->rsp_q_.size()) <
+                   p->rsp_q_depth_total_;
         }
     };
     struct NmuRspInAdapter : noc::NocRspIn {
@@ -338,26 +325,26 @@ private:
         }
     };
 
-    std::size_t      num_nsu_;
-    std::size_t      req_q_depth_per_nsu_;
-    std::size_t      rsp_q_depth_total_;
-    std::size_t      per_vc_depth_ = kDefaultPerVcDepth;
+    std::size_t num_nsu_;
+    std::size_t req_q_depth_per_nsu_;
+    std::size_t rsp_q_depth_total_;
+    std::size_t per_vc_depth_ = kDefaultPerVcDepth;
     std::array<std::size_t, NUM_VC_MAX> nmu_req_per_vc_in_flight_{};
     std::array<std::size_t, NUM_VC_MAX> nsu_rsp_per_vc_in_flight_{};
-    std::array<int8_t, DST_ID_SPACE>        dst_to_nsu_{};
-    std::vector<std::deque<Flit>>           nsu_req_q_;
-    std::deque<Flit>                        rsp_q_;
-    std::vector<std::deque<DelayedFlit>>    nsu_rsp_delay_q_;
-    std::size_t                             total_delayed_rsp_count_ = 0;
-    std::vector<NsuLatencyConfig>           nsu_latency_;
-    unsigned                                req_delay_ = 0, rsp_delay_ = 0;
-    std::deque<std::pair<Flit, unsigned>>   req_pipe_, rsp_pipe_;
-    std::deque<Flit>                        req_q_;   // legacy global req delay output
-    std::mt19937_64                         rng_;
-    NmuReqOutAdapter                        nmu_req_out_adapter_;
-    NmuRspInAdapter                         nmu_rsp_in_adapter_;
-    std::vector<NsuReqInAdapter>            nsu_req_in_adapters_;
-    std::vector<NsuRspOutAdapter>           nsu_rsp_out_adapters_;
+    std::array<int8_t, DST_ID_SPACE> dst_to_nsu_{};
+    std::vector<std::deque<Flit>> nsu_req_q_;
+    std::deque<Flit> rsp_q_;
+    std::vector<std::deque<DelayedFlit>> nsu_rsp_delay_q_;
+    std::size_t total_delayed_rsp_count_ = 0;
+    std::vector<NsuLatencyConfig> nsu_latency_;
+    unsigned req_delay_ = 0, rsp_delay_ = 0;
+    std::deque<std::pair<Flit, unsigned>> req_pipe_, rsp_pipe_;
+    std::deque<Flit> req_q_;  // legacy global req delay output
+    std::mt19937_64 rng_;
+    NmuReqOutAdapter nmu_req_out_adapter_;
+    NmuRspInAdapter nmu_rsp_in_adapter_;
+    std::vector<NsuReqInAdapter> nsu_req_in_adapters_;
+    std::vector<NsuRspOutAdapter> nsu_rsp_out_adapters_;
 };
 
 }  // namespace ni::cmodel::testing

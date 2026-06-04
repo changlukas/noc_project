@@ -16,15 +16,15 @@
 namespace ni::cmodel::noc {
 
 class NocRspOut {
- public:
-  virtual ~NocRspOut() = default;
+  public:
+    virtual ~NocRspOut() = default;
 
-  // Push one response flit downstream. Returns false on backpressure.
-  virtual bool push_flit(const Flit& flit) = 0;
+    // Push one response flit downstream. Returns false on backpressure.
+    virtual bool push_flit(const Flit& flit) = 0;
 
-  // Per-VC credit availability query — see noc_req_out.hpp for
-  // semantics. Default impl returns true so legacy mocks compile.
-  virtual bool credit_avail(uint8_t /*vc_id*/) const { return true; }
+    // Per-VC credit availability query — see noc_req_out.hpp for
+    // semantics. Default impl returns true so legacy mocks compile.
+    virtual bool credit_avail(uint8_t /*vc_id*/) const { return true; }
 };
 
 }  // namespace ni::cmodel::noc

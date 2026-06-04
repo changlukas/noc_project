@@ -40,36 +40,34 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 // deterministic routing (XYRouting satisfies). ROB Disabled does NOT add that
 // ordering -- implicit invariant.
 class Rob : public Packetizer, public Depacketizer {
-public:
-    Rob(Packetize& next_pkt,
-        Depacketizer& next_depkt,
-        RobMode mode_w,
-        RobMode mode_r)
-        : next_pkt_(next_pkt), next_depkt_(next_depkt),
-          mode_w_(mode_w), mode_r_(mode_r) {
+  public:
+    Rob(Packetize& next_pkt, Depacketizer& next_depkt, RobMode mode_w, RobMode mode_r)
+        : next_pkt_(next_pkt), next_depkt_(next_depkt), mode_w_(mode_w), mode_r_(mode_r) {
         free_write_entries_.set();
         free_read_entries_.set();
     }
 
     // ===== Packetizer interface (request side; B/R assert+abort) =====
     bool push_aw(const axi::AwBeat& b) override;
-    bool push_w (const axi::WBeat&  b) override;
+    bool push_w(const axi::WBeat& b) override;
     bool push_ar(const axi::ArBeat& b) override;
     bool push_b(const axi::BBeat&) override {
-        assert(false && "nmu::Rob::push_b: Rob multi-inheritance Packetizer side rejects "
-                        "response beats (B is response, not request). Likely cause: "
-                        "AxiSlavePort dispatched a response into the Packetizer base of Rob "
-                        "instead of the Depacketizer base — wiring or vtable-routing bug "
-                        "in the slave-port adapter.");
+        assert(false &&
+               "nmu::Rob::push_b: Rob multi-inheritance Packetizer side rejects "
+               "response beats (B is response, not request). Likely cause: "
+               "AxiSlavePort dispatched a response into the Packetizer base of Rob "
+               "instead of the Depacketizer base — wiring or vtable-routing bug "
+               "in the slave-port adapter.");
         std::abort();
         return false;
     }
     bool push_r(const axi::RBeat&) override {
-        assert(false && "nmu::Rob::push_r: Rob multi-inheritance Packetizer side rejects "
-                        "response beats (R is response, not request). Likely cause: "
-                        "AxiSlavePort dispatched a response into the Packetizer base of Rob "
-                        "instead of the Depacketizer base — wiring or vtable-routing bug "
-                        "in the slave-port adapter.");
+        assert(false &&
+               "nmu::Rob::push_r: Rob multi-inheritance Packetizer side rejects "
+               "response beats (R is response, not request). Likely cause: "
+               "AxiSlavePort dispatched a response into the Packetizer base of Rob "
+               "instead of the Depacketizer base — wiring or vtable-routing bug "
+               "in the slave-port adapter.");
         std::abort();
         return false;
     }
@@ -78,29 +76,32 @@ public:
     std::optional<axi::BBeat> pop_b() override;
     std::optional<axi::RBeat> pop_r() override;
     std::optional<axi::AwBeat> pop_aw() override {
-        assert(false && "nmu::Rob::pop_aw: Rob multi-inheritance Depacketizer side rejects "
-                        "request-channel pops (AW is request, not response). Likely cause: "
-                        "AxiSlavePort routed a request-side pop into the Depacketizer base of "
-                        "Rob instead of the Packetizer base — wiring or vtable-routing bug "
-                        "in the slave-port adapter.");
+        assert(false &&
+               "nmu::Rob::pop_aw: Rob multi-inheritance Depacketizer side rejects "
+               "request-channel pops (AW is request, not response). Likely cause: "
+               "AxiSlavePort routed a request-side pop into the Depacketizer base of "
+               "Rob instead of the Packetizer base — wiring or vtable-routing bug "
+               "in the slave-port adapter.");
         std::abort();
         return std::nullopt;
     }
-    std::optional<axi::WBeat>  pop_w()  override {
-        assert(false && "nmu::Rob::pop_w: Rob multi-inheritance Depacketizer side rejects "
-                        "request-channel pops (W is request, not response). Likely cause: "
-                        "AxiSlavePort routed a request-side pop into the Depacketizer base of "
-                        "Rob instead of the Packetizer base — wiring or vtable-routing bug "
-                        "in the slave-port adapter.");
+    std::optional<axi::WBeat> pop_w() override {
+        assert(false &&
+               "nmu::Rob::pop_w: Rob multi-inheritance Depacketizer side rejects "
+               "request-channel pops (W is request, not response). Likely cause: "
+               "AxiSlavePort routed a request-side pop into the Depacketizer base of "
+               "Rob instead of the Packetizer base — wiring or vtable-routing bug "
+               "in the slave-port adapter.");
         std::abort();
         return std::nullopt;
     }
     std::optional<axi::ArBeat> pop_ar() override {
-        assert(false && "nmu::Rob::pop_ar: Rob multi-inheritance Depacketizer side rejects "
-                        "request-channel pops (AR is request, not response). Likely cause: "
-                        "AxiSlavePort routed a request-side pop into the Depacketizer base of "
-                        "Rob instead of the Packetizer base — wiring or vtable-routing bug "
-                        "in the slave-port adapter.");
+        assert(false &&
+               "nmu::Rob::pop_ar: Rob multi-inheritance Depacketizer side rejects "
+               "request-channel pops (AR is request, not response). Likely cause: "
+               "AxiSlavePort routed a request-side pop into the Depacketizer base of "
+               "Rob instead of the Packetizer base — wiring or vtable-routing bug "
+               "in the slave-port adapter.");
         std::abort();
         return std::nullopt;
     }
@@ -112,13 +113,11 @@ public:
     // Linear scan for first run of n consecutive 1s in bitset<ROB_CAPACITY>.
     // Returns base index (0..ROB_CAPACITY-1), or -1 if no such run exists.
     // O(ROB_CAPACITY) worst case. Public for direct unit testing (TDD).
-    static int find_consecutive_free(
-        const std::bitset<ROB_CAPACITY>& free,
-        std::size_t n);
+    static int find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n);
 
-private:
-    Packetize&     next_pkt_;
-    Depacketizer&  next_depkt_;
+  private:
+    Packetize& next_pkt_;
+    Depacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
 
     // Per-AXI-ID FIFO of outstanding entries. Disabled mode invariant:
@@ -128,10 +127,14 @@ private:
         uint8_t dst_id;
         // future Enabled mode: uint8_t rob_idx;
     };
-    struct WriteState { std::deque<OutstandingEntry> outstanding; };
-    struct ReadState  { std::deque<OutstandingEntry> outstanding; };
+    struct WriteState {
+        std::deque<OutstandingEntry> outstanding;
+    };
+    struct ReadState {
+        std::deque<OutstandingEntry> outstanding;
+    };
     std::array<WriteState, 256> write_;
-    std::array<ReadState,  256> read_;
+    std::array<ReadState, 256> read_;
 
     // W burst credit gate: prevents W beats from reaching Packetize before
     // their corresponding AW has been ROB-accepted. Single counter (not per-id)
@@ -141,21 +144,21 @@ private:
     // === Enabled mode (per-beat slot pool) ===
 
     struct WriteEntry {
-        bool       occupied = false;
-        bool       ready    = false;
-        uint8_t    axi_id   = 0;
-        axi::BBeat b_beat   = {};
+        bool occupied = false;
+        bool ready = false;
+        uint8_t axi_id = 0;
+        axi::BBeat b_beat = {};
     };
     struct ReadEntry {
-        bool       occupied = false;
-        bool       ready    = false;
-        uint8_t    axi_id   = 0;
-        axi::RBeat r_beat   = {};
+        bool occupied = false;
+        bool ready = false;
+        uint8_t axi_id = 0;
+        axi::RBeat r_beat = {};
     };
     std::array<WriteEntry, ROB_CAPACITY> write_entries_;
-    std::array<ReadEntry,  ROB_CAPACITY> read_entries_;
-    std::bitset<ROB_CAPACITY>            free_write_entries_;
-    std::bitset<ROB_CAPACITY>            free_read_entries_;
+    std::array<ReadEntry, ROB_CAPACITY> read_entries_;
+    std::bitset<ROB_CAPACITY> free_write_entries_;
+    std::bitset<ROB_CAPACITY> free_read_entries_;
 
     // Per-id ordered range list. AW = {base, 1}; AR = {base, len+1}.
     struct BeatRange {
@@ -171,9 +174,7 @@ private:
 };
 
 // Linear scan for n consecutive free slots. See declaration above.
-inline int Rob::find_consecutive_free(
-        const std::bitset<ROB_CAPACITY>& free,
-        std::size_t n) {
+inline int Rob::find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n) {
     if (n == 0 || n > ROB_CAPACITY) return -1;
     std::size_t run = 0;
     for (std::size_t i = 0; i < ROB_CAPACITY; ++i) {
@@ -197,14 +198,12 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         int base = find_consecutive_free(free_write_entries_, 1);
         if (base < 0) return false;
         auto t = addr_trans::xy_route(b.addr);
-        if (!next_pkt_.push_aw_with_meta(b,
-                {t.dst_id, t.local_addr, /*rob_req=*/1,
-                 /*rob_idx=*/static_cast<uint8_t>(base)})) {
-            return false;   // downstream backpressure: no state mutation
+        if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
+                                             /*rob_idx=*/static_cast<uint8_t>(base)})) {
+            return false;  // downstream backpressure: no state mutation
         }
         free_write_entries_.reset(static_cast<std::size_t>(base));
-        write_entries_[base] = WriteEntry{
-            /*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
+        write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
         write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1});
         ++w_burst_credit_;
         return true;
@@ -235,20 +234,18 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         // Oversized burst: cannot fit in pool at all.
         if (n > ROB_CAPACITY) return false;
         int base = find_consecutive_free(free_read_entries_, n);
-        if (base < 0) return false;   // no consecutive run
+        if (base < 0) return false;  // no consecutive run
         auto t = addr_trans::xy_route(b.addr);
-        if (!next_pkt_.push_ar_with_meta(b,
-                {t.dst_id, t.local_addr, /*rob_req=*/1,
-                 /*rob_idx=*/static_cast<uint8_t>(base)})) {
-            return false;   // downstream backpressure: no state mutation
+        if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
+                                             /*rob_idx=*/static_cast<uint8_t>(base)})) {
+            return false;  // downstream backpressure: no state mutation
         }
         for (std::size_t i = 0; i < n; ++i) {
             free_read_entries_.reset(static_cast<std::size_t>(base) + i);
-            read_entries_[base + i] = ReadEntry{
-                /*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
+            read_entries_[base + i] =
+                ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
         }
-        read_order_by_id_[b.id].push_back(
-            {static_cast<uint8_t>(base), static_cast<uint8_t>(n)});
+        read_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), static_cast<uint8_t>(n)});
         return true;
     }
     auto t = addr_trans::xy_route(b.addr);

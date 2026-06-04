@@ -20,17 +20,17 @@
 namespace ni::cmodel {
 
 class Packetizer {
- public:
-  virtual ~Packetizer() = default;
+  public:
+    virtual ~Packetizer() = default;
 
-  // Request side (used by NMU AxiSlavePort)
-  virtual bool push_aw(const axi::AwBeat& beat) = 0;
-  virtual bool push_w (const axi::WBeat&  beat) = 0;
-  virtual bool push_ar(const axi::ArBeat& beat) = 0;
+    // Request side (used by NMU AxiSlavePort)
+    virtual bool push_aw(const axi::AwBeat& beat) = 0;
+    virtual bool push_w(const axi::WBeat& beat) = 0;
+    virtual bool push_ar(const axi::ArBeat& beat) = 0;
 
-  // Response side (used by NSU AxiMasterPort)
-  virtual bool push_b(const axi::BBeat& beat) = 0;
-  virtual bool push_r(const axi::RBeat& beat) = 0;
+    // Response side (used by NSU AxiMasterPort)
+    virtual bool push_b(const axi::BBeat& beat) = 0;
+    virtual bool push_r(const axi::RBeat& beat) = 0;
 };
 
 }  // namespace ni::cmodel

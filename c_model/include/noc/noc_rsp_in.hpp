@@ -17,11 +17,11 @@
 namespace ni::cmodel::noc {
 
 class NocRspIn {
- public:
-  virtual ~NocRspIn() = default;
+  public:
+    virtual ~NocRspIn() = default;
 
-  // Pop one response flit from upstream. Returns nullopt when empty.
-  virtual std::optional<Flit> pop_flit() = 0;
+    // Pop one response flit from upstream. Returns nullopt when empty.
+    virtual std::optional<Flit> pop_flit() = 0;
 };
 
 }  // namespace ni::cmodel::noc

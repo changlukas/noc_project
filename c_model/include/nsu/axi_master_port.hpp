@@ -41,104 +41,110 @@ namespace ni::cmodel::nsu {
 // helper and the "fail loud / no defaults" rationale.
 
 class AxiMasterPort {
- public:
-  AxiMasterPort(Depacketizer& depacketizer,
-                Packetizer& packetizer,
-                PortParams params)
-      : depkt_(depacketizer), pkt_(packetizer), params_(params) {}
+  public:
+    AxiMasterPort(Depacketizer& depacketizer, Packetizer& packetizer, PortParams params)
+        : depkt_(depacketizer), pkt_(packetizer), params_(params) {}
 
-  // ---- Downstream-facing AXI manager API ----
-  // Symmetric mirror of AxiSlavePort's push_*/pop_*: pop_* hands out AW/W/AR
-  // beats that the NoC delivered to this NSU; push_* takes B/R beats coming
-  // back from the local subordinate. The harness wires these one-for-one to
-  // the AxiSlave's push_aw / push_w / push_ar / pop_b / pop_r each cycle.
-  std::optional<axi::AwBeat> pop_aw() {
-    if (aw_q_.empty()) return std::nullopt;
-    auto r = aw_q_.front(); aw_q_.pop_front(); return r;
-  }
-  std::optional<axi::WBeat> pop_w() {
-    if (w_q_.empty()) return std::nullopt;
-    auto r = w_q_.front(); w_q_.pop_front(); return r;
-  }
-  std::optional<axi::ArBeat> pop_ar() {
-    if (ar_q_.empty()) return std::nullopt;
-    auto r = ar_q_.front(); ar_q_.pop_front(); return r;
-  }
-  bool push_b(const axi::BBeat& b) {
-    if (b_q_.size() >= params_.b_queue_depth) return false;
-    b_q_.push_back(b); return true;
-  }
-  bool push_r(const axi::RBeat& b) {
-    if (r_q_.size() >= params_.r_queue_depth) return false;
-    r_q_.push_back(b); return true;
-  }
+    // ---- Downstream-facing AXI manager API ----
+    // Symmetric mirror of AxiSlavePort's push_*/pop_*: pop_* hands out AW/W/AR
+    // beats that the NoC delivered to this NSU; push_* takes B/R beats coming
+    // back from the local subordinate. The harness wires these one-for-one to
+    // the AxiSlave's push_aw / push_w / push_ar / pop_b / pop_r each cycle.
+    std::optional<axi::AwBeat> pop_aw() {
+        if (aw_q_.empty()) return std::nullopt;
+        auto r = aw_q_.front();
+        aw_q_.pop_front();
+        return r;
+    }
+    std::optional<axi::WBeat> pop_w() {
+        if (w_q_.empty()) return std::nullopt;
+        auto r = w_q_.front();
+        w_q_.pop_front();
+        return r;
+    }
+    std::optional<axi::ArBeat> pop_ar() {
+        if (ar_q_.empty()) return std::nullopt;
+        auto r = ar_q_.front();
+        ar_q_.pop_front();
+        return r;
+    }
+    bool push_b(const axi::BBeat& b) {
+        if (b_q_.size() >= params_.b_queue_depth) return false;
+        b_q_.push_back(b);
+        return true;
+    }
+    bool push_r(const axi::RBeat& b) {
+        if (r_q_.size() >= params_.r_queue_depth) return false;
+        r_q_.push_back(b);
+        return true;
+    }
 
-  void tick() {
-    // Response forward to packetizer BEFORE request drain from depacketizer:
-    // hand any pending B/R up to the packetizer first so this port's response
-    // queue slots are freed before this cycle's new push_b / push_r calls,
-    // then ingest fresh AW/W/AR from the depacketizer for downstream pop_*.
-    // Mirrors the response-before-request ordering rationale of AxiSlavePort
-    // + Stage 2 AxiMaster::tick (frees response-side backpressure first so a
-    // new producer push lands in the same cycle).
-    forward_b_to_packetizer_();
-    forward_r_to_packetizer_();
-    drain_aw_from_depacketizer_();
-    drain_w_from_depacketizer_();
-    drain_ar_from_depacketizer_();
-  }
+    void tick() {
+        // Response forward to packetizer BEFORE request drain from depacketizer:
+        // hand any pending B/R up to the packetizer first so this port's response
+        // queue slots are freed before this cycle's new push_b / push_r calls,
+        // then ingest fresh AW/W/AR from the depacketizer for downstream pop_*.
+        // Mirrors the response-before-request ordering rationale of AxiSlavePort
+        // + Stage 2 AxiMaster::tick (frees response-side backpressure first so a
+        // new producer push lands in the same cycle).
+        forward_b_to_packetizer_();
+        forward_r_to_packetizer_();
+        drain_aw_from_depacketizer_();
+        drain_w_from_depacketizer_();
+        drain_ar_from_depacketizer_();
+    }
 
-  // ---- Introspection (tests) ----
-  std::size_t aw_q_size() const { return aw_q_.size(); }
-  std::size_t w_q_size()  const { return w_q_.size();  }
-  std::size_t ar_q_size() const { return ar_q_.size(); }
-  std::size_t b_q_size()  const { return b_q_.size();  }
-  std::size_t r_q_size()  const { return r_q_.size();  }
-  const PortParams& params() const { return params_; }
+    // ---- Introspection (tests) ----
+    std::size_t aw_q_size() const { return aw_q_.size(); }
+    std::size_t w_q_size() const { return w_q_.size(); }
+    std::size_t ar_q_size() const { return ar_q_.size(); }
+    std::size_t b_q_size() const { return b_q_.size(); }
+    std::size_t r_q_size() const { return r_q_.size(); }
+    const PortParams& params() const { return params_; }
 
- private:
-  void drain_aw_from_depacketizer_() {
-    while (aw_q_.size() < params_.aw_queue_depth) {
-      auto a = depkt_.pop_aw();
-      if (!a) break;
-      aw_q_.push_back(*a);
+  private:
+    void drain_aw_from_depacketizer_() {
+        while (aw_q_.size() < params_.aw_queue_depth) {
+            auto a = depkt_.pop_aw();
+            if (!a) break;
+            aw_q_.push_back(*a);
+        }
     }
-  }
-  void drain_w_from_depacketizer_() {
-    while (w_q_.size() < params_.w_queue_depth) {
-      auto a = depkt_.pop_w();
-      if (!a) break;
-      w_q_.push_back(*a);
+    void drain_w_from_depacketizer_() {
+        while (w_q_.size() < params_.w_queue_depth) {
+            auto a = depkt_.pop_w();
+            if (!a) break;
+            w_q_.push_back(*a);
+        }
     }
-  }
-  void drain_ar_from_depacketizer_() {
-    while (ar_q_.size() < params_.ar_queue_depth) {
-      auto a = depkt_.pop_ar();
-      if (!a) break;
-      ar_q_.push_back(*a);
+    void drain_ar_from_depacketizer_() {
+        while (ar_q_.size() < params_.ar_queue_depth) {
+            auto a = depkt_.pop_ar();
+            if (!a) break;
+            ar_q_.push_back(*a);
+        }
     }
-  }
-  void forward_b_to_packetizer_() {
-    while (!b_q_.empty()) {
-      if (!pkt_.push_b(b_q_.front())) break;
-      b_q_.pop_front();
+    void forward_b_to_packetizer_() {
+        while (!b_q_.empty()) {
+            if (!pkt_.push_b(b_q_.front())) break;
+            b_q_.pop_front();
+        }
     }
-  }
-  void forward_r_to_packetizer_() {
-    while (!r_q_.empty()) {
-      if (!pkt_.push_r(r_q_.front())) break;
-      r_q_.pop_front();
+    void forward_r_to_packetizer_() {
+        while (!r_q_.empty()) {
+            if (!pkt_.push_r(r_q_.front())) break;
+            r_q_.pop_front();
+        }
     }
-  }
 
-  Depacketizer& depkt_;
-  Packetizer&   pkt_;
-  PortParams    params_;
-  std::deque<axi::AwBeat> aw_q_;
-  std::deque<axi::WBeat>  w_q_;
-  std::deque<axi::ArBeat> ar_q_;
-  std::deque<axi::BBeat>  b_q_;
-  std::deque<axi::RBeat>  r_q_;
+    Depacketizer& depkt_;
+    Packetizer& pkt_;
+    PortParams params_;
+    std::deque<axi::AwBeat> aw_q_;
+    std::deque<axi::WBeat> w_q_;
+    std::deque<axi::ArBeat> ar_q_;
+    std::deque<axi::BBeat> b_q_;
+    std::deque<axi::RBeat> r_q_;
 };
 
 }  // namespace ni::cmodel::nsu

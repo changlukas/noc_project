@@ -16,8 +16,8 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-using ni::cmodel::testing::LoopbackNoc;
 using ni::cmodel::Flit;
+using ni::cmodel::testing::LoopbackNoc;
 
 namespace {
 
@@ -26,8 +26,8 @@ Flit make_req_flit(uint8_t src, uint8_t dst, uint8_t rob_req, uint8_t rob_idx) {
     f.set_header_field("axi_ch", ni::AXI_CH_AW);
     f.set_header_field("src_id", src);
     f.set_header_field("dst_id", dst);
-    f.set_header_field("vc_id",  0);
-    f.set_header_field("last",   1);
+    f.set_header_field("vc_id", 0);
+    f.set_header_field("last", 1);
     f.set_header_field("rob_req", rob_req);
     f.set_header_field("rob_idx", rob_idx);
     return f;
@@ -38,8 +38,8 @@ Flit make_rsp_flit(uint8_t src, uint8_t dst, uint8_t rob_req, uint8_t rob_idx) {
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("src_id", src);
     f.set_header_field("dst_id", dst);
-    f.set_header_field("vc_id",  0);
-    f.set_header_field("last",   1);
+    f.set_header_field("vc_id", 0);
+    f.set_header_field("last", 1);
     f.set_header_field("rob_req", rob_req);
     f.set_header_field("rob_idx", rob_idx);
     return f;
@@ -69,32 +69,36 @@ TEST(LoopbackNocMultiNsu, RouteByDstId) {
 }
 
 TEST(LoopbackNocMultiNsuDeath, UnmappedDst_Assert) {
-    SCENARIO("LoopbackNoc: push of flit with unmapped dst_id asserts (no silent drop or default route)");
+    SCENARIO(
+        "LoopbackNoc: push of flit with unmapped dst_id asserts (no silent drop or default route)");
     LoopbackNoc noc(2, 16, 16);
     // No set_dst_route called -> all dst unmapped -> push asserts
     EXPECT_DEATH(noc.nmu_req_out().push_flit(make_req_flit(0x10, 0x99, 0, 0)), ".*");
 }
 
 TEST(LoopbackNocMultiNsu, PerNsuLatency_StaticDelay) {
-    SCENARIO("LoopbackNoc: set_nsu_latency=3 holds rsp flit for 3 ticks before NMU pop_flit sees it");
+    SCENARIO(
+        "LoopbackNoc: set_nsu_latency=3 holds rsp flit for 3 ticks before NMU pop_flit sees it");
     LoopbackNoc noc(2, 16, 16);
     noc.set_nsu_latency(/*nsu_idx=*/1, /*cycles=*/3);
 
     ASSERT_TRUE(noc.nsu_rsp_out(1).push_flit(make_rsp_flit(0x11, 0x01, 1, 0)));
     // Not visible yet
     EXPECT_FALSE(noc.nmu_rsp_in().pop_flit().has_value());
-    noc.tick();   // 1st aging
+    noc.tick();  // 1st aging
     EXPECT_FALSE(noc.nmu_rsp_in().pop_flit().has_value());
-    noc.tick();   // 2nd
+    noc.tick();  // 2nd
     EXPECT_FALSE(noc.nmu_rsp_in().pop_flit().has_value());
-    noc.tick();   // 3rd -> cycles_remaining hits 0, released to rsp_q
+    noc.tick();  // 3rd -> cycles_remaining hits 0, released to rsp_q
     auto f = noc.nmu_rsp_in().pop_flit();
     ASSERT_TRUE(f.has_value());
     EXPECT_EQ(f->get_header_field("src_id"), 0x11u);
 }
 
 TEST(LoopbackNocMultiNsu, PerNsuLatency_RandomBounded) {
-    SCENARIO("LoopbackNoc: random latency in [2,8] honored per-flit; all 100 flits release within bounds");
+    SCENARIO(
+        "LoopbackNoc: random latency in [2,8] honored per-flit; all 100 flits release within "
+        "bounds");
     LoopbackNoc noc(2, 16, /*rsp_total=*/512);
     noc.set_nsu_latency_range(/*nsu_idx=*/1, /*min=*/2, /*max=*/8);
     noc.set_random_seed(42);
@@ -121,7 +125,9 @@ TEST(LoopbackNocMultiNsu, PerNsuLatency_RandomBounded) {
 }
 
 TEST(LoopbackNocMultiNsu, PerNsuQueueFull_DoesNotBlockOtherNsu) {
-    SCENARIO("LoopbackNoc: NSU_0 req queue full does not block push to NSU_1 (per-NSU independent queues)");
+    SCENARIO(
+        "LoopbackNoc: NSU_0 req queue full does not block push to NSU_1 (per-NSU independent "
+        "queues)");
     LoopbackNoc noc(/*num_nsu=*/2, /*req_per_nsu=*/1, /*rsp_total=*/16);
     noc.set_dst_route(0x00, 0);
     noc.set_dst_route(0x01, 1);
@@ -155,8 +161,9 @@ TEST(LoopbackNocBackwardCompat, SingleNsuCtor_LegacyAccessAndDelayPreserved) {
     // Invariant 3: legacy set_rsp_delay still works (global delay applies)
     noc.set_rsp_delay(2);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_rsp_flit(0x10, 0x01, 0, 0)));
-    EXPECT_FALSE(noc.rsp_in().pop_flit().has_value());   // not visible yet
-    noc.tick(); noc.tick();   // age 2 cycles
+    EXPECT_FALSE(noc.rsp_in().pop_flit().has_value());  // not visible yet
+    noc.tick();
+    noc.tick();  // age 2 cycles
     auto f3 = noc.rsp_in().pop_flit();
     ASSERT_TRUE(f3.has_value());
     EXPECT_EQ(f3->get_header_field("src_id"), 0x10u);

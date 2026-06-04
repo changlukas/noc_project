@@ -2,8 +2,8 @@
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::nmu::addr_trans::xy_route;
 using ni::cmodel::nmu::addr_trans::Translated;
+using ni::cmodel::nmu::addr_trans::xy_route;
 
 TEST(AddrTrans, XyRoute_LowBitsAreLocalAddr) {
     SCENARIO("addr_trans: low-addr bits flow through to local_addr unchanged");

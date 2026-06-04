@@ -17,11 +17,11 @@
 namespace ni::cmodel::noc {
 
 class NocReqIn {
- public:
-  virtual ~NocReqIn() = default;
+  public:
+    virtual ~NocReqIn() = default;
 
-  // Pop one request flit from upstream. Returns nullopt when empty.
-  virtual std::optional<Flit> pop_flit() = 0;
+    // Pop one request flit from upstream. Returns nullopt when empty.
+    virtual std::optional<Flit> pop_flit() = 0;
 };
 
 }  // namespace ni::cmodel::noc

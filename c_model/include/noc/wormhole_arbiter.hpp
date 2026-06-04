@@ -58,12 +58,11 @@ struct ChannelPairing {
 
 template <typename Downstream>
 class WormholeArbiter {
-public:
+  public:
     static constexpr std::size_t MAX_INPUTS = 8;
     static constexpr std::size_t kDefaultPerInputDepth = 4;
 
-    WormholeArbiter(Downstream& downstream,
-                    std::size_t num_inputs,
+    WormholeArbiter(Downstream& downstream, std::size_t num_inputs,
                     std::vector<ChannelPairing> pairings = {},
                     std::size_t per_input_depth = kDefaultPerInputDepth)
         : downstream_(downstream),
@@ -108,9 +107,9 @@ public:
     }
 
     WormholeArbiter(const WormholeArbiter&) = delete;
-    WormholeArbiter(WormholeArbiter&&)      = delete;
+    WormholeArbiter(WormholeArbiter&&) = delete;
     WormholeArbiter& operator=(const WormholeArbiter&) = delete;
-    WormholeArbiter& operator=(WormholeArbiter&&)      = delete;
+    WormholeArbiter& operator=(WormholeArbiter&&) = delete;
 
     Downstream& input(std::size_t idx) {
         assert(idx < num_inputs_);
@@ -127,10 +126,10 @@ public:
     bool is_locked() const noexcept { return locked_to_.has_value(); }
     std::optional<std::size_t> locked_to() const noexcept { return locked_to_; }
 
-private:
+  private:
     struct InputAdapter : Downstream {
         WormholeArbiter* parent;
-        std::size_t      idx;
+        std::size_t idx;
 
         InputAdapter(WormholeArbiter* p, std::size_t i) : parent(p), idx(i) {}
 
@@ -145,22 +144,24 @@ private:
     };
 
     bool is_from_port(std::size_t idx) const {
-        for (const auto& p : pairings_) if (p.from == idx) return true;
+        for (const auto& p : pairings_)
+            if (p.from == idx) return true;
         return false;
     }
     bool is_to_port(std::size_t idx) const {
-        for (const auto& p : pairings_) if (p.to == idx) return true;
+        for (const auto& p : pairings_)
+            if (p.to == idx) return true;
         return false;
     }
 
-    Downstream&                  downstream_;
-    std::size_t                  num_inputs_;
-    std::vector<ChannelPairing>  pairings_;
-    std::size_t                  per_input_depth_;
+    Downstream& downstream_;
+    std::size_t num_inputs_;
+    std::vector<ChannelPairing> pairings_;
+    std::size_t per_input_depth_;
     std::vector<std::deque<Flit>> pending_;
-    std::vector<InputAdapter>    input_adapters_;
-    std::size_t                  round_robin_ptr_ = 0;
-    std::optional<std::size_t>   locked_to_;
+    std::vector<InputAdapter> input_adapters_;
+    std::size_t round_robin_ptr_ = 0;
+    std::optional<std::size_t> locked_to_;
 };
 
 template <typename Downstream>
@@ -191,16 +192,22 @@ inline void WormholeArbiter<Downstream>::tick() {
 
     // Defensive guards (Constraint A2)
     if (is_from_port(target) && last == 1) {
-        assert(false && "WormholeArbiter::tick: from-port flit with header.last=1 -- malformed AW (Packetize regression on header.last stamping; vc_arb round commit 1f82ba8 stamps AW=0)");
+        assert(
+            false &&
+            "WormholeArbiter::tick: from-port flit with header.last=1 -- malformed AW (Packetize "
+            "regression on header.last stamping; vc_arb round commit 1f82ba8 stamps AW=0)");
         std::abort();
     }
     if (is_to_port(target) && !locked_to_.has_value()) {
-        assert(false && "WormholeArbiter::tick: to-port flit pushed without preceding from-port flit (W before AW; upstream serialization broken)");
+        assert(false &&
+               "WormholeArbiter::tick: to-port flit pushed without preceding from-port flit (W "
+               "before AW; upstream serialization broken)");
         std::abort();
     }
 
     bool ok = downstream_.push_flit(flit);
-    assert(ok && "WormholeArbiter::tick: lying downstream (credit_avail=true but push_flit refused)");
+    assert(ok &&
+           "WormholeArbiter::tick: lying downstream (credit_avail=true but push_flit refused)");
     if (!ok) std::abort();  // belt-and-braces for NDEBUG
 
     pending_[target].pop_front();

@@ -14,7 +14,7 @@ namespace ni::cmodel::testing {
 
 template <typename Interface>
 class PerChannelCapture : public Interface {
-public:
+  public:
     bool push_flit(const Flit& f) override {
         captured_.push_back(f);
         return true;
@@ -29,7 +29,7 @@ public:
     std::size_t size() const noexcept { return captured_.size(); }
     void clear() noexcept { captured_.clear(); }
 
-private:
+  private:
     std::deque<Flit> captured_;
 };
 
