@@ -20,6 +20,10 @@ using ni::cmodel::cosim::AxiDpiAdapter;
 
 static const std::string kScenarioYaml = "fixtures/burst_incr_8beat.yaml";
 
+// Cycle-budget constants for loop guards.
+static constexpr int kMaxAwVisibleCycles = 200;
+static constexpr int kMaxScenarioCycles = 5000;
+
 TEST(AxiDpiAdapter, drives_aw_after_scenario_load) {
     SCENARIO("AxiDpiAdapter drives AWVALID on NMU AXI boundary after init");
 
@@ -28,12 +32,12 @@ TEST(AxiDpiAdapter, drives_aw_after_scenario_load) {
 
     AwPins aw{};
     bool saw_awvalid = false;
-    for (int cycle = 0; cycle < 200 && !saw_awvalid; ++cycle) {
+    for (int cycle = 0; cycle < kMaxAwVisibleCycles && !saw_awvalid; ++cycle) {
         adapter.tick();
         adapter.get_nmu_aw(aw);
         if (aw.valid) saw_awvalid = true;
     }
-    EXPECT_TRUE(saw_awvalid) << "no AWVALID asserted in first 200 cycles";
+    EXPECT_TRUE(saw_awvalid) << "no AWVALID asserted in first " << kMaxAwVisibleCycles << " cycles";
 }
 
 TEST(AxiDpiAdapter, scenario_completes) {
@@ -41,9 +45,10 @@ TEST(AxiDpiAdapter, scenario_completes) {
 
     AxiDpiAdapter adapter;
     adapter.init(kScenarioYaml);
-    for (int cycle = 0; cycle < 5000 && !adapter.done(); ++cycle) {
+    for (int cycle = 0; cycle < kMaxScenarioCycles && !adapter.done(); ++cycle) {
         adapter.tick();
     }
-    EXPECT_TRUE(adapter.done()) << "scenario did not drain within 5000 cycles";
+    EXPECT_TRUE(adapter.done()) << "scenario did not drain within " << kMaxScenarioCycles
+                                << " cycles";
     EXPECT_TRUE(adapter.scoreboard_clean()) << "scoreboard reported mismatch";
 }

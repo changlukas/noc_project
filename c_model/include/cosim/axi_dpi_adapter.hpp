@@ -48,7 +48,6 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 namespace ni::cmodel::cosim {
 
@@ -194,8 +193,11 @@ inline void AxiDpiAdapter::init(const std::string& scenario_yaml_path) {
     nsu_cfg.read_rsp_vc = 0;
     nsu_ = std::make_unique<nsu::Nsu>(nsu_cfg, loopback_->nsu_req_in(0), loopback_->nsu_rsp_out(0));
 
-    // AxiMaster binds to NMU's AxiSlavePort. read_dump goes to a temp file.
-    const std::string read_dump_path = "axi_dpi_adapter_read_dump.tmp";
+    // AxiMaster binds to NMU's AxiSlavePort. read_dump goes to a per-instance
+    // temp file — avoids collision when ctest -j runs multiple instances.
+    const std::string read_dump_path = "axi_dpi_adapter_read_dump_" +
+                                       std::to_string(reinterpret_cast<std::uintptr_t>(this)) +
+                                       ".tmp";
     master_ = std::make_unique<axi::AxiMasterT<nmu::AxiSlavePort>>(
         scenario_yaml_path, nmu_->axi_slave_port(), read_dump_path, sc.config.max_outstanding_write,
         sc.config.max_outstanding_read);
@@ -207,7 +209,8 @@ inline void AxiDpiAdapter::init(const std::string& scenario_yaml_path) {
     master_->on_read_observed(
         [this](const axi::ReadResult& rr) { scoreboard_.handle_read_observed(rr); });
 
-    // Reset holdovers and routing tables.
+    // Reset all per-run state so init() is idempotent (safe to call twice).
+    scoreboard_ = axi::Scoreboard{};
     b_holdover_.clear();
     r_holdover_.clear();
     for (auto& dq : b_owner_nsu_) dq.clear();
@@ -250,12 +253,19 @@ inline void AxiDpiAdapter::tick() {
 
     while (auto aw = nsu_port.pop_aw()) {
         uint8_t id = aw->id;
-        if (slave_->push_aw(*aw)) {
-            b_owner_nsu_[id].push_back(0);
+        if (!slave_->push_aw(*aw)) {
+            throw std::runtime_error(
+                "AxiDpiAdapter::tick(): AW channel: slave rejected push_aw for id=" +
+                std::to_string(id) + " — slave queue full or not ready");
         }
+        b_owner_nsu_[id].push_back(0);
     }
     while (auto w = nsu_port.pop_w()) {
-        slave_->push_w(*w);
+        if (!slave_->push_w(*w)) {
+            throw std::runtime_error(
+                "AxiDpiAdapter::tick(): W channel: slave rejected push_w "
+                "— W beat arrived before matching AW or slave W-queue full");
+        }
     }
     while (auto ar = nsu_port.pop_ar()) {
         uint8_t id = ar->id;
@@ -280,16 +290,26 @@ inline void AxiDpiAdapter::tick() {
 
     while (auto b = slave_->pop_b()) {
         uint8_t id = b->id;
-        if (!b_owner_nsu_[id].empty()) {
-            b_owner_nsu_[id].pop_front();
+        if (b_owner_nsu_[id].empty()) {
+            throw std::runtime_error(
+                "AxiDpiAdapter::tick(): B channel: received B beat for id=" + std::to_string(id) +
+                " with no outstanding AW owner — "
+                "slave issued spurious B response");
         }
+        b_owner_nsu_[id].pop_front();
         if (!b_holdover_.empty() || !nsu_port.push_b(*b)) {
             b_holdover_.push_back(*b);
         }
     }
     while (auto r = slave_->pop_r()) {
         uint8_t id = r->id;
-        if (!r_owner_nsu_[id].empty() && r->last) {
+        if (r_owner_nsu_[id].empty()) {
+            throw std::runtime_error(
+                "AxiDpiAdapter::tick(): R channel: received R beat for id=" + std::to_string(id) +
+                " with no outstanding AR owner — "
+                "slave issued spurious R response");
+        }
+        if (r->last) {
             r_owner_nsu_[id].pop_front();
         }
         if (!r_holdover_.empty() || !nsu_port.push_r(*r)) {
