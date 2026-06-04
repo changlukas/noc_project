@@ -8,7 +8,56 @@ Stage 3 test logger (SCENARIO + AxiMasterObserver) 完工：
 - Production assert message audit：19 個 bare `assert(false)` 加 cause + Likely-cause hint（ni/flit + nmu + nsu 三 sub-commits per subsystem）
 - 302 ctest sequential pass (297 prior + 5 new Observer tests), drift gates clean (specgen 163, codegen --check 0, gen_inventory --check 0)
 
-## Just done (this round): wormhole_arbiter + Packetize multi-output
+## Just done (this round): nmu/nsu top-level assembly + clang-format adoption — Stage 3 NI CLOSED
+
+**Karpathy 4-lens summary**:
+- **What we shipped**: `nmu/nmu.hpp` (Nmu class encapsulating AxiSlavePort
+  + Rob + Packetize + WormholeArbiter + VcArbiter + Depacketize); `nsu/nsu.hpp`
+  (Nsu mirror: Depacketize + MetaBuffer + Packetize + WormholeArbiter +
+  VcArbiter + AxiMasterPort; no Rob/addr_trans per NSU asymmetry).
+  Integration testbench refactored from ~520 lines manual wiring to
+  ~316 lines using single `nmu::Nmu` + `std::vector<std::unique_ptr<nsu::Nsu>>`.
+  Plus `.clang-format` Google-base + 4-space indent + 100-col adopted +
+  64 files reformatted. 2 smoke tests added. ctest 372/372 all green.
+- **What we proved**: Stage 3 NI architecture fully encapsulated —
+  testbench uses 1-line ctor + 1-line tick() per side. Constraint A1
+  (VcArbiter requires upstream wormhole) + A2 (WormholeArbiter requires
+  Packetize header.last) preserved through encapsulation. Code style
+  now auto-enforceable via clang-format.
+- **What we owe**: defer to next rounds — integration testbench NUM_VC>1
+  e2e stress (next follow-up; unit tests already cover {1,2,4,8}), Stage 5
+  axi_checker.sv co-sim in new session (per user direction), Stage 4 NoC
+  fabric (`noc/router.hpp`).
+- **Why it matters now**: Stage 3 NI complete. Top-level classes provide
+  the ComponentHandle abstraction surface Stage 5 mix-and-match co-sim
+  needs (per main plan §5.1). New session can pivot directly to Stage 5.
+
+**Round audit note**: Implementer subagents AGAIN hallucinated test counts
+(reported "337/337" / "338/338" — actual was 372/372 throughout due to
+TEST_P parameterized instantiations). Same pattern as wormhole_arbiter
+round. Local ctest verify caught it; no real failures. Going forward,
+controller MUST verify ctest count locally before accepting subagent
+reports.
+
+## Next round: integration testbench NUM_VC>1 e2e stress (queued)
+
+Per user direction (end of nmu/nsu round): extend integration testbench
+to actually USE NUM_VC>1 in PacketizeLoopback fixture, exercising
+WormholeArbiter + VcArbiter at NUM_VC ∈ {2, 4} (not just NUM_VC=1
+transparent mode). Unit tests already cover the parameterized matrix;
+this round adds end-to-end traffic through multi-VC pipeline.
+
+## After that: Stage 5 axi_checker.sv co-sim (NEW SESSION)
+
+Per user direction + saved memory (`project_stage5_axi_checker_cosim_plan`):
+new session jumps Stage 4 and tries Stage 5 co-sim with narrow scope —
+use existing `axi_checker.sv` (in `rtl/`) to validate c_model NMU/NSU
+produce AXI4-conformant traffic at the boundary. ComponentHandle pin-struct
+prep + Verilator or DPI-C bridge to be designed in that session.
+
+---
+
+## Prior round: wormhole_arbiter + Packetize multi-output
 
 **Karpathy 4-lens summary**:
 - **What we shipped**: `noc/wormhole_arbiter.hpp` (template N-to-1 lock
@@ -43,19 +92,7 @@ death tests were silently failing (implementer subagents hallucinated
 Going forward, controller should always run local ctest before accepting
 subagent test count reports.
 
-## Next round: nmu.hpp / nsu.hpp top-level assembly
-
-Per main plan §3 file structure (rows 168 + 173): assemble
-addr_trans + AxiSlavePort + Rob + Packetize + WormholeArbiter + VcArbiter
-into nmu::Nmu class (NMU side) and Depacketize + MetaBuffer + Packetize +
-WormholeArbiter + VcArbiter into nsu::Nsu class (NSU side). Each exposes
-clean external pin-struct interface (AxiSlavePortPins on AXI side,
-NocReqOut/NocRspIn on NoC side). Integration testbench can then use
-nmu::Nmu / nsu::Nsu instances directly instead of manually wiring
-sub-components.
-
-After top-level done = Stage 3 NI completely closed; ready for Stage 4
-NoC fabric (noc/router.hpp).
+(Prior "Next round" pointer fulfilled this session; see top.)
 
 ---
 
