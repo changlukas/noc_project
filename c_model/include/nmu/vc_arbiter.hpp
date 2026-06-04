@@ -152,10 +152,13 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
 
     // Update W-follows-AW optional only after pass conditions (atomicity)
     if (axi_ch == ni::AXI_CH_AW) {
-        assert(!current_aw_vc_.has_value() &&
-               "nmu::VcArbiter::push_flit: AW arrived while previous AW's W burst "
-               "still in progress -- Constraint A1 violated: must be downstream of "
-               "WormholeArbiter (which holds next AW until current W burst ends).");
+        if (current_aw_vc_.has_value()) {
+            assert(false &&
+                   "nmu::VcArbiter::push_flit: AW arrived while previous AW's W burst "
+                   "still in progress -- Constraint A1 violated: must be downstream of "
+                   "WormholeArbiter (which holds next AW until current W burst ends).");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
         current_aw_vc_ = vc_id;
     } else if (axi_ch == ni::AXI_CH_W) {
         if (flit.get_payload_field("W", "wlast") != 0) {
