@@ -72,7 +72,7 @@ TEST(LoopbackNocMultiNsuDeath, UnmappedDst_Assert) {
     SCENARIO("LoopbackNoc: push of flit with unmapped dst_id asserts (no silent drop or default route)");
     LoopbackNoc noc(2, 16, 16);
     // No set_dst_route called -> all dst unmapped -> push asserts
-    EXPECT_DEATH(noc.nmu_req_out().push_flit(make_req_flit(0x10, 0x99, 0, 0)), "");
+    EXPECT_DEATH(noc.nmu_req_out().push_flit(make_req_flit(0x10, 0x99, 0, 0)), ".*");
 }
 
 TEST(LoopbackNocMultiNsu, PerNsuLatency_StaticDelay) {
