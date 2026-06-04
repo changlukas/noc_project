@@ -275,11 +275,19 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
         auto opt = next_depkt_.pop_b_with_meta();
         if (!opt) return std::nullopt;
         auto [b, meta] = *opt;
-        assert(meta.rob_req == 1 && "Enabled Rob received Disabled flit");
-        assert(meta.rob_idx < ROB_CAPACITY && "rob_idx out of range");
+        if (!(meta.rob_req == 1)) {
+            assert(false && "Enabled Rob received Disabled flit");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
+        if (!(meta.rob_idx < ROB_CAPACITY)) {
+            assert(false && "rob_idx out of range");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
         auto& slot = write_entries_[meta.rob_idx];
-        assert(slot.occupied && !slot.ready &&
-               "B for unallocated or already-completed rob_idx");
+        if (!(slot.occupied && !slot.ready)) {
+            assert(false && "B for unallocated or already-completed rob_idx");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
         slot.b_beat = b;
         slot.ready = true;
         // In-order Path: chain-flush ready heads of this id's sequence.
@@ -319,10 +327,19 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
         auto opt = next_depkt_.pop_r_with_meta();
         if (!opt) return std::nullopt;
         auto [r, meta] = *opt;
-        assert(meta.rob_req == 1 && "Enabled Rob received Disabled flit");
-        assert(meta.rob_idx < ROB_CAPACITY && "rob_idx out of range");
+        if (!(meta.rob_req == 1)) {
+            assert(false && "Enabled Rob received Disabled flit");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
+        if (!(meta.rob_idx < ROB_CAPACITY)) {
+            assert(false && "rob_idx out of range");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
         auto& slot = read_entries_[meta.rob_idx];
-        assert(slot.occupied && "R for unallocated rob_idx");
+        if (!slot.occupied) {
+            assert(false && "R for unallocated rob_idx");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
         slot.r_beat = r;
         slot.ready = true;
         // Chain-flush ready ranges (whole burst) of this id's sequence.

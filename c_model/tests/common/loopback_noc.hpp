@@ -25,6 +25,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <limits>
 #include <optional>
@@ -207,7 +208,10 @@ private:
             uint8_t vc  = static_cast<uint8_t>(f.get_header_field("vc_id"));
             uint8_t dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
             int8_t  nsu = p->dst_to_nsu_[dst];
-            assert(nsu >= 0 && "LoopbackNoc: unmapped dst_id");
+            if (!(nsu >= 0)) {
+                assert(false && "LoopbackNoc: unmapped dst_id");
+                std::abort();  // belt-and-braces for NDEBUG
+            }
             if (p->nmu_req_per_vc_in_flight_[vc] >= p->per_vc_depth_) return false;
             // Legacy global req delay path (single-NSU mode only; req_delay_
             // is gated by set_req_delay's num_nsu_==1 assert).

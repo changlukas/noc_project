@@ -3,6 +3,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <optional>
 
@@ -29,7 +30,10 @@ public:
 
   // -- Write side (AW snapshot + B consume) --
   void snapshot_write(uint8_t awid, MetaEntry e) {
-    assert(write_[awid].size() < per_id_depth_ && "MetaBuffer: per-ID depth exceeded");
+    if (!(write_[awid].size() < per_id_depth_)) {
+      assert(false && "MetaBuffer: per-ID depth exceeded");
+      std::abort();  // belt-and-braces for NDEBUG
+    }
     write_[awid].push_back(e);
   }
   std::optional<MetaEntry> peek_write(uint8_t bid) const noexcept {
@@ -44,7 +48,10 @@ public:
   // -- Read side (AR snapshot + R consume) --
   // Multi-beat R burst: peek every beat, commit only on rlast.
   void snapshot_read(uint8_t arid, MetaEntry e) {
-    assert(read_[arid].size() < per_id_depth_ && "MetaBuffer: per-ID depth exceeded");
+    if (!(read_[arid].size() < per_id_depth_)) {
+      assert(false && "MetaBuffer: per-ID depth exceeded");
+      std::abort();  // belt-and-braces for NDEBUG
+    }
     read_[arid].push_back(e);
   }
   std::optional<MetaEntry> peek_read(uint8_t rid) const noexcept {

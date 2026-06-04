@@ -64,7 +64,10 @@ private:
 
 inline bool Packetize::push_b(const axi::BBeat& b) {
   auto meta_opt = meta_.peek_write(b.id);
-  assert(meta_opt.has_value() && "B with no matching outstanding AW (MetaBuffer empty for id)");
+  if (!meta_opt.has_value()) {
+    assert(false && "B with no matching outstanding AW (MetaBuffer empty for id)");
+    std::abort();  // belt-and-braces for NDEBUG
+  }
   const auto& m = *meta_opt;
 
   Flit f;
@@ -85,7 +88,10 @@ inline bool Packetize::push_b(const axi::BBeat& b) {
 
 inline bool Packetize::push_r(const axi::RBeat& b) {
   auto meta_opt = meta_.peek_read(b.id);
-  assert(meta_opt.has_value() && "R with no matching outstanding AR (MetaBuffer empty for id)");
+  if (!meta_opt.has_value()) {
+    assert(false && "R with no matching outstanding AR (MetaBuffer empty for id)");
+    std::abort();  // belt-and-braces for NDEBUG
+  }
   const auto& m = *meta_opt;
 
   Flit f;
