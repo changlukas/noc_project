@@ -29,9 +29,9 @@ add_cmodel_test(test_nsu_depacketize)
 target_include_directories(test_nsu_depacketize PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-# Note: distinct target name from nmu/test_vc_arb to avoid CMake target
+# Note: distinct target name from nmu/test_vc_arbiter to avoid CMake target
 # collision (add_cmodel_test creates a bare-named target). Source file
-# mirrors the target name; gtest suite name remains NsuVcArb.
-add_cmodel_test(test_nsu_vc_arb)
-target_include_directories(test_nsu_vc_arb PRIVATE
+# mirrors the target name; gtest suite name remains NsuVcArbiter.
+add_cmodel_test(test_nsu_vc_arbiter)
+target_include_directories(test_nsu_vc_arbiter PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)

@@ -32,6 +32,6 @@ add_cmodel_test(test_rob)
 target_include_directories(test_rob PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_vc_arb)
-target_include_directories(test_vc_arb PRIVATE
+add_cmodel_test(test_vc_arbiter)
+target_include_directories(test_vc_arbiter PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)

@@ -42,28 +42,28 @@ enum class VcMode {
     MultiCandidate,
 };
 
-class VcArb : public noc::NocReqOut {
+class VcArbiter : public noc::NocReqOut {
 public:
     static constexpr std::size_t NUM_VC_MAX   = 1u << ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t AXI_CH_COUNT = 5;  // AW, W, AR, B, R (B/R unused on NMU)
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
-    static VcArb read_write_split(noc::NocReqOut& downstream,
-                                  std::size_t num_vc,
-                                  uint8_t write_vc,
-                                  uint8_t read_vc,
-                                  std::size_t pending_depth = kDefaultPendingDepth) {
+    static VcArbiter read_write_split(noc::NocReqOut& downstream,
+                                      std::size_t num_vc,
+                                      uint8_t write_vc,
+                                      uint8_t read_vc,
+                                      std::size_t pending_depth = kDefaultPendingDepth) {
         std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
-        return VcArb(downstream, num_vc, VcMode::ReadWriteSplit,
-                     write_vc, read_vc, std::move(empty_candidates), pending_depth);
+        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit,
+                         write_vc, read_vc, std::move(empty_candidates), pending_depth);
     }
 
-    static VcArb multi_candidate(noc::NocReqOut& downstream,
-                                 std::size_t num_vc,
-                                 std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
-                                 std::size_t pending_depth = kDefaultPendingDepth) {
-        return VcArb(downstream, num_vc, VcMode::MultiCandidate,
-                     /*write_vc*/0, /*read_vc*/0, std::move(candidate_vcs), pending_depth);
+    static VcArbiter multi_candidate(noc::NocReqOut& downstream,
+                                     std::size_t num_vc,
+                                     std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
+                                     std::size_t pending_depth = kDefaultPendingDepth) {
+        return VcArbiter(downstream, num_vc, VcMode::MultiCandidate,
+                         /*write_vc*/0, /*read_vc*/0, std::move(candidate_vcs), pending_depth);
     }
 
     // NocReqOut decorator interface
@@ -78,13 +78,13 @@ public:
     std::size_t pending_w_routes_size() const noexcept { return pending_w_routes_.size(); }
 
 private:
-    VcArb(noc::NocReqOut& downstream,
-          std::size_t num_vc,
-          VcMode mode,
-          uint8_t write_vc,
-          uint8_t read_vc,
-          std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
-          std::size_t pending_depth)
+    VcArbiter(noc::NocReqOut& downstream,
+              std::size_t num_vc,
+              VcMode mode,
+              uint8_t write_vc,
+              uint8_t read_vc,
+              std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
+              std::size_t pending_depth)
         : downstream_(downstream),
           num_vc_(num_vc),
           mode_(mode),
@@ -111,12 +111,12 @@ private:
     std::deque<uint8_t>                              pending_w_routes_;
 };
 
-inline std::optional<uint8_t> VcArb::select_vc_for_axi_ch(uint8_t axi_ch) {
+inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
     if (num_vc_ == 1) return uint8_t{0};
 
     if (axi_ch == ni::AXI_CH_W) {
         if (pending_w_routes_.empty()) {
-            assert(false && "nmu::VcArb::push_flit: W arrived with empty pending_w_routes_ -- Packetize w_meta_fifo invariant violated (W before AW); check upstream Rob credit gate or AxiSlavePort routing");
+            assert(false && "nmu::VcArbiter::push_flit: W arrived with empty pending_w_routes_ -- Packetize w_meta_fifo invariant violated (W before AW); check upstream Rob credit gate or AxiSlavePort routing");
             std::abort();
         }
         return pending_w_routes_.front();
@@ -137,7 +137,7 @@ inline std::optional<uint8_t> VcArb::select_vc_for_axi_ch(uint8_t axi_ch) {
     return std::nullopt;
 }
 
-inline bool VcArb::push_flit(const Flit& flit) {
+inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
     auto vc_opt = select_vc_for_axi_ch(axi_ch);
     if (!vc_opt.has_value()) return false;
@@ -159,16 +159,16 @@ inline bool VcArb::push_flit(const Flit& flit) {
     return true;
 }
 
-inline bool VcArb::credit_avail(uint8_t vc_id) const {
+inline bool VcArbiter::credit_avail(uint8_t vc_id) const {
     return pending_[vc_id].size() < pending_depth_;
 }
 
-inline void VcArb::tick() {
+inline void VcArbiter::tick() {
     for (std::size_t k = 0; k < num_vc_; ++k) {
         uint8_t vc = static_cast<uint8_t>((round_robin_ptr_ + k) % num_vc_);
         if (!pending_[vc].empty() && downstream_.credit_avail(vc)) {
             bool ok = downstream_.push_flit(pending_[vc].front());
-            assert(ok && "nmu::VcArb::tick: downstream returned credit_avail=true "
+            assert(ok && "nmu::VcArbiter::tick: downstream returned credit_avail=true "
                          "but push_flit refused -- protocol violation, downstream "
                          "must not lie about credit availability");
             if (!ok) std::abort();  // belt-and-braces for NDEBUG

@@ -74,7 +74,7 @@ TEST(LoopbackNocPerVcCredit, RspSidePerVcCreditMirrorsReq) {
 TEST(LoopbackNocPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
     SCENARIO("LoopbackNoc: credit_avail must return false when per-NSU queue is "
              "full even if per-VC counter still has room (contract: credit_avail=true "
-             "must imply push_flit will succeed; otherwise VcArb tick aborts on "
+             "must imply push_flit will succeed; otherwise VcArbiter tick aborts on "
              "the 'lying downstream' guard)");
     // 1-NSU, req-queue depth 2, default per_vc_depth (unlimited)
     LoopbackNoc noc(/*req*/2, /*rsp*/32);

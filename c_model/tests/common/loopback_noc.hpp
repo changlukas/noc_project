@@ -235,7 +235,7 @@ private:
             }
             // Conservative: dst is not known at this call site, so require that
             // EVERY per-NSU queue have at least one slot. This honors the
-            // VcArb contract that credit_avail=true implies push_flit will
+            // VcArbiter contract that credit_avail=true implies push_flit will
             // succeed regardless of the flit's dst_id.
             for (std::size_t i = 0; i < p->num_nsu_; ++i) {
                 if (p->nsu_req_q_[i].size() >= p->req_q_depth_per_nsu_) return false;

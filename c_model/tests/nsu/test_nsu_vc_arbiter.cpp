@@ -1,4 +1,4 @@
-#include "nsu/vc_arb.hpp"
+#include "nsu/vc_arbiter.hpp"
 #include "common/loopback_noc.hpp"
 #include "common/scenario.hpp"
 #include "ni/flit.hpp"
@@ -8,7 +8,7 @@
 #include <vector>
 
 using ni::cmodel::Flit;
-using ni::cmodel::nsu::VcArb;
+using ni::cmodel::nsu::VcArbiter;
 using ni::cmodel::nsu::VcMode;
 using ni::cmodel::testing::LoopbackNoc;
 
@@ -38,9 +38,9 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2";
 
-    SCENARIO("NSU VcArb Mode A: B -> write_rsp_vc=0, R -> read_rsp_vc=1");
+    SCENARIO("NSU VcArbiter Mode A: B -> write_rsp_vc=0, R -> read_rsp_vc=1");
     LoopbackNoc noc(/*req*/32, /*rsp*/32);
-    auto arb = VcArb::read_write_split(noc.rsp_out(), num_vc, 0, 1);
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), num_vc, 0, 1);
 
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
@@ -69,13 +69,13 @@ TEST_P(NsuVcArbParam, Nsu_MultiCandidate_HoLAvoidance) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 for multi-candidate B overflow";
 
-    SCENARIO("NSU VcArb Mode B: saturate first B candidate VC -> next B "
+    SCENARIO("NSU VcArbiter Mode B: saturate first B candidate VC -> next B "
              "picks second candidate VC, avoiding head-of-line block");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
 
     // B always gets 2 candidates (VC=0 and VC=1); R fills the remainder
     // (or shares VC=0 when num_vc=2 and there is no separate upper half).
-    std::array<std::vector<uint8_t>, VcArb::AXI_CH_COUNT> candidates{};
+    std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
     candidates[ni::AXI_CH_B] = {0, 1};
     if (num_vc > 2) {
         for (std::size_t i = num_vc / 2; i < num_vc; ++i) {
@@ -84,7 +84,7 @@ TEST_P(NsuVcArbParam, Nsu_MultiCandidate_HoLAvoidance) {
     } else {
         candidates[ni::AXI_CH_R] = {0};  // num_vc=2: R shares VC=0
     }
-    auto arb = VcArb::multi_candidate(noc.rsp_out(), num_vc,
+    auto arb = VcArbiter::multi_candidate(noc.rsp_out(), num_vc,
                                       candidates, /*pending_depth=*/2);
 
     // Fill VC=0 pending to capacity (2 Bs land on VC=0).
@@ -106,16 +106,16 @@ TEST_P(NsuVcArbParam, Nsu_RoundRobinFairness) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 to exercise round-robin";
 
-    SCENARIO("NSU VcArb Mode B: num_vc R flits pre-routed to distinct VCs via "
+    SCENARIO("NSU VcArbiter Mode B: num_vc R flits pre-routed to distinct VCs via "
              "candidate list; tick num_vc times -> flits emerge in RR order");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
-    std::array<std::vector<uint8_t>, VcArb::AXI_CH_COUNT> candidates{};
+    std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
     candidates[ni::AXI_CH_B] = {0};
     // R candidate list spans all VCs; pending_depth=1 fills each VC in order.
     for (std::size_t i = 0; i < num_vc; ++i) {
         candidates[ni::AXI_CH_R].push_back(static_cast<uint8_t>(i));
     }
-    auto arb = VcArb::multi_candidate(noc.rsp_out(), num_vc,
+    auto arb = VcArbiter::multi_candidate(noc.rsp_out(), num_vc,
                                       candidates, /*pending_depth=*/1);
 
     // Push num_vc R flits: first fills VC=0, second VC=1, ..., etc.
@@ -141,15 +141,15 @@ TEST_P(NsuVcArbParam, Nsu_CreditGating) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 (uses VC=0 and VC=1)";
 
-    SCENARIO("NSU VcArb: downstream per_vc_depth=1; pending_depth=1 forces "
+    SCENARIO("NSU VcArbiter: downstream per_vc_depth=1; pending_depth=1 forces "
              "second R to VC=1; tick drains VC=0 first; second tick advances "
              "RR to VC=1 after VC=0 credit exhausted");
     LoopbackNoc noc(/*req*/64, /*rsp*/64);
     noc.set_per_vc_depth(1);
-    std::array<std::vector<uint8_t>, VcArb::AXI_CH_COUNT> candidates{};
+    std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
     candidates[ni::AXI_CH_B] = {0};
     candidates[ni::AXI_CH_R] = {0, 1};
-    auto arb = VcArb::multi_candidate(noc.rsp_out(), num_vc,
+    auto arb = VcArbiter::multi_candidate(noc.rsp_out(), num_vc,
                                       candidates, /*pending_depth=*/1);
 
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));  // VC=0
@@ -182,14 +182,14 @@ INSTANTIATE_TEST_SUITE_P(
 //   Nsu_Degenerate_NumVc1_Passthrough : specifically tests NUM_VC=1 behavior
 // ---------------------------------------------------------------------------
 
-TEST(NsuVcArb, Nsu_Degenerate_NumVc1_Passthrough) {
-    SCENARIO("NSU VcArb: NUM_VC=1, both Mode A (read_write_split) and Mode B "
+TEST(NsuVcArbiter, Nsu_Degenerate_NumVc1_Passthrough) {
+    SCENARIO("NSU VcArbiter: NUM_VC=1, both Mode A (read_write_split) and Mode B "
              "(multi_candidate) route B + R -> VC=0");
 
     // Mode A
     {
         LoopbackNoc noc(/*req*/32, /*rsp*/32);
-        auto arb = VcArb::read_write_split(noc.rsp_out(), /*num_vc=*/1, 0, 0);
+        auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/1, 0, 0);
         ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
         ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
         arb.tick(); arb.tick();
@@ -201,10 +201,10 @@ TEST(NsuVcArb, Nsu_Degenerate_NumVc1_Passthrough) {
     // Mode B -- even with multi_candidate, num_vc=1 forces VC=0.
     {
         LoopbackNoc noc(/*req*/32, /*rsp*/32);
-        std::array<std::vector<uint8_t>, VcArb::AXI_CH_COUNT> candidates{};
+        std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
         candidates[ni::AXI_CH_B] = {0};
         candidates[ni::AXI_CH_R] = {0};
-        auto arb = VcArb::multi_candidate(noc.rsp_out(), /*num_vc=*/1, candidates);
+        auto arb = VcArbiter::multi_candidate(noc.rsp_out(), /*num_vc=*/1, candidates);
         ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
         ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
         arb.tick(); arb.tick();
