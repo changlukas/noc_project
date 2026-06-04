@@ -980,6 +980,8 @@ This commit is large (10+ files). Spec §9 requires per-file review to ensure ea
 git diff --stat
 ```
 
+Expected diffstat shape: ~10 files changed; per-file deltas mostly small (production `packetize.hpp` ctor signature + member rename = ~10-15 lines each; test fixture rewiring = ~5-20 lines each; integration testbench wormhole wiring = ~30-50 lines). If any single file shows >100 lines changed, scrutinize — that's a smell for unintended test logic edits.
+
 For each touched test file, manually verify:
 - Production files (`packetize.hpp` × 2): ctor signature + per-output routing only; no other logic change.
 - Test files: fixture construction switched to `PerChannelCapture` and pop sites switched accordingly; **NO** changes to `EXPECT_EQ` / `ASSERT_TRUE` assertion VALUES or test names.
