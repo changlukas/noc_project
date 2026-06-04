@@ -27,6 +27,7 @@ VERILATOR_FLAGS := \
     --cc --exe \
     --top-module $(TOP) \
     --no-timing \
+    --assert \
     -I$(COSIM_ROOT)/sv \
     -I$(COSIM_ROOT)/sv/wb2axip \
     -CFLAGS "-std=c++17" \

@@ -94,7 +94,12 @@ module tb_axi_conformity(
         .C_AXI_ID_WIDTH(ID_WIDTH),
         .C_AXI_DATA_WIDTH(DATA_WIDTH),
         .C_AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .OPT_EXCLUSIVE(0)
+        .OPT_EXCLUSIVE(0),
+        // Override tight defaults (3 cycles) to accommodate c_model's
+        // write_latency / read_latency which can exceed 3 cycles.
+        .F_AXI_MAXSTALL(64),
+        .F_AXI_MAXRSTALL(64),
+        .F_AXI_MAXDELAY(64)
     ) u_nmu_check (
         .i_clk(clk),
         .i_axi_reset_n(rst_n),
@@ -156,7 +161,12 @@ module tb_axi_conformity(
         .C_AXI_ID_WIDTH(ID_WIDTH),
         .C_AXI_DATA_WIDTH(DATA_WIDTH),
         .C_AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .OPT_EXCLUSIVE(0)
+        .OPT_EXCLUSIVE(0),
+        // Override tight defaults (3 cycles) to accommodate c_model's
+        // write_latency / read_latency which can exceed 3 cycles.
+        .F_AXI_MAXSTALL(64),
+        .F_AXI_MAXRSTALL(64),
+        .F_AXI_MAXDELAY(64)
     ) u_nsu_check (
         .i_clk(clk),
         .i_axi_reset_n(rst_n),

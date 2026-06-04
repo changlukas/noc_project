@@ -10,12 +10,17 @@ target_include_directories(test_nmu_nsu_axi_conformity PRIVATE
     ${NI_TESTS_ROOT_DIR})
 add_dependencies(test_nmu_nsu_axi_conformity codegen_check)
 
-# Stage the AXI fixture YAML files and config into the binary output directory
-# so the test can reference them via relative paths (fixtures/<name>.yaml and
+# Stage fixture files into the binary output directory so the test can
+# reference them via relative paths (fixtures/<name>.yaml and
 # config/port_params.yaml), matching how the standalone harness is invoked.
+# Two copy steps: AXI integration fixtures first (shared with c_model tests),
+# then cosim-specific PoC fixtures which may override for scope constraints.
 add_custom_command(TARGET test_nmu_nsu_axi_conformity POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/tests/axi/fixtures
+        $<TARGET_FILE_DIR:test_nmu_nsu_axi_conformity>/fixtures
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_LIST_DIR}/fixtures
         $<TARGET_FILE_DIR:test_nmu_nsu_axi_conformity>/fixtures
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_SOURCE_DIR}/config

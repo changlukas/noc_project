@@ -852,6 +852,17 @@ module faxi_slave #(
 	// ...
 	//
 	// }}}
+
+	// Track f_axi_wr_len: capture AWLEN on each AW handshake.
+	// The upstream formal always-block contains this via '// ...' stubs;
+	// simulation build needs it explicit so induction assertions
+	// (f_axi_wr_pending <= f_axi_wr_len+1) can pass.
+	always @(posedge i_clk)
+	if (!i_axi_reset_n)
+		f_axi_wr_len <= 0;
+	else if (axi_awr_req)
+		f_axi_wr_len <= i_axi_awlen;
+
 	// Write strobe validity checking
 	// {{{
 	always @(*)

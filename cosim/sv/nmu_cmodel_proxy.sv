@@ -4,6 +4,10 @@
 // IMPORTANT: cmodel_tick() is called exactly ONCE per posedge clk (here,
 // in the NMU proxy). The NSU proxy does NOT call cmodel_tick() — the
 // C-model advances exactly once per SV clock edge.
+//
+// DPI-C output arguments are written via local intermediates so that
+// nonblocking assignment (<=) to the interface signals is the only
+// write path, satisfying Verilator BLKANDNBLK rules.
 
 module nmu_cmodel_proxy #(
     parameter int ID_WIDTH   = 8,
@@ -58,6 +62,43 @@ module nmu_cmodel_proxy #(
         output bit [1:0]            resp,
         output bit                  last);
 
+    // Local intermediates: DPI-C writes here (blocking), then we
+    // nonblocking-assign to the interface signals below.
+    bit                  t_awvalid, t_awready;
+    bit [ID_WIDTH-1:0]   t_awid;
+    bit [ADDR_WIDTH-1:0] t_awaddr;
+    bit [7:0]            t_awlen;
+    bit [2:0]            t_awsize;
+    bit [1:0]            t_awburst;
+    bit                  t_awlock;
+    bit [3:0]            t_awcache;
+    bit [2:0]            t_awprot;
+    bit [3:0]            t_awqos;
+
+    bit                    t_wvalid, t_wready, t_wlast;
+    bit [DATA_WIDTH-1:0]   t_wdata;
+    bit [DATA_WIDTH/8-1:0] t_wstrb;
+
+    bit                  t_bvalid, t_bready;
+    bit [ID_WIDTH-1:0]   t_bid;
+    bit [1:0]            t_bresp;
+
+    bit                  t_arvalid, t_arready;
+    bit [ID_WIDTH-1:0]   t_arid;
+    bit [ADDR_WIDTH-1:0] t_araddr;
+    bit [7:0]            t_arlen;
+    bit [2:0]            t_arsize;
+    bit [1:0]            t_arburst;
+    bit                  t_arlock;
+    bit [3:0]            t_arcache;
+    bit [2:0]            t_arprot;
+    bit [3:0]            t_arqos;
+
+    bit                  t_rvalid, t_rready, t_rlast;
+    bit [ID_WIDTH-1:0]   t_rid;
+    bit [DATA_WIDTH-1:0] t_rdata;
+    bit [1:0]            t_rresp;
+
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             aif.awvalid <= '0; aif.awready <= '0;
@@ -80,21 +121,45 @@ module nmu_cmodel_proxy #(
             // Advance the C-model by one cycle — called ONCE per clock edge.
             cmodel_tick();
 
-            cmodel_nmu_get_aw(aif.awvalid, aif.awready,
-                              aif.awid, aif.awaddr,
-                              aif.awlen, aif.awsize, aif.awburst,
-                              aif.awlock, aif.awcache,
-                              aif.awprot, aif.awqos);
-            cmodel_nmu_get_w(aif.wvalid, aif.wready,
-                             aif.wdata, aif.wstrb, aif.wlast);
-            cmodel_nmu_get_ar(aif.arvalid, aif.arready,
-                              aif.arid, aif.araddr,
-                              aif.arlen, aif.arsize, aif.arburst,
-                              aif.arlock, aif.arcache,
-                              aif.arprot, aif.arqos);
-            cmodel_nmu_get_b(aif.bvalid, aif.bready, aif.bid, aif.bresp);
-            cmodel_nmu_get_r(aif.rvalid, aif.rready, aif.rid, aif.rdata,
-                             aif.rresp, aif.rlast);
+            // DPI-C populates local intermediates (blocking to locals).
+            cmodel_nmu_get_aw(t_awvalid, t_awready,
+                              t_awid, t_awaddr,
+                              t_awlen, t_awsize, t_awburst,
+                              t_awlock, t_awcache,
+                              t_awprot, t_awqos);
+            cmodel_nmu_get_w(t_wvalid, t_wready,
+                             t_wdata, t_wstrb, t_wlast);
+            cmodel_nmu_get_ar(t_arvalid, t_arready,
+                              t_arid, t_araddr,
+                              t_arlen, t_arsize, t_arburst,
+                              t_arlock, t_arcache,
+                              t_arprot, t_arqos);
+            cmodel_nmu_get_b(t_bvalid, t_bready, t_bid, t_bresp);
+            cmodel_nmu_get_r(t_rvalid, t_rready, t_rid, t_rdata,
+                             t_rresp, t_rlast);
+
+            // Nonblocking transfer to interface signals (single write path).
+            aif.awvalid <= t_awvalid; aif.awready <= t_awready;
+            aif.awid    <= t_awid;    aif.awaddr  <= t_awaddr;
+            aif.awlen   <= t_awlen;   aif.awsize  <= t_awsize;
+            aif.awburst <= t_awburst;
+            aif.awlock  <= t_awlock;  aif.awcache <= t_awcache;
+            aif.awprot  <= t_awprot;  aif.awqos   <= t_awqos;
+            aif.wvalid  <= t_wvalid;  aif.wready  <= t_wready;
+            aif.wlast   <= t_wlast;
+            aif.wdata   <= t_wdata;   aif.wstrb   <= t_wstrb;
+            aif.bvalid  <= t_bvalid;  aif.bready  <= t_bready;
+            aif.bid     <= t_bid;     aif.bresp   <= t_bresp;
+            aif.arvalid <= t_arvalid; aif.arready <= t_arready;
+            aif.arid    <= t_arid;    aif.araddr  <= t_araddr;
+            aif.arlen   <= t_arlen;   aif.arsize  <= t_arsize;
+            aif.arburst <= t_arburst;
+            aif.arlock  <= t_arlock;  aif.arcache <= t_arcache;
+            aif.arprot  <= t_arprot;  aif.arqos   <= t_arqos;
+            aif.rvalid  <= t_rvalid;  aif.rready  <= t_rready;
+            aif.rlast   <= t_rlast;
+            aif.rid     <= t_rid;     aif.rdata   <= t_rdata;
+            aif.rresp   <= t_rresp;
         end
     end
 endmodule
