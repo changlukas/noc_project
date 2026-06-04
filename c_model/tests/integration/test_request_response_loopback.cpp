@@ -51,17 +51,8 @@
 #include "common/loopback_noc.hpp"
 #include "common/scenario.hpp"
 #include "common/test_logger.hpp"
-#include "nmu/axi_slave_port.hpp"
-#include "nmu/depacketize.hpp"
-#include "nmu/packetize.hpp"
-#include "nmu/rob.hpp"
-#include "nmu/vc_arbiter.hpp"
-#include "noc/wormhole_arbiter.hpp"
-#include "nsu/axi_master_port.hpp"
-#include "nsu/depacketize.hpp"
-#include "nsu/meta_buffer.hpp"
-#include "nsu/packetize.hpp"
-#include "nsu/vc_arbiter.hpp"
+#include "nmu/nmu.hpp"
+#include "nsu/nsu.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -168,77 +159,42 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     }
     test::LoopbackNoc& loopback = *loopback_ptr;
 
-    // Response-path stack (NMU side): nmu::Depacketize pulls rsp_in flits and
-    // surfaces B/R beats to the AxiSlavePort.
-    nmu::Depacketize nmu_depkt(loopback.nmu_rsp_in(), params.depkt_b_q_depth,
-                               params.depkt_r_q_depth);
-
-    // Request-path packetizer (NMU side): Packetize self-computes dst via
-    // addr_trans::xy_route. Wrapped in Rob (Disabled for legacy fixtures,
-    // Enabled for multi_dst_stress so per-id B/R reorder runs across NSUs).
-    //
-    // NMU VcArbiter decorator. NUM_VC=1, Mode A (ReadWriteSplit) -- observationally
-    // transparent to all existing fixtures; future rounds may up NUM_VC.
-    auto nmu_arb = nmu::VcArbiter::read_write_split(loopback.nmu_req_out(), /*num_vc=*/1,
-                                                    /*write_vc=*/0, /*read_vc=*/0);
-    ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> nmu_wh_arb(
-        nmu_arb, /*num_inputs=*/3, std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
-    nmu::Packetize real_nmu_pkt(nmu_wh_arb.input(0), nmu_wh_arb.input(1), nmu_wh_arb.input(2),
-                                /*src_id=*/kNmuSrcId);
-    nmu::Rob rob(real_nmu_pkt, nmu_depkt, rob_mode, rob_mode);
-
-    // Ports straddle the packetize / depacketize stacks. The NMU port hands
-    // requests to Rob (which forwards to real_nmu_pkt) and pops responses
-    // from Rob (which forwards to nmu_depkt). Rob serves as both Packetizer
-    // and Depacketizer via multi-inheritance.
-    nmu::AxiSlavePort nmu_port(rob, rob, params);
+    // NMU top-level: encapsulates AxiSlavePort, Rob, Packetize,
+    // WormholeArbiter, VcArbiter, and Depacketize into one object.
+    nmu::NmuConfig nmu_cfg{};
+    nmu_cfg.src_id = kNmuSrcId;
+    nmu_cfg.write_rob_mode = rob_mode;
+    nmu_cfg.read_rob_mode = rob_mode;
+    nmu_cfg.port_params = params;
+    nmu_cfg.depkt_b_q_depth = params.depkt_b_q_depth;
+    nmu_cfg.depkt_r_q_depth = params.depkt_r_q_depth;
+    nmu::Nmu nmu(nmu_cfg, loopback.nmu_req_out(), loopback.nmu_rsp_in());
 
     // NSU stacks: 1 for legacy fixtures, 4 for multi_dst_stress.
     // Each NSU owns its own MetaBuffer / Depacketize / Packetize / AxiMasterPort
-    // so per-NSU response ordering is independent and the rig stresses the
+    // so per-NSU response ordering is independent and the testbench stresses the
     // cross-NSU reorder path inside Rob (Enabled mode).
     const std::size_t nsu_count = is_multi_dst ? kNumNsuMulti : 1u;
-    std::vector<std::unique_ptr<nsu::MetaBuffer>> nsu_metas;
-    std::vector<std::unique_ptr<nsu::Depacketize>> nsu_depkts;
-    std::vector<std::unique_ptr<nsu::VcArbiter>> nsu_arbs;
-    std::vector<std::unique_ptr<ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocRspOut>>>
-        nsu_wh_arbs;
-    std::vector<std::unique_ptr<nsu::Packetize>> nsu_pkts;
-    std::vector<std::unique_ptr<nsu::AxiMasterPort>> nsu_ports;
-    nsu_metas.reserve(nsu_count);
-    nsu_depkts.reserve(nsu_count);
-    nsu_arbs.reserve(nsu_count);
-    nsu_wh_arbs.reserve(nsu_count);
-    nsu_pkts.reserve(nsu_count);
-    nsu_ports.reserve(nsu_count);
+    std::vector<std::unique_ptr<nsu::Nsu>> nsus;
+    nsus.reserve(nsu_count);
     for (std::size_t i = 0; i < nsu_count; ++i) {
         const uint8_t this_nsu_src = is_multi_dst ? kNsuSrcIdsMulti[i] : kNsuSrcId;
-        nsu_metas.emplace_back(std::make_unique<nsu::MetaBuffer>(params.meta_buffer_per_id_depth));
-        nsu_depkts.emplace_back(std::make_unique<nsu::Depacketize>(
-            loopback.nsu_req_in(i), *nsu_metas[i], params.depkt_aw_q_depth, params.depkt_w_q_depth,
-            params.depkt_ar_q_depth));
-        // NSU VcArbiter decorator. NUM_VC=1, Mode A. Move-constructs from factory
-        // return into unique_ptr so the arbiter outlives the packetizer that
-        // holds it by reference.
-        nsu_arbs.emplace_back(std::make_unique<nsu::VcArbiter>(
-            nsu::VcArbiter::read_write_split(loopback.nsu_rsp_out(i), /*num_vc=*/1,
-                                             /*write_rsp_vc=*/0, /*read_rsp_vc=*/0)));
-        nsu_wh_arbs.emplace_back(
-            std::make_unique<ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocRspOut>>(
-                *nsu_arbs[i], /*num_inputs=*/2, std::vector<ni::cmodel::noc::ChannelPairing>{},
-                /*per_input_depth=*/4));
-        nsu_pkts.emplace_back(std::make_unique<nsu::Packetize>(nsu_wh_arbs[i]->input(0),  // b_out
-                                                               nsu_wh_arbs[i]->input(1),  // r_out
-                                                               *nsu_metas[i], this_nsu_src));
-        nsu_ports.emplace_back(
-            std::make_unique<nsu::AxiMasterPort>(*nsu_depkts[i], *nsu_pkts[i], params));
+        nsu::NsuConfig nsu_cfg{};
+        nsu_cfg.src_id = this_nsu_src;
+        nsu_cfg.port_params = params;
+        nsu_cfg.meta_buffer_per_id_depth = params.meta_buffer_per_id_depth;
+        nsu_cfg.depkt_aw_q_depth = params.depkt_aw_q_depth;
+        nsu_cfg.depkt_w_q_depth = params.depkt_w_q_depth;
+        nsu_cfg.depkt_ar_q_depth = params.depkt_ar_q_depth;
+        nsus.emplace_back(
+            std::make_unique<nsu::Nsu>(nsu_cfg, loopback.nsu_req_in(i), loopback.nsu_rsp_out(i)));
     }
 
     // Per-fixture override for ROB stall coverage: multi_dst_stress needs
     // max_outstanding_write >= 2 so AxiMaster admits both same-id writes
     // concurrently, forcing Rob to stall the 2nd until the 1st B returns.
     // ScenarioConfig defaults to 1 outstanding when the YAML omits the field,
-    // so keep the override rig-side rather than adding a YAML knob.
+    // so keep the override testbench-side rather than adding a YAML knob.
     std::size_t mow = sc.config.max_outstanding_write;
     std::size_t mor = sc.config.max_outstanding_read;
     if (is_multi_dst) {
@@ -247,7 +203,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     }
 
     // Stage 2 endpoints + oracle.
-    axi::AxiMasterT<nmu::AxiSlavePort> master(yaml_path, nmu_port, read_dump_path, mow, mor);
+    axi::AxiMasterT<nmu::AxiSlavePort> master(yaml_path, nmu.axi_slave_port(), read_dump_path, mow,
+                                              mor);
 
     // Observability hook: AxiMasterObserver tracks per-transaction counts,
     // AXI4 IHI 0022 §A5.3 per-id ordering, and (under NOC_LOG=1) emits a
@@ -296,7 +253,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // popping the front entry on each B / R(last) recovers the original NSU.
     // This is essential for multi-NSU: when AW1 (id=5) routes via NSU_0 and
     // AW2 (id=5) routes via NSU_1, the slave still emits B1 before B2, and
-    // the rig must hand B1 back to NSU_0 (whose MetaBuffer holds the
+    // the testbench must hand B1 back to NSU_0 (whose MetaBuffer holds the
     // matching dst/src snapshot) and B2 back to NSU_1.
     std::array<std::deque<std::size_t>, 256> b_owner_nsu;
     std::array<std::deque<std::size_t>, 256> r_owner_nsu;
@@ -304,18 +261,9 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     std::size_t cycle = 0;
     while (!master.done()) {
         master.tick();
-
-        // Response-path drain ordering: NMU depkt -> per-NSU depkts -> ports.
-        // This pulls in-flight flits forward by one stage per cycle in both
-        // directions before the ports forward their queues.
-        nmu_depkt.tick();
+        nmu.tick();
         for (std::size_t i = 0; i < nsu_count; ++i) {
-            nsu_depkts[i]->tick();
-        }
-
-        nmu_port.tick();
-        for (std::size_t i = 0; i < nsu_count; ++i) {
-            nsu_ports[i]->tick();
+            nsus[i]->tick();
         }
 
         // Shuttle requests from each NSU AxiMasterPort downstream face into the
@@ -323,8 +271,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         // forward; a rejected push indicates a sizing mismatch, surfaced as
         // test failure.
         for (std::size_t i = 0; i < nsu_count; ++i) {
-            auto* port = nsu_ports[i].get();
-            while (auto aw = port->pop_aw()) {
+            auto& port = nsus[i]->axi_master_port();
+            while (auto aw = port.pop_aw()) {
                 uint8_t id = aw->id;
                 if (!slave.push_aw(*aw)) {
                     ADD_FAILURE() << "AxiSlave rejected AW push; queue sizing mismatch "
@@ -333,14 +281,14 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
                 }
                 b_owner_nsu[id].push_back(i);
             }
-            while (auto w = port->pop_w()) {
+            while (auto w = port.pop_w()) {
                 if (!slave.push_w(*w)) {
                     ADD_FAILURE() << "AxiSlave rejected W push; queue sizing mismatch "
                                   << "(nsu=" << i << ")";
                     break;
                 }
             }
-            while (auto ar = port->pop_ar()) {
+            while (auto ar = port.pop_ar()) {
                 uint8_t id = ar->id;
                 if (!slave.push_ar(*ar)) {
                     ADD_FAILURE() << "AxiSlave rejected AR push; queue sizing mismatch "
@@ -355,20 +303,21 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         mem.tick();
 
         // Shuttle responses from AxiSlave back into the correct NSU
-        // AxiMasterPort upstream face. With multiple NSUs the rig must route
-        // each B / R beat back to the NSU that owns the matching outstanding
-        // AW / AR. AxiSlave preserves per-id submission order, so the front of
-        // b_owner_nsu[id] / r_owner_nsu[id] is always the correct destination.
-        // R bursts: keep the owner entry until r->last so every beat of a
-        // multi-beat burst routes to the same NSU.
+        // AxiMasterPort upstream face. With multiple NSUs the testbench must
+        // route each B / R beat back to the NSU that owns the matching
+        // outstanding AW / AR. AxiSlave preserves per-id submission order, so
+        // the front of b_owner_nsu[id] / r_owner_nsu[id] is always the correct
+        // destination. R bursts: keep the owner entry until r->last so every
+        // beat of a multi-beat burst routes to the same NSU.
         // Drain holdovers first (per-NSU), then pull from slave.
         for (std::size_t i = 0; i < nsu_count; ++i) {
+            auto& port = nsus[i]->axi_master_port();
             while (!b_holdovers[i].empty()) {
-                if (!nsu_ports[i]->push_b(b_holdovers[i].front())) break;
+                if (!port.push_b(b_holdovers[i].front())) break;
                 b_holdovers[i].pop_front();
             }
             while (!r_holdovers[i].empty()) {
-                if (!nsu_ports[i]->push_r(r_holdovers[i].front())) break;
+                if (!port.push_r(r_holdovers[i].front())) break;
                 r_holdovers[i].pop_front();
             }
         }
@@ -383,7 +332,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
             }
             std::size_t i = b_owner_nsu[id].front();
             b_owner_nsu[id].pop_front();
-            if (!b_holdovers[i].empty() || !nsu_ports[i]->push_b(*b)) {
+            auto& port = nsus[i]->axi_master_port();
+            if (!b_holdovers[i].empty() || !port.push_b(*b)) {
                 b_holdovers[i].push_back(*b);
             }
         }
@@ -398,28 +348,10 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
             if (r->last) {
                 r_owner_nsu[id].pop_front();
             }
-            if (!r_holdovers[i].empty() || !nsu_ports[i]->push_r(*r)) {
+            auto& port = nsus[i]->axi_master_port();
+            if (!r_holdovers[i].empty() || !port.push_r(*r)) {
                 r_holdovers[i].push_back(*r);
             }
-        }
-
-        // Advance WormholeArbiter stages first: each wh_arb drains one flit per
-        // tick from its per-input pending into the downstream VcArbiter.
-        // Must tick before VcArbiter so the pipeline is: Packetize -> wh_arb ->
-        // vc_arb -> loopback in the same cycle.
-        nmu_wh_arb.tick();
-        for (std::size_t i = 0; i < nsu_count; ++i) {
-            nsu_wh_arbs[i]->tick();
-        }
-
-        // Advance VcArbiter pending queues before loopback ages: VcArbiter drains its
-        // per-VC pending into loopback's per-NSU queues, then loopback ages its
-        // per-cycle delay pipes. Same-cycle ordering matches the request-side
-        // pipeline (Packetize -> VcArbiter.push_flit during nmu_port.tick(), then
-        // VcArbiter.tick() pushes into loopback in the same cycle).
-        nmu_arb.tick();
-        for (std::size_t i = 0; i < nsu_count; ++i) {
-            nsu_arbs[i]->tick();
         }
 
         // Advance the loopback's per-cycle delay pipes after all producers /
@@ -498,11 +430,11 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
                              FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u},
                              // Multi-NSU regression gate: 2 same-id writes + 2 same-id reads at
                              // different XYRouting dst boundaries (0x100 -> dst=0,
-                             // 0x10100 -> dst=1). Rig builds 4 NSU stacks with per-NSU latency
-                             // {10, 2, 5, 3}; Rob Enabled mode must reorder per-id B/R back into
-                             // submission order before AxiMaster observes them. The rig
-                             // overrides max_outstanding_{write,read} to 2 for this fixture so
-                             // AxiMaster admits both same-id transactions concurrently.
+                             // 0x10100 -> dst=1). Testbench builds 4 NSU stacks with per-NSU
+                             // latency {10, 2, 5, 3}; Rob Enabled mode must reorder per-id B/R
+                             // back into submission order before AxiMaster observes them. The
+                             // testbench overrides max_outstanding_{write,read} to 2 for this
+                             // fixture so AxiMaster admits both same-id transactions concurrently.
                              FixtureParam{"multi_dst_stress.yaml", 0u, 0u}),
                          [](const ::testing::TestParamInfo<FixtureParam>& info) {
                              auto n = info.param.yaml;
