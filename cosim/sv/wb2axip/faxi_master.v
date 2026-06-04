@@ -193,6 +193,30 @@ module faxi_master #(
 	//
 	integer	k;
 
+	// Missing declarations for simulation build (formal-stub additions)
+	// {{{
+	// Induction depth / reset tracking
+	localparam F_OPT_INITIAL = 1;
+	reg                     f_past_valid;
+	reg [3:0]               f_reset_length;
+	// Write address tracking registers
+	reg [7:0]               f_axi_wr_len;
+	reg [2:0]               f_axi_wr_size;
+	reg [AW-1:0]            f_axi_wr_addr;
+	reg [1:0]               f_axi_wr_burst;
+	// Read-side combinational helpers
+	reg [F_LGDEPTH-1:0]     next_rd_nbursts;
+	reg [F_LGDEPTH-1:0]     next_rd_outstanding;
+	// Read address tracking
+	reg [2:0]               f_axi_rd_cksize;
+	// Write-strobe checking helpers
+	reg [AW-1:0]            wstb_addr;
+	wire                    wstb_valid;
+	wire [2:0]              this_awsize;
+	reg [7:0]               val_wr_len;
+	assign this_awsize = f_axi_wr_size;
+	// }}}
+
 	initial	f_past_valid = 1'b0;
 	always @(posedge i_clk)
 		f_past_valid <= 1'b1;
@@ -977,6 +1001,23 @@ module faxi_master #(
 		reg	[F_LGDEPTH-1:0]	wrid_bursts_to_exwrite;
 		reg			exreq_return;
 
+		// Simulation-build stub declarations for signals missing from the
+		// partial port list (full port list present only in formal version)
+		reg			i_active_lock;
+		reg	[AW-1:0]	i_exlock_addr;
+		reg	[7:0]		i_exlock_len;
+		reg	[1:0]		i_exlock_burst;
+		reg	[2:0]		i_exlock_size;
+		reg			f_axi_ex_checklock;
+		wire	[1:0]		f_axi_ex_state;
+		wire	[AW-1:0]	f_axi_exreq_addr;
+		wire	[7:0]		f_axi_exreq_len;
+		wire	[1:0]		f_axi_exreq_burst;
+		wire	[2:0]		f_axi_exreq_size;
+		wire			f_axi_exreq_return;
+		reg			check_this_return;
+		reg	[IW-1:0]	f_axi_wr_checkid;
+
 		// awcache check
 		// {{{
 		always @(*)
@@ -1112,7 +1153,6 @@ module faxi_master #(
 			// ...
 
 			`SLAVE_ASSERT(!i_axi_bvalid
-				|| // ...
 				|| i_axi_bresp != EXOKAY);
 
 			if (rdid_bursts_to_lock == 1
@@ -1320,5 +1360,4 @@ module faxi_master #(
 	//
 
 	// }}}
-`endif
 endmodule
