@@ -1,0 +1,16 @@
+# Build artifacts
+build/
+cosim/verilator/obj_dir/
+c_model/build/
+Testing/
+c_model/Testing/
+
+# Temporary files
+*.tmp
+*.log
+
+# Editor/tool files
+.vscode/
+
+# Codex prompt files
+.codex_*.txt

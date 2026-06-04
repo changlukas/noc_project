@@ -3,6 +3,7 @@ TOP           := tb_axi_conformity
 PROJ_ROOT     := $(realpath ../..)
 COSIM_ROOT    := $(realpath ..)
 CMODEL_INC    := $(PROJ_ROOT)/c_model/include
+CMODEL_TESTS  := $(PROJ_ROOT)/c_model/tests
 SPECGEN_INC   := $(PROJ_ROOT)/specgen/generated/cpp
 YAMLCPP_INC   := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-src/include
 YAMLCPP_LIB   := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-build/libyaml-cpp.a
@@ -11,6 +12,7 @@ SV_SRC := \
     $(COSIM_ROOT)/sv/axi_if.sv \
     $(COSIM_ROOT)/sv/nmu_cmodel_proxy.sv \
     $(COSIM_ROOT)/sv/nsu_cmodel_proxy.sv \
+    $(COSIM_ROOT)/sv/wb2axip/faxi_wstrb.v \
     $(COSIM_ROOT)/sv/wb2axip/faxi_master.v \
     $(COSIM_ROOT)/sv/wb2axip/faxi_slave.v \
     $(COSIM_ROOT)/sv/tb_axi_conformity.sv
@@ -22,19 +24,37 @@ C_SRC := \
 # c_model is header-only: no -l flag needed; include paths suffice.
 # yaml-cpp is a static archive built by CMake FetchContent; link via full path.
 VERILATOR_FLAGS := \
-    --cc --exe --build \
+    --cc --exe \
     --top-module $(TOP) \
-    -I $(COSIM_ROOT)/sv \
-    -I $(COSIM_ROOT)/sv/wb2axip \
-    -CFLAGS "-std=c++17 -I$(COSIM_ROOT)/c -I$(CMODEL_INC) -I$(SPECGEN_INC) -I$(YAMLCPP_INC)" \
+    --no-timing \
+    -I$(COSIM_ROOT)/sv \
+    -I$(COSIM_ROOT)/sv/wb2axip \
+    -CFLAGS "-std=c++17" \
+    -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
+    -CFLAGS "-I$(COSIM_ROOT)/c" \
+    -CFLAGS "-I$(CMODEL_INC)" \
+    -CFLAGS "-I$(CMODEL_TESTS)" \
+    -CFLAGS "-I$(SPECGEN_INC)" \
+    -CFLAGS "-I$(YAMLCPP_INC)" \
     -LDFLAGS "$(YAMLCPP_LIB)" \
     +define+assume=assert \
     -Wno-fatal
 
 all: obj_dir/V$(TOP)
 
+# Python3 executable.  Prefer the MSYS2/system python3 if it resolves to a
+# real interpreter; fall back to the full Windows CPython path on this host.
+PYTHON3 ?= /c/Users/USER/AppData/Local/Programs/Python/Python313/python.exe
+
+# Two-phase build: Verilator generates C++ in obj_dir, then make compiles it.
+# PYTHON3 override: verilator_includer needs a real Python3 interpreter.
+# LDFLAGS_EXTRA: set PE stack reserve to 64 MiB so MinGW pthread initialises
+#   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
 obj_dir/V$(TOP): $(SV_SRC) $(C_SRC)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SV_SRC) $(C_SRC)
+	$(MAKE) -C obj_dir -f V$(TOP).mk \
+	    PYTHON3="$(PYTHON3)" \
+	    "USER_LDFLAGS=-Wl,--stack,67108864"
 
 # Smoke-test the Verilator toolchain with a trivial module before attempting
 # the full co-sim build.  Expected output: "TOOLCHAIN OK"
