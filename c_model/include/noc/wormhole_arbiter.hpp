@@ -75,19 +75,29 @@ public:
 
         // Validate pairings: from/to in range, from != to, no duplicate from,
         // no nested chain (a `to` cannot also be a `from`).
+        // Belt-and-braces assert + std::abort so NDEBUG release builds also
+        // fail-fast (assert alone is stripped under -DNDEBUG).
         for (std::size_t i = 0; i < pairings_.size(); ++i) {
             const auto& p = pairings_[i];
-            assert(p.from < num_inputs_ && p.to < num_inputs_ &&
-                   "WormholeArbiter: pairing out of range");
-            assert(p.from != p.to &&
-                   "WormholeArbiter: pairing from == to");
+            if (!(p.from < num_inputs_ && p.to < num_inputs_)) {
+                assert(false && "WormholeArbiter: pairing out of range");
+                std::abort();
+            }
+            if (p.from == p.to) {
+                assert(false && "WormholeArbiter: pairing from == to");
+                std::abort();
+            }
             for (std::size_t j = i + 1; j < pairings_.size(); ++j) {
-                assert(pairings_[j].from != p.from &&
-                       "WormholeArbiter: duplicate pairing.from");
+                if (pairings_[j].from == p.from) {
+                    assert(false && "WormholeArbiter: duplicate pairing.from");
+                    std::abort();
+                }
             }
             for (const auto& q : pairings_) {
-                assert(!(q.from == p.to) &&
-                       "WormholeArbiter: nested pairing chain (to is also a from)");
+                if (q.from == p.to) {
+                    assert(false && "WormholeArbiter: nested pairing chain (to is also a from)");
+                    std::abort();
+                }
             }
         }
 
