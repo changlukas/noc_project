@@ -1,0 +1,24 @@
+---
+# c_model coding style — industry standard C++ via clang-format
+# Base: Google C++ Style Guide
+# Project overrides: 4-space indent, 4-space continuation indent, 100-column width
+# Established 2026-06-04 during Stage 3 wrap-up
+BasedOnStyle: Google
+IndentWidth: 4
+ContinuationIndentWidth: 4
+ColumnLimit: 100
+AccessModifierOffset: -2
+AlignConsecutiveAssignments: false
+AlignConsecutiveDeclarations: false
+AllowShortFunctionsOnASingleLine: Inline
+BreakBeforeBraces: Attach
+DerivePointerAlignment: false
+PointerAlignment: Left
+SortIncludes: false
+SpaceAfterCStyleCast: false
+SpaceBeforeAssignmentOperators: true
+TabWidth: 4
+UseTab: Never
+---
+Language: Cpp
+Standard: c++17
