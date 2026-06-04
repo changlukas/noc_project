@@ -17,7 +17,6 @@
 #include "axi_dpi.h"
 #include "cosim/axi_dpi_adapter.hpp"
 #include "cosim/pin_snapshot.hpp"
-#include <cstring>
 #include <memory>
 
 using ni::cmodel::cosim::ArPins;
@@ -29,6 +28,7 @@ using ni::cmodel::cosim::WPins;
 
 namespace {
 
+// One adapter per process; Verilator harness must be single-threaded.
 std::unique_ptr<AxiDpiAdapter> g_adapter;
 
 // Split uint64_t addr into two svBitVecVal words (little-endian word order).
