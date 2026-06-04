@@ -33,3 +33,9 @@ add_subdirectory(nsu)
 add_subdirectory(integration)
 add_subdirectory(noc)
 add_subdirectory(cosim)
+
+# Stage 5 co-sim ctest entry — depends on cosim/verilator binary built out-of-band.
+# The cosim/tests/ tree lives outside c_model/, so we need an explicit binary dir.
+if(EXISTS "${CMAKE_SOURCE_DIR}/../cosim/tests/CMakeLists.txt")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim/tests cosim_smoke_tests)
+endif()
