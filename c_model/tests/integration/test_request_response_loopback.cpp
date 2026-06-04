@@ -116,7 +116,7 @@ struct LoopbackResult {
 };
 
 LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read_dump_path,
-                           unsigned req_delay, unsigned rsp_delay) {
+                           unsigned req_delay, unsigned rsp_delay, std::size_t num_vc = 1) {
     auto sc = axi::load_scenario(yaml_path);
 
     axi::Memory mem(sc.config.memory_base, sc.config.memory_size, sc.config.write_latency,
@@ -168,6 +168,11 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     nmu_cfg.port_params = params;
     nmu_cfg.depkt_b_q_depth = params.depkt_b_q_depth;
     nmu_cfg.depkt_r_q_depth = params.depkt_r_q_depth;
+    // Mode A (ReadWriteSplit): AW/W on write_vc=0, AR on read_vc=1 when num_vc>=2.
+    nmu_cfg.num_vc = num_vc;
+    nmu_cfg.vc_mode = nmu::VcMode::ReadWriteSplit;
+    nmu_cfg.write_vc = 0;
+    nmu_cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
     nmu::Nmu nmu(nmu_cfg, loopback.nmu_req_out(), loopback.nmu_rsp_in());
 
     // NSU stacks: 1 for legacy fixtures, 4 for multi_dst_stress.
@@ -186,6 +191,11 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         nsu_cfg.depkt_aw_q_depth = params.depkt_aw_q_depth;
         nsu_cfg.depkt_w_q_depth = params.depkt_w_q_depth;
         nsu_cfg.depkt_ar_q_depth = params.depkt_ar_q_depth;
+        // Mode A (ReadWriteSplit): B on write_rsp_vc=0, R on read_rsp_vc=1 when num_vc>=2.
+        nsu_cfg.num_vc = num_vc;
+        nsu_cfg.vc_mode = nsu::VcMode::ReadWriteSplit;
+        nsu_cfg.write_rsp_vc = 0;
+        nsu_cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
         nsus.emplace_back(
             std::make_unique<nsu::Nsu>(nsu_cfg, loopback.nsu_req_in(i), loopback.nsu_rsp_out(i)));
     }
@@ -380,6 +390,7 @@ struct FixtureParam {
     std::string yaml;
     unsigned req_delay;
     unsigned rsp_delay;
+    std::size_t num_vc = 1;
 };
 
 }  // namespace
@@ -392,15 +403,15 @@ TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
     auto p = GetParam();
     std::string yaml_path = "fixtures/" + p.yaml;
     std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml + ".pkt_e2e_q" +
-                        std::to_string(p.req_delay) + "_s" + std::to_string(p.rsp_delay) +
-                        ".read.txt";
-    auto r = run_fixture(yaml_path, rpath, p.req_delay, p.rsp_delay);
+                        std::to_string(p.req_delay) + "_s" + std::to_string(p.rsp_delay) + "_vc" +
+                        std::to_string(p.num_vc) + ".read.txt";
+    auto r = run_fixture(yaml_path, rpath, p.req_delay, p.rsp_delay, p.num_vc);
     EXPECT_EQ(r.scoreboard_mismatches, 0u)
         << "scoreboard mismatches in " << p.yaml << " (req_delay=" << p.req_delay
-        << " rsp_delay=" << p.rsp_delay << ")";
+        << " rsp_delay=" << p.rsp_delay << " num_vc=" << p.num_vc << ")";
     EXPECT_LE(r.cycle_count, kMaxCycles)
         << "watchdog tripped on " << p.yaml << " (req_delay=" << p.req_delay
-        << " rsp_delay=" << p.rsp_delay << ")";
+        << " rsp_delay=" << p.rsp_delay << " num_vc=" << p.num_vc << ")";
     if (r.is_multi_dst) {
         EXPECT_TRUE(r.b_order_ok)
             << "multi_dst_stress: id=0x05 B beats arrived out of submission "
@@ -413,21 +424,32 @@ TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
     }
 }
 
+// Shared name generator: yaml_stem + _q<req_delay> + _s<rsp_delay> + _vc<num_vc>.
+// Ensures uniqueness across the Fixtures (num_vc=1) and MultiVc (num_vc>1)
+// instantiation sets that run the same scenario YAMLs.
+static auto fixture_name_gen = [](const ::testing::TestParamInfo<FixtureParam>& info) {
+    auto n = info.param.yaml;
+    auto dot = n.rfind('.');
+    if (dot != std::string::npos) n = n.substr(0, dot);
+    return n + "_q" + std::to_string(info.param.req_delay) + "_s" +
+           std::to_string(info.param.rsp_delay) + "_vc" + std::to_string(info.param.num_vc);
+};
+
 INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
                          ::testing::Values(
                              // Zero-latency loopback baseline across the five Stage 2 fixture
                              // categories: INCR multi-beat, multi-outstanding stress, WRAP,
                              // aligned narrow, sparse-strobe multibeat.
-                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u},
-                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u},
-                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u},
-                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u},
+                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 1u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 1u},
+                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 1u},
+                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 1u},
+                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 1u},
                              // Configurable-latency variant on the multi-outstanding fixture:
                              // 2-cycle request delay + 3-cycle response delay exercises
                              // multi-cycle in-flight ordering and surfaces one-cycle
                              // registration bugs that the zero-latency path hides.
-                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 1u},
                              // Multi-NSU regression gate: 2 same-id writes + 2 same-id reads at
                              // different XYRouting dst boundaries (0x100 -> dst=0,
                              // 0x10100 -> dst=1). Testbench builds 4 NSU stacks with per-NSU
@@ -435,11 +457,37 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
                              // back into submission order before AxiMaster observes them. The
                              // testbench overrides max_outstanding_{write,read} to 2 for this
                              // fixture so AxiMaster admits both same-id transactions concurrently.
-                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u}),
-                         [](const ::testing::TestParamInfo<FixtureParam>& info) {
-                             auto n = info.param.yaml;
-                             auto dot = n.rfind('.');
-                             if (dot != std::string::npos) n = n.substr(0, dot);
-                             return n + "_q" + std::to_string(info.param.req_delay) + "_s" +
-                                    std::to_string(info.param.rsp_delay);
-                         });
+                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 1u}),
+                         fixture_name_gen);
+
+// Multi-VC instantiation: same 7 scenarios re-run at NUM_VC ∈ {2, 4, 8}.
+// Mode A (ReadWriteSplit): AW/W -> write_vc=0, AR -> read_vc=1 (num_vc>=2).
+// Validates WormholeArbiter + VcArbiter arbitration on the multi-VC path.
+// NUM_VC=1 is already covered by the Fixtures instantiation above.
+INSTANTIATE_TEST_SUITE_P(MultiVc, PacketizeLoopbackFixture,
+                         ::testing::Values(
+                             // num_vc=2
+                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 2u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 2u},
+                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 2u},
+                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 2u},
+                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 2u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 2u},
+                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 2u},
+                             // num_vc=4
+                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 4u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 4u},
+                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 4u},
+                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 4u},
+                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 4u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 4u},
+                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 4u},
+                             // num_vc=8
+                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 8u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 8u},
+                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 8u},
+                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 8u},
+                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 8u},
+                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 8u},
+                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 8u}),
+                         fixture_name_gen);
