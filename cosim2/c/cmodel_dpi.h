@@ -30,6 +30,9 @@ typedef enum {
 void cmodel_init(const char* scenario_yaml_path);
 void cmodel_finalize(void);
 int cmodel_check_error(const char** msg);
+// Scenario completion + scoreboard query (polled by tb_top.sv exit logic).
+int cmodel_done(void);
+int cmodel_scoreboard_clean(void);
 
 // Per-shell DPI signatures appended by Tasks 7-11.
 // LoopbackNoc (Task 7) — NoC-only, simplest shell:

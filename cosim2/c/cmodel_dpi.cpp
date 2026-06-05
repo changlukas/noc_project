@@ -89,6 +89,24 @@ extern "C" int cmodel_check_error(const char** msg) {
     return g_dpi_error_code.load();
 }
 
+// cmodel_done — returns 1 when the AxiMaster has submitted all scenario
+// transactions and all in-flight completions have been processed.
+// Returns 0 if the master adapter is not yet initialised.
+extern "C" int cmodel_done(void) {
+    if (!g_master_adapter) return 0;
+    return g_master_adapter->done() ? 1 : 0;
+}
+
+// cmodel_scoreboard_clean — returns 1 when the scoreboard has no mismatches.
+// Scoreboard callback wiring (on_write_completed / on_read_observed) is
+// deferred to T15; this stub returns 1 (clean) so the binary links for T14.
+// T15 must replace this with a real scoreboard query.
+extern "C" int cmodel_scoreboard_clean(void) {
+    // TODO(T15): wire Scoreboard via MasterShellAdapter callbacks and return
+    //   (g_scoreboard.mismatch_count() == 0) ? 1 : 0;
+    return 1;
+}
+
 // LoopbackNoc DPI handlers — Task 7.
 //
 // Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
