@@ -8,3 +8,6 @@ add_cmodel_test(test_master_shell_adapter test_master_shell_adapter.cpp)
 target_link_libraries(test_master_shell_adapter PRIVATE yaml-cpp::yaml-cpp)
 
 add_cmodel_test(test_slave_shell_adapter test_slave_shell_adapter.cpp)
+
+add_cmodel_test(test_nmu_shell_adapter test_nmu_shell_adapter.cpp)
+target_link_libraries(test_nmu_shell_adapter PRIVATE yaml-cpp::yaml-cpp)

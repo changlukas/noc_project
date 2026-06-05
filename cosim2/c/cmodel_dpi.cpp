@@ -5,8 +5,9 @@
 #include "dpi_boundary_macros.h"
 #include "cosim2/loopback_noc_shell_adapter.hpp"
 #include "cosim2/master_shell_adapter.hpp"
+#include "cosim2/nmu_shell_adapter.hpp"
 #include "cosim2/slave_shell_adapter.hpp"
-// Tasks 10-11 add includes for their adapters here.
+// Task 11 adds include for NsuShellAdapter here.
 
 #include "axi/scenario_parser.hpp"
 #include <atomic>
@@ -23,7 +24,7 @@ std::string g_dpi_error_msg;
 std::unique_ptr<LoopbackNocShellAdapter> g_loopback_adapter;
 std::unique_ptr<MasterShellAdapter> g_master_adapter;
 std::unique_ptr<SlaveShellAdapter> g_slave_adapter;
-// Task 10 adds g_nmu_adapter
+std::unique_ptr<NmuShellAdapter> g_nmu_adapter;
 // Task 11 adds g_nsu_adapter
 
 }  // namespace ni::cmodel::cosim2
@@ -36,6 +37,7 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         g_loopback_adapter.reset();
         g_master_adapter.reset();
         g_slave_adapter.reset();
+        g_nmu_adapter.reset();
         g_dpi_error_code.store(CMODEL_DPI_OK);
         g_dpi_error_msg.clear();
 
@@ -52,13 +54,17 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
 
         auto slave = std::make_unique<SlaveShellAdapter>();
         slave->init();
-        // Tasks 10-11: build 2 more local unique_ptr adapters
+
+        auto nmu = std::make_unique<NmuShellAdapter>();
+        nmu->init();
+        // Task 11: build NsuShellAdapter here
 
         // Commit (all-or-nothing)
         g_loopback_adapter = std::move(loop);
         g_master_adapter = std::move(master);
         g_slave_adapter = std::move(slave);
-        // Tasks 10-11: g_xxx_adapter = std::move(xxx);
+        g_nmu_adapter = std::move(nmu);
+        // Task 11: g_nsu_adapter = std::move(nsu);
     }
     DPI_BOUNDARY_END(cmodel_init);
 }
@@ -68,7 +74,8 @@ extern "C" void cmodel_finalize(void) {
         g_loopback_adapter.reset();
         g_master_adapter.reset();
         g_slave_adapter.reset();
-        // Tasks 10-11: reset other 2 singletons
+        g_nmu_adapter.reset();
+        // Task 11: g_nsu_adapter.reset();
     }
     DPI_BOUNDARY_END(cmodel_finalize);
 }
@@ -411,4 +418,110 @@ extern "C" void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* a
         *rlast = static_cast<svBit>(out.rlast);
     }
     DPI_BOUNDARY_END(cmodel_slave_get_outputs);
+}
+
+// Nmu DPI handlers — Task 10.
+//
+// Packing conventions mirror cmodel_slave_*:
+//   8-bit  id/attr  : word[0] low byte
+//   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
+//   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
+//   32-bit wstrb    : word[0]
+//   408-bit flit    : words[0..12] (51 bytes; unpack_flit/pack_flit defined above)
+
+using ni::cmodel::cosim2::NmuInputs;
+using ni::cmodel::cosim2::NmuOutputs;
+
+extern "C" void cmodel_nmu_set_inputs(
+    svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
+    svBitVecVal* awsize, svBitVecVal* awburst, svBitVecVal* awlock, svBitVecVal* awcache,
+    svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
+    svBitVecVal* wstrb, svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
+    svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
+    svBitVecVal* arlock, svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
+    svBit rready, svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
+    svBit noc_req_credit_return) {
+    DPI_BOUNDARY_BEGIN(cmodel_nmu_set_inputs) {
+        if (!g_nmu_adapter) {
+            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
+            g_dpi_error_msg = "cmodel_nmu_set_inputs: g_nmu_adapter null";
+            return;
+        }
+        NmuInputs in{};
+        in.awvalid = static_cast<bool>(awvalid);
+        in.awid = static_cast<uint8_t>(awid[0] & 0xFF);
+        in.awaddr = static_cast<uint64_t>(awaddr[0]) | (static_cast<uint64_t>(awaddr[1]) << 32);
+        in.awlen = static_cast<uint8_t>(awlen[0] & 0xFF);
+        in.awsize = static_cast<uint8_t>(awsize[0] & 0x07);
+        in.awburst = static_cast<uint8_t>(awburst[0] & 0x03);
+        in.awlock = static_cast<uint8_t>(awlock[0] & 0x01);
+        in.awcache = static_cast<uint8_t>(awcache[0] & 0x0F);
+        in.awprot = static_cast<uint8_t>(awprot[0] & 0x07);
+        in.awqos = static_cast<uint8_t>(awqos[0] & 0x0F);
+        in.wvalid = static_cast<bool>(wvalid);
+        in.wdata = unpack_data256(wdata);
+        in.wstrb = wstrb[0];
+        in.wlast = static_cast<bool>(wlast);
+        in.bready = static_cast<bool>(bready);
+        in.arvalid = static_cast<bool>(arvalid);
+        in.arid = static_cast<uint8_t>(arid[0] & 0xFF);
+        in.araddr = static_cast<uint64_t>(araddr[0]) | (static_cast<uint64_t>(araddr[1]) << 32);
+        in.arlen = static_cast<uint8_t>(arlen[0] & 0xFF);
+        in.arsize = static_cast<uint8_t>(arsize[0] & 0x07);
+        in.arburst = static_cast<uint8_t>(arburst[0] & 0x03);
+        in.arlock = static_cast<uint8_t>(arlock[0] & 0x01);
+        in.arcache = static_cast<uint8_t>(arcache[0] & 0x0F);
+        in.arprot = static_cast<uint8_t>(arprot[0] & 0x07);
+        in.arqos = static_cast<uint8_t>(arqos[0] & 0x0F);
+        in.rready = static_cast<bool>(rready);
+        in.noc_rsp_valid = static_cast<bool>(noc_rsp_valid);
+        in.noc_rsp_flit = unpack_flit(noc_rsp_flit);
+        in.noc_req_credit_return = static_cast<bool>(noc_req_credit_return);
+        g_nmu_adapter->set_inputs(in);
+    }
+    DPI_BOUNDARY_END(cmodel_nmu_set_inputs);
+}
+
+extern "C" void cmodel_nmu_tick(void) {
+    DPI_BOUNDARY_BEGIN(cmodel_nmu_tick) {
+        if (!g_nmu_adapter) {
+            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
+            g_dpi_error_msg = "cmodel_nmu_tick: g_nmu_adapter null";
+            return;
+        }
+        g_nmu_adapter->tick();
+    }
+    DPI_BOUNDARY_END(cmodel_nmu_tick);
+}
+
+extern "C" void cmodel_nmu_get_outputs(svBit* awready, svBit* wready, svBit* arready,
+                                       svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp,
+                                       svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
+                                       svBitVecVal* rresp, svBit* rlast, svBit* noc_req_valid,
+                                       svBitVecVal* noc_req_flit, svBit* noc_rsp_credit_return) {
+    DPI_BOUNDARY_BEGIN(cmodel_nmu_get_outputs) {
+        if (!g_nmu_adapter) {
+            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
+            g_dpi_error_msg = "cmodel_nmu_get_outputs: g_nmu_adapter null";
+            return;
+        }
+        NmuOutputs out{};
+        g_nmu_adapter->get_outputs(out);
+
+        *awready = static_cast<svBit>(out.awready);
+        *wready = static_cast<svBit>(out.wready);
+        *arready = static_cast<svBit>(out.arready);
+        *bvalid = static_cast<svBit>(out.bvalid);
+        bid[0] = out.bid;
+        bresp[0] = out.bresp & 0x3u;
+        *rvalid = static_cast<svBit>(out.rvalid);
+        rid[0] = out.rid;
+        pack_data256(out.rdata, rdata);
+        rresp[0] = out.rresp & 0x3u;
+        *rlast = static_cast<svBit>(out.rlast);
+        *noc_req_valid = static_cast<svBit>(out.noc_req_valid);
+        pack_flit(out.noc_req_flit, noc_req_flit);
+        *noc_rsp_credit_return = static_cast<svBit>(out.noc_rsp_credit_return);
+    }
+    DPI_BOUNDARY_END(cmodel_nmu_get_outputs);
 }

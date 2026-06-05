@@ -40,6 +40,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -148,15 +150,52 @@ inline void Nmu::tick() {
 // Invariant: NmuStandalone is non-copyable and non-movable (same as Nmu).
 // -------------------------------------------------------------------------
 
+// Stage 5b additive: NullNocReqOut / NullNocRspIn upgraded to queue stubs so
+// that NmuShellAdapter can drain produced req flits and inject incoming rsp
+// flits at the DPI boundary without modifying the Nmu internals.
+//
+// NullNocReqOut: push_flit accepts every flit into an internal deque (depth
+//   unbounded for PoC); credit_avail always true. ShellAdapter drains via
+//   pop_req_flit() each tick after calling nmu_.tick().
+//
+// NullNocRspIn: ShellAdapter injects flits via inject_rsp_flit() before
+//   calling nmu_.tick(); Nmu's Depacketize stage drains via pop_flit().
 namespace detail {
 
 struct NullNocReqOut : noc::NocReqOut {
-    bool push_flit(const Flit&) override { return false; }
-    bool credit_avail(uint8_t) const override { return false; }
+    // Accept every flit into queue (models infinite downstream bandwidth).
+    bool push_flit(const Flit& f) override {
+        queue_.push_back(f);
+        return true;
+    }
+    bool credit_avail(uint8_t) const override { return true; }
+
+    // ShellAdapter accessor: pop one flit per tick for DPI forwarding.
+    std::optional<Flit> pop_req_flit() {
+        if (queue_.empty()) return std::nullopt;
+        Flit f = queue_.front();
+        queue_.pop_front();
+        return f;
+    }
+
+  private:
+    std::deque<Flit> queue_;
 };
 
 struct NullNocRspIn : noc::NocRspIn {
-    std::optional<Flit> pop_flit() override { return std::nullopt; }
+    // ShellAdapter accessor: inject one flit per tick from DPI wire.
+    void inject_rsp_flit(const Flit& f) { queue_.push_back(f); }
+
+    // Nmu's Depacketize stage drains via pop_flit() each tick.
+    std::optional<Flit> pop_flit() override {
+        if (queue_.empty()) return std::nullopt;
+        Flit f = queue_.front();
+        queue_.pop_front();
+        return f;
+    }
+
+  private:
+    std::deque<Flit> queue_;
 };
 
 }  // namespace detail
@@ -176,6 +215,11 @@ class NmuStandalone {
     const Rob& rob() const noexcept { return nmu_.rob(); }
     const VcArbiter& vc_arbiter() const noexcept { return nmu_.vc_arbiter(); }
     Nmu& nmu() noexcept { return nmu_; }
+
+    // Stage 5b ShellAdapter accessors — drain req side, inject rsp side.
+    std::optional<Flit> pop_req_flit() { return null_req_out_.pop_req_flit(); }
+    void inject_rsp_flit(const Flit& f) { null_rsp_in_.inject_rsp_flit(f); }
+    bool req_credit_avail(uint8_t vc = 0) const { return null_req_out_.credit_avail(vc); }
 
   private:
     detail::NullNocReqOut null_req_out_;
