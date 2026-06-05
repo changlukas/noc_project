@@ -9,6 +9,15 @@
 
 namespace ni::cmodel::axi {
 
+// Fault injection configuration parsed from YAML config.inject:
+// When mode == None (default, no inject: field present), tick() overhead is
+// one bool check per cycle — zero behavioral change.
+struct InjectConfig {
+    enum class Mode { None, AwUnstable };
+    Mode mode = Mode::None;
+    std::size_t cycle = 0;  // tick index at which to trigger the violation
+};
+
 struct ScenarioConfig {
     uint64_t memory_base = 0;
     std::size_t memory_size = 0x10000;
@@ -16,6 +25,7 @@ struct ScenarioConfig {
     std::size_t read_latency = 1;
     std::size_t max_outstanding_write = 1;
     std::size_t max_outstanding_read = 1;
+    InjectConfig inject{};  // optional; defaults to Mode::None
 };
 
 struct ScenarioTransaction {
@@ -57,7 +67,8 @@ inline Scenario load_scenario(const std::string& path) {
         auto cfg = root["config"];
         static const std::vector<std::string> known_cfg = {
             "memory_base",  "memory_size",           "write_latency",
-            "read_latency", "max_outstanding_write", "max_outstanding_read"};
+            "read_latency", "max_outstanding_write", "max_outstanding_read",
+            "inject"};
         for (auto it = cfg.begin(); it != cfg.end(); ++it) {
             auto key = it->first.as<std::string>();
             bool ok = false;
@@ -76,6 +87,17 @@ inline Scenario load_scenario(const std::string& path) {
             sc.config.max_outstanding_write = cfg["max_outstanding_write"].as<std::size_t>();
         if (cfg["max_outstanding_read"])
             sc.config.max_outstanding_read = cfg["max_outstanding_read"].as<std::size_t>();
+        if (cfg["inject"]) {
+            auto inj = cfg["inject"];
+            const std::string mode_str = inj["mode"].as<std::string>();
+            if (mode_str == "aw_unstable") {
+                sc.config.inject.mode = InjectConfig::Mode::AwUnstable;
+            } else {
+                throw std::runtime_error("scenario: unknown +inject mode '" + mode_str +
+                                         "' (allowlist: aw_unstable)");
+            }
+            sc.config.inject.cycle = inj["cycle"].as<std::size_t>();
+        }
     }
 
     if (!root["transactions"] || !root["transactions"].IsSequence() ||

@@ -99,6 +99,12 @@ class AxiMasterT {
     }
 
     void tick() {
+        // ===== Fault injection arm =====
+        if (inject_.mode == InjectConfig::Mode::AwUnstable && cycle_count_ == inject_.cycle) {
+            force_awvalid_low_one_cycle_ = true;
+        }
+        ++cycle_count_;
+
         // ===== Drain B responses =====
         //
         // OperationContext model: one scenario_txn → one OperationContext → N
@@ -271,6 +277,14 @@ class AxiMasterT {
     void on_write_completed(std::function<void(const WriteResult&)> cb) { wcb_ = std::move(cb); }
     void on_read_observed(std::function<void(const ReadResult&)> cb) { rcb_ = std::move(cb); }
 
+    // Fault injection: call once after construction to arm a specific violation.
+    // When inject.mode == None (default), tick() adds one bool check — no other
+    // behavioral change.
+    void configure_inject(const InjectConfig& inj) noexcept {
+        inject_ = inj;
+        cycle_count_ = 0;
+    }
+
   private:
     static std::vector<uint8_t> load_write_data_(const std::string& path,
                                                  std::size_t expected_bytes) {
@@ -376,6 +390,12 @@ class AxiMasterT {
                 // AxLOCK is 1-bit; LockType::Exclusive maps to 1, Normal to 0. Every
                 // sub-burst of one operation carries the same lock value.
                 aw.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
+                // Fault injection: force awvalid low for one cycle by treating
+                // push_aw as rejected. Auto-clear the flag after this cycle.
+                if (force_awvalid_low_one_cycle_) {
+                    force_awvalid_low_one_cycle_ = false;
+                    return op.write_request_done();
+                }
                 if (!slave_.push_aw(aw)) return op.write_request_done();
                 ++op.next_aw_sub_idx_;
             }
@@ -452,6 +472,11 @@ class AxiMasterT {
     // Total active op counters (map.size() now counts active *ids*, not ops).
     std::size_t active_write_count_ = 0;
     std::size_t active_read_count_ = 0;
+
+    // Fault injection state (armed via configure_inject()).
+    InjectConfig inject_{};
+    std::size_t cycle_count_ = 0;
+    bool force_awvalid_low_one_cycle_ = false;
 };
 
 class AxiSlave;
@@ -512,6 +537,7 @@ class AxiMasterStandalone {
     void on_read_observed(std::function<void(const ReadResult&)> cb) {
         inner_.on_read_observed(std::move(cb));
     }
+    void configure_inject(const InjectConfig& inj) noexcept { inner_.configure_inject(inj); }
 
     // Expose inner AxiMasterT for ShellAdapter direct access when needed.
     AxiMasterT<detail::NullSlavePort>& inner() { return inner_; }
