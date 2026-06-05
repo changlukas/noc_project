@@ -102,6 +102,14 @@ class AxiMasterPort {
     std::size_t r_q_size() const { return r_q_.size(); }
     const PortParams& params() const { return params_; }
 
+    // Tick-end capacity queries (Stage 5b ShellAdapter contract per spec §6.4):
+    // Returns true iff one more B/R beat can be pushed when the next tick
+    // begins. MUST be called at tick end (after the c_model has drained /
+    // produced for this cycle). ShellAdapter samples these to drive the
+    // next-cycle ready outputs.
+    [[nodiscard]] bool can_accept_b() const noexcept { return b_q_.size() < params_.b_queue_depth; }
+    [[nodiscard]] bool can_accept_r() const noexcept { return r_q_.size() < params_.r_queue_depth; }
+
     // Non-consuming peek at the front of each queue (returns nullopt if empty).
     // Used by AxiDpiAdapter to snapshot pin state without advancing the queue.
     std::optional<axi::AwBeat> peek_aw() const {
