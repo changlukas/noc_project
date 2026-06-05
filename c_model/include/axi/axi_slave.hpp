@@ -1,14 +1,25 @@
 // Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #pragma once
-#include "axi/types.hpp"
+#include "axi/memory.hpp"
 #include "axi/memory_port.hpp"
 #include "axi/protocol_rules.hpp"
+#include "axi/types.hpp"
 #include <deque>
 #include <map>
 #include <optional>
 #include <tuple>
 
 namespace ni::cmodel::axi {
+
+// Config struct for Stage 5b ShellAdapter hermetic construction.
+// AxiSlave(AxiSlaveConfig) owns its Memory internally; no IMemoryPort& ref needed.
+struct AxiSlaveConfig {
+    uint64_t memory_base_addr = 0;
+    std::size_t memory_size = 65536;
+    std::size_t write_latency = 1;
+    std::size_t read_latency = 1;
+    std::size_t channel_queue_depth = 32;
+};
 
 // AXI4 IHI 0022 §A7.2.4 exclusive access tag, recorded by the slave's
 // exclusive monitor when an exclusive AR is admitted. A subsequent exclusive
@@ -33,6 +44,15 @@ struct ExclusiveTag {
 
 class AxiSlave {
   public:
+    // Stage 5b standalone ctor: owns Memory internally, no IMemoryPort& ref needed.
+    // owned_memory_ is declared before memory_port_ so it is constructed first.
+    explicit AxiSlave(AxiSlaveConfig cfg)
+        : owned_memory_(std::in_place, cfg.memory_base_addr, cfg.memory_size,
+                        cfg.write_latency, cfg.read_latency),
+          memory_port_(*owned_memory_),
+          depth_(cfg.channel_queue_depth) {}
+
+    // Original ctor: caller supplies an external IMemoryPort& (preserved verbatim).
     explicit AxiSlave(IMemoryPort& memory_port, std::size_t channel_queue_depth = 32)
         : memory_port_(memory_port), depth_(channel_queue_depth) {}
 
@@ -94,6 +114,12 @@ class AxiSlave {
     }
 
   private:
+    // Owned memory for standalone ctor (AxiSlaveConfig path).
+    // Declared before memory_port_ so it is constructed first; the standalone
+    // ctor's initializer list can then safely bind memory_port_ to *owned_memory_.
+    // External-ref ctor leaves this nullopt.
+    std::optional<Memory> owned_memory_;
+
     struct WriteBurstState {
         AwBeat aw;
         std::size_t beats_submitted = 0;

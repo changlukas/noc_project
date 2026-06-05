@@ -136,4 +136,51 @@ inline void Nmu::tick() {
     vc_arbiter_.tick();
 }
 
+// -------------------------------------------------------------------------
+// Stage 5b: NmuStandalone — hermetic wrapper, no external NoC refs.
+//
+// ShellAdapters construct NmuStandalone(NmuConfig{...}) without supplying
+// NocReqOut& / NocRspIn&. The wrapper owns null-stub implementations of
+// both interfaces; the real DPI wiring replaces them at the ShellAdapter
+// tick boundary. Null stubs: push_flit always returns false (backpressure),
+// pop_flit always returns nullopt (no incoming flits).
+//
+// Invariant: NmuStandalone is non-copyable and non-movable (same as Nmu).
+// -------------------------------------------------------------------------
+
+namespace detail {
+
+struct NullNocReqOut : noc::NocReqOut {
+    bool push_flit(const Flit&) override { return false; }
+    bool credit_avail(uint8_t) const override { return false; }
+};
+
+struct NullNocRspIn : noc::NocRspIn {
+    std::optional<Flit> pop_flit() override { return std::nullopt; }
+};
+
+}  // namespace detail
+
+class NmuStandalone {
+  public:
+    explicit NmuStandalone(NmuConfig cfg)
+        : null_req_out_(), null_rsp_in_(), nmu_(std::move(cfg), null_req_out_, null_rsp_in_) {}
+
+    NmuStandalone(const NmuStandalone&) = delete;
+    NmuStandalone(NmuStandalone&&) = delete;
+    NmuStandalone& operator=(const NmuStandalone&) = delete;
+    NmuStandalone& operator=(NmuStandalone&&) = delete;
+
+    AxiSlavePort& axi_slave_port() noexcept { return nmu_.axi_slave_port(); }
+    void tick() { nmu_.tick(); }
+    const Rob& rob() const noexcept { return nmu_.rob(); }
+    const VcArbiter& vc_arbiter() const noexcept { return nmu_.vc_arbiter(); }
+    Nmu& nmu() noexcept { return nmu_; }
+
+  private:
+    detail::NullNocReqOut null_req_out_;
+    detail::NullNocRspIn null_rsp_in_;
+    Nmu nmu_;
+};
+
 }  // namespace ni::cmodel::nmu

@@ -125,4 +125,48 @@ inline void Nsu::tick() {
     vc_arbiter_.tick();
 }
 
+// -------------------------------------------------------------------------
+// Stage 5b: NsuStandalone — hermetic wrapper, no external NoC refs.
+//
+// ShellAdapters construct NsuStandalone(NsuConfig{...}) without supplying
+// NocReqIn& / NocRspOut&. Null stubs own both interfaces; real DPI wiring
+// replaces them at the ShellAdapter tick boundary. Null stubs: pop_flit
+// returns nullopt, push_flit returns false (backpressure until DPI wired).
+//
+// Invariant: NsuStandalone is non-copyable and non-movable (same as Nsu).
+// -------------------------------------------------------------------------
+
+namespace detail {
+
+struct NullNocReqIn : noc::NocReqIn {
+    std::optional<Flit> pop_flit() override { return std::nullopt; }
+};
+
+struct NullNocRspOut : noc::NocRspOut {
+    bool push_flit(const Flit&) override { return false; }
+    bool credit_avail(uint8_t) const override { return false; }
+};
+
+}  // namespace detail
+
+class NsuStandalone {
+  public:
+    explicit NsuStandalone(NsuConfig cfg)
+        : null_req_in_(), null_rsp_out_(), nsu_(std::move(cfg), null_req_in_, null_rsp_out_) {}
+
+    NsuStandalone(const NsuStandalone&) = delete;
+    NsuStandalone(NsuStandalone&&) = delete;
+    NsuStandalone& operator=(const NsuStandalone&) = delete;
+    NsuStandalone& operator=(NsuStandalone&&) = delete;
+
+    AxiMasterPort& axi_master_port() noexcept { return nsu_.axi_master_port(); }
+    void tick() { nsu_.tick(); }
+    Nsu& nsu() noexcept { return nsu_; }
+
+  private:
+    detail::NullNocReqIn null_req_in_;
+    detail::NullNocRspOut null_rsp_out_;
+    Nsu nsu_;
+};
+
 }  // namespace ni::cmodel::nsu

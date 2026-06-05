@@ -10,6 +10,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -455,5 +456,69 @@ class AxiMasterT {
 
 class AxiSlave;
 using AxiMaster = AxiMasterT<AxiSlave>;
+
+// -------------------------------------------------------------------------
+// Stage 5b: AxiMasterStandalone — hermetic, no external SlaveT& ref.
+//
+// ShellAdapters that drive AxiMaster without a concrete AxiSlave (e.g.,
+// DPI-wired cosim) use this class. It owns a NullSlavePort (all push_*
+// calls return false; pop_* return nullopt) so AxiMasterT construction
+// succeeds without a real slave. The ShellAdapter overrides the
+// tick-level slave interaction via the DPI layer instead of calling
+// slave_.push_aw etc. directly.
+// -------------------------------------------------------------------------
+
+namespace detail {
+
+// NullSlavePort satisfies the AxiMasterT<SlaveT> interface.
+// push_* always returns false (no backpressure modeling needed at this layer
+// when the real channel is wired externally by the ShellAdapter).
+// pop_* return nullopt (responses injected via external call by ShellAdapter).
+struct NullSlavePort {
+    bool push_aw(const AwBeat&) { return false; }
+    bool push_w(const WBeat&) { return false; }
+    bool push_ar(const ArBeat&) { return false; }
+    std::optional<BBeat> pop_b() { return std::nullopt; }
+    std::optional<RBeat> pop_r() { return std::nullopt; }
+};
+
+}  // namespace detail
+
+// Config struct for Stage 5b ShellAdapter hermetic construction.
+struct AxiMasterConfig {
+    std::string scenario_yaml;
+    std::string read_dump_path;
+    std::size_t max_outstanding_write = 1;
+    std::size_t max_outstanding_read = 1;
+};
+
+// AxiMasterStandalone owns a NullSlavePort and wraps AxiMasterT<NullSlavePort>.
+// Exposes the same public API as AxiMasterT: tick(), done(), on_write_completed(),
+// on_read_observed(), active_write_count(), active_read_count().
+class AxiMasterStandalone {
+  public:
+    explicit AxiMasterStandalone(AxiMasterConfig cfg)
+        : null_slave_(),
+          inner_(cfg.scenario_yaml, null_slave_, cfg.read_dump_path,
+                 cfg.max_outstanding_write, cfg.max_outstanding_read) {}
+
+    void tick() { inner_.tick(); }
+    bool done() const { return inner_.done(); }
+    std::size_t active_write_count() const { return inner_.active_write_count(); }
+    std::size_t active_read_count() const { return inner_.active_read_count(); }
+    void on_write_completed(std::function<void(const WriteResult&)> cb) {
+        inner_.on_write_completed(std::move(cb));
+    }
+    void on_read_observed(std::function<void(const ReadResult&)> cb) {
+        inner_.on_read_observed(std::move(cb));
+    }
+
+    // Expose inner AxiMasterT for ShellAdapter direct access when needed.
+    AxiMasterT<detail::NullSlavePort>& inner() { return inner_; }
+
+  private:
+    detail::NullSlavePort null_slave_;
+    AxiMasterT<detail::NullSlavePort> inner_;
+};
 
 }  // namespace ni::cmodel::axi

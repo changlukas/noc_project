@@ -35,8 +35,21 @@
 
 namespace ni::cmodel::testing {
 
+// Config struct for Stage 5b ShellAdapter hermetic construction.
+// Mirrors the multi-NSU ctor parameters; ShellAdapters construct via
+// LoopbackNoc(LoopbackNocConfig{...}) without needing cross-component refs.
+struct LoopbackNocConfig {
+    std::size_t num_nsu = 1;
+    std::size_t req_q_depth_per_nsu = 64;
+    std::size_t rsp_q_depth_total = 64;
+};
+
 class LoopbackNoc {
   public:
+    // Stage 5b standalone ctor: hermetic, no cross-component refs.
+    explicit LoopbackNoc(LoopbackNocConfig cfg)
+        : LoopbackNoc(cfg.num_nsu, cfg.req_q_depth_per_nsu, cfg.rsp_q_depth_total) {}
+
     // Backward-compat single-NSU ctor. Defaults all dst_id to NSU_0.
     LoopbackNoc(std::size_t req_depth, std::size_t rsp_depth)
         : LoopbackNoc(/*num_nsu=*/1, req_depth, rsp_depth) {
