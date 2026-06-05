@@ -100,15 +100,30 @@ module loopback_noc_wrap #(
             // Step 2: advance C++ model one cycle.
             cmodel_loopback_noc_tick();
 
-            // Step 3: pull outputs from C++ model into locals, then register.
-            cmodel_loopback_noc_get_outputs(
-                req_out_valid_q,
-                req_out_flit_q,
-                req_out_credit_return_q,
-                rsp_out_valid_q,
-                rsp_out_flit_q,
-                rsp_out_credit_return_q
-            );
+            // Step 3: pull outputs into local temporaries (blocking to locals is
+            // safe; avoids BLKANDNBLK with the nonblocking reset path above).
+            begin : get_outputs_blk
+                bit               t_req_out_valid;
+                bit [FLIT_W-1:0]  t_req_out_flit;
+                bit               t_req_out_credit_return;
+                bit               t_rsp_out_valid;
+                bit [FLIT_W-1:0]  t_rsp_out_flit;
+                bit               t_rsp_out_credit_return;
+                cmodel_loopback_noc_get_outputs(
+                    t_req_out_valid,
+                    t_req_out_flit,
+                    t_req_out_credit_return,
+                    t_rsp_out_valid,
+                    t_rsp_out_flit,
+                    t_rsp_out_credit_return
+                );
+                req_out_valid_q         <= t_req_out_valid;
+                req_out_flit_q          <= t_req_out_flit;
+                req_out_credit_return_q <= t_req_out_credit_return;
+                rsp_out_valid_q         <= t_rsp_out_valid;
+                rsp_out_flit_q          <= t_rsp_out_flit;
+                rsp_out_credit_return_q <= t_rsp_out_credit_return;
+            end
 
             // Inline error check (spec §7.5): poll after every tick.
             begin : error_check

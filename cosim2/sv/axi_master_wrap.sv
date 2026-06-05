@@ -168,18 +168,73 @@ module axi_master_wrap #(
             // Step 2: advance C++ model one cycle.
             cmodel_master_tick();
 
-            // Step 3: pull outputs from C++ model into registered locals.
-            cmodel_master_get_outputs(
-                awvalid_q, awid_q, awaddr_q,
-                awlen_q,   awsize_q, awburst_q,
-                awlock_q,  awcache_q, awprot_q, awqos_q,
-                wvalid_q,  wdata_q,  wstrb_q,  wlast_q,
-                bready_q,
-                arvalid_q, arid_q,  araddr_q,
-                arlen_q,   arsize_q, arburst_q,
-                arlock_q,  arcache_q, arprot_q, arqos_q,
-                rready_q
-            );
+            // Step 3: pull outputs into local temporaries (blocking to locals is
+            // safe; avoids BLKANDNBLK with the nonblocking reset path above).
+            begin : get_outputs_blk
+                bit                    t_awvalid;
+                bit [ID_WIDTH-1:0]     t_awid;
+                bit [ADDR_WIDTH-1:0]   t_awaddr;
+                bit [7:0]              t_awlen;
+                bit [2:0]              t_awsize;
+                bit [1:0]              t_awburst;
+                bit                    t_awlock;
+                bit [3:0]              t_awcache;
+                bit [2:0]              t_awprot;
+                bit [3:0]              t_awqos;
+                bit                    t_wvalid;
+                bit [DATA_WIDTH-1:0]   t_wdata;
+                bit [DATA_WIDTH/8-1:0] t_wstrb;
+                bit                    t_wlast;
+                bit                    t_bready;
+                bit                    t_arvalid;
+                bit [ID_WIDTH-1:0]     t_arid;
+                bit [ADDR_WIDTH-1:0]   t_araddr;
+                bit [7:0]              t_arlen;
+                bit [2:0]              t_arsize;
+                bit [1:0]              t_arburst;
+                bit                    t_arlock;
+                bit [3:0]              t_arcache;
+                bit [2:0]              t_arprot;
+                bit [3:0]              t_arqos;
+                bit                    t_rready;
+                cmodel_master_get_outputs(
+                    t_awvalid, t_awid, t_awaddr,
+                    t_awlen,   t_awsize, t_awburst,
+                    t_awlock,  t_awcache, t_awprot, t_awqos,
+                    t_wvalid,  t_wdata,  t_wstrb,  t_wlast,
+                    t_bready,
+                    t_arvalid, t_arid,  t_araddr,
+                    t_arlen,   t_arsize, t_arburst,
+                    t_arlock,  t_arcache, t_arprot, t_arqos,
+                    t_rready
+                );
+                awvalid_q <= t_awvalid;
+                awid_q    <= t_awid;
+                awaddr_q  <= t_awaddr;
+                awlen_q   <= t_awlen;
+                awsize_q  <= t_awsize;
+                awburst_q <= t_awburst;
+                awlock_q  <= t_awlock;
+                awcache_q <= t_awcache;
+                awprot_q  <= t_awprot;
+                awqos_q   <= t_awqos;
+                wvalid_q  <= t_wvalid;
+                wdata_q   <= t_wdata;
+                wstrb_q   <= t_wstrb;
+                wlast_q   <= t_wlast;
+                bready_q  <= t_bready;
+                arvalid_q <= t_arvalid;
+                arid_q    <= t_arid;
+                araddr_q  <= t_araddr;
+                arlen_q   <= t_arlen;
+                arsize_q  <= t_arsize;
+                arburst_q <= t_arburst;
+                arlock_q  <= t_arlock;
+                arcache_q <= t_arcache;
+                arprot_q  <= t_arprot;
+                arqos_q   <= t_arqos;
+                rready_q  <= t_rready;
+            end
 
             // Inline error check (spec §7.5): poll after every tick.
             begin : error_check

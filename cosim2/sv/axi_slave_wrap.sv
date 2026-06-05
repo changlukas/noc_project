@@ -151,14 +151,39 @@ module axi_slave_wrap #(
             // Step 2: advance C++ model one cycle.
             cmodel_slave_tick();
 
-            // Step 3: pull outputs from C++ model into registered locals.
-            cmodel_slave_get_outputs(
-                awready_q,
-                wready_q,
-                arready_q,
-                bvalid_q, bid_q, bresp_q,
-                rvalid_q, rid_q, rdata_q, rresp_q, rlast_q
-            );
+            // Step 3: pull outputs into local temporaries (blocking to locals is
+            // safe; avoids BLKANDNBLK with the nonblocking reset path above).
+            begin : get_outputs_blk
+                bit                    t_awready;
+                bit                    t_wready;
+                bit                    t_arready;
+                bit                    t_bvalid;
+                bit [ID_WIDTH-1:0]     t_bid;
+                bit [1:0]              t_bresp;
+                bit                    t_rvalid;
+                bit [ID_WIDTH-1:0]     t_rid;
+                bit [DATA_WIDTH-1:0]   t_rdata;
+                bit [1:0]              t_rresp;
+                bit                    t_rlast;
+                cmodel_slave_get_outputs(
+                    t_awready,
+                    t_wready,
+                    t_arready,
+                    t_bvalid, t_bid, t_bresp,
+                    t_rvalid, t_rid, t_rdata, t_rresp, t_rlast
+                );
+                awready_q <= t_awready;
+                wready_q  <= t_wready;
+                arready_q <= t_arready;
+                bvalid_q  <= t_bvalid;
+                bid_q     <= t_bid;
+                bresp_q   <= t_bresp;
+                rvalid_q  <= t_rvalid;
+                rid_q     <= t_rid;
+                rdata_q   <= t_rdata;
+                rresp_q   <= t_rresp;
+                rlast_q   <= t_rlast;
+            end
 
             // Inline error check (spec §7.5): poll after every tick.
             begin : error_check
