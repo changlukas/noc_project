@@ -122,7 +122,11 @@ TEST(NmuShellAdapter, multi_beat_w_burst_visible_per_cycle) {
     adapter.set_inputs(in);
     adapter.tick();
     adapter.get_outputs(out);
-    EXPECT_TRUE(out.awready) << "cycle 1: Nmu should accept AW (empty queue)";
+    // awready is suppressed on the acceptance cycle for multi-beat writes (awlen>0)
+    // to satisfy the wb2axip faxi_slave invariant: !awready when wr_pending > 1.
+    // The AW IS accepted internally; the suppressed output matches co-sim semantics.
+    EXPECT_FALSE(out.awready)
+        << "cycle 1: awready suppressed for awlen=7 (wr_pending=8>1, wb2axip compat)";
 
     // Cycles 2-9: drive 8 W beats one per cycle.
     // Count: (a) beats where wready=true (beat accepted into queue this cycle)

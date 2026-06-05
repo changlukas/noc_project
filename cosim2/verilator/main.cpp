@@ -42,6 +42,9 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        // Check finish after rising edge — skip falling edge if done.
+        if (contextp->gotFinish()) break;
+
         contextp->timeInc(5);
         top->clk_i  = 0;
         top->eval();

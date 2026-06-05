@@ -10,6 +10,7 @@
 #include "cosim2/slave_shell_adapter.hpp"
 
 #include "axi/scenario_parser.hpp"
+#include "axi/scoreboard.hpp"
 #include <atomic>
 #include <memory>
 #include <string>
@@ -27,6 +28,9 @@ std::unique_ptr<SlaveShellAdapter> g_slave_adapter;
 std::unique_ptr<NmuShellAdapter> g_nmu_adapter;
 std::unique_ptr<NsuShellAdapter> g_nsu_adapter;
 
+// Real scoreboard — wired to MasterShellAdapter callbacks in cmodel_init.
+std::unique_ptr<ni::cmodel::axi::Scoreboard> g_scoreboard;
+
 }  // namespace ni::cmodel::cosim2
 
 using namespace ni::cmodel::cosim2;
@@ -39,6 +43,7 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         g_slave_adapter.reset();
         g_nmu_adapter.reset();
         g_nsu_adapter.reset();
+        g_scoreboard.reset();
         g_dpi_error_code.store(CMODEL_DPI_OK);
         g_dpi_error_msg.clear();
 
@@ -50,11 +55,17 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         loop->init();
 
         auto master = std::make_unique<MasterShellAdapter>();
-        master->init(std::string(scenario_yaml_path));
+        master->init(std::string(scenario_yaml_path),
+                     "",
+                     scenario.config.max_outstanding_write,
+                     scenario.config.max_outstanding_read);
         master->configure_inject(scenario.config.inject);
 
         auto slave = std::make_unique<SlaveShellAdapter>();
-        slave->init();
+        slave->init(scenario.config.memory_base,
+                    scenario.config.memory_size,
+                    scenario.config.write_latency,
+                    scenario.config.read_latency);
 
         auto nmu = std::make_unique<NmuShellAdapter>();
         nmu->init();
@@ -62,12 +73,23 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         auto nsu = std::make_unique<NsuShellAdapter>();
         nsu->init();
 
+        // Wire real scoreboard to master callbacks.
+        auto sb = std::make_unique<ni::cmodel::axi::Scoreboard>();
+        auto* sb_raw = sb.get();
+        master->on_write_completed([sb_raw](const ni::cmodel::axi::WriteResult& wr) {
+            sb_raw->handle_write_completed(wr, wr.data, wr.strb_per_beat);
+        });
+        master->on_read_observed([sb_raw](const ni::cmodel::axi::ReadResult& rr) {
+            sb_raw->handle_read_observed(rr);
+        });
+
         // Commit (all-or-nothing)
         g_loopback_adapter = std::move(loop);
         g_master_adapter = std::move(master);
         g_slave_adapter = std::move(slave);
         g_nmu_adapter = std::move(nmu);
         g_nsu_adapter = std::move(nsu);
+        g_scoreboard = std::move(sb);
     }
     DPI_BOUNDARY_END(cmodel_init);
 }
@@ -79,6 +101,7 @@ extern "C" void cmodel_finalize(void) {
         g_slave_adapter.reset();
         g_nmu_adapter.reset();
         g_nsu_adapter.reset();
+        g_scoreboard.reset();
     }
     DPI_BOUNDARY_END(cmodel_finalize);
 }
@@ -98,13 +121,11 @@ extern "C" int cmodel_done(void) {
 }
 
 // cmodel_scoreboard_clean — returns 1 when the scoreboard has no mismatches.
-// Scoreboard callback wiring (on_write_completed / on_read_observed) is
-// deferred to T15; this stub returns 1 (clean) so the binary links for T14.
-// T15 must replace this with a real scoreboard query.
+// g_scoreboard is wired via MasterShellAdapter on_write_completed /
+// on_read_observed callbacks in cmodel_init (T15).
 extern "C" int cmodel_scoreboard_clean(void) {
-    // TODO(T15): wire Scoreboard via MasterShellAdapter callbacks and return
-    //   (g_scoreboard.mismatch_count() == 0) ? 1 : 0;
-    return 1;
+    if (!g_scoreboard) return 1;
+    return (g_scoreboard->mismatch_count() == 0) ? 1 : 0;
 }
 
 // LoopbackNoc DPI handlers — Task 7.
@@ -293,10 +314,10 @@ extern "C" void cmodel_master_tick(void) {
 
 extern "C" void cmodel_master_get_outputs(
     svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+    svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
     svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,
     svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-    svBitVecVal* arsize, svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache,
+    svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
     svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_master_get_outputs) {
         if (!g_master_adapter) {
@@ -313,7 +334,7 @@ extern "C" void cmodel_master_get_outputs(
         awlen[0] = out.awlen;
         awsize[0] = out.awsize;
         awburst[0] = out.awburst;
-        awlock[0] = out.awlock;
+        *awlock = static_cast<svBit>(out.awlock & 0x01u);
         awcache[0] = out.awcache;
         awprot[0] = out.awprot;
         awqos[0] = out.awqos;
@@ -331,7 +352,7 @@ extern "C" void cmodel_master_get_outputs(
         arlen[0] = out.arlen;
         arsize[0] = out.arsize;
         arburst[0] = out.arburst;
-        arlock[0] = out.arlock;
+        *arlock = static_cast<svBit>(out.arlock & 0x01u);
         arcache[0] = out.arcache;
         arprot[0] = out.arprot;
         arqos[0] = out.arqos;
@@ -358,10 +379,10 @@ using ni::cmodel::cosim2::SlaveOutputs;
 
 extern "C" void cmodel_slave_set_inputs(
     svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+    svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
     svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast,
     svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
-    svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache, svBitVecVal* arprot,
+    svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot,
     svBitVecVal* arqos, svBit bready, svBit rready) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_set_inputs) {
         if (!g_slave_adapter) {
@@ -376,7 +397,7 @@ extern "C" void cmodel_slave_set_inputs(
         in.awlen = static_cast<uint8_t>(awlen[0] & 0xFF);
         in.awsize = static_cast<uint8_t>(awsize[0] & 0x07);
         in.awburst = static_cast<uint8_t>(awburst[0] & 0x03);
-        in.awlock = static_cast<uint8_t>(awlock[0] & 0x01);
+        in.awlock = static_cast<uint8_t>(awlock & 0x01);
         in.awcache = static_cast<uint8_t>(awcache[0] & 0x0F);
         in.awprot = static_cast<uint8_t>(awprot[0] & 0x07);
         in.awqos = static_cast<uint8_t>(awqos[0] & 0x0F);
@@ -390,7 +411,7 @@ extern "C" void cmodel_slave_set_inputs(
         in.arlen = static_cast<uint8_t>(arlen[0] & 0xFF);
         in.arsize = static_cast<uint8_t>(arsize[0] & 0x07);
         in.arburst = static_cast<uint8_t>(arburst[0] & 0x03);
-        in.arlock = static_cast<uint8_t>(arlock[0] & 0x01);
+        in.arlock = static_cast<uint8_t>(arlock & 0x01);
         in.arcache = static_cast<uint8_t>(arcache[0] & 0x0F);
         in.arprot = static_cast<uint8_t>(arprot[0] & 0x07);
         in.arqos = static_cast<uint8_t>(arqos[0] & 0x0F);
@@ -455,10 +476,10 @@ using ni::cmodel::cosim2::NmuOutputs;
 
 extern "C" void cmodel_nmu_set_inputs(
     svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+    svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
     svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast,
     svBit bready, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-    svBitVecVal* arsize, svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache,
+    svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
     svBitVecVal* arprot, svBitVecVal* arqos, svBit rready, svBit noc_rsp_valid,
     svBitVecVal* noc_rsp_flit, svBit noc_req_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_set_inputs) {
@@ -474,7 +495,7 @@ extern "C" void cmodel_nmu_set_inputs(
         in.awlen = static_cast<uint8_t>(awlen[0] & 0xFF);
         in.awsize = static_cast<uint8_t>(awsize[0] & 0x07);
         in.awburst = static_cast<uint8_t>(awburst[0] & 0x03);
-        in.awlock = static_cast<uint8_t>(awlock[0] & 0x01);
+        in.awlock = static_cast<uint8_t>(awlock & 0x01);
         in.awcache = static_cast<uint8_t>(awcache[0] & 0x0F);
         in.awprot = static_cast<uint8_t>(awprot[0] & 0x07);
         in.awqos = static_cast<uint8_t>(awqos[0] & 0x0F);
@@ -489,7 +510,7 @@ extern "C" void cmodel_nmu_set_inputs(
         in.arlen = static_cast<uint8_t>(arlen[0] & 0xFF);
         in.arsize = static_cast<uint8_t>(arsize[0] & 0x07);
         in.arburst = static_cast<uint8_t>(arburst[0] & 0x03);
-        in.arlock = static_cast<uint8_t>(arlock[0] & 0x01);
+        in.arlock = static_cast<uint8_t>(arlock & 0x01);
         in.arcache = static_cast<uint8_t>(arcache[0] & 0x0F);
         in.arprot = static_cast<uint8_t>(arprot[0] & 0x07);
         in.arqos = static_cast<uint8_t>(arqos[0] & 0x0F);
@@ -607,10 +628,10 @@ extern "C" void cmodel_nsu_tick(void) {
 extern "C" void cmodel_nsu_get_outputs(
     svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return, svBit* awvalid,
     svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+    svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
     svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,
     svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-    svBitVecVal* arsize, svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache,
+    svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
     svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_get_outputs) {
         if (!g_nsu_adapter) {
@@ -631,7 +652,7 @@ extern "C" void cmodel_nsu_get_outputs(
         awlen[0] = out.awlen;
         awsize[0] = out.awsize;
         awburst[0] = out.awburst;
-        awlock[0] = out.awlock;
+        *awlock = static_cast<svBit>(out.awlock & 0x01u);
         awcache[0] = out.awcache;
         awprot[0] = out.awprot;
         awqos[0] = out.awqos;
@@ -649,7 +670,7 @@ extern "C" void cmodel_nsu_get_outputs(
         arlen[0] = out.arlen;
         arsize[0] = out.arsize;
         arburst[0] = out.arburst;
-        arlock[0] = out.arlock;
+        *arlock = static_cast<svBit>(out.arlock & 0x01u);
         arcache[0] = out.arcache;
         arprot[0] = out.arprot;
         arqos[0] = out.arqos;

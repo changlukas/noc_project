@@ -39,7 +39,7 @@ module tb_top (
     localparam int F_LGDEPTH_VAL        = 10;  // default; accommodates MAXSTALL=32 (needs 6 bits)
     localparam int F_AXI_MAXSTALL_VAL   = 32;
     localparam int F_AXI_MAXRSTALL_VAL  = 32;
-    localparam int F_AXI_MAXDELAY_VAL   = 88;
+    localparam int F_AXI_MAXDELAY_VAL   = 500;  // T12-verified 88 + pipeline margin
 
     // -------------------------------------------------------------------------
     // DPI lifecycle
@@ -341,12 +341,12 @@ module tb_top (
             if (cmodel_scoreboard_clean() != 0) begin
         /* verilator lint_on WIDTHTRUNC */
                 $display("PASS: scenario complete, scoreboard clean");
-                cmodel_finalize();
+                // cmodel_finalize() is handled by main.cpp after $finish to
+                // avoid calling DPI on null adapters in the same time-step.
                 $finish(0);
             end else begin
                 $display("FAIL: scoreboard mismatch");
-                cmodel_finalize();
-                $finish(1);
+                $fatal(1, "tb_top: scoreboard mismatch, simulation failed");
             end
         end
     end

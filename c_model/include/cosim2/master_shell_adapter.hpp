@@ -48,6 +48,15 @@ class MasterShellAdapter {
         if (master_) master_->configure_inject(inj);
     }
 
+    // Scoreboard integration: forward callbacks to inner AxiMasterStandalone.
+    // Must be called after init() and before the first tick().
+    void on_write_completed(std::function<void(const axi::WriteResult&)> cb) {
+        if (master_) master_->on_write_completed(std::move(cb));
+    }
+    void on_read_observed(std::function<void(const axi::ReadResult&)> cb) {
+        if (master_) master_->on_read_observed(std::move(cb));
+    }
+
     void set_inputs(const MasterInputs& in) { in_ = in; }
 
     void tick() {
@@ -55,11 +64,17 @@ class MasterShellAdapter {
         auto& wp = master_->wire_port();
 
         // Step 1a: set per-channel ready backpressure from wire inputs.
-        // The WireSlavePort gates push_aw/push_w/push_ar return values so that
-        // the master correctly models AXI4 handshake stalling.
-        wp.set_awready(in_.awready);
-        wp.set_wready(in_.wready);
-        wp.set_arready(in_.arready);
+        //
+        // Beta-tick discipline: the incoming ready signals are the PREVIOUS cycle's
+        // registered NMU/NSU outputs. A beat is only accepted (handshake complete)
+        // when VALID was high ON THE WIRE last cycle AND ready is high this cycle.
+        // "Valid on the wire last cycle" = the master drove valid_q=1 last cycle,
+        // captured in prev_out_. Without this guard, the WireSlavePort would accept
+        // a beat the moment the downstream reports queue-space (ready=1), BEFORE
+        // the downstream ever saw VALID=1, causing the downstream to miss the beat.
+        wp.set_awready(in_.awready && prev_out_.awvalid);
+        wp.set_wready(in_.wready   && prev_out_.wvalid);
+        wp.set_arready(in_.arready && prev_out_.arvalid);
 
         // Step 1b: inject B/R response beats from wire inputs into WireSlavePort
         // so AxiMasterT::tick() can drain them via pop_b() / pop_r().
@@ -128,6 +143,9 @@ class MasterShellAdapter {
             out_.arprot   = ar->prot;
             out_.arqos    = ar->qos;
         }
+
+        // Save this cycle's outputs for beta-tick handshake guard next cycle.
+        prev_out_ = out_;
     }
 
     void get_outputs(MasterOutputs& out) const { out = out_; }
@@ -138,6 +156,7 @@ class MasterShellAdapter {
     std::unique_ptr<axi::AxiMasterStandalone> master_;
     MasterInputs  in_{};
     MasterOutputs out_{};
+    MasterOutputs prev_out_{};  // previous cycle's output for beta-tick guard
 
     // Generate a temp file path for the read dump when no explicit path given.
     static std::string make_tmp_dump() {

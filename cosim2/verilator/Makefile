@@ -37,6 +37,8 @@ VERILATOR_FLAGS := \
     -I$(COSIM_ROOT)/sv/wb2axip \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
+    -CFLAGS "-g" \
+    -CFLAGS "-O0" \
     -CFLAGS "-I$(COSIM_ROOT)/c" \
     -CFLAGS "-I$(CMODEL_INC)" \
     -CFLAGS "-I$(CMODEL_TESTS)" \

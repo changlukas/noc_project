@@ -86,6 +86,16 @@ struct ReadResult {
     std::size_t scenario_line;
 };
 
+// SFINAE helper: call slave.force_aw_not_pending() only if the slave type
+// provides that method (WireSlavePort does; NullSlavePort, AxiSlave do not).
+// Used by the fault-injection path to clear stale AW-pending state so that
+// AWVALID drops on the registered SV wire (beta-tick discipline).
+template <typename SlaveT>
+auto clear_aw_pending_if_supported(SlaveT& s) -> decltype(s.force_aw_not_pending(), void()) {
+    s.force_aw_not_pending();
+}
+inline void clear_aw_pending_if_supported(...) noexcept {}
+
 template <typename SlaveT>
 class AxiMasterT {
   public:
@@ -394,6 +404,10 @@ class AxiMasterT {
                 // push_aw as rejected. Auto-clear the flag after this cycle.
                 if (force_awvalid_low_one_cycle_) {
                     force_awvalid_low_one_cycle_ = false;
+                    // Beta-tick: clear any pending AW beat so AWVALID drops on
+                    // the SV wire. detail::clear_aw_pending is a helper that calls
+                    // force_aw_not_pending() if the slave type exposes it (SFINAE).
+                    clear_aw_pending_if_supported(slave_);
                     return op.write_request_done();
                 }
                 if (!slave_.push_aw(aw)) return op.write_request_done();
@@ -526,8 +540,14 @@ struct NullSlavePort {
 struct WireSlavePort {
     // Backpressure controls: ShellAdapter sets these from MasterInputs before
     // each call to AxiMasterT::tick().
+    // Beta-tick semantics: set_wready resets the per-tick delivery gate.
+    // Only ONE W beat is accepted per tick (modelling the 1-beat-per-clock-edge
+    // constraint of the registered SV wire in the co-sim beta-tick discipline).
     void set_awready(bool v) noexcept { awready_ = v; }
-    void set_wready(bool v) noexcept { wready_ = v; }
+    void set_wready(bool v) noexcept {
+        wready_ = v;
+        w_delivered_this_tick_ = false;  // reset gate each tick
+    }
     void set_arready(bool v) noexcept { arready_ = v; }
 
     // Called by AxiMasterT to present a request beat. Returns true (handshake
@@ -542,8 +562,9 @@ struct WireSlavePort {
     bool push_w(const WBeat& b) {
         last_w_ = b;
         w_pending_ = true;
-        if (!wready_) return false;
+        if (!wready_ || w_delivered_this_tick_) return false;
         w_pending_ = false;
+        w_delivered_this_tick_ = true;
         return true;
     }
     bool push_ar(const ArBeat& b) {
@@ -588,10 +609,16 @@ struct WireSlavePort {
     void inject_b(const BBeat& b) { b_queue_.push_back(b); }
     void inject_r(const RBeat& r) { r_queue_.push_back(r); }
 
+    // Beta-tick inject support: force-clear AW pending state so that AWVALID
+    // drops to 0 on the wire. Called by MasterShellAdapter when fault injection
+    // suppresses the AW push for the current cycle.
+    void force_aw_not_pending() noexcept { aw_pending_ = false; }
+
   private:
     bool awready_ = false;
     bool wready_  = false;
     bool arready_ = false;
+    bool w_delivered_this_tick_ = false;  // beta-tick: max 1 W beat per tick
 
     bool    aw_pending_ = false;
     AwBeat  last_aw_{};

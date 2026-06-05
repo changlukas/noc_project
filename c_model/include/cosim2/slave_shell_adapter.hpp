@@ -52,8 +52,15 @@ class SlaveShellAdapter {
         // Step 1: push AW/W/AR beats from the wire into AxiSlave queues.
         // The push_* return value indicates whether the queue accepted the beat
         // (true = accepted, false = queue full → backpressure this cycle).
+        //
+        // AW acceptance gated: faxi_master asserts !awready when wr_pending > 1.
+        // Suppress AW acceptance when more than 1 W beat is outstanding.
+        const bool pre_accept_wr_pending_gt1 =
+            (w_beats_expected_ > w_beats_received_) &&
+            ((w_beats_expected_ - w_beats_received_) > 1u);
+
         bool aw_accepted = false;
-        if (in_.awvalid) {
+        if (in_.awvalid && !pre_accept_wr_pending_gt1) {
             axi::AwBeat aw{};
             aw.id = in_.awid;
             aw.addr = in_.awaddr;
@@ -66,6 +73,9 @@ class SlaveShellAdapter {
             aw.qos = in_.awqos;
             aw.user = 0;
             aw_accepted = slave_->push_aw(aw);
+            if (aw_accepted) {
+                w_beats_expected_ += static_cast<std::size_t>(in_.awlen) + 1u;
+            }
         }
 
         bool w_accepted = false;
@@ -76,6 +86,9 @@ class SlaveShellAdapter {
             w.last = in_.wlast;
             w.user = 0;
             w_accepted = slave_->push_w(w);
+            if (w_accepted) {
+                ++w_beats_received_;
+            }
         }
 
         bool ar_accepted = false;
@@ -94,6 +107,11 @@ class SlaveShellAdapter {
             ar_accepted = slave_->push_ar(ar);
         }
 
+        // Recompute pending gt1 after this tick's updates for AWREADY output.
+        const bool post_accept_wr_pending_gt1 =
+            (w_beats_expected_ > w_beats_received_) &&
+            ((w_beats_expected_ - w_beats_received_) > 1u);
+
         // Step 2: advance AxiSlave one cycle (processes AW→W→B and AR→R pipelines).
         slave_->tick();
 
@@ -102,10 +120,11 @@ class SlaveShellAdapter {
 
         // awready/wready/arready: if master drove valid this cycle, report whether
         // the beat was accepted; otherwise report queue vacancy (space available).
+        // AWREADY suppression: match faxi_master checker's !awready when wr_pending>1.
         if (in_.awvalid) {
-            out_.awready = aw_accepted;
+            out_.awready = aw_accepted && !post_accept_wr_pending_gt1;
         } else {
-            out_.awready = (slave_->aw_q_size() < queue_depth_);
+            out_.awready = (slave_->aw_q_size() < queue_depth_) && !post_accept_wr_pending_gt1;
         }
 
         if (in_.wvalid) {
@@ -160,6 +179,11 @@ class SlaveShellAdapter {
     SlaveOutputs out_{};
     std::optional<axi::BBeat> held_b_;  // beat held while bready is low
     std::optional<axi::RBeat> held_r_;  // beat held while rready is low
+
+    // W-burst in-progress tracking for AWREADY suppression.
+    // faxi_master asserts !awready while f_axi_wr_pending > 1.
+    std::size_t w_beats_expected_ = 0;
+    std::size_t w_beats_received_ = 0;
 };
 
 }  // namespace ni::cmodel::cosim2

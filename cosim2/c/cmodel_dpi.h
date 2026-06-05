@@ -57,11 +57,11 @@ void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arready, svBit 
 void cmodel_master_tick(void);
 void cmodel_master_get_outputs(svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                                svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
-                               svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+                               svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
                                svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata,
                                svBitVecVal* wstrb, svBit* wlast, svBit* bready, svBit* arvalid,
                                svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-                               svBitVecVal* arsize, svBitVecVal* arburst, svBitVecVal* arlock,
+                               svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock,
                                svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
                                svBit* rready);
 
@@ -75,11 +75,11 @@ void cmodel_master_get_outputs(svBit* awvalid, svBitVecVal* awid, svBitVecVal* a
 //   other attribs : 1 word each (low bits used per width)
 void cmodel_slave_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                              svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
-                             svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+                             svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
                              svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
                              svBitVecVal* wstrb, svBit wlast, svBit arvalid, svBitVecVal* arid,
                              svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
-                             svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache,
+                             svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
                              svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready);
 void cmodel_slave_tick(void);
 void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
@@ -96,11 +96,11 @@ void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* arready, svB
 //   other attribs : 1 word each (low bits used per width)
 void cmodel_nmu_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                            svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
-                           svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+                           svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
                            svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
                            svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
                            svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
-                           svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache,
+                           svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
                            svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
                            svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
                            svBit noc_req_credit_return);
@@ -130,12 +130,12 @@ void cmodel_nsu_tick(void);
 void cmodel_nsu_get_outputs(svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit,
                             svBit* noc_req_credit_return, svBit* awvalid, svBitVecVal* awid,
                             svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-                            svBitVecVal* awburst, svBitVecVal* awlock, svBitVecVal* awcache,
+                            svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
                             svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,
                             svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast, svBit* bready,
                             svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
                             svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
-                            svBitVecVal* arlock, svBitVecVal* arcache, svBitVecVal* arprot,
+                            svBit* arlock, svBitVecVal* arcache, svBitVecVal* arprot,
                             svBitVecVal* arqos, svBit* rready);
 
 #ifdef __cplusplus
