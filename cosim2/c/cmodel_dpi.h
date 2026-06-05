@@ -94,12 +94,12 @@ void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* arready, svB
 void cmodel_nmu_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                            svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
                            svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-                           svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
-                           svBitVecVal* wstrb, svBit wlast, svBit bready, svBit arvalid,
-                           svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-                           svBitVecVal* arsize, svBitVecVal* arburst, svBitVecVal* arlock,
-                           svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
-                           svBit rready, svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
+                           svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
+                           svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
+                           svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
+                           svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache,
+                           svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
+                           svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
                            svBit noc_req_credit_return);
 void cmodel_nmu_tick(void);
 void cmodel_nmu_get_outputs(svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
@@ -107,6 +107,33 @@ void cmodel_nmu_get_outputs(svBit* awready, svBit* wready, svBit* arready, svBit
                             svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
                             svBit* noc_req_valid, svBitVecVal* noc_req_flit,
                             svBit* noc_rsp_credit_return);
+
+// Nsu (Task 11) — NoC consumer (req in) + producer (rsp out) + AXI master side.
+// Direction inversion vs. Nmu:
+//   cmodel_nsu_set_inputs receives noc_req_flit (consumer) + AXI master ready/B/R.
+//   cmodel_nsu_get_outputs produces noc_rsp_flit (producer) + AXI master AW/W/AR.
+// Packing conventions (same as cmodel_nmu_*):
+//   id fields     : 1 word (8-bit value in low byte)
+//   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
+//   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
+//   wstrb         : 1 word (32-bit strobe)
+//   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
+//   other attribs : 1 word each (low bits used per width)
+void cmodel_nsu_set_inputs(svBit noc_req_valid, svBitVecVal* noc_req_flit,
+                           svBit noc_rsp_credit_return, svBit awready, svBit wready, svBit bvalid,
+                           svBitVecVal* bid, svBitVecVal* bresp, svBit arready, svBit rvalid,
+                           svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
+void cmodel_nsu_tick(void);
+void cmodel_nsu_get_outputs(svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit,
+                            svBit* noc_req_credit_return, svBit* awvalid, svBitVecVal* awid,
+                            svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
+                            svBitVecVal* awburst, svBitVecVal* awlock, svBitVecVal* awcache,
+                            svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,
+                            svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast, svBit* bready,
+                            svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+                            svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
+                            svBitVecVal* arlock, svBitVecVal* arcache, svBitVecVal* arprot,
+                            svBitVecVal* arqos, svBit* rready);
 
 #ifdef __cplusplus
 }

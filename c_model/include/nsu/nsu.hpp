@@ -37,6 +37,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -130,8 +132,14 @@ inline void Nsu::tick() {
 //
 // ShellAdapters construct NsuStandalone(NsuConfig{...}) without supplying
 // NocReqIn& / NocRspOut&. Null stubs own both interfaces; real DPI wiring
-// replaces them at the ShellAdapter tick boundary. Null stubs: pop_flit
-// returns nullopt, push_flit returns false (backpressure until DPI wired).
+// replaces them at the ShellAdapter tick boundary.
+//
+// NullNocReqIn: ShellAdapter injects flits via inject_req_flit() before
+//   calling nsu_.tick(); Nsu's Depacketize stage drains via pop_flit().
+//
+// NullNocRspOut: push_flit accepts every flit into an internal deque (depth
+//   unbounded for PoC); credit_avail always true. ShellAdapter drains via
+//   pop_rsp_flit() each tick after calling nsu_.tick().
 //
 // Invariant: NsuStandalone is non-copyable and non-movable (same as Nsu).
 // -------------------------------------------------------------------------
@@ -139,12 +147,39 @@ inline void Nsu::tick() {
 namespace detail {
 
 struct NullNocReqIn : noc::NocReqIn {
-    std::optional<Flit> pop_flit() override { return std::nullopt; }
+    // ShellAdapter accessor: inject one flit per tick from DPI wire.
+    void inject_req_flit(const Flit& f) { queue_.push_back(f); }
+
+    // Nsu's Depacketize stage drains via pop_flit() each tick.
+    std::optional<Flit> pop_flit() override {
+        if (queue_.empty()) return std::nullopt;
+        Flit f = queue_.front();
+        queue_.pop_front();
+        return f;
+    }
+
+  private:
+    std::deque<Flit> queue_;
 };
 
 struct NullNocRspOut : noc::NocRspOut {
-    bool push_flit(const Flit&) override { return false; }
-    bool credit_avail(uint8_t) const override { return false; }
+    // Accept every flit into queue (models infinite downstream bandwidth).
+    bool push_flit(const Flit& f) override {
+        queue_.push_back(f);
+        return true;
+    }
+    bool credit_avail(uint8_t) const override { return true; }
+
+    // ShellAdapter accessor: pop one flit per tick for DPI forwarding.
+    std::optional<Flit> pop_rsp_flit() {
+        if (queue_.empty()) return std::nullopt;
+        Flit f = queue_.front();
+        queue_.pop_front();
+        return f;
+    }
+
+  private:
+    std::deque<Flit> queue_;
 };
 
 }  // namespace detail
@@ -162,6 +197,11 @@ class NsuStandalone {
     AxiMasterPort& axi_master_port() noexcept { return nsu_.axi_master_port(); }
     void tick() { nsu_.tick(); }
     Nsu& nsu() noexcept { return nsu_; }
+
+    // Stage 5b ShellAdapter accessors — inject req side, drain rsp side.
+    void inject_req_flit(const Flit& f) { null_req_in_.inject_req_flit(f); }
+    std::optional<Flit> pop_rsp_flit() { return null_rsp_out_.pop_rsp_flit(); }
+    bool rsp_credit_avail(uint8_t vc = 0) const { return null_rsp_out_.credit_avail(vc); }
 
   private:
     detail::NullNocReqIn null_req_in_;
