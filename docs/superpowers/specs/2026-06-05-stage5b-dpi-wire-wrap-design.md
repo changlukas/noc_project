@@ -24,7 +24,7 @@ The architectural prize is also future-facing: once each c_model component sits 
 - Reuse Stage 5a's vendored `wb2axip/` + Verilator MSYS2 build pattern
 - Additive c_model header changes: standalone ctor overloads, `can_accept_*()` const queries, plusarg-gated `inject_violation()` API
 - 5 ctest scenarios (simplified per `feedback-test-meaningfulness-over-count`)
-- rtl-forge `rtl-style` skill + karpathy-guidelines + `rtl-reviewer` agent integration
+- `cosim2/CODING_DISCIPLINE.md` documenting rtl-forge `rtl-style` skill + karpathy-guidelines + `rtl-reviewer` agent invocation conventions (the deliverable is the doc + CI grep script; the skills/agent themselves are already installed at user level)
 
 **Out of scope** (deferred to follow-up):
 - `main plan §5.2` ComponentHandle SV virtual class abstraction
@@ -36,7 +36,7 @@ The architectural prize is also future-facing: once each c_model component sits 
 - Layer 3 cross-comparison tool ((a) vs (b) beat sequence diff)
 - specgen handshake field upstream (Phase 2)
 - 256-beat / 4KB-cross / multi-VC stress scenarios
-- `cosim2/` → `cosim/` rename + delete (a) artifacts (separate clean commit after 5b stable)
+- `cosim2/` → `cosim/` rename (separate clean commit after 5b stable). Deletion of (a) PoC files (proxy SVs, axi_dpi_adapter, pin_snapshot) is IN-SCOPE early in 5b — see §3 + §8.
 
 ## 3. Anchored decisions
 
@@ -46,7 +46,7 @@ The architectural prize is also future-facing: once each c_model component sits 
 | Architecture | Approach 1: 5 hard-coded SV shells + manual wire interconnect in `tb_top` | Section 4 Approach selection |
 | DPI shape | Batched per shell: `set_inputs` + `tick` + `get_outputs` (3 calls per shell per cycle) | Codex Section 3 fix |
 | Hermetic singleton invariant | C++ components never directly method-call each other; only path = SV wire | Section 3 Codex review pushback |
-| ctor compatibility | Overloaded ctors: existing `Nmu(NmuConfig, NocReqOut&, NocRspIn&)` retained, new `Nmu(NmuConfig)` standalone added | Codex Section 6+7 patch #1 |
+| ctor compatibility | Overloaded ctors per component — **existing signature preserved verbatim for (a) compatibility, new standalone added for (b).** Affected: `Nmu`, `Nsu`, `AxiMaster`, `AxiSlave`, `LoopbackNoc` (5 components, all retain existing signature) | Codex Section 6+7 patch #1 + Section 12 review |
 | AW handshake closes when | Master's `*valid_q[t]` AND slave's `*ready_q[t]` both high in same SV cycle | Codex Section 4 High #1 |
 | Backpressure rule | `tick()` sequence: sample valid → query `can_accept_*()` → push iff both true → ALWAYS set `out.ready = can_accept_*_next_cycle()` | Codex Section 4 High #2 |
 | `can_accept_*()` semantic | Returns tick-end capacity (post-tick state); ShellAdapter calls at tick end only | Codex Section 6+7 Medium #3 |
@@ -160,11 +160,23 @@ class NmuShellAdapter {
 
 ```c
 // cosim2/c/cmodel_dpi.h
+
+// Error code enum (categorized, not just 0/1)
+typedef enum {
+    CMODEL_DPI_OK                       = 0,
+    CMODEL_DPI_ERR_GENERIC              = 1,   // catch (std::exception&) fallback
+    CMODEL_DPI_ERR_NOT_INITIALIZED      = 2,   // adapter accessed before cmodel_init
+    CMODEL_DPI_ERR_HERMETIC_VIOLATION   = 3,   // detected cross-component direct access
+    CMODEL_DPI_ERR_BACKPRESSURE         = 4,   // capacity invariant violation (push without check)
+    CMODEL_DPI_ERR_INJECT_BAD_MODE      = 5,   // +inject= mode not in allowlist
+    CMODEL_DPI_ERR_UNKNOWN              = 99   // catch (...) fallback
+} cmodel_dpi_error_e;
+
 extern "C" {
     // Lifecycle (singleton management for 5 adapters)
     void cmodel_init(const char* scenario_yaml_path);
     void cmodel_finalize(void);
-    int  cmodel_check_error(const char** msg);          // 0 = OK, !=0 = fatal pending
+    int  cmodel_check_error(const char** msg);   // returns cmodel_dpi_error_e value
 
     // 5 sets of {set, tick, get} — one set per component
     void cmodel_nmu_set_inputs(/* svBit/svBitVecVal args matching NmuInputs */);
@@ -207,6 +219,75 @@ extern "C" void cmodel_init(const char* path) {
 ```
 
 c_model ctors MUST be throw-safe (audit before implementation; spec-level invariant).
+
+### 5.4 SV shell module signatures (5 shells)
+
+```systemverilog
+module axi_master_wrap #(
+    parameter int ID_WIDTH   = 8,
+    parameter int ADDR_WIDTH = 64,
+    parameter int DATA_WIDTH = 256
+) (
+    input  logic       clk_i,
+    input  logic       rst_ni,
+    axi_intf.master    axi_o            // drives AXI to nmu_wrap
+);
+endmodule
+
+module nmu_wrap #(
+    parameter int ID_WIDTH   = 8,
+    parameter int ADDR_WIDTH = 64,
+    parameter int DATA_WIDTH = 256,
+    parameter int NUM_VC     = 1,
+    parameter int FLIT_W     = 256
+) (
+    input  logic              clk_i,
+    input  logic              rst_ni,
+    axi_intf.slave            axi_i,        // from axi_master_wrap
+    noc_req_intf.producer     noc_req_o,    // to loopback_noc_wrap
+    noc_rsp_intf.consumer     noc_rsp_i     // back from loopback_noc_wrap
+);
+endmodule
+
+module loopback_noc_wrap #(
+    parameter int NUM_VC = 1,
+    parameter int FLIT_W = 256
+) (
+    input  logic              clk_i,
+    input  logic              rst_ni,
+    noc_req_intf.consumer     req_from_nmu,
+    noc_req_intf.producer     req_to_nsu,
+    noc_rsp_intf.consumer     rsp_from_nsu,
+    noc_rsp_intf.producer     rsp_to_nmu
+);
+endmodule
+
+module nsu_wrap #(
+    // same parameters as nmu_wrap
+    parameter int ID_WIDTH = 8, parameter int ADDR_WIDTH = 64,
+    parameter int DATA_WIDTH = 256, parameter int NUM_VC = 1, parameter int FLIT_W = 256
+) (
+    input  logic              clk_i,
+    input  logic              rst_ni,
+    noc_req_intf.consumer     noc_req_i,
+    noc_rsp_intf.producer     noc_rsp_o,
+    axi_intf.master           axi_o         // drives AXI to axi_slave_wrap
+);
+endmodule
+
+module axi_slave_wrap #(
+    parameter int ID_WIDTH   = 8,
+    parameter int ADDR_WIDTH = 64,
+    parameter int DATA_WIDTH = 256
+) (
+    input  logic       clk_i,
+    input  logic       rst_ni,
+    axi_intf.slave     axi_i              // from nsu_wrap
+);
+endmodule
+```
+
+**Connection rule in `tb_top`**：所有 parameter 從 top localparam 統一驅動；`NUM_VC` 跨 NMU/LoopbackNoc/NSU 三 shell 必須一致；NoC interface 兩 instance（nmu↔noc, noc↔nsu）的 `FLIT_W` 與 `NUM_VC` 必須相同。Default `NUM_VC = 1` 給 PoC，未來 multi-VC scenario 在 top 改 localparam 即可。
 
 ## 6. Wire interface contracts
 
@@ -421,22 +502,40 @@ c_model/include/cosim2/
 ├── nsu_shell_adapter.hpp, nsu_shell_io.hpp
 └── slave_shell_adapter.hpp, slave_shell_io.hpp
 
-c_model/include/{nmu,nsu,axi,common}/    # additive changes only
-├── nmu/axi_slave_port.hpp               # + can_accept_aw/w/ar() const
-├── nsu/axi_master_port.hpp              # + can_accept_b/r() const
-├── axi/axi_master.hpp                   # + standalone ctor + plusarg inject mode
-├── axi/axi_slave.hpp                    # + standalone ctor
-├── nmu/nmu.hpp                          # + standalone ctor (NmuConfig only)
-├── nsu/nsu.hpp                          # + standalone ctor
-└── common/loopback_noc.hpp              # + standalone ctor
+c_model/include/{nmu,nsu,axi,common}/    # additive changes ONLY — existing signatures preserved verbatim
+├── nmu/axi_slave_port.hpp               # + can_accept_aw/w/ar() const queries (no existing API change)
+├── nsu/axi_master_port.hpp              # + can_accept_b/r() const queries (no existing API change)
+├── axi/axi_master.hpp                   # + standalone ctor overload; + plusarg inject mode parser
+│                                        #   (existing AxiMaster<AxiSlavePortT>(scenario, port_ref, ...) retained)
+├── axi/axi_slave.hpp                    # + standalone ctor overload
+│                                        #   (existing AxiSlave(memory) retained)
+├── nmu/nmu.hpp                          # + explicit Nmu(NmuConfig) standalone overload
+│                                        #   (existing Nmu(NmuConfig, NocReqOut&, NocRspIn&) retained)
+├── nsu/nsu.hpp                          # + explicit Nsu(NsuConfig) standalone overload
+│                                        #   (existing Nsu(NsuConfig, NocReqIn&, NocRspOut&) retained)
+└── common/loopback_noc.hpp              # + standalone ctor overload (existing ctor retained)
 
 # CODING_DISCIPLINE.md content
 - All cosim2/sv/*.sv MUST conform to rtl-style skill
-- Subagents writing/modifying SV invoke rtl-style skill first
+- Subagents writing/modifying SV invoke rtl-style skill first (Skill tool with name 'rtl-style')
 - Writers invoke karpathy-guidelines skill for code quality discipline
-- Reviewers dispatch rtl-reviewer agent + Codex review
-- Hermetic singleton invariant enforced via build/CI/grep
+- Hermetic singleton invariant enforced via build/CI/grep (script `tools/check_cosim2_hermetic.sh`)
 - Shells contain ONLY wire↔method conversion + handshake; no c_model logic
+
+## rtl-reviewer agent dispatch (concrete invocation)
+
+For each per-task code review of cosim2/sv/*.sv:
+
+  Agent(subagent_type='rtl-reviewer',
+        description='Review <module>.sv',
+        prompt='Review cosim2/sv/<module>.sv per rtl-style skill. Use Read/Grep on
+                the file. Return categorized findings with CRITICAL/HIGH/MEDIUM/LOW
+                severity, file:line refs, exact rule violated, minimal-change fix.')
+
+- Output artifact: save reviewer report to `c_model/build/rtl-review-logs/<task-id>-rtl-review.md`
+- Pass criteria: 0 CRITICAL + 0 HIGH findings
+- MEDIUM findings: flagged for decision; LOW: informational only
+- Codex review runs in parallel (independent perspective)
 ```
 
 (a) artifacts to **delete in single dedicated commit** (top of branch):
@@ -465,10 +564,14 @@ Carry to `cosim2/sv/wb2axip/`: vendored files + ATTRIBUTION + sim_wrapper + faxi
 - 1 injection scenario produces non-zero exit code (binary fail = test pass), `$display` confirms wb2axip property name
 - Existing Stage 5a `test_axi_dpi_adapter` (2 cases) unchanged (parallel infra)
 - 4 drift gates clean (specgen pytest 163, codegen --check, gen_inventory --check, c_model ctest)
-- `KNOWN_LIMITATIONS.md` §2 marked RESOLVED with evidence (multibeat passing log)
-- `rtl-reviewer` agent reports 0 CRITICAL/HIGH findings on shells
+- `KNOWN_LIMITATIONS.md` §2 marked RESOLVED with concrete evidence — `multibeat_incr_8beat.yaml` PASS log artifact saved to `c_model/build/test-artifacts/multibeat-resolved.log` and referenced from the RESOLVED note in KNOWN_LIMITATIONS.md
+- `rtl-reviewer` agent reports 0 CRITICAL/HIGH findings on every shell (.md reports under `c_model/build/rtl-review-logs/`)
 
-**ctest expected**: 395 (a baseline) + 5 (new) = **400/400**
+**ctest expected (CI vs local split)**:
+- **Local dev (Verilator + cosim2 binary built)**: 395 (Stage 5a baseline) + 5 (Stage 5b new) = **400/400**
+- **CI (no Verilator installed)**: 395 (Stage 5a baseline only; cosim2 entries skipped via CMake guard `if(EXISTS .../Vtb_top.exe) add_test(...)`)
+- CI gates: specgen pytest + codegen/inventory checks + c_model ctest 395
+- Local gates: above + cosim2 ctest 5 = full 400
 
 ### 9.3 Implementation prerequisites (must resolve before writing tests)
 
@@ -486,11 +589,52 @@ Carry to `cosim2/sv/wb2axip/`: vendored files + ATTRIBUTION + sim_wrapper + faxi
 
 ### 9.5 CI / drift gates
 
-GH Actions doesn't install Verilator (same as Stage 5a). cosim2 ctest local-only. CI runs specgen pytest + codegen / inventory checks + c_model ctest (excluding cosim2 entries).
+GH Actions doesn't install Verilator (same as Stage 5a). cosim2 ctest local-only via CMake guard:
+
+```cmake
+# c_model/tests/CMakeLists.txt (top of cosim2 hook)
+if(EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir_production/Vtb_top.exe"
+   OR EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir_production/Vtb_top")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim2/tests cosim2_tests)
+else()
+    message(STATUS "Vtb_top binary not found - skipping cosim2 ctest entries (likely CI env)")
+endif()
+```
+
+CI runs specgen pytest + codegen / inventory checks + c_model ctest = 395 entries. Local runs add cosim2 entries when Verilator binary built.
+
+### 9.6 Scenario YAML format
+
+Existing scenarios reuse `c_model/include/axi/scenario_parser.hpp` schema (carried from Stage 5a; field set: `id`, `addr`, `len`, `size`, `burst`, `lock`, `prot`, `qos`, `data`, `strb`, `max_outstanding_write`, `memory_latency` etc.).
+
+**Multi-beat scenarios**: set `len > 0` on a write transaction (e.g., `len: 7` = 8 beats). Existing YAML parser handles already; β tick discipline + per-cycle wire makes the W beats visible to wb2axip (vs (a) snapshot model losing them).
+
+**Multi-outstanding scenarios**: set `max_outstanding_write > 1` on the scenario block + multiple AW transactions with same ID + different addr; exercises Rob Enabled mode.
+
+**Injection scenarios — new field `inject:`**:
+
+```yaml
+# fixtures/injection_aw_unstable.yaml
+scenario:
+  max_outstanding_write: 1
+  memory_latency: 5
+  inject:                        # NEW field; consumed by AxiMaster at init
+    mode: aw_unstable            # must be in allowlist (currently: aw_unstable)
+    cycle: 10                    # when to trigger violation
+transactions:
+  - { type: write, id: 0, addr: 0x100, len: 0, size: 5, burst: 1, data: [0xCAFE] }
+```
+
+Allowlist (expandable):
+- `aw_unstable`: at cycle N, force `awvalid` low while `awready` not yet observed (violates AXI4 stable invariant)
+- (future) `wlast_drop`: drop wlast assertion mid-burst
+- (future) `bresp_xerror`: assert BRESP = X
+
+Parser: AxiMaster reads YAML `inject:` block at init. If field present, store mode + cycle. At each tick, if cycle matches + mode is `aw_unstable`, force `awvalid` low. If `mode` not in allowlist → `cmodel_init` returns `CMODEL_DPI_ERR_INJECT_BAD_MODE`.
 
 ## 10. Karpathy 4-lens
 
-**Overcomplication?** 25 new files lookbig but 5 shells are cookie-cutter (rtl-style template instantiated 5×). Alternatives rejected: extending (a) snapshot (treats symptom not cause); ComponentHandle SV virtual class (over-engineer for single backend; Verilator SV OOP support uncertain). Risk: shells creeping non-conversion logic. Mitigation: CODING_DISCIPLINE.md explicit rule + per-task review.
+**Overcomplication?** 25 new files look big but 5 shells share the same outer skeleton (rtl-style template instantiated 5×: `clk_i/rst_ni` + DPI imports + 1 `always_ff` + reset block + 3-step set/tick/get). Alternatives rejected: extending (a) snapshot (treats symptom not cause); ComponentHandle SV virtual class (over-engineer for single backend; Verilator SV OOP support uncertain). **Real implementation risk**：每個 shell 內部 `tick()` 內的 handshake state machine（capacity check + push detection + ready computation per AXI / NoC channel）是 per-component bespoke — outer skeleton 可 cookie-cutter，inner handshake logic 必須 case-by-case 寫對。**This is the highest-risk implementation area，不是 boilerplate**。Mitigations: explicit backpressure invariant (§6.4) + per-task spec-compliance reviewer cross-check against §6.3 timing diagram + rtl-reviewer agent CRITICAL/HIGH gate.
 
 **Surgical?** All c_model changes additive (overloaded ctors, `can_accept_*()` const queries, plusarg-driven inject — no signature changes). (a) infrastructure untouched. specgen unmodified Phase 1. New files all in cosim2/. ctest 395 baseline preserved. Risk: implementer drift into existing c_model internal logic. Mitigation: per-task scope clause in implementation plan + spec-compliance reviewer enforces `git diff` boundary.
 
