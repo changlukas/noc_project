@@ -47,8 +47,8 @@ class AxiSlave {
     // Stage 5b standalone ctor: owns Memory internally, no IMemoryPort& ref needed.
     // owned_memory_ is declared before memory_port_ so it is constructed first.
     explicit AxiSlave(AxiSlaveConfig cfg)
-        : owned_memory_(std::in_place, cfg.memory_base_addr, cfg.memory_size,
-                        cfg.write_latency, cfg.read_latency),
+        : owned_memory_(std::in_place, cfg.memory_base_addr, cfg.memory_size, cfg.write_latency,
+                        cfg.read_latency),
           memory_port_(*owned_memory_),
           depth_(cfg.channel_queue_depth) {}
 
@@ -85,7 +85,16 @@ class AxiSlave {
         return r;
     }
 
-    void tick();  // implemented in Task 3.2+
+    void tick();  // implemented in Task 3.2+; also advances owned_memory_ if present
+
+    // Advance the owned Memory one tick (standalone-ctor path only).
+    // External-ref ctor: caller is responsible for ticking the IMemoryPort
+    // implementation (e.g. a Memory instance) separately, as the tests do.
+    // Called at the top of tick() so memory responses are available in the
+    // same cycle the slave drains them in step 1.
+    void tick_memory() {
+        if (owned_memory_) owned_memory_->tick();
+    }
     void set_memory_bounds(uint64_t base, std::size_t size) {
         bounds_base_ = base;
         bounds_size_ = size;
@@ -162,6 +171,12 @@ class AxiSlave {
 };
 
 inline void AxiSlave::tick() {
+    // 0. Advance owned Memory one tick (standalone-ctor path only).
+    //    Decrement latency counters BEFORE draining responses (step 1) so that
+    //    a write submitted in this same tick can fire immediately on write_lat=0,
+    //    or arrive in the next tick on write_lat=1 (the common case).
+    tick_memory();
+
     // 1. Drain memory write responses → match by id, advance OLDEST burst.
     //    Per-ID FIFO: same-id bursts complete in issue order (AXI4 IHI 0022
     //    A5.3 — ordering of transactions with the same AXI ID is preserved).

@@ -1,0 +1,198 @@
+// axi_slave_wrap — Stage 5b DPI shell for AxiSlave component.
+//
+// Beta-tick discipline (spec §5.1): on every posedge clk_i the module
+// samples the PREVIOUS cycle's registered wire inputs (from axi_i.awvalid/
+// wvalid/arvalid + bready/rready channels), pushes them to C++ via
+// cmodel_slave_set_inputs, advances the model via cmodel_slave_tick, pulls
+// outputs via cmodel_slave_get_outputs, then registers those outputs
+// nonblocking so they are visible from the NEXT cycle onward.
+//
+// Reset: synchronous active-low (rst_ni). Output registers cleared on reset;
+// no async reset path — sync reset is the project default per rtl-style.
+//
+// Inline error check (spec §7.5): cmodel_check_error() called at end of
+// every active always_ff body; non-zero triggers $fatal after cmodel_finalize.
+//
+// axi_intf.slave modport: slave reads AW/W/AR + bready/rready from axi_i;
+//                         slave drives awready/wready/arready + B/R to axi_i.
+
+`ifndef AXI_SLAVE_WRAP_SV
+`define AXI_SLAVE_WRAP_SV
+
+module axi_slave_wrap #(
+    parameter int ID_WIDTH   = 8,
+    parameter int ADDR_WIDTH = 64,
+    parameter int DATA_WIDTH = 256
+) (
+    input  logic    clk_i,
+    input  logic    rst_ni,
+    axi_intf.slave  axi_i
+);
+
+    // -------------------------------------------------------------------------
+    // DPI imports — 3-step pattern per spec §5.1
+    // -------------------------------------------------------------------------
+
+    import "DPI-C" context function void cmodel_slave_set_inputs(
+        input  bit                    awvalid,
+        input  bit [ID_WIDTH-1:0]     awid,
+        input  bit [ADDR_WIDTH-1:0]   awaddr,
+        input  bit [7:0]              awlen,
+        input  bit [2:0]              awsize,
+        input  bit [1:0]              awburst,
+        input  bit                    awlock,
+        input  bit [3:0]              awcache,
+        input  bit [2:0]              awprot,
+        input  bit [3:0]              awqos,
+        input  bit                    wvalid,
+        input  bit [DATA_WIDTH-1:0]   wdata,
+        input  bit [DATA_WIDTH/8-1:0] wstrb,
+        input  bit                    wlast,
+        input  bit                    arvalid,
+        input  bit [ID_WIDTH-1:0]     arid,
+        input  bit [ADDR_WIDTH-1:0]   araddr,
+        input  bit [7:0]              arlen,
+        input  bit [2:0]              arsize,
+        input  bit [1:0]              arburst,
+        input  bit                    arlock,
+        input  bit [3:0]              arcache,
+        input  bit [2:0]              arprot,
+        input  bit [3:0]              arqos,
+        input  bit                    bready,
+        input  bit                    rready
+    );
+
+    import "DPI-C" context function void cmodel_slave_tick();
+
+    import "DPI-C" context function void cmodel_slave_get_outputs(
+        output bit                    awready,
+        output bit                    wready,
+        output bit                    arready,
+        output bit                    bvalid,
+        output bit [ID_WIDTH-1:0]     bid,
+        output bit [1:0]              bresp,
+        output bit                    rvalid,
+        output bit [ID_WIDTH-1:0]     rid,
+        output bit [DATA_WIDTH-1:0]   rdata,
+        output bit [1:0]              rresp,
+        output bit                    rlast
+    );
+
+    // Lifecycle / error polling (shared with all shells).
+    import "DPI-C" context function int  cmodel_check_error(output string msg);
+    import "DPI-C" context function void cmodel_finalize();
+
+    // -------------------------------------------------------------------------
+    // Output registers (beta-tick: registered one cycle behind DPI sample)
+    // -------------------------------------------------------------------------
+
+    bit awready_q;
+    bit wready_q;
+    bit arready_q;
+
+    bit                    bvalid_q;
+    bit [ID_WIDTH-1:0]     bid_q;
+    bit [1:0]              bresp_q;
+
+    bit                    rvalid_q;
+    bit [ID_WIDTH-1:0]     rid_q;
+    bit [DATA_WIDTH-1:0]   rdata_q;
+    bit [1:0]              rresp_q;
+    bit                    rlast_q;
+
+    // -------------------------------------------------------------------------
+    // always_ff: sync-reset, 3-step DPI call, registered outputs, error check
+    // -------------------------------------------------------------------------
+
+    always_ff @(posedge clk_i) begin
+        if (!rst_ni) begin
+            awready_q <= '0;
+            wready_q  <= '0;
+            arready_q <= '0;
+            bvalid_q  <= '0;
+            bid_q     <= '0;
+            bresp_q   <= '0;
+            rvalid_q  <= '0;
+            rid_q     <= '0;
+            rdata_q   <= '0;
+            rresp_q   <= '0;
+            rlast_q   <= '0;
+        end else begin
+            // Step 1: push current master-side wire values into C++ input latch.
+            cmodel_slave_set_inputs(
+                axi_i.awvalid,
+                axi_i.awid,
+                axi_i.awaddr,
+                axi_i.awlen,
+                axi_i.awsize,
+                axi_i.awburst,
+                axi_i.awlock,
+                axi_i.awcache,
+                axi_i.awprot,
+                axi_i.awqos,
+                axi_i.wvalid,
+                axi_i.wdata,
+                axi_i.wstrb,
+                axi_i.wlast,
+                axi_i.arvalid,
+                axi_i.arid,
+                axi_i.araddr,
+                axi_i.arlen,
+                axi_i.arsize,
+                axi_i.arburst,
+                axi_i.arlock,
+                axi_i.arcache,
+                axi_i.arprot,
+                axi_i.arqos,
+                axi_i.bready,
+                axi_i.rready
+            );
+
+            // Step 2: advance C++ model one cycle.
+            cmodel_slave_tick();
+
+            // Step 3: pull outputs from C++ model into registered locals.
+            cmodel_slave_get_outputs(
+                awready_q,
+                wready_q,
+                arready_q,
+                bvalid_q, bid_q, bresp_q,
+                rvalid_q, rid_q, rdata_q, rresp_q, rlast_q
+            );
+
+            // Inline error check (spec §7.5): poll after every tick.
+            begin : error_check
+                string err_msg;
+                int    err_code;
+                err_code = cmodel_check_error(err_msg);
+                if (err_code != 0) begin
+                    $display("[axi_slave_wrap] DPI fatal (code=%0d): %s",
+                             err_code, err_msg);
+                    cmodel_finalize();
+                    $fatal(1, "axi_slave_wrap: DPI error, simulation aborted");
+                end
+            end
+        end
+    end
+
+    // -------------------------------------------------------------------------
+    // Drive interface outputs from registered state
+    // -------------------------------------------------------------------------
+
+    assign axi_i.awready = awready_q;
+    assign axi_i.wready  = wready_q;
+    assign axi_i.arready = arready_q;
+
+    assign axi_i.bvalid  = bvalid_q;
+    assign axi_i.bid     = bid_q;
+    assign axi_i.bresp   = bresp_q;
+
+    assign axi_i.rvalid  = rvalid_q;
+    assign axi_i.rid     = rid_q;
+    assign axi_i.rdata   = rdata_q;
+    assign axi_i.rresp   = rresp_q;
+    assign axi_i.rlast   = rlast_q;
+
+endmodule
+
+`endif  // AXI_SLAVE_WRAP_SV

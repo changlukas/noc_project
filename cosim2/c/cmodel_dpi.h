@@ -17,31 +17,29 @@ extern "C" {
 // Categorized DPI error codes (return value of cmodel_check_error).
 // Per Stage 5b spec §5.2.
 typedef enum {
-    CMODEL_DPI_OK                     = 0,
-    CMODEL_DPI_ERR_GENERIC            = 1,
-    CMODEL_DPI_ERR_NOT_INITIALIZED    = 2,
+    CMODEL_DPI_OK = 0,
+    CMODEL_DPI_ERR_GENERIC = 1,
+    CMODEL_DPI_ERR_NOT_INITIALIZED = 2,
     CMODEL_DPI_ERR_HERMETIC_VIOLATION = 3,
-    CMODEL_DPI_ERR_BACKPRESSURE       = 4,
-    CMODEL_DPI_ERR_INJECT_BAD_MODE    = 5,
-    CMODEL_DPI_ERR_UNKNOWN            = 99
+    CMODEL_DPI_ERR_BACKPRESSURE = 4,
+    CMODEL_DPI_ERR_INJECT_BAD_MODE = 5,
+    CMODEL_DPI_ERR_UNKNOWN = 99
 } cmodel_dpi_error_e;
 
 // Lifecycle (5 shell singletons, all-or-nothing init per spec §5.3)
 void cmodel_init(const char* scenario_yaml_path);
 void cmodel_finalize(void);
-int  cmodel_check_error(const char** msg);
+int cmodel_check_error(const char** msg);
 
 // Per-shell DPI signatures appended by Tasks 7-11.
 // LoopbackNoc (Task 7) — NoC-only, simplest shell:
 void cmodel_loopback_noc_set_inputs(svBit req_in_valid, svBitVecVal* req_in_flit,
-                                     svBit req_in_credit_return,
-                                     svBit rsp_in_valid, svBitVecVal* rsp_in_flit,
-                                     svBit rsp_in_credit_return);
+                                    svBit req_in_credit_return, svBit rsp_in_valid,
+                                    svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return);
 void cmodel_loopback_noc_tick(void);
 void cmodel_loopback_noc_get_outputs(svBit* req_out_valid, svBitVecVal* req_out_flit,
-                                      svBit* req_out_credit_return,
-                                      svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
-                                      svBit* rsp_out_credit_return);
+                                     svBit* req_out_credit_return, svBit* rsp_out_valid,
+                                     svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return);
 
 // AxiMaster (Task 8) — drives AXI master side; consumes B/R from slave wire.
 // Packing: svBitVecVal* for multi-bit fields (little-endian word order).
@@ -50,25 +48,40 @@ void cmodel_loopback_noc_get_outputs(svBit* req_out_valid, svBitVecVal* req_out_
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
 //   wstrb         : 1 word (32-bit strobe)
 //   other attribs : 1 word each (low bits used per width)
-void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arready,
-                               svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp,
-                               svBit rvalid, svBitVecVal* rid, svBitVecVal* rdata,
-                               svBitVecVal* rresp, svBit rlast);
+void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arready, svBit bvalid,
+                              svBitVecVal* bid, svBitVecVal* bresp, svBit rvalid, svBitVecVal* rid,
+                              svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
 void cmodel_master_tick(void);
-void cmodel_master_get_outputs(svBit*       awvalid, svBitVecVal* awid,
-                                svBitVecVal* awaddr,  svBitVecVal* awlen,
-                                svBitVecVal* awsize,  svBitVecVal* awburst,
-                                svBitVecVal* awlock,  svBitVecVal* awcache,
-                                svBitVecVal* awprot,  svBitVecVal* awqos,
-                                svBit*       wvalid,  svBitVecVal* wdata,
-                                svBitVecVal* wstrb,   svBit*       wlast,
-                                svBit*       bready,
-                                svBit*       arvalid, svBitVecVal* arid,
-                                svBitVecVal* araddr,  svBitVecVal* arlen,
-                                svBitVecVal* arsize,  svBitVecVal* arburst,
-                                svBitVecVal* arlock,  svBitVecVal* arcache,
-                                svBitVecVal* arprot,  svBitVecVal* arqos,
-                                svBit*       rready);
+void cmodel_master_get_outputs(svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+                               svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
+                               svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+                               svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata,
+                               svBitVecVal* wstrb, svBit* wlast, svBit* bready, svBit* arvalid,
+                               svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
+                               svBitVecVal* arsize, svBitVecVal* arburst, svBitVecVal* arlock,
+                               svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
+                               svBit* rready);
+
+// AxiSlave (Task 9) — accepts AW/W/AR from master wire; drives awready/wready/
+// arready handshake + B/R response channels back to master.
+// Packing: same conventions as cmodel_master_* (little-endian word order).
+//   id fields     : 1 word (8-bit value in low byte)
+//   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
+//   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
+//   wstrb         : 1 word (32-bit strobe)
+//   other attribs : 1 word each (low bits used per width)
+void cmodel_slave_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+                             svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
+                             svBitVecVal* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+                             svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
+                             svBitVecVal* wstrb, svBit wlast, svBit arvalid, svBitVecVal* arid,
+                             svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
+                             svBitVecVal* arburst, svBitVecVal* arlock, svBitVecVal* arcache,
+                             svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready);
+void cmodel_slave_tick(void);
+void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
+                              svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
+                              svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast);
 
 #ifdef __cplusplus
 }
