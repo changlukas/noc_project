@@ -1,0 +1,49 @@
+# cosim2/ — Known Limitations
+
+## Resolved in Stage 5b
+
+### §2 Multi-beat W burst and multi-outstanding AW invisible to checker — RESOLVED
+
+Stage 5a snapshot model lost beats W[1..N-1] of multi-beat bursts. β tick
+discipline (registered SV wires, 1-cycle latency per hop) makes every beat
+wire-visible. Evidence: `multibeat_incr_8beat.yaml` passes wb2axip checker
+without false positives.
+
+Evidence artifact (after Task 15 completion):
+`c_model/build/test-artifacts/multibeat-resolved.log`
+
+### §3 cmodel_finalize not called on timeout — RESOLVED
+
+Stage 5b DPI error propagation (return code + SV `$fatal`) calls
+`cmodel_finalize()` at SV side cycle end before `$fatal`. See spec §7.5.
+
+## Carried unchanged from Stage 5a
+
+### §1 faxi_wstrb.v permissive stub
+
+`cosim2/sv/wb2axip/faxi_wstrb.v` was created as a permissive stub during the
+Stage 5a build-fix pass (commit `822a780`). `o_valid` is hardwired to `1'b1`,
+disabling WSTRB alignment checking. Stage 5b carries this stub unchanged.
+
+Follow-up: pull a proper upstream `faxi_wstrb.v` or implement the alignment
+check natively.
+
+### §4 read_dump tmp accumulation
+
+`c_model/include/cosim2/master_shell_adapter.hpp` (when implemented) inherits
+the per-instance read_dump `.tmp` filename from Stage 5a AxiDpiAdapter. Files
+accumulate in build dir per ctest run. Cosmetic; cleanup via per-instance
+destructor unlink is a follow-up.
+
+### §5 Timing master direction differs from spec §3 anchored decision
+
+Stage 5b harness keeps Stage 5a's "C++ drives clock" pattern (`main.cpp`
+toggles `clk_i` and drives `rst_ni`). The spec §3 decision says "SV master DPI
+direction" — the C++ harness is the timing master at the Verilator level, while
+the SV side owns the cycle-by-cycle wire propagation. This nuance is consistent
+with main plan §5.4 "low-friction first Verilator" goal; documented for future
+VCS DPI-RTL port (which will reverse the role).
+
+## New limitations introduced in Stage 5b
+
+(None expected; will be added if any surface during T15 smoke run.)

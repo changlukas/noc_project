@@ -1,4 +1,4 @@
-# OSS Attribution — cosim/sv/wb2axip/
+# OSS Attribution — cosim2/sv/wb2axip/
 
 AXI4 protocol checker properties from the ZipCPU/wb2axip project, used as
 simulation-runtime observers via Verilator. Two files are modified from
@@ -14,10 +14,10 @@ upstream; one file is newly authored for this project.
 
 | This repo                              | Upstream path                       | Status        |
 |----------------------------------------|--------------------------------------|---------------|
-| `cosim/sv/wb2axip/faxi_master.v`       | `bench/formal/faxi_master.v`         | Modified      |
-| `cosim/sv/wb2axip/faxi_slave.v`        | `bench/formal/faxi_slave.v`          | Modified      |
-| `cosim/sv/wb2axip/faxi_wstrb.v`        | (none)                               | Newly authored|
-| `cosim/sv/wb2axip/sim_wrapper.svh`     | (none)                               | Newly authored|
+| `cosim2/sv/wb2axip/faxi_master.v`      | `bench/formal/faxi_master.v`         | Modified      |
+| `cosim2/sv/wb2axip/faxi_slave.v`       | `bench/formal/faxi_slave.v`          | Modified      |
+| `cosim2/sv/wb2axip/faxi_wstrb.v`       | (none)                               | Newly authored|
+| `cosim2/sv/wb2axip/sim_wrapper.svh`    | (none)                               | Newly authored|
 
 ## Modifications to vendored files
 
@@ -61,7 +61,7 @@ into the parent modules; this project needs it as a separate module to
 satisfy Verilator's structural elaboration.
 
 **Current behavior**: `o_valid` is hardwired to `1'b1` (always valid). Write
-strobe alignment checking is effectively disabled. See `cosim/KNOWN_LIMITATIONS.md`
+strobe alignment checking is effectively disabled. See `cosim2/KNOWN_LIMITATIONS.md`
 §1 for the implication and fix path.
 
 ### sim_wrapper.svh (newly authored)
@@ -71,4 +71,10 @@ for the macro shim layer. `SLAVE_ASSUME` and `SLAVE_ASSERT` are defined
 inside `faxi_master.v` / `faxi_slave.v` with per-file role semantics; this
 file does NOT redefine them to avoid conflicts. Standalone `assume(...)` calls
 inside the checker files are mapped to `assert` via the Verilator build flag
-`+define+assume=assert` in `cosim/verilator/Makefile`.
+`+define+assume=assert` in `cosim2/verilator/Makefile`.
+
+## Path move (Stage 5b)
+
+Vendored files moved from `cosim/sv/wb2axip/` to `cosim2/sv/wb2axip/` as part of the
+Stage 5b DPI wire-wrap rework. File contents unchanged. Stage 5a artifacts at
+`cosim/sv/wb2axip/` have been deleted in this branch.
