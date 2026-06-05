@@ -33,3 +33,16 @@ add_subdirectory(nmu)
 add_subdirectory(nsu)
 add_subdirectory(integration)
 add_subdirectory(noc)
+
+# Stage 5b cosim2 ctest entries — only built when Vtb_top binary exists.
+# CI environments without Verilator skip silently; local dev with a built
+# Vtb_top gets 2 additional test targets (CosimWireSmoke, CheckerLiveness).
+if(EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir/Vtb_top.exe"
+   OR EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir/Vtb_top")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim2/tests
+                     ${CMAKE_BINARY_DIR}/cosim2_smoke_tests)
+else()
+    message(STATUS
+        "Vtb_top binary not found — skipping cosim2 ctest entries "
+        "(build cosim2/verilator first for local co-sim smoke tests)")
+endif()
