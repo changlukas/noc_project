@@ -188,6 +188,47 @@ extern "C" {
 
 Each DPI entrypoint wraps work in try/catch via `DPI_BOUNDARY_BEGIN(fn)` / `DPI_BOUNDARY_END` macro that sets `g_dpi_error_{code,msg}` on exception. NO `vl_fatal` mid-cycle — propagation via return code, SV shell raises `$fatal` at safe sync point.
 
+### 5.2.1 wb2axip MAXSTALL / MAXRSTALL / MAXDELAY semantic — verified
+
+Source inspection of `cosim2/sv/wb2axip/faxi_slave.v` on 2026-06-05:
+
+- **`F_AXI_MAXSTALL`** (aliased as `F_AXI_MAXWAIT`, line 141; properties at lines 422, 440, 460): Three independent per-channel counters — `f_axi_awstall`, `f_axi_wstall`, `f_axi_arstall`. Each increments every cycle that `xVALID=1 && xREADY=0` on its channel (AW, W, AR respectively); resets to 0 on `xREADY=1`, `xVALID=0`, or when response-channel backpressure (`BVALID && !BREADY`) would excuse the stall. Enforced as `SLAVE_ASSERT(counter < F_AXI_MAXSTALL)` — a DUT obligation: the slave must assert xREADY within MAXSTALL consecutive stall cycles.
+- **`F_AXI_MAXRSTALL`** (properties at lines 501, 516, 531): Three independent per-channel counters — `f_axi_wvstall` (counts cycles `wr_pending>0 && wvalid=0`: master not supplying W data after AW handshake), `f_axi_bstall` (consecutive cycles `BVALID=1 && BREADY=0`), `f_axi_rstall` (consecutive cycles `RVALID=1 && RREADY=0`). Enforced as `SLAVE_ASSUME` — these **constrain the master/environment**: the testbench must not stall the response channel or withhold W-data for more than MAXRSTALL consecutive cycles.
+- **`F_AXI_MAXDELAY`** (properties at lines 762, 765): Two per-transaction counters — `f_axi_awr_ack_delay` (counts cycles where `awr_nbursts>0 && bvalid=0 && wvalid=0`: all W beats sent, AW outstanding, but slave has not yet asserted BVALID) and `f_axi_rd_ack_delay` (counts cycles where `rd_outstanding>0 && rvalid=0`: read address accepted but slave not yet asserting RVALID). Counter resets on any beat of the response (`bvalid=1` or `rvalid=1`). Enforced as `SLAVE_ASSERT` — DUT obligation: the slave must begin responding within MAXDELAY cycles of receiving the last request beat.
+
+**Key distinction**: MAXSTALL/MAXWAIT constrains individual-cycle back-to-back stall runs on request channels; MAXDELAY constrains per-transaction silence before the **first** response beat; MAXRSTALL constrains the master/testbench on response-channel back-pressure and W-data pacing.
+
+Spec §7.2 parametric formula confirmed and updated:
+
+```systemverilog
+localparam int BURST_LEN_MAX   = 256;
+localparam int NUM_HOPS_FWD    = 4;    // master→nmu→noc→nsu→slave
+localparam int NUM_HOPS_BACK   = 4;
+localparam int MEM_LATENCY_MAX = 16;
+
+// F_AXI_MAXSTALL: slave must accept AW/W/AR within this many consecutive stall cycles.
+// Worst case in Stage 5b: NoC in-flight arbitration = O(NUM_HOPS_FWD) cycles. 32 is generous.
+localparam int F_AXI_MAXSTALL_VAL  = 32;
+
+// F_AXI_MAXRSTALL: master must not back-pressure B/R or stall W-data for more than this.
+// The testbench AxiMaster drives BREADY=1 combinatorially; wvstall risk is multi-beat gap.
+// 32 is sufficient for any single-burst back-pressure scenario in Stage 5b.
+localparam int F_AXI_MAXRSTALL_VAL = 32;
+
+// F_AXI_MAXDELAY: slave must assert BVALID/RVALID within this many cycles after last beat.
+// Worst case: all W beats sent (BURST_LEN_MAX cycles) + NoC round-trip + memory latency.
+// MAXDELAY only counts from last beat → BVALID; burst transmission time is NOT included.
+localparam int F_AXI_MAXDELAY_VAL  = NUM_HOPS_FWD + NUM_HOPS_BACK
+                                     + MEM_LATENCY_MAX
+                                     + 64;  // safety margin
+                                     // = 88 cycles for worst-case NoC+memory;
+                                     // trivially satisfied by Stage 5b PoC (4+4+16+64=88)
+```
+
+For Stage 5b PoC smoke set (max 8-beat burst, 5-cycle memory): MAXDELAY = 88 is extremely generous (actual path ~13–20 cycles). MAXSTALL = MAXRSTALL = 32 similarly generous.
+
+This unblocks T13 `tb_top.sv` MAXSTALL override.
+
 ### 5.3 Idempotent init (strong exception guarantee)
 
 ```cpp
@@ -419,18 +460,26 @@ Layers 1+2 ship gate. Layer 3 marked follow-up.
 ### 7.2 wb2axip bind + parametric override
 
 ```systemverilog
-localparam int BURST_LEN_MAX  = 256;
-localparam int NUM_HOPS_FWD   = 4;
-localparam int NUM_HOPS_BACK  = 4;
+// Semantic verified in §5.2.1 (source inspection 2026-06-05).
+localparam int NUM_HOPS_FWD    = 4;    // master→nmu→noc→nsu→slave
+localparam int NUM_HOPS_BACK   = 4;
 localparam int MEM_LATENCY_MAX = 16;
-// [UNVERIFIED] — implementer MUST verify wb2axip property semantic
-// before pinning. See cosim2/sv/wb2axip/{faxi_master,faxi_slave}.v sources.
-localparam int F_AXI_MAXSTALL_VAL  = NUM_HOPS_FWD * 2;
-localparam int F_AXI_MAXRSTALL_VAL = NUM_HOPS_BACK * 2;
-localparam int F_AXI_MAXDELAY_VAL  = BURST_LEN_MAX + NUM_HOPS_FWD + NUM_HOPS_BACK + MEM_LATENCY_MAX;
 
-faxi_slave #(.F_AXI_MAXSTALL(F_AXI_MAXSTALL_VAL), .F_AXI_MAXDELAY(F_AXI_MAXDELAY_VAL), ...)
-    u_nmu_check (...);
+// MAXSTALL: max consecutive cycles slave may stall xREADY on AW/W/AR channels.
+localparam int F_AXI_MAXSTALL_VAL  = 32;
+// MAXRSTALL: max consecutive cycles master may back-pressure B/R or stall W-data.
+localparam int F_AXI_MAXRSTALL_VAL = 32;
+// MAXDELAY: max cycles from last W/AR beat until first BVALID/RVALID (silence budget).
+// Burst transmission time is NOT counted; only post-last-beat silence counted.
+localparam int F_AXI_MAXDELAY_VAL  = NUM_HOPS_FWD + NUM_HOPS_BACK
+                                     + MEM_LATENCY_MAX + 64;  // = 88 cycles
+
+faxi_slave #(
+    .F_AXI_MAXSTALL (F_AXI_MAXSTALL_VAL),
+    .F_AXI_MAXRSTALL(F_AXI_MAXRSTALL_VAL),
+    .F_AXI_MAXDELAY (F_AXI_MAXDELAY_VAL),
+    ...
+) u_nmu_check (...);
 ```
 
 ### 7.3 Scoreboard placement + timing caveat
