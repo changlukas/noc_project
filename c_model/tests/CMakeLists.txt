@@ -28,6 +28,7 @@ target_sources(test_register_file PRIVATE
 
 add_subdirectory(axi)
 add_subdirectory(common)
+add_subdirectory(cosim2)
 add_subdirectory(nmu)
 add_subdirectory(nsu)
 add_subdirectory(integration)

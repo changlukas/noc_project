@@ -65,5 +65,105 @@ extern "C" int cmodel_check_error(const char** msg) {
     return g_dpi_error_code.load();
 }
 
-// Task 7 appends LoopbackNoc handler bodies here.
+// LoopbackNoc DPI handlers — Task 7.
+//
+// Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
+// ceil(FLIT_WIDTH / 32) = 13. Words are little-endian: word[0] carries bits
+// [31:0], word[12] carries bits [407:384] in its low 24 bits.
+
+using ni::cmodel::cosim2::FLIT_VEC_WORDS;
+using ni::cmodel::cosim2::FLIT_BYTES;
+using ni::cmodel::cosim2::FlitBytes;
+using ni::cmodel::cosim2::LoopbackNocInputs;
+using ni::cmodel::cosim2::LoopbackNocOutputs;
+
+namespace {
+
+// Unpack svBitVecVal[FLIT_VEC_WORDS] → FlitBytes (little-endian within each word).
+FlitBytes unpack_flit(const svBitVecVal* vec) {
+    FlitBytes b{};
+    for (int w = 0; w < FLIT_VEC_WORDS; ++w) {
+        for (int byte = 0; byte < 4; ++byte) {
+            int idx = w * 4 + byte;
+            if (idx < FLIT_BYTES) {
+                b[idx] = static_cast<uint8_t>((vec[w] >> (byte * 8)) & 0xFF);
+            }
+        }
+    }
+    return b;
+}
+
+// Pack FlitBytes → svBitVecVal[FLIT_VEC_WORDS] (little-endian within each word).
+void pack_flit(const FlitBytes& b, svBitVecVal* vec) {
+    for (int w = 0; w < FLIT_VEC_WORDS; ++w) {
+        vec[w] = 0;
+        for (int byte = 0; byte < 4; ++byte) {
+            int idx = w * 4 + byte;
+            if (idx < FLIT_BYTES) {
+                vec[w] |= static_cast<uint32_t>(b[idx]) << (byte * 8);
+            }
+        }
+    }
+}
+
+}  // namespace
+
+extern "C" void cmodel_loopback_noc_set_inputs(svBit req_in_valid, svBitVecVal* req_in_flit,
+                                                svBit req_in_credit_return,
+                                                svBit rsp_in_valid, svBitVecVal* rsp_in_flit,
+                                                svBit rsp_in_credit_return) {
+    DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_set_inputs) {
+        if (!g_loopback_adapter) {
+            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
+            g_dpi_error_msg = "cmodel_loopback_noc_set_inputs: g_loopback_adapter null";
+            return;
+        }
+        LoopbackNocInputs in{};
+        in.req_in_valid         = static_cast<bool>(req_in_valid);
+        in.req_in_flit          = unpack_flit(req_in_flit);
+        in.req_in_credit_return = static_cast<bool>(req_in_credit_return);
+        in.rsp_in_valid         = static_cast<bool>(rsp_in_valid);
+        in.rsp_in_flit          = unpack_flit(rsp_in_flit);
+        in.rsp_in_credit_return = static_cast<bool>(rsp_in_credit_return);
+        g_loopback_adapter->set_inputs(in);
+    }
+    DPI_BOUNDARY_END(cmodel_loopback_noc_set_inputs);
+}
+
+extern "C" void cmodel_loopback_noc_tick(void) {
+    DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_tick) {
+        if (!g_loopback_adapter) {
+            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
+            g_dpi_error_msg = "cmodel_loopback_noc_tick: g_loopback_adapter null";
+            return;
+        }
+        g_loopback_adapter->tick();
+    }
+    DPI_BOUNDARY_END(cmodel_loopback_noc_tick);
+}
+
+extern "C" void cmodel_loopback_noc_get_outputs(svBit* req_out_valid,
+                                                 svBitVecVal* req_out_flit,
+                                                 svBit* req_out_credit_return,
+                                                 svBit* rsp_out_valid,
+                                                 svBitVecVal* rsp_out_flit,
+                                                 svBit* rsp_out_credit_return) {
+    DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_get_outputs) {
+        if (!g_loopback_adapter) {
+            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
+            g_dpi_error_msg = "cmodel_loopback_noc_get_outputs: g_loopback_adapter null";
+            return;
+        }
+        LoopbackNocOutputs out{};
+        g_loopback_adapter->get_outputs(out);
+        *req_out_valid         = static_cast<svBit>(out.req_out_valid);
+        pack_flit(out.req_out_flit, req_out_flit);
+        *req_out_credit_return = static_cast<svBit>(out.req_out_credit_return);
+        *rsp_out_valid         = static_cast<svBit>(out.rsp_out_valid);
+        pack_flit(out.rsp_out_flit, rsp_out_flit);
+        *rsp_out_credit_return = static_cast<svBit>(out.rsp_out_credit_return);
+    }
+    DPI_BOUNDARY_END(cmodel_loopback_noc_get_outputs);
+}
+
 // Tasks 8-11 append their handler bodies.
