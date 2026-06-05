@@ -615,7 +615,10 @@ Existing scenarios reuse `c_model/include/axi/scenario_parser.hpp` schema (carri
 
 ```yaml
 # fixtures/injection_aw_unstable.yaml
-scenario:
+# NOTE: top-level key is `config:` (matches existing scenario_parser convention),
+# NOT `scenario:` as earlier drafts of this spec suggested. Verified during T4
+# implementation.
+config:
   max_outstanding_write: 1
   memory_latency: 5
   inject:                        # NEW field; consumed by AxiMaster at init
