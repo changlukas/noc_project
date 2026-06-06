@@ -33,6 +33,8 @@ class SpecBundle:
     nmu: Optional[dict] = None
     nsu: Optional[dict] = None
     md_dir: Optional[Path] = None
+    constants: Optional[dict] = None
+    interfaces: Optional[dict] = None
 
 
 def load_spec_bundle(spec_dir: Union[str, Path], md_dir: Optional[Union[str, Path]] = None) -> SpecBundle:
@@ -54,6 +56,20 @@ def load_spec_bundle(spec_dir: Union[str, Path], md_dir: Optional[Union[str, Pat
 
     if md_dir is not None:
         bundle.md_dir = Path(md_dir)
+
+    # Auto-load handshake schema files if present (specgen/source/, sibling
+    # to ni_spec/). Located relative to this file's __file__ path because
+    # spec_dir argument refers to the JSON spec dir (typically generated/json/),
+    # which is a different directory.
+    from ni_spec.handshake_schema import load_constants, load_interfaces
+    specgen_root = Path(__file__).resolve().parent.parent  # specgen/
+    constants_yaml = specgen_root / "source" / "constants.yaml"
+    interfaces_json = specgen_root / "source" / "interface_handshake.json"
+    if constants_yaml.exists():
+        bundle.constants = load_constants(constants_yaml)
+    if interfaces_json.exists() and bundle.constants is not None:
+        bundle.interfaces = load_interfaces(interfaces_json, bundle.constants)
+
     return bundle
 
 

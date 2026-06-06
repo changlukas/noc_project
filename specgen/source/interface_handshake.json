@@ -1,0 +1,64 @@
+{
+    "schema_version": "1.0",
+    "interfaces": {
+        "axi4_intf": {
+            "kind": "axi4",
+            "parameters": [
+                { "name": "ID_WIDTH",   "constants_yaml_key": "axi.ID_WIDTH"   },
+                { "name": "ADDR_WIDTH", "constants_yaml_key": "axi.ADDR_WIDTH" },
+                { "name": "DATA_WIDTH", "constants_yaml_key": "axi.DATA_WIDTH" }
+            ],
+            "channels": ["AW", "W", "B", "AR", "R"],
+            "signal_matrix_source": "IHI_0022H_TABLE_A9_1_to_A9_4",
+            "modports": ["master", "slave"]
+        },
+
+        "noc_req_intf": {
+            "kind": "noc_link",
+            "parameters": [
+                { "name": "NUM_VC",                "constants_yaml_key": "noc.NUM_VC" },
+                { "name": "FLIT_WIDTH",            "constants_yaml_key": "noc.FLIT_WIDTH" },
+                { "name": "SLAVE_VC_BUFFER_DEPTH", "constants_yaml_key": "noc.SLAVE_VC_BUFFER_DEPTH" }
+            ],
+            "signals": [
+                { "name": "valid",         "width_expr": "1",          "driven_by": "master" },
+                { "name": "flit",          "width_expr": "FLIT_WIDTH", "driven_by": "master" },
+                { "name": "credit_return", "width_expr": "NUM_VC",     "driven_by": "slave"  }
+            ],
+            "modports": ["master", "slave"],
+            "protocol_semantics": {
+                "transfer_condition": "producer-internal credit counter for selected VC > 0 AND valid asserted; selected VC encoded inside flit header (NOT a separate interface signal)",
+                "credit_return_encoding": {
+                    "scheme": "per_vc_credit_pulse_vector",
+                    "semantics": "credit_return[v] asserted for exactly 1 cycle releases 1 credit for VC v. Multi-hot is permitted — multiple VCs may release credits in the same cycle.",
+                    "output_discipline": "registered (no combinational path from valid input to credit_return output)",
+                    "reset_value": "all zeros",
+                    "onehot_check_required": false
+                },
+                "initial_credits": {
+                    "scheme": "configured_at_reset",
+                    "value_per_vc": "SLAVE_VC_BUFFER_DEPTH",
+                    "note": "Producer assumes SLAVE_VC_BUFFER_DEPTH credits per VC available after rst_ni deassert; slave guarantees buffer has SLAVE_VC_BUFFER_DEPTH free slots per VC at reset exit"
+                },
+                "valid_stability": "once valid asserted, valid + flit MUST hold until handshake completes (always-accept on slave side; backpressure is purely via producer credit exhaustion upstream of this interface). See IHI 0022H §A3.2.1 analog.",
+                "combinational_loops": "forbidden — credit_return must be a registered output of the slave"
+            }
+        },
+
+        "noc_rsp_intf": {
+            "kind": "noc_link",
+            "parameters": [
+                { "name": "NUM_VC",                "constants_yaml_key": "noc.NUM_VC" },
+                { "name": "FLIT_WIDTH",            "constants_yaml_key": "noc.FLIT_WIDTH" },
+                { "name": "SLAVE_VC_BUFFER_DEPTH", "constants_yaml_key": "noc.SLAVE_VC_BUFFER_DEPTH" }
+            ],
+            "signals": [
+                { "name": "valid",         "width_expr": "1",          "driven_by": "master" },
+                { "name": "flit",          "width_expr": "FLIT_WIDTH", "driven_by": "master" },
+                { "name": "credit_return", "width_expr": "NUM_VC",     "driven_by": "slave"  }
+            ],
+            "modports": ["master", "slave"],
+            "protocol_semantics": "same as noc_req_intf"
+        }
+    }
+}
