@@ -5,13 +5,15 @@ COSIM_ROOT    := $(realpath ..)
 CMODEL_INC    := $(PROJ_ROOT)/c_model/include
 CMODEL_TESTS  := $(PROJ_ROOT)/c_model/tests
 SPECGEN_INC   := $(PROJ_ROOT)/specgen/generated/cpp
+SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
 YAMLCPP_INC   := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-src/include
 YAMLCPP_LIB   := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-build/libyaml-cpp.a
 
 SV_SRC := \
-    $(COSIM_ROOT)/sv/axi_intf.sv \
-    $(COSIM_ROOT)/sv/noc_req_intf.sv \
-    $(COSIM_ROOT)/sv/noc_rsp_intf.sv \
+    $(SPECGEN_SV_INC)/ni_params_pkg.sv \
+    $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
+    $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
+    $(SPECGEN_SV_INC)/ni_regs_pkg.sv \
     $(COSIM_ROOT)/sv/axi_master_wrap.sv \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \
     $(COSIM_ROOT)/sv/loopback_noc_wrap.sv \
@@ -35,6 +37,7 @@ VERILATOR_FLAGS := \
     --assert \
     -I$(COSIM_ROOT)/sv \
     -I$(COSIM_ROOT)/sv/wb2axip \
+    -I$(SPECGEN_SV_INC) \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     -CFLAGS "-g" \
@@ -47,6 +50,11 @@ VERILATOR_FLAGS := \
     -LDFLAGS "$(YAMLCPP_LIB)" \
     +define+assume=assert \
     -Wno-fatal
+
+# Optional strict-mode flag injection for release gates.
+# Override with: make VERILATOR_EXTRA_FLAGS="--Wall --Wpedantic"
+VERILATOR_EXTRA_FLAGS ?=
+VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 
 all: obj_dir/V$(TOP)
 

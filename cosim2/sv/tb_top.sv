@@ -29,11 +29,12 @@ module tb_top (
     // -------------------------------------------------------------------------
     // Parameters
     // -------------------------------------------------------------------------
-    localparam int ID_WIDTH   = 8;
-    localparam int ADDR_WIDTH = 64;
-    localparam int DATA_WIDTH = 256;
-    localparam int NUM_VC     = 1;
-    localparam int FLIT_W     = 408;  // ni::FLIT_WIDTH — project canonical
+    localparam int unsigned ID_WIDTH              = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT;
+    localparam int unsigned ADDR_WIDTH            = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT;
+    localparam int unsigned DATA_WIDTH            = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT;
+    localparam int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT;
+    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT;
+    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;
 
     // wb2axip parametric override per spec §5.2.1 (T12 verified values)
     localparam int F_LGDEPTH_VAL        = 10;  // default; accommodates MAXSTALL=32 (needs 6 bits)
@@ -64,42 +65,46 @@ module tb_top (
     // -------------------------------------------------------------------------
 
     // [1] master_nmu_axi — AXI between axi_master_wrap (master) and nmu_wrap (slave)
-    axi_intf #(
+    axi4_intf #(
         .ID_WIDTH(ID_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .DATA_WIDTH(DATA_WIDTH)
-    ) master_nmu_axi (.clk_i(clk_i), .rst_ni(rst_ni));
+    ) master_nmu_axi ();
 
     // [2] nmu_loopback_req — NoC request from nmu_wrap to loopback_noc_wrap
     noc_req_intf #(
         .NUM_VC(NUM_VC),
-        .FLIT_W(FLIT_W)
-    ) nmu_loopback_req (.clk_i(clk_i), .rst_ni(rst_ni));
+        .FLIT_WIDTH(FLIT_WIDTH),
+        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) nmu_loopback_req ();
 
     // [3] loopback_nmu_rsp — NoC response from loopback_noc_wrap back to nmu_wrap
     noc_rsp_intf #(
         .NUM_VC(NUM_VC),
-        .FLIT_W(FLIT_W)
-    ) loopback_nmu_rsp (.clk_i(clk_i), .rst_ni(rst_ni));
+        .FLIT_WIDTH(FLIT_WIDTH),
+        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) loopback_nmu_rsp ();
 
     // [4] loopback_nsu_req — NoC request from loopback_noc_wrap to nsu_wrap
     noc_req_intf #(
         .NUM_VC(NUM_VC),
-        .FLIT_W(FLIT_W)
-    ) loopback_nsu_req (.clk_i(clk_i), .rst_ni(rst_ni));
+        .FLIT_WIDTH(FLIT_WIDTH),
+        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) loopback_nsu_req ();
 
     // [5] nsu_loopback_rsp — NoC response from nsu_wrap back to loopback_noc_wrap
     noc_rsp_intf #(
         .NUM_VC(NUM_VC),
-        .FLIT_W(FLIT_W)
-    ) nsu_loopback_rsp (.clk_i(clk_i), .rst_ni(rst_ni));
+        .FLIT_WIDTH(FLIT_WIDTH),
+        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) nsu_loopback_rsp ();
 
     // [6] nsu_slave_axi — AXI between nsu_wrap (master) and axi_slave_wrap (slave)
-    axi_intf #(
+    axi4_intf #(
         .ID_WIDTH(ID_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .DATA_WIDTH(DATA_WIDTH)
-    ) nsu_slave_axi (.clk_i(clk_i), .rst_ni(rst_ni));
+    ) nsu_slave_axi ();
 
     // -------------------------------------------------------------------------
     // 5 component instances
@@ -116,46 +121,49 @@ module tb_top (
         .axi_o(master_nmu_axi.master)
     );
 
-    // [2] NMU shell — AXI slave in, NoC producer/consumer out
+    // [2] NMU shell — AXI slave in, NoC master/slave out
     nmu_wrap #(
         .ID_WIDTH(ID_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .DATA_WIDTH(DATA_WIDTH),
         .NUM_VC(NUM_VC),
-        .FLIT_W(FLIT_W)
+        .FLIT_WIDTH(FLIT_WIDTH),
+        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_nmu (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .axi_i(master_nmu_axi.slave),
-        .noc_req_o(nmu_loopback_req.producer),
-        .noc_rsp_i(loopback_nmu_rsp.consumer)
+        .noc_req_o(nmu_loopback_req.master),
+        .noc_rsp_i(loopback_nmu_rsp.slave)
     );
 
     // [3] Loopback NoC — routes NMU requests to NSU and NSU responses back
     loopback_noc_wrap #(
         .NUM_VC(NUM_VC),
-        .FLIT_W(FLIT_W)
+        .FLIT_WIDTH(FLIT_WIDTH),
+        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_loopback (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .req_from_nmu_i(nmu_loopback_req.consumer),
-        .req_to_nsu_o(loopback_nsu_req.producer),
-        .rsp_from_nsu_i(nsu_loopback_rsp.consumer),
-        .rsp_to_nmu_o(loopback_nmu_rsp.producer)
+        .noc_req_from_nmu_i(nmu_loopback_req.slave),
+        .noc_req_to_nsu_o(loopback_nsu_req.master),
+        .noc_rsp_from_nsu_i(nsu_loopback_rsp.slave),
+        .noc_rsp_to_nmu_o(loopback_nmu_rsp.master)
     );
 
-    // [4] NSU shell — NoC consumer/producer in, AXI master out
+    // [4] NSU shell — NoC slave/master in, AXI master out
     nsu_wrap #(
         .ID_WIDTH(ID_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
         .DATA_WIDTH(DATA_WIDTH),
         .NUM_VC(NUM_VC),
-        .FLIT_W(FLIT_W)
+        .FLIT_WIDTH(FLIT_WIDTH),
+        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_nsu (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .noc_req_i(loopback_nsu_req.consumer),
-        .noc_rsp_o(nsu_loopback_rsp.producer),
+        .noc_req_i(loopback_nsu_req.slave),
+        .noc_rsp_o(nsu_loopback_rsp.master),
         .axi_o(nsu_slave_axi.master)
     );
 
