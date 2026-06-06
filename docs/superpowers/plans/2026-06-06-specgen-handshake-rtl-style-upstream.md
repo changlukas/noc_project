@@ -514,10 +514,16 @@ class HandshakeSchemaError(ValueError):
 
 
 _TOP_LEVEL_KEYS = {"schema_version", "axi", "noc", "derived"}
-_REQUIRED_PARAM_FIELDS = {"type", "default", "sv_symbol", "cpp_symbol"}
+# Plain (axi/noc) and derived require different field sets:
+#   plain   → {type, default, sv_symbol, cpp_symbol}
+#   derived → {type, expression, sv_symbol, cpp_symbol}
+_BASE_REQUIRED = {"type", "sv_symbol", "cpp_symbol"}
+_PLAIN_EXTRA   = {"default"}
+_DERIVED_EXTRA = {"expression"}
 _OPTIONAL_PARAM_FIELDS = {
     "units", "description", "min", "max", "allowed",
-    "expression", "constraint",  # only for derived
+    "expression", "default",  # both legal but only one is required-per-kind
+    "constraint",              # only for derived
 }
 _PARAM_NAME_UPPER = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _FORBIDDEN_W_END = re.compile(r"_W$")
@@ -546,14 +552,14 @@ def load_constants(path: Path) -> Dict[str, Any]:
             continue
         for name, spec in data[domain].items():
             _validate_param_name(name, where=f"{domain}.{name}")
-            _validate_param_spec(spec, where=f"{domain}.{name}", allow_expression=False)
+            _validate_param_spec(spec, where=f"{domain}.{name}", is_derived=False)
             resolved[name] = spec["default"]
 
     # Then derived (each only references already-resolved symbols)
     if "derived" in data:
         for name, spec in data["derived"].items():
             _validate_param_name(name, where=f"derived.{name}")
-            _validate_param_spec(spec, where=f"derived.{name}", allow_expression=True)
+            _validate_param_spec(spec, where=f"derived.{name}", is_derived=True)
             value = _eval_derived(name, spec, resolved)
             resolved[name] = value
             if "constraint" in spec:
@@ -578,13 +584,14 @@ def _validate_param_name(name: str, where: str) -> None:
         )
 
 
-def _validate_param_spec(spec: Dict[str, Any], where: str, allow_expression: bool) -> None:
+def _validate_param_spec(spec: Dict[str, Any], where: str, is_derived: bool) -> None:
     if not isinstance(spec, dict):
         raise HandshakeSchemaError(f"{where}: spec must be a mapping")
-    missing = _REQUIRED_PARAM_FIELDS - set(spec)
+    required = _BASE_REQUIRED | (_DERIVED_EXTRA if is_derived else _PLAIN_EXTRA)
+    missing = required - set(spec)
     if missing:
         raise HandshakeSchemaError(f"{where}: missing required field(s): {sorted(missing)}")
-    allowed_fields = _REQUIRED_PARAM_FIELDS | _OPTIONAL_PARAM_FIELDS
+    allowed_fields = required | _OPTIONAL_PARAM_FIELDS
     unknown = set(spec) - allowed_fields
     if unknown:
         raise HandshakeSchemaError(f"{where}: unknown field(s): {sorted(unknown)}")
@@ -592,7 +599,7 @@ def _validate_param_spec(spec: Dict[str, Any], where: str, allow_expression: boo
         raise HandshakeSchemaError(
             f"{where}: unknown type {spec['type']!r}; supported: {sorted(_SUPPORTED_TYPES)}"
         )
-    if not allow_expression:
+    if not is_derived:
         d = spec["default"]
         if "min" in spec and d < spec["min"]:
             raise HandshakeSchemaError(f"{where}: default {d} < min {spec['min']}")
@@ -1339,29 +1346,95 @@ def emit_handshake_convention_section(interfaces_doc: dict, constants: dict) -> 
 
 
 def emit_axi4_signal_matrix_section(interfaces_doc: dict, constants: dict) -> str:
-    """Per IHI 0022H §A9.3 Tables A9-1..A9-4."""
-    from tools.elaborate.sv_signals import _AXI_CHANNEL_SIGNALS, _MASTER_DRIVES_AXI
+    """Per IHI 0022H §A9.3 Tables A9-1..A9-4 (per-role required matrix)."""
+    from tools.elaborate.sv_signals import (
+        _AXI_CHANNEL_SIGNALS, _MASTER_DRIVES_AXI,
+        _AXI_SIGNAL_METADATA,  # added in sv_signals.py — see below
+    )
 
     lines = []
     lines.append("## AXI4 Signal Matrix (per IHI 0022H §A9.3 Tables A9-1..A9-4)")
     lines.append("")
-    lines.append("Generator-emitted. Manager and Memory Subordinate use the same signal set but with mirrored directions encoded by the `master`/`slave` modport.")
+    lines.append("Generator-emitted from `interface_handshake.json` + per-signal metadata in `sv_signals.py`.")
+    lines.append("")
+    lines.append("Columns:")
+    lines.append("- **Manager**: `R` = required for Manager IP per Table A9-1/A9-3; `O` = optional.")
+    lines.append("- **Memory Subordinate**: `R` = required for Memory Subordinate IP per Table A9-2/A9-4; `O` = optional.")
+    lines.append("- **Reset value**: `0` (driven to zero at reset by output side); `X` (input side, don't care at reset).")
     lines.append("")
     for ch in ("AW", "W", "B", "AR", "R"):
         lines.append(f"### {ch} channel")
         lines.append("")
-        lines.append("| Signal | Width | Master drives | Slave drives |")
-        lines.append("|---|---|---|---|")
+        lines.append("| Signal | Width | Manager | Mem-Sub | Reset value |")
+        lines.append("|---|---|---|---|---|")
         for sig_name, width_spec in _AXI_CHANNEL_SIGNALS[ch]:
             width_disp = (
                 str(int(width_spec.split(":",1)[1]))
                 if width_spec.startswith("fixed:") else width_spec
             )
-            m = "✓" if sig_name in _MASTER_DRIVES_AXI else ""
-            s = "" if sig_name in _MASTER_DRIVES_AXI else "✓"
-            lines.append(f"| `{sig_name}` | {width_disp} | {m} | {s} |")
+            meta = _AXI_SIGNAL_METADATA[sig_name]
+            lines.append(
+                f"| `{sig_name}` | {width_disp} | "
+                f"{meta['manager']} | {meta['memsub']} | {meta['reset']} |"
+            )
         lines.append("")
     return "\n".join(lines) + "\n"
+```
+
+**Step 3a (NEW): Add `_AXI_SIGNAL_METADATA` to `sv_signals.py`**
+
+Append to `specgen/tools/elaborate/sv_signals.py`, after the existing `_MASTER_DRIVES_AXI` block:
+
+```python
+# Per-role required-ness and reset values per IHI 0022H §A9.3 Tables A9-1..A9-4.
+# Manager / Memory Subordinate columns: R = required, O = optional.
+# Reset value: '0' (output side defaults to zero), 'X' (input side, don't care).
+_AXI_SIGNAL_METADATA = {
+    # AW channel
+    "awid":      {"manager": "R", "memsub": "R", "reset": "0"},
+    "awaddr":    {"manager": "R", "memsub": "R", "reset": "0"},
+    "awlen":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "awsize":    {"manager": "R", "memsub": "R", "reset": "0"},
+    "awburst":   {"manager": "R", "memsub": "R", "reset": "0"},
+    "awlock":    {"manager": "R", "memsub": "O", "reset": "0"},
+    "awcache":   {"manager": "R", "memsub": "O", "reset": "0"},
+    "awprot":    {"manager": "R", "memsub": "O", "reset": "0"},
+    "awqos":     {"manager": "R", "memsub": "O", "reset": "0"},
+    "awregion":  {"manager": "R", "memsub": "O", "reset": "0"},
+    "awvalid":   {"manager": "R", "memsub": "R", "reset": "0"},
+    "awready":   {"manager": "R", "memsub": "R", "reset": "0"},
+    # W channel
+    "wdata":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "wstrb":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "wlast":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "wvalid":    {"manager": "R", "memsub": "R", "reset": "0"},
+    "wready":    {"manager": "R", "memsub": "R", "reset": "0"},
+    # B channel
+    "bid":       {"manager": "R", "memsub": "R", "reset": "0"},
+    "bresp":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "bvalid":    {"manager": "R", "memsub": "R", "reset": "0"},
+    "bready":    {"manager": "R", "memsub": "R", "reset": "0"},
+    # AR channel (same shape as AW)
+    "arid":      {"manager": "R", "memsub": "R", "reset": "0"},
+    "araddr":    {"manager": "R", "memsub": "R", "reset": "0"},
+    "arlen":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "arsize":    {"manager": "R", "memsub": "R", "reset": "0"},
+    "arburst":   {"manager": "R", "memsub": "R", "reset": "0"},
+    "arlock":    {"manager": "R", "memsub": "O", "reset": "0"},
+    "arcache":   {"manager": "R", "memsub": "O", "reset": "0"},
+    "arprot":    {"manager": "R", "memsub": "O", "reset": "0"},
+    "arqos":     {"manager": "R", "memsub": "O", "reset": "0"},
+    "arregion":  {"manager": "R", "memsub": "O", "reset": "0"},
+    "arvalid":   {"manager": "R", "memsub": "R", "reset": "0"},
+    "arready":   {"manager": "R", "memsub": "R", "reset": "0"},
+    # R channel
+    "rid":       {"manager": "R", "memsub": "R", "reset": "0"},
+    "rdata":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "rresp":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "rlast":     {"manager": "R", "memsub": "R", "reset": "0"},
+    "rvalid":    {"manager": "R", "memsub": "R", "reset": "0"},
+    "rready":    {"manager": "R", "memsub": "R", "reset": "0"},
+}
 ```
 
 - [ ] **Step 4: Wire into signal_interface.md regeneration**
@@ -1395,6 +1468,14 @@ def regen_signal_interface_md() -> None:
 
     def _swap(src: str, start: str, end: str, body: str) -> str:
         import re
+        # Assert exactly one begin + one end marker. Missing or duplicated
+        # markers indicate corrupted markdown — fail loudly instead of silently.
+        if src.count(start) != 1 or src.count(end) != 1:
+            raise RuntimeError(
+                f"signal_interface.md marker corruption: "
+                f"{start!r} count={src.count(start)}, {end!r} count={src.count(end)} "
+                f"(expected exactly 1 each)"
+            )
         pat = re.compile(re.escape(start) + r".*?" + re.escape(end), re.S)
         return pat.sub(f"{start}\n{body}{end}", src)
 
@@ -1678,18 +1759,22 @@ sed -n '1,80p' cosim2/sv/tb_top.sv
 
 Note the existing instance names + how the 5 wraps are wired today.
 
-- [ ] **Step 2: Rewrite the interface instantiations + wraps section**
+- [ ] **Step 2: READ existing `tb_top.sv` and identify what to preserve**
 
-Preserve clock generation, DPI imports, scoreboard hooks, and `$finish` logic. Replace the interface instantiation block + module instances with:
+Run: `sed -n '1,40p' cosim2/sv/tb_top.sv`
+
+Observe:
+- `tb_top` has `clk_i` and `rst_ni` as **input ports** driven by `main.cpp` (via Verilator's top eval loop) — DO NOT redeclare them as internal `logic`
+- There is NO embedded clock generator in `tb_top.sv` itself; `main.cpp` toggles the clock
+- DPI imports, scoreboard wiring, and `$finish` triggers live mid-file — preserve them
+
+The rewrite touches ONLY the interface instantiation + module instance block. Preserve all other lines verbatim.
+
+- [ ] **Step 3: Rewrite the interface instantiation + module-instance block**
+
+Identify the existing `axi_intf #() ...;`, `noc_req_intf #() ...;`, and module instance lines. Replace that block (only) with:
 
 ```systemverilog
-module tb_top;
-    logic clk;
-    logic rst_n;
-
-    // Existing clock + reset generator stays.
-    // ...
-
     // 2 AXI links: CPU-side + memory-side
     axi4_intf #() axi_cpu_link();
     axi4_intf #() axi_mem_link();
@@ -1701,19 +1786,19 @@ module tb_top;
     noc_rsp_intf #() noc_rsp_lp_to_nmu();
 
     axi_master_wrap u_cpu_master (
-        .clk_i(clk), .rst_ni(rst_n),
+        .clk_i(clk_i), .rst_ni(rst_ni),
         .axi_o(axi_cpu_link)
     );
 
     nmu_wrap u_nmu (
-        .clk_i(clk), .rst_ni(rst_n),
+        .clk_i(clk_i), .rst_ni(rst_ni),
         .axi_i(axi_cpu_link),
         .noc_req_o(noc_req_nmu_to_lp),
         .noc_rsp_i(noc_rsp_lp_to_nmu)
     );
 
     loopback_noc_wrap u_loopback (
-        .clk_i(clk), .rst_ni(rst_n),
+        .clk_i(clk_i), .rst_ni(rst_ni),
         .noc_req_from_nmu_i(noc_req_nmu_to_lp),
         .noc_req_to_nsu_o(noc_req_lp_to_nsu),
         .noc_rsp_from_nsu_i(noc_rsp_nsu_to_lp),
@@ -1721,21 +1806,19 @@ module tb_top;
     );
 
     nsu_wrap u_nsu (
-        .clk_i(clk), .rst_ni(rst_n),
+        .clk_i(clk_i), .rst_ni(rst_ni),
         .noc_req_i(noc_req_lp_to_nsu),
         .noc_rsp_o(noc_rsp_nsu_to_lp),
         .axi_o(axi_mem_link)
     );
 
     axi_slave_wrap u_mem_slave (
-        .clk_i(clk), .rst_ni(rst_n),
+        .clk_i(clk_i), .rst_ni(rst_ni),
         .axi_i(axi_mem_link)
     );
-
-    // Existing DPI imports + scoreboard hooks + $finish logic preserved below.
-    // ...
-endmodule
 ```
+
+Module header (`module tb_top (input logic clk_i, input logic rst_ni);` or whatever it actually is), DPI imports, `final` blocks, scoreboard hooks, and `$finish` logic are NOT touched.
 
 - [ ] **Step 3: Update `cosim2/verilator/Makefile` — remove deleted .sv, add specgen sources, add VERILATOR_EXTRA_FLAGS**
 
@@ -1838,18 +1921,27 @@ Expected: 410/410 PASS (matches Stage 5b baseline).
 
 - [ ] **Step 5: Run the explicit 5-fixture smoke set** (per Codex round 3 MEDIUM)
 
+Use two separate loops — positive fixtures fail loudly; negative fixture must exit nonzero or the gate FAILS:
+
 ```bash
 cd /e/05_NoC/noc_project/cosim2/verilator
-for fix in debug_multi1.yaml write_only_smoke.yaml multibeat_incr_8beat.yaml \
-           multi_id_single_beat_sequential.yaml injection_aw_unstable.yaml; do
-    echo "=== $fix ==="
-    ./obj_dir/Vtb_top "+scenario=../tests/fixtures/$fix" || echo "EXPECTED FAIL: $fix"
+set -e
+echo "=== positive fixtures (must exit 0) ==="
+for fix in debug_multi1.yaml write_only_smoke.yaml \
+           multibeat_incr_8beat.yaml multi_id_single_beat_sequential.yaml; do
+    echo "--- $fix ---"
+    ./obj_dir/Vtb_top "+scenario=../tests/fixtures/$fix"
 done
+echo "=== negative fixture (must exit nonzero) ==="
+if ./obj_dir/Vtb_top "+scenario=../tests/fixtures/injection_aw_unstable.yaml"; then
+    echo "GATE FAIL: injection_aw_unstable.yaml exited zero (checker dead?)"
+    exit 1
+fi
+echo "=== smoke set OK ==="
+set +e
 ```
 
-Expected:
-- 4 fixtures PASS (exit 0)
-- `injection_aw_unstable.yaml` FAILS (exit nonzero — CheckerLiveness)
+Expected: positive loop completes with no error; negative fixture exits nonzero as required; "smoke set OK" printed.
 
 - [ ] **Step 6: Verilator strict-mode warning-clean elaboration**
 
@@ -2277,12 +2369,72 @@ verilator --lint-only --Wall \
 
 Expected: 0 warning, 0 error.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verilator parameter-override sweep (catches parameter-dependent SV/DPI failures)**
+
+The previous steps only verify the schema validator and default-parameter elaboration. To catch failures that surface only at non-default parameters (signal-width mismatches in DPI, off-by-one in wrap logic, etc.), elaborate the full top with `-G<PARAM>=<value>` overrides across a representative corner matrix.
+
+Create `cosim2/scripts/verilator_param_sweep.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Verilator parameter-override sweep against tb_top.
+# Representative 8-combo corner matrix (not full 432 — full sweep is the specgen
+# yaml load test in Step 1-3; this is the SV-elaboration corollary).
+set -euo pipefail
+export PATH="/c/msys64/mingw64/bin:$PATH"
+cd "$(git rev-parse --show-toplevel)/cosim2/verilator"
+
+# Each tuple: ID_WIDTH ADDR_WIDTH DATA_WIDTH NUM_VC FLIT_WIDTH
+declare -a MATRIX=(
+    "1 32 32 1 64"        # smallest corner
+    "16 64 1024 8 1024"   # largest corner
+    "8 64 256 1 408"      # default
+    "8 64 64 4 256"       # mid + multi-VC
+    "1 64 32 8 64"        # min widths, max VCs
+    "16 32 1024 1 1024"   # max widths, min VCs
+    "8 48 128 4 408"      # asymmetric
+    "8 64 512 1 256"      # default-ish
+)
+
+mkdir -p /tmp/param_sweep
+fail=0
+for combo in "${MATRIX[@]}"; do
+    read id_w addr_w data_w num_vc flit_w <<< "$combo"
+    tag="id${id_w}_addr${addr_w}_data${data_w}_vc${num_vc}_flit${flit_w}"
+    echo "== sweep: $tag =="
+    if ! verilator --lint-only --Wall --assert \
+            -GID_WIDTH="$id_w" -GADDR_WIDTH="$addr_w" \
+            -GDATA_WIDTH="$data_w" -GNUM_VC="$num_vc" \
+            -GFLIT_WIDTH="$flit_w" \
+            -I../sv -I../sv/wb2axip \
+            $(make -s -p 2>/dev/null | sed -n 's/^SV_SRC :=//p' | tr -d '\\') \
+            --top-module tb_top \
+            > "/tmp/param_sweep/${tag}.log" 2>&1; then
+        echo "  FAIL: see /tmp/param_sweep/${tag}.log"
+        fail=$((fail+1))
+    fi
+done
+echo
+echo "Parameter sweep: ${#MATRIX[@]} combos, $fail failures."
+exit $fail
+```
+
+Run:
+```bash
+chmod +x cosim2/scripts/verilator_param_sweep.sh
+./cosim2/scripts/verilator_param_sweep.sh | tee cosim2/quality/parameter_sweep_sv.log
+```
+
+Expected: 8/8 elaborate green; `fail=0`.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add specgen/tests/test_parameter_sweep.py \
-        cosim2/tests/sv/elab_modport_only_harness.sv
-git commit -m "chore(quality): release gate 5 parameter sweep + modport-only harness"
+        cosim2/tests/sv/elab_modport_only_harness.sv \
+        cosim2/scripts/verilator_param_sweep.sh \
+        cosim2/quality/parameter_sweep_sv.log
+git commit -m "chore(quality): release gate 5 parameter sweep (yaml + SV elab matrix) + modport harness"
 ```
 
 ---
@@ -2322,67 +2474,94 @@ git commit -m "chore(quality): release gate 6 c_model sanitizer clean (cosim Ver
 
 ### Task 25: Release gate 7 — coverage
 
-**Note:** Verilator coverage flow requires:
+Verilator coverage requires three pieces wired together:
 1. Build with `--coverage-line --coverage-toggle`
-2. The Verilator-instrumented binary writes `coverage.dat` when `VerilatedCov::write()` is called in `main.cpp` (or `_finish` handler)
-3. `verilator_coverage --annotate-min` to materialize per-file rates
+2. `main.cpp` calls `VerilatedCov::write(<path>)` at exit, with a **per-scenario filename** (multiple runs in the same dir would otherwise overwrite each other).
+3. After all runs, `verilator_coverage --write merged.dat <inputs...>` merges, then `verilator_coverage --rank merged.dat` parses official format.
 
-Current cosim2 `main.cpp` does NOT call `VerilatedCov::write()` — this must be added as a one-time wiring fix.
+Reference: [Verilator coverage docs](https://verilator.org/guide/latest/exe_verilator_coverage.html).
 
-- [ ] **Step 1: Wire `VerilatedCov::write()` into cosim2 main.cpp**
+- [ ] **Step 1: Wire per-scenario `VerilatedCov::write()` into `main.cpp`**
 
-Edit `cosim2/verilator/main.cpp`. Just before the `return 0;` (or wherever the binary exits), add:
+Edit `cosim2/verilator/main.cpp`. Locate where the scenario name (from `+scenario=...` plusarg) is parsed. Before the binary exits, add:
 
 ```cpp
 #if VM_COVERAGE
-    Verilated::threadContextp()->coveragep()->write("coverage.dat");
+    {
+        // Derive a unique filename from the scenario name so concurrent / sequential
+        // runs in the same CWD don't overwrite each other.
+        std::string scen_name = "default";
+        const char* scen = Verilated::commandArgsPlusMatch("scenario");
+        if (scen && *scen) {
+            std::string s(scen);
+            auto slash = s.find_last_of("/\\");
+            auto dot   = s.find_last_of('.');
+            scen_name = s.substr(
+                slash == std::string::npos ? 0 : slash + 1,
+                dot == std::string::npos ? std::string::npos : dot - (slash + 1)
+            );
+        }
+        std::string out = "coverage_" + scen_name + ".dat";
+        Verilated::threadContextp()->coveragep()->write(out.c_str());
+    }
 #endif
 ```
 
-Commit this:
+Commit this fix as its own sub-commit:
 ```bash
 git add cosim2/verilator/main.cpp
-git commit -m "feat(cosim2): emit coverage.dat at simulation exit"
+git commit -m "feat(cosim2): emit per-scenario coverage_<name>.dat at simulation exit"
 ```
 
-- [ ] **Step 2: Build with coverage**
+- [ ] **Step 2: Build with coverage flags**
 
 ```bash
+export PATH="/c/msys64/mingw64/bin:$PATH"
 cd /e/05_NoC/noc_project/cosim2/verilator
 make clean
 make VERILATOR_EXTRA_FLAGS="--coverage-line --coverage-toggle"
 ```
 
-- [ ] **Step 3: Run ctest to populate coverage**
+- [ ] **Step 3: Run the full ctest sweep to populate coverage**
 
 ```bash
 cd /e/05_NoC/noc_project/c_model/build
 ctest --output-on-failure
 ```
 
-(This invokes `Vtb_top` with each fixture, populating `cosim2/verilator/obj_dir/coverage.dat` or sub-dat files per test run; merge if multiple.)
+Each `Vtb_top` invocation writes `coverage_<scenario>.dat` in its CWD (`cosim2/verilator/`).
 
-- [ ] **Step 4: Run verilator_coverage**
+- [ ] **Step 4: Merge + rank using official `verilator_coverage`**
 
 ```bash
 cd /e/05_NoC/noc_project/cosim2/verilator
-# Merge per-test coverage files if generated separately:
-verilator_coverage --write coverage_merged.dat obj_dir/coverage*.dat
-# Annotate + report rate:
-verilator_coverage --annotate-min 1 --annotate /tmp/cov_annotated coverage_merged.dat
-# Extract overall pcts:
-verilator_coverage --rank coverage_merged.dat > /e/05_NoC/noc_project/cosim2/quality/coverage_rank.log
+ls coverage_*.dat  # sanity: confirm multiple files exist
+verilator_coverage --write merged.dat coverage_*.dat
+verilator_coverage --rank merged.dat > /e/05_NoC/noc_project/cosim2/quality/coverage_rank.log
+verilator_coverage --annotate-all --annotate /tmp/cov_annotated merged.dat
 ```
 
-- [ ] **Step 5: Compute and enforce thresholds**
+`--annotate-all` is REQUIRED so unhit files are also written into the annotated tree (otherwise the rate denominator skews high).
+
+- [ ] **Step 5: Enforce line + toggle thresholds (separately)**
+
+Verilator annotated format prefix per line is one of:
+- `%000000`, `%000123` — counter (line coverage hit count)
+- `~000010` — toggle counter
+- `        ` — non-instrumented source line
+
+Reference: <https://verilator.org/guide/latest/exe_verilator_coverage.html#annotation-format>
 
 Create `cosim2/scripts/check_coverage.py`:
 
 ```python
 #!/usr/bin/env py -3
-"""Parse verilator_coverage annotated output and enforce thresholds.
+"""Parse verilator_coverage --annotate-all output and enforce thresholds.
 
-Excluded paths: cosim2/sv/wb2axip/**, specgen/generated/**
+Excludes: cosim2/sv/wb2axip/** (vendored), specgen/generated/** (auto-gen).
+Thresholds (per spec §6.5 gate 7):
+- Line coverage >= 80%
+- Toggle coverage >= 70%
 """
 import re
 import sys
@@ -2392,60 +2571,94 @@ EXCLUDES = ("wb2axip/", "specgen/generated/")
 LINE_MIN = 80.0
 TOGGLE_MIN = 70.0
 
+# Counter is the leading 7-char prefix: % or ~ followed by 6-digit count.
+COUNTER_RE = re.compile(r"^([%~])(\d{6})")
 
-def parse(annotated_dir: Path):
+
+def parse(annotated_dir: Path) -> tuple[float, float]:
     line_hit = 0; line_tot = 0
-    tog_hit = 0; tog_tot = 0
-    for p in annotated_dir.glob("**/*"):
-        if any(e in str(p) for e in EXCLUDES):
-            continue
+    tog_hit = 0;  tog_tot = 0
+    for p in annotated_dir.rglob("*"):
         if not p.is_file():
             continue
+        if any(e in str(p).replace("\\", "/") for e in EXCLUDES):
+            continue
         for ln in p.read_text(errors="ignore").splitlines():
-            # Verilator annotation: "%[hit_count]%" before line; "0" marks miss
-            m = re.match(r"\s*([0-9-]+)\s+\|", ln)
+            m = COUNTER_RE.match(ln)
             if not m:
                 continue
-            line_tot += 1
-            if m.group(1) not in ("0", "-"):
-                line_hit += 1
+            kind, count = m.group(1), int(m.group(2))
+            if kind == "%":
+                line_tot += 1
+                if count > 0:
+                    line_hit += 1
+            elif kind == "~":
+                tog_tot += 1
+                if count > 0:
+                    tog_hit += 1
     line_pct = 100.0 * line_hit / max(line_tot, 1)
-    return line_pct, tog_hit, tog_tot  # toggle parsed similarly
+    tog_pct  = 100.0 * tog_hit  / max(tog_tot,  1)
+    return line_pct, tog_pct
 
 
-pct, _, _ = parse(Path(sys.argv[1]))
-print(f"Line coverage: {pct:.1f}%")
-if pct < LINE_MIN:
-    sys.exit(f"FAIL: line coverage {pct:.1f}% < {LINE_MIN}%")
-print("OK")
+def main(argv: list[str]) -> int:
+    if len(argv) != 2:
+        print("usage: check_coverage.py <annotated_dir>", file=sys.stderr)
+        return 2
+    line_pct, tog_pct = parse(Path(argv[1]))
+    print(f"Line coverage   : {line_pct:6.2f}% (threshold {LINE_MIN}%)")
+    print(f"Toggle coverage : {tog_pct:6.2f}% (threshold {TOGGLE_MIN}%)")
+    failures = []
+    if line_pct < LINE_MIN:
+        failures.append(f"line {line_pct:.2f}% < {LINE_MIN}%")
+    if tog_pct < TOGGLE_MIN:
+        failures.append(f"toggle {tog_pct:.2f}% < {TOGGLE_MIN}%")
+    if failures:
+        print("FAIL: " + "; ".join(failures))
+        return 1
+    print("OK: thresholds met")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
 ```
 
 Run:
 ```bash
-py -3 cosim2/scripts/check_coverage.py /tmp/cov_annotated > /e/05_NoC/noc_project/cosim2/quality/coverage_summary.log
+py -3 cosim2/scripts/check_coverage.py /tmp/cov_annotated \
+    | tee /e/05_NoC/noc_project/cosim2/quality/coverage_summary.log
 ```
 
-Expected: line ≥ 80%, toggle ≥ 70%.
+Expected: last line `OK: thresholds met`. Script exits 0.
 
 - [ ] **Step 6: Per-property assertion coverage**
 
-For wb2axip `SLAVE_ASSERT`-derived properties: confirm the existing CheckerLiveness positive (`injection_aw_unstable.yaml` causes nonzero exit) AND the existing CosimWireSmoke negative (normal traffic exits zero — same checker present, no fire) prove the checker remains live.
-
-Document at `cosim2/quality/assertion_coverage.log`:
+The release-level claim is that every wb2axip `SLAVE_ASSERT` property has been exercised on at least one positive (no-violation) and one negative (violation) traffic pattern. Document via the existing `CheckerLiveness` (Task 27, drives nonzero exit) and `CosimWireSmoke` (Task 15 Step 5, drives zero exit) ctest pair. Write `cosim2/quality/assertion_coverage.log`:
 
 ```
-Wb2axip checker liveness verified:
-- CheckerLiveness (ctest): injection_aw_unstable.yaml -> child binary nonzero exit -> checker fires (per design)
-- CosimWireSmoke (ctest): normal fixtures -> child binary zero exit -> no spurious fire
-Conclusion: protocol checker NOT dead code.
+WB2AXIP assertion liveness verified by the ctest pair below.
+
+Positive (no violation, all SLAVE_ASSERT properties active, none fire):
+  ctest -R CosimWireSmoke  -> PASS (child exits 0)
+
+Negative (DPI error path exercised, master abort surfaces nonzero exit):
+  ctest -R CheckerLiveness -> PASS (gtest EXPECT_NE asserts nonzero exit)
+
+NOTE: CheckerLiveness uses injection_aw_unstable.yaml which forces a DPI-side
+error path (missing data file). It proves DPI-error-to-$fatal-to-nonzero-exit
+liveness, NOT the wb2axip SVA firing path. The complementary protocol-violation
+gate is Task 27 Step 2 (axi4_protocol_violation.yaml).
 ```
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cosim2/quality/coverage_rank.log cosim2/quality/coverage_summary.log \
-        cosim2/quality/assertion_coverage.log cosim2/scripts/check_coverage.py
-git commit -m "chore(quality): release gate 7 coverage thresholds enforced"
+git add cosim2/scripts/check_coverage.py \
+        cosim2/quality/coverage_rank.log \
+        cosim2/quality/coverage_summary.log \
+        cosim2/quality/assertion_coverage.log
+git commit -m "chore(quality): release gate 7 coverage (line+toggle thresholds enforced)"
 ```
 
 ---
@@ -2508,18 +2721,94 @@ git commit -m "chore(quality): release gate 8 reproducible generation"
 
 ---
 
-### Task 27: Release gate 9 — fault injection sanity (CheckerLiveness)
+### Task 27: Release gate 9 — fault injection sanity (DPI + protocol)
 
-- [ ] **Step 1: Run CheckerLiveness via ctest**
+This gate must prove TWO distinct error paths are live:
+- **(a) DPI-error path**: existing `CheckerLiveness` ctest verifies the C++ DPI-side error-to-`$fatal` chain. Fixture: `injection_aw_unstable.yaml` (missing data file).
+- **(b) AXI4 protocol checker path**: a new fixture that violates AXI4 spec (e.g., `WLAST` asserted on non-last beat) which causes wb2axip `SLAVE_ASSERT` to fire `$error`. This is the path Codex round 4 flagged as not actually covered by `CheckerLiveness` alone.
+
+- [ ] **Step 1: Run `CheckerLiveness` (DPI-error path)**
 
 ```bash
 cd /e/05_NoC/noc_project/c_model/build
-ctest -R CheckerLiveness --output-on-failure 2>&1 | tee /e/05_NoC/noc_project/cosim2/quality/fault_inject.log
+ctest -R CheckerLiveness --output-on-failure 2>&1 \
+    | tee /e/05_NoC/noc_project/cosim2/quality/fault_inject_dpi.log
 ```
 
-Expected: ctest reports `CheckerLiveness: PASSED`. The underlying gtest assertion `EXPECT_NE(rc, 0)` confirms the cosim binary exits nonzero when fed the injected scenario — proving the protocol checker is live.
+Expected: ctest reports `CheckerLiveness ... Passed` (ctest's actual capitalization — NOT `PASSED`). The underlying gtest assertion `EXPECT_NE(rc, 0)` confirms nonzero exit.
 
-- [ ] **Step 2: Run a positive (no-injection) fixture to confirm zero exit**
+- [ ] **Step 2: Create `axi4_protocol_violation.yaml` fixture**
+
+Author `cosim2/tests/fixtures/axi4_protocol_violation.yaml` to drive an actual AXI4 spec violation that wb2axip's `SLAVE_ASSERT` catches. Concrete approach (since cosim2 scenario_parser drives traffic via the c_model AXI master): the scenario specifies an INCR write burst where the master DELIBERATELY drops `wlast` before the last beat. This requires extending scenario YAML schema:
+
+```yaml
+# cosim2/tests/fixtures/axi4_protocol_violation.yaml
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  max_outstanding_write: 1
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0x0
+    len: 3
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/multibeat_8beat_data.txt
+    inject:
+      wlast_violation: drop_on_last_beat   # NEW scenario-parser field
+```
+
+The new `inject.wlast_violation: drop_on_last_beat` field tells the c_model `AxiMaster` to NOT assert WLAST on the final beat. wb2axip's `f_axi_slave` checks `wlast` ↔ beat-count alignment per IHI 0022H §A3.4.1 and will fire `$error`.
+
+**Scenario-parser extension required.** Add a parallel sub-task (call it Task 27.5) to extend `cosim2/c/cmodel_dpi.cpp` or `c_model/include/cosim2/axi_master_shell_adapter.hpp` (whichever owns the wlast emission) to honor the `inject.wlast_violation` field. The extension is small: an extra bool flag passed through the scenario → adapter → wlast suppression on final beat.
+
+If implementing the parser extension is out-of-scope for W3, this gate can still record the test as `deferred` in `cosim2/quality/zone_B_decisions.json` with HIGH severity. User decides whether to require it for release.
+
+- [ ] **Step 3: Register `Wb2axipProtocolViolation` ctest**
+
+Edit `cosim2/tests/CMakeLists.txt`. Add after the `CheckerLiveness` block:
+
+```cmake
+add_test(NAME Wb2axipProtocolViolation COMMAND test_wb2axip_protocol_violation)
+set_tests_properties(Wb2axipProtocolViolation PROPERTIES
+    ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
+    WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
+```
+
+Create `cosim2/tests/test_wb2axip_protocol_violation.cpp` mirroring `test_checker_fires_on_violation.cpp` shape:
+
+```cpp
+// Confirms wb2axip SLAVE_ASSERT fires on AXI4 protocol violation.
+#include "common/scenario.hpp"
+#include <cstdlib>
+#include <gtest/gtest.h>
+#include <string>
+
+TEST(Wb2axipProtocolViolation, wlast_violation_fires_slave_assert) {
+    SCENARIO("wb2axip protocol checker liveness: wlast violation fires $error");
+    const char* bin = std::getenv("COSIM_BIN");
+    ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
+    const std::string cmd =
+        std::string(bin) + " +scenario=../tests/fixtures/axi4_protocol_violation.yaml";
+    const int rc = std::system(cmd.c_str());
+    EXPECT_NE(rc, 0)
+        << "protocol violation scenario should have fired wb2axip $error and exited nonzero";
+}
+```
+
+- [ ] **Step 4: Run both tests**
+
+```bash
+cd /e/05_NoC/noc_project/c_model/build
+ctest -R 'CheckerLiveness|Wb2axipProtocolViolation' --output-on-failure 2>&1 \
+    | tee -a /e/05_NoC/noc_project/cosim2/quality/fault_inject_dpi.log
+```
+
+Expected: both tests `Passed` (each via `EXPECT_NE(rc, 0)`).
+
+- [ ] **Step 5: Run a positive (no-injection) fixture to confirm zero exit**
 
 ```bash
 cd /e/05_NoC/noc_project/cosim2/verilator
@@ -2527,13 +2816,18 @@ cd /e/05_NoC/noc_project/cosim2/verilator
 echo "Positive exit code: $?"
 ```
 
-Expected: exit code 0. Append to fault_inject.log.
+Expected: exit code 0.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add cosim2/quality/fault_inject.log
-git commit -m "chore(quality): release gate 9 fault injection sanity (CheckerLiveness)"
+git add cosim2/tests/fixtures/axi4_protocol_violation.yaml \
+        cosim2/tests/test_wb2axip_protocol_violation.cpp \
+        cosim2/tests/CMakeLists.txt \
+        cosim2/quality/fault_inject_dpi.log \
+        c_model/include/cosim2/axi_master_shell_adapter.hpp \
+        cosim2/c/cmodel_dpi.cpp
+git commit -m "chore(quality): release gate 9 fault injection (DPI-error + wb2axip protocol violation)"
 ```
 
 ---
@@ -2574,46 +2868,196 @@ git commit -m "chore(quality): release gate 10 C++ byte-identical"
 
 ---
 
-### Task 29: Spec §7.3 scenario tests
+### Task 29: Spec §7.3 scenario tests (in-scope subset + deferred subset)
 
-**Files:**
-- Create: `cosim2/tests/fixtures/reset_mid_burst.yaml`
+**Files in scope:**
 - Create: `cosim2/tests/fixtures/backpressure_throttle.yaml`
-- Create: `cosim2/tests/fixtures/aw_w_simultaneous.yaml`
-- Create: `cosim2/tests/fixtures/outstanding_id.yaml`
+- Create: `cosim2/tests/fixtures/outstanding_id_inorder.yaml`
 - Create: `cosim2/tests/fixtures/five_channel_connectivity.yaml`
-- Modify: `cosim2/tests/CMakeLists.txt` (register new ctest entries)
+- Modify: `cosim2/tests/CMakeLists.txt`
 
-**Rationale (Codex round 3 MEDIUM):** Spec §7.3 lists scenario tests that previous plan revisions never added. These exercise behaviors not covered by the existing 5 smoke fixtures.
+**Deferred to a follow-up scenario-parser-extension spec:**
+- `reset_mid_burst.yaml` — requires NEW scenario-parser field `reset_at_cycle`. Current parser does not support mid-simulation reset assertion. Document in `cosim2/quality/zone_B_decisions.json` with severity HIGH + owner placeholder.
+- `aw_w_simultaneous.yaml` — requires NEW scenario-parser field to express AW/W timing skew. Current c_model `AxiMaster` always emits AW before W. Document similarly.
 
-- [ ] **Step 1-5: Author one fixture per scenario**
+**Outstanding-ID semantics correction (Codex round 4):** AXI4 explicitly ALLOWS multiple outstanding transactions with the same `AWID` — what is required is that responses with the same ID stay in order (IHI 0022H §A5.2.2). The fixture below tests the LEGAL behavior and the EXPECTED in-order completion, not a violation.
 
-For each fixture, write YAML in the existing scenario format (look at `debug_multi1.yaml` for template). Brief content guidance:
+- [ ] **Step 1: Author `backpressure_throttle.yaml`**
 
-- `reset_mid_burst.yaml`: configure max_outstanding_write=1, drive an INCR burst of len=7, assert rst_ni at midpoint (need test harness support — may require a new YAML field `reset_at_cycle`). If reset injection isn't supported by current scenario_parser, defer to a deferred fixture and note in `deferred_findings.json` with severity HIGH (release blocker not met) and ask user to defer or block.
-- `backpressure_throttle.yaml`: configure write_latency=5, max_outstanding_write=1, drive 4 sequential writes; check observable backpressure on the AW channel via existing scoreboard hooks.
-- `aw_w_simultaneous.yaml`: per IHI 0022H §A3.2.1, W may precede AW. Configure scenario to send W beats before AW for same transaction; confirm c_model handles correctly.
-- `outstanding_id.yaml`: configure max_outstanding_write=4, drive 4 in-flight AWs with same ID — confirm wb2axip checker fires (this is illegal per AXI4) → test should be marked as a CheckerLiveness-style negative (expected nonzero exit).
-- `five_channel_connectivity.yaml`: a single scenario that exercises a write + read transaction (covers all 5 AXI channels at least once).
+```yaml
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 5
+  read_latency: 5
+  max_outstanding_write: 1
+  max_outstanding_read: 1
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0x0
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/single_beat_data.txt
+  - op: write
+    addr: 0x1040
+    id: 0x0
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/single_beat_data.txt
+  - op: write
+    addr: 0x1080
+    id: 0x0
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/single_beat_data.txt
+  - op: write
+    addr: 0x10c0
+    id: 0x0
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/single_beat_data.txt
+```
 
-- [ ] **Step 6: Register new tests in cosim2/tests/CMakeLists.txt**
+Behavior: with `write_latency=5` + `max_outstanding_write=1`, master must stall AW each cycle until the previous B response — directly exercises backpressure on AW.
 
-Add 5 `add_test` entries patterned after existing `CosimWireSmoke` and `CheckerLiveness`. For the `outstanding_id` case, set `WILL_FAIL TRUE` (the child binary is expected to exit nonzero).
+- [ ] **Step 2: Author `outstanding_id_inorder.yaml`** (legal multi-outstanding same-ID)
 
-- [ ] **Step 7: Run + commit**
+```yaml
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 3
+  max_outstanding_write: 4
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/single_beat_data.txt
+  - op: write
+    addr: 0x1040
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/single_beat_data.txt
+  - op: write
+    addr: 0x1080
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/single_beat_data.txt
+```
+
+Behavior: 3 in-flight writes, all same ID=0x5, all legal per AXI4 §A5.2.2. Scoreboard verifies B responses arrive in issue order.
+
+- [ ] **Step 3: Author `five_channel_connectivity.yaml`**
+
+```yaml
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0x0
+    len: 1
+    size: 5
+    burst: INCR
+    data_file: ../tests/fixtures/two_beat_data.txt
+  - op: read
+    addr: 0x1000
+    id: 0x0
+    len: 1
+    size: 5
+    burst: INCR
+    dump_file: unused
+```
+
+Behavior: one write (covers AW + W + B) + one read (covers AR + R) = all 5 channels exercised in a single scenario.
+
+- [ ] **Step 4: Register ctest entries** (CMakeLists.txt)
+
+Append to `cosim2/tests/CMakeLists.txt`:
+
+```cmake
+add_test(NAME BackpressureThrottle COMMAND test_scenario_runner
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/backpressure_throttle.yaml")
+set_tests_properties(BackpressureThrottle PROPERTIES
+    ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
+    WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
+
+add_test(NAME OutstandingIdInOrder COMMAND test_scenario_runner
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/outstanding_id_inorder.yaml")
+set_tests_properties(OutstandingIdInOrder PROPERTIES
+    ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
+    WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
+
+add_test(NAME FiveChannelConnectivity COMMAND test_scenario_runner
+    "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/five_channel_connectivity.yaml")
+set_tests_properties(FiveChannelConnectivity PROPERTIES
+    ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
+    WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
+```
+
+(Adapt the `test_scenario_runner` target name to match the existing scenario-driver gtest harness in the repo — confirm via `grep "add_test" cosim2/tests/CMakeLists.txt`. NO `WILL_FAIL TRUE` on any of these — all three are legal scenarios expected to PASS.)
+
+- [ ] **Step 5: Add deferred-fixture notes**
+
+Append to `cosim2/quality/zone_B_decisions.json` (or create it if not yet present from Task 17):
+
+```json
+[
+  {
+    "severity": "HIGH",
+    "category": "deferred_test",
+    "file": "cosim2/tests/fixtures/reset_mid_burst.yaml",
+    "line": 0,
+    "description": "Spec §7.3 reset-during-transaction scenario deferred; requires scenario-parser support for reset_at_cycle field.",
+    "suggested_fix": "Extend scenario-parser + AxiMaster to honor reset_at_cycle; then author fixture.",
+    "owner": "TBD"
+  },
+  {
+    "severity": "HIGH",
+    "category": "deferred_test",
+    "file": "cosim2/tests/fixtures/aw_w_simultaneous.yaml",
+    "line": 0,
+    "description": "Spec §7.3 AW/W simultaneous (W-before-AW) scenario deferred; requires scenario-parser support for AW/W timing skew.",
+    "suggested_fix": "Extend scenario-parser + AxiMaster timing model; then author fixture.",
+    "owner": "TBD"
+  }
+]
+```
+
+User must mark `defer` (release goes ahead without these) or `fix` (release blocked until scenario-parser extension).
+
+- [ ] **Step 6: Build + run + commit**
 
 ```bash
 cd /e/05_NoC/noc_project/c_model/build
-cmake -S ../. -B .
 cmake --build . -j
-ctest --output-on-failure -R 'ResetMidBurst|Backpressure|AwWSimul|OutstandingId|FiveChan'
+ctest --output-on-failure -R 'BackpressureThrottle|OutstandingIdInOrder|FiveChannelConnectivity'
 ```
 
-Expected: 4 PASS + 1 expected-fail PASS (OutstandingId, via WILL_FAIL).
+Expected: 3/3 PASS.
 
 ```bash
-git add cosim2/tests/fixtures/*.yaml cosim2/tests/CMakeLists.txt
-git commit -m "feat(cosim2): add spec §7.3 scenario tests (reset/backpressure/aw_w/outstanding/connectivity)"
+git add cosim2/tests/fixtures/backpressure_throttle.yaml \
+        cosim2/tests/fixtures/outstanding_id_inorder.yaml \
+        cosim2/tests/fixtures/five_channel_connectivity.yaml \
+        cosim2/tests/CMakeLists.txt \
+        cosim2/quality/zone_B_decisions.json
+git commit -m "feat(cosim2): spec §7.3 scenario tests (backpressure/outstanding-id/5-ch); reset+aw-w deferred"
 ```
 
 ---
@@ -2623,7 +3067,49 @@ git commit -m "feat(cosim2): add spec §7.3 scenario tests (reset/backpressure/a
 **Files:**
 - Create: `cosim2/scripts/run_release_gates.sh`
 
-- [ ] **Step 1: Write aggregator**
+- [ ] **Step 1: Write aggregator + decisions-parser helper**
+
+Create `cosim2/scripts/check_decisions.py` first — it parses `zone_<X>_decisions.json` and counts unfixed CRITICAL/HIGH findings:
+
+```python
+#!/usr/bin/env py -3
+"""Confirm all CRITICAL findings fixed; all HIGH fixed or owner-deferred."""
+import json
+import sys
+from pathlib import Path
+
+def main(paths: list[str]) -> int:
+    bad_critical = []
+    bad_high = []
+    for p in paths:
+        data = json.loads(Path(p).read_text())
+        for f in data:
+            sev = f.get("severity", "")
+            dec = f.get("decision", "")
+            if sev == "CRITICAL" and dec != "fix":
+                bad_critical.append((p, f))
+            elif sev == "HIGH" and dec not in ("fix", "defer"):
+                bad_high.append((p, f))
+            elif sev == "HIGH" and dec == "defer" and not f.get("owner"):
+                bad_high.append((p, f))
+    if bad_critical:
+        print(f"FAIL: {len(bad_critical)} CRITICAL findings not marked fix:")
+        for p, f in bad_critical:
+            print(f"  {p}: {f.get('file')}:{f.get('line')} -- {f.get('description')}")
+    if bad_high:
+        print(f"FAIL: {len(bad_high)} HIGH findings missing fix/defer-with-owner:")
+        for p, f in bad_high:
+            print(f"  {p}: {f.get('file')}:{f.get('line')} -- {f.get('description')}")
+    if bad_critical or bad_high:
+        return 1
+    print("OK: all CRITICAL fixed; all HIGH fixed or owner-deferred")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
+```
+
+Then write the aggregator:
 
 ```bash
 #!/usr/bin/env bash
@@ -2633,57 +3119,106 @@ set -euo pipefail
 export PATH="/c/msys64/mingw64/bin:$PATH"
 cd "$(git rev-parse --show-toplevel)"
 
-echo "== Gate 1+2: findings acked =="
-test -s cosim2/quality/zone_A_decisions.json
-test -s cosim2/quality/zone_B_decisions.json
-test -s cosim2/quality/zone_C_decisions.json
-echo "OK"
+fail=0
+run_gate() {
+    local name="$1"; shift
+    echo "== $name =="
+    if "$@"; then
+        echo "  PASS"
+    else
+        echo "  FAIL"
+        fail=$((fail+1))
+    fi
+}
 
-echo "== Gate 3: lint clean =="
-! grep -E "^(warning|error)" cosim2/quality/clang_tidy.log
-! grep -E "^(warning|error)" cosim2/quality/verible.log
-echo "OK"
+# Gate 1+2: zone findings actually fixed or owner-deferred
+run_gate "Gate 1+2 zone findings" \
+    py -3 cosim2/scripts/check_decisions.py \
+        cosim2/quality/zone_A_decisions.json \
+        cosim2/quality/zone_B_decisions.json \
+        cosim2/quality/zone_C_decisions.json
 
-echo "== Gate 4: Verilator warning-clean =="
-! grep -E "^%(Warning|Error)" cosim2/quality/verilator_strict.log
-echo "OK"
+# Gate 3: lint clean
+run_gate "Gate 3 clang-tidy" \
+    bash -c '! grep -iE "(warning:|error:)" cosim2/quality/clang_tidy.log'
+run_gate "Gate 3 verible" \
+    bash -c '! grep -iE "(warning|error)" cosim2/quality/verible.log'
 
-echo "== Gate 5: parameter sweep =="
-py -3 -m pytest specgen/tests/test_parameter_sweep.py -q
-echo "OK"
+# Gate 4: Verilator strict warning-clean
+run_gate "Gate 4 Verilator strict" \
+    bash -c '! grep -E "^%(Warning|Error)" cosim2/quality/verilator_strict.log'
 
-echo "== Gate 6: sanitizer =="
-! grep -E "(AddressSanitizer|UndefinedBehaviorSanitizer):" cosim2/quality/sanitizer_cmodel.log
-echo "OK"
+# Gate 5: parameter sweep
+run_gate "Gate 5 specgen schema sweep" \
+    py -3 -m pytest specgen/tests/test_parameter_sweep.py -q
+run_gate "Gate 5 SV elab matrix" \
+    bash -c './cosim2/scripts/verilator_param_sweep.sh > /dev/null'
 
-echo "== Gate 7: coverage =="
-grep "^OK" cosim2/quality/coverage_summary.log
-echo "OK"
+# Gate 6: sanitizer (c_model)
+run_gate "Gate 6 sanitizer" \
+    bash -c '! grep -E "(AddressSanitizer|UndefinedBehaviorSanitizer):" cosim2/quality/sanitizer_cmodel.log'
 
-echo "== Gate 8: reproducible =="
-grep "Reproducible: byte-identical" cosim2/quality/reproducible.log
-echo "OK"
+# Gate 7: coverage thresholds
+run_gate "Gate 7 coverage" \
+    py -3 cosim2/scripts/check_coverage.py /tmp/cov_annotated
 
-echo "== Gate 9: fault injection =="
-grep "CheckerLiveness: PASSED" cosim2/quality/fault_inject.log
-echo "OK"
+# Gate 8: reproducible generation
+run_gate "Gate 8 reproducible" \
+    bash -c 'grep -q "Reproducible: byte-identical" cosim2/quality/reproducible.log'
 
-echo "== Gate 10: cpp byte-identical =="
-grep "C++ byte-identical" cosim2/quality/cpp_byte_identical.log
-echo "OK"
+# Gate 9: fault injection — BOTH DPI + protocol violation must pass
+run_gate "Gate 9 fault injection" \
+    bash -c 'cd c_model/build && ctest -R "CheckerLiveness|Wb2axipProtocolViolation" --output-on-failure'
 
-echo "== Drift gate =="
-(cd specgen && py -3 tools/codegen.py --check)
-echo "OK"
+# Gate 10: C++ byte-identical
+run_gate "Gate 10 cpp byte-identical" \
+    bash -c 'grep -q "C++ byte-identical" cosim2/quality/cpp_byte_identical.log'
+
+# Spec §7.3 scenario tests
+run_gate "§7.3 scenarios" \
+    bash -c 'cd c_model/build && ctest -R "BackpressureThrottle|OutstandingIdInOrder|FiveChannelConnectivity" --output-on-failure'
+
+# Modport-only harness still elaborates after possible W3 architectural fixes
+run_gate "Modport harness" \
+    bash -c 'cd cosim2/verilator && verilator --lint-only --Wall --assert \
+        -I../sv -I../sv/wb2axip \
+        ../../specgen/generated/sv/ni_params_pkg.sv \
+        ../../specgen/generated/sv/ni_signals_pkg.sv \
+        ../sv/axi_master_wrap.sv ../sv/axi_slave_wrap.sv ../sv/loopback_noc_wrap.sv \
+        ../tests/sv/elab_modport_only_harness.sv --top-module elab_modport_only_harness'
+
+# Full ctest sweep
+run_gate "Full ctest" \
+    bash -c 'cd c_model/build && ctest --output-on-failure'
+
+# Drift gate
+run_gate "Drift" \
+    bash -c 'cd specgen && py -3 tools/codegen.py --check'
+
+# Clean-tree assertion: HEAD is committed, working tree is clean
+run_gate "Clean tree" \
+    bash -c 'test -z "$(git status --porcelain)"'
 
 echo
-echo "ALL GATES PASSED. Ready to tag v0.5.0."
+if [ $fail -eq 0 ]; then
+    echo "ALL GATES PASSED. Ready to tag v0.5.0."
+else
+    echo "FAILED: $fail gate(s) did not pass."
+    exit $fail
+fi
 ```
 
-- [ ] **Step 2: Run aggregator + tag**
+- [ ] **Step 2: Make scripts executable + commit aggregator**
 
 ```bash
 chmod +x cosim2/scripts/run_release_gates.sh
+git add cosim2/scripts/run_release_gates.sh cosim2/scripts/check_decisions.py
+git commit -m "chore(quality): release-gate aggregator (parses decisions, runs ctest, checks clean tree)"
+```
+
+- [ ] **Step 3: Run aggregator + tag**
+
+```bash
 ./cosim2/scripts/run_release_gates.sh
 
 git tag -a v0.5.0 -m "Stage 5b release: specgen handshake upstream + rtl-style refactor
