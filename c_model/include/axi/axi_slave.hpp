@@ -123,6 +123,16 @@ class AxiSlave {
     }
 
   private:
+    // tick() phase methods — one per numbered step in the AXI4 slave pipeline.
+    // Each operates on member state and preserves the original step's semantics.
+    void tick_drain_write_resp_();           // Step 1
+    void tick_drain_read_resp_();            // Step 2
+    void tick_admit_aw_();                   // Step 3 (incl. E2/E3 exclusive monitor)
+    void tick_submit_w_();                   // Step 4 (incl. E4 exclusive-write suppress)
+    void tick_drain_failed_exclusive_b_();   // Step 4b
+    void tick_admit_ar_();                   // Step 5 (incl. E1 exclusive monitor)
+    void tick_submit_ar_();                  // Step 6
+
     // Owned memory for standalone ctor (AxiSlaveConfig path).
     // Declared before memory_port_ so it is constructed first; the standalone
     // ctor's initializer list can then safely bind memory_port_ to *owned_memory_.
@@ -176,7 +186,16 @@ inline void AxiSlave::tick() {
     //    a write submitted in this same tick can fire immediately on write_lat=0,
     //    or arrive in the next tick on write_lat=1 (the common case).
     tick_memory();
+    tick_drain_write_resp_();          // 1
+    tick_drain_read_resp_();           // 2
+    tick_admit_aw_();                  // 3
+    tick_submit_w_();                  // 4
+    tick_drain_failed_exclusive_b_();  // 4b
+    tick_admit_ar_();                  // 5
+    tick_submit_ar_();                 // 6
+}
 
+inline void AxiSlave::tick_drain_write_resp_() {
     // 1. Drain memory write responses → match by id, advance OLDEST burst.
     //    Per-ID FIFO: same-id bursts complete in issue order (AXI4 IHI 0022
     //    A5.3 — ordering of transactions with the same AXI ID is preserved).
@@ -217,7 +236,9 @@ inline void AxiSlave::tick() {
             // queued burst is correct even while this one waits on memory latency.
         }
     }
+}
 
+inline void AxiSlave::tick_drain_read_resp_() {
     // 2. Drain memory read responses → push R beats (advance OLDEST per id).
     while (auto rresp = memory_port_.pop_read_resp()) {
         AXI_PROTOCOL_ASSERT(rules::check_resp_encoding(rresp->resp),
@@ -262,7 +283,9 @@ inline void AxiSlave::tick() {
             if (it->second.empty()) active_reads_.erase(it);
         }
     }
+}
 
+inline void AxiSlave::tick_admit_aw_() {
     // 3. Start new AW (with burst-atomic OOB pre-check).
     //    Per-ID FIFO admits multi-outstanding same-id bursts: just append to
     //    the id's chain. AXI4 same-id ordering is preserved by FIFO discipline
@@ -369,7 +392,9 @@ inline void AxiSlave::tick() {
         aw_issue_order_.push_back(aw.id);
         aw_q_.pop_front();
     }
+}
 
+inline void AxiSlave::tick_submit_w_() {
     // 4. Submit W beats for oldest-issued active write (per-id FIFO).
     //    Multi-outstanding same-id: chain.front() may already have its W beats
     //    fully submitted (and be waiting on B drain). Find the FIRST burst in
@@ -433,7 +458,9 @@ inline void AxiSlave::tick() {
             // Continue the loop: a subsequent burst may have W beats already queued.
         }
     }
+}
 
+inline void AxiSlave::tick_drain_failed_exclusive_b_() {
     // 4b. Phase C — emit B for failed exclusive writes (E6 partial: no-match).
     //     These bursts never reach memory_port_, so step 1 cannot drain them.
     //     Walk each id's chain front-to-back: drain any prefix of bursts whose
@@ -463,7 +490,9 @@ inline void AxiSlave::tick() {
         else
             ++it;
     }
+}
 
+inline void AxiSlave::tick_admit_ar_() {
     // 5. Start new AR (with burst-atomic OOB pre-check).
     //    Per-ID FIFO: append same-id ARs to the id's chain. Step 2 (R drain)
     //    advances FRONT — AXI4 preserves same-id response order.
@@ -550,7 +579,9 @@ inline void AxiSlave::tick() {
         active_reads_[ar.id].push_back(ReadBurstState{ar, 0, 0});
         ar_q_.pop_front();
     }
+}
 
+inline void AxiSlave::tick_submit_ar_() {
     // 6. Submit AR beats to memory.
     //    For each id, walk the FIFO chain front-to-back: drain the front burst's
     //    remaining beats before issuing the next one. This preserves the order
