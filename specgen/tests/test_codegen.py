@@ -288,3 +288,16 @@ def test_packet_cpp_has_payload_static_assert():
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
     for ch in ("AW", "AR", "W", "B", "R"):
         assert f"ni::payload::{ch}_WIDTH" in text, f"missing static_assert for {ch}"
+
+
+def test_emit_ni_params_h_matches_spec_derived_golden():
+    """cpp_params.emit() output must match the hand-authored golden."""
+    from tools.elaborate import cpp_params
+    from ni_spec.loader import load_spec_version
+
+    src = SPECGEN_ROOT / "source" / "constants.yaml"
+    out = cpp_params.emit(src, load_spec_version())
+
+    golden_path = Path(__file__).resolve().parent / "golden" / "ni_params.h.golden"
+    golden = golden_path.read_text(encoding="ascii")
+    assert out == golden, "emitted cpp output differs from spec-derived golden"
