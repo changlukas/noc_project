@@ -2,12 +2,25 @@
 #pragma once
 #include "ni_flit_constants.h"
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 namespace ni::cmodel::axi {
 
 constexpr int DATA_BYTES = ni::WSTRB_WIDTH;
 constexpr int DATA_WIDTH = DATA_BYTES * 8;
+
+// AXI data field width in bits used by NoC payload bulk-bytes accessors
+// (set_payload_bytes / get_payload_bytes for wdata / rdata).
+constexpr int NOC_DATA_WIDTH_BITS = DATA_BYTES * 8;
+
+// AXI ID space (1 << AXI_ID_WIDTH). Used to size per-id container arrays in
+// the NMU Rob and NSU MetaBuffer. Locked to the codegen'd AXI_ID_WIDTH so any
+// future widening of the ID field is caught at static_assert below.
+constexpr std::size_t AXI_ID_SPACE = 1u << ni::width::AXI_ID_WIDTH;
+static_assert(AXI_ID_SPACE == 256,
+              "AXI_ID_SPACE locked to 256 (AXI_ID_WIDTH=8); update per-id "
+              "container sizes if AXI_ID_WIDTH changes");
 
 static_assert(DATA_BYTES * 8 == ni::width::NOC_DATA_WIDTH,
               "DATA_BYTES (= WSTRB_WIDTH) * 8 must equal NOC_DATA_WIDTH "

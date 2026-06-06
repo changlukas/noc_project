@@ -1,4 +1,5 @@
 #pragma once
+#include "axi/types.hpp"
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -64,9 +65,9 @@ class MetaBuffer {
     }
 
   private:
-    // ~40KB per MetaBuffer (256 empty deques x ~80B each); assumes sparse-id usage
-    std::array<std::deque<MetaEntry>, 256> write_;  // per awid
-    std::array<std::deque<MetaEntry>, 256> read_;   // per arid
+    // ~40KB per MetaBuffer (AXI_ID_SPACE=256 empty deques x ~80B each); assumes sparse-id usage
+    std::array<std::deque<MetaEntry>, axi::AXI_ID_SPACE> write_;  // per awid
+    std::array<std::deque<MetaEntry>, axi::AXI_ID_SPACE> read_;   // per arid
     std::size_t per_id_depth_;
 };
 

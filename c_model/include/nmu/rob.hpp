@@ -108,7 +108,8 @@ class Rob : public Packetizer, public Depacketizer {
 
     // === Enabled mode public constants (for testing + caller info) ===
     static constexpr std::size_t ROB_CAPACITY = 1u << ni::header::ROB_IDX_WIDTH;  // 32
-    static constexpr std::size_t AXI_ID_SPACE = 1u << ni::width::AXI_ID_WIDTH;    // 256
+    // AXI ID space alias — single source of truth lives in axi::AXI_ID_SPACE.
+    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;                // 256
 
     // Linear scan for first run of n consecutive 1s in bitset<ROB_CAPACITY>.
     // Returns base index (0..ROB_CAPACITY-1), or -1 if no such run exists.
@@ -133,8 +134,8 @@ class Rob : public Packetizer, public Depacketizer {
     struct ReadState {
         std::deque<OutstandingEntry> outstanding;
     };
-    std::array<WriteState, 256> write_;
-    std::array<ReadState, 256> read_;
+    std::array<WriteState, axi::AXI_ID_SPACE> write_;
+    std::array<ReadState, axi::AXI_ID_SPACE> read_;
 
     // W burst credit gate: prevents W beats from reaching Packetize before
     // their corresponding AW has been ROB-accepted. Single counter (not per-id)

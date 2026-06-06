@@ -106,7 +106,7 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
     f.set_payload_field("R", "rresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("R", "ruser", b.user);
     f.set_payload_field("R", "rlast", b.last ? 1u : 0u);
-    f.set_payload_bytes("R", "rdata", b.data.data(), 256);
+    f.set_payload_bytes("R", "rdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
     if (!r_out_.push_flit(f)) return false;
     if (b.last) meta_.commit_read(b.id);
     return true;

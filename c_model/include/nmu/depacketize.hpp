@@ -98,7 +98,7 @@ inline axi::RBeat Depacketize::decode_r(const Flit& f) {
     r.resp = static_cast<axi::Resp>(f.get_payload_field("R", "rresp"));
     r.user = static_cast<uint8_t>(f.get_payload_field("R", "ruser"));
     r.last = f.get_payload_field("R", "rlast") != 0;
-    f.get_payload_bytes("R", "rdata", r.data.data(), 256);
+    f.get_payload_bytes("R", "rdata", r.data.data(), axi::NOC_DATA_WIDTH_BITS);
     return r;
 }
 

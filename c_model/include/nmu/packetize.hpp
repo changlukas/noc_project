@@ -152,7 +152,7 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     f.set_payload_field("W", "wlast", b.last ? 1u : 0u);
     f.set_payload_field("W", "wuser", b.user);
     f.set_payload_field("W", "wstrb", b.strb);
-    f.set_payload_bytes("W", "wdata", b.data.data(), 256);
+    f.set_payload_bytes("W", "wdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
     if (!w_out_.push_flit(f)) return false;
     if (b.last) w_meta_fifo_.pop_front();
     return true;

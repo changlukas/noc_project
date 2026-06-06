@@ -42,10 +42,11 @@ inline std::vector<BurstSpec> split_into_sub_bursts(const ScenarioTransaction& t
     uint64_t addr = txn.addr;
     std::size_t beats_remaining = static_cast<std::size_t>(txn.len) + 1u;
     while (beats_remaining > 0) {
-        const std::size_t bytes_to_4kb = 0x1000u - (addr & 0xFFFu);
+        const std::size_t bytes_to_4kb = rules::kAxi4PageBytes - (addr & rules::kAxi4PageMask);
         std::size_t beats_to_4kb = bytes_to_4kb / bpb;
         if (beats_to_4kb == 0) beats_to_4kb = beats_remaining;  // already aligned
-        const std::size_t beats_this = std::min({beats_to_4kb, beats_remaining, std::size_t{256}});
+        const std::size_t beats_this = std::min(
+            {beats_to_4kb, beats_remaining, static_cast<std::size_t>(rules::kAxi4MaxBurstBeats)});
         out.push_back(BurstSpec{addr, static_cast<uint8_t>(beats_this - 1), txn.size, Burst::INCR});
         addr += beats_this * bpb;
         beats_remaining -= beats_this;

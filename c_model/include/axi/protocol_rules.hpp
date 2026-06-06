@@ -29,6 +29,25 @@
 namespace ni::cmodel::axi::rules {
 
 // ============================================================================
+// Shared AXI4 spec constants (IHI 0022H §A3.4.1)
+// ============================================================================
+
+// 4KB-page math: INCR bursts must not cross a 4KB address boundary
+// (IHI 0022H §A3.4.1). Codify the page size as log2 + derived bytes/mask.
+constexpr int      kAxi4PageBits      = 12;                  // log2(page bytes)
+constexpr uint64_t kAxi4PageBytes     = 1ull << kAxi4PageBits;
+constexpr uint64_t kAxi4PageMask      = kAxi4PageBytes - 1ull;
+// INCR max burst length: AxLEN is 8-bit → up to 256 beats per AW/AR
+// (IHI 0022H §A3.4.1).
+constexpr int      kAxi4MaxBurstBeats = 256;
+
+// AxSIZE encodes log2(bytes-per-beat); must not exceed log2(DATA_BYTES) so a
+// beat fits the bus (IHI 0022H §A3.4.1). DATA_BYTES = 32 → max size = 5.
+constexpr int kMaxSize = 5;  // log2(DATA_BYTES) for DATA_BYTES = 32
+static_assert(DATA_BYTES == (1 << kMaxSize),
+              "kMaxSize must equal log2(DATA_BYTES); update if bus widens");
+
+// ============================================================================
 // Stateless field checks
 // ============================================================================
 
@@ -40,10 +59,6 @@ inline bool check_burst_encoding(Burst b) {
 // SIZE_BOUND — AxSIZE encodes log2(bytes-per-beat); must not exceed
 // log2(DATA_BYTES) so a beat fits the bus (IHI 0022 A3.4.1).
 inline bool check_size_bound(uint8_t size) {
-    // DATA_BYTES = 32 → max size = 5 (32 = 1 << 5).
-    constexpr int kMaxSize = 5;  // log2(DATA_BYTES) for DATA_BYTES = 32
-    static_assert(DATA_BYTES == (1 << kMaxSize),
-                  "kMaxSize must equal log2(DATA_BYTES); update if bus widens");
     return size <= kMaxSize;
 }
 
@@ -133,7 +148,7 @@ inline bool check_4kb_cross(uint64_t base_addr, uint8_t len, uint8_t size, Burst
     const uint64_t total = (static_cast<uint64_t>(len) + 1u) * bpb;
     if (total == 0) return true;
     const uint64_t last_byte = base_addr + total - 1u;
-    return (base_addr >> 12) == (last_byte >> 12);
+    return (base_addr >> kAxi4PageBits) == (last_byte >> kAxi4PageBits);
 }
 
 // ============================================================================
