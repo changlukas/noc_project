@@ -101,6 +101,33 @@ def test_rejects_wrong_type(tmp_path):
         load_constants(bad)
 
 
+def test_rejects_bool_default_for_int_type(tmp_path):
+    """YAML bool is a subclass of int — must be rejected when type: int."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        'schema_version: "1.0"\n'
+        "axi:\n"
+        "  ID_WIDTH:\n"
+        "    type: int\n    default: true\n"
+        "    sv_symbol: X\n    cpp_symbol: x\n"
+    )
+    with pytest.raises(HandshakeSchemaError, match=r"default.*not int"):
+        load_constants(bad)
+
+
+def test_rejects_string_default_for_int_type(tmp_path):
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        'schema_version: "1.0"\n'
+        "axi:\n"
+        "  ID_WIDTH:\n"
+        '    type: int\n    default: "8"\n'
+        "    sv_symbol: X\n    cpp_symbol: x\n"
+    )
+    with pytest.raises(HandshakeSchemaError, match=r"default.*not int"):
+        load_constants(bad)
+
+
 def test_rejects_plain_param_with_derived_only_field(tmp_path):
     """A plain axi/noc param must NOT accept 'expression' (only valid on derived)."""
     bad = tmp_path / "bad.yaml"

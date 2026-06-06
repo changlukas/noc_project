@@ -17,7 +17,10 @@ import re
 from pathlib import Path
 from typing import Any, Dict
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 
 class HandshakeSchemaError(ValueError):
@@ -47,6 +50,11 @@ _INTERFACE_KINDS = {"axi4", "noc_link"}
 # -------- constants.yaml --------
 
 def load_constants(path: Path) -> Dict[str, Any]:
+    if yaml is None:
+        raise RuntimeError(
+            f"PyYAML is required to load {path} (constants.yaml). "
+            "Install with: pip install pyyaml"
+        )
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise HandshakeSchemaError(f"{path}: top level must be a mapping")
@@ -112,6 +120,26 @@ def _validate_param_spec(spec: Dict[str, Any], where: str, is_derived: bool) -> 
         raise HandshakeSchemaError(
             f"{where}: unknown type {spec['type']!r}; supported: {sorted(_SUPPORTED_TYPES)}"
         )
+    if spec["type"] == "int":
+        # Reject YAML bools (subclass of int) and any non-int default/min/max/allowed
+        def _is_strict_int(v):
+            return isinstance(v, int) and not isinstance(v, bool)
+
+        if "default" in spec and not _is_strict_int(spec["default"]):
+            raise HandshakeSchemaError(
+                f"{where}: default {spec['default']!r} is not int (type was declared 'int')"
+            )
+        for key in ("min", "max"):
+            if key in spec and not _is_strict_int(spec[key]):
+                raise HandshakeSchemaError(
+                    f"{where}: {key} {spec[key]!r} is not int (type was declared 'int')"
+                )
+        if "allowed" in spec:
+            for elt in spec["allowed"]:
+                if not _is_strict_int(elt):
+                    raise HandshakeSchemaError(
+                        f"{where}: allowed entry {elt!r} is not int (type was declared 'int')"
+                    )
     if not is_derived:
         d = spec["default"]
         if "min" in spec and d < spec["min"]:
