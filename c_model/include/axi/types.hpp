@@ -26,6 +26,19 @@ static_assert(DATA_BYTES * 8 == ni::width::NOC_DATA_WIDTH,
               "DATA_BYTES (= WSTRB_WIDTH) * 8 must equal NOC_DATA_WIDTH "
               "for byte-level WSTRB semantics");
 
+// constants.yaml allows DATA_WIDTH ∈ {32..1024} per spec, but the c_model and
+// DPI marshalling currently hardcode 256-bit (DATA_BYTES = 32). Lock that
+// assumption so any future widening of the bus fails the build here instead of
+// silently corrupting payloads.
+static_assert(DATA_BYTES == 32,
+              "c_model assumes AXI DATA_WIDTH = 256 bits; widen DATA_BYTES + "
+              "WBeat/RBeat data array + WSTRB type if the spec changes");
+
+// WBeat::strb is uint32_t. If DATA_BYTES ever exceeds 32, WSTRB no longer fits
+// in a single uint32_t — widen the struct field before relaxing this.
+static_assert(DATA_BYTES <= 32,
+              "WBeat::strb is uint32_t; widen the strb field if DATA_BYTES > 32");
+
 enum class Burst : uint8_t { FIXED = 0, INCR = 1, WRAP = 2 };
 enum class Resp : uint8_t { OKAY = 0, EXOKAY = 1, SLVERR = 2, DECERR = 3 };
 

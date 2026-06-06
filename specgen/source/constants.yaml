@@ -11,6 +11,10 @@ axi:
     default: 8
     min: 1
     max: 32
+    # NOTE: spec range is 1..32 per AXI4 IHI 0022 §A2.2.1, but c_model + DPI
+    # currently hardcode 8 (see static_assert in c_model/include/axi/types.hpp
+    # AXI_ID_SPACE check, and the AXI_ID_WIDTH wiring in cosim2/c/cmodel_dpi.cpp).
+    # Widen the impl side before relaxing this max.
     sv_symbol: NI_AXI_ID_WIDTH_DFLT
     cpp_symbol: NI_AXI_ID_WIDTH
   ADDR_WIDTH:
@@ -20,6 +24,9 @@ axi:
     default: 64
     min: 1
     max: 64
+    # NOTE: spec range is 1..64 per AXI4 IHI 0022 §A2.2.1, but the DPI pack_addr64
+    # helper in cosim2/c/cmodel_dpi.cpp hardcodes a 64-bit split into svBitVecVal[2].
+    # Reparameterize pack_addr64 before narrowing or relaxing this max.
     sv_symbol: NI_AXI_ADDR_WIDTH_DFLT
     cpp_symbol: NI_AXI_ADDR_WIDTH
   DATA_WIDTH:
@@ -28,6 +35,10 @@ axi:
     description: "AXI data bus width"
     default: 256
     allowed: [32, 64, 128, 256, 512, 1024]
+    # NOTE: spec allows the widths listed in `allowed`, but c_model + DPI currently
+    # hardcode 256-bit (DATA_BYTES = 32 in c_model/include/axi/types.hpp, and the
+    # svBitVecVal[8] data marshalling in cosim2/c/cmodel_dpi.cpp). Widen the impl
+    # side before picking a different `allowed` value.
     sv_symbol: NI_AXI_DATA_WIDTH_DFLT
     cpp_symbol: NI_AXI_DATA_WIDTH
 

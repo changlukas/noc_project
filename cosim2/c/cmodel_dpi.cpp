@@ -11,9 +11,32 @@
 
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
+#include "axi/types.hpp"  // ni::cmodel::axi::DATA_BYTES
+#include "ni_flit_constants.h"  // ni::FLIT_WIDTH
 #include <atomic>
 #include <memory>
 #include <string>
+
+// ---------------------------------------------------------------------------
+// DPI marshalling assumes a fixed wire format. The packing/unpacking helpers
+// below (unpack_flit, pack_flit, unpack_data256, pack_data256, pack_addr64)
+// hardcode word counts and bit shifts for the current spec defaults:
+//   FLIT_WIDTH = 408 bits → svBitVecVal[13] words
+//   DATA_BYTES = 32       → svBitVecVal[8]  words (256-bit data bus)
+//   ADDR_WIDTH = 64 bits  → svBitVecVal[2]  words (pack_addr64)
+// If a future constants.yaml change widens any of these, compile fails here
+// and the DPI pack/unpack must be parameterized before the build can proceed.
+// ---------------------------------------------------------------------------
+static_assert(::ni::FLIT_WIDTH == 408,
+              "cmodel_dpi pack/unpack assumes FLIT_WIDTH = 408 bits "
+              "(svBitVecVal[13]); reparameterize unpack_flit/pack_flit if widened");
+static_assert(::ni::cmodel::axi::DATA_BYTES == 32,
+              "cmodel_dpi pack/unpack assumes 256-bit data bus (DATA_BYTES = 32, "
+              "svBitVecVal[8]); reparameterize unpack_data256/pack_data256 if widened");
+// ADDR_WIDTH=64 → 2 svBitVecVal words. pack_addr64 hardcodes the 32/32 split.
+static_assert(::ni::width::AXI_ADDR_WIDTH == 64,
+              "cmodel_dpi pack_addr64 assumes ADDR_WIDTH = 64 bits "
+              "(svBitVecVal[2]); reparameterize pack_addr64 if widened");
 
 namespace ni::cmodel::cosim2 {
 

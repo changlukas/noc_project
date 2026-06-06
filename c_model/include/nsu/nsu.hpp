@@ -35,6 +35,7 @@
 #include "nsu/packetize.hpp"
 #include "nsu/vc_arbiter.hpp"
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -137,9 +138,9 @@ inline void Nsu::tick() {
 // NullNocReqIn: ShellAdapter injects flits via inject_req_flit() before
 //   calling nsu_.tick(); Nsu's Depacketize stage drains via pop_flit().
 //
-// NullNocRspOut: push_flit accepts every flit into an internal deque (depth
-//   unbounded for PoC); credit_avail always true. ShellAdapter drains via
-//   pop_rsp_flit() each tick after calling nsu_.tick().
+// NullNocRspOut: push_flit accepts every flit into an internal deque (capped
+//   at kMaxQueueDepth for PoC sanity); credit_avail always true. ShellAdapter
+//   drains via pop_rsp_flit() each tick after calling nsu_.tick().
 //
 // Invariant: NsuStandalone is non-copyable and non-movable (same as Nsu).
 // -------------------------------------------------------------------------
@@ -163,8 +164,15 @@ struct NullNocReqIn : noc::NocReqIn {
 };
 
 struct NullNocRspOut : noc::NocRspOut {
+    // Sanity cap: a real ShellAdapter drains every tick, so a queue this deep
+    // means the test forgot to drain. Asserts in debug; release builds skip
+    // the check (and the queue is still allowed to grow unboundedly).
+    static constexpr std::size_t kMaxQueueDepth = 1024;
+
     // Accept every flit into queue (models infinite downstream bandwidth).
     bool push_flit(const Flit& f) override {
+        assert(queue_.size() < kMaxQueueDepth &&
+               "NullNocRspOut overflow — did the test ShellAdapter forget to drain?");
         queue_.push_back(f);
         return true;
     }

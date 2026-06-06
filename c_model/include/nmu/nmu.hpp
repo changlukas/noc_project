@@ -38,6 +38,7 @@
 #include "noc/noc_rsp_in.hpp"
 #include "noc/wormhole_arbiter.hpp"
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -154,17 +155,24 @@ inline void Nmu::tick() {
 // that NmuShellAdapter can drain produced req flits and inject incoming rsp
 // flits at the DPI boundary without modifying the Nmu internals.
 //
-// NullNocReqOut: push_flit accepts every flit into an internal deque (depth
-//   unbounded for PoC); credit_avail always true. ShellAdapter drains via
-//   pop_req_flit() each tick after calling nmu_.tick().
+// NullNocReqOut: push_flit accepts every flit into an internal deque (capped
+//   at kMaxQueueDepth for PoC sanity); credit_avail always true. ShellAdapter
+//   drains via pop_req_flit() each tick after calling nmu_.tick().
 //
 // NullNocRspIn: ShellAdapter injects flits via inject_rsp_flit() before
 //   calling nmu_.tick(); Nmu's Depacketize stage drains via pop_flit().
 namespace detail {
 
 struct NullNocReqOut : noc::NocReqOut {
+    // Sanity cap: a real ShellAdapter drains every tick, so a queue this deep
+    // means the test forgot to drain. Asserts in debug; release builds skip
+    // the check (and the queue is still allowed to grow unboundedly).
+    static constexpr std::size_t kMaxQueueDepth = 1024;
+
     // Accept every flit into queue (models infinite downstream bandwidth).
     bool push_flit(const Flit& f) override {
+        assert(queue_.size() < kMaxQueueDepth &&
+               "NullNocReqOut overflow — did the test ShellAdapter forget to drain?");
         queue_.push_back(f);
         return true;
     }
