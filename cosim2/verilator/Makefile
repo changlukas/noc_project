@@ -12,8 +12,6 @@ YAMLCPP_LIB   := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-build/libyaml-cpp.a
 SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
-    $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
-    $(SPECGEN_SV_INC)/ni_regs_pkg.sv \
     $(COSIM_ROOT)/sv/axi_master_wrap.sv \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \
     $(COSIM_ROOT)/sv/loopback_noc_wrap.sv \
