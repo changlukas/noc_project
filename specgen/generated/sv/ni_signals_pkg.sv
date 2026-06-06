@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: 9ed018f23a88
 // Generator version: v1.0.0
-// Generated at: 2026-06-01T13:57:36Z
+// Generated at: 2026-06-06T11:38:17Z
 // ----------------------------------------------------------------------------
 `ifndef NI_SIGNALS_PKG_SVH
 `define NI_SIGNALS_PKG_SVH
@@ -64,174 +64,97 @@ package ni_signals_pkg;
 
 endpackage
 
-interface ni_axi_slave_port_intf;
-  logic [7:0] axi_awid;
-  logic [63:0] axi_awaddr;
-  logic [7:0] axi_awlen;
-  logic [2:0] axi_awsize;
-  logic [1:0] axi_awburst;
-  logic [3:0] axi_awcache;
-  logic axi_awlock;
-  logic [2:0] axi_awprot;
-  logic [3:0] axi_awregion;
-  logic [7:0] axi_awuser;
-  logic [3:0] axi_awqos;
-  logic [255:0] axi_wdata;
-  logic [31:0] axi_wstrb;
-  logic axi_wlast;
-  logic [7:0] axi_wuser;
-  logic [7:0] axi_arid;
-  logic [63:0] axi_araddr;
-  logic [7:0] axi_arlen;
-  logic [2:0] axi_arsize;
-  logic [1:0] axi_arburst;
-  logic [3:0] axi_arcache;
-  logic axi_arlock;
-  logic [2:0] axi_arprot;
-  logic [3:0] axi_arregion;
-  logic [7:0] axi_aruser;
-  logic [3:0] axi_arqos;
-  logic [7:0] axi_bid;
-  logic [1:0] axi_bresp;
-  logic [7:0] axi_buser;
-  logic [7:0] axi_rid;
-  logic [255:0] axi_rdata;
-  logic [1:0] axi_rresp;
-  logic axi_rlast;
-  logic [7:0] axi_ruser;
+interface axi4_intf #(
+  parameter int unsigned ID_WIDTH   = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT,
+  parameter int unsigned ADDR_WIDTH = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT,
+  parameter int unsigned DATA_WIDTH = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT
+);
+  localparam int unsigned WSTRB_WIDTH = DATA_WIDTH / 8;
 
-  modport endpoint (
-    input axi_awid, axi_awaddr, axi_awlen, axi_awsize, axi_awburst, axi_awcache, axi_awlock, axi_awprot, axi_awregion, axi_awuser, axi_awqos, axi_wdata, axi_wstrb, axi_wlast, axi_wuser, axi_arid, axi_araddr, axi_arlen, axi_arsize, axi_arburst, axi_arcache, axi_arlock, axi_arprot, axi_arregion, axi_aruser, axi_arqos,
-    output axi_bid, axi_bresp, axi_buser, axi_rid, axi_rdata, axi_rresp, axi_rlast, axi_ruser
+  // AW channel
+  logic [ID_WIDTH-1:0]   awid;
+  logic [ADDR_WIDTH-1:0] awaddr;
+  logic [7:0]            awlen;
+  logic [2:0]            awsize;
+  logic [1:0]            awburst;
+  logic                  awlock;
+  logic [3:0]            awcache;
+  logic [2:0]            awprot;
+  logic [3:0]            awqos;
+  logic [3:0]            awregion;
+  logic                  awvalid;
+  logic                  awready;
+
+  // W channel
+  logic [DATA_WIDTH-1:0]  wdata;
+  logic [WSTRB_WIDTH-1:0] wstrb;
+  logic                   wlast;
+  logic                   wvalid;
+  logic                   wready;
+
+  // B channel
+  logic [ID_WIDTH-1:0] bid;
+  logic [1:0]          bresp;
+  logic                bvalid;
+  logic                bready;
+
+  // AR channel
+  logic [ID_WIDTH-1:0]   arid;
+  logic [ADDR_WIDTH-1:0] araddr;
+  logic [7:0]            arlen;
+  logic [2:0]            arsize;
+  logic [1:0]            arburst;
+  logic                  arlock;
+  logic [3:0]            arcache;
+  logic [2:0]            arprot;
+  logic [3:0]            arqos;
+  logic [3:0]            arregion;
+  logic                  arvalid;
+  logic                  arready;
+
+  // R channel
+  logic [ID_WIDTH-1:0]   rid;
+  logic [DATA_WIDTH-1:0] rdata;
+  logic [1:0]            rresp;
+  logic                  rlast;
+  logic                  rvalid;
+  logic                  rready;
+
+  modport master (
+    output awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awqos, awregion, awvalid, wdata, wstrb, wlast, wvalid, bready, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arqos, arregion, arvalid, rready,
+    input  awready, wready, bid, bresp, bvalid, arready, rid, rdata, rresp, rlast, rvalid
   );
-endinterface : ni_axi_slave_port_intf
 
-interface ni_noc_req_out_intf;
-  logic noc_req_valid;
-  logic [407:0] noc_req_flit;
-  logic noc_req_credit;
-
-  modport endpoint (
-    input noc_req_credit,
-    output noc_req_valid, noc_req_flit
+  modport slave (
+    input  awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awqos, awregion, awvalid, wdata, wstrb, wlast, wvalid, bready, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arqos, arregion, arvalid, rready,
+    output awready, wready, bid, bresp, bvalid, arready, rid, rdata, rresp, rlast, rvalid
   );
-endinterface : ni_noc_req_out_intf
+endinterface : axi4_intf
 
-interface ni_noc_rsp_in_intf;
-  logic noc_rsp_valid;
-  logic [407:0] noc_rsp_flit;
-  logic noc_rsp_credit;
+interface noc_req_intf #(
+  parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
+  parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
+  parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
+);
+  logic                  valid;
+  logic [FLIT_WIDTH-1:0] flit;
+  logic [NUM_VC-1:0]     credit_return;
 
-  modport endpoint (
-    input noc_rsp_valid, noc_rsp_flit,
-    output noc_rsp_credit
-  );
-endinterface : ni_noc_rsp_in_intf
+  modport master ( output valid, flit, input  credit_return );
+  modport slave  ( input  valid, flit, output credit_return );
+endinterface : noc_req_intf
 
-interface ni_csr_intf;
-  logic [7:0] csr_awid;
-  logic [63:0] csr_awaddr;
-  logic [7:0] csr_awlen;
-  logic [2:0] csr_awsize;
-  logic [1:0] csr_awburst;
-  logic [3:0] csr_awcache;
-  logic csr_awlock;
-  logic [2:0] csr_awprot;
-  logic [3:0] csr_awregion;
-  logic [7:0] csr_awuser;
-  logic [3:0] csr_awqos;
-  logic [255:0] csr_wdata;
-  logic [31:0] csr_wstrb;
-  logic csr_wlast;
-  logic [7:0] csr_wuser;
-  logic [7:0] csr_arid;
-  logic [63:0] csr_araddr;
-  logic [7:0] csr_arlen;
-  logic [2:0] csr_arsize;
-  logic [1:0] csr_arburst;
-  logic [3:0] csr_arcache;
-  logic csr_arlock;
-  logic [2:0] csr_arprot;
-  logic [3:0] csr_arregion;
-  logic [7:0] csr_aruser;
-  logic [3:0] csr_arqos;
-  logic [7:0] csr_bid;
-  logic [1:0] csr_bresp;
-  logic [7:0] csr_buser;
-  logic [7:0] csr_rid;
-  logic [255:0] csr_rdata;
-  logic [1:0] csr_rresp;
-  logic csr_rlast;
-  logic [7:0] csr_ruser;
+interface noc_rsp_intf #(
+  parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
+  parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
+  parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
+);
+  logic                  valid;
+  logic [FLIT_WIDTH-1:0] flit;
+  logic [NUM_VC-1:0]     credit_return;
 
-  modport endpoint (
-    input csr_awid, csr_awaddr, csr_awlen, csr_awsize, csr_awburst, csr_awcache, csr_awlock, csr_awprot, csr_awregion, csr_awuser, csr_awqos, csr_wdata, csr_wstrb, csr_wlast, csr_wuser, csr_arid, csr_araddr, csr_arlen, csr_arsize, csr_arburst, csr_arcache, csr_arlock, csr_arprot, csr_arregion, csr_aruser, csr_arqos,
-    output csr_bid, csr_bresp, csr_buser, csr_rid, csr_rdata, csr_rresp, csr_rlast, csr_ruser
-  );
-endinterface : ni_csr_intf
-
-interface ni_noc_req_in_intf;
-  logic noc_req_valid;
-  logic [407:0] noc_req_flit;
-  logic noc_req_credit;
-
-  modport endpoint (
-    input noc_req_valid, noc_req_flit,
-    output noc_req_credit
-  );
-endinterface : ni_noc_req_in_intf
-
-interface ni_axi_master_port_intf;
-  logic [7:0] axi_awid;
-  logic [63:0] axi_awaddr;
-  logic [7:0] axi_awlen;
-  logic [2:0] axi_awsize;
-  logic [1:0] axi_awburst;
-  logic [3:0] axi_awcache;
-  logic axi_awlock;
-  logic [2:0] axi_awprot;
-  logic [3:0] axi_awregion;
-  logic [7:0] axi_awuser;
-  logic [3:0] axi_awqos;
-  logic [255:0] axi_wdata;
-  logic [31:0] axi_wstrb;
-  logic axi_wlast;
-  logic [7:0] axi_wuser;
-  logic [7:0] axi_arid;
-  logic [63:0] axi_araddr;
-  logic [7:0] axi_arlen;
-  logic [2:0] axi_arsize;
-  logic [1:0] axi_arburst;
-  logic [3:0] axi_arcache;
-  logic axi_arlock;
-  logic [2:0] axi_arprot;
-  logic [3:0] axi_arregion;
-  logic [7:0] axi_aruser;
-  logic [3:0] axi_arqos;
-  logic [7:0] axi_bid;
-  logic [1:0] axi_bresp;
-  logic [7:0] axi_buser;
-  logic [7:0] axi_rid;
-  logic [255:0] axi_rdata;
-  logic [1:0] axi_rresp;
-  logic axi_rlast;
-  logic [7:0] axi_ruser;
-
-  modport endpoint (
-    input axi_bid, axi_bresp, axi_buser, axi_rid, axi_rdata, axi_rresp, axi_rlast, axi_ruser,
-    output axi_awid, axi_awaddr, axi_awlen, axi_awsize, axi_awburst, axi_awcache, axi_awlock, axi_awprot, axi_awregion, axi_awuser, axi_awqos, axi_wdata, axi_wstrb, axi_wlast, axi_wuser, axi_arid, axi_araddr, axi_arlen, axi_arsize, axi_arburst, axi_arcache, axi_arlock, axi_arprot, axi_arregion, axi_aruser, axi_arqos
-  );
-endinterface : ni_axi_master_port_intf
-
-interface ni_noc_rsp_out_intf;
-  logic noc_rsp_valid;
-  logic [407:0] noc_rsp_flit;
-  logic noc_rsp_credit;
-
-  modport endpoint (
-    input noc_rsp_credit,
-    output noc_rsp_valid, noc_rsp_flit
-  );
-endinterface : ni_noc_rsp_out_intf
+  modport master ( output valid, flit, input  credit_return );
+  modport slave  ( input  valid, flit, output credit_return );
+endinterface : noc_rsp_intf
 
 `endif // NI_SIGNALS_PKG_SVH

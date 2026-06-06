@@ -1,79 +1,204 @@
 """SV emitter for signals domain.
 
 Produces rtl_pkg/ni_signals_pkg.sv.
-Uses localparam int unsigned for reset constants (design doc §6.2).
-Also emits one SV ``interface`` block per ni_signals.json interface, outside
-the package (SV interfaces cannot be declared inside packages).
-Consumes ni_spec.constants only -- no direct JSON parsing.
+Uses localparam int unsigned for reset constants (design doc 6.2).
+After ``endpackage`` emits one SV ``interface`` block per entry in
+``source/interface_handshake.json`` (SV interfaces cannot be declared
+inside packages). The interface shapes (AXI4 channels and NoC link
+modports) are derived from the handshake schema + constants.yaml.
 """
 from __future__ import annotations
 from pathlib import Path
 import sys
 
-SPEC_VALIDATE = Path(__file__).resolve().parent.parent.parent
-sys.path.insert(0, str(SPEC_VALIDATE))
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent.parent
+sys.path.insert(0, str(SPECGEN_ROOT))
 
 from ni_spec import constants as C
 from ni_spec.loader import load_doc
+from ni_spec.handshake_schema import load_constants, load_interfaces
 
 
-def _resolve_pin_width(signals_spec, packet_spec, iface_name: str, pin: dict) -> int:
-    """Return the pin width as an int.
+# ---------------------------------------------------------------------------
+# AXI4 channel signal matrix (IHI 0022 §A2 + §A3).
+# Each entry is (signal_name, sv_width_field). Width tokens reference the
+# axi4_intf parameters (ID_WIDTH / ADDR_WIDTH / DATA_WIDTH) and the
+# interface-local localparam WSTRB_WIDTH = DATA_WIDTH / 8.
+# ---------------------------------------------------------------------------
+_AXI_CHANNEL_SIGNALS: dict[str, list[tuple[str, str]]] = {
+    "AW": [
+        ("awid",     "[ID_WIDTH-1:0]"),
+        ("awaddr",   "[ADDR_WIDTH-1:0]"),
+        ("awlen",    "[7:0]"),
+        ("awsize",   "[2:0]"),
+        ("awburst",  "[1:0]"),
+        ("awlock",   ""),
+        ("awcache",  "[3:0]"),
+        ("awprot",   "[2:0]"),
+        ("awqos",    "[3:0]"),
+        ("awregion", "[3:0]"),
+        ("awvalid",  ""),
+        ("awready",  ""),
+    ],
+    "W": [
+        ("wdata",  "[DATA_WIDTH-1:0]"),
+        ("wstrb",  "[WSTRB_WIDTH-1:0]"),
+        ("wlast",  ""),
+        ("wvalid", ""),
+        ("wready", ""),
+    ],
+    "B": [
+        ("bid",    "[ID_WIDTH-1:0]"),
+        ("bresp",  "[1:0]"),
+        ("bvalid", ""),
+        ("bready", ""),
+    ],
+    "AR": [
+        ("arid",     "[ID_WIDTH-1:0]"),
+        ("araddr",   "[ADDR_WIDTH-1:0]"),
+        ("arlen",    "[7:0]"),
+        ("arsize",   "[2:0]"),
+        ("arburst",  "[1:0]"),
+        ("arlock",   ""),
+        ("arcache",  "[3:0]"),
+        ("arprot",   "[2:0]"),
+        ("arqos",    "[3:0]"),
+        ("arregion", "[3:0]"),
+        ("arvalid",  ""),
+        ("arready",  ""),
+    ],
+    "R": [
+        ("rid",    "[ID_WIDTH-1:0]"),
+        ("rdata",  "[DATA_WIDTH-1:0]"),
+        ("rresp",  "[1:0]"),
+        ("rlast",  ""),
+        ("rvalid", ""),
+        ("rready", ""),
+    ],
+}
 
-    PP-9: every AXI/CSR/NoC pin resolves to an int through ``signal_pin_width``
-    (the AXI_*_WIDTH symbol gap is closed by per-port ``port_parameters``).
-    No symbolic-string fallback remains; an ``ExprNameError`` here is a
-    real spec bug and propagates to the caller.
+# AXI signals driven by the master (manager) side. Everything else in the
+# channel matrix is slave-driven. Used to compose modport direction lists.
+_MASTER_DRIVES_AXI: frozenset[str] = frozenset({
+    "awid", "awaddr", "awlen", "awsize", "awburst", "awlock", "awcache",
+    "awprot", "awqos", "awregion", "awvalid",
+    "wdata", "wstrb", "wlast", "wvalid",
+    "bready",
+    "arid", "araddr", "arlen", "arsize", "arburst", "arlock", "arcache",
+    "arprot", "arqos", "arregion", "arvalid",
+    "rready",
+})
+
+
+def _emit_param_header(name: str, iface_spec: dict, constants: dict) -> list[str]:
+    """Emit the ``interface NAME #( ... );`` header.
+
+    Parameter names are column-aligned. The default expression on each line
+    is ``ni_params_pkg::<sv_symbol>`` taken from constants.yaml via the
+    ``constants_yaml_key`` ref on every handshake parameter entry.
     """
-    return C.signal_pin_width(signals_spec, packet_spec,
-                              iface_name, pin["pin_name"])
+    params = iface_spec.get("parameters", [])
+    out: list[str] = [f"interface {name} #("]
+    name_col = max(len(p["name"]) for p in params)
+    for i, p in enumerate(params):
+        domain, _, key = p["constants_yaml_key"].partition(".")
+        sv_symbol = constants[domain][key]["sv_symbol"]
+        sep = "," if i < len(params) - 1 else ""
+        out.append(
+            f"  parameter int unsigned {p['name']:<{name_col}} = "
+            f"ni_params_pkg::{sv_symbol}{sep}"
+        )
+    out.append(");")
+    return out
 
 
-def _sv_width_for(width: int) -> str:
-    """Return SV bit-vector range ``[W-1:0] `` or empty string for 1-bit signals."""
-    w = int(width)
-    return "" if w == 1 else f"[{w - 1}:0] "
+def _emit_axi4_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
+    """Emit a full ``interface axi4_intf #(...) ... endinterface`` block."""
+    out: list[str] = _emit_param_header(name, iface_spec, constants)
+    # AXI requires the WSTRB_WIDTH localparam (depends on DATA_WIDTH).
+    out.append("  localparam int unsigned WSTRB_WIDTH = DATA_WIDTH / 8;")
+    out.append("")
+
+    master_sigs: list[str] = []
+    slave_sigs: list[str] = []
+    channels = iface_spec.get("channels", list(_AXI_CHANNEL_SIGNALS.keys()))
+    for ch in channels:
+        sigs = _AXI_CHANNEL_SIGNALS[ch]
+        out.append(f"  // {ch} channel")
+        width_col = max(len(w) for _, w in sigs)
+        for sig_name, width in sigs:
+            out.append(f"  logic {width:<{width_col}} {sig_name};")
+            if sig_name in _MASTER_DRIVES_AXI:
+                master_sigs.append(sig_name)
+            else:
+                slave_sigs.append(sig_name)
+        out.append("")
+
+    # Two modports: master and slave. Master drives master_sigs (output) and
+    # receives slave_sigs (input); slave is the mirror.
+    out.append("  modport master (")
+    out.append(f"    output {', '.join(master_sigs)},")
+    out.append(f"    input  {', '.join(slave_sigs)}")
+    out.append("  );")
+    out.append("")
+    out.append("  modport slave (")
+    out.append(f"    input  {', '.join(master_sigs)},")
+    out.append(f"    output {', '.join(slave_sigs)}")
+    out.append("  );")
+    out.append(f"endinterface : {name}")
+    return out
 
 
-def _strip_dir_suffix(pin_name: str) -> str:
-    """Strip literal ``_i``/``_o`` direction suffix from a pin name."""
-    return pin_name[:-2] if pin_name.endswith(("_i", "_o")) else pin_name
+def _emit_noc_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
+    """Emit a NoC-link interface block (one set of signals + 2 modports)."""
+    out: list[str] = _emit_param_header(name, iface_spec, constants)
+    signals = iface_spec.get("signals", [])
+
+    # Translate width_expr -> SV bit-vector field. ``1`` becomes empty (1-bit
+    # scalar uses bare ``logic``); other expressions become ``[EXPR-1:0]``.
+    width_fields: list[str] = []
+    for s in signals:
+        expr = s["width_expr"].strip()
+        width_fields.append("" if expr == "1" else f"[{expr}-1:0]")
+    width_col = max(len(w) for w in width_fields)
+
+    for s, width in zip(signals, width_fields):
+        out.append(f"  logic {width:<{width_col}} {s['name']};")
+    out.append("")
+
+    master_names = [s["name"] for s in signals if s["driven_by"] == "master"]
+    slave_names  = [s["name"] for s in signals if s["driven_by"] == "slave"]
+    out.append(
+        f"  modport master ( output {', '.join(master_names)}, "
+        f"input  {', '.join(slave_names)} );"
+    )
+    out.append(
+        f"  modport slave  ( input  {', '.join(master_names)}, "
+        f"output {', '.join(slave_names)} );"
+    )
+    out.append(f"endinterface : {name}")
+    return out
 
 
-def _emit_sv_interfaces(signals_spec, packet_spec) -> list[str]:
-    """Emit ``interface ni_<name>_intf;`` blocks from interfaces[].
+def _emit_interfaces_from_handshake_schema(
+    interfaces_doc: dict, constants: dict
+) -> list[str]:
+    """Emit every interface declared in interface_handshake.json.
 
-    SV interfaces cannot be declared inside packages, so callers MUST place
-    these lines after ``endpackage``.
+    One blank line separates consecutive interface blocks.
     """
     out: list[str] = []
-    grouped = C.signals_pins_by_interface(signals_spec)
-    for iface_name, sigs in grouped.items():
-        iface_id = f"ni_{iface_name.lower()}_intf"
-        out.append(f"interface {iface_id};")
-        for s in sigs:
-            width = _sv_width_for(
-                _resolve_pin_width(signals_spec, packet_spec, iface_name, s)
-            )
-            sig_name = _strip_dir_suffix(s["pin_name"])
-            out.append(f"  logic {width}{sig_name};")
-        out.append("")
-        in_sigs  = [s for s in sigs if s.get("direction") == "input"]
-        out_sigs = [s for s in sigs if s.get("direction") == "output"]
-        if in_sigs or out_sigs:
-            out.append("  modport endpoint (")
-            entries: list[str] = []
-            if in_sigs:
-                entries.append(
-                    "    input " + ", ".join(_strip_dir_suffix(s["pin_name"]) for s in in_sigs)
-                )
-            if out_sigs:
-                entries.append(
-                    "    output " + ", ".join(_strip_dir_suffix(s["pin_name"]) for s in out_sigs)
-                )
-            out.append(",\n".join(entries))
-            out.append("  );")
-        out.append(f"endinterface : {iface_id}")
+    items = list(interfaces_doc["interfaces"].items())
+    for i, (name, iface_spec) in enumerate(items):
+        kind = iface_spec["kind"]
+        if kind == "axi4":
+            out.extend(_emit_axi4_intf(name, iface_spec, constants))
+        elif kind == "noc_link":
+            out.extend(_emit_noc_intf(name, iface_spec, constants))
+        else:  # handshake_schema already validates the kind enum.
+            raise ValueError(f"sv_signals: unsupported interface kind {kind!r}")
+        # Trailing blank line after every interface (including the last) so the
+        # caller can append ``endif`` directly.
         out.append("")
     return out
 
@@ -81,11 +206,11 @@ def _emit_sv_interfaces(signals_spec, packet_spec) -> list[str]:
 def emit(signals_json: Path, spec_version: str) -> str:
     """Return SV package body (no provenance banner -- caller prepends it).
 
-    Loads the sibling ``ni_packet.json`` to feed the cross-domain namespace
-    used by ``C.signal_pin_width``.
+    Reset-constant section is derived from ni_signals.json. The interface
+    blocks after ``endpackage`` are derived from interface_handshake.json
+    (parameter defaults sourced from constants.yaml).
     """
     spec = load_doc(signals_json)
-    packet_spec = load_doc(signals_json.parent / "ni_packet.json")
 
     # Collect output signals with a defined (non-external_driven) reset value.
     reset_consts: list[tuple[str, str]] = []
@@ -118,8 +243,14 @@ def emit(signals_json: Path, spec_version: str) -> str:
     out.append("")
     out.append("endpackage")
     out.append("")
+
     # SV interface blocks live OUTSIDE the package (SV LRM: interface
     # declarations are top-level, not allowed inside packages).
-    out.extend(_emit_sv_interfaces(spec, packet_spec))
+    constants = load_constants(SPECGEN_ROOT / "source" / "constants.yaml")
+    interfaces_doc = load_interfaces(
+        SPECGEN_ROOT / "source" / "interface_handshake.json", constants
+    )
+    out.extend(_emit_interfaces_from_handshake_schema(interfaces_doc, constants))
+
     out.append("`endif // NI_SIGNALS_PKG_SVH")
     return "\n".join(out) + "\n"
