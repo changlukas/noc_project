@@ -37,10 +37,15 @@ class MasterShellAdapter {
         cfg.read_dump_path       = read_dump_path.empty() ? make_tmp_dump() : read_dump_path;
         cfg.max_outstanding_write = max_outstanding_write;
         cfg.max_outstanding_read  = max_outstanding_read;
+        read_dump_path_          = cfg.read_dump_path;  // cache for cmodel_dump_scoreboard
         master_ = std::make_unique<axi::AxiMasterStandalone>(cfg);
         in_  = MasterInputs{};
         out_ = MasterOutputs{};
     }
+
+    // Path of the read-data dump file written by AxiMaster on each R-channel
+    // completion. Empty if init() was never called.
+    const std::string& read_dump_path() const { return read_dump_path_; }
 
     // configure_inject — forward T4 fault injection config to inner master.
     // Call after init(); no-op if inject.mode == None (default).
@@ -154,6 +159,7 @@ class MasterShellAdapter {
 
   private:
     std::unique_ptr<axi::AxiMasterStandalone> master_;
+    std::string   read_dump_path_;
     MasterInputs  in_{};
     MasterOutputs out_{};
     MasterOutputs prev_out_{};  // previous cycle's output for beta-tick guard

@@ -146,6 +146,30 @@ extern "C" int cmodel_scoreboard_clean(void) {
     return (g_scoreboard->mismatch_count() == 0) ? 1 : 0;
 }
 
+// cmodel_dump_scoreboard — print scoreboard stats + mismatch log + read-dump
+// file path to stderr. Called by tb_top.sv before $finish / $fatal so the
+// debug info is visible without having to inspect the tmp-dir dump file.
+// Safe to call multiple times; safe before init / after finalize (no-ops).
+extern "C" void cmodel_dump_scoreboard(void) {
+    DPI_BOUNDARY_BEGIN(cmodel_dump_scoreboard) {
+        if (g_scoreboard) {
+            std::fprintf(stderr,
+                         "[scoreboard] %zu reads checked, %zu mismatches\n",
+                         g_scoreboard->reads_checked(),
+                         g_scoreboard->mismatch_count());
+            for (const auto& msg : g_scoreboard->mismatch_report()) {
+                std::fprintf(stderr, "  %s\n", msg.c_str());
+            }
+        }
+        if (g_master_adapter) {
+            std::fprintf(stderr,
+                         "[dump] read-dump file: %s\n",
+                         g_master_adapter->read_dump_path().c_str());
+        }
+    }
+    DPI_BOUNDARY_END(cmodel_dump_scoreboard);
+}
+
 // LoopbackNoc DPI handlers — Task 7.
 //
 // Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =

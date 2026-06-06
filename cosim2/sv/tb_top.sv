@@ -49,6 +49,7 @@ module tb_top (
     import "DPI-C" context function void cmodel_finalize();
     import "DPI-C" context function int  cmodel_done();
     import "DPI-C" context function int  cmodel_scoreboard_clean();
+    import "DPI-C" context function void cmodel_dump_scoreboard();
 
     string scenario_path;
 
@@ -349,11 +350,13 @@ module tb_top (
             if (cmodel_scoreboard_clean() != 0) begin
         /* verilator lint_on WIDTHTRUNC */
                 $display("PASS: scenario complete, scoreboard clean");
+                cmodel_dump_scoreboard();
                 // cmodel_finalize() is handled by main.cpp after $finish to
                 // avoid calling DPI on null adapters in the same time-step.
                 $finish(0);
             end else begin
                 $display("FAIL: scoreboard mismatch");
+                cmodel_dump_scoreboard();
                 $fatal(1, "tb_top: scoreboard mismatch, simulation failed");
             end
         end
@@ -378,6 +381,7 @@ module tb_top (
             if (dpi_err_code != 0) begin
                 $display("[tb_top] DPI fatal (code=%0d): %s",
                          dpi_err_code, dpi_err_msg);
+                cmodel_dump_scoreboard();
                 cmodel_finalize();
                 $fatal(1, "tb_top: DPI error, simulation aborted");
             end
