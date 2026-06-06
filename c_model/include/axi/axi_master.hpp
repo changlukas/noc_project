@@ -116,6 +116,17 @@ class AxiMasterT {
         }
         ++cycle_count_;
 
+        tick_drain_b_resp_();
+        tick_drain_r_resp_();
+        tick_admit_scenario_();
+        tick_push_aw_w_();
+        tick_push_ar_();
+    }
+
+  private:
+    // tick() phase methods — verbatim relocation of the original inline blocks.
+    // Each operates on member state and preserves the original block's semantics.
+    void tick_drain_b_resp_() {
         // ===== Drain B responses =====
         //
         // OperationContext model: one scenario_txn → one OperationContext → N
@@ -153,7 +164,9 @@ class AxiMasterT {
                 if (deq.empty()) active_write_ops_.erase(b->id);
             }
         }
+    }
 
+    void tick_drain_r_resp_() {
         // ===== Drain R responses =====
         //
         // R beats arrive in sub-burst order (per-id FIFO at the slave). Track
@@ -217,7 +230,9 @@ class AxiMasterT {
                 if (deq.empty()) active_read_ops_.erase(r->id);
             }
         }
+    }
 
+    void tick_admit_scenario_() {
         // ===== Admission =====
         //
         // One OperationContext per scenario_txn. AXI4 IHI 0022 §A5.3 permits
@@ -248,7 +263,9 @@ class AxiMasterT {
             }
             ++next_txn_idx_;
         }
+    }
 
+    void tick_push_aw_w_() {
         // ===== Push AW + W beats per operation =====
         //
         // Walk each id's per-id FIFO in submission order. Within one op, walk its
@@ -264,7 +281,9 @@ class AxiMasterT {
                 if (!push_writes_(id, op)) break;
             }
         }
+    }
 
+    void tick_push_ar_() {
         // ===== Push AR per operation =====
         //
         // Same-id FIFO order: AR for op[0] must be fully pushed before op[1]'s AR.
@@ -275,6 +294,7 @@ class AxiMasterT {
         }
     }
 
+  public:
     bool done() const {
         return next_txn_idx_ >= sc_.transactions.size() && active_write_count_ == 0 &&
                active_read_count_ == 0;
