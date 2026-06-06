@@ -13,20 +13,20 @@
 // Inline error check (spec §7.5): cmodel_check_error() called at end of
 // every active always_ff body; non-zero triggers $fatal after cmodel_finalize.
 //
-// axi_intf.master modport: master drives AW/W/AR + bready/rready;
+// axi4_intf.master modport: master drives AW/W/AR + bready/rready;
 //                          master reads awready/wready/arready + B/R.
 
 `ifndef AXI_MASTER_WRAP_SV
 `define AXI_MASTER_WRAP_SV
 
 module axi_master_wrap #(
-    parameter int ID_WIDTH   = 8,
-    parameter int ADDR_WIDTH = 64,
-    parameter int DATA_WIDTH = 256
+    parameter int unsigned ID_WIDTH   = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT,
+    parameter int unsigned ADDR_WIDTH = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT,
+    parameter int unsigned DATA_WIDTH = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT
 ) (
-    input  logic    clk_i,
-    input  logic    rst_ni,
-    axi_intf.master axi_o
+    input  logic     clk_i,
+    input  logic     rst_ni,
+    axi4_intf.master axi_o
 );
 
     // -------------------------------------------------------------------------
