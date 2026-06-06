@@ -9,6 +9,9 @@ c_model/Testing/
 *.tmp
 *.log
 
+# Co-sim runtime artifacts
+master_shell_read_dump.txt
+
 # Editor/tool files
 .vscode/
 

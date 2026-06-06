@@ -93,13 +93,44 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         nsu->init();
 
         // Wire real scoreboard to master callbacks.
+        // Each callback also prints a one-line transaction summary to stderr so
+        // co-sim runs surface per-AXI-transaction activity at runtime, matching
+        // the visibility c_model standalone tests give.
         auto sb = std::make_unique<ni::cmodel::axi::Scoreboard>();
         auto* sb_raw = sb.get();
-        master->on_write_completed([sb_raw](const ni::cmodel::axi::WriteResult& wr) {
+        auto resp_str = [](ni::cmodel::axi::Resp r) -> const char* {
+            switch (r) {
+                case ni::cmodel::axi::Resp::OKAY:   return "OKAY";
+                case ni::cmodel::axi::Resp::EXOKAY: return "EXOKAY";
+                case ni::cmodel::axi::Resp::SLVERR: return "SLVERR";
+                case ni::cmodel::axi::Resp::DECERR: return "DECERR";
+            }
+            return "?";
+        };
+        master->on_write_completed([sb_raw, resp_str](const ni::cmodel::axi::WriteResult& wr) {
             sb_raw->handle_write_completed(wr, wr.data, wr.strb_per_beat);
+            std::fprintf(stderr,
+                         "[axi-w] id=0x%x addr=0x%llx len=%u size=%u resp=%s\n",
+                         static_cast<unsigned>(wr.id),
+                         static_cast<unsigned long long>(wr.addr),
+                         static_cast<unsigned>(wr.len),
+                         static_cast<unsigned>(wr.size),
+                         resp_str(wr.resp));
         });
-        master->on_read_observed(
-            [sb_raw](const ni::cmodel::axi::ReadResult& rr) { sb_raw->handle_read_observed(rr); });
+        master->on_read_observed([sb_raw, resp_str](const ni::cmodel::axi::ReadResult& rr) {
+            sb_raw->handle_read_observed(rr);
+            // Print first user-data byte as a quick pattern check; ReadResult.data
+            // is the packed user-byte buffer (not per-beat).
+            const uint8_t first_byte = rr.data.empty() ? 0 : rr.data[0];
+            std::fprintf(stderr,
+                         "[axi-r] id=0x%x addr=0x%llx len=%u size=%u resp=%s data[0]=0x%02x\n",
+                         static_cast<unsigned>(rr.id),
+                         static_cast<unsigned long long>(rr.addr),
+                         static_cast<unsigned>(rr.len),
+                         static_cast<unsigned>(rr.size),
+                         resp_str(rr.resp),
+                         static_cast<unsigned>(first_byte));
+        });
 
         // Commit (all-or-nothing)
         g_loopback_adapter = std::move(loop);

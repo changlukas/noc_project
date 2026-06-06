@@ -164,12 +164,12 @@ class MasterShellAdapter {
     MasterOutputs out_{};
     MasterOutputs prev_out_{};  // previous cycle's output for beta-tick guard
 
-    // Generate a temp file path for the read dump when no explicit path given.
+    // Default read-dump path when init() is called without an explicit one.
+    // Kept cwd-relative so dumps land inside the project (cosim2/verilator/
+    // when Vtb_top runs, c_model/build/ when ctest runs) rather than the OS
+    // temp dir. Overwritten on each run.
     static std::string make_tmp_dump() {
-        // Use a fixed temp name; overwritten each test run.
-        return std::string(std::getenv("TEMP") ? std::getenv("TEMP") :
-                           std::getenv("TMP")  ? std::getenv("TMP")  : "/tmp") +
-               "/master_shell_read_dump.txt";
+        return "master_shell_read_dump.txt";
     }
 };
 

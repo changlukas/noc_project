@@ -45,9 +45,14 @@ VERILATOR_FLAGS := \
     -CFLAGS "-I$(CMODEL_TESTS)" \
     -CFLAGS "-I$(SPECGEN_INC)" \
     -CFLAGS "-I$(YAMLCPP_INC)" \
+    -CFLAGS "-Wno-attributes" \
     -LDFLAGS "$(YAMLCPP_LIB)" \
     +define+assume=assert \
-    -Wno-fatal
+    -Wno-fatal \
+    -Wno-NULLPORT \
+    -Wno-REDEFMACRO \
+    -Wno-WIDTHEXPAND \
+    -Wno-WIDTHTRUNC
 
 # Optional strict-mode flag injection for release gates.
 # Override with: make VERILATOR_EXTRA_FLAGS="--Wall --Wpedantic"
