@@ -11,7 +11,7 @@
 
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
-#include "axi/types.hpp"  // ni::cmodel::axi::DATA_BYTES
+#include "axi/types.hpp"        // ni::cmodel::axi::DATA_BYTES
 #include "ni_flit_constants.h"  // ni::FLIT_WIDTH
 #include <atomic>
 #include <memory>
@@ -78,17 +78,13 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         loop->init();
 
         auto master = std::make_unique<MasterShellAdapter>();
-        master->init(std::string(scenario_yaml_path),
-                     "",
-                     scenario.config.max_outstanding_write,
+        master->init(std::string(scenario_yaml_path), "", scenario.config.max_outstanding_write,
                      scenario.config.max_outstanding_read);
         master->configure_inject(scenario.config.inject);
 
         auto slave = std::make_unique<SlaveShellAdapter>();
-        slave->init(scenario.config.memory_base,
-                    scenario.config.memory_size,
-                    scenario.config.write_latency,
-                    scenario.config.read_latency);
+        slave->init(scenario.config.memory_base, scenario.config.memory_size,
+                    scenario.config.write_latency, scenario.config.read_latency);
 
         auto nmu = std::make_unique<NmuShellAdapter>();
         nmu->init();
@@ -102,9 +98,8 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         master->on_write_completed([sb_raw](const ni::cmodel::axi::WriteResult& wr) {
             sb_raw->handle_write_completed(wr, wr.data, wr.strb_per_beat);
         });
-        master->on_read_observed([sb_raw](const ni::cmodel::axi::ReadResult& rr) {
-            sb_raw->handle_read_observed(rr);
-        });
+        master->on_read_observed(
+            [sb_raw](const ni::cmodel::axi::ReadResult& rr) { sb_raw->handle_read_observed(rr); });
 
         // Commit (all-or-nothing)
         g_loopback_adapter = std::move(loop);
@@ -199,11 +194,7 @@ extern "C" void cmodel_loopback_noc_set_inputs(svBit req_in_valid, svBitVecVal* 
                                                svBitVecVal* rsp_in_flit,
                                                svBit rsp_in_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_set_inputs) {
-        if (!g_loopback_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_loopback_noc_set_inputs: g_loopback_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_loopback_adapter, "cmodel_loopback_noc_set_inputs");
         LoopbackNocInputs in{};
         in.req_in_valid = static_cast<bool>(req_in_valid);
         in.req_in_flit = unpack_flit(req_in_flit);
@@ -218,11 +209,7 @@ extern "C" void cmodel_loopback_noc_set_inputs(svBit req_in_valid, svBitVecVal* 
 
 extern "C" void cmodel_loopback_noc_tick(void) {
     DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_tick) {
-        if (!g_loopback_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_loopback_noc_tick: g_loopback_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_loopback_adapter, "cmodel_loopback_noc_tick");
         g_loopback_adapter->tick();
     }
     DPI_BOUNDARY_END(cmodel_loopback_noc_tick);
@@ -233,11 +220,7 @@ extern "C" void cmodel_loopback_noc_get_outputs(svBit* req_out_valid, svBitVecVa
                                                 svBitVecVal* rsp_out_flit,
                                                 svBit* rsp_out_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_get_outputs) {
-        if (!g_loopback_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_loopback_noc_get_outputs: g_loopback_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_loopback_adapter, "cmodel_loopback_noc_get_outputs");
         LoopbackNocOutputs out{};
         g_loopback_adapter->get_outputs(out);
         *req_out_valid = static_cast<svBit>(out.req_out_valid);
@@ -301,11 +284,7 @@ extern "C" void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arre
                                          svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
                                          svBit rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_master_set_inputs) {
-        if (!g_master_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_master_set_inputs: g_master_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_master_adapter, "cmodel_master_set_inputs");
         MasterInputs in{};
         in.awready = static_cast<bool>(awready);
         in.wready = static_cast<bool>(wready);
@@ -325,11 +304,7 @@ extern "C" void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arre
 
 extern "C" void cmodel_master_tick(void) {
     DPI_BOUNDARY_BEGIN(cmodel_master_tick) {
-        if (!g_master_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_master_tick: g_master_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_master_adapter, "cmodel_master_tick");
         g_master_adapter->tick();
     }
     DPI_BOUNDARY_END(cmodel_master_tick);
@@ -343,11 +318,7 @@ extern "C" void cmodel_master_get_outputs(
     svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
     svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_master_get_outputs) {
-        if (!g_master_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_master_get_outputs: g_master_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_master_adapter, "cmodel_master_get_outputs");
         MasterOutputs out{};
         g_master_adapter->get_outputs(out);
 
@@ -408,11 +379,7 @@ extern "C" void cmodel_slave_set_inputs(
     svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot,
     svBitVecVal* arqos, svBit bready, svBit rready) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_set_inputs) {
-        if (!g_slave_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_slave_set_inputs: g_slave_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_slave_adapter, "cmodel_slave_set_inputs");
         SlaveInputs in{};
         in.awvalid = static_cast<bool>(awvalid);
         in.awid = static_cast<uint8_t>(awid[0] & 0xFF);
@@ -447,11 +414,7 @@ extern "C" void cmodel_slave_set_inputs(
 
 extern "C" void cmodel_slave_tick(void) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_tick) {
-        if (!g_slave_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_slave_tick: g_slave_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_slave_adapter, "cmodel_slave_tick");
         g_slave_adapter->tick();
     }
     DPI_BOUNDARY_END(cmodel_slave_tick);
@@ -462,11 +425,7 @@ extern "C" void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* a
                                          svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
                                          svBitVecVal* rresp, svBit* rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_get_outputs) {
-        if (!g_slave_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_slave_get_outputs: g_slave_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_slave_adapter, "cmodel_slave_get_outputs");
         SlaveOutputs out{};
         g_slave_adapter->get_outputs(out);
 
@@ -497,20 +456,18 @@ extern "C" void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* a
 using ni::cmodel::cosim2::NmuInputs;
 using ni::cmodel::cosim2::NmuOutputs;
 
-extern "C" void cmodel_nmu_set_inputs(
-    svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-    svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast,
-    svBit bready, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-    svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
-    svBitVecVal* arprot, svBitVecVal* arqos, svBit rready, svBit noc_rsp_valid,
-    svBitVecVal* noc_rsp_flit, svBit noc_req_credit_return) {
+extern "C" void cmodel_nmu_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+                                      svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
+                                      svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
+                                      svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
+                                      svBitVecVal* wstrb, svBit wlast, svBit bready, svBit arvalid,
+                                      svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
+                                      svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
+                                      svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
+                                      svBit rready, svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
+                                      svBit noc_req_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_set_inputs) {
-        if (!g_nmu_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_nmu_set_inputs: g_nmu_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_nmu_adapter, "cmodel_nmu_set_inputs");
         NmuInputs in{};
         in.awvalid = static_cast<bool>(awvalid);
         in.awid = static_cast<uint8_t>(awid[0] & 0xFF);
@@ -548,11 +505,7 @@ extern "C" void cmodel_nmu_set_inputs(
 
 extern "C" void cmodel_nmu_tick(void) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_tick) {
-        if (!g_nmu_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_nmu_tick: g_nmu_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_nmu_adapter, "cmodel_nmu_tick");
         g_nmu_adapter->tick();
     }
     DPI_BOUNDARY_END(cmodel_nmu_tick);
@@ -564,11 +517,7 @@ extern "C" void cmodel_nmu_get_outputs(svBit* awready, svBit* wready, svBit* arr
                                        svBit* rlast, svBit* noc_req_valid,
                                        svBitVecVal* noc_req_flit, svBit* noc_rsp_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_get_outputs) {
-        if (!g_nmu_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_nmu_get_outputs: g_nmu_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_nmu_adapter, "cmodel_nmu_get_outputs");
         NmuOutputs out{};
         g_nmu_adapter->get_outputs(out);
 
@@ -611,11 +560,7 @@ extern "C" void cmodel_nsu_set_inputs(svBit noc_req_valid, svBitVecVal* noc_req_
                                       svBit arready, svBit rvalid, svBitVecVal* rid,
                                       svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_set_inputs) {
-        if (!g_nsu_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_nsu_set_inputs: g_nsu_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_nsu_adapter, "cmodel_nsu_set_inputs");
         NsuInputs in{};
         in.noc_req_valid = static_cast<bool>(noc_req_valid);
         in.noc_req_flit = unpack_flit(noc_req_flit);
@@ -638,11 +583,7 @@ extern "C" void cmodel_nsu_set_inputs(svBit noc_req_valid, svBitVecVal* noc_req_
 
 extern "C" void cmodel_nsu_tick(void) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_tick) {
-        if (!g_nsu_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_nsu_tick: g_nsu_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_nsu_adapter, "cmodel_nsu_tick");
         g_nsu_adapter->tick();
     }
     DPI_BOUNDARY_END(cmodel_nsu_tick);
@@ -657,11 +598,7 @@ extern "C" void cmodel_nsu_get_outputs(
     svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
     svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_get_outputs) {
-        if (!g_nsu_adapter) {
-            g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);
-            g_dpi_error_msg = "cmodel_nsu_get_outputs: g_nsu_adapter null";
-            return;
-        }
+        REQUIRE_ADAPTER(g_nsu_adapter, "cmodel_nsu_get_outputs");
         NsuOutputs out{};
         g_nsu_adapter->get_outputs(out);
 
