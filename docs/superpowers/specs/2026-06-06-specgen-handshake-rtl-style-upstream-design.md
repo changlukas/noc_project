@@ -27,21 +27,21 @@ The dual source of truth introduces drift risk — every NI signal change has to
 |---|---|
 | W1 | Upstream the handshake/parameter schema into specgen source (new `constants.yaml`, new `interface_handshake.json`, extend `signal_interface.md`). |
 | W2 | Atomic PR: refactor `specgen/ni_spec/generator.py` to emit industry-standard SV interfaces; regenerate `specgen/generated/`; migrate `cosim2/sv/` (delete hand-written interfaces; rewrite 5 wraps + `tb_top.sv`). |
-| W3 | Release-level quality sweep across the entire branch + Stage 3 existing c_model code (Karpathy 4-lens + magic-number hunt + lint + Verilator warning-clean + parameter sweep + sanitizer + coverage + reproducible generation). |
 
 ### 1.3 Out of scope
 
 - Real RTL `nmu.sv` / `nsu.sv` implementation (Stage 5+).
 - wb2axip replacement protocol checker (Stage 5c+).
 - VCS DPI-RTL backend port (Stage 5c+).
-- Functional changes to c_model behavior. W3 sweep is **review and naming hygiene only**, not behavioral refactor.
+- Functional changes to c_model behavior.
 - AxUSER / WUSER / BUSER / RUSER signals (cosim2 currently does not carry them; future spec may add).
+- **Release-level quality sweep** (Karpathy 4-lens + magic-number hunt + lint + Verilator warning-clean + parameter sweep + sanitizer + coverage + reproducible generation + fault injection + release tag). Each of these gates is a non-trivial sub-spec (real coverage parsing, scenario-parser extension for fault injection, tb_top parameter forwarding for sweep, etc.). Moved to a follow-up spec — see §7 Open Items.
 
 ### 1.4 Success criteria
 
 1. `cosim2/sv/` contains no hand-written `*_intf.sv`. All interfaces come from `specgen/generated/sv/`.
 2. Existing `cosim2` ctest suite (410 tests) stays green; existing 5 fixture smoke stays green; existing drift gate stays clean.
-3. W3 sweep produces a categorized findings report. All CRITICAL findings fixed; all HIGH findings fixed or deferred with owner. Release tag `v0.5.0` cut.
+3. specgen pytest suite green after schema + emitter additions, with new tests covering all §4.2 validator rules.
 
 ---
 
@@ -498,106 +498,15 @@ faxi_slave u_faxi_slave (
 
 ---
 
-## 6. W3 — Release-Level Quality Sweep
+## 6. Test Plan
 
-### 6.1 Scope
-
-Three parallel zones, each with one Claude subagent + one Codex review:
-
-| Zone | Files | Reviewers |
-|---|---|---|
-| A — Stage 3 c_model core | `c_model/include/{axi,nmu,nsu,common,noc}/**` + `c_model/tests/{axi,nmu,nsu}/**` | claude-subagent-A + Codex-A |
-| B — Stage 5b cosim | `c_model/include/cosim2/**` + `cosim2/{c,sv,verilator,tests}/**` (post-W2 state) | claude-subagent-B + Codex-B |
-| C — specgen | `specgen/**` (post-W2 state) | claude-subagent-C + Codex-C |
-
-### 6.2 Two-axis findings per zone
-
-**Axis 1 — Karpathy 4-lens:**
-
-| Lens | Catches |
-|---|---|
-| Overcomplication | Unnecessary abstraction / over-design (wrapper class wrapped 3 levels deep) |
-| Surgical | Edits unrelated to the stated fix |
-| Surface assumptions | Implicit assumptions not commented (e.g. "assumed reset is sync") |
-| Verifiable success | Feature without test coverage |
-
-**Axis 2 — Magic numbers (narrowed scope):**
-
-| Type | Action |
-|---|---|
-| Width literal | Replace with parameter |
-| Timing constant | Extract to named constant |
-| Buffer size | Extract to `constexpr` |
-| Mask / shift | Extract to named mask |
-
-**Magic-number scope rule:** only fix literals implicated by *this* refactor's change set. Other magic-number findings get logged to `deferred_findings.json` with severity LOW and deferred to a future spec. This prevents W3 from ballooning into a project-wide cleanup.
-
-### 6.3 Findings format
-
-Each reviewer produces:
-
-```json
-{
-  "zone": "A",
-  "reviewer": "claude-subagent-A",
-  "findings": [
-    {
-      "severity": "MEDIUM",
-      "category": "magic_number",
-      "file": "c_model/include/nmu/rob.hpp",
-      "line": 42,
-      "description": "ROB depth hardcoded as 16, should be ROB_DEPTH constexpr",
-      "suggested_fix": "constexpr size_t ROB_DEPTH = 16; replace literal at use site"
-    }
-  ]
-}
-```
-
-Two-reviewer findings per zone are de-duplicated (by file:line + category) and merged before user review.
-
-### 6.4 Decision matrix
-
-| Severity | Default action | Override |
-|---|---|---|
-| CRITICAL | Must fix; release blocker | None |
-| HIGH | Fix; user may defer with owner + Linear ticket | Documented in `deferred_findings.json` |
-| MEDIUM | User decides; recommendation is fix | — |
-| LOW | User decides; recommendation is defer/wontfix | — |
-
-### 6.5 Verification arsenal (release-level)
-
-| Gate | Description | Tooling |
-|---|---|---|
-| 1. CRITICAL findings | All fixed | merged PRs |
-| 2. HIGH findings | All fixed or deferred with owner | `deferred_findings.json` + Linear |
-| 3. Lint clean | `clang-tidy` over all c_model + `verible-verilog-lint` over all SV; 0 warning | clang-tidy + verible |
-| 4. Verilator warning-clean elaboration | `-Wall -Wpedantic --assert`; 0 warning at elaboration and simulation | Verilator |
-| 5. Parameter sweep test | Finite matrix: `ID_WIDTH ∈ {1,8,16}` × `ADDR_WIDTH ∈ {32,48,64}` × `DATA_WIDTH ∈ {32,64,256,512}` × `NUM_VC ∈ {1,4,8}` × `FLIT_WIDTH ∈ {64,256,408,1024}` — all combos elaborate green | CMake matrix + Verilator |
-| 6. Negative parameter test | Invalid inputs (`DATA_WIDTH=33`, `NUM_VC=0`, `ID_WIDTH=0`) trigger generator validation error | pytest |
-| 7. Sanitizer clean | UBSan + ASan rebuild → ctest 410/410 green | clang + gcc |
-| 8. Coverage threshold | Line ≥ 80%, Toggle ≥ 70%; exclusions: `cosim2/sv/wb2axip/**`, `specgen/generated/**`. Per-property assertion coverage 100% (every wb2axip `SLAVE_ASSERT` fired in at least 1 positive and 1 negative scenario) | Verilator `--coverage-line --coverage-toggle` + lcov |
-| 9. Reproducible generation | `python -m specgen` from 2 clean trees (`git clean -fdx`) → tracked generated files byte-identical | bash + diff |
-| 10. Fault injection sanity | Same negative scenario fires `$error`; same scenario without injection passes — proves wb2axip is not dead code | dedicated test |
-| 11. C++ output byte-identical | Regen `ni_params.h` + `ni_signals.h` + `ni_flit_constants.h` + `ni_regs.h` → diff vs committed | bash + diff |
-| 12. Release tag | Cut `v0.5.0` (semver, not `release-candidate`) | git tag + release notes |
-
-### 6.6 W3 commit boundary
-
-One PR per zone. Magic-number fixes per zone split from architectural findings per zone (two PRs maximum per zone).
-
-PR title pattern: `chore(quality-zone-A-arch): apply karpathy findings — Stage 3 c_model architecture`, `chore(quality-zone-A-magic): apply magic-number findings — Stage 3 c_model`.
-
----
-
-## 7. Test Plan
-
-### 7.1 During W1
+### 6.1 During W1
 
 - Existing specgen pytest suite stays green (`specgen/tests/test_generator_sv.py` etc.).
 - New test: malformed `constants.yaml` (unknown key, missing required field, default outside constraint) → raises validation error.
 - New test: malformed `interface_handshake.json` (parameter references undefined `constants.yaml` key) → raises validation error.
 
-### 7.2 During W2
+### 6.2 During W2
 
 - Sub-commits 1–9 may be temporarily broken — not CI-gated.
 - Final CI gate after sub-commit 10:
@@ -605,50 +514,37 @@ PR title pattern: `chore(quality-zone-A-arch): apply karpathy findings — Stage
     - cosim2 ctest 410/410 green.
     - 5 existing fixture smoke (`debug_multi1.yaml`, `write_only_smoke.yaml`, `multibeat_incr_8beat.yaml`, etc.) green.
     - Existing drift gate clean (no diff between `specgen/generated/cpp/*` and c_model headers).
-    - Verilator elaboration warning-clean.
-
-### 7.3 During W3
-
-Per the gate matrix in §6.5. Additional scenario tests:
-
-- Reset-during-transaction (assert `rst_ni` mid-burst → confirm clean recovery).
-- Backpressure (slave throttles `awready` low for N cycles → confirm master holds, no spurious traffic).
-- Simultaneous AW + W (per AXI4 §A3.2.1, W can be in flight before AW).
-- Outstanding-ID (multiple in-flight AW with the same `awid` is illegal; confirm wb2axip fires).
-- 5-channel connectivity (every channel has at least one transaction in the smoke set).
-- Generated SV modport compile / lint independently (each modport instantiated alone in a minimal harness).
-- Every signal width / direction has a semantic unit test (not only golden text comparison) — automated via parsed `interface_handshake.json`.
+    - Verilator elaboration warning-clean (existing baseline; strict-mode sweep is deferred to release-sweep spec).
 
 ---
 
-## 8. Open Items & Risks
+## 7. Open Items & Risks
 
 | # | Item | Mitigation |
 |---|---|---|
 | O1 | Specgen golden file diff scope may exceed `ni_signals_pkg.sv` | W2 PR description lists explicit diff for user review before merge |
 | O2 | One of the 5 wraps may have a signal-set mismatch surfacing only at elaboration | Verilator elaboration error pinpoints; sub-commit 9 is last; revert is per-file |
-| O3 | W3 findings volume may delay release | Severity-gated: only CRITICAL / HIGH gate release. LOW deferred to `deferred_findings.json` |
-| O4 | Stage 3 code may have W3-only-surfaced design smells | LOW severity findings defer to Stage 6 |
-| O5 | wb2axip signal name mismatch with specgen | Explicit port mapping inside each wrap — no edit to vendored source |
-| O6 | NoC credit semantics (multi-hot pulse, registered output) must match existing c_model `MetaBuffer` credit accounting | W2 atomic PR includes regression run of existing cosim2 credit-flow scenarios (LoopbackNoc, NullNoc); failure blocks merge |
-| O7 | `axi4_intf` consolidation: two wraps (`axi_master_wrap` and `slave_wrap`) instantiate the same interface type with different modports — verify Verilator elaboration accepts | Covered by W2 final CI gate |
-| O8 | AxUSER/WUSER/BUSER/RUSER excluded from this spec — future addition requires schema extension + regenerate + consumer migration in another atomic PR | Tracked in this open-items list; not in v0.5.0 release |
-| O9 | `manager / subordinate` modport alias requested by future RTL stage | Generator scaffolding leaves space; current emission single `master / slave` only |
+| O3 | wb2axip signal name mismatch with specgen | Explicit port mapping inside each wrap — no edit to vendored source |
+| O4 | NoC credit semantics (multi-hot pulse, registered output) must match existing c_model `MetaBuffer` credit accounting | W2 atomic PR includes regression run of existing cosim2 credit-flow scenarios (LoopbackNoc, NullNoc); failure blocks merge |
+| O5 | `axi4_intf` consolidation: two wraps (`axi_master_wrap` and `slave_wrap`) instantiate the same interface type with different modports — verify Verilator elaboration accepts | Covered by W2 final CI gate |
+| O6 | AxUSER/WUSER/BUSER/RUSER excluded — future addition requires schema extension + regenerate + consumer migration in another atomic PR | Tracked here; not in this spec |
+| O7 | `manager / subordinate` modport alias requested by future RTL stage | Generator scaffolding leaves space; current emission single `master / slave` only |
+| **O8** | **Release-level quality sweep (Karpathy 4-lens + magic-number hunt + 12 verification gates) deferred to follow-up spec.** Each gate is a non-trivial sub-spec (real Verilator coverage parsing per official format; scenario-parser extension for protocol-violation fault injection; tb_top parameter forwarding for sweep; etc.). Codex round 5 review of an earlier attempt to bundle them into this plan revealed substantial unresolved HIGH-severity gaps. | Follow-up spec to brainstorm separately: `docs/superpowers/specs/YYYY-MM-DD-release-quality-sweep-design.md` (TBD date). Each gate handled as its own sub-task with concrete tooling commands verified against the actual codebase. |
 
 ---
 
-## 9. Karpathy 4-Lens Self-Check (on this spec itself)
+## 8. Karpathy 4-Lens Self-Check (on this spec itself)
 
 | Lens | Check |
 |---|---|
 | Overcomplication | Handshake JSON describes exactly 3 interfaces (1 AXI + 2 NoC). No framework abstraction. `constants.yaml` is flat per-domain, not a generic config DSL |
-| Surgical | `ni_regs_pkg.sv`, `ni_flit_pkg.sv`, c_model functional code, wb2axip — all explicit out-of-scope. W2 PR's atomic nature limits surface to listed file set |
-| Surface assumptions | §2.1 table makes every convention explicit; clk / rst routing noted as project convention not AMBA mandate; magic-number sweep scope explicitly narrowed |
-| Verifiable success | §6.5 lists 12 release gates with named tools. §7 lists test scenarios. §1.4 success criteria are testable |
+| Surgical | `ni_regs_pkg.sv`, `ni_flit_pkg.sv`, c_model functional code, wb2axip — all explicit out-of-scope. W2 PR's atomic nature limits surface to listed file set. **Release-level sweep deferred to follow-up spec** after Codex round 5 surfaced unresolved HIGH-severity gaps when attempting to bundle 12 gates into one plan |
+| Surface assumptions | §2.1 table makes every convention explicit; clk / rst routing noted as project convention not AMBA mandate |
+| Verifiable success | §1.4 success criteria are testable; §6 final CI gate is concrete (specgen pytest + drift gate + ctest 410/410 + 5 fixture smoke + Verilator baseline) |
 
 ---
 
-## 10. References
+## 9. References
 
 - **Arm AMBA AXI/ACE Protocol Specification IHI 0022H** — accessible at developer.arm.com (Arm AMBA documentation portal). Specifically:
     - §A1.3 — Master / Slave terminology (legacy), now Manager / Subordinate
@@ -662,11 +558,12 @@ Per the gate matrix in §6.5. Additional scenario tests:
 
 ---
 
-## 11. Approval
+## 10. Approval
 
-- [ ] User review (pending)
-- [ ] Spec self-review pass (this document — see §9)
-- [ ] Codex review round 1 (completed; findings incorporated)
-- [ ] Codex review round 2 (completed; findings incorporated)
+- [ ] User review (pending after W3 deferral trim)
+- [x] Spec self-review pass (this document — see §8)
+- [x] Codex review round 1 (incorporated)
+- [x] Codex review round 2 (incorporated)
+- [x] Codex review rounds 3–5 (round 5 surfaced unresolved W3 gaps; resolved by deferring §6 to follow-up spec)
 
-After user approval, transition to `writing-plans` skill to produce `docs/superpowers/plans/2026-06-06-specgen-handshake-rtl-style-upstream.md`.
+After user approval, the implementation plan at `docs/superpowers/plans/2026-06-06-specgen-handshake-rtl-style-upstream.md` (W1+W2 only) is the executable artifact for this scope. The deferred release-level sweep gets its own brainstorm → spec → plan cycle.
