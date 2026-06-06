@@ -11,8 +11,9 @@
 // outputs via cmodel_nsu_get_outputs, then registers those outputs nonblocking
 // so they are visible to SV wires from the NEXT cycle onward.
 //
-// FLIT_W must match ni::FLIT_WIDTH = 408. The noc_req_intf / noc_rsp_intf
-// interface FLIT_W parameter is overridden at instantiation in tb_top.sv.
+// FLIT_WIDTH must match ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT = 408. The
+// noc_req_intf / noc_rsp_intf interface FLIT_WIDTH parameter is overridden at
+// instantiation in tb_top.sv.
 //
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
@@ -20,26 +21,27 @@
 // Inline error check (spec §7.5): cmodel_check_error() called at end of
 // every active always_ff body; non-zero triggers $fatal after cmodel_finalize.
 //
-// axi_intf.master modport: master drives AW/W/AR + bready/rready to axi_o;
-//                          master reads awready/wready/arready + B/R from axi_o.
-// noc_req_intf.consumer:   Nsu reads req flit + valid; drives credit_return.
-// noc_rsp_intf.producer:   Nsu drives rsp flit + valid; reads credit_return.
+// axi4_intf.master modport: master drives AW/W/AR + bready/rready to axi_o;
+//                           master reads awready/wready/arready + B/R from axi_o.
+// noc_req_intf.slave:      Nsu reads req flit + valid; drives credit_return.
+// noc_rsp_intf.master:     Nsu drives rsp flit + valid; reads credit_return.
 
 `ifndef NSU_WRAP_SV
 `define NSU_WRAP_SV
 
 module nsu_wrap #(
-    parameter int ID_WIDTH   = 8,
-    parameter int ADDR_WIDTH = 64,
-    parameter int DATA_WIDTH = 256,
-    parameter int NUM_VC     = 1,
-    parameter int FLIT_W     = 408
+    parameter int unsigned ID_WIDTH              = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT,
+    parameter int unsigned ADDR_WIDTH            = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT,
+    parameter int unsigned DATA_WIDTH            = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT,
+    parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
+    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
+    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    noc_req_intf.consumer     noc_req_i,
-    noc_rsp_intf.producer     noc_rsp_o,
-    axi_intf.master           axi_o
+    noc_req_intf.slave        noc_req_i,
+    noc_rsp_intf.master       noc_rsp_o,
+    axi4_intf.master          axi_o
 );
 
     // -------------------------------------------------------------------------
@@ -48,7 +50,7 @@ module nsu_wrap #(
 
     import "DPI-C" context function void cmodel_nsu_set_inputs(
         input  bit                    noc_req_valid,
-        input  bit [FLIT_W-1:0]       noc_req_flit,
+        input  bit [FLIT_WIDTH-1:0]       noc_req_flit,
         input  bit                    noc_rsp_credit_return,
         input  bit                    awready,
         input  bit                    wready,
@@ -67,7 +69,7 @@ module nsu_wrap #(
 
     import "DPI-C" context function void cmodel_nsu_get_outputs(
         output bit                    noc_rsp_valid,
-        output bit [FLIT_W-1:0]       noc_rsp_flit,
+        output bit [FLIT_WIDTH-1:0]       noc_rsp_flit,
         output bit                    noc_req_credit_return,
         output bit                    awvalid,
         output bit [ID_WIDTH-1:0]     awid,
@@ -107,7 +109,7 @@ module nsu_wrap #(
 
     // NoC rsp side outputs (Nsu drives toward LoopbackNoc)
     bit                    noc_rsp_valid_q;
-    bit [FLIT_W-1:0]       noc_rsp_flit_q;
+    bit [FLIT_WIDTH-1:0]       noc_rsp_flit_q;
 
     // NoC req credit return (Nsu drives back upstream; PoC always 0)
     bit                    noc_req_credit_return_q;
@@ -208,7 +210,7 @@ module nsu_wrap #(
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
             begin : get_outputs_blk
                 bit                    t_noc_rsp_valid;
-                bit [FLIT_W-1:0]       t_noc_rsp_flit;
+                bit [FLIT_WIDTH-1:0]       t_noc_rsp_flit;
                 bit                    t_noc_req_credit_return;
                 bit                    t_awvalid;
                 bit [ID_WIDTH-1:0]     t_awid;
