@@ -18,8 +18,8 @@
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
 //
-// Inline error check (spec §7.5): cmodel_check_error() called at end of
-// every active always_ff body; non-zero triggers $fatal after cmodel_finalize.
+// Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
+// calls cmodel_check_error/cmodel_finalize itself.
 //
 // axi4_intf.master modport: master drives AW/W/AR + bready/rready to axi_o;
 //                           master reads awready/wready/arready + B/R from axi_o.
@@ -43,6 +43,18 @@ module nsu_wrap #(
     noc_rsp_intf.master       noc_rsp_o,
     axi4_intf.master          axi_o
 );
+
+    // -------------------------------------------------------------------------
+    // PoC scope guard (T1.3): single-VC only
+    // -------------------------------------------------------------------------
+    // c_model + DPI marshalling assume single-VC. Multi-VC support requires
+    // plumbing per-VC credit_return through DPI; until then, fail elaboration
+    // if NUM_VC > 1 instead of silently reducing credit_return to bit 0.
+    initial begin
+        if (NUM_VC != 1) begin
+            $fatal(1, "%m: NUM_VC=%0d; PoC supports NUM_VC=1 only", NUM_VC);
+        end
+    end
 
     // -------------------------------------------------------------------------
     // DPI imports — 3-step pattern per spec §5.1
@@ -99,9 +111,7 @@ module nsu_wrap #(
         output bit                    rready
     );
 
-    // Lifecycle / error polling (shared with all shells).
-    import "DPI-C" context function int  cmodel_check_error(output string msg);
-    import "DPI-C" context function void cmodel_finalize();
+    // Lifecycle / error polling lives in tb_top.sv (T1.4).
 
     // -------------------------------------------------------------------------
     // Output registers (beta-tick: registered one cycle behind DPI sample)
@@ -277,18 +287,6 @@ module nsu_wrap #(
                 arprot_q                <= t_arprot;
                 arqos_q                 <= t_arqos;
                 rready_q                <= t_rready;
-            end
-
-            // Inline error check (spec §7.5): poll after every tick.
-            begin : error_check
-                string err_msg;
-                int    err_code;
-                err_code = cmodel_check_error(err_msg);
-                if (err_code != 0) begin
-                    $display("[nsu_wrap] DPI fatal (code=%0d): %s", err_code, err_msg);
-                    cmodel_finalize();
-                    $fatal(1, "nsu_wrap: DPI error, simulation aborted");
-                end
             end
         end
     end

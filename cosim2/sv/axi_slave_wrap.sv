@@ -10,8 +10,8 @@
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset;
 // no async reset path — sync reset is the project default per rtl-style.
 //
-// Inline error check (spec §7.5): cmodel_check_error() called at end of
-// every active always_ff body; non-zero triggers $fatal after cmodel_finalize.
+// Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
+// calls cmodel_check_error/cmodel_finalize itself.
 //
 // axi4_intf.slave modport: slave reads AW/W/AR + bready/rready from axi_i;
 //                         slave drives awready/wready/arready + B/R to axi_i.
@@ -78,9 +78,7 @@ module axi_slave_wrap #(
         output bit                    rlast
     );
 
-    // Lifecycle / error polling (shared with all shells).
-    import "DPI-C" context function int  cmodel_check_error(output string msg);
-    import "DPI-C" context function void cmodel_finalize();
+    // Lifecycle / error polling lives in tb_top.sv (T1.4).
 
     // -------------------------------------------------------------------------
     // Output registers (beta-tick: registered one cycle behind DPI sample)
@@ -183,19 +181,6 @@ module axi_slave_wrap #(
                 rdata_q   <= t_rdata;
                 rresp_q   <= t_rresp;
                 rlast_q   <= t_rlast;
-            end
-
-            // Inline error check (spec §7.5): poll after every tick.
-            begin : error_check
-                string err_msg;
-                int    err_code;
-                err_code = cmodel_check_error(err_msg);
-                if (err_code != 0) begin
-                    $display("[axi_slave_wrap] DPI fatal (code=%0d): %s",
-                             err_code, err_msg);
-                    cmodel_finalize();
-                    $fatal(1, "axi_slave_wrap: DPI error, simulation aborted");
-                end
             end
         end
     end

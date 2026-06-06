@@ -359,6 +359,32 @@ module tb_top (
         end
     end
 
+    // -------------------------------------------------------------------------
+    // Centralized DPI error poll (T1.4)
+    // -------------------------------------------------------------------------
+    // Wraps no longer call cmodel_finalize individually; this single block
+    // owns the fatal-exit path. Previously each of the 5 wraps had its own
+    // error_check block that called cmodel_finalize on non-zero, which risked
+    // a race where multiple wraps tried to destruct the C++ model in the same
+    // delta cycle.
+    import "DPI-C" context function int cmodel_check_error(output string msg);
+
+    always_ff @(posedge clk_i) begin
+        /* verilator lint_off WIDTHTRUNC */
+        if (rst_ni) begin
+            string dpi_err_msg;
+            int    dpi_err_code;
+            dpi_err_code = cmodel_check_error(dpi_err_msg);
+            if (dpi_err_code != 0) begin
+                $display("[tb_top] DPI fatal (code=%0d): %s",
+                         dpi_err_code, dpi_err_msg);
+                cmodel_finalize();
+                $fatal(1, "tb_top: DPI error, simulation aborted");
+            end
+        end
+        /* verilator lint_on WIDTHTRUNC */
+    end
+
 endmodule
 
 `endif  // TB_TOP_SV

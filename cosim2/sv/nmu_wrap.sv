@@ -19,8 +19,8 @@
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
 //
-// Inline error check (spec §7.5): cmodel_check_error() called at end of
-// every active always_ff body; non-zero triggers $fatal after cmodel_finalize.
+// Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
+// calls cmodel_check_error/cmodel_finalize itself.
 //
 // axi4_intf.slave modport: slave reads AW/W/AR + bready/rready from axi_i;
 //                          slave drives awready/wready/arready + B/R to axi_i.
@@ -44,6 +44,18 @@ module nmu_wrap #(
     noc_req_intf.master       noc_req_o,
     noc_rsp_intf.slave        noc_rsp_i
 );
+
+    // -------------------------------------------------------------------------
+    // PoC scope guard (T1.3): single-VC only
+    // -------------------------------------------------------------------------
+    // c_model + DPI marshalling assume single-VC. Multi-VC support requires
+    // plumbing per-VC credit_return through DPI; until then, fail elaboration
+    // if NUM_VC > 1 instead of silently reducing credit_return to bit 0.
+    initial begin
+        if (NUM_VC != 1) begin
+            $fatal(1, "%m: NUM_VC=%0d; PoC supports NUM_VC=1 only", NUM_VC);
+        end
+    end
 
     // -------------------------------------------------------------------------
     // DPI imports — 3-step pattern per spec §5.1
@@ -100,9 +112,7 @@ module nmu_wrap #(
         output bit                    noc_rsp_credit_return
     );
 
-    // Lifecycle / error polling (shared with all shells).
-    import "DPI-C" context function int  cmodel_check_error(output string msg);
-    import "DPI-C" context function void cmodel_finalize();
+    // Lifecycle / error polling lives in tb_top.sv (T1.4).
 
     // -------------------------------------------------------------------------
     // Output registers (beta-tick: registered one cycle behind DPI sample)
@@ -228,18 +238,6 @@ module nmu_wrap #(
                 noc_req_valid_q         <= t_noc_req_valid;
                 noc_req_flit_q          <= t_noc_req_flit;
                 noc_rsp_credit_return_q <= t_noc_rsp_credit_return;
-            end
-
-            // Inline error check (spec §7.5): poll after every tick.
-            begin : error_check
-                string err_msg;
-                int    err_code;
-                err_code = cmodel_check_error(err_msg);
-                if (err_code != 0) begin
-                    $display("[nmu_wrap] DPI fatal (code=%0d): %s", err_code, err_msg);
-                    cmodel_finalize();
-                    $fatal(1, "nmu_wrap: DPI error, simulation aborted");
-                end
             end
         end
     end
