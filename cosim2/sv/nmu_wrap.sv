@@ -12,8 +12,9 @@
 // outputs via cmodel_nmu_get_outputs, then registers those outputs nonblocking
 // so they are visible to SV wires from the NEXT cycle onward.
 //
-// FLIT_W must match ni::FLIT_WIDTH = 408. The noc_req_intf / noc_rsp_intf
-// interface FLIT_W parameter is overridden at instantiation in tb_top.sv.
+// FLIT_WIDTH must match ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT = 408. The
+// noc_req_intf / noc_rsp_intf interface FLIT_WIDTH parameter is overridden at
+// instantiation in tb_top.sv.
 //
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
@@ -21,26 +22,27 @@
 // Inline error check (spec §7.5): cmodel_check_error() called at end of
 // every active always_ff body; non-zero triggers $fatal after cmodel_finalize.
 //
-// axi_intf.slave modport: slave reads AW/W/AR + bready/rready from axi_i;
-//                         slave drives awready/wready/arready + B/R to axi_i.
-// noc_req_intf.producer:  Nmu drives req flit + valid; reads credit_return.
-// noc_rsp_intf.consumer:  Nmu reads rsp flit + valid; drives credit_return.
+// axi4_intf.slave modport: slave reads AW/W/AR + bready/rready from axi_i;
+//                          slave drives awready/wready/arready + B/R to axi_i.
+// noc_req_intf.master:     Nmu drives req flit + valid; reads credit_return.
+// noc_rsp_intf.slave:      Nmu reads rsp flit + valid; drives credit_return.
 
 `ifndef NMU_WRAP_SV
 `define NMU_WRAP_SV
 
 module nmu_wrap #(
-    parameter int ID_WIDTH   = 8,
-    parameter int ADDR_WIDTH = 64,
-    parameter int DATA_WIDTH = 256,
-    parameter int NUM_VC     = 1,
-    parameter int FLIT_W     = 408
+    parameter int unsigned ID_WIDTH              = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT,
+    parameter int unsigned ADDR_WIDTH            = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT,
+    parameter int unsigned DATA_WIDTH            = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT,
+    parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
+    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
+    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    axi_intf.slave            axi_i,
-    noc_req_intf.producer     noc_req_o,
-    noc_rsp_intf.consumer     noc_rsp_i
+    axi4_intf.slave           axi_i,
+    noc_req_intf.master       noc_req_o,
+    noc_rsp_intf.slave        noc_rsp_i
 );
 
     // -------------------------------------------------------------------------
@@ -75,7 +77,7 @@ module nmu_wrap #(
         input  bit [3:0]              arqos,
         input  bit                    rready,
         input  bit                    noc_rsp_valid,
-        input  bit [FLIT_W-1:0]       noc_rsp_flit,
+        input  bit [FLIT_WIDTH-1:0]   noc_rsp_flit,
         input  bit                    noc_req_credit_return
     );
 
@@ -94,7 +96,7 @@ module nmu_wrap #(
         output bit [1:0]              rresp,
         output bit                    rlast,
         output bit                    noc_req_valid,
-        output bit [FLIT_W-1:0]       noc_req_flit,
+        output bit [FLIT_WIDTH-1:0]   noc_req_flit,
         output bit                    noc_rsp_credit_return
     );
 
@@ -123,7 +125,7 @@ module nmu_wrap #(
 
     // NoC req side outputs (Nmu drives toward LoopbackNoc)
     bit                    noc_req_valid_q;
-    bit [FLIT_W-1:0]       noc_req_flit_q;
+    bit [FLIT_WIDTH-1:0]   noc_req_flit_q;
 
     // NoC rsp credit return (Nmu drives back upstream; PoC always 0)
     bit                    noc_rsp_credit_return_q;
@@ -203,7 +205,7 @@ module nmu_wrap #(
                 bit [1:0]              t_rresp;
                 bit                    t_rlast;
                 bit                    t_noc_req_valid;
-                bit [FLIT_W-1:0]       t_noc_req_flit;
+                bit [FLIT_WIDTH-1:0]   t_noc_req_flit;
                 bit                    t_noc_rsp_credit_return;
                 cmodel_nmu_get_outputs(
                     t_awready, t_wready, t_arready,
