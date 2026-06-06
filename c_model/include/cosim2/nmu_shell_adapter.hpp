@@ -83,17 +83,9 @@ class NmuShellAdapter {
         }
 
         // Step 1b: push AW/W/AR beats from wire into axi_slave_port queues.
-        // Compute current wr_pending state BEFORE accepting new beats.
-        // AW is only accepted when no W burst is outstanding (wr_pending_gt1 means
-        // the faxi_slave checker would fire !awready). Match the checker condition:
-        // suppress when (outstanding > 1), i.e., more than 1 W beat still pending.
-        const bool pre_accept_wr_pending_gt1 =
-            (w_beats_expected_ > w_beats_received_) &&
-            ((w_beats_expected_ - w_beats_received_) > 1u);
-
         // push_* returns false if the queue is full (backpressure this cycle).
         bool aw_accepted = false;
-        if (in_.awvalid && !pre_accept_wr_pending_gt1) {
+        if (in_.awvalid) {
             axi::AwBeat aw{};
             aw.id = in_.awid;
             aw.addr = in_.awaddr;
@@ -106,9 +98,6 @@ class NmuShellAdapter {
             aw.qos = in_.awqos;
             aw.user = 0;
             aw_accepted = port.push_aw(aw);
-            if (aw_accepted) {
-                w_beats_expected_ += static_cast<std::size_t>(in_.awlen) + 1u;
-            }
         }
 
         bool w_accepted = false;
@@ -119,9 +108,6 @@ class NmuShellAdapter {
             w.last = in_.wlast;
             w.user = 0;
             w_accepted = port.push_w(w);
-            if (w_accepted) {
-                ++w_beats_received_;
-            }
         }
 
         bool ar_accepted = false;
@@ -149,18 +135,10 @@ class NmuShellAdapter {
 
         // awready/wready/arready: if master drove valid, report whether accepted;
         // otherwise report queue vacancy (mirrors SlaveShellAdapter T9 pattern).
-        //
-        // AWREADY: match faxi_slave checker's condition: suppress when
-        // (outstanding W beats) > 1. This includes the cycle of AW acceptance
-        // for multi-beat bursts (awlen>0) so f_axi_wr_pending = awlen+1 > 1
-        // and the checker's combinatorial assertion sees awready=0.
-        const bool post_accept_wr_pending_gt1 =
-            (w_beats_expected_ > w_beats_received_) &&
-            ((w_beats_expected_ - w_beats_received_) > 1u);
         if (in_.awvalid) {
-            out_.awready = aw_accepted && !post_accept_wr_pending_gt1;
+            out_.awready = aw_accepted;
         } else {
-            out_.awready = port.can_accept_aw() && !post_accept_wr_pending_gt1;
+            out_.awready = port.can_accept_aw();
         }
 
         if (in_.wvalid) {
@@ -223,14 +201,6 @@ class NmuShellAdapter {
     NmuOutputs out_{};
     std::optional<axi::BBeat> held_b_;
     std::optional<axi::RBeat> held_r_;
-
-    // Write-burst in-progress tracking for AXI4 AWREADY suppression.
-    // faxi_slave asserts !awready while f_axi_wr_pending > 1 (i.e., while a
-    // multi-beat write burst is in progress but WLAST not yet received).
-    // Track: total W beats expected from accepted AWs; total W beats received.
-    // AWREADY is suppressed while (w_beats_expected_ - w_beats_received_) > 1.
-    std::size_t w_beats_expected_ = 0;  // cumulative, incremented on AW accept
-    std::size_t w_beats_received_ = 0;  // cumulative, incremented on W accept
 
     // Flit ↔ FlitBytes conversions (same as LoopbackNocShellAdapter).
     static Flit flit_from_bytes(const FlitBytes& b) {
