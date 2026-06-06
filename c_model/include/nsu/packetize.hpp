@@ -24,36 +24,9 @@ class Packetize : public Packetizer {
     bool push_r(const axi::RBeat& b) override;
 
     // ---- Request methods assert false ----
-    bool push_aw(const axi::AwBeat&) override {
-        assert(false &&
-               "nsu::Packetize::push_aw: NSU packetizer handles response side only "
-               "(B/R into NocRspOut) — AW belongs on the request side "
-               "(NMU Packetize). Likely cause: AxiMasterPort wiring routed a "
-               "request beat into the NSU packetizer, or test fixture invoked the "
-               "wrong Packetizer instance.");
-        std::abort();
-        return false;
-    }
-    bool push_w(const axi::WBeat&) override {
-        assert(false &&
-               "nsu::Packetize::push_w: NSU packetizer handles response side only "
-               "(B/R into NocRspOut) — W belongs on the request side "
-               "(NMU Packetize). Likely cause: AxiMasterPort wiring routed a "
-               "request beat into the NSU packetizer, or test fixture invoked the "
-               "wrong Packetizer instance.");
-        std::abort();
-        return false;
-    }
-    bool push_ar(const axi::ArBeat&) override {
-        assert(false &&
-               "nsu::Packetize::push_ar: NSU packetizer handles response side only "
-               "(B/R into NocRspOut) — AR belongs on the request side "
-               "(NMU Packetize). Likely cause: AxiMasterPort wiring routed a "
-               "request beat into the NSU packetizer, or test fixture invoked the "
-               "wrong Packetizer instance.");
-        std::abort();
-        return false;
-    }
+    bool push_aw(const axi::AwBeat&) override { wrong_side_("nsu::Packetize", "push_aw"); }
+    bool push_w(const axi::WBeat&) override { wrong_side_("nsu::Packetize", "push_w"); }
+    bool push_ar(const axi::ArBeat&) override { wrong_side_("nsu::Packetize", "push_ar"); }
 
   private:
     noc::NocRspOut& b_out_;

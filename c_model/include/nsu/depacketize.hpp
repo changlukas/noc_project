@@ -41,26 +41,8 @@ class Depacketize : public Depacketizer {
     std::optional<axi::WBeat> pop_w() override;
     std::optional<axi::ArBeat> pop_ar() override;
     // Response methods assert false
-    std::optional<axi::BBeat> pop_b() override {
-        assert(false &&
-               "nsu::Depacketize::pop_b: NSU depacketizer handles request side only "
-               "(AW/W/AR from NocReqIn) — B belongs on the response side "
-               "(NMU Depacketize). Likely cause: AxiMasterPort wiring routed a "
-               "response-channel pop into the NSU depacketizer, or test fixture "
-               "invoked the wrong Depacketizer instance.");
-        std::abort();
-        return std::nullopt;
-    }
-    std::optional<axi::RBeat> pop_r() override {
-        assert(false &&
-               "nsu::Depacketize::pop_r: NSU depacketizer handles request side only "
-               "(AW/W/AR from NocReqIn) — R belongs on the response side "
-               "(NMU Depacketize). Likely cause: AxiMasterPort wiring routed a "
-               "response-channel pop into the NSU depacketizer, or test fixture "
-               "invoked the wrong Depacketizer instance.");
-        std::abort();
-        return std::nullopt;
-    }
+    std::optional<axi::BBeat> pop_b() override { wrong_side_("nsu::Depacketize", "pop_b"); }
+    std::optional<axi::RBeat> pop_r() override { wrong_side_("nsu::Depacketize", "pop_r"); }
 
   private:
     noc::NocReqIn& req_in_;

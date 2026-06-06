@@ -15,6 +15,7 @@
 // A given port only USES its half; the other half is exercised by the
 // peer port via the same concrete object.
 #include "axi/types.hpp"
+#include "ni/wrong_side.hpp"  // wrong_side_() helper for unused-side stubs
 #include <cstdint>
 #include <optional>
 #include <utility>

@@ -67,26 +67,8 @@ class Packetize : public Packetizer {
     }
 
     // ---- Packetizer interface (response methods assert false) ----
-    bool push_b(const axi::BBeat&) override {
-        assert(false &&
-               "nmu::Packetize::push_b: NMU packetizer handles request side only "
-               "(AW/W/AR into NocReqOut) — B belongs on the response side "
-               "(NSU Packetize). Likely cause: AxiSlavePort wiring routed a response "
-               "beat into the NMU packetizer, or test fixture invoked the wrong "
-               "Packetizer instance.");
-        std::abort();
-        return false;
-    }
-    bool push_r(const axi::RBeat&) override {
-        assert(false &&
-               "nmu::Packetize::push_r: NMU packetizer handles request side only "
-               "(AW/W/AR into NocReqOut) — R belongs on the response side "
-               "(NSU Packetize). Likely cause: AxiSlavePort wiring routed a response "
-               "beat into the NMU packetizer, or test fixture invoked the wrong "
-               "Packetizer instance.");
-        std::abort();
-        return false;
-    }
+    bool push_b(const axi::BBeat&) override { wrong_side_("nmu::Packetize", "push_b"); }
+    bool push_r(const axi::RBeat&) override { wrong_side_("nmu::Packetize", "push_r"); }
 
     // ---- Non-interface methods, called by Rob with full metadata ----
     // Future Enabled mode supplies rob_idx via this path.

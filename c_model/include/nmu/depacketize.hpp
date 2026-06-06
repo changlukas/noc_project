@@ -33,36 +33,9 @@ class Depacketize : public Depacketizer {
     std::optional<std::pair<axi::BBeat, ResponseMeta>> pop_b_with_meta() override;
     std::optional<std::pair<axi::RBeat, ResponseMeta>> pop_r_with_meta() override;
     // Request methods assert false
-    std::optional<axi::AwBeat> pop_aw() override {
-        assert(false &&
-               "nmu::Depacketize::pop_aw: NMU depacketizer handles response side only "
-               "(B/R from NocRspIn) — AW belongs on the request side "
-               "(NSU Depacketize or testbench bypass). Likely cause: "
-               "AxiSlavePort wiring routed a request-channel pop into the NMU "
-               "depacketizer, or test fixture invoked the wrong Depacketizer instance.");
-        std::abort();
-        return std::nullopt;
-    }
-    std::optional<axi::WBeat> pop_w() override {
-        assert(false &&
-               "nmu::Depacketize::pop_w: NMU depacketizer handles response side only "
-               "(B/R from NocRspIn) — W belongs on the request side "
-               "(NSU Depacketize or testbench bypass). Likely cause: "
-               "AxiSlavePort wiring routed a request-channel pop into the NMU "
-               "depacketizer, or test fixture invoked the wrong Depacketizer instance.");
-        std::abort();
-        return std::nullopt;
-    }
-    std::optional<axi::ArBeat> pop_ar() override {
-        assert(false &&
-               "nmu::Depacketize::pop_ar: NMU depacketizer handles response side only "
-               "(B/R from NocRspIn) — AR belongs on the request side "
-               "(NSU Depacketize or testbench bypass). Likely cause: "
-               "AxiSlavePort wiring routed a request-channel pop into the NMU "
-               "depacketizer, or test fixture invoked the wrong Depacketizer instance.");
-        std::abort();
-        return std::nullopt;
-    }
+    std::optional<axi::AwBeat> pop_aw() override { wrong_side_("nmu::Depacketize", "pop_aw"); }
+    std::optional<axi::WBeat> pop_w() override { wrong_side_("nmu::Depacketize", "pop_w"); }
+    std::optional<axi::ArBeat> pop_ar() override { wrong_side_("nmu::Depacketize", "pop_ar"); }
 
   private:
     struct BWithMeta {
