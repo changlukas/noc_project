@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 `ifndef NI_PARAMS_PKG_SVH
 `define NI_PARAMS_PKG_SVH
 

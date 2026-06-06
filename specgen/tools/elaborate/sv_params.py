@@ -20,6 +20,8 @@ from ni_spec.handshake_schema import eval_derived_expression, load_constants
 def emit(src_path: Path, spec_version: str) -> str:
     constants = load_constants(src_path)
     lines: list[str] = []
+    lines.append("`timescale 1ns/1ps")
+    lines.append("")
     lines.append("`ifndef NI_PARAMS_PKG_SVH")
     lines.append("`define NI_PARAMS_PKG_SVH")
     lines.append("")

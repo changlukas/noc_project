@@ -227,6 +227,8 @@ def emit(signals_json: Path, spec_version: str) -> str:
         reset_consts.append((pin_name.upper(), value))
 
     out: list[str] = []
+    out.append("`timescale 1ns/1ps")
+    out.append("")
     out.append("`ifndef NI_SIGNALS_PKG_SVH")
     out.append("`define NI_SIGNALS_PKG_SVH")
     out.append("")

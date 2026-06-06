@@ -16,6 +16,8 @@
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
 
+`timescale 1ns/1ps
+
 `ifndef LOOPBACK_NOC_WRAP_SV
 `define LOOPBACK_NOC_WRAP_SV
 

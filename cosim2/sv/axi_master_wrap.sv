@@ -16,6 +16,8 @@
 // axi4_intf.master modport: master drives AW/W/AR + bready/rready;
 //                          master reads awready/wready/arready + B/R.
 
+`timescale 1ns/1ps
+
 `ifndef AXI_MASTER_WRAP_SV
 `define AXI_MASTER_WRAP_SV
 

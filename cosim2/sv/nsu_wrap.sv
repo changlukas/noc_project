@@ -26,6 +26,8 @@
 // noc_req_intf.slave:      Nsu reads req flit + valid; drives credit_return.
 // noc_rsp_intf.master:     Nsu drives rsp flit + valid; reads credit_return.
 
+`timescale 1ns/1ps
+
 `ifndef NSU_WRAP_SV
 `define NSU_WRAP_SV
 

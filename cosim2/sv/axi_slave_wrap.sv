@@ -16,6 +16,8 @@
 // axi4_intf.slave modport: slave reads AW/W/AR + bready/rready from axi_i;
 //                         slave drives awready/wready/arready + B/R to axi_i.
 
+`timescale 1ns/1ps
+
 `ifndef AXI_SLAVE_WRAP_SV
 `define AXI_SLAVE_WRAP_SV
 
