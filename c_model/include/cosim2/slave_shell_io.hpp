@@ -15,14 +15,15 @@
 // DATA_BYTES = 32 (256-bit data bus per ni::WSTRB_WIDTH). All multi-byte
 // fields are stored byte-array little-endian, matching the axi_intf.sv wire.
 #pragma once
+#include "axi/types.hpp"  // axi::DATA_BYTES
 #include <array>
 #include <cstdint>
 
 namespace ni::cmodel::cosim2 {
 
-// 256-bit data bus = 32 bytes (re-use constant from master_shell_io.hpp scope).
-// Defined here independently; both TUs agree on AXI_DATA_BYTES = 32.
-static constexpr int SLAVE_AXI_DATA_BYTES = 32;
+// 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
+// wire width agrees across master/slave/nmu/nsu shell IO structs.
+constexpr int SLAVE_AXI_DATA_BYTES = axi::DATA_BYTES;
 
 // SlaveInputs: from master side (consumed by the slave each cycle).
 struct SlaveInputs {

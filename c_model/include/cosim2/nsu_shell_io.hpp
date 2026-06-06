@@ -18,15 +18,16 @@
 //   Nmu consumes noc_rsp / produces noc_req  → Nsu produces noc_rsp / consumes noc_req.
 //   Nmu has axi_intf.slave (accepts AW/W/AR) → Nsu has axi_intf.master (drives AW/W/AR).
 #pragma once
-#include "cosim2/loopback_noc_shell_io.hpp"  // FlitBytes, FLIT_BYTES, AXI_DATA_BYTES
+#include "axi/types.hpp"                     // axi::DATA_BYTES
+#include "cosim2/loopback_noc_shell_io.hpp"  // FlitBytes, FLIT_BYTES
 #include <array>
 #include <cstdint>
 
 namespace ni::cmodel::cosim2 {
 
-// NSU_AXI_DATA_BYTES matches AXI_DATA_BYTES from nmu_shell_io.hpp (32 bytes).
-// Defined independently to avoid cross-header dependency ordering issues.
-static constexpr int NSU_AXI_DATA_BYTES = 32;
+// 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
+// wire width agrees across master/slave/nmu/nsu shell IO structs.
+constexpr int NSU_AXI_DATA_BYTES = axi::DATA_BYTES;
 
 // NsuInputs: signals consumed by Nsu each cycle.
 struct NsuInputs {

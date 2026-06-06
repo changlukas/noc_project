@@ -19,7 +19,9 @@
 // and held until the next tick() overwrites them.
 #pragma once
 #include "common/loopback_noc.hpp"
+#include "cosim2/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "cosim2/loopback_noc_shell_io.hpp"
+#include "cosim2/poc_defaults.hpp"  // kPoCLoopbackNocDepth
 #include <memory>
 
 namespace ni::cmodel::cosim2 {
@@ -29,8 +31,8 @@ class LoopbackNocShellAdapter {
     void init() {
         // Single-NSU backward-compat ctor: auto-routes all dst_id to NSU_0.
         loopback_ = std::make_unique<testing::LoopbackNoc>(
-            /*req_depth=*/64, /*rsp_depth=*/64);
-        in_  = LoopbackNocInputs{};
+            /*req_depth=*/kPoCLoopbackNocDepth, /*rsp_depth=*/kPoCLoopbackNocDepth);
+        in_ = LoopbackNocInputs{};
         out_ = LoopbackNocOutputs{};
     }
 
@@ -60,13 +62,13 @@ class LoopbackNocShellAdapter {
         // req_out: NSU side pops one request flit from the loopback per cycle.
         if (auto f = loopback_->nsu_req_in(0).pop_flit()) {
             out_.req_out_valid = true;
-            out_.req_out_flit  = flit_to_bytes(*f);
+            out_.req_out_flit = flit_to_bytes(*f);
         }
 
         // rsp_out: NMU side pops one response flit from the loopback per cycle.
         if (auto f = loopback_->nmu_rsp_in().pop_flit()) {
             out_.rsp_out_valid = true;
-            out_.rsp_out_flit  = flit_to_bytes(*f);
+            out_.rsp_out_flit = flit_to_bytes(*f);
         }
 
         // credit_return: loopback has capacity for next flit (NUM_VC=1 PoC, vc=0).
@@ -78,24 +80,11 @@ class LoopbackNocShellAdapter {
 
   private:
     std::unique_ptr<testing::LoopbackNoc> loopback_;
-    LoopbackNocInputs  in_{};
+    LoopbackNocInputs in_{};
     LoopbackNocOutputs out_{};
 
-    // FlitBytes ↔ c_model Flit conversions.
-    // Flit::raw() is std::array<uint8_t, WIDTH_BYTES> where WIDTH_BYTES == FLIT_BYTES.
-    static Flit flit_from_bytes(const FlitBytes& b) {
-        static_assert(FLIT_BYTES == Flit::WIDTH_BYTES,
-                      "FlitBytes size must equal Flit::WIDTH_BYTES");
-        std::array<uint8_t, Flit::WIDTH_BYTES> raw{};
-        for (int i = 0; i < Flit::WIDTH_BYTES; ++i) raw[i] = b[i];
-        return Flit(raw);
-    }
-
-    static FlitBytes flit_to_bytes(const Flit& f) {
-        FlitBytes b{};
-        for (int i = 0; i < Flit::WIDTH_BYTES; ++i) b[i] = f.raw()[i];
-        return b;
-    }
+    // FlitBytes <-> c_model Flit helpers live in cosim2/flit_byte_conv.hpp;
+    // calls use flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 
 }  // namespace ni::cmodel::cosim2

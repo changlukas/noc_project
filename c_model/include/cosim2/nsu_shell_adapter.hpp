@@ -29,8 +29,10 @@
 // Hermetic invariant: no refs to other ShellAdapters.
 #pragma once
 #include "axi/types.hpp"
+#include "cosim2/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
 #include "cosim2/loopback_noc_shell_io.hpp"  // FlitBytes, FLIT_BYTES
 #include "cosim2/nsu_shell_io.hpp"
+#include "cosim2/poc_defaults.hpp"  // kPoC* depths
 #include "ni/flit.hpp"
 #include "nsu/nsu.hpp"
 #include <array>
@@ -42,8 +44,8 @@ namespace ni::cmodel::cosim2 {
 class NsuShellAdapter {
   public:
     // init — construct NsuStandalone with a minimal PoC NsuConfig.
-    // Defaults: 1 VC, ReadWriteSplit, queue_depth=16 per channel.
-    void init(uint8_t src_id = 0, std::size_t queue_depth = 16) {
+    // Defaults: 1 VC, ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
+    void init(uint8_t src_id = 0, std::size_t queue_depth = kPoCAxiQueueDepth) {
         using namespace ni::cmodel::nsu;
         NsuConfig cfg{};
         cfg.src_id = src_id;
@@ -61,15 +63,15 @@ class NsuShellAdapter {
         cfg.port_params.depkt_ar_q_depth = queue_depth;
         cfg.port_params.depkt_b_q_depth = queue_depth;
         cfg.port_params.depkt_r_q_depth = queue_depth;
-        cfg.port_params.loopback_noc_req_depth = 64;
-        cfg.port_params.loopback_noc_rsp_depth = 64;
-        cfg.port_params.meta_buffer_per_id_depth = 16;
+        cfg.port_params.loopback_noc_req_depth = kPoCLoopbackNocDepth;
+        cfg.port_params.loopback_noc_rsp_depth = kPoCLoopbackNocDepth;
+        cfg.port_params.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;
         cfg.depkt_aw_q_depth = queue_depth;
         cfg.depkt_w_q_depth = queue_depth;
         cfg.depkt_ar_q_depth = queue_depth;
-        cfg.meta_buffer_per_id_depth = 16;
-        cfg.wormhole_per_input_depth = 4;
-        cfg.vc_arbiter_pending_depth = 4;
+        cfg.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;
+        cfg.wormhole_per_input_depth = kPoCArbiterFifoDepth;
+        cfg.vc_arbiter_pending_depth = kPoCArbiterFifoDepth;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
         in_ = NsuInputs{};
         out_ = NsuOutputs{};
@@ -202,20 +204,8 @@ class NsuShellAdapter {
     std::optional<axi::WBeat> held_w_;
     std::optional<axi::ArBeat> held_ar_;
 
-    // Flit ↔ FlitBytes conversions (same as NmuShellAdapter).
-    static Flit flit_from_bytes(const FlitBytes& b) {
-        static_assert(FLIT_BYTES == Flit::WIDTH_BYTES,
-                      "FlitBytes size must equal Flit::WIDTH_BYTES");
-        std::array<uint8_t, Flit::WIDTH_BYTES> raw{};
-        for (int i = 0; i < Flit::WIDTH_BYTES; ++i) raw[i] = b[i];
-        return Flit(raw);
-    }
-
-    static FlitBytes flit_to_bytes(const Flit& f) {
-        FlitBytes b{};
-        for (int i = 0; i < Flit::WIDTH_BYTES; ++i) b[i] = f.raw()[i];
-        return b;
-    }
+    // Flit <-> FlitBytes helpers live in cosim2/flit_byte_conv.hpp; calls use
+    // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 
 }  // namespace ni::cmodel::cosim2
