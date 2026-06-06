@@ -1,0 +1,16 @@
+package ni_params_pkg;
+
+    // AXI parameter defaults
+    parameter int unsigned NI_AXI_ID_WIDTH_DFLT   = 8;
+    parameter int unsigned NI_AXI_ADDR_WIDTH_DFLT = 64;
+    parameter int unsigned NI_AXI_DATA_WIDTH_DFLT = 256;
+
+    // NoC parameter defaults
+    parameter int unsigned NI_NOC_NUM_VC_DFLT                = 1;
+    parameter int unsigned NI_NOC_FLIT_WIDTH_DFLT            = 408;
+    parameter int unsigned NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT = 4;
+
+    // Derived parameter defaults
+    parameter int unsigned NI_AXI_WSTRB_WIDTH_DFLT = 32;
+
+endpackage

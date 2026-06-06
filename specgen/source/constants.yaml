@@ -1,0 +1,71 @@
+# specgen/source/constants.yaml
+# Language-neutral parameter defaults. Source of truth for both ni_params_pkg.sv
+# and ni_params.h. See design spec §4.1.
+schema_version: "1.0"
+
+axi:
+  ID_WIDTH:
+    type: int
+    units: bits
+    description: "AXI transaction ID width"
+    default: 8
+    min: 1
+    max: 32
+    sv_symbol: NI_AXI_ID_WIDTH_DFLT
+    cpp_symbol: NI_AXI_ID_WIDTH
+  ADDR_WIDTH:
+    type: int
+    units: bits
+    description: "AXI address bus width"
+    default: 64
+    min: 1
+    max: 64
+    sv_symbol: NI_AXI_ADDR_WIDTH_DFLT
+    cpp_symbol: NI_AXI_ADDR_WIDTH
+  DATA_WIDTH:
+    type: int
+    units: bits
+    description: "AXI data bus width"
+    default: 256
+    allowed: [32, 64, 128, 256, 512, 1024]
+    sv_symbol: NI_AXI_DATA_WIDTH_DFLT
+    cpp_symbol: NI_AXI_DATA_WIDTH
+
+noc:
+  NUM_VC:
+    type: int
+    units: count
+    description: "Number of virtual channels per NoC link"
+    default: 1
+    min: 1
+    max: 8
+    sv_symbol: NI_NOC_NUM_VC_DFLT
+    cpp_symbol: NI_NOC_NUM_VC
+  FLIT_WIDTH:
+    type: int
+    units: bits
+    description: "NoC flit payload width"
+    default: 408
+    min: 64
+    max: 1024
+    sv_symbol: NI_NOC_FLIT_WIDTH_DFLT
+    cpp_symbol: NI_NOC_FLIT_WIDTH
+  SLAVE_VC_BUFFER_DEPTH:
+    type: int
+    units: flits
+    description: "Per-VC buffer depth at NoC slave; defines initial credit count exposed to producer"
+    default: 4
+    min: 1
+    max: 64
+    sv_symbol: NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
+    cpp_symbol: NI_NOC_SLAVE_VC_BUFFER_DEPTH
+
+derived:
+  WSTRB_WIDTH:
+    type: int
+    units: bits
+    description: "AXI write strobe width"
+    expression: "DATA_WIDTH / 8"
+    constraint: "DATA_WIDTH % 8 == 0"
+    sv_symbol: NI_AXI_WSTRB_WIDTH_DFLT
+    cpp_symbol: NI_AXI_WSTRB_WIDTH

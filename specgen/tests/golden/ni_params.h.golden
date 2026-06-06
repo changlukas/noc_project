@@ -1,0 +1,20 @@
+#pragma once
+
+#include <cstddef>
+
+namespace ni {
+
+// AXI parameter defaults
+constexpr int NI_AXI_ID_WIDTH   = 8;
+constexpr int NI_AXI_ADDR_WIDTH = 64;
+constexpr int NI_AXI_DATA_WIDTH = 256;
+
+// NoC parameter defaults
+constexpr int NI_NOC_NUM_VC                = 1;
+constexpr int NI_NOC_FLIT_WIDTH            = 408;
+constexpr int NI_NOC_SLAVE_VC_BUFFER_DEPTH = 4;
+
+// Derived parameter defaults
+constexpr int NI_AXI_WSTRB_WIDTH = 32;
+
+}  // namespace ni
