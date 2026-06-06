@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3 (specgen via `py -3 specgen/tools/codegen.py`), SystemVerilog (Verilator 5.036), C++17 (c_model header-only), CMake/ctest (`c_model/CMakeLists.txt`), MSYS2 on Windows (PATH="/c/msys64/mingw64/bin:$PATH"), pytest (specgen tests), GoogleTest (c_model+cosim2 tests).
 
-**Source spec:** `docs/superpowers/specs/2026-06-06-specgen-handshake-rtl-style-upstream-design.md` (commit `1449efa`).
+**Source spec:** `docs/superpowers/specs/2026-06-06-specgen-handshake-rtl-style-upstream-design.md` (refreshed through commit `abacdd1`).
 
 **Codebase facts (verified against working tree before plan rewrite):**
 - specgen CLI: `py -3 specgen/tools/codegen.py --target {cpp|sv} --domain {packet|signals|registers}` (no `python -m specgen`)
@@ -53,7 +53,7 @@
 - `specgen/generated/sv/ni_signals_pkg.sv` — regenerated (new style).
 - `specgen/generated/cpp/ni_signals.h` — regenerated if signal layout downstream changed (likely byte-identical since name set unchanged).
 - `specgen/tests/golden/ni_signals_pkg.sv.golden` — regenerated (new style).
-- `spec/ni/doc/signal_interface.md` — `## Handshake & Modport Convention` and `## AXI4 Signal Matrix` sections generator-emitted.
+- ~~`spec/ni/doc/signal_interface.md`~~ — generator-emit of `## Handshake & Modport Convention` and `## AXI4 Signal Matrix` sections is **DEFERRED** to release-sweep follow-up spec (see spec §4.4); this plan does NOT touch this file.
 - `cosim2/sv/nmu_wrap.sv` — use specgen `axi4_intf` + `noc_req_intf` + `noc_rsp_intf`; add `clk_i/rst_ni` module ports.
 - `cosim2/sv/nsu_wrap.sv` — symmetric.
 - `cosim2/sv/axi_master_wrap.sv` — use `axi4_intf.master`.
@@ -1736,9 +1736,9 @@ EOF
 
 ---
 
-# Phase W3 — DEFERRED
+# Deferred work (post-W2)
 
-After Codex round 5 surfaced unresolved HIGH-severity gaps when this plan attempted to bundle 12 release-level verification gates into one document, **the entire release-level quality sweep is deferred to a follow-up spec + plan cycle.**
+After Codex round 5 surfaced unresolved HIGH-severity gaps when this plan attempted to bundle 12 release-level verification gates into one document, **release-level verification is deferred to a follow-up spec.** The Karpathy 4-lens + magic-number sweep is independently deferred to its own already-written spec (`2026-06-06-karpathy-quality-sweep-design.md`).
 
 ### Why deferred
 
@@ -1805,7 +1805,7 @@ The follow-up spec lives at `docs/superpowers/specs/YYYY-MM-DD-release-quality-s
 ## Notes for Executor
 
 - The spec §5.3 mentioned `slave_wrap.sv` and `noc_wrap.sv` informally; actual file names are `axi_slave_wrap.sv` and `loopback_noc_wrap.sv`. This plan uses the actual names throughout.
-- `generator.py` is the markdown→JSON parser; SV emission lives in `specgen/tools/elaborate/sv_*.py` peer modules. New emitters (`sv_params.py`, `cpp_params.py`, `signal_interface_md.py`) follow the same peer pattern.
+- `generator.py` is the markdown→JSON parser; SV emission lives in `specgen/tools/elaborate/sv_*.py` peer modules. New emitters in scope: `sv_params.py` + `cpp_params.py`. (`signal_interface_md.py` is **deferred** — not created by this plan.)
 - `codegen.py` is the dispatcher. All new emitters MUST register in `DOMAIN_TO_EMITTER` and follow the `(src_path, spec_version) -> body_str` contract.
 - W2 sub-commits 4-14 are not necessarily elaboration-clean mid-PR. Only Task 15 final gate runs the full ctest + drift gate.
 - The plan does NOT call `python -m specgen` (no such entry point); all generator commands use `py -3 specgen/tools/codegen.py --target <X> --domain <Y>` per `codegen.py:4-13` docstring.

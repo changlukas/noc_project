@@ -22,8 +22,7 @@
 
 ### Created
 
-- `cosim2/scripts/karpathy/dispatch_subagent.md` — dispatch prompt template (reused per zone)
-- `cosim2/scripts/karpathy/dispatch_codex.md` — same content as subagent prompt; Codex variant
+- `cosim2/scripts/karpathy/dispatch_prompt.md` — single dispatch prompt template; same prompt body fed to both subagent (via Agent tool) and Codex (via `codex:rescue` skill) with only `{{OUTPUT_PATH}}` substitution differing
 - `cosim2/scripts/karpathy/merge_findings.py` — de-dup + merge JSON
 - `cosim2/quality/karpathy/zone_{A,B,C}_subagent.json` — raw subagent findings
 - `cosim2/quality/karpathy/zone_{A,B,C}_codex.json` — raw Codex findings
@@ -44,30 +43,64 @@
 **Files:**
 - Create: `cosim2/quality/karpathy/baseline.txt`
 
-- [ ] **Step 1: Run baselines**
+- [ ] **Step 1: Ensure Verilator `Vtb_top` is built (prerequisite — two cosim ctests SKIP silently if missing)**
 
 ```bash
 export PATH="/c/msys64/mingw64/bin:$PATH"
+cd /e/05_NoC/noc_project/cosim2/verilator
+test -x obj_dir/Vtb_top || make
+test -x obj_dir/Vtb_top || { echo "FATAL: Vtb_top did not build"; exit 1; }
+```
+
+Expected: `obj_dir/Vtb_top` exists and is executable. Without this, two cosim ctests (`CosimWireSmoke`, `CheckerLiveness`) silently skip per `c_model/tests/CMakeLists.txt:40`, and the "410 tests pass" baseline becomes a lie.
+
+- [ ] **Step 2: Run baselines (with exit-code propagation)**
+
+```bash
+set -e
 cd /e/05_NoC/noc_project
 mkdir -p cosim2/quality/karpathy
+
+CTEST_LOG=$(mktemp); SPECGEN_LOG=$(mktemp); DRIFT_LOG=$(mktemp)
+
+(cd c_model/build && ctest --output-on-failure) > "$CTEST_LOG" 2>&1
+CTEST_RC=$?
+
+(cd specgen && py -3 -m pytest tests/ -q) > "$SPECGEN_LOG" 2>&1
+SPECGEN_RC=$?
+
+(cd specgen && py -3 tools/codegen.py --check) > "$DRIFT_LOG" 2>&1
+DRIFT_RC=$?
 
 {
     echo "=== Karpathy sweep pre-baseline ==="
     echo "Date: $(date -Iseconds)"
     echo "Commit: $(git rev-parse HEAD)"
+    echo "Vtb_top: $(ls -la cosim2/verilator/obj_dir/Vtb_top)"
+    echo "Recommended ordering vs W1+W2: __W1+W2 first__ (per spec §2.1; record actual order chosen here)"
     echo
-    echo "--- c_model ctest ---"
-    (cd c_model/build && ctest --output-on-failure 2>&1) | tail -5
+    echo "--- c_model ctest (rc=$CTEST_RC) ---"
+    tail -10 "$CTEST_LOG"
     echo
-    echo "--- specgen pytest ---"
-    (cd specgen && py -3 -m pytest tests/ -q 2>&1) | tail -5
+    echo "--- specgen pytest (rc=$SPECGEN_RC) ---"
+    tail -10 "$SPECGEN_LOG"
     echo
-    echo "--- drift gate ---"
-    (cd specgen && py -3 tools/codegen.py --check && echo "drift: OK") || echo "drift: FAIL"
-} | tee cosim2/quality/karpathy/baseline.txt
+    echo "--- drift gate (rc=$DRIFT_RC) ---"
+    tail -5 "$DRIFT_LOG"
+} > cosim2/quality/karpathy/baseline.txt
+
+rm -f "$CTEST_LOG" "$SPECGEN_LOG" "$DRIFT_LOG"
+
+# Strict pass condition
+[ $CTEST_RC -eq 0 ] && [ $SPECGEN_RC -eq 0 ] && [ $DRIFT_RC -eq 0 ] || {
+    echo "BASELINE NOT CLEAN — sweep cannot start until baseline is green"
+    cat cosim2/quality/karpathy/baseline.txt
+    exit 1
+}
+set +e
 ```
 
-Expected: c_model ctest reports 410 tests passed; specgen pytest reports all pass; drift: OK.
+Expected: all three exit codes are 0; the script does not print "BASELINE NOT CLEAN".
 
 - [ ] **Step 2: Commit baseline**
 
@@ -81,12 +114,12 @@ git commit -m "chore(quality): capture karpathy sweep pre-baseline"
 ### Task 2: Author dispatch prompt template
 
 **Files:**
-- Create: `cosim2/scripts/karpathy/dispatch_subagent.md`
+- Create: `cosim2/scripts/karpathy/dispatch_prompt.md`
 
 - [ ] **Step 1: Write the template**
 
 ```markdown
-<!-- cosim2/scripts/karpathy/dispatch_subagent.md -->
+<!-- cosim2/scripts/karpathy/dispatch_prompt.md -->
 You are running a Karpathy 4-lens + magic-number sweep on a specified file zone of the noc_project repo. Return findings ONLY as a JSON array — no prose, no markdown.
 
 ## Zone
@@ -146,11 +179,11 @@ Do NOT write anything else.
 - [ ] **Step 2: Commit**
 
 ```bash
-git add cosim2/scripts/karpathy/dispatch_subagent.md
+git add cosim2/scripts/karpathy/dispatch_prompt.md
 git commit -m "chore(quality): add Karpathy sweep dispatch prompt template"
 ```
 
-(The same content serves as the Codex variant; pass via `codex:rescue` `args`.)
+The same template body is fed to both reviewers — only `{{OUTPUT_PATH}}` differs.
 
 ---
 
@@ -198,12 +231,13 @@ def merge(subagent: Path, codex: Path) -> list:
             seen[key] = f
             continue
         existing = seen[key]
-        # Merge reviewers + descriptions
+        # Merge reviewers + preserve both descriptions
         existing["reviewers"] = sorted(set(existing["reviewers"] + f["reviewers"]))
         existing["descriptions"] = list(dict.fromkeys(existing["descriptions"] + f["descriptions"]))
-        # Higher severity wins
+        # Higher severity wins — promote severity AND primary description AND suggested_fix
         if _RANK[f["severity"]] < _RANK[existing["severity"]]:
             existing["severity"] = f["severity"]
+            existing["description"] = f["description"]  # primary now reflects winner
             existing["suggested_fix"] = f["suggested_fix"]
     return sorted(
         seen.values(),
@@ -225,7 +259,7 @@ if __name__ == "__main__":
     sys.exit(main(sys.argv))
 ```
 
-- [ ] **Step 2: Smoke-test with stub inputs**
+- [ ] **Step 2: Smoke-test with stub inputs (assertions, not eyeball)**
 
 ```bash
 cd /e/05_NoC/noc_project
@@ -240,11 +274,25 @@ cat > /tmp/karpathy_test/b.json << 'EOF'
   {"severity":"CRITICAL","category":"magic_number_width","file":"x.hpp","line":1,"description":"codex: 16 used in 5 places","suggested_fix":"constexpr int kX = 16;"}
 ]
 EOF
-py -3 cosim2/scripts/karpathy/merge_findings.py /tmp/karpathy_test/a.json /tmp/karpathy_test/b.json /tmp/karpathy_test/merged.json
-cat /tmp/karpathy_test/merged.json
+py -3 cosim2/scripts/karpathy/merge_findings.py \
+    /tmp/karpathy_test/a.json /tmp/karpathy_test/b.json \
+    /tmp/karpathy_test/merged.json
+
+py -3 - << 'PY'
+import json, sys
+d = json.load(open('/tmp/karpathy_test/merged.json'))
+assert len(d) == 1, f"expected 1 entry, got {len(d)}"
+e = d[0]
+assert e["severity"] == "CRITICAL", e["severity"]
+assert e["description"] == "codex: 16 used in 5 places", e["description"]
+assert e["suggested_fix"] == "constexpr int kX = 16;", e["suggested_fix"]
+assert set(e["reviewers"]) == {"claude-subagent","codex"}, e["reviewers"]
+assert len(e["descriptions"]) == 2, e["descriptions"]
+print("OK: merge_findings.py passes smoke test")
+PY
 ```
 
-Expected: 1 finding with `severity: CRITICAL` (winner), both reviewers listed, both descriptions preserved.
+Expected: stdout `OK: merge_findings.py passes smoke test`; script exit 0.
 
 - [ ] **Step 3: Commit**
 
@@ -263,30 +311,51 @@ git commit -m "chore(quality): add Karpathy sweep findings merge script"
 
 **Note:** Single message with TWO tool calls — Agent + Skill — so they run in parallel per [[feedback-superpowers-entry]] dispatch pattern.
 
-- [ ] **Step 1: Compose the zone-specific prompt by template substitution**
+- [ ] **Step 1: Compose the two prompt strings by template substitution**
 
-Read `cosim2/scripts/karpathy/dispatch_subagent.md`. Substitute:
-- `{{ZONE_TAG}}` → `A`
-- `{{ZONE_PATHS_BULLETED}}` → bullet list:
-    - `c_model/include/axi/**`
-    - `c_model/include/nmu/**`
-    - `c_model/include/nsu/**`
-    - `c_model/include/common/**`
-    - `c_model/include/noc/**`
-    - `c_model/tests/axi/**`
-    - `c_model/tests/nmu/**`
-    - `c_model/tests/nsu/**`
-- `{{OUTPUT_PATH}}` → `cosim2/quality/karpathy/zone_A_subagent.json`
+```bash
+TEMPLATE=$(cat cosim2/scripts/karpathy/dispatch_prompt.md)
+ZONE_A_PATHS='- c_model/include/axi/**
+- c_model/include/nmu/**
+- c_model/include/nsu/**
+- c_model/include/common/**
+- c_model/include/noc/**
+- c_model/tests/axi/**
+- c_model/tests/nmu/**
+- c_model/tests/nsu/**'
 
-For Codex, change only `{{OUTPUT_PATH}}` to `cosim2/quality/karpathy/zone_A_codex.json`.
+SUBSTITUTED=$(echo "$TEMPLATE" \
+    | sed "s|{{ZONE_TAG}}|A|" \
+    | awk -v p="$ZONE_A_PATHS" '{gsub(/\{\{ZONE_PATHS_BULLETED\}\}/, p); print}')
 
-- [ ] **Step 2: Dispatch both in parallel — single tool message with two calls**
+PROMPT_FOR_SUBAGENT=$(echo "$SUBSTITUTED" \
+    | sed "s|{{OUTPUT_PATH}}|cosim2/quality/karpathy/zone_A_subagent.json|")
+PROMPT_FOR_CODEX=$(echo "$SUBSTITUTED" \
+    | sed "s|{{OUTPUT_PATH}}|cosim2/quality/karpathy/zone_A_codex.json|")
+```
 
-In ONE Claude tool message:
-1. Call Agent tool: `subagent_type: general-purpose`, prompt = subagent-substituted template.
-2. Call Skill tool: `skill: codex:rescue`, args = codex-substituted template.
+(Stage these into temp files for use in the tool calls below — both prompts are large and pasting inline into the Agent / Skill invocation is fragile.)
 
-Wait for both to return.
+- [ ] **Step 2: Dispatch both in parallel — single Claude message with two tool calls**
+
+In a SINGLE Claude assistant message, emit BOTH tool invocations (so they run concurrently):
+
+```
+[Agent invocation]
+    subagent_type: general-purpose
+    description: "Karpathy sweep zone A"
+    prompt: $PROMPT_FOR_SUBAGENT
+    (subagent writes JSON to cosim2/quality/karpathy/zone_A_subagent.json)
+
+[Skill invocation]
+    skill: codex:rescue
+    args: $PROMPT_FOR_CODEX
+    (codex:rescue writes JSON to cosim2/quality/karpathy/zone_A_codex.json)
+```
+
+CRITICAL: do NOT call Codex via `Agent` with `subagent_type: codex:codex-rescue` — that pattern is fire-and-forget and the response never returns. Use the `Skill` tool with `skill: codex:rescue` per [[feedback-codex-review-each-round]] memory.
+
+Wait for BOTH to return before continuing.
 
 - [ ] **Step 3: Verify both JSON files exist and parse**
 
@@ -495,14 +564,25 @@ For each entry in the work list:
 - Apply `suggested_fix`, adapting to the surrounding context (the suggestion is a hint, not a literal patch)
 - Commit per logical group (one file or one symbol per commit)
 
-- [ ] **Step 3: Run regression gate**
+- [ ] **Step 3: Run full regression gate (ctest + pytest + drift)**
+
+Same three-pillar gate as Task 1 Step 2 — c_model ctest, specgen pytest, drift gate — all three must pass with the same pass counts as baseline.
 
 ```bash
-cd /e/05_NoC/noc_project/c_model/build
-ctest --output-on-failure
+set -e
+export PATH="/c/msys64/mingw64/bin:$PATH"
+cd /e/05_NoC/noc_project
+
+# Ensure Vtb_top exists (per Task 1 prerequisite)
+test -x cosim2/verilator/obj_dir/Vtb_top || (cd cosim2/verilator && make)
+
+(cd c_model/build && ctest --output-on-failure)
+(cd specgen && py -3 -m pytest tests/ -q)
+(cd specgen && py -3 tools/codegen.py --check)
+set +e
 ```
 
-Expected: same pass count as baseline (`cosim2/quality/karpathy/baseline.txt`). If any test fails, revert the offending commit and move the finding to `deferred_findings.json` with severity HIGH and `rationale: "fix regressed test <name>; deferred for investigation"`.
+If any of the three exits nonzero: revert the offending fix-commit, move the finding to `deferred_findings.json` with severity HIGH and `rationale: "fix regressed <ctest|pytest|drift>; deferred for investigation"` plus the relevant log excerpt. Do NOT silence the failing test, weaken the gate, or hand-tweak the fix — per [[feedback-dont-silence-the-checker]] memory.
 
 - [ ] **Step 4: Open PR**
 

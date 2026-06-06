@@ -26,7 +26,7 @@ The dual source of truth introduces drift risk — every NI signal change has to
 | Work item | Description |
 |---|---|
 | W1 | Upstream the handshake/parameter schema into specgen source (new `constants.yaml`, new `interface_handshake.json`, new `handshake_schema.py` loader/validator). |
-| W2 | Atomic PR: refactor `specgen/ni_spec/generator.py` to emit industry-standard SV interfaces; regenerate `specgen/generated/`; migrate `cosim2/sv/` (delete hand-written interfaces; rewrite 5 wraps + `tb_top.sv`). |
+| W2 | Atomic PR: add `specgen/tools/elaborate/{sv,cpp}_params.py` peer emitters + rewrite `sv_signals.py` interface emission to consume `interface_handshake.json`; register new emitters in `specgen/tools/codegen.py` `DOMAIN_TO_EMITTER`; regenerate `specgen/generated/`; migrate `cosim2/sv/` (delete hand-written interfaces; rewrite 5 wraps + `tb_top.sv`). `specgen/ni_spec/generator.py` (the markdown-to-JSON parser) is NOT modified. |
 
 ### 1.3 Out of scope
 
@@ -35,7 +35,8 @@ The dual source of truth introduces drift risk — every NI signal change has to
 - VCS DPI-RTL backend port (Stage 5c+).
 - Functional changes to c_model behavior.
 - AxUSER / WUSER / BUSER / RUSER signals (cosim2 currently does not carry them; future spec may add).
-- **Release-level quality sweep** (Karpathy 4-lens + magic-number hunt + lint + Verilator warning-clean + parameter sweep + sanitizer + coverage + reproducible generation + fault injection + release tag). Each of these gates is a non-trivial sub-spec (real coverage parsing, scenario-parser extension for fault injection, tb_top parameter forwarding for sweep, etc.). Moved to a follow-up spec — see §7 Open Items.
+- **Release-level verification gates** (lint + Verilator strict warning-clean + parameter sweep + sanitizer + coverage + reproducible generation + wb2axip protocol-violation fault injection + release tag). Each gate is a non-trivial sub-spec (real coverage parsing, scenario-parser extension, tb_top parameter forwarding, etc.). Moved to a follow-up spec — see §7 Open Items.
+- **Karpathy 4-lens + magic-number sweep**: separate sibling spec `docs/superpowers/specs/2026-06-06-karpathy-quality-sweep-design.md` covers the Karpathy + magic-number axes independently. That spec may ship before, after, or alongside this one — see its §2.1 for the ordering discussion.
 
 ### 1.4 Success criteria
 
@@ -354,7 +355,7 @@ Unchanged:
 - `_emit_sv_flit_pkg()` — `ni_flit_pkg.sv` not in scope.
 - `_emit_sv_regs_pkg()` — register interface not in scope.
 
-Magic-number cleanup inside `generator.py` itself is scoped narrowly: only literals that are about to be replaced by `constants.yaml`-driven values. Other generator-internal literals are not touched in W2 (they go to W3 zone C sweep).
+Magic-number cleanup inside the emitter modules themselves is scoped narrowly: only literals that are about to be replaced by `constants.yaml`-driven values. Other emitter-internal literals are not touched in W2 — they fall under the Karpathy quality sweep (sibling spec `2026-06-06-karpathy-quality-sweep-design.md` zone C).
 
 ### 5.2 Generated SV interface — final form
 

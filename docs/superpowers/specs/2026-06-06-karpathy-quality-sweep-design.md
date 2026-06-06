@@ -39,10 +39,12 @@ The Karpathy + magic-number sweep, however, has **no codebase-depth dependencies
 
 ### 1.4 Success criteria
 
-1. Each zone produces a merged findings JSON file (subagent + Codex de-duped).
-2. User decision matrix recorded (each finding marked `fix` / `defer` / `ignore`).
-3. All `fix`-marked findings applied via merged PRs; all `defer`-marked findings recorded with owner in `deferred_findings.json`.
-4. No regression: c_model + cosim2 ctest suite stays green after each merged PR (same baseline as before the sweep).
+1. Each zone produces `zone_<X>_merged.json` (subagent + Codex de-duped, with overflow split into `zone_<X>_overflow.json` per §3.4).
+2. Each zone produces `zone_<X>_decisions.json` annotated — every finding has a `decision` field (`fix` / `defer` / `ignore`).
+3. Deferred entries split into the global `deferred_findings.json` with a non-empty `owner` field (not `"TBD"`); ignored entries split into `ignored_findings.json` with a rationale.
+4. After Task 8 split, `zone_<X>_decisions.json` contains ONLY `fix`-marked entries (deferred + ignored removed).
+5. All `fix`-marked findings applied via merged PRs; per-PR regression gate (c_model ctest + specgen pytest + drift gate) is GREEN.
+6. Post-sweep `baseline.txt` shows the same three pass counts as the pre-sweep baseline.
 
 ---
 
@@ -51,10 +53,19 @@ The Karpathy + magic-number sweep, however, has **no codebase-depth dependencies
 | Zone | Files | Rationale |
 |---|---|---|
 | **A — Stage 3 c_model core** | `c_model/include/{axi,nmu,nsu,common,noc}/**` + `c_model/tests/{axi,nmu,nsu}/**` | Headers + tests for the c_model components that pre-date Stage 5b (NMU/NSU/AXI master/slave/scoreboard/Memory/etc.) |
-| **B — Stage 5b cosim** | `c_model/include/cosim2/**` + `cosim2/{c,sv,verilator,tests}/**` | New code added during Stage 5b: shell adapters, DPI bridge, SV wraps, tests. Hand-written `cosim2/sv/*_intf.sv` covered here will be deleted by W2 — sweep them anyway for completeness in case W1+W2 is delayed |
-| **C — specgen** | `specgen/**` | Generator code + tests. W1+W2 will add new emitters here; sweep current state to catch pre-existing smells |
+| **B — Stage 5b cosim** | `c_model/include/cosim2/**` + `cosim2/{c,sv,verilator,tests}/**` | New code added during Stage 5b: shell adapters, DPI bridge, SV wraps, tests |
+| **C — specgen** | `specgen/**` | Generator code + tests |
 
 `cosim2/sv/wb2axip/**` is **excluded** from all zones (vendored Apache 2.0 code, frozen per Stage 5b rule).
+
+### 2.1 Recommended ordering vs W1+W2
+
+This sweep is **semantically coupled** to the W1+W2 atomic refactor (sibling spec), not independent of it:
+
+- If this sweep ships **first**: it may flag findings inside `cosim2/sv/{axi,noc_req,noc_rsp}_intf.sv` and review pre-W2 specgen emitter shape. W2 then deletes the SV files and rewrites the emitters, wasting any fix-effort applied to them.
+- If W1+W2 ships **first**: this sweep reviews the new `sv_params.py`/`cpp_params.py` peer emitters + the consolidated `axi4_intf`/`noc_req_intf`/`noc_rsp_intf` instead of the old shape. Findings are more durable.
+
+**Recommended order: W1+W2 first, then this sweep.** This ordering is not enforced by the spec — user may override — but matches the realistic value calculus. Document the chosen order in `cosim2/quality/karpathy/baseline.txt`.
 
 ---
 
@@ -83,7 +94,16 @@ Per `andrej-karpathy-skills:karpathy-guidelines`:
 
 ### 3.3 Scope rule (prevents balloon)
 
-Reviewers fix only literals that the surrounding code makes "high quality impact" (the literal is referenced 3+ times across the file, OR the literal is semantic, OR there is a comment trying to explain it). Other magic-number findings get logged to `cosim2/quality/karpathy/deferred_findings.json` with severity LOW and a sample-of-3 file:line citation; user decides at the matrix stage whether to expand a future spec.
+Reviewers report only literals that are HIGH IMPACT — referenced 3+ times in the same file, semantically meaningful, OR have a comment trying to explain them. Plain one-off literals are not reported.
+
+### 3.4 Findings cap — per-reviewer + post-merge enforcement
+
+| Layer | Cap | Action on overflow |
+|---|---|---|
+| Per reviewer (subagent / Codex) per axis | 30 | Reviewer self-truncates to highest-severity / highest-impact 30; instructed in the dispatch prompt |
+| Post-merge per zone per axis | 60 (target) → trimmed by `merge_findings.py` to top 30/axis after dedup | Overflow auto-written to `cosim2/quality/karpathy/zone_<X>_overflow.json` with severity LOW; user can promote any back to a decisions file by hand |
+
+The two layers together bound the per-zone user-decision phase to ~60 entries (30/axis × 2 axes) regardless of reviewer disagreement; the overflow file preserves anything that exceeds it for later promotion.
 
 ---
 
@@ -204,12 +224,13 @@ After all per-zone PRs merged:
 
 | # | Item | Mitigation |
 |---|---|---|
-| O1 | Findings volume may be larger than expected; user-decision phase could be the bottleneck | Reviewers cap at top-30 per zone per axis (60 total per zone); rest go to `deferred_findings.json` automatically with severity LOW. Cap is explicit in dispatch prompt |
-| O2 | Reviewers may disagree on severity for the same finding | Merge keeps higher severity; both descriptions preserved for context |
-| O3 | A fix may regress an existing test that wasn't covering the symbol robustly | Per-PR ctest gate catches; revert the offending commit, log finding back to `deferred_findings.json` with HIGH and the failure log |
-| O4 | Sweep happening in parallel with W1+W2 execution could cause merge conflicts | This spec's PRs ship on independent branches off main; W1+W2 either rebases over them or ships first. User decides ordering at merge time. No timing dependency in the spec |
-| O5 | wb2axip vendored code is excluded; sweep may flag `cosim2/sv/wb2axip/**` references in non-vendored files (port wiring) | Scope rule: a finding *about how non-vendored code uses wb2axip* IS in scope; a finding *inside wb2axip itself* is OUT. Reviewer prompt makes this explicit |
+| O1 | Findings volume may be larger than expected; user-decision phase could be the bottleneck | Two-layer cap (§3.4): per-reviewer 30/axis + post-merge trim to 30/axis. Overflow preserved in `zone_<X>_overflow.json` |
+| O2 | Reviewers may disagree on severity for the same finding | Merge keeps higher severity; both descriptions preserved; merged entry's `description` reflects the higher-severity reviewer's wording |
+| O3 | A fix may regress an existing test that wasn't covering the symbol robustly | Per-PR regression gate = full ctest + specgen pytest + drift gate (all 3 must pass). On regression: revert offending commit; move finding to `deferred_findings.json` with HIGH and failure log path |
+| O4 | Sweep semantically coupled with W1+W2 (§2.1) — ordering affects which files get reviewed | Recommended ordering: W1+W2 first. Per-PR gate ensures whichever ships second sees green baseline. |
+| O5 | wb2axip vendored code excluded; sweep may flag `cosim2/sv/wb2axip/**` references in non-vendored files (port wiring) | Scope rule: a finding *about how non-vendored code uses wb2axip* IS in scope; *inside wb2axip itself* is OUT. Reviewer prompt enforces |
 | O6 | `c_model` has heavy templating; some "magic numbers" may be template parameters that look like literals | Reviewer prompt instructs: if a literal is template-parameter-bound, skip — it is not magic |
+| O7 | Baseline / regression gate depends on a built `cosim2/verilator/obj_dir/Vtb_top` — two cosim ctests silently skip if missing (per `c_model/tests/CMakeLists.txt:40`) | Task 1 baseline + per-PR gates explicitly build Vtb_top before running ctest; baseline.txt records its existence as a pass condition |
 
 ---
 
