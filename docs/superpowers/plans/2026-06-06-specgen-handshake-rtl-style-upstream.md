@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Upstream the handshake/parameter schema currently hand-written in `cosim2/sv/*_intf.sv` into specgen, refactor specgen SV emission to industry-standard style (single `axi4_intf` with master/slave modports, consolidated NoC interface *types* — physical link instances stay separate per topology), migrate `cosim2/sv/` to consume specgen output, then release-level quality sweep.
+**Goal:** Upstream the handshake/parameter schema currently hand-written in `cosim2/sv/*_intf.sv` into specgen, refactor specgen SV emission to industry-standard style (single `axi4_intf` with master/slave modports, consolidated NoC interface *types* — physical link instances stay separate per topology), and migrate `cosim2/sv/` to consume specgen output.
 
-**Architecture:** 3 phases. W1 adds the schema sources (`constants.yaml`, `interface_handshake.json`) and loader/validator. Generator emission unchanged in W1 — drift gate (`py -3 tools/codegen.py --check`) stays clean. W2 is one atomic PR: refactor emission (new emitter modules `sv_params.py`/`cpp_params.py`, rewrite `sv_signals.py` interface block), regenerate artifacts, migrate `cosim2/sv/` (preserving 2-hop NoC topology with 4 link instances of consolidated types), update `cosim2/verilator/Makefile`. W3 runs a release-level quality sweep (Karpathy 4-lens + magic-number hunt + 10 verification gates).
+**Architecture:** 2 phases. W1 adds the schema sources (`constants.yaml`, `interface_handshake.json`) and loader/validator. Generator emission unchanged in W1 — drift gate (`py -3 specgen/tools/codegen.py --check`) stays clean. W2 is one atomic PR: refactor emission (new peer emitter modules `sv_params.py`/`cpp_params.py`, rewrite `sv_signals.py` interface block), regenerate artifacts, migrate `cosim2/sv/` (preserving 2-hop NoC topology with 4 link instances of consolidated types), update `cosim2/verilator/Makefile`. Release-level quality sweep is **deferred** to a follow-up spec — see Phase W3 stub at end of plan.
 
 **Tech Stack:** Python 3 (specgen via `py -3 specgen/tools/codegen.py`), SystemVerilog (Verilator 5.036), C++17 (c_model header-only), CMake/ctest (`c_model/CMakeLists.txt`), MSYS2 on Windows (PATH="/c/msys64/mingw64/bin:$PATH"), pytest (specgen tests), GoogleTest (c_model+cosim2 tests).
 
@@ -33,19 +33,17 @@
 - `specgen/ni_spec/handshake_schema.py` — loader + comprehensive validator (per spec §4.2).
 - `specgen/tools/elaborate/sv_params.py` — new emitter for `ni_params_pkg.sv` (peer to `sv_signals.py`/`sv_packet.py`).
 - `specgen/tools/elaborate/cpp_params.py` — new emitter for `ni_params.h` (peer to `cpp_signals.py`/`cpp_packet.py`).
-- `specgen/tools/elaborate/signal_interface_md.py` — emitter for the generator-derived `signal_interface.md` sections (Handshake & Modport Convention + AXI4 Signal Matrix per spec §4.4).
 - `specgen/generated/sv/ni_params_pkg.sv` — committed regen output.
 - `specgen/generated/cpp/ni_params.h` — committed regen output.
 - `specgen/tests/golden/ni_params_pkg.sv.golden` — spec-derived hand-authored golden.
 - `specgen/tests/golden/ni_params.h.golden` — spec-derived hand-authored golden.
 - `specgen/tests/test_handshake_schema.py` — validator/loader tests.
-- `specgen/tests/test_parameter_sweep.py` — parameter sweep matrix + negative.
-- `specgen/tests/test_signal_interface_md.py` — verifies generator-emitted markdown sections.
-- `cosim2/scripts/run_release_gates.sh` — aggregator for W3 gates.
-- `cosim2/scripts/check_reproducible_gen.sh` — gate 9.
-- `cosim2/scripts/check_byte_identical_cpp.sh` — gate 11.
-- `cosim2/scripts/merge_findings.py` — W3 sweep findings de-dup.
-- `cosim2/tests/sv/elab_modport_only_harness.sv` — modport-isolation elaboration harness.
+
+**Deferred to release-sweep follow-up spec** (NOT created in this plan):
+- `specgen/tools/elaborate/signal_interface_md.py` + `specgen/tests/test_signal_interface_md.py` (per-IHI A9-1..A9-4 matrix needs careful classification — see deferred-stub section)
+- `specgen/tests/test_parameter_sweep.py` (requires `tb_top` parameter forwarding)
+- `cosim2/scripts/{run_release_gates,check_reproducible_gen,check_byte_identical_cpp,merge_findings,verilator_param_sweep,check_coverage,check_decisions}.{sh,py}` (release-level tooling)
+- `cosim2/tests/sv/elab_modport_only_harness.sv` (release-level lint)
 
 ### Modified
 
@@ -764,13 +762,34 @@ git commit -m "feat(specgen): wire constants.yaml + interface_handshake.json int
 - [ ] `cd specgen && py -3 tools/codegen.py --check` — exit 0 (drift clean)
 - [ ] `git diff main -- specgen/generated/` — empty
 
-Open PR with title `feat(specgen): add handshake schema + language-neutral constants source`.
+- [ ] **Push branch + open PR**
+
+```bash
+git push -u origin stage5b/dpi-wire-wrap
+gh pr create --title "feat(specgen): add handshake schema + language-neutral constants source" \
+    --body "$(cat <<'EOF'
+## Summary
+- New specgen/source/constants.yaml (language-neutral SV+C++ parameter source)
+- New specgen/source/interface_handshake.json (interface + handshake + modport schema)
+- New specgen/ni_spec/handshake_schema.py (loader + validator covering all spec §4.2 rules)
+- SpecBundle extended with constants + interfaces fields (no emission change yet)
+
+## Test plan
+- [x] specgen pytest all green (10+ new validator tests)
+- [x] py -3 specgen/tools/codegen.py --check (drift clean — no regen artifact change)
+
+Refs: spec docs/superpowers/specs/2026-06-06-specgen-handshake-rtl-style-upstream-design.md
+EOF
+)"
+```
+
+W2 PR opens on the same branch after W1 merges to main.
 
 ---
 
 # Phase W2 — Atomic Refactor + Regenerate + Migrate (single PR)
 
-W2 is one merged PR. Intermediate sub-commits may not elaborate clean; **final tree** is the CI gate: `py -3 specgen/tools/codegen.py --check` clean + `ctest -R '.*' --output-on-failure` 410/410 PASS + Verilator strict elaboration warning-clean.
+W2 is one merged PR. Intermediate sub-commits may not elaborate clean; **final tree** is the CI gate: `py -3 specgen/tools/codegen.py --check` clean + `ctest --output-on-failure` 410/410 PASS + Verilator BASELINE elaboration (0 `%Error`; warnings under the existing `-Wno-fatal` baseline are tolerated). Strict-mode warning-clean elaboration is deferred to the release-sweep follow-up spec.
 
 PR title: `refactor(specgen+cosim2): industry-style SV interfaces + atomic migration`
 
@@ -1252,281 +1271,13 @@ git commit -m "refactor(specgen): rewrite SV interface emission for axi4_intf + 
 
 ---
 
-### Task 8: Add `signal_interface_md.py` emitter (spec §4.4)
+### Task 8: `signal_interface.md` generator-emit — **DEFERRED**
 
-**Files:**
-- Create: `specgen/tools/elaborate/signal_interface_md.py`
-- Create: `specgen/tests/test_signal_interface_md.py`
-- Modify: `spec/ni/doc/signal_interface.md` (sections become generator-emitted)
+Per spec §4.4 (deferred to release-sweep follow-up spec): the `## Handshake & Modport Convention` and `## AXI4 Signal Matrix (per IHI 0022H §A9.3)` sections of `signal_interface.md` will be generator-emitted. Codex round 5 verified that the per-row Manager-required / Memory-Subordinate-required classification is non-trivial and Codex round 6 caught an attempted shortcut classifying most signals incorrectly.
 
-**Rationale (Codex round 3):** Spec §4.4 requires the `## Handshake & Modport Convention` and `## AXI4 Signal Matrix` sections to be generator-emitted. Without this task the spec requirement is unimplemented.
+Skipping this task in this plan keeps W2 self-consistent: no generated markdown is committed with incorrect signal-role data. The follow-up spec authors the markdown emitter with line-by-line IHI Table A9-1..A9-4 reading + separate review.
 
-- [ ] **Step 1: Test that emit_handshake_section produces expected markdown**
-
-```python
-# specgen/tests/test_signal_interface_md.py
-from pathlib import Path
-from tools.elaborate.signal_interface_md import (
-    emit_handshake_convention_section,
-    emit_axi4_signal_matrix_section,
-)
-from ni_spec.handshake_schema import load_constants, load_interfaces
-
-SOURCE = Path(__file__).resolve().parent.parent / "source"
-
-
-def test_handshake_section_lists_three_interfaces():
-    c = load_constants(SOURCE / "constants.yaml")
-    ifaces = load_interfaces(SOURCE / "interface_handshake.json", c)
-    md = emit_handshake_convention_section(ifaces, c)
-    for name in ("axi4_intf", "noc_req_intf", "noc_rsp_intf"):
-        assert name in md
-    # multi-hot credit semantics surfaced
-    assert "per_vc_credit_pulse_vector" in md
-
-
-def test_axi_matrix_section_lists_all_5_channels():
-    c = load_constants(SOURCE / "constants.yaml")
-    ifaces = load_interfaces(SOURCE / "interface_handshake.json", c)
-    md = emit_axi4_signal_matrix_section(ifaces, c)
-    for ch in ("AW", "W", "B", "AR", "R"):
-        assert f"### {ch} channel" in md
-    # Manager-required signal (e.g., AWPROT) appears
-    assert "awprot" in md.lower()
-```
-
-- [ ] **Step 2: Run test — verify ImportError**
-
-Run: `cd specgen && py -3 -m pytest tests/test_signal_interface_md.py -v`
-Expected: ImportError.
-
-- [ ] **Step 3: Implement `signal_interface_md.py`**
-
-```python
-# specgen/tools/elaborate/signal_interface_md.py
-"""Generator-emitted sections for spec/ni/doc/signal_interface.md.
-
-Authored from interface_handshake.json so the markdown stays canonical with
-the JSON schema.
-"""
-from __future__ import annotations
-
-
-def emit_handshake_convention_section(interfaces_doc: dict, constants: dict) -> str:
-    lines = []
-    lines.append("## Handshake & Modport Convention")
-    lines.append("")
-    lines.append("This section is generator-emitted from `specgen/source/interface_handshake.json`. Do not hand-edit.")
-    lines.append("")
-    for name, spec in interfaces_doc["interfaces"].items():
-        lines.append(f"### `{name}`")
-        lines.append("")
-        lines.append(f"- Kind: `{spec['kind']}`")
-        lines.append(f"- Modports: {', '.join(f'`{m}`' for m in spec['modports'])}")
-        if spec.get("parameters"):
-            lines.append("- Parameters:")
-            for p in spec["parameters"]:
-                lines.append(f"  - `{p['name']}` ← `{p['constants_yaml_key']}`")
-        if "protocol_semantics" in spec:
-            lines.append("- Protocol semantics:")
-            sem = spec["protocol_semantics"]
-            ce = sem.get("credit_return_encoding", {})
-            if ce:
-                lines.append(f"  - Credit encoding: `{ce.get('scheme')}`")
-                lines.append(f"  - Multi-hot allowed: `{not ce.get('onehot_check_required', False)}`")
-            if "initial_credits" in sem:
-                ic = sem["initial_credits"]
-                lines.append(f"  - Initial credits per VC: `{ic.get('value_per_vc')}`")
-            if "valid_stability" in sem:
-                lines.append(f"  - Valid stability: {sem['valid_stability']}")
-            if "combinational_loops" in sem:
-                lines.append(f"  - Combinational loops: {sem['combinational_loops']}")
-        lines.append("")
-    return "\n".join(lines) + "\n"
-
-
-def emit_axi4_signal_matrix_section(interfaces_doc: dict, constants: dict) -> str:
-    """Per IHI 0022H §A9.3 Tables A9-1..A9-4 (per-role required matrix)."""
-    from tools.elaborate.sv_signals import (
-        _AXI_CHANNEL_SIGNALS, _MASTER_DRIVES_AXI,
-        _AXI_SIGNAL_METADATA,  # added in sv_signals.py — see below
-    )
-
-    lines = []
-    lines.append("## AXI4 Signal Matrix (per IHI 0022H §A9.3 Tables A9-1..A9-4)")
-    lines.append("")
-    lines.append("Generator-emitted from `interface_handshake.json` + per-signal metadata in `sv_signals.py`.")
-    lines.append("")
-    lines.append("Columns:")
-    lines.append("- **Manager**: `R` = required for Manager IP per Table A9-1/A9-3; `O` = optional.")
-    lines.append("- **Memory Subordinate**: `R` = required for Memory Subordinate IP per Table A9-2/A9-4; `O` = optional.")
-    lines.append("- **Reset value**: `0` (driven to zero at reset by output side); `X` (input side, don't care at reset).")
-    lines.append("")
-    for ch in ("AW", "W", "B", "AR", "R"):
-        lines.append(f"### {ch} channel")
-        lines.append("")
-        lines.append("| Signal | Width | Manager | Mem-Sub | Reset value |")
-        lines.append("|---|---|---|---|---|")
-        for sig_name, width_spec in _AXI_CHANNEL_SIGNALS[ch]:
-            width_disp = (
-                str(int(width_spec.split(":",1)[1]))
-                if width_spec.startswith("fixed:") else width_spec
-            )
-            meta = _AXI_SIGNAL_METADATA[sig_name]
-            lines.append(
-                f"| `{sig_name}` | {width_disp} | "
-                f"{meta['manager']} | {meta['memsub']} | {meta['reset']} |"
-            )
-        lines.append("")
-    return "\n".join(lines) + "\n"
-```
-
-**Step 3a (NEW): Add `_AXI_SIGNAL_METADATA` to `sv_signals.py`**
-
-Append to `specgen/tools/elaborate/sv_signals.py`, after the existing `_MASTER_DRIVES_AXI` block:
-
-```python
-# Per-role required-ness and reset values per IHI 0022H §A9.3 Tables A9-1..A9-4.
-# Manager / Memory Subordinate columns: R = required, O = optional.
-# Reset value: '0' (output side defaults to zero), 'X' (input side, don't care).
-_AXI_SIGNAL_METADATA = {
-    # AW channel
-    "awid":      {"manager": "R", "memsub": "R", "reset": "0"},
-    "awaddr":    {"manager": "R", "memsub": "R", "reset": "0"},
-    "awlen":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "awsize":    {"manager": "R", "memsub": "R", "reset": "0"},
-    "awburst":   {"manager": "R", "memsub": "R", "reset": "0"},
-    "awlock":    {"manager": "R", "memsub": "O", "reset": "0"},
-    "awcache":   {"manager": "R", "memsub": "O", "reset": "0"},
-    "awprot":    {"manager": "R", "memsub": "O", "reset": "0"},
-    "awqos":     {"manager": "R", "memsub": "O", "reset": "0"},
-    "awregion":  {"manager": "R", "memsub": "O", "reset": "0"},
-    "awvalid":   {"manager": "R", "memsub": "R", "reset": "0"},
-    "awready":   {"manager": "R", "memsub": "R", "reset": "0"},
-    # W channel
-    "wdata":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "wstrb":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "wlast":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "wvalid":    {"manager": "R", "memsub": "R", "reset": "0"},
-    "wready":    {"manager": "R", "memsub": "R", "reset": "0"},
-    # B channel
-    "bid":       {"manager": "R", "memsub": "R", "reset": "0"},
-    "bresp":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "bvalid":    {"manager": "R", "memsub": "R", "reset": "0"},
-    "bready":    {"manager": "R", "memsub": "R", "reset": "0"},
-    # AR channel (same shape as AW)
-    "arid":      {"manager": "R", "memsub": "R", "reset": "0"},
-    "araddr":    {"manager": "R", "memsub": "R", "reset": "0"},
-    "arlen":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "arsize":    {"manager": "R", "memsub": "R", "reset": "0"},
-    "arburst":   {"manager": "R", "memsub": "R", "reset": "0"},
-    "arlock":    {"manager": "R", "memsub": "O", "reset": "0"},
-    "arcache":   {"manager": "R", "memsub": "O", "reset": "0"},
-    "arprot":    {"manager": "R", "memsub": "O", "reset": "0"},
-    "arqos":     {"manager": "R", "memsub": "O", "reset": "0"},
-    "arregion":  {"manager": "R", "memsub": "O", "reset": "0"},
-    "arvalid":   {"manager": "R", "memsub": "R", "reset": "0"},
-    "arready":   {"manager": "R", "memsub": "R", "reset": "0"},
-    # R channel
-    "rid":       {"manager": "R", "memsub": "R", "reset": "0"},
-    "rdata":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "rresp":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "rlast":     {"manager": "R", "memsub": "R", "reset": "0"},
-    "rvalid":    {"manager": "R", "memsub": "R", "reset": "0"},
-    "rready":    {"manager": "R", "memsub": "R", "reset": "0"},
-}
-```
-
-- [ ] **Step 4: Wire into signal_interface.md regeneration**
-
-Add a new emit driver to `specgen/tools/codegen.py`:
-
-```python
-# After _check_cpp_sv_paired, add:
-def regen_signal_interface_md() -> None:
-    """Rewrite the auto-emitted sections of spec/ni/doc/signal_interface.md."""
-    from tools.elaborate.signal_interface_md import (
-        emit_handshake_convention_section,
-        emit_axi4_signal_matrix_section,
-    )
-    from ni_spec.handshake_schema import load_constants, load_interfaces
-
-    md_path = SPECGEN_ROOT.parent / "spec" / "ni" / "doc" / "signal_interface.md"
-    src = md_path.read_text(encoding="utf-8")
-
-    # Marker-delimited regions
-    h_start = "<!-- AUTO:HANDSHAKE_CONVENTION:BEGIN -->"
-    h_end   = "<!-- AUTO:HANDSHAKE_CONVENTION:END -->"
-    m_start = "<!-- AUTO:AXI_SIGNAL_MATRIX:BEGIN -->"
-    m_end   = "<!-- AUTO:AXI_SIGNAL_MATRIX:END -->"
-
-    c = load_constants(SPECGEN_ROOT / "source" / "constants.yaml")
-    ifaces = load_interfaces(SPECGEN_ROOT / "source" / "interface_handshake.json", c)
-
-    handshake_body = emit_handshake_convention_section(ifaces, c)
-    matrix_body = emit_axi4_signal_matrix_section(ifaces, c)
-
-    def _swap(src: str, start: str, end: str, body: str) -> str:
-        import re
-        # Assert exactly one begin + one end marker. Missing or duplicated
-        # markers indicate corrupted markdown — fail loudly instead of silently.
-        if src.count(start) != 1 or src.count(end) != 1:
-            raise RuntimeError(
-                f"signal_interface.md marker corruption: "
-                f"{start!r} count={src.count(start)}, {end!r} count={src.count(end)} "
-                f"(expected exactly 1 each)"
-            )
-        pat = re.compile(re.escape(start) + r".*?" + re.escape(end), re.S)
-        return pat.sub(f"{start}\n{body}{end}", src)
-
-    src = _swap(src, h_start, h_end, handshake_body)
-    src = _swap(src, m_start, m_end, matrix_body)
-    md_path.write_text(src, encoding="utf-8")
-
-
-# Append a CLI flag in main():
-parser.add_argument(
-    "--regen-md", action="store_true",
-    help="rewrite generator-emitted sections of spec/ni/doc/signal_interface.md",
-)
-# In main(), before the existing if-chain:
-if args.regen_md:
-    regen_signal_interface_md()
-    return 0
-```
-
-- [ ] **Step 5: Add marker comments to signal_interface.md**
-
-Edit `spec/ni/doc/signal_interface.md`. Find a suitable insertion location (likely near existing handshake or signal description sections) and insert:
-
-```markdown
-<!-- AUTO:HANDSHAKE_CONVENTION:BEGIN -->
-<!-- AUTO:HANDSHAKE_CONVENTION:END -->
-
-<!-- AUTO:AXI_SIGNAL_MATRIX:BEGIN -->
-<!-- AUTO:AXI_SIGNAL_MATRIX:END -->
-```
-
-- [ ] **Step 6: Run `--regen-md` + test**
-
-```bash
-cd specgen && py -3 tools/codegen.py --regen-md
-cd specgen && py -3 -m pytest tests/test_signal_interface_md.py -v
-```
-
-Expected: both green.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add specgen/tools/elaborate/signal_interface_md.py \
-        specgen/tests/test_signal_interface_md.py \
-        specgen/tools/codegen.py \
-        spec/ni/doc/signal_interface.md
-git commit -m "feat(specgen): generator-emit signal_interface.md handshake + AXI matrix sections"
-```
-
----
+This task is intentionally a no-op: skip and proceed to Task 9.
 
 ### Task 9: Regenerate all C++ artifacts + verify byte-identical (defensive)
 
@@ -1946,13 +1697,14 @@ Expected: positive loop completes with no error; negative fixture exits nonzero 
 - [ ] **Step 6: Verilator baseline elaboration**
 
 ```bash
+set -o pipefail
 cd /e/05_NoC/noc_project/cosim2/verilator
 make clean
 make 2>&1 | tee /tmp/verilator_build.log
-grep -E "^%Error" /tmp/verilator_build.log
+! grep -q "^%Error" /tmp/verilator_build.log
 ```
 
-Expected: 0 `%Error` lines. Warnings under the existing Makefile baseline (`-Wno-fatal` in `VERILATOR_FLAGS`) are tolerated at this gate — strict-mode warning-clean elaboration is deferred to the release-quality-sweep follow-up spec.
+Expected: the final `! grep -q` exits 0 (no `%Error` lines found). `set -o pipefail` ensures a failing `make` propagates; the negated `grep` inverts grep's "no match = exit 1" so absence-of-errors becomes the success condition. Warnings under the existing Makefile baseline (`-Wno-fatal` in `VERILATOR_FLAGS`) are tolerated at this gate — strict-mode warning-clean elaboration is deferred to the release-sweep follow-up spec.
 
 - [ ] **Step 7: Push + open PR**
 
@@ -1965,18 +1717,17 @@ gh pr create --title "refactor(specgen+cosim2): industry-style SV interfaces + a
 - Consolidates 4 NoC interfaces to noc_req_intf + noc_rsp_intf (interface *types*; physical link instances preserved per 2-hop topology)
 - constants.yaml as language-neutral source of truth for SV+C++ parameter defaults
 - New ni_params_pkg.sv + ni_params.h emitters added to codegen.py DOMAIN_TO_EMITTER
-- signal_interface.md handshake + AXI matrix sections generator-emitted
 - 5 wraps + tb_top migrated; hand-written cosim2/sv/{axi,noc_req,noc_rsp}_intf.sv removed
-- Verilator Makefile updated with VERILATOR_EXTRA_FLAGS mechanism
+- cosim2/verilator/Makefile SV_SRC list updated for specgen-generated sources
 
 ## Test plan
 - [x] specgen pytest all green
 - [x] py -3 specgen/tools/codegen.py --check (drift clean)
 - [x] ctest 410/410
-- [x] 5-fixture smoke (4 PASS + injection_aw_unstable exits nonzero per CheckerLiveness)
+- [x] 5-fixture smoke (4 PASS + injection_aw_unstable exits nonzero — CheckerLiveness DPI-error injection PRESERVED)
 - [x] Verilator baseline elaboration: 0 errors
 
-Note: release-level verification (strict warning-clean, sanitizer, coverage, fault injection, release tag) is deferred to a follow-up spec — see plan §"Phase W3 — DEFERRED".
+Note: release-level verification (strict warning-clean elaboration, lint, sanitizer, coverage thresholds, wb2axip protocol-violation fault injection, parameter override sweep, release tag) is deferred to a follow-up spec — see plan §"Phase W3 — DEFERRED". This PR does NOT remove or weaken the existing DPI-error injection (`CheckerLiveness` ctest); only adds nothing further.
 
 Refs: spec docs/superpowers/specs/2026-06-06-specgen-handshake-rtl-style-upstream-design.md
 EOF
@@ -2030,23 +1781,23 @@ The follow-up spec lives at `docs/superpowers/specs/YYYY-MM-DD-release-quality-s
 
 **Spec coverage (W1+W2 only):**
 - §1.2 W1 schema → Tasks 1-3 ✓
-- §1.2 W2 atomic → Tasks 4-15 ✓
+- §1.2 W2 atomic → Tasks 4-15 ✓ (Task 8 deferred-no-op per spec §4.4)
 - §2.1 axi4_intf single → Tasks 6-7 ✓
 - §2.1 NoC type consolidation w/ topology preserved → Tasks 13, 14 ✓
 - §2.2 naming discipline → Task 2 (validator rejects `*_W$`, lowercase) ✓
 - §4.1 constants.yaml → Task 1 ✓
-- §4.3 interface_handshake.json (incl. NoC protocol_semantics, 1-hot per VC) → Task 3 ✓
-- §4.4 generator-emit signal_interface.md handshake + AXI matrix sections → Task 8 ✓
-- §5.2 SV emission examples → Tasks 4, 6 (hand-authored golden), 7 (emitter) ✓
-- §5.3 wrap migration → Tasks 10-14 (preserves 4-port NoC topology in Task 13) ✓
+- §4.3 interface_handshake.json (3 interfaces: 1 AXI + 2 NoC types; incl. NoC `protocol_semantics`, multi-hot credit pulse vector) → Task 3 ✓
+- §4.4 signal_interface.md generator-emit → DEFERRED → Task 8 is a deferred no-op ✓
+- §5.2 SV emission examples → Tasks 4, 6 (hand-authored golden), 7 (emitter rewrite) ✓
+- §5.3 wrap migration → Tasks 10-14 (preserves 4-link NoC topology in Task 13) ✓
 - §6 W1/W2 test plan → Task 15 final CI gate ✓
-- §7 Open Item O8 (release-sweep deferred) → recorded as deferred above, no tasks in this plan ✓
+- §7 Open Item O8 (release-sweep deferred) → recorded as deferred-stub section, no tasks in this plan ✓
 
-**Placeholder scan:** `sv_params.py` / `cpp_params.py` / `signal_interface_md.py` / `handshake_schema.py` all defined inline with full code in Tasks 2, 4, 5, 8. Drift command (`py -3 specgen/tools/codegen.py --check` per `codegen.py:11`). Makefile path (`cosim2/verilator/Makefile` per actual location, NOT `cosim2/CMakeLists.txt`). No `...` or "or whatever" hand-waves outside intentional ellipsis in code listings that follow the spec verbatim.
+**Placeholder scan:** `sv_params.py` / `cpp_params.py` / `handshake_schema.py` all defined inline with full code in Tasks 2, 4, 5. Drift command (`py -3 specgen/tools/codegen.py --check` per `codegen.py:11`). Makefile path (`cosim2/verilator/Makefile` per actual location, NOT `cosim2/CMakeLists.txt`). No `...` or "or whatever" hand-waves outside intentional ellipsis in code listings that follow the spec verbatim.
 
 **Type consistency:**
 - Emitter signature `emit(src_path: Path, spec_version: str) -> str` consistent across `sv_params`, `cpp_params`, existing `sv_signals` (matches `DOMAIN_TO_EMITTER` contract at `codegen.py:38`).
-- `load_constants(path: Path) -> dict`, `load_interfaces(path: Path, constants: dict) -> dict` consistent across Tasks 2, 3, 4, 5, 7, 8.
+- `load_constants(path: Path) -> dict`, `load_interfaces(path: Path, constants: dict) -> dict` consistent across Tasks 2, 3, 4, 5, 7.
 - Parameter names (`ID_WIDTH`, `ADDR_WIDTH`, `DATA_WIDTH`, `NUM_VC`, `FLIT_WIDTH`, `SLAVE_VC_BUFFER_DEPTH`) uniform across Tasks 1, 6, 7, 10-14.
 
 ---

@@ -25,7 +25,7 @@ The dual source of truth introduces drift risk — every NI signal change has to
 
 | Work item | Description |
 |---|---|
-| W1 | Upstream the handshake/parameter schema into specgen source (new `constants.yaml`, new `interface_handshake.json`, extend `signal_interface.md`). |
+| W1 | Upstream the handshake/parameter schema into specgen source (new `constants.yaml`, new `interface_handshake.json`, new `handshake_schema.py` loader/validator). |
 | W2 | Atomic PR: refactor `specgen/ni_spec/generator.py` to emit industry-standard SV interfaces; regenerate `specgen/generated/`; migrate `cosim2/sv/` (delete hand-written interfaces; rewrite 5 wraps + `tb_top.sv`). |
 
 ### 1.3 Out of scope
@@ -93,39 +93,42 @@ Generator enforces: any parameter name matching `*_W$` (W ending without IDTH) �
 ### 3.1 Source-of-truth chain (after refactor)
 
 ```
-spec/ni/doc/signal_interface.md           (handshake/parameter sections generator-emitted)
-specgen/source/ni_function_blocks.json    (feature inventory — unchanged)
-specgen/source/constants.yaml             (NEW — language-neutral constants source)
-specgen/source/interface_handshake.json   (NEW — handshake + modport schema)
+specgen/source/ni_function_blocks.json          (feature inventory — unchanged)
+specgen/source/constants.yaml                   (NEW — language-neutral constants source)
+specgen/source/interface_handshake.json         (NEW — handshake + modport schema)
                 |
-                v  specgen/ni_spec/generator.py  (REFACTORED)
+                v  specgen/tools/codegen.py     (dispatcher; extended with new emitters)
+                |  specgen/tools/elaborate/
+                |    sv_params.py (NEW), cpp_params.py (NEW),
+                |    sv_signals.py (REWRITTEN interface block)
                 |
 specgen/generated/
-    +-- sv/ni_params_pkg.sv               (NEW — SV parameter defaults)
-    +-- sv/ni_signals_pkg.sv              (REGEN — industry-style interfaces)
-    +-- sv/ni_flit_pkg.sv                 (unchanged)
-    +-- sv/ni_regs_pkg.sv                 (unchanged)
-    +-- cpp/ni_params.h                   (NEW — C++ constants)
-    +-- cpp/ni_flit_constants.h           (unchanged for non-parameter constants)
-    +-- cpp/ni_signals.h                  (REGEN — keeps c_model alignment)
-    +-- cpp/ni_regs.h                     (unchanged)
+    +-- sv/ni_params_pkg.sv                     (NEW — SV parameter defaults)
+    +-- sv/ni_signals_pkg.sv                    (REGEN — industry-style interfaces)
+    +-- sv/ni_flit_pkg.sv                       (unchanged)
+    +-- sv/ni_regs_pkg.sv                       (unchanged)
+    +-- cpp/ni_params.h                         (NEW — C++ constants)
+    +-- cpp/ni_flit_constants.h                 (unchanged for non-parameter constants)
+    +-- cpp/ni_signals.h                        (REGEN — keeps c_model alignment)
+    +-- cpp/ni_regs.h                           (unchanged)
                 |
                 v  consumed by
                 |
-cosim2/sv/                                (W2 migration)
+cosim2/sv/                                      (W2 migration)
     +-- nmu_wrap.sv, nsu_wrap.sv,
-    +-- axi_master_wrap.sv, slave_wrap.sv,
-    +-- noc_wrap.sv, tb_top.sv
+    +-- axi_master_wrap.sv, axi_slave_wrap.sv,
+    +-- loopback_noc_wrap.sv, tb_top.sv
     (REMOVED: axi_intf.sv, noc_req_intf.sv, noc_rsp_intf.sv)
 ```
+
+`spec/ni/doc/signal_interface.md` generator-emit of handshake + AXI matrix sections is **deferred** with the release-sweep spec — IHI 0022H Tables A9-1..A9-4 per-role required matrix needs careful line-by-line reading not appropriate inside this plan.
 
 ### 3.2 Phase plan
 
 | Phase | Work | Drift gate | Commit granularity |
 |---|---|---|---|
-| **W1** | Add `constants.yaml`, `interface_handshake.json`, extend `signal_interface.md`. Generator does NOT yet consume new fields. | Clean | Single PR. `feat(specgen): add handshake schema + language-neutral constants` |
-| **W2** | Atomic PR: refactor generator emission → regenerate `specgen/generated/` → migrate `cosim2/sv/` (delete hand-written intf, rewrite 5 wraps + tb_top). | Final tree green; intermediate sub-commits may be elaboration-broken (reviewable but not CI-gated) | Single PR, multiple review-only sub-commits. Final CI gate: ctest 410/410 + drift gate + Verilator warning-clean elaboration |
-| **W3** | Release-level quality sweep. No code changes outside what findings dictate. | N/A | One PR per zone (A: Stage 3 c_model core; B: Stage 5b cosim; C: specgen). Magic-number fixes split from architectural fixes |
+| **W1** | Add `constants.yaml`, `interface_handshake.json`, loader + validator (`handshake_schema.py`). Generator does NOT yet consume new fields. | Clean | Single PR. `feat(specgen): add handshake schema + language-neutral constants` |
+| **W2** | Atomic PR: add `sv_params.py`/`cpp_params.py` peer emitters; rewrite `sv_signals.py` interface emission; regenerate `specgen/generated/`; migrate `cosim2/sv/` (delete hand-written intf, rewrite 5 wraps + tb_top). | Final tree green; intermediate sub-commits may be elaboration-broken (reviewable but not CI-gated) | Single PR, multiple review-only sub-commits. Final CI gate: ctest 410/410 + drift gate + Verilator baseline elaboration |
 
 W2 is intentionally non-bisectable mid-PR because changing the interface contract is atomic with all consumers. Final-tree CI gates the merge. The sub-commit ordering inside W2 is for code-review readability, not for git-bisect.
 
@@ -139,8 +142,8 @@ W2 is intentionally non-bisectable mid-PR because changing the interface contrac
 
 | Boundary | Translator | Spec area |
 |---|---|---|
-| spec source ↔ generated SV | `generator.py` | §5 |
-| generated SV interface ↔ wrap module port | wrap port list (`_i / _o / _ni` + modport) | §6 |
+| spec source ↔ generated SV | `specgen/tools/elaborate/sv_*.py` peer emitters, dispatched by `specgen/tools/codegen.py` (`DOMAIN_TO_EMITTER`) | §5 |
+| generated SV interface ↔ wrap module port | wrap port list (`_i / _o / _ni` + modport) | §5.3 |
 | wrap C++ side ↔ DPI | existing `cosim2/c/dpi_bridge.cpp` | not in scope |
 | specgen interface ↔ vendor IP (Vivado / Quartus) | future flatten wrapper | not in scope |
 
@@ -306,11 +309,13 @@ Schema for the four interfaces (one AXI, two NoC). The AXI consolidation per §2
 }
 ```
 
-### 4.4 `signal_interface.md` extension
+### 4.4 `signal_interface.md` extension — **DEFERRED**
 
-Add a `## Handshake & Modport Convention` section. Content is **generator-emitted** from `interface_handshake.json` — no hand-edited prose that can drift from JSON.
+Generator-emit of the `## Handshake & Modport Convention` section and the `## AXI4 Signal Matrix (per IHI 0022H §A9.3)` section is **deferred to the release-sweep follow-up spec**.
 
-Add a `## AXI4 Signal Matrix (per IHI 0022H §A9.3)` section. Content is also generator-emitted: a per-role table for each of the 5 channels (AW, W, B, AR, R), with columns Manager-required / Memory-Subordinate-required, width source, and reset value.
+Reason: the AXI signal matrix requires per-row classification (Manager-required vs Memory-Subordinate-required vs optional) from IHI 0022H Tables A9-1..A9-4. Codex round 5 verified that an earlier attempt mis-classified most entries (`AWID`, `AWLEN`, `AWSIZE`, `AWBURST`, `AWLOCK`, `AWCACHE`, `WSTRB`, `BID`, `BRESP` are OPTIONAL for Manager, not required). Doing it correctly requires line-by-line table reading + a per-signal data table sized for review, which is misplaced inside the W2 atomic PR.
+
+The downstream consumer of this section is documentation only — generator-derived markdown for human reviewers. No code consumes it. Deferring it does not affect W1/W2 correctness.
 
 ### 4.5 W1 commit boundary
 
@@ -322,21 +327,19 @@ PR title: `feat(specgen): add handshake schema + language-neutral constants sour
 
 ## 5. W2 — Atomic Refactor + Regenerate + Migrate
 
-### 5.1 Generator refactor scope (`specgen/ni_spec/generator.py`)
+### 5.1 Generator refactor scope
 
-New functions:
+Emission lives in `specgen/tools/elaborate/sv_*.py` and `cpp_*.py` peer modules, dispatched from `specgen/tools/codegen.py` via the `DOMAIN_TO_EMITTER` table. The W2 work adds two new peer emitters and rewrites one existing one — `specgen/ni_spec/generator.py` (the markdown→JSON parser) is NOT modified.
 
-| Function | Purpose |
-|---|---|
-| `_load_constants_yaml()` | Parse `constants.yaml`, validate per §4.2 rules |
-| `_load_handshake_schema()` | Parse `interface_handshake.json`, cross-check parameter references against `constants.yaml` |
-| `_emit_sv_params_pkg()` | Emit `specgen/generated/sv/ni_params_pkg.sv` with parameter defaults |
-| `_emit_cpp_params_header()` | Emit `specgen/generated/cpp/ni_params.h` with `constexpr` constants |
-| `_emit_sv_interface()` (rewrite) | Parameterized header + modport block emission; consume `interface_handshake.json` |
-| `_emit_sv_signal_decl()` (rewrite) | Use SV parameter (`logic [ID_WIDTH-1:0]`) not hardcoded literal |
-| `_emit_sv_modport()` | Read `driven_by`, emit `master` / `slave` modport with comma-separated entries |
-| `_consolidate_noc_interfaces()` | Merge the prior 4 `*_out_intf` / `*_in_intf` into 2 bundled interfaces |
-| `_emit_signal_interface_md()` | Generator-emit the handshake table and AXI signal matrix into `signal_interface.md` |
+| Change | Location | Purpose |
+|---|---|---|
+| NEW `emit()` | `specgen/tools/elaborate/sv_params.py` | Emit `ni_params_pkg.sv` from `constants.yaml` |
+| NEW `emit()` | `specgen/tools/elaborate/cpp_params.py` | Emit `ni_params.h` from `constants.yaml` |
+| REWRITE `_emit_sv_interfaces()` | `specgen/tools/elaborate/sv_signals.py` | Consume `interface_handshake.json`: emit single `axi4_intf` (parameterized + master/slave modports) + 2 consolidated `noc_req_intf`/`noc_rsp_intf` (replaces prior 4 endpoint-split outputs) |
+| EXTEND `DOMAIN_TO_EMITTER` | `specgen/tools/codegen.py` | Add `("sv","params")` and `("cpp","params")` entries; add `params` to `--domain` choices |
+| Loader integration | `specgen/ni_spec/loader.py` (already done in W1 Task 3) | `SpecBundle.constants` and `SpecBundle.interfaces` populated by `handshake_schema.load_*` |
+
+Generator emitter signature stays `(src_path: Path, spec_version: str) -> str` per existing dispatcher contract. Sources for new emitters are `specgen/source/constants.yaml`; sources for the rewritten `sv_signals.py` emit are `specgen/generated/json/ni_signals.json` (unchanged) + `specgen/source/interface_handshake.json` (new, loaded via `handshake_schema`).
 | `_validate_naming_consistency()` | Reject `*_W$` parameter names; reject lowercase parameter names |
 
 Removed code paths:
