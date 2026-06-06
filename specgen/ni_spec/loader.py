@@ -12,6 +12,10 @@ try:
 except ImportError:
     yaml = None
 
+from .handshake_schema import load_constants, load_interfaces
+
+SPECGEN_ROOT = Path(__file__).resolve().parent.parent
+
 
 def load_doc(path: Union[str, Path]) -> dict:
     """讀單一 spec 檔。YAML 走 safe_load。"""
@@ -57,14 +61,9 @@ def load_spec_bundle(spec_dir: Union[str, Path], md_dir: Optional[Union[str, Pat
     if md_dir is not None:
         bundle.md_dir = Path(md_dir)
 
-    # Auto-load handshake schema files if present (specgen/source/, sibling
-    # to ni_spec/). Located relative to this file's __file__ path because
-    # spec_dir argument refers to the JSON spec dir (typically generated/json/),
-    # which is a different directory.
-    from ni_spec.handshake_schema import load_constants, load_interfaces
-    specgen_root = Path(__file__).resolve().parent.parent  # specgen/
-    constants_yaml = specgen_root / "source" / "constants.yaml"
-    interfaces_json = specgen_root / "source" / "interface_handshake.json"
+    # Auto-load handshake schema files from specgen/source/ if present.
+    constants_yaml = SPECGEN_ROOT / "source" / "constants.yaml"
+    interfaces_json = SPECGEN_ROOT / "source" / "interface_handshake.json"
     if constants_yaml.exists():
         bundle.constants = load_constants(constants_yaml)
     if interfaces_json.exists() and bundle.constants is not None:
@@ -79,8 +78,7 @@ def load_spec_version() -> str:
     Looks for the file relative to the specgen parent directory:
         noc_project/spec/ni/VERSION  (one-line semver, no trailing newline content).
     """
-    specgen_root = Path(__file__).resolve().parent.parent
-    version_file = specgen_root.parent / "spec" / "ni" / "VERSION"
+    version_file = SPECGEN_ROOT.parent / "spec" / "ni" / "VERSION"
     if not version_file.exists():
         raise FileNotFoundError(f"spec/ni/VERSION not found at {version_file}")
     return version_file.read_text(encoding="utf-8").strip()
