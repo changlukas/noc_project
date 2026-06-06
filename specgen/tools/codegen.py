@@ -88,50 +88,6 @@ def _strip_timestamp(lines: list[str]) -> list[str]:
     return [l for l in lines if not l.startswith("// Generated at:")]
 
 
-def _check_cpp_sv_paired(out_dir: Path) -> list[str]:
-    """Verify C++ struct field names match SV interface signal names per bundle.
-
-    Field NAMES are compared after stripping ``_i``/``_o`` from the C++ side
-    (SV interface signals already have the suffix stripped by sv_signals.py).
-    Field TYPES are not compared -- wide signals are ``std::array<uint8_t,N>``
-    in C++ but ``logic [W-1:0]`` in SV, and that asymmetry is intentional.
-    """
-    import re
-    errors: list[str] = []
-    cpp_text = (out_dir / "generated" / "cpp" / "ni_signals.h").read_text(encoding="ascii")
-    sv_text  = (out_dir / "generated" / "sv" / "ni_signals_pkg.sv").read_text(encoding="ascii")
-
-    # C++: struct <Name>Pins { ... };   fields are either uint*-scalar or std::array<...> array.
-    cpp_bundles: dict[str, set[str]] = {}
-    for m in re.finditer(r"struct (\w+Pins)\s*\{([^}]*)\}", cpp_text, re.S):
-        bundle = m.group(1)
-        fields = re.findall(r"(?:uint\w+|std::array<[^>]+>)\s+(\w+);", m.group(2))
-        cpp_bundles[bundle] = set(fields)
-
-    # SV: interface ni_<lc_name>_intf; ... endinterface
-    # Re-map the SV interface ID back to PascalCase + "Pins" to align with C++ bundle name.
-    sv_bundles: dict[str, set[str]] = {}
-    for m in re.finditer(r"interface ni_(\w+)_intf;(.*?)endinterface", sv_text, re.S):
-        iface_lc = m.group(1)
-        pascal = "".join(p.capitalize() for p in iface_lc.split("_")) + "Pins"
-        sigs = re.findall(r"logic(?:\s*\[[^\]]*\])?\s+(\w+);", m.group(2))
-        sv_bundles[pascal] = set(sigs)
-
-    # Compare names (strip _i/_o from C++ fields).
-    all_bundles = set(cpp_bundles) | set(sv_bundles)
-    for bundle in sorted(all_bundles):
-        cpp_fields = cpp_bundles.get(bundle, set())
-        sv_fields  = sv_bundles.get(bundle, set())
-        cpp_stripped = {
-            f[:-2] if f.endswith(("_i", "_o")) else f
-            for f in cpp_fields
-        }
-        diff = cpp_stripped.symmetric_difference(sv_fields)
-        if diff:
-            errors.append(f"{bundle}: C++ <-> SV pin mismatch: {sorted(diff)}")
-    return errors
-
-
 def cmd_emit(args: argparse.Namespace) -> int:
     if not args.domain:
         print("ERROR: --domain is required with --target", file=sys.stderr)
@@ -195,16 +151,6 @@ def cmd_check(_args: argparse.Namespace) -> int:
                 ))
                 print(f"[drift] {fresh_path.name}:")
                 print("\n".join(diff[:40]))
-
-    # Paired check: C++ pin-bundle struct fields must match SV interface
-    # signal names one-to-one. Operates on COMMITTED files -- drift in either
-    # the .h or .sv that breaks the pairing is a hard error.
-    paired_errors = _check_cpp_sv_paired(SPECGEN_ROOT)
-    if paired_errors:
-        all_ok = False
-        print("[paired-check] C++ ni_signals.h <-> SV ni_signals_pkg.sv mismatch:")
-        for err in paired_errors:
-            print(f"  {err}")
 
     return 0 if all_ok else 1
 

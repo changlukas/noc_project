@@ -241,11 +241,10 @@ class TestCheckModeWithSv:
 # Task 4: Pin-level SV interface per bundle
 # ---------------------------------------------------------------------------
 
-def test_sv_interface_per_bundle():
-    """ni_signals_pkg.sv must expose one SV interface per ni_signals.json bundle.
-
-    Interface ID convention: ``ni_<lowercase_source_name>_intf`` derived from
-    ``interfaces[].name`` (UPPERCASE_SNAKE) in ni_signals.json.
+def test_sv_consolidated_interfaces_present():
+    """ni_signals_pkg.sv must expose the 3 consolidated industry-style interfaces
+    from interface_handshake.json: axi4_intf (with master+slave modports) +
+    noc_req_intf + noc_rsp_intf.
     """
     # Ensure the SV file is freshly regenerated before reading.
     r = run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
@@ -254,13 +253,9 @@ def test_sv_interface_per_bundle():
     pkg = RTL_PKG_DIR / "ni_signals_pkg.sv"
     text = pkg.read_text(encoding="ascii")
     expected_ifaces = (
-        "ni_axi_slave_port_intf",
-        "ni_axi_master_port_intf",
-        "ni_noc_req_out_intf",
-        "ni_noc_req_in_intf",
-        "ni_noc_rsp_out_intf",
-        "ni_noc_rsp_in_intf",
-        "ni_csr_intf",
+        "axi4_intf",
+        "noc_req_intf",
+        "noc_rsp_intf",
     )
     for iface in expected_ifaces:
         assert f"interface {iface}" in text, f"missing SV interface: {iface}"
