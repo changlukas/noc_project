@@ -155,22 +155,37 @@ def _validate_param_spec(spec: Dict[str, Any], where: str, is_derived: bool) -> 
 _SAFE_EXPR_PATTERN = re.compile(r"^[A-Z0-9_+\-*/ %()]+$")
 
 
-def _eval_derived(name: str, spec: Dict[str, Any], resolved: Dict[str, int]) -> int:
-    expr = spec["expression"]
+def eval_derived_expression(expr: str, resolved: Dict[str, int]) -> int:
+    """Public-API eval of a derived expression with the same safety policy as the validator.
+
+    Single source of truth for derived-expression evaluation: shared by the
+    constants.yaml validator (`_eval_derived`) and downstream emitters
+    (sv_params, cpp_params) so the safety policy lives in exactly one place.
+
+    Raises HandshakeSchemaError on disallowed chars or undefined symbols.
+    """
     if not _SAFE_EXPR_PATTERN.match(expr):
         raise HandshakeSchemaError(
-            f"derived.{name}: expression contains disallowed characters: {expr!r}"
+            f"expression contains disallowed characters: {expr!r}"
         )
     # Symbol-ordering: every UPPER_SNAKE_CASE token must already be resolved
     for tok in re.findall(r"[A-Z][A-Z0-9_]*", expr):
         if tok not in resolved:
             raise HandshakeSchemaError(
-                f"derived.{name}: expression references undefined symbol {tok!r}"
+                f"expression references undefined symbol {tok!r}"
             )
     try:
         return int(eval(expr, {"__builtins__": {}}, resolved))
     except Exception as exc:
-        raise HandshakeSchemaError(f"derived.{name}: eval failed: {exc}")
+        raise HandshakeSchemaError(f"eval failed for expression {expr!r}: {exc}")
+
+
+def _eval_derived(name: str, spec: Dict[str, Any], resolved: Dict[str, int]) -> int:
+    """Validator wrapper: evaluate `derived.<name>` with name-scoped error context."""
+    try:
+        return eval_derived_expression(spec["expression"], resolved)
+    except HandshakeSchemaError as exc:
+        raise HandshakeSchemaError(f"derived.{name}: {exc}") from None
 
 
 def _eval_constraint(constraint: str, resolved: Dict[str, int]) -> bool:

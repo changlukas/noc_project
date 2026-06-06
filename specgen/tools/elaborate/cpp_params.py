@@ -13,7 +13,7 @@ import sys
 SPECGEN_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(SPECGEN_ROOT))
 
-from ni_spec.handshake_schema import load_constants
+from ni_spec.handshake_schema import eval_derived_expression, load_constants
 
 
 def emit(src_path: Path, spec_version: str) -> str:
@@ -56,7 +56,7 @@ def emit(src_path: Path, spec_version: str) -> str:
     _emit_group(
         list(constants.get("derived", {}).items()),
         "Derived parameter defaults",
-        lambda _n, s: int(eval(s["expression"], {"__builtins__": {}}, plain_values)),
+        lambda _n, s: eval_derived_expression(s["expression"], plain_values),
     )
 
     lines.append("}  // namespace ni")

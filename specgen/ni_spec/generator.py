@@ -61,7 +61,13 @@ def _section_slice(md_text: str, heading_pattern: str) -> Optional[str]:
         else:
             break
     if level == 0:
-        level = 6  # fallback：不限制深度
+        # Caller bug: heading_pattern matched something that isn't a markdown
+        # heading. Previously silently fell back to level=6; now surface so the
+        # caller fixes the regex instead of producing a sloppy section slice.
+        raise ValueError(
+            f"_section_slice received non-heading match for pattern "
+            f"{heading_pattern!r}: {matched!r}"
+        )
     after = md_text[m.end():]
     next_re = re.compile(rf"^#{{1,{level}}}\s", re.MULTILINE)
     nxt = next_re.search(after)
@@ -122,9 +128,17 @@ def parse_header_fields(md_text: str) -> List[dict]:
     result = []
     for cells in rows:
         if max(i_name, i_wp, i_rng) >= len(cells):
+            warnings.warn(
+                f"parse_header_fields: skipping row with too few columns: {cells!r}",
+                stacklevel=2,
+            )
             continue
         name = cells[i_name]
         if not name:
+            warnings.warn(
+                f"parse_header_fields: skipping row with empty Field cell: {cells!r}",
+                stacklevel=2,
+            )
             continue
         rng_cell = cells[i_rng]
 
@@ -148,6 +162,11 @@ def parse_header_fields(md_text: str) -> List[dict]:
 
         rng = _parse_bit_range(rng_cell)
         if rng is None:
+            warnings.warn(
+                f"parse_header_fields: skipping row {name!r} with unparseable "
+                f"Default Range {rng_cell!r}",
+                stacklevel=2,
+            )
             continue
         # Bit range parsed only to validate the row; positions are computed
         # on-the-fly by constants.header_field_position. Per PP-6 the JSON is
@@ -954,6 +973,11 @@ def parse_pin_level_reset(md_path: Path) -> dict:
                 domain = "arst_ni"
             else:
                 # Unknown prefix — default to arst_ni and let L2 catch domain whitelist violation
+                warnings.warn(
+                    f"parse_pin_level_reset: unknown pin prefix {pin!r}, "
+                    f"defaulting reset-domain to arst_ni",
+                    stacklevel=2,
+                )
                 domain = "arst_ni"
             rb = {"kind": "async-active-low", "value": "0", "domain": domain}
         elif re.match(r"^1\s*(\(.*\))?$", reset_text) or reset_text == "1'b1":
@@ -1159,7 +1183,9 @@ def parse_register_map(md_path: Path) -> list:
         name = name_raw.strip("`").strip("*").strip("`").strip("*").strip()
 
         # Detect reserved placeholder: name contains "reserved" and access/reset are dashes
-        if _is_dash(access_raw) or _is_dash(reset_raw):
+        access_dash = _is_dash(access_raw)
+        reset_dash = _is_dash(reset_raw)
+        if access_dash and reset_dash:
             rows.append({
                 "offset": offset,
                 "name": name,
@@ -1168,6 +1194,15 @@ def parse_register_map(md_path: Path) -> list:
                 "reset_expr": None,
             })
             continue
+        if access_dash != reset_dash:
+            # One-dash mismatch: previously demoted to reserved silently, which
+            # would mask a typo. Warn and fall through to normal field parsing
+            # so downstream validators see the real (broken) row.
+            warnings.warn(
+                f"register row {name!r} @offset={offset}: one-dash mismatch "
+                f"(access={access_raw!r}, reset={reset_raw!r}); not demoting to reserved",
+                stacklevel=2,
+            )
 
         # Clean up access: strip inline comment suffixes like "0x0 (Bypass)"
         access = access_raw.strip()
@@ -1308,7 +1343,13 @@ def _infer_proto(section: str) -> str:
     for key, val in _PROTO_MAP:
         if key.lower() in section.lower():
             return val
-    return "CONFIG"  # default fallback (unreachable for known spec sections)
+    # Default fallback (unreachable for known spec sections): warn so unknown
+    # headings surface instead of silently being lumped into CONFIG.
+    warnings.warn(
+        f"_infer_proto: unrecognized section {section!r}, defaulting to CONFIG",
+        stacklevel=2,
+    )
+    return "CONFIG"
 
 
 def parse_protocol_rule_index(md_path: Path) -> list:
