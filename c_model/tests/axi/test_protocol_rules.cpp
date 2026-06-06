@@ -253,30 +253,6 @@ TEST_F(AxiProtocolDeath, WBeforeB_RejectsEarlyB) {
 // Same-id W/R ordering is enforced by per-id FIFO at slave + master.
 // ============================================================================
 
-TEST_F(AxiProtocolDeath, Tautology_WNoInterleave) {
-    SCENARIO("protocol_rules: W_NO_INTERLEAVE is structurally guaranteed (AXI4 W has no WID)");
-    EXPECT_TRUE(rules::check_w_no_interleave());
-}
-TEST_F(AxiProtocolDeath, Tautology_AwWIndependence) {
-    SCENARIO(
-        "protocol_rules: AW_W_INDEPENDENCE is structurally guaranteed (AW/W are independent "
-        "channels)");
-    EXPECT_TRUE(rules::check_aw_w_independence());
-}
-TEST_F(AxiProtocolDeath, Tautology_DiffIdInterleaveAllowed) {
-    SCENARIO(
-        "protocol_rules: DIFF_ID_INTERLEAVE allowed by AXI4 (different-id R/B can interleave)");
-    EXPECT_TRUE(rules::check_diff_id_interleave_allowed());
-}
-TEST_F(AxiProtocolDeath, Tautology_SameIdWOrder) {
-    SCENARIO("protocol_rules: SAME_ID_W_ORDER enforced by per-id FIFO at slave + master");
-    EXPECT_TRUE(rules::check_same_id_w_order());
-}
-TEST_F(AxiProtocolDeath, Tautology_SameIdROrder) {
-    SCENARIO("protocol_rules: SAME_ID_R_ORDER enforced by per-id FIFO at slave + master");
-    EXPECT_TRUE(rules::check_same_id_r_order());
-}
-
 // ============================================================================
 // Integration: an end-to-end assert path via AxiSlave::tick().
 // Confirms that an inline AXI_PROTOCOL_ASSERT call site in production code

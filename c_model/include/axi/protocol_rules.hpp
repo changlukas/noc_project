@@ -218,47 +218,22 @@ inline bool check_r_front_can_accept_beat(
     return rlast == (op.r_beats_in_cur_ == sub.len);
 }
 
-// SAME_ID_W_ORDER — same-ID write responses must come back in issue order.
-// Structurally enforced by the slave's per-ID FIFO (front = oldest); the rule
-// is preserved as a tautology to document the invariant.
-inline bool check_same_id_w_order() {
-    return true;
-}
-
-// SAME_ID_R_ORDER — symmetric to W (per-ID FIFO at the slave + master).
-inline bool check_same_id_r_order() {
-    return true;
-}
-
-// DIFF_ID_INTERLEAVE_ALLOWED — AXI4 permits interleaving of R beats across
-// different IDs; W beats follow AW issue order (structurally enforced by the
-// master's per-operation push). Tautology, kept for documentation.
-inline bool check_diff_id_interleave_allowed() {
-    return true;
-}
+// ============================================================================
+// Structurally enforced invariants (no runtime check)
+// ============================================================================
+// The following AXI4 invariants are guaranteed by the c_model structure and
+// require no runtime check:
+//   SAME_ID_W_ORDER / SAME_ID_R_ORDER — per-ID FIFOs at slave + master.
+//   DIFF_ID_INTERLEAVE_ALLOWED        — AXI4 permits this; model neither
+//                                       requires nor forbids it.
+//   AW_W_INDEPENDENCE                 — AW and W are queued independently.
+//   W_NO_INTERLEAVE                   — AXI4 has no WID; WBeat carries no
+//                                       WID, so structurally guaranteed.
 
 // W_BEFORE_B — the slave must not send a B response before all W beats for
 // that burst have been forwarded to memory.
 inline bool check_w_before_b(bool all_w_done) {
     return all_w_done;
-}
-
-// AW_W_INDEPENDENCE — AW and W are independent channels; AW may arrive
-// before, after, or interleaved with W (IHI 0022 A3.3.1). The model already
-// queues both; tautology, kept for documentation.
-inline bool check_aw_w_independence() {
-    return true;
-}
-
-// ============================================================================
-// Extras
-// ============================================================================
-
-// W_NO_INTERLEAVE — AXI4 removed write data interleaving (no WID); W beats
-// follow AW issue order. The model carries no WID in WBeat, so this is
-// structurally guaranteed. Tautology, kept for documentation.
-inline bool check_w_no_interleave() {
-    return true;
 }
 
 // ============================================================================
