@@ -16,17 +16,20 @@
 // [[noreturn]] lets stubs with non-void return types omit a synthetic
 // return value (e.g. std::optional<axi::BBeat> pop_b()).
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
 
 namespace ni::cmodel {
 
 [[noreturn]] inline void wrong_side_(const char* class_name, const char* method_name) {
-    (void)class_name;
-    (void)method_name;
-    assert(false &&
-           "Packetizer/Depacketizer wrong-side method called — type system normally "
-           "prevents this; likely an upstream wiring or vtable-routing bug in the "
-           "port adapter or test fixture.");
+    // Emit the precise endpoint to stderr before abort so the failure mode is
+    // diagnosable in release builds (where the assert message is stripped).
+    std::fprintf(stderr,
+                 "[wrong_side] %s::%s called — Packetizer/Depacketizer wrong-side "
+                 "dispatch; likely an upstream wiring or vtable-routing bug in the "
+                 "port adapter or test fixture.\n",
+                 class_name, method_name);
+    assert(false && "Packetizer/Depacketizer wrong-side method called");
     std::abort();
 }
 
