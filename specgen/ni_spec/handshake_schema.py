@@ -29,13 +29,15 @@ _TOP_LEVEL_KEYS = {"schema_version", "axi", "noc", "derived"}
 #   plain   -> {type, default, sv_symbol, cpp_symbol}
 #   derived -> {type, expression, sv_symbol, cpp_symbol}
 _BASE_REQUIRED = {"type", "sv_symbol", "cpp_symbol"}
-_PLAIN_EXTRA   = {"default"}
-_DERIVED_EXTRA = {"expression"}
-_OPTIONAL_PARAM_FIELDS = {
-    "units", "description", "min", "max", "allowed",
-    "expression", "default",  # both legal but only one is required-per-kind
-    "constraint",              # only for derived
-}
+_PLAIN_REQUIRED = _BASE_REQUIRED | {"default"}
+_DERIVED_REQUIRED = _BASE_REQUIRED | {"expression"}
+
+# Per-kind allowed fields = required + kind-specific optional set.
+_PLAIN_OPTIONAL = {"units", "description", "min", "max", "allowed"}
+_DERIVED_OPTIONAL = {"units", "description", "constraint"}
+
+_PLAIN_ALLOWED   = _PLAIN_REQUIRED | _PLAIN_OPTIONAL
+_DERIVED_ALLOWED = _DERIVED_REQUIRED | _DERIVED_OPTIONAL
 _PARAM_NAME_UPPER = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _FORBIDDEN_W_END = re.compile(r"_W$")
 _SUPPORTED_TYPES = {"int"}
@@ -98,11 +100,11 @@ def _validate_param_name(name: str, where: str) -> None:
 def _validate_param_spec(spec: Dict[str, Any], where: str, is_derived: bool) -> None:
     if not isinstance(spec, dict):
         raise HandshakeSchemaError(f"{where}: spec must be a mapping")
-    required = _BASE_REQUIRED | (_DERIVED_EXTRA if is_derived else _PLAIN_EXTRA)
+    required = _DERIVED_REQUIRED if is_derived else _PLAIN_REQUIRED
+    allowed_fields = _DERIVED_ALLOWED if is_derived else _PLAIN_ALLOWED
     missing = required - set(spec)
     if missing:
         raise HandshakeSchemaError(f"{where}: missing required field(s): {sorted(missing)}")
-    allowed_fields = required | _OPTIONAL_PARAM_FIELDS
     unknown = set(spec) - allowed_fields
     if unknown:
         raise HandshakeSchemaError(f"{where}: unknown field(s): {sorted(unknown)}")

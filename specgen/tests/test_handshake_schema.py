@@ -101,6 +101,41 @@ def test_rejects_wrong_type(tmp_path):
         load_constants(bad)
 
 
+def test_rejects_plain_param_with_derived_only_field(tmp_path):
+    """A plain axi/noc param must NOT accept 'expression' (only valid on derived)."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        'schema_version: "1.0"\n'
+        "axi:\n"
+        "  ID_WIDTH:\n"
+        "    type: int\n    default: 8\n"
+        "    sv_symbol: X\n    cpp_symbol: x\n"
+        '    expression: "1 + 1"\n'
+    )
+    with pytest.raises(HandshakeSchemaError, match=r"unknown.*expression"):
+        load_constants(bad)
+
+
+def test_rejects_derived_param_with_plain_only_field(tmp_path):
+    """A derived param must NOT accept 'default' (defaults come from expression evaluation)."""
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        'schema_version: "1.0"\n'
+        "axi:\n"
+        "  DATA_WIDTH:\n"
+        "    type: int\n    default: 256\n"
+        "    sv_symbol: A\n    cpp_symbol: a\n"
+        "derived:\n"
+        "  WSTRB_WIDTH:\n"
+        "    type: int\n"
+        '    expression: "DATA_WIDTH / 8"\n'
+        "    default: 99\n"
+        "    sv_symbol: B\n    cpp_symbol: b\n"
+    )
+    with pytest.raises(HandshakeSchemaError, match=r"unknown.*default"):
+        load_constants(bad)
+
+
 # ---- range/allowed checks ----
 
 def test_rejects_default_above_max(tmp_path):
