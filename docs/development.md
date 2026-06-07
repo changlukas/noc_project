@@ -145,10 +145,13 @@ correct Python 3.x installation.
 
 ### Hermetic singleton invariant
 
-Each `cosim/c/*_shell_adapter.hpp` owns exactly one c_model component.
+Each `c_model/include/cosim/*_shell_adapter.hpp` owns exactly one
+c_model component. `cosim/c/cmodel_dpi.cpp` instantiates one global
+adapter per component and is the only file that may hold these globals.
 Cross-component references are forbidden:
 
-- `cosim/c/<comp_a>_dpi.cpp` must not reference `g_<comp_b>_adapter`.
+- `cosim/c/cmodel_dpi.cpp` must not read adapter state from a different
+  component's global.
 - `*_shell_adapter.hpp` must not include another shell's adapter header.
 - No C++ component may hold a reference or pointer to a different
   component.

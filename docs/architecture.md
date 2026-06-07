@@ -49,10 +49,8 @@ The NMU and NSU are the primary subjects under test. The NoC fabric
 between them is represented by a simple loopback in the c_model
 (LoopbackNoc) and is not under AXI4 conformity verification.
 
-Both c_model and RTL target the same AXI4 pin boundary. The c_model
-is the primary conformity verification vehicle; the RTL implementation
-(future stage) will be verified by replaying the same scenario set through
-a hardware simulation with the same protocol checkers.
+The c_model is the primary conformity verification vehicle. Both c_model
+and any future RTL implementation target the same AXI4 pin boundary.
 
 ---
 
@@ -65,17 +63,17 @@ The NMU sits on the AXI-master ingress side. Its responsibilities:
 - Accepts AW, W, AR beats from the AXI4 master.
 - Packs AXI4 transactions into NoC flits and injects them into the
   request network.
-- Generates QoS values (four modes: Bypass, Fixed, Limiter, Regulator).
-- Attaches end-to-end SECDED ECC to outbound flits.
+- Zero-fills the `noc_qos` and `flit_ecc` header fields in outbound flits
+  (both are deferred; see `c_model/include/nmu/packetize.hpp`).
 - Manages a Reorder Buffer (RoB) for incoming B and R responses so that
   out-of-order network delivery is re-serialized per AXI4 ID ordering rules.
 - Handles address remapping before flit injection (remapping table is
   implementation-defined; the c_model exposes the mechanism via a
   configurable offset field).
 
-The RoB is the most complex NMU sub-block: it holds in-flight response
-slots indexed by AXI ID, releases them in-order per ID, and asserts
-BVALID / RVALID only when the slot at the head of each ID queue drains.
+The RoB holds in-flight response slots indexed by AXI ID, releases them
+in-order per ID, and asserts BVALID / RVALID only when the slot at the
+head of each ID queue drains.
 
 ### NSU (Network Subordinate Unit)
 
@@ -83,23 +81,23 @@ The NSU sits on the AXI-subordinate egress side. Its responsibilities:
 
 - Receives request flits from the NoC, unpacks them, and drives AW/W/AR
   to the downstream AXI4 slave.
-- Captures B and R responses from the slave, packs them with ECC, and
-  injects them into the response network.
-- Validates SECDED ECC on incoming request flits and flags correctable /
-  uncorrectable errors via CSR.
+- Captures B and R responses from the slave, packs them into NoC flits
+  (the `noc_qos` and `flit_ecc` header fields are zero-filled, deferred),
+  and injects them into the response network.
+- The ECC CSR counters (`ECC_CORR_ERR_CNT`, `ECC_UNCORR_ERR_CNT`) are
+  present in the register file but the ECC check logic is not yet
+  implemented.
 
 The NSU is asymmetric with the NMU: it does not have a RoB (response
-ordering is the master's responsibility) and its QoS path is simpler
-(no Regulator mode required on the subordinate side).
+ordering is the master's responsibility).
 
 ### Uniform router
 
 All router nodes in the NoC mesh are identical (no Edge / Compute
-distinction). Routing uses static XY dimension-ordered routing. Flow
-control is compile-time selectable: Valid/Ready (Version A) or
-Credit-Based (Version B). The router is not the primary subject of
-Stage 5b verification; it appears only as the LoopbackNoc stub in the
-c_model.
+distinction). Routing uses XY address-based routing (`addr_trans::xy_route`
+in `c_model/include/nmu/addr_trans.hpp`). The router is not the primary
+subject of Stage 5b verification; it appears only as the LoopbackNoc stub
+(`c_model/tests/common/loopback_noc.hpp`) in the c_model.
 
 ### AXI4 endpoint model
 
@@ -122,7 +120,7 @@ AxiMaster
 AxiSlavePort        (accepts AXI4 beats from the master-side driver)
     |  push_aw() / push_w() / push_ar()
     v
-Nmu                 (packetizes; generates QoS + ECC; manages RoB)
+Nmu                 (packetizes; zero-fills noc_qos + flit_ecc; manages RoB)
     |  flit inject
     v
 LoopbackNoc         (zero-latency stub; connects NMU TX to NSU RX)
@@ -141,11 +139,14 @@ Each component in the pipeline is a separate C++ class in `c_model/`.
 Components communicate through typed queues or method calls -- never
 through shared global state.
 
-Hermetic singleton invariant: each `*_shell_adapter.hpp` in `cosim/c/`
-owns exactly ONE c_model component. The following cross-component
-references are forbidden:
+Hermetic singleton invariant: each `*_shell_adapter.hpp` in
+`c_model/include/cosim/` owns exactly ONE c_model component.
+The DPI entry point `cosim/c/cmodel_dpi.cpp` instantiates one global
+adapter per component and is the only file that may hold these globals.
+The following cross-component references are forbidden:
 
-- A `cosim/c/<comp_a>_dpi.cpp` referencing `g_<comp_b>_adapter`.
+- `cosim/c/cmodel_dpi.cpp` referencing adapter state from a different
+  component's global.
 - A `*_shell_adapter.hpp` including another shell's adapter header.
 - A C++ component holding a reference or pointer to a different component.
 
@@ -168,9 +169,7 @@ Key properties:
   SV clock edge per c_model tick. The C++ harness is the timing master at
   the Verilator level (main.cpp toggles clk_i and drives rst_ni). The SV
   side owns the cycle-by-cycle wire propagation within that clock edge.
-  This is consistent with the "low-friction first Verilator" goal of
-  Stage 5b; a future VCS DPI-RTL port will reverse the timing master
-  role to SV.
+  This is the timing model for Stage 5b.
 - C++ vs SV timing nuance -- in the C++ model, state updates are
   immediate within tick(). In SV, the registered outputs settle after the
   clock edge and are visible one delta later. The DPI shell adapters
@@ -180,19 +179,17 @@ Key properties:
 
 ### 3.3 Extension boundaries
 
-The c_model is designed for forward extension without rework:
+The c_model separates concerns so that the NoC stub and the NI
+components can evolve independently:
 
-- Dual flow control -- Valid/Ready (Version A) and Credit-Based
-  (Version B) are compile-time templates. The factory function reads a
-  JSON config and instantiates the correct template, analogous to an RTL
-  parameter.
-- Factory pattern -- `NocSystem::create(config)` returns the fully
-  wired pipeline for a given topology. Adding a new topology requires
-  only a new factory entry; existing components are unchanged.
-- Hot-swap interface -- `Router_Interface<Mode>` and
-  `NI_Interface<Mode>` are abstract base classes. Swapping the
-  LoopbackNoc stub for a real router requires only implementing the
-  interface and re-registering in the factory.
+- VcArbiter modes -- `VcArbiter::read_write_split` and
+  `VcArbiter::multi_candidate` are factory constructors on
+  `nmu::VcArbiter` and `nsu::VcArbiter`. The mode is selected at
+  construction time via `NmuConfig::vc_mode` / `NsuConfig::vc_mode`.
+- LoopbackNoc substitution -- `LoopbackNoc` (`c_model/tests/common/`)
+  implements the `NocReqOut` / `NocRspIn` / `NocReqIn` / `NocRspOut`
+  abstract interfaces defined in `c_model/include/noc/`. Replacing it
+  with a real router model requires implementing those four interfaces.
 
 ---
 
@@ -291,7 +288,6 @@ C++/SV state mismatch. Reverted in commit 9701cb5.
   2.0 attribution must be updated). Set to 0 to bypass the assertion.
 - (b) Replace wb2axip with a full AXI4 BFM without this constraint
   (candidates include OSVVM or a vendor-agnostic open-source checker).
-  Evaluate when porting to VCS in the next stage.
 - (c) Accept current scope limit (path taken in Stage 5b): wb2axip
   verifies single-beat traffic; multi-beat is C++-layer verified.
 
@@ -387,13 +383,6 @@ transfers.
   at the C++ adapter layer (see sec. 4, wb2axip structural limits).
 - Dual-clock CDC -- the c_model uses a single-clock approximation; CDC
   is a property of the RTL implementation, not the behavioural model.
-
-### Future phases
-
-Stage 6 targets porting the scenario set to a VCS simulation with a
-full AXI4 formal verification IP that does not carry the wb2axip
-single-burst constraint. At that point, multi-beat and multi-outstanding
-scenarios will run through the checker without SKIP.
 
 ---
 
