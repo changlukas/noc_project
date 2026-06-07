@@ -11,8 +11,8 @@
 
 ### In scope (this round)
 
-- Inventory and reclassify all 60 tracked `.md` files
-- Move 32 historical specs / plans / working notes into `docs/_archive/`
+- Inventory and reclassify all 72 tracked `.md` files
+- Move 34 historical specs / plans / working notes into `docs/_archive/`
 - Delete obsolete working docs whose content is absorbed into new maintained docs
 - Add 3 new maintained docs: root `README.md`, `docs/architecture.md`,
   `docs/development.md`
@@ -75,16 +75,23 @@ auto-generated banner). The taxonomy is a decision aid, not a tagging system.
 - Rationale: matches OpenTitan / FlooNoC; URL-friendly; visually
   distinguishes documentation from C++ `snake_case` source
 
-### Per-class structure templates
+### Per-class structure guidance (not mandatory templates)
 
-| Class | Required sections |
+| Class | Recommended shape |
 |---|---|
-| `docs/architecture.md` (single file) | `# Title` → `## Purpose` → component sections → `## References` |
-| `docs/development.md` (single file) | `# Title` → workflow / conventions / generated files / how-to sections → pre-submit checklist → `## References` |
-| Module `README.md` | `# Module` → one-sentence summary → `## Build` → `## Test` → `## Layout` → `## See also` |
+| `docs/architecture.md` (single file) | `# Title` → `## Contents` (TOC) → System context first → component / boundary / verification sections → `## References` |
+| `docs/development.md` (single file) | `# Title` → `## Contents` (TOC) → workflow / conventions / build / generated files / how-to sections → pre-submit checklist → `## References` |
+| New full-rewrite module `README.md` | `# Module` → one-sentence summary → `## Build` → `## Test` → `## Layout` → `## See also` |
 
-Section headings inside each doc are chosen pragmatically; the spec does not
-mandate identical subsection lists across guides.
+Section ordering and naming are guidance, not enforced templates — choose
+what serves the document. The two new top-level guides (`architecture.md`,
+`development.md`) follow the outlines in §6 and §7 exactly; their TOC
+structure is the source of truth, not the table above.
+
+The full-rewrite module README shape applies only to new module READMEs.
+Existing kept-in-place READMEs (`spec/ni/README.md`, `tests/scenarios/
+README.md`) retain their current section structure; only style adjustments
+(filename references, heading case, ASCII substitutions) apply.
 
 ### Writing style
 
@@ -98,17 +105,33 @@ mandate identical subsection lists across guides.
   ` ```yaml `)
 - No emoji (per project memory: only use emoji when explicitly requested)
 - Cross-links use relative paths with `.md` suffix: `[label](../arch/cosim.md)`
-- Per-document length budget: 200-400 lines; split if exceeded
+- Per-document length budget: 200-400 lines for in-depth guides
+  (architecture, development); root `README.md` exempt (target ~110 lines);
+  split if architecture or development exceeds 400 lines (see §9 future
+  split hooks)
 - Character encoding: UTF-8 without BOM
-- ASCII only — no `→`, `←`, `⇒`, `⇐` (Windows GBK locale produces mojibake);
-  use `->`, `<-`, `=>`, `<=`
+- ASCII-only enforcement: **no byte >0x7F anywhere in maintained docs**.
+  This covers arrows (`->`, `<-`, `=>`, `<=` instead of `->/<-/=>/<=`
+  Unicode), em-dash (use ` - ` or `--`), Greek letters (write out
+  "beta" instead of `β`), section sign (write "section" or "sec." or just
+  the §-less reference), greater-than-or-equal (use `>=` instead of `≥`).
+  Enforced in pre-flight via byte check; not a "if cheap" option
 
 ### Lint
 
-- `markdownlint-cli2` for general Markdown hygiene
-- The ASCII-only rule is enforced via a custom check in
-  `tools/lint_scenarios.py` (or a sibling script) — to be added during plan
-  execution if cheap
+- `markdownlint-cli2` for general Markdown hygiene (optional, deferred)
+- **Mandatory ASCII byte check** added during this round as part of
+  `tools/lint_docs.py` (new tiny script) or folded into existing
+  `tools/lint_scenarios.py`. Implementation:
+  ```python
+  for path in target_md_files:
+      data = open(path, 'rb').read()
+      bad = [i for i, b in enumerate(data) if b > 0x7F]
+      if bad: report(path, bad)
+  ```
+  Targets: maintained docs in §4 (root README + docs/ + module READMEs
+  being rewritten). Excludes: archive, normative spec, sub-project docs,
+  CLAUDE.md, ATTRIBUTION.md, FEATURE_INVENTORY.md
 
 ### Out of scope
 
@@ -120,11 +143,11 @@ mandate identical subsection lists across guides.
 
 ## 4. Migration table
 
-### Move to `docs/_archive/` (32 files)
+### Move to `docs/_archive/` (34 files)
 
 | Source | Target | Reason |
 |---|---|---|
-| `docs/superpowers/specs/2026-06-*.md` (13 files including this design) | `docs/_archive/superpowers/specs/` | Completed brainstorm history |
+| `docs/superpowers/specs/2026-06-*.md` (14 files: 11 design + 1 research + AXI standardization design + this design) | `docs/_archive/superpowers/specs/` | Completed brainstorm history |
 | `docs/superpowers/plans/2026-06-*.md` (12 files) | `docs/_archive/superpowers/plans/` | Completed plan history |
 | `docs/noc_cmodel_rtl_plan.md` | `docs/_archive/noc_cmodel_rtl_plan.md` | Stage roadmap with [done]/[new] markers; not durable architecture |
 | `spec/ni/NEXT_SESSION_A6.md` | `docs/_archive/spec_ni/next_session_A6.md` | 2026-05-15 handoff, expired |
@@ -137,7 +160,7 @@ mandate identical subsection lists across guides.
 
 After moves, the empty `docs/superpowers/` directory is removed.
 
-### Delete (7 files; content absorbed into new docs or stale)
+### Delete (6 files; content absorbed into new docs or stale)
 
 | File | Why |
 |---|---|
@@ -147,13 +170,13 @@ After moves, the empty `docs/superpowers/` directory is removed.
 | `cosim/README.md` | Same |
 | `cosim/CODING_DISCIPLINE.md` | Durable content absorbed into `docs/development.md` §2 (Repo conventions); private workflow not republished |
 | `cosim/KNOWN_LIMITATIONS.md` | Active wb2axip limitations absorbed into `docs/architecture.md` §5 (Cosim & Verilator boundary); resolved history dropped |
-| `issue/issue_1.md` (untracked) | Stale `cosim2/` paths build log; absorbed by `.gitignore` rule on `/issue/` |
 
-### Keep in place, unchanged (12 + 16 normative)
+### Keep in place, unchanged (13 + 16 normative)
 
 | Path | Class | Why |
 |---|---|---|
 | `c_model/include/axi/ATTRIBUTION.md` | Legal | cocotbext-axi MIT attribution |
+| `cosim/sv/wb2axip/ATTRIBUTION.md` | Legal | ZipCPU/wb2axip Apache 2.0 attribution; **must retarget any link to deleted `cosim/KNOWN_LIMITATIONS.md`** in commit 3 |
 | `c_model/FEATURE_INVENTORY.md` | Generated | `gen_inventory.py` output with auto-generated banner |
 | `spec/ni/MODE.md` | Spec metadata | `spec_author` plugin metadata header |
 | `spec/ni/doc/*.md` (10 files) | Normative spec | Out of scope per §1 |
@@ -179,24 +202,35 @@ After moves, the empty `docs/superpowers/` directory is removed.
 | `docs/development.md` | Maintained guide | Single development guide for workflow / conventions / tools / how-tos / pre-submit |
 | `docs/_archive/README.md` | Maintained guide | Archived-material warning + brief class taxonomy |
 
+### Untracked workspace material (ignore, do not remove)
+
+| Item | Disposition |
+|---|---|
+| `issue/issue_1.md` | Untracked; never `git rm`. `.gitignore /issue/` blocks future `git add`. |
+| `dpi_ref/` (npu/sdram/soc SV reference) | **Default decision: keep local-only, never tracked.** User retains the directory as a local reference workspace. `.gitignore /dpi_ref/` enforces this. |
+| `docs/image/*.jpg` (3 files) | Untracked; only referenced by archived material. Default ignore. If new `docs/architecture.md` adopts them during implementation, explicitly `git add` in commit 3. |
+
 ### `.gitignore` additions
 
 ```
 /Python/                # local Python 3.14 install at repo root (~144 MB)
 /specgen/Python/        # specgen sub-project's local Python install (~134 MB)
 /.codegraph/            # codegraph MCP database (~215 MB)
-/dpi_ref/               # user-local SV reference (npu/sdram/soc)
+/dpi_ref/               # user-local SV reference (npu/sdram/soc) — local-only by default
 /issue/                 # user-local scratch issue notes
 /docs/image/*.jpg       # only referenced by archived material; ignore unless new doc adopts
+/.pytest_cache/         # pytest cache at repo root
+__pycache__/            # Python bytecode anywhere
+*.py[cod]               # compiled Python
 ```
 
 ### Counts before / after
 
 | | Before | After |
 |---|---|---|
+| Tracked `.md` total | 72 | ~38 (6 maintained + 13 legal/generated/normative + 16 sub-project + 3 spec-bare-essentials) — exact count verified during implementation |
 | Visible maintained docs | 28 | **6** (root README + architecture.md + development.md + tests/scenarios/README.md + spec/ni/README.md + docs/_archive/README.md) |
-| Total visible `.md` (incl. legal / generated / normative / sub-project) | 60 | ~22 |
-| Archived `.md` | 0 | 32 |
+| Archived `.md` | 0 | 34 |
 | `.gitignore`-suppressed clutter | 0 | ~493 MB across 5 untracked dirs |
 
 ---
@@ -210,9 +244,10 @@ After moves, the empty `docs/superpowers/` directory is removed.
 Network-on-Chip Interface (NMU + NSU)"]
 
 ## Status
-[Research / alpha. Stage 5b in progress; behavioural c_model passing
-425 / 425 tests; Verilator cosim 12 / 36 PASS + skips for wb2axip
-structural limits.]
+[Research / alpha. Stage 5b in progress; behavioural c_model
+passing <N>/<N> tests; Verilator cosim <P>/<T> PASS + skips for
+wb2axip structural limits. **Implementer: verify exact counts at
+commit-3 time; outline numbers (425/425, 12/36) are stale-prone.**]
 
 ## Architecture
 [~30 lines: ASCII overview diagram + "Where code lives" sub-block
@@ -267,11 +302,13 @@ docs/development.md]
 - Detailed conventions: docs/development.md
 
 ## License and third-party
-[~12 lines]
-- Project license: [TBD pending user decision]
+[~12 lines, definitive wording per §9]
+- No project-wide license has been selected. Until one is added,
+  project-owned material is not offered under an open-source license.
 - `c_model/include/axi/` ported from cocotbext-axi (MIT); see
   `c_model/include/axi/ATTRIBUTION.md`
-- `cosim/sv/wb2axip/` is ZipCPU/wb2axip (Apache 2.0), used verbatim
+- `cosim/sv/wb2axip/` is ZipCPU/wb2axip (Apache 2.0), used verbatim;
+  see `cosim/sv/wb2axip/ATTRIBUTION.md`
 ```
 
 Total ≈ 110 lines after merging the original repository-map section into
@@ -279,7 +316,7 @@ Architecture per Codex.
 
 ---
 
-## 6. `docs/architecture.md` outline (~330 lines)
+## 6. `docs/architecture.md` outline (~360 lines content; ~400 incl. TOC, headings, code blocks)
 
 Single document with 6 sections plus references. Table of contents at top.
 
@@ -297,7 +334,7 @@ Single document with 6 sections plus references. Table of contents at top.
 
 ## 1. System context (~30 lines)
 - Project purpose: AXI4 NoC NI behavioural model + Verilator cosim
-- ASCII overview diagram (AXI Master ─► NMU ─► NoC ─► NSU ─► AXI Slave)
+- ASCII overview diagram (AXI Master --> NMU --> NoC --> NSU --> AXI Slave)
 - Boundary definitions (AXI pin, NoC flit)
 - Two NI implementations (behavioural c_model + future RTL), behaviorally
   equivalent at AXI and NoC pin boundaries
@@ -311,16 +348,24 @@ Single document with 6 sections plus references. Table of contents at top.
   derivatives (link to ATTRIBUTION.md)
 - Source path links per component
 
-## 3. c_model component flow and tick discipline (~90 lines)
-[Merged from previous outline §3 and §4]
-- Component map: AxiMaster -> AxiSlavePort -> Nmu -> LoopbackNoc -> Nsu ->
+## 3. c_model component flow and tick discipline (~90 lines, split into H3)
+[Merged from previous outline §3 and §4 per Codex feedback]
+
+### 3.1 Component map
+- AxiMaster -> AxiSlavePort -> Nmu -> LoopbackNoc -> Nsu ->
   AxiMasterPort -> AxiSlave + Memory
-- β tick discipline (1 tick per cycle; inputs first, then outputs)
 - Hermetic singleton; data flow only via IO structs
+
+### 3.2 Tick semantics
+- beta tick discipline (1 tick per cycle; inputs first, then outputs)
+- 1-cycle latency per hop; fully-registered handshake
+- Pipeline boundaries explicit; no combinational delays across components
+- Why this matters for cosim: matches Verilator clk_i registration
+
+### 3.3 Extension boundaries
 - Dual flow control (Valid/Ready and Credit-based; compile-time selected)
 - Factory pattern; RTL parameter analogy
 - Hot-swap Router_Interface / NI_Interface abstract base classes
-- Pipeline boundaries explicit; no combinational delays across components
 
 ## 4. Cosim and Verilator boundary (~80 lines)
 - Stage 5b wire-wrap: each c_model component lives in an SV shell module;
@@ -371,7 +416,7 @@ Total ≈ 330 lines.
 
 ---
 
-## 7. `docs/development.md` outline (~345 lines)
+## 7. `docs/development.md` outline (~390-430 lines incl. TOC + headings + code blocks)
 
 ```
 # Development guide
@@ -484,14 +529,55 @@ ls spec/ni/*.md | grep -vE '(README|MODE)\.md'
 ls LICENSE* 2>/dev/null || echo "No LICENSE — deferred per §1 non-goals"
 ```
 
-### 4 commits in order
+### 4 commits in order (with explicit review gate before commit 4)
 
 | # | Subject | Content |
 |---|---|---|
-| 1 | `build(gitignore): exclude local Python installs + codegraph DB + workspace dirs` | `.gitignore` additions for `/Python/`, `/specgen/Python/`, `/.codegraph/`, `/dpi_ref/`, `/issue/`, `/docs/image/*.jpg`; clean working tree |
-| 2 | `docs(archive): move completed brainstorm + plan + spec working notes` | `git mv` 32 files to `docs/_archive/{superpowers/specs,superpowers/plans,spec_ni,specgen}/`; new `docs/_archive/README.md` (one-paragraph warning); delete empty `docs/superpowers/` |
-| 3 | `docs: add root README + architecture guide + development guide` | New `README.md`, `docs/architecture.md`, `docs/development.md`; rewrite `spec/ni/README.md` (style adjustments only, no content change) |
-| 4 | `docs: remove obsolete working docs + module READMEs` | Delete `NEXT_STEPS.md` (root), `c_model/NEXT_STEPS.md`, `c_model/README.md`, `cosim/README.md`, `cosim/CODING_DISCIPLINE.md`, `cosim/KNOWN_LIMITATIONS.md`; rely on content absorbed in commit 3 |
+| 1 | `build(gitignore): exclude local Python installs + codegraph DB + workspace dirs` | `.gitignore` additions for `/Python/`, `/specgen/Python/`, `/.codegraph/`, `/dpi_ref/`, `/issue/`, `/docs/image/*.jpg`, `/.pytest_cache/`, `__pycache__/`, `*.py[cod]`; clean working tree |
+| 2 | `docs(archive): move completed brainstorm + plan + spec working notes` | `git mv` 34 files to `docs/_archive/{superpowers/specs,superpowers/plans,spec_ni,specgen}/`; new `docs/_archive/README.md` (one-paragraph warning + brief 4-class taxonomy reference); delete empty `docs/superpowers/` |
+| 3 | `docs: add root README + architecture guide + development guide + link fixes` | New `README.md`, `docs/architecture.md`, `docs/development.md`; rewrite `spec/ni/README.md` (style adjustments only); **update `CLAUDE.md` links** (retarget `docs/noc_cmodel_rtl_plan.md` to `docs/_archive/noc_cmodel_rtl_plan.md`; drop 2 stale 2026-05-31 spec references that already 404 today); **update `cosim/sv/wb2axip/ATTRIBUTION.md` link** to `cosim/KNOWN_LIMITATIONS.md` (retarget to `docs/architecture.md#cosim-and-verilator-boundary`); run mandatory ASCII byte check |
+| **Review gate** | — | After commit 3, run doc/link/absorption review (§8 disposition matrix below); commit 4 is prohibited until the gate passes. Additional fix commits between commit 3 and commit 4 are permitted; the round is not strictly 4 commits if the review surfaces fixes |
+| 4 | `docs: remove obsolete working docs + module READMEs` | Delete `NEXT_STEPS.md` (root), `c_model/NEXT_STEPS.md`, `c_model/README.md`, `cosim/README.md`, `cosim/CODING_DISCIPLINE.md`, `cosim/KNOWN_LIMITATIONS.md`; relies on disposition matrix marking every source-section as absorbed-or-intentionally-dropped |
+
+### Source-heading disposition matrix (mandatory before commit 4)
+
+Every H2/H3 in each deleted-file must have exactly one disposition: target
+new-doc section, or "intentionally dropped" with reason. The matrix below
+is the source of truth; populate fully during commit 3 and check before
+commit 4 lands.
+
+| Source file + heading | Target / disposition |
+|---|---|
+| `cosim/KNOWN_LIMITATIONS.md` Resolved §2 (multi-beat W) | `docs/architecture.md` §4 (Cosim boundary) — wb2axip structural limit list |
+| `cosim/KNOWN_LIMITATIONS.md` Resolved §3 (cmodel_finalize) | Intentionally dropped — resolved + integration-test covered |
+| `cosim/KNOWN_LIMITATIONS.md` Carried §1 (faxi_wstrb permissive stub) | `docs/architecture.md` §4 (Cosim boundary) — note as active limit |
+| `cosim/KNOWN_LIMITATIONS.md` (temporary dump accumulation) | `docs/architecture.md` §4 or §5 — verify content during implementation; if present, target one of these |
+| `cosim/KNOWN_LIMITATIONS.md` (C++ vs SV timing-master nuance) | `docs/architecture.md` §3 (tick discipline section) |
+| `cosim/CODING_DISCIPLINE.md` (hermetic-singleton invariants) | `docs/development.md` §2 (Repo conventions) — full hermetic invariants enumerated, not summarized |
+| `cosim/CODING_DISCIPLINE.md` (shells only convert wires/methods) | `docs/architecture.md` §4 (Cosim boundary) — design constraint |
+| `cosim/CODING_DISCIPLINE.md` (private AI workflow / Skill invocations) | Intentionally dropped — Codex feedback: do not republish private workflow as project requirement |
+| `NEXT_STEPS.md` (root, status snapshots) | Intentionally dropped — git log is source of truth |
+| `c_model/NEXT_STEPS.md` (Stage 2 phase completion log) | Intentionally dropped — same |
+| `c_model/README.md` | Intentionally dropped — module not independently distributed; root README + `docs/architecture.md` §2-3 cover it |
+| `cosim/README.md` | Intentionally dropped — same; `docs/architecture.md` §4 covers |
+
+If the implementation finds additional headings in the source files not
+captured here, the implementer updates the matrix in the same commit
+before commit 4. Missing disposition = commit 4 blocked.
+
+### Link validation step (mandatory after commit 4)
+
+Run a local-link check across all maintained docs (root README + docs/* +
+spec/ni/README.md + module READMEs + CLAUDE.md + ATTRIBUTION files) to
+catch dangling references missed by the disposition matrix:
+
+```bash
+# crude grep for relative links + verify each target exists
+grep -rnoE '\[[^\]]+\]\(([^)]+)\)' README.md docs/ spec/ni/README.md \
+     CLAUDE.md c_model/include/axi/ATTRIBUTION.md \
+     cosim/sv/wb2axip/ATTRIBUTION.md 2>/dev/null
+# pipe through a small validator script or eyeball
+```
 
 ### Atomicity
 
@@ -517,10 +603,18 @@ ls LICENSE* 2>/dev/null || echo "No LICENSE — deferred per §1 non-goals"
 ### LICENSE decision
 
 The project lacks a root `LICENSE`. Codex flagged this as a pre-publication
-gate, not a doc-round blocker. The new `README.md` writes `[TBD pending user
-decision]` in the License section. Selecting a license (Apache 2.0 / MIT /
-GPL / proprietary) is a separate user decision and outside this round's
-scope.
+gate, not a doc-round blocker. The new `README.md` License section uses
+definitive wording rather than `[TBD]`:
+
+> No project-wide license has been selected. Until one is added,
+> project-owned material is not offered under an open-source license.
+> Component-level attributions (`c_model/include/axi/ATTRIBUTION.md`,
+> `cosim/sv/wb2axip/ATTRIBUTION.md`) describe vendored / derived material
+> only.
+
+This makes the doc work proceed while public publication remains gated.
+Selecting a license (Apache 2.0 / MIT / proprietary / etc.) is a separate
+user decision and outside this round's scope.
 
 ### `docs/image/*.jpg`
 
@@ -539,12 +633,14 @@ AI-specific guidance (skill workflow, brainstorming pattern) on top.
 
 ### Future split hooks
 
-When `docs/architecture.md` exceeds ~450 lines, split out
+When `docs/architecture.md` exceeds the 400-line style limit (or earlier if
+single sections become unwieldy), split out
 `docs/cosim-and-verification.md` containing §4 (Cosim boundary), §5
 (Verification layers), §6 (AXI4 conformity scope). When `docs/development.md`
-exceeds ~400 lines, split out `docs/testing-and-debugging.md` containing §5
+exceeds 400 lines, split out `docs/testing-and-debugging.md` containing §5
 (Adding a scenario), §6 (Targeted tests), §7 (Debugging cosim), §8
-(Pre-submit checklist).
+(Pre-submit checklist). The 400-line threshold applies uniformly per §3
+style guide — no separate 450-line architecture threshold.
 
 ---
 
@@ -571,9 +667,23 @@ exceeds ~400 lines, split out `docs/testing-and-debugging.md` containing §5
   `docs/superpowers/specs/2026-06-07-axi-pattern-standardization-design.md`
   (moved to `docs/_archive/` in commit 2)
 
-### Codex review round
+### Codex review rounds
 
-One whole-design review (after Sections 1-7 outlined) caught: missing specgen
-inventory (3 paths), missing `CLAUDE.md` classification, mojibake risk in
-specgen guides, untracked-file deletion paradox, redundant Repository map
-section in README. All adopted before this spec was written.
+Two whole-design reviews ran before this spec was finalized:
+
+- **Round 1 (after Sections 1-7 outlined):** caught missing specgen
+  inventory (3 paths), missing `CLAUDE.md` classification, mojibake risk in
+  specgen guides, untracked-file deletion paradox, redundant Repository map
+  section in README. All adopted before first spec draft.
+- **Round 2 (after first spec committed at `5d53db5`):** caught wrong .md
+  count (60 vs actual 72), wrong spec count (13 vs actual 14), missing
+  `cosim/sv/wb2axip/ATTRIBUTION.md`, broken `CLAUDE.md` links to
+  to-be-moved/already-missing files, incomplete content-absorption claim
+  (`KNOWN_LIMITATIONS.md` has more sub-items than just multi-beat;
+  `CODING_DISCIPLINE.md` has hermetic-singleton invariants), §3 template
+  vs §6/§7 outline conflict, ASCII enforcement not actionable, line budget
+  reconciliation, missing review gate between commit 3 and commit 4,
+  absorption needs disposition matrix, missing `/.pytest_cache/` /
+  `__pycache__/` from `.gitignore`, `dpi_ref/` decision implicit, stale
+  `issue/issue_1.md` under Delete, LICENSE placeholder weak. All 13
+  findings adopted; matching amend commit follows this spec.
