@@ -95,7 +95,7 @@ MAINTAINED_DOCS = \
 lint_docs:
 	py -3 tools/lint_docs.py $(MAINTAINED_DOCS)
 
-check: lint_scenarios lint_docs build-cmodel
+check: lint_scenarios lint_docs build-cmodel build-verilator
 	cd $(CMODEL_BUILD) && ctest --output-on-failure
 
 # --- clean ---

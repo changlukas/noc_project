@@ -354,9 +354,12 @@ Three hand-curated test suites exercise specific protocol invariants:
   verify that the wb2axip checker fires on a deliberate protocol
   violation (bringup test for the checker itself).
 
-`make check` runs lint_scenarios, lint_docs, builds the c_model, and
-runs the full ctest suite (Layers 1-4). It does not invoke `make sim`
-(sim is a separate manual target).
+`make check` runs lint_scenarios, lint_docs, builds the c_model and the
+Verilator binary, and runs the full ctest suite (Layers 1-4). It does
+not invoke `make sim` (sim is a separate manual target). Note: cosim
+Layer 3 ctest registration requires `Vtb_top` to be present at CMake
+configure time; `make check` ensures this by depending on
+`build-verilator` before running ctest.
 
 ---
 

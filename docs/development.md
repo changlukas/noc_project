@@ -39,7 +39,7 @@ type(scope): description (English)
 ~~~
 
 Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`,
-`chore`, `perf`.
+`chore`, `perf`, `build`, `revert`.
 
 Scope is a short noun identifying the affected area (e.g. `nmu`,
 `cosim`, `scenarios`, `makefile`). The description is imperative mood,
@@ -50,7 +50,7 @@ lowercase, no trailing period.
 Run `make check` before every commit that touches code or docs:
 
 ~~~bash
-make check    # lint_scenarios + lint_docs + build + ctest
+make check    # lint_scenarios + lint_docs + build-cmodel + build-verilator + ctest
 ~~~
 
 All three lint checks and the full ctest suite must be green. If a test
@@ -184,6 +184,19 @@ make clean           # remove all build artifacts
 The top-level Makefile orchestrates only. Subdir Makefiles own their
 own build and clean targets. `$(MAKE) -C cosim/verilator` delegates to
 `cosim/verilator/Makefile` for the Verilator build step.
+
+### PYTHON3 override for Verilator build
+
+`cosim/verilator/Makefile` uses `PYTHON3 ?= python3` as the default
+interpreter for the Verilator include-file helper. On Windows with MSYS2
+`python3` may not resolve; use:
+
+~~~bash
+make build-verilator PYTHON3="py -3"
+make check PYTHON3="py -3"
+~~~
+
+On Linux and macOS `python3` is correct and no override is needed.
 
 ### CMakeCache.txt and configure
 

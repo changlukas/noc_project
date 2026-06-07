@@ -61,9 +61,10 @@ VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 
 all: obj_dir/V$(TOP)
 
-# Python3 executable.  Prefer the MSYS2/system python3 if it resolves to a
-# real interpreter; fall back to the full Windows CPython path on this host.
-PYTHON3 ?= /c/Users/USER/AppData/Local/Programs/Python/Python313/python.exe
+# Python3 executable.  On Windows with MSYS2 use `py -3`; on Linux/macOS
+# `python3` is standard.  Override at the command line if needed:
+#   make build-verilator PYTHON3=py
+PYTHON3 ?= python3
 
 # Two-phase build: Verilator generates C++ in obj_dir, then make compiles it.
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.

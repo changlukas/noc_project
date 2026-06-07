@@ -75,7 +75,7 @@ Every commit:
 - Passes all existing tests.
 - Includes tests for new functionality.
 - Has a commit message in format `type(scope): description` (English).
-- Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`.
+- Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`, `perf`, `build`, `revert`.
 
 Branch: feature work on feature branches; PRs target `main`.
 
