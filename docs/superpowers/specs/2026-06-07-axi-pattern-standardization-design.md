@@ -74,7 +74,7 @@ AX4-<CAT>-<NNN>_<slug>
 | `EXC` | `exclusive` | Exclusive access |
 | `RSP` | `response` | Error response (DECERR / SLVERR) |
 | `STR` | `stress` | Stress / concurrency |
-| `INF` | `infrastructure` | Non-AXI4-spec; testbench / DPI / bringup smoke |
+| `INF` | `infrastructure` | Non-AXI4-spec; testbench / DPI / bringup fixtures |
 
 `CAT`↔`category` mapping is canonical; parser validates that the `CAT` prefix
 in `metadata.name` agrees with the `metadata.category` value.
@@ -259,7 +259,7 @@ IHI 0022H spec narrative order: simpler concepts first, then more complex.
    propagation infrastructure, not AXI4 §A3.2 handshake stability. Slug renamed
    to reflect actual behaviour; `INF` category introduced.
 3. `multi_id_single_beat_sequential` moved from ORD to BAS — single outstanding
-   does not exercise ordering; closer to basic ID-handling smoke.
+   does not exercise ordering; closer to basic ID-handling coverage.
 4. `cross_4kb_auto_split` and `4kb_boundary_edges` moved to BND — 4 KB boundary
    is alignment-class, not burst-type-class.
 5. Within-category ordering corrections (FIXED before WRAP; narrow before
@@ -370,13 +370,23 @@ Five existing test files split into two categories:
 | Category | File | List source |
 |---|---|---|
 | Run-all | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` + `kCmodelSkips` |
-| Run-all | `cosim/tests/test_cosim_wire_smoke.cpp` | `kAllAxi4Scenarios` + `kCosimSkips` |
+| Run-all | `cosim/tests/test_cosim_integration.cpp` (renamed from `test_cosim_wire_smoke.cpp`) | `kAllAxi4Scenarios` + `kCosimSkips` |
 | Scoped | `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated list × delay sweep |
 | Scoped | `c_model/tests/integration/test_request_response_loopback.cpp` | Curated list × num_vc variant |
 | Scoped | `cosim/tests/test_checker_fires_on_violation.cpp` | INF-001 only |
 
 Run-all tests use `kAllAxi4Scenarios` (automatic discovery via CMake glob);
 scoped tests keep curated lists but reference scenarios by new AX4 IDs.
+
+**Terminology — "smoke" dropped.** The legacy `test_cosim_wire_smoke.cpp`
+filename historically reflected the small subset of wb2axip-compatible
+scenarios. Under this design, the cosim-side test is the **peer of**
+`c_model/tests/axi/test_integration.cpp` — both register the full
+`kAllAxi4Scenarios` and let skip maps narrate which are currently
+infrastructure-blocked. The file is renamed to `test_cosim_integration.cpp`
+in commit 2. The SKIPPED rows in cosim CI output are an audit trail of
+wb2axip's structural blockers, not noise; they disappear automatically
+when wb2axip is replaced and `kCosimSkips` is deleted.
 
 ### 5.4 Run-all test body shape
 
@@ -531,7 +541,7 @@ Runs as part of `make check`. Ten invariants:
 | # | Subject | Atomic with |
 |---|---|---|
 | 1 | `feat(scenarios): add schema_version, metadata, generated list, skip enum, lint` | self-contained — existing tests untouched, runtime unchanged |
-| 2 | `refactor(scenarios): rename to AX4-CAT-NNN_slug + 5 spec-gap additions + test rewrites` | must atomic — ~40 dir moves + 5 cpp file rewrites; intermediate states fail |
+| 2 | `refactor(scenarios): rename to AX4-CAT-NNN_slug + 5 spec-gap additions + test rewrites + cosim test rename` | must atomic — ~40 dir moves + 5 cpp file rewrites (including `test_cosim_wire_smoke.cpp` → `test_cosim_integration.cpp` + `INSTANTIATE_TEST_SUITE_P` label `WireSmoke` → `CosimIntegration`); intermediate states fail |
 | 3 | `docs(scenarios): rewrite tests/scenarios/README.md` | independent |
 
 Each commit individually compiles, runs `make check` clean (including lint),
@@ -575,7 +585,7 @@ turn into hidden negative-consumers metadata.
 
 When wb2axip is replaced with a full AXI4 BFM:
 
-1. Delete `kCosimSkips` array from `test_cosim_wire_smoke.cpp`.
+1. Delete `kCosimSkips` array from `test_cosim_integration.cpp`.
 2. Build cosim binary. All previously skipped scenarios now run.
 3. Treat resulting failures as BFM integration work (not as regressions of
    this round).
