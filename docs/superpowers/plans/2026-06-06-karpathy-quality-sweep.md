@@ -26,7 +26,7 @@ cd specgen && py -3 tools/codegen.py --check
 並行 dispatch (single message, multi-tool calls)：
 
 - Claude subagent A：掃 `c_model/include/{axi,nmu,nsu,common,noc}/**` + 對應 `c_model/tests/`
-- Claude subagent B：掃 `c_model/include/cosim2/**` + `cosim2/{c,sv,verilator,tests}/**` (排除 `cosim2/sv/wb2axip/`)
+- Claude subagent B：掃 `c_model/include/cosim/**` + `cosim/{c,sv,verilator,tests}/**` (排除 `cosim/sv/wb2axip/`)
 - Claude subagent C：掃 `specgen/**`
 - Codex via `codex:rescue` skill：cross-check 同樣 scope
 

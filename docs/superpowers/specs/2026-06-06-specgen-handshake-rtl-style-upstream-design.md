@@ -12,7 +12,7 @@
 
 ### 1.1 Motivation
 
-Stage 5b shipped a working co-sim by hand-writing three SystemVerilog interfaces in `cosim2/sv/` (`axi_intf.sv`, `noc_req_intf.sv`, `noc_rsp_intf.sv`) plus five wrap modules. These hand-written interfaces are **not aligned** with specgen-generated `ni_signals_pkg.sv`:
+Stage 5b shipped a working co-sim by hand-writing three SystemVerilog interfaces in `cosim/sv/` (`axi_intf.sv`, `noc_req_intf.sv`, `noc_rsp_intf.sv`) plus five wrap modules. These hand-written interfaces are **not aligned** with specgen-generated `ni_signals_pkg.sv`:
 
 - specgen has no handshake fields (no `valid` / `ready` / `credit_return`)
 - specgen splits NoC into 4 endpoint-directional interfaces (`*_out_intf` / `*_in_intf`)
@@ -26,7 +26,7 @@ The dual source of truth introduces drift risk — every NI signal change has to
 | Work item | Description |
 |---|---|
 | W1 | Upstream the handshake/parameter schema into specgen source (new `constants.yaml`, new `interface_handshake.json`, new `handshake_schema.py` loader/validator). |
-| W2 | Atomic PR: add `specgen/tools/elaborate/{sv,cpp}_params.py` peer emitters + rewrite `sv_signals.py` interface emission to consume `interface_handshake.json`; register new emitters in `specgen/tools/codegen.py` `DOMAIN_TO_EMITTER`; regenerate `specgen/generated/`; migrate `cosim2/sv/` (delete hand-written interfaces; rewrite 5 wraps + `tb_top.sv`). `specgen/ni_spec/generator.py` (the markdown-to-JSON parser) is NOT modified. |
+| W2 | Atomic PR: add `specgen/tools/elaborate/{sv,cpp}_params.py` peer emitters + rewrite `sv_signals.py` interface emission to consume `interface_handshake.json`; register new emitters in `specgen/tools/codegen.py` `DOMAIN_TO_EMITTER`; regenerate `specgen/generated/`; migrate `cosim/sv/` (delete hand-written interfaces; rewrite 5 wraps + `tb_top.sv`). `specgen/ni_spec/generator.py` (the markdown-to-JSON parser) is NOT modified. |
 
 ### 1.3 Out of scope
 
@@ -34,14 +34,14 @@ The dual source of truth introduces drift risk — every NI signal change has to
 - wb2axip replacement protocol checker (Stage 5c+).
 - VCS DPI-RTL backend port (Stage 5c+).
 - Functional changes to c_model behavior.
-- AxUSER / WUSER / BUSER / RUSER signals (cosim2 currently does not carry them; future spec may add).
+- AxUSER / WUSER / BUSER / RUSER signals (cosim currently does not carry them; future spec may add).
 - **Release-level verification gates** (lint + Verilator strict warning-clean + parameter sweep + sanitizer + coverage + reproducible generation + wb2axip protocol-violation fault injection + release tag). Each gate is a non-trivial sub-spec (real coverage parsing, scenario-parser extension, tb_top parameter forwarding, etc.). Moved to a follow-up spec — see §7 Open Items.
 - **Karpathy 4-lens + magic-number sweep**: separate sibling spec `docs/superpowers/specs/2026-06-06-karpathy-quality-sweep-design.md` covers the Karpathy + magic-number axes independently. That spec may ship before, after, or alongside this one — see its §2.1 for the ordering discussion.
 
 ### 1.4 Success criteria
 
-1. `cosim2/sv/` contains no hand-written `*_intf.sv`. All interfaces come from `specgen/generated/sv/`.
-2. Existing `cosim2` ctest suite (410 tests) stays green; existing 5 fixture smoke stays green; existing drift gate stays clean.
+1. `cosim/sv/` contains no hand-written `*_intf.sv`. All interfaces come from `specgen/generated/sv/`.
+2. Existing `cosim` ctest suite (410 tests) stays green; existing 5 fixture smoke stays green; existing drift gate stays clean.
 3. specgen pytest suite green after schema + emitter additions, with new tests covering all §4.2 validator rules.
 
 ---
@@ -85,7 +85,7 @@ Generator enforces: any parameter name matching `*_W$` (W ending without IDTH) �
 
 - `ni_regs_pkg.sv` — register interface schema; not in this scope.
 - `ni_flit_pkg.sv` — flit struct definitions; aligned with c_model header; not in this scope.
-- `cosim2/sv/wb2axip/` — vendored Apache 2.0 source; frozen.
+- `cosim/sv/wb2axip/` — vendored Apache 2.0 source; frozen.
 
 ---
 
@@ -115,7 +115,7 @@ specgen/generated/
                 |
                 v  consumed by
                 |
-cosim2/sv/                                      (W2 migration)
+cosim/sv/                                      (W2 migration)
     +-- nmu_wrap.sv, nsu_wrap.sv,
     +-- axi_master_wrap.sv, axi_slave_wrap.sv,
     +-- loopback_noc_wrap.sv, tb_top.sv
@@ -129,7 +129,7 @@ cosim2/sv/                                      (W2 migration)
 | Phase | Work | Drift gate | Commit granularity |
 |---|---|---|---|
 | **W1** | Add `constants.yaml`, `interface_handshake.json`, loader + validator (`handshake_schema.py`). Generator does NOT yet consume new fields. | Clean | Single PR. `feat(specgen): add handshake schema + language-neutral constants` |
-| **W2** | Atomic PR: add `sv_params.py`/`cpp_params.py` peer emitters; rewrite `sv_signals.py` interface emission; regenerate `specgen/generated/`; migrate `cosim2/sv/` (delete hand-written intf, rewrite 5 wraps + tb_top). | Final tree green; intermediate sub-commits may be elaboration-broken (reviewable but not CI-gated) | Single PR, multiple review-only sub-commits. Final CI gate: ctest 410/410 + drift gate + Verilator baseline elaboration |
+| **W2** | Atomic PR: add `sv_params.py`/`cpp_params.py` peer emitters; rewrite `sv_signals.py` interface emission; regenerate `specgen/generated/`; migrate `cosim/sv/` (delete hand-written intf, rewrite 5 wraps + tb_top). | Final tree green; intermediate sub-commits may be elaboration-broken (reviewable but not CI-gated) | Single PR, multiple review-only sub-commits. Final CI gate: ctest 410/410 + drift gate + Verilator baseline elaboration |
 
 W2 is intentionally non-bisectable mid-PR because changing the interface contract is atomic with all consumers. Final-tree CI gates the merge. The sub-commit ordering inside W2 is for code-review readability, not for git-bisect.
 
@@ -145,7 +145,7 @@ W2 is intentionally non-bisectable mid-PR because changing the interface contrac
 |---|---|---|
 | spec source ↔ generated SV | `specgen/tools/elaborate/sv_*.py` peer emitters, dispatched by `specgen/tools/codegen.py` (`DOMAIN_TO_EMITTER`) | §5 |
 | generated SV interface ↔ wrap module port | wrap port list (`_i / _o / _ni` + modport) | §5.3 |
-| wrap C++ side ↔ DPI | existing `cosim2/c/dpi_bridge.cpp` | not in scope |
+| wrap C++ side ↔ DPI | existing `cosim/c/dpi_bridge.cpp` | not in scope |
 | specgen interface ↔ vendor IP (Vivado / Quartus) | future flatten wrapper | not in scope |
 
 ---
@@ -422,24 +422,24 @@ interface noc_req_intf #(
 endinterface
 ```
 
-### 5.3 cosim2 migration
+### 5.3 cosim migration
 
 #### Files removed
 
-- `cosim2/sv/axi_intf.sv`
-- `cosim2/sv/noc_req_intf.sv`
-- `cosim2/sv/noc_rsp_intf.sv`
+- `cosim/sv/axi_intf.sv`
+- `cosim/sv/noc_req_intf.sv`
+- `cosim/sv/noc_rsp_intf.sv`
 
 #### Files modified
 
 | File | Change |
 |---|---|
-| `cosim2/sv/nmu_wrap.sv` | Port list adds `clk_i`, `rst_ni`. Uses `axi4_intf.slave axi_i`, `noc_req_intf.master noc_req_o`, `noc_rsp_intf.slave noc_rsp_i` |
-| `cosim2/sv/nsu_wrap.sv` | Symmetric: `noc_req_intf.slave noc_req_i`, `noc_rsp_intf.master noc_rsp_o`, `axi4_intf.master axi_o` |
-| `cosim2/sv/axi_master_wrap.sv` | Uses `axi4_intf.master axi_o` |
-| `cosim2/sv/slave_wrap.sv` | Uses `axi4_intf.slave axi_i` |
-| `cosim2/sv/noc_wrap.sv` (LoopbackNoc, NullNoc) | Uses `noc_req_intf` + `noc_rsp_intf` with appropriate modports |
-| `cosim2/sv/tb_top.sv` | Instantiates specgen interfaces with default parameters; clk/rst generated at tb_top scope and passed as module ports |
+| `cosim/sv/nmu_wrap.sv` | Port list adds `clk_i`, `rst_ni`. Uses `axi4_intf.slave axi_i`, `noc_req_intf.master noc_req_o`, `noc_rsp_intf.slave noc_rsp_i` |
+| `cosim/sv/nsu_wrap.sv` | Symmetric: `noc_req_intf.slave noc_req_i`, `noc_rsp_intf.master noc_rsp_o`, `axi4_intf.master axi_o` |
+| `cosim/sv/axi_master_wrap.sv` | Uses `axi4_intf.master axi_o` |
+| `cosim/sv/slave_wrap.sv` | Uses `axi4_intf.slave axi_i` |
+| `cosim/sv/noc_wrap.sv` (LoopbackNoc, NullNoc) | Uses `noc_req_intf` + `noc_rsp_intf` with appropriate modports |
+| `cosim/sv/tb_top.sv` | Instantiates specgen interfaces with default parameters; clk/rst generated at tb_top scope and passed as module ports |
 
 Module-port suffix mapping (per §2.1, project convention only):
 
@@ -469,7 +469,7 @@ Signal name mapping inside each:
 
 #### wb2axip wire-up
 
-wb2axip vendored module expects port names like `i_axi_awvalid`. specgen emits `awvalid`. Mapping happens at the wrap port-connection level — no edit to `cosim2/sv/wb2axip/*.v`:
+wb2axip vendored module expects port names like `i_axi_awvalid`. specgen emits `awvalid`. Mapping happens at the wrap port-connection level — no edit to `cosim/sv/wb2axip/*.v`:
 
 ```systemverilog
 faxi_slave u_faxi_slave (
@@ -489,7 +489,7 @@ faxi_slave u_faxi_slave (
 4. `_consolidate_noc_interfaces` + 2-interface NoC emission.
 5. Regenerate `specgen/generated/sv/`.
 6. Update specgen golden test fixtures.
-7. Delete `cosim2/sv/axi_intf.sv` + `noc_req_intf.sv` + `noc_rsp_intf.sv`.
+7. Delete `cosim/sv/axi_intf.sv` + `noc_req_intf.sv` + `noc_rsp_intf.sv`.
 8. Rewrite the 5 wraps.
 9. Rewrite `tb_top.sv`.
 10. Final CI gate (ctest 410/410 + drift gate + Verilator warning-clean elaboration).
@@ -515,7 +515,7 @@ faxi_slave u_faxi_slave (
 - Sub-commits 1–9 may be temporarily broken — not CI-gated.
 - Final CI gate after sub-commit 10:
     - Specgen pytest green (with regenerated golden fixtures).
-    - cosim2 ctest 410/410 green.
+    - cosim ctest 410/410 green.
     - 5 existing fixture smoke (`debug_multi1.yaml`, `write_only_smoke.yaml`, `multibeat_incr_8beat.yaml`, etc.) green.
     - Existing drift gate clean (no diff between `specgen/generated/cpp/*` and c_model headers).
     - Verilator elaboration warning-clean (existing baseline; strict-mode sweep is deferred to release-sweep spec).
@@ -529,7 +529,7 @@ faxi_slave u_faxi_slave (
 | O1 | Specgen golden file diff scope may exceed `ni_signals_pkg.sv` | W2 PR description lists explicit diff for user review before merge |
 | O2 | One of the 5 wraps may have a signal-set mismatch surfacing only at elaboration | Verilator elaboration error pinpoints; sub-commit 9 is last; revert is per-file |
 | O3 | wb2axip signal name mismatch with specgen | Explicit port mapping inside each wrap — no edit to vendored source |
-| O4 | NoC credit semantics (multi-hot pulse, registered output) must match existing c_model `MetaBuffer` credit accounting | W2 atomic PR includes regression run of existing cosim2 credit-flow scenarios (LoopbackNoc, NullNoc); failure blocks merge |
+| O4 | NoC credit semantics (multi-hot pulse, registered output) must match existing c_model `MetaBuffer` credit accounting | W2 atomic PR includes regression run of existing cosim credit-flow scenarios (LoopbackNoc, NullNoc); failure blocks merge |
 | O5 | `axi4_intf` consolidation: two wraps (`axi_master_wrap` and `slave_wrap`) instantiate the same interface type with different modports — verify Verilator elaboration accepts | Covered by W2 final CI gate |
 | O6 | AxUSER/WUSER/BUSER/RUSER excluded — future addition requires schema extension + regenerate + consumer migration in another atomic PR | Tracked here; not in this spec |
 | O7 | `manager / subordinate` modport alias requested by future RTL stage | Generator scaffolding leaves space; current emission single `master / slave` only |

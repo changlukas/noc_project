@@ -24,7 +24,7 @@ The architectural prize is also future-facing: once each c_model component sits 
 - Reuse Stage 5a's vendored `wb2axip/` + Verilator MSYS2 build pattern
 - Additive c_model header changes: standalone ctor overloads, `can_accept_*()` const queries, plusarg-gated `inject_violation()` API
 - 5 ctest scenarios (simplified per `feedback-test-meaningfulness-over-count`)
-- `cosim2/CODING_DISCIPLINE.md` documenting rtl-forge `rtl-style` skill + karpathy-guidelines + `rtl-reviewer` agent invocation conventions (the deliverable is the doc + CI grep script; the skills/agent themselves are already installed at user level)
+- `cosim/CODING_DISCIPLINE.md` documenting rtl-forge `rtl-style` skill + karpathy-guidelines + `rtl-reviewer` agent invocation conventions (the deliverable is the doc + CI grep script; the skills/agent themselves are already installed at user level)
 
 **Out of scope** (deferred to follow-up):
 - `main plan §5.2` ComponentHandle SV virtual class abstraction
@@ -36,7 +36,7 @@ The architectural prize is also future-facing: once each c_model component sits 
 - Layer 3 cross-comparison tool ((a) vs (b) beat sequence diff)
 - specgen handshake field upstream (Phase 2)
 - 256-beat / 4KB-cross / multi-VC stress scenarios
-- `cosim2/` → `cosim/` rename (separate clean commit after 5b stable). Deletion of (a) PoC files (proxy SVs, axi_dpi_adapter, pin_snapshot) is IN-SCOPE early in 5b — see §3 + §8.
+- `cosim/` → `cosim/` rename (separate clean commit after 5b stable). Deletion of (a) PoC files (proxy SVs, axi_dpi_adapter, pin_snapshot) is IN-SCOPE early in 5b — see §3 + §8.
 
 ## 3. Anchored decisions
 
@@ -57,11 +57,11 @@ The architectural prize is also future-facing: once each c_model component sits 
 | Reset | Synchronous, single global `rst_ni` driven by `main.cpp` (carry from 5a) | Codex Section 3 (b) |
 | Verilator | 5.036 on Windows MSYS2 (proven in 5a Task 8) | 5a result |
 | Branch | `stage5b/dpi-wire-wrap` off Stage 5a tip `0a8849c` | Section 6 |
-| (a) artifact deletion | Single dedicated commit early in 5b; carries wb2axip vendor to `cosim2/sv/wb2axip/` | Codex (c) |
+| (a) artifact deletion | Single dedicated commit early in 5b; carries wb2axip vendor to `cosim/sv/wb2axip/` | Codex (c) |
 | Interface naming | No `cosim` prefix on SV / CMake / library names (drop redundancy with dir name) | User Section 7 feedback |
 | Module / signal naming | `_i / _o / _q / _d / _ni` per `rtl-style` skill; sync reset default | rtl-forge SKILL.md |
 | Coding discipline | `rtl-style` + `karpathy-guidelines` skills authoritative during writing; `rtl-reviewer` agent + Codex during review | User Section 6+7 directive |
-| Specgen handshake | Phase 1 cosim2-local; Phase 2 upstream into specgen `ni_signals_pkg.sv` (separate spec) | User Section 4 directive + Codex (b) |
+| Specgen handshake | Phase 1 cosim-local; Phase 2 upstream into specgen `ni_signals_pkg.sv` (separate spec) | User Section 4 directive + Codex (b) |
 
 ## 4. Architecture
 
@@ -122,9 +122,9 @@ end
 Each ShellAdapter owns ONE c_model component. Cross-component data ALWAYS via SV wire. Enforcement:
 
 - Each `*_shell_adapter.hpp` in its own header; no `#include` of another shell adapter
-- Each `cosim2/c/<comp>_dpi.cpp` only references its own adapter's singleton
-- Build-system policy: `cosim2/c/` translation units do not link against each other
-- CI lint script `tools/check_cosim2_hermetic.sh`: grep for forbidden cross-shell access patterns
+- Each `cosim/c/<comp>_dpi.cpp` only references its own adapter's singleton
+- Build-system policy: `cosim/c/` translation units do not link against each other
+- CI lint script `tools/check_cosim_hermetic.sh`: grep for forbidden cross-shell access patterns
 - c_model standalone ctor: ShellAdapter constructs `Nmu(NmuConfig)` without other-component refs
 
 ## 5. Shell pattern + DPI surface
@@ -132,7 +132,7 @@ Each ShellAdapter owns ONE c_model component. Cross-component data ALWAYS via SV
 ### 5.1 C++ ShellAdapter (template per component)
 
 ```cpp
-namespace ni::cmodel::cosim2 {
+namespace ni::cmodel::cosim {
 
 class NmuShellAdapter {
   public:
@@ -154,12 +154,12 @@ class NmuShellAdapter {
 }  // namespace
 ```
 
-`NmuInputs` / `NmuOutputs` are POD structs grouping all AXI + NoC pins for the boundary. Defined in `c_model/include/cosim2/nmu_shell_io.hpp` for symmetry.
+`NmuInputs` / `NmuOutputs` are POD structs grouping all AXI + NoC pins for the boundary. Defined in `c_model/include/cosim/nmu_shell_io.hpp` for symmetry.
 
 ### 5.2 DPI signatures (per shell, batched)
 
 ```c
-// cosim2/c/cmodel_dpi.h
+// cosim/c/cmodel_dpi.h
 
 // Error code enum (categorized, not just 0/1)
 typedef enum {
@@ -190,7 +190,7 @@ Each DPI entrypoint wraps work in try/catch via `DPI_BOUNDARY_BEGIN(fn)` / `DPI_
 
 ### 5.2.1 wb2axip MAXSTALL / MAXRSTALL / MAXDELAY semantic — verified
 
-Source inspection of `cosim2/sv/wb2axip/faxi_slave.v` on 2026-06-05:
+Source inspection of `cosim/sv/wb2axip/faxi_slave.v` on 2026-06-05:
 
 - **`F_AXI_MAXSTALL`** (aliased as `F_AXI_MAXWAIT`, line 141; properties at lines 422, 440, 460): Three independent per-channel counters — `f_axi_awstall`, `f_axi_wstall`, `f_axi_arstall`. Each increments every cycle that `xVALID=1 && xREADY=0` on its channel (AW, W, AR respectively); resets to 0 on `xREADY=1`, `xVALID=0`, or when response-channel backpressure (`BVALID && !BREADY`) would excuse the stall. Enforced as `SLAVE_ASSERT(counter < F_AXI_MAXSTALL)` — a DUT obligation: the slave must assert xREADY within MAXSTALL consecutive stall cycles.
 - **`F_AXI_MAXRSTALL`** (properties at lines 501, 516, 531): Three independent per-channel counters — `f_axi_wvstall` (counts cycles `wr_pending>0 && wvalid=0`: master not supplying W data after AW handshake), `f_axi_bstall` (consecutive cycles `BVALID=1 && BREADY=0`), `f_axi_rstall` (consecutive cycles `RVALID=1 && RREADY=0`). Enforced as `SLAVE_ASSUME` — these **constrain the master/environment**: the testbench must not stall the response channel or withhold W-data for more than MAXRSTALL consecutive cycles.
@@ -332,7 +332,7 @@ endmodule
 
 ## 6. Wire interface contracts
 
-### 6.1 axi_intf (cosim2-local; Phase 2 upstream → specgen)
+### 6.1 axi_intf (cosim-local; Phase 2 upstream → specgen)
 
 ```systemverilog
 interface axi_intf #(
@@ -518,7 +518,7 @@ Each SV shell `always_ff` calls `cmodel_check_error` inline at end of cycle; if 
 ## 8. File layout
 
 ```
-cosim2/                                  # Stage 5b root (rename → cosim/ after stable)
+cosim/                                  # Stage 5b root (rename → cosim/ after stable)
 ├── README.md, KNOWN_LIMITATIONS.md, CODING_DISCIPLINE.md
 ├── sv/
 │   ├── axi_intf.sv                      # AXI + handshake + master/slave modports
@@ -544,7 +544,7 @@ cosim2/                                  # Stage 5b root (rename → cosim/ afte
     ├── fixtures/                        # 5 YAML scenarios
     └── test_cosim_wire_smoke.cpp + test_checker_fires_on_violation.cpp
 
-c_model/include/cosim2/
+c_model/include/cosim/
 ├── master_shell_adapter.hpp, master_shell_io.hpp
 ├── nmu_shell_adapter.hpp, nmu_shell_io.hpp
 ├── loopback_noc_shell_adapter.hpp, loopback_noc_shell_io.hpp
@@ -565,19 +565,19 @@ c_model/include/{nmu,nsu,axi,common}/    # additive changes ONLY — existing si
 └── common/loopback_noc.hpp              # + standalone ctor overload (existing ctor retained)
 
 # CODING_DISCIPLINE.md content
-- All cosim2/sv/*.sv MUST conform to rtl-style skill
+- All cosim/sv/*.sv MUST conform to rtl-style skill
 - Subagents writing/modifying SV invoke rtl-style skill first (Skill tool with name 'rtl-style')
 - Writers invoke karpathy-guidelines skill for code quality discipline
-- Hermetic singleton invariant enforced via build/CI/grep (script `tools/check_cosim2_hermetic.sh`)
+- Hermetic singleton invariant enforced via build/CI/grep (script `tools/check_cosim_hermetic.sh`)
 - Shells contain ONLY wire↔method conversion + handshake; no c_model logic
 
 ## rtl-reviewer agent dispatch (concrete invocation)
 
-For each per-task code review of cosim2/sv/*.sv:
+For each per-task code review of cosim/sv/*.sv:
 
   Agent(subagent_type='rtl-reviewer',
         description='Review <module>.sv',
-        prompt='Review cosim2/sv/<module>.sv per rtl-style skill. Use Read/Grep on
+        prompt='Review cosim/sv/<module>.sv per rtl-style skill. Use Read/Grep on
                 the file. Return categorized findings with CRITICAL/HIGH/MEDIUM/LOW
                 severity, file:line refs, exact rule violated, minimal-change fix.')
 
@@ -593,7 +593,7 @@ For each per-task code review of cosim2/sv/*.sv:
 `c_model/include/cosim/{axi_dpi_adapter.hpp,pin_snapshot.hpp}`,
 `c_model/tests/cosim/`.
 
-Carry to `cosim2/sv/wb2axip/`: vendored files + ATTRIBUTION + sim_wrapper + faxi_wstrb (unchanged).
+Carry to `cosim/sv/wb2axip/`: vendored files + ATTRIBUTION + sim_wrapper + faxi_wstrb (unchanged).
 
 ## 9. Test plan
 
@@ -617,14 +617,14 @@ Carry to `cosim2/sv/wb2axip/`: vendored files + ATTRIBUTION + sim_wrapper + faxi
 - `rtl-reviewer` agent reports 0 CRITICAL/HIGH findings on every shell (.md reports under `c_model/build/rtl-review-logs/`)
 
 **ctest expected (CI vs local split)**:
-- **Local dev (Verilator + cosim2 binary built)**: 395 (Stage 5a baseline) + 5 (Stage 5b new) = **400/400**
-- **CI (no Verilator installed)**: 395 (Stage 5a baseline only; cosim2 entries skipped via CMake guard `if(EXISTS .../Vtb_top.exe) add_test(...)`)
+- **Local dev (Verilator + cosim binary built)**: 395 (Stage 5a baseline) + 5 (Stage 5b new) = **400/400**
+- **CI (no Verilator installed)**: 395 (Stage 5a baseline only; cosim entries skipped via CMake guard `if(EXISTS .../Vtb_top.exe) add_test(...)`)
 - CI gates: specgen pytest + codegen/inventory checks + c_model ctest 395
-- Local gates: above + cosim2 ctest 5 = full 400
+- Local gates: above + cosim ctest 5 = full 400
 
 ### 9.3 Implementation prerequisites (must resolve before writing tests)
 
-1. wb2axip `F_AXI_MAXSTALL` semantic verified — implementer dispatches sanity-check subagent that reads `cosim2/sv/wb2axip/faxi_*.v` and confirms per-response vs per-channel stall semantic. Updates parametric formula if needed. Documented in spec amendment before `conformity_backpressure.yaml` task starts.
+1. wb2axip `F_AXI_MAXSTALL` semantic verified — implementer dispatches sanity-check subagent that reads `cosim/sv/wb2axip/faxi_*.v` and confirms per-response vs per-channel stall semantic. Updates parametric formula if needed. Documented in spec amendment before `conformity_backpressure.yaml` task starts.
 2. c_model component ctors audited throw-safe. List of any non-throw-safe ctors documented; either refactored to RAII or excluded from strong-init guarantee.
 3. `can_accept_*()` query API added to ports (small additive change; verified by re-running Stage 5a `test_axi_dpi_adapter`).
 
@@ -638,19 +638,19 @@ Carry to `cosim2/sv/wb2axip/`: vendored files + ATTRIBUTION + sim_wrapper + faxi
 
 ### 9.5 CI / drift gates
 
-GH Actions doesn't install Verilator (same as Stage 5a). cosim2 ctest local-only via CMake guard:
+GH Actions doesn't install Verilator (same as Stage 5a). cosim ctest local-only via CMake guard:
 
 ```cmake
-# c_model/tests/CMakeLists.txt (top of cosim2 hook)
-if(EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir_production/Vtb_top.exe"
-   OR EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir_production/Vtb_top")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim2/tests cosim2_tests)
+# c_model/tests/CMakeLists.txt (top of cosim hook)
+if(EXISTS "${CMAKE_SOURCE_DIR}/../cosim/verilator/obj_dir_production/Vtb_top.exe"
+   OR EXISTS "${CMAKE_SOURCE_DIR}/../cosim/verilator/obj_dir_production/Vtb_top")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim/tests cosim_tests)
 else()
-    message(STATUS "Vtb_top binary not found - skipping cosim2 ctest entries (likely CI env)")
+    message(STATUS "Vtb_top binary not found - skipping cosim ctest entries (likely CI env)")
 endif()
 ```
 
-CI runs specgen pytest + codegen / inventory checks + c_model ctest = 395 entries. Local runs add cosim2 entries when Verilator binary built.
+CI runs specgen pytest + codegen / inventory checks + c_model ctest = 395 entries. Local runs add cosim entries when Verilator binary built.
 
 ### 9.6 Scenario YAML format
 
@@ -688,7 +688,7 @@ Parser: AxiMaster reads YAML `inject:` block at init. If field present, store mo
 
 **Overcomplication?** 25 new files look big but 5 shells share the same outer skeleton (rtl-style template instantiated 5×: `clk_i/rst_ni` + DPI imports + 1 `always_ff` + reset block + 3-step set/tick/get). Alternatives rejected: extending (a) snapshot (treats symptom not cause); ComponentHandle SV virtual class (over-engineer for single backend; Verilator SV OOP support uncertain). **Real implementation risk**：每個 shell 內部 `tick()` 內的 handshake state machine（capacity check + push detection + ready computation per AXI / NoC channel）是 per-component bespoke — outer skeleton 可 cookie-cutter，inner handshake logic 必須 case-by-case 寫對。**This is the highest-risk implementation area，不是 boilerplate**。Mitigations: explicit backpressure invariant (§6.4) + per-task spec-compliance reviewer cross-check against §6.3 timing diagram + rtl-reviewer agent CRITICAL/HIGH gate.
 
-**Surgical?** All c_model changes additive (overloaded ctors, `can_accept_*()` const queries, plusarg-driven inject — no signature changes). (a) infrastructure untouched. specgen unmodified Phase 1. New files all in cosim2/. ctest 395 baseline preserved. Risk: implementer drift into existing c_model internal logic. Mitigation: per-task scope clause in implementation plan + spec-compliance reviewer enforces `git diff` boundary.
+**Surgical?** All c_model changes additive (overloaded ctors, `can_accept_*()` const queries, plusarg-driven inject — no signature changes). (a) infrastructure untouched. specgen unmodified Phase 1. New files all in cosim/. ctest 395 baseline preserved. Risk: implementer drift into existing c_model internal logic. Mitigation: per-task scope clause in implementation plan + spec-compliance reviewer enforces `git diff` boundary.
 
 **Surface assumptions** (with verification + fallback):
 
@@ -710,9 +710,9 @@ Soft signal: rtl-reviewer 0 CRITICAL/HIGH; Codex per-task reviews approved; impl
 ## 11. Open items & Phase 2 follow-ups
 
 - Layer 3 cross-comparison tool ((a) vs (b) beat sequence diff)
-- specgen handshake field upstream + regenerate `ni_signals_pkg.sv`; cosim2 switches from local interfaces to regenerated specgen output
+- specgen handshake field upstream + regenerate `ni_signals_pkg.sv`; cosim switches from local interfaces to regenerated specgen output
 - Stress scenarios: 256-beat, 4KB cross, multi-VC (NUM_VC > 1)
-- `cosim2/` → `cosim/` rename + delete (a) artifacts (after 5b stable)
+- `cosim/` → `cosim/` rename + delete (a) artifacts (after 5b stable)
 - VCS DPI-RTL backend port (use same SV side; replace Verilator main.cpp with DPI bridge)
 - ComponentHandle SV virtual class abstraction (only if multiple backends per component become needed)
 - Performance counter wire visibility
@@ -722,7 +722,7 @@ Soft signal: rtl-reviewer 0 CRITICAL/HIGH; Codex per-task reviews approved; impl
 - Stage 5a spec: `docs/superpowers/specs/2026-06-04-stage5-axi-checker-cosim-design.md`
 - Stage 5a plan: `docs/superpowers/plans/2026-06-04-stage5-axi-checker-cosim.md`
 - Main plan: `docs/noc_cmodel_rtl_plan.md` §5 (mixed co-sim vision)
-- Stage 5a KNOWN_LIMITATIONS: `cosim/KNOWN_LIMITATIONS.md` (carried + updated to `cosim2/`)
+- Stage 5a KNOWN_LIMITATIONS: `cosim/KNOWN_LIMITATIONS.md` (carried + updated to `cosim/`)
 - wb2axip vendor: https://github.com/ZipCPU/wb2axip @ commit `2e8d3bc2` (Apache 2.0)
 - rtl-forge skill: https://github.com/changlukas/rtl-forge (rtl-style + rtl-reviewer)
 - karpathy-guidelines skill (installed via plugin)

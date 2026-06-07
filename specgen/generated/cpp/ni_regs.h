@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_registers.json
 // Source SHA: 05cc59c20bff
 // Generator version: v1.0.0
-// Generated at: 2026-06-06T11:43:30Z
+// Generated at: 2026-06-07T02:31:32Z
 // ----------------------------------------------------------------------------
 #pragma once
 #include <cstdint>

@@ -5,9 +5,9 @@
 
 CMODEL_DIR      := c_model
 CMODEL_BUILD    := $(CMODEL_DIR)/build
-COSIM_VERILATOR := cosim2/verilator
-COSIM_FIXTURES  := cosim2/tests/fixtures
-SIM_OUTPUT_DIR  := cosim2/output
+COSIM_VERILATOR := cosim/verilator
+COSIM_FIXTURES  := cosim/tests/fixtures
+SIM_OUTPUT_DIR  := cosim/output
 SCENARIO        ?= debug_multi1
 
 .PHONY: help build build-cmodel build-verilator sim test \
@@ -27,7 +27,7 @@ help:
 	@echo "Clean:"
 	@echo "  make clean                  everything"
 	@echo "  make clean-cmodel           c_model/build/"
-	@echo "  make clean-verilator        cosim2/verilator/obj_dir/ + cosim2/output/"
+	@echo "  make clean-verilator        cosim/verilator/obj_dir/ + cosim/output/"
 	@echo "  make clean-specgen-cache    specgen __pycache__/"
 
 # --- build ---

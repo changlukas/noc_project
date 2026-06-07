@@ -21,33 +21,33 @@
 
 | Path | Responsibility |
 |---|---|
-| `cosim2/README.md` | Stage 5b vision + branch lineage |
-| `cosim2/CODING_DISCIPLINE.md` | rtl-style + karpathy + rtl-reviewer invocation conventions |
-| `cosim2/KNOWN_LIMITATIONS.md` | Carry from cosim/, mark §2 RESOLVED after smoke pass |
-| `cosim2/sv/axi_intf.sv` | AXI bundle + valid/ready + master/slave modports |
-| `cosim2/sv/noc_req_intf.sv` | NoC req bundle, parameterized over NUM_VC + FLIT_W |
-| `cosim2/sv/noc_rsp_intf.sv` | NoC rsp bundle, symmetric |
-| `cosim2/sv/axi_master_wrap.sv` | DPI shell for c_model AxiMaster |
-| `cosim2/sv/nmu_wrap.sv` | DPI shell for c_model Nmu |
-| `cosim2/sv/loopback_noc_wrap.sv` | DPI shell for c_model LoopbackNoc |
-| `cosim2/sv/nsu_wrap.sv` | DPI shell for c_model Nsu |
-| `cosim2/sv/axi_slave_wrap.sv` | DPI shell for c_model AxiSlave (owns Memory helper) |
-| `cosim2/sv/tb_top.sv` | TB top: 5 instances + 6 wire bundles + 2 wb2axip checkers + plusarg parse |
-| `cosim2/sv/wb2axip/*` | Carried verbatim from cosim/sv/wb2axip/ |
-| `cosim2/c/cmodel_dpi.h` | DPI signatures + error enum |
-| `cosim2/c/cmodel_dpi.cpp` | extern "C" handlers per shell + try/catch + g_dpi_error |
-| `cosim2/c/dpi_boundary_macros.h` | DPI_BOUNDARY_BEGIN/END macros |
-| `cosim2/verilator/Makefile` | Adapted from cosim/verilator/ for cosim2 paths |
-| `cosim2/verilator/main.cpp` | Verilator harness: drives clk_i + rst_ni, plusarg forward, eval loop |
-| `cosim2/tests/CMakeLists.txt` | ctest registration with WORKING_DIRECTORY + Vtb_top env var |
-| `cosim2/tests/fixtures/*.yaml` | 5 scenarios: 3 carried + 2 new multibeat + 1 injection |
-| `cosim2/tests/test_cosim_wire_smoke.cpp` | Parameterized GoogleTest over 4 non-injection scenarios |
-| `cosim2/tests/test_checker_fires_on_violation.cpp` | Fault injection — expect non-zero exit |
-| `c_model/include/cosim2/{master,nmu,loopback_noc,nsu,slave}_shell_io.hpp` | Per-shell POD `Inputs` / `Outputs` structs |
-| `c_model/include/cosim2/{master,nmu,loopback_noc,nsu,slave}_shell_adapter.hpp` | Per-shell C++ adapter class |
-| `c_model/tests/cosim2/test_{comp}_shell_adapter.cpp` | Per-shell C++ unit test (no DPI/SV) |
-| `c_model/tests/cosim2/CMakeLists.txt` | Per-shell unit test entries |
-| `tools/check_cosim2_hermetic.sh` | CI grep for hermetic invariant violations |
+| `cosim/README.md` | Stage 5b vision + branch lineage |
+| `cosim/CODING_DISCIPLINE.md` | rtl-style + karpathy + rtl-reviewer invocation conventions |
+| `cosim/KNOWN_LIMITATIONS.md` | Carry from cosim/, mark §2 RESOLVED after smoke pass |
+| `cosim/sv/axi_intf.sv` | AXI bundle + valid/ready + master/slave modports |
+| `cosim/sv/noc_req_intf.sv` | NoC req bundle, parameterized over NUM_VC + FLIT_W |
+| `cosim/sv/noc_rsp_intf.sv` | NoC rsp bundle, symmetric |
+| `cosim/sv/axi_master_wrap.sv` | DPI shell for c_model AxiMaster |
+| `cosim/sv/nmu_wrap.sv` | DPI shell for c_model Nmu |
+| `cosim/sv/loopback_noc_wrap.sv` | DPI shell for c_model LoopbackNoc |
+| `cosim/sv/nsu_wrap.sv` | DPI shell for c_model Nsu |
+| `cosim/sv/axi_slave_wrap.sv` | DPI shell for c_model AxiSlave (owns Memory helper) |
+| `cosim/sv/tb_top.sv` | TB top: 5 instances + 6 wire bundles + 2 wb2axip checkers + plusarg parse |
+| `cosim/sv/wb2axip/*` | Carried verbatim from cosim/sv/wb2axip/ |
+| `cosim/c/cmodel_dpi.h` | DPI signatures + error enum |
+| `cosim/c/cmodel_dpi.cpp` | extern "C" handlers per shell + try/catch + g_dpi_error |
+| `cosim/c/dpi_boundary_macros.h` | DPI_BOUNDARY_BEGIN/END macros |
+| `cosim/verilator/Makefile` | Adapted from cosim/verilator/ for cosim paths |
+| `cosim/verilator/main.cpp` | Verilator harness: drives clk_i + rst_ni, plusarg forward, eval loop |
+| `cosim/tests/CMakeLists.txt` | ctest registration with WORKING_DIRECTORY + Vtb_top env var |
+| `cosim/tests/fixtures/*.yaml` | 5 scenarios: 3 carried + 2 new multibeat + 1 injection |
+| `cosim/tests/test_cosim_wire_smoke.cpp` | Parameterized GoogleTest over 4 non-injection scenarios |
+| `cosim/tests/test_checker_fires_on_violation.cpp` | Fault injection — expect non-zero exit |
+| `c_model/include/cosim/{master,nmu,loopback_noc,nsu,slave}_shell_io.hpp` | Per-shell POD `Inputs` / `Outputs` structs |
+| `c_model/include/cosim/{master,nmu,loopback_noc,nsu,slave}_shell_adapter.hpp` | Per-shell C++ adapter class |
+| `c_model/tests/cosim/test_{comp}_shell_adapter.cpp` | Per-shell C++ unit test (no DPI/SV) |
+| `c_model/tests/cosim/CMakeLists.txt` | Per-shell unit test entries |
+| `tools/check_cosim_hermetic.sh` | CI grep for hermetic invariant violations |
 
 c_model headers receive ADDITIVE changes (existing API preserved verbatim):
 
@@ -66,13 +66,13 @@ c_model headers receive ADDITIVE changes (existing API preserved verbatim):
 - `cosim/c/{axi_dpi.cpp,axi_dpi.h}`
 - `c_model/include/cosim/{axi_dpi_adapter.hpp,pin_snapshot.hpp}`
 - `c_model/tests/cosim/` (whole subdir)
-- `cosim/verilator/{Makefile,main.cpp}` (will be replaced by cosim2/verilator/)
+- `cosim/verilator/{Makefile,main.cpp}` (will be replaced by cosim/verilator/)
 - `cosim/tests/` (whole subdir)
-- `cosim/{KNOWN_LIMITATIONS.md, .gitkeep, sv/.gitkeep}` move/recreate under cosim2/
+- `cosim/{KNOWN_LIMITATIONS.md, .gitkeep, sv/.gitkeep}` move/recreate under cosim/
 
-(a) artifacts to **CARRY** to `cosim2/sv/wb2axip/`:
+(a) artifacts to **CARRY** to `cosim/sv/wb2axip/`:
 - `cosim/sv/wb2axip/{faxi_master.v, faxi_slave.v, faxi_wstrb.v, sim_wrapper.svh}`
-- `cosim/sv/wb2axip/ATTRIBUTION.md` (update path note from `cosim/` → `cosim2/`)
+- `cosim/sv/wb2axip/ATTRIBUTION.md` (update path note from `cosim/` → `cosim/`)
 
 ---
 
@@ -91,9 +91,9 @@ c_model headers receive ADDITIVE changes (existing API preserved verbatim):
 ## Task 1: Bootstrap (branch + scaffold + carry wb2axip + delete (a) + CODING_DISCIPLINE)
 
 **Files:**
-- Create: `cosim2/{README.md, CODING_DISCIPLINE.md, KNOWN_LIMITATIONS.md}`
-- Create: `cosim2/sv/wb2axip/{faxi_master.v, faxi_slave.v, faxi_wstrb.v, sim_wrapper.svh, ATTRIBUTION.md}` (moved from cosim/)
-- Create: empty placeholder `cosim2/{sv,c,verilator,tests}/.gitkeep`, `c_model/include/cosim2/.gitkeep`, `c_model/tests/cosim2/.gitkeep`
+- Create: `cosim/{README.md, CODING_DISCIPLINE.md, KNOWN_LIMITATIONS.md}`
+- Create: `cosim/sv/wb2axip/{faxi_master.v, faxi_slave.v, faxi_wstrb.v, sim_wrapper.svh, ATTRIBUTION.md}` (moved from cosim/)
+- Create: empty placeholder `cosim/{sv,c,verilator,tests}/.gitkeep`, `c_model/include/cosim/.gitkeep`, `c_model/tests/cosim/.gitkeep`
 - Delete: `cosim/sv/{nmu_cmodel_proxy,nsu_cmodel_proxy,tb_axi_conformity}.sv`
 - Delete: `cosim/c/{axi_dpi.cpp,axi_dpi.h}`
 - Delete: `c_model/include/cosim/{axi_dpi_adapter.hpp,pin_snapshot.hpp}` and `c_model/include/cosim/.gitkeep`
@@ -101,7 +101,7 @@ c_model headers receive ADDITIVE changes (existing API preserved verbatim):
 - Delete: `cosim/verilator/{Makefile,main.cpp}` and `cosim/verilator/.gitkeep`
 - Delete: `cosim/tests/` (whole subdir)
 - Delete: `cosim/{KNOWN_LIMITATIONS.md, sv/.gitkeep, c/.gitkeep}`
-- Modify: `c_model/tests/CMakeLists.txt` — remove `add_subdirectory(cosim)` line if present; do NOT add cosim2 yet (later task)
+- Modify: `c_model/tests/CMakeLists.txt` — remove `add_subdirectory(cosim)` line if present; do NOT add cosim yet (later task)
 
 - [ ] **Step 1: Create stage5b branch off current HEAD**
 
@@ -114,32 +114,32 @@ git log -1 --format="%H %s"                                     # Verify branch 
 
 Expected: branch `stage5b/dpi-wire-wrap` created off the most recent commit (the Stage 5b spec commits).
 
-- [ ] **Step 2: Create cosim2/ directory scaffold + .gitkeep placeholders**
+- [ ] **Step 2: Create cosim/ directory scaffold + .gitkeep placeholders**
 
 ```bash
-mkdir -p cosim2/sv/wb2axip cosim2/c cosim2/verilator cosim2/tests/fixtures
-mkdir -p c_model/include/cosim2 c_model/tests/cosim2
-touch cosim2/c/.gitkeep cosim2/verilator/.gitkeep cosim2/tests/.gitkeep cosim2/tests/fixtures/.gitkeep
-touch c_model/include/cosim2/.gitkeep c_model/tests/cosim2/.gitkeep
+mkdir -p cosim/sv/wb2axip cosim/c cosim/verilator cosim/tests/fixtures
+mkdir -p c_model/include/cosim c_model/tests/cosim
+touch cosim/c/.gitkeep cosim/verilator/.gitkeep cosim/tests/.gitkeep cosim/tests/fixtures/.gitkeep
+touch c_model/include/cosim/.gitkeep c_model/tests/cosim/.gitkeep
 ```
 
-- [ ] **Step 3: Move wb2axip vendor + sim_wrapper + faxi_wstrb to cosim2/sv/wb2axip/**
+- [ ] **Step 3: Move wb2axip vendor + sim_wrapper + faxi_wstrb to cosim/sv/wb2axip/**
 
 ```bash
 # Move (preserves git history)
-git mv cosim/sv/wb2axip/faxi_master.v   cosim2/sv/wb2axip/faxi_master.v
-git mv cosim/sv/wb2axip/faxi_slave.v    cosim2/sv/wb2axip/faxi_slave.v
-git mv cosim/sv/wb2axip/faxi_wstrb.v    cosim2/sv/wb2axip/faxi_wstrb.v
-git mv cosim/sv/wb2axip/sim_wrapper.svh cosim2/sv/wb2axip/sim_wrapper.svh
-git mv cosim/sv/wb2axip/ATTRIBUTION.md  cosim2/sv/wb2axip/ATTRIBUTION.md
+git mv cosim/sv/wb2axip/faxi_master.v   cosim/sv/wb2axip/faxi_master.v
+git mv cosim/sv/wb2axip/faxi_slave.v    cosim/sv/wb2axip/faxi_slave.v
+git mv cosim/sv/wb2axip/faxi_wstrb.v    cosim/sv/wb2axip/faxi_wstrb.v
+git mv cosim/sv/wb2axip/sim_wrapper.svh cosim/sv/wb2axip/sim_wrapper.svh
+git mv cosim/sv/wb2axip/ATTRIBUTION.md  cosim/sv/wb2axip/ATTRIBUTION.md
 ```
 
-Now edit `cosim2/sv/wb2axip/ATTRIBUTION.md` — find any reference to `cosim/sv/wb2axip/` and replace with `cosim2/sv/wb2axip/`. Add a note section:
+Now edit `cosim/sv/wb2axip/ATTRIBUTION.md` — find any reference to `cosim/sv/wb2axip/` and replace with `cosim/sv/wb2axip/`. Add a note section:
 
 ```markdown
 ## Path move (Stage 5b)
 
-Vendored files moved from `cosim/sv/wb2axip/` to `cosim2/sv/wb2axip/` as part of the
+Vendored files moved from `cosim/sv/wb2axip/` to `cosim/sv/wb2axip/` as part of the
 Stage 5b DPI wire-wrap rework. File contents unchanged. Stage 5a artifacts at
 `cosim/sv/wb2axip/` have been deleted in this branch.
 ```
@@ -183,10 +183,10 @@ If a line `add_subdirectory(cosim)` exists, remove it. If `cosim_smoke_tests` Ex
 # sed -i '/add_subdirectory.*cosim/d' c_model/tests/CMakeLists.txt
 ```
 
-- [ ] **Step 6: Write `cosim2/README.md`**
+- [ ] **Step 6: Write `cosim/README.md`**
 
 ```markdown
-# cosim2/ — Stage 5b DPI wire-wrap co-sim
+# cosim/ — Stage 5b DPI wire-wrap co-sim
 
 This tree houses the Stage 5b co-simulation infrastructure where each c_model
 component is wrapped in its own SystemVerilog shell module, communicating with
@@ -202,9 +202,9 @@ for the implementation breakdown.
 - Branched off Stage 5a tip (commit `0a8849c` at the time of brainstorm; current
   branch HEAD includes the Stage 5b spec + plan commits added afterward).
 - Stage 5a artifacts under `cosim/` were deleted on this branch in the first
-  dedicated commit; wb2axip vendored files were moved to `cosim2/sv/wb2axip/`
+  dedicated commit; wb2axip vendored files were moved to `cosim/sv/wb2axip/`
   preserving git history.
-- After Stage 5b is stable, plan to rename `cosim2/` → `cosim/` and drop the
+- After Stage 5b is stable, plan to rename `cosim/` → `cosim/` and drop the
   Stage 5a `cosim/` history reference (separate clean rename commit).
 
 ## Layout
@@ -220,12 +220,12 @@ for the implementation breakdown.
 See `CODING_DISCIPLINE.md`. All `.sv` files conform to rtl-style skill.
 ```
 
-- [ ] **Step 7: Write `cosim2/CODING_DISCIPLINE.md`**
+- [ ] **Step 7: Write `cosim/CODING_DISCIPLINE.md`**
 
 ```markdown
-# Coding Discipline — cosim2/
+# Coding Discipline — cosim/
 
-## SystemVerilog (`cosim2/sv/*.sv`)
+## SystemVerilog (`cosim/sv/*.sv`)
 
 All `.sv` files MUST conform to the `rtl-style` skill (installed at
 `~/.claude/skills/rtl-style/`, sourced from
@@ -244,7 +244,7 @@ Dispatch `rtl-reviewer` agent per task:
 
     Agent(subagent_type='rtl-reviewer',
           description='Review <module>.sv',
-          prompt='Review cosim2/sv/<module>.sv per rtl-style skill. Return
+          prompt='Review cosim/sv/<module>.sv per rtl-style skill. Return
                   categorized findings with CRITICAL/HIGH/MEDIUM/LOW severity,
                   file:line refs, exact rule violated, minimal-change fix.')
 
@@ -260,15 +260,15 @@ the 4-lens discipline: overcomplication / surgical / surface assumptions /
 verifiable success. Avoid LLM-typical mistakes: overengineering, defensive code
 for impossible cases, mixed-concern files, untestable success criteria.
 
-## Hermetic singleton invariant (cosim2/c/)
+## Hermetic singleton invariant (cosim/c/)
 
 Each `*_shell_adapter.hpp` owns ONE c_model component. Forbidden:
 
-- `cosim2/c/<comp_a>_dpi.cpp` referencing `g_<comp_b>_adapter`
+- `cosim/c/<comp_a>_dpi.cpp` referencing `g_<comp_b>_adapter`
 - `*_shell_adapter.hpp` `#include`-ing another shell's adapter
 - C++ component A holding a ref/ptr to component B
 
-CI gate: `tools/check_cosim2_hermetic.sh` greps for forbidden patterns. Must
+CI gate: `tools/check_cosim_hermetic.sh` greps for forbidden patterns. Must
 pass before merge.
 
 ## Shells contain ONLY wire↔method conversion
@@ -284,10 +284,10 @@ yourself adding such logic, the c_model component is missing an API — extend
 the c_model header instead.
 ```
 
-- [ ] **Step 8: Write `cosim2/KNOWN_LIMITATIONS.md`** (carried from cosim/, updated)
+- [ ] **Step 8: Write `cosim/KNOWN_LIMITATIONS.md`** (carried from cosim/, updated)
 
 ```markdown
-# cosim2/ — Known Limitations
+# cosim/ — Known Limitations
 
 ## Resolved in Stage 5b
 
@@ -310,7 +310,7 @@ Stage 5b DPI error propagation (return code + SV `$fatal`) calls
 
 ### §1 faxi_wstrb.v permissive stub
 
-`cosim2/sv/wb2axip/faxi_wstrb.v` was created as a permissive stub during the
+`cosim/sv/wb2axip/faxi_wstrb.v` was created as a permissive stub during the
 Stage 5a build-fix pass (commit `822a780`). `o_valid` is hardwired to `1'b1`,
 disabling WSTRB alignment checking. Stage 5b carries this stub unchanged.
 
@@ -319,7 +319,7 @@ check natively.
 
 ### §4 read_dump tmp accumulation
 
-`c_model/include/cosim2/master_shell_adapter.hpp` (when implemented) inherits
+`c_model/include/cosim/master_shell_adapter.hpp` (when implemented) inherits
 the per-instance read_dump `.tmp` filename from Stage 5a AxiDpiAdapter. Files
 accumulate in build dir per ctest run. Cosmetic; cleanup via per-instance
 destructor unlink is a follow-up.
@@ -342,12 +342,12 @@ VCS DPI-RTL port (which will reverse the role).
 
 ```bash
 git status --short
-git add cosim2/ c_model/tests/CMakeLists.txt
+git add cosim/ c_model/tests/CMakeLists.txt
 git commit -m "$(cat <<'EOF'
-chore(cosim2): bootstrap Stage 5b tree + move wb2axip + delete Stage 5a artifacts
+chore(cosim): bootstrap Stage 5b tree + move wb2axip + delete Stage 5a artifacts
 
-Single dedicated reset commit per spec §8: scaffolds cosim2/{sv,c,verilator,tests}
-directory tree, moves wb2axip vendored files to cosim2/sv/wb2axip/ preserving
+Single dedicated reset commit per spec §8: scaffolds cosim/{sv,c,verilator,tests}
+directory tree, moves wb2axip vendored files to cosim/sv/wb2axip/ preserving
 git history, deletes Stage 5a snapshot-model PoC files (proxy SVs, axi_dpi,
 adapter, pin_snapshot, axi_dpi_adapter unit test, Verilator harness for the old
 tb_axi_conformity binary), writes README/CODING_DISCIPLINE/KNOWN_LIMITATIONS,
@@ -378,9 +378,9 @@ If the test count surprises you, note it in the commit description for the next 
 - [ ] **Step 11: Self-review**
 
 - All target files created/deleted per the plan?
-- `cosim2/` tree exists with placeholders?
+- `cosim/` tree exists with placeholders?
 - `cosim/` is empty of tracked files (verify with `find cosim -type f`)?
-- `cosim2/sv/wb2axip/` has all 5 vendored files + updated ATTRIBUTION.md?
+- `cosim/sv/wb2axip/` has all 5 vendored files + updated ATTRIBUTION.md?
 - Commit message accurately describes the reset?
 
 ---
@@ -806,9 +806,9 @@ EOF
 ## Task 5: SV interfaces — axi_intf + noc_req_intf + noc_rsp_intf
 
 **Files:**
-- Create: `cosim2/sv/axi_intf.sv` (AXI bundle + valid/ready + master/slave modports)
-- Create: `cosim2/sv/noc_req_intf.sv` (parameterized over NUM_VC + FLIT_W; producer/consumer modports)
-- Create: `cosim2/sv/noc_rsp_intf.sv` (symmetric to noc_req)
+- Create: `cosim/sv/axi_intf.sv` (AXI bundle + valid/ready + master/slave modports)
+- Create: `cosim/sv/noc_req_intf.sv` (parameterized over NUM_VC + FLIT_W; producer/consumer modports)
+- Create: `cosim/sv/noc_rsp_intf.sv` (symmetric to noc_req)
 
 - [ ] **Step 1: Invoke rtl-style + karpathy skills**
 
@@ -819,7 +819,7 @@ Skill('karpathy-guidelines')
 
 Read `~/.claude/skills/rtl-style/references/interfaces.md` and `~/.claude/skills/rtl-style/templates/` for the project SV interface convention.
 
-- [ ] **Step 2: Write `cosim2/sv/axi_intf.sv` per spec §6.1**
+- [ ] **Step 2: Write `cosim/sv/axi_intf.sv` per spec §6.1**
 
 ```systemverilog
 // AXI4 bundle interface with full handshake (valid/ready per channel) and
@@ -907,7 +907,7 @@ interface axi_intf #(
 endinterface
 ```
 
-- [ ] **Step 3: Write `cosim2/sv/noc_req_intf.sv` per spec §6.2**
+- [ ] **Step 3: Write `cosim/sv/noc_req_intf.sv` per spec §6.2**
 
 ```systemverilog
 // NoC request bundle. Credit-based (no AXI-style ready); credit_return is
@@ -936,7 +936,7 @@ interface noc_req_intf #(
 endinterface
 ```
 
-- [ ] **Step 4: Write `cosim2/sv/noc_rsp_intf.sv` (symmetric)**
+- [ ] **Step 4: Write `cosim/sv/noc_rsp_intf.sv` (symmetric)**
 
 ```systemverilog
 // NoC response bundle. Symmetric to noc_req_intf — same field shape, opposite
@@ -971,10 +971,10 @@ endinterface
 ```bash
 export PATH="/c/msys64/mingw64/bin:$PATH"
 verilator --lint-only -Wall \
-    -I cosim2/sv \
-    cosim2/sv/axi_intf.sv \
-    cosim2/sv/noc_req_intf.sv \
-    cosim2/sv/noc_rsp_intf.sv 2>&1 | tail -10
+    -I cosim/sv \
+    cosim/sv/axi_intf.sv \
+    cosim/sv/noc_req_intf.sv \
+    cosim/sv/noc_rsp_intf.sv 2>&1 | tail -10
 ```
 
 Expected: 0 errors, possibly some `UNUSED` warnings (acceptable; interfaces have no internal logic).
@@ -986,16 +986,16 @@ Dispatch the `rtl-reviewer` agent on the 3 interface files. Save output to `c_mo
 - [ ] **Step 7: Commit**
 
 ```bash
-git add cosim2/sv/axi_intf.sv cosim2/sv/noc_req_intf.sv cosim2/sv/noc_rsp_intf.sv
+git add cosim/sv/axi_intf.sv cosim/sv/noc_req_intf.sv cosim/sv/noc_rsp_intf.sv
 git commit -m "$(cat <<'EOF'
-feat(cosim2/sv): add axi_intf + noc_req_intf + noc_rsp_intf with modports
+feat(cosim/sv): add axi_intf + noc_req_intf + noc_rsp_intf with modports
 
 Three Stage 5b wire bundle interfaces:
 - axi_intf: AXI4 + handshake + master/slave modports for direction safety
 - noc_req_intf: NUM_VC-parameterized, [NUM_VC-1:0] credit_return per spec §6.2
 - noc_rsp_intf: symmetric to noc_req
 
-Phase 1: cosim2-local definitions. Phase 2 follow-up: upstream into specgen.
+Phase 1: cosim-local definitions. Phase 2 follow-up: upstream into specgen.
 rtl-style + rtl-reviewer 0 CRITICAL/0 HIGH; Verilator --lint-only clean.
 EOF
 )"
@@ -1013,9 +1013,9 @@ EOF
 ## Task 6: DPI infrastructure — cmodel_dpi.h + dpi_boundary_macros.h + lifecycle skeleton
 
 **Files:**
-- Create: `cosim2/c/cmodel_dpi.h` (DPI signatures + `cmodel_dpi_error_e` enum + lifecycle decls)
-- Create: `cosim2/c/dpi_boundary_macros.h` (`DPI_BOUNDARY_BEGIN/END` macros)
-- Create: `cosim2/c/cmodel_dpi.cpp` (extern "C" lifecycle bodies + global error state; per-shell handlers added in later shell tasks)
+- Create: `cosim/c/cmodel_dpi.h` (DPI signatures + `cmodel_dpi_error_e` enum + lifecycle decls)
+- Create: `cosim/c/dpi_boundary_macros.h` (`DPI_BOUNDARY_BEGIN/END` macros)
+- Create: `cosim/c/cmodel_dpi.cpp` (extern "C" lifecycle bodies + global error state; per-shell handlers added in later shell tasks)
 
 - [ ] **Step 1: Invoke karpathy + read svdpi conventions**
 
@@ -1028,7 +1028,7 @@ Recall from Stage 5a `cosim/c/axi_dpi.h` conventions:
 - `svBitVecVal*` for multi-bit (word) output args
 - `#ifdef __cplusplus extern "C" { ... }` wrap
 
-- [ ] **Step 2: Write `cosim2/c/dpi_boundary_macros.h`**
+- [ ] **Step 2: Write `cosim/c/dpi_boundary_macros.h`**
 
 ```cpp
 // DPI boundary try/catch macros — every extern "C" DPI handler MUST wrap its
@@ -1046,7 +1046,7 @@ Recall from Stage 5a `cosim/c/axi_dpi.h` conventions:
 #include <exception>
 #include <string>
 
-namespace ni::cmodel::cosim2 {
+namespace ni::cmodel::cosim {
 extern std::atomic<int>  g_dpi_error_code;
 extern std::string       g_dpi_error_msg;
 }
@@ -1054,12 +1054,12 @@ extern std::string       g_dpi_error_msg;
 #define DPI_BOUNDARY_BEGIN(fn_name) try
 #define DPI_BOUNDARY_END(fn_name)                                                  \
     catch (const std::exception& e) {                                              \
-        ni::cmodel::cosim2::g_dpi_error_code.store(CMODEL_DPI_ERR_GENERIC);        \
-        ni::cmodel::cosim2::g_dpi_error_msg =                                      \
+        ni::cmodel::cosim::g_dpi_error_code.store(CMODEL_DPI_ERR_GENERIC);        \
+        ni::cmodel::cosim::g_dpi_error_msg =                                      \
             std::string(#fn_name ": ") + e.what();                                 \
     } catch (...) {                                                                \
-        ni::cmodel::cosim2::g_dpi_error_code.store(CMODEL_DPI_ERR_UNKNOWN);        \
-        ni::cmodel::cosim2::g_dpi_error_msg = std::string(#fn_name) + ": ...";    \
+        ni::cmodel::cosim::g_dpi_error_code.store(CMODEL_DPI_ERR_UNKNOWN);        \
+        ni::cmodel::cosim::g_dpi_error_msg = std::string(#fn_name) + ": ...";    \
     }
 
 #endif  // COSIM2_DPI_BOUNDARY_MACROS_H
@@ -1075,7 +1075,7 @@ extern "C" void cmodel_nmu_tick() {
 }
 ```
 
-- [ ] **Step 3: Write `cosim2/c/cmodel_dpi.h`**
+- [ ] **Step 3: Write `cosim/c/cmodel_dpi.h`**
 
 ```cpp
 // DPI signatures for Stage 5b wire-wrap co-sim. 5 shells × 3 calls/cycle
@@ -1112,7 +1112,7 @@ int  cmodel_check_error(const char** msg);
 
 // Per-shell signatures — bodies added by Tasks 7-11.
 // Each shell defines its own {Comp}Inputs / {Comp}Outputs C++ struct in
-// c_model/include/cosim2/{comp}_shell_io.hpp; DPI signatures match
+// c_model/include/cosim/{comp}_shell_io.hpp; DPI signatures match
 // field-by-field with svBit (1-bit) / svBitVecVal (word).
 //
 // LoopbackNoc (NoC-only, simplest — Task 7):
@@ -1141,7 +1141,7 @@ void cmodel_loopback_noc_get_outputs(svBit* req_valid_out, svBitVecVal* req_flit
 
 For now this header just declares LoopbackNoc + lifecycle + error enum. Tasks 8-11 each append their own set of {set_inputs,tick,get_outputs} DPI decls.
 
-- [ ] **Step 4: Write `cosim2/c/cmodel_dpi.cpp` (lifecycle only; shell handlers added later)**
+- [ ] **Step 4: Write `cosim/c/cmodel_dpi.cpp` (lifecycle only; shell handlers added later)**
 
 ```cpp
 // Stage 5b DPI bridge — lifecycle handlers + global error state.
@@ -1149,17 +1149,17 @@ For now this header just declares LoopbackNoc + lifecycle + error enum. Tasks 8-
 
 #include "cmodel_dpi.h"
 #include "dpi_boundary_macros.h"
-#include "cosim2/loopback_noc_shell_adapter.hpp"   // Task 7
-// #include "cosim2/master_shell_adapter.hpp"      // Task 8
-// #include "cosim2/slave_shell_adapter.hpp"       // Task 9
-// #include "cosim2/nmu_shell_adapter.hpp"         // Task 10
-// #include "cosim2/nsu_shell_adapter.hpp"         // Task 11
+#include "cosim/loopback_noc_shell_adapter.hpp"   // Task 7
+// #include "cosim/master_shell_adapter.hpp"      // Task 8
+// #include "cosim/slave_shell_adapter.hpp"       // Task 9
+// #include "cosim/nmu_shell_adapter.hpp"         // Task 10
+// #include "cosim/nsu_shell_adapter.hpp"         // Task 11
 #include "axi/scenario_parser.hpp"
 #include <atomic>
 #include <memory>
 #include <string>
 
-namespace ni::cmodel::cosim2 {
+namespace ni::cmodel::cosim {
 
 std::atomic<int>  g_dpi_error_code{CMODEL_DPI_OK};
 std::string       g_dpi_error_msg;
@@ -1169,9 +1169,9 @@ std::string       g_dpi_error_msg;
 std::unique_ptr<LoopbackNocShellAdapter> g_loopback_adapter;
 // (master / slave / nmu / nsu singletons declared by Tasks 8-11.)
 
-}  // namespace ni::cmodel::cosim2
+}  // namespace ni::cmodel::cosim
 
-using namespace ni::cmodel::cosim2;
+using namespace ni::cmodel::cosim;
 
 extern "C" void cmodel_init(const char* scenario_yaml_path) {
     DPI_BOUNDARY_BEGIN(cmodel_init) {
@@ -1211,17 +1211,17 @@ extern "C" int cmodel_check_error(const char** msg) {
 
 ```bash
 cd c_model
-g++ -std=c++17 -I include -I ../cosim2/c -I ../specgen/generated/cpp \
-    -c ../cosim2/c/cmodel_dpi.cpp -o /tmp/cmodel_dpi_compile_probe.o 2>&1 | tail -10
+g++ -std=c++17 -I include -I ../cosim/c -I ../specgen/generated/cpp \
+    -c ../cosim/c/cmodel_dpi.cpp -o /tmp/cmodel_dpi_compile_probe.o 2>&1 | tail -10
 ```
 
 Expected: compile succeeds. Will fail if `loopback_noc_shell_adapter.hpp` doesn't exist yet — at this point that's expected; comment out the `#include` and the body code that references it, push the actual usage to Task 7. Or stub `LoopbackNocShellAdapter` minimally.
 
-If you stub: write a one-line header `c_model/include/cosim2/loopback_noc_shell_adapter.hpp`:
+If you stub: write a one-line header `c_model/include/cosim/loopback_noc_shell_adapter.hpp`:
 
 ```cpp
 #pragma once
-namespace ni::cmodel::cosim2 {
+namespace ni::cmodel::cosim {
 class LoopbackNocShellAdapter {
 public:
     void init() {}
@@ -1234,10 +1234,10 @@ This unblocks compile; real class body added in Task 7.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cosim2/c/cmodel_dpi.h cosim2/c/dpi_boundary_macros.h cosim2/c/cmodel_dpi.cpp \
-        c_model/include/cosim2/loopback_noc_shell_adapter.hpp
+git add cosim/c/cmodel_dpi.h cosim/c/dpi_boundary_macros.h cosim/c/cmodel_dpi.cpp \
+        c_model/include/cosim/loopback_noc_shell_adapter.hpp
 git commit -m "$(cat <<'EOF'
-feat(cosim2/c): add DPI bridge skeleton — error enum + boundary macros + lifecycle
+feat(cosim/c): add DPI bridge skeleton — error enum + boundary macros + lifecycle
 
 Per Stage 5b spec §5.2-5.3:
 - cmodel_dpi.h declares cmodel_dpi_error_e enum (7 codes) and lifecycle DPI
@@ -1267,14 +1267,14 @@ EOF
 This task establishes the pattern for Tasks 8-11. LoopbackNoc is the simplest component (NoC-only, no AXI), so the cookie-cutter shape is clearer here.
 
 **Files:**
-- Create: `c_model/include/cosim2/loopback_noc_shell_io.hpp` (Inputs/Outputs POD structs)
-- Modify: `c_model/include/cosim2/loopback_noc_shell_adapter.hpp` (replace Task 6 stub with full class)
-- Create: `c_model/tests/cosim2/test_loopback_noc_shell_adapter.cpp` (TDD unit test)
-- Create: `c_model/tests/cosim2/CMakeLists.txt`
-- Modify: `c_model/tests/CMakeLists.txt` (add `add_subdirectory(cosim2)`)
-- Modify: `cosim2/c/cmodel_dpi.h` (append LoopbackNoc DPI sigs)
-- Modify: `cosim2/c/cmodel_dpi.cpp` (append LoopbackNoc handler bodies)
-- Create: `cosim2/sv/loopback_noc_wrap.sv` (DPI shell module)
+- Create: `c_model/include/cosim/loopback_noc_shell_io.hpp` (Inputs/Outputs POD structs)
+- Modify: `c_model/include/cosim/loopback_noc_shell_adapter.hpp` (replace Task 6 stub with full class)
+- Create: `c_model/tests/cosim/test_loopback_noc_shell_adapter.cpp` (TDD unit test)
+- Create: `c_model/tests/cosim/CMakeLists.txt`
+- Modify: `c_model/tests/CMakeLists.txt` (add `add_subdirectory(cosim)`)
+- Modify: `cosim/c/cmodel_dpi.h` (append LoopbackNoc DPI sigs)
+- Modify: `cosim/c/cmodel_dpi.cpp` (append LoopbackNoc handler bodies)
+- Create: `cosim/sv/loopback_noc_wrap.sv` (DPI shell module)
 
 - [ ] **Step 1: Invoke skills + survey LoopbackNoc existing API**
 
@@ -1291,7 +1291,7 @@ Note method names, NoC flit type (likely `FlitWord` or `ni::flit` from specgen).
 
 - [ ] **Step 2: Write Inputs/Outputs POD structs**
 
-Create `c_model/include/cosim2/loopback_noc_shell_io.hpp`:
+Create `c_model/include/cosim/loopback_noc_shell_io.hpp`:
 
 ```cpp
 // LoopbackNoc shell IO POD structs. Fields match SV wire bundle per spec §6.2
@@ -1301,7 +1301,7 @@ Create `c_model/include/cosim2/loopback_noc_shell_io.hpp`:
 #include <array>
 #include <cstdint>
 
-namespace ni::cmodel::cosim2 {
+namespace ni::cmodel::cosim {
 
 // FlitWord type — bit-for-bit match with NoC flit (NUM_VC=1 PoC, 256-bit flit).
 // Stored as byte array for DPI marshalling consistency.
@@ -1334,7 +1334,7 @@ struct LoopbackNocOutputs {
 
 - [ ] **Step 3: Write failing unit test (TDD)**
 
-Create `c_model/tests/cosim2/CMakeLists.txt`:
+Create `c_model/tests/cosim/CMakeLists.txt`:
 
 ```cmake
 add_executable(test_loopback_noc_shell_adapter test_loopback_noc_shell_adapter.cpp)
@@ -1349,20 +1349,20 @@ add_test(NAME LoopbackNocShellAdapter.smoke COMMAND test_loopback_noc_shell_adap
 Modify `c_model/tests/CMakeLists.txt` to add:
 
 ```cmake
-add_subdirectory(cosim2)
+add_subdirectory(cosim)
 ```
 
-Create `c_model/tests/cosim2/test_loopback_noc_shell_adapter.cpp`:
+Create `c_model/tests/cosim/test_loopback_noc_shell_adapter.cpp`:
 
 ```cpp
 #include "common/scenario.hpp"
-#include "cosim2/loopback_noc_shell_adapter.hpp"
-#include "cosim2/loopback_noc_shell_io.hpp"
+#include "cosim/loopback_noc_shell_adapter.hpp"
+#include "cosim/loopback_noc_shell_io.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::cosim2::LoopbackNocShellAdapter;
-using ni::cmodel::cosim2::LoopbackNocInputs;
-using ni::cmodel::cosim2::LoopbackNocOutputs;
+using ni::cmodel::cosim::LoopbackNocShellAdapter;
+using ni::cmodel::cosim::LoopbackNocInputs;
+using ni::cmodel::cosim::LoopbackNocOutputs;
 
 TEST(LoopbackNocShellAdapter, req_flit_forwards_after_one_tick) {
     SCENARIO("req flit in at cycle T appears as req_out at cycle T+1 (β model)");
@@ -1411,15 +1411,15 @@ Expected: compile error — `LoopbackNocShellAdapter` has no `set_inputs / tick 
 
 - [ ] **Step 5: Implement full `LoopbackNocShellAdapter` class**
 
-Replace `c_model/include/cosim2/loopback_noc_shell_adapter.hpp` with:
+Replace `c_model/include/cosim/loopback_noc_shell_adapter.hpp` with:
 
 ```cpp
 #pragma once
 #include "common/loopback_noc.hpp"
-#include "cosim2/loopback_noc_shell_io.hpp"
+#include "cosim/loopback_noc_shell_io.hpp"
 #include <memory>
 
-namespace ni::cmodel::cosim2 {
+namespace ni::cmodel::cosim {
 
 class LoopbackNocShellAdapter {
 public:
@@ -1482,7 +1482,7 @@ cd c_model && cmake --build build && ctest --test-dir build -R LoopbackNocShellA
 
 Iterate until both tests pass. Likely failures: c_model LoopbackNoc API mismatch, missing accessor, helper conversion bugs.
 
-- [ ] **Step 7: Append LoopbackNoc DPI handlers to `cosim2/c/cmodel_dpi.cpp`**
+- [ ] **Step 7: Append LoopbackNoc DPI handlers to `cosim/c/cmodel_dpi.cpp`**
 
 Add after the lifecycle handlers:
 
@@ -1544,7 +1544,7 @@ extern "C" void cmodel_loopback_noc_get_outputs(svBit* req_valid_out, svBitVecVa
 }
 ```
 
-- [ ] **Step 8: Write `cosim2/sv/loopback_noc_wrap.sv`** (invoke `Skill('rtl-style')` first)
+- [ ] **Step 8: Write `cosim/sv/loopback_noc_wrap.sv`** (invoke `Skill('rtl-style')` first)
 
 ```
 Skill('rtl-style')
@@ -1640,16 +1640,16 @@ endmodule
 ```bash
 export PATH="/c/msys64/mingw64/bin:$PATH"
 verilator --lint-only -Wall \
-    -I cosim2/sv -I cosim2/sv/wb2axip \
-    cosim2/sv/axi_intf.sv cosim2/sv/noc_req_intf.sv cosim2/sv/noc_rsp_intf.sv \
-    cosim2/sv/loopback_noc_wrap.sv 2>&1 | tail -15
+    -I cosim/sv -I cosim/sv/wb2axip \
+    cosim/sv/axi_intf.sv cosim/sv/noc_req_intf.sv cosim/sv/noc_rsp_intf.sv \
+    cosim/sv/loopback_noc_wrap.sv 2>&1 | tail -15
 ```
 
 Expected: 0 errors. UNUSED warnings on AXI bundle signals acceptable (not used by loopback).
 
 - [ ] **Step 10: Dispatch rtl-reviewer agent**
 
-Dispatch on `cosim2/sv/loopback_noc_wrap.sv`. Save report to `c_model/build/rtl-review-logs/task7-rtl-review.md`. Block on 0 CRITICAL / 0 HIGH.
+Dispatch on `cosim/sv/loopback_noc_wrap.sv`. Save report to `c_model/build/rtl-review-logs/task7-rtl-review.md`. Block on 0 CRITICAL / 0 HIGH.
 
 - [ ] **Step 11: Run all c_model tests (including new shell adapter unit test)**
 
@@ -1662,19 +1662,19 @@ Expected: previous count + 2 (LoopbackNocShellAdapter cases) pass.
 - [ ] **Step 12: Commit**
 
 ```bash
-git add c_model/include/cosim2/loopback_noc_shell_io.hpp \
-        c_model/include/cosim2/loopback_noc_shell_adapter.hpp \
-        c_model/tests/cosim2/ c_model/tests/CMakeLists.txt \
-        cosim2/c/cmodel_dpi.h cosim2/c/cmodel_dpi.cpp \
-        cosim2/sv/loopback_noc_wrap.sv
+git add c_model/include/cosim/loopback_noc_shell_io.hpp \
+        c_model/include/cosim/loopback_noc_shell_adapter.hpp \
+        c_model/tests/cosim/ c_model/tests/CMakeLists.txt \
+        cosim/c/cmodel_dpi.h cosim/c/cmodel_dpi.cpp \
+        cosim/sv/loopback_noc_wrap.sv
 git commit -m "$(cat <<'EOF'
-feat(cosim2): LoopbackNoc shell — adapter + SV wrap + unit test (pattern proof)
+feat(cosim): LoopbackNoc shell — adapter + SV wrap + unit test (pattern proof)
 
 Establishes the Stage 5b shell pattern (Tasks 8-11 follow same shape):
 - POD Inputs/Outputs structs (loopback_noc_shell_io.hpp)
 - C++ ShellAdapter with set_inputs/tick/get_outputs (hermetic singleton)
 - 2 GoogleTest unit cases (β tick latency + idle behavior)
-- DPI handler set in cosim2/c/cmodel_dpi.{h,cpp} with DPI_BOUNDARY try/catch
+- DPI handler set in cosim/c/cmodel_dpi.{h,cpp} with DPI_BOUNDARY try/catch
 - SV wrap module with always_ff + reset + inline error check + $fatal path
 
 rtl-style + rtl-reviewer 0 CRITICAL / 0 HIGH; Verilator lint clean.
@@ -1702,13 +1702,13 @@ Follow Task 7 pattern. Differences:
 - Plusarg inject parsed by AxiMaster (Task 4) — adapter just calls AxiMaster's existing API
 
 **Files:**
-- Create: `c_model/include/cosim2/master_shell_io.hpp` (MasterInputs/Outputs)
-- Create: `c_model/include/cosim2/master_shell_adapter.hpp`
-- Create: `c_model/tests/cosim2/test_master_shell_adapter.cpp`
-- Modify: `c_model/tests/cosim2/CMakeLists.txt` (add test entry)
-- Modify: `cosim2/c/cmodel_dpi.h` (append MasterShell DPI sigs)
-- Modify: `cosim2/c/cmodel_dpi.cpp` (append handler bodies + add g_master_adapter singleton + init/finalize)
-- Create: `cosim2/sv/axi_master_wrap.sv`
+- Create: `c_model/include/cosim/master_shell_io.hpp` (MasterInputs/Outputs)
+- Create: `c_model/include/cosim/master_shell_adapter.hpp`
+- Create: `c_model/tests/cosim/test_master_shell_adapter.cpp`
+- Modify: `c_model/tests/cosim/CMakeLists.txt` (add test entry)
+- Modify: `cosim/c/cmodel_dpi.h` (append MasterShell DPI sigs)
+- Modify: `cosim/c/cmodel_dpi.cpp` (append handler bodies + add g_master_adapter singleton + init/finalize)
+- Create: `cosim/sv/axi_master_wrap.sv`
 
 Steps follow the Task 7 template — invoke skills first, then IO struct → failing unit test → adapter implementation → DPI handlers → SV wrap → lint → rtl-reviewer → ctest → commit.
 
@@ -1730,7 +1730,7 @@ Unit test should verify:
 2. With backpressure (no awready), awvalid stays high
 3. Plusarg inject mode propagates from scenario → adapter → AxiMaster
 
-Commit message: `feat(cosim2): AxiMaster shell — adapter + SV wrap + unit test`
+Commit message: `feat(cosim): AxiMaster shell — adapter + SV wrap + unit test`
 
 ---
 
@@ -1757,7 +1757,7 @@ Unit test verifies:
 2. AR input drives → memory read → R response with correct data
 3. Multiple outstanding AW respect ID ordering
 
-Commit message: `feat(cosim2): AxiSlave shell — adapter + SV wrap + unit test`
+Commit message: `feat(cosim): AxiSlave shell — adapter + SV wrap + unit test`
 
 ---
 
@@ -1786,7 +1786,7 @@ Unit test verifies:
 2. NoC rsp input → depacketize → R output on AXI side
 3. Multi-beat W bursts (len=7) appear one beat per cycle on wire (proves KNOWN_LIMITATIONS §2 resolution)
 
-Commit message: `feat(cosim2): Nmu shell — adapter + SV wrap + unit test (resolves KL §2)`
+Commit message: `feat(cosim): Nmu shell — adapter + SV wrap + unit test (resolves KL §2)`
 
 ---
 
@@ -1815,7 +1815,7 @@ Unit test verifies:
 2. AXI B input → packetize → NoC rsp out
 3. Multi-outstanding AW with different IDs respect MetaBuffer ordering
 
-Commit message: `feat(cosim2): Nsu shell — adapter + SV wrap + unit test`
+Commit message: `feat(cosim): Nsu shell — adapter + SV wrap + unit test`
 
 ---
 
@@ -1831,7 +1831,7 @@ This task is gated by spec §9.3 implementation prerequisites: "implementer MUST
 
 ```bash
 grep -nE "F_AXI_MAXSTALL|F_AXI_MAXRSTALL|F_AXI_MAXDELAY|MAXSTALL_AW|MAXSTALL_W|MAXSTALL_AR" \
-    cosim2/sv/wb2axip/faxi_master.v cosim2/sv/wb2axip/faxi_slave.v 2>&1 | head -40
+    cosim/sv/wb2axip/faxi_master.v cosim/sv/wb2axip/faxi_slave.v 2>&1 | head -40
 ```
 
 Read the surrounding `\`SLAVE_ASSERT` and `\`SLAVE_ASSUME` lines to understand exactly what each `MAXSTALL` parameter bounds — is it consecutive cycles of `valid=1 && ready=0` (per-channel stall)? Or per-transaction (cycles between handshake and response)?
@@ -1839,7 +1839,7 @@ Read the surrounding `\`SLAVE_ASSERT` and `\`SLAVE_ASSUME` lines to understand e
 - [ ] **Step 2: Read wb2axip README + Dan Gisselquist's blog posts (if accessible)**
 
 ```bash
-ls cosim2/sv/wb2axip/README.md 2>&1 || echo "no README, check upstream"
+ls cosim/sv/wb2axip/README.md 2>&1 || echo "no README, check upstream"
 # Reference: https://github.com/ZipCPU/wb2axip — bench/formal directory
 ```
 
@@ -1852,7 +1852,7 @@ Append a subsection to `docs/superpowers/specs/2026-06-05-stage5b-dpi-wire-wrap-
 ```markdown
 ### 5.2.1 wb2axip MAXSTALL semantic — verified
 
-After source inspection of `cosim2/sv/wb2axip/faxi_master.v` and `faxi_slave.v`
+After source inspection of `cosim/sv/wb2axip/faxi_master.v` and `faxi_slave.v`
 on 2026-06-05:
 
 - **`F_AXI_MAXSTALL`**: maximum consecutive cycles `awvalid=1 && awready=0`
@@ -1910,7 +1910,7 @@ EOF
 ## Task 13: tb_top.sv — assemble 5 shells + 6 wires + 2 wb2axip checkers
 
 **Files:**
-- Create: `cosim2/sv/tb_top.sv`
+- Create: `cosim/sv/tb_top.sv`
 
 - [ ] **Step 1: Invoke rtl-style + read Stage 5a `tb_axi_conformity.sv` for pattern**
 
@@ -1925,7 +1925,7 @@ git show 0a8849c:cosim/sv/tb_axi_conformity.sv | head -100
 
 Note the wb2axip bind structure + plusarg parsing + DPI lifecycle calls.
 
-- [ ] **Step 2: Write `cosim2/sv/tb_top.sv`**
+- [ ] **Step 2: Write `cosim/sv/tb_top.sv`**
 
 ```systemverilog
 `timescale 1ns/1ps
@@ -2061,12 +2061,12 @@ The full faxi_slave + faxi_master port hookup (~43 ports each) is mechanical sea
 ```bash
 export PATH="/c/msys64/mingw64/bin:$PATH"
 verilator --lint-only -Wall \
-    -I cosim2/sv -I cosim2/sv/wb2axip \
-    cosim2/sv/axi_intf.sv cosim2/sv/noc_req_intf.sv cosim2/sv/noc_rsp_intf.sv \
-    cosim2/sv/axi_master_wrap.sv cosim2/sv/nmu_wrap.sv cosim2/sv/loopback_noc_wrap.sv \
-    cosim2/sv/nsu_wrap.sv cosim2/sv/axi_slave_wrap.sv \
-    cosim2/sv/wb2axip/faxi_master.v cosim2/sv/wb2axip/faxi_slave.v \
-    cosim2/sv/tb_top.sv \
+    -I cosim/sv -I cosim/sv/wb2axip \
+    cosim/sv/axi_intf.sv cosim/sv/noc_req_intf.sv cosim/sv/noc_rsp_intf.sv \
+    cosim/sv/axi_master_wrap.sv cosim/sv/nmu_wrap.sv cosim/sv/loopback_noc_wrap.sv \
+    cosim/sv/nsu_wrap.sv cosim/sv/axi_slave_wrap.sv \
+    cosim/sv/wb2axip/faxi_master.v cosim/sv/wb2axip/faxi_slave.v \
+    cosim/sv/tb_top.sv \
     --top-module tb_top 2>&1 | tail -20
 ```
 
@@ -2074,14 +2074,14 @@ Expected: 0 errors. Iterate any port mismatch failures.
 
 - [ ] **Step 4: Dispatch rtl-reviewer agent**
 
-On `cosim2/sv/tb_top.sv`. Save report to `c_model/build/rtl-review-logs/task13-rtl-review.md`. Block 0 CRITICAL / 0 HIGH.
+On `cosim/sv/tb_top.sv`. Save report to `c_model/build/rtl-review-logs/task13-rtl-review.md`. Block 0 CRITICAL / 0 HIGH.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cosim2/sv/tb_top.sv
+git add cosim/sv/tb_top.sv
 git commit -m "$(cat <<'EOF'
-feat(cosim2/sv): add tb_top — 5 shells + 6 wire bundles + 2 wb2axip checkers
+feat(cosim/sv): add tb_top — 5 shells + 6 wire bundles + 2 wb2axip checkers
 
 Top-level TB per spec §4.1 topology. Parametric MAXSTALL/MAXDELAY override
 from Task 12 verified semantic. clk_i + rst_ni input ports (driven by C++
@@ -2104,8 +2104,8 @@ EOF
 ## Task 14: Verilator Makefile + main.cpp + first build
 
 **Files:**
-- Create: `cosim2/verilator/Makefile`
-- Create: `cosim2/verilator/main.cpp`
+- Create: `cosim/verilator/Makefile`
+- Create: `cosim/verilator/main.cpp`
 
 - [ ] **Step 1: Adapt Makefile from Stage 5a pattern**
 
@@ -2114,15 +2114,15 @@ git show 0a8849c:cosim/verilator/Makefile > /tmp/stage5a_makefile.txt
 head -80 /tmp/stage5a_makefile.txt
 ```
 
-Read the Stage 5a Makefile flags (the build path that fixed in Tasks 6c-65d). Recreate at `cosim2/verilator/Makefile` with cosim2 paths.
+Read the Stage 5a Makefile flags (the build path that fixed in Tasks 6c-65d). Recreate at `cosim/verilator/Makefile` with cosim paths.
 
 Critical flags retained from Stage 5a:
 - `--assert` (assertion enable — Stage 5a critical fix)
 - `--no-timing` (no timing constructs in SV)
 - `-DYAML_CPP_STATIC_DEFINE`
-- `-I` path adjustments for cosim2/
+- `-I` path adjustments for cosim/
 
-The new Makefile builds `obj_dir/Vtb_top.exe` instead of `Vtb_axi_conformity.exe`. Update SV source list to cosim2 file names.
+The new Makefile builds `obj_dir/Vtb_top.exe` instead of `Vtb_axi_conformity.exe`. Update SV source list to cosim file names.
 
 - [ ] **Step 2: Adapt main.cpp from Stage 5a**
 
@@ -2131,7 +2131,7 @@ git show 0a8849c:cosim/verilator/main.cpp > /tmp/stage5a_main_cpp.txt
 cat /tmp/stage5a_main_cpp.txt
 ```
 
-Recreate at `cosim2/verilator/main.cpp`:
+Recreate at `cosim/verilator/main.cpp`:
 - Drives `clk_i` + `rst_ni` (Stage 5a `sc_time_stamp()` fix preserved)
 - Polls `cmodel_done()` for exit
 - Forwards plusarg to Vtb_top via `Verilated::commandArgs()`
@@ -2142,20 +2142,20 @@ Module top class is now `Vtb_top` not `Vtb_axi_conformity`.
 
 ```bash
 export PATH="/c/msys64/mingw64/bin:$PATH"
-cd cosim2/verilator && make 2>&1 | tail -30
+cd cosim/verilator && make 2>&1 | tail -30
 ```
 
 Expected: successful build, `obj_dir/Vtb_top.exe` exists. Iterate failures:
 - Missing DPI handler (Tasks 8-11 must all be complete with their handlers in cmodel_dpi.cpp)
-- Path issues (cosim2 vs cosim)
+- Path issues (cosim vs cosim)
 - Yaml-cpp link path
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cosim2/verilator/Makefile cosim2/verilator/main.cpp
+git add cosim/verilator/Makefile cosim/verilator/main.cpp
 git commit -m "$(cat <<'EOF'
-feat(cosim2/verilator): add Makefile + main.cpp for Stage 5b co-sim build
+feat(cosim/verilator): add Makefile + main.cpp for Stage 5b co-sim build
 
 Adapted from Stage 5a cosim/verilator/ pattern (commit 0a8849c reference).
 Preserves critical fixes: --assert flag, --no-timing mode, sc_time_stamp
@@ -2175,28 +2175,28 @@ EOF
 ## Task 15: First smoke + iterate to green + add 4 remaining + ctest + drift gates + KNOWN_LIMITATIONS
 
 **Files:**
-- Create: `cosim2/tests/fixtures/conformity_write_read.yaml` (carry from Stage 5a if exists, else new)
-- Create: `cosim2/tests/fixtures/conformity_backpressure.yaml`
-- Create: `cosim2/tests/fixtures/multibeat_incr_8beat.yaml`
-- Create: `cosim2/tests/fixtures/multioutstanding_aw_stress.yaml`
-- Create: `cosim2/tests/fixtures/injection_aw_unstable.yaml`
-- Create: `cosim2/tests/test_cosim_wire_smoke.cpp` (parameterized GoogleTest, 4 scenarios)
-- Create: `cosim2/tests/test_checker_fires_on_violation.cpp` (injection regression)
-- Create: `cosim2/tests/CMakeLists.txt`
-- Modify: `c_model/tests/CMakeLists.txt` (add cosim2/tests hook with `if(EXISTS Vtb_top.exe)` guard per spec §9.5)
-- Modify: `cosim2/KNOWN_LIMITATIONS.md` (mark §2 RESOLVED with artifact path)
+- Create: `cosim/tests/fixtures/conformity_write_read.yaml` (carry from Stage 5a if exists, else new)
+- Create: `cosim/tests/fixtures/conformity_backpressure.yaml`
+- Create: `cosim/tests/fixtures/multibeat_incr_8beat.yaml`
+- Create: `cosim/tests/fixtures/multioutstanding_aw_stress.yaml`
+- Create: `cosim/tests/fixtures/injection_aw_unstable.yaml`
+- Create: `cosim/tests/test_cosim_wire_smoke.cpp` (parameterized GoogleTest, 4 scenarios)
+- Create: `cosim/tests/test_checker_fires_on_violation.cpp` (injection regression)
+- Create: `cosim/tests/CMakeLists.txt`
+- Modify: `c_model/tests/CMakeLists.txt` (add cosim/tests hook with `if(EXISTS Vtb_top.exe)` guard per spec §9.5)
+- Modify: `cosim/KNOWN_LIMITATIONS.md` (mark §2 RESOLVED with artifact path)
 
 - [ ] **Step 1: Write 4 carry + new scenario YAMLs**
 
 ```bash
 # Carry from Stage 5a (these exist in git history):
 git show 0a8849c:cosim/tests/fixtures/conformity_write_read.yaml \
-    > cosim2/tests/fixtures/conformity_write_read.yaml
+    > cosim/tests/fixtures/conformity_write_read.yaml
 git show 0a8849c:cosim/tests/fixtures/conformity_backpressure.yaml \
-    > cosim2/tests/fixtures/conformity_backpressure.yaml
+    > cosim/tests/fixtures/conformity_backpressure.yaml
 
 # Write new multi-beat scenario:
-cat > cosim2/tests/fixtures/multibeat_incr_8beat.yaml <<'EOF'
+cat > cosim/tests/fixtures/multibeat_incr_8beat.yaml <<'EOF'
 scenario:
   max_outstanding_write: 1
   memory_latency: 0
@@ -2206,7 +2206,7 @@ transactions:
 EOF
 
 # New multi-outstanding scenario:
-cat > cosim2/tests/fixtures/multioutstanding_aw_stress.yaml <<'EOF'
+cat > cosim/tests/fixtures/multioutstanding_aw_stress.yaml <<'EOF'
 scenario:
   max_outstanding_write: 4
   memory_latency: 2
@@ -2218,7 +2218,7 @@ transactions:
 EOF
 
 # New injection scenario per spec §9.6:
-cat > cosim2/tests/fixtures/injection_aw_unstable.yaml <<'EOF'
+cat > cosim/tests/fixtures/injection_aw_unstable.yaml <<'EOF'
 scenario:
   max_outstanding_write: 1
   memory_latency: 5
@@ -2234,7 +2234,7 @@ EOF
 
 ```bash
 export PATH="/c/msys64/mingw64/bin:$PATH"
-cd cosim2/verilator
+cd cosim/verilator
 ./obj_dir/Vtb_top.exe +scenario=../tests/fixtures/conformity_write_read.yaml 2>&1 | tail -30
 ```
 
@@ -2243,7 +2243,7 @@ Expected: scenario completes, scoreboard clean. Iterate any failures:
 - DPI marshalling bugs (flit byte order, addr split)
 - wb2axip parameter too tight (check Task 12 amendment)
 
-Each iteration: fix code, rebuild Verilator binary, re-run. Document any non-trivial fix as a separate commit (e.g., `fix(cosim2/sv/nmu_wrap): correct WLAST nonblocking timing`).
+Each iteration: fix code, rebuild Verilator binary, re-run. Document any non-trivial fix as a separate commit (e.g., `fix(cosim/sv/nmu_wrap): correct WLAST nonblocking timing`).
 
 - [ ] **Step 3: Run remaining 3 scenarios manually**
 
@@ -2269,7 +2269,7 @@ If exit is 0, the fault-injection contract isn't working — debug AxiMaster `co
 
 - [ ] **Step 5: Write GoogleTest wrappers + CMakeLists**
 
-Create `cosim2/tests/test_cosim_wire_smoke.cpp`:
+Create `cosim/tests/test_cosim_wire_smoke.cpp`:
 
 ```cpp
 #include "common/scenario.hpp"
@@ -2305,7 +2305,7 @@ INSTANTIATE_TEST_SUITE_P(WireSmoke, CosimWireSmoke,
 }
 ```
 
-Create `cosim2/tests/test_checker_fires_on_violation.cpp`:
+Create `cosim/tests/test_checker_fires_on_violation.cpp`:
 
 ```cpp
 #include "common/scenario.hpp"
@@ -2323,7 +2323,7 @@ TEST(CheckerLiveness, aw_unstable_injection_must_fire) {
 }
 ```
 
-Create `cosim2/tests/CMakeLists.txt`:
+Create `cosim/tests/CMakeLists.txt`:
 
 ```cmake
 add_executable(test_cosim_wire_smoke test_cosim_wire_smoke.cpp)
@@ -2345,7 +2345,7 @@ add_custom_command(TARGET test_cosim_wire_smoke POST_BUILD
         ${CMAKE_SOURCE_DIR}/../config
         $<TARGET_FILE_DIR:test_cosim_wire_smoke>/config)
 
-set(COSIM_BIN "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir/Vtb_top.exe")
+set(COSIM_BIN "${CMAKE_SOURCE_DIR}/../cosim/verilator/obj_dir/Vtb_top.exe")
 
 add_test(NAME CosimWireSmoke COMMAND test_cosim_wire_smoke)
 set_tests_properties(CosimWireSmoke PROPERTIES
@@ -2358,17 +2358,17 @@ set_tests_properties(CheckerLiveness PROPERTIES
     WORKING_DIRECTORY $<TARGET_FILE_DIR:test_checker_fires_on_violation>)
 ```
 
-- [ ] **Step 6: Hook cosim2/tests from c_model/tests with EXISTS guard**
+- [ ] **Step 6: Hook cosim/tests from c_model/tests with EXISTS guard**
 
 In `c_model/tests/CMakeLists.txt`, add at the end:
 
 ```cmake
-# Stage 5b cosim2 ctest entries — only built if Verilator binary exists (local dev)
-if(EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir/Vtb_top.exe"
-   OR EXISTS "${CMAKE_SOURCE_DIR}/../cosim2/verilator/obj_dir/Vtb_top")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim2/tests cosim2_smoke_tests)
+# Stage 5b cosim ctest entries — only built if Verilator binary exists (local dev)
+if(EXISTS "${CMAKE_SOURCE_DIR}/../cosim/verilator/obj_dir/Vtb_top.exe"
+   OR EXISTS "${CMAKE_SOURCE_DIR}/../cosim/verilator/obj_dir/Vtb_top")
+    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim/tests cosim_smoke_tests)
 else()
-    message(STATUS "Vtb_top binary not found — skipping cosim2 ctest entries (CI env)")
+    message(STATUS "Vtb_top binary not found — skipping cosim ctest entries (CI env)")
 endif()
 ```
 
@@ -2400,7 +2400,7 @@ ctest --test-dir c_model/build -R "WireSmoke.*multibeat_incr_8beat" -V \
     > c_model/build/test-artifacts/multibeat-resolved.log 2>&1
 ```
 
-Edit `cosim2/KNOWN_LIMITATIONS.md` §2 — change "RESOLVED" status note to include the artifact path:
+Edit `cosim/KNOWN_LIMITATIONS.md` §2 — change "RESOLVED" status note to include the artifact path:
 
 ```markdown
 ### §2 Multi-beat W burst and multi-outstanding AW invisible to checker — RESOLVED
@@ -2418,9 +2418,9 @@ Last verified: 2026-06-05 by Stage 5b implementation Task 15.
 - [ ] **Step 10: Commit**
 
 ```bash
-git add cosim2/tests/ c_model/tests/CMakeLists.txt cosim2/KNOWN_LIMITATIONS.md
+git add cosim/tests/ c_model/tests/CMakeLists.txt cosim/KNOWN_LIMITATIONS.md
 git commit -m "$(cat <<'EOF'
-test(cosim2): add 5 ctest scenarios + drift gate validation + KL §2 RESOLVED
+test(cosim): add 5 ctest scenarios + drift gate validation + KL §2 RESOLVED
 
 Per Stage 5b spec §9 simplified test plan:
 - 4 conformity / multibeat / multioutstanding scenarios via parameterized
@@ -2440,7 +2440,7 @@ EOF
 - Injection scenario truly fails the binary (non-zero exit)?
 - Drift gates all clean (incl specgen pytest 163 + codegen --check + gen_inventory --check)?
 - KNOWN_LIMITATIONS §2 status updated with artifact path?
-- `cosim2/KNOWN_LIMITATIONS.md` §2 references the actual artifact file (existence verified)?
+- `cosim/KNOWN_LIMITATIONS.md` §2 references the actual artifact file (existence verified)?
 - Commit message accurately summarizes scope?
 
 ---

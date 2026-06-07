@@ -18,9 +18,9 @@ User intent (verbatim, 2026-06-06):
 
 ## 2. Scope
 
-In：`c_model/` + `cosim2/` + `specgen/`
+In：`c_model/` + `cosim/` + `specgen/`
 
-Out：`cosim2/sv/wb2axip/` (vendored Apache 2.0，frozen)
+Out：`cosim/sv/wb2axip/` (vendored Apache 2.0，frozen)
 
 Deferred 到後續 release-quality follow-up spec：Verilator strict warning-clean、
 coverage thresholds、sanitizer (UBSan/ASan)、fault injection、parameter sweep、
@@ -50,5 +50,5 @@ gate。Codex review 走 skill 而不是 Agent tool 帶 `subagent_type: codex:cod
 
 ## 6. Recommended order
 
-W1+W2 ship 之後再跑。W1+W2 已 delete / rewrite 部份 `cosim2/sv/` 檔；先跑這個會
+W1+W2 ship 之後再跑。W1+W2 已 delete / rewrite 部份 `cosim/sv/` 檔；先跑這個會
 浪費 fix-effort 在被刪檔上。

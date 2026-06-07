@@ -17,4 +17,4 @@ master_shell_read_dump.txt
 
 # Codex prompt files
 .codex_*.txt
-cosim2/output/
+cosim/output/

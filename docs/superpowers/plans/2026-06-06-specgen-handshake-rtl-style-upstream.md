@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Upstream the handshake/parameter schema currently hand-written in `cosim2/sv/*_intf.sv` into specgen, refactor specgen SV emission to industry-standard style (single `axi4_intf` with master/slave modports, consolidated NoC interface *types* — physical link instances stay separate per topology), and migrate `cosim2/sv/` to consume specgen output.
+**Goal:** Upstream the handshake/parameter schema currently hand-written in `cosim/sv/*_intf.sv` into specgen, refactor specgen SV emission to industry-standard style (single `axi4_intf` with master/slave modports, consolidated NoC interface *types* — physical link instances stay separate per topology), and migrate `cosim/sv/` to consume specgen output.
 
-**Architecture:** 2 phases. W1 adds the schema sources (`constants.yaml`, `interface_handshake.json`) and loader/validator. Generator emission unchanged in W1 — drift gate (`py -3 specgen/tools/codegen.py --check`) stays clean. W2 is one atomic PR: refactor emission (new peer emitter modules `sv_params.py`/`cpp_params.py`, rewrite `sv_signals.py` interface block), regenerate artifacts, migrate `cosim2/sv/` (preserving 2-hop NoC topology with 4 link instances of consolidated types), update `cosim2/verilator/Makefile`. Release-level quality sweep is **deferred** to a follow-up spec — see Phase W3 stub at end of plan.
+**Architecture:** 2 phases. W1 adds the schema sources (`constants.yaml`, `interface_handshake.json`) and loader/validator. Generator emission unchanged in W1 — drift gate (`py -3 specgen/tools/codegen.py --check`) stays clean. W2 is one atomic PR: refactor emission (new peer emitter modules `sv_params.py`/`cpp_params.py`, rewrite `sv_signals.py` interface block), regenerate artifacts, migrate `cosim/sv/` (preserving 2-hop NoC topology with 4 link instances of consolidated types), update `cosim/verilator/Makefile`. Release-level quality sweep is **deferred** to a follow-up spec — see Phase W3 stub at end of plan.
 
-**Tech Stack:** Python 3 (specgen via `py -3 specgen/tools/codegen.py`), SystemVerilog (Verilator 5.036), C++17 (c_model header-only), CMake/ctest (`c_model/CMakeLists.txt`), MSYS2 on Windows (PATH="/c/msys64/mingw64/bin:$PATH"), pytest (specgen tests), GoogleTest (c_model+cosim2 tests).
+**Tech Stack:** Python 3 (specgen via `py -3 specgen/tools/codegen.py`), SystemVerilog (Verilator 5.036), C++17 (c_model header-only), CMake/ctest (`c_model/CMakeLists.txt`), MSYS2 on Windows (PATH="/c/msys64/mingw64/bin:$PATH"), pytest (specgen tests), GoogleTest (c_model+cosim tests).
 
 **Source spec:** `docs/superpowers/specs/2026-06-06-specgen-handshake-rtl-style-upstream-design.md` (refreshed through commit `abacdd1`).
 
@@ -15,7 +15,7 @@
 - Drift gate: `py -3 specgen/tools/codegen.py --check`
 - Emitter signature: `emit(src_path: Path, spec_version: str) -> str` returning body (banner prepended by codegen.py)
 - `DOMAIN_TO_EMITTER` dispatcher in `codegen.py:38` maps `(target, domain)` to `(emitter_func, out_filename, source_json_rel)`
-- Verilator source list: `cosim2/verilator/Makefile:11` (NO `cosim2/CMakeLists.txt`)
+- Verilator source list: `cosim/verilator/Makefile:11` (NO `cosim/CMakeLists.txt`)
 - Makefile uses `VERILATOR_FLAGS := ...` recursive assign + already has `-Wno-fatal`; strict mode needs new mechanism
 - c_model build root: `c_model/CMakeLists.txt` (NO root CMakeLists.txt)
 - Fault injection test: `ctest -R CheckerLiveness` (test PASS when child binary exits nonzero; scenario `injection_aw_unstable.yaml`)
@@ -42,8 +42,8 @@
 **Deferred to release-sweep follow-up spec** (NOT created in this plan):
 - `specgen/tools/elaborate/signal_interface_md.py` + `specgen/tests/test_signal_interface_md.py` (per-IHI A9-1..A9-4 matrix needs careful classification — see deferred-stub section)
 - `specgen/tests/test_parameter_sweep.py` (requires `tb_top` parameter forwarding)
-- `cosim2/scripts/{run_release_gates,check_reproducible_gen,check_byte_identical_cpp,merge_findings,verilator_param_sweep,check_coverage,check_decisions}.{sh,py}` (release-level tooling)
-- `cosim2/tests/sv/elab_modport_only_harness.sv` (release-level lint)
+- `cosim/scripts/{run_release_gates,check_reproducible_gen,check_byte_identical_cpp,merge_findings,verilator_param_sweep,check_coverage,check_decisions}.{sh,py}` (release-level tooling)
+- `cosim/tests/sv/elab_modport_only_harness.sv` (release-level lint)
 
 ### Modified
 
@@ -54,19 +54,19 @@
 - `specgen/generated/cpp/ni_signals.h` — regenerated if signal layout downstream changed (likely byte-identical since name set unchanged).
 - `specgen/tests/golden/ni_signals_pkg.sv.golden` — regenerated (new style).
 - ~~`spec/ni/doc/signal_interface.md`~~ — generator-emit of `## Handshake & Modport Convention` and `## AXI4 Signal Matrix` sections is **DEFERRED** to release-sweep follow-up spec (see spec §4.4); this plan does NOT touch this file.
-- `cosim2/sv/nmu_wrap.sv` — use specgen `axi4_intf` + `noc_req_intf` + `noc_rsp_intf`; add `clk_i/rst_ni` module ports.
-- `cosim2/sv/nsu_wrap.sv` — symmetric.
-- `cosim2/sv/axi_master_wrap.sv` — use `axi4_intf.master`.
-- `cosim2/sv/axi_slave_wrap.sv` — use `axi4_intf.slave`.
-- `cosim2/sv/loopback_noc_wrap.sv` — **preserve 4-port topology** with 4 interface instances of types `noc_req_intf` + `noc_rsp_intf` (2 hops × 2 directions).
-- `cosim2/sv/tb_top.sv` — instantiate 1 axi4_intf for CPU side + 1 axi4_intf for memory side + 4 noc interfaces (req-NMU-side, req-NSU-side, rsp-NSU-side, rsp-NMU-side).
-- `cosim2/verilator/Makefile` — remove 3 hand-written interface .sv from `SV_SRC`; add specgen-generated `ni_params_pkg.sv` + `ni_signals_pkg.sv` to source list; add `VERILATOR_EXTRA_FLAGS` mechanism for strict gates.
+- `cosim/sv/nmu_wrap.sv` — use specgen `axi4_intf` + `noc_req_intf` + `noc_rsp_intf`; add `clk_i/rst_ni` module ports.
+- `cosim/sv/nsu_wrap.sv` — symmetric.
+- `cosim/sv/axi_master_wrap.sv` — use `axi4_intf.master`.
+- `cosim/sv/axi_slave_wrap.sv` — use `axi4_intf.slave`.
+- `cosim/sv/loopback_noc_wrap.sv` — **preserve 4-port topology** with 4 interface instances of types `noc_req_intf` + `noc_rsp_intf` (2 hops × 2 directions).
+- `cosim/sv/tb_top.sv` — instantiate 1 axi4_intf for CPU side + 1 axi4_intf for memory side + 4 noc interfaces (req-NMU-side, req-NSU-side, rsp-NSU-side, rsp-NMU-side).
+- `cosim/verilator/Makefile` — remove 3 hand-written interface .sv from `SV_SRC`; add specgen-generated `ni_params_pkg.sv` + `ni_signals_pkg.sv` to source list; add `VERILATOR_EXTRA_FLAGS` mechanism for strict gates.
 
 ### Deleted
 
-- `cosim2/sv/axi_intf.sv`
-- `cosim2/sv/noc_req_intf.sv`
-- `cosim2/sv/noc_rsp_intf.sv`
+- `cosim/sv/axi_intf.sv`
+- `cosim/sv/noc_req_intf.sv`
+- `cosim/sv/noc_rsp_intf.sv`
 
 ---
 
@@ -791,7 +791,7 @@ W2 PR opens on the same branch after W1 merges to main.
 
 W2 is one merged PR. Intermediate sub-commits may not elaborate clean; **final tree** is the CI gate: `py -3 specgen/tools/codegen.py --check` clean + `ctest --output-on-failure` 410/410 PASS + Verilator BASELINE elaboration (0 `%Error`; warnings under the existing `-Wno-fatal` baseline are tolerated). Strict-mode warning-clean elaboration is deferred to the release-sweep follow-up spec.
 
-PR title: `refactor(specgen+cosim2): industry-style SV interfaces + atomic migration`
+PR title: `refactor(specgen+cosim): industry-style SV interfaces + atomic migration`
 
 ---
 
@@ -1321,12 +1321,12 @@ git commit -m "chore(specgen): regenerate cpp artifacts (incidental byte refresh
 ### Task 10: Migrate `nmu_wrap.sv`
 
 **Files:**
-- Modify: `cosim2/sv/nmu_wrap.sv`
+- Modify: `cosim/sv/nmu_wrap.sv`
 
 - [ ] **Step 1: Read current file**
 
 ```bash
-sed -n '1,60p' cosim2/sv/nmu_wrap.sv
+sed -n '1,60p' cosim/sv/nmu_wrap.sv
 ```
 
 Note current parameters, port list, and how each `axi_intf` / `noc_*_intf` reference is used in `always_ff` blocks.
@@ -1364,8 +1364,8 @@ Inside the module body, mechanically rename:
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cosim2/sv/nmu_wrap.sv
-git commit -m "refactor(cosim2): migrate nmu_wrap to specgen axi4_intf + noc_*_intf"
+git add cosim/sv/nmu_wrap.sv
+git commit -m "refactor(cosim): migrate nmu_wrap to specgen axi4_intf + noc_*_intf"
 ```
 
 ---
@@ -1396,8 +1396,8 @@ module nsu_wrap #(
 - [ ] **Step 2: Body renames + commit**
 
 ```bash
-git add cosim2/sv/nsu_wrap.sv
-git commit -m "refactor(cosim2): migrate nsu_wrap to specgen interfaces"
+git add cosim/sv/nsu_wrap.sv
+git commit -m "refactor(cosim): migrate nsu_wrap to specgen interfaces"
 ```
 
 ---
@@ -1439,8 +1439,8 @@ Body renames: `<old>.<sig>` → `axi_i.<sig>`.
 - [ ] **Step 3: Commit**
 
 ```bash
-git add cosim2/sv/axi_master_wrap.sv cosim2/sv/axi_slave_wrap.sv
-git commit -m "refactor(cosim2): migrate axi_*_wrap to axi4_intf"
+git add cosim/sv/axi_master_wrap.sv cosim/sv/axi_slave_wrap.sv
+git commit -m "refactor(cosim): migrate axi_*_wrap to axi4_intf"
 ```
 
 ---
@@ -1448,14 +1448,14 @@ git commit -m "refactor(cosim2): migrate axi_*_wrap to axi4_intf"
 ### Task 13: Migrate `loopback_noc_wrap.sv` — **preserve 4-port topology**
 
 **Files:**
-- Modify: `cosim2/sv/loopback_noc_wrap.sv`
+- Modify: `cosim/sv/loopback_noc_wrap.sv`
 
 **Rationale (Codex round 3 CRITICAL):** The loopback NoC participates in `NMU → loopback → NSU → loopback → NMU` flow. Each leg is a distinct interface *instance*; collapsing to 2 ports destroys the topology. Consolidate interface *types* (noc_req_intf, noc_rsp_intf) while keeping 4 port *instances*.
 
 - [ ] **Step 1: Read current file**
 
 ```bash
-sed -n '1,50p' cosim2/sv/loopback_noc_wrap.sv
+sed -n '1,50p' cosim/sv/loopback_noc_wrap.sv
 ```
 
 Note the existing 4 ports — typically `noc_req_in`, `noc_req_out`, `noc_rsp_in`, `noc_rsp_out` (or similarly named).
@@ -1489,8 +1489,8 @@ Each prior single-direction port reference becomes the appropriately-named new p
 - [ ] **Step 4: Commit**
 
 ```bash
-git add cosim2/sv/loopback_noc_wrap.sv
-git commit -m "refactor(cosim2): migrate loopback_noc_wrap to consolidated NoC types (keeping 4-port topology)"
+git add cosim/sv/loopback_noc_wrap.sv
+git commit -m "refactor(cosim): migrate loopback_noc_wrap to consolidated NoC types (keeping 4-port topology)"
 ```
 
 ---
@@ -1498,21 +1498,21 @@ git commit -m "refactor(cosim2): migrate loopback_noc_wrap to consolidated NoC t
 ### Task 14: Migrate `tb_top.sv` — 1 CPU-side AXI + 1 mem-side AXI + 4 NoC links
 
 **Files:**
-- Modify: `cosim2/sv/tb_top.sv`
-- Modify: `cosim2/verilator/Makefile`
-- Delete: `cosim2/sv/axi_intf.sv`, `cosim2/sv/noc_req_intf.sv`, `cosim2/sv/noc_rsp_intf.sv`
+- Modify: `cosim/sv/tb_top.sv`
+- Modify: `cosim/verilator/Makefile`
+- Delete: `cosim/sv/axi_intf.sv`, `cosim/sv/noc_req_intf.sv`, `cosim/sv/noc_rsp_intf.sv`
 
 - [ ] **Step 1: Read current `tb_top.sv` to understand existing wire/instance layout**
 
 ```bash
-sed -n '1,80p' cosim2/sv/tb_top.sv
+sed -n '1,80p' cosim/sv/tb_top.sv
 ```
 
 Note the existing instance names + how the 5 wraps are wired today.
 
 - [ ] **Step 2: READ existing `tb_top.sv` and identify what to preserve**
 
-Run: `sed -n '1,40p' cosim2/sv/tb_top.sv`
+Run: `sed -n '1,40p' cosim/sv/tb_top.sv`
 
 Observe:
 - `tb_top` has `clk_i` and `rst_ni` as **input ports** driven by `main.cpp` (via Verilator's top eval loop) — DO NOT redeclare them as internal `logic`
@@ -1571,9 +1571,9 @@ Identify the existing `axi_intf #() ...;`, `noc_req_intf #() ...;`, and module i
 
 Module header (`module tb_top (input logic clk_i, input logic rst_ni);` or whatever it actually is), DPI imports, `final` blocks, scoreboard hooks, and `$finish` logic are NOT touched.
 
-- [ ] **Step 3: Update `cosim2/verilator/Makefile` — remove deleted .sv, add specgen sources, add VERILATOR_EXTRA_FLAGS**
+- [ ] **Step 3: Update `cosim/verilator/Makefile` — remove deleted .sv, add specgen sources, add VERILATOR_EXTRA_FLAGS**
 
-Edit `cosim2/verilator/Makefile`. Find the `SV_SRC := \` block (line 11-23). Rewrite as:
+Edit `cosim/verilator/Makefile`. Find the `SV_SRC := \` block (line 11-23). Rewrite as:
 
 ```makefile
 SV_SRC := \
@@ -1614,14 +1614,14 @@ And in the actual build invocation (line 62), keep `$(VERILATOR_FLAGS)` (which n
 - [ ] **Step 4: Delete the three hand-written interface files**
 
 ```bash
-git rm cosim2/sv/axi_intf.sv cosim2/sv/noc_req_intf.sv cosim2/sv/noc_rsp_intf.sv
+git rm cosim/sv/axi_intf.sv cosim/sv/noc_req_intf.sv cosim/sv/noc_rsp_intf.sv
 ```
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cosim2/sv/tb_top.sv cosim2/verilator/Makefile
-git commit -m "refactor(cosim2): migrate tb_top + Makefile; remove hand-written interfaces"
+git add cosim/sv/tb_top.sv cosim/verilator/Makefile
+git commit -m "refactor(cosim): migrate tb_top + Makefile; remove hand-written interfaces"
 ```
 
 ---
@@ -1646,7 +1646,7 @@ cd specgen && py -3 tools/codegen.py --check
 
 Expected: exit 0.
 
-- [ ] **Step 3: Build c_model + cosim2 from scratch**
+- [ ] **Step 3: Build c_model + cosim from scratch**
 
 ```bash
 export PATH="/c/msys64/mingw64/bin:$PATH"
@@ -1654,7 +1654,7 @@ cd /e/05_NoC/noc_project/c_model
 cmake -S . -B build
 cmake --build build -j
 
-cd ../cosim2/verilator
+cd ../cosim/verilator
 make clean
 make
 ```
@@ -1675,7 +1675,7 @@ Expected: 410/410 PASS (matches Stage 5b baseline).
 Use two separate loops — positive fixtures fail loudly; negative fixture must exit nonzero or the gate FAILS:
 
 ```bash
-cd /e/05_NoC/noc_project/cosim2/verilator
+cd /e/05_NoC/noc_project/cosim/verilator
 set -e
 echo "=== positive fixtures (must exit 0) ==="
 for fix in debug_multi1.yaml write_only_smoke.yaml \
@@ -1698,7 +1698,7 @@ Expected: positive loop completes with no error; negative fixture exits nonzero 
 
 ```bash
 set -o pipefail
-cd /e/05_NoC/noc_project/cosim2/verilator
+cd /e/05_NoC/noc_project/cosim/verilator
 make clean
 make 2>&1 | tee /tmp/verilator_build.log
 ! grep -q "^%Error" /tmp/verilator_build.log
@@ -1710,15 +1710,15 @@ Expected: the final `! grep -q` exits 0 (no `%Error` lines found). `set -o pipef
 
 ```bash
 git push -u origin stage5b/dpi-wire-wrap
-gh pr create --title "refactor(specgen+cosim2): industry-style SV interfaces + atomic migration" \
+gh pr create --title "refactor(specgen+cosim): industry-style SV interfaces + atomic migration" \
   --body "$(cat <<'EOF'
 ## Summary
 - Single axi4_intf with master/slave modports (collapses 2 prior interfaces)
 - Consolidates 4 NoC interfaces to noc_req_intf + noc_rsp_intf (interface *types*; physical link instances preserved per 2-hop topology)
 - constants.yaml as language-neutral source of truth for SV+C++ parameter defaults
 - New ni_params_pkg.sv + ni_params.h emitters added to codegen.py DOMAIN_TO_EMITTER
-- 5 wraps + tb_top migrated; hand-written cosim2/sv/{axi,noc_req,noc_rsp}_intf.sv removed
-- cosim2/verilator/Makefile SV_SRC list updated for specgen-generated sources
+- 5 wraps + tb_top migrated; hand-written cosim/sv/{axi,noc_req,noc_rsp}_intf.sv removed
+- cosim/verilator/Makefile SV_SRC list updated for specgen-generated sources
 
 ## Test plan
 - [x] specgen pytest all green
@@ -1793,7 +1793,7 @@ The follow-up spec lives at `docs/superpowers/specs/YYYY-MM-DD-release-quality-s
 - §6 W1/W2 test plan → Task 15 final CI gate ✓
 - §7 Open Item O8 (release-sweep deferred) → recorded as deferred-stub section, no tasks in this plan ✓
 
-**Placeholder scan:** `sv_params.py` / `cpp_params.py` / `handshake_schema.py` all defined inline with full code in Tasks 2, 4, 5. Drift command (`py -3 specgen/tools/codegen.py --check` per `codegen.py:11`). Makefile path (`cosim2/verilator/Makefile` per actual location, NOT `cosim2/CMakeLists.txt`). No `...` or "or whatever" hand-waves outside intentional ellipsis in code listings that follow the spec verbatim.
+**Placeholder scan:** `sv_params.py` / `cpp_params.py` / `handshake_schema.py` all defined inline with full code in Tasks 2, 4, 5. Drift command (`py -3 specgen/tools/codegen.py --check` per `codegen.py:11`). Makefile path (`cosim/verilator/Makefile` per actual location, NOT `cosim/CMakeLists.txt`). No `...` or "or whatever" hand-waves outside intentional ellipsis in code listings that follow the spec verbatim.
 
 **Type consistency:**
 - Emitter signature `emit(src_path: Path, spec_version: str) -> str` consistent across `sv_params`, `cpp_params`, existing `sv_signals` (matches `DOMAIN_TO_EMITTER` contract at `codegen.py:38`).
