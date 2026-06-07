@@ -6,6 +6,8 @@
 CMODEL_DIR      := c_model
 CMODEL_BUILD    := $(CMODEL_DIR)/build
 COSIM_VERILATOR := cosim2/verilator
+COSIM_FIXTURES  := cosim2/tests/fixtures
+SIM_OUTPUT_DIR  := cosim2/output
 SCENARIO        ?= debug_multi1
 
 .PHONY: help build build-cmodel build-verilator sim test \
@@ -25,7 +27,7 @@ help:
 	@echo "Clean:"
 	@echo "  make clean                  everything"
 	@echo "  make clean-cmodel           c_model/build/"
-	@echo "  make clean-verilator        cosim2/verilator/obj_dir/ + its dump"
+	@echo "  make clean-verilator        cosim2/verilator/obj_dir/ + cosim2/output/"
 	@echo "  make clean-specgen-cache    specgen __pycache__/"
 
 # --- build ---
@@ -47,8 +49,28 @@ build-verilator: build-cmodel
 
 # --- run / test ---
 
+# Run Vtb_top with cwd at $(COSIM_VERILATOR) (so the scenario YAML's relative
+# data_file paths resolve correctly), then collect all per-run artifacts
+# (run.log + master_shell_read_dump.txt) into $(SIM_OUTPUT_DIR)/$(SCENARIO)/.
+# Re-runs overwrite the prior run's files.
+SIM_RUN_DIR := $(SIM_OUTPUT_DIR)/$(SCENARIO)
+SIM_RUN_ABS := $(CURDIR)/$(SIM_RUN_DIR)
+
 sim: build-verilator
-	cd $(COSIM_VERILATOR) && ./obj_dir/Vtb_top "+scenario=../tests/fixtures/$(SCENARIO).yaml"
+	@mkdir -p $(SIM_RUN_DIR)
+	@echo "running scenario $(SCENARIO); output -> $(SIM_RUN_DIR)/"
+	@cd $(COSIM_VERILATOR) && \
+	    ./obj_dir/Vtb_top "+scenario=../tests/fixtures/$(SCENARIO).yaml" \
+	    > $(SIM_RUN_ABS)/run.log 2>&1; \
+	rc=$$?; \
+	if [ -f master_shell_read_dump.txt ]; then \
+	    mv master_shell_read_dump.txt $(SIM_RUN_ABS)/; \
+	fi; \
+	echo "--- run.log (tail) ---"; \
+	tail -8 $(SIM_RUN_ABS)/run.log; \
+	echo "--- artifacts ---"; \
+	ls $(SIM_RUN_ABS)/; \
+	exit $$rc
 
 test: build-cmodel
 	cd $(CMODEL_BUILD) && ctest --output-on-failure
@@ -62,6 +84,7 @@ clean-cmodel:
 
 clean-verilator:
 	$(MAKE) -C $(COSIM_VERILATOR) clean
+	rm -rf $(SIM_OUTPUT_DIR)
 
 clean-specgen-cache:
 	find specgen -type d -name __pycache__ -prune -exec rm -rf {} +
