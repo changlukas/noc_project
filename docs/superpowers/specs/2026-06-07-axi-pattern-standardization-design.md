@@ -22,7 +22,7 @@
   scenario's parsed content against wb2axip's structural constraints and
   SKIPs the test with a content-derived reason string. No maintained skip
   map. INF scenarios detected by ID prefix.
-- Lint utility `tools/lint_scenarios.py` (10 invariants)
+- Lint utility `tools/lint_scenarios.py` (8 invariants)
 - Rewrite `tests/scenarios/README.md`
 
 ### Non-goals (deferred to later rounds)
@@ -68,7 +68,7 @@ AX4-<CAT>-<NNN>_<slug>
 
 | Code | Full name | Scope |
 |---|---|---|
-| `BAS` | `basic` | Basic single-beat transfers |
+| `BAS` | `basic` | Basic serialized single-beat transfers |
 | `HSH` | `handshake` | Handshake stall, backpressure |
 | `BUR` | `burst` | INCR / WRAP / FIXED burst type and length |
 | `BND` | `boundary` | Alignment, narrow transfer, 4 KB boundary |
@@ -171,7 +171,7 @@ belong in test code, not pattern metadata.
 ### Final mapping (36 scenarios after one delete, one reclassify, 5 additions)
 
 ```
-BAS (5) — basic single-beat transfers
+BAS (5) — basic serialized single-beat transfers
   BAS-001 single_write_no_read
   BAS-002 single_read_default_fill
   BAS-003 single_write_read_aligned
@@ -339,27 +339,32 @@ New file `cosim/tests/wb2axip_block.hpp`:
 namespace noc::tests {
 
 // Returns a SKIP reason string if this scenario's content violates a known
-// wb2axip structural constraint; nullopt if wb2axip can in principle run it.
-// Constraint sources (all from wb2axip/rtl/faxi_slave.v):
-//   - AWLEN = 0 (single beat only)                line 805-807
+// wb2axip structural constraint (or names a fault-injection mode that
+// belongs in a dedicated test). nullopt = wb2axip can in principle run it.
+//
+// Verified constraints (wb2axip/rtl/faxi_slave.v audit, Codex review):
+//   - AWLEN must be 0 (single-beat write)         line 805-807
 //   - wr_pending <= 1 (single outstanding write)  line 805-807
-//   - rd_pending <= 1 (single outstanding read)
-//   - AW/W strict in-order                        line 561
-//   - INCR-only burst type
-//   - No DECERR modelling (OOB address)
-//   - No exclusive monitor
+//   - No exclusive-access monitor
+//
+// Not blockers (rejected from earlier draft after source audit):
+//   - max_outstanding_read > 1 — wb2axip permits multiple outstanding reads
+//   - burst != INCR — wb2axip handles WRAP/FIXED for single beat (len=0);
+//     multi-beat WRAP/FIXED are already caught by the len>0 check
+//   - OOB address (DECERR) — wb2axip is a protocol checker, not an
+//     address-map predictor; DECERR responses are legal AXI4
+//
+// Fault injection (inject.mode != None) belongs in dedicated tests
+// (e.g. test_checker_fires_on_violation), not run-all suites.
 inline std::optional<std::string>
 wb2axip_block_reason(ni::cmodel::axi::Scenario const& sc) {
     using namespace ni::cmodel::axi;
     if (sc.config.max_outstanding_write > 1) return "WB2AXIP_MAX_OUT_WRITE";
-    if (sc.config.max_outstanding_read  > 1) return "WB2AXIP_MAX_OUT_READ";
-    auto const mem_end = sc.config.memory_base + sc.config.memory_size;
+    if (sc.config.inject.mode != InjectConfig::Mode::None)
+        return "INJECTION_DEDICATED_TEST";
     for (auto const& t : sc.transactions) {
-        if (t.len > 0)                      return "WB2AXIP_MULTI_BEAT";
-        if (t.burst != Burst::INCR)         return "WB2AXIP_NON_INCR";
-        if (t.lock == LockType::Exclusive)  return "WB2AXIP_EXCLUSIVE";
-        if (t.addr < sc.config.memory_base || t.addr >= mem_end)
-            return "WB2AXIP_OOB_DECERR";
+        if (t.len > 0)                     return "WB2AXIP_MULTI_BEAT";
+        if (t.lock == LockType::Exclusive) return "WB2AXIP_EXCLUSIVE";
     }
     return std::nullopt;
 }
@@ -413,16 +418,17 @@ c_model side (`test_integration.cpp`):
 ```cpp
 TEST_P(IntegrationP, RunsToCompletion) {
     auto scenario_id = std::string{GetParam()};
+    auto scenario_path = std::string(SCENARIO_TREE_ROOT) + scenario_id
+                       + "/scenario.yaml";
 
-    // INF scenarios belong to dedicated tests; run-all skips them.
+    // Validate-before-skip: broken YAML must fail loudly, not hide behind skip.
+    // load_scenario throws (with path:field:value context) on schema violation.
+    auto sc = ni::cmodel::axi::load_scenario(scenario_path);
+
+    // After successful load, INF scenarios are reserved for dedicated tests.
     if (scenario_id.compare(0, 8, "AX4-INF-") == 0) {
         GTEST_SKIP() << "INF_DEDICATED_TEST";
     }
-
-    // Validate-before-skip: broken YAML must fail loudly, not hide behind skip.
-    auto scenario_path = std::string(SCENARIO_TREE_ROOT) + scenario_id
-                       + "/scenario.yaml";
-    auto sc = ni::cmodel::axi::load_scenario(scenario_path);
 
     // Run scenario.
     auto r = run_scenario(sc, ...);
@@ -439,19 +445,25 @@ INSTANTIATE_TEST_SUITE_P(
     });
 ```
 
-cosim side (`test_cosim_integration.cpp`) adds the wb2axip helper after
-load_scenario:
+cosim side (`test_cosim_integration.cpp`) follows the same load-first
+ordering, then calls the wb2axip helper:
 
 ```cpp
 TEST_P(CosimIntegrationP, ScenarioPassesWb2axip) {
     auto scenario_id = std::string{GetParam()};
+    auto scenario_path = std::string(SCENARIO_TREE_ROOT) + scenario_id
+                       + "/scenario.yaml";
+
+    // Load + schema-validate first.
+    auto sc = ni::cmodel::axi::load_scenario(scenario_path);
+
+    // INF scenarios reserved for dedicated tests.
     if (scenario_id.compare(0, 8, "AX4-INF-") == 0) {
         GTEST_SKIP() << "INF_DEDICATED_TEST";
     }
-    auto scenario_path = std::string(SCENARIO_TREE_ROOT) + scenario_id
-                       + "/scenario.yaml";
-    auto sc = ni::cmodel::axi::load_scenario(scenario_path);
 
+    // wb2axip structural blockers (max_outstanding_write>1, len>0,
+    // Exclusive, inject mode).
     if (auto reason = noc::tests::wb2axip_block_reason(sc); reason) {
         GTEST_SKIP() << *reason;
     }
@@ -537,17 +549,21 @@ plain C++ inspected by compiler; INF detection is a one-line prefix check.
 
 ## 6. Commit batching + README
 
-### Three commits
+### Four commits
 
 | # | Subject | Atomic with |
 |---|---|---|
-| 1 | `feat(scenarios): add schema_version, metadata, generated list, wb2axip runtime predicate, lint` | self-contained — existing tests untouched, runtime unchanged |
-| 2 | `refactor(scenarios): rename to AX4-CAT-NNN_slug + 5 spec-gap additions + test rewrites + cosim test rename` | must atomic — ~40 dir moves + 5 cpp file rewrites (including `test_cosim_wire_smoke.cpp` → `test_cosim_integration.cpp` + `INSTANTIATE_TEST_SUITE_P` label `WireSmoke` → `CosimIntegration`); intermediate states fail |
-| 3 | `docs(scenarios): rewrite tests/scenarios/README.md` | independent |
+| 1 | `feat(scenarios): parser strict mode + generated list scaffold + wb2axip runtime predicate` | self-contained — adds parser fields, CMake glob template, helper headers; **no lint hookup yet** (would reject legacy dirs). Existing layered scenarios still load via lenient mode (no `schema_version` field). |
+| 2 | `refactor(scenarios): migrate 31 existing to AX4-CAT-NNN_slug + lint + test rewrites + cosim test rename` | must atomic — ~30 dir moves + add metadata to each + activate lint in `make check` + 5 cpp file rewrites (including `test_cosim_wire_smoke.cpp` → `test_cosim_integration.cpp` + `INSTANTIATE_TEST_SUITE_P` label `WireSmoke` → `CosimIntegration`); intermediate states fail |
+| 3 | `feat(scenarios): add 5 spec-gap patterns (BUR-003/007/008/009, BND-007)` | self-contained on top of commit 2 — each new scenario is a fresh AX4-* dir + YAML + data, no edits to existing scenarios; tests pick up via `kAllAxi4Scenarios` automatically |
+| 4 | `docs(scenarios): rewrite tests/scenarios/README.md` | independent |
 
-Each commit individually compiles, runs `make check` clean (including lint),
-and contains tests for any new functionality. Commit 2's commit message
-includes the full rename map.
+Each commit individually compiles, runs `make check` clean, and contains
+tests for any new functionality. Commit 2 is the only large commit by
+necessity (rename + lint activation + test path updates are coupled).
+Commit 2's commit message includes the full rename map. Commit 3 ships
+the 5 spec-gap patterns separately so review can focus on each pattern's
+spec citation.
 
 ### README rewrite outline
 
