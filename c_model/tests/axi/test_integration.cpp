@@ -68,25 +68,38 @@ struct FixtureParam {
 
 // Generates a readable name for each TEST_P instance, e.g.
 // AxiFixtures/IntegrationP.RunFixture/single_write_read_aligned
+// The param value is "<layer>/<name>"; gtest names disallow '/', so we
+// keep only the trailing <name> component.
 struct FixtureName {
     std::string operator()(const ::testing::TestParamInfo<FixtureParam>& info) const {
         auto n = info.param.yaml;
-        auto dot = n.rfind('.');
-        if (dot != std::string::npos) n = n.substr(0, dot);
+        auto slash = n.rfind('/');
+        if (slash != std::string::npos) n = n.substr(slash + 1);
         return n;
     }
 };
 
 class IntegrationP : public ::testing::TestWithParam<FixtureParam> {};
 
+// p.yaml is a path stem like "common/single_write_read_aligned" or
+// "c-model-only/sparse_multibeat" — the layer prefix lets a single test list
+// span common/ and c-model-only/ scenarios. The scenario.yaml path is built
+// from SCENARIO_TREE_ROOT (injected by CMake) so the test runs from any cwd.
 TEST_P(IntegrationP, RunFixture) {
     SCENARIO(
         "axi integration: end-to-end YAML fixture runs Master+Slave+Mem to completion under "
         "watchdog");
     auto p = GetParam();
-    std::string yaml_path = "fixtures/" + p.yaml;
-    std::string wpath = p.write_data.empty() ? std::string{} : ("fixtures/" + p.write_data);
-    std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml + ".read.txt";
+    std::string yaml_path =
+        std::string(SCENARIO_TREE_ROOT) + p.yaml + "/scenario.yaml";
+    std::string wpath = p.write_data.empty()
+                            ? std::string{}
+                            : (std::string(SCENARIO_TREE_ROOT) + p.yaml + "/" + p.write_data);
+    // Use scenario name (last path component of p.yaml) for the read-dump
+    // temp filename so the path stays readable and short.
+    auto last_slash = p.yaml.rfind('/');
+    std::string short_name = (last_slash == std::string::npos) ? p.yaml : p.yaml.substr(last_slash + 1);
+    std::string rpath = std::string(::testing::TempDir()) + "/" + short_name + ".read.txt";
     auto r = run_scenario(yaml_path, wpath, rpath);
     if (p.expect_file_diff_pass) {
         EXPECT_TRUE(r.file_diff_pass)
@@ -98,40 +111,41 @@ TEST_P(IntegrationP, RunFixture) {
     EXPECT_LE(r.cycle_count, kMaxCycles) << "watchdog tripped: " << p.yaml;
 }
 
+// FixtureParam.yaml encodes "<layer>/<scenario-dir>" (no .yaml suffix);
+// FixtureParam.write_data is the diff target's bare filename inside the
+// scenario dir (typically "data.txt"; empty = skip file diff).
 INSTANTIATE_TEST_SUITE_P(
     AxiFixtures, IntegrationP,
     ::testing::Values(
-        FixtureParam{"single_write_read_aligned.yaml", "single_write_read_aligned_data.txt", true,
-                     true},
-        FixtureParam{"burst_incr_2beat.yaml", "burst_incr_2beat_data.txt", true, true},
-        FixtureParam{"burst_incr_8beat.yaml", "burst_incr_8beat_data.txt", true, true},
-        FixtureParam{"multi_txn_same_id.yaml", "multi_txn_same_id_data.txt", true, true},
-        FixtureParam{"multi_txn_diff_id.yaml", "multi_txn_diff_id_data.txt", true, true},
-        FixtureParam{"decerr_oob_write.yaml", "", false, true},
-        FixtureParam{"decerr_oob_read.yaml", "", false, true},
-        FixtureParam{"latency_stress.yaml", "latency_stress_data.txt", true, true},
-        FixtureParam{"single_read_default_fill.yaml", "", false, true},
-        FixtureParam{"burst_crosses_oob_boundary.yaml", "", false, true},
+        FixtureParam{"common/single_write_read_aligned", "data.txt", true, true},
+        FixtureParam{"common/burst_incr_2beat", "data.txt", true, true},
+        FixtureParam{"common/burst_incr_8beat", "data.txt", true, true},
+        FixtureParam{"common/multi_txn_same_id", "data.txt", true, true},
+        FixtureParam{"common/multi_txn_diff_id", "data.txt", true, true},
+        FixtureParam{"c-model-only/decerr_oob_write", "", false, true},
+        FixtureParam{"c-model-only/decerr_oob_read", "", false, true},
+        FixtureParam{"c-model-only/latency_stress", "data.txt", true, true},
+        FixtureParam{"c-model-only/single_read_default_fill", "", false, true},
+        FixtureParam{"c-model-only/burst_crosses_oob_boundary", "", false, true},
         // backpressure_retry: 4 concurrent writes + 4 concurrent reads on the
         // same addresses race each other (no AXI write-before-read ordering),
         // so the read dump is non-deterministic relative to write completion.
         // We verify watchdog + scoreboard only; file diff is skipped.
-        FixtureParam{"backpressure_retry.yaml", "", false, true},
-        FixtureParam{"multi_outstanding_stress.yaml", "multi_outstanding_stress_data.txt", true,
-                     true},
+        FixtureParam{"common/backpressure_retry", "", false, true},
+        FixtureParam{"c-model-only/multi_outstanding_stress", "data.txt", true, true},
         // Phase B-2: INCR with unaligned start addr 0x1005 size=5; first beat
         // WSTRB clears lanes 0..4. Read dump cannot byte-match the write data
         // (alignment differs); scoreboard validates byte-level correctness.
         // NOTE: c_model emits 1 beat where AXI4 spec would require 2 (the burst
         // logically crosses lane 31 into a 2nd bus word). Data file uses
         // trailing 0 padding to compensate; only 27 user bytes are committed.
-        FixtureParam{"unaligned_start.yaml", "", false, true},
+        FixtureParam{"c-model-only/unaligned_start", "", false, true},
         // Phase B-3b: aligned narrow bursts. data_file is packed user bytes
         // ((len+1)*bpb total); read dump is per-beat bus-image and does not
         // match the packed layout, so file diff is skipped. Scoreboard
         // validates byte-level write->read equivalence.
-        FixtureParam{"narrow_transfer_size2.yaml", "", false, true},
-        FixtureParam{"narrow_transfer_size0.yaml", "", false, true},
+        FixtureParam{"c-model-only/narrow_transfer_size2", "", false, true},
+        FixtureParam{"c-model-only/narrow_transfer_size0", "", false, true},
         // Phase B-4: WRAP and FIXED bursts (AXI4 IHI 0022 B1.4.3).
         // - wrap_burst_aligned: 2-beat WRAP that stays inside the window (no
         //   actual wrap). Read dump matches the packed data file byte-for-byte
@@ -144,15 +158,15 @@ INSTANTIATE_TEST_SUITE_P(
         //   sees last-beat-wins, so the read dump returns 4 copies of beat 3
         //   while the data file has 4 distinct beats; file diff is skipped.
         //   Scoreboard models last-beat-wins per byte via map assignment.
-        FixtureParam{"wrap_burst_aligned.yaml", "wrap_burst_aligned_data.txt", true, true},
-        FixtureParam{"wrap_burst_actual_wrap.yaml", "wrap_burst_actual_wrap_data.txt", true, true},
-        FixtureParam{"fixed_burst.yaml", "", false, true},
+        FixtureParam{"c-model-only/wrap_burst_aligned", "data.txt", true, true},
+        FixtureParam{"c-model-only/wrap_burst_actual_wrap", "data.txt", true, true},
+        FixtureParam{"c-model-only/fixed_burst", "", false, true},
         // Phase B-5a: INCR txn at 0x0FE0 size=5 len=7 (256B) crosses the 4KB
         // boundary at 0x1000. AxiMaster auto-segments into 1-beat + 7-beat
         // sub-bursts via split_into_sub_bursts. Both addr=0x0FE0 and 0x1000
         // are 32-byte aligned, so byte_lane=0 throughout — the read dump
         // matches the packed data file byte-for-byte.
-        FixtureParam{"cross_4kb_auto_split.yaml", "cross_4kb_auto_split_data.txt", true, true},
+        FixtureParam{"c-model-only/cross_4kb_auto_split", "data.txt", true, true},
         // Phase B-5b combined fixtures.
         // - narrow_aligned_multibeat: aligned narrow multi-beat (addr=0x1004,
         //   size=2, len=3). Read dump is bus-image-per-beat, not packed, so
@@ -163,8 +177,8 @@ INSTANTIATE_TEST_SUITE_P(
         //   patterns (0x000000FF, 0x0000FF00, 0x00FF0000, 0xFF000000). Each
         //   beat enables a different byte-group; scoreboard validates that
         //   only enabled bytes update memory.
-        FixtureParam{"narrow_aligned_multibeat.yaml", "", false, true},
-        FixtureParam{"sparse_multibeat.yaml", "", false, true},
+        FixtureParam{"c-model-only/narrow_aligned_multibeat", "", false, true},
+        FixtureParam{"c-model-only/sparse_multibeat", "", false, true},
         // Phase C: AXI4 exclusive access (IHI 0022 §A7).
         // - exclusive_pair_success: matched AR(excl)/AW(excl) pair → EXOKAY;
         //   memory commits; final verify-read returns the exclusive payload.
@@ -177,8 +191,8 @@ INSTANTIATE_TEST_SUITE_P(
         //   tag range uses wrap window.
         // file_diff skipped: dump_file emits per-beat bus image, not packed
         // user-byte layout. Scoreboard validates byte-level correctness.
-        FixtureParam{"exclusive_pair_success.yaml", "", false, true},
-        FixtureParam{"exclusive_intervening_write.yaml", "", false, true},
-        FixtureParam{"exclusive_no_prior_read.yaml", "", false, true},
-        FixtureParam{"exclusive_wrap_pair_success.yaml", "", false, true}),
+        FixtureParam{"c-model-only/exclusive_pair_success", "", false, true},
+        FixtureParam{"c-model-only/exclusive_intervening_write", "", false, true},
+        FixtureParam{"c-model-only/exclusive_no_prior_read", "", false, true},
+        FixtureParam{"c-model-only/exclusive_wrap_pair_success", "", false, true}),
     FixtureName{});

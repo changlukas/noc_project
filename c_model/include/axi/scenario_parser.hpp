@@ -3,6 +3,7 @@
 #include "axi/protocol_rules.hpp"
 #include "axi/types.hpp"
 #include <cstdint>
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -62,6 +63,16 @@ inline Scenario load_scenario(const std::string& path) {
     } catch (const YAML::Exception& e) {
         throw std::runtime_error("scenario: parse failed for '" + path + "': " + e.what());
     }
+    // Resolve data_file / dump_file / strb_file relative to the YAML's own
+    // directory so a scenario can be consumed from any cwd. Absolute paths
+    // are honored as-is (escape hatch for ad-hoc tests).
+    const std::filesystem::path yaml_dir = std::filesystem::path(path).parent_path();
+    auto resolve_data_path = [&yaml_dir](std::string raw) -> std::string {
+        if (raw.empty()) return raw;
+        std::filesystem::path p(raw);
+        if (p.is_absolute()) return raw;
+        return (yaml_dir / p).string();
+    };
     Scenario sc;
 
     if (root["config"]) {
@@ -144,10 +155,11 @@ inline Scenario load_scenario(const std::string& path) {
             }
         }
         if (t.op == ScenarioTransaction::Op::Write)
-            t.data_file = txn["data_file"].as<std::string>();
-        if (t.op == ScenarioTransaction::Op::Read) t.dump_file = txn["dump_file"].as<std::string>();
+            t.data_file = resolve_data_path(txn["data_file"].as<std::string>());
+        if (t.op == ScenarioTransaction::Op::Read)
+            t.dump_file = resolve_data_path(txn["dump_file"].as<std::string>());
         if (t.op == ScenarioTransaction::Op::Write && txn["strb_file"]) {
-            t.strb_file = txn["strb_file"].as<std::string>();
+            t.strb_file = resolve_data_path(txn["strb_file"].as<std::string>());
         }
         if (txn["lock"]) {
             auto lock_str = txn["lock"].as<std::string>();

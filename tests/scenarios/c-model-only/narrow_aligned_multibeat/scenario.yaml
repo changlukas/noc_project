@@ -1,0 +1,27 @@
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+# Phase B-5b combined: aligned narrow multi-beat (size=2, 4 bytes/beat,
+# 4 beats). Exercises B-3b narrow-byte-lane W push together with B-5a
+# per-ID FIFO admit. addr=0x1004 is aligned to (1<<size)=4, so this is
+# NOT an unaligned-narrow case (file renamed from narrow_unaligned.yaml
+# in the Phase C audit, D1-1). A truly unaligned variant (e.g. addr=0x1005
+# size=2) would interact with lane-positioning in a way already covered
+# by unaligned_start.yaml.
+transactions:
+  - op: write
+    addr: 0x1004
+    id: 0x5
+    len: 3
+    size: 2
+    burst: INCR
+    data_file: data.txt
+  - op: read
+    addr: 0x1004
+    id: 0x5
+    len: 3
+    size: 2
+    burst: INCR
+    dump_file: unused.txt

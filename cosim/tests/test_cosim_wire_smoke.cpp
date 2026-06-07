@@ -58,8 +58,12 @@ TEST_P(CosimWireSmoke, scenario_passes_wb2axip) {
     SCENARIO(("Stage 5b wire-level: " + GetParam()).c_str());
     const char* bin = std::getenv(kCosimBinaryEnv);
     ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
-    // Scenario path relative to cosim/verilator/ (the Vtb_top CWD).
-    const std::string scenario = "../tests/fixtures/" + GetParam();
+    // SCENARIO_TREE_ROOT is the absolute path to tests/scenarios/ (injected
+    // at compile time by CMake). All scenarios consumed by this smoke test
+    // live under common/. scenario_parser resolves data_file: paths relative
+    // to the scenario.yaml's own directory, so Vtb_top's cwd doesn't matter.
+    const std::string scenario =
+        std::string(SCENARIO_TREE_ROOT) + "common/" + GetParam() + "/scenario.yaml";
     const std::string cmd = std::string(bin) + " +scenario=" + scenario;
     const ProcResult result = run_and_capture(cmd);
     EXPECT_EQ(result.rc, 0) << "scenario " << GetParam() << " failed (exit "
@@ -84,15 +88,19 @@ TEST_P(CosimWireSmoke, scenario_passes_wb2axip) {
 // independently verified at the C++ adapter layer by T10 unit test
 // NmuShellAdapter.multi_beat_w_burst_visible_per_cycle.
 //
-// Scenario "multioutstanding_aw_stress" is intentionally renamed below
-// (see multi_id_single_beat_sequential.yaml) — the original name implied
-// multi-outstanding AW but all transactions are max_outstanding_write=1
-// with len=0 (sequential single-beat). See KNOWN_LIMITATIONS.md §6.
+// Scenarios are post-Stage-B common scenarios scope-limited to
+// max_outstanding_{write,read} == 1 (default) and single-beat (AWLEN=0).
+// wb2axip's faxi_slave additionally checks AW/W ordering (faxi_slave.v:561
+// + :805-807) which a multi-outstanding master can violate by interleaving
+// W beats across AW IDs — the older L1 fixtures conformity_backpressure /
+// multi_id_single_beat_sequential were explicitly tuned for these limits
+// (max_outstanding_write=1) and were dedup'd against L3 scenarios that
+// raise max_outstanding to 4-8. Only L3 scenarios that defaulted to
+// max_outstanding=1 are usable here.
 INSTANTIATE_TEST_SUITE_P(
     WireSmoke, CosimWireSmoke,
     ::testing::Values(
-        "conformity_write_read.yaml",
-        "conformity_backpressure.yaml",
-        "multi_id_single_beat_sequential.yaml"));
+        "single_write_read_aligned",
+        "multi_txn_same_id"));
 
 }  // namespace

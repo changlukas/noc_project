@@ -1,0 +1,120 @@
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+  max_outstanding_write: 8
+  max_outstanding_read: 8
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_1.txt
+  - op: write
+    addr: 0x1020
+    id: 0x2
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_2.txt
+  - op: write
+    addr: 0x1040
+    id: 0x3
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_3.txt
+  - op: write
+    addr: 0x1060
+    id: 0x4
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_4.txt
+  - op: write
+    addr: 0x1080
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_5.txt
+  - op: write
+    addr: 0x10A0
+    id: 0x6
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_6.txt
+  - op: write
+    addr: 0x10C0
+    id: 0x7
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_7.txt
+  - op: write
+    addr: 0x10E0
+    id: 0x8
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: data_8.txt
+  - op: read
+    addr: 0x1000
+    id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1020
+    id: 0x2
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1040
+    id: 0x3
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1060
+    id: 0x4
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1080
+    id: 0x5
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x10A0
+    id: 0x6
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x10C0
+    id: 0x7
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x10E0
+    id: 0x8
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused

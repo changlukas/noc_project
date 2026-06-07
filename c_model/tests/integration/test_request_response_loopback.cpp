@@ -126,7 +126,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
 
     auto params = cmod::load_port_params_yaml("config/port_params.yaml", "nmu");
 
-    const bool is_multi_dst = yaml_path.find("multi_dst_stress.yaml") != std::string::npos;
+    const bool is_multi_dst = yaml_path.find("multi_dst_stress/") != std::string::npos;
     const nmu::RobMode rob_mode = is_multi_dst ? nmu::RobMode::Enabled : nmu::RobMode::Disabled;
 
     // NoC test fixture: single-NSU for legacy fixtures (preserves existing
@@ -401,8 +401,12 @@ TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
     SCENARIO(
         "req/rsp loopback: NMU+NSU packetize/depacketize + LoopbackNoc end-to-end zero mismatch");
     auto p = GetParam();
-    std::string yaml_path = "fixtures/" + p.yaml;
-    std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml + ".pkt_e2e_q" +
+    // p.yaml is "<layer>/<name>"; scenario.yaml path is built from SCENARIO_TREE_ROOT.
+    std::string yaml_path = std::string(SCENARIO_TREE_ROOT) + p.yaml + "/scenario.yaml";
+    auto last_slash = p.yaml.rfind('/');
+    std::string short_name =
+        (last_slash == std::string::npos) ? p.yaml : p.yaml.substr(last_slash + 1);
+    std::string rpath = std::string(::testing::TempDir()) + "/" + short_name + ".pkt_e2e_q" +
                         std::to_string(p.req_delay) + "_s" + std::to_string(p.rsp_delay) + "_vc" +
                         std::to_string(p.num_vc) + ".read.txt";
     auto r = run_fixture(yaml_path, rpath, p.req_delay, p.rsp_delay, p.num_vc);
@@ -426,11 +430,12 @@ TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
 
 // Shared name generator: yaml_stem + _q<req_delay> + _s<rsp_delay> + _vc<num_vc>.
 // Ensures uniqueness across the Fixtures (num_vc=1) and MultiVc (num_vc>1)
-// instantiation sets that run the same scenario YAMLs.
+// instantiation sets that run the same scenario YAMLs. gtest names disallow
+// '/', so we strip the layer prefix and keep only the trailing <name>.
 static auto fixture_name_gen = [](const ::testing::TestParamInfo<FixtureParam>& info) {
     auto n = info.param.yaml;
-    auto dot = n.rfind('.');
-    if (dot != std::string::npos) n = n.substr(0, dot);
+    auto slash = n.rfind('/');
+    if (slash != std::string::npos) n = n.substr(slash + 1);
     return n + "_q" + std::to_string(info.param.req_delay) + "_s" +
            std::to_string(info.param.rsp_delay) + "_vc" + std::to_string(info.param.num_vc);
 };
@@ -440,16 +445,16 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
                              // Zero-latency loopback baseline across the five Stage 2 fixture
                              // categories: INCR multi-beat, multi-outstanding stress, WRAP,
                              // aligned narrow, sparse-strobe multibeat.
-                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 1u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 1u},
-                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 1u},
-                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 1u},
-                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 1u},
+                             FixtureParam{"common/burst_incr_8beat", 0u, 0u, 1u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 0u, 0u, 1u},
+                             FixtureParam{"c-model-only/wrap_burst_aligned", 0u, 0u, 1u},
+                             FixtureParam{"c-model-only/narrow_aligned_multibeat", 0u, 0u, 1u},
+                             FixtureParam{"c-model-only/sparse_multibeat", 0u, 0u, 1u},
                              // Configurable-latency variant on the multi-outstanding fixture:
                              // 2-cycle request delay + 3-cycle response delay exercises
                              // multi-cycle in-flight ordering and surfaces one-cycle
                              // registration bugs that the zero-latency path hides.
-                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 1u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 2u, 3u, 1u},
                              // Multi-NSU regression gate: 2 same-id writes + 2 same-id reads at
                              // different XYRouting dst boundaries (0x100 -> dst=0,
                              // 0x10100 -> dst=1). Testbench builds 4 NSU stacks with per-NSU
@@ -457,7 +462,7 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
                              // back into submission order before AxiMaster observes them. The
                              // testbench overrides max_outstanding_{write,read} to 2 for this
                              // fixture so AxiMaster admits both same-id transactions concurrently.
-                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 1u}),
+                             FixtureParam{"c-model-only/multi_dst_stress", 0u, 0u, 1u}),
                          fixture_name_gen);
 
 // Multi-VC instantiation: same 7 scenarios re-run at NUM_VC ∈ {2, 4, 8}.
@@ -467,27 +472,27 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
 INSTANTIATE_TEST_SUITE_P(MultiVc, PacketizeLoopbackFixture,
                          ::testing::Values(
                              // num_vc=2
-                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 2u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 2u},
-                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 2u},
-                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 2u},
-                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 2u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 2u},
-                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 2u},
+                             FixtureParam{"common/burst_incr_8beat", 0u, 0u, 2u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 0u, 0u, 2u},
+                             FixtureParam{"c-model-only/wrap_burst_aligned", 0u, 0u, 2u},
+                             FixtureParam{"c-model-only/narrow_aligned_multibeat", 0u, 0u, 2u},
+                             FixtureParam{"c-model-only/sparse_multibeat", 0u, 0u, 2u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 2u, 3u, 2u},
+                             FixtureParam{"c-model-only/multi_dst_stress", 0u, 0u, 2u},
                              // num_vc=4
-                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 4u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 4u},
-                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 4u},
-                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 4u},
-                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 4u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 4u},
-                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 4u},
+                             FixtureParam{"common/burst_incr_8beat", 0u, 0u, 4u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 0u, 0u, 4u},
+                             FixtureParam{"c-model-only/wrap_burst_aligned", 0u, 0u, 4u},
+                             FixtureParam{"c-model-only/narrow_aligned_multibeat", 0u, 0u, 4u},
+                             FixtureParam{"c-model-only/sparse_multibeat", 0u, 0u, 4u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 2u, 3u, 4u},
+                             FixtureParam{"c-model-only/multi_dst_stress", 0u, 0u, 4u},
                              // num_vc=8
-                             FixtureParam{"burst_incr_8beat.yaml", 0u, 0u, 8u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 0u, 0u, 8u},
-                             FixtureParam{"wrap_burst_aligned.yaml", 0u, 0u, 8u},
-                             FixtureParam{"narrow_aligned_multibeat.yaml", 0u, 0u, 8u},
-                             FixtureParam{"sparse_multibeat.yaml", 0u, 0u, 8u},
-                             FixtureParam{"multi_outstanding_stress.yaml", 2u, 3u, 8u},
-                             FixtureParam{"multi_dst_stress.yaml", 0u, 0u, 8u}),
+                             FixtureParam{"common/burst_incr_8beat", 0u, 0u, 8u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 0u, 0u, 8u},
+                             FixtureParam{"c-model-only/wrap_burst_aligned", 0u, 0u, 8u},
+                             FixtureParam{"c-model-only/narrow_aligned_multibeat", 0u, 0u, 8u},
+                             FixtureParam{"c-model-only/sparse_multibeat", 0u, 0u, 8u},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 2u, 3u, 8u},
+                             FixtureParam{"c-model-only/multi_dst_stress", 0u, 0u, 8u}),
                          fixture_name_gen);

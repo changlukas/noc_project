@@ -10,7 +10,9 @@ target_link_libraries(test_scoreboard PRIVATE yaml-cpp::yaml-cpp)
 add_cmodel_test(test_integration)
 target_link_libraries(test_integration PRIVATE yaml-cpp::yaml-cpp)
 add_cmodel_test(test_protocol_rules)
-add_custom_command(TARGET test_integration POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures
-    $<TARGET_FILE_DIR:test_integration>/fixtures)
+
+# Stage B unified scenario tree. test_integration consumes scenarios via
+# absolute path built from SCENARIO_TREE_ROOT; no per-binary copy is needed
+# because scenario_parser resolves data_file: relative to the YAML's dir.
+target_compile_definitions(test_integration PRIVATE
+  SCENARIO_TREE_ROOT="${CMAKE_SOURCE_DIR}/../tests/scenarios/")

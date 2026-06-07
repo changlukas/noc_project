@@ -56,9 +56,10 @@ TEST(CheckerLiveness, injection_forces_nonzero_exit) {
     SCENARIO("wb2axip / DPI error liveness: injected fault causes non-zero exit");
     const char* bin = std::getenv("COSIM_BIN");
     ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
-    // Scenario path relative to cosim/verilator/ (the Vtb_top CWD).
+    // SCENARIO_TREE_ROOT is the absolute path to tests/scenarios/ (CMake-injected).
     const std::string cmd =
-        std::string(bin) + " +scenario=../tests/fixtures/injection_aw_unstable.yaml";
+        std::string(bin) +
+        " +scenario=" SCENARIO_TREE_ROOT "sv-cosim-only/injection_aw_unstable/scenario.yaml";
     const ProcResult result = run_and_capture(cmd);
     EXPECT_NE(result.rc, 0)
         << "injection scenario should have caused non-zero exit (DPI error / checker fire)\n"

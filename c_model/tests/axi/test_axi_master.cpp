@@ -4,6 +4,7 @@
 #include "axi/memory.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 
@@ -45,8 +46,11 @@ transactions:
     EXPECT_EQ(sc.config.memory_base, 0x1000u);
     ASSERT_EQ(sc.transactions.size(), 2u);
     EXPECT_EQ(sc.transactions[0].op, axi::ScenarioTransaction::Op::Write);
-    EXPECT_EQ(sc.transactions[0].data_file, "w.txt");
-    EXPECT_EQ(sc.transactions[1].dump_file, "r.txt");
+    // scenario_parser resolves data_file / dump_file relative to YAML's own
+    // parent dir. Both YAML and bare names "w.txt" / "r.txt" land in TempDir.
+    const std::string yaml_dir = std::filesystem::path(path).parent_path().string();
+    EXPECT_EQ(sc.transactions[0].data_file, (std::filesystem::path(yaml_dir) / "w.txt").string());
+    EXPECT_EQ(sc.transactions[1].dump_file, (std::filesystem::path(yaml_dir) / "r.txt").string());
 }
 
 TEST_F(ScenarioParser, DefaultsAppliedWhenConfigOmitted) {
@@ -193,7 +197,8 @@ transactions:
 )YAML");
     auto sc = axi::load_scenario(path);
     ASSERT_EQ(sc.transactions.size(), 1u);
-    EXPECT_EQ(sc.transactions[0].strb_file, "s.txt");
+    const std::string yaml_dir = std::filesystem::path(path).parent_path().string();
+    EXPECT_EQ(sc.transactions[0].strb_file, (std::filesystem::path(yaml_dir) / "s.txt").string());
 }
 
 TEST_F(ScenarioParser, StrbFileOptional) {

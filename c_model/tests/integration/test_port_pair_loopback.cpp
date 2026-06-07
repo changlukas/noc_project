@@ -259,8 +259,12 @@ TEST_P(PortPairLoopbackP, EndToEndZeroMismatch) {
         "port-pair loopback: NMU+NSU port pair end-to-end fixture run produces zero scoreboard "
         "mismatches");
     auto p = GetParam();
-    std::string yaml_path = "fixtures/" + p.yaml;
-    std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml + ".port_pair_d" +
+    // p.yaml is "<layer>/<name>"; scenario.yaml path is built from SCENARIO_TREE_ROOT.
+    std::string yaml_path = std::string(SCENARIO_TREE_ROOT) + p.yaml + "/scenario.yaml";
+    auto last_slash = p.yaml.rfind('/');
+    std::string short_name =
+        (last_slash == std::string::npos) ? p.yaml : p.yaml.substr(last_slash + 1);
+    std::string rpath = std::string(::testing::TempDir()) + "/" + short_name + ".port_pair_d" +
                         std::to_string(p.delay_cycles) + ".read.txt";
     auto r = run_fixture(yaml_path, rpath, p.delay_cycles);
     EXPECT_EQ(r.scoreboard_mismatches, 0u)
@@ -272,18 +276,20 @@ TEST_P(PortPairLoopbackP, EndToEndZeroMismatch) {
 INSTANTIATE_TEST_SUITE_P(PortPairFixtures, PortPairLoopbackP,
                          ::testing::Values(
                              // Zero-latency loopback baseline: catches structural bugs.
-                             FixtureParam{"burst_incr_8beat.yaml", 0},
-                             FixtureParam{"multi_outstanding_stress.yaml", 0},
-                             FixtureParam{"wrap_burst_aligned.yaml", 0},
-                             FixtureParam{"narrow_aligned_multibeat.yaml", 0},
+                             FixtureParam{"common/burst_incr_8beat", 0},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 0},
+                             FixtureParam{"c-model-only/wrap_burst_aligned", 0},
+                             FixtureParam{"c-model-only/narrow_aligned_multibeat", 0},
                              // Configurable-latency variant: 2-cycle and 3-cycle delays exercise
                              // multi-cycle in-flight ordering and surface one-cycle
                              // registration bugs the zero-latency path hides.
-                             FixtureParam{"burst_incr_8beat.yaml", 2},
-                             FixtureParam{"multi_outstanding_stress.yaml", 3}),
+                             FixtureParam{"common/burst_incr_8beat", 2},
+                             FixtureParam{"c-model-only/multi_outstanding_stress", 3}),
                          [](const ::testing::TestParamInfo<FixtureParam>& info) {
+                             // gtest names disallow '/', so use only the trailing
+                             // <name> component (last path segment).
                              auto n = info.param.yaml;
-                             auto dot = n.rfind('.');
-                             if (dot != std::string::npos) n = n.substr(0, dot);
+                             auto slash = n.rfind('/');
+                             if (slash != std::string::npos) n = n.substr(slash + 1);
                              return n + "_d" + std::to_string(info.param.delay_cycles);
                          });
