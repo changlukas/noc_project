@@ -19,3 +19,23 @@ w_beats_received_
 # Codex prompt files
 .codex_*.txt
 cosim/output/
+
+# Local Python installs (project-local 3.14, ~278 MB total)
+/Python/
+/specgen/Python/
+
+# Codegraph MCP database
+/.codegraph/
+
+# User-local workspace (kept local-only by default; see
+# docs/superpowers/specs/2026-06-07-doc-cleanup-and-rewrite-design.md sec 4)
+/dpi_ref/
+/issue/
+
+# Image artifacts only referenced by archived material
+/docs/image/*.jpg
+
+# Python tooling caches
+/.pytest_cache/
+__pycache__/
+*.py[cod]
