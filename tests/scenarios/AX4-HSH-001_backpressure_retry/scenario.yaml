@@ -1,3 +1,8 @@
+schema_version: 1
+metadata:
+  name: AX4-HSH-001_backpressure_retry
+  category: handshake
+
 # Backpressure retry: high latency + several outstanding writes so memory's
 # pending-queue policy and AxiSlave's submit_write retry path get exercised.
 # Reads stay serialized (max_outstanding_read=1) to keep dump order deterministic.

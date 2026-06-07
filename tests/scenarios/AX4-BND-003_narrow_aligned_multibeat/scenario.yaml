@@ -1,3 +1,8 @@
+schema_version: 1
+metadata:
+  name: AX4-BND-003_narrow_aligned_multibeat
+  category: boundary
+
 config:
   memory_base: 0x1000
   memory_size: 0x1000

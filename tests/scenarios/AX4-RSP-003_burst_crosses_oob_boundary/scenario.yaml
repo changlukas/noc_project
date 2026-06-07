@@ -1,3 +1,8 @@
+schema_version: 1
+metadata:
+  name: AX4-RSP-003_burst_crosses_oob_boundary
+  category: response
+
 config:
   memory_base: 0x1000
   memory_size: 0x1000
@@ -10,4 +15,4 @@ transactions:
     len: 1
     size: 5
     burst: INCR
-    data_file: ../../common/burst_incr_2beat/data.txt
+    data_file: data.txt

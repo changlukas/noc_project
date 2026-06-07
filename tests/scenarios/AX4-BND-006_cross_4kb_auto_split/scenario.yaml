@@ -1,3 +1,8 @@
+schema_version: 1
+metadata:
+  name: AX4-BND-006_cross_4kb_auto_split
+  category: boundary
+
 config:
   memory_base: 0x0000
   memory_size: 0x2000

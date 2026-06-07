@@ -1,7 +1,12 @@
-# Fault injection scenario: aw_unstable at cycle 1 with non-existent data_file
-# forces cmodel_init to fail (data_file not found), causing DPI error at first
-# posedge → $fatal in shell wrapper → non-zero exit.
-# This verifies: (a) error propagation path is live, (b) wb2axip/DPI liveness.
+schema_version: 1
+metadata:
+  name: AX4-INF-001_dpi_fatal_on_init_failure
+  category: infrastructure
+
+# Infrastructure scenario: tests DPI fatal propagation via nonexistent data file.
+# A nonexistent data_file causes cmodel_init to fail, resulting in a DPI error
+# at first posedge, then $fatal in tb_top.sv and a non-zero exit.
+# Purpose: verify the error propagation path is live (not AXI4 A3.2 AW stability).
 config:
   memory_base: 0x1000
   memory_size: 0x1000
