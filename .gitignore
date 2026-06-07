@@ -39,3 +39,6 @@ cosim/output/
 /.pytest_cache/
 __pycache__/
 *.py[cod]
+
+# Cross-AI review artifacts (transient; not normative)
+/cross-review/
