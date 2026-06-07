@@ -63,7 +63,7 @@ TEST_P(CosimWireSmoke, scenario_passes_wb2axip) {
     // live under common/. scenario_parser resolves data_file: paths relative
     // to the scenario.yaml's own directory, so Vtb_top's cwd doesn't matter.
     const std::string scenario =
-        std::string(SCENARIO_TREE_ROOT) + "common/" + GetParam() + "/scenario.yaml";
+        std::string(SCENARIO_TREE_ROOT) + GetParam() + "/scenario.yaml";
     const std::string cmd = std::string(bin) + " +scenario=" + scenario;
     const ProcResult result = run_and_capture(cmd);
     EXPECT_EQ(result.rc, 0) << "scenario " << GetParam() << " failed (exit "
@@ -100,7 +100,14 @@ TEST_P(CosimWireSmoke, scenario_passes_wb2axip) {
 INSTANTIATE_TEST_SUITE_P(
     WireSmoke, CosimWireSmoke,
     ::testing::Values(
-        "single_write_read_aligned",
-        "multi_txn_same_id"));
+        // common/ layer — max_outstanding=1 by default, wb2axip-compatible.
+        "common/single_write_read_aligned",
+        "common/multi_txn_same_id",
+        // sv-cosim-only/ layer — L1-tuned versions with max_outstanding=1
+        // explicit, restored so wb2axip serialization constraint stays met
+        // (see header comment above).
+        "sv-cosim-only/conformity_write_read",
+        "sv-cosim-only/conformity_backpressure",
+        "sv-cosim-only/multi_id_single_beat_sequential"));
 
 }  // namespace

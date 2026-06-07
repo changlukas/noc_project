@@ -1,8 +1,8 @@
 config:
   memory_base: 0x1000
   memory_size: 0x1000
-  write_latency: 2
-  read_latency: 2
+  write_latency: 5
+  read_latency: 5
   max_outstanding_write: 1
   max_outstanding_read: 1
 transactions:
@@ -12,24 +12,10 @@ transactions:
     len: 0
     size: 5
     burst: INCR
-    data_file: ../_data/data_aa.txt
-  - op: write
-    addr: 0x1020
-    id: 0x1
-    len: 0
-    size: 5
-    burst: INCR
     data_file: ../_data/data_bb.txt
   - op: read
     addr: 0x1000
     id: 0x0
-    len: 0
-    size: 5
-    burst: INCR
-    dump_file: unused
-  - op: read
-    addr: 0x1020
-    id: 0x1
     len: 0
     size: 5
     burst: INCR

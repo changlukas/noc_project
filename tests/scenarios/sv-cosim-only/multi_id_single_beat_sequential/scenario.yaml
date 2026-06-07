@@ -20,6 +20,20 @@ transactions:
     size: 5
     burst: INCR
     data_file: ../_data/data_bb.txt
+  - op: write
+    addr: 0x1040
+    id: 0x2
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../_data/data_aa.txt
+  - op: write
+    addr: 0x1060
+    id: 0x3
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: ../_data/data_bb.txt
   - op: read
     addr: 0x1000
     id: 0x0
@@ -30,6 +44,20 @@ transactions:
   - op: read
     addr: 0x1020
     id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1040
+    id: 0x2
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1060
+    id: 0x3
     len: 0
     size: 5
     burst: INCR
