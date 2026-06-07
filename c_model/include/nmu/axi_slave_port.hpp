@@ -1,7 +1,7 @@
 #pragma once
 // NMU AxiSlavePort — thin transparent AXI4 subordinate transport.
 //
-// Role (per docs/noc_cmodel_rtl_plan.md §3): the NMU's upstream-facing AXI
+// Role (per docs/_archive/noc_cmodel_rtl_plan.md §3): the NMU's upstream-facing AXI
 // boundary. An external manager (AxiMaster) drives AW / W / AR into this
 // port; this port hands those beats unmodified to a Packetizer for NoC
 // transport, and surfaces B / R beats popped from a Depacketizer back to

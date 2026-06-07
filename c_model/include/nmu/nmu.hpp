@@ -27,7 +27,6 @@
 //
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
-//   docs/noc_cmodel_rtl_plan.md section 3 row 168
 #include "ni/port_params.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/depacketize.hpp"

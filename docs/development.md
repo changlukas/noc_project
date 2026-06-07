@@ -60,8 +60,7 @@ the test. Do not disable ctest discovery to hide failures.
 ### Never --no-verify
 
 Git hook bypass (`--no-verify`) is forbidden. If a hook fails,
-investigate and fix the root cause. Hooks run `make check` on the staged
-tree; a passing hook means the commit is known-good at submission time.
+investigate and fix the root cause.
 
 ### Prefer new commits over amending
 
@@ -154,9 +153,7 @@ Cross-component references are forbidden:
 - No C++ component may hold a reference or pointer to a different
   component.
 
-A future CI gate (`tools/check_cosim_hermetic.sh`, planned) will enforce
-this via grep. Today the hermetic invariant is enforced by code review;
-the script is tracked as a future automation task.
+The hermetic invariant is enforced by code review.
 If you need cross-component communication, the correct fix is to extend
 the c_model component API -- not to bridge through the adapter layer.
 
@@ -289,19 +286,15 @@ template authoring, and extension guide.
    line per beat). For multi-beat bursts, provide one word per beat.
    Add `strb.txt` or `excl.txt` if the scenario requires them.
 
-4. Add a `metadata.ihi_ref:` field citing the IHI 0022H section the
-   scenario is derived from (e.g. `ihi_ref: "A3.4.1"` for a burst
-   scenario).
-
-5. Run `make check`. The scenario is picked up automatically by both
+4. Run `make check`. The scenario is picked up automatically by both
    the c_model integration test and the cosim integration test via
    CMake `CONFIGURE_DEPENDS`.
 
-6. If the cosim test SKIPs the new scenario with a `WB2AXIP_*` reason
+5. If the cosim test SKIPs the new scenario with a `WB2AXIP_*` reason
    code, that is expected -- wb2axip does not model that case. No
    action needed; the SKIP is self-documenting.
 
-7. Commit with a body paragraph citing the IHI 0022H section or
+6. Commit with a body paragraph citing the IHI 0022H section or
    protocol property the scenario exercises.
 
 ---

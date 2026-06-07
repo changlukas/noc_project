@@ -2,7 +2,7 @@
 // NSU AxiMasterPort — thin transparent AXI4 manager transport, peer of
 // nmu/axi_slave_port.hpp.
 //
-// Role (per docs/noc_cmodel_rtl_plan.md §3): the NSU's downstream-facing
+// Role (per docs/_archive/noc_cmodel_rtl_plan.md §3): the NSU's downstream-facing
 // AXI boundary. Pre-shaped AW / W / AR beats arrive from the NoC fabric
 // via a Depacketizer; this port queues them and exposes a manager-side
 // pop interface (pop_aw / pop_w / pop_ar) so an external AXI subordinate

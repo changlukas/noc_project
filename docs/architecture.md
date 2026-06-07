@@ -149,9 +149,7 @@ references are forbidden:
 - A `*_shell_adapter.hpp` including another shell's adapter header.
 - A C++ component holding a reference or pointer to a different component.
 
-A future CI gate (`tools/check_cosim_hermetic.sh`, planned) will grep for
-these patterns. Today the hermetic invariant is enforced by code review;
-the script is tracked as a future automation task.
+The hermetic invariant is enforced by code review.
 
 ### 3.2 Tick semantics
 
@@ -308,9 +306,6 @@ stub during the Stage 5a build-fix pass (commit 822a780). `o_valid` is
 hardwired to `1'b1`, disabling WSTRB alignment checking. Stage 5b
 carries this stub unchanged.
 
-Follow-up: pull a proper upstream `faxi_wstrb.v` or implement the
-alignment check natively.
-
 ### cosim/tests/wb2axip_block.hpp runtime predicate
 
 `wb2axip_block_reason()` inspects each scenario's parsed content against
@@ -387,8 +382,7 @@ transfers.
 - sec. A7.2.4: Exclusive access monitor -- NSU does not implement an
   Exclusive Monitor in Stage 5b; EXC scenarios are present in the
   scenario tree but not passing through the cosim layer.
-- SLVERR response -- not exercised by any scenario in Stage 5b (planned
-  future addition).
+- SLVERR response -- not exercised by any scenario in Stage 5b.
 - Multi-beat INCR bursts through the cosim wb2axip layer -- covered only
   at the C++ adapter layer (see sec. 4, wb2axip structural limits).
 - Dual-clock CDC -- the c_model uses a single-clock approximation; CDC

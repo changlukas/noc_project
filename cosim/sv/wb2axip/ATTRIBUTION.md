@@ -74,8 +74,3 @@ file does NOT redefine them to avoid conflicts. Standalone `assume(...)` calls
 inside the checker files are mapped to `assert` via the Verilator build flag
 `+define+assume=assert` in `cosim/verilator/Makefile`.
 
-## Path move (Stage 5b)
-
-Vendored files moved from `cosim/sv/wb2axip/` to `cosim/sv/wb2axip/` as part of the
-Stage 5b DPI wire-wrap rework. File contents unchanged. Stage 5a artifacts at
-`cosim/sv/wb2axip/` have been deleted in this branch.
