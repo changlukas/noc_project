@@ -111,7 +111,7 @@ def test_payload_field_width_derived(packet_spec):
         C.payload_field_width(packet_spec, "AW", f["name"])
         for f in ch["fields"] if f["name"] != "aw_rsvd"
     )
-    assert w == 108 - other_sum
+    assert w == C.payload_channel_width(packet_spec, "AW") - other_sum
 
 
 def test_payload_field_position(packet_spec):

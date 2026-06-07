@@ -29,6 +29,7 @@
       "AXI_LOCK_WIDTH": 1,
       "AXI_PROT_WIDTH": 3,
       "AXI_REGION_WIDTH": 4,
+      "AXI_QOS_WIDTH": 4,
       "AXI_RESP_WIDTH": 2,
       "AXI_LAST_WIDTH": 1,
       "WSTRB_WIDTH": 32,
@@ -106,7 +107,7 @@
       {
         "name": "AW",
         "network": "REQ",
-        "payload_width": 108,
+        "payload_width": 112,
         "fields": [
           {
             "name": "awid",
@@ -145,6 +146,10 @@
             "width_param": "AXI_REGION_WIDTH"
           },
           {
+            "name": "awqos",
+            "width_param": "AXI_QOS_WIDTH"
+          },
+          {
             "name": "awuser",
             "width_param": "AXI_USER_WIDTH"
           },
@@ -157,7 +162,7 @@
       {
         "name": "AR",
         "network": "REQ",
-        "payload_width": 108,
+        "payload_width": 112,
         "fields": [
           {
             "name": "arid",
@@ -194,6 +199,10 @@
           {
             "name": "arregion",
             "width_param": "AXI_REGION_WIDTH"
+          },
+          {
+            "name": "arqos",
+            "width_param": "AXI_QOS_WIDTH"
           },
           {
             "name": "aruser",
