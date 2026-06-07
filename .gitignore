@@ -11,6 +11,7 @@ c_model/Testing/
 
 # Co-sim runtime artifacts
 master_shell_read_dump.txt
+w_beats_received_
 
 # Editor/tool files
 .vscode/
