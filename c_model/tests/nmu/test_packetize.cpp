@@ -189,7 +189,7 @@ TEST(NmuPacketize, AwqosRoundTrip) {
 TEST(NmuPacketize, ArqosRoundTrip) {
     SCENARIO(
         "NMU Packetize: arqos=0xA set on ArBeat packs into the AR payload field "
-        "(ARQOS_LSB=77, ARQOS_WIDTH=4); flit get_payload_field recovers same value");
+        "(ARQOS_LSB=97, ARQOS_WIDTH=4); flit get_payload_field recovers same value");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
     auto ar = make_ar(/*id*/ 0x02, /*addr*/ 0x990000);
