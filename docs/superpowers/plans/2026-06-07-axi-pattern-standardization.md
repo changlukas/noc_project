@@ -337,8 +337,8 @@ inline constexpr std::array<std::string_view, @scenario_count@>
 ```cmake
 # Generates scenarios_list.hpp by globbing AX4-* directories.
 # CONFIGURE_DEPENDS triggers re-glob when files change.
-file(GLOB CONFIGURE_DEPENDS LIST_DIRECTORIES false
-     scenario_yamls "${CMAKE_CURRENT_SOURCE_DIR}/AX4-*/scenario.yaml")
+file(GLOB scenario_yamls CONFIGURE_DEPENDS LIST_DIRECTORIES false
+     "${CMAKE_CURRENT_SOURCE_DIR}/AX4-*/scenario.yaml")
 list(SORT scenario_yamls)
 
 set(scenario_ids "")
