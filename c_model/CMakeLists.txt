@@ -12,8 +12,13 @@ if(NOT EXISTS "${SPECGEN_CPP_INCLUDE}/ni_flit_constants.h")
 endif()
 
 # Drift gate: refuse to build if codegen output is stale.
+# Use find_package(Python3) so CMake passes an absolute interpreter path to the
+# custom command. Bypasses Windows py.exe launcher ambiguity where the same
+# `py -3` invocation from cmd.exe vs bash vs PowerShell can resolve to
+# different Python installs (and only one of them has the required PyYAML).
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_custom_target(codegen_check
-  COMMAND py -3 ${CMAKE_CURRENT_SOURCE_DIR}/../specgen/tools/codegen.py --check
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../specgen/tools/codegen.py --check
   WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../specgen
   COMMENT "Verifying codegen artifacts are not stale"
 )
