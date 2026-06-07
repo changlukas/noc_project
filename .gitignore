@@ -28,7 +28,7 @@ cosim/output/
 /.codegraph/
 
 # User-local workspace (kept local-only by default; see
-# docs/superpowers/specs/2026-06-07-doc-cleanup-and-rewrite-design.md sec 4)
+# docs/_archive/superpowers/specs/2026-06-07-doc-cleanup-and-rewrite-design.md sec 4)
 /dpi_ref/
 /issue/
 

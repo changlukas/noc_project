@@ -154,7 +154,9 @@ Cross-component references are forbidden:
 - No C++ component may hold a reference or pointer to a different
   component.
 
-The CI gate `tools/check_cosim_hermetic.sh` enforces this via grep.
+A future CI gate (`tools/check_cosim_hermetic.sh`, planned) will enforce
+this via grep. Today the hermetic invariant is enforced by code review;
+the script is tracked as a future automation task.
 If you need cross-component communication, the correct fix is to extend
 the c_model component API -- not to bridge through the adapter layer.
 

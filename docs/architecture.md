@@ -149,8 +149,9 @@ references are forbidden:
 - A `*_shell_adapter.hpp` including another shell's adapter header.
 - A C++ component holding a reference or pointer to a different component.
 
-The CI gate `tools/check_cosim_hermetic.sh` greps for these patterns and
-must pass before merge.
+A future CI gate (`tools/check_cosim_hermetic.sh`, planned) will grep for
+these patterns. Today the hermetic invariant is enforced by code review;
+the script is tracked as a future automation task.
 
 ### 3.2 Tick semantics
 

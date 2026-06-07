@@ -7,9 +7,10 @@ under Verilator.
 
 ## Status
 
-Research / alpha. Stage 5b in progress; behavioural c_model passing
-<N>/<N> tests (verify with `make test`); Verilator cosim subset passes
-plus skips for wb2axip structural limits (see `docs/architecture.md`).
+Research / alpha. Stage 5b in progress; behavioural c_model + Verilator
+cosim. Run `make test` for the current pass count and skip reasons; the
+cosim side SKIPs wb2axip-blocked scenarios with documented reason codes
+(see `docs/architecture.md`).
 
 ## Architecture
 
