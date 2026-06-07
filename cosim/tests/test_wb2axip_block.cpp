@@ -85,4 +85,19 @@ TEST(Wb2axipBlock, allows_oob_addr) {
     EXPECT_FALSE(noc::tests::wb2axip_block_reason(sc).has_value());
 }
 
+TEST(Wb2axipBlock, returns_first_blocker_in_priority_order) {
+    // Helper short-circuits at first match. Documented order:
+    // max_outstanding_write > inject > multi_beat (per-txn) > exclusive (per-txn).
+    // Combine 2+ blockers and verify the documented winner.
+    auto sc = base_scenario();
+    sc.config.max_outstanding_write = 4;
+    sc.config.inject.mode = ni::cmodel::axi::InjectConfig::Mode::AwUnstable;
+    sc.transactions[0].len = 7;
+    sc.transactions[0].lock = ni::cmodel::axi::LockType::Exclusive;
+    auto r = noc::tests::wb2axip_block_reason(sc);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(*r, "WB2AXIP_MAX_OUT_WRITE")
+        << "max_outstanding_write must be first-priority blocker";
+}
+
 }  // namespace

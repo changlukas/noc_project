@@ -46,22 +46,29 @@ def main() -> int:
         except Exception as e:
             errors.append(f"{entry}: YAML parse error: {e}")
             continue
+        if not isinstance(doc, dict):
+            errors.append(
+                f"{entry}: scenario.yaml must be a YAML mapping, got "
+                f"{type(doc).__name__ if doc is not None else 'None'}"
+            )
+            continue
         md = doc.get("metadata") or {}
         name = md.get("name", "")
         category = md.get("category", "")
         # Invariant 4: name equals dir basename.
         if name != entry:
             errors.append(f"{entry}: metadata.name '{name}' != dir basename")
-        # Invariant 5: name globally unique.
-        if name in seen_names:
-            errors.append(f"{entry}: duplicate metadata.name; also at {seen_names[name]}")
-        else:
-            seen_names[name] = entry
+        # Invariant 5: name globally unique (skip empty — already flagged by Inv 4).
+        if name:
+            if name in seen_names:
+                errors.append(f"{entry}: duplicate metadata.name; also at {seen_names[name]}")
+            else:
+                seen_names[name] = entry
         # Invariant 6: name matches regex.
         if name and not NAME_RE.match(name):
             errors.append(f"{entry}: metadata.name '{name}' fails AX4-CAT-NNN_slug regex")
         # Invariant 7: category matches CAT prefix.
-        if name and len(name) > 7:
+        if name and NAME_RE.match(name) and len(name) > 7:
             cat3 = name[4:7]
             expect = CAT_CATEGORY.get(cat3)
             if expect is None:
