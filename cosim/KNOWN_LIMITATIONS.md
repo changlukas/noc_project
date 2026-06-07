@@ -13,7 +13,7 @@ beats from an AWLEN=7 burst is observable one-per-cycle on the wire bundle.
 
 **End-to-end wb2axip verification of multi-beat W bursts is BLOCKED** by an
 upstream wb2axip constraint (see §6). Multi-beat scenarios run via T10 unit
-test only; not exercised through `CosimWireSmoke` ctest set.
+test only; not exercised through `CosimIntegration` ctest set.
 
 Last verified: 2026-06-05 (T10 unit test PASS commit 852fafa).
 

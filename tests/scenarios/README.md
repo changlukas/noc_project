@@ -1,105 +1,105 @@
-# tests/scenarios — Unified AXI scenario tree
+# tests/scenarios — AXI4 Scenario Tree
 
-Single source of truth for AXI scenario YAMLs and per-beat payload data. Both
-the c_model unit tests (`c_model/tests/axi/test_integration.cpp` +
-`c_model/tests/integration/test_*_loopback.cpp`) and the Verilator wire-level
-co-sim tests (`cosim/tests/test_cosim_wire_smoke.cpp` +
-`cosim/tests/test_checker_fires_on_violation.cpp`) consume scenarios from
-here. The scenario YAML schema is parsed by
-`c_model/include/axi/scenario_parser.hpp`.
+Single source of truth for AXI4 scenario YAMLs. Both c_model integration test
+(`c_model/tests/axi/test_integration.cpp`) and cosim integration test
+(`cosim/tests/test_cosim_integration.cpp`) consume the full set via a
+CMake-generated header. Three scoped tests (`test_port_pair_loopback`,
+`test_request_response_loopback`, `test_checker_fires_on_violation`) consume
+hand-curated subsets.
 
-## Layered scheme
+## Naming convention — `AX4-CAT-NNN_slug`
 
-```
-tests/scenarios/
-├── common/             scenarios consumed by 2+ test layers
-├── sv-cosim-only/      L1 (SV co-sim) only (debug_multi1, injection_aw_unstable)
-├── cpp-adapter-only/   L2 (adapter unit tests) — empty today; see its README
-└── c-model-only/       L3 (c_model unit + loopback tests) only
-```
+| Code | Category | Scope |
+|---|---|---|
+| `BAS` | basic         | Basic serialized single-beat transfers |
+| `HSH` | handshake     | Handshake stall, backpressure (IHI 0022H §A3.2) |
+| `BUR` | burst         | INCR / WRAP / FIXED burst type and length (§A3.4.1) |
+| `BND` | boundary      | Alignment, narrow transfer, 4 KB boundary (§A3.4.1) |
+| `ORD` | ordering      | Multi-ID ordering (§A5, §A6) |
+| `EXC` | exclusive     | Exclusive access (§A7.2.4) |
+| `RSP` | response      | Error response — DECERR/SLVERR (§A3.4.5) |
+| `STR` | stress        | Stress / concurrency |
+| `INF` | infrastructure | Non-AXI4-spec; testbench / DPI / bringup fixtures |
 
-Placement rules:
+ID format: `AX4-<CAT>-<NNN>_<slug>` where NNN is 3-digit zero-padded sequence
+number within category (e.g. `AX4-BUR-002_incr_8beat`). IDs are not stable —
+deleting a scenario renumbers later siblings; commit messages include the
+rename map.
 
-- `common/` — scenarios both L1 and L3 exercise (basic AXI patterns: single
-  R/W, INCR bursts, multi-id, simple backpressure).
-- `c-model-only/` — scenarios that require c_model features the SV path
-  doesn't yet model: `lock: exclusive`, sparse `strb_file`, DECERR/OOB,
-  WRAP/FIXED bursts, narrow transfers, 4 KB auto-split, multi-NSU stress.
-- `sv-cosim-only/` — scenarios specific to the SV path: `config.inject`
-  fault injection, developer ad-hoc debug fixtures.
-- `cpp-adapter-only/` — reserved for L2 (NMU/NSU adapter) scenarios; today
-  the adapter unit tests construct stimulus in-memory.
-
-## Per-pattern directory convention
-
-Each scenario sits in its own dir:
-
-```
-<scenario_name>/
-├── scenario.yaml      canonical YAML name; never renamed per-pattern
-├── data.txt           single data file (or the diff-target concat)
-├── data_<n>.txt       indexed data files (e.g. multi-outstanding writes)
-├── data_<x>.txt       lettered data files (e.g. multi_txn_same_id _a _b)
-├── strb.txt           per-beat WSTRB (optional, c-model-only feature)
-└── excl.txt           exclusive monitor stimulus (optional)
-```
-
-Inside `scenario.yaml`, `data_file:` / `dump_file:` / `strb_file:` use SHORT
-bare filenames (e.g. `data_file: data.txt`). `scenario_parser` resolves them
-relative to the scenario.yaml's own directory, so a scenario works from any
-cwd.
-
-Cross-scenario reuse is allowed via relative path:
+## YAML schema
 
 ```yaml
-data_file: ../../common/burst_incr_2beat/data.txt
+schema_version: 1                          # required
+metadata:                                  # required
+  name: AX4-BUR-002_incr_8beat             # equals parent directory basename
+  category: burst                          # CAT prefix must agree
+
+config:                                    # AXI scenario config (see scenario_parser.hpp)
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+  max_outstanding_write: 1                 # optional, default 1
+  max_outstanding_read: 1                  # optional, default 1
+  inject: { mode: aw_unstable, cycle: 1 }  # optional, INF-only
+
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0x5
+    len: 7
+    size: 5
+    burst: INCR
+    data_file: data.txt
 ```
 
-`burst_crosses_oob_boundary` uses this idiom.
+Each scenario directory contains `scenario.yaml` plus per-beat `data.txt`
+(and optionally `strb.txt`, `excl.txt`, indexed `data_<n>.txt`). `data_file:`
+and friends use bare filenames; `scenario_parser` resolves them relative to
+the scenario's own directory.
 
-## Consuming scenarios
+## Test layer consumption
 
-### From the c_model unit tests
+| Test | List source | Skips |
+|---|---|---|
+| `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
+| `cosim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix + `wb2axip_block_reason()` runtime predicate |
+| `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated 4 scenarios × delay sweep | n/a |
+| `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 7 scenarios × num_vc variants | n/a |
+| `cosim/tests/test_checker_fires_on_violation.cpp` | INF-001 only | n/a |
 
-`SCENARIO_TREE_ROOT` is injected at compile time by CMake (see
-`c_model/tests/axi/CMakeLists.txt` and `c_model/tests/integration/CMakeLists.txt`)
-and points at this directory. Test code builds the full YAML path:
+`kAllAxi4Scenarios` is generated at CMake configure time from
+`tests/scenarios/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
+Adding a new pattern automatically propagates to both run-all tests on the
+next build.
 
-```cpp
-std::string yaml_path = std::string(SCENARIO_TREE_ROOT) + p.yaml + "/scenario.yaml";
-```
+`wb2axip_block_reason()` (in `cosim/tests/wb2axip_block.hpp`) inspects each
+scenario's parsed content against wb2axip's structural limits and returns a
+SKIP reason on hit. No skip map is maintained. When wb2axip is replaced with
+a full AXI4 BFM, deleting the helper body activates all previously skipped
+scenarios.
 
-where `p.yaml` is encoded as `"<layer>/<scenario>"` (e.g.
-`"common/burst_incr_8beat"`, `"c-model-only/sparse_multibeat"`).
+## Adding a new scenario
 
-### From the SV co-sim tests
+1. Pick CAT + next NNN; create `tests/scenarios/AX4-CAT-NNN_slug/`
+2. Write `scenario.yaml` with `schema_version: 1` and full `metadata:` block
+3. Add `data.txt` (and any other data files referenced)
+4. Run `make check` — lint + both integration tests pick it up automatically
+5. If cosim SKIPs the new pattern with `WB2AXIP_*`, that's expected — wb2axip
+   doesn't model that case. No action needed; SKIP is documentation
+6. Commit with a body citing the IHI 0022H § or VIP test the scenario was
+   derived from
 
-Same `SCENARIO_TREE_ROOT` mechanism; see `cosim/tests/CMakeLists.txt`.
+## Reference: IHI 0022H sections covered per category
 
-### From `make sim`
-
-```
-make sim                                       # common/single_write_read_aligned
-make sim SCENARIO=multi_txn_diff_id            # common/multi_txn_diff_id
-make sim SCENARIO=debug_multi1 LAYER=sv-cosim-only
-make sim SCENARIO=sparse_multibeat LAYER=c-model-only
-```
-
-## Data file format
-
-- One AXI beat per line.
-- `DATA_BYTES = 32` (= `WSTRB_WIDTH`) hex bytes per beat, space-separated.
-- For sub-beat transactions (`size < 5`), only the first `1 << size` bytes of
-  each line are observed on the bus; the data file still provides a full
-  32-byte line (extra bytes are ignored on the read side).
-- For diff-pass scenarios, the `data.txt` payload equals the expected
-  `dump_file` output byte-for-byte (one line per beat, in receive order).
-
-## Adding scenarios
-
-1. Decide layer: `common/` if 2+ layers will consume it, otherwise the
-   layer-specific sub-dir.
-2. Create `<layer>/<name>/scenario.yaml` plus the data files.
-3. Use bare filenames in `data_file:` etc.; `scenario_parser` resolves them.
-4. Register the scenario in the relevant test's `INSTANTIATE_TEST_SUITE_P`
-   list (test code path), encoding `"<layer>/<name>"`.
+| CAT | IHI § |
+|---|---|
+| BAS | §A3.2 (basic VALID/READY) |
+| HSH | §A3.2 (handshake stalls) |
+| BUR | §A3.4.1 (burst type, length, size) |
+| BND | §A3.4.1 (alignment, 4KB boundary) |
+| ORD | §A5, §A6 (ID-based ordering) |
+| EXC | §A7.2.4 (exclusive access) |
+| RSP | §A3.4.5 (response codes) |
+| STR | §A5 (multi-outstanding traffic) |
+| INF | (none — testbench infrastructure) |
