@@ -86,3 +86,4 @@ hello:
 
 clean:
 	rm -rf obj_dir
+	rm -f master_shell_read_dump.txt
