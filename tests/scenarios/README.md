@@ -53,10 +53,13 @@ transactions:
     data_file: data.txt
 ```
 
-Each scenario directory contains `scenario.yaml` plus per-beat `data.txt`
-(and optionally `strb.txt`, `excl.txt`, indexed `data_<n>.txt`). `data_file:`
-and friends use bare filenames; `scenario_parser` resolves them relative to
-the scenario's own directory.
+Each scenario directory contains `scenario.yaml`. Scenarios that perform
+real AXI4 transactions also contain `data.txt` (and optionally `strb.txt`,
+`excl.txt`, indexed `data_<n>.txt`). `data_file:` and friends use bare
+filenames; `scenario_parser` resolves them relative to the scenario's own
+directory. Infrastructure scenarios that deliberately point `data_file:`
+at a nonexistent path (e.g. INF-001, which tests the DPI fatal
+propagation) do not ship a data file.
 
 ## Test layer consumption
 
@@ -65,7 +68,7 @@ the scenario's own directory.
 | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
 | `cosim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix + `wb2axip_block_reason()` runtime predicate |
 | `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated 4 scenarios x delay sweep | n/a |
-| `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 7 scenarios x num_vc variants | n/a |
+| `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 6 distinct scenarios (7 FixtureParam entries at num_vc=1; re-run at num_vc in {2, 4, 8}) | n/a |
 | `cosim/tests/test_checker_fires_on_violation.cpp` | INF-001 only | n/a |
 
 `kAllAxi4Scenarios` is generated at CMake configure time from

@@ -285,9 +285,18 @@ template authoring, and extension guide.
    `metadata:` block. The `name` field must equal the directory basename
    exactly.
 
-3. Add `data.txt` for write transactions (one hex word per line, one
-   line per beat). For multi-beat bursts, provide one word per beat.
-   Add `strb.txt` or `excl.txt` if the scenario requires them.
+3. Add `data.txt` for write transactions. The parser
+   (`c_model/include/axi/axi_master.hpp:251,327-330`) requires at least
+   `(len + 1) * (1 << size)` bytes total (extra bytes past that point
+   are read but unused), where `len` and `size` are the AXI awlen /
+   awsize fields of the transaction (number of beats minus one, and
+   beat byte-width log2). Tokens are whitespace-delimited hex bytes
+   (one `uint8_t` per token); per-line layout (e.g. one beat per
+   line, 32 bytes per line for a 256-bit data bus) is a project
+   convention, not enforced by the parser. Add `strb.txt` or
+   `excl.txt` if the scenario requires them. Infrastructure scenarios
+   that deliberately reference a missing data file (e.g. INF-001) do
+   not provide an actual data file.
 
 4. Run `make check`. The scenario is picked up automatically by both
    the c_model integration test and the cosim integration test via
@@ -295,7 +304,12 @@ template authoring, and extension guide.
 
 5. If the cosim test SKIPs the new scenario with a `WB2AXIP_*` reason
    code, that is expected -- wb2axip does not model that case. No
-   action needed; the SKIP is self-documenting.
+   action needed; the SKIP is self-documenting. INF-prefix scenarios
+   are skipped from both run-all paths (marker `INF_DEDICATED_TEST`,
+   set in `c_model/tests/axi/test_integration.cpp:87` and
+   `cosim/tests/test_cosim_integration.cpp:61`) and should only be
+   exercised through their dedicated test (e.g. `CheckerLiveness` for
+   INF-001).
 
 6. Commit with a body paragraph citing the IHI 0022H section or
    protocol property the scenario exercises.
@@ -317,9 +331,11 @@ ctest --output-on-failure                      # all tests
 
 ### Registering new test files
 
-Add a `GoogleTest::AddGoogleTest` (or equivalent) call in the
-appropriate `CMakeLists.txt`. C++ test files under `c_model/tests/`
-follow the naming convention `test_<subject>.cpp`. Every new file must:
+Add an `add_cmodel_test(test_<subject>)` call (the project wrapper
+around `gtest_discover_tests`, defined at
+`c_model/tests/CMakeLists.txt:13`) in the appropriate subdirectory
+`CMakeLists.txt` under `c_model/tests/`. C++ test files follow the
+naming convention `test_<subject>.cpp`. Every new file must:
 
 - Include at least one test that exercises the primary new behaviour.
 - Include at least one test that verifies the primary error path.
@@ -375,8 +391,14 @@ directly:
 
 ~~~bash
 cd c_model/build
-ctest -R cosim --output-on-failure
+ctest -R Cosim --output-on-failure       # matches CosimIntegration
+ctest -R 'Cosim|Checker|Wb2axip' --output-on-failure   # all cosim ctests
 ~~~
+
+The cosim ctest names (PascalCase) are `CosimIntegration`,
+`CheckerLiveness`, and `Wb2axipBlock` (see `cosim/tests/CMakeLists.txt`
+lines 62, 67, 72). `ctest -R` matches against test names with a regex,
+so `-R cosim` (lowercase) matches zero tests.
 
 The Vtb_top binary must be built (`make build-verilator`) before cosim
 ctests can run.
@@ -401,19 +423,25 @@ This test proves that each of the 8 W beats in an AWLEN=7 burst is
 individually visible on the wire bundle at successive ticks, independent
 of the wb2axip constraint.
 
-### test_checker_fires_on_violation
+### CheckerLiveness (test_checker_fires_on_violation)
 
-The bringup test for the wb2axip checker itself:
+The bringup test for the DPI error-propagation path:
 
 ~~~bash
 cd c_model/build
-ctest -R test_checker_fires_on_violation --output-on-failure
+ctest -R CheckerLiveness --output-on-failure
 ~~~
 
-This test uses the INF-001 scenario (a deliberately invalid handshake)
-and verifies that `faxi_slave.v` fires an assertion. If this test fails,
-the checker is not connected to the DUT wires correctly -- debug the
-DPI wire bundle mapping before proceeding with other cosim tests.
+(The ctest name is `CheckerLiveness`; the underlying executable is
+`test_checker_fires_on_violation`. `ctest -R` matches the test name,
+not the executable.) This test uses INF-001
+(`tests/scenarios/AX4-INF-001_dpi_fatal_on_init_failure`), which
+points `data_file` at a nonexistent path to force `cmodel_init` to
+fail at the first master tick. It verifies (a) `Vtb_top` exits
+non-zero and (b) the centralized DPI fatal marker
+`[tb_top] DPI fatal` appears in output. If this test fails, the DPI
+error-propagation path through `cmodel_check_error` in `tb_top.sv` is
+broken -- debug that before relying on any other cosim ctest.
 
 ---
 

@@ -1,4 +1,4 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
+// Independent design (cocotbext-axi has no scenario file format) — see axi/ATTRIBUTION.md
 #pragma once
 #include "axi/protocol_rules.hpp"
 #include "axi/types.hpp"

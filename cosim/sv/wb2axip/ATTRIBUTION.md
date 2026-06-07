@@ -29,7 +29,7 @@ simulation mode and in commit 391f13d to fix internal invariant tracking.
 
 **Why**: The upstream file is a formal-tool-only checker. It references
 signals that are not declared in the port list (formal tools tolerate this;
-Verilator does not). Six concrete patches vs upstream 2e8d3bc:
+Verilator does not). Five concrete patches vs upstream 2e8d3bc:
 
 1. Removed orphan `` `endif `` at end-of-file (no matching `` `ifdef ``).
 2. Removed `|| // ...` stub line producing a `|| ||` double-operator syntax
@@ -45,7 +45,7 @@ Verilator does not). Six concrete patches vs upstream 2e8d3bc:
    sets `f_axi_wr_len <= i_axi_awlen` on every AW handshake. The upstream
    formal block contains this via `// ...` stub comments; simulation needs
    it explicit so the induction assertion `f_axi_wr_pending <= f_axi_wr_len+1`
-   at line 889 receives a correct value.
+   at line 900 receives a correct value.
 
 ### faxi_slave.v
 

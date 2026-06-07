@@ -42,8 +42,7 @@ _archive/
 
 ## Doc classes (cross-reference)
 
-The project uses a lightweight 4-class decision model when classifying
-documentation:
+The project uses a 4-class decision model when classifying documentation:
 
 - **Normative spec**: authoritative; changes require sign-off
   (e.g. `spec/ni/doc/*.md`).

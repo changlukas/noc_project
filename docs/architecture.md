@@ -8,7 +8,7 @@ For build instructions and workflow conventions, see `docs/development.md`.
 ## Table of contents
 
 1. [System context](#1-system-context)
-2. [NI components -- NMU, NSU, router](#2-ni-components----nmu-nsu-router)
+2. [NI components -- NMU, NSU, NoC fabric stub](#2-ni-components----nmu-nsu-noc-fabric-stub)
 3. [c_model component flow and tick discipline](#3-cmodel-component-flow-and-tick-discipline)
    - 3.1 [Component map](#31-component-map)
    - 3.2 [Tick semantics](#32-tick-semantics)
@@ -49,12 +49,12 @@ The NMU and NSU are the primary subjects under test. The NoC fabric
 between them is represented by a simple loopback in the c_model
 (LoopbackNoc) and is not under AXI4 conformity verification.
 
-The c_model is the primary conformity verification vehicle. Both c_model
-and any future RTL implementation target the same AXI4 pin boundary.
+The c_model is the conformity verification vehicle at the AXI4 pin
+boundary of the NMU and NSU.
 
 ---
 
-## 2. NI components -- NMU, NSU, router
+## 2. NI components -- NMU, NSU, NoC fabric stub
 
 ### NMU (Network Manager Unit)
 
@@ -63,13 +63,16 @@ The NMU sits on the AXI-master ingress side. Its responsibilities:
 - Accepts AW, W, AR beats from the AXI4 master.
 - Packs AXI4 transactions into NoC flits and injects them into the
   request network.
-- Zero-fills the `noc_qos` and `flit_ecc` header fields in outbound flits
-  (both are deferred; see `c_model/include/nmu/packetize.hpp`).
+- Zero-fills the `noc_qos`, `route_par`, and `flit_ecc` header fields in
+  outbound flits (all three are deferred; see
+  `c_model/include/nmu/packetize.hpp` lines 24-26).
 - Manages a Reorder Buffer (RoB) for incoming B and R responses so that
   out-of-order network delivery is re-serialized per AXI4 ID ordering rules.
-- Handles address remapping before flit injection (remapping table is
-  implementation-defined; the c_model exposes the mechanism via a
-  configurable offset field).
+- Address translation extracts the destination ID from the upper address
+  bits at packetize time (`nmu::addr_trans::xy_route` in
+  `c_model/include/nmu/addr_trans.hpp`); the local address passed through
+  the NoC is the full input address unmodified. There is no remap table
+  in the c_model.
 
 The RoB holds in-flight response slots indexed by AXI ID, releases them
 in-order per ID, and asserts BVALID / RVALID only when the slot at the
@@ -82,8 +85,8 @@ The NSU sits on the AXI-subordinate egress side. Its responsibilities:
 - Receives request flits from the NoC, unpacks them, and drives AW/W/AR
   to the downstream AXI4 slave.
 - Captures B and R responses from the slave, packs them into NoC flits
-  (the `noc_qos` and `flit_ecc` header fields are zero-filled, deferred),
-  and injects them into the response network.
+  (the `noc_qos`, `route_par`, and `flit_ecc` header fields are
+  zero-filled, deferred), and injects them into the response network.
 - The ECC CSR counters (`ECC_CORR_ERR_CNT`, `ECC_UNCORR_ERR_CNT`) are
   present in the register file but the ECC check logic is not yet
   implemented.
@@ -91,13 +94,20 @@ The NSU sits on the AXI-subordinate egress side. Its responsibilities:
 The NSU is asymmetric with the NMU: it does not have a RoB (response
 ordering is the master's responsibility).
 
-### Uniform router
+### NoC fabric stub
 
-All router nodes in the NoC mesh are identical (no Edge / Compute
-distinction). Routing uses XY address-based routing (`addr_trans::xy_route`
-in `c_model/include/nmu/addr_trans.hpp`). The router is not the primary
-subject of Stage 5b verification; it appears only as the LoopbackNoc stub
-(`c_model/tests/common/loopback_noc.hpp`) in the c_model.
+The c_model contains no router class. The only NoC component is the
+`LoopbackNoc` stub (`c_model/tests/common/loopback_noc.hpp`), a
+testbench-only NoC bridge that conducts NMU TX flits to NSU RX. By
+default it is zero-delay; the test fixture can set a per-NSU response
+latency via `set_nsu_latency` / `set_nsu_latency_range`, or a global
+request / response delay via `set_req_delay` / `set_rsp_delay` (single-
+NSU mode only). Destination derivation (XY bit-slice on `awaddr` /
+`araddr`) is performed at NMU packetize time via
+`nmu::addr_trans::xy_route` (`c_model/include/nmu/addr_trans.hpp`), not
+at the NoC level. A router model can replace `LoopbackNoc` by
+implementing the four `NocReqOut` / `NocRspIn` / `NocReqIn` /
+`NocRspOut` abstract interfaces declared in `c_model/include/noc/`.
 
 ### AXI4 endpoint model
 
@@ -183,9 +193,10 @@ The c_model separates concerns so that the NoC stub and the NI
 components can evolve independently:
 
 - VcArbiter modes -- `VcArbiter::read_write_split` and
-  `VcArbiter::multi_candidate` are factory constructors on
-  `nmu::VcArbiter` and `nsu::VcArbiter`. The mode is selected at
-  construction time via `NmuConfig::vc_mode` / `NsuConfig::vc_mode`.
+  `VcArbiter::multi_candidate` are static factory methods on
+  `nmu::VcArbiter` and `nsu::VcArbiter` (the constructors are private).
+  The mode is selected at construction time via `NmuConfig::vc_mode` /
+  `NsuConfig::vc_mode`.
 - LoopbackNoc substitution -- `LoopbackNoc` (`c_model/tests/common/`)
   implements the `NocReqOut` / `NocRspIn` / `NocReqIn` / `NocRspOut`
   abstract interfaces defined in `c_model/include/noc/`. Replacing it
@@ -200,9 +211,15 @@ components can evolve independently:
 Stage 5b introduces a DPI wire-wrap layer that connects the c_model
 components to Verilator-compiled SV checkers. The layer has three steps:
 
-1. SV drives DPI export `cmodel_tick()` at each rising edge.
-2. DPI export reads the SV input wire bundle, calls the appropriate
-   `*_shell_adapter.hpp` tick(), writes the SV output wire bundle.
+1. Each `*_wrap.sv` module calls its per-shell DPI imports at every
+   posedge `clk_i`: `cmodel_<shell>_set_inputs` ->
+   `cmodel_<shell>_tick` -> `cmodel_<shell>_get_outputs` (see
+   `cosim/c/cmodel_dpi.h` for the five tick functions:
+   `cmodel_master_tick`, `cmodel_nmu_tick`, `cmodel_loopback_noc_tick`,
+   `cmodel_nsu_tick`, `cmodel_slave_tick`).
+2. The DPI implementation reads the SV input wire bundle, calls the
+   appropriate `*_shell_adapter.hpp::tick()`, and writes the SV output
+   wire bundle.
 3. SV propagates output wires to the connected wb2axip checker ports.
 
 Five shell adapters mediate the boundary:
@@ -230,8 +247,11 @@ header instead.
 
 `cosim/sv/wb2axip/` contains the ZipCPU/wb2axip AXI4 formal checker
 files (Apache 2.0), adapted for Verilator simulation mode. The checker
-observes AXI4 wire bundles on the NMU input side (faxi_master.v) and
-the NSU output side (faxi_slave.v).
+observes AXI4 wire bundles on the NMU manager-facing side
+(`faxi_slave.v`, treating the NMU as an AXI master) and on the NSU
+memory-facing side (`faxi_master.v`, treating the NSU as an AXI slave).
+See `cosim/sv/tb_top.sv` lines 12-13 for the role mapping and lines
+208 / 279 for the bind sites.
 
 The Verilator binary `Vtb_top` is built in `cosim/verilator/obj_dir/`.
 It is driven by `cosim/verilator/main.cpp` via the DPI shell adapters.

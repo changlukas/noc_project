@@ -34,7 +34,7 @@ AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
 
 - CMake 3.20 or newer
 - Verilator 5.036
-- Python 3.13 or newer (with PyYAML)
+- Python 3.9 or newer (with PyYAML)
 - MSYS2 mingw64 toolchain (Windows host)
 
 ## Build

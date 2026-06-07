@@ -1,16 +1,17 @@
 # OSS Attribution — c_model/include/axi/
 
-Algorithms in this directory are ported line-by-line from
+Algorithms in this directory are ported from
 [alexforencich/cocotbext-axi](https://github.com/alexforencich/cocotbext-axi),
-MIT license. cocotbext-axi is Python (cocotb async); this c_model is C++17 +
-GoogleTest with synchronous tick-driven semantics.
+MIT license, with the adaptations listed under "Adaptation notes" below.
+cocotbext-axi is Python (cocotb async); this c_model is C++17 + GoogleTest
+with synchronous tick-driven semantics.
 
 ## File mapping
 
 | c_model file (this repo)          | Upstream Python source             |
 |-----------------------------------|------------------------------------|
 | `axi/types.hpp`                   | `cocotbext/axi/*.py` (enums + structs) |
-| `axi/memory_port.hpp`             | `cocotbext/axi/memory.py` (MemoryInterface API) |
+| `axi/memory_port.hpp`             | `cocotbext/axi/memory.py` (tick-driven re-shape of MemoryInterface) |
 | `axi/memory.hpp`                  | `cocotbext/axi/axi_ram.py` (AxiRam) |
 | `axi/axi_slave.hpp`               | `cocotbext/axi/axi_slave.py` (AxiSlave + AxiSlaveWrite + AxiSlaveRead) |
 | `axi/axi_master.hpp`              | `cocotbext/axi/axi_master.py` (AxiMaster + AxiMasterWrite + AxiMasterRead) |
