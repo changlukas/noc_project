@@ -71,6 +71,38 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
     EXPECT_EQ(m->rob_idx, 3);
 }
 
+TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
+    SCENARIO(
+        "NSU Depacketize: awqos=0xA in AW flit payload is recovered into AwBeat.qos "
+        "(verifies awqos is not forced to 0)");
+    LoopbackNoc noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
+    auto flit = make_aw_flit(0x05, 0x1000, /*src*/ 0x12, /*rob_req*/ 0, /*rob_idx*/ 0);
+    flit.set_payload_field("AW", "awqos", 0xA);
+    ASSERT_TRUE(noc.req_out().push_flit(flit));
+    depkt.tick();
+    auto aw = depkt.pop_aw();
+    ASSERT_TRUE(aw.has_value());
+    EXPECT_EQ(aw->qos, 0xAu);
+}
+
+TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
+    SCENARIO(
+        "NSU Depacketize: arqos=0xA in AR flit payload is recovered into ArBeat.qos "
+        "(verifies arqos is not forced to 0)");
+    LoopbackNoc noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
+    auto flit = make_ar_flit(0x07, 0x2000, /*src*/ 0x12);
+    flit.set_payload_field("AR", "arqos", 0xA);
+    ASSERT_TRUE(noc.req_out().push_flit(flit));
+    depkt.tick();
+    auto ar = depkt.pop_ar();
+    ASSERT_TRUE(ar.has_value());
+    EXPECT_EQ(ar->qos, 0xAu);
+}
+
 TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
     SCENARIO("NSU Depacketize: AR flit snapshots read-side meta into MetaBuffer + emits AR beat");
     LoopbackNoc noc(16, 16);

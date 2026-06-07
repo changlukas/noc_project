@@ -173,6 +173,32 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
     EXPECT_EQ(f.get_payload_field("AW", "awuser"), 0xFFu);
 }
 
+TEST(NmuPacketize, AwqosRoundTrip) {
+    SCENARIO(
+        "NMU Packetize: awqos=0xA set on AwBeat packs into the AW payload field "
+        "(AWQOS_LSB=97, AWQOS_WIDTH=4); flit get_payload_field recovers same value");
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
+    auto aw = make_aw(/*id*/ 0x01, /*addr*/ 0x340000);
+    aw.qos = 0xA;
+    ASSERT_TRUE(pkt.push_aw(aw));
+    auto f = *aw_cap.pop();
+    EXPECT_EQ(f.get_payload_field("AW", "awqos"), 0xAu);
+}
+
+TEST(NmuPacketize, ArqosRoundTrip) {
+    SCENARIO(
+        "NMU Packetize: arqos=0xA set on ArBeat packs into the AR payload field "
+        "(ARQOS_LSB=77, ARQOS_WIDTH=4); flit get_payload_field recovers same value");
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
+    auto ar = make_ar(/*id*/ 0x02, /*addr*/ 0x990000);
+    ar.qos = 0xA;
+    ASSERT_TRUE(pkt.push_ar(ar));
+    auto f = *ar_cap.pop();
+    EXPECT_EQ(f.get_payload_field("AR", "arqos"), 0xAu);
+}
+
 TEST(NmuPacketize, WPayloadBitPerfect) {
     SCENARIO(
         "NMU Packetize: W payload (wdata/wstrb/wlast/wuser) round-trips bit-perfect through flit");
