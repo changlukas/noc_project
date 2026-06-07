@@ -32,7 +32,7 @@ AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
 
 ## Prerequisites
 
-- CMake 3.12 or newer
+- CMake 3.20 or newer
 - Verilator 5.036
 - Python 3.13 or newer (with PyYAML)
 - MSYS2 mingw64 toolchain (Windows host)
@@ -86,5 +86,5 @@ Vendored / derived material has its own license:
 
 - `c_model/include/axi/` ported from cocotbext-axi (MIT); see
   `c_model/include/axi/ATTRIBUTION.md`
-- `cosim/sv/wb2axip/` is ZipCPU/wb2axip (Apache 2.0), used verbatim;
-  see `cosim/sv/wb2axip/ATTRIBUTION.md`
+- `cosim/sv/wb2axip/` is ZipCPU/wb2axip (Apache 2.0), used with modifications
+  (see `cosim/sv/wb2axip/ATTRIBUTION.md` for the diff)

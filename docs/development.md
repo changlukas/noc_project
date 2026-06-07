@@ -213,7 +213,7 @@ running configure.
 The following files are auto-generated at build time and must not be
 edited by hand:
 
-- `c_model/include/generated/` -- C++ headers produced by specgen from
+- `specgen/generated/cpp/` -- C++ headers produced by specgen from
   the NI spec YAML.
 - `c_model/FEATURE_INVENTORY.md` -- feature inventory markdown generated
   from the same YAML sources.
@@ -348,9 +348,13 @@ the wb2axip single-burst-at-a-time assertion (see
 multi-outstanding write traffic that exceeds wb2axip's internal
 constraint. This is not a c_model conformity failure.
 
-Correct response: add a `wb2axip_block_reason()` entry for the scenario
-so the cosim integration test SKIPs it cleanly. Alternatively, route the
-scenario through the c_model integration test only (Layer 2).
+Correct response: do not add scenario-specific skip logic. The
+`wb2axip_block_reason()` predicate inspects scenario content (`len`,
+`lock`, `max_outstanding_write`); if it does not already catch your
+scenario, the scenario likely violates a wb2axip constraint that the
+predicate does not yet capture. Add the constraint to the predicate,
+not to the scenario. Alternatively, route the scenario through the
+c_model integration test only (Layer 2).
 
 Do NOT modify `faxi_slave.v` to remove the assertion.
 

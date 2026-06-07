@@ -216,7 +216,7 @@ Five shell adapters mediate the boundary:
 - `NsuShellAdapter` -- flit input / AXI master port output.
 - `MasterShellAdapter` -- AXI master driver output / NMU slave port input.
 - `SlaveShellAdapter` -- NSU master port output / slave receiver input.
-- `MemoryShellAdapter` -- memory read/write interface.
+- `LoopbackNocShellAdapter` -- NMU flit output to NSU flit input (zero-latency loopback stub).
 
 Shell responsibility invariant: `<comp>_shell_adapter.hpp::tick()` is
 allowed only to:
@@ -372,7 +372,9 @@ runs the full ctest suite (Layers 1-4). It does not invoke `make sim`
   category).
 - sec. A5, A6: ID-based response ordering with multi-ID traffic (ORD
   category).
-- sec. A3.4.5: Error response codes SLVERR (RSP category).
+- sec. A3.4.5: Error response codes DECERR (RSP category; RSP-001 and
+  RSP-002 exercise out-of-bounds DECERR paths via
+  `c_model/include/axi/memory.hpp:100,119`).
 
 The BAS category covers basic serialized single-beat write and read
 transfers.
@@ -382,8 +384,8 @@ transfers.
 - sec. A7.2.4: Exclusive access monitor -- NSU does not implement an
   Exclusive Monitor in Stage 5b; EXC scenarios are present in the
   scenario tree but not passing through the cosim layer.
-- DECERR response -- not modelled in Stage 5b (RSP scenarios limited to
-  SLVERR).
+- SLVERR response -- not exercised by any scenario in Stage 5b (planned
+  future addition).
 - Multi-beat INCR bursts through the cosim wb2axip layer -- covered only
   at the C++ adapter layer (see sec. 4, wb2axip structural limits).
 - Dual-clock CDC -- the c_model uses a single-clock approximation; CDC

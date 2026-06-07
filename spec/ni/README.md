@@ -2,7 +2,7 @@
 
 ## Overview
 
-Network Interface (NI) bridges an AXI4 manager / subordinate pair to the NoC packet substrate. The NI consists of two functional units -- NMU (Network Manager Unit) on the AXI-master ingress side and NSU (Network Subordinate Unit) on the AXI-subordinate egress side -- that can be independently enabled. The NI performs protocol conversion (AXI4 <-> flit), QoS generation, end-to-end ECC, and reorder-buffered response handling. It is implemented in two equivalent forms: a synthesizable RTL implementation and a C++ behavior model BFM, behaviorally equivalent at the AXI and NoC pin boundaries.
+Network Interface (NI) bridges an AXI4 manager / subordinate pair to the NoC packet substrate. The NI consists of two functional units -- NMU (Network Manager Unit) on the AXI-master ingress side and NSU (Network Subordinate Unit) on the AXI-subordinate egress side -- that can be independently enabled. The NI performs protocol conversion (AXI4 <-> flit), QoS generation, end-to-end ECC, and reorder-buffered response handling. It is specified for two equivalent forms: a synthesizable RTL implementation (planned, future stage) and a C++ behaviour model BFM (current), behaviourally equivalent at the AXI and NoC pin boundaries.
 
 ## Features
 
