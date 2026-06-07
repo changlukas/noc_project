@@ -4,12 +4,19 @@
 #include "axi/types.hpp"
 #include <cstdint>
 #include <filesystem>
+#include <map>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <vector>
 #include <yaml-cpp/yaml.h>
 
 namespace ni::cmodel::axi {
+
+struct Metadata {
+    std::string name;
+    std::string category;
+};
 
 // Fault injection configuration parsed from YAML config.inject:
 // When mode == None (default, no inject: field present), tick() overhead is
@@ -45,6 +52,7 @@ struct ScenarioTransaction {
 };
 
 struct Scenario {
+    Metadata metadata;
     ScenarioConfig config;
     std::vector<ScenarioTransaction> transactions;
 };
@@ -73,14 +81,57 @@ inline Scenario load_scenario(const std::string& path) {
         if (p.is_absolute()) return raw;
         return (yaml_dir / p).string();
     };
+    static const std::regex kNameRegex(
+        R"(^AX4-(BAS|BUR|BND|ORD|EXC|RSP|STR|HSH|INF)-\d{3}_[a-z0-9_]+$)");
+    static const std::map<std::string, std::string> kCatCategory = {
+        {"BAS", "basic"},    {"BUR", "burst"},     {"BND", "boundary"},
+        {"ORD", "ordering"}, {"EXC", "exclusive"}, {"RSP", "response"},
+        {"STR", "stress"},   {"HSH", "handshake"}, {"INF", "infrastructure"},
+    };
+
+    bool strict = false;
+    if (root["schema_version"]) {
+        auto v = root["schema_version"].as<int>();
+        if (v != 1) {
+            throw std::runtime_error("scenario: unsupported schema_version " + std::to_string(v));
+        }
+        strict = true;
+    }
+
     Scenario sc;
+
+    if (strict && !root["metadata"]) {
+        throw std::runtime_error("scenario: schema_version 1 requires metadata block");
+    }
+
+    if (root["metadata"]) {
+        auto md = root["metadata"];
+        if (md["name"]) sc.metadata.name = md["name"].as<std::string>();
+        if (md["category"]) sc.metadata.category = md["category"].as<std::string>();
+
+        if (strict) {
+            if (sc.metadata.name.empty() || sc.metadata.category.empty()) {
+                throw std::runtime_error("scenario: metadata.name and metadata.category required");
+            }
+            if (!std::regex_match(sc.metadata.name, kNameRegex)) {
+                throw std::runtime_error("scenario: metadata.name '" + sc.metadata.name +
+                                         "' does not match AX4-CAT-NNN_slug regex");
+            }
+            auto cat3 = sc.metadata.name.substr(4, 3);
+            auto it = kCatCategory.find(cat3);
+            if (it == kCatCategory.end() || it->second != sc.metadata.category) {
+                throw std::runtime_error("scenario: metadata.name CAT '" + cat3 +
+                                         "' does not match metadata.category '" +
+                                         sc.metadata.category + "'");
+            }
+        }
+    }
 
     if (root["config"]) {
         auto cfg = root["config"];
         static const std::vector<std::string> known_cfg = {
-            "memory_base",  "memory_size",           "write_latency",
-            "read_latency", "max_outstanding_write", "max_outstanding_read",
-            "inject"};
+            "memory_base",           "memory_size",          "write_latency", "read_latency",
+            "max_outstanding_write", "max_outstanding_read", "inject"};
         for (auto it = cfg.begin(); it != cfg.end(); ++it) {
             auto key = it->first.as<std::string>();
             bool ok = false;

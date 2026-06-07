@@ -47,4 +47,10 @@ set(YAML_CPP_FORMAT_SOURCE OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(yaml-cpp)
 
 enable_testing()
+
+# Scenario list INTERFACE library — must come before tests/ so that targets in
+# tests/axi/ and tests/cosim/ can link noc_axi4_scenarios.
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../tests/scenarios
+                 ${CMAKE_CURRENT_BINARY_DIR}/tests/scenarios)
+
 add_subdirectory(tests)

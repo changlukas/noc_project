@@ -1,0 +1,11 @@
+#pragma once
+#include <array>
+#include <string_view>
+
+namespace noc::tests {
+
+inline constexpr std::array<std::string_view, @scenario_count@>
+    kAllAxi4Scenarios = {
+@scenario_ids@};
+
+}  // namespace noc::tests

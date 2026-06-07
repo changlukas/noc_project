@@ -16,3 +16,9 @@ add_cmodel_test(test_protocol_rules)
 # because scenario_parser resolves data_file: relative to the YAML's dir.
 target_compile_definitions(test_integration PRIVATE
   SCENARIO_TREE_ROOT="${CMAKE_SOURCE_DIR}/../tests/scenarios/")
+
+# test_scenario_metadata — unit tests for metadata block parsing + strict mode.
+add_cmodel_test(test_scenario_metadata)
+target_link_libraries(test_scenario_metadata PRIVATE yaml-cpp::yaml-cpp noc_axi4_scenarios)
+target_include_directories(test_scenario_metadata PRIVATE
+    "${CMAKE_SOURCE_DIR}/../tests/scenarios")

@@ -40,6 +40,16 @@ target_compile_definitions(test_checker_fires_on_violation PRIVATE
     SCENARIO_TREE_ROOT="${SCENARIO_TREE_ABS}")
 
 # -----------------------------------------------------------------------
+# test_wb2axip_block — unit tests for wb2axip_block_reason predicate
+# Pure C++ logic unit test; no SCENARIO_TREE_ROOT or COSIM_BIN needed.
+# -----------------------------------------------------------------------
+add_executable(test_wb2axip_block test_wb2axip_block.cpp)
+target_link_libraries(test_wb2axip_block PRIVATE GTest::gtest_main yaml-cpp::yaml-cpp)
+target_include_directories(test_wb2axip_block PRIVATE
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_LIST_DIR})
+
+# -----------------------------------------------------------------------
 # ctest registrations.
 # WORKING_DIRECTORY stays COSIM_VERILATOR_DIR so Vtb_top can still write its
 # in-project read-dump there. Scenarios are anchored to YAML location now,
@@ -54,3 +64,5 @@ add_test(NAME CheckerLiveness COMMAND test_checker_fires_on_violation)
 set_tests_properties(CheckerLiveness PROPERTIES
     ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
     WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
+
+add_test(NAME Wb2axipBlock COMMAND test_wb2axip_block)
