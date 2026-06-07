@@ -111,6 +111,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_payload_field("AW", "awlock", b.lock);
     f.set_payload_field("AW", "awprot", b.prot);
     f.set_payload_field("AW", "awregion", b.region);
+    f.set_payload_field("AW", "awqos", b.qos);
     f.set_payload_field("AW", "awuser", b.user);
     if (!aw_out_.push_flit(f)) return false;
     w_meta_fifo_.push_back({meta.dst_id, meta.rob_req, meta.rob_idx});
@@ -158,6 +159,7 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
     f.set_payload_field("AR", "arlock", b.lock);
     f.set_payload_field("AR", "arprot", b.prot);
     f.set_payload_field("AR", "arregion", b.region);
+    f.set_payload_field("AR", "arqos", b.qos);
     f.set_payload_field("AR", "aruser", b.user);
     if (!ar_out_.push_flit(f)) return false;
     return true;

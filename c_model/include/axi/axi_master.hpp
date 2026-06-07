@@ -421,6 +421,7 @@ class AxiMasterT {
                 // AxLOCK is 1-bit; LockType::Exclusive maps to 1, Normal to 0. Every
                 // sub-burst of one operation carries the same lock value.
                 aw.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
+                aw.qos = op.src_txn.qos;
                 // Fault injection: force awvalid low for one cycle by treating
                 // push_aw as rejected. Auto-clear the flag after this cycle.
                 if (force_awvalid_low_one_cycle_) {
@@ -482,6 +483,7 @@ class AxiMasterT {
             ar.burst = sub.burst;
             // Phase C: wire-through scenario_txn.lock onto AR.lock (1-bit).
             ar.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
+            ar.qos = op.src_txn.qos;
             if (!slave_.push_ar(ar)) return op.read_request_done();
             ++op.next_ar_sub_idx_;
         }

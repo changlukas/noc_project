@@ -10,12 +10,12 @@ import yaml
 
 ROOT = os.path.join(os.path.dirname(__file__), "..", "tests", "scenarios")
 NAME_RE = re.compile(
-    r"^AX4-(BAS|BUR|BND|ORD|EXC|RSP|STR|HSH|INF)-\d{3}_[a-z0-9_]+$"
+    r"^AX4-(BAS|BUR|BND|ORD|EXC|RSP|STR|HSH|INF|QOS)-\d{3}_[a-z0-9_]+$"
 )
 CAT_CATEGORY = {
     "BAS": "basic", "BUR": "burst", "BND": "boundary", "ORD": "ordering",
     "EXC": "exclusive", "RSP": "response", "STR": "stress",
-    "HSH": "handshake", "INF": "infrastructure",
+    "HSH": "handshake", "INF": "infrastructure", "QOS": "qos",
 }
 
 def main() -> int:

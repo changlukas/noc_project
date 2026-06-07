@@ -48,6 +48,7 @@ struct ScenarioTransaction {
     std::string dump_file;
     std::string strb_file;             // optional; empty = full WSTRB per beat
     LockType lock = LockType::Normal;  // optional; YAML "normal" or "exclusive"
+    uint8_t qos = 0;                   // optional; YAML "qos" (default 0)
     std::size_t scenario_line;
 };
 
@@ -82,11 +83,12 @@ inline Scenario load_scenario(const std::string& path) {
         return (yaml_dir / p).string();
     };
     static const std::regex kNameRegex(
-        R"(^AX4-(BAS|BUR|BND|ORD|EXC|RSP|STR|HSH|INF)-\d{3}_[a-z0-9_]+$)");
+        R"(^AX4-(BAS|BUR|BND|ORD|EXC|RSP|STR|HSH|INF|QOS)-\d{3}_[a-z0-9_]+$)");
     static const std::map<std::string, std::string> kCatCategory = {
         {"BAS", "basic"},    {"BUR", "burst"},     {"BND", "boundary"},
         {"ORD", "ordering"}, {"EXC", "exclusive"}, {"RSP", "response"},
         {"STR", "stress"},   {"HSH", "handshake"}, {"INF", "infrastructure"},
+        {"QOS", "qos"},
     };
 
     bool strict = false;
@@ -224,6 +226,7 @@ inline Scenario load_scenario(const std::string& path) {
                                          lock_str + "')");
             }
         }
+        if (auto q = txn["qos"]) t.qos = static_cast<uint8_t>(q.as<unsigned>());
         sc.transactions.push_back(t);
     }
     return sc;

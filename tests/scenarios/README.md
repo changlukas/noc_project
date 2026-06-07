@@ -20,6 +20,7 @@ hand-curated subsets.
 | `RSP` | response      | Error response -- DECERR/SLVERR (sec. A3.4.5) |
 | `STR` | stress        | Stress / concurrency |
 | `INF` | infrastructure | Non-AXI4-spec; testbench / DPI / bringup fixtures |
+| `QOS` | qos           | A8 QoS signaling; awqos / arqos passthrough end-to-end |
 
 ID format: `AX4-<CAT>-<NNN>_<slug>` where NNN is 3-digit zero-padded sequence
 number within category (e.g. `AX4-BUR-002_incr_8beat`). IDs are not stable --
@@ -106,3 +107,4 @@ scenarios.
 | RSP | sec. A3.4.5 (response codes) |
 | STR | sec. A5 (multi-outstanding traffic) |
 | INF | (none -- testbench infrastructure) |
+| QOS | sec. A8 (QoS signaling) |

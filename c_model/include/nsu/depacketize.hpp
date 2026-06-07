@@ -70,7 +70,7 @@ inline axi::AwBeat Depacketize::decode_aw(const Flit& f) {
     b.prot = static_cast<uint8_t>(f.get_payload_field("AW", "awprot"));
     b.region = static_cast<uint8_t>(f.get_payload_field("AW", "awregion"));
     b.user = static_cast<uint8_t>(f.get_payload_field("AW", "awuser"));
-    b.qos = 0;  // not in NoC flit (separate flit field noc_qos)
+    b.qos = static_cast<uint8_t>(f.get_payload_field("AW", "awqos"));
     return b;
 }
 
@@ -95,7 +95,7 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
     b.prot = static_cast<uint8_t>(f.get_payload_field("AR", "arprot"));
     b.region = static_cast<uint8_t>(f.get_payload_field("AR", "arregion"));
     b.user = static_cast<uint8_t>(f.get_payload_field("AR", "aruser"));
-    b.qos = 0;
+    b.qos = static_cast<uint8_t>(f.get_payload_field("AR", "arqos"));
     return b;
 }
 
