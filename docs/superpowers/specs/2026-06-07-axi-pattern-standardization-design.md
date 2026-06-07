@@ -18,8 +18,10 @@
 - YAML schema additions: `schema_version: 1`, `metadata.name`, `metadata.category`
 - `scenario_parser.hpp` strict mode gated by `schema_version`
 - Generated `scenarios_list.hpp` via CMake glob + `CONFIGURE_DEPENDS`
-- Per-test skip-with-reason maps (`SkipReason` enum) for layers that cannot execute
-  certain scenarios under current infrastructure
+- Runtime `wb2axip_block_reason()` helper (cosim side) that inspects each
+  scenario's parsed content against wb2axip's structural constraints and
+  SKIPs the test with a content-derived reason string. No maintained skip
+  map. INF scenarios detected by ID prefix.
 - Lint utility `tools/lint_scenarios.py` (10 invariants)
 - Rewrite `tests/scenarios/README.md`
 
@@ -316,52 +318,67 @@ inline constexpr std::array<std::string_view, @scenario_count@>
 
 Top-level `CMakeLists.txt` adds `add_subdirectory(tests/scenarios)`.
 
-### 5.2 Skip-with-reason enum
+### 5.2 Runtime skip predicate (no maintained map)
 
-New file `tests/scenarios/skip_reasons.hpp`:
+Rather than enumerate every wb2axip-blocked scenario in a hand-maintained
+map, the cosim integration test inspects each scenario's parsed content
+against wb2axip's structural limits at runtime. Adding a new pattern requires
+zero infrastructure changes — if the pattern violates a known wb2axip
+constraint, the helper auto-detects and the test SKIPs with a specific reason
+string. Retiring wb2axip means deleting the helper file (or its body); all
+auto-derived SKIPs vanish on the next test run.
+
+New file `cosim/tests/wb2axip_block.hpp`:
 
 ```cpp
 #pragma once
-#include <string_view>
+#include "axi/scenario_parser.hpp"
+#include <optional>
+#include <string>
 
 namespace noc::tests {
 
-enum class SkipReason {
-    // wb2axip formal-verification slave structural limits (temporary;
-    // remove map when wb2axip is replaced with a full AXI4 BFM)
-    kWb2axipMultiBeat,
-    kWb2axipMultiOutstanding,
-    kWb2axipFixedBurst,
-    kWb2axipWrapBurst,
-    kWb2axipDecerr,
-    kWb2axipExclusive,
-
-    // INF scenarios are reserved for their dedicated tests (e.g.
-    // test_checker_fires_on_violation owns INF-001); run-all tests skip
-    // them regardless of layer.
-    kInfDedicatedTest,
-};
-
-constexpr std::string_view to_string(SkipReason r) {
-    switch (r) {
-        case SkipReason::kWb2axipMultiBeat:        return "WB2AXIP_MULTI_BEAT";
-        case SkipReason::kWb2axipMultiOutstanding: return "WB2AXIP_MULTI_OUTSTANDING";
-        case SkipReason::kWb2axipFixedBurst:       return "WB2AXIP_FIXED_BURST";
-        case SkipReason::kWb2axipWrapBurst:        return "WB2AXIP_WRAP_BURST";
-        case SkipReason::kWb2axipDecerr:           return "WB2AXIP_DECERR";
-        case SkipReason::kWb2axipExclusive:        return "WB2AXIP_EXCLUSIVE";
-        case SkipReason::kInfDedicatedTest:        return "INF_DEDICATED_TEST";
+// Returns a SKIP reason string if this scenario's content violates a known
+// wb2axip structural constraint; nullopt if wb2axip can in principle run it.
+// Constraint sources (all from wb2axip/rtl/faxi_slave.v):
+//   - AWLEN = 0 (single beat only)                line 805-807
+//   - wr_pending <= 1 (single outstanding write)  line 805-807
+//   - rd_pending <= 1 (single outstanding read)
+//   - AW/W strict in-order                        line 561
+//   - INCR-only burst type
+//   - No DECERR modelling (OOB address)
+//   - No exclusive monitor
+inline std::optional<std::string>
+wb2axip_block_reason(ni::cmodel::axi::Scenario const& sc) {
+    using namespace ni::cmodel::axi;
+    if (sc.config.max_outstanding_write > 1) return "WB2AXIP_MAX_OUT_WRITE";
+    if (sc.config.max_outstanding_read  > 1) return "WB2AXIP_MAX_OUT_READ";
+    auto const mem_end = sc.config.memory_base + sc.config.memory_size;
+    for (auto const& t : sc.transactions) {
+        if (t.len > 0)                      return "WB2AXIP_MULTI_BEAT";
+        if (t.burst != Burst::INCR)         return "WB2AXIP_NON_INCR";
+        if (t.lock == LockType::Exclusive)  return "WB2AXIP_EXCLUSIVE";
+        if (t.addr < sc.config.memory_base || t.addr >= mem_end)
+            return "WB2AXIP_OOB_DECERR";
     }
-    return "UNKNOWN";  // unreachable
+    return std::nullopt;
 }
-
-struct ScenarioSkip {
-    std::string_view scenario;
-    SkipReason       reason;
-};
 
 }  // namespace noc::tests
 ```
+
+INF-class scenarios are detected by ID prefix (one-line check in each
+run-all test, no helper needed):
+
+```cpp
+if (scenario_id.substr(0, 8) == "AX4-INF-") {
+    GTEST_SKIP() << "INF_DEDICATED_TEST";
+}
+```
+
+INF scenarios are reserved for their dedicated tests (e.g.
+`test_checker_fires_on_violation` owns INF-001); run-all tests skip them
+regardless of layer.
 
 ### 5.3 Test layer classification
 
@@ -369,8 +386,8 @@ Five existing test files split into two categories:
 
 | Category | File | List source |
 |---|---|---|
-| Run-all | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` + `kCmodelSkips` |
-| Run-all | `cosim/tests/test_cosim_integration.cpp` (renamed from `test_cosim_wire_smoke.cpp`) | `kAllAxi4Scenarios` + `kCosimSkips` |
+| Run-all | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` + INF-prefix SKIP |
+| Run-all | `cosim/tests/test_cosim_integration.cpp` (renamed from `test_cosim_wire_smoke.cpp`) | `kAllAxi4Scenarios` + INF-prefix SKIP + `wb2axip_block_reason()` SKIP |
 | Scoped | `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated list × delay sweep |
 | Scoped | `c_model/tests/integration/test_request_response_loopback.cpp` | Curated list × num_vc variant |
 | Scoped | `cosim/tests/test_checker_fires_on_violation.cpp` | INF-001 only |
@@ -382,29 +399,30 @@ scoped tests keep curated lists but reference scenarios by new AX4 IDs.
 filename historically reflected the small subset of wb2axip-compatible
 scenarios. Under this design, the cosim-side test is the **peer of**
 `c_model/tests/axi/test_integration.cpp` — both register the full
-`kAllAxi4Scenarios` and let skip maps narrate which are currently
-infrastructure-blocked. The file is renamed to `test_cosim_integration.cpp`
+`kAllAxi4Scenarios`. The cosim side additionally consults
+`wb2axip_block_reason()` at runtime so wb2axip-blocked rows SKIP with a
+content-derived reason. The file is renamed to `test_cosim_integration.cpp`
 in commit 2. The SKIPPED rows in cosim CI output are an audit trail of
 wb2axip's structural blockers, not noise; they disappear automatically
-when wb2axip is replaced and `kCosimSkips` is deleted.
+when wb2axip is replaced and the helper body is removed.
 
 ### 5.4 Run-all test body shape
 
+c_model side (`test_integration.cpp`):
+
 ```cpp
 TEST_P(IntegrationP, RunsToCompletion) {
-    auto scenario_id = GetParam();
+    auto scenario_id = std::string{GetParam()};
+
+    // INF scenarios belong to dedicated tests; run-all skips them.
+    if (scenario_id.compare(0, 8, "AX4-INF-") == 0) {
+        GTEST_SKIP() << "INF_DEDICATED_TEST";
+    }
 
     // Validate-before-skip: broken YAML must fail loudly, not hide behind skip.
-    auto scenario_path = std::string(SCENARIO_TREE_ROOT) + std::string(scenario_id)
+    auto scenario_path = std::string(SCENARIO_TREE_ROOT) + scenario_id
                        + "/scenario.yaml";
     auto sc = ni::cmodel::axi::load_scenario(scenario_path);
-
-    // Check skip map.
-    for (auto const& [name, reason] : kCmodelSkips) {
-        if (name == scenario_id) {
-            GTEST_SKIP() << to_string(reason);
-        }
-    }
 
     // Run scenario.
     auto r = run_scenario(sc, ...);
@@ -421,53 +439,34 @@ INSTANTIATE_TEST_SUITE_P(
     });
 ```
 
-### 5.5 Cosim skip map (skeleton)
+cosim side (`test_cosim_integration.cpp`) adds the wb2axip helper after
+load_scenario:
 
 ```cpp
-inline constexpr noc::tests::ScenarioSkip kCosimSkips[] = {
-    // BUR multi-beat
-    {"AX4-BUR-001_incr_2beat",        SkipReason::kWb2axipMultiBeat},
-    {"AX4-BUR-002_incr_8beat",        SkipReason::kWb2axipMultiBeat},
-    {"AX4-BUR-003_incr_len_256",      SkipReason::kWb2axipMultiBeat},
-    // BUR non-INCR
-    {"AX4-BUR-004_fixed_burst",       SkipReason::kWb2axipFixedBurst},
-    {"AX4-BUR-005_wrap_aligned",      SkipReason::kWb2axipWrapBurst},
-    {"AX4-BUR-006_wrap_actual_wrap",  SkipReason::kWb2axipWrapBurst},
-    {"AX4-BUR-007_wrap_len_2",        SkipReason::kWb2axipWrapBurst},
-    {"AX4-BUR-008_wrap_len_4",        SkipReason::kWb2axipWrapBurst},
-    {"AX4-BUR-009_wrap_len_16",       SkipReason::kWb2axipWrapBurst},
-    // BND multi-beat or narrow
-    {"AX4-BND-003_narrow_aligned_multibeat", SkipReason::kWb2axipMultiBeat},
-    {"AX4-BND-005_sparse_multibeat",         SkipReason::kWb2axipMultiBeat},
-    {"AX4-BND-006_cross_4kb_auto_split",     SkipReason::kWb2axipMultiBeat},
-    {"AX4-BND-007_4kb_boundary_edges",       SkipReason::kWb2axipMultiBeat},
-    // ORD multi-outstanding
-    {"AX4-ORD-002_multi_txn_diff_id",        SkipReason::kWb2axipMultiOutstanding},
-    // EXC
-    {"AX4-EXC-001_exclusive_pair_success",       SkipReason::kWb2axipExclusive},
-    {"AX4-EXC-002_exclusive_no_prior_read",      SkipReason::kWb2axipExclusive},
-    {"AX4-EXC-003_exclusive_intervening_write",  SkipReason::kWb2axipExclusive},
-    {"AX4-EXC-004_exclusive_wrap_pair_success",  SkipReason::kWb2axipExclusive},
-    // RSP
-    {"AX4-RSP-001_decerr_oob_read",          SkipReason::kWb2axipDecerr},
-    {"AX4-RSP-002_decerr_oob_write",         SkipReason::kWb2axipDecerr},
-    {"AX4-RSP-003_burst_crosses_oob_boundary", SkipReason::kWb2axipDecerr},
-    // STR
-    {"AX4-STR-002_multi_outstanding_stress", SkipReason::kWb2axipMultiOutstanding},
-    {"AX4-STR-003_multi_dst_stress",         SkipReason::kWb2axipMultiOutstanding},
-    {"AX4-HSH-001_backpressure_retry",       SkipReason::kWb2axipMultiOutstanding},
-    // INF — run-all path skips; lives in test_checker_fires_on_violation
-    {"AX4-INF-001_dpi_fatal_on_init_failure", SkipReason::kInfDedicatedTest},
-};
+TEST_P(CosimIntegrationP, ScenarioPassesWb2axip) {
+    auto scenario_id = std::string{GetParam()};
+    if (scenario_id.compare(0, 8, "AX4-INF-") == 0) {
+        GTEST_SKIP() << "INF_DEDICATED_TEST";
+    }
+    auto scenario_path = std::string(SCENARIO_TREE_ROOT) + scenario_id
+                       + "/scenario.yaml";
+    auto sc = ni::cmodel::axi::load_scenario(scenario_path);
+
+    if (auto reason = noc::tests::wb2axip_block_reason(sc); reason) {
+        GTEST_SKIP() << *reason;
+    }
+
+    // shell out to Vtb_top binary, capture stdout+stderr, assert PASS marker
+    // (existing mechanism from test_cosim_wire_smoke.cpp)
+    ...
+}
 ```
 
-c_model skip map:
+### 5.5 (removed — runtime predicate replaces enumerated skip map)
 
-```cpp
-inline constexpr noc::tests::ScenarioSkip kCmodelSkips[] = {
-    {"AX4-INF-001_dpi_fatal_on_init_failure", SkipReason::kInfDedicatedTest},
-};
-```
+No per-test skip map is maintained. `wb2axip_block_reason()` derives the
+SKIP reason from scenario content; INF is detected by ID prefix. Adding a
+new pattern requires no skip-map edit.
 
 ### 5.6 Scoped tests — `RequireKnownScenario` helper
 
@@ -517,7 +516,7 @@ silent skips.
 
 ### 5.7 Lint utility — `tools/lint_scenarios.py`
 
-Runs as part of `make check`. Ten invariants:
+Runs as part of `make check`. Eight invariants:
 
 1. Every non-`AX4-*` dir under `tests/scenarios/` is an error (catches malformed
    names CMake glob would miss).
@@ -528,9 +527,11 @@ Runs as part of `make check`. Ten invariants:
 5. `metadata.name` is globally unique across repo.
 6. `metadata.name` matches `AX4-CAT-NNN_slug` regex.
 7. `metadata.category` value agrees with `CAT` prefix.
-8. Each test's skip-map keys exist in `kAllAxi4Scenarios` (no stale entries).
-9. Each test's skip-map keys are unique.
-10. `kAllAxi4Scenarios` non-empty (zero tests = configuration error).
+8. `kAllAxi4Scenarios` non-empty (zero tests = configuration error).
+
+Skip-map invariants (8, 9 of the previous draft) are no longer needed —
+there is no skip map to lint. The cosim `wb2axip_block_reason()` helper is
+plain C++ inspected by compiler; INF detection is a one-line prefix check.
 
 ---
 
@@ -540,7 +541,7 @@ Runs as part of `make check`. Ten invariants:
 
 | # | Subject | Atomic with |
 |---|---|---|
-| 1 | `feat(scenarios): add schema_version, metadata, generated list, skip enum, lint` | self-contained — existing tests untouched, runtime unchanged |
+| 1 | `feat(scenarios): add schema_version, metadata, generated list, wb2axip runtime predicate, lint` | self-contained — existing tests untouched, runtime unchanged |
 | 2 | `refactor(scenarios): rename to AX4-CAT-NNN_slug + 5 spec-gap additions + test rewrites + cosim test rename` | must atomic — ~40 dir moves + 5 cpp file rewrites (including `test_cosim_wire_smoke.cpp` → `test_cosim_integration.cpp` + `INSTANTIATE_TEST_SUITE_P` label `WireSmoke` → `CosimIntegration`); intermediate states fail |
 | 3 | `docs(scenarios): rewrite tests/scenarios/README.md` | independent |
 
@@ -555,9 +556,11 @@ includes the full rename map.
 1. Naming convention `AX4-CAT-NNN_slug` (with category enum + IHI § mapping)
 2. YAML schema (`schema_version` / `metadata.{name, category}` / `config` /
    `transactions`)
-3. Test layer consumption (run-all vs scoped; `kAllAxi4Scenarios` + skip maps)
-4. Adding a new scenario (mkdir → YAML + data → `make check` → expect cosim
-   skip map row if wb2axip-blocked)
+3. Test layer consumption (run-all vs scoped; `kAllAxi4Scenarios` +
+   `wb2axip_block_reason()` runtime predicate for cosim)
+4. Adding a new scenario (mkdir → YAML + data → `make check` → cosim
+   integration will auto-classify via `wb2axip_block_reason()`; no skip-map
+   edit needed)
 5. Reference: IHI 0022H sections covered per category
 
 Removed from old README:
@@ -585,12 +588,13 @@ turn into hidden negative-consumers metadata.
 
 When wb2axip is replaced with a full AXI4 BFM:
 
-1. Delete `kCosimSkips` array from `test_cosim_integration.cpp`.
+1. Delete `cosim/tests/wb2axip_block.hpp` (or empty its body so it returns
+   `std::nullopt` for everything).
 2. Build cosim binary. All previously skipped scenarios now run.
 3. Treat resulting failures as BFM integration work (not as regressions of
    this round).
-4. Optionally extend `SkipReason` enum if the new BFM has its own structural
-   limits.
+4. If the new BFM has its own structural limits, write an analogous
+   `new_bfm_block_reason()` helper next to the test.
 
 ### Cross-scenario data file reuse
 
