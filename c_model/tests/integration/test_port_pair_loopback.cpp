@@ -31,6 +31,8 @@
 #include "axi/scoreboard.hpp"
 #include "common/scenario.hpp"
 #include "ni/depacketizer.hpp"
+#include "scenario_helpers.hpp"
+#include <algorithm>
 #include "ni/packetizer.hpp"
 #include "ni/port_params.hpp"
 #include "nmu/axi_slave_port.hpp"
@@ -259,12 +261,9 @@ TEST_P(PortPairLoopbackP, EndToEndZeroMismatch) {
         "port-pair loopback: NMU+NSU port pair end-to-end fixture run produces zero scoreboard "
         "mismatches");
     auto p = GetParam();
-    // p.yaml is "<layer>/<name>"; scenario.yaml path is built from SCENARIO_TREE_ROOT.
+    // p.yaml is an AX4-CAT-NNN_slug scenario id; scenario.yaml path built from SCENARIO_TREE_ROOT.
     std::string yaml_path = std::string(SCENARIO_TREE_ROOT) + p.yaml + "/scenario.yaml";
-    auto last_slash = p.yaml.rfind('/');
-    std::string short_name =
-        (last_slash == std::string::npos) ? p.yaml : p.yaml.substr(last_slash + 1);
-    std::string rpath = std::string(::testing::TempDir()) + "/" + short_name + ".port_pair_d" +
+    std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml + ".port_pair_d" +
                         std::to_string(p.delay_cycles) + ".read.txt";
     auto r = run_fixture(yaml_path, rpath, p.delay_cycles);
     EXPECT_EQ(r.scoreboard_mismatches, 0u)
@@ -273,23 +272,27 @@ TEST_P(PortPairLoopbackP, EndToEndZeroMismatch) {
         << "watchdog tripped on " << p.yaml << " (delay=" << p.delay_cycles << ")";
 }
 
-INSTANTIATE_TEST_SUITE_P(PortPairFixtures, PortPairLoopbackP,
-                         ::testing::Values(
-                             // Zero-latency loopback baseline: catches structural bugs.
-                             FixtureParam{"common/burst_incr_8beat", 0},
-                             FixtureParam{"c-model-only/multi_outstanding_stress", 0},
-                             FixtureParam{"c-model-only/wrap_burst_aligned", 0},
-                             FixtureParam{"c-model-only/narrow_aligned_multibeat", 0},
-                             // Configurable-latency variant: 2-cycle and 3-cycle delays exercise
-                             // multi-cycle in-flight ordering and surface one-cycle
-                             // registration bugs the zero-latency path hides.
-                             FixtureParam{"common/burst_incr_8beat", 2},
-                             FixtureParam{"c-model-only/multi_outstanding_stress", 3}),
-                         [](const ::testing::TestParamInfo<FixtureParam>& info) {
-                             // gtest names disallow '/', so use only the trailing
-                             // <name> component (last path segment).
-                             auto n = info.param.yaml;
-                             auto slash = n.rfind('/');
-                             if (slash != std::string::npos) n = n.substr(slash + 1);
-                             return n + "_d" + std::to_string(info.param.delay_cycles);
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    PortPairFixtures, PortPairLoopbackP,
+    ::testing::Values(
+        // Zero-latency loopback baseline: catches structural bugs.
+        FixtureParam{std::string{noc::tests::RequireKnownScenario("AX4-BUR-002_incr_8beat")}, 0},
+        FixtureParam{
+            std::string{noc::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+            0},
+        FixtureParam{std::string{noc::tests::RequireKnownScenario("AX4-BUR-005_wrap_aligned")}, 0},
+        FixtureParam{
+            std::string{noc::tests::RequireKnownScenario("AX4-BND-003_narrow_aligned_multibeat")},
+            0},
+        // Configurable-latency variant: 2-cycle and 3-cycle delays exercise
+        // multi-cycle in-flight ordering and surface one-cycle
+        // registration bugs the zero-latency path hides.
+        FixtureParam{std::string{noc::tests::RequireKnownScenario("AX4-BUR-002_incr_8beat")}, 2},
+        FixtureParam{
+            std::string{noc::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+            3}),
+    [](const ::testing::TestParamInfo<FixtureParam>& info) {
+        auto n = info.param.yaml;
+        std::replace(n.begin(), n.end(), '-', '_');
+        return n + "_d" + std::to_string(info.param.delay_cycles);
+    });

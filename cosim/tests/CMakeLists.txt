@@ -18,24 +18,28 @@ endif()
 set(SCENARIO_TREE_ABS "${CMAKE_CURRENT_LIST_DIR}/../../tests/scenarios/")
 
 # -----------------------------------------------------------------------
-# test_cosim_wire_smoke — parameterized over 4 conformity scenarios
+# test_cosim_integration — run-all over kAllAxi4Scenarios, wb2axip SKIPs
 # -----------------------------------------------------------------------
-add_executable(test_cosim_wire_smoke test_cosim_wire_smoke.cpp)
-target_link_libraries(test_cosim_wire_smoke PRIVATE GTest::gtest_main)
-target_include_directories(test_cosim_wire_smoke PRIVATE
+add_executable(test_cosim_integration test_cosim_integration.cpp)
+target_link_libraries(test_cosim_integration PRIVATE GTest::gtest_main yaml-cpp::yaml-cpp
+    noc_axi4_scenarios)
+target_include_directories(test_cosim_integration PRIVATE
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/tests)
-target_compile_definitions(test_cosim_wire_smoke PRIVATE
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_CURRENT_LIST_DIR})
+target_compile_definitions(test_cosim_integration PRIVATE
     SCENARIO_TREE_ROOT="${SCENARIO_TREE_ABS}")
 
 # -----------------------------------------------------------------------
 # test_checker_fires_on_violation — injection liveness regression
 # -----------------------------------------------------------------------
 add_executable(test_checker_fires_on_violation test_checker_fires_on_violation.cpp)
-target_link_libraries(test_checker_fires_on_violation PRIVATE GTest::gtest_main)
+target_link_libraries(test_checker_fires_on_violation PRIVATE GTest::gtest_main
+    yaml-cpp::yaml-cpp noc_axi4_scenarios)
 target_include_directories(test_checker_fires_on_violation PRIVATE
     ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/tests)
+    ${CMAKE_SOURCE_DIR}/tests
+    "${CMAKE_CURRENT_LIST_DIR}/../../tests/scenarios")
 target_compile_definitions(test_checker_fires_on_violation PRIVATE
     SCENARIO_TREE_ROOT="${SCENARIO_TREE_ABS}")
 
@@ -55,8 +59,8 @@ target_include_directories(test_wb2axip_block PRIVATE
 # in-project read-dump there. Scenarios are anchored to YAML location now,
 # so cwd no longer matters for data_file: resolution.
 # -----------------------------------------------------------------------
-add_test(NAME CosimWireSmoke COMMAND test_cosim_wire_smoke)
-set_tests_properties(CosimWireSmoke PROPERTIES
+add_test(NAME CosimIntegration COMMAND test_cosim_integration)
+set_tests_properties(CosimIntegration PROPERTIES
     ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
     WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
 

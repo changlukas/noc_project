@@ -1,12 +1,13 @@
 // Stage 5b checker liveness regression.
-// The injection_aw_unstable scenario uses a non-existent data_file to force
+// AX4-INF-001_dpi_fatal_on_init_failure uses a non-existent data_file to force
 // a DPI error at the first master tick. This propagates through the centralized
-// DPI error poll in tb_top.sv (cmodel_check_error → $display "[tb_top] DPI fatal"
-// → $fatal) → non-zero exit.
+// DPI error poll in tb_top.sv (cmodel_check_error, $display "[tb_top] DPI fatal",
+// $fatal) resulting in a non-zero exit.
 // Expected: binary exits non-zero AND emits the "[tb_top] DPI fatal" marker.
 // rc != 0 alone is insufficient — a Verilator build failure or a missing
 // scenario YAML would also exit non-zero without the fatal-path marker.
 #include "common/scenario.hpp"
+#include "scenario_helpers.hpp"
 #include <cstdio>
 #include <cstdlib>
 #include <gtest/gtest.h>
@@ -54,12 +55,14 @@ ProcResult run_and_capture(const std::string& cmd) {
 
 TEST(CheckerLiveness, injection_forces_nonzero_exit) {
     SCENARIO("wb2axip / DPI error liveness: injected fault causes non-zero exit");
+    using noc::tests::RequireKnownScenario;
     const char* bin = std::getenv("COSIM_BIN");
     ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
     // SCENARIO_TREE_ROOT is the absolute path to tests/scenarios/ (CMake-injected).
     const std::string cmd =
-        std::string(bin) +
-        " +scenario=" SCENARIO_TREE_ROOT "sv-cosim-only/injection_aw_unstable/scenario.yaml";
+        std::string(bin) + " +scenario=" SCENARIO_TREE_ROOT +
+        std::string(RequireKnownScenario("AX4-INF-001_dpi_fatal_on_init_failure")) +
+        "/scenario.yaml";
     const ProcResult result = run_and_capture(cmd);
     EXPECT_NE(result.rc, 0)
         << "injection scenario should have caused non-zero exit (DPI error / checker fire)\n"

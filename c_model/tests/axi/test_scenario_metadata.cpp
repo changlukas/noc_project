@@ -76,10 +76,9 @@ transactions:
 }
 
 TEST(ScenarioHelpers, helper_compiles) {
-    // kAllAxi4Scenarios is empty in commit 1; RequireKnownScenario can't be
-    // exercised positively yet — just check the header includes cleanly.
+    // After commit 2 migration, kAllAxi4Scenarios has 31 AX4-* scenarios.
     using noc::tests::kAllAxi4Scenarios;
-    EXPECT_EQ(kAllAxi4Scenarios.size(), 0u);
+    EXPECT_GT(kAllAxi4Scenarios.size(), 0u);
 }
 
 }  // namespace

@@ -11,7 +11,7 @@ SIM_OUTPUT_DIR  := cosim/output
 LAYER           ?= common
 SCENARIO        ?= single_write_read_aligned
 
-.PHONY: help build build-cmodel build-verilator sim test \
+.PHONY: help build build-cmodel build-verilator sim test check lint_scenarios \
         clean clean-cmodel clean-verilator clean-specgen-cache
 
 help:
@@ -79,6 +79,12 @@ sim: build-verilator
 	exit $$rc
 
 test: build-cmodel
+	cd $(CMODEL_BUILD) && ctest --output-on-failure
+
+lint_scenarios:
+	py -3 tools/lint_scenarios.py --require-nonempty
+
+check: lint_scenarios build-cmodel
 	cd $(CMODEL_BUILD) && ctest --output-on-failure
 
 # --- clean ---

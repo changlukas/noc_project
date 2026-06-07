@@ -8,7 +8,9 @@ target_link_libraries(test_axi_master_inject PRIVATE yaml-cpp::yaml-cpp)
 add_cmodel_test(test_scoreboard)
 target_link_libraries(test_scoreboard PRIVATE yaml-cpp::yaml-cpp)
 add_cmodel_test(test_integration)
-target_link_libraries(test_integration PRIVATE yaml-cpp::yaml-cpp)
+target_link_libraries(test_integration PRIVATE yaml-cpp::yaml-cpp noc_axi4_scenarios)
+target_include_directories(test_integration PRIVATE
+    "${CMAKE_SOURCE_DIR}/../tests/scenarios")
 add_cmodel_test(test_protocol_rules)
 
 # Stage B unified scenario tree. test_integration consumes scenarios via
