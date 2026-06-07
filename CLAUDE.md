@@ -22,9 +22,7 @@
 
 ## Key Design Docs
 
-- `docs/noc_cmodel_rtl_plan.md` — **main plan**: NoC c_model + RTL integration roadmap (Stage 2/3/4/5)
-- `docs/superpowers/specs/2026-05-31-pure-axi-subsystem-phase-b-design.md` — Phase B reference
-- `docs/superpowers/specs/2026-05-31-pure-axi-subsystem-phase-c-design.md` — Phase C reference
+- `docs/_archive/noc_cmodel_rtl_plan.md` - stage roadmap (archived 2026-06-07; superseded by `docs/architecture.md`)
 
 ## Doc Writing Rules
 

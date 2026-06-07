@@ -10,7 +10,7 @@ SCENARIO_TREE   := tests/scenarios
 SIM_OUTPUT_DIR  := cosim/output
 SCENARIO        ?= AX4-BAS-003_single_write_read_aligned
 
-.PHONY: help build build-cmodel build-verilator sim test check lint_scenarios \
+.PHONY: help build build-cmodel build-verilator sim test check lint_scenarios lint_docs \
         clean clean-cmodel clean-verilator clean-specgen-cache
 
 help:
@@ -82,7 +82,20 @@ test: build-cmodel
 lint_scenarios:
 	py -3 tools/lint_scenarios.py --require-nonempty
 
-check: lint_scenarios build-cmodel
+# Mandatory ASCII byte check on maintained docs (spec sec 3.2).
+# Excludes archive, normative spec, sub-project docs, legal, generated.
+MAINTAINED_DOCS = \
+    README.md \
+    docs/architecture.md \
+    docs/development.md \
+    docs/_archive/README.md \
+    tests/scenarios/README.md \
+    spec/ni/README.md
+
+lint_docs:
+	py -3 tools/lint_docs.py $(MAINTAINED_DOCS)
+
+check: lint_scenarios lint_docs build-cmodel
 	cd $(CMODEL_BUILD) && ctest --output-on-failure
 
 # --- clean ---

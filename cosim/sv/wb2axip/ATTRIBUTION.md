@@ -61,8 +61,9 @@ into the parent modules; this project needs it as a separate module to
 satisfy Verilator's structural elaboration.
 
 **Current behavior**: `o_valid` is hardwired to `1'b1` (always valid). Write
-strobe alignment checking is effectively disabled. See `cosim/KNOWN_LIMITATIONS.md`
-§1 for the implication and fix path.
+strobe alignment checking is effectively disabled. See
+`docs/architecture.md` sec. 4 (faxi_wstrb.v -- permissive stub) for the
+implication and fix path.
 
 ### sim_wrapper.svh (newly authored)
 

@@ -1,4 +1,4 @@
-# tests/scenarios — AXI4 Scenario Tree
+# tests/scenarios -- AXI4 Scenario Tree
 
 Single source of truth for AXI4 scenario YAMLs. Both c_model integration test
 (`c_model/tests/axi/test_integration.cpp`) and cosim integration test
@@ -7,22 +7,22 @@ CMake-generated header. Three scoped tests (`test_port_pair_loopback`,
 `test_request_response_loopback`, `test_checker_fires_on_violation`) consume
 hand-curated subsets.
 
-## Naming convention — `AX4-CAT-NNN_slug`
+## Naming convention -- `AX4-CAT-NNN_slug`
 
 | Code | Category | Scope |
 |---|---|---|
 | `BAS` | basic         | Basic serialized single-beat transfers |
-| `HSH` | handshake     | Handshake stall, backpressure (IHI 0022H §A3.2) |
-| `BUR` | burst         | INCR / WRAP / FIXED burst type and length (§A3.4.1) |
-| `BND` | boundary      | Alignment, narrow transfer, 4 KB boundary (§A3.4.1) |
-| `ORD` | ordering      | Multi-ID ordering (§A5, §A6) |
-| `EXC` | exclusive     | Exclusive access (§A7.2.4) |
-| `RSP` | response      | Error response — DECERR/SLVERR (§A3.4.5) |
+| `HSH` | handshake     | Handshake stall, backpressure (IHI 0022H sec. A3.2) |
+| `BUR` | burst         | INCR / WRAP / FIXED burst type and length (sec. A3.4.1) |
+| `BND` | boundary      | Alignment, narrow transfer, 4 KB boundary (sec. A3.4.1) |
+| `ORD` | ordering      | Multi-ID ordering (sec. A5, sec. A6) |
+| `EXC` | exclusive     | Exclusive access (sec. A7.2.4) |
+| `RSP` | response      | Error response -- DECERR/SLVERR (sec. A3.4.5) |
 | `STR` | stress        | Stress / concurrency |
 | `INF` | infrastructure | Non-AXI4-spec; testbench / DPI / bringup fixtures |
 
 ID format: `AX4-<CAT>-<NNN>_<slug>` where NNN is 3-digit zero-padded sequence
-number within category (e.g. `AX4-BUR-002_incr_8beat`). IDs are not stable —
+number within category (e.g. `AX4-BUR-002_incr_8beat`). IDs are not stable --
 deleting a scenario renumbers later siblings; commit messages include the
 rename map.
 
@@ -64,8 +64,8 @@ the scenario's own directory.
 |---|---|---|
 | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
 | `cosim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix + `wb2axip_block_reason()` runtime predicate |
-| `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated 4 scenarios × delay sweep | n/a |
-| `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 7 scenarios × num_vc variants | n/a |
+| `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated 4 scenarios x delay sweep | n/a |
+| `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 7 scenarios x num_vc variants | n/a |
 | `cosim/tests/test_checker_fires_on_violation.cpp` | INF-001 only | n/a |
 
 `kAllAxi4Scenarios` is generated at CMake configure time from
@@ -84,22 +84,22 @@ scenarios.
 1. Pick CAT + next NNN; create `tests/scenarios/AX4-CAT-NNN_slug/`
 2. Write `scenario.yaml` with `schema_version: 1` and full `metadata:` block
 3. Add `data.txt` (and any other data files referenced)
-4. Run `make check` — lint + both integration tests pick it up automatically
-5. If cosim SKIPs the new pattern with `WB2AXIP_*`, that's expected — wb2axip
+4. Run `make check` -- lint + both integration tests pick it up automatically
+5. If cosim SKIPs the new pattern with `WB2AXIP_*`, that's expected -- wb2axip
    doesn't model that case. No action needed; SKIP is documentation
-6. Commit with a body citing the IHI 0022H § or VIP test the scenario was
+6. Commit with a body citing the IHI 0022H sec. or VIP test the scenario was
    derived from
 
 ## Reference: IHI 0022H sections covered per category
 
-| CAT | IHI § |
+| CAT | IHI sec. |
 |---|---|
-| BAS | §A3.2 (basic VALID/READY) |
-| HSH | §A3.2 (handshake stalls) |
-| BUR | §A3.4.1 (burst type, length, size) |
-| BND | §A3.4.1 (alignment, 4KB boundary) |
-| ORD | §A5, §A6 (ID-based ordering) |
-| EXC | §A7.2.4 (exclusive access) |
-| RSP | §A3.4.5 (response codes) |
-| STR | §A5 (multi-outstanding traffic) |
-| INF | (none — testbench infrastructure) |
+| BAS | sec. A3.2 (basic VALID/READY) |
+| HSH | sec. A3.2 (handshake stalls) |
+| BUR | sec. A3.4.1 (burst type, length, size) |
+| BND | sec. A3.4.1 (alignment, 4KB boundary) |
+| ORD | sec. A5, sec. A6 (ID-based ordering) |
+| EXC | sec. A7.2.4 (exclusive access) |
+| RSP | sec. A3.4.5 (response codes) |
+| STR | sec. A5 (multi-outstanding traffic) |
+| INF | (none -- testbench infrastructure) |
