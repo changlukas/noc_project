@@ -1,0 +1,28 @@
+# IHI 0022H §A3.4.1: AxLEN = 255 (256-beat INCR burst, max valid length).
+# Each beat is size=5 (32 bytes). Total transfer = 8192 bytes; memory_size
+# enlarged accordingly.
+schema_version: 1
+metadata:
+  name: AX4-BUR-003_incr_len_256
+  category: burst
+
+config:
+  memory_base: 0x1000
+  memory_size: 0x4000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0
+    len: 255
+    size: 5
+    burst: INCR
+    data_file: data.txt
+  - op: read
+    addr: 0x1000
+    id: 0
+    len: 255
+    size: 5
+    burst: INCR
+    dump_file: unused

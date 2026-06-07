@@ -1,0 +1,26 @@
+# IHI 0022H §A3.4.1: WRAP burst, AxLEN=3 (4-beat). Wrap boundary 128 bytes.
+schema_version: 1
+metadata:
+  name: AX4-BUR-008_wrap_len_4
+  category: burst
+
+config:
+  memory_base: 0x1000
+  memory_size: 0x1000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x1000
+    id: 0
+    len: 3
+    size: 5
+    burst: WRAP
+    data_file: data.txt
+  - op: read
+    addr: 0x1000
+    id: 0
+    len: 3
+    size: 5
+    burst: WRAP
+    dump_file: unused

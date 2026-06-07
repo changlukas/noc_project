@@ -1,0 +1,45 @@
+# IHI 0022H §A3.4.1: 4KB boundary edges. Two transactions: one ending exactly
+# at the 4KB boundary (no split needed), one starting one beat short of
+# crossing (also no split). Both INCR.
+#
+# burst1: addr=0x0F80, len=3, size=5  -> 4 beats * 32 = 128 bytes ending at 0x0FFF
+# burst2: addr=0x1000, len=3, size=5  -> next 4KB region, same pattern
+schema_version: 1
+metadata:
+  name: AX4-BND-007_4kb_boundary_edges
+  category: boundary
+
+config:
+  memory_base: 0x0F80
+  memory_size: 0x2000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x0F80
+    id: 0
+    len: 3
+    size: 5
+    burst: INCR
+    data_file: data.txt
+  - op: write
+    addr: 0x1000
+    id: 0
+    len: 3
+    size: 5
+    burst: INCR
+    data_file: data.txt
+  - op: read
+    addr: 0x0F80
+    id: 0
+    len: 3
+    size: 5
+    burst: INCR
+    dump_file: unused
+  - op: read
+    addr: 0x1000
+    id: 0
+    len: 3
+    size: 5
+    burst: INCR
+    dump_file: unused
