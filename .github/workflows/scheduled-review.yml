@@ -1,0 +1,59 @@
+name: Scheduled Code Review
+
+# Daily automated review of the NoC c_model codebase.
+# Claude inspects the repository and opens a GitHub Issue summarizing findings.
+on:
+  schedule:
+    # 01:00 UTC daily (cron is always UTC). Adjust if a different slot is preferred.
+    - cron: "0 1 * * *"
+  # Allow manual runs from the Actions tab for testing.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Full history so the review can inspect recent commits.
+          fetch-depth: 0
+
+      - name: Run scheduled review
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --allowedTools "Read,Grep,Glob,Bash(git log:*),Bash(git diff:*),Bash(git show:*),Bash(gh issue create:*),Bash(gh issue list:*)"
+          prompt: |
+            You are running a scheduled daily code-health review of the
+            `ni::cmodel::` NoC C++ behavior model. Read CLAUDE.md first and
+            follow its project conventions.
+
+            Scope:
+            - Review the commits from the last 24 hours (`git log --since="24 hours ago"`).
+              If there are no new commits, do a light sweep of a different area of
+              the codebase (NMU, NSU, cosim shells, or config) instead.
+            - Look for: correctness risks, missing tests for new functionality,
+              violations of the project conventions in CLAUDE.md (namespacing,
+              hermetic singleton invariant, parameter discipline, no external
+              IP/vendor names), and doc/spec cross-file inconsistencies.
+
+            Output:
+            - Summarize findings as a single GitHub Issue titled
+              `Daily review YYYY-MM-DD` (use today's date).
+            - Group findings by severity (High / Medium / Low). For each finding
+              cite `file_path:line_number`. If nothing notable is found, still open
+              the issue and state that the review was clean.
+            - Before creating the issue, run `gh issue list --search "Daily review"`
+              to avoid duplicate titles; if today's already exists, comment is not
+              needed — just note it and stop.
+            - Create the issue with `gh issue create`. Do NOT modify any files,
+              open PRs, or push commits.
