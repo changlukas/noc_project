@@ -73,12 +73,12 @@ def load_spec_bundle(spec_dir: Union[str, Path], md_dir: Optional[Union[str, Pat
 
 
 def load_spec_version() -> str:
-    """Read spec/ni/VERSION (single source of truth for spec_version).
+    """Read specgen/source/VERSION (single source of truth for spec_version).
 
-    Looks for the file relative to the specgen parent directory:
-        noc_project/spec/ni/VERSION  (one-line semver, no trailing newline content).
+    Looks for the file relative to the specgen root:
+        specgen/source/VERSION  (one-line semver, no trailing newline content).
     """
-    version_file = SPECGEN_ROOT.parent / "spec" / "ni" / "VERSION"
+    version_file = SPECGEN_ROOT / "source" / "VERSION"
     if not version_file.exists():
-        raise FileNotFoundError(f"spec/ni/VERSION not found at {version_file}")
+        raise FileNotFoundError(f"specgen/source/VERSION not found at {version_file}")
     return version_file.read_text(encoding="utf-8").strip()
