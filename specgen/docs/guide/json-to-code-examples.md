@@ -1,8 +1,12 @@
-# From MD spec to generated C++/SV
+# From JSON spec to generated C++/SV
 
-以 generic placeholder 展示 `spec_validate` 三條 codegen 通路 (packet / signals / registers)
-的「authored MD → JSON → elaborated header」轉換 pattern。
+以 generic placeholder 展示 `specgen` 三條 codegen 通路 (packet / signals / registers)
+的「authored JSON → elaborated header」轉換 pattern。
 讀者：要在 spec 新增 header field / signal pin / register field 的工程師。
+
+JSON 是 canonical source — 直接 hand-edit `specgen/generated/json/ni_*.json`，
+跑 `py -3 specgen/tools/codegen.py --target cpp/sv --domain packet/signals/registers`
+重生 `.h` / `.sv`。drift gate 守住 JSON ↔ cpp/sv 一致。
 
 ```
 specgen/generated/json/ni_*.json   (canonical source; hand-edit here)

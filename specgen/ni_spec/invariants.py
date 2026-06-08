@@ -338,10 +338,11 @@ def check_protocol_rules_id_uniqueness(rule_spec) -> List[Issue]:
 
 
 def check_all(bundle, md_dir: Optional[str] = None) -> List[Issue]:
-    """Path B：跑 Layer 1 (schema) + Layer 2 (arithmetic)。
+    """跑 Layer 1 (schema) + Layer 2 (arithmetic) 對 hand-edited JSON spec。
 
-    Layer 3 (cross-check) 在 Path B 下不再存在 — generator 把 MD 直接
-    產成 JSON，沒有兩份要對拍。md_dir 參數保留簽名但已無作用。
+    `specgen/generated/json/*.json` 是 canonical source；invariants 守的是
+    JSON 結構 + 算術一致性，下游 cpp/sv 一致性由 `codegen.py --check` 守。
+    md_dir 參數保留簽名只為 backward compatibility，現已無作用。
     """
     issues: List[Issue] = []
     issues += check_schema(bundle.packet, bundle.packet_schema)

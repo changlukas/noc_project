@@ -33,7 +33,7 @@ def _field_widths_section(text: str) -> str:
 def test_field_widths_declaration_order_preserved_in_header():
     """ni_flit_constants.h emits `constexpr int <NAME>_WIDTH = ...` lines for
     each field_widths entry; their order must match field_widths{} insertion
-    order in the JSON (= MD source declaration order)."""
+    order in the JSON (the canonical hand-edited source)."""
     spec = json.loads(JSON_PATH.read_text(encoding="utf-8"))
     text = HEADER_PATH.read_text(encoding="utf-8")
     section = _field_widths_section(text)

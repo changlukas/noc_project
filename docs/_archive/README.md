@@ -43,7 +43,7 @@ _archive/
 The project uses a 4-class decision model when classifying documentation:
 
 - **Normative spec**: authoritative; changes require sign-off
-  (e.g. `spec/ni/doc/*.md`).
+  (e.g. `specgen/generated/json/ni_packet.json`, `docs/image/*.jpg`).
 - **Maintained guide**: tracks code drift
   (e.g. `README.md`, `docs/architecture.md`, `docs/development.md`).
 - **Generated reference**: tool emits; humans do not edit
