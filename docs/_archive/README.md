@@ -22,8 +22,6 @@ reproducibility of completed brainstorm + plan cycles.
 - Looking for current architecture: read `../architecture.md`
 - Looking for how to build, test, or contribute: read `../development.md`
 - Looking for the project entry point: read `../../README.md`
-- Looking for the normative NI spec: read `../../spec/ni/README.md`
-
 ## Layout
 
 ```

@@ -125,7 +125,7 @@ prefix in the directory name.
 
 - Encoding: UTF-8, no BOM.
 - Maintained docs (README.md, docs/architecture.md, docs/development.md,
-  docs/_archive/README.md, tests/scenarios/README.md, spec/ni/README.md)
+  docs/_archive/README.md, tests/scenarios/README.md)
   must be ASCII-only. The `lint_docs` target enforces this.
 - Headings: sentence case (only first word and proper nouns capitalized).
 - Link paths: forward slash `/` separator.
@@ -467,7 +467,6 @@ Before opening a PR or merging a branch:
 
 - `docs/architecture.md` -- system context, component map, tick
   discipline, cosim boundary, wb2axip structural limits.
-- `spec/ni/README.md` -- normative NI specification.
 - `tests/scenarios/README.md` -- scenario naming convention, YAML
   schema, IHI 0022H section coverage table.
 - `specgen/docs/guide/index.md` -- specgen sub-project guide.

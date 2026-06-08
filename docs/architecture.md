@@ -408,8 +408,6 @@ transfers.
 
 ## 7. References
 
-- `spec/ni/README.md` -- normative NI specification (features, protocol
-  rules, register map, DV plan).
 - `tests/scenarios/README.md` -- scenario naming convention, YAML schema,
   IHI 0022H section mapping per category.
 - `c_model/include/axi/ATTRIBUTION.md` -- cocotbext-axi MIT attribution.

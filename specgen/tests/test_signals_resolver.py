@@ -133,8 +133,8 @@ def test_signal_eval_expr_arithmetic(signals_spec, packet_spec):
 # -- AXI_*_WIDTH resolution via per-interface port_parameters (PP-9) -
 
 # Expected widths for every AXI scalar symbol. These match the defaults
-# carried by the merged namespace (signal_interface.md §Parameters +
-# packet_format.md §1.2 Group 3 + AMBA IHI 0022 fixed AXI_QOS_WIDTH).
+# carried by the merged namespace (ni_signals.json port_parameters +
+# ni_packet.json §1.2 Group 3 + AMBA IHI 0022 fixed AXI_QOS_WIDTH).
 _EXPECTED_AXI_WIDTHS = {
     "AXI_DATA_WIDTH":    256,
     "AXI_STRB_WIDTH":    32,

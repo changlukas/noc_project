@@ -89,8 +89,7 @@ MAINTAINED_DOCS = \
     docs/architecture.md \
     docs/development.md \
     docs/_archive/README.md \
-    tests/scenarios/README.md \
-    spec/ni/README.md
+    tests/scenarios/README.md
 
 lint_docs:
 	py -3 tools/lint_docs.py $(MAINTAINED_DOCS)

@@ -4,8 +4,8 @@
     "spec_version": "v0.4.0",
     "source_format": "hand-written; do not auto-gen",
     "authored_from": [
-      "spec/ni/README.md §Features",
-      "spec/ni/doc/theory_of_operation.md"
+      "docs/image/header.jpg",
+      "specgen/generated/json/ni_packet.json"
     ]
   },
   "blocks": [

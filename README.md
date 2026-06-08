@@ -25,7 +25,6 @@ AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
 - `c_model/` - C++17 behavioural model + GoogleTest
 - `cosim/` - Verilator wire-level cosim + wb2axip checker
 - `tests/scenarios/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
-- `spec/ni/` - normative NI specification
 - `specgen/` - spec-to-header codegen sub-project
 - `tools/` - repo-level tooling
 - `docs/` - architecture + development guide
@@ -62,7 +61,6 @@ faxi_slave.v assertions if run through `make sim` directly. See
 
 - [Architecture overview](docs/architecture.md)
 - [Development guide](docs/development.md)
-- [NI specification](spec/ni/README.md)
 - [specgen sub-project](specgen/docs/guide/index.md)
 - [Historical archive](docs/_archive/README.md)
 
