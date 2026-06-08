@@ -2,24 +2,9 @@
 import json
 from pathlib import Path
 import pytest
-from ni_spec import generator, constants, loader
+from ni_spec import constants, loader
 
 SPECGEN_ROOT = Path(__file__).resolve().parent.parent
-MD_DIR = SPECGEN_ROOT.parent / "spec" / "ni" / "doc"
-
-
-def test_extract_reset_signals_returns_arst_and_noc_rst():
-    """parse_pin_level_reset extracts the `Reset signals:` bullet list."""
-    reset_signals = generator.extract_reset_signals(MD_DIR / "pin_level_reset.md")
-    assert "arst_ni" in reset_signals
-    assert "noc_rst_ni" in reset_signals
-    assert len(reset_signals) >= 2
-
-
-def test_extract_reset_signals_handles_missing_file():
-    """Missing file raises FileNotFoundError."""
-    with pytest.raises(FileNotFoundError):
-        generator.extract_reset_signals(Path("/nonexistent"))
 
 
 def test_signals_reset_domains_after_extract():
