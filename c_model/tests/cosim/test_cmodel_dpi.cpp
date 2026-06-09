@@ -61,7 +61,18 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_channel_model_tick(garbage);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
-    // Body extended by Tasks 6-10.
+    // === Master cases (T6) ===
+
+    // Case: master_create after init succeeds; scoreboard callbacks wired.
+    void* master_handle = cmodel_master_create("master_test");
+    ASSERT_NE(master_handle, nullptr);
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: type mismatch — channel_model handle passed to master_tick.
+    cmodel_master_tick(cm_handle);
+    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
+
+    // Body extended by Tasks 7-10.
 }
 
 }  // namespace

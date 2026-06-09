@@ -28,6 +28,7 @@ module axi_master_wrap #(
 ) (
     input  logic     clk_i,
     input  logic     rst_ni,
+    input  chandle   ctx_i,
     axi4_intf.master axi_o
 );
 
@@ -36,6 +37,7 @@ module axi_master_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_master_set_inputs(
+        input  chandle              ctx,
         input  bit                  awready,
         input  bit                  wready,
         input  bit                  arready,
@@ -49,9 +51,12 @@ module axi_master_wrap #(
         input  bit                  rlast
     );
 
-    import "DPI-C" context function void cmodel_master_tick();
+    import "DPI-C" context function void cmodel_master_tick(
+        input chandle ctx
+    );
 
     import "DPI-C" context function void cmodel_master_get_outputs(
+        input  chandle              ctx,
         output bit                  awvalid,
         output bit [ID_WIDTH-1:0]   awid,
         output bit [ADDR_WIDTH-1:0] awaddr,
@@ -152,6 +157,7 @@ module axi_master_wrap #(
         end else begin
             // Step 1: push current slave-side wire values into C++ input latch.
             cmodel_master_set_inputs(
+                ctx_i,
                 axi_o.awready,
                 axi_o.wready,
                 axi_o.arready,
@@ -166,7 +172,7 @@ module axi_master_wrap #(
             );
 
             // Step 2: advance C++ model one cycle.
-            cmodel_master_tick();
+            cmodel_master_tick(ctx_i);
 
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
@@ -198,6 +204,7 @@ module axi_master_wrap #(
                 bit [3:0]              t_arqos;
                 bit                    t_rready;
                 cmodel_master_get_outputs(
+                    ctx_i,
                     t_awvalid, t_awid, t_awaddr,
                     t_awlen,   t_awsize, t_awburst,
                     t_awlock,  t_awcache, t_awprot, t_awqos,

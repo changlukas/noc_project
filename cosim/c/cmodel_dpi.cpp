@@ -443,12 +443,71 @@ void pack_addr64(uint64_t addr, svBitVecVal* vec) {
 
 }  // namespace
 
-extern "C" void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arready, svBit bvalid,
-                                         svBitVecVal* bid, svBitVecVal* bresp, svBit rvalid,
-                                         svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
-                                         svBit rlast) {
+extern "C" void* cmodel_master_create(const char* name) {
+    if (g_session_state != SessionState::Initialized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
+                             "cmodel_master_create: not initialized");
+        return nullptr;
+    }
+    DPI_BOUNDARY_BEGIN_R(cmodel_master_create, nullptr) {
+        const std::string dump_path = "master_shell_read_dump_" + std::string(name) + ".txt";
+        auto adapter = std::make_unique<MasterShellAdapter>();
+        adapter->init(g_scenario_yaml_path, dump_path, g_scenario.config.max_outstanding_write,
+                      g_scenario.config.max_outstanding_read);
+        adapter->configure_inject(g_scenario.config.inject);
+
+        // Wire scoreboard callbacks. g_scoreboard outlives all masters
+        // (single global; created in cmodel_init, destroyed in cmodel_finalize).
+        auto* sb_raw = g_scoreboard.get();
+        auto resp_str = [](ni::cmodel::axi::Resp r) -> const char* {
+            switch (r) {
+                case ni::cmodel::axi::Resp::OKAY:
+                    return "OKAY";
+                case ni::cmodel::axi::Resp::EXOKAY:
+                    return "EXOKAY";
+                case ni::cmodel::axi::Resp::SLVERR:
+                    return "SLVERR";
+                case ni::cmodel::axi::Resp::DECERR:
+                    return "DECERR";
+            }
+            return "?";
+        };
+        adapter->on_write_completed([sb_raw, resp_str](const ni::cmodel::axi::WriteResult& wr) {
+            sb_raw->handle_write_completed(wr, wr.data, wr.strb_per_beat);
+            std::fprintf(stderr, "[axi-w] id=0x%x addr=0x%llx len=%u size=%u resp=%s\n",
+                         static_cast<unsigned>(wr.id), static_cast<unsigned long long>(wr.addr),
+                         static_cast<unsigned>(wr.len), static_cast<unsigned>(wr.size),
+                         resp_str(wr.resp));
+        });
+        adapter->on_read_observed([sb_raw, resp_str](const ni::cmodel::axi::ReadResult& rr) {
+            sb_raw->handle_read_observed(rr);
+            const uint8_t first_byte = rr.data.empty() ? 0 : rr.data[0];
+            std::fprintf(stderr,
+                         "[axi-r] id=0x%x addr=0x%llx len=%u size=%u resp=%s data[0]=0x%02x\n",
+                         static_cast<unsigned>(rr.id), static_cast<unsigned long long>(rr.addr),
+                         static_cast<unsigned>(rr.len), static_cast<unsigned>(rr.size),
+                         resp_str(rr.resp), static_cast<unsigned>(first_byte));
+        });
+
+        auto* h = new HandleBlock{
+            static_cast<uint32_t>(ShellType::Master), ShellType::Master, HandleState::Live,
+            std::string(name),
+            std::unique_ptr<void, void (*)(void*)>(
+                adapter.release(), [](void* p) { delete static_cast<MasterShellAdapter*>(p); })};
+        g_handle_registry.insert(h);
+        ++g_ever_created_master;
+        return static_cast<void*>(h);
+    }
+    DPI_BOUNDARY_END_R(cmodel_master_create);
+}
+
+extern "C" void cmodel_master_set_inputs(void* ctx, svBit awready, svBit wready, svBit arready,
+                                         svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp,
+                                         svBit rvalid, svBitVecVal* rid, svBitVecVal* rdata,
+                                         svBitVecVal* rresp, svBit rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_master_set_inputs) {
-        REQUIRE_ADAPTER(g_master_adapter, "cmodel_master_set_inputs");
+        REQUIRE_HANDLE(ctx, ShellType::Master, "cmodel_master_set_inputs");
+        auto* master = static_cast<MasterShellAdapter*>(_h->adapter.get());
         MasterInputs in{};
         in.awready = static_cast<bool>(awready);
         in.wready = static_cast<bool>(wready);
@@ -461,30 +520,32 @@ extern "C" void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arre
         in.rdata = unpack_data256(rdata);
         in.rresp = static_cast<uint8_t>(rresp[0] & 0x3);
         in.rlast = static_cast<bool>(rlast);
-        g_master_adapter->set_inputs(in);
+        master->set_inputs(in);
     }
     DPI_BOUNDARY_END(cmodel_master_set_inputs);
 }
 
-extern "C" void cmodel_master_tick(void) {
+extern "C" void cmodel_master_tick(void* ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_master_tick) {
-        REQUIRE_ADAPTER(g_master_adapter, "cmodel_master_tick");
-        g_master_adapter->tick();
+        REQUIRE_HANDLE(ctx, ShellType::Master, "cmodel_master_tick");
+        auto* master = static_cast<MasterShellAdapter*>(_h->adapter.get());
+        master->tick();
     }
     DPI_BOUNDARY_END(cmodel_master_tick);
 }
 
 extern "C" void cmodel_master_get_outputs(
-    svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-    svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,
-    svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-    svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
-    svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
+    void* ctx, svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
+    svBitVecVal* awsize, svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
+    svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
+    svBit* wlast, svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+    svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock,
+    svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_master_get_outputs) {
-        REQUIRE_ADAPTER(g_master_adapter, "cmodel_master_get_outputs");
+        REQUIRE_HANDLE(ctx, ShellType::Master, "cmodel_master_get_outputs");
+        auto* master = static_cast<MasterShellAdapter*>(_h->adapter.get());
         MasterOutputs out{};
-        g_master_adapter->get_outputs(out);
+        master->get_outputs(out);
 
         *awvalid = static_cast<svBit>(out.awvalid);
         awid[0] = out.awid;

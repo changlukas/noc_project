@@ -46,18 +46,19 @@ void cmodel_channel_model_get_outputs(void* ctx, svBit* req_out_valid, svBitVecV
                                       svBit* req_out_credit_return, svBit* rsp_out_valid,
                                       svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return);
 
-// AxiMaster (Task 8) — drives AXI master side; consumes B/R from slave wire.
+// AxiMaster (Task 6) — chandle ABI; per-instance dump path + scoreboard wiring.
 // Packing: svBitVecVal* for multi-bit fields (little-endian word order).
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
 //   wstrb         : 1 word (32-bit strobe)
 //   other attribs : 1 word each (low bits used per width)
-void cmodel_master_set_inputs(svBit awready, svBit wready, svBit arready, svBit bvalid,
+void* cmodel_master_create(const char* name);
+void cmodel_master_set_inputs(void* ctx, svBit awready, svBit wready, svBit arready, svBit bvalid,
                               svBitVecVal* bid, svBitVecVal* bresp, svBit rvalid, svBitVecVal* rid,
                               svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
-void cmodel_master_tick(void);
-void cmodel_master_get_outputs(svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+void cmodel_master_tick(void* ctx);
+void cmodel_master_get_outputs(void* ctx, svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                                svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
                                svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
                                svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata,
