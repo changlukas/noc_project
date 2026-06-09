@@ -111,15 +111,7 @@ HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name)
     return h;
 }
 
-// 5 singleton ShellAdapter pointers — populated by cmodel_init.
-// Hermetic: each handler accesses ONLY its own singleton.
-std::unique_ptr<ChannelModelShellAdapter> g_channel_adapter;
-std::unique_ptr<MasterShellAdapter> g_master_adapter;
-std::unique_ptr<SlaveShellAdapter> g_slave_adapter;
-std::unique_ptr<NmuShellAdapter> g_nmu_adapter;
-std::unique_ptr<NsuShellAdapter> g_nsu_adapter;
-
-// Real scoreboard — wired to MasterShellAdapter callbacks in cmodel_init.
+// Real scoreboard — wired to MasterShellAdapter callbacks in cmodel_master_create.
 std::unique_ptr<ni::cmodel::axi::Scoreboard> g_scoreboard;
 
 }  // namespace ni::cmodel::cosim
@@ -143,72 +135,6 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         g_scenario = std::move(scenario);
         g_scenario_yaml_path = scenario_yaml_path;
         g_scoreboard = std::make_unique<ni::cmodel::axi::Scoreboard>();
-
-        // ====== Preserved singleton-construction block (removed in Task 10) ======
-        // Construct fresh adapters into local unique_ptrs (strong exception guarantee)
-        auto channel = std::make_unique<ChannelModelShellAdapter>();
-        channel->init();
-
-        auto master = std::make_unique<MasterShellAdapter>();
-        master->init(g_scenario_yaml_path, "", g_scenario.config.max_outstanding_write,
-                     g_scenario.config.max_outstanding_read);
-        master->configure_inject(g_scenario.config.inject);
-
-        auto slave = std::make_unique<SlaveShellAdapter>();
-        slave->init(g_scenario.config.memory_base, g_scenario.config.memory_size,
-                    g_scenario.config.write_latency, g_scenario.config.read_latency);
-
-        auto nmu = std::make_unique<NmuShellAdapter>();
-        nmu->init();
-
-        auto nsu = std::make_unique<NsuShellAdapter>();
-        nsu->init();
-
-        // Wire real scoreboard to master callbacks.
-        // Each callback also prints a one-line transaction summary to stderr so
-        // co-sim runs surface per-AXI-transaction activity at runtime, matching
-        // the visibility c_model standalone tests give.
-        auto* sb_raw = g_scoreboard.get();
-        auto resp_str = [](ni::cmodel::axi::Resp r) -> const char* {
-            switch (r) {
-                case ni::cmodel::axi::Resp::OKAY:
-                    return "OKAY";
-                case ni::cmodel::axi::Resp::EXOKAY:
-                    return "EXOKAY";
-                case ni::cmodel::axi::Resp::SLVERR:
-                    return "SLVERR";
-                case ni::cmodel::axi::Resp::DECERR:
-                    return "DECERR";
-            }
-            return "?";
-        };
-        master->on_write_completed([sb_raw, resp_str](const ni::cmodel::axi::WriteResult& wr) {
-            sb_raw->handle_write_completed(wr, wr.data, wr.strb_per_beat);
-            std::fprintf(stderr, "[axi-w] id=0x%x addr=0x%llx len=%u size=%u resp=%s\n",
-                         static_cast<unsigned>(wr.id), static_cast<unsigned long long>(wr.addr),
-                         static_cast<unsigned>(wr.len), static_cast<unsigned>(wr.size),
-                         resp_str(wr.resp));
-        });
-        master->on_read_observed([sb_raw, resp_str](const ni::cmodel::axi::ReadResult& rr) {
-            sb_raw->handle_read_observed(rr);
-            // Print first user-data byte as a quick pattern check; ReadResult.data
-            // is the packed user-byte buffer (not per-beat).
-            const uint8_t first_byte = rr.data.empty() ? 0 : rr.data[0];
-            std::fprintf(stderr,
-                         "[axi-r] id=0x%x addr=0x%llx len=%u size=%u resp=%s data[0]=0x%02x\n",
-                         static_cast<unsigned>(rr.id), static_cast<unsigned long long>(rr.addr),
-                         static_cast<unsigned>(rr.len), static_cast<unsigned>(rr.size),
-                         resp_str(rr.resp), static_cast<unsigned>(first_byte));
-        });
-
-        // Commit (all-or-nothing)
-        g_channel_adapter = std::move(channel);
-        g_master_adapter = std::move(master);
-        g_slave_adapter = std::move(slave);
-        g_nmu_adapter = std::move(nmu);
-        g_nsu_adapter = std::move(nsu);
-        // ====== End preserved block ======
-
         g_session_state = SessionState::Initialized;
     }
     DPI_BOUNDARY_END(cmodel_init);
@@ -226,13 +152,6 @@ extern "C" void cmodel_finalize(void) {
         }
         g_handle_registry.clear();
 
-        // Preserve existing singleton resets — removed by Task 10 once all
-        // per-shell create handlers are in place.
-        g_channel_adapter.reset();
-        g_master_adapter.reset();
-        g_slave_adapter.reset();
-        g_nmu_adapter.reset();
-        g_nsu_adapter.reset();
         g_scoreboard.reset();
         g_ever_created_master = 0;
 
@@ -247,12 +166,19 @@ extern "C" int cmodel_check_error(const char** msg) {
     return g_dpi_error_code.load();
 }
 
-// cmodel_done — returns 1 when the AxiMaster has submitted all scenario
-// transactions and all in-flight completions have been processed.
-// Returns 0 if the master adapter is not yet initialised.
+// cmodel_done — returns 1 when all live MasterShellAdapter instances report
+// done(). Returns 0 if no master was ever created (non-vacuous guard) or if
+// any master has not yet completed all in-flight transactions.
 extern "C" int cmodel_done(void) {
-    if (!g_master_adapter) return 0;
-    return g_master_adapter->done() ? 1 : 0;
+    using namespace ni::cmodel::cosim;
+    if (g_session_state != SessionState::Initialized) return 0;
+    if (g_ever_created_master == 0) return 0;
+    for (HandleBlock* h : g_handle_registry) {
+        if (h->type != ShellType::Master) continue;
+        auto* m = static_cast<MasterShellAdapter*>(h->adapter.get());
+        if (!m->done()) return 0;
+    }
+    return 1;
 }
 
 // cmodel_scoreboard_clean — returns 1 when the scoreboard has no mismatches.
@@ -263,11 +189,12 @@ extern "C" int cmodel_scoreboard_clean(void) {
     return (g_scoreboard->mismatch_count() == 0) ? 1 : 0;
 }
 
-// cmodel_dump_scoreboard — print scoreboard stats + mismatch log + read-dump
-// file path to stderr. Called by tb_top.sv before $finish / $fatal so the
-// debug info is visible without having to inspect the tmp-dir dump file.
-// Safe to call multiple times; safe before init / after finalize (no-ops).
+// cmodel_dump_scoreboard — print scoreboard stats + mismatch log + per-master
+// read-dump file path to stderr. Iterates g_handle_registry for all live
+// Master handles. Safe to call multiple times; safe before init / after
+// finalize (scoreboard pointer check guards the null case).
 extern "C" void cmodel_dump_scoreboard(void) {
+    using namespace ni::cmodel::cosim;
     DPI_BOUNDARY_BEGIN(cmodel_dump_scoreboard) {
         if (g_scoreboard) {
             std::fprintf(stderr, "[scoreboard] %zu reads checked, %zu mismatches\n",
@@ -276,9 +203,11 @@ extern "C" void cmodel_dump_scoreboard(void) {
                 std::fprintf(stderr, "  %s\n", msg.c_str());
             }
         }
-        if (g_master_adapter) {
-            std::fprintf(stderr, "[dump] read-dump file: %s\n",
-                         g_master_adapter->read_dump_path().c_str());
+        for (HandleBlock* h : g_handle_registry) {
+            if (h->type != ShellType::Master) continue;
+            auto* m = static_cast<MasterShellAdapter*>(h->adapter.get());
+            std::fprintf(stderr, "[dump] master=%s read-dump file: %s\n", h->name.c_str(),
+                         m->read_dump_path().c_str());
         }
     }
     DPI_BOUNDARY_END(cmodel_dump_scoreboard);

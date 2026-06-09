@@ -96,7 +96,29 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     ASSERT_NE(nsu_handle, nullptr);
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Body extended by Task 10.
+    // === Lifecycle aggregation + FINALIZED phase (T10) ===
+
+    // Case: cmodel_done with master created but not driven → 0.
+    //   ever_created_master ≥ 1 (T6 created master_handle) but master.done()
+    //   is false until scenario completes. Exercises BOTH the non-vacuous
+    //   guard AND the "any master not done → return 0" path.
+    EXPECT_EQ(cmodel_done(), 0);
+
+    // Case: finalize from INITIALIZED → registry destroyed, state = FINALIZED.
+    cmodel_finalize();
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: cycle op on stale ctx after finalize → registry-miss → HERMETIC_VIOLATION.
+    cmodel_channel_model_tick(cm_handle);
+    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
+
+    // Case: finalize twice → second is no-op.
+    cmodel_finalize();
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: cmodel_init after finalize → REINIT_FORBIDDEN (terminal state).
+    cmodel_init(good_yaml);
+    check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
 }
 
 }  // namespace
