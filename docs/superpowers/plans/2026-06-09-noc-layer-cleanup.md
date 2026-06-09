@@ -569,11 +569,18 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
   ```bash
   py -3 specgen/tools/codegen.py --check                   # exit 0
   py -3 -m pytest specgen/tests/ 2>&1 | tail -3            # all PASS
-  make build PYTHON3="py -3" 2>&1 | tail -10               # clean SV elaboration (modulo GCC ICE)
-  make check PYTHON3="py -3" 2>&1 | tail -10               # green modulo GCC ICE
+  make build PYTHON3="py -3" 2>&1 | tail -10               # modulo baseline noise (see "Pre-existing baseline noise" below)
+  make check PYTHON3="py -3" 2>&1 | tail -10               # modulo baseline noise
   ```
 
-  Verify: Verilator passes new `noc_intf` declaration; DPI symbols (`cmodel_channel_model_*`) resolve between `cmodel_dpi.h` and `channel_model_wrap.sv`.
+  **Verification we CAN do here**: DPI symbol resolution (`cmodel_channel_model_*`) between `cmodel_dpi.h` and `channel_model_wrap.sv` — grep + manual trace.
+
+  **Verification we CANNOT do here (Verilator perl-launcher env issue)**: SV elaboration of the new `noc_intf` bundle. Implementer + reviewer manually trace signal directions + modport contracts against the JSON; record the trace in commit message / report. Full Verilator pass deferred until env is fixed.
+
+  **Pre-existing baseline noise** (verified on b8901c3 baseline by stash + rerun; DO NOT try to fix here):
+  - MinGW GCC 15.2 ICE on some c_model target (surfaces at `register_file.cpp:54` or `test_meta_buffer`)
+  - ~60 ctest failures rooted in `flit.hpp:153 payload_field_pos: (channel, field) pair not found`
+  - Verilator perl-launcher path issue in MSYS env
 
 - [ ] **3.13: Commit**
 
@@ -616,13 +623,13 @@ Skipped this cleanup because there is exactly one `noc_link` interface in the JS
   ```
 
   Dispatch `codex:codex-rescue` with the diff. Verify:
-  - 3 commits implement the spec exactly
-  - No surviving `LoopbackNoc` / `loopback_noc` / `noc_req_intf` / `noc_rsp_intf` outside historical scope
+  - All implementation commits (see "Verification Record" below for actual count) match the spec
+  - No surviving `LoopbackNoc` / `loopback_noc` / `noc_req_intf` / `noc_rsp_intf` outside historical scope (excluded files: `docs/_archive/`, the prior cleanup spec/plan files dated `2026-06-0[2-8]-*`, and the 2026-06-09 spec + plan themselves)
   - `codegen.py --check` exit 0
   - `pytest specgen/tests/` all PASS
-  - `make check` green modulo pre-existing GCC ICE
+  - `make check` modulo baseline noise (GCC ICE + ~60 ctest `flit.hpp:153` failures + Verilator perl env)
 
-- [ ] **P.2: If Codex flags issues — fix inline + amend or fixup commit. Re-run until clean.**
+- [ ] **P.2: If Codex flags issues — fix inline as a new commit (per CLAUDE.md, prefer new commit over amend). Re-run until clean.**
 
 - [ ] **P.3: Cleanup + push**
 
@@ -630,3 +637,40 @@ Skipped this cleanup because there is exactly one `noc_link` interface in the JS
   rm .noc_cleanup_diff.patch
   git push origin main
   ```
+
+---
+
+## Verification Record
+
+**Actual implementation commit chain (6 commits + 1 plan doc, on top of spec `b8901c3`):**
+
+| SHA | Type |
+|---|---|
+| `6198b90` | C1: rename LoopbackNoc → ChannelModel (43 files) |
+| `86249b9` | C1 polish: scrub residual loopback comments + rename `u_loopback` → `u_channel` (12 files, driven by code-quality reviewer findings) |
+| `5ec456e` | C2: merge ni_signals.json NoC interfaces (16 files; SV golden refreshed because `codegen --check` covers all targets) |
+| `9b22148` | C3: merge interface_handshake.json + sv_signals.py modport-from-JSON + 4 SV wraps + tb_top (10 files) |
+| `dbd5895` | C3 polish: `<chan>` placeholder legend + cosmetic alignment + topology comment rewrite (5 files, driven by code-quality reviewer findings) |
+| `474e8a5` | docs(plan): this plan document |
+| `a3f421e` | refactor: align NoC wrap port suffixes with AXI `_i`/`_o` convention (5 files; user-driven correction after observing AXI parallel) |
+
+The original plan estimated 3 implementation commits (C1+C2+C3); landed 5 implementation + 1 naming-fix = 6. The two polish commits and the naming-fix commit are documented above with their drivers.
+
+**Gates verified PASS** (each implementation commit + final state):
+- `py -3 specgen/tools/codegen.py --check` → exit 0
+- `py -3 -m pytest specgen/tests/` → 166 passed
+- `py -3 tools/lint_docs.py …` → OK
+- `py -3 tools/lint_scenarios.py` → 37 dirs OK
+- Final survey greps (LoopbackNoc / NocReqOutPins / noc_req_intf scopes) → empty in active code, with 2 negation regression-guard asserts in `specgen/tests/test_codegen_sv.py:270-271` (intentional)
+
+**Gates verified PASS modulo pre-existing baseline noise** (`make check`):
+- MinGW GCC 15.2 ICE on some c_model target — verified pre-existing on b8901c3 via `git stash` + rerun
+- ~60 ctest failures rooted in `flit.hpp:153 payload_field_pos: (channel, field) pair not found` — verified pre-existing
+- Other c_model `.exe` targets compile + link cleanly
+
+**Gates NOT verified locally — open follow-up**:
+- **Verilator SV elaboration of `noc_intf` bundle**: blocked by pre-existing perl-launcher path issue in MSYS env (`make build-verilator` fails before reaching elaboration). Wrap port directions + signal-ref bindings + modport contracts were manually traced by the implementer and re-checked by the code-quality reviewer; the trace is consistent with the JSON. Full Verilator elaboration MUST be re-run once the env issue is resolved before treating this part of the cleanup as production-ready.
+
+**Code-quality reviewer follow-ups (open):**
+- `specgen/ni_spec/handshake_schema.py`: schema does not currently validate `len(modports) == 2` or `driven_by ∈ modports`. Deferred per the "Deferred" section above. Reopen if a second `noc_link` interface is ever added.
+- `specgen/tools/elaborate/sv_signals.py`: the `modports = iface_spec.get("modports", ["master", "slave"])` default is dead under the current schema (modports is required + non-empty). Cosmetic; safe to land.
