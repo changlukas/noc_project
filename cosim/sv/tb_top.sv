@@ -119,7 +119,7 @@ module tb_top (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .axi_i(master_nmu_axi.slave),
-        .noc_mosi(nmu_channel_model.mosi)
+        .noc_mosi_o(nmu_channel_model.mosi)
     );
 
     // [3] Channel Model — NMU side (miso) + NSU side (mosi)
@@ -130,8 +130,8 @@ module tb_top (
     ) u_channel_model (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .noc_miso(nmu_channel_model.miso),
-        .noc_mosi(channel_model_nsu.mosi)
+        .noc_miso_i(nmu_channel_model.miso),
+        .noc_mosi_o(channel_model_nsu.mosi)
     );
 
     // [4] NSU shell — NoC bundle (miso) in from ChannelModel, AXI master out
@@ -145,7 +145,7 @@ module tb_top (
     ) u_nsu (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .noc_miso(channel_model_nsu.miso),
+        .noc_miso_i(channel_model_nsu.miso),
         .axi_o(nsu_slave_axi.master)
     );
 

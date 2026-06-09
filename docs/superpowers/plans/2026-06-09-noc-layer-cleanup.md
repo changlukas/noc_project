@@ -209,18 +209,18 @@ Auto-emitted pin structs collapse from `NocReqOutPins`+`NocRspInPins` (NMU) and 
   // Lines 16-17:
   -    ni::pins::NocReqOutPins req_out{};
   -    req_out.reset_outputs();
-  +    ni::pins::NocIntfMosiPins noc_mosi{};
-  +    noc_mosi.reset_outputs();
+  +    ni::pins::NocIntfMosiPins noc_mosi_o{};
+  +    noc_mosi_o.reset_outputs();
 
   // Lines 19-20:
   -    ni::pins::NocRspInPins rsp_in{};
   -    rsp_in.reset_outputs();
-  // (delete — covered by noc_mosi above)
+  // (delete — covered by noc_mosi_o above)
 
   // Lines 25-26:
   -    ni::pins::NocReqInPins  req_in{};  req_in.reset_outputs();
   -    ni::pins::NocRspOutPins rsp_out{}; rsp_out.reset_outputs();
-  +    ni::pins::NocIntfMisoPins noc_miso{}; noc_miso.reset_outputs();
+  +    ni::pins::NocIntfMisoPins noc_miso_i{}; noc_miso_i.reset_outputs();
   ```
 
 - [ ] **2.6: Update `c_model/tests/test_pins_smoke.cpp` if it names old struct types**
@@ -415,7 +415,7 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
 
 - [ ] **3.7: Edit `cosim/sv/nmu_wrap.sv` port list + signal references + comments**
 
-  **Naming convention:** wrap port name = modport name, so each of the 4 wrap-side NoC ports is `noc_mosi` or `noc_miso`. NMU drives toward the channel → modport `mosi`, port name `noc_mosi`.
+  **Naming convention:** wrap port name = modport name, so each of the 4 wrap-side NoC ports is `noc_mosi_o` or `noc_miso_i`. NMU drives toward the channel → modport `mosi`, port name `noc_mosi_o`.
 
   Port list: replace
 
@@ -429,19 +429,19 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
 
   ```sv
   axi4_intf.slave           axi_i,
-  noc_intf.mosi             noc_mosi
+  noc_intf.mosi             noc_mosi_o
   ```
 
   Signal-reference replacements inside the wrap body:
 
   | Before | After |
   |---|---|
-  | `noc_req_o.valid` | `noc_mosi.req_valid` |
-  | `noc_req_o.flit` | `noc_mosi.req_flit` |
-  | `noc_req_o.credit_return` | `noc_mosi.req_credit_return` |
-  | `noc_rsp_i.valid` | `noc_mosi.rsp_valid` |
-  | `noc_rsp_i.flit` | `noc_mosi.rsp_flit` |
-  | `noc_rsp_i.credit_return` | `noc_mosi.rsp_credit_return` |
+  | `noc_req_o.valid` | `noc_mosi_o.req_valid` |
+  | `noc_req_o.flit` | `noc_mosi_o.req_flit` |
+  | `noc_req_o.credit_return` | `noc_mosi_o.req_credit_return` |
+  | `noc_rsp_i.valid` | `noc_mosi_o.rsp_valid` |
+  | `noc_rsp_i.flit` | `noc_mosi_o.rsp_flit` |
+  | `noc_rsp_i.credit_return` | `noc_mosi_o.rsp_credit_return` |
 
   **Comment updates** (Codex MUST-FIX — no surviving `noc_req_intf` / `noc_rsp_intf` / `noc_req_o` / `noc_rsp_i` mention in active comments):
 
@@ -453,7 +453,7 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
 
 - [ ] **3.8: Edit `cosim/sv/nsu_wrap.sv` symmetrically**
 
-  NSU receives from the channel → modport `miso`, port name `noc_miso`.
+  NSU receives from the channel → modport `miso`, port name `noc_miso_i`.
 
   Port list:
 
@@ -466,7 +466,7 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
   becomes
 
   ```sv
-  noc_intf.miso             noc_miso,
+  noc_intf.miso             noc_miso_i,
   axi4_intf.master          axi_o
   ```
 
@@ -474,18 +474,18 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
 
   | Before | After |
   |---|---|
-  | `noc_req_i.valid` | `noc_miso.req_valid` |
-  | `noc_req_i.flit` | `noc_miso.req_flit` |
-  | `noc_req_i.credit_return` | `noc_miso.req_credit_return` |
-  | `noc_rsp_o.valid` | `noc_miso.rsp_valid` |
-  | `noc_rsp_o.flit` | `noc_miso.rsp_flit` |
-  | `noc_rsp_o.credit_return` | `noc_miso.rsp_credit_return` |
+  | `noc_req_i.valid` | `noc_miso_i.req_valid` |
+  | `noc_req_i.flit` | `noc_miso_i.req_flit` |
+  | `noc_req_i.credit_return` | `noc_miso_i.req_credit_return` |
+  | `noc_rsp_o.valid` | `noc_miso_i.rsp_valid` |
+  | `noc_rsp_o.flit` | `noc_miso_i.rsp_flit` |
+  | `noc_rsp_o.credit_return` | `noc_miso_i.rsp_credit_return` |
 
   Comment updates: same `grep -n "noc_req_intf\|noc_rsp_intf\|noc_req_i\|noc_rsp_o"` sweep on `cosim/sv/nsu_wrap.sv`, update every comment match.
 
 - [ ] **3.9: Edit `cosim/sv/channel_model_wrap.sv` (file already renamed in C1)**
 
-  channel_model has two NoC sides. Per the wrap-port = modport-name convention, each port is named after its modport: the channel-model NMU side uses modport `miso` → port `noc_miso`; the channel-model NSU side uses modport `mosi` → port `noc_mosi`.
+  channel_model has two NoC sides. Per the wrap-port = modport-name convention, each port is named after its modport: the channel-model NMU side uses modport `miso` → port `noc_miso_i`; the channel-model NSU side uses modport `mosi` → port `noc_mosi_o`.
 
   Current 4 NoC ports collapse to 2:
 
@@ -499,26 +499,26 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
   becomes
 
   ```sv
-  noc_intf.miso             noc_miso,   // NMU-facing side
-  noc_intf.mosi             noc_mosi    // NSU-facing side
+  noc_intf.miso             noc_miso_i,   // NMU-facing side
+  noc_intf.mosi             noc_mosi_o    // NSU-facing side
   ```
 
   Signal-reference rewires:
 
   | Before | After |
   |---|---|
-  | `noc_req_from_nmu_i.valid` | `noc_miso.req_valid` |
-  | `noc_req_from_nmu_i.flit` | `noc_miso.req_flit` |
-  | `noc_req_from_nmu_i.credit_return` | `noc_miso.req_credit_return` |
-  | `noc_rsp_to_nmu_o.valid` | `noc_miso.rsp_valid` |
-  | `noc_rsp_to_nmu_o.flit` | `noc_miso.rsp_flit` |
-  | `noc_rsp_to_nmu_o.credit_return` | `noc_miso.rsp_credit_return` |
-  | `noc_req_to_nsu_o.valid` | `noc_mosi.req_valid` |
-  | `noc_req_to_nsu_o.flit` | `noc_mosi.req_flit` |
-  | `noc_req_to_nsu_o.credit_return` | `noc_mosi.req_credit_return` |
-  | `noc_rsp_from_nsu_i.valid` | `noc_mosi.rsp_valid` |
-  | `noc_rsp_from_nsu_i.flit` | `noc_mosi.rsp_flit` |
-  | `noc_rsp_from_nsu_i.credit_return` | `noc_mosi.rsp_credit_return` |
+  | `noc_req_from_nmu_i.valid` | `noc_miso_i.req_valid` |
+  | `noc_req_from_nmu_i.flit` | `noc_miso_i.req_flit` |
+  | `noc_req_from_nmu_i.credit_return` | `noc_miso_i.req_credit_return` |
+  | `noc_rsp_to_nmu_o.valid` | `noc_miso_i.rsp_valid` |
+  | `noc_rsp_to_nmu_o.flit` | `noc_miso_i.rsp_flit` |
+  | `noc_rsp_to_nmu_o.credit_return` | `noc_miso_i.rsp_credit_return` |
+  | `noc_req_to_nsu_o.valid` | `noc_mosi_o.req_valid` |
+  | `noc_req_to_nsu_o.flit` | `noc_mosi_o.req_flit` |
+  | `noc_req_to_nsu_o.credit_return` | `noc_mosi_o.req_credit_return` |
+  | `noc_rsp_from_nsu_i.valid` | `noc_mosi_o.rsp_valid` |
+  | `noc_rsp_from_nsu_i.flit` | `noc_mosi_o.rsp_flit` |
+  | `noc_rsp_from_nsu_i.credit_return` | `noc_mosi_o.rsp_credit_return` |
 
   Comment updates: same grep + update sweep on `cosim/sv/channel_model_wrap.sv`.
 
@@ -550,9 +550,9 @@ C3 + C4 combined: regenerating `ni_signals_pkg.sv` deletes `noc_req_intf`/`noc_r
 
   | Instance | Before | After |
   |---|---|---|
-  | `u_nmu` | `.noc_req_o(nmu_loopback_req.master), .noc_rsp_i(loopback_nmu_rsp.slave)` | `.noc_mosi(nmu_channel_model.mosi)` |
-  | `u_channel_model` | 4 NoC ports | `.noc_miso(nmu_channel_model.miso), .noc_mosi(channel_model_nsu.mosi)` |
-  | `u_nsu` | `.noc_req_i(loopback_nsu_req.slave), .noc_rsp_o(nsu_loopback_rsp.master)` | `.noc_miso(channel_model_nsu.miso)` |
+  | `u_nmu` | `.noc_req_o(nmu_loopback_req.master), .noc_rsp_i(loopback_nmu_rsp.slave)` | `.noc_mosi_o(nmu_channel_model.mosi)` |
+  | `u_channel_model` | 4 NoC ports | `.noc_miso_i(nmu_channel_model.miso), .noc_mosi_o(channel_model_nsu.mosi)` |
+  | `u_nsu` | `.noc_req_i(loopback_nsu_req.slave), .noc_rsp_o(nsu_loopback_rsp.master)` | `.noc_miso_i(channel_model_nsu.miso)` |
 
 - [ ] **3.11: C3 final survey (Codex MUST-FIX)**
 

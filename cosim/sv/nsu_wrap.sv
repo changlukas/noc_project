@@ -1,7 +1,7 @@
 // nsu_wrap — Stage 5b DPI shell for the Nsu component.
 //
 // The Nsu is the NoC-side inverse of nmu_wrap. Its single NoC port
-// noc_miso (noc_intf.miso modport) reads req flit + valid + rsp_credit_return
+// noc_miso_i (noc_intf.miso modport) reads req flit + valid + rsp_credit_return
 // from ChannelModel and drives rsp flit + valid + req_credit_return back.
 // On the AXI side it acts as master toward the downstream subordinate.
 //
@@ -40,7 +40,7 @@ module nsu_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    noc_intf.miso             noc_miso,
+    noc_intf.miso             noc_miso_i,
     axi4_intf.master          axi_o
 );
 
@@ -195,10 +195,10 @@ module nsu_wrap #(
             // Step 1: push current wire values into C++ input latch.
             cmodel_nsu_set_inputs(
                 // NoC req side — req flit arriving from ChannelModel toward Nsu
-                noc_miso.req_valid,
-                noc_miso.req_flit,
+                noc_miso_i.req_valid,
+                noc_miso_i.req_flit,
                 // NoC rsp credit — ChannelModel returns credit to Nsu
-                noc_miso.rsp_credit_return[0],
+                noc_miso_i.rsp_credit_return[0],
                 // AXI master side — subordinate drives ready + B/R
                 axi_o.awready,
                 axi_o.wready,
@@ -296,11 +296,11 @@ module nsu_wrap #(
     // -------------------------------------------------------------------------
 
     // NoC rsp side — Nsu drives rsp flit toward ChannelModel
-    assign noc_miso.rsp_valid = noc_rsp_valid_q;
-    assign noc_miso.rsp_flit  = noc_rsp_flit_q;
+    assign noc_miso_i.rsp_valid = noc_rsp_valid_q;
+    assign noc_miso_i.rsp_flit  = noc_rsp_flit_q;
 
     // NoC req credit — Nsu drives req_credit_return back upstream (PoC always 0)
-    assign noc_miso.req_credit_return = {NUM_VC{noc_req_credit_return_q}};
+    assign noc_miso_i.req_credit_return = {NUM_VC{noc_req_credit_return_q}};
 
     // AXI master side — Nsu drives request channels toward subordinate
     assign axi_o.awvalid = awvalid_q;

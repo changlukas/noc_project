@@ -1,10 +1,10 @@
 // channel_model_wrap — Stage 5b DPI shell for ChannelModel component.
 //
 // Two NoC ports, both noc_intf bundles (req + rsp channels combined):
-//   noc_miso — NMU-facing side (noc_intf.miso modport):
+//   noc_miso_i — NMU-facing side (noc_intf.miso modport):
 //              receives NMU req_valid/req_flit + rsp_credit_return;
 //              drives req_credit_return + rsp_valid/rsp_flit back to NMU.
-//   noc_mosi — NSU-facing side (noc_intf.mosi modport):
+//   noc_mosi_o — NSU-facing side (noc_intf.mosi modport):
 //              drives NSU req_valid/req_flit + rsp_credit_return;
 //              receives req_credit_return + rsp_valid/rsp_flit from NSU.
 //
@@ -37,9 +37,9 @@ module channel_model_wrap #(
     input  logic              clk_i,
     input  logic              rst_ni,
     // NMU-facing bundle: receives req_*, drives rsp_* and req_credit_return.
-    noc_intf.miso             noc_miso,
+    noc_intf.miso             noc_miso_i,
     // NSU-facing bundle: drives req_*, receives rsp_* and req_credit_return.
-    noc_intf.mosi             noc_mosi
+    noc_intf.mosi             noc_mosi_o
 );
 
     // -------------------------------------------------------------------------
@@ -110,12 +110,12 @@ module channel_model_wrap #(
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_channel_model_set_inputs(
-                noc_miso.req_valid,
-                noc_miso.req_flit,
-                noc_mosi.req_credit_return[0],
-                noc_mosi.rsp_valid,
-                noc_mosi.rsp_flit,
-                noc_miso.rsp_credit_return[0]
+                noc_miso_i.req_valid,
+                noc_miso_i.req_flit,
+                noc_mosi_o.req_credit_return[0],
+                noc_mosi_o.rsp_valid,
+                noc_mosi_o.rsp_flit,
+                noc_miso_i.rsp_credit_return[0]
             );
 
             // Step 2: advance C++ model one cycle.
@@ -153,16 +153,16 @@ module channel_model_wrap #(
     // -------------------------------------------------------------------------
 
     // NSU-facing side: drive req_valid/req_flit forward.
-    assign noc_mosi.req_valid             = req_out_valid_q;
-    assign noc_mosi.req_flit              = req_out_flit_q;
+    assign noc_mosi_o.req_valid             = req_out_valid_q;
+    assign noc_mosi_o.req_flit              = req_out_flit_q;
     // NMU-facing side: return req credits back upstream.
-    assign noc_miso.req_credit_return     = {NUM_VC{req_out_credit_return_q}};
+    assign noc_miso_i.req_credit_return     = {NUM_VC{req_out_credit_return_q}};
 
     // NMU-facing side: drive rsp_valid/rsp_flit back toward NMU.
-    assign noc_miso.rsp_valid             = rsp_out_valid_q;
-    assign noc_miso.rsp_flit              = rsp_out_flit_q;
+    assign noc_miso_i.rsp_valid             = rsp_out_valid_q;
+    assign noc_miso_i.rsp_flit              = rsp_out_flit_q;
     // NSU-facing side: return rsp credits back upstream.
-    assign noc_mosi.rsp_credit_return     = {NUM_VC{rsp_out_credit_return_q}};
+    assign noc_mosi_o.rsp_credit_return     = {NUM_VC{rsp_out_credit_return_q}};
 
 endmodule
 

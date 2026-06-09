@@ -2,7 +2,7 @@
 //
 // The Nmu is the most complex shell — it has BOTH an AXI slave side
 // (incoming AW/W/AR from master, outgoing B/R + handshake to master) AND
-// a NoC side: noc_mosi (noc_intf.mosi modport) drives req flit + valid
+// a NoC side: noc_mosi_o (noc_intf.mosi modport) drives req flit + valid
 // toward ChannelModel and drives rsp_credit_return back; it reads rsp
 // flit + valid + req_credit_return from ChannelModel. Beta-tick discipline
 // and error checking follow the same pattern as axi_slave_wrap (T9) and
@@ -44,7 +44,7 @@ module nmu_wrap #(
     input  logic              clk_i,
     input  logic              rst_ni,
     axi4_intf.slave           axi_i,
-    noc_intf.mosi             noc_mosi
+    noc_intf.mosi             noc_mosi_o
 );
 
     // -------------------------------------------------------------------------
@@ -193,10 +193,10 @@ module nmu_wrap #(
                 axi_i.arqos,
                 axi_i.rready,
                 // NoC rsp side — rsp flit arriving from ChannelModel toward Nmu
-                noc_mosi.rsp_valid,
-                noc_mosi.rsp_flit,
+                noc_mosi_o.rsp_valid,
+                noc_mosi_o.rsp_flit,
                 // NoC req credit — ChannelModel returns credit to Nmu
-                noc_mosi.req_credit_return[0]
+                noc_mosi_o.req_credit_return[0]
             );
 
             // Step 2: advance C++ model one cycle.
@@ -264,11 +264,11 @@ module nmu_wrap #(
     assign axi_i.rlast   = rlast_q;
 
     // NoC req side — Nmu drives req flit toward ChannelModel
-    assign noc_mosi.req_valid = noc_req_valid_q;
-    assign noc_mosi.req_flit  = noc_req_flit_q;
+    assign noc_mosi_o.req_valid = noc_req_valid_q;
+    assign noc_mosi_o.req_flit  = noc_req_flit_q;
 
     // NoC rsp credit — Nmu drives rsp_credit_return back upstream (PoC always 0)
-    assign noc_mosi.rsp_credit_return = {NUM_VC{noc_rsp_credit_return_q}};
+    assign noc_mosi_o.rsp_credit_return = {NUM_VC{noc_rsp_credit_return_q}};
 
 endmodule
 
