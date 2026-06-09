@@ -68,7 +68,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
 
     NmuConfig cfg{};
     cfg.src_id = kSrcId;
-    // PortParams has no defaults ("fail loud" — see ni/port_params.hpp);
+    // PortParams has no defaults ("fail loud" — see nmu/port_params.hpp);
     // a hermetic test sets just the per-channel queue depths it exercises.
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;

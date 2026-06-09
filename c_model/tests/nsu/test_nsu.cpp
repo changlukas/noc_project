@@ -73,7 +73,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     NsuConfig cfg{};
     cfg.src_id = kNsuSrcId;
     // PortParams + depacketize depths have no defaults ("fail loud" — see
-    // ni/port_params.hpp); a hermetic test sets just the depths it exercises.
+    // nsu/port_params.hpp); a hermetic test sets just the depths it exercises.
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;
     cfg.port_params.ar_queue_depth = 16;

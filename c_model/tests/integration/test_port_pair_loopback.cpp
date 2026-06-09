@@ -314,9 +314,14 @@ INSTANTIATE_TEST_SUITE_P(
 //    while NSU would accept more. Pre-refactor (single shared PortParams)
 //    both sides used identical values; the split makes independence visible.
 TEST(PortParamsSplit, AsymmetricNmuNsuAwQueueSaturationIndependent) {
-    ni::cmodel::nmu::PortParams nmu_pp{/*aw=*/2,       /*w=*/32,      /*ar=*/32,
-                                       /*b=*/32,       /*r=*/32,
-                                       /*depkt_b=*/32, /*depkt_r=*/32};
+    ni::cmodel::nmu::PortParams nmu_pp{};
+    nmu_pp.aw_queue_depth = 2;
+    nmu_pp.w_queue_depth = 32;
+    nmu_pp.ar_queue_depth = 32;
+    nmu_pp.b_queue_depth = 32;
+    nmu_pp.r_queue_depth = 32;
+    nmu_pp.depkt_b_q_depth = 32;
+    nmu_pp.depkt_r_q_depth = 32;
 
     ni::cmodel::testing::LoopbackChannelSet ch{};
     ni::cmodel::testing::LoopbackPacketizer pkt(ch);
@@ -376,5 +381,9 @@ TEST(PortParamsSplit, LoaderMissingNmuQueueKeyThrows) {
            "    # w_queue_depth intentionally missing\n"
            "    ar_queue_depth: 32\n    b_queue_depth: 32\n    r_queue_depth: 32\n"
            "  depacketize: { b_q_depth: 32, r_q_depth: 32 }\n";
+    // EXPECT_ANY_THROW (not EXPECT_THROW with a specific type) because
+    // yaml-cpp's missing-key path throws YAML::TypedBadConversion (a
+    // yaml-cpp internal subclass of std::runtime_error), not the explicit
+    // std::runtime_error the block-level guards throw.
     EXPECT_ANY_THROW(nmu::load_nmu_port_params(p.string()));
 }

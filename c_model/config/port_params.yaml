@@ -1,6 +1,12 @@
 # NMU/NSU port-pair parameters and test-fixture sizings.
 # Each loader (load_nmu_port_params / load_nsu_port_params /
 # load_channel_model_params) parses its own top-level block.
+#
+# Units:
+#   queues.*           — beats (per-channel internal FIFO capacity)
+#   depacketize.*      — beats (Depacketize internal demux FIFO capacity)
+#   meta_buffer.*      — transactions (NSU per-AXI-ID outstanding window)
+#   channel_model.*    — flits (test-fixture per-direction in-flight cap)
 
 nmu:
   queues:
