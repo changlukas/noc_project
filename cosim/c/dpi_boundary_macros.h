@@ -9,6 +9,7 @@
 #define COSIM2_DPI_BOUNDARY_MACROS_H
 
 #include "cmodel_dpi.h"
+#include "handle_block.hpp"
 #include <atomic>
 #include <exception>
 #include <string>
@@ -16,6 +17,7 @@
 namespace ni::cmodel::cosim {
 extern std::atomic<int> g_dpi_error_code;
 extern std::string g_dpi_error_msg;
+HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name);
 }  // namespace ni::cmodel::cosim
 
 // Usage:
@@ -73,5 +75,13 @@ extern std::string g_dpi_error_msg;
             return;                                                                                \
         }                                                                                          \
     } while (0)
+
+// REQUIRE_HANDLE — used by ctx-taking handlers (Tasks 5-9). validate_handle
+// sets the error latch and returns nullptr on failure; this macro then returns
+// from the void handler. The caller pulls the typed adapter with:
+//     auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
+#define REQUIRE_HANDLE(ctx, expected_type, fn_name)                                   \
+    auto* _h = ni::cmodel::cosim::validate_handle((ctx), (expected_type), (fn_name)); \
+    if (!_h) return
 
 #endif  // COSIM2_DPI_BOUNDARY_MACROS_H

@@ -3,6 +3,7 @@
 
 #include "cmodel_dpi.h"
 #include "dpi_boundary_macros.h"
+#include "handle_block.hpp"
 #include "cosim/channel_model_shell_adapter.hpp"
 #include "cosim/master_shell_adapter.hpp"
 #include "cosim/nmu_shell_adapter.hpp"
@@ -42,6 +43,62 @@ namespace ni::cmodel::cosim {
 
 std::atomic<int> g_dpi_error_code{CMODEL_DPI_OK};
 std::string g_dpi_error_msg;
+
+// Session state machine — Uninitialized on startup; transitions driven by
+// cmodel_init (→ Initialized) and cmodel_finalize (→ Finalized).
+// Task 3 modifies cmodel_init/cmodel_finalize to perform the transitions.
+enum class SessionState { Uninitialized, Initialized, Finalized };
+SessionState g_session_state = SessionState::Uninitialized;
+
+// Process-wide handle registry — definition (declaration is in handle_block.hpp).
+// Every live HandleBlock* is inserted here at *_create time and erased at
+// *_destroy or cmodel_finalize time.
+std::unordered_set<HandleBlock*> g_handle_registry;
+
+// validate_handle — resolves void* ctx to a typed HandleBlock* with 5 guards:
+//   1. Session state: Uninitialized → ERR_NOT_INITIALIZED.
+//   2. Registry membership: unknown pointer → ERR_HERMETIC_VIOLATION.
+//   3. Magic sentinel match: bit-flip / aliased ptr → ERR_HERMETIC_VIOLATION.
+//   4. Type tag match: wrong shell type → ERR_HERMETIC_VIOLATION.
+//   5. Handle liveness: Closed handle (post-destroy) → ERR_HERMETIC_VIOLATION.
+// Returns nullptr and sets the error latch on any failure; returns the typed
+// block on success.
+HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name) {
+    // Guard 1 — state-first per spec state-transition table.
+    if (g_session_state == SessionState::Uninitialized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
+                             std::string(fn_name) + ": session not initialized");
+        return nullptr;
+    }
+    // Guard 2 — registry membership avoids garbage void* deref (SIGSEGV).
+    // Post-finalize handles also fail here (registry emptied by finalize) →
+    // ERR_HERMETIC_VIOLATION, consistent with the spec test matrix.
+    if (!g_handle_registry.count(static_cast<HandleBlock*>(ctx))) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
+                             std::string(fn_name) + ": ctx not in registry");
+        return nullptr;
+    }
+    auto* h = static_cast<HandleBlock*>(ctx);
+    // Guard 3 — magic sentinel.
+    if (h->magic != static_cast<uint32_t>(expected)) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
+                             std::string(fn_name) + ": magic mismatch");
+        return nullptr;
+    }
+    // Guard 4 — type tag.
+    if (h->type != expected) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
+                             std::string(fn_name) + ": type mismatch");
+        return nullptr;
+    }
+    // Guard 5 — liveness.
+    if (h->state != HandleState::Live) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
+                             std::string(fn_name) + ": handle not live");
+        return nullptr;
+    }
+    return h;
+}
 
 // 5 singleton ShellAdapter pointers — populated by cmodel_init.
 // Hermetic: each handler accesses ONLY its own singleton.
