@@ -1,5 +1,13 @@
 // channel_model_wrap — Stage 5b DPI shell for ChannelModel component.
 //
+// Two NoC ports, both noc_intf bundles (req + rsp channels combined):
+//   noc_miso — NMU-facing side (noc_intf.miso modport):
+//              receives NMU req_valid/req_flit + rsp_credit_return;
+//              drives req_credit_return + rsp_valid/rsp_flit back to NMU.
+//   noc_mosi — NSU-facing side (noc_intf.mosi modport):
+//              drives NSU req_valid/req_flit + rsp_credit_return;
+//              receives req_credit_return + rsp_valid/rsp_flit from NSU.
+//
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to
 // the C++ model via DPI set_inputs, advances the model via tick, pulls
@@ -7,8 +15,8 @@
 // they are visible to SV wires from the NEXT cycle onward.
 //
 // FLIT_WIDTH must match ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT = 408
-// (c_model flit width). The noc_req_intf / noc_rsp_intf interface
-// parameter is overridden at instantiation in tb_top.sv.
+// (c_model flit width). The noc_intf FLIT_WIDTH parameter is overridden
+// at instantiation in tb_top.sv.
 //
 // Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.
@@ -28,12 +36,10 @@ module channel_model_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    // Request: NMU -> channel -> NSU
-    noc_req_intf.slave        noc_req_from_nmu_i,
-    noc_req_intf.master       noc_req_to_nsu_o,
-    // Response: NSU -> channel -> NMU
-    noc_rsp_intf.slave        noc_rsp_from_nsu_i,
-    noc_rsp_intf.master       noc_rsp_to_nmu_o
+    // NMU-facing bundle: receives req_*, drives rsp_* and req_credit_return.
+    noc_intf.miso             noc_miso,
+    // NSU-facing bundle: drives req_*, receives rsp_* and req_credit_return.
+    noc_intf.mosi             noc_mosi
 );
 
     // -------------------------------------------------------------------------
@@ -104,12 +110,12 @@ module channel_model_wrap #(
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_channel_model_set_inputs(
-                noc_req_from_nmu_i.valid,
-                noc_req_from_nmu_i.flit,
-                noc_req_to_nsu_o.credit_return[0],
-                noc_rsp_from_nsu_i.valid,
-                noc_rsp_from_nsu_i.flit,
-                noc_rsp_to_nmu_o.credit_return[0]
+                noc_miso.req_valid,
+                noc_miso.req_flit,
+                noc_mosi.req_credit_return[0],
+                noc_mosi.rsp_valid,
+                noc_mosi.rsp_flit,
+                noc_miso.rsp_credit_return[0]
             );
 
             // Step 2: advance C++ model one cycle.
@@ -146,15 +152,17 @@ module channel_model_wrap #(
     // Drive interface outputs from registered state
     // -------------------------------------------------------------------------
 
-    assign noc_req_to_nsu_o.valid            = req_out_valid_q;
-    assign noc_req_to_nsu_o.flit             = req_out_flit_q;
-    assign noc_req_from_nmu_i.credit_return  =
-        {NUM_VC{req_out_credit_return_q}};
+    // NSU-facing side: drive req_valid/req_flit forward.
+    assign noc_mosi.req_valid             = req_out_valid_q;
+    assign noc_mosi.req_flit              = req_out_flit_q;
+    // NMU-facing side: return req credits back upstream.
+    assign noc_miso.req_credit_return     = {NUM_VC{req_out_credit_return_q}};
 
-    assign noc_rsp_to_nmu_o.valid            = rsp_out_valid_q;
-    assign noc_rsp_to_nmu_o.flit             = rsp_out_flit_q;
-    assign noc_rsp_from_nsu_i.credit_return  =
-        {NUM_VC{rsp_out_credit_return_q}};
+    // NMU-facing side: drive rsp_valid/rsp_flit back toward NMU.
+    assign noc_miso.rsp_valid             = rsp_out_valid_q;
+    assign noc_miso.rsp_flit              = rsp_out_flit_q;
+    // NSU-facing side: return rsp credits back upstream.
+    assign noc_mosi.rsp_credit_return     = {NUM_VC{rsp_out_credit_return_q}};
 
 endmodule
 

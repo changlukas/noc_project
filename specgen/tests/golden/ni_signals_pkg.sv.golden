@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: ceef98ad4649
 // Generator version: v1.0.0
-// Generated at: 2026-06-09T06:24:00Z
+// Generated at: 2026-06-09T06:48:06Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -133,30 +133,20 @@ interface axi4_intf #(
   );
 endinterface : axi4_intf
 
-interface noc_req_intf #(
+interface noc_intf #(
   parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
   parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
   parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
 );
-  logic                  valid;
-  logic [FLIT_WIDTH-1:0] flit;
-  logic [NUM_VC-1:0]     credit_return;
+  logic                  req_valid;
+  logic [FLIT_WIDTH-1:0] req_flit;
+  logic [NUM_VC-1:0]     req_credit_return;
+  logic                  rsp_valid;
+  logic [FLIT_WIDTH-1:0] rsp_flit;
+  logic [NUM_VC-1:0]     rsp_credit_return;
 
-  modport master ( output valid, flit, input  credit_return );
-  modport slave  ( input  valid, flit, output credit_return );
-endinterface : noc_req_intf
-
-interface noc_rsp_intf #(
-  parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
-  parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
-  parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
-);
-  logic                  valid;
-  logic [FLIT_WIDTH-1:0] flit;
-  logic [NUM_VC-1:0]     credit_return;
-
-  modport master ( output valid, flit, input  credit_return );
-  modport slave  ( input  valid, flit, output credit_return );
-endinterface : noc_rsp_intf
+  modport mosi ( output req_valid, req_flit, rsp_credit_return, input  req_credit_return, rsp_valid, rsp_flit );
+  modport miso  ( input  req_valid, req_flit, rsp_credit_return, output req_credit_return, rsp_valid, rsp_flit );
+endinterface : noc_intf
 
 `endif // NI_SIGNALS_PKG_SVH

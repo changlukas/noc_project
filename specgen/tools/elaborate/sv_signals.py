@@ -119,6 +119,11 @@ def _emit_axi4_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
     out.append("  localparam int unsigned WSTRB_WIDTH = DATA_WIDTH / 8;")
     out.append("")
 
+    # Modport names come from JSON so AXI keeps master/slave while NoC can
+    # use mosi/miso (or any future role names) without code changes here.
+    modports = iface_spec.get("modports", ["master", "slave"])
+    mp_out, mp_in = modports[0], modports[1]
+
     master_sigs: list[str] = []
     slave_sigs: list[str] = []
     channels = iface_spec.get("channels", list(_AXI_CHANNEL_SIGNALS.keys()))
@@ -134,14 +139,14 @@ def _emit_axi4_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
                 slave_sigs.append(sig_name)
         out.append("")
 
-    # Two modports: master and slave. Master drives master_sigs (output) and
-    # receives slave_sigs (input); slave is the mirror.
-    out.append("  modport master (")
+    # Two modports. mp_out drives master_sigs (output) and receives slave_sigs
+    # (input); mp_in is the mirror.
+    out.append(f"  modport {mp_out} (")
     out.append(f"    output {', '.join(master_sigs)},")
     out.append(f"    input  {', '.join(slave_sigs)}")
     out.append("  );")
     out.append("")
-    out.append("  modport slave (")
+    out.append(f"  modport {mp_in} (")
     out.append(f"    input  {', '.join(master_sigs)},")
     out.append(f"    output {', '.join(slave_sigs)}")
     out.append("  );")
@@ -150,7 +155,15 @@ def _emit_axi4_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
 
 
 def _emit_noc_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
-    """Emit a NoC-link interface block (one set of signals + 2 modports)."""
+    """Emit a NoC-link interface block (one set of signals + 2 modports).
+
+    Modport names + per-signal ``driven_by`` strings come from JSON. The
+    first modport in the list is treated as the producer side (its signals
+    are ``output``); the second is the consumer side (its signals are
+    ``input``). For the canonical noc_intf entry the modports are
+    ``["mosi", "miso"]`` and ``driven_by`` tags signals as ``mosi`` or
+    ``miso`` accordingly.
+    """
     out: list[str] = _emit_param_header(name, iface_spec, constants)
     signals = iface_spec.get("signals", [])
 
@@ -166,15 +179,17 @@ def _emit_noc_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
         out.append(f"  logic {width:<{width_col}} {s['name']};")
     out.append("")
 
-    master_names = [s["name"] for s in signals if s["driven_by"] == "master"]
-    slave_names  = [s["name"] for s in signals if s["driven_by"] == "slave"]
+    modports = iface_spec.get("modports", ["master", "slave"])
+    mp_out, mp_in = modports[0], modports[1]
+    out_names = [s["name"] for s in signals if s["driven_by"] == mp_out]
+    in_names = [s["name"] for s in signals if s["driven_by"] == mp_in]
     out.append(
-        f"  modport master ( output {', '.join(master_names)}, "
-        f"input  {', '.join(slave_names)} );"
+        f"  modport {mp_out} ( output {', '.join(out_names)}, "
+        f"input  {', '.join(in_names)} );"
     )
     out.append(
-        f"  modport slave  ( input  {', '.join(master_names)}, "
-        f"output {', '.join(slave_names)} );"
+        f"  modport {mp_in}  ( input  {', '.join(out_names)}, "
+        f"output {', '.join(in_names)} );"
     )
     out.append(f"endinterface : {name}")
     return out

@@ -245,24 +245,19 @@ def test_rejects_derived_constraint_violation(tmp_path):
         load_constants(bad)
 
 
-# ---- interface_handshake.json positive case (gated on Task 3 — these will fail until Task 3 creates the file) ----
+# ---- interface_handshake.json positive case ----
 
-def test_load_interfaces_returns_three_named_interfaces():
+def test_load_interfaces_returns_two_named_interfaces():
     c = load_constants(SOURCE_DIR / "constants.yaml")
-    if not (SOURCE_DIR / "interface_handshake.json").exists():
-        pytest.skip("interface_handshake.json not yet present (created in Task 3)")
     data = load_interfaces(SOURCE_DIR / "interface_handshake.json", c)
-    assert set(data["interfaces"].keys()) == {
-        "axi4_intf", "noc_req_intf", "noc_rsp_intf"
-    }
+    assert set(data["interfaces"].keys()) == {"axi4_intf", "noc_intf"}
+    assert data["interfaces"]["noc_intf"]["modports"] == ["mosi", "miso"]
 
 
-def test_noc_req_intf_protocol_semantics_complete():
+def test_noc_intf_protocol_semantics_complete():
     c = load_constants(SOURCE_DIR / "constants.yaml")
-    if not (SOURCE_DIR / "interface_handshake.json").exists():
-        pytest.skip("interface_handshake.json not yet present (created in Task 3)")
     data = load_interfaces(SOURCE_DIR / "interface_handshake.json", c)
-    sem = data["interfaces"]["noc_req_intf"]["protocol_semantics"]
+    sem = data["interfaces"]["noc_intf"]["protocol_semantics"]
     assert sem["credit_return_encoding"]["scheme"] == "per_vc_credit_pulse_vector"
     assert sem["credit_return_encoding"]["onehot_check_required"] is False
     assert sem["initial_credits"]["value_per_vc"] == "SLAVE_VC_BUFFER_DEPTH"

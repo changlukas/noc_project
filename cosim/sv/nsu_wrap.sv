@@ -1,9 +1,9 @@
 // nsu_wrap — Stage 5b DPI shell for the Nsu component.
 //
-// The Nsu is the NoC-side inverse of nmu_wrap: it has a NoC consumer side
-// (noc_req_i — receives req flits from ChannelModel) and a NoC producer side
-// (noc_rsp_o — drives rsp flits back toward ChannelModel), plus an AXI master
-// side (drives AW/W/AR to the downstream subordinate; receives B/R responses).
+// The Nsu is the NoC-side inverse of nmu_wrap. Its single NoC port
+// noc_miso (noc_intf.miso modport) reads req flit + valid + rsp_credit_return
+// from ChannelModel and drives rsp flit + valid + req_credit_return back.
+// On the AXI side it acts as master toward the downstream subordinate.
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
@@ -12,8 +12,7 @@
 // so they are visible to SV wires from the NEXT cycle onward.
 //
 // FLIT_WIDTH must match ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT = 408. The
-// noc_req_intf / noc_rsp_intf interface FLIT_WIDTH parameter is overridden at
-// instantiation in tb_top.sv.
+// noc_intf FLIT_WIDTH parameter is overridden at instantiation in tb_top.sv.
 //
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
@@ -23,8 +22,8 @@
 //
 // axi4_intf.master modport: master drives AW/W/AR + bready/rready to axi_o;
 //                           master reads awready/wready/arready + B/R from axi_o.
-// noc_req_intf.slave:      Nsu reads req flit + valid; drives credit_return.
-// noc_rsp_intf.master:     Nsu drives rsp flit + valid; reads credit_return.
+// noc_intf.miso modport:   Nsu reads req_valid/req_flit + rsp_credit_return;
+//                          Nsu drives req_credit_return + rsp_valid/rsp_flit.
 
 `timescale 1ns/1ps
 
@@ -41,8 +40,7 @@ module nsu_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    noc_req_intf.slave        noc_req_i,
-    noc_rsp_intf.master       noc_rsp_o,
+    noc_intf.miso             noc_miso,
     axi4_intf.master          axi_o
 );
 
@@ -197,10 +195,10 @@ module nsu_wrap #(
             // Step 1: push current wire values into C++ input latch.
             cmodel_nsu_set_inputs(
                 // NoC req side — req flit arriving from ChannelModel toward Nsu
-                noc_req_i.valid,
-                noc_req_i.flit,
+                noc_miso.req_valid,
+                noc_miso.req_flit,
                 // NoC rsp credit — ChannelModel returns credit to Nsu
-                noc_rsp_o.credit_return[0],
+                noc_miso.rsp_credit_return[0],
                 // AXI master side — subordinate drives ready + B/R
                 axi_o.awready,
                 axi_o.wready,
@@ -298,11 +296,11 @@ module nsu_wrap #(
     // -------------------------------------------------------------------------
 
     // NoC rsp side — Nsu drives rsp flit toward ChannelModel
-    assign noc_rsp_o.valid = noc_rsp_valid_q;
-    assign noc_rsp_o.flit  = noc_rsp_flit_q;
+    assign noc_miso.rsp_valid = noc_rsp_valid_q;
+    assign noc_miso.rsp_flit  = noc_rsp_flit_q;
 
-    // NoC req credit — Nsu drives credit_return back upstream (PoC always 0)
-    assign noc_req_i.credit_return = {NUM_VC{noc_req_credit_return_q}};
+    // NoC req credit — Nsu drives req_credit_return back upstream (PoC always 0)
+    assign noc_miso.req_credit_return = {NUM_VC{noc_req_credit_return_q}};
 
     // AXI master side — Nsu drives request channels toward subordinate
     assign axi_o.awvalid = awvalid_q;

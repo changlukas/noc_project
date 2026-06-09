@@ -242,9 +242,9 @@ class TestCheckModeWithSv:
 # ---------------------------------------------------------------------------
 
 def test_sv_consolidated_interfaces_present():
-    """ni_signals_pkg.sv must expose the 3 consolidated industry-style interfaces
-    from interface_handshake.json: axi4_intf (with master+slave modports) +
-    noc_req_intf + noc_rsp_intf.
+    """ni_signals_pkg.sv must expose the 2 consolidated industry-style interfaces
+    from interface_handshake.json: axi4_intf (master/slave modports) + noc_intf
+    (mosi/miso modports — req + rsp channels bundled).
     """
     # Ensure the SV file is freshly regenerated before reading.
     r = run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
@@ -254,14 +254,21 @@ def test_sv_consolidated_interfaces_present():
     text = pkg.read_text(encoding="ascii")
     expected_ifaces = (
         "axi4_intf",
-        "noc_req_intf",
-        "noc_rsp_intf",
+        "noc_intf",
     )
     for iface in expected_ifaces:
         assert f"interface {iface}" in text, f"missing SV interface: {iface}"
         assert (
             f"endinterface : {iface}" in text or "endinterface" in text
         ), f"missing endinterface for {iface}"
+    # axi4_intf keeps master/slave modports; noc_intf uses mosi/miso.
+    assert "modport master" in text, "axi4_intf master modport missing"
+    assert "modport slave" in text, "axi4_intf slave modport missing"
+    assert "modport mosi" in text, "noc_intf mosi modport missing"
+    assert "modport miso" in text, "noc_intf miso modport missing"
+    # Old split interfaces must be gone.
+    assert "interface noc_req_intf" not in text
+    assert "interface noc_rsp_intf" not in text
 
 
 class TestLintSv:

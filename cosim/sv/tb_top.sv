@@ -4,11 +4,10 @@
 // tb_top — Stage 5b wire-level co-sim testbench
 //
 // Per spec §4.1 topology:
-//   axi_master_wrap →[master_nmu_axi]→ nmu_wrap →[nmu_loopback_req]→ channel_model_wrap
-//                                              ←[loopback_nmu_rsp]←
-//   channel_model_wrap →[loopback_nsu_req]→ nsu_wrap →[nsu_slave_axi]→ axi_slave_wrap
-//                    ←[nsu_loopback_rsp]←
+//   axi_master_wrap →[master_nmu_axi]→ nmu_wrap →[nmu_channel_model]→ channel_model_wrap
+//                                                                  →[channel_model_nsu]→ nsu_wrap →[nsu_slave_axi]→ axi_slave_wrap
 //
+//   Each noc_intf bundle carries req + rsp channels with mosi/miso modports.
 //   wb2axip faxi_slave  bound on master_nmu_axi (NMU manager-facing: checks NMU as AXI master)
 //   wb2axip faxi_master bound on nsu_slave_axi  (NSU memory-facing: checks NSU as AXI slave)
 //
@@ -62,7 +61,7 @@ module tb_top (
     end
 
     // -------------------------------------------------------------------------
-    // 6 wire bundles (interfaces)
+    // 4 wire bundles (interfaces)
     // -------------------------------------------------------------------------
 
     // [1] master_nmu_axi — AXI between axi_master_wrap (master) and nmu_wrap (slave)
@@ -72,35 +71,21 @@ module tb_top (
         .DATA_WIDTH(DATA_WIDTH)
     ) master_nmu_axi ();
 
-    // [2] nmu_loopback_req — NoC request from nmu_wrap to channel_model_wrap
-    noc_req_intf #(
+    // [2] nmu_channel_model — NoC bundle between nmu_wrap and channel_model_wrap (NMU side)
+    noc_intf #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) nmu_loopback_req ();
+    ) nmu_channel_model ();
 
-    // [3] loopback_nmu_rsp — NoC response from channel_model_wrap back to nmu_wrap
-    noc_rsp_intf #(
+    // [3] channel_model_nsu — NoC bundle between channel_model_wrap and nsu_wrap (NSU side)
+    noc_intf #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) loopback_nmu_rsp ();
+    ) channel_model_nsu ();
 
-    // [4] loopback_nsu_req — NoC request from channel_model_wrap to nsu_wrap
-    noc_req_intf #(
-        .NUM_VC(NUM_VC),
-        .FLIT_WIDTH(FLIT_WIDTH),
-        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) loopback_nsu_req ();
-
-    // [5] nsu_loopback_rsp — NoC response from nsu_wrap back to channel_model_wrap
-    noc_rsp_intf #(
-        .NUM_VC(NUM_VC),
-        .FLIT_WIDTH(FLIT_WIDTH),
-        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) nsu_loopback_rsp ();
-
-    // [6] nsu_slave_axi — AXI between nsu_wrap (master) and axi_slave_wrap (slave)
+    // [4] nsu_slave_axi — AXI between nsu_wrap (master) and axi_slave_wrap (slave)
     axi4_intf #(
         .ID_WIDTH(ID_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
@@ -122,7 +107,7 @@ module tb_top (
         .axi_o(master_nmu_axi.master)
     );
 
-    // [2] NMU shell — AXI slave in, NoC master/slave out
+    // [2] NMU shell — AXI slave in, NoC bundle (mosi) out toward ChannelModel
     nmu_wrap #(
         .ID_WIDTH(ID_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
@@ -134,25 +119,22 @@ module tb_top (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .axi_i(master_nmu_axi.slave),
-        .noc_req_o(nmu_loopback_req.master),
-        .noc_rsp_i(loopback_nmu_rsp.slave)
+        .noc_mosi(nmu_channel_model.mosi)
     );
 
-    // [3] Channel Model — routes NMU requests to NSU and NSU responses back
+    // [3] Channel Model — NMU side (miso) + NSU side (mosi)
     channel_model_wrap #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) u_channel (
+    ) u_channel_model (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .noc_req_from_nmu_i(nmu_loopback_req.slave),
-        .noc_req_to_nsu_o(loopback_nsu_req.master),
-        .noc_rsp_from_nsu_i(nsu_loopback_rsp.slave),
-        .noc_rsp_to_nmu_o(loopback_nmu_rsp.master)
+        .noc_miso(nmu_channel_model.miso),
+        .noc_mosi(channel_model_nsu.mosi)
     );
 
-    // [4] NSU shell — NoC slave/master in, AXI master out
+    // [4] NSU shell — NoC bundle (miso) in from ChannelModel, AXI master out
     nsu_wrap #(
         .ID_WIDTH(ID_WIDTH),
         .ADDR_WIDTH(ADDR_WIDTH),
@@ -163,8 +145,7 @@ module tb_top (
     ) u_nsu (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .noc_req_i(loopback_nsu_req.slave),
-        .noc_rsp_o(nsu_loopback_rsp.master),
+        .noc_miso(channel_model_nsu.miso),
         .axi_o(nsu_slave_axi.master)
     );
 
