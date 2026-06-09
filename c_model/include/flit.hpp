@@ -116,9 +116,13 @@ inline FieldPos payload_field_pos(std::string_view channel, std::string_view fie
     else if (ieq(channel, "R"))
         hit = find_in(ni::R_PAYLOAD_FIELDS);
     if (hit) return *hit;
-    std::fprintf(stderr, "payload_field_pos: %.*s.%.*s not found.\n",
+    // channel.data() is reused for the array name; case may not match the
+    // actual array name (e.g. "aw" prints aw_PAYLOAD_FIELDS[] not AW_...).
+    std::fprintf(stderr,
+                 "ni::cmodel::detail::payload_field_pos: %.*s.%.*s not found "
+                 "in codegen %.*s_PAYLOAD_FIELDS[] — check ni_packet.json or regen.\n",
                  static_cast<int>(channel.size()), channel.data(), static_cast<int>(field.size()),
-                 field.data());
+                 field.data(), static_cast<int>(channel.size()), channel.data());
     assert(false && "payload_field_pos: field not found");
     std::abort();
 }

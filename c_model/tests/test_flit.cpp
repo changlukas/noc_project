@@ -82,9 +82,11 @@ TEST(FlitDispatch, RsvdHeaderFieldQueryAborts) {
     // Spec marks rsvd as enabled=false (ni_packet.json header_fields).
     // After this refactor, codegen-emitted HEADER_FIELDS[] skips rsvd, so
     // the generic dispatch loop falls through and aborts.
+    // Regex anchors on the fprintf diagnostic prefix specifically (the
+    // assert string alone would also match the assert message path).
     EXPECT_DEATH(
         { ni::cmodel::detail::header_field_pos("rsvd"); },
-        "header_field_pos: name not found"
+        "ni::cmodel::detail::header_field_pos: name 'rsvd' not found"
     );
 }
 
