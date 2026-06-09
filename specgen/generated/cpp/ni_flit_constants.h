@@ -3,11 +3,12 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: 17e253c9e678
 // Generator version: v1.0.0
-// Generated at: 2026-06-07T15:17:37Z
+// Generated at: 2026-06-09T15:08:57Z
 // ----------------------------------------------------------------------------
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace ni {
 
@@ -268,6 +269,82 @@ constexpr int AXI_CH_W   = 1;
 constexpr int AXI_CH_AR  = 2;
 constexpr int AXI_CH_B   = 3;
 constexpr int AXI_CH_R   = 4;
+
+// --- FieldDescriptor struct + field arrays (for flit dispatch) ---
+struct FieldDescriptor {
+    std::string_view name;
+    int lsb;
+    int msb;
+};
+
+constexpr FieldDescriptor HEADER_FIELDS[] = {
+    { "noc_qos", header::NOC_QOS_LSB, header::NOC_QOS_MSB },
+    { "axi_ch", header::AXI_CH_LSB, header::AXI_CH_MSB },
+    { "src_id", header::SRC_ID_LSB, header::SRC_ID_MSB },
+    { "dst_id", header::DST_ID_LSB, header::DST_ID_MSB },
+    { "vc_id", header::VC_ID_LSB, header::VC_ID_MSB },
+    { "route_par", header::ROUTE_PAR_LSB, header::ROUTE_PAR_MSB },
+    { "last", header::LAST_LSB, header::LAST_MSB },
+    { "rob_req", header::ROB_REQ_LSB, header::ROB_REQ_MSB },
+    { "rob_idx", header::ROB_IDX_LSB, header::ROB_IDX_MSB },
+    { "commtype", header::COMMTYPE_LSB, header::COMMTYPE_MSB },
+    { "multicast", header::MULTICAST_LSB, header::MULTICAST_MSB },
+    { "flit_ecc", header::FLIT_ECC_LSB, header::FLIT_ECC_MSB },
+};
+
+constexpr FieldDescriptor AW_PAYLOAD_FIELDS[] = {
+    { "awid", payload::aw::AWID_LSB, payload::aw::AWID_MSB },
+    { "awaddr", payload::aw::AWADDR_LSB, payload::aw::AWADDR_MSB },
+    { "awlen", payload::aw::AWLEN_LSB, payload::aw::AWLEN_MSB },
+    { "awsize", payload::aw::AWSIZE_LSB, payload::aw::AWSIZE_MSB },
+    { "awburst", payload::aw::AWBURST_LSB, payload::aw::AWBURST_MSB },
+    { "awcache", payload::aw::AWCACHE_LSB, payload::aw::AWCACHE_MSB },
+    { "awlock", payload::aw::AWLOCK_LSB, payload::aw::AWLOCK_MSB },
+    { "awprot", payload::aw::AWPROT_LSB, payload::aw::AWPROT_MSB },
+    { "awregion", payload::aw::AWREGION_LSB, payload::aw::AWREGION_MSB },
+    { "awqos", payload::aw::AWQOS_LSB, payload::aw::AWQOS_MSB },
+    { "awuser", payload::aw::AWUSER_LSB, payload::aw::AWUSER_MSB },
+    { "aw_rsvd", payload::aw::AW_RSVD_LSB, payload::aw::AW_RSVD_MSB },
+};
+
+constexpr FieldDescriptor AR_PAYLOAD_FIELDS[] = {
+    { "arid", payload::ar::ARID_LSB, payload::ar::ARID_MSB },
+    { "araddr", payload::ar::ARADDR_LSB, payload::ar::ARADDR_MSB },
+    { "arlen", payload::ar::ARLEN_LSB, payload::ar::ARLEN_MSB },
+    { "arsize", payload::ar::ARSIZE_LSB, payload::ar::ARSIZE_MSB },
+    { "arburst", payload::ar::ARBURST_LSB, payload::ar::ARBURST_MSB },
+    { "arcache", payload::ar::ARCACHE_LSB, payload::ar::ARCACHE_MSB },
+    { "arlock", payload::ar::ARLOCK_LSB, payload::ar::ARLOCK_MSB },
+    { "arprot", payload::ar::ARPROT_LSB, payload::ar::ARPROT_MSB },
+    { "arregion", payload::ar::ARREGION_LSB, payload::ar::ARREGION_MSB },
+    { "arqos", payload::ar::ARQOS_LSB, payload::ar::ARQOS_MSB },
+    { "aruser", payload::ar::ARUSER_LSB, payload::ar::ARUSER_MSB },
+    { "ar_rsvd", payload::ar::AR_RSVD_LSB, payload::ar::AR_RSVD_MSB },
+};
+
+constexpr FieldDescriptor W_PAYLOAD_FIELDS[] = {
+    { "wlast", payload::w::WLAST_LSB, payload::w::WLAST_MSB },
+    { "wuser", payload::w::WUSER_LSB, payload::w::WUSER_MSB },
+    { "wstrb", payload::w::WSTRB_LSB, payload::w::WSTRB_MSB },
+    { "wdata", payload::w::WDATA_LSB, payload::w::WDATA_MSB },
+    { "w_rsvd", payload::w::W_RSVD_LSB, payload::w::W_RSVD_MSB },
+};
+
+constexpr FieldDescriptor B_PAYLOAD_FIELDS[] = {
+    { "bid", payload::b::BID_LSB, payload::b::BID_MSB },
+    { "bresp", payload::b::BRESP_LSB, payload::b::BRESP_MSB },
+    { "buser", payload::b::BUSER_LSB, payload::b::BUSER_MSB },
+    { "b_rsvd", payload::b::B_RSVD_LSB, payload::b::B_RSVD_MSB },
+};
+
+constexpr FieldDescriptor R_PAYLOAD_FIELDS[] = {
+    { "rlast", payload::r::RLAST_LSB, payload::r::RLAST_MSB },
+    { "rid", payload::r::RID_LSB, payload::r::RID_MSB },
+    { "rresp", payload::r::RRESP_LSB, payload::r::RRESP_MSB },
+    { "ruser", payload::r::RUSER_LSB, payload::r::RUSER_MSB },
+    { "rdata", payload::r::RDATA_LSB, payload::r::RDATA_MSB },
+    { "r_rsvd", payload::r::R_RSVD_LSB, payload::r::R_RSVD_MSB },
+};
 
 // --- static_assert: arithmetic equality invariants (design doc sec 6.4) ---
 static_assert(FLIT_WIDTH == HEADER_WIDTH + PAYLOAD_WIDTH, "Flit width arithmetic inconsistent: HEADER_WIDTH + PAYLOAD_WIDTH must equal FLIT_WIDTH");

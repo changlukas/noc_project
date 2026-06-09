@@ -36,6 +36,45 @@ def _emit_padding_fields(spec) -> list[str]:
     return out
 
 
+def _emit_field_descriptor_struct(out: list[str]) -> None:
+    out.append("struct FieldDescriptor {")
+    out.append("    std::string_view name;")
+    out.append("    int lsb;")
+    out.append("    int msb;")
+    out.append("};")
+    out.append("")
+
+
+def _emit_header_fields_array(out: list[str], header_fields: list) -> None:
+    out.append("constexpr FieldDescriptor HEADER_FIELDS[] = {")
+    for f in header_fields:
+        if not f.get("enabled", True):
+            continue  # skip rsvd (enabled=false)
+        name = f["name"]
+        upper = name.upper()
+        out.append(f'    {{ "{name}", header::{upper}_LSB, header::{upper}_MSB }},')
+    out.append("};")
+    out.append("")
+
+
+def _emit_payload_fields_arrays(out: list[str], spec: dict, payload_channels: list) -> None:
+    for ch in payload_channels:
+        ch_lower = ch["name"].lower()
+        ch_upper = ch["name"]
+        out.append(f"constexpr FieldDescriptor {ch_upper}_PAYLOAD_FIELDS[] = {{")
+        for f in ch["fields"]:
+            pos = C.payload_field_position(spec, ch["name"], f["name"])
+            if pos is None:
+                continue  # width=0 placeholder, not bit-addressable
+            const = f["name"].upper()
+            out.append(
+                f'    {{ "{f["name"]}", payload::{ch_lower}::{const}_LSB, '
+                f'payload::{ch_lower}::{const}_MSB }},'
+            )
+        out.append("};")
+        out.append("")
+
+
 def emit(packet_json: Path, spec_version: str) -> str:
     """Return C++ header body (no provenance banner -- caller prepends it)."""
     spec = load_doc(packet_json)
@@ -44,6 +83,7 @@ def emit(packet_json: Path, spec_version: str) -> str:
     out.append("#pragma once")
     out.append("#include <cstddef>")
     out.append("#include <cstdint>")
+    out.append("#include <string_view>")
     out.append("")
     out.append("namespace ni {")
     out.append("")
@@ -129,6 +169,12 @@ def emit(packet_json: Path, spec_version: str) -> str:
 
     # --- static_assert arithmetic invariants (design doc sec 6.4) ---
     # Only equality invariants; no tiling/cross-ref/width_param eval.
+    # --- FieldDescriptor struct + arrays (for flit dispatch consumers) ---
+    out.append("// --- FieldDescriptor struct + field arrays (for flit dispatch) ---")
+    _emit_field_descriptor_struct(out)
+    _emit_header_fields_array(out, spec["flit"]["header_fields"])
+    _emit_payload_fields_arrays(out, spec, spec["flit"]["payload_channels"])
+
     out.append("// --- static_assert: arithmetic equality invariants (design doc sec 6.4) ---")
 
     out.append(
