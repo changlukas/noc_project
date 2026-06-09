@@ -79,7 +79,17 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     ASSERT_NE(slave_handle, nullptr);
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Body extended by Tasks 8-10.
+    // === NMU multi-instance independence (T8) ===
+
+    // Case: create 2 NMU adapters — distinct void* + both validate as live.
+    void* nmu_a = cmodel_nmu_create("nmu_a");
+    void* nmu_b = cmodel_nmu_create("nmu_b");
+    ASSERT_NE(nmu_a, nullptr);
+    ASSERT_NE(nmu_b, nullptr);
+    EXPECT_NE(nmu_a, nmu_b);
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Body extended by Tasks 9-10.
 }
 
 }  // namespace

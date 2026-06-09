@@ -91,7 +91,7 @@ void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* a
                               svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
                               svBit* rlast);
 
-// Nmu (Task 10) — AXI slave side + NoC req/rsp sides.
+// Nmu (Task 8) — chandle ABI; AXI slave side + NoC req/rsp sides.
 // Packing conventions (same as cmodel_slave_*):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
@@ -99,7 +99,8 @@ void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* a
 //   wstrb         : 1 word (32-bit strobe)
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
-void cmodel_nmu_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+void* cmodel_nmu_create(const char* name);
+void cmodel_nmu_set_inputs(void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                            svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
                            svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
                            svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
@@ -109,8 +110,8 @@ void cmodel_nmu_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr
                            svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
                            svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
                            svBit noc_req_credit_return);
-void cmodel_nmu_tick(void);
-void cmodel_nmu_get_outputs(svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
+void cmodel_nmu_tick(void* ctx);
+void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
                             svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
                             svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
                             svBit* noc_req_valid, svBitVecVal* noc_req_flit,

@@ -43,6 +43,7 @@ module nmu_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
+    input  chandle            ctx_i,
     axi4_intf.slave           axi_i,
     noc_intf.mosi             noc_mosi_o
 );
@@ -64,6 +65,7 @@ module nmu_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_nmu_set_inputs(
+        input  chandle                ctx,
         input  bit                    awvalid,
         input  bit [ID_WIDTH-1:0]     awid,
         input  bit [ADDR_WIDTH-1:0]   awaddr,
@@ -95,9 +97,12 @@ module nmu_wrap #(
         input  bit                    noc_req_credit_return
     );
 
-    import "DPI-C" context function void cmodel_nmu_tick();
+    import "DPI-C" context function void cmodel_nmu_tick(
+        input  chandle                ctx
+    );
 
     import "DPI-C" context function void cmodel_nmu_get_outputs(
+        input  chandle                ctx,
         output bit                    awready,
         output bit                    wready,
         output bit                    arready,
@@ -165,6 +170,7 @@ module nmu_wrap #(
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_nmu_set_inputs(
+                ctx_i,
                 // AXI slave side — master drives these
                 axi_i.awvalid,
                 axi_i.awid,
@@ -200,7 +206,7 @@ module nmu_wrap #(
             );
 
             // Step 2: advance C++ model one cycle.
-            cmodel_nmu_tick();
+            cmodel_nmu_tick(ctx_i);
 
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
@@ -220,6 +226,7 @@ module nmu_wrap #(
                 bit [FLIT_WIDTH-1:0]   t_noc_req_flit;
                 bit                    t_noc_rsp_credit_return;
                 cmodel_nmu_get_outputs(
+                    ctx_i,
                     t_awready, t_wready, t_arready,
                     t_bvalid,  t_bid,    t_bresp,
                     t_rvalid,  t_rid,    t_rdata,  t_rresp, t_rlast,

@@ -693,7 +693,7 @@ extern "C" void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wread
     DPI_BOUNDARY_END(cmodel_slave_get_outputs);
 }
 
-// Nmu DPI handlers — Task 10.
+// Nmu DPI handlers — Task 8.
 //
 // Packing conventions mirror cmodel_slave_*:
 //   8-bit  id/attr  : word[0] low byte
@@ -705,18 +705,36 @@ extern "C" void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wread
 using ni::cmodel::cosim::NmuInputs;
 using ni::cmodel::cosim::NmuOutputs;
 
-extern "C" void cmodel_nmu_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
-                                      svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
-                                      svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-                                      svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
-                                      svBitVecVal* wstrb, svBit wlast, svBit bready, svBit arvalid,
-                                      svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-                                      svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
-                                      svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
-                                      svBit rready, svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
-                                      svBit noc_req_credit_return) {
+extern "C" void* cmodel_nmu_create(const char* name) {
+    if (g_session_state != SessionState::Initialized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nmu_create: not initialized");
+        return nullptr;
+    }
+    DPI_BOUNDARY_BEGIN_R(cmodel_nmu_create, nullptr) {
+        auto adapter = std::make_unique<NmuShellAdapter>();
+        adapter->init();
+        auto* h = new HandleBlock{
+            static_cast<uint32_t>(ShellType::Nmu), ShellType::Nmu, HandleState::Live,
+            std::string(name),
+            std::unique_ptr<void, void (*)(void*)>(
+                adapter.release(), [](void* p) { delete static_cast<NmuShellAdapter*>(p); })};
+        g_handle_registry.insert(h);
+        return static_cast<void*>(h);
+    }
+    DPI_BOUNDARY_END_R(cmodel_nmu_create);
+}
+
+extern "C" void cmodel_nmu_set_inputs(
+    void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
+    svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
+    svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
+    svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+    svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
+    svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
+    svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit noc_req_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_set_inputs) {
-        REQUIRE_ADAPTER(g_nmu_adapter, "cmodel_nmu_set_inputs");
+        REQUIRE_HANDLE(ctx, ShellType::Nmu, "cmodel_nmu_set_inputs");
+        auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
         NmuInputs in{};
         in.awvalid = static_cast<bool>(awvalid);
         in.awid = static_cast<uint8_t>(awid[0] & 0xFF);
@@ -747,28 +765,30 @@ extern "C" void cmodel_nmu_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVec
         in.noc_rsp_valid = static_cast<bool>(noc_rsp_valid);
         in.noc_rsp_flit = unpack_flit(noc_rsp_flit);
         in.noc_req_credit_return = static_cast<bool>(noc_req_credit_return);
-        g_nmu_adapter->set_inputs(in);
+        nmu->set_inputs(in);
     }
     DPI_BOUNDARY_END(cmodel_nmu_set_inputs);
 }
 
-extern "C" void cmodel_nmu_tick(void) {
+extern "C" void cmodel_nmu_tick(void* ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_tick) {
-        REQUIRE_ADAPTER(g_nmu_adapter, "cmodel_nmu_tick");
-        g_nmu_adapter->tick();
+        REQUIRE_HANDLE(ctx, ShellType::Nmu, "cmodel_nmu_tick");
+        auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
+        nmu->tick();
     }
     DPI_BOUNDARY_END(cmodel_nmu_tick);
 }
 
-extern "C" void cmodel_nmu_get_outputs(svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
-                                       svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid,
-                                       svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
-                                       svBit* rlast, svBit* noc_req_valid,
+extern "C" void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arready,
+                                       svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp,
+                                       svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
+                                       svBitVecVal* rresp, svBit* rlast, svBit* noc_req_valid,
                                        svBitVecVal* noc_req_flit, svBit* noc_rsp_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_get_outputs) {
-        REQUIRE_ADAPTER(g_nmu_adapter, "cmodel_nmu_get_outputs");
+        REQUIRE_HANDLE(ctx, ShellType::Nmu, "cmodel_nmu_get_outputs");
+        auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
         NmuOutputs out{};
-        g_nmu_adapter->get_outputs(out);
+        nmu->get_outputs(out);
 
         *awready = static_cast<svBit>(out.awready);
         *wready = static_cast<svBit>(out.wready);
