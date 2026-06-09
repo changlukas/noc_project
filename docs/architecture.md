@@ -149,18 +149,34 @@ Each component in the pipeline is a separate C++ class in `c_model/`.
 Components communicate through typed queues or method calls -- never
 through shared global state.
 
-Hermetic singleton invariant: each `*_shell_adapter.hpp` in
-`c_model/include/cosim/` owns exactly ONE c_model component.
-The DPI entry point `cosim/c/cmodel_dpi.cpp` instantiates one global
-adapter per component and is the only file that may hold these globals.
-The following cross-component references are forbidden:
+### Per-instance chandle ABI
 
-- `cosim/c/cmodel_dpi.cpp` referencing adapter state from a different
-  component's global.
-- A `*_shell_adapter.hpp` including another shell's adapter header.
-- A C++ component holding a reference or pointer to a different component.
+Each shell adapter (`*ShellAdapter`) is instantiated per call to
+`cmodel_<shell>_create(name)`. The function returns an opaque `void*`
+(`chandle` from SV's perspective) that wraps a typed `HandleBlock`:
 
-The hermetic invariant is enforced by code review.
+```cpp
+struct HandleBlock {
+    uint32_t    magic;     // ShellType-derived sentinel
+    ShellType   type;
+    HandleState state;
+    std::string name;
+    std::unique_ptr<void, void(*)(void*)> adapter;  // type-erased
+};
+```
+
+All live handles are tracked in `g_handle_registry`. Cycle handlers
+(`cmodel_<shell>_set_inputs/tick/get_outputs`) validate via
+`REQUIRE_HANDLE(ctx, expected_type, fn_name)`, which checks: session
+state != Uninitialized, registry membership, magic/type self-
+consistency, and Live state.
+
+`cmodel_finalize` walks the registry and destroys each `HandleBlock`,
+which in turn invokes the per-handle type-erased deleter to clean up
+the underlying adapter.
+
+See `docs/superpowers/specs/2026-06-09-multi-instance-dpi-design.md`
+for the full design.
 
 ### 3.2 Tick semantics
 

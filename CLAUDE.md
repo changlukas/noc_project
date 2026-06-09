@@ -8,7 +8,7 @@
 
 - **NMU / NSU**: per-direction units (`c_model/include/nmu/`, `c_model/include/nsu/`). Packetize / depacketize, AXI port adapters, per-ID RoB on the NMU response path.
 - **NoC fabric**: no router class in c_model; `ChannelModel` (`c_model/tests/common/channel_model.hpp`) is the only NoC stub. Destination derivation (XY bit-slice) is done at NMU packetize time via `nmu::addr_trans::xy_route`.
-- **Shell adapters**: `NmuShellAdapter` / `NsuShellAdapter` / `MasterShellAdapter` / `SlaveShellAdapter` / `ChannelModelShellAdapter` in `c_model/include/cosim/`. Hermetic singleton invariant — one global per adapter in `cosim/c/cmodel_dpi.cpp`; no cross-component pointers.
+- **Shell adapters**: `NmuShellAdapter` / `NsuShellAdapter` / `MasterShellAdapter` / `SlaveShellAdapter` / `ChannelModelShellAdapter` in `c_model/include/cosim/`. Per-instance via chandle ABI — `void* cmodel_<shell>_create(name)` returns a `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops validate via `REQUIRE_HANDLE`. No cross-component pointers.
 - **Config**: YAML (`c_model/config/`); no JSON, no compile-time `<Mode>` templates.
 
 **Build**: C++17, CMake 3.20+, GoogleTest.

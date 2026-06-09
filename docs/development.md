@@ -143,22 +143,19 @@ Use `py -3` (not `python3`) for all Python tool invocations on the
 Windows host. This resolves through the Windows py launcher to the
 correct Python 3.x installation.
 
-### Hermetic singleton invariant
+### Per-instance chandle ABI
 
-Each `c_model/include/cosim/*_shell_adapter.hpp` owns exactly one
-c_model component. `cosim/c/cmodel_dpi.cpp` instantiates one global
-adapter per component and is the only file that may hold these globals.
-Cross-component references are forbidden:
+`cosim/c/cmodel_dpi.cpp` exposes 5 `cmodel_<shell>_create(name)`
+functions (one per shell type: master, slave, nmu, nsu,
+channel_model). Each returns an opaque `void*` (SV chandle) that wraps
+a `HandleBlock` registered in `g_handle_registry`. Cycle handlers
+take `void* ctx` as leading argument and validate via
+`REQUIRE_HANDLE` before adapter access. `cmodel_finalize` walks the
+registry destroying all live handles.
 
-- `cosim/c/cmodel_dpi.cpp` must not read adapter state from a different
-  component's global.
-- `*_shell_adapter.hpp` must not include another shell's adapter header.
-- No C++ component may hold a reference or pointer to a different
-  component.
-
-The hermetic invariant is enforced by code review.
-If you need cross-component communication, the correct fix is to extend
-the c_model component API -- not to bridge through the adapter layer.
+This replaces the prior 5-singleton invariant. See
+`docs/superpowers/specs/2026-06-09-multi-instance-dpi-design.md` for
+the design rationale.
 
 ---
 
