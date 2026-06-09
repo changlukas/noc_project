@@ -133,32 +133,32 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // NoC test fixture: single-NSU for legacy fixtures (preserves existing
     // global req/rsp delay path), multi-NSU for multi_dst_stress so we can
     // wire 4 dst boundaries to 4 independent NSU stacks with per-NSU latency.
-    std::unique_ptr<test::ChannelModel> loopback_ptr;
+    std::unique_ptr<test::ChannelModel> channel_ptr;
     if (is_multi_dst) {
-        loopback_ptr = std::make_unique<test::ChannelModel>(
+        channel_ptr = std::make_unique<test::ChannelModel>(
             /*num_nsu=*/kNumNsuMulti,
             /*req_q_depth_per_nsu=*/params.channel_model_req_depth,
             /*rsp_q_depth_total=*/params.channel_model_rsp_depth);
         // multi_dst_stress addresses: 0x100 -> dst=0, 0x10100 -> dst=1 via
         // addr_trans::xy_route. Map dst_id {0..3} -> NSU {0..3}.
-        loopback_ptr->set_dst_route(0x00, 0);
-        loopback_ptr->set_dst_route(0x01, 1);
-        loopback_ptr->set_dst_route(0x02, 2);
-        loopback_ptr->set_dst_route(0x03, 3);
+        channel_ptr->set_dst_route(0x00, 0);
+        channel_ptr->set_dst_route(0x01, 1);
+        channel_ptr->set_dst_route(0x02, 2);
+        channel_ptr->set_dst_route(0x03, 3);
         // Per-NSU response latency: NSU_0 slow (10c), NSU_1 fast (2c) exposes
         // out-of-order B arrival; Rob Enabled mode must reorder to preserve AXI4
         // IHI 0022 §A5.3 same-id submission order.
-        loopback_ptr->set_nsu_latency(0, 10);
-        loopback_ptr->set_nsu_latency(1, 2);
-        loopback_ptr->set_nsu_latency(2, 5);
-        loopback_ptr->set_nsu_latency(3, 3);
+        channel_ptr->set_nsu_latency(0, 10);
+        channel_ptr->set_nsu_latency(1, 2);
+        channel_ptr->set_nsu_latency(2, 5);
+        channel_ptr->set_nsu_latency(3, 3);
     } else {
-        loopback_ptr = std::make_unique<test::ChannelModel>(params.channel_model_req_depth,
-                                                            params.channel_model_rsp_depth);
-        loopback_ptr->set_req_delay(req_delay);
-        loopback_ptr->set_rsp_delay(rsp_delay);
+        channel_ptr = std::make_unique<test::ChannelModel>(params.channel_model_req_depth,
+                                                           params.channel_model_rsp_depth);
+        channel_ptr->set_req_delay(req_delay);
+        channel_ptr->set_rsp_delay(rsp_delay);
     }
-    test::ChannelModel& loopback = *loopback_ptr;
+    test::ChannelModel& channel = *channel_ptr;
 
     // NMU top-level: encapsulates AxiSlavePort, Rob, Packetize,
     // WormholeArbiter, VcArbiter, and Depacketize into one object.
@@ -174,7 +174,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     nmu_cfg.vc_mode = nmu::VcMode::ReadWriteSplit;
     nmu_cfg.write_vc = 0;
     nmu_cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
-    nmu::Nmu nmu(nmu_cfg, loopback.nmu_req_out(), loopback.nmu_rsp_in());
+    nmu::Nmu nmu(nmu_cfg, channel.nmu_req_out(), channel.nmu_rsp_in());
 
     // NSU stacks: 1 for legacy fixtures, 4 for multi_dst_stress.
     // Each NSU owns its own MetaBuffer / Depacketize / Packetize / AxiMasterPort
@@ -198,7 +198,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         nsu_cfg.write_rsp_vc = 0;
         nsu_cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
         nsus.emplace_back(
-            std::make_unique<nsu::Nsu>(nsu_cfg, loopback.nsu_req_in(i), loopback.nsu_rsp_out(i)));
+            std::make_unique<nsu::Nsu>(nsu_cfg, channel.nsu_req_in(i), channel.nsu_rsp_out(i)));
     }
 
     // Per-fixture override for ROB stall coverage: multi_dst_stress needs
@@ -365,9 +365,9 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
             }
         }
 
-        // Advance the loopback's per-cycle delay pipes after all producers /
+        // Advance the channel's per-cycle delay pipes after all producers /
         // consumers have run for this cycle. Mirrors port-pair test ordering.
-        loopback.tick();
+        channel.tick();
 
         if (++cycle > kMaxCycles) {
             LoopbackResult r{sb.mismatch_count(), cycle, true, true, is_multi_dst};

@@ -2,8 +2,8 @@
 //
 // NmuInputs: signals consumed by the Nmu each cycle.
 //   AXI slave side: master drives AW/W/AR onto axi_intf; Nmu accepts them.
-//   NoC rsp side:   flit arriving from loopback NoC toward Nmu's Depacketize.
-//   NoC req credit: credit_return from downstream (loopback credits back to Nmu).
+//   NoC rsp side:   flit arriving from channel model toward Nmu's Depacketize.
+//   NoC req credit: credit_return from downstream (channel credits back to Nmu).
 //
 // NmuOutputs: signals driven by the Nmu each cycle.
 //   AXI slave side: Nmu drives awready/wready/arready handshake + B/R channels.
@@ -58,10 +58,10 @@ struct NmuInputs {
     uint8_t arqos;
     // AXI slave side — R channel (master accepts read data)
     bool rready;
-    // NoC rsp side — flit arriving from loopback toward Nmu Depacketize
+    // NoC rsp side — flit arriving from channel toward Nmu Depacketize
     bool noc_rsp_valid;
     FlitBytes noc_rsp_flit;
-    // NoC req credit — loopback returns credit to Nmu (NUM_VC=1 PoC: 1 bit)
+    // NoC req credit — channel returns credit to Nmu (NUM_VC=1 PoC: 1 bit)
     bool noc_req_credit_return;
 };
 
@@ -81,7 +81,7 @@ struct NmuOutputs {
     std::array<uint8_t, NMU_AXI_DATA_BYTES> rdata;
     uint8_t rresp;  // 2-bit
     bool rlast;
-    // NoC req side — flit produced by Nmu Packetize, leaving toward loopback
+    // NoC req side — flit produced by Nmu Packetize, leaving toward channel
     bool noc_req_valid;
     FlitBytes noc_req_flit;
     // NoC rsp credit — Nmu returns credit to rsp-side upstream (PoC: always 0)

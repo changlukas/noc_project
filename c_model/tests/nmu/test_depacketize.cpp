@@ -121,8 +121,8 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsRobIdxAndRobReq) {
     SCENARIO(
         "NMU Depacketize: pop_b_with_meta returns rob_req/rob_idx from header for ROB routing");
     using namespace ni::cmodel;
-    ChannelModel loopback(/*req_depth=*/16, /*rsp_depth=*/16);
-    nmu::Depacketize depkt(loopback.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
+    ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
+    nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
 
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
@@ -136,7 +136,7 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsRobIdxAndRobReq) {
     f.set_payload_field("B", "bresp", 0);
     f.set_payload_field("B", "buser", 0);
 
-    ASSERT_TRUE(loopback.rsp_out().push_flit(f));
+    ASSERT_TRUE(channel.rsp_out().push_flit(f));
     depkt.tick();
 
     auto opt = depkt.pop_b_with_meta();
@@ -151,8 +151,8 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatRobIdx) {
     SCENARIO(
         "NMU Depacketize: pop_r_with_meta returns per-beat rob_idx (5,6,7,8) for 4-beat burst");
     using namespace ni::cmodel;
-    ChannelModel loopback(/*req_depth=*/16, /*rsp_depth=*/16);
-    nmu::Depacketize depkt(loopback.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
+    ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
+    nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
 
     for (uint8_t i = 0; i < 4; ++i) {
         Flit f;
@@ -170,7 +170,7 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatRobIdx) {
         std::array<uint8_t, 32> data{};
         data[0] = static_cast<uint8_t>(0xA0 + i);
         f.set_payload_bytes("R", "rdata", data.data(), 256);
-        ASSERT_TRUE(loopback.rsp_out().push_flit(f));
+        ASSERT_TRUE(channel.rsp_out().push_flit(f));
     }
     depkt.tick();
 

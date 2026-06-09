@@ -138,12 +138,12 @@ module tb_top (
         .noc_rsp_i(loopback_nmu_rsp.slave)
     );
 
-    // [3] Loopback NoC — routes NMU requests to NSU and NSU responses back
+    // [3] Channel Model — routes NMU requests to NSU and NSU responses back
     channel_model_wrap #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) u_loopback (
+    ) u_channel (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .noc_req_from_nmu_i(nmu_loopback_req.slave),

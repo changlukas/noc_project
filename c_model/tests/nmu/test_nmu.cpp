@@ -22,17 +22,17 @@ TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
     SCENARIO(
         "Nmu top-level smoke: NUM_VC=1 default config, construct + tick 10x "
         "should not crash. Verifies ctor sequence + member init order.");
-    ChannelModel loopback(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel channel(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
     cfg.src_id = 0x12;
-    Nmu nmu(cfg, loopback.nmu_req_out(), loopback.nmu_rsp_in());
+    Nmu nmu(cfg, channel.nmu_req_out(), channel.nmu_rsp_in());
 
     EXPECT_EQ(&nmu.axi_slave_port(), &nmu.axi_slave_port())
         << "axi_slave_port() returns stable reference";
 
     for (int i = 0; i < 10; ++i) {
         nmu.tick();
-        loopback.tick();
+        channel.tick();
     }
     SUCCEED();  // reaching here means no abort during ctor or tick
 }

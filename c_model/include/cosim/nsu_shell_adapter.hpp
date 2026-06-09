@@ -29,8 +29,8 @@
 // Hermetic invariant: no refs to other ShellAdapters.
 #pragma once
 #include "axi/types.hpp"
-#include "cosim/flit_byte_conv.hpp"          // flit_from_bytes, flit_to_bytes
 #include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "cosim/flit_byte_conv.hpp"          // flit_from_bytes, flit_to_bytes
 #include "cosim/nsu_shell_io.hpp"
 #include "cosim/poc_defaults.hpp"  // kPoC* depths
 #include "ni/flit.hpp"

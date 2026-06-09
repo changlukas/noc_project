@@ -1,8 +1,8 @@
 // NsuShellAdapter IO POD structs — Stage 5b spec §6 (combined NoC consumer + AXI master).
 //
 // NsuInputs: signals consumed by the Nsu each cycle.
-//   NoC req side:    flit arriving from loopback NoC toward Nsu's Depacketize.
-//   NoC rsp credit:  credit_return from downstream (loopback credits back to Nsu).
+//   NoC req side:    flit arriving from channel model toward Nsu's Depacketize.
+//   NoC rsp credit:  credit_return from downstream (channel credits back to Nsu).
 //   AXI master side: ready signals + B/R beats returning from the AXI subordinate.
 //
 // NsuOutputs: signals driven by the Nsu each cycle.
@@ -31,10 +31,10 @@ constexpr int NSU_AXI_DATA_BYTES = axi::DATA_BYTES;
 
 // NsuInputs: signals consumed by Nsu each cycle.
 struct NsuInputs {
-    // NoC req side — flit arriving from loopback toward Nsu Depacketize
+    // NoC req side — flit arriving from channel toward Nsu Depacketize
     bool noc_req_valid;
     FlitBytes noc_req_flit;
-    // NoC rsp credit — loopback returns credit to Nsu (NUM_VC=1 PoC: 1 bit)
+    // NoC rsp credit — channel returns credit to Nsu (NUM_VC=1 PoC: 1 bit)
     bool noc_rsp_credit_return;
     // AXI master side — AW channel (subordinate drives ready)
     bool awready;
@@ -56,7 +56,7 @@ struct NsuInputs {
 
 // NsuOutputs: signals driven by Nsu each cycle.
 struct NsuOutputs {
-    // NoC rsp side — flit produced by Nsu Packetize, leaving toward loopback
+    // NoC rsp side — flit produced by Nsu Packetize, leaving toward channel
     bool noc_rsp_valid;
     FlitBytes noc_rsp_flit;
     // NoC req credit — Nsu returns credit to req-side upstream (PoC: always 0)

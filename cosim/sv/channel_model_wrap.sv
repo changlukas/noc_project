@@ -28,10 +28,10 @@ module channel_model_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    // Request: NMU -> loopback -> NSU
+    // Request: NMU -> channel -> NSU
     noc_req_intf.slave        noc_req_from_nmu_i,
     noc_req_intf.master       noc_req_to_nsu_o,
-    // Response: NSU -> loopback -> NMU
+    // Response: NSU -> channel -> NMU
     noc_rsp_intf.slave        noc_rsp_from_nsu_i,
     noc_rsp_intf.master       noc_rsp_to_nmu_o
 );
