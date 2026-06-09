@@ -40,6 +40,7 @@ module nsu_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
+    input  chandle            ctx_i,
     noc_intf.miso             noc_miso_i,
     axi4_intf.master          axi_o
 );
@@ -61,6 +62,7 @@ module nsu_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_nsu_set_inputs(
+        input  chandle                ctx,
         input  bit                    noc_req_valid,
         input  bit [FLIT_WIDTH-1:0]       noc_req_flit,
         input  bit                    noc_rsp_credit_return,
@@ -77,9 +79,12 @@ module nsu_wrap #(
         input  bit                    rlast
     );
 
-    import "DPI-C" context function void cmodel_nsu_tick();
+    import "DPI-C" context function void cmodel_nsu_tick(
+        input  chandle                ctx
+    );
 
     import "DPI-C" context function void cmodel_nsu_get_outputs(
+        input  chandle                ctx,
         output bit                    noc_rsp_valid,
         output bit [FLIT_WIDTH-1:0]       noc_rsp_flit,
         output bit                    noc_req_credit_return,
@@ -194,6 +199,7 @@ module nsu_wrap #(
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_nsu_set_inputs(
+                ctx_i,
                 // NoC req side — req flit arriving from ChannelModel toward Nsu
                 noc_miso_i.req_valid,
                 noc_miso_i.req_flit,
@@ -214,7 +220,7 @@ module nsu_wrap #(
             );
 
             // Step 2: advance C++ model one cycle.
-            cmodel_nsu_tick();
+            cmodel_nsu_tick(ctx_i);
 
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
@@ -249,6 +255,7 @@ module nsu_wrap #(
                 bit [3:0]              t_arqos;
                 bit                    t_rready;
                 cmodel_nsu_get_outputs(
+                    ctx_i,
                     t_noc_rsp_valid, t_noc_rsp_flit, t_noc_req_credit_return,
                     t_awvalid, t_awid, t_awaddr, t_awlen, t_awsize, t_awburst,
                     t_awlock, t_awcache, t_awprot, t_awqos,

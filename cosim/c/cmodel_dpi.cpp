@@ -808,7 +808,7 @@ extern "C" void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready,
     DPI_BOUNDARY_END(cmodel_nmu_get_outputs);
 }
 
-// Nsu DPI handlers — Task 11.
+// Nsu DPI handlers — Task 9.
 //
 // Direction inversion vs. Nmu:
 //   set_inputs receives noc_req_flit (NoC consumer) + AXI master ready signals / B/R.
@@ -823,13 +823,33 @@ extern "C" void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready,
 using ni::cmodel::cosim::NsuInputs;
 using ni::cmodel::cosim::NsuOutputs;
 
-extern "C" void cmodel_nsu_set_inputs(svBit noc_req_valid, svBitVecVal* noc_req_flit,
+extern "C" void* cmodel_nsu_create(const char* name) {
+    if (g_session_state != SessionState::Initialized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nsu_create: not initialized");
+        return nullptr;
+    }
+    DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, nullptr) {
+        auto adapter = std::make_unique<NsuShellAdapter>();
+        adapter->init();
+        auto* h = new HandleBlock{
+            static_cast<uint32_t>(ShellType::Nsu), ShellType::Nsu, HandleState::Live,
+            std::string(name),
+            std::unique_ptr<void, void (*)(void*)>(
+                adapter.release(), [](void* p) { delete static_cast<NsuShellAdapter*>(p); })};
+        g_handle_registry.insert(h);
+        return static_cast<void*>(h);
+    }
+    DPI_BOUNDARY_END_R(cmodel_nsu_create);
+}
+
+extern "C" void cmodel_nsu_set_inputs(void* ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
                                       svBit noc_rsp_credit_return, svBit awready, svBit wready,
                                       svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp,
                                       svBit arready, svBit rvalid, svBitVecVal* rid,
                                       svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_set_inputs) {
-        REQUIRE_ADAPTER(g_nsu_adapter, "cmodel_nsu_set_inputs");
+        REQUIRE_HANDLE(ctx, ShellType::Nsu, "cmodel_nsu_set_inputs");
+        auto* nsu = static_cast<NsuShellAdapter*>(_h->adapter.get());
         NsuInputs in{};
         in.noc_req_valid = static_cast<bool>(noc_req_valid);
         in.noc_req_flit = unpack_flit(noc_req_flit);
@@ -845,31 +865,33 @@ extern "C" void cmodel_nsu_set_inputs(svBit noc_req_valid, svBitVecVal* noc_req_
         in.rdata = unpack_data256(rdata);
         in.rresp = static_cast<uint8_t>(rresp[0] & 0x3);
         in.rlast = static_cast<bool>(rlast);
-        g_nsu_adapter->set_inputs(in);
+        nsu->set_inputs(in);
     }
     DPI_BOUNDARY_END(cmodel_nsu_set_inputs);
 }
 
-extern "C" void cmodel_nsu_tick(void) {
+extern "C" void cmodel_nsu_tick(void* ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_tick) {
-        REQUIRE_ADAPTER(g_nsu_adapter, "cmodel_nsu_tick");
-        g_nsu_adapter->tick();
+        REQUIRE_HANDLE(ctx, ShellType::Nsu, "cmodel_nsu_tick");
+        auto* nsu = static_cast<NsuShellAdapter*>(_h->adapter.get());
+        nsu->tick();
     }
     DPI_BOUNDARY_END(cmodel_nsu_tick);
 }
 
 extern "C" void cmodel_nsu_get_outputs(
-    svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return, svBit* awvalid,
-    svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
+    void* ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return,
+    svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
     svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
     svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,
     svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
     svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
     svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_get_outputs) {
-        REQUIRE_ADAPTER(g_nsu_adapter, "cmodel_nsu_get_outputs");
+        REQUIRE_HANDLE(ctx, ShellType::Nsu, "cmodel_nsu_get_outputs");
+        auto* nsu = static_cast<NsuShellAdapter*>(_h->adapter.get());
         NsuOutputs out{};
-        g_nsu_adapter->get_outputs(out);
+        nsu->get_outputs(out);
 
         *noc_rsp_valid = static_cast<svBit>(out.noc_rsp_valid);
         pack_flit(out.noc_rsp_flit, noc_rsp_flit);

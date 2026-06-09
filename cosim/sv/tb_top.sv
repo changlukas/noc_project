@@ -53,12 +53,14 @@ module tb_top (
     import "DPI-C" context function chandle cmodel_master_create(input string name);
     import "DPI-C" context function chandle cmodel_slave_create(input string name);
     import "DPI-C" context function chandle cmodel_nmu_create(input string name);
+    import "DPI-C" context function chandle cmodel_nsu_create(input string name);
 
     string  scenario_path;
     chandle cm_ctx;
     chandle master_ctx;
     chandle slave_ctx;
     chandle nmu_ctx;
+    chandle nsu_ctx;
 
     initial begin
         if (!$value$plusargs("scenario=%s", scenario_path)) begin
@@ -70,6 +72,7 @@ module tb_top (
         master_ctx = cmodel_master_create("master_0");
         slave_ctx  = cmodel_slave_create("slave_0");
         nmu_ctx    = cmodel_nmu_create("nmu_0");
+        nsu_ctx    = cmodel_nsu_create("nsu_0");
     end
 
     // -------------------------------------------------------------------------
@@ -160,6 +163,7 @@ module tb_top (
     ) u_nsu (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
+        .ctx_i(nsu_ctx),
         .noc_miso_i(channel_model_nsu.miso),
         .axi_o(nsu_slave_axi.master)
     );

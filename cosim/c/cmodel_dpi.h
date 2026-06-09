@@ -117,7 +117,7 @@ void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arr
                             svBit* noc_req_valid, svBitVecVal* noc_req_flit,
                             svBit* noc_rsp_credit_return);
 
-// Nsu (Task 11) — NoC consumer (req in) + producer (rsp out) + AXI master side.
+// Nsu (Task 9) — NoC consumer (req in) + producer (rsp out) + AXI master side.
 // Direction inversion vs. Nmu:
 //   cmodel_nsu_set_inputs receives noc_req_flit (consumer) + AXI master ready/B/R.
 //   cmodel_nsu_get_outputs produces noc_rsp_flit (producer) + AXI master AW/W/AR.
@@ -128,12 +128,13 @@ void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arr
 //   wstrb         : 1 word (32-bit strobe)
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
-void cmodel_nsu_set_inputs(svBit noc_req_valid, svBitVecVal* noc_req_flit,
+void* cmodel_nsu_create(const char* name);
+void cmodel_nsu_set_inputs(void* ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
                            svBit noc_rsp_credit_return, svBit awready, svBit wready, svBit bvalid,
                            svBitVecVal* bid, svBitVecVal* bresp, svBit arready, svBit rvalid,
                            svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
-void cmodel_nsu_tick(void);
-void cmodel_nsu_get_outputs(svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit,
+void cmodel_nsu_tick(void* ctx);
+void cmodel_nsu_get_outputs(void* ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit,
                             svBit* noc_req_credit_return, svBit* awvalid, svBitVecVal* awid,
                             svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
                             svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,

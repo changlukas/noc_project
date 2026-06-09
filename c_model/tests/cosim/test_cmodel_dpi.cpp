@@ -89,7 +89,14 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Body extended by Tasks 9-10.
+    // === NSU case (T9 — last per-shell) ===
+
+    // Case: nsu_create after init succeeds.
+    void* nsu_handle = cmodel_nsu_create("nsu_test");
+    ASSERT_NE(nsu_handle, nullptr);
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Body extended by Task 10.
 }
 
 }  // namespace
