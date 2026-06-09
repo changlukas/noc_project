@@ -108,6 +108,7 @@ inline FieldPos payload_field_pos(std::string_view channel, std::string_view fie
         if (field == "awprot") return {ni::payload::aw::AWPROT_LSB, ni::payload::aw::AWPROT_MSB};
         if (field == "awregion")
             return {ni::payload::aw::AWREGION_LSB, ni::payload::aw::AWREGION_MSB};
+        if (field == "awqos") return {ni::payload::aw::AWQOS_LSB, ni::payload::aw::AWQOS_MSB};
         if (field == "awuser") return {ni::payload::aw::AWUSER_LSB, ni::payload::aw::AWUSER_MSB};
         if (field == "aw_rsvd") return {ni::payload::aw::AW_RSVD_LSB, ni::payload::aw::AW_RSVD_MSB};
     }
@@ -123,6 +124,7 @@ inline FieldPos payload_field_pos(std::string_view channel, std::string_view fie
         if (field == "arprot") return {ni::payload::ar::ARPROT_LSB, ni::payload::ar::ARPROT_MSB};
         if (field == "arregion")
             return {ni::payload::ar::ARREGION_LSB, ni::payload::ar::ARREGION_MSB};
+        if (field == "arqos") return {ni::payload::ar::ARQOS_LSB, ni::payload::ar::ARQOS_MSB};
         if (field == "aruser") return {ni::payload::ar::ARUSER_LSB, ni::payload::ar::ARUSER_MSB};
         if (field == "ar_rsvd") return {ni::payload::ar::AR_RSVD_LSB, ni::payload::ar::AR_RSVD_MSB};
     }
