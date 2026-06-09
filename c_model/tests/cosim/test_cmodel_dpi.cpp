@@ -1,6 +1,7 @@
-// Single ordered TEST_F walking the DPI session state machine.
+// c_model/tests/cosim/test_cmodel_dpi.cpp
+// Single ordered TEST_F walking the DPI session state machine
+// (Uninitialized → Initialized → Finalized phases).
 // Each negative assertion calls check_and_clear_error() to drain the latch.
-// Body extended by Tasks 3-10; EXCLUDE_FROM_ALL removed by Task 5.
 #include "cmodel_dpi.h"
 #include "handle_block.hpp"
 #include <atomic>

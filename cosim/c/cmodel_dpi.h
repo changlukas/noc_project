@@ -27,13 +27,14 @@ typedef enum {
     CMODEL_DPI_ERR_UNKNOWN = 99
 } cmodel_dpi_error_e;
 
-// Lifecycle (5 shell singletons, all-or-nothing init per spec §5.3)
+// Lifecycle — session state machine (init/finalize) + per-instance *_create.
 void cmodel_init(const char* scenario_yaml_path);
 void cmodel_finalize(void);
 int cmodel_check_error(const char** msg);
 // Scenario completion + scoreboard query (polled by tb_top.sv exit logic).
 int cmodel_done(void);
 int cmodel_scoreboard_clean(void);
+void cmodel_dump_scoreboard(void);
 
 // Per-shell DPI signatures appended by Tasks 5-11.
 // ChannelModel (Task 5) — NoC-only, simplest shell; first chandle migration:

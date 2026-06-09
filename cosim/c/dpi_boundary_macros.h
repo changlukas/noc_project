@@ -62,20 +62,6 @@ HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name)
         return _dpi_boundary_fail_val_;                                                      \
     }
 
-// Per-shell DPI handlers (set_inputs/tick/get_outputs) all guard against a null
-// adapter (cmodel_init not yet called). REQUIRE_ADAPTER deduplicates the check:
-// on null adapter it sets CMODEL_DPI_ERR_NOT_INITIALIZED + an error message
-// including the function name (so cmodel_check_error reports which shell
-// faulted), then returns from the handler. Handler return type must be void.
-#define REQUIRE_ADAPTER(adapter_ptr, fn_name)                                                      \
-    do {                                                                                           \
-        if (!(adapter_ptr)) {                                                                      \
-            ni::cmodel::cosim::g_dpi_error_code.store(CMODEL_DPI_ERR_NOT_INITIALIZED);             \
-            ni::cmodel::cosim::g_dpi_error_msg = std::string(fn_name) + ": " #adapter_ptr " null"; \
-            return;                                                                                \
-        }                                                                                          \
-    } while (0)
-
 // REQUIRE_HANDLE — used by ctx-taking handlers (Tasks 5-9). validate_handle
 // sets the error latch and returns nullptr on failure; this macro then returns
 // from the void handler. The caller pulls the typed adapter with:
