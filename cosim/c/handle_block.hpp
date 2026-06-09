@@ -14,7 +14,7 @@ enum class ShellType : uint32_t {
     Slave = 0x534C4156u,         // 'SLAV'
     Nmu = 0x4E4D5520u,           // 'NMU '
     Nsu = 0x4E535520u,           // 'NSU '
-    ChannelModel = 0x434D4D20u,  // 'CMM '
+    ChannelModel = 0x43484E4Du,  // 'CHNM'
 };
 
 enum class HandleState { Live };  // closed handles are removed from registry
@@ -24,7 +24,10 @@ struct HandleBlock {
     ShellType type;
     HandleState state;
     std::string name;
-    std::unique_ptr<void, void (*)(void*)> adapter;  // type-erased
+    // type-erased; the deleter MUST cast to the concrete adapter type before
+    // delete (e.g. [](void* p){ delete static_cast<NmuShellAdapter*>(p); }).
+    // Deleting via void* skips the destructor → UB.
+    std::unique_ptr<void, void (*)(void*)> adapter;
 };
 
 extern std::unordered_set<HandleBlock*> g_handle_registry;

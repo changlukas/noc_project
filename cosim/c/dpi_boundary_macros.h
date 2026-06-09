@@ -26,6 +26,9 @@ extern std::string g_dpi_error_msg;
 //   }
 
 // First-error-wins: skip overwrite if a prior error is already latched.
+// NOTE: load-check-store is not atomic CAS — single-threaded Verilator DPI
+// only. Multi-threaded DPI (Verilator -j>1 with concurrent contexts) would
+// need a CAS loop here.
 #define DPI_SET_ERR_IF_CLEAR(code_expr, msg_expr)                 \
     do {                                                          \
         int prior = ni::cmodel::cosim::g_dpi_error_code.load();   \
@@ -45,16 +48,16 @@ extern std::string g_dpi_error_msg;
     }
 
 #define DPI_BOUNDARY_BEGIN_R(fn_name, fail_value) \
-    auto _dpi_fail_value = (fail_value);          \
+    auto _dpi_boundary_fail_val_ = (fail_value);  \
     try
 #define DPI_BOUNDARY_END_R(fn_name)                                                          \
     catch (const std::exception& e) {                                                        \
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_GENERIC, std::string(#fn_name ": ") + e.what()); \
-        return _dpi_fail_value;                                                              \
+        return _dpi_boundary_fail_val_;                                                      \
     }                                                                                        \
     catch (...) {                                                                            \
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_UNKNOWN, std::string(#fn_name) + ": ...");       \
-        return _dpi_fail_value;                                                              \
+        return _dpi_boundary_fail_val_;                                                      \
     }
 
 // Per-shell DPI handlers (set_inputs/tick/get_outputs) all guard against a null
