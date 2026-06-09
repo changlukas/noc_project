@@ -1,5 +1,6 @@
 // Stage 5b DPI bridge — lifecycle handlers + global error state.
-// Per-shell {set_inputs,tick,get_outputs} handler bodies added by Tasks 7-11.
+// Per-shell {set_inputs,tick,get_outputs} handlers + per-instance *_create
+// lifecycle (chandle ABI). Handle validation via REQUIRE_HANDLE.
 
 #include "cmodel_dpi.h"
 #include "dpi_boundary_macros.h"
@@ -183,7 +184,7 @@ extern "C" int cmodel_done(void) {
 
 // cmodel_scoreboard_clean — returns 1 when the scoreboard has no mismatches.
 // g_scoreboard is wired via MasterShellAdapter on_write_completed /
-// on_read_observed callbacks in cmodel_init (T15).
+// on_read_observed callbacks in cmodel_master_create.
 extern "C" int cmodel_scoreboard_clean(void) {
     if (!g_scoreboard) return 1;
     return (g_scoreboard->mismatch_count() == 0) ? 1 : 0;
@@ -325,8 +326,6 @@ extern "C" void cmodel_channel_model_get_outputs(void* ctx, svBit* req_out_valid
     }
     DPI_BOUNDARY_END(cmodel_channel_model_get_outputs);
 }
-
-// Tasks 9-11 append their handler bodies.
 
 // AxiMaster DPI handlers — Task 8.
 //
