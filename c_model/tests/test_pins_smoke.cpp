@@ -10,17 +10,13 @@ TEST(PinsSmoke, AxiSlavePortPinsCompilesAndResets) {
 TEST(PinsSmoke, AllBundlesInstantiable) {
     ni::pins::AxiSlavePortPins axi_s{};
     ni::pins::AxiMasterPortPins axi_m{};
-    ni::pins::NocReqOutPins nq_o{};
-    ni::pins::NocReqInPins nq_i{};
-    ni::pins::NocRspOutPins nr_o{};
-    ni::pins::NocRspInPins nr_i{};
+    ni::pins::NocIntfMosiPins noc_mosi{};
+    ni::pins::NocIntfMisoPins noc_miso{};
     ni::pins::CsrPins csr{};
     (void)axi_s;
     (void)axi_m;
-    (void)nq_o;
-    (void)nq_i;
-    (void)nr_o;
-    (void)nr_i;
+    (void)noc_mosi;
+    (void)noc_miso;
     (void)csr;
     SUCCEED();
 }

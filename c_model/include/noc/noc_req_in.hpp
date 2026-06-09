@@ -4,8 +4,10 @@
 // The NSU Depacketize stage pulls request flits (AW / W / AR) from a
 // NocReqIn and reassembles them into AXI beats. Concrete implementations
 // are the real NoC adapter (DPI bridge from the SystemVerilog router) and
-// the ChannelModel test fixture. Naming mirrors the ni_signals.json pin
-// struct `NocReqInPins`.
+// the ChannelModel test fixture. The matching RTL pin set is the
+// request-in half of the merged `NocIntfMisoPins` bundle (ni_signals.json
+// NOC_INTF_MISO — noc_req_valid_i / noc_req_flit_i / noc_req_credit_o);
+// the rsp-out half of that same pin bundle is driven by NocRspOut.
 //
 // Contract: pop_flit returns nullopt when no flit is currently available.
 // Callers must NOT busy-wait — they call once per tick and process whatever

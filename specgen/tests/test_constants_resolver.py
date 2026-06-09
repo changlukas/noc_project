@@ -172,7 +172,7 @@ def test_link_width_includes_valid_and_credit(packet_spec):
 
     The forward bundle is valid + flit; the reverse bundle is NUM_VC credit
     bits. NUM_VC defaults to 1 (single-VC) when not present in field_widths.
-    Per ni_signals.json NOC_REQ_OUT / NOC_RSP_OUT signal definitions.
+    Per ni_signals.json NOC_INTF_MOSI / NOC_INTF_MISO signal definitions.
     """
     fw = packet_spec["flit"].get("field_widths", {})
     num_vc = int(fw.get("NUM_VC", 1))

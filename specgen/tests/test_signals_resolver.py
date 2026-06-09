@@ -33,10 +33,12 @@ def packet_spec():
 
 def test_signal_interfaces_lists_all_in_order(signals_spec):
     ifaces = C.signal_interfaces(signals_spec)
-    # All 7 NI top-level interfaces present, in JSON declaration order.
+    # All 5 NI top-level interfaces present, in JSON declaration order.
+    # Post C2: NoC req/rsp pairs merged into NOC_INTF_MOSI (NMU) and
+    # NOC_INTF_MISO (NSU), collapsing 4 NoC interfaces -> 2.
     assert ifaces == [
-        "AXI_SLAVE_PORT", "NOC_REQ_OUT", "NOC_RSP_IN", "CSR",
-        "NOC_REQ_IN", "AXI_MASTER_PORT", "NOC_RSP_OUT",
+        "AXI_SLAVE_PORT", "NOC_INTF_MOSI", "CSR",
+        "NOC_INTF_MISO", "AXI_MASTER_PORT",
     ]
 
 
@@ -53,10 +55,13 @@ def test_signal_interface_pins_handles_channeled_iface(signals_spec):
 
 
 def test_signal_interface_pins_handles_direct_iface(signals_spec):
-    """NOC_REQ_OUT has direct signals[] (no channels)."""
-    pins = C.signal_interface_pins(signals_spec, "NOC_REQ_OUT")
+    """NOC_INTF_MOSI has direct signals[] (no channels); merged req-out + rsp-in."""
+    pins = C.signal_interface_pins(signals_spec, "NOC_INTF_MOSI")
     pin_names = {p["pin_name"] for p in pins}
-    assert pin_names == {"noc_req_valid_o", "noc_req_flit_o", "noc_req_credit_i"}
+    assert pin_names == {
+        "noc_req_valid_o", "noc_req_flit_o", "noc_req_credit_i",
+        "noc_rsp_valid_i", "noc_rsp_flit_i", "noc_rsp_credit_o",
+    }
 
 
 def test_signal_interface_pins_unknown_iface_raises(signals_spec):
@@ -82,7 +87,7 @@ def test_pin_width_cross_domain_flit_width(signals_spec, packet_spec):
     """
     expected = C.flit_width_resolved(packet_spec)
     actual = C.signal_pin_width(signals_spec, packet_spec,
-                                "NOC_REQ_OUT", "noc_req_flit_o")
+                                "NOC_INTF_MOSI", "noc_req_flit_o")
     assert actual == expected
     # Sanity: this is the real composed width, not just the legacy default.
     # Post fixed-56b refactor: HEADER_WIDTH=56, PAYLOAD_WIDTH=352, FLIT_WIDTH=408.
@@ -96,7 +101,7 @@ def test_pin_width_from_interface_port_parameter(signals_spec, packet_spec):
     priority #3 (interface scope).
     """
     actual = C.signal_pin_width(signals_spec, packet_spec,
-                                "NOC_REQ_OUT", "noc_req_credit_i")
+                                "NOC_INTF_MOSI", "noc_req_credit_i")
     assert actual == 1  # NUM_VC default = 1
 
 
@@ -104,7 +109,7 @@ def test_pin_width_no_width_param_falls_back_to_width_expr(signals_spec, packet_
     """noc_req_valid_o has width_param=null and width_expr='1' (literal);
     resolver returns the literal int from width_expr."""
     actual = C.signal_pin_width(signals_spec, packet_spec,
-                                "NOC_REQ_OUT", "noc_req_valid_o")
+                                "NOC_INTF_MOSI", "noc_req_valid_o")
     assert actual == 1
 
 
@@ -117,7 +122,7 @@ def test_pin_width_unknown_pin_raises(signals_spec, packet_spec):
 def test_signal_eval_expr_bogus_symbol_raises(signals_spec, packet_spec):
     with pytest.raises(ExprNameError):
         C.signal_eval_expr(signals_spec, packet_spec,
-                           "NOC_REQ_OUT", "BOGUS_UNKNOWN_SYMBOL")
+                           "NOC_INTF_MOSI", "BOGUS_UNKNOWN_SYMBOL")
 
 
 def test_signal_eval_expr_arithmetic(signals_spec, packet_spec):

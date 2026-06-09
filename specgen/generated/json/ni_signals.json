@@ -447,9 +447,9 @@
       ]
     },
     {
-      "name": "NOC_REQ_OUT",
+      "name": "NOC_INTF_MOSI",
       "block": "NMU",
-      "direction": "out",
+      "direction": "out request, in response",
       "protocol": "NoC",
       "clock": "noc_clk_i",
       "reset": "noc_rst_ni",
@@ -487,31 +487,7 @@
           },
           "presence": null,
           "width_expr": null
-        }
-      ],
-      "port_parameters": [
-        {
-          "name": "NUM_VC",
-          "type": "int",
-          "default": "1",
-          "constraint_text": "1 ≤ x ≤ 8; when x > 1, both `R_ROB_TYPE` and `B_ROB_TYPE` MUST be != `NoRoB` (see `theory_of_operation.md` §RoB allocator §\"NoRoB single-VC restriction\")"
         },
-        {
-          "name": "FLIT_WIDTH",
-          "type": "derived",
-          "default": "402",
-          "constraint_text": "derived = HEADER_WIDTH + PAYLOAD_WIDTH"
-        }
-      ]
-    },
-    {
-      "name": "NOC_RSP_IN",
-      "block": "NMU",
-      "direction": "in",
-      "protocol": "NoC",
-      "clock": "noc_clk_i",
-      "reset": "noc_rst_ni",
-      "signals": [
         {
           "width_param": null,
           "direction": "input",
@@ -984,9 +960,9 @@
       ]
     },
     {
-      "name": "NOC_REQ_IN",
+      "name": "NOC_INTF_MISO",
       "block": "NSU",
-      "direction": "in",
+      "direction": "in request, out response",
       "protocol": "NoC",
       "clock": "noc_clk_i",
       "reset": "noc_rst_ni",
@@ -1019,6 +995,40 @@
             "kind": "async-active-low",
             "value": "0",
             "domain": "noc_rst_ni"
+          },
+          "presence": null,
+          "width_expr": null
+        },
+        {
+          "width_param": null,
+          "direction": "output",
+          "width_expr": "1",
+          "pin_name": "noc_rsp_valid_o",
+          "reset_behavior": {
+            "kind": "async-active-low",
+            "value": "0",
+            "domain": "noc_rst_ni"
+          },
+          "presence": null
+        },
+        {
+          "width_param": "FLIT_WIDTH",
+          "direction": "output",
+          "pin_name": "noc_rsp_flit_o",
+          "reset_behavior": {
+            "kind": "async-active-low",
+            "value": "0",
+            "domain": "noc_rst_ni"
+          },
+          "presence": null,
+          "width_expr": null
+        },
+        {
+          "width_param": "NUM_VC",
+          "direction": "input",
+          "pin_name": "noc_rsp_credit_i",
+          "reset_behavior": {
+            "kind": "external_driven"
           },
           "presence": null,
           "width_expr": null
@@ -1495,64 +1505,6 @@
           "type": "int",
           "default": "8",
           "constraint_text": "1 ≤ x ≤ 32"
-        }
-      ]
-    },
-    {
-      "name": "NOC_RSP_OUT",
-      "block": "NSU",
-      "direction": "out",
-      "protocol": "NoC",
-      "clock": "noc_clk_i",
-      "reset": "noc_rst_ni",
-      "signals": [
-        {
-          "width_param": null,
-          "direction": "output",
-          "width_expr": "1",
-          "pin_name": "noc_rsp_valid_o",
-          "reset_behavior": {
-            "kind": "async-active-low",
-            "value": "0",
-            "domain": "noc_rst_ni"
-          },
-          "presence": null
-        },
-        {
-          "width_param": "FLIT_WIDTH",
-          "direction": "output",
-          "pin_name": "noc_rsp_flit_o",
-          "reset_behavior": {
-            "kind": "async-active-low",
-            "value": "0",
-            "domain": "noc_rst_ni"
-          },
-          "presence": null,
-          "width_expr": null
-        },
-        {
-          "width_param": "NUM_VC",
-          "direction": "input",
-          "pin_name": "noc_rsp_credit_i",
-          "reset_behavior": {
-            "kind": "external_driven"
-          },
-          "presence": null,
-          "width_expr": null
-        }
-      ],
-      "port_parameters": [
-        {
-          "name": "NUM_VC",
-          "type": "int",
-          "default": "1",
-          "constraint_text": "1 ≤ x ≤ 8; when x > 1, both `R_ROB_TYPE` and `B_ROB_TYPE` MUST be != `NoRoB` (see `theory_of_operation.md` §RoB allocator §\"NoRoB single-VC restriction\")"
-        },
-        {
-          "name": "FLIT_WIDTH",
-          "type": "derived",
-          "default": "402",
-          "constraint_text": "derived = HEADER_WIDTH + PAYLOAD_WIDTH"
         }
       ]
     }

@@ -380,8 +380,8 @@ def link_width_resolved(spec: dict) -> int:
     one logical link is therefore FLIT_WIDTH + 1 + NUM_VC.
 
     NUM_VC defaults to 1 (single-VC); override via flit.field_widths.NUM_VC.
-    Per specgen/generated/json/ni_packet.json and ni_signals.json NOC_REQ_OUT /
-    NOC_RSP_OUT (noc_*_valid + noc_*_flit + noc_*_credit signals)."""
+    Per specgen/generated/json/ni_packet.json and ni_signals.json NOC_INTF_MOSI /
+    NOC_INTF_MISO (noc_*_valid + noc_*_flit + noc_*_credit signals)."""
     fw = spec["flit"].get("field_widths", {})
     num_vc = int(fw.get("NUM_VC", 1))
     return flit_width_resolved(spec) + 1 + num_vc
