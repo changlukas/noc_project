@@ -664,12 +664,32 @@ The original plan estimated 3 implementation commits (C1+C2+C3); landed 5 implem
 - Final survey greps (LoopbackNoc / NocReqOutPins / noc_req_intf scopes) → empty in active code, with 2 negation regression-guard asserts in `specgen/tests/test_codegen_sv.py:270-271` (intentional)
 
 **Gates verified PASS modulo pre-existing baseline noise** (`make check`):
-- MinGW GCC 15.2 ICE on some c_model target — verified pre-existing on b8901c3 via `git stash` + rerun
+- MinGW GCC 15.2 ICE on some c_model target — verified pre-existing on b8901c3 via `git stash` + rerun. (Re-attempted at final-gate stage with `PATH=/c/msys64/mingw64/bin:/c/Windows/System32:$PATH` and a clean build; the ICE did not reproduce — likely parallel-build-order sensitive.)
 - ~60 ctest failures rooted in `flit.hpp:153 payload_field_pos: (channel, field) pair not found` — verified pre-existing
 - Other c_model `.exe` targets compile + link cleanly
 
-**Gates NOT verified locally — open follow-up**:
-- **Verilator SV elaboration of `noc_intf` bundle**: blocked by pre-existing perl-launcher path issue in MSYS env (`make build-verilator` fails before reaching elaboration). Wrap port directions + signal-ref bindings + modport contracts were manually traced by the implementer and re-checked by the code-quality reviewer; the trace is consistent with the JSON. Full Verilator elaboration MUST be re-run once the env issue is resolved before treating this part of the cleanup as production-ready.
+**Verilator + end-to-end sim — verified at final-gate stage:**
+
+Two env workarounds were needed to unblock the Verilator path:
+
+1. Verilator's `#!/usr/bin/env perl` shebang resolves to MSYS perl (`/usr/bin/perl`) which is missing `Pod::Usage`. Mingw64 perl (`/c/msys64/mingw64/bin/perl`) has it. Workaround: `PATH=/c/msys64/mingw64/bin:$PATH`.
+2. CMake's `GoogleTestAddTests.cmake` invokes `cmd.exe`, which is not in the MSYS shell PATH by default. Workaround: add `/c/Windows/System32` to PATH alongside the above.
+
+Combined invocation that completes the full build + sim from a clean tree:
+
+```bash
+PATH=/c/msys64/mingw64/bin:/c/Windows/System32:$PATH make build-cmodel
+PATH=/c/msys64/mingw64/bin:/c/Windows/System32:$PATH make build-verilator
+PATH=/c/msys64/mingw64/bin:/c/Windows/System32:$PATH make sim
+```
+
+Results at HEAD (post-cleanup `ed12584`):
+
+- **`make build-cmodel`**: clean (38/38 targets linked). No GCC ICE reproduction this run.
+- **`make build-verilator`**: Verilator elaboration of merged `noc_intf` (with `mosi`/`miso` modports + per-channel signals) + wrap port lists (`noc_mosi_o` / `noc_miso_i`) + tb_top instance connections — all **build clean**. Only warnings: 3 benign Verilator-output-formatting `unknown escape sequence: '\c'` on the `cosim/sv\channel_model_wrap.sv` debug-string path; identical at baseline.
+- **`make sim SCENARIO=AX4-BAS-003_single_write_read_aligned`**: binary runs, then **fails on the pre-existing `flit.hpp:153 payload_field_pos` assertion** described above. Verified pre-existing by `git checkout b8901c3 && make clean-verilator && make build-verilator && make sim`: identical assertion fires at the same scenario from the unmodified baseline. The cleanup did not touch `c_model/include/ni/flit.hpp` nor `specgen/source/` payload-layout sources (`git log b8901c3..HEAD -- specgen/source/ c_model/include/ni/flit.hpp` shows only the C3 `interface_handshake.json` edit, which is signal-side metadata only).
+
+**Conclusion**: the NoC cleanup is verified end-to-end up to the point where the pre-existing payload-layout bug blocks all scenarios. Treating this as the same baseline gap recorded above, the cleanup is acceptable for push. Fixing the `payload_field_pos` issue is a separate follow-up tracked outside this plan.
 
 **Code-quality reviewer follow-ups (open):**
 - `specgen/ni_spec/handshake_schema.py`: schema does not currently validate `len(modports) == 2` or `driven_by ∈ modports`. Deferred per the "Deferred" section above. Reopen if a second `noc_link` interface is ever added.
