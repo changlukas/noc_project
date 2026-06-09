@@ -49,7 +49,19 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_init(good_yaml);
     check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
 
-    // Body extended by Tasks 4-10.
+    // === ChannelModel cases (T5) ===
+
+    // Case: channel_model_create after init succeeds.
+    void* cm_handle = cmodel_channel_model_create("cm_test");
+    ASSERT_NE(cm_handle, nullptr);
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: garbage void* (non-registry) → registry-membership guard, no SIGSEGV.
+    void* garbage = reinterpret_cast<void*>(0xDEADBEEFCAFEull);
+    cmodel_channel_model_tick(garbage);
+    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
+
+    // Body extended by Tasks 6-10.
 }
 
 }  // namespace

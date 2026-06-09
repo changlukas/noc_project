@@ -35,13 +35,14 @@ int cmodel_check_error(const char** msg);
 int cmodel_done(void);
 int cmodel_scoreboard_clean(void);
 
-// Per-shell DPI signatures appended by Tasks 7-11.
-// ChannelModel (Task 7) — NoC-only, simplest shell:
-void cmodel_channel_model_set_inputs(svBit req_in_valid, svBitVecVal* req_in_flit,
+// Per-shell DPI signatures appended by Tasks 5-11.
+// ChannelModel (Task 5) — NoC-only, simplest shell; first chandle migration:
+void* cmodel_channel_model_create(const char* name);
+void cmodel_channel_model_set_inputs(void* ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
                                      svBit req_in_credit_return, svBit rsp_in_valid,
                                      svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return);
-void cmodel_channel_model_tick(void);
-void cmodel_channel_model_get_outputs(svBit* req_out_valid, svBitVecVal* req_out_flit,
+void cmodel_channel_model_tick(void* ctx);
+void cmodel_channel_model_get_outputs(void* ctx, svBit* req_out_valid, svBitVecVal* req_out_flit,
                                       svBit* req_out_credit_return, svBit* rsp_out_valid,
                                       svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return);
 

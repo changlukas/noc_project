@@ -44,13 +44,15 @@ module tb_top (
     // -------------------------------------------------------------------------
     // DPI lifecycle
     // -------------------------------------------------------------------------
-    import "DPI-C" context function void cmodel_init(input string path);
-    import "DPI-C" context function void cmodel_finalize();
-    import "DPI-C" context function int  cmodel_done();
-    import "DPI-C" context function int  cmodel_scoreboard_clean();
-    import "DPI-C" context function void cmodel_dump_scoreboard();
+    import "DPI-C" context function void    cmodel_init(input string path);
+    import "DPI-C" context function void    cmodel_finalize();
+    import "DPI-C" context function int     cmodel_done();
+    import "DPI-C" context function int     cmodel_scoreboard_clean();
+    import "DPI-C" context function void    cmodel_dump_scoreboard();
+    import "DPI-C" context function chandle cmodel_channel_model_create(input string name);
 
-    string scenario_path;
+    string  scenario_path;
+    chandle cm_ctx;
 
     initial begin
         if (!$value$plusargs("scenario=%s", scenario_path)) begin
@@ -58,6 +60,7 @@ module tb_top (
             $finish(1);
         end
         cmodel_init(scenario_path);
+        cm_ctx = cmodel_channel_model_create("channel_model_0");
     end
 
     // -------------------------------------------------------------------------
@@ -130,6 +133,7 @@ module tb_top (
     ) u_channel_model (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
+        .ctx_i(cm_ctx),
         .noc_miso_i(nmu_channel_model.miso),
         .noc_mosi_o(channel_model_nsu.mosi)
     );

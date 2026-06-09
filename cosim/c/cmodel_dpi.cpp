@@ -215,7 +215,6 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
 }
 
 extern "C" void cmodel_finalize(void) {
-    using namespace ni::cmodel::cosim;
     DPI_BOUNDARY_BEGIN(cmodel_finalize) {
         if (g_session_state != SessionState::Initialized) {
             return;  // no-op from UNINITIALIZED or FINALIZED (idempotent)
@@ -328,12 +327,35 @@ void pack_flit(const FlitBytes& b, svBitVecVal* vec) {
 
 }  // namespace
 
-extern "C" void cmodel_channel_model_set_inputs(svBit req_in_valid, svBitVecVal* req_in_flit,
+extern "C" void* cmodel_channel_model_create(const char* name) {
+    if (g_session_state != SessionState::Initialized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
+                             "cmodel_channel_model_create: not initialized");
+        return nullptr;
+    }
+    DPI_BOUNDARY_BEGIN_R(cmodel_channel_model_create, nullptr) {
+        auto adapter = std::make_unique<ChannelModelShellAdapter>();
+        adapter->init();
+        auto* h =
+            new HandleBlock{static_cast<uint32_t>(ShellType::ChannelModel), ShellType::ChannelModel,
+                            HandleState::Live, std::string(name),
+                            std::unique_ptr<void, void (*)(void*)>(adapter.release(), [](void* p) {
+                                delete static_cast<ChannelModelShellAdapter*>(p);
+                            })};
+        g_handle_registry.insert(h);
+        return static_cast<void*>(h);
+    }
+    DPI_BOUNDARY_END_R(cmodel_channel_model_create);
+}
+
+extern "C" void cmodel_channel_model_set_inputs(void* ctx, svBit req_in_valid,
+                                                svBitVecVal* req_in_flit,
                                                 svBit req_in_credit_return, svBit rsp_in_valid,
                                                 svBitVecVal* rsp_in_flit,
                                                 svBit rsp_in_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_channel_model_set_inputs) {
-        REQUIRE_ADAPTER(g_channel_adapter, "cmodel_channel_model_set_inputs");
+        REQUIRE_HANDLE(ctx, ShellType::ChannelModel, "cmodel_channel_model_set_inputs");
+        auto* cm = static_cast<ChannelModelShellAdapter*>(_h->adapter.get());
         ChannelModelInputs in{};
         in.req_in_valid = static_cast<bool>(req_in_valid);
         in.req_in_flit = unpack_flit(req_in_flit);
@@ -341,27 +363,30 @@ extern "C" void cmodel_channel_model_set_inputs(svBit req_in_valid, svBitVecVal*
         in.rsp_in_valid = static_cast<bool>(rsp_in_valid);
         in.rsp_in_flit = unpack_flit(rsp_in_flit);
         in.rsp_in_credit_return = static_cast<bool>(rsp_in_credit_return);
-        g_channel_adapter->set_inputs(in);
+        cm->set_inputs(in);
     }
     DPI_BOUNDARY_END(cmodel_channel_model_set_inputs);
 }
 
-extern "C" void cmodel_channel_model_tick(void) {
+extern "C" void cmodel_channel_model_tick(void* ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_channel_model_tick) {
-        REQUIRE_ADAPTER(g_channel_adapter, "cmodel_channel_model_tick");
-        g_channel_adapter->tick();
+        REQUIRE_HANDLE(ctx, ShellType::ChannelModel, "cmodel_channel_model_tick");
+        auto* cm = static_cast<ChannelModelShellAdapter*>(_h->adapter.get());
+        cm->tick();
     }
     DPI_BOUNDARY_END(cmodel_channel_model_tick);
 }
 
-extern "C" void cmodel_channel_model_get_outputs(svBit* req_out_valid, svBitVecVal* req_out_flit,
+extern "C" void cmodel_channel_model_get_outputs(void* ctx, svBit* req_out_valid,
+                                                 svBitVecVal* req_out_flit,
                                                  svBit* req_out_credit_return, svBit* rsp_out_valid,
                                                  svBitVecVal* rsp_out_flit,
                                                  svBit* rsp_out_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_channel_model_get_outputs) {
-        REQUIRE_ADAPTER(g_channel_adapter, "cmodel_channel_model_get_outputs");
+        REQUIRE_HANDLE(ctx, ShellType::ChannelModel, "cmodel_channel_model_get_outputs");
+        auto* cm = static_cast<ChannelModelShellAdapter*>(_h->adapter.get());
         ChannelModelOutputs out{};
-        g_channel_adapter->get_outputs(out);
+        cm->get_outputs(out);
         *req_out_valid = static_cast<svBit>(out.req_out_valid);
         pack_flit(out.req_out_flit, req_out_flit);
         *req_out_credit_return = static_cast<svBit>(out.req_out_credit_return);
