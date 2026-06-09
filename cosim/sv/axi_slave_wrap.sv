@@ -28,6 +28,7 @@ module axi_slave_wrap #(
 ) (
     input  logic    clk_i,
     input  logic    rst_ni,
+    input  chandle  ctx_i,
     axi4_intf.slave axi_i
 );
 
@@ -36,6 +37,7 @@ module axi_slave_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_slave_set_inputs(
+        input  chandle                ctx,
         input  bit                    awvalid,
         input  bit [ID_WIDTH-1:0]     awid,
         input  bit [ADDR_WIDTH-1:0]   awaddr,
@@ -64,9 +66,10 @@ module axi_slave_wrap #(
         input  bit                    rready
     );
 
-    import "DPI-C" context function void cmodel_slave_tick();
+    import "DPI-C" context function void cmodel_slave_tick(input chandle ctx);
 
     import "DPI-C" context function void cmodel_slave_get_outputs(
+        input  chandle                ctx,
         output bit                    awready,
         output bit                    wready,
         output bit                    arready,
@@ -120,6 +123,7 @@ module axi_slave_wrap #(
         end else begin
             // Step 1: push current master-side wire values into C++ input latch.
             cmodel_slave_set_inputs(
+                ctx_i,
                 axi_i.awvalid,
                 axi_i.awid,
                 axi_i.awaddr,
@@ -149,7 +153,7 @@ module axi_slave_wrap #(
             );
 
             // Step 2: advance C++ model one cycle.
-            cmodel_slave_tick();
+            cmodel_slave_tick(ctx_i);
 
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
@@ -166,6 +170,7 @@ module axi_slave_wrap #(
                 bit [1:0]              t_rresp;
                 bit                    t_rlast;
                 cmodel_slave_get_outputs(
+                    ctx_i,
                     t_awready,
                     t_wready,
                     t_arready,

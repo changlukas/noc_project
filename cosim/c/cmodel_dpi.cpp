@@ -596,15 +596,37 @@ using ni::cmodel::cosim::SlaveOutputs;
 // unpack_data256 and pack_addr64 are defined in the master block above (same
 // anonymous namespace); they are reused here for the slave handlers.
 
+extern "C" void* cmodel_slave_create(const char* name) {
+    if (g_session_state != SessionState::Initialized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
+                             "cmodel_slave_create: not initialized");
+        return nullptr;
+    }
+    DPI_BOUNDARY_BEGIN_R(cmodel_slave_create, nullptr) {
+        auto adapter = std::make_unique<SlaveShellAdapter>();
+        adapter->init(g_scenario.config.memory_base, g_scenario.config.memory_size,
+                      g_scenario.config.write_latency, g_scenario.config.read_latency);
+        auto* h = new HandleBlock{
+            static_cast<uint32_t>(ShellType::Slave), ShellType::Slave, HandleState::Live,
+            std::string(name),
+            std::unique_ptr<void, void (*)(void*)>(
+                adapter.release(), [](void* p) { delete static_cast<SlaveShellAdapter*>(p); })};
+        g_handle_registry.insert(h);
+        return static_cast<void*>(h);
+    }
+    DPI_BOUNDARY_END_R(cmodel_slave_create);
+}
+
 extern "C" void cmodel_slave_set_inputs(
-    svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-    svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast,
-    svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
-    svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot,
-    svBitVecVal* arqos, svBit bready, svBit rready) {
+    void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
+    svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
+    svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
+    svBit wlast, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
+    svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
+    svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_set_inputs) {
-        REQUIRE_ADAPTER(g_slave_adapter, "cmodel_slave_set_inputs");
+        REQUIRE_HANDLE(ctx, ShellType::Slave, "cmodel_slave_set_inputs");
+        auto* slave = static_cast<SlaveShellAdapter*>(_h->adapter.get());
         SlaveInputs in{};
         in.awvalid = static_cast<bool>(awvalid);
         in.awid = static_cast<uint8_t>(awid[0] & 0xFF);
@@ -632,27 +654,29 @@ extern "C" void cmodel_slave_set_inputs(
         in.arqos = static_cast<uint8_t>(arqos[0] & 0x0F);
         in.bready = static_cast<bool>(bready);
         in.rready = static_cast<bool>(rready);
-        g_slave_adapter->set_inputs(in);
+        slave->set_inputs(in);
     }
     DPI_BOUNDARY_END(cmodel_slave_set_inputs);
 }
 
-extern "C" void cmodel_slave_tick(void) {
+extern "C" void cmodel_slave_tick(void* ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_tick) {
-        REQUIRE_ADAPTER(g_slave_adapter, "cmodel_slave_tick");
-        g_slave_adapter->tick();
+        REQUIRE_HANDLE(ctx, ShellType::Slave, "cmodel_slave_tick");
+        auto* slave = static_cast<SlaveShellAdapter*>(_h->adapter.get());
+        slave->tick();
     }
     DPI_BOUNDARY_END(cmodel_slave_tick);
 }
 
-extern "C" void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* arready,
+extern "C" void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arready,
                                          svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp,
                                          svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
                                          svBitVecVal* rresp, svBit* rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_get_outputs) {
-        REQUIRE_ADAPTER(g_slave_adapter, "cmodel_slave_get_outputs");
+        REQUIRE_HANDLE(ctx, ShellType::Slave, "cmodel_slave_get_outputs");
+        auto* slave = static_cast<SlaveShellAdapter*>(_h->adapter.get());
         SlaveOutputs out{};
-        g_slave_adapter->get_outputs(out);
+        slave->get_outputs(out);
 
         *awready = static_cast<svBit>(out.awready);
         *wready = static_cast<svBit>(out.wready);

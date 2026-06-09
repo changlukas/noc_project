@@ -72,7 +72,14 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_master_tick(cm_handle);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
-    // Body extended by Tasks 7-10.
+    // === Slave case (T7) ===
+
+    // Case: slave_create after init succeeds.
+    void* slave_handle = cmodel_slave_create("slave_test");
+    ASSERT_NE(slave_handle, nullptr);
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Body extended by Tasks 8-10.
 }
 
 }  // namespace

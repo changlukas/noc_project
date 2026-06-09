@@ -68,15 +68,16 @@ void cmodel_master_get_outputs(void* ctx, svBit* awvalid, svBitVecVal* awid, svB
                                svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
                                svBit* rready);
 
-// AxiSlave (Task 9) — accepts AW/W/AR from master wire; drives awready/wready/
-// arready handshake + B/R response channels back to master.
+// AxiSlave (Task 7) — chandle ABI; accepts AW/W/AR from master wire; drives
+// awready/wready/arready handshake + B/R response channels back to master.
 // Packing: same conventions as cmodel_master_* (little-endian word order).
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
 //   wstrb         : 1 word (32-bit strobe)
 //   other attribs : 1 word each (low bits used per width)
-void cmodel_slave_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+void* cmodel_slave_create(const char* name);
+void cmodel_slave_set_inputs(void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                              svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
                              svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
                              svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
@@ -84,10 +85,11 @@ void cmodel_slave_set_inputs(svBit awvalid, svBitVecVal* awid, svBitVecVal* awad
                              svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
                              svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
                              svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready);
-void cmodel_slave_tick(void);
-void cmodel_slave_get_outputs(svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
-                              svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
-                              svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast);
+void cmodel_slave_tick(void* ctx);
+void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arready,
+                              svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid,
+                              svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
+                              svBit* rlast);
 
 // Nmu (Task 10) — AXI slave side + NoC req/rsp sides.
 // Packing conventions (same as cmodel_slave_*):
