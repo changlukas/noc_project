@@ -83,9 +83,28 @@ def run_emit(target: str, domain: str, out_dir: Path) -> Path:
     return out_path
 
 
-def _strip_timestamp(lines: list[str]) -> list[str]:
-    """Remove the '// Generated at:' line so timestamps don't cause false drift."""
-    return [l for l in lines if not l.startswith("// Generated at:")]
+def _strip_provenance(lines: list[str]) -> list[str]:
+    """Strip provenance metadata that varies independently of elaborated content.
+
+    Removes:
+      - ``// Generated at: <UTC>``  (re-runs change the timestamp)
+      - ``// Source SHA: <hash>``   (JSON content evolves as the spec schema
+                                     is normalised; the elaborated body stays
+                                     the same)
+
+    Aligns this gate with ``specgen/tests/test_byte_identical_golden.py``
+    which strips both lines. Without alignment, a JSON-schema renormalisation
+    that leaves the elaborated body untouched would turn this gate red while
+    the byte-identical golden test stayed green.
+    """
+    return [
+        l for l in lines
+        if not l.startswith("// Generated at:") and not l.startswith("// Source SHA:")
+    ]
+
+
+# Backwards-compatible alias for any external caller still using the old name.
+_strip_timestamp = _strip_provenance
 
 
 def cmd_emit(args: argparse.Namespace) -> int:
@@ -109,7 +128,10 @@ def cmd_emit(args: argparse.Namespace) -> int:
 def cmd_check(_args: argparse.Namespace) -> int:
     """Regen all targets to a temp dir and diff vs committed directories.
 
-    The timestamp line in the banner is excluded from comparison.
+    Provenance metadata in the banner is excluded from comparison:
+    both ``// Generated at:`` and ``// Source SHA:`` lines are stripped
+    before diffing (see ``_strip_provenance``). This matches the policy
+    of ``specgen/tests/test_byte_identical_golden.py``.
     Exits 0 if all files match, 1 if any drift is detected.
     """
     all_ok = True
@@ -137,8 +159,8 @@ def cmd_check(_args: argparse.Namespace) -> int:
                 all_ok = False
                 continue
 
-            fresh_lines   = _strip_timestamp(fresh_path.read_text(encoding="ascii").splitlines())
-            committed_lines = _strip_timestamp(committed_path.read_text(encoding="ascii").splitlines())
+            fresh_lines   = _strip_provenance(fresh_path.read_text(encoding="ascii").splitlines())
+            committed_lines = _strip_provenance(committed_path.read_text(encoding="ascii").splitlines())
 
             if fresh_lines != committed_lines:
                 all_ok = False
