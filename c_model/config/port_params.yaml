@@ -32,9 +32,9 @@ depacketize:
   b_q_depth:  32
   r_q_depth:  32
 
-# LoopbackNoc test fixture: per-direction in-flight flit deque capacity
+# ChannelModel test fixture: per-direction in-flight flit deque capacity
 # (unit = flits). Sized for the longest e2e burst; not a production parameter.
-loopback_noc:
+channel_model:
   req_depth: 32
   rsp_depth: 32
 

@@ -1,13 +1,13 @@
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nsu::Depacketize;
 using ni::cmodel::nsu::MetaBuffer;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 namespace axi = ni::cmodel::axi;
 
 namespace {
@@ -53,7 +53,7 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
     SCENARIO(
         "NSU Depacketize: AW flit snapshots src_id/rob_req/rob_idx into MetaBuffer + emits AW "
         "beat");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000,
@@ -75,7 +75,7 @@ TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
     SCENARIO(
         "NSU Depacketize: awqos=0xA in AW flit payload is recovered into AwBeat.qos "
         "(verifies awqos is not forced to 0)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
     auto flit = make_aw_flit(0x05, 0x1000, /*src*/ 0x12, /*rob_req*/ 0, /*rob_idx*/ 0);
@@ -91,7 +91,7 @@ TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
     SCENARIO(
         "NSU Depacketize: arqos=0xA in AR flit payload is recovered into ArBeat.qos "
         "(verifies arqos is not forced to 0)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
     auto flit = make_ar_flit(0x07, 0x2000, /*src*/ 0x12);
@@ -105,7 +105,7 @@ TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
 
 TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
     SCENARIO("NSU Depacketize: AR flit snapshots read-side meta into MetaBuffer + emits AR beat");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
     ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x07, 0x2000, 0x12)));
@@ -119,7 +119,7 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
     SCENARIO(
         "NSU Depacketize: W flit emits W beat but does NOT touch MetaBuffer (write-meta belongs to "
         "AW)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFFFF, true)));
@@ -132,7 +132,7 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
 TEST(NsuDepacketize, DemuxMixedAwWAr) {
     SCENARIO(
         "NSU Depacketize: interleaved AW/W/AR flits demux to per-channel queues by axi_ch header");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x01, 0x0)));
@@ -147,7 +147,7 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
 TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
     SCENARIO(
         "NSU Depacketize: HoL W queue full holds pending W; AW behind blocked until W drained");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w cap*/ 1, /*ar*/ 16);
     // Order: W, W, AW
@@ -165,7 +165,7 @@ TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
 
 TEST(NsuDepacketize, PopBAssertFalse) {
     SCENARIO("NSU Depacketize: pop_b asserts false (B is response-direction only, not request)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
     EXPECT_DEATH(depkt.pop_b(), ".*");
@@ -173,7 +173,7 @@ TEST(NsuDepacketize, PopBAssertFalse) {
 
 TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
     SCENARIO("NSU Depacketize: AW queue preserves NoC arrival order across 3 sequential AW flits");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(1, 0x0)));

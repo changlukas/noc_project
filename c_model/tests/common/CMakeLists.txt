@@ -1,6 +1,6 @@
 add_cmodel_test(test_loopback_latency)
-# Pick up the shared loopback fixtures from tests/common/ via
-# "common/loopback_*.hpp".
+# Pick up the shared channel-model fixtures from tests/common/ via
+# "common/channel_model.hpp".
 target_include_directories(test_loopback_latency PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
@@ -14,6 +14,6 @@ target_include_directories(test_test_logger PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(test_test_logger PRIVATE yaml-cpp::yaml-cpp)
 
-add_cmodel_test(test_loopback_noc_per_vc_credit)
-target_include_directories(test_loopback_noc_per_vc_credit PRIVATE
+add_cmodel_test(test_channel_model_per_vc_credit)
+target_include_directories(test_channel_model_per_vc_credit PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)

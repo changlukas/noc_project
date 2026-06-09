@@ -1,5 +1,5 @@
 // Stage 3 integration: full request/response e2e loopback through the
-// four packetize/depacketize modules + LoopbackNoc, sourced and oracled
+// four packetize/depacketize modules + ChannelModel, sourced and oracled
 // by the Stage 2 AxiMaster / AxiSlave / Memory / Scoreboard fixtures.
 //
 // Wiring (request path: NMU -> NoC -> NSU):
@@ -13,7 +13,7 @@
 //   nmu::Packetize                        nmu::Depacketize
 //      |                                  ^
 //      v push_flit                        | pop_flit
-//   LoopbackNoc (req_out -> req_in,  rsp_out -> rsp_in,  optional N-cycle delay)
+//   ChannelModel (req_out -> req_in,  rsp_out -> rsp_in,  optional N-cycle delay)
 //      |                                  ^
 //      v pop_flit                         | push_flit
 //   nsu::Depacketize                      nsu::Packetize
@@ -34,7 +34,7 @@
 // Per-fixture pass criterion: Scoreboard zero mismatch after master.done()
 // AND every NoC / port queue / NSU AxiSlave holdover is drained.
 //
-// At least one variant uses LoopbackNoc.set_req_delay / set_rsp_delay so
+// At least one variant uses ChannelModel.set_req_delay / set_rsp_delay so
 // non-zero in-flight pipelines exercise multi-cycle ordering paths the
 // zero-latency case hides.
 //
@@ -48,7 +48,7 @@
 #include "axi/memory.hpp"
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "common/test_logger.hpp"
 #include "nmu/nmu.hpp"
@@ -133,12 +133,12 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // NoC test fixture: single-NSU for legacy fixtures (preserves existing
     // global req/rsp delay path), multi-NSU for multi_dst_stress so we can
     // wire 4 dst boundaries to 4 independent NSU stacks with per-NSU latency.
-    std::unique_ptr<test::LoopbackNoc> loopback_ptr;
+    std::unique_ptr<test::ChannelModel> loopback_ptr;
     if (is_multi_dst) {
-        loopback_ptr = std::make_unique<test::LoopbackNoc>(
+        loopback_ptr = std::make_unique<test::ChannelModel>(
             /*num_nsu=*/kNumNsuMulti,
-            /*req_q_depth_per_nsu=*/params.loopback_noc_req_depth,
-            /*rsp_q_depth_total=*/params.loopback_noc_rsp_depth);
+            /*req_q_depth_per_nsu=*/params.channel_model_req_depth,
+            /*rsp_q_depth_total=*/params.channel_model_rsp_depth);
         // multi_dst_stress addresses: 0x100 -> dst=0, 0x10100 -> dst=1 via
         // addr_trans::xy_route. Map dst_id {0..3} -> NSU {0..3}.
         loopback_ptr->set_dst_route(0x00, 0);
@@ -153,12 +153,12 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         loopback_ptr->set_nsu_latency(2, 5);
         loopback_ptr->set_nsu_latency(3, 3);
     } else {
-        loopback_ptr = std::make_unique<test::LoopbackNoc>(params.loopback_noc_req_depth,
-                                                           params.loopback_noc_rsp_depth);
+        loopback_ptr = std::make_unique<test::ChannelModel>(params.channel_model_req_depth,
+                                                            params.channel_model_rsp_depth);
         loopback_ptr->set_req_delay(req_delay);
         loopback_ptr->set_rsp_delay(rsp_delay);
     }
-    test::LoopbackNoc& loopback = *loopback_ptr;
+    test::ChannelModel& loopback = *loopback_ptr;
 
     // NMU top-level: encapsulates AxiSlavePort, Rob, Packetize,
     // WormholeArbiter, VcArbiter, and Depacketize into one object.
@@ -400,7 +400,7 @@ class PacketizeLoopbackFixture : public ::testing::TestWithParam<FixtureParam> {
 
 TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
     SCENARIO(
-        "req/rsp loopback: NMU+NSU packetize/depacketize + LoopbackNoc end-to-end zero mismatch");
+        "req/rsp loopback: NMU+NSU packetize/depacketize + ChannelModel end-to-end zero mismatch");
     auto p = GetParam();
     // p.yaml is an AX4-CAT-NNN_slug scenario id; scenario.yaml path built from SCENARIO_TREE_ROOT.
     std::string yaml_path = std::string(SCENARIO_TREE_ROOT) + p.yaml + "/scenario.yaml";

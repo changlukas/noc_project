@@ -1,7 +1,7 @@
 #include "nmu/rob.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/depacketize.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
@@ -15,7 +15,7 @@ using ni::cmodel::nmu::Depacketize;
 using ni::cmodel::nmu::Packetize;
 using ni::cmodel::nmu::Rob;
 using ni::cmodel::nmu::RobMode;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 using ni::cmodel::testing::ReqCapture;
 namespace axi = ni::cmodel::axi;
 
@@ -64,11 +64,11 @@ ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
     return f;
 }
 
-// Test rig: Rob wraps Packetize + Depacketize over LoopbackNoc.
-// PerChannelCapture is used for w/ar outputs; aw_out is LoopbackNoc.req_out()
+// Test rig: Rob wraps Packetize + Depacketize over ChannelModel.
+// PerChannelCapture is used for w/ar outputs; aw_out is ChannelModel.req_out()
 // so the rsp side (noc.rsp_out) still works for injecting B/R flits.
 struct RobRig {
-    LoopbackNoc noc{16, 16};
+    ChannelModel noc{16, 16};
     ReqCapture w_cap, ar_cap;
     Packetize pkt{noc.req_out(), w_cap, ar_cap, kSrcId};
     Depacketize depkt{noc.rsp_in(), 16, 16};
@@ -130,8 +130,8 @@ TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
 TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
     SCENARIO("Rob Disabled: push_aw failing on downstream backpressure leaves ROB state unchanged");
     // Force downstream NoC full via small req_depth.
-    // All 3 Packetize outputs share the same LoopbackNoc req_out.
-    LoopbackNoc noc(/*req*/ 1, /*rsp*/ 16);
+    // All 3 Packetize outputs share the same ChannelModel req_out.
+    ChannelModel noc(/*req*/ 1, /*rsp*/ 16);
     Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Disabled, RobMode::Disabled);
@@ -175,9 +175,9 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
         "Rob Disabled: push_w failing on downstream backpressure preserves W credit (no "
         "decrement)");
     // Trigger backpressure: small req_depth fills after AW + W beats.
-    // All 3 Packetize outputs share the same LoopbackNoc req_out so depth
+    // All 3 Packetize outputs share the same ChannelModel req_out so depth
     // limits apply regardless of which channel (AW or W) is being pushed.
-    LoopbackNoc noc(/*req*/ 2, /*rsp*/ 16);
+    ChannelModel noc(/*req*/ 2, /*rsp*/ 16);
     Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Disabled, RobMode::Disabled);
@@ -216,7 +216,7 @@ TEST(NmuRobDeath, Disabled_AbortPaths) {
 
 TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
     SCENARIO("Rob Enabled: push_aw allocates ROB slot, stamps rob_req=1 + rob_idx on AW header");
-    LoopbackNoc noc(/*req=*/16, /*rsp=*/16);
+    ChannelModel noc(/*req=*/16, /*rsp=*/16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -233,7 +233,7 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
     SCENARIO(
         "Rob Enabled: AR len=3 (4 beats) -> 4 consecutive ROB slots, base rob_idx stamped to AR "
         "header");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -281,7 +281,7 @@ TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
 
 TEST(NmuRob, Enabled_PushAr_OversizedBurst_ReturnFalse) {
     SCENARIO("Rob Enabled: AR burst > ROB_CAPACITY rejected (return false), no state mutation");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -302,9 +302,9 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
     SCENARIO(
         "Rob Enabled: push_ar rolled back on downstream backpressure; slots stay free for retry");
     // req queue depth = 1: pkt.push_ar_with_meta will fail after 1st push.
-    // All 3 Packetize outputs share the same LoopbackNoc req_out so the
+    // All 3 Packetize outputs share the same ChannelModel req_out so the
     // depth limit applies to AR pushes as well as AW.
-    LoopbackNoc noc(/*req=*/1, /*rsp=*/16);
+    ChannelModel noc(/*req=*/1, /*rsp=*/16);
     Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
@@ -329,7 +329,7 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
 
 TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
     SCENARIO("Rob Enabled: 32 AWs fill write pool to ROB_CAPACITY; 33rd push_aw returns false");
-    LoopbackNoc noc(64, 16);
+    ChannelModel noc(64, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);  // aw uses noc; w/ar use captures
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -346,7 +346,7 @@ TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
 TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
     SCENARIO(
         "Rob Enabled: push_aw rolled back on downstream backpressure; slot stays free for retry");
-    LoopbackNoc noc(/*req=*/1, /*rsp=*/16);
+    ChannelModel noc(/*req=*/1, /*rsp=*/16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);  // aw uses noc for backpressure
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -362,7 +362,7 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
 
 TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
     SCENARIO("Rob Enabled: B for rob_idx=0 (per-id head) commits immediately on pop_b");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -388,7 +388,7 @@ TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
 TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
     SCENARIO(
         "Rob Enabled: out-of-order B (slot 1 before 0) held; chain-flushes when head (0) arrives");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -424,7 +424,7 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
     SCENARIO(
         "Rob Enabled: AR1 4-beat then AR2 2-beat R flits arrive reversed; commit in submission "
         "order");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -484,7 +484,7 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
     SCENARIO(
         "Rob Enabled: different-id Rs may commit interleaved (per-id order preserved within each "
         "id)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -525,7 +525,7 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
 
 TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
     SCENARIO("Rob Enabled: pop_b on B flit with unallocated rob_idx aborts (defensive assert)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
@@ -547,7 +547,7 @@ TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
 
 TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
     SCENARIO("Rob Enabled: pop_b on Disabled-mode flit (rob_req=0) aborts (mode mismatch)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);

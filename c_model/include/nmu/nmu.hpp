@@ -6,7 +6,7 @@
 // Pipeline (req path):
 //   external AXI master ──> AxiSlavePort ──> Rob ──> Packetize{aw,w,ar}
 //     ──> WormholeArbiter<NocReqOut>(3 in, pairing {{0,1}}) ──> VcArbiter
-//     ──> external NocReqOut (LoopbackNoc or DPI bridge)
+//     ──> external NocReqOut (ChannelModel or DPI bridge)
 //
 // Pipeline (rsp path):
 //   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort

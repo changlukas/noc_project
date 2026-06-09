@@ -4,9 +4,9 @@
 // tb_top — Stage 5b wire-level co-sim testbench
 //
 // Per spec §4.1 topology:
-//   axi_master_wrap →[master_nmu_axi]→ nmu_wrap →[nmu_loopback_req]→ loopback_noc_wrap
+//   axi_master_wrap →[master_nmu_axi]→ nmu_wrap →[nmu_loopback_req]→ channel_model_wrap
 //                                              ←[loopback_nmu_rsp]←
-//   loopback_noc_wrap →[loopback_nsu_req]→ nsu_wrap →[nsu_slave_axi]→ axi_slave_wrap
+//   channel_model_wrap →[loopback_nsu_req]→ nsu_wrap →[nsu_slave_axi]→ axi_slave_wrap
 //                    ←[nsu_loopback_rsp]←
 //
 //   wb2axip faxi_slave  bound on master_nmu_axi (NMU manager-facing: checks NMU as AXI master)
@@ -72,28 +72,28 @@ module tb_top (
         .DATA_WIDTH(DATA_WIDTH)
     ) master_nmu_axi ();
 
-    // [2] nmu_loopback_req — NoC request from nmu_wrap to loopback_noc_wrap
+    // [2] nmu_loopback_req — NoC request from nmu_wrap to channel_model_wrap
     noc_req_intf #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) nmu_loopback_req ();
 
-    // [3] loopback_nmu_rsp — NoC response from loopback_noc_wrap back to nmu_wrap
+    // [3] loopback_nmu_rsp — NoC response from channel_model_wrap back to nmu_wrap
     noc_rsp_intf #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) loopback_nmu_rsp ();
 
-    // [4] loopback_nsu_req — NoC request from loopback_noc_wrap to nsu_wrap
+    // [4] loopback_nsu_req — NoC request from channel_model_wrap to nsu_wrap
     noc_req_intf #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) loopback_nsu_req ();
 
-    // [5] nsu_loopback_rsp — NoC response from nsu_wrap back to loopback_noc_wrap
+    // [5] nsu_loopback_rsp — NoC response from nsu_wrap back to channel_model_wrap
     noc_rsp_intf #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
@@ -139,7 +139,7 @@ module tb_top (
     );
 
     // [3] Loopback NoC — routes NMU requests to NSU and NSU responses back
-    loopback_noc_wrap #(
+    channel_model_wrap #(
         .NUM_VC(NUM_VC),
         .FLIT_WIDTH(FLIT_WIDTH),
         .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)

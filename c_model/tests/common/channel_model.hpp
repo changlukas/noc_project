@@ -1,11 +1,11 @@
-// LoopbackNoc -- testbench-only NoC bridge with multi-NSU + per-NSU latency.
+// ChannelModel -- testbench-only NoC bridge with multi-NSU + per-NSU latency.
 //
-// Single-NSU ctor (LoopbackNoc(req_depth, rsp_depth)) is the backward-compat
+// Single-NSU ctor (ChannelModel(req_depth, rsp_depth)) is the backward-compat
 // path: all 256 dst_id default-route to NSU_0; legacy aliases
 // (req_in/req_out/rsp_in/rsp_out) point at NSU_0 endpoints; legacy
 // set_req_delay/set_rsp_delay apply globally as before.
 //
-// Multi-NSU ctor (LoopbackNoc(num_nsu, req_per_nsu, rsp_total)) requires
+// Multi-NSU ctor (ChannelModel(num_nsu, req_per_nsu, rsp_total)) requires
 // explicit set_dst_route(dst_id, nsu_idx) -- unmapped dst pushes assert.
 //
 // Per-NSU response latency (set_nsu_latency / set_nsu_latency_range) replaces
@@ -13,7 +13,7 @@
 //
 // Bounded deque per direction. Accepts multiple flits per tick -- does NOT
 // model 1-flit/cycle physical NoC pacing. That's vc_arb's responsibility.
-// Latency/throughput numbers from tests using LoopbackNoc are non-physical.
+// Latency/throughput numbers from tests using ChannelModel are non-physical.
 #pragma once
 #include "ni/flit.hpp"
 #include "ni_flit_constants.h"
@@ -37,22 +37,22 @@ namespace ni::cmodel::testing {
 
 // Config struct for Stage 5b ShellAdapter hermetic construction.
 // Mirrors the multi-NSU ctor parameters; ShellAdapters construct via
-// LoopbackNoc(LoopbackNocConfig{...}) without needing cross-component refs.
-struct LoopbackNocConfig {
+// ChannelModel(ChannelModelConfig{...}) without needing cross-component refs.
+struct ChannelModelConfig {
     std::size_t num_nsu = 1;
     std::size_t req_q_depth_per_nsu = 64;
     std::size_t rsp_q_depth_total = 64;
 };
 
-class LoopbackNoc {
+class ChannelModel {
   public:
     // Stage 5b standalone ctor: hermetic, no cross-component refs.
-    explicit LoopbackNoc(LoopbackNocConfig cfg)
-        : LoopbackNoc(cfg.num_nsu, cfg.req_q_depth_per_nsu, cfg.rsp_q_depth_total) {}
+    explicit ChannelModel(ChannelModelConfig cfg)
+        : ChannelModel(cfg.num_nsu, cfg.req_q_depth_per_nsu, cfg.rsp_q_depth_total) {}
 
     // Backward-compat single-NSU ctor. Defaults all dst_id to NSU_0.
-    LoopbackNoc(std::size_t req_depth, std::size_t rsp_depth)
-        : LoopbackNoc(/*num_nsu=*/1, req_depth, rsp_depth) {
+    ChannelModel(std::size_t req_depth, std::size_t rsp_depth)
+        : ChannelModel(/*num_nsu=*/1, req_depth, rsp_depth) {
         // Override default-unmapped: route all dst to NSU_0 for legacy fixtures.
         for (std::size_t d = 0; d < DST_ID_SPACE; ++d) {
             dst_to_nsu_[d] = 0;
@@ -60,7 +60,8 @@ class LoopbackNoc {
     }
 
     // Multi-NSU ctor. Caller must call set_dst_route() for each dst_id used.
-    LoopbackNoc(std::size_t num_nsu, std::size_t req_q_depth_per_nsu, std::size_t rsp_q_depth_total)
+    ChannelModel(std::size_t num_nsu, std::size_t req_q_depth_per_nsu,
+                 std::size_t rsp_q_depth_total)
         : num_nsu_(num_nsu),
           req_q_depth_per_nsu_(req_q_depth_per_nsu),
           rsp_q_depth_total_(rsp_q_depth_total),
@@ -206,14 +207,14 @@ class LoopbackNoc {
     };
 
     struct NmuReqOutAdapter : noc::NocReqOut {
-        LoopbackNoc* p;
-        explicit NmuReqOutAdapter(LoopbackNoc* parent) : p(parent) {}
+        ChannelModel* p;
+        explicit NmuReqOutAdapter(ChannelModel* parent) : p(parent) {}
         bool push_flit(const Flit& f) override {
             uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
             uint8_t dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
             int8_t nsu = p->dst_to_nsu_[dst];
             if (!(nsu >= 0)) {
-                assert(false && "LoopbackNoc: unmapped dst_id");
+                assert(false && "ChannelModel: unmapped dst_id");
                 std::abort();  // belt-and-braces for NDEBUG
             }
             if (p->nmu_req_per_vc_in_flight_[vc] >= p->per_vc_depth_) return false;
@@ -251,9 +252,9 @@ class LoopbackNoc {
         }
     };
     struct NsuReqInAdapter : noc::NocReqIn {
-        LoopbackNoc* p;
+        ChannelModel* p;
         std::size_t i;
-        NsuReqInAdapter(LoopbackNoc* parent, std::size_t idx) : p(parent), i(idx) {}
+        NsuReqInAdapter(ChannelModel* parent, std::size_t idx) : p(parent), i(idx) {}
         std::optional<Flit> pop_flit() override {
             // Legacy global req delay path drains via req_q_ (single-NSU
             // only -- NSU_0 is the sole NSU when req_delay_ is non-zero).
@@ -275,9 +276,9 @@ class LoopbackNoc {
         }
     };
     struct NsuRspOutAdapter : noc::NocRspOut {
-        LoopbackNoc* p;
+        ChannelModel* p;
         std::size_t i;
-        NsuRspOutAdapter(LoopbackNoc* parent, std::size_t idx) : p(parent), i(idx) {}
+        NsuRspOutAdapter(ChannelModel* parent, std::size_t idx) : p(parent), i(idx) {}
         bool push_flit(const Flit& f) override {
             uint8_t vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
             if (p->nsu_rsp_per_vc_in_flight_[vc] >= p->per_vc_depth_) return false;
@@ -325,8 +326,8 @@ class LoopbackNoc {
         }
     };
     struct NmuRspInAdapter : noc::NocRspIn {
-        LoopbackNoc* p;
-        explicit NmuRspInAdapter(LoopbackNoc* parent) : p(parent) {}
+        ChannelModel* p;
+        explicit NmuRspInAdapter(ChannelModel* parent) : p(parent) {}
         std::optional<Flit> pop_flit() override {
             if (p->rsp_q_.empty()) return std::nullopt;
             Flit f = p->rsp_q_.front();

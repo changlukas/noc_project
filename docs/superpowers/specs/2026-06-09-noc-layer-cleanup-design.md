@@ -70,7 +70,7 @@ Identifiers:
 | DPI `cmodel_loopback_noc_{tick,set_inputs,get_outputs}` | `cmodel_channel_model_*` |
 | `loopback_noc_req_depth`, `loopback_noc_rsp_depth` (port_params.hpp) + `loopback_noc:` YAML key (port_params.yaml:37) | `channel_model_*` |
 
-Content updates (no rename): `cmodel_dpi.{cpp,h}`, `cosim/sv/{nmu,nsu,tb_top}_wrap.sv`, `cosim/verilator/Makefile`, `c_model/include/{nmu/nmu.hpp, cosim/{flit_byte_conv,poc_defaults,port_params}.hpp, noc/noc_{req,rsp}_{in,out}.hpp comments}`, 9 c_model tests (test_packetize, test_depacketize, test_nmu, test_vc_arbiter, test_rob, test_nsu_depacketize, test_nsu_vc_arbiter, test_nsu_packetize, test_nsu, test_loopback_latency, test_request_response_loopback), 2 CMakeLists.txt, scenario AX4-STR-003 yaml, `docs/architecture.md`, `CLAUDE.md`, this spec.
+Content updates (no rename): `cmodel_dpi.{cpp,h}`, `cosim/sv/{nmu,nsu,tb_top}_wrap.sv`, `cosim/verilator/Makefile`, `c_model/include/{nmu/nmu.hpp, cosim/{flit_byte_conv,poc_defaults,port_params}.hpp, noc/noc_{req,rsp}_{in,out}.hpp comments}`, 11 c_model tests (test_packetize, test_depacketize, test_nmu, test_vc_arbiter, test_rob, test_nsu_depacketize, test_nsu_vc_arbiter, test_nsu_packetize, test_nsu, test_loopback_latency, test_request_response_loopback), 2 CMakeLists.txt, scenario AX4-STR-003 yaml, `docs/architecture.md`, `CLAUDE.md`, this spec.
 
 Files preserving "loopback" in name (refers to topology / latency feature, not the class): `test_loopback_latency.cpp`, `test_request_response_loopback.cpp` — only `#include` + class references update.
 

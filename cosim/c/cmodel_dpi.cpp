@@ -3,7 +3,7 @@
 
 #include "cmodel_dpi.h"
 #include "dpi_boundary_macros.h"
-#include "cosim/loopback_noc_shell_adapter.hpp"
+#include "cosim/channel_model_shell_adapter.hpp"
 #include "cosim/master_shell_adapter.hpp"
 #include "cosim/nmu_shell_adapter.hpp"
 #include "cosim/nsu_shell_adapter.hpp"
@@ -45,7 +45,7 @@ std::string g_dpi_error_msg;
 
 // 5 singleton ShellAdapter pointers — populated by cmodel_init.
 // Hermetic: each handler accesses ONLY its own singleton.
-std::unique_ptr<LoopbackNocShellAdapter> g_loopback_adapter;
+std::unique_ptr<ChannelModelShellAdapter> g_channel_adapter;
 std::unique_ptr<MasterShellAdapter> g_master_adapter;
 std::unique_ptr<SlaveShellAdapter> g_slave_adapter;
 std::unique_ptr<NmuShellAdapter> g_nmu_adapter;
@@ -61,7 +61,7 @@ using namespace ni::cmodel::cosim;
 extern "C" void cmodel_init(const char* scenario_yaml_path) {
     DPI_BOUNDARY_BEGIN(cmodel_init) {
         // Reset all existing singletons + error state (idempotent per spec §5.3)
-        g_loopback_adapter.reset();
+        g_channel_adapter.reset();
         g_master_adapter.reset();
         g_slave_adapter.reset();
         g_nmu_adapter.reset();
@@ -74,8 +74,8 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         auto scenario = ni::cmodel::axi::load_scenario(std::string(scenario_yaml_path));
 
         // Construct fresh adapters into local unique_ptrs (strong exception guarantee)
-        auto loop = std::make_unique<LoopbackNocShellAdapter>();
-        loop->init();
+        auto channel = std::make_unique<ChannelModelShellAdapter>();
+        channel->init();
 
         auto master = std::make_unique<MasterShellAdapter>();
         master->init(std::string(scenario_yaml_path), "", scenario.config.max_outstanding_write,
@@ -100,21 +100,22 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         auto* sb_raw = sb.get();
         auto resp_str = [](ni::cmodel::axi::Resp r) -> const char* {
             switch (r) {
-                case ni::cmodel::axi::Resp::OKAY:   return "OKAY";
-                case ni::cmodel::axi::Resp::EXOKAY: return "EXOKAY";
-                case ni::cmodel::axi::Resp::SLVERR: return "SLVERR";
-                case ni::cmodel::axi::Resp::DECERR: return "DECERR";
+                case ni::cmodel::axi::Resp::OKAY:
+                    return "OKAY";
+                case ni::cmodel::axi::Resp::EXOKAY:
+                    return "EXOKAY";
+                case ni::cmodel::axi::Resp::SLVERR:
+                    return "SLVERR";
+                case ni::cmodel::axi::Resp::DECERR:
+                    return "DECERR";
             }
             return "?";
         };
         master->on_write_completed([sb_raw, resp_str](const ni::cmodel::axi::WriteResult& wr) {
             sb_raw->handle_write_completed(wr, wr.data, wr.strb_per_beat);
-            std::fprintf(stderr,
-                         "[axi-w] id=0x%x addr=0x%llx len=%u size=%u resp=%s\n",
-                         static_cast<unsigned>(wr.id),
-                         static_cast<unsigned long long>(wr.addr),
-                         static_cast<unsigned>(wr.len),
-                         static_cast<unsigned>(wr.size),
+            std::fprintf(stderr, "[axi-w] id=0x%x addr=0x%llx len=%u size=%u resp=%s\n",
+                         static_cast<unsigned>(wr.id), static_cast<unsigned long long>(wr.addr),
+                         static_cast<unsigned>(wr.len), static_cast<unsigned>(wr.size),
                          resp_str(wr.resp));
         });
         master->on_read_observed([sb_raw, resp_str](const ni::cmodel::axi::ReadResult& rr) {
@@ -124,16 +125,13 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
             const uint8_t first_byte = rr.data.empty() ? 0 : rr.data[0];
             std::fprintf(stderr,
                          "[axi-r] id=0x%x addr=0x%llx len=%u size=%u resp=%s data[0]=0x%02x\n",
-                         static_cast<unsigned>(rr.id),
-                         static_cast<unsigned long long>(rr.addr),
-                         static_cast<unsigned>(rr.len),
-                         static_cast<unsigned>(rr.size),
-                         resp_str(rr.resp),
-                         static_cast<unsigned>(first_byte));
+                         static_cast<unsigned>(rr.id), static_cast<unsigned long long>(rr.addr),
+                         static_cast<unsigned>(rr.len), static_cast<unsigned>(rr.size),
+                         resp_str(rr.resp), static_cast<unsigned>(first_byte));
         });
 
         // Commit (all-or-nothing)
-        g_loopback_adapter = std::move(loop);
+        g_channel_adapter = std::move(channel);
         g_master_adapter = std::move(master);
         g_slave_adapter = std::move(slave);
         g_nmu_adapter = std::move(nmu);
@@ -145,7 +143,7 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
 
 extern "C" void cmodel_finalize(void) {
     DPI_BOUNDARY_BEGIN(cmodel_finalize) {
-        g_loopback_adapter.reset();
+        g_channel_adapter.reset();
         g_master_adapter.reset();
         g_slave_adapter.reset();
         g_nmu_adapter.reset();
@@ -184,34 +182,31 @@ extern "C" int cmodel_scoreboard_clean(void) {
 extern "C" void cmodel_dump_scoreboard(void) {
     DPI_BOUNDARY_BEGIN(cmodel_dump_scoreboard) {
         if (g_scoreboard) {
-            std::fprintf(stderr,
-                         "[scoreboard] %zu reads checked, %zu mismatches\n",
-                         g_scoreboard->reads_checked(),
-                         g_scoreboard->mismatch_count());
+            std::fprintf(stderr, "[scoreboard] %zu reads checked, %zu mismatches\n",
+                         g_scoreboard->reads_checked(), g_scoreboard->mismatch_count());
             for (const auto& msg : g_scoreboard->mismatch_report()) {
                 std::fprintf(stderr, "  %s\n", msg.c_str());
             }
         }
         if (g_master_adapter) {
-            std::fprintf(stderr,
-                         "[dump] read-dump file: %s\n",
+            std::fprintf(stderr, "[dump] read-dump file: %s\n",
                          g_master_adapter->read_dump_path().c_str());
         }
     }
     DPI_BOUNDARY_END(cmodel_dump_scoreboard);
 }
 
-// LoopbackNoc DPI handlers — Task 7.
+// ChannelModel DPI handlers — Task 7.
 //
 // Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
 // ceil(FLIT_WIDTH / 32) = 13. Words are little-endian: word[0] carries bits
 // [31:0], word[12] carries bits [407:384] in its low 24 bits.
 
+using ni::cmodel::cosim::ChannelModelInputs;
+using ni::cmodel::cosim::ChannelModelOutputs;
 using ni::cmodel::cosim::FLIT_BYTES;
 using ni::cmodel::cosim::FLIT_VEC_WORDS;
 using ni::cmodel::cosim::FlitBytes;
-using ni::cmodel::cosim::LoopbackNocInputs;
-using ni::cmodel::cosim::LoopbackNocOutputs;
 
 namespace {
 
@@ -244,40 +239,40 @@ void pack_flit(const FlitBytes& b, svBitVecVal* vec) {
 
 }  // namespace
 
-extern "C" void cmodel_loopback_noc_set_inputs(svBit req_in_valid, svBitVecVal* req_in_flit,
-                                               svBit req_in_credit_return, svBit rsp_in_valid,
-                                               svBitVecVal* rsp_in_flit,
-                                               svBit rsp_in_credit_return) {
-    DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_set_inputs) {
-        REQUIRE_ADAPTER(g_loopback_adapter, "cmodel_loopback_noc_set_inputs");
-        LoopbackNocInputs in{};
+extern "C" void cmodel_channel_model_set_inputs(svBit req_in_valid, svBitVecVal* req_in_flit,
+                                                svBit req_in_credit_return, svBit rsp_in_valid,
+                                                svBitVecVal* rsp_in_flit,
+                                                svBit rsp_in_credit_return) {
+    DPI_BOUNDARY_BEGIN(cmodel_channel_model_set_inputs) {
+        REQUIRE_ADAPTER(g_channel_adapter, "cmodel_channel_model_set_inputs");
+        ChannelModelInputs in{};
         in.req_in_valid = static_cast<bool>(req_in_valid);
         in.req_in_flit = unpack_flit(req_in_flit);
         in.req_in_credit_return = static_cast<bool>(req_in_credit_return);
         in.rsp_in_valid = static_cast<bool>(rsp_in_valid);
         in.rsp_in_flit = unpack_flit(rsp_in_flit);
         in.rsp_in_credit_return = static_cast<bool>(rsp_in_credit_return);
-        g_loopback_adapter->set_inputs(in);
+        g_channel_adapter->set_inputs(in);
     }
-    DPI_BOUNDARY_END(cmodel_loopback_noc_set_inputs);
+    DPI_BOUNDARY_END(cmodel_channel_model_set_inputs);
 }
 
-extern "C" void cmodel_loopback_noc_tick(void) {
-    DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_tick) {
-        REQUIRE_ADAPTER(g_loopback_adapter, "cmodel_loopback_noc_tick");
-        g_loopback_adapter->tick();
+extern "C" void cmodel_channel_model_tick(void) {
+    DPI_BOUNDARY_BEGIN(cmodel_channel_model_tick) {
+        REQUIRE_ADAPTER(g_channel_adapter, "cmodel_channel_model_tick");
+        g_channel_adapter->tick();
     }
-    DPI_BOUNDARY_END(cmodel_loopback_noc_tick);
+    DPI_BOUNDARY_END(cmodel_channel_model_tick);
 }
 
-extern "C" void cmodel_loopback_noc_get_outputs(svBit* req_out_valid, svBitVecVal* req_out_flit,
-                                                svBit* req_out_credit_return, svBit* rsp_out_valid,
-                                                svBitVecVal* rsp_out_flit,
-                                                svBit* rsp_out_credit_return) {
-    DPI_BOUNDARY_BEGIN(cmodel_loopback_noc_get_outputs) {
-        REQUIRE_ADAPTER(g_loopback_adapter, "cmodel_loopback_noc_get_outputs");
-        LoopbackNocOutputs out{};
-        g_loopback_adapter->get_outputs(out);
+extern "C" void cmodel_channel_model_get_outputs(svBit* req_out_valid, svBitVecVal* req_out_flit,
+                                                 svBit* req_out_credit_return, svBit* rsp_out_valid,
+                                                 svBitVecVal* rsp_out_flit,
+                                                 svBit* rsp_out_credit_return) {
+    DPI_BOUNDARY_BEGIN(cmodel_channel_model_get_outputs) {
+        REQUIRE_ADAPTER(g_channel_adapter, "cmodel_channel_model_get_outputs");
+        ChannelModelOutputs out{};
+        g_channel_adapter->get_outputs(out);
         *req_out_valid = static_cast<svBit>(out.req_out_valid);
         pack_flit(out.req_out_flit, req_out_flit);
         *req_out_credit_return = static_cast<svBit>(out.req_out_credit_return);
@@ -285,7 +280,7 @@ extern "C" void cmodel_loopback_noc_get_outputs(svBit* req_out_valid, svBitVecVa
         pack_flit(out.rsp_out_flit, rsp_out_flit);
         *rsp_out_credit_return = static_cast<svBit>(out.rsp_out_credit_return);
     }
-    DPI_BOUNDARY_END(cmodel_loopback_noc_get_outputs);
+    DPI_BOUNDARY_END(cmodel_channel_model_get_outputs);
 }
 
 // Tasks 9-11 append their handler bodies.

@@ -4,11 +4,11 @@
 
 **Namespace**: `ni::cmodel::` (production sub-namespaces under `c_model/include/`: `axi`, `cosim`, `nmu`, `nsu`. Tests under `c_model/tests/common/` add a `ni::cmodel::testing` sub-namespace).
 
-**Architecture**: AXI4 Master → NMU → LoopbackNoc (test stub) → NSU → AXI4 Slave. Verilator co-sim wraps each c_model component in a `*_shell_adapter.hpp` and binds wb2axip protocol checkers (`faxi_slave.v` on the NMU manager-facing side, `faxi_master.v` on the NSU memory-facing side).
+**Architecture**: AXI4 Master → NMU → ChannelModel (test stub) → NSU → AXI4 Slave. Verilator co-sim wraps each c_model component in a `*_shell_adapter.hpp` and binds wb2axip protocol checkers (`faxi_slave.v` on the NMU manager-facing side, `faxi_master.v` on the NSU memory-facing side).
 
 - **NMU / NSU**: per-direction units (`c_model/include/nmu/`, `c_model/include/nsu/`). Packetize / depacketize, AXI port adapters, per-ID RoB on the NMU response path.
-- **NoC fabric**: no router class in c_model; `LoopbackNoc` (`c_model/tests/common/loopback_noc.hpp`) is the only NoC stub. Destination derivation (XY bit-slice) is done at NMU packetize time via `nmu::addr_trans::xy_route`.
-- **Shell adapters**: `NmuShellAdapter` / `NsuShellAdapter` / `MasterShellAdapter` / `SlaveShellAdapter` / `LoopbackNocShellAdapter` in `c_model/include/cosim/`. Hermetic singleton invariant — one global per adapter in `cosim/c/cmodel_dpi.cpp`; no cross-component pointers.
+- **NoC fabric**: no router class in c_model; `ChannelModel` (`c_model/tests/common/channel_model.hpp`) is the only NoC stub. Destination derivation (XY bit-slice) is done at NMU packetize time via `nmu::addr_trans::xy_route`.
+- **Shell adapters**: `NmuShellAdapter` / `NsuShellAdapter` / `MasterShellAdapter` / `SlaveShellAdapter` / `ChannelModelShellAdapter` in `c_model/include/cosim/`. Hermetic singleton invariant — one global per adapter in `cosim/c/cmodel_dpi.cpp`; no cross-component pointers.
 - **Config**: YAML (`c_model/config/`); no JSON, no compile-time `<Mode>` templates.
 
 **Build**: C++17, CMake 3.20+, GoogleTest.

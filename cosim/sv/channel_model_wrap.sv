@@ -1,4 +1,4 @@
-// loopback_noc_wrap — Stage 5b DPI shell for LoopbackNoc component.
+// channel_model_wrap — Stage 5b DPI shell for ChannelModel component.
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to
@@ -18,10 +18,10 @@
 
 `timescale 1ns/1ps
 
-`ifndef LOOPBACK_NOC_WRAP_SV
-`define LOOPBACK_NOC_WRAP_SV
+`ifndef CHANNEL_MODEL_WRAP_SV
+`define CHANNEL_MODEL_WRAP_SV
 
-module loopback_noc_wrap #(
+module channel_model_wrap #(
     parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
     parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
     parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
@@ -54,7 +54,7 @@ module loopback_noc_wrap #(
 
     // set_inputs: sample SV wire state into C++ input latch.
     // svBitVecVal carries FLIT_WIDTH bits as ceil(FLIT_WIDTH/32) 32-bit words.
-    import "DPI-C" context function void cmodel_loopback_noc_set_inputs(
+    import "DPI-C" context function void cmodel_channel_model_set_inputs(
         input  bit                  req_in_valid,
         input  bit [FLIT_WIDTH-1:0] req_in_flit,
         input  bit                  req_in_credit_return,
@@ -64,10 +64,10 @@ module loopback_noc_wrap #(
     );
 
     // tick: advance C++ model one cycle.
-    import "DPI-C" context function void cmodel_loopback_noc_tick();
+    import "DPI-C" context function void cmodel_channel_model_tick();
 
     // get_outputs: read C++ output latch into SV locals.
-    import "DPI-C" context function void cmodel_loopback_noc_get_outputs(
+    import "DPI-C" context function void cmodel_channel_model_get_outputs(
         output bit                  req_out_valid,
         output bit [FLIT_WIDTH-1:0] req_out_flit,
         output bit                  req_out_credit_return,
@@ -103,7 +103,7 @@ module loopback_noc_wrap #(
             rsp_out_credit_return_q  <= '0;
         end else begin
             // Step 1: push current wire values into C++ input latch.
-            cmodel_loopback_noc_set_inputs(
+            cmodel_channel_model_set_inputs(
                 noc_req_from_nmu_i.valid,
                 noc_req_from_nmu_i.flit,
                 noc_req_to_nsu_o.credit_return[0],
@@ -113,7 +113,7 @@ module loopback_noc_wrap #(
             );
 
             // Step 2: advance C++ model one cycle.
-            cmodel_loopback_noc_tick();
+            cmodel_channel_model_tick();
 
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
@@ -124,7 +124,7 @@ module loopback_noc_wrap #(
                 bit                    t_rsp_out_valid;
                 bit [FLIT_WIDTH-1:0]   t_rsp_out_flit;
                 bit                    t_rsp_out_credit_return;
-                cmodel_loopback_noc_get_outputs(
+                cmodel_channel_model_get_outputs(
                     t_req_out_valid,
                     t_req_out_flit,
                     t_req_out_credit_return,
@@ -158,4 +158,4 @@ module loopback_noc_wrap #(
 
 endmodule
 
-`endif  // LOOPBACK_NOC_WRAP_SV
+`endif  // CHANNEL_MODEL_WRAP_SV

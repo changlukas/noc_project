@@ -38,11 +38,11 @@ struct PortParams {
     std::size_t depkt_b_q_depth;
     std::size_t depkt_r_q_depth;
 
-    // Stage 3 LoopbackNoc test fixture: per-direction in-flight flit deque
+    // Stage 3 ChannelModel test fixture: per-direction in-flight flit deque
     // capacity. Sized large enough for the longest e2e test burst; not a
     // production parameter.
-    std::size_t loopback_noc_req_depth;
-    std::size_t loopback_noc_rsp_depth;
+    std::size_t channel_model_req_depth;
+    std::size_t channel_model_rsp_depth;
 
     // Stage 3 MetaBuffer (NSU side): per-AXI-ID FIFO depth tracking
     // outstanding request metadata while the response is in flight.
@@ -52,7 +52,7 @@ struct PortParams {
 // Load PortParams from c_model/config/port_params.yaml.
 //
 // The current YAML schema is a flat block of port-pair keys plus three
-// sub-maps (depacketize / loopback_noc / meta_buffer); all values are shared
+// sub-maps (depacketize / channel_model / meta_buffer); all values are shared
 // by both sides (NMU AxiSlavePort and NSU AxiMasterPort load identical
 // PortParams). The `side` parameter is reserved for a future schema that
 // splits per-side blocks (e.g. `nmu:` / `nsu:` sub-maps); today it is
@@ -75,9 +75,9 @@ inline PortParams load_port_params_yaml(const std::string& path, const std::stri
     p.depkt_b_q_depth = root["depacketize"]["b_q_depth"].as<std::size_t>();
     p.depkt_r_q_depth = root["depacketize"]["r_q_depth"].as<std::size_t>();
 
-    // LoopbackNoc test fixture deque capacity (per direction).
-    p.loopback_noc_req_depth = root["loopback_noc"]["req_depth"].as<std::size_t>();
-    p.loopback_noc_rsp_depth = root["loopback_noc"]["rsp_depth"].as<std::size_t>();
+    // ChannelModel test fixture deque capacity (per direction).
+    p.channel_model_req_depth = root["channel_model"]["req_depth"].as<std::size_t>();
+    p.channel_model_rsp_depth = root["channel_model"]["rsp_depth"].as<std::size_t>();
 
     // MetaBuffer per-AXI-ID outstanding-request depth.
     p.meta_buffer_per_id_depth = root["meta_buffer"]["per_id_depth"].as<std::size_t>();

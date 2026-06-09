@@ -2,9 +2,9 @@
 //
 // The Nmu is the most complex shell — it has BOTH an AXI slave side
 // (incoming AW/W/AR from master, outgoing B/R + handshake to master) AND
-// NoC sides (noc_req_o producer toward LoopbackNoc, noc_rsp_i consumer from
-// LoopbackNoc). Beta-tick discipline and error checking follow the same
-// pattern as axi_slave_wrap (T9) and loopback_noc_wrap (T7).
+// NoC sides (noc_req_o producer toward ChannelModel, noc_rsp_i consumer from
+// ChannelModel). Beta-tick discipline and error checking follow the same
+// pattern as axi_slave_wrap (T9) and channel_model_wrap (T7).
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
@@ -135,7 +135,7 @@ module nmu_wrap #(
     bit [1:0]              rresp_q;
     bit                    rlast_q;
 
-    // NoC req side outputs (Nmu drives toward LoopbackNoc)
+    // NoC req side outputs (Nmu drives toward ChannelModel)
     bit                    noc_req_valid_q;
     bit [FLIT_WIDTH-1:0]   noc_req_flit_q;
 
@@ -192,10 +192,10 @@ module nmu_wrap #(
                 axi_i.arprot,
                 axi_i.arqos,
                 axi_i.rready,
-                // NoC rsp side — rsp flit arriving from LoopbackNoc toward Nmu
+                // NoC rsp side — rsp flit arriving from ChannelModel toward Nmu
                 noc_rsp_i.valid,
                 noc_rsp_i.flit,
-                // NoC req credit — LoopbackNoc returns credit to Nmu
+                // NoC req credit — ChannelModel returns credit to Nmu
                 noc_req_o.credit_return[0]
             );
 
@@ -263,7 +263,7 @@ module nmu_wrap #(
     assign axi_i.rresp   = rresp_q;
     assign axi_i.rlast   = rlast_q;
 
-    // NoC req side — Nmu drives req flit toward LoopbackNoc
+    // NoC req side — Nmu drives req flit toward ChannelModel
     assign noc_req_o.valid = noc_req_valid_q;
     assign noc_req_o.flit  = noc_req_flit_q;
 

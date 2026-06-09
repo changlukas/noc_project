@@ -3,7 +3,7 @@
 //
 // The NSU Packetize stage produces response flits (B / R packetized) and
 // hands them to a NocRspOut. Concrete implementations are the real NoC
-// adapter (DPI bridge to the SystemVerilog router) and the LoopbackNoc test
+// adapter (DPI bridge to the SystemVerilog router) and the ChannelModel test
 // fixture. Naming mirrors the ni_signals.json pin struct `NocRspOutPins`.
 //
 // Contract: push_flit returns true if the flit was accepted, false on

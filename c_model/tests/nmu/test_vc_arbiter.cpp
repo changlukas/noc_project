@@ -2,7 +2,7 @@
 #include "nmu/packetize.hpp"
 #include "noc/wormhole_arbiter.hpp"
 #include "axi/types.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "ni/flit.hpp"
 #include "ni_flit_constants.h"
@@ -13,7 +13,7 @@
 using ni::cmodel::Flit;
 using ni::cmodel::nmu::VcArbiter;
 using ni::cmodel::nmu::VcMode;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 
 namespace {
 
@@ -47,7 +47,7 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
     SCENARIO(
         "NMU VcArbiter Mode A: AW -> write_vc=0, AR -> read_vc=1; "
         "verify pending queues + downstream stamps");
-    LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
+    ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc,
                                            /*write_vc=*/0, /*read_vc=*/1);
 
@@ -85,7 +85,7 @@ TEST_P(NmuVcArbParam, MultiCandidate_HoLAvoidance) {
     SCENARIO(
         "NMU VcArbiter Mode B: saturate first AR candidate VC (VC=0) -> "
         "next AR picks second candidate VC (VC=1), avoiding head-of-line block");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
 
     // AR spans all VCs in order; AW/W get a single VC=0 candidate.
     std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
@@ -120,7 +120,7 @@ TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
         "NMU VcArbiter NUM_VC=2: single outstanding AW + 3 W beats (last "
         "with wlast=1) — all W beats route to AW's VC. After W with wlast, "
         "current_aw_vc_ resets, allowing next AW to be pushed.");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
     EXPECT_TRUE(arb.has_current_aw());
@@ -155,7 +155,7 @@ TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
         "NMU VcArbiter: current_aw_vc_ resets based on payload.W.wlast, "
         "NOT header.last. Push AW + 3 W beats; only the 3rd has "
         "payload.wlast=1; verify current_aw_vc_ only resets on the 3rd.");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
     EXPECT_TRUE(arb.has_current_aw());
@@ -195,7 +195,7 @@ TEST_P(NmuVcArbParam, RoundRobinFairness_AllVcsServiced_NoStarvation) {
     SCENARIO(
         "NMU VcArbiter Mode B: num_vc ARs pre-routed to distinct VCs via "
         "candidate list; tick num_vc times -> flits emerge in RR order");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
     candidates[ni::AXI_CH_AW] = {0};
     candidates[ni::AXI_CH_W] = {0};
@@ -224,18 +224,18 @@ TEST_P(NmuVcArbParam, RoundRobinFairness_AllVcsServiced_NoStarvation) {
     }
 }
 
-// Credit gating: LoopbackNoc per_vc_depth=1 caps downstream credit.
+// Credit gating: ChannelModel per_vc_depth=1 caps downstream credit.
 // Works at any NUM_VC (the per-VC independent credit logic is the same).
 // Uses a single VC (VC=0) via read_write_split to keep the scenario simple.
 TEST_P(NmuVcArbParam, CreditGating_TickIdleWhenAllVcsBlocked) {
     const std::size_t num_vc = GetParam();
 
     SCENARIO(
-        "NMU VcArbiter: all flits -> VC=0; LoopbackNoc per_vc_depth=1 caps "
+        "NMU VcArbiter: all flits -> VC=0; ChannelModel per_vc_depth=1 caps "
         "downstream credit. Push 4 AR flits, tick drains 1. Subsequent "
         "tick is idle (downstream credit exhausted). Pop downstream -> "
         "credit returns -> next tick drains 1 more.");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     noc.set_per_vc_depth(1);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 0,
                                            /*pending_depth=*/8);
@@ -274,7 +274,7 @@ TEST_P(NmuVcArbParam, BackpressureChain_VcArbToUpstream) {
         "VcArbiter's pending_[0] is full -> push_flit returns false; "
         "credit_avail(0) also returns false. Backpressure visible to "
         "upstream Packetize.");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 0,
                                            /*pending_depth=*/2);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
@@ -303,11 +303,11 @@ TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
     SCENARIO(
         "NMU VcArbiter: NUM_VC=1, both Mode A (read_write_split) and Mode B "
         "(multi_candidate) route every axi_ch -> VC=0; behavior "
-        "observationally identical to direct Packetize -> LoopbackNoc");
+        "observationally identical to direct Packetize -> ChannelModel");
 
     // Mode A
     {
-        LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
+        ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
         auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
         ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
         ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
@@ -325,7 +325,7 @@ TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
     }
     // Mode B -- even with multi_candidate, num_vc=1 forces VC=0.
     {
-        LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
+        ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
         std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
         candidates[ni::AXI_CH_AW] = {0};
         candidates[ni::AXI_CH_W] = {0};
@@ -350,10 +350,10 @@ TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
 TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
     SCENARIO(
         "NMU VcArbiter decorator is transparent to nmu::Packetize: wire "
-        "Packetize -> WormholeArbiter -> VcArbiter -> LoopbackNoc with "
+        "Packetize -> WormholeArbiter -> VcArbiter -> ChannelModel with "
         "NUM_VC=1 and verify Packetize-emitted AW + W flits arrive intact "
         "at NSU side.");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
     ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> wh_arb(
         vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
@@ -394,7 +394,7 @@ TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
         "WormholeArbiter -> VcArbiter -> downstream matches payload.wlast "
         "(verifies §12 packetize fix is preserved end-to-end through the "
         "decorator pipeline).");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
     ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> wh_arb(
         vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
@@ -449,7 +449,7 @@ TEST(NmuVcArbDeath, WFollowsAW_WBeforeAW_DeathTest) {
         "NMU VcArbiter: push_flit(W) before any push_flit(AW) violates "
         "Constraint A1; current_aw_vc_ has no value so VcArbiter must "
         "assert+abort instead of UB.");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/2, 0, 1);
     EXPECT_DEATH(
         {

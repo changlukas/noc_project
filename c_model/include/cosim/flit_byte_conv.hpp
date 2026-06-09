@@ -1,13 +1,13 @@
 // Flit <-> FlitBytes byte-array conversions shared by all cosim shell adapters.
 //
 // Extracted to dedupe identical helpers previously living in
-// nmu_shell_adapter.hpp, nsu_shell_adapter.hpp, and loopback_noc_shell_adapter.hpp.
-// FlitBytes is a std::array<uint8_t, FLIT_BYTES> defined in loopback_noc_shell_io.hpp;
+// nmu_shell_adapter.hpp, nsu_shell_adapter.hpp, and channel_model_shell_adapter.hpp.
+// FlitBytes is a std::array<uint8_t, FLIT_BYTES> defined in channel_model_shell_io.hpp;
 // Flit::raw() returns std::array<uint8_t, Flit::WIDTH_BYTES>. The static_assert below
 // ensures FLIT_BYTES (cosim DPI marshalling size) equals Flit::WIDTH_BYTES (c_model
 // flit container size), so the per-byte copy is well-defined.
 #pragma once
-#include "cosim/loopback_noc_shell_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
 #include "ni/flit.hpp"                       // Flit
 #include <array>
 #include <cstdint>

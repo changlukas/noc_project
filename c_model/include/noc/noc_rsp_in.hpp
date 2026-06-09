@@ -4,7 +4,7 @@
 // The NMU Depacketize stage pulls response flits (B / R) from a NocRspIn
 // and reassembles them into AXI beats. Concrete implementations are the
 // real NoC adapter (DPI bridge from the SystemVerilog router) and the
-// LoopbackNoc test fixture. Naming mirrors the ni_signals.json pin struct
+// ChannelModel test fixture. Naming mirrors the ni_signals.json pin struct
 // `NocRspInPins`.
 //
 // Contract: pop_flit returns nullopt when no flit is currently available.

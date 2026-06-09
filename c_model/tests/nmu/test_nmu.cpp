@@ -3,7 +3,7 @@
 // detail::make_vc_arbiter, sub-module ref dependencies) before Task 3
 // integration. Does NOT exercise full e2e flow; that's integration testbench.
 #include "axi/types.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "ni/flit.hpp"
 #include "ni_flit_constants.h"
@@ -15,14 +15,14 @@ using ni::cmodel::Flit;
 using ni::cmodel::nmu::Nmu;
 using ni::cmodel::nmu::NmuConfig;
 using ni::cmodel::nmu::NmuStandalone;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 namespace axi = ni::cmodel::axi;
 
 TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
     SCENARIO(
         "Nmu top-level smoke: NUM_VC=1 default config, construct + tick 10x "
         "should not crash. Verifies ctor sequence + member init order.");
-    LoopbackNoc loopback(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel loopback(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
     cfg.src_id = 0x12;
     Nmu nmu(cfg, loopback.nmu_req_out(), loopback.nmu_rsp_in());
@@ -46,7 +46,7 @@ TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
 // -> VcArbiter -> NocReqOut wiring, and the symmetric
 // NocRspIn -> Depacketize -> AxiSlavePort return path inside the
 // assembled pipeline. Uses NmuStandalone so the test does not depend on
-// the LoopbackNoc / NSU side; any break in Nmu-internal wiring surfaces
+// the ChannelModel / NSU side; any break in Nmu-internal wiring surfaces
 // here even if the integration testbench's harness happens to mask it.
 TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     SCENARIO(

@@ -1,11 +1,11 @@
 #include "nmu/depacketize.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nmu::Depacketize;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 namespace axi = ni::cmodel::axi;
 
 namespace {
@@ -31,7 +31,7 @@ ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
 
 TEST(NmuDepacketize, PopBDecodesFromFlit) {
     SCENARIO("NMU Depacketize: B flit decodes to BBeat with id and resp from payload fields");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), /*b*/ 16, /*r*/ 16);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_b_flit(0x05, axi::Resp::SLVERR)));
     depkt.tick();
@@ -43,7 +43,7 @@ TEST(NmuDepacketize, PopBDecodesFromFlit) {
 
 TEST(NmuDepacketize, DemuxMixedFlitsByAxiCh) {
     SCENARIO("NMU Depacketize: B/R interleaved flits demux to per-channel queues by axi_ch header");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_b_flit(0x01)));
     ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(0x02, true)));
@@ -56,7 +56,7 @@ TEST(NmuDepacketize, DemuxMixedFlitsByAxiCh) {
 
 TEST(NmuDepacketize, PendingFlitHolBlockingBFullStallsR) {
     SCENARIO("NMU Depacketize: HoL B-queue full holds pending B; R behind blocked until B drained");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), /*b cap=*/1, /*r cap=*/16);
     // Queue order: B, B, R
     ASSERT_TRUE(noc.rsp_out().push_flit(make_b_flit(0x01)));
@@ -74,7 +74,7 @@ TEST(NmuDepacketize, PendingFlitHolBlockingBFullStallsR) {
 
 TEST(NmuDepacketize, PopBEmptyReturnsNullopt) {
     SCENARIO("NMU Depacketize: pop_b/pop_r on empty queues return nullopt (no spurious values)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     EXPECT_FALSE(depkt.pop_b().has_value());
     EXPECT_FALSE(depkt.pop_r().has_value());
@@ -82,14 +82,14 @@ TEST(NmuDepacketize, PopBEmptyReturnsNullopt) {
 
 TEST(NmuDepacketize, PopAwAssertFalse) {
     SCENARIO("NMU Depacketize: pop_aw asserts false (AW is request-direction only, not response)");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     EXPECT_DEATH(depkt.pop_aw(), ".*");
 }
 
 TEST(NmuDepacketize, BFifoOrderPreserved) {
     SCENARIO("NMU Depacketize: B queue preserves NoC arrival order across 5 sequential B flits");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     for (uint8_t i = 0; i < 5; ++i) ASSERT_TRUE(noc.rsp_out().push_flit(make_b_flit(i)));
     depkt.tick();
@@ -98,7 +98,7 @@ TEST(NmuDepacketize, BFifoOrderPreserved) {
 
 TEST(NmuDepacketize, RPayloadBytesDecoded) {
     SCENARIO("NMU Depacketize: R flit payload bytes (rdata, 32B) decode bit-perfect to RBeat.data");
-    LoopbackNoc noc(16, 16);
+    ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_R);
@@ -121,7 +121,7 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsRobIdxAndRobReq) {
     SCENARIO(
         "NMU Depacketize: pop_b_with_meta returns rob_req/rob_idx from header for ROB routing");
     using namespace ni::cmodel;
-    LoopbackNoc loopback(/*req_depth=*/16, /*rsp_depth=*/16);
+    ChannelModel loopback(/*req_depth=*/16, /*rsp_depth=*/16);
     nmu::Depacketize depkt(loopback.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
 
     Flit f;
@@ -151,7 +151,7 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatRobIdx) {
     SCENARIO(
         "NMU Depacketize: pop_r_with_meta returns per-beat rob_idx (5,6,7,8) for 4-beat burst");
     using namespace ni::cmodel;
-    LoopbackNoc loopback(/*req_depth=*/16, /*rsp_depth=*/16);
+    ChannelModel loopback(/*req_depth=*/16, /*rsp_depth=*/16);
     nmu::Depacketize depkt(loopback.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
 
     for (uint8_t i = 0; i < 4; ++i) {

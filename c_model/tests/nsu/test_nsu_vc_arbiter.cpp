@@ -1,5 +1,5 @@
 #include "nsu/vc_arbiter.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "ni/flit.hpp"
 #include "ni_flit_constants.h"
@@ -10,7 +10,7 @@
 using ni::cmodel::Flit;
 using ni::cmodel::nsu::VcArbiter;
 using ni::cmodel::nsu::VcMode;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 
 namespace {
 
@@ -39,7 +39,7 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2";
 
     SCENARIO("NSU VcArbiter Mode A: B -> write_rsp_vc=0, R -> read_rsp_vc=1");
-    LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
+    ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), num_vc, 0, 1);
 
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
@@ -75,7 +75,7 @@ TEST_P(NsuVcArbParam, Nsu_MultiCandidate_HoLAvoidance) {
     SCENARIO(
         "NSU VcArbiter Mode B: saturate first B candidate VC -> next B "
         "picks second candidate VC, avoiding head-of-line block");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
 
     // B always gets 2 candidates (VC=0 and VC=1); R fills the remainder
     // (or shares VC=0 when num_vc=2 and there is no separate upper half).
@@ -112,7 +112,7 @@ TEST_P(NsuVcArbParam, Nsu_RoundRobinFairness) {
     SCENARIO(
         "NSU VcArbiter Mode B: num_vc R flits pre-routed to distinct VCs via "
         "candidate list; tick num_vc times -> flits emerge in RR order");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
     candidates[ni::AXI_CH_B] = {0};
     // R candidate list spans all VCs; pending_depth=1 fills each VC in order.
@@ -148,7 +148,7 @@ TEST_P(NsuVcArbParam, Nsu_CreditGating) {
         "NSU VcArbiter: downstream per_vc_depth=1; pending_depth=1 forces "
         "second R to VC=1; tick drains VC=0 first; second tick advances "
         "RR to VC=1 after VC=0 credit exhausted");
-    LoopbackNoc noc(/*req*/ 64, /*rsp*/ 64);
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     noc.set_per_vc_depth(1);
     std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
     candidates[ni::AXI_CH_B] = {0};
@@ -191,7 +191,7 @@ TEST(NsuVcArbiter, Nsu_Degenerate_NumVc1_Passthrough) {
 
     // Mode A
     {
-        LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
+        ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
         auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/1, 0, 0);
         ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
         ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
@@ -205,7 +205,7 @@ TEST(NsuVcArbiter, Nsu_Degenerate_NumVc1_Passthrough) {
     }
     // Mode B -- even with multi_candidate, num_vc=1 forces VC=0.
     {
-        LoopbackNoc noc(/*req*/ 32, /*rsp*/ 32);
+        ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
         std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
         candidates[ni::AXI_CH_B] = {0};
         candidates[ni::AXI_CH_R] = {0};

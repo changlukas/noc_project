@@ -46,8 +46,8 @@ System boundary:
 ~~~
 
 The NMU and NSU are the primary subjects under test. The NoC fabric
-between them is represented by a simple loopback in the c_model
-(LoopbackNoc) and is not under AXI4 conformity verification.
+between them is represented by a simple channel stub in the c_model
+(ChannelModel) and is not under AXI4 conformity verification.
 
 The c_model is the conformity verification vehicle at the AXI4 pin
 boundary of the NMU and NSU.
@@ -97,7 +97,7 @@ ordering is the master's responsibility).
 ### NoC fabric stub
 
 The c_model contains no router class. The only NoC component is the
-`LoopbackNoc` stub (`c_model/tests/common/loopback_noc.hpp`), a
+`ChannelModel` stub (`c_model/tests/common/channel_model.hpp`), a
 testbench-only NoC bridge that conducts NMU TX flits to NSU RX. By
 default it is zero-delay; the test fixture can set a per-NSU response
 latency via `set_nsu_latency` / `set_nsu_latency_range`, or a global
@@ -105,7 +105,7 @@ request / response delay via `set_req_delay` / `set_rsp_delay` (single-
 NSU mode only). Destination derivation (XY bit-slice on `awaddr` /
 `araddr`) is performed at NMU packetize time via
 `nmu::addr_trans::xy_route` (`c_model/include/nmu/addr_trans.hpp`), not
-at the NoC level. A router model can replace `LoopbackNoc` by
+at the NoC level. A router model can replace `ChannelModel` by
 implementing the four `NocReqOut` / `NocRspIn` / `NocReqIn` /
 `NocRspOut` abstract interfaces declared in `c_model/include/noc/`.
 
@@ -133,7 +133,7 @@ AxiSlavePort        (accepts AXI4 beats from the master-side driver)
 Nmu                 (packetizes; zero-fills noc_qos + flit_ecc; manages RoB)
     |  flit inject
     v
-LoopbackNoc         (zero-latency stub; connects NMU TX to NSU RX)
+ChannelModel        (zero-latency stub; connects NMU TX to NSU RX)
     |  flit deliver
     v
 Nsu                 (unpacks; drives AXI4 to downstream slave)
@@ -171,7 +171,7 @@ registered state. This matches the Verilator clk_i cycle semantics.
 Key properties:
 
 - 1-cycle latency per pipeline hop -- a beat pushed into NMU at tick N
-  appears at the LoopbackNoc input at tick N+1.
+  appears at the ChannelModel input at tick N+1.
 - Registered handshake -- `can_accept_*()` queries reflect state latched
   at the previous tick, not combinational lookahead.
 - Verilator clk_i match -- the Verilator harness calls
@@ -197,7 +197,7 @@ components can evolve independently:
   `nmu::VcArbiter` and `nsu::VcArbiter` (the constructors are private).
   The mode is selected at construction time via `NmuConfig::vc_mode` /
   `NsuConfig::vc_mode`.
-- LoopbackNoc substitution -- `LoopbackNoc` (`c_model/tests/common/`)
+- ChannelModel substitution -- `ChannelModel` (`c_model/tests/common/`)
   implements the `NocReqOut` / `NocRspIn` / `NocReqIn` / `NocRspOut`
   abstract interfaces defined in `c_model/include/noc/`. Replacing it
   with a real router model requires implementing those four interfaces.
@@ -215,7 +215,7 @@ components to Verilator-compiled SV checkers. The layer has three steps:
    posedge `clk_i`: `cmodel_<shell>_set_inputs` ->
    `cmodel_<shell>_tick` -> `cmodel_<shell>_get_outputs` (see
    `cosim/c/cmodel_dpi.h` for the five tick functions:
-   `cmodel_master_tick`, `cmodel_nmu_tick`, `cmodel_loopback_noc_tick`,
+   `cmodel_master_tick`, `cmodel_nmu_tick`, `cmodel_channel_model_tick`,
    `cmodel_nsu_tick`, `cmodel_slave_tick`).
 2. The DPI implementation reads the SV input wire bundle, calls the
    appropriate `*_shell_adapter.hpp::tick()`, and writes the SV output
@@ -228,7 +228,7 @@ Five shell adapters mediate the boundary:
 - `NsuShellAdapter` -- flit input / AXI master port output.
 - `MasterShellAdapter` -- AXI master driver output / NMU slave port input.
 - `SlaveShellAdapter` -- NSU master port output / slave receiver input.
-- `LoopbackNocShellAdapter` -- NMU flit output to NSU flit input (zero-latency loopback stub).
+- `ChannelModelShellAdapter` -- NMU flit output to NSU flit input (zero-latency channel stub).
 
 Shell responsibility invariant: `<comp>_shell_adapter.hpp::tick()` is
 allowed only to:

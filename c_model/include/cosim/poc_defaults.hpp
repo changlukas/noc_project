@@ -2,7 +2,7 @@
 //
 // Centralizes the magic numbers that previously appeared as bare literals
 // across nmu_shell_adapter.hpp, nsu_shell_adapter.hpp, and
-// loopback_noc_shell_adapter.hpp. Names mirror the AdapterConfig /
+// channel_model_shell_adapter.hpp. Names mirror the AdapterConfig /
 // NmuConfig / NsuConfig field they populate.
 #pragma once
 #include <cstddef>
@@ -12,9 +12,9 @@ namespace ni::cmodel::cosim {
 // AxiSlavePort / AxiMasterPort port_params.*_queue_depth and depkt_*_q_depth.
 constexpr std::size_t kPoCAxiQueueDepth = 16;
 
-// LoopbackNoc req / rsp queue depths (port_params.loopback_noc_{req,rsp}_depth)
-// and the standalone LoopbackNoc ctor depths.
-constexpr std::size_t kPoCLoopbackNocDepth = 64;
+// ChannelModel req / rsp queue depths (port_params.channel_model_{req,rsp}_depth)
+// and the standalone ChannelModel ctor depths.
+constexpr std::size_t kPoCChannelModelDepth = 64;
 
 // MetaBuffer per-ID depth (port_params.meta_buffer_per_id_depth and
 // NsuConfig::meta_buffer_per_id_depth).

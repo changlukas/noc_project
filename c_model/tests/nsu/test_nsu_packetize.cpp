@@ -1,6 +1,6 @@
 #include "nsu/packetize.hpp"
 #include "nsu/meta_buffer.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
@@ -9,7 +9,7 @@
 using ni::cmodel::nsu::MetaBuffer;
 using ni::cmodel::nsu::MetaEntry;
 using ni::cmodel::nsu::Packetize;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 using ni::cmodel::testing::RspCapture;
 namespace axi = ni::cmodel::axi;
 
@@ -69,7 +69,7 @@ TEST(NsuPacketize, PushBNoCommitOnNocFull) {
     SCENARIO(
         "NSU Packetize: push_b fail on NoC full keeps MetaBuffer entry (peek-then-commit, no "
         "desync)");
-    LoopbackNoc noc(/*req*/ 16, /*rsp*/ 1);
+    ChannelModel noc(/*req*/ 16, /*rsp*/ 1);
     RspCapture r_cap;
     MetaBuffer mb(4);
     mb.snapshot_write(0x05, {0x12, 0, 0});

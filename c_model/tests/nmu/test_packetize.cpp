@@ -1,12 +1,12 @@
 #include "nmu/packetize.hpp"
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nmu::Packetize;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 using ni::cmodel::testing::ReqCapture;
 namespace axi = ni::cmodel::axi;
 
@@ -135,7 +135,7 @@ TEST(NmuPacketize, WHeaderLastMatchesWlast) {
 TEST(NmuPacketize, PushAwFailsOnNocFull) {
     SCENARIO(
         "NMU Packetize: push_aw returns false when NoC req channel is full; succeeds after drain");
-    LoopbackNoc noc(/*req*/ 1, /*rsp*/ 16);
+    ChannelModel noc(/*req*/ 1, /*rsp*/ 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));

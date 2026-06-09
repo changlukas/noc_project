@@ -1,8 +1,8 @@
 // nsu_wrap — Stage 5b DPI shell for the Nsu component.
 //
 // The Nsu is the NoC-side inverse of nmu_wrap: it has a NoC consumer side
-// (noc_req_i — receives req flits from LoopbackNoc) and a NoC producer side
-// (noc_rsp_o — drives rsp flits back toward LoopbackNoc), plus an AXI master
+// (noc_req_i — receives req flits from ChannelModel) and a NoC producer side
+// (noc_rsp_o — drives rsp flits back toward ChannelModel), plus an AXI master
 // side (drives AW/W/AR to the downstream subordinate; receives B/R responses).
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
@@ -119,7 +119,7 @@ module nsu_wrap #(
     // Output registers (beta-tick: registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
-    // NoC rsp side outputs (Nsu drives toward LoopbackNoc)
+    // NoC rsp side outputs (Nsu drives toward ChannelModel)
     bit                    noc_rsp_valid_q;
     bit [FLIT_WIDTH-1:0]       noc_rsp_flit_q;
 
@@ -196,10 +196,10 @@ module nsu_wrap #(
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_nsu_set_inputs(
-                // NoC req side — req flit arriving from LoopbackNoc toward Nsu
+                // NoC req side — req flit arriving from ChannelModel toward Nsu
                 noc_req_i.valid,
                 noc_req_i.flit,
-                // NoC rsp credit — LoopbackNoc returns credit to Nsu
+                // NoC rsp credit — ChannelModel returns credit to Nsu
                 noc_rsp_o.credit_return[0],
                 // AXI master side — subordinate drives ready + B/R
                 axi_o.awready,
@@ -297,7 +297,7 @@ module nsu_wrap #(
     // Drive interface outputs from registered state
     // -------------------------------------------------------------------------
 
-    // NoC rsp side — Nsu drives rsp flit toward LoopbackNoc
+    // NoC rsp side — Nsu drives rsp flit toward ChannelModel
     assign noc_rsp_o.valid = noc_rsp_valid_q;
     assign noc_rsp_o.flit  = noc_rsp_flit_q;
 

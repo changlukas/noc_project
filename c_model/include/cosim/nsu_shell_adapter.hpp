@@ -1,8 +1,8 @@
 // NsuShellAdapter — Stage 5b ShellAdapter for the Nsu component.
 //
 // Owns an NsuStandalone (T3 hermetic wrapper). Nsu is the inverse of Nmu:
-// it has a NoC consumer side (receives req flits from LoopbackNoc), a NoC
-// producer side (sends rsp flits to LoopbackNoc), and an AXI master side
+// it has a NoC consumer side (receives req flits from ChannelModel), a NoC
+// producer side (sends rsp flits to ChannelModel), and an AXI master side
 // (drives AW/W/AR to a subordinate; consumes B/R from that subordinate).
 //
 // Each tick follows the 3-step pattern:
@@ -29,8 +29,8 @@
 // Hermetic invariant: no refs to other ShellAdapters.
 #pragma once
 #include "axi/types.hpp"
-#include "cosim/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
-#include "cosim/loopback_noc_shell_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "cosim/flit_byte_conv.hpp"          // flit_from_bytes, flit_to_bytes
+#include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
 #include "cosim/nsu_shell_io.hpp"
 #include "cosim/poc_defaults.hpp"  // kPoC* depths
 #include "ni/flit.hpp"
@@ -63,8 +63,8 @@ class NsuShellAdapter {
         cfg.port_params.depkt_ar_q_depth = queue_depth;
         cfg.port_params.depkt_b_q_depth = queue_depth;
         cfg.port_params.depkt_r_q_depth = queue_depth;
-        cfg.port_params.loopback_noc_req_depth = kPoCLoopbackNocDepth;
-        cfg.port_params.loopback_noc_rsp_depth = kPoCLoopbackNocDepth;
+        cfg.port_params.channel_model_req_depth = kPoCChannelModelDepth;
+        cfg.port_params.channel_model_rsp_depth = kPoCChannelModelDepth;
         cfg.port_params.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;
         cfg.depkt_aw_q_depth = queue_depth;
         cfg.depkt_w_q_depth = queue_depth;

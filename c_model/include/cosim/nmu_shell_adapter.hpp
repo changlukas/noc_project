@@ -2,8 +2,8 @@
 //
 // Owns an NmuStandalone (T3 hermetic wrapper). The Nmu is the most complex
 // shell — it has BOTH an AXI slave side (incoming AW/W/AR, outgoing B/R)
-// AND NoC sides (req_out producer toward LoopbackNoc, rsp_in consumer from
-// LoopbackNoc). Each tick follows the 3-step pattern:
+// AND NoC sides (req_out producer toward ChannelModel, rsp_in consumer from
+// ChannelModel). Each tick follows the 3-step pattern:
 //   set_inputs(in)   → latch NmuInputs
 //   tick()           → inject NoC rsp flit (if valid) into NmuStandalone,
 //                      push AW/W/AR beats (if valid) into axi_slave_port(),
@@ -24,8 +24,8 @@
 // Hermetic invariant: no refs to other ShellAdapters.
 #pragma once
 #include "axi/types.hpp"
-#include "cosim/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
-#include "cosim/loopback_noc_shell_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "cosim/flit_byte_conv.hpp"          // flit_from_bytes, flit_to_bytes
+#include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
 #include "cosim/nmu_shell_io.hpp"
 #include "cosim/poc_defaults.hpp"  // kPoC* depths
 #include "ni/flit.hpp"
@@ -58,8 +58,8 @@ class NmuShellAdapter {
         cfg.port_params.depkt_ar_q_depth = queue_depth;
         cfg.port_params.depkt_b_q_depth = queue_depth;
         cfg.port_params.depkt_r_q_depth = queue_depth;
-        cfg.port_params.loopback_noc_req_depth = kPoCLoopbackNocDepth;
-        cfg.port_params.loopback_noc_rsp_depth = kPoCLoopbackNocDepth;
+        cfg.port_params.channel_model_req_depth = kPoCChannelModelDepth;
+        cfg.port_params.channel_model_rsp_depth = kPoCChannelModelDepth;
         cfg.port_params.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;
         cfg.depkt_b_q_depth = queue_depth;
         cfg.depkt_r_q_depth = queue_depth;

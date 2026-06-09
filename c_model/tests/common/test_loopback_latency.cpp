@@ -1,4 +1,4 @@
-// Multi-NSU LoopbackNoc unit tests + backward-compat invariant.
+// Multi-NSU ChannelModel unit tests + backward-compat invariant.
 //
 // Verifies:
 //   - Multi-NSU ctor routes per-flit by dst_id via set_dst_route().
@@ -9,7 +9,7 @@
 //   - Single-NSU ctor backward-compat: dst defaults route to NSU_0, legacy
 //     aliases (req_in/req_out/rsp_in/rsp_out) reach NSU_0, legacy
 //     set_rsp_delay still applies globally.
-#include "common/loopback_noc.hpp"
+#include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "ni_flit_constants.h"
 #include <cstdint>
@@ -17,7 +17,7 @@
 #include <vector>
 
 using ni::cmodel::Flit;
-using ni::cmodel::testing::LoopbackNoc;
+using ni::cmodel::testing::ChannelModel;
 
 namespace {
 
@@ -47,9 +47,9 @@ Flit make_rsp_flit(uint8_t src, uint8_t dst, uint8_t rob_req, uint8_t rob_idx) {
 
 }  // namespace
 
-TEST(LoopbackNocMultiNsu, RouteByDstId) {
-    SCENARIO("LoopbackNoc: multi-NSU ctor routes per-flit by dst_id via set_dst_route map");
-    LoopbackNoc noc(/*num_nsu=*/2, /*req_per_nsu=*/16, /*rsp_total=*/16);
+TEST(ChannelModelMultiNsu, RouteByDstId) {
+    SCENARIO("ChannelModel: multi-NSU ctor routes per-flit by dst_id via set_dst_route map");
+    ChannelModel noc(/*num_nsu=*/2, /*req_per_nsu=*/16, /*rsp_total=*/16);
     noc.set_dst_route(/*dst=*/0x00, /*nsu_idx=*/0);
     noc.set_dst_route(/*dst=*/0x01, /*nsu_idx=*/1);
 
@@ -68,18 +68,19 @@ TEST(LoopbackNocMultiNsu, RouteByDstId) {
     EXPECT_FALSE(noc.nsu_req_in(1).pop_flit().has_value());
 }
 
-TEST(LoopbackNocMultiNsuDeath, UnmappedDst_Assert) {
+TEST(ChannelModelMultiNsuDeath, UnmappedDst_Assert) {
     SCENARIO(
-        "LoopbackNoc: push of flit with unmapped dst_id asserts (no silent drop or default route)");
-    LoopbackNoc noc(2, 16, 16);
+        "ChannelModel: push of flit with unmapped dst_id asserts (no silent drop or default "
+        "route)");
+    ChannelModel noc(2, 16, 16);
     // No set_dst_route called -> all dst unmapped -> push asserts
     EXPECT_DEATH(noc.nmu_req_out().push_flit(make_req_flit(0x10, 0x99, 0, 0)), ".*");
 }
 
-TEST(LoopbackNocMultiNsu, PerNsuLatency_StaticDelay) {
+TEST(ChannelModelMultiNsu, PerNsuLatency_StaticDelay) {
     SCENARIO(
-        "LoopbackNoc: set_nsu_latency=3 holds rsp flit for 3 ticks before NMU pop_flit sees it");
-    LoopbackNoc noc(2, 16, 16);
+        "ChannelModel: set_nsu_latency=3 holds rsp flit for 3 ticks before NMU pop_flit sees it");
+    ChannelModel noc(2, 16, 16);
     noc.set_nsu_latency(/*nsu_idx=*/1, /*cycles=*/3);
 
     ASSERT_TRUE(noc.nsu_rsp_out(1).push_flit(make_rsp_flit(0x11, 0x01, 1, 0)));
@@ -95,11 +96,11 @@ TEST(LoopbackNocMultiNsu, PerNsuLatency_StaticDelay) {
     EXPECT_EQ(f->get_header_field("src_id"), 0x11u);
 }
 
-TEST(LoopbackNocMultiNsu, PerNsuLatency_RandomBounded) {
+TEST(ChannelModelMultiNsu, PerNsuLatency_RandomBounded) {
     SCENARIO(
-        "LoopbackNoc: random latency in [2,8] honored per-flit; all 100 flits release within "
+        "ChannelModel: random latency in [2,8] honored per-flit; all 100 flits release within "
         "bounds");
-    LoopbackNoc noc(2, 16, /*rsp_total=*/512);
+    ChannelModel noc(2, 16, /*rsp_total=*/512);
     noc.set_nsu_latency_range(/*nsu_idx=*/1, /*min=*/2, /*max=*/8);
     noc.set_random_seed(42);
 
@@ -124,11 +125,11 @@ TEST(LoopbackNocMultiNsu, PerNsuLatency_RandomBounded) {
     }
 }
 
-TEST(LoopbackNocMultiNsu, PerNsuQueueFull_DoesNotBlockOtherNsu) {
+TEST(ChannelModelMultiNsu, PerNsuQueueFull_DoesNotBlockOtherNsu) {
     SCENARIO(
-        "LoopbackNoc: NSU_0 req queue full does not block push to NSU_1 (per-NSU independent "
+        "ChannelModel: NSU_0 req queue full does not block push to NSU_1 (per-NSU independent "
         "queues)");
-    LoopbackNoc noc(/*num_nsu=*/2, /*req_per_nsu=*/1, /*rsp_total=*/16);
+    ChannelModel noc(/*num_nsu=*/2, /*req_per_nsu=*/1, /*rsp_total=*/16);
     noc.set_dst_route(0x00, 0);
     noc.set_dst_route(0x01, 1);
 
@@ -139,10 +140,11 @@ TEST(LoopbackNocMultiNsu, PerNsuQueueFull_DoesNotBlockOtherNsu) {
     EXPECT_TRUE(noc.nmu_req_out().push_flit(make_req_flit(0x10, 0x01, 0, 0)));
 }
 
-TEST(LoopbackNocBackwardCompat, SingleNsuCtor_LegacyAccessAndDelayPreserved) {
-    SCENARIO("LoopbackNoc: single-NSU ctor keeps backward compat (legacy aliases + set_rsp_delay)");
+TEST(ChannelModelBackwardCompat, SingleNsuCtor_LegacyAccessAndDelayPreserved) {
+    SCENARIO(
+        "ChannelModel: single-NSU ctor keeps backward compat (legacy aliases + set_rsp_delay)");
     // Single-NSU ctor: dst_to_nsu_ defaults to all NSU_0
-    LoopbackNoc noc(/*req_depth=*/4, /*rsp_depth=*/4);
+    ChannelModel noc(/*req_depth=*/4, /*rsp_depth=*/4);
 
     // Invariant 1: dst defaults route to NSU_0 (no set_dst_route needed)
     ASSERT_TRUE(noc.nmu_req_out().push_flit(make_req_flit(0x10, 0x55, 0, 0)));
