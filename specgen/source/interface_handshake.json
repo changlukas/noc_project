@@ -30,6 +30,7 @@
       ],
       "modports": ["mosi", "miso"],
       "protocol_semantics": {
+        "placeholder_convention": "<chan> ∈ {req, rsp} — protocol applies symmetrically to both channels of the bundle",
         "transfer_condition": "producer-internal credit counter for selected VC > 0 AND <chan>_valid asserted; selected VC encoded inside <chan>_flit header. Each channel (req, rsp) has independent credit accounting.",
         "credit_return_encoding": {
           "scheme": "per_vc_credit_pulse_vector",
@@ -44,7 +45,7 @@
           "note": "Producer assumes SLAVE_VC_BUFFER_DEPTH credits per VC per channel after rst_ni deassert."
         },
         "valid_stability": "once <chan>_valid asserted, <chan>_valid + <chan>_flit MUST hold until handshake completes (always-accept on receiver side; backpressure via producer credit exhaustion). See IHI 0022H §A3.2.1 analog.",
-        "combinational_loops": "forbidden — <chan>_credit_return must be a registered output of the receiver"
+        "combinational_loops": "forbidden — <chan>_credit_return must be a registered output of the side receiving that channel's valid/flit (per <chan>)"
       }
     }
   }

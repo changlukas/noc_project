@@ -4,8 +4,8 @@
 // tb_top — Stage 5b wire-level co-sim testbench
 //
 // Per spec §4.1 topology:
-//   axi_master_wrap →[master_nmu_axi]→ nmu_wrap →[nmu_channel_model]→ channel_model_wrap
-//                                                                  →[channel_model_nsu]→ nsu_wrap →[nsu_slave_axi]→ axi_slave_wrap
+//   Request:  axi_master_wrap →[master_nmu_axi]→ nmu_wrap →[nmu_channel_model]→ channel_model_wrap →[channel_model_nsu]→ nsu_wrap →[nsu_slave_axi]→ axi_slave_wrap
+//   Response: opposite direction along the same path
 //
 //   Each noc_intf bundle carries req + rsp channels with mosi/miso modports.
 //   wb2axip faxi_slave  bound on master_nmu_axi (NMU manager-facing: checks NMU as AXI master)

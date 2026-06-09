@@ -188,7 +188,7 @@ def _emit_noc_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
         f"input  {', '.join(in_names)} );"
     )
     out.append(
-        f"  modport {mp_in}  ( input  {', '.join(out_names)}, "
+        f"  modport {mp_in} ( input  {', '.join(out_names)}, "
         f"output {', '.join(in_names)} );"
     )
     out.append(f"endinterface : {name}")

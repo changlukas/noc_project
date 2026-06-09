@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: ceef98ad4649
 // Generator version: v1.0.0
-// Generated at: 2026-06-09T06:52:53Z
+// Generated at: 2026-06-09T07:06:21Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -146,7 +146,7 @@ interface noc_intf #(
   logic [NUM_VC-1:0]     rsp_credit_return;
 
   modport mosi ( output req_valid, req_flit, rsp_credit_return, input  req_credit_return, rsp_valid, rsp_flit );
-  modport miso  ( input  req_valid, req_flit, rsp_credit_return, output req_credit_return, rsp_valid, rsp_flit );
+  modport miso ( input  req_valid, req_flit, rsp_credit_return, output req_credit_return, rsp_valid, rsp_flit );
 endinterface : noc_intf
 
 `endif // NI_SIGNALS_PKG_SVH
