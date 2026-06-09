@@ -4,6 +4,7 @@
 #include "cmodel_dpi.h"
 #include "handle_block.hpp"
 #include <atomic>
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <string>
 
@@ -30,7 +31,21 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     EXPECT_EQ(h0, nullptr);
     check_and_clear_error(CMODEL_DPI_ERR_NOT_INITIALIZED);
 
-    // Body extended by Tasks 3-10.
+    // Case: cmodel_init on bad YAML → ERR_GENERIC, state stays UNINITIALIZED.
+    cmodel_init("/nonexistent/path/to/scenario.yaml");
+    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
+
+    // Case: cmodel_init with good YAML → succeeds.
+    const char* good_yaml = std::getenv("CMODEL_TEST_SCENARIO_YAML");
+    ASSERT_NE(good_yaml, nullptr) << "set CMODEL_TEST_SCENARIO_YAML to a valid scenario";
+    cmodel_init(good_yaml);
+    check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: cmodel_init called twice (both successful) → second rejected.
+    cmodel_init(good_yaml);
+    check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
+
+    // Body extended by Tasks 4-10.
 }
 
 }  // namespace

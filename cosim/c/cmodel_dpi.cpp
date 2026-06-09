@@ -50,6 +50,14 @@ std::string g_dpi_error_msg;
 enum class SessionState { Uninitialized, Initialized, Finalized };
 SessionState g_session_state = SessionState::Uninitialized;
 
+std::size_t g_ever_created_master = 0;  // bumped on each cmodel_master_create
+
+// Cached scenario + original YAML path — read by *_create handlers in Tasks 6-9.
+// Scenario struct lacks a `path` field so the literal path string is stashed
+// separately. Both are immutable after cmodel_init success.
+ni::cmodel::axi::Scenario g_scenario;
+std::string g_scenario_yaml_path;
+
 // Process-wide handle registry — definition (declaration is in handle_block.hpp).
 // Every live HandleBlock* is inserted here at *_create time and erased at
 // *_destroy or cmodel_finalize time.
@@ -119,32 +127,37 @@ std::unique_ptr<ni::cmodel::axi::Scoreboard> g_scoreboard;
 using namespace ni::cmodel::cosim;
 
 extern "C" void cmodel_init(const char* scenario_yaml_path) {
+    using namespace ni::cmodel::cosim;
+    // Session state machine guard.
+    if (g_session_state == SessionState::Initialized ||
+        g_session_state == SessionState::Finalized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_REINIT_FORBIDDEN,
+                             "cmodel_init: session already initialized or finalized");
+        return;
+    }
+    // Retry from UNINITIALIZED: clear prior latch before parsing.
+    g_dpi_error_code.store(CMODEL_DPI_OK);
+    g_dpi_error_msg.clear();
+
     DPI_BOUNDARY_BEGIN(cmodel_init) {
-        // Reset all existing singletons + error state (idempotent per spec §5.3)
-        g_channel_adapter.reset();
-        g_master_adapter.reset();
-        g_slave_adapter.reset();
-        g_nmu_adapter.reset();
-        g_nsu_adapter.reset();
-        g_scoreboard.reset();
-        g_dpi_error_code.store(CMODEL_DPI_OK);
-        g_dpi_error_msg.clear();
-
-        // Parse scenario (validates +inject mode if present)
         auto scenario = ni::cmodel::axi::load_scenario(std::string(scenario_yaml_path));
+        g_scenario = std::move(scenario);
+        g_scenario_yaml_path = scenario_yaml_path;
+        g_scoreboard = std::make_unique<ni::cmodel::axi::Scoreboard>();
 
+        // ====== Preserved singleton-construction block (removed in Task 10) ======
         // Construct fresh adapters into local unique_ptrs (strong exception guarantee)
         auto channel = std::make_unique<ChannelModelShellAdapter>();
         channel->init();
 
         auto master = std::make_unique<MasterShellAdapter>();
-        master->init(std::string(scenario_yaml_path), "", scenario.config.max_outstanding_write,
-                     scenario.config.max_outstanding_read);
-        master->configure_inject(scenario.config.inject);
+        master->init(g_scenario_yaml_path, "", g_scenario.config.max_outstanding_write,
+                     g_scenario.config.max_outstanding_read);
+        master->configure_inject(g_scenario.config.inject);
 
         auto slave = std::make_unique<SlaveShellAdapter>();
-        slave->init(scenario.config.memory_base, scenario.config.memory_size,
-                    scenario.config.write_latency, scenario.config.read_latency);
+        slave->init(g_scenario.config.memory_base, g_scenario.config.memory_size,
+                    g_scenario.config.write_latency, g_scenario.config.read_latency);
 
         auto nmu = std::make_unique<NmuShellAdapter>();
         nmu->init();
@@ -156,8 +169,7 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         // Each callback also prints a one-line transaction summary to stderr so
         // co-sim runs surface per-AXI-transaction activity at runtime, matching
         // the visibility c_model standalone tests give.
-        auto sb = std::make_unique<ni::cmodel::axi::Scoreboard>();
-        auto* sb_raw = sb.get();
+        auto* sb_raw = g_scoreboard.get();
         auto resp_str = [](ni::cmodel::axi::Resp r) -> const char* {
             switch (r) {
                 case ni::cmodel::axi::Resp::OKAY:
@@ -196,7 +208,9 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         g_slave_adapter = std::move(slave);
         g_nmu_adapter = std::move(nmu);
         g_nsu_adapter = std::move(nsu);
-        g_scoreboard = std::move(sb);
+        // ====== End preserved block ======
+
+        g_session_state = SessionState::Initialized;
     }
     DPI_BOUNDARY_END(cmodel_init);
 }
