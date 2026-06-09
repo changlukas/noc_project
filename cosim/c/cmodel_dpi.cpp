@@ -79,13 +79,16 @@ HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name)
         return nullptr;
     }
     auto* h = static_cast<HandleBlock*>(ctx);
-    // Guard 3 — magic sentinel.
-    if (h->magic != static_cast<uint32_t>(expected)) {
+    // Guard 3 — magic sentinel: magic must equal the stored type tag.
+    // Detects memory stomp where the magic field is corrupted but the type
+    // field is intact (or vice versa).
+    if (h->magic != static_cast<uint32_t>(h->type)) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
-                             std::string(fn_name) + ": magic mismatch");
+                             std::string(fn_name) + ": magic does not match stored type");
         return nullptr;
     }
-    // Guard 4 — type tag.
+    // Guard 4 — type tag: stored type must equal what the handler expected.
+    // Detects passing a handle for shell A to a handler for shell B.
     if (h->type != expected) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
                              std::string(fn_name) + ": type mismatch");

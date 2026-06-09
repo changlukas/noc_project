@@ -82,6 +82,8 @@ HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name)
 //     auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
 #define REQUIRE_HANDLE(ctx, expected_type, fn_name)                                   \
     auto* _h = ni::cmodel::cosim::validate_handle((ctx), (expected_type), (fn_name)); \
-    if (!_h) return
+    do {                                                                              \
+        if (!_h) return;                                                              \
+    } while (0)
 
 #endif  // COSIM2_DPI_BOUNDARY_MACROS_H
