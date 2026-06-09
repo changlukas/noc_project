@@ -15,8 +15,8 @@
 #include "common/loopback_depacketizer.hpp"
 #include "common/loopback_packetizer.hpp"
 #include "common/scenario.hpp"
-#include "ni/port_params.hpp"
 #include "nsu/axi_master_port.hpp"
+#include "nsu/port_params.hpp"
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <vector>
@@ -65,12 +65,11 @@ struct PortFixture {
     test::LoopbackChannelSet ch{};
     test::LoopbackPacketizer pkt{ch};
     test::LoopbackDepacketizer depkt{ch};
-    cmod::PortParams params;
+    nsu::PortParams params;
     nsu::AxiMasterPort port;
 
     PortFixture()
-        : params(cmod::load_port_params_yaml("config/port_params.yaml", "nsu")),
-          port(depkt, pkt, params) {}
+        : params(nsu::load_nsu_port_params("config/port_params.yaml")), port(depkt, pkt, params) {}
 
     void set_loopback_caps(std::size_t aw, std::size_t w, std::size_t ar, std::size_t b,
                            std::size_t r) {

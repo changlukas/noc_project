@@ -13,8 +13,8 @@
 #include "common/loopback_depacketizer.hpp"
 #include "common/loopback_packetizer.hpp"
 #include "common/scenario.hpp"
-#include "ni/port_params.hpp"
 #include "nmu/axi_slave_port.hpp"
+#include "nmu/port_params.hpp"
 #include <cstdint>
 #include <gtest/gtest.h>
 
@@ -66,12 +66,11 @@ struct PortFixture {
     test::LoopbackChannelSet ch{};
     test::LoopbackPacketizer pkt{ch};
     test::LoopbackDepacketizer depkt{ch};
-    cmod::PortParams params;
+    nmu::PortParams params;
     nmu::AxiSlavePort port;
 
     PortFixture()
-        : params(cmod::load_port_params_yaml("config/port_params.yaml", "nmu")),
-          port(pkt, depkt, params) {}
+        : params(nmu::load_nmu_port_params("config/port_params.yaml")), port(pkt, depkt, params) {}
 
     // Tighter loopback caps so backpressure tests can drive saturation
     // without exhausting the default 32-deep ports.
@@ -319,7 +318,7 @@ TEST(NmuAxiSlavePort, IndependentBRBackpressure_RProgressesWhileBHolds) {
     test::LoopbackChannelSet ch{};
     test::LoopbackPacketizer pkt{ch};
     test::LoopbackDepacketizer depkt{ch};
-    cmod::PortParams p{32, 32, 32, /*b*/ 1, /*r*/ 32};
+    nmu::PortParams p{32, 32, 32, /*b*/ 1, /*r*/ 32, /*depkt_b*/ 32, /*depkt_r*/ 32};
     nmu::AxiSlavePort port(pkt, depkt, p);
 
     // Pre-fill the depkt-side queues with several beats on each channel.

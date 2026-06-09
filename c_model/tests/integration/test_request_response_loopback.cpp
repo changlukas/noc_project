@@ -49,10 +49,13 @@
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
 #include "common/channel_model.hpp"
+#include "common/channel_model_params.hpp"
 #include "common/scenario.hpp"
 #include "common/test_logger.hpp"
 #include "nmu/nmu.hpp"
+#include "nmu/port_params.hpp"
 #include "nsu/nsu.hpp"
+#include "nsu/port_params.hpp"
 #include "scenario_helpers.hpp"
 #include <algorithm>
 #include <array>
@@ -125,7 +128,9 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     axi::AxiSlave slave(mem);
     slave.set_memory_bounds(sc.config.memory_base, sc.config.memory_size);
 
-    auto params = cmod::load_port_params_yaml("config/port_params.yaml", "nmu");
+    auto nmu_params = nmu::load_nmu_port_params("config/port_params.yaml");
+    auto nsu_params = nsu::load_nsu_port_params("config/port_params.yaml");
+    auto cm_params = test::load_channel_model_params("config/port_params.yaml");
 
     const bool is_multi_dst = yaml_path.find("AX4-STR-003_multi_dst_stress/") != std::string::npos;
     const nmu::RobMode rob_mode = is_multi_dst ? nmu::RobMode::Enabled : nmu::RobMode::Disabled;
@@ -137,8 +142,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     if (is_multi_dst) {
         channel_ptr = std::make_unique<test::ChannelModel>(
             /*num_nsu=*/kNumNsuMulti,
-            /*req_q_depth_per_nsu=*/params.channel_model_req_depth,
-            /*rsp_q_depth_total=*/params.channel_model_rsp_depth);
+            /*req_q_depth_per_nsu=*/cm_params.req_depth,
+            /*rsp_q_depth_total=*/cm_params.rsp_depth);
         // multi_dst_stress addresses: 0x100 -> dst=0, 0x10100 -> dst=1 via
         // addr_trans::xy_route. Map dst_id {0..3} -> NSU {0..3}.
         channel_ptr->set_dst_route(0x00, 0);
@@ -153,8 +158,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         channel_ptr->set_nsu_latency(2, 5);
         channel_ptr->set_nsu_latency(3, 3);
     } else {
-        channel_ptr = std::make_unique<test::ChannelModel>(params.channel_model_req_depth,
-                                                           params.channel_model_rsp_depth);
+        channel_ptr =
+            std::make_unique<test::ChannelModel>(cm_params.req_depth, cm_params.rsp_depth);
         channel_ptr->set_req_delay(req_delay);
         channel_ptr->set_rsp_delay(rsp_delay);
     }
@@ -166,9 +171,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     nmu_cfg.src_id = kNmuSrcId;
     nmu_cfg.write_rob_mode = rob_mode;
     nmu_cfg.read_rob_mode = rob_mode;
-    nmu_cfg.port_params = params;
-    nmu_cfg.depkt_b_q_depth = params.depkt_b_q_depth;
-    nmu_cfg.depkt_r_q_depth = params.depkt_r_q_depth;
+    nmu_cfg.port_params = nmu_params;
     // Mode A (ReadWriteSplit): AW/W on write_vc=0, AR on read_vc=1 when num_vc>=2.
     nmu_cfg.num_vc = num_vc;
     nmu_cfg.vc_mode = nmu::VcMode::ReadWriteSplit;
@@ -187,11 +190,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         const uint8_t this_nsu_src = is_multi_dst ? kNsuSrcIdsMulti[i] : kNsuSrcId;
         nsu::NsuConfig nsu_cfg{};
         nsu_cfg.src_id = this_nsu_src;
-        nsu_cfg.port_params = params;
-        nsu_cfg.meta_buffer_per_id_depth = params.meta_buffer_per_id_depth;
-        nsu_cfg.depkt_aw_q_depth = params.depkt_aw_q_depth;
-        nsu_cfg.depkt_w_q_depth = params.depkt_w_q_depth;
-        nsu_cfg.depkt_ar_q_depth = params.depkt_ar_q_depth;
+        nsu_cfg.port_params = nsu_params;
         // Mode A (ReadWriteSplit): B on write_rsp_vc=0, R on read_rsp_vc=1 when num_vc>=2.
         nsu_cfg.num_vc = num_vc;
         nsu_cfg.vc_mode = nsu::VcMode::ReadWriteSplit;

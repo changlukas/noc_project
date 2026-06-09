@@ -61,15 +61,7 @@ class NsuShellAdapter {
         cfg.port_params.depkt_aw_q_depth = queue_depth;
         cfg.port_params.depkt_w_q_depth = queue_depth;
         cfg.port_params.depkt_ar_q_depth = queue_depth;
-        cfg.port_params.depkt_b_q_depth = queue_depth;
-        cfg.port_params.depkt_r_q_depth = queue_depth;
-        cfg.port_params.channel_model_req_depth = kPoCChannelModelDepth;
-        cfg.port_params.channel_model_rsp_depth = kPoCChannelModelDepth;
         cfg.port_params.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;
-        cfg.depkt_aw_q_depth = queue_depth;
-        cfg.depkt_w_q_depth = queue_depth;
-        cfg.depkt_ar_q_depth = queue_depth;
-        cfg.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;
         cfg.wormhole_per_input_depth = kPoCArbiterFifoDepth;
         cfg.vc_arbiter_pending_depth = kPoCArbiterFifoDepth;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));

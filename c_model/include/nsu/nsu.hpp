@@ -24,7 +24,6 @@
 //
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
-#include "ni/port_params.hpp"
 #include "noc/noc_req_in.hpp"
 #include "noc/noc_rsp_out.hpp"
 #include "noc/wormhole_arbiter.hpp"
@@ -46,11 +45,7 @@ namespace ni::cmodel::nsu {
 
 struct NsuConfig {
     uint8_t src_id = 0;
-    PortParams port_params{};
-    std::size_t meta_buffer_per_id_depth = 16;
-    std::size_t depkt_aw_q_depth = 16;
-    std::size_t depkt_w_q_depth = 16;
-    std::size_t depkt_ar_q_depth = 16;
+    nsu::PortParams port_params{};
     std::size_t num_vc = 1;
     VcMode vc_mode = VcMode::ReadWriteSplit;
     uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
@@ -114,10 +109,10 @@ inline Nsu::Nsu(NsuConfig cfg, noc::NocReqIn& upstream_req, noc::NocRspOut& down
       vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_rsp_)),
       wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/2, std::vector<noc::ChannelPairing>{},
                         cfg_.wormhole_per_input_depth),
-      meta_buffer_(cfg_.meta_buffer_per_id_depth),
+      meta_buffer_(cfg_.port_params.meta_buffer_per_id_depth),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), meta_buffer_, cfg_.src_id),
-      depacketize_(upstream_req_, meta_buffer_, cfg_.depkt_aw_q_depth, cfg_.depkt_w_q_depth,
-                   cfg_.depkt_ar_q_depth),
+      depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.depkt_aw_q_depth,
+                   cfg_.port_params.depkt_w_q_depth, cfg_.port_params.depkt_ar_q_depth),
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {

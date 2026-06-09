@@ -1,44 +1,32 @@
-# NMU/NSU transparent transport port parameters.
-#
-# Single source of truth for the AxiSlavePort (NMU side) and AxiMasterPort
-# (NSU side) internal per-channel FIFO depths. The port classes do not
-# hard-code queue depths in headers — tests load this file and pass a
-# PortParams struct into the constructor.
-#
-# Depths chosen to match Stage 2 axi/axi_slave.hpp default (32). The two
-# ports mirror each other so use the same defaults for both sides; size
-# pressure tests can override these values via inline PortParams literals.
-#
-# Fields (all per-channel, unit = beats):
-#   aw_queue_depth : AW channel internal FIFO capacity
-#   w_queue_depth  : W  channel internal FIFO capacity
-#   ar_queue_depth : AR channel internal FIFO capacity
-#   b_queue_depth  : B  channel internal FIFO capacity
-#   r_queue_depth  : R  channel internal FIFO capacity
+# NMU/NSU port-pair parameters and test-fixture sizings.
+# Each loader (load_nmu_port_params / load_nsu_port_params /
+# load_channel_model_params) parses its own top-level block.
 
-aw_queue_depth: 32
-w_queue_depth: 32
-ar_queue_depth: 32
-b_queue_depth: 32
-r_queue_depth: 32
+nmu:
+  queues:
+    aw_queue_depth: 32
+    w_queue_depth:  32
+    ar_queue_depth: 32
+    b_queue_depth:  32
+    r_queue_depth:  32
+  depacketize:
+    b_q_depth: 32
+    r_q_depth: 32
 
-# Depacketize stage internal demux queue depths (per channel, unit = beats).
-# NMU Depacketize only uses {b, r}; NSU Depacketize only uses {aw, w, ar};
-# the unused fields on each side are loaded but ignored.
-depacketize:
-  aw_q_depth: 32
-  w_q_depth:  32
-  ar_q_depth: 32
-  b_q_depth:  32
-  r_q_depth:  32
+nsu:
+  queues:
+    aw_queue_depth: 32
+    w_queue_depth:  32
+    ar_queue_depth: 32
+    b_queue_depth:  32
+    r_queue_depth:  32
+  depacketize:
+    aw_q_depth: 32
+    w_q_depth:  32
+    ar_q_depth: 32
+  meta_buffer:
+    per_id_depth: 4
 
-# ChannelModel test fixture: per-direction in-flight flit deque capacity
-# (unit = flits). Sized for the longest e2e burst; not a production parameter.
 channel_model:
   req_depth: 32
   rsp_depth: 32
-
-# MetaBuffer (NSU side) per-AXI-ID FIFO depth: max outstanding requests
-# tracked per ID while the response is in flight (unit = transactions).
-meta_buffer:
-  per_id_depth: 4

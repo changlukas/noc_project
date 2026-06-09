@@ -25,6 +25,15 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
     ChannelModel channel(/*req*/ 64, /*rsp*/ 64);
     NsuConfig cfg{};
     cfg.src_id = 0x34;
+    cfg.port_params.aw_queue_depth = 16;
+    cfg.port_params.w_queue_depth = 16;
+    cfg.port_params.ar_queue_depth = 16;
+    cfg.port_params.b_queue_depth = 16;
+    cfg.port_params.r_queue_depth = 16;
+    cfg.port_params.depkt_aw_q_depth = 16;
+    cfg.port_params.depkt_w_q_depth = 16;
+    cfg.port_params.depkt_ar_q_depth = 16;
+    cfg.port_params.meta_buffer_per_id_depth = 4;
     Nsu nsu(cfg, channel.nsu_req_in(0), channel.nsu_rsp_out(0));
 
     EXPECT_EQ(&nsu.axi_master_port(), &nsu.axi_master_port())
@@ -70,6 +79,10 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     cfg.port_params.ar_queue_depth = 16;
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
+    cfg.port_params.depkt_aw_q_depth = 16;
+    cfg.port_params.depkt_w_q_depth = 16;
+    cfg.port_params.depkt_ar_q_depth = 16;
+    cfg.port_params.meta_buffer_per_id_depth = 4;
     NsuStandalone nsu(cfg);
 
     // Build an AW flit. NSU Depacketize snapshots {src_id, rob_req,

@@ -25,6 +25,13 @@ TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
     ChannelModel channel(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
     cfg.src_id = 0x12;
+    cfg.port_params.aw_queue_depth = 16;
+    cfg.port_params.w_queue_depth = 16;
+    cfg.port_params.ar_queue_depth = 16;
+    cfg.port_params.b_queue_depth = 16;
+    cfg.port_params.r_queue_depth = 16;
+    cfg.port_params.depkt_b_q_depth = 16;
+    cfg.port_params.depkt_r_q_depth = 16;
     Nmu nmu(cfg, channel.nmu_req_out(), channel.nmu_rsp_in());
 
     EXPECT_EQ(&nmu.axi_slave_port(), &nmu.axi_slave_port())
@@ -68,6 +75,8 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     cfg.port_params.ar_queue_depth = 16;
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
+    cfg.port_params.depkt_b_q_depth = 16;
+    cfg.port_params.depkt_r_q_depth = 16;
     NmuStandalone nmu(cfg);
 
     // Push one 1-beat write transaction into the upstream AXI face.

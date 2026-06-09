@@ -27,7 +27,6 @@
 //
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
-#include "ni/port_params.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
@@ -51,9 +50,7 @@ struct NmuConfig {
     uint8_t src_id = 0;
     RobMode read_rob_mode = RobMode::Disabled;
     RobMode write_rob_mode = RobMode::Disabled;
-    PortParams port_params{};
-    std::size_t depkt_b_q_depth = 16;  // NMU Depacketize: B response queue
-    std::size_t depkt_r_q_depth = 16;  // NMU Depacketize: R response queue
+    nmu::PortParams port_params{};
     std::size_t num_vc = 1;
     VcMode vc_mode = VcMode::ReadWriteSplit;
     uint8_t write_vc = 0;
@@ -125,7 +122,8 @@ inline Nmu::Nmu(NmuConfig cfg, noc::NocReqOut& downstream_req, noc::NocRspIn& do
       vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_req_)),
       wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/3, std::vector<noc::ChannelPairing>{{0, 1}},
                         cfg_.wormhole_per_input_depth),
-      depacketize_(downstream_rsp_, cfg_.depkt_b_q_depth, cfg_.depkt_r_q_depth),
+      depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
+                   cfg_.port_params.depkt_r_q_depth),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
                  cfg_.src_id),
       rob_(packetize_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode),

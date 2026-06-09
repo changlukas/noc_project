@@ -28,17 +28,17 @@
 #include "axi/types.hpp"
 #include "ni/depacketizer.hpp"
 #include "ni/packetizer.hpp"
-#include "ni/port_params.hpp"
+#include "nsu/port_params.hpp"
 #include <cstddef>
 #include <deque>
 #include <optional>
 
 namespace ni::cmodel::nsu {
 
-// Per-channel internal FIFO depths come from ni::cmodel::PortParams
-// (shared with nmu::AxiSlavePort). Single source of truth is
-// c_model/config/port_params.yaml; see ni/port_params.hpp for the loader
-// helper and the "fail loud / no defaults" rationale.
+// Per-channel internal FIFO depths come from nsu::PortParams.
+// Single source of truth is c_model/config/port_params.yaml nsu: block;
+// see nsu/port_params.hpp for the loader helper and the "fail loud / no
+// defaults" rationale.
 
 class AxiMasterPort {
   public:
