@@ -12,8 +12,7 @@
 //   - Port contract: per-channel FIFO order for all beats regardless of
 //     AXI ID. Cross-ID completion ordering / per-ID response reordering
 //     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
-#include "common/loopback_request_io.hpp"
-#include "common/loopback_response_io.hpp"
+#include "common/loopback_channel_set.hpp"
 #include "common/scenario.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/port_params.hpp"

@@ -2,16 +2,15 @@
 // subordinate transparent transport port.
 //
 // Test strategy (per Stage 3 brief):
-//   - LoopbackChannelSet stands in for the future ni/packetize.hpp +
-//     ni/depacketize.hpp pair so the port can be exercised without standing
-//     up the NoC fabric.
+//   - LoopbackChannelSet (loopback_channel_set.hpp) wires a
+//     RequestPacketizer + ResponseDepacketizer pair so the port can be
+//     exercised without standing up the NoC fabric.
 //   - PortParams come from c_model/config/port_params.yaml (loaded at
 //     fixture setup; NO hardcoded queue-depth literals in the port header).
 //   - Port contract: per-channel FIFO order for all beats regardless of
 //     AXI ID. Cross-ID completion ordering / per-ID response reordering
 //     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
-#include "common/loopback_request_io.hpp"
-#include "common/loopback_response_io.hpp"
+#include "common/loopback_channel_set.hpp"
 #include "common/scenario.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/port_params.hpp"

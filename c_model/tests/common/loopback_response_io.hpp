@@ -7,12 +7,9 @@
 // base (pop_b_with_meta / pop_r_with_meta default to the base forwarding
 // impl — no override needed).
 //
-// LoopbackChannelSet aggregates one RequestChannelSet and one
-// ResponseChannelSet for integration tests that need both planes wired.
-//
 // Lives in tests/common/ because both NMU and NSU unit tests consume it.
+// For the integration aggregate that joins both planes, see loopback_channel_set.hpp.
 #include "axi/types.hpp"
-#include "common/loopback_request_io.hpp"
 #include "response_io.hpp"
 #include <cstddef>
 #include <deque>
@@ -25,15 +22,6 @@ struct ResponseChannelSet {
     std::size_t r_capacity = 32;
     std::deque<axi::BBeat> b;
     std::deque<axi::RBeat> r;
-};
-
-// Integration aggregate: both planes in one struct so the test can write:
-//   LoopbackChannelSet ch{};
-//   LoopbackRequestPacketizer  req_pkt(ch.request);
-//   LoopbackResponseDepacketizer rsp_depkt(ch.response);
-struct LoopbackChannelSet {
-    RequestChannelSet request;
-    ResponseChannelSet response;
 };
 
 class LoopbackResponsePacketizer : public ResponsePacketizer {
