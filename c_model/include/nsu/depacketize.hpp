@@ -1,9 +1,9 @@
 #pragma once
 #include "axi/types.hpp"
-#include "ni/depacketizer.hpp"
 #include "flit.hpp"
 #include "noc/noc_req_in.hpp"
 #include "nsu/meta_buffer.hpp"
+#include "request_io.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -24,7 +24,7 @@ namespace ni::cmodel::nsu {
 // Critical: MetaBuffer snapshot for AW/AR happens AFTER the q_depth check
 // passes, so a backpressure-induced retry of the same pending_ flit never
 // double-snapshots.
-class Depacketize : public Depacketizer {
+class Depacketize : public RequestDepacketizer {
   public:
     Depacketize(noc::NocReqIn& req_in, MetaBuffer& meta, std::size_t aw_q_depth,
                 std::size_t w_q_depth, std::size_t ar_q_depth)
@@ -36,13 +36,10 @@ class Depacketize : public Depacketizer {
 
     void tick();
 
-    // Request methods real
+    // RequestDepacketizer interface
     std::optional<axi::AwBeat> pop_aw() override;
     std::optional<axi::WBeat> pop_w() override;
     std::optional<axi::ArBeat> pop_ar() override;
-    // Response methods assert false
-    std::optional<axi::BBeat> pop_b() override { wrong_side_("nsu::Depacketize", "pop_b"); }
-    std::optional<axi::RBeat> pop_r() override { wrong_side_("nsu::Depacketize", "pop_r"); }
 
   private:
     noc::NocReqIn& req_in_;

@@ -12,8 +12,8 @@
 //   - Port contract: per-channel FIFO order for all beats regardless of
 //     AXI ID. Cross-ID completion ordering / per-ID response reordering
 //     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
-#include "common/loopback_depacketizer.hpp"
-#include "common/loopback_packetizer.hpp"
+#include "common/loopback_request_io.hpp"
+#include "common/loopback_response_io.hpp"
 #include "common/scenario.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/port_params.hpp"
@@ -63,8 +63,8 @@ axi::RBeat make_r(uint8_t id, uint8_t fill, axi::Resp resp, bool last, uint8_t u
 
 struct PortFixture {
     test::LoopbackChannelSet ch{};
-    test::LoopbackPacketizer pkt{ch};
-    test::LoopbackDepacketizer depkt{ch};
+    test::LoopbackRequestDepacketizer depkt{ch.request};
+    test::LoopbackResponsePacketizer pkt{ch.response};
     nsu::PortParams params;
     nsu::AxiMasterPort port;
 
@@ -73,11 +73,11 @@ struct PortFixture {
 
     void set_loopback_caps(std::size_t aw, std::size_t w, std::size_t ar, std::size_t b,
                            std::size_t r) {
-        ch.aw_capacity = aw;
-        ch.w_capacity = w;
-        ch.ar_capacity = ar;
-        ch.b_capacity = b;
-        ch.r_capacity = r;
+        ch.request.aw_capacity = aw;
+        ch.request.w_capacity = w;
+        ch.request.ar_capacity = ar;
+        ch.response.b_capacity = b;
+        ch.response.r_capacity = r;
     }
 };
 
@@ -90,7 +90,7 @@ TEST(NsuAxiMasterPort, AwBasicHandshake_PushPopNoLoss) {
     SCENARIO(
         "NSU AxiMasterPort: 8 AW beats arrive from depacketizer, all surface via pop_aw in order");
     PortFixture fx;
-    for (uint8_t i = 0; i < 8; ++i) fx.ch.aw.push_back(make_aw(i, 0x1000 + i * 32));
+    for (uint8_t i = 0; i < 8; ++i) fx.ch.request.aw.push_back(make_aw(i, 0x1000 + i * 32));
     fx.port.tick();
     for (uint8_t i = 0; i < 8; ++i) {
         auto out = fx.port.pop_aw();
@@ -103,7 +103,7 @@ TEST(NsuAxiMasterPort, ArBasicHandshake_PushPopNoLoss) {
     SCENARIO(
         "NSU AxiMasterPort: 8 AR beats arrive from depacketizer, all surface via pop_ar in order");
     PortFixture fx;
-    for (uint8_t i = 0; i < 8; ++i) fx.ch.ar.push_back(make_ar(i, 0x2000 + i * 32));
+    for (uint8_t i = 0; i < 8; ++i) fx.ch.request.ar.push_back(make_ar(i, 0x2000 + i * 32));
     fx.port.tick();
     for (uint8_t i = 0; i < 8; ++i) {
         auto out = fx.port.pop_ar();
@@ -117,7 +117,8 @@ TEST(NsuAxiMasterPort, WBasicHandshake_PushPopNoLoss) {
         "NSU AxiMasterPort: 8 W beats arrive from depacketizer, all surface via pop_w with "
         "payload");
     PortFixture fx;
-    for (uint8_t i = 0; i < 8; ++i) fx.ch.w.push_back(make_w(0x10 + i, 0xFFFFFFFFu, i == 7, i));
+    for (uint8_t i = 0; i < 8; ++i)
+        fx.ch.request.w.push_back(make_w(0x10 + i, 0xFFFFFFFFu, i == 7, i));
     fx.port.tick();
     for (uint8_t i = 0; i < 8; ++i) {
         auto out = fx.port.pop_w();
@@ -137,7 +138,7 @@ TEST(NsuAxiMasterPort, BBackpressure_FullThenDrainThenAcceptOne) {
     for (std::size_t i = 0; i < fx.params.b_queue_depth; ++i)
         ASSERT_TRUE(fx.port.push_b(make_b(static_cast<uint8_t>(i & 0xFF), axi::Resp::OKAY, 0)));
     EXPECT_FALSE(fx.port.push_b(make_b(0xFF, axi::Resp::OKAY, 0)));
-    fx.ch.b_capacity = 1;
+    fx.ch.response.b_capacity = 1;
     fx.port.tick();
     EXPECT_TRUE(fx.port.push_b(make_b(0xFF, axi::Resp::OKAY, 0)));
 }
@@ -156,13 +157,13 @@ TEST(NsuAxiMasterPort, BBoundary_FailedPushDoesNotDuplicateOnRetry) {
     EXPECT_FALSE(fx.port.push_b(retry));
     EXPECT_FALSE(fx.port.push_b(retry));
     EXPECT_EQ(fx.port.b_q_size(), fx.params.b_queue_depth);
-    fx.ch.b_capacity = 1;
+    fx.ch.response.b_capacity = 1;
     fx.port.tick();
     EXPECT_TRUE(fx.port.push_b(retry));
-    fx.ch.b_capacity = 64;
+    fx.ch.response.b_capacity = 64;
     fx.port.tick();
     std::size_t retry_id_count = 0;
-    for (const auto& b : fx.ch.b)
+    for (const auto& b : fx.ch.response.b)
         if (b.id == 0xCD) ++retry_id_count;
     EXPECT_EQ(retry_id_count, 1u);
 }
@@ -179,7 +180,7 @@ TEST(NsuAxiMasterPort, AwFifoOrder_PreservedAcrossMixedIds) {
     // Cross-ID completion ordering / per-ID response reordering is the ROB
     // stage's responsibility (see plan §3.1), NOT this port's.
     const std::vector<uint8_t> ids{4, 7, 4, 1, 7, 2, 1, 4};
-    for (auto id : ids) fx.ch.aw.push_back(make_aw(id, 0x1000));
+    for (auto id : ids) fx.ch.request.aw.push_back(make_aw(id, 0x1000));
     fx.port.tick();
     for (std::size_t i = 0; i < ids.size(); ++i) {
         auto out = fx.port.pop_aw();
@@ -200,7 +201,7 @@ TEST(NsuAxiMasterPort, ArFifoOrder_PreservedAcrossMixedIds) {
     // Cross-ID completion ordering / per-ID response reordering is the ROB
     // stage's responsibility (see plan §3.1), NOT this port's.
     const std::vector<uint8_t> ids{6, 8, 6, 3, 8, 0, 3, 6};
-    for (auto id : ids) fx.ch.ar.push_back(make_ar(id, 0x2000));
+    for (auto id : ids) fx.ch.request.ar.push_back(make_ar(id, 0x2000));
     fx.port.tick();
     for (std::size_t i = 0; i < ids.size(); ++i) {
         auto out = fx.port.pop_ar();
@@ -221,7 +222,7 @@ TEST(NsuAxiMasterPort, WPassthroughBitForBit) {
     in.strb = 0xDEAD'BEEFu;
     in.last = true;
     in.user = 0x77;
-    fx.ch.w.push_back(in);
+    fx.ch.request.w.push_back(in);
     fx.port.tick();
     auto out = fx.port.pop_w();
     ASSERT_TRUE(out.has_value());
@@ -240,8 +241,8 @@ TEST(NsuAxiMasterPort, BPassthroughBitForBit) {
     axi::BBeat in = make_b(0x42, axi::Resp::EXOKAY, 0x91);
     ASSERT_TRUE(fx.port.push_b(in));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.b.size(), 1u);
-    const auto& out = fx.ch.b.front();
+    ASSERT_EQ(fx.ch.response.b.size(), 1u);
+    const auto& out = fx.ch.response.b.front();
     EXPECT_EQ(out.id, in.id);
     EXPECT_EQ(out.resp, in.resp);
     EXPECT_EQ(out.user, in.user);
@@ -261,8 +262,8 @@ TEST(NsuAxiMasterPort, RPassthroughBitForBit) {
     in.user = 0x12;
     ASSERT_TRUE(fx.port.push_r(in));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.r.size(), 1u);
-    const auto& out = fx.ch.r.front();
+    ASSERT_EQ(fx.ch.response.r.size(), 1u);
+    const auto& out = fx.ch.response.r.front();
     EXPECT_EQ(out.id, in.id);
     EXPECT_EQ(out.data, in.data);
     EXPECT_EQ(out.resp, in.resp);
@@ -282,8 +283,8 @@ TEST(NsuAxiMasterPort, AwArPassthroughBitForBit) {
                                 0xF, 0xAB, 0xE);
     axi::ArBeat ar_in = make_ar(0x6B, 0x1234'5678'9ABC'DEF0ull, 15, 3, axi::Burst::FIXED, 0x9, 0,
                                 0x4, 0xD, 0xCD, 0x5);
-    fx.ch.aw.push_back(aw_in);
-    fx.ch.ar.push_back(ar_in);
+    fx.ch.request.aw.push_back(aw_in);
+    fx.ch.request.ar.push_back(ar_in);
     fx.port.tick();
     auto aw = fx.port.pop_aw();
     ASSERT_TRUE(aw.has_value());
@@ -327,15 +328,15 @@ TEST(NsuAxiMasterPort, IndependentBRBackpressure_RProgressesWhileBHolds) {
     for (uint8_t i = 0; i < 4; ++i)
         ASSERT_TRUE(fx.port.push_r(make_r(i, 0x40 + i, axi::Resp::OKAY, i == 3, 0)));
     fx.port.tick();
-    EXPECT_EQ(fx.ch.r.size(), 4u);  // R drained to packetizer
-    EXPECT_EQ(fx.ch.b.size(), 0u);  // B held: packetizer rejected all
+    EXPECT_EQ(fx.ch.response.r.size(), 4u);  // R drained to packetizer
+    EXPECT_EQ(fx.ch.response.b.size(), 0u);  // B held: packetizer rejected all
     EXPECT_EQ(fx.port.b_q_size(), 4u);
     EXPECT_EQ(fx.port.r_q_size(), 0u);
     // Open the B packetizer one slot at a time; each tick should drain one.
     for (std::size_t i = 0; i < 4; ++i) {
-        fx.ch.b_capacity = i + 1;
+        fx.ch.response.b_capacity = i + 1;
         fx.port.tick();
-        EXPECT_EQ(fx.ch.b.size(), i + 1);
+        EXPECT_EQ(fx.ch.response.b.size(), i + 1);
     }
     EXPECT_EQ(fx.port.b_q_size(), 0u);
 }
@@ -347,16 +348,16 @@ TEST(NsuAxiMasterPort, IndependentBRBackpressure_RProgressesWhileBHolds) {
 TEST(NsuAxiMasterPort, SimultaneousAwWArForwardProgressInOneTick) {
     SCENARIO("NSU AxiMasterPort: AW, W, AR all ingested from depacketizer in same tick");
     PortFixture fx;
-    fx.ch.aw.push_back(make_aw(0x1, 0x1000));
-    fx.ch.w.push_back(make_w(0xAA, 0xFFFFFFFFu, true, 0x3C));
-    fx.ch.ar.push_back(make_ar(0x2, 0x2000));
+    fx.ch.request.aw.push_back(make_aw(0x1, 0x1000));
+    fx.ch.request.w.push_back(make_w(0xAA, 0xFFFFFFFFu, true, 0x3C));
+    fx.ch.request.ar.push_back(make_ar(0x2, 0x2000));
     fx.port.tick();
     EXPECT_EQ(fx.port.aw_q_size(), 1u);
     EXPECT_EQ(fx.port.w_q_size(), 1u);
     EXPECT_EQ(fx.port.ar_q_size(), 1u);
-    EXPECT_EQ(fx.ch.aw.size(), 0u);
-    EXPECT_EQ(fx.ch.w.size(), 0u);
-    EXPECT_EQ(fx.ch.ar.size(), 0u);
+    EXPECT_EQ(fx.ch.request.aw.size(), 0u);
+    EXPECT_EQ(fx.ch.request.w.size(), 0u);
+    EXPECT_EQ(fx.ch.request.ar.size(), 0u);
 }
 
 // -------------------------------------------------------------------------
@@ -370,10 +371,10 @@ TEST(NsuAxiMasterPort, AwBackpressure_DoesNotBlockAr) {
     PortFixture fx;
     // Fill the port's AW internal queue but leave AR slack.
     for (std::size_t i = 0; i < fx.params.aw_queue_depth + 4; ++i)
-        fx.ch.aw.push_back(make_aw(static_cast<uint8_t>(i & 0xFF), 0x1000));
-    for (uint8_t i = 0; i < 3; ++i) fx.ch.ar.push_back(make_ar(i, 0x2000));
+        fx.ch.request.aw.push_back(make_aw(static_cast<uint8_t>(i & 0xFF), 0x1000));
+    for (uint8_t i = 0; i < 3; ++i) fx.ch.request.ar.push_back(make_ar(i, 0x2000));
     fx.port.tick();
     EXPECT_EQ(fx.port.aw_q_size(), fx.params.aw_queue_depth);
     EXPECT_EQ(fx.port.ar_q_size(), 3u);  // AR drained fully despite AW jam
-    EXPECT_EQ(fx.ch.ar.size(), 0u);
+    EXPECT_EQ(fx.ch.request.ar.size(), 0u);
 }

@@ -29,18 +29,16 @@
 #include "axi/memory.hpp"
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
+#include "common/loopback_request_io.hpp"
+#include "common/loopback_response_io.hpp"
 #include "common/scenario.hpp"
-#include "ni/depacketizer.hpp"
-#include "scenario_helpers.hpp"
-#include <algorithm>
-#include "ni/packetizer.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/nmu.hpp"
 #include "nmu/port_params.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/port_params.hpp"
-#include "common/loopback_depacketizer.hpp"
-#include "common/loopback_packetizer.hpp"
+#include "scenario_helpers.hpp"
+#include <algorithm>
 #include <cstddef>
 #include <deque>
 #include <filesystem>
@@ -62,12 +60,15 @@ namespace {
 constexpr std::size_t kMaxCycles = 200'000;
 
 // -------------------------------------------------------------------------
-// DelayedLoopback: implements both Packetizer and Depacketizer. Each
-// channel has a small "pipeline" deque whose tail is the head visible to
-// the depacketizer side. delay_cycles_ controls how many tick() calls must
-// elapse between a successful push and the beat becoming visible to pop.
-// delay_cycles_ == 0 reduces to a plain bounded loopback (still respects
-// capacity though: push fails when total in-flight beats == capacity).
+// DelayedLoopback: wraps 5 delay channels and exposes the 4 narrow roles
+// required by the new interfaces. Each channel has a small "pipeline" deque
+// whose tail is visible to the consumer side. delay_cycles_ controls how
+// many tick_advance() calls elapse between a successful push and the beat
+// becoming visible to pop. delay_cycles_==0 reduces to a plain bounded
+// loopback (capacity still enforced).
+//
+// The struct exposes 4 role references (req_pkt, req_depkt, rsp_pkt,
+// rsp_depkt) so the test can wire NMU and NSU to the correct narrow bases.
 // -------------------------------------------------------------------------
 template <typename T>
 struct DelayChannel {
@@ -94,9 +95,44 @@ struct DelayChannel {
     }
 };
 
-class DelayedLoopback : public cmod::Packetizer, public cmod::Depacketizer {
-  public:
-    explicit DelayedLoopback(std::size_t delay_cycles) : delay_(delay_cycles) {}
+// Forward declaration so the inner role classes can reference the parent.
+struct DelayedLoopback;
+
+// Inner role classes — each references the owning DelayedLoopback by pointer
+// so they share the same 5 DelayChannels and the same now_/delay_.
+struct DelayedReqPacketizer : cmod::RequestPacketizer {
+    DelayedLoopback* owner;
+    explicit DelayedReqPacketizer(DelayedLoopback* o) : owner(o) {}
+    bool push_aw(const axi::AwBeat& b) override;
+    bool push_w(const axi::WBeat& b) override;
+    bool push_ar(const axi::ArBeat& b) override;
+};
+
+struct DelayedReqDepacketizer : cmod::RequestDepacketizer {
+    DelayedLoopback* owner;
+    explicit DelayedReqDepacketizer(DelayedLoopback* o) : owner(o) {}
+    std::optional<axi::AwBeat> pop_aw() override;
+    std::optional<axi::WBeat> pop_w() override;
+    std::optional<axi::ArBeat> pop_ar() override;
+};
+
+struct DelayedRspPacketizer : cmod::ResponsePacketizer {
+    DelayedLoopback* owner;
+    explicit DelayedRspPacketizer(DelayedLoopback* o) : owner(o) {}
+    bool push_b(const axi::BBeat& b) override;
+    bool push_r(const axi::RBeat& b) override;
+};
+
+struct DelayedRspDepacketizer : cmod::ResponseDepacketizer {
+    DelayedLoopback* owner;
+    explicit DelayedRspDepacketizer(DelayedLoopback* o) : owner(o) {}
+    std::optional<axi::BBeat> pop_b() override;
+    std::optional<axi::RBeat> pop_r() override;
+};
+
+struct DelayedLoopback {
+    explicit DelayedLoopback(std::size_t delay_cycles)
+        : delay_(delay_cycles), req_pkt(this), req_depkt(this), rsp_pkt(this), rsp_depkt(this) {}
 
     // Bump every channel's visibility window by one cycle.
     void tick_advance() {
@@ -108,21 +144,6 @@ class DelayedLoopback : public cmod::Packetizer, public cmod::Depacketizer {
         r_.advance(now_);
     }
 
-    // Packetizer (request side: NMU; response side: NSU).
-    bool push_aw(const axi::AwBeat& b) override { return aw_.push(b, now_, delay_); }
-    bool push_w(const axi::WBeat& b) override { return w_.push(b, now_, delay_); }
-    bool push_ar(const axi::ArBeat& b) override { return ar_.push(b, now_, delay_); }
-    bool push_b(const axi::BBeat& b) override { return b_.push(b, now_, delay_); }
-    bool push_r(const axi::RBeat& b) override { return r_.push(b, now_, delay_); }
-
-    // Depacketizer (response side: NMU; request side: NSU).
-    std::optional<axi::BBeat> pop_b() override { return b_.pop(); }
-    std::optional<axi::RBeat> pop_r() override { return r_.pop(); }
-    std::optional<axi::AwBeat> pop_aw() override { return aw_.pop(); }
-    std::optional<axi::WBeat> pop_w() override { return w_.pop(); }
-    std::optional<axi::ArBeat> pop_ar() override { return ar_.pop(); }
-
-  private:
     std::size_t now_ = 0;
     std::size_t delay_;
     DelayChannel<axi::AwBeat> aw_;
@@ -130,7 +151,44 @@ class DelayedLoopback : public cmod::Packetizer, public cmod::Depacketizer {
     DelayChannel<axi::ArBeat> ar_;
     DelayChannel<axi::BBeat> b_;
     DelayChannel<axi::RBeat> r_;
+
+    DelayedReqPacketizer req_pkt;
+    DelayedReqDepacketizer req_depkt;
+    DelayedRspPacketizer rsp_pkt;
+    DelayedRspDepacketizer rsp_depkt;
 };
+
+// ---- Role method definitions (need full DelayedLoopback def) ----
+inline bool DelayedReqPacketizer::push_aw(const axi::AwBeat& b) {
+    return owner->aw_.push(b, owner->now_, owner->delay_);
+}
+inline bool DelayedReqPacketizer::push_w(const axi::WBeat& b) {
+    return owner->w_.push(b, owner->now_, owner->delay_);
+}
+inline bool DelayedReqPacketizer::push_ar(const axi::ArBeat& b) {
+    return owner->ar_.push(b, owner->now_, owner->delay_);
+}
+inline std::optional<axi::AwBeat> DelayedReqDepacketizer::pop_aw() {
+    return owner->aw_.pop();
+}
+inline std::optional<axi::WBeat> DelayedReqDepacketizer::pop_w() {
+    return owner->w_.pop();
+}
+inline std::optional<axi::ArBeat> DelayedReqDepacketizer::pop_ar() {
+    return owner->ar_.pop();
+}
+inline bool DelayedRspPacketizer::push_b(const axi::BBeat& b) {
+    return owner->b_.push(b, owner->now_, owner->delay_);
+}
+inline bool DelayedRspPacketizer::push_r(const axi::RBeat& b) {
+    return owner->r_.push(b, owner->now_, owner->delay_);
+}
+inline std::optional<axi::BBeat> DelayedRspDepacketizer::pop_b() {
+    return owner->b_.pop();
+}
+inline std::optional<axi::RBeat> DelayedRspDepacketizer::pop_r() {
+    return owner->r_.pop();
+}
 
 // Load per-side port params from the new split YAML schema.
 nmu::PortParams load_nmu_params() {
@@ -160,8 +218,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     slave.set_memory_bounds(sc.config.memory_base, sc.config.memory_size);
 
     DelayedLoopback loopback(delay_cycles);
-    nmu::AxiSlavePort nmu_port(loopback, loopback, load_nmu_params());
-    nsu::AxiMasterPort nsu_port(loopback, loopback, load_nsu_params());
+    nmu::AxiSlavePort nmu_port(loopback.req_pkt, loopback.rsp_depkt, load_nmu_params());
+    nsu::AxiMasterPort nsu_port(loopback.req_depkt, loopback.rsp_pkt, load_nsu_params());
 
     // The AxiMaster type is templated on the slave-side adaptor. AxiSlavePort
     // exposes the exact push_aw/push_w/push_ar + pop_b/pop_r API AxiMaster
@@ -324,8 +382,8 @@ TEST(PortParamsSplit, AsymmetricNmuNsuAwQueueSaturationIndependent) {
     nmu_pp.depkt_r_q_depth = 32;
 
     ni::cmodel::testing::LoopbackChannelSet ch{};
-    ni::cmodel::testing::LoopbackPacketizer pkt(ch);
-    ni::cmodel::testing::LoopbackDepacketizer depkt(ch);
+    ni::cmodel::testing::LoopbackRequestPacketizer pkt(ch.request);
+    ni::cmodel::testing::LoopbackResponseDepacketizer depkt(ch.response);
     nmu::AxiSlavePort nmu_port(pkt, depkt, nmu_pp);
 
     axi::AwBeat aw{};

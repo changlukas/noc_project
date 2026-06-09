@@ -122,12 +122,6 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
     for (int i = 0; i < 32; ++i) EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
 }
 
-TEST(NsuPacketize, PushAwAssertFalse) {
-    SCENARIO(
-        "NSU Packetize: push_aw aborts (AW is request-direction; NSU only emits B/R responses)");
-    RspCapture b_cap, r_cap;
-    MetaBuffer mb(4);
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
-    axi::AwBeat dummy{};
-    EXPECT_DEATH(pkt.push_aw(dummy), ".*");
-}
+// NsuPacketize::PushAwAssertFalse was a runtime wrong_side_() test.
+// After T4 the method no longer exists on nsu::Packetize; wrong-side
+// calls are now caught at compile time. Test removed.

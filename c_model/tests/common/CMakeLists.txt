@@ -17,3 +17,7 @@ target_link_libraries(test_test_logger PRIVATE yaml-cpp::yaml-cpp)
 add_cmodel_test(test_channel_model_per_vc_credit)
 target_include_directories(test_channel_model_per_vc_credit PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_narrow_io)
+target_include_directories(test_narrow_io PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)

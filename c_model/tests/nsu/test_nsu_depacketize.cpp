@@ -163,13 +163,9 @@ TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
     EXPECT_TRUE(depkt.pop_aw().has_value());  // AW now demuxed
 }
 
-TEST(NsuDepacketize, PopBAssertFalse) {
-    SCENARIO("NSU Depacketize: pop_b asserts false (B is response-direction only, not request)");
-    ChannelModel noc(16, 16);
-    MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
-    EXPECT_DEATH(depkt.pop_b(), ".*");
-}
+// NsuDepacketize::PopBAssertFalse was a runtime wrong_side_() test.
+// After T4 the method no longer exists on nsu::Depacketize; wrong-side
+// calls are now caught at compile time. Test removed.
 
 TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
     SCENARIO("NSU Depacketize: AW queue preserves NoC arrival order across 3 sequential AW flits");

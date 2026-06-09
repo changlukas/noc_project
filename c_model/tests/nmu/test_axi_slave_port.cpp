@@ -10,8 +10,8 @@
 //   - Port contract: per-channel FIFO order for all beats regardless of
 //     AXI ID. Cross-ID completion ordering / per-ID response reordering
 //     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
-#include "common/loopback_depacketizer.hpp"
-#include "common/loopback_packetizer.hpp"
+#include "common/loopback_request_io.hpp"
+#include "common/loopback_response_io.hpp"
 #include "common/scenario.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/port_params.hpp"
@@ -64,8 +64,8 @@ axi::RBeat make_r(uint8_t id, uint8_t fill, axi::Resp resp, bool last, uint8_t u
 
 struct PortFixture {
     test::LoopbackChannelSet ch{};
-    test::LoopbackPacketizer pkt{ch};
-    test::LoopbackDepacketizer depkt{ch};
+    test::LoopbackRequestPacketizer pkt{ch.request};
+    test::LoopbackResponseDepacketizer depkt{ch.response};
     nmu::PortParams params;
     nmu::AxiSlavePort port;
 
@@ -76,11 +76,11 @@ struct PortFixture {
     // without exhausting the default 32-deep ports.
     void set_loopback_caps(std::size_t aw, std::size_t w, std::size_t ar, std::size_t b,
                            std::size_t r) {
-        ch.aw_capacity = aw;
-        ch.w_capacity = w;
-        ch.ar_capacity = ar;
-        ch.b_capacity = b;
-        ch.r_capacity = r;
+        ch.request.aw_capacity = aw;
+        ch.request.w_capacity = w;
+        ch.request.ar_capacity = ar;
+        ch.response.b_capacity = b;
+        ch.response.r_capacity = r;
     }
 };
 
@@ -94,8 +94,8 @@ TEST(NmuAxiSlavePort, AwBasicHandshake_PushPopNoLoss) {
     PortFixture fx;
     for (uint8_t i = 0; i < 8; ++i) ASSERT_TRUE(fx.port.push_aw(make_aw(i, 0x1000 + i * 32)));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.aw.size(), 8u);
-    for (uint8_t i = 0; i < 8; ++i) EXPECT_EQ(fx.ch.aw[i].id, i);
+    ASSERT_EQ(fx.ch.request.aw.size(), 8u);
+    for (uint8_t i = 0; i < 8; ++i) EXPECT_EQ(fx.ch.request.aw[i].id, i);
 }
 
 TEST(NmuAxiSlavePort, ArBasicHandshake_PushPopNoLoss) {
@@ -103,8 +103,8 @@ TEST(NmuAxiSlavePort, ArBasicHandshake_PushPopNoLoss) {
     PortFixture fx;
     for (uint8_t i = 0; i < 8; ++i) ASSERT_TRUE(fx.port.push_ar(make_ar(i, 0x2000 + i * 32)));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.ar.size(), 8u);
-    for (uint8_t i = 0; i < 8; ++i) EXPECT_EQ(fx.ch.ar[i].id, i);
+    ASSERT_EQ(fx.ch.request.ar.size(), 8u);
+    for (uint8_t i = 0; i < 8; ++i) EXPECT_EQ(fx.ch.request.ar[i].id, i);
 }
 
 TEST(NmuAxiSlavePort, WBasicHandshake_PushPopNoLoss) {
@@ -113,8 +113,8 @@ TEST(NmuAxiSlavePort, WBasicHandshake_PushPopNoLoss) {
     for (uint8_t i = 0; i < 8; ++i)
         ASSERT_TRUE(fx.port.push_w(make_w(0x10 + i, 0xFFFFFFFFu, i == 7, i)));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.w.size(), 8u);
-    for (std::size_t i = 0; i < 8; ++i) EXPECT_EQ(fx.ch.w[i].data[0], 0x10 + i);
+    ASSERT_EQ(fx.ch.request.w.size(), 8u);
+    for (std::size_t i = 0; i < 8; ++i) EXPECT_EQ(fx.ch.request.w[i].data[0], 0x10 + i);
 }
 
 // -------------------------------------------------------------------------
@@ -130,7 +130,7 @@ TEST(NmuAxiSlavePort, AwBackpressure_FullThenDrainThenAcceptOne) {
         ASSERT_TRUE(fx.port.push_aw(make_aw(static_cast<uint8_t>(i & 0xFF), 0x1000 + i * 32)));
     EXPECT_FALSE(fx.port.push_aw(make_aw(0xFF, 0x9000)));
     // Open packetizer one slot.
-    fx.ch.aw_capacity = 1;
+    fx.ch.request.aw_capacity = 1;
     fx.port.tick();  // forwards one to packetizer, freeing one port slot
     EXPECT_TRUE(fx.port.push_aw(make_aw(0xFF, 0x9000)));
 }
@@ -154,14 +154,14 @@ TEST(NmuAxiSlavePort, AwBoundary_FailedPushDoesNotDuplicateOnRetry) {
     EXPECT_FALSE(fx.port.push_aw(retry));
     EXPECT_EQ(fx.port.aw_q_size(), fx.params.aw_queue_depth);
     // Open packetizer one slot, tick to free one port slot, then accept retry.
-    fx.ch.aw_capacity = 1;
+    fx.ch.request.aw_capacity = 1;
     fx.port.tick();
     EXPECT_TRUE(fx.port.push_aw(retry));
     // Now there must be EXACTLY one retry-id (0xAB) in the system, not three.
-    fx.ch.aw_capacity = 64;
+    fx.ch.request.aw_capacity = 64;
     fx.port.tick();
     std::size_t retry_id_count = 0;
-    for (const auto& b : fx.ch.aw)
+    for (const auto& b : fx.ch.request.aw)
         if (b.id == 0xAB) ++retry_id_count;
     EXPECT_EQ(retry_id_count, 1u);
 }
@@ -180,8 +180,8 @@ TEST(NmuAxiSlavePort, AwFifoOrder_PreservedAcrossMixedIds) {
     const std::vector<uint8_t> ids{3, 5, 3, 7, 5, 0, 7, 3};
     for (auto id : ids) ASSERT_TRUE(fx.port.push_aw(make_aw(id, 0x1000)));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.aw.size(), ids.size());
-    for (std::size_t i = 0; i < ids.size(); ++i) EXPECT_EQ(fx.ch.aw[i].id, ids[i]);
+    ASSERT_EQ(fx.ch.request.aw.size(), ids.size());
+    for (std::size_t i = 0; i < ids.size(); ++i) EXPECT_EQ(fx.ch.request.aw[i].id, ids[i]);
 }
 
 // -------------------------------------------------------------------------
@@ -198,8 +198,8 @@ TEST(NmuAxiSlavePort, ArFifoOrder_PreservedAcrossMixedIds) {
     const std::vector<uint8_t> ids{1, 2, 1, 3, 2, 0, 3, 1};
     for (auto id : ids) ASSERT_TRUE(fx.port.push_ar(make_ar(id, 0x2000)));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.ar.size(), ids.size());
-    for (std::size_t i = 0; i < ids.size(); ++i) EXPECT_EQ(fx.ch.ar[i].id, ids[i]);
+    ASSERT_EQ(fx.ch.request.ar.size(), ids.size());
+    for (std::size_t i = 0; i < ids.size(); ++i) EXPECT_EQ(fx.ch.request.ar[i].id, ids[i]);
 }
 
 // -------------------------------------------------------------------------
@@ -216,8 +216,8 @@ TEST(NmuAxiSlavePort, WPassthroughBitForBit) {
     in.user = 0x77;
     ASSERT_TRUE(fx.port.push_w(in));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.w.size(), 1u);
-    const auto& out = fx.ch.w.front();
+    ASSERT_EQ(fx.ch.request.w.size(), 1u);
+    const auto& out = fx.ch.request.w.front();
     EXPECT_EQ(out.data, in.data);
     EXPECT_EQ(out.strb, in.strb);
     EXPECT_EQ(out.last, in.last);
@@ -231,7 +231,7 @@ TEST(NmuAxiSlavePort, BPassthroughBitForBit) {
     SCENARIO("NMU AxiSlavePort: B beat passes through with id/resp/user bit-for-bit preserved");
     PortFixture fx;
     axi::BBeat in = make_b(0x42, axi::Resp::EXOKAY, 0x91);
-    fx.ch.b.push_back(in);
+    fx.ch.response.b.push_back(in);
     fx.port.tick();
     auto out = fx.port.pop_b();
     ASSERT_TRUE(out.has_value());
@@ -254,7 +254,7 @@ TEST(NmuAxiSlavePort, RPassthroughBitForBit) {
     in.resp = axi::Resp::SLVERR;
     in.last = true;
     in.user = 0x12;
-    fx.ch.r.push_back(in);
+    fx.ch.response.r.push_back(in);
     fx.port.tick();
     auto out = fx.port.pop_r();
     ASSERT_TRUE(out.has_value());
@@ -280,9 +280,9 @@ TEST(NmuAxiSlavePort, AwArPassthroughBitForBit) {
     ASSERT_TRUE(fx.port.push_aw(aw_in));
     ASSERT_TRUE(fx.port.push_ar(ar_in));
     fx.port.tick();
-    ASSERT_EQ(fx.ch.aw.size(), 1u);
-    ASSERT_EQ(fx.ch.ar.size(), 1u);
-    const auto& aw = fx.ch.aw.front();
+    ASSERT_EQ(fx.ch.request.aw.size(), 1u);
+    ASSERT_EQ(fx.ch.request.ar.size(), 1u);
+    const auto& aw = fx.ch.request.aw.front();
     EXPECT_EQ(aw.id, aw_in.id);
     EXPECT_EQ(aw.addr, aw_in.addr);
     EXPECT_EQ(aw.len, aw_in.len);
@@ -294,7 +294,7 @@ TEST(NmuAxiSlavePort, AwArPassthroughBitForBit) {
     EXPECT_EQ(aw.region, aw_in.region);
     EXPECT_EQ(aw.user, aw_in.user);
     EXPECT_EQ(aw.qos, aw_in.qos);
-    const auto& ar = fx.ch.ar.front();
+    const auto& ar = fx.ch.request.ar.front();
     EXPECT_EQ(ar.id, ar_in.id);
     EXPECT_EQ(ar.addr, ar_in.addr);
     EXPECT_EQ(ar.len, ar_in.len);
@@ -316,22 +316,23 @@ TEST(NmuAxiSlavePort, IndependentBRBackpressure_RProgressesWhileBHolds) {
     SCENARIO("NMU AxiSlavePort: B queue full does not block R ingestion (independent channels)");
     // Custom params: tiny B queue (1), normal R queue.
     test::LoopbackChannelSet ch{};
-    test::LoopbackPacketizer pkt{ch};
-    test::LoopbackDepacketizer depkt{ch};
+    test::LoopbackRequestPacketizer pkt{ch.request};
+    test::LoopbackResponseDepacketizer depkt{ch.response};
     nmu::PortParams p{32, 32, 32, /*b*/ 1, /*r*/ 32, /*depkt_b*/ 32, /*depkt_r*/ 32};
     nmu::AxiSlavePort port(pkt, depkt, p);
 
     // Pre-fill the depkt-side queues with several beats on each channel.
-    for (uint8_t i = 0; i < 4; ++i) ch.b.push_back(make_b(i, axi::Resp::OKAY, 0));
-    for (uint8_t i = 0; i < 4; ++i) ch.r.push_back(make_r(i, 0x40 + i, axi::Resp::OKAY, i == 3, 0));
+    for (uint8_t i = 0; i < 4; ++i) ch.response.b.push_back(make_b(i, axi::Resp::OKAY, 0));
+    for (uint8_t i = 0; i < 4; ++i)
+        ch.response.r.push_back(make_r(i, 0x40 + i, axi::Resp::OKAY, i == 3, 0));
 
     port.tick();
     // R should fully ingest (cap 32, 4 beats); B should ingest only 1
     // because its cap is 1 and the test does not pop_b yet.
     EXPECT_EQ(port.r_q_size(), 4u);
     EXPECT_EQ(port.b_q_size(), 1u);
-    EXPECT_EQ(ch.b.size(), 3u);  // 3 still pending on the depkt side
-    EXPECT_EQ(ch.r.size(), 0u);
+    EXPECT_EQ(ch.response.b.size(), 3u);  // 3 still pending on the depkt side
+    EXPECT_EQ(ch.response.r.size(), 0u);
 
     // Now consume B one at a time — each tick after pop_b frees a slot.
     for (int i = 0; i < 4; ++i) {
@@ -340,7 +341,7 @@ TEST(NmuAxiSlavePort, IndependentBRBackpressure_RProgressesWhileBHolds) {
         port.tick();
     }
     EXPECT_EQ(port.b_q_size(), 0u);
-    EXPECT_EQ(ch.b.size(), 0u);
+    EXPECT_EQ(ch.response.b.size(), 0u);
 }
 
 // -------------------------------------------------------------------------
@@ -354,9 +355,9 @@ TEST(NmuAxiSlavePort, SimultaneousAwWArForwardProgressInOneTick) {
     ASSERT_TRUE(fx.port.push_w(make_w(0xAA, 0xFFFFFFFFu, true, 0x3C)));
     ASSERT_TRUE(fx.port.push_ar(make_ar(0x2, 0x2000)));
     fx.port.tick();
-    EXPECT_EQ(fx.ch.aw.size(), 1u);
-    EXPECT_EQ(fx.ch.w.size(), 1u);
-    EXPECT_EQ(fx.ch.ar.size(), 1u);
+    EXPECT_EQ(fx.ch.request.aw.size(), 1u);
+    EXPECT_EQ(fx.ch.request.w.size(), 1u);
+    EXPECT_EQ(fx.ch.request.ar.size(), 1u);
     EXPECT_EQ(fx.port.aw_q_size(), 0u);
     EXPECT_EQ(fx.port.w_q_size(), 0u);
     EXPECT_EQ(fx.port.ar_q_size(), 0u);
@@ -378,5 +379,5 @@ TEST(NmuAxiSlavePort, WBackpressure_DoesNotBlockAw) {
     // AW must still flow despite W jam.
     ASSERT_TRUE(fx.port.push_aw(make_aw(0x9, 0x1000)));
     fx.port.tick();
-    EXPECT_EQ(fx.ch.aw.size(), 1u);
+    EXPECT_EQ(fx.ch.request.aw.size(), 1u);
 }

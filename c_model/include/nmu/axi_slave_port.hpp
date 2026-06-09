@@ -26,9 +26,9 @@
 // drains responses BEFORE forwarding requests so a packetizer that empties
 // its slot in the same cycle can be re-fed without a one-cycle bubble.
 #include "axi/types.hpp"
-#include "ni/depacketizer.hpp"
-#include "ni/packetizer.hpp"
 #include "nmu/port_params.hpp"
+#include "request_io.hpp"
+#include "response_io.hpp"
 #include <cstddef>
 #include <deque>
 #include <optional>
@@ -42,7 +42,8 @@ namespace ni::cmodel::nmu {
 
 class AxiSlavePort {
   public:
-    AxiSlavePort(Packetizer& packetizer, Depacketizer& depacketizer, PortParams params)
+    AxiSlavePort(RequestPacketizer& packetizer, ResponseDepacketizer& depacketizer,
+                 PortParams params)
         : pkt_(packetizer), depkt_(depacketizer), params_(params) {}
 
     // ---- Upstream-facing AXI subordinate API (mirrors axi/axi_slave.hpp) ----
@@ -166,8 +167,8 @@ class AxiSlavePort {
         }
     }
 
-    Packetizer& pkt_;
-    Depacketizer& depkt_;
+    RequestPacketizer& pkt_;
+    ResponseDepacketizer& depkt_;
     PortParams params_;
     std::deque<axi::AwBeat> aw_q_;
     std::deque<axi::WBeat> w_q_;

@@ -1,8 +1,7 @@
 #pragma once
 // NMU-side request packetizer. Stateless except for a small write-metadata
 // FIFO (populated by push_aw, consumed by W beats with wlast=1). Implements
-// the 5-method Packetizer interface; push_b/push_r assert false (NMU never
-// emits responses).
+// RequestPacketizer (AW / W / AR only; NMU never emits responses).
 //
 // Header fields per push:
 //   src_id      — constructor arg (NMU tile coord, fixed per instance)
@@ -27,9 +26,9 @@
 //   rsvd        — 0 by Flit default
 #include "axi/types.hpp"
 #include "flit.hpp"
-#include "ni/packetizer.hpp"
 #include "nmu/addr_trans.hpp"
 #include "noc/noc_req_out.hpp"
+#include "request_io.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -47,12 +46,12 @@ struct AwHeaderMeta {
     uint8_t rob_idx;      // 0 in Disabled, allocated in Enabled
 };
 
-class Packetize : public Packetizer {
+class Packetize : public RequestPacketizer {
   public:
     Packetize(noc::NocReqOut& aw_out, noc::NocReqOut& w_out, noc::NocReqOut& ar_out, uint8_t src_id)
         : aw_out_(aw_out), w_out_(w_out), ar_out_(ar_out), src_id_(src_id) {}
 
-    // ---- Packetizer interface (request methods are real) ----
+    // ---- RequestPacketizer interface ----
     bool push_aw(const axi::AwBeat& b) override {
         auto t = addr_trans::xy_route(b.addr);
         return push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0});
@@ -65,10 +64,6 @@ class Packetize : public Packetizer {
         auto t = addr_trans::xy_route(b.addr);
         return push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0});
     }
-
-    // ---- Packetizer interface (response methods assert false) ----
-    bool push_b(const axi::BBeat&) override { wrong_side_("nmu::Packetize", "push_b"); }
-    bool push_r(const axi::RBeat&) override { wrong_side_("nmu::Packetize", "push_r"); }
 
     // ---- Non-interface methods, called by Rob with full metadata ----
     // Future Enabled mode supplies rob_idx via this path.

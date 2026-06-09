@@ -200,17 +200,9 @@ TEST(NmuRob, Disabled_DifferentIdsIndependentNoInterference) {
     EXPECT_TRUE(r.rob.push_aw(make_aw(0x06, 0x100)));
 }
 
-// === Defensive (1 test) ===
-
-TEST(NmuRobDeath, Disabled_AbortPaths) {
-    SCENARIO("Rob: push_b/push_r and pop_aw/pop_w/pop_ar all abort (wrong-direction APIs)");
-    RobRig r;
-    EXPECT_DEATH(r.rob.push_b(axi::BBeat{}), ".*");
-    EXPECT_DEATH(r.rob.push_r(axi::RBeat{}), ".*");
-    EXPECT_DEATH(r.rob.pop_aw(), ".*");
-    EXPECT_DEATH(r.rob.pop_w(), ".*");
-    EXPECT_DEATH(r.rob.pop_ar(), ".*");
-}
+// NmuRobDeath/Disabled_AbortPaths was a runtime wrong_side_() test.
+// After T4 Rob inherits only RequestPacketizer + ResponseDepacketizer;
+// the wrong-direction methods don't exist — compile-time protection. Removed.
 
 // === ROB Enabled mode: push-side tests (Task 2) ===
 

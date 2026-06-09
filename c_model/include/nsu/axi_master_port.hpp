@@ -26,9 +26,9 @@
 // (just NoC handles + PortParams) — the test rig owns the explicit
 // AxiMasterPort <-> AxiSlave glue, exactly one cycle per cycle.
 #include "axi/types.hpp"
-#include "ni/depacketizer.hpp"
-#include "ni/packetizer.hpp"
 #include "nsu/port_params.hpp"
+#include "request_io.hpp"
+#include "response_io.hpp"
 #include <cstddef>
 #include <deque>
 #include <optional>
@@ -42,7 +42,8 @@ namespace ni::cmodel::nsu {
 
 class AxiMasterPort {
   public:
-    AxiMasterPort(Depacketizer& depacketizer, Packetizer& packetizer, PortParams params)
+    AxiMasterPort(RequestDepacketizer& depacketizer, ResponsePacketizer& packetizer,
+                  PortParams params)
         : depkt_(depacketizer), pkt_(packetizer), params_(params) {}
 
     // ---- Downstream-facing AXI manager API ----
@@ -168,8 +169,8 @@ class AxiMasterPort {
         }
     }
 
-    Depacketizer& depkt_;
-    Packetizer& pkt_;
+    RequestDepacketizer& depkt_;
+    ResponsePacketizer& pkt_;
     PortParams params_;
     std::deque<axi::AwBeat> aw_q_;
     std::deque<axi::WBeat> w_q_;

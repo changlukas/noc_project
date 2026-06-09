@@ -1,8 +1,8 @@
 #pragma once
 #include "axi/types.hpp"
-#include "ni/depacketizer.hpp"  // from Stage 3 port-pair task
 #include "flit.hpp"
 #include "noc/noc_rsp_in.hpp"
+#include "response_io.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -20,22 +20,18 @@ namespace ni::cmodel::nmu {
 // the flit is held in `pending_` and re-attempted next tick. This blocks
 // any other flits behind it (head-of-line blocking on single-FIFO ingress).
 // Documented in spec §4.4; not a bug.
-class Depacketize : public Depacketizer {
+class Depacketize : public ResponseDepacketizer {
   public:
     Depacketize(noc::NocRspIn& rsp_in, std::size_t b_q_depth, std::size_t r_q_depth)
         : rsp_in_(rsp_in), b_q_depth_(b_q_depth), r_q_depth_(r_q_depth) {}
 
     void tick();
 
-    // Depacketizer interface — response methods are real
+    // ResponseDepacketizer interface — response methods are real
     std::optional<axi::BBeat> pop_b() override;
     std::optional<axi::RBeat> pop_r() override;
     std::optional<std::pair<axi::BBeat, ResponseMeta>> pop_b_with_meta() override;
     std::optional<std::pair<axi::RBeat, ResponseMeta>> pop_r_with_meta() override;
-    // Request methods assert false
-    std::optional<axi::AwBeat> pop_aw() override { wrong_side_("nmu::Depacketize", "pop_aw"); }
-    std::optional<axi::WBeat> pop_w() override { wrong_side_("nmu::Depacketize", "pop_w"); }
-    std::optional<axi::ArBeat> pop_ar() override { wrong_side_("nmu::Depacketize", "pop_ar"); }
 
   private:
     struct BWithMeta {

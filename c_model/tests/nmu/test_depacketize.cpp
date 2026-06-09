@@ -80,12 +80,9 @@ TEST(NmuDepacketize, PopBEmptyReturnsNullopt) {
     EXPECT_FALSE(depkt.pop_r().has_value());
 }
 
-TEST(NmuDepacketize, PopAwAssertFalse) {
-    SCENARIO("NMU Depacketize: pop_aw asserts false (AW is request-direction only, not response)");
-    ChannelModel noc(16, 16);
-    Depacketize depkt(noc.rsp_in(), 16, 16);
-    EXPECT_DEATH(depkt.pop_aw(), ".*");
-}
+// NmuDepacketize::PopAwAssertFalse was a runtime wrong_side_() test.
+// After T4 the method no longer exists on nmu::Depacketize; wrong-side
+// calls are now caught at compile time. Test removed.
 
 TEST(NmuDepacketize, BFifoOrderPreserved) {
     SCENARIO("NMU Depacketize: B queue preserves NoC arrival order across 5 sequential B flits");

@@ -1,10 +1,10 @@
 #pragma once
 #include "axi/types.hpp"
-#include "ni/depacketizer.hpp"
-#include "ni/packetizer.hpp"
 #include "ni_flit_constants.h"
 #include "nmu/addr_trans.hpp"
 #include "nmu/packetize.hpp"
+#include "request_io.hpp"
+#include "response_io.hpp"
 #include <array>
 #include <bitset>
 #include <cassert>
@@ -19,7 +19,8 @@ namespace ni::cmodel::nmu {
 enum class RobMode { Disabled, Enabled };  // Enabled = next round
 
 // In-line layer between AxiSlavePort and {Packetize, Depacketize}.
-// Implements both Packetizer (request gate) and Depacketizer (response observe).
+// Implements RequestPacketizer (request gate: push_aw/w/ar) and
+// ResponseDepacketizer (response observe: pop_b/r).
 //
 // Disabled mode (this round): per-AXI-ID transaction ordering filter.
 //   - Same id + same dst -> pass; outstanding deque grows
@@ -30,8 +31,8 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 // Enabled mode (next round): per-AXI-ID reorder buffer + rob_idx allocator.
 //   This round leaves Enabled-mode method bodies as assert(false) + std::abort.
 //
-// Single-threaded tick model: state mutations from Packetizer-side (push_aw/ar)
-// and Depacketizer-side (pop_b/r) happen in the same thread, no synchronization.
+// Single-threaded tick model: state mutations from RequestPacketizer-side (push_aw/ar)
+// and ResponseDepacketizer-side (pop_b/r) happen in the same thread, no synchronization.
 // Tick order (per AxiSlavePort): drain B/R before forwarding AW/W/AR -> response
 // frees IDs in same cycle, request can use freed IDs after.
 //
@@ -39,32 +40,27 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 // response ordering is guaranteed by AxiMaster's per-id FIFO + NoC's per-pair
 // deterministic routing (XYRouting satisfies). ROB Disabled does NOT add that
 // ordering -- implicit invariant.
-class Rob : public Packetizer, public Depacketizer {
+class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
-    Rob(Packetize& next_pkt, Depacketizer& next_depkt, RobMode mode_w, RobMode mode_r)
+    Rob(Packetize& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_w, RobMode mode_r)
         : next_pkt_(next_pkt), next_depkt_(next_depkt), mode_w_(mode_w), mode_r_(mode_r) {
         free_write_entries_.set();
         free_read_entries_.set();
     }
 
-    // ===== Packetizer interface (request side; B/R assert+abort) =====
+    // ===== RequestPacketizer interface =====
     bool push_aw(const axi::AwBeat& b) override;
     bool push_w(const axi::WBeat& b) override;
     bool push_ar(const axi::ArBeat& b) override;
-    bool push_b(const axi::BBeat&) override { wrong_side_("nmu::Rob", "push_b"); }
-    bool push_r(const axi::RBeat&) override { wrong_side_("nmu::Rob", "push_r"); }
 
-    // ===== Depacketizer interface (response side; AW/W/AR assert+abort) =====
+    // ===== ResponseDepacketizer interface =====
     std::optional<axi::BBeat> pop_b() override;
     std::optional<axi::RBeat> pop_r() override;
-    std::optional<axi::AwBeat> pop_aw() override { wrong_side_("nmu::Rob", "pop_aw"); }
-    std::optional<axi::WBeat> pop_w() override { wrong_side_("nmu::Rob", "pop_w"); }
-    std::optional<axi::ArBeat> pop_ar() override { wrong_side_("nmu::Rob", "pop_ar"); }
 
     // === Enabled mode public constants (for testing + caller info) ===
     static constexpr std::size_t ROB_CAPACITY = 1u << ni::header::ROB_IDX_WIDTH;  // 32
     // AXI ID space alias — single source of truth lives in axi::AXI_ID_SPACE.
-    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;                // 256
+    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256
 
     // Linear scan for first run of n consecutive 1s in bitset<ROB_CAPACITY>.
     // Returns base index (0..ROB_CAPACITY-1), or -1 if no such run exists.
@@ -73,7 +69,7 @@ class Rob : public Packetizer, public Depacketizer {
 
   private:
     Packetize& next_pkt_;
-    Depacketizer& next_depkt_;
+    ResponseDepacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
 
     // Per-AXI-ID FIFO of outstanding entries. Disabled mode invariant:

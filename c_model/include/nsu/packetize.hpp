@@ -1,9 +1,9 @@
 #pragma once
 #include "axi/types.hpp"
 #include "flit.hpp"
-#include "ni/packetizer.hpp"
 #include "noc/noc_rsp_out.hpp"
 #include "nsu/meta_buffer.hpp"
+#include "response_io.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -12,21 +12,15 @@ namespace ni::cmodel::nsu {
 
 // NSU-side response packetizer. Looks up dst_id/rob_* from MetaBuffer via
 // peek+commit so a failed NocRspOut.push_flit() never desynchronizes.
-// Implements 5-method Packetizer interface; push_aw/push_w/push_ar assert
-// false (NSU never emits requests).
-class Packetize : public Packetizer {
+// Implements ResponsePacketizer (B / R only; NSU never emits requests).
+class Packetize : public ResponsePacketizer {
   public:
     Packetize(noc::NocRspOut& b_out, noc::NocRspOut& r_out, MetaBuffer& meta, uint8_t src_id)
         : b_out_(b_out), r_out_(r_out), meta_(meta), src_id_(src_id) {}
 
-    // ---- Packetizer interface (response methods are real) ----
+    // ---- ResponsePacketizer interface ----
     bool push_b(const axi::BBeat& b) override;
     bool push_r(const axi::RBeat& b) override;
-
-    // ---- Request methods assert false ----
-    bool push_aw(const axi::AwBeat&) override { wrong_side_("nsu::Packetize", "push_aw"); }
-    bool push_w(const axi::WBeat&) override { wrong_side_("nsu::Packetize", "push_w"); }
-    bool push_ar(const axi::ArBeat&) override { wrong_side_("nsu::Packetize", "push_ar"); }
 
   private:
     noc::NocRspOut& b_out_;
