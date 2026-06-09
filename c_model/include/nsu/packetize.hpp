@@ -1,6 +1,6 @@
 #pragma once
 #include "axi/types.hpp"
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni/packetizer.hpp"
 #include "noc/noc_rsp_out.hpp"
 #include "nsu/meta_buffer.hpp"

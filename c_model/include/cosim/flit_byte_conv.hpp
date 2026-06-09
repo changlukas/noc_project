@@ -8,7 +8,7 @@
 // flit container size), so the per-byte copy is well-defined.
 #pragma once
 #include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
-#include "ni/flit.hpp"                       // Flit
+#include "flit.hpp"                       // Flit
 #include <array>
 #include <cstdint>
 

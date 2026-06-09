@@ -12,7 +12,7 @@
 // Contract: pop_flit returns nullopt when no flit is currently available.
 // Callers must NOT busy-wait — they call once per tick and process whatever
 // comes back. A returned flit is consumed; the source advances by one slot.
-#include "ni/flit.hpp"
+#include "flit.hpp"
 
 #include <optional>
 

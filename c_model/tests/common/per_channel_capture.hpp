@@ -3,7 +3,7 @@
 // downstream channels (e.g., Packetize after multi-output refactor). Each
 // instance captures flits pushed to it into an internal deque for later
 // assertion. credit_avail uses the default (returns true).
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "noc/noc_req_out.hpp"
 #include "noc/noc_rsp_out.hpp"
 #include <cstddef>

@@ -24,7 +24,7 @@
 //   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
 //   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
 //   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "noc/noc_req_out.hpp"
 #include <array>

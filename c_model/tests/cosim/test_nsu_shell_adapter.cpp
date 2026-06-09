@@ -11,7 +11,7 @@
 #include "common/scenario.hpp"
 #include "cosim/nsu_shell_adapter.hpp"
 #include "cosim/nsu_shell_io.hpp"
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni_flit_constants.h"
 #include <gtest/gtest.h>
 

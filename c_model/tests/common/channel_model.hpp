@@ -15,7 +15,7 @@
 // model 1-flit/cycle physical NoC pacing. That's vc_arb's responsibility.
 // Latency/throughput numbers from tests using ChannelModel are non-physical.
 #pragma once
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "noc/noc_req_in.hpp"
 #include "noc/noc_req_out.hpp"

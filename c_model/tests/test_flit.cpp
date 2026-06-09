@@ -1,4 +1,4 @@
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
@@ -72,9 +72,27 @@ TEST(Flit, RsvdPaddingCheckPassesWhenZero) {
 TEST(Flit, RsvdPaddingCheckFailsWhenSet) {
     SCENARIO("Flit: setting any rsvd bit makes check_padding_is_zero return false");
     Flit f;
-    // Set a bit in rsvd region
-    f.set_header_field("rsvd", 0x3);  // 2-bit rsvd
+    // rsvd = header bits 54-55 (byte 6, bits 6-7). Write directly since rsvd
+    // is disabled (enabled=false in spec) and not reachable via set_header_field.
+    f.raw()[6] |= (1u << 6);  // bit 54
     EXPECT_FALSE(f.check_padding_is_zero());
+}
+
+TEST(FlitDispatch, RsvdHeaderFieldQueryAborts) {
+    // Spec marks rsvd as enabled=false (ni_packet.json header_fields).
+    // After this refactor, codegen-emitted HEADER_FIELDS[] skips rsvd, so
+    // the generic dispatch loop falls through and aborts.
+    EXPECT_DEATH(
+        { ni::cmodel::detail::header_field_pos("rsvd"); },
+        "header_field_pos: name not found"
+    );
+}
+
+TEST(FlitDispatch, EnabledHeaderFieldsStillResolve) {
+    // Sanity: enabled fields still resolve via generic loop.
+    auto pos = ni::cmodel::detail::header_field_pos("dst_id");
+    EXPECT_EQ(pos.lsb, ni::header::DST_ID_LSB);
+    EXPECT_EQ(pos.msb, ni::header::DST_ID_MSB);
 }
 
 TEST(Flit, SetGetPayloadBFields) {

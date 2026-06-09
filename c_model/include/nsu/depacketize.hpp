@@ -1,7 +1,7 @@
 #pragma once
 #include "axi/types.hpp"
 #include "ni/depacketizer.hpp"
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "noc/noc_req_in.hpp"
 #include "nsu/meta_buffer.hpp"
 #include <cassert>

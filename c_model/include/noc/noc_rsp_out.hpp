@@ -14,7 +14,7 @@
 // caller re-presents the same flit on the next tick without duplicating it;
 // implementations therefore must not partially consume on a false-return
 // path.
-#include "ni/flit.hpp"
+#include "flit.hpp"
 
 namespace ni::cmodel::noc {
 

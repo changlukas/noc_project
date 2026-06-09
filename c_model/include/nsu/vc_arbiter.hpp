@@ -13,7 +13,7 @@
 //
 // References:
 //   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md §7.2
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "noc/noc_rsp_out.hpp"
 #include <array>

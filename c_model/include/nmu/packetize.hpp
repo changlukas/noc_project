@@ -26,7 +26,7 @@
 //   flit_ecc    — 0-filled (deferred to future tasks)
 //   rsvd        — 0 by Flit default
 #include "axi/types.hpp"
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni/packetizer.hpp"
 #include "nmu/addr_trans.hpp"
 #include "noc/noc_req_out.hpp"

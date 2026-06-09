@@ -33,7 +33,7 @@
 #include "cosim/flit_byte_conv.hpp"          // flit_from_bytes, flit_to_bytes
 #include "cosim/nsu_shell_io.hpp"
 #include "cosim/poc_defaults.hpp"  // kPoC* depths
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "nsu/nsu.hpp"
 #include <array>
 #include <memory>

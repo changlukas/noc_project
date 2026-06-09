@@ -35,7 +35,7 @@
 //   docs/superpowers/specs/2026-06-04-wormhole-arbiter-design.md
 //   FlooNoC hw/floo_wormhole_arbiter.sv, hw/floo_axi_chimney.sv:744 / :758
 
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "noc/noc_req_out.hpp"
 #include "noc/noc_rsp_out.hpp"

@@ -4,7 +4,7 @@
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nsu/nsu.hpp"
 #include <cstdint>

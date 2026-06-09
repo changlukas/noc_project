@@ -1,7 +1,7 @@
 #pragma once
 #include "axi/types.hpp"
 #include "ni/depacketizer.hpp"  // from Stage 3 port-pair task
-#include "ni/flit.hpp"
+#include "flit.hpp"
 #include "noc/noc_rsp_in.hpp"
 #include <cassert>
 #include <cstdint>
