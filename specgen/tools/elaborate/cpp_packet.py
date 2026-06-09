@@ -167,14 +167,14 @@ def emit(packet_json: Path, spec_version: str) -> str:
             out.append(f"constexpr int AXI_CH_{name:<3} = {value};")
         out.append("")
 
-    # --- static_assert arithmetic invariants (design doc sec 6.4) ---
-    # Only equality invariants; no tiling/cross-ref/width_param eval.
     # --- FieldDescriptor struct + arrays (for flit dispatch consumers) ---
     out.append("// --- FieldDescriptor struct + field arrays (for flit dispatch) ---")
     _emit_field_descriptor_struct(out)
     _emit_header_fields_array(out, spec["flit"]["header_fields"])
     _emit_payload_fields_arrays(out, spec, spec["flit"]["payload_channels"])
 
+    # --- static_assert arithmetic invariants (design doc sec 6.4) ---
+    # Only equality invariants; no tiling/cross-ref/width_param eval.
     out.append("// --- static_assert: arithmetic equality invariants (design doc sec 6.4) ---")
 
     out.append(
