@@ -31,7 +31,8 @@ target_sources(test_cmodel_dpi PRIVATE
 target_link_libraries(test_cmodel_dpi PRIVATE yaml-cpp::yaml-cpp)
 target_include_directories(test_cmodel_dpi PRIVATE
     ${CMAKE_SOURCE_DIR}/../cosim/c
-    $ENV{VERILATOR_ROOT}/include)
+    $ENV{VERILATOR_ROOT}/include
+    $ENV{VERILATOR_ROOT}/include/vltstd)
 set_target_properties(test_cmodel_dpi PROPERTIES EXCLUDE_FROM_ALL TRUE)
 # Pass scenario YAML env var to every discovered test case (e.g.
 # CmodelDpiLifecycleTest.walk_session_state_machine). Task 5 removes EXCLUDE_FROM_ALL;

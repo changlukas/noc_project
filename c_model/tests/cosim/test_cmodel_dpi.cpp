@@ -26,6 +26,10 @@ void check_and_clear_error(int expected_code) {
 class CmodelDpiLifecycleTest : public ::testing::Test {};
 
 TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
+    // Case: cmodel_finalize from UNINITIALIZED → no-op (no error, state unchanged).
+    cmodel_finalize();
+    check_and_clear_error(CMODEL_DPI_OK);
+
     // Case: *_create before init → ERR_NOT_INITIALIZED.
     void* h0 = cmodel_channel_model_create("cm_pre_init");
     EXPECT_EQ(h0, nullptr);

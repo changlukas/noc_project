@@ -44,9 +44,9 @@ namespace ni::cmodel::cosim {
 std::atomic<int> g_dpi_error_code{CMODEL_DPI_OK};
 std::string g_dpi_error_msg;
 
-// Session state machine — Uninitialized on startup; transitions driven by
-// cmodel_init (→ Initialized) and cmodel_finalize (→ Finalized).
-// Task 3 modifies cmodel_init/cmodel_finalize to perform the transitions.
+// Session state machine — Uninitialized on startup.
+// Session state transitions: cmodel_init → Initialized;
+// cmodel_finalize → Finalized; both REINIT_FORBIDDEN-guarded.
 enum class SessionState { Uninitialized, Initialized, Finalized };
 SessionState g_session_state = SessionState::Uninitialized;
 
@@ -127,7 +127,6 @@ std::unique_ptr<ni::cmodel::axi::Scoreboard> g_scoreboard;
 using namespace ni::cmodel::cosim;
 
 extern "C" void cmodel_init(const char* scenario_yaml_path) {
-    using namespace ni::cmodel::cosim;
     // Session state machine guard.
     if (g_session_state == SessionState::Initialized ||
         g_session_state == SessionState::Finalized) {
@@ -216,13 +215,29 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
 }
 
 extern "C" void cmodel_finalize(void) {
+    using namespace ni::cmodel::cosim;
     DPI_BOUNDARY_BEGIN(cmodel_finalize) {
+        if (g_session_state != SessionState::Initialized) {
+            return;  // no-op from UNINITIALIZED or FINALIZED (idempotent)
+        }
+        // Destroy each handle block. unique_ptr<void, deleter> in HandleBlock
+        // ensures the type-erased adapter is properly deleted.
+        for (HandleBlock* h : g_handle_registry) {
+            delete h;
+        }
+        g_handle_registry.clear();
+
+        // Preserve existing singleton resets — removed by Task 10 once all
+        // per-shell create handlers are in place.
         g_channel_adapter.reset();
         g_master_adapter.reset();
         g_slave_adapter.reset();
         g_nmu_adapter.reset();
         g_nsu_adapter.reset();
         g_scoreboard.reset();
+        g_ever_created_master = 0;
+
+        g_session_state = SessionState::Finalized;
     }
     DPI_BOUNDARY_END(cmodel_finalize);
 }
