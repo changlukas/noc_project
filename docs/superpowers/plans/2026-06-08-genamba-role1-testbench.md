@@ -1,5 +1,26 @@
 # gen_amba role-1 single-master testbench — Implementation Plan
 
+**Status: COMPLETE (2026-06-10)** — see `2026-06-08-genamba-role1-testbench-findings.md`.
+
+| Task | Commit | Outcome |
+|---|---|---|
+| T1 build target + mem_axi standalone | `6d29be3` | done |
+| T2 BFM + Task A (BFM↔mem_axi) | `470ed96` | Task A PASS |
+| T3 insert NMU/NSU bridge | `01737c2` | Task A PASS through bridge |
+| T4 DPI error pump (faxi_slave bind later removed) | `47cce9e` | done |
+| T5 Task B burst + drop faxi_slave + R-shadow | `d40525d` | B blen=4/8/16 PASS |
+| T6 Task C N-outstanding + project-owned `bfm_drain_r` (revert vendored read_r) | `dfba5fa` | C N=4/8 PASS |
+| T7 Task D outstanding burst N=4 × blen 4/8 | `7bd3a4c` | D PASS |
+| T8 Task E same-ID outstanding (ROB invariant) | `4dfcc2e` | E PASS |
+| T9 Task F mixed R+W concurrent | `277c3c4` | F PASS |
+| T10 Task G deep outstanding pressure N=8/16 + watchdog | `7e00f32` | G N=8 84 cy, N=16 156 cy |
+| T11 findings document | `1cb477d` | Phase 1 GO for Phase 2 |
+
+Single-run sim time 16.3 us, walltime 0.007 s on Verilator 5.036 + MSYS2.
+No DPI errors, no watchdog fires, no `$fatal`.
+
+---
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use `- [ ]` checkbox tracking.
 
 **Goal:** Build a Verilator `--cc --exe --timing` (two-phase) self-clocked testbench that drives the NMU/NSU bridge with gen_amba's golden VIP through 7 single-master AXI4 patterns (baseline, burst, outstanding, outstanding-burst, same-ID, mixed R+W, deep pressure) and produces independent cross-tool evidence of bridge correctness. Run env: **Git Bash on Windows** (MSYS2 Bash); `--binary --timing` does not work because Verilator 5.036's nested-make subprocess can't find MSYS2 `make` via Windows `CreateProcess()` — discovered T1, see `main_genamba.cpp` driver workaround.
