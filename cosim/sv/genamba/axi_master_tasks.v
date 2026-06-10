@@ -98,38 +98,40 @@ endtask
 task axi_master_read_r;
      input [WIDTH_ID-1:0] arid ;
      input [15:0]         bleng; // burst length: 1, 2, ...
-     input                delay; // 0:don't use delay  (unused in shadow path)
-     reg   [7:0]          start_widx;
-     integer              idx;
+     input                delay; // 0:don't use delay
+     integer idx;
+     integer rdelay;
 begin
-    // Project Verilator --timing patch: replace per-beat procedural RDATA
-    // reads with parallel shadow-array capture in genamba_master_bfm.sv.
-    // Per-beat procedural reads race with NBA + RREADY-held-high: each
-    // loop iter consumes 2 cycles, but NSU/NMU drive 1 beat/cycle, so the
-    // task starves and hangs at the second-from-last beat for blen>=2.
-    // See ATTRIBUTION.md "axi_master_read_r — shadow-array data capture".
-    RREADY     <= #LD 1;
-    start_widx  = r_shadow_widx;
-    // Wait for `bleng` new handshakes to land in the shadow array.
-    while ((r_shadow_widx - start_widx) < bleng) @ (posedge ACLK);
-    RREADY     <= #LD 0;
-    // Copy shadow [start_widx .. start_widx+bleng-1] into dataR[0..bleng-1]
+    RREADY   <= #LD 1;
     for (idx=0; idx<bleng; idx=idx+1) begin
-        dataR[idx] = r_shadow[start_widx + idx[7:0]];
+         @ (posedge ACLK); //-----------------------------------
+         while (RVALID==1'b0) @ (posedge ACLK);
+         dataR[idx] = RDATA; // it simply store the read-data; should be blocking
+         if (RRESP!=2'b00) begin
+             $display($time,,"%m ERROR RD RRESP no-ok 0x%02x", RRESP);
+         end
+         if (RID!=arid) begin
+             $display($time,,"%m ERROR RD RID mis-match 0x%4x:0x%04x", RID, arid);
+         end
+         if (idx==(bleng-1)) begin
+             if (RLAST==1'b0) begin
+                 $display($time,,"%m ERROR RD RLAST not driven");
+             end
+         end else begin
+             if (RLAST==1'b1) begin
+                 $display($time,,"%m ERROR RD RLAST not expected");
+             end
+             if (delay) begin
+                rdelay = {$random(seed_tread)}%5;
+                if (rdelay>0) begin
+                    RREADY <= #LD 0;
+                    repeat (rdelay) @ (posedge ACLK); //------------
+                    RREADY <= #LD 1;
+                end
+             end
+         end
     end
-    // Final-beat sanity (RID/RLAST/RRESP latches hold the LAST beat's
-    // values — sufficient for per-burst RLAST/RID/RRESP checks; per-beat
-    // ID checks are intentionally lost vs. vendored since same-ID
-    // bursts have identical RID across beats anyway).
-    if (r_last_latch != 1'b1) begin
-        $display($time,,"%m ERROR RD RLAST not driven on final beat");
-    end
-    if (r_id_latch != arid) begin
-        $display($time,,"%m ERROR RD RID mis-match 0x%4x:0x%04x", r_id_latch, arid);
-    end
-    if (r_resp_latch != 2'b00) begin
-        $display($time,,"%m ERROR RD RRESP no-ok 0x%02x", r_resp_latch);
-    end
+    RREADY   <= #LD 0;
 end
 endtask
 

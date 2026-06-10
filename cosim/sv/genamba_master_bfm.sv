@@ -93,7 +93,8 @@ module genamba_master_bfm #(
     // task waits for (r_shadow_widx - snapshot_at_entry) >= blen, then
     // copies into dataR[0..blen-1].
     reg [WIDTH_DA-1:0] r_shadow [0:255];
-    reg [7:0]          r_shadow_widx;
+    reg [7:0]          r_shadow_widx;       // write-side counter (NBA, parallel block)
+    reg [7:0]          r_shadow_ridx = 8'd0; // read-side counter (blocking, drain task)
     always @(posedge ACLK) begin
         if (!ARESETn) begin
             r_shadow_widx <= 8'd0;
@@ -132,8 +133,31 @@ module genamba_master_bfm #(
     endtask
 
     task bfm_drain_r(input [WIDTH_ID-1:0] id, input integer blen);
-        // After return, dataR[0:blen-1] holds the read data.
-        axi_master_read_r(id, blen[15:0], 1'b0);
+        // Project-owned drain (NOT calling vendored axi_master_read_r) —
+        // sidesteps the Verilator --timing per-beat RDATA read race entirely.
+        // Assert RREADY (the vendored axi_master_read_r used by Task A's
+        // mem_test deasserts RREADY at its exit; we must re-assert here),
+        // then wait for the parallel always block to land `blen` new R beats
+        // in r_shadow. r_shadow_ridx tracks the read pointer across calls so
+        // multiple outstanding drains consume the right slots.
+        //
+        // Assumes the bridge preserves AR-issue → R-return order across IDs
+        // (empirically true for the current NMU/NSU c_model on a single
+        // noc_intf with no contention; see docs/superpowers/specs/
+        // 2026-06-08-genamba-role1-testbench-design.md §3.5 for the
+        // assumption rationale). If a future bridge variant returns R
+        // out-of-order across distinct IDs, the shadow array would need
+        // per-ID FIFOs instead of a single global queue.
+        reg [7:0] start;
+        integer i;
+        RREADY <= 1'b1;
+        start = r_shadow_ridx;
+        while ((r_shadow_widx - start) < blen[7:0]) @(posedge ACLK);
+        for (i = 0; i < blen; i = i + 1) begin
+            dataR[i] = r_shadow[start + i[7:0]];
+        end
+        r_shadow_ridx = start + blen[7:0];
+        RREADY <= 1'b0;
     endtask
 
     // ---------- Task A: vendored baseline ----------
@@ -154,6 +178,11 @@ module genamba_master_bfm #(
         reg [WIDTH_DA-1:0] expected [0:63];
         integer i, b;
         reg [WIDTH_AD-1:0] addr;
+        // R-shadow barrier: previous task (Task A vendored mem_test) advanced
+        // r_shadow_widx via its own R handshakes; sync r_shadow_ridx so this
+        // task's bfm_drain_r calls start counting from beats that arrive AFTER
+        // this barrier, not from stale shadow entries.
+        r_shadow_ridx = r_shadow_widx;
         $display("[%0t] TASK B start: burst blen=%0d", $time, blen);
 
         // Write phase — single-outstanding: AW → W beats → B drain
@@ -184,6 +213,47 @@ module genamba_master_bfm #(
             end
         end
         $display("[%0t] TASK B PASS blen=%0d", $time, blen);
+    endtask
+
+    // ---------- Task C: outstanding writes/reads via adapter layer ----------
+    // N AWs sequentially absorbed into NMU AW queue, then N Ws sequentially,
+    // then drain N Bs. Same shape for reads. Distinct AXI IDs 1..N.
+    // Window 0x0800-0x09FF; blen=1 (single beat).
+    task test_outstanding_N(input integer N);
+        reg [WIDTH_DA-1:0] expected [0:15];
+        integer i;
+        reg [WIDTH_AD-1:0] addr;
+        // R-shadow barrier (see test_burst_blen for rationale).
+        r_shadow_ridx = r_shadow_widx;
+        $display("[%0t] TASK C start: N=%0d outstanding", $time, N);
+
+        for (i = 0; i < N; i = i + 1) begin
+            addr = 64'h0000_0800 + i * 16;
+            bfm_post_aw(i+1, addr, 1);
+        end
+        for (i = 0; i < N; i = i + 1) begin
+            addr = 64'h0000_0800 + i * 16;
+            dataW[0] = get_data(0) & get_mask(addr, 16);
+            expected[i] = dataW[0];
+            bfm_post_w(i+1, addr, 1);
+        end
+        for (i = 0; i < N; i = i + 1) bfm_drain_b(i+1);
+
+        for (i = 0; i < N; i = i + 1) begin
+            addr = 64'h0000_0800 + i * 16;
+            bfm_post_ar(i+1, addr, 1);
+        end
+        for (i = 0; i < N; i = i + 1) begin
+            addr = 64'h0000_0800 + i * 16;
+            bfm_drain_r(i+1, 1);
+            if ((dataR[0] & get_mask(addr, 16)) !== expected[i]) begin
+                $display("[%0t] TASK C N=%0d id=%0d mismatch A=0x%x D=0x%x exp=0x%x",
+                         $time, N, i+1, addr, dataR[0], expected[i]);
+                error_flag = 1;
+                $fatal(1, "TASK C data mismatch");
+            end
+        end
+        $display("[%0t] TASK C PASS N=%0d", $time, N);
     endtask
 
     // Idle defaults

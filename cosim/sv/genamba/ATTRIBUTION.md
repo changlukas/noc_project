@@ -19,7 +19,7 @@ to Verilator `--timing` simulator compatibility, documented below.
 | `cosim/sv/genamba/mem_axi.v`            | `gen_amba_axi/verification/ip/mem_axi.v`         | Unmodified |
 | `cosim/sv/genamba/mem_axi_beh.v`        | `gen_amba_axi/verification/ip/mem_axi_beh.v`     | Unmodified |
 | `cosim/sv/genamba/mem_axi_dpram_sync.v` | `gen_amba_axi/verification/ip/mem_axi_dpram_sync.v` | Unmodified |
-| `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B/R latch reads; see "Modifications" below) |
+| `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B-channel latch read in `axi_master_write_b`; see "Modifications" below. `axi_master_read_r` is upstream-pristine — project bypasses it via `bfm_drain_r` in `genamba_master_bfm.sv`.) |
 | `cosim/sv/genamba/mem_test_tasks.v`     | `gen_amba_axi/verification/ip/mem_test_tasks.v`  | **Modified** (offset-width fix; see "Modifications" below) |
 | `cosim/sv/genamba/axi_tester.v`         | `gen_amba_axi/verification/ip/axi_tester.v`      | Unmodified (template/reference for the BFM signal environment) |
 
@@ -79,11 +79,10 @@ Discovered during T2 (same plan). The race is Verilator-specific; the watcher
 works fine under Icarus / ModelSim. Worth flagging upstream as a Verilator
 compatibility issue.
 
-### `axi_master_tasks.v` — B/R channel snapshot-latch reads
+### `axi_master_tasks.v` — B-channel snapshot-latch reads
 
-Upstream `axi_master_write_b` and `axi_master_read_r` read the B-channel
-`BID`/`BRESP` and R-channel `RID`/`RRESP`/`RLAST` signals as raw input wires
-immediately after `@(posedge ACLK)` synchronization:
+Upstream `axi_master_write_b` reads the B-channel `BID`/`BRESP` signals as raw
+input wires immediately after `@(posedge ACLK)` synchronization:
 
 ```verilog
 while (BVALID==1'b0) @ (posedge ACLK);
@@ -101,71 +100,36 @@ captured by a parallel `always @(posedge ACLK)` monitor) is correct. This is a
 Verilator-specific procedural-vs-NBA race; the same code works under Icarus /
 ModelSim.
 
-Project fix: introduce snapshot-latch registers in `genamba_master_bfm.sv`
-(non-vendored, project code) that capture B/R-channel signals on every
-handshake cycle via a clean `always @(posedge ACLK)` block:
+Project fix: introduce a snapshot-latch register in `genamba_master_bfm.sv`
+(non-vendored, project code) that captures B-channel signals on every handshake
+cycle via a clean `always @(posedge ACLK)` block:
 
 ```verilog
 reg [WIDTH_ID-1:0] b_id_latch;
 reg [1:0]          b_resp_latch;
-reg [WIDTH_ID-1:0] r_id_latch;
-reg [1:0]          r_resp_latch;
-reg                r_last_latch;
 always @(posedge ACLK) begin
     if (BVALID && BREADY) begin b_id_latch <= BID; b_resp_latch <= BRESP; end
-    if (RVALID && RREADY) begin r_id_latch <= RID; r_resp_latch <= RRESP; r_last_latch <= RLAST; end
 end
 ```
 
-Then patch the vendored `axi_master_write_b` / `axi_master_read_r` to (1) wait
-one additional `@(posedge ACLK)` so the latches' NBA settles, then (2) read the
-latches (`b_id_latch`, `b_resp_latch`, `r_id_latch`, `r_resp_latch`, `r_last_latch`)
-instead of the raw input wires. The latch registers themselves are project code
-(in `genamba_master_bfm.sv`), so the vendored modification is limited to the
-in-task signal name swap plus the extra `@(posedge)` wait.
+Then patch the vendored `axi_master_write_b` to (1) wait one additional
+`@(posedge ACLK)` so the latch's NBA settles, then (2) read the latches
+(`b_id_latch`, `b_resp_latch`) instead of the raw input wires. The latch
+registers themselves are project code, so the vendored modification is limited
+to the in-task signal name swap plus the extra `@(posedge)` wait.
 
 Discovered during T3 (debug DBG monitors in `tb_genamba.sv` showed BID=0x39 at
-the handshake cycle, while the vendored task's procedural read returned 0). The
-issue is purely a Verilator simulator quirk; the bridge transports BID/RID/RLAST
-correctly end-to-end (verified at every adapter / DPI / SV signal boundary by
-Codex static trace + the SV DBG monitors).
+the handshake cycle, while the vendored task's procedural read returned 0).
 
-### `axi_master_read_r` — shadow-array data capture
-
-The B-channel latch fix above is sufficient for `axi_master_write_b` (which
-checks BID/BRESP only once per write transaction). But for multi-beat read
-bursts, the per-beat procedural `dataR[idx] = RDATA` read inside the vendored
-loop is structurally broken under Verilator `--timing`:
-
-```verilog
-for (idx=0; idx<bleng; idx=idx+1) begin
-    @ (posedge ACLK);
-    while (RVALID==1'b0) @ (posedge ACLK);
-    dataR[idx] = RDATA;          // post-NBA read — reads NEXT cycle
-    @ (posedge ACLK);            // (previous patch's extra wait for latches)
-    if (r_id_latch != arid) ...
-end
-```
-
-Each iteration consumes 2 clock cycles (the `@(posedge)` at loop top + the
-extra `@(posedge)` added by the prior latch patch). NSU/NMU drive R beats at
-one beat/cycle with RREADY held high, so for `blen=4` the second-to-last
-beat is the last RVALID-high cycle. By iter 2 the bus has gone idle —
-`while (RVALID==1'b0)` loops forever. Task B blen=4 hangs after the first R
-burst's RLAST=1; Task A blen=1 escapes because there's only one iteration.
-
-Project fix: capture every RVALID-RREADY handshake's RDATA in a parallel
-NBA-counter-indexed shadow array (`r_shadow[]` in `genamba_master_bfm.sv`),
-then replace the vendored loop with a simple "wait for `bleng` new entries,
-copy to dataR" task body. Per-beat ID checks reduce to per-burst checks
-against `r_id_latch` / `r_last_latch` / `r_resp_latch` — sufficient for our
-tests (same-ID bursts have identical RID per beat anyway; per-beat RLAST is
-implicitly verified by RLAST=1 only on the final beat).
-
-Discovered during T5 Task B blen=4 silent hang. The same race would manifest
-in `axi_master_write_w` (W-beat loop) if our flow used RREADY-style W push;
-the adapter task `bfm_post_w` sidesteps it by issuing exactly `blen` W beats
-sequentially without waiting for WREADY drops between them.
+**R-channel handling — not a vendored patch.** The same race affects R-channel
+`RID`/`RDATA`/`RLAST` reads, plus a structural mismatch with the per-beat
+procedural loop (each iter consumes 2 cycles vs. one R beat/cycle from the
+bridge — Task B blen=4 hangs at the second-to-last beat). Rather than further
+patching `axi_master_read_r`, the project's `bfm_drain_r` adapter task in
+`cosim/sv/genamba_master_bfm.sv` bypasses the vendored task entirely: it reads
+from a parallel-captured shadow array (`r_shadow[256]`) indexed by a blocking
+read-side counter (`r_shadow_ridx`). The vendored `axi_master_read_r` remains
+upstream-pristine, compiled but not called.
 
 ## Notes
 
