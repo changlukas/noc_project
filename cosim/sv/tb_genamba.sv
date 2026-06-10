@@ -119,4 +119,68 @@ module tb_genamba;
     final begin
         cmodel_finalize();
     end
+
+    // ---- DPI per-cycle error pump (copy of tb_top.sv:374-388 pattern) ----
+    import "DPI-C" context function int cmodel_check_error(output string msg);
+    /* verilator lint_off WIDTHTRUNC */
+    always_ff @(posedge ACLK) begin
+        if (ARESETn) begin
+            string dpi_err_msg;
+            int    dpi_err_code;
+            dpi_err_code = cmodel_check_error(dpi_err_msg);
+            if (dpi_err_code != 0) begin
+                $display("[%0t] DPI error code=%0d msg=%s", $time, dpi_err_code, dpi_err_msg);
+                cmodel_finalize();
+                $fatal(1, "DPI error pump fired");
+            end
+        end
+    end
+    /* verilator lint_on WIDTHTRUNC */
+
+    // ---- faxi_slave induction outputs (declared per checker port set) ----
+    wire [9:0] nmu_f_awr_nbursts, nmu_f_wr_pending, nmu_f_rd_nbursts, nmu_f_rd_outstanding;
+
+    // ---- faxi_slave on BFM ↔ NMU AXI; tuned params per spec §3.8 ----
+    /* verilator lint_off PINMISSING */
+    faxi_slave #(
+        .C_AXI_ID_WIDTH(8), .C_AXI_DATA_WIDTH(256), .C_AXI_ADDR_WIDTH(64),
+        .OPT_EXCLUSIVE(0),
+        .F_LGDEPTH(10),
+        .F_AXI_MAXSTALL(256),         // bumped 32 -> 256 for outstanding pressure
+        .F_AXI_MAXRSTALL(256),        // bumped 32 -> 256
+        .F_AXI_MAXDELAY(2000)         // bumped 500 -> 2000
+    ) u_nmu_check (
+        .i_clk(ACLK), .i_axi_reset_n(ARESETn),
+        // AW
+        .i_axi_awvalid(bfm_nmu_axi.awvalid), .i_axi_awready(bfm_nmu_axi.awready),
+        .i_axi_awid(bfm_nmu_axi.awid), .i_axi_awaddr(bfm_nmu_axi.awaddr),
+        .i_axi_awlen(bfm_nmu_axi.awlen), .i_axi_awsize(bfm_nmu_axi.awsize),
+        .i_axi_awburst(bfm_nmu_axi.awburst), .i_axi_awlock(bfm_nmu_axi.awlock),
+        .i_axi_awcache(bfm_nmu_axi.awcache), .i_axi_awprot(bfm_nmu_axi.awprot),
+        .i_axi_awqos(bfm_nmu_axi.awqos),
+        // W
+        .i_axi_wvalid(bfm_nmu_axi.wvalid), .i_axi_wready(bfm_nmu_axi.wready),
+        .i_axi_wdata(bfm_nmu_axi.wdata), .i_axi_wstrb(bfm_nmu_axi.wstrb),
+        .i_axi_wlast(bfm_nmu_axi.wlast),
+        // B
+        .i_axi_bvalid(bfm_nmu_axi.bvalid), .i_axi_bready(bfm_nmu_axi.bready),
+        .i_axi_bid(bfm_nmu_axi.bid), .i_axi_bresp(bfm_nmu_axi.bresp),
+        // AR
+        .i_axi_arvalid(bfm_nmu_axi.arvalid), .i_axi_arready(bfm_nmu_axi.arready),
+        .i_axi_arid(bfm_nmu_axi.arid), .i_axi_araddr(bfm_nmu_axi.araddr),
+        .i_axi_arlen(bfm_nmu_axi.arlen), .i_axi_arsize(bfm_nmu_axi.arsize),
+        .i_axi_arburst(bfm_nmu_axi.arburst), .i_axi_arlock(bfm_nmu_axi.arlock),
+        .i_axi_arcache(bfm_nmu_axi.arcache), .i_axi_arprot(bfm_nmu_axi.arprot),
+        .i_axi_arqos(bfm_nmu_axi.arqos),
+        // R
+        .i_axi_rvalid(bfm_nmu_axi.rvalid), .i_axi_rready(bfm_nmu_axi.rready),
+        .i_axi_rid(bfm_nmu_axi.rid), .i_axi_rdata(bfm_nmu_axi.rdata),
+        .i_axi_rresp(bfm_nmu_axi.rresp), .i_axi_rlast(bfm_nmu_axi.rlast),
+        // Induction outputs
+        .f_axi_awr_nbursts(nmu_f_awr_nbursts),
+        .f_axi_wr_pending(nmu_f_wr_pending),
+        .f_axi_rd_nbursts(nmu_f_rd_nbursts),
+        .f_axi_rd_outstanding(nmu_f_rd_outstanding)
+    );
+    /* verilator lint_on PINMISSING */
 endmodule
