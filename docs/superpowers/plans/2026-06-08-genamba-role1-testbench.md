@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use `- [ ]` checkbox tracking.
 
-**Goal:** Build a Verilator `--binary --timing` self-clocked testbench that drives the NMU/NSU bridge with gen_amba's golden VIP through 7 single-master AXI4 patterns (baseline, burst, outstanding, outstanding-burst, same-ID, mixed R+W, deep pressure) and produces independent cross-tool evidence of bridge correctness.
+**Goal:** Build a Verilator `--cc --exe --timing` (two-phase) self-clocked testbench that drives the NMU/NSU bridge with gen_amba's golden VIP through 7 single-master AXI4 patterns (baseline, burst, outstanding, outstanding-burst, same-ID, mixed R+W, deep pressure) and produces independent cross-tool evidence of bridge correctness. Run env: **Git Bash on Windows** (MSYS2 Bash); `--binary --timing` does not work because Verilator 5.036's nested-make subprocess can't find MSYS2 `make` via Windows `CreateProcess()` — discovered T1, see `main_genamba.cpp` driver workaround.
 
 **Architecture:** `gen_amba BFM → NMU → noc_intf (direct mosi↔miso, no router) → NSU → gen_amba mem_axi`. Self-clocked SV top, no `main.cpp` (DPI lifecycle in SV `final` block). faxi_slave checker on BFM↔NMU AXI with bumped MAXSTALL/MAXRSTALL/MAXDELAY for outstanding pressure. All 7 BFM tasks live in one `genamba_master_bfm.sv` module; tasks B–G use a thin **adapter task layer** that calls the vendored channel-level primitives positionally (vendored `*_multiple_outstanding` helpers have N≤16 + broken per-address data per spec §2 caveat — do not use).
 
-**Tech Stack:** Verilator 5.040 `--binary --timing`; SystemVerilog 2012; vendored gen_amba_2021 VIP (2-clause BSD, `cosim/sv/genamba/`); wb2axip checker (`cosim/sv/wb2axip/`); Windows host via PowerShell driver + msys2 `sh.exe`.
+**Tech Stack:** Verilator 5.036+ `--cc --exe --timing` (two-phase, mirroring existing `tb_top` Makefile pattern); SystemVerilog 2012; vendored gen_amba_2021 VIP (2-clause BSD, `cosim/sv/genamba/`); wb2axip checker (`cosim/sv/wb2axip/`); Git Bash on Windows (MSYS2).
 
 **Spec:** `docs/superpowers/specs/2026-06-08-genamba-role1-testbench-design.md` (rev 6).
 
@@ -18,7 +18,7 @@
 
 - `cosim/sv/tb_genamba.sv` — self-clocked SV top, DPI lifecycle, BFM + DUT wraps + mem_axi instantiation, faxi_slave bind, 7-task sequencer
 - `cosim/sv/genamba_master_bfm.sv` — BFM module: full AXI4 5-channel port surface + parameter `P_MST_ID` (required by vendored `mem_test_tasks.v:30`); `` `include "genamba/axi_master_tasks.v" `` + `` `include "genamba/mem_test_tasks.v" `` (vendored fragments included into module body); **adapter task layer** (semantic named tasks `bfm_post_aw`, `bfm_post_w`, `bfm_drain_b`, `bfm_post_ar`, `bfm_drain_r`) wrapping vendored channel-level primitives; 7 helper tasks A–G
-- `cosim/verilator/run_genamba.ps1` — Windows driver (PATH + LC_ALL + PYTHON3 + make + run)
+- `cosim/verilator/main_genamba.cpp` — minimal Verilator main: `topp->eval()` + `nextTimeSlot()` loop until `gotFinish()` + `sc_time_stamp()` stub (~28 lines; not the existing `main.cpp` which drives ACLK from C++)
 - `docs/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md` — Phase 1 findings (T11 only)
 
 ### Modified
@@ -103,8 +103,8 @@ For burst (blen>1): populate `dataW[0:blen-1]` before each `bfm_post_w` call; re
 
 **Files:**
 - Create: `cosim/sv/tb_genamba.sv` — minimal skeleton (mem_axi tied idle + reset + `$finish`)
-- Create: `cosim/verilator/run_genamba.ps1` — Windows driver
-- Modify: `cosim/verilator/Makefile` — add `genamba` target (mirrors existing pattern at lines 31-55)
+- Create: `cosim/verilator/main_genamba.cpp` — minimal Verilator main driver (~28 lines)
+- Modify: `cosim/verilator/Makefile` — add `genamba` target (mirrors existing two-phase `tb_top` pattern at lines 31-77)
 
 - [ ] **Step 1: Create skeleton `cosim/sv/tb_genamba.sv`**
 
@@ -173,7 +173,7 @@ GENAMBA_SRC := \
 GENAMBA_C_SRC := \
     $(COSIM_ROOT)/c/cmodel_dpi.cpp
 GENAMBA_FLAGS := \
-    --binary --timing \
+    --cc --exe --timing \
     --top-module tb_genamba \
     --Mdir $(GENAMBA_OBJDIR) \
     --assert \
@@ -202,36 +202,52 @@ genamba:
 
 T2/T3/T4 each grow `GENAMBA_SRC` and (if needed) `GENAMBA_C_SRC`.
 
-- [ ] **Step 3: Create `cosim/verilator/run_genamba.ps1` (Windows driver)**
+- [ ] **Step 3: Create `cosim/verilator/main_genamba.cpp` (minimal Verilator driver)**
 
-```powershell
-# Windows driver for the genamba testbench
-$env:Path  = "C:\msys64\mingw64\bin;C:\msys64\usr\bin;" + $env:Path
-$env:LC_ALL = "C"
+```cpp
+// Verilated main for tb_genamba (--cc --exe --timing, two-phase build).
+// Equivalent of what `--binary` would auto-generate; written separately so
+// the genamba target uses --cc --exe + explicit $(MAKE) -C, avoiding the
+// Windows/MSYS2 nested-make subprocess issue in --binary mode.
 
-Push-Location $PSScriptRoot
-try {
-    & make genamba PYTHON3=py
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+#include "verilated.h"
+#include "Vtb_genamba.h"
 
-    $exe = Join-Path $PSScriptRoot "obj_genamba\Vtb_genamba.exe"
-    if (-not (Test-Path $exe)) {
-        Write-Error "Build did not produce $exe"
-        exit 1
+// Legacy SystemC timestamp stub required by verilated.cpp under --cc mode
+// (which does not set -DVL_TIME_CONTEXT by default).
+double sc_time_stamp() { return 0.0; }
+
+int main(int argc, char** argv, char**) {
+    Verilated::debug(0);
+    const std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
+    contextp->commandArgs(argc, argv);
+
+    const std::unique_ptr<Vtb_genamba> topp{new Vtb_genamba{contextp.get(), ""}};
+
+    while (!contextp->gotFinish()) {
+        topp->eval();
+        if (!topp->eventsPending()) break;
+        contextp->time(topp->nextTimeSlot());
     }
 
-    # T1: no scenario plusarg yet (cmodel_init not called); T3 adds it.
-    & $exe
-    exit $LASTEXITCODE
-} finally {
-    Pop-Location
+    if (!contextp->gotFinish()) {
+        VL_DEBUG_IF(VL_PRINTF("+ Exiting without $finish; no events left\n"););
+    }
+
+    topp->final();
+    contextp->statsPrintSummary();
+    return 0;
 }
 ```
 
+The driver only spins the Verilator scheduler; SV side (`always #5 ACLK`) owns the clock. Adds `$(PROJ_ROOT)/cosim/verilator/main_genamba.cpp` to `GENAMBA_C_SRC` in the Makefile target above.
+
 - [ ] **Step 4: Build + run**
 
-```powershell
-cosim\verilator\run_genamba.ps1
+```bash
+make -C cosim/verilator genamba PYTHON3=python3
+./cosim/verilator/obj_genamba/Vtb_genamba.exe \
+  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected stdout (selected): `tb_genamba: T1 PASS (mem_axi standalone)` + exit 0.
@@ -239,13 +255,15 @@ Expected stdout (selected): `tb_genamba: T1 PASS (mem_axi standalone)` + exit 0.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cosim/verilator/Makefile cosim/sv/tb_genamba.sv cosim/verilator/run_genamba.ps1
+git add cosim/verilator/Makefile cosim/sv/tb_genamba.sv cosim/verilator/main_genamba.cpp
 git commit -m "build(cosim): genamba verilator target + mem_axi standalone
 
 T1 of role-1 testbench. New 'genamba' make target mirrors existing tb_top
-variable pattern (PROJ_ROOT / COSIM_ROOT / SPECGEN_SV_INC etc. used as
--I flags + qualified source paths), builds tb_genamba under --binary
---timing with mem_axi tied idle.
+two-phase pattern (PROJ_ROOT / COSIM_ROOT / SPECGEN_SV_INC etc. used as
+-I flags + qualified source paths), builds tb_genamba under --cc --exe
+--timing with mem_axi tied idle. Includes minimal main_genamba.cpp driver
+(28 lines: eval() loop + sc_time_stamp() stub) since --binary fails on
+MSYS2/Windows (Verilator CreateProcess() can't see nested make).
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```
@@ -457,8 +475,10 @@ Insert `$(COSIM_ROOT)/sv/genamba_master_bfm.sv` directly before `$(COSIM_ROOT)/s
 
 - [ ] **Step 4: Build + run**
 
-```powershell
-cosim\verilator\run_genamba.ps1
+```bash
+make -C cosim/verilator genamba PYTHON3=python3
+./cosim/verilator/obj_genamba/Vtb_genamba.exe \
+  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected (selected stdout): `TASK A start: mem_test baseline` → `mem_test OK for 16-byte from 0x0 to 0xff` → `TASK A PASS` → `T2 PASS (BFM<->mem_axi mem_test)` → exit 0.
@@ -490,7 +510,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 **Files:**
 - Modify: `cosim/sv/tb_genamba.sv` — replace direct wiring with `nmu_wrap` + `noc_intf` + `nsu_wrap`; add DPI lifecycle
 - Modify: `cosim/verilator/Makefile` — add `ni_params_pkg.sv`, `ni_signals_pkg.sv`, `nmu_wrap.sv`, `nsu_wrap.sv` to `GENAMBA_SRC`
-- Modify: `cosim/verilator/run_genamba.ps1` — pass `+scenario=...` plusarg
+- (no .ps1 to modify — invocation pattern in step 5 below explicitly includes `+scenario=...` plusarg)
 
 - [ ] **Step 1: Add DUT pkg + wrap sources to Makefile**
 
@@ -628,18 +648,14 @@ Replace the entire body (keep `timescale`/`module`/`endmodule` + ACLK/ARESETn ge
     end
 ```
 
-- [ ] **Step 4: Update `cosim/verilator/run_genamba.ps1`**
-
-Replace the `& $exe` line with:
-
-```powershell
-& $exe "+scenario=$PSScriptRoot\..\..\tests\scenarios\AX4-BAS-001_single_write_no_read\scenario.yaml"
-```
+- [ ] **Step 4: (skipped — no .ps1 to update. Invocation already includes `+scenario=...` per the build+run command pattern below.)**
 
 - [ ] **Step 5: Build + run**
 
-```powershell
-cosim\verilator\run_genamba.ps1
+```bash
+make -C cosim/verilator genamba PYTHON3=python3
+./cosim/verilator/obj_genamba/Vtb_genamba.exe \
+  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected: `TASK A PASS` + `T3 PASS (BFM->NMU->NoC->NSU->mem mem_test)` + exit 0.
@@ -651,7 +667,7 @@ Expected: `TASK A PASS` + `T3 PASS (BFM->NMU->NoC->NSU->mem mem_test)` + exit 0.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add cosim/sv/tb_genamba.sv cosim/verilator/Makefile cosim/verilator/run_genamba.ps1
+git add cosim/sv/tb_genamba.sv cosim/verilator/Makefile
 git commit -m "test(cosim): BFM -> NMU -> NoC -> NSU -> mem_axi mem_test passes (Task A through bridge)
 
 T3 of role-1 testbench. Insert DUT bridge between BFM and mem_axi. Adds
@@ -753,8 +769,10 @@ Insert before the closing `endmodule`:
 
 - [ ] **Step 3: Build + run**
 
-```powershell
-cosim\verilator\run_genamba.ps1
+```bash
+make -C cosim/verilator genamba PYTHON3=python3
+./cosim/verilator/obj_genamba/Vtb_genamba.exe \
+  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected: same `T3 PASS` outcome + no `Assertion failed` from faxi_slave + no `DPI error pump fired`.
@@ -845,8 +863,10 @@ After `u_bfm.test_baseline_mem_test;`:
 
 - [ ] **Step 3: Build + run**
 
-```powershell
-cosim\verilator\run_genamba.ps1
+```bash
+make -C cosim/verilator genamba PYTHON3=python3
+./cosim/verilator/obj_genamba/Vtb_genamba.exe \
+  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected: `TASK B PASS blen=4`, `... blen=8`, `... blen=16`. Checker silent.
@@ -1310,7 +1330,10 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ```powershell
 # stdout -> .log (task PASS markers, cycle counts)
 # stderr -> .err (faxi_slave Assertion fired, $fatal, watchdog fire, DPI error pump)
-cosim\verilator\run_genamba.ps1 1> genamba_run.log 2> genamba_run.err
+(make -C cosim/verilator genamba PYTHON3=python3 && \
+ ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
+   +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml) \
+  1> genamba_run.log 2> genamba_run.err
 ```
 
 **stdout** sources: `$display` lines (per-task PASS markers, watchdog PASS cycle count, T2/T3 phase markers).
@@ -1410,7 +1433,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 ### Placeholder scan
 
 - No `TBD` / `TODO` / "implement later" / "similar to" / "fill in".
-- Every step contains either actual SV/PowerShell/bash code or actual command + expected output.
+- Every step contains either actual SV/Bash/C++ code or actual command + expected output.
 - T10/T11 templates have explicit fill markers (`X`/`Y` cycle values, `<P/F>` outcomes) — these are run-time fields the engineer fills with measured values, not skipped work.
 
 ### Type / signature consistency
