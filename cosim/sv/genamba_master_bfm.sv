@@ -354,6 +354,78 @@ module genamba_master_bfm #(
         $display("[%0t] TASK E PASS (same-ID order preserved)", $time);
     endtask
 
+    // ---------- Task F: mixed R+W concurrent ----------
+    // Writes addrs 0x1000-0x107F (IDs 1..8); pre-seed reads at 0x1100-0x117F
+    // (IDs 0x81..0x88 to avoid ID clash with concurrent writes). Each fork
+    // branch owns its own loop variable. Verify writes landed via post-fork
+    // single-outstanding readback.
+    task test_mixed_rw_concurrent;
+        reg [WIDTH_DA-1:0] w_expected [0:7];
+        reg [WIDTH_DA-1:0] r_expected [0:7];
+        integer i, k;             // serial-phase vars
+        // R-shadow barrier (consistent with other test wrappers).
+        r_shadow_ridx = r_shadow_widx;
+        $display("[%0t] TASK F start: mixed R+W concurrent", $time);
+
+        // Pre-seed read window — sequential writes via the adapter layer
+        // (NOT vendored axi_master_write). The vendored single-shot wrapper
+        // contains an internal fork/join; combining it with the top-level
+        // fork below crosses Verilator 5.036's coroutine-split threshold
+        // (`__Vfork_N__sync was not declared in this scope` C++ build error).
+        // Adapter sequential is functionally equivalent for setup writes —
+        // we only need the data to land in mem before the read phase, not
+        // to exercise AW/W parallel issue.
+        for (i = 0; i < 8; i = i + 1) begin
+            dataW[0] = get_data(0) & get_mask(64'h0000_1100 + i*16, 16);
+            r_expected[i] = dataW[0];
+            bfm_post_aw(8'h81, 64'h0000_1100 + i*16, 1);
+            bfm_post_w(8'h81, 64'h0000_1100 + i*16, 1);
+            bfm_drain_b(8'h81);
+        end
+
+        fork
+            begin : w_concurrent
+                integer wi;
+                for (wi = 0; wi < 8; wi = wi + 1)
+                    bfm_post_aw(wi+1, 64'h0000_1000 + wi*16, 1);
+                for (wi = 0; wi < 8; wi = wi + 1) begin
+                    dataW[0] = get_data(0) & get_mask(64'h0000_1000 + wi*16, 16);
+                    w_expected[wi] = dataW[0];
+                    bfm_post_w(wi+1, 64'h0000_1000 + wi*16, 1);
+                end
+                for (wi = 0; wi < 8; wi = wi + 1) bfm_drain_b(wi+1);
+            end
+            begin : r_concurrent
+                integer ri;
+                for (ri = 0; ri < 8; ri = ri + 1)
+                    bfm_post_ar(ri+1+8'h80, 64'h0000_1100 + ri*16, 1);
+                for (ri = 0; ri < 8; ri = ri + 1) begin
+                    bfm_drain_r(ri+1+8'h80, 1);
+                    if ((dataR[0] & get_mask(64'h0000_1100 + ri*16, 16)) !== r_expected[ri]) begin
+                        $display("[%0t] TASK F R mismatch ri=%0d D=0x%x exp=0x%x",
+                                 $time, ri, dataR[0], r_expected[ri]);
+                        error_flag = 1;
+                        $fatal(1, "TASK F R data mismatch");
+                    end
+                end
+            end
+        join
+
+        // Post-fork: verify writes landed — adapter layer for same reason as
+        // pre-seed above (avoids vendored axi_master_read's internal fork).
+        for (k = 0; k < 8; k = k + 1) begin
+            bfm_post_ar(8'h82, 64'h0000_1000 + k*16, 1);
+            bfm_drain_r(8'h82, 1);
+            if ((dataR[0] & get_mask(64'h0000_1000 + k*16, 16)) !== w_expected[k]) begin
+                $display("[%0t] TASK F W readback mismatch k=%0d D=0x%x exp=0x%x",
+                         $time, k, dataR[0], w_expected[k]);
+                error_flag = 1;
+                $fatal(1, "TASK F W readback mismatch");
+            end
+        end
+        $display("[%0t] TASK F PASS (mixed R+W concurrent)", $time);
+    endtask
+
     // Idle defaults
     initial begin
         AWID = 0; AWADDR = 0; AWLEN = 0; AWSIZE = 3'd5; AWBURST = 2'b01;
