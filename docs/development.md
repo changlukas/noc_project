@@ -172,7 +172,9 @@ make build-verilator # Verilator binary (depends on build-cmodel)
 make test            # run c_model ctest suite
 make check           # lint + build + full ctest
 make sim             # run default scenario through Vtb_top
-make sim SCENARIO=AX4-BUR-002_incr_8beat   # specific scenario
+make sim SCENARIO=AX4-BUR-002_incr_8beat            # specific scenario
+make sim-genamba                                    # gen_amba role-1 testbench (Tasks A-G)
+make sim-genamba GENAMBA_SCENARIO=AX4-BUR-002_incr_8beat   # specific scenario
 make clean           # remove all build artifacts
 ~~~
 
@@ -419,6 +421,50 @@ ctest -R NmuShellAdapter.multi_beat_w_burst_visible_per_cycle --output-on-failur
 This test proves that each of the 8 W beats in an AWLEN=7 burst is
 individually visible on the wire bundle at successive ticks, independent
 of the wb2axip constraint.
+
+### gen_amba role-1 testbench
+
+The gen_amba role-1 testbench (`tb_genamba`) is a separate cosim target
+from `tb_top`. It drives the NMU/NSU bridge with a gen_amba golden master
+BFM through seven AXI4 patterns (baseline, burst, outstanding, outstanding
+burst, same-ID, mixed R+W, deep pressure) -- see
+`docs/superpowers/specs/2026-06-08-genamba-role1-testbench-design.md`
+for the design and the matching findings document for the Phase 1 outcome.
+
+Build + run from repo root:
+
+~~~bash
+make sim-genamba                                          # default scenario
+make sim-genamba GENAMBA_SCENARIO=AX4-BUR-002_incr_8beat  # override
+~~~
+
+The default scenario is `AX4-BAS-001_single_write_no_read`. All current
+Tasks A-G are scenario-independent (the BFM owns the stimulus); the
+`+scenario=` plusarg only feeds `cmodel_init` so the DPI lifecycle has
+something valid to point at.
+
+Build artefacts land in `cosim/verilator/obj_genamba/` -- separate from
+`tb_top`'s `obj_dir/` because Verilator generates each `--top-module` into
+a single `--Mdir` and two tops would clobber each other.
+
+Per-cycle AW/W/B/AR/R handshake dumps are gated behind
+`+define+GENAMBA_DBG_AXI` (default off; runs stay quiet). Enable for
+bring-up debug:
+
+~~~bash
+make -C cosim/verilator clean-genamba run-genamba \
+    VERILATOR_EXTRA_FLAGS=+define+GENAMBA_DBG_AXI
+~~~
+
+If `make sim-genamba` fails with "Can't open perl script /mingw64/bin/verilator"
+or similar PATH errors, the shell does not have MSYS2 paths. The Makefile
+prepends them automatically on `OS=Windows_NT`, but if you're in a non-Git-Bash
+shell (PowerShell / cmd) call the wrapper directly:
+
+~~~bash
+./cosim/verilator/run_genamba.sh \
+    +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
+~~~
 
 ### CheckerLiveness (test_checker_fires_on_violation)
 

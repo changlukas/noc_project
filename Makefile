@@ -10,7 +10,7 @@ SCENARIO_TREE   := tests/scenarios
 SIM_OUTPUT_DIR  := cosim/output
 SCENARIO        ?= AX4-BAS-003_single_write_read_aligned
 
-.PHONY: help build build-cmodel build-verilator sim test check lint_scenarios lint_docs \
+.PHONY: help build build-cmodel build-verilator sim sim-genamba test check lint_scenarios lint_docs \
         clean clean-cmodel clean-verilator clean-specgen-cache
 
 help:
@@ -23,6 +23,8 @@ help:
 	@echo "  make sim                                       run AX4-BAS-003_single_write_read_aligned"
 	@echo "  make sim SCENARIO=<ax4-id>                     run tests/scenarios/<ax4-id>/"
 	@echo "      e.g. make sim SCENARIO=AX4-BUR-002_incr_8beat"
+	@echo "  make sim-genamba                               build+run gen_amba role-1 testbench (Tasks A-G)"
+	@echo "  make sim-genamba GENAMBA_SCENARIO=<ax4-id>     override default scenario"
 	@echo "  make test                                      run c_model ctest suite"
 	@echo ""
 	@echo "Clean:"
@@ -75,6 +77,35 @@ sim: build-verilator
 	echo "--- artifacts ---"; \
 	ls $(SIM_RUN_ABS)/; \
 	exit $$rc
+
+# gen_amba role-1 testbench: build+run delegated to cosim/verilator/Makefile.
+# GENAMBA_SCENARIO override is forwarded; defaults to AX4-BAS-001 in the
+# delegate. The genamba target is independent of build-verilator (its own
+# objdir, top, source list) and does not depend on c_model build.
+#
+# On Windows the sub-make must find MSYS2 mingw64/bin (verilator + perl)
+# and usr/bin (make + g++) on PATH; prepend in the recipe so this target
+# works from any Git Bash login (matches run_genamba.sh's prepend). The
+# prepended paths are harmless on Linux / macOS (they simply don't exist).
+# LC_ALL silences the "Locale not supported" warning from MSYS2 perl on
+# zh_TW. GNU make on MSYS2 does not inherit $(OS) from env, so the prefix
+# is unconditional rather than guarded.
+GENAMBA_SCENARIO ?=
+# yaml-cpp header check: cmodel_dpi.cpp pulls in headers from
+# c_model/build/_deps/yaml-cpp-src/include, populated by CMake FetchContent.
+# Don't auto-depend on build-cmodel here: a full c_model build is slow and
+# the yaml-cpp headers are stable once configured. Surface a clear hint
+# if missing instead.
+YAMLCPP_LIB := $(CMODEL_BUILD)/_deps/yaml-cpp-build/libyaml-cpp.a
+sim-genamba:
+	@if [ ! -f "$(YAMLCPP_LIB)" ]; then \
+	    echo "ERROR: yaml-cpp static lib missing ($(YAMLCPP_LIB))."; \
+	    echo "Run \`make build-cmodel\` once to populate c_model/build/_deps."; \
+	    exit 1; \
+	fi
+	@PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH" LC_ALL=C \
+	    $(MAKE) -C $(COSIM_VERILATOR) run-genamba \
+	    $(if $(GENAMBA_SCENARIO),GENAMBA_SCENARIO=$(GENAMBA_SCENARIO),)
 
 test: build-cmodel
 	cd $(CMODEL_BUILD) && ctest --output-on-failure

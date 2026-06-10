@@ -136,3 +136,14 @@ genamba:
 	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
 	$(MAKE) -C $(GENAMBA_OBJDIR) -f Vtb_genamba.mk \
 	    PYTHON3="$(PYTHON3)"
+
+# Build + run in one shot. SCENARIO override follows the top-level Makefile
+# convention: pass a scenario directory name under tests/scenarios/.
+GENAMBA_SCENARIO ?= AX4-BAS-001_single_write_no_read
+GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenario.yaml
+.PHONY: run-genamba
+run-genamba: genamba
+	./$(GENAMBA_OBJDIR)/Vtb_genamba.exe "+scenario=$(GENAMBA_SCENARIO_ABS)"
+
+clean-genamba:
+	rm -rf $(GENAMBA_OBJDIR)
