@@ -426,6 +426,63 @@ module genamba_master_bfm #(
         $display("[%0t] TASK F PASS (mixed R+W concurrent)", $time);
     endtask
 
+    // ---------- Task G: deep outstanding pressure ----------
+    // Window 0x1400-0x1FFF; N in {8, 16}; blen=1; distinct IDs 1..N.
+    // --timing mode in this simulator restricts `disable`; use a bounded
+    // `while (!done)` cycle counter inside the test branch with
+    // `fork ... join_none` + `wait fork`. No dangling watchdog thread.
+    localparam int WATCHDOG_CYCLES = 2000;
+    task test_deep_outstanding_pressure(input integer N);
+        reg [WIDTH_DA-1:0] expected [0:31];
+        integer i;
+        time t_start, t_end;
+        int cycle_count;
+        bit done;
+        // R-shadow barrier (consistent with other test wrappers).
+        r_shadow_ridx = r_shadow_widx;
+        $display("[%0t] TASK G start: N=%0d deep pressure", $time, N);
+        done = 0;
+        cycle_count = 0;
+        t_start = $time;
+
+        fork
+            begin : test_branch
+                for (i = 0; i < N; i = i + 1)
+                    bfm_post_aw(i+1, 64'h0000_1400 + i*16, 1);
+                for (i = 0; i < N; i = i + 1) begin
+                    dataW[0] = get_data(0) & get_mask(64'h0000_1400 + i*16, 16);
+                    expected[i] = dataW[0];
+                    bfm_post_w(i+1, 64'h0000_1400 + i*16, 1);
+                end
+                for (i = 0; i < N; i = i + 1) bfm_drain_b(i+1);
+                for (i = 0; i < N; i = i + 1)
+                    bfm_post_ar(i+1, 64'h0000_1400 + i*16, 1);
+                for (i = 0; i < N; i = i + 1) begin
+                    bfm_drain_r(i+1, 1);
+                    if ((dataR[0] & get_mask(64'h0000_1400 + i*16, 16)) !== expected[i]) begin
+                        error_flag = 1;
+                        $fatal(1, "TASK G N=%0d data mismatch i=%0d", N, i);
+                    end
+                end
+                done = 1;
+            end
+        join_none
+
+        // Bounded watchdog poll — completes when done set OR cycles exceeded.
+        while (!done && cycle_count < WATCHDOG_CYCLES) begin
+            @(posedge ACLK);
+            cycle_count = cycle_count + 1;
+        end
+        if (!done) begin
+            $fatal(1, "TASK G watchdog fired (N=%0d, cycles=%0d): stall != deadlock evidence",
+                   N, cycle_count);
+        end
+        wait fork;     // ensure test_branch fully completes (cleanup)
+        t_end = $time;
+        $display("[%0t] TASK G PASS N=%0d (duration=%0d ns, %0d cycles)",
+                 $time, N, t_end - t_start, cycle_count);
+    endtask
+
     // Idle defaults
     initial begin
         AWID = 0; AWADDR = 0; AWLEN = 0; AWSIZE = 3'd5; AWBURST = 2'b01;

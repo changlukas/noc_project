@@ -126,6 +126,9 @@ module tb_genamba;
 
         u_bfm.test_mixed_rw_concurrent;
 
+        u_bfm.test_deep_outstanding_pressure(8);
+        u_bfm.test_deep_outstanding_pressure(16);
+
         repeat (50) @(posedge ACLK);
         $display("[%0t] tb_genamba: T3 PASS (BFM->NMU->NoC->NSU->mem mem_test)", $time);
         $finish;
