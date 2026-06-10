@@ -93,10 +93,11 @@ clean:
 GENAMBA_OBJDIR := obj_genamba
 GENAMBA_SRC := \
     $(COSIM_ROOT)/sv/genamba/mem_axi.v \
+    $(COSIM_ROOT)/sv/genamba_master_bfm.sv \
     $(COSIM_ROOT)/sv/tb_genamba.sv
 GENAMBA_C_SRC := \
     $(COSIM_ROOT)/c/cmodel_dpi.cpp \
-    $(PROJ_ROOT)/cosim/verilator/main_genamba.cpp
+    $(COSIM_ROOT)/verilator/main_genamba.cpp
 GENAMBA_FLAGS := \
     --cc --exe --timing \
     --top-module tb_genamba \

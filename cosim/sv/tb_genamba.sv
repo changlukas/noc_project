@@ -1,4 +1,4 @@
-// gen_amba role-1 testbench top — T1 skeleton (mem_axi standalone)
+// gen_amba role-1 testbench top — T2 BFM<->mem_axi direct wiring
 `timescale 1ns/1ps
 `include "wb2axip/sim_wrapper.svh"
 
@@ -7,43 +7,69 @@ module tb_genamba;
     always #5 ACLK = ~ACLK;          // 10 ns period
     reg ARESETn = 0;
 
-    // mem_axi at AD=64 / DA=256 / ID=8 / no CID / 16 KiB (spec §3.2)
+    // BFM <-> mem_axi direct wiring (no bridge yet — T2 baseline)
+    // separate bfm_awid + bfm_arid wires (BFM outputs both; tying both to
+    // one wire would short-circuit two driver outputs)
+    wire [7:0]   bfm_awid, bfm_arid;
+    wire [63:0]  bfm_awaddr, bfm_araddr;
+    wire [7:0]   bfm_awlen,  bfm_arlen;
+    wire [2:0]   bfm_awsize, bfm_arsize;
+    wire [1:0]   bfm_awburst, bfm_arburst;
+    wire         bfm_awlock, bfm_arlock;
+    wire [3:0]   bfm_awcache, bfm_arcache;
+    wire [2:0]   bfm_awprot,  bfm_arprot;
+    wire [3:0]   bfm_awqos,   bfm_arqos;
+    wire         bfm_awvalid, bfm_awready, bfm_arvalid, bfm_arready;
+    wire [255:0] bfm_wdata; wire [31:0] bfm_wstrb;
+    wire         bfm_wlast, bfm_wvalid, bfm_wready;
+    wire [7:0]   mem_bid; wire [1:0] mem_bresp; wire mem_bvalid, bfm_bready;
+    wire [7:0]   mem_rid; wire [255:0] mem_rdata; wire [1:0] mem_rresp;
+    wire         mem_rlast, mem_rvalid, bfm_rready;
+
+    genamba_master_bfm #(.WIDTH_AD(64), .WIDTH_DA(256), .WIDTH_ID(8), .P_MST_ID(0)) u_bfm (
+        .ACLK(ACLK), .ARESETn(ARESETn),
+        .AWID(bfm_awid), .AWADDR(bfm_awaddr), .AWLEN(bfm_awlen), .AWSIZE(bfm_awsize),
+        .AWBURST(bfm_awburst), .AWLOCK(bfm_awlock), .AWCACHE(bfm_awcache),
+        .AWPROT(bfm_awprot), .AWQOS(bfm_awqos),
+        .AWVALID(bfm_awvalid), .AWREADY(bfm_awready),
+        .WDATA(bfm_wdata), .WSTRB(bfm_wstrb), .WLAST(bfm_wlast),
+        .WVALID(bfm_wvalid), .WREADY(bfm_wready),
+        .BID(mem_bid), .BRESP(mem_bresp), .BVALID(mem_bvalid), .BREADY(bfm_bready),
+        .ARID(bfm_arid), .ARADDR(bfm_araddr), .ARLEN(bfm_arlen), .ARSIZE(bfm_arsize),
+        .ARBURST(bfm_arburst), .ARLOCK(bfm_arlock), .ARCACHE(bfm_arcache),
+        .ARPROT(bfm_arprot), .ARQOS(bfm_arqos),
+        .ARVALID(bfm_arvalid), .ARREADY(bfm_arready),
+        .RID(mem_rid), .RDATA(mem_rdata), .RRESP(mem_rresp), .RLAST(mem_rlast),
+        .RVALID(mem_rvalid), .RREADY(bfm_rready)
+    );
+
     mem_axi #(
-        .AXI_WIDTH_CID(0),
-        .AXI_WIDTH_ID (8),
-        .AXI_WIDTH_AD (64),
-        .AXI_WIDTH_DA (256),
-        .SIZE_IN_BYTES(16384)
+        .AXI_WIDTH_CID(0), .AXI_WIDTH_ID(8), .AXI_WIDTH_AD(64),
+        .AXI_WIDTH_DA(256), .SIZE_IN_BYTES(16384)
     ) u_mem (
-        .ARESETn (ARESETn),
-        .ACLK    (ACLK),
-        .CSYSREQ (1'b1),
-        .CSYSACK (),
-        .CACTIVE (),
-        // AW (tied)
-        .AWID(8'd0), .AWADDR(64'd0), .AWLEN(8'd0), .AWSIZE(3'd0), .AWBURST(2'd0),
-        .AWLOCK(1'b0), .AWCACHE(4'd0), .AWPROT(3'd0), .AWQOS(4'd0), .AWREGION(4'd0),
-        .AWVALID(1'b0), .AWREADY(),
-        // W (tied)
-        .WDATA(256'd0), .WSTRB(32'd0), .WLAST(1'b0),
-        .WVALID(1'b0), .WREADY(),
-        // B
-        .BID(), .BRESP(), .BVALID(), .BREADY(1'b0),
-        // AR (tied)
-        .ARID(8'd0), .ARADDR(64'd0), .ARLEN(8'd0), .ARSIZE(3'd0), .ARBURST(2'd0),
-        .ARLOCK(1'b0), .ARCACHE(4'd0), .ARPROT(3'd0), .ARQOS(4'd0), .ARREGION(4'd0),
-        .ARVALID(1'b0), .ARREADY(),
-        // R
-        .RID(), .RDATA(), .RRESP(), .RLAST(), .RVALID(), .RREADY(1'b0)
+        .ARESETn(ARESETn), .ACLK(ACLK), .CSYSREQ(1'b1), .CSYSACK(), .CACTIVE(),
+        .AWID(bfm_awid), .AWADDR(bfm_awaddr), .AWLEN(bfm_awlen), .AWSIZE(bfm_awsize),
+        .AWBURST(bfm_awburst), .AWLOCK(bfm_awlock), .AWCACHE(bfm_awcache),
+        .AWPROT(bfm_awprot), .AWQOS(bfm_awqos), .AWREGION(4'b0),
+        .AWVALID(bfm_awvalid), .AWREADY(bfm_awready),
+        .WDATA(bfm_wdata), .WSTRB(bfm_wstrb), .WLAST(bfm_wlast),
+        .WVALID(bfm_wvalid), .WREADY(bfm_wready),
+        .BID(mem_bid), .BRESP(mem_bresp), .BVALID(mem_bvalid), .BREADY(bfm_bready),
+        .ARID(bfm_arid), .ARADDR(bfm_araddr), .ARLEN(bfm_arlen), .ARSIZE(bfm_arsize),
+        .ARBURST(bfm_arburst), .ARLOCK(bfm_arlock), .ARCACHE(bfm_arcache),
+        .ARPROT(bfm_arprot), .ARQOS(bfm_arqos), .ARREGION(4'b0),
+        .ARVALID(bfm_arvalid), .ARREADY(bfm_arready),
+        .RID(mem_rid), .RDATA(mem_rdata), .RRESP(mem_rresp), .RLAST(mem_rlast),
+        .RVALID(mem_rvalid), .RREADY(bfm_rready)
     );
 
     initial begin
-        $display("[%0t] tb_genamba: reset assert", $time);
         repeat (4) @(posedge ACLK);
         ARESETn = 1'b1;
-        $display("[%0t] tb_genamba: reset deassert", $time);
+        repeat (10) @(posedge ACLK);
+        u_bfm.test_baseline_mem_test;      // Task A
         repeat (20) @(posedge ACLK);
-        $display("[%0t] tb_genamba: T1 PASS (mem_axi standalone)", $time);
+        $display("[%0t] tb_genamba: T2 PASS (BFM<->mem_axi mem_test)", $time);
         $finish;
     end
 endmodule
