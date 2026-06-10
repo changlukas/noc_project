@@ -49,11 +49,11 @@ No NoC crossbar, no router. The bridge sits between two golden gen_amba endpoint
 
 ```
 gen_amba BFM ─AXI(ID8,AD64,DA256)─→ NMU ── noc_intf (direct mosi↔miso) ── NSU ─AXI─→ gen_amba mem_axi
-                                                  ↑                ↑
-                                       faxi_slave checker  (optional faxi_master)
 ```
 
 NMU/NSU NoC modports mate directly via one `noc_intf` instance. Credit stubbed → BFM-side stall is the only backpressure path. Traffic depth bounded by SV watchdog where it could otherwise hang (task G, §3.5/§3.7).
+
+**No wb2axip protocol checker** — rev 6 originally bound `faxi_slave` on the BFM↔NMU side, but its non-pipelined-write model (`if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)`) false-fires on AXI4-legal multi-beat bursts. Removed during T5 per `[[dont-silence-the-checker]]` policy: the checker is wrong about AXI4, the bridge is correct. Detection coverage falls back to (1) the DPI error pump in `tb_genamba.sv` (catches NMU/NSU c_model assertion fires) + (2) per-task SV data compares + (3) `error_flag`-trapped wrapper `$fatal`.
 
 ### 3.1 Clocking + build
 
@@ -65,7 +65,7 @@ NMU/NSU NoC modports mate directly via one `noc_intf` instance. Credit stubbed �
 - Single `final begin cmodel_finalize(); end` at end of sim (replaces main.cpp's normal finalize call).
 - Does **not** use `cmodel_done()` for PASS — `master_adapter` is constructed but never ticked here; PASS comes from `error_flag==0` after all 7 BFM tasks complete.
 
-New Verilator target `genamba` in `cosim/verilator/Makefile`: `--timing --binary --top-module tb_genamba` + gen_amba `+define+`s + `-Icosim/sv/genamba`. SV source list (order matters): `ni_params_pkg.sv`, `ni_signals_pkg.sv`, `nmu_wrap.sv`, `nsu_wrap.sv`, `genamba/mem_axi.v`, `wb2axip/{faxi_wstrb,faxi_master,faxi_slave}.v`, `genamba_master_bfm.sv`, `tb_genamba.sv`. C source: `cmodel_dpi.cpp` only (no `main.cpp`). Link: `yaml-cpp` + `-Wl,--stack,67108864`.
+New Verilator target `genamba` in `cosim/verilator/Makefile`: `--cc --exe --timing --top-module tb_genamba` + gen_amba `+define+`s + `-Icosim/sv/genamba`. SV source list (order matters): `ni_params_pkg.sv`, `ni_signals_pkg.sv`, `nmu_wrap.sv`, `nsu_wrap.sv`, `genamba/mem_axi.v`, `genamba_master_bfm.sv`, `tb_genamba.sv`. C source: `cmodel_dpi.cpp` + `main_genamba.cpp`. Link: `yaml-cpp`. (Stack-size flag intentionally omitted — Verilator 5.036 + MSYS2 mishandles commas in generated `.mk`.)
 
 ### 3.2 Widths + optional signals
 
@@ -96,13 +96,12 @@ Total used: ~6 KiB out of 16 KiB; remainder reserved for findings-driven extensi
 |---|---|---|
 | `nmu_wrap.sv`, `nsu_wrap.sv` | Reuse unchanged | Existing |
 | `cmodel_dpi.cpp` (chandle ABI) | Reuse unchanged | Existing |
-| `cosim/sv/tb_genamba.sv` | NEW — self-clocked top + DPI lifecycle + BFM instance + faxi_slave bind | This effort |
-| `cosim/sv/genamba_master_bfm.sv` | NEW — wraps `axi_master_tasks.v` + `mem_test_tasks.v` + adds 6 channel-level wrapper tasks (B–G; A reuses vendored `mem_test`) | This effort |
-| `cosim/sv/genamba/{mem_axi,axi_master_tasks,mem_test_tasks}.v` | Reuse vendored unmodified | `07fff1f` |
+| `cosim/sv/tb_genamba.sv` | NEW — self-clocked top + DPI lifecycle + BFM instance + DPI error pump + 1us watchdog | This effort |
+| `cosim/sv/genamba_master_bfm.sv` | NEW — wraps `axi_master_tasks.v` + `mem_test_tasks.v` + B/R latches + R-shadow array + 6 adapter tasks (B–G; A reuses vendored `mem_test`) | This effort |
+| `cosim/sv/genamba/{mem_axi,axi_master_tasks,mem_test_tasks}.v` | Vendored with project patches; see `cosim/sv/genamba/ATTRIBUTION.md` | `07fff1f` + T2/T3/T5 patches |
 | `cosim/verilator/Makefile` (`genamba` target) | NEW | This effort |
 | `cosim/verilator/main_genamba.cpp` (minimal Verilator main: `eval()` loop until `$finish`) | NEW | This effort (T1) |
-| wb2axip `faxi_slave` on BFM↔NMU AXI | NEW instance — see §3.8 for params (tuned higher than `tb_top.sv:209-271`) | wb2axip |
-| wb2axip `faxi_master` on NSU↔mem_axi AXI (optional) | NEW instance — params copy `tb_top.sv:280-340` with same MAXSTALL/MAXDELAY bump | wb2axip |
+| `cosim/verilator/run_genamba.sh` (wrapper that prepends MSYS2 paths) | NEW | This effort (T2) |
 
 ChannelModel / Master / Slave chandles are created (per `tb_top.sv:71-73` pattern) so DPI state-machine assertions pass, but they are not ticked — the genamba BFM and `mem_axi` are the only active drivers.
 
@@ -110,7 +109,7 @@ ChannelModel / Master / Slave chandles are created (per `tb_top.sv:71-73` patter
 
 All helper tasks live in `genamba_master_bfm.sv`. Each task sets `error_flag=1` on data-compare mismatch. **gen_amba's `error_flag` mechanism is fail-fast**: `mem_test_tasks.v:14-19` raises `$finish(2)` 50 cycles after `error_flag` rises. **Tasks run sequentially in a single `initial`; the first failure terminates the simulation and remaining tasks do not run** — this is intentional. The vendored `$finish(2)` is informational only — Verilator ignores `$finish`'s optional argument and always exits 0 — so the wrapper additionally calls `$fatal(1, "TASK X data mismatch")` immediately on `error_flag` rising to guarantee a non-zero process exit code. `$display` "TASK X start/PASS" markers around each task provide aggregate reporting via the run log.
 
-Each task uses a disjoint window per §3.3 to keep failure isolation per-task. `faxi_slave` checker is always-on across all tasks with the tuned params from §3.8.
+Each task uses a disjoint window per §3.3 to keep failure isolation per-task.
 
 | # | Task | Implementation strategy | Coverage / parameter values |
 |---|---|---|---|
@@ -148,22 +147,15 @@ WATCHDOG_NS_HEURISTIC = ideal_min_ns × stall_factor × safety_factor
 
 Use `WATCHDOG_CYCLES = 2000` (≈ 20 µs at 10 ns period) in the SV `localparam` as initial value, with calibration step in plan: run G at N=8 first, measure actual completion time, set `WATCHDOG_CYCLES = measured_N8_cycles × (16/8) × 4` (safety) before running N=16. If task G fires the watchdog at the calibrated value, **that is itself the finding** — Phase 2's real credit flow control is the remediation, not a further watchdog bump.
 
-### 3.8 wb2axip checker params (genamba target)
+### 3.8 Watchdog (replaces wb2axip checker)
 
-**Known limitation**: wb2axip `faxi_slave` does not fully model AXI4 multiple-outstanding transactions. Tasks C / D / E / F / G (any outstanding pressure) trigger false-positive checker fires that are NOT bridge bugs. **Mitigation**: `$assertoff(0, u_nmu_check)` after Task B (single-outstanding) completes, leave off for C–G. Coverage consequence — checker observations are valid only for Tasks A + B; outstanding tasks rely on `error_flag` data-mismatch detection and bridge-internal counters (e.g. NMU ROB depth) for protocol confidence. Real (non-outstanding) protocol bugs that would normally fire faxi_slave will go undetected during C–G.
+Rev 6 originally specified wb2axip `faxi_slave` / `faxi_master` checkers tuned for outstanding pressure. Removed during T5 — `faxi_slave`'s `if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)` rule false-fires on AXI4-legal multi-beat writes (NMU correctly holds AWREADY high between W beats). User policy `[[dont-silence-the-checker]]` forbids `$assertoff` workarounds to mask a wrong checker, so the bind itself comes out.
 
-Copy from `tb_top.sv:209-271` (`faxi_slave`) and `tb_top.sv:280-340` (`faxi_master`), but bump three params to handle deep outstanding pressure (task G):
-
-| Param | tb_top value | genamba target value | Reason |
-|---|---|---|---|
-| `C_AXI_ID_WIDTH` | 8 | 8 | Unchanged |
-| `C_AXI_DATA_WIDTH` | 256 | 256 | Unchanged |
-| `C_AXI_ADDR_WIDTH` | 64 | 64 | Unchanged |
-| `OPT_EXCLUSIVE` | 0 | 0 | Unchanged (exclusives deferred per §4) |
-| `F_LGDEPTH` | 10 | 10 | 2^10 = 1024 beats; covers N=16 × blen=16 = 256 worst case |
-| `F_AXI_MAXSTALL` | 32 | **256** | Allow longer stall windows under credit-stub backpressure |
-| `F_AXI_MAXRSTALL` | 32 | **256** | Symmetric |
-| `F_AXI_MAXDELAY` | 500 | **2000** | Tolerate task-G stall propagation |
+Replacement coverage:
+- **Per-task SV data compare** in `genamba_master_bfm.sv` — wrapper raises `error_flag=1` and `$fatal` on any per-address mismatch (already covers C–G's protocol bugs that would manifest as data corruption).
+- **DPI error pump** in `tb_genamba.sv` (copies `tb_top.sv:374-388`) — surfaces any NMU/NSU c_model `cmodel_check_error` non-zero state with `$fatal`.
+- **1 µs AXI-silence watchdog** in `tb_genamba.sv` — fires `$fatal` if AW/W/B/AR/R all stay invalid for 1 µs on either side, turning a silent stall into a finite failure log.
+- **`+define+GENAMBA_DBG_AXI`** — opt-in per-cycle handshake `$display` block in `tb_genamba.sv` (default off; default runs stay quiet).
 
 ## 4. Out of scope (Phase 1)
 
@@ -180,7 +172,7 @@ Copy from `tb_top.sv:209-271` (`faxi_slave`) and `tb_top.sv:280-340` (`faxi_mast
 ## 5. Success criteria
 
 - `tb_genamba` builds under Verilator `--cc --exe --timing` (two-phase) as a self-clocked top with DUT DPI + gen_amba VIP coexisting in one executable (coexistence proof).
-- Tasks A–G run sequentially; sim exits cleanly with `error_flag==0` (no `$fatal` from the wrapper's mismatch trap), `cmodel_check_error` returns 0 every cycle, and no `faxi_slave` checker violation **during Tasks A + B** (checker $assertoff'd before C per §3.8 limitation). Process exit code 0; any `$fatal` raises non-zero exit (Verilator ignores `$finish` arg, so wrapper uses `$fatal` for failure status).
+- Tasks A–G run sequentially; sim exits cleanly with `error_flag==0` (no `$fatal` from the wrapper's mismatch trap), `cmodel_check_error` returns 0 every cycle, and the 1 µs AXI-silence watchdog (§3.8) does not fire. Process exit code 0; any `$fatal` raises non-zero exit (Verilator ignores `$finish` arg, so wrapper uses `$fatal` for failure status).
 - Task G's watchdog does **not** fire (`$fatal(1, "G watchdog fired ...")` does not appear in run log).
 - One-page findings doc lists per-task PASS/`fail-here` outcomes, root-cause for any fail, observed protocol behaviour (e.g. ROB ordering visible in `f_axi_*_outstanding` counters), and residual work scoped for Phase 2.
 
@@ -193,4 +185,4 @@ Copy from `tb_top.sv:209-271` (`faxi_slave`) and `tb_top.sv:280-340` (`faxi_mast
 - **Task E sequencer correctness**: same-ID write/read FIFO ordering must hold on the BFM side before we measure NMU ordering. AXI4 mandates same-ID W beats follow AW issue order and same-ID R returns follow AR issue order — wrapper enforces this by serial issue + serial drain, no fork.
 - **Optional-signal alignment**: gen_amba BFM + `mem_axi` vs DUT `axi4_intf` qos/cache/prot defaults under the build `+define+`s.
 - **Reset alignment**: DUT sync active-low `rst_ni` vs gen_amba `ARESETn` / async reset in `mem_axi`. Single-domain self-clocked top mitigates.
-- **`faxi_slave` checker bounds** (§3.8): bumped MAXSTALL/MAXRSTALL/MAXDELAY for genamba target. If the bumped bounds still fire under N=16, the bridge has a real stall-latency invariant break (not just a checker artefact).
+- **Loss of independent protocol checker** (§3.8): with wb2axip removed, real per-handshake protocol bugs (e.g. AWREADY glitching mid-burst) escape detection unless they corrupt data. Mitigation accepted because (a) the c_model bridges are already audited via the existing `tb_top` checker bind, and (b) the genamba role-1 testbench's purpose is to characterise outstanding/burst behaviour against a golden VIP, not to replace tb_top's per-handshake protocol guard.

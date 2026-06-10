@@ -111,6 +111,11 @@ module tb_genamba;
         ARESETn = 1'b1;
         repeat (10) @(posedge ACLK);
         u_bfm.test_baseline_mem_test;
+
+        u_bfm.test_burst_blen(4);
+        u_bfm.test_burst_blen(8);
+        u_bfm.test_burst_blen(16);
+
         repeat (50) @(posedge ACLK);
         $display("[%0t] tb_genamba: T3 PASS (BFM->NMU->NoC->NSU->mem mem_test)", $time);
         $finish;
@@ -137,50 +142,79 @@ module tb_genamba;
     end
     /* verilator lint_on WIDTHTRUNC */
 
-    // ---- faxi_slave induction outputs (declared per checker port set) ----
-    wire [9:0] nmu_f_awr_nbursts, nmu_f_wr_pending, nmu_f_rd_nbursts, nmu_f_rd_outstanding;
+    // ---- T5 hang debug monitors (project code, not vendored) ----
+    // Watchdog: kill sim if no AXI activity for 1us — turns silent hang into
+    // a finite log we can hand to Codex. Includes AR/R channels — mem_test
+    // alternates write-burst then read-burst phases, so a W-only watchdog
+    // false-fires during the read phase.
+    integer last_event_time = 0;
+    always @(posedge ACLK) begin
+        if (bfm_nmu_axi.awvalid || bfm_nmu_axi.wvalid || bfm_nmu_axi.bvalid ||
+            bfm_nmu_axi.arvalid || bfm_nmu_axi.rvalid ||
+            nsu_mem_axi.awvalid || nsu_mem_axi.wvalid || nsu_mem_axi.bvalid ||
+            nsu_mem_axi.arvalid || nsu_mem_axi.rvalid)
+            last_event_time = $time;
+        if (ARESETn && ($time - last_event_time) > 1000) begin
+            $display("[%0t] WATCHDOG: 1us of AXI silence, dumping final state", $time);
+            $display("  BFM-side : AWV=%b AWR=%b AWID=0x%0h AWADDR=0x%0h AWLEN=%0d",
+                     bfm_nmu_axi.awvalid, bfm_nmu_axi.awready,
+                     bfm_nmu_axi.awid, bfm_nmu_axi.awaddr, bfm_nmu_axi.awlen);
+            $display("  BFM-side : WV=%b WR=%b WLAST=%b WSTRB=0x%0h",
+                     bfm_nmu_axi.wvalid, bfm_nmu_axi.wready,
+                     bfm_nmu_axi.wlast, bfm_nmu_axi.wstrb);
+            $display("  BFM-side : BV=%b BR=%b BID=0x%0h BRESP=%0d",
+                     bfm_nmu_axi.bvalid, bfm_nmu_axi.bready,
+                     bfm_nmu_axi.bid, bfm_nmu_axi.bresp);
+            $display("  NSU-side : AWV=%b AWR=%b AWID=0x%0h AWLEN=%0d",
+                     nsu_mem_axi.awvalid, nsu_mem_axi.awready,
+                     nsu_mem_axi.awid, nsu_mem_axi.awlen);
+            $display("  NSU-side : WV=%b WR=%b WLAST=%b",
+                     nsu_mem_axi.wvalid, nsu_mem_axi.wready, nsu_mem_axi.wlast);
+            $display("  NSU-side : BV=%b BR=%b BID=0x%0h",
+                     nsu_mem_axi.bvalid, nsu_mem_axi.bready, nsu_mem_axi.bid);
+            $fatal(1, "WATCHDOG: AXI silence");
+        end
+    end
 
-    // ---- faxi_slave on BFM ↔ NMU AXI; tuned params per spec §3.8 ----
-    /* verilator lint_off PINMISSING */
-    faxi_slave #(
-        .C_AXI_ID_WIDTH(8), .C_AXI_DATA_WIDTH(256), .C_AXI_ADDR_WIDTH(64),
-        .OPT_EXCLUSIVE(0),
-        .F_LGDEPTH(10),
-        .F_AXI_MAXSTALL(256),         // bumped 32 -> 256 for outstanding pressure
-        .F_AXI_MAXRSTALL(256),        // bumped 32 -> 256
-        .F_AXI_MAXDELAY(2000)         // bumped 500 -> 2000
-    ) u_nmu_check (
-        .i_clk(ACLK), .i_axi_reset_n(ARESETn),
-        // AW
-        .i_axi_awvalid(bfm_nmu_axi.awvalid), .i_axi_awready(bfm_nmu_axi.awready),
-        .i_axi_awid(bfm_nmu_axi.awid), .i_axi_awaddr(bfm_nmu_axi.awaddr),
-        .i_axi_awlen(bfm_nmu_axi.awlen), .i_axi_awsize(bfm_nmu_axi.awsize),
-        .i_axi_awburst(bfm_nmu_axi.awburst), .i_axi_awlock(bfm_nmu_axi.awlock),
-        .i_axi_awcache(bfm_nmu_axi.awcache), .i_axi_awprot(bfm_nmu_axi.awprot),
-        .i_axi_awqos(bfm_nmu_axi.awqos),
-        // W
-        .i_axi_wvalid(bfm_nmu_axi.wvalid), .i_axi_wready(bfm_nmu_axi.wready),
-        .i_axi_wdata(bfm_nmu_axi.wdata), .i_axi_wstrb(bfm_nmu_axi.wstrb),
-        .i_axi_wlast(bfm_nmu_axi.wlast),
-        // B
-        .i_axi_bvalid(bfm_nmu_axi.bvalid), .i_axi_bready(bfm_nmu_axi.bready),
-        .i_axi_bid(bfm_nmu_axi.bid), .i_axi_bresp(bfm_nmu_axi.bresp),
-        // AR
-        .i_axi_arvalid(bfm_nmu_axi.arvalid), .i_axi_arready(bfm_nmu_axi.arready),
-        .i_axi_arid(bfm_nmu_axi.arid), .i_axi_araddr(bfm_nmu_axi.araddr),
-        .i_axi_arlen(bfm_nmu_axi.arlen), .i_axi_arsize(bfm_nmu_axi.arsize),
-        .i_axi_arburst(bfm_nmu_axi.arburst), .i_axi_arlock(bfm_nmu_axi.arlock),
-        .i_axi_arcache(bfm_nmu_axi.arcache), .i_axi_arprot(bfm_nmu_axi.arprot),
-        .i_axi_arqos(bfm_nmu_axi.arqos),
-        // R
-        .i_axi_rvalid(bfm_nmu_axi.rvalid), .i_axi_rready(bfm_nmu_axi.rready),
-        .i_axi_rid(bfm_nmu_axi.rid), .i_axi_rdata(bfm_nmu_axi.rdata),
-        .i_axi_rresp(bfm_nmu_axi.rresp), .i_axi_rlast(bfm_nmu_axi.rlast),
-        // Induction outputs
-        .f_axi_awr_nbursts(nmu_f_awr_nbursts),
-        .f_axi_wr_pending(nmu_f_wr_pending),
-        .f_axi_rd_nbursts(nmu_f_rd_nbursts),
-        .f_axi_rd_outstanding(nmu_f_rd_outstanding)
-    );
-    /* verilator lint_on PINMISSING */
+    // Per-cycle AXI handshake monitors — first 30 W beats only to bound log.
+    // Opt-in via `+define+GENAMBA_DBG_AXI` (default off — runs stay quiet).
+`ifdef GENAMBA_DBG_AXI
+    integer w_beat_count = 0;
+    always @(posedge ACLK) begin
+        if (ARESETn && bfm_nmu_axi.awvalid && bfm_nmu_axi.awready)
+            $display("[%0t] DBG BFM AW handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
+                     $time, bfm_nmu_axi.awid, bfm_nmu_axi.awaddr, bfm_nmu_axi.awlen);
+        if (ARESETn && bfm_nmu_axi.wvalid && bfm_nmu_axi.wready && w_beat_count < 30) begin
+            $display("[%0t] DBG BFM W#%0d: WLAST=%b WSTRB=0x%0h DATA[31:0]=0x%0h",
+                     $time, w_beat_count, bfm_nmu_axi.wlast,
+                     bfm_nmu_axi.wstrb[31:0], bfm_nmu_axi.wdata[31:0]);
+            w_beat_count = w_beat_count + 1;
+        end
+        if (ARESETn && bfm_nmu_axi.bvalid && bfm_nmu_axi.bready)
+            $display("[%0t] DBG BFM B handshake: BID=0x%0h BRESP=%0d",
+                     $time, bfm_nmu_axi.bid, bfm_nmu_axi.bresp);
+        if (ARESETn && nsu_mem_axi.awvalid && nsu_mem_axi.awready)
+            $display("[%0t] DBG NSU AW handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
+                     $time, nsu_mem_axi.awid, nsu_mem_axi.awaddr, nsu_mem_axi.awlen);
+        if (ARESETn && nsu_mem_axi.wvalid && nsu_mem_axi.wready)
+            $display("[%0t] DBG NSU W: WLAST=%b WSTRB=0x%0h",
+                     $time, nsu_mem_axi.wlast, nsu_mem_axi.wstrb[31:0]);
+        if (ARESETn && nsu_mem_axi.bvalid && nsu_mem_axi.bready)
+            $display("[%0t] DBG NSU B: BID=0x%0h BRESP=%0d",
+                     $time, nsu_mem_axi.bid, nsu_mem_axi.bresp);
+        if (ARESETn && bfm_nmu_axi.arvalid && bfm_nmu_axi.arready)
+            $display("[%0t] DBG BFM AR handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
+                     $time, bfm_nmu_axi.arid, bfm_nmu_axi.araddr, bfm_nmu_axi.arlen);
+        if (ARESETn && bfm_nmu_axi.rvalid && bfm_nmu_axi.rready)
+            $display("[%0t] DBG BFM R: RID=0x%0h RLAST=%b RRESP=%0d",
+                     $time, bfm_nmu_axi.rid, bfm_nmu_axi.rlast, bfm_nmu_axi.rresp);
+        if (ARESETn && nsu_mem_axi.arvalid && nsu_mem_axi.arready)
+            $display("[%0t] DBG NSU AR handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
+                     $time, nsu_mem_axi.arid, nsu_mem_axi.araddr, nsu_mem_axi.arlen);
+        if (ARESETn && nsu_mem_axi.rvalid && nsu_mem_axi.rready)
+            $display("[%0t] DBG NSU R: RID=0x%0h RLAST=%b RRESP=%0d",
+                     $time, nsu_mem_axi.rid, nsu_mem_axi.rlast, nsu_mem_axi.rresp);
+    end
+`endif // GENAMBA_DBG_AXI
+
 endmodule

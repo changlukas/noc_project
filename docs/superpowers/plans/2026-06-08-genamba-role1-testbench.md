@@ -12,6 +12,16 @@
 
 ---
 
+## Amendments after dispatch (chronological)
+
+These deviations from the as-written task bodies were authorised in-flight by the user and are recorded here so the historical task instructions still parse but the actual state is clear:
+
+- **T1 — Verilator build mode**: rev 6 specified `--binary --timing`, but the Verilator 5.036 + MSYS2 nested-make subprocess can't find `make` via Windows `CreateProcess()`. Switched to `--cc --exe --timing` two-phase build and added `cosim/verilator/main_genamba.cpp` driver + `cosim/verilator/run_genamba.sh` PATH wrapper. Spec §3.1/§3.4 updated.
+- **T4/T5 — wb2axip protocol checker removed**: `faxi_slave`'s `if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)` rule false-fires on AXI4-legal multi-beat writes (NMU correctly holds AWREADY high between W beats). Per `[[dont-silence-the-checker]]`, `$assertoff` is forbidden — the bind itself was removed during T5. Replacement coverage: 1 µs AXI-silence watchdog in `tb_genamba.sv`, DPI error pump (unchanged), per-task data compares. Spec §3 / §3.4 / §3.5 / §3.8 / §5 / §6 updated.
+- **T2/T3/T5 — vendored VIP patches**: documented in `cosim/sv/genamba/ATTRIBUTION.md`. `mem_test_tasks.v` get_mask offset width + `error_flag` watcher removal; `axi_master_tasks.v` B-channel latch reads (T3) and R-channel shadow-array data capture (T5). All workarounds for Verilator `--timing` procedural-vs-NBA semantics.
+
+---
+
 ## File Structure
 
 ### Created

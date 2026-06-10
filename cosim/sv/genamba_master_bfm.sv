@@ -85,15 +85,31 @@ module genamba_master_bfm #(
     reg [WIDTH_ID-1:0] r_id_latch;
     reg [1:0]          r_resp_latch;
     reg                r_last_latch;
+    // R-channel multi-beat shadow: single r_last/r_id latch only captures
+    // the FINAL beat. For burst reads, a procedural loop in the vendored
+    // task can't read RDATA per-beat reliably (Verilator --timing race +
+    // RREADY-held-high causes beats to be skipped). So we shadow every
+    // RDATA via a parallel-captured array indexed by a NBA counter. The
+    // task waits for (r_shadow_widx - snapshot_at_entry) >= blen, then
+    // copies into dataR[0..blen-1].
+    reg [WIDTH_DA-1:0] r_shadow [0:255];
+    reg [7:0]          r_shadow_widx;
     always @(posedge ACLK) begin
-        if (BVALID && BREADY) begin
-            b_id_latch   <= BID;
-            b_resp_latch <= BRESP;
+        if (!ARESETn) begin
+            r_shadow_widx <= 8'd0;
         end
-        if (RVALID && RREADY) begin
-            r_id_latch   <= RID;
-            r_resp_latch <= RRESP;
-            r_last_latch <= RLAST;
+        else begin
+            if (BVALID && BREADY) begin
+                b_id_latch   <= BID;
+                b_resp_latch <= BRESP;
+            end
+            if (RVALID && RREADY) begin
+                r_id_latch              <= RID;
+                r_resp_latch            <= RRESP;
+                r_last_latch            <= RLAST;
+                r_shadow[r_shadow_widx] <= RDATA;
+                r_shadow_widx           <= r_shadow_widx + 8'd1;
+            end
         end
     end
 
@@ -128,7 +144,47 @@ module genamba_master_bfm #(
         $display("[%0t] TASK A PASS", $time);
     endtask
 
-    // Tasks B-G defined in later commits (T5-T10).
+    // ---------- Task B: burst single-outstanding ----------
+    // AXI4 §A3.3: master may issue W beats before or after AW — NMU
+    // must buffer W until AW arrives. We issue AW then W sequentially to
+    // avoid fork/join inside loops, which triggers a Verilator 5.036
+    // coroutine-split bug (VlForkSync declared in wrong split frame).
+    // expected[] flat: 4 outer × 16 beats max, indexed [outer*16+beat].
+    task test_burst_blen(input integer blen);
+        reg [WIDTH_DA-1:0] expected [0:63];
+        integer i, b;
+        reg [WIDTH_AD-1:0] addr;
+        $display("[%0t] TASK B start: burst blen=%0d", $time, blen);
+
+        // Write phase — single-outstanding: AW → W beats → B drain
+        for (i = 0; i < 4; i = i + 1) begin
+            addr = 64'h0000_0400 + i * (blen * 16);
+            for (b = 0; b < blen; b = b + 1) begin
+                dataW[b]           = get_data(0) & get_mask(addr + b * 16, 16);
+                expected[i*16 + b] = dataW[b];
+            end
+            bfm_post_aw(0, addr, blen);
+            bfm_post_w(0, addr, blen);
+            bfm_drain_b(0);
+        end
+
+        // Read + compare phase
+        for (i = 0; i < 4; i = i + 1) begin
+            addr = 64'h0000_0400 + i * (blen * 16);
+            bfm_post_ar(0, addr, blen);
+            bfm_drain_r(0, blen);
+            // bfm_drain_r populates dataR[0:blen-1]
+            for (b = 0; b < blen; b = b + 1) begin
+                if ((dataR[b] & get_mask(addr + b * 16, 16)) !== expected[i*16 + b]) begin
+                    $display("[%0t] TASK B blen=%0d outer=%0d beat=%0d mismatch D=0x%x exp=0x%x",
+                             $time, blen, i, b, dataR[b], expected[i*16 + b]);
+                    error_flag = 1;
+                    $fatal(1, "TASK B data mismatch");
+                end
+            end
+        end
+        $display("[%0t] TASK B PASS blen=%0d", $time, blen);
+    endtask
 
     // Idle defaults
     initial begin

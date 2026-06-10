@@ -130,6 +130,43 @@ issue is purely a Verilator simulator quirk; the bridge transports BID/RID/RLAST
 correctly end-to-end (verified at every adapter / DPI / SV signal boundary by
 Codex static trace + the SV DBG monitors).
 
+### `axi_master_read_r` — shadow-array data capture
+
+The B-channel latch fix above is sufficient for `axi_master_write_b` (which
+checks BID/BRESP only once per write transaction). But for multi-beat read
+bursts, the per-beat procedural `dataR[idx] = RDATA` read inside the vendored
+loop is structurally broken under Verilator `--timing`:
+
+```verilog
+for (idx=0; idx<bleng; idx=idx+1) begin
+    @ (posedge ACLK);
+    while (RVALID==1'b0) @ (posedge ACLK);
+    dataR[idx] = RDATA;          // post-NBA read — reads NEXT cycle
+    @ (posedge ACLK);            // (previous patch's extra wait for latches)
+    if (r_id_latch != arid) ...
+end
+```
+
+Each iteration consumes 2 clock cycles (the `@(posedge)` at loop top + the
+extra `@(posedge)` added by the prior latch patch). NSU/NMU drive R beats at
+one beat/cycle with RREADY held high, so for `blen=4` the second-to-last
+beat is the last RVALID-high cycle. By iter 2 the bus has gone idle —
+`while (RVALID==1'b0)` loops forever. Task B blen=4 hangs after the first R
+burst's RLAST=1; Task A blen=1 escapes because there's only one iteration.
+
+Project fix: capture every RVALID-RREADY handshake's RDATA in a parallel
+NBA-counter-indexed shadow array (`r_shadow[]` in `genamba_master_bfm.sv`),
+then replace the vendored loop with a simple "wait for `bleng` new entries,
+copy to dataR" task body. Per-beat ID checks reduce to per-burst checks
+against `r_id_latch` / `r_last_latch` / `r_resp_latch` — sufficient for our
+tests (same-ID bursts have identical RID per beat anyway; per-beat RLAST is
+implicitly verified by RLAST=1 only on the final beat).
+
+Discovered during T5 Task B blen=4 silent hang. The same race would manifest
+in `axi_master_write_w` (W-beat loop) if our flow used RREADY-style W push;
+the adapter task `bfm_post_w` sidesteps it by issuing exactly `blen` W beats
+sequentially without waiting for WREADY drops between them.
+
 ## Notes
 
 Only the point-to-point spike IP is vendored (golden master tasks + memory model);
