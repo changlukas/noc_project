@@ -588,13 +588,17 @@ Replace the entire body (keep `timescale`/`module`/`endmodule` + ACLK/ARESETn ge
     );
 
     // ---- DUT bridge: NMU + NSU on one noc_intf ----
+    // ctx_i: chandle context for per-instance DPI tick (NMU/NSU wrap each
+    // own one); verified against tb_top.sv:137,166 — mandatory port.
     nmu_wrap u_nmu (
         .clk_i(ACLK), .rst_ni(ARESETn),
+        .ctx_i(nmu_ctx),
         .axi_i(bfm_nmu_axi.slave),
         .noc_mosi_o(noc_link.mosi)
     );
     nsu_wrap u_nsu (
         .clk_i(ACLK), .rst_ni(ARESETn),
+        .ctx_i(nsu_ctx),
         .noc_miso_i(noc_link.miso),         // _i suffix per nsu_wrap.sv:44
         .axi_o(nsu_mem_axi.master)
     );
