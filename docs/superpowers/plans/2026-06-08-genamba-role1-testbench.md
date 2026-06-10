@@ -290,11 +290,12 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 `timescale 1ns/1ps
 
 module genamba_master_bfm #(
-    parameter integer WIDTH_AD = 64,
-    parameter integer WIDTH_DA = 256,
-    parameter integer WIDTH_DS = WIDTH_DA / 8,
-    parameter integer WIDTH_ID = 8,
-    parameter integer P_MST_ID = 0     // required by mem_test_tasks.v:30 (mem_test seeds dataW with P_MST_ID[3:0])
+    parameter integer WIDTH_AD  = 64,
+    parameter integer WIDTH_DA  = 256,
+    parameter integer WIDTH_DS  = WIDTH_DA / 8,
+    parameter integer WIDTH_DSB = $clog2(WIDTH_DS),  // strobe-width log2; vendored axi_master_tasks.v:399/427 + mem_test_tasks.v:52/70/236 reference this in caller scope (matches axi_tester.v:26 convention; vendored uses clogb2(), we use $clog2 — same result)
+    parameter integer WIDTH_ID  = 8,
+    parameter integer P_MST_ID  = 0     // required by mem_test_tasks.v:30 (mem_test seeds dataW with P_MST_ID[3:0])
 ) (
     input wire                  ACLK,
     input wire                  ARESETn,
@@ -421,7 +422,9 @@ Rewrite the module body (keep `timescale` + `module tb_genamba` + `ACLK`/`ARESET
     wire [7:0]   mem_rid; wire [255:0] mem_rdata; wire [1:0] mem_rresp;
     wire         mem_rlast, mem_rvalid, bfm_rready;
 
-    genamba_master_bfm #(.WIDTH_AD(64), .WIDTH_DA(256), .WIDTH_ID(8), .P_MST_ID(0)) u_bfm (
+    genamba_master_bfm #(.WIDTH_AD(64), .WIDTH_DA(256), .WIDTH_ID(8), .P_MST_ID(0))
+        // WIDTH_DSB defaults to $clog2(WIDTH_DS) = $clog2(32) = 5
+        u_bfm (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID(bfm_awid), .AWADDR(bfm_awaddr), .AWLEN(bfm_awlen), .AWSIZE(bfm_awsize),
         .AWBURST(bfm_awburst), .AWLOCK(bfm_awlock), .AWCACHE(bfm_awcache),
@@ -558,7 +561,9 @@ Replace the entire body (keep `timescale`/`module`/`endmodule` + ACLK/ARESETn ge
     assign bfm_nmu_axi.arregion = 4'b0;
 
     // ---- BFM ↔ bfm_nmu_axi (BFM uppercase port → axi4_intf lowercase) ----
-    genamba_master_bfm #(.WIDTH_AD(64), .WIDTH_DA(256), .WIDTH_ID(8), .P_MST_ID(0)) u_bfm (
+    genamba_master_bfm #(.WIDTH_AD(64), .WIDTH_DA(256), .WIDTH_ID(8), .P_MST_ID(0))
+        // WIDTH_DSB defaults to $clog2(WIDTH_DS) = $clog2(32) = 5
+        u_bfm (
         .ACLK(ACLK), .ARESETn(ARESETn),
         .AWID(bfm_nmu_axi.awid), .AWADDR(bfm_nmu_axi.awaddr),
         .AWLEN(bfm_nmu_axi.awlen), .AWSIZE(bfm_nmu_axi.awsize),
