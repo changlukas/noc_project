@@ -256,6 +256,49 @@ module genamba_master_bfm #(
         $display("[%0t] TASK C PASS N=%0d", $time, N);
     endtask
 
+    // ---------- Task D: outstanding burst ----------
+    // Window 0x0A00-0x0DFF; N=4 outstanding x blen in {4,8}; distinct IDs.
+    task test_outstanding_burst_N4(input integer blen);
+        reg [WIDTH_DA-1:0] expected [0:3][0:15];
+        integer i, b;
+        reg [WIDTH_AD-1:0] addr;
+        // R-shadow barrier (see test_burst_blen / test_outstanding_N for rationale).
+        r_shadow_ridx = r_shadow_widx;
+        $display("[%0t] TASK D start: N=4 blen=%0d outstanding burst", $time, blen);
+
+        for (i = 0; i < 4; i = i + 1) begin
+            addr = 64'h0000_0A00 + i * (blen * 16);
+            bfm_post_aw(i+1, addr, blen);
+        end
+        for (i = 0; i < 4; i = i + 1) begin
+            addr = 64'h0000_0A00 + i * (blen * 16);
+            for (b = 0; b < blen; b = b + 1) begin
+                dataW[b] = get_data(0) & get_mask(addr + b*16, 16);
+                expected[i][b] = dataW[b];
+            end
+            bfm_post_w(i+1, addr, blen);
+        end
+        for (i = 0; i < 4; i = i + 1) bfm_drain_b(i+1);
+
+        for (i = 0; i < 4; i = i + 1) begin
+            addr = 64'h0000_0A00 + i * (blen * 16);
+            bfm_post_ar(i+1, addr, blen);
+        end
+        for (i = 0; i < 4; i = i + 1) begin
+            addr = 64'h0000_0A00 + i * (blen * 16);
+            bfm_drain_r(i+1, blen);
+            for (b = 0; b < blen; b = b + 1) begin
+                if ((dataR[b] & get_mask(addr + b*16, 16)) !== expected[i][b]) begin
+                    $display("[%0t] TASK D N4 blen=%0d id=%0d beat=%0d mismatch D=0x%x exp=0x%x",
+                             $time, blen, i+1, b, dataR[b], expected[i][b]);
+                    error_flag = 1;
+                    $fatal(1, "TASK D data mismatch");
+                end
+            end
+        end
+        $display("[%0t] TASK D PASS N=4 blen=%0d", $time, blen);
+    endtask
+
     // Idle defaults
     initial begin
         AWID = 0; AWADDR = 0; AWLEN = 0; AWSIZE = 3'd5; AWBURST = 2'b01;
