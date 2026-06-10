@@ -67,6 +67,36 @@ module genamba_master_bfm #(
     `include "genamba/axi_master_tasks.v"
     `include "genamba/mem_test_tasks.v"
 
+    // ---------- B/R channel Verilator --timing snapshot latches ----------
+    // Vendored axi_master_write_b / axi_master_read_r read BID/RID
+    // procedurally right after `@(posedge ACLK)`. Under Verilator --timing,
+    // the procedural resume happens after the NBA region of that posedge,
+    // so the read returns the NEXT cycle's value — which is 0 because
+    // NMU's adapter de-asserts BVALID/BID one cycle after the handshake
+    // per AXI4 §A3.2.1 held-latch pattern. The DBG monitors in tb_genamba.sv
+    // (always @(posedge) blocks) read the correct in-cycle values.
+    //
+    // Workaround: snapshot BID/BRESP and RID/RRESP into latches via NBA
+    // on the handshake cycle. The patched vendored tasks read these
+    // latches (after waiting one extra @(posedge) for the latch to settle)
+    // instead of reading the raw input wires.
+    reg [WIDTH_ID-1:0] b_id_latch;
+    reg [1:0]          b_resp_latch;
+    reg [WIDTH_ID-1:0] r_id_latch;
+    reg [1:0]          r_resp_latch;
+    reg                r_last_latch;
+    always @(posedge ACLK) begin
+        if (BVALID && BREADY) begin
+            b_id_latch   <= BID;
+            b_resp_latch <= BRESP;
+        end
+        if (RVALID && RREADY) begin
+            r_id_latch   <= RID;
+            r_resp_latch <= RRESP;
+            r_last_latch <= RLAST;
+        end
+    end
+
     // ---------- Adapter task layer (semantic names, positional vendored calls) ----------
     task bfm_post_aw(input [WIDTH_ID-1:0] id, input [WIDTH_AD-1:0] addr, input integer blen);
         axi_master_write_aw(id, addr, 16'd16, blen[15:0], 2'b01 /*INCR*/, 2'b00 /*no lock*/);
