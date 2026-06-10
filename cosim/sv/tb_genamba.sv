@@ -122,6 +122,8 @@ module tb_genamba;
         u_bfm.test_outstanding_burst_N4(4);
         u_bfm.test_outstanding_burst_N4(8);
 
+        u_bfm.test_same_id_outstanding;
+
         repeat (50) @(posedge ACLK);
         $display("[%0t] tb_genamba: T3 PASS (BFM->NMU->NoC->NSU->mem mem_test)", $time);
         $finish;

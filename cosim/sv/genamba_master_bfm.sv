@@ -299,6 +299,61 @@ module genamba_master_bfm #(
         $display("[%0t] TASK D PASS N=4 blen=%0d", $time, blen);
     endtask
 
+    // ---------- Task E: same-ID outstanding (4 W/R with shared ID) ----------
+    // AMBA AXI4 §A5.3: same-ID R returns must follow AR issue order;
+    // since WID was removed, same-ID W beats follow AW issue order on the
+    // channel (no fork on AW or W issuance — single sequencer prevents
+    // multi-driver conflict on shared AW/W signals).
+    // Concurrent B drain on its own branch avoids stalling B queue once W
+    // beats land.
+    localparam [7:0] E_FIXED_ID = 8'd7;
+    task test_same_id_outstanding;
+        reg [WIDTH_DA-1:0] expected [0:3];
+        integer i, j;             // separate vars for fork branches
+        reg [WIDTH_AD-1:0] addr;
+        // R-shadow barrier (consistent with other test wrappers).
+        r_shadow_ridx = r_shadow_widx;
+        $display("[%0t] TASK E start: same-ID outstanding (id=%0d)", $time, E_FIXED_ID);
+
+        // Phase 1: serial AW with shared ID
+        for (i = 0; i < 4; i = i + 1) begin
+            addr = 64'h0000_0E00 + i * 16;
+            bfm_post_aw(E_FIXED_ID, addr, 1);
+        end
+        // Phase 2: serial W in AW order + concurrent B drain (separate loop vars)
+        fork
+            begin : w_branch
+                integer w_i;
+                for (w_i = 0; w_i < 4; w_i = w_i + 1) begin
+                    dataW[0] = get_data(0) & get_mask(64'h0000_0E00 + w_i*16, 16);
+                    expected[w_i] = dataW[0];
+                    bfm_post_w(E_FIXED_ID, 64'h0000_0E00 + w_i*16, 1);
+                end
+            end
+            begin : b_branch
+                integer b_i;
+                for (b_i = 0; b_i < 4; b_i = b_i + 1)
+                    bfm_drain_b(E_FIXED_ID);
+            end
+        join
+
+        // Phase 3: serial AR with shared ID, then drain R; same-ID R MUST follow AR order
+        for (j = 0; j < 4; j = j + 1) begin
+            addr = 64'h0000_0E00 + j * 16;
+            bfm_post_ar(E_FIXED_ID, addr, 1);
+        end
+        for (j = 0; j < 4; j = j + 1) begin
+            bfm_drain_r(E_FIXED_ID, 1);
+            if ((dataR[0] & get_mask(64'h0000_0E00 + j*16, 16)) !== expected[j]) begin
+                $display("[%0t] TASK E same-ID ORDER mismatch j=%0d D=0x%x exp=0x%x",
+                         $time, j, dataR[0], expected[j]);
+                error_flag = 1;
+                $fatal(1, "TASK E same-ID ordering violation");
+            end
+        end
+        $display("[%0t] TASK E PASS (same-ID order preserved)", $time);
+    endtask
+
     // Idle defaults
     initial begin
         AWID = 0; AWADDR = 0; AWLEN = 0; AWSIZE = 3'd5; AWBURST = 2'b01;
