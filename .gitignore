@@ -9,8 +9,8 @@ c_model/Testing/
 *.tmp
 *.log
 
-# Co-sim runtime artifacts
-master_shell_read_dump.txt
+# Co-sim runtime artifacts (per-instance variants since multi-instance DPI refactor)
+master_shell_read_dump*.txt
 w_beats_received_
 
 # Editor/tool files
