@@ -92,6 +92,10 @@ clean:
 # --- gen_amba role-1 testbench (Phase 1) ---
 GENAMBA_OBJDIR := obj_genamba
 GENAMBA_SRC := \
+    $(SPECGEN_SV_INC)/ni_params_pkg.sv \
+    $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
+    $(COSIM_ROOT)/sv/nmu_wrap.sv \
+    $(COSIM_ROOT)/sv/nsu_wrap.sv \
     $(COSIM_ROOT)/sv/genamba/mem_axi.v \
     $(COSIM_ROOT)/sv/genamba_master_bfm.sv \
     $(COSIM_ROOT)/sv/tb_genamba.sv
