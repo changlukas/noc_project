@@ -2,9 +2,9 @@
 
 AMBA AXI verification IP from the gen_amba project, vendored for the gen_amba
 integration feasibility spike (used as golden AXI master BFM + memory model under
-Verilator). Files are vendored unmodified from upstream **except** for two patches
-to `mem_test_tasks.v` (offset-width fix + watcher removal for Verilator compat),
-documented below.
+Verilator). Files are vendored unmodified from upstream **except** for project
+patches to two files (`mem_test_tasks.v` and `axi_master_tasks.v`) — all related
+to Verilator `--timing` simulator compatibility, documented below.
 
 ## Upstream
 
@@ -19,7 +19,7 @@ documented below.
 | `cosim/sv/genamba/mem_axi.v`            | `gen_amba_axi/verification/ip/mem_axi.v`         | Unmodified |
 | `cosim/sv/genamba/mem_axi_beh.v`        | `gen_amba_axi/verification/ip/mem_axi_beh.v`     | Unmodified |
 | `cosim/sv/genamba/mem_axi_dpram_sync.v` | `gen_amba_axi/verification/ip/mem_axi_dpram_sync.v` | Unmodified |
-| `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| Unmodified |
+| `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B/R latch reads; see "Modifications" below) |
 | `cosim/sv/genamba/mem_test_tasks.v`     | `gen_amba_axi/verification/ip/mem_test_tasks.v`  | **Modified** (offset-width fix; see "Modifications" below) |
 | `cosim/sv/genamba/axi_tester.v`         | `gen_amba_axi/verification/ip/axi_tester.v`      | Unmodified (template/reference for the BFM signal environment) |
 
@@ -78,6 +78,57 @@ is retained (still used by the explicit checks).
 Discovered during T2 (same plan). The race is Verilator-specific; the watcher
 works fine under Icarus / ModelSim. Worth flagging upstream as a Verilator
 compatibility issue.
+
+### `axi_master_tasks.v` — B/R channel snapshot-latch reads
+
+Upstream `axi_master_write_b` and `axi_master_read_r` read the B-channel
+`BID`/`BRESP` and R-channel `RID`/`RRESP`/`RLAST` signals as raw input wires
+immediately after `@(posedge ACLK)` synchronization:
+
+```verilog
+while (BVALID==1'b0) @ (posedge ACLK);
+BREADY <= #LD 0;
+if (BID!=awid) $display(...);    // reads BID procedurally
+```
+
+Under Verilator `--timing`, procedural code resumed from `@(posedge ACLK)` reads
+post-NBA signal values — i.e. the NEXT cycle's perspective of the registered
+output. The NMU bridge implements the AXI4 §A3.2.1 held-latch pattern correctly
+(`nmu_shell_adapter.hpp:150-162`): `bvalid_q`/`bid_q` are held until BREADY is
+seen, then deasserted via NBA. So in the next cycle BID=0 — which is what the
+vendored task ends up reading, even though the handshake-cycle value (correctly
+captured by a parallel `always @(posedge ACLK)` monitor) is correct. This is a
+Verilator-specific procedural-vs-NBA race; the same code works under Icarus /
+ModelSim.
+
+Project fix: introduce snapshot-latch registers in `genamba_master_bfm.sv`
+(non-vendored, project code) that capture B/R-channel signals on every
+handshake cycle via a clean `always @(posedge ACLK)` block:
+
+```verilog
+reg [WIDTH_ID-1:0] b_id_latch;
+reg [1:0]          b_resp_latch;
+reg [WIDTH_ID-1:0] r_id_latch;
+reg [1:0]          r_resp_latch;
+reg                r_last_latch;
+always @(posedge ACLK) begin
+    if (BVALID && BREADY) begin b_id_latch <= BID; b_resp_latch <= BRESP; end
+    if (RVALID && RREADY) begin r_id_latch <= RID; r_resp_latch <= RRESP; r_last_latch <= RLAST; end
+end
+```
+
+Then patch the vendored `axi_master_write_b` / `axi_master_read_r` to (1) wait
+one additional `@(posedge ACLK)` so the latches' NBA settles, then (2) read the
+latches (`b_id_latch`, `b_resp_latch`, `r_id_latch`, `r_resp_latch`, `r_last_latch`)
+instead of the raw input wires. The latch registers themselves are project code
+(in `genamba_master_bfm.sv`), so the vendored modification is limited to the
+in-task signal name swap plus the extra `@(posedge)` wait.
+
+Discovered during T3 (debug DBG monitors in `tb_genamba.sv` showed BID=0x39 at
+the handshake cycle, while the vendored task's procedural read returned 0). The
+issue is purely a Verilator simulator quirk; the bridge transports BID/RID/RLAST
+correctly end-to-end (verified at every adapter / DPI / SV signal boundary by
+Codex static trace + the SV DBG monitors).
 
 ## Notes
 

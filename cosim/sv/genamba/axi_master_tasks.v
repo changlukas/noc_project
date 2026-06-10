@@ -102,23 +102,31 @@ task axi_master_read_r;
      integer idx;
      integer rdelay;
 begin
-    RREADY   <= #LD 1; 
+    RREADY   <= #LD 1;
     for (idx=0; idx<bleng; idx=idx+1) begin
          @ (posedge ACLK); //-----------------------------------
          while (RVALID==1'b0) @ (posedge ACLK);
          dataR[idx] = RDATA; // it simply store the read-data; should be blocking
-         if (RRESP!=2'b00) begin
-             $display($time,,"%m ERROR RD RRESP no-ok 0x%02x", RRESP);
+         // Project Verilator --timing patch: wait one extra cycle so the R
+         // snapshot latches (r_id_latch / r_resp_latch in
+         // genamba_master_bfm.sv) capture the handshake-cycle RID/RRESP via
+         // NBA, then read the latches instead of the raw input wires. See
+         // ATTRIBUTION.md.
+         @ (posedge ACLK);
+         if (r_resp_latch!=2'b00) begin
+             $display($time,,"%m ERROR RD RRESP no-ok 0x%02x", r_resp_latch);
          end
-         if (RID!=arid) begin
-             $display($time,,"%m ERROR RD RID mis-match 0x%4x:0x%04x", RID, arid);
+         if (r_id_latch!=arid) begin
+             $display($time,,"%m ERROR RD RID mis-match 0x%4x:0x%04x", r_id_latch, arid);
          end
          if (idx==(bleng-1)) begin
-             if (RLAST==1'b0) begin
+             // Project Verilator --timing patch: read RLAST via r_last_latch
+             // (in genamba_master_bfm.sv) — same race as RID/RRESP.
+             if (r_last_latch==1'b0) begin
                  $display($time,,"%m ERROR RD RLAST not driven");
              end
          end else begin
-             if (RLAST==1'b1) begin
+             if (r_last_latch==1'b1) begin
                  $display($time,,"%m ERROR RD RLAST not expected");
              end
              if (delay) begin
@@ -303,11 +311,16 @@ begin
     @ (posedge ACLK); //----------------------------------------
     while (BVALID==1'b0) @ (posedge ACLK);
     BREADY   <= #LD 0;
-    if (BRESP!=2'b00) begin
-        $display($time,,"%m ERROR WR BRESP no-ok 0x%02x", BRESP);
+    // Project Verilator --timing patch: wait one extra cycle so the B
+    // snapshot latches (b_id_latch / b_resp_latch in genamba_master_bfm.sv)
+    // capture the handshake-cycle BID/BRESP via NBA, then read the latches
+    // instead of the raw input wires. See ATTRIBUTION.md.
+    @ (posedge ACLK);
+    if (b_resp_latch!=2'b00) begin
+        $display($time,,"%m ERROR WR BRESP no-ok 0x%02x", b_resp_latch);
     end
-    if (BID!=awid) begin
-        $display($time,,"%m ERROR WR BID mis-match 0x%4x:0x%04x", BID, awid);
+    if (b_id_latch!=awid) begin
+        $display($time,,"%m ERROR WR BID mis-match 0x%4x:0x%04x", b_id_latch, awid);
     end
 end
 endtask
