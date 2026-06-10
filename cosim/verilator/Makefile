@@ -88,3 +88,46 @@ hello:
 clean:
 	rm -rf obj_dir
 	rm -f master_shell_read_dump.txt
+
+# --- gen_amba role-1 testbench (Phase 1) ---
+GENAMBA_OBJDIR := obj_genamba
+GENAMBA_SRC := \
+    $(COSIM_ROOT)/sv/genamba/mem_axi.v \
+    $(COSIM_ROOT)/sv/tb_genamba.sv
+GENAMBA_C_SRC := \
+    $(COSIM_ROOT)/c/cmodel_dpi.cpp \
+    $(PROJ_ROOT)/cosim/verilator/main_genamba.cpp
+GENAMBA_FLAGS := \
+    --cc --exe --timing \
+    --top-module tb_genamba \
+    --Mdir $(GENAMBA_OBJDIR) \
+    --assert \
+    -I$(COSIM_ROOT)/sv \
+    -I$(COSIM_ROOT)/sv/genamba \
+    -I$(COSIM_ROOT)/sv/wb2axip \
+    -I$(SPECGEN_SV_INC) \
+    +define+AMBA_AXI4 +define+AMBA_QOS \
+    +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT \
+    +define+assume=assert \
+    -CFLAGS "-std=c++17" \
+    -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
+    -CFLAGS "-I$(COSIM_ROOT)/c" \
+    -CFLAGS "-I$(CMODEL_INC)" \
+    -CFLAGS "-I$(CMODEL_TESTS)" \
+    -CFLAGS "-I$(SPECGEN_INC)" \
+    -CFLAGS "-I$(YAMLCPP_INC)" \
+    -LDFLAGS "$(YAMLCPP_LIB)" \
+    -Wno-fatal -Wno-NULLPORT -Wno-REDEFMACRO \
+    -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC
+
+# Two-phase build mirrors tb_top pattern: Verilator generates C++ in
+# $(GENAMBA_OBJDIR), then $(MAKE) compiles it.  --timing is used instead of
+# --no-timing so the SV $time-based $display calls are accurate.
+# -LDFLAGS "-Wl,--stack,N" is intentionally omitted: Verilator 5.036 on
+# Windows/MSYS2 escapes commas in generated .mk, breaking the link step.
+# Stack for T1 (mem_axi idle) does not need enlargement.
+.PHONY: genamba
+genamba:
+	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
+	$(MAKE) -C $(GENAMBA_OBJDIR) -f Vtb_genamba.mk \
+	    PYTHON3="$(PYTHON3)"
