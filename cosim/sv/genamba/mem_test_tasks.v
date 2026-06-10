@@ -12,12 +12,24 @@
 // VERSION: 2021.09.05.
 //----------------------------------------------------------------
 reg error_flag=0;
-always @ ( * ) begin
-   if (error_flag==1) begin
-        repeat (50) @ (posedge ACLK);
-        $finish(2);
-   end
-end
+// Project modification: the vendored upstream defines an always@(*) watcher
+// that triggers `$finish(2)` 50 cycles after error_flag rises. Under Verilator
+// 5.036, regs (including error_flag and our top-level ARESETn) are randomized
+// at construction; the watcher can observe both as 1 before any initial block
+// runs, falsely firing $finish at ~495 ns regardless of whether a real
+// mismatch occurred. Neither `--x-initial 0`, `--x-assign 0`, the runtime
+// `+verilator+rand+reset+0` plusarg, nor an `ARESETn &&` guard suppresses it
+// (same randomization affects ARESETn). The watcher is removed below; the
+// project's wrapper tasks (e.g. `test_baseline_mem_test`) check
+// `if (error_flag) $fatal(...)` explicitly after each vendored test call,
+// which is the equivalent failure-detection contract without the race.
+// Removed for Verilator compatibility:
+//   always @ ( * ) begin
+//      if (error_flag==1) begin
+//           repeat (50) @ (posedge ACLK);
+//           $finish(2);
+//      end
+//   end
 
 integer seed_mread=9;
 integer seed_mwrite=11;
@@ -197,7 +209,11 @@ error_flag=1;
         input [WIDTH_AD-1:0] addr;
         input [ 15:0]        bnum; // byte-number: 1,2,4,8,16
         reg   [127:0]        mask; // for the case of 16-byte (128-bit)
-        reg   [  3:0]        offset;
+        // Width fix (project modification): vendored upstream declared `reg [3:0]`,
+        // which truncates `addr % WIDTH_DS` for WIDTH_DS > 16 (e.g. 256-bit bus
+        // → WIDTH_DS=32, offset 0..31 needs 5 bits). Explicit 5-bit covers
+        // WIDTH_DS up to 32 (i.e. data bus up to 256-bit). See ATTRIBUTION.md.
+        reg   [  4:0]        offset;
      begin
           case (bnum)
            1: mask = 'hFF;
