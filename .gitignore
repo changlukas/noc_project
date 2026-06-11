@@ -1,6 +1,7 @@
 # Build artifacts
 build/
 cosim/verilator/obj_dir/
+cosim/verilator/obj_genamba/
 c_model/build/
 Testing/
 c_model/Testing/

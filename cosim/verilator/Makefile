@@ -85,7 +85,7 @@ hello:
 	    --Mdir /tmp/empty_tb_obj
 	/tmp/empty_tb_obj/Vempty_tb && echo "TOOLCHAIN OK"
 
-clean:
+clean: clean-genamba
 	rm -rf obj_dir
 	rm -f master_shell_read_dump.txt
 
@@ -106,10 +106,10 @@ GENAMBA_FLAGS := \
     --cc --exe --timing \
     --top-module tb_genamba \
     --Mdir $(GENAMBA_OBJDIR) \
+    --output-split 0 \
     --assert \
     -I$(COSIM_ROOT)/sv \
     -I$(COSIM_ROOT)/sv/genamba \
-    -I$(COSIM_ROOT)/sv/wb2axip \
     -I$(SPECGEN_SV_INC) \
     +define+AMBA_AXI4 +define+AMBA_QOS \
     +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT \
@@ -125,17 +125,33 @@ GENAMBA_FLAGS := \
     -Wno-fatal -Wno-NULLPORT -Wno-REDEFMACRO \
     -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC
 
+# Strict-mode flag injection applies to genamba builds too (mirrors
+# VERILATOR_FLAGS above).
+GENAMBA_FLAGS += $(VERILATOR_EXTRA_FLAGS)
+
 # Two-phase build mirrors tb_top pattern: Verilator generates C++ in
 # $(GENAMBA_OBJDIR), then $(MAKE) compiles it.  --timing is used instead of
 # --no-timing so the SV $time-based $display calls are accurate.
+# --output-split 0: Verilator 5.036's default 20000-statement split can
+# separate a coroutine's `__Vfork_N__sync` declaration from its use across
+# generated .cpp chunks ("was not declared in this scope" C++ error) when
+# fork-bearing tasks grow. Disabling the split keeps each coroutine whole;
+# compile-time cost is acceptable at this design size.
 # -LDFLAGS "-Wl,--stack,N" is intentionally omitted: Verilator 5.036 on
 # Windows/MSYS2 escapes commas in generated .mk, breaking the link step.
-# Stack for T1 (mem_axi idle) does not need enlargement.
-.PHONY: genamba
-genamba:
+#
+# Incremental: the exe depends on SV + C sources, so an unchanged tree
+# skips both Verilation and the C++ compile on repeat `make run-genamba`.
+# `genamba` stays as the friendly alias. MinGW ld appends .exe; name the
+# real artifact so the dependency check actually fires.
+GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba.exe
+$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC)
 	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
 	$(MAKE) -C $(GENAMBA_OBJDIR) -f Vtb_genamba.mk \
 	    PYTHON3="$(PYTHON3)"
+
+.PHONY: genamba
+genamba: $(GENAMBA_EXE)
 
 # Build + run in one shot. SCENARIO override follows the top-level Makefile
 # convention: pass a scenario directory name under tests/scenarios/.
@@ -145,5 +161,6 @@ GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenari
 run-genamba: genamba
 	./$(GENAMBA_OBJDIR)/Vtb_genamba.exe "+scenario=$(GENAMBA_SCENARIO_ABS)"
 
+.PHONY: clean-genamba
 clean-genamba:
 	rm -rf $(GENAMBA_OBJDIR)
