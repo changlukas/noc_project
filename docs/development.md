@@ -200,6 +200,35 @@ On Linux and macOS `python3` is correct and no override is needed. The
 root Makefile's lint targets auto-detect: they prefer the Windows `py -3`
 launcher when present and fall back to `python3`.
 
+### Dual-simulator support (Verilator / VCS)
+
+Both cosim testbenches build under either simulator from the same source
+lists (`cosim/sources.mk`); simulator-specific flags live in
+`cosim/verilator/Makefile` and `cosim/vcs/Makefile`.
+
+~~~bash
+make sim-genamba              # Verilator (default; Windows + Linux)
+make sim-genamba SIM=vcs      # VCS (Linux workstation only)
+~~~
+
+Layout of the split:
+
+- `cosim/sources.mk` -- simulator-neutral file lists, include dirs,
+  `+define+`s.
+- `cosim/verilator/` -- Verilator flags, the C++ main drivers (`main.cpp`
+  drives tb_top's clock; `main_genamba.cpp` is an eval loop), and the
+  Verilator 5.036 workarounds (`--output-split 0`, backslash-path sed,
+  `$(EXEEXT)`).
+- `cosim/vcs/` -- VCS flags only. No C++ main: VCS owns simulation time.
+  tb_genamba is self-clocked already; tb_top is wrapped by
+  `cosim/sv/tb_top_vcs.sv` (clock + reset + timeout + final-block
+  finalize, mirroring `main.cpp`). Adjust the `[WORKSTATION]` block in
+  `cosim/vcs/Makefile` (vcs path, license, site flags) before first use.
+
+The vendored-task patches (B-latch reads, R-shadow array) are
+simulator-neutral and identical under both flows. The `SIM=vcs` path has
+been dry-run validated only -- first run on a real VCS install pending.
+
 ### Verified toolchain versions
 
 The build is developed and verified on Windows 11 + MSYS2 (mingw64).

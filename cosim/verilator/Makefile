@@ -1,29 +1,16 @@
 VERILATOR     := verilator
 TOP           := tb_top
-PROJ_ROOT     := $(realpath ../..)
-COSIM_ROOT    := $(realpath ..)
-CMODEL_INC    := $(PROJ_ROOT)/c_model/include
-CMODEL_TESTS  := $(PROJ_ROOT)/c_model/tests
-SPECGEN_INC   := $(PROJ_ROOT)/specgen/generated/cpp
-SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
-YAMLCPP_INC   := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-src/include
-YAMLCPP_LIB   := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-build/libyaml-cpp.a
 
-SV_SRC := \
-    $(SPECGEN_SV_INC)/ni_params_pkg.sv \
-    $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
-    $(COSIM_ROOT)/sv/axi_master_wrap.sv \
-    $(COSIM_ROOT)/sv/nmu_wrap.sv \
-    $(COSIM_ROOT)/sv/channel_model_wrap.sv \
-    $(COSIM_ROOT)/sv/nsu_wrap.sv \
-    $(COSIM_ROOT)/sv/axi_slave_wrap.sv \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_wstrb.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_master.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_slave.v \
-    $(COSIM_ROOT)/sv/tb_top.sv
+# Source lists, include dirs, and +define+s are simulator-neutral and shared
+# with cosim/vcs/Makefile via cosim/sources.mk.
+include ../sources.mk
 
+SV_SRC := $(TB_TOP_SV_SRC)
+
+# main.cpp is the Verilator-only clock/eval driver; under VCS the simulator
+# owns time and the DPI .cpp is the only C++ source.
 C_SRC := \
-    $(COSIM_ROOT)/c/cmodel_dpi.cpp \
+    $(DPI_C_SRC) \
     $(COSIM_ROOT)/verilator/main.cpp
 
 # c_model is header-only: no -l flag needed; include paths suffice.
@@ -36,13 +23,9 @@ VERILATOR_COMMON_FLAGS := \
     -I$(SPECGEN_SV_INC) \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
-    -CFLAGS "-I$(COSIM_ROOT)/c" \
-    -CFLAGS "-I$(CMODEL_INC)" \
-    -CFLAGS "-I$(CMODEL_TESTS)" \
-    -CFLAGS "-I$(SPECGEN_INC)" \
-    -CFLAGS "-I$(YAMLCPP_INC)" \
+    $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
     -LDFLAGS "$(YAMLCPP_LIB)" \
-    +define+assume=assert \
+    $(COMMON_DEFINES) \
     -Wno-fatal \
     -Wno-NULLPORT \
     -Wno-REDEFMACRO \
@@ -104,16 +87,9 @@ clean: clean-genamba
 
 # --- gen_amba role-1 testbench (Phase 1) ---
 GENAMBA_OBJDIR := obj_genamba
-GENAMBA_SRC := \
-    $(SPECGEN_SV_INC)/ni_params_pkg.sv \
-    $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
-    $(COSIM_ROOT)/sv/nmu_wrap.sv \
-    $(COSIM_ROOT)/sv/nsu_wrap.sv \
-    $(COSIM_ROOT)/sv/genamba/mem_axi.v \
-    $(COSIM_ROOT)/sv/genamba_master_bfm.sv \
-    $(COSIM_ROOT)/sv/tb_genamba.sv
+GENAMBA_SRC := $(GENAMBA_SV_SRC)
 GENAMBA_C_SRC := \
-    $(COSIM_ROOT)/c/cmodel_dpi.cpp \
+    $(DPI_C_SRC) \
     $(COSIM_ROOT)/verilator/main_genamba.cpp
 GENAMBA_FLAGS := \
     $(VERILATOR_COMMON_FLAGS) \
@@ -122,8 +98,7 @@ GENAMBA_FLAGS := \
     --Mdir $(GENAMBA_OBJDIR) \
     --output-split 0 \
     -I$(COSIM_ROOT)/sv/genamba \
-    +define+AMBA_AXI4 +define+AMBA_QOS \
-    +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT
+    $(GENAMBA_DEFINES)
 
 # Strict-mode flag injection applies to genamba builds too (mirrors
 # VERILATOR_FLAGS above).

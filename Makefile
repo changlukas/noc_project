@@ -25,6 +25,7 @@ help:
 	@echo "      e.g. make sim SCENARIO=AX4-BUR-002_incr_8beat"
 	@echo "  make sim-genamba                               build+run gen_amba role-1 testbench (Tasks A-G)"
 	@echo "  make sim-genamba GENAMBA_SCENARIO=<ax4-id>     override default scenario"
+	@echo "  make sim-genamba SIM=vcs                       same testbench under VCS (Linux workstation)"
 	@echo "  make test                                      run c_model ctest suite"
 	@echo ""
 	@echo "Clean:"
@@ -110,13 +111,25 @@ GENAMBA_SCENARIO ?=
 # the yaml-cpp headers are stable once configured. Surface a clear hint
 # if missing instead.
 YAMLCPP_LIB := $(CMODEL_BUILD)/_deps/yaml-cpp-build/libyaml-cpp.a
+
+# Simulator selection: SIM=verilator (default; Windows + Linux) or SIM=vcs
+# (Linux workstation only — adjust cosim/vcs/Makefile [WORKSTATION] block
+# first). Both simulators build the same testbench from the same source
+# lists (cosim/sources.mk).
+SIM ?= verilator
+ifeq ($(SIM),vcs)
+COSIM_SIM_DIR := cosim/vcs
+else
+COSIM_SIM_DIR := $(COSIM_VERILATOR)
+endif
+
 sim-genamba:
 	@if [ ! -f "$(YAMLCPP_LIB)" ]; then \
 	    echo "ERROR: yaml-cpp static lib missing ($(YAMLCPP_LIB))."; \
 	    echo "Run \`make build-cmodel\` once to populate c_model/build/_deps."; \
 	    exit 1; \
 	fi
-	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) run-genamba \
+	@$(TOOLPATH) $(MAKE) -C $(COSIM_SIM_DIR) run-genamba \
 	    $(if $(GENAMBA_SCENARIO),GENAMBA_SCENARIO=$(GENAMBA_SCENARIO),)
 
 test: build-cmodel
