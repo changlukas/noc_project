@@ -28,24 +28,19 @@ C_SRC := \
 
 # c_model is header-only: no -l flag needed; include paths suffice.
 # yaml-cpp is a static archive built by CMake FetchContent; link via full path.
-VERILATOR_FLAGS := \
+# Flags shared by every Verilator target in this Makefile (tb_top, genamba).
+VERILATOR_COMMON_FLAGS := \
     --cc --exe \
-    --top-module $(TOP) \
-    --no-timing \
     --assert \
     -I$(COSIM_ROOT)/sv \
-    -I$(COSIM_ROOT)/sv/wb2axip \
     -I$(SPECGEN_SV_INC) \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
-    -CFLAGS "-g" \
-    -CFLAGS "-O0" \
     -CFLAGS "-I$(COSIM_ROOT)/c" \
     -CFLAGS "-I$(CMODEL_INC)" \
     -CFLAGS "-I$(CMODEL_TESTS)" \
     -CFLAGS "-I$(SPECGEN_INC)" \
     -CFLAGS "-I$(YAMLCPP_INC)" \
-    -CFLAGS "-Wno-attributes" \
     -LDFLAGS "$(YAMLCPP_LIB)" \
     +define+assume=assert \
     -Wno-fatal \
@@ -53,6 +48,15 @@ VERILATOR_FLAGS := \
     -Wno-REDEFMACRO \
     -Wno-WIDTHEXPAND \
     -Wno-WIDTHTRUNC
+
+VERILATOR_FLAGS := \
+    $(VERILATOR_COMMON_FLAGS) \
+    --top-module $(TOP) \
+    --no-timing \
+    -I$(COSIM_ROOT)/sv/wb2axip \
+    -CFLAGS "-g" \
+    -CFLAGS "-O0" \
+    -CFLAGS "-Wno-attributes"
 
 # Optional strict-mode flag injection for release gates.
 # Override with: make VERILATOR_EXTRA_FLAGS="--Wall --Wpedantic"
@@ -103,27 +107,14 @@ GENAMBA_C_SRC := \
     $(COSIM_ROOT)/c/cmodel_dpi.cpp \
     $(COSIM_ROOT)/verilator/main_genamba.cpp
 GENAMBA_FLAGS := \
-    --cc --exe --timing \
+    $(VERILATOR_COMMON_FLAGS) \
+    --timing \
     --top-module tb_genamba \
     --Mdir $(GENAMBA_OBJDIR) \
     --output-split 0 \
-    --assert \
-    -I$(COSIM_ROOT)/sv \
     -I$(COSIM_ROOT)/sv/genamba \
-    -I$(SPECGEN_SV_INC) \
     +define+AMBA_AXI4 +define+AMBA_QOS \
-    +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT \
-    +define+assume=assert \
-    -CFLAGS "-std=c++17" \
-    -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
-    -CFLAGS "-I$(COSIM_ROOT)/c" \
-    -CFLAGS "-I$(CMODEL_INC)" \
-    -CFLAGS "-I$(CMODEL_TESTS)" \
-    -CFLAGS "-I$(SPECGEN_INC)" \
-    -CFLAGS "-I$(YAMLCPP_INC)" \
-    -LDFLAGS "$(YAMLCPP_LIB)" \
-    -Wno-fatal -Wno-NULLPORT -Wno-REDEFMACRO \
-    -Wno-WIDTHEXPAND -Wno-WIDTHTRUNC
+    +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT
 
 # Strict-mode flag injection applies to genamba builds too (mirrors
 # VERILATOR_FLAGS above).
