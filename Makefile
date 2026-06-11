@@ -41,14 +41,27 @@ build: build-cmodel build-verilator
 # clean-cmodel). Subsequent `make build-cmodel` is pure `cmake --build`, which
 # avoids reconfigure triggering ninja to re-run side-effect custom targets
 # (e.g. codegen_check) under a different subprocess env.
+#
+# TOOLPATH hardening: recipes run regardless of how complete the invoking
+# shell's PATH is. Three deficits seen in practice on Windows/Git Bash:
+# - mingw64/bin missing -> verilator (perl script) + g++ unresolvable
+# - usr/bin missing     -> MSYS make/coreutils unresolvable
+# - System32 missing    -> ninja's `cmd.exe /C` link rules (gtest discovery
+#   POST_BUILD) fail with "'cmd.exe' is not recognized"
+# MSYS dirs are PREpended (their coreutils must shadow Windows homonyms like
+# find/sort); System32 is APPended (only cmd.exe is needed from there).
+# All three are no-ops on Linux/macOS. LC_ALL=C silences MSYS perl locale
+# complaints under non-UTF-8 Windows locales.
+TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/System32" LC_ALL=C
+
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
-	cmake --build $(CMODEL_BUILD) -j
+	@$(TOOLPATH) cmake --build $(CMODEL_BUILD) -j
 
 $(CMODEL_BUILD)/CMakeCache.txt:
-	cmake -S $(CMODEL_DIR) -B $(CMODEL_BUILD)
+	@$(TOOLPATH) cmake -S $(CMODEL_DIR) -B $(CMODEL_BUILD)
 
 build-verilator: build-cmodel
-	$(MAKE) -C $(COSIM_VERILATOR)
+	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR)
 
 # --- run / test ---
 
@@ -103,12 +116,11 @@ sim-genamba:
 	    echo "Run \`make build-cmodel\` once to populate c_model/build/_deps."; \
 	    exit 1; \
 	fi
-	@PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH" LC_ALL=C \
-	    $(MAKE) -C $(COSIM_VERILATOR) run-genamba \
+	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) run-genamba \
 	    $(if $(GENAMBA_SCENARIO),GENAMBA_SCENARIO=$(GENAMBA_SCENARIO),)
 
 test: build-cmodel
-	cd $(CMODEL_BUILD) && ctest --output-on-failure
+	@$(TOOLPATH) sh -c 'cd $(CMODEL_BUILD) && ctest --output-on-failure'
 
 lint_scenarios:
 	py -3 tools/lint_scenarios.py --require-nonempty

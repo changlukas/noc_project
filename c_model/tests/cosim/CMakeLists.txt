@@ -26,10 +26,24 @@ add_dependencies(test_cmodel_dpi codegen_check)
 target_sources(test_cmodel_dpi PRIVATE
     ${CMAKE_SOURCE_DIR}/../cosim/c/cmodel_dpi.cpp)
 target_link_libraries(test_cmodel_dpi PRIVATE yaml-cpp::yaml-cpp)
+# svdpi.h lives under the Verilator install. Prefer VERILATOR_ROOT when the
+# environment provides it; otherwise fall back to common install locations
+# (MSYS2 mingw64 on Windows, distro share dirs on Linux). A bare
+# $ENV{VERILATOR_ROOT} expansion silently degrades to "/include" when the
+# variable is unset at configure time, breaking the build later.
+find_path(VERILATOR_INCLUDE_DIR vltstd/svdpi.h
+    HINTS $ENV{VERILATOR_ROOT}/include
+    PATHS C:/msys64/mingw64/share/verilator/include
+          /usr/share/verilator/include
+          /usr/local/share/verilator/include)
+if(NOT VERILATOR_INCLUDE_DIR)
+    message(FATAL_ERROR
+        "Verilator include dir (vltstd/svdpi.h) not found - set VERILATOR_ROOT")
+endif()
 target_include_directories(test_cmodel_dpi PRIVATE
     ${CMAKE_SOURCE_DIR}/../cosim/c
-    $ENV{VERILATOR_ROOT}/include
-    $ENV{VERILATOR_ROOT}/include/vltstd)
+    ${VERILATOR_INCLUDE_DIR}
+    ${VERILATOR_INCLUDE_DIR}/vltstd)
 # Pass scenario YAML env var to every discovered test case (e.g.
 # CmodelDpiLifecycleTest.walk_session_state_machine).
 gtest_discover_tests(test_cmodel_dpi
