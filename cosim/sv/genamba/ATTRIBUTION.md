@@ -19,7 +19,7 @@ to Verilator `--timing` simulator compatibility, documented below.
 | `cosim/sv/genamba/mem_axi.v`            | `gen_amba_axi/verification/ip/mem_axi.v`         | Unmodified |
 | `cosim/sv/genamba/mem_axi_beh.v`        | `gen_amba_axi/verification/ip/mem_axi_beh.v`     | Unmodified |
 | `cosim/sv/genamba/mem_axi_dpram_sync.v` | `gen_amba_axi/verification/ip/mem_axi_dpram_sync.v` | Unmodified |
-| `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B-channel latch read in `axi_master_write_b`; see "Modifications" below. `axi_master_read_r` is upstream-pristine — project bypasses it via `bfm_drain_r` in `genamba_master_bfm.sv`.) |
+| `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B-channel latch read in `axi_master_write_b`; `error_flag` escalation in `_write_b` + `_read_r`; see "Modifications" below. `_read_r` is otherwise upstream-pristine — burst drains bypass it via `bfm_drain_r` in `genamba_master_bfm.sv`.) |
 | `cosim/sv/genamba/mem_test_tasks.v`     | `gen_amba_axi/verification/ip/mem_test_tasks.v`  | **Modified** (offset-width fix; see "Modifications" below) |
 | `cosim/sv/genamba/axi_tester.v`         | `gen_amba_axi/verification/ip/axi_tester.v`      | Unmodified (template/reference for the BFM signal environment) |
 
@@ -128,8 +128,27 @@ bridge — Task B blen=4 hangs at the second-to-last beat). Rather than further
 patching `axi_master_read_r`, the project's `bfm_drain_r` adapter task in
 `cosim/sv/genamba_master_bfm.sv` bypasses the vendored task entirely: it reads
 from a parallel-captured shadow array (`r_shadow[256]`) indexed by a blocking
-read-side counter (`r_shadow_ridx`). The vendored `axi_master_read_r` remains
-upstream-pristine, compiled but not called.
+read-side counter (`r_shadow_ridx`). The vendored `axi_master_read_r` stays in
+the Task A call path only (via `mem_test` → `axi_master_read`), modified only
+by the `error_flag` escalation below.
+
+### `axi_master_write_b` / `axi_master_read_r` — error_flag escalation
+
+Upstream protocol checks in both tasks (BID/BRESP in `_write_b`; RID/RRESP/
+RLAST in `_read_r`) report failures with `$display` only — the simulation
+continues and exits 0, so a B/R-channel ID or response error is invisible
+unless someone greps the log.
+
+Project fix: each check additionally sets `error_flag = 1` (the flag is
+upstream's own fail-fast mechanism, declared in `mem_test_tasks.v`). The
+check conditions and messages are unmodified — only the escalation is added.
+The project-side traps convert the flag into a `$fatal` + non-zero exit:
+`test_baseline_mem_test` (after `mem_test`) and `bfm_drain_b` (after
+`axi_master_write_b`) in `genamba_master_bfm.sv`.
+
+Verified by fault injection: a deliberate `bfm_drain_b` with a wrong AWID
+makes the BID check fire, sets `error_flag`, and the trap aborts the run
+with a non-zero exit code.
 
 ## Notes
 

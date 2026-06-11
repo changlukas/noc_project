@@ -109,17 +109,21 @@ begin
          dataR[idx] = RDATA; // it simply store the read-data; should be blocking
          if (RRESP!=2'b00) begin
              $display($time,,"%m ERROR RD RRESP no-ok 0x%02x", RRESP);
+             error_flag = 1; // project patch: protocol error must fail the run
          end
          if (RID!=arid) begin
              $display($time,,"%m ERROR RD RID mis-match 0x%4x:0x%04x", RID, arid);
+             error_flag = 1; // project patch
          end
          if (idx==(bleng-1)) begin
              if (RLAST==1'b0) begin
                  $display($time,,"%m ERROR RD RLAST not driven");
+                 error_flag = 1; // project patch
              end
          end else begin
              if (RLAST==1'b1) begin
                  $display($time,,"%m ERROR RD RLAST not expected");
+                 error_flag = 1; // project patch
              end
              if (delay) begin
                 rdelay = {$random(seed_tread)}%5;
@@ -310,9 +314,11 @@ begin
     @ (posedge ACLK);
     if (b_resp_latch!=2'b00) begin
         $display($time,,"%m ERROR WR BRESP no-ok 0x%02x", b_resp_latch);
+        error_flag = 1; // project patch: protocol error must fail the run
     end
     if (b_id_latch!=awid) begin
         $display($time,,"%m ERROR WR BID mis-match 0x%4x:0x%04x", b_id_latch, awid);
+        error_flag = 1; // project patch
     end
 end
 endtask

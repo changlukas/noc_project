@@ -132,6 +132,10 @@ module genamba_master_bfm #(
 
     task bfm_drain_b(input [WIDTH_ID-1:0] id);
         axi_master_write_b(id);
+        // Vendored write_b sets error_flag on BID/BRESP mismatch (project
+        // patch; see ATTRIBUTION.md) but does not abort — trap it here so
+        // a B-channel protocol error fails the run with a non-zero exit.
+        if (error_flag) $fatal(1, "bfm_drain_b: B-channel protocol error");
     endtask
 
     task bfm_post_ar(input [WIDTH_ID-1:0] id, input [WIDTH_AD-1:0] addr, input integer blen);
