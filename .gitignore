@@ -43,3 +43,4 @@ __pycache__/
 
 # Cross-AI review artifacts (transient; not normative)
 /cross-review/
+docs/slides/
