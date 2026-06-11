@@ -56,11 +56,14 @@ transactions:
 
 Each scenario directory contains `scenario.yaml`. Scenarios that perform
 real AXI4 transactions also contain `data.txt` (and optionally `strb.txt`,
-`excl.txt`, indexed `data_<n>.txt`). `data_file:` and friends use bare
-filenames; `scenario_parser` resolves them relative to the scenario's own
-directory. Infrastructure scenarios that deliberately point `data_file:`
-at a nonexistent path (e.g. INF-001, which tests the DPI fatal
-propagation) do not ship a data file.
+`excl.txt`, indexed `data_<n>.txt`). `data_file:` and friends are paths
+resolved relative to the scenario's own directory (`scenario_parser`):
+most scenarios use bare filenames; some share inputs from the sibling
+`_data/` directory via relative paths (e.g. AX4-BAS-004/-005 and
+AX4-HSH-002 use `data_file: ../_data/data_aa.txt` style). Infrastructure
+scenarios that deliberately point `data_file:` at a nonexistent path
+(e.g. INF-001, which tests the DPI fatal propagation) do not ship a
+data file.
 
 ## Test layer consumption
 

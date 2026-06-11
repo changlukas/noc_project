@@ -3,8 +3,11 @@
 AMBA AXI verification IP from the gen_amba project, vendored for the gen_amba
 integration feasibility spike (used as golden AXI master BFM + memory model under
 Verilator). Files are vendored unmodified from upstream **except** for project
-patches to two files (`mem_test_tasks.v` and `axi_master_tasks.v`) — all related
-to Verilator `--timing` simulator compatibility, documented below.
+patches to two files (`mem_test_tasks.v` and `axi_master_tasks.v`), documented
+below. Patch motivations split three ways: Verilator simulator compatibility
+(watcher removal, B-latch reads), a plain wide-bus correctness bug (get_mask
+offset width — wrong on any simulator at `WIDTH_DS > 16`), and detection
+strength (error_flag escalation).
 
 ## Upstream
 
@@ -93,8 +96,9 @@ if (BID!=awid) $display(...);    // reads BID procedurally
 Under Verilator `--timing`, procedural code resumed from `@(posedge ACLK)` reads
 post-NBA signal values — i.e. the NEXT cycle's perspective of the registered
 output. The NMU bridge implements the AXI4 §A3.2.1 held-latch pattern correctly
-(`nmu_shell_adapter.hpp:150-162`): `bvalid_q`/`bid_q` are held until BREADY is
-seen, then deasserted via NBA. So in the next cycle BID=0 — which is what the
+(`nmu_shell_adapter.hpp:150-162` holds the response in `held_b_` until BREADY is
+seen; the SV-side registers `bvalid_q`/`bid_q` in `nmu_wrap.sv` deassert via NBA
+one cycle after the handshake). So in the next cycle BID=0 — which is what the
 vendored task ends up reading, even though the handshake-cycle value (correctly
 captured by a parallel `always @(posedge ACLK)` monitor) is correct. This is a
 Verilator-specific procedural-vs-NBA race; the same code works under Icarus /

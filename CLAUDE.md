@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Namespace**: `ni::cmodel::` (production sub-namespaces under `c_model/include/`: `axi`, `cosim`, `nmu`, `nsu`. Tests under `c_model/tests/common/` add a `ni::cmodel::testing` sub-namespace).
+**Namespace**: `ni::cmodel::` (production sub-namespaces under `c_model/include/`: `axi`, `cosim`, `nmu`, `noc`, `nsu`. Tests under `c_model/tests/common/` add a `ni::cmodel::testing` sub-namespace).
 
 **Architecture**: AXI4 Master → NMU → ChannelModel (test stub) → NSU → AXI4 Slave. Verilator co-sim wraps each c_model component in a `*_shell_adapter.hpp` and binds wb2axip protocol checkers (`faxi_slave.v` on the NMU manager-facing side, `faxi_master.v` on the NSU memory-facing side).
 

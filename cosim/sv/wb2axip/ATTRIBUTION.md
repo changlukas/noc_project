@@ -2,7 +2,7 @@
 
 AXI4 protocol checker properties from the ZipCPU/wb2axip project, used as
 simulation-runtime observers via Verilator. Two files are modified from
-upstream; one file is newly authored for this project.
+upstream; two files are newly authored for this project.
 
 ## Upstream
 

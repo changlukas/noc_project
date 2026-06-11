@@ -31,8 +31,10 @@ with synchronous tick-driven semantics.
 
 cocotbext-axi is MIT licensed. See <https://github.com/alexforencich/cocotbext-axi/blob/master/LICENSE>.
 
-This c_model project inherits the MIT terms for the ported algorithms;
-the rest of c_model follows the project's own license (see repo root).
+This c_model project inherits the MIT terms for the ported algorithms.
+No project-wide license has been selected yet (see README.md, License
+section); until one is added, the rest of c_model is not offered under
+an open-source license.
 
 ## Phase C — Exclusive Access (AxLOCK + EXOKAY)
 

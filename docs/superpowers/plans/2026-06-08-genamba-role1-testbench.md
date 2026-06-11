@@ -25,7 +25,7 @@ No DPI errors, no watchdog fires, no `$fatal`.
 
 **Goal:** Build a Verilator `--cc --exe --timing` (two-phase) self-clocked testbench that drives the NMU/NSU bridge with gen_amba's golden VIP through 7 single-master AXI4 patterns (baseline, burst, outstanding, outstanding-burst, same-ID, mixed R+W, deep pressure) and produces independent cross-tool evidence of bridge correctness. Run env: **Git Bash on Windows** (MSYS2 Bash); `--binary --timing` does not work because Verilator 5.036's nested-make subprocess can't find MSYS2 `make` via Windows `CreateProcess()` — discovered T1, see `main_genamba.cpp` driver workaround.
 
-**Architecture:** `gen_amba BFM → NMU → noc_intf (direct mosi↔miso, no router) → NSU → gen_amba mem_axi`. Self-clocked SV top, no `main.cpp` (DPI lifecycle in SV `final` block). faxi_slave checker on BFM↔NMU AXI with bumped MAXSTALL/MAXRSTALL/MAXDELAY for outstanding pressure. All 7 BFM tasks live in one `genamba_master_bfm.sv` module; tasks B–G use a thin **adapter task layer** that calls the vendored channel-level primitives positionally (vendored `*_multiple_outstanding` helpers have N≤16 + broken per-address data per spec §2 caveat — do not use).
+**Architecture:** `gen_amba BFM → NMU → noc_intf (direct mosi↔miso, no router) → NSU → gen_amba mem_axi`. Self-clocked SV top with a minimal C++ driver (`main_genamba.cpp`, eval loop only; DPI finalize in SV `final` block). No wb2axip checker (faxi_slave bind removed in T5 — see Amendments); detection = per-task data compare + DPI error pump + 1 µs handshake-progress watchdog. All 7 BFM tasks live in one `genamba_master_bfm.sv` module; tasks B–G use a thin **adapter task layer** that calls the vendored channel-level primitives positionally (vendored `*_multiple_outstanding` helpers have N≤16 + broken per-address data per spec §2 caveat — do not use).
 
 **Tech Stack:** Verilator 5.036+ `--cc --exe --timing` (two-phase, mirroring existing `tb_top` Makefile pattern); SystemVerilog 2012; vendored gen_amba_2021 VIP (2-clause BSD, `cosim/sv/genamba/`); wb2axip checker (`cosim/sv/wb2axip/`); Git Bash on Windows (MSYS2).
 
@@ -60,9 +60,9 @@ These deviations from the as-written task bodies were authorised in-flight by th
 
 - `cosim/sv/nmu_wrap.sv` / `nsu_wrap.sv` (NSU port name is `noc_miso_i` per `nsu_wrap.sv:44` — verified)
 - `cosim/c/cmodel_dpi.cpp` (chandle ABI)
-- `cosim/sv/genamba/{mem_axi,axi_master_tasks,mem_test_tasks}.v` (vendored unmodified per ATTRIBUTION)
-- `cosim/sv/wb2axip/{faxi_slave,faxi_master,faxi_wstrb}.v` + `sim_wrapper.svh`
+- `cosim/sv/genamba/mem_axi.v` (vendored pristine); `axi_master_tasks.v` + `mem_test_tasks.v` carry project patches — see `cosim/sv/genamba/ATTRIBUTION.md`
 - `specgen/generated/sv/ni_params_pkg.sv` + `ni_signals_pkg.sv`
+- (wb2axip files were in the original plan via the faxi_slave bind; removed in T5 — the genamba build uses no wb2axip source)
 
 ### Deleted
 
