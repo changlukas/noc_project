@@ -168,16 +168,30 @@ From the repo root:
 
 ~~~bash
 make build           # c_model + Verilator (correct dep order)
-make build-cmodel    # c_model only (CMake + ninja)
-make build-verilator # Verilator binary (depends on build-cmodel)
+make build-cmodel    # c_model only (CMake + ninja) -> build/cmodel/
+make build-verilator # Verilator binaries -> build/verilator/
 make test            # run c_model ctest suite
 make check           # lint + build + full ctest
-make sim             # run default scenario through Vtb_top
-make sim SCENARIO=AX4-BUR-002_incr_8beat            # specific scenario
-make sim-genamba                                    # gen_amba role-1 testbench (Tasks A-G)
-make sim-genamba GENAMBA_SCENARIO=AX4-BUR-002_incr_8beat   # specific scenario
 make clean           # remove all build artifacts
 ~~~
+
+The root Makefile builds only. Simulation runs from each simulator's own
+directory; run logs land in that directory's `output/<scenario>/run.log`:
+
+~~~bash
+cd cosim/verilator
+make run-genamba                                # gen_amba role-1 (Tasks A-G)
+make run-genamba GENAMBA_SCENARIO=<ax4-id>      # specific scenario
+make run-tb-top                                 # wb2axip cosim, default scenario
+make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
+
+cd cosim/vcs                                    # Linux workstation only
+make run-genamba / run-tb-top
+~~~
+
+All build artifacts live under the top-level `build/` tree:
+`build/cmodel/` (CMake), `build/verilator/` (obj_dir + obj_genamba),
+`build/vcs/` (simv + csrc).
 
 ### Recursive make
 
@@ -207,8 +221,8 @@ lists (`cosim/sources.mk`); simulator-specific flags live in
 `cosim/verilator/Makefile` and `cosim/vcs/Makefile`.
 
 ~~~bash
-make sim-genamba              # Verilator (default; Windows + Linux)
-make sim-genamba SIM=vcs      # VCS (Linux workstation only)
+cd cosim/verilator && make run-genamba   # Verilator (Windows + Linux)
+cd cosim/vcs       && make run-genamba   # VCS (Linux workstation only)
 ~~~
 
 Layout of the split:
@@ -245,15 +259,14 @@ match the Verilator major.minor where possible.
 
 On a new host (e.g. a Linux workstation): `git clone`, install
 verilator + g++ + cmake + ninja + python3 from the distro or a user-space
-prefix, then `make check` -- build artifacts are per-clone
-(`c_model/build/`, `cosim/verilator/obj_dir/`, `obj_genamba/` are all
-gitignored), so Windows and Linux working copies never share or clobber
-binaries. Line endings are pinned by `.gitattributes` (LF in repo
+prefix, then `make check` -- build artifacts are per-clone (the whole
+`build/` tree and per-sim `output/` dirs are gitignored), so Windows and
+Linux working copies never share or clobber binaries. Line endings are pinned by `.gitattributes` (LF in repo
 objects; shell/build files LF in the working tree on every platform).
 
 ### CMakeCache.txt and configure
 
-CMake configure runs only when `c_model/build/CMakeCache.txt` is absent
+CMake configure runs only when `build/cmodel/CMakeCache.txt` is absent
 (first time or after `make clean-cmodel`). Subsequent `make build-cmodel`
 calls are pure `cmake --build`, which avoids re-running configure-time
 side-effect custom targets (e.g. codegen_check) in a different
@@ -265,7 +278,7 @@ will trigger CMake reconfigure automatically on the next build.
 
 ### clean-cmodel timing
 
-`make clean-cmodel` removes `c_model/build/`. The next `make build-cmodel`
+`make clean-cmodel` removes `build/cmodel/`. The next `make build-cmodel`
 will run a full CMake configure. If CMake fails after a clean, check that
 the required tools (Python 3, PyYAML, Ninja or Make) are on PATH before
 running configure.
@@ -378,7 +391,7 @@ template authoring, and extension guide.
 Use ctest `-R` to filter by test name:
 
 ~~~bash
-cd c_model/build
+cd build/cmodel
 ctest -R NmuShellAdapter --output-on-failure   # all NmuShellAdapter tests
 ctest -R multi_beat --output-on-failure        # all tests matching multi_beat
 ctest --output-on-failure                      # all tests
@@ -408,14 +421,14 @@ property under test.
 
 ## 7. Debugging cosim
 
-### make sim sanity check
+### run-tb-top sanity check
 
 Before suspecting c_model or checker bugs, run the default scenario
 and inspect the log:
 
 ~~~bash
-make sim    # runs AX4-BAS-003_single_write_read_aligned
-cat cosim/output/AX4-BAS-003_single_write_read_aligned/run.log
+cd cosim/verilator && make run-tb-top   # AX4-BAS-003_single_write_read_aligned
+cat cosim/verilator/output/AX4-BAS-003_single_write_read_aligned/run.log
 ~~~
 
 A passing run ends with `$finish` and no assertion failure lines.
@@ -440,12 +453,12 @@ Do NOT modify `faxi_slave.v` to remove the assertion.
 
 ### ctest path for cosim tests
 
-The cosim ctest executables are registered in `c_model/build/` by the
+The cosim ctest executables are registered in `build/cmodel/` by the
 CMake configuration that includes cosim tests. To run cosim tests
 directly:
 
 ~~~bash
-cd c_model/build
+cd build/cmodel
 ctest -R Cosim --output-on-failure       # matches CosimIntegration
 ctest -R 'Cosim|Checker|Wb2axip' --output-on-failure   # all cosim ctests
 ~~~
@@ -460,8 +473,8 @@ ctests can run.
 
 ### Vtb_top output log
 
-Vtb_top writes run.log to `cosim/output/<SCENARIO>/run.log` when invoked
-via `make sim`. When invoked via ctest, output goes to stdout, captured
+Vtb_top writes run.log to `cosim/verilator/output/<SCENARIO>/run.log` when
+invoked via `make run-tb-top`. When invoked via ctest, output goes to stdout, captured
 by `--output-on-failure`.
 
 ### NmuShellAdapter multi-beat unit test
@@ -470,7 +483,7 @@ The multi-beat W burst coverage path through the cosim adapter layer is
 exercised by:
 
 ~~~bash
-cd c_model/build
+cd build/cmodel
 ctest -R NmuShellAdapter.multi_beat_w_burst_visible_per_cycle --output-on-failure
 ~~~
 
@@ -490,8 +503,9 @@ for the design and the matching findings document for the Phase 1 outcome.
 Build + run from repo root:
 
 ~~~bash
-make sim-genamba                                          # default scenario
-make sim-genamba GENAMBA_SCENARIO=AX4-BUR-002_incr_8beat  # override
+cd cosim/verilator
+make run-genamba                                     # default scenario
+make run-genamba GENAMBA_SCENARIO=AX4-BUR-002_incr_8beat  # override
 ~~~
 
 The default scenario is `AX4-BAS-001_single_write_no_read`. All current
@@ -499,9 +513,10 @@ Tasks A-G are scenario-independent (the BFM owns the stimulus); the
 `+scenario=` plusarg only feeds `cmodel_init` so the DPI lifecycle has
 something valid to point at.
 
-Build artefacts land in `cosim/verilator/obj_genamba/` -- separate from
-`tb_top`'s `obj_dir/` because Verilator generates each `--top-module` into
-a single `--Mdir` and two tops would clobber each other.
+Build artefacts land in `build/verilator/obj_genamba/` -- separate from
+`tb_top`'s `build/verilator/obj_dir/` because Verilator generates each
+`--top-module` into a single `--Mdir` and two tops would clobber each
+other.
 
 Per-cycle AW/W/B/AR/R handshake dumps are gated behind
 `+define+GENAMBA_DBG_AXI` (default off; runs stay quiet). Enable for
@@ -512,7 +527,7 @@ make -C cosim/verilator clean-genamba run-genamba \
     VERILATOR_EXTRA_FLAGS=+define+GENAMBA_DBG_AXI
 ~~~
 
-If `make sim-genamba` fails with "Can't open perl script /mingw64/bin/verilator"
+If `make run-genamba` fails with "Can't open perl script /mingw64/bin/verilator"
 or similar PATH errors, the shell does not have MSYS2 paths. The Makefile's
 TOOLPATH prefix adds them unconditionally in every recipe (no-op on Linux),
 but if you're in a non-Git-Bash shell (PowerShell / cmd) call the wrapper
@@ -528,7 +543,7 @@ directly:
 The bringup test for the DPI error-propagation path:
 
 ~~~bash
-cd c_model/build
+cd build/cmodel
 ctest -R CheckerLiveness --output-on-failure
 ~~~
 

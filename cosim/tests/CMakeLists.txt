@@ -5,11 +5,12 @@
 
 cmake_minimum_required(VERSION 3.20)
 
-# Derive the Vtb_top binary path relative to cosim/ (parent of this directory).
-set(COSIM_VERILATOR_DIR "${CMAKE_CURRENT_LIST_DIR}/../verilator")
-set(COSIM_BIN_PATH "${COSIM_VERILATOR_DIR}/obj_dir/Vtb_top.exe")
+# Derive the Vtb_top binary path: all build artifacts live under the
+# top-level build/ tree (build/verilator/obj_dir).
+set(VERILATOR_BUILD_DIR "${CMAKE_CURRENT_LIST_DIR}/../../build/verilator")
+set(COSIM_BIN_PATH "${VERILATOR_BUILD_DIR}/obj_dir/Vtb_top.exe")
 if(NOT EXISTS "${COSIM_BIN_PATH}")
-    set(COSIM_BIN_PATH "${COSIM_VERILATOR_DIR}/obj_dir/Vtb_top")
+    set(COSIM_BIN_PATH "${VERILATOR_BUILD_DIR}/obj_dir/Vtb_top")
 endif()
 
 # Stage B unified scenario tree. Scenarios live at repo-root tests/scenarios/.
@@ -55,18 +56,19 @@ target_include_directories(test_wb2axip_block PRIVATE
 
 # -----------------------------------------------------------------------
 # ctest registrations.
-# WORKING_DIRECTORY stays COSIM_VERILATOR_DIR so Vtb_top can still write its
-# in-project read-dump there. Scenarios are anchored to YAML location now,
-# so cwd no longer matters for data_file: resolution.
+# WORKING_DIRECTORY is the verilator BUILD dir so Vtb_top writes its
+# in-project read-dump into build artifacts, not the source tree. Scenarios
+# are anchored to YAML location, so cwd does not matter for data_file:
+# resolution.
 # -----------------------------------------------------------------------
 add_test(NAME CosimIntegration COMMAND test_cosim_integration)
 set_tests_properties(CosimIntegration PROPERTIES
     ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
-    WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
+    WORKING_DIRECTORY ${VERILATOR_BUILD_DIR})
 
 add_test(NAME CheckerLiveness COMMAND test_checker_fires_on_violation)
 set_tests_properties(CheckerLiveness PROPERTIES
     ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
-    WORKING_DIRECTORY ${COSIM_VERILATOR_DIR})
+    WORKING_DIRECTORY ${VERILATOR_BUILD_DIR})
 
 add_test(NAME Wb2axipBlock COMMAND test_wb2axip_block)

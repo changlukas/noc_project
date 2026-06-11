@@ -269,7 +269,7 @@ memory-facing side (`faxi_master.v`, treating the NSU as an AXI slave).
 See `cosim/sv/tb_top.sv` lines 12-13 for the role mapping and lines
 208 / 279 for the bind sites.
 
-The Verilator binary `Vtb_top` is built in `cosim/verilator/obj_dir/`.
+The Verilator binary `Vtb_top` is built in `build/verilator/obj_dir/`.
 It is driven by `cosim/verilator/main.cpp` via the DPI shell adapters.
 
 ### wb2axip structural limits
@@ -388,12 +388,13 @@ through seven single-master AXI4 patterns: baseline self-check, burst
 sweep, N-outstanding, outstanding burst, same-ID ordering, mixed R+W,
 and deep outstanding pressure. This provides independent evidence from
 a second AXI VIP implementation (gen_amba) that does not share code or
-assumptions with wb2axip. Run with `make sim-genamba`. Phase 1 results:
+assumptions with wb2axip. Run with `cd cosim/verilator && make run-genamba`.
+Phase 1 results:
 `docs/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
 
 `make check` runs lint_scenarios, lint_docs, builds the c_model and the
 Verilator binary, and runs the full ctest suite (Layers 1-4). It does
-not invoke `make sim` or `make sim-genamba` (both are separate manual
+not run any simulation (sims are manual, from each simulator's own
 targets). Note: cosim Layer 3 ctest registration requires `Vtb_top` to
 be present at CMake configure time; `make check` ensures this by
 depending on `build-verilator` before running ctest.

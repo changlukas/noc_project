@@ -7,12 +7,18 @@
 COSIM_ROOT  := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 PROJ_ROOT   := $(patsubst %/,%,$(dir $(COSIM_ROOT)))
 
+# All build artifacts live under the top-level build/ tree:
+#   build/cmodel/    CMake (c_model tests + FetchContent deps)
+#   build/verilator/ obj_dir (tb_top) + obj_genamba
+#   build/vcs/       simv_* + csrc_* + *.daidir
+BUILD_ROOT     := $(PROJ_ROOT)/build
+
 CMODEL_INC     := $(PROJ_ROOT)/c_model/include
 CMODEL_TESTS   := $(PROJ_ROOT)/c_model/tests
 SPECGEN_INC    := $(PROJ_ROOT)/specgen/generated/cpp
 SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
-YAMLCPP_INC    := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-src/include
-YAMLCPP_LIB    := $(PROJ_ROOT)/c_model/build/_deps/yaml-cpp-build/libyaml-cpp.a
+YAMLCPP_INC    := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-src/include
+YAMLCPP_LIB    := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-build/libyaml-cpp.a
 
 # --- tb_top (wb2axip cosim) ---
 TB_TOP_SV_SRC := \

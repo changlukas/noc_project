@@ -1,10 +1,13 @@
-# Build artifacts
-build/
+# Build artifacts — everything lands under the top-level build/ tree
+# (build/cmodel, build/verilator, build/vcs)
+/build/
+Testing/
+c_model/Testing/
+# Legacy locations (pre build/-tree restructure); keep ignored so stale
+# checkouts don't show noise
 cosim/verilator/obj_dir/
 cosim/verilator/obj_genamba/
 c_model/build/
-Testing/
-c_model/Testing/
 
 # Temporary files
 *.tmp
@@ -19,6 +22,10 @@ w_beats_received_
 
 # Codex prompt files
 .codex_*.txt
+
+# Per-simulator run outputs (cosim/verilator/output, cosim/vcs/output)
+cosim/*/output/
+# Legacy run-output location
 cosim/output/
 
 # Local Python installs (project-local 3.14, ~278 MB total)
