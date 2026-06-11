@@ -26,9 +26,9 @@ Run date: 2026-06-10. Commit range: `6d29be3..7e00f32` (T1..T10).
 
 ## 1. Per-task outcome
 
-All eleven scenarios (A; B blen 4/8/16; C N 4/8; D N=4 blen 4/8; E
+All twelve scenarios (A; B blen 4/8/16; C N 4/8; D N=4 blen 4/8; E
 same-ID; F mixed R+W; G N 8/16) PASS in a single run of
-`cosim/verilator/Vtb_genamba.exe` against
+`cosim/verilator/obj_genamba/Vtb_genamba.exe` against
 `tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml`.
 Sim finish at 16.3 us, walltime 0.007 s on Verilator 5.036 + MSYS2.
 
@@ -47,10 +47,11 @@ Sim finish at 16.3 us, walltime 0.007 s on Verilator 5.036 + MSYS2.
 | G deep pressure N=8 | PASS | 14.2 us | 84 cycles (840 ns) |
 | G deep pressure N=16 | PASS | 15.8 us | 156 cycles (1560 ns) |
 
-The G N=8 measurement was used to calibrate the watchdog budget for
-N=16 per spec §3.7: budget = `measured_N8 * 2 * 4 = 672` cycles. N=16
-actually completed in 156 cycles, well under both the calibrated budget
-and the default `WATCHDOG_CYCLES = 2000`.
+The G N=8 measurement gives an analytical budget for N=16 per spec
+§3.7: `measured_N8 * 2 * 4 = 672` cycles. Because 672 is well under the
+default `WATCHDOG_CYCLES = 2000`, the code keeps the 2000-cycle
+localparam unchanged (no calibration edit was needed); N=16 actually
+completed in 156 cycles.
 
 ## 2. Stderr observations
 

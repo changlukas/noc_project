@@ -351,7 +351,7 @@ activates all previously skipped scenarios.
 
 ## 5. Verification layers
 
-The project uses four overlapping verification layers:
+The project uses five overlapping verification layers:
 
 **Layer 1 -- c_model unit tests**
 GoogleTest tests under `c_model/tests/` exercise individual components
@@ -381,12 +381,22 @@ Three hand-curated test suites exercise specific protocol invariants:
   verify that the wb2axip checker fires on a deliberate protocol
   violation (bringup test for the checker itself).
 
+**Layer 5 -- gen_amba cross-tool testbench**
+`cosim/sv/tb_genamba.sv` drives the NMU/NSU bridge with a vendored
+gen_amba_2021 golden master BFM and memory model (`cosim/sv/genamba/`)
+through seven single-master AXI4 patterns: baseline self-check, burst
+sweep, N-outstanding, outstanding burst, same-ID ordering, mixed R+W,
+and deep outstanding pressure. This provides independent evidence from
+a second AXI VIP implementation (gen_amba) that does not share code or
+assumptions with wb2axip. Run with `make sim-genamba`. Phase 1 results:
+`docs/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
+
 `make check` runs lint_scenarios, lint_docs, builds the c_model and the
 Verilator binary, and runs the full ctest suite (Layers 1-4). It does
-not invoke `make sim` (sim is a separate manual target). Note: cosim
-Layer 3 ctest registration requires `Vtb_top` to be present at CMake
-configure time; `make check` ensures this by depending on
-`build-verilator` before running ctest.
+not invoke `make sim` or `make sim-genamba` (both are separate manual
+targets). Note: cosim Layer 3 ctest registration requires `Vtb_top` to
+be present at CMake configure time; `make check` ensures this by
+depending on `build-verilator` before running ctest.
 
 ---
 
