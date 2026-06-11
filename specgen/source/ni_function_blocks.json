@@ -61,11 +61,11 @@
         },
         {
           "id": "FEAT-NMU-ROB",
-          "summary": "Per-AXI-ID response reordering for the read path. Variants: NoRoB (pass-through), SimpleRoB (issue-order), NormalRoB (per-ID linked-list with prev_dest adaptive bypass).",
-          "modes": ["NoRoB", "SimpleRoB", "NormalRoB"],
+          "summary": "Per-AXI-ID response handling on B and R paths. Disabled: admission filter (same-id different-dst stalls), responses pass in arrival order. Enabled: rob_idx slot pool, in-order commit per ID.",
+          "modes": ["Disabled", "Enabled"],
           "compile_time_params": {
-            "B_ROB_TYPE": "NoRoB",
-            "R_ROB_TYPE": "NoRoB"
+            "write_rob_mode": "Disabled",
+            "read_rob_mode": "Disabled"
           },
           "uses_packet_fields": ["rob_req", "rob_idx", "B", "R"],
           "configured_by": [],
