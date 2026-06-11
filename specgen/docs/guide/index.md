@@ -5,8 +5,8 @@ A toolchain that generates C++ headers and SystemVerilog packages from machine-r
 ## What it does
 
 - Reads JSON SSoT from `generated/`. `ni_function_blocks.json` is kept as a feature inventory and cross-domain consistency check, not as codegen input.
-- Elaborates C++ headers into `include/` for the C-model.
-- Elaborates SystemVerilog packages into `rtl_pkg/` for co-sim.
+- Elaborates C++ headers into `generated/cpp/` for the C-model.
+- Elaborates SystemVerilog packages into `generated/sv/` for co-sim.
 - Detects drift between committed artifacts and current SSoT (`--check`).
 - Smoke-lints SV output with verilator (`--lint-sv`).
 
@@ -22,6 +22,6 @@ A toolchain that generates C++ headers and SystemVerilog packages from machine-r
 
 ## Links
 
-- Design rationale: [`docs/plans/2026-05-26-spec-as-code-unified-design.md`](../plans/2026-05-26-spec-as-code-unified-design.md)
+- Design rationale: [`docs/_archive/specgen/2026-05-26-spec-as-code-unified-design.md`](../../../docs/_archive/specgen/2026-05-26-spec-as-code-unified-design.md) (archived)
 - Codegen entry point: `tools/codegen.py`
 - Public Python API: `ni_spec/constants.py`

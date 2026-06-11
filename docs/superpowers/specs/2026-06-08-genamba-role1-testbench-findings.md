@@ -57,10 +57,10 @@ completed in 156 cycles.
 
 | Source | Observed |
 |---|---|
-| `faxi_slave` violations | N/A -- checker was removed during T5 (commit `d40525d`) because its non-pipelined-write model false-fires on AXI4-legal multi-beat writes; the bind comes out per `[[dont-silence-the-checker]]`, replaced by an AXI-silence watchdog plus per-task data compare |
+| `faxi_slave` violations | N/A -- checker was removed during T5 (commit `d40525d`) because its non-pipelined-write model false-fires on AXI4-legal multi-beat writes; the bind comes out per `[[dont-silence-the-checker]]`, replaced by a handshake-progress watchdog plus per-task data compare |
 | DPI error pump fires | None |
 | `$fatal` fires | None |
-| `tb_genamba` 1 us AXI-silence watchdog | Did not fire |
+| `tb_genamba` 1 us handshake-progress watchdog | Did not fire |
 | Task G bounded watchdog (`fork join_none` + `wait fork`) | Did not fire (N=8: 84 cy; N=16: 156 cy; cap 2000 cy) |
 
 ## 3. Bridge-level findings
@@ -83,7 +83,7 @@ passthrough for distinct-ID returns. The project-owned `bfm_drain_r`
 relies on this empirical property (the shadow array is indexed by a
 global RVALID-RREADY counter, not by RID); if a future bridge variant
 reorders cross-ID returns, the drain would need per-ID FIFOs. This
-is annotated in `genamba_master_bfm.sv:135-150`.
+is annotated in the `bfm_drain_r` task comment in `genamba_master_bfm.sv`.
 
 ### 3.3 ROB MetaBuffer pressure (Tasks D, G)
 
@@ -112,7 +112,7 @@ that Phase 2 starts with the right inventory.
 | Multiple VCs | Not exercised; PoC guard fails elaboration if `NUM_VC > 1` | `cosim/sv/nmu_wrap.sv:58`, `cosim/sv/nsu_wrap.sv:55` |
 | Credit-based flow control | Wired, fixed at 0 | `cosim/sv/nmu_wrap.sv:277-278`, `cosim/sv/nsu_wrap.sv:309-310` ("PoC always 0"); c_model `NullNocReqOut::credit_avail()` returns `true` unconditionally (`c_model/include/nmu/nmu.hpp:176`) |
 | Router / fabric | Not present | `tb_genamba.sv` connects `noc_mosi_o` -> `noc_miso_i` directly via a single `noc_intf`; XY routing computes `dst_id` at packetize time but no downstream consumer |
-| ROB Enabled mode | Not implemented | `c_model/include/nmu/rob.hpp` declares Enabled mode but bodies are `assert(false)` |
+| ROB Enabled mode | Implemented, not exercised here | `c_model/include/nmu/rob.hpp` implements `RobMode::Enabled` (slot pool + per-ID ranges); this testbench constructs the bridge in Disabled mode |
 | ChannelModel tick | Not ticked | chandle created so DPI state-machine assertions pass; BFM and `mem_axi` are the only active drivers |
 | AXI REGION transport | Not marshalled by DPI | spec §3.2; tied to 0 at boundary |
 | AXI exclusive access | Not exercised | spec §4; `mem_axi` has no exclusive monitor |
@@ -129,14 +129,14 @@ The Phase 1 result tells us what Phase 2 needs to gain before role 2
 | Real credit-based flow control | Phase 2's multi-master load will create routing contention that valid-ready alone cannot characterise without false stalls or deadlock blind spots |
 | ROB Enabled mode | Multi-master + non-trivial router will return R out-of-order across distinct IDs at higher rates; per-ID reorder must be active |
 | AXI REGION DPI extension | If role 2's xbar routes by region, DPI must marshal `AWREGION` / `ARREGION` |
-| gen_amba crossbar generation | gen_amba_2021 `gen_amba_axi/gen_amba_axi.py` plus a topology choice (e.g. 2 master x 2 slave) and ID widening to `WIDTH_SID = 8 + ceil(log2(N_master))` |
+| gen_amba crossbar generation | the gen_amba_2021 crossbar generator (`gen_amba_axi`) plus a topology choice (e.g. 2 master x 2 slave) and ID widening to `WIDTH_SID = 8 + ceil(log2(N_master))` |
 | Multi-instance NMU/NSU wiring | The chandle ABI already supports per-instance create; the testbench needs N NMU + N NSU + per-slot `cm_ctx` |
 
 ## 6. Verdict
 
 **GO** for Phase 2 startup.
 
-The single-master point-to-point bridge passes all eleven AXI4
+The single-master point-to-point bridge passes all twelve AXI4
 patterns. The bridge handled `N=16` deep outstanding pressure without
 stall propagation collapsing into deadlock; same-ID ordering invariant
 holds at the boundary; data integrity was verified per-address across

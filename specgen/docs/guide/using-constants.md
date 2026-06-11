@@ -19,10 +19,10 @@ int main() {
 }
 ```
 
-Compile with `-I include`:
+Compile with `-I specgen/generated/cpp`:
 
 ```bash
-g++ -std=c++17 -I include your_code.cpp -o your_code.exe
+g++ -std=c++17 -I specgen/generated/cpp your_code.cpp -o your_code.exe
 ```
 
 All values are `constexpr int` (or `constexpr bool` for `_ENABLED` flags), so the compiler folds them to immediates. The resulting binary has no Python dependency.
@@ -60,7 +60,7 @@ For scripts that consume the spec directly (test stimulus generation, custom ela
 from ni_spec.loader import load_doc
 from ni_spec import constants as C
 
-packet = load_doc("generated/ni_packet.json")
+packet = load_doc("generated/json/ni_packet.json")
 
 C.flit_width_resolved(packet)                  # int -- total bits per flit
 C.header_field_position(packet, "dst_id")      # (lsb, msb) -- or None if width=0
@@ -73,7 +73,7 @@ C.axi_channel_encoding(packet)                 # {"AW": 0, "W": 1, "AR": 2, ...}
 
 Each function takes the loaded spec as its first argument.
 
-#### Packet (`generated/ni_packet.json`)
+#### Packet (`generated/json/ni_packet.json`)
 
 All width/position accessors are pure functions of `field_widths` + `width_param`
 (pure-parameterization refactor). The JSON no longer stores resolved
@@ -85,7 +85,7 @@ All width/position accessors are pure functions of `field_widths` + `width_param
 | `header_width_resolved(spec)` | `int` |
 | `payload_width_resolved(spec)` | `int` (max across channels) |
 | `payload_channel_width(spec, channel)` | `int` (authored per-channel width) |
-| `link_width_resolved(spec)` | `int` (= `flit_width_resolved + 1`) |
+| `link_width_resolved(spec)` | `int` (= `flit_width_resolved + 1 + NUM_VC`) |
 | `flit_data_width_resolved(spec)` | `int` (= header + payload − ECC) |
 | `header_data_width_resolved(spec)` | `int` (= header − ECC) |
 | `wstrb_width_resolved(spec)` | `int` (= `NOC_DATA_WIDTH / 8`) |
@@ -100,7 +100,7 @@ All width/position accessors are pure functions of `field_widths` + `width_param
 | `field_encoding(spec, name)` | `{value: int}` for any field with an `encoding` table. |
 | `packet_eval_expr(spec, expr)` | `int`; safe AST evaluator over `field_widths`. |
 
-#### Signals (`generated/ni_signals.json`)
+#### Signals (`generated/json/ni_signals.json`)
 
 | Function | Returns |
 |----------|---------|
@@ -108,7 +108,7 @@ All width/position accessors are pure functions of `field_widths` + `width_param
 | `signals_reset_domains(spec)` | `set[str]` of legal reset signal names. |
 | `signals_signal_by_pin(spec, pin_name)` | `dict` (full signal entry) or `None`. |
 
-#### Registers (`generated/ni_registers.json`)
+#### Registers (`generated/json/ni_registers.json`)
 
 | Function | Returns |
 |----------|---------|

@@ -17,7 +17,7 @@ Phase split rationale: Phase 2 requires gen_amba crossbar generation, ID widenin
 ## 2. Ground truth
 
 - DUT AXI `axi4_intf` (`specgen/generated/sv/ni_signals_pkg.sv`): AXI4, ID=8, ADDR=64, DATA=256, carrying `aw/ar` `cache/prot/qos/region/lock`. AXI4 carries `AxLOCK` as a 1-bit signal (only `lock[0]` of the 2-bit AXI3 field).
-- DUT NoC link (post `noc-layer-cleanup` refactor): unified `interface noc_intf` at `ni_signals_pkg.sv:136` with `mosi`/`miso` modports — replaces the old `noc_req_intf`/`noc_rsp_intf` split. NMU exposes `noc_intf.mosi noc_mosi_o` (`nmu_wrap.sv:48`); NSU exposes `noc_intf.miso noc_miso_o`; mated point-to-point in tb.
+- DUT NoC link (post `noc-layer-cleanup` refactor): unified `interface noc_intf` at `ni_signals_pkg.sv:136` with `mosi`/`miso` modports — replaces the old `noc_req_intf`/`noc_rsp_intf` split. NMU exposes `noc_intf.mosi noc_mosi_o` (`nmu_wrap.sv:48`); NSU exposes `noc_intf.miso noc_miso_i` (`nsu_wrap.sv:44`); mated point-to-point in tb.
 - DUT DPI (post `multi-instance-dpi` refactor): chandle ABI per instance, no `g_*` singletons. Pattern at `tb_top.sv:47-56` (imports) + `tb_top.sv:70-76` (lifecycle):
   ```sv
   cmodel_init(scenario_path);
@@ -123,7 +123,7 @@ Each task uses a disjoint window per §3.3 to keep failure isolation per-task.
 
 ### 3.6 BFM helper task implementation notes
 
-- **Use channel-level primitives only for C/D/E/F/G** (not the high-level `_multiple_outstanding` wrappers). Per §2 caveats, the vendored multi-outstanding helpers either have N≤16 array caps + per-address data-correspondence bugs, or randomise AXI ID. Wrapping at channel level (`axi_master_write_aw` / `_w` / `_b` / `_read_ar` / `_r`) gives us deterministic ID/address/data binding while still using vendored AXI sequencing inside each `*_aw`/`*_w` task.
+- **Use channel-level primitives for B–G** (not the high-level single-shot `axi_master_write/_read` or `_multiple_outstanding` wrappers). Per §2 caveats, the vendored multi-outstanding helpers either have N≤16 array caps + per-address data-correspondence bugs, or randomise AXI ID. Wrapping at channel level (`axi_master_write_aw` / `_w` / `_b` / `_read_ar` / `_r`) gives us deterministic ID/address/data binding while still using vendored AXI sequencing inside each `*_aw`/`*_w` task.
 - Each wrapper records `expected[addr]` before issuing, then post-issue reads back via `bfm_post_ar` + the project-owned `bfm_drain_r` and compares; mismatch sets `error_flag=1`. `bfm_drain_r` does NOT call vendored `axi_master_read_r` — it consumes an R-shadow array filled by a parallel `always` block (every `RVALID&&RREADY` handshake captures RDATA + RID/RRESP/RLAST), sidestepping the Verilator `--timing` per-beat procedural-read race, and checks the metadata per beat.
 - Vendored `mem_test` (task A) is the only place we let gen_amba both drive and check; from B onwards our wrapper owns the compare.
 

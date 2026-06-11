@@ -42,9 +42,9 @@ endinterface : noc_intf
 
 | Module | Before | After |
 |---|---|---|
-| `nmu_wrap` | `axi4_intf.slave axi_i, noc_req_intf.master noc_req_o, noc_rsp_intf.slave noc_rsp_i` | `axi4_intf.slave axi_i, noc_intf.mosi noc_o` |
-| `nsu_wrap` | `axi4_intf.master axi_o, noc_req_intf.slave noc_req_i, noc_rsp_intf.master noc_rsp_o` | `axi4_intf.master axi_o, noc_intf.miso noc_o` |
-| `channel_model_wrap` (was `loopback_noc_wrap`) | 4 NoC ports | `noc_intf.miso noc_nmu_side, noc_intf.mosi noc_nsu_side` |
+| `nmu_wrap` | `axi4_intf.slave axi_i, noc_req_intf.master noc_req_o, noc_rsp_intf.slave noc_rsp_i` | `axi4_intf.slave axi_i, noc_intf.mosi noc_mosi_o` |
+| `nsu_wrap` | `axi4_intf.master axi_o, noc_req_intf.slave noc_req_i, noc_rsp_intf.master noc_rsp_o` | `axi4_intf.master axi_o, noc_intf.miso noc_miso_i` |
+| `channel_model_wrap` (was `loopback_noc_wrap`) | 4 NoC ports | `noc_intf.miso noc_miso_i` (NMU-facing), `noc_intf.mosi noc_mosi_o` (NSU-facing) |
 
 `axi4_intf` keeps `master`/`slave` modports; only `noc_intf` uses `mosi`/`miso`.
 
@@ -83,7 +83,7 @@ Files preserving "loopback" in name (refers to topology / latency feature, not t
 | C1 | `refactor: rename LoopbackNoc -> ChannelModel` | 6 `git mv` + all identifier + config-key renames + ~20 content refs. Pure rename. `make check` clean. |
 | C2 | `refactor(specgen): merge ni_signals.json NoC interfaces` | NMU `NOC_REQ_OUT+NOC_RSP_IN` → `NOC_INTF_MOSI`; NSU symmetric; ChannelModel symmetric. Regen `ni_signals.h`. Refresh golden. Update `test_signals_schema.py`, `test_signals_resolver.py`, `test_pins_smoke.cpp`. |
 | C3 | `refactor(specgen): merge interface_handshake.json + mosi/miso modports` | Merge 2 NoC entries → 1 in `interface_handshake.json`; `sv_signals.py` drives modport names from JSON (axi4 → master/slave, noc → mosi/miso). Regen `ni_signals_pkg.sv`. Refresh golden. Update `test_handshake_schema.py`, `test_codegen_sv.py`. |
-| C4 | `refactor(cosim/sv): wraps use noc_intf.mosi/miso` | nmu/nsu/channel_model/tb_top: port list + signal references (`noc_req_o.valid` → `noc_o.req_valid`). DPI signatures unchanged. |
+| C4 | `refactor(cosim/sv): wraps use noc_intf.mosi/miso` | nmu/nsu/channel_model/tb_top: port list + signal references (`noc_req_o.valid` → `noc_mosi_o.req_valid`). DPI signatures unchanged. |
 
 C1 first so C2-C4 use new names. C5 (c_model shell_io merge) was speculation — structs are already flat, codegen handles it.
 

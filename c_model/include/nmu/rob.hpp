@@ -28,8 +28,8 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 //   - Different id -> independent
 //   - Response B/R observe to pop_front per-id deque
 //
-// Enabled mode (next round): per-AXI-ID reorder buffer + rob_idx allocator.
-//   This round leaves Enabled-mode method bodies as assert(false) + std::abort.
+// Enabled mode: per-beat slot pool + rob_idx allocator (implemented; the
+//   asserts in the pop paths are integrity guards, not stubs).
 //
 // Single-threaded tick model: state mutations from RequestPacketizer-side (push_aw/ar)
 // and ResponseDepacketizer-side (pop_b/r) happen in the same thread, no synchronization.

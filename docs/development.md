@@ -53,7 +53,7 @@ Run `make check` before every commit that touches code or docs:
 make check    # lint_scenarios + lint_docs + build-cmodel + build-verilator + ctest
 ~~~
 
-All three lint checks and the full ctest suite must be green. If a test
+Both lint checks and the full ctest suite must be green. If a test
 that previously passed now fails, fix it -- do not skip or comment out
 the test. Do not disable ctest discovery to hide failures.
 
@@ -84,8 +84,9 @@ document (`docs/development.md`) and `docs/architecture.md` instead.
 
 - C++ variables and methods: `snake_case`.
 - C++ types and classes: `PascalCase`.
-- Files: `snake_case` for C++ source files; `PascalCase` only where
-  required to match a class name (e.g. `NmuShellAdapter.cpp`).
+- Files: `snake_case` for C++ source files (e.g. `nmu_shell_adapter.hpp`
+  holds class `NmuShellAdapter`); the file name matches the class name
+  in snake_case form.
 - Module / class names: full word, no abbreviations. `Arbiter` not
   `Arb`; `NmuShellAdapter` not `NmuShellAdpt`. File name must match
   class name.
@@ -246,13 +247,15 @@ running configure.
 
 ### Generated artifacts
 
-The following files are auto-generated at build time and must not be
-edited by hand:
+The following files are auto-generated and must not be edited by hand:
 
-- `specgen/generated/cpp/` -- C++ headers produced by specgen from
-  the NI spec YAML.
+- `specgen/generated/cpp/` -- C++ headers produced by specgen from the
+  authored JSON sources (`specgen/source/*.json`); regenerated via
+  `codegen.py`, drift-checked at build time by `codegen_check`.
 - `c_model/FEATURE_INVENTORY.md` -- feature inventory markdown generated
-  from the same YAML sources.
+  from `specgen/source/ni_function_blocks.json` by
+  `specgen/tools/gen_inventory.py` (run manually after editing the JSON;
+  drift-gated by `specgen/tests/test_feature_inventory.py`).
 
 Generated files are excluded from `lint_docs` and from clang-format runs.
 
@@ -285,7 +288,7 @@ py -3 specgen/tools/codegen.py --check
 ~~~
 
 Exit code 0 means the committed headers match what the generator would
-produce from current YAML. Exit code 1 means drift -- regenerate and
+produce from the current JSON sources. Exit code 1 means drift -- regenerate and
 commit the updated headers before `make check` will pass.
 
 ### specgen sub-project guide
@@ -481,9 +484,10 @@ make -C cosim/verilator clean-genamba run-genamba \
 ~~~
 
 If `make sim-genamba` fails with "Can't open perl script /mingw64/bin/verilator"
-or similar PATH errors, the shell does not have MSYS2 paths. The Makefile
-prepends them automatically on `OS=Windows_NT`, but if you're in a non-Git-Bash
-shell (PowerShell / cmd) call the wrapper directly:
+or similar PATH errors, the shell does not have MSYS2 paths. The Makefile's
+TOOLPATH prefix adds them unconditionally in every recipe (no-op on Linux),
+but if you're in a non-Git-Bash shell (PowerShell / cmd) call the wrapper
+directly:
 
 ~~~bash
 ./cosim/verilator/run_genamba.sh \

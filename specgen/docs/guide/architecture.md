@@ -6,8 +6,8 @@ Two artifact tiers, generated top-down:
 generated/*.json                <- validated JSON SSoT
         |  (tools/elaborate/*.py, dispatched by tools/codegen.py)
         v
-include/*.h                     <- C++ headers for the C-model
-rtl_pkg/*.sv                    <- SystemVerilog packages for co-sim
+generated/cpp/*.h               <- C++ headers for the C-model
+generated/sv/*.sv                    <- SystemVerilog packages for co-sim
 ```
 
 ## Domains
@@ -16,9 +16,10 @@ Three spec domains, each with its own JSON SSoT and a pair of elaborators:
 
 | Domain | JSON SSoT | C++ header | SV package |
 |--------|-----------|------------|------------|
-| `packet` | `generated/ni_packet.json` | `ni_flit_constants.h` | `ni_flit_pkg.sv` |
-| `signals` | `generated/ni_signals.json` | `ni_signals.h` | `ni_signals_pkg.sv` |
-| `registers` | `generated/ni_registers.json` | `ni_regs.h` | `ni_regs_pkg.sv` |
+| `packet` | `generated/json/ni_packet.json` | `ni_flit_constants.h` | `ni_flit_pkg.sv` |
+| `signals` | `generated/json/ni_signals.json` | `ni_signals.h` | `ni_signals_pkg.sv` |
+| `registers` | `generated/json/ni_registers.json` | `ni_regs.h` | `ni_regs_pkg.sv` |
+| `params` | `source/constants.yaml` | `ni_params.h` | `ni_params_pkg.sv` |
 
 `ni_function_blocks.json` is retained as a feature inventory and cross-domain consistency check, but no longer drives codegen.
 
@@ -33,13 +34,13 @@ Three spec domains, each with its own JSON SSoT and a pair of elaborators:
 
 ## Why a firewall?
 
-If the JSON shape changes — say a field is renamed — only `ni_spec.constants` needs an update. All six elaborators and any downstream Python consumer stay untouched.
+If the JSON shape changes — say a field is renamed — only `ni_spec.constants` needs an update. All eight elaborators and any downstream Python consumer stay untouched.
 
 ## Source of truth
 
-The JSON SSoT files are the contract. `--check` enforces that committed `include/` and `rtl_pkg/` exactly match what those JSONs would elaborate to (timestamp aside). Edit the SSoT, run codegen, commit both.
+The JSON SSoT files are the contract. `--check` enforces that committed `generated/cpp/` and `generated/sv/` exactly match what those JSONs would elaborate to (timestamp aside). Edit the SSoT, run codegen, commit both.
 
-Hand-editing files in `include/` or `rtl_pkg/` will be caught by `--check`. Don't.
+Hand-editing files in `generated/cpp/` or `generated/sv/` will be caught by `--check`. Don't.
 
 ## Provenance
 

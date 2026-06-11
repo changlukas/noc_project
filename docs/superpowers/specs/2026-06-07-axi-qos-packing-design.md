@@ -90,7 +90,7 @@ Three files touched (shell adapters already wire `qos` end-to-end at `nmu_shell_
 | Unit (depacketize) | 1 AW + 1 AR symmetric reverse | `c_model/tests/nsu/test_nsu_depacketize.cpp` |
 | Integration | One scenario through AxiMaster → NMU → LoopbackNoc → NSU → AxiSlave with `qos: 0xA` | `tests/scenarios/AX4-QOS-001_awqos_round_trip/scenario.yaml` |
 
-Test pattern follows existing `test_packetize.cpp:223` idiom (`EXPECT_EQ(f.get_header_field("noc_qos"), 0u)` is the same idiom applied to a payload field).
+Test pattern follows existing `test_packetize.cpp:249` idiom (`EXPECT_EQ(f.get_header_field("noc_qos"), 0u)` is the same idiom applied to a payload field).
 
 ### 3.6 Scenario category registration
 
