@@ -64,8 +64,17 @@ module genamba_master_bfm #(
     reg [WIDTH_DA-1:0] dataW [0:1023];
     reg [WIDTH_DA-1:0] dataR [0:1023];
 
+    // Lint scope for the vendored includes only:
+    // - INITIALDLY: vendored tasks drive AW/W/AR/R with `<= #LD` and are
+    //   called from initial blocks — the intended gen_amba BFM idiom;
+    //   correct under --timing.
+    // - WIDTHXZEXPAND: vendored mem_test seeds `dataW[ind] = 'hX` unsized.
+    /* verilator lint_off INITIALDLY */
+    /* verilator lint_off WIDTHXZEXPAND */
     `include "genamba/axi_master_tasks.v"
     `include "genamba/mem_test_tasks.v"
+    /* verilator lint_on WIDTHXZEXPAND */
+    /* verilator lint_on INITIALDLY */
 
     // ---------- B/R channel Verilator --timing snapshot capture ----------
     // Vendored axi_master_write_b reads BID/BRESP procedurally right after
@@ -168,6 +177,10 @@ module genamba_master_bfm #(
         // per-ID FIFOs instead of a single global queue.
         reg [7:0] start;
         integer i;
+        // RREADY uses NBA from this initial-called task on purpose — same
+        // BFM-driver idiom as the vendored tasks (avoids a same-timestep
+        // race against the shadow-capture always block reading RREADY).
+        /* verilator lint_off INITIALDLY */
         RREADY <= 1'b1;
         start = r_shadow_ridx;
         while ((r_shadow_widx - start) < blen[7:0]) @(posedge ACLK);
@@ -177,6 +190,7 @@ module genamba_master_bfm #(
         end
         r_shadow_ridx = start + blen[7:0];
         RREADY <= 1'b0;
+        /* verilator lint_on INITIALDLY */
     endtask
 
     // Per-beat R metadata check (see bfm_drain_r). Function, not task: no

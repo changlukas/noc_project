@@ -47,7 +47,11 @@ VERILATOR_COMMON_FLAGS := \
     -Wno-NULLPORT \
     -Wno-REDEFMACRO \
     -Wno-WIDTHEXPAND \
-    -Wno-WIDTHTRUNC
+    -Wno-WIDTHTRUNC \
+    -CFLAGS "-Wno-attributes"
+# -Wno-attributes (g++): verilator's own svdpi.h triggers "'dllimport'
+# attribute ignored" under MinGW for every DPI-bearing translation unit —
+# toolchain header noise, not project code.
 
 VERILATOR_FLAGS := \
     $(VERILATOR_COMMON_FLAGS) \
@@ -55,8 +59,7 @@ VERILATOR_FLAGS := \
     --no-timing \
     -I$(COSIM_ROOT)/sv/wb2axip \
     -CFLAGS "-g" \
-    -CFLAGS "-O0" \
-    -CFLAGS "-Wno-attributes"
+    -CFLAGS "-O0"
 
 # Optional strict-mode flag injection for release gates.
 # Override with: make VERILATOR_EXTRA_FLAGS="--Wall --Wpedantic"
@@ -136,8 +139,16 @@ GENAMBA_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 # `genamba` stays as the friendly alias. MinGW ld appends .exe; name the
 # real artifact so the dependency check actually fires.
 GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba.exe
+# sed pass between Verilation and C++ compile: Verilator 5.036 on Windows
+# joins include-resolved source paths with backslashes and embeds them in
+# generated C-string literals (fork-sync done() debug info). `\g` etc. are
+# invalid escapes (2300+ g++ warnings) and `\t` silently corrupts to TAB.
+# Rewrite only backslashes that follow a drive-letter path prefix —
+# legitimate \n escapes in $display format strings never match.
 $(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC)
 	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
+	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
+	    $(GENAMBA_OBJDIR)/*.cpp $(GENAMBA_OBJDIR)/*.h
 	$(MAKE) -C $(GENAMBA_OBJDIR) -f Vtb_genamba.mk \
 	    PYTHON3="$(PYTHON3)"
 

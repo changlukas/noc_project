@@ -67,6 +67,10 @@ module tb_genamba;
     );
 
     // ---- nsu_mem_axi ↔ mem_axi (axi4_intf lowercase → UPPERCASE) ----
+    // WAITCONST: vendored mem_axi has a low-power handshake (`wait
+    // (CSYSREQ==1'b0)`) that this testbench never exercises — CSYSREQ tied
+    // high makes the wait condition constant by design.
+    /* verilator lint_off WAITCONST */
     mem_axi #(
         .AXI_WIDTH_CID(0), .AXI_WIDTH_ID(8), .AXI_WIDTH_AD(64),
         .AXI_WIDTH_DA(256), .SIZE_IN_BYTES(16384)
@@ -93,6 +97,7 @@ module tb_genamba;
         .RRESP(nsu_mem_axi.rresp), .RLAST(nsu_mem_axi.rlast),
         .RVALID(nsu_mem_axi.rvalid), .RREADY(nsu_mem_axi.rready)
     );
+    /* verilator lint_on WAITCONST */
 
     initial begin
         // DPI lifecycle (BEFORE reset deassert, per tb_top.sv:70-76 pattern)
