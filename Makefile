@@ -122,8 +122,13 @@ sim-genamba:
 test: build-cmodel
 	@$(TOOLPATH) sh -c 'cd $(CMODEL_BUILD) && ctest --output-on-failure'
 
+# Python interpreter: prefer the Windows `py -3` launcher when present
+# (canonical on this project's Windows setup), fall back to python3
+# (Linux/macOS and MSYS2 shells without the launcher on PATH).
+PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
+
 lint_scenarios:
-	py -3 tools/lint_scenarios.py --require-nonempty
+	$(PYTHON3) tools/lint_scenarios.py --require-nonempty
 
 # Mandatory ASCII byte check on maintained docs (spec sec 3.2).
 # Excludes archive, normative spec, sub-project docs, legal, generated.
@@ -135,10 +140,10 @@ MAINTAINED_DOCS = \
     tests/scenarios/README.md
 
 lint_docs:
-	py -3 tools/lint_docs.py $(MAINTAINED_DOCS)
+	$(PYTHON3) tools/lint_docs.py $(MAINTAINED_DOCS)
 
 check: lint_scenarios lint_docs build-cmodel build-verilator
-	cd $(CMODEL_BUILD) && ctest --output-on-failure
+	@$(TOOLPATH) sh -c 'cd $(CMODEL_BUILD) && ctest --output-on-failure'
 
 # --- clean ---
 

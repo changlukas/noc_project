@@ -66,7 +66,13 @@ VERILATOR_FLAGS := \
 VERILATOR_EXTRA_FLAGS ?=
 VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 
-all: obj_dir/V$(TOP)
+# Linked binary name is platform-dependent: MinGW ld appends .exe, Linux
+# does not. Naming the real artifact makes the source-dependency check
+# fire correctly on both (a phony or wrong-name target rebuilds always).
+EXEEXT := $(if $(findstring NT,$(shell uname -s)),.exe,)
+TBTOP_EXE := obj_dir/V$(TOP)$(EXEEXT)
+
+all: $(TBTOP_EXE)
 
 # Python3 executable.  On Windows with MSYS2 use `py -3`; on Linux/macOS
 # `python3` is standard.  Override at the command line if needed:
@@ -77,7 +83,7 @@ PYTHON3 ?= python3
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
 # LDFLAGS_EXTRA: set PE stack reserve to 64 MiB so MinGW pthread initialises
 #   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
-obj_dir/V$(TOP): $(SV_SRC) $(C_SRC)
+$(TBTOP_EXE): $(SV_SRC) $(C_SRC)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SV_SRC) $(C_SRC)
 	$(MAKE) -C obj_dir -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
@@ -136,9 +142,8 @@ GENAMBA_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 #
 # Incremental: the exe depends on SV + C sources, so an unchanged tree
 # skips both Verilation and the C++ compile on repeat `make run-genamba`.
-# `genamba` stays as the friendly alias. MinGW ld appends .exe; name the
-# real artifact so the dependency check actually fires.
-GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba.exe
+# `genamba` stays as the friendly alias. $(EXEEXT) defined near `all:`.
+GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba$(EXEEXT)
 # sed pass between Verilation and C++ compile: Verilator 5.036 on Windows
 # joins include-resolved source paths with backslashes and embeds them in
 # generated C-string literals (fork-sync done() debug info). `\g` etc. are
@@ -161,7 +166,7 @@ GENAMBA_SCENARIO ?= AX4-BAS-001_single_write_no_read
 GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenario.yaml
 .PHONY: run-genamba
 run-genamba: genamba
-	./$(GENAMBA_OBJDIR)/Vtb_genamba.exe "+scenario=$(GENAMBA_SCENARIO_ABS)"
+	./$(GENAMBA_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)"
 
 .PHONY: clean-genamba
 clean-genamba:

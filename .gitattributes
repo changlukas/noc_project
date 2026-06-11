@@ -1,0 +1,20 @@
+# Normalize line endings: repo objects are always LF; working-tree EOL
+# follows platform default except where a format requires LF.
+* text=auto
+
+# Shell scripts and build files must be LF — CRLF breaks bash ("\r:
+# command not found") and can confuse make on Linux.
+*.sh text eol=lf
+Makefile text eol=lf
+*.mk text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+
+# YAML parsed by tools on both platforms — keep LF for byte-stable hashing.
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Binary assets — never normalize.
+*.jpg binary
+*.png binary
+*.pdf binary

@@ -195,7 +195,31 @@ make build-verilator PYTHON3="py -3"
 make check PYTHON3="py -3"
 ~~~
 
-On Linux and macOS `python3` is correct and no override is needed.
+On Linux and macOS `python3` is correct and no override is needed. The
+root Makefile's lint targets auto-detect: they prefer the Windows `py -3`
+launcher when present and fall back to `python3`.
+
+### Verified toolchain versions
+
+The build is developed and verified on Windows 11 + MSYS2 (mingw64).
+Recorded versions are the combination known to work; a Linux host should
+match the Verilator major.minor where possible.
+
+| Tool | Verified version | Notes |
+|---|---|---|
+| Verilator | 5.036 (MSYS2 mingw64) | `--output-split 0` on the genamba target works around a 5.036 coroutine-split bug; harmless on newer versions |
+| GCC (g++) | 15.2.0 (mingw64) | C++17 |
+| CMake | MSYS2 mingw64 build | ninja generator |
+| GoogleTest / yaml-cpp | pinned by CMake FetchContent | no system install needed |
+| Python | 3.13 (`py -3`) / 3.12 (mingw64 `python3`) | lint + specgen tooling |
+
+On a new host (e.g. a Linux workstation): `git clone`, install
+verilator + g++ + cmake + ninja + python3 from the distro or a user-space
+prefix, then `make check` -- build artifacts are per-clone
+(`c_model/build/`, `cosim/verilator/obj_dir/`, `obj_genamba/` are all
+gitignored), so Windows and Linux working copies never share or clobber
+binaries. Line endings are pinned by `.gitattributes` (LF in repo
+objects; shell/build files LF in the working tree on every platform).
 
 ### CMakeCache.txt and configure
 
