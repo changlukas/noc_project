@@ -1,6 +1,5 @@
-// gen_amba role-1 testbench top — T3 BFM->NMU->NoC->NSU->mem_axi bridge
+// gen_amba role-1 testbench top — BFM->NMU->NoC->NSU->mem_axi bridge
 `timescale 1ns/1ps
-`include "wb2axip/sim_wrapper.svh"
 
 module tb_genamba;
     reg ACLK = 0;
@@ -155,20 +154,30 @@ module tb_genamba;
     end
     /* verilator lint_on WIDTHTRUNC */
 
-    // ---- T5 hang debug monitors (project code, not vendored) ----
-    // Watchdog: kill sim if no AXI activity for 1us — turns silent hang into
-    // a finite log we can hand to Codex. Includes AR/R channels — mem_test
-    // alternates write-burst then read-burst phases, so a W-only watchdog
-    // false-fires during the read phase.
-    integer last_event_time = 0;
+    // ---- AXI progress watchdog (project code, not vendored) ----
+    // Kill sim if no AXI HANDSHAKE completes for 1us — turns a silent hang
+    // into a finite failure log. Two deliberate choices:
+    // - `time` (64-bit), not `integer`: a 32-bit signed copy of $time
+    //   overflows at ~2.1 ms sim time and corrupts the silence computation
+    //   (observed once as a watchdog firing with a garbage timestamp).
+    // - Progress = completed handshake (valid && ready), not valid alone:
+    //   a stuck transfer (VALID held high, READY never coming) must trip
+    //   the watchdog, but valid-as-activity would keep resetting it.
+    time last_event_time = 0;
     always @(posedge ACLK) begin
-        if (bfm_nmu_axi.awvalid || bfm_nmu_axi.wvalid || bfm_nmu_axi.bvalid ||
-            bfm_nmu_axi.arvalid || bfm_nmu_axi.rvalid ||
-            nsu_mem_axi.awvalid || nsu_mem_axi.wvalid || nsu_mem_axi.bvalid ||
-            nsu_mem_axi.arvalid || nsu_mem_axi.rvalid)
+        if ((bfm_nmu_axi.awvalid && bfm_nmu_axi.awready) ||
+            (bfm_nmu_axi.wvalid  && bfm_nmu_axi.wready)  ||
+            (bfm_nmu_axi.bvalid  && bfm_nmu_axi.bready)  ||
+            (bfm_nmu_axi.arvalid && bfm_nmu_axi.arready) ||
+            (bfm_nmu_axi.rvalid  && bfm_nmu_axi.rready)  ||
+            (nsu_mem_axi.awvalid && nsu_mem_axi.awready) ||
+            (nsu_mem_axi.wvalid  && nsu_mem_axi.wready)  ||
+            (nsu_mem_axi.bvalid  && nsu_mem_axi.bready)  ||
+            (nsu_mem_axi.arvalid && nsu_mem_axi.arready) ||
+            (nsu_mem_axi.rvalid  && nsu_mem_axi.rready))
             last_event_time = $time;
         if (ARESETn && ($time - last_event_time) > 1000) begin
-            $display("[%0t] WATCHDOG: 1us of AXI silence, dumping final state", $time);
+            $display("[%0t] WATCHDOG: 1us without AXI handshake progress, dumping final state", $time);
             $display("  BFM-side : AWV=%b AWR=%b AWID=0x%0h AWADDR=0x%0h AWLEN=%0d",
                      bfm_nmu_axi.awvalid, bfm_nmu_axi.awready,
                      bfm_nmu_axi.awid, bfm_nmu_axi.awaddr, bfm_nmu_axi.awlen);

@@ -67,32 +67,31 @@ module genamba_master_bfm #(
     `include "genamba/axi_master_tasks.v"
     `include "genamba/mem_test_tasks.v"
 
-    // ---------- B/R channel Verilator --timing snapshot latches ----------
-    // Vendored axi_master_write_b / axi_master_read_r read BID/RID
-    // procedurally right after `@(posedge ACLK)`. Under Verilator --timing,
-    // the procedural resume happens after the NBA region of that posedge,
-    // so the read returns the NEXT cycle's value — which is 0 because
-    // NMU's adapter de-asserts BVALID/BID one cycle after the handshake
-    // per AXI4 §A3.2.1 held-latch pattern. The DBG monitors in tb_genamba.sv
-    // (always @(posedge) blocks) read the correct in-cycle values.
+    // ---------- B/R channel Verilator --timing snapshot capture ----------
+    // Vendored axi_master_write_b reads BID/BRESP procedurally right after
+    // `@(posedge ACLK)`. Under Verilator --timing, the procedural resume
+    // happens after the NBA region of that posedge, so the read returns the
+    // NEXT cycle's value — which is 0 because NMU's adapter de-asserts
+    // BVALID/BID one cycle after the handshake per AXI4 §A3.2.1 held-latch
+    // pattern.
     //
-    // Workaround: snapshot BID/BRESP and RID/RRESP into latches via NBA
-    // on the handshake cycle. The patched vendored tasks read these
-    // latches (after waiting one extra @(posedge) for the latch to settle)
-    // instead of reading the raw input wires.
+    // Workaround: snapshot BID/BRESP into latches via NBA on the handshake
+    // cycle. The patched vendored axi_master_write_b reads these latches
+    // (after waiting one extra @(posedge) for the latch to settle) instead
+    // of the raw input wires.
     reg [WIDTH_ID-1:0] b_id_latch;
     reg [1:0]          b_resp_latch;
-    reg [WIDTH_ID-1:0] r_id_latch;
-    reg [1:0]          r_resp_latch;
-    reg                r_last_latch;
-    // R-channel multi-beat shadow: single r_last/r_id latch only captures
-    // the FINAL beat. For burst reads, a procedural loop in the vendored
-    // task can't read RDATA per-beat reliably (Verilator --timing race +
-    // RREADY-held-high causes beats to be skipped). So we shadow every
-    // RDATA via a parallel-captured array indexed by a NBA counter. The
-    // task waits for (r_shadow_widx - snapshot_at_entry) >= blen, then
-    // copies into dataR[0..blen-1].
-    reg [WIDTH_DA-1:0] r_shadow [0:255];
+    // R-channel multi-beat shadow: a procedural loop can't read R-channel
+    // signals per-beat reliably under --timing (same race as B, plus the
+    // 2-cycles-per-iter starvation documented in ATTRIBUTION.md). So a
+    // parallel block captures EVERY RVALID&&RREADY handshake — data AND
+    // per-beat metadata (RID/RRESP/RLAST) — into NBA-counter-indexed
+    // arrays. bfm_drain_r then waits for `blen` new entries, copies data
+    // into dataR, and checks the metadata per beat.
+    reg [WIDTH_DA-1:0] r_shadow      [0:255];
+    reg [WIDTH_ID-1:0] r_shadow_id   [0:255];
+    reg [1:0]          r_shadow_resp [0:255];
+    reg                r_shadow_last [0:255];
     reg [7:0]          r_shadow_widx;       // write-side counter (NBA, parallel block)
     reg [7:0]          r_shadow_ridx = 8'd0; // read-side counter (blocking, drain task)
     always @(posedge ACLK) begin
@@ -105,11 +104,18 @@ module genamba_master_bfm #(
                 b_resp_latch <= BRESP;
             end
             if (RVALID && RREADY) begin
-                r_id_latch              <= RID;
-                r_resp_latch            <= RRESP;
-                r_last_latch            <= RLAST;
-                r_shadow[r_shadow_widx] <= RDATA;
-                r_shadow_widx           <= r_shadow_widx + 8'd1;
+                r_shadow[r_shadow_widx]      <= RDATA;
+                r_shadow_id[r_shadow_widx]   <= RID;
+                r_shadow_resp[r_shadow_widx] <= RRESP;
+                r_shadow_last[r_shadow_widx] <= RLAST;
+                r_shadow_widx                <= r_shadow_widx + 8'd1;
+                // 8-bit counter wrap guard: one full run currently lands
+                // ~232 R beats (A:16 reads + B..G). Past 255 the shadow
+                // index wraps and drains would read stale slots — fail
+                // loudly instead. Widen the counters when Phase 2 grows
+                // the per-run beat count.
+                if (r_shadow_widx == 8'd255)
+                    $fatal(1, "r_shadow_widx wrap: widen shadow counters");
             end
         end
     end
@@ -141,6 +147,14 @@ module genamba_master_bfm #(
         // in r_shadow. r_shadow_ridx tracks the read pointer across calls so
         // multiple outstanding drains consume the right slots.
         //
+        // Per-beat checks against the captured metadata: RID must equal the
+        // expected id on every beat, RRESP must be OKAY, and RLAST must be
+        // asserted on exactly the final beat of the burst. The checks live
+        // in check_r_beat (a function, not inline) — inline if-blocks here
+        // push the enclosing coroutine over Verilator 5.036's splitter
+        // threshold when this task is called inside a fork branch
+        // (`__Vfork_N__sync was not declared` C++ compile error).
+        //
         // Assumes the bridge preserves AR-issue → R-return order across IDs
         // (empirically true for the current NMU/NSU c_model on a single
         // noc_intf with no contention; see docs/superpowers/specs/
@@ -155,10 +169,35 @@ module genamba_master_bfm #(
         while ((r_shadow_widx - start) < blen[7:0]) @(posedge ACLK);
         for (i = 0; i < blen; i = i + 1) begin
             dataR[i] = r_shadow[start + i[7:0]];
+            check_r_beat(start + i[7:0], id, i, blen);
         end
         r_shadow_ridx = start + blen[7:0];
         RREADY <= 1'b0;
     endtask
+
+    // Per-beat R metadata check (see bfm_drain_r). Function, not task: no
+    // time consumption, and the body stays out of the calling coroutine.
+    function automatic void check_r_beat(input [7:0] k, input [WIDTH_ID-1:0] id,
+                                         input integer i, input integer blen);
+        if (r_shadow_id[k] !== id) begin
+            $display("[%0t] bfm_drain_r RID mismatch beat=%0d got=0x%0h exp=0x%0h",
+                     $time, i, r_shadow_id[k], id);
+            error_flag = 1;
+            $fatal(1, "bfm_drain_r RID mismatch");
+        end
+        if (r_shadow_resp[k] !== 2'b00) begin
+            $display("[%0t] bfm_drain_r RRESP not OKAY beat=%0d resp=%0d",
+                     $time, i, r_shadow_resp[k]);
+            error_flag = 1;
+            $fatal(1, "bfm_drain_r RRESP error");
+        end
+        if (r_shadow_last[k] !== (i == blen - 1)) begin
+            $display("[%0t] bfm_drain_r RLAST misplace beat=%0d last=%b blen=%0d",
+                     $time, i, r_shadow_last[k], blen);
+            error_flag = 1;
+            $fatal(1, "bfm_drain_r RLAST framing error");
+        end
+    endfunction
 
     // ---------- Task A: vendored baseline ----------
     task test_baseline_mem_test;
