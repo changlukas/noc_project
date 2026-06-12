@@ -81,16 +81,29 @@ class MasterShellAdapter {
         wp.set_wready(in_.wready   && prev_out_.wvalid);
         wp.set_arready(in_.arready && prev_out_.arvalid);
 
-        // Step 1b: inject B/R response beats from wire inputs into WireSlavePort
-        // so AxiMasterT::tick() can drain them via pop_b() / pop_r().
-        if (in_.bvalid) {
+        // Request handshakes recognized this tick open the response-ready
+        // context windows (policy spec: B/R ready pre-assert only while a
+        // response is actually owed).
+        if (in_.awready && prev_out_.awvalid) {
+            ++outstanding_w_;
+        }
+        if (in_.arready && prev_out_.arvalid) {
+            expected_r_beats_ += static_cast<uint32_t>(prev_out_.arlen) + 1u;
+        }
+
+        // Step 1b: inject B/R response beats into WireSlavePort — ONLY on
+        // true wire-handshake ticks (valid && our previously driven ready).
+        // The responder holds the beat (A3.2.1) while our ready is low;
+        // injecting on bare valid would double-count held beats.
+        if (in_.bvalid && prev_bready_) {
             axi::BBeat b{};
             b.id   = in_.bid;
             b.resp = static_cast<axi::Resp>(in_.bresp & 0x3u);
             b.user = 0;
             wp.inject_b(b);
+            if (outstanding_w_ > 0) --outstanding_w_;
         }
-        if (in_.rvalid) {
+        if (in_.rvalid && prev_rready_) {
             static_assert(AXI_DATA_BYTES == axi::DATA_BYTES,
                           "MasterInputs::rdata size must equal axi::DATA_BYTES");
             axi::RBeat r{};
@@ -100,6 +113,7 @@ class MasterShellAdapter {
             r.user = 0;
             r.data = in_.rdata;
             wp.inject_r(r);
+            if (expected_r_beats_ > 0) --expected_r_beats_;
         }
 
         // Step 2: advance AxiMasterT one cycle. Scoreboard callbacks
@@ -111,10 +125,11 @@ class MasterShellAdapter {
         // driving onto the channel this cycle (valid = pending beat exists).
         out_ = MasterOutputs{};
 
-        // bready / rready: master asserts these unconditionally (always ready
-        // to accept responses). The SV wire sees these as constant-high.
-        out_.bready = true;
-        out_.rready = true;
+        // bready / rready: context-gated pre-assert (policy spec) — the
+        // master pre-asserts ready only while a response is owed for a
+        // request it actually issued; idle wires sit at 0.
+        out_.bready = (outstanding_w_ > 0);
+        out_.rready = (expected_r_beats_ > 0);
 
         if (auto aw = wp.pending_aw()) {
             out_.awvalid  = true;
@@ -151,6 +166,8 @@ class MasterShellAdapter {
 
         // Save this cycle's outputs for beta-tick handshake guard next cycle.
         prev_out_ = out_;
+        prev_bready_ = out_.bready;
+        prev_rready_ = out_.rready;
     }
 
     void get_outputs(MasterOutputs& out) const { out = out_; }
@@ -163,6 +180,10 @@ class MasterShellAdapter {
     MasterInputs  in_{};
     MasterOutputs out_{};
     MasterOutputs prev_out_{};  // previous cycle's output for beta-tick guard
+    bool prev_bready_ = false;   // ready driven last tick (wire value this tick)
+    bool prev_rready_ = false;
+    uint32_t outstanding_w_ = 0;     // writes issued, B response still owed
+    uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs
 
     // Default read-dump path when init() is called without an explicit one.
     // Kept cwd-relative so dumps land inside the project (cosim/verilator/

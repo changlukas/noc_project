@@ -70,6 +70,10 @@ class NsuShellAdapter {
         held_aw_ = std::nullopt;
         held_w_ = std::nullopt;
         held_ar_ = std::nullopt;
+        prev_bready_ = false;
+        prev_rready_ = false;
+        outstanding_w_ = 0;
+        expected_r_beats_ = 0;
     }
 
     void set_inputs(const NsuInputs& in) { in_ = in; }
@@ -96,9 +100,12 @@ class NsuShellAdapter {
         // awready/wready/arready (AXI4 §A3.2.1 — master must not deassert
         // valid until ready is seen).
 
-        // AW: consume held beat on awready; try to pop the next.
+        // AW: consume held beat on awready; try to pop the next. The consume
+        // tick is the recognized AW handshake — a B response is now owed, so
+        // open the BREADY context window.
         if (held_aw_ && in_.awready) {
             held_aw_ = std::nullopt;
+            ++outstanding_w_;
         }
         if (!held_aw_) {
             held_aw_ = port.pop_aw();
@@ -130,8 +137,11 @@ class NsuShellAdapter {
             out_.wlast = held_w_->last;
         }
 
-        // AR: consume held beat on arready; try to pop the next.
+        // AR: consume held beat on arready; try to pop the next. The consume
+        // tick is the recognized AR handshake — ARLEN+1 R beats are now owed,
+        // so widen the RREADY context window before dropping the beat.
         if (held_ar_ && in_.arready) {
+            expected_r_beats_ += static_cast<uint32_t>(held_ar_->len) + 1u;
             held_ar_ = std::nullopt;
         }
         if (!held_ar_) {
@@ -150,17 +160,20 @@ class NsuShellAdapter {
             out_.arqos = held_ar_->qos;
         }
 
-        // B/R: push subordinate responses into AxiMasterPort so Packetize
-        // can pick them up next cycle. bready/rready: Nsu is always ready to
-        // accept subordinate responses (PoC — master port queue depth=16).
-        if (in_.bvalid) {
+        // B/R: push subordinate responses into AxiMasterPort — ONLY on true
+        // wire-handshake ticks (valid && our previously driven ready). The
+        // subordinate holds the beat (A3.2.1 held latch) while our ready is
+        // low, so gating cannot lose beats — but pushing on bare valid WOULD
+        // double-count once ready can be low while valid is held.
+        if (in_.bvalid && prev_bready_) {
             axi::BBeat b{};
             b.id = in_.bid;
             b.resp = static_cast<axi::Resp>(in_.bresp & 0x3u);
             b.user = 0;
             port.push_b(b);
+            if (outstanding_w_ > 0) --outstanding_w_;
         }
-        if (in_.rvalid) {
+        if (in_.rvalid && prev_rready_) {
             axi::RBeat r{};
             r.id = in_.rid;
             r.data = in_.rdata;
@@ -168,12 +181,14 @@ class NsuShellAdapter {
             r.last = in_.rlast;
             r.user = 0;
             port.push_r(r);
+            if (expected_r_beats_ > 0) --expected_r_beats_;
         }
 
-        // bready/rready: Nsu is always ready to accept from subordinate
-        // (queue depth=16 >> PoC traffic; real backpressure would use can_accept_b/r).
-        out_.bready = port.can_accept_b();
-        out_.rready = port.can_accept_r();
+        // bready/rready: context-gated pre-assert (policy spec). Nsu issued
+        // the requests, so it pre-asserts ready while responses are owed and
+        // buffer capacity allows — without waiting for valid.
+        out_.bready = (outstanding_w_ > 0) && port.can_accept_b();
+        out_.rready = (expected_r_beats_ > 0) && port.can_accept_r();
 
         // NoC rsp side: pop one rsp flit produced by Packetize this cycle.
         if (auto f = nsu_->pop_rsp_flit()) {
@@ -184,6 +199,10 @@ class NsuShellAdapter {
         // NoC req credit: PoC always 0 (NsuStandalone owns its own req queue;
         // no upstream credit signalling needed for the PoC single-shell setup).
         out_.noc_req_credit_return = false;
+
+        // Save this tick's ready outputs for next tick's handshake detection.
+        prev_bready_ = out_.bready;
+        prev_rready_ = out_.rready;
     }
 
     void get_outputs(NsuOutputs& out) const { out = out_; }
@@ -195,6 +214,10 @@ class NsuShellAdapter {
     std::optional<axi::AwBeat> held_aw_;
     std::optional<axi::WBeat> held_w_;
     std::optional<axi::ArBeat> held_ar_;
+    bool prev_bready_ = false;   // ready driven last tick (wire value this tick)
+    bool prev_rready_ = false;
+    uint32_t outstanding_w_ = 0;     // writes issued, B response still owed
+    uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs
 
     // Flit <-> FlitBytes helpers live in cosim/flit_byte_conv.hpp; calls use
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
