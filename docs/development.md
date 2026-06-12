@@ -296,6 +296,23 @@ prefix, then `make check` -- build artifacts are per-clone (the whole
 Linux working copies never share or clobber binaries. Line endings are pinned by `.gitattributes` (LF in repo
 objects; shell/build files LF in the working tree on every platform).
 
+Offline hosts (no outbound network, e.g. a firewalled company server):
+CMake FetchContent cannot download googletest/yaml-cpp there. Copy
+`googletest-src/` and `yaml-cpp-src/` from an online host's
+`build/cmodel/_deps/` (`.git` subdirs not needed) to the offline host, then:
+
+~~~bash
+make build-cmodel DEPS_SRC=$HOME/noc_offline_deps
+~~~
+
+`DEPS_SRC` configures with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so an
+accidental download attempt fails loudly instead of hanging on the firewall.
+Toolchain prerequisites still apply: CMake >= 3.20 (a portable Kitware
+binary tarball transferred to the host works user-space, no root) and
+g++ >= 7 for C++17 (on RHEL/CentOS 7 hosts: `scl enable devtoolset-N bash`;
+the same shell must also be used for the VCS run so DPI C++ compiles with
+the new g++).
+
 ### CMakeCache.txt and configure
 
 CMake configure runs only when `build/cmodel/CMakeCache.txt` is absent

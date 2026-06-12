@@ -63,11 +63,26 @@ build: build-cmodel build-verilator
 # complaints under non-UTF-8 Windows locales.
 TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/System32" LC_ALL=C
 
+# Offline hosts (no network for FetchContent): point DEPS_SRC at a directory
+# holding pre-fetched dependency sources — copy googletest-src/ and
+# yaml-cpp-src/ from an online host's build/cmodel/_deps/ (the .git subdirs
+# are not needed). FULLY_DISCONNECTED makes any accidental download attempt a
+# hard error instead of a silent hang on a firewalled host.
+#   make build-cmodel DEPS_SRC=$$HOME/noc_offline_deps
+ifdef DEPS_SRC
+CMAKE_DEPS_FLAGS := \
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+    -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=$(DEPS_SRC)/googletest-src \
+    -DFETCHCONTENT_SOURCE_DIR_YAML-CPP=$(DEPS_SRC)/yaml-cpp-src
+else
+CMAKE_DEPS_FLAGS :=
+endif
+
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
 	@$(TOOLPATH) cmake --build $(CMODEL_BUILD) -j
 
 $(CMODEL_BUILD)/CMakeCache.txt:
-	@$(TOOLPATH) cmake -S $(CMODEL_DIR) -B $(CMODEL_BUILD)
+	@$(TOOLPATH) cmake -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS)
 
 build-verilator: build-cmodel
 	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR)
