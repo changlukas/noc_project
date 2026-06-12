@@ -163,12 +163,12 @@ make -n genamba  > /tmp/base_genamba.txt  2>&1 || true
 
 The site-specific knobs go where the spec requires — inside the existing
 `[WORKSTATION]` block, after `VCS_EXTRA ?=`. Defaults come from the user's
-actual workstation config (`cosim/ref/Makefile`):
+actual workstation config (local reference Makefile, untracked `cosim/ref/`):
 
 ```make
 # FSDB dumping (FSDB=1): Verdi install + PLI registration for $fsdbDump*.
-# Defaults match the workstation's cosim/ref/Makefile (Verdi 2020.03,
-# PLI under LINUXAMD64). Alternate older install seen in the ref flows:
+# Defaults match the workstation's local reference Makefile (untracked,
+# cosim/ref/; Verdi 2020.03, PLI under LINUXAMD64). Alternate older install:
 #   /cadtools/synopsys/verdi/M-2017.03/share/PLI/VCS/LINUX64/{novas.tab,pli.a}
 # LD_LIBRARY_PATH may additionally be needed for the FSDB runtime libs
 # (e.g. $VERDI_HOME/share/PLI/lib/LINUXAMD64) — verify at first run, record here.
@@ -483,8 +483,8 @@ Opt-in per run; default off (regression and ctest are unaffected):
     make run-all-fsdb                                        # all 37 scenarios + genamba, summary at end
 
 Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
-workstation's install, per `cosim/ref/Makefile`); override it if the layout
-differs. FSDB builds produce separate `simv_*_fsdb` binaries beside the
+workstation's install, taken from its local reference Makefile — untracked
+`cosim/ref/`); override it if the layout differs. FSDB builds produce separate `simv_*_fsdb` binaries beside the
 normal ones; toggling `FSDB` never reuses a binary from the other mode.
 For memory dumping / interactive Verdi debug, enable the heavier ref-flow
 combo: `FSDB_EXTRA="-debug_access+all -debug_all +fsdb+all +vcsd"`.
