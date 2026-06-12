@@ -6,6 +6,14 @@
 #include "verilated.h"
 #include "Vtb_genamba.h"
 
+// VCD tracing — compiled in only when verilated with --trace (TRACE=1 in
+// cosim/verilator/Makefile defines VM_TRACE). Path comes from +vcd=<abs-path>;
+// the run recipe supplies output/genamba_<scenario>/tb_genamba.vcd.
+#if VM_TRACE
+#include "verilated_vcd_c.h"
+#include <string>
+#endif
+
 // Legacy SystemC timestamp stub required by verilated.cpp when compiled
 // without -DVL_TIME_CONTEXT (which --cc mode does not set by default).
 double sc_time_stamp() {
@@ -19,9 +27,24 @@ int main(int argc, char** argv, char**) {
 
     const std::unique_ptr<Vtb_genamba> topp{new Vtb_genamba{contextp.get(), ""}};
 
+#if VM_TRACE
+    contextp->traceEverOn(true);
+    const std::unique_ptr<VerilatedVcdC> tfp{new VerilatedVcdC};
+    topp->trace(tfp.get(), 99);  // 99 = full hierarchy depth
+    std::string vcd_path = "tb_genamba.vcd";
+    {
+        const std::string m = contextp->commandArgsPlusMatch("vcd=");
+        if (m.rfind("+vcd=", 0) == 0) vcd_path = m.substr(5);
+    }
+    tfp->open(vcd_path.c_str());
+#endif
+
     // Simulate until $finish
     while (!contextp->gotFinish()) {
         topp->eval();
+#if VM_TRACE
+        tfp->dump(contextp->time());
+#endif
         if (!topp->eventsPending()) break;
         contextp->time(topp->nextTimeSlot());
     }
@@ -30,6 +53,9 @@ int main(int argc, char** argv, char**) {
         VL_DEBUG_IF(VL_PRINTF("+ Exiting without $finish; no events left\n"););
     }
 
+#if VM_TRACE
+    tfp->close();
+#endif
     topp->final();
     contextp->statsPrintSummary();
     return 0;
