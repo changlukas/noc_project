@@ -63,6 +63,8 @@ FSDB_SUFFIX :=
 endif
 # Deferred (=) on purpose: SCENARIO / GENAMBA_SCENARIO are defined later in
 # this file, and the per-run value must win when run-all-fsdb loops.
+# Use sites attach via $(if $(V), $(V),) — a bare " $(V)" would leave a
+# double space when empty and break FSDB=0 command-line byte-identity.
 ifeq ($(FSDB),1)
 FSDB_PLUSARG_TB_TOP  = "+fsdb=$(CURDIR)/output/$(SCENARIO)/tb_top.fsdb"
 FSDB_PLUSARG_GENAMBA = "+fsdb=$(CURDIR)/output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb"
@@ -121,7 +123,7 @@ genamba: $(SIMV_GENAMBA)
 
 run-genamba: $(SIMV_GENAMBA)
 	@mkdir -p output/genamba_$(GENAMBA_SCENARIO)
-	@rm -f output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb
+	@rm -f output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb  # drop stale fsdb from a previous FSDB=1 run
 	@set -o pipefail; \
 	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(FSDB_PLUSARG_GENAMBA), $(FSDB_PLUSARG_GENAMBA),) \
 	    2>&1 | tee output/genamba_$(GENAMBA_SCENARIO)/run.log
@@ -146,7 +148,7 @@ tb_top: $(SIMV_TB_TOP)
 
 run-tb-top: $(SIMV_TB_TOP)
 	@mkdir -p output/$(SCENARIO)
-	@rm -f output/$(SCENARIO)/tb_top.fsdb
+	@rm -f output/$(SCENARIO)/tb_top.fsdb  # drop stale fsdb from a previous FSDB=1 run
 	@set -o pipefail; \
 	$(SIMV_TB_TOP) "+scenario=$(SCENARIO_ABS)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
 	    2>&1 | tee output/$(SCENARIO)/run.log
