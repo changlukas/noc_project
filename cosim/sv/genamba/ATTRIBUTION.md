@@ -183,6 +183,24 @@ condition-based waits instead of fixed delays:
   re-asserts RREADY to flush stragglers, waits for 4 quiet edges, then
   syncs the pointer; all six test-task barriers use it.
 
+### Request-side counter handshakes + serialized write (wait_valid era)
+
+When the NMU adapters moved to one-shot wait_valid ready pulses (ready high
+for exactly one wire cycle per AW/AR), the vendored `while (xREADY==0)`
+polls broke the same way the B poll had: a post-NBA coroutine resume reads
+the ready one wire-cycle early, and the VALID deassert issued from that
+point lands before the DUT samples the handshake. All three request waits
+(`axi_master_write_aw`, per-beat `axi_master_write_w`,
+`axi_master_read_ar`) now wait on capture counters
+(`aw_count`/`w_count`/`ar_count` in `genamba_master_bfm.sv`, incremented by
+the always_ff that samples true wire values) — the same proven pattern as
+`b_count`.
+
+`axi_master_write` upstream forks AW/W/B concurrently (AXI-legal). Project
+decision: serialized to AW (handshake completes) → W → B, matching the
+adapter-layer Tasks B-G and the conservative ordering preferred for
+waveform review.
+
 ### Known upstream issue (unpatched)
 
 `axi_master_write_multiple_outstanding` indexes `reg_addr[idx]` from its

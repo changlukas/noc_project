@@ -95,6 +95,13 @@ module genamba_master_bfm #(
     reg [WIDTH_ID-1:0] b_id_latch;
     reg [1:0]          b_resp_latch;
     reg [7:0]          b_count = 8'd0;  // increments on every B handshake capture
+    // Request-side handshake counters (same pattern): the vendored ready
+    // polls resume post-NBA one wire-cycle early, which races the NMU's
+    // one-shot wait_valid ready pulses. The patched vendored tasks wait on
+    // these counters instead of polling AWREADY/WREADY/ARREADY.
+    reg [7:0]          aw_count = 8'd0;
+    reg [7:0]          w_count  = 8'd0;
+    reg [7:0]          ar_count = 8'd0;
     // R-channel multi-beat shadow: a procedural loop can't read R-channel
     // signals per-beat reliably under --timing (same race as B, plus the
     // 2-cycles-per-iter starvation documented in ATTRIBUTION.md). So a
@@ -118,6 +125,9 @@ module genamba_master_bfm #(
                 b_resp_latch <= BRESP;
                 b_count      <= b_count + 8'd1;
             end
+            if (AWVALID && AWREADY) aw_count <= aw_count + 8'd1;
+            if (WVALID  && WREADY)  w_count  <= w_count  + 8'd1;
+            if (ARVALID && ARREADY) ar_count <= ar_count + 8'd1;
             if (RVALID && RREADY) begin
                 r_shadow[r_shadow_widx]      <= RDATA;
                 r_shadow_id[r_shadow_widx]   <= RID;

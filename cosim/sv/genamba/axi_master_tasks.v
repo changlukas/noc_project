@@ -69,7 +69,9 @@ task axi_master_read_ar;
      input [15:0]         bleng; // burst length: 1, 2, ...
      input [ 1:0]         burst; // 0:fixed, 1:incr, 2:wrap
      input [ 1:0]         lock ; // 2'b10:lock, 2'b01:excl
+     reg   [7:0]          ar_count_start;
 begin
+    ar_count_start = ar_count;
     ARID     <= arid;
     ARADDR   <= addr;
     ARLEN    <= (bleng - 1); // 0, 1, ...
@@ -81,8 +83,9 @@ begin
     ARSIZE   <= get_size(bnum);
     ARBURST  <= burst;
     ARVALID  <= 1'b1;
-    @ (posedge ACLK); //-----------------------------------------
-    while (ARREADY==1'b0) @ (posedge ACLK);
+    // Project patch: detect the AR handshake via the ar_count capture
+    // counter (same rationale as aw_count in axi_master_write_aw).
+    while (ar_count == ar_count_start) @ (posedge ACLK);
     `ifndef LOW_POWER
     ARID     <= 0;
     ARADDR   <= ~0;
@@ -199,20 +202,25 @@ begin
      if (bnum!=1<<$clog2(bnum)) $display($time,,"%m ERROR size in bytes not supported %d", bnum);
      awid <= $random(seed_awid);
      @ (posedge ACLK); //-------------------------------------------
-     fork axi_master_write_aw( awid
-                             , addr
-                             , bnum
-                             , bleng
-                             , burst
-                             , lock);
-          axi_master_write_w( awid
-                            , addr
-                            , bnum
-                            , bleng
-                            , burst
-                            , delay);
-          axi_master_write_b( awid);
-     join
+     // Project patch: upstream forks AW/W/B concurrently (AXI-legal — W may
+     // even precede AW). Serialized by project decision: complete the AW
+     // handshake first (write_aw returns only after AWREADY), then stream W,
+     // then drain B — conservative ordering, matches the adapter-layer Tasks
+     // B-G and the NMU's wait_valid ready policy (WREADY opens only after
+     // the AW handshake anyway).
+     axi_master_write_aw( awid
+                        , addr
+                        , bnum
+                        , bleng
+                        , burst
+                        , lock);
+     axi_master_write_w( awid
+                       , addr
+                       , bnum
+                       , bleng
+                       , burst
+                       , delay);
+     axi_master_write_b( awid);
      num_of_writes = num_of_writes + 1;
 end
 endtask
@@ -224,7 +232,9 @@ task axi_master_write_aw;
      input [15:0]         bleng; // burst length: 1, 2, ...
      input [ 1:0]         burst; // 0:fixed, 1:incr, 2:wrap
      input [ 1:0]         lock ; // 2'b10:lock, 2'b01:excl
+     reg   [7:0]          aw_count_start;
 begin
+    aw_count_start = aw_count;
     AWID     <= awid;
     AWADDR   <= addr;
     AWLEN    <= bleng - 1;
@@ -236,8 +246,11 @@ begin
     AWSIZE   <= get_size(bnum);
     AWBURST  <= burst;
     AWVALID  <= 1'b1;
-    @ (posedge ACLK); //-----------------------------------------
-    while (AWREADY==1'b0) @ (posedge ACLK);
+    // Project patch: detect the AW handshake via the aw_count capture
+    // counter (genamba_master_bfm.sv; sampled from true wire values) —
+    // the procedural AWREADY poll resumes post-NBA one wire-cycle early,
+    // which races a one-shot wait_valid ready pulse. See ATTRIBUTION.md.
+    while (aw_count == aw_count_start) @ (posedge ACLK);
     `ifndef LOW_POWER
     AWID     <= 0;
     AWADDR   <= ~0;
@@ -258,11 +271,13 @@ task axi_master_write_w;
      input [ 1:0]         burst; // 0:fixed, 1:incr, 2:wrap
      input                delay; // 0:don't use delay
      reg   [WIDTH_AD-1:0] addr_reg;
+     reg   [7:0]          w_count_start;
      integer idx;
      integer wdelay;
 begin
     addr_reg = addr;
     for (idx=0; idx<bleng; idx=idx+1) begin
+        w_count_start = w_count;
         `ifndef AMBA_AXI4
         WID      <= awid;
         `endif
@@ -271,8 +286,9 @@ begin
         if (idx==(bleng-1)) WLAST    <= 1;
         else                WLAST    <= 0;
         WVALID   <= 1'b1;
-        @ (posedge ACLK); //------------------------------------
-        while (WREADY==1'b0) @ (posedge ACLK);
+        // Project patch: per-beat handshake detected via the w_count
+        // capture counter (same rationale as aw_count above).
+        while (w_count == w_count_start) @ (posedge ACLK);
         addr_reg = get_next_addr(addr_reg,bnum,bleng,burst);
         if (delay) begin
            wdelay = {$random(seed_twrite)}%5;
