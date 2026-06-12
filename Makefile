@@ -18,7 +18,7 @@ COSIM_VERILATOR := cosim/verilator
 COSIM_VCS       := cosim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
-        clean clean-cmodel clean-verilator clean-specgen-cache
+        clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
 	@echo "Build (from repo root):"
@@ -40,6 +40,7 @@ help:
 	@echo "  make clean                  everything (build/ + per-sim output/)"
 	@echo "  make clean-cmodel           build/cmodel/"
 	@echo "  make clean-verilator        build/verilator/ + cosim/verilator/output/"
+	@echo "  make clean-vcs              build/vcs/ + cosim/vcs/output/ + Verdi droppings"
 	@echo "  make clean-specgen-cache    specgen __pycache__/"
 
 # --- build ---
@@ -124,7 +125,7 @@ check: lint_scenarios lint_docs build-cmodel build-verilator
 
 # --- clean ---
 
-clean: clean-cmodel clean-verilator clean-specgen-cache
+clean: clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 	rm -rf $(BUILD_ROOT)
 
 clean-cmodel:
@@ -132,6 +133,9 @@ clean-cmodel:
 
 clean-verilator:
 	$(MAKE) -C $(COSIM_VERILATOR) clean
+
+clean-vcs:
+	$(MAKE) -C cosim/vcs clean
 
 clean-specgen-cache:
 	find specgen -type d -name __pycache__ -prune -exec rm -rf {} +

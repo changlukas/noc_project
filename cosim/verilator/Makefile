@@ -158,6 +158,7 @@ hello:
 clean: clean-genamba
 	rm -rf $(VL_BUILD)/obj_dir $(VL_BUILD)/obj_dir_trace output
 	rm -f master_shell_read_dump*.txt
+	rm -f $(VL_BUILD)/master_shell_read_dump*.txt  # ctest runs Vtb_top with cwd build/verilator
 
 # --- gen_amba role-1 testbench (Phase 1) ---
 GENAMBA_OBJDIR := $(VL_BUILD)/obj_genamba$(TRACE_SUFFIX)
