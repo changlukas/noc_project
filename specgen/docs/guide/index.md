@@ -4,7 +4,7 @@ A toolchain that generates C++ headers and SystemVerilog packages from machine-r
 
 ## What it does
 
-- Reads JSON SSoT from `generated/`. `ni_function_blocks.json` is kept as a feature inventory and cross-domain consistency check, not as codegen input.
+- Reads JSON SSoT from `generated/`. `noc_function_blocks.json` is kept as a feature inventory and cross-domain consistency check, not as codegen input.
 - Elaborates C++ headers into `generated/cpp/` for the C-model.
 - Elaborates SystemVerilog packages into `generated/sv/` for co-sim.
 - Detects drift between committed artifacts and current SSoT (`--check`).

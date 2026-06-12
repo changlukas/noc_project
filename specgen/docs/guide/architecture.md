@@ -21,7 +21,7 @@ Three spec domains, each with its own JSON SSoT and a pair of elaborators:
 | `registers` | `generated/json/ni_registers.json` | `ni_regs.h` | `ni_regs_pkg.sv` |
 | `params` | `source/constants.yaml` | `ni_params.h` | `ni_params_pkg.sv` |
 
-`ni_function_blocks.json` is retained as a feature inventory and cross-domain consistency check, but no longer drives codegen.
+`noc_function_blocks.json` is retained as a feature inventory and cross-domain consistency check, but no longer drives codegen.
 
 ## Layers
 

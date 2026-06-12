@@ -195,5 +195,5 @@ Signals 可以 reference packet domain symbol，常見於 NoC link：
 `generated/json/ni_*.schema.json` 是 JSON Schema Draft 2020-12 validation gate，
 schema validation 由 `ni_spec.invariants` 以 jsonschema Draft 2020-12 執行（`load_doc` 本身不驗證）；不參與 codegen。
 
-`ni_function_blocks.json` 為 spec-validation 元資料 (feature inventory + cross-domain
+`noc_function_blocks.json` 為 spec-validation 元資料 (feature inventory + cross-domain
 consistency checks)，不 emit C/SV，不在本文範圍。

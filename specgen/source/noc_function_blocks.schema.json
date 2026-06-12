@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "ni_function_blocks.schema.json",
+  "$id": "noc_function_blocks.schema.json",
   "type": "object",
   "required": ["$schema_version", "meta", "blocks"],
   "additionalProperties": false,

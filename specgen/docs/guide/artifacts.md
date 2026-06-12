@@ -5,8 +5,8 @@
 ```
 specgen/
   source/                       <- authored inputs
-    ni_function_blocks.json     <- feature inventory (not consumed by codegen)
-    ni_function_blocks.schema.json
+    noc_function_blocks.json    <- feature inventory (not consumed by codegen)
+    noc_function_blocks.schema.json
     constants.yaml              <- params domain SSoT
     interface_handshake.json
   generated/

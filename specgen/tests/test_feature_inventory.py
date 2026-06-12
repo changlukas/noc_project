@@ -26,7 +26,7 @@ def test_inventory_md_up_to_date():
 
 
 def test_inventory_covers_all_features_in_json():
-    spec = json.loads((SPECGEN_ROOT / "source" / "ni_function_blocks.json").read_text(encoding="utf-8"))
+    spec = json.loads((SPECGEN_ROOT / "source" / "noc_function_blocks.json").read_text(encoding="utf-8"))
     md   = INVENTORY_MD.read_text(encoding="utf-8")
     for block in spec["blocks"]:
         for feat in block["features"]:

@@ -5,8 +5,8 @@ import re
 from ni_spec import loader, invariants
 
 SPECGEN_ROOT = Path(__file__).resolve().parent.parent
-FB_JSON = SPECGEN_ROOT / "source" / "ni_function_blocks.json"
-FB_SCHEMA = SPECGEN_ROOT / "source" / "ni_function_blocks.schema.json"
+FB_JSON = SPECGEN_ROOT / "source" / "noc_function_blocks.json"
+FB_SCHEMA = SPECGEN_ROOT / "source" / "noc_function_blocks.schema.json"
 
 
 def test_function_blocks_json_exists():

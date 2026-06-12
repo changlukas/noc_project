@@ -366,7 +366,7 @@ The following files are auto-generated and must not be edited by hand:
   authored JSON sources (`specgen/source/*.json`); regenerated via
   `codegen.py`, drift-checked at build time by `codegen_check`.
 - `c_model/FEATURE_INVENTORY.md` -- feature inventory markdown generated
-  from `specgen/source/ni_function_blocks.json` by
+  from `specgen/source/noc_function_blocks.json` by
   `specgen/tools/gen_inventory.py` (run manually after editing the JSON;
   drift-gated by `specgen/tests/test_feature_inventory.py`).
 

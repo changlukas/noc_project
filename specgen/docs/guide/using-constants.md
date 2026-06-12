@@ -116,7 +116,7 @@ All width/position accessors are pure functions of `field_widths` + `width_param
 | `regs_field_mask(spec, reg, field)` | `int` bitmask. Raises `KeyError`. |
 | `regs_access_mode(spec, reg)` | `"RO"` / `"RW"` / `"RW1C"` / `"WO"` / `"WC"`. Raises `KeyError`. |
 
-`ni_function_blocks.json` is kept as feature inventory + cross-domain consistency check, but no longer exposes accessor functions through `ni_spec.constants` — it does not drive codegen.
+`noc_function_blocks.json` is kept as feature inventory + cross-domain consistency check, but no longer exposes accessor functions through `ni_spec.constants` — it does not drive codegen.
 
 ## Stability contract
 
