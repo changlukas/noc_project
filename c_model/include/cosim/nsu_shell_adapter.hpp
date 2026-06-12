@@ -74,6 +74,7 @@ class NsuShellAdapter {
         prev_rready_ = false;
         outstanding_w_ = 0;
         expected_r_beats_ = 0;
+        w_pop_budget_ = 0;
     }
 
     void set_inputs(const NsuInputs& in) { in_ = in; }
@@ -100,10 +101,14 @@ class NsuShellAdapter {
         // awready/wready/arready (AXI4 §A3.2.1 — master must not deassert
         // valid until ready is seen).
 
-        // AW: consume held beat on awready; try to pop the next. (The BREADY
-        // window opens at the WLAST consume below — a write's B is only
-        // awaited once its data phase completed.)
+        // AW: consume held beat on awready; try to pop the next. The consume
+        // tick is the recognized AW handshake — grant the W presentation
+        // budget (AWLEN+1 beats): WVALID must not rise before the write's
+        // AW handshake completed. (The BREADY window opens at the WLAST
+        // consume below — a write's B is only awaited once its data phase
+        // completed.)
         if (held_aw_ && in_.awready) {
+            w_pop_budget_ += static_cast<uint32_t>(held_aw_->len) + 1u;
             held_aw_ = std::nullopt;
         }
         if (!held_aw_) {
@@ -122,15 +127,18 @@ class NsuShellAdapter {
             out_.awqos = held_aw_->qos;
         }
 
-        // W: consume held beat on wready; try to pop the next. The WLAST
-        // consume completes the write request — the B response is now owed,
-        // so open the BREADY context window.
+        // W: consume held beat on wready; try to pop the next — but only
+        // within the presentation budget granted by completed AW handshakes
+        // (W beats of a not-yet-handshaken AW stay queued, invisible on the
+        // wire). The WLAST consume completes the write request — the B
+        // response is now owed, so open the BREADY context window.
         if (held_w_ && in_.wready) {
             if (held_w_->last) ++outstanding_w_;
             held_w_ = std::nullopt;
         }
-        if (!held_w_) {
+        if (!held_w_ && w_pop_budget_ > 0) {
             held_w_ = port.pop_w();
+            if (held_w_) --w_pop_budget_;
         }
         if (held_w_) {
             out_.wvalid = true;
@@ -220,6 +228,7 @@ class NsuShellAdapter {
     bool prev_rready_ = false;
     uint32_t outstanding_w_ = 0;     // writes issued, B response still owed
     uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs
+    uint32_t w_pop_budget_ = 0;      // W beats presentable (AWs already handshaken)
 
     // Flit <-> FlitBytes helpers live in cosim/flit_byte_conv.hpp; calls use
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
