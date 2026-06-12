@@ -96,6 +96,7 @@ VCS_COMMON_FLAGS := \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
     $(VCS_EXTRA)
 ifeq ($(FSDB),1)
+# guarded: += of an empty var would add a trailing space and break FSDB=0 byte-identity
 VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
 
@@ -120,8 +121,9 @@ genamba: $(SIMV_GENAMBA)
 
 run-genamba: $(SIMV_GENAMBA)
 	@mkdir -p output/genamba_$(GENAMBA_SCENARIO)
+	@rm -f output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb
 	@set -o pipefail; \
-	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)" \
+	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(FSDB_PLUSARG_GENAMBA), $(FSDB_PLUSARG_GENAMBA),) \
 	    2>&1 | tee output/genamba_$(GENAMBA_SCENARIO)/run.log
 
 # --- tb_top (wb2axip cosim) via tb_top_vcs wrapper ---
@@ -144,8 +146,9 @@ tb_top: $(SIMV_TB_TOP)
 
 run-tb-top: $(SIMV_TB_TOP)
 	@mkdir -p output/$(SCENARIO)
+	@rm -f output/$(SCENARIO)/tb_top.fsdb
 	@set -o pipefail; \
-	$(SIMV_TB_TOP) "+scenario=$(SCENARIO_ABS)" \
+	$(SIMV_TB_TOP) "+scenario=$(SCENARIO_ABS)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
 	    2>&1 | tee output/$(SCENARIO)/run.log
 
 .PHONY: clean
