@@ -27,7 +27,8 @@ VCS      ?= vcs
 # vary by VCS version — check `vcs -help` on the workstation.
 VCS_EXTRA ?=
 # FSDB dumping (FSDB=1): Verdi install + PLI registration for $fsdbDump*.
-# Defaults match the workstation's cosim/ref/Makefile (Verdi 2020.03,
+# Defaults match the workstation's local reference Makefile (untracked,
+# cosim/ref/; Verdi 2020.03,
 # PLI under LINUXAMD64). Alternate older install seen in the ref flows:
 #   /cadtools/synopsys/verdi/M-2017.03/share/PLI/VCS/LINUX64/{novas.tab,pli.a}
 # LD_LIBRARY_PATH may additionally be needed for the FSDB runtime libs
@@ -155,24 +156,31 @@ run-tb-top: $(SIMV_TB_TOP)
 
 # --- batch: one fsdb per scenario, both TBs ----------------------------------
 # Produces waveforms; NOT a regression gate (always exits 0 — ctest is the
-# gate). Failing patterns are reported but do not stop the batch; their
-# partial fsdb is kept for debugging. AX4-INF-001 fails by design.
+# gate). The FSDB tb_top binary is built once up front — if that build fails
+# the batch stops before running any scenario. A scenario counts PASS only if
+# the run succeeds AND its fsdb exists non-empty; failing patterns are
+# reported but do not stop the batch; their partial fsdb is kept for
+# debugging. AX4-INF-001 fails by design.
 SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/tests/scenarios/AX4-*))
 
 .PHONY: run-all-fsdb
 run-all-fsdb:
-	@pass=(); fail=(); \
+	@if ! $(MAKE) tb_top FSDB=1; then \
+	    echo ""; echo "run-all-fsdb: FSDB build failed — no scenarios were run."; \
+	    exit 0; \
+	fi; \
+	pass=(); fail=(); fsdbs=(); \
 	for s in $(SCENARIOS_ALL); do \
 	    echo ""; echo "=== run-all-fsdb: $$s ==="; \
-	    if $(MAKE) run-tb-top SCENARIO=$$s FSDB=1; then \
-	        pass+=("$$s"); \
+	    if $(MAKE) run-tb-top SCENARIO=$$s FSDB=1 && test -s "output/$$s/tb_top.fsdb"; then \
+	        pass+=("$$s"); fsdbs+=("output/$$s/tb_top.fsdb"); \
 	    else \
 	        fail+=("$$s"); \
 	    fi; \
 	done; \
 	echo ""; echo "=== run-all-fsdb: tb_genamba ($(GENAMBA_SCENARIO)) ==="; \
-	if $(MAKE) run-genamba FSDB=1; then \
-	    pass+=("genamba_$(GENAMBA_SCENARIO)"); \
+	if $(MAKE) run-genamba FSDB=1 && test -s "output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb"; then \
+	    pass+=("genamba_$(GENAMBA_SCENARIO)"); fsdbs+=("output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb"); \
 	else \
 	    fail+=("genamba_$(GENAMBA_SCENARIO)"); \
 	fi; \
@@ -187,7 +195,11 @@ run-all-fsdb:
 	    esac; \
 	done; \
 	echo "--- waveforms ---"; \
-	find output -name '*.fsdb' -exec ls -lh {} \; 2>/dev/null | awk '{print "  " $$5 "\t" $$9}'; \
+	if [ $${#fsdbs[@]} -gt 0 ]; then \
+	    ls -lh "$${fsdbs[@]}" | awk '{print "  " $$5 "\t" $$9}'; \
+	else \
+	    echo "  (none)"; \
+	fi; \
 	exit 0
 
 .PHONY: clean
