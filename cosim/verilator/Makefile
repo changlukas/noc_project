@@ -117,7 +117,7 @@ check-yamlcpp:
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
 # LDFLAGS_EXTRA: set PE stack reserve to 64 MiB so MinGW pthread initialises
 #   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
-$(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(TB_TOP_INC_DEPS) | check-yamlcpp
+$(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(TB_TOP_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SV_SRC) $(C_SRC)
 	$(MAKE) -C $(VL_BUILD)/obj_dir$(TRACE_SUFFIX) -f V$(TOP).mk \
@@ -199,7 +199,7 @@ GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba$(EXEEXT)
 # invalid escapes (2300+ g++ warnings) and `\t` silently corrupts to TAB.
 # Rewrite only backslashes that follow a drive-letter path prefix —
 # legitimate \n escapes in $display format strings never match.
-$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) | check-yamlcpp
+$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(GENAMBA_OBJDIR)
 	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
