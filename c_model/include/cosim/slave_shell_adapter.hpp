@@ -9,7 +9,9 @@
 //
 // Wire interception design: AxiSlave's existing push_aw/push_w/push_ar and
 // pop_b/pop_r API already form the wire boundary — no WireMasterPort class is
-// needed. awready/wready/arready are derived from queue capacity (size < depth);
+// needed. awready/wready/arready follow the wait_valid / context-gated policy
+// (one-shot pulses for AW/AR after valid is observed; W pre-asserts while
+// accepted bursts have beats owed — see the 2026-06-12 policy spec);
 // bvalid/rvalid are derived from a held latch that retains beats when the master
 // drives bready=false / rready=false, matching AXI4 §A3.2.1 (valid must not
 // deassert until ready).

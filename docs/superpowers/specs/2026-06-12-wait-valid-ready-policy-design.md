@@ -35,17 +35,18 @@ model.
 
 | Adapter | Drives | New policy |
 |---|---|---|
-| NmuShellAdapter / SlaveShellAdapter | AWREADY | one-shot: `awvalid && !prev_awready && can_accept_aw && w_expected==0` |
+| NmuShellAdapter / SlaveShellAdapter | AWREADY | one-shot: `awvalid && !prev_awready && can_accept_aw` |
 | | WREADY | burst-hold: `w_expected>0 && can_accept_w` |
 | | ARREADY | one-shot: `arvalid && !prev_arready && can_accept_ar` |
 | NsuShellAdapter / MasterShellAdapter | BREADY | outstanding-hold: `outstanding_writes>0 && can_accept_b` (master shell: capacity always true) |
 | | RREADY | outstanding-hold: `expected_r_beats>0 && can_accept_r` |
 
 State added per adapter: previous-cycle ready outputs (handshake detection),
-`w_expected` (beats remaining of the open burst, loaded from AWLEN+1 at the
-AW handshake, decremented per W handshake, cross-checked against WLAST),
-and on the request side `outstanding_writes` / `expected_r_beats` (loaded
-at AW/AR handshakes from the issued lengths, decremented at B/R handshakes).
+`w_expected` (W beats owed, ACCUMULATED across accepted AWs — AWLEN+1 added
+per AW handshake, decremented per W handshake; WLAST correctness is left to
+the protocol checkers), and on the request side `outstanding_writes` /
+`expected_r_beats` (loaded at AW/AR handshakes from the issued lengths,
+decremented at B/R handshakes).
 
 ## Semantics changes (load-bearing)
 
@@ -55,9 +56,9 @@ at AW/AR handshakes from the issued lengths, decremented at B/R handshakes).
    the latter currently inject whenever valid is high, which double-counts
    once ready can be low while valid is held.
 2. **Cost**: one bubble cycle per AW/AR transaction and at W-burst start;
-   W bursts then run at full rate (burst-hold). Writes serialize per burst
-   at the NMU ingress (AW gating). wb2axip headroom: MAXSTALL=32 vs
-   worst-case 2-cycle ready latency — safe.
+   W bursts then run at full rate (burst-hold). Multi-outstanding AW is
+   preserved (no burst gating — see the retraction above). wb2axip
+   headroom: MAXSTALL=32 vs worst-case 2-cycle ready latency — safe.
 3. The master shell's beta-tick guard (ready&&prev_valid) remains correct
    and is now mirrored on every receiving channel.
 
@@ -68,8 +69,9 @@ at AW/AR handshakes from the issued lengths, decremented at B/R handshakes).
    outstanding context).
 2. Full ctest suite green (435 ± updated tests).
 3. Verilator: genamba Tasks A–G pass (TRACE=0/1); tb_top CosimIntegration
-   scenarios pass — including the wb2axip checkers (MAXSTALL/MAXDELAY and
-   the `!awready while wr_pending>1` rule, now satisfied by design).
+   scenarios pass through the wb2axip checkers (MAXSTALL/MAXDELAY; the
+   `!awready while wr_pending>1` rule remains covered by the scenario skip
+   list for patterns it structurally rejects).
 4. Waveform spot-check (VCD): NMU awready/wready idle-low; awready pulses
    one cycle after AWVALID; wready rises after the AW handshake and holds
    through the burst.

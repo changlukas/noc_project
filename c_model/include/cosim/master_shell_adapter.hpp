@@ -41,6 +41,11 @@ class MasterShellAdapter {
         master_ = std::make_unique<axi::AxiMasterStandalone>(cfg);
         in_  = MasterInputs{};
         out_ = MasterOutputs{};
+        prev_out_ = MasterOutputs{};
+        prev_bready_ = false;
+        prev_rready_ = false;
+        outstanding_w_ = 0;
+        expected_r_beats_ = 0;
     }
 
     // Path of the read-data dump file written by AxiMaster on each R-channel

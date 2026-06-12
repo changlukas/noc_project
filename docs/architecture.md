@@ -310,7 +310,7 @@ ordering constraint.
 single-beat configurations (AWLEN=0 throughout). Multi-beat and true
 multi-outstanding scenarios are verified at the C++ adapter / scoreboard
 layer only -- the T10 unit test (`test_nmu_shell_adapter.cpp:
-NmuShellAdapter.multi_beat_w_burst_visible_per_cycle`) and per-shell
+NmuShellAdapter.multi_beat_w_burst_full_rate_aw_available`) and per-shell
 unit tests exercise these paths.
 
 **Attempted workarounds (reverted)**: T15 (commit 0008c28) added

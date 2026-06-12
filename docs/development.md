@@ -555,7 +555,7 @@ exercised by:
 
 ~~~bash
 cd build/cmodel
-ctest -R NmuShellAdapter.multi_beat_w_burst_visible_per_cycle --output-on-failure
+ctest -R NmuShellAdapter.multi_beat_w_burst_full_rate_aw_available --output-on-failure
 ~~~
 
 This test proves that each of the 8 W beats in an AWLEN=7 burst is
