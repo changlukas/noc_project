@@ -85,11 +85,16 @@ module genamba_master_bfm #(
     // pattern.
     //
     // Workaround: snapshot BID/BRESP into latches via NBA on the handshake
-    // cycle. The patched vendored axi_master_write_b reads these latches
-    // (after waiting one extra @(posedge) for the latch to settle) instead
-    // of the raw input wires.
+    // cycle. The patched vendored axi_master_write_b uses b_count as its
+    // handshake detector (condition-based, same pattern as r_shadow_widx
+    // below): it holds BREADY high until the counter advances, then reads
+    // these latches. Neither a fixed one-cycle wait nor a procedural
+    // BVALID poll is sound here — the poll resumes post-NBA (one
+    // wire-cycle early) and a BREADY deassert issued from that point kills
+    // the handshake before any always_ff samples it.
     reg [WIDTH_ID-1:0] b_id_latch;
     reg [1:0]          b_resp_latch;
+    reg [7:0]          b_count = 8'd0;  // increments on every B handshake capture
     // R-channel multi-beat shadow: a procedural loop can't read R-channel
     // signals per-beat reliably under --timing (same race as B, plus the
     // 2-cycles-per-iter starvation documented in ATTRIBUTION.md). So a
@@ -111,6 +116,7 @@ module genamba_master_bfm #(
             if (BVALID && BREADY) begin
                 b_id_latch   <= BID;
                 b_resp_latch <= BRESP;
+                b_count      <= b_count + 8'd1;
             end
             if (RVALID && RREADY) begin
                 r_shadow[r_shadow_widx]      <= RDATA;
@@ -193,6 +199,26 @@ module genamba_master_bfm #(
         /* verilator lint_on INITIALDLY */
     endtask
 
+    // R-shadow barrier between test tasks. A bare `ridx = widx` sync races
+    // straggler beats: the vendored read path's procedural loop runs one
+    // wire-cycle ahead of the actual handshakes, so its final beat can still
+    // be in flight (RVALID held by the bridge, RREADY already dropped) when
+    // the task returns. Flush by re-asserting RREADY, wait until RVALID has
+    // been low for 4 consecutive edges, then sync the read pointer.
+    task bfm_r_barrier;
+        integer quiet;
+        /* verilator lint_off INITIALDLY */
+        RREADY <= 1'b1;  // release any straggler beat held by the bridge
+        quiet = 0;
+        while (quiet < 4) begin
+            @(posedge ACLK);
+            if (RVALID) quiet = 0; else quiet = quiet + 1;
+        end
+        RREADY <= 1'b0;
+        /* verilator lint_on INITIALDLY */
+        r_shadow_ridx = r_shadow_widx;
+    endtask
+
     // Per-beat R metadata check (see bfm_drain_r). Function, not task: no
     // time consumption, and the body stays out of the calling coroutine.
     function automatic void check_r_beat(input [7:0] k, input [WIDTH_ID-1:0] id,
@@ -239,7 +265,7 @@ module genamba_master_bfm #(
         // r_shadow_widx via its own R handshakes; sync r_shadow_ridx so this
         // task's bfm_drain_r calls start counting from beats that arrive AFTER
         // this barrier, not from stale shadow entries.
-        r_shadow_ridx = r_shadow_widx;
+        bfm_r_barrier;
         $display("[%0t] TASK B start: burst blen=%0d", $time, blen);
 
         // Write phase — single-outstanding: AW → W beats → B drain
@@ -281,7 +307,7 @@ module genamba_master_bfm #(
         integer i;
         reg [WIDTH_AD-1:0] addr;
         // R-shadow barrier (see test_burst_blen for rationale).
-        r_shadow_ridx = r_shadow_widx;
+        bfm_r_barrier;
         $display("[%0t] TASK C start: N=%0d outstanding", $time, N);
 
         for (i = 0; i < N; i = i + 1) begin
@@ -320,7 +346,7 @@ module genamba_master_bfm #(
         integer i, b;
         reg [WIDTH_AD-1:0] addr;
         // R-shadow barrier (see test_burst_blen / test_outstanding_N for rationale).
-        r_shadow_ridx = r_shadow_widx;
+        bfm_r_barrier;
         $display("[%0t] TASK D start: N=4 blen=%0d outstanding burst", $time, blen);
 
         for (i = 0; i < 4; i = i + 1) begin
@@ -369,7 +395,7 @@ module genamba_master_bfm #(
         integer i, j;             // separate vars for fork branches
         reg [WIDTH_AD-1:0] addr;
         // R-shadow barrier (consistent with other test wrappers).
-        r_shadow_ridx = r_shadow_widx;
+        bfm_r_barrier;
         $display("[%0t] TASK E start: same-ID outstanding (id=%0d)", $time, E_FIXED_ID);
 
         // Phase 1: serial AW with shared ID
@@ -421,7 +447,7 @@ module genamba_master_bfm #(
         reg [WIDTH_DA-1:0] r_expected [0:7];
         integer i, k;             // serial-phase vars
         // R-shadow barrier (consistent with other test wrappers).
-        r_shadow_ridx = r_shadow_widx;
+        bfm_r_barrier;
         $display("[%0t] TASK F start: mixed R+W concurrent", $time);
 
         // Pre-seed read window — sequential writes via the adapter layer
@@ -496,7 +522,7 @@ module genamba_master_bfm #(
         int cycle_count;
         bit done;
         // R-shadow barrier (consistent with other test wrappers).
-        r_shadow_ridx = r_shadow_widx;
+        bfm_r_barrier;
         $display("[%0t] TASK G start: N=%0d deep pressure", $time, N);
         done = 0;
         cycle_count = 0;

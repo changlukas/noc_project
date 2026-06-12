@@ -154,6 +154,35 @@ Verified by fault injection: a deliberate `bfm_drain_b` with a wrong AWID
 makes the BID check fire, sets `error_flag`, and the trap aborts the run
 with a non-zero exit code.
 
+### `<= #LD` flattening — edge-aligned BFM drives
+
+Upstream drives every AXI output with `<= #LD` (`LD=1`). Under Verilator
+`--timing` this is executed as a 1 ns coroutine suspension per statement
+(not an IEEE intra-assignment delay), so consecutive assignments staircase
+1..7 ns past the clock edge — waveforms showed every BFM-driven signal
+off-edge by its statement ordinal, and chained calls could drift past the
+next edge entirely.
+
+Project fix: all 50 `<= #LD` sites in `axi_master_tasks.v` are flattened to
+plain `<=` (NBA at the current edge). All BFM-driven signals now transition
+exactly on clock edges (verified: every VCD transition lands on a posedge
+timestamp).
+
+Two latent races surfaced by the (denser) flattened timing, both fixed with
+condition-based waits instead of fixed delays:
+
+- `axi_master_write_b`: the procedural BVALID poll resumes post-NBA (one
+  wire-cycle early); a BREADY deassert issued from there lands at the head
+  of the next timestep, before any always_ff samples the handshake —
+  aborting it. The patched task now detects handshake completion via the
+  `b_count` capture counter (`genamba_master_bfm.sv`) and deasserts BREADY
+  only afterwards; the stale fixed one-extra-cycle wait is removed.
+- Inter-task R-shadow sync: a bare `r_shadow_ridx = r_shadow_widx` barrier
+  raced straggler R beats still held by the bridge when the previous task
+  returned. `bfm_r_barrier` (project-owned, `genamba_master_bfm.sv`)
+  re-asserts RREADY to flush stragglers, waits for 4 quiet edges, then
+  syncs the pointer; all six test-task barriers use it.
+
 ## Notes
 
 Only the point-to-point spike IP is vendored (golden master tasks + memory model);
