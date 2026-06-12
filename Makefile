@@ -74,8 +74,15 @@ build-verilator: build-cmodel
 
 # --- test ---
 
+# TEST_TMPDIR: gtest's TempDir() checks TEST_TMPDIR before TEMP. MSYS sh
+# (which executes make recipes) can strip/empty TEMP, making TempDir() fall
+# back to a nonexistent temp dir and failing every test that writes a
+# read-dump. Point it at a build-tree dir using a native path (`pwd -W` in
+# MSYS sh; plain pwd elsewhere).
+CTEST_CMD = mkdir -p $(CMODEL_BUILD)/test_tmp && cd $(CMODEL_BUILD) &&     TEST_TMPDIR="$$(pwd -W 2>/dev/null || pwd)/test_tmp" ctest --output-on-failure
+
 test: build-cmodel
-	@$(TOOLPATH) sh -c 'cd $(CMODEL_BUILD) && ctest --output-on-failure'
+	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
 
 # Python interpreter: prefer the Windows `py -3` launcher when present
 # (canonical on this project's Windows setup), fall back to python3
@@ -98,7 +105,7 @@ lint_docs:
 	$(PYTHON3) tools/lint_docs.py $(MAINTAINED_DOCS)
 
 check: lint_scenarios lint_docs build-cmodel build-verilator
-	@$(TOOLPATH) sh -c 'cd $(CMODEL_BUILD) && ctest --output-on-failure'
+	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
 
 # --- clean ---
 

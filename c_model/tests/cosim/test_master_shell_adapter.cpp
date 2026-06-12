@@ -23,12 +23,14 @@ using ni::cmodel::cosim::MasterShellAdapter;
 
 namespace {
 
-// Return the OS temp directory as a string.
+// Return the temp directory as a string (no trailing separator).
+// Uses gtest's TempDir() so TEST_TMPDIR is respected — the Makefile's
+// test/check recipes set it because MSYS sh can strip TEMP/TMP, which
+// made a raw getenv fallback land on a nonexistent path.
 std::string tmp_dir() {
-    const char* t = std::getenv("TEMP");
-    if (!t) t = std::getenv("TMP");
-    if (!t) t = "/tmp";
-    return std::string(t);
+    std::string t = ::testing::TempDir();
+    while (!t.empty() && (t.back() == '/' || t.back() == '\\')) t.pop_back();
+    return t;
 }
 
 // Write content to a temp file; return its path.
@@ -57,19 +59,20 @@ TEST(MasterShellAdapter, drives_aw_for_single_write_scenario) {
     auto data_file = write_temp_file("t8_write_data.txt", kSingleBeatData);
     auto dump_file = write_temp_file("t8_read_dump.txt", "");
     auto yaml_path = write_temp_file("t8_scenario.yaml",
-        "transactions:\n"
-        "  - op: write\n"
-        "    addr: 0x100\n"
-        "    id: 0\n"
-        "    len: 0\n"
-        "    size: 5\n"
-        "    burst: INCR\n"
-        "    data_file: " + data_file + "\n");
+                                     "transactions:\n"
+                                     "  - op: write\n"
+                                     "    addr: 0x100\n"
+                                     "    id: 0\n"
+                                     "    len: 0\n"
+                                     "    size: 5\n"
+                                     "    burst: INCR\n"
+                                     "    data_file: " +
+                                         data_file + "\n");
 
     MasterShellAdapter adapter;
     adapter.init(yaml_path, dump_file);
 
-    MasterInputs  in{};   // awready/wready/arready all false → master stalls
+    MasterInputs in{};  // awready/wready/arready all false → master stalls
     MasterOutputs out{};
     bool saw_awvalid = false;
 
@@ -82,9 +85,9 @@ TEST(MasterShellAdapter, drives_aw_for_single_write_scenario) {
 
     EXPECT_TRUE(saw_awvalid) << "awvalid never asserted in 50 cycles";
     if (saw_awvalid) {
-        EXPECT_EQ(out.awid,   0u);
+        EXPECT_EQ(out.awid, 0u);
         EXPECT_EQ(out.awaddr, 0x100u);
-        EXPECT_EQ(out.awlen,  0u);
+        EXPECT_EQ(out.awlen, 0u);
         EXPECT_EQ(out.awsize, 5u);
     }
 }
@@ -100,23 +103,24 @@ TEST(MasterShellAdapter, awvalid_holds_until_awready) {
     auto data_file = write_temp_file("t8_hold_data.txt", kSingleBeatData);
     auto dump_file = write_temp_file("t8_hold_dump.txt", "");
     auto yaml_path = write_temp_file("t8_hold_scenario.yaml",
-        "transactions:\n"
-        "  - op: write\n"
-        "    addr: 0x200\n"
-        "    id: 0\n"
-        "    len: 0\n"
-        "    size: 5\n"
-        "    burst: INCR\n"
-        "    data_file: " + data_file + "\n");
+                                     "transactions:\n"
+                                     "  - op: write\n"
+                                     "    addr: 0x200\n"
+                                     "    id: 0\n"
+                                     "    len: 0\n"
+                                     "    size: 5\n"
+                                     "    burst: INCR\n"
+                                     "    data_file: " +
+                                         data_file + "\n");
 
     MasterShellAdapter adapter;
     adapter.init(yaml_path, dump_file);
 
     // awready stays false for the entire run — master must hold awvalid.
-    MasterInputs  in{};
+    MasterInputs in{};
     MasterOutputs out{};
-    bool saw_awvalid       = false;
-    int  valid_high_cycles = 0;
+    bool saw_awvalid = false;
+    int valid_high_cycles = 0;
 
     for (int cycle = 0; cycle < 30; ++cycle) {
         adapter.set_inputs(in);
@@ -132,6 +136,6 @@ TEST(MasterShellAdapter, awvalid_holds_until_awready) {
         }
     }
 
-    EXPECT_TRUE(saw_awvalid)           << "awvalid never asserted in 30 cycles";
-    EXPECT_GE(valid_high_cycles, 2)    << "awvalid should remain high across multiple cycles";
+    EXPECT_TRUE(saw_awvalid) << "awvalid never asserted in 30 cycles";
+    EXPECT_GE(valid_high_cycles, 2) << "awvalid should remain high across multiple cycles";
 }
