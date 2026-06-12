@@ -64,9 +64,12 @@ end
 `endif
 ```
 
-`<top_module>` is `tb_top_vcs` and `tb_genamba` respectively. `tb_top.sv` itself
-needs no change — dumping from the `tb_top_vcs` wrapper recursively covers the
-whole instantiated hierarchy (DPI wrappers and the `faxi` checkers included).
+`<top_module>` is `tb_top_vcs` and `tb_genamba` respectively. The plusarg-less
+fallback filename differs per TB (`dump.fsdb` for tb_top_vcs, `tb_genamba.fsdb`
+for tb_genamba) so a manual run without `+fsdb=` still yields distinguishable
+files. `tb_top.sv` itself needs no change — dumping from the `tb_top_vcs`
+wrapper recursively covers the whole instantiated hierarchy (DPI wrappers and
+the `faxi` checkers included).
 
 ### Output naming and location
 
@@ -80,7 +83,10 @@ lands next to that run's `run.log`):
 
 The run recipe passes this as an absolute path via `+fsdb=`, creates the output
 directory first, and deletes any stale `.fsdb` of the same name before launching
-`simv`, so a failed run can never leave a misleading old waveform behind.
+`simv`, so a failed *simulation* cannot leave a misleading old waveform behind.
+(Scope note: the cleanup runs inside the run recipe, after the simv build
+prerequisite — a *compile* failure aborts before the recipe and leaves prior
+files untouched, which is acceptable: no new run happened.)
 
 ### Makefile changes (`cosim/vcs/Makefile`)
 
@@ -90,22 +96,29 @@ directory first, and deletes any stale `.fsdb` of the same name before launching
      the `_fsdb`-suffixed simv/csrc names (see Trigger and isolation).
    - run: append the `+fsdb=` plusarg with the per-recipe absolute path (see
      Output naming).
-3. FSDB PLI link flags live in the `[WORKSTATION]` block because they depend on a
-   site-local `$VERDI_HOME`, and are user-overridable (`?=`):
+3. FSDB PLI link flags live in the existing `[WORKSTATION]` block (alongside
+   `VCS`/`VCS_EXTRA`) and are user-overridable (`?=`). Defaults are taken from
+   the user's actual workstation configuration (`cosim/ref/Makefile`,
+   Verdi 2020.03, PLI under `LINUXAMD64`):
    ```
-   FSDB_PLI ?= -P $(VERDI_HOME)/share/PLI/VCS/LINUX64/novas.tab \
-                  $(VERDI_HOME)/share/PLI/VCS/LINUX64/pli.a
+   VERDI_HOME ?= /tools/verdi_2020.03
+   FSDB_PLI   ?= -P $(VERDI_HOME)/share/PLI/VCS/LINUXAMD64/novas.tab \
+                    $(VERDI_HOME)/share/PLI/VCS/LINUXAMD64/pli.a
+   # Alternate older install seen in ref flows (run_rtl/run_gsim):
+   #   /cadtools/synopsys/verdi/M-2017.03/share/PLI/VCS/LINUX64/{novas.tab,pli.a}
+   FSDB_EXTRA ?=
+   # FSDB_EXTRA knob: the ref flow's heavier known-working combo, for memory
+   # dump / interactive Verdi debug when wanted:
+   #   FSDB_EXTRA += -debug_access+all -debug_all +fsdb+all +vcsd
    ```
-   Notes for first bring-up on the workstation (all `[TBD]` until validated on
-   the real install — current tree is dry-run validated only):
-   - Procedural `$fsdbDump*` needs only this PLI registration. `-debug_access+all`
-     / `-kdb` serve interactive-Verdi / KDB source debug and are NOT added by
-     default; add to `VCS_EXTRA` only if that workflow is wanted. `-lca` is
-     version-dependent.
+   Notes for first bring-up on the workstation:
+   - Procedural `$fsdbDump*` needs only the PLI registration; the default stays
+     minimal (fastest sim). The heavier flags are one `FSDB_EXTRA` line away.
    - The Verdi FSDB runtime libraries may require `LD_LIBRARY_PATH` (e.g.
-     `$VERDI_HOME/share/PLI/lib/LINUX64`); verify at first run and record the
-     result in the `[WORKSTATION]` block.
-   - `FSDB=1` errors out early with a clear message if `VERDI_HOME` is unset.
+     `$VERDI_HOME/share/PLI/lib/LINUXAMD64`) — `[TBD]` verify at first run and
+     record the result in the `[WORKSTATION]` block.
+   - `FSDB=1` errors out early with a clear message if `VERDI_HOME` is unset
+     or the default path does not exist on the host.
 4. New batch target `run-all-fsdb`:
    - enumerate scenarios via `$(notdir $(wildcard <repo>/tests/scenarios/AX4-*))`.
    - loop with explicit exit-code capture (`if $(MAKE) run-tb-top SCENARIO=$$s
@@ -143,9 +156,9 @@ Because the host has no VCS+Verdi, verification is staged:
 
 ## Open items
 
-- Exact Verdi PLI link flag set (`novas.tab`/`pli.a` path, `LD_LIBRARY_PATH`,
-  `-lca`) is `[TBD]` until first run on the real install; encoded as
-  overridable `[WORKSTATION]` knobs.
+- PLI paths are now defaults from the workstation's own `cosim/ref/Makefile`
+  (Verdi 2020.03 / `LINUXAMD64`); whether `LD_LIBRARY_PATH` is additionally
+  needed remains `[TBD]` until first run.
 - Whether to also dump SVA (`$fsdbDumpSVA`) for the `faxi` checkers — deferred;
   not needed for the initial per-pattern signal trace.
 - Dumping of memories / multidimensional arrays may need version-specific
@@ -163,3 +176,12 @@ Because the host has no VCS+Verdi, verification is staged:
   PASS/EXPECTED-FAIL/SKIP classification (avoids duplicating the wb2axip skip
   list maintained in `test_cosim_integration.cpp`); no `FSDB_TIMEOUT` / disk
   preflight (YAGNI until proven needed).
+- 2026-06-12 codex plan review: REQUEST CHANGES, 8 findings, all adopted:
+  stale-file guarantee narrowed to simulation failures; `FSDB_PLI` moved into
+  the `[WORKSTATION]` block; per-TB fallback filenames written into the spec;
+  verible inactive-branch parsing replaced by sed-activate + parse (verified
+  empirically on this host: verible v0.0-4007 does NOT check inactive `ifdef`
+  branches); per-token `grep -q` verifications; doc cross-check expanded to
+  `docs/architecture.md`. Workstation defaults imported from
+  `cosim/ref/Makefile` per user (Verdi 2020.03 / LINUXAMD64; minimal flags +
+  `FSDB_EXTRA` knob carrying the ref flow's heavier combo).

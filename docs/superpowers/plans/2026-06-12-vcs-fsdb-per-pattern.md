@@ -8,7 +8,7 @@
 
 **Tech Stack:** GNU Make (bash recipes), SystemVerilog, VCS + Verdi PLI (workstation only). Spec: `docs/superpowers/specs/2026-06-12-vcs-fsdb-per-pattern-design.md`.
 
-**Verification constraints:** VCS/Verdi do not exist on the Windows dev host. Local gates are: (a) `make -n` dry-run diffs proving `FSDB=0` output is byte-identical to pre-change, (b) `verible-verilog-syntax` parse of edited SV, (c) the Verilator genamba build still compiling (proves the `ifdef` leaks nothing into the default flow). Real-FSDB acceptance happens on the workstation (Task 6 checklist).
+**Verification constraints:** VCS/Verdi do not exist on the Windows dev host. Local gates are: (a) `make -n` dry-run diffs proving `FSDB=0` compile/run commands are unchanged — with one intentional, explicitly-diffed exception: the stale-fsdb `rm -f` line added in Task 4, (b) `verible-verilog-syntax` parse of edited SV including the activated dump branch (sed-strip directives), (c) the Verilator genamba build still compiling (proves the `ifdef` leaks nothing into the default flow). Real-FSDB acceptance happens on the workstation (Task 6 checklist).
 
 ---
 
@@ -22,10 +22,10 @@
 ```bash
 cd /d/02_NoC/noc_project
 verible-verilog-syntax cosim/sv/tb_top_vcs.sv && echo BASELINE_OK
-grep -c fsdb cosim/sv/tb_top_vcs.sv || echo "0 (expected: no fsdb yet)"
+test "$(grep -c fsdb cosim/sv/tb_top_vcs.sv || true)" -eq 0 && echo NO_FSDB_YET
 ```
 
-Expected: `BASELINE_OK`, grep count `0`.
+Expected: `BASELINE_OK`, `NO_FSDB_YET`.
 
 - [ ] **Step 2: Add the guarded dump block**
 
@@ -46,14 +46,19 @@ In `cosim/sv/tb_top_vcs.sv`, insert between the `tb_top u_tb (...)` instantiatio
 `endif
 ```
 
-- [ ] **Step 3: Verify syntax**
+- [ ] **Step 3: Verify syntax — both branches**
+
+verible v0.0-4007 does NOT parse inactive `ifdef` branches (verified
+empirically), so check twice: once as-is, once with the conditional
+directives stripped so the dump block becomes active code:
 
 ```bash
 verible-verilog-syntax cosim/sv/tb_top_vcs.sv && echo PARSE_OK
+sed -E '/^[[:space:]]*`(ifdef|ifndef|else|endif)/d' cosim/sv/tb_top_vcs.sv > /tmp/tb_top_vcs_active.sv
+verible-verilog-syntax /tmp/tb_top_vcs_active.sv && echo ACTIVE_BRANCH_PARSE_OK
 ```
 
-Expected: `PARSE_OK` (verible parses all preprocessor branches, so the
-`$fsdbDump*` calls are syntax-checked even without the define).
+Expected: `PARSE_OK`, `ACTIVE_BRANCH_PARSE_OK`.
 
 - [ ] **Step 4: Verify the default flow is untouched**
 
@@ -108,13 +113,17 @@ tb_top one:
 `endif
 ```
 
-- [ ] **Step 3: Verify syntax**
+- [ ] **Step 3: Verify syntax — both branches**
 
 ```bash
 verible-verilog-syntax cosim/sv/tb_genamba.sv && echo PARSE_OK
+sed -E '/^[[:space:]]*`(ifdef|ifndef|else|endif)/d' cosim/sv/tb_genamba.sv > /tmp/tb_genamba_active.sv
+verible-verilog-syntax /tmp/tb_genamba_active.sv && echo ACTIVE_BRANCH_PARSE_OK
 ```
 
-Expected: `PARSE_OK`.
+Expected: `PARSE_OK`, `ACTIVE_BRANCH_PARSE_OK`. (The sed also activates the
+pre-existing `GENAMBA_DBG_AXI` monitor block — that block is plain
+always-blocks and parses fine; it has no `` `else `` arm.)
 
 - [ ] **Step 4: Verify the Verilator flow still builds this file (define absent)**
 
@@ -150,10 +159,29 @@ make -n tb_top   > /tmp/base_tb_top.txt   2>&1 || true
 make -n genamba  > /tmp/base_genamba.txt  2>&1 || true
 ```
 
-- [ ] **Step 2: Add the FSDB mode block**
+- [ ] **Step 2a: Extend the existing `[WORKSTATION]` block (lines 21-29)**
 
-Insert into `cosim/vcs/Makefile` right after `VCS_BUILD := $(BUILD_ROOT)/vcs`
-(line 33):
+The site-specific knobs go where the spec requires — inside the existing
+`[WORKSTATION]` block, after `VCS_EXTRA ?=`. Defaults come from the user's
+actual workstation config (`cosim/ref/Makefile`):
+
+```make
+# FSDB dumping (FSDB=1): Verdi install + PLI registration for $fsdbDump*.
+# Defaults match the workstation's cosim/ref/Makefile (Verdi 2020.03,
+# PLI under LINUXAMD64). Alternate older install seen in the ref flows:
+#   /cadtools/synopsys/verdi/M-2017.03/share/PLI/VCS/LINUX64/{novas.tab,pli.a}
+# LD_LIBRARY_PATH may additionally be needed for the FSDB runtime libs
+# (e.g. $VERDI_HOME/share/PLI/lib/LINUXAMD64) — verify at first run, record here.
+VERDI_HOME ?= /tools/verdi_2020.03
+FSDB_PLI   ?= -P $(VERDI_HOME)/share/PLI/VCS/LINUXAMD64/novas.tab \
+                 $(VERDI_HOME)/share/PLI/VCS/LINUXAMD64/pli.a
+# Heavier known-working combo from the ref flow, for memory dump /
+# interactive Verdi debug (slower sim, bigger fsdb):
+#   FSDB_EXTRA += -debug_access+all -debug_all +fsdb+all +vcsd
+FSDB_EXTRA ?=
+```
+
+- [ ] **Step 2b: Add the FSDB mode logic after `VCS_BUILD := $(BUILD_ROOT)/vcs` (line 33)**
 
 ```make
 # --- FSDB waveform dumping (opt-in; Verdi PLI, workstation only) -------------
@@ -166,14 +194,7 @@ ifeq ($(FSDB),1)
 ifeq ($(strip $(VERDI_HOME)),)
 $(error FSDB=1 requires VERDI_HOME (Verdi install root) to be set)
 endif
-# [WORKSTATION] PLI registration for $fsdbDump* — override if the local
-# install layout differs. LD_LIBRARY_PATH may additionally be needed for
-# the FSDB runtime libs (e.g. $VERDI_HOME/share/PLI/lib/LINUX64); verify at
-# first run and record here. -debug_access/-kdb are NOT needed for
-# procedural dumping; add to VCS_EXTRA only for interactive Verdi debug.
-FSDB_PLI ?= -P $(VERDI_HOME)/share/PLI/VCS/LINUX64/novas.tab \
-            $(VERDI_HOME)/share/PLI/VCS/LINUX64/pli.a
-FSDB_COMPILE_FLAGS := +define+FSDB_DUMP $(FSDB_PLI)
+FSDB_COMPILE_FLAGS := +define+FSDB_DUMP $(FSDB_PLI) $(FSDB_EXTRA)
 FSDB_SUFFIX := _fsdb
 else
 FSDB_COMPILE_FLAGS :=
@@ -241,19 +262,28 @@ Expected: `TB_TOP_UNCHANGED`, `GENAMBA_UNCHANGED` (zero diff).
 
 - [ ] **Step 5: Verify FSDB=1 dry-run adds exactly the right pieces**
 
-```bash
-make -n tb_top FSDB=1 VERDI_HOME=/opt/verdi 2>&1 | tee /tmp/fsdb_tb_top.txt | \
-  grep -E "define\+FSDB_DUMP|novas.tab|pli.a|simv_tb_top_fsdb|csrc_tb_top_fsdb" | wc -l
-```
-
-Expected: count >= 4 (define, both PLI files, suffixed simv+csrc visible).
+Each required token checked independently (default `VERDI_HOME` from the
+`[WORKSTATION]` block applies — no override needed):
 
 ```bash
-make -n tb_top FSDB=1 2>&1 | head -2
+make -n tb_top FSDB=1 > /tmp/fsdb_tb_top.txt 2>&1
+for tok in "+define+FSDB_DUMP" \
+           "/tools/verdi_2020.03/share/PLI/VCS/LINUXAMD64/novas.tab" \
+           "/tools/verdi_2020.03/share/PLI/VCS/LINUXAMD64/pli.a" \
+           "simv_tb_top_fsdb" \
+           "csrc_tb_top_fsdb"; do
+  grep -qF "$tok" /tmp/fsdb_tb_top.txt && echo "OK  $tok" || echo "MISS $tok"
+done
 ```
 
-Expected: `*** FSDB=1 requires VERDI_HOME ... Stop.` (guard fires without
-VERDI_HOME).
+Expected: five `OK` lines, zero `MISS`.
+
+```bash
+make -n tb_top FSDB=1 VERDI_HOME= 2>&1 | head -2
+```
+
+Expected: `*** FSDB=1 requires VERDI_HOME ... Stop.` (guard fires when
+VERDI_HOME is explicitly emptied).
 
 - [ ] **Step 6: Commit**
 
@@ -303,18 +333,32 @@ run-genamba: $(SIMV_GENAMBA)
 
 (The `rm -f` runs in both modes — deleting a nonexistent fsdb in FSDB=0 mode
 is a no-op and keeps the recipe single-path; a leftover fsdb from an earlier
-FSDB=1 run of the same scenario is exactly the stale evidence we want gone.)
+FSDB=1 run of the same scenario is exactly the stale evidence we want gone.
+Scope of the guarantee: cleanup runs inside the run recipe, i.e. after the
+simv build prerequisite — a compile failure aborts earlier and leaves prior
+files untouched, which is fine: no new simulation happened.)
 
 - [ ] **Step 3: Verify dry-runs**
 
+FSDB=0 must differ from the Task 4 Step 1 baseline by exactly the intentional
+`rm -f` cleanup lines and nothing else:
+
 ```bash
-make -n run-tb-top 2>&1 | grep -E "\+fsdb=" ; echo "exit=$? (expect 1: no plusarg when FSDB=0)"
-make -n run-tb-top FSDB=1 VERDI_HOME=/opt/verdi 2>&1 | grep -E "\+fsdb=.*output/AX4-BAS-003.*tb_top.fsdb" && echo PLUSARG_OK
-make -n run-genamba FSDB=1 VERDI_HOME=/opt/verdi 2>&1 | grep -E "\+fsdb=.*output/genamba_AX4-BAS-001.*tb_genamba.fsdb" && echo GENAMBA_PLUSARG_OK
+make -n run-tb-top  2>&1 | diff /tmp/base_run_tb_top.txt  - | grep "^>"
+make -n run-genamba 2>&1 | diff /tmp/base_run_genamba.txt - | grep "^>"
 ```
 
-Expected: first grep finds nothing (`exit=1`); then `PLUSARG_OK`,
-`GENAMBA_PLUSARG_OK`.
+Expected: each diff shows exactly one added line — the
+`rm -f output/.../...fsdb` — no other `>` lines, no `<` lines, no `+fsdb=`.
+
+Then FSDB=1 (default `VERDI_HOME` applies):
+
+```bash
+make -n run-tb-top  FSDB=1 2>&1 | grep -E "\+fsdb=.*output/AX4-BAS-003.*tb_top.fsdb" && echo PLUSARG_OK
+make -n run-genamba FSDB=1 2>&1 | grep -E "\+fsdb=.*output/genamba_AX4-BAS-001.*tb_genamba.fsdb" && echo GENAMBA_PLUSARG_OK
+```
+
+Expected: `PLUSARG_OK`, `GENAMBA_PLUSARG_OK`.
 
 - [ ] **Step 4: Commit**
 
@@ -386,7 +430,7 @@ The inner `$(MAKE) run-tb-top ...` can't run here, but the bash
 collect/summary logic can be exercised by overriding MAKE:
 
 ```bash
-make run-all-fsdb MAKE=true VERDI_HOME=/opt/verdi 2>&1 | tail -15
+make run-all-fsdb MAKE=true 2>&1 | tail -15
 ```
 
 (`MAKE=true` makes every inner invocation a no-op success.) Expected: the
@@ -394,7 +438,7 @@ summary prints `PASS (with fsdb): 38` (37 scenarios + genamba), `FAIL ...: 0`,
 and the target exits 0.
 
 ```bash
-make run-all-fsdb MAKE=false VERDI_HOME=/opt/verdi > /tmp/batch_fail.txt 2>&1; echo "target exit=$?"
+make run-all-fsdb MAKE=false > /tmp/batch_fail.txt 2>&1; echo "target exit=$?"
 grep -c "FAIL AX4" /tmp/batch_fail.txt
 grep "fails by design" /tmp/batch_fail.txt
 ```
@@ -431,13 +475,16 @@ Opt-in per run; default off (regression and ctest are unaffected):
     make run-genamba FSDB=1                                  # -> output/genamba_<scenario>/tb_genamba.fsdb
     make run-all-fsdb                                        # all 37 scenarios + genamba, summary at end
 
-Requirements: `VERDI_HOME` must point at the Verdi install (the build errors
-out otherwise). FSDB builds produce separate `simv_*_fsdb` binaries beside
-the normal ones; toggling `FSDB` never reuses a binary from the other mode.
+Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
+workstation's install, per `cosim/ref/Makefile`); override it if the layout
+differs. FSDB builds produce separate `simv_*_fsdb` binaries beside the
+normal ones; toggling `FSDB` never reuses a binary from the other mode.
+For memory dumping / interactive Verdi debug, enable the heavier ref-flow
+combo: `FSDB_EXTRA="-debug_access+all -debug_all +fsdb+all +vcsd"`.
 
 First-run validation on the workstation (record results in the
 `[WORKSTATION]` block of `cosim/vcs/Makefile`):
-1. `FSDB_PLI` paths exist (`$VERDI_HOME/share/PLI/VCS/LINUX64/{novas.tab,pli.a}`).
+1. `FSDB_PLI` paths exist (`$VERDI_HOME/share/PLI/VCS/LINUXAMD64/{novas.tab,pli.a}`).
 2. Whether `LD_LIBRARY_PATH` needs the FSDB runtime libs.
 3. Open one fsdb in Verdi: top-level AXI interfaces, DPI wrapper boundaries,
    and `faxi` checker state must be visible (not merely a loadable file).
@@ -451,7 +498,9 @@ grep -rln "run-tb-top\|run-genamba\|FSDB" README.md docs/*.md | sort
 ```
 
 Review each hit: any doc describing the VCS run flow must not contradict the
-new FSDB text. Expected files: `docs/development.md` (just edited). If
+new FSDB text. Expected files: `docs/development.md` (just edited) AND
+`docs/architecture.md` (already references `run-genamba` today — verify its
+wording stays accurate; it should not need changes since FSDB is opt-in). If
 `README.md` or others mention the VCS flow, list the mismatches for the user
 rather than silently editing (CLAUDE.md: surface cross-file diffs).
 
