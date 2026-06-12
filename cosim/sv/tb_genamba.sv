@@ -244,4 +244,17 @@ module tb_genamba;
     end
 `endif // GENAMBA_DBG_AXI
 
+    // FSDB waveform dump — compiled in only by the VCS flow with FSDB=1
+    // (+define+FSDB_DUMP). Path comes from +fsdb=<abs-path>; the Makefile
+    // run recipe supplies output/genamba_<scenario>/tb_genamba.fsdb.
+`ifdef FSDB_DUMP
+    initial begin
+        string fsdb_path;
+        if (!$value$plusargs("fsdb=%s", fsdb_path))
+            fsdb_path = "tb_genamba.fsdb";
+        $fsdbDumpfile(fsdb_path);
+        $fsdbDumpvars(0, tb_genamba); // depth 0 = full hierarchy below top
+    end
+`endif
+
 endmodule
