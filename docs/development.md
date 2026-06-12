@@ -275,6 +275,28 @@ First-run validation on the workstation (record results in the
 3. Open one fsdb in Verdi: top-level AXI interfaces, DPI wrapper boundaries,
    and `faxi` checker state must be visible (not merely a loadable file).
 
+#### VCD waveform tracing (Verilator)
+
+Twin of the FSDB flow for the Verilator side — usable on the Windows dev
+host without VCS/Verdi. Opt-in per run; default off:
+
+~~~bash
+cd cosim/verilator
+make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat TRACE=1  # -> output/<scenario>/tb_top.vcd
+make run-genamba TRACE=1                                 # -> output/genamba_<scenario>/tb_genamba.vcd
+make run-all-trace                                       # all 37 scenarios + genamba, summary at end
+~~~
+
+Trace builds verilate with `--trace` into separate obj dirs
+(`obj_dir_trace` / `obj_genamba_trace`); toggling `TRACE` never reuses the
+other mode's build. The dump code in `main.cpp` / `main_genamba.cpp` is
+`#if VM_TRACE`-guarded, so non-trace builds are unchanged. `run-all-trace`
+follows `run-all-fsdb` semantics (always exits 0; a scenario counts PASS
+only if its vcd is non-empty; `AX4-INF-*` annotated "fails by design").
+
+View locally with GTKWave, or transfer to the workstation for Verdi (Verdi
+opens VCD directly). VCD is uncompressed text — `gzip` before transfer.
+
 ### Verified toolchain versions
 
 The build is developed and verified on Windows 11 + MSYS2 (mingw64).
