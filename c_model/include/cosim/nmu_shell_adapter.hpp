@@ -99,9 +99,9 @@ class NmuShellAdapter {
             // Capacity was a condition of asserting ready last tick and only
             // this adapter pushes, so the push cannot fail here.
             (void)port.push_aw(aw);
-            // Open the W-burst window: AWLEN+1 beats are now expected, and
-            // no further AW is accepted until WLAST closes the window
-            // (wb2axip: !awready while W beats of an accepted burst pend).
+            // Widen the W window: AWLEN+1 more beats are now owed. The
+            // counter accumulates across accepted AWs (multi-outstanding),
+            // keeping WREADY pre-asserted until all owed beats arrive.
             w_expected_ += static_cast<uint32_t>(in_.awlen) + 1u;
         }
 
@@ -141,13 +141,16 @@ class NmuShellAdapter {
         // docs/superpowers/specs/2026-06-12-wait-valid-ready-policy-design.md):
         // - AW/AR (address channels): one-shot wait_valid — ready stays low
         //   until VALID is observed, pulses for exactly one wire cycle (the
-        //   handshake completes on that cycle), then returns low. AW is
-        //   additionally gated while a W burst is open.
-        // - W (follow-on channel): once the AW handshake opened the burst
-        //   window, wready pre-asserts on buffer capacity WITHOUT waiting
-        //   for WVALID, and holds until the WLAST beat is received.
-        out_.awready = in_.awvalid && !prev_awready_ && (w_expected_ == 0) &&
-                       port.can_accept_aw();
+        //   handshake completes on that cycle), then returns low. AW is NOT
+        //   gated on W-burst completion: multi-outstanding AW (post several
+        //   AWs, then stream the data) is legitimate AXI4 and load-bearing
+        //   for the RoB/multi-ID paths; the stricter wb2axip view is handled
+        //   by the existing scenario skip list, not baked into the model.
+        // - W (follow-on channel): wready pre-asserts on buffer capacity
+        //   WITHOUT waiting for WVALID while any accepted AW still has W
+        //   beats owed (w_expected_ accumulates across accepted bursts),
+        //   and drops once all owed beats arrived.
+        out_.awready = in_.awvalid && !prev_awready_ && port.can_accept_aw();
         out_.wready = (w_expected_ > 0) && port.can_accept_w();
         out_.arready = in_.arvalid && !prev_arready_ && port.can_accept_ar();
 

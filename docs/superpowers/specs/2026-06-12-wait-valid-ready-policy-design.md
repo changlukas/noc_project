@@ -21,10 +21,15 @@ space, regardless of valid") with the user's two-class policy:
   WLAST beat received; B: while writes outstanding; R: while read beats
   outstanding).
 
-Additional rule (satisfies the wb2axip `faxi_slave` assertion that AWREADY
-be low while >1 W beat of an accepted burst is pending): **AW acceptance is
-gated while a W burst is open** — a new AW is not ready-acknowledged until
-the previous burst's WLAST beat has been received.
+~~Additional rule: AW acceptance gated while a W burst is open.~~
+**Retracted during implementation**: the gating deadlocks legitimate
+multi-outstanding patterns that post several AWs before streaming data
+(genamba Task C hung structurally; the same serialization would hurt the
+RoB/multi-ID paths). `w_expected` instead ACCUMULATES across accepted AWs,
+so WREADY stays pre-asserted until all owed beats arrive. The stricter
+wb2axip `!awready while wr_pending>1` view remains handled where it always
+was — the wb2axip-incompatible scenario skip list — not baked into the
+model.
 
 ## Per-component table
 

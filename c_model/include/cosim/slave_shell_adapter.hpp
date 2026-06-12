@@ -104,9 +104,9 @@ class SlaveShellAdapter {
         out_ = SlaveOutputs{};
 
         // wait_valid / context-gated ready policy (same as NmuShellAdapter;
-        // see the policy spec): AW/AR one-shot wait_valid (AW gated while a
-        // W burst is open); W pre-asserts on capacity for the burst window.
-        out_.awready = in_.awvalid && !prev_awready_ && (w_expected_ == 0) &&
+        // see the policy spec): AW/AR one-shot wait_valid; W pre-asserts on
+        // capacity while owed beats remain (accumulates across bursts).
+        out_.awready = in_.awvalid && !prev_awready_ &&
                        (slave_->aw_q_size() < queue_depth_);
         out_.wready = (w_expected_ > 0) && (slave_->w_q_size() < queue_depth_);
         out_.arready =

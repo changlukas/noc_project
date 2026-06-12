@@ -9,8 +9,9 @@
 //   2. Single AW + W: two-phase AW handshake (ready pulses the tick after
 //      valid appears), then the W window opens and wready pre-asserts.
 //   3. AWLEN=7 (8-beat W burst): wready holds for the whole burst (one bubble
-//      at burst start, then full rate), and AWREADY is gated low while the
-//      burst is open (satisfies the wb2axip !awready-during-burst rule).
+//      at burst start, then full rate). A second AW presented mid-burst still
+//      gets its ready pulse — multi-outstanding AW (post addresses ahead of
+//      data) is legitimate AXI4 and load-bearing for the RoB/multi-ID paths.
 #include "common/scenario.hpp"
 #include "cosim/nmu_shell_adapter.hpp"
 #include "cosim/nmu_shell_io.hpp"
@@ -91,15 +92,16 @@ TEST(NmuShellAdapter, single_aw_w_two_phase_handshake) {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: AWLEN=7 (8-beat W burst) — burst-hold wready + AW gating.
+// Test 3: AWLEN=7 (8-beat W burst) — burst-hold wready; AW stays available.
 //
 // After the AW handshake the W window holds wready high for the full burst
 // (capacity permitting): one bubble at burst start, then full rate — all 8
-// beats accepted back-to-back. While the window is open, a second AWVALID
-// must NOT see awready (wb2axip faxi_slave: !awready while W beats pend).
+// beats accepted back-to-back. A second AWVALID presented mid-burst still
+// receives its one-shot ready pulse (multi-outstanding AW preserved; the
+// stricter wb2axip view lives in the scenario skip list, not in the model).
 // ---------------------------------------------------------------------------
-TEST(NmuShellAdapter, multi_beat_w_burst_full_rate_and_aw_gated) {
-    SCENARIO("8-beat W burst at full rate after AW handshake; AW gated during burst");
+TEST(NmuShellAdapter, multi_beat_w_burst_full_rate_aw_available) {
+    SCENARIO("8-beat W burst at full rate; mid-burst AW still gets its ready pulse");
 
     NmuShellAdapter adapter;
     adapter.init();
@@ -154,9 +156,9 @@ TEST(NmuShellAdapter, multi_beat_w_burst_full_rate_and_aw_gated) {
         if (prev_wready) ++beats_accepted;
         prev_wready = out.wready;
         if (beat == 0) {
-            EXPECT_FALSE(out.awready)
-                << "second AW must be gated while the W burst is open "
-                   "(wb2axip: !awready while W beats of an accepted burst pend)";
+            EXPECT_TRUE(out.awready)
+                << "second AW presented mid-burst must still get its ready "
+                   "pulse (multi-outstanding AW preserved)";
         }
         if (beat < 7) {
             EXPECT_TRUE(out.wready)
