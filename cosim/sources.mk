@@ -55,7 +55,12 @@ GENAMBA_SV_SRC := \
 # rebuild (previously invisible to make).
 GENAMBA_INC_DEPS := \
     $(COSIM_ROOT)/sv/genamba/axi_master_tasks.v \
-    $(COSIM_ROOT)/sv/genamba/mem_test_tasks.v
+    $(COSIM_ROOT)/sv/genamba/mem_test_tasks.v \
+    $(COSIM_ROOT)/sv/genamba/mem_axi_dpram_sync.v
+
+# Same for tb_top: sim_wrapper.svh is `include'd by tb_top.sv.
+TB_TOP_INC_DEPS := \
+    $(COSIM_ROOT)/sv/wb2axip/sim_wrapper.svh
 
 GENAMBA_DEFINES := \
     +define+AMBA_AXI4 +define+AMBA_QOS \

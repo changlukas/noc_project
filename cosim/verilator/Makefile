@@ -117,7 +117,7 @@ check-yamlcpp:
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
 # LDFLAGS_EXTRA: set PE stack reserve to 64 MiB so MinGW pthread initialises
 #   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
-$(TBTOP_EXE): $(SV_SRC) $(C_SRC) | check-yamlcpp
+$(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(TB_TOP_INC_DEPS) | check-yamlcpp
 	@mkdir -p $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SV_SRC) $(C_SRC)
 	$(MAKE) -C $(VL_BUILD)/obj_dir$(TRACE_SUFFIX) -f V$(TOP).mk \

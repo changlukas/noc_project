@@ -183,6 +183,13 @@ condition-based waits instead of fixed delays:
   re-asserts RREADY to flush stragglers, waits for 4 quiet edges, then
   syncs the pointer; all six test-task barriers use it.
 
+### Known upstream issue (unpatched)
+
+`axi_master_write_multiple_outstanding` indexes `reg_addr[idx]` from its
+concurrent AW loop where `reg_addr[idy]` (the W-loop index) is intended,
+which can mis-strobe narrow/unaligned writes. Left as-is: the project BFM
+does not call this task; fix it before first use.
+
 ## Notes
 
 Only the point-to-point spike IP is vendored (golden master tasks + memory model);
