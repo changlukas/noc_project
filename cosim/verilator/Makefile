@@ -32,7 +32,7 @@ endif
 # double space when empty and break TRACE=0 command-line byte-identity.
 ifeq ($(TRACE),1)
 TRACE_PLUSARG_TB_TOP  = "+vcd=$(CURDIR)/output/$(SCENARIO)/tb_top.vcd"
-TRACE_PLUSARG_GENAMBA = "+vcd=$(CURDIR)/output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd"
+TRACE_PLUSARG_GENAMBA = "+vcd=$(CURDIR)/output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.vcd"
 else
 TRACE_PLUSARG_TB_TOP  =
 TRACE_PLUSARG_GENAMBA =
@@ -212,17 +212,26 @@ $(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DE
 genamba: $(GENAMBA_EXE)
 
 # Build + run in one shot. Console output streams live AND lands in
-# output/genamba_$(GENAMBA_SCENARIO)/run.log (pipefail keeps the sim's
+# output/genamba_$(GENAMBA_RUN_TAG)/run.log (pipefail keeps the sim's
 # exit code through the tee).
-GENAMBA_SCENARIO ?= AX4-BAS-001_single_write_no_read
+# Default cmodel_init() input is the standalone stub (no scenario tree
+# dependency); pass GENAMBA_SCENARIO=<ax4-id> to point at a tree scenario
+# instead (content is still inert: NMU/NSU take no config from it).
+GENAMBA_SCENARIO ?=
+ifeq ($(GENAMBA_SCENARIO),)
+GENAMBA_SCENARIO_ABS := $(COSIM_ROOT)/genamba_init.yaml
+GENAMBA_RUN_TAG := default
+else
 GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenario.yaml
+GENAMBA_RUN_TAG := $(GENAMBA_SCENARIO)
+endif
 .PHONY: run-genamba
 run-genamba: genamba
-	@mkdir -p output/genamba_$(GENAMBA_SCENARIO)
-	@rm -f output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd  # drop stale vcd from a previous TRACE=1 run
+	@mkdir -p output/genamba_$(GENAMBA_RUN_TAG)
+	@rm -f output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.vcd  # drop stale vcd from a previous TRACE=1 run
 	@set -o pipefail; \
 	$(GENAMBA_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(TRACE_PLUSARG_GENAMBA), $(TRACE_PLUSARG_GENAMBA),) \
-	    2>&1 | tee output/genamba_$(GENAMBA_SCENARIO)/run.log
+	    2>&1 | tee output/genamba_$(GENAMBA_RUN_TAG)/run.log
 
 .PHONY: clean-genamba
 clean-genamba:
@@ -290,8 +299,8 @@ run-all-trace:
 	    fi; \
 	done; \
 	echo ""; echo "=== run-all-trace: tb_genamba ($(GENAMBA_SCENARIO)) ==="; \
-	if $(MAKE) run-genamba TRACE=1 && test -s "output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd"; then \
-	    pass+=("genamba_$(GENAMBA_SCENARIO)"); vcds+=("output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd"); \
+	if $(MAKE) run-genamba TRACE=1 && test -s "output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.vcd"; then \
+	    pass+=("genamba_$(GENAMBA_SCENARIO)"); vcds+=("output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.vcd"); \
 	else \
 	    fail+=("genamba_$(GENAMBA_SCENARIO)"); \
 	fi; \

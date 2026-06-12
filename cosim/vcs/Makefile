@@ -68,7 +68,7 @@ endif
 # double space when empty and break FSDB=0 command-line byte-identity.
 ifeq ($(FSDB),1)
 FSDB_PLUSARG_TB_TOP  = "+fsdb=$(CURDIR)/output/$(SCENARIO)/tb_top.fsdb"
-FSDB_PLUSARG_GENAMBA = "+fsdb=$(CURDIR)/output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb"
+FSDB_PLUSARG_GENAMBA = "+fsdb=$(CURDIR)/output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"
 else
 FSDB_PLUSARG_TB_TOP  =
 FSDB_PLUSARG_GENAMBA =
@@ -104,8 +104,17 @@ VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
 
 # --- gen_amba role-1 testbench ---
-GENAMBA_SCENARIO ?= AX4-BAS-001_single_write_no_read
+# Default cmodel_init() input is the standalone stub (no scenario tree
+# dependency); pass GENAMBA_SCENARIO=<ax4-id> to point at a tree scenario
+# instead (content is still inert: NMU/NSU take no config from it).
+GENAMBA_SCENARIO ?=
+ifeq ($(GENAMBA_SCENARIO),)
+GENAMBA_SCENARIO_ABS := $(COSIM_ROOT)/genamba_init.yaml
+GENAMBA_RUN_TAG := default
+else
 GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenario.yaml
+GENAMBA_RUN_TAG := $(GENAMBA_SCENARIO)
+endif
 
 SIMV_GENAMBA := $(VCS_BUILD)/simv_genamba$(FSDB_SUFFIX)
 
@@ -123,11 +132,11 @@ $(SIMV_GENAMBA): $(GENAMBA_SV_SRC) $(DPI_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DE
 genamba: $(SIMV_GENAMBA)
 
 run-genamba: $(SIMV_GENAMBA)
-	@mkdir -p output/genamba_$(GENAMBA_SCENARIO)
-	@rm -f output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb  # drop stale fsdb from a previous FSDB=1 run
+	@mkdir -p output/genamba_$(GENAMBA_RUN_TAG)
+	@rm -f output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb  # drop stale fsdb from a previous FSDB=1 run
 	@set -o pipefail; \
 	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(FSDB_PLUSARG_GENAMBA), $(FSDB_PLUSARG_GENAMBA),) \
-	    2>&1 | tee output/genamba_$(GENAMBA_SCENARIO)/run.log
+	    2>&1 | tee output/genamba_$(GENAMBA_RUN_TAG)/run.log
 
 # --- tb_top (wb2axip cosim) via tb_top_vcs wrapper ---
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
@@ -178,9 +187,9 @@ run-all-fsdb:
 	        fail+=("$$s"); \
 	    fi; \
 	done; \
-	echo ""; echo "=== run-all-fsdb: tb_genamba ($(GENAMBA_SCENARIO)) ==="; \
-	if $(MAKE) run-genamba FSDB=1 && test -s "output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb"; then \
-	    pass+=("genamba_$(GENAMBA_SCENARIO)"); fsdbs+=("output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb"); \
+	echo ""; echo "=== run-all-fsdb: tb_genamba ($(GENAMBA_RUN_TAG)) ==="; \
+	if $(MAKE) run-genamba FSDB=1 && test -s "output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"; then \
+	    pass+=("genamba_$(GENAMBA_SCENARIO)"); fsdbs+=("output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"); \
 	else \
 	    fail+=("genamba_$(GENAMBA_SCENARIO)"); \
 	fi; \

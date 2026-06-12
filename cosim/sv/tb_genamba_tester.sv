@@ -107,7 +107,7 @@ module tb_genamba_tester;
     initial begin
         string scenario_path;
         if (!$value$plusargs("scenario=%s", scenario_path))
-            scenario_path = "../../tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml";
+            scenario_path = "../genamba_init.yaml";  // fallback for direct exe runs from cosim/verilator
         cmodel_init(scenario_path);
         cm_ctx     = cmodel_channel_model_create("channel_model_0");
         master_ctx = cmodel_master_create("master_0");

@@ -1,0 +1,28 @@
+# cmodel_init() stub for the genamba testbenches (tb_genamba and
+# tb_genamba_tester).
+#
+# These testbenches drive all AXI traffic from SV (the project BFM tasks or
+# gen_amba's own axi_tester sequence). The c_model AxiMaster / AxiSlave
+# adapters are created so the DPI session state machine passes, but never
+# ticked — so nothing in this file executes. cmodel_init() only needs a
+# file that the scenario parser accepts:
+#   - no schema_version  -> legacy mode, no AX4 naming rules apply
+#   - one read transaction satisfies the non-empty `transactions` rule
+#     (reads need no data_file)
+#
+# NMU / NSU take no configuration from this file: cmodel_nmu_create() and
+# cmodel_nsu_create() call adapter init() with no arguments. The config
+# block consumed from scenario YAMLs (memory_base / latencies /
+# max_outstanding / inject) feeds only the never-ticked Master and Slave
+# adapters.
+transactions:
+  - op: read
+    addr: 0x0
+    id: 0
+    len: 0
+    size: 5
+    burst: INCR
+    # dump_file is a parser-required key for read ops. It names an OUTPUT
+    # file that only gets opened when the AxiMaster ticks — never in the
+    # genamba flows — so it does not need to exist.
+    dump_file: genamba_init_unused_dump.txt
