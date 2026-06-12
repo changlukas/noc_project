@@ -9,7 +9,9 @@
 //
 // Wire interception design: AxiSlave's existing push_aw/push_w/push_ar and
 // pop_b/pop_r API already form the wire boundary — no WireMasterPort class is
-// needed. awready/wready/arready are derived from queue capacity (size < depth);
+// needed. awready/wready/arready follow the wait_valid / context-gated policy
+// (one-shot pulses for AW/AR after valid is observed; W pre-asserts while
+// accepted bursts have beats owed — see the 2026-06-12 policy spec);
 // bvalid/rvalid are derived from a held latch that retains beats when the master
 // drives bready=false / rready=false, matching AXI4 §A3.2.1 (valid must not
 // deassert until ready).
@@ -42,6 +44,10 @@ class SlaveShellAdapter {
         out_ = SlaveOutputs{};
         held_b_ = std::nullopt;
         held_r_ = std::nullopt;
+        prev_awready_ = false;
+        prev_wready_ = false;
+        prev_arready_ = false;
+        w_expected_ = 0;
     }
 
     void set_inputs(const SlaveInputs& in) { in_ = in; }
@@ -49,11 +55,10 @@ class SlaveShellAdapter {
     void tick() {
         if (!slave_) return;
 
-        // Step 1: push AW/W/AR beats from the wire into AxiSlave queues.
-        // The push_* return value indicates whether the queue accepted the beat
-        // (true = accepted, false = queue full → backpressure this cycle).
-        bool aw_accepted = false;
-        if (in_.awvalid) {
+        // Step 1: push AW/W/AR beats into AxiSlave queues — ONLY on true
+        // wire-handshake ticks (valid && our previously driven ready).
+        // wait_valid policy: see nmu_shell_adapter.hpp / the policy spec.
+        if (in_.awvalid && prev_awready_) {
             axi::AwBeat aw{};
             aw.id = in_.awid;
             aw.addr = in_.awaddr;
@@ -65,21 +70,21 @@ class SlaveShellAdapter {
             aw.prot = in_.awprot;
             aw.qos = in_.awqos;
             aw.user = 0;
-            aw_accepted = slave_->push_aw(aw);
+            (void)slave_->push_aw(aw);
+            w_expected_ += static_cast<uint32_t>(in_.awlen) + 1u;
         }
 
-        bool w_accepted = false;
-        if (in_.wvalid) {
+        if (in_.wvalid && prev_wready_) {
             axi::WBeat w{};
             w.data = in_.wdata;
             w.strb = in_.wstrb;
             w.last = in_.wlast;
             w.user = 0;
-            w_accepted = slave_->push_w(w);
+            (void)slave_->push_w(w);
+            if (w_expected_ > 0) --w_expected_;
         }
 
-        bool ar_accepted = false;
-        if (in_.arvalid) {
+        if (in_.arvalid && prev_arready_) {
             axi::ArBeat ar{};
             ar.id = in_.arid;
             ar.addr = in_.araddr;
@@ -91,7 +96,7 @@ class SlaveShellAdapter {
             ar.prot = in_.arprot;
             ar.qos = in_.arqos;
             ar.user = 0;
-            ar_accepted = slave_->push_ar(ar);
+            (void)slave_->push_ar(ar);
         }
 
         // Step 2: advance AxiSlave one cycle (processes AW→W→B and AR→R pipelines).
@@ -100,25 +105,14 @@ class SlaveShellAdapter {
         // Step 3: build SlaveOutputs.
         out_ = SlaveOutputs{};
 
-        // awready/wready/arready: if master drove valid this cycle, report whether
-        // the beat was accepted; otherwise report queue vacancy (space available).
-        if (in_.awvalid) {
-            out_.awready = aw_accepted;
-        } else {
-            out_.awready = (slave_->aw_q_size() < queue_depth_);
-        }
-
-        if (in_.wvalid) {
-            out_.wready = w_accepted;
-        } else {
-            out_.wready = (slave_->w_q_size() < queue_depth_);
-        }
-
-        if (in_.arvalid) {
-            out_.arready = ar_accepted;
-        } else {
-            out_.arready = (slave_->ar_q_size() < queue_depth_);
-        }
+        // wait_valid / context-gated ready policy (same as NmuShellAdapter;
+        // see the policy spec): AW/AR one-shot wait_valid; W pre-asserts on
+        // capacity while owed beats remain (accumulates across bursts).
+        out_.awready = in_.awvalid && !prev_awready_ &&
+                       (slave_->aw_q_size() < queue_depth_);
+        out_.wready = (w_expected_ > 0) && (slave_->w_q_size() < queue_depth_);
+        out_.arready =
+            in_.arvalid && !prev_arready_ && (slave_->ar_q_size() < queue_depth_);
 
         // B channel: held_b_ retains the beat while bready is low (AXI4 §A3.2.1:
         // bvalid must remain asserted until bready). On bready rising, consume the
@@ -149,6 +143,11 @@ class SlaveShellAdapter {
             out_.rresp = static_cast<uint8_t>(held_r_->resp);
             out_.rlast = held_r_->last;
         }
+
+        // Save this tick's ready outputs for next tick's handshake detection.
+        prev_awready_ = out_.awready;
+        prev_wready_ = out_.wready;
+        prev_arready_ = out_.arready;
     }
 
     void get_outputs(SlaveOutputs& out) const { out = out_; }
@@ -160,6 +159,10 @@ class SlaveShellAdapter {
     SlaveOutputs out_{};
     std::optional<axi::BBeat> held_b_;  // beat held while bready is low
     std::optional<axi::RBeat> held_r_;  // beat held while rready is low
+    bool prev_awready_ = false;  // ready driven last tick (wire value this tick)
+    bool prev_wready_ = false;
+    bool prev_arready_ = false;
+    uint32_t w_expected_ = 0;  // W beats remaining of the open burst window
 };
 
 }  // namespace ni::cmodel::cosim

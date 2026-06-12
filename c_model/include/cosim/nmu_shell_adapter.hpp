@@ -62,6 +62,10 @@ class NmuShellAdapter {
         out_ = NmuOutputs{};
         held_b_ = std::nullopt;
         held_r_ = std::nullopt;
+        prev_awready_ = false;
+        prev_wready_ = false;
+        prev_arready_ = false;
+        w_expected_ = 0;
     }
 
     void set_inputs(const NmuInputs& in) { in_ = in; }
@@ -76,10 +80,11 @@ class NmuShellAdapter {
             nmu_->inject_rsp_flit(flit_from_bytes(in_.noc_rsp_flit));
         }
 
-        // Step 1b: push AW/W/AR beats from wire into axi_slave_port queues.
-        // push_* returns false if the queue is full (backpressure this cycle).
-        bool aw_accepted = false;
-        if (in_.awvalid) {
+        // Step 1b: push AW/W/AR beats into axi_slave_port queues — ONLY on
+        // true wire-handshake ticks (valid && our previously driven ready).
+        // wait_valid policy: ready is never pre-asserted for the address
+        // channels, so first sight of valid is NOT an accept.
+        if (in_.awvalid && prev_awready_) {
             axi::AwBeat aw{};
             aw.id = in_.awid;
             aw.addr = in_.awaddr;
@@ -91,21 +96,26 @@ class NmuShellAdapter {
             aw.prot = in_.awprot;
             aw.qos = in_.awqos;
             aw.user = 0;
-            aw_accepted = port.push_aw(aw);
+            // Capacity was a condition of asserting ready last tick and only
+            // this adapter pushes, so the push cannot fail here.
+            (void)port.push_aw(aw);
+            // Widen the W window: AWLEN+1 more beats are now owed. The
+            // counter accumulates across accepted AWs (multi-outstanding),
+            // keeping WREADY pre-asserted until all owed beats arrive.
+            w_expected_ += static_cast<uint32_t>(in_.awlen) + 1u;
         }
 
-        bool w_accepted = false;
-        if (in_.wvalid) {
+        if (in_.wvalid && prev_wready_) {
             axi::WBeat w{};
             w.data = in_.wdata;
             w.strb = in_.wstrb;
             w.last = in_.wlast;
             w.user = 0;
-            w_accepted = port.push_w(w);
+            (void)port.push_w(w);
+            if (w_expected_ > 0) --w_expected_;
         }
 
-        bool ar_accepted = false;
-        if (in_.arvalid) {
+        if (in_.arvalid && prev_arready_) {
             axi::ArBeat ar{};
             ar.id = in_.arid;
             ar.addr = in_.araddr;
@@ -117,7 +127,7 @@ class NmuShellAdapter {
             ar.prot = in_.arprot;
             ar.qos = in_.arqos;
             ar.user = 0;
-            ar_accepted = port.push_ar(ar);
+            (void)port.push_ar(ar);
         }
 
         // Step 2: advance Nmu one cycle (Depacketize + AxiSlavePort +
@@ -127,25 +137,22 @@ class NmuShellAdapter {
         // Step 3: build NmuOutputs.
         out_ = NmuOutputs{};
 
-        // awready/wready/arready: if master drove valid, report whether accepted;
-        // otherwise report queue vacancy (mirrors SlaveShellAdapter T9 pattern).
-        if (in_.awvalid) {
-            out_.awready = aw_accepted;
-        } else {
-            out_.awready = port.can_accept_aw();
-        }
-
-        if (in_.wvalid) {
-            out_.wready = w_accepted;
-        } else {
-            out_.wready = port.can_accept_w();
-        }
-
-        if (in_.arvalid) {
-            out_.arready = ar_accepted;
-        } else {
-            out_.arready = port.can_accept_ar();
-        }
+        // wait_valid / context-gated ready policy (see
+        // docs/superpowers/specs/2026-06-12-wait-valid-ready-policy-design.md):
+        // - AW/AR (address channels): one-shot wait_valid — ready stays low
+        //   until VALID is observed, pulses for exactly one wire cycle (the
+        //   handshake completes on that cycle), then returns low. AW is NOT
+        //   gated on W-burst completion: multi-outstanding AW (post several
+        //   AWs, then stream the data) is legitimate AXI4 and load-bearing
+        //   for the RoB/multi-ID paths; the stricter wb2axip view is handled
+        //   by the existing scenario skip list, not baked into the model.
+        // - W (follow-on channel): wready pre-asserts on buffer capacity
+        //   WITHOUT waiting for WVALID while any accepted AW still has W
+        //   beats owed (w_expected_ accumulates across accepted bursts),
+        //   and drops once all owed beats arrived.
+        out_.awready = in_.awvalid && !prev_awready_ && port.can_accept_aw();
+        out_.wready = (w_expected_ > 0) && port.can_accept_w();
+        out_.arready = in_.arvalid && !prev_arready_ && port.can_accept_ar();
 
         // B channel: held-latch pattern (AXI4 §A3.2.1 — bvalid must hold
         // until bready). Consume held beat on bready; try to pop the next.
@@ -185,6 +192,12 @@ class NmuShellAdapter {
         // NoC rsp credit: PoC always 0 (NmuStandalone owns its own rsp queue;
         // no upstream credit signalling needed for the PoC single-shell setup).
         out_.noc_rsp_credit_return = false;
+
+        // Save this tick's ready outputs: next tick, valid && prev_ready
+        // identifies the wire-handshake cycle.
+        prev_awready_ = out_.awready;
+        prev_wready_ = out_.wready;
+        prev_arready_ = out_.arready;
     }
 
     void get_outputs(NmuOutputs& out) const { out = out_; }
@@ -195,6 +208,10 @@ class NmuShellAdapter {
     NmuOutputs out_{};
     std::optional<axi::BBeat> held_b_;
     std::optional<axi::RBeat> held_r_;
+    bool prev_awready_ = false;  // ready driven last tick (wire value this tick)
+    bool prev_wready_ = false;
+    bool prev_arready_ = false;
+    uint32_t w_expected_ = 0;  // W beats remaining of the open burst window
 
     // Flit <-> FlitBytes helpers live in cosim/flit_byte_conv.hpp; calls use
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.

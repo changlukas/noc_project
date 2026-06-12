@@ -62,10 +62,11 @@ FlitBytes make_w_flit_bytes() {
 
 // ---------------------------------------------------------------------------
 // Test 1: idle adapter — no NoC input produces no AXI master traffic and no
-// NoC rsp flit. bready/rready asserted (capacity available).
+// NoC rsp flit. bready/rready stay LOW: context-gated policy — no request
+// was issued, so no response is owed and ready must not pre-assert.
 // ---------------------------------------------------------------------------
 TEST(NsuShellAdapter, idle_adapter_no_output) {
-    SCENARIO("Idle NsuShellAdapter: no NoC req flit → noc_rsp_valid low + axi_o.awvalid low");
+    SCENARIO("Idle NsuShellAdapter: no NoC req flit → no AXI outputs, b/rready low");
 
     NsuShellAdapter adapter;
     adapter.init();
@@ -81,8 +82,10 @@ TEST(NsuShellAdapter, idle_adapter_no_output) {
     EXPECT_FALSE(out.awvalid) << "idle Nsu should not drive AW (no request processed)";
     EXPECT_FALSE(out.wvalid) << "idle Nsu should not drive W";
     EXPECT_FALSE(out.arvalid) << "idle Nsu should not drive AR";
-    EXPECT_TRUE(out.bready) << "Nsu should be ready to accept B (queue has capacity)";
-    EXPECT_TRUE(out.rready) << "Nsu should be ready to accept R (queue has capacity)";
+    EXPECT_FALSE(out.bready)
+        << "context-gated: no write issued -> no B owed -> bready stays low";
+    EXPECT_FALSE(out.rready)
+        << "context-gated: no read issued -> no R owed -> rready stays low";
 }
 
 // ---------------------------------------------------------------------------

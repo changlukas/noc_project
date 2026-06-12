@@ -1,17 +1,17 @@
-// Unit tests for NmuShellAdapter — Stage 5b T10.
+// Unit tests for NmuShellAdapter — Stage 5b T10, updated for the
+// wait_valid / context-gated ready policy (see
+// docs/superpowers/specs/2026-06-12-wait-valid-ready-policy-design.md).
 //
 // Tests verify the 3-step pattern (set_inputs / tick / get_outputs) without any
 // DPI or SV involvement. Three cases cover the key behavioral invariants:
-//   1. Idle adapter asserts awready/wready/arready (empty queues have capacity).
-//   2. Single AW + single W beat: awready is asserted, wready is asserted.
-//   3. AWLEN=7 (8-beat W burst): every W beat visible on wire one per cycle
-//      (KNOWN_LIMITATIONS §2 fix proof — beta-tick model, not snapshot model).
-//
-// Note on test 3 expectations: NmuStandalone's Packetize stage has internal
-// wormhole_per_input_depth=4. The AxiSlavePort w_queue_depth=16 accepts all 8
-// beats; they drain one-per-cycle into Packetize. The test verifies that wready
-// is asserted each cycle the beat is presented (queue has capacity), proving
-// that beats are individually wire-visible, not collapsed into one cycle.
+//   1. Idle adapter keeps awready/wready/arready LOW (wait_valid: capacity
+//      alone never asserts ready).
+//   2. Single AW + W: two-phase AW handshake (ready pulses the tick after
+//      valid appears), then the W window opens and wready pre-asserts.
+//   3. AWLEN=7 (8-beat W burst): wready holds for the whole burst (one bubble
+//      at burst start, then full rate). A second AW presented mid-burst still
+//      gets its ready pulse — multi-outstanding AW (post addresses ahead of
+//      data) is legitimate AXI4 and load-bearing for the RoB/multi-ID paths.
 #include "common/scenario.hpp"
 #include "cosim/nmu_shell_adapter.hpp"
 #include "cosim/nmu_shell_io.hpp"
@@ -22,10 +22,10 @@ using ni::cmodel::cosim::NmuOutputs;
 using ni::cmodel::cosim::NmuShellAdapter;
 
 // ---------------------------------------------------------------------------
-// Test 1: idle adapter asserts awready/wready/arready (empty queues, no beats).
+// Test 1: idle adapter keeps all readys LOW (wait_valid policy).
 // ---------------------------------------------------------------------------
-TEST(NmuShellAdapter, idle_adapter_asserts_ready_signals) {
-    SCENARIO("Idle NmuShellAdapter asserts awready/wready/arready (empty queues have capacity)");
+TEST(NmuShellAdapter, idle_adapter_keeps_readys_low) {
+    SCENARIO("Idle NmuShellAdapter keeps awready/wready/arready low (wait_valid)");
 
     NmuShellAdapter adapter;
     adapter.init();
@@ -37,21 +37,19 @@ TEST(NmuShellAdapter, idle_adapter_asserts_ready_signals) {
     NmuOutputs out{};
     adapter.get_outputs(out);
 
-    EXPECT_TRUE(out.awready) << "idle Nmu should accept new AW (empty queue has capacity)";
-    EXPECT_TRUE(out.wready) << "idle Nmu should accept new W (empty queue has capacity)";
-    EXPECT_TRUE(out.arready) << "idle Nmu should accept new AR (empty queue has capacity)";
+    EXPECT_FALSE(out.awready) << "wait_valid: no AWVALID -> awready must stay low";
+    EXPECT_FALSE(out.wready) << "no open W burst window -> wready must stay low";
+    EXPECT_FALSE(out.arready) << "wait_valid: no ARVALID -> arready must stay low";
     EXPECT_FALSE(out.bvalid) << "no B response without a prior AW+W";
     EXPECT_FALSE(out.rvalid) << "no R response without a prior AR";
     EXPECT_FALSE(out.noc_req_valid) << "no NoC req flit without any AXI request";
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: single AW + W beat — awready and wready both asserted this cycle.
-// This exercises AXI slave side wire visibility: each channel independently
-// accepts its beat when queue has capacity.
+// Test 2: single AW + W beat — two-phase AW handshake, then W window.
 // ---------------------------------------------------------------------------
-TEST(NmuShellAdapter, single_aw_w_beat_both_accepted) {
-    SCENARIO("Drive single AW and W beat; both awready and wready asserted");
+TEST(NmuShellAdapter, single_aw_w_two_phase_handshake) {
+    SCENARIO("Two-phase AW handshake; wready pre-asserts after AW, W beat consumed");
 
     NmuShellAdapter adapter;
     adapter.init();
@@ -59,23 +57,28 @@ TEST(NmuShellAdapter, single_aw_w_beat_both_accepted) {
     NmuInputs in{};
     NmuOutputs out{};
 
-    // Cycle 1: present AW (INCR, len=0 = 1 beat, size=5 = 32 B/beat).
+    // Cycle 1: AWVALID first seen — awready pulses; W window still closed.
     in.awvalid = true;
     in.awid = 0x01;
     in.awaddr = 0x200;
     in.awlen = 0;    // 1 beat
     in.awsize = 5;   // 32 bytes (256-bit bus)
     in.awburst = 1;  // INCR
-    in.awlock = 0;
-    in.awcache = 0;
-    in.awprot = 0;
-    in.awqos = 0;
     adapter.set_inputs(in);
     adapter.tick();
     adapter.get_outputs(out);
-    EXPECT_TRUE(out.awready) << "cycle 1: Nmu should accept AW from empty queue";
+    EXPECT_TRUE(out.awready) << "cycle 1: AWVALID observed + capacity -> awready pulses";
+    EXPECT_FALSE(out.wready) << "cycle 1: AW not yet handshaken -> W window closed";
 
-    // Cycle 2: present W (single beat, last=true).
+    // Cycle 2: valid held && prev ready -> AW handshake tick; window opens.
+    adapter.set_inputs(in);
+    adapter.tick();
+    adapter.get_outputs(out);
+    EXPECT_FALSE(out.awready) << "cycle 2: handshake done -> awready back low";
+    EXPECT_TRUE(out.wready) << "cycle 2: W window open -> wready pre-asserts without wvalid";
+
+    // Cycle 3: drive the single W beat (prev wready=1 -> consumed; WLAST
+    // closes the window).
     in = NmuInputs{};
     in.wvalid = true;
     in.wdata[0] = 0x55;
@@ -85,22 +88,20 @@ TEST(NmuShellAdapter, single_aw_w_beat_both_accepted) {
     adapter.set_inputs(in);
     adapter.tick();
     adapter.get_outputs(out);
-    EXPECT_TRUE(out.wready) << "cycle 2: Nmu should accept W from empty queue";
+    EXPECT_FALSE(out.wready) << "cycle 3: WLAST consumed -> W window closed";
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: AWLEN=7 (8-beat W burst) — per-cycle wire visibility (KL §2 fix).
+// Test 3: AWLEN=7 (8-beat W burst) — burst-hold wready; AW stays available.
 //
-// The KNOWN_LIMITATIONS §2 broken behavior (snapshot model) would collapse all
-// 8 W beats into a single cycle. The beta-tick model (this implementation)
-// exposes each beat individually on the wire: wready is asserted each cycle
-// because the AxiSlavePort w_queue has capacity (depth=16).
-//
-// Proof: drive 8 W beats one per cycle; count cycles where wready=true.
-// Every cycle with wvalid=true and queue not full should see wready=true.
+// After the AW handshake the W window holds wready high for the full burst
+// (capacity permitting): one bubble at burst start, then full rate — all 8
+// beats accepted back-to-back. A second AWVALID presented mid-burst still
+// receives its one-shot ready pulse (multi-outstanding AW preserved; the
+// stricter wb2axip view lives in the scenario skip list, not in the model).
 // ---------------------------------------------------------------------------
-TEST(NmuShellAdapter, multi_beat_w_burst_visible_per_cycle) {
-    SCENARIO("AWLEN=7 (8-beat W burst): every W beat visible on wire one per cycle (KL §2 fix)");
+TEST(NmuShellAdapter, multi_beat_w_burst_full_rate_aw_available) {
+    SCENARIO("8-beat W burst at full rate; mid-burst AW still gets its ready pulse");
 
     NmuShellAdapter adapter;
     adapter.init();
@@ -108,58 +109,64 @@ TEST(NmuShellAdapter, multi_beat_w_burst_visible_per_cycle) {
     NmuInputs in{};
     NmuOutputs out{};
 
-    // Cycle 1: drive AW with len=7 (AWLEN=7 → 8 beats).
+    // Cycle 1: AW (len=7 -> 8 beats) first seen.
     in.awvalid = true;
     in.awid = 0x00;
     in.awaddr = 0x100;
     in.awlen = 7;    // 8 beats
-    in.awsize = 5;   // 32 bytes/beat (256-bit bus)
+    in.awsize = 5;   // 32 bytes/beat
     in.awburst = 1;  // INCR
-    in.awlock = 0;
-    in.awcache = 0;
-    in.awprot = 0;
-    in.awqos = 0;
     adapter.set_inputs(in);
     adapter.tick();
     adapter.get_outputs(out);
-    // AW with awlen=7: NMU's can_accept_aw() is a pure queue-vacancy check (AXI4
-    // §A3.3 spec-compliant). AWREADY=1 is correct when the queue has space.
-    // wb2axip faxi_slave.v:805-807 enforces AWREADY=0 during W burst — that is a
-    // wb2axip-internal simplification, not AXI4 spec (see KNOWN_LIMITATIONS.md §6).
-    EXPECT_TRUE(out.awready)
-        << "cycle 1: awready should be 1 (queue has space, spec-compliant)";
+    EXPECT_TRUE(out.awready) << "cycle 1: awready pulses for the observed AW";
 
-    // Cycles 2-9: drive 8 W beats one per cycle.
-    // Count: (a) beats where wready=true (beat accepted into queue this cycle)
-    //        (b) whether wready was ever true (at least one beat visible on wire)
-    in = NmuInputs{};
-    in.bready = true;
+    // Cycle 2: AW handshake tick — window opens (w_expected=8).
+    adapter.set_inputs(in);
+    adapter.tick();
+    adapter.get_outputs(out);
+    EXPECT_FALSE(out.awready) << "cycle 2: AW consumed";
+    EXPECT_TRUE(out.wready) << "cycle 2: burst window open, wready holds";
+
+    // Cycles 3-10: drive 8 W beats one per cycle. A beat is accepted when the
+    // PREVIOUS tick's wready (the wire value this cycle) was high. Present a
+    // second AW alongside the first W beat: it must be gated (no awready)
+    // while the burst is open.
     int beats_accepted = 0;
-    int beats_presented = 8;
-
-    for (int beat = 0; beat < beats_presented; ++beat) {
+    bool prev_wready = out.wready;  // wire value seen by the first W beat
+    for (int beat = 0; beat < 8; ++beat) {
+        in = NmuInputs{};
+        in.bready = true;
         in.wvalid = true;
         in.wdata.fill(0);
-        in.wdata[0] = static_cast<uint8_t>(0x10 + beat);  // unique canary per beat
+        in.wdata[0] = static_cast<uint8_t>(0x10 + beat);
         in.wstrb = 0xFFFF'FFFFu;
         in.wlast = (beat == 7);
+        if (beat == 0) {
+            in.awvalid = true;  // second AW presented mid-burst
+            in.awid = 0x02;
+            in.awaddr = 0x300;
+            in.awlen = 0;
+            in.awsize = 5;
+            in.awburst = 1;
+        }
         adapter.set_inputs(in);
         adapter.tick();
         adapter.get_outputs(out);
-        if (out.wready) {
-            ++beats_accepted;
+        if (prev_wready) ++beats_accepted;
+        prev_wready = out.wready;
+        if (beat == 0) {
+            EXPECT_TRUE(out.awready)
+                << "second AW presented mid-burst must still get its ready "
+                   "pulse (multi-outstanding AW preserved)";
+        }
+        if (beat < 7) {
+            EXPECT_TRUE(out.wready)
+                << "beat " << beat << ": burst window still open -> wready holds";
         }
     }
 
-    // Core KL §2 assertion: at least 1 W beat was wire-visible per cycle.
-    // In the broken snapshot model, only beat 0 would ever be visible because
-    // all beats are buffered inside the model before tick(), not one per cycle.
-    // In the beta-tick model, each beat arrives one-per-cycle at push_w().
-    EXPECT_GE(beats_accepted, 1) << "at least one W beat must be accepted per-cycle (KL §2)";
-
-    // Stronger assertion: because AxiSlavePort.w_queue_depth=16 and we drive 8
-    // beats, the queue should have capacity for all 8 → every beat accepted.
-    EXPECT_EQ(beats_accepted, beats_presented)
-        << "all 8 W beats should be accepted (queue depth=16 >> 8 beats); "
-           "if <8, the adapter is buffering beats before tick() (KL §2 regression)";
+    EXPECT_EQ(beats_accepted, 8)
+        << "all 8 W beats must transfer at full rate after the one-bubble start";
+    EXPECT_FALSE(out.wready) << "after WLAST the window closes -> wready low";
 }

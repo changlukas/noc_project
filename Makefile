@@ -18,7 +18,7 @@ COSIM_VERILATOR := cosim/verilator
 COSIM_VCS       := cosim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
-        clean clean-cmodel clean-verilator clean-specgen-cache
+        clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
 	@echo "Build (from repo root):"
@@ -40,6 +40,7 @@ help:
 	@echo "  make clean                  everything (build/ + per-sim output/)"
 	@echo "  make clean-cmodel           build/cmodel/"
 	@echo "  make clean-verilator        build/verilator/ + cosim/verilator/output/"
+	@echo "  make clean-vcs              build/vcs/ + cosim/vcs/output/ + Verdi droppings"
 	@echo "  make clean-specgen-cache    specgen __pycache__/"
 
 # --- build ---
@@ -63,11 +64,26 @@ build: build-cmodel build-verilator
 # complaints under non-UTF-8 Windows locales.
 TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/System32" LC_ALL=C
 
+# Offline hosts (no network for FetchContent): point DEPS_SRC at a directory
+# holding pre-fetched dependency sources — copy googletest-src/ and
+# yaml-cpp-src/ from an online host's build/cmodel/_deps/ (the .git subdirs
+# are not needed). FULLY_DISCONNECTED makes any accidental download attempt a
+# hard error instead of a silent hang on a firewalled host.
+#   make build-cmodel DEPS_SRC=$$HOME/noc_offline_deps
+ifdef DEPS_SRC
+CMAKE_DEPS_FLAGS := \
+    -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+    -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=$(DEPS_SRC)/googletest-src \
+    -DFETCHCONTENT_SOURCE_DIR_YAML-CPP=$(DEPS_SRC)/yaml-cpp-src
+else
+CMAKE_DEPS_FLAGS :=
+endif
+
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
 	@$(TOOLPATH) cmake --build $(CMODEL_BUILD) -j
 
 $(CMODEL_BUILD)/CMakeCache.txt:
-	@$(TOOLPATH) cmake -S $(CMODEL_DIR) -B $(CMODEL_BUILD)
+	@$(TOOLPATH) cmake -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS)
 
 build-verilator: build-cmodel
 	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR)
@@ -109,7 +125,7 @@ check: lint_scenarios lint_docs build-cmodel build-verilator
 
 # --- clean ---
 
-clean: clean-cmodel clean-verilator clean-specgen-cache
+clean: clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 	rm -rf $(BUILD_ROOT)
 
 clean-cmodel:
@@ -117,6 +133,9 @@ clean-cmodel:
 
 clean-verilator:
 	$(MAKE) -C $(COSIM_VERILATOR) clean
+
+clean-vcs:
+	$(MAKE) -C cosim/vcs clean
 
 clean-specgen-cache:
 	find specgen -type d -name __pycache__ -prune -exec rm -rf {} +

@@ -38,4 +38,17 @@ module tb_top_vcs;
         .clk_i (clk_i),
         .rst_ni(rst_ni)
     );
+
+    // FSDB waveform dump — compiled in only by the VCS flow with FSDB=1
+    // (+define+FSDB_DUMP). Path comes from +fsdb=<abs-path>; the Makefile
+    // run recipe supplies output/<scenario>/tb_top.fsdb.
+`ifdef FSDB_DUMP
+    initial begin
+        string fsdb_path;
+        if (!$value$plusargs("fsdb=%s", fsdb_path))
+            fsdb_path = "dump.fsdb";
+        $fsdbDumpfile(fsdb_path);
+        $fsdbDumpvars(0, tb_top_vcs); // depth 0 = full hierarchy below top
+    end
+`endif
 endmodule

@@ -49,6 +49,30 @@ GENAMBA_SV_SRC := \
     $(COSIM_ROOT)/sv/genamba_master_bfm.sv \
     $(COSIM_ROOT)/sv/tb_genamba.sv
 
+# `include'd task bodies — NOT standalone compile units (never pass them to
+# the simulator command line), but they ARE build inputs: list them as extra
+# prerequisites on the genamba build rules so editing them triggers a
+# rebuild (previously invisible to make).
+GENAMBA_INC_DEPS := \
+    $(COSIM_ROOT)/sv/genamba/axi_master_tasks.v \
+    $(COSIM_ROOT)/sv/genamba/mem_test_tasks.v \
+    $(COSIM_ROOT)/sv/genamba/mem_axi_dpram_sync.v
+
+# Same for tb_top: sim_wrapper.svh is `include'd by tb_top.sv.
+TB_TOP_INC_DEPS := \
+    $(COSIM_ROOT)/sv/wb2axip/sim_wrapper.svh
+
+# DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (shell adapters and
+# their transitive includes). The obj-dir sub-make tracks them via -MMD, but
+# the TOP-level rules must list them too — otherwise a header-only change
+# leaves the simulator binary stale because the sub-make never runs.
+DPI_HDR_DEPS := \
+    $(wildcard $(PROJ_ROOT)/c_model/include/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/c_model/include/*/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/c_model/include/*/*/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/c_model/tests/common/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.hpp)
+
 GENAMBA_DEFINES := \
     +define+AMBA_AXI4 +define+AMBA_QOS \
     +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT

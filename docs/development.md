@@ -243,6 +243,60 @@ The vendored-task patches (B-latch reads, R-shadow array) are
 simulator-neutral and identical under both flows. The `SIM=vcs` path has
 been dry-run validated only -- first run on a real VCS install pending.
 
+#### FSDB waveform dumping (VCS only)
+
+Opt-in per run; default off (regression and ctest are unaffected):
+
+~~~bash
+cd cosim/vcs
+make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat FSDB=1   # -> output/<scenario>/tb_top.fsdb
+make run-genamba FSDB=1                                   # -> output/genamba_<scenario>/tb_genamba.fsdb
+make run-all-fsdb                                         # all 37 scenarios + genamba, summary at end
+~~~
+
+Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
+workstation's install, taken from its local reference Makefile — untracked
+`cosim/ref/`); override it if the layout
+differs. FSDB builds produce separate `simv_tb_top_fsdb` / `simv_genamba_fsdb`
+binaries beside the normal ones; toggling `FSDB` never reuses a binary from
+the other mode.
+For memory dumping / interactive Verdi debug, enable the heavier ref-flow
+combo: `FSDB_EXTRA="-debug_access+all -debug_all +fsdb+all +vcsd"`.
+
+`run-all-fsdb` always exits 0 — it is not a regression gate; failing
+patterns are reported and their partial fsdb is kept for debug.
+`AX4-INF-*` failures are annotated "fails by design" in the summary.
+
+First-run validation on the workstation (record results in the
+`[WORKSTATION]` block of `cosim/vcs/Makefile`):
+
+1. `FSDB_PLI` paths exist (`$VERDI_HOME/share/PLI/VCS/LINUXAMD64/{novas.tab,pli.a}`).
+2. Whether `LD_LIBRARY_PATH` needs the FSDB runtime libs.
+3. Open one fsdb in Verdi: top-level AXI interfaces, DPI wrapper boundaries,
+   and `faxi` checker state must be visible (not merely a loadable file).
+
+#### VCD waveform tracing (Verilator)
+
+Twin of the FSDB flow for the Verilator side — usable on the Windows dev
+host without VCS/Verdi. Opt-in per run; default off:
+
+~~~bash
+cd cosim/verilator
+make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat TRACE=1  # -> output/<scenario>/tb_top.vcd
+make run-genamba TRACE=1                                 # -> output/genamba_<scenario>/tb_genamba.vcd
+make run-all-trace                                       # all 37 scenarios + genamba, summary at end
+~~~
+
+Trace builds verilate with `--trace` into separate obj dirs
+(`obj_dir_trace` / `obj_genamba_trace`); toggling `TRACE` never reuses the
+other mode's build. The dump code in `main.cpp` / `main_genamba.cpp` is
+`#if VM_TRACE`-guarded, so non-trace builds are unchanged. `run-all-trace`
+follows `run-all-fsdb` semantics (always exits 0; a scenario counts PASS
+only if its vcd is non-empty; `AX4-INF-*` annotated "fails by design").
+
+View locally with GTKWave, or transfer to the workstation for Verdi (Verdi
+opens VCD directly). VCD is uncompressed text — `gzip` before transfer.
+
 ### Verified toolchain versions
 
 The build is developed and verified on Windows 11 + MSYS2 (mingw64).
@@ -263,6 +317,23 @@ prefix, then `make check` -- build artifacts are per-clone (the whole
 `build/` tree and per-sim `output/` dirs are gitignored), so Windows and
 Linux working copies never share or clobber binaries. Line endings are pinned by `.gitattributes` (LF in repo
 objects; shell/build files LF in the working tree on every platform).
+
+Offline hosts (no outbound network, e.g. a firewalled company server):
+CMake FetchContent cannot download googletest/yaml-cpp there. Copy
+`googletest-src/` and `yaml-cpp-src/` from an online host's
+`build/cmodel/_deps/` (`.git` subdirs not needed) to the offline host, then:
+
+~~~bash
+make build-cmodel DEPS_SRC=$HOME/noc_offline_deps
+~~~
+
+`DEPS_SRC` configures with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so an
+accidental download attempt fails loudly instead of hanging on the firewall.
+Toolchain prerequisites still apply: CMake >= 3.20 (a portable Kitware
+binary tarball transferred to the host works user-space, no root) and
+g++ >= 7 for C++17 (on RHEL/CentOS 7 hosts: `scl enable devtoolset-N bash`;
+the same shell must also be used for the VCS run so DPI C++ compiles with
+the new g++).
 
 ### CMakeCache.txt and configure
 
@@ -484,7 +555,7 @@ exercised by:
 
 ~~~bash
 cd build/cmodel
-ctest -R NmuShellAdapter.multi_beat_w_burst_visible_per_cycle --output-on-failure
+ctest -R NmuShellAdapter.multi_beat_w_burst_full_rate_aw_available --output-on-failure
 ~~~
 
 This test proves that each of the 8 W beats in an AWLEN=7 burst is

@@ -12,6 +12,33 @@ include ../sources.mk
 
 VL_BUILD := $(BUILD_ROOT)/verilator
 
+# --- VCD waveform tracing (opt-in) -------------------------------------------
+# TRACE=1 verilates with --trace into separate obj dirs (obj_dir_trace /
+# obj_genamba_trace) because --trace changes the generated C++ — sharing an
+# obj dir across modes would silently reuse the wrong build. The dump code in
+# main.cpp / main_genamba.cpp is guarded by #if VM_TRACE (defined by
+# Verilator iff --trace), so non-trace builds contain zero trace code.
+TRACE ?= 0
+ifeq ($(TRACE),1)
+TRACE_FLAGS := --trace --trace-structs
+TRACE_SUFFIX := _trace
+else
+TRACE_FLAGS :=
+TRACE_SUFFIX :=
+endif
+# Deferred (=) on purpose: SCENARIO / GENAMBA_SCENARIO are defined later in
+# this file, and the per-run value must win when run-all-trace loops.
+# Use sites attach via $(if $(V), $(V),) — a bare " $(V)" would leave a
+# double space when empty and break TRACE=0 command-line byte-identity.
+ifeq ($(TRACE),1)
+TRACE_PLUSARG_TB_TOP  = "+vcd=$(CURDIR)/output/$(SCENARIO)/tb_top.vcd"
+TRACE_PLUSARG_GENAMBA = "+vcd=$(CURDIR)/output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd"
+else
+TRACE_PLUSARG_TB_TOP  =
+TRACE_PLUSARG_GENAMBA =
+endif
+# -----------------------------------------------------------------------------
+
 SV_SRC := $(TB_TOP_SV_SRC)
 
 # main.cpp is the Verilator-only clock/eval driver; under VCS the simulator
@@ -42,12 +69,17 @@ VERILATOR_COMMON_FLAGS := \
 # -Wno-attributes (g++): verilator's own svdpi.h triggers "'dllimport'
 # attribute ignored" under MinGW for every DPI-bearing translation unit —
 # toolchain header noise, not project code.
+ifeq ($(TRACE),1)
+# guarded: += of an empty var would add a trailing space and break TRACE=0
+# byte-identity
+VERILATOR_COMMON_FLAGS += $(TRACE_FLAGS)
+endif
 
 VERILATOR_FLAGS := \
     $(VERILATOR_COMMON_FLAGS) \
     --top-module $(TOP) \
     --no-timing \
-    --Mdir $(VL_BUILD)/obj_dir \
+    --Mdir $(VL_BUILD)/obj_dir$(TRACE_SUFFIX) \
     -I$(COSIM_ROOT)/sv/wb2axip \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
@@ -61,7 +93,7 @@ VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 # does not. Naming the real artifact makes the source-dependency check
 # fire correctly on both (a phony or wrong-name target rebuilds always).
 EXEEXT := $(if $(findstring NT,$(shell uname -s)),.exe,)
-TBTOP_EXE := $(VL_BUILD)/obj_dir/V$(TOP)$(EXEEXT)
+TBTOP_EXE := $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)/V$(TOP)$(EXEEXT)
 
 all: $(TBTOP_EXE)
 
@@ -85,10 +117,10 @@ check-yamlcpp:
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
 # LDFLAGS_EXTRA: set PE stack reserve to 64 MiB so MinGW pthread initialises
 #   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
-$(TBTOP_EXE): $(SV_SRC) $(C_SRC) | check-yamlcpp
-	@mkdir -p $(VL_BUILD)/obj_dir
+$(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(TB_TOP_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
+	@mkdir -p $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SV_SRC) $(C_SRC)
-	$(MAKE) -C $(VL_BUILD)/obj_dir -f V$(TOP).mk \
+	$(MAKE) -C $(VL_BUILD)/obj_dir$(TRACE_SUFFIX) -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=-Wl,--stack,67108864"
 
@@ -102,8 +134,9 @@ SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
 .PHONY: run-tb-top
 run-tb-top: $(TBTOP_EXE)
 	@mkdir -p output/$(SCENARIO)
+	@rm -f output/$(SCENARIO)/tb_top.vcd  # drop stale vcd from a previous TRACE=1 run
 	@echo "running scenario $(SCENARIO); output -> output/$(SCENARIO)/"
-	@$(TBTOP_EXE) "+scenario=$(SCENARIO_ABS)" \
+	@$(TBTOP_EXE) "+scenario=$(SCENARIO_ABS)"$(if $(TRACE_PLUSARG_TB_TOP), $(TRACE_PLUSARG_TB_TOP),) \
 	    > output/$(SCENARIO)/run.log 2>&1; \
 	rc=$$?; \
 	if ls master_shell_read_dump*.txt >/dev/null 2>&1; then \
@@ -123,11 +156,12 @@ hello:
 	/tmp/empty_tb_obj/Vempty_tb && echo "TOOLCHAIN OK"
 
 clean: clean-genamba
-	rm -rf $(VL_BUILD)/obj_dir output
+	rm -rf $(VL_BUILD)/obj_dir $(VL_BUILD)/obj_dir_trace output
 	rm -f master_shell_read_dump*.txt
+	rm -f $(VL_BUILD)/master_shell_read_dump*.txt  # ctest runs Vtb_top with cwd build/verilator
 
 # --- gen_amba role-1 testbench (Phase 1) ---
-GENAMBA_OBJDIR := $(VL_BUILD)/obj_genamba
+GENAMBA_OBJDIR := $(VL_BUILD)/obj_genamba$(TRACE_SUFFIX)
 GENAMBA_SRC := $(GENAMBA_SV_SRC)
 GENAMBA_C_SRC := \
     $(DPI_C_SRC) \
@@ -166,7 +200,7 @@ GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba$(EXEEXT)
 # invalid escapes (2300+ g++ warnings) and `\t` silently corrupts to TAB.
 # Rewrite only backslashes that follow a drive-letter path prefix —
 # legitimate \n escapes in $display format strings never match.
-$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) | check-yamlcpp
+$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(GENAMBA_OBJDIR)
 	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
@@ -185,10 +219,57 @@ GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenari
 .PHONY: run-genamba
 run-genamba: genamba
 	@mkdir -p output/genamba_$(GENAMBA_SCENARIO)
+	@rm -f output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd  # drop stale vcd from a previous TRACE=1 run
 	@set -o pipefail; \
-	$(GENAMBA_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)" \
+	$(GENAMBA_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(TRACE_PLUSARG_GENAMBA), $(TRACE_PLUSARG_GENAMBA),) \
 	    2>&1 | tee output/genamba_$(GENAMBA_SCENARIO)/run.log
 
 .PHONY: clean-genamba
 clean-genamba:
-	rm -rf $(GENAMBA_OBJDIR)
+	rm -rf $(VL_BUILD)/obj_genamba $(VL_BUILD)/obj_genamba_trace
+
+# --- batch: one vcd per scenario, both TBs ------------------------------------
+# Mirrors cosim/vcs run-all-fsdb (see that header for semantics): pre-builds
+# the trace binary once, then runs every scenario; a scenario counts PASS
+# only if the sim exits 0 AND its vcd is non-empty. NOT a regression gate
+# (always exits 0 — ctest is the gate). AX4-INF-001 fails by design.
+SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/tests/scenarios/AX4-*))
+
+.PHONY: run-all-trace
+run-all-trace:
+	@if ! $(MAKE) all TRACE=1; then \
+	    echo ""; echo "run-all-trace: trace build failed — no scenarios were run."; \
+	    exit 0; \
+	fi; \
+	pass=(); fail=(); vcds=(); \
+	for s in $(SCENARIOS_ALL); do \
+	    echo ""; echo "=== run-all-trace: $$s ==="; \
+	    if $(MAKE) run-tb-top SCENARIO=$$s TRACE=1 && test -s "output/$$s/tb_top.vcd"; then \
+	        pass+=("$$s"); vcds+=("output/$$s/tb_top.vcd"); \
+	    else \
+	        fail+=("$$s"); \
+	    fi; \
+	done; \
+	echo ""; echo "=== run-all-trace: tb_genamba ($(GENAMBA_SCENARIO)) ==="; \
+	if $(MAKE) run-genamba TRACE=1 && test -s "output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd"; then \
+	    pass+=("genamba_$(GENAMBA_SCENARIO)"); vcds+=("output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.vcd"); \
+	else \
+	    fail+=("genamba_$(GENAMBA_SCENARIO)"); \
+	fi; \
+	echo ""; echo "================ run-all-trace summary ================"; \
+	echo "PASS (with vcd): $${#pass[@]}"; \
+	for s in "$${pass[@]}"; do echo "  PASS $$s"; done; \
+	echo "FAIL (no vcd or sim failed): $${#fail[@]}"; \
+	for s in "$${fail[@]}"; do \
+	    case "$$s" in \
+	        AX4-INF-*) echo "  FAIL $$s  (fails by design)";; \
+	        *)         echo "  FAIL $$s";; \
+	    esac; \
+	done; \
+	echo "--- waveforms ---"; \
+	if [ $${#vcds[@]} -gt 0 ]; then \
+	    ls -lh "$${vcds[@]}" | awk '{print "  " $$5 "\t" $$9}'; \
+	else \
+	    echo "  (none)"; \
+	fi; \
+	exit 0

@@ -154,6 +154,60 @@ Verified by fault injection: a deliberate `bfm_drain_b` with a wrong AWID
 makes the BID check fire, sets `error_flag`, and the trap aborts the run
 with a non-zero exit code.
 
+### `<= #LD` flattening — edge-aligned BFM drives
+
+Upstream drives every AXI output with `<= #LD` (`LD=1`). Under Verilator
+`--timing` this is executed as a 1 ns coroutine suspension per statement
+(not an IEEE intra-assignment delay), so consecutive assignments staircase
+1..7 ns past the clock edge — waveforms showed every BFM-driven signal
+off-edge by its statement ordinal, and chained calls could drift past the
+next edge entirely.
+
+Project fix: all 50 `<= #LD` sites in `axi_master_tasks.v` are flattened to
+plain `<=` (NBA at the current edge). All BFM-driven signals now transition
+exactly on clock edges (verified: every VCD transition lands on a posedge
+timestamp).
+
+Two latent races surfaced by the (denser) flattened timing, both fixed with
+condition-based waits instead of fixed delays:
+
+- `axi_master_write_b`: the procedural BVALID poll resumes post-NBA (one
+  wire-cycle early); a BREADY deassert issued from there lands at the head
+  of the next timestep, before any always_ff samples the handshake —
+  aborting it. The patched task now detects handshake completion via the
+  `b_count` capture counter (`genamba_master_bfm.sv`) and deasserts BREADY
+  only afterwards; the stale fixed one-extra-cycle wait is removed.
+- Inter-task R-shadow sync: a bare `r_shadow_ridx = r_shadow_widx` barrier
+  raced straggler R beats still held by the bridge when the previous task
+  returned. `bfm_r_barrier` (project-owned, `genamba_master_bfm.sv`)
+  re-asserts RREADY to flush stragglers, waits for 4 quiet edges, then
+  syncs the pointer; all six test-task barriers use it.
+
+### Request-side counter handshakes + serialized write (wait_valid era)
+
+When the NMU adapters moved to one-shot wait_valid ready pulses (ready high
+for exactly one wire cycle per AW/AR), the vendored `while (xREADY==0)`
+polls broke the same way the B poll had: a post-NBA coroutine resume reads
+the ready one wire-cycle early, and the VALID deassert issued from that
+point lands before the DUT samples the handshake. All three request waits
+(`axi_master_write_aw`, per-beat `axi_master_write_w`,
+`axi_master_read_ar`) now wait on capture counters
+(`aw_count`/`w_count`/`ar_count` in `genamba_master_bfm.sv`, incremented by
+the always_ff that samples true wire values) — the same proven pattern as
+`b_count`.
+
+`axi_master_write` upstream forks AW/W/B concurrently (AXI-legal). Project
+decision: serialized to AW (handshake completes) → W → B, matching the
+adapter-layer Tasks B-G and the conservative ordering preferred for
+waveform review.
+
+### Known upstream issue (unpatched)
+
+`axi_master_write_multiple_outstanding` indexes `reg_addr[idx]` from its
+concurrent AW loop where `reg_addr[idy]` (the W-loop index) is intended,
+which can mis-strobe narrow/unaligned writes. Left as-is: the project BFM
+does not call this task; fix it before first use.
+
 ## Notes
 
 Only the point-to-point spike IP is vendored (golden master tasks + memory model);
