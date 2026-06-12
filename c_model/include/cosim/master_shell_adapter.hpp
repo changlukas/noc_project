@@ -86,10 +86,12 @@ class MasterShellAdapter {
         wp.set_wready(in_.wready   && prev_out_.wvalid);
         wp.set_arready(in_.arready && prev_out_.arvalid);
 
-        // Request handshakes recognized this tick open the response-ready
-        // context windows (policy spec: B/R ready pre-assert only while a
-        // response is actually owed).
-        if (in_.awready && prev_out_.awvalid) {
+        // Request completion recognized this tick opens the response-ready
+        // context window (policy spec: B/R ready pre-assert only while a
+        // response is actually owed). For writes the request is complete at
+        // the WLAST handshake — BREADY must not rise before the data phase
+        // finished; for reads the single AR handshake completes the request.
+        if (in_.wready && prev_out_.wvalid && prev_out_.wlast) {
             ++outstanding_w_;
         }
         if (in_.arready && prev_out_.arvalid) {

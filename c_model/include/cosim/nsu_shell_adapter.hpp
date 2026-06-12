@@ -100,12 +100,11 @@ class NsuShellAdapter {
         // awready/wready/arready (AXI4 §A3.2.1 — master must not deassert
         // valid until ready is seen).
 
-        // AW: consume held beat on awready; try to pop the next. The consume
-        // tick is the recognized AW handshake — a B response is now owed, so
-        // open the BREADY context window.
+        // AW: consume held beat on awready; try to pop the next. (The BREADY
+        // window opens at the WLAST consume below — a write's B is only
+        // awaited once its data phase completed.)
         if (held_aw_ && in_.awready) {
             held_aw_ = std::nullopt;
-            ++outstanding_w_;
         }
         if (!held_aw_) {
             held_aw_ = port.pop_aw();
@@ -123,8 +122,11 @@ class NsuShellAdapter {
             out_.awqos = held_aw_->qos;
         }
 
-        // W: consume held beat on wready; try to pop the next.
+        // W: consume held beat on wready; try to pop the next. The WLAST
+        // consume completes the write request — the B response is now owed,
+        // so open the BREADY context window.
         if (held_w_ && in_.wready) {
+            if (held_w_->last) ++outstanding_w_;
             held_w_ = std::nullopt;
         }
         if (!held_w_) {

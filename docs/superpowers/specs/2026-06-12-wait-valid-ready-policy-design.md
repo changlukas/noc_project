@@ -38,7 +38,7 @@ model.
 | NmuShellAdapter / SlaveShellAdapter | AWREADY | one-shot: `awvalid && !prev_awready && can_accept_aw` |
 | | WREADY | burst-hold: `w_expected>0 && can_accept_w` |
 | | ARREADY | one-shot: `arvalid && !prev_arready && can_accept_ar` |
-| NsuShellAdapter / MasterShellAdapter | BREADY | outstanding-hold: `outstanding_writes>0 && can_accept_b` (master shell: capacity always true) |
+| NsuShellAdapter / MasterShellAdapter | BREADY | outstanding-hold: `outstanding_writes>0 && can_accept_b` (master shell: capacity always true); `outstanding_writes` opens at the WLAST handshake — BREADY rises only after the write's data phase completed (user refinement 2026-06-12) |
 | | RREADY | outstanding-hold: `expected_r_beats>0 && can_accept_r` |
 
 State added per adapter: previous-cycle ready outputs (handshake detection),
