@@ -153,6 +153,43 @@ run-tb-top: $(SIMV_TB_TOP)
 	$(SIMV_TB_TOP) "+scenario=$(SCENARIO_ABS)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
 	    2>&1 | tee output/$(SCENARIO)/run.log
 
+# --- batch: one fsdb per scenario, both TBs ----------------------------------
+# Produces waveforms; NOT a regression gate (always exits 0 — ctest is the
+# gate). Failing patterns are reported but do not stop the batch; their
+# partial fsdb is kept for debugging. AX4-INF-001 fails by design.
+SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/tests/scenarios/AX4-*))
+
+.PHONY: run-all-fsdb
+run-all-fsdb:
+	@pass=(); fail=(); \
+	for s in $(SCENARIOS_ALL); do \
+	    echo ""; echo "=== run-all-fsdb: $$s ==="; \
+	    if $(MAKE) run-tb-top SCENARIO=$$s FSDB=1; then \
+	        pass+=("$$s"); \
+	    else \
+	        fail+=("$$s"); \
+	    fi; \
+	done; \
+	echo ""; echo "=== run-all-fsdb: tb_genamba ($(GENAMBA_SCENARIO)) ==="; \
+	if $(MAKE) run-genamba FSDB=1; then \
+	    pass+=("genamba_$(GENAMBA_SCENARIO)"); \
+	else \
+	    fail+=("genamba_$(GENAMBA_SCENARIO)"); \
+	fi; \
+	echo ""; echo "================ run-all-fsdb summary ================"; \
+	echo "PASS (with fsdb): $${#pass[@]}"; \
+	for s in "$${pass[@]}"; do echo "  PASS $$s"; done; \
+	echo "FAIL (fsdb kept for debug): $${#fail[@]}"; \
+	for s in "$${fail[@]}"; do \
+	    case "$$s" in \
+	        AX4-INF-*) echo "  FAIL $$s  (fails by design)";; \
+	        *)         echo "  FAIL $$s";; \
+	    esac; \
+	done; \
+	echo "--- waveforms ---"; \
+	find output -name '*.fsdb' -exec ls -lh {} \; 2>/dev/null | awk '{print "  " $$5 "\t" $$9}'; \
+	exit 0
+
 .PHONY: clean
 clean:
 	rm -rf $(VCS_BUILD) output csrc *.log ucli.key vc_hdrs.h
