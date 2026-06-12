@@ -255,7 +255,8 @@ make run-all-fsdb                                         # all 37 scenarios + g
 ~~~
 
 Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
-workstation's install, per `cosim/ref/Makefile`); override it if the layout
+workstation's install, taken from its local reference Makefile — untracked
+`cosim/ref/`); override it if the layout
 differs. FSDB builds produce separate `simv_tb_top_fsdb` / `simv_genamba_fsdb`
 binaries beside the normal ones; toggling `FSDB` never reuses a binary from
 the other mode.

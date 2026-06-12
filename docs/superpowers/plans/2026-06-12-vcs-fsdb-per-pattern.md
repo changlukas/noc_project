@@ -426,6 +426,13 @@ Expected: `37`.
 
 - [ ] **Step 3: Verify the loop logic locally with a stub (no VCS needed)**
 
+> **Note (post-review):** the expectations below reflect the ORIGINAL
+> pre-review recipe and are kept for history. After the final-review
+> hardening (fsdb existence check + one-time pre-build), the stub results
+> change: `MAKE=true` now yields 38 FAIL / 0 PASS (the stub produces no
+> fsdb files, and the pre-build `true` succeeds), and `MAKE=false` now
+> aborts before the loop with "FSDB build failed" and exits 0.
+
 The inner `$(MAKE) run-tb-top ...` can't run here, but the bash
 collect/summary logic can be exercised by overriding MAKE:
 
