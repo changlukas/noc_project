@@ -199,7 +199,7 @@ GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba$(EXEEXT)
 # invalid escapes (2300+ g++ warnings) and `\t` silently corrupts to TAB.
 # Rewrite only backslashes that follow a drive-letter path prefix —
 # legitimate \n escapes in $display format strings never match.
-$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) | check-yamlcpp
+$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) | check-yamlcpp
 	@mkdir -p $(GENAMBA_OBJDIR)
 	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \

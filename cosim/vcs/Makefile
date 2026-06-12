@@ -109,7 +109,7 @@ GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenari
 
 SIMV_GENAMBA := $(VCS_BUILD)/simv_genamba$(FSDB_SUFFIX)
 
-$(SIMV_GENAMBA): $(GENAMBA_SV_SRC) $(DPI_C_SRC) | check-yamlcpp
+$(SIMV_GENAMBA): $(GENAMBA_SV_SRC) $(DPI_C_SRC) $(GENAMBA_INC_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
 	    -Mdir=$(VCS_BUILD)/csrc_genamba$(FSDB_SUFFIX) \
