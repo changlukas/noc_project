@@ -24,7 +24,7 @@ strength (error_flag escalation).
 | `cosim/sv/genamba/mem_axi_dpram_sync.v` | `gen_amba_axi/verification/ip/mem_axi_dpram_sync.v` | Unmodified |
 | `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B-channel latch read in `axi_master_write_b`; `error_flag` escalation in `_write_b` + `_read_r`; see "Modifications" below. `_read_r` is otherwise upstream-pristine — burst drains bypass it via `bfm_drain_r` in `genamba_master_bfm.sv`.) |
 | `cosim/sv/genamba/mem_test_tasks.v`     | `gen_amba_axi/verification/ip/mem_test_tasks.v`  | **Modified** (offset-width fix; see "Modifications" below) |
-| `cosim/sv/genamba/axi_tester.v`         | `gen_amba_axi/verification/ip/axi_tester.v`      | Unmodified (template/reference for the BFM signal environment) |
+| `cosim/sv/genamba/axi_tester.v`         | `gen_amba_axi/verification/ip/axi_tester.v`      | **Modified** (capture-counter glue block; test sequence untouched — see below) |
 
 ## Modifications
 
@@ -200,6 +200,17 @@ the always_ff that samples true wire values) — the same proven pattern as
 decision: serialized to AW (handshake completes) → W → B, matching the
 adapter-layer Tasks B-G and the conservative ordering preferred for
 waveform review.
+
+### `axi_tester.v` — capture-counter glue block
+
+The patched task waits in `axi_master_tasks.v` reference handshake capture
+counters (`aw_count`/`w_count`/`ar_count`/`b_count`) and B-response latches
+(`b_id_latch`/`b_resp_latch`) that the including module must declare.
+`axi_tester.v` gets the same declarations + capture `always` block as
+`genamba_master_bfm.sv`, inserted right after the task `include`s. The
+upstream initial test sequence (SINGLE_TEST / BURST_TEST / *_MEM plusarg
+stages) is untouched — `tb_genamba_tester` runs it as-is as the
+pure-referee mode (`make run-genamba-tester`).
 
 ### Known upstream issue (unpatched)
 

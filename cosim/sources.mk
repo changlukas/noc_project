@@ -49,6 +49,17 @@ GENAMBA_SV_SRC := \
     $(COSIM_ROOT)/sv/genamba_master_bfm.sv \
     $(COSIM_ROOT)/sv/tb_genamba.sv
 
+# Pure-referee variant: gen_amba's own axi_tester drives the bridge with
+# its upstream test sequence; no project BFM, no project patterns.
+GENAMBA_TESTER_SV_SRC := \
+    $(SPECGEN_SV_INC)/ni_params_pkg.sv \
+    $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
+    $(COSIM_ROOT)/sv/nmu_wrap.sv \
+    $(COSIM_ROOT)/sv/nsu_wrap.sv \
+    $(COSIM_ROOT)/sv/genamba/mem_axi.v \
+    $(COSIM_ROOT)/sv/genamba/axi_tester.v \
+    $(COSIM_ROOT)/sv/tb_genamba_tester.sv
+
 # `include'd task bodies — NOT standalone compile units (never pass them to
 # the simulator command line), but they ARE build inputs: list them as extra
 # prerequisites on the genamba build rules so editing them triggers a

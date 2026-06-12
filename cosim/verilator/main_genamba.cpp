@@ -4,7 +4,16 @@
 // avoiding the Windows/MSYS2 nested-make subprocess issue in --binary mode.
 
 #include "verilated.h"
+// GENAMBA_TOP selects the verilated top class. Default: Vtb_genamba.
+// The tester build (run-genamba-tester) passes -DGENAMBA_TESTER_TOP so
+// this one main serves both tops.
+#ifdef GENAMBA_TESTER_TOP
+#include "Vtb_genamba_tester.h"
+#define GENAMBA_TOP Vtb_genamba_tester
+#else
 #include "Vtb_genamba.h"
+#define GENAMBA_TOP Vtb_genamba
+#endif
 
 // VCD tracing — compiled in only when verilated with --trace (TRACE=1 in
 // cosim/verilator/Makefile defines VM_TRACE). Path comes from +vcd=<abs-path>;
@@ -25,7 +34,7 @@ int main(int argc, char** argv, char**) {
     const std::unique_ptr<VerilatedContext> contextp{new VerilatedContext};
     contextp->commandArgs(argc, argv);
 
-    const std::unique_ptr<Vtb_genamba> topp{new Vtb_genamba{contextp.get(), ""}};
+    const std::unique_ptr<GENAMBA_TOP> topp{new GENAMBA_TOP{contextp.get(), ""}};
 
 #if VM_TRACE
     contextp->traceEverOn(true);

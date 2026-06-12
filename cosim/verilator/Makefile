@@ -226,7 +226,46 @@ run-genamba: genamba
 
 .PHONY: clean-genamba
 clean-genamba:
-	rm -rf $(VL_BUILD)/obj_genamba $(VL_BUILD)/obj_genamba_trace
+	rm -rf $(VL_BUILD)/obj_genamba $(VL_BUILD)/obj_genamba_trace \
+	       $(VL_BUILD)/obj_genamba_tester
+
+# --- pure-referee: gen_amba's own axi_tester drives the bridge ---------------
+# Stimulus, data, and compares are upstream code (test selection via the
+# upstream plusargs). The shared main is retargeted to the tester top via
+# GENAMBA_TOP define + a force-include of the matching verilated header.
+# MULTIPLE_OUTSTANDING is excluded from the default set: upstream task has
+# a known index bug (see ATTRIBUTION.md, "Known upstream issue").
+TESTER_OBJDIR := $(VL_BUILD)/obj_genamba_tester
+TESTER_FLAGS := \
+    $(VERILATOR_COMMON_FLAGS) \
+    --timing \
+    --top-module tb_genamba_tester \
+    --Mdir $(TESTER_OBJDIR) \
+    --output-split 0 \
+    -I$(COSIM_ROOT)/sv/genamba \
+    $(GENAMBA_DEFINES) \
+    -CFLAGS "-DGENAMBA_TESTER_TOP"
+TESTER_FLAGS += $(VERILATOR_EXTRA_FLAGS)
+
+TESTER_EXE := $(TESTER_OBJDIR)/Vtb_genamba_tester$(EXEEXT)
+GENAMBA_TESTER_TESTS ?= +SINGLE_TEST=1 +BURST_TEST=1 +SINGLE_TEST_MEM=1 +BURST_TEST_MEM=1
+
+$(TESTER_EXE): $(GENAMBA_TESTER_SV_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
+	@mkdir -p $(TESTER_OBJDIR)
+	$(VERILATOR) $(TESTER_FLAGS) $(GENAMBA_TESTER_SV_SRC) $(GENAMBA_C_SRC)
+	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
+	    $(TESTER_OBJDIR)/*.cpp $(TESTER_OBJDIR)/*.h
+	$(MAKE) -C $(TESTER_OBJDIR) -f Vtb_genamba_tester.mk \
+	    PYTHON3="$(PYTHON3)"
+
+.PHONY: genamba-tester run-genamba-tester
+genamba-tester: $(TESTER_EXE)
+
+run-genamba-tester: $(TESTER_EXE)
+	@mkdir -p output/genamba_tester
+	@set -o pipefail; \
+	$(TESTER_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)" $(GENAMBA_TESTER_TESTS) \
+	    2>&1 | tee output/genamba_tester/run.log
 
 # --- batch: one vcd per scenario, both TBs ------------------------------------
 # Mirrors cosim/vcs run-all-fsdb (see that header for semantics): pre-builds

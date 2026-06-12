@@ -120,6 +120,28 @@ module axi_tester
      `include "axi_master_tasks.v"
      `include "mem_test_tasks.v"
      //-----------------------------------------------------------
+     // Project patch (Verilator --timing): handshake capture counters +
+     // B-response latches required by the patched task waits in
+     // axi_master_tasks.v (aw_count/w_count/ar_count/b_count,
+     // b_id_latch/b_resp_latch). Same block as genamba_master_bfm.sv;
+     // the test sequence below is untouched upstream code. ATTRIBUTION.md.
+     reg [WIDTH_ID-1:0] b_id_latch;
+     reg [1:0]          b_resp_latch;
+     reg [7:0]          b_count  = 8'd0;
+     reg [7:0]          aw_count = 8'd0;
+     reg [7:0]          w_count  = 8'd0;
+     reg [7:0]          ar_count = 8'd0;
+     always @(posedge ACLK) begin
+         if (BVALID && BREADY) begin
+             b_id_latch   <= BID;
+             b_resp_latch <= BRESP;
+             b_count      <= b_count + 8'd1;
+         end
+         if (AWVALID && AWREADY) aw_count <= aw_count + 8'd1;
+         if (WVALID  && WREADY)  w_count  <= w_count  + 8'd1;
+         if (ARVALID && ARREADY) ar_count <= ar_count + 8'd1;
+     end
+     //-----------------------------------------------------------
      integer arg; // for commandline test plus arguments
      reg [15:0]         bnum ; initial bnum  = 0;
      reg [15:0]         blen ; initial blen  = 0;
