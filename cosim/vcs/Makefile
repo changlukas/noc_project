@@ -26,11 +26,51 @@ VCS      ?= vcs
 # NOTE: -Mdir (incremental-compile dir, redirects csrc/) flag spelling can
 # vary by VCS version — check `vcs -help` on the workstation.
 VCS_EXTRA ?=
+# FSDB dumping (FSDB=1): Verdi install + PLI registration for $fsdbDump*.
+# Defaults match the workstation's cosim/ref/Makefile (Verdi 2020.03,
+# PLI under LINUXAMD64). Alternate older install seen in the ref flows:
+#   /cadtools/synopsys/verdi/M-2017.03/share/PLI/VCS/LINUX64/{novas.tab,pli.a}
+# LD_LIBRARY_PATH may additionally be needed for the FSDB runtime libs
+# (e.g. $VERDI_HOME/share/PLI/lib/LINUXAMD64) — verify at first run, record here.
+VERDI_HOME ?= /tools/verdi_2020.03
+FSDB_PLI   ?= -P $(VERDI_HOME)/share/PLI/VCS/LINUXAMD64/novas.tab \
+                 $(VERDI_HOME)/share/PLI/VCS/LINUXAMD64/pli.a
+# Heavier known-working combo from the ref flow, for memory dump /
+# interactive Verdi debug (slower sim, bigger fsdb):
+#   FSDB_EXTRA += -debug_access+all -debug_all +fsdb+all +vcsd
+FSDB_EXTRA ?=
 # -----------------------------------------------------------------------------
 
 include ../sources.mk
 
 VCS_BUILD := $(BUILD_ROOT)/vcs
+
+# --- FSDB waveform dumping (opt-in; Verdi PLI, workstation only) -------------
+# FSDB=1 compiles a separate simv with +define+FSDB_DUMP and the Verdi PLI
+# linked in. FSDB and non-FSDB builds use distinct simv/csrc names because
+# make does not track flag changes — sharing a binary across modes would
+# silently reuse the wrong one.
+FSDB ?= 0
+ifeq ($(FSDB),1)
+ifeq ($(strip $(VERDI_HOME)),)
+$(error FSDB=1 requires VERDI_HOME (Verdi install root) to be set)
+endif
+FSDB_COMPILE_FLAGS := +define+FSDB_DUMP $(FSDB_PLI) $(FSDB_EXTRA)
+FSDB_SUFFIX := _fsdb
+else
+FSDB_COMPILE_FLAGS :=
+FSDB_SUFFIX :=
+endif
+# Deferred (=) on purpose: SCENARIO / GENAMBA_SCENARIO are defined later in
+# this file, and the per-run value must win when run-all-fsdb loops.
+ifeq ($(FSDB),1)
+FSDB_PLUSARG_TB_TOP  = "+fsdb=$(CURDIR)/output/$(SCENARIO)/tb_top.fsdb"
+FSDB_PLUSARG_GENAMBA = "+fsdb=$(CURDIR)/output/genamba_$(GENAMBA_SCENARIO)/tb_genamba.fsdb"
+else
+FSDB_PLUSARG_TB_TOP  =
+FSDB_PLUSARG_GENAMBA =
+endif
+# -----------------------------------------------------------------------------
 
 # yaml-cpp comes from the c_model CMake build; surface a clear hint instead
 # of a mysterious link failure when it has not been built yet.
@@ -55,50 +95,57 @@ VCS_COMMON_FLAGS := \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
     $(VCS_EXTRA)
+ifeq ($(FSDB),1)
+VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
+endif
 
 # --- gen_amba role-1 testbench ---
 GENAMBA_SCENARIO ?= AX4-BAS-001_single_write_no_read
 GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenario.yaml
 
-$(VCS_BUILD)/simv_genamba: $(GENAMBA_SV_SRC) $(DPI_C_SRC) | check-yamlcpp
+SIMV_GENAMBA := $(VCS_BUILD)/simv_genamba$(FSDB_SUFFIX)
+
+$(SIMV_GENAMBA): $(GENAMBA_SV_SRC) $(DPI_C_SRC) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_genamba \
+	    -Mdir=$(VCS_BUILD)/csrc_genamba$(FSDB_SUFFIX) \
 	    +incdir+$(COSIM_ROOT)/sv/genamba \
 	    $(GENAMBA_DEFINES) \
 	    -top tb_genamba \
 	    $(GENAMBA_SV_SRC) $(DPI_C_SRC) $(YAMLCPP_LIB) \
-	    -o $(VCS_BUILD)/simv_genamba
+	    -o $(SIMV_GENAMBA)
 
 .PHONY: genamba run-genamba
-genamba: $(VCS_BUILD)/simv_genamba
+genamba: $(SIMV_GENAMBA)
 
-run-genamba: $(VCS_BUILD)/simv_genamba
+run-genamba: $(SIMV_GENAMBA)
 	@mkdir -p output/genamba_$(GENAMBA_SCENARIO)
 	@set -o pipefail; \
-	$(VCS_BUILD)/simv_genamba "+scenario=$(GENAMBA_SCENARIO_ABS)" \
+	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)" \
 	    2>&1 | tee output/genamba_$(GENAMBA_SCENARIO)/run.log
 
 # --- tb_top (wb2axip cosim) via tb_top_vcs wrapper ---
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
 
-$(VCS_BUILD)/simv_tb_top: $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) | check-yamlcpp
+SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top$(FSDB_SUFFIX)
+
+$(SIMV_TB_TOP): $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_tb_top \
+	    -Mdir=$(VCS_BUILD)/csrc_tb_top$(FSDB_SUFFIX) \
 	    +incdir+$(COSIM_ROOT)/sv/wb2axip \
 	    -top tb_top_vcs \
 	    $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) $(YAMLCPP_LIB) \
-	    -o $(VCS_BUILD)/simv_tb_top
+	    -o $(SIMV_TB_TOP)
 
 .PHONY: tb_top run-tb-top
-tb_top: $(VCS_BUILD)/simv_tb_top
+tb_top: $(SIMV_TB_TOP)
 
-run-tb-top: $(VCS_BUILD)/simv_tb_top
+run-tb-top: $(SIMV_TB_TOP)
 	@mkdir -p output/$(SCENARIO)
 	@set -o pipefail; \
-	$(VCS_BUILD)/simv_tb_top "+scenario=$(SCENARIO_ABS)" \
+	$(SIMV_TB_TOP) "+scenario=$(SCENARIO_ABS)" \
 	    2>&1 | tee output/$(SCENARIO)/run.log
 
 .PHONY: clean
