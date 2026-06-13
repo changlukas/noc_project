@@ -10,6 +10,10 @@ using ni::cmodel::noc::RouterPort;
 
 namespace {
 
+// Router zero-load latency: a flit pushed at tick T is delivered at T+3
+// (3-stage reverse-order pipeline; pinned by RouterDatapath.ZeroLoadLatencyIsThreeTicks).
+constexpr int kPipelineDepth = 3;
+
 RouterConfig center_cfg() {
     RouterConfig cfg;
     cfg.x = 1;
@@ -142,14 +146,13 @@ ni::cmodel::Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t last, uint8_
     return f;
 }
 
-// Push the next flit of `pkt` into its input port (one flit/port/tick). Returns
-// false when the packet is already fully drained.
-bool feed_packet(Router& r, Packet& pkt, uint8_t dst, uint8_t vc) {
-    if (pkt.next > 2) return false;
+// Push the next flit of `pkt` into its input port (one flit/port/tick). No-op
+// once the packet (head/body/tail) is already fully drained.
+void feed_packet(Router& r, Packet& pkt, uint8_t dst, uint8_t vc) {
+    if (pkt.next > 2) return;
     const uint64_t last = (pkt.next == 2) ? 1 : 0;
     r.input(pkt.in_port).push_flit(make_tagged_flit(dst, vc, last, pkt.src_id));
     ++pkt.next;
-    return true;
 }
 
 // tick() then, for every flit delivered to `sink` this cycle, return one EAST
@@ -170,11 +173,16 @@ TEST(RouterWormhole, PacketsDoNotInterleavePerOutputVc) {
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
     r.set_downstream(E, east);
     const uint8_t dst = make_dst(3, 1);  // routes EAST from center
+    // 0x10 / 0x20: arbitrary distinct sink labels so each packet's flits can be
+    // told apart at the shared EAST sink (carried in the src_id header field).
     Packet a{static_cast<std::size_t>(RouterPort::WEST), /*src_id=*/0x10};
     Packet b{static_cast<std::size_t>(RouterPort::SOUTH), /*src_id=*/0x20};
 
     // A starts at tick 0, B offset by one tick; both feed one flit/tick. Return
-    // EAST credit each tick so a 6-flit stream never stalls on credit.
+    // EAST credit each tick so a 6-flit stream never stalls on credit. Bound 20 is
+    // generous slack (two 3-flit packets serialized through a kPipelineDepth-deep
+    // pipe drain in well under 20 ticks); the real settle point is the size()==6
+    // assertion below.
     for (int t = 0; t < 20; ++t) {
         feed_packet(r, a, dst, 0);
         if (t >= 1) feed_packet(r, b, dst, 0);
@@ -218,8 +226,10 @@ TEST(RouterWormhole, SingleFlitPacketLocksAndReleasesSameCycle) {
     r.input(WEST).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x10));
     r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x20));
     // S1 latch (tick 1) -> two back-to-back grants (ticks 2,3) since each
-    // single-flit packet releases the lock the cycle it is granted.
-    for (int t = 0; t < 6; ++t) tick_and_return_credit(r, east, E);
+    // single-flit packet releases the lock the cycle it is granted. The later
+    // grant (tick 3) lands at the sink kPipelineDepth ticks afterward, so 3 +
+    // kPipelineDepth ticks suffice to settle both single-flit packets.
+    for (int t = 0; t < 3 + kPipelineDepth; ++t) tick_and_return_credit(r, east, E);
     // Both single-flit packets must have been delivered; the second did not wait
     // for a stale lock to clear.
     ASSERT_EQ(east.received.size(), 2u);
@@ -251,7 +261,9 @@ TEST(RouterWormhole, LockedEmptyVcIdlesButDoesNotLoseLock) {
     tick_and_return_credit(r, east, E);
 
     // SOUTH stalls (FIFO drains to empty). WEST starts pushing its packet, which
-    // queues behind the held lock.
+    // queues behind the held lock. 4 ticks = 3 WEST flits pushed + 1 settle tick
+    // through the kPipelineDepth-deep pipe; long enough for any stolen flit to
+    // surface at the sink were the lock not held.
     for (int t = 0; t < 4; ++t) {
         feed_packet(r, west, dst, 0);  // WEST head / body / tail
         tick_and_return_credit(r, east, E);
@@ -266,6 +278,9 @@ TEST(RouterWormhole, LockedEmptyVcIdlesButDoesNotLoseLock) {
 
     // SOUTH sends its tail (last=1) to release the lock.
     r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x20));
+    // Drain SOUTH's tail + WEST's 3 queued flits through the kPipelineDepth-deep
+    // pipe. Bound 10 is generous slack; the real settle point is the
+    // count_w==3 / count_s==2 assertions below.
     for (int t = 0; t < 10; ++t) {
         tick_and_return_credit(r, east, E);
     }
@@ -300,6 +315,9 @@ TEST(RouterWormhole, RrAdvancesPerPacket) {
     // so the input FIFO never overflows; the output grants one input per cycle, so
     // a saturated single-flit stream from both inputs exercises the packet-level
     // RR pointer. Replenish credit per delivered flit so the stream never stalls.
+    // The real exit is the size() < 8 guard (collect 8 grants); bound 40 is a
+    // generous safety cap (8 grants + kPipelineDepth drain fit well inside it) so
+    // a regression that stops granting fails fast instead of spinning forever.
     for (int t = 0; t < 40 && east.received.size() < 8; ++t) {
         if (r.input_fifo_size(WEST, 0) == 0)
             r.input(WEST).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x10));
