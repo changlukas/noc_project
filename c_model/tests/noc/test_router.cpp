@@ -2,6 +2,7 @@
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
+using ni::NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH;
 using ni::NI_NOC_ROUTER_VC_DEPTH;
 using ni::cmodel::noc::route_compute;
 using ni::cmodel::noc::Router;
@@ -458,26 +459,31 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     const uint8_t dst = make_dst(3, 1);
 
-    // Phase A — fill the EAST output FIFO to its depth (2) WITHOUT a downstream
-    // attached, so stage 3 cannot drain it. Keep a backlog queued in the input
-    // FIFO so a grant is available on every later tick. Feed one vc0 flit/tick.
+    // Phase A — fill the EAST output FIFO to its depth (NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH)
+    // WITHOUT a downstream attached, so stage 3 cannot drain it. Keep a backlog queued
+    // in the input FIFO so a grant is available on every later tick. Feed one vc0 flit/tick.
     for (int t = 0; t < 12; ++t) {
-        if (r.input_fifo_size(WEST, 0) < 3)
+        if (r.input_fifo_size(WEST, 0) < NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH + 1)
             r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*last=*/1));
         r.tick();
-        if (r.output_fifo_size(E) >= 2 && r.input_fifo_size(WEST, 0) >= 1) break;
+        if (r.output_fifo_size(E) >= NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH &&
+            r.input_fifo_size(WEST, 0) >= 1)
+            break;
     }
-    ASSERT_EQ(r.output_fifo_size(E), 2u) << "output FIFO not filled to depth";
+    ASSERT_EQ(r.output_fifo_size(E), static_cast<std::size_t>(NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH))
+        << "output FIFO not filled to depth";
     ASSERT_GE(r.input_fifo_size(WEST, 0), 1u) << "no input backlog to supply a same-tick grant";
 
     // Attach the downstream now: stage 3 can drain one flit this tick, and stage 2
     // (running after stage 3 in the same tick) can grant one from the input
-    // backlog. Net output-FIFO occupancy stays 2; the sink gains exactly one.
+    // backlog. Net output-FIFO occupancy stays at NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH;
+    // the sink gains exactly one.
     r.set_downstream(E, east);
     ASSERT_TRUE(east.received.empty());
     const std::size_t backlog_before = r.input_fifo_size(WEST, 0);
     r.tick();
-    EXPECT_EQ(r.output_fifo_size(E), 2u) << "deq+enq in the same tick did not hold occupancy at 2";
+    EXPECT_EQ(r.output_fifo_size(E), static_cast<std::size_t>(NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH))
+        << "deq+enq in the same tick did not hold occupancy at the FIFO depth";
     EXPECT_EQ(east.received.size(), 1u) << "stage 3 did not drain one flit";
     EXPECT_EQ(r.input_fifo_size(WEST, 0), backlog_before - 1)
         << "stage 2 did not grant one from the backlog the same tick";
