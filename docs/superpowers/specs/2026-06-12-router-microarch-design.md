@@ -1,7 +1,7 @@
 # Router Micro-Architecture Design
 
 Date: 2026-06-12
-Status: Approved pending user review
+Status: Implemented (single-router scope) — 2026-06-13
 Scope: (a) single-router micro-architecture for the c_model NoC fabric; (b) `seq` header
 field addition to the packet format. Mesh/fabric assembly, multi-router integration, NI
 wiring, and the NSU request-reorder mechanism are out of scope (later rounds).

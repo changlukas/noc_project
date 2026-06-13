@@ -133,6 +133,18 @@
           "related_features": ["FEAT-NSU-PACKETIZE"]
         }
       ]
+    },
+    {
+      "name": "ROUTER",
+      "fullname": "NoC Router",
+      "role": "Fixed-vc 3-stage wormhole switch; one instance per physical network",
+      "features": [
+        {"id": "FEAT-ROUTER-ROUTE_COMPUTATION", "summary": "XY dimension-order route computation on the head flit; minimal, deterministic, no Y-to-X turns.", "modes": []},
+        {"id": "FEAT-ROUTER-WORMHOLE_ARBITRATION", "summary": "Per-(output port, vc) packet-level lock from head grant to tail grant; round-robin advances per packet.", "modes": []},
+        {"id": "FEAT-ROUTER-VC_ARBITRATION", "summary": "Per-output flit-level round-robin across VCs, credit-gated.", "modes": []},
+        {"id": "FEAT-ROUTER-CREDIT_FLOW_CONTROL", "summary": "Per-(output port, vc) credit counters seeded with downstream depth; reserve at grant, registered 1-cycle credit return.", "modes": []},
+        {"id": "FEAT-ROUTER-ROUTE_PARITY_CHECK", "summary": "Optional route_par screen at ingress; mismatch drops the flit and counts.", "modes": []}
+      ]
     }
   ]
 }

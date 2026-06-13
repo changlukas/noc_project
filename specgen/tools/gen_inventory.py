@@ -27,6 +27,11 @@ _HEADER_OVERRIDES = {
     "FEAT-NMU-VC_ARB":     "c_model/include/nmu/vc_arbiter.hpp",
     "FEAT-NSU-VC_ARB":     "c_model/include/nsu/vc_arbiter.hpp",
     "FEAT-NMU-VC_MAPPING": "c_model/include/nmu/vc_arbiter.hpp (VcMode)",
+    "FEAT-ROUTER-ROUTE_COMPUTATION":    "c_model/include/noc/router.hpp (route_compute)",
+    "FEAT-ROUTER-WORMHOLE_ARBITRATION": "c_model/include/noc/router.hpp",
+    "FEAT-ROUTER-VC_ARBITRATION":       "c_model/include/noc/router.hpp",
+    "FEAT-ROUTER-CREDIT_FLOW_CONTROL":  "c_model/include/noc/router.hpp",
+    "FEAT-ROUTER-ROUTE_PARITY_CHECK":   "c_model/include/noc/router.hpp",
 }
 
 
