@@ -70,6 +70,42 @@ noc:
     max: 64
     sv_symbol: NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
     cpp_symbol: NI_NOC_SLAVE_VC_BUFFER_DEPTH
+  ROUTER_VC_DEPTH:
+    type: int
+    units: flits
+    description: "Router input VC FIFO depth; defines the credit seed of the upstream sender"
+    default: 4
+    min: 1
+    max: 16
+    sv_symbol: NI_NOC_ROUTER_VC_DEPTH_DFLT
+    cpp_symbol: NI_NOC_ROUTER_VC_DEPTH
+  ROUTER_OUTPUT_FIFO_DEPTH:
+    type: int
+    units: flits
+    description: "Router output FIFO depth (stage 3); not credit-counted"
+    default: 2
+    min: 1
+    max: 16
+    sv_symbol: NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT
+    cpp_symbol: NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH
+  MESH_X_DIM:
+    type: int
+    units: count
+    description: "Mesh X dimension (routers per row); bounded by X_WIDTH (4 bit)"
+    default: 4
+    min: 2
+    max: 16
+    sv_symbol: NI_NOC_MESH_X_DIM_DFLT
+    cpp_symbol: NI_NOC_MESH_X_DIM
+  MESH_Y_DIM:
+    type: int
+    units: count
+    description: "Mesh Y dimension (routers per column); bounded by Y_WIDTH (4 bit)"
+    default: 4
+    min: 2
+    max: 16
+    sv_symbol: NI_NOC_MESH_Y_DIM_DFLT
+    cpp_symbol: NI_NOC_MESH_Y_DIM
 
 derived:
   WSTRB_WIDTH:

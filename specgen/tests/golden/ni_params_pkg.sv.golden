@@ -11,9 +11,13 @@ package ni_params_pkg;
   localparam int unsigned NI_AXI_DATA_WIDTH_DFLT = 256;
 
   // NoC parameter defaults
-  localparam int unsigned NI_NOC_NUM_VC_DFLT                = 1;
-  localparam int unsigned NI_NOC_FLIT_WIDTH_DFLT            = 408;
-  localparam int unsigned NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT = 4;
+  localparam int unsigned NI_NOC_NUM_VC_DFLT                   = 1;
+  localparam int unsigned NI_NOC_FLIT_WIDTH_DFLT               = 408;
+  localparam int unsigned NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT    = 4;
+  localparam int unsigned NI_NOC_ROUTER_VC_DEPTH_DFLT          = 4;
+  localparam int unsigned NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT = 2;
+  localparam int unsigned NI_NOC_MESH_X_DIM_DFLT               = 4;
+  localparam int unsigned NI_NOC_MESH_Y_DIM_DFLT               = 4;
 
   // Derived parameter defaults
   localparam int unsigned NI_AXI_WSTRB_WIDTH_DFLT = 32;

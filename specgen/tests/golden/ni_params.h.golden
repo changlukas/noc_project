@@ -10,9 +10,13 @@ constexpr int NI_AXI_ADDR_WIDTH = 64;
 constexpr int NI_AXI_DATA_WIDTH = 256;
 
 // NoC parameter defaults
-constexpr int NI_NOC_NUM_VC                = 1;
-constexpr int NI_NOC_FLIT_WIDTH            = 408;
-constexpr int NI_NOC_SLAVE_VC_BUFFER_DEPTH = 4;
+constexpr int NI_NOC_NUM_VC                   = 1;
+constexpr int NI_NOC_FLIT_WIDTH               = 408;
+constexpr int NI_NOC_SLAVE_VC_BUFFER_DEPTH    = 4;
+constexpr int NI_NOC_ROUTER_VC_DEPTH          = 4;
+constexpr int NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH = 2;
+constexpr int NI_NOC_MESH_X_DIM               = 4;
+constexpr int NI_NOC_MESH_Y_DIM               = 4;
 
 // Derived parameter defaults
 constexpr int NI_AXI_WSTRB_WIDTH = 32;
