@@ -1,6 +1,9 @@
 #include "noc/router.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
+#include <ios>
+#include <tuple>
+#include <vector>
 
 using ni::NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH;
 using ni::NI_NOC_ROUTER_VC_DEPTH;
@@ -670,6 +673,180 @@ TEST(RouterRoutePar, CleanStreamNotDropped) {
     EXPECT_EQ(r.route_par_drop_count(), 0u) << "checker over-fired on a clean stream";
     EXPECT_EQ(east.received.size(), static_cast<std::size_t>(kFlits)) << "clean flits lost";
 }
+
+// --- All-to-one fairness + parameterized grid (Task 9) ------------------
+
+TEST(RouterFairness, AllToOneNoStarvation) {
+    SCENARIO(
+        "Router: 4 inputs flood one output, no backpressure — per-packet wait bounded by "
+        "(inputs-1) x MAX_PACKET_FLITS (spec §5/§12.4)");
+    Router r(center_cfg());
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // routes EAST from center (1,1)
+
+    // The four contending inputs: every non-EAST port. LOCAL->EAST is a valid
+    // turn, so LOCAL is a legitimate sender here. EAST is the shared output; its
+    // FlitSink drains freely (credit relayed per delivered flit by
+    // tick_and_return_credit), so there is no downstream backpressure and the
+    // only contention is for the single EAST grant/cycle.
+    constexpr int kInputs = 4;
+    // feed_packet emits a head(last=0)/body(last=0)/tail(last=1) stream, so each
+    // packet here is MAX_PACKET_FLITS = 3 flits. The §5 fairness bound scales with
+    // this packet length.
+    constexpr int kPacketFlits = 3;
+    const std::size_t in_ports[kInputs] = {
+        static_cast<std::size_t>(RouterPort::LOCAL),
+        static_cast<std::size_t>(RouterPort::NORTH),
+        static_cast<std::size_t>(RouterPort::SOUTH),
+        static_cast<std::size_t>(RouterPort::WEST),
+    };
+    // Distinct sink labels (carried in src_id) so each delivered flit names its
+    // input. One Packet object per input; refill with a fresh 2-flit packet as
+    // soon as the previous one is fully pushed, keeping all four backlogged.
+    const uint8_t labels[kInputs] = {0x10, 0x20, 0x30, 0x40};
+    Packet pkt[kInputs];
+    for (int i = 0; i < kInputs; ++i) {
+        pkt[i] = Packet{in_ports[i], labels[i]};
+    }
+
+    // Feed at most one flit/input/tick, and only when that input's vc0 FIFO has
+    // room (credit-aware: never overflow the vc_depth-deep input FIFO). Refill a
+    // finished packet so every input stays continuously backlogged. Collect a
+    // generous number of delivered flits to span many full RR rounds (each round
+    // is kInputs x kPacketFlits = 12 flits).
+    constexpr std::size_t kCollect = 72u;  // 6 full RR rounds
+    for (int t = 0; t < 400 && east.received.size() < kCollect; ++t) {
+        for (int i = 0; i < kInputs; ++i) {
+            if (pkt[i].next > 2) pkt[i] = Packet{in_ports[i], labels[i]};  // refill
+            if (r.input_fifo_size(in_ports[i], 0) < NI_NOC_ROUTER_VC_DEPTH)
+                feed_packet(r, pkt[i], dst, 0);
+        }
+        tick_and_return_credit(r, east, E);
+    }
+    ASSERT_GE(east.received.size(), kCollect) << "router stopped granting under all-to-one load";
+
+    // All four inputs must make progress (none starved entirely).
+    int per_src[kInputs] = {0, 0, 0, 0};
+    for (const auto& f : east.received) {
+        const uint8_t s = static_cast<uint8_t>(f.get_header_field("src_id"));
+        for (int i = 0; i < kInputs; ++i)
+            if (s == labels[i]) ++per_src[i];
+    }
+    for (int i = 0; i < kInputs; ++i)
+        EXPECT_GT(per_src[i], 0) << "input label 0x" << std::hex << static_cast<int>(labels[i])
+                                 << " starved (zero grants)";
+
+    // Fairness bound (spec §5): between two consecutive grants of the SAME input,
+    // at most (inputs-1) x MAX_PACKET_FLITS flits from OTHER inputs may interpose.
+    // Packet-level RR serves each of the other 3 inputs one full kPacketFlits
+    // packet before returning, so the worst case is exactly 3 x 3 = 9 intervening
+    // flits.
+    constexpr int kBound = (kInputs - 1) * kPacketFlits;  // 9
+    int last_index[kInputs];
+    for (int i = 0; i < kInputs; ++i) last_index[i] = -1;
+    int max_intervening = 0;
+    for (std::size_t idx = 0; idx < east.received.size(); ++idx) {
+        const uint8_t s = static_cast<uint8_t>(east.received[idx].get_header_field("src_id"));
+        for (int i = 0; i < kInputs; ++i) {
+            if (s != labels[i]) continue;
+            if (last_index[i] >= 0) {
+                // Flits from other inputs strictly between this and the previous
+                // grant of the same input = index gap minus 1.
+                const int intervening = static_cast<int>(idx) - last_index[i] - 1;
+                if (intervening > max_intervening) max_intervening = intervening;
+            }
+            last_index[i] = static_cast<int>(idx);
+        }
+    }
+    EXPECT_LE(max_intervening, kBound)
+        << "starvation: " << max_intervening << " flits interposed between two grants of one input"
+        << " (bound " << kBound << ")";
+}
+
+class RouterGrid : public ::testing::TestWithParam<std::tuple<int, int>> {};
+
+TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
+    SCENARIO(
+        "Router: NUM_VC x ROUTER_VC_DEPTH grid — mixed traffic end-to-end intact (spec §12.6)");
+    auto [num_vc, depth] = GetParam();
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = static_cast<uint8_t>(num_vc);
+    cfg.vc_depth = static_cast<std::size_t>(depth);
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // routes EAST from center
+
+    // Drive kPacketsPerVc single-flit packets per VC from WEST->EAST. Tag each
+    // with a per-vc-increasing src_id so per-VC FIFO order can be checked at the
+    // sink. Single-flit packets keep the wormhole lock trivial; the point of this
+    // grid is parameter-space coverage (num_vc, depth), not multi-flit locking
+    // (covered by RouterWormhole.*).
+    constexpr int kPacketsPerVc = 3;
+    // src_id label per (vc, packet): high nibble = vc, low nibble = sequence. With
+    // num_vc<=8 and 3 packets this stays inside a byte and is unambiguous.
+    auto label = [](int vc, int seq) -> uint8_t {
+        return static_cast<uint8_t>((vc << 4) | (seq & 0x0F));
+    };
+
+    // Feeding must be credit-aware so depth=1 never overflows the vc_depth-deep
+    // input FIFO: push a vc's next packet only when that vc's input FIFO has room.
+    // One flit/input-port/tick (landing register), so per-vc injection naturally
+    // interleaves across ticks. Track the next packet sequence to push per vc.
+    std::vector<int> fed(num_vc, 0);
+    const int total = num_vc * kPacketsPerVc;
+    for (int t = 0;
+         t < total * (kPipelineDepth + 4) + 50 && static_cast<int>(east.received.size()) < total;
+         ++t) {
+        for (int vc = 0; vc < num_vc; ++vc) {
+            if (fed[vc] >= kPacketsPerVc) continue;
+            if (r.input_fifo_size(WEST, static_cast<uint8_t>(vc)) <
+                static_cast<std::size_t>(depth)) {
+                r.input(WEST).push_flit(make_tagged_flit(dst, static_cast<uint8_t>(vc),
+                                                         /*last=*/1, label(vc, fed[vc])));
+                ++fed[vc];
+                break;  // one flit/input-port/tick (landing register)
+            }
+        }
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i) {
+            const auto vc = static_cast<uint8_t>(east.received[i].get_header_field("vc_id"));
+            r.receive_credit(E, vc);
+        }
+    }
+
+    // Every flit arrived (none lost or duplicated).
+    ASSERT_EQ(static_cast<int>(east.received.size()), total)
+        << "num_vc=" << num_vc << " depth=" << depth << ": not all flits delivered";
+
+    // Per-VC order preserved: within each vc, src_id sequence must be the
+    // monotonic 0,1,2 injection order (wormhole + FIFO keep per-vc order; the
+    // router may interleave ACROSS vcs, which is allowed).
+    std::vector<int> next_seq(num_vc, 0);
+    for (const auto& f : east.received) {
+        const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+        const auto s = static_cast<uint8_t>(f.get_header_field("src_id"));
+        ASSERT_LT(static_cast<int>(vc), num_vc) << "delivered an out-of-range vc";
+        EXPECT_EQ(s, label(vc, next_seq[vc]))
+            << "vc=" << static_cast<int>(vc) << " out of order (num_vc=" << num_vc
+            << " depth=" << depth << ")";
+        // Header intact: dst and vc survive unchanged end-to-end.
+        EXPECT_EQ(static_cast<uint8_t>(f.get_header_field("dst_id")), dst);
+        ++next_seq[vc];
+    }
+    for (int vc = 0; vc < num_vc; ++vc)
+        EXPECT_EQ(next_seq[vc], kPacketsPerVc)
+            << "vc=" << vc << " did not deliver all packets (num_vc=" << num_vc << ")";
+}
+
+INSTANTIATE_TEST_SUITE_P(Spec12_6, RouterGrid,
+                         ::testing::Combine(::testing::Values(1, 2, 4, 8),
+                                            ::testing::Values(1, 2, 4, 8)));
 
 TEST(RouterDatapathDeath, BadVcIdAborts) {
     SCENARIO("Router: input flit vc_id >= num_vc -> assert+abort (spec §9)");
