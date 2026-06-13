@@ -24,7 +24,7 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
     f.set_header_field("last", 0x1);
     f.set_header_field("rob_req", 0x1);
     f.set_header_field("rob_idx", 0x1F);
-    f.set_header_field("seq", 0x1F);
+    f.set_header_field("seq", 0x15);
     f.set_header_field("commtype", 0x2);
     f.set_header_field("flit_ecc", 0x3FF);
     EXPECT_EQ(f.get_header_field("noc_qos"), 0xAu);
@@ -36,7 +36,7 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
     EXPECT_EQ(f.get_header_field("last"), 0x1u);
     EXPECT_EQ(f.get_header_field("rob_req"), 0x1u);
     EXPECT_EQ(f.get_header_field("rob_idx"), 0x1Fu);
-    EXPECT_EQ(f.get_header_field("seq"), 0x1Fu);
+    EXPECT_EQ(f.get_header_field("seq"), 0x15u);
     EXPECT_EQ(f.get_header_field("commtype"), 0x2u);
     EXPECT_EQ(f.get_header_field("flit_ecc"), 0x3FFu);
 }
