@@ -336,6 +336,153 @@ TEST(RouterWormhole, RrAdvancesPerPacket) {
     }
 }
 
+// --- Per-VC independence (Task 7) ---------------------------------------
+// All three tests need >=2 VCs; the generated default NI_NOC_NUM_VC is 1, so
+// each builds its RouterConfig with num_vc = 2.
+
+RouterConfig two_vc_cfg() {
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    return cfg;
+}
+
+// tick() then return one EAST credit only for flits delivered on `keep_vc`.
+// Flits on the other VC drain to the sink but their credit is deliberately
+// withheld, so that VC's downstream stays "full" (head-of-line blocked).
+void tick_return_credit_for_vc(Router& r, FlitSink& sink, std::size_t out_port, uint8_t keep_vc) {
+    const std::size_t before = sink.received.size();
+    r.tick();
+    for (std::size_t i = before; i < sink.received.size(); ++i) {
+        const auto vc = static_cast<uint8_t>(sink.received[i].get_header_field("vc_id"));
+        if (vc == keep_vc) r.receive_credit(out_port, vc);
+    }
+}
+
+TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
+    SCENARIO(
+        "Router: vc0 head-blocked (credits exhausted, none returned) — vc1 traffic flows "
+        "(spec §12.3)");
+    Router r(two_vc_cfg());
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // routes EAST from center
+
+    // Phase A — exhaust EAST vc0 credit. Feed one vc0 single-flit packet per tick
+    // from WEST; each grant decrements credit (4 -> 0) and we NEVER return vc0
+    // credit. Stop feeding once vc0 credit is gone and 2 extras sit queued (the
+    // input VC FIFO is vc_depth=4 deep, so 2 extras can never overflow it).
+    for (int t = 0; t < 30; ++t) {
+        // Keep feeding vc0 while credit remains, plus exactly 2 extras afterward.
+        const bool credit_left = r.credit(E, 0) > 0;
+        const bool want_extra = !credit_left && r.input_fifo_size(WEST, 0) < 2;
+        if (credit_left || want_extra)
+            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/0, /*last=*/1, 0x10));
+        r.tick();  // never return vc0 credit
+        if (!credit_left && r.input_fifo_size(WEST, 0) >= 2) break;
+    }
+    ASSERT_EQ(r.credit(E, 0), 0u) << "vc0 credit not exhausted";
+    ASSERT_GE(r.input_fifo_size(WEST, 0), 1u) << "no vc0 backlog left head-blocked";
+    const std::size_t vc0_blocked = r.input_fifo_size(WEST, 0);
+    const std::size_t sink_after_vc0 = east.received.size();
+
+    // Phase B — feed vc1 single-flit packets from WEST (one/tick) and return vc1
+    // credit on delivery. vc1 has full, fresh credit, so it must flow despite vc0
+    // being permanently blocked on the same input/output ports.
+    int vc1_received = 0;
+    for (int t = 0; t < 12 && vc1_received < 4; ++t) {
+        if (r.input_fifo_size(WEST, 1) == 0)
+            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/1, /*last=*/1, 0x20));
+        const std::size_t before = east.received.size();
+        tick_return_credit_for_vc(r, east, E, /*keep_vc=*/1);
+        for (std::size_t i = before; i < east.received.size(); ++i)
+            if (static_cast<uint8_t>(east.received[i].get_header_field("vc_id")) == 1)
+                ++vc1_received;
+    }
+
+    EXPECT_GE(vc1_received, 4) << "vc1 starved by head-blocked vc0";
+    // vc0's backlog must still be stuck in the input FIFO: its credit never
+    // returned, so no further vc0 flit could have been granted.
+    EXPECT_EQ(r.credit(E, 0), 0u);
+    EXPECT_EQ(r.input_fifo_size(WEST, 0), vc0_blocked) << "blocked vc0 drained unexpectedly";
+    // Every flit delivered during phase B was vc1 (vc0 could not advance).
+    for (std::size_t i = sink_after_vc0; i < east.received.size(); ++i)
+        EXPECT_EQ(static_cast<uint8_t>(east.received[i].get_header_field("vc_id")), 1)
+            << "a blocked-vc0 flit slipped through";
+}
+
+TEST(RouterVcArbitration, FlitLevelRrAcrossVcs) {
+    SCENARIO("Router: per-output flit-level RR across VCs under sustained two-VC load");
+    Router r(two_vc_cfg());
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+
+    // One flit/input-port/tick (landing register), so "sustained two-VC load from
+    // the same input" is fed by alternating vc0 / vc1 on successive ticks. Both
+    // VCs keep a flit queued; the output grants one flit/cycle and round-robins
+    // across VCs, so delivered vc_ids must alternate. Ample credit (returned per
+    // delivery) keeps neither VC credit-starved.
+    uint8_t feed_vc = 0;
+    for (int t = 0; t < 40 && east.received.size() < 8; ++t) {
+        if (r.input_fifo_size(WEST, feed_vc) == 0)
+            r.input(WEST).push_flit(make_flit(dst, feed_vc, /*last=*/1));
+        feed_vc ^= 1;  // alternate the input we top up each tick
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i) {
+            const auto vc = static_cast<uint8_t>(east.received[i].get_header_field("vc_id"));
+            r.receive_credit(E, vc);
+        }
+    }
+    ASSERT_GE(east.received.size(), 8u);
+
+    // Per-output VC RR: consecutive grants must alternate vc0 / vc1.
+    for (std::size_t i = 1; i < 8; ++i) {
+        const auto prev = static_cast<uint8_t>(east.received[i - 1].get_header_field("vc_id"));
+        const auto cur = static_cast<uint8_t>(east.received[i].get_header_field("vc_id"));
+        EXPECT_NE(cur, prev) << "VC RR did not alternate at grant " << i;
+    }
+}
+
+TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
+    SCENARIO(
+        "Router: full output FIFO frees one slot at stage 3 and accepts a new grant the same "
+        "tick (spec §5)");
+    Router r(two_vc_cfg());
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    const uint8_t dst = make_dst(3, 1);
+
+    // Phase A — fill the EAST output FIFO to its depth (2) WITHOUT a downstream
+    // attached, so stage 3 cannot drain it. Keep a backlog queued in the input
+    // FIFO so a grant is available on every later tick. Feed one vc0 flit/tick.
+    for (int t = 0; t < 12; ++t) {
+        if (r.input_fifo_size(WEST, 0) < 3)
+            r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*last=*/1));
+        r.tick();
+        if (r.output_fifo_size(E) >= 2 && r.input_fifo_size(WEST, 0) >= 1) break;
+    }
+    ASSERT_EQ(r.output_fifo_size(E), 2u) << "output FIFO not filled to depth";
+    ASSERT_GE(r.input_fifo_size(WEST, 0), 1u) << "no input backlog to supply a same-tick grant";
+
+    // Attach the downstream now: stage 3 can drain one flit this tick, and stage 2
+    // (running after stage 3 in the same tick) can grant one from the input
+    // backlog. Net output-FIFO occupancy stays 2; the sink gains exactly one.
+    r.set_downstream(E, east);
+    ASSERT_TRUE(east.received.empty());
+    const std::size_t backlog_before = r.input_fifo_size(WEST, 0);
+    r.tick();
+    EXPECT_EQ(r.output_fifo_size(E), 2u) << "deq+enq in the same tick did not hold occupancy at 2";
+    EXPECT_EQ(east.received.size(), 1u) << "stage 3 did not drain one flit";
+    EXPECT_EQ(r.input_fifo_size(WEST, 0), backlog_before - 1)
+        << "stage 2 did not grant one from the backlog the same tick";
+}
+
 TEST(RouterDatapathDeath, BadVcIdAborts) {
     SCENARIO("Router: input flit vc_id >= num_vc -> assert+abort (spec §9)");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
