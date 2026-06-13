@@ -859,4 +859,18 @@ TEST(RouterDatapathDeath, BadVcIdAborts) {
                  "vc_id");  // default NUM_VC < 8
 }
 
+// The §9 unsupported-feature guard has two halves: nonzero commtype and multicast.
+// Only the commtype half is reachable at runtime and death-tested below. The multicast
+// half is compile-time-inert (ni::header::MULTICAST_ENABLED == false, width-0 field), so
+// get_header_field("multicast") would itself abort and the branch can never be exercised;
+// it is intentionally not death-tested.
+TEST(RouterDatapathDeath, NonzeroCommtypeAborts) {
+    SCENARIO("Router: input flit with nonzero commtype is unsupported -> assert+abort (spec §9)");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    Router r(center_cfg());
+    auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*last=*/1);
+    f.set_header_field("commtype", 1);
+    EXPECT_DEATH(r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(f), "commtype");
+}
+
 }  // namespace
