@@ -603,15 +603,10 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
 }
 
 TEST(RouterCreditDeath, OverflowAborts) {
-    SCENARIO("Router: spurious credit return beyond depth -> assert+abort (spec §9)");
+    SCENARIO("Router: credit return when already full (seeded at DEPTH) -> assert+abort (spec §9)");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     Router r(center_cfg());
-    EXPECT_DEATH(
-        {
-            for (int i = 0; i <= static_cast<int>(NI_NOC_ROUTER_VC_DEPTH); ++i)
-                r.receive_credit(static_cast<std::size_t>(RouterPort::EAST), 0);
-        },
-        "overflow");
+    EXPECT_DEATH(r.receive_credit(static_cast<std::size_t>(RouterPort::EAST), 0), "overflow");
 }
 
 TEST(RouterRoutePar, FaultInjectionDropsAndCounts) {
