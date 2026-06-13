@@ -489,6 +489,193 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
         << "stage 2 did not grant one from the backlog the same tick";
 }
 
+// --- Credit conservation + error behaviors + route_par fault injection (Task 8) ---
+
+TEST(RouterCredit, ConservationAcrossChainedRouters) {
+    SCENARIO(
+        "Router: credit + in-flight + downstream occupancy == depth, every tick (spec §6/§12.1)");
+    // Chain: A(1,1) EAST -> B(2,1) WEST; B ejects LOCAL into a sink.
+    RouterConfig acfg = center_cfg();
+    RouterConfig bcfg = center_cfg();
+    bcfg.x = 2;  // B is east of A
+    Router a(acfg), b(bcfg);
+
+    // B's WEST upstream-credit pulse returns one (A.EAST, vc0) credit to A. This
+    // fires (registered, one tick late) when B GRANTS a flit out of its WEST/vc0
+    // input FIFO — i.e. the credit comes home only once B has consumed the flit.
+    struct CreditRelay : ni::cmodel::noc::RouterCreditSink {
+        Router* target;
+        std::size_t port;
+        void receive_credit(uint8_t vc) override { target->receive_credit(port, vc); }
+    } relay;
+    relay.target = &a;
+    relay.port = static_cast<std::size_t>(RouterPort::EAST);
+
+    // A's stage-3 push lands in B's WEST landing register; it becomes FIFO-visible
+    // only after B's next stage-1. `wire_inflight` counts flits A has pushed but B
+    // has not yet absorbed into its WEST FIFO. We increment here and decrement once
+    // per b.tick() (stage 1 always drains a present landing). Since A pushes <=1
+    // flit/tick on EAST and B absorbs its landing every tick, wire_inflight is 0 or
+    // 1 at any post-tick sampling point.
+    struct CountingLink : ni::cmodel::noc::RouterLink {
+        Router* target;
+        std::size_t port;
+        std::size_t in_flight = 0;
+        void push_flit(const ni::cmodel::Flit& f) override {
+            target->input(port).push_flit(f);
+            ++in_flight;
+        }
+    } a_to_b;
+    a_to_b.target = &b;
+    a_to_b.port = static_cast<std::size_t>(RouterPort::WEST);
+
+    const std::size_t E = static_cast<std::size_t>(RouterPort::EAST);
+    const std::size_t W = static_cast<std::size_t>(RouterPort::WEST);
+    const std::size_t L = static_cast<std::size_t>(RouterPort::LOCAL);
+    a.set_downstream(E, a_to_b);
+    b.set_upstream_credit(W, relay);
+
+    // B's LOCAL ejection node: record the flit AND immediately return one B.LOCAL
+    // vc0 credit, modelling the destination draining its buffer each cycle. Without
+    // this, B's LOCAL credit (seeded at DEPTH) is never replenished and B stalls
+    // after DEPTH ejections — which would starve A's returning credit too. This
+    // ejection sink is outside the (A.EAST, vc0) conservation domain under test.
+    struct EjectSink : ni::cmodel::noc::RouterLink {
+        std::vector<ni::cmodel::Flit> received;
+        Router* router;
+        std::size_t port;
+        void push_flit(const ni::cmodel::Flit& f) override {
+            received.push_back(f);
+            router->receive_credit(port, 0);
+        }
+    } local_sink;
+    local_sink.router = &b;
+    local_sink.port = L;
+    b.set_downstream(L, local_sink);
+
+    const uint8_t dst_b_local = make_dst(2, 1);  // routes EAST at A, LOCAL at B
+    constexpr int kPackets = 20;
+    int injected = 0;
+
+    // Conservation domain for (A.EAST, vc0): a credit leaves A at its grant and
+    // returns only after B grants the flit onward. The full accounting of slots
+    // that the DEPTH credits map to, at any sampling instant, is:
+    //   credit(A.E,0)                         available
+    // + a.output_fifo_size(A.EAST)            granted, awaiting A's stage-3 push
+    // + wire_inflight                         pushed by A, not yet in B's WEST FIFO
+    // + b.input_fifo_size(B.WEST,0)           buffered at B, awaiting B's grant
+    // + in-flight B->A return pulse           B granted, credit not yet home
+    // The last term we cannot read directly, so we assert the SOUND upper bound
+    // (everything except the unobservable return-pulse term) <= DEPTH every tick
+    // (proves no credit is created), and prove exact restoration + zero loss at
+    // quiescence (proves none is destroyed). Those three together = conservation.
+    auto occupancy_lower = [&]() -> std::size_t {
+        return a.credit(E, 0) + a.output_fifo_size(E) + a_to_b.in_flight + b.input_fifo_size(W, 0);
+    };
+
+    // Drive: model the NI-side credit mirror — only push a new packet into A's WEST
+    // when A still has EAST/vc0 credit (the sender never overruns the receiver).
+    for (int t = 0; t < 200 && (injected < kPackets || a.credit(E, 0) < NI_NOC_ROUTER_VC_DEPTH);
+         ++t) {
+        if (injected < kPackets && a.credit(E, 0) > 0 && a.input_fifo_size(W, 0) == 0) {
+            a.input(W).push_flit(make_flit(dst_b_local, /*vc=*/0, /*last=*/1));
+            ++injected;
+        }
+        a.tick();  // A may push <=1 flit onto the wire (a_to_b.push_flit)
+        b.tick();  // B absorbs its WEST landing this tick
+        if (a_to_b.in_flight > 0) --a_to_b.in_flight;  // landing consumed by B stage 1
+
+        // No credit created: the observable occupancy never exceeds DEPTH.
+        EXPECT_LE(occupancy_lower(), static_cast<std::size_t>(NI_NOC_ROUTER_VC_DEPTH))
+            << "credit created at tick " << t;
+        EXPECT_LE(a_to_b.in_flight, 1u) << "more than one flit on the wire at tick " << t;
+    }
+
+    EXPECT_EQ(injected, kPackets) << "did not inject all packets (credit deadlock?)";
+    // At quiescence: every credit restored (none destroyed) and every flit ejected
+    // (none lost or duplicated).
+    EXPECT_EQ(a.credit(E, 0), static_cast<std::size_t>(NI_NOC_ROUTER_VC_DEPTH))
+        << "credit not fully restored at drain";
+    EXPECT_EQ(a_to_b.in_flight, 0u);
+    EXPECT_EQ(b.input_fifo_size(W, 0), 0u);
+    EXPECT_EQ(local_sink.received.size(), static_cast<std::size_t>(kPackets))
+        << "flits created or lost in transit";
+}
+
+TEST(RouterCreditDeath, OverflowAborts) {
+    SCENARIO("Router: spurious credit return beyond depth -> assert+abort (spec §9)");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    Router r(center_cfg());
+    EXPECT_DEATH(
+        {
+            for (int i = 0; i <= static_cast<int>(NI_NOC_ROUTER_VC_DEPTH); ++i)
+                r.receive_credit(static_cast<std::size_t>(RouterPort::EAST), 0);
+        },
+        "overflow");
+}
+
+TEST(RouterRoutePar, FaultInjectionDropsAndCounts) {
+    SCENARIO(
+        "Router: corrupted route_par -> flit dropped, drop counter ++, credit still returned, "
+        "stream continues (spec §12.7, checker-first)");
+    RouterConfig cfg = center_cfg();
+    cfg.route_par_check = true;
+    Router r(cfg);
+    FlitSink east;
+    CreditCounter west_up;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    r.set_upstream_credit(WEST, west_up);
+
+    // The corrupted flit MUST be a single-flit packet (last=1): a mid-packet tail
+    // drop under a wormhole lock is a documented non-recovered case (spec §9).
+    auto bad = make_flit(make_dst(3, 1), 0, 1);
+    bad.set_header_field("route_par", bad.get_header_field("route_par") ^ 1);  // corrupt
+    r.input(WEST).push_flit(bad);
+    r.tick();  // stage 1: parity screen drops it, queues a WEST credit pulse
+    r.tick();  // registered WEST credit pulse delivered upstream
+    r.tick();
+    r.tick();
+    EXPECT_EQ(r.route_par_drop_count(), 1u);
+    EXPECT_TRUE(east.received.empty()) << "dropped flit must not reach the output";
+    EXPECT_EQ(west_up.pulses.size(), 1u) << "credit leaked (or double-returned) on drop";
+
+    // Stream continues: a well-formed flit still passes end-to-end.
+    r.input(WEST).push_flit(make_flit(make_dst(3, 1), 0, 1));
+    for (int t = 0; t < kPipelineDepth; ++t) r.tick();
+    EXPECT_EQ(r.route_par_drop_count(), 1u) << "good flit wrongly dropped";
+    ASSERT_EQ(east.received.size(), 1u) << "good flit did not pass after a drop";
+}
+
+TEST(RouterRoutePar, CleanStreamNotDropped) {
+    SCENARIO(
+        "Router: route_par check enabled, correct parity — zero drops (checker does not "
+        "over-fire)");
+    RouterConfig cfg = center_cfg();
+    cfg.route_par_check = true;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // routes EAST from center
+
+    // make_flit stamps correct parity. Feed several well-formed single-flit packets
+    // one/tick, returning EAST credit on delivery so the stream never stalls.
+    constexpr int kFlits = 6;
+    int fed = 0;
+    for (int t = 0; t < kFlits + 4 * kPipelineDepth && east.received.size() < kFlits; ++t) {
+        if (fed < kFlits && r.input_fifo_size(WEST, 0) == 0) {
+            r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*last=*/1));
+            ++fed;
+        }
+        tick_and_return_credit(r, east, E);
+    }
+    EXPECT_EQ(r.route_par_drop_count(), 0u) << "checker over-fired on a clean stream";
+    EXPECT_EQ(east.received.size(), static_cast<std::size_t>(kFlits)) << "clean flits lost";
+}
+
 TEST(RouterDatapathDeath, BadVcIdAborts) {
     SCENARIO("Router: input flit vc_id >= num_vc -> assert+abort (spec §9)");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
