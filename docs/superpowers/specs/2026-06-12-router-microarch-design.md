@@ -137,7 +137,7 @@ Credit accounting, per `(output port, vc)`:
 | `dst_id` outside mesh range at RC | assert + abort |
 | Input flit `vc_id` ≥ `NUM_VC` | assert + abort |
 | Credit counter underflow or overflow | assert + abort |
-| `route_par` mismatch (when `EN_ROUTE_PAR`; parity over `dst_id`, `last` per `ni_packet.json`) | drop flit + increment test-visible drop counter (register-side counting stays at the NI sink per `ni_registers.json`) |
+| `route_par` mismatch (when `EN_ROUTE_PAR`; parity over `dst_id`, `last` per `ni_packet.json`) | drop flit + increment test-visible drop counter (register-side counting stays at the NI sink per `ni_registers.json`). Fault model assumes a single-flit packet; mid-packet tail drop under an active wormhole lock is not recovered this round (would wedge that (output,vc) until reset). |
 | Nonzero `multicast` or `commtype` (unsupported this round) | assert + abort |
 | Construction with `NUM_VC` > 2^`VC_ID_WIDTH` or zero FIFO depths | assert + abort |
 | Reset during an in-flight packet | Not modeled. Construction is the only reset; stated explicitly. |

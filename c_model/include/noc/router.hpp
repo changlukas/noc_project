@@ -168,6 +168,10 @@ inline void Router::accept_flit(std::size_t port, const Flit& f) {
         assert(false && "Router::accept_flit: nonzero commtype unsupported");
         std::abort();
     }
+    if (ni::header::MULTICAST_ENABLED && f.get_header_field("multicast") != 0) {
+        assert(false && "Router::accept_flit: nonzero multicast unsupported");
+        std::abort();
+    }
     if (landing_[port].has_value()) {
         assert(false && "Router::accept_flit: >1 flit per link per cycle");
         std::abort();
@@ -246,6 +250,10 @@ inline void Router::tick() {
             const auto par = static_cast<uint8_t>(f.get_header_field("route_par"));
             if ((route_parity(dst, last) ^ par) != 0) {
                 ++route_par_drop_count_;
+                // Fault model: the dropped flit is treated as a single-flit packet.
+                // A mid-packet tail drop while this (out,vc) is wormhole-locked would
+                // wedge the lock (no tail to release it); recovery (timeout) is out of
+                // scope this round. See spec §9.
                 credit_pulse_pending_.emplace_back(port, vc);  // slot never consumed
                 continue;
             }
