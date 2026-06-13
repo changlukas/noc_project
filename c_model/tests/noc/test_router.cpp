@@ -144,6 +144,8 @@ struct Packet {
     int next = 0;  // 0=head, 1=body, 2=tail, 3=done
 };
 
+constexpr int kMaxPacketFlits = 3;  // head + body + tail; see feed_packet()
+
 ni::cmodel::Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t last, uint8_t src_id) {
     auto f = make_flit(dst, vc, last);
     f.set_header_field("src_id", src_id);
@@ -153,8 +155,8 @@ ni::cmodel::Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t last, uint8_
 // Push the next flit of `pkt` into its input port (one flit/port/tick). No-op
 // once the packet (head/body/tail) is already fully drained.
 void feed_packet(Router& r, Packet& pkt, uint8_t dst, uint8_t vc) {
-    if (pkt.next > 2) return;
-    const uint64_t last = (pkt.next == 2) ? 1 : 0;
+    if (pkt.next >= kMaxPacketFlits) return;
+    const uint64_t last = (pkt.next == kMaxPacketFlits - 1) ? 1 : 0;
     r.input(pkt.in_port).push_flit(make_tagged_flit(dst, vc, last, pkt.src_id));
     ++pkt.next;
 }
@@ -695,7 +697,7 @@ TEST(RouterFairness, AllToOneNoStarvation) {
     // feed_packet emits a head(last=0)/body(last=0)/tail(last=1) stream, so each
     // packet here is MAX_PACKET_FLITS = 3 flits. The §5 fairness bound scales with
     // this packet length.
-    constexpr int kPacketFlits = 3;
+    constexpr int kPacketFlits = kMaxPacketFlits;
     const std::size_t in_ports[kInputs] = {
         static_cast<std::size_t>(RouterPort::LOCAL),
         static_cast<std::size_t>(RouterPort::NORTH),
@@ -703,7 +705,7 @@ TEST(RouterFairness, AllToOneNoStarvation) {
         static_cast<std::size_t>(RouterPort::WEST),
     };
     // Distinct sink labels (carried in src_id) so each delivered flit names its
-    // input. One Packet object per input; refill with a fresh 2-flit packet as
+    // input. One Packet object per input; refill with a fresh 3-flit packet as
     // soon as the previous one is fully pushed, keeping all four backlogged.
     const uint8_t labels[kInputs] = {0x10, 0x20, 0x30, 0x40};
     Packet pkt[kInputs];
@@ -719,7 +721,7 @@ TEST(RouterFairness, AllToOneNoStarvation) {
     constexpr std::size_t kCollect = 72u;  // 6 full RR rounds
     for (int t = 0; t < 400 && east.received.size() < kCollect; ++t) {
         for (int i = 0; i < kInputs; ++i) {
-            if (pkt[i].next > 2) pkt[i] = Packet{in_ports[i], labels[i]};  // refill
+            if (pkt[i].next >= kMaxPacketFlits) pkt[i] = Packet{in_ports[i], labels[i]};  // refill
             if (r.input_fifo_size(in_ports[i], 0) < NI_NOC_ROUTER_VC_DEPTH)
                 feed_packet(r, pkt[i], dst, 0);
         }
