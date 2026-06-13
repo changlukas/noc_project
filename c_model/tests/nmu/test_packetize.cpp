@@ -238,14 +238,13 @@ TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
 }
 
 TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
-    SCENARIO(
-        "NMU Packetize: rsvd/disabled header fields (commtype/multicast/noc_qos/...) all zero");
+    SCENARIO("NMU Packetize: rsvd/unstamped header fields (commtype/seq/noc_qos/...) all zero");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
     ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
     auto f = *aw_cap.pop();
     EXPECT_EQ(f.get_header_field("commtype"), 0u);
-    EXPECT_EQ(f.get_header_field("multicast"), 0u);
+    EXPECT_EQ(f.get_header_field("seq"), 0u);
     EXPECT_EQ(f.get_header_field("noc_qos"), 0u);
     EXPECT_EQ(f.get_header_field("route_par"), 0u);
     EXPECT_EQ(f.get_header_field("flit_ecc"), 0u);

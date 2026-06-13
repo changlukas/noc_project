@@ -2,7 +2,7 @@
   "$schema_version": "ni-spec/2.0",
   "meta": {
     "block": "Network Interface (NI: NMU + NSU)",
-    "spec_version": "v0.4.0"
+    "spec_version": "v0.5.0"
   },
   "flit": {
     "field_widths": {
@@ -13,8 +13,9 @@
       "LAST_WIDTH": 1,
       "ROB_REQ_WIDTH": 1,
       "ROB_IDX_WIDTH": 5,
+      "SEQ_WIDTH": 5,
       "RSVD_COMMTYPE_WIDTH": 2,
-      "MULTICAST_WIDTH": 8,
+      "MULTICAST_WIDTH": 0,
       "VC_ID_WIDTH": 3,
       "ROUTE_PAR_WIDTH": 1,
       "FLIT_ECC_WIDTH": 10,
@@ -83,6 +84,11 @@
         "enabled": true
       },
       {
+        "name": "seq",
+        "width_param": "SEQ_WIDTH",
+        "enabled": true
+      },
+      {
         "name": "commtype",
         "width_param": "RSVD_COMMTYPE_WIDTH",
         "enabled": true
@@ -90,7 +96,7 @@
       {
         "name": "multicast",
         "width_param": "MULTICAST_WIDTH",
-        "enabled": true
+        "enabled": false
       },
       {
         "name": "flit_ecc",

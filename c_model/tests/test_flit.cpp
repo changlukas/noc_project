@@ -11,7 +11,9 @@ TEST(Flit, ConstructFromRawHasMatchingWidth) {
 }
 
 TEST(Flit, SetGetHeaderRoundtripAllFields) {
-    SCENARIO("Flit: every header field (noc_qos/axi_ch/src_id/.../flit_ecc) set/get bit-perfect");
+    SCENARIO(
+        "Flit: every header field (noc_qos/axi_ch/src_id/.../seq/.../flit_ecc) set/get "
+        "bit-perfect");
     Flit f;
     f.set_header_field("noc_qos", 0xA);
     f.set_header_field("axi_ch", 0x4);  // R
@@ -22,8 +24,8 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
     f.set_header_field("last", 0x1);
     f.set_header_field("rob_req", 0x1);
     f.set_header_field("rob_idx", 0x1F);
+    f.set_header_field("seq", 0x1F);
     f.set_header_field("commtype", 0x2);
-    f.set_header_field("multicast", 0xFF);
     f.set_header_field("flit_ecc", 0x3FF);
     EXPECT_EQ(f.get_header_field("noc_qos"), 0xAu);
     EXPECT_EQ(f.get_header_field("axi_ch"), 0x4u);
@@ -34,8 +36,8 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
     EXPECT_EQ(f.get_header_field("last"), 0x1u);
     EXPECT_EQ(f.get_header_field("rob_req"), 0x1u);
     EXPECT_EQ(f.get_header_field("rob_idx"), 0x1Fu);
+    EXPECT_EQ(f.get_header_field("seq"), 0x1Fu);
     EXPECT_EQ(f.get_header_field("commtype"), 0x2u);
-    EXPECT_EQ(f.get_header_field("multicast"), 0xFFu);
     EXPECT_EQ(f.get_header_field("flit_ecc"), 0x3FFu);
 }
 
@@ -86,8 +88,7 @@ TEST(FlitDispatch, RsvdHeaderFieldQueryAborts) {
     // assert string alone would also match the assert message path).
     EXPECT_DEATH(
         { ni::cmodel::detail::header_field_pos("rsvd"); },
-        "ni::cmodel::detail::header_field_pos: name 'rsvd' not found"
-    );
+        "ni::cmodel::detail::header_field_pos: name 'rsvd' not found");
 }
 
 TEST(FlitDispatch, EnabledHeaderFieldsStillResolve) {

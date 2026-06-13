@@ -19,10 +19,11 @@
 //   rob_idx     — 0 in frozen interface path (Disabled mode); Rob path
 //                 supplies via AwHeaderMeta (future Enabled mode).
 //   commtype,
-//   multicast,
+//   seq,
 //   noc_qos,
 //   route_par,
 //   flit_ecc    — 0-filled (deferred to future tasks)
+//   multicast   — width-0 reserved placeholder (not in flit)
 //   rsvd        — 0 by Flit default
 #include "axi/types.hpp"
 #include "flit.hpp"

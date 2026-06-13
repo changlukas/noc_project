@@ -85,8 +85,8 @@ def test_header_field_position_disabled_still_positioned(packet_spec):
     # rsvd is the lone disabled (derived padding) field; sits at the end.
     pos = C.header_field_position(packet_spec, "rsvd")
     assert pos is not None
-    # width=2 (HEADER_TOTAL_WIDTH 56 - sum of enabled 54), so MSB-LSB == 1.
-    assert pos[1] - pos[0] == 1
+    # width=5 (HEADER_TOTAL_WIDTH 56 - sum of enabled 51), so MSB-LSB == 4.
+    assert pos[1] - pos[0] == 4
 
 
 def test_header_field_enabled(packet_spec):

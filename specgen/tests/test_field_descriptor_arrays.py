@@ -23,10 +23,11 @@ def test_header_fields_array_skips_disabled():
     body = m.group(1)
     # All 12 enabled header fields present.
     for name in ["noc_qos", "axi_ch", "src_id", "dst_id", "vc_id", "route_par",
-                 "last", "rob_req", "rob_idx", "commtype", "multicast", "flit_ecc"]:
+                 "last", "rob_req", "rob_idx", "seq", "commtype", "flit_ecc"]:
         assert f'"{name}"' in body, f"missing {name} in HEADER_FIELDS"
-    # rsvd is enabled=false in spec, must be skipped.
+    # rsvd (derived padding) and multicast (width=0) are enabled=false; skipped.
     assert '"rsvd"' not in body, "rsvd should be skipped (enabled=false)"
+    assert '"multicast"' not in body, "multicast should be skipped (enabled=false)"
 
 
 def test_payload_field_arrays_per_channel():
