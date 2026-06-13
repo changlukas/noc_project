@@ -15,7 +15,7 @@
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "ni_params.h"
-#include "route_parity.hpp"
+#include "route_parity.hpp"  // route_parity(): stage-1 RC route_par screen (gated by cfg_.route_par_check)
 
 #include <array>
 #include <cassert>
@@ -143,6 +143,7 @@ class Router {
     };
 
     RouterConfig cfg_;
+    // stage-1 input landing register, one flit/port/cycle
     std::array<std::optional<Flit>, ROUTER_PORT_COUNT> landing_{};
     std::array<std::vector<std::deque<Flit>>, ROUTER_PORT_COUNT> input_fifo_{};
     std::array<std::vector<std::size_t>, ROUTER_PORT_COUNT> credit_{};      // [out][vc]
@@ -151,13 +152,108 @@ class Router {
     std::array<std::deque<Flit>, ROUTER_PORT_COUNT> output_fifo_{};
     std::array<RouterLink*, ROUTER_PORT_COUNT> downstream_{};
     std::array<RouterCreditSink*, ROUTER_PORT_COUNT> upstream_credit_{};
-    std::vector<std::pair<std::size_t, uint8_t>> credit_pulse_pending_;  // emit next tick
+    // credit return pulses, registered: emitted at the start of next tick
+    std::vector<std::pair<std::size_t, uint8_t>> credit_pulse_pending_;
     std::vector<InputAdapter> input_adapters_;
-    uint64_t route_par_drop_count_ = 0;
+    uint64_t route_par_drop_count_ = 0;  // flits dropped by the stage-1 route_par screen
 };
 
-// Datapath stubbed in this task; implemented in Task 5.
-inline void Router::tick() {}
-inline void Router::accept_flit(std::size_t, const Flit&) {}
+inline void Router::accept_flit(std::size_t port, const Flit& f) {
+    const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+    if (vc >= cfg_.num_vc) {
+        assert(false && "Router::accept_flit: vc_id >= num_vc");
+        std::abort();
+    }
+    if (ni::header::COMMTYPE_ENABLED && f.get_header_field("commtype") != 0) {
+        assert(false && "Router::accept_flit: nonzero commtype unsupported");
+        std::abort();
+    }
+    if (landing_[port].has_value()) {
+        assert(false && "Router::accept_flit: >1 flit per link per cycle");
+        std::abort();
+    }
+    landing_[port] = f;
+}
+
+inline void Router::tick() {
+    // Registered credit pulses generated last tick go out first.
+    for (const auto& [port, vc] : credit_pulse_pending_) {
+        if (upstream_credit_[port]) upstream_credit_[port]->receive_credit(vc);
+    }
+    credit_pulse_pending_.clear();
+
+    // Stages run in reverse pipeline order so a flit advances one stage per tick.
+    // Stage 3: output FIFO -> link (one flit per output port per cycle).
+    for (std::size_t out = 0; out < ROUTER_PORT_COUNT; ++out) {
+        if (!output_fifo_[out].empty() && downstream_[out]) {
+            downstream_[out]->push_flit(output_fifo_[out].front());
+            output_fifo_[out].pop_front();
+        }
+    }
+
+    // Stage 2: per-output grant — wormhole (packet) lock + VC (flit) RR.
+    for (std::size_t out = 0; out < ROUTER_PORT_COUNT; ++out) {
+        if (output_fifo_[out].size() >= cfg_.output_fifo_depth) continue;
+        for (std::size_t k = 0; k < cfg_.num_vc; ++k) {
+            const std::size_t vc = (vc_rr_[out] + k) % cfg_.num_vc;
+            auto& ws = wormhole_[out][vc];
+            std::optional<std::size_t> candidate;
+            if (ws.locked_input.has_value()) {
+                if (!input_fifo_[*ws.locked_input][vc].empty()) candidate = ws.locked_input;
+            } else {
+                for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
+                    const std::size_t in = (ws.rr + j) % ROUTER_PORT_COUNT;
+                    const auto& q = input_fifo_[in][vc];
+                    if (q.empty()) continue;
+                    const auto dst = static_cast<uint8_t>(q.front().get_header_field("dst_id"));
+                    if (static_cast<std::size_t>(route_compute(dst, cfg_)) == out) {
+                        candidate = in;
+                        break;
+                    }
+                }
+            }
+            if (!candidate.has_value() || credit_[out][vc] == 0) continue;
+
+            // Grant (spec §5): single atomic event.
+            auto& q = input_fifo_[*candidate][vc];
+            const Flit flit = q.front();
+            q.pop_front();
+            assert(credit_[out][vc] > 0 && "Router: credit underflow");
+            --credit_[out][vc];
+            output_fifo_[out].push_back(flit);
+            credit_pulse_pending_.emplace_back(*candidate, static_cast<uint8_t>(vc));
+            const uint64_t last = flit.get_header_field("last");
+            if (last == 0) {
+                ws.locked_input = *candidate;
+            } else {
+                ws.locked_input.reset();
+                ws.rr = (*candidate + 1) % ROUTER_PORT_COUNT;
+            }
+            vc_rr_[out] = (vc + 1) % cfg_.num_vc;
+            break;  // one grant per output port per cycle
+        }
+    }
+
+    // Stage 1: landing register -> input VC FIFO (+ route_par screen).
+    for (std::size_t port = 0; port < ROUTER_PORT_COUNT; ++port) {
+        if (!landing_[port].has_value()) continue;
+        const Flit f = *landing_[port];
+        landing_[port].reset();
+        const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+        if (cfg_.route_par_check) {
+            const auto dst = f.get_header_field("dst_id");
+            const auto last = f.get_header_field("last");
+            const auto par = static_cast<uint8_t>(f.get_header_field("route_par"));
+            if ((route_parity(dst, last) ^ par) != 0) {
+                ++route_par_drop_count_;
+                credit_pulse_pending_.emplace_back(port, vc);  // slot never consumed
+                continue;
+            }
+        }
+        assert(input_fifo_[port][vc].size() < cfg_.vc_depth &&
+               "Router: input FIFO overflow — upstream credit discipline broken");
+        input_fifo_[port][vc].push_back(f);
+    }
+}
 
 }  // namespace ni::cmodel::noc
