@@ -21,7 +21,6 @@
 //   commtype,
 //   multicast,
 //   noc_qos,
-//   route_par,
 //   flit_ecc    — 0-filled (deferred to future tasks)
 //   rsvd        — 0 by Flit default
 #include "axi/types.hpp"

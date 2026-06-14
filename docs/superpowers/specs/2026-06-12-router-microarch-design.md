@@ -2,22 +2,20 @@
 
 Date: 2026-06-12
 Status: Implemented (single-router scope) — 2026-06-13
-Scope: (a) single-router micro-architecture for the c_model NoC fabric; (b) `seq` header
-field addition to the packet format. Mesh/fabric assembly, multi-router integration, NI
-wiring, and the NSU request-reorder mechanism are out of scope (later rounds).
-Image authority: `docs/image/router.jpg` matches this design unchanged. `docs/image/header.jpg`
-becomes outdated once `seq` lands; see §10.
+Scope: single-router micro-architecture for the c_model NoC fabric. Mesh/fabric assembly,
+multi-router integration, NI wiring, and request-path ordering (endpoint reorder) are out
+of scope (later rounds).
+Image authority: `docs/image/router.jpg` matches this design unchanged.
 
 ## 1. Decision log
 
 | Decision | Outcome | Rationale |
 |---|---|---|
-| VC allocation (VA) stage | Rejected this round | Free-pool VA lets two packets of one flow take different VCs; per-VC FIFOs at the next hop arbitrate independently, so the later packet can overtake. The request path has no reorder mechanism today. Revisit only after the NSU request-reorder round (§10) lands. |
-| Ordering strategy | Endpoint reorder, symmetric with RSP | RSP direction already restores order at the endpoint (`rob_req`/`rob_idx` + NMU per-ID RoB). REQ direction gets the same family: `seq` field now (§10), NSU request reorder + window flow control in a later round. Until then, ordering is preserved structurally (fixed VC, deterministic route) under the §10 deployment constraints. |
-| `vc_id` mutability | Fixed end-to-end | NMU `VcArbiter` assigns at injection; routers index per-VC FIFOs by it, never rewrite it. Transport ordering contract stays "in order within `(src_id, dst_id, vc_id)`". |
+| VC allocation (VA) stage | Rejected this round | Free-pool VA lets two packets of one flow take different VCs; per-VC FIFOs at the next hop arbitrate independently, so the later packet can overtake. The request path has no reorder mechanism, so this would break same-flow ordering. Revisit only if a request-path reorder mechanism is added later. |
+| Ordering | Structural (fixed VC + deterministic route) | Same-flow packets keep one VC and one route, so each stays in a single FIFO chain and cannot be overtaken → in order within `(src_id, dst_id, vc_id)`. A request-path endpoint-reorder scheme was considered but deferred; not in this round. |
+| `vc_id` mutability | Fixed end-to-end | NMU `VcArbiter` assigns at injection; routers index per-VC FIFOs by it, never rewrite it. |
 | Pipeline | 3-stage wormhole (image-aligned) | FlooNoC mainline `floo_router.sv` form. |
 | Reuse of NI `WormholeArbiter` | No | Its lock pairs sibling input channels (AW→W). The router locks one `(input port, vc)` per `(output port, vc)` until tail. Same FlooNoC lock semantic, different ownership model; implemented separately. |
-| `seq` field | 5 bit, after `rob_idx` | §10. |
 | Mesh default | 4 × 4 | All router positions (corner / edge / center) and port subsets exercised; range 2..16 bounded by `X_WIDTH`/`Y_WIDTH`. |
 
 ## 2. Position and instances
@@ -37,7 +35,7 @@ becomes outdated once `seq` lands; see §10.
 | 2 | Per-`(output port, vc)` wormhole arbitration + crossbar; per-output VC arbitration |
 | 3 | Output FIFO → link |
 
-- Zero-load latency through one router: 3 cycles. Verified by test (§12.5).
+- Zero-load latency through one router: 3 cycles. Verified by test (§11.5).
 - No zero-cycle bypass and no look-ahead routing this round.
 
 ## 4. Route computation
@@ -79,7 +77,7 @@ Flit level — one VC arbiter per output port:
 - Round-robin across VCs, advancing per flit.
 - Reference: `floo_vc_arbiter.sv`.
 
-Starvation bounds (verified §12.4 under no downstream backpressure, i.e. credits never
+Starvation bounds (verified §11.4 under no downstream backpressure, i.e. credits never
 exhausted and the link always accepts): packet level ≤ (competing inputs − 1) ×
 `MAX_PACKET_FLITS` flit times, where `MAX_PACKET_FLITS` = 1 + max AXI burst beats;
 flit level ≤ `NUM_VC` − 1 flit times. With backpressure the bounds scale by the
@@ -137,49 +135,14 @@ Credit accounting, per `(output port, vc)`:
 | `dst_id` outside mesh range at RC | assert + abort |
 | Input flit `vc_id` ≥ `NUM_VC` | assert + abort |
 | Credit counter underflow or overflow | assert + abort |
-| `route_par` mismatch (when `EN_ROUTE_PAR`; parity over `dst_id`, `last` per `ni_packet.json`) | drop flit + increment test-visible drop counter (register-side counting stays at the NI sink per `ni_registers.json`). Fault model assumes a single-flit packet; mid-packet tail drop under an active wormhole lock is not recovered this round (would wedge that (output,vc) until reset). |
-| Nonzero `multicast` or `commtype` (unsupported this round) | assert + abort |
+| Nonzero `multicast` or `commtype` (unsupported this round) | assert + abort (guard inert while the fields are disabled) |
 | Construction with `NUM_VC` > 2^`VC_ID_WIDTH` or zero FIFO depths | assert + abort |
 | Reset during an in-flight packet | Not modeled. Construction is the only reset; stated explicitly. |
 
 A "head flit while packet active on the same input VC" check is deliberately absent: the
 header has no head bit, so a new single-flit packet is indistinguishable from a lost tail.
 
-## 10. Packet format change: `seq` field
-
-New optional header field for request-path ordering, symmetric with the existing
-response-path tag (`rob_req`/`rob_idx` + NMU per-ID RoB).
-
-| Property | Value |
-|---|---|
-| Name / presence | `seq`, Option `EN_SEQ` |
-| Width | `SEQ_WIDTH`, default 5 (window 32) |
-| Position | Between `rob_idx` and `commtype` |
-| Stamped by | NMU, per-`(src_id, dst_id)` counter, REQ network packets only; one value per packet (all flits of a packet carry the same `seq`), wraps mod 2^`SEQ_WIDTH` |
-| Read by | Future NSU request reorder. Routers never examine it. |
-
-- Position rationale: `rob_req`/`rob_idx`/`seq` form one contiguous ordering-metadata
-  block; all router-read fields (`dst_id`, `vc_id`, `last`, `route_par` span) sit before
-  it, so their offsets are unaffected; `flit_ecc` stays at the tail.
-- Width rationale: the fabric is lossless and duplicate-free, so the reorder window is
-  unambiguous iff in-flight packets per flow ≤ 2^`SEQ_WIDTH` (no TCP-style halving
-  needed). 32 matches the `rob_idx` outstanding scale (32-entry RoB). Enforcement of the
-  in-flight bound is the window flow control of the NSU reorder round.
-- Bit budget: header total stays 56. With `seq` enabled the option sum is 59 > 56, so
-  `EN_SEQ` + `EN_MULTICAST` + `EN_ECC` cannot be enabled together; the existing
-  compile-time budget check rejects such configs.
-- Authority handoff: `docs/image/header.jpg` does not show `seq` and is outdated once
-  this lands. Authority for the header layout moves to `specgen/generated/json/ni_packet.json`
-  plus this section until the image is regenerated (user-owned).
-
-Deployment constraints until the NSU request-reorder round is implemented and verified:
-
-| Constraint | Released by |
-|---|---|
-| NMU REQ injection: candidate set per AXI channel limited to a single VC (deterministic flow-to-VC; `MultiCandidate` effectively single-entry on REQ) | NSU request reorder + window flow control |
-| NSU RSP injection: either single-candidate VC mapping, or `rob_req = 1` on all responses (bypass responses rely on fabric in-order delivery) | Same |
-
-## 11. Parameters and specgen integration
+## 10. Parameters and specgen integration
 
 | Parameter | Source | Default |
 |---|---|---|
@@ -187,16 +150,13 @@ Deployment constraints until the NSU request-reorder round is implemented and ve
 | `ROUTER_VC_DEPTH` | new, `constants.yaml` — input VC FIFO depth = credit seed | 4 |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | new, `constants.yaml` | 2 |
 | `MESH_X_DIM` / `MESH_Y_DIM` | new, `constants.yaml`; range 2..16, bounded by existing `X_WIDTH`/`Y_WIDTH` (4 bit) | 4 / 4 |
-| `SEQ_WIDTH` | new, packet domain (`ni_packet.json` field widths) | 5 |
 
 - Router enters `specgen/source/noc_function_blocks.json` as a new function block
   (feature inventory + drift gate; does not drive codegen, per existing invariant).
-- `seq` enters `specgen/generated/json/ni_packet.json` (packet domain SSoT) and flows
-  through existing codegen to `ni_flit_constants.h` / `ni_flit_pkg.sv`.
 - Router parameters flow through the existing params domain (`constants.yaml` →
   `ni_params.h` / `ni_params_pkg.sv`). No new codegen domain.
 
-## 12. Verification invariants
+## 11. Verification invariants
 
 1. Credit conservation (§6 equation, sampled post-`tick()` every cycle).
 2. Packet non-interleaving per `(output port, vc)`, including the single-flit
@@ -206,17 +166,13 @@ Deployment constraints until the NSU request-reorder round is implemented and ve
    ≤ §5 bounds.
 5. Zero-load latency: a flit pushed at cycle T reaches `downstream.push_flit` at T + 3.
 6. Parameterized fixture over `NUM_VC` ∈ {1, 2, 4, 8} × `ROUTER_VC_DEPTH` ∈ {1, 2, 4, 8}.
-7. `route_par` fault injection: corrupted parity → drop counter increments, stream
-   continues (checker-first discipline).
-8. `seq` transparency: header bits identical at router ingress and egress.
-9. Multi-router paths: out of scope, fabric round.
+7. Multi-router paths: out of scope, fabric round.
 
-## 13. References
+## 12. References
 
 - BookSim2 `src/routers/iq_router.cpp` — surveyed; its RC→VA→SA→ST form was evaluated and
   rejected this round (§1).
 - FlooNoC `hw/floo_router.sv`, `hw/floo_wormhole_arbiter.sv`, `hw/floo_vc_arbiter.sv` —
-  structure ported here; `hw/deprecated/floo_vc_router.sv` as the VA counter-example;
-  `FLOO_TYPEDEF_HDR_T` (`rob_req`/`rob_idx`) as the endpoint-reorder precedent.
+  structure ported here; `hw/deprecated/floo_vc_router.sv` as the VA counter-example.
 - Dally & Towles, *Principles and Practices of Interconnection Networks* — DOR deadlock
   argument, credit-based flow control.
