@@ -15,7 +15,6 @@
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "ni_params.h"
-#include "route_parity.hpp"  // route_parity(): stage-1 RC route_par screen (gated by cfg_.route_par_check)
 
 #include <array>
 #include <cassert>
@@ -39,7 +38,6 @@ struct RouterConfig {
     uint8_t num_vc = NI_NOC_NUM_VC;
     std::size_t vc_depth = NI_NOC_ROUTER_VC_DEPTH;
     std::size_t output_fifo_depth = NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH;
-    bool route_par_check = false;
 };
 
 // Forward half of the router link contract (spec §6). push_flit is always
@@ -125,7 +123,6 @@ class Router {
         return input_fifo_[port][vc].size();
     }
     std::size_t output_fifo_size(std::size_t port) const { return output_fifo_[port].size(); }
-    uint64_t route_par_drop_count() const { return route_par_drop_count_; }
 
   private:
     struct InputAdapter : RouterLink {
@@ -155,7 +152,6 @@ class Router {
     // credit return pulses, registered: emitted at the start of next tick
     std::vector<std::pair<std::size_t, uint8_t>> credit_pulse_pending_;
     std::vector<InputAdapter> input_adapters_;
-    uint64_t route_par_drop_count_ = 0;  // flits dropped by the stage-1 route_par screen
 };
 
 inline void Router::accept_flit(std::size_t port, const Flit& f) {
@@ -238,26 +234,12 @@ inline void Router::tick() {
         }
     }
 
-    // Stage 1: landing register -> input VC FIFO (+ route_par screen).
+    // Stage 1: landing register -> input VC FIFO.
     for (std::size_t port = 0; port < ROUTER_PORT_COUNT; ++port) {
         if (!landing_[port].has_value()) continue;
         const Flit f = *landing_[port];
         landing_[port].reset();
         const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
-        if (cfg_.route_par_check) {
-            const auto dst = f.get_header_field("dst_id");
-            const auto last = f.get_header_field("last");
-            const auto par = static_cast<uint8_t>(f.get_header_field("route_par"));
-            if ((route_parity(dst, last) ^ par) != 0) {
-                ++route_par_drop_count_;
-                // Fault model: the dropped flit is treated as a single-flit packet.
-                // A mid-packet tail drop while this (out,vc) is wormhole-locked would
-                // wedge the lock (no tail to release it); recovery (timeout) is out of
-                // scope this round. See spec §9.
-                credit_pulse_pending_.emplace_back(port, vc);  // slot never consumed
-                continue;
-            }
-        }
         assert(input_fifo_[port][vc].size() < cfg_.vc_depth &&
                "Router: input FIFO overflow — upstream credit discipline broken");
         input_fifo_[port][vc].push_back(f);
