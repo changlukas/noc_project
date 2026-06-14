@@ -19,19 +19,16 @@
 //   rob_idx     — 0 in frozen interface path (Disabled mode); Rob path
 //                 supplies via AwHeaderMeta (future Enabled mode).
 //   commtype,
-//   seq,
+//   multicast,
 //   noc_qos,
 //   route_par,
 //   flit_ecc    — 0-filled (deferred to future tasks)
-//   multicast   — width-0 reserved placeholder (not in flit)
 //   rsvd        — 0 by Flit default
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "nmu/addr_trans.hpp"
 #include "noc/noc_req_out.hpp"
 #include "request_io.hpp"
-#include "route_parity.hpp"
-#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -80,23 +77,13 @@ class Packetize : public RequestPacketizer {
     uint8_t src_id_;
 
     // W FIFO carries the meta inherited from AW. local_addr NOT stored:
-    // W payload has no address field; only header dst_id/rob_*/seq needed.
-    // `seq` is latched at AW issue so W beats replay the AW packet's value
-    // even with multiple outstanding AW packets (spec 2026-06-12 §10).
+    // W payload has no address field; only header dst_id/rob_* needed.
     struct WMeta {
         uint8_t dst_id;
         uint8_t rob_req;
         uint8_t rob_idx;
-        uint8_t seq;
     };
     std::deque<WMeta> w_meta_fifo_;
-
-    // Request-path ordering tag (spec 2026-06-12 §10): per-(src,dst) packet
-    // counter, REQ network only. W flits reuse their AW packet's value.
-    // Sized to the full dst_id space (X_WIDTH + Y_WIDTH) so any dst_id indexes
-    // directly with no bounds check. Per-(src,dst) free-running packet counter.
-    static constexpr uint8_t SEQ_MASK = static_cast<uint8_t>((1u << ni::header::SEQ_WIDTH) - 1);
-    std::array<uint8_t, 1u << (ni::width::X_WIDTH + ni::width::Y_WIDTH)> seq_counter_{};
 };
 
 // ---- inline impl ----
@@ -110,9 +97,6 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_header_field("last", 0);  // AW starts wormhole packet (FlooNoC pattern)
     f.set_header_field("rob_req", meta.rob_req);
     f.set_header_field("rob_idx", meta.rob_idx);
-    const uint8_t seq = seq_counter_[meta.dst_id] & SEQ_MASK;
-    f.set_header_field("seq", seq);
-    f.set_header_field("route_par", route_parity(meta.dst_id, /*last=*/0));
     f.set_payload_field("AW", "awid", b.id);
     f.set_payload_field("AW", "awaddr", meta.local_addr);  // NOT b.addr (future remap-safe)
     f.set_payload_field("AW", "awlen", b.len);
@@ -125,8 +109,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_payload_field("AW", "awqos", b.qos);
     f.set_payload_field("AW", "awuser", b.user);
     if (!aw_out_.push_flit(f)) return false;
-    w_meta_fifo_.push_back({meta.dst_id, meta.rob_req, meta.rob_idx, seq});
-    seq_counter_[meta.dst_id] = (seq + 1) & SEQ_MASK;  // advance only after accept
+    w_meta_fifo_.push_back({meta.dst_id, meta.rob_req, meta.rob_idx});
     return true;
 }
 
@@ -144,8 +127,6 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     f.set_header_field("last", b.last ? 1u : 0u);  // W's wlast ends wormhole packet (FlooNoC)
     f.set_header_field("rob_req", meta.rob_req);
     f.set_header_field("rob_idx", meta.rob_idx);
-    f.set_header_field("seq", meta.seq);  // reuse owning AW packet's seq
-    f.set_header_field("route_par", route_parity(meta.dst_id, b.last ? 1u : 0u));
     f.set_payload_field("W", "wlast", b.last ? 1u : 0u);
     f.set_payload_field("W", "wuser", b.user);
     f.set_payload_field("W", "wstrb", b.strb);
@@ -164,9 +145,6 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
     f.set_header_field("last", 1);
     f.set_header_field("rob_req", meta.rob_req);
     f.set_header_field("rob_idx", meta.rob_idx);
-    const uint8_t seq = seq_counter_[meta.dst_id] & SEQ_MASK;
-    f.set_header_field("seq", seq);
-    f.set_header_field("route_par", route_parity(meta.dst_id, /*last=*/1));
     f.set_payload_field("AR", "arid", b.id);
     f.set_payload_field("AR", "araddr", meta.local_addr);
     f.set_payload_field("AR", "arlen", b.len);
@@ -179,7 +157,6 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
     f.set_payload_field("AR", "arqos", b.qos);
     f.set_payload_field("AR", "aruser", b.user);
     if (!ar_out_.push_flit(f)) return false;
-    seq_counter_[meta.dst_id] = (seq + 1) & SEQ_MASK;  // advance only after accept
     return true;
 }
 

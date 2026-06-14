@@ -153,10 +153,10 @@ def test_use_constants_cpp_compiles_and_runs(tmp_path):
         [str(exe)], capture_output=True, text=True,
     )
     assert run_result.returncode == 0, run_result.stderr
-    # Post fixed-56b refactor: noc_qos enabled (width=4) shifts every other
-    # field +4 bits, so packed hex of (axi_ch=2, src_id=5, dst_id=0x12,
-    # last=1, rob_req=1, rob_idx=7) is the old value left-shifted by 4.
-    assert "0x00000000F80902A0" in run_result.stdout, (
+    # All optional fields disabled: axi_ch is the first enabled field at LSB 0,
+    # so packed hex of (axi_ch=2, src_id=5, dst_id=0x12, last=1, rob_req=1,
+    # rob_idx=7) is the minimal-header value.
+    assert "0x0000000007C0902A" in run_result.stdout, (
         f"Expected header value not found in output:\n{run_result.stdout}"
     )
 
@@ -173,10 +173,14 @@ def test_packet_cpp_has_flit_width_static_assert():
     assert "HEADER_WIDTH + PAYLOAD_WIDTH" in text
 
 
-def test_packet_cpp_has_secded_static_assert():
-    """ni_flit_constants.h must contain SECDED bound static_assert."""
+def test_packet_cpp_secded_static_assert_gated_on_flit_ecc():
+    """SECDED bound static_assert is emitted only when flit_ecc is enabled.
+
+    flit_ecc is currently disabled (width 0), so the codegen must NOT emit the
+    SECDED assert (1 << 0 >= data_bits + ... would be false at compile time).
+    """
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
-    assert "SECDED bound" in text
+    assert "SECDED bound" not in text
 
 
 def test_registers_cpp_has_field_width_static_assert():

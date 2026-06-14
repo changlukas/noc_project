@@ -3,7 +3,6 @@
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
-#include "route_parity.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nmu::Packetize;
@@ -239,16 +238,11 @@ TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
 }
 
 TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
-    SCENARIO("NMU Packetize: rsvd/unstamped header fields (commtype/seq/noc_qos/...) all zero");
+    SCENARIO("NMU Packetize: rsvd/disabled header fields all zero");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
     ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
     auto f = *aw_cap.pop();
-    EXPECT_EQ(f.get_header_field("commtype"), 0u);
-    EXPECT_EQ(f.get_header_field("seq"), 0u);
-    EXPECT_EQ(f.get_header_field("noc_qos"), 0u);
-    EXPECT_EQ(f.get_header_field("route_par"), 0u);
-    EXPECT_EQ(f.get_header_field("flit_ecc"), 0u);
     EXPECT_TRUE(f.check_padding_is_zero());
 }
 
@@ -268,95 +262,6 @@ TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
     EXPECT_EQ(f.get_header_field("rob_req"), 1u);
     EXPECT_EQ(f.get_header_field("rob_idx"), 0x07u);
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x9999u);  // meta.local_addr, NOT b.addr
-}
-
-TEST(PacketizeSeq, IncrementsPerPacketPerDestination) {
-    SCENARIO("NMU Packetize: seq increments per packet per (src,dst) flow; W shares AW's seq");
-    ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
-    // dst A = addr 0x10000 → 0x01;  dst B = addr 0x20000 → 0x02.
-    ASSERT_TRUE(pkt.push_aw(make_aw(0x01, 0x10000)));  // AW#1 to A
-    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));
-    ASSERT_TRUE(pkt.push_aw(make_aw(0x02, 0x10000)));  // AW#2 to A
-    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));
-    ASSERT_TRUE(pkt.push_ar(make_ar(0x03, 0x20000)));  // AR#1 to B
-    ASSERT_TRUE(pkt.push_aw(make_aw(0x04, 0x10000)));  // AW#3 to A
-    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));
-
-    auto aw1 = aw_cap.pop();
-    auto w1 = w_cap.pop();
-    auto aw2 = aw_cap.pop();
-    auto w2 = w_cap.pop();
-    auto ar1 = ar_cap.pop();
-    auto aw3 = aw_cap.pop();
-    auto w3 = w_cap.pop();
-    EXPECT_EQ(aw1->get_header_field("seq"), 0u);  // AW#1 to A
-    EXPECT_EQ(w1->get_header_field("seq"), 0u);   // W shares AW#1's seq
-    EXPECT_EQ(aw2->get_header_field("seq"), 1u);  // AW#2 to A
-    EXPECT_EQ(w2->get_header_field("seq"), 1u);
-    EXPECT_EQ(ar1->get_header_field("seq"), 0u);  // independent per-dst counter (B)
-    EXPECT_EQ(aw3->get_header_field("seq"), 2u);  // AW#3 to A
-    EXPECT_EQ(w3->get_header_field("seq"), 2u);
-}
-
-TEST(PacketizeSeq, WrapsAtSeqWidth) {
-    SCENARIO("NMU Packetize: seq wraps mod 2^SEQ_WIDTH");
-    ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
-    const unsigned period = 1u << ni::header::SEQ_WIDTH;  // 32
-    for (unsigned i = 0; i < period; ++i) {
-        ASSERT_TRUE(pkt.push_aw(make_aw(0x01, 0x10000)));  // single-beat AW packets to dst A
-        ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));
-    }
-    ASSERT_TRUE(pkt.push_aw(make_aw(0x01, 0x10000)));  // the (period+1)th packet wraps to seq 0
-    // drain the first `period` packets' captures
-    for (unsigned i = 0; i < period; ++i) {
-        aw_cap.pop();
-        w_cap.pop();
-    }
-    auto wrapped = aw_cap.pop();
-    ASSERT_TRUE(wrapped.has_value());
-    EXPECT_EQ(wrapped->get_header_field("seq"), 0u);
-}
-
-TEST(PacketizeSeq, OutstandingAwPacketsKeepTheirOwnSeq) {
-    SCENARIO(
-        "NMU Packetize: AW1 accepted, AW2 accepted, then AW1's W beats — W carries AW1's seq, not "
-        "AW2's");
-    ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
-    // Two outstanding AWs to the same dst A, both accepted before any W flit.
-    ASSERT_TRUE(pkt.push_aw(make_aw(0x01, 0x10000)));            // AW1
-    ASSERT_TRUE(pkt.push_aw(make_aw(0x02, 0x10000)));            // AW2
-    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));  // W-of-AW1
-
-    auto aw1 = aw_cap.pop();
-    auto aw2 = aw_cap.pop();
-    auto w_of_aw1 = w_cap.pop();
-    EXPECT_EQ(aw1->get_header_field("seq"), 0u);
-    EXPECT_EQ(aw2->get_header_field("seq"), 1u);
-    EXPECT_EQ(w_of_aw1->get_header_field("seq"), 0u);  // AW1's seq, not AW2's
-}
-
-TEST(PacketizeRoutePar, EvenParityOverDstIdAndLast) {
-    SCENARIO("NMU Packetize: route_par makes XOR(dst_id bits, last, route_par) == 0");
-    ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId);
-    // dst 0x34 (multi-bit, odd parity) exercises the fold; len=2 → 3 W beats.
-    ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x340000, /*len*/ 2)));
-    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ false)));
-    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ false)));
-    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));
-    ASSERT_TRUE(pkt.push_ar(make_ar(0x06, 0x560000)));
-
-    auto check = [](const ni::cmodel::Flit& f) {
-        uint64_t x = f.get_header_field("dst_id");
-        uint8_t p = ni::cmodel::route_parity(x, f.get_header_field("last"));
-        EXPECT_EQ(f.get_header_field("route_par"), p);
-    };
-    check(*aw_cap.pop());
-    for (int i = 0; i < 3; ++i) check(*w_cap.pop());
-    check(*ar_cap.pop());
 }
 
 TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {

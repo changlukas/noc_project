@@ -191,7 +191,7 @@ def emit(packet_json: Path, spec_version: str) -> str:
         flit_ecc_w = C.header_field_width(spec, "flit_ecc")
     except Exception:
         flit_ecc_w = None
-    if flit_data is not None and flit_ecc_w is not None:
+    if flit_data is not None and flit_ecc_w is not None and C.header_field_enabled(spec, "flit_ecc"):
         # Emit using header:: qualified name so the constant is in scope.
         out.append(
             "static_assert((1 << header::FLIT_ECC_WIDTH) >= FLIT_DATA_WIDTH + header::FLIT_ECC_WIDTH + 1,"

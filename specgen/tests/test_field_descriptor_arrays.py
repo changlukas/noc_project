@@ -21,13 +21,12 @@ def test_header_fields_array_skips_disabled():
                   text, re.DOTALL)
     assert m, "HEADER_FIELDS[] array not emitted"
     body = m.group(1)
-    # All 12 enabled header fields present.
-    for name in ["noc_qos", "axi_ch", "src_id", "dst_id", "vc_id", "route_par",
-                 "last", "rob_req", "rob_idx", "seq", "commtype", "flit_ecc"]:
+    # The 7 mandatory header fields present (in declaration order).
+    for name in ["axi_ch", "src_id", "dst_id", "vc_id", "last", "rob_req", "rob_idx"]:
         assert f'"{name}"' in body, f"missing {name} in HEADER_FIELDS"
-    # rsvd (derived padding) and multicast (width=0) are enabled=false; skipped.
-    assert '"rsvd"' not in body, "rsvd should be skipped (enabled=false)"
-    assert '"multicast"' not in body, "multicast should be skipped (enabled=false)"
+    # All 6 optional fields + rsvd are enabled=false; skipped.
+    for name in ["noc_qos", "route_par", "commtype", "multicast", "seq", "flit_ecc", "rsvd"]:
+        assert f'"{name}"' not in body, f"{name} should be skipped (enabled=false)"
 
 
 def test_payload_field_arrays_per_channel():

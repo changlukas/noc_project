@@ -4,7 +4,6 @@
 #include "noc/noc_rsp_out.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "response_io.hpp"
-#include "route_parity.hpp"
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -46,7 +45,6 @@ inline bool Packetize::push_b(const axi::BBeat& b) {
     f.set_header_field("last", 1);
     f.set_header_field("rob_req", m.rob_req);
     f.set_header_field("rob_idx", m.rob_idx);
-    f.set_header_field("route_par", route_parity(m.src_id, /*last=*/1));
     f.set_payload_field("B", "bid", b.id);
     f.set_payload_field("B", "bresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("B", "buser", b.user);
@@ -71,7 +69,6 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
     f.set_header_field("last", 1);
     f.set_header_field("rob_req", m.rob_req);
     f.set_header_field("rob_idx", m.rob_idx);
-    f.set_header_field("route_par", route_parity(m.src_id, /*last=*/1));
     f.set_payload_field("R", "rid", b.id);
     f.set_payload_field("R", "rresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("R", "ruser", b.user);

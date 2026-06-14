@@ -44,7 +44,6 @@ ni::cmodel::Flit make_flit(uint8_t dst, uint8_t vc, uint64_t last) {
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", vc);
     f.set_header_field("last", last);
-    f.set_header_field("route_par", ni::cmodel::route_parity(dst, last));
     return f;
 }
 
@@ -94,13 +93,11 @@ TEST(RouterDatapath, ZeroLoadLatencyIsThreeTicks) {
 }
 
 TEST(RouterDatapath, HeaderTransparency) {
-    SCENARIO("Router: header bits identical at ingress and egress, incl. seq (spec §12.8)");
+    SCENARIO("Router: header bits identical at ingress and egress (spec §12.8)");
     Router r(center_cfg());
     FlitSink east;
     r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
     auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*last=*/1);
-    f.set_header_field("seq", 21);
-    f.set_header_field("noc_qos", 5);
     f.set_header_field("rob_req", 1);
     f.set_header_field("rob_idx", 7);
     f.set_header_field("src_id", make_dst(0, 2));
@@ -494,7 +491,7 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
         << "stage 2 did not grant one from the backlog the same tick";
 }
 
-// --- Credit conservation + error behaviors + route_par fault injection (Task 8) ---
+// --- Credit conservation + error behaviors (Task 8) ---
 
 TEST(RouterCredit, ConservationAcrossChainedRouters) {
     SCENARIO(
@@ -612,68 +609,6 @@ TEST(RouterCreditDeath, OverflowAborts) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     Router r(center_cfg());
     EXPECT_DEATH(r.receive_credit(static_cast<std::size_t>(RouterPort::EAST), 0), "overflow");
-}
-
-TEST(RouterRoutePar, FaultInjectionDropsAndCounts) {
-    SCENARIO(
-        "Router: corrupted route_par -> flit dropped, drop counter ++, credit still returned, "
-        "stream continues (spec §12.7, checker-first)");
-    RouterConfig cfg = center_cfg();
-    cfg.route_par_check = true;
-    Router r(cfg);
-    FlitSink east;
-    CreditCounter west_up;
-    const auto E = static_cast<std::size_t>(RouterPort::EAST);
-    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
-    r.set_downstream(E, east);
-    r.set_upstream_credit(WEST, west_up);
-
-    // The corrupted flit MUST be a single-flit packet (last=1): a mid-packet tail
-    // drop under a wormhole lock is a documented non-recovered case (spec §9).
-    auto bad = make_flit(make_dst(3, 1), 0, 1);
-    bad.set_header_field("route_par", bad.get_header_field("route_par") ^ 1);  // corrupt
-    r.input(WEST).push_flit(bad);
-    r.tick();  // stage 1: parity screen drops it, queues a WEST credit pulse
-    r.tick();  // registered WEST credit pulse delivered upstream
-    r.tick();
-    r.tick();
-    EXPECT_EQ(r.route_par_drop_count(), 1u);
-    EXPECT_TRUE(east.received.empty()) << "dropped flit must not reach the output";
-    EXPECT_EQ(west_up.pulses.size(), 1u) << "credit leaked (or double-returned) on drop";
-
-    // Stream continues: a well-formed flit still passes end-to-end.
-    r.input(WEST).push_flit(make_flit(make_dst(3, 1), 0, 1));
-    for (int t = 0; t < kPipelineDepth; ++t) r.tick();
-    EXPECT_EQ(r.route_par_drop_count(), 1u) << "good flit wrongly dropped";
-    ASSERT_EQ(east.received.size(), 1u) << "good flit did not pass after a drop";
-}
-
-TEST(RouterRoutePar, CleanStreamNotDropped) {
-    SCENARIO(
-        "Router: route_par check enabled, correct parity — zero drops (checker does not "
-        "over-fire)");
-    RouterConfig cfg = center_cfg();
-    cfg.route_par_check = true;
-    Router r(cfg);
-    FlitSink east;
-    const auto E = static_cast<std::size_t>(RouterPort::EAST);
-    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
-    r.set_downstream(E, east);
-    const uint8_t dst = make_dst(3, 1);  // routes EAST from center
-
-    // make_flit stamps correct parity. Feed several well-formed single-flit packets
-    // one/tick, returning EAST credit on delivery so the stream never stalls.
-    constexpr int kFlits = 6;
-    int fed = 0;
-    for (int t = 0; t < kFlits + 4 * kPipelineDepth && east.received.size() < kFlits; ++t) {
-        if (fed < kFlits && r.input_fifo_size(WEST, 0) == 0) {
-            r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*last=*/1));
-            ++fed;
-        }
-        tick_and_return_credit(r, east, E);
-    }
-    EXPECT_EQ(r.route_par_drop_count(), 0u) << "checker over-fired on a clean stream";
-    EXPECT_EQ(east.received.size(), static_cast<std::size_t>(kFlits)) << "clean flits lost";
 }
 
 // --- All-to-one fairness + parameterized grid (Task 9) ------------------
@@ -857,20 +792,6 @@ TEST(RouterDatapathDeath, BadVcIdAborts) {
     EXPECT_DEATH(r.input(static_cast<std::size_t>(RouterPort::WEST))
                      .push_flit(make_flit(make_dst(3, 1), 7, 1)),
                  "vc_id");  // default NUM_VC < 8
-}
-
-// The §9 unsupported-feature guard has two halves: nonzero commtype and multicast.
-// Only the commtype half is reachable at runtime and death-tested below. The multicast
-// half is compile-time-inert (ni::header::MULTICAST_ENABLED == false, width-0 field), so
-// get_header_field("multicast") would itself abort and the branch can never be exercised;
-// it is intentionally not death-tested.
-TEST(RouterDatapathDeath, NonzeroCommtypeAborts) {
-    SCENARIO("Router: input flit with nonzero commtype is unsupported -> assert+abort (spec §9)");
-    GTEST_FLAG_SET(death_test_style, "threadsafe");
-    Router r(center_cfg());
-    auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*last=*/1);
-    f.set_header_field("commtype", 1);
-    EXPECT_DEATH(r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(f), "commtype");
 }
 
 }  // namespace

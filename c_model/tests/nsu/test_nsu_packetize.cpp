@@ -4,7 +4,6 @@
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
-#include "route_parity.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nsu::MetaBuffer;
@@ -121,27 +120,6 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
     std::array<uint8_t, 32> out{};
     f.get_payload_bytes("R", "rdata", out.data(), 256);
     for (int i = 0; i < 32; ++i) EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
-}
-
-TEST(PacketizeRoutePar, NsuEvenParityOverDstIdAndLast) {
-    SCENARIO(
-        "NSU Packetize: route_par on B and R flits makes XOR(dst_id bits, last, route_par)==0");
-    RspCapture b_cap, r_cap;
-    MetaBuffer mb(4);
-    // dst (= orig src_id) 0x12 is multi-bit; B last=1, R last=1.
-    mb.snapshot_write(0x05, {/*src=*/0x12, /*rob_req=*/0, /*rob_idx=*/0});
-    mb.snapshot_read(0x03, {/*src=*/0x12, /*rob_req=*/0, /*rob_idx=*/0});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
-    ASSERT_TRUE(pkt.push_b(make_b(0x05)));
-    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true)));
-
-    auto check = [](const ni::cmodel::Flit& f) {
-        uint64_t x = f.get_header_field("dst_id");
-        uint8_t p = ni::cmodel::route_parity(x, f.get_header_field("last"));
-        EXPECT_EQ(f.get_header_field("route_par"), p);
-    };
-    check(*b_cap.pop());
-    check(*r_cap.pop());
 }
 
 // NsuPacketize::PushAwAssertFalse was a runtime wrong_side_() test.

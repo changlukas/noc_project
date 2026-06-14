@@ -76,17 +76,17 @@ def test_header_field_width_expression(packet_spec):
 
 
 def test_header_field_position_cumulative(packet_spec):
-    # Post fixed-56b refactor (noc_qos enabled, width=4): all positions shift +4.
-    assert C.header_field_position(packet_spec, "axi_ch") == (4, 6)
-    assert C.header_field_position(packet_spec, "src_id") == (7, 14)
+    # All optional fields disabled: axi_ch is the first enabled field at LSB 0.
+    assert C.header_field_position(packet_spec, "axi_ch") == (0, 2)
+    assert C.header_field_position(packet_spec, "src_id") == (3, 10)
 
 
 def test_header_field_position_disabled_still_positioned(packet_spec):
     # rsvd is the lone disabled (derived padding) field; sits at the end.
     pos = C.header_field_position(packet_spec, "rsvd")
     assert pos is not None
-    # width=5 (HEADER_TOTAL_WIDTH 56 - sum of enabled 51), so MSB-LSB == 4.
-    assert pos[1] - pos[0] == 4
+    # width=27 (HEADER_TOTAL_WIDTH 56 - sum of enabled 29), so MSB-LSB == 26.
+    assert pos[1] - pos[0] == 26
 
 
 def test_header_field_enabled(packet_spec):

@@ -12,33 +12,23 @@ TEST(Flit, ConstructFromRawHasMatchingWidth) {
 
 TEST(Flit, SetGetHeaderRoundtripAllFields) {
     SCENARIO(
-        "Flit: every header field (noc_qos/axi_ch/src_id/.../seq/.../flit_ecc) set/get "
-        "bit-perfect");
+        "Flit: every enabled header field (axi_ch/src_id/dst_id/vc_id/last/rob_req/rob_idx) "
+        "set/get bit-perfect");
     Flit f;
-    f.set_header_field("noc_qos", 0xA);
     f.set_header_field("axi_ch", 0x4);  // R
     f.set_header_field("src_id", 0x12);
     f.set_header_field("dst_id", 0x34);
     f.set_header_field("vc_id", 0x2);
-    f.set_header_field("route_par", 0x1);
     f.set_header_field("last", 0x1);
     f.set_header_field("rob_req", 0x1);
     f.set_header_field("rob_idx", 0x1F);
-    f.set_header_field("seq", 0x15);
-    f.set_header_field("commtype", 0x2);
-    f.set_header_field("flit_ecc", 0x3FF);
-    EXPECT_EQ(f.get_header_field("noc_qos"), 0xAu);
     EXPECT_EQ(f.get_header_field("axi_ch"), 0x4u);
     EXPECT_EQ(f.get_header_field("src_id"), 0x12u);
     EXPECT_EQ(f.get_header_field("dst_id"), 0x34u);
     EXPECT_EQ(f.get_header_field("vc_id"), 0x2u);
-    EXPECT_EQ(f.get_header_field("route_par"), 0x1u);
     EXPECT_EQ(f.get_header_field("last"), 0x1u);
     EXPECT_EQ(f.get_header_field("rob_req"), 0x1u);
     EXPECT_EQ(f.get_header_field("rob_idx"), 0x1Fu);
-    EXPECT_EQ(f.get_header_field("seq"), 0x15u);
-    EXPECT_EQ(f.get_header_field("commtype"), 0x2u);
-    EXPECT_EQ(f.get_header_field("flit_ecc"), 0x3FFu);
 }
 
 TEST(Flit, SetGetPayloadAwFields) {
@@ -74,8 +64,8 @@ TEST(Flit, RsvdPaddingCheckPassesWhenZero) {
 TEST(Flit, RsvdPaddingCheckFailsWhenSet) {
     SCENARIO("Flit: setting any rsvd bit makes check_padding_is_zero return false");
     Flit f;
-    // rsvd = header bits 54-55 (byte 6, bits 6-7). Write directly since rsvd
-    // is disabled (enabled=false in spec) and not reachable via set_header_field.
+    // rsvd = header bits 29-55. Write a rsvd bit directly since rsvd is
+    // disabled (enabled=false in spec) and not reachable via set_header_field.
     f.raw()[6] |= (1u << 6);  // bit 54
     EXPECT_FALSE(f.check_padding_is_zero());
 }

@@ -26,25 +26,17 @@ int main() {
     std::printf("\n");
 
     std::printf("=== Header field bit positions ===\n");
-    std::printf("noc_qos   at [%2d:%2d] (width %d)\n",
-                ni::header::NOC_QOS_MSB, ni::header::NOC_QOS_LSB,
-                ni::header::NOC_QOS_WIDTH);
-    std::printf("axi_ch    at [%2d:%2d] (width %d)\n",
-                ni::header::AXI_CH_MSB, ni::header::AXI_CH_LSB,
-                ni::header::AXI_CH_WIDTH);
-    std::printf("dst_id    at [%2d:%2d] (width %d)\n",
-                ni::header::DST_ID_MSB, ni::header::DST_ID_LSB,
-                ni::header::DST_ID_WIDTH);
-    std::printf("rob_idx   at [%2d:%2d] (width %d)\n",
-                ni::header::ROB_IDX_MSB, ni::header::ROB_IDX_LSB,
-                ni::header::ROB_IDX_WIDTH);
+    std::printf("axi_ch    at [%2d:%2d] (width %d)\n", ni::header::AXI_CH_MSB,
+                ni::header::AXI_CH_LSB, ni::header::AXI_CH_WIDTH);
+    std::printf("dst_id    at [%2d:%2d] (width %d)\n", ni::header::DST_ID_MSB,
+                ni::header::DST_ID_LSB, ni::header::DST_ID_WIDTH);
+    std::printf("rob_idx   at [%2d:%2d] (width %d)\n", ni::header::ROB_IDX_MSB,
+                ni::header::ROB_IDX_LSB, ni::header::ROB_IDX_WIDTH);
     std::printf("\n");
 
     std::printf("=== Payload widths ===\n");
-    std::printf("AW=%d  W=%d  AR=%d  B=%d  R=%d\n",
-                ni::payload::AW_WIDTH, ni::payload::W_WIDTH,
-                ni::payload::AR_WIDTH, ni::payload::B_WIDTH,
-                ni::payload::R_WIDTH);
+    std::printf("AW=%d  W=%d  AR=%d  B=%d  R=%d\n", ni::payload::AW_WIDTH, ni::payload::W_WIDTH,
+                ni::payload::AR_WIDTH, ni::payload::B_WIDTH, ni::payload::R_WIDTH);
     std::printf("\n");
 
     // Demo: 用 constexpr 常數實際打包一個 AR header
@@ -52,7 +44,7 @@ int main() {
     //         last=1, rob_req=1, rob_idx=7
     // (noc_qos / vc_id / route_par / commtype / multicast / flit_ecc 留 0 不 demo 打包)
     std::printf("=== Demo: pack an AR header using compile-time constants ===\n");
-    uint64_t hdr_lo = 0;  // bits 0..63 of header
+    uint64_t hdr_lo = 0;                                  // bits 0..63 of header
     hdr_lo |= (uint64_t)(0x2) << ni::header::AXI_CH_LSB;  // AR
     hdr_lo |= (uint64_t)(0x05) << ni::header::SRC_ID_LSB;
     hdr_lo |= (uint64_t)(0x12) << ni::header::DST_ID_LSB;
