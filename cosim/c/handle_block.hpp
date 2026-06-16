@@ -10,11 +10,12 @@
 namespace ni::cmodel::cosim {
 
 enum class ShellType : uint32_t {
-    Master = 0x4D415354u,        // 'MAST'
-    Slave = 0x534C4156u,         // 'SLAV'
-    Nmu = 0x4E4D5520u,           // 'NMU '
-    Nsu = 0x4E535520u,           // 'NSU '
-    ChannelModel = 0x43484E4Du,  // 'CHNM'
+    Master = 0x4D415354u,         // 'MAST'
+    Slave = 0x534C4156u,          // 'SLAV'
+    Nmu = 0x4E4D5520u,            // 'NMU '
+    Nsu = 0x4E535520u,            // 'NSU '
+    ChannelModel = 0x43484E4Du,   // 'CHNM'
+    RouterChannel = 0x52434E4Cu,  // 'RCNL'
 };
 
 enum class HandleState { Live };  // closed handles are removed from registry

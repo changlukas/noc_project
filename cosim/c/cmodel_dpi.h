@@ -47,6 +47,22 @@ void cmodel_channel_model_get_outputs(void* ctx, svBit* req_out_valid, svBitVecV
                                       svBit* req_out_credit_return, svBit* rsp_out_valid,
                                       svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return);
 
+// RouterChannel (Task 3) — 2-node bidirectional NoC fabric; pins suffixed _n0/_n1.
+void* cmodel_router_channel_create(const char* name);
+void cmodel_router_channel_set_inputs(void* ctx, svBit req_in_valid_n0, svBitVecVal* req_in_flit_n0,
+                                      svBit req_in_credit_return_n0, svBit rsp_in_valid_n0,
+                                      svBitVecVal* rsp_in_flit_n0, svBit rsp_in_credit_return_n0,
+                                      svBit req_in_valid_n1, svBitVecVal* req_in_flit_n1,
+                                      svBit req_in_credit_return_n1, svBit rsp_in_valid_n1,
+                                      svBitVecVal* rsp_in_flit_n1, svBit rsp_in_credit_return_n1);
+void cmodel_router_channel_tick(void* ctx);
+void cmodel_router_channel_get_outputs(
+    void* ctx, svBit* req_out_valid_n0, svBitVecVal* req_out_flit_n0,
+    svBit* req_out_credit_return_n0, svBit* rsp_out_valid_n0, svBitVecVal* rsp_out_flit_n0,
+    svBit* rsp_out_credit_return_n0, svBit* req_out_valid_n1, svBitVecVal* req_out_flit_n1,
+    svBit* req_out_credit_return_n1, svBit* rsp_out_valid_n1, svBitVecVal* rsp_out_flit_n1,
+    svBit* rsp_out_credit_return_n1);
+
 // AxiMaster (Task 6) — chandle ABI; per-instance dump path + scoreboard wiring.
 // Packing: svBitVecVal* for multi-bit fields (little-endian word order).
 //   id fields     : 1 word (8-bit value in low byte)
