@@ -53,15 +53,25 @@ class VcArbiter : public noc::NocReqOut {
                                       uint8_t write_vc, uint8_t read_vc,
                                       std::size_t pending_depth = kDefaultPendingDepth) {
         std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
-        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit, write_vc, read_vc,
-                         std::move(empty_candidates), pending_depth);
+        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit, std::vector<uint8_t>{write_vc},
+                         std::vector<uint8_t>{read_vc}, std::move(empty_candidates), pending_depth);
+    }
+
+    static VcArbiter read_write_split_pools(noc::NocReqOut& downstream, std::size_t num_vc,
+                                            std::vector<uint8_t> write_vcs,
+                                            std::vector<uint8_t> read_vcs,
+                                            std::size_t pending_depth = kDefaultPendingDepth) {
+        std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
+        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit, std::move(write_vcs),
+                         std::move(read_vcs), std::move(empty_candidates), pending_depth);
     }
 
     static VcArbiter multi_candidate(noc::NocReqOut& downstream, std::size_t num_vc,
                                      std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
                                      std::size_t pending_depth = kDefaultPendingDepth) {
         return VcArbiter(downstream, num_vc, VcMode::MultiCandidate,
-                         /*write_vc*/ 0, /*read_vc*/ 0, std::move(candidate_vcs), pending_depth);
+                         /*write_vcs*/ std::vector<uint8_t>{}, /*read_vcs*/ std::vector<uint8_t>{},
+                         std::move(candidate_vcs), pending_depth);
     }
 
     // NocReqOut decorator interface
@@ -76,19 +86,20 @@ class VcArbiter : public noc::NocReqOut {
     bool has_current_aw() const noexcept { return current_aw_vc_.has_value(); }
 
   private:
-    VcArbiter(noc::NocReqOut& downstream, std::size_t num_vc, VcMode mode, uint8_t write_vc,
-              uint8_t read_vc, std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
+    VcArbiter(noc::NocReqOut& downstream, std::size_t num_vc, VcMode mode,
+              std::vector<uint8_t> write_vcs, std::vector<uint8_t> read_vcs,
+              std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
               std::size_t pending_depth)
         : downstream_(downstream),
           num_vc_(num_vc),
           mode_(mode),
-          write_vc_(write_vc),
-          read_vc_(read_vc),
+          write_vcs_(std::move(write_vcs)),
+          read_vcs_(std::move(read_vcs)),
           candidate_vcs_(std::move(candidate_vcs)),
           pending_depth_(pending_depth) {
         assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
-        assert(write_vc_ < num_vc_);
-        assert(read_vc_ < num_vc_);
+        for (uint8_t v : write_vcs_) assert(v < num_vc_);
+        for (uint8_t v : read_vcs_) assert(v < num_vc_);
     }
 
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch);
@@ -96,8 +107,8 @@ class VcArbiter : public noc::NocReqOut {
     noc::NocReqOut& downstream_;
     std::size_t num_vc_;
     VcMode mode_;
-    uint8_t write_vc_;
-    uint8_t read_vc_;
+    std::vector<uint8_t> write_vcs_;
+    std::vector<uint8_t> read_vcs_;
     std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs_;
     std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
     std::size_t pending_depth_;
@@ -122,17 +133,19 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
 
     if (num_vc_ == 1) return uint8_t{0};
 
+    const std::vector<uint8_t>* cand = nullptr;
     if (mode_ == VcMode::ReadWriteSplit) {
-        if (axi_ch == ni::AXI_CH_AW) return write_vc_;
-        if (axi_ch == ni::AXI_CH_AR) return read_vc_;
-        return std::nullopt;
+        if (axi_ch == ni::AXI_CH_AW)
+            cand = &write_vcs_;
+        else if (axi_ch == ni::AXI_CH_AR)
+            cand = &read_vcs_;
+        else
+            return std::nullopt;
+    } else {  // MultiCandidate
+        cand = &candidate_vcs_[axi_ch];
     }
-
-    // Mode B: MultiCandidate
-    for (uint8_t vc : candidate_vcs_[axi_ch]) {
-        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) {
-            return vc;
-        }
+    for (uint8_t vc : *cand) {
+        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
     }
     return std::nullopt;
 }

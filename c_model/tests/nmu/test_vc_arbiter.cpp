@@ -17,7 +17,8 @@ using ni::cmodel::testing::ChannelModel;
 
 namespace {
 
-Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint64_t wlast = 0) {
+Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint64_t wlast = 0,
+               uint8_t id = 0) {
     Flit f;
     f.set_header_field("axi_ch", axi_ch);
     f.set_header_field("dst_id", dst_id);
@@ -26,6 +27,10 @@ Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint6
     f.set_header_field("last", 1);  // legacy; VcArbiter does not consult header.last
     if (axi_ch == ni::AXI_CH_W) {
         f.set_payload_field("W", "wlast", wlast);
+    } else if (axi_ch == ni::AXI_CH_AW) {
+        f.set_payload_field("AW", "awid", id);
+    } else if (axi_ch == ni::AXI_CH_AR) {
+        f.set_payload_field("AR", "arid", id);
     }
     return f;
 }
