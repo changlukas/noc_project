@@ -1,21 +1,26 @@
 `timescale 1ns/1ps
 `include "wb2axip/sim_wrapper.svh"
 
-// tb_top — Stage 5b wire-level co-sim testbench
+// tb_top — bidirectional 2-node router co-sim testbench
 //
-// Per spec §4.1 topology:
-//   Request:  axi_master_wrap →[master_nmu_axi]→ nmu_wrap →[nmu_channel_model]→ channel_model_wrap →[channel_model_nsu]→ nsu_wrap →[nsu_slave_axi]→ axi_slave_wrap
-//   Response: opposite direction along the same path
+// Two symmetric nodes drive the production RouterChannel fabric (no faxi):
+//   node k:  axi_master_wrap →[master_nmu_axi_k]→ nmu_wrap →[nodeK_nmu]→ ┐
+//            router_channel_wrap ↔ ┘
+//            router_channel_wrap →[nodeK_nsu]→ nsu_wrap →[nsu_slave_axi_k]→ axi_slave_wrap
+//   Response travels the opposite direction along the same path.
 //
-//   Each noc_intf bundle carries req + rsp channels with mosi/miso modports.
-//   wb2axip faxi_slave  bound on master_nmu_axi (NMU manager-facing: checks NMU as AXI master)
-//   wb2axip faxi_master bound on nsu_slave_axi  (NSU memory-facing: checks NSU as AXI slave)
+// Variant→instance pairing (spec §2/§5/§8): master at node k is fed the OTHER
+// node's coordinate variant so traffic crosses the link:
+//   node0.master ← scn_node1 (high addr, targets (1,0)) → ejects at node1.NSU →
+//                  slave_1 ← scn_node1.
+//   node1.master ← scn_node0 (low addr, targets (0,0))  → ejects at node0.NSU →
+//                  slave_0 ← scn_node0.
+// src_id matches each node's coordinate (NSU stamps response dst_id from
+// request src_id): nmu_0/nsu_0 → 0, nmu_1/nsu_1 → 1.
 //
 // clk_i + rst_ni driven by C++ main.cpp (input ports — per Stage 5a pattern).
-// Plusarg +scenario=<yaml-path> kicks off cmodel_init().
-// Exit logic deferred to main.cpp (polls cmodel_done() per scenario_parser).
-//
-// MAXSTALL=32, MAXRSTALL=32, MAXDELAY=88 verified in T12 (spec §5.2.1).
+// Plusargs +scenario_node0=<path> +scenario_node1=<path> kick off the run;
+// cmodel_init is called once with either variant (shared config).
 
 `ifndef TB_TOP_SV
 `define TB_TOP_SV
@@ -35,12 +40,6 @@ module tb_top (
     localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT;
     localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;
 
-    // wb2axip parametric override per spec §5.2.1 (T12 verified values)
-    localparam int F_LGDEPTH_VAL        = 10;  // default; accommodates MAXSTALL=32 (needs 6 bits)
-    localparam int F_AXI_MAXSTALL_VAL   = 32;
-    localparam int F_AXI_MAXRSTALL_VAL  = 32;
-    localparam int F_AXI_MAXDELAY_VAL   = 500;  // T12-verified 88 + pipeline margin
-
     // -------------------------------------------------------------------------
     // DPI lifecycle
     // -------------------------------------------------------------------------
@@ -49,316 +48,171 @@ module tb_top (
     import "DPI-C" context function int     cmodel_done();
     import "DPI-C" context function int     cmodel_scoreboard_clean();
     import "DPI-C" context function void    cmodel_dump_scoreboard();
-    import "DPI-C" context function chandle cmodel_channel_model_create(input string name);
-    import "DPI-C" context function chandle cmodel_master_create(input string name);
-    import "DPI-C" context function chandle cmodel_slave_create(input string name);
-    import "DPI-C" context function chandle cmodel_nmu_create(input string name);
-    import "DPI-C" context function chandle cmodel_nsu_create(input string name);
+    import "DPI-C" context function chandle cmodel_router_channel_create(input string name);
+    import "DPI-C" context function chandle cmodel_master_create(input string name,
+                                                                 input string scenario_path);
+    import "DPI-C" context function chandle cmodel_slave_create(input string name,
+                                                                input string scenario_path);
+    import "DPI-C" context function chandle cmodel_nmu_create(input string name, input int src_id);
+    import "DPI-C" context function chandle cmodel_nsu_create(input string name, input int src_id);
+    import "DPI-C" context function int     cmodel_master_count();
+    import "DPI-C" context function int     cmodel_reads_checked();
 
-    string  scenario_path;
-    chandle cm_ctx;
-    chandle master_ctx;
-    chandle slave_ctx;
-    chandle nmu_ctx;
-    chandle nsu_ctx;
+    string  scn_node0;  // node0 coordinate variant (low addr);  drives node1.master
+    string  scn_node1;  // node1 coordinate variant (high addr); drives node0.master
+    chandle rc_ctx;
+    chandle m0_ctx, s0_ctx, n0_nmu_ctx, n0_nsu_ctx;
+    chandle m1_ctx, s1_ctx, n1_nmu_ctx, n1_nsu_ctx;
 
     initial begin
-        if (!$value$plusargs("scenario=%s", scenario_path)) begin
-            $display("ERROR: +scenario=<yaml-path> required");
+        if (!$value$plusargs("scenario_node0=%s", scn_node0) ||
+            !$value$plusargs("scenario_node1=%s", scn_node1)) begin
+            $display("ERROR: +scenario_node0=<path> +scenario_node1=<path> required");
             $finish(1);
         end
-        cmodel_init(scenario_path);
-        cm_ctx     = cmodel_channel_model_create("channel_model_0");
-        master_ctx = cmodel_master_create("master_0");
-        slave_ctx  = cmodel_slave_create("slave_0");
-        nmu_ctx    = cmodel_nmu_create("nmu_0");
-        nsu_ctx    = cmodel_nsu_create("nsu_0");
+        cmodel_init(scn_node1);  // shared config; either variant is fine
+        rc_ctx     = cmodel_router_channel_create("router_channel_0");
+        // node0.master drives node1-variant (high addr, targets (1,0)); ejects at node1.NSU.
+        m0_ctx     = cmodel_master_create("master_0", scn_node1);
+        s1_ctx     = cmodel_slave_create ("slave_1",  scn_node1);  // node1.slave: high range
+        n0_nmu_ctx = cmodel_nmu_create("nmu_0", 0);                // src_id = node0 coordinate
+        n0_nsu_ctx = cmodel_nsu_create("nsu_0", 0);
+        // node1.master drives node0-variant (low addr, targets (0,0)); ejects at node0.NSU.
+        m1_ctx     = cmodel_master_create("master_1", scn_node0);
+        s0_ctx     = cmodel_slave_create ("slave_0",  scn_node0);  // node0.slave: low range
+        n1_nmu_ctx = cmodel_nmu_create("nmu_1", 1);                // src_id = node1 coordinate
+        n1_nsu_ctx = cmodel_nsu_create("nsu_1", 1);
     end
 
     // -------------------------------------------------------------------------
-    // 4 wire bundles (interfaces)
+    // Wire bundles — 2 nodes × {master_nmu AXI, NMU-side NoC, NSU-side NoC, nsu_slave AXI}
     // -------------------------------------------------------------------------
 
-    // [1] master_nmu_axi — AXI between axi_master_wrap (master) and nmu_wrap (slave)
+    // node0
     axi4_intf #(
-        .ID_WIDTH(ID_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH),
-        .DATA_WIDTH(DATA_WIDTH)
-    ) master_nmu_axi ();
-
-    // [2] nmu_channel_model — NoC bundle between nmu_wrap and channel_model_wrap (NMU side)
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) master_nmu_axi_0 ();
     noc_intf #(
-        .NUM_VC(NUM_VC),
-        .FLIT_WIDTH(FLIT_WIDTH),
-        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) nmu_channel_model ();
-
-    // [3] channel_model_nsu — NoC bundle between channel_model_wrap and nsu_wrap (NSU side)
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) node0_nmu ();
     noc_intf #(
-        .NUM_VC(NUM_VC),
-        .FLIT_WIDTH(FLIT_WIDTH),
-        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) channel_model_nsu ();
-
-    // [4] nsu_slave_axi — AXI between nsu_wrap (master) and axi_slave_wrap (slave)
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) node0_nsu ();
     axi4_intf #(
-        .ID_WIDTH(ID_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH),
-        .DATA_WIDTH(DATA_WIDTH)
-    ) nsu_slave_axi ();
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) nsu_slave_axi_0 ();
+
+    // node1
+    axi4_intf #(
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) master_nmu_axi_1 ();
+    noc_intf #(
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) node1_nmu ();
+    noc_intf #(
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) node1_nsu ();
+    axi4_intf #(
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) nsu_slave_axi_1 ();
 
     // -------------------------------------------------------------------------
-    // 5 component instances
+    // Component instances — node0
     // -------------------------------------------------------------------------
-
-    // [1] AXI traffic generator — drives master_nmu_axi as AXI master
     axi_master_wrap #(
-        .ID_WIDTH(ID_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH),
-        .DATA_WIDTH(DATA_WIDTH)
-    ) u_master (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .ctx_i(master_ctx),
-        .axi_o(master_nmu_axi.master)
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) u_master_0 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(m0_ctx), .axi_o(master_nmu_axi_0.master)
     );
 
-    // [2] NMU shell — AXI slave in, NoC bundle (mosi) out toward ChannelModel
     nmu_wrap #(
-        .ID_WIDTH(ID_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH),
-        .DATA_WIDTH(DATA_WIDTH),
-        .NUM_VC(NUM_VC),
-        .FLIT_WIDTH(FLIT_WIDTH),
-        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) u_nmu (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .ctx_i(nmu_ctx),
-        .axi_i(master_nmu_axi.slave),
-        .noc_mosi_o(nmu_channel_model.mosi)
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_nmu_0 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(n0_nmu_ctx),
+        .axi_i(master_nmu_axi_0.slave), .noc_mosi_o(node0_nmu.mosi)
     );
 
-    // [3] Channel Model — NMU side (miso) + NSU side (mosi)
-    channel_model_wrap #(
-        .NUM_VC(NUM_VC),
-        .FLIT_WIDTH(FLIT_WIDTH),
-        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) u_channel_model (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .ctx_i(cm_ctx),
-        .noc_miso_i(nmu_channel_model.miso),
-        .noc_mosi_o(channel_model_nsu.mosi)
-    );
-
-    // [4] NSU shell — NoC bundle (miso) in from ChannelModel, AXI master out
     nsu_wrap #(
-        .ID_WIDTH(ID_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH),
-        .DATA_WIDTH(DATA_WIDTH),
-        .NUM_VC(NUM_VC),
-        .FLIT_WIDTH(FLIT_WIDTH),
-        .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) u_nsu (
-        .clk_i(clk_i),
-        .rst_ni(rst_ni),
-        .ctx_i(nsu_ctx),
-        .noc_miso_i(channel_model_nsu.miso),
-        .axi_o(nsu_slave_axi.master)
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_nsu_0 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(n0_nsu_ctx),
+        .noc_miso_i(node0_nsu.miso), .axi_o(nsu_slave_axi_0.master)
     );
 
-    // [5] AXI memory model — receives transactions on nsu_slave_axi as AXI slave
     axi_slave_wrap #(
-        .ID_WIDTH(ID_WIDTH),
-        .ADDR_WIDTH(ADDR_WIDTH),
-        .DATA_WIDTH(DATA_WIDTH)
-    ) u_slave (
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) u_slave_0 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(s0_ctx), .axi_i(nsu_slave_axi_0.slave)
+    );
+
+    // -------------------------------------------------------------------------
+    // Component instances — node1
+    // -------------------------------------------------------------------------
+    axi_master_wrap #(
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) u_master_1 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(m1_ctx), .axi_o(master_nmu_axi_1.master)
+    );
+
+    nmu_wrap #(
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_nmu_1 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(n1_nmu_ctx),
+        .axi_i(master_nmu_axi_1.slave), .noc_mosi_o(node1_nmu.mosi)
+    );
+
+    nsu_wrap #(
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_nsu_1 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(n1_nsu_ctx),
+        .noc_miso_i(node1_nsu.miso), .axi_o(nsu_slave_axi_1.master)
+    );
+
+    axi_slave_wrap #(
+        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
+    ) u_slave_1 (
+        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(s1_ctx), .axi_i(nsu_slave_axi_1.slave)
+    );
+
+    // -------------------------------------------------------------------------
+    // RouterChannel fabric — 4 noc_intf bundles (2 nodes × {NMU miso, NSU mosi})
+    // -------------------------------------------------------------------------
+    router_channel_wrap #(
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_rc (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .ctx_i(slave_ctx),
-        .axi_i(nsu_slave_axi.slave)
+        .ctx_i(rc_ctx),
+        .node0_nmu_i(node0_nmu.miso),
+        .node0_nsu_o(node0_nsu.mosi),
+        .node1_nmu_i(node1_nmu.miso),
+        .node1_nsu_o(node1_nsu.mosi)
     );
 
     // -------------------------------------------------------------------------
-    // Induction output wires (faxi_slave / faxi_master outputs — 4 per checker)
-    // -------------------------------------------------------------------------
-
-    // NMU boundary (faxi_slave outputs)
-    logic [F_LGDEPTH_VAL-1:0] nmu_f_axi_awr_nbursts;
-    logic [8:0]               nmu_f_axi_wr_pending;
-    logic [F_LGDEPTH_VAL-1:0] nmu_f_axi_rd_nbursts;
-    logic [F_LGDEPTH_VAL-1:0] nmu_f_axi_rd_outstanding;
-
-    // NSU boundary (faxi_master outputs)
-    logic [F_LGDEPTH_VAL-1:0] nsu_f_axi_awr_nbursts;
-    logic [8:0]               nsu_f_axi_wr_pending;
-    logic [F_LGDEPTH_VAL-1:0] nsu_f_axi_rd_nbursts;
-    logic [F_LGDEPTH_VAL-1:0] nsu_f_axi_rd_outstanding;
-
-    // -------------------------------------------------------------------------
-    // wb2axip checker 1: faxi_slave on master_nmu_axi
-    // Checks that NMU behaves as a well-formed AXI4 master (assume
-    // master-driven channels, assert slave-driven channels).
-    // OPT_EXCLUSIVE=0: exclusive-access state machine omitted; c_model does
-    // not generate lock transactions in this testbench.
-    // PINMISSING suppress: upstream wb2axip faxi_slave.v has a trailing-comma
-    // null port (line 135); all real induction outputs are connected above.
-    // -------------------------------------------------------------------------
-    /* verilator lint_off PINMISSING */
-    faxi_slave #(
-        .C_AXI_ID_WIDTH(ID_WIDTH),
-        .C_AXI_DATA_WIDTH(DATA_WIDTH),
-        .C_AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .OPT_EXCLUSIVE(0),
-        .F_LGDEPTH(F_LGDEPTH_VAL),
-        .F_AXI_MAXSTALL(F_AXI_MAXSTALL_VAL),
-        .F_AXI_MAXRSTALL(F_AXI_MAXRSTALL_VAL),
-        .F_AXI_MAXDELAY(F_AXI_MAXDELAY_VAL)
-    ) u_nmu_check (
-        .i_clk(clk_i),
-        .i_axi_reset_n(rst_ni),
-        // AW
-        .i_axi_awvalid(master_nmu_axi.awvalid),
-        .i_axi_awready(master_nmu_axi.awready),
-        .i_axi_awid(master_nmu_axi.awid),
-        .i_axi_awaddr(master_nmu_axi.awaddr),
-        .i_axi_awlen(master_nmu_axi.awlen),
-        .i_axi_awsize(master_nmu_axi.awsize),
-        .i_axi_awburst(master_nmu_axi.awburst),
-        .i_axi_awlock(master_nmu_axi.awlock),
-        .i_axi_awcache(master_nmu_axi.awcache),
-        .i_axi_awprot(master_nmu_axi.awprot),
-        .i_axi_awqos(master_nmu_axi.awqos),
-        // W
-        .i_axi_wvalid(master_nmu_axi.wvalid),
-        .i_axi_wready(master_nmu_axi.wready),
-        .i_axi_wdata(master_nmu_axi.wdata),
-        .i_axi_wstrb(master_nmu_axi.wstrb),
-        .i_axi_wlast(master_nmu_axi.wlast),
-        // B
-        .i_axi_bvalid(master_nmu_axi.bvalid),
-        .i_axi_bready(master_nmu_axi.bready),
-        .i_axi_bid(master_nmu_axi.bid),
-        .i_axi_bresp(master_nmu_axi.bresp),
-        // AR
-        .i_axi_arvalid(master_nmu_axi.arvalid),
-        .i_axi_arready(master_nmu_axi.arready),
-        .i_axi_arid(master_nmu_axi.arid),
-        .i_axi_araddr(master_nmu_axi.araddr),
-        .i_axi_arlen(master_nmu_axi.arlen),
-        .i_axi_arsize(master_nmu_axi.arsize),
-        .i_axi_arburst(master_nmu_axi.arburst),
-        .i_axi_arlock(master_nmu_axi.arlock),
-        .i_axi_arcache(master_nmu_axi.arcache),
-        .i_axi_arprot(master_nmu_axi.arprot),
-        .i_axi_arqos(master_nmu_axi.arqos),
-        // R
-        .i_axi_rid(master_nmu_axi.rid),
-        .i_axi_rresp(master_nmu_axi.rresp),
-        .i_axi_rvalid(master_nmu_axi.rvalid),
-        .i_axi_rdata(master_nmu_axi.rdata),
-        .i_axi_rlast(master_nmu_axi.rlast),
-        .i_axi_rready(master_nmu_axi.rready),
-        // Induction outputs
-        .f_axi_awr_nbursts(nmu_f_axi_awr_nbursts),
-        .f_axi_wr_pending(nmu_f_axi_wr_pending),
-        .f_axi_rd_nbursts(nmu_f_axi_rd_nbursts),
-        .f_axi_rd_outstanding(nmu_f_axi_rd_outstanding)
-    );
-    /* verilator lint_on PINMISSING */
-
-    // -------------------------------------------------------------------------
-    // wb2axip checker 2: faxi_master on nsu_slave_axi
-    // Checks that NSU behaves as a well-formed AXI4 slave (assume
-    // slave-driven channels, assert master-driven channels — roles inverted
-    // relative to faxi_slave).
-    // OPT_EXCLUSIVE=0: exclusive-access state machine omitted; same rationale.
-    // PINMISSING suppress: same upstream null-port issue as faxi_slave above.
-    // -------------------------------------------------------------------------
-    /* verilator lint_off PINMISSING */
-    faxi_master #(
-        .C_AXI_ID_WIDTH(ID_WIDTH),
-        .C_AXI_DATA_WIDTH(DATA_WIDTH),
-        .C_AXI_ADDR_WIDTH(ADDR_WIDTH),
-        .OPT_EXCLUSIVE(0),
-        .F_LGDEPTH(F_LGDEPTH_VAL),
-        .F_AXI_MAXSTALL(F_AXI_MAXSTALL_VAL),
-        .F_AXI_MAXRSTALL(F_AXI_MAXRSTALL_VAL),
-        .F_AXI_MAXDELAY(F_AXI_MAXDELAY_VAL)
-    ) u_nsu_check (
-        .i_clk(clk_i),
-        .i_axi_reset_n(rst_ni),
-        // AW
-        .i_axi_awvalid(nsu_slave_axi.awvalid),
-        .i_axi_awready(nsu_slave_axi.awready),
-        .i_axi_awid(nsu_slave_axi.awid),
-        .i_axi_awaddr(nsu_slave_axi.awaddr),
-        .i_axi_awlen(nsu_slave_axi.awlen),
-        .i_axi_awsize(nsu_slave_axi.awsize),
-        .i_axi_awburst(nsu_slave_axi.awburst),
-        .i_axi_awlock(nsu_slave_axi.awlock),
-        .i_axi_awcache(nsu_slave_axi.awcache),
-        .i_axi_awprot(nsu_slave_axi.awprot),
-        .i_axi_awqos(nsu_slave_axi.awqos),
-        // W
-        .i_axi_wvalid(nsu_slave_axi.wvalid),
-        .i_axi_wready(nsu_slave_axi.wready),
-        .i_axi_wdata(nsu_slave_axi.wdata),
-        .i_axi_wstrb(nsu_slave_axi.wstrb),
-        .i_axi_wlast(nsu_slave_axi.wlast),
-        // B
-        .i_axi_bvalid(nsu_slave_axi.bvalid),
-        .i_axi_bready(nsu_slave_axi.bready),
-        .i_axi_bid(nsu_slave_axi.bid),
-        .i_axi_bresp(nsu_slave_axi.bresp),
-        // AR
-        .i_axi_arvalid(nsu_slave_axi.arvalid),
-        .i_axi_arready(nsu_slave_axi.arready),
-        .i_axi_arid(nsu_slave_axi.arid),
-        .i_axi_araddr(nsu_slave_axi.araddr),
-        .i_axi_arlen(nsu_slave_axi.arlen),
-        .i_axi_arsize(nsu_slave_axi.arsize),
-        .i_axi_arburst(nsu_slave_axi.arburst),
-        .i_axi_arlock(nsu_slave_axi.arlock),
-        .i_axi_arcache(nsu_slave_axi.arcache),
-        .i_axi_arprot(nsu_slave_axi.arprot),
-        .i_axi_arqos(nsu_slave_axi.arqos),
-        // R
-        .i_axi_rid(nsu_slave_axi.rid),
-        .i_axi_rresp(nsu_slave_axi.rresp),
-        .i_axi_rvalid(nsu_slave_axi.rvalid),
-        .i_axi_rdata(nsu_slave_axi.rdata),
-        .i_axi_rlast(nsu_slave_axi.rlast),
-        .i_axi_rready(nsu_slave_axi.rready),
-        // Induction outputs
-        .f_axi_awr_nbursts(nsu_f_axi_awr_nbursts),
-        .f_axi_wr_pending(nsu_f_axi_wr_pending),
-        .f_axi_rd_nbursts(nsu_f_axi_rd_nbursts),
-        .f_axi_rd_outstanding(nsu_f_axi_rd_outstanding)
-    );
-    /* verilator lint_on PINMISSING */
-
-    // -------------------------------------------------------------------------
-    // Exit logic
+    // Exit logic — non-vacuous PASS guard
     // -------------------------------------------------------------------------
     // Scenario completion is polled by C++ main.cpp via cmodel_done().
-    // This always block provides a SV-side mirror for simulation observers.
-    // cmodel_done/cmodel_scoreboard_clean return int; cast to bit for Verilator.
+    // PASS requires a non-vacuous run: scoreboard clean AND both masters created
+    // AND at least one read actually checked (so a write-only / no-op run fails).
     always @(posedge clk_i) begin
         /* verilator lint_off WIDTHTRUNC */
         if (rst_ni && (cmodel_done() != 0)) begin
-            if (cmodel_scoreboard_clean() != 0) begin
+            if (cmodel_scoreboard_clean() != 0 &&
+                cmodel_master_count() == 2 && cmodel_reads_checked() > 0) begin
         /* verilator lint_on WIDTHTRUNC */
                 $display("PASS: scenario complete, scoreboard clean");
                 cmodel_dump_scoreboard();
-                // cmodel_finalize() is handled by main.cpp after $finish to
-                // avoid calling DPI on null adapters in the same time-step.
                 $finish(0);
             end else begin
-                $display("FAIL: scoreboard mismatch");
+                $display("FAIL: scoreboard mismatch or vacuous run (masters=%0d reads=%0d)",
+                         cmodel_master_count(), cmodel_reads_checked());
                 cmodel_dump_scoreboard();
-                $fatal(1, "tb_top: scoreboard mismatch, simulation failed");
+                $fatal(1, "tb_top: bidirectional run failed");
             end
         end
     end
@@ -367,10 +221,9 @@ module tb_top (
     // Centralized DPI error poll (T1.4)
     // -------------------------------------------------------------------------
     // Wraps no longer call cmodel_finalize individually; this single block
-    // owns the fatal-exit path. Previously each of the 5 wraps had its own
-    // error_check block that called cmodel_finalize on non-zero, which risked
-    // a race where multiple wraps tried to destruct the C++ model in the same
-    // delta cycle.
+    // owns the fatal-exit path. Previously each wrap had its own error_check
+    // block that called cmodel_finalize on non-zero, which risked a race where
+    // multiple wraps tried to destruct the C++ model in the same delta cycle.
     import "DPI-C" context function int cmodel_check_error(output string msg);
 
     always_ff @(posedge clk_i) begin
