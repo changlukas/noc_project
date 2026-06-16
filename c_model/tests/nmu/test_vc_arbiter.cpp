@@ -35,6 +35,15 @@ Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint6
     return f;
 }
 
+// Push a flit, drain one to the channel, return the assigned vc_id.
+uint8_t push_and_vc(VcArbiter& arb, ChannelModel& noc, const Flit& f) {
+    EXPECT_TRUE(arb.push_flit(f));
+    arb.tick();
+    auto out = noc.req_in().pop_flit();
+    EXPECT_TRUE(out.has_value());
+    return static_cast<uint8_t>(out->get_header_field("vc_id"));
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -101,15 +110,60 @@ TEST_P(NmuVcArbParam, MultiCandidate_HoLAvoidance) {
     }
     auto arb = VcArbiter::multi_candidate(noc.req_out(), num_vc, candidates, /*pending_depth=*/2);
 
+    // Distinct ARIDs (per-id binding pins each flow to its first-available VC).
     // Fill VC=0 pending to capacity (2 ARs land on VC=0).
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/2)));
     EXPECT_EQ(arb.pending_size(0), 2u);
     EXPECT_EQ(arb.pending_size(1), 0u);
 
-    // Next AR: VC=0 full -> candidate fallback picks VC=1.
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    // Next AR (distinct id): VC=0 full -> candidate fallback picks VC=1.
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/3)));
     EXPECT_EQ(arb.pending_size(1), 1u);
+}
+
+TEST_P(NmuVcArbParam, Binding_SameWriteId_SameVc) {
+    SCENARIO("VcArbiter: same AWID across packets binds to one VC (multi-element write set)");
+    const auto num_vc = GetParam();
+    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs for a multi-element write set";
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
+    uint8_t v1 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, 0, 0, 0, /*id=*/7));
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));  // close burst
+    arb.tick();
+    noc.req_in().pop_flit();
+    uint8_t v2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, 0, 0, 0, /*id=*/7));
+    EXPECT_EQ(v1, v2) << "same AWID must reuse the same VC";
+}
+
+TEST_P(NmuVcArbParam, Binding_PerIdStickyAndDistinctIdsIndependent) {
+    SCENARIO("VcArbiter: ARID re-binds to its own VC; distinct ARIDs are independent");
+    const auto num_vc = GetParam();
+    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
+    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1));
+    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/2));
+    EXPECT_TRUE(a == 2 || a == 3) << "ARID=1 in read set {2,3}";
+    EXPECT_TRUE(b == 2 || b == 3) << "ARID=2 in read set {2,3}";
+    uint8_t a2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1));
+    EXPECT_EQ(a2, a) << "ARID=1 must re-bind to its original VC";
+}
+
+TEST_P(NmuVcArbParam, Binding_DistinctIdsSpreadUnderDepthPressure) {
+    SCENARIO("VcArbiter: with pending_depth=1, distinct ARIDs land on different VCs");
+    const auto num_vc = GetParam();
+    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    // depth 1: once id=1 binds+fills its VC, the next distinct id cannot reuse it.
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3},
+                                                 /*pending_depth=*/1);
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1)));  // binds + fills
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/2)));  // must pick the other
+    // No tick/drain between: assert the two ids occupy DIFFERENT read-set VCs via introspection.
+    std::size_t in2 = arb.pending_size(2), in3 = arb.pending_size(3);
+    EXPECT_EQ(in2 + in3, 2u) << "both flits queued in the read set";
+    EXPECT_TRUE(in2 == 1 && in3 == 1) << "distinct ids forced onto different VCs under depth=1";
 }
 
 // W follows AW invariant: all W beats of a burst route to the same VC as
@@ -210,9 +264,10 @@ TEST_P(NmuVcArbParam, RoundRobinFairness_AllVcsServiced_NoStarvation) {
     }
     auto arb = VcArbiter::multi_candidate(noc.req_out(), num_vc, candidates, /*pending_depth=*/1);
 
-    // Push num_vc ARs: first fills VC=0, second fills VC=1, ..., etc.
+    // Push num_vc ARs with DISTINCT ids: depth=1 forces each distinct flow
+    // onto the next free VC, so first fills VC=0, second VC=1, ..., etc.
     for (std::size_t i = 0; i < num_vc; ++i) {
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, static_cast<uint8_t>(i + 1))));
         EXPECT_EQ(arb.pending_size(i), 1u);
     }
 

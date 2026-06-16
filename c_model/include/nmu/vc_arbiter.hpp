@@ -105,7 +105,13 @@ class VcArbiter : public noc::NocReqOut {
         for (uint8_t v : read_vcs_) assert(v < num_vc_);
     }
 
-    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch);
+    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id);
+
+    const std::vector<uint8_t>* candidates_for(uint8_t axi_ch) const {
+        if (mode_ == VcMode::ReadWriteSplit)
+            return axi_ch == ni::AXI_CH_AW ? &write_vcs_ : &read_vcs_;
+        return &candidate_vcs_[axi_ch];
+    }
 
     noc::NocReqOut& downstream_;
     std::size_t num_vc_;
@@ -117,9 +123,12 @@ class VcArbiter : public noc::NocReqOut {
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;
     std::optional<uint8_t> current_aw_vc_;
+    static constexpr std::size_t AXI_ID_SPACE = 256;  // matches axi::AXI_ID_SPACE
+    std::array<std::optional<uint8_t>, AXI_ID_SPACE> write_binding_{};
+    std::array<std::optional<uint8_t>, AXI_ID_SPACE> read_binding_{};
 };
 
-inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
+inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id) {
     // W invariant fires regardless of NUM_VC (Constraint A1: must be
     // downstream of WormholeArbiter; W must always follow AW)
     if (axi_ch == ni::AXI_CH_W) {
@@ -136,18 +145,16 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
 
     if (num_vc_ == 1) return uint8_t{0};
 
-    const std::vector<uint8_t>* cand = nullptr;
-    if (mode_ == VcMode::ReadWriteSplit) {
-        if (axi_ch == ni::AXI_CH_AW)
-            cand = &write_vcs_;
-        else if (axi_ch == ni::AXI_CH_AR)
-            cand = &read_vcs_;
-        else
-            return std::nullopt;
-    } else {  // MultiCandidate
-        cand = &candidate_vcs_[axi_ch];
-    }
-    for (uint8_t vc : *cand) {
+    std::array<std::optional<uint8_t>, AXI_ID_SPACE>* binding = nullptr;
+    if (axi_ch == ni::AXI_CH_AW)
+        binding = &write_binding_;
+    else if (axi_ch == ni::AXI_CH_AR)
+        binding = &read_binding_;
+    else
+        return std::nullopt;
+    if ((*binding)[id].has_value()) return (*binding)[id];  // bound: stick (even if full)
+    const std::vector<uint8_t>* cand = candidates_for(axi_ch);
+    for (uint8_t vc : *cand) {  // unbound: first available
         if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
     }
     return std::nullopt;
@@ -155,7 +162,17 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
 
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
-    auto vc_opt = select_vc_for_axi_ch(axi_ch);
+
+    // Read the per-flow id (only when binding is active, i.e. num_vc_>1; spec §8).
+    uint8_t id = 0;
+    if (num_vc_ > 1) {
+        if (axi_ch == ni::AXI_CH_AW)
+            id = static_cast<uint8_t>(flit.get_payload_field("AW", "awid"));
+        else if (axi_ch == ni::AXI_CH_AR)
+            id = static_cast<uint8_t>(flit.get_payload_field("AR", "arid"));
+    }
+
+    auto vc_opt = select_vc_for_axi_ch(axi_ch, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
@@ -174,6 +191,16 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         if (flit.get_payload_field("W", "wlast") != 0) {
             current_aw_vc_.reset();
         }
+    }
+
+    // Commit the (channel, id) -> vc binding only after every accept condition
+    // (including the AW-collision check above) has passed, so a malformed-AW
+    // abort cannot leave a committed binding. Active for num_vc_>1 only.
+    if (num_vc_ > 1) {
+        if (axi_ch == ni::AXI_CH_AW)
+            write_binding_[id] = vc_id;
+        else if (axi_ch == ni::AXI_CH_AR)
+            read_binding_[id] = vc_id;
     }
 
     Flit stamped = flit;
