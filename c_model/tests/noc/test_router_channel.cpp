@@ -161,4 +161,25 @@ TEST(RouterChannel, EjectBoundaryCreditConservation) {
     }
 }
 
+TEST(RouterChannel, EjectQueueHoldsAggregateMultiVcCredit) {
+    SCENARIO(
+        "RouterChannel: with NSU stalled, the shared eject queue must hold num_vc*vc_depth "
+        "flits (not just vc_depth)");
+    using ni::cmodel::noc::RouterChannel;
+    constexpr std::size_t kDepth = 4;
+    RouterChannel ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
+    // Alternate vc0/vc1 single-flit requests to dst=(0,0); never pop at NSU(0).
+    // Each VC can have up to kDepth flits granted out the LOCAL output before its
+    // credit is exhausted -> up to 2*kDepth flits accumulate in the shared eject queue.
+    std::size_t pushed = 0;
+    for (int t = 0; t < 400; ++t) {
+        uint8_t vc = static_cast<uint8_t>(t % 2);
+        if (ch.nmu_req_out(1).push_flit(req_flit(0x00, vc))) ++pushed;
+        ch.tick();  // must NOT abort (eject overflow) once depth is fixed
+        // never pop nsu_req_in(0)
+    }
+    EXPECT_GT(ch.req_eject_buffered(0), kDepth)
+        << "eject queue must hold more than one VC's worth (aggregate num_vc*vc_depth)";
+}
+
 }  // namespace

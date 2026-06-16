@@ -75,11 +75,14 @@ adapter types bridge them.
   bounded queue.
 - `pop_flit() → optional<Flit>`: serves from the queue; on consume, calls
   `router.receive_credit(LOCAL_out_port, vc)` to return the slot.
-- Invariant (mandatory): the eject queue depth equals the router's LOCAL-output credit seed.
-  `RouterLink::push_flit` is `void` and cannot backpressure, so this equality is what
+- Invariant (mandatory): the eject queue is SHARED across all VCs, so its depth must equal the
+  AGGREGATE LOCAL-output credit = `num_vc * vc_depth` (the per-VC seed alone is insufficient when
+  `num_vc>1`: the router has `num_vc` independent LOCAL-output credit counters each seeded to
+  `vc_depth`, so with the NSU stalled it can grant up to `num_vc * vc_depth` flits into the one
+  shared queue). `RouterLink::push_flit` is `void` and cannot backpressure, so this depth is what
   guarantees no overflow — the router only ejects when it holds LOCAL-output credit, and one
-  ejected flit consumes exactly one queue slot. The credit-conservation unit test (§7)
-  asserts this; there is no natural backpressure to fall back on.
+  ejected flit consumes exactly one queue slot. The credit-conservation unit test (§7) asserts
+  this; there is no natural backpressure to fall back on.
 
 **CreditRelay** (`RouterCreditSink`): forwards a downstream router's input credit pulse to
 the upstream router's `receive_credit(port, vc)` for the matching inter-router port pair

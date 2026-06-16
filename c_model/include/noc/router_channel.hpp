@@ -59,9 +59,13 @@ class InjectAdapter : public NocReqOut, public NocRspOut, public RouterCreditSin
 };
 
 // router LOCAL output -> NI. Implements the consumer-side NoC interfaces and is
-// the router's downstream RouterLink. Buffer depth MUST equal the router's
-// LOCAL-output credit seed so the void push_flit never overflows (credit gating
-// is the only backpressure -- see spec section 4).
+// the router's downstream RouterLink. The eject queue is SHARED across all VCs,
+// but the router's LOCAL output has num_vc INDEPENDENT credit counters each
+// seeded to vc_depth, so it can grant up to num_vc*vc_depth flits total before
+// any credit is returned (NSU stalled). Buffer depth MUST therefore cover the
+// AGGREGATE LOCAL-output credit = num_vc*vc_depth so the void push_flit never
+// overflows (credit gating is the only backpressure -- see spec section 4); the
+// per-VC seed alone is insufficient when num_vc>1.
 // One instance per direction: the NocReqIn/NocRspIn pop_flit bases share one
 // queue, so bind a given EjectAdapter to a single network's LOCAL output only
 // (req OR rsp, never both) or the two streams would interleave on one queue.
@@ -72,8 +76,8 @@ class EjectAdapter : public NocReqIn, public NocRspIn, public RouterLink {
 
     void push_flit(const Flit& flit) override {
         assert(queue_.size() < depth_ &&
-               "EjectAdapter overflow: queue depth must equal the router LOCAL-output credit "
-               "seed (credit gating should have prevented this)");
+               "EjectAdapter overflow: queue depth must cover the AGGREGATE LOCAL-output credit "
+               "(num_vc*vc_depth) (credit gating should have prevented this)");
         queue_.push_back(flit);
     }
     std::optional<Flit> pop_flit() override {
@@ -166,7 +170,8 @@ class RouterChannel {
     void wire_local(Router& r, std::unique_ptr<InjectAdapter>& inj,
                     std::unique_ptr<EjectAdapter>& ej) {
         inj = std::make_unique<InjectAdapter>(r, LOCAL, num_vc_, vc_depth_);
-        ej = std::make_unique<EjectAdapter>(r, LOCAL, vc_depth_);
+        ej =
+            std::make_unique<EjectAdapter>(r, LOCAL, static_cast<std::size_t>(num_vc_) * vc_depth_);
         r.set_upstream_credit(LOCAL, *inj);
         r.set_downstream(LOCAL, *ej);
     }
