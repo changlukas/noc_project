@@ -68,7 +68,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // O(ROB_CAPACITY) worst case. Public for direct unit testing (TDD).
     static int find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n);
 
-    // Fired with (is_write, axi_id) when that id's outstanding source empties on a pop.
+    // Fired with (is_write, axi_id) exactly once on the transition where that id's
+    // outstanding source becomes empty (edge-triggered, not level) -- i.e. when the
+    // last response of that id is popped. No-op until an observer is set.
     void set_drain_observer(std::function<void(bool, uint8_t)> cb) {
         drain_observer_ = std::move(cb);
     }
@@ -260,6 +262,7 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
             write_entries_[head.base].occupied = false;
             write_order_by_id_[id].pop_front();
         }
+        // id fully committed: the chain-flush above drained this id's order list -> fire once.
         if (write_order_by_id_[id].empty()) notify_drained(true, id);
         if (!committed_b_queue_.empty()) {
             auto out = committed_b_queue_.front();
@@ -323,6 +326,7 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
             }
             read_order_by_id_[id].pop_front();
         }
+        // id fully committed: the chain-flush above drained this id's order list -> fire once.
         if (read_order_by_id_[id].empty()) notify_drained(false, id);
         if (!committed_r_queue_.empty()) {
             auto out = committed_r_queue_.front();
