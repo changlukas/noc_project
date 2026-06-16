@@ -29,8 +29,8 @@ add_custom_command(TARGET test_request_response_loopback POST_BUILD
     ${CMAKE_CURRENT_SOURCE_DIR}/../../config
     $<TARGET_FILE_DIR:test_request_response_loopback>/config)
 
-# Task 5: bidirectional loopback over one production RouterChannel. Two full-NI
-# nodes (NMU+NSU) wired to a single RouterChannel; both flows scored by the
+# Task 5: bidirectional loopback over a hand-assembled TwoNodeFabric. Two full-NI
+# nodes (NMU+NSU) wired to two per-node Routers + a link; both flows scored by the
 # Stage 2 Scoreboard across num_vc {1,2,4,8}.
 add_cmodel_test(test_router_loopback)
 target_link_libraries(test_router_loopback PRIVATE yaml-cpp::yaml-cpp noc_axi4_scenarios)
