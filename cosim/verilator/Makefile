@@ -131,12 +131,21 @@ $(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(TB_TOP_INC_DEPS) $(DPI_HDR_DEPS) | check-yaml
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
 
+# tb_top is now bidirectional: it needs two coordinate-variant plusargs
+# (node0 = identity / low addr, node1 = +0x1_0000_0000 / coordinate (1,0)).
+# Generate the variants for $(SCENARIO) into output/$(SCENARIO)/coord/ then
+# pass +scenario_node0/+scenario_node1. The authoritative ctest path
+# (test_cosim_integration) builds its own command and does not use this target.
+COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
+
 .PHONY: run-tb-top
 run-tb-top: $(TBTOP_EXE)
 	@mkdir -p output/$(SCENARIO)
 	@rm -f output/$(SCENARIO)/tb_top.vcd  # drop stale vcd from a previous TRACE=1 run
 	@echo "running scenario $(SCENARIO); output -> output/$(SCENARIO)/"
-	@$(TBTOP_EXE) "+scenario=$(SCENARIO_ABS)"$(if $(TRACE_PLUSARG_TB_TOP), $(TRACE_PLUSARG_TB_TOP),) \
+	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord"
+	@$(TBTOP_EXE) "+scenario_node0=output/$(SCENARIO)/coord/node0/scenario.yaml" \
+	    "+scenario_node1=output/$(SCENARIO)/coord/node1/scenario.yaml"$(if $(TRACE_PLUSARG_TB_TOP), $(TRACE_PLUSARG_TB_TOP),) \
 	    > output/$(SCENARIO)/run.log 2>&1; \
 	rc=$$?; \
 	if ls master_shell_read_dump*.txt >/dev/null 2>&1; then \

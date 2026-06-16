@@ -64,9 +64,31 @@ TEST_P(CosimIntegration, ScenarioPassesWb2axip) {
         GTEST_SKIP() << *reason;
     }
 
+    // tb_top's non-vacuous PASS guard requires reads_checked > 0; write-only
+    // scenarios would FAIL it. Skip them — the bidirectional path needs a read.
+    bool has_read = std::any_of(
+        sc.transactions.begin(), sc.transactions.end(),
+        [](const ni::cmodel::axi::ScenarioTransaction& t) {
+            return t.op == ni::cmodel::axi::ScenarioTransaction::Op::Read;
+        });
+    if (!has_read) GTEST_SKIP() << "BIDIR_REQUIRES_READ";
+
     const char* bin = std::getenv(kCosimBinaryEnv);
     ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
-    auto cmd = std::string(bin) + " +scenario=" + scenario_path;
+    // Drive both nodes from this scenario's coordinate variants: node0 =
+    // identity (low addr), node1 = +0x1_0000_0000 (coordinate (1,0)). Variants
+    // are pre-generated only for COSIM_BIDIR_SUBSET (CMakeLists.txt); a
+    // qualifying scenario outside that bring-up subset has no variant tree —
+    // skip rather than fail on a missing file.
+    auto base = std::string(COORD_VARIANT_ROOT) + "/" + scenario_id;
+    auto node0_path = base + "/node0/scenario.yaml";
+    if (FILE* f = std::fopen(node0_path.c_str(), "r")) {
+        std::fclose(f);
+    } else {
+        GTEST_SKIP() << "NOT_IN_BIDIR_SUBSET";
+    }
+    auto cmd = std::string(bin) + " +scenario_node0=" + base + "/node0/scenario.yaml" +
+               " +scenario_node1=" + base + "/node1/scenario.yaml";
     auto result = run_and_capture(cmd);
     EXPECT_EQ(result.rc, 0) << "scenario " << scenario_id << " failed (exit " << result.rc << ")\n"
                             << result.output;
