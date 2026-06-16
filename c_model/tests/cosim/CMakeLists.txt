@@ -9,6 +9,11 @@ add_cmodel_test(test_router_channel_shell_adapter)
 target_include_directories(test_router_channel_shell_adapter PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
+add_cmodel_test(test_router_shell_adapter)
+# Add c_model/tests/ to include path to mirror the ChannelModel adapter test.
+target_include_directories(test_router_shell_adapter PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
 add_cmodel_test(test_master_shell_adapter test_master_shell_adapter.cpp)
 target_link_libraries(test_master_shell_adapter PRIVATE yaml-cpp::yaml-cpp)
 
