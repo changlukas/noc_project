@@ -477,16 +477,20 @@ TEST(RouterChannel, EjectBoundaryCreditConservation) {
         ch.nmu_req_out(1).push_flit(req_flit(0x00, 0));   // ok if backpressured
         ch.tick();
         if (t % 3 == 0) ch.nsu_req_in(0).pop_flit();       // drain 1-in-3
-        EXPECT_EQ(ch.req_router(0).credit(LOCAL, 0) + ch.req_eject_buffered(0), kDepth)
-            << "eject credit conservation violated at tick " << t
-            << " (credit loss → sum<depth, fabrication → router overflow assert)";
+        EXPECT_EQ(ch.req_router(0).credit(LOCAL, 0)
+                      + ch.req_router(0).output_fifo_size(LOCAL)
+                      + ch.req_eject_buffered(0),
+                  kDepth)
+            << "eject credit conservation violated at tick " << t;
     }
 }
 ```
 This is REQUIRED (not optional): the eject boundary is where the void `RouterLink::push_flit`
-overflow risk lives, so the per-tick `credit + buffered == depth` invariant is the load-bearing
-conservation check. Credit loss shows as `sum < depth`; fabrication would already have tripped
-the router's overflow assert. The `FullBackpressureWhenConsumerStalls` test above remains as the
+overflow risk lives. The invariant is THREE-term — a credit-holding flit is in exactly one of
+{available credit, the router LOCAL output FIFO (between Stage-2 grant and Stage-3 eject), the
+eject buffer} — so `credit(LOCAL,vc) + output_fifo_size(LOCAL) + eject_buffered == depth` every
+tick. (`Router::output_fifo_size(port)` already exists as introspection.) Credit loss shows as
+`sum < depth`; fabrication would already have tripped the router's overflow assert. The `FullBackpressureWhenConsumerStalls` test above remains as the
 no-assert / bounded-acceptance complement.
 
 - [ ] **Step 2: Run** — `make build-cmodel && ctest --test-dir build/cmodel -R "RouterChannel" --output-on-failure` → PASS. If `FullBackpressure` aborts (router assert) instead of backpressuring, the landing guard or the eject-depth==credit-seed invariant is wrong — STOP and report.
