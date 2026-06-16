@@ -139,6 +139,11 @@ class RouterShellAdapter {
 
     void get_outputs(RouterOutputs& out) const { out = out_; }
 
+    // Test introspection: the REQ router, so a test can read its built-in
+    // credit_[LOCAL] sender counter (router->NI direction) across a
+    // credit-return hop. Not used in production wiring.
+    noc::Router& req_router() { return *req_router_; }
+
   private:
     static constexpr std::size_t LOCAL = static_cast<std::size_t>(noc::RouterPort::LOCAL);
 

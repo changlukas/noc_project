@@ -158,10 +158,19 @@ TEST(RouterShellAdapter, LocalInputDrainEmitsCreditPulse) {
 // direction) is replenished by the NI's returned pulse on req_in_credit_return.
 // Eject one LOCAL-bound req first (which spends one credit_[LOCAL] on the router
 // output), THEN return the credit pulse; router.receive_credit(LOCAL) must
-// accept it without overflow and the pulse must not be misread as a flit.
+// restore the counter. This test is a genuine discriminator: it reads the
+// router's credit_[LOCAL] before/after the return hop. A dropped hop (the shell
+// failing to call receive_credit(LOCAL) on req_in_credit_return) leaves the
+// counter one short and FAILS the final assertion — a no-abort-only test would
+// not catch that.
 TEST(RouterShellAdapter, LocalInCreditReturnReplenishesRouter) {
+    constexpr std::size_t LOCAL = static_cast<std::size_t>(ni::cmodel::noc::RouterPort::LOCAL);
+
     RouterShellAdapter a;
     a.init(/*x_coord=*/0);
+    const std::size_t seed = a.req_router().credit(LOCAL, /*vc=*/0);
+    ASSERT_GT(seed, 0u) << "router LOCAL output credit must seed > 0";
+
     RouterInputs in{};
     in.req_in_valid = true;
     in.req_in_flit = flit_to_bytes(make_req(/*dst=*/0x00));  // LOCAL-bound
@@ -169,7 +178,8 @@ TEST(RouterShellAdapter, LocalInCreditReturnReplenishesRouter) {
     a.tick();
     a.set_inputs(RouterInputs{});
 
-    // Let the flit eject at req_out (spends one router LOCAL-output credit).
+    // Let the flit eject at req_out. The grant that moves it into the LOCAL
+    // output FIFO spends exactly one credit_[LOCAL] (router.hpp stage 2).
     RouterOutputs out{};
     bool ejected = false;
     for (int cyc = 0; cyc < 16 && !ejected; ++cyc) {
@@ -178,15 +188,20 @@ TEST(RouterShellAdapter, LocalInCreditReturnReplenishesRouter) {
         if (out.req_out_valid) ejected = true;
     }
     ASSERT_TRUE(ejected);
+    ASSERT_EQ(a.req_router().credit(LOCAL, /*vc=*/0), seed - 1)
+        << "ejecting one LOCAL flit must spend exactly one credit_[LOCAL]";
 
-    // Now the NSU returns the consumer credit pulse: receive_credit(LOCAL) must
-    // accept it (counter below depth) with no spurious flit output / no abort.
+    // Now the NSU returns the consumer credit pulse. The shell must route it to
+    // router.receive_credit(LOCAL, 0), incrementing credit_[LOCAL] back to seed.
+    // If the hop were dropped the counter would stay at seed-1 and this fails.
     in = RouterInputs{};
     in.req_in_credit_return = true;
     a.set_inputs(in);
     a.tick();
     a.get_outputs(out);
-    EXPECT_FALSE(out.req_out_valid);
+    EXPECT_FALSE(out.req_out_valid) << "credit-return pulse must not surface as a flit";
+    EXPECT_EQ(a.req_router().credit(LOCAL, /*vc=*/0), seed)
+        << "req_in_credit_return must replenish credit_[LOCAL] back to its seed";
 }
 
 // Node1 (x=1): a request to dst=(0,0) routes WEST = its LINK port.

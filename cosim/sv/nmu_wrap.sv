@@ -274,7 +274,8 @@ module nmu_wrap #(
     assign noc_mosi_o.req_valid = noc_req_valid_q;
     assign noc_mosi_o.req_flit  = noc_req_flit_q;
 
-    // NoC rsp credit — Nmu drives rsp_credit_return back upstream (PoC always 0)
+    // NoC rsp credit — Nmu drives rsp_credit_return back upstream (registered
+    // FlooNoC consumer pulse from the C model; pure pass-through bit)
     assign noc_mosi_o.rsp_credit_return = {NUM_VC{noc_rsp_credit_return_q}};
 
 endmodule

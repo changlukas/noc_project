@@ -126,15 +126,18 @@ inline void Nsu::tick() {
 // Stage 5b: NsuStandalone — hermetic wrapper, no external NoC refs.
 //
 // ShellAdapters construct NsuStandalone(NsuConfig{...}) without supplying
-// NocReqIn& / NocRspOut&. Null stubs own both interfaces; real DPI wiring
-// replaces them at the ShellAdapter tick boundary.
+// NocReqIn& / NocRspOut&. The wrapper owns queue-backed terminal endpoints for
+// both interfaces; real DPI wiring drives/drains them at the ShellAdapter tick
+// boundary.
 //
 // NullNocReqIn: ShellAdapter injects flits via inject_req_flit() before
 //   calling nsu_.tick(); Nsu's Depacketize stage drains via pop_flit().
 //
-// NullNocRspOut: push_flit accepts every flit into an internal deque (capped
-//   at kMaxQueueDepth for PoC sanity); credit_avail always true. ShellAdapter
-//   drains via pop_rsp_flit() each tick after calling nsu_.tick().
+// NullNocRspOut: push_flit enqueues into an internal deque (capped at
+//   kMaxQueueDepth as a drain-forgotten sanity check). With FlooNoC credit
+//   enabled (cosim opt-in) push_flit also gates+consumes per-VC credit and
+//   credit_avail reflects the counter; with credit OFF (default) it accepts
+//   unconditionally. ShellAdapter drains via pop_rsp_flit() each tick.
 //
 // Invariant: NsuStandalone is non-copyable and non-movable (same as Nsu).
 // -------------------------------------------------------------------------
@@ -173,7 +176,9 @@ struct NullNocReqIn : noc::NocReqIn {
 
   private:
     std::deque<Flit> queue_;
-    std::vector<std::size_t> pending_{1, 0};  // default 1 VC
+    // (count=1, value=0) vector ctor: one VC, pending pulse count 0. NOT a
+    // 2-element {1, 0} initializer-list. size_pending() resizes for >1 VC.
+    std::vector<std::size_t> pending_{1, 0};
 };
 
 struct NullNocRspOut : noc::NocRspOut {

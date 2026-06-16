@@ -145,19 +145,21 @@ inline void Nmu::tick() {
 // ShellAdapters construct NmuStandalone(NmuConfig{...}) without supplying
 // NocReqOut& / NocRspIn&. The wrapper owns null-stub implementations of
 // both interfaces; the real DPI wiring replaces them at the ShellAdapter
-// tick boundary. Null stubs: push_flit always returns false (backpressure),
-// pop_flit always returns nullopt (no incoming flits).
+// tick boundary. The wrapper's NullNocReqOut/NullNocRspIn are real queues
+// (not no-op stubs): push_flit enqueues, pop_flit dequeues.
 //
 // Invariant: NmuStandalone is non-copyable and non-movable (same as Nmu).
 // -------------------------------------------------------------------------
 
-// Stage 5b additive: NullNocReqOut / NullNocRspIn upgraded to queue stubs so
-// that NmuShellAdapter can drain produced req flits and inject incoming rsp
-// flits at the DPI boundary without modifying the Nmu internals.
+// NullNocReqOut / NullNocRspIn are queue-backed terminal endpoints so that
+// NmuShellAdapter can drain produced req flits and inject incoming rsp flits
+// at the DPI boundary without modifying the Nmu internals.
 //
-// NullNocReqOut: push_flit accepts every flit into an internal deque (capped
-//   at kMaxQueueDepth for PoC sanity); credit_avail always true. ShellAdapter
-//   drains via pop_req_flit() each tick after calling nmu_.tick().
+// NullNocReqOut: push_flit enqueues into an internal deque (capped at
+//   kMaxQueueDepth as a drain-forgotten sanity check). With FlooNoC credit
+//   enabled (cosim opt-in) push_flit also gates+consumes per-VC credit and
+//   credit_avail reflects the counter; with credit OFF (default) it accepts
+//   unconditionally. ShellAdapter drains via pop_req_flit() each tick.
 //
 // NullNocRspIn: ShellAdapter injects flits via inject_rsp_flit() before
 //   calling nmu_.tick(); Nmu's Depacketize stage drains via pop_flit().
@@ -243,7 +245,9 @@ struct NullNocRspIn : noc::NocRspIn {
 
   private:
     std::deque<Flit> queue_;
-    std::vector<std::size_t> pending_{1, 0};  // default 1 VC
+    // (count=1, value=0) vector ctor: one VC, pending pulse count 0. NOT a
+    // 2-element {1, 0} initializer-list. size_pending() resizes for >1 VC.
+    std::vector<std::size_t> pending_{1, 0};
 };
 
 }  // namespace detail

@@ -225,13 +225,15 @@ module router_wrap #(
     // NSU-facing side: drive req_valid/req_flit forward.
     assign noc_nsu_o.req_valid          = req_out_valid_q;
     assign noc_nsu_o.req_flit           = req_out_flit_q;
-    // NMU-facing side: return req credits back upstream (level/stub).
+    // NMU-facing side: return req credit pulse back upstream (registered
+    // FlooNoC pulse from the C model; pure pass-through, no SV interpretation).
     assign noc_nmu_i.req_credit_return  = {NUM_VC{req_out_credit_return_q}};
 
     // NMU-facing side: drive rsp_valid/rsp_flit back toward NMU.
     assign noc_nmu_i.rsp_valid          = rsp_out_valid_q;
     assign noc_nmu_i.rsp_flit           = rsp_out_flit_q;
-    // NSU-facing side: return rsp credits back upstream (level/stub).
+    // NSU-facing side: return rsp credit pulse back upstream (registered
+    // FlooNoC pulse from the C model; pure pass-through, no SV interpretation).
     assign noc_nsu_o.rsp_credit_return  = {NUM_VC{rsp_out_credit_return_q}};
 
     // REQ-network LINK: drive flit forward, return credit pulse upstream.

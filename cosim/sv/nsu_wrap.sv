@@ -306,7 +306,8 @@ module nsu_wrap #(
     assign noc_miso_i.rsp_valid = noc_rsp_valid_q;
     assign noc_miso_i.rsp_flit  = noc_rsp_flit_q;
 
-    // NoC req credit — Nsu drives req_credit_return back upstream (PoC always 0)
+    // NoC req credit — Nsu drives req_credit_return back upstream (registered
+    // FlooNoC consumer pulse from the C model; pure pass-through bit)
     assign noc_miso_i.req_credit_return = {NUM_VC{noc_req_credit_return_q}};
 
     // AXI master side — Nsu drives request channels toward subordinate
