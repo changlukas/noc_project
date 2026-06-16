@@ -168,6 +168,32 @@ TEST_P(NmuVcArbParam, Binding_PerIdStickyAndDistinctIdsIndependent) {
     EXPECT_EQ(v7b, 3) << "bound id=7 must stay on vc3, not fall back to the now-free vc2";
 }
 
+TEST_P(NmuVcArbParam, Binding_RebindAfterDrain) {
+    SCENARIO("VcArbiter: on_id_drained frees a binding; the id then re-binds (and sticks anew)");
+    const auto num_vc = GetParam();
+    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
+    uint8_t first = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
+    EXPECT_TRUE(first == 2 || first == 3);
+    arb.on_id_drained(/*is_write=*/false, /*id=*/5);  // release the binding
+    uint8_t rebind = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
+    EXPECT_TRUE(rebind == 2 || rebind == 3);
+    uint8_t rebind2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
+    EXPECT_EQ(rebind2, rebind) << "after re-binding, id=5 sticks to the new VC";
+}
+
+TEST_P(NmuVcArbParam, Binding_MidFlightSameIdReusesVc) {
+    SCENARIO("VcArbiter: a second same-id packet before any drain-release reuses the same VC");
+    const auto num_vc = GetParam();
+    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
+    uint8_t v = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/9));
+    uint8_t v2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/9));  // no release
+    EXPECT_EQ(v2, v);
+}
+
 TEST_P(NmuVcArbParam, Binding_DistinctIdsSpreadUnderDepthPressure) {
     SCENARIO("VcArbiter: with pending_depth=1, distinct ARIDs land on different VCs");
     const auto num_vc = GetParam();

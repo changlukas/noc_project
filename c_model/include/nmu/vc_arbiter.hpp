@@ -90,6 +90,15 @@ class VcArbiter : public noc::NocReqOut {
 
     void tick();
 
+    // Release the (class,id) binding when its outstanding count reaches 0.
+    // Called by the NMU Rob drain hook. is_write selects the write vs read table.
+    void on_id_drained(bool is_write, uint8_t id) {
+        if (is_write)
+            write_binding_[id].reset();
+        else
+            read_binding_[id].reset();
+    }
+
     // Test introspection
     std::size_t pending_size(uint8_t vc_id) const noexcept { return pending_[vc_id].size(); }
     uint8_t round_robin_ptr() const noexcept { return round_robin_ptr_; }
