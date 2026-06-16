@@ -1,5 +1,6 @@
 #include "noc/router_channel.hpp"
 #include "noc/router.hpp"
+#include "noc/router_adapters.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
@@ -20,11 +21,12 @@ RouterConfig cfg_at(uint8_t x, uint8_t y) {
     c.vc_depth = 2;
     return c;
 }
-Flit req_flit(uint8_t dst, uint8_t vc) {
+Flit req_flit(uint8_t dst, uint8_t vc, uint8_t tag = 0) {
     Flit f;
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", vc);
     f.set_header_field("last", 1);
+    f.set_header_field("src_id", tag);
     return f;
 }
 
@@ -180,6 +182,123 @@ TEST(RouterChannel, EjectQueueHoldsAggregateMultiVcCredit) {
     }
     EXPECT_GT(ch.req_eject_buffered(0), kDepth)
         << "eject queue must hold more than one VC's worth (aggregate num_vc*vc_depth)";
+}
+
+// ---------------------------------------------------------------------------
+// Link adapters (cross-DPI FlooNoC pulse credit).
+// ---------------------------------------------------------------------------
+
+TEST(LinkEjectAdapter, FifoOrderAndNoRouterCredit) {
+    SCENARIO("LinkEjectAdapter: push N flits, pop returns them FIFO; pop returns no router credit");
+    using ni::cmodel::noc::LinkEjectAdapter;
+    constexpr std::size_t kDepth = 4;
+    LinkEjectAdapter le(kDepth);
+    EXPECT_EQ(le.buffered(), 0u);
+    EXPECT_FALSE(le.pop_flit().has_value()) << "empty pop yields nullopt";
+    for (std::size_t i = 0; i < kDepth; ++i) {
+        le.push_flit(req_flit(/*dst=*/0x00, /*vc=*/0, /*tag=*/static_cast<uint8_t>(i)));
+        EXPECT_EQ(le.buffered(), i + 1);
+    }
+    for (std::size_t i = 0; i < kDepth; ++i) {
+        auto f = le.pop_flit();
+        ASSERT_TRUE(f.has_value());
+        EXPECT_EQ(f->get_header_field("src_id"), i) << "FIFO order preserved";
+        EXPECT_EQ(le.buffered(), kDepth - i - 1);
+    }
+    EXPECT_FALSE(le.pop_flit().has_value());
+}
+
+TEST(LinkEjectAdapterDeath, OverflowAssertsAtDepth) {
+    SCENARIO("LinkEjectAdapter: pushing past depth trips the overflow assert");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    using ni::cmodel::noc::LinkEjectAdapter;
+    LinkEjectAdapter le(/*depth=*/2);
+    le.push_flit(req_flit(0x00, 0));
+    le.push_flit(req_flit(0x00, 0));
+    EXPECT_DEATH(le.push_flit(req_flit(0x00, 0)), "LinkEjectAdapter overflow");
+}
+
+TEST(LinkCreditOut, AccumulatesAndDrainsOnePerTake) {
+    SCENARIO(
+        "LinkCreditOut: receive_credit accumulates pending; take drains one, false when empty");
+    using ni::cmodel::noc::LinkCreditOut;
+    LinkCreditOut co(/*num_vc=*/2);
+    EXPECT_EQ(co.pending(0), 0u);
+    EXPECT_FALSE(co.take(0)) << "no pending -> take returns false";
+    co.receive_credit(0);
+    co.receive_credit(0);
+    co.receive_credit(1);
+    EXPECT_EQ(co.pending(0), 2u);
+    EXPECT_EQ(co.pending(1), 1u);
+    EXPECT_TRUE(co.take(0));
+    EXPECT_EQ(co.pending(0), 1u) << "take drains exactly one (no double-count)";
+    EXPECT_TRUE(co.take(0));
+    EXPECT_EQ(co.pending(0), 0u);
+    EXPECT_FALSE(co.take(0)) << "drained -> false";
+    EXPECT_EQ(co.pending(1), 1u) << "per-VC independent: vc1 untouched";
+    EXPECT_TRUE(co.take(1));
+    EXPECT_FALSE(co.take(1));
+}
+
+// S2 conservation: a single Router with a LinkEjectAdapter on an output port
+// (set_downstream) and a LinkCreditOut on an input port (set_upstream_credit).
+// Drive many flits LINK-in -> LOCAL-out while stalling credit return, and assert
+// (a) no LinkEjectAdapter overflow, (b) LinkCreditOut.pending accumulates the
+// input-drain pulses with no double-count, (c) the output port's credit_ drains
+// to 0 and no flit is lost or over-pushed.
+TEST(LinkAdapterConservation, StalledCreditDrainsOutputAndConservesFlits) {
+    SCENARIO(
+        "Router + LinkEjectAdapter(out) + LinkCreditOut(in): stalled credit drains output credit "
+        "to 0, no eject overflow, pending == drained, flit count conserved");
+    using ni::cmodel::noc::LinkCreditOut;
+    using ni::cmodel::noc::LinkEjectAdapter;
+    // node (1,0): a flit arriving on the WEST link input addressed to this node's
+    // own coord dst=(1,0)=0x01 routes to the LOCAL output (XY DOR, dst==self).
+    RouterConfig c;
+    c.x = 1;
+    c.y = 0;
+    c.mesh_x_dim = 2;
+    c.mesh_y_dim = 1;
+    c.num_vc = 1;
+    c.vc_depth = 4;
+    Router r(c);
+    const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+
+    // LOCAL output buffer must cover the aggregate output credit = num_vc*vc_depth.
+    const std::size_t out_seed = r.credit(LOCAL, 0);
+    LinkEjectAdapter local_out(static_cast<std::size_t>(c.num_vc) * c.vc_depth);
+    LinkCreditOut link_credit(c.num_vc);
+    r.set_downstream(LOCAL, local_out);
+    r.set_upstream_credit(WEST, link_credit);
+
+    // Drive more flits than can drain (LOCAL output credit never returned -> stalls).
+    // The WEST input FIFO has vc_depth slots; push one/tick gated by free space.
+    std::size_t pushed = 0;
+    std::size_t popped = 0;
+    for (int t = 0; t < 60; ++t) {
+        if (r.input_fifo_size(WEST, 0) < c.vc_depth) {
+            r.input(WEST).push_flit(req_flit(/*dst=*/0x01, /*vc=*/0));
+            ++pushed;
+        }
+        r.tick();
+        // never pop local_out -> LOCAL output credit stays drained
+        // (a) eject buffer never overflows (would have asserted in push_flit)
+    }
+    // The single WEST input FIFO can hold vc_depth, the LOCAL output FIFO + eject
+    // buffer absorb the granted flits, all gated by the LOCAL output credit.
+    EXPECT_EQ(r.credit(LOCAL, 0), 0u) << "(c) LOCAL output credit drained to 0 under stall";
+    // (b) every grant out of WEST emitted exactly one credit pulse into LinkCreditOut.
+    // Grants == flits that left the WEST input FIFO == out_seed (output credit spent).
+    EXPECT_EQ(link_credit.pending(0), out_seed)
+        << "(b) one credit pulse per WEST-input drain, no double-count";
+    // (c) flit conservation: every pushed flit is accounted for, none lost/over-pushed.
+    while (local_out.pop_flit().has_value()) ++popped;
+    const std::size_t still_in_west = r.input_fifo_size(WEST, 0);
+    const std::size_t still_in_out_fifo = r.output_fifo_size(LOCAL);
+    EXPECT_EQ(popped + still_in_west + still_in_out_fifo, pushed)
+        << "(c) no flit lost or over-pushed across input FIFO + output FIFO + eject buffer";
+    EXPECT_GT(pushed, out_seed) << "test drove more than the credit window (real stall)";
 }
 
 }  // namespace
