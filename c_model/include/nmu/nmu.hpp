@@ -169,14 +169,33 @@ struct NullNocReqOut : noc::NocReqOut {
     // the check (and the queue is still allowed to grow unboundedly).
     static constexpr std::size_t kMaxQueueDepth = 1024;
 
-    // Accept every flit into queue (models infinite downstream bandwidth).
+    // R2 opt-in FlooNoC sender credit (default OFF = today's always-available).
+    // When enabled, this models the InjectAdapter credit pattern: a per-VC
+    // counter seeded to the downstream (router LOCAL input) depth; push_flit
+    // decrements on accept, receive_credit increments on a credit pulse.
+    // INVARIANT: credit_[vc] is decremented ONLY in push_flit and incremented
+    // ONLY in receive_credit, so credit_[vc] + outstanding == seed holds.
+    void enable_credit(uint8_t num_vc, std::size_t seed) {
+        credit_enabled_ = true;
+        credit_.assign(num_vc, seed);
+    }
+    void receive_credit(uint8_t vc) { ++credit_[vc]; }
+
+    // Accept a flit into the queue. When credit is disabled this models
+    // infinite downstream bandwidth (always accept). When enabled it gates on
+    // and consumes one per-VC credit, returning false (backpressure) if none.
     bool push_flit(const Flit& f) override {
+        if (credit_enabled_) {
+            const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+            if (credit_[vc] == 0) return false;
+            --credit_[vc];
+        }
         assert(queue_.size() < kMaxQueueDepth &&
                "NullNocReqOut overflow — did the test ShellAdapter forget to drain?");
         queue_.push_back(f);
         return true;
     }
-    bool credit_avail(uint8_t) const override { return true; }
+    bool credit_avail(uint8_t vc) const override { return !credit_enabled_ || credit_[vc] > 0; }
 
     // ShellAdapter accessor: pop one flit per tick for DPI forwarding.
     std::optional<Flit> pop_req_flit() {
@@ -188,22 +207,43 @@ struct NullNocReqOut : noc::NocReqOut {
 
   private:
     std::deque<Flit> queue_;
+    bool credit_enabled_ = false;
+    std::vector<std::size_t> credit_;
 };
 
 struct NullNocRspIn : noc::NocRspIn {
     // ShellAdapter accessor: inject one flit per tick from DPI wire.
     void inject_rsp_flit(const Flit& f) { queue_.push_back(f); }
 
-    // Nmu's Depacketize stage drains via pop_flit() each tick.
+    // R2 consumer-pulse: size the per-VC pending counter before traffic. Always
+    // present (no enable flag needed — pending only matters when the shell drains
+    // it via take_credit, which is cosim-only). Defaults to 1 VC.
+    void size_pending(uint8_t num_vc) { pending_.assign(num_vc, 0); }
+
+    // Nmu's Depacketize stage drains via pop_flit() each tick. Depacketize may
+    // call pop_flit() MULTIPLE times per tick (it drains in a while-loop), so
+    // pending_ MUST accumulate (counter), not latch a single bit.
     std::optional<Flit> pop_flit() override {
         if (queue_.empty()) return std::nullopt;
         Flit f = queue_.front();
         queue_.pop_front();
+        const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+        ++pending_[vc];
         return f;
     }
 
+    // ShellAdapter accessor: drain one consumer credit pulse per tick (mirror of
+    // noc::LinkCreditOut::take). Returns true when a pulse was emitted.
+    bool take_credit(uint8_t vc) {
+        if (pending_[vc] == 0) return false;
+        --pending_[vc];
+        return true;
+    }
+    std::size_t pending(uint8_t vc) const { return pending_[vc]; }
+
   private:
     std::deque<Flit> queue_;
+    std::vector<std::size_t> pending_{1, 0};  // default 1 VC
 };
 
 }  // namespace detail
@@ -211,7 +251,12 @@ struct NullNocRspIn : noc::NocRspIn {
 class NmuStandalone {
   public:
     explicit NmuStandalone(NmuConfig cfg)
-        : null_req_out_(), null_rsp_in_(), nmu_(std::move(cfg), null_req_out_, null_rsp_in_) {}
+        : num_vc_(static_cast<uint8_t>(cfg.num_vc)),
+          null_req_out_(),
+          null_rsp_in_(),
+          nmu_(std::move(cfg), null_req_out_, null_rsp_in_) {
+        null_rsp_in_.size_pending(num_vc_);
+    }
 
     NmuStandalone(const NmuStandalone&) = delete;
     NmuStandalone(NmuStandalone&&) = delete;
@@ -229,7 +274,15 @@ class NmuStandalone {
     void inject_rsp_flit(const Flit& f) { null_rsp_in_.inject_rsp_flit(f); }
     bool req_credit_avail(uint8_t vc = 0) const { return null_req_out_.credit_avail(vc); }
 
+    // R2 opt-in FlooNoC credit at the NoC terminal edge (cosim-only; default
+    // OFF). Seeds the req-out sender counter; the rsp-in consumer pulse is
+    // always active (sized in the ctor) but inert unless rsp_take_credit drains.
+    void enable_noc_credit(std::size_t seed) { null_req_out_.enable_credit(num_vc_, seed); }
+    void req_receive_credit(uint8_t vc = 0) { null_req_out_.receive_credit(vc); }
+    bool rsp_take_credit(uint8_t vc = 0) { return null_rsp_in_.take_credit(vc); }
+
   private:
+    uint8_t num_vc_;
     detail::NullNocReqOut null_req_out_;
     detail::NullNocRspIn null_rsp_in_;
     Nmu nmu_;

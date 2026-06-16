@@ -40,3 +40,8 @@ add_cmodel_test(test_nmu)
 target_include_directories(test_nmu PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(test_nmu PRIVATE yaml-cpp::yaml-cpp)
+
+add_cmodel_test(test_nmu_credit)
+target_include_directories(test_nmu_credit PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(test_nmu_credit PRIVATE yaml-cpp::yaml-cpp)
