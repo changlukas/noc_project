@@ -127,6 +127,68 @@ TEST(RouterShellAdapter, LinkInputDrainEmitsCreditPulse) {
     EXPECT_EQ(pulses, 1) << "expected exactly one LINK-input drain credit pulse";
 }
 
+// R2: the LOCAL (NI-edge) credit is now a single-cycle PULSE, identical to the
+// LINK. When the router's LOCAL input FIFO drains an NMU-injected req flit
+// (grant), the shell must surface exactly one req_out_credit_return pulse — NOT
+// a steady credit_avail level. Inject one LOCAL-bound req at node0 (dst=(0,0)
+// routes LOCAL, ejecting back at this node's NSU-facing req_out) and count the
+// returned credit pulses.
+TEST(RouterShellAdapter, LocalInputDrainEmitsCreditPulse) {
+    RouterShellAdapter a;
+    a.init(/*x_coord=*/0);
+    RouterInputs in{};
+    in.req_in_valid = true;
+    in.req_in_flit = flit_to_bytes(make_req(/*dst=*/0x00));  // LOCAL-bound
+    a.set_inputs(in);
+    a.tick();
+    a.set_inputs(RouterInputs{});
+
+    RouterOutputs out{};
+    int pulses = 0;
+    for (int cyc = 0; cyc < 16; ++cyc) {
+        a.tick();
+        a.get_outputs(out);
+        if (out.req_out_credit_return) ++pulses;
+    }
+    // Exactly one flit drained from the LOCAL input FIFO -> exactly one pulse.
+    EXPECT_EQ(pulses, 1) << "expected exactly one LOCAL-input drain credit pulse";
+}
+
+// R2: the router's built-in credit_[LOCAL] sender counter (router->NI output
+// direction) is replenished by the NI's returned pulse on req_in_credit_return.
+// Eject one LOCAL-bound req first (which spends one credit_[LOCAL] on the router
+// output), THEN return the credit pulse; router.receive_credit(LOCAL) must
+// accept it without overflow and the pulse must not be misread as a flit.
+TEST(RouterShellAdapter, LocalInCreditReturnReplenishesRouter) {
+    RouterShellAdapter a;
+    a.init(/*x_coord=*/0);
+    RouterInputs in{};
+    in.req_in_valid = true;
+    in.req_in_flit = flit_to_bytes(make_req(/*dst=*/0x00));  // LOCAL-bound
+    a.set_inputs(in);
+    a.tick();
+    a.set_inputs(RouterInputs{});
+
+    // Let the flit eject at req_out (spends one router LOCAL-output credit).
+    RouterOutputs out{};
+    bool ejected = false;
+    for (int cyc = 0; cyc < 16 && !ejected; ++cyc) {
+        a.tick();
+        a.get_outputs(out);
+        if (out.req_out_valid) ejected = true;
+    }
+    ASSERT_TRUE(ejected);
+
+    // Now the NSU returns the consumer credit pulse: receive_credit(LOCAL) must
+    // accept it (counter below depth) with no spurious flit output / no abort.
+    in = RouterInputs{};
+    in.req_in_credit_return = true;
+    a.set_inputs(in);
+    a.tick();
+    a.get_outputs(out);
+    EXPECT_FALSE(out.req_out_valid);
+}
+
 // Node1 (x=1): a request to dst=(0,0) routes WEST = its LINK port.
 TEST(RouterShellAdapter, Node1NmuReqRoutesToLinkOut) {
     RouterShellAdapter a;

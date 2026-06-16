@@ -5,21 +5,26 @@
 // adapters (cross-DPI FlooNoC pulse-credit link toward the neighbor). Two of
 // these wired in tb_top replace the bundled RouterChannel.
 //
-// Per node the LOCAL wiring mirrors RouterChannel::wire_local exactly:
-//   req router LOCAL: InjectAdapter (NMU req in)  + EjectAdapter (NSU req out)
-//   rsp router LOCAL: InjectAdapter (NSU rsp in)  + EjectAdapter (NMU rsp out)
-//   *_out_credit_return = inject-side credit_avail(0) level (NI edge stub —
-//   unchanged from RouterChannelShellAdapter; the SV-provided *_in_credit_return
-//   inputs are accepted but unused).
-// The LINK port is the only new wiring (x_coord==0 -> EAST, x_coord==1 -> WEST,
-// matching route_compute: a (1,0)-dst flit leaves node0 EAST, a (0,0)-dst flit
-// leaves node1 WEST). Per network:
-//   set_downstream(LINK, LinkEjectAdapter)   — router LINK output -> SV transport
-//     buffer (no pop credit; credit returns over SV from the neighbor).
-//   set_upstream_credit(LINK, LinkCreditOut) — captures the router's LINK
-//     input-drain pulses; the shell drains one/tick onto link_<N>_in_credit.
-//   neighbor link-in flit pushes straight into router.input(LINK).
-//   each neighbor link-out credit pulse calls router.receive_credit(LINK, 0).
+// Per node BOTH the LOCAL (NI edge) and LINK ports now use identical FlooNoC
+// pulse-credit wiring (R2: the NI edge no longer uses the level-credit stub).
+// LOCAL (NMU/NSU edge) and LINK (cross-DPI inter-router) per network:
+//   set_downstream(port, LinkEjectAdapter)   — router output -> SV transport
+//     buffer (no pop credit; credit returns over SV as a pulse).
+//   set_upstream_credit(port, LinkCreditOut) — captures the router's input-drain
+//     pulses; the shell drains one/tick onto the *_credit/*_credit_return wire.
+//   inbound flit pushes straight into router.input(port).
+//   each inbound credit pulse calls router.receive_credit(port, 0).
+// LOCAL pin mapping (NI edge):
+//   inbound  : in_.req_in / in_.rsp_in            -> router.input(LOCAL).push_flit
+//   eject    : req_local_eject_ / rsp_local_eject_ -> out_.req_out / out_.rsp_out
+//   out cred : req_local_credit_/rsp_local_credit_.take(0) -> out_.*_out_credit_return
+//              (PULSE: router LOCAL input drained -> credit to NMU/NSU)
+//   in  cred : in_.req_in_credit_return / rsp_in_credit_return (NMU/NSU consumed
+//              an ejected flit) -> router.receive_credit(LOCAL, 0) (replenishes
+//              the router's built-in credit_[LOCAL] sender counter, router->NI dir)
+// The LINK port mapping (x_coord==0 -> EAST, x_coord==1 -> WEST, matching
+// route_compute: a (1,0)-dst flit leaves node0 EAST, a (0,0)-dst flit leaves
+// node1 WEST) is identical, over the link_<N>_* pins toward the neighbor.
 //
 // num_vc=1 pinned (SV wraps fatal otherwise); LOCAL/LINK depths = kPoCChannelModelDepth.
 //
@@ -30,10 +35,10 @@
 // reset stance); the tb_top reset window precedes all *_create + traffic, so no
 // stale pending credit can leak post-reset.
 //
-// Depth/throw rationale matches RouterChannelShellAdapter: the SV credit feedback
-// is registered one cycle behind (beta-tick), so pin depths to kPoCChannelModelDepth
-// for margin and throw if a NI push is ever rejected (the NMU/NSU is credit-gated
-// via *_out_credit_return, so a reject means a real bug, not backpressure).
+// Depth rationale: the SV credit feedback is registered one cycle behind
+// (beta-tick), so pin the eject buffers to num_vc*kPoCChannelModelDepth (the
+// aggregate router-output credit window) for margin. The NMU/NSU is credit-gated
+// by *_out_credit_return / link_*_in_credit, so the router input never overflows.
 #pragma once
 #include "cosim/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "cosim/poc_defaults.hpp"    // kPoCChannelModelDepth
@@ -63,10 +68,10 @@ class RouterShellAdapter {
         req_router_ = std::make_unique<noc::Router>(c);
         rsp_router_ = std::make_unique<noc::Router>(c);
 
-        wire_local(*req_router_, req_inject_, req_eject_);
-        wire_local(*rsp_router_, rsp_inject_, rsp_eject_);
-        wire_link(*req_router_, req_link_eject_, req_link_credit_);
-        wire_link(*rsp_router_, rsp_link_eject_, rsp_link_credit_);
+        wire_port(*req_router_, LOCAL, req_local_eject_, req_local_credit_);
+        wire_port(*rsp_router_, LOCAL, rsp_local_eject_, rsp_local_credit_);
+        wire_port(*req_router_, link_port_, req_link_eject_, req_link_credit_);
+        wire_port(*rsp_router_, link_port_, rsp_link_eject_, rsp_link_credit_);
 
         in_ = RouterInputs{};
         out_ = RouterOutputs{};
@@ -75,17 +80,16 @@ class RouterShellAdapter {
     void set_inputs(const RouterInputs& in) { in_ = in; }
 
     void tick() {
-        // Step 1: reset inject landing guards; push all inbound flits.
-        req_inject_->on_tick();
-        rsp_inject_->on_tick();
-
-        if (in_.req_in_valid && !req_inject_->push_flit(flit_from_bytes(in_.req_in_flit))) {
-            throw std::runtime_error(
-                "RouterShellAdapter: NMU req push rejected (credit discipline violated)");
+        // Step 1: push all inbound flits straight into the router inputs. LOCAL
+        // and LINK are now symmetric FlooNoC pulse-credit ports (no InjectAdapter
+        // mirror). The single NMU/NSU source sends <=1 LOCAL flit/tick, but the
+        // router landing register asserts on a 2nd push/port/cycle (router.hpp),
+        // so guard it: exactly one LOCAL push per network per tick.
+        if (in_.req_in_valid) {
+            req_router_->input(LOCAL).push_flit(flit_from_bytes(in_.req_in_flit));
         }
-        if (in_.rsp_in_valid && !rsp_inject_->push_flit(flit_from_bytes(in_.rsp_in_flit))) {
-            throw std::runtime_error(
-                "RouterShellAdapter: NSU rsp push rejected (credit discipline violated)");
+        if (in_.rsp_in_valid) {
+            rsp_router_->input(LOCAL).push_flit(flit_from_bytes(in_.rsp_in_flit));
         }
         if (in_.link_req_in_valid) {
             req_router_->input(link_port_).push_flit(flit_from_bytes(in_.link_req_in_flit));
@@ -93,6 +97,11 @@ class RouterShellAdapter {
         if (in_.link_rsp_in_valid) {
             rsp_router_->input(link_port_).push_flit(flit_from_bytes(in_.link_rsp_in_flit));
         }
+        // LOCAL credit IN: the NMU/NSU returned a pulse for a flit drained from
+        // the router's LOCAL OUTPUT (router->NI direction). Replenish the
+        // router's built-in credit_[LOCAL] sender counter.
+        if (in_.req_in_credit_return) req_router_->receive_credit(LOCAL, 0);
+        if (in_.rsp_in_credit_return) rsp_router_->receive_credit(LOCAL, 0);
         // Neighbor credit pulses for flits we previously sent over the LINK.
         if (in_.link_req_out_credit) req_router_->receive_credit(link_port_, 0);
         if (in_.link_rsp_out_credit) rsp_router_->receive_credit(link_port_, 0);
@@ -103,16 +112,18 @@ class RouterShellAdapter {
 
         // Step 3: sample outputs.
         out_ = RouterOutputs{};
-        if (auto f = req_eject_->pop_flit()) {
+        if (auto f = req_local_eject_->pop_flit()) {
             out_.req_out_valid = true;
             out_.req_out_flit = flit_to_bytes(*f);
         }
-        if (auto f = rsp_eject_->pop_flit()) {
+        if (auto f = rsp_local_eject_->pop_flit()) {
             out_.rsp_out_valid = true;
             out_.rsp_out_flit = flit_to_bytes(*f);
         }
-        out_.req_out_credit_return = req_inject_->credit_avail(0);
-        out_.rsp_out_credit_return = rsp_inject_->credit_avail(0);
+        // LOCAL credit OUT: PULSE — the router's LOCAL INPUT drained a flit from
+        // the NMU/NSU, so return one credit to the NMU/NSU (NI->router direction).
+        out_.req_out_credit_return = req_local_credit_->take(0);
+        out_.rsp_out_credit_return = rsp_local_credit_->take(0);
 
         if (auto f = req_link_eject_->pop_flit()) {
             out_.link_req_out_valid = true;
@@ -131,30 +142,24 @@ class RouterShellAdapter {
   private:
     static constexpr std::size_t LOCAL = static_cast<std::size_t>(noc::RouterPort::LOCAL);
 
-    void wire_local(noc::Router& r, std::unique_ptr<noc::InjectAdapter>& inj,
-                    std::unique_ptr<noc::EjectAdapter>& ej) {
-        inj = std::make_unique<noc::InjectAdapter>(r, LOCAL, num_vc_, kPoCChannelModelDepth);
-        ej = std::make_unique<noc::EjectAdapter>(
-            r, LOCAL, static_cast<std::size_t>(num_vc_) * kPoCChannelModelDepth);
-        r.set_upstream_credit(LOCAL, *inj);
-        r.set_downstream(LOCAL, *ej);
-    }
-
-    void wire_link(noc::Router& r, std::unique_ptr<noc::LinkEjectAdapter>& ej,
+    // FlooNoC pulse-credit wiring, identical for LOCAL and LINK: transport-only
+    // eject (no pop credit) + a LinkCreditOut that captures the router's
+    // input-drain pulses for the shell to drain one/tick onto the credit wire.
+    void wire_port(noc::Router& r, std::size_t port, std::unique_ptr<noc::LinkEjectAdapter>& ej,
                    std::unique_ptr<noc::LinkCreditOut>& credit) {
         ej = std::make_unique<noc::LinkEjectAdapter>(static_cast<std::size_t>(num_vc_) *
                                                      kPoCChannelModelDepth);
         credit = std::make_unique<noc::LinkCreditOut>(num_vc_);
-        r.set_downstream(link_port_, *ej);
-        r.set_upstream_credit(link_port_, *credit);
+        r.set_downstream(port, *ej);
+        r.set_upstream_credit(port, *credit);
     }
 
     uint8_t num_vc_ = 1;
     std::size_t link_port_ = static_cast<std::size_t>(noc::RouterPort::EAST);
 
     std::unique_ptr<noc::Router> req_router_, rsp_router_;
-    std::unique_ptr<noc::InjectAdapter> req_inject_, rsp_inject_;
-    std::unique_ptr<noc::EjectAdapter> req_eject_, rsp_eject_;
+    std::unique_ptr<noc::LinkEjectAdapter> req_local_eject_, rsp_local_eject_;
+    std::unique_ptr<noc::LinkCreditOut> req_local_credit_, rsp_local_credit_;
     std::unique_ptr<noc::LinkEjectAdapter> req_link_eject_, rsp_link_eject_;
     std::unique_ptr<noc::LinkCreditOut> req_link_credit_, rsp_link_credit_;
 

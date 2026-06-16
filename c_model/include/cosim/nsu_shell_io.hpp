@@ -34,7 +34,8 @@ struct NsuInputs {
     // NoC req side — flit arriving from channel toward Nsu Depacketize
     bool noc_req_valid;
     FlitBytes noc_req_flit;
-    // NoC rsp credit — channel returns credit to Nsu (NUM_VC=1 PoC: 1 bit)
+    // NoC rsp credit — PULSE: router LOCAL input drained an Nsu rsp flit, return
+    // one credit to the rsp-out sender counter (NUM_VC=1 PoC: 1 bit)
     bool noc_rsp_credit_return;
     // AXI master side — AW channel (subordinate drives ready)
     bool awready;
@@ -59,7 +60,8 @@ struct NsuOutputs {
     // NoC rsp side — flit produced by Nsu Packetize, leaving toward channel
     bool noc_rsp_valid;
     FlitBytes noc_rsp_flit;
-    // NoC req credit — Nsu returns credit to req-side upstream (PoC: always 0)
+    // NoC req credit — consumer PULSE: Nsu Depacketize consumed an injected req
+    // flit, return one credit to the router LOCAL output sender counter
     bool noc_req_credit_return;
     // AXI master side — AW channel (Nsu drives write address to subordinate)
     bool awvalid;

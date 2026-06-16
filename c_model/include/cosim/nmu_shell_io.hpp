@@ -61,7 +61,8 @@ struct NmuInputs {
     // NoC rsp side — flit arriving from channel toward Nmu Depacketize
     bool noc_rsp_valid;
     FlitBytes noc_rsp_flit;
-    // NoC req credit — channel returns credit to Nmu (NUM_VC=1 PoC: 1 bit)
+    // NoC req credit — PULSE: router LOCAL input drained an Nmu req flit, return
+    // one credit to the req-out sender counter (NUM_VC=1 PoC: 1 bit)
     bool noc_req_credit_return;
 };
 
@@ -84,7 +85,8 @@ struct NmuOutputs {
     // NoC req side — flit produced by Nmu Packetize, leaving toward channel
     bool noc_req_valid;
     FlitBytes noc_req_flit;
-    // NoC rsp credit — Nmu returns credit to rsp-side upstream (PoC: always 0)
+    // NoC rsp credit — consumer PULSE: Nmu Depacketize consumed an injected rsp
+    // flit, return one credit to the router LOCAL output sender counter
     bool noc_rsp_credit_return;
 };
 

@@ -65,6 +65,10 @@ class NsuShellAdapter {
         cfg.wormhole_per_input_depth = kPoCArbiterFifoDepth;
         cfg.vc_arbiter_pending_depth = kPoCArbiterFifoDepth;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
+        // R2: close the NI-edge credit loop. Seed the rsp-out sender counter to
+        // the router LOCAL input depth (kPoCChannelModelDepth) so credit conserves
+        // — the router shell seeds its LOCAL eject/credit with the same depth.
+        nsu_->enable_noc_credit(kPoCChannelModelDepth);
         in_ = NsuInputs{};
         out_ = NsuOutputs{};
         held_aw_ = std::nullopt;
@@ -87,6 +91,13 @@ class NsuShellAdapter {
         // Depacketize stage can process it this cycle.
         if (in_.noc_req_valid) {
             nsu_->inject_req_flit(flit_from_bytes(in_.noc_req_flit));
+        }
+
+        // R2: incoming credit pulse — the router's LOCAL input drained an NSU
+        // rsp flit, so replenish the rsp-out sender counter BEFORE tick() so this
+        // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
+        if (in_.noc_rsp_credit_return) {
+            nsu_->rsp_receive_credit(0);
         }
 
         // Step 2: advance Nsu one cycle (Depacketize + AxiMasterPort +
@@ -206,9 +217,10 @@ class NsuShellAdapter {
             out_.noc_rsp_flit = flit_to_bytes(*f);
         }
 
-        // NoC req credit: PoC always 0 (NsuStandalone owns its own req queue;
-        // no upstream credit signalling needed for the PoC single-shell setup).
-        out_.noc_req_credit_return = false;
+        // NoC req credit OUT: consumer PULSE — the NSU's Depacketize consumed an
+        // injected req flit this tick, so return one credit upstream (to the
+        // router's LOCAL output sender counter). Drains one pending pulse/tick.
+        out_.noc_req_credit_return = nsu_->req_take_credit(0);
 
         // Save this tick's ready outputs for next tick's handshake detection.
         prev_bready_ = out_.bready;
@@ -224,7 +236,7 @@ class NsuShellAdapter {
     std::optional<axi::AwBeat> held_aw_;
     std::optional<axi::WBeat> held_w_;
     std::optional<axi::ArBeat> held_ar_;
-    bool prev_bready_ = false;   // ready driven last tick (wire value this tick)
+    bool prev_bready_ = false;  // ready driven last tick (wire value this tick)
     bool prev_rready_ = false;
     uint32_t outstanding_w_ = 0;     // writes issued, B response still owed
     uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs

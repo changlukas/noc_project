@@ -58,6 +58,10 @@ class NmuShellAdapter {
         cfg.wormhole_per_input_depth = kPoCArbiterFifoDepth;
         cfg.vc_arbiter_pending_depth = kPoCArbiterFifoDepth;
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
+        // R2: close the NI-edge credit loop. Seed the req-out sender counter to
+        // the router LOCAL input depth (kPoCChannelModelDepth) so credit conserves
+        // — the router shell seeds its LOCAL eject/credit with the same depth.
+        nmu_->enable_noc_credit(kPoCChannelModelDepth);
         in_ = NmuInputs{};
         out_ = NmuOutputs{};
         held_b_ = std::nullopt;
@@ -78,6 +82,13 @@ class NmuShellAdapter {
         // Depacketize stage can process it this cycle.
         if (in_.noc_rsp_valid) {
             nmu_->inject_rsp_flit(flit_from_bytes(in_.noc_rsp_flit));
+        }
+
+        // R2: incoming credit pulse — the router's LOCAL input drained an NMU
+        // req flit, so replenish the req-out sender counter BEFORE tick() so this
+        // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
+        if (in_.noc_req_credit_return) {
+            nmu_->req_receive_credit(0);
         }
 
         // Step 1b: push AW/W/AR beats into axi_slave_port queues — ONLY on
@@ -189,9 +200,10 @@ class NmuShellAdapter {
             out_.noc_req_flit = flit_to_bytes(*f);
         }
 
-        // NoC rsp credit: PoC always 0 (NmuStandalone owns its own rsp queue;
-        // no upstream credit signalling needed for the PoC single-shell setup).
-        out_.noc_rsp_credit_return = false;
+        // NoC rsp credit OUT: consumer PULSE — the NMU's Depacketize consumed an
+        // injected rsp flit this tick, so return one credit upstream (to the
+        // router's LOCAL output sender counter). Drains one pending pulse/tick.
+        out_.noc_rsp_credit_return = nmu_->rsp_take_credit(0);
 
         // Save this tick's ready outputs: next tick, valid && prev_ready
         // identifies the wire-handshake cycle.
