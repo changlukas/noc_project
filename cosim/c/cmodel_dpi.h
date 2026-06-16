@@ -1,4 +1,4 @@
-// DPI signatures for Stage 5b wire-wrap co-sim. 5 shells x 3 calls/cycle
+// DPI signatures for Stage 5b wire-wrap co-sim. 6 shells x 3 calls/cycle
 // (set_inputs/tick/get_outputs) + lifecycle (init/finalize/check_error).
 //
 // Error propagation: try/catch in handlers sets g_dpi_error_code; SV side
