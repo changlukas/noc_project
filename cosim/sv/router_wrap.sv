@@ -14,7 +14,7 @@
 //              the level/stub credit on the NI (NMU/NSU) faces.
 //
 // Beta-tick discipline (mirrors channel_model_wrap): on every posedge clk_i
-// the module samples the CURRENT registered wire inputs, pushes them to the
+// the module samples the PREVIOUS cycle's registered wire inputs, pushes them to the
 // C++ model via DPI set_inputs, advances the model via tick, pulls outputs
 // via get_outputs, and registers those outputs nonblocking so they are
 // visible to SV wires from the NEXT cycle onward.

@@ -48,7 +48,7 @@ module tb_top (
     import "DPI-C" context function int     cmodel_done();
     import "DPI-C" context function int     cmodel_scoreboard_clean();
     import "DPI-C" context function void    cmodel_dump_scoreboard();
-    import "DPI-C" context function chandle cmodel_router_channel_create(input string name);
+    import "DPI-C" context function chandle cmodel_router_create(input string name, input int x_coord);
     import "DPI-C" context function chandle cmodel_master_create(input string name,
                                                                  input string scenario_path);
     import "DPI-C" context function chandle cmodel_slave_create(input string name,
@@ -60,7 +60,7 @@ module tb_top (
 
     string  scn_node0;  // node0 coordinate variant (low addr);  drives node1.master
     string  scn_node1;  // node1 coordinate variant (high addr); drives node0.master
-    chandle rc_ctx;
+    chandle router0_ctx, router1_ctx;
     chandle m0_ctx, s0_ctx, n0_nmu_ctx, n0_nsu_ctx;
     chandle m1_ctx, s1_ctx, n1_nmu_ctx, n1_nsu_ctx;
 
@@ -71,7 +71,8 @@ module tb_top (
             $finish(1);
         end
         cmodel_init(scn_node1);  // shared config; either variant is fine
-        rc_ctx     = cmodel_router_channel_create("router_channel_0");
+        router0_ctx = cmodel_router_create("router_0", 0);
+        router1_ctx = cmodel_router_create("router_1", 1);
         // node0.master drives node1-variant (high addr, targets (1,0)); ejects at node1.NSU.
         m0_ctx     = cmodel_master_create("master_0", scn_node1);
         s1_ctx     = cmodel_slave_create ("slave_1",  scn_node1);  // node1.slave: high range
@@ -179,18 +180,66 @@ module tb_top (
     );
 
     // -------------------------------------------------------------------------
-    // RouterChannel fabric — 4 noc_intf bundles (2 nodes × {NMU miso, NSU mosi})
+    // Router fabric — two per-node router_wraps joined by a cross-wired link
     // -------------------------------------------------------------------------
-    router_channel_wrap #(
+    // Link nets named <net>_<src>to<dst>_*: data flows src->dst, credit pulse
+    // flows on the net whose direction matches the credit's travel. For the REQ
+    // network, 0to1 carries node0's outbound data AND node0's returned credit
+    // (credit for data node0 received from node1, travelling 0->1); 1to0
+    // mirrors. Same for RSP. Each net has exactly one OUT driver + one IN reader.
+    logic                  link_req_0to1_valid, link_req_1to0_valid;
+    logic [FLIT_WIDTH-1:0] link_req_0to1_flit,  link_req_1to0_flit;
+    logic                  link_req_0to1_credit, link_req_1to0_credit;  // pulse
+    logic                  link_rsp_0to1_valid, link_rsp_1to0_valid;
+    logic [FLIT_WIDTH-1:0] link_rsp_0to1_flit,  link_rsp_1to0_flit;
+    logic                  link_rsp_0to1_credit, link_rsp_1to0_credit;  // pulse
+
+    router_wrap #(
         .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
-    ) u_rc (
+    ) u_router_0 (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
-        .ctx_i(rc_ctx),
-        .node0_nmu_i(node0_nmu.miso),
-        .node0_nsu_o(node0_nsu.mosi),
-        .node1_nmu_i(node1_nmu.miso),
-        .node1_nsu_o(node1_nsu.mosi)
+        .ctx_i(router0_ctx),
+        .noc_nmu_i(node0_nmu.miso),
+        .noc_nsu_o(node0_nsu.mosi),
+        // REQ link: node0 OUT -> 0to1 data; node0 IN <- 1to0 data.
+        .link_req_out_valid(link_req_0to1_valid),
+        .link_req_out_flit(link_req_0to1_flit),
+        .link_req_out_credit(link_req_1to0_credit),  // credit for node0's sent data
+        .link_req_in_valid(link_req_1to0_valid),
+        .link_req_in_flit(link_req_1to0_flit),
+        .link_req_in_credit(link_req_0to1_credit),   // credit node0 returns to node1
+        // RSP link: mirrored.
+        .link_rsp_out_valid(link_rsp_0to1_valid),
+        .link_rsp_out_flit(link_rsp_0to1_flit),
+        .link_rsp_out_credit(link_rsp_1to0_credit),
+        .link_rsp_in_valid(link_rsp_1to0_valid),
+        .link_rsp_in_flit(link_rsp_1to0_flit),
+        .link_rsp_in_credit(link_rsp_0to1_credit)
+    );
+
+    router_wrap #(
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_router_1 (
+        .clk_i(clk_i),
+        .rst_ni(rst_ni),
+        .ctx_i(router1_ctx),
+        .noc_nmu_i(node1_nmu.miso),
+        .noc_nsu_o(node1_nsu.mosi),
+        // REQ link: node1 OUT -> 1to0 data; node1 IN <- 0to1 data.
+        .link_req_out_valid(link_req_1to0_valid),
+        .link_req_out_flit(link_req_1to0_flit),
+        .link_req_out_credit(link_req_0to1_credit),  // credit for node1's sent data
+        .link_req_in_valid(link_req_0to1_valid),
+        .link_req_in_flit(link_req_0to1_flit),
+        .link_req_in_credit(link_req_1to0_credit),   // credit node1 returns to node0
+        // RSP link: mirrored.
+        .link_rsp_out_valid(link_rsp_1to0_valid),
+        .link_rsp_out_flit(link_rsp_1to0_flit),
+        .link_rsp_out_credit(link_rsp_0to1_credit),
+        .link_rsp_in_valid(link_rsp_0to1_valid),
+        .link_rsp_in_flit(link_rsp_0to1_flit),
+        .link_rsp_in_credit(link_rsp_1to0_credit)
     );
 
     // -------------------------------------------------------------------------
