@@ -137,17 +137,30 @@ TEST_P(NmuVcArbParam, Binding_SameWriteId_SameVc) {
 }
 
 TEST_P(NmuVcArbParam, Binding_PerIdStickyAndDistinctIdsIndependent) {
-    SCENARIO("VcArbiter: ARID re-binds to its own VC; distinct ARIDs are independent");
+    SCENARIO("VcArbiter: a bound id sticks to its original VC even when a lower-index VC is free");
     const auto num_vc = GetParam();
     if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
-    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1));
-    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/2));
-    EXPECT_TRUE(a == 2 || a == 3) << "ARID=1 in read set {2,3}";
-    EXPECT_TRUE(b == 2 || b == 3) << "ARID=2 in read set {2,3}";
-    uint8_t a2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1));
-    EXPECT_EQ(a2, a) << "ARID=1 must re-bind to its original VC";
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3},
+                                                 /*pending_depth=*/2);
+    // Fill vc2 with two distinct ids so a third id is forced onto vc3. Use raw
+    // push_flit (no drain): a drain here would empty vc2 and let id=7 reuse it.
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5)));  // -> vc2
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/6)));  // -> vc2 (now full)
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/7)));  // -> vc3
+    EXPECT_EQ(arb.pending_size(2), 2u) << "vc2 full with ids 5,6";
+    EXPECT_EQ(arb.pending_size(3), 1u) << "id=7 forced onto vc3 while vc2 is full";
+    // Drain every read-set VC. Bindings persist (id7->vc3) across the drain.
+    while (arb.pending_size(2) != 0 || arb.pending_size(3) != 0) {
+        arb.tick();
+        noc.req_in().pop_flit();
+    }
+    EXPECT_EQ(arb.pending_size(2), 0u);
+    EXPECT_EQ(arb.pending_size(3), 0u);
+    // Re-push id=7: with the binding it STICKS to vc3; without it, first-available
+    // would now pick vc2 (lowest index, freed).
+    uint8_t v7b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/7));
+    EXPECT_EQ(v7b, 3) << "bound id=7 must stay on vc3, not fall back to the now-free vc2";
 }
 
 TEST_P(NmuVcArbParam, Binding_DistinctIdsSpreadUnderDepthPressure) {
