@@ -26,7 +26,7 @@ TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
     $(COSIM_ROOT)/sv/axi_master_wrap.sv \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \
-    $(COSIM_ROOT)/sv/channel_model_wrap.sv \
+    $(COSIM_ROOT)/sv/router_channel_wrap.sv \
     $(COSIM_ROOT)/sv/nsu_wrap.sv \
     $(COSIM_ROOT)/sv/axi_slave_wrap.sv \
     $(COSIM_ROOT)/sv/wb2axip/faxi_wstrb.v \
