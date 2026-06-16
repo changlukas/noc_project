@@ -3,6 +3,7 @@
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
+using ni::NI_NOC_ROUTER_VC_DEPTH;
 using ni::cmodel::Flit;
 using ni::cmodel::noc::InjectAdapter;
 using ni::cmodel::noc::Router;
@@ -123,6 +124,41 @@ TEST(RouterChannel, SingleFlitRspEndToEnd) {
     }
     ASSERT_TRUE(got.has_value()) << "response did not arrive at NMU(1,0)";
     EXPECT_EQ(got->get_header_field("dst_id"), 0x01u);
+}
+
+TEST(RouterChannel, FullBackpressureWhenConsumerStalls) {
+    SCENARIO(
+        "RouterChannel: NSU never pops -> credit drains -> NMU inject backpressures (no assert)");
+    using ni::cmodel::noc::RouterChannel;
+    RouterChannel ch(/*num_vc=*/2);
+    int accepted = 0;
+    for (int t = 0; t < 200; ++t) {
+        Flit f = req_flit(0x00, 0);
+        if (ch.nmu_req_out(1).push_flit(f)) ++accepted;
+        ch.tick();
+        // deliberately do NOT pop at nsu_req_in(0)
+    }
+    EXPECT_GT(accepted, 0);
+    EXPECT_LT(accepted, 200) << "with the consumer stalled, inject must eventually backpressure";
+}
+
+TEST(RouterChannel, EjectBoundaryCreditConservation) {
+    SCENARIO(
+        "RouterChannel: credit(LOCAL,vc) + output_fifo_size(LOCAL) + eject_buffered == vc_depth "
+        "every tick");
+    using ni::cmodel::noc::RouterChannel;
+    constexpr std::size_t kDepth = NI_NOC_ROUTER_VC_DEPTH;
+    RouterChannel ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
+    const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
+    for (int t = 0; t < 300; ++t) {
+        ch.nmu_req_out(1).push_flit(req_flit(0x00, 0));  // ok if backpressured
+        ch.tick();
+        if (t % 3 == 0) ch.nsu_req_in(0).pop_flit();  // drain 1-in-3
+        EXPECT_EQ(ch.req_router(0).credit(LOCAL, 0) + ch.req_router(0).output_fifo_size(LOCAL) +
+                      ch.req_eject_buffered(0),
+                  kDepth)
+            << "eject credit conservation violated at tick " << t;
+    }
 }
 
 }  // namespace
