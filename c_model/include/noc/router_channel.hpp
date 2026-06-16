@@ -19,8 +19,6 @@
 #include "noc/router.hpp"
 
 #include <cstdint>
-#include <deque>
-#include <optional>
 #include <vector>
 
 namespace ni::cmodel::noc {
