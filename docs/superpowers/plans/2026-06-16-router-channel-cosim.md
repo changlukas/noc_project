@@ -30,7 +30,9 @@ Verilator/`Vtb_top` builds via `MSYSTEM=MINGW64 LC_ALL=C /c/msys64/usr/bin/bash 
 | `c_model/include/cosim/router_channel_shell_adapter.hpp` (new) | `RouterChannelShellAdapter`: owns one `RouterChannel(num_vc=1)`; per-node tick |
 | `c_model/tests/cosim/test_router_channel_shell_adapter.cpp` (new) | adapter unit test (both directions) |
 | `cosim/c/cmodel_dpi.cpp` (modify) | `ShellType::RouterChannel` handlers; per-master/slave scenario path; `cmodel_master_count`/`cmodel_reads_checked` |
-| `cosim/include/handle_block.hpp` (modify) | add `RouterChannel` to `ShellType` enum |
+| `cosim/c/handle_block.hpp` (modify) | add `RouterChannel` to `ShellType` enum |
+| `cosim/sources.mk` (modify) | swap `channel_model_wrap.sv` → `router_channel_wrap.sv` in the tb_top source list |
+| `cosim/verilator/Makefile` (modify) | `run-tb-top` target → two-plusarg invocation |
 | `cosim/c/cmodel_dpi.h` (modify) | declare new exported DPI functions |
 | `cosim/tools/gen_coordinate_scenarios.py` (new) | emit node0/node1 coordinate variants |
 | `cosim/sv/router_channel_wrap.sv` (new) | 4-bundle beta-tick DPI wrapper |
@@ -204,18 +206,29 @@ Expected: FAIL — `router_channel_shell_adapter.hpp: No such file`.
 // The SV-provided *_in_credit_return inputs are accepted but unused: RouterChannel
 // manages credit internally (eject pop returns router credit; inject mirror gates
 // the NMU via *_out_credit_return). num_vc=1: the SV NoC wrappers fatal otherwise.
+//
+// Depth: RouterChannel's default vc_depth is 4 (NI_NOC_ROUTER_VC_DEPTH); the SV
+// credit feedback is registered one cycle behind (beta-tick), so a too-shallow
+// inject mirror risks a stale-credit overshoot. Pin vc_depth/out_fifo to the
+// PoC ChannelModel depth (kPoCChannelModelDepth=64) for margin, and throw if a
+// push is ever rejected so a silent flit-drop becomes a loud DPI failure (the
+// NMU is credit-gated via *_out_credit_return, so a reject means a real bug).
 #pragma once
 #include "cosim/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
+#include "cosim/poc_defaults.hpp"    // kPoCChannelModelDepth
 #include "cosim/router_channel_shell_io.hpp"
 #include "noc/router_channel.hpp"
 #include <memory>
+#include <stdexcept>
 
 namespace ni::cmodel::cosim {
 
 class RouterChannelShellAdapter {
   public:
     void init() {
-        channel_ = std::make_unique<noc::RouterChannel>(/*num_vc=*/1);
+        channel_ = std::make_unique<noc::RouterChannel>(
+            /*num_vc=*/1, /*vc_depth=*/kPoCChannelModelDepth,
+            /*out_fifo_depth=*/kPoCChannelModelDepth);
         in_ = RouterChannelInputs{};
         out_ = RouterChannelOutputs{};
     }
@@ -224,11 +237,15 @@ class RouterChannelShellAdapter {
 
     void tick() {
         for (std::size_t n = 0; n < kRouterChannelNodes; ++n) {
-            if (in_.node[n].req_in_valid) {
-                channel_->nmu_req_out(n).push_flit(flit_from_bytes(in_.node[n].req_in_flit));
+            if (in_.node[n].req_in_valid &&
+                !channel_->nmu_req_out(n).push_flit(flit_from_bytes(in_.node[n].req_in_flit))) {
+                throw std::runtime_error("RouterChannelShellAdapter: req push rejected (credit "
+                                         "discipline violated at node " + std::to_string(n) + ")");
             }
-            if (in_.node[n].rsp_in_valid) {
-                channel_->nsu_rsp_out(n).push_flit(flit_from_bytes(in_.node[n].rsp_in_flit));
+            if (in_.node[n].rsp_in_valid &&
+                !channel_->nsu_rsp_out(n).push_flit(flit_from_bytes(in_.node[n].rsp_in_flit))) {
+                throw std::runtime_error("RouterChannelShellAdapter: rsp push rejected (credit "
+                                         "discipline violated at node " + std::to_string(n) + ")");
             }
         }
 
@@ -284,13 +301,13 @@ git commit -m "feat(cosim): RouterChannelShellAdapter (2-node) + unit test"
 ## Task 3: DPI handlers for RouterChannel
 
 **Files:**
-- Modify: `cosim/include/handle_block.hpp` (add `RouterChannel` to `ShellType`)
+- Modify: `cosim/c/handle_block.hpp` (add `RouterChannel` to `ShellType`)
 - Modify: `cosim/c/cmodel_dpi.cpp` (handlers)
 - Modify: `cosim/c/cmodel_dpi.h` (declarations)
 
 - [ ] **Step 1: Add the ShellType enum value**
 
-In `cosim/include/handle_block.hpp`, find `enum class ShellType` and add `RouterChannel` as a
+In `cosim/c/handle_block.hpp`, find `enum class ShellType` and add `RouterChannel` as a
 new value (keep existing values; append to avoid renumbering — the magic sentinel stores the
 numeric tag, so a stable order matters only within a session, but append regardless).
 
@@ -460,10 +477,11 @@ extern "C" void* cmodel_slave_create(const char* name, const char* scenario_path
 }
 ```
 
-- [ ] **Step 3: Change `cmodel_nmu_create` to take a node src_id**
+- [ ] **Step 3: Change `cmodel_nmu_create` AND `cmodel_nsu_create` to take a node src_id**
 
-`NmuShellAdapter::init(uint8_t src_id, ...)` already accepts src_id (default 0). Thread it
-through so each node's NMU stamps its own coordinate (spec §8):
+Both `NmuShellAdapter::init(uint8_t src_id, ...)` and `NsuShellAdapter::init(uint8_t src_id, ...)`
+already accept src_id (default 0). The NSU stamps the response flit's src_id from its own
+coordinate, so node1's NSU must be src_id=1 too (not just the NMU). Thread src_id through both:
 
 ```cpp
 extern "C" void* cmodel_nmu_create(const char* name, int src_id) {
@@ -475,8 +493,9 @@ extern "C" void* cmodel_nmu_create(const char* name, int src_id) {
     }
     DPI_BOUNDARY_END_R(cmodel_nmu_create);
 }
+// cmodel_nsu_create: identical edit — add `int src_id` arg, pass to adapter->init(src_id).
 ```
-Update the declaration in `cmodel_dpi.h` to the 2-arg form.
+Update both declarations in `cmodel_dpi.h` to the 2-arg form.
 
 - [ ] **Step 4: Add non-vacuous-guard DPI**
 
@@ -692,16 +711,23 @@ Declare the `*_q` output registers for both nodes; clear them all on `!rst_ni`; 
 branch call `set_inputs` (both nodes' wires) → `tick` → `get_outputs` (into per-node temporaries,
 then nonblocking-assign to `*_q`), exactly as `channel_model_wrap.sv` does for one node.
 
-- [ ] **Step 4: Lint-only elaboration check** (full build happens in Task 8)
+- [ ] **Step 4: Register in the tb_top build sources**
+
+In `cosim/sources.mk`, the tb_top source list (the `TB_TOP_*` block, ~line 23-35) lists
+`$(COSIM_ROOT)/sv/channel_model_wrap.sv`. The rewritten tb_top no longer instantiates it — swap
+that line to `$(COSIM_ROOT)/sv/router_channel_wrap.sv`. Leave `channel_model_wrap.sv` on disk
+(unused by tb_top now; the file itself is not deleted).
+
+- [ ] **Step 5: Lint-only elaboration check** (full build happens in Task 8)
 
 `router_channel_wrap.sv` is elaborated as part of `Vtb_top` in Task 8; no standalone build here.
 Sanity-read against `channel_model_wrap.sv` to confirm every `*_q` is driven and every DPI arg
 is wired.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add cosim/sv/router_channel_wrap.sv
+git add cosim/sv/router_channel_wrap.sv cosim/sources.mk
 git commit -m "feat(cosim): router_channel_wrap.sv (4-bundle 2-node beta-tick DPI wrapper)"
 ```
 
@@ -731,7 +757,7 @@ import "DPI-C" context function chandle cmodel_master_create(input string name,
 import "DPI-C" context function chandle cmodel_slave_create(input string name,
                                                             input string scenario_path);
 import "DPI-C" context function chandle cmodel_nmu_create(input string name, input int src_id);
-import "DPI-C" context function chandle cmodel_nsu_create(input string name);
+import "DPI-C" context function chandle cmodel_nsu_create(input string name, input int src_id);
 import "DPI-C" context function int cmodel_master_count();
 import "DPI-C" context function int cmodel_reads_checked();
 
@@ -747,12 +773,12 @@ initial begin
     m0_ctx     = cmodel_master_create("master_0", scn_node1);
     s1_ctx     = cmodel_slave_create ("slave_1",  scn_node1);  // node1.slave covers the high range
     n0_nmu_ctx = cmodel_nmu_create("nmu_0", 0);                // src_id = node0 coordinate
-    n0_nsu_ctx = cmodel_nsu_create("nsu_0");
+    n0_nsu_ctx = cmodel_nsu_create("nsu_0", 0);
     // node1.master drives node0-variant (low addr, targets (0,0)); its req ejects at node0.NSU.
     m1_ctx     = cmodel_master_create("master_1", scn_node0);
     s0_ctx     = cmodel_slave_create ("slave_0",  scn_node0);  // node0.slave covers the low range
     n1_nmu_ctx = cmodel_nmu_create("nmu_1", 1);                // src_id = node1 coordinate
-    n1_nsu_ctx = cmodel_nsu_create("nsu_1");
+    n1_nsu_ctx = cmodel_nsu_create("nsu_1", 1);
 end
 ```
 **Wiring identity (spec §2/§5/§8):** master at node `k` is fed the OTHER node's coordinate
@@ -828,21 +854,41 @@ git commit -m "feat(cosim): rewrite tb_top as bidirectional 2-node router co-sim
 
 - [ ] **Step 1: Generate variants at configure/build time**
 
-In `cosim/tests/CMakeLists.txt`, add a custom command that runs the generator over the subset
-into the build tree. Read the existing `SCENARIO_TREE_ABS` definition and reuse it for the source
-root. Minimal form:
+In `cosim/tests/CMakeLists.txt`, generate the variants into the build tree with a proper
+output-dependency (not a bare `ALL` target — that does not order before the test). Use
+`find_package(Python3)` so the generator runs under an interpreter that actually has PyYAML
+(`py -3` on Windows may point at a Python without it), and fail configure early if `import yaml`
+is absent. Reuse the existing `SCENARIO_TREE_ABS` for the source root.
 
 ```cmake
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+execute_process(COMMAND ${Python3_EXECUTABLE} -c "import yaml"
+                RESULT_VARIABLE _yaml_rc)
+if(NOT _yaml_rc EQUAL 0)
+    message(FATAL_ERROR "scenario generator needs PyYAML: pip install pyyaml for ${Python3_EXECUTABLE}")
+endif()
+
 set(COORD_VARIANT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/coord_scenarios")
-add_custom_target(gen_coord_scenarios ALL
-    COMMAND ${CMAKE_COMMAND} -E make_directory "${COORD_VARIANT_ROOT}"
-    COMMENT "Generating coordinate scenario variants")
-# One generator invocation per subset id; the subset list is shared with the test
-# via a generated header or a known directory layout under COORD_VARIANT_ROOT/<id>/{node0,node1}.
+set(_coord_outputs "")
+foreach(id IN LISTS COSIM_BIDIR_SUBSET)   # the read-bearing wb2axip-runnable id list
+    set(_out "${COORD_VARIANT_ROOT}/${id}/node1/scenario.yaml")
+    add_custom_command(
+        OUTPUT "${_out}" "${COORD_VARIANT_ROOT}/${id}/node0/scenario.yaml"
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/cosim/tools/gen_coordinate_scenarios.py
+                "${SCENARIO_TREE_ABS}/${id}/scenario.yaml" "${COORD_VARIANT_ROOT}/${id}"
+        DEPENDS ${CMAKE_SOURCE_DIR}/cosim/tools/gen_coordinate_scenarios.py
+                "${SCENARIO_TREE_ABS}/${id}/scenario.yaml"
+        COMMENT "Generating coordinate variants for ${id}")
+    list(APPEND _coord_outputs "${_out}")
+endforeach()
+add_custom_target(gen_coord_scenarios DEPENDS ${_coord_outputs})
+add_dependencies(test_cosim_integration gen_coord_scenarios)
+target_compile_definitions(test_cosim_integration PRIVATE
+    COORD_VARIANT_ROOT="${COORD_VARIANT_ROOT}")
 ```
-Drive one `py -3 .../gen_coordinate_scenarios.py <src>/<id>/scenario.yaml
-${COORD_VARIANT_ROOT}/<id>` per subset id (loop in CMake over the subset list). Pass
-`-DCOORD_VARIANT_ROOT="${COORD_VARIANT_ROOT}"` to `test_cosim_integration` compile defs.
+`COSIM_BIDIR_SUBSET` is the read-bearing wb2axip-runnable id list (define it in this file; cross-
+check against `noc::tests::kAllAxi4Scenarios` filtered by Step 2's predicate). The test reads
+`COORD_VARIANT_ROOT` from the compile def.
 
 - [ ] **Step 2: Restrict the subset to read-bearing wb2axip-runnable patterns**
 
@@ -871,7 +917,17 @@ EXPECT_EQ(result.rc, 0) << result.output;
 EXPECT_NE(result.output.find(kPassMarker), std::string::npos) << result.output;
 ```
 
-- [ ] **Step 4: Build + run the bidirectional integration**
+- [ ] **Step 4: Update the Makefile manual-run target**
+
+`cosim/verilator/Makefile`'s `run-tb-top` (~line 134-139) passes a single
+`+scenario=$(SCENARIO_ABS)`; the bidirectional tb_top now requires two plusargs. The VCD trace
+loop `run-all-tb-top` (~line 295) inherits it. Update `run-tb-top` to generate the variants for
+`$(SCENARIO)` (invoke `cosim/tools/gen_coordinate_scenarios.py` into a local dir) and pass
+`+scenario_node0=<dir>/node0/scenario.yaml +scenario_node1=<dir>/node1/scenario.yaml`. This
+keeps manual runs and the trace loop working; the authoritative ctest path is unaffected (it
+builds the command itself in Step 3).
+
+- [ ] **Step 5: Build + run the bidirectional integration**
 
 ```bash
 cd /e/05_NoC/noc_project/build/cmodel && export PATH="/c/Windows/System32:$PATH"
@@ -883,10 +939,10 @@ cd /e/05_NoC/noc_project/build/cmodel && ctest -R CosimIntegration --output-on-f
 Expected: the read-bearing wb2axip subset PASSES bidirectionally through the real router;
 write-only and wb2axip-blocked scenarios SKIP; 0 FAIL.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add cosim/tests/CMakeLists.txt cosim/tests/test_cosim_integration.cpp
+git add cosim/tests/CMakeLists.txt cosim/tests/test_cosim_integration.cpp cosim/verilator/Makefile
 git commit -m "test(cosim): bidirectional CosimIntegration over coordinate variants"
 ```
 
@@ -903,3 +959,13 @@ git commit -m "test(cosim): bidirectional CosimIntegration over coordinate varia
 - **Variant pairing:** node1.master↔node0.slave (low), node0.master↔node1.slave (high). Getting
   this backwards routes traffic out of mesh (abort). Task 7 Step 1 documents the identity.
 - **Vacuous guard depends on the subset having reads** (Task 8 Step 2) — keep both in sync.
+- **Credit depth (Codex B1):** default `vc_depth=4` is too shallow for the beta-tick credit lag;
+  Task 2 pins it to `kPoCChannelModelDepth` and throws on a rejected push so a silent drop fails
+  loudly. NSU also needs its node src_id (Codex S1) — Task 4 Step 3 covers both NMU and NSU.
+- **Build wiring (Codex B2/S2/S3/S4):** `cosim/sources.mk` must swap in `router_channel_wrap.sv`
+  (Task 6 Step 4); the Makefile `run-tb-top` must pass two plusargs (Task 8 Step 4); the variant
+  generator runs under `find_package(Python3)` with a PyYAML check and an `add_custom_command`
+  output dependency so the test cannot run before variants exist (Task 8 Step 1).
+- **Relocatability (Codex N1):** the generator rewrites `data_file` to absolute paths (same as
+  `test_router_loopback`'s `shifted_scenario_path`), so the generated variant tree is not portable
+  across machines — acceptable for an in-tree build artifact; revisit if variants are committed.
