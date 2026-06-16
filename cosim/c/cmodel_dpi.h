@@ -35,6 +35,9 @@ int cmodel_check_error(const char** msg);
 int cmodel_done(void);
 int cmodel_scoreboard_clean(void);
 void cmodel_dump_scoreboard(void);
+// Non-vacuous-run guards (polled by tb_top.sv): masters ever created + reads checked.
+int cmodel_master_count(void);
+int cmodel_reads_checked(void);
 
 // Per-shell DPI signatures appended by Tasks 5-11.
 // ChannelModel (Task 5) — NoC-only, simplest shell; first chandle migration:
@@ -70,7 +73,7 @@ void cmodel_router_channel_get_outputs(
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
 //   wstrb         : 1 word (32-bit strobe)
 //   other attribs : 1 word each (low bits used per width)
-void* cmodel_master_create(const char* name);
+void* cmodel_master_create(const char* name, const char* scenario_path);
 void cmodel_master_set_inputs(void* ctx, svBit awready, svBit wready, svBit arready, svBit bvalid,
                               svBitVecVal* bid, svBitVecVal* bresp, svBit rvalid, svBitVecVal* rid,
                               svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
@@ -93,7 +96,7 @@ void cmodel_master_get_outputs(void* ctx, svBit* awvalid, svBitVecVal* awid, svB
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
 //   wstrb         : 1 word (32-bit strobe)
 //   other attribs : 1 word each (low bits used per width)
-void* cmodel_slave_create(const char* name);
+void* cmodel_slave_create(const char* name, const char* scenario_path);
 void cmodel_slave_set_inputs(void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                              svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
                              svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
@@ -116,7 +119,7 @@ void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* a
 //   wstrb         : 1 word (32-bit strobe)
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
-void* cmodel_nmu_create(const char* name);
+void* cmodel_nmu_create(const char* name, int src_id);
 void cmodel_nmu_set_inputs(void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
                            svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
                            svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
@@ -145,7 +148,7 @@ void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arr
 //   wstrb         : 1 word (32-bit strobe)
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
-void* cmodel_nsu_create(const char* name);
+void* cmodel_nsu_create(const char* name, int src_id);
 void cmodel_nsu_set_inputs(void* ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
                            svBit noc_rsp_credit_return, svBit awready, svBit wready, svBit bvalid,
                            svBitVecVal* bid, svBitVecVal* bresp, svBit arready, svBit rvalid,

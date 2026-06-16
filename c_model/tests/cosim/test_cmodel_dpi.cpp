@@ -65,9 +65,10 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === Master cases (T6) ===
 
     // Case: master_create after init succeeds; scoreboard callbacks wired.
-    void* master_handle = cmodel_master_create("master_test");
+    void* master_handle = cmodel_master_create("master_test", good_yaml);
     ASSERT_NE(master_handle, nullptr);
     check_and_clear_error(CMODEL_DPI_OK);
+    EXPECT_EQ(cmodel_master_count(), 1);
 
     // Case: type mismatch — channel_model handle passed to master_tick.
     cmodel_master_tick(cm_handle);
@@ -76,15 +77,15 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === Slave case (T7) ===
 
     // Case: slave_create after init succeeds.
-    void* slave_handle = cmodel_slave_create("slave_test");
+    void* slave_handle = cmodel_slave_create("slave_test", good_yaml);
     ASSERT_NE(slave_handle, nullptr);
     check_and_clear_error(CMODEL_DPI_OK);
 
     // === NMU multi-instance independence (T8) ===
 
     // Case: create 2 NMU adapters — distinct void* + both validate as live.
-    void* nmu_a = cmodel_nmu_create("nmu_a");
-    void* nmu_b = cmodel_nmu_create("nmu_b");
+    void* nmu_a = cmodel_nmu_create("nmu_a", 0);
+    void* nmu_b = cmodel_nmu_create("nmu_b", 0);
     ASSERT_NE(nmu_a, nullptr);
     ASSERT_NE(nmu_b, nullptr);
     EXPECT_NE(nmu_a, nmu_b);
@@ -93,7 +94,7 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === NSU case (T9 — last per-shell) ===
 
     // Case: nsu_create after init succeeds.
-    void* nsu_handle = cmodel_nsu_create("nsu_test");
+    void* nsu_handle = cmodel_nsu_create("nsu_test", 0);
     ASSERT_NE(nsu_handle, nullptr);
     check_and_clear_error(CMODEL_DPI_OK);
 

@@ -215,6 +215,15 @@ extern "C" void cmodel_dump_scoreboard(void) {
     DPI_BOUNDARY_END(cmodel_dump_scoreboard);
 }
 
+// Master count + reads-checked, for tb_top's non-vacuous PASS guard.
+extern "C" int cmodel_master_count(void) {
+    return static_cast<int>(g_ever_created_master);
+}
+extern "C" int cmodel_reads_checked(void) {
+    if (!g_scoreboard) return 0;
+    return static_cast<int>(g_scoreboard->reads_checked());
+}
+
 // ChannelModel DPI handlers — Task 7.
 //
 // Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
@@ -461,7 +470,7 @@ void pack_addr64(uint64_t addr, svBitVecVal* vec) {
 
 }  // namespace
 
-extern "C" void* cmodel_master_create(const char* name) {
+extern "C" void* cmodel_master_create(const char* name, const char* scenario_path) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_master_create: not initialized");
@@ -470,7 +479,8 @@ extern "C" void* cmodel_master_create(const char* name) {
     DPI_BOUNDARY_BEGIN_R(cmodel_master_create, nullptr) {
         const std::string dump_path = "master_shell_read_dump_" + std::string(name) + ".txt";
         auto adapter = std::make_unique<MasterShellAdapter>();
-        adapter->init(g_scenario_yaml_path, dump_path, g_scenario.config.max_outstanding_write,
+        adapter->init(std::string(scenario_path), dump_path,
+                      g_scenario.config.max_outstanding_write,
                       g_scenario.config.max_outstanding_read);
         adapter->configure_inject(g_scenario.config.inject);
 
@@ -614,15 +624,16 @@ using ni::cmodel::cosim::SlaveOutputs;
 // unpack_data256 and pack_addr64 are defined in the master block above (same
 // anonymous namespace); they are reused here for the slave handlers.
 
-extern "C" void* cmodel_slave_create(const char* name) {
+extern "C" void* cmodel_slave_create(const char* name, const char* scenario_path) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_slave_create: not initialized");
         return nullptr;
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_slave_create, nullptr) {
+        auto variant = ni::cmodel::axi::load_scenario(std::string(scenario_path));
         auto adapter = std::make_unique<SlaveShellAdapter>();
-        adapter->init(g_scenario.config.memory_base, g_scenario.config.memory_size,
+        adapter->init(variant.config.memory_base, variant.config.memory_size,
                       g_scenario.config.write_latency, g_scenario.config.read_latency);
         auto* h = new HandleBlock{
             static_cast<uint32_t>(ShellType::Slave), ShellType::Slave, HandleState::Live,
@@ -723,14 +734,14 @@ extern "C" void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wread
 using ni::cmodel::cosim::NmuInputs;
 using ni::cmodel::cosim::NmuOutputs;
 
-extern "C" void* cmodel_nmu_create(const char* name) {
+extern "C" void* cmodel_nmu_create(const char* name, int src_id) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nmu_create: not initialized");
         return nullptr;
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_nmu_create, nullptr) {
         auto adapter = std::make_unique<NmuShellAdapter>();
-        adapter->init();
+        adapter->init(static_cast<uint8_t>(src_id));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(ShellType::Nmu), ShellType::Nmu, HandleState::Live,
             std::string(name),
@@ -841,14 +852,14 @@ extern "C" void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready,
 using ni::cmodel::cosim::NsuInputs;
 using ni::cmodel::cosim::NsuOutputs;
 
-extern "C" void* cmodel_nsu_create(const char* name) {
+extern "C" void* cmodel_nsu_create(const char* name, int src_id) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nsu_create: not initialized");
         return nullptr;
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, nullptr) {
         auto adapter = std::make_unique<NsuShellAdapter>();
-        adapter->init();
+        adapter->init(static_cast<uint8_t>(src_id));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(ShellType::Nsu), ShellType::Nsu, HandleState::Live,
             std::string(name),
