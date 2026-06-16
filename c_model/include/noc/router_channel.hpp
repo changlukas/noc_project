@@ -60,6 +60,9 @@ class InjectAdapter : public NocReqOut, public NocRspOut, public RouterCreditSin
 // the router's downstream RouterLink. Buffer depth MUST equal the router's
 // LOCAL-output credit seed so the void push_flit never overflows (credit gating
 // is the only backpressure -- see spec section 4).
+// One instance per direction: the NocReqIn/NocRspIn pop_flit bases share one
+// queue, so bind a given EjectAdapter to a single network's LOCAL output only
+// (req OR rsp, never both) or the two streams would interleave on one queue.
 class EjectAdapter : public NocReqIn, public NocRspIn, public RouterLink {
   public:
     EjectAdapter(Router& router, std::size_t port, std::size_t depth)

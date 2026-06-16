@@ -58,14 +58,19 @@ TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
     ni::cmodel::noc::EjectAdapter ej(r, LOCAL, /*depth=*/2);
     r.set_upstream_credit(LOCAL, inj);
     r.set_downstream(LOCAL, ej);
+    const std::size_t local_out_seed = r.credit(LOCAL, 0);  // full before any grant
     EXPECT_TRUE(inj.push_flit(req_flit(/*dst=*/0, /*vc=*/0)));
     inj.on_tick();
     r.tick();  // stage1: landing->fifo
-    r.tick();  // stage2: grant->output fifo (LOCAL)
+    r.tick();  // stage2: grant->output fifo (LOCAL), LOCAL output credit--
     r.tick();  // stage3: output fifo -> downstream (ej buffers)
+    EXPECT_EQ(r.credit(LOCAL, 0), local_out_seed - 1) << "LOCAL output credit spent on eject";
     auto out = ej.pop_flit();
     ASSERT_TRUE(out.has_value());
     EXPECT_EQ(out->get_header_field("dst_id"), 0u);
+    EXPECT_EQ(ej.buffered(), 0u) << "pop drained the only buffered flit";
+    EXPECT_EQ(r.credit(LOCAL, 0), local_out_seed)
+        << "pop_flit must return the LOCAL output credit to full";
 }
 
 TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
