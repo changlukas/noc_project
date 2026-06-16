@@ -59,10 +59,16 @@ TEST(CheckerLiveness, injection_forces_nonzero_exit) {
     const char* bin = std::getenv("COSIM_BIN");
     ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
     // SCENARIO_TREE_ROOT is the absolute path to tests/scenarios/ (CMake-injected).
-    const std::string cmd =
-        std::string(bin) + " +scenario=" SCENARIO_TREE_ROOT +
+    const std::string scenario_path =
+        std::string(SCENARIO_TREE_ROOT) +
         std::string(RequireKnownScenario("AX4-INF-001_dpi_fatal_on_init_failure")) +
         "/scenario.yaml";
+    // The bidirectional tb_top requires both node plusargs. Point both at the
+    // injection scenario: its non-existent data_file forces a DPI error at the
+    // first master tick (before any routing), so one scenario for both nodes
+    // still exercises the centralized DPI-fatal path this test asserts.
+    const std::string cmd = std::string(bin) + " +scenario_node0=" + scenario_path +
+                            " +scenario_node1=" + scenario_path;
     const ProcResult result = run_and_capture(cmd);
     EXPECT_NE(result.rc, 0)
         << "injection scenario should have caused non-zero exit (DPI error / checker fire)\n"
