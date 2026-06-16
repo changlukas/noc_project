@@ -149,6 +149,13 @@ no cross-flow overtaking.
 - Node coordinates and scenario address ranges keep all `dst_id` in mesh, so the router's
   out-of-mesh and `vc_id`-range aborts are not triggered in normal operation.
 - Reset is not modeled (the router's "construction = reset" stands; no partial reset).
+- **`src_id` is a routing identity, not free metadata.** The NSU stamps a response's `dst_id`
+  from the request's `src_id`, and the RSP fabric routes by `dst_id`; with `y=0` the node index
+  equals the `dst_id` byte. So each NMU's `src_id` MUST equal its node coordinate or its
+  responses eject at the wrong node. Single-flow tests never expose this (one NMU absorbs all
+  responses); the bidirectional loopback does. `RouterChannel`/NMU do not currently assert this
+  coupling — a multi-node integrator that sets `src_id` independently of node coordinate will
+  silently misroute responses. (Candidate for an NMU-side assert in a later round.)
 
 ## 9. File structure
 
