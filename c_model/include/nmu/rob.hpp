@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
+#include <functional>
 #include <optional>
 #include <utility>
 
@@ -67,7 +68,17 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // O(ROB_CAPACITY) worst case. Public for direct unit testing (TDD).
     static int find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n);
 
+    // Fired with (is_write, axi_id) when that id's outstanding source empties on a pop.
+    void set_drain_observer(std::function<void(bool, uint8_t)> cb) {
+        drain_observer_ = std::move(cb);
+    }
+
   private:
+    std::function<void(bool, uint8_t)> drain_observer_;
+    void notify_drained(bool is_write, uint8_t id) {
+        if (drain_observer_) drain_observer_(is_write, id);
+    }
+
     Packetize& next_pkt_;
     ResponseDepacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
@@ -249,6 +260,7 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
             write_entries_[head.base].occupied = false;
             write_order_by_id_[id].pop_front();
         }
+        if (write_order_by_id_[id].empty()) notify_drained(true, id);
         if (!committed_b_queue_.empty()) {
             auto out = committed_b_queue_.front();
             committed_b_queue_.pop_front();
@@ -261,6 +273,7 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
     auto& s = write_[opt->id];
     assert(!s.outstanding.empty() && "B for id with no outstanding write");
     s.outstanding.pop_front();
+    if (s.outstanding.empty()) notify_drained(true, opt->id);
     return opt;
 }
 
@@ -310,6 +323,7 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
             }
             read_order_by_id_[id].pop_front();
         }
+        if (read_order_by_id_[id].empty()) notify_drained(false, id);
         if (!committed_r_queue_.empty()) {
             auto out = committed_r_queue_.front();
             committed_r_queue_.pop_front();
@@ -323,6 +337,7 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
         auto& s = read_[opt->id];
         assert(!s.outstanding.empty() && "R(last) for id with no outstanding read");
         s.outstanding.pop_front();
+        if (s.outstanding.empty()) notify_drained(false, opt->id);
     }
     return opt;
 }

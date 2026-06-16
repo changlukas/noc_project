@@ -127,7 +127,10 @@ inline Nmu::Nmu(NmuConfig cfg, noc::NocReqOut& downstream_req, noc::NocRspIn& do
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
                  cfg_.src_id),
       rob_(packetize_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode),
-      axi_slave_port_(rob_, rob_, cfg_.port_params) {}
+      axi_slave_port_(rob_, rob_, cfg_.port_params) {
+    rob_.set_drain_observer(
+        [this](bool is_write, uint8_t id) { vc_arbiter_.on_id_drained(is_write, id); });
+}
 
 inline void Nmu::tick() {
     depacketize_.tick();

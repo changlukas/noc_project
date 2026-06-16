@@ -8,6 +8,7 @@
 #include <array>
 #include <bitset>
 #include <set>
+#include <utility>
 #include <vector>
 #include <gtest/gtest.h>
 
@@ -535,6 +536,81 @@ TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
     depkt.tick();
     EXPECT_DEATH(rob.pop_b(), ".*");
+}
+
+// === Task 4: Rob per-id drain hook (releases VcArbiter binding) ===
+
+TEST(RobDrainHook, FiresOnPerIdOutstandingEmpty_Disabled) {
+    SCENARIO("Rob: drain observer fires (is_write,id) exactly when that id's outstanding empties");
+    RobRig r;
+    std::vector<std::pair<bool, uint8_t>> drained;
+    r.rob.set_drain_observer([&](bool w, uint8_t id) { drained.emplace_back(w, id); });
+
+    // Push two AWs of id=4 (same dst -> both admitted, outstanding grows to 2).
+    ASSERT_TRUE(r.rob.push_aw(make_aw(0x04, 0x100)));
+    ASSERT_TRUE(r.rob.push_aw(make_aw(0x04, 0x200)));
+
+    // First B(id=4): outstanding 2 -> 1, not empty -> no fire.
+    ASSERT_TRUE(r.noc.rsp_out().push_flit(make_b_flit(0x04)));
+    r.depkt.tick();
+    ASSERT_TRUE(r.rob.pop_b().has_value());
+    EXPECT_EQ(drained.size(), 0u);
+
+    // Second B(id=4): outstanding 1 -> 0, empties -> exactly one fire (true,4).
+    ASSERT_TRUE(r.noc.rsp_out().push_flit(make_b_flit(0x04)));
+    r.depkt.tick();
+    ASSERT_TRUE(r.rob.pop_b().has_value());
+    ASSERT_EQ(drained.size(), 1u);
+    EXPECT_EQ(drained[0].first, true);
+    EXPECT_EQ(drained[0].second, 4);
+}
+
+TEST(RobDrainHook, FiresOncePerIdDrain_Enabled) {
+    SCENARIO("Rob Enabled mode: drain observer fires once when an id's order list empties");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    std::vector<std::pair<bool, uint8_t>> drained;
+    rob.set_drain_observer([&](bool w, uint8_t id) { drained.emplace_back(w, id); });
+
+    // Drive a single multi-beat read burst: id=5, len=3 -> 4 beats, slots 0..3.
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 3;
+    ASSERT_TRUE(rob.push_ar(ar));
+
+    auto push_r = [&](uint8_t rob_idx, bool rlast) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", rob_idx);
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+    push_r(0, false);
+    push_r(1, false);
+    push_r(2, false);
+    push_r(3, true);
+    depkt.tick();
+
+    // Drain all 4 committed beats. The whole burst (one order-list entry) is the
+    // only entry for id=5, so the order list empties on the commit -> exactly one fire.
+    int got = 0;
+    for (int i = 0; i < 32 && got < 4; ++i) {
+        if (rob.pop_r().has_value()) ++got;
+    }
+    ASSERT_EQ(got, 4);
+    ASSERT_EQ(drained.size(), 1u);
+    EXPECT_EQ(drained[0].first, false);
+    EXPECT_EQ(drained[0].second, 5);
 }
 
 TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
