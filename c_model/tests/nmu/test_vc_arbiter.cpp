@@ -471,7 +471,7 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
 
     ni::cmodel::axi::AwBeat aw{};
     aw.id = 0x07;
-    aw.addr = 0x340000;
+    aw.addr = 0x3400000000;
     aw.len = 0;
     aw.size = 5;
     aw.burst = ni::cmodel::axi::Burst::INCR;

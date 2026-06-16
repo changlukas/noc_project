@@ -64,7 +64,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
 
     constexpr uint8_t kSrcId = 0x12;
     constexpr uint8_t kAxiId = 0x05;
-    constexpr uint64_t kAddr = 0x100;  // dst_id = (0x100 >> 16) & 0xff = 0
+    constexpr uint64_t kAddr = 0x100;  // dst_id = (0x100 >> 32) & 0xff = 0
 
     NmuConfig cfg{};
     cfg.src_id = kSrcId;

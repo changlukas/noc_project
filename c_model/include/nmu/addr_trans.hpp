@@ -6,15 +6,15 @@ namespace ni::cmodel::nmu::addr_trans {
 
 // XYRouting bit allocation (c_model policy -- will move when SAM table or
 // remap added; per spec sec 4.3):
-//   addr[LOCAL_ADDR_BITS-1:0]                = local address (64 KB per dst)
+//   addr[LOCAL_ADDR_BITS-1:0]                = local address (4 GB per dst)
 //   addr[LOCAL_ADDR_BITS + X_WIDTH - 1 : LOCAL_ADDR_BITS]               = x
 //   addr[LOCAL_ADDR_BITS + DST_ID_BITS - 1 : LOCAL_ADDR_BITS + X_WIDTH] = y
 //   addr[63 : LOCAL_ADDR_BITS + DST_ID_BITS] = unused (zero in test fixtures)
 //
 // LOCAL_ADDR_BITS is namespace-scope so Packetize / Rob can share it without
-// duplicating `>> 16`. DST_ID_MASK derives from generated X_WIDTH + Y_WIDTH
+// duplicating `>> 32`. DST_ID_MASK derives from generated X_WIDTH + Y_WIDTH
 // so this file desync-detects if the spec regenerates with different widths.
-constexpr uint64_t LOCAL_ADDR_BITS = 16;
+constexpr uint64_t LOCAL_ADDR_BITS = 32;
 constexpr unsigned DST_ID_BITS = ni::width::X_WIDTH + ni::width::Y_WIDTH;
 constexpr uint8_t DST_ID_MASK = static_cast<uint8_t>((1u << DST_ID_BITS) - 1);
 static_assert(DST_ID_BITS == 8,

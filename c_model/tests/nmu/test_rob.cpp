@@ -84,8 +84,8 @@ TEST(NmuRob, Disabled_StallSameIdDiffDst) {
     RobRig r;
     // 1st AW: id=5, addr=0x100 -> dst=0
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    // 2nd AW: same id, addr=0x10100 -> dst=1 -> must stall
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x10100)));
+    // 2nd AW: same id, addr=0x100000100 -> dst=1 -> must stall
+    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x100000100)));
 }
 
 TEST(NmuRob, Disabled_StallReleaseOnBComplete) {
@@ -93,7 +93,7 @@ TEST(NmuRob, Disabled_StallReleaseOnBComplete) {
         "Rob Disabled: stall on same-id-diff-dst AW released when matching B arrives via pop_b");
     RobRig r;
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x10100)));
+    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x100000100)));
     // Inject a B flit for id=5 via rsp_in
     ASSERT_TRUE(r.noc.rsp_out().push_flit(make_b_flit(0x05)));
     r.depkt.tick();  // demux into B queue
@@ -101,7 +101,7 @@ TEST(NmuRob, Disabled_StallReleaseOnBComplete) {
     ASSERT_TRUE(b.has_value());
     EXPECT_EQ(b->id, 0x05);
     // After pop_b, outstanding for id=5 is empty -> next push_aw should pass
-    EXPECT_TRUE(r.rob.push_aw(make_aw(0x05, 0x10100)));
+    EXPECT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100000100)));
 }
 
 TEST(NmuRob, Disabled_StallReleaseOnRlast) {
@@ -109,14 +109,14 @@ TEST(NmuRob, Disabled_StallReleaseOnRlast) {
         "Rob Disabled: AR stall on same-id-diff-dst released when matching R(rlast=1) arrives");
     RobRig r;
     ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x10100)));
+    EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x100000100)));
     // Inject R(last=true)
     ASSERT_TRUE(r.noc.rsp_out().push_flit(make_r_flit(0x05, /*rlast=*/true)));
     r.depkt.tick();
     auto rb = r.rob.pop_r();
     ASSERT_TRUE(rb.has_value());
     EXPECT_TRUE(rb->last);
-    EXPECT_TRUE(r.rob.push_ar(make_ar(0x05, 0x10100)));
+    EXPECT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100000100)));
 }
 
 TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
@@ -196,7 +196,7 @@ TEST(NmuRob, Disabled_DifferentIdsIndependentNoInterference) {
     SCENARIO("Rob Disabled: id=5 stalled does not block id=6; per-id state is independent");
     RobRig r;
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x10100)));  // id=5 stalled
+    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x100000100)));  // id=5 stalled
     // id=6 should be independent
     EXPECT_TRUE(r.rob.push_aw(make_aw(0x06, 0x100)));
 }
@@ -389,7 +389,7 @@ TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
 
     // id=5: two AWs in flight, slots 0 + 1
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));
-    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x10100)));
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100000100)));
     auto push_b = [&](uint8_t rob_idx, uint8_t bresp) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_B);

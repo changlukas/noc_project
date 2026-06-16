@@ -6,8 +6,8 @@
 // its own scoreboard:
 //
 //   Flow A: NMU at node 1, NSU at node 0. Scenario addresses map to dst=(0,0).
-//   Flow B: NMU at node 0, NSU at node 1. A +0x10000 address offset sets bit 16
-//           so addr_trans::xy_route yields dst_id=0x01 -> node (1,0).
+//   Flow B: NMU at node 0, NSU at node 1. A +0x100000000 address offset sets
+//           bit 32 so addr_trans::xy_route yields dst_id=0x01 -> node (1,0).
 //
 // The Flow body (master/nmu/nsu construction, the NSU AxiMasterPort <-> AxiSlave
 // response shuttle, the b/r holdover deques, and the b_owner_nsu/r_owner_nsu
@@ -67,7 +67,7 @@ std::string scenario_path(const char* id) {
 }
 
 // AxiMasterT only accepts a YAML path (it re-parses internally), so Flow B's
-// +0x10000 address offset is applied by writing a shifted copy of the scenario
+// +0x100000000 address offset is applied by writing a shifted copy of the scenario
 // to TEST_TMPDIR (plan mechanism 3: ScenarioConfig/AxiMaster expose no offset
 // field, and the master owns its own parse so an in-memory mutation would not
 // reach it). data_file/dump_file are rewritten to absolute paths so they still
@@ -115,7 +115,7 @@ std::string shifted_scenario_path(const std::string& base_yaml, uint64_t offset,
 struct Flow {
     // master_node hosts the NMU + AXI master (traffic source); slave_node hosts
     // the NSU + AxiSlave/Memory (the responder). For Flow A: 1 -> 0. For Flow B:
-    // 0 -> 1 with a +0x10000 address offset so dst_id resolves to slave_node.
+    // 0 -> 1 with a +0x100000000 address offset so dst_id resolves to slave_node.
     Flow(rc::RouterChannel& ch, std::size_t master_node, std::size_t slave_node,
          const std::string& yaml_path, std::size_t num_vc, const std::string& read_dump,
          uint8_t expected_dst)
@@ -289,8 +289,8 @@ TEST_P(RouterLoopbackParam, BidirectionalZeroMismatch) {
 
     // Flow A: master at node 1, slave at node 0; addresses map to dst=(0,0)=0x00.
     Flow flow_a(ch, /*master_node=*/1, /*slave_node=*/0, base, num_vc, rpath_a, /*dst=*/0x00);
-    // Flow B: master at node 0, slave at node 1; +0x10000 sets bit 16 -> dst=0x01.
-    const std::string yaml_b = shifted_scenario_path(base, 0x10000, /*tag=*/num_vc);
+    // Flow B: master at node 0, slave at node 1; +0x100000000 sets bit 32 -> dst=0x01.
+    const std::string yaml_b = shifted_scenario_path(base, 0x100000000, /*tag=*/num_vc);
     Flow flow_b(ch, /*master_node=*/0, /*slave_node=*/1, yaml_b, num_vc, rpath_b, /*dst=*/0x01);
 
     std::size_t cycle = 0;
