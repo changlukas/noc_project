@@ -5,10 +5,13 @@
 // drains to the wrapped downstream via tick() using credit-gated
 // round-robin.
 //
-// Two modes (compile-time selected via factory):
-//   Mode A (ReadWriteSplit, default): AW/W → write_vc; AR → read_vc.
-//   Mode B (MultiCandidate): per-axi_ch candidate VC list; first VC with
-//     pending space AND downstream credit wins.
+// Two modes (compile-time selected via factory). Both select via the SAME
+// rule: the first VC in the channel's candidate set that has pending space
+// AND downstream credit wins (else backpressure). The modes differ only in
+// where the candidate set comes from:
+//   Mode A (ReadWriteSplit, default): derived per direction -- AW → write_vcs_,
+//     AR → read_vcs_.
+//   Mode B (MultiCandidate): the per-axi_ch candidate_vcs_ array.
 //
 // W-follows-AW invariant (Constraint A1): this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
