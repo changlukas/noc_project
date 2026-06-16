@@ -177,6 +177,11 @@ TEST_P(NmuVcArbParam, Binding_RebindAfterDrain) {
     uint8_t first = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
     EXPECT_TRUE(first == 2 || first == 3);
     arb.on_id_drained(/*is_write=*/false, /*id=*/5);  // release the binding
+    // NOTE: selection is deterministic first-available and push_and_vc drains the
+    // queue empty, so `rebind` coincides with `first` here. This test verifies the
+    // release made id=5 re-selectable and that the new choice sticks — it does NOT
+    // (and cannot, without depth plumbing) assert a binding can land on a DIFFERENT
+    // VC after release.
     uint8_t rebind = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
     EXPECT_TRUE(rebind == 2 || rebind == 3);
     uint8_t rebind2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
