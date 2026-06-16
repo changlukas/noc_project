@@ -170,6 +170,8 @@ class RouterChannel {
         r.set_upstream_credit(LOCAL, *inj);
         r.set_downstream(LOCAL, *ej);
     }
+    // Wire the full-duplex inter-router link. PRECONDITION: a is the higher-x node
+    // (a.WEST faces b.EAST). Swapping a/b silently inverts the topology.
     void wire_link(Router& a, Router& b, std::unique_ptr<CreditRelay>& relay_a,
                    std::unique_ptr<CreditRelay>& relay_b) {
         a.set_downstream(WEST, b.input(EAST));  // a.WEST_out -> b.EAST_in
@@ -185,6 +187,8 @@ class RouterChannel {
     std::vector<std::unique_ptr<Router>> req_routers_, rsp_routers_;
     std::array<std::unique_ptr<InjectAdapter>, kNodes> req_inject_, rsp_inject_;
     std::array<std::unique_ptr<EjectAdapter>, kNodes> req_eject_, rsp_eject_;
+    // Credit relays, one per link direction. _AB_ = serves the node-A -> node-B
+    // dataflow link (e.g. _10_ = node 1 -> node 0). Not node coordinates.
     std::unique_ptr<CreditRelay> req_relay_10_, req_relay_01_, rsp_relay_10_, rsp_relay_01_;
 };
 
