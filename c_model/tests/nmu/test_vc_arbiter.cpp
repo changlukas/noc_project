@@ -123,7 +123,12 @@ TEST_P(NmuVcArbParam, MultiCandidate_HoLAvoidance) {
 }
 
 TEST_P(NmuVcArbParam, Binding_SameWriteId_SameVc) {
-    SCENARIO("VcArbiter: same AWID across packets binds to one VC (multi-element write set)");
+    // AW-path smoke check (the sticky-vs-distinct discriminator tests use the AR path).
+    // Distinct angle: the binding survives the AW + W-burst-close boundary on the
+    // write path (current_aw_vc_ reset on wlast, then re-bind of the same AWID).
+    SCENARIO(
+        "VcArbiter: same AWID re-binds to its VC across the AW + W-burst-close boundary "
+        "(current_aw_vc_ reset, write-path smoke check; multi-element write set)");
     const auto num_vc = GetParam();
     if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs for a multi-element write set";
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);

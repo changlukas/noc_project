@@ -5,6 +5,12 @@
 // drains to the wrapped downstream via tick() using credit-gated
 // round-robin.
 //
+// Selection is gated first by a sticky (channel, axi_id) -> vc binding: a
+// bound id always returns its assigned VC, even when that VC is full (it
+// backpressures on its own VC rather than switching). Only UNBOUND ids fall
+// through to the candidate scan below. The binding is released by
+// on_id_drained (a later task / the Rob drain hook).
+//
 // Two modes (compile-time selected via factory). Both select via the SAME
 // rule: the first VC in the channel's candidate set that has pending space
 // AND downstream credit wins (else backpressure). The modes differ only in
@@ -27,6 +33,7 @@
 //   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
 //   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
 //   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
+#include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "noc/noc_req_out.hpp"
@@ -123,7 +130,7 @@ class VcArbiter : public noc::NocReqOut {
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;
     std::optional<uint8_t> current_aw_vc_;
-    static constexpr std::size_t AXI_ID_SPACE = 256;  // matches axi::AXI_ID_SPACE
+    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256; single source of truth
     std::array<std::optional<uint8_t>, AXI_ID_SPACE> write_binding_{};
     std::array<std::optional<uint8_t>, AXI_ID_SPACE> read_binding_{};
 };
