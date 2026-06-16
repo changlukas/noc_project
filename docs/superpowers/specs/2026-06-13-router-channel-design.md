@@ -75,6 +75,11 @@ adapter types bridge them.
   bounded queue.
 - `pop_flit() → optional<Flit>`: serves from the queue; on consume, calls
   `router.receive_credit(LOCAL_out_port, vc)` to return the slot.
+- Invariant (mandatory): the eject queue depth equals the router's LOCAL-output credit seed.
+  `RouterLink::push_flit` is `void` and cannot backpressure, so this equality is what
+  guarantees no overflow — the router only ejects when it holds LOCAL-output credit, and one
+  ejected flit consumes exactly one queue slot. The credit-conservation unit test (§7)
+  asserts this; there is no natural backpressure to fall back on.
 
 **CreditRelay** (`RouterCreditSink`): forwards a downstream router's input credit pulse to
 the upstream router's `receive_credit(port, vc)` for the matching inter-router port pair
@@ -88,12 +93,27 @@ evaluate-then-commit (reverse stage order, one stage advanced per tick). The fix
 order makes one traversal direction one tick faster than the other (directional latency
 asymmetry); this affects timing only — the scoreboard checks data, not cycle counts.
 
+Tick-boundary contract (required for the InjectAdapter landing-register guard): the
+`pushed_this_tick` flag spans the whole producer injection window of a cycle. The test loop
+calls each producer's `tick()` (which injects at most one flit per port via the NMU/NSU VC
+arbiter) and `RouterChannel.tick()` exactly once per cycle; `RouterChannel.tick()` resetting
+the flag is the cycle boundary. A producer must not push twice between two
+`RouterChannel.tick()` calls — which the NMU/NSU naturally satisfy (one drained flit per
+tick), but the guard enforces it regardless.
+
 ## 6. Ordering
 
 Same-`(channel, axi_id)` traffic keeps one VC (sub-project A binding) and one deterministic
 route, so it stays in one per-VC FIFO chain end-to-end and cannot be overtaken. The router
 preserves `vc_id`. This is the structural ordering guarantee for the loopback's same-ID
 traffic across the per-VC fabric.
+
+Cross-flow isolation (the two simultaneous directions) does NOT rely on the flows using
+different VC numbers — they may share VC ids. Isolation comes from the structure: REQ and RSP
+are separate router instances, and the two request directions traverse opposite unidirectional
+link segments and different `(input port → output port)` pairs within each router (flow A:
+`LOCAL_in → WEST_out`; flow B: `WEST_in → LOCAL_out`). Different `(input port, vc)` FIFOs, so
+no cross-flow overtaking.
 
 ## 7. Verification
 
@@ -106,12 +126,18 @@ traffic across the per-VC fabric.
 3. Full backpressure: with the downstream NI not popping, after the mirror credit drains the
    InjectAdapter's `credit_avail`/`push_flit` return false (no flit lost, no router assert).
 
-**Integration loopback (bidirectional)** (`c_model/tests/integration/test_router_loopback.cpp`,
-reusing the existing scoreboard/oracle):
-- Two nodes, each a real NMU + NSU wired to its `RouterChannel` ports. NMU(1,0) drives
-  low-address scenarios (`dst=(0,0)`); NMU(0,0) drives high-address scenarios (`dst=(1,0)`);
-  both run simultaneously.
-- The scoreboard tracks both flows; assertion is zero mismatch on each.
+**Integration loopback (bidirectional)** (`c_model/tests/integration/test_router_loopback.cpp`):
+- This is a NEW harness, not a drop-in reuse of `test_request_response_loopback.cpp`. That
+  test is single-master/single-slave (one `Nmu`, one `AxiMaster`, one `AxiSlave`, one
+  scoreboard, one `master.tick()`/`nmu.tick()` in the loop). The bidirectional test needs two
+  full NI nodes — two `Nmu` + two `AxiMaster` + two `NSU`/`AxiSlave` + two response paths —
+  driven in one tick loop alongside `RouterChannel.tick()`.
+- Oracle reuse is at the COMPONENT level: the existing scoreboard class is the per-flow
+  oracle, instantiated once per flow (two instances), each attached to its own master's
+  callbacks. The harness wiring, the two-master tick loop, and the per-flow address ranges
+  are new code; only the scoreboard/oracle class is reused.
+- NMU(1,0) drives low-address scenarios (`dst=(0,0)`); NMU(0,0) drives high-address scenarios
+  (`dst=(1,0)`); both run simultaneously. Each scoreboard asserts zero mismatch on its flow.
 - Parameterized over `num_vc ∈ {1, 2, 4, 8}` (A binding holds same-ID order through the
   per-VC fabric). ReadWriteSplit candidate sets used for multi-VC.
 
