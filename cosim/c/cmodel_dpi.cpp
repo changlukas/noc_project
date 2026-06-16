@@ -10,6 +10,7 @@
 #include "cosim/nmu_shell_adapter.hpp"
 #include "cosim/nsu_shell_adapter.hpp"
 #include "cosim/router_channel_shell_adapter.hpp"
+#include "cosim/router_shell_adapter.hpp"
 #include "cosim/slave_shell_adapter.hpp"
 
 #include "axi/scenario_parser.hpp"
@@ -424,6 +425,97 @@ extern "C" void cmodel_router_channel_get_outputs(
         *rsp_out_credit_return_n1 = static_cast<svBit>(out.node[1].rsp_out_credit_return);
     }
     DPI_BOUNDARY_END(cmodel_router_channel_get_outputs);
+}
+
+// Router DPI handlers — per-node (Task 3, router-channel split).
+// One RouterShellAdapter owns ONE node's REQ+RSP routers at coordinate (x,0).
+// Pins split into NMU/NSU-facing (NI edge) + per-network LINK (pulse credit).
+
+using ni::cmodel::cosim::RouterInputs;
+using ni::cmodel::cosim::RouterOutputs;
+using ni::cmodel::cosim::RouterShellAdapter;
+
+extern "C" void* cmodel_router_create(const char* name, int x_coord) {
+    if (g_session_state != SessionState::Initialized) {
+        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
+                             "cmodel_router_create: not initialized");
+        return nullptr;
+    }
+    DPI_BOUNDARY_BEGIN_R(cmodel_router_create, nullptr) {
+        auto adapter = std::make_unique<RouterShellAdapter>();
+        adapter->init(static_cast<uint8_t>(x_coord));
+        auto* h = new HandleBlock{
+            static_cast<uint32_t>(ShellType::Router), ShellType::Router, HandleState::Live,
+            std::string(name),
+            std::unique_ptr<void, void (*)(void*)>(
+                adapter.release(), [](void* p) { delete static_cast<RouterShellAdapter*>(p); })};
+        g_handle_registry.insert(h);
+        return static_cast<void*>(h);
+    }
+    DPI_BOUNDARY_END_R(cmodel_router_create);
+}
+
+extern "C" void cmodel_router_set_inputs(void* ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
+                                         svBit req_in_credit_return, svBit rsp_in_valid,
+                                         svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return,
+                                         svBit link_req_out_credit, svBit link_req_in_valid,
+                                         svBitVecVal* link_req_in_flit, svBit link_rsp_out_credit,
+                                         svBit link_rsp_in_valid, svBitVecVal* link_rsp_in_flit) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_set_inputs) {
+        REQUIRE_HANDLE(ctx, ShellType::Router, "cmodel_router_set_inputs");
+        auto* r = static_cast<RouterShellAdapter*>(_h->adapter.get());
+        RouterInputs in{};
+        in.req_in_valid = static_cast<bool>(req_in_valid);
+        in.req_in_flit = unpack_flit(req_in_flit);
+        in.req_in_credit_return = static_cast<bool>(req_in_credit_return);
+        in.rsp_in_valid = static_cast<bool>(rsp_in_valid);
+        in.rsp_in_flit = unpack_flit(rsp_in_flit);
+        in.rsp_in_credit_return = static_cast<bool>(rsp_in_credit_return);
+        in.link_req_out_credit = static_cast<bool>(link_req_out_credit);
+        in.link_req_in_valid = static_cast<bool>(link_req_in_valid);
+        in.link_req_in_flit = unpack_flit(link_req_in_flit);
+        in.link_rsp_out_credit = static_cast<bool>(link_rsp_out_credit);
+        in.link_rsp_in_valid = static_cast<bool>(link_rsp_in_valid);
+        in.link_rsp_in_flit = unpack_flit(link_rsp_in_flit);
+        r->set_inputs(in);
+    }
+    DPI_BOUNDARY_END(cmodel_router_set_inputs);
+}
+
+extern "C" void cmodel_router_tick(void* ctx) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_tick) {
+        REQUIRE_HANDLE(ctx, ShellType::Router, "cmodel_router_tick");
+        static_cast<RouterShellAdapter*>(_h->adapter.get())->tick();
+    }
+    DPI_BOUNDARY_END(cmodel_router_tick);
+}
+
+extern "C" void cmodel_router_get_outputs(void* ctx, svBit* req_out_valid,
+                                          svBitVecVal* req_out_flit, svBit* req_out_credit_return,
+                                          svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
+                                          svBit* rsp_out_credit_return, svBit* link_req_out_valid,
+                                          svBitVecVal* link_req_out_flit, svBit* link_req_in_credit,
+                                          svBit* link_rsp_out_valid, svBitVecVal* link_rsp_out_flit,
+                                          svBit* link_rsp_in_credit) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_get_outputs) {
+        REQUIRE_HANDLE(ctx, ShellType::Router, "cmodel_router_get_outputs");
+        auto* r = static_cast<RouterShellAdapter*>(_h->adapter.get());
+        RouterOutputs out{};
+        r->get_outputs(out);
+        *req_out_valid = static_cast<svBit>(out.req_out_valid);
+        pack_flit(out.req_out_flit, req_out_flit);
+        *req_out_credit_return = static_cast<svBit>(out.req_out_credit_return);
+        *rsp_out_valid = static_cast<svBit>(out.rsp_out_valid);
+        pack_flit(out.rsp_out_flit, rsp_out_flit);
+        *rsp_out_credit_return = static_cast<svBit>(out.rsp_out_credit_return);
+        *link_req_out_valid = static_cast<svBit>(out.link_req_out_valid);
+        pack_flit(out.link_req_out_flit, link_req_out_flit);
+        *link_req_in_credit = static_cast<svBit>(out.link_req_in_credit);
+        *link_rsp_out_valid = static_cast<svBit>(out.link_rsp_out_valid);
+        pack_flit(out.link_rsp_out_flit, link_rsp_out_flit);
+        *link_rsp_in_credit = static_cast<svBit>(out.link_rsp_in_credit);
+    }
+    DPI_BOUNDARY_END(cmodel_router_get_outputs);
 }
 
 // AxiMaster DPI handlers — Task 8.

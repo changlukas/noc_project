@@ -66,6 +66,24 @@ void cmodel_router_channel_get_outputs(
     svBit* req_out_credit_return_n1, svBit* rsp_out_valid_n1, svBitVecVal* rsp_out_flit_n1,
     svBit* rsp_out_credit_return_n1);
 
+// Router (Task 3, per-node) — ONE node's REQ+RSP routers at (x,0). Pins split:
+//   NMU/NSU-facing (NI edge, level/stub credit) + per-network LINK (pulse credit).
+// x_coord selects the LINK direction (0 -> EAST, 1 -> WEST).
+void* cmodel_router_create(const char* name, int x_coord);
+void cmodel_router_set_inputs(void* ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
+                              svBit req_in_credit_return, svBit rsp_in_valid,
+                              svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return,
+                              svBit link_req_out_credit, svBit link_req_in_valid,
+                              svBitVecVal* link_req_in_flit, svBit link_rsp_out_credit,
+                              svBit link_rsp_in_valid, svBitVecVal* link_rsp_in_flit);
+void cmodel_router_tick(void* ctx);
+void cmodel_router_get_outputs(void* ctx, svBit* req_out_valid, svBitVecVal* req_out_flit,
+                               svBit* req_out_credit_return, svBit* rsp_out_valid,
+                               svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return,
+                               svBit* link_req_out_valid, svBitVecVal* link_req_out_flit,
+                               svBit* link_req_in_credit, svBit* link_rsp_out_valid,
+                               svBitVecVal* link_rsp_out_flit, svBit* link_rsp_in_credit);
+
 // AxiMaster (Task 6) — chandle ABI; per-instance dump path + scoreboard wiring.
 // Packing: svBitVecVal* for multi-bit fields (little-endian word order).
 //   id fields     : 1 word (8-bit value in low byte)
