@@ -40,10 +40,13 @@ On the first packet of a `(class, id)` reaching `VcArbiter` (no existing binding
 - Read the id from the flit **payload** (`awid` for AW, `arid` for AR) — currently
   `select_vc_for_axi_ch` reads only `axi_ch` from the header; add payload-id read on the
   AW/AR paths.
-- Pick a VC from that channel's candidate set using the existing availability logic
-  (`pending_[vc].size() < depth && downstream_.credit_avail(vc)`); record `binding[id]=vc`.
-- If no candidate is "available", fall back to the first VC in the set (a VC must always be
-  returned); the binding still sticks.
+- Pick the first available VC from that channel's candidate set (existing availability
+  logic: `pending_[vc].size() < depth && downstream_.credit_avail(vc)`).
+- If no candidate is available, the flit backpressures (selection returns none) and retries
+  — the binding commits **only when a flit is actually accepted**, binding to whichever VC
+  was available at accept time. This avoids committing an id to a full VC. A bound id always
+  returns its bound VC (even if currently full), so it backpressures on its own VC rather
+  than switching, preserving order.
 
 ## 5. Reuse and W-follows-AW
 

@@ -15,6 +15,7 @@
 - After editing any `.hpp`/`.cpp`: `/c/msys64/mingw64/bin/clang-format -i <file>` (clang-format is NOT on PATH).
 - Commit format `type(scope): description`, English body. Never `--no-verify`.
 - Work on a feature branch: first step of Task 1 creates it.
+- **Scope guard: NMU only.** Touch only `c_model/include/nmu/{vc_arbiter,rob,nmu}.hpp` and the NMU tests. There is a separate `c_model/include/nsu/vc_arbiter.hpp` with similarly-named members — do NOT modify it; it is out of scope.
 
 **Key code facts (verified):**
 - `c_model/include/nmu/vc_arbiter.hpp`: `select_vc_for_axi_ch(axi_ch)` (line 108), `push_flit` (140); members `write_vc_`/`read_vc_`/`candidate_vcs_[AXI_CH_COUNT]`/`pending_[NUM_VC_MAX]`/`current_aw_vc_`; factories `read_write_split` / `multi_candidate`; `NUM_VC_MAX=8`, `AXI_CH_COUNT=5`.
@@ -184,7 +185,28 @@ TEST_P(NmuVcArbParam, Binding_PerIdStickyAndDistinctIdsIndependent) {
     uint8_t a2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1));
     EXPECT_EQ(a2, a) << "ARID=1 must re-bind to its original VC";
 }
+
+TEST_P(NmuVcArbParam, Binding_DistinctIdsSpreadUnderDepthPressure) {
+    SCENARIO("VcArbiter: with pending_depth=1, distinct ARIDs must land on different VCs");
+    const auto num_vc = GetParam();
+    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    // depth 1: once id=1 binds+fills its VC, the next distinct id cannot reuse it.
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3},
+                                                 /*pending_depth=*/1);
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1)));  // binds, fills its VC
+    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/2)));  // must pick the other
+    auto f1 = noc.req_in().pop_flit();  // wait: nothing drained yet — see note below
+    (void)f1;
+}
 ```
+Note on the depth-pressure test: with `pending_depth=1` and no `arb.tick()` between the two
+pushes, id=1 occupies its VC's only slot, so id=2's first-available scan must select the
+other read-set VC. Drive it by reading both pending queues via the arbiter introspection
+(`pending_size(vc)`) rather than draining: assert exactly one of {2,3} has a pending flit
+after the first push and the OTHER gains one after the second push (the two distinct ids
+occupy different VCs). Use `arb.pending_size(2)` / `arb.pending_size(3)` for the assertion;
+do not call `push_and_vc` here (it drains and would free the depth-1 slot).
 
 - [ ] **Step 2: Run to verify the new tests fail**
 
@@ -221,20 +243,29 @@ In `vc_arbiter.hpp`:
         return &candidate_vcs_[axi_ch];
     }
 ```
-- In `push_flit` (line 140): read the id and commit the binding only after the pending-depth check passes (accepted flit):
+- In `push_flit` (line 140): read the id (only when `num_vc_ > 1` — single-VC short-circuits
+  in select, so no id read is needed, matching spec §8), and commit the binding only after
+  ALL accept conditions pass, including the `current_aw_vc_` validation (so a malformed-AW
+  abort cannot leave a committed binding):
 ```cpp
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
     uint8_t id = 0;
-    if (axi_ch == ni::AXI_CH_AW) id = static_cast<uint8_t>(flit.get_payload_field("AW", "awid"));
-    else if (axi_ch == ni::AXI_CH_AR) id = static_cast<uint8_t>(flit.get_payload_field("AR", "arid"));
+    if (num_vc_ > 1) {
+        if (axi_ch == ni::AXI_CH_AW) id = static_cast<uint8_t>(flit.get_payload_field("AW", "awid"));
+        else if (axi_ch == ni::AXI_CH_AR) id = static_cast<uint8_t>(flit.get_payload_field("AR", "arid"));
+    }
     auto vc_opt = select_vc_for_axi_ch(axi_ch, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
-    // commit binding on accept (AW/AR only)
-    if (axi_ch == ni::AXI_CH_AW) write_binding_[id] = vc_id;
-    else if (axi_ch == ni::AXI_CH_AR) read_binding_[id] = vc_id;
-    // ... existing current_aw_vc_ update + stamp + enqueue (unchanged) ...
+    // ... existing current_aw_vc_ AW-collision assert + update, and the W wlast reset,
+    //     run here UNCHANGED ...
+    // commit binding AFTER the validation above (AW/AR only, num_vc>1 only):
+    if (num_vc_ > 1) {
+        if (axi_ch == ni::AXI_CH_AW) write_binding_[id] = vc_id;
+        else if (axi_ch == ni::AXI_CH_AR) read_binding_[id] = vc_id;
+    }
+    // ... existing stamp vc_id + enqueue + return true (unchanged) ...
 ```
 
 - [ ] **Step 4: Run the new binding tests + fix the now-broken MultiCandidate spreading test**
@@ -248,6 +279,8 @@ Expected: `Binding_*` PASS. `MultiCandidate_HoLAvoidance` now FAILS — it pushe
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/3)));
 ```
 Keep the test's assertion that the ARs spread across VCs (now justified by distinct ids). Read the actual assertions and adjust the ids so the spreading still occurs.
+
+Also update `RoundRobinFairness_AllVcsServiced_NoStarvation` (`test_vc_arbiter.cpp:191`): it pushes repeated ARID=0, which now all pin to one VC and would break the round-robin/no-starvation assertion. Give each pushed AR a **distinct** ARID (e.g. an incrementing id per push) so the round-robin across VCs is still exercised. Grep the whole file for any other test that pushes multiple same-channel flits expecting them to spread across VCs (they will all have implicit ARID/AWID=0 via `make_flit`) and give those distinct ids too — the size-1 ReadWriteSplit and W-follows-AW tests are unaffected.
 
 - [ ] **Step 5: Run the full vc_arbiter suite**
 
@@ -370,6 +403,8 @@ TEST(RobDrainHook, FiresOnPerIdOutstandingEmpty_Enabled) {
 }
 ```
 If `test_rob.cpp` has no Enabled-mode response-injection helper, model it on the file's existing Enabled `pop_b` tests (they already drive rob_idx-tagged responses). If Enabled response injection is genuinely not expressible with the existing scaffold, report DONE_WITH_CONCERNS rather than skipping the case — do not silently drop §9.7 coverage.
+
+For the Enabled READ case specifically, drive a multi-beat read burst (one AR → several R beats committed by the chain-flush) and assert the observer fires **exactly once** (`drained.size()==1`) when `read_order_by_id_[id]` empties — this proves the fire is per-id-drain, not per-committed-beat.
 
 - [ ] **Step 2: Run to verify failure (compile error: `set_drain_observer` missing)**
 
