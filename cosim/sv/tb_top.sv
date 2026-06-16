@@ -3,10 +3,11 @@
 
 // tb_top — bidirectional 2-node router co-sim testbench
 //
-// Two symmetric nodes drive the production RouterChannel fabric (no faxi):
+// Two symmetric nodes, each driving its own per-node router_wrap, joined by a
+// cross-node link (no faxi):
 //   node k:  axi_master_wrap →[master_nmu_axi_k]→ nmu_wrap →[nodeK_nmu]→ ┐
-//            router_channel_wrap ↔ ┘
-//            router_channel_wrap →[nodeK_nsu]→ nsu_wrap →[nsu_slave_axi_k]→ axi_slave_wrap
+//            router_wrap[k] ←link→ router_wrap[1-k] ┘
+//            router_wrap[k] →[nodeK_nsu]→ nsu_wrap →[nsu_slave_axi_k]→ axi_slave_wrap
 //   Response travels the opposite direction along the same path.
 //
 // Variant→instance pairing (spec §2/§5/§8): master at node k is fed the OTHER

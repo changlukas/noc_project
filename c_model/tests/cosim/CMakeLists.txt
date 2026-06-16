@@ -4,11 +4,6 @@ add_cmodel_test(test_channel_model_shell_adapter)
 target_include_directories(test_channel_model_shell_adapter PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_router_channel_shell_adapter)
-# Add c_model/tests/ to include path to mirror the ChannelModel adapter test.
-target_include_directories(test_router_channel_shell_adapter PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/..)
-
 add_cmodel_test(test_router_shell_adapter)
 # Add c_model/tests/ to include path to mirror the ChannelModel adapter test.
 target_include_directories(test_router_shell_adapter PRIVATE

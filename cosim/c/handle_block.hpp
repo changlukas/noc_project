@@ -15,7 +15,6 @@ enum class ShellType : uint32_t {
     Nmu = 0x4E4D5520u,            // 'NMU '
     Nsu = 0x4E535520u,            // 'NSU '
     ChannelModel = 0x43484E4Du,   // 'CHNM'
-    RouterChannel = 0x52434E4Cu,  // 'RCNL'
     Router = 0x524F5554u,         // 'ROUT'
 };
 

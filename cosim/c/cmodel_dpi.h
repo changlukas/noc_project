@@ -50,22 +50,6 @@ void cmodel_channel_model_get_outputs(void* ctx, svBit* req_out_valid, svBitVecV
                                       svBit* req_out_credit_return, svBit* rsp_out_valid,
                                       svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return);
 
-// RouterChannel (Task 3) — 2-node bidirectional NoC fabric; pins suffixed _n0/_n1.
-void* cmodel_router_channel_create(const char* name);
-void cmodel_router_channel_set_inputs(void* ctx, svBit req_in_valid_n0, svBitVecVal* req_in_flit_n0,
-                                      svBit req_in_credit_return_n0, svBit rsp_in_valid_n0,
-                                      svBitVecVal* rsp_in_flit_n0, svBit rsp_in_credit_return_n0,
-                                      svBit req_in_valid_n1, svBitVecVal* req_in_flit_n1,
-                                      svBit req_in_credit_return_n1, svBit rsp_in_valid_n1,
-                                      svBitVecVal* rsp_in_flit_n1, svBit rsp_in_credit_return_n1);
-void cmodel_router_channel_tick(void* ctx);
-void cmodel_router_channel_get_outputs(
-    void* ctx, svBit* req_out_valid_n0, svBitVecVal* req_out_flit_n0,
-    svBit* req_out_credit_return_n0, svBit* rsp_out_valid_n0, svBitVecVal* rsp_out_flit_n0,
-    svBit* rsp_out_credit_return_n0, svBit* req_out_valid_n1, svBitVecVal* req_out_flit_n1,
-    svBit* req_out_credit_return_n1, svBit* rsp_out_valid_n1, svBitVecVal* rsp_out_flit_n1,
-    svBit* rsp_out_credit_return_n1);
-
 // Router (Task 3, per-node) — ONE node's REQ+RSP routers at (x,0). Pins split:
 //   NMU/NSU-facing (NI edge, level/stub credit) + per-network LINK (pulse credit).
 // x_coord selects the LINK direction (0 -> EAST, 1 -> WEST).
