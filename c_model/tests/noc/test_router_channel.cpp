@@ -92,4 +92,37 @@ TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
     EXPECT_EQ(up.credit(WEST, 0), seed) << "relay must restore the upstream WEST output credit";
 }
 
+TEST(RouterChannel, SingleFlitReqEndToEnd) {
+    SCENARIO("RouterChannel: a REQ flit injected at NMU(1,0) ejects at NSU(0,0) through 2 routers");
+    using ni::cmodel::noc::RouterChannel;
+    RouterChannel ch(/*num_vc=*/2);
+    Flit f = req_flit(/*dst=*/0x00, /*vc=*/0);
+    f.set_header_field("src_id", 0x10);
+    ASSERT_TRUE(ch.nmu_req_out(/*node=*/1).push_flit(f));
+    std::optional<Flit> got;
+    for (int t = 0; t < 12 && !got; ++t) {
+        ch.tick();
+        got = ch.nsu_req_in(/*node=*/0).pop_flit();
+    }
+    ASSERT_TRUE(got.has_value()) << "request did not arrive at NSU(0,0)";
+    EXPECT_EQ(got->get_header_field("dst_id"), 0x00u);
+    EXPECT_EQ(got->get_header_field("src_id"), 0x10u);
+}
+
+TEST(RouterChannel, SingleFlitRspEndToEnd) {
+    SCENARIO("RouterChannel: a RSP flit injected at NSU(0,0) ejects at NMU(1,0) (spec both nets)");
+    using ni::cmodel::noc::RouterChannel;
+    RouterChannel ch(/*num_vc=*/2);
+    Flit f = req_flit(/*dst=*/0x01, /*vc=*/0);  // dst=(1,0)
+    f.set_header_field("src_id", 0x20);
+    ASSERT_TRUE(ch.nsu_rsp_out(/*node=*/0).push_flit(f));
+    std::optional<Flit> got;
+    for (int t = 0; t < 12 && !got; ++t) {
+        ch.tick();
+        got = ch.nmu_rsp_in(/*node=*/1).pop_flit();
+    }
+    ASSERT_TRUE(got.has_value()) << "response did not arrive at NMU(1,0)";
+    EXPECT_EQ(got->get_header_field("dst_id"), 0x01u);
+}
+
 }  // namespace
