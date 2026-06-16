@@ -1,6 +1,6 @@
-#include "noc/router_channel.hpp"
 #include "noc/router.hpp"
 #include "noc/router_adapters.hpp"
+#include "noc/two_node_fabric.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
@@ -10,6 +10,7 @@ using ni::cmodel::noc::InjectAdapter;
 using ni::cmodel::noc::Router;
 using ni::cmodel::noc::RouterConfig;
 using ni::cmodel::noc::RouterPort;
+using ni::cmodel::noc::testing::TwoNodeFabric;
 
 namespace {
 
@@ -95,10 +96,9 @@ TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
     EXPECT_EQ(up.credit(WEST, 0), seed) << "relay must restore the upstream WEST output credit";
 }
 
-TEST(RouterChannel, SingleFlitReqEndToEnd) {
-    SCENARIO("RouterChannel: a REQ flit injected at NMU(1,0) ejects at NSU(0,0) through 2 routers");
-    using ni::cmodel::noc::RouterChannel;
-    RouterChannel ch(/*num_vc=*/2);
+TEST(TwoNodeFabric, SingleFlitReqEndToEnd) {
+    SCENARIO("TwoNodeFabric: a REQ flit injected at NMU(1,0) ejects at NSU(0,0) through 2 routers");
+    TwoNodeFabric ch(/*num_vc=*/2);
     Flit f = req_flit(/*dst=*/0x00, /*vc=*/0);
     f.set_header_field("src_id", 0x10);
     ASSERT_TRUE(ch.nmu_req_out(/*node=*/1).push_flit(f));
@@ -112,10 +112,9 @@ TEST(RouterChannel, SingleFlitReqEndToEnd) {
     EXPECT_EQ(got->get_header_field("src_id"), 0x10u);
 }
 
-TEST(RouterChannel, SingleFlitRspEndToEnd) {
-    SCENARIO("RouterChannel: a RSP flit injected at NSU(0,0) ejects at NMU(1,0) (spec both nets)");
-    using ni::cmodel::noc::RouterChannel;
-    RouterChannel ch(/*num_vc=*/2);
+TEST(TwoNodeFabric, SingleFlitRspEndToEnd) {
+    SCENARIO("TwoNodeFabric: a RSP flit injected at NSU(0,0) ejects at NMU(1,0) (spec both nets)");
+    TwoNodeFabric ch(/*num_vc=*/2);
     Flit f = req_flit(/*dst=*/0x01, /*vc=*/0);  // dst=(1,0)
     f.set_header_field("src_id", 0x20);
     ASSERT_TRUE(ch.nsu_rsp_out(/*node=*/0).push_flit(f));
@@ -128,11 +127,10 @@ TEST(RouterChannel, SingleFlitRspEndToEnd) {
     EXPECT_EQ(got->get_header_field("dst_id"), 0x01u);
 }
 
-TEST(RouterChannel, FullBackpressureWhenConsumerStalls) {
+TEST(TwoNodeFabric, FullBackpressureWhenConsumerStalls) {
     SCENARIO(
-        "RouterChannel: NSU never pops -> credit drains -> NMU inject backpressures (no assert)");
-    using ni::cmodel::noc::RouterChannel;
-    RouterChannel ch(/*num_vc=*/2);
+        "TwoNodeFabric: NSU never pops -> credit drains -> NMU inject backpressures (no assert)");
+    TwoNodeFabric ch(/*num_vc=*/2);
     int accepted = 0;
     for (int t = 0; t < 200; ++t) {
         Flit f = req_flit(0x00, 0);
@@ -144,13 +142,12 @@ TEST(RouterChannel, FullBackpressureWhenConsumerStalls) {
     EXPECT_LT(accepted, 200) << "with the consumer stalled, inject must eventually backpressure";
 }
 
-TEST(RouterChannel, EjectBoundaryCreditConservation) {
+TEST(TwoNodeFabric, EjectBoundaryCreditConservation) {
     SCENARIO(
-        "RouterChannel: credit(LOCAL,vc) + output_fifo_size(LOCAL) + eject_buffered == vc_depth "
+        "TwoNodeFabric: credit(LOCAL,vc) + output_fifo_size(LOCAL) + eject_buffered == vc_depth "
         "every tick");
-    using ni::cmodel::noc::RouterChannel;
     constexpr std::size_t kDepth = NI_NOC_ROUTER_VC_DEPTH;
-    RouterChannel ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
+    TwoNodeFabric ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
     const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
     for (int t = 0; t < 300; ++t) {
         ch.nmu_req_out(1).push_flit(req_flit(0x00, 0));  // ok if backpressured
@@ -163,13 +160,12 @@ TEST(RouterChannel, EjectBoundaryCreditConservation) {
     }
 }
 
-TEST(RouterChannel, EjectQueueHoldsAggregateMultiVcCredit) {
+TEST(TwoNodeFabric, EjectQueueHoldsAggregateMultiVcCredit) {
     SCENARIO(
-        "RouterChannel: with NSU stalled, the shared eject queue must hold num_vc*vc_depth "
+        "TwoNodeFabric: with NSU stalled, the shared eject queue must hold num_vc*vc_depth "
         "flits (not just vc_depth)");
-    using ni::cmodel::noc::RouterChannel;
     constexpr std::size_t kDepth = 4;
-    RouterChannel ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
+    TwoNodeFabric ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
     // Alternate vc0/vc1 single-flit requests to dst=(0,0); never pop at NSU(0).
     // Each VC can have up to kDepth flits granted out the LOCAL output before its
     // credit is exhausted -> up to 2*kDepth flits accumulate in the shared eject queue.

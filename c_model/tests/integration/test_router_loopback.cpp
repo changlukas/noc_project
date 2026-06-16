@@ -1,9 +1,9 @@
-// Task 5 integration: bidirectional loopback over one production RouterChannel.
+// Task 5 integration: bidirectional loopback over a hand-assembled two-node fabric.
 //
-// Two full-NI nodes share a single RouterChannel (2-node, 1-hop, full-duplex
-// fabric). Each direction is one self-contained Flow (master -> NMU -> REQ net
-// -> NSU -> AxiSlave/Memory, response back through the RSP net), validated by
-// its own scoreboard:
+// Two full-NI nodes share a single TwoNodeFabric (2-node, 1-hop, full-duplex
+// fabric hand-assembled from individual Routers + LOCAL adapters). Each direction
+// is one self-contained Flow (master -> NMU -> REQ net -> NSU -> AxiSlave/Memory,
+// response back through the RSP net), validated by its own scoreboard:
 //
 //   Flow A: NMU at node 1, NSU at node 0. Scenario addresses map to dst=(0,0).
 //   Flow B: NMU at node 0, NSU at node 1. A +0x100000000 address offset sets
@@ -28,7 +28,9 @@
 #include "nmu/addr_trans.hpp"
 #include "nmu/nmu.hpp"
 #include "nmu/port_params.hpp"
-#include "noc/router_channel.hpp"
+#include "noc/router.hpp"
+#include "noc/router_adapters.hpp"
+#include "noc/two_node_fabric.hpp"
 #include "nsu/nsu.hpp"
 #include "nsu/port_params.hpp"
 #include "scenario_helpers.hpp"
@@ -44,7 +46,8 @@
 namespace axi = ni::cmodel::axi;
 namespace nmu = ni::cmodel::nmu;
 namespace nsu = ni::cmodel::nsu;
-namespace rc = ni::cmodel::noc;  // RouterChannel namespace; ::noc::tests is the helper ns
+namespace rc = ni::cmodel::noc;  // fabric/addr_trans namespace; ::noc::tests is the helper ns
+using ni::cmodel::noc::testing::TwoNodeFabric;
 
 namespace {
 
@@ -116,7 +119,7 @@ struct Flow {
     // master_node hosts the NMU + AXI master (traffic source); slave_node hosts
     // the NSU + AxiSlave/Memory (the responder). For Flow A: 1 -> 0. For Flow B:
     // 0 -> 1 with a +0x100000000 address offset so dst_id resolves to slave_node.
-    Flow(rc::RouterChannel& ch, std::size_t master_node, std::size_t slave_node,
+    Flow(TwoNodeFabric& ch, std::size_t master_node, std::size_t slave_node,
          const std::string& yaml_path, std::size_t num_vc, const std::string& read_dump,
          uint8_t expected_dst)
         : sc_(axi::load_scenario(yaml_path)),
@@ -276,9 +279,9 @@ constexpr std::size_t kCycleCap = 100'000;
 class RouterLoopbackParam : public ::testing::TestWithParam<std::size_t> {};  // num_vc
 
 TEST_P(RouterLoopbackParam, BidirectionalZeroMismatch) {
-    SCENARIO("RouterChannel: two simultaneous flows (1,0)<->(0,0), both scoreboards clean");
+    SCENARIO("TwoNodeFabric: two simultaneous flows (1,0)<->(0,0), both scoreboards clean");
     const std::size_t num_vc = GetParam();
-    rc::RouterChannel ch(static_cast<uint8_t>(num_vc));
+    TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
 
     const std::string base = scenario_path("AX4-BAS-003_single_write_read_aligned");
     const std::string tmp = std::string(::testing::TempDir());
