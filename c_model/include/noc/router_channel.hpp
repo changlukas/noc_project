@@ -18,7 +18,10 @@
 #include "noc/noc_rsp_out.hpp"
 #include "noc/router.hpp"
 
+#include <cassert>
 #include <cstdint>
+#include <deque>
+#include <optional>
 #include <vector>
 
 namespace ni::cmodel::noc {
@@ -51,6 +54,51 @@ class InjectAdapter : public NocReqOut, public NocRspOut, public RouterCreditSin
     std::size_t port_;
     std::vector<std::size_t> credit_;
     bool pushed_this_tick_ = false;
+};
+
+// router LOCAL output -> NI. Implements the consumer-side NoC interfaces and is
+// the router's downstream RouterLink. Buffer depth MUST equal the router's
+// LOCAL-output credit seed so the void push_flit never overflows (credit gating
+// is the only backpressure -- see spec section 4).
+class EjectAdapter : public NocReqIn, public NocRspIn, public RouterLink {
+  public:
+    EjectAdapter(Router& router, std::size_t port, std::size_t depth)
+        : router_(router), port_(port), depth_(depth) {}
+
+    void push_flit(const Flit& flit) override {
+        assert(queue_.size() < depth_ &&
+               "EjectAdapter overflow: queue depth must equal the router LOCAL-output credit "
+               "seed (credit gating should have prevented this)");
+        queue_.push_back(flit);
+    }
+    std::optional<Flit> pop_flit() override {
+        if (queue_.empty()) return std::nullopt;
+        Flit f = queue_.front();
+        queue_.pop_front();
+        const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
+        router_.receive_credit(port_, vc);
+        return f;
+    }
+    std::size_t buffered() const { return queue_.size(); }
+
+  private:
+    Router& router_;
+    std::size_t port_;
+    std::size_t depth_;
+    std::deque<Flit> queue_;
+};
+
+// Forwards a downstream router's input-credit pulse to the upstream router's
+// matching OUTPUT port. Registered on the downstream via set_upstream_credit.
+class CreditRelay : public RouterCreditSink {
+  public:
+    CreditRelay(Router& upstream, std::size_t upstream_out_port)
+        : upstream_(upstream), port_(upstream_out_port) {}
+    void receive_credit(uint8_t vc) override { upstream_.receive_credit(port_, vc); }
+
+  private:
+    Router& upstream_;
+    std::size_t port_;
 };
 
 }  // namespace ni::cmodel::noc

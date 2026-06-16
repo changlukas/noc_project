@@ -50,4 +50,41 @@ TEST(InjectAdapter, LandingGuardResetsOnTick) {
     EXPECT_TRUE(inj.push_flit(req_flit(0, 0))) << "new tick: landing free, one push allowed";
 }
 
+TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
+    SCENARIO("EjectAdapter: router push buffers; pop_flit serves it and returns a credit");
+    Router r(cfg_at(0, 0));
+    const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
+    InjectAdapter inj(r, LOCAL, 2, 2);
+    ni::cmodel::noc::EjectAdapter ej(r, LOCAL, /*depth=*/2);
+    r.set_upstream_credit(LOCAL, inj);
+    r.set_downstream(LOCAL, ej);
+    EXPECT_TRUE(inj.push_flit(req_flit(/*dst=*/0, /*vc=*/0)));
+    inj.on_tick();
+    r.tick();  // stage1: landing->fifo
+    r.tick();  // stage2: grant->output fifo (LOCAL)
+    r.tick();  // stage3: output fifo -> downstream (ej buffers)
+    auto out = ej.pop_flit();
+    ASSERT_TRUE(out.has_value());
+    EXPECT_EQ(out->get_header_field("dst_id"), 0u);
+}
+
+TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
+    SCENARIO(
+        "CreditRelay: after the upstream output credit is spent, relay.receive_credit restores it");
+    Router up(cfg_at(1, 0));  // node (1,0); a flit to dst=(0,0) routes out WEST
+    const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    InjectAdapter inj(up, LOCAL, 2, 2);
+    up.set_upstream_credit(LOCAL, inj);
+    ni::cmodel::noc::CreditRelay relay(up, WEST);
+    const std::size_t seed = up.credit(WEST, 0);
+    ASSERT_TRUE(inj.push_flit(req_flit(/*dst=*/0x00, /*vc=*/0)));
+    inj.on_tick();
+    up.tick();  // stage1
+    up.tick();  // stage2: grant -> WEST output FIFO, WEST credit--
+    EXPECT_EQ(up.credit(WEST, 0), seed - 1) << "WEST output credit spent on grant";
+    relay.receive_credit(0);  // downstream EAST input freed -> relay restores WEST
+    EXPECT_EQ(up.credit(WEST, 0), seed) << "relay must restore the upstream WEST output credit";
+}
+
 }  // namespace
