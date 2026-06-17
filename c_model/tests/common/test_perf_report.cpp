@@ -1,6 +1,4 @@
-#include "common/ni_perf_observer.hpp"
 #include "common/perf_report.hpp"
-#include "common/perf_common.hpp"
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
@@ -9,8 +7,7 @@ using namespace ni::cmodel::testing;
 
 TEST(PerfReport, SummaryLineContainsLabels) {
     uint64_t now = 0;
-    PhaseController phase(now, PhaseConfig{});
-    NIPerfObserver ni(now, phase, [] { return std::size_t{0}; }, NIPerfConfig{"flowA"});
+    NIPerfObserver ni(now, "flowA");
     now = 1;
     ni.on_issue(true, 1);
     now = 4;

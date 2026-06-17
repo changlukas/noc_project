@@ -36,8 +36,6 @@
 #include "scenario_helpers.hpp"
 #include "common/scenario.hpp"
 #include "common/ni_perf_observer.hpp"
-#include "common/perf_common.hpp"
-#include "common/router_perf_observer.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -336,7 +334,7 @@ INSTANTIATE_TEST_SUITE_P(NumVc, RouterLoopbackParam, ::testing::Values(1, 2, 4, 
 
 namespace {
 
-std::size_t run_loopback(bool with_observers, std::size_t* stall_out) {
+std::size_t run_loopback(bool with_observers) {
     using namespace ni::cmodel::testing;
     const std::size_t num_vc = 1;
     TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
@@ -349,19 +347,8 @@ std::size_t run_loopback(bool with_observers, std::size_t* stall_out) {
                 /*dst=*/0x01);
 
     uint64_t now = 0;
-    PhaseController phase(now, PhaseConfig{});
-    NIPerfObserver ni_a(
-        now, phase, [&] { return flow_a.rob().write_occupancy() + flow_a.rob().read_occupancy(); },
-        NIPerfConfig{"A"});
-    NIPerfObserver ni_b(
-        now, phase, [&] { return flow_b.rob().write_occupancy() + flow_b.rob().read_occupancy(); },
-        NIPerfConfig{"B"});
-    RouterPerfObserver router_obs(now, phase,
-                                  {{"req0", &ch.req_router(0)},
-                                   {"req1", &ch.req_router(1)},
-                                   {"rsp0", &ch.rsp_router(0)},
-                                   {"rsp1", &ch.rsp_router(1)}},
-                                  RouterPerfConfig{});
+    NIPerfObserver ni_a(now, "A");
+    NIPerfObserver ni_b(now, "B");
 
     if (with_observers) {
         flow_a.master().on_write_issued(
@@ -391,15 +378,8 @@ std::size_t run_loopback(bool with_observers, std::size_t* stall_out) {
         ch.tick();
         flow_a.post_tick();
         flow_b.post_tick();
-        if (with_observers) {
-            ni_a.sample();
-            ni_b.sample();
-            router_obs.sample();
-        }
         ++cycle;
     }
-    if (with_observers && (flow_a.done() && flow_b.done())) phase.begin_drain();
-    if (stall_out) *stall_out = router_obs.credit_stall_cycles();
     EXPECT_EQ(flow_a.mismatches(), 0u);
     EXPECT_EQ(flow_b.mismatches(), 0u);
     return cycle;
@@ -408,9 +388,8 @@ std::size_t run_loopback(bool with_observers, std::size_t* stall_out) {
 }  // namespace
 
 TEST(RouterLoopbackPerf, ObserversAreNonIntrusive) {
-    std::size_t stall = 0;
-    const std::size_t plain = run_loopback(/*with_observers=*/false, nullptr);
-    const std::size_t obs = run_loopback(/*with_observers=*/true, &stall);
+    const std::size_t plain = run_loopback(/*with_observers=*/false);
+    const std::size_t obs = run_loopback(/*with_observers=*/true);
     EXPECT_EQ(plain, obs) << "attaching observers changed cycle-to-completion (plain=" << plain
                           << " obs=" << obs << ")";
 }
