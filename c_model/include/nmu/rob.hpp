@@ -75,6 +75,21 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         drain_observer_ = std::move(cb);
     }
 
+    // Test introspection: current outstanding-entry count summed over all ids.
+    // Counts the Disabled-mode per-id `outstanding` deques (the mode the c_model
+    // runs this round). Enabled-mode slot-pool occupancy (write_entries_) is not
+    // counted -- extend here if/when Enabled mode is exercised.
+    std::size_t write_occupancy() const {
+        std::size_t n = 0;
+        for (const auto& s : write_) n += s.outstanding.size();
+        return n;
+    }
+    std::size_t read_occupancy() const {
+        std::size_t n = 0;
+        for (const auto& s : read_) n += s.outstanding.size();
+        return n;
+    }
+
   private:
     std::function<void(bool, uint8_t)> drain_observer_;
     void notify_drained(bool is_write, uint8_t id) {
