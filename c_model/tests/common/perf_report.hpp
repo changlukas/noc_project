@@ -112,15 +112,15 @@ class PerfReport {
     static std::string component_json(const ComponentRecord& c, bool with_kind) {
         std::string o = "{";
         if (with_kind) o += "\"kind\":\"" + c.kind + "\",";
-        o += "\"hop_latency_cyc\":{\"min\":" + std::to_string(c.hop_min) +
+        o += "\"latency_cyc\":{\"min\":" + std::to_string(c.hop_min) +
              ",\"mean\":" + std::to_string(c.hop_mean) + ",\"max\":" + std::to_string(c.hop_max) +
              "},\"occupancy\":{\"max\":" + std::to_string(c.occ_max) +
              ",\"capacity\":" + std::to_string(c.occ_capacity) + "}}";
         return o;
     }
     static void write_component_line(std::ostream& os, const ComponentRecord& c) {
-        os << "[perf:" << c.name << "] kind=" << c.kind << " hop(min/mean/max)=" << c.hop_min << '/'
-           << c.hop_mean << '/' << c.hop_max << " occ(max/cap)=" << c.occ_max << '/'
+        os << "[perf:" << c.name << "] kind=" << c.kind << " latency(min/mean/max)=" << c.hop_min
+           << '/' << c.hop_mean << '/' << c.hop_max << " occ(max/cap)=" << c.occ_max << '/'
            << c.occ_capacity << '\n';
     }
 
