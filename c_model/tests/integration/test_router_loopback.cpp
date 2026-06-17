@@ -463,14 +463,36 @@ namespace {
 struct IsolatedResult {
     uint64_t write_zero_load = 0;  // Pass-1 isolated end-to-end latency (write)
     uint64_t read_zero_load = 0;   // Pass-1 isolated end-to-end latency (read)
-    // Per-component no-stall dwells from Pass 1. Zero = not measured.
+    // Per-component no-stall dwells from Pass 1.
+    // NMU/NSU dwell is ~0: pull-based model, upstream-first tick, all NI sub-stages
+    // advance in one tick (see nmu.hpp upstream-first tick order).
     uint64_t nmu_req_dwell = 0;
     uint64_t router_req_dwell = 0;
     uint64_t nsu_req_dwell = 0;
     uint64_t nsu_rsp_dwell = 0;
     uint64_t router_rsp_dwell = 0;
     uint64_t nmu_rsp_dwell = 0;
+    // Router occupancy: peak observed and configured capacity from Pass 1.
+    std::size_t router_occ_max = 0;
+    std::size_t router_occ_capacity = 0;
 };
+
+// Returns sum of all component dwells (both request leg and response leg).
+// Asserts that zero_load >= sum before any subtraction so a negative remainder
+// fails the test instead of being silently clamped.
+// sum_dwells covers: nmu_req + router_req (req leg) + nsu_req + nsu_rsp +
+// router_rsp + nmu_rsp (rsp leg) — the full round-trip decomposition.
+inline uint64_t compute_slave_remainder(const IsolatedResult& iso) {
+    const uint64_t sum = iso.nmu_req_dwell + iso.router_req_dwell + iso.nsu_req_dwell +
+                         iso.nsu_rsp_dwell + iso.router_rsp_dwell + iso.nmu_rsp_dwell;
+    EXPECT_GE(iso.write_zero_load, sum)
+        << "component dwells exceed zero_load (slave_remainder would be negative): "
+        << "sum=" << sum << " zero_load=" << iso.write_zero_load << " nmu_req=" << iso.nmu_req_dwell
+        << " router_req=" << iso.router_req_dwell << " nsu_req=" << iso.nsu_req_dwell
+        << " nsu_rsp=" << iso.nsu_rsp_dwell << " router_rsp=" << iso.router_rsp_dwell
+        << " nmu_rsp=" << iso.nmu_rsp_dwell;
+    return (iso.write_zero_load >= sum) ? (iso.write_zero_load - sum) : 0;
+}
 
 // Run the Flow-B signature (node 0 -> node 1) alone on a fresh fabric.
 // Wires NI-edge probes and inter-router link probes; Flow binds NMU/NSU to
@@ -530,12 +552,15 @@ IsolatedResult characterize_signature() {
     flow.set_on_slave_req_beat([&](uint8_t /*axi_ch*/) { nsu_req_slave_cycle = now; });
     flow.set_on_slave_rsp_beat([&](uint8_t /*axi_ch*/) { nsu_rsp_slave_cycle = now; });
 
+    std::size_t occ_max = 0;
     std::size_t cycle = 0;
     const std::size_t cap = 100000;
     while (!flow.done() && cycle < cap) {
         now = cycle;
         flow.pre_tick();
         ch.tick();
+        // Sample req router LOCAL output FIFO occupancy after each tick.
+        occ_max = std::max(occ_max, ch.req_router(1).output_fifo_size(TwoNodeFabric::LOCAL));
         flow.post_tick();
         ++cycle;
     }
@@ -543,6 +568,8 @@ IsolatedResult characterize_signature() {
     IsolatedResult out;
     out.write_zero_load = ni.write_latency().count() ? ni.write_latency().min() : 0;
     out.read_zero_load = ni.read_latency().count() ? ni.read_latency().min() : 0;
+    out.router_occ_max = occ_max;
+    out.router_occ_capacity = ch.req_router(1).output_fifo_depth();
 
     // NMU req dwell: AW/AR accept cycle -> first req flit at NMU NoC edge.
     if (!nmu_req_out_log.crossings().empty())
@@ -587,12 +614,12 @@ TEST(RouterLoopbackPerf, DecompositionSanity) {
     ASSERT_GT(iso.write_zero_load, 0u) << "isolated write flow did not complete";
     const uint64_t sum_dwells = iso.nmu_req_dwell + iso.router_req_dwell + iso.nsu_req_dwell +
                                 iso.nsu_rsp_dwell + iso.router_rsp_dwell + iso.nmu_rsp_dwell;
-    EXPECT_GE(iso.write_zero_load, sum_dwells)
-        << "component dwells exceed zero_load (slave_remainder < 0): sum=" << sum_dwells
-        << " zero_load=" << iso.write_zero_load << " nmu_req=" << iso.nmu_req_dwell
-        << " router_req=" << iso.router_req_dwell << " nsu_req=" << iso.nsu_req_dwell
-        << " nsu_rsp=" << iso.nsu_rsp_dwell << " router_rsp=" << iso.router_rsp_dwell
-        << " nmu_rsp=" << iso.nmu_rsp_dwell;
+    // Hard guard: slave_remainder must not be negative.
+    ASSERT_GE(iso.write_zero_load, sum_dwells)
+        << "slave_remainder is negative; measured dwells exceed zero_load"
+        << " sum=" << sum_dwells << " zero_load=" << iso.write_zero_load;
+    // compute_slave_remainder also fires EXPECT_GE with the full breakdown.
+    (void)compute_slave_remainder(iso);
 }
 
 TEST(RouterLoopbackPerf, MinLatencyAtLeastZeroLoad) {
@@ -633,11 +660,12 @@ TEST(RouterLoopbackPerf, MinLatencyAtLeastZeroLoad) {
     EXPECT_GE(ni_b.write_latency().min(), zl)
         << "measured=" << ni_b.write_latency().min() << " zero_load=" << zl;
 
-    // Compute slave_remainder and emit perf report.
-    const uint64_t sum_dwells = iso.nmu_req_dwell + iso.router_req_dwell + iso.nsu_req_dwell +
-                                iso.nsu_rsp_dwell + iso.router_rsp_dwell + iso.nmu_rsp_dwell;
-    const uint64_t slave_rem =
-        (iso.write_zero_load >= sum_dwells) ? (iso.write_zero_load - sum_dwells) : 0;
+    // compute_slave_remainder asserts zero_load >= sum (both req + rsp legs)
+    // before subtracting. sum_dwells covers the full round-trip:
+    //   req leg: nmu_req + router_req + nsu_req
+    //   rsp leg: nsu_rsp + router_rsp + nmu_rsp
+    // NMU/NSU dwell is ~0 (pull-based model, upstream-first tick; see nmu.hpp).
+    const uint64_t slave_rem = compute_slave_remainder(iso);
 
     PerfReport rep;
     rep.set_scenario("AX4-BAS-003");
@@ -646,16 +674,17 @@ TEST(RouterLoopbackPerf, MinLatencyAtLeastZeroLoad) {
     const std::vector<std::string> rsp_path = {"NSU1", "R(1,0)", "R(0,0)", "NMU0"};
     rep.add_transaction(TxnRecord{42, "write", 0, "NMU0", "NSU1", req_path, rsp_path,
                                   ni_b.write_latency().min(), zl});
-    if (iso.nmu_req_dwell > 0)
-        rep.add_ni(ComponentRecord{"NMU0", "nmu", iso.nmu_req_dwell,
-                                   static_cast<double>(iso.nmu_req_dwell), iso.nmu_req_dwell, 0,
-                                   0});
+    // Always emit NI records; NMU/NSU dwell of 0 is the honest pull-based value.
+    rep.add_ni(ComponentRecord{"NMU0", "nmu", iso.nmu_req_dwell,
+                               static_cast<double>(iso.nmu_req_dwell), iso.nmu_req_dwell, 0, 0});
+    rep.add_ni(ComponentRecord{"NSU1", "nsu", iso.nsu_req_dwell,
+                               static_cast<double>(iso.nsu_req_dwell), iso.nsu_req_dwell, 0, 0});
     if (iso.router_req_dwell > 0) {
-        TwoNodeFabric ch2(static_cast<uint8_t>(num_vc));
+        // occ_capacity from config constant (output_fifo_depth()); occ_max sampled
+        // during Pass-1 characterize_signature run.
         rep.add_router(ComponentRecord{
             "R(1,0)", "router", iso.router_req_dwell, static_cast<double>(iso.router_req_dwell),
-            iso.router_req_dwell, ch2.req_router(1).output_fifo_size(TwoNodeFabric::LOCAL),
-            ch2.req_router(1).output_fifo_depth()});
+            iso.router_req_dwell, iso.router_occ_max, iso.router_occ_capacity});
     }
     rep.emit();
 }
