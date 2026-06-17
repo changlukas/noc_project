@@ -56,16 +56,28 @@ Observation surfaces, by boundary type:
 
 - AXI edge (beats): `AxiMaster` issue/completion callbacks, for transaction
   latency. This is the only non-flit boundary.
-- NoC flit boundaries (flits): testbench-only link wrappers on every NoC port
-  where flits flow -- NMU NoC port, NSU NoC port, and each inter-router link.
-  A wrapper is a decorator over the link interface (`NocReqOut` / `NocRspIn` /
-  `RouterLink`) that timestamps each flit crossing, then forwards it unchanged.
-- Occupancy: const introspection already on the components
-  (`Router::input_fifo_size` / `output_fifo_size`, NI queue depths).
+- NoC flit boundaries (flits): testbench-only decorators over the flit interfaces
+  that the perf testbench wires between the NI and the fabric. The perf testbench
+  uses the full `Nmu` / `Nsu` (constructed with injected NoC interfaces), not the
+  `*Standalone` pop/inject accessors, so all four NI NoC interfaces are
+  wrappable -- `NocReqOut` (NMU request out), `NocRspIn` (NMU response in),
+  `NocReqIn` (NSU request in), `NocRspOut` (NSU response out) -- plus each
+  inter-router `RouterLink` (attached at `TwoNodeFabric::set_downstream`). A
+  decorator timestamps each flit crossing, then forwards it unchanged.
+- Occupancy: const introspection. `Router::input_fifo_size` / `output_fifo_size`
+  exist; the capacities (`vc_depth`, `output_fifo_depth`) and the NSU
+  busiest-queue occupancy are not yet exposed and are added as additive const
+  getters (Section 9), in the same pattern as the v1 `Rob`/`Router` getters.
 
-This makes the mechanism symmetric: every flit boundary is link-wrapped (NI and
-router alike); only the AXI edge uses callbacks, because only the NI converts
+This makes the mechanism symmetric: every flit boundary is decorator-wrapped (NI
+and router alike); only the AXI edge uses callbacks, because only the NI converts
 between AXI beats and NoC flits.
+
+Flit pairing: a flit's entry and exit at a boundary are matched by per-link,
+per-VC FIFO order (the links and FIFOs preserve order, so the Nth flit in is the
+Nth flit out). `Flit` carries no probe-unique id, so order-pairing is the
+mechanism; it is exact under the no-contention characterization pass and within
+a single VC during measurement.
 
 ### Why the NI uses both
 
@@ -81,10 +93,14 @@ The probe runs the scenario twice.
 
 Pass 1 -- characterization (no contention): inject one transaction signature at
 a time into an otherwise empty network. Each flit sees zero queueing, so its
-per-component dwell equals the component depth. This pass yields:
+measured per-segment latency equals the structural segment latency. A segment is
+one boundary-to-next-boundary hop (a flit crossing boundary `i` to crossing
+boundary `i+1`); it includes the component's processing and its outgoing link,
+so the segments tile the path with no gap. This pass yields:
 
-- component depth per (component, direction), feeding the calculator and the
-  `hop_latency_cyc.min` field.
+- segment depth per (component, AXI channel) -- AW, W, AR, R are measured
+  separately because they traverse different packetizer/arbiter paths -- feeding
+  the calculator and the `hop_latency_cyc.min` field.
 - the per-signature zero-load ground truth (end-to-end via callbacks), used to
   validate the calculator (Section 7).
 
@@ -111,18 +127,20 @@ zero_load(txn) =
   + (num_data_flits - 1)        # serialization, applied once on the multi-beat leg
 ```
 
-- A transaction's latency spans the request leg (master to slave) then the
-  response leg (slave back to master); both legs are summed.
-- `depth(req)` and `depth(rsp)` may differ per component (a NMU packetizes on
-  the request leg, depacketizes on the response leg).
+- Each `depth` is a measured per-segment latency from Pass 1 (boundary to next
+  boundary, including the outgoing link). Because the segments tile the path with
+  no gap, the sum has no missing inter-component or link term.
+- Depths are per AXI channel and per leg: the request leg uses AW/W/AR segment
+  depths, the response leg uses B/R segment depths. They differ (a NMU packetizes
+  on the request leg, depacketizes on the response leg).
 - `num_data_flits` is the beat count of the data-carrying direction (W beats for
-  a write, R beats for a read). One flit per cycle injection makes the
-  serialization term `(beats - 1)` cycles, added once.
-- Component depths come from Pass 1 (measured, not statically derived from
-  code).
-
-The path itself is deterministic under XY routing, so it is derived from
-`src`/`dst`, not traced.
+  a write, R beats for a read). The serialization term `(beats - 1)` cycles holds
+  only while the burst fits within the downstream buffer depth, so no flit waits
+  on a credit round-trip. For a burst longer than the buffer, self-credit-stall
+  adds cycles the term omits; check 7.1 detects this and marks the signature out
+  of the calculator's analytic range.
+- The path is deterministic under XY routing, derived from `src`/`dst`, not
+  traced.
 
 ## 7. Validation
 
@@ -196,9 +214,24 @@ New and changed, all testbench-only under `c_model/tests/` (namespace
 | `c_model/tests/common/zero_load_calculator.hpp` | new: path + depths -> zero-load latency |
 | `c_model/tests/common/perf_report.hpp` | rewrite to emit the Section 8 JSON + stdout summary |
 
-No production header changes. The router link wrappers attach where
-`TwoNodeFabric` wires `set_downstream`; the NI link wrappers attach at the
-`NmuStandalone` / `NsuStandalone` NoC accessors.
+Production introspection getters (additive, const-only, the v1 `Rob`/`Router`
+pattern):
+
+| File | Getter |
+|---|---|
+| `c_model/include/noc/router.hpp` | `vc_depth()`, `output_fifo_depth()` -- expose the configured capacities for the occupancy `capacity` field |
+| `c_model/include/nsu/nsu.hpp` | a const occupancy getter for the NSU's busiest internal queue (MetaBuffer / depacketize / AXI port), mirroring the NMU `Rob` occupancy getter |
+
+The router decorators attach where `TwoNodeFabric` wires `set_downstream`; the NI
+decorators wrap the four NoC interfaces the perf testbench injects into `Nmu` /
+`Nsu`.
+
+Coordinated changeset. Deleting `perf_common.hpp` and `router_perf_observer.hpp`,
+shrinking `NIPerfObserver`, and rewriting `PerfReport` all break each other's
+callers and the tests `test_perf_phase` / `test_router_perf_observer`. The
+implementation plan applies these as one changeset and updates
+`c_model/tests/common/CMakeLists.txt` (remove the two dead test targets, add the
+new ones) in the same step.
 
 ## 10. Log location
 
