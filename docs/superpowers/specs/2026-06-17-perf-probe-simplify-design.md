@@ -1,4 +1,4 @@
-# Perf probe simplification: zero-load (measured) + per-component pipeline dwell
+# Perf probe simplification: zero-load (measured) + per-component latency
 
 Date: 2026-06-17
 Status: Draft (pending user review)
@@ -26,10 +26,9 @@ pipeline dwells (with the slave as a remainder), under two validation checks.
 
 - zero-load latency: the end-to-end latency of a transaction when it is alone
   in the network (no contention). Standard term (Dally & Towles).
-- component depth: the no-stall structural latency of one component, in cycles
-  (the pipeline depth a flit traverses with no backpressure).
-- dwell: the cycles a flit actually spends in a component during a run
-  (>= depth; the excess is queueing).
+- per-component latency: the cycles a flit spends traversing one component. Its
+  Pass-1 no-stall value (the `min`) is the component's structural pipeline depth;
+  under contention (`mean`/`max`) the excess over that floor is queueing.
 - queueing: `measured_latency - zero_load`, the contention delay.
 
 ## 3. Scope
@@ -115,7 +114,7 @@ Pass 2 -- measurement (the real scenario): run the scenario as authored. This
 pass yields per transaction: measured latency (callbacks), path, and the
 per-component occupancy peak (introspection).
 
-## 6. Zero-load and per-component dwell decomposition
+## 6. Zero-load and per-component latency decomposition
 
 `zero_load` is the isolated measured latency (Section 5), not a formula. The
 probe additionally decomposes it into per-component no-stall pipeline dwells, so
@@ -205,15 +204,15 @@ and that buffer's capacity.
   ],
   "ni": {
     "NMU0": { "kind": "nmu",
-              "hop_latency_cyc": { "min": 2, "mean": 3.1, "max": 6 },
+              "latency_cyc": { "min": 2, "mean": 3.1, "max": 6 },
               "occupancy": { "max": 4, "capacity": 4 } },
-    "NSU1": { "kind": "nsu", "hop_latency_cyc": { "min": 2, "mean": 2.4, "max": 5 },
+    "NSU1": { "kind": "nsu", "latency_cyc": { "min": 2, "mean": 2.4, "max": 5 },
               "occupancy": { "max": 3, "capacity": 32 } }
   },
   "router": {
-    "R(0,0)": { "hop_latency_cyc": { "min": 3, "mean": 4.0, "max": 9 },
+    "R(0,0)": { "latency_cyc": { "min": 3, "mean": 4.0, "max": 9 },
                 "occupancy": { "max": 3, "capacity": 4 } },
-    "R(1,0)": { "hop_latency_cyc": { "min": 3, "mean": 3.6, "max": 7 },
+    "R(1,0)": { "latency_cyc": { "min": 3, "mean": 3.6, "max": 7 },
                 "occupancy": { "max": 2, "capacity": 4 } }
   },
   "slave": { "remainder_cyc": 1 }
@@ -223,7 +222,7 @@ and that buffer's capacity.
 - `ni` holds both NMU and NSU entries, distinguished by `kind`; `router` holds
   the routers; `slave` holds the remainder. Together with `transactions[]` these
   give the pipeline-stage breakdown of `zero_load`.
-- `hop_latency_cyc.min` is the no-stall component dwell measured in Pass 1; the NI
+- `latency_cyc.min` is the no-stall component dwell measured in Pass 1; the NI
   dwell is measured from the AXI accept callback to the NoC-edge flit crossing
   (Section 6); `mean`/`max` show contention in Pass 2.
 - `slave.remainder_cyc` = `zero_load` minus the summed component dwells (Section
