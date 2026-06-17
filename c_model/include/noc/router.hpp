@@ -123,6 +123,16 @@ class Router {
         return input_fifo_[port][vc].size();
     }
     std::size_t output_fifo_size(std::size_t port) const { return output_fifo_[port].size(); }
+    uint8_t num_vc() const { return cfg_.num_vc; }
+    // Front flit's routed output port for (in_port, vc), or nullopt if empty.
+    // Pure read; mirrors stage-2's route check without side effects.
+    std::optional<RouterPort> front_route(std::size_t in_port, uint8_t vc) const {
+        if (in_port >= ROUTER_PORT_COUNT || vc >= cfg_.num_vc) return std::nullopt;
+        const auto& q = input_fifo_[in_port][vc];
+        if (q.empty()) return std::nullopt;
+        const auto dst = static_cast<uint8_t>(q.front().get_header_field("dst_id"));
+        return route_compute(dst, cfg_);
+    }
 
   private:
     struct InputAdapter : RouterLink {

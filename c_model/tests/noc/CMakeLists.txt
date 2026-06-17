@@ -8,3 +8,7 @@ target_include_directories(test_router PRIVATE
 
 add_cmodel_test(test_router_adapters)
 target_include_directories(test_router_adapters PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_router_front_route)
+target_include_directories(test_router_front_route PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
