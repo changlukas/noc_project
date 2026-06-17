@@ -702,6 +702,8 @@ struct AxiMasterConfig {
 // AxiMasterStandalone owns a WireSlavePort and wraps AxiMasterT<WireSlavePort>.
 // Exposes the same public API as AxiMasterT: tick(), done(), on_write_completed(),
 // on_read_observed(), active_write_count(), active_read_count().
+// Note: on_write_issued()/on_read_issued() exist on AxiMasterT but are intentionally
+// not forwarded here (cosim path does not need them).
 // wire_port() gives ShellAdapter direct access to drain request beats and
 // inject response beats on each DPI tick.
 class AxiMasterStandalone {

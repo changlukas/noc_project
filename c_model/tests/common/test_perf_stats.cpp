@@ -22,6 +22,7 @@ TEST(PerfStats, EmptyIsSafe) {
     EXPECT_EQ(s.min(), 0u);
     EXPECT_EQ(s.max(), 0u);
     EXPECT_DOUBLE_EQ(s.mean(), 0.0);  // no div-by-zero
+    EXPECT_DOUBLE_EQ(s.variance(), 0.0);
 }
 
 TEST(PerfStats, ThresholdBinsCountCorrectly) {
