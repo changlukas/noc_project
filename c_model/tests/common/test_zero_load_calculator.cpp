@@ -11,12 +11,12 @@ TEST(ZeroLoadCalc, XyPathCountsHops) {
 }
 
 TEST(ZeroLoadCalc, FormulaMatchesManualSum) {
-    // One inter-router hop (path {0,1} -> 1 router on each leg).
+    // router_req=3 is the caller-pre-summed total over all routers on the leg.
     // depths: nmu_req=2 nsu_req=2 router_req=3 ; nsu_rsp=2 nmu_rsp=2 router_rsp=3.
     DepthTable d{/*nmu_req=*/2, /*nmu_rsp=*/2,    /*nsu_req=*/2,
                  /*nsu_rsp=*/2, /*router_req=*/3, /*router_rsp=*/3};
-    // request leg: nmu_req(2) + 1*router_req(3) + nsu_req(2) = 7
-    // response leg: nsu_rsp(2) + 1*router_rsp(3) + nmu_rsp(2) = 7
+    // request leg: nmu_req(2) + router_req(3) + nsu_req(2) = 7  (added once)
+    // response leg: nsu_rsp(2) + router_rsp(3) + nmu_rsp(2) = 7  (added once)
     // serialization: (num_data_flits - 1). For a 1-beat write: 0.
     EXPECT_EQ(zero_load(0, 1, 2, 1, /*num_data_flits=*/1, d), 14u);
     // 3-beat write adds (3-1)=2.
@@ -24,8 +24,9 @@ TEST(ZeroLoadCalc, FormulaMatchesManualSum) {
 }
 
 TEST(ZeroLoadCalc, LocalPathHasNoRouterTerm) {
-    DepthTable d{2, 2, 2, 2, 3, 3};
-    // path {0} -> 0 router hops: nmu_req(2)+nsu_req(2) + nsu_rsp(2)+nmu_rsp(2) = 8.
+    DepthTable d{2, 2, 2, 2, /*router_req=*/0, /*router_rsp=*/0};
+    // local path: caller passes router_req=router_rsp=0;
+    // nmu_req(2)+nsu_req(2)+nsu_rsp(2)+nmu_rsp(2) = 8.
     EXPECT_EQ(zero_load(0, 0, 2, 1, /*num_data_flits=*/1, d), 8u);
 }
 

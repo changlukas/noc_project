@@ -41,7 +41,8 @@ inline std::vector<uint8_t> xy_path(uint8_t src_id, uint8_t dst_id, uint8_t /*me
 }
 
 // Per-component, per-leg segment depths (Pass-1 measured). req leg uses AW/W/AR
-// segment depths; rsp leg uses B/R. router_* is the per-router-hop depth.
+// segment depths; rsp leg uses B/R. router_req / router_rsp are the SUM over the
+// routers on the leg (caller pre-sums; pass 0 for a local same-node path).
 struct DepthTable {
     uint64_t nmu_req;
     uint64_t nmu_rsp;
@@ -51,18 +52,15 @@ struct DepthTable {
     uint64_t router_rsp;
 };
 
-// Section 6 formula. router hop count is the number of routers traversed on a
-// leg; for an N-node path the flit crosses (N-1) inter-router links but passes
-// through the routers at each hop. Per spec sec 6 the segment depths tile the
-// path with no gap; the request and response legs each traverse the same hop
-// count, so router_req / router_rsp are each multiplied by the inter-router hop
-// count (path.size() - 1). Serialization (num_data_flits - 1) is applied once.
-inline uint64_t zero_load(uint8_t src_id, uint8_t dst_id, uint8_t mesh_x_dim, uint8_t mesh_y_dim,
-                          std::size_t num_data_flits, const DepthTable& d) {
-    const auto path = xy_path(src_id, dst_id, mesh_x_dim, mesh_y_dim);
-    const uint64_t hops = static_cast<uint64_t>(path.empty() ? 0 : path.size() - 1);
-    const uint64_t request_leg = d.nmu_req + hops * d.router_req + d.nsu_req;
-    const uint64_t response_leg = d.nsu_rsp + hops * d.router_rsp + d.nmu_rsp;
+// Section 6 formula: sum the per-leg segment depths, which tile the path with no
+// gap. router_req / router_rsp are already the SUM over the routers on the leg
+// (the caller pre-sums them; a local same-node path passes router_req=router_rsp=0).
+// Added once per leg -- do NOT multiply by hop count. src/dst/mesh args are kept
+// for signature stability (the path is derived via xy_path for the JSON path list).
+inline uint64_t zero_load(uint8_t /*src_id*/, uint8_t /*dst_id*/, uint8_t /*mesh_x_dim*/,
+                          uint8_t /*mesh_y_dim*/, std::size_t num_data_flits, const DepthTable& d) {
+    const uint64_t request_leg = d.nmu_req + d.router_req + d.nsu_req;
+    const uint64_t response_leg = d.nsu_rsp + d.router_rsp + d.nmu_rsp;
     const uint64_t serialization = num_data_flits > 0 ? num_data_flits - 1 : 0;
     return request_leg + response_leg + serialization;
 }
