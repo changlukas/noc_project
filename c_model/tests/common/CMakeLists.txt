@@ -29,3 +29,8 @@ target_include_directories(test_perf_stats PRIVATE
 add_cmodel_test(test_perf_phase)
 target_include_directories(test_perf_phase PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_axi_master_callbacks)
+target_include_directories(test_axi_master_callbacks PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(test_axi_master_callbacks PRIVATE yaml-cpp::yaml-cpp)
