@@ -38,3 +38,7 @@ target_link_libraries(test_axi_master_callbacks PRIVATE yaml-cpp::yaml-cpp)
 add_cmodel_test(test_ni_perf_observer)
 target_include_directories(test_ni_perf_observer PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_router_perf_observer)
+target_include_directories(test_router_perf_observer PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
