@@ -10,13 +10,17 @@ additive const getters on `Router`; the DUT timing is untouched.
 ## 1. The log and the pipeline at a glance
 
 Read the log against the pipeline it measures. The same numbers appear in both.
+The decomposition values -- `zero_load_cyc`, the `ni`/`router` latencies, and
+`slave.remainder_cyc` -- are the measured isolated AX4-BAS-003 write. The
+`measured_latency_cyc`/`queueing_cyc` pair (marked `*`) is illustrative: it shows
+a contended run, where the single isolated write has `queueing_cyc = 0`.
 
 ```
 JSON log (one write transaction + the per-component breakdown)
-  transactions:[{ measured_latency_cyc:18, zero_load_cyc:15, queueing_cyc:3 }]
+  transactions:[{ measured_latency_cyc:18*, zero_load_cyc:15, queueing_cyc:3* }]
   ni:     { NMU0:{latency_cyc.min:0},   NSU1:{latency_cyc.min:2} }
   router: { R(0,0):{latency_cyc...},    R(1,0):{latency_cyc...} }
-  slave:  { remainder_cyc:6 }
+  slave:  { remainder_cyc:6 }      (* illustrative; all other values measured)
 
 Pipeline (one no-stall round trip = zero_load_cyc = 15 cycles)
 
@@ -38,8 +42,10 @@ Pipeline (one no-stall round trip = zero_load_cyc = 15 cycles)
 - `slave.remainder_cyc` (6) is `zero_load` minus the measured component
   latencies -- the slave's own processing, which the NoC probe does not break
   down further.
-- `measured_latency_cyc` (18) is the real Pass-2 latency; `queueing_cyc` (3) =
-  `measured - zero_load` is the contention delay on top of the floor.
+- `measured_latency_cyc` (18*, illustrative) is the Pass-2 latency under
+  contention; `queueing_cyc` (3*) = `measured - zero_load` is the contention
+  delay on top of the floor. For the isolated write, `measured = zero_load = 15`
+  and `queueing = 0`.
 
 The terms: **zero-load latency** is the end-to-end latency of a transaction alone
 in the network (Dally & Towles). **Per-component latency** is the cycles a flit
