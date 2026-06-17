@@ -87,6 +87,19 @@ struct ReadResult {
     std::size_t scenario_line;
 };
 
+// IssueInfo is fired once per transaction on the first AW/AR handshake.
+// Carries the original scenario_txn geometry so observers can record
+// issue time and correlate with the matching WriteResult/ReadResult.
+struct IssueInfo {
+    bool is_write;
+    uint8_t id;
+    std::size_t scenario_line;
+    uint64_t addr;
+    uint8_t size;
+    uint8_t len;
+    Burst burst;
+};
+
 // SFINAE helper: call slave.force_aw_not_pending() only if the slave type
 // provides that method (WireSlavePort does; NullSlavePort, AxiSlave do not).
 // Used by the fault-injection path to clear stale AW-pending state so that
@@ -155,10 +168,10 @@ class AxiMasterT {
                 // WriteResult carries the ORIGINAL user txn (addr, size, len, burst)
                 // — NOT sub-burst geometry. The scoreboard re-derives per-beat addr
                 // from the original txn.
-                if (wcb_)
-                    wcb_(WriteResult{op.src_txn.addr, op.src_txn.size, op.src_txn.len,
-                                     op.src_txn.burst, op.src_txn.lock, op.data, op.strb_per_beat,
-                                     op.worst_resp_, b->id, op.src_txn.scenario_line});
+                for (auto& cb : wcb_)
+                    cb(WriteResult{op.src_txn.addr, op.src_txn.size, op.src_txn.len,
+                                   op.src_txn.burst, op.src_txn.lock, op.data, op.strb_per_beat,
+                                   op.worst_resp_, b->id, op.src_txn.scenario_line});
                 deq.pop_front();
                 --active_write_count_;
                 if (deq.empty()) active_write_ops_.erase(b->id);
@@ -221,10 +234,10 @@ class AxiMasterT {
                     read_dump_ << '\n';
                 }
                 read_dump_.flush();
-                if (rcb_)
-                    rcb_(ReadResult{op.src_txn.addr, op.src_txn.size, op.src_txn.len,
-                                    op.src_txn.burst, op.read_accumulator, op.worst_resp_, r->id,
-                                    op.src_txn.scenario_line});
+                for (auto& cb : rcb_)
+                    cb(ReadResult{op.src_txn.addr, op.src_txn.size, op.src_txn.len,
+                                  op.src_txn.burst, op.read_accumulator, op.worst_resp_, r->id,
+                                  op.src_txn.scenario_line});
                 deq.pop_front();
                 --active_read_count_;
                 if (deq.empty()) active_read_ops_.erase(r->id);
@@ -305,8 +318,18 @@ class AxiMasterT {
     std::size_t active_write_count() const { return active_write_count_; }
     std::size_t active_read_count() const { return active_read_count_; }
 
-    void on_write_completed(std::function<void(const WriteResult&)> cb) { wcb_ = std::move(cb); }
-    void on_read_observed(std::function<void(const ReadResult&)> cb) { rcb_ = std::move(cb); }
+    void on_write_completed(std::function<void(const WriteResult&)> cb) {
+        wcb_.push_back(std::move(cb));
+    }
+    void on_read_observed(std::function<void(const ReadResult&)> cb) {
+        rcb_.push_back(std::move(cb));
+    }
+    void on_write_issued(std::function<void(const IssueInfo&)> cb) {
+        iwcb_.push_back(std::move(cb));
+    }
+    void on_read_issued(std::function<void(const IssueInfo&)> cb) {
+        ircb_.push_back(std::move(cb));
+    }
 
     // Fault injection: call once after construction to arm a specific violation.
     // When inject.mode == None (default), tick() adds one bool check — no other
@@ -432,8 +455,13 @@ class AxiMasterT {
                     clear_aw_pending_if_supported(slave_);
                     return op.write_request_done();
                 }
+                const bool first_aw = (op.next_aw_sub_idx_ == 0);
                 if (!slave_.push_aw(aw)) return op.write_request_done();
                 ++op.next_aw_sub_idx_;
+                if (first_aw)
+                    for (auto& cb : iwcb_)
+                        cb(IssueInfo{true, id, op.src_txn.scenario_line, op.src_txn.addr,
+                                     op.src_txn.size, op.src_txn.len, op.src_txn.burst});
             }
             const std::size_t bpb = 1ull << sub.size;
             while (op.w_pushed_in_cur_ <= sub.len) {
@@ -484,8 +512,13 @@ class AxiMasterT {
             // Phase C: wire-through scenario_txn.lock onto AR.lock (1-bit).
             ar.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
             ar.qos = op.src_txn.qos;
+            const bool first_ar = (op.next_ar_sub_idx_ == 0);
             if (!slave_.push_ar(ar)) return op.read_request_done();
             ++op.next_ar_sub_idx_;
+            if (first_ar)
+                for (auto& cb : ircb_)
+                    cb(IssueInfo{false, id, op.src_txn.scenario_line, op.src_txn.addr,
+                                 op.src_txn.size, op.src_txn.len, op.src_txn.burst});
         }
         return op.read_request_done();
     }
@@ -495,8 +528,10 @@ class AxiMasterT {
     std::size_t max_out_w_, max_out_r_;
     std::size_t next_txn_idx_ = 0;
     std::ofstream read_dump_;
-    std::function<void(const WriteResult&)> wcb_;
-    std::function<void(const ReadResult&)> rcb_;
+    std::vector<std::function<void(const WriteResult&)>> wcb_;
+    std::vector<std::function<void(const ReadResult&)>> rcb_;
+    std::vector<std::function<void(const IssueInfo&)>> iwcb_;
+    std::vector<std::function<void(const IssueInfo&)>> ircb_;
     // Per-AXI-ID FIFO of outstanding ops (post AXI4 conformity fix — same-id
     // concurrent allowed). AXI4 IHI 0022 §A5.3: responses for same id complete
     // in submission order; per-id deque preserves submission order; B/R routing
@@ -639,19 +674,19 @@ struct WireSlavePort {
 
   private:
     bool awready_ = false;
-    bool wready_  = false;
+    bool wready_ = false;
     bool arready_ = false;
     bool w_delivered_this_tick_ = false;  // beta-tick: max 1 W beat per tick
 
-    bool    aw_pending_ = false;
-    AwBeat  last_aw_{};
-    bool    w_pending_  = false;
-    WBeat   last_w_{};
-    bool    ar_pending_ = false;
-    ArBeat  last_ar_{};
+    bool aw_pending_ = false;
+    AwBeat last_aw_{};
+    bool w_pending_ = false;
+    WBeat last_w_{};
+    bool ar_pending_ = false;
+    ArBeat last_ar_{};
 
-    std::deque<BBeat>  b_queue_;
-    std::deque<RBeat>  r_queue_;
+    std::deque<BBeat> b_queue_;
+    std::deque<RBeat> r_queue_;
 };
 
 }  // namespace detail
@@ -673,8 +708,8 @@ class AxiMasterStandalone {
   public:
     explicit AxiMasterStandalone(AxiMasterConfig cfg)
         : wire_slave_(),
-          inner_(cfg.scenario_yaml, wire_slave_, cfg.read_dump_path,
-                 cfg.max_outstanding_write, cfg.max_outstanding_read) {}
+          inner_(cfg.scenario_yaml, wire_slave_, cfg.read_dump_path, cfg.max_outstanding_write,
+                 cfg.max_outstanding_read) {}
 
     void tick() { inner_.tick(); }
     bool done() const { return inner_.done(); }
