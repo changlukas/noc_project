@@ -16,11 +16,11 @@ The decomposition values -- `zero_load_cyc`, the `ni`/`router` latencies, and
 a contended run, where the single isolated write has `queueing_cyc = 0`.
 
 ```
-JSON log (one write transaction + the per-component breakdown)
-  transactions:[{ measured_latency_cyc:18*, zero_load_cyc:15, queueing_cyc:3* }]
-  ni:     { NMU0:{latency_cyc.min:0},   NSU1:{latency_cyc.min:2} }
-  router: { R(0,0):{latency_cyc...},    R(1,0):{latency_cyc...} }
-  slave:  { remainder_cyc:6 }      (* illustrative; all other values measured)
+Log fields (schematic -- abbreviated, not literal JSON; see Section 6)
+  transactions:  measured_latency_cyc=18*  zero_load_cyc=15  queueing_cyc=3*
+  ni:            NMU0 latency_cyc.min=0    NSU1 latency_cyc.min=2
+  router:        R(0,0) latency_cyc=...    R(1,0) latency_cyc=...
+  slave:         remainder_cyc=6           (* illustrative; others measured)
 
 Pipeline (one no-stall round trip = zero_load_cyc = 15 cycles)
 
@@ -166,6 +166,33 @@ keys: `scenario`, `transactions[]`, `ni{}`, `router{}`, `slave{}`.
 | `ni` / `router` `.<name>.latency_cyc` | `{min, mean, max}`; `min` is the no-stall latency |
 | `ni` / `router` `.<name>.occupancy` | `{max, capacity}` busiest buffer |
 | `slave.remainder_cyc` | `zero_load - sum(component latencies)` |
+
+Example layout (values illustrative):
+
+```json
+{
+  "scenario": "AX4-BAS-003",
+  "transactions": [
+    { "line": 42, "type": "write", "id": 0, "src": "NMU0", "dst": "NSU1",
+      "request_path":  ["NMU0", "R(0,0)", "R(1,0)", "NSU1"],
+      "response_path": ["NSU1", "R(1,0)", "R(0,0)", "NMU0"],
+      "measured_latency_cyc": 18, "zero_load_cyc": 15, "queueing_cyc": 3 }
+  ],
+  "ni": {
+    "NMU0": { "kind": "nmu", "latency_cyc": { "min": 0, "mean": 0.0, "max": 0 },
+              "occupancy": { "max": 1, "capacity": 4 } },
+    "NSU1": { "kind": "nsu", "latency_cyc": { "min": 2, "mean": 2.4, "max": 5 },
+              "occupancy": { "max": 1, "capacity": 32 } }
+  },
+  "router": {
+    "R(0,0)": { "latency_cyc": { "min": 1, "mean": 2.0, "max": 6 },
+                "occupancy": { "max": 1, "capacity": 2 } },
+    "R(1,0)": { "latency_cyc": { "min": 2, "mean": 3.1, "max": 7 },
+                "occupancy": { "max": 1, "capacity": 2 } }
+  },
+  "slave": { "remainder_cyc": 6 }
+}
+```
 
 The JSON is written to a gitignored path (`build/cmodel/perf/<scenario>.json`, or
 `NOC_PERF_FILE`); the stdout summary always prints. `_cyc` marks cycle-valued
