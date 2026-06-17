@@ -45,6 +45,7 @@ struct ComponentRecord {
 class PerfReport {
   public:
     void set_scenario(std::string s) { scenario_ = std::move(s); }
+    void set_slave_remainder(uint64_t cyc) { slave_remainder_ = cyc; }
     void add_transaction(TxnRecord t) { txns_.push_back(std::move(t)); }
     void add_ni(ComponentRecord c) { ni_.push_back(std::move(c)); }
     void add_router(ComponentRecord c) { router_.push_back(std::move(c)); }
@@ -52,6 +53,7 @@ class PerfReport {
     void write_summary(std::ostream& os) const {
         for (const auto& c : ni_) write_component_line(os, c);
         for (const auto& c : router_) write_component_line(os, c);
+        os << "[perf:slave] remainder_cyc=" << slave_remainder_ << '\n';
     }
 
     void write_json(std::ostream& os) const {
@@ -79,7 +81,7 @@ class PerfReport {
             os << '"' << router_[i].name
                << "\":" << component_json(router_[i], /*with_kind=*/false);
         }
-        os << "}}";
+        os << "},\"slave\":{\"remainder_cyc\":" << slave_remainder_ << "}}";
     }
 
     // stdout summary always; JSON to build/cmodel/perf/<scenario>.json (or
@@ -123,6 +125,7 @@ class PerfReport {
     }
 
     std::string scenario_;
+    uint64_t slave_remainder_ = 0;
     std::vector<TxnRecord> txns_;
     std::vector<ComponentRecord> ni_;
     std::vector<ComponentRecord> router_;

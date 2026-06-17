@@ -38,3 +38,25 @@ TEST(PerfReport, JsonContainsSectionEightShape) {
     EXPECT_NE(s.find("NMU0"), std::string::npos);
     EXPECT_NE(s.find("R(0,0)"), std::string::npos);
 }
+
+TEST(PerfReport, SlaveRemainderInJsonAndSummary) {
+    PerfReport rep;
+    rep.set_scenario("slave-remainder-test");
+    rep.set_slave_remainder(7);
+
+    std::ostringstream js;
+    rep.write_json(js);
+    const std::string j = js.str();
+
+    // slave entry present with correct value
+    EXPECT_NE(j.find("\"slave\":{\"remainder_cyc\":7}"), std::string::npos);
+    // JSON must be well-formed: no trailing comma before } or adjacent }}
+    EXPECT_EQ(j.find(",}"), std::string::npos);
+    EXPECT_EQ(j.find("}{"), std::string::npos);
+    // must end with closing brace (no trailing comma at root level)
+    EXPECT_EQ(j.back(), '}');
+
+    std::ostringstream ss;
+    rep.write_summary(ss);
+    EXPECT_NE(ss.str().find("remainder_cyc=7"), std::string::npos);
+}
