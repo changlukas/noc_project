@@ -1,4 +1,4 @@
-# Perf probe simplification: zero-load calculator + per-component dwell
+# Perf probe simplification: zero-load (measured) + per-component pipeline dwell
 
 Date: 2026-06-17
 Status: Draft (pending user review)
@@ -18,8 +18,9 @@ window. The user needs three things only:
 3. The no-stall (structural) cycles a flit spends in each component, and from
    it the zero-load latency.
 
-This design delivers those three from one JSON log, drops the rest, and adds a
-zero-load latency calculator with two validation checks.
+This design delivers those three from one JSON log and drops the rest. Zero-load
+is the isolated measured latency; the probe decomposes it into per-component
+pipeline dwells (with the slave as a remainder), under two validation checks.
 
 ## 2. Terms
 
@@ -35,10 +36,10 @@ zero-load latency calculator with two validation checks.
 
 In scope:
 
-- Per-transaction measured latency, zero-load latency, queueing, and path.
-- Per-component (NMU, NSU, each router) aggregate dwell (min/mean/max) and
-  aggregate occupancy (busiest buffer peak + capacity).
-- A zero-load calculator and its two validation checks.
+- Per-transaction measured latency, zero-load (isolated) latency, queueing, path.
+- Per-component (NMU, NSU, each router) measured pipeline dwell (min/mean/max) and
+  aggregate occupancy (busiest buffer peak + capacity), plus a slave remainder.
+- Two validation checks (decomposition sanity + min-latency floor).
 - One JSON log plus a stdout summary.
 
 Out of scope (removed from the v1 probe):
@@ -77,9 +78,9 @@ between AXI beats and NoC flits.
 
 Flit pairing: a flit's entry and exit at a boundary are matched by per-link,
 per-VC FIFO order (the links and FIFOs preserve order, so the Nth flit in is the
-Nth flit out). `Flit` carries no probe-unique id, so order-pairing is the
-mechanism; it is exact under the no-contention characterization pass and within
-a single VC during measurement.
+Nth flit out). To map a crossing to its transaction, the `FlitLog` records the
+flit's AXI id and `scenario_line` (Section 9). Pairing is exact under the
+no-contention characterization pass and within a single VC during measurement.
 
 ### Why the NI uses both
 
@@ -93,73 +94,93 @@ link-wrapped.
 
 The probe runs the scenario twice.
 
-Pass 1 -- characterization (no contention): inject one transaction signature at
-a time into an otherwise empty network. Each flit sees zero queueing, so its
-measured per-segment latency equals the structural segment latency. A segment is
-one boundary-to-next-boundary hop (a flit crossing boundary `i` to crossing
-boundary `i+1`); it includes the component's processing and its outgoing link,
-so the segments tile the path with no gap. This pass yields:
+Timing boundary: latency is counted from when the NMU accepts the AXI request
+(AW/AR accept) to when the NMU returns the AXI response (B / last R). Master-side
+queueing before AW/AR accept is excluded.
 
-- segment depth per (component, AXI channel) -- AW, W, AR, R are measured
-  separately because they traverse different packetizer/arbiter paths -- feeding
-  the calculator and the `hop_latency_cyc.min` field.
-- the per-signature zero-load ground truth (end-to-end via callbacks), used to
-  validate the calculator (Section 7).
+Pass 1 -- characterization (no contention): inject one signature at a time into
+an otherwise empty network, so every flit sees zero queueing. This pass yields:
 
-A signature is `(src, dst, type, burst_len)`; zero-load depends only on the
-signature, so each distinct signature is characterized once.
+- `zero_load(signature)` = the isolated end-to-end latency over the boundary
+  above, taken directly from the `AxiMaster` issue/completion callbacks. The
+  callbacks carry no cycle field, so the harness stamps the current cycle (`now`)
+  when each fires.
+- the per-component no-stall pipeline dwell (Section 6): NMU, each router, and
+  NSU, from the boundary-crossing timestamps collected this pass.
+
+A signature is `(src, dst, type, burst_len)`; zero-load and the dwells depend
+only on the signature, so each distinct signature is characterized once.
 
 Pass 2 -- measurement (the real scenario): run the scenario as authored. This
-pass yields:
+pass yields per transaction: measured latency (callbacks), path, and the
+per-component occupancy peak (introspection).
 
-- measured latency per transaction (callbacks).
-- per-component dwell min/mean/max (link wrappers).
-- per-component occupancy peak (introspection).
-- path per transaction.
+## 6. Zero-load and per-component dwell decomposition
 
-## 6. Zero-load calculator
+`zero_load` is the isolated measured latency (Section 5), not a formula. The
+probe additionally decomposes it into per-component no-stall pipeline dwells, so
+a reader sees where the latency goes -- a pipeline-stage view. The pipeline
+structure each dwell measures is in Section 6.1.
 
-The calculator computes zero-load from the path and the component depths, rather
-than re-measuring it per run:
+Per-component dwell (measured in Pass 1, no contention):
 
-```
-zero_load(txn) =
-    request leg:   NMU.depth(req) + sum ROUTER.depth(req) over request hops + NSU.depth(req)
-  + response leg:  NSU.depth(rsp) + sum ROUTER.depth(rsp) over response hops + NMU.depth(rsp)
-  + (num_data_flits - 1)        # serialization, applied once on the multi-beat leg
-```
+- NMU request dwell = (cycle the first request flit leaves the NMU NoC edge) -
+  (AW/AR accept cycle). The start is the `AxiMaster` issue callback; the end is
+  the wrapped `NocReqOut` crossing. This dwell includes the NMU's AXI-to-flit
+  conversion -- the AXI side is not split out, it is the NMU pipeline's first
+  stage.
+- Router dwell per hop = (flit leaves the router) - (flit enters the router),
+  from the inject / inter-router-link / eject `LinkProbe`s.
+- NSU request dwell = (cycle the last request beat is driven to the slave --
+  WLAST for a write, AR for a read) - (cycle the request flit enters the NSU).
+  The slave-drive cycle is observed at the harness shuttle point where the NSU
+  AXI master port hands the beat to the slave (`pop_aw`/`pop_w`/`pop_ar` ->
+  `slave.push_*`); no AxiMasterPort change is needed.
+- The response leg measures the symmetric dwells (NSU response, router, NMU
+  response) the same way.
 
-- Each `depth` is a measured per-segment latency from Pass 1 (boundary to next
-  boundary, including the outgoing link). Because the segments tile the path with
-  no gap, the sum has no missing inter-component or link term.
-- Depths are per AXI channel and per leg: the request leg uses AW/W/AR segment
-  depths, the response leg uses B/R segment depths. They differ (a NMU packetizes
-  on the request leg, depacketizes on the response leg).
-- `num_data_flits` is the beat count of the data-carrying direction (W beats for
-  a write, R beats for a read). The serialization term `(beats - 1)` cycles holds
-  only while the burst fits within the downstream buffer depth, so no flit waits
-  on a credit round-trip. For a burst longer than the buffer, self-credit-stall
-  adds cycles the term omits; check 7.1 detects this and marks the signature out
-  of the calculator's analytic range.
-- The path is deterministic under XY routing, derived from `src`/`dst`, not
-  traced.
+Flit-to-transaction correlation: a flit crossing is mapped to its transaction by
+the flit's AXI id and `scenario_line`, which the `FlitLog` records (the
+packetizer carries `awid`/`arid`; the log is extended to capture them).
+
+slave_remainder = `zero_load` - sum(all measured component dwells). It is shown
+as a `slave` entry. It absorbs the slave's own processing plus any latency not
+attributed to a measured component. By construction it cannot be the source of
+its own validation (Section 7), so the validation checks `slave_remainder >= 0`
+rather than an equality.
+
+### 6.1 Pipeline structure (for the doc and to ground the dwells)
+
+The dwells measure these real pipelines (from the c_model; each stage is a
+registered hop, ~1 cycle with no stall):
+
+- NMU request: `AxiSlavePort -> RoB -> Packetize (AXI->flit) -> WormholeArbiter
+  -> VcArbiter -> NoC out`. NMU response is the reverse via `Depacketize`.
+- NSU request: `NoC in -> Depacketize (flit->AXI, meta->MetaBuffer) ->
+  AxiMasterPort -> AXI to slave`. NSU response: `AXI from slave -> AxiMasterPort
+  -> Packetize -> WormholeArbiter -> VcArbiter -> NoC out`. (NSU has no RoB.)
+- Router (per hop, 3-stage wormhole-VC): `landing reg -> stage1 input FIFO +
+  route-compute -> stage2 VC alloc + switch alloc (wormhole lock + VC RR) +
+  crossbar -> stage3 output FIFO -> link`.
 
 ## 7. Validation
 
 Two checks gate correctness.
 
-1. Calculator accuracy. For every signature, the calculator output must equal
-   the Pass-1 ground truth (the same transaction's end-to-end latency measured
-   in isolation): `zero_load_calc(sig) == zero_load_measured(sig)`. The model is
-   deterministic, so this is exact equality. A mismatch means the calculator
-   omits a latency term (for example an inter-component link cycle) -- fix the
-   formula or the depths.
+1. Decomposition sanity. The sum of the measured per-component dwells must not
+   exceed the isolated latency: `sum(component dwells) <= zero_load(sig)`,
+   equivalently `slave_remainder >= 0`. A negative remainder means a component
+   dwell was over-measured (for example a mis-paired boundary, or a first/last
+   flit boundary that double-counts). The model is deterministic, so under a
+   consistent boundary convention the components cannot take longer than the
+   whole.
 
 2. Min-latency floor. In Pass 2, for every signature, the minimum measured
    latency must be at least the zero-load latency:
-   `min(measured_latency(sig)) >= zero_load(sig)`, equivalently
-   `queueing >= 0` for every transaction. A violation means the calculator
-   over-estimates or a measurement is wrong.
+   `min(measured_latency(sig)) >= zero_load(sig)`, equivalently `queueing >= 0`
+   for every transaction. The isolated latency is the no-contention floor, so
+   contention can only add cycles. A violation means a signature mismatch or a
+   timing-convention error.
 
 Both run as test assertions.
 
@@ -190,14 +211,19 @@ and that buffer's capacity.
                 "occupancy": { "max": 3, "capacity": 4 } },
     "R(1,0)": { "hop_latency_cyc": { "min": 3, "mean": 3.6, "max": 7 },
                 "occupancy": { "max": 2, "capacity": 4 } }
-  }
+  },
+  "slave": { "remainder_cyc": 1 }
 }
 ```
 
 - `ni` holds both NMU and NSU entries, distinguished by `kind`; `router` holds
-  the routers. Two top-level component groups, matching the NI / router split.
-- `hop_latency_cyc.min` is the component depth (no-stall); `mean`/`max` show
-  contention in Pass 2.
+  the routers; `slave` holds the remainder. Together with `transactions[]` these
+  give the pipeline-stage breakdown of `zero_load`.
+- `hop_latency_cyc.min` is the no-stall component dwell measured in Pass 1; the NI
+  dwell is measured from the AXI accept callback to the NoC-edge flit crossing
+  (Section 6); `mean`/`max` show contention in Pass 2.
+- `slave.remainder_cyc` = `zero_load` minus the summed component dwells (Section
+  6); it must be `>= 0` (Section 7.1).
 - `_cyc` suffix marks cycle-valued fields.
 
 ## 9. Files
@@ -211,10 +237,11 @@ New and changed, all testbench-only under `c_model/tests/` (namespace
 | `c_model/tests/common/perf_common.hpp` | delete (`PhaseController` unused) |
 | `c_model/tests/common/router_perf_observer.hpp` | delete |
 | `c_model/tests/common/ni_perf_observer.hpp` | reduce to the transaction-latency collector (drop outstanding, RoB occupancy) |
-| `c_model/tests/common/flit_link_probe.hpp` | new: link-wrapper decorator that timestamps flit crossings |
-| `c_model/tests/common/component_dwell_observer.hpp` | new: aggregates per-component dwell + occupancy from the link probes and introspection |
-| `c_model/tests/common/zero_load_calculator.hpp` | new: path + depths -> zero-load latency |
-| `c_model/tests/common/perf_report.hpp` | rewrite to emit the Section 8 JSON + stdout summary |
+| `c_model/tests/common/flit_link_probe.hpp` | new: decorators that timestamp flit crossings; the `FlitLog` also records each flit's AXI id + `scenario_line` for transaction correlation |
+| `c_model/tests/common/component_dwell_observer.hpp` | new: per-component dwell + occupancy. NI dwell from the AXI callback (accept) to the NoC-edge crossing; router dwell from the inject/link/eject probes; NSU request dwell ends at the harness slave-drive shuttle point. |
+| `c_model/tests/common/zero_load_calculator.hpp` | new: `xy_path` path helper only. The zero-load calculator and `DepthTable` are dropped -- `zero_load` is the Pass-1 isolated measured latency, not computed. |
+| `c_model/tests/common/perf_report.hpp` | rewrite to emit the Section 8 JSON (incl. `slave` remainder) + stdout summary |
+| `c_model/tests/integration/test_router_loopback.cpp` | the two-pass harness + the Section 7 asserts + the non-intrusive A/B |
 
 Occupancy reuses existing getters, so the per-component occupancy needs no new
 state accessor:
@@ -230,9 +257,13 @@ The only new production code is two router config-constant accessors for the
 |---|---|
 | `c_model/include/noc/router.hpp` | `vc_depth()`, `output_fifo_depth()` -- return the configured capacities (constants already in `RouterConfig`) |
 
-The router decorators attach where `TwoNodeFabric` wires `set_downstream`; the NI
-decorators wrap the four NoC interfaces the perf testbench injects into `Nmu` /
-`Nsu`.
+Router decorators attach by re-routing the inter-router links through a
+`LinkProbe` (`Router::set_downstream` overwrites the downstream pointer, so this
+needs no fabric change). NI decorators wrap the four NoC interfaces; for them to
+sit in the flit path, the `Flow` test helper's constructor is extended to accept
+the four NI-edge interfaces (`NocReqOut` / `NocRspIn` / `NocReqIn` / `NocRspOut`)
+to bind `Nmu` / `Nsu` against, so the perf testbench passes probe-wrapped
+interfaces. The existing callers pass the raw `TwoNodeFabric` edges unchanged.
 
 Coordinated changeset. Deleting `perf_common.hpp` and `router_perf_observer.hpp`,
 shrinking `NIPerfObserver`, and rewriting `PerfReport` all break each other's
@@ -250,15 +281,20 @@ new ones) in the same step.
 
 ## 11. Testing
 
-- `zero_load_calculator`: unit test on a known path and depth set; asserts the
-  formula including the serialization term.
-- Calculator accuracy (Section 7.1): integration assertion across all signatures.
-- Min-latency floor (Section 7.2): integration assertion across Pass 2.
-- Non-intrusive: the observers are read-only (callbacks, forwarding link
-  wrappers, const introspection); an A/B run asserts identical cycle-to-
-  completion with and without the probe attached.
-- `flit_link_probe`: unit test that a wrapped link forwards every flit unchanged
-  and records the crossing cycle.
+- `xy_path`: unit test that the derived node-id path is correct (X then Y) for
+  representative src/dst pairs.
+- Decomposition sanity (Section 7.1): integration assertion that
+  `slave_remainder >= 0` (component dwells do not exceed the isolated latency)
+  for the characterized signatures.
+- Min-latency floor (Section 7.2): integration assertion that the Pass-2 minimum
+  measured latency per signature is `>= zero_load` (queueing >= 0).
+- Non-intrusive: the observers are read-only (callbacks, forwarding decorators,
+  const introspection); an A/B run asserts identical cycle-to-completion with and
+  without the probe attached.
+- `flit_link_probe`: unit test that a wrapped interface forwards every flit
+  unchanged and records the crossing cycle, AXI id, and scenario_line.
+- `component_dwell_observer`: unit test of the FIFO/id pairing and per-component
+  dwell accumulation.
 
 ## 12. References
 
