@@ -42,3 +42,7 @@ target_include_directories(test_ni_perf_observer PRIVATE
 add_cmodel_test(test_router_perf_observer)
 target_include_directories(test_router_perf_observer PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_perf_report)
+target_include_directories(test_perf_report PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
