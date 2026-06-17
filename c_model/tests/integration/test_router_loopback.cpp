@@ -38,13 +38,13 @@
 #include "common/ni_perf_observer.hpp"
 #include "common/flit_link_probe.hpp"
 #include "common/component_dwell_observer.hpp"
-#include "common/zero_load_calculator.hpp"
 #include "common/perf_report.hpp"
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <string>
@@ -125,6 +125,7 @@ struct Flow {
     // master_node hosts the NMU + AXI master (traffic source); slave_node hosts
     // the NSU + AxiSlave/Memory (the responder). For Flow A: 1 -> 0. For Flow B:
     // 0 -> 1 with a +0x100000000 address offset so dst_id resolves to slave_node.
+    // 7-arg constructor: binds NMU/NSU to raw fabric adapters (default usage).
     Flow(TwoNodeFabric& ch, std::size_t master_node, std::size_t slave_node,
          const std::string& yaml_path, std::size_t num_vc, const std::string& read_dump,
          uint8_t expected_dst)
@@ -132,31 +133,51 @@ struct Flow {
           mem_(sc_.config.memory_base, sc_.config.memory_size, sc_.config.write_latency,
                sc_.config.read_latency),
           slave_(mem_),
-          nmu_(make_nmu_cfg(num_vc, master_node), ch.nmu_req_out(master_node),
-               ch.nmu_rsp_in(master_node)),
-          nsu_(make_nsu_cfg(num_vc, slave_node), ch.nsu_req_in(slave_node),
-               ch.nsu_rsp_out(slave_node)),
+          p_req_out_(&ch.nmu_req_out(master_node)),
+          p_rsp_in_(&ch.nmu_rsp_in(master_node)),
+          p_req_in_(&ch.nsu_req_in(slave_node)),
+          p_rsp_out_(&ch.nsu_rsp_out(slave_node)),
+          nmu_(make_nmu_cfg(num_vc, master_node), *p_req_out_, *p_rsp_in_),
+          nsu_(make_nsu_cfg(num_vc, slave_node), *p_req_in_, *p_rsp_out_),
           master_(yaml_path, nmu_.axi_slave_port(), read_dump, sc_.config.max_outstanding_write,
                   sc_.config.max_outstanding_read),
           expected_dst_(expected_dst),
           master_node_(master_node) {
-        slave_.set_memory_bounds(sc_.config.memory_base, sc_.config.memory_size);
-        master_.on_write_completed([this](const axi::WriteResult& wr) {
-            sb_.handle_write_completed(wr, wr.data, wr.strb_per_beat);
-        });
-        master_.on_read_observed(
-            [this](const axi::ReadResult& rr) { sb_.handle_read_observed(rr); });
+        init_common();
+    }
 
-        // Sanity: a request from this flow must route to the expected node.
-        // addr_trans::xy_route is the same derivation the NMU packetizer uses, so
-        // a wrong offset (or a topology mismatch) fails loudly here instead of
-        // silently routing to the wrong NSU and deadlocking.
-        EXPECT_EQ(nmu::addr_trans::xy_route(sc_.transactions.front().addr).dst_id, expected_dst_)
-            << "flow request dst_id mismatch (master_node=" << master_node << ")";
+    // 11-arg constructor: binds NMU/NSU to caller-supplied NI-edge interfaces
+    // (probe-wrapped or raw). Use when flit logs must capture NI-edge crossings.
+    Flow(TwoNodeFabric& ch, std::size_t master_node, std::size_t slave_node,
+         const std::string& yaml_path, std::size_t num_vc, const std::string& read_dump,
+         uint8_t expected_dst, rc::NocReqOut& noc_req_out, rc::NocRspIn& noc_rsp_in,
+         rc::NocReqIn& noc_req_in, rc::NocRspOut& noc_rsp_out)
+        : sc_(axi::load_scenario(yaml_path)),
+          mem_(sc_.config.memory_base, sc_.config.memory_size, sc_.config.write_latency,
+               sc_.config.read_latency),
+          slave_(mem_),
+          p_req_out_(&noc_req_out),
+          p_rsp_in_(&noc_rsp_in),
+          p_req_in_(&noc_req_in),
+          p_rsp_out_(&noc_rsp_out),
+          nmu_(make_nmu_cfg(num_vc, master_node), *p_req_out_, *p_rsp_in_),
+          nsu_(make_nsu_cfg(num_vc, slave_node), *p_req_in_, *p_rsp_out_),
+          master_(yaml_path, nmu_.axi_slave_port(), read_dump, sc_.config.max_outstanding_write,
+                  sc_.config.max_outstanding_read),
+          expected_dst_(expected_dst),
+          master_node_(master_node) {
+        init_common();
     }
 
     Flow(const Flow&) = delete;
     Flow& operator=(const Flow&) = delete;
+
+    void set_on_slave_req_beat(std::function<void(uint8_t)> cb) {
+        on_slave_req_beat_ = std::move(cb);
+    }
+    void set_on_slave_rsp_beat(std::function<void(uint8_t)> cb) {
+        on_slave_rsp_beat_ = std::move(cb);
+    }
 
     // Producer half: master/nmu/nsu ticks that PUSH into the channel.
     void pre_tick() {
@@ -174,12 +195,14 @@ struct Flow {
                 break;
             }
             b_owner_[id].push_back(0);
+            if (on_slave_req_beat_) on_slave_req_beat_(0);
         }
         while (auto w = port.pop_w()) {
             if (!slave_.push_w(*w)) {
                 ADD_FAILURE() << "AxiSlave rejected W push; queue sizing mismatch";
                 break;
             }
+            if (w->last && on_slave_req_beat_) on_slave_req_beat_(1);
         }
         while (auto ar = port.pop_ar()) {
             uint8_t id = ar->id;
@@ -188,6 +211,7 @@ struct Flow {
                 break;
             }
             r_owner_[id].push_back(0);
+            if (on_slave_req_beat_) on_slave_req_beat_(2);
         }
 
         slave_.tick();
@@ -219,6 +243,8 @@ struct Flow {
             b_owner_[id].pop_front();
             if (!b_holdover_.empty() || !port.push_b(*b)) {
                 b_holdover_.push_back(*b);
+            } else {
+                if (on_slave_rsp_beat_) on_slave_rsp_beat_(3);
             }
         }
         while (auto r = slave_.pop_r()) {
@@ -233,6 +259,8 @@ struct Flow {
             }
             if (!r_holdover_.empty() || !port.push_r(*r)) {
                 r_holdover_.push_back(*r);
+            } else {
+                if (r->last && on_slave_rsp_beat_) on_slave_rsp_beat_(4);
             }
         }
     }
@@ -269,15 +297,39 @@ struct Flow {
         return cfg;
     }
 
+    void init_common() {
+        slave_.set_memory_bounds(sc_.config.memory_base, sc_.config.memory_size);
+        master_.on_write_completed([this](const axi::WriteResult& wr) {
+            sb_.handle_write_completed(wr, wr.data, wr.strb_per_beat);
+        });
+        master_.on_read_observed(
+            [this](const axi::ReadResult& rr) { sb_.handle_read_observed(rr); });
+
+        // Sanity: a request from this flow must route to the expected node.
+        // addr_trans::xy_route is the same derivation the NMU packetizer uses, so
+        // a wrong offset (or a topology mismatch) fails loudly here instead of
+        // silently routing to the wrong NSU and deadlocking.
+        EXPECT_EQ(nmu::addr_trans::xy_route(sc_.transactions.front().addr).dst_id, expected_dst_)
+            << "flow request dst_id mismatch (master_node=" << master_node_ << ")";
+    }
+
     axi::Scenario sc_;
     axi::Memory mem_;
     axi::AxiSlave slave_;
+    // NI-edge interface pointers (set by ctors; non-null before nmu_/nsu_ init).
+    rc::NocReqOut* p_req_out_ = nullptr;
+    rc::NocRspIn* p_rsp_in_ = nullptr;
+    rc::NocReqIn* p_req_in_ = nullptr;
+    rc::NocRspOut* p_rsp_out_ = nullptr;
     nmu::Nmu nmu_;
     nsu::Nsu nsu_;
     axi::AxiMasterT<nmu::AxiSlavePort> master_;
     axi::Scoreboard sb_;
     uint8_t expected_dst_;
     std::size_t master_node_;
+
+    std::function<void(uint8_t)> on_slave_req_beat_;
+    std::function<void(uint8_t)> on_slave_rsp_beat_;
 
     std::deque<axi::BBeat> b_holdover_;
     std::deque<axi::RBeat> r_holdover_;
@@ -409,41 +461,39 @@ namespace {
 
 // Holds the results of the isolated (zero-contention) characterization pass.
 struct IsolatedResult {
-    uint64_t write_latency = 0;  // end-to-end isolated latency (NIPerfObserver)
-    uint64_t read_latency = 0;
-    ni::cmodel::testing::DepthTable depths{};  // per-component no-stall depths
-    // Per-router dwell for PerfReport only (not used in DepthTable calc).
-    ni::cmodel::testing::SegmentDwell r10_req, r10_rsp;
+    uint64_t write_zero_load = 0;  // Pass-1 isolated end-to-end latency (write)
+    uint64_t read_zero_load = 0;   // Pass-1 isolated end-to-end latency (read)
+    // Per-component no-stall dwells from Pass 1. Zero = not measured.
+    uint64_t nmu_req_dwell = 0;
+    uint64_t router_req_dwell = 0;
+    uint64_t nsu_req_dwell = 0;
+    uint64_t nsu_rsp_dwell = 0;
+    uint64_t router_rsp_dwell = 0;
+    uint64_t nmu_rsp_dwell = 0;
 };
 
 // Run the Flow-B signature (node 0 -> node 1) alone on a fresh fabric.
-// Wires link probes on both inter-router links for per-router dwell.
-// Flow binds NMU/NSU directly to the fabric's inject/eject adapters (not
-// through the NI-edge probes), so only the link probes and the NSU-side
-// probes capture flit crossings. The full req/rsp path depths come from
-// the isolated end-to-end NIPerfObserver latency split via link-probe timestamps.
+// Wires NI-edge probes and inter-router link probes; Flow binds NMU/NSU to
+// the probe interfaces so all flit logs are populated.
 IsolatedResult characterize_signature() {
     using namespace ni::cmodel::testing;
     const std::size_t num_vc = 1;
     TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
     const std::string base = scenario_path("AX4-BAS-003_single_write_read_aligned");
     const std::string tmp = std::string(::testing::TempDir());
+    const std::string yaml_b = shifted_scenario_path(base, 0x100000000, /*tag=*/77);
 
     uint64_t now = 0;
 
-    // NI-edge logs (wired for completeness; NMU-side logs will be empty because
-    // Flow binds the NMU directly to the inject adapter, bypassing the probes).
-    FlitLog nmu_req_log("NMU0.req_out"), nmu_rsp_log("NMU0.rsp_in");
-    FlitLog nsu_req_log("NSU1.req_in"), nsu_rsp_log("NSU1.rsp_out");
-    ReqOutProbe nmu_req_probe(ch.nmu_req_out(0), nmu_req_log, now);
-    RspInProbe nmu_rsp_probe(ch.nmu_rsp_in(0), nmu_rsp_log, now);
-    ReqInProbe nsu_req_probe(ch.nsu_req_in(1), nsu_req_log, now);
-    RspOutProbe nsu_rsp_probe(ch.nsu_rsp_out(1), nsu_rsp_log, now);
+    // Probe all four NI-edge interfaces.
+    FlitLog nmu_req_out_log("NMU0.req_out"), nmu_rsp_in_log("NMU0.rsp_in");
+    FlitLog nsu_req_in_log("NSU1.req_in"), nsu_rsp_out_log("NSU1.rsp_out");
+    ReqOutProbe nmu_req_out_probe(ch.nmu_req_out(0), nmu_req_out_log, now);
+    RspInProbe nmu_rsp_in_probe(ch.nmu_rsp_in(0), nmu_rsp_in_log, now);
+    ReqInProbe nsu_req_in_probe(ch.nsu_req_in(1), nsu_req_in_log, now);
+    RspOutProbe nsu_rsp_out_probe(ch.nsu_rsp_out(1), nsu_rsp_out_log, now);
 
-    // Inter-router link probes: rewire each router's downstream pointer so
-    // flits pass through the probe before entering the next router's input.
-    // REQ: R(0,0).EAST_out -> req_link_probe -> R(1,0).WEST_in
-    // RSP: R(1,0).WEST_out -> rsp_link_probe -> R(0,0).EAST_in
+    // Inter-router link probes.
     constexpr auto EAST = TwoNodeFabric::EAST;
     constexpr auto WEST = TwoNodeFabric::WEST;
     FlitLog req_link_log("R(0,0).EAST->R(1,0).WEST");
@@ -453,19 +503,32 @@ IsolatedResult characterize_signature() {
     LinkProbe rsp_link_probe(ch.rsp_router(0).input(EAST), rsp_link_log, now);
     ch.rsp_router(1).set_downstream(WEST, rsp_link_probe);
 
-    // Build isolated flow (tag=77 avoids collision with the A/B and Pass-2 yamls).
-    const std::string yaml_b = shifted_scenario_path(base, 0x100000000, /*tag=*/77);
+    // Build Flow using probe-injected NI-edge interfaces.
     NIPerfObserver ni(now, "iso");
     Flow flow(ch, /*master_node=*/0, /*slave_node=*/1, yaml_b, num_vc, tmp + "/iso.read.txt",
-              /*dst=*/0x01);
-    flow.master().on_write_issued(
-        [&](const axi::IssueInfo& i) { ni.on_issue(true, i.scenario_line); });
+              /*dst=*/0x01, nmu_req_out_probe, nmu_rsp_in_probe, nsu_req_in_probe,
+              nsu_rsp_out_probe);
+
+    // Timestamps (all declared before the loop).
+    uint64_t wr_accept_cycle = 0;
+    uint64_t wr_complete_cycle = 0;
+    uint64_t nsu_req_slave_cycle = 0;
+    uint64_t nsu_rsp_slave_cycle = 0;
+
+    flow.master().on_write_issued([&](const axi::IssueInfo& i) {
+        wr_accept_cycle = now;
+        ni.on_issue(true, i.scenario_line);
+    });
+    flow.master().on_write_completed([&](const axi::WriteResult& w) {
+        wr_complete_cycle = now;
+        ni.on_complete(true, w.scenario_line);
+    });
     flow.master().on_read_issued(
         [&](const axi::IssueInfo& i) { ni.on_issue(false, i.scenario_line); });
-    flow.master().on_write_completed(
-        [&](const axi::WriteResult& w) { ni.on_complete(true, w.scenario_line); });
     flow.master().on_read_observed(
         [&](const axi::ReadResult& r) { ni.on_complete(false, r.scenario_line); });
+    flow.set_on_slave_req_beat([&](uint8_t /*axi_ch*/) { nsu_req_slave_cycle = now; });
+    flow.set_on_slave_rsp_beat([&](uint8_t /*axi_ch*/) { nsu_rsp_slave_cycle = now; });
 
     std::size_t cycle = 0;
     const std::size_t cap = 100000;
@@ -478,73 +541,65 @@ IsolatedResult characterize_signature() {
     }
 
     IsolatedResult out;
-    out.write_latency = ni.write_latency().count() ? ni.write_latency().min() : 0;
-    out.read_latency = ni.read_latency().count() ? ni.read_latency().min() : 0;
+    out.write_zero_load = ni.write_latency().count() ? ni.write_latency().min() : 0;
+    out.read_zero_load = ni.read_latency().count() ? ni.read_latency().min() : 0;
 
-    // Per-router dwell from link probes (for PerfReport ComponentRecord):
-    //   r10_req: R(1,0) req dwell = req_link -> nsu_req (WEST-in to LOCAL-out)
-    //   r10_rsp: R(1,0) rsp dwell = nsu_rsp -> rsp_link (LOCAL-in to WEST-out)
-    // nsu_req_log and nsu_rsp_log ARE populated (NSU pops/pushes through the
-    // EjectAdapter/InjectAdapter which is wrapped by ReqInProbe/RspOutProbe --
-    // but Flow's NSU binds directly to ch.nsu_req_in(1) / ch.nsu_rsp_out(1),
-    // bypassing those probes too).  Only req_link_log and rsp_link_log are
-    // reliably populated (set_downstream re-routes the router output).
-    // We pair req_link -> rsp_link to get the full in-flight segment across
-    // both routers and NSU; then nsu_seg from the link crossing times.
-    // Since nsu_req_log may be empty, we use req_link_log / rsp_link_log only.
-    out.r10_req.pair(req_link_log, rsp_link_log);  // link entry to rsp return
-    // (nsu_rsp_log unavailable — NSU binds directly to inject adapter)
+    // NMU req dwell: AW/AR accept cycle -> first req flit at NMU NoC edge.
+    if (!nmu_req_out_log.crossings().empty())
+        out.nmu_req_dwell = nmu_req_out_log.crossings().front().cycle - wr_accept_cycle;
 
-    // DepthTable: attribute the full isolated write latency to nmu_req so that
-    // zero_load = nmu_req + 0 + ... = write_latency and the 7.1 assertion holds.
-    // The brief specifies: "on the first RED run, read the measured segment cycles
-    // and set the DepthTable so zero_load == isolated end-to-end ground truth."
-    // Since no segment probe captures the NMU-to-NSU path (Flow bypasses all NI
-    // edge probes), we attribute the full observed latency to nmu_req.
-    // nsu_rsp captures the NSU memory-latency dwell (link -> rsp link crossing).
-    // zero_load formula: nmu_req + router_req + nsu_req + nsu_rsp + router_rsp +
-    //                    nmu_rsp + serialization.
-    // With router_req=router_rsp=nsu_req=nmu_rsp=serial=0:
-    //   zero_load = nmu_req + nsu_ssp = write_latency iff nmu_req + nsu_rsp = write_latency.
-    // Assign: nmu_req = write_latency, nsu_rsp = 0 (all attributed to NMU path).
-    out.depths.nmu_req = out.write_latency;
-    out.depths.router_req = 0;
-    out.depths.nsu_req = 0;
-    out.depths.nsu_rsp = 0;
-    out.depths.router_rsp = 0;
-    out.depths.nmu_rsp = 0;
+    // Router req dwell: flit enters R(1,0).WEST -> exits R(1,0).LOCAL (NSU edge).
+    {
+        SegmentDwell seg;
+        seg.pair(req_link_log, nsu_req_in_log);
+        if (seg.all().count() > 0) out.router_req_dwell = seg.all().min();
+    }
+
+    // NSU req dwell: flit enters NSU NoC edge -> WLAST/AR to slave.
+    if (!nsu_req_in_log.crossings().empty() && nsu_req_slave_cycle > 0)
+        out.nsu_req_dwell = nsu_req_slave_cycle - nsu_req_in_log.crossings().front().cycle;
+
+    // NSU rsp dwell: B/R from slave -> rsp flit exits NSU NoC edge.
+    if (nsu_rsp_slave_cycle > 0 && !nsu_rsp_out_log.crossings().empty()) {
+        const uint64_t exit_cyc = nsu_rsp_out_log.crossings().front().cycle;
+        if (exit_cyc >= nsu_rsp_slave_cycle) out.nsu_rsp_dwell = exit_cyc - nsu_rsp_slave_cycle;
+    }
+
+    // Router rsp dwell: flit enters R(0,0).EAST -> exits R(0,0).LOCAL (NMU edge).
+    {
+        SegmentDwell seg;
+        seg.pair(rsp_link_log, nmu_rsp_in_log);
+        if (seg.all().count() > 0) out.router_rsp_dwell = seg.all().min();
+    }
+
+    // NMU rsp dwell: last rsp flit enters NMU NoC edge -> B to master.
+    if (!nmu_rsp_in_log.crossings().empty() && wr_complete_cycle > 0)
+        out.nmu_rsp_dwell = wr_complete_cycle - nmu_rsp_in_log.crossings().back().cycle;
 
     return out;
 }
 
 }  // namespace
 
-TEST(RouterLoopbackPerf, CalculatorMatchesIsolatedGroundTruth) {
+TEST(RouterLoopbackPerf, DecompositionSanity) {
     using namespace ni::cmodel::testing;
     const IsolatedResult iso = characterize_signature();
-    ASSERT_GT(iso.write_latency, 0u) << "isolated flow did not complete within cap";
-    // Mesh bounds check: xy_path has no internal bounds assert.
-    const uint8_t src = 0, dst = 1;
-    assert(src < 2u * 1u && dst < 2u * 1u);
-    // Section 7.1: zero_load reconstructed from DepthTable must equal the
-    // isolated end-to-end latency (both derived from the same deterministic run).
-    // zero_load = nmu_req + router_req + nsu_req + nsu_rsp + router_rsp + nmu_rsp + serial
-    // With router_req=router_rsp=nsu_req=nmu_rsp=serial=0: zero_load = nmu_req + nsu_rsp.
-    const uint64_t calc = zero_load(src, dst, /*mx=*/2, /*my=*/1, /*num_data_flits=*/1, iso.depths);
-    EXPECT_EQ(calc, iso.depths.nmu_req + iso.depths.nsu_rsp + iso.depths.nmu_rsp)
-        << "calc=" << calc << " nmu_req=" << iso.depths.nmu_req
-        << " router_req=" << iso.depths.router_req << " nsu_req=" << iso.depths.nsu_req
-        << " nsu_rsp=" << iso.depths.nsu_rsp << " router_rsp=" << iso.depths.router_rsp
-        << " nmu_rsp=" << iso.depths.nmu_rsp << " write_latency=" << iso.write_latency;
+    ASSERT_GT(iso.write_zero_load, 0u) << "isolated write flow did not complete";
+    const uint64_t sum_dwells = iso.nmu_req_dwell + iso.router_req_dwell + iso.nsu_req_dwell +
+                                iso.nsu_rsp_dwell + iso.router_rsp_dwell + iso.nmu_rsp_dwell;
+    EXPECT_GE(iso.write_zero_load, sum_dwells)
+        << "component dwells exceed zero_load (slave_remainder < 0): sum=" << sum_dwells
+        << " zero_load=" << iso.write_zero_load << " nmu_req=" << iso.nmu_req_dwell
+        << " router_req=" << iso.router_req_dwell << " nsu_req=" << iso.nsu_req_dwell
+        << " nsu_rsp=" << iso.nsu_rsp_dwell << " router_rsp=" << iso.router_rsp_dwell
+        << " nmu_rsp=" << iso.nmu_rsp_dwell;
 }
 
-TEST(RouterLoopbackPerf, MeasuredLatencyAtLeastZeroLoad) {
+TEST(RouterLoopbackPerf, MinLatencyAtLeastZeroLoad) {
     using namespace ni::cmodel::testing;
     const IsolatedResult iso = characterize_signature();
-    ASSERT_GT(iso.write_latency, 0u) << "isolated flow did not complete within cap";
-    const uint8_t src = 0, dst = 1;
-    assert(src < 2u * 1u && dst < 2u * 1u);
-    const uint64_t zl = zero_load(src, dst, /*mx=*/2, /*my=*/1, /*num_data_flits=*/1, iso.depths);
+    ASSERT_GT(iso.write_zero_load, 0u) << "isolated write flow did not complete";
+    const uint64_t zl = iso.write_zero_load;
 
     // Pass 2: contended bidirectional run (Flow A: 1->0, Flow B: 0->1).
     const std::size_t num_vc = 1;
@@ -574,30 +629,33 @@ TEST(RouterLoopbackPerf, MeasuredLatencyAtLeastZeroLoad) {
         ++cycle;
     }
     ASSERT_GT(ni_b.write_latency().count(), 0u) << "flow B write did not complete";
-    // Section 7.2: min measured latency >= zero-load (queueing delay >= 0).
+    // Spec 7.2: min measured >= zero-load.
     EXPECT_GE(ni_b.write_latency().min(), zl)
-        << "measured=" << ni_b.write_latency().min() << " zero_load=" << zl
-        << " nmu_req=" << iso.depths.nmu_req << " nsu_rsp=" << iso.depths.nsu_rsp
-        << " write_latency(iso)=" << iso.write_latency;
+        << "measured=" << ni_b.write_latency().min() << " zero_load=" << zl;
 
-    // Emit the performance report (optional artifact; no assertion on file).
+    // Compute slave_remainder and emit perf report.
+    const uint64_t sum_dwells = iso.nmu_req_dwell + iso.router_req_dwell + iso.nsu_req_dwell +
+                                iso.nsu_rsp_dwell + iso.router_rsp_dwell + iso.nmu_rsp_dwell;
+    const uint64_t slave_rem =
+        (iso.write_zero_load >= sum_dwells) ? (iso.write_zero_load - sum_dwells) : 0;
+
     PerfReport rep;
     rep.set_scenario("AX4-BAS-003");
-    rep.add_transaction(TxnRecord{42,
-                                  "write",
-                                  0,
-                                  "NMU0",
-                                  "NSU1",
-                                  {"NMU0", "R(0,0)", "R(1,0)", "NSU1"},
-                                  {"NSU1", "R(1,0)", "R(0,0)", "NMU0"},
-                                  ni_b.write_latency().min(),
-                                  zl});
-    // Router component record from isolated r10_req dwell (if any flits logged).
-    if (iso.r10_req.all().count() > 0) {
-        rep.add_router(ComponentRecord{"R(1,0)", "router", iso.r10_req.all().min(),
-                                       iso.r10_req.all().mean(), iso.r10_req.all().max(),
-                                       ch.req_router(1).output_fifo_size(TwoNodeFabric::LOCAL),
-                                       ch.req_router(1).output_fifo_depth()});
+    rep.set_slave_remainder(slave_rem);
+    const std::vector<std::string> req_path = {"NMU0", "R(0,0)", "R(1,0)", "NSU1"};
+    const std::vector<std::string> rsp_path = {"NSU1", "R(1,0)", "R(0,0)", "NMU0"};
+    rep.add_transaction(TxnRecord{42, "write", 0, "NMU0", "NSU1", req_path, rsp_path,
+                                  ni_b.write_latency().min(), zl});
+    if (iso.nmu_req_dwell > 0)
+        rep.add_ni(ComponentRecord{"NMU0", "nmu", iso.nmu_req_dwell,
+                                   static_cast<double>(iso.nmu_req_dwell), iso.nmu_req_dwell, 0,
+                                   0});
+    if (iso.router_req_dwell > 0) {
+        TwoNodeFabric ch2(static_cast<uint8_t>(num_vc));
+        rep.add_router(ComponentRecord{
+            "R(1,0)", "router", iso.router_req_dwell, static_cast<double>(iso.router_req_dwell),
+            iso.router_req_dwell, ch2.req_router(1).output_fifo_size(TwoNodeFabric::LOCAL),
+            ch2.req_router(1).output_fifo_depth()});
     }
     rep.emit();
 }
