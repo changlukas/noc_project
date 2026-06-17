@@ -50,7 +50,9 @@ Out of scope (removed from the v1 probe):
 ## 4. Architecture
 
 The probe is a set of testbench-side observer objects attached beside the DUT.
-The DUT (NMU, NSU, Router) is not modified.
+The DUT's behaviour is unchanged; the only production additions are additive,
+const-only introspection getters (Section 9) that expose configuration constants
+already held internally, so they cannot alter timing or state.
 
 Observation surfaces, by boundary type:
 
@@ -214,13 +216,19 @@ New and changed, all testbench-only under `c_model/tests/` (namespace
 | `c_model/tests/common/zero_load_calculator.hpp` | new: path + depths -> zero-load latency |
 | `c_model/tests/common/perf_report.hpp` | rewrite to emit the Section 8 JSON + stdout summary |
 
-Production introspection getters (additive, const-only, the v1 `Rob`/`Router`
-pattern):
+Occupancy reuses existing getters, so the per-component occupancy needs no new
+state accessor:
+
+- NMU occupancy: the `Rob` occupancy getter added in v1.
+- NSU occupancy: the busiest of the already-exposed `AxiMasterPort` queue sizes.
+- Router occupancy: the existing `input_fifo_size` / `output_fifo_size`.
+
+The only new production code is two router config-constant accessors for the
+`capacity` field (additive, const, behaviour-neutral):
 
 | File | Getter |
 |---|---|
-| `c_model/include/noc/router.hpp` | `vc_depth()`, `output_fifo_depth()` -- expose the configured capacities for the occupancy `capacity` field |
-| `c_model/include/nsu/nsu.hpp` | a const occupancy getter for the NSU's busiest internal queue (MetaBuffer / depacketize / AXI port), mirroring the NMU `Rob` occupancy getter |
+| `c_model/include/noc/router.hpp` | `vc_depth()`, `output_fifo_depth()` -- return the configured capacities (constants already in `RouterConfig`) |
 
 The router decorators attach where `TwoNodeFabric` wires `set_downstream`; the NI
 decorators wrap the four NoC interfaces the perf testbench injects into `Nmu` /
