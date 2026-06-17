@@ -124,6 +124,10 @@ class Router {
     }
     std::size_t output_fifo_size(std::size_t port) const { return output_fifo_[port].size(); }
     uint8_t num_vc() const { return cfg_.num_vc; }
+    // Configured per-VC input FIFO capacity (spec sec 9 occupancy capacity).
+    std::size_t vc_depth() const { return cfg_.vc_depth; }
+    // Configured per-output FIFO capacity.
+    std::size_t output_fifo_depth() const { return cfg_.output_fifo_depth; }
     // Front flit's routed output port for (in_port, vc), or nullopt if empty.
     // Pure read; mirrors stage-2's route check without side effects.
     std::optional<RouterPort> front_route(std::size_t in_port, uint8_t vc) const {
