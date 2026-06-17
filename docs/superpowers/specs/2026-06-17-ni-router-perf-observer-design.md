@@ -226,21 +226,31 @@ finite loopback scenarios, so they stay behind the guard).
   histogram (first bin whose cumulative count crosses 99%) and so appears only
   in the JSON, not the always-on summary. JSON schema:
 
+Each `Stats` object serializes `{count,min,max,mean,variance}` plus
+`histogram:{thresholds,bins}` when histograms are enabled. v1 JSON (delivered
+shape):
+
 ```json
 {
-  "ni": {
-    "write_latency": {"count":N,"min":..,"mean":..,"max":..,"histogram":{"thresholds":[..],"bins":[..]}},
-    "read_latency":  {...},
-    "outstanding":   {"peak":..,"histogram":{...}},
-    "rob_occupancy": {"peak":..,"histogram":{...}}
-  },
+  "ni": [
+    {"label":"flowA",
+     "write_latency":  {"count":N,"min":..,"max":..,"mean":..,"variance":..,"histogram":{...}},
+     "read_latency":   {...},
+     "outstanding_peak": P,
+     "outstanding":    {...Stats...},
+     "rob_occupancy":  {...Stats...}}
+  ],
   "router": {
     "credit_stall_cycles": M,
-    "per_port": [{"port":0,"out_nonempty_ratio":0.0,"in_fifo":{...},"out_fifo":{...},"credit":{...}}, ...]
-  },
-  "phases": {"warmup_cycles":..,"measurement_cycles":..,"drain_cycles":..}
+    "per_router": [{"label":"req0","stall":..,"in_fifo":{...Stats...},"out_fifo":{...Stats...}}, ...]
+  }
 }
 ```
+
+Deferred to a JSON follow-on (kept out of v1 to bound untested telemetry code):
+the `phases` block (`warmup/measurement/drain` cycle counts) and a per-output-port
+`out_nonempty_ratio` array. The per-port ratios are still printed in the always-on
+stdout summary.
 
 With multiple NMUs the `ni` object is an array keyed by flow label (one entry
 per `NIPerfObserver`). JSON path: `NOC_PERF_FILE` env override, else

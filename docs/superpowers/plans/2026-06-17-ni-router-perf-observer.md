@@ -62,6 +62,7 @@ TEST(PerfStats, ScalarsOverKnownSequence) {
     EXPECT_EQ(s.min(), 2u);
     EXPECT_EQ(s.max(), 8u);
     EXPECT_DOUBLE_EQ(s.mean(), 5.0);
+    EXPECT_DOUBLE_EQ(s.variance(), 5.0);  // ((9+1+1+9)/4) = 5
     EXPECT_TRUE(s.histogram().empty());
 }
 
@@ -125,6 +126,7 @@ class Stats {
     void add(uint64_t v) {
         ++count_;
         sum_ += v;
+        sumsq_ += v * v;
         if (v < min_) min_ = v;
         if (v > max_) max_ = v;
         if (!thresholds_.empty()) ++bins_[bin_index_(v)];
@@ -134,6 +136,11 @@ class Stats {
     uint64_t min() const { return count_ ? min_ : 0; }
     uint64_t max() const { return count_ ? max_ : 0; }
     double mean() const { return count_ ? static_cast<double>(sum_) / static_cast<double>(count_) : 0.0; }
+    double variance() const {
+        if (!count_) return 0.0;
+        const double m = mean();
+        return static_cast<double>(sumsq_) / static_cast<double>(count_) - m * m;
+    }
     const std::vector<uint64_t>& thresholds() const { return thresholds_; }
     const std::vector<uint64_t>& histogram() const { return bins_; }
 
@@ -147,6 +154,7 @@ class Stats {
     std::vector<uint64_t> bins_;
     uint64_t count_ = 0;
     uint64_t sum_ = 0;
+    uint64_t sumsq_ = 0;
     uint64_t min_ = std::numeric_limits<uint64_t>::max();
     uint64_t max_ = 0;
 };
@@ -315,9 +323,12 @@ std::string write_inline_scenario() {
 
 TEST(AxiMasterCallbacks, FanoutAndIssueBeforeCompletion) {
     const std::string scn = write_inline_scenario();
-    axi::Memory mem(/*base=*/0, /*size=*/4096);
+    axi::Memory mem(/*base=*/0, /*size=*/4096, /*write_latency_ticks=*/0, /*read_latency_ticks=*/0);
     axi::AxiSlave slave(mem);
-    axi::AxiMaster master(scn, slave, /*max_out_w=*/1, /*max_out_r=*/1);
+    // axi::AxiMaster = AxiMasterT<AxiSlave> (axi_master.hpp:520). 3rd arg is the
+    // read-dump path (the master opens it on construction).
+    axi::AxiMaster master(scn, slave, std::string(::testing::TempDir()) + "/cb.read.txt",
+                          /*max_out_w=*/1, /*max_out_r=*/1);
 
     int wc1 = 0, wc2 = 0, w_issue = 0;
     std::size_t issue_line = 999, complete_line = 888;
@@ -348,10 +359,12 @@ TEST(AxiMasterCallbacks, FanoutAndIssueBeforeCompletion) {
 }
 ```
 
-> Implementer note: the exact `AxiMaster` / `AxiSlave` / `Memory` ctor argument
-> order is whatever `test_test_logger.cpp` and `test_request_response_loopback.cpp`
-> already use; copy that construction verbatim if the signatures differ from the
-> sketch above. The assertions are the contract.
+> Implementer note: signatures are verified against `axi_master.hpp` /
+> `memory.hpp` (Memory takes base/size/write_latency_ticks/read_latency_ticks;
+> AxiMaster takes scenario/slave/read_dump_path/max_w/max_r). The inline YAML
+> field names must match `scenario_parser.hpp`; if the parser rejects a key,
+> align it with an existing `tests/scenarios/AX4-BAS-*/scenario.yaml`. The
+> assertions are the contract.
 
 - [ ] **Step 2: Register and run to verify it fails**
 
@@ -444,16 +457,13 @@ Fire the read issue callback on first-sub-burst AR accept. Replace lines 487-488
                                  op.src_txn.size, op.src_txn.len, op.src_txn.burst});
 ```
 
-In the non-template `AxiMaster` wrapper (the forwarding block around 683-688), add forwarders mirroring the existing `on_write_completed` forwarder:
-
-```cpp
-    void on_write_issued(std::function<void(const IssueInfo&)> cb) {
-        inner_.on_write_issued(std::move(cb));
-    }
-    void on_read_issued(std::function<void(const IssueInfo&)> cb) {
-        inner_.on_read_issued(std::move(cb));
-    }
-```
+The four `on_*` methods (including the two new `on_*_issued`) all live on the
+**`AxiMasterT` template** (registrars at 308-309). Both `using AxiMaster =
+AxiMasterT<AxiSlave>` (line 520, used by this test) and the loopback's
+`AxiMasterT<nmu::AxiSlavePort>` inherit them automatically -- no alias-level
+change needed. The `AxiMasterStandalone` cosim wrapper (683-688) is NOT in scope
+this round; forwarding `on_*_issued` there is optional follow-on for the cosim
+path and is omitted here.
 
 (`<functional>` and `<vector>` are already included via the existing callback members.)
 
@@ -472,7 +482,7 @@ git commit -m "feat(axi): multi-subscriber completion callbacks + on_*_issued is
 
 ---
 
-## Task 4: Rob occupancy getters (H? introspection)
+## Task 4: Rob occupancy getters (NI occupancy introspection, feeds NIPerfObserver)
 
 **Files:**
 - Modify: `c_model/include/nmu/rob.hpp` (public section, after `set_drain_observer` ~line 76; members `write_`/`read_` at 101-102)
@@ -536,6 +546,9 @@ In `c_model/include/nmu/rob.hpp`, in the public section (after `set_drain_observ
 
 ```cpp
     // Test introspection: current outstanding-entry count summed over all ids.
+    // Counts the Disabled-mode per-id `outstanding` deques (the mode the c_model
+    // runs this round). Enabled-mode slot-pool occupancy (write_entries_) is not
+    // counted -- extend here if/when Enabled mode is exercised.
     std::size_t write_occupancy() const {
         std::size_t n = 0;
         for (const auto& s : write_) n += s.outstanding.size();
@@ -715,6 +728,20 @@ TEST(NIPerfObserver, StuckTransactionSurfaced) {
     now = 1; obs.on_issue(false, 7);  // read issued, never completed
     EXPECT_EQ(obs.stuck_count(), 1u);
 }
+
+// H4: a transaction issued during Measurement but completing during Drain is
+// still recorded, because eligibility is latched at issue, not re-checked at
+// completion.
+TEST(NIPerfObserver, MeasurementIssuedDrainCompletedStillRecorded) {
+    uint64_t now = 0;
+    PhaseController phase(now, PhaseConfig{});  // measurement from cycle 0
+    NIPerfObserver obs(now, phase, [] { return std::size_t{0}; }, NIPerfConfig{"NI"});
+    now = 3; obs.on_issue(true, 1);    // issued in Measurement -> eligible latched
+    phase.begin_drain();               // now draining
+    now = 9; obs.on_complete(true, 1); // completes in Drain
+    EXPECT_EQ(obs.write_latency().count(), 1u);  // still recorded
+    EXPECT_EQ(obs.write_latency().max(), 6u);    // 9 - 3
+}
 ```
 
 - [ ] **Step 2: Register and run to verify it fails**
@@ -873,33 +900,29 @@ TEST(RouterPerfObserver, IdleRouterZeroStall) {
 }
 
 TEST(RouterPerfObserver, FrontFlitNoCreditAccruesStall) {
+    // Deterministic stall: vc_depth=1, output_fifo_depth=1, EAST has no
+    // downstream wired. flit1 consumes the single EAST credit (1->0) and parks
+    // in the output FIFO (stage-3 finds no downstream, so no credit return).
+    // flit2 then sits in the input FIFO routed EAST with credit(EAST,0)==0.
     noc::RouterConfig c; c.x = 0; c.y = 0; c.mesh_x_dim = 2; c.mesh_y_dim = 1;
     c.num_vc = 1; c.vc_depth = 1; c.output_fifo_depth = 1;
     noc::Router r(c);
-    // Drain EAST output credit to 0 by leaving no downstream: push enough flits
-    // routed EAST that the EAST output credit hits 0 while an input flit waits.
-    r.input(static_cast<std::size_t>(noc::RouterPort::LOCAL)).push_flit(make_flit(0x01));
-    r.tick();  // flit now in LOCAL input FIFO, routes EAST
-    // Force EAST credit to 0 via repeated grants with no credit return (no downstream set).
+    const auto LOCAL = static_cast<std::size_t>(noc::RouterPort::LOCAL);
+
+    r.input(LOCAL).push_flit(make_flit(0x01));  // flit1, dst (1,0) -> EAST
+    r.tick();  // stage1: flit1 landing -> input FIFO
+    r.tick();  // stage2: flit1 granted, EAST credit 1->0, parks in output FIFO
+
     uint64_t now = 0;
     PhaseController phase(now, PhaseConfig{});
     RouterPerfObserver obs(now, phase, {{"req0", &r}}, RouterPerfConfig{});
-    // Tick until EAST credit is exhausted, then a waiting front flit + credit==0 = stall.
-    for (int i = 0; i < 4; ++i) {
-        r.input(static_cast<std::size_t>(noc::RouterPort::LOCAL)).push_flit(make_flit(0x01));
-        r.tick();
-        now = static_cast<uint64_t>(i);
-        obs.sample();
-    }
+
+    r.input(LOCAL).push_flit(make_flit(0x01));  // flit2, dst EAST
+    r.tick();  // flit2 -> input FIFO; cannot be granted (credit(EAST,0)==0)
+    obs.sample();
     EXPECT_GT(obs.credit_stall_cycles(), 0u);
 }
 ```
-
-> Implementer note: if forcing `credit==0` through repeated grants proves
-> fiddly, instead construct the stall condition directly -- the contract is only
-> "front flit routed to an output whose `credit(out,vc)==0` accrues a stall
-> cycle; an idle router accrues zero." Use whatever minimal `Router` driving
-> sequence reaches `credit(EAST,0)==0` with a LOCAL-input flit routed EAST.
 
 - [ ] **Step 2: Register and run to verify it fails**
 
@@ -1135,10 +1158,24 @@ class PerfReport {
                << "\"write_latency\":" << stat_json(ni->write_latency()) << ','
                << "\"read_latency\":" << stat_json(ni->read_latency()) << ','
                << "\"outstanding_peak\":" << ni->outstanding_peak() << ','
+               << "\"outstanding\":" << stat_json(ni->outstanding()) << ','
                << "\"rob_occupancy\":" << stat_json(ni->rob_occupancy()) << '}';
         }
-        os << "],\"router\":{\"credit_stall_cycles\":"
-           << (router_ ? router_->credit_stall_cycles() : 0) << "}}";
+        os << "],\"router\":{";
+        if (router_) {
+            os << "\"credit_stall_cycles\":" << router_->credit_stall_cycles() << ",\"per_router\":[";
+            for (std::size_t i = 0; i < router_->router_count(); ++i) {
+                if (i) os << ',';
+                os << "{\"label\":\"" << router_->label(i) << "\","
+                   << "\"stall\":" << router_->stall(i) << ','
+                   << "\"in_fifo\":" << stat_json(router_->in_fifo(i)) << ','
+                   << "\"out_fifo\":" << stat_json(router_->out_fifo(i)) << '}';
+            }
+            os << ']';
+        } else {
+            os << "\"credit_stall_cycles\":0";
+        }
+        os << "}}";
     }
 
   private:
@@ -1146,7 +1183,8 @@ class PerfReport {
         std::string o = "{\"count\":" + std::to_string(s.count()) +
                         ",\"min\":" + std::to_string(s.min()) +
                         ",\"max\":" + std::to_string(s.max()) +
-                        ",\"mean\":" + std::to_string(s.mean());
+                        ",\"mean\":" + std::to_string(s.mean()) +
+                        ",\"variance\":" + std::to_string(s.variance());
         if (!s.histogram().empty()) {
             o += ",\"histogram\":{\"thresholds\":[";
             for (std::size_t i = 0; i < s.thresholds().size(); ++i)
@@ -1248,14 +1286,15 @@ std::size_t run_loopback(bool with_observers, std::size_t* stall_out) {
     std::size_t cycle = 0;
     const std::size_t cap = 100000;
     while ((!flow_a.done() || !flow_b.done()) && cycle < cap) {
+        now = cycle;  // cycle-start timestamp: callbacks (fired inside the ticks)
+                      // and sample() below all read the SAME now this iteration
         flow_a.pre_tick();
         flow_b.pre_tick();
         ch.tick();
         flow_a.post_tick();
         flow_b.post_tick();
-        ++cycle;
-        now = cycle;
         if (with_observers) { ni_a.sample(); ni_b.sample(); router_obs.sample(); }
+        ++cycle;
     }
     if (with_observers && (flow_a.done() && flow_b.done())) phase.begin_drain();
     if (stall_out) *stall_out = router_obs.credit_stall_cycles();
@@ -1337,7 +1376,12 @@ git commit -m "chore(perf): remove completed implementation plan"
   `RouterPerfObserver(now, phase, std::vector<ObservedRouter>, RouterPerfConfig)`,
   `IssueInfo{is_write,id,scenario_line,addr,size,len,burst}` are used identically
   across tasks.
-- Known soft spots flagged inline for the implementer (copy-construction boilerplate
-  in T3/T4 from sibling tests; the T7 credit==0 driving sequence): these are
-  construction details, not contract ambiguity -- the asserts pin the contract.
+- Codex plan-review (2026-06-17) resolved: T3 Memory/AxiMaster ctor signatures
+  corrected and verified against `memory.hpp` / `axi_master.hpp:103,520`; T4 uses
+  the concrete hermetic `NmuStandalone`; T6 adds the H4 drain-latency test
+  (Measurement-issued + Drain-completed -> recorded); T7 uses a deterministic
+  EAST-credit-exhaustion stall sequence; T9 sets the cycle timestamp at loop top
+  so callbacks and `sample()` share `now`. `Stats` gains `variance()`; JSON gains
+  `outstanding`/`variance`/`per_router` (spec §6 marks `phases` + per-port ratio
+  array deferred).
 ```
