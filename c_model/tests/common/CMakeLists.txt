@@ -21,3 +21,7 @@ target_include_directories(test_channel_model_per_vc_credit PRIVATE
 add_cmodel_test(test_narrow_io)
 target_include_directories(test_narrow_io PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_perf_stats)
+target_include_directories(test_perf_stats PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
