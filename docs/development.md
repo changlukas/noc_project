@@ -255,7 +255,7 @@ make run-all-fsdb                                         # all 37 scenarios + g
 ~~~
 
 Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
-workstation's install, taken from its local reference Makefile — untracked
+workstation's install, taken from its local reference Makefile -- untracked
 `cosim/ref/`); override it if the layout
 differs. FSDB builds produce separate `simv_tb_top_fsdb` / `simv_genamba_fsdb`
 binaries beside the normal ones; toggling `FSDB` never reuses a binary from
@@ -263,7 +263,7 @@ the other mode.
 For memory dumping / interactive Verdi debug, enable the heavier ref-flow
 combo: `FSDB_EXTRA="-debug_access+all -debug_all +fsdb+all +vcsd"`.
 
-`run-all-fsdb` always exits 0 — it is not a regression gate; failing
+`run-all-fsdb` always exits 0 -- it is not a regression gate; failing
 patterns are reported and their partial fsdb is kept for debug.
 `AX4-INF-*` failures are annotated "fails by design" in the summary.
 
@@ -277,7 +277,7 @@ First-run validation on the workstation (record results in the
 
 #### VCD waveform tracing (Verilator)
 
-Twin of the FSDB flow for the Verilator side — usable on the Windows dev
+Twin of the FSDB flow for the Verilator side -- usable on the Windows dev
 host without VCS/Verdi. Opt-in per run; default off:
 
 ~~~bash
@@ -295,7 +295,7 @@ follows `run-all-fsdb` semantics (always exits 0; a scenario counts PASS
 only if its vcd is non-empty; `AX4-INF-*` annotated "fails by design").
 
 View locally with GTKWave, or transfer to the workstation for Verdi (Verdi
-opens VCD directly). VCD is uncompressed text — `gzip` before transfer.
+opens VCD directly). VCD is uncompressed text -- `gzip` before transfer.
 
 ### Verified toolchain versions
 
