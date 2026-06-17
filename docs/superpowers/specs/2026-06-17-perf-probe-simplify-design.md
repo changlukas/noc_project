@@ -78,9 +78,9 @@ between AXI beats and NoC flits.
 
 Flit pairing: a flit's entry and exit at a boundary are matched by per-link,
 per-VC FIFO order (the links and FIFOs preserve order, so the Nth flit in is the
-Nth flit out). To map a crossing to its transaction, the `FlitLog` records the
-flit's AXI id and `scenario_line` (Section 9). Pairing is exact under the
-no-contention characterization pass and within a single VC during measurement.
+Nth flit out). Per-component dwell is measured only in Pass 1 with one signature
+in flight, so FIFO order alone pairs each crossing unambiguously; no per-flit
+transaction id is needed.
 
 ### Why the NI uses both
 
@@ -138,10 +138,6 @@ Per-component dwell (measured in Pass 1, no contention):
   `slave.push_*`); no AxiMasterPort change is needed.
 - The response leg measures the symmetric dwells (NSU response, router, NMU
   response) the same way.
-
-Flit-to-transaction correlation: a flit crossing is mapped to its transaction by
-the flit's AXI id and `scenario_line`, which the `FlitLog` records (the
-packetizer carries `awid`/`arid`; the log is extended to capture them).
 
 slave_remainder = `zero_load` - sum(all measured component dwells). It is shown
 as a `slave` entry. It absorbs the slave's own processing plus any latency not
@@ -245,11 +241,10 @@ New and changed, all testbench-only under `c_model/tests/` (namespace
 | `c_model/tests/common/perf_common.hpp` | delete (`PhaseController` unused) |
 | `c_model/tests/common/router_perf_observer.hpp` | delete |
 | `c_model/tests/common/ni_perf_observer.hpp` | reduce to the transaction-latency collector (drop outstanding, RoB occupancy) |
-| `c_model/tests/common/flit_link_probe.hpp` | new: decorators that timestamp flit crossings; the `FlitLog` also records each flit's AXI id + `scenario_line` for transaction correlation |
-| `c_model/tests/common/component_dwell_observer.hpp` | new: per-component dwell + occupancy. NI dwell from the AXI callback (accept) to the NoC-edge crossing; router dwell from the inject/link/eject probes; NSU request dwell ends at the harness slave-drive shuttle point. |
-| `c_model/tests/common/zero_load_calculator.hpp` | new: `xy_path` path helper only. The zero-load calculator and `DepthTable` are dropped -- `zero_load` is the Pass-1 isolated measured latency, not computed. |
+| `c_model/tests/common/flit_link_probe.hpp` | new: decorators that timestamp flit crossings into a `FlitLog` |
+| `c_model/tests/common/component_dwell_observer.hpp` | new: per-component dwell (`SegmentDwell`, FIFO-order pairing) + occupancy peak. Router dwell from the inject/link/eject probes; NI dwell is computed in the harness from the AXI callback (accept) to the NoC-edge crossing; NSU request dwell ends at the harness slave-drive shuttle point. |
 | `c_model/tests/common/perf_report.hpp` | rewrite to emit the Section 8 JSON (incl. `slave` remainder) + stdout summary |
-| `c_model/tests/integration/test_router_loopback.cpp` | the two-pass harness + the Section 7 asserts + the non-intrusive A/B |
+| `c_model/tests/integration/test_router_loopback.cpp` | the two-pass harness + the Section 7 asserts + the non-intrusive A/B. Builds the fixed 2-node path list inline. |
 
 Occupancy reuses existing getters, so the per-component occupancy needs no new
 state accessor:
@@ -289,8 +284,6 @@ new ones) in the same step.
 
 ## 11. Testing
 
-- `xy_path`: unit test that the derived node-id path is correct (X then Y) for
-  representative src/dst pairs.
 - Decomposition sanity (Section 7.1): integration assertion that
   `slave_remainder >= 0` (component dwells do not exceed the isolated latency)
   for the characterized signatures.
@@ -300,9 +293,9 @@ new ones) in the same step.
   const introspection); an A/B run asserts identical cycle-to-completion with and
   without the probe attached.
 - `flit_link_probe`: unit test that a wrapped interface forwards every flit
-  unchanged and records the crossing cycle, AXI id, and scenario_line.
-- `component_dwell_observer`: unit test of the FIFO/id pairing and per-component
-  dwell accumulation.
+  unchanged and records the crossing cycle.
+- `component_dwell_observer`: unit test of the FIFO-order pairing and
+  per-component dwell accumulation.
 
 ## 12. References
 
