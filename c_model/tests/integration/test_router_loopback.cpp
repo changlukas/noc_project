@@ -572,8 +572,10 @@ IsolatedResult characterize_signature() {
     out.router_occ_capacity = ch.req_router(1).output_fifo_depth();
 
     // NMU req dwell: AW/AR accept cycle -> first req flit at NMU NoC edge.
-    if (!nmu_req_out_log.crossings().empty())
-        out.nmu_req_dwell = nmu_req_out_log.crossings().front().cycle - wr_accept_cycle;
+    if (!nmu_req_out_log.crossings().empty()) {
+        const uint64_t exit_cyc = nmu_req_out_log.crossings().front().cycle;
+        if (exit_cyc >= wr_accept_cycle) out.nmu_req_dwell = exit_cyc - wr_accept_cycle;
+    }
 
     // Router req dwell: flit enters R(1,0).WEST -> exits R(1,0).LOCAL (NSU edge).
     {
@@ -583,8 +585,10 @@ IsolatedResult characterize_signature() {
     }
 
     // NSU req dwell: flit enters NSU NoC edge -> WLAST/AR to slave.
-    if (!nsu_req_in_log.crossings().empty() && nsu_req_slave_cycle > 0)
-        out.nsu_req_dwell = nsu_req_slave_cycle - nsu_req_in_log.crossings().front().cycle;
+    if (!nsu_req_in_log.crossings().empty() && nsu_req_slave_cycle > 0) {
+        const uint64_t entry_cyc = nsu_req_in_log.crossings().front().cycle;
+        if (nsu_req_slave_cycle >= entry_cyc) out.nsu_req_dwell = nsu_req_slave_cycle - entry_cyc;
+    }
 
     // NSU rsp dwell: B/R from slave -> rsp flit exits NSU NoC edge.
     if (nsu_rsp_slave_cycle > 0 && !nsu_rsp_out_log.crossings().empty()) {
@@ -600,8 +604,10 @@ IsolatedResult characterize_signature() {
     }
 
     // NMU rsp dwell: last rsp flit enters NMU NoC edge -> B to master.
-    if (!nmu_rsp_in_log.crossings().empty() && wr_complete_cycle > 0)
-        out.nmu_rsp_dwell = wr_complete_cycle - nmu_rsp_in_log.crossings().back().cycle;
+    if (!nmu_rsp_in_log.crossings().empty() && wr_complete_cycle > 0) {
+        const uint64_t entry_cyc = nmu_rsp_in_log.crossings().back().cycle;
+        if (wr_complete_cycle >= entry_cyc) out.nmu_rsp_dwell = wr_complete_cycle - entry_cyc;
+    }
 
     return out;
 }
