@@ -1,7 +1,7 @@
 # NI + Router Performance Observer Design
 
 Date: 2026-06-17
-Status: Draft (pending Codex review + user review)
+Status: Implemented (2026-06-17, branch feat/ni-router-perf-observer)
 Scope: two testbench-only, non-intrusive performance observers for the c_model
 NoC -- `NIPerfObserver` (NI-edge latency / outstanding / RoB occupancy) and
 `RouterPerfObserver` (credit-stall / FIFO occupancy / output-port congestion) --
