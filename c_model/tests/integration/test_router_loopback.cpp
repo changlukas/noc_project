@@ -35,6 +35,9 @@
 #include "nsu/port_params.hpp"
 #include "scenario_helpers.hpp"
 #include "common/scenario.hpp"
+#include "common/ni_perf_observer.hpp"
+#include "common/perf_common.hpp"
+#include "common/router_perf_observer.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -132,7 +135,8 @@ struct Flow {
                ch.nsu_rsp_out(slave_node)),
           master_(yaml_path, nmu_.axi_slave_port(), read_dump, sc_.config.max_outstanding_write,
                   sc_.config.max_outstanding_read),
-          expected_dst_(expected_dst) {
+          expected_dst_(expected_dst),
+          master_node_(master_node) {
         slave_.set_memory_bounds(sc_.config.memory_base, sc_.config.memory_size);
         master_.on_write_completed([this](const axi::WriteResult& wr) {
             sb_.handle_write_completed(wr, wr.data, wr.strb_per_beat);
@@ -233,6 +237,11 @@ struct Flow {
     bool done() const { return master_.done(); }
     std::size_t mismatches() const { return sb_.mismatch_count(); }
 
+    // Observer wiring accessors.
+    axi::AxiMasterT<nmu::AxiSlavePort>& master() { return master_; }
+    const nmu::Rob& rob() const { return nmu_.rob(); }
+    uint8_t node_index() const { return static_cast<uint8_t>(master_node_); }
+
   private:
     static nmu::NmuConfig make_nmu_cfg(std::size_t num_vc, std::size_t node) {
         nmu::NmuConfig cfg{};
@@ -265,6 +274,7 @@ struct Flow {
     axi::AxiMasterT<nmu::AxiSlavePort> master_;
     axi::Scoreboard sb_;
     uint8_t expected_dst_;
+    std::size_t master_node_;
 
     std::deque<axi::BBeat> b_holdover_;
     std::deque<axi::RBeat> r_holdover_;
@@ -317,3 +327,90 @@ INSTANTIATE_TEST_SUITE_P(NumVc, RouterLoopbackParam, ::testing::Values(1, 2, 4, 
                          [](const ::testing::TestParamInfo<std::size_t>& info) {
                              return "vc" + std::to_string(info.param);
                          });
+
+// ---------------------------------------------------------------------------
+// Non-intrusive A/B test: observers must not perturb cycle-to-completion.
+// Runs the bidirectional num_vc=1 fabric twice (plain, then with observers
+// attached) and asserts identical cycle count and zero-mismatch scoreboards.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+std::size_t run_loopback(bool with_observers, std::size_t* stall_out) {
+    using namespace ni::cmodel::testing;
+    const std::size_t num_vc = 1;
+    TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
+    const std::string base = scenario_path("AX4-BAS-003_single_write_read_aligned");
+    const std::string tmp = std::string(::testing::TempDir());
+    Flow flow_a(ch, /*master_node=*/1, /*slave_node=*/0, base, num_vc, tmp + "/ab_a.read.txt",
+                /*dst=*/0x00);
+    const std::string yaml_b = shifted_scenario_path(base, 0x100000000, /*tag=*/42);
+    Flow flow_b(ch, /*master_node=*/0, /*slave_node=*/1, yaml_b, num_vc, tmp + "/ab_b.read.txt",
+                /*dst=*/0x01);
+
+    uint64_t now = 0;
+    PhaseController phase(now, PhaseConfig{});
+    NIPerfObserver ni_a(
+        now, phase, [&] { return flow_a.rob().write_occupancy() + flow_a.rob().read_occupancy(); },
+        NIPerfConfig{"A"});
+    NIPerfObserver ni_b(
+        now, phase, [&] { return flow_b.rob().write_occupancy() + flow_b.rob().read_occupancy(); },
+        NIPerfConfig{"B"});
+    RouterPerfObserver router_obs(now, phase,
+                                  {{"req0", &ch.req_router(0)},
+                                   {"req1", &ch.req_router(1)},
+                                   {"rsp0", &ch.rsp_router(0)},
+                                   {"rsp1", &ch.rsp_router(1)}},
+                                  RouterPerfConfig{});
+
+    if (with_observers) {
+        flow_a.master().on_write_issued(
+            [&](const axi::IssueInfo& i) { ni_a.on_issue(true, i.scenario_line); });
+        flow_a.master().on_read_issued(
+            [&](const axi::IssueInfo& i) { ni_a.on_issue(false, i.scenario_line); });
+        flow_a.master().on_write_completed(
+            [&](const axi::WriteResult& w) { ni_a.on_complete(true, w.scenario_line); });
+        flow_a.master().on_read_observed(
+            [&](const axi::ReadResult& r) { ni_a.on_complete(false, r.scenario_line); });
+        flow_b.master().on_write_issued(
+            [&](const axi::IssueInfo& i) { ni_b.on_issue(true, i.scenario_line); });
+        flow_b.master().on_read_issued(
+            [&](const axi::IssueInfo& i) { ni_b.on_issue(false, i.scenario_line); });
+        flow_b.master().on_write_completed(
+            [&](const axi::WriteResult& w) { ni_b.on_complete(true, w.scenario_line); });
+        flow_b.master().on_read_observed(
+            [&](const axi::ReadResult& r) { ni_b.on_complete(false, r.scenario_line); });
+    }
+
+    std::size_t cycle = 0;
+    const std::size_t cap = 100000;
+    while ((!flow_a.done() || !flow_b.done()) && cycle < cap) {
+        now = cycle;
+        flow_a.pre_tick();
+        flow_b.pre_tick();
+        ch.tick();
+        flow_a.post_tick();
+        flow_b.post_tick();
+        if (with_observers) {
+            ni_a.sample();
+            ni_b.sample();
+            router_obs.sample();
+        }
+        ++cycle;
+    }
+    if (with_observers && (flow_a.done() && flow_b.done())) phase.begin_drain();
+    if (stall_out) *stall_out = router_obs.credit_stall_cycles();
+    EXPECT_EQ(flow_a.mismatches(), 0u);
+    EXPECT_EQ(flow_b.mismatches(), 0u);
+    return cycle;
+}
+
+}  // namespace
+
+TEST(RouterLoopbackPerf, ObserversAreNonIntrusive) {
+    std::size_t stall = 0;
+    const std::size_t plain = run_loopback(/*with_observers=*/false, nullptr);
+    const std::size_t obs = run_loopback(/*with_observers=*/true, &stall);
+    EXPECT_EQ(plain, obs) << "attaching observers changed cycle-to-completion (plain=" << plain
+                          << " obs=" << obs << ")";
+}
