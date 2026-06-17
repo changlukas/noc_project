@@ -1551,6 +1551,40 @@ IsolatedResult characterize_signature() {
 
 }  // namespace
 
+**Per-router dwell augmentation (user decision: populate per-router JSON rows).**
+Fold this into `characterize_signature()` and the report step. `Router::set_downstream`
+only overwrites the downstream pointer (`router.hpp`), so the inter-router links
+are re-routed through a `LinkProbe` after `TwoNodeFabric` is built -- no fabric
+change needed. Add alongside the four NI-edge probes:
+
+```cpp
+    constexpr auto EAST = static_cast<std::size_t>(rc::RouterPort::EAST);
+    constexpr auto WEST = static_cast<std::size_t>(rc::RouterPort::WEST);
+    FlitLog req_link_log("R(0,0).EAST->R(1,0).WEST");  // Flow B request, eastward
+    FlitLog rsp_link_log("R(1,0).WEST->R(0,0).EAST");  // Flow B response, westward
+    LinkProbe req_link(ch.req_router(1).input(WEST), req_link_log, now);
+    ch.req_router(0).set_downstream(EAST, req_link);
+    LinkProbe rsp_link(ch.rsp_router(0).input(EAST), rsp_link_log, now);
+    ch.rsp_router(1).set_downstream(WEST, rsp_link);
+    // After the isolated run, pair to get each router's dwell:
+    SegmentDwell r00_req, r10_req, r10_rsp, r00_rsp;
+    r00_req.pair(nmu_req_log, req_link_log);  // R(0,0): LOCAL-in -> EAST-out
+    r10_req.pair(req_link_log, nsu_req_log);  // R(1,0): WEST-in -> LOCAL-out
+    r10_rsp.pair(nsu_rsp_log, rsp_link_log);  // R(1,0) response dwell
+    r00_rsp.pair(rsp_link_log, nmu_rsp_log);  // R(0,0) response dwell
+```
+
+Set `DepthTable.router_req` = `r00_req.all().min() + r10_req.all().min()` (sum of
+the two routers' request dwell, realizing the calculator's "sum over request
+hops"), `router_rsp` likewise. With the router segments now measured rather than
+zeroed, check 7.1 (`zero_load == isolated end-to-end`) is a real path-tiling test,
+not a tautology -- so the residual NMU/NSU AXI<->flit depths (which cross the
+AXI/flit boundary and are read from the deterministic model on the first RED run)
+are pinned by the equality. In the report step, emit one
+`add_router(ComponentRecord{...})` per router: `hop_*` from that router's
+`SegmentDwell` min/mean/max, `occ_max` from `req_router(n).output_fifo_size(LOCAL)`,
+`occ_capacity` from `req_router(n).output_fifo_depth()` (Task 3).
+
 TEST(RouterLoopbackPerf, CalculatorMatchesIsolatedGroundTruth) {
     using namespace ni::cmodel::testing;
     const IsolatedResult iso = characterize_signature();
