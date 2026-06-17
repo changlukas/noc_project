@@ -151,8 +151,7 @@ rather than an equality.
 
 ### 6.1 Pipeline structure (for the doc and to ground the dwells)
 
-The dwells measure these real pipelines (from the c_model; each stage is a
-registered hop, ~1 cycle with no stall):
+The dwells measure these real pipelines (from the c_model):
 
 - NMU request: `AxiSlavePort -> RoB -> Packetize (AXI->flit) -> WormholeArbiter
   -> VcArbiter -> NoC out`. NMU response is the reverse via `Depacketize`.
@@ -162,6 +161,15 @@ registered hop, ~1 cycle with no stall):
 - Router (per hop, 3-stage wormhole-VC): `landing reg -> stage1 input FIFO +
   route-compute -> stage2 VC alloc + switch alloc (wormhole lock + VC RR) +
   crossbar -> stage3 output FIFO -> link`.
+
+The NMU and NSU sub-stages are pull-based: in one `tick()` a beat propagates
+through all of them (ticked upstream-first, no inter-stage register;
+`nmu.hpp:135`), so the NI adds ~0 structural cycles -- an AW accepted at tick N
+emits its flit on the NoC edge at the same tick N. The registered latency lives
+in the router 3-stage pipeline (one cycle per hop) and in the slave. So
+`zero_load` is dominated by the router hops and the slave remainder, and a
+measured NI dwell near zero is the correct model behaviour, not a measurement
+error.
 
 ## 7. Validation
 
