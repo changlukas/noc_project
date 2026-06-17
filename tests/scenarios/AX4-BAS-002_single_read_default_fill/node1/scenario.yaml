@@ -1,0 +1,17 @@
+schema_version: 1
+metadata:
+  name: AX4-BAS-002_single_read_default_fill
+  category: basic
+config:
+  memory_base: 4294971392
+  memory_size: 4096
+  write_latency: 1
+  read_latency: 1
+transactions:
+- op: read
+  addr: 4294971520
+  id: 4
+  len: 0
+  size: 5
+  burst: INCR
+  dump_file: ../unused

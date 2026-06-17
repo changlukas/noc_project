@@ -4,9 +4,10 @@
 Usage: gen_coordinate_scenarios.py <src scenario.yaml> <out_dir>
 Writes <out_dir>/node0/scenario.yaml (identity) and <out_dir>/node1/scenario.yaml
 (+NODE1_OFFSET on every transaction addr and on config.memory_base). File
-references (data_file/dump_file/strb_file) are rewritten to absolute paths against
-the source directory so they resolve from any cwd (load_scenario resolves relative
-paths against the YAML's own dir).
+references (data_file/dump_file/strb_file) are rewritten to relative paths from the
+variant subdir back to the source data file (load_scenario resolves relative paths
+against the YAML's own dir), so a materialized variant stays valid wherever the
+scenario tree is checked out.
 """
 import copy
 import os
@@ -28,7 +29,14 @@ def _emit(sc, src_dir, out_dir, offset):
             t["addr"] = _as_int(t["addr"]) + offset
         for k in _FILE_KEYS:
             if t.get(k) and not os.path.isabs(t[k]):
-                t[k] = os.path.join(src_dir, t[k])
+                abs_src = os.path.join(src_dir, t[k])
+                try:
+                    rel = os.path.relpath(abs_src, out_dir)
+                except ValueError:
+                    # Different Windows drives have no relative path; the
+                    # absolute one still resolves from the YAML's own dir.
+                    rel = os.path.abspath(abs_src)
+                t[k] = rel.replace(os.sep, "/")
     if offset:
         cfg = sc.setdefault("config", {})
         cfg["memory_base"] = _as_int(cfg.get("memory_base", 0)) + offset

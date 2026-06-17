@@ -8,7 +8,9 @@ SRC = os.path.join(REPO, "tests", "scenarios",
 
 
 def test_node1_variant_shifts_addr_and_base():
-    with tempfile.TemporaryDirectory() as out:
+    # Materialize under the repo tree (same drive as the source) so the
+    # generator can emit a drive-relative data_file path on Windows.
+    with tempfile.TemporaryDirectory(dir=REPO) as out:
         subprocess.run([sys.executable, GEN, SRC, out], check=True)
         n0 = yaml.safe_load(open(os.path.join(out, "node0", "scenario.yaml")))
         n1 = yaml.safe_load(open(os.path.join(out, "node1", "scenario.yaml")))
@@ -18,6 +20,8 @@ def test_node1_variant_shifts_addr_and_base():
         # node1 = +0x100000000 on addr and memory_base
         assert int(str(n1["transactions"][0]["addr"]), 0) == 0x1000 + 0x100000000
         assert int(str(n1["config"]["memory_base"]), 0) == 0x1000 + 0x100000000
-        # data_file rewritten to an absolute path that exists
-        assert os.path.isabs(n1["transactions"][0]["data_file"])
-        assert os.path.exists(n1["transactions"][0]["data_file"])
+        # data_file rewritten to a RELATIVE path that resolves from the variant
+        # subdir back to the source data file.
+        data_file = n1["transactions"][0]["data_file"]
+        assert not os.path.isabs(data_file)
+        assert os.path.exists(os.path.join(out, "node1", data_file))

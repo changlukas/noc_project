@@ -77,10 +77,11 @@ TEST_P(CosimIntegration, ScenarioPassesWb2axip) {
     ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
     // Drive both nodes from this scenario's coordinate variants: node0 =
     // identity (low addr), node1 = +0x1_0000_0000 (coordinate (1,0)). Variants
-    // are pre-generated only for COSIM_BIDIR_SUBSET (CMakeLists.txt); a
-    // qualifying scenario outside that bring-up subset has no variant tree —
-    // skip rather than fail on a missing file.
-    auto base = std::string(COORD_VARIANT_ROOT) + "/" + scenario_id;
+    // are materialized + committed under tests/scenarios/<id>/node{0,1}/ only
+    // for the bidirectional bring-up subset; a qualifying scenario outside that
+    // subset has no variant tree — skip rather than fail on a missing file.
+    // COORD_VARIANT_ROOT == the scenario-tree root (trailing slash).
+    auto base = std::string(COORD_VARIANT_ROOT) + scenario_id;
     auto node0_path = base + "/node0/scenario.yaml";
     if (FILE* f = std::fopen(node0_path.c_str(), "r")) {
         std::fclose(f);

@@ -1,0 +1,38 @@
+schema_version: 1
+metadata:
+  name: AX4-ORD-001_multi_txn_same_id
+  category: ordering
+config:
+  memory_base: 4096
+  memory_size: 4096
+  write_latency: 1
+  read_latency: 1
+transactions:
+- op: write
+  addr: 4096
+  id: 5
+  len: 0
+  size: 5
+  burst: INCR
+  data_file: ../data_a.txt
+- op: write
+  addr: 4128
+  id: 5
+  len: 0
+  size: 5
+  burst: INCR
+  data_file: ../data_b.txt
+- op: read
+  addr: 4096
+  id: 5
+  len: 0
+  size: 5
+  burst: INCR
+  dump_file: ../unused
+- op: read
+  addr: 4128
+  id: 5
+  len: 0
+  size: 5
+  burst: INCR
+  dump_file: ../unused

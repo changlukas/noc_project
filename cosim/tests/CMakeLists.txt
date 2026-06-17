@@ -32,50 +32,16 @@ target_compile_definitions(test_cosim_integration PRIVATE
     SCENARIO_TREE_ROOT="${SCENARIO_TREE_ABS}")
 
 # -----------------------------------------------------------------------
-# Bidirectional coordinate-variant generation for CosimIntegration.
-# COSIM_BIDIR_SUBSET = scenarios that are BOTH wb2axip-runnable (single-beat,
-# non-exclusive, no injection, max_outstanding_write<=1) AND read-bearing
-# (reads_checked>0 satisfies tb_top's non-vacuous PASS guard). Write-only and
-# wb2axip-blocked scenarios stay in the full kAllAxi4Scenarios sweep but SKIP.
+# Bidirectional coordinate variants for CosimIntegration.
+# The per-node variants (node0 = identity, node1 = +0x1_0000_0000) are
+# materialized + committed under each pattern dir in the scenario tree
+# (tests/scenarios/<id>/node{0,1}/scenario.yaml), generated offline by
+# cosim/tools/gen_coordinate_scenarios.py. The test reads them directly from
+# the source tree; only the bring-up subset (single-beat, non-exclusive,
+# read-bearing patterns) has a node0/node1 tree, and ids without one SKIP.
 # -----------------------------------------------------------------------
-set(COSIM_BIDIR_SUBSET
-    AX4-BAS-002_single_read_default_fill
-    AX4-BAS-003_single_write_read_aligned
-    AX4-BAS-004_conformity_write_read
-    AX4-BAS-005_multi_id_single_beat_sequential
-    AX4-ORD-001_multi_txn_same_id
-    AX4-HSH-002_conformity_backpressure)
-
-# The generator must run under an interpreter that has PyYAML (py -3 on Windows
-# may not). Fail configure early if it is missing.
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
-execute_process(COMMAND ${Python3_EXECUTABLE} -c "import yaml"
-                RESULT_VARIABLE _yaml_rc)
-if(NOT _yaml_rc EQUAL 0)
-    message(FATAL_ERROR
-        "scenario generator needs PyYAML: pip install pyyaml for ${Python3_EXECUTABLE}")
-endif()
-
-set(COORD_VARIANT_ROOT "${CMAKE_CURRENT_BINARY_DIR}/coord_scenarios")
-set(_coord_outputs "")
-foreach(id IN LISTS COSIM_BIDIR_SUBSET)
-    set(_n0 "${COORD_VARIANT_ROOT}/${id}/node0/scenario.yaml")
-    set(_n1 "${COORD_VARIANT_ROOT}/${id}/node1/scenario.yaml")
-    add_custom_command(
-        OUTPUT "${_n0}" "${_n1}"
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_coordinate_scenarios.py
-                "${SCENARIO_TREE_ABS}${id}/scenario.yaml"
-                "${COORD_VARIANT_ROOT}/${id}"
-        DEPENDS ${CMAKE_CURRENT_LIST_DIR}/../tools/gen_coordinate_scenarios.py
-                "${SCENARIO_TREE_ABS}${id}/scenario.yaml"
-        COMMENT "Generating coordinate variants for ${id}")
-    list(APPEND _coord_outputs "${_n0}" "${_n1}")
-endforeach()
-add_custom_target(gen_coord_scenarios DEPENDS ${_coord_outputs})
-add_dependencies(test_cosim_integration gen_coord_scenarios)
 target_compile_definitions(test_cosim_integration PRIVATE
-    COORD_VARIANT_ROOT="${COORD_VARIANT_ROOT}")
+    COORD_VARIANT_ROOT="${SCENARIO_TREE_ABS}")
 
 # -----------------------------------------------------------------------
 # test_checker_fires_on_violation — injection liveness regression
