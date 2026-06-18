@@ -50,3 +50,8 @@ target_include_directories(test_component_dwell_observer PRIVATE
 add_cmodel_test(test_router_path)
 target_include_directories(test_router_path PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_isolated_scenario)
+target_include_directories(test_isolated_scenario PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(test_isolated_scenario PRIVATE yaml-cpp::yaml-cpp)
