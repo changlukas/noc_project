@@ -167,8 +167,13 @@ TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
 // After T4 the method no longer exists on nsu::Depacketize; wrong-side
 // calls are now caught at compile time. Test removed.
 
+// Tick-cardinality update (spec §5.3): S1 register holds <=1 AW per tick.
+// For 3 sequential AW flits on the same channel, tick 3 times — one flit
+// per tick — to drain all 3. FIFO order coverage is unchanged.
 TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
-    SCENARIO("NSU Depacketize: AW queue preserves NoC arrival order across 3 sequential AW flits");
+    SCENARIO(
+        "NSU Depacketize: AW S1 register preserves NoC arrival order across 3 sequential AW flits "
+        "(one per tick per staged S1 contract)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
@@ -176,7 +181,9 @@ TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(2, 0x0)));
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(3, 0x0)));
     depkt.tick();
-    EXPECT_EQ(depkt.pop_aw()->id, 1);
-    EXPECT_EQ(depkt.pop_aw()->id, 2);
-    EXPECT_EQ(depkt.pop_aw()->id, 3);
+    EXPECT_EQ(depkt.pop_aw()->id, 1);  // flit 1 decoded into S1 this tick
+    depkt.tick();
+    EXPECT_EQ(depkt.pop_aw()->id, 2);  // flit 2 decoded into S1 next tick
+    depkt.tick();
+    EXPECT_EQ(depkt.pop_aw()->id, 3);  // flit 3 decoded into S1 third tick
 }

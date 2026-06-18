@@ -72,10 +72,10 @@ class Nsu {
     void tick();
 
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
-        (void)path;
-        (void)stage;
-        (void)axi_ch;
-        return 0;  // filled per-path in later tasks
+        if (path == NiPath::NsuReq && stage == 0) {
+            return depacketize_.s1_occupancy(axi_ch);
+        }
+        return 0;  // other paths filled in later tasks
     }
 
   private:
@@ -126,8 +126,12 @@ inline Nsu::Nsu(NsuConfig cfg, noc::NocReqIn& upstream_req, noc::NocRspOut& down
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {
-    depacketize_.tick();
-    axi_master_port_.tick();
+    // Reverse-order tick for the req path (spec §5.3): S2 drains from S1
+    // registers before S1 refills them, so a beat advances exactly one stage
+    // per tick. This mirrors the router reverse-order tick (router.hpp:199).
+    // Response path (wormhole/vc_arbiter) is unchanged.
+    axi_master_port_.tick();  // S2: consume from S1 registers, forward B/R
+    depacketize_.tick();      // S1: decode new flit into S1 registers
     wormhole_arbiter_.tick();
     vc_arbiter_.tick();
 }

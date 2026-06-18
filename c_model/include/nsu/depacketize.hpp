@@ -1,7 +1,9 @@
 #pragma once
 #include "axi/types.hpp"
 #include "flit.hpp"
+#include "ni_flit_constants.h"
 #include "noc/noc_req_in.hpp"
+#include "noc/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "request_io.hpp"
 #include <cassert>
@@ -36,19 +38,41 @@ class Depacketize : public RequestDepacketizer {
 
     void tick();
 
-    // RequestDepacketizer interface
+    // RequestDepacketizer interface: takes from the S1 stage register.
+    // Called by AxiMasterPort (S2) once per tick (<=1 beat/channel/tick).
     std::optional<axi::AwBeat> pop_aw() override;
     std::optional<axi::WBeat> pop_w() override;
     std::optional<axi::ArBeat> pop_ar() override;
 
+    // stage_occupancy probe: returns 1 if the S1 register for axi_ch is
+    // occupied, 0 otherwise. axi_ch uses ni::AXI_CH_* constants.
+    std::size_t s1_occupancy(uint8_t axi_ch) const noexcept {
+        switch (axi_ch) {
+            case ni::AXI_CH_AW:
+                return s1_aw_.occupancy();
+            case ni::AXI_CH_W:
+                return s1_w_.occupancy();
+            case ni::AXI_CH_AR:
+                return s1_ar_.occupancy();
+            default:
+                return 0;
+        }
+    }
+
   private:
     noc::NocReqIn& req_in_;
     MetaBuffer& meta_;
-    std::deque<axi::AwBeat> aw_q_;
-    std::deque<axi::WBeat> w_q_;
-    std::deque<axi::ArBeat> ar_q_;
+    // Unused: old per-channel queues replaced by S1 PipelineStage registers.
+    // Depths are kept as members to preserve backpressure checks if needed.
     std::size_t aw_q_depth_, w_q_depth_, ar_q_depth_;
     std::optional<Flit> pending_;
+
+    // S1 stage registers: one per AXI channel (AW/W/AR). Depacketize::tick()
+    // decodes <=1 flit/channel/tick into these registers. pop_aw/pop_w/pop_ar
+    // (called by AxiMasterPort as the S2 stage) take from them.
+    noc::PipelineStage<axi::AwBeat> s1_aw_;
+    noc::PipelineStage<axi::WBeat> s1_w_;
+    noc::PipelineStage<axi::ArBeat> s1_ar_;
 
     static axi::AwBeat decode_aw(const Flit& f);
     static axi::WBeat decode_w(const Flit& f);
@@ -96,6 +120,11 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
     return b;
 }
 
+// tick() is the S1 stage: decode <=1 flit per channel per tick into the S1
+// stage registers. If a register is already occupied (not yet consumed by the
+// S2 AxiMasterPort), backpressure the flit into pending_ (head-of-line
+// blocking on single-FIFO ingress, same semantics as the original queue-based
+// implementation). MetaBuffer snapshot is atomic with decode into S1 (R4).
 inline void Depacketize::tick() {
     while (true) {
         Flit f;
@@ -109,42 +138,42 @@ inline void Depacketize::tick() {
         uint64_t ch = f.get_header_field("axi_ch");
         switch (ch) {
             case ni::AXI_CH_AW:
-                if (aw_q_.size() >= aw_q_depth_) {
+                if (s1_aw_.full()) {
                     pending_ = f;
                     return;
                 }
                 {
                     auto aw = decode_aw(f);
-                    aw_q_.push_back(aw);
                     meta_.snapshot_write(aw.id,
                                          {
                                              static_cast<uint8_t>(f.get_header_field("src_id")),
                                              static_cast<uint8_t>(f.get_header_field("rob_req")),
                                              static_cast<uint8_t>(f.get_header_field("rob_idx")),
                                          });
+                    s1_aw_.accept(aw);
                 }
                 break;
             case ni::AXI_CH_W:
-                if (w_q_.size() >= w_q_depth_) {
+                if (s1_w_.full()) {
                     pending_ = f;
                     return;
                 }
-                w_q_.push_back(decode_w(f));
+                s1_w_.accept(decode_w(f));
                 break;
             case ni::AXI_CH_AR:
-                if (ar_q_.size() >= ar_q_depth_) {
+                if (s1_ar_.full()) {
                     pending_ = f;
                     return;
                 }
                 {
                     auto ar = decode_ar(f);
-                    ar_q_.push_back(ar);
                     meta_.snapshot_read(ar.id,
                                         {
                                             static_cast<uint8_t>(f.get_header_field("src_id")),
                                             static_cast<uint8_t>(f.get_header_field("rob_req")),
                                             static_cast<uint8_t>(f.get_header_field("rob_idx")),
                                         });
+                    s1_ar_.accept(ar);
                 }
                 break;
             default:
@@ -157,26 +186,36 @@ inline void Depacketize::tick() {
                 std::abort();
         }
         pending_.reset();
+        // S1 registers accept only one flit per channel per tick.
+        // After placing a flit in a register, stop advancing the ingress
+        // stream for that channel (subsequent flits for any channel remain
+        // for the next tick, preserving the <=1 beat/channel/tick bound).
+        // Since all three registers are independent, we continue pulling
+        // flits for other channels until all three are full or the ingress
+        // is empty.
+        //
+        // The while(true) loop naturally handles this: after the switch we
+        // loop back to pull the next flit. When a channel's register is
+        // full, the next flit for that channel goes to pending_. Because
+        // pending_ is a single-slot stash, only one channel can be stalled
+        // at a time (head-of-line blocking on the single ingress stream).
     }
 }
 
+// pop_aw/pop_w/pop_ar: S2 consumer interface — take from the S1 register.
+// Called <=1 time per channel per tick by AxiMasterPort::drain_*_from_depkt.
+// Returns nullopt when the S1 register is empty (no beat ready this tick).
 inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
-    if (aw_q_.empty()) return std::nullopt;
-    auto b = aw_q_.front();
-    aw_q_.pop_front();
-    return b;
+    if (!s1_aw_.full()) return std::nullopt;
+    return s1_aw_.take();
 }
 inline std::optional<axi::WBeat> Depacketize::pop_w() {
-    if (w_q_.empty()) return std::nullopt;
-    auto b = w_q_.front();
-    w_q_.pop_front();
-    return b;
+    if (!s1_w_.full()) return std::nullopt;
+    return s1_w_.take();
 }
 inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
-    if (ar_q_.empty()) return std::nullopt;
-    auto b = ar_q_.front();
-    ar_q_.pop_front();
-    return b;
+    if (!s1_ar_.full()) return std::nullopt;
+    return s1_ar_.take();
 }
 
 }  // namespace ni::cmodel::nsu

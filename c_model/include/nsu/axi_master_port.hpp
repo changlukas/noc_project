@@ -135,25 +135,23 @@ class AxiMasterPort {
     }
 
   private:
+    // S2 stage: advance <=1 beat per channel per tick from the S1 stage
+    // registers (held by Depacketize). The while-loops are replaced by a
+    // single pop per channel, implementing the register-parked advance
+    // described in spec §5.3 (one beat per stage per tick, not a drain).
     void drain_aw_from_depacketizer_() {
-        while (aw_q_.size() < params_.aw_queue_depth) {
-            auto a = depkt_.pop_aw();
-            if (!a) break;
-            aw_q_.push_back(*a);
+        if (aw_q_.size() < params_.aw_queue_depth) {
+            if (auto a = depkt_.pop_aw()) aw_q_.push_back(*a);
         }
     }
     void drain_w_from_depacketizer_() {
-        while (w_q_.size() < params_.w_queue_depth) {
-            auto a = depkt_.pop_w();
-            if (!a) break;
-            w_q_.push_back(*a);
+        if (w_q_.size() < params_.w_queue_depth) {
+            if (auto a = depkt_.pop_w()) w_q_.push_back(*a);
         }
     }
     void drain_ar_from_depacketizer_() {
-        while (ar_q_.size() < params_.ar_queue_depth) {
-            auto a = depkt_.pop_ar();
-            if (!a) break;
-            ar_q_.push_back(*a);
+        if (ar_q_.size() < params_.ar_queue_depth) {
+            if (auto a = depkt_.pop_ar()) ar_q_.push_back(*a);
         }
     }
     void forward_b_to_packetizer_() {

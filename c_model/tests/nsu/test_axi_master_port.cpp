@@ -84,14 +84,19 @@ struct PortFixture {
 
 // -------------------------------------------------------------------------
 // 1. Basic per-channel handshake: NoC delivers N AW beats, port surfaces N.
+// Tick-cardinality update (spec §5.3): AxiMasterPort advances <=1 beat per
+// channel per tick (S2 stage). N beats require N ticks to drain from the S1
+// register interface (LoopbackRequestDepacketizer is not staged, so each pop
+// returns immediately; one beat per tick is the port's own constraint).
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, AwBasicHandshake_PushPopNoLoss) {
     SCENARIO(
-        "NSU AxiMasterPort: 8 AW beats arrive from depacketizer, all surface via pop_aw in order");
+        "NSU AxiMasterPort: 8 AW beats arrive from depacketizer, all surface via pop_aw in order "
+        "(one beat per tick per staged S2 contract)");
     PortFixture fx;
     for (uint8_t i = 0; i < 8; ++i) fx.ch.request.aw.push_back(make_aw(i, 0x1000 + i * 32));
-    fx.port.tick();
     for (uint8_t i = 0; i < 8; ++i) {
+        fx.port.tick();
         auto out = fx.port.pop_aw();
         ASSERT_TRUE(out.has_value());
         EXPECT_EQ(out->id, i);
@@ -100,11 +105,12 @@ TEST(NsuAxiMasterPort, AwBasicHandshake_PushPopNoLoss) {
 
 TEST(NsuAxiMasterPort, ArBasicHandshake_PushPopNoLoss) {
     SCENARIO(
-        "NSU AxiMasterPort: 8 AR beats arrive from depacketizer, all surface via pop_ar in order");
+        "NSU AxiMasterPort: 8 AR beats arrive from depacketizer, all surface via pop_ar in order "
+        "(one beat per tick per staged S2 contract)");
     PortFixture fx;
     for (uint8_t i = 0; i < 8; ++i) fx.ch.request.ar.push_back(make_ar(i, 0x2000 + i * 32));
-    fx.port.tick();
     for (uint8_t i = 0; i < 8; ++i) {
+        fx.port.tick();
         auto out = fx.port.pop_ar();
         ASSERT_TRUE(out.has_value());
         EXPECT_EQ(out->id, i);
@@ -114,12 +120,12 @@ TEST(NsuAxiMasterPort, ArBasicHandshake_PushPopNoLoss) {
 TEST(NsuAxiMasterPort, WBasicHandshake_PushPopNoLoss) {
     SCENARIO(
         "NSU AxiMasterPort: 8 W beats arrive from depacketizer, all surface via pop_w with "
-        "payload");
+        "payload (one beat per tick per staged S2 contract)");
     PortFixture fx;
     for (uint8_t i = 0; i < 8; ++i)
         fx.ch.request.w.push_back(make_w(0x10 + i, 0xFFFFFFFFu, i == 7, i));
-    fx.port.tick();
     for (uint8_t i = 0; i < 8; ++i) {
+        fx.port.tick();
         auto out = fx.port.pop_w();
         ASSERT_TRUE(out.has_value());
         EXPECT_EQ(out->data[0], 0x10 + i);
@@ -169,19 +175,21 @@ TEST(NsuAxiMasterPort, BBoundary_FailedPushDoesNotDuplicateOnRetry) {
 
 // -------------------------------------------------------------------------
 // 4. AW channel FIFO order preserved end-to-end (mixed ids).
+// Tick-cardinality update: one beat per tick per channel — tick N times to
+// drain N beats. FIFO order coverage is unchanged.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, AwFifoOrder_PreservedAcrossMixedIds) {
     SCENARIO(
         "NSU AxiMasterPort: AW channel FIFO order preserved across mixed AXI ids (no per-id "
-        "reorder)");
+        "reorder; one beat per tick per staged S2 contract)");
     PortFixture fx;
     // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
     // Cross-ID completion ordering / per-ID response reordering is the ROB
     // stage's responsibility (see plan §3.1), NOT this port's.
     const std::vector<uint8_t> ids{4, 7, 4, 1, 7, 2, 1, 4};
     for (auto id : ids) fx.ch.request.aw.push_back(make_aw(id, 0x1000));
-    fx.port.tick();
     for (std::size_t i = 0; i < ids.size(); ++i) {
+        fx.port.tick();
         auto out = fx.port.pop_aw();
         ASSERT_TRUE(out.has_value());
         EXPECT_EQ(out->id, ids[i]);
@@ -190,19 +198,20 @@ TEST(NsuAxiMasterPort, AwFifoOrder_PreservedAcrossMixedIds) {
 
 // -------------------------------------------------------------------------
 // 5. AR channel FIFO order preserved end-to-end (mixed ids).
+// Tick-cardinality update: one beat per tick per channel — tick N times.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, ArFifoOrder_PreservedAcrossMixedIds) {
     SCENARIO(
         "NSU AxiMasterPort: AR channel FIFO order preserved across mixed AXI ids (no per-id "
-        "reorder)");
+        "reorder; one beat per tick per staged S2 contract)");
     PortFixture fx;
     // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
     // Cross-ID completion ordering / per-ID response reordering is the ROB
     // stage's responsibility (see plan §3.1), NOT this port's.
     const std::vector<uint8_t> ids{6, 8, 6, 3, 8, 0, 3, 6};
     for (auto id : ids) fx.ch.request.ar.push_back(make_ar(id, 0x2000));
-    fx.port.tick();
     for (std::size_t i = 0; i < ids.size(); ++i) {
+        fx.port.tick();
         auto out = fx.port.pop_ar();
         ASSERT_TRUE(out.has_value());
         EXPECT_EQ(out->id, ids[i]);
@@ -360,20 +369,40 @@ TEST(NsuAxiMasterPort, SimultaneousAwWArForwardProgressInOneTick) {
 }
 
 // -------------------------------------------------------------------------
-// 12. AW backpressure independent from AR. Saturate AW internal queue;
-//     AR must still drain from the depacketizer (5 channels independent).
+// 12. AW backpressure independent from AR. Set AW queue depth to 1 and
+//     saturate it with a pre-loaded beat. Even with AW S2 drain blocked
+//     (AW queue full), AR must still advance 1 beat per tick (AXI4 channel
+//     independence). Tick-cardinality: <=1 beat per channel per tick.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, AwBackpressure_DoesNotBlockAr) {
     SCENARIO(
         "NSU AxiMasterPort: AW queue full does not block AR channel ingestion (independent per "
-        "AXI4)");
-    PortFixture fx;
-    // Fill the port's AW internal queue but leave AR slack.
-    for (std::size_t i = 0; i < fx.params.aw_queue_depth + 4; ++i)
-        fx.ch.request.aw.push_back(make_aw(static_cast<uint8_t>(i & 0xFF), 0x1000));
-    for (uint8_t i = 0; i < 3; ++i) fx.ch.request.ar.push_back(make_ar(i, 0x2000));
-    fx.port.tick();
-    EXPECT_EQ(fx.port.aw_q_size(), fx.params.aw_queue_depth);
-    EXPECT_EQ(fx.port.ar_q_size(), 3u);  // AR drained fully despite AW jam
-    EXPECT_EQ(fx.ch.request.ar.size(), 0u);
+        "AXI4; one AR per tick per staged S2 contract)");
+    // Override AW queue depth to 1 so we can saturate it in one tick.
+    test::LoopbackChannelSet ch{};
+    test::LoopbackRequestDepacketizer depkt{ch.request};
+    test::LoopbackResponsePacketizer pkt{ch.response};
+    nsu::PortParams params = nsu::load_nsu_port_params("config/port_params.yaml");
+    params.aw_queue_depth = 1;
+    nsu::AxiMasterPort port(depkt, pkt, params);
+
+    // Put 1 AW into depacketizer (drains into port queue, saturating it),
+    // plus a second AW that will be blocked. Also 3 AR beats that should drain.
+    ch.request.aw.push_back(make_aw(0, 0x1000));  // will fill port AW queue (depth=1)
+    ch.request.aw.push_back(make_aw(1, 0x1100));  // blocked: AW queue full
+    for (uint8_t i = 0; i < 3; ++i) ch.request.ar.push_back(make_ar(i, 0x2000));
+
+    // Tick 1: AW drains 1 (queue now full at depth=1); AR drains 1.
+    port.tick();
+    EXPECT_EQ(port.aw_q_size(), 1u);      // AW queue saturated
+    EXPECT_EQ(port.ar_q_size(), 1u);      // AR drained 1 despite AW jam
+    EXPECT_EQ(ch.request.aw.size(), 1u);  // second AW still waiting
+
+    // Ticks 2-3: AW stays blocked (queue full, no consumer), AR drains 1/tick.
+    port.tick();
+    EXPECT_EQ(port.ar_q_size(), 2u);
+    port.tick();
+    EXPECT_EQ(port.ar_q_size(), 3u);  // all 3 AR in port queue
+    EXPECT_EQ(ch.request.ar.size(), 0u);
+    EXPECT_EQ(port.aw_q_size(), 1u);  // AW still at capacity (no consumer)
 }

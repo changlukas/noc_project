@@ -82,19 +82,22 @@ TEST(NsuShellAdapter, idle_adapter_no_output) {
     EXPECT_FALSE(out.awvalid) << "idle Nsu should not drive AW (no request processed)";
     EXPECT_FALSE(out.wvalid) << "idle Nsu should not drive W";
     EXPECT_FALSE(out.arvalid) << "idle Nsu should not drive AR";
-    EXPECT_FALSE(out.bready)
-        << "context-gated: no write issued -> no B owed -> bready stays low";
-    EXPECT_FALSE(out.rready)
-        << "context-gated: no read issued -> no R owed -> rready stays low";
+    EXPECT_FALSE(out.bready) << "context-gated: no write issued -> no B owed -> bready stays low";
+    EXPECT_FALSE(out.rready) << "context-gated: no read issued -> no R owed -> rready stays low";
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: inject a NoC req AW flit → after tick, Nsu drives awvalid on the
-// AXI master side. Then inject a W flit → wvalid asserted. Verifies the
-// NoC consumer → Depacketize → AxiMasterPort pipeline.
+// Test 2: inject a NoC req AW flit → Nsu drives awvalid after 2 ticks.
+//
+// Pipeline staging (spec §5.3): S1 (Depacketize) accepts flit in tick 1;
+// S2 (AxiMasterPort) drains S1 → aw_q in tick 2. Tick order inside
+// Nsu::tick(): S2-drain THEN S1-fill, so S1 fills in tick N and S2 sees it
+// in tick N+1.
 // ---------------------------------------------------------------------------
 TEST(NsuShellAdapter, noc_req_aw_flit_produces_axi_awvalid) {
-    SCENARIO("NoC req AW flit injection → AXI master drives awvalid after tick");
+    SCENARIO(
+        "NoC req AW flit injection → AXI master drives awvalid after 2 ticks (S1 fill tick 1, "
+        "S2 drain tick 2 — spec §5.3 two-stage pipeline)");
 
     NsuShellAdapter adapter;
     adapter.init();
@@ -102,30 +105,36 @@ TEST(NsuShellAdapter, noc_req_aw_flit_produces_axi_awvalid) {
     NsuInputs in{};
     NsuOutputs out{};
 
-    // Cycle 1: inject AW flit (ID=0x05, addr=0x1000) into NoC consumer input.
+    // Tick 1: inject AW flit into NoC consumer. S1 (Depacketize) accepts it.
+    // S2 has nothing yet (reverse-order tick: S2 drains first, then S1 fills).
     in.noc_req_valid = true;
     in.noc_req_flit = make_aw_flit_bytes(0x05, 0x1000, /*src_id=*/0x10);
-    in.awready = false;  // subordinate not yet ready
+    in.awready = false;
     adapter.set_inputs(in);
     adapter.tick();
     adapter.get_outputs(out);
+    EXPECT_FALSE(out.awvalid) << "tick 1: AW in S1 only; S2 aw_q empty, awvalid must be low";
 
-    // After tick, Depacketize should have produced an AW beat in AxiMasterPort.
-    EXPECT_TRUE(out.awvalid) << "cycle 1: Nsu must drive awvalid after AW flit is depacketized";
-    EXPECT_EQ(out.awid, 0x05u) << "awid must match the flit payload";
-    EXPECT_EQ(out.awaddr, 0x1000u) << "awaddr must match the flit payload";
-
-    // Cycle 2: inject W flit (single beat).
+    // Tick 2: inject W flit (lands in S1). S2 drains AW from S1 → aw_q → awvalid high.
     in = NsuInputs{};
     in.noc_req_valid = true;
     in.noc_req_flit = make_w_flit_bytes();
-    in.awready = true;  // subordinate accepts AW this cycle
+    in.awready = false;  // don't accept AW yet — verify awvalid first
+    adapter.set_inputs(in);
+    adapter.tick();
+    adapter.get_outputs(out);
+    EXPECT_TRUE(out.awvalid) << "tick 2: AW drained S1→S2; awvalid must be high";
+    EXPECT_EQ(out.awid, 0x05u) << "awid must match the flit payload";
+    EXPECT_EQ(out.awaddr, 0x1000u) << "awaddr must match the flit payload";
+
+    // Tick 3: accept AW (awready=true). S2 drains W from S1 → wvalid.
+    in = NsuInputs{};
+    in.awready = true;
     in.wready = false;
     adapter.set_inputs(in);
     adapter.tick();
     adapter.get_outputs(out);
-
-    EXPECT_TRUE(out.wvalid) << "cycle 2: Nsu must drive wvalid after W flit is depacketized";
+    EXPECT_TRUE(out.wvalid) << "tick 3: W drained S1→S2; wvalid must be high";
     EXPECT_TRUE(out.wlast) << "single-beat burst: wlast must be asserted";
 }
 

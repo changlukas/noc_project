@@ -1,3 +1,6 @@
+add_cmodel_test(test_nsu_pipeline)
+target_link_libraries(test_nsu_pipeline PRIVATE yaml-cpp::yaml-cpp)
+
 add_cmodel_test(test_axi_master_port)
 target_link_libraries(test_axi_master_port PRIVATE yaml-cpp::yaml-cpp)
 # Pick up the shared loopback fixtures from tests/common/ via
