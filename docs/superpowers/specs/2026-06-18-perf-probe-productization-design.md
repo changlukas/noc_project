@@ -1,7 +1,7 @@
 # Perf probe productization: mesh-agnostic decomposition + scenario-driven
 
 Date: 2026-06-18
-Status: Draft (pending Codex review + user approval)
+Status: Draft, rev 2 (Codex round-1 must-fixes applied; pending re-review)
 Builds on: `2026-06-17-perf-probe-simplify-design.md` (the measured zero-load +
 per-component latency probe). That probe is correct but partial: it emits one
 lumped router, hard-codes NI occupancy to 0, drives a single hard-coded
@@ -66,6 +66,16 @@ The response leg wraps the reverse path symmetrically. The harness loops over th
 path; it never names a specific router. For the 2-node instance this reduces to
 exactly the current `R(0,0)`/`R(1,0)` + one inter-router link.
 
+Boundary conventions (state explicitly so the segments are unambiguous):
+
+- The NI source edge crossing is the flit entering router `r_0`'s LOCAL input via
+  the inject adapter (`InjectAdapter::push_flit`), i.e. the wrapped `NocReqOut`
+  push. The NI sink edge crossing is the flit leaving router `r_k`'s LOCAL output
+  to the eject adapter, i.e. the wrapped `NocReqIn` pop.
+- A `LinkProbe` is data-path-only: it timestamps then forwards `push_flit`
+  unchanged. The credit path is wired separately at fabric construction and must
+  stay untouched, so the probe does not alter backpressure or timing.
+
 ### 2.4 Per-router latency
 
 The wrapped boundaries produce an ordered crossing log per leg:
@@ -107,13 +117,14 @@ The harness needs, from whatever fabric it runs on:
 
 The 2-node fabric exposes `req_router(node)` / `rsp_router(node)` for nodes 0 and
 1; the harness maps `(x, y)` to a node id and uses these. An N×M fabric provides
-`router_at` over the grid with the same primitives. The perf code depends only on
-this interface, so it is unchanged when the fabric grows.
+the same accessors over the grid. The perf code depends only on this interface,
+so it is unchanged when the fabric grows.
 
-`[TBD]` whether to add a thin `router_at(x, y)` accessor to `TwoNodeFabric` now
-(2 nodes) so the harness already calls the general accessor, or to map coords
-inline until an N×M fabric exists. Proposed: add `router_at` now — it keeps the
-harness mesh-agnostic and is a 2-line accessor.
+Add `req_router_at(x, y)` and `rsp_router_at(x, y)` accessors to `TwoNodeFabric`
+now (each maps `(x, y)` to the node id and returns the existing per-node router).
+The harness calls only the by-coordinate accessors, so it is already
+mesh-agnostic; an N×M fabric implements the same two accessors. The request and
+response networks are separate, so both accessors are required.
 
 ## 4. Content completeness
 
@@ -130,22 +141,48 @@ harness mesh-agnostic and is a 2-line accessor.
 
 ### 5.1 Driving any scenario
 
+A scenario is one `src -> dst` flow (the destination is whatever the transaction
+addresses route to; the harness does not manage destination selection -- that is a
+future traffic-pattern concern). The decomposition is per-flow: it takes the
+flow's path from the mesh and holds regardless of how the traffic pattern grows.
 Generalize the harness from one hard-coded write to any scenario YAML:
 
 - Load the scenario (`axi::load_scenario`, already used). Drive all its
-  transactions (read/write, burst, to either destination) through the fabric.
-- Pass 1: characterize each distinct signature `(src, dst, type, burst_len)` in
-  isolation -> `zero_load` + per-component latency per signature.
-- Pass 2: run the full scenario -> per-transaction measured latency, path, and
-  per-component occupancy peak. One `transactions[]` row per real transaction.
+  transactions (read/write, multi-beat burst) through the one `src -> dst` flow.
+- Pass 1: characterize each distinct signature in isolation -> `zero_load` +
+  per-component latency per signature. The signature key is the full transaction
+  shape: `(op, src, dst, len, size, burst, mem_latency_class)` -- latency varies
+  with `size`, 4 KB split, and the memory model, so a coarse `(src,dst,type,len)`
+  key would alias distinct transactions.
+- Pass 1 isolation must preserve the transaction faithfully. `shifted_scenario_path`
+  drops `strb_file`, `lock`, `qos`, `inject`, and max-outstanding fields, so it
+  cannot characterize an arbitrary transaction. Use a lossless single-transaction
+  writer that copies every field from the source transaction and config.
+- Pass 2: run the full scenario -> per-transaction measured latency (from the AXI
+  callbacks, keyed by `scenario_line`), path, and per-component occupancy peak. One
+  `transactions[]` row per real transaction.
 - Aggregate per-component `latency_cyc{min,mean,max}` across all transactions that
   traverse that component.
 
+Two passes are retained deliberately. The no-stall structural latency (`zero_load`,
+the `min`) and the `queueing = measured - zero_load` split require an isolated
+no-contention reference; a single pass cannot separate structural latency from
+contention. The added cost is bounded by caching one characterization per distinct
+signature. The two-pass harness already exists and passes; this design moves it to
+a dedicated file and generalizes it, rather than re-deriving a single-pass scheme.
+
 ### 5.2 Coverage
 
-All 37 scenarios run on the 2-node fabric (the real co-sim is 2-node;
-`multi_dst` scenarios target the two nodes, not more). `AX4-INF-001` fails by
-design — the perf target records it as expected-fail, not a perf result.
+All 37 scenarios are 2-node single-flow traffic patterns (the real co-sim is
+2-node; under real `xy_route` a scenario's native addresses route to one
+destination -- the `multi_dst` naming is about multiple transactions, not
+multiple physical nodes). So each scenario drives one `src -> dst` flow on the
+existing fabric; no N×M fabric is needed for coverage.
+
+A small set of scenarios are error-injection / expected-fail (`AX4-INF-001` aborts
+on init by design; AXI integration already skips INF scenarios via YAML
+validation). A `expected_fail` registry lists these; `make perf` records them as
+`skipped`/`expected_fail` and does not instantiate the probe against them.
 
 ### 5.3 `make perf`
 
@@ -155,9 +192,11 @@ make perf SCENARIO=AX4-BAS-003 # one scenario
 ```
 
 Mirrors the `test` target (`build-cmodel` dep, `TOOLPATH`, `TEST_TMPDIR`,
-`PYTHON3`). Sets `NOC_PERF_FILE=build/cmodel/perf/<id>.json` per run; `emit()`
-already writes there and prints the path. Artifacts land under
-`build/cmodel/perf/`, mirroring `cosim/<sim>/output/<scenario>/run.log`.
+`PYTHON3`). The ctest body runs from `build/cmodel`, and `emit()`'s default path
+is CWD-relative, so the target must set an **absolute** `NOC_PERF_FILE` per run
+(`$(abspath $(CMODEL_BUILD))/perf/<id>.json`) and create the directory first.
+`emit()` prints the path it wrote. Artifacts land under `build/cmodel/perf/`,
+mirroring `cosim/<sim>/output/<scenario>/run.log`.
 
 ## 6. Validation
 
@@ -175,16 +214,19 @@ Unchanged in intent, generalized to any path:
 | File | Action |
 |---|---|
 | `c_model/tests/common/router_path.hpp` | new: `router_path(src,dst,mx,my)` + per-hop direction. Mesh-parameterized (replaces the deleted `xy_path`). |
+| `c_model/tests/common/isolated_scenario.hpp` | new: lossless single-transaction scenario writer (copies every transaction + config field) for Pass-1 characterization. |
 | `c_model/tests/common/perf_report.hpp` | add run-metadata block; align stdout names; drop redundant `kind=`; support `n/a` occupancy. |
-| `c_model/tests/integration/test_router_loopback.cpp` (or a new `perf_harness`) | path-driven instrumentation loop; scenario-driven multi-transaction Pass 1/2; per-router + NI-occupancy population; path/component assert. |
-| `c_model/tests/noc/two_node_fabric.hpp` | add `router_at(x,y)` accessor (2-node now). |
-| root `Makefile` | `perf` target (`make perf [SCENARIO=<id>]`). |
+| `c_model/tests/integration/test_perf_probe.cpp` | new dedicated perf harness: path-driven instrumentation loop, scenario-driven multi-transaction Pass 1/2, per-router + NI-occupancy population, path/component assert, expected-fail handling. `test_router_loopback.cpp` keeps only its loopback correctness + A/B. |
+| `c_model/tests/noc/two_node_fabric.hpp` | add `req_router_at(x,y)` / `rsp_router_at(x,y)` accessors. |
+| `c_model/tests/scenarios/perf_expected_fail.hpp` (or reuse the AXI skip list) | `expected_fail` registry for INF / error-injection scenarios. |
+| root `Makefile` | `perf` target (`make perf [SCENARIO=<id>]`), absolute `NOC_PERF_FILE`. |
 
-## 8. Open questions
+## 8. Resolved decisions (were open questions)
 
-- `[TBD]` add `router_at` now vs inline coord mapping (Section 3) — proposed: add now.
-- `[TBD]` where the productized harness lives: extend `test_router_loopback.cpp`
-  or split a dedicated `test_perf_<...>.cpp` driven by scenario id. Proposed: a
-  dedicated perf harness file, so the loopback correctness test stays focused.
-- `[TBD]` per-signature isolation in Pass 1 for scenarios with many distinct
-  signatures (cost): characterize once per distinct signature, cache by signature.
+- Coordinate access: add `req_router_at`/`rsp_router_at` to `TwoNodeFabric` now;
+  the harness calls only these (Section 3).
+- Harness location: a dedicated `test_perf_probe.cpp`; `test_router_loopback.cpp`
+  already carries correctness + A/B + Pass 1/2 and would become unmaintainable.
+- Pass-1 signature key: the full transaction shape
+  `(op, src, dst, len, size, burst, mem_latency_class)`; characterize once per
+  distinct signature, cache by that key (Section 5.1).
