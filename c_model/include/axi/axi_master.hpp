@@ -168,6 +168,17 @@ class AxiMasterT {
                 // WriteResult carries the ORIGINAL user txn (addr, size, len, burst)
                 // — NOT sub-burst geometry. The scoreboard re-derives per-beat addr
                 // from the original txn.
+
+                // RAW guard: remove the write's address range so held reads can
+                // now proceed. Erase the first matching entry (FIFO order).
+                const uint64_t w_addr = op.src_txn.addr & ~((1ull << op.src_txn.size) - 1);
+                const uint64_t w_bytes = (static_cast<uint64_t>(op.src_txn.len) + 1u)
+                                         << op.src_txn.size;
+                auto it =
+                    std::find(outstanding_write_ranges_.begin(), outstanding_write_ranges_.end(),
+                              std::make_pair(w_addr, w_bytes));
+                if (it != outstanding_write_ranges_.end()) outstanding_write_ranges_.erase(it);
+
                 for (auto& cb : wcb_)
                     cb(WriteResult{op.src_txn.addr, op.src_txn.size, op.src_txn.len,
                                    op.src_txn.burst, op.src_txn.lock, op.data, op.strb_per_beat,
@@ -458,10 +469,19 @@ class AxiMasterT {
                 const bool first_aw = (op.next_aw_sub_idx_ == 0);
                 if (!slave_.push_aw(aw)) return op.write_request_done();
                 ++op.next_aw_sub_idx_;
-                if (first_aw)
+                if (first_aw) {
+                    // RAW guard: register the write's address range so reads to
+                    // overlapping addresses are held until B arrives. Range covers
+                    // all beats of the ORIGINAL (user-level) transaction so the
+                    // guard works even when split into multiple sub-bursts.
+                    const uint64_t w_addr = op.src_txn.addr & ~((1ull << op.src_txn.size) - 1);
+                    const uint64_t w_bytes = (static_cast<uint64_t>(op.src_txn.len) + 1u)
+                                             << op.src_txn.size;
+                    outstanding_write_ranges_.emplace_back(w_addr, w_bytes);
                     for (auto& cb : iwcb_)
                         cb(IssueInfo{true, id, op.src_txn.scenario_line, op.src_txn.addr,
                                      op.src_txn.size, op.src_txn.len, op.src_txn.burst});
+                }
             }
             const std::size_t bpb = 1ull << sub.size;
             while (op.w_pushed_in_cur_ <= sub.len) {
@@ -499,13 +519,26 @@ class AxiMasterT {
     // sub-burst. Returns true iff all sub-bursts' ARs have been pushed
     // downstream. The outer FIFO loop breaks on the first false to preserve
     // submission order for same-id reads (R responses route to per-id .front()).
+    //
+    // RAW hazard guard (AXI4 IHI 0022 §A5.3.4): if the read's address range
+    // overlaps any outstanding write (issued, B not yet received), hold the
+    // read until that write's B arrives. Non-overlapping reads are not held.
     bool push_reads_(uint8_t id, OperationContext& op) {
         while (op.next_ar_sub_idx_ < op.sub_bursts.size()) {
             const auto& sub = op.sub_bursts[op.next_ar_sub_idx_];
+            const uint64_t ar_addr = sub.addr & ~((1ull << sub.size) - 1);
+            const uint64_t ar_bytes = (static_cast<uint64_t>(sub.len) + 1u) << sub.size;
+            // Check overlap with every outstanding write range. Two ranges
+            // [a, a+da) and [b, b+db) overlap iff a < b+db && b < a+da.
+            for (const auto& [w_addr, w_bytes] : outstanding_write_ranges_) {
+                if (ar_addr < w_addr + w_bytes && w_addr < ar_addr + ar_bytes) {
+                    return op.read_request_done();  // hold: overlapping write not yet B'd
+                }
+            }
             ArBeat ar{};
             ar.id = id;
             // Align AR addr DOWN to (1<<size) boundary, symmetric with AW.
-            ar.addr = sub.addr & ~((1ull << sub.size) - 1);
+            ar.addr = ar_addr;
             ar.len = sub.len;
             ar.size = sub.size;
             ar.burst = sub.burst;
@@ -544,6 +577,14 @@ class AxiMasterT {
     // Total active op counters (map.size() now counts active *ids*, not ops).
     std::size_t active_write_count_ = 0;
     std::size_t active_read_count_ = 0;
+
+    // RAW hazard guard (AXI4 §A5.3.4): address ranges of writes that have been
+    // issued (first AW pushed) but whose B response has not yet been received.
+    // Each entry is {aligned_addr, byte_count} for the original user transaction.
+    // A read whose range overlaps any entry is held until the entry is removed
+    // (on B receipt). Uses vector for small N; erase is O(N) but N is bounded
+    // by max_out_w_ which is typically 1-4.
+    std::vector<std::pair<uint64_t, uint64_t>> outstanding_write_ranges_;
 
     // Fault injection state (armed via configure_inject()).
     InjectConfig inject_{};
