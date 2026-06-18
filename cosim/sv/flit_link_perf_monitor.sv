@@ -13,8 +13,8 @@ module flit_link_perf_monitor #(
     import "DPI-C" context function void cmodel_perf_link(
         input string name, input longint flit_count, input longint stall_cyc);
 
-    longint flit_count, stall_cyc;
-    int     credit;
+    longint      flit_count, stall_cyc;
+    int unsigned credit;
 
     always_ff @(posedge clk_i) begin
         if (!rst_ni) begin
@@ -23,9 +23,16 @@ module flit_link_perf_monitor #(
             // credit accounting: -1 on flit sent, +1 on pulse (net 0 if both).
             if (valid) flit_count <= flit_count + 1;
             credit <= credit - (valid ? 1 : 0) + (credit_pulse ? 1 : 0);
-            if (credit == 0) stall_cyc <= stall_cyc + 1;  // downstream buffer full
+            if (credit == 0) stall_cyc <= stall_cyc + 1;  // pre-update credit: this cycle had no free downstream slot
         end
     end
+
+    // Credit must never be consumed below zero: valid is gated on credit
+    // upstream, so valid && credit==0 means a mis-wire or DUT bug, not a
+    // real flit. Assert loudly rather than silently mis-count stall_cyc.
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+        !(valid && credit == 0))
+        else $error("[%s] credit underflow: valid asserted with zero credit", LINK_NAME);
 
     final cmodel_perf_link(LINK_NAME, flit_count, stall_cyc);
 endmodule
