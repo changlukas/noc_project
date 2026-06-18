@@ -62,6 +62,12 @@ PG037 AXI4-Stream metrics (transfer/data/position/null byte, packet, idle) are
 throughput / interconnect latency are **derived** post-hoc (byte count / window
 cycles; per-router/link sums), not stored counters.
 
+Reporting location (dedup, Section 5.1): the monitor computes latency per slot,
+but latency sum/min/max and histogram are **reported once** -- end-to-end in the
+`latency` section (manager), slave-side in the subordinate slot's
+`service_latency` -- never duplicated under `axi_slots[]`, which keeps only the
+throughput/backpressure counters.
+
 - Latency per transaction = completion cycle - address-accept cycle, where the
   end event differs by direction: **read** ends at RLAST (`RLAST & RVALID &
   RREADY`); **write** ends at the **B response** (`BVALID & BREADY`), NOT at WLAST
@@ -188,60 +194,114 @@ perturbed the DUT and is a blocker. (This extends the cycle-equality idea of
 
 ## 5.1 perf.json schema (normative)
 
-One `perf.json` per scenario. All counts/sums/cycles are unsigned 64-bit. Keys are
-fixed; an absent optional array is `[]`, never omitted. The `slots[]` fields ARE
-the PG037 agent metric list (Section 3); `transactions[]` / `signatures[]` are the
-two-grain latency view (Section 5); `routers[]` / `links[]` are the NoC additions.
+One `perf.json` per scenario. All counts/cycles are unsigned 64-bit. Keys fixed;
+an absent optional array is `[]`, never omitted. **Each datum has one home** (no
+duplication): `axi_slots[]` = throughput + backpressure; `latency` = the single
+home for end-to-end latency (raw + aggregates); `noc` = router/link.
+
+| Section | Holds | Grain |
+|---|---|---|
+| `axi_slots[]` | byte/txn count, the two idle counters, outstanding_max; subordinate slots add `service_latency` (slave-side, summary only) | per AXI interface |
+| `latency.transactions[]` | raw per-txn end-to-end rows (the only raw source) | manager slot |
+| `latency.by_signature[]` | min/mean/max per `(op,len,size,src,dst)` -- aggregate of the rows; `min` = best-case ref | per signature |
+| `latency.histogram[]` | per-`[low,high)` bin count -- aggregate of the rows | whole run |
+| `noc.routers[]` / `noc.links[]` | flit count + occupancy max; link credit-stall | per router/link |
 
 ```json
 {
   "schema_version": 1,
   "scenario": "AX4-BAS-003",
-  "window": { "start_cyc": 0, "end_cyc": 1234, "total_cyc": 1234 },
-  "slots": [
-    {
-      "name": "node0.manager", "role": "manager",
+  "window": { "start_cyc": 0, "end_cyc": 64 },
+  "axi_slots": [
+    { "name": "node0.manager", "role": "manager",
       "write_txn_count": 1, "read_txn_count": 1,
       "write_byte_count": 64, "read_byte_count": 64,
-      "write_latency_sum": 42, "read_latency_sum": 30,
-      "write_latency_min": 42, "write_latency_max": 42,
-      "read_latency_min": 30, "read_latency_max": 30,
-      "slave_write_idle_cyc": 3, "master_read_idle_cyc": 0,
-      "outstanding_max": 1,
-      "latency_histogram": [ { "low": 0, "high": 32, "count": 1 },
-                             { "low": 32, "high": 64, "count": 1 } ],
-      "per_id": [ { "id": 3, "dir": "write", "count": 1, "latency_sum": 42 } ]
-    }
+      "slave_write_idle_cyc": 2, "master_read_idle_cyc": 0, "outstanding_max": 1 },
+    { "name": "node1.subordinate", "role": "subordinate",
+      "write_txn_count": 1, "read_txn_count": 1,
+      "write_byte_count": 64, "read_byte_count": 64,
+      "slave_write_idle_cyc": 3, "master_read_idle_cyc": 1, "outstanding_max": 1,
+      "service_latency": { "write": { "min": 14, "mean": 14, "max": 14 },
+                           "read":  { "min": 12, "mean": 12, "max": 12 } } },
+    { "name": "node0.subordinate", "role": "subordinate",
+      "write_txn_count": 0, "read_txn_count": 0, "write_byte_count": 0,
+      "read_byte_count": 0, "slave_write_idle_cyc": 0, "master_read_idle_cyc": 0,
+      "outstanding_max": 0 },
+    { "name": "node1.manager", "role": "manager",
+      "write_txn_count": 0, "read_txn_count": 0, "write_byte_count": 0,
+      "read_byte_count": 0, "slave_write_idle_cyc": 0, "master_read_idle_cyc": 0,
+      "outstanding_max": 0 }
   ],
-  "transactions": [
-    { "slot": "node0.manager", "id": 3, "dir": "write",
-      "accept_cyc": 10, "complete_cyc": 52, "latency": 42, "bytes": 64 }
-  ],
-  "signatures": [
-    { "op": "write", "len": 1, "size": 3,
-      "src": "node0.manager", "dst": "node1.subordinate",
-      "count": 1, "latency_min": 42, "latency_mean": 42, "latency_max": 42 }
-  ],
-  "routers": [
-    { "name": "R(0,0)", "flit_count": 8,
-      "in_fifo_occ_sum": 12, "in_fifo_occ_max": 2,
-      "out_fifo_occ_sum": 10, "out_fifo_occ_max": 2 }
-  ],
-  "links": [
-    { "name": "req_0to1", "flit_count": 4, "stall_cyc": 1 }
-  ]
+  "latency": {
+    "measured_at": "manager slot -- end-to-end (address-accept -> B-response/RLAST)",
+    "transactions": [
+      { "id": 3, "dir": "write", "src": "node0", "dst": "node1",
+        "accept_cyc": 10, "complete_cyc": 52, "latency": 42, "bytes": 64 },
+      { "id": 5, "dir": "read",  "src": "node0", "dst": "node1",
+        "accept_cyc": 12, "complete_cyc": 50, "latency": 38, "bytes": 64 }
+    ],
+    "by_signature": [
+      { "op": "write", "len": 8, "size": 3, "src": "node0", "dst": "node1",
+        "count": 1, "min": 42, "mean": 42, "max": 42 },
+      { "op": "read",  "len": 8, "size": 3, "src": "node0", "dst": "node1",
+        "count": 1, "min": 38, "mean": 38, "max": 38 }
+    ],
+    "histogram": [ { "low": 0, "high": 16, "count": 0 },
+                   { "low": 16, "high": 32, "count": 0 },
+                   { "low": 32, "high": 64, "count": 2 } ],
+    "per_id": "optional (config-gated, default off): same shape grouped by AXI id"
+  },
+  "noc": {
+    "routers": [
+      { "name": "req.R(0,0)", "flit_count": 8, "in_fifo_occ_max": 2, "out_fifo_occ_max": 2 },
+      { "name": "req.R(1,0)", "flit_count": 8, "in_fifo_occ_max": 2, "out_fifo_occ_max": 2 },
+      { "name": "rsp.R(1,0)", "flit_count": 6, "in_fifo_occ_max": 1, "out_fifo_occ_max": 2 },
+      { "name": "rsp.R(0,0)", "flit_count": 6, "in_fifo_occ_max": 2, "out_fifo_occ_max": 1 }
+    ],
+    "links": [
+      { "name": "req_0to1", "flit_count": 4, "stall_cyc": 1 },
+      { "name": "rsp_1to0", "flit_count": 4, "stall_cyc": 0 }
+    ]
+  }
 }
 ```
 
-- `role` is `manager` (master->NMU edge) or `subordinate` (NSU->slave edge).
-- `dir` is `write` or `read`. Histogram bin edges (`low`/`high`) are config-driven;
-  default ladder `[0,16) [16,32) [32,64) [64,128) [128,256) [256,inf)` cycles
-  (covers the observed single-flow latency band; override in config if a scenario
-  needs finer resolution).
-- `latency_min` per slot is the **min observed** reference (Section 5), not a
-  zero-load value.
+- `role` = `manager` (master->NMU) or `subordinate` (NSU->slave). `dir` = `write`/`read`.
+- End-to-end latency lives ONLY in `latency`; slave-side service time ONLY in the
+  subordinate slot's `service_latency`. Neither is repeated in the other.
+- Histogram bins are config-driven; default `[0,16) [16,32) [32,64) [64,128)
+  [128,256) [256,inf)` cycles.
+- `min` is the **min observed** reference (Section 5), not a zero-load value.
+- `per_id` breakdown (PG037 ID filter) is optional, config-gated, default off.
+- `in/out_fifo_occ_max` only (occupancy sum dropped -- low reader value).
 - The per-id correlation FIFO has finite capacity (max outstanding per id);
   overflow is asserted as a measurement error, never silently dropped.
+
+### CLI summary (stdout)
+
+`run-tb-top` prints an aggregate summary (no raw `transactions[]` -- that is
+JSON-only, so the CLI never floods on large runs):
+
+```text
+[perf] AX4-BAS-003   window [0,64) cyc
+  AXI throughput / backpressure
+    slot                bytes_wr bytes_rd txn_wr txn_rd idle_wr idle_rd outst_max
+    node0.manager          64       64      1      1      2       0       1
+    node1.subordinate      64       64      1      1      3       1       1
+  Latency -- end-to-end (manager; min = best-case observed)
+    signature                      n  min  mean max
+    write node0->node1 len8 size3  1   42   42   42
+    read  node0->node1 len8 size3  1   38   38   38
+    histogram (cyc): [32,64)=2
+    slave service @node1.subordinate: write 14  read 12
+  NoC
+    router      flit in_occ_max out_occ_max     link      flit stall
+    req.R(0,0)   8       2          2            req_0to1   4    1
+    req.R(1,0)   8       2          2            rsp_1to0   4    0
+    rsp.R(1,0)   6       1          2
+    rsp.R(0,0)   6       2          1
+  2 transactions -> cosim/verilator/output/AX4-BAS-003/perf.json
+```
 
 ## 6. Co-sim integration points
 
