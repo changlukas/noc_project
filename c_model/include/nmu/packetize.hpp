@@ -45,7 +45,15 @@ struct AwHeaderMeta {
     uint8_t rob_idx;      // 0 in Disabled, allocated in Enabled
 };
 
-class Packetize : public RequestPacketizer {
+class NmuPacketizeSink {
+  public:
+    virtual ~NmuPacketizeSink() = default;
+    virtual bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) = 0;
+    virtual bool push_w(const axi::WBeat& b) = 0;
+    virtual bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) = 0;
+};
+
+class Packetize : public RequestPacketizer, public NmuPacketizeSink {
   public:
     Packetize(noc::NocReqOut& aw_out, noc::NocReqOut& w_out, noc::NocReqOut& ar_out, uint8_t src_id)
         : aw_out_(aw_out), w_out_(w_out), ar_out_(ar_out), src_id_(src_id) {}
@@ -66,8 +74,8 @@ class Packetize : public RequestPacketizer {
 
     // ---- Non-interface methods, called by Rob with full metadata ----
     // Future Enabled mode supplies rob_idx via this path.
-    bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta);
-    bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta);
+    bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) override;
+    bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) override;
 
   private:
     noc::NocReqOut& aw_out_;

@@ -33,8 +33,10 @@
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
 #include "nmu/vc_arbiter.hpp"
+#include "nmu/ni_tokens.hpp"
 #include "noc/noc_req_out.hpp"
 #include "noc/noc_rsp_in.hpp"
+#include "noc/pipeline_stage.hpp"
 #include "noc/wormhole_arbiter.hpp"
 #include <array>
 #include <cassert>
@@ -46,6 +48,76 @@
 #include <vector>
 
 namespace ni::cmodel::nmu {
+
+class NmuReqS1Bridge : public NmuPacketizeSink {
+  public:
+    bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) override {
+        if (s1_aw_.full()) return false;
+        s1_aw_.accept({b, meta.dst_id, meta.local_addr, meta.rob_req, meta.rob_idx});
+        return true;
+    }
+    bool push_w(const axi::WBeat& b) override {
+        if (s1_w_.full()) return false;
+        s1_w_.accept({b});
+        return true;
+    }
+    bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) override {
+        if (s1_ar_.full()) return false;
+        s1_ar_.accept({b, meta.dst_id, meta.local_addr, meta.rob_req, meta.rob_idx});
+        return true;
+    }
+
+    void tick(Packetize& packetize) {
+        if (s1_aw_.full()) {
+            const auto& e = s1_aw_.peek();
+            if (packetize.push_aw_with_meta(e.beat,
+                                            {e.dst_id, e.local_addr, e.rob_req, e.rob_idx})) {
+                s1_aw_.take();
+            }
+        }
+        if (s1_aw_.full()) return;
+
+        if (s1_w_.full()) {
+            const auto& e = s1_w_.peek();
+            if (packetize.push_w(e.beat)) {
+                s1_w_.take();
+            }
+        }
+        if (s1_ar_.full()) {
+            const auto& e = s1_ar_.peek();
+            if (packetize.push_ar_with_meta(e.beat,
+                                            {e.dst_id, e.local_addr, e.rob_req, e.rob_idx})) {
+                s1_ar_.take();
+            }
+        }
+    }
+
+    std::size_t occupancy(uint8_t axi_ch) const noexcept {
+        if (axi_ch == ni::AXI_CH_AW) return s1_aw_.occupancy();
+        if (axi_ch == ni::AXI_CH_W) return s1_w_.occupancy();
+        if (axi_ch == ni::AXI_CH_AR) return s1_ar_.occupancy();
+        return 0;
+    }
+
+  private:
+    noc::PipelineStage<AdmittedAw> s1_aw_;
+    noc::PipelineStage<AdmittedW> s1_w_;
+    noc::PipelineStage<AdmittedAr> s1_ar_;
+};
+
+struct NmuRspBEntry {
+    axi::BBeat beat;
+    uint8_t rob_idx = 0;
+    uint8_t axi_id = 0;
+    bool rob_enabled = false;
+};
+
+struct NmuRspREntry {
+    axi::RBeat beat;
+    uint8_t rob_idx = 0;
+    uint8_t axi_id = 0;
+    bool rob_enabled = false;
+};
 
 struct NmuConfig {
     uint8_t src_id = 0;
@@ -84,20 +156,36 @@ class Nmu {
     const Rob& rob() const noexcept { return rob_; }
     const VcArbiter& vc_arbiter() const noexcept { return vc_arbiter_; }
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
-        (void)path;
-        (void)stage;
-        (void)axi_ch;
+        if (path == NiPath::NmuReq && stage == 0) {
+            return req_s1_bridge_.occupancy(axi_ch);
+        }
         return 0;  // filled per-path in later tasks
     }
 
   private:
+    bool push_rsp_b_to_axi_(const NmuRspBEntry& entry);
+    bool push_rsp_r_to_axi_(const NmuRspREntry& entry);
+    bool accept_rsp_b_entry_(NmuRspBEntry entry);
+    bool accept_rsp_r_entry_(NmuRspREntry entry);
+    void drain_rsp_b_output_();
+    void drain_rsp_r_output_();
+    void advance_rsp_b_shift_();
+    void advance_rsp_r_shift_();
+    void drain_rsp_s2_b_();
+    void drain_rsp_s2_r_();
+    void advance_rsp_s2_b_();
+    void advance_rsp_s2_r_();
+    void drain_rsp_robless_b_();
+    void drain_rsp_robless_r_();
+
     // Declaration order respects ctor ref dependencies:
     //   1. cfg_ + external downstream refs (no deps).
     //   2. vc_arbiter_ wraps downstream_req_.
     //   3. wormhole_arbiter_ wraps vc_arbiter_ as its Downstream.
     //   4. depacketize_ wraps downstream_rsp_ (req path independent).
     //   5. packetize_ takes wormhole_arbiter_.input(0/1/2) (req path).
-    //   6. rob_ takes packetize_ + depacketize_.
+    //   6. req_s1_bridge_ stages ROB-admitted requests before Packetize.
+    //   7. rob_ takes req_s1_bridge_ + depacketize_.
     //   7. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
     NmuConfig cfg_;
     noc::NocReqOut& downstream_req_;
@@ -106,8 +194,13 @@ class Nmu {
     noc::WormholeArbiter<noc::NocReqOut> wormhole_arbiter_;
     Depacketize depacketize_;
     Packetize packetize_;
+    NmuReqS1Bridge req_s1_bridge_;
     Rob rob_;
     AxiSlavePort axi_slave_port_;
+    noc::PipelineStage<NmuRspBEntry> s2_rsp_b_;
+    noc::PipelineStage<NmuRspREntry> s2_rsp_r_;
+    std::vector<noc::PipelineStage<NmuRspBEntry>> rsp_extra_b_shift_;
+    std::vector<noc::PipelineStage<NmuRspREntry>> rsp_extra_r_shift_;
 };
 
 namespace detail {
@@ -135,17 +228,144 @@ inline Nmu::Nmu(NmuConfig cfg, noc::NocReqOut& downstream_req, noc::NocRspIn& do
                    cfg_.port_params.depkt_r_q_depth),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
                  cfg_.src_id),
-      rob_(packetize_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode),
-      axi_slave_port_(rob_, rob_, cfg_.port_params) {
+      req_s1_bridge_(),
+      rob_(req_s1_bridge_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode),
+      axi_slave_port_(rob_, rob_, cfg_.port_params),
+      s2_rsp_b_(),
+      s2_rsp_r_(),
+      rsp_extra_b_shift_(cfg_.ni_rsp_extra_depth),
+      rsp_extra_r_shift_(cfg_.ni_rsp_extra_depth) {
     rob_.set_drain_observer(
         [this](bool is_write, uint8_t id) { vc_arbiter_.on_id_drained(is_write, id); });
 }
 
 inline void Nmu::tick() {
-    depacketize_.tick();
-    axi_slave_port_.tick();
     wormhole_arbiter_.tick();
     vc_arbiter_.tick();
+    req_s1_bridge_.tick(packetize_);
+    axi_slave_port_.tick_req();
+
+    drain_rsp_b_output_();
+    drain_rsp_r_output_();
+    advance_rsp_b_shift_();
+    advance_rsp_r_shift_();
+    if (cfg_.write_rob_mode == RobMode::Enabled) {
+        drain_rsp_s2_b_();
+        advance_rsp_s2_b_();
+    } else {
+        drain_rsp_robless_b_();
+    }
+    if (cfg_.read_rob_mode == RobMode::Enabled) {
+        drain_rsp_s2_r_();
+        advance_rsp_s2_r_();
+    } else {
+        drain_rsp_robless_r_();
+    }
+    depacketize_.tick();
+}
+
+inline bool Nmu::push_rsp_b_to_axi_(const NmuRspBEntry& entry) {
+    if (!axi_slave_port_.push_b_staged(entry.beat)) return false;
+    if (entry.rob_enabled) rob_.commit_b_exit(entry.rob_idx, entry.axi_id);
+    return true;
+}
+
+inline bool Nmu::push_rsp_r_to_axi_(const NmuRspREntry& entry) {
+    if (!axi_slave_port_.push_r_staged(entry.beat)) return false;
+    if (entry.rob_enabled) rob_.commit_r_exit(entry.rob_idx, entry.axi_id);
+    return true;
+}
+
+inline bool Nmu::accept_rsp_b_entry_(NmuRspBEntry entry) {
+    if (rsp_extra_b_shift_.empty()) return push_rsp_b_to_axi_(entry);
+    if (rsp_extra_b_shift_.front().full()) return false;
+    rsp_extra_b_shift_.front().accept(std::move(entry));
+    return true;
+}
+
+inline bool Nmu::accept_rsp_r_entry_(NmuRspREntry entry) {
+    if (rsp_extra_r_shift_.empty()) return push_rsp_r_to_axi_(entry);
+    if (rsp_extra_r_shift_.front().full()) return false;
+    rsp_extra_r_shift_.front().accept(std::move(entry));
+    return true;
+}
+
+inline void Nmu::drain_rsp_b_output_() {
+    if (rsp_extra_b_shift_.empty() || !rsp_extra_b_shift_.back().full()) return;
+    const auto& entry = rsp_extra_b_shift_.back().peek();
+    if (push_rsp_b_to_axi_(entry)) rsp_extra_b_shift_.back().take();
+}
+
+inline void Nmu::drain_rsp_r_output_() {
+    if (rsp_extra_r_shift_.empty() || !rsp_extra_r_shift_.back().full()) return;
+    const auto& entry = rsp_extra_r_shift_.back().peek();
+    if (push_rsp_r_to_axi_(entry)) rsp_extra_r_shift_.back().take();
+}
+
+inline void Nmu::advance_rsp_b_shift_() {
+    if (rsp_extra_b_shift_.size() < 2) return;
+    for (std::size_t i = rsp_extra_b_shift_.size() - 1; i > 0; --i) {
+        if (!rsp_extra_b_shift_[i].full() && rsp_extra_b_shift_[i - 1].full()) {
+            rsp_extra_b_shift_[i].accept(rsp_extra_b_shift_[i - 1].take());
+        }
+    }
+}
+
+inline void Nmu::advance_rsp_r_shift_() {
+    if (rsp_extra_r_shift_.size() < 2) return;
+    for (std::size_t i = rsp_extra_r_shift_.size() - 1; i > 0; --i) {
+        if (!rsp_extra_r_shift_[i].full() && rsp_extra_r_shift_[i - 1].full()) {
+            rsp_extra_r_shift_[i].accept(rsp_extra_r_shift_[i - 1].take());
+        }
+    }
+}
+
+inline void Nmu::drain_rsp_s2_b_() {
+    if (!s2_rsp_b_.full()) return;
+    const auto& entry = s2_rsp_b_.peek();
+    if (accept_rsp_b_entry_(entry)) s2_rsp_b_.take();
+}
+
+inline void Nmu::drain_rsp_s2_r_() {
+    if (!s2_rsp_r_.full()) return;
+    const auto& entry = s2_rsp_r_.peek();
+    if (accept_rsp_r_entry_(entry)) s2_rsp_r_.take();
+}
+
+inline void Nmu::advance_rsp_s2_b_() {
+    if (s2_rsp_b_.full()) return;
+    auto b = rob_.pop_b_staged();
+    if (!b) return;
+    s2_rsp_b_.accept({b->beat, b->rob_idx, b->axi_id, true});
+}
+
+inline void Nmu::advance_rsp_s2_r_() {
+    if (s2_rsp_r_.full()) return;
+    auto r = rob_.pop_r_staged();
+    if (!r) return;
+    s2_rsp_r_.accept({r->beat, r->rob_idx, r->axi_id, true});
+}
+
+inline void Nmu::drain_rsp_robless_b_() {
+    if (rsp_extra_b_shift_.empty() &&
+        axi_slave_port_.b_q_size() >= axi_slave_port_.params().b_queue_depth) {
+        return;
+    }
+    if (!rsp_extra_b_shift_.empty() && rsp_extra_b_shift_.front().full()) return;
+    auto b = rob_.pop_b();
+    if (!b) return;
+    (void)accept_rsp_b_entry_({*b, 0, b->id, false});
+}
+
+inline void Nmu::drain_rsp_robless_r_() {
+    if (rsp_extra_r_shift_.empty() &&
+        axi_slave_port_.r_q_size() >= axi_slave_port_.params().r_queue_depth) {
+        return;
+    }
+    if (!rsp_extra_r_shift_.empty() && rsp_extra_r_shift_.front().full()) return;
+    auto r = rob_.pop_r();
+    if (!r) return;
+    (void)accept_rsp_r_entry_({*r, 0, r->id, false});
 }
 
 // -------------------------------------------------------------------------

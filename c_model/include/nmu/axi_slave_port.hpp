@@ -76,11 +76,28 @@ class AxiSlavePort {
         return r;
     }
 
+    bool push_b_staged(const axi::BBeat& b) {
+        if (b_q_.size() >= params_.b_queue_depth) return false;
+        b_q_.push_back(b);
+        return true;
+    }
+    bool push_r_staged(const axi::RBeat& r) {
+        if (r_q_.size() >= params_.r_queue_depth) return false;
+        r_q_.push_back(r);
+        return true;
+    }
+
     void tick() {
         // Response drain BEFORE request forward (mirrors Stage 2 AxiMaster::tick
         // and frees upstream-visible B/R slots before this cycle's new pushes).
         drain_b_from_depacketizer_();
         drain_r_from_depacketizer_();
+        forward_aw_to_packetizer_();
+        forward_w_to_packetizer_();
+        forward_ar_to_packetizer_();
+    }
+
+    void tick_req() {
         forward_aw_to_packetizer_();
         forward_w_to_packetizer_();
         forward_ar_to_packetizer_();
@@ -132,18 +149,14 @@ class AxiSlavePort {
 
   private:
     void drain_b_from_depacketizer_() {
-        while (b_q_.size() < params_.b_queue_depth) {
-            auto b = depkt_.pop_b();
-            if (!b) break;
-            b_q_.push_back(*b);
-        }
+        if (b_q_.size() >= params_.b_queue_depth) return;
+        auto b = depkt_.pop_b();
+        if (b) b_q_.push_back(*b);
     }
     void drain_r_from_depacketizer_() {
-        while (r_q_.size() < params_.r_queue_depth) {
-            auto r = depkt_.pop_r();
-            if (!r) break;
-            r_q_.push_back(*r);
-        }
+        if (r_q_.size() >= params_.r_queue_depth) return;
+        auto r = depkt_.pop_r();
+        if (r) r_q_.push_back(*r);
     }
     // Per-channel pass-through. The packetizer's false return MUST not consume
     // the head — we only pop on a successful push, so a failed forward this

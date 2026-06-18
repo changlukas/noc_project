@@ -326,11 +326,19 @@ TEST(NmuAxiSlavePort, IndependentBRBackpressure_RProgressesWhileBHolds) {
         ch.response.r.push_back(make_r(i, 0x40 + i, axi::Resp::OKAY, i == 3, 0));
 
     port.tick();
-    // R should fully ingest (cap 32, 4 beats); B should ingest only 1
-    // because its cap is 1 and the test does not pop_b yet.
-    EXPECT_EQ(port.r_q_size(), 4u);
+    // Drains are bounded to one beat/channel/tick. B ingests one beat and then
+    // holds full; R continues to make independent progress on later ticks.
+    EXPECT_EQ(port.r_q_size(), 1u);
     EXPECT_EQ(port.b_q_size(), 1u);
     EXPECT_EQ(ch.response.b.size(), 3u);  // 3 still pending on the depkt side
+    EXPECT_EQ(ch.response.r.size(), 3u);
+
+    for (int i = 0; i < 3; ++i) {
+        port.tick();
+    }
+    EXPECT_EQ(port.r_q_size(), 4u);
+    EXPECT_EQ(port.b_q_size(), 1u);
+    EXPECT_EQ(ch.response.b.size(), 3u);
     EXPECT_EQ(ch.response.r.size(), 0u);
 
     // Now consume B one at a time — each tick after pop_b frees a slot.
