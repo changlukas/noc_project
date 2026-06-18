@@ -42,7 +42,13 @@ module axi_perf_monitor #(
         if (!rst_ni) begin
             cyc <= 0; slave_write_idle <= 0; master_read_idle <= 0;
             outstanding_max <= 0; outstanding <= 0;
+            for (int i = 0; i < NID; i++) begin
+                w_acc[i].delete();  w_addr[i].delete();  w_len[i].delete();  w_sz[i].delete();
+                r_acc[i].delete();  r_addr[i].delete();  r_len[i].delete();  r_sz[i].delete();
+            end
         end else begin
+            automatic int acc_n = (awvalid && awready ? 1 : 0) + (arvalid && arready ? 1 : 0);
+            automatic int ret_n = (bvalid && bready ? 1 : 0) + (rvalid && rready && rlast ? 1 : 0);
             cyc <= cyc + 1;
             if (wvalid && !wready) slave_write_idle  <= slave_write_idle  + 1;
             if (rvalid && !rready) master_read_idle   <= master_read_idle  + 1;
@@ -52,16 +58,13 @@ module axi_perf_monitor #(
                     $fatal(1, "%s: write id=%0d exceeds MAX_OUTSTANDING", SLOT_NAME, awid);
                 w_acc[awid].push_back(cyc);  w_addr[awid].push_back(awaddr);
                 w_len[awid].push_back(int'(awlen)); w_sz[awid].push_back(int'(awsize));
-                outstanding++;
             end
             if (arvalid && arready) begin
                 if (r_acc[arid].size() >= MAX_OUTSTANDING)
                     $fatal(1, "%s: read id=%0d exceeds MAX_OUTSTANDING", SLOT_NAME, arid);
                 r_acc[arid].push_back(cyc);  r_addr[arid].push_back(araddr);
                 r_len[arid].push_back(int'(arlen)); r_sz[arid].push_back(int'(arsize));
-                outstanding++;
             end
-            if (outstanding > outstanding_max) outstanding_max <= outstanding;
 
             if (bvalid && bready) begin
                 if (w_acc[bid].size() == 0)
@@ -70,7 +73,6 @@ module axi_perf_monitor #(
                                     w_len[bid][0], w_sz[bid][0], w_acc[bid][0], cyc);
                 void'(w_acc[bid].pop_front());  void'(w_addr[bid].pop_front());
                 void'(w_len[bid].pop_front());  void'(w_sz[bid].pop_front());
-                outstanding--;
             end
             if (rvalid && rready && rlast) begin
                 if (r_acc[rid].size() == 0)
@@ -79,8 +81,10 @@ module axi_perf_monitor #(
                                     r_len[rid][0], r_sz[rid][0], r_acc[rid][0], cyc);
                 void'(r_acc[rid].pop_front());  void'(r_addr[rid].pop_front());
                 void'(r_len[rid].pop_front());  void'(r_sz[rid].pop_front());
-                outstanding--;
             end
+
+            if (outstanding + acc_n > outstanding_max) outstanding_max <= outstanding + acc_n;
+            outstanding <= outstanding + acc_n - ret_n;
         end
     end
 
