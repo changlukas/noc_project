@@ -71,6 +71,37 @@ Per-slot counters (PG037's six + survey additions):
   `+perf_start`/`+perf_end` plusargs gate the measured window (warmup/drain),
   with no second pass.
 
+### 3.1 PG037 block mapping
+
+Mirror the AMD APM core blocks (`docs/image/Block Diagram of AXI Performance
+Monitor core.jpg` Fig 1-1; `Event Count Module.jpg` Fig 1-2; `Accumulator and
+Range Incrementer.jpg` Fig 1-3; `Event Counting in Profile Mode.jpg` Fig 1-4).
+The APM datapath per monitor slot is:
+
+`Monitor Slot -> ID Filter & Mask -> Metric Enable Generator -> Metric Selector
+Mux -> Accumulator (+ Sampled Accumulator) & Range Incrementer -> Registers`,
+with a Global Clock Counter (cycle base) and a Timer (sample interval).
+
+Our C objects mirror these one-to-one:
+
+| APM block (Fig) | Our equivalent |
+|---|---|
+| Monitor Slot (Fig 1-1) | one monitor per AXI interface |
+| Global Clock Counter (Fig 1-1) | the co-sim cycle counter (`now`) |
+| ID Filter & Mask (Fig 1-2) | optional per-AXI-id selection -> per-id latency/count breakdown |
+| Metric Enable Generator + Metric Selector Mux (Fig 1-2) | which metric a counter accumulates (latency / byte / txn) -- config |
+| Accumulator (Fig 1-3) | running sum/count counter |
+| Sampled Accumulator (Fig 1-4) | snapshot at the sample-interval boundary (Δ -> window throughput/latency) |
+| Range Incrementer, Range LOW/HIGH (Fig 1-3) | latency-distribution bins: count transactions whose latency falls in `[LOW, HIGH)` -> a configurable latency histogram |
+| Registers + AXI4-Lite (Fig 1-1) | the readout struct (dumped via DPI; no AXI4-Lite master needed) |
+| Event Log + AXI4-Stream (Fig 1-1) | trace stream -- DEFERRED (profile/count mode first) |
+| Timer (Fig 1-4) | the sample-window driver |
+
+This adds two items over the bare counter set: an **ID filter** (per-id
+breakdown) and a **Range Incrementer** (latency histogram bins), both first-class
+in PG037. Profile mode (counters + sampled accumulators) is the first target;
+the Event-Log/AXI4-Stream trace path is deferred.
+
 ## 4. Implementation: C + DPI (decision)
 
 The monitors are C++ objects at the co-sim's c_model boundary, sampled and dumped
