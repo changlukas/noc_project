@@ -1,9 +1,10 @@
 # NMU/NSU pipeline model (NI microarchitecture)
 
 Date: 2026-06-18
-Status: Draft rev 5 (NSU-req spike found a write-vs-read race; survey (Codex+web) — AXI4 gives no read-write ordering, fix is at the originating master, NSU AxiMasterPort stays transparent; §5.4 added)
-token model + arbiter final-stage + ROB Enabled staging contract + ROB-default
-resolved; §5.0-5.3, §6.1)
+Status: Draft rev 5 (NSU-req spike found a write-vs-read race; survey (Codex+web):
+AXI4 gives no read-write ordering, fix is at the originating master, NSU
+AxiMasterPort stays transparent — §5.4. Prior rev: §5.0-5.3 register-parked tokens
++ arbiter final-stage + §6.1 ROB staging contract + ROB-default resolved.)
 
 Replace the 0-cycle functional NMU/NSU with a real, staged-across-ticks pipeline
 model that reflects the intended NI RTL microarchitecture. The c_model becomes the
