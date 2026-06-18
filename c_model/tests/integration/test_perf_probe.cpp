@@ -30,6 +30,7 @@
 #include <gtest/gtest.h>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -331,7 +332,7 @@ IsolatedResult characterize_signature() {
     IsolatedResult out;
     out.nmu_occ_cap = nmu::Rob::ROB_CAPACITY;
     out.nsu_occ_cap = flow.nsu().axi_master_port().params().aw_queue_depth;
-    out.router_occ_cap = ch.req_router_at(0, 0).output_fifo_depth();
+    out.router_occ_cap = ch.req_router_at(req_coords[0].x, req_coords[0].y).output_fifo_depth();
 
     std::size_t cycle = 0;
     const std::size_t cap = 100000;
@@ -497,12 +498,42 @@ TEST(PerfProbe, MinLatencyAtLeastZeroLoadAndEmit) {
     rep.add_ni(ComponentRecord{"NMU0", "nmu", 0, 0.0, 0, iso.nmu_occ_max, iso.nmu_occ_cap, true});
     rep.add_ni(ComponentRecord{"NSU1", "nsu", 0, 0.0, 0, iso.nsu_occ_max, iso.nsu_occ_cap, true});
     // Every router on the request leg (mesh-agnostic; loops the path).
+    // Name tagged ":req" / ":rsp" so req and rsp records for the same physical
+    // router are distinct JSON keys; neither leg's latency is silently dropped.
     for (const auto& kv : iso.req_leg.router_latency) {
+        const std::string rec_name = kv.first + ":req";
         const std::size_t occ =
             iso.router_occ_max.count(kv.first) ? iso.router_occ_max.at(kv.first) : 0;
-        rep.add_router(ComponentRecord{kv.first, "router", kv.second,
+        rep.add_router(ComponentRecord{rec_name, "router", kv.second,
                                        static_cast<double>(kv.second), kv.second, occ,
                                        iso.router_occ_cap, true});
     }
+    // Every router on the response leg — same occupancy-lookup pattern.
+    for (const auto& kv : iso.rsp_leg.router_latency) {
+        const std::string rec_name = kv.first + ":rsp";
+        const std::size_t occ =
+            iso.router_occ_max.count(kv.first) ? iso.router_occ_max.at(kv.first) : 0;
+        rep.add_router(ComponentRecord{rec_name, "router", kv.second,
+                                       static_cast<double>(kv.second), kv.second, occ,
+                                       iso.router_occ_cap, true});
+    }
+
+    // Assert that the EMITTED JSON contains a record for every router on BOTH
+    // legs (with the leg-tagged name).  This catches the class of bug where a
+    // leg's latencies are computed + summed but never written out.
+    std::ostringstream oss;
+    rep.write_json(oss);
+    const std::string emitted = oss.str();
+    for (const auto& kv : iso.req_leg.router_latency) {
+        const std::string key = kv.first + ":req";
+        EXPECT_NE(emitted.find('"' + key + '"'), std::string::npos)
+            << "req-leg router record missing from emitted JSON: " << key;
+    }
+    for (const auto& kv : iso.rsp_leg.router_latency) {
+        const std::string key = kv.first + ":rsp";
+        EXPECT_NE(emitted.find('"' + key + '"'), std::string::npos)
+            << "rsp-leg router record missing from emitted JSON: " << key;
+    }
+
     rep.emit();
 }
