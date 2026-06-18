@@ -20,7 +20,7 @@ Binding rules (copied verbatim from the spec intent + project CLAUDE.md / MEMORY
 - **clang-format:** run `clang-format -i <file>` on every edited `.hpp` / `.cpp` before committing. The repo `.clang-format` enforces Google-base + IndentWidth 4 + ContinuationIndentWidth 4 + ColumnLimit 100.
 - **Commit message format:** `type(scope): description` (English). Valid types: feat, fix, docs, style, refactor, test, chore, perf, build, revert. End each commit body with the harness-required `Co-Authored-By:` trailer.
 - **Never** use `--no-verify`. Never disable a test to make it pass. Never commit non-compiling code. Every commit compiles, passes all existing tests, and includes tests for new functionality.
-- **JSON location:** gitignored, default `build/cmodel/perf/<scenario>.json`, overridable by `NOC_PERF_FILE`. `/build/` is already in `.gitignore`. The `make perf` target sets an **absolute** `NOC_PERF_FILE` because the ctest body runs from `build/cmodel` and `emit()`'s default path is CWD-relative.
+- **JSON location:** gitignored, `<dir>/<scenario>.json`. emit() path priority: `NOC_PERF_FILE` (full path, single scenario) > `NOC_PERF_DIR/<scenario>.json` (per-scenario batch) > CWD-relative default. `make perf` sets these **absolute** (the ctest body runs from `build/cmodel`, so a relative path would resolve wrongly): batch -> `NOC_PERF_DIR`, single -> `NOC_PERF_FILE`. `/build/` is already gitignored.
 
 ### Coding-style reminders (project conventions)
 
@@ -696,21 +696,29 @@ class PerfReport {
         os << "},\"slave\":{\"remainder_cyc\":" << slave_remainder_ << "}}";
     }
 
-    // stdout summary always; JSON to build/cmodel/perf/<scenario>.json (or
-    // NOC_PERF_FILE). Creates the perf dir if std::filesystem is available.
+    // stdout summary always. JSON path priority: NOC_PERF_FILE (full path, single
+    // scenario) > NOC_PERF_DIR/<scenario>.json (per-scenario, batch run -- avoids
+    // every scenario overwriting one shared file) > the CWD-relative default.
     void emit() const {
         write_summary(std::cout);
-        const char* f = std::getenv("NOC_PERF_FILE");
-        std::string path;
-        if (f) {
-            path = f;
+        const char* file = std::getenv("NOC_PERF_FILE");
+        const char* dir = std::getenv("NOC_PERF_DIR");
+        std::string path, mkdir_target;
+        if (file) {
+            path = file;
+        } else if (dir) {
+            path = std::string(dir) + "/" + scenario_ + ".json";
+            mkdir_target = dir;
         } else {
             path = "build/cmodel/perf/" + scenario_ + ".json";
-#ifdef NI_PERF_HAS_FILESYSTEM
-            std::error_code ec;
-            std::filesystem::create_directories("build/cmodel/perf", ec);
-#endif
+            mkdir_target = "build/cmodel/perf";
         }
+#ifdef NI_PERF_HAS_FILESYSTEM
+        if (!mkdir_target.empty()) {
+            std::error_code ec;
+            std::filesystem::create_directories(mkdir_target, ec);
+        }
+#endif
         std::ofstream js(path);
         if (js) write_json(js);
         std::cout << "[perf:run] wrote " << path << '\n';
@@ -1580,13 +1588,14 @@ Append after the `test:` recipe (around line 101):
 #   make perf                       all scenarios in the test_perf_probe suite
 #   make perf SCENARIO=AX4-BAS-003  one scenario (ctest -R filter on the id)
 #
-# NOC_PERF_FILE MUST be absolute: the ctest body runs from build/cmodel and
-# PerfReport::emit()'s default path is CWD-relative. The perf dir is created
-# first. Mirrors the `test` target's TOOLPATH / TEST_TMPDIR / PYTHON3 setup.
+# Paths MUST be absolute: the ctest body runs from build/cmodel and emit()'s
+# default path is CWD-relative. Batch (all scenarios) uses NOC_PERF_DIR so each
+# scenario writes its own <scenario>.json (no shared-file overwrite); single
+# (SCENARIO=<id>) pins one NOC_PERF_FILE. Mirrors `test`'s TOOLPATH/TEST_TMPDIR/PYTHON3.
 PERF_DIR := $(abspath $(CMODEL_BUILD))/perf
+PERF_ENV = $(if $(SCENARIO),NOC_PERF_FILE="$(PERF_DIR)/$(SCENARIO).json",NOC_PERF_DIR="$(PERF_DIR)")
 PERF_CMD = mkdir -p $(CMODEL_BUILD)/test_tmp $(PERF_DIR) && cd $(CMODEL_BUILD) && \
-    TEST_TMPDIR="$$(pwd -W 2>/dev/null || pwd)/test_tmp" \
-    NOC_PERF_FILE="$(PERF_DIR)/$(if $(SCENARIO),$(SCENARIO),all).json" \
+    TEST_TMPDIR="$$(pwd -W 2>/dev/null || pwd)/test_tmp" $(PERF_ENV) \
     ctest --output-on-failure -R 'test_perf_probe$(if $(SCENARIO),.*$(SCENARIO),)'
 
 perf: build-cmodel
@@ -1596,7 +1605,7 @@ perf: build-cmodel
 - [ ] **Step 2: Run the all-scenarios target**
 
 Run: `make perf PYTHON3=/c/msys64/mingw64/bin/python3`
-Expected: builds, runs the `test_perf_probe` suite, prints `[perf:run] ... json=...` lines, exits 0. JSON artifacts land under `build/cmodel/perf/`. (Note: with a single `NOC_PERF_FILE` env var, multiple scenario cases in one run share the same file and the last writer wins; this is acceptable for the `all` smoke target — the per-scenario default path inside `emit()` already disambiguates when `NOC_PERF_FILE` is unset. For a clean per-scenario artifact use the `SCENARIO=` form below.)
+Expected: builds, runs the `test_perf_probe` suite, prints `[perf:run] wrote ...` lines, exits 0. Each scenario writes its own `build/cmodel/perf/<scenario>.json` (batch mode sets `NOC_PERF_DIR`, so emit() derives a per-scenario filename -- no shared-file overwrite). Verify with `ls build/cmodel/perf/` showing one JSON per non-skipped scenario.
 
 - [ ] **Step 3: Run the single-scenario target**
 
