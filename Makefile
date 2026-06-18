@@ -17,7 +17,7 @@ CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
 COSIM_VERILATOR := cosim/verilator
 COSIM_VCS       := cosim/vcs
 
-.PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
+.PHONY: help build build-cmodel build-verilator test perf check lint_scenarios lint_docs \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -99,6 +99,28 @@ CTEST_CMD = mkdir -p $(CMODEL_BUILD)/test_tmp && cd $(CMODEL_BUILD) &&     TEST_
 
 test: build-cmodel
 	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
+
+# --- perf ---
+
+# Run the perf harness and write per-scenario JSON to build/cmodel/perf/<id>.json.
+#   make perf                       all scenarios in the test_perf_probe suite
+#   make perf SCENARIO=AX4-BAS-003  one scenario (ctest -R filter on the id)
+#
+# Paths MUST be absolute: the ctest body runs from build/cmodel and emit()'s
+# default path is CWD-relative. Batch (all scenarios) uses NOC_PERF_DIR so each
+# scenario writes its own <scenario>.json (no shared-file overwrite); single
+# (SCENARIO=<id>) pins one NOC_PERF_FILE. Mirrors `test`'s TOOLPATH/TEST_TMPDIR/PYTHON3.
+PERF_DIR := $(abspath $(CMODEL_BUILD))/perf
+PERF_ENV = $(if $(SCENARIO),NOC_PERF_FILE="$(PERF_DIR)/$(SCENARIO).json",NOC_PERF_DIR="$(PERF_DIR)")
+# ctest test names use underscores (AX4_BAS_003); SCENARIO uses dashes (AX4-BAS-003).
+# tr converts the filter; no SCENARIO -> match all PerfProbe* tests.
+PERF_FILTER = $(if $(SCENARIO),'PerfProbeScenario.*'$$(echo '$(SCENARIO)' | tr - _),'PerfProbe')
+PERF_CMD = mkdir -p $(CMODEL_BUILD)/test_tmp $(PERF_DIR) && cd $(CMODEL_BUILD) && \
+    TEST_TMPDIR="$$(pwd -W 2>/dev/null || pwd)/test_tmp" $(PERF_ENV) \
+    ctest --output-on-failure -R $(PERF_FILTER)
+
+perf: build-cmodel
+	@$(TOOLPATH) sh -c '$(PERF_CMD)'
 
 # Python interpreter: prefer the Windows `py -3` launcher when present
 # (canonical on this project's Windows setup), fall back to python3
