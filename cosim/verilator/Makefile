@@ -155,6 +155,7 @@ run-tb-top: $(TBTOP_EXE)
 	fi; \
 	echo "--- run.log (tail) ---"; \
 	tail -8 output/$(SCENARIO)/run.log; \
+	$(PYTHON3) perf_cli_summary.py output/$(SCENARIO)/perf.json || true; \
 	exit $$rc
 
 # Smoke-test the Verilator toolchain with a trivial module before attempting
