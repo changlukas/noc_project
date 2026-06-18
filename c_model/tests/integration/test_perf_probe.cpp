@@ -781,12 +781,35 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
         }
     });
 
+    // Pass-2 occupancy tracking — sampled each cycle (peak values only).
+    std::size_t p2_nmu_occ_max = 0;
+    std::size_t p2_nsu_occ_max = 0;
+    const auto req_coords = router_path(/*src=*/0x00, /*dst=*/0x01, /*mesh_x=*/2, /*mesh_y=*/1);
+    std::map<std::string, std::size_t> p2_router_occ_max;
+
     std::size_t cycle = 0;
     const std::size_t cap = 100000;
     while (!flow_b.done() && cycle < cap) {
         now = cycle;
         flow_b.pre_tick();
         ch.tick();
+        // Sample NI occupancy (peak) per tick.
+        p2_nmu_occ_max = std::max(p2_nmu_occ_max,
+                                  flow_b.rob().write_occupancy() + flow_b.rob().read_occupancy());
+        {
+            auto& port = flow_b.nsu().axi_master_port();
+            const std::size_t nsu_busy =
+                std::max({port.aw_q_size(), port.w_q_size(), port.ar_q_size(), port.b_q_size(),
+                          port.r_q_size()});
+            p2_nsu_occ_max = std::max(p2_nsu_occ_max, nsu_busy);
+        }
+        // Sample each request-leg router's LOCAL output FIFO occupancy.
+        for (const auto& c : req_coords) {
+            const std::size_t fill =
+                ch.req_router_at(c.x, c.y).output_fifo_size(TwoNodeFabric::LOCAL);
+            auto& peak = p2_router_occ_max[router_name(c)];
+            peak = std::max(peak, fill);
+        }
         flow_b.post_tick();
         ++cycle;
     }
@@ -820,6 +843,26 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
                                       measured, zl});
         EXPECT_GE(measured, zl) << "scenario " << id << " txn line=" << t.scenario_line
                                 << " measured=" << measured << " below zero_load=" << zl;
+    }
+    // NI records with real Pass-2 occupancy (same structure as MinLatencyAtLeastZeroLoadAndEmit).
+    rep.add_ni(ComponentRecord{"NMU0", "nmu", 0, 0.0, 0, p2_nmu_occ_max, iso.nmu_occ_cap, true});
+    rep.add_ni(ComponentRecord{"NSU1", "nsu", 0, 0.0, 0, p2_nsu_occ_max, iso.nsu_occ_cap, true});
+    // Every router on the request leg (:req suffix) and response leg (:rsp suffix).
+    for (const auto& kv : iso.req_leg.router_latency) {
+        const std::string rec_name = kv.first + ":req";
+        const std::size_t occ =
+            p2_router_occ_max.count(kv.first) ? p2_router_occ_max.at(kv.first) : 0;
+        rep.add_router(ComponentRecord{rec_name, "router", kv.second,
+                                       static_cast<double>(kv.second), kv.second, occ,
+                                       iso.router_occ_cap, true});
+    }
+    for (const auto& kv : iso.rsp_leg.router_latency) {
+        const std::string rec_name = kv.first + ":rsp";
+        const std::size_t occ =
+            p2_router_occ_max.count(kv.first) ? p2_router_occ_max.at(kv.first) : 0;
+        rep.add_router(ComponentRecord{rec_name, "router", kv.second,
+                                       static_cast<double>(kv.second), kv.second, occ,
+                                       iso.router_occ_cap, true});
     }
     rep.emit();
 }
