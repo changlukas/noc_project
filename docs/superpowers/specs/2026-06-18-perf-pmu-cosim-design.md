@@ -1,7 +1,8 @@
 # In-fabric AXI/NoC performance monitor in the co-sim (PMU-style)
 
 Date: 2026-06-18
-Status: Draft rev 2 (Codex GO; hybrid SV+C decision applied; PG037 blocks mapped)
+Status: Draft rev 3 (Codex GO; hybrid SV+C; PG037 blocks mapped; clean-break
+cleanup of the two-pass c_model model per user decision 2026-06-18 -- Section 7)
 Supersedes the approach of: the c_model two-pass perf harness + `make perf`
 (`2026-06-18-perf-probe-productization-design.md`). That harness measured the
 c_model in isolation with a two-pass zero-load characterization. This design
@@ -176,16 +177,25 @@ non-intrusive test) gates this.
 - `cosim/verilator/Makefile`: `run-tb-top` writes
   `output/<scenario>/perf.json` beside `run.log`.
 
-## 7. Survive / replace
+## 7. Survive / replace (clean break, user decision 2026-06-18)
+
+The user chose a **clean break**: the two-pass `zero_load` c_model bypass model
+is deleted, not kept as a secondary view. The PMU co-sim becomes the only perf
+path. Neutral primitives (observer, stats, link probe) survive because the PMU
+reuses their logic and they back unrelated c_model unit tests.
 
 | Current piece | Verdict |
 |---|---|
-| `NIPerfObserver` (on_issue/on_complete latency) | survive for the c_model unit tests; the co-sim AXI latency is re-implemented in the SV slot monitor (same per-id-FIFO logic, but on AXI wires) |
-| Router/NI introspection getters | survive (the C-side occupancy counters) |
-| `PerfReport` JSON structure | survive as the readout shape, reframed to counters/measured (drop zero_load/queueing fields) |
-| flit-link decorators (LinkProbe) | survive only for the c_model unit tests; the co-sim uses the SV link monitor |
-| two-pass harness, `characterize_signature`, per-signature `zero_load` | replace (single-run) |
-| `test_perf_probe.cpp` + `make perf` (c_model scenario suite) | keep as a c_model-level perf view for now; retire the `zero_load`/`queueing` fields once the co-sim monitor reaches parity (Codex review) |
+| `NIPerfObserver` (`ni_perf_observer.hpp`) | **survive** -- neutral primitive for c_model unit tests; co-sim AXI latency re-implemented in the SV slot monitor (same per-id-FIFO logic, on AXI wires) |
+| `PerfStats` (`perf_stats.hpp`) | **survive** -- neutral min/mean/max accumulator |
+| Router/NI introspection getters | **survive** -- feed the C-side occupancy counters |
+| flit-link decorators (LinkProbe, `flit_link_probe.hpp`) | **survive** -- c_model unit tests only; the co-sim uses the SV link monitor |
+| `test_router_loopback.cpp` `ObserversAreNonIntrusive` | **survive** -- the non-intrusive A/B gate model (Section 4) |
+| two-pass harness, `characterize_signature`, per-signature `zero_load` | **delete** (lives entirely in `test_perf_probe.cpp`) |
+| `test_perf_probe.cpp` + `make perf` target | **delete** -- the superseded two-pass scenario suite |
+| `PerfReport` `zero_load_cyc` / `queueing_cyc` / `slave_remainder` fields | **delete** -- reframe to counters/measured; if `perf_collector.hpp` reuses the struct, keep the reframed struct, else delete `perf_report.hpp` with its sole consumer |
+| `docs/performance-probe.md` | **rewrite** for single-run in-fabric PMU (`make run-tb-top`, `perf.json`) |
+| `docs/superpowers/plans/2026-06-17-perf-probe-rework.md` (untracked, never executed) | **delete** -- orphan plan for an abandoned approach |
 
 ## 8. Files (anticipated)
 
@@ -199,6 +209,13 @@ non-intrusive test) gates this.
 | `c_model/include/cosim/nmu_shell_adapter.hpp` / `nsu_shell_adapter.hpp` | add accessors to reach `Rob` / `AxiMasterPort` occupancy |
 | `cosim/sv/tb_top.sv` | instantiate the AXI slot + link SV monitors; import + call the sample/dump DPI |
 | `cosim/verilator/Makefile` | `run-tb-top` emits `output/<scenario>/perf.json` |
+| `c_model/tests/integration/test_perf_probe.cpp` | **delete** -- two-pass `zero_load` scenario suite (incl. `characterize_signature`) |
+| root `Makefile` `perf` target (lines ~106, ~122) | **delete** -- `make perf` and its help line |
+| `c_model/tests/common/perf_report.hpp` | strip `zero_load_cyc` / `queueing_cyc` / `slave_remainder`; delete the file if `perf_collector.hpp` does not reuse it |
+| `c_model/tests/common/test_perf_report.cpp` | update or delete to match `perf_report.hpp` |
+| `docs/performance-probe.md` | rewrite for the single-run in-fabric PMU |
+| `docs/superpowers/plans/2026-06-17-perf-probe-rework.md` | **delete** -- orphan plan (never executed) |
+| `c_model/tests/integration/CMakeLists.txt` (and any `test_perf_probe` registration) | remove the `test_perf_probe` target |
 
 ## 9. References
 
