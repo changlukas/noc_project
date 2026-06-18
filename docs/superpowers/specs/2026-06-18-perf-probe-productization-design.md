@@ -1,7 +1,7 @@
 # Perf probe productization: mesh-agnostic decomposition + scenario-driven
 
 Date: 2026-06-18
-Status: Draft, rev 2 (Codex round-1 must-fixes applied; pending re-review)
+Status: Draft, rev 3 (Codex round-2 residuals applied; pending final check)
 Builds on: `2026-06-17-perf-probe-simplify-design.md` (the measured zero-load +
 per-component latency probe). That probe is correct but partial: it emits one
 lumped router, hard-codes NI occupancy to 0, drives a single hard-coded
@@ -37,8 +37,18 @@ For an `(X, Y)` mesh, node id encodes `(x, y)` as `x | (y << X_WIDTH)`.
 
 - Request path: `src -> ... -> dst`. Response path: the reverse.
 - The sequence has `k+1` nodes for a `k`-hop path; each node hosts one router.
-- For 2-node `AX4-BAS-003` (node 0 -> node 1): `[(0,0), (1,0)]`, a 1-hop path,
-  two routers.
+- For 2-node `AX4-BAS-003` driven as a `node 0 -> node 1` flow: `[(0,0), (1,0)]`,
+  a 1-hop path, two routers.
+
+Note on the flow destination: a scenario's native addresses are local (under
+`xy_route`, `dst_id = (addr >> 32) & mask`, and native addresses keep the high
+bits clear, so they route to `dst 0`). To exercise the network, the harness runs
+each scenario as one canonical non-local flow (`node 0 -> node 1` on the 2-node
+fabric) by remapping the destination address bits. This is a single fixed flow
+per scenario, not per-transaction destination routing; routing each transaction
+to a varying destination is a future traffic-pattern concern. The remap is done
+by the lossless writer (Section 5.1), which sets the destination while preserving
+every other field.
 
 This is the only place mesh dimensions enter. Everything downstream consumes the
 path.
@@ -157,7 +167,9 @@ Generalize the harness from one hard-coded write to any scenario YAML:
 - Pass 1 isolation must preserve the transaction faithfully. `shifted_scenario_path`
   drops `strb_file`, `lock`, `qos`, `inject`, and max-outstanding fields, so it
   cannot characterize an arbitrary transaction. Use a lossless single-transaction
-  writer that copies every field from the source transaction and config.
+  writer (`ScenarioTransaction` / `ScenarioConfig` carry every field via
+  `axi::load_scenario`) that copies all of them and applies the destination remap
+  (Section 2.1) to establish the `node 0 -> node 1` flow.
 - Pass 2: run the full scenario -> per-transaction measured latency (from the AXI
   callbacks, keyed by `scenario_line`), path, and per-component occupancy peak. One
   `transactions[]` row per real transaction.
@@ -180,9 +192,11 @@ multiple physical nodes). So each scenario drives one `src -> dst` flow on the
 existing fabric; no N×M fabric is needed for coverage.
 
 A small set of scenarios are error-injection / expected-fail (`AX4-INF-001` aborts
-on init by design; AXI integration already skips INF scenarios via YAML
-validation). A `expected_fail` registry lists these; `make perf` records them as
-`skipped`/`expected_fail` and does not instantiate the probe against them.
+on init by design). The AXI integration test skips these with an inline prefix
+check (`if scenario_id starts with "AX4-INF-" -> GTEST_SKIP`), not a shared skip
+list. The perf harness defines its own explicit `expected_fail` set (the INF
+prefix plus any other error-injection ids) and `make perf` records those as
+`skipped`, never instantiating the probe against them.
 
 ### 5.3 `make perf`
 
@@ -218,7 +232,7 @@ Unchanged in intent, generalized to any path:
 | `c_model/tests/common/perf_report.hpp` | add run-metadata block; align stdout names; drop redundant `kind=`; support `n/a` occupancy. |
 | `c_model/tests/integration/test_perf_probe.cpp` | new dedicated perf harness: path-driven instrumentation loop, scenario-driven multi-transaction Pass 1/2, per-router + NI-occupancy population, path/component assert, expected-fail handling. `test_router_loopback.cpp` keeps only its loopback correctness + A/B. |
 | `c_model/tests/noc/two_node_fabric.hpp` | add `req_router_at(x,y)` / `rsp_router_at(x,y)` accessors. |
-| `c_model/tests/scenarios/perf_expected_fail.hpp` (or reuse the AXI skip list) | `expected_fail` registry for INF / error-injection scenarios. |
+| `c_model/tests/integration/test_perf_probe.cpp` (the harness) | defines its own explicit `expected_fail` set (INF prefix + any error-injection ids); no shared AXI skip list exists to reuse. |
 | root `Makefile` | `perf` target (`make perf [SCENARIO=<id>]`), absolute `NOC_PERF_FILE`. |
 
 ## 8. Resolved decisions (were open questions)
