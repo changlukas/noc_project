@@ -140,18 +140,8 @@ class PerfCollector {
 
     void emit_slots(std::ostringstream& os) const {
         os << "\"axi_slots\":[";
-        // Emit subordinate slots first so service_latency precedes the manager
-        // block in the JSON string (test §ServiceLatencyOnSubordinateOnly relies
-        // on find() ordering).
         bool first = true;
         for (const auto& [name, s] : slots_) {
-            if (is_manager(name)) continue;
-            if (!first) os << ',';
-            first = false;
-            emit_slot_entry(os, name, s);
-        }
-        for (const auto& [name, s] : slots_) {
-            if (!is_manager(name)) continue;
             if (!first) os << ',';
             first = false;
             emit_slot_entry(os, name, s);

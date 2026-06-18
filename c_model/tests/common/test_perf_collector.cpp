@@ -43,14 +43,15 @@ TEST(PerfCollector, SignatureMinMeanMax) {
 }
 
 TEST(PerfCollector, ServiceLatencyOnSubordinateOnly) {
-    const std::string j = make_populated().to_json();
-    EXPECT_NE(j.find("\"service_latency\""), std::string::npos);
-    // service_latency appears under the subordinate slot, not the manager.
-    const std::size_t mgr = j.find("node0.manager");
-    const std::size_t sub = j.find("node1.subordinate");
-    const std::size_t svc = j.find("\"service_latency\"");
-    EXPECT_GT(svc, sub);
-    EXPECT_TRUE(svc < mgr || mgr > sub);
+    // A manager-only collector emits no service_latency; a subordinate-only one does.
+    // Order-independent: tests field presence per slot role, not string position.
+    PerfCollector mgr_only;
+    mgr_only.add_txn("node0.manager", 3, true, 0x100000000ull, 7, 3, 10, 52);
+    EXPECT_EQ(mgr_only.to_json().find("service_latency"), std::string::npos);
+
+    PerfCollector sub_only;
+    sub_only.add_txn("node1.subordinate", 3, true, 0x100000000ull, 7, 3, 30, 44);
+    EXPECT_NE(sub_only.to_json().find("service_latency"), std::string::npos);
 }
 
 TEST(PerfCollector, RouterOccupancyTracksMax) {
