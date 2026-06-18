@@ -33,6 +33,7 @@ TB_TOP_SV_SRC := \
     $(COSIM_ROOT)/sv/wb2axip/faxi_master.v \
     $(COSIM_ROOT)/sv/wb2axip/faxi_slave.v \
     $(COSIM_ROOT)/sv/axi_perf_monitor.sv \
+    $(COSIM_ROOT)/sv/flit_link_perf_monitor.sv \
     $(COSIM_ROOT)/sv/tb_top.sv
 
 # DPI implementation shared by every simulator; the C++ *main* drivers
