@@ -1,3 +1,6 @@
+add_cmodel_test(test_pipeline_stage)
+target_include_directories(test_pipeline_stage PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
 add_cmodel_test(test_wormhole_arbiter)
 target_include_directories(test_wormhole_arbiter PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
