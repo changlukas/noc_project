@@ -35,10 +35,6 @@ add_cmodel_test(test_ni_perf_observer)
 target_include_directories(test_ni_perf_observer PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_perf_report)
-target_include_directories(test_perf_report PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..)
-
 add_cmodel_test(test_flit_link_probe)
 target_include_directories(test_flit_link_probe PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)

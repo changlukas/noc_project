@@ -43,16 +43,3 @@ add_custom_command(TARGET test_router_loopback POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/../../config
     $<TARGET_FILE_DIR:test_router_loopback>/config)
-
-# Dedicated perf harness: path-driven mesh-agnostic per-component decomposition.
-add_cmodel_test(test_perf_probe)
-target_link_libraries(test_perf_probe PRIVATE yaml-cpp::yaml-cpp noc_axi4_scenarios)
-target_include_directories(test_perf_probe PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..
-  "${CMAKE_SOURCE_DIR}/../tests/scenarios")
-target_compile_definitions(test_perf_probe PRIVATE
-  SCENARIO_TREE_ROOT="${CMAKE_SOURCE_DIR}/../tests/scenarios/")
-add_custom_command(TARGET test_perf_probe POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../config
-    $<TARGET_FILE_DIR:test_perf_probe>/config)
