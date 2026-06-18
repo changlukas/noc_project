@@ -99,9 +99,13 @@ throughput/backpressure counters.
   normal idle state and a level test would count a stall almost every cycle. The
   SV link monitor maintains its own credit counter per link direction: seed =
   downstream VC buffer depth; `+1` on each credit pulse; `-1` on each flit sent
-  (`valid && accepted`). A **stall cycle** = `valid && credit_count == 0` (a flit
-  is offered but no credit remains). NoC credit/flit terminology -- NOT AXI
-  ready/valid.
+  (`valid` high). A **stall cycle** = `credit_count == 0` (downstream buffer
+  full). NOT `valid && credit_count == 0`: the sender gates `valid` on credit
+  (`router_wrap` drives `valid` only when it holds credit), so `valid` is low
+  during exhaustion and that term never fires. `credit_count == 0` is the only
+  wire-observable backpressure; cross-reference the upstream router out-FIFO
+  occupancy (C-side sample) to separate real backpressure from an idle-but-full
+  link. NoC credit/flit terminology -- NOT AXI ready/valid.
 - Sample window: single-run, default the whole scenario is one window. Optional
   `+perf_start`/`+perf_end` plusargs gate the measured window (warmup/drain),
   with no second pass. **Window inclusion rule**: a transaction counts in the
@@ -274,6 +278,8 @@ home for end-to-end latency (raw + aggregates); `noc` = router/link.
 - `min` is the **min observed** reference (Section 5), not a zero-load value.
 - `per_id` breakdown (PG037 ID filter) is optional, config-gated, default off.
 - `in/out_fifo_occ_max` only (occupancy sum dropped -- low reader value).
+- link `stall_cyc` = cycles with `credit_count == 0` (downstream buffer full);
+  see Section 3 for why it is not `valid && credit_count == 0`.
 - The per-id correlation FIFO has finite capacity (max outstanding per id);
   overflow is asserted as a measurement error, never silently dropped.
 
@@ -314,7 +320,7 @@ JSON-only, so the CLI never floods on large runs):
   reads the wires).
 - `cosim/sv/flit_link_perf_monitor.sv` (new): passive counter on the inter-router
   link wires (`tb_top.sv link_*`): flit count, and credit-counter-based stall
-  (`valid && credit_count == 0`; credit is a pulse -- see Section 3). One per link
+  (`credit_count == 0`; credit is a pulse -- see Section 3). One per link
   direction.
 - `RouterShellAdapter`: add `rsp_router()` accessor (only `req_router()` exists;
   the `rsp_router_` member is there). `Router::output_fifo_size`/`input_fifo_size`
@@ -384,7 +390,7 @@ and stall counters carry the most risk, so they are tested directly.
 | mixed read+write, same AXI id | read and write use separate `(id, dir)` FIFOs; no cross-direction mismatch |
 | W-channel with no W-id | write-data latency attributes to the AW id in order |
 | per-id FIFO overflow | exceeding max-outstanding-per-id fires the measurement-error assert (not a silent drop) |
-| credit-stall sanity | a congested link reports `stall_cyc > 0`; an uncongested single-flow run reports `stall_cyc == 0` (guards the C2 pulse/credit-counter fix) |
+| credit-stall sanity | the monitor's credit counter stays in `[0, depth]` (never underflows/overflows); a deliberately back-pressured link reports `stall_cyc > 0` (guards the C2 pulse/credit-counter fix) |
 | non-intrusive A/B | perf-enabled vs perf-disabled build: identical scoreboard result + identical per-txn completion cycles (Section 4) |
 | schema conformance | emitted `perf.json` parses and carries every required key of Section 5.1 |
 | min-observed labelling | the best-case field is named `latency_min` / "min observed", never `zero_load` |
