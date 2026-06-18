@@ -13,8 +13,8 @@
 //     (reads meta from MetaBuffer) ──> WormholeArbiter<NocRspOut>(2 in,
 //     no pairing) ──> VcArbiter ──> external NocRspOut
 //
-// Per-cycle tick order (upstream-first):
-//   depacketize_.tick(); axi_master_port_.tick();
+// Per-cycle tick order (S2-before-S1 on the req path):
+//   axi_master_port_.tick(); depacketize_.tick();
 //   wormhole_arbiter_.tick(); vc_arbiter_.tick();
 //
 // Lifetime: Nsu deletes move/copy. Member order respects ctor ref deps.
