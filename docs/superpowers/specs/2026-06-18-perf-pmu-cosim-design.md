@@ -1,7 +1,7 @@
 # In-fabric AXI/NoC performance monitor in the co-sim (PMU-style)
 
 Date: 2026-06-18
-Status: Draft (pending Codex review + user approval)
+Status: Draft rev 2 (Codex GO; hybrid SV+C decision applied; PG037 blocks mapped)
 Supersedes the approach of: the c_model two-pass perf harness + `make perf`
 (`2026-06-18-perf-probe-productization-design.md`). That harness measured the
 c_model in isolation with a two-pass zero-load characterization. This design
@@ -58,15 +58,16 @@ Per-slot counters (PG037's six + survey additions):
   id's FIFO -- valid because AXI4 requires same-id responses to return in issue
   order (this is the AXI-REALM DOTQ Head-Tail/Linked-Data idea reduced to an
   in-order queue). Capacity = max outstanding per id; overflow is a measurement
-  error to assert, not silently drop. Implementation note: the co-sim callbacks
-  also carry a unique per-transaction `scenario_line`, so the implementation MAY
-  key directly on `scenario_line` for unambiguous matching -- under AXI same-id
-  ordering this yields the identical result as the per-id FIFO, and sidesteps the
-  same-id hazard entirely. Write data (no W-channel id) follows the AW id order.
+  error to assert, not silently drop. The SV slot monitor (Section 4) sees only
+  the AXI wires: AXI id is present but `scenario_line` is NOT (it is a
+  c_model-internal tag, not an AXI signal), so the monitor MUST correlate by
+  `(id, direction)` + in-order FIFO. Write data (no W-channel id) follows the AW
+  id order.
 - A global clock counter provides the cycle stamp.
 - NoC router/link counters (Ciordas concept; not AXI-level, so not in PG037):
-  per-router flit count, valid-but-not-ready and ready-but-not-valid stall
-  cycles, output/input FIFO occupancy (sum + max), backpressure cycles.
+  per-router flit count, output/input FIFO occupancy (sum + max), and link
+  backpressure stall cycles defined as `valid && !credit_available` (NoC
+  credit/flit terminology -- NOT AXI ready/valid).
 - Sample window: single-run, default the whole scenario is one window. Optional
   `+perf_start`/`+perf_end` plusargs gate the measured window (warmup/drain),
   with no second pass.
@@ -102,28 +103,36 @@ breakdown) and a **Range Incrementer** (latency histogram bins), both first-clas
 in PG037. Profile mode (counters + sampled accumulators) is the first target;
 the Event-Log/AXI4-Stream trace path is deferred.
 
-## 4. Implementation: C + DPI (decision)
+## 4. Implementation: hybrid (SV AXI slots + C/DPI internal), unified dump
 
-The monitors are C++ objects at the co-sim's c_model boundary, sampled and dumped
-via DPI; `tb_top` drives them. Rationale:
+Split by where the signal lives (Codex design review):
 
-- The NoC router/link counters MUST be C: the data lives in the c_model `Router`
-  (existing `output_fifo_size`/`input_fifo_size` getters). A uniform C readout
-  (one `PerfCollector`, one end-of-run dump) avoids mixing an SV `$fwrite` path
-  with a C DPI path.
-- The co-sim AXI master IS a c_model `AxiMaster` (inside `MasterShellAdapter`); its
-  `on_*_issued`/`on_*_completed` callbacks give transaction identity + cycles
-  directly, reusing the existing `NIPerfObserver` latency logic. Only a small
-  forwarding addition is needed (Section 6).
-- C + DPI monitors run inside the co-sim and dump at end -> `make run-tb-top`
-  produces the log. This meets the in-fabric / from-the-real-run goal.
+- **AXI slots -> SV passive monitor** (`axi_perf_monitor.sv`, one per AXI
+  interface). It reads the AXI wires (AxVALID&AxREADY ... xLAST) and counts
+  bytes/transactions/latency with a per-id issue-cycle FIFO. This is the
+  PG037-faithful approach (counting on wire handshakes) and it is the ONLY way to
+  cover the subordinate slot: the `NSU -> slave` AXI edge is driven by the NSU's
+  AxiMasterPort and has NO c_model `AxiMaster` callback, so a callback-based C
+  monitor cannot see it. SV monitors cover the manager (`master -> NMU`) and
+  subordinate (`NSU -> slave`) slots uniformly. Bonus: no need to forward the
+  `on_*_issued` callbacks, so production `AxiMaster` is untouched.
+- **NoC router / NI internal state -> C + DPI**: the data lives in the c_model
+  `Router` (`output_fifo_size`/`input_fifo_size`), `Rob` (occupancy),
+  `AxiMasterPort` (queue sizes) -- C++ objects, sampled per tick via a DPI hook.
+- **Inter-router link -> SV**: the link is an SV wire (`tb_top.sv link_*`), so a
+  small SV counter taps valid/flit/credit there.
+- **Unified readout -> C**: a `PerfCollector` (C++) gathers the SV slot/link
+  counters (read at end via DPI / hierarchical reference) plus the C-side
+  occupancy counters, and writes one `perf.json` at end of run.
 
-Considered alternative (rejected, but noted for the reviewer): an SV passive
-`axi_perf_monitor.sv` on the AXI wires (closer to PG037 RTL, no DPI for the
-monitor logic). Rejected because it splits readout into SV + C paths and does not
-reuse `NIPerfObserver`; the AXI signals it would tap originate from the c_model
-master anyway. If the project later wants a true RTL DUT, the SV monitor becomes
-the right choice -- the counter structure here is identical, so the port is local.
+Why not pure C+DPI (the first draft's choice): the subordinate AXI slot has no
+c_model callback, so C alone leaves a slot uncovered. Why not pure SV: the NoC
+router/NI occupancy lives in c_model C++ objects with no SV signal, so it must be
+sampled in C. The split is forced by where each datum exists, not preference.
+
+Non-intrusive: SV monitors only read wires; C sampling only reads const getters.
+An A/B cycle-equality check (as in `test_router_loopback.cpp`'s existing
+non-intrusive test) gates this.
 
 ## 5. Single run, no zero-load
 
@@ -135,42 +144,54 @@ the right choice -- the counter structure here is identical, so the port is loca
 
 ## 6. Co-sim integration points
 
-- `MasterShellAdapter` + `AxiMasterStandalone`: forward `on_write_issued` /
-  `on_read_issued` (currently not forwarded in the cosim path). ~6 lines.
-- `RouterShellAdapter`: add `rsp_router()` accessor (only `req_router()` exists);
-  expose `output_fifo_size`/`input_fifo_size` sampling.
-- `NmuShellAdapter`/`NsuShellAdapter`: add accessors for `Rob`/`AxiMasterPort`
-  occupancy if NI-buffer occupancy is wanted.
-- The SV inter-router link (`tb_top.sv` `link_*` wires): a small passive SV
-  monitor (valid/ready/flit count + stall), counters read at end via DPI or a
-  hierarchical reference -- this is the one piece that is necessarily SV, because
-  the link is an SV wire, not a C++ object.
-- A `cmodel_perf_sample_tick()` DPI function called from `tb_top` each cycle (or a
-  free-running counter sampled lazily), and a `cmodel_perf_dump(path)` DPI called
-  at end-of-sim that writes `cosim/verilator/output/<scenario>/perf.json`.
-- `make run-tb-top` already runs per scenario; the dump lands beside `run.log`.
+- `cosim/sv/axi_perf_monitor.sv` (new): passive AXI slot monitor; instantiate on
+  each AXI interface in `tb_top.sv` -- the manager edges (`master -> NMU`) and the
+  subordinate edges (`NSU -> slave`), per node. Counts byte/transaction/latency
+  per slot, per-id issue-cycle FIFO for same-id correctness. No production
+  `AxiMaster` change (the `on_*_issued`-forwarding the first draft needed is
+  dropped -- the SV monitor reads the wires).
+- `cosim/sv/flit_link_perf_monitor.sv` (new): passive counter on the inter-router
+  link wires (`tb_top.sv link_*`): flit count, and stall = `valid && !credit`
+  (NoC credit/flit terminology, NOT AXI ready). One per link direction.
+- `RouterShellAdapter`: add `rsp_router()` accessor (only `req_router()` exists;
+  the `rsp_router_` member is there). `Router::output_fifo_size`/`input_fifo_size`
+  already exist.
+- `NmuShellAdapter` / `NsuShellAdapter`: add accessors to reach `Rob::*occupancy`
+  and the NSU `AxiMasterPort` queue sizes (the c_model getters exist; the shells
+  keep the objects private with no pass-through). Verify the NSU queue-size API
+  shape.
+- `cosim/c/cmodel_dpi.cpp`: add `cmodel_perf_sample_tick()` (sample the C-side
+  router/NI occupancy each cycle) and `cmodel_perf_dump(path)` (collect the SV
+  slot/link counters + the C occupancy into a `PerfCollector` and write JSON).
+  None exist today -- new from scratch. Must not disturb the existing scoreboard
+  callbacks.
+- `tb_top.sv`: instantiate the two SV monitors; import + call the sample/dump DPI.
+- `cosim/verilator/Makefile`: `run-tb-top` writes
+  `output/<scenario>/perf.json` beside `run.log`.
 
 ## 7. Survive / replace
 
 | Current piece | Verdict |
 |---|---|
-| `NIPerfObserver` (on_issue/on_complete latency) | survive -- it is the AXI latency monitor core |
-| Router/NI introspection getters | survive (occupancy counters) |
-| `PerfReport` JSON structure | survive, reframed to counters/measured (drop zero_load/queueing fields) |
-| flit-link decorators (LinkProbe) | survive only for the c_model unit tests; not used in the co-sim path |
+| `NIPerfObserver` (on_issue/on_complete latency) | survive for the c_model unit tests; the co-sim AXI latency is re-implemented in the SV slot monitor (same per-id-FIFO logic, but on AXI wires) |
+| Router/NI introspection getters | survive (the C-side occupancy counters) |
+| `PerfReport` JSON structure | survive as the readout shape, reframed to counters/measured (drop zero_load/queueing fields) |
+| flit-link decorators (LinkProbe) | survive only for the c_model unit tests; the co-sim uses the SV link monitor |
 | two-pass harness, `characterize_signature`, per-signature `zero_load` | replace (single-run) |
-| `test_perf_probe.cpp` + `make perf` (c_model scenario suite) | `[TBD]` keep as a c_model-level perf view, or retire once the co-sim monitor lands -- user decision |
+| `test_perf_probe.cpp` + `make perf` (c_model scenario suite) | keep as a c_model-level perf view for now; retire the `zero_load`/`queueing` fields once the co-sim monitor reaches parity (Codex review) |
 
 ## 8. Files (anticipated)
 
 | File | Action |
 |---|---|
-| `c_model/include/cosim/axi_perf_monitor.hpp` (or similar) | new: per-AXI-slot latency/throughput/outstanding counters (reuses `NIPerfObserver`) |
-| `c_model/include/cosim/perf_collector.hpp` | new: aggregates all slots + router/link counters; `dump(path)` JSON |
-| `cosim/c/cmodel_dpi.cpp` | add `cmodel_perf_sample_tick` / `cmodel_perf_dump` DPI; forward AXI issue callbacks |
-| `c_model/include/cosim/*_shell_adapter.hpp` | additive accessors (rsp_router, occupancy, issue-callback forwarding) |
-| `cosim/sv/tb_top.sv` | instantiate the SV link monitor; call the sample/dump DPI |
-| `cosim/verilator/Makefile` | ensure `run-tb-top` emits `output/<scenario>/perf.json` |
+| `cosim/sv/axi_perf_monitor.sv` | new SV: passive per-AXI-slot byte/transaction/latency counters + per-id issue-cycle FIFO; PG037 block structure (Section 3.1) |
+| `cosim/sv/flit_link_perf_monitor.sv` | new SV: inter-router link flit count + `valid && !credit` stall counter |
+| `c_model/include/cosim/perf_collector.hpp` | new C: gather SV slot/link counters + C-side router/NI occupancy; `dump(path)` JSON |
+| `cosim/c/cmodel_dpi.cpp` + `cmodel_dpi.h` | add `cmodel_perf_sample_tick` / `cmodel_perf_dump` DPI (NO issue-callback forwarding -- SV reads the wires); must not disturb the scoreboard callbacks |
+| `c_model/include/cosim/router_shell_adapter.hpp` | add `rsp_router()` accessor |
+| `c_model/include/cosim/nmu_shell_adapter.hpp` / `nsu_shell_adapter.hpp` | add accessors to reach `Rob` / `AxiMasterPort` occupancy |
+| `cosim/sv/tb_top.sv` | instantiate the AXI slot + link SV monitors; import + call the sample/dump DPI |
+| `cosim/verilator/Makefile` | `run-tb-top` emits `output/<scenario>/perf.json` |
 
 ## 9. References
 
