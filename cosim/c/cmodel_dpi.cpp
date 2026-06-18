@@ -118,7 +118,7 @@ HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name)
 std::unique_ptr<ni::cmodel::axi::Scoreboard> g_scoreboard;
 
 // Perf collector — reset on cmodel_init; populated via cmodel_perf_* DPI calls.
-ni::cmodel::cosim::PerfCollector g_perf;
+static ni::cmodel::cosim::PerfCollector g_perf;
 
 }  // namespace ni::cmodel::cosim
 

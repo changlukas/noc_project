@@ -3,6 +3,7 @@
 
 #include "nmu/addr_trans.hpp"
 
+#include <cstdio>
 #include <cstdint>
 #include <fstream>
 #include <map>
@@ -28,6 +29,7 @@ class PerfCollector {
         Txn t;
         t.id = id;
         t.is_write = is_write;
+        t.src_node = slot.substr(0, slot.find('.'));
         t.dst = nmu::addr_trans::xy_route(addr).dst_id;
         t.len = len;
         t.size = size;
@@ -71,6 +73,10 @@ class PerfCollector {
 
     void dump(const std::string& path) const {
         std::ofstream f(path);
+        if (!f.is_open()) {
+            std::fprintf(stderr, "[perf] WARNING: failed to open '%s' for writing\n", path.c_str());
+            return;
+        }
         f << to_json() << '\n';
     }
 
@@ -78,6 +84,7 @@ class PerfCollector {
     struct Txn {
         uint32_t id = 0;
         bool is_write = false;
+        std::string src_node;
         uint32_t dst = 0;
         uint32_t len = 0;
         uint32_t size = 0;
@@ -174,9 +181,9 @@ class PerfCollector {
                 if (!first) os << ',';
                 first = false;
                 os << "{\"id\":" << t.id << ",\"dir\":\"" << (t.is_write ? "write" : "read")
-                   << "\",\"dst\":\"node" << t.dst << "\",\"accept_cyc\":" << t.accept_cyc
-                   << ",\"complete_cyc\":" << t.complete_cyc << ",\"latency\":" << t.latency
-                   << ",\"bytes\":" << t.bytes << '}';
+                   << "\",\"src\":\"" << t.src_node << "\",\"dst\":\"node" << t.dst
+                   << "\",\"accept_cyc\":" << t.accept_cyc << ",\"complete_cyc\":" << t.complete_cyc
+                   << ",\"latency\":" << t.latency << ",\"bytes\":" << t.bytes << '}';
             }
         }
         os << "],\"by_signature\":[";
@@ -187,9 +194,11 @@ class PerfCollector {
     }
 
     static void emit_signatures(std::ostringstream& os, const std::vector<Txn>& txns) {
-        // key = (is_write, len, size, dst)
-        std::map<std::tuple<bool, uint32_t, uint32_t, uint32_t>, std::vector<uint64_t>> g;
-        for (const Txn& t : txns) g[{t.is_write, t.len, t.size, t.dst}].push_back(t.latency);
+        // key = (is_write, len, size, src_node, dst)
+        std::map<std::tuple<bool, uint32_t, uint32_t, std::string, uint32_t>, std::vector<uint64_t>>
+            g;
+        for (const Txn& t : txns)
+            g[{t.is_write, t.len, t.size, t.src_node, t.dst}].push_back(t.latency);
         bool first = true;
         for (const auto& [k, lats] : g) {
             if (!first) os << ',';
@@ -201,10 +210,10 @@ class PerfCollector {
                 sum += l;
             }
             os << "{\"op\":\"" << (std::get<0>(k) ? "write" : "read")
-               << "\",\"len\":" << std::get<1>(k) << ",\"size\":" << std::get<2>(k)
-               << ",\"dst\":\"node" << std::get<3>(k) << "\",\"count\":" << lats.size()
-               << ",\"min\":" << mn << ",\"mean\":" << (sum / lats.size()) << ",\"max\":" << mx
-               << '}';
+               << "\",\"len\":" << std::get<1>(k) << ",\"size\":" << std::get<2>(k) << ",\"src\":\""
+               << std::get<3>(k) << "\",\"dst\":\"node" << std::get<4>(k)
+               << "\",\"count\":" << lats.size() << ",\"min\":" << mn
+               << ",\"mean\":" << (sum / lats.size()) << ",\"max\":" << mx << '}';
         }
     }
 

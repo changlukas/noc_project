@@ -93,6 +93,8 @@ int main(int argc, char** argv) {
 #endif
             cmodel_finalize();
             top->final();
+            // perf.json is intentionally NOT dumped on timeout (a wedged run yields no meaningful
+            // perf data)
             return 1;
         }
 

@@ -43,8 +43,7 @@ Full JSON schema: spec §5.1 (`docs/superpowers/specs/2026-06-18-perf-pmu-cosim-
 write data (WLAST). This probe measures to the B-response, because a write
 transaction is not architecturally complete until the initiator receives its
 B-response — WLAST-to-B-response cycles are real latency the initiator must
-wait for. Measuring to WLAST understates the latency a manager observes
-(AXI-REALM [UNVERIFIED external paper] makes the same argument).
+wait for. Measuring to WLAST understates the latency a manager observes.
 
 Same-id correlation: the AXI monitors maintain a per-(id, direction) FIFO of
 issue cycles. On completion, the FRONT of the FIFO is popped. This correctly
