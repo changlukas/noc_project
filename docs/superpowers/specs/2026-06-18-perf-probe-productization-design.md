@@ -1,7 +1,7 @@
 # Perf probe productization: mesh-agnostic decomposition + scenario-driven
 
 Date: 2026-06-18
-Status: Draft, rev 3 (Codex round-2 residuals applied; pending final check)
+Status: Approved (Codex GO, 2026-06-18); ready for implementation plan
 Builds on: `2026-06-17-perf-probe-simplify-design.md` (the measured zero-load +
 per-component latency probe). That probe is correct but partial: it emits one
 lumped router, hard-codes NI occupancy to 0, drives a single hard-coded
