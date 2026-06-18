@@ -406,6 +406,61 @@ uint64_t sum_component_latency(const IsolatedResult& iso) {
     return s;
 }
 
+// Pass-1 per-signature characterization. Runs one isolated single-transaction
+// scenario (txn_index from sc) and returns its zero-load NI-edge latency.
+// Writes the isolated YAML to iso_yaml_path (caller supplies a unique path).
+// Returns 0 if the transaction did not complete (caller should ASSERT > 0).
+uint64_t characterize_txn_zero_load(const axi::Scenario& sc, std::size_t txn_index,
+                                    const std::string& iso_yaml_path) {
+    using namespace ni::cmodel::testing;
+    const std::size_t num_vc = 1;
+    TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
+    const std::string tmp = std::string(::testing::TempDir());
+    write_isolated_scenario(sc, txn_index, /*dst_offset=*/0x100000000ull, iso_yaml_path);
+
+    uint64_t now = 0;
+    // Minimal NI-edge probes (no router/link probes needed for zero-load only).
+    FlitLog nmu_req_out_log("P1.req_out"), nmu_rsp_in_log("P1.rsp_in");
+    FlitLog nsu_req_in_log("P1.nsu_req"), nsu_rsp_out_log("P1.nsu_rsp");
+    ReqOutProbe nmu_req_out_probe(ch.nmu_req_out(0), nmu_req_out_log, now);
+    RspInProbe nmu_rsp_in_probe(ch.nmu_rsp_in(0), nmu_rsp_in_log, now);
+    ReqInProbe nsu_req_in_probe(ch.nsu_req_in(1), nsu_req_in_log, now);
+    RspOutProbe nsu_rsp_out_probe(ch.nsu_rsp_out(1), nsu_rsp_out_log, now);
+
+    NIPerfObserver ni(now, "p1");
+    Flow flow(ch, /*master_node=*/0, /*slave_node=*/1, iso_yaml_path, num_vc,
+              tmp + "/p1_iso.read.txt", /*dst=*/0x01, nmu_req_out_probe, nmu_rsp_in_probe,
+              nsu_req_in_probe, nsu_rsp_out_probe);
+
+    const bool is_write = (sc.transactions.at(txn_index).op == axi::ScenarioTransaction::Op::Write);
+    if (is_write) {
+        flow.master().on_write_issued(
+            [&](const axi::IssueInfo& i) { ni.on_issue(true, i.scenario_line); });
+        flow.master().on_write_completed(
+            [&](const axi::WriteResult& w) { ni.on_complete(true, w.scenario_line); });
+    } else {
+        flow.master().on_read_issued(
+            [&](const axi::IssueInfo& i) { ni.on_issue(false, i.scenario_line); });
+        flow.master().on_read_observed(
+            [&](const axi::ReadResult& r) { ni.on_complete(false, r.scenario_line); });
+    }
+
+    std::size_t cycle = 0;
+    const std::size_t cap = 100000;
+    while (!flow.done() && cycle < cap) {
+        now = cycle;
+        flow.pre_tick();
+        ch.tick();
+        flow.post_tick();
+        ++cycle;
+    }
+
+    if (is_write) {
+        return ni.write_latency().count() ? ni.write_latency().min() : 0;
+    }
+    return ni.read_latency().count() ? ni.read_latency().min() : 0;
+}
+
 }  // namespace
 
 TEST(PerfProbe, EveryRouterOnPathHasComponentEntry) {
@@ -661,8 +716,24 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
     const std::string base = scenario_path(id.c_str());
     const axi::Scenario src = axi::load_scenario(base);
 
-    // Pass 1: characterize zero-load floor using canonical AX4-BAS-003 reference.
-    // Reuse the existing characterize_signature() which runs the isolated single-write.
+    // Pass 1: per-signature zero-load characterization (spec sec 5.1).
+    // For each distinct transaction signature in this scenario, run an isolated
+    // single-transaction flow and record its NI-edge latency as the floor.
+    // Distinct signatures differ by op, len, size, burst, or memory latency class.
+    const std::string tmp = std::string(::testing::TempDir());
+    std::map<Signature, uint64_t> sig_zero_load;
+    for (std::size_t i = 0; i < src.transactions.size(); ++i) {
+        const Signature sig = signature_of(src.transactions[i], src.config, 0, 1);
+        if (sig_zero_load.count(sig)) continue;  // already characterized
+        const std::string iso_path = tmp + "/p1_" + id + "_txn" + std::to_string(i) + ".yaml";
+        const uint64_t zl = characterize_txn_zero_load(src, i, iso_path);
+        ASSERT_GT(zl, 0u) << "Pass-1 isolated run did not complete for txn " << i << " of scenario "
+                          << id;
+        sig_zero_load[sig] = zl;
+    }
+
+    // Also characterize path shape (component_path) from the canonical BAS-003 reference
+    // for TxnRecord population (mesh-agnostic; path shape is the same for all scenarios).
     const IsolatedResult iso = characterize_signature();
     ASSERT_GT(iso.write_zero_load, 0u);
 
@@ -671,7 +742,6 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
     // xy_route() routes to dst=1 (bit 32 = node-select).
     const std::size_t num_vc = 1;
     TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
-    const std::string tmp = std::string(::testing::TempDir());
     const std::string yaml_b = tmp + "/perf_scn_" + id + ".yaml";
     write_full_scenario(src, /*dst_offset=*/0x100000000ull, yaml_b);
 
@@ -713,14 +783,13 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
         const bool w = (t.op == axi::ScenarioTransaction::Op::Write);
         const auto& lat_stats = w ? ni_b.write_latency() : ni_b.read_latency();
         const uint64_t measured = lat_stats.count() ? lat_stats.min() : 0;
+        const Signature sig = signature_of(t, src.config, 0, 1);
+        const uint64_t zl = sig_zero_load.count(sig) ? sig_zero_load.at(sig) : 0;
         rep.add_transaction(TxnRecord{t.scenario_line, w ? "write" : "read", t.id, "NMU0", "NSU1",
                                       iso.req_leg.component_path, iso.rsp_leg.component_path,
-                                      measured, iso.write_zero_load});
-        // Note: the write_zero_load floor (from BAS-003) is NOT asserted here because it
-        // only applies to in-bounds writes with the same memory-latency signature. OOB
-        // scenarios (DECERR, shorter slave response) and read transactions both have
-        // structurally shorter latencies. Per-signature floor characterization is a
-        // future enhancement tracked in the Signature cache.
+                                      measured, zl});
+        EXPECT_GE(measured, zl) << "scenario " << id << " txn line=" << t.scenario_line
+                                << " measured=" << measured << " below zero_load=" << zl;
     }
     rep.emit();
 }
