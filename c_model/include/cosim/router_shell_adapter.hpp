@@ -143,6 +143,8 @@ class RouterShellAdapter {
     // credit_[LOCAL] sender counter (router->NI direction) across a
     // credit-return hop. Not used in production wiring.
     noc::Router& req_router() { return *req_router_; }
+    // RSP router accessor — used by cmodel_perf_sample_tick to sample occupancy.
+    noc::Router& rsp_router() { return *rsp_router_; }
 
   private:
     static constexpr std::size_t LOCAL = static_cast<std::size_t>(noc::RouterPort::LOCAL);

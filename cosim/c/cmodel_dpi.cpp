@@ -14,7 +14,8 @@
 
 #include "axi/scenario_parser.hpp"
 #include "axi/scoreboard.hpp"
-#include "axi/types.hpp"        // ni::cmodel::axi::DATA_BYTES
+#include "axi/types.hpp"  // ni::cmodel::axi::DATA_BYTES
+#include "cosim/perf_collector.hpp"
 #include "ni_flit_constants.h"  // ni::FLIT_WIDTH
 #include <atomic>
 #include <memory>
@@ -116,6 +117,9 @@ HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name)
 // Real scoreboard — wired to MasterShellAdapter callbacks in cmodel_master_create.
 std::unique_ptr<ni::cmodel::axi::Scoreboard> g_scoreboard;
 
+// Perf collector — reset on cmodel_init; populated via cmodel_perf_* DPI calls.
+ni::cmodel::cosim::PerfCollector g_perf;
+
 }  // namespace ni::cmodel::cosim
 
 using namespace ni::cmodel::cosim;
@@ -137,6 +141,7 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
         g_scenario = std::move(scenario);
         g_scenario_yaml_path = scenario_yaml_path;
         g_scoreboard = std::make_unique<ni::cmodel::axi::Scoreboard>();
+        g_perf = ni::cmodel::cosim::PerfCollector{};
         g_session_state = SessionState::Initialized;
     }
     DPI_BOUNDARY_END(cmodel_init);
@@ -960,4 +965,54 @@ extern "C" void cmodel_nsu_get_outputs(
         *rready = static_cast<svBit>(out.rready);
     }
     DPI_BOUNDARY_END(cmodel_nsu_get_outputs);
+}
+
+// Perf DPI handlers — SV monitors push per-txn and end-of-run counters;
+// cmodel_perf_sample_tick snapshots router occupancy once per clock cycle.
+
+namespace {
+
+void sample_one_router(const std::string& node, ni::cmodel::noc::Router& r, const char* plane) {
+    using ni::cmodel::noc::ROUTER_PORT_COUNT;
+    std::size_t in_occ = 0, out_occ = 0;
+    for (std::size_t p = 0; p < ROUTER_PORT_COUNT; ++p) {
+        out_occ += r.output_fifo_size(p);
+        for (uint8_t vc = 0; vc < r.num_vc(); ++vc) in_occ += r.input_fifo_size(p, vc);
+    }
+    g_perf.sample_router(std::string(plane) + "." + node, in_occ, out_occ);
+}
+
+}  // namespace
+
+extern "C" void cmodel_perf_axi_txn(const char* slot, int id, int is_write, long long addr, int len,
+                                    int size, long long accept_cyc, long long complete_cyc) {
+    g_perf.add_txn(slot, static_cast<uint32_t>(id), is_write != 0, static_cast<uint64_t>(addr),
+                   static_cast<uint32_t>(len), static_cast<uint32_t>(size),
+                   static_cast<uint64_t>(accept_cyc), static_cast<uint64_t>(complete_cyc));
+}
+
+extern "C" void cmodel_perf_axi_backpressure(const char* slot, long long slave_write_idle_cyc,
+                                             long long master_read_idle_cyc,
+                                             long long outstanding_max) {
+    g_perf.set_slot_backpressure(slot, static_cast<uint64_t>(slave_write_idle_cyc),
+                                 static_cast<uint64_t>(master_read_idle_cyc),
+                                 static_cast<uint64_t>(outstanding_max));
+}
+
+extern "C" void cmodel_perf_link(const char* name, long long flit_count, long long stall_cyc) {
+    g_perf.set_link(name, static_cast<uint64_t>(flit_count), static_cast<uint64_t>(stall_cyc));
+}
+
+extern "C" void cmodel_perf_sample_tick() {
+    using namespace ni::cmodel::cosim;
+    for (HandleBlock* h : g_handle_registry) {
+        if (h->type != ShellType::Router) continue;
+        auto* r = static_cast<RouterShellAdapter*>(h->adapter.get());
+        sample_one_router(h->name, r->req_router(), "req");
+        sample_one_router(h->name, r->rsp_router(), "rsp");
+    }
+}
+
+extern "C" void cmodel_perf_dump(const char* path) {
+    g_perf.dump(path);
 }

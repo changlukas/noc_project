@@ -39,6 +39,16 @@ void cmodel_dump_scoreboard(void);
 int cmodel_master_count(void);
 int cmodel_reads_checked(void);
 
+// Perf instrumentation — SV monitors push per-txn and end-of-run counters;
+// cmodel_perf_sample_tick is called once per clock to snapshot router occupancy.
+void cmodel_perf_axi_txn(const char* slot, int id, int is_write, long long addr, int len, int size,
+                         long long accept_cyc, long long complete_cyc);
+void cmodel_perf_axi_backpressure(const char* slot, long long slave_write_idle_cyc,
+                                  long long master_read_idle_cyc, long long outstanding_max);
+void cmodel_perf_link(const char* name, long long flit_count, long long stall_cyc);
+void cmodel_perf_sample_tick(void);
+void cmodel_perf_dump(const char* path);
+
 // Per-shell DPI signatures appended by Tasks 5-11.
 // ChannelModel (Task 5) — NoC-only, simplest shell; first chandle migration:
 void* cmodel_channel_model_create(const char* name);
