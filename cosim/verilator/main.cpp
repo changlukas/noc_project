@@ -6,16 +6,18 @@
 #include "verilated.h"
 #include <cstdio>
 #include <memory>
+#include <string>
 
 // VCD tracing — compiled in only when verilated with --trace (TRACE=1 in
 // cosim/verilator/Makefile defines VM_TRACE). Path comes from +vcd=<abs-path>;
 // the run recipe supplies output/<scenario>/tb_top.vcd.
 #if VM_TRACE
 #include "verilated_vcd_c.h"
-#include <string>
 #endif
 
 extern "C" void cmodel_finalize(void);
+extern "C" void cmodel_perf_sample_tick(void);
+extern "C" void cmodel_perf_dump(const char* path);
 
 // Legacy SystemC timestamp stub.
 // IMPORTANT: must NOT call VerilatedContext::time() — doing so triggers
@@ -49,6 +51,13 @@ int main(int argc, char** argv) {
     tfp->open(vcd_path.c_str());
 #endif
 
+    // +perf_out=<path>: destination for the JSON perf report.
+    std::string perf_path = "perf.json";
+    {
+        const std::string m = contextp->commandArgsPlusMatch("perf_out=");
+        if (m.rfind("+perf_out=", 0) == 0) perf_path = m.substr(10);
+    }
+
     top->clk_i = 0;
     top->rst_ni = 0;
     top->eval();
@@ -62,6 +71,8 @@ int main(int argc, char** argv) {
         top->clk_i = 1;
         top->rst_ni = (cycle >= RESET_CYCLES) ? 1 : 0;
         top->eval();
+        // Sample router occupancy once per rising-edge cycle.
+        cmodel_perf_sample_tick();
 #if VM_TRACE
         tfp->dump(contextp->time());
 #endif
@@ -92,6 +103,9 @@ int main(int argc, char** argv) {
     tfp->close();
 #endif
     cmodel_finalize();
+    // top->final() executes SV final blocks (monitor DPI callbacks → g_perf).
+    // cmodel_perf_dump must follow so g_perf is fully populated.
     top->final();
+    cmodel_perf_dump(perf_path.c_str());
     return contextp->gotError() ? 1 : 0;
 }

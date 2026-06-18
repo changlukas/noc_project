@@ -145,7 +145,8 @@ run-tb-top: $(TBTOP_EXE)
 	@echo "running scenario $(SCENARIO); output -> output/$(SCENARIO)/"
 	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord"
 	@$(TBTOP_EXE) "+scenario_node0=output/$(SCENARIO)/coord/node0/scenario.yaml" \
-	    "+scenario_node1=output/$(SCENARIO)/coord/node1/scenario.yaml"$(if $(TRACE_PLUSARG_TB_TOP), $(TRACE_PLUSARG_TB_TOP),) \
+	    "+scenario_node1=output/$(SCENARIO)/coord/node1/scenario.yaml" \
+	    "+perf_out=output/$(SCENARIO)/perf.json"$(if $(TRACE_PLUSARG_TB_TOP), $(TRACE_PLUSARG_TB_TOP),) \
 	    > output/$(SCENARIO)/run.log 2>&1; \
 	rc=$$?; \
 	if ls master_shell_read_dump*.txt >/dev/null 2>&1; then \

@@ -244,6 +244,108 @@ module tb_top (
     );
 
     // -------------------------------------------------------------------------
+    // PMU monitors — passive; no drives
+    // -------------------------------------------------------------------------
+    // AXI slot monitors: one per node × {manager, subordinate} edge.
+    axi_perf_monitor #(
+        .SLOT_NAME("node0.manager"), .ID_W($bits(master_nmu_axi_0.awid))
+    ) u_perf_mgr_0 (
+        .clk_i, .rst_ni,
+        .awvalid(master_nmu_axi_0.awvalid), .awready(master_nmu_axi_0.awready),
+        .awid(master_nmu_axi_0.awid),       .awaddr(master_nmu_axi_0.awaddr),
+        .awlen(master_nmu_axi_0.awlen),     .awsize(master_nmu_axi_0.awsize),
+        .wvalid(master_nmu_axi_0.wvalid),   .wready(master_nmu_axi_0.wready),
+        .bvalid(master_nmu_axi_0.bvalid),   .bready(master_nmu_axi_0.bready),
+        .bid(master_nmu_axi_0.bid),
+        .arvalid(master_nmu_axi_0.arvalid), .arready(master_nmu_axi_0.arready),
+        .arid(master_nmu_axi_0.arid),       .araddr(master_nmu_axi_0.araddr),
+        .arlen(master_nmu_axi_0.arlen),     .arsize(master_nmu_axi_0.arsize),
+        .rvalid(master_nmu_axi_0.rvalid),   .rready(master_nmu_axi_0.rready),
+        .rlast(master_nmu_axi_0.rlast),     .rid(master_nmu_axi_0.rid)
+    );
+
+    axi_perf_monitor #(
+        .SLOT_NAME("node1.manager"), .ID_W($bits(master_nmu_axi_1.awid))
+    ) u_perf_mgr_1 (
+        .clk_i, .rst_ni,
+        .awvalid(master_nmu_axi_1.awvalid), .awready(master_nmu_axi_1.awready),
+        .awid(master_nmu_axi_1.awid),       .awaddr(master_nmu_axi_1.awaddr),
+        .awlen(master_nmu_axi_1.awlen),     .awsize(master_nmu_axi_1.awsize),
+        .wvalid(master_nmu_axi_1.wvalid),   .wready(master_nmu_axi_1.wready),
+        .bvalid(master_nmu_axi_1.bvalid),   .bready(master_nmu_axi_1.bready),
+        .bid(master_nmu_axi_1.bid),
+        .arvalid(master_nmu_axi_1.arvalid), .arready(master_nmu_axi_1.arready),
+        .arid(master_nmu_axi_1.arid),       .araddr(master_nmu_axi_1.araddr),
+        .arlen(master_nmu_axi_1.arlen),     .arsize(master_nmu_axi_1.arsize),
+        .rvalid(master_nmu_axi_1.rvalid),   .rready(master_nmu_axi_1.rready),
+        .rlast(master_nmu_axi_1.rlast),     .rid(master_nmu_axi_1.rid)
+    );
+
+    axi_perf_monitor #(
+        .SLOT_NAME("node0.subordinate"), .ID_W($bits(nsu_slave_axi_0.awid))
+    ) u_perf_sub_0 (
+        .clk_i, .rst_ni,
+        .awvalid(nsu_slave_axi_0.awvalid), .awready(nsu_slave_axi_0.awready),
+        .awid(nsu_slave_axi_0.awid),       .awaddr(nsu_slave_axi_0.awaddr),
+        .awlen(nsu_slave_axi_0.awlen),     .awsize(nsu_slave_axi_0.awsize),
+        .wvalid(nsu_slave_axi_0.wvalid),   .wready(nsu_slave_axi_0.wready),
+        .bvalid(nsu_slave_axi_0.bvalid),   .bready(nsu_slave_axi_0.bready),
+        .bid(nsu_slave_axi_0.bid),
+        .arvalid(nsu_slave_axi_0.arvalid), .arready(nsu_slave_axi_0.arready),
+        .arid(nsu_slave_axi_0.arid),       .araddr(nsu_slave_axi_0.araddr),
+        .arlen(nsu_slave_axi_0.arlen),     .arsize(nsu_slave_axi_0.arsize),
+        .rvalid(nsu_slave_axi_0.rvalid),   .rready(nsu_slave_axi_0.rready),
+        .rlast(nsu_slave_axi_0.rlast),     .rid(nsu_slave_axi_0.rid)
+    );
+
+    axi_perf_monitor #(
+        .SLOT_NAME("node1.subordinate"), .ID_W($bits(nsu_slave_axi_1.awid))
+    ) u_perf_sub_1 (
+        .clk_i, .rst_ni,
+        .awvalid(nsu_slave_axi_1.awvalid), .awready(nsu_slave_axi_1.awready),
+        .awid(nsu_slave_axi_1.awid),       .awaddr(nsu_slave_axi_1.awaddr),
+        .awlen(nsu_slave_axi_1.awlen),     .awsize(nsu_slave_axi_1.awsize),
+        .wvalid(nsu_slave_axi_1.wvalid),   .wready(nsu_slave_axi_1.wready),
+        .bvalid(nsu_slave_axi_1.bvalid),   .bready(nsu_slave_axi_1.bready),
+        .bid(nsu_slave_axi_1.bid),
+        .arvalid(nsu_slave_axi_1.arvalid), .arready(nsu_slave_axi_1.arready),
+        .arid(nsu_slave_axi_1.arid),       .araddr(nsu_slave_axi_1.araddr),
+        .arlen(nsu_slave_axi_1.arlen),     .arsize(nsu_slave_axi_1.arsize),
+        .rvalid(nsu_slave_axi_1.rvalid),   .rready(nsu_slave_axi_1.rready),
+        .rlast(nsu_slave_axi_1.rlast),     .rid(nsu_slave_axi_1.rid)
+    );
+
+    // Inter-router link monitors: valid paired with credit from the OPPOSITE direction
+    // (credit for data flowing 0→1 returns on the 1→0 net, and vice versa).
+    flit_link_perf_monitor #(
+        .LINK_NAME("req_0to1"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_perf_link_req01 (
+        .clk_i, .rst_ni,
+        .valid(link_req_0to1_valid), .credit_pulse(link_req_1to0_credit)
+    );
+
+    flit_link_perf_monitor #(
+        .LINK_NAME("req_1to0"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_perf_link_req10 (
+        .clk_i, .rst_ni,
+        .valid(link_req_1to0_valid), .credit_pulse(link_req_0to1_credit)
+    );
+
+    flit_link_perf_monitor #(
+        .LINK_NAME("rsp_0to1"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_perf_link_rsp01 (
+        .clk_i, .rst_ni,
+        .valid(link_rsp_0to1_valid), .credit_pulse(link_rsp_1to0_credit)
+    );
+
+    flit_link_perf_monitor #(
+        .LINK_NAME("rsp_1to0"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+    ) u_perf_link_rsp10 (
+        .clk_i, .rst_ni,
+        .valid(link_rsp_1to0_valid), .credit_pulse(link_rsp_0to1_credit)
+    );
+
+    // -------------------------------------------------------------------------
     // Exit logic — non-vacuous PASS guard
     // -------------------------------------------------------------------------
     // Scenario completion is polled by C++ main.cpp via cmodel_done().
