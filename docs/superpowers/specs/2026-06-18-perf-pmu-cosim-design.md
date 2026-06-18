@@ -51,10 +51,18 @@ Per-slot counters (PG037's six + survey additions):
 | latency min / max | per-slot extrema |
 | outstanding max | peak in-flight (DOTQ depth) |
 
-- Latency per transaction = `Last-Data cycle - Address-Accept cycle`, correlated
-  by AXI id (issue stamps `start[id]`; completion computes `now - start[id]`).
-  Write data (no W-channel id) is handled by ordering within the id, per the
-  AXI-REALM W-table note.
+- Latency per transaction = `Last-Data cycle - Address-Accept cycle`. Correlation
+  must handle MULTIPLE outstanding transactions with the SAME AXI id: a single
+  `start[id]` is wrong (a second same-id issue overwrites the first). Use a
+  per-(id, direction) FIFO of issue cycles; on completion, pop the FRONT of that
+  id's FIFO -- valid because AXI4 requires same-id responses to return in issue
+  order (this is the AXI-REALM DOTQ Head-Tail/Linked-Data idea reduced to an
+  in-order queue). Capacity = max outstanding per id; overflow is a measurement
+  error to assert, not silently drop. Implementation note: the co-sim callbacks
+  also carry a unique per-transaction `scenario_line`, so the implementation MAY
+  key directly on `scenario_line` for unambiguous matching -- under AXI same-id
+  ordering this yields the identical result as the per-id FIFO, and sidesteps the
+  same-id hazard entirely. Write data (no W-channel id) follows the AW id order.
 - A global clock counter provides the cycle stamp.
 - NoC router/link counters (Ciordas concept; not AXI-level, so not in PG037):
   per-router flit count, valid-but-not-ready and ready-but-not-valid stall
