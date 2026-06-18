@@ -16,19 +16,24 @@ std::string make_source(const std::string& dir) {
     {
         std::ofstream(data) << "00\n";
     }
+    const std::string strb = dir + "/iso_src_strb.txt";
+    {
+        std::ofstream(strb) << "FF\nFF\n";
+    }
     const std::string path = dir + "/iso_src.yaml";
     std::ofstream f(path);
     f << "schema_version: 1\n";
     f << "metadata:\n  name: AX4-BAS-003_single_write_read_aligned\n  category: basic\n";
     f << "config:\n  memory_base: 0x0\n  memory_size: 0x10000\n"
          "  write_latency: 2\n  read_latency: 3\n"
-         "  max_outstanding_write: 4\n  max_outstanding_read: 5\n";
+         "  max_outstanding_write: 4\n  max_outstanding_read: 5\n"
+         "  inject:\n    mode: aw_unstable\n    cycle: 5\n";
     f << "transactions:\n";
     f << "  - op: read\n    addr: 0x40\n    id: 0x1\n    len: 0\n    size: 3\n"
          "    burst: INCR\n    dump_file: unused\n";
     f << "  - op: write\n    addr: 0x80\n    id: 0x2\n    len: 1\n    size: 3\n"
          "    burst: INCR\n    data_file: "
-      << data << "\n    lock: exclusive\n    qos: 7\n";
+      << data << "\n    strb_file: " << strb << "\n    lock: exclusive\n    qos: 7\n";
     return path;
 }
 }  // namespace
@@ -63,4 +68,9 @@ TEST(IsolatedScenario, PreservesEveryFieldAndRemapsDestination) {
     EXPECT_EQ(got.config.read_latency, 3u);
     EXPECT_EQ(got.config.max_outstanding_write, 4u);
     EXPECT_EQ(got.config.max_outstanding_read, 5u);
+    // strb_file round-trip: non-empty path must survive.
+    EXPECT_FALSE(t.strb_file.empty());
+    // inject round-trip: mode + cycle must survive.
+    EXPECT_EQ(got.config.inject.mode, axi::InjectConfig::Mode::AwUnstable);
+    EXPECT_EQ(got.config.inject.cycle, 5u);
 }
