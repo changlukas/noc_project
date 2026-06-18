@@ -114,8 +114,9 @@ the Event-Log/AXI4-Stream trace path is deferred.
 Split by where the signal lives (Codex design review):
 
 - **AXI slots -> SV passive monitor** (`axi_perf_monitor.sv`, one per AXI
-  interface). It reads the AXI wires (AxVALID&AxREADY ... xLAST) and counts
-  bytes/transactions/latency with a per-id issue-cycle FIFO. This is the
+  interface). It reads the AXI wires and counts bytes/transactions/latency with a
+  per-id issue-cycle FIFO, using the direction-specific start/end events of
+  Section 3 (start = address accept; end = RLAST for reads, B-response for writes). This is the
   PG037-faithful approach (counting on wire handshakes) and it is the ONLY way to
   cover the subordinate slot: the `NSU -> slave` AXI edge is driven by the NSU's
   AxiMasterPort and has NO c_model `AxiMaster` callback, so a callback-based C
@@ -205,5 +206,6 @@ non-intrusive test) gates this.
 - AXI-REALM, PULP platform (arXiv 2311.09662, 2501.10161; `pulp-platform/axi_rt`,
   SHL-0.51) -- AXI traffic monitoring, DOTQ id-correlation.
 - AMD AXI Performance Monitor, PG037 -- per-AXI-interface counter set, latency
-  definition (Address-Accept to Last-Data), sample interval.
+  definition (Address-Accept to RLAST for reads, to B-response for writes),
+  sample interval.
 - `docs/architecture.md` sec. 3.2 -- tick discipline (1 tick = 1 cycle).
