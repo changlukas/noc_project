@@ -1,7 +1,7 @@
 # NMU/NSU pipeline model (NI microarchitecture)
 
 Date: 2026-06-18
-Status: Draft rev 4 (plan-review design pass: register-parked stages + inter-stage
+Status: Draft rev 5 (NSU-req spike found a write-vs-read race; survey (Codex+web) — AXI4 gives no read-write ordering, fix is at the originating master, NSU AxiMasterPort stays transparent; §5.4 added)
 token model + arbiter final-stage + ROB Enabled staging contract + ROB-default
 resolved; §5.0-5.3, §6.1)
 
@@ -164,6 +164,34 @@ buffer behind that one registered boundary.
   is ready; upstream backpressure occurs only when that storage / request-side
   allocation is exhausted. Modeled as finite reorder occupancy + stall-when-full,
   NOT as fixed pipeline depth.
+
+### 5.4 Write-vs-read ordering is the master's responsibility, not the NSU's
+
+Surfaced by the NSU-req staging spike (Codex + web survey, 2026-06-18): once W
+beats serialize one/tick, a read (independent AR channel) can reach the slave
+before an in-flight write's data is committed. This is **AXI4-correct**, not a bug:
+
+- AXI4 (ARM IHI 0022E §A5.3.4) gives **no ordering between read and write
+  transactions** — even to the same address, even with `ARID == AWID`. To order a
+  read after a write, the **master must wait for the write's `B` response** before
+  issuing the read; `WLAST` is not completion (data sent ≠ committed).
+- Real AXI-NoC slave units pass through: FlooNoC's NI reorders only same-TxnID
+  same-direction responses; it does **not** enforce write-before-read at the
+  slave-facing port. AXI interconnects (ARM/Xilinx) likewise leave cross-direction
+  ordering to the master or to a slave that returns early `B`.
+
+Therefore:
+- The NSU `AxiMasterPort` stays a **transparent transport** — it does NOT
+  manufacture write-before-read ordering (`axi_master_port.hpp:14/18`).
+- The 0-cycle model accidentally over-ordered (AW→W→AR drained in one tick). The
+  staged model correctly exposes the race.
+- **The fix is at the originating master.** The testbench `AxiMaster` (scenario
+  driver, shared by the c_model tests and the co-sim) enforces the AXI4 rule:
+  **a read to an address that overlaps an outstanding (not-yet-`B`-responded) write
+  is held until that write's `B`.** This makes the write-then-read-same-address
+  data-integrity scenarios AXI-correct under any NI latency, and applies uniformly
+  to the c_model port-pair test and the co-sim. Burst-scenario coverage is retained
+  (never deleted to dodge the race).
 
 ## 6. Ordering modes — reuse existing `RobMode`
 
