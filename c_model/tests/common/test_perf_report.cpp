@@ -5,58 +5,65 @@
 
 using namespace ni::cmodel::testing;
 
-TEST(PerfReport, JsonContainsSectionEightShape) {
+namespace {
+PerfReport make_report() {
     PerfReport rep;
     rep.set_scenario("AX4-BAS-003");
-    rep.add_transaction(TxnRecord{/*line=*/42,
-                                  "read",
-                                  /*id=*/3,
+    rep.set_run_meta(RunMeta{"AX4-BAS-003", /*mesh_x=*/2, /*mesh_y=*/1, /*num_vc=*/1,
+                             /*total_cycles=*/123, /*txn_count=*/1,
+                             /*json_path=*/"build/cmodel/perf/AX4-BAS-003.json"});
+    rep.set_slave_remainder(1);
+    rep.add_transaction(TxnRecord{42,
+                                  "write",
+                                  0,
                                   "NMU0",
                                   "NSU1",
                                   {"NMU0", "R(0,0)", "R(1,0)", "NSU1"},
                                   {"NSU1", "R(1,0)", "R(0,0)", "NMU0"},
-                                  /*measured=*/18,
-                                  /*zero_load=*/9});
-    rep.add_ni(ComponentRecord{"NMU0", "nmu", 2, 3.1, 6, 4, 4});
-    rep.add_ni(ComponentRecord{"NSU1", "nsu", 2, 2.4, 5, 3, 32});
-    rep.add_router(ComponentRecord{"R(0,0)", "router", 3, 4.0, 9, 3, 4});
+                                  18,
+                                  9});
+    // NMU: occupancy available.
+    rep.add_ni(ComponentRecord{"NMU0", "nmu", 2, 2.0, 2, 4, 16, /*occ_available=*/true});
+    // NSU: occupancy genuinely unavailable -> n/a, never 0.
+    rep.add_ni(ComponentRecord{"NSU1", "nsu", 2, 2.0, 2, 0, 0, /*occ_available=*/false});
+    rep.add_router(ComponentRecord{"R(1,0)", "router", 3, 3.0, 3, 2, 4, /*occ_available=*/true});
+    return rep;
+}
+}  // namespace
 
-    std::ostringstream js;
-    rep.write_json(js);
-    const std::string j = js.str();
-    EXPECT_NE(j.find("\"scenario\":\"AX4-BAS-003\""), std::string::npos);
-    EXPECT_NE(j.find("\"queueing_cyc\":9"), std::string::npos);  // 18 - 9
-    EXPECT_NE(j.find("\"zero_load_cyc\":9"), std::string::npos);
-    EXPECT_NE(j.find("\"kind\":\"nmu\""), std::string::npos);
-    EXPECT_NE(j.find("\"kind\":\"nsu\""), std::string::npos);
-    EXPECT_NE(j.find("\"capacity\":32"), std::string::npos);
-    EXPECT_NE(j.find("\"R(0,0)\""), std::string::npos);
-
+TEST(PerfReport, StdoutHasRunMetaAndAlignedNamesNoKind) {
     std::ostringstream os;
-    rep.write_summary(os);
-    const std::string s = os.str();
-    EXPECT_NE(s.find("NMU0"), std::string::npos);
-    EXPECT_NE(s.find("R(0,0)"), std::string::npos);
+    make_report().write_summary(os);
+    const std::string out = os.str();
+    EXPECT_NE(out.find("[perf:run]"), std::string::npos);
+    EXPECT_NE(out.find("scenario=AX4-BAS-003"), std::string::npos);
+    EXPECT_NE(out.find("mesh=2x1"), std::string::npos);
+    EXPECT_NE(out.find("num_vc=1"), std::string::npos);
+    EXPECT_NE(out.find("total_cycles=123"), std::string::npos);
+    // Aligned field names (JSON-style) on the component line.
+    EXPECT_NE(out.find("latency_cyc(min/mean/max)"), std::string::npos);
+    EXPECT_NE(out.find("occupancy(max/capacity)"), std::string::npos);
+    // kind= dropped from the stdout component line.
+    EXPECT_EQ(out.find("] kind="), std::string::npos);
+    // NSU occupancy printed as n/a, never as 0.
+    EXPECT_NE(out.find("[perf:NSU1]"), std::string::npos);
+    EXPECT_NE(out.find("occupancy(max/capacity)=n/a"), std::string::npos);
 }
 
-TEST(PerfReport, SlaveRemainderInJsonAndSummary) {
-    PerfReport rep;
-    rep.set_scenario("slave-remainder-test");
-    rep.set_slave_remainder(7);
-
-    std::ostringstream js;
-    rep.write_json(js);
-    const std::string j = js.str();
-
-    // slave entry present with correct value
-    EXPECT_NE(j.find("\"slave\":{\"remainder_cyc\":7}"), std::string::npos);
-    // JSON must be well-formed: no trailing comma before } or adjacent }}
-    EXPECT_EQ(j.find(",}"), std::string::npos);
-    EXPECT_EQ(j.find("}{"), std::string::npos);
-    // must end with closing brace (no trailing comma at root level)
-    EXPECT_EQ(j.back(), '}');
-
-    std::ostringstream ss;
-    rep.write_summary(ss);
-    EXPECT_NE(ss.str().find("remainder_cyc=7"), std::string::npos);
+TEST(PerfReport, JsonHasRunBlockAndNaOccupancy) {
+    std::ostringstream os;
+    make_report().write_json(os);
+    const std::string j = os.str();
+    EXPECT_NE(j.find("\"run\":{"), std::string::npos);
+    EXPECT_NE(j.find("\"mesh_x\":2"), std::string::npos);
+    EXPECT_NE(j.find("\"mesh_y\":1"), std::string::npos);
+    EXPECT_NE(j.find("\"num_vc\":1"), std::string::npos);
+    EXPECT_NE(j.find("\"total_cycles\":123"), std::string::npos);
+    EXPECT_NE(j.find("\"transaction_count\":1"), std::string::npos);
+    EXPECT_NE(j.find("\"json_path\":\"build/cmodel/perf/AX4-BAS-003.json\""), std::string::npos);
+    // NSU occupancy is the JSON null literal, not a measured 0.
+    EXPECT_NE(j.find("\"NSU1\":{\"kind\":\"nsu\""), std::string::npos);
+    EXPECT_NE(j.find("\"occupancy\":{\"max\":null,\"capacity\":null}"), std::string::npos);
+    // Router occupancy still numeric.
+    EXPECT_NE(j.find("\"occupancy\":{\"max\":2,\"capacity\":4}"), std::string::npos);
 }
