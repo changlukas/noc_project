@@ -46,3 +46,7 @@ target_include_directories(test_flit_link_probe PRIVATE
 add_cmodel_test(test_component_dwell_observer)
 target_include_directories(test_component_dwell_observer PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_cmodel_test(test_router_path)
+target_include_directories(test_router_path PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
