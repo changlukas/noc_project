@@ -42,23 +42,37 @@ A monitor **slot per AXI interface** ("agent"). In the 2-node tb_top: the
 manager edge (`master <-> NMU`) and the subordinate edge (`NSU <-> slave`), per
 node -- up to 4 AXI slots.
 
-Per-slot counters (PG037's six + survey additions):
+Per-slot counters. The PG037 agent metric list (doc p.11) IS the per-slot output
+contract; the survey additions extend it:
 
-| Counter | Definition |
-|---|---|
-| write/read byte count | beats x bytes/beat |
-| write/read transaction count | completed transactions |
-| write/read latency sum | sum of per-transaction latency |
-| latency min / max | per-slot extrema |
-| outstanding max | peak in-flight (DOTQ depth) |
+| Counter | Definition | Source |
+|---|---|---|
+| write/read transaction count | completed transactions (PG037: requests; we count completions) | PG037 |
+| write/read byte count | beats x bytes/beat (throughput numerator) | PG037 |
+| write/read latency sum | sum of per-transaction latency | PG037 |
+| latency min / max | per-slot extrema (`min` = the min-observed reference, Section 5) | PG037 |
+| slave write idle cycles | cycles with `WVALID && !WREADY` (slave slow to accept write data) | PG037 |
+| master read idle cycles | cycles with `RVALID && !RREADY` (master slow to accept read data) | PG037 |
+| outstanding max | peak in-flight per slot (DOTQ depth) | survey |
+| latency histogram | per-`[LOW,HIGH)` bin transaction count (PG037 Range Incrementer) | PG037 |
+| per-id breakdown | latency sum/count keyed by AXI id (PG037 ID Filter) | PG037 |
+
+PG037 AXI4-Stream metrics (transfer/data/position/null byte, packet, idle) are
+**not applicable** -- the fabric has no AXI4-Stream interface. System-level
+throughput / interconnect latency are **derived** post-hoc (byte count / window
+cycles; per-router/link sums), not stored counters.
 
 - Latency per transaction = completion cycle - address-accept cycle, where the
   end event differs by direction: **read** ends at RLAST (`RLAST & RVALID &
   RREADY`); **write** ends at the **B response** (`BVALID & BREADY`), NOT at WLAST
   -- a write transaction is not complete until its response returns, so measuring
   to WLAST (write-data done) would understate write latency by the
-  data-to-response gap. Start event = address accept (`AWVALID&AWREADY` for write,
-  `ARVALID&ARREADY` for read). Correlation
+  data-to-response gap. **This write-end choice intentionally diverges from the
+  PG037 default** (PG037 measures write latency to first/last write data; it does
+  not offer a B-response endpoint). We take the transaction-completion semantics
+  (matching AXI-REALM) over PG037 parity here; the divergence is noted in
+  `docs/performance-probe.md`. Start event = address accept (`AWVALID&AWREADY` for
+  write, `ARVALID&ARREADY` for read). Correlation
   must handle MULTIPLE outstanding transactions with the SAME AXI id: a single
   `start[id]` is wrong (a second same-id issue overwrites the first). Use a
   per-(id, direction) FIFO of issue cycles; on completion, pop the FRONT of that
@@ -73,11 +87,21 @@ Per-slot counters (PG037's six + survey additions):
 - A global clock counter provides the cycle stamp.
 - NoC router/link counters (Ciordas concept; not AXI-level, so not in PG037):
   per-router flit count, output/input FIFO occupancy (sum + max), and link
-  backpressure stall cycles defined as `valid && !credit_available` (NoC
-  credit/flit terminology -- NOT AXI ready/valid).
+  backpressure stall cycles. **Stall is credit-counter-based, NOT a `!credit`
+  level read**: the link credit signal is a single-cycle *pulse* returned when a
+  downstream buffer slot frees (`tb_top.sv:193,198 // pulse`), so `!credit` is the
+  normal idle state and a level test would count a stall almost every cycle. The
+  SV link monitor maintains its own credit counter per link direction: seed =
+  downstream VC buffer depth; `+1` on each credit pulse; `-1` on each flit sent
+  (`valid && accepted`). A **stall cycle** = `valid && credit_count == 0` (a flit
+  is offered but no credit remains). NoC credit/flit terminology -- NOT AXI
+  ready/valid.
 - Sample window: single-run, default the whole scenario is one window. Optional
   `+perf_start`/`+perf_end` plusargs gate the measured window (warmup/drain),
-  with no second pass.
+  with no second pass. **Window inclusion rule**: a transaction counts in the
+  window iff its **completion** cycle falls in `[perf_start, perf_end)`
+  (address-accept may precede the window). Byte/flit/stall/occupancy counters
+  accumulate only on cycles within the window.
 
 ### 3.1 PG037 block mapping
 
@@ -139,28 +163,97 @@ router/NI occupancy lives in c_model C++ objects with no SV signal, so it must b
 sampled in C. The split is forced by where each datum exists, not preference.
 
 Non-intrusive: SV monitors only read wires; C sampling only reads const getters.
-An A/B cycle-equality check (as in `test_router_loopback.cpp`'s existing
-non-intrusive test) gates this.
+**A/B gate (normative)**: a perf-enabled build and a perf-disabled build of the
+same scenario must produce (a) identical scoreboard pass/fail and (b) an identical
+per-transaction completion-cycle sequence. Any difference means the monitor
+perturbed the DUT and is a blocker. (This extends the cycle-equality idea of
+`test_router_loopback.cpp`'s existing non-intrusive test to the co-sim.)
 
 ## 5. Single run, no zero-load
 
-- Report measured per-transaction latency (min/mean/max) + the counters above.
-- No isolated Pass-1. The `min observed latency` field is the same run's minimum;
-  it is labelled "min observed", not "zero_load".
+- No isolated Pass-1, no analytical `zero_load`. The best-case reference is the
+  **minimum observed latency** of the same run -- a real measurement of the
+  least-congested transaction -- labelled "min observed", never "zero_load".
+- Report latency at **two grains** (user decision 2026-06-18):
+  1. **per transaction** -- each completed transaction's measured latency, with
+     its AXI id, direction, and slot (the raw rows; lets the reader see the
+     distribution and outliers).
+  2. **per signature class** -- transactions grouped by `(op, len, size, src->dst
+     slot)`; report min / mean / max per class. The **per-class min observed** is
+     that class's best-case reference line.
 - `queueing` (measured - ideal) is dropped unless an external nominal is provided
-  and clearly labelled.
+  and clearly labelled (not the default output).
+
+## 5.1 perf.json schema (normative)
+
+One `perf.json` per scenario. All counts/sums/cycles are unsigned 64-bit. Keys are
+fixed; an absent optional array is `[]`, never omitted. The `slots[]` fields ARE
+the PG037 agent metric list (Section 3); `transactions[]` / `signatures[]` are the
+two-grain latency view (Section 5); `routers[]` / `links[]` are the NoC additions.
+
+```json
+{
+  "schema_version": 1,
+  "scenario": "AX4-BAS-003",
+  "window": { "start_cyc": 0, "end_cyc": 1234, "total_cyc": 1234 },
+  "slots": [
+    {
+      "name": "node0.manager", "role": "manager",
+      "write_txn_count": 1, "read_txn_count": 1,
+      "write_byte_count": 64, "read_byte_count": 64,
+      "write_latency_sum": 42, "read_latency_sum": 30,
+      "write_latency_min": 42, "write_latency_max": 42,
+      "read_latency_min": 30, "read_latency_max": 30,
+      "slave_write_idle_cyc": 3, "master_read_idle_cyc": 0,
+      "outstanding_max": 1,
+      "latency_histogram": [ { "low": 0, "high": 32, "count": 1 },
+                             { "low": 32, "high": 64, "count": 1 } ],
+      "per_id": [ { "id": 3, "dir": "write", "count": 1, "latency_sum": 42 } ]
+    }
+  ],
+  "transactions": [
+    { "slot": "node0.manager", "id": 3, "dir": "write",
+      "accept_cyc": 10, "complete_cyc": 52, "latency": 42, "bytes": 64 }
+  ],
+  "signatures": [
+    { "op": "write", "len": 1, "size": 3,
+      "src": "node0.manager", "dst": "node1.subordinate",
+      "count": 1, "latency_min": 42, "latency_mean": 42, "latency_max": 42 }
+  ],
+  "routers": [
+    { "name": "R(0,0)", "flit_count": 8,
+      "in_fifo_occ_sum": 12, "in_fifo_occ_max": 2,
+      "out_fifo_occ_sum": 10, "out_fifo_occ_max": 2 }
+  ],
+  "links": [
+    { "name": "req_0to1", "flit_count": 4, "stall_cyc": 1 }
+  ]
+}
+```
+
+- `role` is `manager` (master->NMU edge) or `subordinate` (NSU->slave edge).
+- `dir` is `write` or `read`. Histogram bin edges (`low`/`high`) are config-driven;
+  default ladder `[0,16) [16,32) [32,64) [64,128) [128,256) [256,inf)` cycles
+  (covers the observed single-flow latency band; override in config if a scenario
+  needs finer resolution).
+- `latency_min` per slot is the **min observed** reference (Section 5), not a
+  zero-load value.
+- The per-id correlation FIFO has finite capacity (max outstanding per id);
+  overflow is asserted as a measurement error, never silently dropped.
 
 ## 6. Co-sim integration points
 
 - `cosim/sv/axi_perf_monitor.sv` (new): passive AXI slot monitor; instantiate on
   each AXI interface in `tb_top.sv` -- the manager edges (`master -> NMU`) and the
-  subordinate edges (`NSU -> slave`), per node. Counts byte/transaction/latency
-  per slot, per-id issue-cycle FIFO for same-id correctness. No production
-  `AxiMaster` change (the `on_*_issued`-forwarding the first draft needed is
-  dropped -- the SV monitor reads the wires).
+  subordinate edges (`NSU -> slave`), per node. Counts byte / transaction /
+  latency / the two AXI idle-cycle metrics (Section 3) per slot, with a per-id
+  issue-cycle FIFO for same-id correctness. No production `AxiMaster` change (the
+  `on_*_issued`-forwarding the first draft needed is dropped -- the SV monitor
+  reads the wires).
 - `cosim/sv/flit_link_perf_monitor.sv` (new): passive counter on the inter-router
-  link wires (`tb_top.sv link_*`): flit count, and stall = `valid && !credit`
-  (NoC credit/flit terminology, NOT AXI ready). One per link direction.
+  link wires (`tb_top.sv link_*`): flit count, and credit-counter-based stall
+  (`valid && credit_count == 0`; credit is a pulse -- see Section 3). One per link
+  direction.
 - `RouterShellAdapter`: add `rsp_router()` accessor (only `req_router()` exists;
   the `rsp_router_` member is there). `Router::output_fifo_size`/`input_fifo_size`
   already exist.
@@ -193,7 +286,7 @@ reuses their logic and they back unrelated c_model unit tests.
 | `test_router_loopback.cpp` `ObserversAreNonIntrusive` | **survive** -- the non-intrusive A/B gate model (Section 4) |
 | two-pass harness, `characterize_signature`, per-signature `zero_load` | **delete** (lives entirely in `test_perf_probe.cpp`) |
 | `test_perf_probe.cpp` + `make perf` target | **delete** -- the superseded two-pass scenario suite |
-| `PerfReport` `zero_load_cyc` / `queueing_cyc` / `slave_remainder` fields | **delete** -- reframe to counters/measured; if `perf_collector.hpp` reuses the struct, keep the reframed struct, else delete `perf_report.hpp` with its sole consumer |
+| `PerfReport` (`perf_report.hpp`) + `test_perf_report.cpp` | **delete entirely** -- its core data model IS the deleted two-pass model (`zero_load_cyc` / `queueing_cyc` / `slave_remainder`); both reviewers flagged that preserving it carries the deleted concept forward. The new readout is a fresh counter-oriented struct in `perf_collector.hpp` matching the Section 5.1 schema |
 | `docs/performance-probe.md` | **rewrite** for single-run in-fabric PMU (`make run-tb-top`, `perf.json`) |
 | `docs/superpowers/plans/2026-06-17-perf-probe-rework.md` (untracked, never executed) | **delete** -- orphan plan for an abandoned approach |
 
@@ -209,13 +302,30 @@ reuses their logic and they back unrelated c_model unit tests.
 | `c_model/include/cosim/nmu_shell_adapter.hpp` / `nsu_shell_adapter.hpp` | add accessors to reach `Rob` / `AxiMasterPort` occupancy |
 | `cosim/sv/tb_top.sv` | instantiate the AXI slot + link SV monitors; import + call the sample/dump DPI |
 | `cosim/verilator/Makefile` | `run-tb-top` emits `output/<scenario>/perf.json` |
-| `c_model/tests/integration/test_perf_probe.cpp` | **delete** -- two-pass `zero_load` scenario suite (incl. `characterize_signature`) |
-| root `Makefile` `perf` target (lines ~106, ~122) | **delete** -- `make perf` and its help line |
-| `c_model/tests/common/perf_report.hpp` | strip `zero_load_cyc` / `queueing_cyc` / `slave_remainder`; delete the file if `perf_collector.hpp` does not reuse it |
-| `c_model/tests/common/test_perf_report.cpp` | update or delete to match `perf_report.hpp` |
+| `c_model/tests/integration/test_perf_probe.cpp` | **delete** -- two-pass `zero_load` scenario suite (incl. `characterize_signature`, `test_perf_probe.cpp:719-740`) |
+| root `Makefile` | **delete** the `perf` target (`Makefile:122` + the `PERF_DIR`/`PERF_ENV`/`PERF_FILTER`/`PERF_CMD` vars ~105-120) AND remove `perf` from the `.PHONY` list (`Makefile:20`). (There is no separate "help line" -- earlier draft was wrong.) |
+| `c_model/tests/common/perf_report.hpp` | **delete** -- replaced by `perf_collector.hpp` (Section 7) |
+| `c_model/tests/common/test_perf_report.cpp` | **delete** -- validates the removed `zero_load`/`queueing`/`slave_remainder` concepts |
+| `c_model/tests/common/CMakeLists.txt` | remove `add_cmodel_test(test_perf_report)` (`CMakeLists.txt:38-40`) |
+| `c_model/tests/integration/CMakeLists.txt` | remove the `test_perf_probe` target (`CMakeLists.txt:48-58`, incl. its POST_BUILD config copy) |
 | `docs/performance-probe.md` | rewrite for the single-run in-fabric PMU |
 | `docs/superpowers/plans/2026-06-17-perf-probe-rework.md` | **delete** -- orphan plan (never executed) |
-| `c_model/tests/integration/CMakeLists.txt` (and any `test_perf_probe` registration) | remove the `test_perf_probe` target |
+
+## 8.1 Validation matrix
+
+Every normative clause has a check (reviewer requirement). The latency-correlation
+and stall counters carry the most risk, so they are tested directly.
+
+| Check | What it proves |
+|---|---|
+| same-id, multiple outstanding | per-(id,dir) FIFO pops in issue order; a 2nd same-id issue does not overwrite the 1st |
+| mixed read+write, same AXI id | read and write use separate `(id, dir)` FIFOs; no cross-direction mismatch |
+| W-channel with no W-id | write-data latency attributes to the AW id in order |
+| per-id FIFO overflow | exceeding max-outstanding-per-id fires the measurement-error assert (not a silent drop) |
+| credit-stall sanity | a congested link reports `stall_cyc > 0`; an uncongested single-flow run reports `stall_cyc == 0` (guards the C2 pulse/credit-counter fix) |
+| non-intrusive A/B | perf-enabled vs perf-disabled build: identical scoreboard result + identical per-txn completion cycles (Section 4) |
+| schema conformance | emitted `perf.json` parses and carries every required key of Section 5.1 |
+| min-observed labelling | the best-case field is named `latency_min` / "min observed", never `zero_load` |
 
 ## 9. References
 
