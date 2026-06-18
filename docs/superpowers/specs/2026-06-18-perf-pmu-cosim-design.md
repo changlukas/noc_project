@@ -92,8 +92,12 @@ throughput/backpressure counters.
   id order.
 - A global clock counter provides the cycle stamp.
 - NoC router/link counters (Ciordas concept; not AXI-level, so not in PG037):
-  per-router flit count, output/input FIFO occupancy (sum + max), and link
-  backpressure stall cycles. **Stall is credit-counter-based, NOT a `!credit`
+  per-router input/output FIFO occupancy (max), and link flit count + link
+  backpressure stall cycles. Router **flit throughput is not counted at the
+  router** (the c_model `Router` exposes occupancy getters but no flit counter,
+  and adding one is a production change -- non-intrusive forbids it); link flit
+  count (SV, on the wire) carries throughput instead. **Stall is
+  credit-counter-based, NOT a `!credit`
   level read**: the link credit signal is a single-cycle *pulse* returned when a
   downstream buffer slot frees (`tb_top.sv:193,198 // pulse`), so `!credit` is the
   normal idle state and a level test would count a stall almost every cycle. The
@@ -209,7 +213,8 @@ home for end-to-end latency (raw + aggregates); `noc` = router/link.
 | `latency.transactions[]` | raw per-txn end-to-end rows (the only raw source) | manager slot |
 | `latency.by_signature[]` | min/mean/max per `(op,len,size,src,dst)` -- aggregate of the rows; `min` = best-case ref | per signature |
 | `latency.histogram[]` | per-`[low,high)` bin count -- aggregate of the rows | whole run |
-| `noc.routers[]` / `noc.links[]` | flit count + occupancy max; link credit-stall | per router/link |
+| `noc.routers[]` | input/output FIFO occupancy max (no flit count -- not available) | per router |
+| `noc.links[]` | flit count + credit-stall cycles | per link |
 
 ```json
 {
@@ -257,10 +262,10 @@ home for end-to-end latency (raw + aggregates); `noc` = router/link.
   },
   "noc": {
     "routers": [
-      { "name": "req.R(0,0)", "flit_count": 8, "in_fifo_occ_max": 2, "out_fifo_occ_max": 2 },
-      { "name": "req.R(1,0)", "flit_count": 8, "in_fifo_occ_max": 2, "out_fifo_occ_max": 2 },
-      { "name": "rsp.R(1,0)", "flit_count": 6, "in_fifo_occ_max": 1, "out_fifo_occ_max": 2 },
-      { "name": "rsp.R(0,0)", "flit_count": 6, "in_fifo_occ_max": 2, "out_fifo_occ_max": 1 }
+      { "name": "req.R(0,0)", "in_fifo_occ_max": 2, "out_fifo_occ_max": 2 },
+      { "name": "req.R(1,0)", "in_fifo_occ_max": 2, "out_fifo_occ_max": 2 },
+      { "name": "rsp.R(1,0)", "in_fifo_occ_max": 1, "out_fifo_occ_max": 2 },
+      { "name": "rsp.R(0,0)", "in_fifo_occ_max": 2, "out_fifo_occ_max": 1 }
     ],
     "links": [
       { "name": "req_0to1", "flit_count": 4, "stall_cyc": 1 },
@@ -301,11 +306,11 @@ JSON-only, so the CLI never floods on large runs):
     histogram (cyc): [32,64)=2
     slave service @node1.subordinate: write 14  read 12
   NoC
-    router      flit in_occ_max out_occ_max     link      flit stall
-    req.R(0,0)   8       2          2            req_0to1   4    1
-    req.R(1,0)   8       2          2            rsp_1to0   4    0
-    rsp.R(1,0)   6       1          2
-    rsp.R(0,0)   6       2          1
+    router      in_occ_max out_occ_max     link      flit stall
+    req.R(0,0)      2          2            req_0to1   4    1
+    req.R(1,0)      2          2            rsp_1to0   4    0
+    rsp.R(1,0)      1          2
+    rsp.R(0,0)      2          1
   2 transactions -> cosim/verilator/output/AX4-BAS-003/perf.json
 ```
 
