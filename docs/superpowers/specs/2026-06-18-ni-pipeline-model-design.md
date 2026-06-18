@@ -1,8 +1,9 @@
 # NMU/NSU pipeline model (NI microarchitecture)
 
 Date: 2026-06-18
-Status: Draft rev 3 (Codex round 2 clean: stage_occupancy introspection API
-named, rob citation fixed; all 6 round-1 items resolved)
+Status: Draft rev 4 (plan-review design pass: register-parked stages + inter-stage
+token model + arbiter final-stage + ROB Enabled staging contract + ROB-default
+resolved; §5.0-5.3, §6.1)
 
 Replace the 0-cycle functional NMU/NSU with a real, staged-across-ticks pipeline
 model that reflects the intended NI RTL microarchitecture. The c_model becomes the
@@ -69,15 +70,72 @@ columns = a pipeline register boundary.
 
 ## 5. Mechanism
 
-The current submodules drain multiple items per tick (while loops, e.g.
-`axi_slave_port.hpp:151`, `depacketize.hpp:74`). This is replaced by bounded
-one-token-per-stage advance, mirroring the router.
+### 5.0 Register-parked stages, not a push call-chain (the router model)
+
+Today an NI beat traverses several blocks in **one push call-chain within a
+single tick**: `AxiSlavePort::forward_aw → Rob::push_aw → Packetize::push_aw_with_meta
+→ arbiter push_flit` (`axi_slave_port.hpp:151`, `rob.hpp:181`, `packetize.hpp:110`);
+NSU response is symmetric (`axi_master_port.hpp:159 → packetize.hpp:32`). The
+blocks communicate by **calling the next block's push**, and side-effects commit
+only on downstream success (`w_meta_fifo_` `packetize.hpp:111`; MetaBuffer
+`nsu/packetize.hpp:52/78`). This is why the path collapses to 0 cycles.
+
+The router does the opposite and is the model: stages communicate **only through
+shared stage-register/FIFO data members**, never by calling the next stage.
+Stage 1 writes `input_fifo_`; Stage 2 reads `input_fifo_`, writes `output_fifo_`;
+Stage 3 reads `output_fifo_`, writes the link (`router.hpp:157-163`, `:199-260`).
+A `Flit` parked in a register IS the inter-stage hand-off; reverse-order tick
+moves it exactly one register per tick.
+
+**The refactor:** convert each NI block from "transform-and-call-next-push" into a
+stage that **reads its input stage register, transforms, writes its output stage
+register**. No block calls the next block's push. The path `tick()` drives the
+reverse-order advance.
+
+### 5.1 Inter-stage tokens
+
+The router's `Flit` is self-describing. NI stage transforms compute metadata
+(dst, local_addr, rob_idx) that must **ride with the beat** to the next stage, so
+each stage register holds a `{beat + computed meta}` token. Token per boundary:
+
+| Boundary | Token parked in the register |
+|---|---|
+| NMU req S1→S2 | `AdmittedReq{ Aw\|Ar beat, dst_id, local_addr, rob_req, rob_idx }` (Rob admit computed these); W carries the AW-inherited meta |
+| NMU req S2→S3 | built `Flit` (Packetize output; self-describing) |
+| NMU rsp S1→S2 | `{ B\|R beat + rsp meta }` from Depacketize |
+| NMU rsp S2→S3 | reordered `{ B\|R beat }` (Rob Re-Ordering output) |
+| NSU req S1→S2 | decoded `{ Aw\|W\|Ar beat }` (MetaBuffer snapshot done atomically in S1) |
+| NSU rsp S1→S2 | accepted `{ B\|R beat }`; S2→S3 = built `Flit` (Packetize, MetaBuffer read) |
+
+**Side-effect commit moves with the stage.** `w_meta_fifo_` mutation and MetaBuffer
+`commit_*` move to the stage that performs the actual NoC `push_flit` (the
+arbiter-feeding stage), so "commit on downstream success" still holds — success is
+now "accepted into the next stage register / granted to NoC", not a deep call
+return.
+
+### 5.2 Arbiter as the final stage (no same-tick escape)
+
+The `WormholeArbiter`/`VcArbiter` are single-grant-per-tick but their `push_flit`
+enqueues immediately and their `tick()` pushes downstream the same tick
+(`wormhole_arbiter.hpp:136/208`, `vc_arbiter.hpp:232`). To stop a same-tick
+Packetize→NoC escape: Packetize writes the **S2→S3 stage register**, NOT the
+arbiter input directly; the arbiter consumes from that register during the
+reverse-order tick and drives NoC. The arbiter pending queues are the final-stage
+buffer behind that one registered boundary.
+
+### 5.3 Stage register + bounded advance
 
 - **Stage register.** Each stage owns one **stage register** per AXI channel
-  holding ≤1 in-flight beat/flit (the router's `landing_`/`output_fifo_` analogue,
+  holding ≤1 token (the router's `landing_`/`output_fifo_` analogue,
   `router.hpp:157/163`). A stage advances **at most one beat per channel per tick** —
-  no drain-until-empty loop. The while-loop submodules are restructured into this
-  bounded form.
+  the while-loop drains (`axi_slave_port.hpp:151`, `axi_master_port.hpp:138`,
+  `depacketize.hpp` `while(true)`) are replaced by this bounded form.
+- **Port response-before-request ordering preserved.** `AxiSlavePort::tick()`
+  drains responses before forwarding requests (`axi_slave_port.hpp:79`); `AxiMasterPort`
+  forwards responses before draining requests (`axi_master_port.hpp:83`). Since req
+  and rsp are now separate staged paths, each path keeps its own reverse-order
+  advance; the shared port object's two directions advance independently and retain
+  their relative ordering within the path tick.
 - **Reverse-order tick** (mirror `router.hpp:199`): each NMU/NSU `tick()` processes
   stages S_n → … → S_1, so one beat advances exactly one stage per tick and the
   downstream stage frees its register before the upstream fills it (single-tick
@@ -127,8 +185,31 @@ independently, as today.
   (`rob.hpp:289/353`); otherwise request-side stalls never release. So the NMU-rsp
   passthrough still calls the counter-retire — it does decrement bookkeeping, just
   no buffering.
-- Default = ROB (`Enabled`) for the golden-reference latency; ROBLESS selectable
-  per channel.
+- **Config default stays `Disabled` (= ROBLESS), as today** (`NmuConfig.read_rob_mode`/
+  `write_rob_mode` already default `Disabled`, `nmu.hpp:51-52`). Decision: do NOT
+  change the production default (avoids perturbing existing behavior/tests); ROB
+  (`Enabled`) is opt-in per channel. (Supersedes the earlier "default ROB" wording —
+  the spec aligns to the code default to resolve the contradiction.)
+
+### 6.1 ROB (Enabled) staging contract — one-beat release timing
+
+The current Enabled `pop_b`/`pop_r` chain-flush commits all ready heads for an id
+into `committed_*_queue_` and frees slots + fires `notify_drained` in that flush
+(`rob.hpp:272-284/327-348/281/345`). Limiting only the *output* to one beat/tick
+would free slots and release request-side stalls **early** (Codex R3). Contract:
+
+- The reorder **decision/commit** (which beats are now in-order) may compute a ready
+  run, but **slot-free, `notify_drained`, and the per-id outstanding retire fire when
+  a beat actually leaves the Re-Ordering stage register toward S3 (one beat/tick)** —
+  not when it enters `committed_*_queue_`.
+- `committed_*_queue_` becomes the reorder-storage occupancy behind the stage
+  register; it drains one beat/tick into the rsp output path.
+- Net: a request-side stall releases only when its response has actually advanced
+  past the staged Re-Ordering output, keeping req/rsp timing consistent.
+
+This is a real `Rob` internal change (not just bounding the pop caller); it is
+scoped to the NMU rsp staging task and must preserve Enabled-mode reorder
+correctness (out-of-order responses still buffer until their predecessor leaves).
 
 ## 7. Scope and consequences
 
