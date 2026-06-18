@@ -154,16 +154,17 @@ class AxiMasterPort {
             if (auto a = depkt_.pop_ar()) ar_q_.push_back(*a);
         }
     }
+    // S1 advance: ≤1 beat/channel/tick into the Packetize S1 stage register.
+    // Replaces the while-loop drain (spec §5.3: one beat per stage per tick).
+    // Packetize::push_b/r() return false when S1 is full (backpressure).
     void forward_b_to_packetizer_() {
-        while (!b_q_.empty()) {
-            if (!pkt_.push_b(b_q_.front())) break;
-            b_q_.pop_front();
+        if (!b_q_.empty()) {
+            if (pkt_.push_b(b_q_.front())) b_q_.pop_front();
         }
     }
     void forward_r_to_packetizer_() {
-        while (!r_q_.empty()) {
-            if (!pkt_.push_r(r_q_.front())) break;
-            r_q_.pop_front();
+        if (!r_q_.empty()) {
+            if (pkt_.push_r(r_q_.front())) r_q_.pop_front();
         }
     }
 

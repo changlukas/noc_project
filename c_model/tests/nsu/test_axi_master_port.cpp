@@ -150,6 +150,10 @@ TEST(NsuAxiMasterPort, BBackpressure_FullThenDrainThenAcceptOne) {
 
 // -------------------------------------------------------------------------
 // 3. Queue boundary: failed push_b retried 3 times must not duplicate.
+// Tick-cardinality update (spec §5.3): ≤1 beat/channel/tick. Draining the
+// full queue (depth + 1 retry) requires depth+1 ticks total. The invariant
+// being tested is that retry_id 0xCD appears exactly once in the output —
+// independent of how many ticks are needed to drain the queue.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, BBoundary_FailedPushDoesNotDuplicateOnRetry) {
     SCENARIO("NSU AxiMasterPort: failed push_b retries do not silently land; retry counts as one");
@@ -162,11 +166,15 @@ TEST(NsuAxiMasterPort, BBoundary_FailedPushDoesNotDuplicateOnRetry) {
     EXPECT_FALSE(fx.port.push_b(retry));
     EXPECT_FALSE(fx.port.push_b(retry));
     EXPECT_EQ(fx.port.b_q_size(), fx.params.b_queue_depth);
-    fx.ch.response.b_capacity = 1;
-    fx.port.tick();
-    EXPECT_TRUE(fx.port.push_b(retry));
+    // Open capacity, drain one slot, enqueue retry.
     fx.ch.response.b_capacity = 64;
     fx.port.tick();
+    EXPECT_TRUE(fx.port.push_b(retry));
+    // Drain all remaining beats (b_queue_depth beats: depth-1 initial + retry).
+    // Each tick advances ≤1; total ticks needed = remaining b_q_ size.
+    const std::size_t remaining = fx.port.b_q_size();
+    for (std::size_t t = 0; t < remaining; ++t) fx.port.tick();
+    // Retry must appear exactly once; no duplication from the 3 failed pushes.
     std::size_t retry_id_count = 0;
     for (const auto& b : fx.ch.response.b)
         if (b.id == 0xCD) ++retry_id_count;
@@ -325,22 +333,31 @@ TEST(NsuAxiMasterPort, AwArPassthroughBitForBit) {
 // -------------------------------------------------------------------------
 // 10. Independent B and R backpressure on the response side: B packetizer
 //     full while R packetizer still draining — R progresses, B holds.
+// Tick-cardinality update (spec §5.3): AxiMasterPort advances ≤1 beat per
+// channel per tick. 4 R beats require 4 ticks to drain; B stays at 0
+// throughout because b_capacity=0 blocks all B forwards.
 // -------------------------------------------------------------------------
 TEST(NsuAxiMasterPort, IndependentBRBackpressure_RProgressesWhileBHolds) {
     SCENARIO(
         "NSU AxiMasterPort: B-side packetizer full does not block R-side draining (channels "
-        "independent)");
+        "independent); ≤1 beat/channel/tick so 4 R beats need 4 ticks");
     PortFixture fx;
     fx.set_loopback_caps(32, 32, 32, /*b*/ 0, /*r*/ 32);
     for (uint8_t i = 0; i < 4; ++i) ASSERT_TRUE(fx.port.push_b(make_b(i, axi::Resp::OKAY, 0)));
     for (uint8_t i = 0; i < 4; ++i)
         ASSERT_TRUE(fx.port.push_r(make_r(i, 0x40 + i, axi::Resp::OKAY, i == 3, 0)));
-    fx.port.tick();
-    EXPECT_EQ(fx.ch.response.r.size(), 4u);  // R drained to packetizer
-    EXPECT_EQ(fx.ch.response.b.size(), 0u);  // B held: packetizer rejected all
-    EXPECT_EQ(fx.port.b_q_size(), 4u);
-    EXPECT_EQ(fx.port.r_q_size(), 0u);
+    // 4 ticks: one R drains per tick; B held throughout (b_capacity=0).
+    for (std::size_t t = 0; t < 4; ++t) {
+        fx.port.tick();
+        EXPECT_EQ(fx.ch.response.r.size(), t + 1)
+            << "R should drain one per tick (tick " << t << ")";
+        EXPECT_EQ(fx.ch.response.b.size(), 0u)
+            << "B must stay held (b_capacity=0, tick " << t << ")";
+    }
+    EXPECT_EQ(fx.port.b_q_size(), 4u);  // all 4 B still queued
+    EXPECT_EQ(fx.port.r_q_size(), 0u);  // all 4 R drained
     // Open the B packetizer one slot at a time; each tick should drain one.
+    fx.ch.response.b_capacity = 0;
     for (std::size_t i = 0; i < 4; ++i) {
         fx.ch.response.b_capacity = i + 1;
         fx.port.tick();

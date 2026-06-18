@@ -24,6 +24,7 @@
 //
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
+#include "ni_flit_constants.h"
 #include "nmu/ni_stage.hpp"
 #include "noc/noc_req_in.hpp"
 #include "noc/noc_rsp_out.hpp"
@@ -75,7 +76,18 @@ class Nsu {
         if (path == NiPath::NsuReq && stage == 0) {
             return depacketize_.s1_occupancy(axi_ch);
         }
-        return 0;  // other paths filled in later tasks
+        if (path == NiPath::NsuRsp) {
+            // NsuRsp has 3 stages (spec §4):
+            //   S0 = S1 reg in Packetize (accepted B/R beat, pre-transform)
+            //   S1 = S2→S3 boundary (WormholeArbiter pending queue)
+            //   S2 = VcArbiter pending queue (toward NoC)
+            // stage_occupancy(NsuRsp, 0, axi_ch) probes the S1 Packetize reg.
+            if (stage == 0) {
+                if (axi_ch == ni::AXI_CH_B) return packetize_.s1_b_occupancy();
+                if (axi_ch == ni::AXI_CH_R) return packetize_.s1_r_occupancy();
+            }
+        }
+        return 0;
     }
 
   private:
@@ -126,14 +138,32 @@ inline Nsu::Nsu(NsuConfig cfg, noc::NocReqIn& upstream_req, noc::NocRspOut& down
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {
-    // Reverse-order tick for the req path (spec §5.3): S2 drains from S1
-    // registers before S1 refills them, so a beat advances exactly one stage
-    // per tick. This mirrors the router reverse-order tick (router.hpp:199).
-    // Response path (wormhole/vc_arbiter) is unchanged.
-    axi_master_port_.tick();  // S2: consume from S1 registers, forward B/R
-    depacketize_.tick();      // S1: decode new flit into S1 registers
-    wormhole_arbiter_.tick();
-    vc_arbiter_.tick();
+    // Reverse-order tick for both req and rsp paths (spec §5.3).
+    // A beat advances exactly one stage per tick; later stages drain before
+    // earlier stages fill, so no double-advance occurs.
+    //
+    // RSP path (S3 → S2 → S1, reverse order):
+    //   S3: wormhole_arbiter_ drains from its pending_ (= S2→S3 register) to
+    //       vc_arbiter_, which drains to NoC. Draining before Packetize fills
+    //       ensures the slot is free for this tick's S2 output.
+    //   S2: packetize_.tick() reads s1_b_/s1_r_ stage registers, builds
+    //       Flits, pushes to wormhole input (the S2→S3 register boundary).
+    //       Because wormhole_.tick() already ran, the flits pushed here
+    //       cannot escape to NoC until the next tick — the arbiter-final-stage
+    //       property (spec §5.2: no same-tick Packetize→NoC escape).
+    //   S1: axi_master_port_ forward_b/r_to_packetizer_() takes ≤1 beat from
+    //       b_q_/r_q_ and calls packetize_.push_b/r() (writes s1_b_/s1_r_).
+    //       Packetize_.tick() already drained s1 this tick, so no overwrite.
+    //
+    // REQ path (S2 → S1, reverse order, unchanged from Task 3):
+    //   S2: axi_master_port_ drain_*_from_depacketizer_ consumes from
+    //       depacketize_.s1_* stage registers.
+    //   S1: depacketize_.tick() decodes a new flit into s1_* registers.
+    wormhole_arbiter_.tick();  // RSP S3a: drain S2→S3 boundary to VcArbiter
+    vc_arbiter_.tick();        // RSP S3b: drain VcArbiter pending to NoC
+    packetize_.tick();         // RSP S2: read S1 regs, push to S2→S3 boundary
+    axi_master_port_.tick();   // RSP S1 + REQ S2: bounded B/R accept + req drain
+    depacketize_.tick();       // REQ S1: decode flit into S1 stage registers
 }
 
 // -------------------------------------------------------------------------

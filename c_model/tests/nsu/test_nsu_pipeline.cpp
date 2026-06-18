@@ -1,11 +1,10 @@
-// NSU request path register-parked staging test.
+// NSU pipeline staging tests.
 //
-// Spec §5.0/§5.3: Depacketize decodes <=1 req flit/channel into S1
-// PipelineStage registers; AxiMasterPort consumes <=1 beat/channel from S1
-// (S2). Nsu::tick() req portion runs reverse-order: S2 advance then S1.
-//
-// ReqLatencyIsTwoStages: inject one AR flit, tick once -> S1 holds AR (not
-// yet at slave); tick again -> AR drivable at slave port.
+// Covers both paths:
+//   Req path (spec §5.0/§5.3, Task 3): Depacketize S1 + AxiMasterPort S2 = 2 stages.
+//   Rsp path (spec §5.0/§5.1/§5.2, Task 4): AxiMasterPort S1 + Packetize S2 +
+//     WormholeArbiter+VcArbiter S3 = 3 stages; arbiter-final-stage pattern
+//     prevents same-tick Packetize→NoC escape.
 #include "axi/types.hpp"
 #include "common/scenario.hpp"
 #include "flit.hpp"
@@ -54,8 +53,42 @@ static void inject_single_ar_flit(NsuStandalone& nsu, uint8_t id, uint64_t addr)
     nsu.inject_req_flit(f);
 }
 
+// Seed the MetaBuffer for a B response with the given AXI id.
+// Injects an AW flit and ticks once so Depacketize::tick() snapshots the
+// MetaBuffer entry (src_id=0x10, rob_req=0, rob_idx=0). The AW beat may
+// land in AxiMasterPort's aw_q on subsequent ticks; it does not affect B.
+static void seed_meta_for_b(NsuStandalone& nsu, uint8_t id) {
+    ni::cmodel::Flit f;
+    f.set_header_field("axi_ch", ni::AXI_CH_AW);
+    f.set_header_field("src_id", 0x10);  // requester → stored as MetaEntry.src_id
+    f.set_header_field("dst_id", 0x00);
+    f.set_header_field("last", 0);  // AW opens wormhole (last=0)
+    f.set_header_field("rob_req", 0);
+    f.set_header_field("rob_idx", 0);
+    f.set_header_field("vc_id", 0);
+    f.set_payload_field("AW", "awid", id);
+    f.set_payload_field("AW", "awaddr", 0x1000);
+    f.set_payload_field("AW", "awlen", 0);
+    f.set_payload_field("AW", "awsize", 2);
+    f.set_payload_field("AW", "awburst", static_cast<uint64_t>(axi::Burst::INCR));
+    nsu.inject_req_flit(f);
+    nsu.tick();  // Depacketize runs: AW → s1_aw_ + MetaBuffer.snapshot_write(id)
+}
+
+// Build a B beat for a given AXI id.
+static axi::BBeat make_b_beat(uint8_t id) {
+    axi::BBeat b{};
+    b.id = id;
+    b.resp = axi::Resp::OKAY;
+    b.user = 0;
+    return b;
+}
+
 }  // namespace
 
+// -------------------------------------------------------------------------
+// Req path (Task 3): 2-stage latency
+// -------------------------------------------------------------------------
 // After one tick: AR flit decoded into S1 register (Depacketize stage).
 // stage_occupancy(NsuReq, 0, AXI_CH_AR) == 1; slave port cannot pop_ar yet.
 // After second tick: S2 advance moves AR from S1 to AxiMasterPort output;
@@ -78,4 +111,54 @@ TEST(NsuPipeline, ReqLatencyIsTwoStages) {
     nsu.tick();  // S2: AR advances from S1 to AxiMasterPort output queue
     EXPECT_TRUE(nsu.axi_master_port().pop_ar().has_value())
         << "After tick 2: AR must be poppable at slave port";
+}
+
+// -------------------------------------------------------------------------
+// Rsp path (Task 4): 3-stage latency + arbiter-final-stage (no same-tick escape)
+// -------------------------------------------------------------------------
+// Stage model (spec §4, §5.2):
+//   Cycle 0: push_b() into AxiMasterPort b_q_ (external accept handshake).
+//   Tick 1 (S1): axi_master_port_.tick() → forward_b_to_packetizer_()
+//                takes ≤1 from b_q_, calls pkt_.push_b() → writes pkt s1_b_.
+//                pop_rsp_flit() MUST be empty (no escape).
+//   Tick 2 (S2): packetize_.tick() reads s1_b_, builds Flit, pushes to
+//                wormhole.input pending queue (S2→S3 boundary).
+//                pop_rsp_flit() MUST be empty (arbiter-final-stage: wormhole
+//                tick already ran this tick so flit is queued but not drained).
+//   Tick 3 (S3): wormhole_.tick() drains pending to vc_arbiter.
+//                vc_arbiter_.tick() drains to NullNocRspOut.
+//                pop_rsp_flit() returns the B flit. ✓
+TEST(NsuPipeline, RspLatencyIsThreeStages) {
+    SCENARIO(
+        "NSU rsp path: B beat injected at push_b(), appears on NoC rsp-out only "
+        "after 3 ticks (3-stage latency); ticks 1-2 must produce no flit "
+        "(no same-tick Packetize→NoC escape, spec §5.2 arbiter-final-stage)");
+    NsuConfig cfg = make_nsu_cfg();
+    NsuStandalone nsu(cfg);
+
+    // Seed MetaBuffer so Packetize can build the B flit.
+    // seed_meta_for_b injects AW flit and runs 1 tick to snapshot MetaBuffer.
+    seed_meta_for_b(nsu, /*id=*/3);
+
+    // Push B into AxiMasterPort (external accept handshake = cycle 0).
+    ASSERT_TRUE(nsu.axi_master_port().push_b(make_b_beat(/*id=*/3)));
+
+    // Ticks 1-2: rsp flit must NOT escape to NoC (no same-tick escape).
+    for (int t = 0; t < 2; ++t) {
+        nsu.tick();
+        EXPECT_FALSE(nsu.pop_rsp_flit().has_value())
+            << "Rsp flit must not escape before tick 3 (no-escape at tick " << (t + 1) << ")";
+    }
+
+    // Tick 3: S3 wormhole+vc drains the B flit to NullNocRspOut.
+    nsu.tick();
+    auto flit = nsu.pop_rsp_flit();
+    ASSERT_TRUE(flit.has_value()) << "B flit must appear on NoC rsp-out after tick 3";
+    EXPECT_EQ(flit->get_header_field("axi_ch"), static_cast<uint64_t>(ni::AXI_CH_B));
+    EXPECT_EQ(flit->get_payload_field("B", "bid"), 3u);
+
+    // Verify S1 stage register occupancy probe (stage 0 = Packetize S1 reg).
+    // After tick 3, S1 is empty (B advanced through all stages).
+    EXPECT_EQ(nsu.stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_B), 0u)
+        << "After tick 3: NsuRsp S1 register must be empty (B has exited pipeline)";
 }
