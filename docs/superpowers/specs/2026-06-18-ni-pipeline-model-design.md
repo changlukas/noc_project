@@ -1,9 +1,8 @@
 # NMU/NSU pipeline model (NI microarchitecture)
 
 Date: 2026-06-18
-Status: Draft rev 3 (Codex round 2 clean: stage_occupancy introspection API named, rob citation fixed; all 6 round-1 items resolved)
-NMU-req S1, NSU-rsp WormholeArbiter added, ORDERING_MODE = existing RobMode,
-co-sim boundary attribution decided, validation made executable)
+Status: Draft rev 3 (Codex round 2 clean: stage_occupancy introspection API
+named, rob citation fixed; all 6 round-1 items resolved)
 
 Replace the 0-cycle functional NMU/NSU with a real, staged-across-ticks pipeline
 model that reflects the intended NI RTL microarchitecture. The c_model becomes the
