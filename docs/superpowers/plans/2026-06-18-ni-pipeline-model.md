@@ -2,107 +2,88 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Convert NMU/NSU from 0-cycle combinational pull-through into a real staged-across-ticks pipeline, mirroring the router, so the c_model captures realistic per-stage NI latency and is the golden reference for the NI RTL.
+**Goal:** Convert NMU/NSU from a 0-cycle push call-chain into a real staged-across-ticks pipeline, mirroring the router, so the c_model captures realistic per-stage NI latency and is the golden reference for the NI RTL.
 
-**Architecture:** Mirror `router.hpp` exactly: each NI path gets explicit per-(channel) **stage registers** as data members; `Nmu::tick()`/`Nsu::tick()` run stages in **reverse order** so one beat advances exactly one stage per tick; hand-offs are registered; each stage moves **at most one beat per channel per tick** (the unbounded `while`-drain loops are replaced). Stage transforms (Rob allocate / Packetize build / Depacketize decode) run as the per-stage combinational body. The WormholeArbiter/VcArbiter are already single-grant-per-tick and stay as the final stage.
+**Architecture:** Mirror `router.hpp`: stages communicate **only through shared stage-register data members** (never by calling the next block's push), and `tick()` runs stages **reverse-order** so one token advances one stage per tick. This is a refactor from "transform-and-call-next-push" to "read input register → transform → write output register" (spec §5.0). Each stage register holds a `{beat + computed meta}` token (spec §5.1). The arbiter is the final stage fed from a registered S2→S3 boundary (no same-tick NoC escape, spec §5.2).
 
-**Tech Stack:** C++17, GoogleTest. Spec: `docs/superpowers/specs/2026-06-18-ni-pipeline-model-design.md`.
+**Tech Stack:** C++17, GoogleTest. Spec: `docs/superpowers/specs/2026-06-18-ni-pipeline-model-design.md` (read §5.0-5.3 and §6.1 — the mechanism lives there; tasks below reference it rather than restate it).
 
 ## Global Constraints
 
 - Build: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3`. Test: `cd build/cmodel && ctest -R <name> --output-on-failure`.
 - `clang-format -i` every edited `.hpp`/`.cpp` before commit. snake_case methods, PascalCase types. No `--no-verify`.
-- **Mirror the router** (`router.hpp:156-261`): explicit stage register (`landing_` analogue), reverse-order `tick()` (`:199`), registered hand-off (`credit_pulse_pending_`, `:166`), overwrite assert on stage-register write (`:185`), `≤1 beat/channel/stage/tick`.
-- Stage allocation is locked by the spec §4: **NMU req 3 / NMU rsp 3 / NSU req 2 / NSU rsp 3**, default 1 cycle/stage.
-- Latency measured at internal stage boundaries via the new `stage_occupancy(NiPath, stage, axi_ch)` getter (spec §8), excluding the co-sim wrapper register.
-- ORDERING_MODE = existing `RobMode` (ROB=`Enabled`, ROBLESS=`Disabled`); do not add a new knob (spec §6).
-- Per-stage depth is parameterized; default = the §4 stage counts.
-- Preserve coupled side-effects (spec §5 / Explore): MetaBuffer snapshot atomic with NSU-Depacketize queue push; NMU-Packetize `w_meta_fifo_` mutated only on push success; VcArbiter bindings unchanged; Depacketize `pending_` semantics.
+- Stage allocation locked (spec §4): NMU req 3 / NMU rsp 3 / NSU req 2 / NSU rsp 3; default 1 cycle/stage.
+- Latency measured at internal stage registers via `stage_occupancy(NiPath, stage, axi_ch)` (spec §8), excluding the co-sim wrapper register (spec §7).
+- ORDERING_MODE = existing `RobMode`; config default stays `Disabled` (= ROBLESS); ROB (`Enabled`) opt-in (spec §6).
+- Preserve side-effects by moving commit to the stage that performs the NoC push (spec §5.1): `w_meta_fifo_` (`packetize.hpp:111`), MetaBuffer `commit_*` (`nsu/packetize.hpp:52/78`).
 
-## Risk register (per Explore; each cited task must respect these)
+## Task coupling (why the sequence below; Codex plan-review)
+
+The four paths share submodules, so they are NOT independent workers:
+- `Rob` is shared by **NMU req (admit/allocate)** and **NMU rsp (re-order)** → they are **one task** (Task 5).
+- The arbiter final-stage pattern is shared by the two packetize paths (NSU rsp, NMU req) → established once in Task 4, reused in Task 5.
+- `Packetize`/port objects are touched by multiple paths → later tasks may re-touch earlier files; the per-task reviewer must re-run the earlier path's tests.
+
+Sequence (easiest→hardest, dependency-safe): primitive+tokens → scaffold → **NSU req spike** (register-parked, no Rob, no arbiter) → **NSU rsp** (first arbiter final-stage) → **NMU req+rsp together** (shared Rob + ROB/ROBLESS + depth) → integration/co-sim/docs.
+
+## Risk register (per the structure survey)
 
 | R | Risk | Where |
 |---|---|---|
-| R1 | Unbounded `while`-drain loops move many beats/tick | `axi_slave_port.hpp:151-168`, `axi_master_port.hpp:138-170`, `nmu/depacketize.hpp:74`, `nsu/depacketize.hpp:99` |
-| R2 | Single call spans AxiSlavePort→Rob→Packetize→push_flit (req) / AxiMasterPort→Packetize→MetaBuffer→push_flit (rsp) | `axi_slave_port.hpp:151`, `rob.hpp:191`, `packetize.hpp` |
-| R3 | Rob Enabled-mode `pop_b`/`pop_r` chain-flush (2 logical stages/call) | `rob.hpp:243-352` |
-| R4 | Coupled side-effects must stay atomic | MetaBuffer (`nsu/depacketize.hpp:119/142`), `w_meta_fifo_` (`packetize.hpp:111`), VcArbiter bindings |
+| R1 | Unbounded `while`-drain loops | `axi_slave_port.hpp:151`, `axi_master_port.hpp:138`, both `depacketize.hpp` `while(true)` |
+| R2 | Single call spans multiple blocks (push chain) | `axi_slave_port.hpp:151→rob.hpp:181→packetize.hpp:110` |
+| R3 | Rob Enabled chain-flush frees slots / `notify_drained` early | `rob.hpp:272-348` — staging contract spec §6.1 |
+| R4 | Side-effect commit atomicity (`w_meta_fifo_`, MetaBuffer) | spec §5.1 |
 | R5 | Test-endpoint `pending_` counters assume multi-pop/tick | `nmu.hpp:226`, `nsu.hpp:157` |
-| R6 | Watchdog cycle bounds in integration tests may need raising | `test_request_response_loopback.cpp`, `test_port_pair_loopback.cpp` |
+| R6 | Integration watchdog bounds | `test_request_response_loopback.cpp`, `test_port_pair_loopback.cpp` |
 
 ---
 
-### Task 1: `PipelineStage` register primitive
+### Task 1: `PipelineStage` primitive + inter-stage token types + depth config
 
 **Files:**
-- Create: `c_model/include/noc/pipeline_stage.hpp`
-- Test: `c_model/tests/noc/test_pipeline_stage.cpp`
-- Modify: `c_model/tests/noc/CMakeLists.txt`
+- Create: `c_model/include/noc/pipeline_stage.hpp`, `c_model/include/nmu/ni_tokens.hpp`
+- Modify: `c_model/include/nmu/nmu.hpp` (`NmuConfig` depth fields), `c_model/include/nsu/nsu.hpp` (`NsuConfig` depth fields)
+- Test: `c_model/tests/noc/test_pipeline_stage.cpp`; `c_model/tests/noc/CMakeLists.txt`
 
 **Interfaces:**
-- Produces: `template <class Beat> class PipelineStage` — the per-channel one-beat stage register mirroring the router's `landing_` register. Consumed by Tasks 2-5.
+- Produces: `template<class Token> class PipelineStage` (`full/ready/occupancy/peek/accept/take/clear`); token structs (`AdmittedReq`, …); per-path depth config fields. Consumed by Tasks 3-5.
 
-The primitive generalizes the router's `std::optional<Flit> landing_` + overwrite-assert pattern into a typed, occupancy-introspectable one-beat register with a valid/ready hand-off.
-
-- [ ] **Step 1: Register the test**
-
-In `c_model/tests/noc/CMakeLists.txt`, add (next to the other `add_cmodel_test` lines):
-```cmake
-add_cmodel_test(test_pipeline_stage)
-target_include_directories(test_pipeline_stage PRIVATE ${CMAKE_SOURCE_DIR}/include)
-```
+- [ ] **Step 1: Register the test** — in `c_model/tests/noc/CMakeLists.txt` add `add_cmodel_test(test_pipeline_stage)` + `target_include_directories(... PRIVATE ${CMAKE_SOURCE_DIR}/include)`.
 
 - [ ] **Step 2: Write the failing test**
 
 `c_model/tests/noc/test_pipeline_stage.cpp`:
 ```cpp
 #include "noc/pipeline_stage.hpp"
-
 #include <gtest/gtest.h>
-
 using ni::cmodel::noc::PipelineStage;
-
 namespace {
-
 TEST(PipelineStage, EmptyByDefault) {
     PipelineStage<int> s;
     EXPECT_FALSE(s.full());
     EXPECT_EQ(s.occupancy(), 0u);
-    EXPECT_TRUE(s.ready());  // ready to accept when empty
+    EXPECT_TRUE(s.ready());
 }
-
-TEST(PipelineStage, AcceptThenFull) {
+TEST(PipelineStage, AcceptThenTake) {
     PipelineStage<int> s;
     s.accept(7);
     EXPECT_TRUE(s.full());
     EXPECT_EQ(s.occupancy(), 1u);
     EXPECT_FALSE(s.ready());
     EXPECT_EQ(s.peek(), 7);
-}
-
-TEST(PipelineStage, TakeFrees) {
-    PipelineStage<int> s;
-    s.accept(7);
     EXPECT_EQ(s.take(), 7);
-    EXPECT_FALSE(s.full());
     EXPECT_TRUE(s.ready());
 }
-
-TEST(PipelineStage, OverwriteAsserts) {
-    // Mirrors Router::accept_flit overwrite guard (router.hpp:185): >1 beat
-    // into a one-beat stage register in one cycle is a discipline violation.
+TEST(PipelineStage, OverwriteAsserts) {  // mirrors router.hpp:185
     PipelineStage<int> s;
     s.accept(1);
     EXPECT_DEATH(s.accept(2), "PipelineStage: overwrite");
 }
-
 }  // namespace
 ```
 
-- [ ] **Step 3: Run the test (expect compile failure)**
-
-Run: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3`
-Expected: FAIL — `pipeline_stage.hpp` not found.
+- [ ] **Step 3: Run (expect compile failure)** — `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3`. Expected: FAIL (header missing).
 
 - [ ] **Step 4: Implement the primitive**
 
@@ -110,447 +91,207 @@ Expected: FAIL — `pipeline_stage.hpp` not found.
 ```cpp
 #ifndef NI_CMODEL_NOC_PIPELINE_STAGE_HPP
 #define NI_CMODEL_NOC_PIPELINE_STAGE_HPP
-
 #include <cassert>
 #include <cstddef>
 #include <optional>
 #include <utility>
-
 namespace ni::cmodel::noc {
-
-// One-beat stage register, the building block of a staged-across-ticks NI
-// pipeline. Mirrors Router::landing_ (router.hpp:157) + its overwrite assert
-// (router.hpp:185): at most one beat per cycle enters; reverse-order tick
-// drains (take) before the upstream fills (accept), so a beat advances exactly
-// one stage per tick. `ready()` is the valid/ready back-pressure signal.
-template <class Beat>
+// One-token stage register; the staged-NI building block. Mirrors Router::landing_
+// (router.hpp:157) + overwrite assert (router.hpp:185). Reverse-order tick drains
+// (take) before upstream fills (accept), so a token advances one stage/tick.
+template <class Token>
 class PipelineStage {
   public:
     bool full() const noexcept { return slot_.has_value(); }
     bool ready() const noexcept { return !slot_.has_value(); }
     std::size_t occupancy() const noexcept { return slot_ ? 1u : 0u; }
-
-    const Beat& peek() const {
-        assert(slot_.has_value() && "PipelineStage: peek empty");
-        return *slot_;
-    }
-
-    void accept(Beat b) {
-        assert(!slot_.has_value() && "PipelineStage: overwrite (>1 beat/cycle)");
-        slot_ = std::move(b);
-    }
-
-    Beat take() {
-        assert(slot_.has_value() && "PipelineStage: take empty");
-        Beat b = std::move(*slot_);
-        slot_.reset();
-        return b;
-    }
-
+    const Token& peek() const { assert(slot_ && "PipelineStage: peek empty"); return *slot_; }
+    void accept(Token t) { assert(!slot_ && "PipelineStage: overwrite (>1/cycle)"); slot_ = std::move(t); }
+    Token take() { assert(slot_ && "PipelineStage: take empty"); Token t = std::move(*slot_); slot_.reset(); return t; }
     void clear() noexcept { slot_.reset(); }
-
   private:
-    std::optional<Beat> slot_;
+    std::optional<Token> slot_;
 };
-
 }  // namespace ni::cmodel::noc
-
-#endif  // NI_CMODEL_NOC_PIPELINE_STAGE_HPP
+#endif
 ```
 
-- [ ] **Step 5: Run the test (expect pass)**
+`c_model/include/nmu/ni_tokens.hpp` — the `{beat+meta}` tokens (spec §5.1). Define structs grouping the existing beat types with the computed meta they must carry between stages, e.g.:
+```cpp
+#ifndef NI_CMODEL_NI_TOKENS_HPP
+#define NI_CMODEL_NI_TOKENS_HPP
+#include "axi/types.hpp"
+#include <cstdint>
+namespace ni::cmodel {
+// NMU req S1->S2: AW/AR admitted by Rob with route+rob meta computed in S1.
+struct AdmittedAw { axi::AwBeat beat; uint8_t dst_id; uint64_t local_addr; uint8_t rob_req; uint16_t rob_idx; };
+struct AdmittedAr { axi::ArBeat beat; uint8_t dst_id; uint64_t local_addr; uint8_t rob_req; uint16_t rob_idx; };
+// W carries AW-inherited meta (matches packetize.hpp w_meta_fifo_ contract).
+struct AdmittedW  { axi::WBeat beat; };
+}  // namespace ni::cmodel
+#endif
+```
+(Field set mirrors the existing `AwHeaderMeta` passed to `push_aw_with_meta`, `packetize.hpp:69`. Add the NSU-side and rsp-side token structs as each path task needs them — keep them in this one header.)
 
-Run: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3 && cd build/cmodel && ctest -R PipelineStage --output-on-failure`
-Expected: 4/4 PASS.
+In `NmuConfig` (`nmu.hpp`) and `NsuConfig` (`nsu.hpp`) add per-path extra-depth knobs, all default 0:
+```cpp
+std::size_t ni_req_extra_depth = 0;   // extra shift stages on the request path
+std::size_t ni_rsp_extra_depth = 0;   // extra shift stages on the response path
+```
+
+- [ ] **Step 5: Run (expect pass)** — `make build-cmodel ... && cd build/cmodel && ctest -R PipelineStage --output-on-failure`. Expected: 3/3 PASS; full build green (config fields compile).
 
 - [ ] **Step 6: clang-format + commit**
-
 ```bash
-clang-format -i c_model/include/noc/pipeline_stage.hpp c_model/tests/noc/test_pipeline_stage.cpp
-git add -A
-git commit -m "feat(ni): add PipelineStage one-beat register primitive"
+clang-format -i c_model/include/noc/pipeline_stage.hpp c_model/include/nmu/ni_tokens.hpp c_model/include/nmu/nmu.hpp c_model/include/nsu/nsu.hpp c_model/tests/noc/test_pipeline_stage.cpp
+git add -A && git commit -m "feat(ni): PipelineStage primitive + inter-stage token types + depth config"
 ```
 
 ---
 
 ### Task 2: `NiPath` enum + `stage_occupancy` getter scaffold
 
-**Files:**
-- Create: `c_model/include/nmu/ni_stage.hpp` (shared enum)
-- Modify: `c_model/include/nmu/nmu.hpp`, `c_model/include/nsu/nsu.hpp`
-- Test: `c_model/tests/common/test_ni_stage.cpp`
-- Modify: `c_model/tests/common/CMakeLists.txt`
+(Unchanged from the prior plan revision.) Create `c_model/include/nmu/ni_stage.hpp` with `enum class NiPath { NmuReq, NmuRsp, NsuReq, NsuRsp }`; add `std::size_t stage_occupancy(NiPath, std::size_t stage, uint8_t axi_ch) const` returning 0 on `Nmu`/`Nsu`/`NmuStandalone`/`NsuStandalone` (filled per path in Tasks 3-5). Test `test_ni_stage.cpp` asserts the enum distinct. Commit `feat(ni): NiPath enum + stage_occupancy scaffold`.
 
-**Interfaces:**
-- Consumes: nothing.
-- Produces: `enum class NiPath { NmuReq, NmuRsp, NsuReq, NsuRsp }`; `std::size_t Nmu::stage_occupancy(NiPath, std::size_t stage, uint8_t axi_ch) const`; same on `Nsu`, `NmuStandalone`, `NsuStandalone`. Initially returns 0 (no stages wired yet); Tasks 3-6 fill it in per path.
-
-This isolates the public introspection surface (spec §8) so later path tasks only add their wiring behind a stable signature.
-
-- [ ] **Step 1: Register the test**
-
-`c_model/tests/common/CMakeLists.txt`: add
-```cmake
-add_cmodel_test(test_ni_stage)
-target_include_directories(test_ni_stage PRIVATE ${CMAKE_SOURCE_DIR}/include)
-```
-
-- [ ] **Step 2: Write the failing test**
-
-`c_model/tests/common/test_ni_stage.cpp`:
-```cpp
-#include "nmu/ni_stage.hpp"
-
-#include <gtest/gtest.h>
-
-using ni::cmodel::NiPath;
-
-TEST(NiStage, PathEnumValues) {
-    // The four NI translation paths (spec §4).
-    EXPECT_NE(NiPath::NmuReq, NiPath::NmuRsp);
-    EXPECT_NE(NiPath::NsuReq, NiPath::NsuRsp);
-}
-```
-
-- [ ] **Step 3: Run (expect compile failure)**
-
-Run: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3`
-Expected: FAIL — `nmu/ni_stage.hpp` not found.
-
-- [ ] **Step 4: Implement the enum + getter scaffold**
-
-`c_model/include/nmu/ni_stage.hpp`:
-```cpp
-#ifndef NI_CMODEL_NI_STAGE_HPP
-#define NI_CMODEL_NI_STAGE_HPP
-
-namespace ni::cmodel {
-
-// The four AXI<->flit translation paths of the NI (spec §4).
-enum class NiPath { NmuReq, NmuRsp, NsuReq, NsuRsp };
-
-}  // namespace ni::cmodel
-
-#endif  // NI_CMODEL_NI_STAGE_HPP
-```
-
-In `nmu.hpp`, add `#include "nmu/ni_stage.hpp"` and on `Nmu` (public):
-```cpp
-// Beats held in stage register [stage] of [path] for AXI channel [axi_ch]
-// (ni_flit_constants AW=0..R=4). Internal-boundary latency probe (spec §8).
-// Returns 0 for paths/stages not yet staged.
-std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
-    (void)path; (void)stage; (void)axi_ch;
-    return 0;  // filled per-path in Tasks 3-6
-}
-```
-Re-expose verbatim on `NmuStandalone` (mirror the existing `rob()`/`vc_arbiter()` passthroughs at `nmu.hpp:272-273`). Do the same on `Nsu` and `NsuStandalone` (`nsu.hpp` — add the passthrough that does not exist yet, per Explore).
-
-- [ ] **Step 5: Run (expect pass)**
-
-Run: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3 && cd build/cmodel && ctest -R NiStage --output-on-failure`
-Expected: 1/1 PASS; full build green (getter compiles on all four classes).
-
-- [ ] **Step 6: clang-format + commit**
-
-```bash
-clang-format -i c_model/include/nmu/ni_stage.hpp c_model/include/nmu/nmu.hpp c_model/include/nsu/nsu.hpp c_model/tests/common/test_ni_stage.cpp
-git add -A
-git commit -m "feat(ni): add NiPath enum + stage_occupancy getter scaffold"
-```
+- [ ] **Step 1:** register `add_cmodel_test(test_ni_stage)` in `c_model/tests/common/CMakeLists.txt`.
+- [ ] **Step 2:** write `test_ni_stage.cpp` (enum distinctness, as prior revision).
+- [ ] **Step 3:** run → expect compile fail.
+- [ ] **Step 4:** implement `ni_stage.hpp` + the 4 getters (return 0). Re-expose on the `*Standalone` wrappers (mirror `nmu.hpp:272`; add the NSU passthrough that does not exist yet).
+- [ ] **Step 5:** run → `ctest -R NiStage`, full build green.
+- [ ] **Step 6:** clang-format + commit.
 
 ---
 
-### Task 3: NSU req path staging (2 stages) — simplest path first
+### Task 3: NSU req vertical slice (register-parked spike, 2 stages)
 
-**Files:**
-- Modify: `c_model/include/nsu/nsu.hpp` (tick reverse-order + stage registers + `stage_occupancy`)
-- Modify: `c_model/include/nsu/depacketize.hpp` (bound to one-beat advance), `c_model/include/nsu/axi_master_port.hpp` (bound req-drain to one-beat)
-- Test: `c_model/tests/nsu/test_nsu_pipeline.cpp`
-- Modify: `c_model/tests/nsu/CMakeLists.txt`
+**Why first / spike:** NSU req (`Depacketize → AxiMasterPort → slave`) has no Rob and no arbiter — it proves the register-parked refactor (spec §5.0) end-to-end on the least-coupled path before the harder ones.
 
-**Why first:** NSU req is the only 2-stage path, has no Rob, and its blocks are `Depacketize → AxiMasterPort` (Explore items 8/7). It validates the router-mirrored mechanism end-to-end on the least-coupled path before the Rob paths.
+**Files:** `c_model/include/nsu/nsu.hpp`, `c_model/include/nsu/depacketize.hpp`, `c_model/include/nsu/axi_master_port.hpp`; test `c_model/tests/nsu/test_nsu_pipeline.cpp` (+ CMake).
 
-**Interfaces:**
-- Consumes: `PipelineStage` (Task 1), `NiPath` (Task 2).
-- Produces: the staging pattern (stage register members + reverse-order advance + bounded one-beat submodule advance) that Tasks 4-6 replicate.
+**Interfaces:** Consumes `PipelineStage`/tokens (T1), `NiPath` (T2). Produces the register-parked pattern + the reusable flit-injection test helper for NSU; fills `stage_occupancy(NsuReq,…)`.
 
-**Mechanism (mirror router, spec §5):**
-- Add stage registers in `Nsu`: one `PipelineStage<...>` per AXI request channel (AW/W/AR) at the S1→S2 boundary (between `Depacketize` output and `AxiMasterPort` input).
-- `Nsu::tick()` request portion runs reverse-order: **first** advance S2 (`AxiMasterPort` drives the slave with ≤1 beat/channel from its stage register), **then** advance S1 (`Depacketize` decodes ≤1 flit into the S1 register). One beat advances one stage per tick.
-- Replace the unbounded `while` in `Depacketize::tick()` (`nsu/depacketize.hpp:99`) and the `drain_*_from_depacketizer_` loops (`axi_master_port.hpp:138-158`) with **one-beat-per-channel-per-tick** moves. Preserve the MetaBuffer snapshot atomicity (R4): snapshot still happens with the single AW/AR decode.
-- `stage_occupancy(NsuReq, stage, axi_ch)`: stage 0 = the S1 register occupancy, stage 1 = `AxiMasterPort`'s per-channel holding for that channel.
+**Mechanism (spec §5.0/§5.3):** `Depacketize` decodes ≤1 req flit/channel into S1 stage registers (MetaBuffer snapshot stays atomic with the decode, R4); `AxiMasterPort` consumes ≤1 beat/channel from S1 to drive the slave (S2). `Nsu::tick()` req portion reverse-order: S2 advance, then S1 advance. Replace the `while(true)` (`nsu/depacketize.hpp:99`) and `drain_*` loops (`axi_master_port.hpp:138`) with one-beat advance reading/writing the stage registers — NOT a direct `depkt_.pop_*` call-chain.
 
-- [ ] **Step 1: Register the test**
-
-`c_model/tests/nsu/CMakeLists.txt`: add `add_cmodel_test(test_nsu_pipeline)` + its `target_include_directories`.
-
-- [ ] **Step 2: Write the failing test (latency = 2; one-stage-per-tick advance)**
-
-`c_model/tests/nsu/test_nsu_pipeline.cpp`:
+- [ ] **Step 1:** register `add_cmodel_test(test_nsu_pipeline)`.
+- [ ] **Step 2: failing test (req latency = 2):**
 ```cpp
 #include "nsu/nsu.hpp"
 #include "nmu/ni_stage.hpp"
 #include "ni_flit_constants.h"
-
 #include <gtest/gtest.h>
-
-using ni::cmodel::NiPath;
-using ni::cmodel::nsu::NsuStandalone;
-using ni::cmodel::nsu::NsuConfig;
-
+using ni::cmodel::NiPath; using ni::cmodel::nsu::NsuStandalone; using ni::cmodel::nsu::NsuConfig;
 namespace {
-
-// Inject one AR request flit at the NoC edge; it must take exactly 2 ticks
-// (Depacketize S1, AxiMasterPort S2) to appear as an AR beat at the slave port.
+// Helper (this TU): build one AR request flit and inject at the NoC-req endpoint,
+// modeled on the existing test_nsu_* flit encoders.
+static void inject_single_ar_flit(NsuStandalone& nsu, uint8_t id, uint64_t addr);
 TEST(NsuPipeline, ReqLatencyIsTwoStages) {
-    NsuConfig cfg;  // defaults: 1 cycle/stage, depth per spec §4
-    NsuStandalone nsu(cfg);
-
-    // <inject a single AR request flit into nsu's NoC-req endpoint>
-    // (use the NsuStandalone inject_req_flit() helper, Explore item 6)
-    inject_single_ar_flit(nsu);  // helper defined in this TU; see Step 4 note
-
-    // tick 1: AR advances into S1 (Depacketize register), not yet at slave.
-    nsu.tick();
+    NsuConfig cfg; NsuStandalone nsu(cfg);
+    inject_single_ar_flit(nsu, /*id=*/5, /*addr=*/0x40);
+    nsu.tick();  // S1: Depacketize register holds AR; not yet at slave
     EXPECT_EQ(nsu.stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_AR), 1u);
     EXPECT_FALSE(nsu.axi_master_port().pop_ar().has_value());
-
-    // tick 2: AR advances into S2 and is drivable at the slave port.
-    nsu.tick();
+    nsu.tick();  // S2: AR drivable at slave port
     EXPECT_TRUE(nsu.axi_master_port().pop_ar().has_value());
 }
-
 }  // namespace
 ```
-(The `inject_single_ar_flit` helper builds one AR flit via the existing flit/packetize encoding and pushes it through `NsuStandalone`'s req endpoint; model it on the existing `test_nsu_*` flit-injection helpers.)
-
-- [ ] **Step 3: Run (expect fail — today it is 0-cycle, AR appears after 1 tick)**
-
-Run: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3 && cd build/cmodel && ctest -R NsuPipeline --output-on-failure`
-Expected: FAIL — current pull-through delivers the AR in one tick (no S1 occupancy observed / pop_ar succeeds at tick 1).
-
-- [ ] **Step 4: Implement the staging**
-
-Apply the mechanism above:
-1. `nsu/depacketize.hpp`: change `tick()` (`:99` `while(true)`) to decode **at most one flit per request channel** into per-channel stage registers; keep the MetaBuffer snapshot atomic with the single decode (R4); keep `pending_` for the still-blocked case.
-2. `nsu/axi_master_port.hpp`: change `drain_aw/w/ar_from_depacketizer_` (`:138-158`) to pull **at most one beat per channel per tick** from the S1 registers.
-3. `nsu.hpp`: hold the S1 `PipelineStage` registers; rewrite the request portion of `tick()` to reverse-order (S2 advance, then S1 advance); implement `stage_occupancy(NsuReq, …)`.
-
-- [ ] **Step 5: Run (expect pass) + no regression on existing NSU tests**
-
-Run: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3 && cd build/cmodel && ctest -R "NsuPipeline|Nsu_" --output-on-failure`
-Expected: NsuPipeline 2/2 PASS; existing NSU tests still pass (bounded-loop drivers tolerate the added cycle — Explore). If a direct submodule test asserted "all N beats visible after one tick," update it to tick N times (R1) and note it.
-
-- [ ] **Step 6: clang-format + commit**
-
-```bash
-clang-format -i c_model/include/nsu/*.hpp c_model/tests/nsu/test_nsu_pipeline.cpp
-git add -A
-git commit -m "feat(ni): stage the NSU request path (2 stages, router-mirrored)"
-```
+- [ ] **Step 3:** run → FAIL (today AR appears in 1 tick).
+- [ ] **Step 4:** implement the register-parked NSU-req staging + the `inject_single_ar_flit` helper + `stage_occupancy(NsuReq,…)` reading the S1 register occupancy.
+- [ ] **Step 5:** run → `ctest -R "NsuPipeline|Nsu_"`. NsuPipeline 1/1; existing NSU tests pass (audit any direct `test_depacketize`/`test_axi_master_port` that assumed all-beats-after-one-tick — update to tick per stage, R1).
+- [ ] **Step 6:** clang-format + commit `feat(ni): NSU request path register-parked staging (2 stages)`.
 
 ---
 
-### Task 4: NSU rsp path staging (3 stages)
+### Task 4: NSU rsp path (3 stages) + arbiter final-stage pattern
 
-**Files:**
-- Modify: `c_model/include/nsu/nsu.hpp`, `c_model/include/nsu/axi_master_port.hpp` (bound B/R forward), `c_model/include/nsu/packetize.hpp` (one-beat build)
-- Test: `c_model/tests/nsu/test_nsu_pipeline.cpp` (add cases)
+**Establishes once:** the arbiter final-stage register (spec §5.2) — Packetize writes the S2→S3 stage register; the arbiter consumes it in the reverse-order tick; no same-tick Packetize→NoC escape. Reused by Task 5's NMU req.
 
-**Interfaces:**
-- Consumes: Task 3 pattern.
-- Produces: `stage_occupancy(NsuRsp, …)`.
+**Files:** `c_model/include/nsu/nsu.hpp`, `c_model/include/nsu/axi_master_port.hpp`, `c_model/include/nsu/packetize.hpp`; add cases to `test_nsu_pipeline.cpp`.
 
-**Mechanism:** stages `AxiMasterPort accept (B/R) → Packetize → WormholeArbiter+VcArbiter → NoC`. The arbiters are already single-grant-per-tick (Explore 11/12) — they are the final stage as-is. Insert stage registers at AxiMasterPort-accept→Packetize and Packetize→arbiter-input. Reverse-order advance. Preserve `MetaBuffer` peek/commit ordering (R4): commit only on successful `push_flit`.
+**Mechanism:** `AxiMasterPort accept (B/R) → Packetize → [S2→S3 reg] → Wormhole+VcArbiter → NoC`. MetaBuffer `commit_*` moves to the stage that pushes into the S2→S3 register success (R4). `stage_occupancy(NsuRsp,…)`.
 
-- [ ] **Step 1: Write the failing test (rsp latency = 3)**
-
-Add to `test_nsu_pipeline.cpp`:
+- [ ] **Step 1: failing test (rsp latency = 3, + no same-tick escape):**
 ```cpp
-// Push a single B response at the AXI master port; it must take 3 ticks
-// (AxiMasterPort accept, Packetize, arbiter→NoC) to appear as a rsp flit.
 TEST(NsuPipeline, RspLatencyIsThreeStages) {
-    NsuConfig cfg;
-    NsuStandalone nsu(cfg);
-    seed_meta_for_b(nsu, /*id=*/3);  // snapshot meta so Packetize can build B
-    nsu.axi_master_port().push_b(make_b_beat(/*id=*/3));
-    for (int t = 0; t < 2; ++t) {
-        nsu.tick();
-        EXPECT_FALSE(nsu.pop_rsp_flit().has_value()) << "rsp flit emitted too early at tick " << t;
-    }
-    nsu.tick();  // 3rd tick: rsp flit at NoC edge
+    NsuConfig cfg; NsuStandalone nsu(cfg);
+    seed_meta_for_b(nsu, /*id=*/3);                  // helper: snapshot meta so Packetize can build B
+    nsu.axi_master_port().push_b(make_b_beat(3));
+    for (int t = 0; t < 2; ++t) { nsu.tick(); EXPECT_FALSE(nsu.pop_rsp_flit().has_value()) << "escape at " << t; }
+    nsu.tick();
     EXPECT_TRUE(nsu.pop_rsp_flit().has_value());
 }
 ```
-
-- [ ] **Step 2: Run (expect fail)** — `ctest -R NsuPipeline.RspLatencyIsThreeStages`; current path emits in 1 tick.
-
-- [ ] **Step 3: Implement** the rsp staging per the mechanism (bound `forward_b/r_to_packetizer_` `axi_master_port.hpp:159-170` to one beat; stage registers in `nsu.hpp` rsp portion; reverse-order; MetaBuffer commit-on-success preserved).
-
-- [ ] **Step 4: Run (expect pass) + NSU regression** — `ctest -R "NsuPipeline|Nsu_"`. Expected: all pass.
-
-- [ ] **Step 5: clang-format + commit**
-```bash
-git add -A && git commit -m "feat(ni): stage the NSU response path (3 stages)"
-```
+- [ ] **Step 2:** run → FAIL (emits in 1 tick today).
+- [ ] **Step 3:** implement the rsp staging + the arbiter final-stage register + MetaBuffer commit-on-stage-push. Bound `forward_b/r_to_packetizer_` (`axi_master_port.hpp:159`).
+- [ ] **Step 4:** run → `ctest -R "NsuPipeline|Nsu_"`, all pass.
+- [ ] **Step 5:** clang-format + commit `feat(ni): NSU response path staging (3 stages) + arbiter final-stage`.
 
 ---
 
-### Task 5: NMU req path staging (3 stages, Rob allocate + Address Map in S1)
+### Task 5: NMU req + rsp (shared `Rob`) — staging + ROB/ROBLESS + depth
 
-**Files:**
-- Modify: `c_model/include/nmu/nmu.hpp`, `c_model/include/nmu/axi_slave_port.hpp` (bound forward), `c_model/include/nmu/rob.hpp` (one-beat admit), `c_model/include/nmu/packetize.hpp` (one-beat build)
-- Test: `c_model/tests/nmu/test_nmu_pipeline.cpp`; `c_model/tests/nmu/CMakeLists.txt`
+**One task** because both NMU paths edit `Rob` (R2/R3). Implements: NMU req (3 stages), NMU rsp (3 stages, code order Depacketize→Rob→AxiSlavePort), the ROB Enabled one-beat-release staging contract (spec §6.1), the ROBLESS retire hook (spec §6), and the depth knobs.
 
-**Interfaces:**
-- Consumes: Task 3/4 pattern.
-- Produces: `stage_occupancy(NmuReq, …)`.
+**Files:** `c_model/include/nmu/nmu.hpp`, `axi_slave_port.hpp`, `rob.hpp`, `packetize.hpp`, `depacketize.hpp`; test `c_model/tests/nmu/test_nmu_pipeline.cpp` (+ CMake).
 
-**Mechanism:** stages `AxiSlavePort accept + Rob admit/allocate + Address Map (xy_route, rob.hpp:180/218) → Packetize → WormholeArbiter+VcArbiter → NoC`. S1 includes the Rob admission (allocate + same-id/different-dst gate stays); S2 = Packetize builds the flit from precomputed route/meta. Break the AxiSlavePort→Rob→Packetize one-call chain (R2): AxiSlavePort advances ≤1 beat/channel into S1; Rob admit runs at S1; the S1 register feeds Packetize at S2. Preserve `w_meta_fifo_` mutate-on-success (R4).
+**Mechanism:**
+- **req:** `AxiSlavePort accept + Rob admit/allocate + Address Map (xy_route, rob.hpp:180/218) → [S1 reg: AdmittedAw/Ar token] → Packetize build → [S2→S3 reg] → arbiter → NoC`. Rob admit writes the S1 token register; it does **not** call Packetize (R2). `w_meta_fifo_` mutate moves to the S2→S3 push (R4). Reuse Task 4's arbiter final-stage.
+- **rsp:** `Depacketize → [S1 reg] → Rob Re-Ordering → [S2 reg] → AxiSlavePort → master`. ROB Enabled: reorder decision computes ready run, but slot-free/`notify_drained`/outstanding-retire fire **when a beat leaves the Re-Ordering stage register** (one beat/tick), per spec §6.1 — not on chain-flush. ROBLESS (`Disabled`): Re-Ordering collapses to passthrough (2 stages); the rsp side still retires the per-id counter (`rob.hpp:289/353`).
+- **depth:** `ni_req_extra_depth`/`ni_rsp_extra_depth` insert extra `PipelineStage` shift registers.
 
-- [ ] **Step 1: Write the failing test (req latency = 3)**
-
-`c_model/tests/nmu/test_nmu_pipeline.cpp`:
+- [ ] **Step 1: failing tests** (`test_nmu_pipeline.cpp`):
 ```cpp
-#include "nmu/nmu.hpp"
-#include "nmu/ni_stage.hpp"
-#include "ni_flit_constants.h"
-#include <gtest/gtest.h>
-using ni::cmodel::NiPath;
-using ni::cmodel::nmu::NmuStandalone;
-using ni::cmodel::nmu::NmuConfig;
-
 TEST(NmuPipeline, ReqLatencyIsThreeStages) {
-    NmuConfig cfg;  // RobMode::Disabled default per existing config
-    NmuStandalone nmu(cfg);
-    nmu.axi_slave_port().push_ar(make_ar_beat(/*id=*/5, /*addr=*/0x100000000ull));
-    for (int t = 0; t < 2; ++t) {
-        nmu.tick();
-        EXPECT_FALSE(nmu.pop_req_flit().has_value()) << "req flit too early at tick " << t;
-    }
-    nmu.tick();  // 3rd tick: AR flit at NoC edge
-    EXPECT_TRUE(nmu.pop_req_flit().has_value());
+    NmuConfig cfg; NmuStandalone nmu(cfg);                 // RobMode default Disabled
+    nmu.axi_slave_port().push_ar(make_ar_beat(5, 0x100000000ull));
+    for (int t = 0; t < 2; ++t) { nmu.tick(); EXPECT_FALSE(nmu.pop_req_flit().has_value()); }
+    nmu.tick(); EXPECT_TRUE(nmu.pop_req_flit().has_value());
 }
-```
-
-- [ ] **Step 2: Run (expect fail)** — current chain emits in 1 tick.
-
-- [ ] **Step 3: Implement** per mechanism. Bound `forward_aw/w/ar_to_packetizer_` (`axi_slave_port.hpp:151-168`) to one beat; run Rob admit (`rob.hpp` push_* incl. `xy_route`) at S1 on the single beat; S1 register → Packetize at S2; reverse-order `tick()` req portion; `stage_occupancy(NmuReq, …)`. **Do not** change Rob mode behavior (allocate/gate logic stays; only the per-tick cardinality is bounded).
-
-- [ ] **Step 4: Run (expect pass) + NMU regression** — `ctest -R "NmuPipeline|Nmu_"`. Expected: all pass.
-
-- [ ] **Step 5: commit** — `git add -A && git commit -m "feat(ni): stage the NMU request path (3 stages, Rob+AddrMap in S1)"`
-
----
-
-### Task 6: NMU rsp path staging (3 stages) + Re-Ordering + ORDERING_MODE + depth param
-
-**Files:**
-- Modify: `c_model/include/nmu/nmu.hpp`, `c_model/include/nmu/depacketize.hpp` (one-beat), `c_model/include/nmu/rob.hpp` (reorder stage as 1-cycle lookup; ROBLESS retire hook)
-- Test: `c_model/tests/nmu/test_nmu_pipeline.cpp` (add cases)
-
-**Interfaces:**
-- Consumes: Task 5 pattern.
-- Produces: `stage_occupancy(NmuRsp, …)`; ROB/ROBLESS behavior per spec §6.
-
-**Mechanism:** stages `Depacketize → Rob Re-Ordering → AxiSlavePort → master` (code order, spec §4). **ROB** (`RobMode::Enabled`): the Re-Ordering stage is a fixed 1-cycle order-decision; in-order forwards (0 hold), out-of-order goes to finite reorder storage (NOT pipeline depth, spec §5). Confine the Enabled-mode chain-flush (R3, `rob.hpp:243-352`) to: 1-cycle lookup advances ≤1 ready beat/tick; the rest stays in reorder storage (occupancy), released one-per-tick. **ROBLESS** (`RobMode::Disabled`): Re-Ordering collapses to passthrough (2 stages); the response side still calls the per-id counter retire (`rob.hpp:289/353`) so request-side stalls release (spec §6). **Depth param**: a per-path depth knob inserts extra `PipelineStage` registers (N-deep shift = N-cycle latency).
-
-- [ ] **Step 1: Write failing tests (rsp latency = 3 ROB / 2 ROBLESS; reorder hold; depth knob)**
-
-Add to `test_nmu_pipeline.cpp`:
-```cpp
 TEST(NmuPipeline, RspLatencyRobIsThree) {
     NmuConfig cfg; cfg.read_rob_mode = ni::cmodel::nmu::RobMode::Enabled;
-    NmuStandalone nmu(cfg);
-    inject_single_r_flit(nmu, /*id=*/5);  // in-order head -> 0 hold
+    NmuStandalone nmu(cfg); inject_single_r_flit(nmu, 5);  // in-order head -> 0 hold
     for (int t = 0; t < 2; ++t) { nmu.tick(); EXPECT_FALSE(nmu.axi_slave_port().pop_r().has_value()); }
-    nmu.tick();
-    EXPECT_TRUE(nmu.axi_slave_port().pop_r().has_value());
+    nmu.tick(); EXPECT_TRUE(nmu.axi_slave_port().pop_r().has_value());
 }
-
 TEST(NmuPipeline, RspLatencyRoblessIsTwo) {
     NmuConfig cfg; cfg.read_rob_mode = ni::cmodel::nmu::RobMode::Disabled;
-    NmuStandalone nmu(cfg);
-    inject_single_r_flit(nmu, /*id=*/5);
+    NmuStandalone nmu(cfg); inject_single_r_flit(nmu, 5);
     nmu.tick(); EXPECT_FALSE(nmu.axi_slave_port().pop_r().has_value());
-    nmu.tick();
-    EXPECT_TRUE(nmu.axi_slave_port().pop_r().has_value());  // 2 stages: Depacketize -> AxiSlavePort
+    nmu.tick(); EXPECT_TRUE(nmu.axi_slave_port().pop_r().has_value());
 }
-
 TEST(NmuPipeline, DepthKnobAddsLatency) {
-    NmuConfig cfg; cfg.read_rob_mode = ni::cmodel::nmu::RobMode::Disabled;
-    cfg.ni_rsp_extra_depth = 2;  // +2 shift registers on NMU rsp
-    NmuStandalone nmu(cfg);
-    inject_single_r_flit(nmu, /*id=*/5);
+    NmuConfig cfg; cfg.read_rob_mode = ni::cmodel::nmu::RobMode::Disabled; cfg.ni_rsp_extra_depth = 2;
+    NmuStandalone nmu(cfg); inject_single_r_flit(nmu, 5);
     for (int t = 0; t < 3; ++t) { nmu.tick(); EXPECT_FALSE(nmu.axi_slave_port().pop_r().has_value()); }
-    nmu.tick();  // base 2 + extra 2 = 4 ticks
-    EXPECT_TRUE(nmu.axi_slave_port().pop_r().has_value());
+    nmu.tick(); EXPECT_TRUE(nmu.axi_slave_port().pop_r().has_value());  // 2 base + 2 extra
 }
 ```
-(Add `ni_rsp_extra_depth` and the analogous per-path knobs to `NmuConfig`/`NsuConfig`, default 0; document each in the config struct.)
-
-- [ ] **Step 2: Run (expect fail).**
-
-- [ ] **Step 3: Implement** the rsp staging + reorder-as-1-cycle-lookup + ROBLESS retire hook + depth knobs.
-
-- [ ] **Step 4: Run (expect pass) + full NMU/NSU regression** — `ctest -R "NmuPipeline|Nmu_|Nsu" --output-on-failure`. Expected: all pass. Also run `ctest -R rob` to confirm Rob unit tests still pass (audit any that assumed multi-beat-per-tick, R1).
-
-- [ ] **Step 5: commit** — `git commit -m "feat(ni): stage the NMU response path + ROB/ROBLESS modes + depth knobs"`
+- [ ] **Step 2:** run → FAIL.
+- [ ] **Step 3:** implement req staging, then rsp staging + the §6.1 ROB Enabled contract + ROBLESS retire + depth knobs. Add NSU/NMU rsp+req token structs to `ni_tokens.hpp` as needed.
+- [ ] **Step 4: run + full NMU/NSU/Rob regression** — `ctest -R "NmuPipeline|Nmu_|Nsu|rob" --output-on-failure`. Expected: all pass. Audit `test_rob.cpp` for any "all beats after one tick / one pop" assumption (R1) and update.
+- [ ] **Step 5:** clang-format + commit `feat(ni): NMU req+rsp staging + ROB/ROBLESS modes + depth knobs`.
 
 ---
 
-### Task 7: Integration regression, co-sim, and docs
+### Task 6: Integration regression, co-sim, docs
 
-**Files:**
-- Modify: affected integration/unit tests (watchdog bounds, direct-submodule cardinality), `docs/performance-probe.md`
-- Verify: co-sim still builds + runs
+**Files:** affected integration/unit tests; `docs/performance-probe.md`. Verify co-sim.
 
-**Interfaces:** none new.
-
-- [ ] **Step 1: Full c_model regression**
-
-Run: `make build-cmodel PYTHON3=/c/msys64/mingw64/bin/python3 && cd build/cmodel && ctest --output-on-failure`
-Fix fallout: raise `kMaxCycles` watchdog bounds in `test_request_response_loopback.cpp` / `test_port_pair_loopback.cpp` if staging pushed total cycles over the bound (R6); update any direct submodule unit test that asserted "all beats visible after one tick" to tick the staged number of times (R1). Update the stale "single tick sufficient" comments (`test_nmu.cpp:136-138`, `test_nsu.cpp:117`).
-
-- [ ] **Step 2: Co-sim build + run**
-
-Run: `make build-verilator PYTHON3=/c/msys64/mingw64/bin/python3 && cd cosim/verilator && make run-tb-top SCENARIO=AX4-BAS-003_single_write_read_aligned`
-Expected: builds, scoreboard 0 mismatches. End-to-end latency rises (NI is now a real pipeline) — confirm the run still passes and emits `perf.json`.
-
-- [ ] **Step 3: Rewrite the perf-doc fidelity section**
-
-In `docs/performance-probe.md`, replace the "Latency composition and pipeline fidelity" section: NI is now a **real pipeline** (NMU req 3 / rsp 3 / NSU req 2 / rsp 3), no longer a co-sim wrap artifact. Keep the wrapper-register note (still a separate co-sim boundary cost per spec §7). Update the worked example numbers from a fresh measured run. Remove the "NI pipeline model planned" line from Known limitations (now done).
-
-- [ ] **Step 4: commit**
-
-```bash
-git add -A
-git commit -m "test(ni): fix regressions for staged NI; co-sim verified; perf-doc fidelity rewrite"
-```
+- [ ] **Step 1: full c_model regression** — `make build-cmodel ... && cd build/cmodel && ctest --output-on-failure`. Raise `kMaxCycles` watchdogs (`test_request_response_loopback.cpp`, `test_port_pair_loopback.cpp`) if staging pushed totals over bound (R6); update stale "single tick sufficient" comments (`test_nmu.cpp:136`, `test_nsu.cpp:117`); verify endpoint `pending_` credit accounting still holds (R5).
+- [ ] **Step 2: co-sim** — `make build-verilator PYTHON3=/c/msys64/mingw64/bin/python3 && cd cosim/verilator && make run-tb-top SCENARIO=AX4-BAS-003_single_write_read_aligned`. Expected: builds, scoreboard 0 mismatches, perf.json emitted; end-to-end latency higher (NI now real pipeline).
+- [ ] **Step 3: perf-doc rewrite** — `docs/performance-probe.md` "pipeline fidelity": NI is now a real pipeline (3/3/2/3), not a wrap artifact; keep the wrapper-register note (separate, spec §7); refresh worked-example numbers from a fresh run; drop "NI pipeline model planned" from Known limitations.
+- [ ] **Step 4:** commit `test(ni): integration+co-sim regression; perf-doc fidelity rewrite`.
 
 ---
 
 ## Self-Review
 
-**Spec coverage:**
+**Spec coverage:** §4 stage allocation → T3/T4/T5; §5.0-5.3 register-parked + tokens + arbiter final-stage + bounded advance → T1 (primitive/tokens) + T3/T4/T5; §6 ORDERING_MODE + §6.1 ROB Enabled contract → T5; §7 boundary attribution → stage_occupancy in T2-T5 + T6 perf-doc; §8 validation (advance/latency/backpressure/reorder/ROB-ROBLESS/depth) → T1/T3/T4/T5 tests; §8 API → T2 scaffold + T3/T4/T5 fill; §7 consequences (tests/perf-doc) → T6.
 
-| Spec section | Task |
-|---|---|
-| §4 stage allocation (3/3/2/3) | T3 (NSU req 2), T4 (NSU rsp 3), T5 (NMU req 3), T6 (NMU rsp 3) |
-| §5 stage register + reverse-order tick + valid/ready + per-channel throughput + depth + cycle epoch | T1 (primitive), T3-T6 (per path), T6 (depth knob) |
-| §5 reorder hold = finite occupancy not depth | T6 |
-| §6 ORDERING_MODE = RobMode (ROB/ROBLESS) + retire hook | T6 |
-| §7 boundary attribution (internal stages, wrapper separate) | T3-T6 measure at `stage_occupancy`; T7 perf-doc |
-| §8 validation (per-stage advance, latency=count, backpressure, reorder, ROB/ROBLESS, depth) | T1, T3-T6 tests |
-| §8 `stage_occupancy(NiPath,stage,axi_ch)` API | T2 scaffold, T3-T6 fill |
-| §3 scope (ECC/CDC excluded) | not implemented (correct) |
-| §7 consequence: tests + perf-doc | T7 |
+**Placeholder scan:** test helpers (`inject_single_ar_flit`, `seed_meta_for_b`, `make_b_beat`, `inject_single_r_flit`, `make_ar_beat`) are implemented in their first-using task (T3/T4/T5), modeled on existing `test_nsu_*`/`test_nmu_*` flit encoders; named, not deferred. Mechanism detail lives in spec §5 (referenced, not restated). No TBD.
 
-**Placeholder scan:** test helpers (`inject_single_ar_flit`, `make_b_beat`, `seed_meta_for_b`, `inject_single_r_flit`) are named and their role specified; they are modeled on existing `test_nmu_*`/`test_nsu_*` flit-injection helpers (the implementer copies the established pattern). No TBD/TODO. The per-submodule "bound the while-loop to one beat" edits reference exact current line ranges from the Explore so they are locatable.
+**Type consistency:** `PipelineStage<Token>` API uniform T1→T5; `stage_occupancy(NiPath, std::size_t, uint8_t)` identical everywhere; token structs centralized in `ni_tokens.hpp`; depth knobs `ni_req_extra_depth`/`ni_rsp_extra_depth` consistent.
 
-**Type consistency:** `PipelineStage<Beat>` (T1) API (`full/ready/occupancy/peek/accept/take/clear`) is used uniformly in T3-T6. `stage_occupancy(NiPath, std::size_t, uint8_t)` (T2) signature is identical everywhere it is filled. `NiPath` enumerators match spec §4.
+**Sequencing safety:** T3 (NSU req) is the spike; T4 establishes the arbiter final-stage; T5 combines both NMU paths (shared Rob) so no two workers edit `rob.hpp` concurrently. Each path task re-runs the prior path's tests (T4 re-runs Nsu_, T5 re-runs Nmu_+Nsu+rob) to catch shared-file regressions. T6 is the integration net.
 
-**Risk-coverage:** R1 (T3-T7 bound loops + test fixes), R2 (T5 break the chain), R3 (T6 confine chain-flush), R4 (T3-T6 preserve side-effect atomicity, called out per task), R5 (T3/T6 Depacketize cardinality — verify endpoint `pending_` counters), R6 (T7 watchdog bounds).
-
-**Open dependency for the implementer:** the exact per-submodule edit (converting each `while`-drain to one-beat advance while preserving backpressure/`pending_`/MetaBuffer/`w_meta_fifo_` semantics) is the substantive work; each task names the file:line and the invariant to preserve. Tasks 3→6 are ordered easiest→hardest so the router-mirrored pattern is proven on NSU-req before the Rob paths.
+**Risk coverage:** R1 (T3-T6 bound loops + test audits), R2 (T3/T5 break the chain via stage registers), R3 (T5 per spec §6.1 contract), R4 (T3-T5 commit-on-stage-push), R5 (T6 endpoint counters), R6 (T6 watchdogs).
