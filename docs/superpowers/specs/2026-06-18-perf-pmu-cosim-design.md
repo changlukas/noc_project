@@ -20,7 +20,7 @@ out at end of run. The probe is non-intrusive (passive observation only).
 |---|---|
 | AXI-REALM (PULP, arXiv 2501.10161 / 2311.09662) | "Latency is measured online as a single run." Per-manager monitor at AXI ingress/egress; AXI-id outstanding tracking (DOTQ: Head-Tail + Linked-Data tables); memory-mapped register readout. No isolated characterization pass for the online output. |
 | Ciordas et al., Event-Based Monitoring Service for NoC (TODAES 2005) + Transaction Monitoring in NoC | Hardware probes integrated into the running NoC at NI/router/link; run-time, single-run; only the NI sees end-to-end transaction identity. |
-| AMD AXI Performance Monitor (PG037) | Per-AXI-interface "slot"; 6 profile counters/slot (write/read byte count, transaction count, latency count); latency = Address-Accept (AxVALID&AxREADY) to Last-Data (xLAST&xVALID&xREADY); sample-interval snapshots; AXI-ID filter; register readout. |
+| AMD AXI Performance Monitor (PG037) | Per-AXI-interface "slot"; 6 profile counters/slot (write/read byte count, transaction count, latency count); latency start = Address-Accept (AxVALID&AxREADY); end = RLAST for reads, B-response (BVALID&BREADY) for writes (a write completes at its response, not at WLAST); sample-interval snapshots; AXI-ID filter; register readout. |
 
 Conclusion: the standard is **single-run, counter/event-based, in-fabric**. The
 two-pass per-signature `zero_load` (a Dally-textbook construct) is not how
@@ -51,7 +51,13 @@ Per-slot counters (PG037's six + survey additions):
 | latency min / max | per-slot extrema |
 | outstanding max | peak in-flight (DOTQ depth) |
 
-- Latency per transaction = `Last-Data cycle - Address-Accept cycle`. Correlation
+- Latency per transaction = completion cycle - address-accept cycle, where the
+  end event differs by direction: **read** ends at RLAST (`RLAST & RVALID &
+  RREADY`); **write** ends at the **B response** (`BVALID & BREADY`), NOT at WLAST
+  -- a write transaction is not complete until its response returns, so measuring
+  to WLAST (write-data done) would understate write latency by the
+  data-to-response gap. Start event = address accept (`AWVALID&AWREADY` for write,
+  `ARVALID&ARREADY` for read). Correlation
   must handle MULTIPLE outstanding transactions with the SAME AXI id: a single
   `start[id]` is wrong (a second same-id issue overwrites the first). Use a
   per-(id, direction) FIFO of issue cycles; on completion, pop the FRONT of that
