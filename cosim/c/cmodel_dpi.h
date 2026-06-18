@@ -48,6 +48,7 @@ void cmodel_perf_axi_backpressure(const char* slot, long long slave_write_idle_c
 void cmodel_perf_link(const char* name, long long flit_count, long long stall_cyc);
 void cmodel_perf_sample_tick(void);
 void cmodel_perf_dump(const char* path);
+void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 
 // Per-shell DPI signatures appended by Tasks 5-11.
 // ChannelModel (Task 5) — NoC-only, simplest shell; first chandle migration:

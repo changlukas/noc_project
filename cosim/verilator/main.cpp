@@ -18,6 +18,7 @@
 extern "C" void cmodel_finalize(void);
 extern "C" void cmodel_perf_sample_tick(void);
 extern "C" void cmodel_perf_dump(const char* path);
+extern "C" void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 
 // Legacy SystemC timestamp stub.
 // IMPORTANT: must NOT call VerilatedContext::time() — doing so triggers
@@ -58,6 +59,13 @@ int main(int argc, char** argv) {
         if (m.rfind("+perf_out=", 0) == 0) perf_path = m.substr(10);
     }
 
+    // +perf_scenario=<name>: scenario label written into perf.json "scenario" field.
+    std::string perf_scenario;
+    {
+        const std::string m = contextp->commandArgsPlusMatch("perf_scenario=");
+        if (m.rfind("+perf_scenario=", 0) == 0) perf_scenario = m.substr(15);
+    }
+
     top->clk_i = 0;
     top->rst_ni = 0;
     top->eval();
@@ -71,7 +79,8 @@ int main(int argc, char** argv) {
         top->clk_i = 1;
         top->rst_ni = (cycle >= RESET_CYCLES) ? 1 : 0;
         top->eval();
-        // Sample router occupancy once per rising-edge cycle.
+        // Sample router occupancy once per rising-edge cycle (posedge-stable
+        // occupancy); the falling-edge half-cycle is intentionally not sampled.
         cmodel_perf_sample_tick();
 #if VM_TRACE
         tfp->dump(contextp->time());
@@ -106,6 +115,7 @@ int main(int argc, char** argv) {
     // top->final() executes SV final blocks (monitor DPI callbacks → g_perf).
     // cmodel_perf_dump must follow so g_perf is fully populated.
     top->final();
+    cmodel_perf_set_run(perf_scenario.c_str(), static_cast<long long>(cycle));
     cmodel_perf_dump(perf_path.c_str());
     return contextp->gotError() ? 1 : 0;
 }

@@ -1016,3 +1016,8 @@ extern "C" void cmodel_perf_sample_tick() {
 extern "C" void cmodel_perf_dump(const char* path) {
     g_perf.dump(path);
 }
+
+extern "C" void cmodel_perf_set_run(const char* scenario, long long total_cyc) {
+    g_perf.set_scenario(scenario);
+    g_perf.set_window(0, static_cast<uint64_t>(total_cyc));
+}
