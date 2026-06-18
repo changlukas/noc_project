@@ -123,16 +123,18 @@ Our C objects mirror these one-to-one:
 | ID Filter & Mask (Fig 1-2) | optional per-AXI-id selection -> per-id latency/count breakdown |
 | Metric Enable Generator + Metric Selector Mux (Fig 1-2) | which metric a counter accumulates (latency / byte / txn) -- config |
 | Accumulator (Fig 1-3) | running sum/count counter |
-| Sampled Accumulator (Fig 1-4) | snapshot at the sample-interval boundary (Δ -> window throughput/latency) |
+| Sampled Accumulator (Fig 1-4) | **DEFERRED** -- the first target is a single window (Section 5); periodic interval snapshots / time-series are not produced |
 | Range Incrementer, Range LOW/HIGH (Fig 1-3) | latency-distribution bins: count transactions whose latency falls in `[LOW, HIGH)` -> a configurable latency histogram |
 | Registers + AXI4-Lite (Fig 1-1) | the readout struct (dumped via DPI; no AXI4-Lite master needed) |
 | Event Log + AXI4-Stream (Fig 1-1) | trace stream -- DEFERRED (profile/count mode first) |
-| Timer (Fig 1-4) | the sample-window driver |
+| Timer (Fig 1-4) | **not used for periodic sampling**; only `+perf_start`/`+perf_end` gate a single window (Section 5) |
 
 This adds two items over the bare counter set: an **ID filter** (per-id
 breakdown) and a **Range Incrementer** (latency histogram bins), both first-class
-in PG037. Profile mode (counters + sampled accumulators) is the first target;
-the Event-Log/AXI4-Stream trace path is deferred.
+in PG037. First target = counters + latency histogram + per-id breakdown over a
+**single window**. Periodic sampled accumulators (time-series) and the
+Event-Log/AXI4-Stream trace path are **deferred** -- consistent with Section 5's
+single-run, no-second-pass scope and the Section 5.1 schema (no time-series array).
 
 ## 4. Implementation: hybrid (SV AXI slots + C/DPI internal), unified dump
 
