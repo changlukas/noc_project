@@ -749,14 +749,37 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
                 ch.nmu_req_out(0), ch.nmu_rsp_in(0), ch.nsu_req_in(1), ch.nsu_rsp_out(1));
     uint64_t now = 0;
     NIPerfObserver ni_b(now, "B");
-    flow_b.master().on_write_issued(
-        [&](const axi::IssueInfo& i) { ni_b.on_issue(true, i.scenario_line); });
-    flow_b.master().on_write_completed(
-        [&](const axi::WriteResult& w) { ni_b.on_complete(true, w.scenario_line); });
-    flow_b.master().on_read_issued(
-        [&](const axi::IssueInfo& i) { ni_b.on_issue(false, i.scenario_line); });
-    flow_b.master().on_read_observed(
-        [&](const axi::ReadResult& r) { ni_b.on_complete(false, r.scenario_line); });
+
+    // Per-scenario_line latency map: records each transaction's OWN latency
+    // (issue cycle -> completion cycle) rather than the aggregate min over all
+    // write or read transactions.
+    std::map<std::size_t, uint64_t> issue_cycle;
+    std::map<std::size_t, uint64_t> txn_latency;
+
+    flow_b.master().on_write_issued([&](const axi::IssueInfo& i) {
+        ni_b.on_issue(true, i.scenario_line);
+        issue_cycle[i.scenario_line] = now;
+    });
+    flow_b.master().on_write_completed([&](const axi::WriteResult& w) {
+        ni_b.on_complete(true, w.scenario_line);
+        auto it = issue_cycle.find(w.scenario_line);
+        if (it != issue_cycle.end()) {
+            txn_latency[w.scenario_line] = now - it->second;
+            issue_cycle.erase(it);
+        }
+    });
+    flow_b.master().on_read_issued([&](const axi::IssueInfo& i) {
+        ni_b.on_issue(false, i.scenario_line);
+        issue_cycle[i.scenario_line] = now;
+    });
+    flow_b.master().on_read_observed([&](const axi::ReadResult& r) {
+        ni_b.on_complete(false, r.scenario_line);
+        auto it = issue_cycle.find(r.scenario_line);
+        if (it != issue_cycle.end()) {
+            txn_latency[r.scenario_line] = now - it->second;
+            issue_cycle.erase(it);
+        }
+    });
 
     std::size_t cycle = 0;
     const std::size_t cap = 100000;
@@ -771,6 +794,12 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
                                << " cycles";
     EXPECT_EQ(flow_b.mismatches(), 0u) << "scenario " << id << " scoreboard mismatch";
 
+    // slave_remainder: computed from the canonical-flow component decomposition
+    // (zero_load - sum_component). This is path-shape-invariant for the 2-node
+    // fabric; the same path applies to all scenarios in this suite.
+    const uint64_t sum_comp = sum_component_latency(iso);
+    const uint64_t slave_rem = iso.write_zero_load >= sum_comp ? iso.write_zero_load - sum_comp : 0;
+
     // One transactions[] row per real transaction; signature-keyed floor check.
     const std::string scenario_prefix = id.substr(0, 11);  // "AX4-XXX-NNN"
     PerfReport rep;
@@ -778,11 +807,12 @@ TEST_P(PerfProbeScenario, DrivesAllTransactionsAndEmits) {
     rep.set_run_meta(RunMeta{scenario_prefix, 2, 1, static_cast<uint8_t>(num_vc), cycle,
                              src.transactions.size(),
                              "build/cmodel/perf/" + scenario_prefix + ".json"});
-    rep.set_slave_remainder(0);
+    rep.set_slave_remainder(slave_rem);
     for (const auto& t : src.transactions) {
         const bool w = (t.op == axi::ScenarioTransaction::Op::Write);
-        const auto& lat_stats = w ? ni_b.write_latency() : ni_b.read_latency();
-        const uint64_t measured = lat_stats.count() ? lat_stats.min() : 0;
+        // Per-transaction latency: each transaction's own (complete - issue) cycles.
+        const uint64_t measured =
+            txn_latency.count(t.scenario_line) ? txn_latency.at(t.scenario_line) : 0;
         const Signature sig = signature_of(t, src.config, 0, 1);
         const uint64_t zl = sig_zero_load.count(sig) ? sig_zero_load.at(sig) : 0;
         rep.add_transaction(TxnRecord{t.scenario_line, w ? "write" : "read", t.id, "NMU0", "NSU1",
