@@ -77,14 +77,18 @@ def print_latency(latency, slots):
             svc = s["service_latency"]
             w = svc.get("write", {})
             r = svc.get("read", {})
+            w_str = str(w.get("min", "?")) if s.get("write_txn_count", 0) > 0 else "n/a"
+            r_str = str(r.get("min", "?")) if s.get("read_txn_count", 0) > 0 else "n/a"
             print("    slave service @{}: write {}  read {}".format(
-                s.get("name", "?"), w.get("min", "?"), r.get("min", "?")))
+                s.get("name", "?"), w_str, r_str))
 
 
 def print_noc(noc):
-    _hdr("  NoC")
     routers = noc.get("routers", [])
     links = noc.get("links", [])
+    if not routers and not links:
+        return
+    _hdr("  NoC")
     rfmt = "    {:<16} {:>10} {:>11}"
     lfmt = "    {:<18} {:>4} {:>5}"
     print(rfmt.format("router", "in_occ_max", "out_occ_max") +

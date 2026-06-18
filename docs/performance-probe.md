@@ -40,9 +40,11 @@ Full JSON schema: spec §5.1 (`docs/superpowers/specs/2026-06-18-perf-pmu-cosim-
 | Write end | B-response: `BVALID & BREADY` |
 
 **Write-end divergence from PG037:** PG037 measures write latency to first/last
-write data (WLAST). This probe measures to the B-response (transaction
-completion), matching AXI-REALM semantics. WLAST-to-B-response cycles are
-included; measuring to WLAST would understate write latency.
+write data (WLAST). This probe measures to the B-response, because a write
+transaction is not architecturally complete until the initiator receives its
+B-response — WLAST-to-B-response cycles are real latency the initiator must
+wait for. Measuring to WLAST understates the latency a manager observes
+(AXI-REALM [UNVERIFIED external paper] makes the same argument).
 
 Same-id correlation: the AXI monitors maintain a per-(id, direction) FIFO of
 issue cycles. On completion, the FRONT of the FIFO is popped. This correctly
