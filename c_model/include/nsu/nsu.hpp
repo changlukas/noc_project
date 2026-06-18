@@ -13,9 +13,13 @@
 //     (reads meta from MetaBuffer) ──> WormholeArbiter<NocRspOut>(2 in,
 //     no pairing) ──> VcArbiter ──> external NocRspOut
 //
-// Per-cycle tick order (S2-before-S1 on the req path):
-//   axi_master_port_.tick(); depacketize_.tick();
-//   wormhole_arbiter_.tick(); vc_arbiter_.tick();
+// Per-cycle tick order: reverse-order staged pipeline (spec §5.3) — later
+// stages drain before earlier stages fill, so a beat advances one stage/tick:
+//   wormhole_arbiter_.tick(); vc_arbiter_.tick();  // rsp S3 (-> NoC)
+//   packetize_.tick();                             // rsp S2
+//   axi_master_port_.tick();                       // rsp S1 + req S2
+//   depacketize_.tick();                           // req S1
+// See the per-stage commentary in Nsu::tick() below.
 //
 // Lifetime: Nsu deletes move/copy. Member order respects ctor ref deps.
 //
@@ -77,7 +81,7 @@ class Nsu {
             return depacketize_.s1_occupancy(axi_ch);
         }
         if (path == NiPath::NsuRsp) {
-            // NsuRsp has 3 stages (spec §4):
+            // NsuRsp has 3 stages (spec §5.0-5.2):
             //   S0 = S1 reg in Packetize (accepted B/R beat, pre-transform)
             //   S1 = S2→S3 boundary (WormholeArbiter pending queue)
             //   S2 = VcArbiter pending queue (toward NoC)
