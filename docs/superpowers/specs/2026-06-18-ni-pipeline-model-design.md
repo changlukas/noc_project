@@ -1,7 +1,7 @@
 # NMU/NSU pipeline model (NI microarchitecture)
 
 Date: 2026-06-18
-Status: Draft rev 2 (Codex round 1 applied: mechanism pinned, address-map →
+Status: Draft rev 3 (Codex round 2 clean: stage_occupancy introspection API named, rob citation fixed; all 6 round-1 items resolved)
 NMU-req S1, NSU-rsp WormholeArbiter added, ORDERING_MODE = existing RobMode,
 co-sim boundary attribution decided, validation made executable)
 
@@ -52,7 +52,7 @@ columns = a pipeline register boundary.
 
 | Path | Direction | S1 | S2 | S3 | Stages |
 |---|---|---|---|---|---|
-| **NMU req** | AXI→NoC | `AxiSlavePort` accept (AW/W/AR) + `Rob` admit/allocate + **Address Map** (`xy_route` dst, in `Rob::push_aw/ar`, `rob.hpp:180/191`) | `Packetize` consumes precomputed route/meta, builds flit | `WormholeArbiter`+`VcArbiter` (VC mapping + arbitration) → NoC | 3 |
+| **NMU req** | AXI→NoC | `AxiSlavePort` accept (AW/W/AR) + `Rob` admit/allocate + **Address Map** (`xy_route` dst, in `Rob::push_aw`/`push_ar`, `rob.hpp:180/218`) | `Packetize` consumes precomputed route/meta, builds flit | `WormholeArbiter`+`VcArbiter` (VC mapping + arbitration) → NoC | 3 |
 | **NMU rsp** | NoC→AXI | `Depacketize` (flit → AXI beat) | `Rob` Re-Ordering (read **and** write) | `AxiSlavePort` → master | 3 |
 | **NSU req** | NoC→slave | `Depacketize` (+ `MetaBuffer` snapshot) | `AxiMasterPort` → slave | — | 2 |
 | **NSU rsp** | slave→NoC | `AxiMasterPort` accept (B/R) | `Packetize` (read `MetaBuffer`) | `WormholeArbiter`+`VcArbiter` (arbitration) → NoC | 3 |
@@ -152,10 +152,22 @@ independently, as today.
 
 ## 8. Validation
 
-Latency is measured at **internal stage boundaries** (per-stage occupancy probe /
-per-component getter), excluding the co-sim wrapper register (§7). Cycle epoch =
-accept handshake (§5). Each path has a per-stage occupancy getter (the introspection
-hook the checks below consume).
+Latency is measured at **internal stage boundaries**, excluding the co-sim wrapper
+register (§7). Cycle epoch = accept handshake (§5).
+
+**Introspection API (the hook the checks below consume).** `Nmu` and `Nsu` each
+expose a const getter, analogous to `Router::input_fifo_size(port, vc)`:
+
+```cpp
+// beats currently held in stage register [stage] of [path] for AXI channel [axi_ch]
+std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const;
+```
+
+where `NiPath ∈ {NmuReq, NmuRsp, NsuReq, NsuRsp}`, `stage` is the 0-based stage
+index within that path, and `axi_ch` follows `ni_flit_constants` (AW=0…R=4). The
+getter lives on `Nmu`/`Nsu` (surfaced through the shell adapters for co-sim
+introspection, as the router getters already are). For ROB occupancy the existing
+`Rob::write_occupancy()`/`read_occupancy()` are reused.
 
 | Check | Hook / method | Proves |
 |---|---|---|
