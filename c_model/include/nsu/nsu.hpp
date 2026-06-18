@@ -24,6 +24,7 @@
 //
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
+#include "nmu/ni_stage.hpp"
 #include "noc/noc_req_in.hpp"
 #include "noc/noc_rsp_out.hpp"
 #include "noc/wormhole_arbiter.hpp"
@@ -69,6 +70,13 @@ class Nsu {
     AxiMasterPort& axi_master_port() noexcept { return axi_master_port_; }
 
     void tick();
+
+    std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
+        (void)path;
+        (void)stage;
+        (void)axi_ch;
+        return 0;  // filled per-path in later tasks
+    }
 
   private:
     // Declaration order:
@@ -250,6 +258,9 @@ class NsuStandalone {
 
     AxiMasterPort& axi_master_port() noexcept { return nsu_.axi_master_port(); }
     void tick() { nsu_.tick(); }
+    std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
+        return nsu_.stage_occupancy(path, stage, axi_ch);
+    }
     Nsu& nsu() noexcept { return nsu_; }
 
     // Stage 5b ShellAdapter accessors — inject req side, drain rsp side.

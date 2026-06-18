@@ -28,6 +28,7 @@
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
 #include "nmu/axi_slave_port.hpp"
+#include "nmu/ni_stage.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
@@ -82,6 +83,12 @@ class Nmu {
     // Test introspection (optional getters; add only as test code needs)
     const Rob& rob() const noexcept { return rob_; }
     const VcArbiter& vc_arbiter() const noexcept { return vc_arbiter_; }
+    std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
+        (void)path;
+        (void)stage;
+        (void)axi_ch;
+        return 0;  // filled per-path in later tasks
+    }
 
   private:
     // Declaration order respects ctor ref dependencies:
@@ -273,6 +280,9 @@ class NmuStandalone {
     void tick() { nmu_.tick(); }
     const Rob& rob() const noexcept { return nmu_.rob(); }
     const VcArbiter& vc_arbiter() const noexcept { return nmu_.vc_arbiter(); }
+    std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
+        return nmu_.stage_occupancy(path, stage, axi_ch);
+    }
     Nmu& nmu() noexcept { return nmu_; }
 
     // Stage 5b ShellAdapter accessors — drain req side, inject rsp side.
