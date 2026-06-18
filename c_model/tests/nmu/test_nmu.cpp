@@ -133,9 +133,9 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     b_flit.set_payload_field("B", "buser", 0);
     nmu.inject_rsp_flit(b_flit);
 
-    // Drain the response side. Depacketize.tick() ingests the flit; the
-    // AxiSlavePort.tick() that follows in the same Nmu.tick() pulls it
-    // into b_q_. So a single nmu.tick() is sufficient, but loop for slack.
+    // Drain the response side. NMU rsp is a 2-stage (ROBLESS) or 3-stage (ROB)
+    // pipeline: Depacketize → (Rob stage) → AxiSlavePort. The flit needs
+    // multiple ticks to traverse the stages; loop up to 8 for slack.
     std::optional<axi::BBeat> b_out;
     for (int i = 0; i < 8 && !b_out; ++i) {
         nmu.tick();

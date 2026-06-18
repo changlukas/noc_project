@@ -77,35 +77,55 @@ transactions) min equals the no-queueing network floor.
 
 ## Latency composition and pipeline fidelity
 
-End-to-end latency has three sources, only one of which is a real pipeline. For a
-single 32-byte transaction (AX4-BAS-003, AxSIZE=5, AxLEN=0, 2-node tb_top), the
-measured write round-trip of 21 cycles decomposes as:
+End-to-end latency has three sources, all now reflecting real microarchitecture.
+For a single 32-byte transaction (AX4-BAS-003, AxSIZE=5, AxLEN=0, 2-node tb_top),
+the measured round-trip decomposes as:
+
+**Write (27 cycles measured):**
 
 | Source | Cycles | Nature |
 |---|---|---|
-| Router pipeline | 12 | real 3-stage registered pipeline × 4 traversals (request + response, 2 routers each) |
-| NI boundary crossings | 6 | co-sim shell artifact (see below) + AXI/credit handshake |
+| NI pipeline (NMU req + NSU req + NSU rsp + NMU rsp) | 10 | real register-parked staged pipeline (3 + 2 + 3 + 2 stages, ROBLESS) |
+| Router pipeline | 12 | real 3-stage registered pipeline × 4 traversals (req + rsp, 2 routers each) |
 | Slave service | 3 | memory model `write_latency` + slave-edge handshake |
+| Co-sim shell boundary (residual) | 2 | `*_wrap.sv` registered output per module-boundary crossing (see below) |
+
+**Read (28 cycles measured):**
+
+| Source | Cycles | Nature |
+|---|---|---|
+| NI pipeline | 10 | same 4-path staged pipeline as write |
+| Router pipeline | 12 | same 4 traversals |
+| Slave service | 2 | memory model `read_latency` |
+| Co-sim shell boundary (residual) | 4 | same `*_wrap.sv` artifact; read R-beat path adds 1 extra boundary cycle vs. write B-beat |
+
+**NI stage allocation (ROBLESS mode, co-sim default):**
+
+| Path | S1 | S2 | S3 | Stages |
+|---|---|---|---|---|
+| NMU req (AXI→NoC) | `AxiSlavePort` + `Rob` alloc | `Packetize` | `WormholeArbiter` + `VcArbiter` | 3 |
+| NSU req (NoC→slave) | `Depacketize` + `MetaBuffer` snapshot | `AxiMasterPort` drain | — | 2 |
+| NSU rsp (slave→NoC) | `AxiMasterPort` accept (B/R) | `Packetize` | `WormholeArbiter` + `VcArbiter` | 3 |
+| NMU rsp (NoC→AXI, ROBLESS) | `Depacketize` | `AxiSlavePort` push | — | 2 |
+| NMU rsp (NoC→AXI, ROB Enabled) | `Depacketize` | `Rob` re-order stage | `AxiSlavePort` push | 3 |
 
 - **Router is a real pipeline.** `Router` advances a flit one stage per tick
   through landing → input FIFO → output FIFO (`c_model/include/noc/router.hpp`,
-  3 stages). Each traversal costs 3 cycles. Routers account for 12 of the 21
-  cycles (57%).
-- **NMU and NSU have no internal pipeline.** Their `tick()` is upstream-first and
-  propagates a beat through all internal stages combinationally within one tick
-  when unblocked (`c_model/include/nmu/nmu.hpp:135`,
-  `c_model/include/nsu/nsu.hpp:118`). Internal pipeline depth is 0 stages. The
-  queues they hold are elastic/reorder/handshake state, not fixed pipeline
-  registers.
-- **The per-boundary NI latency is a co-sim wrapping artifact.** Each `*_wrap.sv`
-  registers its component outputs once per clock (`set_inputs → tick →
-  get_outputs → registered output`), adding 1 cycle per module-boundary crossing
-  regardless of internal logic. The 6 NI-boundary cycles are this shell register
-  plus AXI/credit handshake, not NI microarchitecture.
+  3 stages). Four traversals (request path: 2 routers; response path: 2 routers)
+  = 12 cycles.
+- **NI is now a real staged pipeline.** Each NMU/NSU sub-module is register-parked;
+  a beat advances exactly one stage per tick. The reverse-order tick (later stages
+  drain before earlier fill) enforces no same-tick double-advance, matching the
+  router model. NI accounts for 10 of the 27 write cycles (37%).
+- **Co-sim shell boundary (separate, residual cost).** Each `*_wrap.sv` registers
+  its DPI outputs once per clock (`set_inputs → tick → get_outputs → registered
+  output`), adding 1 cycle per module-boundary crossing. This is a Verilator
+  co-sim artifact, not NI microarchitecture. It is accounted separately and does
+  not fold into the NI stage count.
 
-Fidelity boundary: router latency reflects real microarchitecture; NI latency
-does not. A consumer of `perf.json` must read the NI contribution as co-sim
-boundary cost, not silicon NI pipeline depth.
+Fidelity boundary: all three sources (NI pipeline, router pipeline, slave service)
+now reflect real microarchitecture. The only non-architectural cost is the co-sim
+shell boundary, clearly isolated in the table above.
 
 ## Non-intrusive
 
@@ -116,9 +136,6 @@ identical scoreboard result and identical per-transaction completion cycles.
 
 ## Known limitations
 
-- **NI pipeline fidelity:** NMU/NSU are 0-cycle functional models; their measured
-  latency is co-sim boundary cost, not a real pipeline. A real NI pipeline model
-  is planned (the NI is DUT and will be implemented in RTL).
 - **Window gating:** `+perf_start`/`+perf_end` are not implemented; the window is
   the whole run.
 - **Stress coverage:** `stall_cyc` and the AXI idle counters are exercised only on

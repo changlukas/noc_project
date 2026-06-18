@@ -113,8 +113,9 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     w_flit.set_payload_field("W", "wstrb", 0xF);
     nsu.inject_req_flit(w_flit);
 
-    // Drain the downstream AXI face. Pipeline depth:
-    // NullNocReqIn -> Depacketize -> AxiMasterPort each one tick boundary.
+    // Drain the downstream AXI face. NSU req is a 2-stage pipeline:
+    // Depacketize (S1) → AxiMasterPort drain (S2). Flit needs ≥2 ticks;
+    // loop up to 16 for slack and multi-beat bursts.
     std::optional<axi::AwBeat> aw_out;
     std::optional<axi::WBeat> w_out;
     for (int i = 0; i < 16 && !(aw_out && w_out); ++i) {
