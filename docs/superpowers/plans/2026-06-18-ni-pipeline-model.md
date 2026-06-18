@@ -162,18 +162,33 @@ git add -A && git commit -m "feat(ni): PipelineStage primitive + inter-stage tok
 
 ---
 
-### Task 3: NSU req vertical slice (register-parked spike, 2 stages)
+### Task 3: AxiMaster write→read ordering (prereq) + NSU req vertical slice (2 stages)
 
-**Why first / spike:** NSU req (`Depacketize → AxiMasterPort → slave`) has no Rob and no arbiter — it proves the register-parked refactor (spec §5.0) end-to-end on the least-coupled path before the harder ones.
+Two coupled deliverables in one task: the staged NSU-req path correctly exposes a
+read racing an in-flight write (AXI4-legal, spec §5.4), so the burst data-integrity
+scenarios only pass once the **originating master** orders write→read per AXI4. Both
+must land together; **burst-scenario coverage is kept, never deleted.**
 
-**Files:** `c_model/include/nsu/nsu.hpp`, `c_model/include/nsu/depacketize.hpp`, `c_model/include/nsu/axi_master_port.hpp`; test `c_model/tests/nsu/test_nsu_pipeline.cpp` (+ CMake).
+**Part A — AxiMaster RAW ordering (prerequisite, spec §5.4).**
+- File: `c_model/include/axi/axi_master.hpp` (the scenario-driver master). Test: `c_model/tests/axi/test_axi_master_raw_order.cpp` (+ CMake).
+- Mechanism: before admitting/issuing a read, check whether its address range overlaps any **outstanding write** (issued, `B` not yet observed). If so, **hold the read** until that write's `B` arrives (the master already tracks write completion via `on_write_completed`, the B-driven signal used by the scoreboard — `test_port_pair_loopback.cpp:231`, `scoreboard.hpp:26`). Track outstanding-write address ranges `{addr, (len+1)<<size}`; release held reads on the matching `B`. Reads to non-overlapping addresses are NOT held (preserve concurrency). Do NOT add ordering to NSU `AxiMasterPort` — it is a transparent transport (spec §5.4).
+- This is AXI4 §A5.3.4 master behavior; it changes nothing on the 0-cycle model except the read now waits for `B` (the read still sees the written data).
 
-**Interfaces:** Consumes `PipelineStage`/tokens (T1), `NiPath` (T2). Produces the register-parked pattern + the reusable flit-injection test helper for NSU; fills `stage_occupancy(NsuReq,…)`.
+**Part B — NSU req register-parked staging (2 stages).**
+- Files: `c_model/include/nsu/nsu.hpp`, `c_model/include/nsu/depacketize.hpp`, `c_model/include/nsu/axi_master_port.hpp`.
+- Mechanism (spec §5.0/§5.3): `Depacketize` decodes ≤1 req flit/channel into S1 stage registers (MetaBuffer snapshot atomic with the decode, R4); `AxiMasterPort` consumes ≤1 beat/channel from S1 (S2). `Nsu::tick()` req portion reverse-order: S2 advance, then S1 advance. Replace the `while(true)` (`nsu/depacketize.hpp:99`) and `drain_*` loops (`axi_master_port.hpp:138`) with one-beat advance reading/writing the stage registers — NOT a direct `depkt_.pop_*` call-chain.
 
-**Mechanism (spec §5.0/§5.3):** `Depacketize` decodes ≤1 req flit/channel into S1 stage registers (MetaBuffer snapshot stays atomic with the decode, R4); `AxiMasterPort` consumes ≤1 beat/channel from S1 to drive the slave (S2). `Nsu::tick()` req portion reverse-order: S2 advance, then S1 advance. Replace the `while(true)` (`nsu/depacketize.hpp:99`) and `drain_*` loops (`axi_master_port.hpp:138`) with one-beat advance reading/writing the stage registers — NOT a direct `depkt_.pop_*` call-chain.
+**Why this is the spike:** NSU req has no Rob and no arbiter — it proves the register-parked refactor end-to-end on the least-coupled path. Part A makes the existing burst scenarios AXI-correct so they survive staging.
 
-- [ ] **Step 1:** register `add_cmodel_test(test_nsu_pipeline)`.
-- [ ] **Step 2: failing test (req latency = 2):**
+**Interfaces:** Consumes `PipelineStage`/tokens (T1), `NiPath` (T2). Produces the register-parked pattern, the NSU flit-injection test helper, AxiMaster RAW ordering; fills `stage_occupancy(NsuReq,…)`.
+
+**Part A steps:**
+- [ ] **A1: failing test** — `c_model/tests/axi/test_axi_master_raw_order.cpp` (+ register in CMake): drive a write then a read to the SAME address with NO B-wait built into the scenario; assert the read's AR is issued only AFTER the write's `B` (observe via the master's issue-order / `on_write_completed` timing), and the read returns the written data. On the current model this currently issues the read immediately → test FAILs.
+- [ ] **A2: implement** the RAW ordering in `axi_master.hpp` (track outstanding-write address ranges; hold an overlapping read until the write's `B`; release on `B`; non-overlapping reads not held). Run the new test PASS, then full c_model regression `cd build/cmodel && ctest --output-on-failure` — existing tests must pass; if any asserted a read issued before an overlapping write's B (relied on undefined ordering), fix it AXI-correctly (do NOT delete).
+- [ ] **A3: commit** `fix(axi): master orders a read after an overlapping outstanding write (wait B)`.
+
+**Part B steps:**
+- [ ] **B1: failing test (req latency = 2)** — register `add_cmodel_test(test_nsu_pipeline)`; write:
 ```cpp
 #include "nsu/nsu.hpp"
 #include "nmu/ni_stage.hpp"
@@ -181,9 +196,7 @@ git add -A && git commit -m "feat(ni): PipelineStage primitive + inter-stage tok
 #include <gtest/gtest.h>
 using ni::cmodel::NiPath; using ni::cmodel::nsu::NsuStandalone; using ni::cmodel::nsu::NsuConfig;
 namespace {
-// Helper (this TU): build one AR request flit and inject at the NoC-req endpoint,
-// modeled on the existing test_nsu_* flit encoders.
-static void inject_single_ar_flit(NsuStandalone& nsu, uint8_t id, uint64_t addr);
+static void inject_single_ar_flit(NsuStandalone& nsu, uint8_t id, uint64_t addr);  // model on test_nsu_*
 TEST(NsuPipeline, ReqLatencyIsTwoStages) {
     NsuConfig cfg; NsuStandalone nsu(cfg);
     inject_single_ar_flit(nsu, /*id=*/5, /*addr=*/0x40);
@@ -195,10 +208,10 @@ TEST(NsuPipeline, ReqLatencyIsTwoStages) {
 }
 }  // namespace
 ```
-- [ ] **Step 3:** run → FAIL (today AR appears in 1 tick).
-- [ ] **Step 4:** implement the register-parked NSU-req staging + the `inject_single_ar_flit` helper + `stage_occupancy(NsuReq,…)` reading the S1 register occupancy.
-- [ ] **Step 5:** run → `ctest -R "NsuPipeline|Nsu_"`. NsuPipeline 1/1; existing NSU tests pass (audit any direct `test_depacketize`/`test_axi_master_port` that assumed all-beats-after-one-tick — update to tick per stage, R1).
-- [ ] **Step 6:** clang-format + commit `feat(ni): NSU request path register-parked staging (2 stages)`.
+- [ ] **B2: run → FAIL** (today AR appears in 1 tick).
+- [ ] **B3: implement** the register-parked NSU-req staging + the `inject_single_ar_flit` helper + `stage_occupancy(NsuReq,…)`.
+- [ ] **B4: run** → `ctest -R "NsuPipeline|Nsu_|PortPair" --output-on-failure`. NsuPipeline passes; **the port-pair burst scenarios `AX4-BUR-002`/`AX4-BUR-005`/`AX4-BND-003` are KEPT and now pass** (Part A made write→read AXI-correct). Audit any direct `test_depacketize`/`test_axi_master_port` that assumed all-beats-after-one-tick → update to tick-per-stage (R1), do NOT delete coverage.
+- [ ] **B5: commit** `feat(ni): NSU request path register-parked staging (2 stages)`.
 
 ---
 
