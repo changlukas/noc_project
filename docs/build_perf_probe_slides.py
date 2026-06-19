@@ -10,7 +10,7 @@ Out:  docs/performance-probe.pptx
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.shapes import MSO_SHAPE, PP_PLACEHOLDER
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
 import os
 
@@ -126,11 +126,8 @@ def simple_table(s, x, y, w, rowh, data, colw, header_fill=DARK, size=12):
 s = prs.slides.add_slide(L_TITLE)
 s.shapes.title.text = "NoC Performance Probe"
 for ph in s.placeholders:
-    if ph.placeholder_format.type is not None and ph != s.shapes.title:
-        try:
-            ph.text = "Two-view performance monitoring on the running design"
-        except Exception:
-            pass
+    if ph.placeholder_format.type == PP_PLACEHOLDER.SUBTITLE:
+        ph.text = "Two-view performance monitoring on the running design"
 
 # ============================ Slide 2: Overview ============================
 s = title_only("Overview")
