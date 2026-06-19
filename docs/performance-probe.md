@@ -7,21 +7,18 @@ so the design behaves identically whether they are on or off.
 
 ## 1. Overview
 
-The probe offers two views of the same run:
+The probe answers two questions about a run: how the design performs across all
+traffic, and what happened to any single transaction. It observes the running
+design without perturbing it, so the numbers reflect the design's own behavior.
 
 - **Profile** view: aggregate counters and per-class latency for each interface.
-- **Trace** view: one record per completed transaction, for drilling into a
-  specific outlier.
+  The minimum of a class is its best observed latency; the spread up to the
+  maximum reflects interference from competing traffic.
+- **Trace** view: one record per completed transaction, for drilling into an
+  outlier the Profile view flags.
 
-Run a scenario and read the result:
-
-```
-make run-tb-top SCENARIO=<scenario-id>
-```
-
-This writes `perf.json` (beside the run log) and prints a summary. The best-case
-reference is the smallest latency observed in the same run, not a separate idle
-pass.
+Both views come from one run. The best-case reference is the smallest latency
+seen in that same run, not a separate idle pass.
 
 **Figure 1: Probe placement on the 2-node testbench.** All taps are input-only.
 
@@ -51,7 +48,9 @@ One monitor sits on each AXI interface (the manager edge between master and
 network interface, and the memory edge between network interface and memory), one
 monitor sits on each link direction, and router queue occupancy is sampled every
 cycle. All of them feed a single collector that writes the output; none of them
-drive any signal in the design.
+drive any signal in the design. Each scenario is launched with
+`make run-tb-top SCENARIO=<scenario-id>`, which produces `perf.json` beside the
+run log and prints the summary.
 
 **Figure 2: Monitor structure and data flow.**
 
