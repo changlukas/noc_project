@@ -12,7 +12,7 @@ traffic, and what happened to any single transaction. It observes the running
 design without perturbing it, so the numbers reflect the design's own behavior.
 
 - **Profile** view: aggregate counters and per-class latency for each interface.
-  The minimum of a class is its best observed latency; the spread up to the
+  The minimum of a class is its best observed latency. The spread up to its
   maximum reflects interference from competing traffic.
 - **Trace** view: one record per completed transaction, for drilling into an
   outlier the Profile view flags.
@@ -47,7 +47,7 @@ seen in that same run, not a separate idle pass.
 One monitor sits on each AXI interface (the manager edge between master and
 network interface, and the memory edge between network interface and memory), one
 monitor sits on each link direction, and router queue occupancy is sampled every
-cycle. All of them feed a single collector that writes the output; none of them
+cycle. All of them feed a single collector that writes the output. None of them
 drive any signal in the design. Each scenario is launched with
 `make run-tb-top SCENARIO=<scenario-id>`, which produces `perf.json` beside the
 run log and prints the summary.
@@ -77,58 +77,56 @@ run log and prints the summary.
 
 ## 3. Operation
 
-Every monitor works the same way: it taps its wires, detects events on each clock
-and accumulates them locally, and at the end of the run the collector turns those
-accumulated counts into the two views.
+A monitor turns interface activity into counts in three steps.
 
 **Figure 3: Measurement flow.**
 
 ```text
-   INPUT                     COMPUTE (every clock)          OUTPUT (end of run)
-   interface and       -->   detect events,           -->   aggregate counts into
-   link wires                latch transaction starts,       Profile and Trace,
-   (tapped, input-only)      accumulate counts,              write perf.json,
-   router queues             sample queue occupancy          print the summary
+   INPUT                      COMPUTE                      OUTPUT
+   tap interface, link,  -->  detect each handshake,  -->  derive throughput and
+   and router-queue           update the counters          per-class latency,
+   wires (read-only)          (one set per monitor)        write perf.json
+                                                           and the summary
 ```
 
-The events each monitor reacts to:
+**Input.** A monitor taps the wires of one AXI interface or one link, and reads
+the router queue levels. Every tap is read-only.
 
-| When (per clock) | Action |
-|---|---|
-| `AWVALID & AWREADY` or `ARVALID & ARREADY` | latch the accept cycle in a per-id, per-direction queue |
-| `BVALID & BREADY`, or `RVALID & RREADY & RLAST` | pop the oldest accept of that id, emit a completed-transaction record and its latency |
-| `WVALID & !WREADY` | add one to the write-idle count |
-| `RVALID & !RREADY` | add one to the read-idle count |
-| every clock | track the peak outstanding (accepted, not yet completed) |
-| flit `VALID` on a link | add one to that link's flit count |
-| `credit == 0` on a link (downstream buffer full) | add one to that link's stall count |
-| every clock | sample each router's input and output queue occupancy, keep the peak |
+**Compute.** On each clock the monitor detects the handshakes on its interface and
+updates the counters defined in Section 4. Each transaction's start cycle is held
+in a per-id queue, so writes and reads stay matched while several are in flight.
 
-A transaction's latency is the gap between its accept cycle and its completion.
-The per-id queue keeps writes and reads matched in order even when several are in
-flight at once.
+**Output.** At the end of the run the collector gathers every counter, derives the
+throughput and per-class latency, and writes `perf.json` and the on-screen summary.
 
 ## 4. Event counting (Profile view)
 
 Each AXI monitor accumulates a fixed set of metrics for its interface:
 
-| Metric | Meaning |
-|---|---|
-| Write / Read Transaction Count | Completed write / read transactions. |
-| Write / Read Byte Count | Bytes written / read; the basis for throughput. |
-| Write Latency | From write-address acceptance to the write response. |
-| Read Latency | From read-address acceptance to the last read data beat. |
-| Slave Write Idle Cycle Count | Cycles the write data waits because the receiving side is not ready. |
-| Master Read Idle Cycle Count | Cycles the read data waits because the reading side is not ready. |
-| Outstanding (peak) | Most issued-but-uncompleted transactions seen at once. |
+- **Write / Read Transaction Count**: Total number of completed write or read
+  transactions at the interface.
+- **Write / Read Byte Count**: Total number of bytes written or read. Used to
+  compute throughput.
+- **Write Latency**: The time from write-address acceptance (`AWVALID & AWREADY`)
+  to the write response (`BVALID & BREADY`).
+- **Read Latency**: The time from read-address acceptance (`ARVALID & ARREADY`) to
+  the last read beat (`RVALID & RREADY & RLAST`).
+- **Slave Write Idle Cycle Count**: The number of clocks the write data is held
+  between `WVALID` and `WREADY` assertion, when the receiving side is not ready.
+- **Master Read Idle Cycle Count**: The number of clocks the read data is held
+  between `RVALID` and `RREADY` assertion, when the reading side is not ready.
+- **Outstanding**: The largest number of accepted but not completed transactions
+  seen at once.
 
-The memory edge adds a **service latency** (how long the memory takes to answer),
-each link reports **backpressure** (cycles stalled because the downstream buffer
-is full), and each router reports its peak **input and output queue occupancy**.
+Three more groups of counters sit outside the per-interface set. The memory edge
+adds a **service latency**, the time the memory takes to answer a transaction.
+Each link reports its **flit count** and a **stall count**, the number of clocks
+it has no downstream credit (`credit == 0`). Each router reports its peak **input
+and output queue occupancy**.
 
 The idle counts are interface-local. On the memory edge the write-idle count is
-the memory stalling; on the manager edge the receiver is the network interface,
-so the same count is the network interface holding off the master.
+the memory stalling. On the manager edge the receiver is the network interface, so
+the same count is the network interface holding off the master.
 
 **Figure 4: Where each latency starts and stops.**
 
@@ -161,7 +159,7 @@ of the whole round trip.
 
 Reading the Profile view:
 
-| Observation | Likely cause |
+| Symptom | Likely cause |
 |---|---|
 | A class's maximum far above its minimum | downstream contention on that flow |
 | High peak outstanding | reorder or queue pressure at the interface |
@@ -183,9 +181,9 @@ The numbers below are one measured instance, not a fixed specification: a single
 32-byte transaction on the 2-node testbench. They move with scenario and
 configuration, so re-measure before quoting.
 
-**Figure 5: Round-trip latency composition (segments to scale; the number above
-each boundary is the cumulative cycle; Shell is the non-architectural co-sim
-residual).**
+**Figure 5: Round-trip latency composition. Segments are to scale, the number
+above each boundary is the cumulative cycle, and Shell is the non-architectural
+co-sim residual.**
 
 ```text
 Write round-trip = 27 cyc
@@ -202,7 +200,7 @@ Read round-trip = 28 cyc
 | Network interface | 10 | 10 | staged pipeline, four paths |
 | Router | 12 | 12 | three-stage pipeline, four traversals |
 | Memory service | 3 | 2 | memory latency plus handshake |
-| Shell boundary | 2 | 4 | co-sim wrapper registers; non-architectural residual |
+| Shell boundary | 2 | 4 | co-sim wrapper registers, non-architectural residual |
 
 The network interface and the router each advance one stage per cycle. The shell
 term is the residual: the measured total minus the network-interface, router, and
