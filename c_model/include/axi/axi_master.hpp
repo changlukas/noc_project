@@ -110,6 +110,15 @@ auto clear_aw_pending_if_supported(SlaveT& s) -> decltype(s.force_aw_not_pending
 }
 inline void clear_aw_pending_if_supported(...) noexcept {}
 
+// SFINAE helper: clear AR-pending only on slave types that model the wire
+// handshake (WireSlavePort). Used at the start of the AR push phase so ARVALID
+// reflects only an AR actively offered this tick.
+template <typename SlaveT>
+auto clear_ar_pending_if_supported(SlaveT& s) -> decltype(s.force_ar_not_pending(), void()) {
+    s.force_ar_not_pending();
+}
+inline void clear_ar_pending_if_supported(...) noexcept {}
+
 template <typename SlaveT>
 class AxiMasterT {
   public:
@@ -310,6 +319,11 @@ class AxiMasterT {
     void tick_push_ar_() {
         // ===== Push AR per operation =====
         //
+        // Clear AR-pending first so ARVALID reflects only an AR actively offered
+        // THIS tick. A read held back by the RAW guard stops calling push_ar, so
+        // without this clear its stale AR-pending would keep ARVALID high and the
+        // downstream would re-accept the held beat every cycle (read amplification).
+        clear_ar_pending_if_supported(slave_);
         // Same-id FIFO order: AR for op[0] must be fully pushed before op[1]'s AR.
         for (auto& [id, deq] : active_read_ops_) {
             for (auto& op : deq) {
@@ -712,6 +726,13 @@ struct WireSlavePort {
     // drops to 0 on the wire. Called by MasterShellAdapter when fault injection
     // suppresses the AW push for the current cycle.
     void force_aw_not_pending() noexcept { aw_pending_ = false; }
+
+    // Force-clear AR pending state so ARVALID drops to 0 on the wire. Called at
+    // the start of the AR push phase each tick: an AR that is not re-offered this
+    // tick (e.g. a read held back by the RAW guard) must not keep ARVALID high,
+    // or the downstream would re-accept the held beat every cycle (AXI4 §A3.2.1:
+    // VALID held with READY high = a new transfer each cycle).
+    void force_ar_not_pending() noexcept { ar_pending_ = false; }
 
   private:
     bool awready_ = false;
