@@ -75,7 +75,40 @@ run log and prints the summary.
                             perf.json + on-screen summary
 ```
 
-## 3. Event counting (Profile view)
+## 3. Operation
+
+Every monitor works the same way: it taps its wires, detects events on each clock
+and accumulates them locally, and at the end of the run the collector turns those
+accumulated counts into the two views.
+
+**Figure 3: Measurement flow.**
+
+```text
+   INPUT                     COMPUTE (every clock)          OUTPUT (end of run)
+   interface and       -->   detect events,           -->   aggregate counts into
+   link wires                latch transaction starts,       Profile and Trace,
+   (tapped, input-only)      accumulate counts,              write perf.json,
+   router queues             sample queue occupancy          print the summary
+```
+
+The events each monitor reacts to:
+
+| When (per clock) | Action |
+|---|---|
+| Address handshake completes (AW or AR valid and ready) | latch the accept cycle in a per-id, per-direction queue |
+| Write response, or last read beat (B, or R with last) | match the oldest accept of that id and emit its completed record and latency |
+| Write data valid while write-ready is low | add one to the write-idle count |
+| Read data valid while read-ready is low | add one to the read-idle count |
+| Any clock | track the peak outstanding (accepted, not yet completed) |
+| A flit is present on a link | add one to that link's flit count |
+| A link has no downstream credit | add one to that link's stall count |
+| Any clock | sample each router's input and output queue occupancy, keep the peak |
+
+A transaction's latency is the gap between its accept cycle and its completion.
+The per-id queue keeps writes and reads matched in order even when several are in
+flight at once.
+
+## 4. Event counting (Profile view)
 
 Each AXI monitor accumulates a fixed set of metrics for its interface:
 
@@ -97,7 +130,7 @@ The idle counts are interface-local. On the memory edge the write-idle count is
 the memory stalling; on the manager edge the receiver is the network interface,
 so the same count is the network interface holding off the master.
 
-**Figure 3: Where each latency starts and stops.**
+**Figure 4: Where each latency starts and stops.**
 
 ```text
 Write transaction
@@ -136,7 +169,7 @@ Reading the Profile view:
 | High write-idle | receiver slow to accept write data |
 | High read-idle | reader slow to accept read data |
 
-## 4. Event logging (Trace view)
+## 5. Event logging (Trace view)
 
 The Trace view keeps one record per completed transaction: direction, source,
 destination, the cycle it was accepted, the cycle it completed, its latency, and
@@ -144,13 +177,13 @@ its byte count. Use it to inspect the transaction behind a Profile outlier. Thes
 records are written to the output file only, not the on-screen summary, and there
 is no streaming trace output.
 
-## 5. Latency composition
+## 6. Latency composition
 
 The numbers below are one measured instance, not a fixed specification: a single
 32-byte transaction on the 2-node testbench. They move with scenario and
 configuration, so re-measure before quoting.
 
-**Figure 4: Round-trip latency composition (segments to scale; the number above
+**Figure 5: Round-trip latency composition (segments to scale; the number above
 each boundary is the cumulative cycle; Shell is the non-architectural co-sim
 residual).**
 
@@ -174,16 +207,5 @@ Read round-trip = 28 cyc
 The network interface and the router each advance one stage per cycle. The shell
 term is the residual: the measured total minus the network-interface, router, and
 memory contributions.
-
-## 6. Limitations
-
-- Not implemented: per-id aggregate breakdown, periodic time-series snapshots, a
-  streaming event-log output, memory-mapped register readout, and external-trigger
-  gating.
-- Backpressure and idle counts have so far been exercised only on lightly loaded
-  scenarios, where they read zero; stress scenarios are still needed.
-- The read-versus-write difference in the shell-boundary residual is a co-sim
-  artifact and is not yet root-caused.
-- The probe is co-sim only; it reports no area or power.
 
 The full field-level layout of the output file is kept in the design spec.
