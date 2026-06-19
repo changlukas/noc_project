@@ -1,9 +1,17 @@
 # NoC performance probe
 
-In-fabric, single-run PMU-style monitors that co-simulate with the DUT and emit
-one `perf.json` plus one stdout summary per run. No second pass, no zero-load
-characterization. Latency, throughput, occupancy, and backpressure are measured
-on the running co-sim.
+In-fabric, single-run performance monitors that co-simulate with the DUT and emit
+one `perf.json` plus one stdout summary per run. The probe measures per-transaction
+latency, per-interface throughput/occupancy, and link backpressure on the running
+co-sim. Two properties hold and are verified, not asserted:
+
+- **Non-intrusive:** the monitors tap signals passively; the DUT's cycle behavior
+  is unchanged (§7, A/B build identical).
+- **Single-run:** no second pass and no isolated zero-load characterization; the
+  best-case reference is the minimum observed in the same run (§4).
+
+Read it top-down: aggregate first (§4 profile), then drill into a single
+transaction (§5).
 
 ## How to run
 
@@ -19,125 +27,179 @@ cosim/verilator/output/<scenario-id>/perf.json
 
 `perf_cli_summary.py` prints the stdout summary automatically after each run.
 
-## Metrics
+## 1. Probe placement
 
-Full JSON schema: spec §5.1 (`docs/superpowers/specs/2026-06-18-perf-pmu-cosim-design.md`).
+Monitors tap the AXI interfaces and the inter-router links; router/NI occupancy is
+sampled on the C side. All are read-only.
 
-| Section | Content | Grain |
+| Tap point | Monitor | Where |
 |---|---|---|
-| `axi_slots[]` | write/read byte count, write/read transaction count, two AXI idle counters, outstanding peak; subordinate slots add `service_latency` | per AXI interface |
-| `latency.transactions[]` | raw per-transaction end-to-end rows (JSON only) | manager slot |
-| `latency.by_signature[]` | min/mean/max grouped by `(op, src, dst, len, size)`; `min` = best-case observed | per signature class |
-| `latency.histogram[]` | per-`[low, high)` bin transaction count | whole run |
-| `noc.routers[]` | input/output FIFO occupancy peak | per router |
-| `noc.links[]` | flit count, credit-stall cycles | per link |
+| AXI manager edge (master ↔ NMU) | `axi_perf_monitor.sv` | per node |
+| AXI subordinate edge (NSU ↔ slave) | `axi_perf_monitor.sv` | per node |
+| Inter-router link | `flit_link_perf_monitor.sv` | per link direction |
+| Router input/output FIFO occupancy | C sampler `cmodel_perf_sample_tick` | per router |
 
-The PG037 agent metric set (transaction count, byte count, latency, idle cycles)
-maps to `axi_slots[]`; the latency histogram maps to PG037's Range Incrementer.
-Router flit throughput is not counted (the `Router` model exposes occupancy but
-no flit counter, and adding one would modify the DUT); link flit count carries
-throughput instead.
+The 2-node `tb_top` instantiates 4 AXI-slot monitors (manager + subordinate per
+node) and one link monitor per link direction. A C-side `PerfCollector` gathers the
+SV counters via DPI plus the C-sampled occupancy and writes `perf.json`. Split
+rationale (some data is on the AXI wire, some only in the c_model): spec §4.
 
-## Latency definitions
+## 2. Measurement definitions
 
-| Event | Definition |
+These fix what each counter means; they are the reference for every number below.
+
+| Quantity | Definition |
 |---|---|
-| Start | Address-accept: `AWVALID & AWREADY` (write), `ARVALID & ARREADY` (read) |
-| Read end | `RLAST & RVALID & RREADY` |
-| Write end | B-response: `BVALID & BREADY` |
+| Latency start | Address-accept: `AWVALID & AWREADY` (write), `ARVALID & ARREADY` (read) |
+| Read latency end | `RLAST & RVALID & RREADY` |
+| Write latency end | B-response: `BVALID & BREADY` (not WLAST) |
+| Byte count | beats × bytes/beat, accumulated per interface |
+| Outstanding (peak) | issued-but-not-completed transactions, sampled per cycle |
+| Link stall | cycles with `credit_count == 0` (downstream VC buffer full) |
 
-Write end is the B-response, not WLAST. A write transaction is not complete until
-the initiator receives its response; the WLAST-to-B-response interval is latency
-the initiator waits through. This diverges from the PG037 default (which measures
-write latency to the last write beat) and understates nothing the manager observes.
+Latency definitions follow AMD PG037 (AXI Performance Monitor), which defines read
+latency as "the time from the start of read address issuance/acceptance to the
+beginning/ending of the read data transaction" and notes the start/end points are
+"user configurable" (PG037 §"Metrics computed for an AXI4 agent"). Our choices:
+read latency ends at RLAST (= PG037's default "to the last read"); write latency
+ends at the **B-response, not WLAST**. The B-response choice diverges from the
+PG037 default (last write data): a write is not complete until the initiator
+receives its response, and PG037 itself states "sending all of the write data ...
+must not be taken as indicating completion." Measuring to WLAST would understate
+the latency a manager observes.
 
 Same-id correlation uses a per-`(id, direction)` FIFO of issue cycles; completion
-pops the FIFO front. This handles multiple outstanding same-id transactions in
-AXI4 issue order. FIFO underflow or overflow asserts (`$fatal`) — a measurement
-error is never silently dropped.
+pops the FIFO front (valid because AXI4 returns same-id responses in issue order).
+FIFO underflow or overflow asserts (`$fatal`) — a measurement error is never
+silently dropped.
 
-## Credit-deficit link stall
+Link stall is `credit_count == 0`, not `valid && !credit`. The link credit is a
+single-cycle pulse, so `!credit` is the normal idle state, and the upstream router
+gates `valid` on credit, so `valid && !credit` never fires on the wire. Cross-
+reference `noc.routers[].out_fifo_occ_max` to separate real backpressure from an
+idle-but-full link.
 
-The link monitors maintain a credit counter seeded to the downstream VC buffer
-depth: each credit pulse increments it, each flit sent decrements it. A stall
-cycle is any cycle with `credit_count == 0` (downstream buffer full).
+## 3. Counters and derived metrics
 
-The link credit signal is a single-cycle pulse, not a level. `!credit` is the
-normal idle state, so `valid && !credit` is not a valid stall condition — the
-router gates `valid` on credit, so that term never fires on the wire. Cross-
-reference `noc.routers[].out_fifo_occ_max` to distinguish real backpressure from
-an idle-but-full link.
+`perf.json` carries raw counters; rates are derived from them. Full schema: spec
+§5.1 (`docs/superpowers/specs/2026-06-18-perf-pmu-cosim-design.md`).
 
-## Best-case reference
-
-`latency.by_signature[].min` is the minimum observed latency for that signature
-class in this run — the least-congested completed transaction. It is labelled
-"min observed", not "zero_load". On a lightly-loaded run (single sequential
-transactions) min equals the no-queueing network floor.
-
-## Latency composition and pipeline fidelity
-
-End-to-end latency has three sources, all now reflecting real microarchitecture.
-For a single 32-byte transaction (AX4-BAS-003, AxSIZE=5, AxLEN=0, 2-node tb_top),
-the measured round-trip decomposes as:
-
-**Write (27 cycles measured):**
-
-| Source | Cycles | Nature |
+| Section | Raw fields | Derived |
 |---|---|---|
-| NI pipeline (NMU req + NSU req + NSU rsp + NMU rsp) | 10 | real register-parked staged pipeline (3 + 2 + 3 + 2 stages, ROBLESS) |
-| Router pipeline | 12 | real 3-stage registered pipeline × 4 traversals (req + rsp, 2 routers each) |
-| Slave service | 3 | memory model `write_latency` + slave-edge handshake |
-| Co-sim shell boundary (residual) | 2 | `*_wrap.sv` registered output per module-boundary crossing (see below) |
+| `axi_slots[]` | write/read byte count, write/read txn count, `slave_write_idle_cyc`, `master_read_idle_cyc`, `outstanding_max`; subordinate slots add `service_latency` | throughput = byte_count ÷ window cycles |
+| `latency.by_signature[]` | per `(op, src, dst, len, size)`: count, min, mean, max | `min` = best-case observed reference |
+| `latency.histogram[]` | per-`[low, high)` bin transaction count | latency distribution |
+| `latency.transactions[]` | raw per-transaction rows (id, dir, src, dst, accept_cyc, complete_cyc, latency, bytes) | §5 drill-down |
+| `noc.routers[]` | input/output FIFO occupancy peak | — |
+| `noc.links[]` | flit count, `stall_cyc` | link utilization, backpressure |
 
-**Read (28 cycles measured):**
+The AXI metric set follows AMD PG037 (AXI Performance Monitor): one monitor slot per
+AXI interface, with per-slot accumulators (PG037's profile mode). Mapping:
 
-| Source | Cycles | Nature |
+| Our element | PG037 block / metric |
+|---|---|
+| `axi_slots[]` per-interface counters | Monitor slot + profile-mode Accumulators (PG037 Fig 1-4) |
+| write/read byte count, transaction count, latency, slave-write-idle, master-read-idle | the per-agent metric list (PG037 §"Metrics computed for an AXI4 agent") |
+| `latency.histogram[]` | Range Incrementer (PG037 Fig 1-3) |
+| `per_id` breakdown (config-gated, default off) | ID Filter & Mask (PG037 Fig 1-2) |
+| run window cycle base | Global Clock Counter (PG037 Fig 1-1) |
+| `perf.json` readout | the register read-out (PG037 uses AXI4-Lite; here a DPI JSON dump) |
+
+PG037 metric definitions adopted verbatim where they match: byte count is "the total
+number of bytes ... helpful when calculating throughput"; slave-write-idle is "the
+number of clocks between WVALID assertion and WREADY assertion"; master-read-idle is
+"the number of clocks between RVALID assertion and RREADY assertion."
+
+Divergences from PG037: write latency ends at B-response not last-write (§2); the
+periodic sampled-accumulator time-series, the event-log/AXI4-Stream trace path, and
+external-trigger gating are not implemented (§8). Router flit throughput is not
+counted — the `Router` model exposes occupancy but no flit counter, and adding one
+would change the DUT; link flit count carries throughput instead.
+
+Diagnostic reading:
+
+- `by_signature.max` rising above `min` for a class → downstream contention for that
+  flow.
+- `outstanding_max` high → NMU RoB / NSU queue pressure at that interface.
+- `stall_cyc > 0` on a link → that link's downstream VC buffer filled.
+- `slave_write_idle_cyc` / `master_read_idle_cyc` → AXI handshake idle (slave slow to
+  accept write data / master slow to accept read data).
+
+## 4. Profile view (aggregate)
+
+`latency.by_signature[]` aggregates transactions by `(op, src, dst, len, size)` and
+reports min/mean/max; `latency.histogram[]` gives the distribution. The stdout
+summary prints these per signature.
+
+`min` is the minimum observed latency for that class in this run — the
+least-congested completed transaction. It is labelled "min observed", not
+"zero_load". On a lightly-loaded run (single sequential transactions) it equals the
+no-queueing network floor.
+
+## 5. Drill-down view (per transaction)
+
+`latency.transactions[]` holds one row per completed transaction (id, direction,
+src, dst, accept/complete cycle, latency, bytes), JSON-only (not printed). It is the
+drill-down for an outlier seen in §4: profile gives the trend, the per-transaction
+rows give the individual transaction that caused it.
+
+## 6. Latency composition and fidelity
+
+End-to-end latency has three architectural sources plus one co-sim residual. For a
+single 32-byte transaction (`AX4-BAS-003`, AxSIZE=5, AxLEN=0, 2-node `tb_top`,
+ROBLESS mode), the measured round-trip decomposes as:
+
+| Source | Write (27 cyc) | Read (28 cyc) | Nature |
+|---|---|---|---|
+| NI pipeline | 10 | 10 | real register-parked staged pipeline, 4 paths |
+| Router pipeline | 12 | 12 | real 3-stage pipeline × 4 traversals |
+| Slave service | 3 | 2 | memory model write/read latency + slave-edge handshake |
+| Co-sim shell boundary | 2 | 4 | `*_wrap.sv` registered output per module crossing (non-architectural) |
+
+NI stage allocation (ROBLESS = co-sim default; ROB adds one NMU-rsp stage):
+
+| Path | Stages | Blocks |
 |---|---|---|
-| NI pipeline | 10 | same 4-path staged pipeline as write |
-| Router pipeline | 12 | same 4 traversals |
-| Slave service | 2 | memory model `read_latency` |
-| Co-sim shell boundary (residual) | 4 | same `*_wrap.sv` artifact; read R-beat path adds 1 extra boundary cycle vs. write B-beat |
+| NMU req (AXI→NoC) | 3 | `AxiSlavePort`+`Rob` alloc → `Packetize` → `WormholeArbiter`+`VcArbiter` |
+| NSU req (NoC→slave) | 2 | `Depacketize`+`MetaBuffer` snapshot → `AxiMasterPort` |
+| NSU rsp (slave→NoC) | 3 | `AxiMasterPort` → `Packetize` → `WormholeArbiter`+`VcArbiter` |
+| NMU rsp (NoC→AXI) | 2 ROBLESS / 3 ROB | `Depacketize` → [`Rob` re-order] → `AxiSlavePort` |
 
-**NI stage allocation (ROBLESS mode, co-sim default):**
+- **Router and NI are both real pipelines.** Each advances a beat one stage per
+  tick via a reverse-order tick (later stages drain before earlier fill, so no
+  same-tick double-advance). NI design: spec §5. NI contributes 10 of the 27 write
+  cycles.
+- **Co-sim shell boundary is the only non-architectural cost.** Each `*_wrap.sv`
+  registers its DPI outputs once per clock. Write incurs 2 such boundary cycles;
+  read incurs 4 (the R-beat path crosses one additional module boundary than the
+  B-beat path — co-sim artifact, root cause unresolved). It does not fold into the
+  NI stage count and is isolated in the table above.
 
-| Path | S1 | S2 | S3 | Stages |
-|---|---|---|---|---|
-| NMU req (AXI→NoC) | `AxiSlavePort` + `Rob` alloc | `Packetize` | `WormholeArbiter` + `VcArbiter` | 3 |
-| NSU req (NoC→slave) | `Depacketize` + `MetaBuffer` snapshot | `AxiMasterPort` drain | — | 2 |
-| NSU rsp (slave→NoC) | `AxiMasterPort` accept (B/R) | `Packetize` | `WormholeArbiter` + `VcArbiter` | 3 |
-| NMU rsp (NoC→AXI, ROBLESS) | `Depacketize` | `AxiSlavePort` push | — | 2 |
-| NMU rsp (NoC→AXI, ROB Enabled) | `Depacketize` | `Rob` re-order stage | `AxiSlavePort` push | 3 |
+Per-stage occupancy is observable via `Nmu/Nsu::stage_occupancy(path, stage,
+axi_ch)`, mirroring the router's `input_fifo_size`/`output_fifo_size`.
 
-- **Router is a real pipeline.** `Router` advances a flit one stage per tick
-  through landing → input FIFO → output FIFO (`c_model/include/noc/router.hpp`,
-  3 stages). Four traversals (request path: 2 routers; response path: 2 routers)
-  = 12 cycles.
-- **NI is now a real staged pipeline.** Each NMU/NSU sub-module is register-parked;
-  a beat advances exactly one stage per tick. The reverse-order tick (later stages
-  drain before earlier fill) enforces no same-tick double-advance, matching the
-  router model. NI accounts for 10 of the 27 write cycles (37%).
-- **Co-sim shell boundary (separate, residual cost).** Each `*_wrap.sv` registers
-  its DPI outputs once per clock (`set_inputs → tick → get_outputs → registered
-  output`). Write incurs 2 extra boundary cycles; read incurs 4 (the R-beat path
-  crosses one additional module boundary vs. the B-beat path — root cause unresolved,
-  co-sim artifact). Neither folds into the NI stage count.
+## 7. Non-intrusive and overhead
 
-Fidelity boundary: all three sources (NI pipeline, router pipeline, slave service)
-now reflect real microarchitecture. The only non-architectural cost is the co-sim
-shell boundary, clearly isolated in the table above.
+The probe adds zero cycles to the DUT and is verified by an A/B build: monitors
+present vs. absent produce an identical scoreboard result and identical
+per-transaction completion cycles.
 
-## Non-intrusive
+- SV monitors (`axi_perf_monitor.sv`, `flit_link_perf_monitor.sv`): input-only
+  ports, no drives.
+- C-side sampler (`cmodel_perf_sample_tick`): reads only const getters.
 
-The SV monitors (`axi_perf_monitor.sv`, `flit_link_perf_monitor.sv`) are passive:
-input-only ports, no drives. The C-side sampler (`cmodel_perf_sample_tick`) reads
-only const getters. An A/B build — monitors present vs. absent — produces an
-identical scoreboard result and identical per-transaction completion cycles.
+Area/power overhead is not reported: this is a co-simulation behavior monitor, not
+synthesized RTL. The relevant overhead — perturbation of the DUT — is zero by the
+A/B check.
 
-## Known limitations
+## 8. Known limitations
 
+- **Time-series profile:** a single window per run; periodic sampled-accumulator
+  snapshots (latency/throughput over time) are deferred (spec §3.1).
 - **Window gating:** `+perf_start`/`+perf_end` are not implemented; the window is
   the whole run.
 - **Stress coverage:** `stall_cyc` and the AXI idle counters are exercised only on
-  lightly-loaded scenarios (observed 0). Pipelined same-id and deliberately
+  lightly-loaded scenarios (observed 0); pipelined same-id and deliberately
   back-pressured scenarios are needed to observe non-zero backpressure.
+- **Co-sim shell residual:** the read vs. write boundary asymmetry (4 vs. 2 cycles,
+  §6) is an unrooted co-sim artifact, not microarchitecture.
