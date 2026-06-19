@@ -179,20 +179,17 @@ The figures below are a **measured instance**, not a fixed spec: a single 32-byt
 transaction (`AX4-BAS-003`, AxSIZE=5, AxLEN=0, 2-node `tb_top`, ROBLESS). Numbers
 move with scenario and configuration; re-measure before quoting.
 
-**Figure 3: Round-trip latency composition (1 cyc per `#`).**
+**Figure 3: Round-trip latency composition (segments to scale; numbers above each
+boundary are the cumulative cycle, Shell is the non-architectural co-sim residual).**
 
 ```text
 Write round-trip = 27 cyc
-  NI pipeline      ##########              10
-  Router pipeline  ############            12
-  Slave service    ###                      3
-  Shell boundary   ##                       2  (co-sim residual, non-architectural)
+  0            10                22      25   27
+  |--- NI:10 --|--- Router:12 ---|-Slv:3-|Sh:2|
 
 Read round-trip = 28 cyc
-  NI pipeline      ##########              10
-  Router pipeline  ############            12
-  Slave service    ##                       2
-  Shell boundary   ####                     4  (co-sim residual, non-architectural)
+  0            10                22    24     28
+  |--- NI:10 --|--- Router:12 ---|Slv:2|-Sh:4-|
 ```
 
 | Component | Write (27) | Read (28) | Source |
