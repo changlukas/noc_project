@@ -57,31 +57,32 @@ and writes `perf.json`.
 
 | Section | Raw fields | Derived |
 |---|---|---|
-| `axi_slots[]` | write/read byte count, txn count, `slave_write_idle_cyc` (`WVALID && !WREADY`), `master_read_idle_cyc` (`RVALID && !RREADY`), `outstanding_max`; subordinate slots add `service_latency` | throughput = byte_count ÷ window cycles |
+| `axi_slots[]` | write/read byte count, write/read txn count, `slave_write_idle_cyc`, `master_read_idle_cyc`, `outstanding_max`; subordinate slots add `service_latency` | throughput = byte_count ÷ window cycles |
 | `latency.by_signature[]` | per `(op, src, dst, len, size)`: count, min, mean, max | `min` = best-case observed |
 | `latency.histogram[]` | per-`[low, high)` bin count | latency distribution |
 | `latency.transactions[]` | per-transaction rows (id, dir, src, dst, accept_cyc, complete_cyc, latency, bytes) | §5 |
-| `noc.routers[]` | input/output FIFO occupancy peak | — |
+| `noc.routers[]` | input/output FIFO occupancy peak | n/a |
 | `noc.links[]` | flit count, `stall_cyc` | utilization, backpressure |
 
 Router flit throughput is not counted: the `Router` model exposes occupancy but no
-flit counter, and adding one would change the DUT. Link flit count carries
-throughput.
+flit counter. Link flit count carries throughput.
 
-The AXI counter set mirrors the AMD AXI Performance Monitor (PG037):
+Metric definitions:
 
-| perf.json | PG037 |
-|---|---|
-| `axi_slots[]` counters | per-interface monitor slot, profile-mode accumulators |
-| byte count, txn count, latency | per-agent metric set |
-| `slave_write_idle_cyc` / `master_read_idle_cyc` | slave-write-idle / master-read-idle |
-| `latency.histogram[]` | Range Incrementer |
-| run window cycle base | Global Clock Counter |
+- Write/read transaction count: number of completed write/read transactions at the
+  interface.
+- Write/read byte count: total bytes written/read; used to compute throughput.
+- Slave write idle cycles: idle cycles caused by the slave during a write, measured
+  as clocks between WVALID assertion and WREADY assertion.
+- Master read idle cycles: idle cycles caused by the master during a read, measured
+  as clocks between RVALID assertion and RREADY assertion.
+- Latency histogram: counts transactions whose latency falls within each configured
+  `[low, high)` range; gives the read/write latency distribution.
 
-Not in this model: per-id breakdown (PG037 ID Filter), periodic sampled-accumulator
-snapshots, the event-log/AXI4-Stream trace path, AXI4-Lite register readout, and
-external-trigger gating. Write latency ends at B-response (initiator-observed
-completion), beyond PG037's write-data endpoints (first/last write).
+Not implemented: per-id breakdown, periodic time-series snapshots, an event-log /
+streaming trace path, memory-mapped register readout, and external-trigger gating.
+Write latency ends at the B-response (initiator-observed completion), not at a
+write-data beat.
 
 Diagnostics:
 
@@ -106,7 +107,7 @@ The stdout summary prints the signatures and the histogram.
 ## Drill-down view (per transaction)
 
 `latency.transactions[]` holds one row per completed manager-slot transaction,
-JSON-only. It is the drill-down for an outlier seen in the profile.
+JSON-only. Use it to inspect the transaction behind a profile outlier.
 
 ## Latency composition
 
@@ -145,9 +146,9 @@ NI stage allocation (ROB adds one NMU-rsp stage):
 
 ## Known limitations
 
-- One window per run; periodic time-series snapshots are deferred (spec §3.1).
+- One window per run; periodic time-series snapshots are not implemented (spec §3.1).
 - `+perf_start`/`+perf_end` window gating not implemented.
 - `stall_cyc` and the idle counters are exercised only on lightly-loaded scenarios
   (observed 0); stress scenarios are needed.
-- The read vs. write shell-boundary residual (4 vs. 2 cycles) is an unrooted co-sim
-  artifact.
+- The read vs. write shell-boundary residual (4 vs. 2 cycles) is a co-sim artifact,
+  not yet root-caused.
