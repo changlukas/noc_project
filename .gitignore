@@ -56,3 +56,7 @@ docs/slides/
 /docs/pg037_axi_perf_mon.pdf
 /docs/pg037_axi_perf_mon.md
 /docs/probe_section_layout_draft.md
+
+# Slide decks (company-master binaries: source template + generated output;
+# rebuild the generated one with docs/build_perf_probe_slides.py)
+/docs/*.pptx
