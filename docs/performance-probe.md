@@ -7,8 +7,8 @@ backpressure on the running DUT.
 Verified properties:
 
 - Monitors tap signals only; an A/B run (monitors on vs. off) gives identical DUT
-  cycles (§7).
-- Single pass; the best-case reference is the same-run minimum (§4).
+  cycles (see *Non-intrusive and overhead*).
+- Single pass; the best-case reference is the same-run minimum (see *Profile view*).
 
 ## How to run
 
@@ -32,7 +32,52 @@ The 2-node `tb_top` instantiates 4 AXI monitors and one monitor per link directi
 A C-side `PerfCollector` gathers the SV counters via DPI plus the sampled occupancy
 and writes `perf.json`.
 
+**Figure 1: Probe placement on the 2-node `tb_top`.** All taps are input-only.
+
+```text
+        NODE 0                                              NODE 1
+   AXI master                                            AXI master
+      |                                                       |
+    [M0] axi_perf_monitor                  axi_perf_monitor [M1]   <- manager edge
+      |                                                       |
+     NMU0                                                   NMU1
+      |                                                       |
+   +--------+      [L0>1] flit_link_perf_monitor      +--------+
+   |Router 0|========================================>|Router 1|
+   |        |<========================================|        |
+   +--------+      [L1>0] flit_link_perf_monitor      +--------+
+      |   ^ in/out FIFO occ                                |
+     NSU0   sampled by C: cmodel_perf_sample_tick()/cyc  NSU1
+      |                                                       |
+    [S0] axi_perf_monitor                  axi_perf_monitor [S1]   <- subordinate edge
+      |                                                       |
+   AXI slave                                             AXI slave
+
+   [M*],[S*] = axi_perf_monitor (passive AXI tap, input-only, no drives)
+   [L*]      = flit_link_perf_monitor (one instance per link direction)
+   Router in/out FIFO occupancy snapshotted once per cycle by the C sampler.
+   A C-side PerfCollector aggregates all taps via DPI and writes perf.json.
+```
+
 ## Measurement definitions
+
+**Figure 2: Latency measurement points (when each counter starts and stops).**
+
+```text
+Write transaction
+  start = AWVALID & AWREADY                      end = BVALID & BREADY
+    |                                                 |
+    v                                                 v
+  --+--[ AW ]--[ W ... WLAST ]------------[ B ]-------+--
+    |<================ write latency =================>|
+
+Read transaction
+  start = ARVALID & ARREADY                        end = RLAST & RVALID & RREADY
+    |                                                   |
+    v                                                   v
+  --+--[ AR ]------------[ R ][ R ] ... [ R = RLAST ]---+--
+    |<================ read latency ===================>|
+```
 
 | Quantity | Definition |
 |---|---|
@@ -48,7 +93,21 @@ and writes `perf.json`.
 - Same-id correlation uses a per-`(id, direction)` FIFO of issue cycles; completion
   pops the front. FIFO underflow or overflow calls `$fatal`.
 - Link stall reads the credit counter, not `valid`: the upstream router gates
-  `valid` on credit, so `valid && !credit` never occurs on the wire.
+  `valid` on credit, so `valid && !credit` never occurs on the wire. `stall_cyc`
+  therefore counts *downstream-buffer-full* cycles: a necessary condition for a
+  flit to block, not a confirmation that one did. Read it together with
+  `flit_count`.
+
+The idle and latency counters are **interface-local**: they describe the AXI
+interface the monitor is tapping, and the physical agent behind a field depends on
+which slot it is.
+
+- On a **subordinate-edge** slot (`NSU ↔ slave`), `slave_write_idle_cyc` is the
+  memory slave stalling.
+- On a **manager-edge** slot (`master ↔ NMU`), the NMU drives `WREADY`, so the same
+  `slave_write_idle_cyc` field is the **NMU** back-pressuring the external master,
+  not a slave. `master_read_idle_cyc` is symmetric (the agent driving `RREADY` on
+  that interface).
 
 ## Counters and derived metrics
 
@@ -57,10 +116,10 @@ and writes `perf.json`.
 
 | Section | Raw fields | Derived |
 |---|---|---|
-| `axi_slots[]` | write/read byte count, write/read txn count, `slave_write_idle_cyc`, `master_read_idle_cyc`, `outstanding_max`; subordinate slots add `service_latency` | throughput = byte_count ÷ window cycles |
+| `axi_slots[]` | `role` (manager/subordinate), write/read byte count, write/read txn count, `slave_write_idle_cyc`, `master_read_idle_cyc`, `outstanding_max`; subordinate slots add `service_latency` | throughput = byte_count ÷ window cycles |
 | `latency.by_signature[]` | per `(op, src, dst, len, size)`: count, min, mean, max | `min` = best-case observed |
 | `latency.histogram[]` | per-`[low, high)` bin count | latency distribution |
-| `latency.transactions[]` | per-transaction rows (id, dir, src, dst, accept_cyc, complete_cyc, latency, bytes) | §5 |
+| `latency.transactions[]` | per-transaction rows (id, dir, src, dst, accept_cyc, complete_cyc, latency, bytes) | drill-down (see *Drill-down view*) |
 | `noc.routers[]` | input/output FIFO occupancy peak | n/a |
 | `noc.links[]` | flit count, `stall_cyc` | utilization, backpressure |
 
@@ -72,13 +131,15 @@ Metric definitions:
 - Write/read transaction count: number of completed write/read transactions at the
   interface.
 - Write/read byte count: total bytes written/read; used to compute throughput.
-- Slave write idle cycles: idle cycles caused by the slave during a write, measured
-  as clocks between WVALID assertion and WREADY assertion.
-- Master read idle cycles: idle cycles caused by the master during a read, measured
-  as clocks between RVALID assertion and RREADY assertion.
-- Latency histogram: counts transactions whose latency falls within each configured
-  `[low, high)` range (the last bin is open-ended, encoded `high=0`); gives the
-  read/write latency distribution.
+- Slave write idle cycles: cycles on this interface where `WVALID` is held without
+  `WREADY` (subordinate side slow to accept write data). Interface-local; see the
+  agent note under *Measurement definitions*.
+- Master read idle cycles: cycles on this interface where `RVALID` is held without
+  `RREADY` (manager side slow to accept read data). Interface-local.
+- Latency histogram: counts transactions whose latency falls in each bin of a
+  **fixed compile-time ladder**: `[0,16) [16,32) [32,64) [64,128) [128,256)
+  [256,∞)` cycles (edges `{0,16,32,64,128,256}` in `emit_histogram`; the last bin is
+  open-ended, encoded `high=0`). The ladder is not run-time configurable.
 
 Not implemented: per-id breakdown, periodic time-series snapshots, an event-log /
 streaming trace path, memory-mapped register readout, and external-trigger gating.
@@ -89,9 +150,10 @@ Diagnostics:
 |---|---|
 | `by_signature.max` ≫ `min` for a class | downstream contention for that flow |
 | `outstanding_max` high | NMU RoB / NSU queue pressure |
-| `stall_cyc > 0` on a link | that link's downstream VC buffer filled |
-| `slave_write_idle_cyc` high | slave slow to accept write data |
-| `master_read_idle_cyc` high | master slow to accept read data |
+| `stall_cyc > 0` on a link | that link's downstream VC buffer filled (necessary, not sufficient, for a blocked flit; cross-check `flit_count`) |
+| `slave_write_idle_cyc` high (subordinate slot) | slave slow to accept write data |
+| `slave_write_idle_cyc` high (manager slot) | NMU slow to accept write data from the master |
+| `master_read_idle_cyc` high | the `RREADY`-driving side of that interface slow to accept read data |
 
 ## Profile view (aggregate)
 
@@ -101,7 +163,10 @@ Diagnostics:
 | Distribution | `latency.histogram[]` |
 | Best-case reference | `by_signature[].min`, the same-run minimum |
 
-The stdout summary prints the signatures and the histogram.
+The stdout summary (`perf_cli_summary.py`) prints the AXI throughput / backpressure
+table, the per-class signatures, the histogram, the subordinate-slot service
+latency, and the NoC router/link table. Per-transaction rows are JSON-only and are
+never printed.
 
 ## Drill-down view (per transaction)
 
@@ -110,8 +175,25 @@ JSON-only. Use it to inspect the transaction behind a profile outlier.
 
 ## Latency composition
 
-For a single 32-byte transaction (`AX4-BAS-003`, AxSIZE=5, AxLEN=0, 2-node
-`tb_top`, ROBLESS), the measured round-trip:
+The figures below are a **measured instance**, not a fixed spec: a single 32-byte
+transaction (`AX4-BAS-003`, AxSIZE=5, AxLEN=0, 2-node `tb_top`, ROBLESS). Numbers
+move with scenario and configuration; re-measure before quoting.
+
+**Figure 3: Round-trip latency composition (1 cyc per `#`).**
+
+```text
+Write round-trip = 27 cyc
+  NI pipeline      ##########              10
+  Router pipeline  ############            12
+  Slave service    ###                      3
+  Shell boundary   ##                       2  (co-sim residual, non-architectural)
+
+Read round-trip = 28 cyc
+  NI pipeline      ##########              10
+  Router pipeline  ############            12
+  Slave service    ##                       2
+  Shell boundary   ####                     4  (co-sim residual, non-architectural)
+```
 
 | Component | Write (27) | Read (28) | Source |
 |---|---|---|---|
