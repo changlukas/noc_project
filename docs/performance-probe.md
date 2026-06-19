@@ -95,14 +95,14 @@ The events each monitor reacts to:
 
 | When (per clock) | Action |
 |---|---|
-| Address handshake completes (AW or AR valid and ready) | latch the accept cycle in a per-id, per-direction queue |
-| Write response, or last read beat (B, or R with last) | match the oldest accept of that id and emit its completed record and latency |
-| Write data valid while write-ready is low | add one to the write-idle count |
-| Read data valid while read-ready is low | add one to the read-idle count |
-| Any clock | track the peak outstanding (accepted, not yet completed) |
-| A flit is present on a link | add one to that link's flit count |
-| A link has no downstream credit | add one to that link's stall count |
-| Any clock | sample each router's input and output queue occupancy, keep the peak |
+| `AWVALID & AWREADY` or `ARVALID & ARREADY` | latch the accept cycle in a per-id, per-direction queue |
+| `BVALID & BREADY`, or `RVALID & RREADY & RLAST` | pop the oldest accept of that id, emit a completed-transaction record and its latency |
+| `WVALID & !WREADY` | add one to the write-idle count |
+| `RVALID & !RREADY` | add one to the read-idle count |
+| every clock | track the peak outstanding (accepted, not yet completed) |
+| flit `VALID` on a link | add one to that link's flit count |
+| `credit == 0` on a link (downstream buffer full) | add one to that link's stall count |
+| every clock | sample each router's input and output queue occupancy, keep the peak |
 
 A transaction's latency is the gap between its accept cycle and its completion.
 The per-id queue keeps writes and reads matched in order even when several are in
@@ -134,18 +134,18 @@ so the same count is the network interface holding off the master.
 
 ```text
 Write transaction
-  start = write address accepted                 end = write response
-    |                                                 |
-    v                                                 v
-  --+--[ AW ]--[ W ... last ]-------------[ B ]-------+--
+  start = AWVALID & AWREADY       end = BVALID & BREADY
+    |                                                  |
+    v                                                  v
+  --+--[ AW ]--[ W ... WLAST ]----------[ B ]----------+--
     |<================ write latency =================>|
 
 Read transaction
-  start = read address accepted                    end = last read beat
-    |                                                   |
-    v                                                   v
-  --+--[ AR ]------------[ R ][ R ] ... [ last R ]------+--
-    |<================ read latency ===================>|
+  start = ARVALID & ARREADY end = RVALID & RREADY & RLAST
+    |                                                  |
+    v                                                  v
+  --+--[ AR ]--------[ R ][ R ] ... [ R=RLAST ]--------+--
+    |<================= read latency =================>|
 ```
 
 From these counters the Profile view derives:
