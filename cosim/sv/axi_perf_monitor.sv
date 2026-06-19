@@ -1,4 +1,4 @@
-// Passive AXI slot monitor (PG037-style). Reads one AXI interface's wires;
+// Passive AXI slot monitor. Reads one AXI interface's wires;
 // correlates latency by per-(id,dir) in-order FIFO; counts idle/outstanding;
 // reports each completion + end-of-run backpressure via DPI. No drives.
 module axi_perf_monitor #(

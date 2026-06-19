@@ -52,7 +52,7 @@ and writes `perf.json`.
 
 ## Counters and derived metrics
 
-`perf.json` stores raw counters; rates are derived. Full schema: spec §5.1
+`perf.json` stores counters and latency aggregates; rates are derived. Full schema: spec §5.1
 (`docs/superpowers/specs/2026-06-18-perf-pmu-cosim-design.md`).
 
 | Section | Raw fields | Derived |
@@ -77,12 +77,11 @@ Metric definitions:
 - Master read idle cycles: idle cycles caused by the master during a read, measured
   as clocks between RVALID assertion and RREADY assertion.
 - Latency histogram: counts transactions whose latency falls within each configured
-  `[low, high)` range; gives the read/write latency distribution.
+  `[low, high)` range (the last bin is open-ended, encoded `high=0`); gives the
+  read/write latency distribution.
 
 Not implemented: per-id breakdown, periodic time-series snapshots, an event-log /
 streaming trace path, memory-mapped register readout, and external-trigger gating.
-Write latency ends at the B-response (initiator-observed completion), not at a
-write-data beat.
 
 Diagnostics:
 
@@ -138,8 +137,8 @@ NI stage allocation (ROB adds one NMU-rsp stage):
 
 ## Non-intrusive and overhead
 
-- Monitors are passive: input-only ports, no drives. The C sampler calls only const
-  accessors.
+- Monitors are passive: input-only ports, no drives. The C sampler reads FIFO
+  occupancy and drives no DUT signal.
 - A manual A/B comparison (monitors on vs. off) gave identical scoreboard results
   and completion cycles. Spec §4 requires an automated gate; none is checked in yet.
 - No area or power numbers: the probe is co-sim only, not synthesized.
