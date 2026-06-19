@@ -77,18 +77,36 @@ class Nsu {
     void tick();
 
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
-        if (path == NiPath::NsuReq && stage == 0) {
-            return depacketize_.s1_occupancy(axi_ch);
+        if (path == NiPath::NsuReq) {
+            // NsuReq: 2 stages
+            //   S0 = Depacketize S1 stage registers
+            //   S1 = AxiMasterPort per-channel queues (drain side)
+            if (stage == 0) return depacketize_.s1_occupancy(axi_ch);
+            if (stage == 1) {
+                if (axi_ch == ni::AXI_CH_AW) return axi_master_port_.aw_q_size();
+                if (axi_ch == ni::AXI_CH_W) return axi_master_port_.w_q_size();
+                if (axi_ch == ni::AXI_CH_AR) return axi_master_port_.ar_q_size();
+            }
         }
         if (path == NiPath::NsuRsp) {
-            // NsuRsp has 3 stages (spec §5.0-5.2):
-            //   S0 = S1 reg in Packetize (accepted B/R beat, pre-transform)
-            //   S1 = S2→S3 boundary (WormholeArbiter pending queue)
+            // NsuRsp: 3 stages
+            //   S0 = Packetize S1 stage registers (accepted B/R beat)
+            //   S1 = WormholeArbiter pending queue (S2→S3 boundary)
             //   S2 = VcArbiter pending queue (toward NoC)
-            // stage_occupancy(NsuRsp, 0, axi_ch) probes the S1 Packetize reg.
             if (stage == 0) {
                 if (axi_ch == ni::AXI_CH_B) return packetize_.s1_b_occupancy();
                 if (axi_ch == ni::AXI_CH_R) return packetize_.s1_r_occupancy();
+            }
+            if (stage == 1) {
+                // WormholeArbiter inputs: 0=B, 1=R
+                if (axi_ch == ni::AXI_CH_B) return wormhole_arbiter_.pending_size(0);
+                if (axi_ch == ni::AXI_CH_R) return wormhole_arbiter_.pending_size(1);
+            }
+            if (stage == 2) {
+                std::size_t total = 0;
+                for (std::size_t v = 0; v < VcArbiter::NUM_VC_MAX; ++v)
+                    total += vc_arbiter_.pending_size(static_cast<uint8_t>(v));
+                return total;
             }
         }
         return 0;

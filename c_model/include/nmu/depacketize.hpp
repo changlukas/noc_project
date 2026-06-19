@@ -33,6 +33,10 @@ class Depacketize : public ResponseDepacketizer {
     std::optional<std::pair<axi::BBeat, ResponseMeta>> pop_b_with_meta() override;
     std::optional<std::pair<axi::RBeat, ResponseMeta>> pop_r_with_meta() override;
 
+    // Introspection: deque occupancy for stage_occupancy(NmuRsp, 0, ch).
+    std::size_t b_occupancy() const noexcept { return b_q_.size(); }
+    std::size_t r_occupancy() const noexcept { return r_q_.size(); }
+
   private:
     struct BWithMeta {
         axi::BBeat beat;

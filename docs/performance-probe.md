@@ -119,9 +119,9 @@ the measured round-trip decomposes as:
   router model. NI accounts for 10 of the 27 write cycles (37%).
 - **Co-sim shell boundary (separate, residual cost).** Each `*_wrap.sv` registers
   its DPI outputs once per clock (`set_inputs → tick → get_outputs → registered
-  output`), adding 1 cycle per module-boundary crossing. This is a Verilator
-  co-sim artifact, not NI microarchitecture. It is accounted separately and does
-  not fold into the NI stage count.
+  output`). Write incurs 2 extra boundary cycles; read incurs 4 (the R-beat path
+  crosses one additional module boundary vs. the B-beat path — root cause unresolved,
+  co-sim artifact). Neither folds into the NI stage count.
 
 Fidelity boundary: all three sources (NI pipeline, router pipeline, slave service)
 now reflect real microarchitecture. The only non-architectural cost is the co-sim

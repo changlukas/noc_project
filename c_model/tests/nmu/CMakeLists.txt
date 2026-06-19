@@ -55,3 +55,8 @@ add_cmodel_test(test_rob_occupancy)
 target_include_directories(test_rob_occupancy PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 target_link_libraries(test_rob_occupancy PRIVATE yaml-cpp::yaml-cpp)
+
+add_cmodel_test(test_nmu_rob_staging)
+target_include_directories(test_nmu_rob_staging PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(test_nmu_rob_staging PRIVATE yaml-cpp::yaml-cpp)
