@@ -52,6 +52,7 @@ __pycache__/
 /cross-review/
 docs/slides/
 
-# Local-only doc references (vendor PDF + superseded research draft)
+# Local-only doc references (vendor PDF + markitdown conversion + superseded draft)
 /docs/pg037_axi_perf_mon.pdf
+/docs/pg037_axi_perf_mon.md
 /docs/probe_section_layout_draft.md
