@@ -51,3 +51,7 @@ __pycache__/
 # Cross-AI review artifacts (transient; not normative)
 /cross-review/
 docs/slides/
+
+# Local-only doc references (vendor PDF + superseded research draft)
+/docs/pg037_axi_perf_mon.pdf
+/docs/probe_section_layout_draft.md
