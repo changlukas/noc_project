@@ -6,7 +6,7 @@ latency, per-interface throughput/occupancy, and link backpressure on the runnin
 co-sim. Two properties hold and are verified, not asserted:
 
 - **Non-intrusive:** the monitors tap signals passively; the DUT's cycle behavior
-  is unchanged (§7, A/B build identical).
+  is unchanged — passive by construction, A/B-confirmed (§7).
 - **Single-run:** no second pass and no isolated zero-load characterization; the
   best-case reference is the minimum observed in the same run (§4).
 
@@ -29,7 +29,7 @@ cosim/verilator/output/<scenario-id>/perf.json
 
 ## 1. Probe placement
 
-Monitors tap the AXI interfaces and the inter-router links; router/NI occupancy is
+Monitors tap the AXI interfaces and the inter-router links; router occupancy is
 sampled on the C side. All are read-only.
 
 | Tap point | Monitor | Where |
@@ -101,20 +101,25 @@ AXI interface, with per-slot accumulators (PG037's profile mode). Mapping:
 | `axi_slots[]` per-interface counters | Monitor slot + profile-mode Accumulators (PG037 Fig 1-4) |
 | write/read byte count, transaction count, latency, slave-write-idle, master-read-idle | the per-agent metric list (PG037 §"Metrics computed for an AXI4 agent") |
 | `latency.histogram[]` | Range Incrementer (PG037 Fig 1-3) |
-| `per_id` breakdown (config-gated, default off) | ID Filter & Mask (PG037 Fig 1-2) |
 | run window cycle base | Global Clock Counter (PG037 Fig 1-1) |
 | `perf.json` readout | the register read-out (PG037 uses AXI4-Lite; here a DPI JSON dump) |
 
-PG037 metric definitions adopted verbatim where they match: byte count is "the total
-number of bytes ... helpful when calculating throughput"; slave-write-idle is "the
-number of clocks between WVALID assertion and WREADY assertion"; master-read-idle is
-"the number of clocks between RVALID assertion and RREADY assertion."
+Implemented metric definitions, with the matching PG037 metric named:
 
-Divergences from PG037: write latency ends at B-response not last-write (§2); the
-periodic sampled-accumulator time-series, the event-log/AXI4-Stream trace path, and
-external-trigger gating are not implemented (§8). Router flit throughput is not
-counted — the `Router` model exposes occupancy but no flit counter, and adding one
-would change the DUT; link flit count carries throughput instead.
+- byte count = beats × bytes/beat (`(len+1)<<size`), `perf_collector.hpp` — PG037
+  "byte count ... helpful when calculating throughput".
+- `slave_write_idle_cyc` = count of cycles with `WVALID && !WREADY`
+  (`axi_perf_monitor.sv`) — PG037 slave-write-idle ("clocks between WVALID and
+  WREADY assertion").
+- `master_read_idle_cyc` = count of cycles with `RVALID && !RREADY` — PG037
+  master-read-idle.
+
+Divergences from PG037 (not implemented): write latency ends at B-response not
+last-write (§2); per-id breakdown (PG037 ID Filter), the periodic
+sampled-accumulator time-series, the event-log/AXI4-Stream trace path, and
+external-trigger gating. Router flit throughput is not counted — the `Router` model
+exposes occupancy but no flit counter, and adding one would change the DUT; link
+flit count carries throughput instead.
 
 Diagnostic reading:
 
@@ -169,28 +174,32 @@ NI stage allocation (ROBLESS = co-sim default; ROB adds one NMU-rsp stage):
   tick via a reverse-order tick (later stages drain before earlier fill, so no
   same-tick double-advance). NI design: spec §5. NI contributes 10 of the 27 write
   cycles.
-- **Co-sim shell boundary is the only non-architectural cost.** Each `*_wrap.sv`
-  registers its DPI outputs once per clock. Write incurs 2 such boundary cycles;
-  read incurs 4 (the R-beat path crosses one additional module boundary than the
-  B-beat path — co-sim artifact, root cause unresolved). It does not fold into the
-  NI stage count and is isolated in the table above.
+- **Co-sim shell boundary is a residual, not an independently measured counter.**
+  The NI (stage count), router (3×4), and slave (config latency) terms are from the
+  model; the shell-boundary term is the **residual** = measured total − those three.
+  Each `*_wrap.sv` registers its DPI outputs once per clock, which accounts for it.
+  The residual is 2 (write) / 4 (read); the read's extra boundary cycle is an
+  unrooted co-sim artifact. It does not fold into the NI stage count.
 
 Per-stage occupancy is observable via `Nmu/Nsu::stage_occupancy(path, stage,
 axi_ch)`, mirroring the router's `input_fifo_size`/`output_fifo_size`.
 
 ## 7. Non-intrusive and overhead
 
-The probe adds zero cycles to the DUT and is verified by an A/B build: monitors
-present vs. absent produce an identical scoreboard result and identical
-per-transaction completion cycles.
+The probe adds zero cycles to the DUT, by construction:
 
 - SV monitors (`axi_perf_monitor.sv`, `flit_link_perf_monitor.sv`): input-only
   ports, no drives.
-- C-side sampler (`cmodel_perf_sample_tick`): reads only const getters.
+- C-side sampler (`cmodel_perf_sample_tick`): calls only const accessors
+  (`Router::input_fifo_size`/`output_fifo_size`); does not mutate the model.
+
+A/B equivalence (monitors present vs. absent → identical scoreboard result and
+per-transaction completion cycles) was confirmed by a manual build comparison. An
+automated A/B gate is mandated by the spec (§4) but is not yet a checked-in test.
 
 Area/power overhead is not reported: this is a co-simulation behavior monitor, not
-synthesized RTL. The relevant overhead — perturbation of the DUT — is zero by the
-A/B check.
+synthesized RTL. The only relevant overhead — perturbation of the DUT — is zero
+(passive by construction).
 
 ## 8. Known limitations
 
