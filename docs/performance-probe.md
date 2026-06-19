@@ -7,13 +7,13 @@ so the design behaves identically whether they are on or off.
 
 ## 1. Overview
 
-The probe answers two questions about a run: how the design performs across all
-traffic, and what happened to any single transaction. It observes the running
-design without perturbing it, so the numbers reflect the design's own behavior.
+The probe produces two views of a run: aggregate metrics for each interface, and
+a record of every individual transaction. It observes the running design without
+perturbing it, so the numbers reflect the design's own behavior.
 
 - **Profile** view: aggregate counters and per-class latency for each interface.
-  The minimum of a class is its best observed latency. The spread up to its
-  maximum reflects interference from competing traffic.
+  The minimum of a class is its best observed latency. The spread between that and
+  its maximum reflects contention from other traffic.
 - **Trace** view: one record per completed transaction, for drilling into an
   outlier the Profile view flags.
 
@@ -120,7 +120,7 @@ Each AXI monitor accumulates a fixed set of metrics for its interface:
 
 Three more groups of counters sit outside the per-interface set. The memory edge
 adds a **service latency**, the time the memory takes to answer a transaction.
-Each link reports its **flit count** and a **stall count**, the number of clocks
+Each link reports its total **flit count** and a **stall count**, the number of clocks
 it has no downstream credit (`credit == 0`). Each router reports its peak **input
 and output queue occupancy**.
 
@@ -178,8 +178,8 @@ is no streaming trace output.
 ## 6. Latency composition
 
 The numbers below are one measured instance, not a fixed specification: a single
-32-byte transaction on the 2-node testbench. They move with scenario and
-configuration, so re-measure before quoting.
+32-byte transaction on the 2-node testbench. These values depend on scenario and
+configuration. Regenerate them before reuse.
 
 **Figure 5: Round-trip latency composition. Segments are to scale, the number
 above each boundary is the cumulative cycle, and Shell is the non-architectural
@@ -202,8 +202,8 @@ Read round-trip = 28 cyc
 | Memory service | 3 | 2 | memory latency plus handshake |
 | Shell boundary | 2 | 4 | co-sim wrapper registers, non-architectural residual |
 
-The network interface and the router each advance one stage per cycle. The shell
-term is the residual: the measured total minus the network-interface, router, and
-memory contributions.
+Only the round-trip total and the memory service are measured directly. The
+network-interface and router figures come from their known pipeline depth (each
+advances one stage per cycle), and the shell boundary is the remainder.
 
 The full field-level layout of the output file is kept in the design spec.
