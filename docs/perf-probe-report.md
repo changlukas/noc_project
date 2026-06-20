@@ -126,9 +126,9 @@ on the 2-node testbench) produces:
   4 transactions -> output/AX4-BAS-003.../perf.json
 ```
 
-Sections 4 and 5 decode this output by function.
+Sections 4 and 5 decode this output.
 
-## 4. Event counting: aggregate metrics
+## 4. Event counting: AXI interface metrics
 
 Event counting aggregates events into per-interface metrics. It splits into three
 functions:
@@ -159,10 +159,9 @@ Counting is clocked. Each cycle, every monitor:
 The aggregation (histogram bins, per-class min / mean / max) runs in the
 collector at the end of the run, not per cycle.
 
-**AXI interface columns** (`AXI throughput / backpressure` block, one row per
-interface):
+**Per-interface counters** (`AXI throughput / backpressure` block):
 
-| Metric (column) | Description |
+| Metric | Description |
 |---|---|
 | Write / Read Byte Count (`bytes_wr` / `bytes_rd`) | Bytes written or read. Basis for throughput. |
 | Write / Read Transaction Count (`txn_wr` / `txn_rd`) | Completed write or read transactions. |
@@ -184,7 +183,10 @@ has its own min / mean / max, and the minimum is the best case observed in the r
 In the example each class has one transaction, so the three are equal (read 28,
 write 27).
 
-**NoC columns** (`noc` object in `perf.json`):
+## 5. NoC and per-transaction records
+
+`perf.json` carries two structured sections: the NoC counters (event counting on
+the links and routers) and the per-transaction records (event logging).
 
 ```json
 "noc": {
@@ -196,10 +198,16 @@ write 27).
     {"name": "req_0to1", "flit_count": 3, "stall_cyc": 0},
     {"name": "rsp_0to1", "flit_count": 2, "stall_cyc": 0}
   ]
-}
+},
+"transactions": [
+  {"id": 5, "dir": "write", "src": "node0", "dst": "node1", "accept_cyc": 2, "complete_cyc": 29, "latency": 27, "bytes": 32},
+  {"id": 5, "dir": "read",  "src": "node0", "dst": "node1", "accept_cyc": 2, "complete_cyc": 30, "latency": 28, "bytes": 32}
+]
 ```
 
 (node1's mirror entries omitted.)
+
+**Router and link metrics**:
 
 - **in_fifo_occ_max / out_fifo_occ_max**: peak fill of a router's input and output
   queues.
@@ -208,18 +216,7 @@ write 27).
 - **stall_cyc**: clocks a link had no downstream credit (`credit == 0`), zero under
   this light load.
 
-## 5. Event logging: per-transaction records
-
-Event logging keeps one record per completed transaction in `perf.json`:
-
-```json
-"transactions": [
-  {"id": 5, "dir": "write", "src": "node0", "dst": "node1", "accept_cyc": 2, "complete_cyc": 29, "latency": 27, "bytes": 32},
-  {"id": 5, "dir": "read",  "src": "node0", "dst": "node1", "accept_cyc": 2, "complete_cyc": 30, "latency": 28, "bytes": 32}
-]
-```
-
-(node1's mirror entries omitted.)
+**Per-transaction records**:
 
 Each record carries the AXI id, direction, source and destination node, the accept
 and complete cycle, the latency, and the byte count. Latency is
