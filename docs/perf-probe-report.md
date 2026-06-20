@@ -224,7 +224,7 @@ and complete cycle, the latency, and the byte count. Latency is
 JSON-only, not printed in the summary. Use them to inspect the transactions behind
 an outlier in the aggregate metrics.
 
-## 6. Latency case study
+## 6. Latency breakdown
 
 The 27/28-cycle round-trip splits across the NI pipeline, the router pipeline, the
 memory, and the co-sim shell. The NI and router pipelines, drawn separately:
