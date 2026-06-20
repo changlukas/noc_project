@@ -2,11 +2,15 @@
 
 ## 1. Probe architecture and scope
 
-A passive probe for the NoC co-simulation: it monitors the running design and
-writes one `perf.json` plus an on-screen summary per scenario, without changing the
-design's timing. It implements a subset of a standard AXI performance monitor with
-two collection functions (Figure 1): event counting (aggregate metrics) and event
-logging (per-transaction records).
+A passive probe for the NoC co-simulation:
+
+- Monitors the running design and writes one `perf.json` plus an on-screen summary
+  per scenario, without changing the design's timing.
+- A subset of a standard AXI performance monitor with two collection functions
+  (Figure 1): event counting (aggregate metrics) and event logging
+  (per-transaction records).
+- One run produces both outputs.
+- Non-intrusive: identical cycles with the monitors on or off.
 
 **Figure 1: Monitor structure and data flow.**
 
@@ -31,9 +35,6 @@ logging (per-transaction records).
                            v
                  perf.json + on-screen summary
 ```
-
-- Non-intrusive: identical cycles with the monitors on or off.
-- One run produces both outputs.
 
 Not implemented: runtime metric selection, ID filtering, periodic time-series
 snapshots, external event and trigger inputs, memory-mapped register access,
