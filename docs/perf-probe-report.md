@@ -226,16 +226,23 @@ an outlier in the aggregate metrics.
 
 ## 6. Latency case study
 
-Where the 27 and 28 cycles go, for one 32-byte transaction:
+Where the 27 and 28 cycles go, for one 32-byte transaction. Each stage is a row,
+the x-axis is cycles, and the transaction flows NI to Router to Slave to Shell:
 
 ```text
 Write round-trip = 27 cyc
-  0            10                22      25   27
-  |--- NI:10 --|--- Router:12 ---|-Slv:3-|Sh:2|
+        0                   10                      22    25  27
+NI      [--------10--------]
+Router                      [----------12----------]
+Slave                                               [-3--]
+Shell                                                     [2-]
 
 Read round-trip = 28 cyc
-  0            10                22    24     28
-  |--- NI:10 --|--- Router:12 ---|Slv:2|-Sh:4-|
+        0                   10                      22  24      28
+NI      [--------10--------]
+Router                      [----------12----------]
+Slave                                               [2-]
+Shell                                                   [--4---]
 ```
 
 | Component | Write | Read | Source |
