@@ -109,7 +109,7 @@ on the 2-node testbench) produces:
     node1.manager                  32       32      1      1       0       0
     node1.subordinate              32       32      1      1       0       0
   Latency -- end-to-end (manager; min = best-case observed)
-    signature                               n   min   mean   max
+    class                                   n   min   mean   max
     read node0->node1  len0 size5           1    28     28    28
     read node1->node0  len0 size5           1    28     28    28
     write node0->node1  len0 size5          1    27     27    27
@@ -147,7 +147,7 @@ event counting
 |---|---|
 | Accumulator | Write / Read Byte Count, Write / Read Transaction Count, Slave Write Idle / Master Read Idle Cycle Count |
 | Range incrementer | Latency histogram, one increment per transaction into a fixed bin (edges 0 16 32 64 128 256) |
-| Latency stats | Per-signature latency min / mean / max |
+| Latency stats | Per-class latency min / mean / max |
 
 Counting is clocked. Each cycle, every monitor:
 
@@ -156,30 +156,33 @@ Counting is clocked. Each cycle, every monitor:
 - pushes or pops a per-id queue to match a transaction's start with its completion,
 - samples the router queue occupancy.
 
-The aggregation (histogram bins, per-signature min / mean / max) runs in the
+The aggregation (histogram bins, per-class min / mean / max) runs in the
 collector at the end of the run, not per cycle.
 
 **AXI interface columns** (`AXI throughput / backpressure` block, one row per
 interface):
 
-- **bytes_wr / bytes_rd** (Write / Read Byte Count): bytes written or read. Basis
-  for throughput.
-- **txn_wr / txn_rd** (Write / Read Transaction Count): completed write or read
-  transactions.
-- **idle_wr** (Slave Write Idle Cycle Count): clocks WVALID is held without WREADY.
-- **idle_rd** (Master Read Idle Cycle Count): clocks RVALID is held without RREADY.
+| Metric (column) | Description |
+|---|---|
+| Write / Read Byte Count (`bytes_wr` / `bytes_rd`) | Bytes written or read. Basis for throughput. |
+| Write / Read Transaction Count (`txn_wr` / `txn_rd`) | Completed write or read transactions. |
+| Slave Write Idle Cycle Count (`idle_wr`) | Clocks WVALID is held without WREADY. |
+| Master Read Idle Cycle Count (`idle_rd`) | Clocks RVALID is held without RREADY. |
 
-**Latency** (end-to-end at the manager interface, grouped by signature: operation,
-source, destination, burst length, transfer size):
+**Latency** (Write and Read measured end-to-end at the manager interface):
 
-- **Write Latency**: from write-address acceptance (AWVALID & AWREADY) to the write
-  response (BVALID & BREADY).
-- **Read Latency**: from read-address acceptance (ARVALID & ARREADY) to the last
-  read beat (RVALID & RREADY & RLAST).
-- **min / mean / max**: per signature. The minimum is the best-case observed in the
-  same run.
-- **slave service**: time the memory takes to answer, measured at the subordinate
-  interface.
+| Metric | Definition |
+|---|---|
+| Write Latency | Write-address acceptance (AWVALID & AWREADY) to the write response (BVALID & BREADY). |
+| Read Latency | Read-address acceptance (ARVALID & ARREADY) to the last read beat (RVALID & RREADY & RLAST). |
+| Slave service | The memory's service time, measured at the subordinate interface. |
+
+The collector groups completed transactions by **class** (operation, source,
+destination, burst length, transfer size) and reports count, min, mean, and max for
+each. The operation is part of the class, so every read flow and every write flow
+has its own min / mean / max, and the minimum is the best case observed in the run.
+In the example each class has one transaction, so the three are equal (read 28,
+write 27).
 
 **NoC columns** (`noc` object in `perf.json`):
 
