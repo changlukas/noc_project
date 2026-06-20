@@ -183,14 +183,14 @@ class PerfCollector {
                    << ",\"latency\":" << t.latency << ",\"bytes\":" << t.bytes << '}';
             }
         }
-        os << "],\"by_signature\":[";
-        emit_signatures(os, mgr);
+        os << "],\"by_class\":[";
+        emit_classes(os, mgr);
         os << "],\"histogram\":[";
         emit_histogram(os, mgr);
         os << "]}";
     }
 
-    static void emit_signatures(std::ostringstream& os, const std::vector<Txn>& txns) {
+    static void emit_classes(std::ostringstream& os, const std::vector<Txn>& txns) {
         // key = (is_write, len, size, src_node, dst)
         std::map<std::tuple<bool, uint32_t, uint32_t, std::string, uint32_t>, std::vector<uint64_t>>
             g;

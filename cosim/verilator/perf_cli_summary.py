@@ -36,15 +36,15 @@ def print_axi_slots(slots):
 
 def print_latency(latency, slots):
     _hdr("  Latency -- end-to-end (manager; min = best-case observed)")
-    by_sig = latency.get("by_signature", [])
-    if by_sig:
+    by_class = latency.get("by_class", [])
+    if by_class:
         fmt = "    {:<36} {:>4} {:>5} {:>6} {:>5}"
-        print(fmt.format("signature", "n", "min", "mean", "max"))
-        for s in by_sig:
+        print(fmt.format("class", "n", "min", "mean", "max"))
+        for s in by_class:
             src = s.get("src")
             dst = s.get("dst", "?")
             flow = "{}->{}" .format(src, dst) if src else dst
-            sig = "{} {}  len{} size{}".format(
+            cls = "{} {}  len{} size{}".format(
                 s.get("op", "?"),
                 flow,
                 s.get("len", "?"),
@@ -55,7 +55,7 @@ def print_latency(latency, slots):
                 mean_str = "{:.1f}".format(mean_val)
             else:
                 mean_str = str(mean_val)
-            print(fmt.format(sig, s.get("count", 0), s.get("min", 0),
+            print(fmt.format(cls, s.get("count", 0), s.get("min", 0),
                              mean_str, s.get("max", 0)))
 
     hist = latency.get("histogram", [])

@@ -32,7 +32,7 @@ TEST(PerfCollector, ByteCountFromLenSize) {
     EXPECT_NE(j.find("\"write_byte_count\":64"), std::string::npos);
 }
 
-TEST(PerfCollector, SignatureMinMeanMax) {
+TEST(PerfCollector, ClassMinMeanMax) {
     PerfCollector pc;
     pc.add_txn("node0.manager", 1, true, 0x100000000ull, 7, 3, 0, 40);
     pc.add_txn("node0.manager", 1, true, 0x100000000ull, 7, 3, 0, 60);
