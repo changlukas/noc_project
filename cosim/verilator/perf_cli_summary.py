@@ -17,10 +17,10 @@ def _hdr(s):
 
 def print_axi_slots(slots):
     _hdr("  AXI throughput / backpressure")
-    fmt = "    {:<24} {:>8} {:>8} {:>6} {:>6} {:>7} {:>7} {:>9}"
+    fmt = "    {:<24} {:>8} {:>8} {:>6} {:>6} {:>7} {:>7}"
     print(fmt.format(
         "slot", "bytes_wr", "bytes_rd",
-        "txn_wr", "txn_rd", "idle_wr", "idle_rd", "outst_max"
+        "txn_wr", "txn_rd", "idle_wr", "idle_rd"
     ))
     for s in slots:
         print(fmt.format(
@@ -31,7 +31,6 @@ def print_axi_slots(slots):
             s.get("read_txn_count", 0),
             s.get("slave_write_idle_cyc", 0),
             s.get("master_read_idle_cyc", 0),
-            s.get("outstanding_max", 0),
         ))
 
 

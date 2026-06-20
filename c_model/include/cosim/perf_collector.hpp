@@ -41,11 +41,10 @@ class PerfCollector {
     }
 
     void set_slot_backpressure(const std::string& slot, uint64_t slave_write_idle_cyc,
-                               uint64_t master_read_idle_cyc, uint64_t outstanding_max) {
+                               uint64_t master_read_idle_cyc) {
         Slot& s = slot_(slot);
         s.slave_write_idle_cyc = slave_write_idle_cyc;
         s.master_read_idle_cyc = master_read_idle_cyc;
-        s.outstanding_max = outstanding_max;
     }
 
     void sample_router(const std::string& name, uint64_t in_occ, uint64_t out_occ) {
@@ -97,7 +96,6 @@ class PerfCollector {
         std::vector<Txn> txns;
         uint64_t slave_write_idle_cyc = 0;
         uint64_t master_read_idle_cyc = 0;
-        uint64_t outstanding_max = 0;
     };
     struct Router {
         uint64_t in_max = 0;
@@ -133,8 +131,7 @@ class PerfCollector {
            << "\"write_txn_count\":" << wt << ",\"read_txn_count\":" << rt << ','
            << "\"write_byte_count\":" << wb << ",\"read_byte_count\":" << rb << ','
            << "\"slave_write_idle_cyc\":" << s.slave_write_idle_cyc
-           << ",\"master_read_idle_cyc\":" << s.master_read_idle_cyc
-           << ",\"outstanding_max\":" << s.outstanding_max;
+           << ",\"master_read_idle_cyc\":" << s.master_read_idle_cyc;
         if (!is_manager(name)) {
             os << ",\"service_latency\":{";
             emit_stats(os, "write", s.txns, true);

@@ -1,5 +1,5 @@
 // Passive AXI slot monitor. Reads one AXI interface's wires;
-// correlates latency by per-(id,dir) in-order FIFO; counts idle/outstanding;
+// correlates latency by per-(id,dir) in-order FIFO; counts idle cycles;
 // reports each completion + end-of-run backpressure via DPI. No drives.
 module axi_perf_monitor #(
     parameter string SLOT_NAME = "slot",
@@ -27,12 +27,11 @@ module axi_perf_monitor #(
         input longint accept_cyc, input longint complete_cyc);
     import "DPI-C" context function void cmodel_perf_axi_backpressure(
         input string slot, input longint slave_write_idle_cyc,
-        input longint master_read_idle_cyc, input longint outstanding_max);
+        input longint master_read_idle_cyc);
 
     localparam int NID = 1 << ID_W;
     longint cyc;
-    longint slave_write_idle, master_read_idle, outstanding_max;
-    int     outstanding;
+    longint slave_write_idle, master_read_idle;
     // per-id in-order issue queues (separate write/read), holding accept cycle +
     // the addr/len/size needed to reconstruct the completion record.
     longint w_acc [NID][$]; longint w_addr [NID][$]; int w_len [NID][$]; int w_sz [NID][$];
@@ -41,14 +40,11 @@ module axi_perf_monitor #(
     always_ff @(posedge clk_i) begin
         if (!rst_ni) begin
             cyc <= 0; slave_write_idle <= 0; master_read_idle <= 0;
-            outstanding_max <= 0; outstanding <= 0;
             for (int i = 0; i < NID; i++) begin
                 w_acc[i].delete();  w_addr[i].delete();  w_len[i].delete();  w_sz[i].delete();
                 r_acc[i].delete();  r_addr[i].delete();  r_len[i].delete();  r_sz[i].delete();
             end
         end else begin
-            automatic int acc_n = (awvalid && awready ? 1 : 0) + (arvalid && arready ? 1 : 0);
-            automatic int ret_n = (bvalid && bready ? 1 : 0) + (rvalid && rready && rlast ? 1 : 0);
             cyc <= cyc + 1;
             if (wvalid && !wready) slave_write_idle  <= slave_write_idle  + 1;
             if (rvalid && !rready) master_read_idle   <= master_read_idle  + 1;
@@ -82,12 +78,9 @@ module axi_perf_monitor #(
                 void'(r_acc[rid].pop_front());  void'(r_addr[rid].pop_front());
                 void'(r_len[rid].pop_front());  void'(r_sz[rid].pop_front());
             end
-
-            if (outstanding + acc_n > outstanding_max) outstanding_max <= outstanding + acc_n;
-            outstanding <= outstanding + acc_n - ret_n;
         end
     end
 
     final cmodel_perf_axi_backpressure(SLOT_NAME, slave_write_idle,
-                                       master_read_idle, outstanding_max);
+                                       master_read_idle);
 endmodule

@@ -17,8 +17,8 @@ PerfCollector make_populated() {
     pc.add_txn("node0.manager", 5, false, 0x100000000ull, 7, 3, 12, 50);
     pc.add_txn("node1.subordinate", 3, true, 0x100000000ull, 7, 3, 30, 44);
     pc.add_txn("node1.subordinate", 5, false, 0x100000000ull, 7, 3, 28, 40);
-    pc.set_slot_backpressure("node0.manager", 2, 0, 1);
-    pc.set_slot_backpressure("node1.subordinate", 3, 1, 1);
+    pc.set_slot_backpressure("node0.manager", 2, 0);
+    pc.set_slot_backpressure("node1.subordinate", 3, 1);
     pc.set_link("req_0to1", 4, 1);
     pc.sample_router("req.R(0,0)", 2, 2);
     pc.sample_router("req.R(0,0)", 1, 1);  // max must stay 2/2
