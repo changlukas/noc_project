@@ -226,24 +226,25 @@ an outlier in the aggregate metrics.
 
 ## 6. Latency case study
 
-Where the 27 and 28 cycles go, for one 32-byte transaction. Each stage is a row,
-the x-axis is cycles, and the transaction flows NI to Router to Slave to Shell:
+The 27-cycle write round-trip, traced through the actual NMU, router, and NSU
+pipeline stages. Each row is a hardware block, the x-axis is cycles. The request
+runs down to memory, then the response runs back up:
 
 ```text
-Write round-trip = 27 cyc
-        0                   10                      22    25  27
-NI      [--------10--------]
-Router                      [----------12----------]
-Slave                                               [-3--]
-Shell                                                     [2-]
+cycle         0              5              10             15             20             25
+node0 NMU     SP PK VA                                                             DP SP
+node0 Router           RC SA LT                                           RC SA LT
+node1 Router                    RC SA LT                         RC SA LT
+node1 NSU                                DP MP          MP PK VA
+node1 memory                                   ME ME ME
+node0 shell                                                                              SH SH
 
-Read round-trip = 28 cyc
-        0                   10                      22  24      28
-NI      [--------10--------]
-Router                      [----------12----------]
-Slave                                               [2-]
-Shell                                                   [--4---]
+SP AxiSlavePort  PK Packetize  VA VcArbiter  DP Depacketize  MP AxiMasterPort
+RC route-compute  SA switch+VC alloc  LT link-traversal  ME memory  SH shell register
 ```
+
+The read round-trip (28 cycles) follows the same path, with memory service of 2
+cycles (not 3) and a 4-cycle shell residual (not 2).
 
 | Component | Write | Read | Source |
 |---|---|---|---|
