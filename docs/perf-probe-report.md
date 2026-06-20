@@ -224,17 +224,21 @@ an outlier in the aggregate metrics.
 The 27/28-cycle round-trip splits across the NI pipeline, the router pipeline, the
 memory, and the co-sim shell. The NI and router pipelines, drawn separately:
 
-**NI pipeline** (NMU and NSU, one registered stage per box):
+**NI pipelines** (NMU and NSU, cycle axis, one stage per cycle):
 
 ```text
-NMU request   (AXI -> NoC)  :  AxiSlavePort + Rob admit  -->  Packetize  -->  WormholeArbiter + VcArbiter
-NMU response  (NoC -> AXI)  :  Depacketize  -->  AxiSlavePort
-NSU request   (NoC -> slave):  Depacketize + MetaBuffer  -->  AxiMasterPort
-NSU response  (slave -> NoC):  AxiMasterPort  -->  Packetize  -->  WormholeArbiter + VcArbiter
+NMU pipeline                   NSU pipeline
+cycle      0    1    2         cycle      0    1    2
+request    SP   PK   VA        request    DP   MP
+response   DP   SP             response   MP   PK   VA
 ```
 
-The four paths total 3 + 2 + 2 + 3 = 10 cycles in ROBLESS mode. A ROB would add a
-re-order stage to the NMU response path.
+SP AxiSlavePort (request: + Rob admit), MP AxiMasterPort, PK Packetize, DP
+Depacketize (NSU request: + MetaBuffer), VA VC arbitration (WormholeArbiter +
+VcArbiter), RB Rob re-order.
+
+The four paths total 3 + 2 + 2 + 3 = 10 cycles in ROBLESS mode. A ROB adds an RB
+re-order stage to the NMU response (DP -> RB -> SP).
 
 **Router pipeline** (3 stages, back-to-back flits overlap):
 
