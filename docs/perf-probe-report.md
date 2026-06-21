@@ -4,11 +4,10 @@
 
 A passive probe for the NoC co-simulation:
 
-- Monitors the running design and writes one `perf.json` plus an on-screen summary
-  per scenario, without changing the design's timing.
-- A subset of a standard AXI performance monitor with two collection functions
-  (Figure 1): event counting (aggregate metrics) and event logging
-  (per-transaction records).
+- Monitors the design under test and records each run to a `perf.json` file and a
+  text summary.
+- Implements two functions of a standard AXI performance monitor (Figure 1): event
+  counting for aggregate metrics and event logging for per-transaction records.
 - One run produces both outputs.
 - Non-intrusive: identical cycles with the monitors on or off.
 
