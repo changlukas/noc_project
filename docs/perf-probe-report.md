@@ -32,7 +32,7 @@ A passive probe for the NoC co-simulation:
             |   event logging   ----------|--> per-transaction records
             +--------------+--------------+
                            v
-                 perf.json + on-screen summary
+                 perf.json + text summary
 ```
 
 Not implemented: runtime metric selection, ID filtering, periodic time-series
@@ -69,10 +69,10 @@ Components:
 |---|---|---|
 | `axi_perf_monitor.sv` | SystemVerilog | Monitors one AXI interface: latency, idle |
 | `flit_link_perf_monitor.sv` | SystemVerilog | Monitors one link: flit count, stall |
-| `cmodel_dpi.cpp` | C++ (DPI-C) | Receive monitor events from RTL |
-| `main.cpp` | C++ | Verilator harness: drive per-cycle sampling and the final dump |
-| `perf_collector.hpp` | C++ | Aggregate every monitor, write `perf.json` |
-| `perf_cli_summary.py` | Python | Print the on-screen summary |
+| `cmodel_dpi.cpp` | C++ (DPI-C) | Receives monitor events from RTL |
+| `main.cpp` | C++ | Drives per-cycle sampling and the final dump (Verilator harness) |
+| `perf_collector.hpp` | C++ | Aggregates every monitor and writes `perf.json` |
+| `perf_cli_summary.py` | Python | Prints the text summary |
 
 Testbench environment (`tb_top`), co-simulated with Verilator:
 
@@ -87,7 +87,7 @@ Testbench environment (`tb_top`), co-simulated with Verilator:
 
 - **Input**: the NI interfaces (AXI manager interface at the master, AXI
   subordinate interface at the memory) and the router interfaces (inter-router
-  links, queue occupancy). The probe reads them, never drives.
+  links, queue occupancy). The probe reads these signals and drives none.
 - **Output**: per-transaction latency, per-interface throughput and byte counts,
   link stall, and router occupancy.
 
@@ -124,8 +124,8 @@ Sections 4 and 5 decode this output.
 
 ## 4. Event counting: AXI interface metrics
 
-Event counting aggregates events into per-interface metrics. It splits into three
-functions:
+Event counting aggregates interface events into per-interface metrics. It comprises
+three functions:
 
 **Figure 3: Event counting functions.**
 
@@ -143,7 +143,7 @@ event counting
 | Range incrementer | Latency histogram, one increment per transaction into a fixed bin (edges 0 16 32 64 128 256) |
 | Latency stats | Per-class latency min / mean / max |
 
-Counting is clocked. Each cycle, every monitor:
+Event counting is clocked. On each cycle, every monitor:
 
 - detects the interface handshakes,
 - updates its counters,
@@ -157,25 +157,24 @@ collector at the end of the run, not per cycle.
 
 | Metric | Description |
 |---|---|
-| Write / Read Byte Count (`bytes_wr` / `bytes_rd`) | Bytes written or read. Basis for throughput. |
-| Write / Read Transaction Count (`txn_wr` / `txn_rd`) | Completed write or read transactions. |
-| Slave Write Idle Cycle Count (`idle_wr`) | Clocks WVALID is held without WREADY. |
-| Master Read Idle Cycle Count (`idle_rd`) | Clocks RVALID is held without RREADY. |
+| Write / Read Byte Count (`bytes_wr` / `bytes_rd`) | Total bytes written or read. Used to compute throughput. |
+| Write / Read Transaction Count (`txn_wr` / `txn_rd`) | Total number of completed write or read transactions. |
+| Slave Write Idle Cycle Count (`idle_wr`) | Number of clocks WVALID is held without WREADY. |
+| Master Read Idle Cycle Count (`idle_rd`) | Number of clocks RVALID is held without RREADY. |
 
 **Latency** (Write and Read measured end-to-end at the manager interface):
 
 | Metric | Definition |
 |---|---|
-| Write Latency | Write-address acceptance (AWVALID & AWREADY) to the write response (BVALID & BREADY). |
-| Read Latency | Read-address acceptance (ARVALID & ARREADY) to the last read beat (RVALID & RREADY & RLAST). |
-| Slave service | The memory's service time, measured at the subordinate interface. |
+| Write Latency | The time from write-address acceptance (AWVALID & AWREADY) to the write response (BVALID & BREADY). |
+| Read Latency | The time from read-address acceptance (ARVALID & ARREADY) to the last read beat (RVALID & RREADY & RLAST). |
+| Slave service | The time the memory takes to service a transaction, measured at the subordinate interface. |
 
 The collector groups completed transactions by **class** (operation, source,
-destination, burst length, transfer size) and reports count, min, mean, and max for
-each. The operation is part of the class, so every read flow and every write flow
-has its own min / mean / max, and the minimum is the best case observed in the run.
-In the example each class has one transaction, so the three are equal (read 28,
-write 27).
+destination, burst length, transfer size) and reports count, min, mean, and max per
+class. Operation is part of the class, so read and write flows are reported
+separately. The minimum is the best case observed in the run. Each class in the
+example holds one transaction, so its three statistics are equal (read 28, write 27).
 
 ## 5. NoC and per-transaction records
 
@@ -203,25 +202,26 @@ the links and routers) and the per-transaction records (event logging).
 
 **Router and link metrics**:
 
-- **in_fifo_occ_max / out_fifo_occ_max**: peak fill of a router's input and output
-  queues.
-- **flit_count**: flits on a link. Here the request link carries three (the write's
-  AW and W, the read's AR) and the response link two (the write's B, the read's R).
-- **stall_cyc**: clocks a link had no downstream credit (`credit == 0`), zero under
-  this light load.
+- **in_fifo_occ_max / out_fifo_occ_max**: Peak occupancy of a router's input and
+  output queues.
+- **flit_count**: Number of flits carried on a link. In this run the request link
+  carries three (write AW and W, read AR) and the response link two (write B, read R).
+- **stall_cyc**: Number of clocks a link has no downstream credit (`credit == 0`).
+  Zero under this light load.
 
 **Per-transaction records**:
 
 Each record carries the AXI id, direction, source and destination node, the accept
 and complete cycle, the latency, and the byte count. Latency is
 `complete_cyc - accept_cyc` (write 29 - 2 = 27, read 30 - 2 = 28). These records are
-JSON-only, not printed in the summary. Use them to inspect the transactions behind
-an outlier in the aggregate metrics.
+JSON-only, not printed in the summary. They support drill-down from an aggregate
+outlier to the individual transactions that produced it.
 
 ## 6. Latency breakdown
 
-The 27/28-cycle round-trip splits across the NI pipeline, the router pipeline, the
-memory, and the co-sim shell. The NI and router pipelines, drawn separately:
+The 27/28-cycle round-trip comprises the NI pipeline, the router pipeline, the
+memory service, and the co-sim shell. The NI and router pipelines are shown
+separately below:
 
 **NI pipelines** (NMU and NSU, cycle axis, one stage per cycle):
 
@@ -258,7 +258,7 @@ router total is four traversals, two routers each way.
 | Memory service | 3 | 2 | memory latency plus handshake |
 | Shell boundary | 2 | 4 | co-sim wrapper registers |
 
-The figures come from three places:
+The figures have three sources:
 
 - **Measured directly**: the round-trip total and the memory service.
 - **Pipeline depth**: the network-interface and router contributions.
