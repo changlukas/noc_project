@@ -22,7 +22,21 @@ CMODEL_INC     := $(PROJ_ROOT)/c_model/include
 CMODEL_TESTS   := $(PROJ_ROOT)/c_model/tests
 SPECGEN_INC    := $(PROJ_ROOT)/specgen/generated/cpp
 SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
-YAMLCPP_INC    := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-src/include
+
+# yaml-cpp HEADERS: online builds clone the source into the build tree; offline
+# (DEPS_SRC) builds use the pre-fetched source IN PLACE, so the headers live
+# there, not under build/. Gate on DEPS_SRC (same condition the root Makefile
+# uses for FetchContent), NOT on a build-tree wildcard — the build tree may not
+# be populated yet at parse time. `cd cosim/<sim> && make` does not run the root
+# Makefile, so resolve DEPS_SRC here too (auto-detect ~/noc_offline_deps;
+# pinnable via local.mk).
+DEPS_SRC ?= $(wildcard $(HOME)/noc_offline_deps)
+ifneq ($(strip $(DEPS_SRC)),)
+YAMLCPP_INC := $(DEPS_SRC)/yaml-cpp-src/include
+else
+YAMLCPP_INC := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-src/include
+endif
+# yaml-cpp LIBRARY is always a build artifact, so it stays under the build tree.
 YAMLCPP_LIB    := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-build/libyaml-cpp.a
 
 # GCC < 9 keeps std::filesystem in a separate library (libstdc++fs); the DPI
