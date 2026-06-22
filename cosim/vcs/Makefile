@@ -142,6 +142,14 @@ run-genamba: $(SIMV_GENAMBA)
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
 
+# tb_top is bidirectional: it needs two coordinate-variant scenarios passed as
+# +scenario_node0 / +scenario_node1 (mirrors cosim/verilator/Makefile). Generate
+# them with gen_coordinate_scenarios.py first. PYTHON3 must have PyYAML — on a
+# host where an EDA tool shadows a broken python3 on PATH, pin it in local.mk:
+#   PYTHON3 := /usr/bin/python3.12
+PYTHON3   ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
+COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
+
 SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top$(FSDB_SUFFIX)
 
 $(SIMV_TB_TOP): $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
@@ -158,9 +166,15 @@ tb_top: $(SIMV_TB_TOP)
 run-tb-top: $(SIMV_TB_TOP)
 	@mkdir -p output/$(SCENARIO)
 	@rm -f output/$(SCENARIO)/tb_top.fsdb  # drop stale fsdb from a previous FSDB=1 run
+	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord"
 	@set -o pipefail; \
-	$(SIMV_TB_TOP) "+scenario=$(SCENARIO_ABS)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
+	$(SIMV_TB_TOP) \
+	    "+scenario_node0=output/$(SCENARIO)/coord/node0/scenario.yaml" \
+	    "+scenario_node1=output/$(SCENARIO)/coord/node1/scenario.yaml" \
+	    "+perf_out=output/$(SCENARIO)/perf.json" \
+	    "+perf_scenario=$(SCENARIO)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
 	    2>&1 | tee output/$(SCENARIO)/run.log
+	@$(PYTHON3) $(COSIM_ROOT)/verilator/perf_cli_summary.py output/$(SCENARIO)/perf.json || true
 
 # --- batch: one fsdb per scenario, both TBs ----------------------------------
 # Produces waveforms; NOT a regression gate (always exits 0 — ctest is the
