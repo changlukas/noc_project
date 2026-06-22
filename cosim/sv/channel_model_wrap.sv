@@ -36,7 +36,7 @@ module channel_model_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    input  chandle            ctx_i,
+    input  longint unsigned            ctx_i,
     // NMU-facing bundle: receives req_*, drives rsp_* and req_credit_return.
     noc_intf.miso             noc_miso_i,
     // NSU-facing bundle: drives req_*, receives rsp_* and req_credit_return.
@@ -62,7 +62,7 @@ module channel_model_wrap #(
     // set_inputs: sample SV wire state into C++ input latch.
     // svBitVecVal carries FLIT_WIDTH bits as ceil(FLIT_WIDTH/32) 32-bit words.
     import "DPI-C" context function void cmodel_channel_model_set_inputs(
-        input  chandle              ctx,
+        input  longint unsigned              ctx,
         input  bit                  req_in_valid,
         input  bit [FLIT_WIDTH-1:0] req_in_flit,
         input  bit                  req_in_credit_return,
@@ -72,11 +72,11 @@ module channel_model_wrap #(
     );
 
     // tick: advance C++ model one cycle.
-    import "DPI-C" context function void cmodel_channel_model_tick(input chandle ctx);
+    import "DPI-C" context function void cmodel_channel_model_tick(input longint unsigned ctx);
 
     // get_outputs: read C++ output latch into SV locals.
     import "DPI-C" context function void cmodel_channel_model_get_outputs(
-        input  chandle              ctx,
+        input  longint unsigned              ctx,
         output bit                  req_out_valid,
         output bit [FLIT_WIDTH-1:0] req_out_flit,
         output bit                  req_out_credit_return,

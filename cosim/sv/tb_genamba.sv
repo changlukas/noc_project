@@ -6,15 +6,15 @@ module tb_genamba;
     always #5 ACLK = ~ACLK;          // 10 ns period
     reg ARESETn = 0;
 
-    // ---- DPI imports + chandle storage (copy of tb_top.sv:47-63 pattern) ----
+    // ---- DPI imports + longint unsigned storage (copy of tb_top.sv:47-63 pattern) ----
     import "DPI-C" context function void    cmodel_init(input string path);
     import "DPI-C" context function void    cmodel_finalize();
-    import "DPI-C" context function chandle cmodel_channel_model_create(input string name);
-    import "DPI-C" context function chandle cmodel_master_create(input string name);
-    import "DPI-C" context function chandle cmodel_slave_create(input string name);
-    import "DPI-C" context function chandle cmodel_nmu_create(input string name);
-    import "DPI-C" context function chandle cmodel_nsu_create(input string name);
-    chandle cm_ctx, master_ctx, slave_ctx, nmu_ctx, nsu_ctx;
+    import "DPI-C" context function longint unsigned cmodel_channel_model_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_master_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_slave_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name);
+    longint unsigned cm_ctx, master_ctx, slave_ctx, nmu_ctx, nsu_ctx;
 
     // ---- AXI + NoC interface bundles ----
     axi4_intf #(.ID_WIDTH(8), .ADDR_WIDTH(64), .DATA_WIDTH(256)) bfm_nmu_axi();
@@ -51,7 +51,7 @@ module tb_genamba;
     );
 
     // ---- DUT bridge: NMU + NSU on one noc_intf ----
-    // ctx_i: chandle context for per-instance DPI tick (NMU/NSU wrap each
+    // ctx_i: longint unsigned context for per-instance DPI tick (NMU/NSU wrap each
     // own one); verified against tb_top.sv:137,166 — mandatory port.
     nmu_wrap u_nmu (
         .clk_i(ACLK), .rst_ni(ARESETn),

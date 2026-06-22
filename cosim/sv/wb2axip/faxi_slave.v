@@ -127,7 +127,7 @@ module faxi_slave #(
 	output	reg	[F_LGDEPTH-1:0]		f_axi_awr_nbursts,
 	output	reg	[9-1:0]			f_axi_wr_pending,
 	output	reg	[F_LGDEPTH-1:0]		f_axi_rd_nbursts,
-	output	reg	[F_LGDEPTH-1:0]		f_axi_rd_outstanding,
+	output	reg	[F_LGDEPTH-1:0]		f_axi_rd_outstanding
 	// ...
 	// }}}
 	// }}}

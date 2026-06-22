@@ -49,21 +49,21 @@ module tb_top (
     import "DPI-C" context function int     cmodel_done();
     import "DPI-C" context function int     cmodel_scoreboard_clean();
     import "DPI-C" context function void    cmodel_dump_scoreboard();
-    import "DPI-C" context function chandle cmodel_router_create(input string name, input int x_coord);
-    import "DPI-C" context function chandle cmodel_master_create(input string name,
+    import "DPI-C" context function longint unsigned cmodel_router_create(input string name, input int x_coord);
+    import "DPI-C" context function longint unsigned cmodel_master_create(input string name,
                                                                  input string scenario_path);
-    import "DPI-C" context function chandle cmodel_slave_create(input string name,
+    import "DPI-C" context function longint unsigned cmodel_slave_create(input string name,
                                                                 input string scenario_path);
-    import "DPI-C" context function chandle cmodel_nmu_create(input string name, input int src_id);
-    import "DPI-C" context function chandle cmodel_nsu_create(input string name, input int src_id);
+    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name, input int src_id);
+    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name, input int src_id);
     import "DPI-C" context function int     cmodel_master_count();
     import "DPI-C" context function int     cmodel_reads_checked();
 
     string  scn_node0;  // node0 coordinate variant (low addr);  drives node1.master
     string  scn_node1;  // node1 coordinate variant (high addr); drives node0.master
-    chandle router0_ctx, router1_ctx;
-    chandle m0_ctx, s0_ctx, n0_nmu_ctx, n0_nsu_ctx;
-    chandle m1_ctx, s1_ctx, n1_nmu_ctx, n1_nsu_ctx;
+    longint unsigned router0_ctx, router1_ctx;
+    longint unsigned m0_ctx, s0_ctx, n0_nmu_ctx, n0_nsu_ctx;
+    longint unsigned m1_ctx, s1_ctx, n1_nmu_ctx, n1_nsu_ctx;
 
     initial begin
         if (!$value$plusargs("scenario_node0=%s", scn_node0) ||

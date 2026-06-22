@@ -17,7 +17,7 @@
 namespace ni::cmodel::cosim {
 extern std::atomic<int> g_dpi_error_code;
 extern std::string g_dpi_error_msg;
-HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name);
+HandleBlock* validate_handle(unsigned long long ctx, ShellType expected, const char* fn_name);
 }  // namespace ni::cmodel::cosim
 
 // Usage:
