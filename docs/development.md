@@ -144,15 +144,18 @@ Use `py -3` (not `python3`) for all Python tool invocations on the
 Windows host. This resolves through the Windows py launcher to the
 correct Python 3.x installation.
 
-### Per-instance chandle ABI
+### Per-instance handle ABI
 
-`cosim/c/cmodel_dpi.cpp` exposes 5 `cmodel_<shell>_create(name)`
-functions (one per shell type: master, slave, nmu, nsu,
-channel_model). Each returns an opaque `void*` (SV chandle) that wraps
-a `HandleBlock` registered in `g_handle_registry`. Cycle handlers
-take `void* ctx` as leading argument and validate via
+`cosim/c/cmodel_dpi.cpp` exposes a `cmodel_<shell>_create(name)`
+function per shell type. Each returns a 64-bit integer handle
+(`unsigned long long`, SV `longint unsigned`) encoding a `HandleBlock*`
+registered in `g_handle_registry`. Cycle handlers take
+`unsigned long long ctx` as leading argument and validate via
 `REQUIRE_HANDLE` before adapter access. `cmodel_finalize` walks the
-registry destroying all live handles.
+registry destroying all live handles. (The handle is a plain integer,
+not SV `chandle`: VCS rejects `chandle` as a module port, so the wraps
+pass the handle as `longint unsigned` and the C side casts it back to
+`HandleBlock*` at the DPI boundary.)
 
 This replaces the prior 5-singleton invariant. See
 `docs/superpowers/specs/2026-06-09-multi-instance-dpi-design.md` for
@@ -182,7 +185,7 @@ directory; run logs land in that directory's `output/<scenario>/run.log`:
 cd cosim/verilator
 make run-genamba                                # gen_amba role-1 (Tasks A-G)
 make run-genamba GENAMBA_SCENARIO=<ax4-id>      # specific scenario
-make run-tb-top                                 # wb2axip cosim, default scenario
+make run-tb-top                                 # wire-level cosim, default scenario
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
 
 cd cosim/vcs                                    # Linux workstation only
@@ -199,20 +202,14 @@ The top-level Makefile orchestrates only. Subdir Makefiles own their
 own build and clean targets. `$(MAKE) -C cosim/verilator` delegates to
 `cosim/verilator/Makefile` for the Verilator build step.
 
-### PYTHON3 override for Verilator build
+### PYTHON3 auto-detection
 
-`cosim/verilator/Makefile` uses `PYTHON3 ?= python3` as the default
-interpreter for the Verilator include-file helper. On Windows with MSYS2
-`python3` may not resolve; use:
-
-~~~bash
-make build-verilator PYTHON3="py -3"
-make check PYTHON3="py -3"
-~~~
-
-On Linux and macOS `python3` is correct and no override is needed. The
-root Makefile's lint targets auto-detect: they prefer the Windows `py -3`
-launcher when present and fall back to `python3`.
+Both the root and `cosim/verilator/Makefile` auto-detect the Python
+interpreter: they prefer the Windows `py -3` launcher when present (the
+MSYS2 mingw64 `python3` often lacks PyYAML, which the scenario/perf
+scripts need) and fall back to `python3` on Linux/macOS. No manual
+`PYTHON3=` override is needed on either host; set it in `local.mk` only
+if the auto-detection picks the wrong interpreter.
 
 ### Dual-simulator support (Verilator / VCS)
 
@@ -272,8 +269,8 @@ First-run validation on the workstation (record results in the
 
 1. `FSDB_PLI` paths exist (`$VERDI_HOME/share/PLI/VCS/LINUXAMD64/{novas.tab,pli.a}`).
 2. Whether `LD_LIBRARY_PATH` needs the FSDB runtime libs.
-3. Open one fsdb in Verdi: top-level AXI interfaces, DPI wrapper boundaries,
-   and `faxi` checker state must be visible (not merely a loadable file).
+3. Open one fsdb in Verdi: top-level AXI interfaces and DPI wrapper
+   boundaries must be visible (not merely a loadable file).
 
 #### VCD waveform tracing (Verilator)
 
@@ -468,14 +465,11 @@ template authoring, and extension guide.
    the c_model integration test and the cosim integration test via
    CMake `CONFIGURE_DEPENDS`.
 
-5. If the cosim test SKIPs the new scenario with a `WB2AXIP_*` reason
-   code, that is expected -- wb2axip does not model that case. No
-   action needed; the SKIP is self-documenting. INF-prefix scenarios
-   are skipped from both run-all paths (marker `INF_DEDICATED_TEST`,
-   set in `c_model/tests/axi/test_integration.cpp:87` and
+5. INF-prefix scenarios are skipped from both run-all paths (marker
+   `INF_DEDICATED_TEST`, set in
+   `c_model/tests/axi/test_integration.cpp:87` and
    `cosim/tests/test_cosim_integration.cpp:61`) and should only be
-   exercised through their dedicated test (e.g. `CheckerLiveness` for
-   INF-001).
+   exercised through their dedicated test.
 
 6. Commit with a body paragraph citing the IHI 0022H section or
    protocol property the scenario exercises.
@@ -531,24 +525,6 @@ cat cosim/verilator/output/AX4-BAS-003_single_write_read_aligned/run.log
 
 A passing run ends with `$finish` and no assertion failure lines.
 
-### faxi_slave.v assertion at line 807
-
-If the run.log contains a line referencing `faxi_slave.v:807`, this is
-the wb2axip single-burst-at-a-time assertion (see
-`docs/architecture.md` sec. 4). The scenario is sending multi-beat or
-multi-outstanding write traffic that exceeds wb2axip's internal
-constraint. This is not a c_model conformity failure.
-
-Correct response: do not add scenario-specific skip logic. The
-`wb2axip_block_reason()` predicate inspects scenario content (`len`,
-`lock`, `max_outstanding_write`); if it does not already catch your
-scenario, the scenario likely violates a wb2axip constraint that the
-predicate does not yet capture. Add the constraint to the predicate,
-not to the scenario. Alternatively, route the scenario through the
-c_model integration test only (Layer 2).
-
-Do NOT modify `faxi_slave.v` to remove the assertion.
-
 ### ctest path for cosim tests
 
 The cosim ctest executables are registered in `build/cmodel/` by the
@@ -558,13 +534,11 @@ directly:
 ~~~bash
 cd build/cmodel
 ctest -R Cosim --output-on-failure       # matches CosimIntegration
-ctest -R 'Cosim|Checker|Wb2axip' --output-on-failure   # all cosim ctests
 ~~~
 
-The cosim ctest names (PascalCase) are `CosimIntegration`,
-`CheckerLiveness`, and `Wb2axipBlock` (see `cosim/tests/CMakeLists.txt`
-lines 62, 67, 72). `ctest -R` matches against test names with a regex,
-so `-R cosim` (lowercase) matches zero tests.
+The cosim ctest name (PascalCase) is `CosimIntegration` (see
+`cosim/tests/CMakeLists.txt`). `ctest -R` matches against test names
+with a regex, so `-R cosim` (lowercase) matches zero tests.
 
 The Vtb_top binary must be built (`make build-verilator`) before cosim
 ctests can run.
@@ -586,8 +560,7 @@ ctest -R NmuShellAdapter.multi_beat_w_burst_full_rate_aw_available --output-on-f
 ~~~
 
 This test proves that each of the 8 W beats in an AWLEN=7 burst is
-individually visible on the wire bundle at successive ticks, independent
-of the wb2axip constraint.
+individually visible on the wire bundle at successive ticks.
 
 ### gen_amba role-1 testbench
 
@@ -636,26 +609,6 @@ directly:
     +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
 ~~~
 
-### CheckerLiveness (test_checker_fires_on_violation)
-
-The bringup test for the DPI error-propagation path:
-
-~~~bash
-cd build/cmodel
-ctest -R CheckerLiveness --output-on-failure
-~~~
-
-(The ctest name is `CheckerLiveness`; the underlying executable is
-`test_checker_fires_on_violation`. `ctest -R` matches the test name,
-not the executable.) This test uses INF-001
-(`tests/scenarios/AX4-INF-001_dpi_fatal_on_init_failure`), which
-points `data_file` at a nonexistent path to force `cmodel_init` to
-fail at the first master tick. It verifies (a) `Vtb_top` exits
-non-zero and (b) the centralized DPI fatal marker
-`[tb_top] DPI fatal` appears in output. If this test fails, the DPI
-error-propagation path through `cmodel_check_error` in `tb_top.sv` is
-broken -- debug that before relying on any other cosim ctest.
-
 ---
 
 ## 8. Pre-submit checklist
@@ -679,7 +632,7 @@ Before opening a PR or merging a branch:
 ## 9. References
 
 - `docs/architecture.md` -- system context, component map, tick
-  discipline, cosim boundary, wb2axip structural limits.
+  discipline, cosim boundary.
 - `tests/scenarios/README.md` -- scenario naming convention, YAML
   schema, IHI 0022H section coverage table.
 - `specgen/docs/guide/index.md` -- specgen sub-project guide.

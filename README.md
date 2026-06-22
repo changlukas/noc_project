@@ -2,28 +2,26 @@
 
 A behavioural C++ model and Verilator co-sim of an AXI4 Network-on-Chip
 Interface (NMU + NSU). The c_model passes IHI 0022H AXI4 conformity
-scenarios; the cosim verifies a subset through wb2axip protocol checkers
-under Verilator.
+scenarios; the cosim runs them through a Verilator wire-level testbench
+and checks results with the c_model scoreboard.
 
 ## Status
 
 Research / alpha. Stage 5b in progress; behavioural c_model + Verilator
-cosim. Run `make test` for the current pass count and skip reasons; the
-cosim side SKIPs wb2axip-blocked scenarios with documented reason codes
-(see `docs/architecture.md`).
+cosim. Run `make test` for the current pass count.
 
 ## Architecture
 
 ~~~
 AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
               behavioural c_model in C++17
-              Verilator cosim with wb2axip protocol check
+              Verilator wire-level cosim with scoreboard check
 ~~~
 
 ### Where code lives
 
 - `c_model/` - C++17 behavioural model + GoogleTest
-- `cosim/` - Verilator wire-level cosim + wb2axip checker
+- `cosim/` - Verilator wire-level cosim
 - `tests/scenarios/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
 - `specgen/` - spec-to-header codegen sub-project
 - `tools/` - repo-level tooling
@@ -57,7 +55,7 @@ directory; run logs land in that directory's `output/<scenario>/run.log`:
 
 ~~~bash
 cd cosim/verilator
-make run-tb-top                                 # wb2axip cosim, default scenario
+make run-tb-top                                 # wire-level cosim, default scenario
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
 make run-genamba                                # gen_amba role-1 testbench (Tasks A-G)
 
@@ -75,10 +73,7 @@ cd cosim/vcs       && make run-tb-top SCENARIO=<id> FSDB=1   # FSDB (needs Verdi
 cd cosim/vcs       && make run-all-fsdb                      # one FSDB per scenario + summary
 ~~~
 
-Multi-beat and multi-outstanding scenarios are SKIPped by the cosim
-integration test (reason codes WB2AXIP_MULTI_BEAT etc.) and will fire
-faxi_slave.v assertions if run through `make run-tb-top` directly. See
-`docs/architecture.md` for wb2axip structural limits, and
+See `docs/architecture.md` for the cosim architecture, and
 `docs/development.md` for the full build/run/waveform reference.
 
 ## Documentation
@@ -108,5 +103,3 @@ Vendored / derived material has its own license:
 
 - `c_model/include/axi/` ported from cocotbext-axi (MIT); see
   `c_model/include/axi/ATTRIBUTION.md`
-- `cosim/sv/wb2axip/` is ZipCPU/wb2axip (Apache 2.0), used with modifications
-  (see `cosim/sv/wb2axip/ATTRIBUTION.md` for the diff)
