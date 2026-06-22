@@ -149,11 +149,14 @@ Each component in the pipeline is a separate C++ class in `c_model/`.
 Components communicate through typed queues or method calls -- never
 through shared global state.
 
-### Per-instance chandle ABI
+### Per-instance handle ABI
 
 Each shell adapter (`*ShellAdapter`) is instantiated per call to
-`cmodel_<shell>_create(name)`. The function returns an opaque `void*`
-(`chandle` from SV's perspective) that wraps a typed `HandleBlock`:
+`cmodel_<shell>_create(name)`. The function returns a 64-bit integer
+handle (`unsigned long long`; SV `longint unsigned`) that encodes a
+pointer to a typed `HandleBlock` (cast back at the DPI boundary; a plain
+integer is used rather than SV `chandle` because VCS rejects `chandle`
+as a module port):
 
 ```cpp
 struct HandleBlock {
