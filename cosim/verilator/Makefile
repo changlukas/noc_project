@@ -98,10 +98,12 @@ TBTOP_EXE := $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)/V$(TOP)$(EXEEXT)
 
 all: $(TBTOP_EXE)
 
-# Python3 executable.  On Windows with MSYS2 use `py -3`; on Linux/macOS
-# `python3` is standard.  Override at the command line if needed:
-#   make build-verilator PYTHON3=py
-PYTHON3 ?= python3
+# Python3 executable — auto-detected so build/run commands stay identical on
+# Windows and Linux. Prefer the Windows `py -3` launcher when present (the
+# canonical interpreter with PyYAML; the MSYS2 mingw64 `python3` often lacks
+# it, which breaks the scenario/perf scripts below). Falls back to `python3`
+# on Linux/macOS. Mirrors the root Makefile. Override via local.mk if needed.
+PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
 # yaml-cpp comes from the c_model CMake build; surface a clear hint instead
 # of a mysterious linker failure when it has not been built yet.
