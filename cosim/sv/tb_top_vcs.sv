@@ -27,10 +27,39 @@ module tb_top_vcs;
         $fatal(1, "tb_top_vcs: timeout after %0d cycles", TIMEOUT_CYCLES);
     end
 
+    // Perf instrumentation — mirrors cosim/verilator/main.cpp. The SV perf
+    // monitors feed the c_model perf collector: per-transaction data during the
+    // run, aggregate counters (backpressure / link) in their own `final` blocks.
+    // We sample router occupancy once per rising edge and dump perf.json at the
+    // end. ORDERING NOTE: SystemVerilog does not define `final`-block order
+    // across modules, so this top-level dump may run before the monitors'
+    // `final` pushes; per-transaction throughput is always present, the
+    // backpressure/link aggregates may be missing if VCS runs this final first.
+    import "DPI-C" context function void cmodel_perf_sample_tick();
+    import "DPI-C" context function void cmodel_perf_set_run(input string scenario,
+                                                            input longint total_cyc);
+    import "DPI-C" context function void cmodel_perf_dump(input string path);
+
+    string        perf_out_path = "perf.json";
+    string        perf_scn      = "";
+    int unsigned  perf_cycle    = 0;
+    initial begin
+        void'($value$plusargs("perf_out=%s", perf_out_path));
+        void'($value$plusargs("perf_scenario=%s", perf_scn));
+    end
+    // main.cpp samples every rising edge, ungated by reset.
+    always @(posedge clk_i) begin
+        cmodel_perf_sample_tick();
+        perf_cycle = perf_cycle + 1;
+    end
+
     // tb_top calls $finish on cmodel_done(); finalize here (Verilator flow
-    // does this in main.cpp after the eval loop exits).
+    // does this in main.cpp after the eval loop exits). Dump perf before
+    // finalize so g_perf is intact.
     import "DPI-C" context function void cmodel_finalize();
     final begin
+        cmodel_perf_set_run(perf_scn, longint'(perf_cycle));
+        cmodel_perf_dump(perf_out_path);
         cmodel_finalize();
     end
 
