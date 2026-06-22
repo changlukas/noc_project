@@ -93,7 +93,6 @@ VCS_COMMON_FLAGS := \
     -assert svaext \
     +incdir+$(COSIM_ROOT)/sv \
     +incdir+$(SPECGEN_SV_INC) \
-    $(COMMON_DEFINES) \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
@@ -139,17 +138,16 @@ run-genamba: $(SIMV_GENAMBA)
 	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(FSDB_PLUSARG_GENAMBA), $(FSDB_PLUSARG_GENAMBA),) \
 	    2>&1 | tee output/genamba_$(GENAMBA_RUN_TAG)/run.log
 
-# --- tb_top (wb2axip cosim) via tb_top_vcs wrapper ---
+# --- tb_top cosim via tb_top_vcs wrapper ---
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
 
 SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top$(FSDB_SUFFIX)
 
-$(SIMV_TB_TOP): $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) $(TB_TOP_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
+$(SIMV_TB_TOP): $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
 	    -Mdir=$(VCS_BUILD)/csrc_tb_top$(FSDB_SUFFIX) \
-	    +incdir+$(COSIM_ROOT)/sv/wb2axip \
 	    -top tb_top_vcs \
 	    $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)

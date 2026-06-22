@@ -155,8 +155,7 @@ class NmuShellAdapter {
         //   handshake completes on that cycle), then returns low. AW is NOT
         //   gated on W-burst completion: multi-outstanding AW (post several
         //   AWs, then stream the data) is legitimate AXI4 and load-bearing
-        //   for the RoB/multi-ID paths; the stricter wb2axip view is handled
-        //   by the existing scenario skip list, not baked into the model.
+        //   for the RoB/multi-ID paths.
         // - W (follow-on channel): wready pre-asserts on buffer capacity
         //   WITHOUT waiting for WVALID while any accepted AW still has W
         //   beats owed (w_expected_ accumulates across accepted bursts),

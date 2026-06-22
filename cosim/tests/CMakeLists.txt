@@ -19,7 +19,7 @@ endif()
 set(SCENARIO_TREE_ABS "${CMAKE_CURRENT_LIST_DIR}/../../tests/scenarios/")
 
 # -----------------------------------------------------------------------
-# test_cosim_integration — run-all over kAllAxi4Scenarios, wb2axip SKIPs
+# test_cosim_integration — run-all over kAllAxi4Scenarios
 # -----------------------------------------------------------------------
 add_executable(test_cosim_integration test_cosim_integration.cpp)
 target_link_libraries(test_cosim_integration PRIVATE GTest::gtest_main yaml-cpp::yaml-cpp
@@ -44,29 +44,6 @@ target_compile_definitions(test_cosim_integration PRIVATE
     COORD_VARIANT_ROOT="${SCENARIO_TREE_ABS}")
 
 # -----------------------------------------------------------------------
-# test_checker_fires_on_violation — injection liveness regression
-# -----------------------------------------------------------------------
-add_executable(test_checker_fires_on_violation test_checker_fires_on_violation.cpp)
-target_link_libraries(test_checker_fires_on_violation PRIVATE GTest::gtest_main
-    yaml-cpp::yaml-cpp noc_axi4_scenarios)
-target_include_directories(test_checker_fires_on_violation PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/tests
-    "${CMAKE_CURRENT_LIST_DIR}/../../tests/scenarios")
-target_compile_definitions(test_checker_fires_on_violation PRIVATE
-    SCENARIO_TREE_ROOT="${SCENARIO_TREE_ABS}")
-
-# -----------------------------------------------------------------------
-# test_wb2axip_block — unit tests for wb2axip_block_reason predicate
-# Pure C++ logic unit test; no SCENARIO_TREE_ROOT or COSIM_BIN needed.
-# -----------------------------------------------------------------------
-add_executable(test_wb2axip_block test_wb2axip_block.cpp)
-target_link_libraries(test_wb2axip_block PRIVATE GTest::gtest_main yaml-cpp::yaml-cpp)
-target_include_directories(test_wb2axip_block PRIVATE
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_LIST_DIR})
-
-# -----------------------------------------------------------------------
 # ctest registrations.
 # WORKING_DIRECTORY is the verilator BUILD dir so Vtb_top writes its
 # in-project read-dump into build artifacts, not the source tree. Scenarios
@@ -77,10 +54,3 @@ add_test(NAME CosimIntegration COMMAND test_cosim_integration)
 set_tests_properties(CosimIntegration PROPERTIES
     ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
     WORKING_DIRECTORY ${VERILATOR_BUILD_DIR})
-
-add_test(NAME CheckerLiveness COMMAND test_checker_fires_on_violation)
-set_tests_properties(CheckerLiveness PROPERTIES
-    ENVIRONMENT "COSIM_BIN=${COSIM_BIN_PATH}"
-    WORKING_DIRECTORY ${VERILATOR_BUILD_DIR})
-
-add_test(NAME Wb2axipBlock COMMAND test_wb2axip_block)

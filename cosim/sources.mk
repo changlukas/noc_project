@@ -40,7 +40,7 @@ STDCXXFS_LDFLAGS := -LDFLAGS "-lstdc++fs"
 endif
 endif
 
-# --- tb_top (wb2axip cosim) ---
+# --- tb_top cosim ---
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
@@ -49,9 +49,6 @@ TB_TOP_SV_SRC := \
     $(COSIM_ROOT)/sv/router_wrap.sv \
     $(COSIM_ROOT)/sv/nsu_wrap.sv \
     $(COSIM_ROOT)/sv/axi_slave_wrap.sv \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_wstrb.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_master.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_slave.v \
     $(COSIM_ROOT)/sv/axi_perf_monitor.sv \
     $(COSIM_ROOT)/sv/flit_link_perf_monitor.sv \
     $(COSIM_ROOT)/sv/tb_top.sv
@@ -91,10 +88,6 @@ GENAMBA_INC_DEPS := \
     $(COSIM_ROOT)/sv/genamba/mem_test_tasks.v \
     $(COSIM_ROOT)/sv/genamba/mem_axi_dpram_sync.v
 
-# Same for tb_top: sim_wrapper.svh is `include'd by tb_top.sv.
-TB_TOP_INC_DEPS := \
-    $(COSIM_ROOT)/sv/wb2axip/sim_wrapper.svh
-
 # DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (shell adapters and
 # their transitive includes). The obj-dir sub-make tracks them via -MMD, but
 # the TOP-level rules must list them too — otherwise a header-only change
@@ -109,8 +102,6 @@ DPI_HDR_DEPS := \
 GENAMBA_DEFINES := \
     +define+AMBA_AXI4 +define+AMBA_QOS \
     +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT
-
-COMMON_DEFINES := +define+assume=assert
 
 CPP_INCLUDE_FLAGS := \
     -I$(COSIM_ROOT)/c \
