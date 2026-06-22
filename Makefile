@@ -77,6 +77,13 @@ TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/Syst
 # (FetchContent_MakeAvailable + gtest 1.14).
 CMAKE ?= $(shell command -v cmake3 2>/dev/null || echo cmake)
 
+# Extra cmake configure flags (escape hatch for host quirks). Common need:
+# pin the Python interpreter when an EDA tool (e.g. Calibre) puts a broken
+# python3 on PATH ahead of the system one and CMake's find_package(Python3)
+# picks it. Set in local.mk, e.g.:
+#   CMAKE_EXTRA := -DPython3_EXECUTABLE=/usr/bin/python3.12
+CMAKE_EXTRA ?=
+
 # Offline / firewalled hosts: FetchContent cannot download googletest/yaml-cpp.
 # DEPS_SRC points at a dir holding pre-fetched googletest-src/ + yaml-cpp-src/
 # (copied from an online host's build/cmodel/_deps/; .git subdirs not needed).
@@ -97,7 +104,7 @@ build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
 	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) -j
 
 $(CMODEL_BUILD)/CMakeCache.txt:
-	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS)
+	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
 build-verilator: build-cmodel
 	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR)
