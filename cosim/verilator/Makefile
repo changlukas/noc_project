@@ -313,11 +313,11 @@ run-all-trace:
 	        fail+=("$$s"); \
 	    fi; \
 	done; \
-	echo ""; echo "=== run-all-trace: tb_genamba ($(GENAMBA_SCENARIO)) ==="; \
+	echo ""; echo "=== run-all-trace: tb_genamba ($(GENAMBA_RUN_TAG)) ==="; \
 	if $(MAKE) run-genamba TRACE=1 && test -s "output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.vcd"; then \
-	    pass+=("genamba_$(GENAMBA_SCENARIO)"); vcds+=("output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.vcd"); \
+	    pass+=("genamba_$(GENAMBA_RUN_TAG)"); vcds+=("output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.vcd"); \
 	else \
-	    fail+=("genamba_$(GENAMBA_SCENARIO)"); \
+	    fail+=("genamba_$(GENAMBA_RUN_TAG)"); \
 	fi; \
 	echo ""; echo "================ run-all-trace summary ================"; \
 	echo "PASS (with vcd): $${#pass[@]}"; \
