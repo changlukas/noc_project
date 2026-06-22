@@ -20,6 +20,21 @@ SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
 YAMLCPP_INC    := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-src/include
 YAMLCPP_LIB    := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-build/libyaml-cpp.a
 
+# GCC < 9 keeps std::filesystem in a separate library (libstdc++fs); the DPI
+# pulls it in via scenario_parser.hpp, so the simv/obj link needs -lstdc++fs.
+# GCC >= 9 folded it into libstdc++ and mingw GCC 9+ has no such archive, so the
+# flag is added ONLY for old GCC. Auto-detected from the C++ compiler; override
+# DPI_CXX if the simulator links with a different compiler than `g++` on PATH.
+# Both verilator and vcs accept the -LDFLAGS "..." form.
+DPI_CXX        ?= g++
+DPI_GXX_MAJOR  := $(shell $(DPI_CXX) -dumpfullversion -dumpversion 2>/dev/null | cut -d. -f1)
+STDCXXFS_LDFLAGS :=
+ifneq ($(DPI_GXX_MAJOR),)
+ifeq ($(shell test $(DPI_GXX_MAJOR) -lt 9 2>/dev/null && echo 1),1)
+STDCXXFS_LDFLAGS := -LDFLAGS "-lstdc++fs"
+endif
+endif
+
 # --- tb_top (wb2axip cosim) ---
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \

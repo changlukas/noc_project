@@ -329,11 +329,20 @@ make build-cmodel DEPS_SRC=$HOME/noc_offline_deps
 
 `DEPS_SRC` configures with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so an
 accidental download attempt fails loudly instead of hanging on the firewall.
-Toolchain prerequisites still apply: CMake >= 3.20 (a portable Kitware
-binary tarball transferred to the host works user-space, no root) and
-g++ >= 7 for C++17 (on RHEL/CentOS 7 hosts: `scl enable devtoolset-N bash`;
-the same shell must also be used for the VCS run so DPI C++ compiles with
-the new g++).
+
+Toolchain notes for older / shadowed environments:
+
+- **CMake**: the build needs >= 3.14 (FetchContent_MakeAvailable + gtest
+  1.14). If an unrelated toolchain shadows a usable cmake on PATH (e.g. a
+  Xilinx SDK bundling cmake 3.3.2 ahead of the system's), point the build at
+  the good one without touching PATH -- RHEL 8 ships 3.20+ as `cmake3`:
+  `make build-cmodel CMAKE=cmake3 DEPS_SRC=...`.
+- **g++**: C++17 needs g++ >= 7; `std::filesystem` (scenario_parser.hpp) needs
+  g++ >= 8. On g++ 8.x the build links `stdc++fs` automatically (CMake detects
+  the compiler version; the cosim Makefiles auto-detect it too). g++ >= 9
+  needs nothing extra. On RHEL/CentOS 7 (g++ 4.8) use
+  `scl enable devtoolset-N bash` and run everything (including the VCS build)
+  in that shell.
 
 ### CMakeCache.txt and configure
 

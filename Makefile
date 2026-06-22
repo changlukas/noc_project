@@ -64,6 +64,14 @@ build: build-cmodel build-verilator
 # complaints under non-UTF-8 Windows locales.
 TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/System32" LC_ALL=C
 
+# CMake binary override. Default `cmake`; mirror the [WORKSTATION] knob style of
+# cosim/vcs/Makefile (VCS ?= vcs). Needed where an unrelated toolchain shadows a
+# usable cmake on PATH (e.g. a Xilinx SDK bundling cmake 3.3.2 ahead of the
+# system's 3.20+). On RHEL the modern one is often `cmake3`:
+#   make build-cmodel CMAKE=cmake3
+# The build requires cmake >= 3.14 (FetchContent_MakeAvailable + gtest 1.14).
+CMAKE ?= cmake
+
 # Offline hosts (no network for FetchContent): point DEPS_SRC at a directory
 # holding pre-fetched dependency sources — copy googletest-src/ and
 # yaml-cpp-src/ from an online host's build/cmodel/_deps/ (the .git subdirs
@@ -80,10 +88,10 @@ CMAKE_DEPS_FLAGS :=
 endif
 
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
-	@$(TOOLPATH) cmake --build $(CMODEL_BUILD) -j
+	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) -j
 
 $(CMODEL_BUILD)/CMakeCache.txt:
-	@$(TOOLPATH) cmake -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS)
+	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS)
 
 build-verilator: build-cmodel
 	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR)

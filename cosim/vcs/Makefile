@@ -97,6 +97,7 @@ VCS_COMMON_FLAGS := \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
+    $(STDCXXFS_LDFLAGS) \
     $(VCS_EXTRA)
 ifeq ($(FSDB),1)
 # guarded: += of an empty var would add a trailing space and break FSDB=0 byte-identity
