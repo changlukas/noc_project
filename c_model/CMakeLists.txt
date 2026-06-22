@@ -48,6 +48,17 @@ FetchContent_MakeAvailable(yaml-cpp)
 
 enable_testing()
 
+# GCC < 9 keeps std::filesystem in a separate library (libstdc++fs);
+# scenario_parser.hpp and several tests use std::filesystem, so targets must
+# link stdc++fs. GCC >= 9 folded it into libstdc++ (no flag needed) and other
+# toolchains (Clang/libc++, MSVC, mingw GCC 9+) do not use this name. Restrict
+# to old GCC. link_libraries() applies to every target defined below (tests +
+# scenarios), but not to the FetchContent deps declared above.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9)
+  link_libraries(stdc++fs)
+  message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} < 9: linking stdc++fs for std::filesystem")
+endif()
+
 # Scenario list INTERFACE library — must come before tests/ so that targets in
 # tests/axi/ and tests/cosim/ can link noc_axi4_scenarios.
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../tests/scenarios

@@ -59,6 +59,7 @@ VERILATOR_COMMON_FLAGS := \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
     -LDFLAGS "$(YAMLCPP_LIB)" \
+    $(STDCXXFS_LDFLAGS) \
     $(COMMON_DEFINES) \
     -Wno-fatal \
     -Wno-NULLPORT \
