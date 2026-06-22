@@ -1,3 +1,7 @@
+# Per-host build overrides (CMAKE / DEPS_SRC / VERDI_HOME ...). Each machine
+# keeps its own; never committed so the tracked command line stays identical.
+/local.mk
+
 # Build artifacts — everything lands under the top-level build/ tree
 # (build/cmodel, build/verilator, build/vcs)
 /build/

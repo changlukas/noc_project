@@ -7,6 +7,11 @@
 COSIM_ROOT  := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 PROJ_ROOT   := $(patsubst %/,%,$(dir $(COSIM_ROOT)))
 
+# Per-host overrides (gitignored, repo-root local.mk) — same file the root
+# Makefile reads, so cosim runs pick up host knobs (e.g. DPI_CXX, VCS,
+# VERDI_HOME) without per-invocation flags. Optional.
+-include $(PROJ_ROOT)/local.mk
+
 # All build artifacts live under the top-level build/ tree:
 #   build/cmodel/    CMake (c_model tests + FetchContent deps)
 #   build/verilator/ obj_dir (tb_top) + obj_genamba

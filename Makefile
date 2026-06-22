@@ -64,21 +64,27 @@ build: build-cmodel build-verilator
 # complaints under non-UTF-8 Windows locales.
 TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/System32" LC_ALL=C
 
-# CMake binary override. Default `cmake`; mirror the [WORKSTATION] knob style of
-# cosim/vcs/Makefile (VCS ?= vcs). Needed where an unrelated toolchain shadows a
-# usable cmake on PATH (e.g. a Xilinx SDK bundling cmake 3.3.2 ahead of the
-# system's 3.20+). On RHEL the modern one is often `cmake3`:
-#   make build-cmodel CMAKE=cmake3
-# The build requires cmake >= 3.14 (FetchContent_MakeAvailable + gtest 1.14).
-CMAKE ?= cmake
+# Per-host overrides (gitignored). Lets a machine pin CMAKE / DEPS_SRC / etc.
+# once so the command line stays identical everywhere. Optional — the
+# auto-detection below covers the common Windows + RHEL cases with no file.
+-include local.mk
 
-# Offline hosts (no network for FetchContent): point DEPS_SRC at a directory
-# holding pre-fetched dependency sources — copy googletest-src/ and
-# yaml-cpp-src/ from an online host's build/cmodel/_deps/ (the .git subdirs
-# are not needed). FULLY_DISCONNECTED makes any accidental download attempt a
-# hard error instead of a silent hang on a firewalled host.
-#   make build-cmodel DEPS_SRC=$$HOME/noc_offline_deps
-ifdef DEPS_SRC
+# CMake binary — auto-detected so the same `make build` works on every host.
+# Prefer `cmake3` when present (RHEL ships the modern 3.x under that name, while
+# bare `cmake` may be an ancient one shadowed onto PATH by e.g. a Xilinx SDK);
+# otherwise fall through to `cmake` resolved at recipe time. Override in
+# local.mk or on the command line if neither is right. Build needs cmake >= 3.14
+# (FetchContent_MakeAvailable + gtest 1.14).
+CMAKE ?= $(shell command -v cmake3 2>/dev/null || echo cmake)
+
+# Offline / firewalled hosts: FetchContent cannot download googletest/yaml-cpp.
+# DEPS_SRC points at a dir holding pre-fetched googletest-src/ + yaml-cpp-src/
+# (copied from an online host's build/cmodel/_deps/; .git subdirs not needed).
+# Auto-engages if ~/noc_offline_deps exists, so the offline host needs no flag
+# once the sources are unpacked there; override the path in local.mk if elsewhere.
+# FULLY_DISCONNECTED turns any accidental download into a hard error, not a hang.
+DEPS_SRC ?= $(wildcard $(HOME)/noc_offline_deps)
+ifneq ($(strip $(DEPS_SRC)),)
 CMAKE_DEPS_FLAGS := \
     -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
     -DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=$(DEPS_SRC)/googletest-src \

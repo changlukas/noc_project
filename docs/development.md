@@ -318,31 +318,49 @@ prefix, then `make check` -- build artifacts are per-clone (the whole
 Linux working copies never share or clobber binaries. Line endings are pinned by `.gitattributes` (LF in repo
 objects; shell/build files LF in the working tree on every platform).
 
-Offline hosts (no outbound network, e.g. a firewalled company server):
-CMake FetchContent cannot download googletest/yaml-cpp there. Copy
-`googletest-src/` and `yaml-cpp-src/` from an online host's
-`build/cmodel/_deps/` (`.git` subdirs not needed) to the offline host, then:
+### One command, every host
 
-~~~bash
-make build-cmodel DEPS_SRC=$HOME/noc_offline_deps
+The goal is that `make build` (and `make build-cmodel`) is the same line on
+Windows and on the Linux workstation -- host differences are auto-detected,
+not passed as flags:
+
+- **CMake**: auto-prefers `cmake3` when present (RHEL's modern 3.x), else
+  `cmake`. Covers the case where an unrelated toolchain shadows an ancient
+  cmake on PATH (e.g. a Xilinx SDK's 3.3.2). Build needs cmake >= 3.14
+  (FetchContent_MakeAvailable + gtest 1.14).
+- **std::filesystem**: g++ 8.x keeps it in a separate library; the build links
+  `stdc++fs` automatically for GCC < 9 (CMake via `CMAKE_CXX_COMPILER_VERSION`,
+  cosim Makefiles via the compiler's `-dumpversion`). g++ >= 9 and non-GCC need
+  nothing. (RHEL/CentOS 7's g++ 4.8 is too old for C++17 entirely -- use
+  `scl enable devtoolset-N bash` and run everything in that shell.)
+- **Offline deps**: see below -- auto-engages if `~/noc_offline_deps` exists.
+
+Anything the auto-detection gets wrong can be pinned per-machine in a
+gitignored `local.mk` at the repo root (read by both the root Makefile and the
+cosim Makefiles), e.g.:
+
+~~~make
+CMAKE      := /opt/cmake/bin/cmake
+DEPS_SRC   := /scratch/noc_deps
+VERDI_HOME := /tools/verdi_2020.03
 ~~~
 
-`DEPS_SRC` configures with `FETCHCONTENT_FULLY_DISCONNECTED=ON`, so an
-accidental download attempt fails loudly instead of hanging on the firewall.
+### Offline / firewalled hosts
 
-Toolchain notes for older / shadowed environments:
+FetchContent cannot download googletest/yaml-cpp there. Copy `googletest-src/`
+and `yaml-cpp-src/` from an online host's `build/cmodel/_deps/` (`.git` subdirs
+not needed) into `~/noc_offline_deps`:
 
-- **CMake**: the build needs >= 3.14 (FetchContent_MakeAvailable + gtest
-  1.14). If an unrelated toolchain shadows a usable cmake on PATH (e.g. a
-  Xilinx SDK bundling cmake 3.3.2 ahead of the system's), point the build at
-  the good one without touching PATH -- RHEL 8 ships 3.20+ as `cmake3`:
-  `make build-cmodel CMAKE=cmake3 DEPS_SRC=...`.
-- **g++**: C++17 needs g++ >= 7; `std::filesystem` (scenario_parser.hpp) needs
-  g++ >= 8. On g++ 8.x the build links `stdc++fs` automatically (CMake detects
-  the compiler version; the cosim Makefiles auto-detect it too). g++ >= 9
-  needs nothing extra. On RHEL/CentOS 7 (g++ 4.8) use
-  `scl enable devtoolset-N bash` and run everything (including the VCS build)
-  in that shell.
+~~~bash
+mkdir -p ~/noc_offline_deps
+tar xzf noc_offline_deps.tar.gz -C ~/noc_offline_deps
+make build-cmodel        # DEPS_SRC auto-detected from ~/noc_offline_deps
+~~~
+
+`DEPS_SRC` defaults to `~/noc_offline_deps` if that directory exists (override
+in `local.mk` for a different path) and configures with
+`FETCHCONTENT_FULLY_DISCONNECTED=ON`, so an accidental download attempt fails
+loudly instead of hanging on the firewall.
 
 ### CMakeCache.txt and configure
 
