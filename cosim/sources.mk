@@ -40,17 +40,23 @@ endif
 YAMLCPP_LIB    := $(BUILD_ROOT)/cmodel/_deps/yaml-cpp-build/libyaml-cpp.a
 
 # GCC < 9 keeps std::filesystem in a separate library (libstdc++fs); the DPI
-# pulls it in via scenario_parser.hpp, so the simv/obj link needs -lstdc++fs.
-# GCC >= 9 folded it into libstdc++ and mingw GCC 9+ has no such archive, so the
-# flag is added ONLY for old GCC. Auto-detected from the C++ compiler; override
-# DPI_CXX if the simulator links with a different compiler than `g++` on PATH.
-# Both verilator and vcs accept the -LDFLAGS "..." form.
+# pulls it in via scenario_parser.hpp, so the link needs -lstdc++fs. GCC >= 9
+# folded it into libstdc++ and mingw GCC 9+ has no such archive, so the flag is
+# added ONLY for old GCC. Auto-detected from the C++ compiler; override DPI_CXX
+# if the simulator links with a different compiler than `g++` on PATH.
+#
+# --whole-archive wrap: VCS injects -LDFLAGS at the FRONT of the link line,
+# before cmodel_dpi.o. GNU ld is order-sensitive — a plain `-lstdc++fs` ahead
+# of the object that needs it gets discarded ("undefined reference to
+# std::filesystem::..."). --whole-archive forces every libstdc++fs member in
+# unconditionally, so resolution no longer depends on link order. Both verilator
+# and vcs accept the -LDFLAGS "..." form.
 DPI_CXX        ?= g++
 DPI_GXX_MAJOR  := $(shell $(DPI_CXX) -dumpfullversion -dumpversion 2>/dev/null | cut -d. -f1)
 STDCXXFS_LDFLAGS :=
 ifneq ($(DPI_GXX_MAJOR),)
 ifeq ($(shell test $(DPI_GXX_MAJOR) -lt 9 2>/dev/null && echo 1),1)
-STDCXXFS_LDFLAGS := -LDFLAGS "-lstdc++fs"
+STDCXXFS_LDFLAGS := -LDFLAGS "-Wl,--whole-archive -lstdc++fs -Wl,--no-whole-archive"
 endif
 endif
 
