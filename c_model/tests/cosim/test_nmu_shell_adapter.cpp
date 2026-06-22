@@ -97,8 +97,9 @@ TEST(NmuShellAdapter, single_aw_w_two_phase_handshake) {
 // After the AW handshake the W window holds wready high for the full burst
 // (capacity permitting): one bubble at burst start, then full rate — all 8
 // beats accepted back-to-back. A second AWVALID presented mid-burst still
-// receives its one-shot ready pulse (multi-outstanding AW preserved; the
-// stricter wb2axip view lives in the scenario skip list, not in the model).
+// receives its one-shot ready pulse (multi-outstanding AW preserved; any
+// stricter single-outstanding view lives in the scenario skip list, not in
+// the model).
 // ---------------------------------------------------------------------------
 TEST(NmuShellAdapter, multi_beat_w_burst_full_rate_aw_available) {
     SCENARIO("8-beat W burst at full rate; mid-burst AW still gets its ready pulse");

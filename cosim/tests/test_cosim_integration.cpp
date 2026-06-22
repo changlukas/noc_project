@@ -1,12 +1,10 @@
-// AXI4 cosim integration: runs each AX4-* scenario through Vtb_top (Verilator
-// + wb2axip slave), asserts exit 0 AND PASS marker from tb_top.sv. Peer of
+// AXI4 cosim integration: runs each AX4-* scenario through Vtb_top, asserts
+// exit 0 AND PASS marker from tb_top.sv. Peer of
 // c_model/tests/axi/test_integration.cpp — same scenario set, different
-// execution path. wb2axip-blocked scenarios SKIP with a content-derived
-// reason from wb2axip_block_reason(); INF scenarios SKIP by id prefix.
+// execution path. INF scenarios SKIP by id prefix.
 #include "axi/scenario_parser.hpp"
 #include "common/scenario.hpp"
 #include "scenarios_list.hpp"
-#include "wb2axip_block.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -59,9 +57,6 @@ TEST_P(CosimIntegration, ScenarioPassesWb2axip) {
 
     if (scenario_id.compare(0, 8, "AX4-INF-") == 0) {
         GTEST_SKIP() << "INF_DEDICATED_TEST";
-    }
-    if (auto reason = noc::tests::wb2axip_block_reason(sc); reason) {
-        GTEST_SKIP() << *reason;
     }
 
     // tb_top's non-vacuous PASS guard requires reads_checked > 0; write-only

@@ -1,10 +1,9 @@
 `timescale 1ns/1ps
-`include "wb2axip/sim_wrapper.svh"
 
 // tb_top — bidirectional 2-node router co-sim testbench
 //
 // Two symmetric nodes, each driving its own per-node router_wrap, joined by a
-// cross-node link (no faxi):
+// cross-node link:
 //   node k:  axi_master_wrap →[master_nmu_axi_k]→ nmu_wrap →[nodeK_nmu]→ ┐
 //            router_wrap[k] ←link→ router_wrap[1-k] ┘
 //            router_wrap[k] →[nodeK_nsu]→ nsu_wrap →[nsu_slave_axi_k]→ axi_slave_wrap
