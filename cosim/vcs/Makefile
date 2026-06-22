@@ -190,9 +190,9 @@ run-all-fsdb:
 	done; \
 	echo ""; echo "=== run-all-fsdb: tb_genamba ($(GENAMBA_RUN_TAG)) ==="; \
 	if $(MAKE) run-genamba FSDB=1 && test -s "output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"; then \
-	    pass+=("genamba_$(GENAMBA_SCENARIO)"); fsdbs+=("output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"); \
+	    pass+=("genamba_$(GENAMBA_RUN_TAG)"); fsdbs+=("output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"); \
 	else \
-	    fail+=("genamba_$(GENAMBA_SCENARIO)"); \
+	    fail+=("genamba_$(GENAMBA_RUN_TAG)"); \
 	fi; \
 	echo ""; echo "================ run-all-fsdb summary ================"; \
 	echo "PASS (with fsdb): $${#pass[@]}"; \
