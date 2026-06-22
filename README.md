@@ -46,16 +46,40 @@ make build       # c_model + Verilator (correct dep order)
 ## Test
 
 ~~~bash
-make test                                    # c_model gtest suite
+make test                                    # c_model gtest suite (+ cosim ctest if Vtb_top built)
 make check                                   # lint + build + tests
-make sim                                     # default scenario via cosim
-make sim SCENARIO=AX4-BUR-002_incr_8beat     # specific scenario
+~~~
+
+## Simulate (cosim)
+
+The root Makefile builds only. Simulation runs from each simulator's own
+directory; run logs land in that directory's `output/<scenario>/run.log`:
+
+~~~bash
+cd cosim/verilator
+make run-tb-top                                 # wb2axip cosim, default scenario
+make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
+make run-genamba                                # gen_amba role-1 testbench (Tasks A-G)
+
+cd cosim/vcs                                    # Linux workstation only (VCS)
+make run-tb-top SCENARIO=<ax4-id>
+make run-genamba
+~~~
+
+Waveform dumping is opt-in (default off, so regression is unaffected):
+
+~~~bash
+cd cosim/verilator && make run-tb-top SCENARIO=<id> TRACE=1  # VCD -> output/<id>/tb_top.vcd
+cd cosim/verilator && make run-all-trace                     # one VCD per scenario + summary
+cd cosim/vcs       && make run-tb-top SCENARIO=<id> FSDB=1   # FSDB (needs Verdi/VERDI_HOME)
+cd cosim/vcs       && make run-all-fsdb                      # one FSDB per scenario + summary
 ~~~
 
 Multi-beat and multi-outstanding scenarios are SKIPped by the cosim
 integration test (reason codes WB2AXIP_MULTI_BEAT etc.) and will fire
-faxi_slave.v assertions if run through `make sim` directly. See
-`docs/architecture.md` for wb2axip structural limits.
+faxi_slave.v assertions if run through `make run-tb-top` directly. See
+`docs/architecture.md` for wb2axip structural limits, and
+`docs/development.md` for the full build/run/waveform reference.
 
 ## Documentation
 
