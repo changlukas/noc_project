@@ -3,9 +3,8 @@
 Single source of truth for AXI4 scenario YAMLs. Both c_model integration test
 (`c_model/tests/axi/test_integration.cpp`) and cosim integration test
 (`cosim/tests/test_cosim_integration.cpp`) consume the full set via a
-CMake-generated header. Three scoped tests (`test_port_pair_loopback`,
-`test_request_response_loopback`, `test_checker_fires_on_violation`) consume
-hand-curated subsets.
+CMake-generated header. Two scoped tests (`test_port_pair_loopback`,
+`test_request_response_loopback`) consume hand-curated subsets.
 
 ## Naming convention -- `AX4-CAT-NNN_slug`
 
@@ -70,21 +69,14 @@ data file.
 | Test | List source | Skips |
 |---|---|---|
 | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
-| `cosim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix + `wb2axip_block_reason()` runtime predicate |
+| `cosim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
 | `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated 4 scenarios x delay sweep | n/a |
 | `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 6 distinct scenarios (7 FixtureParam entries at num_vc=1; re-run at num_vc in {2, 4, 8}) | n/a |
-| `cosim/tests/test_checker_fires_on_violation.cpp` | INF-001 only | n/a |
 
 `kAllAxi4Scenarios` is generated at CMake configure time from
 `tests/scenarios/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
 Adding a new pattern automatically propagates to both run-all tests on the
 next build.
-
-`wb2axip_block_reason()` (in `cosim/tests/wb2axip_block.hpp`) inspects each
-scenario's parsed content against wb2axip's structural limits and returns a
-SKIP reason on hit. No skip map is maintained. When wb2axip is replaced with
-a full AXI4 BFM, deleting the helper body activates all previously skipped
-scenarios.
 
 ## Adding a new scenario
 
@@ -92,9 +84,7 @@ scenarios.
 2. Write `scenario.yaml` with `schema_version: 1` and full `metadata:` block
 3. Add `data.txt` (and any other data files referenced)
 4. Run `make check` -- lint + both integration tests pick it up automatically
-5. If cosim SKIPs the new pattern with `WB2AXIP_*`, that's expected -- wb2axip
-   doesn't model that case. No action needed; SKIP is documentation
-6. Commit with a body citing the IHI 0022H sec. or VIP test the scenario was
+5. Commit with a body citing the IHI 0022H sec. or VIP test the scenario was
    derived from
 
 ## Reference: IHI 0022H sections covered per category

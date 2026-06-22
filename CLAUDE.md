@@ -4,11 +4,11 @@
 
 **Namespace**: `ni::cmodel::` (production sub-namespaces under `c_model/include/`: `axi`, `cosim`, `nmu`, `noc`, `nsu`. Tests under `c_model/tests/common/` add a `ni::cmodel::testing` sub-namespace).
 
-**Architecture**: AXI4 Master → NMU → ChannelModel (test stub) → NSU → AXI4 Slave. Verilator co-sim wraps each c_model component in a `*_shell_adapter.hpp` and binds wb2axip protocol checkers (`faxi_slave.v` on the NMU manager-facing side, `faxi_master.v` on the NSU memory-facing side).
+**Architecture**: AXI4 Master → NMU → ChannelModel (test stub) → NSU → AXI4 Slave. Verilator co-sim wraps each c_model component in a `*_shell_adapter.hpp` and drives the scenarios through the wire-level testbench; correctness is checked by the c_model scoreboard (per-transaction write→readback compare) plus the model's own internal checks.
 
 - **NMU / NSU**: per-direction units (`c_model/include/nmu/`, `c_model/include/nsu/`). Packetize / depacketize, AXI port adapters, per-ID RoB on the NMU response path.
 - **NoC fabric**: no router class in c_model; `ChannelModel` (`c_model/tests/common/channel_model.hpp`) is the only NoC stub. Destination derivation (XY bit-slice) is done at NMU packetize time via `nmu::addr_trans::xy_route`.
-- **Shell adapters**: `NmuShellAdapter` / `NsuShellAdapter` / `MasterShellAdapter` / `SlaveShellAdapter` / `ChannelModelShellAdapter` in `c_model/include/cosim/`. Per-instance via chandle ABI — `void* cmodel_<shell>_create(name)` returns a `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops validate via `REQUIRE_HANDLE`. No cross-component pointers.
+- **Shell adapters**: `NmuShellAdapter` / `NsuShellAdapter` / `MasterShellAdapter` / `SlaveShellAdapter` / `ChannelModelShellAdapter` in `c_model/include/cosim/`. Per-instance via a 64-bit integer handle ABI — `unsigned long long cmodel_<shell>_create(name)` returns an integer-encoded `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops take `unsigned long long ctx` (SV `longint unsigned`) and validate via `REQUIRE_HANDLE`. (chandle is avoided because VCS rejects it as a module port.) No cross-component pointers.
 - **Config**: YAML (`c_model/config/`); no JSON, no compile-time `<Mode>` templates.
 
 **Build**: C++17, CMake 3.20+, GoogleTest.
