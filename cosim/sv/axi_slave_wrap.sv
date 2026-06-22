@@ -28,7 +28,7 @@ module axi_slave_wrap #(
 ) (
     input  logic    clk_i,
     input  logic    rst_ni,
-    input  chandle  ctx_i,
+    input  longint unsigned  ctx_i,
     axi4_intf.slave axi_i
 );
 
@@ -37,7 +37,7 @@ module axi_slave_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_slave_set_inputs(
-        input  chandle                ctx,
+        input  longint unsigned                ctx,
         input  bit                    awvalid,
         input  bit [ID_WIDTH-1:0]     awid,
         input  bit [ADDR_WIDTH-1:0]   awaddr,
@@ -66,10 +66,10 @@ module axi_slave_wrap #(
         input  bit                    rready
     );
 
-    import "DPI-C" context function void cmodel_slave_tick(input chandle ctx);
+    import "DPI-C" context function void cmodel_slave_tick(input longint unsigned ctx);
 
     import "DPI-C" context function void cmodel_slave_get_outputs(
-        input  chandle                ctx,
+        input  longint unsigned                ctx,
         output bit                    awready,
         output bit                    wready,
         output bit                    arready,

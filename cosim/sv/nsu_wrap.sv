@@ -40,7 +40,7 @@ module nsu_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    input  chandle            ctx_i,
+    input  longint unsigned            ctx_i,
     noc_intf.miso             noc_miso_i,
     axi4_intf.master          axi_o
 );
@@ -62,7 +62,7 @@ module nsu_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_nsu_set_inputs(
-        input  chandle                ctx,
+        input  longint unsigned                ctx,
         input  bit                    noc_req_valid,
         input  bit [FLIT_WIDTH-1:0]       noc_req_flit,
         input  bit                    noc_rsp_credit_return,
@@ -80,11 +80,11 @@ module nsu_wrap #(
     );
 
     import "DPI-C" context function void cmodel_nsu_tick(
-        input  chandle                ctx
+        input  longint unsigned                ctx
     );
 
     import "DPI-C" context function void cmodel_nsu_get_outputs(
-        input  chandle                ctx,
+        input  longint unsigned                ctx,
         output bit                    noc_rsp_valid,
         output bit [FLIT_WIDTH-1:0]       noc_rsp_flit,
         output bit                    noc_req_credit_return,

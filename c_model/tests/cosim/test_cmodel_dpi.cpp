@@ -32,8 +32,8 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     check_and_clear_error(CMODEL_DPI_OK);
 
     // Case: *_create before init → ERR_NOT_INITIALIZED.
-    void* h0 = cmodel_channel_model_create("cm_pre_init");
-    EXPECT_EQ(h0, nullptr);
+    unsigned long long h0 = cmodel_channel_model_create("cm_pre_init");
+    EXPECT_EQ(h0, 0ull);
     check_and_clear_error(CMODEL_DPI_ERR_NOT_INITIALIZED);
 
     // Case: cmodel_init on bad YAML → ERR_GENERIC, state stays UNINITIALIZED.
@@ -53,20 +53,20 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === ChannelModel cases (T5) ===
 
     // Case: channel_model_create after init succeeds.
-    void* cm_handle = cmodel_channel_model_create("cm_test");
-    ASSERT_NE(cm_handle, nullptr);
+    unsigned long long cm_handle = cmodel_channel_model_create("cm_test");
+    ASSERT_NE(cm_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
 
     // Case: garbage void* (non-registry) → registry-membership guard, no SIGSEGV.
-    void* garbage = reinterpret_cast<void*>(0xDEADBEEFCAFEull);
+    unsigned long long garbage = 0xDEADBEEFCAFEull;
     cmodel_channel_model_tick(garbage);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // === Master cases (T6) ===
 
     // Case: master_create after init succeeds; scoreboard callbacks wired.
-    void* master_handle = cmodel_master_create("master_test", good_yaml);
-    ASSERT_NE(master_handle, nullptr);
+    unsigned long long master_handle = cmodel_master_create("master_test", good_yaml);
+    ASSERT_NE(master_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
     EXPECT_EQ(cmodel_master_count(), 1);
 
@@ -77,25 +77,25 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === Slave case (T7) ===
 
     // Case: slave_create after init succeeds.
-    void* slave_handle = cmodel_slave_create("slave_test", good_yaml);
-    ASSERT_NE(slave_handle, nullptr);
+    unsigned long long slave_handle = cmodel_slave_create("slave_test", good_yaml);
+    ASSERT_NE(slave_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
 
     // === NMU multi-instance independence (T8) ===
 
     // Case: create 2 NMU adapters — distinct void* + both validate as live.
-    void* nmu_a = cmodel_nmu_create("nmu_a", 0);
-    void* nmu_b = cmodel_nmu_create("nmu_b", 0);
-    ASSERT_NE(nmu_a, nullptr);
-    ASSERT_NE(nmu_b, nullptr);
+    unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0);
+    unsigned long long nmu_b = cmodel_nmu_create("nmu_b", 0);
+    ASSERT_NE(nmu_a, 0ull);
+    ASSERT_NE(nmu_b, 0ull);
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
 
     // === NSU case (T9 — last per-shell) ===
 
     // Case: nsu_create after init succeeds.
-    void* nsu_handle = cmodel_nsu_create("nsu_test", 0);
-    ASSERT_NE(nsu_handle, nullptr);
+    unsigned long long nsu_handle = cmodel_nsu_create("nsu_test", 0);
+    ASSERT_NE(nsu_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
 
     // === Lifecycle aggregation + FINALIZED phase (T10) ===

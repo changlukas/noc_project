@@ -18,6 +18,7 @@
 #include "cosim/perf_collector.hpp"
 #include "ni_flit_constants.h"  // ni::FLIT_WIDTH
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -66,7 +67,7 @@ std::string g_scenario_yaml_path;
 // *_destroy or cmodel_finalize time.
 std::unordered_set<HandleBlock*> g_handle_registry;
 
-// validate_handle — resolves void* ctx to a typed HandleBlock* with 5 guards:
+// validate_handle — resolves unsigned long long ctx to a typed HandleBlock* with 5 guards:
 //   1. Session state: Uninitialized → ERR_NOT_INITIALIZED.
 //   2. Registry membership: unknown pointer → ERR_HERMETIC_VIOLATION.
 //   3. Magic sentinel match: bit-flip / aliased ptr → ERR_HERMETIC_VIOLATION.
@@ -74,7 +75,8 @@ std::unordered_set<HandleBlock*> g_handle_registry;
 //   5. Handle liveness: Closed handle (post-destroy) → ERR_HERMETIC_VIOLATION.
 // Returns nullptr and sets the error latch on any failure; returns the typed
 // block on success.
-HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name) {
+HandleBlock* validate_handle(unsigned long long ctx, ShellType expected, const char* fn_name) {
+    HandleBlock* _ctx_ptr = reinterpret_cast<HandleBlock*>(static_cast<uintptr_t>(ctx));
     // Guard 1 — state-first per spec state-transition table.
     if (g_session_state == SessionState::Uninitialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
@@ -84,12 +86,12 @@ HandleBlock* validate_handle(void* ctx, ShellType expected, const char* fn_name)
     // Guard 2 — registry membership avoids garbage void* deref (SIGSEGV).
     // Post-finalize handles also fail here (registry emptied by finalize) →
     // ERR_HERMETIC_VIOLATION, consistent with the spec test matrix.
-    if (!g_handle_registry.count(static_cast<HandleBlock*>(ctx))) {
+    if (!g_handle_registry.count(_ctx_ptr)) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
                              std::string(fn_name) + ": ctx not in registry");
         return nullptr;
     }
-    auto* h = static_cast<HandleBlock*>(ctx);
+    auto* h = _ctx_ptr;
     // Guard 3 — magic sentinel: magic must equal the stored type tag.
     // Detects memory stomp where the magic field is corrupted but the type
     // field is intact (or vice versa).
@@ -272,13 +274,13 @@ void pack_flit(const FlitBytes& b, svBitVecVal* vec) {
 
 }  // namespace
 
-extern "C" void* cmodel_channel_model_create(const char* name) {
+extern "C" unsigned long long cmodel_channel_model_create(const char* name) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_channel_model_create: not initialized");
-        return nullptr;
+        return 0ull;
     }
-    DPI_BOUNDARY_BEGIN_R(cmodel_channel_model_create, nullptr) {
+    DPI_BOUNDARY_BEGIN_R(cmodel_channel_model_create, 0ull) {
         auto adapter = std::make_unique<ChannelModelShellAdapter>();
         adapter->init();
         auto* h =
@@ -288,12 +290,12 @@ extern "C" void* cmodel_channel_model_create(const char* name) {
                                 delete static_cast<ChannelModelShellAdapter*>(p);
                             })};
         g_handle_registry.insert(h);
-        return static_cast<void*>(h);
+        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(cmodel_channel_model_create);
 }
 
-extern "C" void cmodel_channel_model_set_inputs(void* ctx, svBit req_in_valid,
+extern "C" void cmodel_channel_model_set_inputs(unsigned long long ctx, svBit req_in_valid,
                                                 svBitVecVal* req_in_flit,
                                                 svBit req_in_credit_return, svBit rsp_in_valid,
                                                 svBitVecVal* rsp_in_flit,
@@ -313,7 +315,7 @@ extern "C" void cmodel_channel_model_set_inputs(void* ctx, svBit req_in_valid,
     DPI_BOUNDARY_END(cmodel_channel_model_set_inputs);
 }
 
-extern "C" void cmodel_channel_model_tick(void* ctx) {
+extern "C" void cmodel_channel_model_tick(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_channel_model_tick) {
         REQUIRE_HANDLE(ctx, ShellType::ChannelModel, "cmodel_channel_model_tick");
         auto* cm = static_cast<ChannelModelShellAdapter*>(_h->adapter.get());
@@ -322,7 +324,7 @@ extern "C" void cmodel_channel_model_tick(void* ctx) {
     DPI_BOUNDARY_END(cmodel_channel_model_tick);
 }
 
-extern "C" void cmodel_channel_model_get_outputs(void* ctx, svBit* req_out_valid,
+extern "C" void cmodel_channel_model_get_outputs(unsigned long long ctx, svBit* req_out_valid,
                                                  svBitVecVal* req_out_flit,
                                                  svBit* req_out_credit_return, svBit* rsp_out_valid,
                                                  svBitVecVal* rsp_out_flit,
@@ -350,13 +352,13 @@ using ni::cmodel::cosim::RouterInputs;
 using ni::cmodel::cosim::RouterOutputs;
 using ni::cmodel::cosim::RouterShellAdapter;
 
-extern "C" void* cmodel_router_create(const char* name, int x_coord) {
+extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_router_create: not initialized");
-        return nullptr;
+        return 0ull;
     }
-    DPI_BOUNDARY_BEGIN_R(cmodel_router_create, nullptr) {
+    DPI_BOUNDARY_BEGIN_R(cmodel_router_create, 0ull) {
         auto adapter = std::make_unique<RouterShellAdapter>();
         adapter->init(static_cast<uint8_t>(x_coord));
         auto* h = new HandleBlock{
@@ -365,12 +367,12 @@ extern "C" void* cmodel_router_create(const char* name, int x_coord) {
             std::unique_ptr<void, void (*)(void*)>(
                 adapter.release(), [](void* p) { delete static_cast<RouterShellAdapter*>(p); })};
         g_handle_registry.insert(h);
-        return static_cast<void*>(h);
+        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(cmodel_router_create);
 }
 
-extern "C" void cmodel_router_set_inputs(void* ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
+extern "C" void cmodel_router_set_inputs(unsigned long long ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
                                          svBit req_in_credit_return, svBit rsp_in_valid,
                                          svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return,
                                          svBit link_req_out_credit, svBit link_req_in_valid,
@@ -397,7 +399,7 @@ extern "C" void cmodel_router_set_inputs(void* ctx, svBit req_in_valid, svBitVec
     DPI_BOUNDARY_END(cmodel_router_set_inputs);
 }
 
-extern "C" void cmodel_router_tick(void* ctx) {
+extern "C" void cmodel_router_tick(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_router_tick) {
         REQUIRE_HANDLE(ctx, ShellType::Router, "cmodel_router_tick");
         static_cast<RouterShellAdapter*>(_h->adapter.get())->tick();
@@ -405,7 +407,7 @@ extern "C" void cmodel_router_tick(void* ctx) {
     DPI_BOUNDARY_END(cmodel_router_tick);
 }
 
-extern "C" void cmodel_router_get_outputs(void* ctx, svBit* req_out_valid,
+extern "C" void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
                                           svBitVecVal* req_out_flit, svBit* req_out_credit_return,
                                           svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
                                           svBit* rsp_out_credit_return, svBit* link_req_out_valid,
@@ -477,13 +479,13 @@ void pack_addr64(uint64_t addr, svBitVecVal* vec) {
 
 }  // namespace
 
-extern "C" void* cmodel_master_create(const char* name, const char* scenario_path) {
+extern "C" unsigned long long cmodel_master_create(const char* name, const char* scenario_path) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_master_create: not initialized");
-        return nullptr;
+        return 0ull;
     }
-    DPI_BOUNDARY_BEGIN_R(cmodel_master_create, nullptr) {
+    DPI_BOUNDARY_BEGIN_R(cmodel_master_create, 0ull) {
         const std::string dump_path = "master_shell_read_dump_" + std::string(name) + ".txt";
         auto adapter = std::make_unique<MasterShellAdapter>();
         adapter->init(std::string(scenario_path), dump_path,
@@ -531,12 +533,12 @@ extern "C" void* cmodel_master_create(const char* name, const char* scenario_pat
                 adapter.release(), [](void* p) { delete static_cast<MasterShellAdapter*>(p); })};
         g_handle_registry.insert(h);
         ++g_ever_created_master;
-        return static_cast<void*>(h);
+        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(cmodel_master_create);
 }
 
-extern "C" void cmodel_master_set_inputs(void* ctx, svBit awready, svBit wready, svBit arready,
+extern "C" void cmodel_master_set_inputs(unsigned long long ctx, svBit awready, svBit wready, svBit arready,
                                          svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp,
                                          svBit rvalid, svBitVecVal* rid, svBitVecVal* rdata,
                                          svBitVecVal* rresp, svBit rlast) {
@@ -560,7 +562,7 @@ extern "C" void cmodel_master_set_inputs(void* ctx, svBit awready, svBit wready,
     DPI_BOUNDARY_END(cmodel_master_set_inputs);
 }
 
-extern "C" void cmodel_master_tick(void* ctx) {
+extern "C" void cmodel_master_tick(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_master_tick) {
         REQUIRE_HANDLE(ctx, ShellType::Master, "cmodel_master_tick");
         auto* master = static_cast<MasterShellAdapter*>(_h->adapter.get());
@@ -570,7 +572,7 @@ extern "C" void cmodel_master_tick(void* ctx) {
 }
 
 extern "C" void cmodel_master_get_outputs(
-    void* ctx, svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
+    unsigned long long ctx, svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
     svBitVecVal* awsize, svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
     svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
     svBit* wlast, svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
@@ -631,13 +633,13 @@ using ni::cmodel::cosim::SlaveOutputs;
 // unpack_data256 and pack_addr64 are defined in the master block above (same
 // anonymous namespace); they are reused here for the slave handlers.
 
-extern "C" void* cmodel_slave_create(const char* name, const char* scenario_path) {
+extern "C" unsigned long long cmodel_slave_create(const char* name, const char* scenario_path) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_slave_create: not initialized");
-        return nullptr;
+        return 0ull;
     }
-    DPI_BOUNDARY_BEGIN_R(cmodel_slave_create, nullptr) {
+    DPI_BOUNDARY_BEGIN_R(cmodel_slave_create, 0ull) {
         auto variant = ni::cmodel::axi::load_scenario(std::string(scenario_path));
         auto adapter = std::make_unique<SlaveShellAdapter>();
         adapter->init(variant.config.memory_base, variant.config.memory_size,
@@ -648,13 +650,13 @@ extern "C" void* cmodel_slave_create(const char* name, const char* scenario_path
             std::unique_ptr<void, void (*)(void*)>(
                 adapter.release(), [](void* p) { delete static_cast<SlaveShellAdapter*>(p); })};
         g_handle_registry.insert(h);
-        return static_cast<void*>(h);
+        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(cmodel_slave_create);
 }
 
 extern "C" void cmodel_slave_set_inputs(
-    void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
+    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
     svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
     svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
     svBit wlast, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
@@ -695,7 +697,7 @@ extern "C" void cmodel_slave_set_inputs(
     DPI_BOUNDARY_END(cmodel_slave_set_inputs);
 }
 
-extern "C" void cmodel_slave_tick(void* ctx) {
+extern "C" void cmodel_slave_tick(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_tick) {
         REQUIRE_HANDLE(ctx, ShellType::Slave, "cmodel_slave_tick");
         auto* slave = static_cast<SlaveShellAdapter*>(_h->adapter.get());
@@ -704,7 +706,7 @@ extern "C" void cmodel_slave_tick(void* ctx) {
     DPI_BOUNDARY_END(cmodel_slave_tick);
 }
 
-extern "C" void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arready,
+extern "C" void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
                                          svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp,
                                          svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
                                          svBitVecVal* rresp, svBit* rlast) {
@@ -741,12 +743,12 @@ extern "C" void cmodel_slave_get_outputs(void* ctx, svBit* awready, svBit* wread
 using ni::cmodel::cosim::NmuInputs;
 using ni::cmodel::cosim::NmuOutputs;
 
-extern "C" void* cmodel_nmu_create(const char* name, int src_id) {
+extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nmu_create: not initialized");
-        return nullptr;
+        return 0ull;
     }
-    DPI_BOUNDARY_BEGIN_R(cmodel_nmu_create, nullptr) {
+    DPI_BOUNDARY_BEGIN_R(cmodel_nmu_create, 0ull) {
         auto adapter = std::make_unique<NmuShellAdapter>();
         adapter->init(static_cast<uint8_t>(src_id));
         auto* h = new HandleBlock{
@@ -755,13 +757,13 @@ extern "C" void* cmodel_nmu_create(const char* name, int src_id) {
             std::unique_ptr<void, void (*)(void*)>(
                 adapter.release(), [](void* p) { delete static_cast<NmuShellAdapter*>(p); })};
         g_handle_registry.insert(h);
-        return static_cast<void*>(h);
+        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(cmodel_nmu_create);
 }
 
 extern "C" void cmodel_nmu_set_inputs(
-    void* ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
+    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
     svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
     svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
     svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
@@ -806,7 +808,7 @@ extern "C" void cmodel_nmu_set_inputs(
     DPI_BOUNDARY_END(cmodel_nmu_set_inputs);
 }
 
-extern "C" void cmodel_nmu_tick(void* ctx) {
+extern "C" void cmodel_nmu_tick(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_tick) {
         REQUIRE_HANDLE(ctx, ShellType::Nmu, "cmodel_nmu_tick");
         auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
@@ -815,7 +817,7 @@ extern "C" void cmodel_nmu_tick(void* ctx) {
     DPI_BOUNDARY_END(cmodel_nmu_tick);
 }
 
-extern "C" void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready, svBit* arready,
+extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
                                        svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp,
                                        svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
                                        svBitVecVal* rresp, svBit* rlast, svBit* noc_req_valid,
@@ -859,12 +861,12 @@ extern "C" void cmodel_nmu_get_outputs(void* ctx, svBit* awready, svBit* wready,
 using ni::cmodel::cosim::NsuInputs;
 using ni::cmodel::cosim::NsuOutputs;
 
-extern "C" void* cmodel_nsu_create(const char* name, int src_id) {
+extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nsu_create: not initialized");
-        return nullptr;
+        return 0ull;
     }
-    DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, nullptr) {
+    DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, 0ull) {
         auto adapter = std::make_unique<NsuShellAdapter>();
         adapter->init(static_cast<uint8_t>(src_id));
         auto* h = new HandleBlock{
@@ -873,12 +875,12 @@ extern "C" void* cmodel_nsu_create(const char* name, int src_id) {
             std::unique_ptr<void, void (*)(void*)>(
                 adapter.release(), [](void* p) { delete static_cast<NsuShellAdapter*>(p); })};
         g_handle_registry.insert(h);
-        return static_cast<void*>(h);
+        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
     }
     DPI_BOUNDARY_END_R(cmodel_nsu_create);
 }
 
-extern "C" void cmodel_nsu_set_inputs(void* ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
+extern "C" void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
                                       svBit noc_rsp_credit_return, svBit awready, svBit wready,
                                       svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp,
                                       svBit arready, svBit rvalid, svBitVecVal* rid,
@@ -906,7 +908,7 @@ extern "C" void cmodel_nsu_set_inputs(void* ctx, svBit noc_req_valid, svBitVecVa
     DPI_BOUNDARY_END(cmodel_nsu_set_inputs);
 }
 
-extern "C" void cmodel_nsu_tick(void* ctx) {
+extern "C" void cmodel_nsu_tick(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_tick) {
         REQUIRE_HANDLE(ctx, ShellType::Nsu, "cmodel_nsu_tick");
         auto* nsu = static_cast<NsuShellAdapter*>(_h->adapter.get());
@@ -916,7 +918,7 @@ extern "C" void cmodel_nsu_tick(void* ctx) {
 }
 
 extern "C" void cmodel_nsu_get_outputs(
-    void* ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return,
+    unsigned long long ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return,
     svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
     svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
     svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,

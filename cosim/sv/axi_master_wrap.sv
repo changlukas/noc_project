@@ -28,7 +28,7 @@ module axi_master_wrap #(
 ) (
     input  logic     clk_i,
     input  logic     rst_ni,
-    input  chandle   ctx_i,
+    input  longint unsigned   ctx_i,
     axi4_intf.master axi_o
 );
 
@@ -37,7 +37,7 @@ module axi_master_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_master_set_inputs(
-        input  chandle              ctx,
+        input  longint unsigned              ctx,
         input  bit                  awready,
         input  bit                  wready,
         input  bit                  arready,
@@ -52,11 +52,11 @@ module axi_master_wrap #(
     );
 
     import "DPI-C" context function void cmodel_master_tick(
-        input chandle ctx
+        input longint unsigned ctx
     );
 
     import "DPI-C" context function void cmodel_master_get_outputs(
-        input  chandle              ctx,
+        input  longint unsigned              ctx,
         output bit                  awvalid,
         output bit [ID_WIDTH-1:0]   awid,
         output bit [ADDR_WIDTH-1:0] awaddr,

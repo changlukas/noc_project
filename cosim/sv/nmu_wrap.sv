@@ -43,7 +43,7 @@ module nmu_wrap #(
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
-    input  chandle            ctx_i,
+    input  longint unsigned            ctx_i,
     axi4_intf.slave           axi_i,
     noc_intf.mosi             noc_mosi_o
 );
@@ -65,7 +65,7 @@ module nmu_wrap #(
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_nmu_set_inputs(
-        input  chandle                ctx,
+        input  longint unsigned                ctx,
         input  bit                    awvalid,
         input  bit [ID_WIDTH-1:0]     awid,
         input  bit [ADDR_WIDTH-1:0]   awaddr,
@@ -98,11 +98,11 @@ module nmu_wrap #(
     );
 
     import "DPI-C" context function void cmodel_nmu_tick(
-        input  chandle                ctx
+        input  longint unsigned                ctx
     );
 
     import "DPI-C" context function void cmodel_nmu_get_outputs(
-        input  chandle                ctx,
+        input  longint unsigned                ctx,
         output bit                    awready,
         output bit                    wready,
         output bit                    arready,

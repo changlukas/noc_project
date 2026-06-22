@@ -13,15 +13,15 @@ module tb_genamba_tester;
     always #5 ACLK = ~ACLK;          // 10 ns period
     reg ARESETn = 0;
 
-    // ---- DPI imports + chandle storage (same lifecycle as tb_genamba) ----
+    // ---- DPI imports + longint unsigned storage (same lifecycle as tb_genamba) ----
     import "DPI-C" context function void    cmodel_init(input string path);
     import "DPI-C" context function void    cmodel_finalize();
-    import "DPI-C" context function chandle cmodel_channel_model_create(input string name);
-    import "DPI-C" context function chandle cmodel_master_create(input string name);
-    import "DPI-C" context function chandle cmodel_slave_create(input string name);
-    import "DPI-C" context function chandle cmodel_nmu_create(input string name);
-    import "DPI-C" context function chandle cmodel_nsu_create(input string name);
-    chandle cm_ctx, master_ctx, slave_ctx, nmu_ctx, nsu_ctx;
+    import "DPI-C" context function longint unsigned cmodel_channel_model_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_master_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_slave_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name);
+    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name);
+    longint unsigned cm_ctx, master_ctx, slave_ctx, nmu_ctx, nsu_ctx;
 
     // ---- AXI + NoC interface bundles ----
     axi4_intf #(.ID_WIDTH(8), .ADDR_WIDTH(64), .DATA_WIDTH(256)) bfm_nmu_axi();
