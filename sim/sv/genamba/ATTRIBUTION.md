@@ -1,4 +1,4 @@
-# OSS Attribution — cosim/sv/genamba/
+# OSS Attribution — sim/sv/genamba/
 
 AMBA AXI verification IP from the gen_amba project, vendored for the gen_amba
 integration feasibility spike (used as golden AXI master BFM + memory model under
@@ -19,12 +19,12 @@ strength (error_flag escalation).
 
 | This repo                                | Upstream path                                   | Status     |
 |------------------------------------------|--------------------------------------------------|------------|
-| `cosim/sv/genamba/mem_axi.v`            | `gen_amba_axi/verification/ip/mem_axi.v`         | Unmodified |
-| `cosim/sv/genamba/mem_axi_beh.v`        | `gen_amba_axi/verification/ip/mem_axi_beh.v`     | Unmodified |
-| `cosim/sv/genamba/mem_axi_dpram_sync.v` | `gen_amba_axi/verification/ip/mem_axi_dpram_sync.v` | Unmodified |
-| `cosim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B-channel latch read in `axi_master_write_b`; `error_flag` escalation in `_write_b` + `_read_r`; see "Modifications" below. `_read_r` is otherwise upstream-pristine — burst drains bypass it via `bfm_drain_r` in `genamba_master_bfm.sv`.) |
-| `cosim/sv/genamba/mem_test_tasks.v`     | `gen_amba_axi/verification/ip/mem_test_tasks.v`  | **Modified** (offset-width fix; see "Modifications" below) |
-| `cosim/sv/genamba/axi_tester.v`         | `gen_amba_axi/verification/ip/axi_tester.v`      | **Modified** (capture-counter glue block; test sequence untouched — see below) |
+| `sim/sv/genamba/mem_axi.v`            | `gen_amba_axi/verification/ip/mem_axi.v`         | Unmodified |
+| `sim/sv/genamba/mem_axi_beh.v`        | `gen_amba_axi/verification/ip/mem_axi_beh.v`     | Unmodified |
+| `sim/sv/genamba/mem_axi_dpram_sync.v` | `gen_amba_axi/verification/ip/mem_axi_dpram_sync.v` | Unmodified |
+| `sim/sv/genamba/axi_master_tasks.v`   | `gen_amba_axi/verification/ip/axi_master_tasks.v`| **Modified** (B-channel latch read in `axi_master_write_b`; `error_flag` escalation in `_write_b` + `_read_r`; see "Modifications" below. `_read_r` is otherwise upstream-pristine — burst drains bypass it via `bfm_drain_r` in `genamba_master_bfm.sv`.) |
+| `sim/sv/genamba/mem_test_tasks.v`     | `gen_amba_axi/verification/ip/mem_test_tasks.v`  | **Modified** (offset-width fix; see "Modifications" below) |
+| `sim/sv/genamba/axi_tester.v`         | `gen_amba_axi/verification/ip/axi_tester.v`      | **Modified** (capture-counter glue block; test sequence untouched — see below) |
 
 ## Modifications
 
@@ -130,7 +130,7 @@ the handshake cycle, while the vendored task's procedural read returned 0).
 procedural loop (each iter consumes 2 cycles vs. one R beat/cycle from the
 bridge — Task B blen=4 hangs at the second-to-last beat). Rather than further
 patching `axi_master_read_r`, the project's `bfm_drain_r` adapter task in
-`cosim/sv/genamba_master_bfm.sv` bypasses the vendored task entirely: it reads
+`sim/sv/genamba_master_bfm.sv` bypasses the vendored task entirely: it reads
 from a parallel-captured shadow array (`r_shadow[256]`) indexed by a blocking
 read-side counter (`r_shadow_ridx`). The vendored `axi_master_read_r` stays in
 the Task A call path only (via `mem_test` → `axi_master_read`), modified only

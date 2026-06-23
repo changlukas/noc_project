@@ -40,5 +40,5 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/../build/verilator/obj_dir/Vtb_top.exe"
 else()
     message(STATUS
         "Vtb_top binary not found — skipping cosim ctest entries "
-        "(build cosim/verilator first for local co-sim smoke tests)")
+        "(build sim/verilator first for local co-sim smoke tests)")
 endif()

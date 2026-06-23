@@ -1,4 +1,4 @@
-# cosim/tests — Stage 5b wire-level smoke tests (GoogleTest + ctest).
+# sim/tests — Stage 5b wire-level smoke tests (GoogleTest + ctest).
 # These tests invoke the Vtb_top binary as a subprocess via std::system().
 # COSIM_BIN is injected via set_tests_properties ENVIRONMENT so ctest
 # can locate the binary regardless of working directory.
@@ -14,7 +14,7 @@ if(NOT EXISTS "${COSIM_BIN_PATH}")
 endif()
 
 # Stage B unified scenario tree. Scenarios live at repo-root tests/scenarios/.
-# CMAKE_CURRENT_LIST_DIR == .../cosim/tests, so ../../tests/scenarios/ is the
+# CMAKE_CURRENT_LIST_DIR == .../sim/tests, so ../../tests/scenarios/ is the
 # repo-root tree.
 set(SCENARIO_TREE_ABS "${CMAKE_CURRENT_LIST_DIR}/../../tests/scenarios/")
 
@@ -36,7 +36,7 @@ target_compile_definitions(test_cosim_integration PRIVATE
 # The per-node variants (node0 = identity, node1 = +0x1_0000_0000) are
 # materialized + committed under each pattern dir in the scenario tree
 # (tests/scenarios/<id>/node{0,1}/scenario.yaml), generated offline by
-# cosim/tools/gen_coordinate_scenarios.py. The test reads them directly from
+# sim/tools/gen_coordinate_scenarios.py. The test reads them directly from
 # the source tree; only the bring-up subset (single-beat, non-exclusive,
 # read-bearing patterns) has a node0/node1 tree, and ids without one SKIP.
 # -----------------------------------------------------------------------

@@ -5,7 +5,7 @@ TOP           := tb_top
 SHELL         := bash
 
 # Source lists, include dirs, and +define+s are simulator-neutral and shared
-# with cosim/vcs/Makefile via cosim/sources.mk. BUILD_ROOT (top-level build/)
+# with sim/vcs/Makefile via sim/sources.mk. BUILD_ROOT (top-level build/)
 # also comes from sources.mk; all Verilator artifacts land under
 # $(BUILD_ROOT)/verilator/, run logs under ./output/.
 include ../sources.mk
@@ -290,7 +290,7 @@ run-genamba-tester: $(TESTER_EXE)
 	    2>&1 | tee output/genamba_tester/run.log
 
 # --- batch: one vcd per scenario, both TBs ------------------------------------
-# Mirrors cosim/vcs run-all-fsdb (see that header for semantics): pre-builds
+# Mirrors sim/vcs run-all-fsdb (see that header for semantics): pre-builds
 # the trace binary once, then runs every scenario; a scenario counts PASS
 # only if the sim exits 0 AND its vcd is non-empty. NOT a regression gate
 # (always exits 0 — ctest is the gate). AX4-INF-001 fails by design.

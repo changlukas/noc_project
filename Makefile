@@ -4,7 +4,7 @@
 # gates; SIMULATION runs from each simulator's own directory:
 #   cd sim/verilator && make run-genamba / run-tb-top   (Windows + Linux)
 #   cd sim/vcs       && make run-genamba / run-tb-top   (Linux workstation)
-# Run logs land in cosim/<sim>/output/<scenario>/run.log.
+# Run logs land in sim/<sim>/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
 #   build/cmodel/    CMake (c_model tests + FetchContent deps)

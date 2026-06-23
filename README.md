@@ -21,7 +21,7 @@ AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
 ### Where code lives
 
 - `c_model/` - C++17 behavioural model + GoogleTest
-- `cosim/` - Verilator wire-level cosim
+- `sim/` - Verilator wire-level cosim
 - `tests/scenarios/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
 - `specgen/` - spec-to-header codegen sub-project
 - `tools/` - repo-level tooling
@@ -54,12 +54,12 @@ The root Makefile builds only. Simulation runs from each simulator's own
 directory; run logs land in that directory's `output/<scenario>/run.log`:
 
 ~~~bash
-cd cosim/verilator
+cd sim/verilator
 make run-tb-top                                 # wire-level cosim, default scenario
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
 make run-genamba                                # gen_amba role-1 testbench (Tasks A-G)
 
-cd cosim/vcs                                    # Linux workstation only (VCS)
+cd sim/vcs                                      # Linux workstation only (VCS)
 make run-tb-top SCENARIO=<ax4-id>
 make run-genamba
 ~~~
@@ -67,10 +67,10 @@ make run-genamba
 Waveform dumping is opt-in (default off, so regression is unaffected):
 
 ~~~bash
-cd cosim/verilator && make run-tb-top SCENARIO=<id> TRACE=1  # VCD -> output/<id>/tb_top.vcd
-cd cosim/verilator && make run-all-trace                     # one VCD per scenario + summary
-cd cosim/vcs       && make run-tb-top SCENARIO=<id> FSDB=1   # FSDB (needs Verdi/VERDI_HOME)
-cd cosim/vcs       && make run-all-fsdb                      # one FSDB per scenario + summary
+cd sim/verilator && make run-tb-top SCENARIO=<id> TRACE=1  # VCD -> output/<id>/tb_top.vcd
+cd sim/verilator && make run-all-trace                     # one VCD per scenario + summary
+cd sim/vcs       && make run-tb-top SCENARIO=<id> FSDB=1   # FSDB (needs Verdi/VERDI_HOME)
+cd sim/vcs       && make run-all-fsdb                      # one FSDB per scenario + summary
 ~~~
 
 See `docs/architecture.md` for the cosim architecture, and

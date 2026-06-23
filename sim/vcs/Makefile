@@ -1,5 +1,5 @@
 # VCS build for the cosim testbenches. Source lists are shared with the
-# Verilator flow via cosim/sources.mk; everything VCS-specific lives here.
+# Verilator flow via sim/sources.mk; everything VCS-specific lives here.
 # Build artifacts land under $(BUILD_ROOT)/vcs/ (top-level build/), run logs
 # under ./output/.
 #
@@ -28,7 +28,7 @@ VCS      ?= vcs
 VCS_EXTRA ?=
 # FSDB dumping (FSDB=1): Verdi install + PLI registration for $fsdbDump*.
 # Defaults match the workstation's local reference Makefile (untracked,
-# cosim/ref/; Verdi 2020.03,
+# sim/ref/; Verdi 2020.03,
 # PLI under LINUXAMD64). Alternate older install seen in the ref flows:
 #   /cadtools/synopsys/verdi/M-2017.03/share/PLI/VCS/LINUX64/{novas.tab,pli.a}
 # LD_LIBRARY_PATH may additionally be needed for the FSDB runtime libs
@@ -143,7 +143,7 @@ SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
 
 # tb_top is bidirectional: it needs two coordinate-variant scenarios passed as
-# +scenario_node0 / +scenario_node1 (mirrors cosim/verilator/Makefile). Generate
+# +scenario_node0 / +scenario_node1 (mirrors sim/verilator/Makefile). Generate
 # them with gen_coordinate_scenarios.py first. PYTHON3 must have PyYAML — on a
 # host where an EDA tool shadows a broken python3 on PATH, pin it in local.mk:
 #   PYTHON3 := /usr/bin/python3.12

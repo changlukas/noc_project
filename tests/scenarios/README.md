@@ -2,7 +2,7 @@
 
 Single source of truth for AXI4 scenario YAMLs. Both c_model integration test
 (`c_model/tests/axi/test_integration.cpp`) and cosim integration test
-(`cosim/tests/test_cosim_integration.cpp`) consume the full set via a
+(`sim/tests/test_cosim_integration.cpp`) consume the full set via a
 CMake-generated header. Two scoped tests (`test_port_pair_loopback`,
 `test_request_response_loopback`) consume hand-curated subsets.
 
@@ -69,7 +69,7 @@ data file.
 | Test | List source | Skips |
 |---|---|---|
 | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
-| `cosim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
+| `sim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
 | `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated 4 scenarios x delay sweep | n/a |
 | `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 6 distinct scenarios (7 FixtureParam entries at num_vc=1; re-run at num_vc in {2, 4, 8}) | n/a |
 
