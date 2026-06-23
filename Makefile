@@ -135,7 +135,7 @@ MAINTAINED_DOCS = \
     README.md \
     docs/architecture.md \
     docs/development.md \
-    docs/_archive/README.md \
+    docs/internal/_archive/README.md \
     tests/scenarios/README.md
 
 lint_docs:

@@ -81,7 +81,7 @@ See `docs/architecture.md` for the cosim architecture, and
 - [Architecture overview](docs/architecture.md)
 - [Development guide](docs/development.md)
 - [specgen sub-project](specgen/docs/guide/index.md)
-- [Historical archive](docs/_archive/README.md)
+- [Historical archive](docs/internal/_archive/README.md)
 
 ## Contributing
 

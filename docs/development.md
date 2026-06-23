@@ -126,7 +126,7 @@ prefix in the directory name.
 
 - Encoding: UTF-8, no BOM.
 - Maintained docs (README.md, docs/architecture.md, docs/development.md,
-  docs/_archive/README.md, tests/scenarios/README.md)
+  docs/internal/_archive/README.md, tests/scenarios/README.md)
   must be ASCII-only. The `lint_docs` target enforces this.
 - Headings: sentence case (only first word and proper nouns capitalized).
 - Link paths: forward slash `/` separator.
@@ -158,7 +158,7 @@ pass the handle as `longint unsigned` and the C side casts it back to
 `HandleBlock*` at the DPI boundary.)
 
 This replaces the prior 5-singleton invariant. See
-`docs/superpowers/specs/2026-06-09-multi-instance-dpi-design.md` for
+`docs/internal/superpowers/specs/2026-06-09-multi-instance-dpi-design.md` for
 the design rationale.
 
 ---
@@ -568,7 +568,7 @@ The gen_amba role-1 testbench (`tb_genamba`) is a separate cosim target
 from `tb_top`. It drives the NMU/NSU bridge with a gen_amba golden master
 BFM through seven AXI4 patterns (baseline, burst, outstanding, outstanding
 burst, same-ID, mixed R+W, deep pressure) -- see
-`docs/superpowers/specs/2026-06-08-genamba-role1-testbench-design.md`
+`docs/internal/superpowers/specs/2026-06-08-genamba-role1-testbench-design.md`
 for the design and the matching findings document for the Phase 1 outcome.
 
 Build + run from repo root:
@@ -636,7 +636,7 @@ Before opening a PR or merging a branch:
 - `tests/scenarios/README.md` -- scenario naming convention, YAML
   schema, IHI 0022H section coverage table.
 - `specgen/docs/guide/index.md` -- specgen sub-project guide.
-- `docs/_archive/README.md` -- historical archive index and doc class
+- `docs/internal/_archive/README.md` -- historical archive index and doc class
   definitions.
 - IHI 0022H (AMBA AXI4 protocol specification, ARM Ltd.) -- referenced
   inline throughout.

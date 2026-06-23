@@ -178,7 +178,7 @@ consistency, and Live state.
 which in turn invokes the per-handle type-erased deleter to clean up
 the underlying adapter.
 
-See `docs/superpowers/specs/2026-06-09-multi-instance-dpi-design.md`
+See `docs/internal/superpowers/specs/2026-06-09-multi-instance-dpi-design.md`
 for the full design.
 
 ### 3.2 Tick semantics
@@ -309,7 +309,7 @@ and deep outstanding pressure. This provides independent evidence from
 a second AXI VIP implementation (gen_amba) that does not share code or
 assumptions with the c_model. Run with `cd cosim/verilator && make run-genamba`.
 Phase 1 results:
-`docs/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
+`docs/internal/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
 
 `make check` runs lint_scenarios, lint_docs, builds the c_model and the
 Verilator binary, and runs the full ctest suite (Layers 1-4). It does
