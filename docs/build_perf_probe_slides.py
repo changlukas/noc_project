@@ -232,9 +232,9 @@ textbox(s, 0.55, 1.55, 12.0, 0.9, [
 SCALE = 0.36
 bx0, lblw = 2.0, 1.5
 segs_w = [("NI", 10, BLUE), ("Router", 12, ORANGE), ("Slave", 3, GREEN),
-          ("Shell", 2, GRAY)]
+          ("Wrap", 2, GRAY)]
 segs_r = [("NI", 10, BLUE), ("Router", 12, ORANGE), ("Slave", 2, GREEN),
-          ("Shell", 4, GRAY)]
+          ("Wrap", 4, GRAY)]
 for bi, (name, segs, total) in enumerate([("Write = 27 cyc", segs_w, 27),
                                           ("Read = 28 cyc", segs_r, 28)]):
     by = 3.1 + bi * 1.4
@@ -247,7 +247,7 @@ for bi, (name, segs, total) in enumerate([("Write = 27 cyc", segs_w, 27),
         cx += w
 textbox(s, 0.55, 6.2, 12.2, 1.0, [
     "Measured directly: round-trip total and slave service. NI and router "
-    "come from their pipeline depth; shell is the remainder. One measured "
+    "come from their pipeline depth; wrap is the remainder. One measured "
     "instance; regenerate before reuse.",
 ], size=12, bullet=True)
 

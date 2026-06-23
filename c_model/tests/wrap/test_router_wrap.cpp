@@ -105,7 +105,7 @@ TEST(RouterWrap, LinkInRspEjectsAtNmu) {
 
 // LinkCreditOut pulse: when a LINK-input flit drains out of the router input
 // FIFO (grant), the router emits a registered input-drain credit pulse; the
-// shell must surface it as a single-cycle assert on link_req_in_credit.
+// wrap must surface it as a single-cycle assert on link_req_in_credit.
 TEST(RouterWrap, LinkInputDrainEmitsCreditPulse) {
     RouterWrap a;
     a.init(/*x_coord=*/0);
@@ -129,7 +129,7 @@ TEST(RouterWrap, LinkInputDrainEmitsCreditPulse) {
 
 // R2: the LOCAL (NI-edge) credit is now a single-cycle PULSE, identical to the
 // LINK. When the router's LOCAL input FIFO drains an NMU-injected req flit
-// (grant), the shell must surface exactly one req_out_credit_return pulse — NOT
+// (grant), the wrap must surface exactly one req_out_credit_return pulse — NOT
 // a steady credit_avail level. Inject one LOCAL-bound req at node0 (dst=(0,0)
 // routes LOCAL, ejecting back at this node's NSU-facing req_out) and count the
 // returned credit pulses.
@@ -159,7 +159,7 @@ TEST(RouterWrap, LocalInputDrainEmitsCreditPulse) {
 // Eject one LOCAL-bound req first (which spends one credit_[LOCAL] on the router
 // output), THEN return the credit pulse; router.receive_credit(LOCAL) must
 // restore the counter. This test is a genuine discriminator: it reads the
-// router's credit_[LOCAL] before/after the return hop. A dropped hop (the shell
+// router's credit_[LOCAL] before/after the return hop. A dropped hop (the wrap
 // failing to call receive_credit(LOCAL) on req_in_credit_return) leaves the
 // counter one short and FAILS the final assertion — a no-abort-only test would
 // not catch that.
@@ -191,7 +191,7 @@ TEST(RouterWrap, LocalInCreditReturnReplenishesRouter) {
     ASSERT_EQ(a.req_router().credit(LOCAL, /*vc=*/0), seed - 1)
         << "ejecting one LOCAL flit must spend exactly one credit_[LOCAL]";
 
-    // Now the NSU returns the consumer credit pulse. The shell must route it to
+    // Now the NSU returns the consumer credit pulse. The wrap must route it to
     // router.receive_credit(LOCAL, 0), incrementing credit_[LOCAL] back to seed.
     // If the hop were dropped the counter would stay at seed-1 and this fails.
     in = RouterInputs{};

@@ -1,4 +1,4 @@
-// PoC queue depths used by all cosim shell adapters.
+// PoC queue depths used by all wrap-layer adapters.
 //
 // Centralizes the magic numbers that previously appeared as bare literals
 // across nmu_wrap.hpp, nsu_wrap.hpp, and

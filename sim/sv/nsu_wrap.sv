@@ -1,4 +1,4 @@
-// nsu_wrap — Stage 5b DPI shell for the Nsu component.
+// nsu_wrap — Stage 5b DPI wrapper for the Nsu component.
 //
 // The Nsu is the NoC-side inverse of nmu_wrap. Its single NoC port
 // noc_miso_i (noc_intf.miso modport) reads req flit + valid + rsp_credit_return

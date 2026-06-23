@@ -11,7 +11,7 @@
 //   set_downstream(port, LinkEjectAdapter)   — router output -> SV transport
 //     buffer (no pop credit; credit returns over SV as a pulse).
 //   set_upstream_credit(port, LinkCreditOut) — captures the router's input-drain
-//     pulses; the shell drains one/tick onto the *_credit/*_credit_return wire.
+//     pulses; the wrap drains one/tick onto the *_credit/*_credit_return wire.
 //   inbound flit pushes straight into router.input(port).
 //   each inbound credit pulse calls router.receive_credit(port, 0).
 // LOCAL pin mapping (NI edge):
@@ -28,7 +28,7 @@
 //
 // num_vc=1 pinned (SV wraps fatal otherwise); LOCAL/LINK depths = kPoCChannelModelDepth.
 //
-// Reset invariant (construction-is-reset): the shell holds no SV-driven reset and
+// Reset invariant (construction-is-reset): the wrap holds no SV-driven reset and
 // is created (cmodel_router_create) after rst_ni deasserts, so LinkCreditOut
 // pending, LinkEjectAdapter queues, and the routers' FIFOs/counters all start
 // empty. Mid-sim reset is NOT modeled (consistent with Router's construction-is-
@@ -151,7 +151,7 @@ class RouterWrap {
 
     // FlooNoC pulse-credit wiring, identical for LOCAL and LINK: transport-only
     // eject (no pop credit) + a LinkCreditOut that captures the router's
-    // input-drain pulses for the shell to drain one/tick onto the credit wire.
+    // input-drain pulses for the wrap to drain one/tick onto the credit wire.
     void wire_port(router::Router& r, std::size_t port,
                    std::unique_ptr<router::LinkEjectAdapter>& ej,
                    std::unique_ptr<router::LinkCreditOut>& credit) {

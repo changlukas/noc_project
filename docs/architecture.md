@@ -201,7 +201,7 @@ Key properties:
   This is the timing model for Stage 5b.
 - C++ vs SV timing nuance -- in the C++ model, state updates are
   immediate within tick(). In SV, the registered outputs settle after the
-  clock edge and are visible one delta later. The DPI shell adapters
+  clock edge and are visible one delta later. The DPI wrap adapters
   absorb this difference: they read input wires before the tick() call
   and write output wires after, so the wire bundle seen on the SV side
   is consistent with the registered model.

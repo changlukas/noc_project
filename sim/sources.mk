@@ -108,7 +108,7 @@ GENAMBA_INC_DEPS := \
     $(COSIM_ROOT)/sv/genamba/mem_test_tasks.v \
     $(COSIM_ROOT)/sv/genamba/mem_axi_dpram_sync.v
 
-# DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (shell adapters and
+# DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (wrap adapters and
 # their transitive includes). The obj-dir sub-make tracks them via -MMD, but
 # the TOP-level rules must list them too — otherwise a header-only change
 # leaves the simulator binary stale because the sub-make never runs.

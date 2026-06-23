@@ -1,6 +1,6 @@
-// nmu_wrap — Stage 5b DPI shell for the Nmu component.
+// nmu_wrap — Stage 5b DPI wrapper for the Nmu component.
 //
-// The Nmu is the most complex shell — it has BOTH an AXI slave side
+// The Nmu is the most complex wrap — it has BOTH an AXI slave side
 // (incoming AW/W/AR from master, outgoing B/R + handshake to master) AND
 // a NoC side: noc_mosi_o (noc_intf.mosi modport) drives req flit + valid
 // toward ChannelModel and drives rsp_credit_return back; it reads rsp

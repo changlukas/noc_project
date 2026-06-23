@@ -1,4 +1,4 @@
-// axi_slave_wrap — Stage 5b DPI shell for AxiSlave component.
+// axi_slave_wrap — Stage 5b DPI wrapper for AxiSlave component.
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs (from axi_i.awvalid/

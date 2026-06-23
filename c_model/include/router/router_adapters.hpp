@@ -142,7 +142,7 @@ class LinkEjectAdapter : public RouterLink {
 
 // Router input-port credit sink for a cross-DPI link. The router pulses
 // receive_credit(vc) when a link input-FIFO slot frees; accumulate per-VC and
-// let the shell drain one pulse/tick onto the SV credit wire to the neighbor.
+// let the wrap drain one pulse/tick onto the SV credit wire to the neighbor.
 class LinkCreditOut : public RouterCreditSink {
   public:
     explicit LinkCreditOut(uint8_t num_vc) : pending_(num_vc, 0) {}

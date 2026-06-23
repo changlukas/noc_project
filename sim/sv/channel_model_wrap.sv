@@ -1,4 +1,4 @@
-// channel_model_wrap — Stage 5b DPI shell for ChannelModel component.
+// channel_model_wrap — Stage 5b DPI wrapper for ChannelModel component.
 //
 // Two NoC ports, both noc_intf bundles (req + rsp channels combined):
 //   noc_miso_i — NMU-facing side (noc_intf.miso modport):

@@ -78,7 +78,7 @@ Testbench environment (`tb_top`), co-simulated with Verilator:
 
 - 2 nodes. Each node chains AXI master to NMU to router, router to the peer router
   over links, then NSU to AXI subordinate (memory). Figure 2 shows the layout.
-- The C++ NoC model runs inside RTL shells (`*_wrap.sv`). Each monitor reports its
+- The C++ NoC model runs inside RTL wraps (`*_wrap.sv`). Each monitor reports its
   interface to the collector over DPI-C.
 - Run one scenario with `make run-tb-top SCENARIO=<id>`, which writes `perf.json`
   and prints the summary.
@@ -220,7 +220,7 @@ outlier to the individual transactions that produced it.
 ## 6. Latency breakdown
 
 The 27/28-cycle round-trip comprises the NI pipeline, the router pipeline, the
-memory service, and the co-sim shell. The NI and router pipelines are shown
+memory service, and the co-sim wrap. The NI and router pipelines are shown
 separately below:
 
 **NI pipelines** (NMU and NSU, cycle axis, one stage per cycle):
@@ -256,10 +256,10 @@ router total is four traversals, two routers each way.
 | Network interface | 10 | 10 | staged pipeline, four paths |
 | Router | 12 | 12 | three-stage pipeline, four traversals |
 | Memory service | 3 | 2 | memory latency plus handshake |
-| Shell boundary | 2 | 4 | co-sim wrapper registers |
+| Wrap boundary | 2 | 4 | co-sim wrapper registers |
 
 The figures have three sources:
 
 - **Measured directly**: the round-trip total and the memory service.
 - **Pipeline depth**: the network-interface and router contributions.
-- **Remainder**: the shell boundary (total minus the other three).
+- **Remainder**: the wrap boundary (total minus the other three).

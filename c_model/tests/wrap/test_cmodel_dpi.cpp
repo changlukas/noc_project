@@ -91,7 +91,7 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // === NSU case (T9 — last per-shell) ===
+    // === NSU case (T9 — last per-wrap) ===
 
     // Case: nsu_create after init succeeds.
     unsigned long long nsu_handle = cmodel_nsu_create("nsu_test", 0);

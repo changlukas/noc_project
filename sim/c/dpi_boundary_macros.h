@@ -3,7 +3,7 @@
 // (which is IEEE 1800 undefined behavior). Per Stage 5b spec §5.2.
 //
 // On exception: sets g_dpi_error_{code,msg}, returns silently. The SV side
-// polls cmodel_check_error() at each shell's always_ff end and raises $fatal.
+// polls cmodel_check_error() at each wrap's always_ff end and raises $fatal.
 
 #ifndef COSIM2_DPI_BOUNDARY_MACROS_H
 #define COSIM2_DPI_BOUNDARY_MACROS_H

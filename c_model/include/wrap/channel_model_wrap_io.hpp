@@ -1,11 +1,11 @@
-// ChannelModel shell IO POD structs — Stage 5b spec §5.1 / §6.2.
+// ChannelModel wrap IO POD structs — Stage 5b spec §5.1 / §6.2.
 //
 // FlitBytes carries the full c_model flit (ni::FLIT_WIDTH = 408 bits = 51 bytes).
 // DPI side packs/unpacks into svBitVecVal[13] words (each 32-bit, little-endian
 // within word; the 13th word carries only bits [407:384] in its low 24 bits).
 //
 // credit_return: one bit per direction for NUM_VC=1 PoC. Multi-VC extends to
-// credit_return[NUM_VC-1:0] — shell adapter signals the per-VC credit_avail
+// credit_return[NUM_VC-1:0] — wrap adapter signals the per-VC credit_avail
 // state from ChannelModel as a single aggregated bit (any VC available).
 #pragma once
 #include "ni_flit_constants.h"

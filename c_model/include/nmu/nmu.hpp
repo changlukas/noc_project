@@ -495,7 +495,7 @@ struct NullNocRspIn : router::NocRspIn {
     void inject_rsp_flit(const Flit& f) { queue_.push_back(f); }
 
     // R2 consumer-pulse: size the per-VC pending counter before traffic. Always
-    // present (no enable flag needed — pending only matters when the shell drains
+    // present (no enable flag needed — pending only matters when the wrap drains
     // it via take_credit, which is cosim-only). Defaults to 1 VC.
     void size_pending(uint8_t num_vc) { pending_.assign(num_vc, 0); }
 

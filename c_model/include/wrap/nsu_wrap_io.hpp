@@ -26,7 +26,7 @@
 namespace ni::cmodel::wrap {
 
 // 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
-// wire width agrees across master/slave/nmu/nsu shell IO structs.
+// wire width agrees across master/slave/nmu/nsu wrap IO structs.
 constexpr int NSU_AXI_DATA_BYTES = axi::DATA_BYTES;
 
 // NsuInputs: signals consumed by Nsu each cycle.

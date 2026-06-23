@@ -182,17 +182,17 @@ The numbers below are one measured instance, not a fixed specification: a single
 configuration. Regenerate them before reuse.
 
 **Figure 5: Round-trip latency composition. Segments are to scale, the number
-above each boundary is the cumulative cycle, and Shell is the non-architectural
+above each boundary is the cumulative cycle, and Wrap is the non-architectural
 co-sim residual.**
 
 ```text
 Write round-trip = 27 cyc
   0            10                22      25   27
-  |--- NI:10 --|--- Router:12 ---|-Slv:3-|Sh:2|
+  |--- NI:10 --|--- Router:12 ---|-Slv:3-|Wr:2|
 
 Read round-trip = 28 cyc
   0            10                22    24     28
-  |--- NI:10 --|--- Router:12 ---|Slv:2|-Sh:4-|
+  |--- NI:10 --|--- Router:12 ---|Slv:2|-Wr:4-|
 ```
 
 | Component | Write | Read | Source |
@@ -200,10 +200,10 @@ Read round-trip = 28 cyc
 | Network interface | 10 | 10 | staged pipeline, four paths |
 | Router | 12 | 12 | three-stage pipeline, four traversals |
 | Memory service | 3 | 2 | memory latency plus handshake |
-| Shell boundary | 2 | 4 | co-sim wrapper registers, non-architectural residual |
+| Wrap boundary | 2 | 4 | co-sim wrapper registers, non-architectural residual |
 
 Only the round-trip total and the memory service are measured directly. The
 network-interface and router figures come from their known pipeline depth (each
-advances one stage per cycle), and the shell boundary is the remainder.
+advances one stage per cycle), and the wrap boundary is the remainder.
 
 The full field-level layout of the output file is kept in the design spec.

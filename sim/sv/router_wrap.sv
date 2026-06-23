@@ -1,4 +1,4 @@
-// router_wrap — Task 4 DPI shell for one node's per-node Router component.
+// router_wrap — Task 4 DPI wrapper for one node's per-node Router component.
 //
 // One node owns its REQ+RSP routers at (x,0). Pins split into three faces:
 //   noc_nmu_i — NMU-facing bundle (noc_intf.miso modport): receives this

@@ -1,8 +1,8 @@
-// DPI signatures for Stage 5b wire-wrap co-sim. 6 shells x 3 calls/cycle
+// DPI signatures for Stage 5b wire-wrap co-sim. 6 wraps x 3 calls/cycle
 // (set_inputs/tick/get_outputs) + lifecycle (init/finalize/check_error).
 //
 // Error propagation: try/catch in handlers sets g_dpi_error_code; SV side
-// polls cmodel_check_error() per shell per cycle and raises $fatal on
+// polls cmodel_check_error() per wrap per cycle and raises $fatal on
 // non-zero. See spec §5.2.
 
 #ifndef COSIM2_CMODEL_DPI_H
@@ -50,8 +50,8 @@ void cmodel_perf_sample_tick(void);
 void cmodel_perf_dump(const char* path);
 void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 
-// Per-shell DPI signatures appended by Tasks 5-11.
-// ChannelModel (Task 5) — NoC-only, simplest shell; first chandle migration:
+// Per-wrap DPI signatures appended by Tasks 5-11.
+// ChannelModel (Task 5) — NoC-only, simplest wrap; first chandle migration:
 unsigned long long cmodel_channel_model_create(const char* name);
 void cmodel_channel_model_set_inputs(unsigned long long ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
                                      svBit req_in_credit_return, svBit rsp_in_valid,

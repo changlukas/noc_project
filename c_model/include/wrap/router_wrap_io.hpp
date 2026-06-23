@@ -1,4 +1,4 @@
-// Per-node Router shell IO — one node's NoC pin bundle.
+// Per-node Router wrap IO — one node's NoC pin bundle.
 //
 // A single cosim RouterWrap owns ONE node's REQ+RSP routers at
 // coordinate (x,0). Its pins split into three groups:

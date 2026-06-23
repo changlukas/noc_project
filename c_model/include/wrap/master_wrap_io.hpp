@@ -1,4 +1,4 @@
-// AxiMaster shell IO POD structs — Stage 5b spec §6.1 (axi_intf wire bundle).
+// AxiMaster wrap IO POD structs — Stage 5b spec §6.1 (axi_intf wire bundle).
 //
 // MasterInputs: signals consumed by the master (driven by the slave side).
 //   awready/wready/arready — handshake ready (slave asserts to accept beats)

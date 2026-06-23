@@ -1,4 +1,4 @@
-// axi_master_wrap — Stage 5b DPI shell for AxiMaster component.
+// axi_master_wrap — Stage 5b DPI wrapper for AxiMaster component.
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs (from axi_o.*ready +

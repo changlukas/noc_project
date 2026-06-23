@@ -1,7 +1,7 @@
 // NmuWrap — Stage 5b Wrap for the Nmu component.
 //
 // Owns an NmuStandalone (T3 hermetic wrapper). The Nmu is the most complex
-// shell — it has BOTH an AXI slave side (incoming AW/W/AR, outgoing B/R)
+// wrap — it has BOTH an AXI slave side (incoming AW/W/AR, outgoing B/R)
 // AND NoC sides (req_out producer toward ChannelModel, rsp_in consumer from
 // ChannelModel). Each tick follows the 3-step pattern:
 //   set_inputs(in)   → latch NmuInputs
@@ -60,7 +60,7 @@ class NmuWrap {
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
         // R2: close the NI-edge credit loop. Seed the req-out sender counter to
         // the router LOCAL input depth (kPoCChannelModelDepth) so credit conserves
-        // — the router shell seeds its LOCAL eject/credit with the same depth.
+        // — the router wrap seeds its LOCAL eject/credit with the same depth.
         nmu_->enable_noc_credit(kPoCChannelModelDepth);
         in_ = NmuInputs{};
         out_ = NmuOutputs{};

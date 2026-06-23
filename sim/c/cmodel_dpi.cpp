@@ -1,5 +1,5 @@
 // Stage 5b DPI bridge — lifecycle handlers + global error state.
-// Per-shell {set_inputs,tick,get_outputs} handlers + per-instance *_create
+// Per-wrap {set_inputs,tick,get_outputs} handlers + per-instance *_create
 // lifecycle (chandle ABI). Handle validation via REQUIRE_HANDLE.
 
 #include "cmodel_dpi.h"
@@ -101,7 +101,7 @@ HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const ch
         return nullptr;
     }
     // Guard 4 — type tag: stored type must equal what the handler expected.
-    // Detects passing a handle for shell A to a handler for shell B.
+    // Detects passing a handle for wrap A to a handler for wrap B.
     if (h->type != expected) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_HERMETIC_VIOLATION,
                              std::string(fn_name) + ": type mismatch");

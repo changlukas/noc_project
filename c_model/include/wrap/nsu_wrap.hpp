@@ -67,7 +67,7 @@ class NsuWrap {
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
         // R2: close the NI-edge credit loop. Seed the rsp-out sender counter to
         // the router LOCAL input depth (kPoCChannelModelDepth) so credit conserves
-        // — the router shell seeds its LOCAL eject/credit with the same depth.
+        // — the router wrap seeds its LOCAL eject/credit with the same depth.
         nsu_->enable_noc_credit(kPoCChannelModelDepth);
         in_ = NsuInputs{};
         out_ = NsuOutputs{};
