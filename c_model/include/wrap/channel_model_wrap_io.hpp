@@ -12,7 +12,7 @@
 #include <array>
 #include <cstdint>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
 // Full c_model flit stored as byte array for DPI marshalling.
 // Size matches ni::FLIT_WIDTH bits rounded up to bytes.
@@ -46,4 +46,4 @@ struct ChannelModelOutputs {
     bool rsp_out_credit_return;
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

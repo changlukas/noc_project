@@ -612,10 +612,10 @@ using AxiMaster = AxiMasterT<AxiSlave>;
 // -------------------------------------------------------------------------
 // Stage 5b: AxiMasterStandalone — hermetic, no external SlaveT& ref.
 //
-// ShellAdapters that drive AxiMaster without a concrete AxiSlave (e.g.,
+// Wraps that drive AxiMaster without a concrete AxiSlave (e.g.,
 // DPI-wired cosim) use this class. It owns a NullSlavePort (all push_*
 // calls return false; pop_* return nullopt) so AxiMasterT construction
-// succeeds without a real slave. The ShellAdapter overrides the
+// succeeds without a real slave. The Wrap overrides the
 // tick-level slave interaction via the DPI layer instead of calling
 // slave_.push_aw etc. directly.
 // -------------------------------------------------------------------------
@@ -624,8 +624,8 @@ namespace detail {
 
 // NullSlavePort satisfies the AxiMasterT<SlaveT> interface.
 // push_* always returns false (no backpressure modeling needed at this layer
-// when the real channel is wired externally by the ShellAdapter).
-// pop_* return nullopt (responses injected via external call by ShellAdapter).
+// when the real channel is wired externally by the Wrap).
+// pop_* return nullopt (responses injected via external call by Wrap).
 struct NullSlavePort {
     bool push_aw(const AwBeat&) { return false; }
     bool push_w(const WBeat&) { return false; }
@@ -634,24 +634,24 @@ struct NullSlavePort {
     std::optional<RBeat> pop_r() { return std::nullopt; }
 };
 
-// WireSlavePort — handshake-aware intermediary for Stage 5b ShellAdapter.
+// WireSlavePort — handshake-aware intermediary for Stage 5b Wrap.
 //
 // Models the AXI4 wire handshake from the master's perspective:
 //   - push_aw/push_w/push_ar model the master PRESENTING a beat (driving valid+
 //     beat info onto the channel). The beat is accepted by WireSlavePort only
-//     when the corresponding ready signal (set by ShellAdapter from the incoming
+//     when the corresponding ready signal (set by Wrap from the incoming
 //     SV wire) is true that cycle — matching the "both valid and ready asserted"
 //     transfer condition (IHI 0022 §A3.2.1).
 //   - When ready is false: push_* returns false so AxiMasterT retries next
-//     cycle. The ShellAdapter reads the pending beat directly from last_aw_/
+//     cycle. The Wrap reads the pending beat directly from last_aw_/
 //     last_w_/last_ar_ to drive awvalid/wvalid/arvalid onto the output wire.
 //   - When ready is true: push_* returns true (handshake complete); the beat is
-//     consumed and ShellAdapter clears the pending latch.
+//     consumed and Wrap clears the pending latch.
 //
-// pop_b / pop_r supply B/R response beats injected by ShellAdapter from the
+// pop_b / pop_r supply B/R response beats injected by Wrap from the
 // incoming SV wire. inject_b / inject_r are the injection points.
 struct WireSlavePort {
-    // Backpressure controls: ShellAdapter sets these from MasterInputs before
+    // Backpressure controls: Wrap sets these from MasterInputs before
     // each call to AxiMasterT::tick().
     // Beta-tick semantics: set_wready resets the per-tick delivery gate.
     // Only ONE W beat is accepted per tick (modelling the 1-beat-per-clock-edge
@@ -688,7 +688,7 @@ struct WireSlavePort {
         return true;
     }
 
-    // Called by AxiMasterT to consume response beats injected by ShellAdapter.
+    // Called by AxiMasterT to consume response beats injected by Wrap.
     std::optional<BBeat> pop_b() {
         if (b_queue_.empty()) return std::nullopt;
         auto front = b_queue_.front();
@@ -702,7 +702,7 @@ struct WireSlavePort {
         return front;
     }
 
-    // ShellAdapter reads the pending beat (if any) to populate MasterOutputs.
+    // Wrap reads the pending beat (if any) to populate MasterOutputs.
     // pending_aw() returns the beat the master is currently presenting on the
     // AW channel (awvalid = true). Returns nullopt when no AW is pending.
     std::optional<AwBeat> pending_aw() const {
@@ -718,12 +718,12 @@ struct WireSlavePort {
         return last_ar_;
     }
 
-    // ShellAdapter injects B/R response beats from the SV wire into the port.
+    // Wrap injects B/R response beats from the SV wire into the port.
     void inject_b(const BBeat& b) { b_queue_.push_back(b); }
     void inject_r(const RBeat& r) { r_queue_.push_back(r); }
 
     // Beta-tick inject support: force-clear AW pending state so that AWVALID
-    // drops to 0 on the wire. Called by MasterShellAdapter when fault injection
+    // drops to 0 on the wire. Called by MasterWrap when fault injection
     // suppresses the AW push for the current cycle.
     void force_aw_not_pending() noexcept { aw_pending_ = false; }
 
@@ -753,7 +753,7 @@ struct WireSlavePort {
 
 }  // namespace detail
 
-// Config struct for Stage 5b ShellAdapter hermetic construction.
+// Config struct for Stage 5b Wrap hermetic construction.
 struct AxiMasterConfig {
     std::string scenario_yaml;
     std::string read_dump_path;
@@ -766,7 +766,7 @@ struct AxiMasterConfig {
 // on_read_observed(), active_write_count(), active_read_count().
 // Note: on_write_issued()/on_read_issued() exist on AxiMasterT but are intentionally
 // not forwarded here (cosim path does not need them).
-// wire_port() gives ShellAdapter direct access to drain request beats and
+// wire_port() gives Wrap direct access to drain request beats and
 // inject response beats on each DPI tick.
 class AxiMasterStandalone {
   public:
@@ -787,7 +787,7 @@ class AxiMasterStandalone {
     }
     void configure_inject(const InjectConfig& inj) noexcept { inner_.configure_inject(inj); }
 
-    // ShellAdapter access to the wire port for request drain + response inject.
+    // Wrap access to the wire port for request drain + response inject.
     detail::WireSlavePort& wire_port() { return wire_slave_; }
 
   private:

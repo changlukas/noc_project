@@ -1,4 +1,4 @@
-// NsuShellAdapter — Stage 5b ShellAdapter for the Nsu component.
+// NsuWrap — Stage 5b Wrap for the Nsu component.
 //
 // Owns an NsuStandalone (T3 hermetic wrapper). Nsu is the inverse of Nmu:
 // it has a NoC consumer side (receives req flits from ChannelModel), a NoC
@@ -26,22 +26,22 @@
 // Pending beats are held in held_aw_/held_w_/held_ar_ until the subordinate
 // asserts the corresponding ready.
 //
-// Hermetic invariant: no refs to other ShellAdapters.
+// Hermetic invariant: no refs to other Wraps.
 #pragma once
 #include "axi/types.hpp"
-#include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
-#include "cosim/flit_byte_conv.hpp"          // flit_from_bytes, flit_to_bytes
-#include "cosim/nsu_shell_io.hpp"
-#include "cosim/poc_defaults.hpp"  // kPoC* depths
+#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "wrap/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
+#include "wrap/nsu_wrap_io.hpp"
+#include "wrap/poc_defaults.hpp"  // kPoC* depths
 #include "flit.hpp"
 #include "nsu/nsu.hpp"
 #include <array>
 #include <memory>
 #include <optional>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
-class NsuShellAdapter {
+class NsuWrap {
   public:
     // init — construct NsuStandalone with a minimal PoC NsuConfig.
     // Defaults: 1 VC, ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
@@ -246,4 +246,4 @@ class NsuShellAdapter {
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

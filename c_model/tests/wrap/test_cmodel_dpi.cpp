@@ -9,10 +9,10 @@
 #include <gtest/gtest.h>
 #include <string>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 extern std::atomic<int> g_dpi_error_code;
 extern std::string g_dpi_error_msg;
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap
 
 namespace {
 
@@ -20,8 +20,8 @@ void check_and_clear_error(int expected_code) {
     const char* msg = nullptr;
     int code = cmodel_check_error(&msg);
     EXPECT_EQ(code, expected_code) << "msg: " << (msg ? msg : "<null>");
-    ni::cmodel::cosim::g_dpi_error_code.store(CMODEL_DPI_OK);
-    ni::cmodel::cosim::g_dpi_error_msg.clear();
+    ni::cmodel::wrap::g_dpi_error_code.store(CMODEL_DPI_OK);
+    ni::cmodel::wrap::g_dpi_error_msg.clear();
 }
 
 class CmodelDpiLifecycleTest : public ::testing::Test {};

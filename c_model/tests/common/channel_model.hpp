@@ -35,8 +35,8 @@
 
 namespace ni::cmodel::testing {
 
-// Config struct for Stage 5b ShellAdapter hermetic construction.
-// Mirrors the multi-NSU ctor parameters; ShellAdapters construct via
+// Config struct for Stage 5b Wrap hermetic construction.
+// Mirrors the multi-NSU ctor parameters; Wraps construct via
 // ChannelModel(ChannelModelConfig{...}) without needing cross-component refs.
 struct ChannelModelConfig {
     std::size_t num_nsu = 1;

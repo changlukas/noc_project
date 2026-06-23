@@ -151,17 +151,17 @@ TEST(AxiMasterRawOrder, ArHeldUntilOverlappingWriteReceivesB) {
 // cycle), turning one read into many AR transfers at the memory edge.
 //
 // Drive AxiMasterStandalone (which owns the WireSlavePort wire model) with the
-// MasterShellAdapter's beta-tick ready policy (accept a beat only if VALID was
+// MasterWrap's beta-tick ready policy (accept a beat only if VALID was
 // driven last cycle). The write's B is never injected, so the write stays
 // outstanding and the read overlaps it for the whole run: the read must stay
 // held and ARVALID must drop, not latch high.
 TEST(AxiMasterRawOrder, ArvalidNotStuckWhileReadRawHeld) {
     const std::string scn = write_raw_scenario();
     axi::AxiMasterConfig cfg;
-    cfg.scenario_yaml         = scn;
-    cfg.read_dump_path        = std::string(::testing::TempDir()) + "/arv_stuck.read.txt";
+    cfg.scenario_yaml = scn;
+    cfg.read_dump_path = std::string(::testing::TempDir()) + "/arv_stuck.read.txt";
     cfg.max_outstanding_write = 1;
-    cfg.max_outstanding_read  = 1;
+    cfg.max_outstanding_read = 1;
     axi::AxiMasterStandalone master(cfg);
     auto& wp = master.wire_port();
 
@@ -176,11 +176,11 @@ TEST(AxiMasterRawOrder, ArvalidNotStuckWhileReadRawHeld) {
         wp.set_arready(prev_arvalid);
         master.tick();
         const bool awv = wp.pending_aw().has_value();
-        const bool wv  = wp.pending_w().has_value();
+        const bool wv = wp.pending_w().has_value();
         const bool arv = wp.pending_ar().has_value();
         if (arv) ++ar_present_cycles;
         prev_awvalid = awv;
-        prev_wvalid  = wv;
+        prev_wvalid = wv;
         prev_arvalid = arv;
     }
 
@@ -188,6 +188,6 @@ TEST(AxiMasterRawOrder, ArvalidNotStuckWhileReadRawHeld) {
     // the RAW range. Once held, ARVALID must drop. A stuck ARVALID shows up as
     // near-every-cycle presence.
     EXPECT_LT(ar_present_cycles, 5)
-        << "ARVALID stuck high while read is RAW-held: present " << ar_present_cycles
-        << " of " << kCycles << " cycles (read amplification at the memory edge)";
+        << "ARVALID stuck high while read is RAW-held: present " << ar_present_cycles << " of "
+        << kCycles << " cycles (read amplification at the memory edge)";
 }

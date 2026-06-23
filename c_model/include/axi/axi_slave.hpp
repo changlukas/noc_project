@@ -11,7 +11,7 @@
 
 namespace ni::cmodel::axi {
 
-// Config struct for Stage 5b ShellAdapter hermetic construction.
+// Config struct for Stage 5b Wrap hermetic construction.
 // AxiSlave(AxiSlaveConfig) owns its Memory internally; no IMemoryPort& ref needed.
 struct AxiSlaveConfig {
     uint64_t memory_base_addr = 0;
@@ -125,13 +125,13 @@ class AxiSlave {
   private:
     // tick() phase methods — one per numbered step in the AXI4 slave pipeline.
     // Each operates on member state and preserves the original step's semantics.
-    void tick_drain_write_resp_();           // Step 1
-    void tick_drain_read_resp_();            // Step 2
-    void tick_admit_aw_();                   // Step 3 (incl. E2/E3 exclusive monitor)
-    void tick_submit_w_();                   // Step 4 (incl. E4 exclusive-write suppress)
-    void tick_drain_failed_exclusive_b_();   // Step 4b
-    void tick_admit_ar_();                   // Step 5 (incl. E1 exclusive monitor)
-    void tick_submit_ar_();                  // Step 6
+    void tick_drain_write_resp_();          // Step 1
+    void tick_drain_read_resp_();           // Step 2
+    void tick_admit_aw_();                  // Step 3 (incl. E2/E3 exclusive monitor)
+    void tick_submit_w_();                  // Step 4 (incl. E4 exclusive-write suppress)
+    void tick_drain_failed_exclusive_b_();  // Step 4b
+    void tick_admit_ar_();                  // Step 5 (incl. E1 exclusive monitor)
+    void tick_submit_ar_();                 // Step 6
 
     // Owned memory for standalone ctor (AxiSlaveConfig path).
     // Declared before memory_port_ so it is constructed first; the standalone

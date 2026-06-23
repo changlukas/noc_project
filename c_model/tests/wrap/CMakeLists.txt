@@ -1,24 +1,24 @@
-add_cmodel_test(test_channel_model_shell_adapter)
+add_cmodel_test(test_channel_model_wrap)
 # Add c_model/tests/ to include path so the adapter (and its ChannelModel
 # dependency in tests/common/) resolves via "common/channel_model.hpp".
-target_include_directories(test_channel_model_shell_adapter PRIVATE
+target_include_directories(test_channel_model_wrap PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_router_shell_adapter)
+add_cmodel_test(test_router_wrap)
 # Add c_model/tests/ to include path to mirror the ChannelModel adapter test.
-target_include_directories(test_router_shell_adapter PRIVATE
+target_include_directories(test_router_wrap PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_master_shell_adapter test_master_shell_adapter.cpp)
-target_link_libraries(test_master_shell_adapter PRIVATE yaml-cpp::yaml-cpp)
+add_cmodel_test(test_master_wrap test_master_wrap.cpp)
+target_link_libraries(test_master_wrap PRIVATE yaml-cpp::yaml-cpp)
 
-add_cmodel_test(test_slave_shell_adapter test_slave_shell_adapter.cpp)
+add_cmodel_test(test_slave_wrap test_slave_wrap.cpp)
 
-add_cmodel_test(test_nmu_shell_adapter test_nmu_shell_adapter.cpp)
-target_link_libraries(test_nmu_shell_adapter PRIVATE yaml-cpp::yaml-cpp)
+add_cmodel_test(test_nmu_wrap test_nmu_wrap.cpp)
+target_link_libraries(test_nmu_wrap PRIVATE yaml-cpp::yaml-cpp)
 
-add_cmodel_test(test_nsu_shell_adapter test_nsu_shell_adapter.cpp)
-target_link_libraries(test_nsu_shell_adapter PRIVATE yaml-cpp::yaml-cpp)
+add_cmodel_test(test_nsu_wrap test_nsu_wrap.cpp)
+target_link_libraries(test_nsu_wrap PRIVATE yaml-cpp::yaml-cpp)
 
 # test_cmodel_dpi — DPI session state-machine / lifecycle test.
 # Expanded inline (not via add_cmodel_test) so gtest_discover_tests can receive

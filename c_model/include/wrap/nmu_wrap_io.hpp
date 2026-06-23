@@ -1,4 +1,4 @@
-// NmuShellAdapter IO POD structs — Stage 5b spec §6 (combined AXI slave + NoC).
+// NmuWrap IO POD structs — Stage 5b spec §6 (combined AXI slave + NoC).
 //
 // NmuInputs: signals consumed by the Nmu each cycle.
 //   AXI slave side: master drives AW/W/AR onto axi_intf; Nmu accepts them.
@@ -14,12 +14,12 @@
 // AXI_DATA_BYTES = 32 (256-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 #pragma once
-#include "axi/types.hpp"                     // axi::DATA_BYTES
-#include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "axi/types.hpp"                   // axi::DATA_BYTES
+#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
 #include <array>
 #include <cstdint>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
 // 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
 // wire width agrees across master/slave/nmu/nsu shell IO structs.
@@ -90,4 +90,4 @@ struct NmuOutputs {
     bool noc_rsp_credit_return;
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

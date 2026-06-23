@@ -1,4 +1,4 @@
-// NsuShellAdapter IO POD structs — Stage 5b spec §6 (combined NoC consumer + AXI master).
+// NsuWrap IO POD structs — Stage 5b spec §6 (combined NoC consumer + AXI master).
 //
 // NsuInputs: signals consumed by the Nsu each cycle.
 //   NoC req side:    flit arriving from channel model toward Nsu's Depacketize.
@@ -14,16 +14,16 @@
 // AXI_DATA_BYTES = 32 (256-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 //
-// Direction inversion vs. NmuShellIO:
+// Direction inversion vs. NmuWrapIo:
 //   Nmu consumes noc_rsp / produces noc_req  → Nsu produces noc_rsp / consumes noc_req.
 //   Nmu has axi_intf.slave (accepts AW/W/AR) → Nsu has axi_intf.master (drives AW/W/AR).
 #pragma once
-#include "axi/types.hpp"                     // axi::DATA_BYTES
-#include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "axi/types.hpp"                   // axi::DATA_BYTES
+#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
 #include <array>
 #include <cstdint>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
 // 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
 // wire width agrees across master/slave/nmu/nsu shell IO structs.
@@ -96,4 +96,4 @@ struct NsuOutputs {
     bool rready;
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

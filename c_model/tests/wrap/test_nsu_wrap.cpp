@@ -1,4 +1,4 @@
-// Unit tests for NsuShellAdapter — Stage 5b T11.
+// Unit tests for NsuWrap — Stage 5b T11.
 //
 // Tests verify the 3-step pattern (set_inputs / tick / get_outputs) without any
 // DPI or SV involvement. Three cases cover the key behavioral invariants:
@@ -9,19 +9,19 @@
 //      valid AXI-side NoC rsp traffic.
 #include "axi/types.hpp"
 #include "common/scenario.hpp"
-#include "cosim/nsu_shell_adapter.hpp"
-#include "cosim/nsu_shell_io.hpp"
+#include "wrap/nsu_wrap.hpp"
+#include "wrap/nsu_wrap_io.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include <gtest/gtest.h>
 
 using ni::cmodel::Flit;
 using ni::cmodel::axi::Burst;
-using ni::cmodel::cosim::FLIT_BYTES;
-using ni::cmodel::cosim::FlitBytes;
-using ni::cmodel::cosim::NsuInputs;
-using ni::cmodel::cosim::NsuOutputs;
-using ni::cmodel::cosim::NsuShellAdapter;
+using ni::cmodel::wrap::FLIT_BYTES;
+using ni::cmodel::wrap::FlitBytes;
+using ni::cmodel::wrap::NsuInputs;
+using ni::cmodel::wrap::NsuOutputs;
+using ni::cmodel::wrap::NsuWrap;
 
 namespace {
 
@@ -65,10 +65,10 @@ FlitBytes make_w_flit_bytes() {
 // NoC rsp flit. bready/rready stay LOW: context-gated policy — no request
 // was issued, so no response is owed and ready must not pre-assert.
 // ---------------------------------------------------------------------------
-TEST(NsuShellAdapter, idle_adapter_no_output) {
-    SCENARIO("Idle NsuShellAdapter: no NoC req flit → no AXI outputs, b/rready low");
+TEST(NsuWrap, idle_adapter_no_output) {
+    SCENARIO("Idle NsuWrap: no NoC req flit → no AXI outputs, b/rready low");
 
-    NsuShellAdapter adapter;
+    NsuWrap adapter;
     adapter.init();
 
     NsuInputs in{};  // all valid flags false — nothing presented
@@ -94,12 +94,12 @@ TEST(NsuShellAdapter, idle_adapter_no_output) {
 // Nsu::tick(): S2-drain THEN S1-fill, so S1 fills in tick N and S2 sees it
 // in tick N+1.
 // ---------------------------------------------------------------------------
-TEST(NsuShellAdapter, noc_req_aw_flit_produces_axi_awvalid) {
+TEST(NsuWrap, noc_req_aw_flit_produces_axi_awvalid) {
     SCENARIO(
         "NoC req AW flit injection → AXI master drives awvalid after 2 ticks (S1 fill tick 1, "
         "S2 drain tick 2 — spec §5.3 two-stage pipeline)");
 
-    NsuShellAdapter adapter;
+    NsuWrap adapter;
     adapter.init();
 
     NsuInputs in{};
@@ -147,10 +147,10 @@ TEST(NsuShellAdapter, noc_req_aw_flit_produces_axi_awvalid) {
 //   (b) Pushing B responses triggers MetaBuffer lookup and generates NoC rsp
 //       flits (noc_rsp_valid) — proving the Packetize path is functional.
 // ---------------------------------------------------------------------------
-TEST(NsuShellAdapter, multi_outstanding_aw_and_out_of_order_b) {
+TEST(NsuWrap, multi_outstanding_aw_and_out_of_order_b) {
     SCENARIO("4 AW IDs via NoC req; B responses out-of-order; MetaBuffer produces NoC rsp flits");
 
-    NsuShellAdapter adapter;
+    NsuWrap adapter;
     adapter.init();
 
     NsuInputs in{};

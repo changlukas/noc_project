@@ -14,11 +14,11 @@
 #include <exception>
 #include <string>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 extern std::atomic<int> g_dpi_error_code;
 extern std::string g_dpi_error_msg;
-HandleBlock* validate_handle(unsigned long long ctx, ShellType expected, const char* fn_name);
-}  // namespace ni::cmodel::cosim
+HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const char* fn_name);
+}  // namespace ni::cmodel::wrap
 
 // Usage:
 //   extern "C" void cmodel_foo() {
@@ -31,13 +31,13 @@ HandleBlock* validate_handle(unsigned long long ctx, ShellType expected, const c
 // NOTE: load-check-store is not atomic CAS — single-threaded Verilator DPI
 // only. Multi-threaded DPI (Verilator -j>1 with concurrent contexts) would
 // need a CAS loop here.
-#define DPI_SET_ERR_IF_CLEAR(code_expr, msg_expr)                 \
-    do {                                                          \
-        int prior = ni::cmodel::cosim::g_dpi_error_code.load();   \
-        if (prior == CMODEL_DPI_OK) {                             \
-            ni::cmodel::cosim::g_dpi_error_code.store(code_expr); \
-            ni::cmodel::cosim::g_dpi_error_msg = (msg_expr);      \
-        }                                                         \
+#define DPI_SET_ERR_IF_CLEAR(code_expr, msg_expr)                \
+    do {                                                         \
+        int prior = ni::cmodel::wrap::g_dpi_error_code.load();   \
+        if (prior == CMODEL_DPI_OK) {                            \
+            ni::cmodel::wrap::g_dpi_error_code.store(code_expr); \
+            ni::cmodel::wrap::g_dpi_error_msg = (msg_expr);      \
+        }                                                        \
     } while (0)
 
 #define DPI_BOUNDARY_BEGIN(fn_name) try
@@ -65,11 +65,11 @@ HandleBlock* validate_handle(unsigned long long ctx, ShellType expected, const c
 // REQUIRE_HANDLE — used by ctx-taking handlers (Tasks 5-9). validate_handle
 // sets the error latch and returns nullptr on failure; this macro then returns
 // from the void handler. The caller pulls the typed adapter with:
-//     auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
-#define REQUIRE_HANDLE(ctx, expected_type, fn_name)                                   \
-    auto* _h = ni::cmodel::cosim::validate_handle((ctx), (expected_type), (fn_name)); \
-    do {                                                                              \
-        if (!_h) return;                                                              \
+//     auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
+#define REQUIRE_HANDLE(ctx, expected_type, fn_name)                                  \
+    auto* _h = ni::cmodel::wrap::validate_handle((ctx), (expected_type), (fn_name)); \
+    do {                                                                             \
+        if (!_h) return;                                                             \
     } while (0)
 
 #endif  // COSIM2_DPI_BOUNDARY_MACROS_H

@@ -1,4 +1,4 @@
-// RouterShellAdapter — per-node ShellAdapter wrapping ONE node's router subsystem.
+// RouterWrap — per-node Wrap wrapping ONE node's router subsystem.
 //
 // Owns this node's REQ router + RSP router at coordinate (x,0) (2-node 2x1 mesh:
 // mesh_x_dim=2, mesh_y_dim=1) plus their LOCAL adapters (NI edge) and LINK
@@ -40,17 +40,17 @@
 // aggregate router-output credit window) for margin. The NMU/NSU is credit-gated
 // by *_out_credit_return / link_*_in_credit, so the router input never overflows.
 #pragma once
-#include "cosim/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
-#include "cosim/poc_defaults.hpp"    // kPoCChannelModelDepth
-#include "cosim/router_shell_io.hpp"
+#include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
+#include "wrap/poc_defaults.hpp"    // kPoCChannelModelDepth
+#include "wrap/router_wrap_io.hpp"
 #include "router/router.hpp"
 #include "router/router_adapters.hpp"
 #include <memory>
 #include <stdexcept>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
-class RouterShellAdapter {
+class RouterWrap {
   public:
     void init(uint8_t x_coord, uint8_t num_vc = 1) {
         num_vc_ = num_vc;
@@ -175,4 +175,4 @@ class RouterShellAdapter {
     RouterOutputs out_{};
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

@@ -1,6 +1,6 @@
 // Per-node Router shell IO — one node's NoC pin bundle.
 //
-// A single cosim RouterShellAdapter owns ONE node's REQ+RSP routers at
+// A single cosim RouterWrap owns ONE node's REQ+RSP routers at
 // coordinate (x,0). Its pins split into three groups:
 //   - NMU/NSU-facing (NI edge): FlooNoC pulse-credit, identical mechanism to the
 //     LINK (R2) — req_in (NMU injects a request), rsp_in (NSU injects a response),
@@ -20,10 +20,10 @@
 //                                                LINK input drains (LinkCreditOut.take)
 //     credit pulses are single-cycle (per VC), NOT the level used on NI bundles.
 #pragma once
-#include "cosim/channel_model_shell_io.hpp"  // FlitBytes
+#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes
 #include <cstdint>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
 struct RouterInputs {
     // --- NMU/NSU-facing (NI edge, FlooNoC pulse credit) ---
@@ -71,4 +71,4 @@ struct RouterOutputs {
     bool link_rsp_in_credit;  // credit pulse we return when our RSP LINK input drains
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

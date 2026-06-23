@@ -1,4 +1,4 @@
-// Unit tests for ChannelModelShellAdapter — Stage 5b T7.
+// Unit tests for ChannelModelWrap — Stage 5b T7.
 //
 // Tests verify the 3-step pattern (set_inputs / tick / get_outputs) without any
 // DPI or SV involvement. Two cases cover the key behavioral invariants:
@@ -8,17 +8,17 @@
 // Include c_model/tests/ via CMake target_include_directories so that
 // "common/channel_model.hpp" (transitively included by the adapter) resolves.
 #include "common/scenario.hpp"
-#include "cosim/channel_model_shell_adapter.hpp"
-#include "cosim/channel_model_shell_io.hpp"
+#include "wrap/channel_model_wrap.hpp"
+#include "wrap/channel_model_wrap_io.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::cosim::ChannelModelInputs;
-using ni::cmodel::cosim::ChannelModelOutputs;
-using ni::cmodel::cosim::ChannelModelShellAdapter;
+using ni::cmodel::wrap::ChannelModelInputs;
+using ni::cmodel::wrap::ChannelModelOutputs;
+using ni::cmodel::wrap::ChannelModelWrap;
 
-TEST(ChannelModelShellAdapter, req_flit_forwards_after_one_tick) {
+TEST(ChannelModelWrap, req_flit_forwards_after_one_tick) {
     SCENARIO("req_in flit at cycle T appears as req_out at cycle T+1 (beta tick)");
-    ChannelModelShellAdapter adapter;
+    ChannelModelWrap adapter;
     adapter.init();
 
     ChannelModelInputs in{};
@@ -38,9 +38,9 @@ TEST(ChannelModelShellAdapter, req_flit_forwards_after_one_tick) {
     EXPECT_FALSE(out.rsp_out_valid);
 }
 
-TEST(ChannelModelShellAdapter, idle_adapter_produces_no_valid_output) {
+TEST(ChannelModelWrap, idle_adapter_produces_no_valid_output) {
     SCENARIO("idle adapter (all inputs false) produces no valid output");
-    ChannelModelShellAdapter adapter;
+    ChannelModelWrap adapter;
     adapter.init();
 
     ChannelModelInputs in{};  // all zero / false

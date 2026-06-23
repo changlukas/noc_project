@@ -19,7 +19,7 @@
 #include <array>
 #include <cstdint>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
 // 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
 // wire width agrees across master/slave/nmu/nsu shell IO structs.
@@ -77,4 +77,4 @@ struct SlaveOutputs {
     bool rlast;
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

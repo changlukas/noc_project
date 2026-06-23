@@ -24,7 +24,7 @@ add_cmodel_test(test_flit)
 
 add_subdirectory(axi)
 add_subdirectory(common)
-add_subdirectory(cosim)
+add_subdirectory(wrap)
 add_subdirectory(nmu)
 add_subdirectory(nsu)
 add_subdirectory(integration)

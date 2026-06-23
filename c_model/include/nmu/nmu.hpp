@@ -419,9 +419,9 @@ inline void Nmu::drain_rsp_robless_r_() {
 // -------------------------------------------------------------------------
 // Stage 5b: NmuStandalone — hermetic wrapper, no external NoC refs.
 //
-// ShellAdapters construct NmuStandalone(NmuConfig{...}) without supplying
+// Wraps construct NmuStandalone(NmuConfig{...}) without supplying
 // NocReqOut& / NocRspIn&. The wrapper owns null-stub implementations of
-// both interfaces; the real DPI wiring replaces them at the ShellAdapter
+// both interfaces; the real DPI wiring replaces them at the Wrap
 // tick boundary. The wrapper's NullNocReqOut/NullNocRspIn are real queues
 // (not no-op stubs): push_flit enqueues, pop_flit dequeues.
 //
@@ -429,21 +429,21 @@ inline void Nmu::drain_rsp_robless_r_() {
 // -------------------------------------------------------------------------
 
 // NullNocReqOut / NullNocRspIn are queue-backed terminal endpoints so that
-// NmuShellAdapter can drain produced req flits and inject incoming rsp flits
+// NmuWrap can drain produced req flits and inject incoming rsp flits
 // at the DPI boundary without modifying the Nmu internals.
 //
 // NullNocReqOut: push_flit enqueues into an internal deque (capped at
 //   kMaxQueueDepth as a drain-forgotten sanity check). With FlooNoC credit
 //   enabled (cosim opt-in) push_flit also gates+consumes per-VC credit and
 //   credit_avail reflects the counter; with credit OFF (default) it accepts
-//   unconditionally. ShellAdapter drains via pop_req_flit() each tick.
+//   unconditionally. Wrap drains via pop_req_flit() each tick.
 //
-// NullNocRspIn: ShellAdapter injects flits via inject_rsp_flit() before
+// NullNocRspIn: Wrap injects flits via inject_rsp_flit() before
 //   calling nmu_.tick(); Nmu's Depacketize stage drains via pop_flit().
 namespace detail {
 
 struct NullNocReqOut : router::NocReqOut {
-    // Sanity cap: a real ShellAdapter drains every tick, so a queue this deep
+    // Sanity cap: a real Wrap drains every tick, so a queue this deep
     // means the test forgot to drain. Asserts in debug; release builds skip
     // the check (and the queue is still allowed to grow unboundedly).
     static constexpr std::size_t kMaxQueueDepth = 1024;
@@ -470,13 +470,13 @@ struct NullNocReqOut : router::NocReqOut {
             --credit_[vc];
         }
         assert(queue_.size() < kMaxQueueDepth &&
-               "NullNocReqOut overflow — did the test ShellAdapter forget to drain?");
+               "NullNocReqOut overflow — did the test Wrap forget to drain?");
         queue_.push_back(f);
         return true;
     }
     bool credit_avail(uint8_t vc) const override { return !credit_enabled_ || credit_[vc] > 0; }
 
-    // ShellAdapter accessor: pop one flit per tick for DPI forwarding.
+    // Wrap accessor: pop one flit per tick for DPI forwarding.
     std::optional<Flit> pop_req_flit() {
         if (queue_.empty()) return std::nullopt;
         Flit f = queue_.front();
@@ -491,7 +491,7 @@ struct NullNocReqOut : router::NocReqOut {
 };
 
 struct NullNocRspIn : router::NocRspIn {
-    // ShellAdapter accessor: inject one flit per tick from DPI wire.
+    // Wrap accessor: inject one flit per tick from DPI wire.
     void inject_rsp_flit(const Flit& f) { queue_.push_back(f); }
 
     // R2 consumer-pulse: size the per-VC pending counter before traffic. Always
@@ -511,7 +511,7 @@ struct NullNocRspIn : router::NocRspIn {
         return f;
     }
 
-    // ShellAdapter accessor: drain one consumer credit pulse per tick (mirror of
+    // Wrap accessor: drain one consumer credit pulse per tick (mirror of
     // router::LinkCreditOut::take). Returns true when a pulse was emitted.
     bool take_credit(uint8_t vc) {
         if (pending_[vc] == 0) return false;
@@ -553,7 +553,7 @@ class NmuStandalone {
     }
     Nmu& nmu() noexcept { return nmu_; }
 
-    // Stage 5b ShellAdapter accessors — drain req side, inject rsp side.
+    // Stage 5b Wrap accessors — drain req side, inject rsp side.
     std::optional<Flit> pop_req_flit() { return null_req_out_.pop_req_flit(); }
     void inject_rsp_flit(const Flit& f) { null_rsp_in_.inject_rsp_flit(f); }
     bool req_credit_avail(uint8_t vc = 0) const { return null_req_out_.credit_avail(vc); }

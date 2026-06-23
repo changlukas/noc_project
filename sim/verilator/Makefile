@@ -151,8 +151,8 @@ run-tb-top: $(TBTOP_EXE)
 	    "+perf_scenario=$(SCENARIO)"$(if $(TRACE_PLUSARG_TB_TOP), $(TRACE_PLUSARG_TB_TOP),) \
 	    > output/$(SCENARIO)/run.log 2>&1; \
 	rc=$$?; \
-	if ls master_shell_read_dump*.txt >/dev/null 2>&1; then \
-	    mv master_shell_read_dump*.txt output/$(SCENARIO)/; \
+	if ls master_wrap_read_dump*.txt >/dev/null 2>&1; then \
+	    mv master_wrap_read_dump*.txt output/$(SCENARIO)/; \
 	fi; \
 	echo "--- run.log (tail) ---"; \
 	tail -8 output/$(SCENARIO)/run.log; \
@@ -170,8 +170,8 @@ hello:
 
 clean: clean-genamba
 	rm -rf $(VL_BUILD)/obj_dir $(VL_BUILD)/obj_dir_trace output
-	rm -f master_shell_read_dump*.txt
-	rm -f $(VL_BUILD)/master_shell_read_dump*.txt  # ctest runs Vtb_top with cwd build/verilator
+	rm -f master_wrap_read_dump*.txt
+	rm -f $(VL_BUILD)/master_wrap_read_dump*.txt  # ctest runs Vtb_top with cwd build/verilator
 
 # --- gen_amba role-1 testbench (Phase 1) ---
 GENAMBA_OBJDIR := $(VL_BUILD)/obj_genamba$(TRACE_SUFFIX)

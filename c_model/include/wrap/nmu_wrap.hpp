@@ -1,4 +1,4 @@
-// NmuShellAdapter — Stage 5b ShellAdapter for the Nmu component.
+// NmuWrap — Stage 5b Wrap for the Nmu component.
 //
 // Owns an NmuStandalone (T3 hermetic wrapper). The Nmu is the most complex
 // shell — it has BOTH an AXI slave side (incoming AW/W/AR, outgoing B/R)
@@ -19,24 +19,24 @@
 //                    tick() so Depacketize can consume them this cycle.
 //
 // B/R held-latch pattern (AXI4 §A3.2.1): bvalid / rvalid must not deassert
-// until bready / rready is observed. Same pattern as SlaveShellAdapter (T9).
+// until bready / rready is observed. Same pattern as SlaveWrap (T9).
 //
-// Hermetic invariant: no refs to other ShellAdapters.
+// Hermetic invariant: no refs to other Wraps.
 #pragma once
 #include "axi/types.hpp"
-#include "cosim/channel_model_shell_io.hpp"  // FlitBytes, FLIT_BYTES
-#include "cosim/flit_byte_conv.hpp"          // flit_from_bytes, flit_to_bytes
-#include "cosim/nmu_shell_io.hpp"
-#include "cosim/poc_defaults.hpp"  // kPoC* depths
+#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "wrap/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
+#include "wrap/nmu_wrap_io.hpp"
+#include "wrap/poc_defaults.hpp"  // kPoC* depths
 #include "flit.hpp"
 #include "nmu/nmu.hpp"
 #include <array>
 #include <memory>
 #include <optional>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
-class NmuShellAdapter {
+class NmuWrap {
   public:
     // init — construct NmuStandalone with a minimal PoC NmuConfig.
     // Defaults: 1 VC, ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
@@ -228,4 +228,4 @@ class NmuShellAdapter {
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

@@ -60,7 +60,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
 endif()
 
 # Scenario list INTERFACE library — must come before tests/ so that targets in
-# tests/axi/ and tests/cosim/ can link noc_axi4_scenarios.
+# tests/axi/ and tests/wrap/ can link noc_axi4_scenarios.
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../tests/scenarios
                  ${CMAKE_CURRENT_BINARY_DIR}/tests/scenarios)
 

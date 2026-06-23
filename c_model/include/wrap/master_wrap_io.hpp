@@ -19,7 +19,7 @@
 #include <array>
 #include <cstdint>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
 // 256-bit data bus = 32 bytes; 32-bit WSTRB = 4 bytes packed as uint32_t.
 // Single source of truth: axi::DATA_BYTES (= ni::WSTRB_WIDTH). All cosim
@@ -82,4 +82,4 @@ struct MasterOutputs {
     bool rready;
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

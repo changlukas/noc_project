@@ -1,8 +1,8 @@
-#include "cosim/perf_collector.hpp"
+#include "wrap/perf_collector.hpp"
 
 #include <gtest/gtest.h>
 
-using ni::cmodel::cosim::PerfCollector;
+using ni::cmodel::wrap::PerfCollector;
 
 namespace {
 

@@ -1,10 +1,10 @@
-#include "cosim/router_shell_adapter.hpp"
-#include "cosim/flit_byte_conv.hpp"
+#include "wrap/router_wrap.hpp"
+#include "wrap/flit_byte_conv.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include <gtest/gtest.h>
 
-using namespace ni::cmodel::cosim;
+using namespace ni::cmodel::wrap;
 
 namespace {
 
@@ -31,8 +31,8 @@ ni::cmodel::Flit make_rsp(uint8_t dst_id) {
 
 // Node0 NMU injects a request to dst=(1,0). route_compute sends it EAST = the
 // LINK port, so it must appear on link_req_out (toward the neighbor).
-TEST(RouterShellAdapter, NmuReqRoutesToLinkOut) {
-    RouterShellAdapter a;
+TEST(RouterWrap, NmuReqRoutesToLinkOut) {
+    RouterWrap a;
     a.init(/*x_coord=*/0);
     RouterInputs in{};
     in.req_in_valid = true;
@@ -57,8 +57,8 @@ TEST(RouterShellAdapter, NmuReqRoutesToLinkOut) {
 
 // A REQ flit arriving on the LINK input destined LOCAL (0,0) must eject at the
 // node0 NSU-facing req_out.
-TEST(RouterShellAdapter, LinkInReqEjectsAtNsu) {
-    RouterShellAdapter a;
+TEST(RouterWrap, LinkInReqEjectsAtNsu) {
+    RouterWrap a;
     a.init(/*x_coord=*/0);
     RouterInputs in{};
     in.link_req_in_valid = true;
@@ -83,8 +83,8 @@ TEST(RouterShellAdapter, LinkInReqEjectsAtNsu) {
 
 // Symmetric RSP path: a RSP flit on the LINK input destined LOCAL must eject at
 // the node0 NMU-facing rsp_out.
-TEST(RouterShellAdapter, LinkInRspEjectsAtNmu) {
-    RouterShellAdapter a;
+TEST(RouterWrap, LinkInRspEjectsAtNmu) {
+    RouterWrap a;
     a.init(/*x_coord=*/0);
     RouterInputs in{};
     in.link_rsp_in_valid = true;
@@ -106,8 +106,8 @@ TEST(RouterShellAdapter, LinkInRspEjectsAtNmu) {
 // LinkCreditOut pulse: when a LINK-input flit drains out of the router input
 // FIFO (grant), the router emits a registered input-drain credit pulse; the
 // shell must surface it as a single-cycle assert on link_req_in_credit.
-TEST(RouterShellAdapter, LinkInputDrainEmitsCreditPulse) {
-    RouterShellAdapter a;
+TEST(RouterWrap, LinkInputDrainEmitsCreditPulse) {
+    RouterWrap a;
     a.init(/*x_coord=*/0);
     RouterInputs in{};
     in.link_req_in_valid = true;
@@ -133,8 +133,8 @@ TEST(RouterShellAdapter, LinkInputDrainEmitsCreditPulse) {
 // a steady credit_avail level. Inject one LOCAL-bound req at node0 (dst=(0,0)
 // routes LOCAL, ejecting back at this node's NSU-facing req_out) and count the
 // returned credit pulses.
-TEST(RouterShellAdapter, LocalInputDrainEmitsCreditPulse) {
-    RouterShellAdapter a;
+TEST(RouterWrap, LocalInputDrainEmitsCreditPulse) {
+    RouterWrap a;
     a.init(/*x_coord=*/0);
     RouterInputs in{};
     in.req_in_valid = true;
@@ -163,10 +163,10 @@ TEST(RouterShellAdapter, LocalInputDrainEmitsCreditPulse) {
 // failing to call receive_credit(LOCAL) on req_in_credit_return) leaves the
 // counter one short and FAILS the final assertion — a no-abort-only test would
 // not catch that.
-TEST(RouterShellAdapter, LocalInCreditReturnReplenishesRouter) {
+TEST(RouterWrap, LocalInCreditReturnReplenishesRouter) {
     constexpr std::size_t LOCAL = static_cast<std::size_t>(ni::cmodel::router::RouterPort::LOCAL);
 
-    RouterShellAdapter a;
+    RouterWrap a;
     a.init(/*x_coord=*/0);
     const std::size_t seed = a.req_router().credit(LOCAL, /*vc=*/0);
     ASSERT_GT(seed, 0u) << "router LOCAL output credit must seed > 0";
@@ -205,8 +205,8 @@ TEST(RouterShellAdapter, LocalInCreditReturnReplenishesRouter) {
 }
 
 // Node1 (x=1): a request to dst=(0,0) routes WEST = its LINK port.
-TEST(RouterShellAdapter, Node1NmuReqRoutesToLinkOut) {
-    RouterShellAdapter a;
+TEST(RouterWrap, Node1NmuReqRoutesToLinkOut) {
+    RouterWrap a;
     a.init(/*x_coord=*/1);
     RouterInputs in{};
     in.req_in_valid = true;

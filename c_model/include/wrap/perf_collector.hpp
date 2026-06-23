@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
 // Single-run perf readout. SV monitors push per-txn + end-of-run counters;
 // C-side sampling pushes router occupancy. dump() writes the spec §5.1 schema.
@@ -256,6 +256,6 @@ class PerfCollector {
     std::map<std::string, Link> links_;
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap
 
 #endif  // NI_CMODEL_COSIM_PERF_COLLECTOR_HPP

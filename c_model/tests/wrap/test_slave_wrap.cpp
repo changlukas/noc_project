@@ -1,4 +1,4 @@
-// Unit tests for SlaveShellAdapter — Stage 5b T9, updated for the
+// Unit tests for SlaveWrap — Stage 5b T9, updated for the
 // wait_valid / context-gated ready policy (see
 // docs/superpowers/specs/2026-06-12-wait-valid-ready-policy-design.md).
 //
@@ -9,22 +9,22 @@
 //      W context window (wready pre-asserts after the AW handshake), and the
 //      full write round trip producing a B response.
 #include "common/scenario.hpp"
-#include "cosim/slave_shell_adapter.hpp"
-#include "cosim/slave_shell_io.hpp"
+#include "wrap/slave_wrap.hpp"
+#include "wrap/slave_wrap_io.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::cosim::SlaveInputs;
-using ni::cmodel::cosim::SlaveOutputs;
-using ni::cmodel::cosim::SlaveShellAdapter;
+using ni::cmodel::wrap::SlaveInputs;
+using ni::cmodel::wrap::SlaveOutputs;
+using ni::cmodel::wrap::SlaveWrap;
 
 // ---------------------------------------------------------------------------
 // Test 1: idle adapter keeps all readys LOW — wait_valid policy: capacity
 // alone never asserts ready; a valid must be observed first.
 // ---------------------------------------------------------------------------
-TEST(SlaveShellAdapter, idle_adapter_keeps_readys_low) {
-    SCENARIO("Idle SlaveShellAdapter keeps awready/wready/arready low (wait_valid)");
+TEST(SlaveWrap, idle_adapter_keeps_readys_low) {
+    SCENARIO("Idle SlaveWrap keeps awready/wready/arready low (wait_valid)");
 
-    SlaveShellAdapter adapter;
+    SlaveWrap adapter;
     adapter.init();  // default config: 64 KiB, 1-cycle latency, depth=32
 
     SlaveInputs in{};  // all valid signals false — nothing presented
@@ -48,10 +48,10 @@ TEST(SlaveShellAdapter, idle_adapter_keeps_readys_low) {
 // ready returns low. After the AW handshake the W burst window opens and
 // wready pre-asserts WITHOUT wvalid.
 // ---------------------------------------------------------------------------
-TEST(SlaveShellAdapter, single_write_round_trip) {
+TEST(SlaveWrap, single_write_round_trip) {
     SCENARIO("Two-phase AW handshake, W context window, B response within 12 cycles");
 
-    SlaveShellAdapter adapter;
+    SlaveWrap adapter;
     adapter.init(/*memory_base=*/0, /*memory_size=*/65536,
                  /*write_lat=*/1, /*read_lat=*/1,
                  /*queue_depth=*/32);

@@ -1,4 +1,4 @@
-// Unit tests for NmuShellAdapter — Stage 5b T10, updated for the
+// Unit tests for NmuWrap — Stage 5b T10, updated for the
 // wait_valid / context-gated ready policy (see
 // docs/superpowers/specs/2026-06-12-wait-valid-ready-policy-design.md).
 //
@@ -13,21 +13,21 @@
 //      gets its ready pulse — multi-outstanding AW (post addresses ahead of
 //      data) is legitimate AXI4 and load-bearing for the RoB/multi-ID paths.
 #include "common/scenario.hpp"
-#include "cosim/nmu_shell_adapter.hpp"
-#include "cosim/nmu_shell_io.hpp"
+#include "wrap/nmu_wrap.hpp"
+#include "wrap/nmu_wrap_io.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::cosim::NmuInputs;
-using ni::cmodel::cosim::NmuOutputs;
-using ni::cmodel::cosim::NmuShellAdapter;
+using ni::cmodel::wrap::NmuInputs;
+using ni::cmodel::wrap::NmuOutputs;
+using ni::cmodel::wrap::NmuWrap;
 
 // ---------------------------------------------------------------------------
 // Test 1: idle adapter keeps all readys LOW (wait_valid policy).
 // ---------------------------------------------------------------------------
-TEST(NmuShellAdapter, idle_adapter_keeps_readys_low) {
-    SCENARIO("Idle NmuShellAdapter keeps awready/wready/arready low (wait_valid)");
+TEST(NmuWrap, idle_adapter_keeps_readys_low) {
+    SCENARIO("Idle NmuWrap keeps awready/wready/arready low (wait_valid)");
 
-    NmuShellAdapter adapter;
+    NmuWrap adapter;
     adapter.init();
 
     NmuInputs in{};  // all valid signals false — nothing presented
@@ -48,10 +48,10 @@ TEST(NmuShellAdapter, idle_adapter_keeps_readys_low) {
 // ---------------------------------------------------------------------------
 // Test 2: single AW + W beat — two-phase AW handshake, then W window.
 // ---------------------------------------------------------------------------
-TEST(NmuShellAdapter, single_aw_w_two_phase_handshake) {
+TEST(NmuWrap, single_aw_w_two_phase_handshake) {
     SCENARIO("Two-phase AW handshake; wready pre-asserts after AW, W beat consumed");
 
-    NmuShellAdapter adapter;
+    NmuWrap adapter;
     adapter.init();
 
     NmuInputs in{};
@@ -101,10 +101,10 @@ TEST(NmuShellAdapter, single_aw_w_two_phase_handshake) {
 // stricter single-outstanding view lives in the scenario skip list, not in
 // the model).
 // ---------------------------------------------------------------------------
-TEST(NmuShellAdapter, multi_beat_w_burst_full_rate_aw_available) {
+TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
     SCENARIO("8-beat W burst at full rate; mid-burst AW still gets its ready pulse");
 
-    NmuShellAdapter adapter;
+    NmuWrap adapter;
     adapter.init();
 
     NmuInputs in{};
@@ -157,9 +157,8 @@ TEST(NmuShellAdapter, multi_beat_w_burst_full_rate_aw_available) {
         if (prev_wready) ++beats_accepted;
         prev_wready = out.wready;
         if (beat == 0) {
-            EXPECT_TRUE(out.awready)
-                << "second AW presented mid-burst must still get its ready "
-                   "pulse (multi-outstanding AW preserved)";
+            EXPECT_TRUE(out.awready) << "second AW presented mid-burst must still get its ready "
+                                        "pulse (multi-outstanding AW preserved)";
         }
         if (beat < 7) {
             EXPECT_TRUE(out.wready)

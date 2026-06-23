@@ -1,4 +1,4 @@
-// ChannelModelShellAdapter — Stage 5b ShellAdapter for the ChannelModel component.
+// ChannelModelWrap — Stage 5b Wrap for the ChannelModel component.
 //
 // Owns a ChannelModel instance (standalone ctor via ChannelModelConfig — hermetic,
 // no cross-component refs). Implements the 3-step pattern per spec §5.1:
@@ -6,7 +6,7 @@
 //   tick()           → push latched inputs into c_model → advance → sample outputs
 //   get_outputs(out) → copy output latch to caller
 //
-// Hermetic invariant: no refs to other ShellAdapters. All cross-component
+// Hermetic invariant: no refs to other Wraps. All cross-component
 // dataflow is via SV wires driven by DPI handlers in cosim/c/cmodel_dpi.cpp.
 //
 // ChannelModel dataflow:
@@ -19,14 +19,14 @@
 // and held until the next tick() overwrites them.
 #pragma once
 #include "common/channel_model.hpp"
-#include "cosim/channel_model_shell_io.hpp"
-#include "cosim/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
-#include "cosim/poc_defaults.hpp"    // kPoCChannelModelDepth
+#include "wrap/channel_model_wrap_io.hpp"
+#include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
+#include "wrap/poc_defaults.hpp"    // kPoCChannelModelDepth
 #include <memory>
 
-namespace ni::cmodel::cosim {
+namespace ni::cmodel::wrap {
 
-class ChannelModelShellAdapter {
+class ChannelModelWrap {
   public:
     void init() {
         // Single-NSU backward-compat ctor: auto-routes all dst_id to NSU_0.
@@ -87,4 +87,4 @@ class ChannelModelShellAdapter {
     // calls use flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 
-}  // namespace ni::cmodel::cosim
+}  // namespace ni::cmodel::wrap

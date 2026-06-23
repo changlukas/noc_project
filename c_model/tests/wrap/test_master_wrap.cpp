@@ -1,4 +1,4 @@
-// Unit tests for MasterShellAdapter — Stage 5b T8.
+// Unit tests for MasterWrap — Stage 5b T8.
 //
 // Tests verify the 3-step pattern (set_inputs / tick / get_outputs) without any
 // DPI or SV involvement. Two cases cover the key behavioral invariants:
@@ -9,17 +9,17 @@
 // Fixture helper: write_temp_yaml/write_temp_data create test scenario files in
 // the platform temp directory so the scenario_parser can open them normally.
 #include "common/scenario.hpp"
-#include "cosim/master_shell_adapter.hpp"
-#include "cosim/master_shell_io.hpp"
+#include "wrap/master_wrap.hpp"
+#include "wrap/master_wrap_io.hpp"
 #include <gtest/gtest.h>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 
-using ni::cmodel::cosim::MasterInputs;
-using ni::cmodel::cosim::MasterOutputs;
-using ni::cmodel::cosim::MasterShellAdapter;
+using ni::cmodel::wrap::MasterInputs;
+using ni::cmodel::wrap::MasterOutputs;
+using ni::cmodel::wrap::MasterWrap;
 
 namespace {
 
@@ -53,8 +53,8 @@ const std::string kSingleBeatData =
 // Test 1: adapter drives awvalid within 50 cycles for a write scenario.
 // awready is not asserted → master queues the AW and re-presents it each tick.
 // ---------------------------------------------------------------------------
-TEST(MasterShellAdapter, drives_aw_for_single_write_scenario) {
-    SCENARIO("MasterShellAdapter drives awvalid within 50 cycles for a single-write scenario");
+TEST(MasterWrap, drives_aw_for_single_write_scenario) {
+    SCENARIO("MasterWrap drives awvalid within 50 cycles for a single-write scenario");
 
     auto data_file = write_temp_file("t8_write_data.txt", kSingleBeatData);
     auto dump_file = write_temp_file("t8_read_dump.txt", "");
@@ -69,7 +69,7 @@ TEST(MasterShellAdapter, drives_aw_for_single_write_scenario) {
                                      "    data_file: " +
                                          data_file + "\n");
 
-    MasterShellAdapter adapter;
+    MasterWrap adapter;
     adapter.init(yaml_path, dump_file);
 
     MasterInputs in{};  // awready/wready/arready all false → master stalls
@@ -97,7 +97,7 @@ TEST(MasterShellAdapter, drives_aw_for_single_write_scenario) {
 // Once the master asserts awvalid it must not deassert it until the handshake.
 // With awready always false the output must stay valid every cycle once asserted.
 // ---------------------------------------------------------------------------
-TEST(MasterShellAdapter, awvalid_holds_until_awready) {
+TEST(MasterWrap, awvalid_holds_until_awready) {
     SCENARIO("AXI4 §A3.2.1: awvalid must remain asserted once raised, until awready");
 
     auto data_file = write_temp_file("t8_hold_data.txt", kSingleBeatData);
@@ -113,7 +113,7 @@ TEST(MasterShellAdapter, awvalid_holds_until_awready) {
                                      "    data_file: " +
                                          data_file + "\n");
 
-    MasterShellAdapter adapter;
+    MasterWrap adapter;
     adapter.init(yaml_path, dump_file);
 
     // awready stays false for the entire run — master must hold awvalid.

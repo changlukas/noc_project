@@ -191,19 +191,19 @@ inline void Nsu::tick() {
 // -------------------------------------------------------------------------
 // Stage 5b: NsuStandalone — hermetic wrapper, no external NoC refs.
 //
-// ShellAdapters construct NsuStandalone(NsuConfig{...}) without supplying
+// Wraps construct NsuStandalone(NsuConfig{...}) without supplying
 // NocReqIn& / NocRspOut&. The wrapper owns queue-backed terminal endpoints for
-// both interfaces; real DPI wiring drives/drains them at the ShellAdapter tick
+// both interfaces; real DPI wiring drives/drains them at the Wrap tick
 // boundary.
 //
-// NullNocReqIn: ShellAdapter injects flits via inject_req_flit() before
+// NullNocReqIn: Wrap injects flits via inject_req_flit() before
 //   calling nsu_.tick(); Nsu's Depacketize stage drains via pop_flit().
 //
 // NullNocRspOut: push_flit enqueues into an internal deque (capped at
 //   kMaxQueueDepth as a drain-forgotten sanity check). With FlooNoC credit
 //   enabled (cosim opt-in) push_flit also gates+consumes per-VC credit and
 //   credit_avail reflects the counter; with credit OFF (default) it accepts
-//   unconditionally. ShellAdapter drains via pop_rsp_flit() each tick.
+//   unconditionally. Wrap drains via pop_rsp_flit() each tick.
 //
 // Invariant: NsuStandalone is non-copyable and non-movable (same as Nsu).
 // -------------------------------------------------------------------------
@@ -211,7 +211,7 @@ inline void Nsu::tick() {
 namespace detail {
 
 struct NullNocReqIn : router::NocReqIn {
-    // ShellAdapter accessor: inject one flit per tick from DPI wire.
+    // Wrap accessor: inject one flit per tick from DPI wire.
     void inject_req_flit(const Flit& f) { queue_.push_back(f); }
 
     // R2 consumer-pulse: size the per-VC pending counter before traffic. Always
@@ -231,7 +231,7 @@ struct NullNocReqIn : router::NocReqIn {
         return f;
     }
 
-    // ShellAdapter accessor: drain one consumer credit pulse per tick (mirror of
+    // Wrap accessor: drain one consumer credit pulse per tick (mirror of
     // router::LinkCreditOut::take). Returns true when a pulse was emitted.
     bool take_credit(uint8_t vc) {
         if (pending_[vc] == 0) return false;
@@ -248,7 +248,7 @@ struct NullNocReqIn : router::NocReqIn {
 };
 
 struct NullNocRspOut : router::NocRspOut {
-    // Sanity cap: a real ShellAdapter drains every tick, so a queue this deep
+    // Sanity cap: a real Wrap drains every tick, so a queue this deep
     // means the test forgot to drain. Asserts in debug; release builds skip
     // the check (and the queue is still allowed to grow unboundedly).
     static constexpr std::size_t kMaxQueueDepth = 1024;
@@ -275,13 +275,13 @@ struct NullNocRspOut : router::NocRspOut {
             --credit_[vc];
         }
         assert(queue_.size() < kMaxQueueDepth &&
-               "NullNocRspOut overflow — did the test ShellAdapter forget to drain?");
+               "NullNocRspOut overflow — did the test Wrap forget to drain?");
         queue_.push_back(f);
         return true;
     }
     bool credit_avail(uint8_t vc) const override { return !credit_enabled_ || credit_[vc] > 0; }
 
-    // ShellAdapter accessor: pop one flit per tick for DPI forwarding.
+    // Wrap accessor: pop one flit per tick for DPI forwarding.
     std::optional<Flit> pop_rsp_flit() {
         if (queue_.empty()) return std::nullopt;
         Flit f = queue_.front();
@@ -319,7 +319,7 @@ class NsuStandalone {
     }
     Nsu& nsu() noexcept { return nsu_; }
 
-    // Stage 5b ShellAdapter accessors — inject req side, drain rsp side.
+    // Stage 5b Wrap accessors — inject req side, drain rsp side.
     void inject_req_flit(const Flit& f) { null_req_in_.inject_req_flit(f); }
     std::optional<Flit> pop_rsp_flit() { return null_rsp_out_.pop_rsp_flit(); }
     bool rsp_credit_avail(uint8_t vc = 0) const { return null_rsp_out_.credit_avail(vc); }
