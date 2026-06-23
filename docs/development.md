@@ -437,15 +437,15 @@ template authoring, and extension guide.
    that deliberately reference a missing data file (e.g. INF-001) do
    not provide an actual data file.
 
-4. Run `make check`. The scenario is picked up automatically by both
-   the c_model integration test and the sim integration test via
-   CMake `CONFIGURE_DEPENDS`.
+4. Run `make check`. The scenario is picked up automatically by the
+   c_model integration test via CMake `CONFIGURE_DEPENDS`. Run
+   `make sim-regress` to pick it up in the co-sim regression as well.
 
 5. INF-prefix scenarios are skipped from both run-all paths (marker
    `INF_DEDICATED_TEST`, set in
    `c_model/tests/axi/test_integration.cpp:87` and
-   `sim/tests/test_cosim_integration.cpp:61`) and should only be
-   exercised through their dedicated test.
+   `sim/run_regress.py`) and should only be exercised through their
+   dedicated test.
 
 6. Commit with a body paragraph citing the IHI 0022H section or
    protocol property the scenario exercises.
@@ -501,23 +501,18 @@ cat sim/verilator/output/AX4-BAS-003_single_write_read_aligned/run.log
 
 A passing run ends with `$finish` and no assertion failure lines.
 
-### ctest path for sim tests
+### Running the co-sim regression
 
-The sim ctest executables are registered in `build/cmodel/` by the
-CMake configuration that includes sim tests. To run sim tests
-directly:
+Co-sim regression runs via `sim/run_regress.py`, not as a ctest entry.
+Invoke from the repo root:
 
 ~~~bash
-cd build/cmodel
-ctest -R Cosim --output-on-failure       # matches CosimIntegration
+make sim-regress PYTHON3=python3         # runs all non-INF scenarios via Vtb_top
 ~~~
 
-The sim ctest name (PascalCase) is `CosimIntegration` (see
-`sim/tests/CMakeLists.txt`). `ctest -R` matches against test names
-with a regex, so `-R cosim` (lowercase) matches zero tests.
-
-The Vtb_top binary must be built (`make build-verilator`) before cosim
-ctests can run.
+The Vtb_top binary must be built (`make build-verilator`) before the
+regression can run. Pass/fail is reported per scenario; a non-zero exit
+code means at least one scenario failed.
 
 ### Vtb_top output log
 

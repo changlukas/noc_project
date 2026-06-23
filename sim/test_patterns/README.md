@@ -1,9 +1,9 @@
 # sim/test_patterns -- AXI4 Scenario Tree
 
-Single source of truth for AXI4 scenario YAMLs. Both c_model integration test
-(`c_model/tests/axi/test_integration.cpp`) and cosim integration test
-(`sim/tests/test_cosim_integration.cpp`) consume the full set via a
-CMake-generated header. Two scoped tests (`test_port_pair_loopback`,
+Single source of truth for AXI4 scenario YAMLs. The c_model integration test
+(`c_model/tests/axi/test_integration.cpp`) and the co-sim regression
+(`sim/run_regress.py`, invoked via `make sim-regress`) both consume the
+full set. Two scoped tests (`test_port_pair_loopback`,
 `test_request_response_loopback`) consume hand-curated subsets.
 
 ## Naming convention -- `AX4-CAT-NNN_slug`
@@ -69,21 +69,22 @@ data file.
 | Test | List source | Skips |
 |---|---|---|
 | `c_model/tests/axi/test_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
-| `sim/tests/test_cosim_integration.cpp` | `kAllAxi4Scenarios` | INF prefix |
+| `sim/run_regress.py` (`make sim-regress`) | all non-INF scenarios | INF prefix |
 | `c_model/tests/integration/test_port_pair_loopback.cpp` | Curated 4 scenarios x delay sweep | n/a |
 | `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 6 distinct scenarios (7 FixtureParam entries at num_vc=1; re-run at num_vc in {2, 4, 8}) | n/a |
 
 `kAllAxi4Scenarios` is generated at CMake configure time from
 `sim/test_patterns/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
-Adding a new pattern automatically propagates to both run-all tests on the
-next build.
+Adding a new pattern automatically propagates to the c_model integration test
+on the next build; run `make sim-regress` to include it in the co-sim regression.
 
 ## Adding a new scenario
 
 1. Pick CAT + next NNN; create `sim/test_patterns/AX4-CAT-NNN_slug/`
 2. Write `scenario.yaml` with `schema_version: 1` and full `metadata:` block
 3. Add `data.txt` (and any other data files referenced)
-4. Run `make check` -- lint + both integration tests pick it up automatically
+4. Run `make check` -- lint + c_model integration test pick it up automatically;
+   run `make sim-regress` to verify in co-sim
 5. Commit with a body citing the IHI 0022H sec. or VIP test the scenario was
    derived from
 

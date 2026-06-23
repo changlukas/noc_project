@@ -162,7 +162,7 @@ COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
 
 SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top$(FSDB_SUFFIX)
 
-$(SIMV_TB_TOP): $(FILELIST_F) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
+$(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
 	    -Mdir=$(VCS_BUILD)/csrc_tb_top$(FSDB_SUFFIX) \

@@ -288,10 +288,11 @@ GoogleTest tests under `c_model/tests/` exercise individual components
 list is generated at CMake configure time from
 `sim/test_patterns/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
 
-**Layer 3 -- cosim integration test**
-`sim/tests/test_cosim_integration.cpp` runs the same scenario list
-through the Verilator wire-level harness, checking each transaction with
-the c_model scoreboard. INF-prefix scenarios are excluded.
+**Layer 3 -- cosim regression**
+`sim/run_regress.py` (invoked via `make sim-regress`) runs the same
+scenario list through the Verilator wire-level harness, checking each
+transaction with the c_model scoreboard. INF-prefix scenarios are
+excluded.
 
 **Layer 4 -- scoped / targeted tests**
 Two hand-curated test suites exercise specific protocol invariants:
@@ -313,11 +314,10 @@ Phase 1 results:
 `docs/internal/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
 
 `make check` runs lint_scenarios, lint_docs, builds the c_model and the
-Verilator binary, and runs the full ctest suite (Layers 1-4). It does
+Verilator binary, and runs the full ctest suite (Layers 1-2, 4). It does
 not run any simulation (sims are manual, from each simulator's own
-targets). Note: cosim Layer 3 ctest registration requires `Vtb_top` to
-be present at CMake configure time; `make check` ensures this by
-depending on `build-verilator` before running ctest.
+targets). Co-sim regression (Layer 3) runs separately via
+`make sim-regress` (see `sim/run_regress.py`).
 
 ---
 

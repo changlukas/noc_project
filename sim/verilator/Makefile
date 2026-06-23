@@ -103,7 +103,7 @@ check-yamlcpp:
 # sed pass (--timing): Verilator 5.036 on Windows joins fork-sync done() debug
 #   source paths with backslashes in generated C-string literals — rewrite them
 #   to forward slashes before g++ sees them (same workaround as genamba target).
-$(TBTOP_EXE): $(FILELIST_F) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
+$(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VL_BUILD)/obj_dir
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
@@ -122,8 +122,8 @@ SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 # tb_top is now bidirectional: it needs two coordinate-variant plusargs
 # (node0 = identity / low addr, node1 = +0x1_0000_0000 / coordinate (1,0)).
 # Generate the variants for $(SCENARIO) into output/$(SCENARIO)/coord/ then
-# pass +scenario_node0/+scenario_node1. The authoritative ctest path
-# (test_cosim_integration) builds its own command and does not use this target.
+# pass +scenario_node0/+scenario_node1. The regression runner (sim/run_regress.py,
+# invoked via make sim-regress) builds its own command and does not use this target.
 COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
 
 .PHONY: run-tb-top

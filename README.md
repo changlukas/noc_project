@@ -44,7 +44,7 @@ make build       # c_model + Verilator (correct dep order)
 ## Test
 
 ~~~bash
-make test                                    # c_model gtest suite (+ cosim ctest if Vtb_top built)
+make test                                    # c_model gtest suite (543 tests)
 make check                                   # lint + build + tests
 ~~~
 
