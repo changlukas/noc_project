@@ -5,8 +5,8 @@
 # shell's environment (PATH changes live only in this script's process).
 #
 # Usage:
-#   ./cosim/verilator/run_genamba.sh                       # T1/T2 (no plusarg)
-#   ./cosim/verilator/run_genamba.sh +scenario=PATH        # T3+ (cmodel_init)
+#   ./sim/verilator/run_genamba.sh                       # T1/T2 (no plusarg)
+#   ./sim/verilator/run_genamba.sh +scenario=PATH        # T3+ (cmodel_init)
 #
 # Any args passed to this script are forwarded to the simulator exe.
 

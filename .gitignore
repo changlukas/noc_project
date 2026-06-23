@@ -9,8 +9,8 @@ Testing/
 c_model/Testing/
 # Legacy locations (pre build/-tree restructure); keep ignored so stale
 # checkouts don't show noise
-cosim/verilator/obj_dir/
-cosim/verilator/obj_genamba/
+sim/verilator/obj_dir/
+sim/verilator/obj_genamba/
 c_model/build/
 
 # Temporary files
@@ -27,10 +27,10 @@ w_beats_received_
 # Codex prompt files
 .codex_*.txt
 
-# Per-simulator run outputs (cosim/verilator/output, cosim/vcs/output)
-cosim/*/output/
+# Per-simulator run outputs (sim/verilator/output, sim/vcs/output)
+sim/*/output/
 # Legacy run-output location
-cosim/output/
+sim/output/
 
 # Local Python installs (project-local 3.14, ~278 MB total)
 /Python/

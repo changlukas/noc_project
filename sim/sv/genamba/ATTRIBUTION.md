@@ -96,7 +96,7 @@ if (BID!=awid) $display(...);    // reads BID procedurally
 Under Verilator `--timing`, procedural code resumed from `@(posedge ACLK)` reads
 post-NBA signal values — i.e. the NEXT cycle's perspective of the registered
 output. The NMU bridge implements the AXI4 §A3.2.1 held-latch pattern correctly
-(`nmu_shell_adapter.hpp:150-162` holds the response in `held_b_` until BREADY is
+(`nmu_wrap.hpp:150-162` holds the response in `held_b_` until BREADY is
 seen; the SV-side registers `bvalid_q`/`bid_q` in `nmu_wrap.sv` deassert via NBA
 one cycle after the handshake). So in the next cycle BID=0 — which is what the
 vendored task ends up reading, even though the handshake-cycle value (correctly
