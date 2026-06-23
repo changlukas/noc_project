@@ -18,6 +18,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
+        sim-regress \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -143,6 +144,9 @@ lint_docs:
 
 check: lint_scenarios lint_docs build-cmodel build-verilator
 	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
+
+sim-regress: build-verilator
+	$(PYTHON3) sim/run_regress.py
 
 # --- clean ---
 
