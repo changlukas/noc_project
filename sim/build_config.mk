@@ -64,9 +64,9 @@ endif
 endif
 
 # --- tb_top sim ---
-# TB_TOP_SV_SRC is consumed by the Makefile's filelist.f generation recipe
-# and by VCS (via -f filelist.f). Paths are relative to COSIM_ROOT so the
-# variable stays readable; the filelist.f recipe absolutizes them.
+# TB_TOP_SV_SRC is consumed by the filelist.f generation recipe below and by
+# VCS (via -f filelist.f). Paths are relative to COSIM_ROOT so the variable
+# stays readable; gen_filelist.py absolutizes them.
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
@@ -78,6 +78,18 @@ TB_TOP_SV_SRC := \
     $(COSIM_ROOT)/sv/axi_perf_monitor.sv \
     $(COSIM_ROOT)/sv/link_perf_monitor.sv \
     $(COSIM_ROOT)/sv/tb_top.sv
+
+# sim/filelist.f is a GENERATED build artifact (gitignored), not committed —
+# it bakes in host-absolute paths. Both sim flows regenerate it from
+# TB_TOP_SV_SRC via gen_filelist.py before use. The recipe is duplicated in
+# each Makefile (rather than defined here) so it never becomes the default
+# goal of an includer. FILELIST_F / FILELIST_GEN_ARGS centralize the shared
+# bits so the two recipes stay in sync.
+FILELIST_F := $(COSIM_ROOT)/filelist.f
+# gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
+# -I/+incdir+ the simulators already pass; listing them in the .f makes it
+# self-contained for tool-native -f consumption.
+FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/sv -- $(TB_TOP_SV_SRC)
 
 # DPI implementation shared by every simulator; the C++ *main* drivers
 # (main.cpp / main_genamba.cpp) are Verilator-only and listed in

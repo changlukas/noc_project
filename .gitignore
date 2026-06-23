@@ -32,6 +32,10 @@ sim/*/output/
 # Legacy run-output location
 sim/output/
 
+# Generated tb_top filelist (regenerated from build_config.mk's TB_TOP_SV_SRC
+# by both sim flows; bakes in host-absolute paths so it must not be committed)
+sim/filelist.f
+
 # Local Python installs (project-local 3.14, ~278 MB total)
 /Python/
 /specgen/Python/

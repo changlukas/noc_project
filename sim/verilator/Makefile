@@ -13,10 +13,9 @@ include ../build_config.mk
 
 VL_BUILD := $(BUILD_ROOT)/verilator
 
-# sim/filelist.f — generated from TB_TOP_SV_SRC with absolute paths so
-# Verilator -f resolution is stable regardless of cwd. Regenerated whenever
-# build_config.mk changes (TB_TOP_SV_SRC source of truth lives there).
-FILELIST_F := $(COSIM_ROOT)/filelist.f
+# FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist.f is a
+# generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
+# absolute paths whenever build_config.mk changes.
 
 # Waveforms are captured via VCS/FSDB; Verilator VCD tracing is not used.
 
@@ -74,10 +73,10 @@ all: $(TBTOP_EXE)
 # Use Python3 for path resolution: Verilator under MSYS2 Perl does not accept
 # /e/05_... POSIX drive paths in -f filelists (treats them as module names);
 # Python3 on Windows returns E:/... native paths that Verilator handles correctly.
-$(FILELIST_F): ../build_config.mk
-	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ \
-	    $(SPECGEN_SV_INC) $(COSIM_ROOT)/sv \
-	    -- $(TB_TOP_SV_SRC)
+# Duplicated (intentionally) in sim/vcs/Makefile so a standalone `cd sim/vcs &&
+# make` regenerates it too; gen_filelist.py + FILELIST_GEN_ARGS keep them in sync.
+$(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/gen_filelist.py
+	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
 # Python3 executable — auto-detected so build/run commands stay identical on
 # Windows and Linux. Prefer the Windows `py -3` launcher when present (the
