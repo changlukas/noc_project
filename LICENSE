@@ -1,0 +1,20 @@
+Copyright (c) 2026 changlukas. All rights reserved.
+
+PROPRIETARY AND CONFIDENTIAL — INTERNAL USE ONLY.
+
+This software and associated documentation files (the "Software") are the
+confidential and proprietary property of the copyright holder. No license,
+express or implied, to use, copy, modify, merge, publish, distribute,
+sublicense, or sell copies of the Software is granted to any party without
+the prior written permission of the copyright holder.
+
+THIRD-PARTY COMPONENTS
+Portions of the Software under c_model/include/axi/ are derived from
+cocotbext-axi and remain licensed under the MIT License. See
+c_model/include/axi/ATTRIBUTION.md for the applicable notice. This
+proprietary license does not supersede that third-party license for those
+files.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
