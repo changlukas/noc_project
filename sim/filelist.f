@@ -1,0 +1,12 @@
++incdir+E:/05_NoC/noc_project/specgen/generated/sv
++incdir+E:/05_NoC/noc_project/sim/sv
+E:/05_NoC/noc_project/specgen/generated/sv/ni_params_pkg.sv
+E:/05_NoC/noc_project/specgen/generated/sv/ni_signals_pkg.sv
+E:/05_NoC/noc_project/sim/sv/axi_master_wrap.sv
+E:/05_NoC/noc_project/sim/sv/nmu_wrap.sv
+E:/05_NoC/noc_project/sim/sv/router_wrap.sv
+E:/05_NoC/noc_project/sim/sv/nsu_wrap.sv
+E:/05_NoC/noc_project/sim/sv/axi_slave_wrap.sv
+E:/05_NoC/noc_project/sim/sv/axi_perf_monitor.sv
+E:/05_NoC/noc_project/sim/sv/link_perf_monitor.sv
+E:/05_NoC/noc_project/sim/sv/tb_top.sv

@@ -1,6 +1,9 @@
-# Simulator-neutral source lists shared by sim/verilator/Makefile and
-# sim/vcs/Makefile. Keep ONLY file lists, include dirs, and +define+s here;
-# simulator-specific flags stay in the per-simulator Makefiles.
+# Build environment config and simulator-neutral source lists shared by
+# sim/verilator/Makefile and sim/vcs/Makefile. Contains make-evaluated
+# variables, conditional logic, and genamba source lists.
+#
+# tb_top SV sources live in sim/filelist.f (generated from TB_TOP_SV_SRC
+# below); both Makefiles use -f filelist.f for the tb_top verilate/compile step.
 #
 # COSIM_ROOT is derived from this file's own location so any includer depth
 # works.
@@ -61,6 +64,9 @@ endif
 endif
 
 # --- tb_top sim ---
+# TB_TOP_SV_SRC is consumed by the Makefile's filelist.f generation recipe
+# and by VCS (via -f filelist.f). Paths are relative to COSIM_ROOT so the
+# variable stays readable; the filelist.f recipe absolutizes them.
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \

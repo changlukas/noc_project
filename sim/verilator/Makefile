@@ -4,17 +4,21 @@ TOP           := tb_top
 # Linux, lacks it).
 SHELL         := bash
 
-# Source lists, include dirs, and +define+s are simulator-neutral and shared
-# with sim/vcs/Makefile via sim/sources.mk. BUILD_ROOT (top-level build/)
-# also comes from sources.mk; all Verilator artifacts land under
-# $(BUILD_ROOT)/verilator/, run logs under ./output/.
-include ../sources.mk
+# Build environment config, include dirs, and genamba source lists are shared
+# with sim/vcs/Makefile via sim/build_config.mk. tb_top SV sources are in
+# sim/filelist.f (generated from TB_TOP_SV_SRC in build_config.mk).
+# BUILD_ROOT (top-level build/) also comes from build_config.mk; all Verilator
+# artifacts land under $(BUILD_ROOT)/verilator/, run logs under ./output/.
+include ../build_config.mk
 
 VL_BUILD := $(BUILD_ROOT)/verilator
 
-# Waveforms are captured via VCS/FSDB; Verilator VCD tracing is not used.
+# sim/filelist.f — generated from TB_TOP_SV_SRC with absolute paths so
+# Verilator -f resolution is stable regardless of cwd. Regenerated whenever
+# build_config.mk changes (TB_TOP_SV_SRC source of truth lives there).
+FILELIST_F := $(COSIM_ROOT)/filelist.f
 
-SV_SRC := $(TB_TOP_SV_SRC)
+# Waveforms are captured via VCS/FSDB; Verilator VCD tracing is not used.
 
 # main.cpp is the Verilator-only clock/eval driver; under VCS the simulator
 # owns time and the DPI .cpp is the only C++ source.
@@ -66,6 +70,15 @@ TBTOP_EXE := $(VL_BUILD)/obj_dir/V$(TOP)$(EXEEXT)
 
 all: $(TBTOP_EXE)
 
+# filelist.f recipe: placed after `all:` so it is not the default goal.
+# Use Python3 for path resolution: Verilator under MSYS2 Perl does not accept
+# /e/05_... POSIX drive paths in -f filelists (treats them as module names);
+# Python3 on Windows returns E:/... native paths that Verilator handles correctly.
+$(FILELIST_F): ../build_config.mk
+	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ \
+	    $(SPECGEN_SV_INC) $(COSIM_ROOT)/sv \
+	    -- $(TB_TOP_SV_SRC)
+
 # Python3 executable — auto-detected so build/run commands stay identical on
 # Windows and Linux. Prefer the Windows `py -3` launcher when present (the
 # canonical interpreter with PyYAML; the MSYS2 mingw64 `python3` often lacks
@@ -91,9 +104,9 @@ check-yamlcpp:
 # sed pass (--timing): Verilator 5.036 on Windows joins fork-sync done() debug
 #   source paths with backslashes in generated C-string literals — rewrite them
 #   to forward slashes before g++ sees them (same workaround as genamba target).
-$(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
+$(TBTOP_EXE): $(FILELIST_F) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VL_BUILD)/obj_dir
-	$(VERILATOR) $(VERILATOR_FLAGS) $(SV_SRC) $(C_SRC)
+	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
 	    $(VL_BUILD)/obj_dir/*.cpp $(VL_BUILD)/obj_dir/*.h
 	$(MAKE) -C $(VL_BUILD)/obj_dir -f V$(TOP).mk \
@@ -260,4 +273,3 @@ run-genamba-tester: $(TESTER_EXE)
 	@set -o pipefail; \
 	$(TESTER_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)" $(GENAMBA_TESTER_TESTS) \
 	    2>&1 | tee output/genamba_tester/run.log
-
