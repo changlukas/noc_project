@@ -22,11 +22,11 @@
 
 ## ③ Source/config 分離(.f filelist)
 > `sim/sources.mk` 現混了**兩種性質**:source 清單 + build 設定(BUILD_ROOT/DEPS_SRC/yaml-cpp/local.mk),且違反自身「ONLY file lists」註解。
-- 抽出 **`.f` filelist**(`sim/tb_top.f`):**只放** SV source 檔 + incdir(`+incdir+`)+ `+define+`(tool-native)。**make-evaluated / 條件式的東西不可進 .f**。
+- 抽出 **`.f` filelist**(`sim/filelist.f`):**只放** SV source 檔 + incdir(`+incdir+`)+ `+define+`(tool-native)。**make-evaluated / 條件式的東西不可進 .f**。
 - 留 **build-config `.mk`**(`sim/build_config.mk`,原 sources.mk 去掉純 source 清單):`COSIM_ROOT`/`PROJ_ROOT`/`BUILD_ROOT`、`DEPS_SRC` 條件、`YAMLCPP_INC/LIB`、`STDCXXFS_LDFLAGS`、`CPP_INCLUDE_FLAGS`、`-include local.mk`(皆 make 條件式,`.f` 裝不了)。
-- **路徑(Codex Important)**:`tb_top.f` 用 **Make 產生的絕對路徑**(Verilator `-f`/`-F` 相對路徑語意特殊,絕對路徑兩個 sim 都穩);可由 Makefile 從變數 generate `.f`,或手寫絕對。落地前在 Verilator(`-f tb_top.f --timing`)與 VCS dry-run 都驗過才刪 sources.mk。
+- **路徑(Codex Important)**:`filelist.f` 用 **Make 產生的絕對路徑**(Verilator `-f`/`-F` 相對路徑語意特殊,絕對路徑兩個 sim 都穩);可由 Makefile 從變數 generate `.f`,或手寫絕對。落地前在 Verilator(`-f filelist.f --timing`)與 VCS dry-run 都驗過才刪 sources.mk。
 - **genamba(Codex Important,別漏)**:`sources.mk` 同時定義 `GENAMBA_SV_SRC`/`GENAMBA_TESTER_SV_SRC`/`GENAMBA_INC_DEPS`/`DPI_HDR_DEPS`/`GENAMBA_DEFINES`(兩 Makefile 都用)。拆解時 genamba 的清單**要嘛各自 `.f`,要嘛留進 `build_config.mk`** —— 以不破 genamba build 為界,不可只搬 tb_top 而讓 genamba 變數消失。
-- `sim/verilator/Makefile`、`sim/vcs/Makefile`:`include ../build_config.mk` + tb_top build 改用 `-f ../tb_top.f`。
+- `sim/verilator/Makefile`、`sim/vcs/Makefile`:`include ../build_config.mk` + tb_top build 改用 `-f ../filelist.f`。
 
 ## ④ 減法
 - **ni_regs 清理(已驗證死碼)**:`ni_regs_pkg.sv` 無人 import、不在 build list;`ni_regs.h` 僅 `ni_spec.hpp:7` 一行 dead-weight include、無符號使用者(register_file 移除後)。動作:
@@ -47,15 +47,15 @@ ctest 解鉤:`c_model/tests/CMakeLists.txt:31-41`(移除 cosim `add_subdirectory
 ## 執行順序(Codex 建議)
 1. 搬 scenario + 更新 consumers。
 2. co-sim 移出 ctest + 加 sim runner。
-3. 拆 source/config(`tb_top.f` + `build_config.mk`,**含 genamba 清單**)。
+3. 拆 source/config(`filelist.f` + `build_config.mk`,**含 genamba 清單**)。
 4. 移除 ni_regs + 跑 codegen/drift/test gate。
 每步 build + 對應 test 綠才下一步。
 
 ## Success Criteria
 - **ctest 純 C++ 全綠**(c_model + specgen;不再含 co-sim entry)。
 - `make sim-regress`(新 runner)跑 6 個驗證 subset scenario **全 PASS**(行為與現況一致)。
-- Verilator(`-f tb_top.f --timing`)與 VCS dry-run 皆從 `.f` 取 source、build/解析成功。
+- Verilator(`-f filelist.f --timing`)與 VCS dry-run 皆從 `.f` 取 source、build/解析成功。
 - specgen drift gate 綠;`ni_regs.*` / goldens / register validator 已移除;repo 無 `ni_regs` 引用。
-- 無頂層 `tests/`、無 `sim/tests/test_cosim_integration.cpp`、無 `sources.mk`(已拆成 `tb_top.f` + `build_config.mk`)。
+- 無頂層 `tests/`、無 `sim/tests/test_cosim_integration.cpp`、無 `sources.mk`(已拆成 `filelist.f` + `build_config.mk`)。
 - local scratch 已清(工作目錄)。
 - `grep` 全 repo:無殘留 `tests/scenarios`、`test_cosim_integration`、`ni_regs`、舊 `sources.mk` 路徑。
