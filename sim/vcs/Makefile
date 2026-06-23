@@ -8,9 +8,8 @@
 # (module load, license, version) before first use.
 #
 # Differences from the Verilator flow, by design:
-# - No C++ main driver: VCS owns simulation time. tb_genamba is already
-#   self-clocked; tb_top is wrapped by tb_top_vcs.sv (clock + reset +
-#   timeout + final-block finalize, mirroring main.cpp).
+# - No C++ main driver: VCS owns simulation time. Both tb_genamba and tb_top
+#   are self-clocked; no wrapper module is needed.
 # - None of the Verilator workarounds are needed (--output-split,
 #   backslash-path sed, EXEEXT); the vendored-task latch/shadow patches
 #   are simulator-neutral and stay.
@@ -138,7 +137,7 @@ run-genamba: $(SIMV_GENAMBA)
 	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(FSDB_PLUSARG_GENAMBA), $(FSDB_PLUSARG_GENAMBA),) \
 	    2>&1 | tee output/genamba_$(GENAMBA_RUN_TAG)/run.log
 
-# --- tb_top cosim via tb_top_vcs wrapper ---
+# --- tb_top cosim (self-clocked) ---
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
 
@@ -152,12 +151,12 @@ COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
 
 SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top$(FSDB_SUFFIX)
 
-$(SIMV_TB_TOP): $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
+$(SIMV_TB_TOP): $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
 	    -Mdir=$(VCS_BUILD)/csrc_tb_top$(FSDB_SUFFIX) \
-	    -top tb_top_vcs \
-	    $(TB_TOP_SV_SRC) $(COSIM_ROOT)/sv/tb_top_vcs.sv $(DPI_C_SRC) $(YAMLCPP_LIB) \
+	    -top tb_top \
+	    $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)
 
 .PHONY: tb_top run-tb-top

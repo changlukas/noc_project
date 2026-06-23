@@ -18,17 +18,26 @@
 // src_id matches each node's coordinate (NSU stamps response dst_id from
 // request src_id): nmu_0/nsu_0 → 0, nmu_1/nsu_1 → 1.
 //
-// clk_i + rst_ni driven by C++ main.cpp (input ports — per Stage 5a pattern).
+// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).
 // Plusargs +scenario_node0=<path> +scenario_node1=<path> kick off the run;
 // cmodel_init is called once with either variant (shared config).
 
 `ifndef TB_TOP_SV
 `define TB_TOP_SV
 
-module tb_top (
-    input logic clk_i,
-    input logic rst_ni
-);
+module tb_top;
+    logic clk_i  = 1'b0;
+    logic rst_ni = 1'b0;
+    always #5 clk_i = ~clk_i;
+    initial begin
+        repeat (4) @(posedge clk_i);
+        rst_ni = 1'b1;
+    end
+    localparam int unsigned TIMEOUT_CYCLES = 100000;
+    initial begin
+        repeat (TIMEOUT_CYCLES) @(posedge clk_i);
+        $fatal(1, "tb_top: timeout after %0d cycles", TIMEOUT_CYCLES);
+    end
 
     // -------------------------------------------------------------------------
     // Parameters
@@ -345,9 +354,46 @@ module tb_top (
     );
 
     // -------------------------------------------------------------------------
+    // Perf instrumentation — sample every rising edge; dump on final
+    // -------------------------------------------------------------------------
+    import "DPI-C" context function void cmodel_perf_sample_tick();
+    import "DPI-C" context function void cmodel_perf_set_run(input string scenario,
+                                                             input longint total_cyc);
+    import "DPI-C" context function void cmodel_perf_dump(input string path);
+
+    string        perf_out_path = "perf.json";
+    string        perf_scn      = "";
+    int unsigned  perf_cycle    = 0;
+    initial begin
+        void'($value$plusargs("perf_out=%s", perf_out_path));
+        void'($value$plusargs("perf_scenario=%s", perf_scn));
+    end
+    always @(posedge clk_i) begin
+        cmodel_perf_sample_tick();
+        perf_cycle = perf_cycle + 1;
+    end
+
+    final begin
+        cmodel_perf_set_run(perf_scn, longint'(perf_cycle));
+        cmodel_perf_dump(perf_out_path);
+        cmodel_finalize();
+    end
+
+    // FSDB waveform dump (VCS only; +define+FSDB_DUMP)
+`ifdef FSDB_DUMP
+    initial begin
+        string fsdb_path;
+        if (!$value$plusargs("fsdb=%s", fsdb_path))
+            fsdb_path = "dump.fsdb";
+        $fsdbDumpfile(fsdb_path);
+        $fsdbDumpvars(0, tb_top);
+    end
+`endif
+
+    // -------------------------------------------------------------------------
     // Exit logic — non-vacuous PASS guard
     // -------------------------------------------------------------------------
-    // Scenario completion is polled by C++ main.cpp via cmodel_done().
+    // cmodel_done() signals scenario completion via DPI.
     // PASS requires a non-vacuous run: scoreboard clean AND both masters created
     // AND at least one read actually checked (so a write-only / no-op run fails).
     always @(posedge clk_i) begin

@@ -78,7 +78,8 @@ endif
 VERILATOR_FLAGS := \
     $(VERILATOR_COMMON_FLAGS) \
     --top-module $(TOP) \
-    --no-timing \
+    --timing \
+    --output-split 0 \
     --Mdir $(VL_BUILD)/obj_dir$(TRACE_SUFFIX) \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
@@ -116,11 +117,16 @@ check-yamlcpp:
 # Two-phase build: Verilator generates C++ in $(VL_BUILD)/obj_dir, then make
 # compiles it.
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
-# LDFLAGS_EXTRA: set PE stack reserve to 64 MiB so MinGW pthread initialises
+# USER_LDFLAGS: set PE stack reserve to 64 MiB so MinGW pthread initialises
 #   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
+# sed pass (--timing): Verilator 5.036 on Windows joins fork-sync done() debug
+#   source paths with backslashes in generated C-string literals — rewrite them
+#   to forward slashes before g++ sees them (same workaround as genamba target).
 $(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)
 	$(VERILATOR) $(VERILATOR_FLAGS) $(SV_SRC) $(C_SRC)
+	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
+	    $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)/*.cpp $(VL_BUILD)/obj_dir$(TRACE_SUFFIX)/*.h
 	$(MAKE) -C $(VL_BUILD)/obj_dir$(TRACE_SUFFIX) -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=-Wl,--stack,67108864"
