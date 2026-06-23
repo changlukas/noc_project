@@ -1,7 +1,7 @@
 // Passive inter-router link monitor. Counts flits (valid high) and credit-deficit
 // stall cycles. Credit is a single-cycle pulse; valid is gated on credit upstream,
 // so backpressure is observable only as credit_count==0 (downstream buffer full).
-module flit_link_perf_monitor #(
+module link_perf_monitor #(
     parameter string LINK_NAME = "link",
     parameter int    BUFFER_DEPTH = 4
 ) (

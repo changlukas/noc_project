@@ -316,28 +316,28 @@ module tb_top (
 
     // Inter-router link monitors: valid paired with credit from the OPPOSITE direction
     // (credit for data flowing 0→1 returns on the 1→0 net, and vice versa).
-    flit_link_perf_monitor #(
+    link_perf_monitor #(
         .LINK_NAME("req_0to1"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_req01 (
         .clk_i, .rst_ni,
         .valid(link_req_0to1_valid), .credit_pulse(link_req_1to0_credit)
     );
 
-    flit_link_perf_monitor #(
+    link_perf_monitor #(
         .LINK_NAME("req_1to0"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_req10 (
         .clk_i, .rst_ni,
         .valid(link_req_1to0_valid), .credit_pulse(link_req_0to1_credit)
     );
 
-    flit_link_perf_monitor #(
+    link_perf_monitor #(
         .LINK_NAME("rsp_0to1"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_rsp01 (
         .clk_i, .rst_ni,
         .valid(link_rsp_0to1_valid), .credit_pulse(link_rsp_1to0_credit)
     );
 
-    flit_link_perf_monitor #(
+    link_perf_monitor #(
         .LINK_NAME("rsp_1to0"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_rsp10 (
         .clk_i, .rst_ni,

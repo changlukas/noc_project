@@ -70,7 +70,7 @@ TB_TOP_SV_SRC := \
     $(COSIM_ROOT)/sv/nsu_wrap.sv \
     $(COSIM_ROOT)/sv/axi_slave_wrap.sv \
     $(COSIM_ROOT)/sv/axi_perf_monitor.sv \
-    $(COSIM_ROOT)/sv/flit_link_perf_monitor.sv \
+    $(COSIM_ROOT)/sv/link_perf_monitor.sv \
     $(COSIM_ROOT)/sv/tb_top.sv
 
 # DPI implementation shared by every simulator; the C++ *main* drivers
