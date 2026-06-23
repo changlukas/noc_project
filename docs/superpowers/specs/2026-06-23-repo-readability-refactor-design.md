@@ -26,6 +26,7 @@
 | LICENSE | proprietary / internal-use-only | 只給特定 reviewer/部門;非開源 |
 | vendored MIT attribution | 保留 `c_model/include/axi/ATTRIBUTION.md` | cocotbext-axi (MIT) 義務不變 |
 | shell 改名用詞 | `wrap`(非 `wrapper`) | user 指定;SV 側本就 `_wrap`,兩側收斂 |
+| namespace 政策 | namespace 跟 dir 改 | `ni::cmodel::noc`→`router`(75 處)、`cosim`→`wrap`(86 處);目錄/namespace 一致。`Noc*` 型別名仍依 §6.1 保留 |
 | register_file | 本輪移除 | AI 擅自生成、production 未接線、user 未要求 |
 | generated `ni_regs.*` 命運 | 本輪保留(不清 specgen) | 屬 specgen 管線,風險類別不同;留孤兒不影響 drift gate |
 | §6.3 / 抽鷹架 | defer | 純內部,對外可讀性零收益 |
@@ -54,8 +55,8 @@
 > 文件 §6.1 謊稱已完成,實際 **repo 從未 apply**(仍 `c_model/include/noc/`,介面檔仍 `noc_` 前綴)。
 - **目錄**:`c_model/include/noc` → `router`;`c_model/tests/noc` → `router`。
 - **介面檔去前綴**:`noc_req_in.hpp`→`req_in.hpp`、`noc_req_out`、`noc_rsp_in`、`noc_rsp_out`。
-- **型別名不變**:`NocReqOut` 等保持。
-- **更新引用(blast radius,Codex 補充)**:約 27 處 `#include "noc/..."`;`ni::cmodel::noc` namespace 引用(`router.hpp`、`pipeline_stage.hpp`、`wormhole_arbiter.hpp`);跨層 consumer(`nmu/nmu.hpp`、`nsu/nsu.hpp`、`packetize.hpp`、`router_shell_adapter.hpp`);`cosim/c/cmodel_dpi.cpp` perf 取樣;`tests/noc/CMakeLists.txt`;`specgen/tools/gen_inventory.py` 路徑。
+- **namespace 改、型別名不變**:`ni::cmodel::noc` → `ni::cmodel::router`(75 處);`NocReqOut` 等型別名依 §6.1 保持(結果為 `ni::cmodel::router::NocReqOut`)。
+- **更新引用(blast radius,Codex 補充)**:約 27 處 `#include "noc/..."`;75 處 `ni::cmodel::noc` namespace;跨層 consumer(`nmu/nmu.hpp`、`nsu/nsu.hpp`、`packetize.hpp`、`router_shell_adapter.hpp`);`cosim/c/cmodel_dpi.cpp` perf 取樣;`tests/noc/CMakeLists.txt`;`specgen/tools/gen_inventory.py` 路徑。
 
 ### 8. 建 `c_model/include/ni/`(風險:低)
 > step 4 之後執行 → 來源已是 `router/`,無「noc/ or router/」歧義。
@@ -70,8 +71,9 @@
 - **目錄**:`c_model/include/cosim/` → `c_model/include/wrap/`。
 - **檔名**:`*_shell_adapter.hpp` → `*_wrap.hpp`;`*_shell_io.hpp` → `*_wrap_io.hpp`(6 元件 × 2)。
 - **型別**:`*ShellAdapter` → `*Wrap`;`*ShellIo` → `*WrapIo`。
-- **範圍**:約 270 處,18 source + 6 test 檔 + CMake + docs。
-- **namespace / handle(Codex 補充)**:`ni::cmodel::cosim`(`handle_block.hpp:10`)、`cmodel_dpi.cpp` include 與型別面。
+- **namespace**:`ni::cmodel::cosim` → `ni::cmodel::wrap`(86 處)。
+- **範圍**:約 270 處 shell 識別字,18 source + 6 test 檔 + CMake + docs;另 86 處 namespace。
+- **handle(Codex 補充)**:`handle_block.hpp`、`cmodel_dpi.cpp` include 與型別面。
 - **不動**:SV 側 `*_wrap.sv`(本就 `_wrap`);DPI 匯出名 `cmodel_<元件>_<op>`(不含 shell/wrap)。step 5 先行 → 此步落於 `sim/c/...` 最終路徑。
 
 ### 7. `flit_link_perf_monitor.sv` → `link_perf_monitor.sv`(風險:小)
@@ -88,5 +90,5 @@
 - specgen drift gate 維持綠(step 2 不觸發)。
 - repo root 有 proprietary LICENSE;`axi/ATTRIBUTION.md` 保留。
 - `docs/` 對外目錄只剩對外文件;過程產物在 `docs/internal/`。
-- `grep` 全 repo:無殘留 `noc/` include、無 `shell`/`ShellAdapter` 識別字、無頂層 `cosim/` 路徑、無 `register_file`。
+- `grep` 全 repo:無殘留 `noc/` include、無 `ni::cmodel::noc` / `ni::cmodel::cosim`、無 `shell`/`ShellAdapter` 識別字、無頂層 `cosim/` 路徑、無 `register_file`。
 - 文件與 repo 結構一致(§6.1 假象消除)。
