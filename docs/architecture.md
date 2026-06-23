@@ -152,7 +152,7 @@ through shared global state.
 ### Per-instance handle ABI
 
 Each wrap (`*Wrap`) is instantiated per call to
-`cmodel_<shell>_create(name)`. The function returns a 64-bit integer
+`cmodel_<component>_create(name)`. The function returns a 64-bit integer
 handle (`unsigned long long`; SV `longint unsigned`) that encodes a
 pointer to a typed `HandleBlock` (cast back at the DPI boundary; a plain
 integer is used rather than SV `chandle` because VCS rejects `chandle`
@@ -160,8 +160,8 @@ as a module port):
 
 ```cpp
 struct HandleBlock {
-    uint32_t    magic;     // ShellType-derived sentinel
-    ShellType   type;
+    uint32_t    magic;     // WrapType-derived sentinel
+    WrapType    type;
     HandleState state;
     std::string name;
     std::unique_ptr<void, void(*)(void*)> adapter;  // type-erased
@@ -169,7 +169,7 @@ struct HandleBlock {
 ```
 
 All live handles are tracked in `g_handle_registry`. Cycle handlers
-(`cmodel_<shell>_set_inputs/tick/get_outputs`) validate via
+(`cmodel_<component>_set_inputs/tick/get_outputs`) validate via
 `REQUIRE_HANDLE(ctx, expected_type, fn_name)`, which checks: session
 state != Uninitialized, registry membership, magic/type self-
 consistency, and Live state.
@@ -231,8 +231,8 @@ Stage 5b introduces a DPI wire-wrap layer that connects the c_model
 components to the Verilator-compiled SV testbench. The layer has three steps:
 
 1. Each `*_wrap.sv` module calls its per-wrap DPI imports at every
-   posedge `clk_i`: `cmodel_<shell>_set_inputs` ->
-   `cmodel_<shell>_tick` -> `cmodel_<shell>_get_outputs` (see
+   posedge `clk_i`: `cmodel_<component>_set_inputs` ->
+   `cmodel_<component>_tick` -> `cmodel_<component>_get_outputs` (see
    `sim/c/cmodel_dpi.h` for the five tick functions:
    `cmodel_master_tick`, `cmodel_nmu_tick`, `cmodel_channel_model_tick`,
    `cmodel_nsu_tick`, `cmodel_slave_tick`).

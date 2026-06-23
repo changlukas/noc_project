@@ -18,7 +18,7 @@ c_model/build/
 *.log
 
 # Co-sim runtime artifacts (per-instance variants since multi-instance DPI refactor)
-master_shell_read_dump*.txt
+master_wrap_read_dump*.txt
 w_beats_received_
 
 # Editor/tool files

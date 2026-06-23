@@ -8,7 +8,7 @@
 
 - **NMU / NSU**: per-direction units (`c_model/include/nmu/`, `c_model/include/nsu/`). Packetize / depacketize, AXI port adapters, per-ID RoB on the NMU response path.
 - **NoC fabric**: no router class in c_model; `ChannelModel` (`c_model/tests/common/channel_model.hpp`) is the only NoC stub. Destination derivation (XY bit-slice) is done at NMU packetize time via `nmu::addr_trans::xy_route`.
-- **Wrap layer**: `NmuWrap` / `NsuWrap` / `MasterWrap` / `SlaveWrap` / `ChannelModelWrap` in `c_model/include/wrap/`. Per-instance via a 64-bit integer handle ABI — `unsigned long long cmodel_<shell>_create(name)` returns an integer-encoded `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops take `unsigned long long ctx` (SV `longint unsigned`) and validate via `REQUIRE_HANDLE`. (chandle is avoided because VCS rejects it as a module port.) No cross-component pointers.
+- **Wrap layer**: `NmuWrap` / `NsuWrap` / `MasterWrap` / `SlaveWrap` / `ChannelModelWrap` in `c_model/include/wrap/`. Per-instance via a 64-bit integer handle ABI — `unsigned long long cmodel_<component>_create(name)` returns an integer-encoded `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops take `unsigned long long ctx` (SV `longint unsigned`) and validate via `REQUIRE_HANDLE`. (chandle is avoided because VCS rejects it as a module port.) No cross-component pointers.
 - **Config**: YAML (`c_model/config/`); no JSON, no compile-time `<Mode>` templates.
 
 **Build**: C++17, CMake 3.20+, GoogleTest.

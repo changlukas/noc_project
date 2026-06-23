@@ -227,4 +227,4 @@ run-all-fsdb:
 .PHONY: clean
 clean:
 	rm -rf $(VCS_BUILD) output csrc *.log ucli.key vc_hdrs.h
-	rm -rf verdiLog novas.* master_shell_read_dump*.txt  # Verdi/FSDB cwd droppings + c_model read dumps
+	rm -rf verdiLog novas.* master_wrap_read_dump*.txt  # Verdi/FSDB cwd droppings + c_model read dumps

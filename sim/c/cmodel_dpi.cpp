@@ -71,7 +71,7 @@ std::unordered_set<HandleBlock*> g_handle_registry;
 //   1. Session state: Uninitialized → ERR_NOT_INITIALIZED.
 //   2. Registry membership: unknown pointer → ERR_HERMETIC_VIOLATION.
 //   3. Magic sentinel match: bit-flip / aliased ptr → ERR_HERMETIC_VIOLATION.
-//   4. Type tag match: wrong shell type → ERR_HERMETIC_VIOLATION.
+//   4. Type tag match: wrong wrap type → ERR_HERMETIC_VIOLATION.
 //   5. Handle liveness: Closed handle (post-destroy) → ERR_HERMETIC_VIOLATION.
 // Returns nullptr and sets the error latch on any failure; returns the typed
 // block on success.

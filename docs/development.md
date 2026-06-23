@@ -145,8 +145,8 @@ correct Python 3.x installation.
 
 ### Per-instance handle ABI
 
-`sim/c/cmodel_dpi.cpp` exposes a `cmodel_<shell>_create(name)`
-function per shell type. Each returns a 64-bit integer handle
+`sim/c/cmodel_dpi.cpp` exposes a `cmodel_<component>_create(name)`
+function per component. Each returns a 64-bit integer handle
 (`unsigned long long`, SV `longint unsigned`) encoding a `HandleBlock*`
 registered in `g_handle_registry`. Cycle handlers take
 `unsigned long long ctx` as leading argument and validate via
