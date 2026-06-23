@@ -1,7 +1,7 @@
 # Development guide
 
 This document covers workflow, repository conventions, build system,
-generated files, scenario authoring, test targeting, cosim debugging,
+generated files, scenario authoring, test targeting, sim debugging,
 and the pre-submit checklist.
 
 For system architecture and component descriptions, see
@@ -42,7 +42,7 @@ Valid types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`,
 `chore`, `perf`, `build`, `revert`.
 
 Scope is a short noun identifying the affected area (e.g. `nmu`,
-`cosim`, `scenarios`, `makefile`). The description is imperative mood,
+`sim`, `scenarios`, `makefile`). The description is imperative mood,
 lowercase, no trailing period.
 
 ### Pre-submit gate
@@ -146,7 +146,7 @@ correct Python 3.x installation.
 
 ### Per-instance handle ABI
 
-`cosim/c/cmodel_dpi.cpp` exposes a `cmodel_<shell>_create(name)`
+`sim/c/cmodel_dpi.cpp` exposes a `cmodel_<shell>_create(name)`
 function per shell type. Each returns a 64-bit integer handle
 (`unsigned long long`, SV `longint unsigned`) encoding a `HandleBlock*`
 registered in `g_handle_registry`. Cycle handlers take
@@ -182,13 +182,13 @@ The root Makefile builds only. Simulation runs from each simulator's own
 directory; run logs land in that directory's `output/<scenario>/run.log`:
 
 ~~~bash
-cd cosim/verilator
+cd sim/verilator
 make run-genamba                                # gen_amba role-1 (Tasks A-G)
 make run-genamba GENAMBA_SCENARIO=<ax4-id>      # specific scenario
 make run-tb-top                                 # wire-level cosim, default scenario
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
 
-cd cosim/vcs                                    # Linux workstation only
+cd sim/vcs                                    # Linux workstation only
 make run-genamba / run-tb-top
 ~~~
 
@@ -199,12 +199,12 @@ All build artifacts live under the top-level `build/` tree:
 ### Recursive make
 
 The top-level Makefile orchestrates only. Subdir Makefiles own their
-own build and clean targets. `$(MAKE) -C cosim/verilator` delegates to
-`cosim/verilator/Makefile` for the Verilator build step.
+own build and clean targets. `$(MAKE) -C sim/verilator` delegates to
+`sim/verilator/Makefile` for the Verilator build step.
 
 ### PYTHON3 auto-detection
 
-Both the root and `cosim/verilator/Makefile` auto-detect the Python
+Both the root and `sim/verilator/Makefile` auto-detect the Python
 interpreter: they prefer the Windows `py -3` launcher when present (the
 MSYS2 mingw64 `python3` often lacks PyYAML, which the scenario/perf
 scripts need) and fall back to `python3` on Linux/macOS. No manual
@@ -213,28 +213,28 @@ if the auto-detection picks the wrong interpreter.
 
 ### Dual-simulator support (Verilator / VCS)
 
-Both cosim testbenches build under either simulator from the same source
-lists (`cosim/sources.mk`); simulator-specific flags live in
-`cosim/verilator/Makefile` and `cosim/vcs/Makefile`.
+Both sim testbenches build under either simulator from the same source
+lists (`sim/sources.mk`); simulator-specific flags live in
+`sim/verilator/Makefile` and `sim/vcs/Makefile`.
 
 ~~~bash
-cd cosim/verilator && make run-genamba   # Verilator (Windows + Linux)
-cd cosim/vcs       && make run-genamba   # VCS (Linux workstation only)
+cd sim/verilator && make run-genamba   # Verilator (Windows + Linux)
+cd sim/vcs       && make run-genamba   # VCS (Linux workstation only)
 ~~~
 
 Layout of the split:
 
-- `cosim/sources.mk` -- simulator-neutral file lists, include dirs,
+- `sim/sources.mk` -- simulator-neutral file lists, include dirs,
   `+define+`s.
-- `cosim/verilator/` -- Verilator flags, the C++ main drivers (`main.cpp`
+- `sim/verilator/` -- Verilator flags, the C++ main drivers (`main.cpp`
   drives tb_top's clock; `main_genamba.cpp` is an eval loop), and the
   Verilator 5.036 workarounds (`--output-split 0`, backslash-path sed,
   `$(EXEEXT)`).
-- `cosim/vcs/` -- VCS flags only. No C++ main: VCS owns simulation time.
+- `sim/vcs/` -- VCS flags only. No C++ main: VCS owns simulation time.
   tb_genamba is self-clocked already; tb_top is wrapped by
-  `cosim/sv/tb_top_vcs.sv` (clock + reset + timeout + final-block
+  `sim/sv/tb_top_vcs.sv` (clock + reset + timeout + final-block
   finalize, mirroring `main.cpp`). Adjust the `[WORKSTATION]` block in
-  `cosim/vcs/Makefile` (vcs path, license, site flags) before first use.
+  `sim/vcs/Makefile` (vcs path, license, site flags) before first use.
 
 The vendored-task patches (B-latch reads, R-shadow array) are
 simulator-neutral and identical under both flows. The `SIM=vcs` path has
@@ -245,7 +245,7 @@ been dry-run validated only -- first run on a real VCS install pending.
 Opt-in per run; default off (regression and ctest are unaffected):
 
 ~~~bash
-cd cosim/vcs
+cd sim/vcs
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat FSDB=1   # -> output/<scenario>/tb_top.fsdb
 make run-genamba FSDB=1                                   # -> output/genamba_<scenario>/tb_genamba.fsdb
 make run-all-fsdb                                         # all 37 scenarios + genamba, summary at end
@@ -253,7 +253,7 @@ make run-all-fsdb                                         # all 37 scenarios + g
 
 Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
 workstation's install, taken from its local reference Makefile -- untracked
-`cosim/ref/`); override it if the layout
+`sim/ref/`); override it if the layout
 differs. FSDB builds produce separate `simv_tb_top_fsdb` / `simv_genamba_fsdb`
 binaries beside the normal ones; toggling `FSDB` never reuses a binary from
 the other mode.
@@ -265,7 +265,7 @@ patterns are reported and their partial fsdb is kept for debug.
 `AX4-INF-*` failures are annotated "fails by design" in the summary.
 
 First-run validation on the workstation (record results in the
-`[WORKSTATION]` block of `cosim/vcs/Makefile`):
+`[WORKSTATION]` block of `sim/vcs/Makefile`):
 
 1. `FSDB_PLI` paths exist (`$VERDI_HOME/share/PLI/VCS/LINUXAMD64/{novas.tab,pli.a}`).
 2. Whether `LD_LIBRARY_PATH` needs the FSDB runtime libs.
@@ -278,7 +278,7 @@ Twin of the FSDB flow for the Verilator side -- usable on the Windows dev
 host without VCS/Verdi. Opt-in per run; default off:
 
 ~~~bash
-cd cosim/verilator
+cd sim/verilator
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat TRACE=1  # -> output/<scenario>/tb_top.vcd
 make run-genamba TRACE=1                                 # -> output/genamba_<scenario>/tb_genamba.vcd
 make run-all-trace                                       # all 37 scenarios + genamba, summary at end
@@ -327,7 +327,7 @@ not passed as flags:
   (FetchContent_MakeAvailable + gtest 1.14).
 - **std::filesystem**: g++ 8.x keeps it in a separate library; the build links
   `stdc++fs` automatically for GCC < 9 (CMake via `CMAKE_CXX_COMPILER_VERSION`,
-  cosim Makefiles via the compiler's `-dumpversion`). g++ >= 9 and non-GCC need
+  sim Makefiles via the compiler's `-dumpversion`). g++ >= 9 and non-GCC need
   nothing. (RHEL/CentOS 7's g++ 4.8 is too old for C++17 entirely -- use
   `scl enable devtoolset-N bash` and run everything in that shell.)
 - **Offline deps**: see below -- auto-engages if `~/noc_offline_deps` exists.
@@ -462,13 +462,13 @@ template authoring, and extension guide.
    not provide an actual data file.
 
 4. Run `make check`. The scenario is picked up automatically by both
-   the c_model integration test and the cosim integration test via
+   the c_model integration test and the sim integration test via
    CMake `CONFIGURE_DEPENDS`.
 
 5. INF-prefix scenarios are skipped from both run-all paths (marker
    `INF_DEDICATED_TEST`, set in
    `c_model/tests/axi/test_integration.cpp:87` and
-   `cosim/tests/test_cosim_integration.cpp:61`) and should only be
+   `sim/tests/test_cosim_integration.cpp:61`) and should only be
    exercised through their dedicated test.
 
 6. Commit with a body paragraph citing the IHI 0022H section or
@@ -505,7 +505,7 @@ naming convention `test_<subject>.cpp`. Every new file must:
 
 Unit tests exercise one component in isolation using fakes or stubs for
 collaborators. Integration tests exercise the full c_model pipeline or
-the full cosim harness. Prefer unit tests for new logic; add an
+the full sim harness. Prefer unit tests for new logic; add an
 integration test only when the interaction between components is the
 property under test.
 
@@ -519,16 +519,16 @@ Before suspecting c_model or checker bugs, run the default scenario
 and inspect the log:
 
 ~~~bash
-cd cosim/verilator && make run-tb-top   # AX4-BAS-003_single_write_read_aligned
-cat cosim/verilator/output/AX4-BAS-003_single_write_read_aligned/run.log
+cd sim/verilator && make run-tb-top   # AX4-BAS-003_single_write_read_aligned
+cat sim/verilator/output/AX4-BAS-003_single_write_read_aligned/run.log
 ~~~
 
 A passing run ends with `$finish` and no assertion failure lines.
 
-### ctest path for cosim tests
+### ctest path for sim tests
 
-The cosim ctest executables are registered in `build/cmodel/` by the
-CMake configuration that includes cosim tests. To run cosim tests
+The sim ctest executables are registered in `build/cmodel/` by the
+CMake configuration that includes sim tests. To run sim tests
 directly:
 
 ~~~bash
@@ -536,8 +536,8 @@ cd build/cmodel
 ctest -R Cosim --output-on-failure       # matches CosimIntegration
 ~~~
 
-The cosim ctest name (PascalCase) is `CosimIntegration` (see
-`cosim/tests/CMakeLists.txt`). `ctest -R` matches against test names
+The sim ctest name (PascalCase) is `CosimIntegration` (see
+`sim/tests/CMakeLists.txt`). `ctest -R` matches against test names
 with a regex, so `-R cosim` (lowercase) matches zero tests.
 
 The Vtb_top binary must be built (`make build-verilator`) before cosim
@@ -545,13 +545,13 @@ ctests can run.
 
 ### Vtb_top output log
 
-Vtb_top writes run.log to `cosim/verilator/output/<SCENARIO>/run.log` when
+Vtb_top writes run.log to `sim/verilator/output/<SCENARIO>/run.log` when
 invoked via `make run-tb-top`. When invoked via ctest, output goes to stdout, captured
 by `--output-on-failure`.
 
 ### NmuShellAdapter multi-beat unit test
 
-The multi-beat W burst coverage path through the cosim adapter layer is
+The multi-beat W burst coverage path through the sim adapter layer is
 exercised by:
 
 ~~~bash
@@ -564,7 +564,7 @@ individually visible on the wire bundle at successive ticks.
 
 ### gen_amba role-1 testbench
 
-The gen_amba role-1 testbench (`tb_genamba`) is a separate cosim target
+The gen_amba role-1 testbench (`tb_genamba`) is a separate sim target
 from `tb_top`. It drives the NMU/NSU bridge with a gen_amba golden master
 BFM through seven AXI4 patterns (baseline, burst, outstanding, outstanding
 burst, same-ID, mixed R+W, deep pressure) -- see
@@ -574,7 +574,7 @@ for the design and the matching findings document for the Phase 1 outcome.
 Build + run from repo root:
 
 ~~~bash
-cd cosim/verilator
+cd sim/verilator
 make run-genamba                                     # default scenario
 make run-genamba GENAMBA_SCENARIO=AX4-BUR-002_incr_8beat  # override
 ~~~
@@ -594,7 +594,7 @@ Per-cycle AW/W/B/AR/R handshake dumps are gated behind
 bring-up debug:
 
 ~~~bash
-make -C cosim/verilator clean-genamba run-genamba \
+make -C sim/verilator clean-genamba run-genamba \
     VERILATOR_EXTRA_FLAGS=+define+GENAMBA_DBG_AXI
 ~~~
 
@@ -605,7 +605,7 @@ but if you're in a non-Git-Bash shell (PowerShell / cmd) call the wrapper
 directly:
 
 ~~~bash
-./cosim/verilator/run_genamba.sh \
+./sim/verilator/run_genamba.sh \
     +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
 ~~~
 
@@ -632,7 +632,7 @@ Before opening a PR or merging a branch:
 ## 9. References
 
 - `docs/architecture.md` -- system context, component map, tick
-  discipline, cosim boundary.
+  discipline, sim boundary.
 - `tests/scenarios/README.md` -- scenario naming convention, YAML
   schema, IHI 0022H section coverage table.
 - `specgen/docs/guide/index.md` -- specgen sub-project guide.

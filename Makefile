@@ -2,8 +2,8 @@
 #
 # Convention: the root builds (c_model + Verilator) and runs lint/test
 # gates; SIMULATION runs from each simulator's own directory:
-#   cd cosim/verilator && make run-genamba / run-tb-top   (Windows + Linux)
-#   cd cosim/vcs       && make run-genamba / run-tb-top   (Linux workstation)
+#   cd sim/verilator && make run-genamba / run-tb-top   (Windows + Linux)
+#   cd sim/vcs       && make run-genamba / run-tb-top   (Linux workstation)
 # Run logs land in cosim/<sim>/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
@@ -14,8 +14,8 @@
 CMODEL_DIR      := c_model
 BUILD_ROOT      := build
 CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
-COSIM_VERILATOR := cosim/verilator
-COSIM_VCS       := cosim/vcs
+COSIM_VERILATOR := sim/verilator
+COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
@@ -27,10 +27,10 @@ help:
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
 	@echo "Simulate (from each simulator's directory):"
-	@echo "  cd cosim/verilator && make run-genamba                  gen_amba role-1 (Tasks A-G)"
-	@echo "  cd cosim/verilator && make run-tb-top                   wb2axip cosim, default scenario"
-	@echo "  cd cosim/verilator && make run-tb-top SCENARIO=<ax4-id> specific scenario"
-	@echo "  cd cosim/vcs       && make run-genamba / run-tb-top     VCS (Linux workstation)"
+	@echo "  cd sim/verilator && make run-genamba                  gen_amba role-1 (Tasks A-G)"
+	@echo "  cd sim/verilator && make run-tb-top                   wb2axip cosim, default scenario"
+	@echo "  cd sim/verilator && make run-tb-top SCENARIO=<ax4-id> specific scenario"
+	@echo "  cd sim/vcs       && make run-genamba / run-tb-top     VCS (Linux workstation)"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -39,8 +39,8 @@ help:
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/)"
 	@echo "  make clean-cmodel           build/cmodel/"
-	@echo "  make clean-verilator        build/verilator/ + cosim/verilator/output/"
-	@echo "  make clean-vcs              build/vcs/ + cosim/vcs/output/ + Verdi droppings"
+	@echo "  make clean-verilator        build/verilator/ + sim/verilator/output/"
+	@echo "  make clean-vcs              build/vcs/ + sim/vcs/output/ + Verdi droppings"
 	@echo "  make clean-specgen-cache    specgen __pycache__/"
 
 # --- build ---
@@ -156,7 +156,7 @@ clean-verilator:
 	$(MAKE) -C $(COSIM_VERILATOR) clean
 
 clean-vcs:
-	$(MAKE) -C cosim/vcs clean
+	$(MAKE) -C sim/vcs clean
 
 clean-specgen-cache:
 	find specgen -type d -name __pycache__ -prune -exec rm -rf {} +

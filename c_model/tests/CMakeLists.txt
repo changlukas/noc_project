@@ -35,7 +35,7 @@ add_subdirectory(router)
 # Vtb_top gets 2 additional test targets (CosimIntegration, CheckerLiveness).
 if(EXISTS "${CMAKE_SOURCE_DIR}/../build/verilator/obj_dir/Vtb_top.exe"
    OR EXISTS "${CMAKE_SOURCE_DIR}/../build/verilator/obj_dir/Vtb_top")
-    add_subdirectory(${CMAKE_SOURCE_DIR}/../cosim/tests
+    add_subdirectory(${CMAKE_SOURCE_DIR}/../sim/tests
                      ${CMAKE_BINARY_DIR}/cosim_smoke_tests)
 else()
     message(STATUS
