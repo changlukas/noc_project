@@ -363,7 +363,7 @@ TEST(AxiMasterCallbacks, FanoutAndIssueBeforeCompletion) {
 > `memory.hpp` (Memory takes base/size/write_latency_ticks/read_latency_ticks;
 > AxiMaster takes scenario/slave/read_dump_path/max_w/max_r). The inline YAML
 > field names must match `scenario_parser.hpp`; if the parser rejects a key,
-> align it with an existing `tests/scenarios/AX4-BAS-*/scenario.yaml`. The
+> align it with an existing `sim/test_patterns/AX4-BAS-*/scenario.yaml`. The
 > assertions are the contract.
 
 - [ ] **Step 2: Register and run to verify it fails**

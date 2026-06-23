@@ -18,7 +18,7 @@ Synopsys/Verdi format only VCS can emit; the Verilator flow is left untouched.
 
 - No waveform dumping of any kind exists today — no `$dumpfile`/`$fsdbDumpfile`,
   no `--trace`/`VerilatedVcdC`, no `-debug_access`/`novas.tab`/`-lfsdb`.
-- "Patterns" for `tb_top` are the scenario tree `tests/scenarios/AX4-*/scenario.yaml`
+- "Patterns" for `tb_top` are the scenario tree `sim/test_patterns/AX4-*/scenario.yaml`
   (37 scenarios), selected at runtime via the `+scenario=<abs-path>` plusarg.
 - `tb_genamba` runs a fixed in-line BFM task program in a single simulation; the
   scenario only seeds the C-model config. Its "pattern" granularity is therefore
@@ -120,7 +120,7 @@ files untouched, which is acceptable: no new run happened.)
    - `FSDB=1` errors out early with a clear message if `VERDI_HOME` is unset
      or the default path does not exist on the host.
 4. New batch target `run-all-fsdb`:
-   - enumerate scenarios via `$(notdir $(wildcard <repo>/tests/scenarios/AX4-*))`.
+   - enumerate scenarios via `$(notdir $(wildcard <repo>/sim/test_patterns/AX4-*))`.
    - loop with explicit exit-code capture (`if $(MAKE) run-tb-top SCENARIO=$$s
      FSDB=1; then ...; else ...; fi` — NOT `|| true`, which destroys the status),
      collecting pass/fail lists.

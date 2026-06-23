@@ -116,7 +116,7 @@ not alignment indent.
 ### YAML schema
 
 Scenario YAML files must conform to the schema in
-`tests/scenarios/README.md`. Required fields: `schema_version: 1`,
+`sim/test_patterns/README.md`. Required fields: `schema_version: 1`,
 `metadata.name`, `metadata.category`. The `name` field must equal the
 parent directory basename. Category code must agree with the `CAT`
 prefix in the directory name.
@@ -125,7 +125,7 @@ prefix in the directory name.
 
 - Encoding: UTF-8, no BOM.
 - Maintained docs (README.md, docs/architecture.md, docs/development.md,
-  docs/internal/_archive/README.md, tests/scenarios/README.md)
+  docs/internal/_archive/README.md, sim/test_patterns/README.md)
   must be ASCII-only. The `lint_docs` target enforces this.
 - Headings: sentence case (only first word and proper nouns capitalized).
 - Link paths: forward slash `/` separator.
@@ -417,7 +417,7 @@ template authoring, and extension guide.
    (NNN) within that category. Create the directory:
 
    ~~~bash
-   mkdir tests/scenarios/AX4-CAT-NNN_my_slug
+   mkdir sim/test_patterns/AX4-CAT-NNN_my_slug
    ~~~
 
 2. Write `scenario.yaml` with `schema_version: 1` and a full
@@ -582,7 +582,7 @@ directly:
 
 ~~~bash
 ./sim/verilator/run_genamba.sh \
-    +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
+    +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
 ~~~
 
 ---
@@ -609,7 +609,7 @@ Before opening a PR or merging a branch:
 
 - `docs/architecture.md` -- system context, component map, tick
   discipline, sim boundary.
-- `tests/scenarios/README.md` -- scenario naming convention, YAML
+- `sim/test_patterns/README.md` -- scenario naming convention, YAML
   schema, IHI 0022H section coverage table.
 - `specgen/docs/guide/index.md` -- specgen sub-project guide.
 - `docs/internal/_archive/README.md` -- historical archive index and doc class

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Flatten `tests/scenarios/` to AX4-CAT-NNN_slug IDs, add YAML metadata + parser strict mode, share scenario list via CMake glob, replace wb2axip-blocked maintenance with a runtime predicate, add 5 spec-gap patterns.
+**Goal:** Flatten `sim/test_patterns/` to AX4-CAT-NNN_slug IDs, add YAML metadata + parser strict mode, share scenario list via CMake glob, replace wb2axip-blocked maintenance with a runtime predicate, add 5 spec-gap patterns.
 
 **Architecture:** Four commits. Commit 1 lands infra (parser strict mode + helpers + CMake scaffold + lint script) without touching scenarios. Commit 2 is the atomic migration (31 renames + metadata + lint hookup + 5 cpp file rewrites + cosim test rename). Commit 3 adds 5 new spec-gap patterns. Commit 4 rewrites README.
 
@@ -26,9 +26,9 @@
 
 | Path | Responsibility |
 |---|---|
-| `tests/scenarios/CMakeLists.txt` | CMake glob over `AX4-*/scenario.yaml`, generate `scenarios_list.hpp`, expose `noc_axi4_scenarios` INTERFACE library |
-| `tests/scenarios/scenarios_list.hpp.in` | Template for generated header (`std::array<std::string_view, N> kAllAxi4Scenarios`) |
-| `tests/scenarios/scenario_helpers.hpp` | `RequireKnownScenario(id)` — abort on unknown ID at startup; for scoped tests |
+| `sim/test_patterns/CMakeLists.txt` | CMake glob over `AX4-*/scenario.yaml`, generate `scenarios_list.hpp`, expose `noc_axi4_scenarios` INTERFACE library |
+| `sim/test_patterns/scenarios_list.hpp.in` | Template for generated header (`std::array<std::string_view, N> kAllAxi4Scenarios`) |
+| `sim/test_patterns/scenario_helpers.hpp` | `RequireKnownScenario(id)` — abort on unknown ID at startup; for scoped tests |
 | `cosim/tests/wb2axip_block.hpp` | `wb2axip_block_reason(Scenario const&)` — runtime predicate for cosim integration test |
 | `cosim/tests/test_wb2axip_block.cpp` | Unit tests for the predicate |
 | `c_model/tests/axi/test_scenario_metadata.cpp` | Unit tests for new metadata parsing |
@@ -41,16 +41,16 @@
 | `c_model/include/axi/scenario_parser.hpp` | Add `Metadata` struct, `Scenario::metadata`, `schema_version` gating, strict-mode validation; wrap field loads with path/field/value context |
 | `c_model/tests/axi/CMakeLists.txt` | Register `test_scenario_metadata` |
 | `cosim/tests/CMakeLists.txt` | Register `test_wb2axip_block` |
-| `CMakeLists.txt` (top-level) | `add_subdirectory(tests/scenarios)` |
+| `CMakeLists.txt` (top-level) | `add_subdirectory(sim/test_patterns)` |
 
 ### Files modified (commit 2 — atomic migration)
 
 | Path | Change |
 |---|---|
-| `tests/scenarios/AX4-*/scenario.yaml` × 31 | Move from `common/`, `c-model-only/`, `sv-cosim-only/`; add `schema_version: 1` + `metadata:` block |
-| `tests/scenarios/AX4-INF-001_dpi_fatal_on_init_failure/scenario.yaml` | Renamed from `sv-cosim-only/injection_aw_unstable/`; reclassified |
-| `tests/scenarios/AX4-RSP-003_burst_crosses_oob_boundary/data.txt` | New inlined copy (was relative path to `common/burst_incr_2beat/data.txt`) |
-| (deleted) `tests/scenarios/sv-cosim-only/debug_multi1/` | Removed entirely |
+| `sim/test_patterns/AX4-*/scenario.yaml` × 31 | Move from `common/`, `c-model-only/`, `sv-cosim-only/`; add `schema_version: 1` + `metadata:` block |
+| `sim/test_patterns/AX4-INF-001_dpi_fatal_on_init_failure/scenario.yaml` | Renamed from `sv-cosim-only/injection_aw_unstable/`; reclassified |
+| `sim/test_patterns/AX4-RSP-003_burst_crosses_oob_boundary/data.txt` | New inlined copy (was relative path to `common/burst_incr_2beat/data.txt`) |
+| (deleted) `sim/test_patterns/sv-cosim-only/debug_multi1/` | Removed entirely |
 | `c_model/tests/axi/test_integration.cpp` | Use `kAllAxi4Scenarios`, load-then-INF-skip ordering, name generator |
 | `cosim/tests/test_cosim_integration.cpp` | Renamed from `test_cosim_wire_smoke.cpp`, label `WireSmoke` → `CosimIntegration`, use `kAllAxi4Scenarios` + `wb2axip_block_reason()` |
 | `c_model/tests/integration/test_port_pair_loopback.cpp` | String-replace IDs, wrap with `RequireKnownScenario()` |
@@ -65,17 +65,17 @@
 
 | Path | Responsibility |
 |---|---|
-| `tests/scenarios/AX4-BUR-003_incr_len_256/` | New: IHI 0022H §A3.4.1 AxLEN=255 |
-| `tests/scenarios/AX4-BUR-007_wrap_len_2/` | New: IHI 0022H §A3.4.1 WRAP len=1 (2-beat) |
-| `tests/scenarios/AX4-BUR-008_wrap_len_4/` | New: IHI 0022H §A3.4.1 WRAP len=3 (4-beat) |
-| `tests/scenarios/AX4-BUR-009_wrap_len_16/` | New: IHI 0022H §A3.4.1 WRAP len=15 (16-beat) |
-| `tests/scenarios/AX4-BND-007_4kb_boundary_edges/` | New: IHI 0022H §A3.4.1 4 KB boundary exact-end / would-cross |
+| `sim/test_patterns/AX4-BUR-003_incr_len_256/` | New: IHI 0022H §A3.4.1 AxLEN=255 |
+| `sim/test_patterns/AX4-BUR-007_wrap_len_2/` | New: IHI 0022H §A3.4.1 WRAP len=1 (2-beat) |
+| `sim/test_patterns/AX4-BUR-008_wrap_len_4/` | New: IHI 0022H §A3.4.1 WRAP len=3 (4-beat) |
+| `sim/test_patterns/AX4-BUR-009_wrap_len_16/` | New: IHI 0022H §A3.4.1 WRAP len=15 (16-beat) |
+| `sim/test_patterns/AX4-BND-007_4kb_boundary_edges/` | New: IHI 0022H §A3.4.1 4 KB boundary exact-end / would-cross |
 
 ### Files modified (commit 4)
 
 | Path | Change |
 |---|---|
-| `tests/scenarios/README.md` | Full rewrite per spec §6 |
+| `sim/test_patterns/README.md` | Full rewrite per spec §6 |
 
 ---
 
@@ -308,13 +308,13 @@ Expected: all pre-existing tests still PASS (lenient mode preserved).
 ### Task 3: CMake glob + INTERFACE library
 
 **Files:**
-- Create: `tests/scenarios/CMakeLists.txt`
-- Create: `tests/scenarios/scenarios_list.hpp.in`
-- Modify: `CMakeLists.txt` (top-level) — add `add_subdirectory(tests/scenarios)`
+- Create: `sim/test_patterns/CMakeLists.txt`
+- Create: `sim/test_patterns/scenarios_list.hpp.in`
+- Modify: `CMakeLists.txt` (top-level) — add `add_subdirectory(sim/test_patterns)`
 
 - [ ] **Step 1: Create template header**
 
-`tests/scenarios/scenarios_list.hpp.in`:
+`sim/test_patterns/scenarios_list.hpp.in`:
 
 ```cpp
 #pragma once
@@ -332,7 +332,7 @@ inline constexpr std::array<std::string_view, @scenario_count@>
 
 - [ ] **Step 2: Create CMakeLists.txt**
 
-`tests/scenarios/CMakeLists.txt`:
+`sim/test_patterns/CMakeLists.txt`:
 
 ```cmake
 # Generates scenarios_list.hpp by globbing AX4-* directories.
@@ -362,13 +362,13 @@ target_sources(noc_axi4_scenarios INTERFACE
 
 - [ ] **Step 3: Wire into top-level CMakeLists.txt**
 
-Edit top-level `CMakeLists.txt` — add `add_subdirectory(tests/scenarios)` near
+Edit top-level `CMakeLists.txt` — add `add_subdirectory(sim/test_patterns)` near
 the other `add_subdirectory(...)` calls for c_model / cosim.
 
 - [ ] **Step 4: Verify generated header exists**
 
 Run: `cmake -S . -B build && cmake --build build`
-Run: `ls build/tests/scenarios/generated/scenarios_list.hpp`
+Run: `ls build/sim/test_patterns/generated/scenarios_list.hpp`
 Expected: file exists; `scenario_count` is `0` because no AX4-* dirs exist yet.
 
 Inspect the file:
@@ -550,7 +550,7 @@ Run: `clang-format -i cosim/tests/wb2axip_block.hpp cosim/tests/test_wb2axip_blo
 ### Task 5: `RequireKnownScenario()` helper
 
 **Files:**
-- Create: `tests/scenarios/scenario_helpers.hpp`
+- Create: `sim/test_patterns/scenario_helpers.hpp`
 
 This helper has no unit test of its own — its abort behavior is hard to test
 in-process without spawning a subprocess. Validation comes from compile-time
@@ -558,7 +558,7 @@ membership check in commit 2 when scoped tests use it.
 
 - [ ] **Step 1: Implement helper**
 
-`tests/scenarios/scenario_helpers.hpp`:
+`sim/test_patterns/scenario_helpers.hpp`:
 
 ```cpp
 #pragma once
@@ -580,7 +580,7 @@ inline std::string_view RequireKnownScenario(std::string_view id) {
     if (it == kAllAxi4Scenarios.end()) {
         std::fprintf(stderr,
                      "FATAL: unknown scenario id '%.*s' "
-                     "(not in tests/scenarios/AX4-*)\n",
+                     "(not in sim/test_patterns/AX4-*)\n",
                      int(id.size()), id.data());
         std::abort();
     }
@@ -610,7 +610,7 @@ The test depends on `noc_axi4_scenarios` — link it in
 target_link_libraries(test_scenario_metadata PRIVATE
     gtest_main noc_axi4_scenarios)
 target_include_directories(test_scenario_metadata PRIVATE
-    "${CMAKE_SOURCE_DIR}/../tests/scenarios")  # for scenario_helpers.hpp
+    "${CMAKE_SOURCE_DIR}/../sim/test_patterns")  # for scenario_helpers.hpp
 ```
 
 - [ ] **Step 3: Build + run**
@@ -620,7 +620,7 @@ Expected: PASS, `kAllAxi4Scenarios.size() == 0` confirmed.
 
 - [ ] **Step 4: clang-format**
 
-Run: `clang-format -i tests/scenarios/scenario_helpers.hpp`
+Run: `clang-format -i sim/test_patterns/scenario_helpers.hpp`
 
 ### Task 6: Lint script (standalone, not yet wired)
 
@@ -633,7 +633,7 @@ Run: `clang-format -i tests/scenarios/scenario_helpers.hpp`
 
 ```python
 #!/usr/bin/env python3
-"""Lint tests/scenarios/ — 8 invariants per design spec §5.7.
+"""Lint sim/test_patterns/ — 8 invariants per design spec §5.7.
 
 Exits 0 on clean, prints errors and exits 1 on any violation.
 """
@@ -709,7 +709,7 @@ def main() -> int:
     # Skipped in commit 1 (zero AX4-* dirs is the legitimate transient state);
     # the lint becomes mandatory in commit 2.
     if "--require-nonempty" in sys.argv and ax4_count == 0:
-        errors.append("tests/scenarios/ contains zero AX4-* dirs")
+        errors.append("sim/test_patterns/ contains zero AX4-* dirs")
 
     if errors:
         for e in errors:
@@ -751,7 +751,7 @@ clang-format -i c_model/include/axi/scenario_parser.hpp \
                 c_model/tests/axi/test_scenario_metadata.cpp \
                 cosim/tests/wb2axip_block.hpp \
                 cosim/tests/test_wb2axip_block.cpp \
-                tests/scenarios/scenario_helpers.hpp
+                sim/test_patterns/scenario_helpers.hpp
 ```
 
 - [ ] **Step 3: Stage + commit**
@@ -763,9 +763,9 @@ git add c_model/include/axi/scenario_parser.hpp \
         cosim/tests/wb2axip_block.hpp \
         cosim/tests/test_wb2axip_block.cpp \
         cosim/tests/CMakeLists.txt \
-        tests/scenarios/CMakeLists.txt \
-        tests/scenarios/scenarios_list.hpp.in \
-        tests/scenarios/scenario_helpers.hpp \
+        sim/test_patterns/CMakeLists.txt \
+        sim/test_patterns/scenarios_list.hpp.in \
+        sim/test_patterns/scenario_helpers.hpp \
         tools/lint_scenarios.py \
         CMakeLists.txt
 
@@ -779,13 +779,13 @@ schema_version load via lenient mode unchanged.
 Additions:
 - scenario_parser strict mode (schema_version: 1 gated): Metadata struct
   with name/category, AX4-CAT-NNN_slug regex, CAT-category mapping.
-- tests/scenarios/CMakeLists.txt: file(GLOB CONFIGURE_DEPENDS) over
+- sim/test_patterns/CMakeLists.txt: file(GLOB CONFIGURE_DEPENDS) over
   AX4-*/scenario.yaml; generates scenarios_list.hpp with kAllAxi4Scenarios
   (empty array in commit 1, populated as commit 2 migration lands).
 - noc_axi4_scenarios INTERFACE library.
 - cosim/tests/wb2axip_block.hpp: 4-condition runtime predicate after
   faxi_slave.v audit (max_outstanding_write>1, len>0, Exclusive, inject).
-- tests/scenarios/scenario_helpers.hpp: RequireKnownScenario aborts on
+- sim/test_patterns/scenario_helpers.hpp: RequireKnownScenario aborts on
   unknown id at startup; used by scoped tests in commit 2.
 - tools/lint_scenarios.py: 8 invariants (not yet wired to make check).
 
@@ -878,7 +878,7 @@ For each row in the rename map (31 rows excluding INF-001's slug rename):
 
 Example for BUR-001:
 ```bash
-git mv tests/scenarios/common/burst_incr_2beat tests/scenarios/AX4-BUR-001_incr_2beat
+git mv sim/test_patterns/common/burst_incr_2beat sim/test_patterns/AX4-BUR-001_incr_2beat
 ```
 
 Repeat for all 31. Use a shell loop reading the rename map for efficiency.
@@ -895,7 +895,7 @@ metadata:
 
 ```
 
-Example, for `tests/scenarios/AX4-BUR-001_incr_2beat/scenario.yaml`:
+Example, for `sim/test_patterns/AX4-BUR-001_incr_2beat/scenario.yaml`:
 
 ```yaml
 schema_version: 1
@@ -921,7 +921,7 @@ INF → infrastructure
 
 Run:
 ```bash
-for d in tests/scenarios/AX4-*; do
+for d in sim/test_patterns/AX4-*; do
   py -3 -c "import yaml; yaml.safe_load(open('$d/scenario.yaml'))" || echo "FAIL: $d"
 done
 ```
@@ -944,7 +944,7 @@ test code (the only test that referenced it should be removable).
 - [ ] **Step 2: `git rm` the directory**
 
 ```bash
-git rm -r tests/scenarios/sv-cosim-only/debug_multi1
+git rm -r sim/test_patterns/sv-cosim-only/debug_multi1
 ```
 
 - [ ] **Step 3: Re-grep to confirm zero hits**
@@ -955,14 +955,14 @@ Expected: zero matches.
 ### Task 11: Rename + reclassify INF-001
 
 **Files:**
-- Move: `tests/scenarios/sv-cosim-only/injection_aw_unstable/` → `tests/scenarios/AX4-INF-001_dpi_fatal_on_init_failure/`
+- Move: `sim/test_patterns/sv-cosim-only/injection_aw_unstable/` → `sim/test_patterns/AX4-INF-001_dpi_fatal_on_init_failure/`
 - Modify: the YAML inside
 
 - [ ] **Step 1: `git mv` the directory**
 
 ```bash
-git mv tests/scenarios/sv-cosim-only/injection_aw_unstable \
-       tests/scenarios/AX4-INF-001_dpi_fatal_on_init_failure
+git mv sim/test_patterns/sv-cosim-only/injection_aw_unstable \
+       sim/test_patterns/AX4-INF-001_dpi_fatal_on_init_failure
 ```
 
 - [ ] **Step 2: Add metadata block to its scenario.yaml**
@@ -986,14 +986,14 @@ After flatten this path is broken (and even if updated, cross-scenario reuse
 fights the flat layout per spec §7).
 
 **Files:**
-- Modify: `tests/scenarios/AX4-RSP-003_burst_crosses_oob_boundary/scenario.yaml`
-- Create: `tests/scenarios/AX4-RSP-003_burst_crosses_oob_boundary/data.txt`
+- Modify: `sim/test_patterns/AX4-RSP-003_burst_crosses_oob_boundary/scenario.yaml`
+- Create: `sim/test_patterns/AX4-RSP-003_burst_crosses_oob_boundary/data.txt`
 
 - [ ] **Step 1: Copy data file in**
 
 ```bash
-cp tests/scenarios/AX4-BUR-001_incr_2beat/data.txt \
-   tests/scenarios/AX4-RSP-003_burst_crosses_oob_boundary/data.txt
+cp sim/test_patterns/AX4-BUR-001_incr_2beat/data.txt \
+   sim/test_patterns/AX4-RSP-003_burst_crosses_oob_boundary/data.txt
 ```
 
 - [ ] **Step 2: Update YAML to reference local file**
@@ -1017,8 +1017,8 @@ moved or deleted).
 Run:
 ```bash
 for d in common c-model-only sv-cosim-only; do
-  echo "=== tests/scenarios/$d ==="
-  ls tests/scenarios/$d 2>/dev/null
+  echo "=== sim/test_patterns/$d ==="
+  ls sim/test_patterns/$d 2>/dev/null
 done
 ```
 Expected: `common/`, `c-model-only/`, `sv-cosim-only/` may contain `_data/`
@@ -1031,7 +1031,7 @@ The `_data/` dir holds `data_aa.txt` / `data_bb.txt` used by 3 AX4-BAS-* and
 AX4-HSH-* scenarios that came from sv-cosim-only/. Move to a flat location:
 
 ```bash
-git mv tests/scenarios/sv-cosim-only/_data tests/scenarios/_data
+git mv sim/test_patterns/sv-cosim-only/_data sim/test_patterns/_data
 ```
 
 - [ ] **Step 3: Update affected YAMLs to point at new `_data/` path**
@@ -1043,8 +1043,8 @@ scenarios are now flat at `AX4-*/`).
 - [ ] **Step 4: Remove now-empty legacy dirs**
 
 ```bash
-git rm -r tests/scenarios/common tests/scenarios/c-model-only \
-          tests/scenarios/sv-cosim-only tests/scenarios/cpp-adapter-only
+git rm -r sim/test_patterns/common sim/test_patterns/c-model-only \
+          sim/test_patterns/sv-cosim-only sim/test_patterns/cpp-adapter-only
 ```
 
 - [ ] **Step 5: Update lint to exclude `_data/`**
@@ -1144,7 +1144,7 @@ Edit `c_model/tests/axi/CMakeLists.txt`:
 target_link_libraries(test_integration PRIVATE
     gtest_main noc_axi4_scenarios ...)  # other existing libs preserved
 target_include_directories(test_integration PRIVATE
-    "${CMAKE_SOURCE_DIR}/../tests/scenarios")  # for scenario_helpers.hpp if used
+    "${CMAKE_SOURCE_DIR}/../sim/test_patterns")  # for scenario_helpers.hpp if used
 ```
 
 - [ ] **Step 4: Build + run**
@@ -1318,7 +1318,7 @@ Edit `c_model/tests/integration/CMakeLists.txt`:
 target_link_libraries(test_port_pair_loopback PRIVATE
     noc_axi4_scenarios ...)  # existing libs preserved
 target_include_directories(test_port_pair_loopback PRIVATE
-    "${CMAKE_SOURCE_DIR}/../tests/scenarios")
+    "${CMAKE_SOURCE_DIR}/../sim/test_patterns")
 ```
 
 - [ ] **Step 4: Build + run**
@@ -1434,7 +1434,7 @@ clang-format -i c_model/tests/axi/test_integration.cpp \
 - [ ] **Step 4: Stage everything**
 
 ```bash
-git add tests/scenarios/ \
+git add sim/test_patterns/ \
         c_model/tests/axi/test_integration.cpp \
         c_model/tests/axi/CMakeLists.txt \
         c_model/tests/integration/test_port_pair_loopback.cpp \
@@ -1524,8 +1524,8 @@ preserved.
 ### Task 21: AX4-BUR-003_incr_len_256
 
 **Files:**
-- Create: `tests/scenarios/AX4-BUR-003_incr_len_256/scenario.yaml`
-- Create: `tests/scenarios/AX4-BUR-003_incr_len_256/data.txt`
+- Create: `sim/test_patterns/AX4-BUR-003_incr_len_256/scenario.yaml`
+- Create: `sim/test_patterns/AX4-BUR-003_incr_len_256/data.txt`
 
 - [ ] **Step 1: Write scenario.yaml**
 
@@ -1555,7 +1555,7 @@ Use a one-liner:
 py -3 -c "
 for i in range(256):
     print(' '.join(f'{(i + j) & 0xFF:02x}' for j in range(32)))
-" > tests/scenarios/AX4-BUR-003_incr_len_256/data.txt
+" > sim/test_patterns/AX4-BUR-003_incr_len_256/data.txt
 ```
 
 - [ ] **Step 3: Verify load + lint**
@@ -1569,8 +1569,8 @@ Expected: c_model PASS, cosim SKIP with WB2AXIP_MULTI_BEAT.
 ### Task 22: AX4-BUR-007_wrap_len_2
 
 **Files:**
-- Create: `tests/scenarios/AX4-BUR-007_wrap_len_2/scenario.yaml`
-- Create: `tests/scenarios/AX4-BUR-007_wrap_len_2/data.txt`
+- Create: `sim/test_patterns/AX4-BUR-007_wrap_len_2/scenario.yaml`
+- Create: `sim/test_patterns/AX4-BUR-007_wrap_len_2/data.txt`
 
 - [ ] **Step 1: Write scenario.yaml**
 
@@ -1599,7 +1599,7 @@ transactions:
 py -3 -c "
 for i in range(2):
     print(' '.join(f'{(i*16 + j) & 0xFF:02x}' for j in range(32)))
-" > tests/scenarios/AX4-BUR-007_wrap_len_2/data.txt
+" > sim/test_patterns/AX4-BUR-007_wrap_len_2/data.txt
 ```
 
 - [ ] **Step 3: Verify**
@@ -1610,8 +1610,8 @@ Expected: c_model PASS, cosim SKIP with WB2AXIP_MULTI_BEAT.
 ### Task 23: AX4-BUR-008_wrap_len_4
 
 **Files:**
-- Create: `tests/scenarios/AX4-BUR-008_wrap_len_4/scenario.yaml`
-- Create: `tests/scenarios/AX4-BUR-008_wrap_len_4/data.txt`
+- Create: `sim/test_patterns/AX4-BUR-008_wrap_len_4/scenario.yaml`
+- Create: `sim/test_patterns/AX4-BUR-008_wrap_len_4/data.txt`
 
 - [ ] **Step 1: Write scenario.yaml**
 
@@ -1638,7 +1638,7 @@ transactions:
 py -3 -c "
 for i in range(4):
     print(' '.join(f'{(i*16 + j) & 0xFF:02x}' for j in range(32)))
-" > tests/scenarios/AX4-BUR-008_wrap_len_4/data.txt
+" > sim/test_patterns/AX4-BUR-008_wrap_len_4/data.txt
 ```
 
 - [ ] **Step 3: Verify**
@@ -1649,8 +1649,8 @@ Expected: c_model PASS, cosim SKIP.
 ### Task 24: AX4-BUR-009_wrap_len_16
 
 **Files:**
-- Create: `tests/scenarios/AX4-BUR-009_wrap_len_16/scenario.yaml`
-- Create: `tests/scenarios/AX4-BUR-009_wrap_len_16/data.txt`
+- Create: `sim/test_patterns/AX4-BUR-009_wrap_len_16/scenario.yaml`
+- Create: `sim/test_patterns/AX4-BUR-009_wrap_len_16/data.txt`
 
 - [ ] **Step 1: Write scenario.yaml**
 
@@ -1677,7 +1677,7 @@ transactions:
 py -3 -c "
 for i in range(16):
     print(' '.join(f'{(i*16 + j) & 0xFF:02x}' for j in range(32)))
-" > tests/scenarios/AX4-BUR-009_wrap_len_16/data.txt
+" > sim/test_patterns/AX4-BUR-009_wrap_len_16/data.txt
 ```
 
 - [ ] **Step 3: Verify**
@@ -1688,8 +1688,8 @@ Expected: c_model PASS, cosim SKIP.
 ### Task 25: AX4-BND-007_4kb_boundary_edges
 
 **Files:**
-- Create: `tests/scenarios/AX4-BND-007_4kb_boundary_edges/scenario.yaml`
-- Create: `tests/scenarios/AX4-BND-007_4kb_boundary_edges/data.txt`
+- Create: `sim/test_patterns/AX4-BND-007_4kb_boundary_edges/scenario.yaml`
+- Create: `sim/test_patterns/AX4-BND-007_4kb_boundary_edges/data.txt`
 
 - [ ] **Step 1: Write scenario.yaml**
 
@@ -1723,7 +1723,7 @@ transactions:
 py -3 -c "
 for i in range(4):
     print(' '.join(f'{(i*16 + j) & 0xFF:02x}' for j in range(32)))
-" > tests/scenarios/AX4-BND-007_4kb_boundary_edges/data.txt
+" > sim/test_patterns/AX4-BND-007_4kb_boundary_edges/data.txt
 ```
 
 - [ ] **Step 3: Verify**
@@ -1743,11 +1743,11 @@ Expected: 36 scenarios lint clean; c_model has 36 IntegrationP fixtures
 - [ ] **Step 2: Stage**
 
 ```bash
-git add tests/scenarios/AX4-BUR-003_incr_len_256 \
-        tests/scenarios/AX4-BUR-007_wrap_len_2 \
-        tests/scenarios/AX4-BUR-008_wrap_len_4 \
-        tests/scenarios/AX4-BUR-009_wrap_len_16 \
-        tests/scenarios/AX4-BND-007_4kb_boundary_edges
+git add sim/test_patterns/AX4-BUR-003_incr_len_256 \
+        sim/test_patterns/AX4-BUR-007_wrap_len_2 \
+        sim/test_patterns/AX4-BUR-008_wrap_len_4 \
+        sim/test_patterns/AX4-BUR-009_wrap_len_16 \
+        sim/test_patterns/AX4-BND-007_4kb_boundary_edges
 ```
 
 - [ ] **Step 3: Commit**
@@ -1777,17 +1777,17 @@ EOF
 
 ## Commit 4 — README rewrite
 
-### Task 27: Rewrite `tests/scenarios/README.md`
+### Task 27: Rewrite `sim/test_patterns/README.md`
 
 **Files:**
-- Modify: `tests/scenarios/README.md`
+- Modify: `sim/test_patterns/README.md`
 
 - [ ] **Step 1: Replace contents**
 
-`tests/scenarios/README.md`:
+`sim/test_patterns/README.md`:
 
 ````markdown
-# tests/scenarios — AXI4 Scenario Tree
+# sim/test_patterns — AXI4 Scenario Tree
 
 Single source of truth for AXI4 scenario YAMLs. Both c_model integration test
 (`c_model/tests/axi/test_integration.cpp`) and cosim integration test
@@ -1858,7 +1858,7 @@ the scenario's own directory.
 | `cosim/tests/test_checker_fires_on_violation.cpp` | INF-001 only | n/a |
 
 `kAllAxi4Scenarios` is generated at CMake configure time from
-`tests/scenarios/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
+`sim/test_patterns/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
 Adding a new pattern automatically propagates to both run-all tests on the
 next build.
 
@@ -1870,7 +1870,7 @@ scenarios.
 
 ## Adding a new scenario
 
-1. Pick CAT + next NNN; create `tests/scenarios/AX4-CAT-NNN_slug/`
+1. Pick CAT + next NNN; create `sim/test_patterns/AX4-CAT-NNN_slug/`
 2. Write `scenario.yaml` with `schema_version: 1` and full `metadata:` block
 3. Add `data.txt` (and any other data files referenced)
 4. Run `make check` — lint + both integration tests pick it up automatically
@@ -1897,7 +1897,7 @@ scenarios.
 - [ ] **Step 2: Commit**
 
 ```bash
-git add tests/scenarios/README.md
+git add sim/test_patterns/README.md
 git commit -m "$(cat <<'EOF'
 docs(scenarios): rewrite README for AX4-CAT-NNN_slug + CMake-glob sharing
 
@@ -1932,7 +1932,7 @@ Expected: everything still passes — README is doc-only.
 
 - It does not write `tools/lint_scenarios.py` to validate `config` / `transactions` schema beyond `metadata`. The C++ parser remains the authoritative schema validator. Lint is intentionally metadata-focused (per Codex Finding 8 of Section 3 round).
 - It does not change `scenario_parser`'s behavior on legacy YAMLs (no `schema_version` field) — those continue to load unchanged. Future rounds may tighten this.
-- It does not address tests beyond the 5 listed consumer test files. If another test starts consuming `tests/scenarios/` after this round, it must adopt `RequireKnownScenario` or join the run-all population.
+- It does not address tests beyond the 5 listed consumer test files. If another test starts consuming `sim/test_patterns/` after this round, it must adopt `RequireKnownScenario` or join the run-all population.
 
 ## Out of scope (deferred to later rounds)
 

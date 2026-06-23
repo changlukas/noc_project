@@ -11,8 +11,8 @@
 - co-sim = `sim/` 的模擬,由 sim-owned regress runner 跑。
 
 ## ① File-tree:scenario 資料搬家
-- `tests/scenarios/` → `sim/test_patterns/`;**刪頂層 `tests/`**(它只裝資料卻叫 tests)。
-- 更新所有 consumer 的路徑(c_model tests 反向引用 `sim/test_patterns`,user 已接受此耦合):`c_model/tests/{axi,integration,wrap}/*`、`c_model/CMakeLists.txt`、`scenarios_list` 生成(原 `tests/scenarios/CMakeLists.txt` + `scenarios_list.hpp.in` 隨之移至 `sim/test_patterns/`)、`tools/lint_scenarios.py` 路徑、root `Makefile`。
+- `sim/test_patterns/` → `sim/test_patterns/`;**刪頂層 `tests/`**(它只裝資料卻叫 tests)。
+- 更新所有 consumer 的路徑(c_model tests 反向引用 `sim/test_patterns`,user 已接受此耦合):`c_model/tests/{axi,integration,wrap}/*`、`c_model/CMakeLists.txt`、`scenarios_list` 生成(原 `sim/test_patterns/CMakeLists.txt` + `scenarios_list.hpp.in` 隨之移至 `sim/test_patterns/`)、`tools/lint_scenarios.py` 路徑、root `Makefile`。
 
 ## ② File-tree:co-sim 移出 ctest
 - 退役 `sim/tests/test_cosim_integration.cpp`(ctest 膠水)與 `sim/tests/`(命名把模擬當 tests)。
@@ -41,7 +41,7 @@
 - **local untracked scratch**:`rm` 掉 `cross-review/`、`dpi_ref/`、`issue/`、`Testing/`、root `master_wrap_read_dump*.txt`、`docs/*.pptx`/`~$*`/`.pdf` 等(**僅動本地工作目錄,皆 gitignored,不進 commit**)。
 
 ## ⑤ Consumer 更新清單(必做 — Codex 精確化的 live 引用)
-scenario 路徑:`c_model/CMakeLists.txt:64`、`c_model/tests/axi/CMakeLists.txt:13,22,28`、`c_model/tests/integration/CMakeLists.txt:7,9,24,26,39,41`、`c_model/tests/wrap/CMakeLists.txt:56`、`sim/verilator/Makefile:108,212`、`sim/vcs/Makefile:114,142,185`、`tools/lint_scenarios.py:2,85`、root `Makefile:139`、**`README.md:25`**、scenarios_list 生成(`tests/scenarios/CMakeLists.txt`+`scenarios_list.hpp.in` 隨資料移至 `sim/test_patterns/`)。
+scenario 路徑:`c_model/CMakeLists.txt:64`、`c_model/tests/axi/CMakeLists.txt:13,22,28`、`c_model/tests/integration/CMakeLists.txt:7,9,24,26,39,41`、`c_model/tests/wrap/CMakeLists.txt:56`、`sim/verilator/Makefile:108,212`、`sim/vcs/Makefile:114,142,185`、`tools/lint_scenarios.py:2,85`、root `Makefile:139`、**`README.md:25`**、scenarios_list 生成(`sim/test_patterns/CMakeLists.txt`+`scenarios_list.hpp.in` 隨資料移至 `sim/test_patterns/`)。
 ctest 解鉤:`c_model/tests/CMakeLists.txt:31-41`(移除 cosim `add_subdirectory`);ctest 註冊點在 `sim/tests/CMakeLists.txt:53`(隨 sim/tests 退役)。注意 `sim/c/cmodel_dpi.cpp` 仍由 `c_model/tests/wrap/CMakeLists.txt:30` 當**純 C++ unit** 編(留著,不受影響)。
 
 ## 執行順序(Codex 建議)
@@ -58,4 +58,4 @@ ctest 解鉤:`c_model/tests/CMakeLists.txt:31-41`(移除 cosim `add_subdirectory
 - specgen drift gate 綠;`ni_regs.*` / goldens / register validator 已移除;repo 無 `ni_regs` 引用。
 - 無頂層 `tests/`、無 `sim/tests/test_cosim_integration.cpp`、無 `sources.mk`(已拆成 `filelist.f` + `build_config.mk`)。
 - local scratch 已清(工作目錄)。
-- `grep` 全 repo:無殘留 `tests/scenarios`、`test_cosim_integration`、`ni_regs`、舊 `sources.mk` 路徑。
+- `grep` 全 repo:無殘留 `sim/test_patterns`、`test_cosim_integration`、`ni_regs`、舊 `sources.mk` 路徑。

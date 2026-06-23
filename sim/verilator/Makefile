@@ -105,7 +105,7 @@ $(TBTOP_EXE): $(SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 # resolves data_file: relative to the YAML's own dir so cwd does not matter
 # for input resolution.
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
-SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
+SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 
 # tb_top is now bidirectional: it needs two coordinate-variant plusargs
 # (node0 = identity / low addr, node1 = +0x1_0000_0000 / coordinate (1,0)).
@@ -209,7 +209,7 @@ ifeq ($(GENAMBA_SCENARIO),)
 GENAMBA_SCENARIO_ABS := $(COSIM_ROOT)/genamba_init.yaml
 GENAMBA_RUN_TAG := default
 else
-GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenario.yaml
+GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(GENAMBA_SCENARIO)/scenario.yaml
 GENAMBA_RUN_TAG := $(GENAMBA_SCENARIO)
 endif
 .PHONY: run-genamba

@@ -22,7 +22,7 @@ AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
 
 - `c_model/` - C++17 behavioural model + GoogleTest
 - `sim/` - Verilator wire-level cosim
-- `tests/scenarios/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
+- `sim/test_patterns/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
 - `specgen/` - spec-to-header codegen sub-project
 - `tools/` - repo-level tooling
 - `docs/` - architecture + development guide

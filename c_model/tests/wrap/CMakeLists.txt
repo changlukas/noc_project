@@ -53,4 +53,4 @@ target_include_directories(test_cmodel_dpi PRIVATE
 # CmodelDpiLifecycleTest.walk_session_state_machine).
 gtest_discover_tests(test_cmodel_dpi
     PROPERTIES ENVIRONMENT
-        "CMODEL_TEST_SCENARIO_YAML=${CMAKE_SOURCE_DIR}/../tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml")
+        "CMODEL_TEST_SCENARIO_YAML=${CMAKE_SOURCE_DIR}/../sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml")

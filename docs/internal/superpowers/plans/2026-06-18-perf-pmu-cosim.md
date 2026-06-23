@@ -913,7 +913,7 @@ Expected: identical scoreboard result and completion cycles (monitors are passiv
 
 - [ ] **Step 2: Same-id correlation check**
 
-Pick a scenario with ≥2 outstanding same-id transactions (or add one under `tests/scenarios/`); run it; confirm no `$fatal` ("no outstanding ... id") fired and each completion's latency is non-negative and monotonic with issue order.
+Pick a scenario with ≥2 outstanding same-id transactions (or add one under `sim/test_patterns/`); run it; confirm no `$fatal` ("no outstanding ... id") fired and each completion's latency is non-negative and monotonic with issue order.
 Run: `cd cosim/verilator && make run-tb-top SCENARIO=<multi-outstanding-id> && grep -c fatal output/<id>/run.log`
 Expected: `0`.
 

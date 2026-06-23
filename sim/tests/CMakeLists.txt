@@ -13,10 +13,10 @@ if(NOT EXISTS "${COSIM_BIN_PATH}")
     set(COSIM_BIN_PATH "${VERILATOR_BUILD_DIR}/obj_dir/Vtb_top")
 endif()
 
-# Stage B unified scenario tree. Scenarios live at repo-root tests/scenarios/.
-# CMAKE_CURRENT_LIST_DIR == .../sim/tests, so ../../tests/scenarios/ is the
+# Stage B unified scenario tree. Scenarios live at repo-root sim/test_patterns/.
+# CMAKE_CURRENT_LIST_DIR == .../sim/tests, so ../../sim/test_patterns/ is the
 # repo-root tree.
-set(SCENARIO_TREE_ABS "${CMAKE_CURRENT_LIST_DIR}/../../tests/scenarios/")
+set(SCENARIO_TREE_ABS "${CMAKE_CURRENT_LIST_DIR}/../../sim/test_patterns/")
 
 # -----------------------------------------------------------------------
 # test_cosim_integration — run-all over kAllAxi4Scenarios
@@ -35,7 +35,7 @@ target_compile_definitions(test_cosim_integration PRIVATE
 # Bidirectional coordinate variants for CosimIntegration.
 # The per-node variants (node0 = identity, node1 = +0x1_0000_0000) are
 # materialized + committed under each pattern dir in the scenario tree
-# (tests/scenarios/<id>/node{0,1}/scenario.yaml), generated offline by
+# (sim/test_patterns/<id>/node{0,1}/scenario.yaml), generated offline by
 # sim/tools/gen_coordinate_scenarios.py. The test reads them directly from
 # the source tree; only the bring-up subset (single-beat, non-exclusive,
 # read-bearing patterns) has a node0/node1 tree, and ids without one SKIP.

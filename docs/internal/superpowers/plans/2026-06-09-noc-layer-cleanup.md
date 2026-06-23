@@ -46,7 +46,7 @@ Pure rename. No structural change. `make check` must stay clean.
 - Config: `c_model/include/ni/port_params.hpp:41-45,55,78-80`, `c_model/config/port_params.yaml:37`
 - Tests: `c_model/tests/nmu/{test_packetize,test_depacketize,test_nmu,test_vc_arbiter,test_rob}.cpp`, `c_model/tests/nsu/{test_nsu_depacketize,test_nsu_vc_arbiter,test_nsu_packetize,test_nsu}.cpp`, `c_model/tests/common/test_loopback_latency.cpp` (includes only, file name kept), `c_model/tests/integration/test_request_response_loopback.cpp` (includes only)
 - CMakeLists (Codex MUST-FIX adds integration): `c_model/tests/cosim/CMakeLists.txt`, `c_model/tests/common/CMakeLists.txt`, `c_model/tests/integration/CMakeLists.txt:16,21`
-- Scenarios + docs: `tests/scenarios/AX4-STR-003_multi_dst_stress/scenario.yaml`, `docs/architecture.md`, `CLAUDE.md`
+- Scenarios + docs: `sim/test_patterns/AX4-STR-003_multi_dst_stress/scenario.yaml`, `docs/architecture.md`, `CLAUDE.md`
 - Spec self-reference (number fix): `docs/superpowers/specs/2026-06-09-noc-layer-cleanup-design.md:73` — `9 c_model tests` → `11 c_model tests` (test list lists 11 names)
 
 ### Steps
@@ -100,7 +100,7 @@ Pure rename. No structural change. `make check` must stay clean.
   ```bash
   py -3 specgen/tools/codegen.py --check                                                                                              # exit 0
   py -3 -m pytest specgen/tests/ 2>&1 | tail -3                                                                                       # all PASS
-  py -3 tools/lint_docs.py README.md docs/architecture.md docs/development.md docs/_archive/README.md tests/scenarios/README.md         # OK
+  py -3 tools/lint_docs.py README.md docs/architecture.md docs/development.md docs/_archive/README.md sim/test_patterns/README.md         # OK
   py -3 tools/lint_scenarios.py                                                                                                       # 37 dirs OK
   make check PYTHON3="py -3" 2>&1 | tail -10                                                                                          # green modulo pre-existing GCC ICE
   ```

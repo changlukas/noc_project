@@ -88,7 +88,7 @@ Three files touched (shell adapters already wire `qos` end-to-end at `nmu_shell_
 |---|---|---|
 | Unit (packetize) | 1 AW round-trip + 1 AR round-trip: `b.qos = 0xA` → packetize → `EXPECT_EQ(f.get_payload_field("AW","awqos"), 0xAu)` | `c_model/tests/nmu/test_packetize.cpp` |
 | Unit (depacketize) | 1 AW + 1 AR symmetric reverse | `c_model/tests/nsu/test_nsu_depacketize.cpp` |
-| Integration | One scenario through AxiMaster → NMU → LoopbackNoc → NSU → AxiSlave with `qos: 0xA` | `tests/scenarios/AX4-QOS-001_awqos_round_trip/scenario.yaml` |
+| Integration | One scenario through AxiMaster → NMU → LoopbackNoc → NSU → AxiSlave with `qos: 0xA` | `sim/test_patterns/AX4-QOS-001_awqos_round_trip/scenario.yaml` |
 
 Test pattern follows existing `test_packetize.cpp:249` idiom (`EXPECT_EQ(f.get_header_field("noc_qos"), 0u)` is the same idiom applied to a payload field).
 
@@ -98,15 +98,15 @@ Test pattern follows existing `test_packetize.cpp:249` idiom (`EXPECT_EQ(f.get_h
 
 - `tools/lint_scenarios.py` CAT allow-list
 - `c_model/include/axi/scenario_parser.hpp` CAT allow-list
-- `tests/scenarios/README.md` IHI 0022H section coverage table (add `QOS — A8 QoS signaling`)
+- `sim/test_patterns/README.md` IHI 0022H section coverage table (add `QOS — A8 QoS signaling`)
 
 ## 4. Commit chain
 
 Three atomic commits per `feedback-codex-review-each-round` (each independently `make check` clean):
 
 1. **`spec(packet): add AXI_QOS_WIDTH parameter and awqos/arqos payload fields`** — `packet_format.md` §1.2 + §3.1 edits, full `codegen.py` regen (`ni_packet.json` + `ni_flit_constants.h` + `ni_flit_pkg.sv` + specgen golden test files). No c_model change.
-2. **`feat(ni): pack awqos/arqos through NMU/NSU and CAT-register QOS scenarios`** — `packetize.hpp` + `depacketize.hpp` (both NMU and NSU sides) + `scenario_parser.hpp` + `axi_master.hpp` + `nmu_shell_adapter.hpp` + `nsu_shell_adapter.hpp` + scenario CAT allow-lists (`lint_scenarios.py`, `scenario_parser.hpp`, `tests/scenarios/README.md`).
-3. **`test(qos): awqos round-trip unit and integration coverage`** — `test_packetize.cpp` + `test_depacketize.cpp` round-trip cases + `tests/scenarios/AX4-QOS-001_awqos_round_trip/scenario.yaml`.
+2. **`feat(ni): pack awqos/arqos through NMU/NSU and CAT-register QOS scenarios`** — `packetize.hpp` + `depacketize.hpp` (both NMU and NSU sides) + `scenario_parser.hpp` + `axi_master.hpp` + `nmu_shell_adapter.hpp` + `nsu_shell_adapter.hpp` + scenario CAT allow-lists (`lint_scenarios.py`, `scenario_parser.hpp`, `sim/test_patterns/README.md`).
+3. **`test(qos): awqos round-trip unit and integration coverage`** — `test_packetize.cpp` + `test_depacketize.cpp` round-trip cases + `sim/test_patterns/AX4-QOS-001_awqos_round_trip/scenario.yaml`.
 
 Each commit passes `make check` (lint_scenarios + lint_docs + build-cmodel + build-verilator + ctest).
 
@@ -129,4 +129,4 @@ Each commit passes `make check` (lint_scenarios + lint_docs + build-cmodel + bui
 
 - **Existing `test_packetize.cpp:161-173` already sets `aw.qos = 0xF`** but does not assert any payload `awqos` field. Codex flagged this in round-1 review. The new round-trip test must assert the actual packed bit position, not just that depacketize recovers the value, to catch any future drift.
 - **Specgen golden test files** are byte-identical baselines (`specgen/tests/test_byte_identical_golden.py`). Commit 1 must update goldens or the specgen pytest suite breaks.
-- **Scenario tooling allow-list drift** — if `lint_scenarios.py`, `scenario_parser.hpp`, and `tests/scenarios/README.md` are not all updated together, `make check` will fail on the QOS-001 scenario.
+- **Scenario tooling allow-list drift** — if `lint_scenarios.py`, `scenario_parser.hpp`, and `sim/test_patterns/README.md` are not all updated together, `make check` will fail on the QOS-001 scenario.

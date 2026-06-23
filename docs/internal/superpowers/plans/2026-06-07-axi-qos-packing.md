@@ -113,7 +113,7 @@
 - Modify: `c_model/include/axi/scenario_parser.hpp` (struct around line 40-52; YAML parse around line 171-227; CAT allow-list at line 85-86)
 - Modify: `c_model/include/axi/axi_master.hpp` (line 414-434 AW build; line 476-485 AR build)
 - Modify: `tools/lint_scenarios.py` (CAT allow-list at line 12-19)
-- Modify: `tests/scenarios/README.md` (CAT mapping table around line 12-23)
+- Modify: `sim/test_patterns/README.md` (CAT mapping table around line 12-23)
 
 - [ ] **Step 2.1: Wire `awqos` in NMU packetize AW path**
 
@@ -213,9 +213,9 @@
 
   Open `tools/lint_scenarios.py`. Locate the CAT allow-list (around line 12-19, search for `"BAS"` or `kCatCategory` equivalent). Add `QOS` to the set / list / regex consistent with how the existing CATs are stored.
 
-- [ ] **Step 2.11: Add `QOS` row to `tests/scenarios/README.md` IHI table**
+- [ ] **Step 2.11: Add `QOS` row to `sim/test_patterns/README.md` IHI table**
 
-  Open `tests/scenarios/README.md`. Locate the IHI 0022H section-to-CAT table (around line 12-23). Insert a new row:
+  Open `sim/test_patterns/README.md`. Locate the IHI 0022H section-to-CAT table (around line 12-23). Insert a new row:
 
   ```markdown
   | QOS | A8 QoS signaling | awqos / arqos passthrough end-to-end |
@@ -239,7 +239,7 @@
 - [ ] **Step 2.15: Commit**
 
   ```bash
-  git add c_model/include/nmu/packetize.hpp c_model/include/nsu/depacketize.hpp c_model/include/axi/scenario_parser.hpp c_model/include/axi/axi_master.hpp tools/lint_scenarios.py tests/scenarios/README.md
+  git add c_model/include/nmu/packetize.hpp c_model/include/nsu/depacketize.hpp c_model/include/axi/scenario_parser.hpp c_model/include/axi/axi_master.hpp tools/lint_scenarios.py sim/test_patterns/README.md
   git commit -m "feat(ni): pack awqos/arqos through NMU/NSU and register QOS scenario CAT
 
   NMU packetize.hpp now writes b.qos into the AW/AR payload's new awqos
@@ -247,7 +247,7 @@
   ScenarioTransaction gains a uint8_t qos field that AxiMaster propagates
   into AwBeat/ArBeat at the per-sub-burst push sites. Adds a 'QOS'
   scenario CAT to scenario_parser.hpp regex/category map, tools
-  /lint_scenarios.py, and tests/scenarios/README.md so AX4-QOS-NNN
+  /lint_scenarios.py, and sim/test_patterns/README.md so AX4-QOS-NNN
   scenarios pass lint. Shell adapters already wire qos at nmu_shell_
   adapter:100,126 and nsu_shell_adapter:124,158; no adapter change needed.
 
@@ -261,8 +261,8 @@
 **Files:**
 - Modify: `c_model/tests/nmu/test_packetize.cpp`
 - Modify: `c_model/tests/nsu/test_nsu_depacketize.cpp`
-- Create: `tests/scenarios/AX4-QOS-001_awqos_round_trip/scenario.yaml`
-- Create: `tests/scenarios/AX4-QOS-001_awqos_round_trip/data.txt`
+- Create: `sim/test_patterns/AX4-QOS-001_awqos_round_trip/scenario.yaml`
+- Create: `sim/test_patterns/AX4-QOS-001_awqos_round_trip/data.txt`
 
 - [ ] **Step 3.1: Add AW round-trip test to `test_packetize.cpp`**
 
@@ -354,12 +354,12 @@
 - [ ] **Step 3.6: Create the AX4-QOS-001 scenario directory**
 
   ```bash
-  mkdir -p tests/scenarios/AX4-QOS-001_awqos_round_trip
+  mkdir -p sim/test_patterns/AX4-QOS-001_awqos_round_trip
   ```
 
 - [ ] **Step 3.7: Write the scenario YAML**
 
-  Create `tests/scenarios/AX4-QOS-001_awqos_round_trip/scenario.yaml`:
+  Create `sim/test_patterns/AX4-QOS-001_awqos_round_trip/scenario.yaml`:
 
   ```yaml
   schema_version: 1
@@ -387,7 +387,7 @@
 
 - [ ] **Step 3.8: Write the per-beat data file**
 
-  Create `tests/scenarios/AX4-QOS-001_awqos_round_trip/data.txt`:
+  Create `sim/test_patterns/AX4-QOS-001_awqos_round_trip/data.txt`:
 
   ```
   00 11 22 33 44 55 66 77 88 99 aa bb cc dd ee ff 10 11 12 13 14 15 16 17 18 19 1a 1b 1c 1d 1e 1f
@@ -397,7 +397,7 @@
 
 - [ ] **Step 3.9: Re-run CMake to pick up the new scenario**
 
-  Run: `make build PYTHON3="py -3"` (this forces CMake reconfigure via `CONFIGURE_DEPENDS` on `tests/scenarios/AX4-*/scenario.yaml`).
+  Run: `make build PYTHON3="py -3"` (this forces CMake reconfigure via `CONFIGURE_DEPENDS` on `sim/test_patterns/AX4-*/scenario.yaml`).
 
 - [ ] **Step 3.10: Run lint to confirm CAT registration**
 
@@ -417,7 +417,7 @@
 - [ ] **Step 3.13: Commit**
 
   ```bash
-  git add c_model/tests/nmu/test_packetize.cpp c_model/tests/nsu/test_nsu_depacketize.cpp tests/scenarios/AX4-QOS-001_awqos_round_trip/
+  git add c_model/tests/nmu/test_packetize.cpp c_model/tests/nsu/test_nsu_depacketize.cpp sim/test_patterns/AX4-QOS-001_awqos_round_trip/
   git commit -m "test(qos): awqos round-trip coverage at unit and integration layers
 
   Four unit tests assert payload-field bit position end-to-end at packetize

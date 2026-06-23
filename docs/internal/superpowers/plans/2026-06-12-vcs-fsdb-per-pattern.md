@@ -381,7 +381,7 @@ git commit -m "build(cosim): per-pattern +fsdb plusarg and stale-fsdb cleanup in
 # Produces waveforms; NOT a regression gate (always exits 0 — ctest is the
 # gate). Failing patterns are reported but do not stop the batch; their
 # partial fsdb is kept for debugging. AX4-INF-001 fails by design.
-SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/tests/scenarios/AX4-*))
+SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/sim/test_patterns/AX4-*))
 
 .PHONY: run-all-fsdb
 run-all-fsdb:

@@ -10,7 +10,7 @@
 ## 1. Context
 
 After Stage A+B (rename `cosim2 → cosim`; unify scenarios under
-`tests/scenarios/<layer>/<name>/`), the pattern tree has 32 scenarios across
+`sim/test_patterns/<layer>/<name>/`), the pattern tree has 32 scenarios across
 3 layer sub-dirs. Next-round goal is standardization (numbering + naming)
 plus expansion (current coverage is too thin against AXI4 spec). This brief
 records two parallel surveys — one Claude subagent, one Codex — on
@@ -19,16 +19,16 @@ industry AXI4 verification pattern conventions, to seed that plan.
 Current scenarios at survey time:
 
 ```
-tests/scenarios/common/
+sim/test_patterns/common/
   single_write_read_aligned, burst_incr_2beat, burst_incr_8beat,
   multi_txn_same_id, multi_txn_diff_id, backpressure_retry,
   single_write_no_read
 
-tests/scenarios/sv-cosim-only/
+sim/test_patterns/sv-cosim-only/
   debug_multi1, injection_aw_unstable, conformity_write_read,
   conformity_backpressure, multi_id_single_beat_sequential
 
-tests/scenarios/c-model-only/
+sim/test_patterns/c-model-only/
   exclusive_pair_success, exclusive_intervening_write,
   exclusive_no_prior_read, exclusive_wrap_pair_success,
   decerr_oob_read, decerr_oob_write, burst_crosses_oob_boundary,
@@ -93,7 +93,7 @@ requirements: [IHI22-A3.4.1]
 wb2axip_safe: true
 ```
 
-Adopting this would let `tests/scenarios/` become flat-by-category and
+Adopting this would let `sim/test_patterns/` become flat-by-category and
 drop the layer dirs. Layer filtering moves into the test runner (gtest
 parameter list filtered by reading metadata, or CMake-time selection).
 
@@ -198,7 +198,7 @@ Large = needs DUT-side support (e.g. randomized R latency, mid-sim reset).
   - AMD AXI VIP PG267: https://docs.amd.com/r/en-US/pg267-axi-vip
   - verilog-axi: https://github.com/alexforencich/verilog-axi
   - IHI 0022H spec: https://developer.arm.com/-/media/Arm%20Developer%20Community/PDF/IHI0022H_amba_axi_protocol_spec.pdf
-- Repository state at survey time: `tests/scenarios/` @ `1e5da80`
+- Repository state at survey time: `sim/test_patterns/` @ `1e5da80`
 
 ## 9. Out of scope for this brief
 

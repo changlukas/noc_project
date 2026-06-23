@@ -368,11 +368,11 @@ cmodel_init(good_yaml);
 check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
 ```
 
-Append to `c_model/tests/cosim/CMakeLists.txt` after the existing `add_cmodel_test(test_cmodel_dpi)` block. The path uses `tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml` (verified to exist at repo root):
+Append to `c_model/tests/cosim/CMakeLists.txt` after the existing `add_cmodel_test(test_cmodel_dpi)` block. The path uses `sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml` (verified to exist at repo root):
 
 ```cmake
 set_tests_properties(test_cmodel_dpi PROPERTIES
-    ENVIRONMENT "CMODEL_TEST_SCENARIO_YAML=${CMAKE_SOURCE_DIR}/../tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml")
+    ENVIRONMENT "CMODEL_TEST_SCENARIO_YAML=${CMAKE_SOURCE_DIR}/../sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml")
 ```
 
 (`set_tests_properties` is the right name once gtest_discover_tests has registered the ctest cases. If the test name discovered by gtest includes a fixture prefix like `CmodelDpiLifecycleTest.walk_session_state_machine`, set the env var on that specific test name instead.)

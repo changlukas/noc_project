@@ -17,7 +17,7 @@ inline std::string_view RequireKnownScenario(std::string_view id) {
     if (it == kAllAxi4Scenarios.end()) {
         std::fprintf(stderr,
                      "FATAL: unknown scenario id '%.*s' "
-                     "(not in tests/scenarios/AX4-*)\n",
+                     "(not in sim/test_patterns/AX4-*)\n",
                      int(id.size()), id.data());
         std::abort();
     }

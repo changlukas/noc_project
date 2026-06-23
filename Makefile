@@ -136,7 +136,7 @@ MAINTAINED_DOCS = \
     docs/architecture.md \
     docs/development.md \
     docs/internal/_archive/README.md \
-    tests/scenarios/README.md
+    sim/test_patterns/README.md
 
 lint_docs:
 	$(PYTHON3) tools/lint_docs.py $(MAINTAINED_DOCS)

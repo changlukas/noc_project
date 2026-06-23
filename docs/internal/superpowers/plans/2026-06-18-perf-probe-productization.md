@@ -43,8 +43,8 @@ Binding rules (copied verbatim from the spec intent + project CLAUDE.md / MEMORY
 - **Scenario:** `axi::load_scenario(path)` -> `axi::Scenario{Metadata metadata; ScenarioConfig config; std::vector<ScenarioTransaction> transactions;}` (`c_model/include/axi/scenario_parser.hpp`). `ScenarioConfig{uint64_t memory_base; std::size_t memory_size,write_latency,read_latency,max_outstanding_write,max_outstanding_read; InjectConfig inject;}`. `ScenarioTransaction{Op op; uint64_t addr; uint8_t id,len,size; Burst burst; std::string data_file,dump_file,strb_file; LockType lock; uint8_t qos; std::size_t scenario_line;}`. `Op::{Write,Read}`; `Burst::{INCR,WRAP,FIXED}`; `LockType::{Normal,Exclusive}`.
 - **`axi::AxiMasterT<nmu::AxiSlavePort>`** (`c_model/include/axi/axi_master.hpp`): `on_write_issued(cb)/on_read_issued(cb)` with `IssueInfo{...,scenario_line}`; `on_write_completed(cb)` with `WriteResult{...,scenario_line}`; `on_read_observed(cb)` with `ReadResult{...,scenario_line}`. The callbacks carry NO cycle field; the harness stamps the current cycle (`now`) when each fires.
 - **`Flit`** (`c_model/include/flit.hpp`): `uint64_t get_header_field(std::string_view) const`; in tests `set_header_field(std::string_view, uint64_t)`. AXI channel codes (`specgen/generated/cpp/ni_flit_constants.h`): `AXI_CH_AW=0, AXI_CH_W=1, AXI_CH_AR=2, AXI_CH_B=3, AXI_CH_R=4`.
-- **CMake helper:** `add_cmodel_test(<name>)` (in `c_model/tests/CMakeLists.txt`) builds `<name>.cpp`, links `gtest_main`, adds the `codegen_check` dep, runs `gtest_discover_tests`. For integration tests link `yaml-cpp::yaml-cpp noc_axi4_scenarios`, set `SCENARIO_TREE_ROOT` define, add `${CMAKE_CURRENT_SOURCE_DIR}/..` + `${CMAKE_SOURCE_DIR}/../tests/scenarios` includes, and copy `config/` POST_BUILD (mirror the `test_router_loopback` block in `c_model/tests/integration/CMakeLists.txt`).
-- **Scenario tree:** 37 ids under `tests/scenarios/<id>/scenario.yaml`. The only error-injection / expected-fail id is `AX4-INF-001_dpi_fatal_on_init_failure` (AXI integration skips `AX4-INF-` ids via inline `GTEST_SKIP`; no shared skip list exists — perf defines its own `expected_fail` set). `SCENARIO_TREE_ROOT` is set in `tests/integration/CMakeLists.txt`. The canonical perf flow is `node 0 -> node 1` (`AX4-BAS-003`), established by setting address bit 32 so `xy_route` yields `dst_id == 1`.
+- **CMake helper:** `add_cmodel_test(<name>)` (in `c_model/tests/CMakeLists.txt`) builds `<name>.cpp`, links `gtest_main`, adds the `codegen_check` dep, runs `gtest_discover_tests`. For integration tests link `yaml-cpp::yaml-cpp noc_axi4_scenarios`, set `SCENARIO_TREE_ROOT` define, add `${CMAKE_CURRENT_SOURCE_DIR}/..` + `${CMAKE_SOURCE_DIR}/../sim/test_patterns` includes, and copy `config/` POST_BUILD (mirror the `test_router_loopback` block in `c_model/tests/integration/CMakeLists.txt`).
+- **Scenario tree:** 37 ids under `sim/test_patterns/<id>/scenario.yaml`. The only error-injection / expected-fail id is `AX4-INF-001_dpi_fatal_on_init_failure` (AXI integration skips `AX4-INF-` ids via inline `GTEST_SKIP`; no shared skip list exists — perf defines its own `expected_fail` set). `SCENARIO_TREE_ROOT` is set in `tests/integration/CMakeLists.txt`. The canonical perf flow is `node 0 -> node 1` (`AX4-BAS-003`), established by setting address bit 32 so `xy_route` yields `dst_id == 1`.
 
 ---
 
@@ -1320,9 +1320,9 @@ add_cmodel_test(test_perf_probe)
 target_link_libraries(test_perf_probe PRIVATE yaml-cpp::yaml-cpp noc_axi4_scenarios)
 target_include_directories(test_perf_probe PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..
-  "${CMAKE_SOURCE_DIR}/../tests/scenarios")
+  "${CMAKE_SOURCE_DIR}/../sim/test_patterns")
 target_compile_definitions(test_perf_probe PRIVATE
-  SCENARIO_TREE_ROOT="${CMAKE_SOURCE_DIR}/../tests/scenarios/")
+  SCENARIO_TREE_ROOT="${CMAKE_SOURCE_DIR}/../sim/test_patterns/")
 add_custom_command(TARGET test_perf_probe POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory
     ${CMAKE_CURRENT_SOURCE_DIR}/../../config
@@ -1411,10 +1411,10 @@ const std::set<std::string>& perf_incompatible() {
 }
 
 // All scenario ids (full coverage). ValuesIn over the generated list so every
-// scenario in tests/scenarios/ is attempted; confirm the exported symbol name in
-// the generated header `tests/scenarios/generated/scenarios_list.hpp` (e.g.
+// scenario in sim/test_patterns/ is attempted; confirm the exported symbol name in
+// the generated header `sim/test_patterns/generated/scenarios_list.hpp` (e.g.
 // `kAllScenarioIds`) and include it. If the generated list is not linkable from
-// this target, enumerate all 37 ids from `ls tests/scenarios/` instead.
+// this target, enumerate all 37 ids from `ls sim/test_patterns/` instead.
 std::vector<std::string> all_scenario_ids() {
     return std::vector<std::string>(std::begin(ni::cmodel::testing::kAllScenarioIds),
                                     std::end(ni::cmodel::testing::kAllScenarioIds));

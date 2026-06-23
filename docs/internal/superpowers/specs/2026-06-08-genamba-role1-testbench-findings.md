@@ -29,7 +29,7 @@ Run date: 2026-06-10. Commit range: `6d29be3..7e00f32` (T1..T10).
 All twelve scenarios (A; B blen 4/8/16; C N 4/8; D N=4 blen 4/8; E
 same-ID; F mixed R+W; G N 8/16) PASS in a single run of
 `cosim/verilator/obj_genamba/Vtb_genamba.exe` against
-`tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml`.
+`sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml`.
 Sim finish at 16.3 us, walltime 0.007 s on Verilator 5.036 + MSYS2.
 
 | Task | Outcome | Sim time at PASS | Notes |

@@ -278,7 +278,7 @@ The driver only spins the Verilator scheduler; SV side (`always #5 ACLK`) owns t
 ```bash
 make -C cosim/verilator genamba PYTHON3=python3
 ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
-  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
+  +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected stdout (selected): `tb_genamba: T1 PASS (mem_axi standalone)` + exit 0.
@@ -512,7 +512,7 @@ Insert `$(COSIM_ROOT)/sv/genamba_master_bfm.sv` directly before `$(COSIM_ROOT)/s
 ```bash
 make -C cosim/verilator genamba PYTHON3=python3
 ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
-  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
+  +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected (selected stdout): `TASK A start: mem_test baseline` → `mem_test OK for 16-byte from 0x0 to 0xff` → `TASK A PASS` → `T2 PASS (BFM<->mem_axi mem_test)` → exit 0.
@@ -666,7 +666,7 @@ Replace the entire body (keep `timescale`/`module`/`endmodule` + ACLK/ARESETn ge
         // DPI lifecycle (BEFORE reset deassert, per tb_top.sv:70-76 pattern)
         string scenario_path;
         if (!$value$plusargs("scenario=%s", scenario_path))
-            scenario_path = "../../tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml";
+            scenario_path = "../../sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml";
         cmodel_init(scenario_path);
         cm_ctx     = cmodel_channel_model_create("channel_model_0");
         master_ctx = cmodel_master_create("master_0");
@@ -695,7 +695,7 @@ Replace the entire body (keep `timescale`/`module`/`endmodule` + ACLK/ARESETn ge
 ```bash
 make -C cosim/verilator genamba PYTHON3=python3
 ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
-  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
+  +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected: `TASK A PASS` + `T3 PASS (BFM->NMU->NoC->NSU->mem mem_test)` + exit 0.
@@ -812,7 +812,7 @@ Insert before the closing `endmodule`:
 ```bash
 make -C cosim/verilator genamba PYTHON3=python3
 ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
-  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
+  +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected: same `T3 PASS` outcome + no `Assertion failed` from faxi_slave + no `DPI error pump fired`.
@@ -906,7 +906,7 @@ After `u_bfm.test_baseline_mem_test;`:
 ```bash
 make -C cosim/verilator genamba PYTHON3=python3
 ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
-  +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml
+  +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
 Expected: `TASK B PASS blen=4`, `... blen=8`, `... blen=16`. Checker silent.
@@ -1372,7 +1372,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 # stderr -> .err (faxi_slave Assertion fired, $fatal, watchdog fire, DPI error pump)
 (make -C cosim/verilator genamba PYTHON3=python3 && \
  ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
-   +scenario=tests/scenarios/AX4-BAS-001_single_write_no_read/scenario.yaml) \
+   +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml) \
   1> genamba_run.log 2> genamba_run.err
 ```
 

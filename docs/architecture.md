@@ -286,7 +286,7 @@ GoogleTest tests under `c_model/tests/` exercise individual components
 `c_model/tests/axi/test_integration.cpp` runs all AX4-* scenarios
 (excluding INF prefix) through the full c_model pipeline. The scenario
 list is generated at CMake configure time from
-`tests/scenarios/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
+`sim/test_patterns/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
 
 **Layer 3 -- cosim integration test**
 `sim/tests/test_cosim_integration.cpp` runs the same scenario list
@@ -353,7 +353,7 @@ transfers.
 
 ## 7. References
 
-- `tests/scenarios/README.md` -- scenario naming convention, YAML schema,
+- `sim/test_patterns/README.md` -- scenario naming convention, YAML schema,
   IHI 0022H section mapping per category.
 - `c_model/include/axi/ATTRIBUTION.md` -- cocotbext-axi MIT attribution.
 - `docs/development.md` -- build system, workflow, contributing guide.

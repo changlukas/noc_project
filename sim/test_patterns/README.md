@@ -1,4 +1,4 @@
-# tests/scenarios -- AXI4 Scenario Tree
+# sim/test_patterns -- AXI4 Scenario Tree
 
 Single source of truth for AXI4 scenario YAMLs. Both c_model integration test
 (`c_model/tests/axi/test_integration.cpp`) and cosim integration test
@@ -74,13 +74,13 @@ data file.
 | `c_model/tests/integration/test_request_response_loopback.cpp` | Curated 6 distinct scenarios (7 FixtureParam entries at num_vc=1; re-run at num_vc in {2, 4, 8}) | n/a |
 
 `kAllAxi4Scenarios` is generated at CMake configure time from
-`tests/scenarios/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
+`sim/test_patterns/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
 Adding a new pattern automatically propagates to both run-all tests on the
 next build.
 
 ## Adding a new scenario
 
-1. Pick CAT + next NNN; create `tests/scenarios/AX4-CAT-NNN_slug/`
+1. Pick CAT + next NNN; create `sim/test_patterns/AX4-CAT-NNN_slug/`
 2. Write `scenario.yaml` with `schema_version: 1` and full `metadata:` block
 3. Add `data.txt` (and any other data files referenced)
 4. Run `make check` -- lint + both integration tests pick it up automatically

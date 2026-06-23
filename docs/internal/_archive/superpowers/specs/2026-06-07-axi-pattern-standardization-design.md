@@ -13,7 +13,7 @@
 ### In scope (this round)
 
 - Rename 31 existing scenarios + 1 reclassification + 1 deletion → flat-by-ID layout
-  `tests/scenarios/AX4-CAT-NNN_slug/` (no layer sub-dirs)
+  `sim/test_patterns/AX4-CAT-NNN_slug/` (no layer sub-dirs)
 - Add 5 new scenarios from IHI 0022H §A3.4.1 spec gap
 - YAML schema additions: `schema_version: 1`, `metadata.name`, `metadata.category`
 - `scenario_parser.hpp` strict mode gated by `schema_version`
@@ -23,7 +23,7 @@
   SKIPs the test with a content-derived reason string. No maintained skip
   map. INF scenarios detected by ID prefix.
 - Lint utility `tools/lint_scenarios.py` (8 invariants)
-- Rewrite `tests/scenarios/README.md`
+- Rewrite `sim/test_patterns/README.md`
 
 ### Non-goals (deferred to later rounds)
 
@@ -274,7 +274,7 @@ IHI 0022H spec narrative order: simpler concepts first, then more complex.
 
 ### 5.1 Generated header
 
-New file `tests/scenarios/CMakeLists.txt`:
+New file `sim/test_patterns/CMakeLists.txt`:
 
 ```cmake
 file(GLOB scenario_yamls CONFIGURE_DEPENDS LIST_DIRECTORIES false
@@ -300,7 +300,7 @@ target_sources(noc_axi4_scenarios INTERFACE
     "${CMAKE_CURRENT_BINARY_DIR}/generated/scenarios_list.hpp")
 ```
 
-Template `tests/scenarios/scenarios_list.hpp.in`:
+Template `sim/test_patterns/scenarios_list.hpp.in`:
 
 ```cpp
 #pragma once
@@ -316,7 +316,7 @@ inline constexpr std::array<std::string_view, @scenario_count@>
 }  // namespace noc::tests
 ```
 
-Top-level `CMakeLists.txt` adds `add_subdirectory(tests/scenarios)`.
+Top-level `CMakeLists.txt` adds `add_subdirectory(sim/test_patterns)`.
 
 ### 5.2 Runtime skip predicate (no maintained map)
 
@@ -482,7 +482,7 @@ new pattern requires no skip-map edit.
 
 ### 5.6 Scoped tests — `RequireKnownScenario` helper
 
-New file `tests/scenarios/scenario_helpers.hpp`:
+New file `sim/test_patterns/scenario_helpers.hpp`:
 
 ```cpp
 #pragma once
@@ -499,7 +499,7 @@ inline std::string_view RequireKnownScenario(std::string_view id) {
     if (it == kAllAxi4Scenarios.end()) {
         std::fprintf(stderr,
                      "FATAL: unknown scenario id '%.*s' "
-                     "(not in tests/scenarios/AX4-*)\n",
+                     "(not in sim/test_patterns/AX4-*)\n",
                      int(id.size()), id.data());
         std::abort();
     }
@@ -530,7 +530,7 @@ silent skips.
 
 Runs as part of `make check`. Eight invariants:
 
-1. Every non-`AX4-*` dir under `tests/scenarios/` is an error (catches malformed
+1. Every non-`AX4-*` dir under `sim/test_patterns/` is an error (catches malformed
    names CMake glob would miss).
 2. Every `AX4-*` dir has a `scenario.yaml`.
 3. Every `scenario.yaml` parses + passes schema validation (full schema, not
@@ -556,7 +556,7 @@ plain C++ inspected by compiler; INF detection is a one-line prefix check.
 | 1 | `feat(scenarios): parser strict mode + generated list scaffold + wb2axip runtime predicate` | self-contained — adds parser fields, CMake glob template, helper headers; **no lint hookup yet** (would reject legacy dirs). Existing layered scenarios still load via lenient mode (no `schema_version` field). |
 | 2 | `refactor(scenarios): migrate 31 existing to AX4-CAT-NNN_slug + lint + test rewrites + cosim test rename` | must atomic — ~30 dir moves + add metadata to each + activate lint in `make check` + 5 cpp file rewrites (including `test_cosim_wire_smoke.cpp` → `test_cosim_integration.cpp` + `INSTANTIATE_TEST_SUITE_P` label `WireSmoke` → `CosimIntegration`); intermediate states fail |
 | 3 | `feat(scenarios): add 5 spec-gap patterns (BUR-003/007/008/009, BND-007)` | self-contained on top of commit 2 — each new scenario is a fresh AX4-* dir + YAML + data, no edits to existing scenarios; tests pick up via `kAllAxi4Scenarios` automatically |
-| 4 | `docs(scenarios): rewrite tests/scenarios/README.md` | independent |
+| 4 | `docs(scenarios): rewrite sim/test_patterns/README.md` | independent |
 
 Each commit individually compiles, runs `make check` clean, and contains
 tests for any new functionality. Commit 2 is the only large commit by
@@ -567,7 +567,7 @@ spec citation.
 
 ### README rewrite outline
 
-`tests/scenarios/README.md` sections:
+`sim/test_patterns/README.md` sections:
 
 1. Naming convention `AX4-CAT-NNN_slug` (with category enum + IHI § mapping)
 2. YAML schema (`schema_version` / `metadata.{name, category}` / `config` /

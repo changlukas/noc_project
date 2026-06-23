@@ -71,7 +71,7 @@ TEST_P(CosimIntegration, ScenarioPassesWb2axip) {
     ASSERT_NE(bin, nullptr) << "COSIM_BIN env var not set";
     // Drive both nodes from this scenario's coordinate variants: node0 =
     // identity (low addr), node1 = +0x1_0000_0000 (coordinate (1,0)). Variants
-    // are materialized + committed under tests/scenarios/<id>/node{0,1}/ only
+    // are materialized + committed under sim/test_patterns/<id>/node{0,1}/ only
     // for the bidirectional bring-up subset; a qualifying scenario outside that
     // subset has no variant tree — skip rather than fail on a missing file.
     // COORD_VARIANT_ROOT == the scenario-tree root (trailing slash).

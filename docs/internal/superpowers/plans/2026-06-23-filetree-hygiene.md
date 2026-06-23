@@ -27,7 +27,7 @@
 ### Task 1: scenario 資料移進 sim/test_patterns + 刪頂層 tests/
 
 **Files:**
-- Move: `tests/scenarios/` → `sim/test_patterns/`(含 `scenarios_list.hpp.in`、`scenario_helpers.hpp`、`CMakeLists.txt`、49 個 `AX4-*/`)
+- Move: `sim/test_patterns/` → `sim/test_patterns/`(含 `scenarios_list.hpp.in`、`scenario_helpers.hpp`、`CMakeLists.txt`、49 個 `AX4-*/`)
 - Delete: 頂層 `tests/`(空後)
 - Modify (path 更新):`c_model/CMakeLists.txt:64`、`c_model/tests/axi/CMakeLists.txt:13,22,28`、`c_model/tests/integration/CMakeLists.txt:7,9,24,26,39,41`、`c_model/tests/wrap/CMakeLists.txt:56`、`sim/verilator/Makefile:108,212`、`sim/vcs/Makefile:114,142,185`、`tools/lint_scenarios.py:2,85`、root `Makefile:139`、`README.md:25`、`sim/tests/CMakeLists.txt`(SCENARIO_TREE 路徑,本檔下個 task 才退役,先更新路徑保綠)
 
@@ -35,19 +35,19 @@
 
 - [ ] **Step 1: git mv 資料樹**
 ```bash
-git mv tests/scenarios sim/test_patterns
+git mv sim/test_patterns sim/test_patterns
 rmdir tests 2>/dev/null || true   # 應已空
 [ -d tests ] && echo "WARN: tests/ 非空:" && ls tests || echo "tests/ removed"
 ```
 - [ ] **Step 2: 全 repo 改路徑引用**
 ```bash
-for f in $(grep -rIl 'tests/scenarios' --include='*.txt' --include='*.cmake' --include='*.in' --include='*.py' --include='Makefile' --include='*.mk' --include='*.md' --include='*.cpp' --include='*.hpp' --exclude-dir=build --exclude-dir=.git .); do
-  sed -i 's@tests/scenarios@sim/test_patterns@g' "$f"
+for f in $(grep -rIl 'sim/test_patterns' --include='*.txt' --include='*.cmake' --include='*.in' --include='*.py' --include='Makefile' --include='*.mk' --include='*.md' --include='*.cpp' --include='*.hpp' --exclude-dir=build --exclude-dir=.git .); do
+  sed -i 's@sim/test_patterns@sim/test_patterns@g' "$f"
 done
 ```
 - [ ] **Step 3: 殘留掃描**
 ```bash
-grep -rIn 'tests/scenarios' --exclude-dir=build --exclude-dir=.git . | grep -v 'docs/internal\|\.superpowers'
+grep -rIn 'sim/test_patterns' --exclude-dir=build --exclude-dir=.git . | grep -v 'docs/internal\|\.superpowers'
 ```
 Expected: 空(歷史 docs 不算)。
 - [ ] **Step 4: gate**
@@ -56,7 +56,7 @@ Expected: ctest 544/544(scenario 由新路徑解析);lint_scenarios 綠。
 - [ ] **Step 5: Commit**
 ```bash
 git add -A
-git commit -m "refactor: move tests/scenarios to sim/test_patterns; delete top-level tests/"
+git commit -m "refactor: move sim/test_patterns to sim/test_patterns; delete top-level tests/"
 ```
 
 ---

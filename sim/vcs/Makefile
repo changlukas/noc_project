@@ -111,7 +111,7 @@ ifeq ($(GENAMBA_SCENARIO),)
 GENAMBA_SCENARIO_ABS := $(COSIM_ROOT)/genamba_init.yaml
 GENAMBA_RUN_TAG := default
 else
-GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(GENAMBA_SCENARIO)/scenario.yaml
+GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(GENAMBA_SCENARIO)/scenario.yaml
 GENAMBA_RUN_TAG := $(GENAMBA_SCENARIO)
 endif
 
@@ -139,7 +139,7 @@ run-genamba: $(SIMV_GENAMBA)
 
 # --- tb_top cosim (self-clocked) ---
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
-SCENARIO_ABS := $(PROJ_ROOT)/tests/scenarios/$(SCENARIO)/scenario.yaml
+SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 
 # tb_top is bidirectional: it needs two coordinate-variant scenarios passed as
 # +scenario_node0 / +scenario_node1 (mirrors sim/verilator/Makefile). Generate
@@ -182,7 +182,7 @@ run-tb-top: $(SIMV_TB_TOP)
 # the run succeeds AND its fsdb exists non-empty; failing patterns are
 # reported but do not stop the batch; their partial fsdb is kept for
 # debugging. AX4-INF-001 fails by design.
-SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/tests/scenarios/AX4-*))
+SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/sim/test_patterns/AX4-*))
 
 .PHONY: run-all-fsdb
 run-all-fsdb:

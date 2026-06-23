@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Lint tests/scenarios/ — 8 invariants per design spec §5.7.
+"""Lint sim/test_patterns/ — 8 invariants per design spec §5.7.
 
 Exits 0 on clean, prints errors and exits 1 on any violation.
 """
@@ -8,7 +8,7 @@ import re
 import sys
 import yaml
 
-ROOT = os.path.join(os.path.dirname(__file__), "..", "tests", "scenarios")
+ROOT = os.path.join(os.path.dirname(__file__), "..", "sim", "test_patterns")
 NAME_RE = re.compile(
     r"^AX4-(BAS|BUR|BND|ORD|EXC|RSP|STR|HSH|INF|QOS)-\d{3}_[a-z0-9_]+$"
 )
@@ -82,7 +82,7 @@ def main() -> int:
     # Skipped in commit 1 (zero AX4-* dirs is the legitimate transient state);
     # the lint becomes mandatory in commit 2.
     if "--require-nonempty" in sys.argv and ax4_count == 0:
-        errors.append("tests/scenarios/ contains zero AX4-* dirs")
+        errors.append("sim/test_patterns/ contains zero AX4-* dirs")
 
     if errors:
         for e in errors:

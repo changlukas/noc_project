@@ -587,7 +587,7 @@ MAINTAINED_DOCS = \
     docs/architecture.md \
     docs/development.md \
     docs/_archive/README.md \
-    tests/scenarios/README.md \
+    sim/test_patterns/README.md \
     spec/ni/README.md
 
 lint_docs:
@@ -650,7 +650,7 @@ AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
 
 - `c_model/` - C++17 behavioural model + GoogleTest
 - `cosim/` - Verilator wire-level cosim + wb2axip checker
-- `tests/scenarios/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
+- `sim/test_patterns/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
 - `spec/ni/` - normative NI specification
 - `specgen/` - spec-to-header codegen sub-project
 - `tools/` - repo-level tooling
@@ -738,7 +738,7 @@ Sentence-case headings. Six sections + references. The file is too long
 to inline here verbatim; follow the outline below and the spec sec 6
 content guidance, copy from the spec's quoted prose where verbatim
 content is given, and fill the rest with concrete content from the
-project (referring to actual files in c_model/, cosim/, tests/scenarios/).
+project (referring to actual files in c_model/, cosim/, sim/test_patterns/).
 
 Structure (write each section in this order):
 
@@ -817,13 +817,13 @@ Structure (write each section in this order):
 (~60 lines)
 - Run-all tests: c_model/tests/axi/test_integration.cpp and
   cosim/tests/test_cosim_integration.cpp; both consume kAllAxi4Scenarios
-  (CMake glob over tests/scenarios/AX4-*/scenario.yaml)
+  (CMake glob over sim/test_patterns/AX4-*/scenario.yaml)
 - Cosim runtime SKIP path with WB2AXIP_* / INF_DEDICATED_TEST reasons
 - Scoped tests: port_pair_loopback, request_response_loopback,
   checker_fires_on_violation; use RequireKnownScenario to abort on
   stale IDs
 - Scenario tree convention AX4-CAT-NNN_slug; full taxonomy at
-  tests/scenarios/README.md
+  sim/test_patterns/README.md
 
 ## 6. AXI4 conformity scope
 
@@ -838,7 +838,7 @@ Structure (write each section in this order):
 - ../spec/ni/README.md
 - ../spec/ni/doc/protocol_rules.md
 - ../spec/ni/doc/packet_format.md
-- ../tests/scenarios/README.md
+- ../sim/test_patterns/README.md
 - ../c_model/FEATURE_INVENTORY.md
 - ../c_model/include/axi/ATTRIBUTION.md
 - ../cosim/sv/wb2axip/ATTRIBUTION.md
@@ -918,7 +918,7 @@ Structure:
   .clang-format at repo root (Google base + IndentWidth 4 +
   ContinuationIndentWidth 4 + ColumnLimit 100)
 - YAML scenarios: schema_version + metadata.{name,category} + config +
-  transactions (see ../tests/scenarios/README.md)
+  transactions (see ../sim/test_patterns/README.md)
 - Markdown: lowercase-kebab-case filenames; ASCII only (no Unicode
   arrows, em-dash, beta, section sign, greater-than-or-equal); per-class
   structure guidance per docs/_archive/README.md
@@ -956,7 +956,7 @@ Structure:
 
 (~50 lines)
 - Pick CAT + next NNN within category (BAS/BUR/BND/ORD/EXC/RSP/STR/HSH/INF)
-- mkdir tests/scenarios/AX4-CAT-NNN_slug/; write scenario.yaml + data.txt
+- mkdir sim/test_patterns/AX4-CAT-NNN_slug/; write scenario.yaml + data.txt
 - Cite IHI 0022H section or VIP test name in YAML header comment
 - `make check` picks it up automatically via kAllAxi4Scenarios glob
 - Cosim side may SKIP with WB2AXIP_* reason - expected for wb2axip-blocked
@@ -1003,7 +1003,7 @@ Structure:
 - ../README.md
 - ./architecture.md
 - ../spec/ni/README.md
-- ../tests/scenarios/README.md
+- ../sim/test_patterns/README.md
 - ../specgen/docs/guide/index.md
 - ../CLAUDE.md (internal AI tooling; non-normative)
 ```
@@ -1138,10 +1138,10 @@ Expected: 1 line.
 
 - [ ] **Step 1: Run lint_docs only**
 
-Run: `py -3 tools/lint_docs.py README.md docs/architecture.md docs/development.md docs/_archive/README.md tests/scenarios/README.md spec/ni/README.md`
+Run: `py -3 tools/lint_docs.py README.md docs/architecture.md docs/development.md docs/_archive/README.md sim/test_patterns/README.md spec/ni/README.md`
 Expected: `lint_docs: 6 file(s) OK`.
 
-If any non-ASCII chars surface in tests/scenarios/README.md (preexisting from
+If any non-ASCII chars surface in sim/test_patterns/README.md (preexisting from
 AXI standardization round), they must be fixed in this task before commit.
 Apply same ASCII substitutions and re-verify.
 
@@ -1328,7 +1328,7 @@ retargeting those links before proceeding.
 
 - [ ] **Step 3: ASCII byte check (full re-run)**
 
-Run: `py -3 tools/lint_docs.py README.md docs/architecture.md docs/development.md docs/_archive/README.md tests/scenarios/README.md spec/ni/README.md`
+Run: `py -3 tools/lint_docs.py README.md docs/architecture.md docs/development.md docs/_archive/README.md sim/test_patterns/README.md spec/ni/README.md`
 Expected: `lint_docs: 6 file(s) OK`.
 
 - [ ] **Step 4: Decision**

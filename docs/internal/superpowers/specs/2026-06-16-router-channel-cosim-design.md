@@ -100,7 +100,7 @@ Per pattern, two coordinate-bearing variants drive the two masters:
 - **node1 variant** (drives node0.master, targets `(1,0)`): every transaction `addr` and the
   `memory_base` shifted by `+0x1_0000_0000` (sets `addr[32]`).
 
-A generator emits both into a stable layout (e.g. `tests/scenarios/<pattern>/{node0,node1}/
+A generator emits both into a stable layout (e.g. `sim/test_patterns/<pattern>/{node0,node1}/
 scenario.yaml`). This round generates the wb2axip-compatible subset only; full 37-pattern
 augmentation is later work (user-driven).
 

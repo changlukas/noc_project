@@ -177,7 +177,7 @@ void cmodel_nsu_get_aw(/* same shape as nmu */);
 Scenario YAML stays on the C++ side, reusing `c_model/include/axi/scenario_parser.hpp`. The Verilator harness passes the path via plusarg:
 
 ```
-./Vtb_axi_conformity +scenario=tests/scenarios/burst_incr_8beat.yaml
+./Vtb_axi_conformity +scenario=sim/test_patterns/burst_incr_8beat.yaml
 ```
 
 `cmodel_init` parses the YAML and primes the existing AxiMaster, exactly as today's integration testbench does.

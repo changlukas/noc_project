@@ -64,3 +64,4 @@ docs/slides/
 # Slide decks (company-master binaries: source template + generated output;
 # rebuild the generated one with docs/build_perf_probe_slides.py)
 /docs/*.pptx
+docs/issue/
