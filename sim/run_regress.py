@@ -8,7 +8,6 @@ ROOT = Path(__file__).resolve().parent.parent          # repo root
 PATTERNS = ROOT / "sim" / "test_patterns"
 EXE = next((ROOT / "build/verilator").rglob("Vtb_top.exe"), None) \
       or next((ROOT / "build/verilator").rglob("Vtb_top"), None)
-GEN = ROOT / "sim" / "tools" / "gen_coordinate_scenarios.py"
 PASS = "PASS: scenario complete, scoreboard clean"
 
 def main():
