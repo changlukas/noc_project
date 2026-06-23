@@ -29,7 +29,7 @@
 #include "wrap/nmu_wrap_io.hpp"
 #include "wrap/poc_defaults.hpp"  // kPoC* depths
 #include "flit.hpp"
-#include "nmu/nmu.hpp"
+#include "nmu/nmu_standalone.hpp"
 #include <array>
 #include <memory>
 #include <optional>

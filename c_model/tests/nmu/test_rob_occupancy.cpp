@@ -1,5 +1,5 @@
 #include "axi/types.hpp"
-#include "nmu/nmu.hpp"
+#include "nmu/nmu_standalone.hpp"
 #include <gtest/gtest.h>
 
 namespace nmu = ni::cmodel::nmu;

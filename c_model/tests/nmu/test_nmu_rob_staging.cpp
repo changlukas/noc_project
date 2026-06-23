@@ -14,7 +14,7 @@
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "nmu/nmu.hpp"
+#include "nmu/nmu_standalone.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::Flit;

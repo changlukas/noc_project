@@ -17,7 +17,7 @@
 #include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "nmu/nmu.hpp"
+#include "nmu/nmu_standalone.hpp"
 #include <cstdint>
 #include <gtest/gtest.h>
 

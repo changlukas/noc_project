@@ -32,7 +32,7 @@
 #include "common/loopback_channel_set.hpp"
 #include "common/scenario.hpp"
 #include "nmu/axi_slave_port.hpp"
-#include "nmu/nmu.hpp"
+#include "nmu/nmu_standalone.hpp"
 #include "nmu/port_params.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/port_params.hpp"
