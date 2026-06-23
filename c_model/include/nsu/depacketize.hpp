@@ -3,7 +3,7 @@
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "router/req_in.hpp"
-#include "router/pipeline_stage.hpp"
+#include "ni/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "request_io.hpp"
 #include <cassert>

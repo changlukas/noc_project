@@ -28,7 +28,7 @@
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
 #include "nmu/axi_slave_port.hpp"
-#include "nmu/ni_stage.hpp"
+#include "ni/ni_stage.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
@@ -36,8 +36,8 @@
 #include "nmu/ni_tokens.hpp"
 #include "router/req_out.hpp"
 #include "router/rsp_in.hpp"
-#include "router/pipeline_stage.hpp"
-#include "router/wormhole_arbiter.hpp"
+#include "ni/pipeline_stage.hpp"
+#include "ni/wormhole_arbiter.hpp"
 #include <array>
 #include <cassert>
 #include <cstddef>

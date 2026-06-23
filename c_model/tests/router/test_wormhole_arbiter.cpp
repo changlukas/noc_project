@@ -1,4 +1,4 @@
-#include "router/wormhole_arbiter.hpp"
+#include "ni/wormhole_arbiter.hpp"
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "flit.hpp"

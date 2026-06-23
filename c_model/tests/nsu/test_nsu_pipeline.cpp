@@ -9,7 +9,7 @@
 #include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "nmu/ni_stage.hpp"
+#include "ni/ni_stage.hpp"
 #include "nsu/nsu.hpp"
 #include <gtest/gtest.h>
 

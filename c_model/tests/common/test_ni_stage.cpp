@@ -1,4 +1,4 @@
-#include "nmu/ni_stage.hpp"
+#include "ni/ni_stage.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::NiPath;

@@ -20,7 +20,7 @@
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "router/rsp_out.hpp"
-#include "router/pipeline_stage.hpp"
+#include "ni/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "response_io.hpp"
 #include <cassert>

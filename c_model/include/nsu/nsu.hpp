@@ -29,10 +29,10 @@
 // References:
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
 #include "ni_flit_constants.h"
-#include "nmu/ni_stage.hpp"
+#include "ni/ni_stage.hpp"
 #include "router/req_in.hpp"
 #include "router/rsp_out.hpp"
-#include "router/wormhole_arbiter.hpp"
+#include "ni/wormhole_arbiter.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"

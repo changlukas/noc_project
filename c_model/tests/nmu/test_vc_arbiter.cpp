@@ -1,6 +1,6 @@
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/packetize.hpp"
-#include "router/wormhole_arbiter.hpp"
+#include "ni/wormhole_arbiter.hpp"
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"

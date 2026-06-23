@@ -1,4 +1,4 @@
-#include "router/pipeline_stage.hpp"
+#include "ni/pipeline_stage.hpp"
 #include <gtest/gtest.h>
 using ni::cmodel::router::PipelineStage;
 namespace {
