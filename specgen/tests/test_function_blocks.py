@@ -66,13 +66,6 @@ def test_xref_packet_fields_exist():
     assert not err, f"cross-ref errors to packet: {[i.message for i in err]}"
 
 
-def test_xref_registers_exist():
-    fb = json.loads(FB_JSON.read_text(encoding="utf-8"))
-    regs = loader.load_doc(SPECGEN_ROOT / "generated" / "json" / "ni_registers.json")
-    issues = invariants.check_blocks_xref_registers(fb, regs)
-    err = [i for i in issues if i.severity == "ERROR"]
-    assert not err, f"cross-ref errors to registers: {[i.message for i in err]}"
-
 
 def test_compile_time_params_unique_across_features():
     fb = json.loads(FB_JSON.read_text(encoding="utf-8"))

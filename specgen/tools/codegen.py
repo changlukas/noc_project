@@ -4,10 +4,8 @@
 Usage:
     py -3 tools/codegen.py --target cpp --domain packet --out generated/cpp/
     py -3 tools/codegen.py --target cpp --domain signals --out generated/cpp/
-    py -3 tools/codegen.py --target cpp --domain registers --out generated/cpp/
     py -3 tools/codegen.py --target sv --domain packet --out generated/sv/
     py -3 tools/codegen.py --target sv --domain signals --out generated/sv/
-    py -3 tools/codegen.py --target sv --domain registers --out generated/sv/
     py -3 tools/codegen.py --check        # regen + diff vs committed; exit 1 on drift
     py -3 tools/codegen.py --lint-sv      # verilator lint smoke test (skips if not in PATH)
 """
@@ -29,8 +27,8 @@ sys.path.insert(0, str(TOOLS_DIR.parent))
 
 from ni_spec.loader import load_spec_version
 from tools.elaborate import common
-from tools.elaborate import cpp_packet, cpp_signals, cpp_registers, cpp_params
-from tools.elaborate import sv_packet, sv_signals, sv_registers, sv_params
+from tools.elaborate import cpp_packet, cpp_signals, cpp_params
+from tools.elaborate import sv_packet, sv_signals, sv_params
 
 
 # Maps (target, domain) -> (emitter_func, output_filename, source_json_rel)
@@ -38,11 +36,9 @@ from tools.elaborate import sv_packet, sv_signals, sv_registers, sv_params
 DOMAIN_TO_EMITTER: dict[tuple[str, str], tuple] = {
     ("cpp", "packet"):    (cpp_packet.emit,    "ni_flit_constants.h", "generated/json/ni_packet.json"),
     ("cpp", "signals"):   (cpp_signals.emit,   "ni_signals.h",        "generated/json/ni_signals.json"),
-    ("cpp", "registers"): (cpp_registers.emit, "ni_regs.h",           "generated/json/ni_registers.json"),
     ("cpp", "params"):    (cpp_params.emit,    "ni_params.h",         "source/constants.yaml"),
     ("sv",  "packet"):    (sv_packet.emit,    "ni_flit_pkg.sv",       "generated/json/ni_packet.json"),
     ("sv",  "signals"):   (sv_signals.emit,   "ni_signals_pkg.sv",    "generated/json/ni_signals.json"),
-    ("sv",  "registers"): (sv_registers.emit, "ni_regs_pkg.sv",       "generated/json/ni_registers.json"),
     ("sv",  "params"):    (sv_params.emit,    "ni_params_pkg.sv",     "source/constants.yaml"),
 }
 
@@ -216,7 +212,7 @@ def main() -> int:
         help="output language target (default: cpp)",
     )
     parser.add_argument(
-        "--domain", choices=["packet", "signals", "registers", "params"],
+        "--domain", choices=["packet", "signals", "params"],
         help="spec domain to emit",
     )
     parser.add_argument(

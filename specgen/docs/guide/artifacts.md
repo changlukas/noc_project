@@ -10,24 +10,20 @@ specgen/
     constants.yaml              <- params domain SSoT
     interface_handshake.json
   generated/
-    json/                       <- JSON SSoT (packet / signals / registers)
+    json/                       <- JSON SSoT (packet / signals)
       ni_packet.json
       ni_packet.schema.json
       ni_signals.json
       ni_signals.schema.json
-      ni_registers.json
-      ni_registers.schema.json
       ni_protocol_rule_index.json
       ni_protocol_rule_index.schema.json
     cpp/                        <- C++ headers (tracked, drift-gated)
       ni_flit_constants.h
       ni_signals.h
-      ni_regs.h
       ni_params.h
     sv/                         <- SV packages (tracked, drift-gated)
       ni_flit_pkg.sv
       ni_signals_pkg.sv
-      ni_regs_pkg.sv
       ni_params_pkg.sv
 ```
 
@@ -70,13 +66,6 @@ Every elaborated file starts with five comment lines plus a horizontal rule abov
 
 - Per-interface, per-channel pin-level signal declarations.
 - `<PIN>_RESET` constants for outputs whose reset value is fixed.
-
-### `ni_regs.h` and `ni_regs_pkg.sv`
-
-- `<REG>_OFFSET` per register.
-- Per-field positions (`<REG>_<FIELD>_LSB` / `_MSB`).
-- `enum class` for access mode (`RO`, `RW`, `RW1C`, `WO`).
-- `static_assert` checks that the per-register field-width sum is <= the register width.
 
 ## Drift policy
 

@@ -69,20 +69,6 @@ def test_signals_cpp_has_provenance_banner():
     assert "Source SHA:" in text
 
 
-def test_registers_cpp_emits_offsets():
-    r = run_codegen("--target", "cpp", "--domain", "registers",
-                    "--out", str(INCLUDE_DIR))
-    assert r.returncode == 0, r.stderr
-    text = (INCLUDE_DIR / "ni_regs.h").read_text(encoding="ascii")
-    assert "namespace regs" in text
-    assert "_OFFSET" in text
-    assert "enum class" in text  # access mode enums
-
-
-def test_registers_cpp_has_provenance_banner():
-    text = (INCLUDE_DIR / "ni_regs.h").read_text(encoding="ascii")
-    assert "Source SHA:" in text
-
 
 # ---------------------------------------------------------------------------
 # --check mode tests
@@ -91,7 +77,7 @@ def test_registers_cpp_has_provenance_banner():
 def test_check_mode_exits_zero_when_clean():
     """--check must exit 0 when committed headers match fresh regen."""
     # First ensure headers are fresh
-    for domain in ("packet", "signals", "registers"):
+    for domain in ("packet", "signals", "params"):
         run_codegen("--target", "cpp", "--domain", domain, "--out", str(INCLUDE_DIR))
     r = run_codegen("--check")
     assert r.returncode == 0, (
@@ -103,7 +89,7 @@ def test_check_mode_exits_zero_when_clean():
 def test_check_mode_exits_one_on_drift(tmp_path):
     """--check must exit 1 when a committed header has been modified."""
     # First ensure headers are fresh
-    for domain in ("packet", "signals", "registers"):
+    for domain in ("packet", "signals", "params"):
         run_codegen("--target", "cpp", "--domain", domain, "--out", str(INCLUDE_DIR))
 
     target_header = INCLUDE_DIR / "ni_flit_constants.h"
@@ -182,12 +168,6 @@ def test_packet_cpp_secded_static_assert_gated_on_flit_ecc():
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
     assert "SECDED bound" not in text
 
-
-def test_registers_cpp_has_field_width_static_assert():
-    """ni_regs.h must contain per-register field width sum static_assert."""
-    text = (INCLUDE_DIR / "ni_regs.h").read_text(encoding="ascii")
-    assert "static_assert" in text
-    assert "field width sum" in text
 
 
 # ---------------------------------------------------------------------------

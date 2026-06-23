@@ -18,7 +18,6 @@ Three spec domains, each with its own JSON SSoT and a pair of elaborators:
 |--------|-----------|------------|------------|
 | `packet` | `generated/json/ni_packet.json` | `ni_flit_constants.h` | `ni_flit_pkg.sv` |
 | `signals` | `generated/json/ni_signals.json` | `ni_signals.h` | `ni_signals_pkg.sv` |
-| `registers` | `generated/json/ni_registers.json` | `ni_regs.h` | `ni_regs_pkg.sv` |
 | `params` | `source/constants.yaml` | `ni_params.h` | `ni_params_pkg.sv` |
 
 `noc_function_blocks.json` is retained as a feature inventory and cross-domain consistency check, but no longer drives codegen.

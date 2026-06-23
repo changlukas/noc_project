@@ -108,14 +108,6 @@ All width/position accessors are pure functions of `field_widths` + `width_param
 | `signals_reset_domains(spec)` | `set[str]` of legal reset signal names. |
 | `signals_signal_by_pin(spec, pin_name)` | `dict` (full signal entry) or `None`. |
 
-#### Registers (`generated/json/ni_registers.json`)
-
-| Function | Returns |
-|----------|---------|
-| `regs_offsets(spec)` | `{reg_name: offset_int}` |
-| `regs_field_mask(spec, reg, field)` | `int` bitmask. Raises `KeyError`. |
-| `regs_access_mode(spec, reg)` | `"RO"` / `"RW"` / `"RW1C"` / `"WO"` / `"WC"`. Raises `KeyError`. |
-
 `noc_function_blocks.json` is kept as feature inventory + cross-domain consistency check, but no longer exposes accessor functions through `ni_spec.constants` — it does not drive codegen.
 
 ## Stability contract

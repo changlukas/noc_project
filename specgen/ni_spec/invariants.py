@@ -273,20 +273,6 @@ def check_blocks_xref_packet(fb_spec, pkt_spec) -> List[Issue]:
     return issues
 
 
-def check_blocks_xref_registers(fb_spec, regs_spec) -> List[Issue]:
-    """L2: every configured_by entry's register name must exist in ni_registers.json."""
-    issues: List[Issue] = []
-    legal = {r["name"] for r in regs_spec.get("registers", []) if r.get("kind") == "register"}
-    for block in fb_spec.get("blocks", []):
-        for feat in block.get("features", []):
-            for ref in feat.get("configured_by", []):
-                # configured_by may include "REG.field" form — match register name part
-                reg_name = ref.split(".")[0]
-                if reg_name not in legal:
-                    issues.append(_err("L2-FB-XREF-REG",
-                        f"{feat['id']}: configured_by {ref!r} register not in ni_registers.json"))
-    return issues
-
 
 def check_blocks_param_uniqueness(fb_spec) -> List[Issue]:
     """L2: compile_time_params name must be unique across all features."""

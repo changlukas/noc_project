@@ -1,11 +1,11 @@
 """Codegen SV emitter tests -- Task 8.
 
 Tests cover:
-- --target sv --domain {packet|signals|registers} each produces a .sv file.
+- --target sv --domain {packet|signals|params} each produces a .sv file.
 - Each .sv file has the correct package / endpackage structure.
-- localparam int unsigned present in all 3 files.
+- localparam int unsigned present in files.
 - Provenance banner (AUTO-GENERATED, Source SHA, Generator version, Generated at).
-- ifndef/define/endif include guard in all 3 files.
+- ifndef/define/endif include guard in files.
 - --check mode covers SV files (detects drift, passes when clean).
 - --lint-sv skips gracefully when verilator is not in PATH.
 """
@@ -163,40 +163,6 @@ class TestSvSignalsEmit:
         assert "Source SHA:" in text
 
 
-class TestSvRegistersEmit:
-    def setup_method(self):
-        r = run_codegen("--target", "sv", "--domain", "registers",
-                        "--out", str(RTL_PKG_DIR))
-        assert r.returncode == 0, r.stderr
-
-    def test_exits_zero(self):
-        r = run_codegen("--target", "sv", "--domain", "registers",
-                        "--out", str(RTL_PKG_DIR))
-        assert r.returncode == 0, r.stderr
-
-    def test_file_exists(self):
-        assert (RTL_PKG_DIR / "ni_regs_pkg.sv").exists()
-
-    def test_package_structure(self):
-        text = _sv_text("ni_regs_pkg.sv")
-        assert "package ni_regs_pkg;" in text
-        assert "endpackage" in text
-
-    def test_localparam_int_unsigned_offsets(self):
-        text = _sv_text("ni_regs_pkg.sv")
-        assert "localparam int unsigned" in text
-        assert "_OFFSET" in text
-
-    def test_ifndef_include_guard(self):
-        text = _sv_text("ni_regs_pkg.sv")
-        assert "`ifndef NI_REGS_PKG_SVH" in text
-        assert "`define NI_REGS_PKG_SVH" in text
-        assert "`endif" in text
-
-    def test_provenance_banner(self):
-        text = _sv_text("ni_regs_pkg.sv")
-        assert "Source SHA:" in text
-
 
 # ---------------------------------------------------------------------------
 # --check mode covers SV files
@@ -205,11 +171,11 @@ class TestSvRegistersEmit:
 class TestCheckModeWithSv:
     def setup_method(self):
         """Ensure all SV files are freshly generated before each check test."""
-        for domain in ("packet", "signals", "registers"):
+        for domain in ("packet", "signals", "params"):
             run_codegen("--target", "sv", "--domain", domain, "--out", str(RTL_PKG_DIR))
         # Also ensure C++ headers are fresh.
         from tests.test_codegen import INCLUDE_DIR
-        for domain in ("packet", "signals", "registers"):
+        for domain in ("packet", "signals", "params"):
             run_codegen("--target", "cpp", "--domain", domain, "--out", str(INCLUDE_DIR))
 
     def test_check_exits_zero_when_sv_clean(self):
@@ -275,7 +241,7 @@ class TestLintSv:
     def test_lint_sv_graceful_skip_or_pass(self):
         """--lint-sv must exit 0 (either skip or lint pass; never crash)."""
         # First ensure SV files exist.
-        for domain in ("packet", "signals", "registers"):
+        for domain in ("packet", "signals", "params"):
             run_codegen("--target", "sv", "--domain", domain, "--out", str(RTL_PKG_DIR))
 
         r = run_codegen("--lint-sv")
@@ -315,14 +281,6 @@ class TestLintSv:
             f"Expected skip message.\nstderr: {result.stderr}"
         )
 
-
-def test_sv_access_mode_typedef_and_per_reg_emitted():
-    """ni_regs_pkg.sv must expose typedef access_mode_e + per-reg <REG>_ACCESS."""
-    from pathlib import Path
-    text = (Path(__file__).resolve().parent.parent / "generated" / "sv" / "ni_regs_pkg.sv").read_text()
-    assert "typedef enum logic [1:0] { ACCESS_RO, ACCESS_RW, ACCESS_RW1C, ACCESS_WO } access_mode_e;" in text, \
-        "missing access_mode_e typedef"
-    assert "localparam access_mode_e ERR_STATUS_ACCESS" in text and "ACCESS_RW1C" in text
 
 
 def test_emit_ni_params_pkg_sv_matches_spec_derived_golden():

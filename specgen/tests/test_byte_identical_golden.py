@@ -64,11 +64,6 @@ def test_golden_cpp_signals():
            _strip_timestamp(_golden("ni_signals.h"))
 
 
-def test_golden_cpp_registers():
-    """Registers domain is out of scope but must not regress."""
-    assert _strip_timestamp(_regen("cpp", "registers", GOLDEN_DIR)) == \
-           _strip_timestamp(_golden("ni_regs.h"))
-
 
 def test_golden_sv_packet():
     assert _strip_timestamp(_regen("sv", "packet", GOLDEN_DIR)) == \
@@ -80,6 +75,3 @@ def test_golden_sv_signals():
            _strip_timestamp(_golden("ni_signals_pkg.sv"))
 
 
-def test_golden_sv_registers():
-    assert _strip_timestamp(_regen("sv", "registers", GOLDEN_DIR)) == \
-           _strip_timestamp(_golden("ni_regs_pkg.sv"))
