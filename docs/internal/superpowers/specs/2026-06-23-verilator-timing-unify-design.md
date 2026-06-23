@@ -12,12 +12,17 @@
 - 唯一 gap:`noc.links` 聚合(flit_count/stall_cyc)在 --timing 下空 → 本 design ① 修。
 > spike 用 `tb_top_vcs` wrapper 當 top 驗證;productionization 把 wrapper 內容**合併進 `tb_top`**(同一份 self-clocked SV,只是收成一個 module)→ 行為等價,故 spike 的 build/parity 結論成立。
 
-## ① link-perf 修法
-**INPUT**:`sim/sv/link_perf_monitor.sv` — `flit_count`/`stall_cyc` 已在 `always_ff` 逐拍累加,但只在 `final` 推一次 `cmodel_perf_link(name, flit_count, stall_cyc)`。
-**ROOT CAUSE**:SV 跨模組 `final` 順序未定義 — 在 `tb_top_vcs.final`(dump perf)之後才跑 `link_perf_monitor.final`(push)→ dump 時 link 還沒 push。VCS / Verilator-timing 同病。
-**COMPUTE/FIX**:改成**逐拍 live push** running total、**移除 `final` block**。`cmodel_perf_link` 已是 set/覆寫語意(`g_perf.set_link` by name)→ 最後一拍的呼叫帶最終總額,正確。
-**OUTPUT**:`noc.links` 在兩個 simulator 都有值;無 end-of-sim 順序依賴。collector(C 側)**不改**。
-> 細節:在 reset 後的 `always_ff` 內、更新計數後呼叫 `cmodel_perf_link(LINK_NAME, flit_count, stall_cyc)`(set 語意,少數 link、每拍一呼可接受)。
+## ① monitor final-ordering 修法(link + axi backpressure 都修)
+**ROOT CAUSE**:SV 跨模組 `final` 順序未定義 — perf dump 的 `final` 可能早於 monitor 的 `final`(push 聚合)→ dump 時聚合還沒進 collector。**兩個 monitor 都中**:
+- `sim/sv/link_perf_monitor.sv`:`flit_count`/`stall_cyc`(always_ff 逐拍累加)只在 `final` 推 `cmodel_perf_link`(→ `noc.links` 空)。
+- `sim/sv/axi_perf_monitor.sv`:`slave_write_idle`/`master_read_idle`(always_ff 逐拍累加,:42/:48-50)只在 `final` 推 `cmodel_perf_axi_backpressure`(:84)(→ axi backpressure 空/stale)。
+（per-transaction `cmodel_perf_axi_txn` 是完成當下即推,不受影響。）
+
+**FIX**:兩個 monitor 都改成**逐拍 live push next 值**、**移除各自 `final` block**。
+- **NBA 正確性(Codex Important)**:不可推 NBA 前的舊 register 值(會少一拍)。在 reset-gated posedge block 內,用 **pre-update 的 `valid`/`credit`(或 `wvalid&&!wready` 等)算出 `next_*`**,assign register,**再推 `next_*`**。`stall_cyc` 仍用 pre-update `credit==0`(對齊現行 :27 語意)。
+- DPI 需 set/last-write-wins:`cmodel_perf_link`→`g_perf.set_link` 已確認(`perf_collector.hpp:56` / `cmodel_dpi.cpp:1010`);`cmodel_perf_axi_backpressure` 須確認同為 set-by-slot(plan 時驗,若是 accumulate 則改 set)。
+
+**OUTPUT**:`noc.links` 與 axi backpressure 在 Verilator-timing **與 VCS** 都有正確值;無 end-of-sim 順序依賴。collector C 側結構不改(僅確認 set 語意)。
 
 ## ② 合併成單一 self-clocked `tb_top.sv`(退役 --no-timing + wrapper)
 > 背景:`tb_top.sv:21` 自述 clk/rst 做成 input port 的**唯一原因**是讓 `main.cpp` 從外面打 clock(--no-timing 遺留)。除 `tb_top_vcs` 與待刪的 `main.cpp` 外,無其他 external-clock consumer(genamba 是獨立 tb,用自己的 ACLK)。故退役 main.cpp 後,port 化的理由消失 → 合併。
@@ -25,7 +30,7 @@
 - **刪 `sim/sv/tb_top_vcs.sv`**(已合併)。`_vcs` 誤名問題隨之消失。
 - `sim/verilator/Makefile`:`TOP` 維持 `tb_top`;`VERILATOR_FLAGS` 的 `--no-timing` → `--timing --output-split 0`;保留 64MiB stack reserve(`-Wl,--stack,67108864`,spike 確認乾淨接受);SV_SRC 移除 tb_top_vcs.sv。
 - C main:**刪舊 `sim/verilator/main.cpp`**(打 clk/reset/timeout/perf/VCD 那套),改為極簡 event-loop main(`sim/verilator/main.cpp`):`commandArgs` → 建 `Vtb_top` → `while(!gotFinish){ eval(); if(!eventsPending) break; time(nextTimeSlot); }` → `final()`。clk/reset/timeout/perf/finalize 全在 `tb_top` SV 內。(`main_genamba.cpp` 不動。)
-- **Verilator VCD 放掉**(user 決定;波形走 VCS/FSDB)— 新 main 不含 `VM_TRACE`/`+vcd`;Makefile `TRACE=1` 的 VCD 路徑移除或標 VCS-only。
+- **Verilator VCD 放掉**(user 決定;波形走 VCS/FSDB)— 新 main 不含 `VM_TRACE`/`+vcd`。**且須連 Makefile 的 VCD 設施一起清(Codex Important)**,否則 `TRACE=1`/`run-all-trace` 會假性失敗:移除/retarget `TRACE_PLUSARG_TB_TOP`(`Makefile:34`)、`run-all-trace`(要求 `tb_top.vcd`,`:306`)、VCD TRACE 路徑(`:15-35`、`:290-330`)。CTest 不依賴 VCD(`test_cosim_integration.cpp:71` 只用 binary + PASS marker)。
 - obj_dir 用正式名(spike `obj_dir_timing` 收掉)。
 - **必須透過正常 `make` build**:沿用 genamba `--timing` target 已解的 MSYS2 make/sed workaround(`--output-split 0`、path sed、`$(MAKE) -C`、`$(EXEEXT)`),不留 spike 的手動兩段 / `|| true` hack。
 
@@ -40,10 +45,11 @@ binary 仍是 **`Vtb_top`**(top 維持 `tb_top`)→ `sim/tests/test_cosim_integr
 
 ## Success Criteria
 - `make check PYTHON3=python3` 全綠:`--timing` build-verilator 經正常 `make` 成功(無 stack overflow)、ctest **544/544**。
-- 6 個 bidirectional scenario 在統一 flow 全 PASS,perf parity vs 修前 --no-timing baseline,且 **`noc.links` 有值**(flit_count/stall_cyc 正確)。
+- 6 個 bidirectional scenario 在統一 flow 全 PASS,perf parity vs 修前 --no-timing baseline,且 **`noc.links` 與 axi backpressure 都有正確值**(① 修好兩個 monitor)。
+- `TRACE=1 run-tb-top` / `run-all-trace` 不再假性失敗(VCD 設施已清/retarget)。
 - VCS dry-run(`cd sim/vcs && make -n tb_top`)路徑仍解析(`-top tb_top`)。
-- repo 無殘留:`--no-timing`(tb_top flow)、`main.cpp` 打 clk 邏輯、孤兒 VCD 路徑、`tb_top_vcs`(檔/module/`-top`/`Vtb_top_vcs`)、spike 的 `main_tb_top_vcs.cpp` / `obj_dir_timing`。
-- 文件與實況一致(單一 self-clocked tb_top 敘述)。
+- repo 無殘留:`--no-timing`(`Makefile:80` tb_top flow)、`main.cpp` 打 clk 邏輯、Verilator VCD/`TRACE` 設施(`Makefile:15-35`/`:290-330`/`:306`/`:34`)、`tb_top_vcs`(檔/module/`-top`/`Vtb_top_vcs`/VCS Makefile:155-160+:12)、spike 的 `main_tb_top_vcs.cpp` / `obj_dir_timing`。
+- 文件與 README 一致(單一 self-clocked tb_top;移除 tb_top_vcs / --no-timing / TRACE=1 廣告)。
 
 ## Out of Scope
 - genamba testbench(獨立,`--timing` 已用;去留是另一回事)。
