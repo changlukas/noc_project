@@ -6,7 +6,7 @@
 #include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "nsu/nsu.hpp"
+#include "nsu/nsu_standalone.hpp"
 #include <cstdint>
 #include <gtest/gtest.h>
 

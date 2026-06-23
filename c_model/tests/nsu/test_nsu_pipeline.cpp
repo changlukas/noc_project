@@ -10,7 +10,7 @@
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "ni/ni_stage.hpp"
-#include "nsu/nsu.hpp"
+#include "nsu/nsu_standalone.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::NiPath;

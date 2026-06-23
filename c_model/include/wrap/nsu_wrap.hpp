@@ -34,7 +34,7 @@
 #include "wrap/nsu_wrap_io.hpp"
 #include "wrap/poc_defaults.hpp"  // kPoC* depths
 #include "flit.hpp"
-#include "nsu/nsu.hpp"
+#include "nsu/nsu_standalone.hpp"
 #include <array>
 #include <memory>
 #include <optional>
