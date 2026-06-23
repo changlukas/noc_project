@@ -20,10 +20,14 @@ module link_perf_monitor #(
         if (!rst_ni) begin
             flit_count <= 0; stall_cyc <= 0; credit <= BUFFER_DEPTH;
         end else begin
-            // credit accounting: -1 on flit sent, +1 on pulse (net 0 if both).
-            if (valid) flit_count <= flit_count + 1;
-            credit <= credit - (valid ? 1 : 0) + (credit_pulse ? 1 : 0);
-            if (credit == 0) stall_cyc <= stall_cyc + 1;  // pre-update credit: this cycle had no free downstream slot
+            // next-value (pre-NBA) so the live push is not one cycle short.
+            automatic longint next_flit  = flit_count + (valid ? 1 : 0);
+            automatic longint next_stall = stall_cyc  + ((credit == 0) ? 1 : 0);
+            flit_count <= next_flit;
+            credit     <= credit - (valid ? 1 : 0) + (credit_pulse ? 1 : 0);
+            stall_cyc  <= next_stall;
+            // live push (set/last-write-wins): final cycle's call carries the total.
+            cmodel_perf_link(LINK_NAME, next_flit, next_stall);
         end
     end
 
@@ -33,6 +37,4 @@ module link_perf_monitor #(
     assert property (@(posedge clk_i) disable iff (!rst_ni)
         !(valid && credit == 0))
         else $error("[%s] credit underflow: valid asserted with zero credit", LINK_NAME);
-
-    final cmodel_perf_link(LINK_NAME, flit_count, stall_cyc);
 endmodule

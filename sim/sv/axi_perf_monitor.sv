@@ -45,9 +45,12 @@ module axi_perf_monitor #(
                 r_acc[i].delete();  r_addr[i].delete();  r_len[i].delete();  r_sz[i].delete();
             end
         end else begin
-            cyc <= cyc + 1;
-            if (wvalid && !wready) slave_write_idle  <= slave_write_idle  + 1;
-            if (rvalid && !rready) master_read_idle   <= master_read_idle  + 1;
+            automatic longint next_sw_idle = slave_write_idle + ((wvalid && !wready) ? 1 : 0);
+            automatic longint next_mr_idle = master_read_idle + ((rvalid && !rready) ? 1 : 0);
+            cyc              <= cyc + 1;
+            slave_write_idle <= next_sw_idle;
+            master_read_idle <= next_mr_idle;
+            cmodel_perf_axi_backpressure(SLOT_NAME, next_sw_idle, next_mr_idle);
 
             if (awvalid && awready) begin
                 if (w_acc[awid].size() >= MAX_OUTSTANDING)
@@ -81,6 +84,4 @@ module axi_perf_monitor #(
         end
     end
 
-    final cmodel_perf_axi_backpressure(SLOT_NAME, slave_write_idle,
-                                       master_read_idle);
 endmodule
