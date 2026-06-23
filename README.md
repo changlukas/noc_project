@@ -64,13 +64,11 @@ make run-tb-top SCENARIO=<ax4-id>
 make run-genamba
 ~~~
 
-Waveform dumping is opt-in (default off, so regression is unaffected):
+Waveform dumping (VCS/FSDB only; opt-in, default off):
 
 ~~~bash
-cd sim/verilator && make run-tb-top SCENARIO=<id> TRACE=1  # VCD -> output/<id>/tb_top.vcd
-cd sim/verilator && make run-all-trace                     # one VCD per scenario + summary
-cd sim/vcs       && make run-tb-top SCENARIO=<id> FSDB=1   # FSDB (needs Verdi/VERDI_HOME)
-cd sim/vcs       && make run-all-fsdb                      # one FSDB per scenario + summary
+cd sim/vcs && make run-tb-top SCENARIO=<id> FSDB=1   # FSDB -> output/<id>/tb_top.fsdb (needs Verdi/VERDI_HOME)
+cd sim/vcs && make run-all-fsdb                      # one FSDB per scenario + summary
 ~~~
 
 See `docs/architecture.md` for the cosim architecture, and

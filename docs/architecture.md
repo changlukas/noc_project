@@ -193,12 +193,12 @@ Key properties:
   appears at the ChannelModel input at tick N+1.
 - Registered handshake -- `can_accept_*()` queries reflect state latched
   at the previous tick, not combinational lookahead.
-- Verilator clk_i match -- the Verilator harness calls
-  `eval()` with clk_i=0 then clk_i=1 per C++ tick, producing exactly one
-  SV clock edge per c_model tick. The C++ harness is the timing master at
-  the Verilator level (main.cpp toggles clk_i and drives rst_ni). The SV
-  side owns the cycle-by-cycle wire propagation within that clock edge.
-  This is the timing model for Stage 5b.
+- Verilator clk_i match -- `tb_top.sv` drives its own clock (self-clocked
+  via `always #5` or equivalent); `main.cpp` runs a minimal event-loop
+  (`eval()` + time advance) and does not toggle `clk_i`. One posedge
+  equals one c_model tick. The SV side owns the cycle-by-cycle wire
+  propagation within that clock edge. This is the timing model for
+  Stage 5b.
 - C++ vs SV timing nuance -- in the C++ model, state updates are
   immediate within tick(). In SV, the registered outputs settle after the
   clock edge and are visible one delta later. The DPI wrap adapters
@@ -263,9 +263,11 @@ header instead.
 
 ### Vtb_top binary
 
-The Verilator binary `Vtb_top` is built in `build/verilator/obj_dir/`.
-It is driven by `sim/verilator/main.cpp` via the DPI wraps,
-which step the c_model components over the wire-level testbench. Per-run
+The Verilator binary `Vtb_top` is built in `build/verilator/obj_dir/`
+using `--timing`. `tb_top.sv` is self-clocked (clock, reset, and timeout
+are internal); `sim/verilator/main.cpp` is a minimal event-loop entry that
+calls `eval()` and advances time until `$finish`. The same `tb_top.sv` is
+used by VCS (`-top tb_top`); waveforms are captured via VCS/FSDB. Per-run
 correctness is established by the c_model scoreboard (per-transaction
 write->readback data compare) and the model's own internal checks.
 

@@ -225,15 +225,14 @@ Layout of the split:
 
 - `sim/sources.mk` -- simulator-neutral file lists, include dirs,
   `+define+`s.
-- `sim/verilator/` -- Verilator flags, the C++ main drivers (`main.cpp`
-  drives tb_top's clock; `main_genamba.cpp` is an eval loop), and the
-  Verilator 5.036 workarounds (`--output-split 0`, backslash-path sed,
-  `$(EXEEXT)`).
-- `sim/vcs/` -- VCS flags only. No C++ main: VCS owns simulation time.
-  tb_genamba is self-clocked already; tb_top is wrapped by
-  `sim/sv/tb_top_vcs.sv` (clock + reset + timeout + final-block
-  finalize, mirroring `main.cpp`). Adjust the `[WORKSTATION]` block in
-  `sim/vcs/Makefile` (vcs path, license, site flags) before first use.
+- `sim/verilator/` -- Verilator flags (`--timing`), `main.cpp`
+  (minimal event-loop entry; tb_top is self-clocked), `main_genamba.cpp`
+  (eval loop), and Verilator 5.036 workarounds (`--output-split 0`,
+  backslash-path sed, `$(EXEEXT)`).
+- `sim/vcs/` -- VCS flags only; no C++ main (VCS owns simulation time).
+  Both tb_top and tb_genamba are self-clocked; VCS uses `-top tb_top`.
+  Adjust the `[WORKSTATION]` block in `sim/vcs/Makefile` (vcs path,
+  license, site flags) before first use.
 
 The vendored-task patches (B-latch reads, R-shadow array) are
 simulator-neutral and identical under both flows. The `SIM=vcs` path has
@@ -270,28 +269,6 @@ First-run validation on the workstation (record results in the
 2. Whether `LD_LIBRARY_PATH` needs the FSDB runtime libs.
 3. Open one fsdb in Verdi: top-level AXI interfaces and DPI wrapper
    boundaries must be visible (not merely a loadable file).
-
-#### VCD waveform tracing (Verilator)
-
-Twin of the FSDB flow for the Verilator side -- usable on the Windows dev
-host without VCS/Verdi. Opt-in per run; default off:
-
-~~~bash
-cd sim/verilator
-make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat TRACE=1  # -> output/<scenario>/tb_top.vcd
-make run-genamba TRACE=1                                 # -> output/genamba_<scenario>/tb_genamba.vcd
-make run-all-trace                                       # all 37 scenarios + genamba, summary at end
-~~~
-
-Trace builds verilate with `--trace` into separate obj dirs
-(`obj_dir_trace` / `obj_genamba_trace`); toggling `TRACE` never reuses the
-other mode's build. The dump code in `main.cpp` / `main_genamba.cpp` is
-`#if VM_TRACE`-guarded, so non-trace builds are unchanged. `run-all-trace`
-follows `run-all-fsdb` semantics (always exits 0; a scenario counts PASS
-only if its vcd is non-empty; `AX4-INF-*` annotated "fails by design").
-
-View locally with GTKWave, or transfer to the workstation for Verdi (Verdi
-opens VCD directly). VCD is uncompressed text -- `gzip` before transfer.
 
 ### Verified toolchain versions
 
