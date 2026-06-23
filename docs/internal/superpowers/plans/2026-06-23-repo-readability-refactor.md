@@ -525,10 +525,13 @@ git commit -m "refactor: rename flit_link_perf_monitor.sv to link_perf_monitor.s
 ### Task 9: 文件同步成最終實況(嚴格最後)
 
 **Files:**
-- Modify: `docs/issue/ARCHITECTURE.md`、`docs/architecture.md`、`CLAUDE.md`
+- Modify: `docs/issue/ARCHITECTURE.md`、`docs/architecture.md`、`CLAUDE.md`、`README.md`、`tests/scenarios/README.md`
+- 並修正 Step 6 最終 repo-wide 殘留掃描命中的**任何**檔(noc/cosim/shell 殘留),不限上列
 - (若 `docs/issue/` 仍 untracked,先 `git add` 納入版控由 user 決定)
 
 **Interfaces:** 無程式介面。
+
+> 註:Task 5 fix 已清掉大部分 `cosim/` path 殘留(build-檔註解、ATTRIBUTION.md、README.md/tests README 的 cosim 部分)。本 task 處理 noc→router、shell→wrap、register_file 移除的 doc 殘留 + 最終全 repo sweep。
 
 - [ ] **Step 1: `docs/issue/ARCHITECTURE.md` 改寫**
 
