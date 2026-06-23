@@ -381,7 +381,6 @@ To regenerate C++ headers:
 ~~~bash
 py -3 specgen/tools/codegen.py --target cpp --domain packet
 py -3 specgen/tools/codegen.py --target cpp --domain signals
-py -3 specgen/tools/codegen.py --target cpp --domain registers
 ~~~
 
 To regenerate SV headers:
@@ -389,7 +388,6 @@ To regenerate SV headers:
 ~~~bash
 py -3 specgen/tools/codegen.py --target sv --domain packet
 py -3 specgen/tools/codegen.py --target sv --domain signals
-py -3 specgen/tools/codegen.py --target sv --domain registers
 ~~~
 
 ### Drift check
