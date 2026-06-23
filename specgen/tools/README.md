@@ -10,7 +10,7 @@ canonical source. Regenerate downstream cpp/sv constants:
 ```bash
 py -3 specgen/tools/codegen.py --target cpp --domain packet
 py -3 specgen/tools/codegen.py --target sv  --domain packet
-# (similar for signals, registers, params)
+# (similar for signals, params)
 ```
 
 Drift gate (CI):

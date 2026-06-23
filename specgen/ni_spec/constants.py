@@ -138,37 +138,6 @@ def signals_pins_by_interface(signals_spec) -> dict:
     return out
 
 
-# ---------- registers domain (Task 4 will implement) ----------
-
-def regs_offsets(regs_spec) -> dict:
-    """Return {register_name: offset_int} for kind=register entries."""
-    return {r["name"]: int(r["offset"], 16)
-            for r in regs_spec.get("registers", [])
-            if r.get("kind") == "register"}
-
-
-def regs_field_mask(regs_spec, reg_name: str, field_name: str) -> int:
-    """Return bit mask for a register field. Raises KeyError if not found."""
-    for r in regs_spec.get("registers", []):
-        if r.get("name") != reg_name:
-            continue
-        for f in r.get("fields", []):
-            if f.get("name") == field_name:
-                hi, lo = int(f["bit_high"]), int(f["bit_low"])
-                return ((1 << (hi - lo + 1)) - 1) << lo
-    raise KeyError(f"{reg_name}.{field_name}")
-
-
-def regs_access_mode(regs_spec, reg_name: str) -> str:
-    """Return access mode (RO/RW/RW1C/WO/WC) for a register. Raises KeyError if not found."""
-    for r in regs_spec.get("registers", []):
-        if r.get("kind") != "register":
-            continue
-        if r.get("name") == reg_name:
-            return r.get("access")
-    raise KeyError(reg_name)
-
-
 # ---------- pure-parameterization elaborator helpers (PP-2) ----------
 #
 # These compute the same values currently stored as `derived` / `lsb` / `msb`
