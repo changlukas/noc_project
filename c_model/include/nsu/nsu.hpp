@@ -30,9 +30,9 @@
 //   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
 #include "ni_flit_constants.h"
 #include "nmu/ni_stage.hpp"
-#include "noc/noc_req_in.hpp"
-#include "noc/noc_rsp_out.hpp"
-#include "noc/wormhole_arbiter.hpp"
+#include "router/req_in.hpp"
+#include "router/rsp_out.hpp"
+#include "router/wormhole_arbiter.hpp"
 #include "nsu/axi_master_port.hpp"
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
@@ -65,7 +65,7 @@ struct NsuConfig {
 
 class Nsu {
   public:
-    Nsu(NsuConfig cfg, noc::NocReqIn& upstream_req, noc::NocRspOut& downstream_rsp);
+    Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut& downstream_rsp);
 
     Nsu(const Nsu&) = delete;
     Nsu(Nsu&&) = delete;
@@ -122,10 +122,10 @@ class Nsu {
     //   6. depacketize_ takes upstream_req_ + meta_buffer_.
     //   7. axi_master_port_ takes depacketize_ + packetize_.
     NsuConfig cfg_;
-    noc::NocReqIn& upstream_req_;
-    noc::NocRspOut& downstream_rsp_;
+    router::NocReqIn& upstream_req_;
+    router::NocRspOut& downstream_rsp_;
     VcArbiter vc_arbiter_;
-    noc::WormholeArbiter<noc::NocRspOut> wormhole_arbiter_;
+    router::WormholeArbiter<router::NocRspOut> wormhole_arbiter_;
     MetaBuffer meta_buffer_;
     Packetize packetize_;
     Depacketize depacketize_;
@@ -134,7 +134,7 @@ class Nsu {
 
 namespace detail {
 
-inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, noc::NocRspOut& downstream) {
+inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downstream) {
     if (cfg.vc_mode == VcMode::ReadWriteSplit) {
         return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vc,
                                            cfg.read_rsp_vc, cfg.vc_arbiter_pending_depth);
@@ -146,12 +146,12 @@ inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, noc::NocRspOut& downstrea
 
 }  // namespace detail
 
-inline Nsu::Nsu(NsuConfig cfg, noc::NocReqIn& upstream_req, noc::NocRspOut& downstream_rsp)
+inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut& downstream_rsp)
     : cfg_(std::move(cfg)),
       upstream_req_(upstream_req),
       downstream_rsp_(downstream_rsp),
       vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_rsp_)),
-      wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/2, std::vector<noc::ChannelPairing>{},
+      wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/2, std::vector<router::ChannelPairing>{},
                         cfg_.wormhole_per_input_depth),
       meta_buffer_(cfg_.port_params.meta_buffer_per_id_depth),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), meta_buffer_, cfg_.src_id),
@@ -210,7 +210,7 @@ inline void Nsu::tick() {
 
 namespace detail {
 
-struct NullNocReqIn : noc::NocReqIn {
+struct NullNocReqIn : router::NocReqIn {
     // ShellAdapter accessor: inject one flit per tick from DPI wire.
     void inject_req_flit(const Flit& f) { queue_.push_back(f); }
 
@@ -232,7 +232,7 @@ struct NullNocReqIn : noc::NocReqIn {
     }
 
     // ShellAdapter accessor: drain one consumer credit pulse per tick (mirror of
-    // noc::LinkCreditOut::take). Returns true when a pulse was emitted.
+    // router::LinkCreditOut::take). Returns true when a pulse was emitted.
     bool take_credit(uint8_t vc) {
         if (pending_[vc] == 0) return false;
         --pending_[vc];
@@ -247,7 +247,7 @@ struct NullNocReqIn : noc::NocReqIn {
     std::vector<std::size_t> pending_{1, 0};
 };
 
-struct NullNocRspOut : noc::NocRspOut {
+struct NullNocRspOut : router::NocRspOut {
     // Sanity cap: a real ShellAdapter drains every tick, so a queue this deep
     // means the test forgot to drain. Asserts in debug; release builds skip
     // the check (and the queue is still allowed to grow unboundedly).

@@ -13,8 +13,8 @@
 // Exposes the four NoC-edge accessors the loopback Flow binds against
 // (nmu_req_out / nmu_rsp_in / nsu_req_in / nsu_rsp_out per node) plus tick(),
 // and the introspection the conservation tests use (req_router / req_eject_buffered).
-#include "noc/router.hpp"
-#include "noc/router_adapters.hpp"
+#include "router/router.hpp"
+#include "router/router_adapters.hpp"
 
 #include <array>
 #include <cstddef>
@@ -22,7 +22,7 @@
 #include <memory>
 #include <vector>
 
-namespace ni::cmodel::noc::testing {
+namespace ni::cmodel::router::testing {
 
 class TwoNodeFabric {
   public:
@@ -113,4 +113,4 @@ class TwoNodeFabric {
     std::unique_ptr<CreditRelay> req_relay_10_, req_relay_01_, rsp_relay_10_, rsp_relay_01_;
 };
 
-}  // namespace ni::cmodel::noc::testing
+}  // namespace ni::cmodel::router::testing

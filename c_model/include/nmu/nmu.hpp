@@ -34,10 +34,10 @@
 #include "nmu/rob.hpp"
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/ni_tokens.hpp"
-#include "noc/noc_req_out.hpp"
-#include "noc/noc_rsp_in.hpp"
-#include "noc/pipeline_stage.hpp"
-#include "noc/wormhole_arbiter.hpp"
+#include "router/req_out.hpp"
+#include "router/rsp_in.hpp"
+#include "router/pipeline_stage.hpp"
+#include "router/wormhole_arbiter.hpp"
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -100,9 +100,9 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     }
 
   private:
-    noc::PipelineStage<AdmittedAw> s1_aw_;
-    noc::PipelineStage<AdmittedW> s1_w_;
-    noc::PipelineStage<AdmittedAr> s1_ar_;
+    router::PipelineStage<AdmittedAw> s1_aw_;
+    router::PipelineStage<AdmittedW> s1_w_;
+    router::PipelineStage<AdmittedAr> s1_ar_;
 };
 
 struct NmuRspBEntry {
@@ -139,7 +139,7 @@ struct NmuConfig {
 
 class Nmu {
   public:
-    Nmu(NmuConfig cfg, noc::NocReqOut& downstream_req, noc::NocRspIn& downstream_rsp);
+    Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRspIn& downstream_rsp);
 
     Nmu(const Nmu&) = delete;
     Nmu(Nmu&&) = delete;
@@ -236,24 +236,24 @@ class Nmu {
     //   7. rob_ takes req_s1_bridge_ + depacketize_.
     //   7. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
     NmuConfig cfg_;
-    noc::NocReqOut& downstream_req_;
-    noc::NocRspIn& downstream_rsp_;
+    router::NocReqOut& downstream_req_;
+    router::NocRspIn& downstream_rsp_;
     VcArbiter vc_arbiter_;
-    noc::WormholeArbiter<noc::NocReqOut> wormhole_arbiter_;
+    router::WormholeArbiter<router::NocReqOut> wormhole_arbiter_;
     Depacketize depacketize_;
     Packetize packetize_;
     NmuReqS1Bridge req_s1_bridge_;
     Rob rob_;
     AxiSlavePort axi_slave_port_;
-    noc::PipelineStage<NmuRspBEntry> s2_rsp_b_;
-    noc::PipelineStage<NmuRspREntry> s2_rsp_r_;
-    std::vector<noc::PipelineStage<NmuRspBEntry>> rsp_extra_b_shift_;
-    std::vector<noc::PipelineStage<NmuRspREntry>> rsp_extra_r_shift_;
+    router::PipelineStage<NmuRspBEntry> s2_rsp_b_;
+    router::PipelineStage<NmuRspREntry> s2_rsp_r_;
+    std::vector<router::PipelineStage<NmuRspBEntry>> rsp_extra_b_shift_;
+    std::vector<router::PipelineStage<NmuRspREntry>> rsp_extra_r_shift_;
 };
 
 namespace detail {
 
-inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, noc::NocReqOut& downstream) {
+inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
     if (cfg.vc_mode == VcMode::ReadWriteSplit) {
         return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
                                            cfg.vc_arbiter_pending_depth);
@@ -265,12 +265,12 @@ inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, noc::NocReqOut& downstrea
 
 }  // namespace detail
 
-inline Nmu::Nmu(NmuConfig cfg, noc::NocReqOut& downstream_req, noc::NocRspIn& downstream_rsp)
+inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRspIn& downstream_rsp)
     : cfg_(std::move(cfg)),
       downstream_req_(downstream_req),
       downstream_rsp_(downstream_rsp),
       vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_req_)),
-      wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/3, std::vector<noc::ChannelPairing>{{0, 1}},
+      wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/3, std::vector<router::ChannelPairing>{{0, 1}},
                         cfg_.wormhole_per_input_depth),
       depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
                    cfg_.port_params.depkt_r_q_depth),
@@ -442,7 +442,7 @@ inline void Nmu::drain_rsp_robless_r_() {
 //   calling nmu_.tick(); Nmu's Depacketize stage drains via pop_flit().
 namespace detail {
 
-struct NullNocReqOut : noc::NocReqOut {
+struct NullNocReqOut : router::NocReqOut {
     // Sanity cap: a real ShellAdapter drains every tick, so a queue this deep
     // means the test forgot to drain. Asserts in debug; release builds skip
     // the check (and the queue is still allowed to grow unboundedly).
@@ -490,7 +490,7 @@ struct NullNocReqOut : noc::NocReqOut {
     std::vector<std::size_t> credit_;
 };
 
-struct NullNocRspIn : noc::NocRspIn {
+struct NullNocRspIn : router::NocRspIn {
     // ShellAdapter accessor: inject one flit per tick from DPI wire.
     void inject_rsp_flit(const Flit& f) { queue_.push_back(f); }
 
@@ -512,7 +512,7 @@ struct NullNocRspIn : noc::NocRspIn {
     }
 
     // ShellAdapter accessor: drain one consumer credit pulse per tick (mirror of
-    // noc::LinkCreditOut::take). Returns true when a pulse was emitted.
+    // router::LinkCreditOut::take). Returns true when a pulse was emitted.
     bool take_credit(uint8_t vc) {
         if (pending_[vc] == 0) return false;
         --pending_[vc];

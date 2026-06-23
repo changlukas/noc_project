@@ -37,8 +37,8 @@
 
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "noc/noc_req_out.hpp"
-#include "noc/noc_rsp_out.hpp"
+#include "router/req_out.hpp"
+#include "router/rsp_out.hpp"
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -49,7 +49,7 @@
 #include <utility>
 #include <vector>
 
-namespace ni::cmodel::noc {
+namespace ni::cmodel::router {
 
 struct ChannelPairing {
     std::size_t from;
@@ -227,4 +227,4 @@ inline void WormholeArbiter<Downstream>::tick() {
     }
 }
 
-}  // namespace ni::cmodel::noc
+}  // namespace ni::cmodel::router

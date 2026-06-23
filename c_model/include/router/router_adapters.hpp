@@ -21,11 +21,11 @@
 // Router's construction-is-reset stance); the tb_top reset window precedes all
 // *_create + traffic, so no stale pending credit can leak post-reset.
 #include "flit.hpp"
-#include "noc/noc_req_in.hpp"
-#include "noc/noc_req_out.hpp"
-#include "noc/noc_rsp_in.hpp"
-#include "noc/noc_rsp_out.hpp"
-#include "noc/router.hpp"
+#include "router/req_in.hpp"
+#include "router/req_out.hpp"
+#include "router/rsp_in.hpp"
+#include "router/rsp_out.hpp"
+#include "router/router.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -33,7 +33,7 @@
 #include <optional>
 #include <vector>
 
-namespace ni::cmodel::noc {
+namespace ni::cmodel::router {
 
 // NI -> router LOCAL input. Implements all four producer-side NoC interfaces
 // (NocReqOut and NocRspOut share the same shape) and is the router's
@@ -158,4 +158,4 @@ class LinkCreditOut : public RouterCreditSink {
     std::vector<std::size_t> pending_;
 };
 
-}  // namespace ni::cmodel::noc
+}  // namespace ni::cmodel::router

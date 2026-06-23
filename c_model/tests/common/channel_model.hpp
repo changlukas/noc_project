@@ -17,10 +17,10 @@
 #pragma once
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "noc/noc_req_in.hpp"
-#include "noc/noc_req_out.hpp"
-#include "noc/noc_rsp_in.hpp"
-#include "noc/noc_rsp_out.hpp"
+#include "router/req_in.hpp"
+#include "router/req_out.hpp"
+#include "router/rsp_in.hpp"
+#include "router/rsp_out.hpp"
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -80,24 +80,24 @@ class ChannelModel {
     }
 
     // NMU-side (single)
-    noc::NocReqOut& nmu_req_out() noexcept { return nmu_req_out_adapter_; }
-    noc::NocRspIn& nmu_rsp_in() noexcept { return nmu_rsp_in_adapter_; }
+    router::NocReqOut& nmu_req_out() noexcept { return nmu_req_out_adapter_; }
+    router::NocRspIn& nmu_rsp_in() noexcept { return nmu_rsp_in_adapter_; }
 
     // NSU-side (per-NSU). 0-indexed; bounds-asserted.
-    noc::NocReqIn& nsu_req_in(std::size_t nsu_idx) noexcept {
+    router::NocReqIn& nsu_req_in(std::size_t nsu_idx) noexcept {
         assert(nsu_idx < num_nsu_);
         return nsu_req_in_adapters_[nsu_idx];
     }
-    noc::NocRspOut& nsu_rsp_out(std::size_t nsu_idx) noexcept {
+    router::NocRspOut& nsu_rsp_out(std::size_t nsu_idx) noexcept {
         assert(nsu_idx < num_nsu_);
         return nsu_rsp_out_adapters_[nsu_idx];
     }
 
     // Legacy aliases -- single-NSU compatibility (point at NSU_0)
-    noc::NocReqOut& req_out() noexcept { return nmu_req_out(); }
-    noc::NocReqIn& req_in() noexcept { return nsu_req_in(0); }
-    noc::NocRspOut& rsp_out() noexcept { return nsu_rsp_out(0); }
-    noc::NocRspIn& rsp_in() noexcept { return nmu_rsp_in(); }
+    router::NocReqOut& req_out() noexcept { return nmu_req_out(); }
+    router::NocReqIn& req_in() noexcept { return nsu_req_in(0); }
+    router::NocRspOut& rsp_out() noexcept { return nsu_rsp_out(0); }
+    router::NocRspIn& rsp_in() noexcept { return nmu_rsp_in(); }
 
     // Routing: dst_id -> nsu_idx
     void set_dst_route(uint8_t dst_id, std::size_t nsu_idx) noexcept {
@@ -206,7 +206,7 @@ class ChannelModel {
         std::size_t cycles_remaining;
     };
 
-    struct NmuReqOutAdapter : noc::NocReqOut {
+    struct NmuReqOutAdapter : router::NocReqOut {
         ChannelModel* p;
         explicit NmuReqOutAdapter(ChannelModel* parent) : p(parent) {}
         bool push_flit(const Flit& f) override {
@@ -251,7 +251,7 @@ class ChannelModel {
             return true;
         }
     };
-    struct NsuReqInAdapter : noc::NocReqIn {
+    struct NsuReqInAdapter : router::NocReqIn {
         ChannelModel* p;
         std::size_t i;
         NsuReqInAdapter(ChannelModel* parent, std::size_t idx) : p(parent), i(idx) {}
@@ -275,7 +275,7 @@ class ChannelModel {
             return f;
         }
     };
-    struct NsuRspOutAdapter : noc::NocRspOut {
+    struct NsuRspOutAdapter : router::NocRspOut {
         ChannelModel* p;
         std::size_t i;
         NsuRspOutAdapter(ChannelModel* parent, std::size_t idx) : p(parent), i(idx) {}
@@ -325,7 +325,7 @@ class ChannelModel {
                    p->rsp_q_depth_total_;
         }
     };
-    struct NmuRspInAdapter : noc::NocRspIn {
+    struct NmuRspInAdapter : router::NocRspIn {
         ChannelModel* p;
         explicit NmuRspInAdapter(ChannelModel* parent) : p(parent) {}
         std::optional<Flit> pop_flit() override {

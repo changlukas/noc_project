@@ -1,16 +1,16 @@
-#include "noc/router.hpp"
-#include "noc/router_adapters.hpp"
-#include "noc/two_node_fabric.hpp"
+#include "router/router.hpp"
+#include "router/router_adapters.hpp"
+#include "router/two_node_fabric.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 using ni::NI_NOC_ROUTER_VC_DEPTH;
 using ni::cmodel::Flit;
-using ni::cmodel::noc::InjectAdapter;
-using ni::cmodel::noc::Router;
-using ni::cmodel::noc::RouterConfig;
-using ni::cmodel::noc::RouterPort;
-using ni::cmodel::noc::testing::TwoNodeFabric;
+using ni::cmodel::router::InjectAdapter;
+using ni::cmodel::router::Router;
+using ni::cmodel::router::RouterConfig;
+using ni::cmodel::router::RouterPort;
+using ni::cmodel::router::testing::TwoNodeFabric;
 
 namespace {
 
@@ -59,7 +59,7 @@ TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
     Router r(cfg_at(0, 0));
     const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
     InjectAdapter inj(r, LOCAL, 2, 2);
-    ni::cmodel::noc::EjectAdapter ej(r, LOCAL, /*depth=*/2);
+    ni::cmodel::router::EjectAdapter ej(r, LOCAL, /*depth=*/2);
     r.set_upstream_credit(LOCAL, inj);
     r.set_downstream(LOCAL, ej);
     const std::size_t local_out_seed = r.credit(LOCAL, 0);  // full before any grant
@@ -85,7 +85,7 @@ TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     InjectAdapter inj(up, LOCAL, 2, 2);
     up.set_upstream_credit(LOCAL, inj);
-    ni::cmodel::noc::CreditRelay relay(up, WEST);
+    ni::cmodel::router::CreditRelay relay(up, WEST);
     const std::size_t seed = up.credit(WEST, 0);
     ASSERT_TRUE(inj.push_flit(req_flit(/*dst=*/0x00, /*vc=*/0)));
     inj.on_tick();
@@ -186,7 +186,7 @@ TEST(TwoNodeFabric, EjectQueueHoldsAggregateMultiVcCredit) {
 
 TEST(LinkEjectAdapter, FifoOrderAndNoRouterCredit) {
     SCENARIO("LinkEjectAdapter: push N flits, pop returns them FIFO; pop returns no router credit");
-    using ni::cmodel::noc::LinkEjectAdapter;
+    using ni::cmodel::router::LinkEjectAdapter;
     constexpr std::size_t kDepth = 4;
     LinkEjectAdapter le(kDepth);
     EXPECT_EQ(le.buffered(), 0u);
@@ -207,7 +207,7 @@ TEST(LinkEjectAdapter, FifoOrderAndNoRouterCredit) {
 TEST(LinkEjectAdapterDeath, OverflowAssertsAtDepth) {
     SCENARIO("LinkEjectAdapter: pushing past depth trips the overflow assert");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
-    using ni::cmodel::noc::LinkEjectAdapter;
+    using ni::cmodel::router::LinkEjectAdapter;
     LinkEjectAdapter le(/*depth=*/2);
     le.push_flit(req_flit(0x00, 0));
     le.push_flit(req_flit(0x00, 0));
@@ -217,7 +217,7 @@ TEST(LinkEjectAdapterDeath, OverflowAssertsAtDepth) {
 TEST(LinkCreditOut, AccumulatesAndDrainsOnePerTake) {
     SCENARIO(
         "LinkCreditOut: receive_credit accumulates pending; take drains one, false when empty");
-    using ni::cmodel::noc::LinkCreditOut;
+    using ni::cmodel::router::LinkCreditOut;
     LinkCreditOut co(/*num_vc=*/2);
     EXPECT_EQ(co.pending(0), 0u);
     EXPECT_FALSE(co.take(0)) << "no pending -> take returns false";
@@ -246,8 +246,8 @@ TEST(LinkAdapterConservation, StalledCreditDrainsOutputAndConservesFlits) {
     SCENARIO(
         "Router + LinkEjectAdapter(out) + LinkCreditOut(in): stalled credit drains output credit "
         "to 0, no eject overflow, pending == drained, flit count conserved");
-    using ni::cmodel::noc::LinkCreditOut;
-    using ni::cmodel::noc::LinkEjectAdapter;
+    using ni::cmodel::router::LinkCreditOut;
+    using ni::cmodel::router::LinkEjectAdapter;
     // node (1,0): a flit arriving on the WEST link input addressed to this node's
     // own coord dst=(1,0)=0x01 routes to the LOCAL output (XY DOR, dst==self).
     RouterConfig c;

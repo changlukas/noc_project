@@ -43,8 +43,8 @@
 #include "cosim/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "cosim/poc_defaults.hpp"    // kPoCChannelModelDepth
 #include "cosim/router_shell_io.hpp"
-#include "noc/router.hpp"
-#include "noc/router_adapters.hpp"
+#include "router/router.hpp"
+#include "router/router_adapters.hpp"
 #include <memory>
 #include <stdexcept>
 
@@ -54,10 +54,10 @@ class RouterShellAdapter {
   public:
     void init(uint8_t x_coord, uint8_t num_vc = 1) {
         num_vc_ = num_vc;
-        link_port_ = (x_coord == 0) ? static_cast<std::size_t>(noc::RouterPort::EAST)
-                                    : static_cast<std::size_t>(noc::RouterPort::WEST);
+        link_port_ = (x_coord == 0) ? static_cast<std::size_t>(router::RouterPort::EAST)
+                                    : static_cast<std::size_t>(router::RouterPort::WEST);
 
-        noc::RouterConfig c;
+        router::RouterConfig c;
         c.x = x_coord;
         c.y = 0;
         c.mesh_x_dim = 2;
@@ -65,8 +65,8 @@ class RouterShellAdapter {
         c.num_vc = num_vc;
         c.vc_depth = kPoCChannelModelDepth;
         c.output_fifo_depth = kPoCChannelModelDepth;
-        req_router_ = std::make_unique<noc::Router>(c);
-        rsp_router_ = std::make_unique<noc::Router>(c);
+        req_router_ = std::make_unique<router::Router>(c);
+        rsp_router_ = std::make_unique<router::Router>(c);
 
         wire_port(*req_router_, LOCAL, req_local_eject_, req_local_credit_);
         wire_port(*rsp_router_, LOCAL, rsp_local_eject_, rsp_local_credit_);
@@ -142,33 +142,34 @@ class RouterShellAdapter {
     // Test introspection: the REQ router, so a test can read its built-in
     // credit_[LOCAL] sender counter (router->NI direction) across a
     // credit-return hop. Not used in production wiring.
-    noc::Router& req_router() { return *req_router_; }
+    router::Router& req_router() { return *req_router_; }
     // RSP router accessor — used by cmodel_perf_sample_tick to sample occupancy.
-    noc::Router& rsp_router() { return *rsp_router_; }
+    router::Router& rsp_router() { return *rsp_router_; }
 
   private:
-    static constexpr std::size_t LOCAL = static_cast<std::size_t>(noc::RouterPort::LOCAL);
+    static constexpr std::size_t LOCAL = static_cast<std::size_t>(router::RouterPort::LOCAL);
 
     // FlooNoC pulse-credit wiring, identical for LOCAL and LINK: transport-only
     // eject (no pop credit) + a LinkCreditOut that captures the router's
     // input-drain pulses for the shell to drain one/tick onto the credit wire.
-    void wire_port(noc::Router& r, std::size_t port, std::unique_ptr<noc::LinkEjectAdapter>& ej,
-                   std::unique_ptr<noc::LinkCreditOut>& credit) {
-        ej = std::make_unique<noc::LinkEjectAdapter>(static_cast<std::size_t>(num_vc_) *
-                                                     kPoCChannelModelDepth);
-        credit = std::make_unique<noc::LinkCreditOut>(num_vc_);
+    void wire_port(router::Router& r, std::size_t port,
+                   std::unique_ptr<router::LinkEjectAdapter>& ej,
+                   std::unique_ptr<router::LinkCreditOut>& credit) {
+        ej = std::make_unique<router::LinkEjectAdapter>(static_cast<std::size_t>(num_vc_) *
+                                                        kPoCChannelModelDepth);
+        credit = std::make_unique<router::LinkCreditOut>(num_vc_);
         r.set_downstream(port, *ej);
         r.set_upstream_credit(port, *credit);
     }
 
     uint8_t num_vc_ = 1;
-    std::size_t link_port_ = static_cast<std::size_t>(noc::RouterPort::EAST);
+    std::size_t link_port_ = static_cast<std::size_t>(router::RouterPort::EAST);
 
-    std::unique_ptr<noc::Router> req_router_, rsp_router_;
-    std::unique_ptr<noc::LinkEjectAdapter> req_local_eject_, rsp_local_eject_;
-    std::unique_ptr<noc::LinkCreditOut> req_local_credit_, rsp_local_credit_;
-    std::unique_ptr<noc::LinkEjectAdapter> req_link_eject_, rsp_link_eject_;
-    std::unique_ptr<noc::LinkCreditOut> req_link_credit_, rsp_link_credit_;
+    std::unique_ptr<router::Router> req_router_, rsp_router_;
+    std::unique_ptr<router::LinkEjectAdapter> req_local_eject_, rsp_local_eject_;
+    std::unique_ptr<router::LinkCreditOut> req_local_credit_, rsp_local_credit_;
+    std::unique_ptr<router::LinkEjectAdapter> req_link_eject_, rsp_link_eject_;
+    std::unique_ptr<router::LinkCreditOut> req_link_credit_, rsp_link_credit_;
 
     RouterInputs in_{};
     RouterOutputs out_{};

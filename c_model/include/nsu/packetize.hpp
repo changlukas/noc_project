@@ -19,8 +19,8 @@
 // Implements ResponsePacketizer (B/R only; NSU never emits requests).
 #include "axi/types.hpp"
 #include "flit.hpp"
-#include "noc/noc_rsp_out.hpp"
-#include "noc/pipeline_stage.hpp"
+#include "router/rsp_out.hpp"
+#include "router/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "response_io.hpp"
 #include <cassert>
@@ -31,7 +31,7 @@ namespace ni::cmodel::nsu {
 
 class Packetize : public ResponsePacketizer {
   public:
-    Packetize(noc::NocRspOut& b_out, noc::NocRspOut& r_out, MetaBuffer& meta, uint8_t src_id)
+    Packetize(router::NocRspOut& b_out, router::NocRspOut& r_out, MetaBuffer& meta, uint8_t src_id)
         : b_out_(b_out), r_out_(r_out), meta_(meta), src_id_(src_id) {}
 
     // ---- ResponsePacketizer interface (S1 accept) ----
@@ -51,15 +51,15 @@ class Packetize : public ResponsePacketizer {
     std::size_t s1_r_occupancy() const noexcept { return s1_r_.occupancy(); }
 
   private:
-    noc::NocRspOut& b_out_;
-    noc::NocRspOut& r_out_;
+    router::NocRspOut& b_out_;
+    router::NocRspOut& r_out_;
     MetaBuffer& meta_;
     uint8_t src_id_;
 
     // S1 stage registers: one per response channel. push_b/r() fills them;
     // tick() (S2) drains and transforms into Flits toward the arbiter.
-    noc::PipelineStage<axi::BBeat> s1_b_;
-    noc::PipelineStage<axi::RBeat> s1_r_;
+    router::PipelineStage<axi::BBeat> s1_b_;
+    router::PipelineStage<axi::RBeat> s1_r_;
 
     static Flit build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id);
     static Flit build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id);

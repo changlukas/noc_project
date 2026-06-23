@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <string_view>
 
-namespace noc::tests {
+namespace router::tests {
 
 // Aborts the test binary when called if `id` is not present in
 // kAllAxi4Scenarios. Wrap every hand-written scenario reference in scoped
@@ -24,4 +24,4 @@ inline std::string_view RequireKnownScenario(std::string_view id) {
     return id;
 }
 
-}  // namespace noc::tests
+}  // namespace router::tests

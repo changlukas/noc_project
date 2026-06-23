@@ -164,7 +164,7 @@ TEST(RouterShellAdapter, LocalInputDrainEmitsCreditPulse) {
 // counter one short and FAILS the final assertion — a no-abort-only test would
 // not catch that.
 TEST(RouterShellAdapter, LocalInCreditReturnReplenishesRouter) {
-    constexpr std::size_t LOCAL = static_cast<std::size_t>(ni::cmodel::noc::RouterPort::LOCAL);
+    constexpr std::size_t LOCAL = static_cast<std::size_t>(ni::cmodel::router::RouterPort::LOCAL);
 
     RouterShellAdapter a;
     a.init(/*x_coord=*/0);

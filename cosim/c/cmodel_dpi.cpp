@@ -372,12 +372,13 @@ extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord
     DPI_BOUNDARY_END_R(cmodel_router_create);
 }
 
-extern "C" void cmodel_router_set_inputs(unsigned long long ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
-                                         svBit req_in_credit_return, svBit rsp_in_valid,
-                                         svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return,
-                                         svBit link_req_out_credit, svBit link_req_in_valid,
-                                         svBitVecVal* link_req_in_flit, svBit link_rsp_out_credit,
-                                         svBit link_rsp_in_valid, svBitVecVal* link_rsp_in_flit) {
+extern "C" void cmodel_router_set_inputs(unsigned long long ctx, svBit req_in_valid,
+                                         svBitVecVal* req_in_flit, svBit req_in_credit_return,
+                                         svBit rsp_in_valid, svBitVecVal* rsp_in_flit,
+                                         svBit rsp_in_credit_return, svBit link_req_out_credit,
+                                         svBit link_req_in_valid, svBitVecVal* link_req_in_flit,
+                                         svBit link_rsp_out_credit, svBit link_rsp_in_valid,
+                                         svBitVecVal* link_rsp_in_flit) {
     DPI_BOUNDARY_BEGIN(cmodel_router_set_inputs) {
         REQUIRE_HANDLE(ctx, ShellType::Router, "cmodel_router_set_inputs");
         auto* r = static_cast<RouterShellAdapter*>(_h->adapter.get());
@@ -538,10 +539,10 @@ extern "C" unsigned long long cmodel_master_create(const char* name, const char*
     DPI_BOUNDARY_END_R(cmodel_master_create);
 }
 
-extern "C" void cmodel_master_set_inputs(unsigned long long ctx, svBit awready, svBit wready, svBit arready,
-                                         svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp,
-                                         svBit rvalid, svBitVecVal* rid, svBitVecVal* rdata,
-                                         svBitVecVal* rresp, svBit rlast) {
+extern "C" void cmodel_master_set_inputs(unsigned long long ctx, svBit awready, svBit wready,
+                                         svBit arready, svBit bvalid, svBitVecVal* bid,
+                                         svBitVecVal* bresp, svBit rvalid, svBitVecVal* rid,
+                                         svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_master_set_inputs) {
         REQUIRE_HANDLE(ctx, ShellType::Master, "cmodel_master_set_inputs");
         auto* master = static_cast<MasterShellAdapter*>(_h->adapter.get());
@@ -571,13 +572,16 @@ extern "C" void cmodel_master_tick(unsigned long long ctx) {
     DPI_BOUNDARY_END(cmodel_master_tick);
 }
 
-extern "C" void cmodel_master_get_outputs(
-    unsigned long long ctx, svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
-    svBitVecVal* awsize, svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
-    svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
-    svBit* wlast, svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
-    svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock,
-    svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
+extern "C" void cmodel_master_get_outputs(unsigned long long ctx, svBit* awvalid, svBitVecVal* awid,
+                                          svBitVecVal* awaddr, svBitVecVal* awlen,
+                                          svBitVecVal* awsize, svBitVecVal* awburst, svBit* awlock,
+                                          svBitVecVal* awcache, svBitVecVal* awprot,
+                                          svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata,
+                                          svBitVecVal* wstrb, svBit* wlast, svBit* bready,
+                                          svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+                                          svBitVecVal* arlen, svBitVecVal* arsize,
+                                          svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
+                                          svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_master_get_outputs) {
         REQUIRE_HANDLE(ctx, ShellType::Master, "cmodel_master_get_outputs");
         auto* master = static_cast<MasterShellAdapter*>(_h->adapter.get());
@@ -656,12 +660,12 @@ extern "C" unsigned long long cmodel_slave_create(const char* name, const char* 
 }
 
 extern "C" void cmodel_slave_set_inputs(
-    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
-    svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
-    svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
-    svBit wlast, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-    svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
-    svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready) {
+    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+    svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock,
+    svBitVecVal* awcache, svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
+    svBitVecVal* wstrb, svBit wlast, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+    svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
+    svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_set_inputs) {
         REQUIRE_HANDLE(ctx, ShellType::Slave, "cmodel_slave_set_inputs");
         auto* slave = static_cast<SlaveShellAdapter*>(_h->adapter.get());
@@ -706,10 +710,10 @@ extern "C" void cmodel_slave_tick(unsigned long long ctx) {
     DPI_BOUNDARY_END(cmodel_slave_tick);
 }
 
-extern "C" void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
-                                         svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp,
-                                         svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
-                                         svBitVecVal* rresp, svBit* rlast) {
+extern "C" void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready,
+                                         svBit* arready, svBit* bvalid, svBitVecVal* bid,
+                                         svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
+                                         svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_slave_get_outputs) {
         REQUIRE_HANDLE(ctx, ShellType::Slave, "cmodel_slave_get_outputs");
         auto* slave = static_cast<SlaveShellAdapter*>(_h->adapter.get());
@@ -763,12 +767,12 @@ extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id) {
 }
 
 extern "C" void cmodel_nmu_set_inputs(
-    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen,
-    svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
-    svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
-    svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
-    svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
-    svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
+    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+    svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock,
+    svBitVecVal* awcache, svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
+    svBitVecVal* wstrb, svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
+    svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
+    svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
     svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit noc_req_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_set_inputs) {
         REQUIRE_HANDLE(ctx, ShellType::Nmu, "cmodel_nmu_set_inputs");
@@ -817,11 +821,12 @@ extern "C" void cmodel_nmu_tick(unsigned long long ctx) {
     DPI_BOUNDARY_END(cmodel_nmu_tick);
 }
 
-extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
-                                       svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp,
-                                       svBit* rvalid, svBitVecVal* rid, svBitVecVal* rdata,
-                                       svBitVecVal* rresp, svBit* rlast, svBit* noc_req_valid,
-                                       svBitVecVal* noc_req_flit, svBit* noc_rsp_credit_return) {
+extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready,
+                                       svBit* arready, svBit* bvalid, svBitVecVal* bid,
+                                       svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
+                                       svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
+                                       svBit* noc_req_valid, svBitVecVal* noc_req_flit,
+                                       svBit* noc_rsp_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_get_outputs) {
         REQUIRE_HANDLE(ctx, ShellType::Nmu, "cmodel_nmu_get_outputs");
         auto* nmu = static_cast<NmuShellAdapter*>(_h->adapter.get());
@@ -880,11 +885,12 @@ extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id) {
     DPI_BOUNDARY_END_R(cmodel_nsu_create);
 }
 
-extern "C" void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
-                                      svBit noc_rsp_credit_return, svBit awready, svBit wready,
-                                      svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp,
-                                      svBit arready, svBit rvalid, svBitVecVal* rid,
-                                      svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast) {
+extern "C" void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_valid,
+                                      svBitVecVal* noc_req_flit, svBit noc_rsp_credit_return,
+                                      svBit awready, svBit wready, svBit bvalid, svBitVecVal* bid,
+                                      svBitVecVal* bresp, svBit arready, svBit rvalid,
+                                      svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
+                                      svBit rlast) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_set_inputs) {
         REQUIRE_HANDLE(ctx, ShellType::Nsu, "cmodel_nsu_set_inputs");
         auto* nsu = static_cast<NsuShellAdapter*>(_h->adapter.get());
@@ -917,14 +923,17 @@ extern "C" void cmodel_nsu_tick(unsigned long long ctx) {
     DPI_BOUNDARY_END(cmodel_nsu_tick);
 }
 
-extern "C" void cmodel_nsu_get_outputs(
-    unsigned long long ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return,
-    svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-    svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-    svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,
-    svBit* bready, svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-    svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
-    svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
+extern "C" void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* noc_rsp_valid,
+                                       svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return,
+                                       svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+                                       svBitVecVal* awlen, svBitVecVal* awsize,
+                                       svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
+                                       svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,
+                                       svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,
+                                       svBit* bready, svBit* arvalid, svBitVecVal* arid,
+                                       svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
+                                       svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
+                                       svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_get_outputs) {
         REQUIRE_HANDLE(ctx, ShellType::Nsu, "cmodel_nsu_get_outputs");
         auto* nsu = static_cast<NsuShellAdapter*>(_h->adapter.get());
@@ -974,8 +983,8 @@ extern "C" void cmodel_nsu_get_outputs(
 
 namespace {
 
-void sample_one_router(const std::string& node, ni::cmodel::noc::Router& r, const char* plane) {
-    using ni::cmodel::noc::ROUTER_PORT_COUNT;
+void sample_one_router(const std::string& node, ni::cmodel::router::Router& r, const char* plane) {
+    using ni::cmodel::router::ROUTER_PORT_COUNT;
     std::size_t in_occ = 0, out_occ = 0;
     for (std::size_t p = 0; p < ROUTER_PORT_COUNT; ++p) {
         out_occ += r.output_fifo_size(p);

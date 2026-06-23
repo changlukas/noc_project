@@ -1,6 +1,6 @@
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/packetize.hpp"
-#include "noc/wormhole_arbiter.hpp"
+#include "router/wormhole_arbiter.hpp"
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
@@ -464,8 +464,8 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
         "at NSU side.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-    ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> wh_arb(
-        vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
+    ni::cmodel::router::WormholeArbiter<ni::cmodel::router::NocReqOut> wh_arb(
+        vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::router::ChannelPairing>{{0, 1}});
     ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1), wh_arb.input(2),
                                    /*src_id=*/0x12);
 
@@ -505,8 +505,8 @@ TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
         "decorator pipeline).");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-    ni::cmodel::noc::WormholeArbiter<ni::cmodel::noc::NocReqOut> wh_arb(
-        vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::noc::ChannelPairing>{{0, 1}});
+    ni::cmodel::router::WormholeArbiter<ni::cmodel::router::NocReqOut> wh_arb(
+        vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::router::ChannelPairing>{{0, 1}});
     ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1), wh_arb.input(2),
                                    /*src_id=*/0x12);
 
@@ -545,7 +545,7 @@ TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
 
 namespace {
 
-class LyingDownstream : public ni::cmodel::noc::NocReqOut {
+class LyingDownstream : public ni::cmodel::router::NocReqOut {
   public:
     bool push_flit(const Flit&) override { return false; }
     bool credit_avail(uint8_t) const override { return true; }

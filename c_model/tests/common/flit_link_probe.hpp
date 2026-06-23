@@ -1,10 +1,10 @@
 #pragma once
 #include "flit.hpp"
-#include "noc/noc_req_in.hpp"
-#include "noc/noc_req_out.hpp"
-#include "noc/noc_rsp_in.hpp"
-#include "noc/noc_rsp_out.hpp"
-#include "noc/router.hpp"
+#include "router/req_in.hpp"
+#include "router/req_out.hpp"
+#include "router/rsp_in.hpp"
+#include "router/rsp_out.hpp"
+#include "router/router.hpp"
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -44,9 +44,9 @@ class FlitLog {
 
 // Push-side decorators: record on a successful (true-returning) push only, so a
 // backpressured retry is not double-counted. Forward unchanged otherwise.
-class ReqOutProbe : public noc::NocReqOut {
+class ReqOutProbe : public router::NocReqOut {
   public:
-    ReqOutProbe(noc::NocReqOut& inner, FlitLog& log, const uint64_t& now)
+    ReqOutProbe(router::NocReqOut& inner, FlitLog& log, const uint64_t& now)
         : inner_(inner), log_(log), now_(now) {}
     bool push_flit(const Flit& f) override {
         const bool ok = inner_.push_flit(f);
@@ -56,14 +56,14 @@ class ReqOutProbe : public noc::NocReqOut {
     bool credit_avail(uint8_t vc) const override { return inner_.credit_avail(vc); }
 
   private:
-    noc::NocReqOut& inner_;
+    router::NocReqOut& inner_;
     FlitLog& log_;
     const uint64_t& now_;
 };
 
-class RspOutProbe : public noc::NocRspOut {
+class RspOutProbe : public router::NocRspOut {
   public:
-    RspOutProbe(noc::NocRspOut& inner, FlitLog& log, const uint64_t& now)
+    RspOutProbe(router::NocRspOut& inner, FlitLog& log, const uint64_t& now)
         : inner_(inner), log_(log), now_(now) {}
     bool push_flit(const Flit& f) override {
         const bool ok = inner_.push_flit(f);
@@ -73,15 +73,15 @@ class RspOutProbe : public noc::NocRspOut {
     bool credit_avail(uint8_t vc) const override { return inner_.credit_avail(vc); }
 
   private:
-    noc::NocRspOut& inner_;
+    router::NocRspOut& inner_;
     FlitLog& log_;
     const uint64_t& now_;
 };
 
 // RouterLink push is always accepted (credit guarantees space); record every push.
-class LinkProbe : public noc::RouterLink {
+class LinkProbe : public router::RouterLink {
   public:
-    LinkProbe(noc::RouterLink& inner, FlitLog& log, const uint64_t& now)
+    LinkProbe(router::RouterLink& inner, FlitLog& log, const uint64_t& now)
         : inner_(inner), log_(log), now_(now) {}
     void push_flit(const Flit& f) override {
         log_.record(f, now_);
@@ -89,15 +89,15 @@ class LinkProbe : public noc::RouterLink {
     }
 
   private:
-    noc::RouterLink& inner_;
+    router::RouterLink& inner_;
     FlitLog& log_;
     const uint64_t& now_;
 };
 
 // Pop-side decorators: record only when a flit is actually returned.
-class ReqInProbe : public noc::NocReqIn {
+class ReqInProbe : public router::NocReqIn {
   public:
-    ReqInProbe(noc::NocReqIn& inner, FlitLog& log, const uint64_t& now)
+    ReqInProbe(router::NocReqIn& inner, FlitLog& log, const uint64_t& now)
         : inner_(inner), log_(log), now_(now) {}
     std::optional<Flit> pop_flit() override {
         auto f = inner_.pop_flit();
@@ -106,14 +106,14 @@ class ReqInProbe : public noc::NocReqIn {
     }
 
   private:
-    noc::NocReqIn& inner_;
+    router::NocReqIn& inner_;
     FlitLog& log_;
     const uint64_t& now_;
 };
 
-class RspInProbe : public noc::NocRspIn {
+class RspInProbe : public router::NocRspIn {
   public:
-    RspInProbe(noc::NocRspIn& inner, FlitLog& log, const uint64_t& now)
+    RspInProbe(router::NocRspIn& inner, FlitLog& log, const uint64_t& now)
         : inner_(inner), log_(log), now_(now) {}
     std::optional<Flit> pop_flit() override {
         auto f = inner_.pop_flit();
@@ -122,7 +122,7 @@ class RspInProbe : public noc::NocRspIn {
     }
 
   private:
-    noc::NocRspIn& inner_;
+    router::NocRspIn& inner_;
     FlitLog& log_;
     const uint64_t& now_;
 };

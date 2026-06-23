@@ -26,7 +26,7 @@
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "nmu/addr_trans.hpp"
-#include "noc/noc_req_out.hpp"
+#include "router/req_out.hpp"
 #include "request_io.hpp"
 #include <cassert>
 #include <cstdint>
@@ -55,7 +55,8 @@ class NmuPacketizeSink {
 
 class Packetize : public RequestPacketizer, public NmuPacketizeSink {
   public:
-    Packetize(noc::NocReqOut& aw_out, noc::NocReqOut& w_out, noc::NocReqOut& ar_out, uint8_t src_id)
+    Packetize(router::NocReqOut& aw_out, router::NocReqOut& w_out, router::NocReqOut& ar_out,
+              uint8_t src_id)
         : aw_out_(aw_out), w_out_(w_out), ar_out_(ar_out), src_id_(src_id) {}
 
     // ---- RequestPacketizer interface ----
@@ -78,9 +79,9 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) override;
 
   private:
-    noc::NocReqOut& aw_out_;
-    noc::NocReqOut& w_out_;
-    noc::NocReqOut& ar_out_;
+    router::NocReqOut& aw_out_;
+    router::NocReqOut& w_out_;
+    router::NocReqOut& ar_out_;
     uint8_t src_id_;
 
     // W FIFO carries the meta inherited from AW. local_addr NOT stored:

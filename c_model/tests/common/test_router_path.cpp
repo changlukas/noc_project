@@ -1,8 +1,8 @@
 #include "common/router_path.hpp"
-#include "noc/router.hpp"
+#include "router/router.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::noc::RouterPort;
+using ni::cmodel::router::RouterPort;
 using ni::cmodel::testing::direction;
 using ni::cmodel::testing::node_coord;
 using ni::cmodel::testing::node_id;

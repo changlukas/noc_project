@@ -99,7 +99,7 @@ TEST_P(IntegrationP, RunsToCompletion) {
 }
 
 INSTANTIATE_TEST_SUITE_P(AxiFixtures, IntegrationP,
-                         ::testing::ValuesIn(noc::tests::kAllAxi4Scenarios),
+                         ::testing::ValuesIn(router::tests::kAllAxi4Scenarios),
                          [](::testing::TestParamInfo<std::string_view> const& info) {
                              std::string name{info.param};
                              std::replace(name.begin(), name.end(), '-', '_');

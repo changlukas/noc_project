@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <optional>
 #include <utility>
-namespace ni::cmodel::noc {
+namespace ni::cmodel::router {
 // One-token stage register; the staged-NI building block. Mirrors Router::landing_
 // (router.hpp:157) + overwrite assert (router.hpp:185). Reverse-order tick drains
 // (take) before upstream fills (accept), so a token advances one stage/tick.
@@ -33,5 +33,5 @@ class PipelineStage {
   private:
     std::optional<Token> slot_;
 };
-}  // namespace ni::cmodel::noc
+}  // namespace ni::cmodel::router
 #endif

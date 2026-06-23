@@ -1,4 +1,4 @@
-#include "noc/router.hpp"
+#include "router/router.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 #include <ios>
@@ -7,10 +7,10 @@
 
 using ni::NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH;
 using ni::NI_NOC_ROUTER_VC_DEPTH;
-using ni::cmodel::noc::route_compute;
-using ni::cmodel::noc::Router;
-using ni::cmodel::noc::RouterConfig;
-using ni::cmodel::noc::RouterPort;
+using ni::cmodel::router::route_compute;
+using ni::cmodel::router::Router;
+using ni::cmodel::router::RouterConfig;
+using ni::cmodel::router::RouterPort;
 
 namespace {
 
@@ -29,12 +29,12 @@ uint8_t make_dst(uint8_t x, uint8_t y) {
     return static_cast<uint8_t>((y << ni::width::X_WIDTH) | x);
 }
 
-struct FlitSink : ni::cmodel::noc::RouterLink {
+struct FlitSink : ni::cmodel::router::RouterLink {
     std::vector<ni::cmodel::Flit> received;
     void push_flit(const ni::cmodel::Flit& f) override { received.push_back(f); }
 };
 
-struct CreditCounter : ni::cmodel::noc::RouterCreditSink {
+struct CreditCounter : ni::cmodel::router::RouterCreditSink {
     std::vector<uint8_t> pulses;
     void receive_credit(uint8_t vc) override { pulses.push_back(vc); }
 };
@@ -505,7 +505,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     // B's WEST upstream-credit pulse returns one (A.EAST, vc0) credit to A. This
     // fires (registered, one tick late) when B GRANTS a flit out of its WEST/vc0
     // input FIFO — i.e. the credit comes home only once B has consumed the flit.
-    struct CreditRelay : ni::cmodel::noc::RouterCreditSink {
+    struct CreditRelay : ni::cmodel::router::RouterCreditSink {
         Router* target;
         std::size_t port;
         void receive_credit(uint8_t vc) override { target->receive_credit(port, vc); }
@@ -519,7 +519,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     // per b.tick() (stage 1 always drains a present landing). Since A pushes <=1
     // flit/tick on EAST and B absorbs its landing every tick, wire_inflight is 0 or
     // 1 at any post-tick sampling point.
-    struct CountingLink : ni::cmodel::noc::RouterLink {
+    struct CountingLink : ni::cmodel::router::RouterLink {
         Router* target;
         std::size_t port;
         std::size_t in_flight = 0;
@@ -542,7 +542,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     // this, B's LOCAL credit (seeded at DEPTH) is never replenished and B stalls
     // after DEPTH ejections — which would starve A's returning credit too. This
     // ejection sink is outside the (A.EAST, vc0) conservation domain under test.
-    struct EjectSink : ni::cmodel::noc::RouterLink {
+    struct EjectSink : ni::cmodel::router::RouterLink {
         std::vector<ni::cmodel::Flit> received;
         Router* router;
         std::size_t port;

@@ -25,7 +25,7 @@
 #include <utility>
 #include <vector>
 
-namespace ni::cmodel::noc {
+namespace ni::cmodel::router {
 
 enum class RouterPort : uint8_t { LOCAL = 0, NORTH = 1, EAST = 2, SOUTH = 3, WEST = 4 };
 inline constexpr std::size_t ROUTER_PORT_COUNT = 5;
@@ -260,4 +260,4 @@ inline void Router::tick() {
     }
 }
 
-}  // namespace ni::cmodel::noc
+}  // namespace ni::cmodel::router

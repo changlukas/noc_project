@@ -16,7 +16,7 @@
 
 #include <optional>
 
-namespace ni::cmodel::noc {
+namespace ni::cmodel::router {
 
 class NocReqIn {
   public:
@@ -26,4 +26,4 @@ class NocReqIn {
     virtual std::optional<Flit> pop_flit() = 0;
 };
 
-}  // namespace ni::cmodel::noc
+}  // namespace ni::cmodel::router

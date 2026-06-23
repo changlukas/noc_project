@@ -15,7 +15,7 @@
 //   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md §7.2
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "noc/noc_rsp_out.hpp"
+#include "router/rsp_out.hpp"
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -32,13 +32,13 @@ enum class VcMode {
     MultiCandidate,
 };
 
-class VcArbiter : public noc::NocRspOut {
+class VcArbiter : public router::NocRspOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t AXI_CH_COUNT = 5;  // AW, W, AR, B, R (AW/W/AR unused on NSU)
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
-    static VcArbiter read_write_split(noc::NocRspOut& downstream, std::size_t num_vc,
+    static VcArbiter read_write_split(router::NocRspOut& downstream, std::size_t num_vc,
                                       uint8_t write_rsp_vc, uint8_t read_rsp_vc,
                                       std::size_t pending_depth = kDefaultPendingDepth) {
         std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
@@ -46,7 +46,7 @@ class VcArbiter : public noc::NocRspOut {
                          std::move(empty_candidates), pending_depth);
     }
 
-    static VcArbiter multi_candidate(noc::NocRspOut& downstream, std::size_t num_vc,
+    static VcArbiter multi_candidate(router::NocRspOut& downstream, std::size_t num_vc,
                                      std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
                                      std::size_t pending_depth = kDefaultPendingDepth) {
         return VcArbiter(downstream, num_vc, VcMode::MultiCandidate,
@@ -65,7 +65,7 @@ class VcArbiter : public noc::NocRspOut {
     uint8_t round_robin_ptr() const noexcept { return round_robin_ptr_; }
 
   private:
-    VcArbiter(noc::NocRspOut& downstream, std::size_t num_vc, VcMode mode, uint8_t write_rsp_vc,
+    VcArbiter(router::NocRspOut& downstream, std::size_t num_vc, VcMode mode, uint8_t write_rsp_vc,
               uint8_t read_rsp_vc, std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
               std::size_t pending_depth)
         : downstream_(downstream),
@@ -82,7 +82,7 @@ class VcArbiter : public noc::NocRspOut {
 
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch);
 
-    noc::NocRspOut& downstream_;
+    router::NocRspOut& downstream_;
     std::size_t num_vc_;
     VcMode mode_;
     uint8_t write_rsp_vc_;

@@ -16,7 +16,7 @@
 // path.
 #include "flit.hpp"
 
-namespace ni::cmodel::noc {
+namespace ni::cmodel::router {
 
 class NocReqOut {
   public:
@@ -36,4 +36,4 @@ class NocReqOut {
     virtual bool credit_avail(uint8_t /*vc_id*/) const { return true; }
 };
 
-}  // namespace ni::cmodel::noc
+}  // namespace ni::cmodel::router

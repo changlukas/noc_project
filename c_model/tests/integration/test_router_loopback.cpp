@@ -28,9 +28,9 @@
 #include "nmu/addr_trans.hpp"
 #include "nmu/nmu.hpp"
 #include "nmu/port_params.hpp"
-#include "noc/router.hpp"
-#include "noc/router_adapters.hpp"
-#include "noc/two_node_fabric.hpp"
+#include "router/router.hpp"
+#include "router/router_adapters.hpp"
+#include "router/two_node_fabric.hpp"
 #include "nsu/nsu.hpp"
 #include "nsu/port_params.hpp"
 #include "scenario_helpers.hpp"
@@ -49,8 +49,8 @@
 namespace axi = ni::cmodel::axi;
 namespace nmu = ni::cmodel::nmu;
 namespace nsu = ni::cmodel::nsu;
-namespace rc = ni::cmodel::noc;  // fabric/addr_trans namespace; ::noc::tests is the helper ns
-using ni::cmodel::noc::testing::TwoNodeFabric;
+namespace rc = ni::cmodel::router;  // fabric/addr_trans namespace; ::router::tests is the helper ns
+using ni::cmodel::router::testing::TwoNodeFabric;
 
 namespace {
 
@@ -68,8 +68,8 @@ inline uint8_t node_src_id(std::size_t node) {
 // does: SCENARIO_TREE_ROOT + id + /scenario.yaml, guarded by RequireKnownScenario
 // so a stale id aborts at startup rather than failing silently.
 std::string scenario_path(const char* id) {
-    return std::string(SCENARIO_TREE_ROOT) + std::string(::noc::tests::RequireKnownScenario(id)) +
-           "/scenario.yaml";
+    return std::string(SCENARIO_TREE_ROOT) +
+           std::string(::router::tests::RequireKnownScenario(id)) + "/scenario.yaml";
 }
 
 // AxiMasterT only accepts a YAML path (it re-parses internally), so Flow B's

@@ -77,7 +77,7 @@ transactions:
 
 TEST(ScenarioHelpers, helper_compiles) {
     // After commit 2 migration, kAllAxi4Scenarios has 31 AX4-* scenarios.
-    using noc::tests::kAllAxi4Scenarios;
+    using router::tests::kAllAxi4Scenarios;
     EXPECT_GT(kAllAxi4Scenarios.size(), 0u);
 }
 

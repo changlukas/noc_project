@@ -28,7 +28,7 @@ add_subdirectory(cosim)
 add_subdirectory(nmu)
 add_subdirectory(nsu)
 add_subdirectory(integration)
-add_subdirectory(noc)
+add_subdirectory(router)
 
 # Stage 5b cosim ctest entries — only built when Vtb_top binary exists.
 # CI environments without Verilator skip silently; local dev with a built

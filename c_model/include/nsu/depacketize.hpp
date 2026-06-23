@@ -2,8 +2,8 @@
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "noc/noc_req_in.hpp"
-#include "noc/pipeline_stage.hpp"
+#include "router/req_in.hpp"
+#include "router/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "request_io.hpp"
 #include <cassert>
@@ -28,7 +28,7 @@ namespace ni::cmodel::nsu {
 // double-snapshots.
 class Depacketize : public RequestDepacketizer {
   public:
-    Depacketize(noc::NocReqIn& req_in, MetaBuffer& meta, std::size_t aw_q_depth,
+    Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t aw_q_depth,
                 std::size_t w_q_depth, std::size_t ar_q_depth)
         : req_in_(req_in),
           meta_(meta),
@@ -60,7 +60,7 @@ class Depacketize : public RequestDepacketizer {
     }
 
   private:
-    noc::NocReqIn& req_in_;
+    router::NocReqIn& req_in_;
     MetaBuffer& meta_;
     // Unused: old per-channel queues replaced by S1 PipelineStage registers.
     // Depths are kept as members to preserve backpressure checks if needed.
@@ -70,9 +70,9 @@ class Depacketize : public RequestDepacketizer {
     // S1 stage registers: one per AXI channel (AW/W/AR). Depacketize::tick()
     // decodes <=1 flit/channel/tick into these registers. pop_aw/pop_w/pop_ar
     // (called by AxiMasterPort as the S2 stage) take from them.
-    noc::PipelineStage<axi::AwBeat> s1_aw_;
-    noc::PipelineStage<axi::WBeat> s1_w_;
-    noc::PipelineStage<axi::ArBeat> s1_ar_;
+    router::PipelineStage<axi::AwBeat> s1_aw_;
+    router::PipelineStage<axi::WBeat> s1_w_;
+    router::PipelineStage<axi::ArBeat> s1_ar_;
 
     static axi::AwBeat decode_aw(const Flit& f);
     static axi::WBeat decode_w(const Flit& f);

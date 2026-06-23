@@ -1,6 +1,6 @@
-#include "noc/pipeline_stage.hpp"
+#include "router/pipeline_stage.hpp"
 #include <gtest/gtest.h>
-using ni::cmodel::noc::PipelineStage;
+using ni::cmodel::router::PipelineStage;
 namespace {
 TEST(PipelineStage, EmptyByDefault) {
     PipelineStage<int> s;

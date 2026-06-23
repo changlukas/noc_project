@@ -36,7 +36,7 @@
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
-#include "noc/noc_req_out.hpp"
+#include "router/req_out.hpp"
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -53,13 +53,13 @@ enum class VcMode {
     MultiCandidate,
 };
 
-class VcArbiter : public noc::NocReqOut {
+class VcArbiter : public router::NocReqOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t AXI_CH_COUNT = 5;  // AW, W, AR, B, R (B/R unused on NMU)
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
-    static VcArbiter read_write_split(noc::NocReqOut& downstream, std::size_t num_vc,
+    static VcArbiter read_write_split(router::NocReqOut& downstream, std::size_t num_vc,
                                       uint8_t write_vc, uint8_t read_vc,
                                       std::size_t pending_depth = kDefaultPendingDepth) {
         std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
@@ -67,7 +67,7 @@ class VcArbiter : public noc::NocReqOut {
                          std::vector<uint8_t>{read_vc}, std::move(empty_candidates), pending_depth);
     }
 
-    static VcArbiter read_write_split_pools(noc::NocReqOut& downstream, std::size_t num_vc,
+    static VcArbiter read_write_split_pools(router::NocReqOut& downstream, std::size_t num_vc,
                                             std::vector<uint8_t> write_vcs,
                                             std::vector<uint8_t> read_vcs,
                                             std::size_t pending_depth = kDefaultPendingDepth) {
@@ -76,7 +76,7 @@ class VcArbiter : public noc::NocReqOut {
                          std::move(read_vcs), std::move(empty_candidates), pending_depth);
     }
 
-    static VcArbiter multi_candidate(noc::NocReqOut& downstream, std::size_t num_vc,
+    static VcArbiter multi_candidate(router::NocReqOut& downstream, std::size_t num_vc,
                                      std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
                                      std::size_t pending_depth = kDefaultPendingDepth) {
         return VcArbiter(downstream, num_vc, VcMode::MultiCandidate,
@@ -105,7 +105,7 @@ class VcArbiter : public noc::NocReqOut {
     bool has_current_aw() const noexcept { return current_aw_vc_.has_value(); }
 
   private:
-    VcArbiter(noc::NocReqOut& downstream, std::size_t num_vc, VcMode mode,
+    VcArbiter(router::NocReqOut& downstream, std::size_t num_vc, VcMode mode,
               std::vector<uint8_t> write_vcs, std::vector<uint8_t> read_vcs,
               std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
               std::size_t pending_depth)
@@ -129,7 +129,7 @@ class VcArbiter : public noc::NocReqOut {
         return &candidate_vcs_[axi_ch];
     }
 
-    noc::NocReqOut& downstream_;
+    router::NocReqOut& downstream_;
     std::size_t num_vc_;
     VcMode mode_;
     std::vector<uint8_t> write_vcs_;

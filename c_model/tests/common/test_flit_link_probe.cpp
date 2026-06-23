@@ -1,7 +1,7 @@
 #include "common/flit_link_probe.hpp"
 #include "flit.hpp"
-#include "noc/noc_req_out.hpp"
-#include "noc/noc_rsp_in.hpp"
+#include "router/req_out.hpp"
+#include "router/rsp_in.hpp"
 #include <deque>
 #include <gtest/gtest.h>
 #include <optional>
@@ -15,7 +15,7 @@ namespace {
 
 // Fake request sink: accepts a flit unless `block_` is set, recording the
 // raw flit so the test can confirm byte-for-byte forwarding.
-struct FakeReqOut : ni::cmodel::noc::NocReqOut {
+struct FakeReqOut : ni::cmodel::router::NocReqOut {
     bool block_ = false;
     std::deque<Flit> got_;
     bool push_flit(const Flit& f) override {
@@ -25,7 +25,7 @@ struct FakeReqOut : ni::cmodel::noc::NocReqOut {
     }
 };
 
-struct FakeRspIn : ni::cmodel::noc::NocRspIn {
+struct FakeRspIn : ni::cmodel::router::NocRspIn {
     std::deque<Flit> q_;
     std::optional<Flit> pop_flit() override {
         if (q_.empty()) return std::nullopt;

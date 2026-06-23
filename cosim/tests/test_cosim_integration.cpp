@@ -61,11 +61,10 @@ TEST_P(CosimIntegration, ScenarioPassesWb2axip) {
 
     // tb_top's non-vacuous PASS guard requires reads_checked > 0; write-only
     // scenarios would FAIL it. Skip them — the bidirectional path needs a read.
-    bool has_read = std::any_of(
-        sc.transactions.begin(), sc.transactions.end(),
-        [](const ni::cmodel::axi::ScenarioTransaction& t) {
-            return t.op == ni::cmodel::axi::ScenarioTransaction::Op::Read;
-        });
+    bool has_read = std::any_of(sc.transactions.begin(), sc.transactions.end(),
+                                [](const ni::cmodel::axi::ScenarioTransaction& t) {
+                                    return t.op == ni::cmodel::axi::ScenarioTransaction::Op::Read;
+                                });
     if (!has_read) GTEST_SKIP() << "BIDIR_REQUIRES_READ";
 
     const char* bin = std::getenv(kCosimBinaryEnv);
@@ -94,7 +93,7 @@ TEST_P(CosimIntegration, ScenarioPassesWb2axip) {
 }
 
 INSTANTIATE_TEST_SUITE_P(CosimIntegration, CosimIntegration,
-                         ::testing::ValuesIn(noc::tests::kAllAxi4Scenarios),
+                         ::testing::ValuesIn(router::tests::kAllAxi4Scenarios),
                          [](::testing::TestParamInfo<std::string_view> const& info) {
                              std::string name{info.param};
                              std::replace(name.begin(), name.end(), '-', '_');

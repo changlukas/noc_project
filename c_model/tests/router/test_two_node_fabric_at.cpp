@@ -1,7 +1,7 @@
-#include "noc/two_node_fabric.hpp"
+#include "router/two_node_fabric.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::noc::testing::TwoNodeFabric;
+using ni::cmodel::router::testing::TwoNodeFabric;
 
 TEST(TwoNodeFabricAt, CoordinateMapsToSameRouterAsNodeIndex) {
     TwoNodeFabric ch(/*num_vc=*/1);

@@ -1,6 +1,6 @@
 #pragma once
 #include "ni_flit_constants.h"  // ni::width::X_WIDTH
-#include "noc/router.hpp"       // RouterPort
+#include "router/router.hpp"    // RouterPort
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -48,24 +48,24 @@ inline std::vector<NodeCoord> router_path(uint8_t src_id, uint8_t dst_id, uint8_
 // Output port for one single-axis hop from -> to. XY routing changes X before
 // Y, so each hop is one unambiguous axis step.
 inline std::size_t direction(NodeCoord from, NodeCoord to) {
-    if (to.x > from.x) return static_cast<std::size_t>(noc::RouterPort::EAST);
-    if (to.x < from.x) return static_cast<std::size_t>(noc::RouterPort::WEST);
-    if (to.y > from.y) return static_cast<std::size_t>(noc::RouterPort::NORTH);
-    return static_cast<std::size_t>(noc::RouterPort::SOUTH);
+    if (to.x > from.x) return static_cast<std::size_t>(router::RouterPort::EAST);
+    if (to.x < from.x) return static_cast<std::size_t>(router::RouterPort::WEST);
+    if (to.y > from.y) return static_cast<std::size_t>(router::RouterPort::NORTH);
+    return static_cast<std::size_t>(router::RouterPort::SOUTH);
 }
 
 inline std::size_t opposite(std::size_t port) {
-    switch (static_cast<noc::RouterPort>(port)) {
-        case noc::RouterPort::EAST:
-            return static_cast<std::size_t>(noc::RouterPort::WEST);
-        case noc::RouterPort::WEST:
-            return static_cast<std::size_t>(noc::RouterPort::EAST);
-        case noc::RouterPort::NORTH:
-            return static_cast<std::size_t>(noc::RouterPort::SOUTH);
-        case noc::RouterPort::SOUTH:
-            return static_cast<std::size_t>(noc::RouterPort::NORTH);
+    switch (static_cast<router::RouterPort>(port)) {
+        case router::RouterPort::EAST:
+            return static_cast<std::size_t>(router::RouterPort::WEST);
+        case router::RouterPort::WEST:
+            return static_cast<std::size_t>(router::RouterPort::EAST);
+        case router::RouterPort::NORTH:
+            return static_cast<std::size_t>(router::RouterPort::SOUTH);
+        case router::RouterPort::SOUTH:
+            return static_cast<std::size_t>(router::RouterPort::NORTH);
         default:
-            return static_cast<std::size_t>(noc::RouterPort::LOCAL);
+            return static_cast<std::size_t>(router::RouterPort::LOCAL);
     }
 }
 

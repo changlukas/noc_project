@@ -4,8 +4,8 @@
 // instance captures flits pushed to it into an internal deque for later
 // assertion. credit_avail uses the default (returns true).
 #include "flit.hpp"
-#include "noc/noc_req_out.hpp"
-#include "noc/noc_rsp_out.hpp"
+#include "router/req_out.hpp"
+#include "router/rsp_out.hpp"
 #include <cstddef>
 #include <deque>
 #include <optional>
@@ -33,7 +33,7 @@ class PerChannelCapture : public Interface {
     std::deque<Flit> captured_;
 };
 
-using ReqCapture = PerChannelCapture<noc::NocReqOut>;
-using RspCapture = PerChannelCapture<noc::NocRspOut>;
+using ReqCapture = PerChannelCapture<router::NocReqOut>;
+using RspCapture = PerChannelCapture<router::NocRspOut>;
 
 }  // namespace ni::cmodel::testing

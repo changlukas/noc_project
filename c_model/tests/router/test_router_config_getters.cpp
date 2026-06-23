@@ -1,8 +1,8 @@
-#include "noc/router.hpp"
+#include "router/router.hpp"
 #include <gtest/gtest.h>
 
-using ni::cmodel::noc::Router;
-using ni::cmodel::noc::RouterConfig;
+using ni::cmodel::router::Router;
+using ni::cmodel::router::RouterConfig;
 
 TEST(RouterConfigGetters, ExposeConfiguredCapacities) {
     RouterConfig c;

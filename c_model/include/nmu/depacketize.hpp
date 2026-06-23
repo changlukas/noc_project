@@ -1,7 +1,7 @@
 #pragma once
 #include "axi/types.hpp"
 #include "flit.hpp"
-#include "noc/noc_rsp_in.hpp"
+#include "router/rsp_in.hpp"
 #include "response_io.hpp"
 #include <cassert>
 #include <cstdint>
@@ -22,7 +22,7 @@ namespace ni::cmodel::nmu {
 // Documented in spec §4.4; not a bug.
 class Depacketize : public ResponseDepacketizer {
   public:
-    Depacketize(noc::NocRspIn& rsp_in, std::size_t b_q_depth, std::size_t r_q_depth)
+    Depacketize(router::NocRspIn& rsp_in, std::size_t b_q_depth, std::size_t r_q_depth)
         : rsp_in_(rsp_in), b_q_depth_(b_q_depth), r_q_depth_(r_q_depth) {}
 
     void tick();
@@ -47,7 +47,7 @@ class Depacketize : public ResponseDepacketizer {
         ResponseMeta meta;
     };
 
-    noc::NocRspIn& rsp_in_;
+    router::NocRspIn& rsp_in_;
     std::deque<BWithMeta> b_q_;
     std::deque<RWithMeta> r_q_;
     std::size_t b_q_depth_, r_q_depth_;
