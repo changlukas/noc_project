@@ -68,7 +68,7 @@ Components:
 | File | Language | Role |
 |---|---|---|
 | `axi_perf_monitor.sv` | SystemVerilog | Monitors one AXI interface: latency, idle |
-| `flit_link_perf_monitor.sv` | SystemVerilog | Monitors one link: flit count, stall |
+| `link_perf_monitor.sv` | SystemVerilog | Monitors one link: flit count, stall |
 | `cmodel_dpi.cpp` | C++ (DPI-C) | Receives monitor events from RTL |
 | `main.cpp` | C++ | Drives per-cycle sampling and the final dump (Verilator harness) |
 | `perf_collector.hpp` | C++ | Aggregates every monitor and writes `perf.json` |

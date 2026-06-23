@@ -84,12 +84,11 @@ document (`docs/development.md`) and `docs/architecture.md` instead.
 
 - C++ variables and methods: `snake_case`.
 - C++ types and classes: `PascalCase`.
-- Files: `snake_case` for C++ source files (e.g. `nmu_shell_adapter.hpp`
-  holds class `NmuShellAdapter`); the file name matches the class name
+- Files: `snake_case` for C++ source files (e.g. `nmu_wrap.hpp`
+  holds class `NmuWrap`); the file name matches the class name
   in snake_case form.
 - Module / class names: full word, no abbreviations. `Arbiter` not
-  `Arb`; `NmuShellAdapter` not `NmuShellAdpt`. File name must match
-  class name.
+  `Arb`; `NmuWrap` not `NmuWrp`. File name must match class name.
 - Scenario directories: `AX4-CAT-NNN_slug` (uppercase category code,
   zero-padded NNN, lowercase hyphen-separated slug).
 - Markdown files: `lowercase-kebab-case.md`.
@@ -484,7 +483,7 @@ Use ctest `-R` to filter by test name:
 
 ~~~bash
 cd build/cmodel
-ctest -R NmuShellAdapter --output-on-failure   # all NmuShellAdapter tests
+ctest -R NmuWrap --output-on-failure   # all NmuWrap tests
 ctest -R multi_beat --output-on-failure        # all tests matching multi_beat
 ctest --output-on-failure                      # all tests
 ~~~
@@ -549,14 +548,14 @@ Vtb_top writes run.log to `sim/verilator/output/<SCENARIO>/run.log` when
 invoked via `make run-tb-top`. When invoked via ctest, output goes to stdout, captured
 by `--output-on-failure`.
 
-### NmuShellAdapter multi-beat unit test
+### NmuWrap multi-beat unit test
 
-The multi-beat W burst coverage path through the sim adapter layer is
+The multi-beat W burst coverage path through the sim wrap layer is
 exercised by:
 
 ~~~bash
 cd build/cmodel
-ctest -R NmuShellAdapter.multi_beat_w_burst_full_rate_aw_available --output-on-failure
+ctest -R NmuWrap.multi_beat_w_burst_full_rate_aw_available --output-on-failure
 ~~~
 
 This test proves that each of the 8 W beats in an AWLEN=7 burst is

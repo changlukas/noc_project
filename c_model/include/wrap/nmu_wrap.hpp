@@ -224,7 +224,7 @@ class NmuWrap {
     bool prev_arready_ = false;
     uint32_t w_expected_ = 0;  // W beats remaining of the open burst window
 
-    // Flit <-> FlitBytes helpers live in cosim/flit_byte_conv.hpp; calls use
+    // Flit <-> FlitBytes helpers live in wrap/flit_byte_conv.hpp; calls use
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 

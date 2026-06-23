@@ -22,12 +22,12 @@
 namespace ni::cmodel::wrap {
 
 // 256-bit data bus = 32 bytes; 32-bit WSTRB = 4 bytes packed as uint32_t.
-// Single source of truth: axi::DATA_BYTES (= ni::WSTRB_WIDTH). All cosim
-// shell IO structs alias this so the DPI/SV wire and the c_model agree.
+// Single source of truth: axi::DATA_BYTES (= ni::WSTRB_WIDTH). All wrap
+// IO structs alias this so the DPI/SV wire and the c_model agree.
 constexpr int AXI_DATA_BYTES = axi::DATA_BYTES;
 static_assert(axi::DATA_BYTES == 32,
-              "DPI/SV side hard-codes 256-bit data bus (32 bytes); cosim "
-              "shell IO structs assume the same width");
+              "DPI/SV side hard-codes 256-bit data bus (32 bytes); wrap "
+              "IO structs assume the same width");
 
 // MasterInputs: from slave side (consumed by the master each cycle).
 struct MasterInputs {

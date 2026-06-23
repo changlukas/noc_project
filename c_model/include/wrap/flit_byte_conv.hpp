@@ -1,10 +1,10 @@
-// Flit <-> FlitBytes byte-array conversions shared by all cosim shell adapters.
+// Flit <-> FlitBytes byte-array conversions shared by all wrap components.
 //
 // Extracted to dedupe identical helpers previously living in
 // nmu_wrap.hpp, nsu_wrap.hpp, and channel_model_wrap.hpp.
 // FlitBytes is a std::array<uint8_t, FLIT_BYTES> defined in channel_model_wrap_io.hpp;
 // Flit::raw() returns std::array<uint8_t, Flit::WIDTH_BYTES>. The static_assert below
-// ensures FLIT_BYTES (cosim DPI marshalling size) equals Flit::WIDTH_BYTES (c_model
+// ensures FLIT_BYTES (DPI marshalling size) equals Flit::WIDTH_BYTES (c_model
 // flit container size), so the per-byte copy is well-defined.
 #pragma once
 #include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES

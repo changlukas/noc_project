@@ -1,6 +1,6 @@
 // tb_top_vcs — self-clocked wrapper around tb_top for event-driven
 // simulators (VCS). Under Verilator, clk_i/rst_ni are driven by the C++
-// harness (cosim/verilator/main.cpp), which also calls cmodel_finalize()
+// harness (sim/verilator/main.cpp), which also calls cmodel_finalize()
 // after $finish and enforces a cycle timeout; this wrapper reproduces those
 // three responsibilities in SV so tb_top itself stays simulator-neutral
 // and UNMODIFIED.
@@ -27,7 +27,7 @@ module tb_top_vcs;
         $fatal(1, "tb_top_vcs: timeout after %0d cycles", TIMEOUT_CYCLES);
     end
 
-    // Perf instrumentation — mirrors cosim/verilator/main.cpp. The SV perf
+    // Perf instrumentation — mirrors sim/verilator/main.cpp. The SV perf
     // monitors feed the c_model perf collector: per-transaction data during the
     // run, aggregate counters (backpressure / link) in their own `final` blocks.
     // We sample router occupancy once per rising edge and dump perf.json at the

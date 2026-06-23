@@ -191,7 +191,7 @@ class MasterWrap {
     uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs
 
     // Default read-dump path when init() is called without an explicit one.
-    // Kept cwd-relative so dumps land inside the project (cosim/verilator/
+    // Kept cwd-relative so dumps land inside the project (sim/verilator/
     // when Vtb_top runs, c_model/build/ when ctest runs) rather than the OS
     // temp dir. Overwritten on each run.
     static std::string make_tmp_dump() { return "master_wrap_read_dump.txt"; }

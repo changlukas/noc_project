@@ -1,7 +1,7 @@
 #pragma once
 // ChannelModel test-fixture per-direction in-flight flit deque capacity.
-// Not a production parameter — production cosim ChannelModelWrap
-// uses kPoCChannelModelDepth from cosim/poc_defaults.hpp directly.
+// Not a production parameter — production ChannelModelWrap
+// uses kPoCChannelModelDepth from wrap/poc_defaults.hpp directly.
 #include <yaml-cpp/yaml.h>
 
 #include <cstddef>

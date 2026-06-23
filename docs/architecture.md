@@ -107,7 +107,7 @@ NSU mode only). Destination derivation (XY bit-slice on `awaddr` /
 `nmu::addr_trans::xy_route` (`c_model/include/nmu/addr_trans.hpp`), not
 at the NoC level. A router model can replace `ChannelModel` by
 implementing the four `NocReqOut` / `NocRspIn` / `NocReqIn` /
-`NocRspOut` abstract interfaces declared in `c_model/include/noc/`.
+`NocRspOut` abstract interfaces declared in `c_model/include/router/`.
 
 ### AXI4 endpoint model
 
@@ -151,7 +151,7 @@ through shared global state.
 
 ### Per-instance handle ABI
 
-Each shell adapter (`*ShellAdapter`) is instantiated per call to
+Each wrap (`*Wrap`) is instantiated per call to
 `cmodel_<shell>_create(name)`. The function returns a 64-bit integer
 handle (`unsigned long long`; SV `longint unsigned`) that encodes a
 pointer to a typed `HandleBlock` (cast back at the DPI boundary; a plain
@@ -218,7 +218,7 @@ components can evolve independently:
   `NsuConfig::vc_mode`.
 - ChannelModel substitution -- `ChannelModel` (`c_model/tests/common/`)
   implements the `NocReqOut` / `NocRspIn` / `NocReqIn` / `NocRspOut`
-  abstract interfaces defined in `c_model/include/noc/`. Replacing it
+  abstract interfaces defined in `c_model/include/router/`. Replacing it
   with a real router model requires implementing those four interfaces.
 
 ---
@@ -230,26 +230,25 @@ components can evolve independently:
 Stage 5b introduces a DPI wire-wrap layer that connects the c_model
 components to the Verilator-compiled SV testbench. The layer has three steps:
 
-1. Each `*_wrap.sv` module calls its per-shell DPI imports at every
+1. Each `*_wrap.sv` module calls its per-wrap DPI imports at every
    posedge `clk_i`: `cmodel_<shell>_set_inputs` ->
    `cmodel_<shell>_tick` -> `cmodel_<shell>_get_outputs` (see
-   `cosim/c/cmodel_dpi.h` for the five tick functions:
+   `sim/c/cmodel_dpi.h` for the five tick functions:
    `cmodel_master_tick`, `cmodel_nmu_tick`, `cmodel_channel_model_tick`,
    `cmodel_nsu_tick`, `cmodel_slave_tick`).
 2. The DPI implementation reads the SV input wire bundle, calls the
-   appropriate `*_shell_adapter.hpp::tick()`, and writes the SV output
-   wire bundle.
+   appropriate `*_wrap.hpp::tick()`, and writes the SV output wire bundle.
 3. SV propagates output wires to the next stage's input ports.
 
-Five shell adapters mediate the boundary:
+Five wraps mediate the boundary:
 
-- `NmuShellAdapter` -- NMU AXI slave port input / flit output.
-- `NsuShellAdapter` -- flit input / AXI master port output.
-- `MasterShellAdapter` -- AXI master driver output / NMU slave port input.
-- `SlaveShellAdapter` -- NSU master port output / slave receiver input.
-- `ChannelModelShellAdapter` -- NMU flit output to NSU flit input (zero-latency channel stub).
+- `NmuWrap` -- NMU AXI slave port input / flit output.
+- `NsuWrap` -- flit input / AXI master port output.
+- `MasterWrap` -- AXI master driver output / NMU slave port input.
+- `SlaveWrap` -- NSU master port output / slave receiver input.
+- `ChannelModelWrap` -- NMU flit output to NSU flit input (zero-latency channel stub).
 
-Shell responsibility invariant: `<comp>_shell_adapter.hpp::tick()` is
+Wrap responsibility invariant: `<comp>_wrap.hpp::tick()` is
 allowed only to:
 
 - Read the input wire latch and check `can_accept_*()` capacity, then
@@ -265,7 +264,7 @@ header instead.
 ### Vtb_top binary
 
 The Verilator binary `Vtb_top` is built in `build/verilator/obj_dir/`.
-It is driven by `cosim/verilator/main.cpp` via the DPI shell adapters,
+It is driven by `sim/verilator/main.cpp` via the DPI wraps,
 which step the c_model components over the wire-level testbench. Per-run
 correctness is established by the c_model scoreboard (per-transaction
 write->readback data compare) and the model's own internal checks.
@@ -288,7 +287,7 @@ list is generated at CMake configure time from
 `tests/scenarios/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
 
 **Layer 3 -- cosim integration test**
-`cosim/tests/test_cosim_integration.cpp` runs the same scenario list
+`sim/tests/test_cosim_integration.cpp` runs the same scenario list
 through the Verilator wire-level harness, checking each transaction with
 the c_model scoreboard. INF-prefix scenarios are excluded.
 
@@ -301,13 +300,13 @@ Two hand-curated test suites exercise specific protocol invariants:
   scenarios x num_vc variants.
 
 **Layer 5 -- gen_amba cross-tool testbench**
-`cosim/sv/tb_genamba.sv` drives the NMU/NSU bridge with a vendored
-gen_amba_2021 golden master BFM and memory model (`cosim/sv/genamba/`)
+`sim/sv/tb_genamba.sv` drives the NMU/NSU bridge with a vendored
+gen_amba_2021 golden master BFM and memory model (`sim/sv/genamba/`)
 through seven single-master AXI4 patterns: baseline self-check, burst
 sweep, N-outstanding, outstanding burst, same-ID ordering, mixed R+W,
 and deep outstanding pressure. This provides independent evidence from
 a second AXI VIP implementation (gen_amba) that does not share code or
-assumptions with the c_model. Run with `cd cosim/verilator && make run-genamba`.
+assumptions with the c_model. Run with `cd sim/verilator && make run-genamba`.
 Phase 1 results:
 `docs/internal/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
 

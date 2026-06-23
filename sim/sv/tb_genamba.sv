@@ -103,7 +103,7 @@ module tb_genamba;
         // DPI lifecycle (BEFORE reset deassert, per tb_top.sv:70-76 pattern)
         string scenario_path;
         if (!$value$plusargs("scenario=%s", scenario_path))
-            scenario_path = "../genamba_init.yaml";  // fallback for direct exe runs from cosim/verilator
+            scenario_path = "../genamba_init.yaml";  // fallback for direct exe runs from sim/verilator
         cmodel_init(scenario_path);
         cm_ctx     = cmodel_channel_model_create("channel_model_0");
         master_ctx = cmodel_master_create("master_0");

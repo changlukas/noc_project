@@ -9,7 +9,7 @@
 #include <string>
 
 // VCD tracing — compiled in only when verilated with --trace (TRACE=1 in
-// cosim/verilator/Makefile defines VM_TRACE). Path comes from +vcd=<abs-path>;
+// sim/verilator/Makefile defines VM_TRACE). Path comes from +vcd=<abs-path>;
 // the run recipe supplies output/<scenario>/tb_top.vcd.
 #if VM_TRACE
 #include "verilated_vcd_c.h"

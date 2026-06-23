@@ -242,7 +242,7 @@ class NsuWrap {
     uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs
     uint32_t w_pop_budget_ = 0;      // W beats presentable (AWs already handshaken)
 
-    // Flit <-> FlitBytes helpers live in cosim/flit_byte_conv.hpp; calls use
+    // Flit <-> FlitBytes helpers live in wrap/flit_byte_conv.hpp; calls use
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 

@@ -7,7 +7,7 @@
 //   get_outputs(out) → copy output latch to caller
 //
 // Hermetic invariant: no refs to other Wraps. All cross-component
-// dataflow is via SV wires driven by DPI handlers in cosim/c/cmodel_dpi.cpp.
+// dataflow is via SV wires driven by DPI handlers in sim/c/cmodel_dpi.cpp.
 //
 // ChannelModel dataflow:
 //   req path:  NMU side → nmu_req_out().push_flit() → internal queue →
@@ -83,7 +83,7 @@ class ChannelModelWrap {
     ChannelModelInputs in_{};
     ChannelModelOutputs out_{};
 
-    // FlitBytes <-> c_model Flit helpers live in cosim/flit_byte_conv.hpp;
+    // FlitBytes <-> c_model Flit helpers live in wrap/flit_byte_conv.hpp;
     // calls use flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.
 };
 
