@@ -1,4 +1,6 @@
-// channel_model_wrap — Stage 5b DPI wrapper for ChannelModel component.
+// channel_model_wrap — LEGACY single-VC test stub (not part of the multi-VC mesh
+// fabric; the generated noc_fabric_<topo>.sv no longer instantiates it).
+// Stage 5b DPI wrapper for ChannelModel component.
 //
 // Two NoC ports, both noc_intf bundles (req + rsp channels combined):
 //   noc_miso_i — NMU-facing side (noc_intf.miso modport):

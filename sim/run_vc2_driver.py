@@ -18,7 +18,17 @@ from a num_vc=2 topology. This driver:
      (scoreboard clean + reads checked) appeared.
 
 Run: python3 sim/run_vc2_driver.py
+
+Windows/MSYS2 path discipline: all paths passed to make/verilator use
+forward-slash Windows-native absolute form (E:/... not /e/... and not
+E:\\...).  Verilator's MSYS2 Perl reads /e/... paths as module names; make
+strips backslashes.  Use .as_posix() on every resolved Path before embedding
+it in a shell argument.  Also mirrors root Makefile TOOLPATH: augments PATH
+with /c/msys64/mingw64/bin and /c/msys64/usr/bin so the Verilator Perl script
+finds Pod::Usage, and sets LC_ALL=C to silence the MSYS2 locale warning that
+causes "The system cannot find the path specified" on zh-TW locales.
 """
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -27,7 +37,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SIM = ROOT / "sim"
 TOPOLOGY = "mesh_2x1_vc2"
 DRIVER_SCN = "AX4-BAS-004_conformity_write_read"  # non-burst Mode-A write/read split
-PASS = "PASS: scenario complete, scoreboard clean"
+PASS_STR = "PASS: scenario complete, scoreboard clean"
 
 VL_BUILD = ROOT / "build" / "verilator"
 TB_TOP_VC2 = VL_BUILD / "tb_top_vc2.sv"
@@ -37,6 +47,27 @@ EXE = VL_BUILD / f"obj_dir{OBJDIR_SUFFIX}" / "Vtb_top.exe"
 EXE_NIX = VL_BUILD / f"obj_dir{OBJDIR_SUFFIX}" / "Vtb_top"
 
 
+def _p(path: Path) -> str:
+    """Forward-slash Windows-native absolute path (E:/...) for make/verilator args."""
+    return path.resolve().as_posix()
+
+
+def _toolpath_env() -> dict:
+    """Augmented environment mirroring root Makefile TOOLPATH.
+
+    Prepends /c/msys64/mingw64/bin + /c/msys64/usr/bin so the Verilator Perl
+    wrapper finds Pod::Usage.  Sets LC_ALL=C to suppress the MSYS2 Perl locale
+    warning that corrupts path resolution on zh-TW Windows locales.
+    Both are no-ops on Linux/macOS where these paths don't exist.
+    """
+    env = os.environ.copy()
+    prepend = "/c/msys64/mingw64/bin:/c/msys64/usr/bin"
+    existing = env.get("PATH", "")
+    env["PATH"] = prepend + ":" + existing if existing else prepend
+    env["LC_ALL"] = "C"
+    return env
+
+
 def run(cmd, **kw):
     print("+ " + " ".join(str(c) for c in cmd))
     return subprocess.run(cmd, **kw)
@@ -44,10 +75,14 @@ def run(cmd, **kw):
 
 def main() -> int:
     VL_BUILD.mkdir(parents=True, exist_ok=True)
+    env = _toolpath_env()
 
     # 1. Generate the num_vc=2 tb_top into the isolated variant path.
-    r = run([sys.executable, str(SIM / "tools" / "gen_tb_top.py"),
-             "--topology", TOPOLOGY, "--out", str(TB_TOP_VC2)])
+    #    --out uses a forward-slash absolute path so gen_tb_top writes the fabric
+    #    file alongside it in build/verilator/ (not in sim/verilator/).
+    r = run([sys.executable, _p(SIM / "tools" / "gen_tb_top.py"),
+             "--topology", TOPOLOGY, "--out", _p(TB_TOP_VC2)],
+            env=env)
     if r.returncode != 0:
         print("FAIL: vc2 tb_top generation failed")
         return 1
@@ -55,13 +90,15 @@ def main() -> int:
     # 2. Build via the verilator Makefile with variant overrides. TB_TOP_SV points
     #    the tb_top recipe at the variant .sv; the filelist swaps the default
     #    tb_top.sv entry for it; OBJDIR_SUFFIX isolates the obj_dir + EXE.
-    make = ["make", "-C", str(SIM / "verilator"),
+    #    TB_TOP_SV / FILELIST_F use forward-slash absolute paths: Verilator's MSYS2
+    #    Perl treats /e/... POSIX paths as module names; make strips backslashes.
+    make = ["make", "-C", _p(SIM / "verilator"),
             f"OBJDIR_SUFFIX={OBJDIR_SUFFIX}",
             f"TOPOLOGY={TOPOLOGY}",
-            f"TB_TOP_SV={TB_TOP_VC2}",
-            f"FILELIST_F={FILELIST_VC2}",
+            f"TB_TOP_SV={_p(TB_TOP_VC2)}",
+            f"FILELIST_F={_p(FILELIST_VC2)}",
             "PYTHON3=python3"]
-    r = run(make)
+    r = run(make, env=env)
     if r.returncode != 0:
         print("FAIL: vc2 verilator build failed")
         return 1
@@ -81,14 +118,15 @@ def main() -> int:
 
     out = VL_BUILD / "output_vc2" / DRIVER_SCN
     out.mkdir(parents=True, exist_ok=True)
-    r = run([str(exe),
-             f"+scenario_node0={n0}", f"+scenario_node1={n1}",
-             f"+perf_out={out / 'perf.json'}", f"+perf_scenario={DRIVER_SCN}"],
-            capture_output=True, text=True, cwd=str(VL_BUILD))
+    r = run([_p(exe),
+             f"+scenario_node0={_p(n0)}", f"+scenario_node1={_p(n1)}",
+             f"+perf_out={_p(out / 'perf.json')}", f"+perf_scenario={DRIVER_SCN}"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=_p(VL_BUILD), env=env)
 
     # 4. Non-vacuous PASS assertion (run-count == 1, tb PASS line present).
     ran = 1
-    ok = r.returncode == 0 and PASS in r.stdout
+    ok = r.returncode == 0 and PASS_STR in r.stdout
     print(f"{'PASS' if ok else 'FAIL'}  {DRIVER_SCN}  (num_vc=2)")
     if not ok:
         sys.stdout.write(r.stdout[-1200:] + r.stderr[-600:])

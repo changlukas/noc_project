@@ -66,8 +66,8 @@ def main():
     for scn in scns:
         d = PATTERNS / scn
         if scn.startswith("AX4-INF-"):            skip += 1; continue   # dedicated test
-        # 2-node restricts to the committed bidirectional subset; N>2 runs any
-        # pattern with a base scenario.yaml (variants materialized below).
+        # Both 2-node and N>2 restrict to the curated bidirectional subset
+        # (node0/node1 dirs committed); N>2 materializes variants from that subset.
         out = (PATTERNS.parent / "verilator" / "output" / scn)
         node_paths = node_scenarios(d, n, out)
         if node_paths is None:
