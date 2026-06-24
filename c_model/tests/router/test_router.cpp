@@ -5,8 +5,8 @@
 #include <tuple>
 #include <vector>
 
-using ni::NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH;
-using ni::NI_NOC_ROUTER_VC_DEPTH;
+using ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH;
+using ni::NOC_ROUTER_VC_DEPTH;
 using ni::cmodel::router::route_compute;
 using ni::cmodel::router::Router;
 using ni::cmodel::router::RouterConfig;
@@ -118,18 +118,18 @@ TEST(RouterDatapath, CreditDecrementAtGrantAndPulseAfterDequeue) {
     r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
     r.set_upstream_credit(static_cast<std::size_t>(RouterPort::WEST), west_up);
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
-    EXPECT_EQ(r.credit(E, 0), NI_NOC_ROUTER_VC_DEPTH);  // seeded
+    EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH);  // seeded
     r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(make_flit(make_dst(3, 1), 0, 1));
     r.tick();  // stage 1
-    EXPECT_EQ(r.credit(E, 0), NI_NOC_ROUTER_VC_DEPTH);
+    EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH);
     r.tick();  // stage 2: grant
-    EXPECT_EQ(r.credit(E, 0), NI_NOC_ROUTER_VC_DEPTH - 1);
+    EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH - 1);
     EXPECT_TRUE(west_up.pulses.empty());  // registered
     r.tick();                             // pulse delivered
     ASSERT_EQ(west_up.pulses.size(), 1u);
     EXPECT_EQ(west_up.pulses[0], 0);
     r.receive_credit(E, 0);  // downstream returns
-    EXPECT_EQ(r.credit(E, 0), NI_NOC_ROUTER_VC_DEPTH);
+    EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH);
 }
 
 // --- Wormhole locking helpers (Task 6) ----------------------------------
@@ -340,7 +340,7 @@ TEST(RouterWormhole, RrAdvancesPerPacket) {
 }
 
 // --- Per-VC independence (Task 7) ---------------------------------------
-// All three tests need >=2 VCs; the generated default NI_NOC_NUM_VC is 1, so
+// All three tests need >=2 VCs; the generated default NOC_NUM_VC is 1, so
 // each builds its RouterConfig with num_vc = 2.
 
 RouterConfig two_vc_cfg() {
@@ -461,30 +461,30 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     const uint8_t dst = make_dst(3, 1);
 
-    // Phase A — fill the EAST output FIFO to its depth (NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH)
+    // Phase A — fill the EAST output FIFO to its depth (NOC_ROUTER_OUTPUT_FIFO_DEPTH)
     // WITHOUT a downstream attached, so stage 3 cannot drain it. Keep a backlog queued
     // in the input FIFO so a grant is available on every later tick. Feed one vc0 flit/tick.
     for (int t = 0; t < 12; ++t) {
-        if (r.input_fifo_size(WEST, 0) < NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH + 1)
+        if (r.input_fifo_size(WEST, 0) < NOC_ROUTER_OUTPUT_FIFO_DEPTH + 1)
             r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*last=*/1));
         r.tick();
-        if (r.output_fifo_size(E) >= NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH &&
+        if (r.output_fifo_size(E) >= NOC_ROUTER_OUTPUT_FIFO_DEPTH &&
             r.input_fifo_size(WEST, 0) >= 1)
             break;
     }
-    ASSERT_EQ(r.output_fifo_size(E), static_cast<std::size_t>(NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH))
+    ASSERT_EQ(r.output_fifo_size(E), static_cast<std::size_t>(NOC_ROUTER_OUTPUT_FIFO_DEPTH))
         << "output FIFO not filled to depth";
     ASSERT_GE(r.input_fifo_size(WEST, 0), 1u) << "no input backlog to supply a same-tick grant";
 
     // Attach the downstream now: stage 3 can drain one flit this tick, and stage 2
     // (running after stage 3 in the same tick) can grant one from the input
-    // backlog. Net output-FIFO occupancy stays at NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH;
+    // backlog. Net output-FIFO occupancy stays at NOC_ROUTER_OUTPUT_FIFO_DEPTH;
     // the sink gains exactly one.
     r.set_downstream(E, east);
     ASSERT_TRUE(east.received.empty());
     const std::size_t backlog_before = r.input_fifo_size(WEST, 0);
     r.tick();
-    EXPECT_EQ(r.output_fifo_size(E), static_cast<std::size_t>(NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH))
+    EXPECT_EQ(r.output_fifo_size(E), static_cast<std::size_t>(NOC_ROUTER_OUTPUT_FIFO_DEPTH))
         << "deq+enq in the same tick did not hold occupancy at the FIFO depth";
     EXPECT_EQ(east.received.size(), 1u) << "stage 3 did not drain one flit";
     EXPECT_EQ(r.input_fifo_size(WEST, 0), backlog_before - 1)
@@ -577,7 +577,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
 
     // Drive: model the NI-side credit mirror — only push a new packet into A's WEST
     // when A still has EAST/vc0 credit (the sender never overruns the receiver).
-    for (int t = 0; t < 200 && (injected < kPackets || a.credit(E, 0) < NI_NOC_ROUTER_VC_DEPTH);
+    for (int t = 0; t < 200 && (injected < kPackets || a.credit(E, 0) < NOC_ROUTER_VC_DEPTH);
          ++t) {
         if (injected < kPackets && a.credit(E, 0) > 0 && a.input_fifo_size(W, 0) == 0) {
             a.input(W).push_flit(make_flit(dst_b_local, /*vc=*/0, /*last=*/1));
@@ -588,7 +588,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
         if (a_to_b.in_flight > 0) --a_to_b.in_flight;  // landing consumed by B stage 1
 
         // No credit created: the observable occupancy never exceeds DEPTH.
-        EXPECT_LE(occupancy_lower(), static_cast<std::size_t>(NI_NOC_ROUTER_VC_DEPTH))
+        EXPECT_LE(occupancy_lower(), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH))
             << "credit created at tick " << t;
         EXPECT_LE(a_to_b.in_flight, 1u) << "more than one flit on the wire at tick " << t;
     }
@@ -596,7 +596,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     EXPECT_EQ(injected, kPackets) << "did not inject all packets (credit deadlock?)";
     // At quiescence: every credit restored (none destroyed) and every flit ejected
     // (none lost or duplicated).
-    EXPECT_EQ(a.credit(E, 0), static_cast<std::size_t>(NI_NOC_ROUTER_VC_DEPTH))
+    EXPECT_EQ(a.credit(E, 0), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH))
         << "credit not fully restored at drain";
     EXPECT_EQ(a_to_b.in_flight, 0u);
     EXPECT_EQ(b.input_fifo_size(W, 0), 0u);
@@ -657,7 +657,7 @@ TEST(RouterFairness, AllToOneNoStarvation) {
     for (int t = 0; t < 400 && east.received.size() < kCollect; ++t) {
         for (int i = 0; i < kInputs; ++i) {
             if (pkt[i].next >= kMaxPacketFlits) pkt[i] = Packet{in_ports[i], labels[i]};  // refill
-            if (r.input_fifo_size(in_ports[i], 0) < NI_NOC_ROUTER_VC_DEPTH)
+            if (r.input_fifo_size(in_ports[i], 0) < NOC_ROUTER_VC_DEPTH)
                 feed_packet(r, pkt[i], dst, 0);
         }
         tick_and_return_credit(r, east, E);

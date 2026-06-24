@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: ceef98ad4649
 // Generator version: v1.0.0
-// Generated at: 2026-06-12T11:48:46Z
+// Generated at: 2026-06-24T02:11:17Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -67,9 +67,9 @@ package ni_signals_pkg;
 endpackage
 
 interface axi4_intf #(
-  parameter int unsigned ID_WIDTH   = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT,
-  parameter int unsigned ADDR_WIDTH = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT,
-  parameter int unsigned DATA_WIDTH = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT
+  parameter int unsigned ID_WIDTH   = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+  parameter int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
+  parameter int unsigned DATA_WIDTH = ni_params_pkg::AXI_DATA_WIDTH_DFLT
 );
   localparam int unsigned WSTRB_WIDTH = DATA_WIDTH / 8;
 
@@ -134,9 +134,9 @@ interface axi4_intf #(
 endinterface : axi4_intf
 
 interface noc_intf #(
-  parameter int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT,
-  parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT,
-  parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
+  parameter int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT,
+  parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,
+  parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
 );
   logic                  req_valid;
   logic [FLIT_WIDTH-1:0] req_flit;

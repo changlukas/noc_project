@@ -15,8 +15,8 @@ axi:
     # currently hardcode 8 (see static_assert in c_model/include/axi/types.hpp
     # AXI_ID_SPACE check, and the AXI_ID_WIDTH wiring in sim/c/cmodel_dpi.cpp).
     # Widen the impl side before relaxing this max.
-    sv_symbol: NI_AXI_ID_WIDTH_DFLT
-    cpp_symbol: NI_AXI_ID_WIDTH
+    sv_symbol: AXI_ID_WIDTH_DFLT
+    cpp_symbol: AXI_ID_WIDTH
   ADDR_WIDTH:
     type: int
     units: bits
@@ -27,8 +27,8 @@ axi:
     # NOTE: spec range is 1..64 per AXI4 IHI 0022 §A2.2.1, but the DPI pack_addr64
     # helper in sim/c/cmodel_dpi.cpp hardcodes a 64-bit split into svBitVecVal[2].
     # Reparameterize pack_addr64 before narrowing or relaxing this max.
-    sv_symbol: NI_AXI_ADDR_WIDTH_DFLT
-    cpp_symbol: NI_AXI_ADDR_WIDTH
+    sv_symbol: AXI_ADDR_WIDTH_DFLT
+    cpp_symbol: AXI_ADDR_WIDTH
   DATA_WIDTH:
     type: int
     units: bits
@@ -39,8 +39,8 @@ axi:
     # hardcode 256-bit (DATA_BYTES = 32 in c_model/include/axi/types.hpp, and the
     # svBitVecVal[8] data marshalling in sim/c/cmodel_dpi.cpp). Widen the impl
     # side before picking a different `allowed` value.
-    sv_symbol: NI_AXI_DATA_WIDTH_DFLT
-    cpp_symbol: NI_AXI_DATA_WIDTH
+    sv_symbol: AXI_DATA_WIDTH_DFLT
+    cpp_symbol: AXI_DATA_WIDTH
 
 noc:
   NUM_VC:
@@ -50,8 +50,8 @@ noc:
     default: 1
     min: 1
     max: 8
-    sv_symbol: NI_NOC_NUM_VC_DFLT
-    cpp_symbol: NI_NOC_NUM_VC
+    sv_symbol: NOC_NUM_VC_DFLT
+    cpp_symbol: NOC_NUM_VC
   FLIT_WIDTH:
     type: int
     units: bits
@@ -59,8 +59,8 @@ noc:
     default: 408
     min: 64
     max: 1024
-    sv_symbol: NI_NOC_FLIT_WIDTH_DFLT
-    cpp_symbol: NI_NOC_FLIT_WIDTH
+    sv_symbol: NOC_FLIT_WIDTH_DFLT
+    cpp_symbol: NOC_FLIT_WIDTH
   SLAVE_VC_BUFFER_DEPTH:
     type: int
     units: flits
@@ -68,8 +68,8 @@ noc:
     default: 4
     min: 1
     max: 64
-    sv_symbol: NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
-    cpp_symbol: NI_NOC_SLAVE_VC_BUFFER_DEPTH
+    sv_symbol: NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
+    cpp_symbol: NOC_SLAVE_VC_BUFFER_DEPTH
   ROUTER_VC_DEPTH:
     type: int
     units: flits
@@ -77,8 +77,8 @@ noc:
     default: 4
     min: 1
     max: 16
-    sv_symbol: NI_NOC_ROUTER_VC_DEPTH_DFLT
-    cpp_symbol: NI_NOC_ROUTER_VC_DEPTH
+    sv_symbol: NOC_ROUTER_VC_DEPTH_DFLT
+    cpp_symbol: NOC_ROUTER_VC_DEPTH
   ROUTER_OUTPUT_FIFO_DEPTH:
     type: int
     units: flits
@@ -86,8 +86,8 @@ noc:
     default: 2
     min: 1
     max: 16
-    sv_symbol: NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT
-    cpp_symbol: NI_NOC_ROUTER_OUTPUT_FIFO_DEPTH
+    sv_symbol: NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT
+    cpp_symbol: NOC_ROUTER_OUTPUT_FIFO_DEPTH
   MESH_X_DIM:
     type: int
     units: count
@@ -95,8 +95,8 @@ noc:
     default: 4
     min: 2
     max: 16
-    sv_symbol: NI_NOC_MESH_X_DIM_DFLT
-    cpp_symbol: NI_NOC_MESH_X_DIM
+    sv_symbol: NOC_MESH_X_DIM_DFLT
+    cpp_symbol: NOC_MESH_X_DIM
   MESH_Y_DIM:
     type: int
     units: count
@@ -104,8 +104,8 @@ noc:
     default: 4
     min: 2
     max: 16
-    sv_symbol: NI_NOC_MESH_Y_DIM_DFLT
-    cpp_symbol: NI_NOC_MESH_Y_DIM
+    sv_symbol: NOC_MESH_Y_DIM_DFLT
+    cpp_symbol: NOC_MESH_Y_DIM
 
 derived:
   WSTRB_WIDTH:
@@ -114,5 +114,5 @@ derived:
     description: "AXI write strobe width"
     expression: "DATA_WIDTH / 8"
     constraint: "DATA_WIDTH % 8 == 0"
-    sv_symbol: NI_AXI_WSTRB_WIDTH_DFLT
-    cpp_symbol: NI_AXI_WSTRB_WIDTH
+    sv_symbol: AXI_WSTRB_WIDTH_DFLT
+    cpp_symbol: AXI_WSTRB_WIDTH

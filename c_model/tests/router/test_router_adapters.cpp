@@ -4,7 +4,7 @@
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
-using ni::NI_NOC_ROUTER_VC_DEPTH;
+using ni::NOC_ROUTER_VC_DEPTH;
 using ni::cmodel::Flit;
 using ni::cmodel::router::InjectAdapter;
 using ni::cmodel::router::Router;
@@ -146,7 +146,7 @@ TEST(TwoNodeFabric, EjectBoundaryCreditConservation) {
     SCENARIO(
         "TwoNodeFabric: credit(LOCAL,vc) + output_fifo_size(LOCAL) + eject_buffered == vc_depth "
         "every tick");
-    constexpr std::size_t kDepth = NI_NOC_ROUTER_VC_DEPTH;
+    constexpr std::size_t kDepth = NOC_ROUTER_VC_DEPTH;
     TwoNodeFabric ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
     const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
     for (int t = 0; t < 300; ++t) {

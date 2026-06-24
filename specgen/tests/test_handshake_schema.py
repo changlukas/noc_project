@@ -21,7 +21,7 @@ def test_load_constants_returns_expected_shape():
     assert c["schema_version"] == "1.0"
     assert c["axi"]["ID_WIDTH"]["default"] == 8
     assert c["axi"]["DATA_WIDTH"]["allowed"] == [32, 64, 128, 256, 512, 1024]
-    assert c["noc"]["FLIT_WIDTH"]["sv_symbol"] == "NI_NOC_FLIT_WIDTH_DFLT"
+    assert c["noc"]["FLIT_WIDTH"]["sv_symbol"] == "NOC_FLIT_WIDTH_DFLT"
     assert c["noc"]["SLAVE_VC_BUFFER_DEPTH"]["default"] == 4
     assert c["derived"]["WSTRB_WIDTH"]["expression"] == "DATA_WIDTH / 8"
 

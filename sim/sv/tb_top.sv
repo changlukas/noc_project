@@ -42,12 +42,12 @@ module tb_top;
     // -------------------------------------------------------------------------
     // Parameters
     // -------------------------------------------------------------------------
-    localparam int unsigned ID_WIDTH              = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT;
-    localparam int unsigned ADDR_WIDTH            = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT;
-    localparam int unsigned DATA_WIDTH            = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT;
-    localparam int unsigned NUM_VC                = ni_params_pkg::NI_NOC_NUM_VC_DFLT;
-    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NI_NOC_FLIT_WIDTH_DFLT;
-    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NI_NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;
+    localparam int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT;
+    localparam int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;
+    localparam int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT;
+    localparam int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT;
+    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT;
+    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;
 
     // -------------------------------------------------------------------------
     // DPI lifecycle

@@ -22,9 +22,9 @@
 `define AXI_SLAVE_WRAP_SV
 
 module axi_slave_wrap #(
-    parameter int unsigned ID_WIDTH   = ni_params_pkg::NI_AXI_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH = ni_params_pkg::NI_AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH = ni_params_pkg::NI_AXI_DATA_WIDTH_DFLT
+    parameter int unsigned ID_WIDTH   = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
+    parameter int unsigned DATA_WIDTH = ni_params_pkg::AXI_DATA_WIDTH_DFLT
 ) (
     input  logic    clk_i,
     input  logic    rst_ni,
