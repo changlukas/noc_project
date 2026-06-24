@@ -413,6 +413,22 @@ def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
         yaml.safe_dump(sc, f, sort_keys=False)
 
 
+def _write_data_file(out_dir, seq, axi_size, axi_len):
+    """Write a data file for one write transaction; return the relative file path.
+
+    The file contains (axi_len + 1) * 2**axi_size bytes encoded as space-separated
+    hex tokens (e.g. "01 02 03 04") — the format required by AxiMaster.load_write_data_.
+    Data bytes are a deterministic pattern: repeating (seq & 0xFF) for the entire burst.
+    """
+    n_bytes = (axi_len + 1) * (1 << axi_size)
+    fill = seq & 0xFF
+    tokens = " ".join(f"{fill:02X}" for _ in range(n_bytes))
+    fname = f"data_seq{seq}.txt"
+    with open(os.path.join(out_dir, fname), "w") as f:
+        f.write(tokens + "\n")
+    return fname
+
+
 def _emit_synthetic_node(out_dir, src_idx, dst_cids, src_cid,
                          n_nodes, base_local, memory_size, axi_size, axi_len):
     """Emit <out_dir>/scenario.yaml with synthetic write+read pairs (no base scenario).
@@ -423,15 +439,38 @@ def _emit_synthetic_node(out_dir, src_idx, dst_cids, src_cid,
 
     Burst footprint = (axi_len + 1) * 2**axi_size bytes; passed as `reserved` to
     alloc_unique_offset so the tail also fits within the dst tile memory window.
+
+    The scenario_parser requires id, burst, data_file (write), and dump_file (read)
+    in every transaction.  This function writes per-seq data files alongside the
+    scenario.yaml and references them with relative paths.  dump_file is set to the
+    same data file (its content is unused; the slave scoreboard drives correctness).
     """
+    os.makedirs(out_dir, exist_ok=True)
     reserved = (axi_len + 1) * (1 << axi_size)
     transactions = []
     for seq, dst_cid in enumerate(dst_cids):
         local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
                                         n_nodes, memory_size, reserved=reserved)
         addr = (dst_cid << ADDR_DST_SHIFT) + local_off
-        transactions.append({"op": "write", "addr": addr, "size": axi_size, "len": axi_len})
-        transactions.append({"op": "read",  "addr": addr, "size": axi_size, "len": axi_len})
+        data_fname = _write_data_file(out_dir, seq, axi_size, axi_len)
+        transactions.append({
+            "op": "write",
+            "addr": addr,
+            "id": 0,
+            "size": axi_size,
+            "len": axi_len,
+            "burst": "INCR",
+            "data_file": data_fname,
+        })
+        transactions.append({
+            "op": "read",
+            "addr": addr,
+            "id": 0,
+            "size": axi_size,
+            "len": axi_len,
+            "burst": "INCR",
+            "dump_file": data_fname,
+        })
 
     sc = {
         "config": {
@@ -440,7 +479,6 @@ def _emit_synthetic_node(out_dir, src_idx, dst_cids, src_cid,
         },
         "transactions": transactions,
     }
-    os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "scenario.yaml"), "w") as f:
         yaml.safe_dump(sc, f, sort_keys=False)
 

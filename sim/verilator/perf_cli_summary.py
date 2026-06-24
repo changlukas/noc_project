@@ -8,6 +8,7 @@ this script never prints them.
 """
 
 import json
+import math
 import sys
 
 
@@ -34,8 +35,22 @@ def print_axi_slots(slots):
         ))
 
 
+def _p95(transactions):
+    """Nearest-rank p95 from transactions list (each has a 'latency' field)."""
+    lats = sorted(t["latency"] for t in transactions)
+    n = len(lats)
+    if n == 0:
+        return None
+    idx = math.ceil(0.95 * n) - 1  # 0-based nearest-rank
+    return lats[idx]
+
+
 def print_latency(latency, slots):
     _hdr("  Latency -- end-to-end (manager; min = best-case observed)")
+    txns = latency.get("transactions", [])
+    p95_val = _p95(txns)
+    if p95_val is not None:
+        print(f"    p95 (all txns, nearest-rank): {p95_val} cyc  (n={len(txns)})")
     by_class = latency.get("by_class", [])
     if by_class:
         fmt = "    {:<36} {:>4} {:>5} {:>6} {:>5}"

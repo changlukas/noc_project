@@ -26,7 +26,9 @@
 // route_compute: a (1,0)-dst flit leaves node0 EAST, a (0,0)-dst flit leaves
 // node1 WEST) is identical, over the link_<N>_* pins toward the neighbor.
 //
-// num_vc comes from cmodel_router_create; LOCAL/LINK depths = kPoCChannelModelDepth.
+// num_vc comes from cmodel_router_create; LOCAL/LINK depths = NOC_ROUTER_VC_DEPTH
+// (spec-aligned, matching SLAVE_VC_BUFFER_DEPTH so link_perf_monitor assertions hold
+// under high-fan-in hotspot traffic).
 // Credit pulses marshal per-VC across the DPI boundary (VcCreditVec); the LINK
 // face is per-direction (ROUTER_LINK_PORTS), only link_port_ live at 2-node.
 //
@@ -37,16 +39,18 @@
 // reset stance); the tb_top reset window precedes all *_create + traffic, so no
 // stale pending credit can leak post-reset.
 //
-// Depth rationale: the SV credit feedback is registered one cycle behind
-// (beta-tick), so pin the eject buffers to num_vc*kPoCChannelModelDepth (the
-// aggregate router-output credit window) for margin. The NMU/NSU is credit-gated
-// by *_out_credit_return / link_*_in_credit, so the router input never overflows.
+// Depth rationale: vc_depth = NOC_ROUTER_VC_DEPTH (spec default, matches the SV
+// SLAVE_VC_BUFFER_DEPTH=4 that seeds the link_perf_monitor credit counter).  The
+// eject buffers are sized to num_vc * vc_depth (aggregate output-credit window).
+// The NMU/NSU is credit-gated by *_out_credit_return / link_*_in_credit, so the
+// router input never overflows.
 #pragma once
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
-#include "wrap/poc_defaults.hpp"    // kPoCChannelModelDepth
+#include "wrap/poc_defaults.hpp"    // kPoCChannelModelDepth (ChannelModel only)
 #include "wrap/router_wrap_io.hpp"
 #include "router/router.hpp"
 #include "router/router_adapters.hpp"
+#include "ni_params.h"              // NOC_ROUTER_VC_DEPTH, NOC_ROUTER_OUTPUT_FIFO_DEPTH
 #include <array>
 #include <memory>
 #include <stdexcept>
@@ -77,8 +81,11 @@ class RouterWrap {
         c.mesh_x_dim = mesh_x_dim;
         c.mesh_y_dim = mesh_y_dim;
         c.num_vc = num_vc;
-        c.vc_depth = kPoCChannelModelDepth;
-        c.output_fifo_depth = kPoCChannelModelDepth;
+        // Use spec-aligned depths (matching SLAVE_VC_BUFFER_DEPTH and
+        // NOC_ROUTER_OUTPUT_FIFO_DEPTH from ni_params.h / constants.yaml).
+        // kPoCChannelModelDepth (64) is reserved for the ChannelModel stub.
+        c.vc_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH);
+        c.output_fifo_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH);
         req_router_ = std::make_unique<router::Router>(c);
         rsp_router_ = std::make_unique<router::Router>(c);
 
@@ -202,8 +209,9 @@ class RouterWrap {
     void wire_port(router::Router& r, std::size_t port,
                    std::unique_ptr<router::LinkEjectAdapter>& ej,
                    std::unique_ptr<router::LinkCreditOut>& credit) {
-        ej = std::make_unique<router::LinkEjectAdapter>(static_cast<std::size_t>(num_vc_) *
-                                                        kPoCChannelModelDepth);
+        ej = std::make_unique<router::LinkEjectAdapter>(
+            static_cast<std::size_t>(num_vc_) *
+            static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
         credit = std::make_unique<router::LinkCreditOut>(num_vc_);
         r.set_downstream(port, *ej);
         r.set_upstream_credit(port, *credit);

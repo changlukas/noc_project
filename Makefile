@@ -18,7 +18,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
-        sim-regress \
+        sim-regress bench \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -36,6 +36,7 @@ help:
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
 	@echo "  make check            lint + build + full ctest"
+	@echo "  make bench            run benchmark (TOPOLOGY/PATTERN/HOTSPOT/TRANSACTIONS_PER_NODE/MEMORY_SIZE)"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/)"
@@ -151,6 +152,20 @@ check: lint_scenarios lint_docs build-cmodel build-verilator
 TOPOLOGY ?= mesh_4x4_vc1
 sim-regress: build-verilator
 	TOPOLOGY=$(TOPOLOGY) $(PYTHON3) sim/run_regress.py
+
+# PATTERN, HOTSPOT, TRANSACTIONS_PER_NODE, MEMORY_SIZE: forwarded to run_benchmark.py.
+PATTERN               ?= hotspot
+HOTSPOT               ?= 0
+TRANSACTIONS_PER_NODE ?= 2
+MEMORY_SIZE           ?= 0x4000
+
+bench: build-verilator
+	$(PYTHON3) sim/tools/run_benchmark.py \
+	    --topology $(TOPOLOGY) \
+	    --pattern $(PATTERN) \
+	    --hotspot $(HOTSPOT) \
+	    --transactions-per-node $(TRANSACTIONS_PER_NODE) \
+	    --memory-size $(MEMORY_SIZE)
 
 # --- clean ---
 

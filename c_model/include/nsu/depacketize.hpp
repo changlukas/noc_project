@@ -167,9 +167,10 @@ inline void Depacketize::tick() {
                 }
                 {
                     auto ar = decode_ar(f);
+                    uint8_t ar_src = static_cast<uint8_t>(f.get_header_field("src_id"));
                     meta_.snapshot_read(ar.id,
                                         {
-                                            static_cast<uint8_t>(f.get_header_field("src_id")),
+                                            ar_src,
                                             static_cast<uint8_t>(f.get_header_field("rob_req")),
                                             static_cast<uint8_t>(f.get_header_field("rob_idx")),
                                         });

@@ -1,0 +1,104 @@
+"""Unit tests for run_benchmark.py summarize().
+
+Run:
+    python3 -m pytest sim/tools/test_run_benchmark.py -v
+    python3 -c "import sim.tools.test_run_benchmark as t; t.test_summary_computes_p95()"
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+from run_benchmark import summarize  # noqa: E402
+
+
+def test_summary_computes_p95():
+    """p95 nearest-rank on 1..100 == 95 (ceil(0.95*100) - 1 = 94th 0-based index)."""
+    perf = {"latency": {"transactions": [{"latency": lat} for lat in range(1, 101)]}}
+    s = summarize(perf)
+    assert s["latency"]["p95"] == 95
+
+
+def test_summary_mean():
+    """mean of 1..100 == 50.5."""
+    perf = {"latency": {"transactions": [{"latency": lat} for lat in range(1, 101)]}}
+    s = summarize(perf)
+    assert s["latency"]["mean"] == 50.5
+
+
+def test_summary_max():
+    """max of 1..100 == 100."""
+    perf = {"latency": {"transactions": [{"latency": lat} for lat in range(1, 101)]}}
+    s = summarize(perf)
+    assert s["latency"]["max"] == 100
+
+
+def test_summary_injection_tag():
+    """injection field is always 'greedy-finite-trace-stress'."""
+    perf = {"latency": {"transactions": [{"latency": 10}]}}
+    s = summarize(perf)
+    assert s["injection"] == "greedy-finite-trace-stress"
+
+
+def test_summary_empty_txns():
+    """Empty transactions list -> latency dict is empty (no KeyError)."""
+    perf = {"latency": {"transactions": []}}
+    s = summarize(perf)
+    assert s["latency"] == {}
+
+
+def test_summary_window_passthrough():
+    """window is passed through from perf_json unchanged."""
+    perf = {
+        "latency": {"transactions": []},
+        "window": {"start_cyc": 0, "end_cyc": 42},
+    }
+    s = summarize(perf)
+    assert s["window"] == {"start_cyc": 0, "end_cyc": 42}
+
+
+def test_summary_slot_throughput():
+    """slot_throughput captures bytes and txn counts per slot."""
+    perf = {
+        "latency": {"transactions": []},
+        "axi_slots": [
+            {"name": "node0.manager", "write_byte_count": 32,
+             "read_byte_count": 32, "write_txn_count": 1, "read_txn_count": 1},
+        ],
+    }
+    s = summarize(perf)
+    assert len(s["slot_throughput"]) == 1
+    assert s["slot_throughput"][0]["bytes_wr"] == 32
+
+
+def test_summary_p95_single():
+    """p95 of a single-element list == that element."""
+    perf = {"latency": {"transactions": [{"latency": 7}]}}
+    s = summarize(perf)
+    assert s["latency"]["p95"] == 7
+
+
+if __name__ == "__main__":
+    # Run without pytest (matches task gate requirement).
+    tests = [
+        test_summary_computes_p95,
+        test_summary_mean,
+        test_summary_max,
+        test_summary_injection_tag,
+        test_summary_empty_txns,
+        test_summary_window_passthrough,
+        test_summary_slot_throughput,
+        test_summary_p95_single,
+    ]
+    passed = failed = 0
+    for t in tests:
+        try:
+            t()
+            print(f"PASS  {t.__name__}")
+            passed += 1
+        except AssertionError as e:
+            print(f"FAIL  {t.__name__}: {e}")
+            failed += 1
+    print(f"\n{passed}/{passed+failed} tests passed")
+    sys.exit(1 if failed else 0)

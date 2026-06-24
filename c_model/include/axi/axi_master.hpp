@@ -284,6 +284,20 @@ class AxiMasterT {
                     txn.data_file, static_cast<std::size_t>(txn.len + 1u) * (1ull << txn.size));
                 op.strb_per_beat =
                     load_strb_file_(txn.strb_file, static_cast<std::size_t>(txn.len + 1u));
+                // RAW guard: register the write's address range at admission time
+                // (not at AW-push time) so the guard is active before any AR from
+                // a later same-tick-admitted read can be presented on the wire.
+                // Registering at AW-push is one tick late: `tick_admit` runs before
+                // `tick_push_aw_w_`, so a simultaneously admitted read reaches
+                // `tick_push_ar_` in the same tick with an empty outstanding_write_ranges_
+                // and arvalid goes high — a spurious AR that the downstream captures
+                // before the write even hits the network.
+                {
+                    const uint64_t w_addr = txn.addr & ~((1ull << txn.size) - 1);
+                    const uint64_t w_bytes =
+                        (static_cast<uint64_t>(txn.len) + 1u) << txn.size;
+                    outstanding_write_ranges_.emplace_back(w_addr, w_bytes);
+                }
                 active_write_ops_[txn.id].push_back(std::move(op));
                 ++active_write_count_;
             } else {
@@ -484,14 +498,6 @@ class AxiMasterT {
                 if (!slave_.push_aw(aw)) return op.write_request_done();
                 ++op.next_aw_sub_idx_;
                 if (first_aw) {
-                    // RAW guard: register the write's address range so reads to
-                    // overlapping addresses are held until B arrives. Range covers
-                    // all beats of the ORIGINAL (user-level) transaction so the
-                    // guard works even when split into multiple sub-bursts.
-                    const uint64_t w_addr = op.src_txn.addr & ~((1ull << op.src_txn.size) - 1);
-                    const uint64_t w_bytes = (static_cast<uint64_t>(op.src_txn.len) + 1u)
-                                             << op.src_txn.size;
-                    outstanding_write_ranges_.emplace_back(w_addr, w_bytes);
                     for (auto& cb : iwcb_)
                         cb(IssueInfo{true, id, op.src_txn.scenario_line, op.src_txn.addr,
                                      op.src_txn.size, op.src_txn.len, op.src_txn.burst});
