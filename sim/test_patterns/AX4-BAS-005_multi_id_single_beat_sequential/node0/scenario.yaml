@@ -11,56 +11,56 @@ config:
   max_outstanding_read: 1
 transactions:
 - op: write
-  addr: 4096
+  addr: 73014448128
   id: 0
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_aa.txt
 - op: write
-  addr: 4128
+  addr: 73014449152
   id: 1
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_bb.txt
 - op: write
-  addr: 4160
+  addr: 73014450176
   id: 2
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_aa.txt
 - op: write
-  addr: 4192
+  addr: 73014451200
   id: 3
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_bb.txt
 - op: read
-  addr: 4096
+  addr: 73014448128
   id: 0
   len: 0
   size: 5
   burst: INCR
   dump_file: ../unused
 - op: read
-  addr: 4128
+  addr: 73014449152
   id: 1
   len: 0
   size: 5
   burst: INCR
   dump_file: ../unused
 - op: read
-  addr: 4160
+  addr: 73014450176
   id: 2
   len: 0
   size: 5
   burst: INCR
   dump_file: ../unused
 - op: read
-  addr: 4192
+  addr: 73014451200
   id: 3
   len: 0
   size: 5

@@ -32,6 +32,11 @@ sim/*/output/
 # Legacy run-output location
 sim/output/
 
+# Generated per-node scenario variants (node2+ created by gen_test_patterns at runtime;
+# node0/node1 are the committed curated-subset gate markers and stay tracked).
+sim/test_patterns/*/node[2-9]/
+sim/test_patterns/*/node1[0-9]/
+
 # Generated tb_top filelists (regenerated from build_config.mk's TB_TOP_SV_SRC
 # by both sim flows; bakes in host-absolute paths so they must not be committed)
 sim/filelist_*.f

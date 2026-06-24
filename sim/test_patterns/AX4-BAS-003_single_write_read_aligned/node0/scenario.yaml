@@ -9,14 +9,14 @@ config:
   read_latency: 1
 transactions:
 - op: write
-  addr: 4096
+  addr: 73014448128
   id: 5
   len: 0
   size: 5
   burst: INCR
   data_file: ../data.txt
 - op: read
-  addr: 4096
+  addr: 73014448128
   id: 5
   len: 0
   size: 5

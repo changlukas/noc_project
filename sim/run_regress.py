@@ -4,12 +4,13 @@ Replaces the retired ctest test_cosim_integration.cpp (sim != test: co-sim is a
 simulation regression, run here, not in the C++ ctest suite).
 
 Topology-aware: $TOPOLOGY (default mesh_4x4_vc1) selects the node count and the
-per-topology Vtb_top binary (build/verilator/obj_dir_<TOPOLOGY>/Vtb_top). A 2-node
-topology uses the committed node0/node1 variant dirs; an N>2 topology materializes
-node0..node<N-1> coordinate variants on the fly from each pattern's base
-scenario.yaml via gen_coordinate_scenarios.py, then drives all N +scenario_node<i>
-plusargs. Either way the run is non-vacuous: every node both sends and receives,
-and the PASS guard inside tb_top asserts master_count == N and reads_checked >= N."""
+per-topology Vtb_top binary (build/verilator/obj_dir_<TOPOLOGY>/Vtb_top).
+Materializes node0..node<N-1> neighbor-pattern variants on the fly from each
+pattern's base scenario.yaml via gen_test_patterns.py, then drives all N
++scenario_node<i> plusargs.  Patterns without committed node0/node1 dirs (the
+curated bidirectional subset) are skipped.  Every run is non-vacuous: every node
+both sends and receives, and the PASS guard inside tb_top asserts
+master_count == N and reads_checked >= N."""
 import os
 import subprocess
 import sys
@@ -18,7 +19,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent          # repo root
 PATTERNS = ROOT / "sim" / "test_patterns"
-COORD_GEN = ROOT / "sim" / "tools" / "gen_coordinate_scenarios.py"
+GEN_TEST_PATTERNS = ROOT / "sim" / "tools" / "gen_test_patterns.py"
 PASS = "PASS: scenario complete, scoreboard clean"
 
 TOPOLOGY = os.environ.get("TOPOLOGY", "mesh_4x4_vc1")
@@ -42,27 +43,25 @@ def node_count(topology: str) -> int:
 def node_scenarios(scn_dir: Path, n: int, out_dir: Path):
     """Return the list of per-node scenario.yaml paths, or None to skip.
 
-    The validated bidirectional subset is encoded by the presence of committed
-    node0/node1 dirs (the patterns the 2-node co-sim runs). A pattern WITHOUT
-    those dirs is skipped for every topology, so N>2 stays on the same curated,
-    clean write->read subset rather than forcing every pattern (write-only,
-    OOB-DECERR, extreme-outstanding) through a multi-hop ring.
+    Curated bidirectional subset: patterns with committed node0/node1 dirs.
+    Patterns without those dirs (write-only, OOB-DECERR, extreme-outstanding)
+    are skipped so only the clean write->read subset runs multi-hop.
 
-    2-node uses the committed node0/node1 dirs unchanged; N>2 materializes
-    node0..node<N-1> coordinate variants from the base scenario.yaml.
+    Materializes all N variants from the base scenario.yaml via gen_test_patterns
+    (neighbor pattern).
     """
     if not all((scn_dir / f"node{i}" / "scenario.yaml").exists() for i in range(2)):
         return None  # not in the validated bidirectional subset
-    if n == 2:
-        return [scn_dir / f"node{i}" / "scenario.yaml" for i in range(2)]
     base = scn_dir / "scenario.yaml"
     if not base.exists():
         return None
-    coord = out_dir / "coord"
-    coord.mkdir(parents=True, exist_ok=True)
-    subprocess.run([sys.executable, str(COORD_GEN), str(base), str(coord),
-                    "--topology", TOPOLOGY], check=True)
-    return [coord / f"node{i}" / "scenario.yaml" for i in range(n)]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    subprocess.run([sys.executable, str(GEN_TEST_PATTERNS),
+                    "--from", str(base),
+                    "--pattern", "neighbor",
+                    "--topology", TOPOLOGY,
+                    "--out", str(out_dir)], check=True)
+    return [out_dir / f"node{i}" / "scenario.yaml" for i in range(n)]
 
 
 def main():

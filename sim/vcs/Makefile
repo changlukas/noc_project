@@ -178,14 +178,14 @@ SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 
 # tb_top requires one +scenario_node<i> plusarg per node (its all-node guard
-# $finish(1)s otherwise). Materialize the active topology's N coordinate variants
-# with gen_coordinate_scenarios.py --topology $(TOPOLOGY), then pass every
-# +scenario_node<i>= (built by a shell loop over the emitted node dirs). Mirrors
-# sim/verilator/Makefile + sim/run_regress.py. PYTHON3 must have PyYAML — on a
-# host where an EDA tool shadows a broken python3 on PATH, pin it in local.mk:
-#   PYTHON3 := /usr/bin/python3.12
-PYTHON3   ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
-COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
+# $finish(1)s otherwise). Materialize all N neighbor-pattern variants from the
+# base scenario.yaml via gen_test_patterns.py --pattern neighbor --topology $(TOPOLOGY),
+# then pass every +scenario_node<i>= (built by a shell loop over the emitted node
+# dirs). Mirrors sim/verilator/Makefile + sim/run_regress.py. PYTHON3 must have
+# PyYAML — on a host where an EDA tool shadows a broken python3 on PATH, pin it
+# in local.mk:  PYTHON3 := /usr/bin/python3.12
+PYTHON3           ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
+GEN_TEST_PATTERNS := $(COSIM_ROOT)/tools/gen_test_patterns.py
 
 # Per-topology simv + csrc dir (mirrors the Verilator obj_dir_$(TOPOLOGY)
 # isolation): building one topology must not clobber another's binary.
@@ -205,7 +205,8 @@ tb_top: $(SIMV_TB_TOP)
 run-tb-top: $(SIMV_TB_TOP)
 	@mkdir -p output/$(SCENARIO)
 	@rm -f output/$(SCENARIO)/tb_top.fsdb  # drop stale fsdb from a previous FSDB=1 run
-	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord" --topology $(TOPOLOGY)
+	@$(PYTHON3) $(GEN_TEST_PATTERNS) --from "$(SCENARIO_ABS)" --pattern neighbor \
+	    --topology $(TOPOLOGY) --out "output/$(SCENARIO)/coord"
 	@set -o pipefail; \
 	scn_args=(); \
 	for d in output/$(SCENARIO)/coord/node*/; do \

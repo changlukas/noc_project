@@ -152,19 +152,20 @@ SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 
 # tb_top requires one +scenario_node<i> plusarg per node (its all-node guard
-# $finish(1)s otherwise). Materialize the active topology's N coordinate variants
-# into output/$(SCENARIO)/coord/node0..node<N-1>/ via gen_coordinate_scenarios.py
-# --topology $(TOPOLOGY), then pass every +scenario_node<i>= (built by a shell
-# loop over the emitted node dirs). Mirrors sim/run_regress.py's N-node logic.
+# $finish(1)s otherwise). Materialize all N neighbor-pattern variants from the
+# base scenario.yaml via gen_test_patterns.py --pattern neighbor --topology $(TOPOLOGY),
+# then pass every +scenario_node<i>= (built by a shell loop over the emitted node dirs).
+# Mirrors sim/run_regress.py's N-node logic.
 # The regression runner (sim/run_regress.py, via make sim-regress) builds its own
 # command and does not use this target.
-COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
+GEN_TEST_PATTERNS := $(COSIM_ROOT)/tools/gen_test_patterns.py
 
 .PHONY: run-tb-top
 run-tb-top: $(TBTOP_EXE)
 	@mkdir -p output/$(SCENARIO)
 	@echo "running scenario $(SCENARIO) on $(TOPOLOGY); output -> output/$(SCENARIO)/"
-	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord" --topology $(TOPOLOGY)
+	@$(PYTHON3) $(GEN_TEST_PATTERNS) --from "$(SCENARIO_ABS)" --pattern neighbor \
+	    --topology $(TOPOLOGY) --out "output/$(SCENARIO)/coord"
 	@scn_args=(); \
 	for d in output/$(SCENARIO)/coord/node*/; do \
 	    i=$$(basename "$$d" | sed 's/^node//'); \

@@ -22,7 +22,8 @@ Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
     - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
     - per-node plusarg names (+scenario_node<i>), scenario strings, ctx handles
-    - master at node k drives the NEXT node's variant (circular ring, crosses links)
+    - master at node k uses node k's scenario (identity pairing); addr bit 32+
+      encodes the destination tile (neighbor or any address-driven dst)
     - inter-router links wired per XY direction; boundary directions tied off
     - PASS guard: cmodel_master_count() == len(nodes) AND reads_checked() >= len(nodes)
 
@@ -359,9 +360,8 @@ def emit_tb_top(topo: dict) -> str:
     n = len(nodes)
     num_vc = topo["topology"]["num_vc"]
 
-    # Ring traffic: node i's master is fed node (i+1)%n's coordinate scenario, so
-    # its destination is node (i+1)%n. The slave that ejects that traffic lives at
-    # node (i+1)%n. coord_id stamps src_id (response routing back to originator).
+    # Identity pairing: master_i / slave_i both use scn_node{i}.
+    # Destination is encoded in addr bits 32+ by the scenario generator (gen_test_patterns).
     coord_id = {i: c for (i, _x, _y, c) in nodes}
 
     lines = []
@@ -377,8 +377,8 @@ def emit_tb_top(topo: dict) -> str:
     w("// node, joined by directional links). tb_top creates the DPI handles, attaches a")
     w("// user_node_endpoint (test master_wrap + slave_wrap + perf monitors) to each")
     w("// node's master/slave AXI faces, and owns the scoreboard exit logic.")
-    w("// Variant->instance pairing: master at node k is fed node (k+1)'s coordinate")
-    w("// scenario, so traffic crosses the fabric to node (k+1) and ejects there.")
+    w("// Identity pairing: master/slave at node k both use scn_node{k}. Destination")
+    w("// is address-driven: addr bit 32+ encodes the dst tile (set by gen_test_patterns).")
     w("//")
     w("// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).")
     w(f"// Plusargs +scenario_node0=<path> ... +scenario_node{n-1}=<path> kick off the run.")
@@ -439,12 +439,7 @@ def emit_tb_top(topo: dict) -> str:
 
     # Per-node scenario strings + ctx handles.
     for (i, x, y, c) in nodes:
-        tag = ""
-        if i == 0:
-            tag = "  // node0 variant (low addr); drives node1.master"
-        elif i == n - 1:
-            tag = f"  // node{n-1} variant (high addr); drives node0.master"
-        w(f"    string  scn_node{i};{tag}")
+        w(f"    string  scn_node{i};")
     for (i, _x, _y, _c) in nodes:
         w(f"    longint unsigned router{i}_ctx, m{i}_ctx, s{i}_ctx, n{i}_nmu_ctx, n{i}_nsu_ctx;")
     w("")
@@ -470,13 +465,11 @@ def emit_tb_top(topo: dict) -> str:
     for (i, x, y, _c) in nodes:
         w(f'        router{i}_ctx = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
-    # Per-node master/slave/nmu/nsu creates. master at node i -> dest (i+1)%n.
+    # Per-node master/slave/nmu/nsu creates. Identity pairing: master_i/slave_i <- scn_node{i}.
     for (i, x, y, c) in nodes:
-        dest = (i + 1) % n
-        w(f"        // node{i}.master -> node{dest}-variant (dst coord {coord_id[dest]}); "
-          f"ejects at node{dest}.NSU.")
-        w(f'        m{i}_ctx     = cmodel_master_create("master_{i}", scn_node{dest});')
-        w(f'        s{dest}_ctx     = cmodel_slave_create ("slave_{dest}",  scn_node{dest});')
+        w(f"        // node{i}: master and slave both use scn_node{i}; dst encoded in addr bits 32+.")
+        w(f'        m{i}_ctx     = cmodel_master_create("master_{i}", scn_node{i});')
+        w(f'        s{i}_ctx     = cmodel_slave_create ("slave_{i}",  scn_node{i});')
         w(f'        n{i}_nmu_ctx = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC);  '
           f'// src_id = node{i} coord {c}')
         w(f'        n{i}_nsu_ctx = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC);')
