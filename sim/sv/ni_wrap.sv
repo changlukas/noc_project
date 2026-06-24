@@ -17,8 +17,8 @@
 `ifndef NI_WRAP_SV
 `define NI_WRAP_SV
 
-`include "nmu_wrap.sv"
-`include "nsu_wrap.sv"
+// nmu_wrap / nsu_wrap are provided by the filelist (build_config.mk TB_TOP_SV_SRC,
+// listed before ni_wrap.sv); no in-file `include needed.
 
 module ni_wrap #(
     parameter int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT,

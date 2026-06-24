@@ -54,7 +54,7 @@ module user_node_endpoint #(
     );
 
     axi_perf_monitor #(
-        .SLOT_NAME(MASTER_SLOT_NAME), .ID_W($bits(master_axi_o.awid))
+        .SLOT_NAME(MASTER_SLOT_NAME), .ID_W(ID_WIDTH)
     ) u_perf_man (
         .clk_i, .rst_ni,
         .awvalid(master_axi_o.awvalid), .awready(master_axi_o.awready),
@@ -71,7 +71,7 @@ module user_node_endpoint #(
     );
 
     axi_perf_monitor #(
-        .SLOT_NAME(SLAVE_SLOT_NAME), .ID_W($bits(slave_axi_i.awid))
+        .SLOT_NAME(SLAVE_SLOT_NAME), .ID_W(ID_WIDTH)
     ) u_perf_sub (
         .clk_i, .rst_ni,
         .awvalid(slave_axi_i.awvalid), .awready(slave_axi_i.awready),
