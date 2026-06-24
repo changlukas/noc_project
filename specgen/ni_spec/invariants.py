@@ -249,6 +249,35 @@ def check_protocol_rules_id_uniqueness(rule_spec) -> List[Issue]:
     return issues
 
 
+def check_mesh_within_flit(packet_spec, constants) -> List[Issue]:
+    """L2: mesh dims must fit flit dst_id / vc_id field capacity (spec 2026-06-24 sec 3).
+
+    Flit field widths are read from packet_spec["flit"]["field_widths"] (int values).
+    Mesh/VC params are read from constants["noc"][name]["default"] (constants.yaml shape).
+    DST_ID capacity = X_WIDTH + Y_WIDTH (dst_id width_param is "X_WIDTH + Y_WIDTH").
+    """
+    TAG = "L2-MESH-FLIT"
+    issues: List[Issue] = []
+    fw = packet_spec["flit"]["field_widths"]
+    x_w = int(fw["X_WIDTH"])
+    y_w = int(fw["Y_WIDTH"])
+    vc_w = int(fw["VC_ID_WIDTH"])
+    noc = constants["noc"]
+    mx = int(noc["MESH_X_DIM"]["default"])
+    my = int(noc["MESH_Y_DIM"]["default"])
+    nvc = int(noc["NUM_VC"]["default"])
+    dst_w = x_w + y_w
+    if mx > (1 << x_w):
+        issues.append(_err(TAG, f"MESH_X_DIM {mx} > 2^X_WIDTH {1 << x_w}"))
+    if my > (1 << y_w):
+        issues.append(_err(TAG, f"MESH_Y_DIM {my} > 2^Y_WIDTH {1 << y_w}"))
+    if mx * my > (1 << dst_w):
+        issues.append(_err(TAG, f"MESH_X_DIM*MESH_Y_DIM {mx * my} > 2^DST_ID_WIDTH {1 << dst_w}"))
+    if nvc > (1 << vc_w):
+        issues.append(_err(TAG, f"NOC_NUM_VC {nvc} > 2^VC_ID_WIDTH {1 << vc_w}"))
+    return issues
+
+
 def check_all(bundle, md_dir: Optional[str] = None) -> List[Issue]:
     """跑 Layer 1 (schema) + Layer 2 (arithmetic) 對 hand-edited JSON spec。
 
@@ -259,4 +288,6 @@ def check_all(bundle, md_dir: Optional[str] = None) -> List[Issue]:
     issues: List[Issue] = []
     issues += check_schema(bundle.packet, bundle.packet_schema)
     issues += check_flit_arithmetic(bundle.packet)
+    if bundle.constants is not None:
+        issues += check_mesh_within_flit(bundle.packet, bundle.constants)
     return issues

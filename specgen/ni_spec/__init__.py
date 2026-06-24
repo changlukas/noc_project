@@ -10,6 +10,7 @@ from .invariants import (
     Issue,
     check_schema,
     check_flit_arithmetic,
+    check_mesh_within_flit,
     check_all,
 )
 from .report import n_err, n_warn, print_report
@@ -23,6 +24,7 @@ __all__ = [
     "Issue",
     "check_schema",
     "check_flit_arithmetic",
+    "check_mesh_within_flit",
     "check_all",
     "n_err",
     "n_warn",
