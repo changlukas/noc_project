@@ -76,6 +76,45 @@ def emit_tb_top(topo: dict) -> str:
     n = len(nodes)
     ids = [_node_id(x, y, x_dim) for x, y in nodes]  # src_id per node
 
+    # S0 scope guard: only the 2-node line is supported. router_wrap exposes a
+    # single inter-router link port pair; topologies where any node needs more
+    # than one inter-router link require directional N/E/S/W ports (Task 7).
+    if (x_dim, y_dim) != (2, 1):
+        sys.exit("gen_tb_top: topology needs directional N/E/S/W ports — "
+                 "not supported until Task 7; S0 supports the 2-node line only")
+
+    # ------------------------------------------------------------------
+    # Explicit per-node mapping (no modular arithmetic at emit time).
+    # Each node i owns:
+    #   - a master fed the NEXT node's scenario (traffic crosses the link)
+    #   - a SLAVE that ejects the traffic the master sent — that slave lives at
+    #     the destination node (next_i), is named slave_{next_i}, wired to bus
+    #     nsu_slave_axi_{next_i}, and its ctx handle is created in node i's
+    #     initial block (s{i}_ctx).
+    # slave_map[j] records, for the slave instance at node j, the (ctx_var, bus,
+    # scenario) triple so the instance section states name→ctx→bus together
+    # rather than re-deriving the alias.
+    masters = []   # list of dicts, one per node, in node order
+    slave_map = {}  # slave node index -> dict(ctx_var, bus, scenario, owner)
+    for i in ids:
+        next_i = (i + 1) % n
+        _, m_ctx, s_ctx, nmu_ctx, nsu_ctx = _ctx_vars(i)
+        masters.append({
+            "node": i,
+            "m_ctx": m_ctx,
+            "nmu_ctx": nmu_ctx,
+            "nsu_ctx": nsu_ctx,
+            "scenario": _scenario_var(next_i),
+            "dest": next_i,
+        })
+        # The slave that receives node i's master traffic is at node next_i.
+        slave_map[next_i] = {
+            "ctx_var": s_ctx,                       # created in node i's block
+            "bus": f"nsu_slave_axi_{next_i}",       # AXI bus at the dest node
+            "scenario": _scenario_var(next_i),      # dest-range scenario
+            "owner": i,                             # initial-block that creates it
+        }
+
     lines = []
     w = lines.append
 
@@ -125,6 +164,7 @@ def emit_tb_top(topo: dict) -> str:
     w("    localparam int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
+    # TODO(Task 5): drive the NUM_VC localparam from topology num_vc
     w("    localparam int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT;")
     w("    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT;")
     w("    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;")
@@ -200,29 +240,21 @@ def emit_tb_top(topo: dict) -> str:
         r_ctx = _ctx_vars(i)[0]
         w(f'        {r_ctx} = cmodel_router_create("router_{i}", {x});')
 
-    # Per-node: master drives NEXT node's scenario, slave receives NEXT node's scenario
-    # For node k: master/slave use scenario of node (k+1) % n
-    for i in ids:
-        next_i = (i + 1) % n
-        prev_i = (i - 1) % n
-        _, m_ctx, s_ctx, nmu_ctx, nsu_ctx = _ctx_vars(i)
-        scn_for_master = _scenario_var(next_i)
-        scn_for_slave = _scenario_var(next_i)
-        # Comment explaining cross-link routing
-        w(f"        // node{i}.master drives node{next_i}-variant (targets node{next_i}); ejects at node{next_i}.NSU.")
-        w(f'        {m_ctx}     = cmodel_master_create("master_{i}", {scn_for_master});')
-        # Slave at next_i will receive this data. But slave index = next_i, not i.
-        # Original pattern: s1_ctx assigned alongside n0 block, s0_ctx alongside n1 block
-        # slave_j gets scn_node_j's variant (same as master that targets it)
-        # Actually in original: s1 gets scn_node1, s0 gets scn_node0
-        # But slave_i node receives traffic from the master at the PREVIOUS node
-        # slave at node i gets scenario_node_i (the scenario whose addresses target node i)
-        scn_for_slave_here = _scenario_var(next_i)
-        w(f'        {s_ctx}     = cmodel_slave_create ("slave_{next_i}",  {scn_for_slave_here});  '
-          f'// node{next_i}.slave: receives node{next_i}-range data')
-        w(f'        {nmu_ctx} = cmodel_nmu_create("nmu_{i}", {i});                '
+    # Per-node creates, emitted from the explicit `masters` map. Each node i:
+    #   - master fed the dest node's scenario (traffic crosses the link)
+    #   - slave_{dest} created here (its ctx lives in node i's block); the slave
+    #     INSTANCE is emitted later from slave_map, stating name→ctx→bus together.
+    for m in masters:
+        i = m["node"]
+        dest = m["dest"]
+        s = slave_map[dest]
+        w(f"        // node{i}.master drives node{dest}-variant (targets node{dest}); ejects at node{dest}.NSU.")
+        w(f'        {m["m_ctx"]}     = cmodel_master_create("master_{i}", {m["scenario"]});')
+        w(f'        {s["ctx_var"]}     = cmodel_slave_create ("slave_{dest}",  {s["scenario"]});  '
+          f'// node{dest}.slave: receives node{dest}-range data')
+        w(f'        {m["nmu_ctx"]} = cmodel_nmu_create("nmu_{i}", {i});                '
           f'// src_id = node{i} coordinate')
-        w(f'        {nsu_ctx} = cmodel_nsu_create("nsu_{i}", {i});')
+        w(f'        {m["nsu_ctx"]} = cmodel_nsu_create("nsu_{i}", {i});')
 
     w("    end")
     w("")
@@ -286,31 +318,15 @@ def emit_tb_top(topo: dict) -> str:
         w(f"        .noc_miso_i(node{i}_nsu.miso), .axi_o(nsu_slave_axi_{i}.master)")
         w(f"    );")
         w(f"")
-        # Slave for node i receives data targeted at node i — that slave was created
-        # in node PREV's block but it uses nsu_slave_axi_{next_i} and s_ctx from node i
-        # Actually the slave at node NEXT_I gets s_ctx from node I's block.
-        # So slave instance u_slave_{next_i} uses s{i}_ctx and nsu_slave_axi_{next_i}
-        # Wait — let me re-read the original carefully.
-        # Original:
-        #   s1_ctx = slave_create("slave_1", scn_node1)  -- in node0 block
-        #   s0_ctx = slave_create("slave_0", scn_node0)  -- in node1 block
-        #   u_slave_0 uses s0_ctx, nsu_slave_axi_0
-        #   u_slave_1 uses s1_ctx, nsu_slave_axi_1
-        # So slave instance {j} uses s_ctx from PREVIOUS node's block.
-        # In the loop: node i's block creates slave_{next_i} → s{i}_ctx
-        # u_slave_{next_i} uses s{i}_ctx. So the slave instance is in the NEXT node's section.
-        # This creates a mismatch in the structure if we emit slave in each node's section.
-        # Simplest: emit slave instance at the node that RECEIVES (not the block that creates it).
-        # But slave index = next_i, so slave instance u_slave_{next_i} must use s{i}_ctx.
-        # We need to track which s_ctx maps to which slave index.
-        # Slave j gets s_{(j-1)%n}_ctx (where (j-1)%n is the node whose block created it).
-        prev_of_next = (next_i - 1) % n
-        s_ctx_for_slave = _ctx_vars(prev_of_next)[2]  # s_ctx of prev node = current i node
+        # Slave instance lives at node next_i (the destination of node i's master
+        # traffic). Its name, ctx, and AXI bus come from slave_map[next_i] — stated
+        # together, no modular re-derivation.
+        slv = slave_map[next_i]
         w(f"    axi_slave_wrap #(")
         w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)")
         w(f"    ) u_slave_{next_i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i({s_ctx_for_slave}), "
-          f".axi_i(nsu_slave_axi_{next_i}.slave)")
+        w(f'        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i({slv["ctx_var"]}), '
+          f'.axi_i({slv["bus"]}.slave)')
         w(f"    );")
         w(f"")
 
