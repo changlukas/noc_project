@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate sim/filelist.f with Windows-native absolute paths.
+"""Generate sim/filelist_<TOPOLOGY>.f with Windows-native absolute paths.
 
 Verilator under MSYS2 Perl does not accept /e/05_... POSIX drive paths
 in -f filelists (treats them as module names rather than file paths).

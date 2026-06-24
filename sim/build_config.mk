@@ -2,8 +2,9 @@
 # sim/verilator/Makefile and sim/vcs/Makefile. Contains make-evaluated
 # variables, conditional logic, and genamba source lists.
 #
-# tb_top SV sources live in sim/filelist.f (generated from TB_TOP_SV_SRC
-# below); both Makefiles use -f filelist.f for the tb_top verilate/compile step.
+# tb_top SV sources live in sim/filelist_<TOPOLOGY>.f (generated from
+# TB_TOP_SV_SRC below); both Makefiles use -f filelist_<TOPOLOGY>.f for the
+# tb_top verilate/compile step.
 #
 # COSIM_ROOT is derived from this file's own location so any includer depth
 # works.
@@ -64,9 +65,9 @@ endif
 endif
 
 # --- tb_top sim ---
-# TB_TOP_SV_SRC is consumed by the filelist.f generation recipe below and by
-# VCS (via -f filelist.f). Paths are relative to COSIM_ROOT so the variable
-# stays readable; gen_filelist.py absolutizes them.
+# TB_TOP_SV_SRC is consumed by the filelist_<TOPOLOGY>.f generation recipe below
+# and by VCS (via -f filelist_<TOPOLOGY>.f). Paths are relative to COSIM_ROOT so
+# the variable stays readable; gen_filelist.py absolutizes them.
 # TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
 # (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
 TB_TOP_SV = $(COSIM_ROOT)/sv/tb_top_$(TOPOLOGY).sv

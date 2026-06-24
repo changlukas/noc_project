@@ -9,7 +9,7 @@ TOPOLOGY ?= mesh_4x4_vc1
 
 # Build environment config, include dirs, and genamba source lists are shared
 # with sim/vcs/Makefile via sim/build_config.mk. tb_top SV sources are in
-# sim/filelist.f (generated from TB_TOP_SV_SRC in build_config.mk).
+# sim/filelist_<TOPOLOGY>.f (generated from TB_TOP_SV_SRC in build_config.mk).
 # BUILD_ROOT (top-level build/) also comes from build_config.mk; all Verilator
 # artifacts land under $(BUILD_ROOT)/verilator/, run logs under ./output/.
 include ../build_config.mk
@@ -151,20 +151,26 @@ $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-ya
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 
-# tb_top is now bidirectional: it needs two coordinate-variant plusargs
-# (node0 = identity / low addr, node1 = +0x1_0000_0000 / coordinate (1,0)).
-# Generate the variants for $(SCENARIO) into output/$(SCENARIO)/coord/ then
-# pass +scenario_node0/+scenario_node1. The regression runner (sim/run_regress.py,
-# invoked via make sim-regress) builds its own command and does not use this target.
+# tb_top requires one +scenario_node<i> plusarg per node (its all-node guard
+# $finish(1)s otherwise). Materialize the active topology's N coordinate variants
+# into output/$(SCENARIO)/coord/node0..node<N-1>/ via gen_coordinate_scenarios.py
+# --topology $(TOPOLOGY), then pass every +scenario_node<i>= (built by a shell
+# loop over the emitted node dirs). Mirrors sim/run_regress.py's N-node logic.
+# The regression runner (sim/run_regress.py, via make sim-regress) builds its own
+# command and does not use this target.
 COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
 
 .PHONY: run-tb-top
 run-tb-top: $(TBTOP_EXE)
 	@mkdir -p output/$(SCENARIO)
-	@echo "running scenario $(SCENARIO); output -> output/$(SCENARIO)/"
-	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord"
-	@$(TBTOP_EXE) "+scenario_node0=output/$(SCENARIO)/coord/node0/scenario.yaml" \
-	    "+scenario_node1=output/$(SCENARIO)/coord/node1/scenario.yaml" \
+	@echo "running scenario $(SCENARIO) on $(TOPOLOGY); output -> output/$(SCENARIO)/"
+	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord" --topology $(TOPOLOGY)
+	@scn_args=(); \
+	for d in output/$(SCENARIO)/coord/node*/; do \
+	    i=$$(basename "$$d" | sed 's/^node//'); \
+	    scn_args+=("+scenario_node$$i=$$d""scenario.yaml"); \
+	done; \
+	$(TBTOP_EXE) "$${scn_args[@]}" \
 	    "+perf_out=output/$(SCENARIO)/perf.json" \
 	    "+perf_scenario=$(SCENARIO)" \
 	    > output/$(SCENARIO)/run.log 2>&1; \

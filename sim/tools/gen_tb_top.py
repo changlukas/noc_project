@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Generate sim/sv/tb_top.sv + sim/sv/noc_fabric_<topo>.sv from a topology config.
+"""Generate sim/sv/tb_top_<topology>.sv + sim/sv/noc_fabric_<topo>.sv from a topology config.
 
 The fabric/tb split (S3):
   - noc_fabric_<topo>.sv : N nodes, each = NMU + REQ/RSP router_wrap + NSU, joined
     by inter-router directional (N/E/S/W) links with boundary tie-off + assertion.
     Every node exposes a clean per-node AXI port (master-side + slave-side). The
     DPI `ctx` handles arrive as PORTS — the fabric itself does no cmodel_*_create.
-  - tb_top.sv : clk/rst, plusargs, cmodel_*_create (incl. router/nmu/nsu/master/
-    slave ctx), instantiates the fabric, attaches test master_wrap/slave_wrap +
-    AXI perf monitors + scoreboard exit logic.
+  - tb_top_<topology>.sv : clk/rst, plusargs, cmodel_*_create (incl. router/nmu/nsu/
+    master/slave ctx), instantiates the fabric, attaches test master_wrap/slave_wrap
+    + AXI perf monitors + scoreboard exit logic.
 
 Generated artifacts: edit the generator or the topology YAML, never the emitted
-.sv directly. tb_top.sv includes the fabric (SV `include), so the fabric is
-compiled via the existing -I sim/sv include path (no build_config.mk edit needed).
+.sv directly. tb_top_<topology>.sv includes the fabric (SV `include), so the fabric
+is compiled via the existing -I sim/sv include path (no build_config.mk edit needed).
 
 Usage:
     python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/sv/tb_top_<topology>.sv]

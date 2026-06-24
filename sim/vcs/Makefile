@@ -1,6 +1,6 @@
 # VCS build for the cosim testbenches. Source lists are shared with the
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
-# Topology used to generate tb_top.sv. Override to switch topologies.
+# Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
 # Build artifacts land under $(BUILD_ROOT)/vcs/ (top-level build/), run logs
 # under ./output/.
@@ -47,9 +47,9 @@ include ../build_config.mk
 
 VCS_BUILD := $(BUILD_ROOT)/vcs
 
-# FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist.f is a
-# generated artifact (gitignored): VCS regenerates it itself (recipe below) so a
-# standalone `cd sim/vcs && make` works on a fresh clone where the .f is absent.
+# FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<TOPOLOGY>.f
+# is a generated artifact (gitignored): VCS regenerates it itself (recipe below) so
+# a standalone `cd sim/vcs && make` works on a fresh clone where the .f is absent.
 
 # --- FSDB waveform dumping (opt-in; Verdi PLI, workstation only) -------------
 # FSDB=1 compiles a separate simv with +define+FSDB_DUMP and the Verdi PLI
@@ -177,20 +177,24 @@ run-genamba: $(SIMV_GENAMBA)
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 
-# tb_top is bidirectional: it needs two coordinate-variant scenarios passed as
-# +scenario_node0 / +scenario_node1 (mirrors sim/verilator/Makefile). Generate
-# them with gen_coordinate_scenarios.py first. PYTHON3 must have PyYAML — on a
+# tb_top requires one +scenario_node<i> plusarg per node (its all-node guard
+# $finish(1)s otherwise). Materialize the active topology's N coordinate variants
+# with gen_coordinate_scenarios.py --topology $(TOPOLOGY), then pass every
+# +scenario_node<i>= (built by a shell loop over the emitted node dirs). Mirrors
+# sim/verilator/Makefile + sim/run_regress.py. PYTHON3 must have PyYAML — on a
 # host where an EDA tool shadows a broken python3 on PATH, pin it in local.mk:
 #   PYTHON3 := /usr/bin/python3.12
 PYTHON3   ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 COORD_GEN := $(COSIM_ROOT)/tools/gen_coordinate_scenarios.py
 
-SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top$(FSDB_SUFFIX)
+# Per-topology simv + csrc dir (mirrors the Verilator obj_dir_$(TOPOLOGY)
+# isolation): building one topology must not clobber another's binary.
+SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)$(FSDB_SUFFIX)
 
 $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_tb_top$(FSDB_SUFFIX) \
+	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)$(FSDB_SUFFIX) \
 	    -top tb_top \
 	    -f $(FILELIST_F) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)
@@ -201,11 +205,15 @@ tb_top: $(SIMV_TB_TOP)
 run-tb-top: $(SIMV_TB_TOP)
 	@mkdir -p output/$(SCENARIO)
 	@rm -f output/$(SCENARIO)/tb_top.fsdb  # drop stale fsdb from a previous FSDB=1 run
-	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord"
+	@$(PYTHON3) $(COORD_GEN) "$(SCENARIO_ABS)" "output/$(SCENARIO)/coord" --topology $(TOPOLOGY)
 	@set -o pipefail; \
+	scn_args=(); \
+	for d in output/$(SCENARIO)/coord/node*/; do \
+	    i=$$(basename "$$d" | sed 's/^node//'); \
+	    scn_args+=("+scenario_node$$i=$$d""scenario.yaml"); \
+	done; \
 	$(SIMV_TB_TOP) \
-	    "+scenario_node0=output/$(SCENARIO)/coord/node0/scenario.yaml" \
-	    "+scenario_node1=output/$(SCENARIO)/coord/node1/scenario.yaml" \
+	    "$${scn_args[@]}" \
 	    "+perf_out=output/$(SCENARIO)/perf.json" \
 	    "+perf_scenario=$(SCENARIO)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
 	    2>&1 | tee output/$(SCENARIO)/run.log

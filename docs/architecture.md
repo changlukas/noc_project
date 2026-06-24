@@ -263,13 +263,15 @@ header instead.
 
 ### Vtb_top binary
 
-The Verilator binary `Vtb_top` is built in `build/verilator/obj_dir/`
-using `--timing`. `tb_top.sv` is self-clocked (clock, reset, and timeout
-are internal); `sim/verilator/main.cpp` is a minimal event-loop entry that
-calls `eval()` and advances time until `$finish`. The same `tb_top.sv` is
-used by VCS (`-top tb_top`); waveforms are captured via VCS/FSDB. Per-run
-correctness is established by the c_model scoreboard (per-transaction
-write->readback data compare) and the model's own internal checks.
+The Verilator binary `Vtb_top` is built per topology in
+`build/verilator/obj_dir_<TOPOLOGY>/` using `--timing`. The generated
+`tb_top_<TOPOLOGY>.sv` is self-clocked (clock, reset, and timeout are
+internal); `sim/verilator/main.cpp` is a minimal event-loop entry that
+calls `eval()` and advances time until `$finish`. The same
+`tb_top_<TOPOLOGY>.sv` is used by VCS (`-top tb_top`); waveforms are
+captured via VCS/FSDB. Per-run correctness is established by the c_model
+scoreboard (per-transaction write->readback data compare) and the model's
+own internal checks.
 
 ---
 
