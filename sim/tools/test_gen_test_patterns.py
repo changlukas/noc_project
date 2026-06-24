@@ -12,10 +12,15 @@ import yaml
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import random
+
 from gen_test_patterns import (  # noqa: E402
+    DST_ID_WIDTH,
     alloc_unique_offset,
     coord_id,
+    hotspot_dsts,
     neighbor_dst,
+    uniform_random_dsts,
 )
 
 
@@ -225,3 +230,230 @@ def test_neighbor_variant_addr_at_dst_coord():
                     f"node{i}: addr={addr:#x} dst_bits={actual_dst} != "
                     f"expected {dst_cid} (neighbor of ({x},{y}) = ({dx},{dy}))"
                 )
+
+
+# ---------------------------------------------------------------------------
+# uniform_random_dsts: ported from booksim2 traffic.cpp:386-390
+# ---------------------------------------------------------------------------
+
+def test_uniform_excludes_self():
+    """uniform_random must never return dst == src (default allow_self=False)."""
+    rng = random.Random(1)
+    n_nodes = 16
+    for src in range(n_nodes):
+        dsts = uniform_random_dsts(src, n_nodes, 200, rng)
+        assert src not in dsts, f"src={src} appeared in its own dst list"
+
+
+def test_uniform_covers_many_dsts():
+    """uniform_random with 200 draws should cover well more than 5 distinct dsts."""
+    rng = random.Random(1)
+    dsts = uniform_random_dsts(5, 16, 200, rng)
+    assert len(set(dsts)) > 5, "uniform_random must cover many distinct destinations"
+
+
+def test_uniform_seeded_reproducible():
+    """Same seed + args must produce identical dst sequence."""
+    dsts_a = uniform_random_dsts(0, 16, 50, random.Random(42))
+    dsts_b = uniform_random_dsts(0, 16, 50, random.Random(42))
+    assert dsts_a == dsts_b
+
+
+def test_uniform_allow_self():
+    """--allow-self: dst == src must be possible."""
+    rng = random.Random(7)
+    found_self = False
+    for _ in range(500):
+        dsts = uniform_random_dsts(0, 2, 1, rng, allow_self=True)
+        if dsts[0] == 0:
+            found_self = True
+            break
+    assert found_self, "allow_self=True should eventually produce dst==src for a 2-node mesh"
+
+
+# ---------------------------------------------------------------------------
+# hotspot_dsts: ported from booksim2 traffic.cpp:506-526
+# ---------------------------------------------------------------------------
+
+def test_hotspot_single_always_returns_hotspot():
+    """Single hotspot: every packet must go to that node (booksim fast path)."""
+    rng = random.Random(1)
+    dsts = hotspot_dsts(src_node=0, n_nodes=16, n_txn=50, rng=rng, hotspots=[7])
+    assert all(d == 7 for d in dsts), "single hotspot must always produce that node"
+
+
+def test_hotspot_concentrates_traffic():
+    """With a single hotspot, traffic is 100% concentrated there regardless of n_txn."""
+    rng = random.Random(99)
+    hotspot = 3
+    dsts = hotspot_dsts(0, 16, 100, rng, hotspots=[hotspot])
+    counts = {d: dsts.count(d) for d in set(dsts)}
+    assert counts[hotspot] == 100
+
+
+def test_hotspot_multi_weighted():
+    """Multi-hotspot: weighted rates should bias distribution accordingly."""
+    rng = random.Random(42)
+    # hotspot 0 has rate 9, hotspot 1 has rate 1 => ~90% to node 0
+    dsts = hotspot_dsts(5, 16, 1000, rng, hotspots=[0, 1], rates=[9, 1])
+    frac_0 = dsts.count(0) / len(dsts)
+    assert frac_0 > 0.80, f"expected ~90% to hotspot 0, got {frac_0:.2%}"
+
+
+def test_hotspot_equal_rates_default():
+    """Default equal rates: both hotspots should each get ~50%."""
+    rng = random.Random(13)
+    dsts = hotspot_dsts(5, 16, 1000, rng, hotspots=[0, 2])
+    frac_0 = dsts.count(0) / len(dsts)
+    assert 0.40 < frac_0 < 0.60, f"expected ~50% to hotspot 0, got {frac_0:.2%}"
+
+
+def test_hotspot_excludes_self_when_hotspot_is_src():
+    """If the hotspot happens to be the source, self-exclusion must re-sample."""
+    rng = random.Random(1)
+    # hotspots=[0] but src=0 → must raise (no valid dst)
+    import pytest
+    with pytest.raises(ValueError, match="could not find a non-self dst"):
+        hotspot_dsts(src_node=0, n_nodes=4, n_txn=1, rng=rng, hotspots=[0])
+
+
+# ---------------------------------------------------------------------------
+# Global write-address uniqueness (uniform_random + synthetic payload)
+# ---------------------------------------------------------------------------
+
+def _gen_all_synthetic(pattern, x_dim, y_dim, txn_per_node, seed,
+                       hotspots=None, rates=None, allow_self=False,
+                       base_local=0x1000, memory_size=None):
+    """Helper: run gen_test_patterns CLI in synthetic mode and return parsed scenarios."""
+    import subprocess
+    import tempfile
+    repo = os.path.abspath(os.path.join(HERE, "..", ".."))
+    topo_name = f"mesh_{x_dim}x{y_dim}_vc1"
+    if memory_size is None:
+        # Use a large enough window for the given load.
+        n_nodes = x_dim * y_dim
+        memory_size = n_nodes * txn_per_node * 0x40 * 2  # 2x headroom
+    with tempfile.TemporaryDirectory(dir=repo) as out:
+        cmd = [
+            sys.executable,
+            os.path.join(HERE, "gen_test_patterns.py"),
+            "--pattern", pattern,
+            "--topology", topo_name,
+            "--out", out,
+            "--transactions-per-node", str(txn_per_node),
+            "--seed", str(seed),
+        ]
+        if hotspots:
+            cmd += ["--hotspot"] + [str(h) for h in hotspots]
+        if rates:
+            cmd += ["--hotspot-rates"] + [str(r) for r in rates]
+        if allow_self:
+            cmd.append("--allow-self")
+        subprocess.run(cmd, check=True)
+        n_nodes = x_dim * y_dim
+        scenarios = []
+        for i in range(n_nodes):
+            sc = yaml.safe_load(open(os.path.join(out, f"node{i}", "scenario.yaml")))
+            scenarios.append(sc)
+    return scenarios
+
+
+def test_global_addr_uniqueness_uniform():
+    """All write addresses across all nodes must be globally unique for uniform_random."""
+    scenarios = _gen_all_synthetic("uniform_random", 4, 4, txn_per_node=2, seed=1)
+    write_addrs = [t["addr"] for sc in scenarios for t in sc["transactions"]
+                   if t["op"] == "write"]
+    assert len(write_addrs) == len(set(write_addrs)), (
+        "uniform_random: two writes share the same absolute address"
+    )
+
+
+def test_write_read_pairs_share_addr():
+    """For each pair, write and read must target the same address."""
+    scenarios = _gen_all_synthetic("uniform_random", 4, 4, txn_per_node=2, seed=7)
+    for sc in scenarios:
+        txns = sc["transactions"]
+        # Transactions are interleaved write/read pairs
+        assert len(txns) % 2 == 0
+        for i in range(0, len(txns), 2):
+            assert txns[i]["op"] == "write"
+            assert txns[i + 1]["op"] == "read"
+            assert txns[i]["addr"] == txns[i + 1]["addr"], (
+                "write/read pair must share the same address"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Guard: mesh capacity
+# ---------------------------------------------------------------------------
+
+def test_guard_mesh_exceeds_dst_capacity():
+    """A 20x20 mesh exceeds DST_ID_WIDTH=8 (max 256 nodes); gen must exit(1)."""
+    import subprocess
+    import tempfile
+    repo = os.path.abspath(os.path.join(HERE, "..", ".."))
+    # Create a temporary topology YAML for a 20x20 mesh
+    with tempfile.TemporaryDirectory(dir=repo) as tmp:
+        topo_yaml = os.path.join(tmp, "mesh_20x20_vc1.yaml")
+        with open(topo_yaml, "w") as f:
+            yaml.safe_dump({"topology": {"name": "mesh_20x20_vc1",
+                                          "x_dim": 20, "y_dim": 20, "num_vc": 1}}, f)
+        # Temporarily symlink / copy to topologies dir so _load_topology finds it
+        topo_dir = os.path.join(HERE, "..", "topologies")
+        dest = os.path.join(topo_dir, "mesh_20x20_vc1.yaml")
+        import shutil
+        shutil.copy(topo_yaml, dest)
+        try:
+            result = subprocess.run(
+                [sys.executable,
+                 os.path.join(HERE, "gen_test_patterns.py"),
+                 "--pattern", "uniform_random",
+                 "--topology", "mesh_20x20_vc1",
+                 "--out", os.path.join(tmp, "out"),
+                 "--transactions-per-node", "1"],
+                capture_output=True, text=True
+            )
+            assert result.returncode != 0, (
+                "Expected non-zero exit for mesh exceeding DST_ID_WIDTH capacity"
+            )
+            assert "DST_ID_WIDTH" in result.stderr or "exceeds" in result.stderr, (
+                f"Expected clear error message; stderr={result.stderr!r}"
+            )
+        finally:
+            if os.path.exists(dest):
+                os.remove(dest)
+
+
+def test_guard_dst_id_width_value():
+    """DST_ID_WIDTH exported constant must equal 8 (mirrors ni_flit_constants.h)."""
+    assert DST_ID_WIDTH == 8
+
+
+# ---------------------------------------------------------------------------
+# Allocator memory_size overflow via CLI (too many transactions)
+# ---------------------------------------------------------------------------
+
+def test_allocator_overflow_via_cli():
+    """Passing more --transactions-per-node than the memory window can hold must fail."""
+    import subprocess
+    import tempfile
+    repo = os.path.abspath(os.path.join(HERE, "..", ".."))
+    # mesh_4x4_vc1: n_nodes=16, default memory_size=0x1000, stride=0x40
+    # max txn/node = 4 (16*4*0x40 == 0x1000 exact); 5 overflows
+    with tempfile.TemporaryDirectory(dir=repo) as out:
+        result = subprocess.run(
+            [sys.executable,
+             os.path.join(HERE, "gen_test_patterns.py"),
+             "--pattern", "uniform_random",
+             "--topology", "mesh_4x4_vc1",
+             "--out", out,
+             "--transactions-per-node", "5",
+             "--seed", "0"],
+            capture_output=True, text=True
+        )
+    assert result.returncode != 0, (
+        "Expected non-zero exit when transactions-per-node exceeds memory window"
+    )
+    assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
+        f"Expected memory overflow error; stderr={result.stderr!r}"
+    )
