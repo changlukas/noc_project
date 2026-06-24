@@ -24,7 +24,7 @@ Parameterised from topology YAML:
     - per-node plusarg names (+scenario_node<i>), scenario strings, ctx handles
     - master at node k drives the NEXT node's variant (circular ring, crosses links)
     - inter-router links wired per XY direction; boundary directions tied off
-    - PASS guard: cmodel_master_count() == len(nodes) AND reads_checked() > 0
+    - PASS guard: cmodel_master_count() == len(nodes) AND reads_checked() >= len(nodes)
 
 Constants kept as template (not derived from topology YAML):
     - clk/rst timing (10 ns clock, 4-cycle reset), TIMEOUT_CYCLES = 100000
@@ -51,7 +51,41 @@ LINK_PORTS = 5
 def load_topology(name: str) -> dict:
     import yaml
     path = ROOT / "sim" / "topologies" / f"{name}.yaml"
-    return yaml.safe_load(path.read_text())
+    topo = yaml.safe_load(path.read_text())
+    _check_flit_capacity(topo, path)
+    return topo
+
+
+# Y_WIDTH mirrors the flit spec (ni_packet.json field_widths.Y_WIDTH = 4).
+Y_WIDTH = 4
+DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
+
+
+def _check_flit_capacity(topo: dict, path) -> None:
+    """Reject a topology whose mesh dims exceed the flit field capacity.
+
+    Mirrors specgen/ni_spec/invariants.py:check_mesh_within_flit for the
+    sim-topology-YAML path.  Fails with a clear message so the user knows to
+    reduce dims or widen the flit fields (via the specgen constants).
+    """
+    t = topo["topology"]
+    x_dim = int(t["x_dim"])
+    y_dim = int(t["y_dim"])
+    cap_x = 1 << X_WIDTH
+    cap_y = 1 << Y_WIDTH
+    cap_nodes = 1 << DST_ID_WIDTH
+    errors = []
+    if x_dim > cap_x:
+        errors.append(f"x_dim={x_dim} > 2^X_WIDTH={cap_x}")
+    if y_dim > cap_y:
+        errors.append(f"y_dim={y_dim} > 2^Y_WIDTH={cap_y}")
+    if x_dim * y_dim > cap_nodes:
+        errors.append(f"x_dim*y_dim={x_dim * y_dim} > 2^DST_ID_WIDTH={cap_nodes}")
+    if errors:
+        raise SystemExit(
+            f"gen_tb_top: flit-capacity violated in {path}:\n"
+            + "\n".join(f"  {e}" for e in errors)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -575,18 +609,19 @@ def emit_tb_top(topo: dict) -> str:
     w("    // Exit logic - non-vacuous PASS guard")
     w("    // -------------------------------------------------------------------------")
     w(f"    // PASS requires scoreboard clean AND all {n} masters created AND at least")
-    w("    // one read actually checked (so a write-only / no-op run fails).")
+    w(f"    // {n} reads checked (one per node in the ring — guards weakened scenarios")
+    w("    // where fewer than all nodes complete a read).")
     w("    always @(posedge clk_i) begin")
     w("        /* verilator lint_off WIDTHTRUNC */")
     w("        if (rst_ni && (cmodel_done() != 0)) begin")
     w(f"            if (cmodel_scoreboard_clean() != 0 &&")
-    w(f"                cmodel_master_count() == {n} && cmodel_reads_checked() > 0) begin")
+    w(f"                cmodel_master_count() == {n} && cmodel_reads_checked() >= {n}) begin")
     w("        /* verilator lint_on WIDTHTRUNC */")
     w('                $display("PASS: scenario complete, scoreboard clean");')
     w("                cmodel_dump_scoreboard();")
     w("                $finish(0);")
     w("            end else begin")
-    w('                $display("FAIL: scoreboard mismatch or vacuous run (masters=%0d reads=%0d)",')
+    w(f'                $display("FAIL: scoreboard mismatch or vacuous run (masters=%0d reads=%0d, need>={n})",')
     w("                         cmodel_master_count(), cmodel_reads_checked());")
     w("                cmodel_dump_scoreboard();")
     w('                $fatal(1, "tb_top: run failed");')
