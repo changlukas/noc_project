@@ -30,7 +30,7 @@
 **Files:**
 - Modify: `specgen/source/constants.yaml`(各參數 `cpp_symbol`/`sv_symbol` 去 `NI_`)、`specgen/ni_spec/constants.py`(emitter 若有 `NI_` 前綴組裝邏輯)
 - Regen: `specgen/generated/cpp/ni_params.h`、`specgen/generated/sv/ni_params_pkg.sv`、`ni_signals_pkg.sv`(經 `codegen.py`,不手改)
-- Modify(consumer,11 處):`c_model/include/router/router.hpp`、`c_model/tests/router/test_router.cpp`、`c_model/tests/router/two_node_fabric.hpp`、`sim/sv/channel_model_wrap.sv`、`sim/sv/nmu_wrap.sv`、`sim/sv/nsu_wrap.sv`、`sim/sv/router_wrap.sv`、`sim/sv/tb_top.sv`
+- Modify(consumer — **以 grep 全掃為準,不靠寫死清單**):已知含 `NI_NOC_`/`NI_AXI_` 者包含 `c_model/include/router/router.hpp`、`c_model/tests/router/test_router.cpp`、`c_model/tests/router/two_node_fabric.hpp`、`c_model/tests/router/test_router_adapters.cpp`、`sim/sv/channel_model_wrap.sv`、`sim/sv/nmu_wrap.sv`、`sim/sv/nsu_wrap.sv`、`sim/sv/router_wrap.sv`、`sim/sv/tb_top.sv`、`sim/sv/axi_master_wrap.sv`、`sim/sv/axi_slave_wrap.sv`、specgen goldens/tests(如 `specgen/tests/test_handshake_schema.py`、`specgen/tests/golden/*`)
 
 **Interfaces:**
 - Produces:`ni::NOC_NUM_VC`/`NOC_FLIT_WIDTH`/`NOC_MESH_X_DIM`/`NOC_MESH_Y_DIM`/`NOC_ROUTER_VC_DEPTH`/`NOC_ROUTER_OUTPUT_FIFO_DEPTH`/`NOC_SLAVE_VC_BUFFER_DEPTH`;`ni::AXI_ID_WIDTH`/`AXI_ADDR_WIDTH`/`AXI_DATA_WIDTH`/`AXI_WSTRB_WIDTH`;SV 對應 `ni_params_pkg::NOC_*_DFLT` / `AXI_*_DFLT`。
@@ -40,10 +40,12 @@
 - [ ] **Step 2: 重生 + drift gate(此時會 fail,因 consumer 未改)**
 Run: `python3 specgen/tools/codegen.py --target cpp --domain params && python3 specgen/tools/codegen.py --target sv --domain params`
 Expected: 重生成功;generated header 出現 `NOC_NUM_VC` 等新名。
-- [ ] **Step 3: 全 repo 改 consumer 引用**
+- [ ] **Step 3: 全 repo 改 consumer 引用(grep-driven,確保完整)**
 ```bash
 cd "E:/05_NoC/noc_project"
-for f in c_model/include/router/router.hpp c_model/tests/router/test_router.cpp c_model/tests/router/two_node_fabric.hpp sim/sv/channel_model_wrap.sv sim/sv/nmu_wrap.sv sim/sv/nsu_wrap.sv sim/sv/router_wrap.sv sim/sv/tb_top.sv; do
+# 注意:specgen goldens 改名後須由 codegen 重生對齊,golden 測試會比對;若 golden 是 NI_ 文本,
+# 隨 generated 一起更新(Step 2 重生後 golden 也要更新)。原始碼/SV/測試逐檔 sed:
+for f in $(git ls-files | grep -vE 'docs/internal|cross-review|\.superpowers|specgen/generated' | xargs grep -lE 'NI_NOC_|NI_AXI_' 2>/dev/null); do
   sed -i 's/NI_NOC_/NOC_/g; s/NI_AXI_/AXI_/g' "$f"
 done
 ```
@@ -73,21 +75,29 @@ git commit -m "refactor(specgen): drop redundant NI_ prefix from NOC_*/AXI_* par
 - Consumes:generated `X_WIDTH`/`Y_WIDTH`/`DST_ID_WIDTH`/`VC_ID_WIDTH`(`ni_flit_constants`)、`MESH_X_DIM`/`MESH_Y_DIM`/`NOC_NUM_VC`(params)。
 - Produces:`check_mesh_within_flit()` invariant,違反時 `codegen.py --check` 回非零。
 
-- [ ] **Step 1: 寫 invariant**
-在 `invariants.py` 加(對齊既有 invariant 函式風格):
+- [ ] **Step 1: 寫 invariant(對齊真實 API:回 `List[Issue]` 用 `_err`,非 assert)**
+`invariants.py` 的 check 模式:`def check_x(spec) -> List[Issue]`,append `_err(TAG, msg)`,由 `check_all(bundle)` 聚合(`invariants.py:28,32,252`)。加:
 ```python
-def check_mesh_within_flit(spec):
-    """Mesh dims must fit the flit dst_id / vc_id field capacity (spec 2026-06-24 sec 3)."""
-    x_w = spec.width("X_WIDTH"); y_w = spec.width("Y_WIDTH")
-    dst_w = spec.width("DST_ID_WIDTH"); vc_w = spec.width("VC_ID_WIDTH")
-    mx = spec.param("MESH_X_DIM"); my = spec.param("MESH_Y_DIM"); nvc = spec.param("NOC_NUM_VC")
-    assert x_w + y_w == dst_w, f"X_WIDTH+Y_WIDTH({x_w}+{y_w}) != DST_ID_WIDTH({dst_w})"
-    assert mx <= (1 << x_w), f"MESH_X_DIM {mx} > 2^X_WIDTH {1<<x_w}"
-    assert my <= (1 << y_w), f"MESH_Y_DIM {my} > 2^Y_WIDTH {1<<y_w}"
-    assert mx * my <= (1 << dst_w), f"MESH_X_DIM*MESH_Y_DIM {mx*my} > 2^DST_ID_WIDTH {1<<dst_w}"
-    assert nvc <= (1 << vc_w), f"NOC_NUM_VC {nvc} > 2^VC_ID_WIDTH {1<<vc_w}"
+def check_mesh_within_flit(constants) -> List[Issue]:
+    """L2: mesh dims must fit flit dst_id / vc_id field capacity (spec 2026-06-24 sec 3)."""
+    TAG = "L2-MESH-FLIT"
+    issues: List[Issue] = []
+    g = lambda k: int(constants[k]["value"])   # accessor shape per load_constants() output; adapt at impl
+    x_w, y_w, dst_w, vc_w = g("X_WIDTH"), g("Y_WIDTH"), g("DST_ID_WIDTH"), g("VC_ID_WIDTH")
+    mx, my, nvc = g("MESH_X_DIM"), g("MESH_Y_DIM"), g("NOC_NUM_VC")
+    if x_w + y_w != dst_w:
+        issues.append(_err(TAG, f"X_WIDTH+Y_WIDTH ({x_w}+{y_w}) != DST_ID_WIDTH ({dst_w})"))
+    if mx > (1 << x_w):
+        issues.append(_err(TAG, f"MESH_X_DIM {mx} > 2^X_WIDTH {1 << x_w}"))
+    if my > (1 << y_w):
+        issues.append(_err(TAG, f"MESH_Y_DIM {my} > 2^Y_WIDTH {1 << y_w}"))
+    if mx * my > (1 << dst_w):
+        issues.append(_err(TAG, f"MESH_X_DIM*MESH_Y_DIM {mx*my} > 2^DST_ID_WIDTH {1 << dst_w}"))
+    if nvc > (1 << vc_w):
+        issues.append(_err(TAG, f"NOC_NUM_VC {nvc} > 2^VC_ID_WIDTH {1 << vc_w}"))
+    return issues
 ```
-> 實際取值 API(`spec.width`/`spec.param`)以 `invariants.py` 既有函式為準;若不同則沿用既有取法。把本函式登記進 `check_all`(若 invariants 有 aggregator)。
+> 在 `check_all(bundle)` 內以 `bundle.constants` 呼叫並 `extend` 進總 issues(`loader.py:64-70` 提供 `bundle.constants`)。`g` 的取值形狀以 `load_constants()` 實際輸出為準(可能是 `name→value` 或 `name→{value,...}`),實作時對 `constants.py` 確認。drift gate 在有 ERROR issue 時 fail。
 - [ ] **Step 2: 加測試 — 合法值通過**
 在對應測試檔加:預設 `MESH_X_DIM=4,MESH_Y_DIM=4,NOC_NUM_VC=1` → `check_mesh_within_flit` 不 raise。
 - [ ] **Step 3: 加測試 — 超限 fail**
@@ -240,7 +250,10 @@ git commit -m "feat(sim): thread topology num_vc into generated tb wrap params (
 ### Task 6: wire-level multi-VC（S2）
 
 **Files:**
-- Modify: `sim/c/cmodel_dpi.h`、`sim/c/cmodel_dpi.cpp`(router/NMU/NSU 的 `set_inputs`/`get_outputs` credit 欄位 scalar → `[NUM_VC]`;`cmodel_router_create` 加 `y,mesh_x,mesh_y,num_vc`)
+- Modify: `sim/c/cmodel_dpi.h`、`sim/c/cmodel_dpi.cpp`:
+  - `set_inputs`/`get_outputs` 的 credit 欄位 scalar → `[NUM_VC]`(三個 component)。
+  - **create 簽章全部帶 `num_vc`**:`cmodel_router_create(name,x,y,mesh_x,mesh_y,num_vc)`、`cmodel_nmu_create(name,src_id,num_vc)`、`cmodel_nsu_create(name,src_id,num_vc)`(現皆無 num_vc;`cmodel_dpi.h:135,164`)。SV import/呼叫端同步。
+- Modify: **`*_wrap_io.hpp` 的 credit struct scalar → per-VC**:`c_model/include/wrap/router_wrap_io.hpp:32,41,55,66`、`nmu_wrap_io.hpp:66,90`、`nsu_wrap_io.hpp:39,65`(註解已寫「pulse per VC」,現型別仍 scalar)。
 - Modify: `sim/sv/router_wrap.sv`、`sim/sv/nmu_wrap.sv`、`sim/sv/nsu_wrap.sv`(拔 `NUM_VC!=1` 的 `$fatal`;credit marshalling 改 per-VC,不再 `{NUM_VC{...}}` 壓扁 / 取 `[0]`)
 - Modify: `c_model/include/wrap/nmu_wrap.hpp:47`、`c_model/include/wrap/nsu_wrap.hpp:52`、`c_model/include/wrap/router_wrap.hpp`(`cfg.num_vc` 由 create 參數帶入,不寫死 1)
 - Modify: `sim/run_regress.py`(傳 `+num_vc=` plusarg);`sim/sv/tb_top.sv`(generated:plusarg → wrap NUM_VC)
@@ -253,8 +266,12 @@ git commit -m "feat(sim): thread topology num_vc into generated tb wrap params (
 
 - [ ] **Step 1: 隔離已知 burst bug(避免誤判)**
 記錄基準:`make sim-regress` 現有 6 scenario(非 BUR/STR)綠。**不**把 BUR/STR co-sim 納入本 task gate(已知 wire-level burst bug,屬 SP2;見 spec §7)。multi-VC driver 選 Mode A read/write split 的非-burst scenario。
-- [ ] **Step 2: 改 DPI signature 為 per-PORT × per-VC**
-`cmodel_dpi.h`:`cmodel_router_set_inputs/get_outputs` 的 link credit 參數 `bit` → `bit [NUM_VC-1:0]`(SV 端)對應 C++ `const svBitVecVal*`;`cmodel_router_create(name)` → `(name, x, y, mesh_x, mesh_y, num_vc)`。NMU/NSU 的 NI-face credit 同樣 `[NUM_VC]`。先讓 C++ 端編譯通過(marshalling 搬 `credit_[port][vc]` 全向量)。
+- [ ] **Step 2: 改 DPI signature 為 per-PORT × per-VC + create 帶 num_vc**
+`cmodel_dpi.h`/`.cpp`:
+  - `cmodel_router_set_inputs/get_outputs` 的 link **valid/flit/credit 全 `[PORT]` 化**,credit 再 `[NUM_VC]`(SV `bit [NUM_VC-1:0]` ↔ C++ `svBitVecVal*`)。NMU/NSU NI-face credit 同樣 `[NUM_VC]`。
+  - create 簽章:`cmodel_router_create(name,x,y,mesh_x,mesh_y,num_vc)`、`cmodel_nmu_create(name,src_id,num_vc)`、`cmodel_nsu_create(name,src_id,num_vc)`。
+  - `*_wrap_io.hpp`(router/nmu/nsu)的 credit 欄位 scalar → `std::array<.., NUM_VC>` 或 per-VC vector(對齊 c_model `credit_[port][vc]`)。
+  先讓 C++ 端編譯通過(marshalling 搬 per-VC 全向量,wrap config `num_vc` 由 create 帶入)。
 - [ ] **Step 3: 拔三個 $fatal + wrap num_vc 來源**
 `router_wrap.sv`/`nmu_wrap.sv`/`nsu_wrap.sv` 移除 `if (NUM_VC!=1) $fatal`;credit 改逐 VC marshalling(不 `{NUM_VC{...}}`、不取 `[0]`)。`nmu_wrap.hpp`/`nsu_wrap.hpp`/`router_wrap.hpp` 的 `cfg.num_vc` 由 create 參數設。
 - [ ] **Step 4: run_regress + tb 傳 num_vc**
@@ -269,7 +286,7 @@ python3 sim/tools/gen_tb_top.py --check
 Expected: ctest 全綠;co-sim 原 6 + multi-VC driver 全 PASS。
 - [ ] **Step 6: Commit**
 ```bash
-git add sim/c/cmodel_dpi.h sim/c/cmodel_dpi.cpp sim/sv/router_wrap.sv sim/sv/nmu_wrap.sv sim/sv/nsu_wrap.sv c_model/include/wrap/nmu_wrap.hpp c_model/include/wrap/nsu_wrap.hpp c_model/include/wrap/router_wrap.hpp sim/run_regress.py sim/sv/tb_top.sv sim/test_patterns
+git add sim/c/cmodel_dpi.h sim/c/cmodel_dpi.cpp sim/sv/router_wrap.sv sim/sv/nmu_wrap.sv sim/sv/nsu_wrap.sv c_model/include/wrap/nmu_wrap.hpp c_model/include/wrap/nsu_wrap.hpp c_model/include/wrap/router_wrap.hpp c_model/include/wrap/router_wrap_io.hpp c_model/include/wrap/nmu_wrap_io.hpp c_model/include/wrap/nsu_wrap_io.hpp sim/run_regress.py sim/sv/tb_top.sv sim/test_patterns
 git commit -m "feat(sim): wire-level multi-VC via per-PORT x per-VC DPI; drop single-VC fatals (S2)"
 ```
 
@@ -278,13 +295,14 @@ git commit -m "feat(sim): wire-level multi-VC via per-PORT x per-VC DPI; drop si
 ### Task 7: directional N/E/S/W ports + 2×2 mesh（S3）
 
 **Files:**
-- Modify: `sim/c/cmodel_dpi.cpp`、`c_model/include/wrap/router_wrap.hpp`(wire 全 5 port:LOCAL + N/E/S/W,依 create 的 x/y/mesh 接 c_model router 的 directional adapter)
-- Modify: `sim/sv/router_wrap.sv`(暴露 N/E/S/W link bundle;沿用 S2 的 `[PORT]` ABI,不改 signature)
+- Modify: `sim/c/cmodel_dpi.cpp`、`c_model/include/wrap/router_wrap.hpp`(wire 全 5 port:`LOCAL`+`NORTH`/`EAST`/`SOUTH`/`WEST`,依 create 的 x/y/mesh 接 c_model router 的 directional adapter)
+- Modify: `sim/sv/router_wrap.sv`(暴露 NORTH/EAST/SOUTH/WEST link bundle;沿用 S2 的 `[PORT]` ABI,不改 signature)
 - Modify: `sim/tools/gen_tb_top.py`(產 `noc_fabric_<topo>.sv`:N node + 方向 link 連線 + 邊界 tie-off + assertion;`tb_top.sv` 改為 instantiate fabric)
+- Modify: `sim/build_config.mk`(`TB_TOP_SV_SRC` 加 generated `noc_fabric_<topo>.sv`)或 `sim/gen_filelist.py`(把 fabric 納 SV source set);或 generated `tb_top.sv` `\`include` fabric。擇一,確保 fabric 進 Verilator/VCS 編譯。
 - Create: `sim/topologies/mesh_2x2.yaml`
 
 **Interfaces:**
-- Consumes:S2 的 per-PORT DPI ABI;`Router` 的 5-port `RouterPort{LOCAL,N,E,S,W}`(`router.hpp`)。
+- Consumes:S2 的 per-PORT DPI ABI;`Router` 的 5-port `RouterPort{LOCAL,NORTH,EAST,SOUTH,WEST}`(`router.hpp:30`)。
 - Produces:`noc_fabric_<topo>.sv`(每 node 露 AXI port,ctx 由 port 收入,create 留 tb_top);2×2 mesh co-sim 綠。
 
 - [ ] **Step 1: router_wrap 接全 5 port(C++)**
@@ -302,7 +320,7 @@ python3 sim/tools/gen_tb_top.py --topology mesh_2x2 --check
 Expected: 2×2 mesh co-sim PASS;drift exit 0。亦驗 `mesh_2x1` 仍綠(回歸)。
 - [ ] **Step 5: Commit**
 ```bash
-git add sim/c/cmodel_dpi.cpp c_model/include/wrap/router_wrap.hpp sim/sv/router_wrap.sv sim/tools/gen_tb_top.py sim/topologies/mesh_2x2.yaml sim/sv/tb_top.sv sim/sv/noc_fabric_mesh_2x2.sv
+git add sim/c/cmodel_dpi.cpp c_model/include/wrap/router_wrap.hpp sim/sv/router_wrap.sv sim/tools/gen_tb_top.py sim/build_config.mk sim/topologies/mesh_2x2.yaml sim/sv/tb_top.sv sim/sv/noc_fabric_mesh_2x2.sv
 git commit -m "feat(sim): directional N/E/S/W ports + generated noc_fabric; 2x2 mesh co-sim (S3)"
 ```
 
