@@ -3,7 +3,7 @@
 // Source:    specgen/source/constants.yaml
 // Source SHA: 64d04071fb0d
 // Generator version: v1.0.0
-// Generated at: 2026-06-24T02:11:17Z
+// Generated at: 2026-06-24T12:43:34Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 

@@ -179,7 +179,14 @@ def emit_fabric(topo: dict) -> str:
     w(f"    parameter int unsigned NUM_VC                = {num_vc},")
     w("    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,")
     w("    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = "
-      "ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT")
+      "ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT,")
+    w("    // ROUTER_VC_DEPTH: per-VC input FIFO depth inside the router; this is")
+    w("    // the credit window for INTER-ROUTER links (distinct from SLAVE_VC_BUFFER_DEPTH")
+    w("    // which governs the router->NSU eject path).  Both derive from constants.yaml;")
+    w("    // they coincide at the default of 4 but must be threaded separately so the")
+    w("    // link_perf_monitor assertion holds at ANY configurable depth.")
+    w("    parameter int unsigned ROUTER_VC_DEPTH       = "
+      "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT")
     w(") (")
     w("    input  logic clk_i,")
     w("    input  logic rst_ni,")
@@ -336,7 +343,7 @@ def emit_fabric(topo: dict) -> str:
             seen.add(key)
             for net in ("req", "rsp"):
                 w(f"    link_perf_monitor #(")
-                w(f'        .LINK_NAME("{net}_{i}to{pi}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
+                w(f'        .LINK_NAME("{net}_{i}to{pi}"), .BUFFER_DEPTH(ROUTER_VC_DEPTH)')
                 w(f"    ) u_perf_link_{net}_{i}_{pi} (")
                 w(f"        .clk_i, .rst_ni,")
                 w(f"        .valid(n{i}_link_{net}_out_valid[RP_{d}]),")
@@ -412,6 +419,10 @@ def emit_tb_top(topo: dict) -> str:
     w("    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT;")
     w("    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = "
       "ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;")
+    w("    // ROUTER_VC_DEPTH: credit window for inter-router links; passed to fabric so")
+    w("    // link_perf_monitor tracks the ACTUAL receiving buffer depth (not SLAVE_VC_BUFFER_DEPTH).")
+    w("    localparam int unsigned ROUTER_VC_DEPTH       = "
+      "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // DPI lifecycle")
@@ -498,7 +509,8 @@ def emit_tb_top(topo: dict) -> str:
     w(f"    noc_fabric_{name} #(")
     w("        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
+    w("        .ROUTER_VC_DEPTH(ROUTER_VC_DEPTH)")
     w("    ) u_fabric (")
     w("        .clk_i(clk_i), .rst_ni(rst_ni),")
     for k, (i, _x, _y, _c) in enumerate(nodes):
