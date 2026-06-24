@@ -46,11 +46,11 @@
 |---|---|---|---|
 | `neighbor` | **確定性** | `NeighborTrafficPattern`(`traffic.cpp:316`):每維 +1 mod dim → (x,y)→((x+1)%x_dim,(y+1)%y_dim) | bijection、非 self;**correctness 回歸用它** |
 | `transpose` | 確定性 | `TransposeTrafficPattern`(`traffic.cpp:244`,id bit-half-swap)→ 方形下 (x,y)→(y,x) | guard:需偶次方方形 mesh(4x4 ✓);對角 (x,x)→self,benchmark、隱含 `--allow-self`;correctness smoke 不用它 |
-| `uniform_random` | per-packet 隨機 | `UniformRandom`:`RandomInt(nodes-1)`(排除 self) | load balance、bisection |
-| `hotspot` | per-packet 隨機 | `HotSpotTrafficPattern`(`traffic.cpp:490`):加權選 `--hotspot` node | sink 壅塞;**correctness smoke 用它** |
+| `uniform_random` | per-packet 隨機 | `UniformRandom`(`traffic.cpp:386`):`RandomInt(nodes-1)`(permit self) | load balance、bisection |
+| `hotspot` | per-packet 隨機 | `HotSpotTrafficPattern`(`traffic.cpp:506`):加權選 `--hotspot` node | sink 壅塞;**correctness smoke 用它** |
 
 - **per-packet 隨機**:uniform/hotspot 每筆 transaction 各自取樣(seed 可重現);neighbor/transpose 為確定性。
-- **self-traffic**:預設排除(dst≠src);transpose 對角隱含允許;`--allow-self` 全域開關。
+- **self-traffic**:預設 **permit self**(booksim-faithful:`uniform`=`RandomInt(nodes-1)` 不排除 src,單一 `hotspot` 無條件回該 node 即使 src==hotspot,booksim 不 raise);`--exclude-self` opt-in 排除 dst==src(clean NoC-only 量測;single-hotspot==src degenerate 時 fall back 不 raise)。self-traffic 在 co-sim 合法(master_i→slave_i local,scoreboard 仍驗)。
 - **位址唯一性(全域)**:任何 convergent pattern(多源→同 dst node)都可能撞同一絕對位址 → 每筆 write/read 對在 dst node `memory_base..+memory_size` 內分到**全域唯一 local offset**(以 (src,seq) 決定),非僅 hotspot。write/read 同址成對。dst 位址須落在該 node 的 memory 區內。
 - **guard**:`x_dim×y_dim ≤ 2^DST_ID_WIDTH`、transpose 需方形 mesh;違反即 fail-fast。
 

@@ -236,13 +236,25 @@ def test_neighbor_variant_addr_at_dst_coord():
 # uniform_random_dsts: ported from booksim2 traffic.cpp:386-390
 # ---------------------------------------------------------------------------
 
-def test_uniform_excludes_self():
-    """uniform_random must never return dst == src (default allow_self=False)."""
+def test_uniform_permits_self_by_default():
+    """booksim-faithful default: RandomInt(nodes-1) PERMITS self (no exclusion)."""
+    rng = random.Random(7)
+    found_self = False
+    for _ in range(500):
+        dsts = uniform_random_dsts(0, 2, 1, rng)  # default: permit self
+        if dsts[0] == 0:
+            found_self = True
+            break
+    assert found_self, "default uniform_random must be able to produce dst==src (booksim-faithful)"
+
+
+def test_uniform_exclude_self_opt_in():
+    """--exclude-self: dst != src for every draw."""
     rng = random.Random(1)
     n_nodes = 16
     for src in range(n_nodes):
-        dsts = uniform_random_dsts(src, n_nodes, 200, rng)
-        assert src not in dsts, f"src={src} appeared in its own dst list"
+        dsts = uniform_random_dsts(src, n_nodes, 200, rng, exclude_self=True)
+        assert src not in dsts, f"src={src} appeared in its own dst list under exclude_self"
 
 
 def test_uniform_covers_many_dsts():
@@ -257,18 +269,6 @@ def test_uniform_seeded_reproducible():
     dsts_a = uniform_random_dsts(0, 16, 50, random.Random(42))
     dsts_b = uniform_random_dsts(0, 16, 50, random.Random(42))
     assert dsts_a == dsts_b
-
-
-def test_uniform_allow_self():
-    """--allow-self: dst == src must be possible."""
-    rng = random.Random(7)
-    found_self = False
-    for _ in range(500):
-        dsts = uniform_random_dsts(0, 2, 1, rng, allow_self=True)
-        if dsts[0] == 0:
-            found_self = True
-            break
-    assert found_self, "allow_self=True should eventually produce dst==src for a 2-node mesh"
 
 
 # ---------------------------------------------------------------------------
@@ -308,13 +308,28 @@ def test_hotspot_equal_rates_default():
     assert 0.40 < frac_0 < 0.60, f"expected ~50% to hotspot 0, got {frac_0:.2%}"
 
 
-def test_hotspot_excludes_self_when_hotspot_is_src():
-    """If the hotspot happens to be the source, self-exclusion must re-sample."""
+def test_hotspot_single_returns_hotspot_even_when_src_is_hotspot():
+    """booksim-faithful: single hotspot returns it UNCONDITIONALLY (no raise) even if src==hotspot."""
     rng = random.Random(1)
-    # hotspots=[0] but src=0 → must raise (no valid dst)
-    import pytest
-    with pytest.raises(ValueError, match="could not find a non-self dst"):
-        hotspot_dsts(src_node=0, n_nodes=4, n_txn=1, rng=rng, hotspots=[0])
+    dsts = hotspot_dsts(src_node=0, n_nodes=4, n_txn=5, rng=rng, hotspots=[0])
+    assert all(d == 0 for d in dsts), "single hotspot must return that node even when src==hotspot"
+
+
+def test_hotspot_single_degenerate_no_raise_under_exclude_self():
+    """exclude_self with single hotspot == src must NOT raise (falls back, booksim never raises)."""
+    rng = random.Random(1)
+    dsts = hotspot_dsts(src_node=0, n_nodes=4, n_txn=3, rng=rng, hotspots=[0], exclude_self=True)
+    assert dsts == [0, 0, 0], "degenerate single-hotspot==src must fall back to the hotspot, not raise"
+
+
+def test_hotspot_exclude_self_multi_skips_src():
+    """exclude_self with multi hotspots must skip the src hotspot."""
+    rng = random.Random(5)
+    # src=0 is one of the hotspots; exclude_self should route everything to hotspot 2
+    dsts = hotspot_dsts(src_node=0, n_nodes=16, n_txn=200, rng=rng,
+                        hotspots=[0, 2], exclude_self=True)
+    assert 0 not in dsts, "exclude_self must skip src hotspot in multi-hotspot mode"
+    assert all(d == 2 for d in dsts)
 
 
 # ---------------------------------------------------------------------------
@@ -322,16 +337,19 @@ def test_hotspot_excludes_self_when_hotspot_is_src():
 # ---------------------------------------------------------------------------
 
 def _gen_all_synthetic(pattern, x_dim, y_dim, txn_per_node, seed,
-                       hotspots=None, rates=None, allow_self=False,
-                       base_local=0x1000, memory_size=None):
-    """Helper: run gen_test_patterns CLI in synthetic mode and return parsed scenarios."""
+                       hotspots=None, rates=None, exclude_self=False,
+                       memory_size=None):
+    """Helper: run gen_test_patterns CLI in synthetic mode and return parsed scenarios.
+
+    memory_size: if None, sized to fit the load (n_nodes*txn*0x40*2) and passed via
+    --memory-size so the subprocess actually uses it (not stuck at the 0x1000 default).
+    """
     import subprocess
     import tempfile
     repo = os.path.abspath(os.path.join(HERE, "..", ".."))
     topo_name = f"mesh_{x_dim}x{y_dim}_vc1"
+    n_nodes = x_dim * y_dim
     if memory_size is None:
-        # Use a large enough window for the given load.
-        n_nodes = x_dim * y_dim
         memory_size = n_nodes * txn_per_node * 0x40 * 2  # 2x headroom
     with tempfile.TemporaryDirectory(dir=repo) as out:
         cmd = [
@@ -342,15 +360,15 @@ def _gen_all_synthetic(pattern, x_dim, y_dim, txn_per_node, seed,
             "--out", out,
             "--transactions-per-node", str(txn_per_node),
             "--seed", str(seed),
+            "--memory-size", hex(memory_size),
         ]
         if hotspots:
             cmd += ["--hotspot"] + [str(h) for h in hotspots]
         if rates:
             cmd += ["--hotspot-rates"] + [str(r) for r in rates]
-        if allow_self:
-            cmd.append("--allow-self")
+        if exclude_self:
+            cmd.append("--exclude-self")
         subprocess.run(cmd, check=True)
-        n_nodes = x_dim * y_dim
         scenarios = []
         for i in range(n_nodes):
             sc = yaml.safe_load(open(os.path.join(out, f"node{i}", "scenario.yaml")))
@@ -384,44 +402,84 @@ def test_write_read_pairs_share_addr():
 
 
 # ---------------------------------------------------------------------------
-# Guard: mesh capacity
+# Guard: mesh capacity (per-dimension, spec section 3 invariant)
 # ---------------------------------------------------------------------------
 
-def test_guard_mesh_exceeds_dst_capacity():
-    """A 20x20 mesh exceeds DST_ID_WIDTH=8 (max 256 nodes); gen must exit(1)."""
+def _run_guard_on_mesh(x_dim, y_dim):
+    """Run gen on an x_dim x y_dim mesh; return CompletedProcess (capture stderr).
+
+    Sizes --memory-size to the node count so a legal mesh is limited only by the
+    capacity guard, not the allocator window (isolates the guard under test).
+    """
     import subprocess
     import tempfile
+    import shutil
     repo = os.path.abspath(os.path.join(HERE, "..", ".."))
-    # Create a temporary topology YAML for a 20x20 mesh
+    topo_dir = os.path.join(HERE, "..", "topologies")
+    name = f"mesh_{x_dim}x{y_dim}_vc1"
+    dest = os.path.join(topo_dir, f"{name}.yaml")
+    mem = max(0x1000, x_dim * y_dim * 0x40 * 2)
     with tempfile.TemporaryDirectory(dir=repo) as tmp:
-        topo_yaml = os.path.join(tmp, "mesh_20x20_vc1.yaml")
-        with open(topo_yaml, "w") as f:
-            yaml.safe_dump({"topology": {"name": "mesh_20x20_vc1",
-                                          "x_dim": 20, "y_dim": 20, "num_vc": 1}}, f)
-        # Temporarily symlink / copy to topologies dir so _load_topology finds it
-        topo_dir = os.path.join(HERE, "..", "topologies")
-        dest = os.path.join(topo_dir, "mesh_20x20_vc1.yaml")
-        import shutil
-        shutil.copy(topo_yaml, dest)
+        with open(os.path.join(tmp, f"{name}.yaml"), "w") as f:
+            yaml.safe_dump({"topology": {"name": name,
+                                          "x_dim": x_dim, "y_dim": y_dim, "num_vc": 1}}, f)
+        shutil.copy(os.path.join(tmp, f"{name}.yaml"), dest)
         try:
-            result = subprocess.run(
+            return subprocess.run(
                 [sys.executable,
                  os.path.join(HERE, "gen_test_patterns.py"),
                  "--pattern", "uniform_random",
-                 "--topology", "mesh_20x20_vc1",
+                 "--topology", name,
                  "--out", os.path.join(tmp, "out"),
-                 "--transactions-per-node", "1"],
+                 "--transactions-per-node", "1",
+                 "--memory-size", hex(mem)],
                 capture_output=True, text=True
-            )
-            assert result.returncode != 0, (
-                "Expected non-zero exit for mesh exceeding DST_ID_WIDTH capacity"
-            )
-            assert "DST_ID_WIDTH" in result.stderr or "exceeds" in result.stderr, (
-                f"Expected clear error message; stderr={result.stderr!r}"
             )
         finally:
             if os.path.exists(dest):
                 os.remove(dest)
+
+
+def test_guard_total_node_count_exceeds_capacity():
+    """20x20 = 400 > 256 nodes exceeds DST_ID_WIDTH; gen must exit non-zero."""
+    result = _run_guard_on_mesh(20, 20)
+    assert result.returncode != 0, "20x20 must fail (total node count > 256)"
+    assert "exceeds" in result.stderr, f"clear msg expected; stderr={result.stderr!r}"
+
+
+def test_guard_x_dim_alias_17x15():
+    """17x15 = 255 <= 256 BUT x_dim 17 > 2^X_WIDTH(16): x aliases into y field; must fail."""
+    result = _run_guard_on_mesh(17, 15)
+    assert result.returncode != 0, "17x15 must fail (x_dim 17 > X_WIDTH capacity 16)"
+    assert "x_dim" in result.stderr and "X_WIDTH" in result.stderr, (
+        f"expected per-dimension x guard msg; stderr={result.stderr!r}"
+    )
+
+
+def test_guard_x_dim_alias_32x8():
+    """32x8 = 256 <= 256 BUT x_dim 32 > 16: x aliases; must fail (product check alone misses it)."""
+    result = _run_guard_on_mesh(32, 8)
+    assert result.returncode != 0, "32x8 must fail (x_dim 32 > X_WIDTH capacity 16)"
+    assert "x_dim" in result.stderr and "X_WIDTH" in result.stderr, (
+        f"expected per-dimension x guard msg; stderr={result.stderr!r}"
+    )
+
+
+def test_guard_y_dim_alias_8x32():
+    """8x32: y_dim 32 > 2^Y_WIDTH(16) overflows DST_ID_WIDTH; must fail."""
+    result = _run_guard_on_mesh(8, 32)
+    assert result.returncode != 0, "8x32 must fail (y_dim 32 > Y_WIDTH capacity 16)"
+    assert "y_dim" in result.stderr and "Y_WIDTH" in result.stderr, (
+        f"expected per-dimension y guard msg; stderr={result.stderr!r}"
+    )
+
+
+def test_guard_max_legal_mesh_16x16_passes():
+    """16x16 = 256 nodes, each dim == 16 == capacity: exactly at the boundary, must pass."""
+    result = _run_guard_on_mesh(16, 16)
+    assert result.returncode == 0, (
+        f"16x16 (boundary) must pass; stderr={result.stderr!r}"
+    )
 
 
 def test_guard_dst_id_width_value():
@@ -457,3 +515,29 @@ def test_allocator_overflow_via_cli():
     assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
         f"Expected memory overflow error; stderr={result.stderr!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# --memory-size threads through to the allocator AND the emitted config
+# ---------------------------------------------------------------------------
+
+def test_memory_size_threads_into_emitted_config():
+    """--memory-size must appear in the emitted scenario config.memory_size."""
+    scenarios = _gen_all_synthetic("uniform_random", 4, 4, txn_per_node=2, seed=1,
+                                   memory_size=0x8000)
+    for sc in scenarios:
+        ms = sc["config"]["memory_size"]
+        if isinstance(ms, str):
+            ms = int(ms, 0)
+        assert ms == 0x8000, f"emitted memory_size={ms:#x} != requested 0x8000"
+
+
+def test_memory_size_lifts_allocator_bound():
+    """--memory-size large enough lets 5 txn/node succeed (would overflow at default 0x1000)."""
+    # 16 nodes * 5 txn * 0x40 stride = 0x1400 > 0x1000 default -> needs a bigger window.
+    scenarios = _gen_all_synthetic("uniform_random", 4, 4, txn_per_node=5, seed=1,
+                                   memory_size=0x4000)
+    write_addrs = [t["addr"] for sc in scenarios for t in sc["transactions"]
+                   if t["op"] == "write"]
+    assert len(write_addrs) == 16 * 5, "expected 5 write txns per node"
+    assert len(write_addrs) == len(set(write_addrs)), "all write addrs must stay unique"

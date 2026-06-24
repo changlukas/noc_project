@@ -22,8 +22,8 @@ neighbor  (ported from booksim2 NeighborTrafficPattern::dest, src/traffic.cpp:31
 
 uniform_random  (ported from booksim2 UniformRandomTrafficPattern::dest,
                  src/traffic.cpp:386-390)
-    Each packet independently draws a uniformly random destination from [0, nodes-1],
-    excluding the source node (self-traffic excluded by default; --allow-self to permit).
+    Each packet independently draws a uniformly random destination from [0, nodes-1].
+    Self-traffic is PERMITTED by default (booksim-faithful); --exclude-self opts out.
     Uses random.Random(seed) for reproducibility.
 
 hotspot  (ported from booksim2 HotSpotTrafficPattern::dest, src/traffic.cpp:506-526)
@@ -67,6 +67,7 @@ import yaml
 #   addr[LOCAL_ADDR_BITS + DST_ID_BITS - 1 : LOCAL_ADDR_BITS] = y
 #   addr[LOCAL_ADDR_BITS + X_WIDTH - 1 : LOCAL_ADDR_BITS] = x
 X_WIDTH = 4
+Y_WIDTH = 4          # mirrors ni_flit_constants.h width::Y_WIDTH
 ADDR_DST_SHIFT = 32  # LOCAL_ADDR_BITS
 DST_ID_WIDTH = 8     # header::DST_ID_WIDTH = X_WIDTH + Y_WIDTH; max nodes = 2**8 = 256
 _FILE_KEYS = ("data_file", "dump_file", "strb_file")
@@ -94,41 +95,44 @@ def neighbor_dst(x, y, x_dim, y_dim):
     return (x + 1) % x_dim, (y + 1) % y_dim
 
 
-def uniform_random_dsts(src_node, n_nodes, n_txn, rng, allow_self=False):
+def uniform_random_dsts(src_node, n_nodes, n_txn, rng, exclude_self=False):
     """Booksim2 UniformRandomTrafficPattern::dest (traffic.cpp:386-390): uniform random node.
 
     Returns a list of n_txn destination linear node indices.  Each packet draws its
-    own dst independently (per-packet random, not one dst per node).  Source node is
-    excluded by default (allow_self=False); pass allow_self=True to permit dst==src.
+    own dst independently (per-packet random, not one dst per node).
 
-    Port notes:
-      - booksim `RandomInt(nodes-1)` = uniform in [0, nodes-1].
-      - self-exclusion added per task brief (booksim default is to allow self; we
-        exclude it unless --allow-self is passed, consistent with common NoC practice).
+    Self-traffic policy (booksim-faithful by default):
+      - booksim `RandomInt(nodes-1)` returns a uniform node in [0, nodes-1] and
+        PERMITS self (no source exclusion).  This is the default.
+      - pass exclude_self=True to re-sample until dst != src (clean NoC-only
+        measurement; opt-in via --exclude-self).
     """
     dsts = []
     for _ in range(n_txn):
         while True:
             d = rng.randint(0, n_nodes - 1)
-            if allow_self or d != src_node:
+            if not exclude_self or d != src_node:
                 break
         dsts.append(d)
     return dsts
 
 
-def hotspot_dsts(src_node, n_nodes, n_txn, rng, hotspots, rates=None, allow_self=False):
+def hotspot_dsts(src_node, n_nodes, n_txn, rng, hotspots, rates=None, exclude_self=False):
     """Booksim2 HotSpotTrafficPattern::dest (traffic.cpp:506-526): weighted hotspot selection.
 
     hotspots: list of linear node indices (0..n_nodes-1).
     rates:    weights parallel to hotspots (default: all 1, i.e. equal weight).
               Must be positive integers.
 
-    Single hotspot: all packets go to that node (no RNG needed; mirrors booksim fast path).
-    Multiple hotspots: weighted cumulative selection, same algorithm as booksim.
+    Single hotspot: all packets go to that node (booksim fast path, traffic.cpp:510;
+    returns the hotspot UNCONDITIONALLY -- even when src == hotspot).
+    Multiple hotspots: weighted cumulative selection (traffic.cpp:514-525); booksim
+    applies NO source exclusion.
 
-    Self-exclusion: if the selected hotspot equals src_node and allow_self=False,
-    re-sample until a non-self dst is found (guard against degenerate single-hotspot
-    cases where hotspot == src).
+    Self-traffic policy (booksim-faithful by default): permit self.  Pass
+    exclude_self=True (--exclude-self) to re-sample until dst != src; if no non-self
+    dst exists (e.g. single hotspot == src) the selection falls back to the
+    booksim-faithful value rather than raising.
     """
     if not hotspots:
         raise ValueError("hotspot pattern requires at least one --hotspot node id")
@@ -145,29 +149,29 @@ def hotspot_dsts(src_node, n_nodes, n_txn, rng, hotspots, rates=None, allow_self
             raise ValueError(f"hotspot rate {r} must be positive")
 
     max_val = sum(rates) - 1  # mirrors booksim _max_val accumulation
+    # True only if every hotspot equals src -- then exclude_self cannot succeed and we
+    # fall back to the booksim-faithful value (no raise; booksim never raises).
+    all_hotspots_are_self = all(h == src_node for h in hotspots)
+
+    def _select():
+        if len(hotspots) == 1:
+            # booksim fast path: single hotspot -> return it directly (traffic.cpp:510)
+            return hotspots[0]
+        # booksim weighted cumulative select (traffic.cpp:514-525)
+        pct = rng.randint(0, max_val)
+        for i in range(len(hotspots) - 1):
+            if rates[i] > pct:
+                return hotspots[i]
+            pct -= rates[i]
+        return hotspots[-1]  # mirrors booksim assert-backed fallthrough
 
     dsts = []
     for _ in range(n_txn):
-        for _attempt in range(n_nodes + 1):
-            if len(hotspots) == 1:
-                # booksim fast path: single hotspot → return it directly
-                d = hotspots[0]
-            else:
-                # booksim weighted cumulative select (traffic.cpp:514-525)
-                pct = rng.randint(0, max_val)
-                d = hotspots[-1]  # default: last (mirrors booksim assert fallthrough)
-                for i in range(len(hotspots) - 1):
-                    if rates[i] > pct:
-                        d = hotspots[i]
-                        break
-                    pct -= rates[i]
-            if allow_self or d != src_node:
-                break
-        else:
-            raise ValueError(
-                f"hotspot_dsts: could not find a non-self dst for src={src_node} "
-                f"(hotspots={hotspots}); pass --allow-self or add more hotspots"
-            )
+        d = _select()
+        if exclude_self and not all_hotspots_are_self:
+            # Re-sample until non-self (bounded; only meaningful for multi-hotspot).
+            while d == src_node:
+                d = _select()
         dsts.append(d)
     return dsts
 
@@ -254,7 +258,26 @@ def _load_topology(name):
 # ---------------------------------------------------------------------------
 
 def _check_mesh_capacity(x_dim, y_dim):
-    """Fail fast if the mesh exceeds the dst_id address space (DST_ID_WIDTH=8 bits)."""
+    """Fail fast if the mesh exceeds the dst_id address space.
+
+    coord_id = (y << X_WIDTH) | x, so the encoding requires PER-DIMENSION fit:
+      - x_dim <= 2**X_WIDTH  (else x aliases into the y field)
+      - y_dim <= 2**Y_WIDTH  (else y overflows DST_ID_WIDTH)
+      - x_dim * y_dim <= 2**DST_ID_WIDTH  (total node count fits dst_id)
+    The product check alone misses e.g. 17x15 (=255 <= 256 but x_dim 17 > 16 aliases)
+    or 32x8 (=256 but x_dim 32 > 16).  All three must hold (spec section 3 invariant).
+    """
+    if x_dim > 2 ** X_WIDTH:
+        sys.exit(
+            f"ERROR: x_dim={x_dim} exceeds X_WIDTH={X_WIDTH} capacity "
+            f"({2**X_WIDTH} columns max); x would alias into the y field of coord_id. "
+            f"Reduce x_dim."
+        )
+    if y_dim > 2 ** Y_WIDTH:
+        sys.exit(
+            f"ERROR: y_dim={y_dim} exceeds Y_WIDTH={Y_WIDTH} capacity "
+            f"({2**Y_WIDTH} rows max); y would overflow DST_ID_WIDTH. Reduce y_dim."
+        )
     if x_dim * y_dim > 2 ** DST_ID_WIDTH:
         sys.exit(
             f"ERROR: mesh {x_dim}x{y_dim} = {x_dim * y_dim} nodes exceeds "
@@ -378,7 +401,8 @@ def main(argv=None):
         description="Generate per-node scenario variants from a base scenario + traffic pattern."
     )
     ap.add_argument("--from", dest="base", default=None,
-                    help="Base scenario.yaml path (omit for synthetic payload mode)")
+                    help="Base scenario.yaml path (omit for synthetic payload mode; for "
+                         "random patterns it only borrows the memory shape)")
     ap.add_argument("--pattern", required=True,
                     choices=["neighbor", "uniform_random", "hotspot"],
                     help="Traffic pattern")
@@ -391,8 +415,9 @@ def main(argv=None):
                     help="Write+read pairs per node (synthetic / random patterns)")
     ap.add_argument("--seed", type=int, default=0,
                     help="RNG seed for reproducibility (uniform_random / hotspot)")
-    ap.add_argument("--allow-self", action="store_true",
-                    help="Allow dst == src (default: excluded)")
+    ap.add_argument("--exclude-self", action="store_true",
+                    help="Exclude dst == src (opt-in; default permits self, "
+                         "booksim-faithful)")
     # Hotspot options
     ap.add_argument("--hotspot", type=int, nargs="+", default=None,
                     help="Linear node id(s) for hotspot pattern (0..N-1)")
@@ -403,6 +428,10 @@ def main(argv=None):
                     help="AxSIZE for synthetic transactions (0..7; default 2 = 4 bytes)")
     ap.add_argument("--len", type=int, default=0, dest="burst_len",
                     help="AxLEN for synthetic transactions (0..255; default 0 = single beat)")
+    ap.add_argument("--memory-size", type=lambda v: int(str(v), 0), default=None,
+                    help="dst tile memory window size (default: from --from scenario "
+                         "config.memory_size, else 0x1000); sizes the allocator bound "
+                         "and the emitted config.memory_size")
     a = ap.parse_args(argv)
 
     nodes, x_dim, y_dim = _load_topology(a.topology)
@@ -420,6 +449,8 @@ def main(argv=None):
         cfg = base_sc.get("config", {})
         base_local = _as_int(cfg.get("memory_base", 0)) & 0xFFFFFFFF
         memory_size = _as_int(cfg.get("memory_size", 0x1000))
+        if a.memory_size is not None:
+            memory_size = a.memory_size  # explicit CLI override wins
 
         for (idx, x, y, src_cid) in nodes:
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
@@ -430,29 +461,32 @@ def main(argv=None):
 
     else:
         # Per-packet random pattern (uniform_random / hotspot): synthetic payload.
-        # --from is ignored if provided; --size / --len / --transactions-per-node govern output.
+        # --size / --len / --transactions-per-node govern output; --from (if given) only
+        # borrows the memory shape (memory_base / memory_size).
         rng = _random_module.Random(a.seed)
         base_local = 0x1000  # default local base for synthetic scenarios
         memory_size = 0x1000  # default dst tile window (same as existing topologies)
         if a.base is not None:
-            # Allow caller to borrow memory shape from a base scenario.
+            # Borrow memory shape from a base scenario.
             with open(os.path.abspath(a.base)) as f:
                 base_sc = yaml.safe_load(f)
             cfg = base_sc.get("config", {})
             base_local = _as_int(cfg.get("memory_base", base_local)) & 0xFFFFFFFF
             memory_size = _as_int(cfg.get("memory_size", memory_size))
+        if a.memory_size is not None:
+            memory_size = a.memory_size  # explicit CLI override wins
 
         for (idx, x, y, src_cid) in nodes:
             if a.pattern == "uniform_random":
                 dst_linears = uniform_random_dsts(
-                    idx, n_nodes, a.transactions_per_node, rng, a.allow_self
+                    idx, n_nodes, a.transactions_per_node, rng, a.exclude_self
                 )
             else:  # hotspot
                 if a.hotspot is None:
                     ap.error("--hotspot is required for the hotspot pattern")
                 dst_linears = hotspot_dsts(
                     idx, n_nodes, a.transactions_per_node, rng,
-                    a.hotspot, a.hotspot_rates, a.allow_self
+                    a.hotspot, a.hotspot_rates, a.exclude_self
                 )
 
             # Convert linear dst indices → coord_ids
