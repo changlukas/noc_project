@@ -39,17 +39,19 @@
 
 對 node i 產 `transactions-per-node` 筆 write+read pair,每筆的 **dst 由 pattern 取樣**,addr = `dst_coord<<32 + uniq_local_offset`:
 
-| pattern | 每筆 dst | 備註 |
-|---|---|---|
-| `uniform_random` | 每筆獨立均勻隨機(排除 self,seed-stable) | 每筆各自隨機,**非每 node 固定一個** |
-| `transpose` | (x,y)→(y,x) | guard:需方形 mesh(4x4 ✓);非方形報錯 |
-| `nearest_neighbor` | 隨機選 E/W/N/S 鄰(邊界:no-wrap,選現存方向) | local 低-hop |
-| `hotspot` | 加權選少數固定 hotspot node(`--hotspot` 指定) | sink 壅塞 |
+兩類:**確定性**(每 node 每筆固定 dst,可重現)vs **per-packet 隨機**(每筆各自取樣,seed-stable)。
 
-- **per-packet random**:uniform/hotspot/neighbor 每筆 transaction 各自取樣(seed-stable 可重現)。
-- **self-traffic**:預設排除(dst≠src);可 `--allow-self`。
-- **hotspot 位址唯一性**:每個 source 在 dst 記憶體區分到**不重疊的 local offset**(避免多源寫同絕對位址 → scoreboard 混淆)。每筆 write/read 同址成對。
-- **guard**:`x_dim×y_dim ≤ 2^DST_ID_WIDTH`、pattern 對 mesh 形狀的限制(transpose 方形)違反即 fail-fast。
+| pattern | 類型 | 每筆 dst | 備註 |
+|---|---|---|---|
+| `nearest_neighbor` | **確定性** | 固定方向(預設 +x=East;邊界 no-wrap,缺該方向時退固定次選 W→N→S);排除 self | 確定性 local 低-hop;**correctness 回歸用它** |
+| `transpose` | 確定性 | (x,y)→(y,x) | guard:需方形 mesh(4x4 ✓);**對角 node (x,x)→自己 = self**(數學 transpose 正確),故 transpose 屬 benchmark、隱含 `--allow-self`;correctness smoke 不用它 |
+| `uniform_random` | per-packet 隨機 | 每筆獨立均勻隨機(排除 self) | load balance、bisection |
+| `hotspot` | per-packet 隨機 | 每筆加權選少數 hotspot node(`--hotspot`) | sink 壅塞;**correctness smoke 用它** |
+
+- **per-packet 隨機**:uniform/hotspot 每筆 transaction 各自取樣(seed 可重現);nearest_neighbor/transpose 為確定性。
+- **self-traffic**:預設排除(dst≠src);transpose 對角隱含允許;`--allow-self` 全域開關。
+- **位址唯一性(全域)**:任何 convergent pattern(多源→同 dst node)都可能撞同一絕對位址 → 每筆 write/read 對在 dst node `memory_base..+memory_size` 內分到**全域唯一 local offset**(以 (src,seq) 決定),非僅 hotspot。write/read 同址成對。dst 位址須落在該 node 的 memory 區內。
+- **guard**:`x_dim×y_dim ≤ 2^DST_ID_WIDTH`、transpose 需方形 mesh;違反即 fail-fast。
 
 ### 2b. user-custom（`--from <base scenario.yaml>`）
 
@@ -65,20 +67,20 @@
 - **build**:該 topology 的 tb(若未 build)。
 - **run**:生成的 pattern,傳全 N 個 `+scenario_node<i>`。
 - **correctness gate(必要)**:`PASS: scoreboard clean` + master_count==N + reads_checked≥N(沿用既有 PASS guard;DECERR/SLVERR 不計入 reads → gate 守得住)。
-- **perf**:讀 `perf.json` → per-pattern 彙整 latency(mean / p95 / max;p95 由 `latency.transactions` 算,CLI 目前只 min/mean/max)+ throughput(byte/txn)+ link/occupancy。輸出小 JSON/CSV。
+- **perf**:讀 `perf.json` → per-pattern 彙整 latency(mean / p95 / max;p95 由 `latency.transactions` 算,CLI 目前只 min/mean/max)+ throughput(byte/txn)+ link/occupancy。輸出到 `output/<scenario>/bench_summary.json`。
 - **誠實標示**:v1 注入是 **greedy 有限-trace stress run**(send-while-pending,max_outstanding 上限),**非 offered-load 飽和量測**;summary 標明此語意 + 量測 window(`perf.json` window 現為 `[0,total_cyc)` 含 reset/drain)。saturation curve → 下一輪。
 
 ## 4. 檔案對齊
 
 - `gen_*` 全進 `sim/tools/`(`gen_filelist.py` 移入)。
-- **刪 `gen_coordinate_scenarios.py`**(功能由 `gen_test_patterns` 取代,無 wrapper);**同一改動原子更新**所有 call sites(`run_regress.py:21,63`、Verilator/VCS Makefile)改呼叫 `gen_test_patterns`(correctness 用 `nearest_neighbor`)。
+- **刪 `gen_coordinate_scenarios.py` + 其單元測試 `test_gen_coordinate_scenarios.py`**(功能由 `gen_test_patterns` 取代,無 wrapper;改寫成 `test_gen_test_patterns.py`);**同一改動原子更新**所有 call sites(`run_regress.py:21,63`、Verilator/VCS Makefile `run-tb-top`)改呼叫 `gen_test_patterns`(correctness 用 `nearest_neighbor`)。
 - `run_regress`(正確性回歸)保留,但改用 `gen_test_patterns`;benchmark runner(效能)新增。
 
 ## 5. 測試 / gate
 
 - **pattern dst 公式單元測試**:uniform 覆蓋範圍 + 排除 self;transpose (x,y)→(y,x);neighbor 相鄰且邊界 no-wrap;hotspot 集中於指定 node + 每源唯一位址。
 - **guard 測試**:非方形 transpose / 超 flit 容量 → fail-fast。
-- **非-ring smoke(必要)**:transpose 或 hotspot 在 `mesh_4x4_vc1` 實跑 → routing 正確 + **scoreboard clean** + perf summary 產出(non-vacuous)。光單元測試抓不到配對風險,必須有真跑。
+- **非-ring smoke(必要)**:`hotspot` 在 `mesh_4x4_vc1` 實跑 → routing 正確 + **scoreboard clean** + perf summary 產出(non-vacuous)。選 hotspot(非 transpose,避開對角 self 模糊)。光單元測試抓不到配對風險,必須有真跑。
 - **回歸**:契約修正(§1)後,6-scenario co-sim 改用 `nearest_neighbor` 確定性分佈,scoreboard clean + ctest 保持綠。
 
 ## 6. Success criteria
