@@ -25,7 +25,8 @@ sys.path.insert(0, str(SPECGEN_ROOT))
 TOOLS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS_DIR.parent))
 
-from ni_spec.loader import load_spec_version
+from ni_spec.loader import load_spec_version, load_spec_bundle
+from ni_spec.invariants import check_all
 from tools.elaborate import common
 from tools.elaborate import cpp_packet, cpp_signals, cpp_params
 from tools.elaborate import sv_packet, sv_signals, sv_params
@@ -103,6 +104,30 @@ def _strip_provenance(lines: list[str]) -> list[str]:
 _strip_timestamp = _strip_provenance
 
 
+def _check_invariants() -> bool:
+    """Run Layer 1/2 invariants (check_all) against the committed JSON spec
+    + constants.yaml. Returns True if no ERROR Issue, False otherwise.
+
+    The drift diff only catches "regenerated != committed"; it cannot catch a
+    config that is internally consistent (no drift) yet semantically illegal,
+    e.g. an over-sized mesh that exceeds the flit dst_id/vc_id field capacity.
+    check_all binds those cross-source constraints, so wire it into the gate.
+    """
+    json_dir = SPECGEN_ROOT / "generated" / "json"
+    if not (json_dir / "ni_packet.json").exists():
+        print(f"[skip] invariants: {json_dir}/ni_packet.json not found", file=sys.stderr)
+        return True
+    bundle = load_spec_bundle(json_dir)
+    issues = check_all(bundle)
+    errors = [i for i in issues if i.severity == "ERROR"]
+    if errors:
+        print("[invariant] ERROR issue(s) found:", file=sys.stderr)
+        for i in errors:
+            print(f"  [{i.check}] {i.message}", file=sys.stderr)
+        return False
+    return True
+
+
 def cmd_emit(args: argparse.Namespace) -> int:
     if not args.domain:
         print("ERROR: --domain is required with --target", file=sys.stderr)
@@ -128,9 +153,12 @@ def cmd_check(_args: argparse.Namespace) -> int:
     both ``// Generated at:`` and ``// Source SHA:`` lines are stripped
     before diffing (see ``_strip_provenance``). This matches the policy
     of ``specgen/tests/test_byte_identical_golden.py``.
-    Exits 0 if all files match, 1 if any drift is detected.
+    Also runs check_all invariants (Layer 1/2): a config that is drift-free
+    but semantically illegal (e.g. mesh dims exceeding flit field capacity)
+    fails here even though no header diff would surface it.
+    Exits 0 if all files match and no ERROR invariant, 1 otherwise.
     """
-    all_ok = True
+    all_ok = _check_invariants()
 
     with tempfile.TemporaryDirectory() as tmp:
         fresh_base = Path(tmp)

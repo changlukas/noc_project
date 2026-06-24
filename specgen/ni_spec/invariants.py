@@ -33,7 +33,14 @@ def check_schema(packet_spec, packet_schema) -> List[Issue]:
     """Layer 1。"""
     if packet_schema is None:
         return [_warn("L1-SCHEMA", "schema 未提供，略過 Layer 1")]
-    import jsonschema
+    try:
+        import jsonschema
+    except ImportError:
+        # jsonschema is optional: Layer-1 structural validation is best-effort.
+        # The authoritative L1 gate is the specgen pytest suite (which depends on
+        # jsonschema); codegen.py's gate runs the L2 arithmetic/binding checks that
+        # do not need it. Degrade to WARN so the L2 checks still run here.
+        return [_warn("L1-SCHEMA", "jsonschema 未安裝，略過 Layer 1 結構校驗")]
     validator = jsonschema.Draft202012Validator(packet_schema)
     issues = []
     for e in sorted(validator.iter_errors(packet_spec), key=lambda e: list(e.absolute_path)):
