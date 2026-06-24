@@ -20,6 +20,7 @@ from gen_test_patterns import (  # noqa: E402
     coord_id,
     hotspot_dsts,
     neighbor_dst,
+    transpose_dst,
     uniform_random_dsts,
 )
 
@@ -330,6 +331,76 @@ def test_hotspot_exclude_self_multi_skips_src():
                         hotspots=[0, 2], exclude_self=True)
     assert 0 not in dsts, "exclude_self must skip src hotspot in multi-hotspot mode"
     assert all(d == 2 for d in dsts)
+
+
+# ---------------------------------------------------------------------------
+# transpose_dst: ported from booksim2 TransposeTrafficPattern::dest (traffic.cpp:244)
+# ---------------------------------------------------------------------------
+
+def test_transpose_swaps_xy():
+    """Booksim bit-half-swap on square mesh: (x,y)→(y,x)."""
+    assert transpose_dst(1, 2) == (2, 1)
+    assert transpose_dst(0, 3) == (3, 0)
+    assert transpose_dst(3, 1) == (1, 3)
+
+
+def test_transpose_diagonal_is_self():
+    """Diagonal node (x==y) maps to itself; booksim-faithful (no special-case)."""
+    assert transpose_dst(2, 2) == (2, 2)
+    assert transpose_dst(0, 0) == (0, 0)
+    assert transpose_dst(3, 3) == (3, 3)
+
+
+def test_transpose_is_involution_4x4():
+    """transpose(transpose(x,y)) == (x,y) for all 4x4 nodes."""
+    for x in range(4):
+        for y in range(4):
+            dx, dy = transpose_dst(x, y)
+            assert transpose_dst(dx, dy) == (x, y)
+
+
+def test_transpose_requires_square_mesh():
+    """Non-square topology must cause a SystemExit (fail-fast)."""
+    import subprocess
+    import tempfile
+    import shutil
+    repo = os.path.abspath(os.path.join(HERE, "..", ".."))
+    topo_dir = os.path.join(HERE, "..", "topologies")
+    name = "mesh_3x2_vc1"
+    dest = os.path.join(topo_dir, f"{name}.yaml")
+    with tempfile.TemporaryDirectory(dir=repo) as tmp:
+        with open(os.path.join(tmp, f"{name}.yaml"), "w") as f:
+            yaml.safe_dump({"topology": {"name": name,
+                                          "x_dim": 3, "y_dim": 2, "num_vc": 1}}, f)
+        shutil.copy(os.path.join(tmp, f"{name}.yaml"), dest)
+        try:
+            result = subprocess.run(
+                [sys.executable,
+                 os.path.join(HERE, "gen_test_patterns.py"),
+                 "--pattern", "transpose",
+                 "--topology", name,
+                 "--out", os.path.join(tmp, "out"),
+                 "--transactions-per-node", "1",
+                 "--memory-size", "0x1000"],
+                capture_output=True, text=True
+            )
+        finally:
+            if os.path.exists(dest):
+                os.remove(dest)
+    assert result.returncode != 0, "transpose on non-square mesh must exit non-zero"
+    assert "square" in result.stderr.lower() or "x_dim" in result.stderr, (
+        f"expected square-mesh guard message; stderr={result.stderr!r}"
+    )
+
+
+def test_global_addr_uniqueness_transpose():
+    """All write addresses across all nodes must be globally unique for transpose."""
+    scenarios = _gen_all_synthetic("transpose", 4, 4, txn_per_node=2, seed=0)
+    write_addrs = [t["addr"] for sc in scenarios for t in sc["transactions"]
+                   if t["op"] == "write"]
+    assert len(write_addrs) == len(set(write_addrs)), (
+        "transpose: two writes share the same absolute address"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -26,6 +26,12 @@ uniform_random  (ported from booksim2 UniformRandomTrafficPattern::dest,
     Self-traffic is PERMITTED by default (booksim-faithful); --exclude-self opts out.
     Uses random.Random(seed) for reproducibility.
 
+transpose  (ported from booksim2 TransposeTrafficPattern::dest, src/traffic.cpp:244-250)
+    Bit-half-swap of the node id.  On a square k×k mesh (k a power of two) this is
+    equivalent to (x,y)→(y,x).  Requires x_dim == y_dim and x_dim a power of two.
+    Diagonal nodes (x==y) are self-traffic; permitted by default (booksim-faithful).
+    Each node's dst is fixed; all transactions_per_node pairs target the same dst.
+
 hotspot  (ported from booksim2 HotSpotTrafficPattern::dest, src/traffic.cpp:506-526)
     Directs traffic to one or more hotspot nodes (--hotspot <linear-node-ids>).
     Single hotspot: all packets go to that node.
@@ -93,6 +99,22 @@ def neighbor_dst(x, y, x_dim, y_dim):
     y_dim > 1.
     """
     return (x + 1) % x_dim, (y + 1) % y_dim
+
+
+def transpose_dst(x, y):
+    """Booksim2 TransposeTrafficPattern::dest (traffic.cpp:244): bit-half-swap of node id.
+
+    On a square k×k mesh (k a power of two), booksim's row-major node id y*k+x has
+    equal-width x and y fields; the bit-half-swap is equivalent to swapping the two
+    coordinate fields, giving dst = (y, x).
+
+    Caller MUST have already validated that x_dim == y_dim and x_dim is a power of two
+    (see _check_transpose_guard).  Diagonal nodes (x==y) map to themselves, which is
+    booksim-faithful (booksim does NOT special-case self-traffic).
+
+    Returns (dst_x, dst_y).
+    """
+    return y, x
 
 
 def uniform_random_dsts(src_node, n_nodes, n_txn, rng, exclude_self=False):
@@ -286,6 +308,27 @@ def _check_mesh_capacity(x_dim, y_dim):
         )
 
 
+def _check_transpose_guard(x_dim, y_dim):
+    """Fail fast if the mesh is unsuitable for transpose.
+
+    Booksim TransposeTrafficPattern::TransposeTrafficPattern (traffic.cpp:230-242)
+    requires the total node count to be an even power of two (it exit(-1)s otherwise).
+    For a square row-major mesh this additionally requires x_dim == y_dim and x_dim
+    to be a power of two.  Non-square meshes cannot satisfy the equal bit-field split
+    that makes the bit-half-swap equivalent to (x,y)→(y,x).
+    """
+    if x_dim != y_dim:
+        sys.exit(
+            f"ERROR: transpose pattern requires a square mesh (x_dim == y_dim); "
+            f"got {x_dim}x{y_dim}.  Use a square topology (e.g. mesh_4x4_vc1)."
+        )
+    if x_dim == 0 or (x_dim & (x_dim - 1)) != 0:
+        sys.exit(
+            f"ERROR: transpose pattern requires x_dim to be a power of two "
+            f"(booksim requires even power-of-two node count); got x_dim={x_dim}."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pattern dispatch
 # ---------------------------------------------------------------------------
@@ -294,6 +337,8 @@ def _dst_for(pattern, x, y, x_dim, y_dim):
     """Return (dst_x, dst_y) for the given pattern and source coordinates (deterministic)."""
     if pattern == "neighbor":
         return neighbor_dst(x, y, x_dim, y_dim)
+    if pattern == "transpose":
+        return transpose_dst(x, y)
     raise ValueError(f"Unknown pattern: {pattern!r} (use per-packet sampler for random patterns)")
 
 
@@ -404,7 +449,7 @@ def main(argv=None):
                     help="Base scenario.yaml path (omit for synthetic payload mode; for "
                          "random patterns it only borrows the memory shape)")
     ap.add_argument("--pattern", required=True,
-                    choices=["neighbor", "uniform_random", "hotspot"],
+                    choices=["neighbor", "transpose", "uniform_random", "hotspot"],
                     help="Traffic pattern")
     ap.add_argument("--topology", default="mesh_4x4_vc1",
                     help="Topology name (matches sim/topologies/<name>.yaml)")
@@ -453,11 +498,42 @@ def main(argv=None):
             memory_size = a.memory_size  # explicit CLI override wins
 
         for (idx, x, y, src_cid) in nodes:
-            dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
+            dst_x, dst_y = neighbor_dst(x, y, x_dim, y_dim)
             dst_cid = coord_id(dst_x, dst_y)
             out_dir = os.path.join(a.out, f"node{idx}")
             _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
                        n_nodes, base_local, memory_size)
+
+    elif a.pattern == "transpose":
+        # Deterministic: (x,y)→(y,x), square-mesh only.  Supports synthetic mode
+        # (--from absent) and base-scenario mode (--from present).
+        _check_transpose_guard(x_dim, y_dim)
+        base_local = 0x1000
+        memory_size = 0x1000
+        if a.base is not None:
+            src_path = os.path.abspath(a.base)
+            src_dir = os.path.dirname(src_path)
+            with open(src_path) as f:
+                base_sc = yaml.safe_load(f)
+            cfg = base_sc.get("config", {})
+            base_local = _as_int(cfg.get("memory_base", 0)) & 0xFFFFFFFF
+            memory_size = _as_int(cfg.get("memory_size", 0x1000))
+        if a.memory_size is not None:
+            memory_size = a.memory_size  # explicit CLI override wins
+
+        for (idx, x, y, src_cid) in nodes:
+            dst_x, dst_y = transpose_dst(x, y)
+            dst_cid = coord_id(dst_x, dst_y)
+            # Each of transactions_per_node pairs targets the same fixed dst.
+            dst_cids = [dst_cid] * a.transactions_per_node
+            out_dir = os.path.join(a.out, f"node{idx}")
+            if a.base is not None:
+                _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
+                           n_nodes, base_local, memory_size)
+            else:
+                _emit_synthetic_node(out_dir, idx, dst_cids, src_cid,
+                                     n_nodes, base_local, memory_size,
+                                     a.size, a.burst_len)
 
     else:
         # Per-packet random pattern (uniform_random / hotspot): synthetic payload.
