@@ -342,12 +342,20 @@ def emit_fabric(topo: dict) -> str:
                 continue
             seen.add(key)
             for net in ("req", "rsp"):
+                # vc_id is flit header bits [VC_ID_MSB:VC_ID_LSB] = [21:19].
+                # Decode from the flit bus; truncate to $clog2(NUM_VC) bits so
+                # the monitor index stays in range. credit_pulse is per-VC
+                # (NOT OR-collapsed): each bit corresponds to one VC slot freed.
+                flit_wire = f"n{i}_link_{net}_out_flit[RP_{d}]"
+                credit_wire = f"n{i}_link_{net}_out_credit[RP_{d}]"
                 w(f"    link_perf_monitor #(")
-                w(f'        .LINK_NAME("{net}_{i}to{pi}"), .BUFFER_DEPTH(ROUTER_VC_DEPTH)')
+                w(f'        .LINK_NAME("{net}_{i}to{pi}"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),')
+                w(f"        .NUM_VC(NUM_VC)")
                 w(f"    ) u_perf_link_{net}_{i}_{pi} (")
                 w(f"        .clk_i, .rst_ni,")
                 w(f"        .valid(n{i}_link_{net}_out_valid[RP_{d}]),")
-                w(f"        .credit_pulse(|n{i}_link_{net}_out_credit[RP_{d}])")
+                w(f"        .vc_id({flit_wire}[21:19]),")
+                w(f"        .credit_pulse({credit_wire})")
                 w(f"    );")
                 w("")
 

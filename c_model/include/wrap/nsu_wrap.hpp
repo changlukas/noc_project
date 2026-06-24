@@ -32,7 +32,8 @@
 #include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
 #include "wrap/nsu_wrap_io.hpp"
-#include "wrap/poc_defaults.hpp"  // kPoC* depths
+#include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)
+#include "ni_params.h"             // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "flit.hpp"
 #include "nsu/nsu_standalone.hpp"
 #include <array>
@@ -69,9 +70,11 @@ class NsuWrap {
         cfg.vc_arbiter_pending_depth = kPoCArbiterFifoDepth;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
         // R2: close the NI-edge credit loop. Seed the rsp-out sender counter to
-        // the router LOCAL input depth (kPoCChannelModelDepth) so credit conserves
-        // — the router wrap seeds its LOCAL eject/credit with the same depth.
-        nsu_->enable_noc_credit(kPoCChannelModelDepth);
+        // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
+        // constants.yaml) — the single source of truth that also seeds the
+        // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
+        // kPoCChannelModelDepth (64) is reserved for the ChannelModel stub only.
+        nsu_->enable_noc_credit(static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
         in_ = NsuInputs{};
         out_ = NsuOutputs{};
         held_aw_ = std::nullopt;
