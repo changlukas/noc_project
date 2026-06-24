@@ -145,8 +145,12 @@ lint_docs:
 check: lint_scenarios lint_docs build-cmodel build-verilator
 	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
 
+# TOPOLOGY (default mesh_2x1) selects the node count for both the tb_top build
+# and the regression runner. Exported so sim/run_regress.py materializes the
+# matching per-node coordinate variants (N>2) and asserts master_count == N.
+TOPOLOGY ?= mesh_2x1
 sim-regress: build-verilator
-	$(PYTHON3) sim/run_regress.py
+	TOPOLOGY=$(TOPOLOGY) $(PYTHON3) sim/run_regress.py
 
 # --- clean ---
 

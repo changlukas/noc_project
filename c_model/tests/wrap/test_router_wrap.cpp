@@ -229,3 +229,95 @@ TEST(RouterWrap, Node1NmuReqRoutesToLinkOut) {
     }
     EXPECT_TRUE(seen) << "node1 NMU request never appeared on link_req_out";
 }
+
+// Multi-direction node: corner (1,1) of a 2x2 mesh has TWO live directions —
+// WEST (to x=0) and SOUTH (to y=0); NORTH/EAST are boundary (tied off). XY DOR
+// routes X first, so a (0,1)-dst flit exits WEST and a (1,0)-dst flit exits
+// SOUTH. This is the genuine per-direction discriminator the single-link tests
+// (init(x_coord=0)) cannot reach: it checks that each direction wires
+// independently and that a flit on one direction never bleeds onto the other.
+TEST(RouterWrap, CornerNodeRoutesPerDirectionIndependently) {
+    using ni::cmodel::router::RouterPort;
+    constexpr std::size_t WEST = static_cast<std::size_t>(RouterPort::WEST);
+    constexpr std::size_t SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
+    constexpr std::size_t NORTH = static_cast<std::size_t>(RouterPort::NORTH);
+    constexpr std::size_t EAST = static_cast<std::size_t>(RouterPort::EAST);
+
+    // dst coord ids: (0,1) = (1<<4)|0 = 0x10 routes WEST; (1,0) = 0x01 routes SOUTH.
+    auto route_one = [NORTH, EAST](uint8_t dst, std::size_t expect_dir, std::size_t other_dir) {
+        RouterWrap a;
+        a.init(/*x=*/1, /*y=*/1, /*mesh_x=*/2, /*mesh_y=*/2);
+        RouterInputs in{};
+        in.req_in_valid = true;
+        in.req_in_flit = flit_to_bytes(make_req(dst));
+        a.set_inputs(in);
+        a.tick();
+        a.set_inputs(RouterInputs{});
+
+        RouterOutputs out{};
+        bool on_expect = false;
+        for (int cyc = 0; cyc < 16 && !on_expect; ++cyc) {
+            a.tick();
+            a.get_outputs(out);
+            // The other live direction and BOTH tied-off directions must stay quiet
+            // every cycle — no cross-direction bleed, no boundary drive.
+            EXPECT_FALSE(out.link_req_out_valid[other_dir]) << "flit bled onto the wrong direction";
+            EXPECT_FALSE(out.link_req_out_valid[NORTH]) << "boundary NORTH driven";
+            EXPECT_FALSE(out.link_req_out_valid[EAST]) << "boundary EAST driven";
+            if (out.link_req_out_valid[expect_dir]) {
+                on_expect = true;
+                EXPECT_EQ(
+                    flit_from_bytes(out.link_req_out_flit[expect_dir]).get_header_field("dst_id"),
+                    dst);
+            }
+        }
+        EXPECT_TRUE(on_expect) << "request never appeared on the expected direction";
+    };
+
+    route_one(/*dst=*/0x10, /*expect=*/WEST, /*other=*/SOUTH);
+    route_one(/*dst=*/0x01, /*expect=*/SOUTH, /*other=*/WEST);
+}
+
+// Multi-direction node: a credit pulse returned on one live direction must
+// replenish only that direction's router credit counter, never the other live
+// direction's. Corner (1,1): spend one credit on WEST (eject a WEST-bound flit),
+// then return the WEST credit; SOUTH's credit must be untouched.
+TEST(RouterWrap, CornerNodeCreditDoesNotCrossDirections) {
+    using ni::cmodel::router::RouterPort;
+    constexpr std::size_t WEST = static_cast<std::size_t>(RouterPort::WEST);
+    constexpr std::size_t SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
+
+    RouterWrap a;
+    a.init(/*x=*/1, /*y=*/1, /*mesh_x=*/2, /*mesh_y=*/2);
+    const std::size_t west_seed = a.req_router().credit(WEST, /*vc=*/0);
+    const std::size_t south_seed = a.req_router().credit(SOUTH, /*vc=*/0);
+    ASSERT_GT(west_seed, 0u);
+    ASSERT_GT(south_seed, 0u);
+
+    // Eject one WEST-bound flit (dst (0,1) = 0x10): the grant spends one WEST credit.
+    RouterInputs in{};
+    in.req_in_valid = true;
+    in.req_in_flit = flit_to_bytes(make_req(/*dst=*/0x10));
+    a.set_inputs(in);
+    a.tick();
+    a.set_inputs(RouterInputs{});
+    RouterOutputs out{};
+    bool ejected = false;
+    for (int cyc = 0; cyc < 16 && !ejected; ++cyc) {
+        a.tick();
+        a.get_outputs(out);
+        if (out.link_req_out_valid[WEST]) ejected = true;
+    }
+    ASSERT_TRUE(ejected);
+    ASSERT_EQ(a.req_router().credit(WEST, 0), west_seed - 1) << "WEST eject must spend one credit";
+    ASSERT_EQ(a.req_router().credit(SOUTH, 0), south_seed) << "SOUTH credit must be untouched";
+
+    // Return the WEST credit pulse: only WEST replenishes; SOUTH stays at its seed.
+    in = RouterInputs{};
+    in.link_req_out_credit[WEST][0] = true;
+    a.set_inputs(in);
+    a.tick();
+    EXPECT_EQ(a.req_router().credit(WEST, 0), west_seed)
+        << "WEST credit-return must replenish WEST";
+    EXPECT_EQ(a.req_router().credit(SOUTH, 0), south_seed) << "WEST credit must not touch SOUTH";
+}

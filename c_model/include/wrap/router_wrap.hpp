@@ -47,6 +47,7 @@
 #include "wrap/router_wrap_io.hpp"
 #include "router/router.hpp"
 #include "router/router_adapters.hpp"
+#include <array>
 #include <memory>
 #include <stdexcept>
 
@@ -57,8 +58,18 @@ class RouterWrap {
     void init(uint8_t x_coord, uint8_t y_coord = 0, uint8_t mesh_x_dim = 2, uint8_t mesh_y_dim = 1,
               uint8_t num_vc = 1) {
         num_vc_ = num_vc;
-        link_port_ = (x_coord == 0) ? static_cast<std::size_t>(router::RouterPort::EAST)
-                                    : static_cast<std::size_t>(router::RouterPort::WEST);
+
+        // Determine which N/E/S/W directions have a neighbor in the mesh. The
+        // router LOCAL port is always wired; each existing directional link gets
+        // its own pulse-credit adapter pair. Boundary directions stay unwired
+        // (downstream_[port] == nullptr): route_compute never routes a flit to an
+        // absent neighbor (dst within mesh), and the SV generator emits a tie-off
+        // assertion as defense-in-depth.
+        using router::RouterPort;
+        link_live_[static_cast<std::size_t>(RouterPort::EAST)] = (x_coord + 1 < mesh_x_dim);
+        link_live_[static_cast<std::size_t>(RouterPort::WEST)] = (x_coord > 0);
+        link_live_[static_cast<std::size_t>(RouterPort::NORTH)] = (y_coord + 1 < mesh_y_dim);
+        link_live_[static_cast<std::size_t>(RouterPort::SOUTH)] = (y_coord > 0);
 
         router::RouterConfig c;
         c.x = x_coord;
@@ -73,8 +84,11 @@ class RouterWrap {
 
         wire_port(*req_router_, LOCAL, req_local_eject_, req_local_credit_);
         wire_port(*rsp_router_, LOCAL, rsp_local_eject_, rsp_local_credit_);
-        wire_port(*req_router_, link_port_, req_link_eject_, req_link_credit_);
-        wire_port(*rsp_router_, link_port_, rsp_link_eject_, rsp_link_credit_);
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            if (p == LOCAL || !link_live_[p]) continue;
+            wire_port(*req_router_, p, req_link_eject_[p], req_link_credit_[p]);
+            wire_port(*rsp_router_, p, rsp_link_eject_[p], rsp_link_credit_[p]);
+        }
 
         in_ = RouterInputs{};
         out_ = RouterOutputs{};
@@ -94,13 +108,14 @@ class RouterWrap {
         if (in_.rsp_in_valid) {
             rsp_router_->input(LOCAL).push_flit(flit_from_bytes(in_.rsp_in_flit));
         }
-        if (in_.link_req_in_valid[link_port_]) {
-            req_router_->input(link_port_)
-                .push_flit(flit_from_bytes(in_.link_req_in_flit[link_port_]));
-        }
-        if (in_.link_rsp_in_valid[link_port_]) {
-            rsp_router_->input(link_port_)
-                .push_flit(flit_from_bytes(in_.link_rsp_in_flit[link_port_]));
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            if (p == LOCAL || !link_live_[p]) continue;
+            if (in_.link_req_in_valid[p]) {
+                req_router_->input(p).push_flit(flit_from_bytes(in_.link_req_in_flit[p]));
+            }
+            if (in_.link_rsp_in_valid[p]) {
+                rsp_router_->input(p).push_flit(flit_from_bytes(in_.link_rsp_in_flit[p]));
+            }
         }
         // LOCAL credit IN: the NMU/NSU returned a pulse for a flit drained from
         // the router's LOCAL OUTPUT (router->NI direction). Replenish the
@@ -108,11 +123,12 @@ class RouterWrap {
         for (uint8_t vc = 0; vc < num_vc_; ++vc) {
             if (in_.req_in_credit_return[vc]) req_router_->receive_credit(LOCAL, vc);
             if (in_.rsp_in_credit_return[vc]) rsp_router_->receive_credit(LOCAL, vc);
-            // Neighbor credit pulses for flits we previously sent over the LINK.
-            if (in_.link_req_out_credit[link_port_][vc])
-                req_router_->receive_credit(link_port_, vc);
-            if (in_.link_rsp_out_credit[link_port_][vc])
-                rsp_router_->receive_credit(link_port_, vc);
+            // Neighbor credit pulses for flits we previously sent over each LINK.
+            for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+                if (p == LOCAL || !link_live_[p]) continue;
+                if (in_.link_req_out_credit[p][vc]) req_router_->receive_credit(p, vc);
+                if (in_.link_rsp_out_credit[p][vc]) rsp_router_->receive_credit(p, vc);
+            }
         }
 
         // Step 2: advance both routers one stage.
@@ -136,17 +152,20 @@ class RouterWrap {
             out_.rsp_out_credit_return[vc] = rsp_local_credit_->take(vc);
         }
 
-        if (auto f = req_link_eject_->pop_flit()) {
-            out_.link_req_out_valid[link_port_] = true;
-            out_.link_req_out_flit[link_port_] = flit_to_bytes(*f);
-        }
-        if (auto f = rsp_link_eject_->pop_flit()) {
-            out_.link_rsp_out_valid[link_port_] = true;
-            out_.link_rsp_out_flit[link_port_] = flit_to_bytes(*f);
-        }
-        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-            out_.link_req_in_credit[link_port_][vc] = req_link_credit_->take(vc);
-            out_.link_rsp_in_credit[link_port_][vc] = rsp_link_credit_->take(vc);
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            if (p == LOCAL || !link_live_[p]) continue;
+            if (auto f = req_link_eject_[p]->pop_flit()) {
+                out_.link_req_out_valid[p] = true;
+                out_.link_req_out_flit[p] = flit_to_bytes(*f);
+            }
+            if (auto f = rsp_link_eject_[p]->pop_flit()) {
+                out_.link_rsp_out_valid[p] = true;
+                out_.link_rsp_out_flit[p] = flit_to_bytes(*f);
+            }
+            for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+                out_.link_req_in_credit[p][vc] = req_link_credit_[p]->take(vc);
+                out_.link_rsp_in_credit[p][vc] = rsp_link_credit_[p]->take(vc);
+            }
         }
     }
 
@@ -159,10 +178,20 @@ class RouterWrap {
     // RSP router accessor — used by cmodel_perf_sample_tick to sample occupancy.
     router::Router& rsp_router() { return *rsp_router_; }
 
-    // VC count + active link direction — read by the DPI handlers to size the
-    // per-VC credit marshalling loops and pick the live link-array slot.
+    // VC count — read by the DPI handlers to size the per-VC credit
+    // marshalling loops.
     uint8_t num_vc() const { return num_vc_; }
-    std::size_t link_port() const { return link_port_; }
+
+    // First live LINK direction (LOCAL excluded). For a 2-node line this is the
+    // node's single neighbor (EAST for node0, WEST for node1); used by unit
+    // tests that exercise the single-link case. The DPI now marshals every
+    // direction port-major, so production wiring does not depend on this.
+    std::size_t link_port() const {
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            if (p != LOCAL && link_live_[p]) return p;
+        }
+        return LOCAL;  // isolated node (no neighbor) — no live link
+    }
 
   private:
     static constexpr std::size_t LOCAL = static_cast<std::size_t>(router::RouterPort::LOCAL);
@@ -181,13 +210,18 @@ class RouterWrap {
     }
 
     uint8_t num_vc_ = 1;
-    std::size_t link_port_ = static_cast<std::size_t>(router::RouterPort::EAST);
+    // Per-direction live mask (LOCAL slot unused): true where the node has a
+    // neighbor in the mesh. Boundary directions stay false (unwired).
+    std::array<bool, ROUTER_LINK_PORTS> link_live_{};
 
     std::unique_ptr<router::Router> req_router_, rsp_router_;
     std::unique_ptr<router::LinkEjectAdapter> req_local_eject_, rsp_local_eject_;
     std::unique_ptr<router::LinkCreditOut> req_local_credit_, rsp_local_credit_;
-    std::unique_ptr<router::LinkEjectAdapter> req_link_eject_, rsp_link_eject_;
-    std::unique_ptr<router::LinkCreditOut> req_link_credit_, rsp_link_credit_;
+    // Per-direction LINK adapters; only live[p] slots are constructed.
+    std::array<std::unique_ptr<router::LinkEjectAdapter>, ROUTER_LINK_PORTS> req_link_eject_,
+        rsp_link_eject_;
+    std::array<std::unique_ptr<router::LinkCreditOut>, ROUTER_LINK_PORTS> req_link_credit_,
+        rsp_link_credit_;
 
     RouterInputs in_{};
     RouterOutputs out_{};

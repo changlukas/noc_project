@@ -1,29 +1,34 @@
 #!/usr/bin/env python3
-"""Generate sim/sv/tb_top.sv from a topology config + specgen constants.
+"""Generate sim/sv/tb_top.sv + sim/sv/noc_fabric_<topo>.sv from a topology config.
 
-S0 scope: reproduce 2-node single-VC tb behaviour.  Generated artifact: edit
-the generator or the topology YAML, never the emitted .sv directly.
+The fabric/tb split (S3):
+  - noc_fabric_<topo>.sv : N nodes, each = NMU + REQ/RSP router_wrap + NSU, joined
+    by inter-router directional (N/E/S/W) links with boundary tie-off + assertion.
+    Every node exposes a clean per-node AXI port (master-side + slave-side). The
+    DPI `ctx` handles arrive as PORTS — the fabric itself does no cmodel_*_create.
+  - tb_top.sv : clk/rst, plusargs, cmodel_*_create (incl. router/nmu/nsu/master/
+    slave ctx), instantiates the fabric, attaches test master_wrap/slave_wrap +
+    AXI perf monitors + scoreboard exit logic.
+
+Generated artifacts: edit the generator or the topology YAML, never the emitted
+.sv directly. tb_top.sv includes the fabric (SV `include), so the fabric is
+compiled via the existing -I sim/sv include path (no build_config.mk edit needed).
 
 Usage:
     python3 gen_tb_top.py [--topology mesh_2x1] [--out sim/sv/tb_top.sv]
     python3 gen_tb_top.py --check            # drift gate (exit 1 if stale)
 
 Parameterised from topology YAML:
-    - nodes list [(x,y), ...] from x_dim × y_dim
-    - per-node plusarg names (+scenario_node<i>)
-    - per-node variable declarations (ctx handles, scenario strings)
-    - cmodel_init called with the LAST node's scenario (matches original hand-written order)
-    - master at node k drives the NEXT node's variant (circular, crosses link)
-    - slave  at node k receives the NEXT node's variant
-    - src_id = linear index = x + y*x_dim (same as node index for 1D mesh)
-    - inter-router link nets named <type>_<src>to<dst> for each neighbour pair
-    - PASS guard: cmodel_master_count() == len(nodes)
+    - nodes list [(x,y), ...] from x_dim x y_dim
+    - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
+    - per-node plusarg names (+scenario_node<i>), scenario strings, ctx handles
+    - master at node k drives the NEXT node's variant (circular ring, crosses links)
+    - inter-router links wired per XY direction; boundary directions tied off
+    - PASS guard: cmodel_master_count() == len(nodes) AND reads_checked() > 0
 
 Constants kept as template (not derived from topology YAML):
-    - clk/rst timing (10 ns clock, 4-cycle reset)
-    - TIMEOUT_CYCLES = 100000
-    - localparam width constants from ni_params_pkg
-    - DPI function signatures
+    - clk/rst timing (10 ns clock, 4-cycle reset), TIMEOUT_CYCLES = 100000
+    - localparam width constants from ni_params_pkg, DPI signatures
     - perf instrumentation, FSDB block, DPI error poll structure
 """
 
@@ -34,6 +39,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# Coordinate-id composition must mirror c_model addr_trans / route_compute:
+# dst_id = (y << X_WIDTH) | x, X in the low bits. X_WIDTH from the spec (4).
+X_WIDTH = 4
+
+# RouterPort enum (router.hpp): LOCAL=0, NORTH=1, EAST=2, SOUTH=3, WEST=4.
+RP = {"LOCAL": 0, "NORTH": 1, "EAST": 2, "SOUTH": 3, "WEST": 4}
+LINK_PORTS = 5
+
 
 def load_topology(name: str) -> dict:
     import yaml
@@ -42,107 +55,305 @@ def load_topology(name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Emit helpers
+# Topology model
 # ---------------------------------------------------------------------------
 
-def _node_id(x: int, y: int, x_dim: int) -> int:
-    """Linear node index, same as src_id."""
-    return x + y * x_dim
+def _coord_id(x: int, y: int) -> int:
+    """Coordinate-encoded node id = route_compute dst_id = (y<<X_WIDTH)|x."""
+    return (y << X_WIDTH) | x
 
 
-def _node_label(i: int) -> str:
-    return str(i)
+def _nodes(topo: dict):
+    """Return ordered node list: [(idx, x, y, coord_id), ...] in (y,x) raster order.
 
-
-def _scenario_var(i: int) -> str:
-    return f"scn_node{i}"
-
-
-def _ctx_vars(i: int) -> tuple:
-    """Return (router_ctx, m_ctx, s_ctx, nmu_ctx, nsu_ctx) variable names."""
-    return (
-        f"router{i}_ctx",
-        f"m{i}_ctx",
-        f"s{i}_ctx",
-        f"n{i}_nmu_ctx",
-        f"n{i}_nsu_ctx",
-    )
-
-
-def emit_tb_top(topo: dict) -> str:
+    idx is the linear emit index (0..N-1); coord_id is the routing id. For a 1-D
+    mesh the two coincide, so 2x1 output stays byte-identical to the prior gen.
+    """
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
-    nodes = [(x, y) for y in range(y_dim) for x in range(x_dim)]
+    out = []
+    idx = 0
+    for y in range(y_dim):
+        for x in range(x_dim):
+            out.append((idx, x, y, _coord_id(x, y)))
+            idx += 1
+    return out, x_dim, y_dim
+
+
+def _neighbors(x, y, x_dim, y_dim):
+    """Map of live directions -> (peer_x, peer_y) for a node at (x,y). +y=NORTH."""
+    nbr = {}
+    if y + 1 < y_dim:
+        nbr["NORTH"] = (x, y + 1)
+    if x + 1 < x_dim:
+        nbr["EAST"] = (x + 1, y)
+    if y - 1 >= 0:
+        nbr["SOUTH"] = (x, y - 1)
+    if x - 1 >= 0:
+        nbr["WEST"] = (x - 1, y)
+    return nbr
+
+
+_OPPOSITE = {"NORTH": "SOUTH", "SOUTH": "NORTH", "EAST": "WEST", "WEST": "EAST"}
+
+
+# ---------------------------------------------------------------------------
+# Fabric emitter — noc_fabric_<topo>.sv
+# ---------------------------------------------------------------------------
+
+def emit_fabric(topo: dict) -> str:
+    name = topo["topology"]["name"]
+    nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
-    ids = [_node_id(x, y, x_dim) for x, y in nodes]  # src_id per node
+    num_vc = topo["topology"]["num_vc"]
+    guard = f"NOC_FABRIC_{name.upper()}_SV"
 
-    # S0 scope guard: only the 2-node line is supported. router_wrap exposes a
-    # single inter-router link port pair; topologies where any node needs more
-    # than one inter-router link require directional N/E/S/W ports (Task 7).
-    if (x_dim, y_dim) != (2, 1):
-        sys.exit("gen_tb_top: topology needs directional N/E/S/W ports — "
-                 "not supported until Task 7; S0 supports the 2-node line only")
-
-    # ------------------------------------------------------------------
-    # Explicit per-node mapping (no modular arithmetic at emit time).
-    # Each node i owns:
-    #   - a master fed the NEXT node's scenario (traffic crosses the link)
-    #   - a SLAVE that ejects the traffic the master sent — that slave lives at
-    #     the destination node (next_i), is named slave_{next_i}, wired to bus
-    #     nsu_slave_axi_{next_i}, and its ctx handle is created in node i's
-    #     initial block (s{i}_ctx).
-    # slave_map[j] records, for the slave instance at node j, the (ctx_var, bus,
-    # scenario) triple so the instance section states name→ctx→bus together
-    # rather than re-deriving the alias.
-    masters = []   # list of dicts, one per node, in node order
-    slave_map = {}  # slave node index -> dict(ctx_var, bus, scenario, owner)
-    for i in ids:
-        next_i = (i + 1) % n
-        _, m_ctx, s_ctx, nmu_ctx, nsu_ctx = _ctx_vars(i)
-        masters.append({
-            "node": i,
-            "m_ctx": m_ctx,
-            "nmu_ctx": nmu_ctx,
-            "nsu_ctx": nsu_ctx,
-            "scenario": _scenario_var(next_i),
-            "dest": next_i,
-        })
-        # The slave that receives node i's master traffic is at node next_i.
-        slave_map[next_i] = {
-            "ctx_var": s_ctx,                       # created in node i's block
-            "bus": f"nsu_slave_axi_{next_i}",       # AXI bus at the dest node
-            "scenario": _scenario_var(next_i),      # dest-range scenario
-            "owner": i,                             # initial-block that creates it
-        }
+    # idx -> (x,y) and (x,y) -> idx lookups.
+    idx_of = {(x, y): i for (i, x, y, _c) in nodes}
 
     lines = []
     w = lines.append
 
-    # ------------------------------------------------------------------
-    # File header
-    # ------------------------------------------------------------------
+    w("`timescale 1ns/1ps")
+    w("")
+    w(f"// AUTO-GENERATED by sim/tools/gen_tb_top.py")
+    w(f"// Fabric for topology {name} ({x_dim}x{y_dim}, num_vc={num_vc}).")
+    w("// DO NOT EDIT - modify the generator or sim/topologies/*.yaml instead.")
+    w("//")
+    w("// N nodes, each = nmu_wrap + REQ/RSP router_wrap + nsu_wrap, joined by")
+    w("// inter-router directional links (N/E/S/W). Boundary directions are tied")
+    w("// off; a tied-off direction DRIVING a valid flit is a $fatal (guards a fabric")
+    w("// wiring mistake; the C++ route leak is caught by route_compute's abort). The")
+    w("// DPI ctx handles arrive as ports;")
+    w("// the fabric does no cmodel_*_create. Each node exposes a master-side AXI")
+    w("// port (NMU ingress) and a slave-side AXI port (NSU egress).")
+    w("")
+    w(f"`ifndef {guard}")
+    w(f"`define {guard}")
+    w("")
+    w(f"module noc_fabric_{name} #(")
+    w("    parameter int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT,")
+    w("    parameter int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,")
+    w("    parameter int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT,")
+    w(f"    parameter int unsigned NUM_VC                = {num_vc},")
+    w("    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,")
+    w("    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = "
+      "ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT")
+    w(") (")
+    w("    input  logic clk_i,")
+    w("    input  logic rst_ni,")
+    # ctx ports + AXI interface ports, one set per node.
+    for (i, x, y, _c) in nodes:
+        w(f"    // node{i} (x={x}, y={y}) DPI handles + AXI faces")
+        w(f"    input  longint unsigned router{i}_ctx,")
+        w(f"    input  longint unsigned nmu{i}_ctx,")
+        w(f"    input  longint unsigned nsu{i}_ctx,")
+        w(f"    axi4_intf.slave  master_axi_{i},   // NMU ingress (driven by tb master)")
+        last = (i == n - 1)
+        comma = "" if last else ","
+        w(f"    axi4_intf.master slave_axi_{i}{comma}     // NSU egress (consumed by tb slave)")
+    w(");")
+    w("")
+    w(f"    localparam int unsigned LINK_PORTS = {LINK_PORTS};  // LOCAL + N/E/S/W")
+    w("    // RouterPort direction indices (router.hpp enum).")
+    for d, v in (("LOCAL", 0), ("NORTH", 1), ("EAST", 2), ("SOUTH", 3), ("WEST", 4)):
+        w(f"    localparam int unsigned RP_{d} = {v};")
+    w("")
+
+    # Per-node internal NoC interfaces (NMU<->router, router<->NSU).
+    noc_params = ("        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
+                  ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+    for (i, _x, _y, _c) in nodes:
+        w(f"    noc_intf #(")
+        w(f"{noc_params}")
+        w(f"    ) node{i}_nmu ();")
+        w(f"    noc_intf #(")
+        w(f"{noc_params}")
+        w(f"    ) node{i}_nsu ();")
+    w("")
+
+    # Per-node LINK face arrays (whole [LINK_PORTS] bundle per node).
+    for (i, _x, _y, _c) in nodes:
+        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_out_valid,  n{i}_link_rsp_out_valid;")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_out_flit   [LINK_PORTS];")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_out_flit   [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_in_credit  [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_in_credit  [LINK_PORTS];")
+        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_in_valid,   n{i}_link_rsp_in_valid;")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_in_flit    [LINK_PORTS];")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_in_flit    [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_out_credit [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_out_credit [LINK_PORTS];")
+        w("")
+
+    # Node instances: NMU + router + NSU.
+    for (i, x, y, _c) in nodes:
+        w("    // -------------------------------------------------------------------------")
+        w(f"    // node{i} (x={x}, y={y}): nmu_wrap + router_wrap + nsu_wrap")
+        w("    // -------------------------------------------------------------------------")
+        w(f"    nmu_wrap #(")
+        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
+          f".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+        w(f"    ) u_nmu_{i} (")
+        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nmu{i}_ctx),")
+        w(f"        .axi_i(master_axi_{i}), .noc_mosi_o(node{i}_nmu.mosi)")
+        w(f"    );")
+        w("")
+        w(f"    router_wrap #(")
+        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
+          f".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
+        w(f"        .LINK_PORTS(LINK_PORTS)")
+        w(f"    ) u_router_{i} (")
+        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(router{i}_ctx),")
+        w(f"        .noc_nmu_i(node{i}_nmu.miso),")
+        w(f"        .noc_nsu_o(node{i}_nsu.mosi),")
+        w(f"        .link_req_out_valid(n{i}_link_req_out_valid),")
+        w(f"        .link_req_out_flit(n{i}_link_req_out_flit),")
+        w(f"        .link_req_out_credit(n{i}_link_req_out_credit),")
+        w(f"        .link_req_in_valid(n{i}_link_req_in_valid),")
+        w(f"        .link_req_in_flit(n{i}_link_req_in_flit),")
+        w(f"        .link_req_in_credit(n{i}_link_req_in_credit),")
+        w(f"        .link_rsp_out_valid(n{i}_link_rsp_out_valid),")
+        w(f"        .link_rsp_out_flit(n{i}_link_rsp_out_flit),")
+        w(f"        .link_rsp_out_credit(n{i}_link_rsp_out_credit),")
+        w(f"        .link_rsp_in_valid(n{i}_link_rsp_in_valid),")
+        w(f"        .link_rsp_in_flit(n{i}_link_rsp_in_flit),")
+        w(f"        .link_rsp_in_credit(n{i}_link_rsp_in_credit)")
+        w(f"    );")
+        w("")
+        w(f"    nsu_wrap #(")
+        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
+          f".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+        w(f"    ) u_nsu_{i} (")
+        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nsu{i}_ctx),")
+        w(f"        .noc_miso_i(node{i}_nsu.miso), .axi_o(slave_axi_{i})")
+        w(f"    );")
+        w("")
+
+    # Per-node IN-face wiring: drive every direction slot. Live directions take
+    # the peer's matching OUT slot (data) + the peer's returned credit; boundary
+    # directions are tied off. Two procedural blocks per node (req/rsp).
+    w("    // -------------------------------------------------------------------------")
+    w("    // Inter-router link wiring (per direction) + boundary tie-off")
+    w("    // -------------------------------------------------------------------------")
+    for (i, x, y, _c) in nodes:
+        nbr = _neighbors(x, y, x_dim, y_dim)
+        for net in ("req", "rsp"):
+            w(f"    always_comb begin : link_{net}_in_n{i}")
+            w(f"        for (int p = 0; p < LINK_PORTS; p++) begin")
+            w(f"            n{i}_link_{net}_in_valid[p]   = 1'b0;")
+            w(f"            n{i}_link_{net}_in_flit[p]    = '0;")
+            w(f"            n{i}_link_{net}_out_credit[p] = '0;")
+            w(f"        end")
+            for d, (px, py) in nbr.items():
+                pi = idx_of[(px, py)]
+                pd = _OPPOSITE[d]
+                w(f"        // {d}: data IN <- node{pi} {pd} OUT; out_credit <- "
+                  f"node{pi} {pd} in_credit.")
+                w(f"        n{i}_link_{net}_in_valid[RP_{d}]   = n{pi}_link_{net}_out_valid[RP_{pd}];")
+                w(f"        n{i}_link_{net}_in_flit[RP_{d}]    = n{pi}_link_{net}_out_flit[RP_{pd}];")
+                w(f"        n{i}_link_{net}_out_credit[RP_{d}] = n{pi}_link_{net}_in_credit[RP_{pd}];")
+            w(f"    end")
+            w("")
+
+    # Tie-off assertion: any boundary direction (no neighbor) asserting OUT valid
+    # -> $fatal. Scope note: the C++ route leak (a dst outside the mesh) is already
+    # caught upstream by route_compute's assert+abort (router.hpp), and a boundary
+    # direction's eject adapter is never constructed, so a *misrouted in-mesh* flit
+    # would stall silently in the unwired output FIFO rather than drive OUT valid.
+    # What this assertion actually guards is a fabric WIRING mistake — a future
+    # generator/edit that drives a boundary OUT net (e.g. a mis-derived neighbor
+    # map) surfaces here as a $fatal instead of a silent hang. Defense-in-depth on
+    # the SV side; not a substitute for the C++ abort.
+    w("    // -------------------------------------------------------------------------")
+    w("    // Boundary tie-off assertion: a boundary direction (no neighbor) must")
+    w("    // never drive OUT valid. Fires on a fabric wiring mistake; the C++ route")
+    w("    // leak (dst outside mesh) is caught upstream by route_compute's abort.")
+    w("    // -------------------------------------------------------------------------")
+    w("    always_ff @(posedge clk_i) begin")
+    w("        if (rst_ni) begin")
+    for (i, x, y, _c) in nodes:
+        nbr = _neighbors(x, y, x_dim, y_dim)
+        for d in ("NORTH", "EAST", "SOUTH", "WEST"):
+            if d in nbr:
+                continue
+            for net in ("req", "rsp"):
+                w(f"            if (n{i}_link_{net}_out_valid[RP_{d}])")
+                w(f'                $fatal(1, "noc_fabric: node{i} drove a flit on '
+                  f'tied-off {d} ({net}) - fabric link wiring mistake");')
+    w("        end")
+    w("    end")
+    w("")
+
+    # Link perf monitors: per directed edge, the OUT valid + the credit received.
+    w("    // -------------------------------------------------------------------------")
+    w("    // Inter-router link perf monitors (passive)")
+    w("    // -------------------------------------------------------------------------")
+    seen = set()
+    for (i, x, y, _c) in nodes:
+        nbr = _neighbors(x, y, x_dim, y_dim)
+        for d, (px, py) in nbr.items():
+            pi = idx_of[(px, py)]
+            key = (i, pi)
+            if key in seen:
+                continue
+            seen.add(key)
+            for net in ("req", "rsp"):
+                w(f"    link_perf_monitor #(")
+                w(f'        .LINK_NAME("{net}_{i}to{pi}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
+                w(f"    ) u_perf_link_{net}_{i}_{pi} (")
+                w(f"        .clk_i, .rst_ni,")
+                w(f"        .valid(n{i}_link_{net}_out_valid[RP_{d}]),")
+                w(f"        .credit_pulse(|n{i}_link_{net}_out_credit[RP_{d}])")
+                w(f"    );")
+                w("")
+
+    w(f"endmodule")
+    w("")
+    w(f"`endif  // {guard}")
+    return "\n".join(lines) + "\n"
+
+
+# ---------------------------------------------------------------------------
+# tb_top emitter — instantiates the fabric + test master/slave + exit logic
+# ---------------------------------------------------------------------------
+
+def emit_tb_top(topo: dict) -> str:
+    name = topo["topology"]["name"]
+    nodes, x_dim, y_dim = _nodes(topo)
+    n = len(nodes)
+    num_vc = topo["topology"]["num_vc"]
+
+    # Ring traffic: node i's master is fed node (i+1)%n's coordinate scenario, so
+    # its destination is node (i+1)%n. The slave that ejects that traffic lives at
+    # node (i+1)%n. coord_id stamps src_id (response routing back to originator).
+    coord_id = {i: c for (i, _x, _y, c) in nodes}
+
+    lines = []
+    w = lines.append
+
     w("`timescale 1ns/1ps")
     w("")
     w("// AUTO-GENERATED by sim/tools/gen_tb_top.py")
-    w(f"// Topology: {topo['topology']['name']}  "
-      f"({x_dim}x{y_dim}, num_vc={topo['topology']['num_vc']})")
-    w("// DO NOT EDIT — modify the generator or sim/topologies/*.yaml instead.")
+    w(f"// Topology: {name}  ({x_dim}x{y_dim}, num_vc={num_vc})")
+    w("// DO NOT EDIT - modify the generator or sim/topologies/*.yaml instead.")
     w("//")
-    w("// Behaviour description:")
-    w(f"// {n} symmetric nodes, each driving its own per-node router_wrap, joined by")
-    w("// cross-node link(s).")
-    w("//   node k:  axi_master_wrap →[master_nmu_axi_k]→ nmu_wrap →[nodeK_nmu]→")
-    w("//            router_wrap[k] ←link→ router_wrap[k+1] (circular)")
-    w("//            router_wrap[k] →[nodeK_nsu]→ nsu_wrap →[nsu_slave_axi_k]→ axi_slave_wrap")
-    w("// Variant→instance pairing: master at node k is fed the NEXT node's scenario")
-    w("// so traffic crosses the link. src_id matches each node's linear index.")
+    w(f"// {n} nodes live inside noc_fabric_{name} (NMU + REQ/RSP router + NSU per")
+    w("// node, joined by directional links). tb_top creates the DPI handles, drives")
+    w("// each node's master-side AXI with a test master_wrap, ejects each node's")
+    w("// slave-side AXI with a test slave_wrap, and owns the scoreboard exit logic.")
+    w("// Variant->instance pairing: master at node k is fed node (k+1)'s coordinate")
+    w("// scenario, so traffic crosses the fabric to node (k+1) and ejects there.")
     w("//")
     w("// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).")
-    w("// Plusargs +scenario_node0=<path> ... +scenario_node{N-1}=<path> kick off the run;")
-    w("// cmodel_init is called once with the last node's variant (shared config).")
+    w(f"// Plusargs +scenario_node0=<path> ... +scenario_node{n-1}=<path> kick off the run.")
     w("")
     w("`ifndef TB_TOP_SV")
     w("`define TB_TOP_SV")
+    w("")
+    w(f'`include "noc_fabric_{name}.sv"')
     w("")
     w("module tb_top;")
     w("    logic clk_i  = 1'b0;")
@@ -164,10 +375,10 @@ def emit_tb_top(topo: dict) -> str:
     w("    localparam int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
-    num_vc = topo["topology"]["num_vc"]
-    w(f"    localparam int unsigned NUM_VC                = {num_vc};  // from topology YAML (single source)")
+    w(f"    localparam int unsigned NUM_VC                = {num_vc};  // from topology YAML")
     w("    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT;")
-    w("    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;")
+    w("    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = "
+      "ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // DPI lifecycle")
@@ -193,374 +404,136 @@ def emit_tb_top(topo: dict) -> str:
     w('    import "DPI-C" context function int     cmodel_reads_checked();')
     w("")
 
-    # ------------------------------------------------------------------
-    # Per-node variable declarations
-    # ------------------------------------------------------------------
-    # Scenario strings
-    for i in ids:
-        comment = ""
+    # Per-node scenario strings + ctx handles.
+    for (i, x, y, c) in nodes:
+        tag = ""
         if i == 0:
-            comment = "  // node0 coordinate variant (low addr);  drives node1.master"
+            tag = "  // node0 variant (low addr); drives node1.master"
         elif i == n - 1:
-            comment = f"  // node{n-1} coordinate variant (high addr); drives node0.master"
-        w(f"    string  {_scenario_var(i)};{comment}")
-
-    # Context handles
-    for i in ids:
-        r_ctx, m_ctx, s_ctx, nmu_ctx, nsu_ctx = _ctx_vars(i)
-        w(f"    longint unsigned {r_ctx}, {m_ctx}, {s_ctx}, {nmu_ctx}, {nsu_ctx};")
+            tag = f"  // node{n-1} variant (high addr); drives node0.master"
+        w(f"    string  scn_node{i};{tag}")
+    for (i, _x, _y, _c) in nodes:
+        w(f"    longint unsigned router{i}_ctx, m{i}_ctx, s{i}_ctx, n{i}_nmu_ctx, n{i}_nsu_ctx;")
     w("")
 
-    # ------------------------------------------------------------------
-    # Plusargs + cmodel_init + per-node create
-    # ------------------------------------------------------------------
+    # Plusargs + cmodel_init + per-node create.
     w("    initial begin")
-
-    # Plusarg check — all nodes must provide a scenario
-    cond_parts = []
-    for i in ids:
-        cond_parts.append(f'!$value$plusargs("scenario_node{i}=%s", {_scenario_var(i)})')
-    # Format as a multi-line if
+    cond = [f'!$value$plusargs("scenario_node{i}=%s", scn_node{i})' for (i, *_r) in nodes]
     indent = "        "
-    if len(cond_parts) == 1:
-        w(f"{indent}if ({cond_parts[0]}) begin")
+    if len(cond) == 1:
+        w(f"{indent}if ({cond[0]}) begin")
     else:
-        w(f"{indent}if ({cond_parts[0]} ||")
-        for part in cond_parts[1:-1]:
-            w(f"{indent}    {part} ||")
-        w(f"{indent}    {cond_parts[-1]}) begin")
-
-    scn_args = " ".join(f"+scenario_node{i}=<path>" for i in ids)
+        w(f"{indent}if ({cond[0]} ||")
+        for c in cond[1:-1]:
+            w(f"{indent}    {c} ||")
+        w(f"{indent}    {cond[-1]}) begin")
+    scn_args = " ".join(f"+scenario_node{i}=<path>" for (i, *_r) in nodes)
     w(f'            $display("ERROR: {scn_args} required");')
     w("            $finish(1);")
     w("        end")
-
-    # cmodel_init: use the last node's scenario (matches original convention)
-    last_i = ids[-1]
-    w(f"        cmodel_init({_scenario_var(last_i)});  // shared config; either variant is fine")
-
-    # Router creates — full (x,y,mesh_x,mesh_y,num_vc) signature so the wrap
-    # config takes num_vc from the topology (NOT hardcoded 1).
-    for i in ids:
-        x, y = nodes[i]
-        r_ctx = _ctx_vars(i)[0]
-        w(f'        {r_ctx} = cmodel_router_create("router_{i}", {x}, {y}, '
+    last_i = nodes[-1][0]
+    w(f"        cmodel_init(scn_node{last_i});  // shared config; any variant is fine")
+    # Router creates: full (x,y,mesh_x,mesh_y,num_vc).
+    for (i, x, y, _c) in nodes:
+        w(f'        router{i}_ctx = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
-
-    # Per-node creates, emitted from the explicit `masters` map. Each node i:
-    #   - master fed the dest node's scenario (traffic crosses the link)
-    #   - slave_{dest} created here (its ctx lives in node i's block); the slave
-    #     INSTANCE is emitted later from slave_map, stating name→ctx→bus together.
-    for m in masters:
-        i = m["node"]
-        dest = m["dest"]
-        s = slave_map[dest]
-        w(f"        // node{i}.master drives node{dest}-variant (targets node{dest}); ejects at node{dest}.NSU.")
-        w(f'        {m["m_ctx"]}     = cmodel_master_create("master_{i}", {m["scenario"]});')
-        w(f'        {s["ctx_var"]}     = cmodel_slave_create ("slave_{dest}",  {s["scenario"]});  '
-          f'// node{dest}.slave: receives node{dest}-range data')
-        w(f'        {m["nmu_ctx"]} = cmodel_nmu_create("nmu_{i}", {i}, NUM_VC);        '
-          f'// src_id = node{i} coordinate; num_vc from topology')
-        w(f'        {m["nsu_ctx"]} = cmodel_nsu_create("nsu_{i}", {i}, NUM_VC);')
-
+    # Per-node master/slave/nmu/nsu creates. master at node i -> dest (i+1)%n.
+    for (i, x, y, c) in nodes:
+        dest = (i + 1) % n
+        w(f"        // node{i}.master -> node{dest}-variant (dst coord {coord_id[dest]}); "
+          f"ejects at node{dest}.NSU.")
+        w(f'        m{i}_ctx     = cmodel_master_create("master_{i}", scn_node{dest});')
+        w(f'        s{dest}_ctx     = cmodel_slave_create ("slave_{dest}",  scn_node{dest});')
+        w(f'        n{i}_nmu_ctx = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC);  '
+          f'// src_id = node{i} coord {c}')
+        w(f'        n{i}_nsu_ctx = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC);')
     w("    end")
     w("")
 
-    # ------------------------------------------------------------------
-    # Wire bundles
-    # ------------------------------------------------------------------
-    w("    // -------------------------------------------------------------------------")
-    w("    // Wire bundles — per-node × {master_nmu AXI, NMU-side NoC, NSU-side NoC, nsu_slave AXI}")
-    w("    // -------------------------------------------------------------------------")
+    # Per-node AXI interfaces (master-side + slave-side), driven by tb master/slave
+    # and the fabric's NMU/NSU faces.
     axi_params = "        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)"
-    noc_params = ("        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-                  ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
-
-    for i in ids:
-        w(f"")
-        w(f"    // node{i}")
+    w("    // -------------------------------------------------------------------------")
+    w("    // Per-node AXI buses (master-side into the fabric NMU, slave-side out of NSU)")
+    w("    // -------------------------------------------------------------------------")
+    for (i, _x, _y, _c) in nodes:
         w(f"    axi4_intf #(")
         w(f"{axi_params}")
         w(f"    ) master_nmu_axi_{i} ();")
-        w(f"    noc_intf #(")
-        w(f"{noc_params}")
-        w(f"    ) node{i}_nmu ();")
-        w(f"    noc_intf #(")
-        w(f"{noc_params}")
-        w(f"    ) node{i}_nsu ();")
         w(f"    axi4_intf #(")
         w(f"{axi_params}")
         w(f"    ) nsu_slave_axi_{i} ();")
-
     w("")
 
-    # ------------------------------------------------------------------
-    # Component instances — per node
-    # ------------------------------------------------------------------
-    for i in ids:
-        _, m_ctx, s_ctx, nmu_ctx, nsu_ctx = _ctx_vars(i)
-        next_i = (i + 1) % n
+    # Fabric instance.
+    w("    // -------------------------------------------------------------------------")
+    w(f"    // NoC fabric ({n} nodes, directional links)")
+    w("    // -------------------------------------------------------------------------")
+    w(f"    noc_fabric_{name} #(")
+    w("        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+    w("        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
+      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+    w("    ) u_fabric (")
+    w("        .clk_i(clk_i), .rst_ni(rst_ni),")
+    for k, (i, _x, _y, _c) in enumerate(nodes):
+        last = (k == n - 1)
+        comma = "" if last else ","
+        w(f"        .router{i}_ctx(router{i}_ctx), .nmu{i}_ctx(n{i}_nmu_ctx), "
+          f".nsu{i}_ctx(n{i}_nsu_ctx),")
+        w(f"        .master_axi_{i}(master_nmu_axi_{i}.slave), "
+          f".slave_axi_{i}(nsu_slave_axi_{i}.master){comma}")
+    w("    );")
+    w("")
+
+    # Test master/slave per node.
+    for (i, _x, _y, _c) in nodes:
+        dest = (i + 1) % n
         w("    // -------------------------------------------------------------------------")
-        w(f"    // Component instances — node{i}")
+        w(f"    // Test endpoints - node{i}")
         w("    // -------------------------------------------------------------------------")
         w(f"    axi_master_wrap #(")
         w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)")
         w(f"    ) u_master_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i({m_ctx}), .axi_o(master_nmu_axi_{i}.master)")
+        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(m{i}_ctx), "
+          f".axi_o(master_nmu_axi_{i}.master)")
         w(f"    );")
-        w(f"")
-        w(f"    nmu_wrap #(")
-        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
-        w(f"    ) u_nmu_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i({nmu_ctx}),")
-        w(f"        .axi_i(master_nmu_axi_{i}.slave), .noc_mosi_o(node{i}_nmu.mosi)")
-        w(f"    );")
-        w(f"")
-        w(f"    nsu_wrap #(")
-        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
-        w(f"    ) u_nsu_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i({nsu_ctx}),")
-        w(f"        .noc_miso_i(node{i}_nsu.miso), .axi_o(nsu_slave_axi_{i}.master)")
-        w(f"    );")
-        w(f"")
-        # Slave instance lives at node next_i (the destination of node i's master
-        # traffic). Its name, ctx, and AXI bus come from slave_map[next_i] — stated
-        # together, no modular re-derivation.
-        slv = slave_map[next_i]
+        w("")
         w(f"    axi_slave_wrap #(")
         w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)")
-        w(f"    ) u_slave_{next_i} (")
-        w(f'        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i({slv["ctx_var"]}), '
-          f'.axi_i({slv["bus"]}.slave)')
+        w(f"    ) u_slave_{i} (")
+        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(s{i}_ctx), "
+          f".axi_i(nsu_slave_axi_{i}.slave)")
         w(f"    );")
-        w(f"")
+        w("")
 
-    # ------------------------------------------------------------------
-    # Router fabric — inter-node links
-    # ------------------------------------------------------------------
+    # AXI perf monitors (watch the tb-level AXI buses).
     w("    // -------------------------------------------------------------------------")
-    w("    // Router fabric — per-node router_wraps joined by cross-wired links")
+    w("    // AXI perf monitors - passive; one per node x {manager, subordinate}")
     w("    // -------------------------------------------------------------------------")
-    w("    // Link nets named <net>_<src>to<dst>_*: data flows src->dst, credit pulse")
-    w("    // flows on the net whose direction matches the credit's travel.")
-
-    # For a 2-node mesh there is exactly one pair (0,1) with bidirectional links.
-    # For general n-node ring, pairs are (i, (i+1)%n).
-    # But for the 2-node mesh, node0→node1 and node1→node0 are distinct directed nets.
-    # We emit link nets for each directed pair (i, next_i) where next_i > i only
-    # (for a 2-node mesh that's just (0,1)); for a ring we'd do all n pairs.
-    # S0 scope: 2-node mesh only has one bidirectional link between node0 and node1.
-
-    # Collect unique undirected edges (for a 1D mesh: 0-1, 1-2, etc.)
-    # For x_dim=2, y_dim=1: only edge (0,1)
-    edges = []
-    for y in range(y_dim):
-        for x in range(x_dim - 1):
-            a = _node_id(x, y, x_dim)
-            b = _node_id(x + 1, y, x_dim)
-            edges.append((a, b))
-    # Also y-direction edges for 2D
-    for y in range(y_dim - 1):
-        for x in range(x_dim):
-            a = _node_id(x, y, x_dim)
-            b = _node_id(x, y + 1, x_dim)
-            edges.append((a, b))
-
-    # router_wrap LINK ports are per-direction unpacked arrays [LINK_PORTS]
-    # (router has 5 ports: LOCAL=0, N=1, E=2, S=3, W=4). At 2-node only the one
-    # neighbour direction is live. Credit is a per-VC pulse vector [NUM_VC-1:0].
-    #
-    # Per-node array wires carry every router's whole LINK face; cross-node assigns
-    # connect the live direction slot of each neighbour pair (data + credit).
-    w("    localparam int unsigned LINK_PORTS = 5;  // LOCAL + N/E/S/W (mirrors c_model)")
-    w("    localparam int unsigned RP_EAST    = 2;")
-    w("    localparam int unsigned RP_WEST    = 4;")
-    w("")
-    for i in ids:
-        w(f"    // node{i} LINK face arrays (one slot per direction)")
-        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_out_valid,  n{i}_link_rsp_out_valid;")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_out_flit   [LINK_PORTS];")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_out_flit   [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_in_credit  [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_in_credit  [LINK_PORTS];")
-        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_in_valid,   n{i}_link_rsp_in_valid;")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_in_flit    [LINK_PORTS];")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_in_flit    [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_out_credit [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_out_credit [LINK_PORTS];")
-    w("")
-
-    # For each node, instantiate router_wrap and wire its link ports.
-    # For a 1D mesh:
-    #   node0's OUT direction: toward node1 (0to1 net)
-    #   node0's IN  direction: from node1  (1to0 net)
-    #   node1's OUT direction: toward node0 (1to0 net)
-    #   node1's IN  direction: from node0  (0to1 net)
-    # router_wrap link port naming (from the original):
-    #   link_req_out_valid, link_req_out_flit, link_req_out_credit (credit received from peer)
-    #   link_req_in_valid,  link_req_in_flit,  link_req_in_credit  (credit sent to peer)
-    # Credit direction: credit for data flowing A→B returns on the B→A net.
-    #   link_req_out_credit of node0 = link_req_1to0_credit (credit node0 gets back)
-    #   link_req_in_credit  of node0 = link_req_0to1_credit (credit node0 sends to node1)
-
-    # Build a per-node link port map. For S0 (linear mesh), each node has at most
-    # one "east" neighbour and one "west" neighbour. We only wire the one link each node has.
-    # For simplicity, since router_wrap has exactly one link port pair (REQ+RSP in/out),
-    # we connect it to the single neighbour (either east or west in a 2-node mesh).
-
-    # For a general 1D mesh:
-    #   Node 0:  only east link (to node 1). Out net = 0to1, in net = 1to0.
-    #   Node n-1: only west link (from node n-2). Out net = (n-1)to(n-2), in net = (n-2)to(n-1).
-    #   Middle nodes: two links. (S0: not applicable for 2-node mesh)
-    # For the 2-node case, each node has exactly 1 link.
-
-    # Per-node live link direction (EAST=2 if this node is the 'a' end of its
-    # edge, WEST=4 if the 'b' end). At 2-node each node has exactly one edge.
-    live_dir = {}   # node -> SV port index name ("RP_EAST"/"RP_WEST")
-    peer = {}       # node -> (peer_node, peer_dir_name)
-    for i in ids:
-        east_edge = next(((a, b) for a, b in edges if a == i), None)
-        west_edge = next(((a, b) for a, b in edges if b == i), None)
-        if east_edge is not None:
-            a, b = east_edge
-            live_dir[i] = "RP_EAST"
-            peer[i] = (b, "RP_WEST")
-        elif west_edge is not None:
-            a, b = west_edge
-            live_dir[i] = "RP_WEST"
-            peer[i] = (a, "RP_EAST")
-        else:
-            raise ValueError(f"Node {i} has no edges in the topology")
-
-    for i in ids:
-        r_ctx = _ctx_vars(i)[0]
-        w(f"    router_wrap #(")
-        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
-        w(f"        .LINK_PORTS(LINK_PORTS)")
-        w(f"    ) u_router_{i} (")
-        w(f"        .clk_i(clk_i),")
-        w(f"        .rst_ni(rst_ni),")
-        w(f"        .ctx_i({r_ctx}),")
-        w(f"        .noc_nmu_i(node{i}_nmu.miso),")
-        w(f"        .noc_nsu_o(node{i}_nsu.mosi),")
-        w(f"        // LINK face: whole per-direction arrays; live dir = {live_dir[i]}.")
-        w(f"        .link_req_out_valid(n{i}_link_req_out_valid),")
-        w(f"        .link_req_out_flit(n{i}_link_req_out_flit),")
-        w(f"        .link_req_out_credit(n{i}_link_req_out_credit),")
-        w(f"        .link_req_in_valid(n{i}_link_req_in_valid),")
-        w(f"        .link_req_in_flit(n{i}_link_req_in_flit),")
-        w(f"        .link_req_in_credit(n{i}_link_req_in_credit),")
-        w(f"        .link_rsp_out_valid(n{i}_link_rsp_out_valid),")
-        w(f"        .link_rsp_out_flit(n{i}_link_rsp_out_flit),")
-        w(f"        .link_rsp_out_credit(n{i}_link_rsp_out_credit),")
-        w(f"        .link_rsp_in_valid(n{i}_link_rsp_in_valid),")
-        w(f"        .link_rsp_in_flit(n{i}_link_rsp_in_flit),")
-        w(f"        .link_rsp_in_credit(n{i}_link_rsp_in_credit)")
-        w(f"    );")
-        w(f"")
-
-    # Cross-node link wiring. Each node's IN face is driven once per network by a
-    # procedural block: unconnected directions are 0; the live direction takes the
-    # peer's matching OUT slot (data) and the peer returns our credit. Credit for
-    # data flowing self->peer returns on peer.in_credit -> our out_credit.
-    w("    // -------------------------------------------------------------------------")
-    w("    // Cross-node link wiring (per-direction; only the live direction is hooked)")
-    w("    // -------------------------------------------------------------------------")
-    for i in ids:
-        ld = live_dir[i]
-        pnode, _pdir = peer[i]
-        for net in ("req", "rsp"):
-            w(f"    always_comb begin : link_{net}_in_n{i}")
-            w(f"        for (int p = 0; p < LINK_PORTS; p++) begin")
-            w(f"            n{i}_link_{net}_in_valid[p]   = 1'b0;")
-            w(f"            n{i}_link_{net}_in_flit[p]    = '0;")
-            w(f"            n{i}_link_{net}_out_credit[p] = '0;")
-            w(f"        end")
-            w(f"        // live dir {ld}: data IN <- peer node{pnode} OUT; our sent-data")
-            w(f"        // credit (out_credit) <- peer's returned in_credit.")
-            w(f"        n{i}_link_{net}_in_valid[{ld}]   = n{pnode}_link_{net}_out_valid[{_pdir}];")
-            w(f"        n{i}_link_{net}_in_flit[{ld}]    = n{pnode}_link_{net}_out_flit[{_pdir}];")
-            w(f"        n{i}_link_{net}_out_credit[{ld}] = n{pnode}_link_{net}_in_credit[{_pdir}];")
-            w(f"    end")
-            w(f"")
-
-    # ------------------------------------------------------------------
-    # PMU monitors
-    # ------------------------------------------------------------------
-    w("    // -------------------------------------------------------------------------")
-    w("    // PMU monitors — passive; no drives")
-    w("    // -------------------------------------------------------------------------")
-    w("    // AXI slot monitors: one per node × {manager, subordinate} edge.")
-
-    for i in ids:
-        # manager monitor at node i watches master_nmu_axi_i
-        w(f"    axi_perf_monitor #(")
-        w(f'        .SLOT_NAME("node{i}.manager"), .ID_W($bits(master_nmu_axi_{i}.awid))')
-        w(f"    ) u_perf_mgr_{i} (")
-        w(f"        .clk_i, .rst_ni,")
-        w(f"        .awvalid(master_nmu_axi_{i}.awvalid), .awready(master_nmu_axi_{i}.awready),")
-        w(f"        .awid(master_nmu_axi_{i}.awid),       .awaddr(master_nmu_axi_{i}.awaddr),")
-        w(f"        .awlen(master_nmu_axi_{i}.awlen),     .awsize(master_nmu_axi_{i}.awsize),")
-        w(f"        .wvalid(master_nmu_axi_{i}.wvalid),   .wready(master_nmu_axi_{i}.wready),")
-        w(f"        .bvalid(master_nmu_axi_{i}.bvalid),   .bready(master_nmu_axi_{i}.bready),")
-        w(f"        .bid(master_nmu_axi_{i}.bid),")
-        w(f"        .arvalid(master_nmu_axi_{i}.arvalid), .arready(master_nmu_axi_{i}.arready),")
-        w(f"        .arid(master_nmu_axi_{i}.arid),       .araddr(master_nmu_axi_{i}.araddr),")
-        w(f"        .arlen(master_nmu_axi_{i}.arlen),     .arsize(master_nmu_axi_{i}.arsize),")
-        w(f"        .rvalid(master_nmu_axi_{i}.rvalid),   .rready(master_nmu_axi_{i}.rready),")
-        w(f"        .rlast(master_nmu_axi_{i}.rlast),     .rid(master_nmu_axi_{i}.rid)")
-        w(f"    );")
-        w(f"")
-        # subordinate monitor at node i watches nsu_slave_axi_i
-        w(f"    axi_perf_monitor #(")
-        w(f'        .SLOT_NAME("node{i}.subordinate"), .ID_W($bits(nsu_slave_axi_{i}.awid))')
-        w(f"    ) u_perf_sub_{i} (")
-        w(f"        .clk_i, .rst_ni,")
-        w(f"        .awvalid(nsu_slave_axi_{i}.awvalid), .awready(nsu_slave_axi_{i}.awready),")
-        w(f"        .awid(nsu_slave_axi_{i}.awid),       .awaddr(nsu_slave_axi_{i}.awaddr),")
-        w(f"        .awlen(nsu_slave_axi_{i}.awlen),     .awsize(nsu_slave_axi_{i}.awsize),")
-        w(f"        .wvalid(nsu_slave_axi_{i}.wvalid),   .wready(nsu_slave_axi_{i}.wready),")
-        w(f"        .bvalid(nsu_slave_axi_{i}.bvalid),   .bready(nsu_slave_axi_{i}.bready),")
-        w(f"        .bid(nsu_slave_axi_{i}.bid),")
-        w(f"        .arvalid(nsu_slave_axi_{i}.arvalid), .arready(nsu_slave_axi_{i}.arready),")
-        w(f"        .arid(nsu_slave_axi_{i}.arid),       .araddr(nsu_slave_axi_{i}.araddr),")
-        w(f"        .arlen(nsu_slave_axi_{i}.arlen),     .arsize(nsu_slave_axi_{i}.arsize),")
-        w(f"        .rvalid(nsu_slave_axi_{i}.rvalid),   .rready(nsu_slave_axi_{i}.rready),")
-        w(f"        .rlast(nsu_slave_axi_{i}.rlast),     .rid(nsu_slave_axi_{i}.rid)")
-        w(f"    );")
-        w(f"")
-
-    w("    // Inter-router link monitors: a node's OUT valid paired with the credit it")
-    w("    // RECEIVES for that sent data (out_credit, OR-reduced across VCs).")
-    for a, b in edges:
-        # node a OUT toward b is on a's live direction slot; node b OUT toward a on b's.
-        da, db = live_dir[a], live_dir[b]
-        for net in ("req", "rsp"):
-            w(f"    link_perf_monitor #(")
-            w(f'        .LINK_NAME("{net}_{a}to{b}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
-            w(f"    ) u_perf_link_{net}{a}{b} (")
+    for (i, _x, _y, _c) in nodes:
+        for role, bus in (("manager", f"master_nmu_axi_{i}"),
+                          ("subordinate", f"nsu_slave_axi_{i}")):
+            w(f"    axi_perf_monitor #(")
+            w(f'        .SLOT_NAME("node{i}.{role}"), .ID_W($bits({bus}.awid))')
+            w(f"    ) u_perf_{role[:3]}_{i} (")
             w(f"        .clk_i, .rst_ni,")
-            w(f"        .valid(n{a}_link_{net}_out_valid[{da}]),")
-            w(f"        .credit_pulse(|n{a}_link_{net}_out_credit[{da}])")
+            w(f"        .awvalid({bus}.awvalid), .awready({bus}.awready),")
+            w(f"        .awid({bus}.awid),       .awaddr({bus}.awaddr),")
+            w(f"        .awlen({bus}.awlen),     .awsize({bus}.awsize),")
+            w(f"        .wvalid({bus}.wvalid),   .wready({bus}.wready),")
+            w(f"        .bvalid({bus}.bvalid),   .bready({bus}.bready),")
+            w(f"        .bid({bus}.bid),")
+            w(f"        .arvalid({bus}.arvalid), .arready({bus}.arready),")
+            w(f"        .arid({bus}.arid),       .araddr({bus}.araddr),")
+            w(f"        .arlen({bus}.arlen),     .arsize({bus}.arsize),")
+            w(f"        .rvalid({bus}.rvalid),   .rready({bus}.rready),")
+            w(f"        .rlast({bus}.rlast),     .rid({bus}.rid)")
             w(f"    );")
-            w(f"")
-            w(f"    link_perf_monitor #(")
-            w(f'        .LINK_NAME("{net}_{b}to{a}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
-            w(f"    ) u_perf_link_{net}{b}{a} (")
-            w(f"        .clk_i, .rst_ni,")
-            w(f"        .valid(n{b}_link_{net}_out_valid[{db}]),")
-            w(f"        .credit_pulse(|n{b}_link_{net}_out_credit[{db}])")
-            w(f"    );")
-            w(f"")
-        w(f"")
+            w("")
 
-    # ------------------------------------------------------------------
-    # Perf instrumentation
-    # ------------------------------------------------------------------
+    # Perf instrumentation.
     w("    // -------------------------------------------------------------------------")
-    w("    // Perf instrumentation — sample every rising edge; dump on final")
+    w("    // Perf instrumentation - sample every rising edge; dump on final")
     w("    // -------------------------------------------------------------------------")
     w('    import "DPI-C" context function void cmodel_perf_sample_tick();')
     w('    import "DPI-C" context function void cmodel_perf_set_run(input string scenario,')
@@ -589,7 +562,7 @@ def emit_tb_top(topo: dict) -> str:
     w("`ifdef FSDB_DUMP")
     w("    initial begin")
     w("        string fsdb_path;")
-    w("        if (!$value$plusargs(\"fsdb=%s\", fsdb_path))")
+    w('        if (!$value$plusargs("fsdb=%s", fsdb_path))')
     w('            fsdb_path = "dump.fsdb";')
     w("        $fsdbDumpfile(fsdb_path);")
     w("        $fsdbDumpvars(0, tb_top);")
@@ -597,15 +570,12 @@ def emit_tb_top(topo: dict) -> str:
     w("`endif")
     w("")
 
-    # ------------------------------------------------------------------
-    # Exit logic — PASS guard
-    # ------------------------------------------------------------------
+    # Exit logic.
     w("    // -------------------------------------------------------------------------")
-    w("    // Exit logic — non-vacuous PASS guard")
+    w("    // Exit logic - non-vacuous PASS guard")
     w("    // -------------------------------------------------------------------------")
-    w("    // cmodel_done() signals scenario completion via DPI.")
-    w(f"    // PASS requires a non-vacuous run: scoreboard clean AND all {n} masters created")
-    w("    // AND at least one read actually checked (so a write-only / no-op run fails).")
+    w(f"    // PASS requires scoreboard clean AND all {n} masters created AND at least")
+    w("    // one read actually checked (so a write-only / no-op run fails).")
     w("    always @(posedge clk_i) begin")
     w("        /* verilator lint_off WIDTHTRUNC */")
     w("        if (rst_ni && (cmodel_done() != 0)) begin")
@@ -619,18 +589,14 @@ def emit_tb_top(topo: dict) -> str:
     w('                $display("FAIL: scoreboard mismatch or vacuous run (masters=%0d reads=%0d)",')
     w("                         cmodel_master_count(), cmodel_reads_checked());")
     w("                cmodel_dump_scoreboard();")
-    w('                $fatal(1, "tb_top: bidirectional run failed");')
+    w('                $fatal(1, "tb_top: run failed");')
     w("            end")
     w("        end")
     w("    end")
     w("")
     w("    // -------------------------------------------------------------------------")
-    w("    // Centralized DPI error poll (T1.4)")
+    w("    // Centralized DPI error poll")
     w("    // -------------------------------------------------------------------------")
-    w("    // Wraps no longer call cmodel_finalize individually; this single block")
-    w("    // owns the fatal-exit path. Previously each wrap had its own error_check")
-    w("    // block that called cmodel_finalize on non-zero, which risked a race where")
-    w("    // multiple wraps tried to destruct the C++ model in the same delta cycle.")
     w('    import "DPI-C" context function int cmodel_check_error(output string msg);')
     w("")
     w("    always_ff @(posedge clk_i) begin")
@@ -653,7 +619,6 @@ def emit_tb_top(topo: dict) -> str:
     w("endmodule")
     w("")
     w("`endif  // TB_TOP_SV")
-
     return "\n".join(lines) + "\n"
 
 
@@ -661,39 +626,44 @@ def emit_tb_top(topo: dict) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
+def _fabric_path(out_path: Path, topo: dict) -> Path:
+    return out_path.parent / f"noc_fabric_{topo['topology']['name']}.sv"
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(
-        description="Generate tb_top.sv from topology config."
-    )
+    ap = argparse.ArgumentParser(description="Generate tb_top.sv + noc_fabric_<topo>.sv.")
     ap.add_argument("--topology", default="mesh_2x1",
                     help="Topology name (matches sim/topologies/<name>.yaml)")
     ap.add_argument("--out", default=str(ROOT / "sim" / "sv" / "tb_top.sv"),
-                    help="Output file path")
+                    help="Output tb_top.sv path (fabric emitted alongside)")
     ap.add_argument("--check", action="store_true",
-                    help="Drift gate: regenerate and diff vs committed file; exit 1 if different")
+                    help="Drift gate: regenerate both files and diff vs committed; exit 1 if different")
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
-    text = emit_tb_top(topo)
+    tb_text = emit_tb_top(topo)
+    fab_text = emit_fabric(topo)
+    out_path = Path(a.out)
+    fab_path = _fabric_path(out_path, topo)
 
     if a.check:
-        out_path = Path(a.out)
-        if not out_path.exists():
-            print(f"DRIFT: {a.out} does not exist (never generated)")
-            return 1
-        cur = out_path.read_text(encoding="utf-8")
-        if cur != text:
-            sys.stdout.writelines(difflib.unified_diff(
-                cur.splitlines(True),
-                text.splitlines(True),
-                "committed",
-                "regenerated",
-            ))
-            print("DRIFT: tb_top.sv differs from generator output")
-            return 1
-        return 0
+        rc = 0
+        for path, text, label in ((out_path, tb_text, "tb_top.sv"),
+                                  (fab_path, fab_text, fab_path.name)):
+            if not path.exists():
+                print(f"DRIFT: {path} does not exist (never generated)")
+                rc = 1
+                continue
+            cur = path.read_text(encoding="utf-8")
+            if cur != text:
+                sys.stdout.writelines(difflib.unified_diff(
+                    cur.splitlines(True), text.splitlines(True), "committed", "regenerated"))
+                print(f"DRIFT: {label} differs from generator output")
+                rc = 1
+        return rc
 
-    Path(a.out).write_text(text, encoding="utf-8")
+    out_path.write_text(tb_text, encoding="utf-8")
+    fab_path.write_text(fab_text, encoding="utf-8")
     return 0
 
 

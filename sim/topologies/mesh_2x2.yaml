@@ -1,0 +1,5 @@
+topology:
+  name: mesh_2x2
+  x_dim: 2
+  y_dim: 2
+  num_vc: 1
