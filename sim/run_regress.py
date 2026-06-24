@@ -33,6 +33,8 @@ def main():
             fail += 1
             sys.stdout.write(r.stdout[-800:] + r.stderr[-400:])
     print(f"\nco-sim regress: {run-fail}/{run} passed, {skip} skipped")
+    if run == 0:
+        print("FAIL: 0 scenarios ran (expected >=1) — vacuous pass guard"); return 1
     return 1 if fail else 0
 
 if __name__ == "__main__":
