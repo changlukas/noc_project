@@ -14,6 +14,13 @@ TOPOLOGY ?= mesh_2x1
 # artifacts land under $(BUILD_ROOT)/verilator/, run logs under ./output/.
 include ../build_config.mk
 
+# OBJDIR_SUFFIX isolates a variant build (e.g. the num_vc=2 multi-VC driver) into
+# its own obj_dir + filelist + tb_top.sv so it never clobbers the default
+# (num_vc=1) artifacts that sim-regress + gen_tb_top --check depend on. Empty by
+# default. The vc2 driver (sim/run_vc2_driver.py) sets OBJDIR_SUFFIX=_vc2 plus a
+# matching TOPOLOGY + TB_TOP_SV + FILELIST_F override.
+OBJDIR_SUFFIX ?=
+
 VL_BUILD := $(BUILD_ROOT)/verilator
 
 # FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist.f is a
@@ -55,7 +62,7 @@ VERILATOR_FLAGS := \
     --top-module $(TOP) \
     --timing \
     --output-split 0 \
-    --Mdir $(VL_BUILD)/obj_dir \
+    --Mdir $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX) \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
 
@@ -68,7 +75,7 @@ VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 # does not. Naming the real artifact makes the source-dependency check
 # fire correctly on both (a phony or wrong-name target rebuilds always).
 EXEEXT := $(if $(findstring NT,$(shell uname -s)),.exe,)
-TBTOP_EXE := $(VL_BUILD)/obj_dir/V$(TOP)$(EXEEXT)
+TBTOP_EXE := $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)/V$(TOP)$(EXEEXT)
 
 all: $(TBTOP_EXE)
 
@@ -117,11 +124,11 @@ check-yamlcpp:
 #   source paths with backslashes in generated C-string literals — rewrite them
 #   to forward slashes before g++ sees them (same workaround as genamba target).
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
-	@mkdir -p $(VL_BUILD)/obj_dir
+	@mkdir -p $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
-	    $(VL_BUILD)/obj_dir/*.cpp $(VL_BUILD)/obj_dir/*.h
-	$(MAKE) -C $(VL_BUILD)/obj_dir -f V$(TOP).mk \
+	    $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)/*.cpp $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)/*.h
+	$(MAKE) -C $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX) -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=-Wl,--stack,67108864"
 

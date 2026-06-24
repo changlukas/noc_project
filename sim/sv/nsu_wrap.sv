@@ -46,16 +46,9 @@ module nsu_wrap #(
 );
 
     // -------------------------------------------------------------------------
-    // PoC scope guard (T1.3): single-VC only
+    // Multi-VC: credit_return marshalled per-VC across DPI as a [NUM_VC-1:0]
+    // vector (bit vc = credit pulse on VC vc). No single-VC elaboration guard.
     // -------------------------------------------------------------------------
-    // c_model + DPI marshalling assume single-VC. Multi-VC support requires
-    // plumbing per-VC credit_return through DPI; until then, fail elaboration
-    // if NUM_VC > 1 instead of silently reducing credit_return to bit 0.
-    initial begin
-        if (NUM_VC != 1) begin
-            $fatal(1, "%m: NUM_VC=%0d; PoC supports NUM_VC=1 only", NUM_VC);
-        end
-    end
 
     // -------------------------------------------------------------------------
     // DPI imports — 3-step pattern per spec §5.1
@@ -65,7 +58,7 @@ module nsu_wrap #(
         input  longint unsigned                ctx,
         input  bit                    noc_req_valid,
         input  bit [FLIT_WIDTH-1:0]       noc_req_flit,
-        input  bit                    noc_rsp_credit_return,
+        input  bit [NUM_VC-1:0]       noc_rsp_credit_return,
         input  bit                    awready,
         input  bit                    wready,
         input  bit                    bvalid,
@@ -87,7 +80,7 @@ module nsu_wrap #(
         input  longint unsigned                ctx,
         output bit                    noc_rsp_valid,
         output bit [FLIT_WIDTH-1:0]       noc_rsp_flit,
-        output bit                    noc_req_credit_return,
+        output bit [NUM_VC-1:0]       noc_req_credit_return,
         output bit                    awvalid,
         output bit [ID_WIDTH-1:0]     awid,
         output bit [ADDR_WIDTH-1:0]   awaddr,
@@ -126,8 +119,8 @@ module nsu_wrap #(
     bit                    noc_rsp_valid_q;
     bit [FLIT_WIDTH-1:0]       noc_rsp_flit_q;
 
-    // NoC req credit return (Nsu drives back upstream; PoC always 0)
-    bit                    noc_req_credit_return_q;
+    // NoC req credit return (Nsu drives back upstream; per-VC pulse vector)
+    bit [NUM_VC-1:0]       noc_req_credit_return_q;
 
     // AXI master side outputs (Nsu drives toward subordinate)
     bit                    awvalid_q;
@@ -203,8 +196,8 @@ module nsu_wrap #(
                 // NoC req side — req flit arriving from ChannelModel toward Nsu
                 noc_miso_i.req_valid,
                 noc_miso_i.req_flit,
-                // NoC rsp credit — ChannelModel returns credit to Nsu
-                noc_miso_i.rsp_credit_return[0],
+                // NoC rsp credit — ChannelModel returns credit to Nsu (per-VC vector)
+                noc_miso_i.rsp_credit_return,
                 // AXI master side — subordinate drives ready + B/R
                 axi_o.awready,
                 axi_o.wready,
@@ -227,7 +220,7 @@ module nsu_wrap #(
             begin : get_outputs_blk
                 bit                    t_noc_rsp_valid;
                 bit [FLIT_WIDTH-1:0]       t_noc_rsp_flit;
-                bit                    t_noc_req_credit_return;
+                bit [NUM_VC-1:0]       t_noc_req_credit_return;
                 bit                    t_awvalid;
                 bit [ID_WIDTH-1:0]     t_awid;
                 bit [ADDR_WIDTH-1:0]   t_awaddr;
@@ -307,8 +300,8 @@ module nsu_wrap #(
     assign noc_miso_i.rsp_flit  = noc_rsp_flit_q;
 
     // NoC req credit — Nsu drives req_credit_return back upstream (registered
-    // FlooNoC consumer pulse from the C model; pure pass-through bit)
-    assign noc_miso_i.req_credit_return = {NUM_VC{noc_req_credit_return_q}};
+    // FlooNoC consumer pulse vector from the C model; per-VC pass-through)
+    assign noc_miso_i.req_credit_return = noc_req_credit_return_q;
 
     // AXI master side — Nsu drives request channels toward subordinate
     assign axi_o.awvalid = awvalid_q;

@@ -272,6 +272,26 @@ void pack_flit(const FlitBytes& b, svBitVecVal* vec) {
     }
 }
 
+// Unpack a per-VC credit word (bit vc = pulse on VC vc) into a VcCreditVec.
+// Only [0 .. num_vc) are read; the rest stay false.
+template <typename CreditVec>
+CreditVec unpack_vc_credit(const svBitVecVal* word, uint8_t num_vc) {
+    CreditVec v{};
+    for (uint8_t vc = 0; vc < num_vc; ++vc) {
+        v[vc] = ((word[0] >> vc) & 0x1u) != 0;
+    }
+    return v;
+}
+
+// Pack a VcCreditVec into a single per-VC credit word (bit vc = pulse on VC vc).
+template <typename CreditVec>
+void pack_vc_credit(const CreditVec& v, uint8_t num_vc, svBitVecVal* word) {
+    word[0] = 0;
+    for (uint8_t vc = 0; vc < num_vc; ++vc) {
+        if (v[vc]) word[0] |= (1u << vc);
+    }
+}
+
 }  // namespace
 
 extern "C" unsigned long long cmodel_channel_model_create(const char* name) {
@@ -351,7 +371,8 @@ using ni::cmodel::wrap::RouterInputs;
 using ni::cmodel::wrap::RouterOutputs;
 using ni::cmodel::wrap::RouterWrap;
 
-extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord) {
+extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord, int y_coord,
+                                                   int mesh_x_dim, int mesh_y_dim, int num_vc) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_router_create: not initialized");
@@ -359,7 +380,9 @@ extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_router_create, 0ull) {
         auto adapter = std::make_unique<RouterWrap>();
-        adapter->init(static_cast<uint8_t>(x_coord));
+        adapter->init(static_cast<uint8_t>(x_coord), static_cast<uint8_t>(y_coord),
+                      static_cast<uint8_t>(mesh_x_dim), static_cast<uint8_t>(mesh_y_dim),
+                      static_cast<uint8_t>(num_vc));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Router), WrapType::Router, HandleState::Live,
             std::string(name),
@@ -371,29 +394,33 @@ extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord
     DPI_BOUNDARY_END_R(cmodel_router_create);
 }
 
-extern "C" void cmodel_router_set_inputs(unsigned long long ctx, svBit req_in_valid,
-                                         svBitVecVal* req_in_flit, svBit req_in_credit_return,
-                                         svBit rsp_in_valid, svBitVecVal* rsp_in_flit,
-                                         svBit rsp_in_credit_return, svBit link_req_out_credit,
-                                         svBit link_req_in_valid, svBitVecVal* link_req_in_flit,
-                                         svBit link_rsp_out_credit, svBit link_rsp_in_valid,
-                                         svBitVecVal* link_rsp_in_flit) {
+extern "C" void cmodel_router_set_inputs(
+    unsigned long long ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
+    svBitVecVal* req_in_credit_return, svBit rsp_in_valid, svBitVecVal* rsp_in_flit,
+    svBitVecVal* rsp_in_credit_return, svBitVecVal* link_req_out_credit,
+    svBitVecVal* link_req_in_valid, svBitVecVal* link_req_in_flit, svBitVecVal* link_rsp_out_credit,
+    svBitVecVal* link_rsp_in_valid, svBitVecVal* link_rsp_in_flit) {
     DPI_BOUNDARY_BEGIN(cmodel_router_set_inputs) {
         REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_set_inputs");
         auto* r = static_cast<RouterWrap*>(_h->adapter.get());
+        const uint8_t nvc = r->num_vc();
         RouterInputs in{};
         in.req_in_valid = static_cast<bool>(req_in_valid);
         in.req_in_flit = unpack_flit(req_in_flit);
-        in.req_in_credit_return = static_cast<bool>(req_in_credit_return);
+        in.req_in_credit_return = unpack_vc_credit<VcCreditVec>(req_in_credit_return, nvc);
         in.rsp_in_valid = static_cast<bool>(rsp_in_valid);
         in.rsp_in_flit = unpack_flit(rsp_in_flit);
-        in.rsp_in_credit_return = static_cast<bool>(rsp_in_credit_return);
-        in.link_req_out_credit = static_cast<bool>(link_req_out_credit);
-        in.link_req_in_valid = static_cast<bool>(link_req_in_valid);
-        in.link_req_in_flit = unpack_flit(link_req_in_flit);
-        in.link_rsp_out_credit = static_cast<bool>(link_rsp_out_credit);
-        in.link_rsp_in_valid = static_cast<bool>(link_rsp_in_valid);
-        in.link_rsp_in_flit = unpack_flit(link_rsp_in_flit);
+        in.rsp_in_credit_return = unpack_vc_credit<VcCreditVec>(rsp_in_credit_return, nvc);
+        // LINK face: per-direction arrays (port-major). valid = bit per port in
+        // one word; flit = FLIT_VEC_WORDS per port; credit = one word per port.
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            in.link_req_in_valid[p] = ((link_req_in_valid[0] >> p) & 0x1u) != 0;
+            in.link_rsp_in_valid[p] = ((link_rsp_in_valid[0] >> p) & 0x1u) != 0;
+            in.link_req_in_flit[p] = unpack_flit(link_req_in_flit + p * FLIT_VEC_WORDS);
+            in.link_rsp_in_flit[p] = unpack_flit(link_rsp_in_flit + p * FLIT_VEC_WORDS);
+            in.link_req_out_credit[p] = unpack_vc_credit<VcCreditVec>(link_req_out_credit + p, nvc);
+            in.link_rsp_out_credit[p] = unpack_vc_credit<VcCreditVec>(link_rsp_out_credit + p, nvc);
+        }
         r->set_inputs(in);
     }
     DPI_BOUNDARY_END(cmodel_router_set_inputs);
@@ -407,30 +434,37 @@ extern "C" void cmodel_router_tick(unsigned long long ctx) {
     DPI_BOUNDARY_END(cmodel_router_tick);
 }
 
-extern "C" void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
-                                          svBitVecVal* req_out_flit, svBit* req_out_credit_return,
-                                          svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
-                                          svBit* rsp_out_credit_return, svBit* link_req_out_valid,
-                                          svBitVecVal* link_req_out_flit, svBit* link_req_in_credit,
-                                          svBit* link_rsp_out_valid, svBitVecVal* link_rsp_out_flit,
-                                          svBit* link_rsp_in_credit) {
+extern "C" void cmodel_router_get_outputs(
+    unsigned long long ctx, svBit* req_out_valid, svBitVecVal* req_out_flit,
+    svBitVecVal* req_out_credit_return, svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
+    svBitVecVal* rsp_out_credit_return, svBitVecVal* link_req_out_valid,
+    svBitVecVal* link_req_out_flit, svBitVecVal* link_req_in_credit,
+    svBitVecVal* link_rsp_out_valid, svBitVecVal* link_rsp_out_flit,
+    svBitVecVal* link_rsp_in_credit) {
     DPI_BOUNDARY_BEGIN(cmodel_router_get_outputs) {
         REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_get_outputs");
         auto* r = static_cast<RouterWrap*>(_h->adapter.get());
+        const uint8_t nvc = r->num_vc();
         RouterOutputs out{};
         r->get_outputs(out);
         *req_out_valid = static_cast<svBit>(out.req_out_valid);
         pack_flit(out.req_out_flit, req_out_flit);
-        *req_out_credit_return = static_cast<svBit>(out.req_out_credit_return);
+        pack_vc_credit(out.req_out_credit_return, nvc, req_out_credit_return);
         *rsp_out_valid = static_cast<svBit>(out.rsp_out_valid);
         pack_flit(out.rsp_out_flit, rsp_out_flit);
-        *rsp_out_credit_return = static_cast<svBit>(out.rsp_out_credit_return);
-        *link_req_out_valid = static_cast<svBit>(out.link_req_out_valid);
-        pack_flit(out.link_req_out_flit, link_req_out_flit);
-        *link_req_in_credit = static_cast<svBit>(out.link_req_in_credit);
-        *link_rsp_out_valid = static_cast<svBit>(out.link_rsp_out_valid);
-        pack_flit(out.link_rsp_out_flit, link_rsp_out_flit);
-        *link_rsp_in_credit = static_cast<svBit>(out.link_rsp_in_credit);
+        pack_vc_credit(out.rsp_out_credit_return, nvc, rsp_out_credit_return);
+        // LINK face: per-direction arrays (port-major). valid = bit per port in
+        // one word; flit = FLIT_VEC_WORDS per port; credit = one word per port.
+        link_req_out_valid[0] = 0;
+        link_rsp_out_valid[0] = 0;
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            if (out.link_req_out_valid[p]) link_req_out_valid[0] |= (1u << p);
+            if (out.link_rsp_out_valid[p]) link_rsp_out_valid[0] |= (1u << p);
+            pack_flit(out.link_req_out_flit[p], link_req_out_flit + p * FLIT_VEC_WORDS);
+            pack_flit(out.link_rsp_out_flit[p], link_rsp_out_flit + p * FLIT_VEC_WORDS);
+            pack_vc_credit(out.link_req_in_credit[p], nvc, link_req_in_credit + p);
+            pack_vc_credit(out.link_rsp_in_credit[p], nvc, link_rsp_in_credit + p);
+        }
     }
     DPI_BOUNDARY_END(cmodel_router_get_outputs);
 }
@@ -746,14 +780,14 @@ extern "C" void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready,
 using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
 
-extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id) {
+extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nmu_create: not initialized");
         return 0ull;
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_nmu_create, 0ull) {
         auto adapter = std::make_unique<NmuWrap>();
-        adapter->init(static_cast<uint8_t>(src_id));
+        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nmu), WrapType::Nmu, HandleState::Live,
             std::string(name),
@@ -772,7 +806,7 @@ extern "C" void cmodel_nmu_set_inputs(
     svBitVecVal* wstrb, svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
     svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
     svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
-    svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBit noc_req_credit_return) {
+    svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBitVecVal* noc_req_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_set_inputs) {
         REQUIRE_HANDLE(ctx, WrapType::Nmu, "cmodel_nmu_set_inputs");
         auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
@@ -805,7 +839,8 @@ extern "C" void cmodel_nmu_set_inputs(
         in.rready = static_cast<bool>(rready);
         in.noc_rsp_valid = static_cast<bool>(noc_rsp_valid);
         in.noc_rsp_flit = unpack_flit(noc_rsp_flit);
-        in.noc_req_credit_return = static_cast<bool>(noc_req_credit_return);
+        in.noc_req_credit_return =
+            unpack_vc_credit<NmuVcCreditVec>(noc_req_credit_return, nmu->num_vc());
         nmu->set_inputs(in);
     }
     DPI_BOUNDARY_END(cmodel_nmu_set_inputs);
@@ -825,7 +860,7 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
                                        svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
                                        svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
                                        svBit* noc_req_valid, svBitVecVal* noc_req_flit,
-                                       svBit* noc_rsp_credit_return) {
+                                       svBitVecVal* noc_rsp_credit_return) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_get_outputs) {
         REQUIRE_HANDLE(ctx, WrapType::Nmu, "cmodel_nmu_get_outputs");
         auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
@@ -845,7 +880,7 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
         *rlast = static_cast<svBit>(out.rlast);
         *noc_req_valid = static_cast<svBit>(out.noc_req_valid);
         pack_flit(out.noc_req_flit, noc_req_flit);
-        *noc_rsp_credit_return = static_cast<svBit>(out.noc_rsp_credit_return);
+        pack_vc_credit(out.noc_rsp_credit_return, nmu->num_vc(), noc_rsp_credit_return);
     }
     DPI_BOUNDARY_END(cmodel_nmu_get_outputs);
 }
@@ -865,14 +900,14 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
 using ni::cmodel::wrap::NsuInputs;
 using ni::cmodel::wrap::NsuOutputs;
 
-extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id) {
+extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, int num_vc) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nsu_create: not initialized");
         return 0ull;
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, 0ull) {
         auto adapter = std::make_unique<NsuWrap>();
-        adapter->init(static_cast<uint8_t>(src_id));
+        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nsu), WrapType::Nsu, HandleState::Live,
             std::string(name),
@@ -885,7 +920,7 @@ extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id) {
 }
 
 extern "C" void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_valid,
-                                      svBitVecVal* noc_req_flit, svBit noc_rsp_credit_return,
+                                      svBitVecVal* noc_req_flit, svBitVecVal* noc_rsp_credit_return,
                                       svBit awready, svBit wready, svBit bvalid, svBitVecVal* bid,
                                       svBitVecVal* bresp, svBit arready, svBit rvalid,
                                       svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
@@ -896,7 +931,8 @@ extern "C" void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_vali
         NsuInputs in{};
         in.noc_req_valid = static_cast<bool>(noc_req_valid);
         in.noc_req_flit = unpack_flit(noc_req_flit);
-        in.noc_rsp_credit_return = static_cast<bool>(noc_rsp_credit_return);
+        in.noc_rsp_credit_return =
+            unpack_vc_credit<NsuVcCreditVec>(noc_rsp_credit_return, nsu->num_vc());
         in.awready = static_cast<bool>(awready);
         in.wready = static_cast<bool>(wready);
         in.bvalid = static_cast<bool>(bvalid);
@@ -922,17 +958,15 @@ extern "C" void cmodel_nsu_tick(unsigned long long ctx) {
     DPI_BOUNDARY_END(cmodel_nsu_tick);
 }
 
-extern "C" void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* noc_rsp_valid,
-                                       svBitVecVal* noc_rsp_flit, svBit* noc_req_credit_return,
-                                       svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
-                                       svBitVecVal* awlen, svBitVecVal* awsize,
-                                       svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
-                                       svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,
-                                       svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast,
-                                       svBit* bready, svBit* arvalid, svBitVecVal* arid,
-                                       svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
-                                       svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
-                                       svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
+extern "C" void cmodel_nsu_get_outputs(
+    unsigned long long ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit,
+    svBitVecVal* noc_req_credit_return, svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
+    svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst, svBit* awlock,
+    svBitVecVal* awcache, svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,
+    svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast, svBit* bready, svBit* arvalid,
+    svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
+    svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache, svBitVecVal* arprot,
+    svBitVecVal* arqos, svBit* rready) {
     DPI_BOUNDARY_BEGIN(cmodel_nsu_get_outputs) {
         REQUIRE_HANDLE(ctx, WrapType::Nsu, "cmodel_nsu_get_outputs");
         auto* nsu = static_cast<NsuWrap*>(_h->adapter.get());
@@ -941,7 +975,7 @@ extern "C" void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* noc_rsp_va
 
         *noc_rsp_valid = static_cast<svBit>(out.noc_rsp_valid);
         pack_flit(out.noc_rsp_flit, noc_rsp_flit);
-        *noc_req_credit_return = static_cast<svBit>(out.noc_req_credit_return);
+        pack_vc_credit(out.noc_req_credit_return, nsu->num_vc(), noc_req_credit_return);
 
         *awvalid = static_cast<svBit>(out.awvalid);
         awid[0] = out.awid;

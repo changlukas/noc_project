@@ -20,10 +20,16 @@
 #pragma once
 #include "axi/types.hpp"                   // axi::DATA_BYTES
 #include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
 
 namespace ni::cmodel::wrap {
+
+// Per-VC credit pulse vector (bit/entry vc = one credit pulse on VC vc). Sized to
+// the max VC count; only [0 .. num_vc) live. Mirrors router_wrap_io VcCreditVec.
+inline constexpr std::size_t NSU_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
+using NsuVcCreditVec = std::array<bool, NSU_NUM_VC_MAX>;
 
 // 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
 // wire width agrees across master/slave/nmu/nsu wrap IO structs.
@@ -34,9 +40,9 @@ struct NsuInputs {
     // NoC req side — flit arriving from channel toward Nsu Depacketize
     bool noc_req_valid;
     FlitBytes noc_req_flit;
-    // NoC rsp credit — PULSE: router LOCAL input drained an Nsu rsp flit, return
-    // one credit to the rsp-out sender counter (NUM_VC=1 PoC: 1 bit)
-    bool noc_rsp_credit_return;
+    // NoC rsp credit — PULSE/VC: router LOCAL input drained an Nsu rsp flit, return
+    // one credit per VC to the rsp-out sender counter (bit/entry vc = VC vc pulse).
+    NsuVcCreditVec noc_rsp_credit_return;
     // AXI master side — AW channel (subordinate drives ready)
     bool awready;
     // AXI master side — W channel (subordinate drives ready)
@@ -60,9 +66,9 @@ struct NsuOutputs {
     // NoC rsp side — flit produced by Nsu Packetize, leaving toward channel
     bool noc_rsp_valid;
     FlitBytes noc_rsp_flit;
-    // NoC req credit — consumer PULSE: Nsu Depacketize consumed an injected req
-    // flit, return one credit to the router LOCAL output sender counter
-    bool noc_req_credit_return;
+    // NoC req credit — consumer PULSE/VC: Nsu Depacketize consumed an injected req
+    // flit, return one credit per VC to the router LOCAL output sender counter.
+    NsuVcCreditVec noc_req_credit_return;
     // AXI master side — AW channel (Nsu drives write address to subordinate)
     bool awvalid;
     uint8_t awid;

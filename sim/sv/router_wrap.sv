@@ -36,7 +36,11 @@
 module router_wrap #(
     parameter int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT,
     parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,
-    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
+    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT,
+    // Router port count (LOCAL + N/E/S/W). Mirrors c_model ROUTER_PORT_COUNT /
+    // ROUTER_LINK_PORTS; the DPI marshals the LINK face port-major over these.
+    // Fixed at 5; not overridden (kept as a parameter so the port list can use it).
+    parameter int unsigned LINK_PORTS            = 5
 ) (
     input  logic                  clk_i,
     input  logic                  rst_ni,
@@ -45,36 +49,36 @@ module router_wrap #(
     noc_intf.miso                 noc_nmu_i,
     // NSU-facing bundle: drives req_*, receives rsp_* and req_credit_return.
     noc_intf.mosi                 noc_nsu_o,
-    // REQ-network LINK to peer node (plain signals; pulse credit).
-    output logic                  link_req_out_valid,
-    output logic [FLIT_WIDTH-1:0] link_req_out_flit,
-    input  logic                  link_req_out_credit,
-    input  logic                  link_req_in_valid,
-    input  logic [FLIT_WIDTH-1:0] link_req_in_flit,
-    output logic                  link_req_in_credit,
-    // RSP-network LINK to peer node (plain signals; pulse credit).
-    output logic                  link_rsp_out_valid,
-    output logic [FLIT_WIDTH-1:0] link_rsp_out_flit,
-    input  logic                  link_rsp_out_credit,
-    input  logic                  link_rsp_in_valid,
-    input  logic [FLIT_WIDTH-1:0] link_rsp_in_flit,
-    output logic                  link_rsp_in_credit
+    // REQ-network LINK to peer node(s): per-DIRECTION arrays (router has 5 ports;
+    // LOCAL slot unused on the LINK face, N/E/S/W carry inter-router links). At
+    // 2-node only one direction is live; Task 7 fills the rest. Credit is a
+    // per-VC pulse vector.
+    output logic [LINK_PORTS-1:0]                 link_req_out_valid,
+    output logic [FLIT_WIDTH-1:0]                 link_req_out_flit   [LINK_PORTS],
+    input  logic [NUM_VC-1:0]                     link_req_out_credit [LINK_PORTS],
+    input  logic [LINK_PORTS-1:0]                 link_req_in_valid,
+    input  logic [FLIT_WIDTH-1:0]                 link_req_in_flit    [LINK_PORTS],
+    output logic [NUM_VC-1:0]                     link_req_in_credit  [LINK_PORTS],
+    // RSP-network LINK to peer node(s): per-DIRECTION arrays (mirror of REQ).
+    output logic [LINK_PORTS-1:0]                 link_rsp_out_valid,
+    output logic [FLIT_WIDTH-1:0]                 link_rsp_out_flit   [LINK_PORTS],
+    input  logic [NUM_VC-1:0]                     link_rsp_out_credit [LINK_PORTS],
+    input  logic [LINK_PORTS-1:0]                 link_rsp_in_valid,
+    input  logic [FLIT_WIDTH-1:0]                 link_rsp_in_flit    [LINK_PORTS],
+    output logic [NUM_VC-1:0]                     link_rsp_in_credit  [LINK_PORTS]
 );
 
     // -------------------------------------------------------------------------
-    // PoC scope guard: single-VC only
+    // Multi-VC: NI credit_return + per-direction LINK credit are marshalled
+    // per-VC across DPI as [NUM_VC-1:0] vectors (bit vc = credit pulse on VC vc).
+    // No single-VC elaboration guard.
     // -------------------------------------------------------------------------
-    // c_model + DPI marshalling assume single-VC. Multi-VC support requires
-    // plumbing per-VC credit_return through DPI; until then, fail elaboration
-    // if NUM_VC > 1 instead of silently broadcasting a single-bit credit.
-    initial begin
-        if (NUM_VC != 1) begin
-            $fatal(1, "%m: NUM_VC=%0d; PoC supports NUM_VC=1 only", NUM_VC);
-        end
-    end
 
     // -------------------------------------------------------------------------
     // DPI imports — 3-step pattern; arg order mirrors cmodel_dpi.h Router decls.
+    // LINK face is port-indexed: valid = bit-per-port packed vector; flit =
+    // unpacked [LINK_PORTS] array (port-major words); credit = one [NUM_VC-1:0]
+    // word per port (unpacked [LINK_PORTS]).
     // -------------------------------------------------------------------------
 
     // set_inputs: sample SV wire state into C++ input latch.
@@ -82,16 +86,16 @@ module router_wrap #(
         input  longint unsigned              ctx,
         input  bit                  req_in_valid,
         input  bit [FLIT_WIDTH-1:0] req_in_flit,
-        input  bit                  req_in_credit_return,
+        input  bit [NUM_VC-1:0]     req_in_credit_return,
         input  bit                  rsp_in_valid,
         input  bit [FLIT_WIDTH-1:0] rsp_in_flit,
-        input  bit                  rsp_in_credit_return,
-        input  bit                  link_req_out_credit,
-        input  bit                  link_req_in_valid,
-        input  bit [FLIT_WIDTH-1:0] link_req_in_flit,
-        input  bit                  link_rsp_out_credit,
-        input  bit                  link_rsp_in_valid,
-        input  bit [FLIT_WIDTH-1:0] link_rsp_in_flit
+        input  bit [NUM_VC-1:0]     rsp_in_credit_return,
+        input  bit [NUM_VC-1:0]     link_req_out_credit [LINK_PORTS],
+        input  bit [LINK_PORTS-1:0] link_req_in_valid,
+        input  bit [FLIT_WIDTH-1:0] link_req_in_flit    [LINK_PORTS],
+        input  bit [NUM_VC-1:0]     link_rsp_out_credit [LINK_PORTS],
+        input  bit [LINK_PORTS-1:0] link_rsp_in_valid,
+        input  bit [FLIT_WIDTH-1:0] link_rsp_in_flit    [LINK_PORTS]
     );
 
     // tick: advance C++ model one cycle.
@@ -102,16 +106,16 @@ module router_wrap #(
         input  longint unsigned              ctx,
         output bit                  req_out_valid,
         output bit [FLIT_WIDTH-1:0] req_out_flit,
-        output bit                  req_out_credit_return,
+        output bit [NUM_VC-1:0]     req_out_credit_return,
         output bit                  rsp_out_valid,
         output bit [FLIT_WIDTH-1:0] rsp_out_flit,
-        output bit                  rsp_out_credit_return,
-        output bit                  link_req_out_valid,
-        output bit [FLIT_WIDTH-1:0] link_req_out_flit,
-        output bit                  link_req_in_credit,
-        output bit                  link_rsp_out_valid,
-        output bit [FLIT_WIDTH-1:0] link_rsp_out_flit,
-        output bit                  link_rsp_in_credit
+        output bit [NUM_VC-1:0]     rsp_out_credit_return,
+        output bit [LINK_PORTS-1:0] link_req_out_valid,
+        output bit [FLIT_WIDTH-1:0] link_req_out_flit   [LINK_PORTS],
+        output bit [NUM_VC-1:0]     link_req_in_credit  [LINK_PORTS],
+        output bit [LINK_PORTS-1:0] link_rsp_out_valid,
+        output bit [FLIT_WIDTH-1:0] link_rsp_out_flit   [LINK_PORTS],
+        output bit [NUM_VC-1:0]     link_rsp_in_credit  [LINK_PORTS]
     );
 
     // Lifecycle / error polling lives in tb_top.sv.
@@ -120,18 +124,18 @@ module router_wrap #(
     // Output registers (beta-tick: registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
-    bit                    req_out_valid_q;
-    bit [FLIT_WIDTH-1:0]   req_out_flit_q;
-    bit                    req_out_credit_return_q;
-    bit                    rsp_out_valid_q;
-    bit [FLIT_WIDTH-1:0]   rsp_out_flit_q;
-    bit                    rsp_out_credit_return_q;
-    bit                    link_req_out_valid_q;
-    bit [FLIT_WIDTH-1:0]   link_req_out_flit_q;
-    bit                    link_req_in_credit_q;
-    bit                    link_rsp_out_valid_q;
-    bit [FLIT_WIDTH-1:0]   link_rsp_out_flit_q;
-    bit                    link_rsp_in_credit_q;
+    bit                            req_out_valid_q;
+    bit [FLIT_WIDTH-1:0]           req_out_flit_q;
+    bit [NUM_VC-1:0]              req_out_credit_return_q;
+    bit                            rsp_out_valid_q;
+    bit [FLIT_WIDTH-1:0]           rsp_out_flit_q;
+    bit [NUM_VC-1:0]              rsp_out_credit_return_q;
+    bit [LINK_PORTS-1:0]          link_req_out_valid_q;
+    bit [FLIT_WIDTH-1:0]           link_req_out_flit_q  [LINK_PORTS];
+    bit [NUM_VC-1:0]              link_req_in_credit_q [LINK_PORTS];
+    bit [LINK_PORTS-1:0]          link_rsp_out_valid_q;
+    bit [FLIT_WIDTH-1:0]           link_rsp_out_flit_q  [LINK_PORTS];
+    bit [NUM_VC-1:0]              link_rsp_in_credit_q [LINK_PORTS];
 
     // -------------------------------------------------------------------------
     // always_ff: sync-reset, 3-step DPI call, registered outputs
@@ -146,28 +150,51 @@ module router_wrap #(
             rsp_out_flit_q           <= '0;
             rsp_out_credit_return_q  <= '0;
             link_req_out_valid_q     <= '0;
-            link_req_out_flit_q      <= '0;
-            link_req_in_credit_q     <= '0;
             link_rsp_out_valid_q     <= '0;
-            link_rsp_out_flit_q      <= '0;
-            link_rsp_in_credit_q     <= '0;
+            // Unpacked-array regs cleared element-wise (Verilator rejects '0 here).
+            for (int p = 0; p < LINK_PORTS; p++) begin
+                link_req_out_flit_q[p]  <= '0;
+                link_req_in_credit_q[p] <= '0;
+                link_rsp_out_flit_q[p]  <= '0;
+                link_rsp_in_credit_q[p] <= '0;
+            end
         end else begin
             // Step 1: push current wire values into C++ input latch.
-            cmodel_router_set_inputs(
-                ctx_i,
-                noc_nmu_i.req_valid,
-                noc_nmu_i.req_flit,
-                noc_nsu_o.req_credit_return[0],
-                noc_nsu_o.rsp_valid,
-                noc_nsu_o.rsp_flit,
-                noc_nmu_i.rsp_credit_return[0],
-                link_req_out_credit,
-                link_req_in_valid,
-                link_req_in_flit,
-                link_rsp_out_credit,
-                link_rsp_in_valid,
-                link_rsp_in_flit
-            );
+            // The LINK-face ports are `logic` unpacked arrays; the DPI imports
+            // declare `bit` unpacked arrays. Verilator requires an exact element
+            // type match when passing whole unpacked arrays, so copy the `logic`
+            // ports into `bit` mirrors first (4-state -> 2-state, sim-clean here).
+            begin : set_inputs_blk
+                bit [NUM_VC-1:0]     b_link_req_out_credit [LINK_PORTS];
+                bit [LINK_PORTS-1:0] b_link_req_in_valid;
+                bit [FLIT_WIDTH-1:0] b_link_req_in_flit    [LINK_PORTS];
+                bit [NUM_VC-1:0]     b_link_rsp_out_credit [LINK_PORTS];
+                bit [LINK_PORTS-1:0] b_link_rsp_in_valid;
+                bit [FLIT_WIDTH-1:0] b_link_rsp_in_flit    [LINK_PORTS];
+                b_link_req_in_valid = link_req_in_valid;
+                b_link_rsp_in_valid = link_rsp_in_valid;
+                for (int p = 0; p < LINK_PORTS; p++) begin
+                    b_link_req_out_credit[p] = link_req_out_credit[p];
+                    b_link_req_in_flit[p]    = link_req_in_flit[p];
+                    b_link_rsp_out_credit[p] = link_rsp_out_credit[p];
+                    b_link_rsp_in_flit[p]    = link_rsp_in_flit[p];
+                end
+                cmodel_router_set_inputs(
+                    ctx_i,
+                    noc_nmu_i.req_valid,
+                    noc_nmu_i.req_flit,
+                    noc_nsu_o.req_credit_return,
+                    noc_nsu_o.rsp_valid,
+                    noc_nsu_o.rsp_flit,
+                    noc_nmu_i.rsp_credit_return,
+                    b_link_req_out_credit,
+                    b_link_req_in_valid,
+                    b_link_req_in_flit,
+                    b_link_rsp_out_credit,
+                    b_link_rsp_in_valid,
+                    b_link_rsp_in_flit
+                );
+            end
 
             // Step 2: advance C++ model one cycle.
             cmodel_router_tick(ctx_i);
@@ -175,18 +202,18 @@ module router_wrap #(
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
             begin : get_outputs_blk
-                bit                    t_req_out_valid;
-                bit [FLIT_WIDTH-1:0]   t_req_out_flit;
-                bit                    t_req_out_credit_return;
-                bit                    t_rsp_out_valid;
-                bit [FLIT_WIDTH-1:0]   t_rsp_out_flit;
-                bit                    t_rsp_out_credit_return;
-                bit                    t_link_req_out_valid;
-                bit [FLIT_WIDTH-1:0]   t_link_req_out_flit;
-                bit                    t_link_req_in_credit;
-                bit                    t_link_rsp_out_valid;
-                bit [FLIT_WIDTH-1:0]   t_link_rsp_out_flit;
-                bit                    t_link_rsp_in_credit;
+                bit                            t_req_out_valid;
+                bit [FLIT_WIDTH-1:0]           t_req_out_flit;
+                bit [NUM_VC-1:0]              t_req_out_credit_return;
+                bit                            t_rsp_out_valid;
+                bit [FLIT_WIDTH-1:0]           t_rsp_out_flit;
+                bit [NUM_VC-1:0]              t_rsp_out_credit_return;
+                bit [LINK_PORTS-1:0]          t_link_req_out_valid;
+                bit [FLIT_WIDTH-1:0]           t_link_req_out_flit  [LINK_PORTS];
+                bit [NUM_VC-1:0]              t_link_req_in_credit [LINK_PORTS];
+                bit [LINK_PORTS-1:0]          t_link_rsp_out_valid;
+                bit [FLIT_WIDTH-1:0]           t_link_rsp_out_flit  [LINK_PORTS];
+                bit [NUM_VC-1:0]              t_link_rsp_in_credit [LINK_PORTS];
                 cmodel_router_get_outputs(
                     ctx_i,
                     t_req_out_valid,
@@ -225,23 +252,23 @@ module router_wrap #(
     // NSU-facing side: drive req_valid/req_flit forward.
     assign noc_nsu_o.req_valid          = req_out_valid_q;
     assign noc_nsu_o.req_flit           = req_out_flit_q;
-    // NMU-facing side: return req credit pulse back upstream (registered
-    // FlooNoC pulse from the C model; pure pass-through, no SV interpretation).
-    assign noc_nmu_i.req_credit_return  = {NUM_VC{req_out_credit_return_q}};
+    // NMU-facing side: return req credit pulse vector back upstream (registered
+    // per-VC FlooNoC pulse from the C model; pure pass-through).
+    assign noc_nmu_i.req_credit_return  = req_out_credit_return_q;
 
     // NMU-facing side: drive rsp_valid/rsp_flit back toward NMU.
     assign noc_nmu_i.rsp_valid          = rsp_out_valid_q;
     assign noc_nmu_i.rsp_flit           = rsp_out_flit_q;
-    // NSU-facing side: return rsp credit pulse back upstream (registered
-    // FlooNoC pulse from the C model; pure pass-through, no SV interpretation).
-    assign noc_nsu_o.rsp_credit_return  = {NUM_VC{rsp_out_credit_return_q}};
+    // NSU-facing side: return rsp credit pulse vector back upstream (registered
+    // per-VC FlooNoC pulse from the C model; pure pass-through).
+    assign noc_nsu_o.rsp_credit_return  = rsp_out_credit_return_q;
 
-    // REQ-network LINK: drive flit forward, return credit pulse upstream.
+    // REQ-network LINK: per-direction flit forward + credit pulse upstream.
     assign link_req_out_valid           = link_req_out_valid_q;
     assign link_req_out_flit            = link_req_out_flit_q;
     assign link_req_in_credit           = link_req_in_credit_q;
 
-    // RSP-network LINK: drive flit forward, return credit pulse upstream.
+    // RSP-network LINK: per-direction flit forward + credit pulse upstream.
     assign link_rsp_out_valid           = link_rsp_out_valid_q;
     assign link_rsp_out_flit            = link_rsp_out_flit_q;
     assign link_rsp_in_credit           = link_rsp_in_credit_q;

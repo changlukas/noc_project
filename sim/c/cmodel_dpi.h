@@ -53,31 +53,45 @@ void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 // Per-wrap DPI signatures appended by Tasks 5-11.
 // ChannelModel (Task 5) — NoC-only, simplest wrap; first chandle migration:
 unsigned long long cmodel_channel_model_create(const char* name);
-void cmodel_channel_model_set_inputs(unsigned long long ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
-                                     svBit req_in_credit_return, svBit rsp_in_valid,
-                                     svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return);
+void cmodel_channel_model_set_inputs(unsigned long long ctx, svBit req_in_valid,
+                                     svBitVecVal* req_in_flit, svBit req_in_credit_return,
+                                     svBit rsp_in_valid, svBitVecVal* rsp_in_flit,
+                                     svBit rsp_in_credit_return);
 void cmodel_channel_model_tick(unsigned long long ctx);
-void cmodel_channel_model_get_outputs(unsigned long long ctx, svBit* req_out_valid, svBitVecVal* req_out_flit,
-                                      svBit* req_out_credit_return, svBit* rsp_out_valid,
-                                      svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return);
+void cmodel_channel_model_get_outputs(unsigned long long ctx, svBit* req_out_valid,
+                                      svBitVecVal* req_out_flit, svBit* req_out_credit_return,
+                                      svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
+                                      svBit* rsp_out_credit_return);
 
-// Router (Task 3, per-node) — ONE node's REQ+RSP routers at (x,0). Pins split:
-//   NMU/NSU-facing (NI edge, level/stub credit) + per-network LINK (pulse credit).
-// x_coord selects the LINK direction (0 -> EAST, 1 -> WEST).
-unsigned long long cmodel_router_create(const char* name, int x_coord);
+// Router (Task 3, per-node) — ONE node's REQ+RSP routers at (x,y). Pins split:
+//   NMU/NSU-facing (NI edge, pulse credit) + per-DIRECTION LINK (pulse credit).
+// num_vc threads the topology VC count into the wrap config (NOT hardcoded 1).
+//
+// Per-PORT x per-VC ABI (fixed this task so Task 7 only fills directions):
+//   - LINK valid/flit/credit are PORT-indexed: SV passes packed arrays sized
+//     ROUTER_LINK_PORTS (= router's 5 ports; LOCAL slot unused on the LINK face,
+//     N/E/S/W carry the inter-router links). At 2-node only one direction is live.
+//   - All credit_return fields are per-VC: marshalled as ONE svBitVecVal word
+//     (bit vc = credit pulse on VC vc), valid for num_vc <= 2^VC_ID_WIDTH = 8.
+//   - link_*_flit arrays are FLIT_VEC_WORDS-per-port, contiguous (port-major):
+//     word index = port * FLIT_VEC_WORDS + w.
+//   - link credit arrays are ONE word per port (port-major, bit vc per word).
+unsigned long long cmodel_router_create(const char* name, int x_coord, int y_coord, int mesh_x_dim,
+                                        int mesh_y_dim, int num_vc);
 void cmodel_router_set_inputs(unsigned long long ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
-                              svBit req_in_credit_return, svBit rsp_in_valid,
-                              svBitVecVal* rsp_in_flit, svBit rsp_in_credit_return,
-                              svBit link_req_out_credit, svBit link_req_in_valid,
-                              svBitVecVal* link_req_in_flit, svBit link_rsp_out_credit,
-                              svBit link_rsp_in_valid, svBitVecVal* link_rsp_in_flit);
+                              svBitVecVal* req_in_credit_return, svBit rsp_in_valid,
+                              svBitVecVal* rsp_in_flit, svBitVecVal* rsp_in_credit_return,
+                              svBitVecVal* link_req_out_credit, svBitVecVal* link_req_in_valid,
+                              svBitVecVal* link_req_in_flit, svBitVecVal* link_rsp_out_credit,
+                              svBitVecVal* link_rsp_in_valid, svBitVecVal* link_rsp_in_flit);
 void cmodel_router_tick(unsigned long long ctx);
-void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid, svBitVecVal* req_out_flit,
-                               svBit* req_out_credit_return, svBit* rsp_out_valid,
-                               svBitVecVal* rsp_out_flit, svBit* rsp_out_credit_return,
-                               svBit* link_req_out_valid, svBitVecVal* link_req_out_flit,
-                               svBit* link_req_in_credit, svBit* link_rsp_out_valid,
-                               svBitVecVal* link_rsp_out_flit, svBit* link_rsp_in_credit);
+void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
+                               svBitVecVal* req_out_flit, svBitVecVal* req_out_credit_return,
+                               svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
+                               svBitVecVal* rsp_out_credit_return, svBitVecVal* link_req_out_valid,
+                               svBitVecVal* link_req_out_flit, svBitVecVal* link_req_in_credit,
+                               svBitVecVal* link_rsp_out_valid, svBitVecVal* link_rsp_out_flit,
+                               svBitVecVal* link_rsp_in_credit);
 
 // AxiMaster (Task 6) — chandle ABI; per-instance dump path + scoreboard wiring.
 // Packing: svBitVecVal* for multi-bit fields (little-endian word order).
@@ -87,19 +101,20 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid, svB
 //   wstrb         : 1 word (32-bit strobe)
 //   other attribs : 1 word each (low bits used per width)
 unsigned long long cmodel_master_create(const char* name, const char* scenario_path);
-void cmodel_master_set_inputs(unsigned long long ctx, svBit awready, svBit wready, svBit arready, svBit bvalid,
-                              svBitVecVal* bid, svBitVecVal* bresp, svBit rvalid, svBitVecVal* rid,
-                              svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
+void cmodel_master_set_inputs(unsigned long long ctx, svBit awready, svBit wready, svBit arready,
+                              svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit rvalid,
+                              svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
+                              svBit rlast);
 void cmodel_master_tick(unsigned long long ctx);
-void cmodel_master_get_outputs(unsigned long long ctx, svBit* awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
-                               svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
-                               svBit* awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-                               svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata,
-                               svBitVecVal* wstrb, svBit* wlast, svBit* bready, svBit* arvalid,
-                               svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-                               svBitVecVal* arsize, svBitVecVal* arburst, svBit* arlock,
-                               svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
-                               svBit* rready);
+void cmodel_master_get_outputs(unsigned long long ctx, svBit* awvalid, svBitVecVal* awid,
+                               svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
+                               svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
+                               svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,
+                               svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast, svBit* bready,
+                               svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+                               svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
+                               svBit* arlock, svBitVecVal* arcache, svBitVecVal* arprot,
+                               svBitVecVal* arqos, svBit* rready);
 
 // AxiSlave (Task 7) — chandle ABI; accepts AW/W/AR from master wire; drives
 // awready/wready/arready handshake + B/R response channels back to master.
@@ -110,14 +125,15 @@ void cmodel_master_get_outputs(unsigned long long ctx, svBit* awvalid, svBitVecV
 //   wstrb         : 1 word (32-bit strobe)
 //   other attribs : 1 word each (low bits used per width)
 unsigned long long cmodel_slave_create(const char* name, const char* scenario_path);
-void cmodel_slave_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
-                             svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
-                             svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-                             svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
-                             svBitVecVal* wstrb, svBit wlast, svBit arvalid, svBitVecVal* arid,
-                             svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
-                             svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
-                             svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready);
+void cmodel_slave_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
+                             svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
+                             svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
+                             svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid,
+                             svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast, svBit arvalid,
+                             svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
+                             svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
+                             svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
+                             svBit bready, svBit rready);
 void cmodel_slave_tick(unsigned long long ctx);
 void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
                               svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid,
@@ -132,23 +148,26 @@ void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready, svBit* wre
 //   wstrb         : 1 word (32-bit strobe)
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
-unsigned long long cmodel_nmu_create(const char* name, int src_id);
-void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
-                           svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst,
-                           svBit awlock, svBitVecVal* awcache, svBitVecVal* awprot,
-                           svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
-                           svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
-                           svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
-                           svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
-                           svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
-                           svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit,
-                           svBit noc_req_credit_return);
+// num_vc threads the topology VC count into the NmuConfig (write_vc=0,
+// read_vc=(num_vc>=2)?1:0 — Mode A). noc_req_credit_return / noc_rsp_credit_return
+// are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
+unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc);
+void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
+                           svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
+                           svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
+                           svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid,
+                           svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast, svBit bready,
+                           svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+                           svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
+                           svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot,
+                           svBitVecVal* arqos, svBit rready, svBit noc_rsp_valid,
+                           svBitVecVal* noc_rsp_flit, svBitVecVal* noc_req_credit_return);
 void cmodel_nmu_tick(unsigned long long ctx);
-void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready, svBit* bvalid,
-                            svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
-                            svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
+void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
+                            svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid,
+                            svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
                             svBit* noc_req_valid, svBitVecVal* noc_req_flit,
-                            svBit* noc_rsp_credit_return);
+                            svBitVecVal* noc_rsp_credit_return);
 
 // Nsu (Task 9) — NoC consumer (req in) + producer (rsp out) + AXI master side.
 // Direction inversion vs. Nmu:
@@ -161,14 +180,18 @@ void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wread
 //   wstrb         : 1 word (32-bit strobe)
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
-unsigned long long cmodel_nsu_create(const char* name, int src_id);
+// num_vc threads the topology VC count into the NsuConfig (write_rsp_vc=0,
+// read_rsp_vc=(num_vc>=2)?1:0 — Mode A). noc_rsp_credit_return / noc_req_credit_return
+// are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
+unsigned long long cmodel_nsu_create(const char* name, int src_id, int num_vc);
 void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
-                           svBit noc_rsp_credit_return, svBit awready, svBit wready, svBit bvalid,
-                           svBitVecVal* bid, svBitVecVal* bresp, svBit arready, svBit rvalid,
-                           svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
+                           svBitVecVal* noc_rsp_credit_return, svBit awready, svBit wready,
+                           svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit arready,
+                           svBit rvalid, svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
+                           svBit rlast);
 void cmodel_nsu_tick(unsigned long long ctx);
 void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit,
-                            svBit* noc_req_credit_return, svBit* awvalid, svBitVecVal* awid,
+                            svBitVecVal* noc_req_credit_return, svBit* awvalid, svBitVecVal* awid,
                             svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
                             svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
                             svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,

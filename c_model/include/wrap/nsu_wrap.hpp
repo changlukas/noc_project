@@ -44,15 +44,18 @@ namespace ni::cmodel::wrap {
 class NsuWrap {
   public:
     // init — construct NsuStandalone with a minimal PoC NsuConfig.
-    // Defaults: 1 VC, ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
-    void init(uint8_t src_id = 0, std::size_t queue_depth = kPoCAxiQueueDepth) {
+    // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel. num_vc comes
+    // from the create param (cmodel_nsu_create): write rsp on write_rsp_vc=0,
+    // read rsp on read_rsp_vc=(num_vc>=2)?1:0 — Mode A, mirrors the MultiVc test.
+    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth) {
         using namespace ni::cmodel::nsu;
+        num_vc_ = num_vc;
         NsuConfig cfg{};
         cfg.src_id = src_id;
-        cfg.num_vc = 1;
+        cfg.num_vc = num_vc;
         cfg.vc_mode = VcMode::ReadWriteSplit;
         cfg.write_rsp_vc = 0;
-        cfg.read_rsp_vc = 0;
+        cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;
@@ -96,8 +99,11 @@ class NsuWrap {
         // R2: incoming credit pulse — the router's LOCAL input drained an NSU
         // rsp flit, so replenish the rsp-out sender counter BEFORE tick() so this
         // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
-        if (in_.noc_rsp_credit_return) {
-            nsu_->rsp_receive_credit(0);
+        // Per-VC: replenish each VC that pulsed this cycle.
+        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+            if (in_.noc_rsp_credit_return[vc]) {
+                nsu_->rsp_receive_credit(vc);
+            }
         }
 
         // Step 2: advance Nsu one cycle (Depacketize + AxiMasterPort +
@@ -217,10 +223,12 @@ class NsuWrap {
             out_.noc_rsp_flit = flit_to_bytes(*f);
         }
 
-        // NoC req credit OUT: consumer PULSE — the NSU's Depacketize consumed an
+        // NoC req credit OUT: consumer PULSE/VC — the NSU's Depacketize consumed an
         // injected req flit this tick, so return one credit upstream (to the
-        // router's LOCAL output sender counter). Drains one pending pulse/tick.
-        out_.noc_req_credit_return = nsu_->req_take_credit(0);
+        // router's LOCAL output sender counter). Drains one pending pulse/VC/tick.
+        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+            out_.noc_req_credit_return[vc] = nsu_->req_take_credit(vc);
+        }
 
         // Save this tick's ready outputs for next tick's handshake detection.
         prev_bready_ = out_.bready;
@@ -229,7 +237,11 @@ class NsuWrap {
 
     void get_outputs(NsuOutputs& out) const { out = out_; }
 
+    // VC count — read by the DPI handlers to size the per-VC credit loops.
+    uint8_t num_vc() const { return num_vc_; }
+
   private:
+    uint8_t num_vc_ = 1;
     std::unique_ptr<nsu::NsuStandalone> nsu_;
     NsuInputs in_{};
     NsuOutputs out_{};

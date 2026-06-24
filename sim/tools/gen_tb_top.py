@@ -177,13 +177,18 @@ def emit_tb_top(topo: dict) -> str:
     w('    import "DPI-C" context function int     cmodel_done();')
     w('    import "DPI-C" context function int     cmodel_scoreboard_clean();')
     w('    import "DPI-C" context function void    cmodel_dump_scoreboard();')
-    w('    import "DPI-C" context function longint unsigned cmodel_router_create(input string name, input int x_coord);')
+    w('    import "DPI-C" context function longint unsigned cmodel_router_create(input string name,')
+    w('                                                                  input int x_coord, input int y_coord,')
+    w('                                                                  input int mesh_x_dim, input int mesh_y_dim,')
+    w('                                                                  input int num_vc);')
     w('    import "DPI-C" context function longint unsigned cmodel_master_create(input string name,')
     w('                                                                 input string scenario_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_slave_create(input string name,')
     w('                                                                input string scenario_path);')
-    w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name, input int src_id);')
-    w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name, input int src_id);')
+    w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,')
+    w('                                                              input int src_id, input int num_vc);')
+    w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
+    w('                                                              input int src_id, input int num_vc);')
     w('    import "DPI-C" context function int     cmodel_master_count();')
     w('    import "DPI-C" context function int     cmodel_reads_checked();')
     w("")
@@ -234,11 +239,13 @@ def emit_tb_top(topo: dict) -> str:
     last_i = ids[-1]
     w(f"        cmodel_init({_scenario_var(last_i)});  // shared config; either variant is fine")
 
-    # Router creates
+    # Router creates — full (x,y,mesh_x,mesh_y,num_vc) signature so the wrap
+    # config takes num_vc from the topology (NOT hardcoded 1).
     for i in ids:
-        x = nodes[i][0]  # x_coord for the router
+        x, y = nodes[i]
         r_ctx = _ctx_vars(i)[0]
-        w(f'        {r_ctx} = cmodel_router_create("router_{i}", {x});')
+        w(f'        {r_ctx} = cmodel_router_create("router_{i}", {x}, {y}, '
+          f'{x_dim}, {y_dim}, NUM_VC);')
 
     # Per-node creates, emitted from the explicit `masters` map. Each node i:
     #   - master fed the dest node's scenario (traffic crosses the link)
@@ -252,9 +259,9 @@ def emit_tb_top(topo: dict) -> str:
         w(f'        {m["m_ctx"]}     = cmodel_master_create("master_{i}", {m["scenario"]});')
         w(f'        {s["ctx_var"]}     = cmodel_slave_create ("slave_{dest}",  {s["scenario"]});  '
           f'// node{dest}.slave: receives node{dest}-range data')
-        w(f'        {m["nmu_ctx"]} = cmodel_nmu_create("nmu_{i}", {i});                '
-          f'// src_id = node{i} coordinate')
-        w(f'        {m["nsu_ctx"]} = cmodel_nsu_create("nsu_{i}", {i});')
+        w(f'        {m["nmu_ctx"]} = cmodel_nmu_create("nmu_{i}", {i}, NUM_VC);        '
+          f'// src_id = node{i} coordinate; num_vc from topology')
+        w(f'        {m["nsu_ctx"]} = cmodel_nsu_create("nsu_{i}", {i}, NUM_VC);')
 
     w("    end")
     w("")
@@ -361,14 +368,28 @@ def emit_tb_top(topo: dict) -> str:
             b = _node_id(x, y + 1, x_dim)
             edges.append((a, b))
 
-    # Declare link logic nets for each undirected edge (a, b)
-    for a, b in edges:
-        w(f"    logic                  link_req_{a}to{b}_valid, link_req_{b}to{a}_valid;")
-        w(f"    logic [FLIT_WIDTH-1:0] link_req_{a}to{b}_flit,  link_req_{b}to{a}_flit;")
-        w(f"    logic                  link_req_{a}to{b}_credit, link_req_{b}to{a}_credit;  // pulse")
-        w(f"    logic                  link_rsp_{a}to{b}_valid, link_rsp_{b}to{a}_valid;")
-        w(f"    logic [FLIT_WIDTH-1:0] link_rsp_{a}to{b}_flit,  link_rsp_{b}to{a}_flit;")
-        w(f"    logic                  link_rsp_{a}to{b}_credit, link_rsp_{b}to{a}_credit;  // pulse")
+    # router_wrap LINK ports are per-direction unpacked arrays [LINK_PORTS]
+    # (router has 5 ports: LOCAL=0, N=1, E=2, S=3, W=4). At 2-node only the one
+    # neighbour direction is live. Credit is a per-VC pulse vector [NUM_VC-1:0].
+    #
+    # Per-node array wires carry every router's whole LINK face; cross-node assigns
+    # connect the live direction slot of each neighbour pair (data + credit).
+    w("    localparam int unsigned LINK_PORTS = 5;  // LOCAL + N/E/S/W (mirrors c_model)")
+    w("    localparam int unsigned RP_EAST    = 2;")
+    w("    localparam int unsigned RP_WEST    = 4;")
+    w("")
+    for i in ids:
+        w(f"    // node{i} LINK face arrays (one slot per direction)")
+        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_out_valid,  n{i}_link_rsp_out_valid;")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_out_flit   [LINK_PORTS];")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_out_flit   [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_in_credit  [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_in_credit  [LINK_PORTS];")
+        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_in_valid,   n{i}_link_rsp_in_valid;")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_in_flit    [LINK_PORTS];")
+        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_in_flit    [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_out_credit [LINK_PORTS];")
+        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_out_credit [LINK_PORTS];")
     w("")
 
     # For each node, instantiate router_wrap and wire its link ports.
@@ -395,81 +416,75 @@ def emit_tb_top(topo: dict) -> str:
     #   Middle nodes: two links. (S0: not applicable for 2-node mesh)
     # For the 2-node case, each node has exactly 1 link.
 
+    # Per-node live link direction (EAST=2 if this node is the 'a' end of its
+    # edge, WEST=4 if the 'b' end). At 2-node each node has exactly one edge.
+    live_dir = {}   # node -> SV port index name ("RP_EAST"/"RP_WEST")
+    peer = {}       # node -> (peer_node, peer_dir_name)
     for i in ids:
-        r_ctx = _ctx_vars(i)[0]
-        # Determine which edge this node connects to.
-        # For a 1D mesh: node i connects to node i+1 (if exists) and node i-1 (if exists).
-        # For the 2-node case: node 0 → east=(0,1); node 1 → west=(0,1) reversed.
-        # router_wrap has a single link port pair; for S0 we always connect to the one edge.
         east_edge = next(((a, b) for a, b in edges if a == i), None)
         west_edge = next(((a, b) for a, b in edges if b == i), None)
-
-        # For S0 (2-node), each node has exactly one edge.
-        # The router_wrap's link_*_out is the node's outbound (toward its neighbour).
-        # Node 0: east edge (0,1). Out=0to1, In=1to0.
-        # Node 1: it's on the (0,1) edge as 'b'. Out=1to0, In=0to1.
-
         if east_edge is not None:
             a, b = east_edge
-            out_valid = f"link_req_{a}to{b}_valid"
-            out_flit  = f"link_req_{a}to{b}_flit"
-            out_credit_recv = f"link_req_{b}to{a}_credit"  # credit node a gets from b
-            in_valid  = f"link_req_{b}to{a}_valid"
-            in_flit   = f"link_req_{b}to{a}_flit"
-            in_credit_send  = f"link_req_{a}to{b}_credit"  # credit node a returns to b
-            rsp_out_valid   = f"link_rsp_{a}to{b}_valid"
-            rsp_out_flit    = f"link_rsp_{a}to{b}_flit"
-            rsp_out_credit_recv = f"link_rsp_{b}to{a}_credit"
-            rsp_in_valid    = f"link_rsp_{b}to{a}_valid"
-            rsp_in_flit     = f"link_rsp_{b}to{a}_flit"
-            rsp_in_credit_send  = f"link_rsp_{a}to{b}_credit"
-            out_comment = f"// REQ link: node{a} OUT -> {a}to{b} data; node{a} IN <- {b}to{a} data."
-            rsp_comment = f"// RSP link: mirrored."
+            live_dir[i] = "RP_EAST"
+            peer[i] = (b, "RP_WEST")
         elif west_edge is not None:
-            a, b = west_edge  # a < b; current node = b
-            # Node b's out is b→a (reversed direction on the edge)
-            out_valid = f"link_req_{b}to{a}_valid"
-            out_flit  = f"link_req_{b}to{a}_flit"
-            out_credit_recv = f"link_req_{a}to{b}_credit"  # credit node b gets from a
-            in_valid  = f"link_req_{a}to{b}_valid"
-            in_flit   = f"link_req_{a}to{b}_flit"
-            in_credit_send  = f"link_req_{b}to{a}_credit"  # credit node b returns to a
-            rsp_out_valid   = f"link_rsp_{b}to{a}_valid"
-            rsp_out_flit    = f"link_rsp_{b}to{a}_flit"
-            rsp_out_credit_recv = f"link_rsp_{a}to{b}_credit"
-            rsp_in_valid    = f"link_rsp_{a}to{b}_valid"
-            rsp_in_flit     = f"link_rsp_{a}to{b}_flit"
-            rsp_in_credit_send  = f"link_rsp_{b}to{a}_credit"
-            out_comment = f"// REQ link: node{b} OUT -> {b}to{a} data; node{b} IN <- {a}to{b} data."
-            rsp_comment = "// RSP link: mirrored."
+            a, b = west_edge
+            live_dir[i] = "RP_WEST"
+            peer[i] = (a, "RP_EAST")
         else:
-            # Isolated node (no edges) — should not happen for a connected mesh.
             raise ValueError(f"Node {i} has no edges in the topology")
 
+    for i in ids:
+        r_ctx = _ctx_vars(i)[0]
         w(f"    router_wrap #(")
-        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
+        w(f"        .LINK_PORTS(LINK_PORTS)")
         w(f"    ) u_router_{i} (")
         w(f"        .clk_i(clk_i),")
         w(f"        .rst_ni(rst_ni),")
         w(f"        .ctx_i({r_ctx}),")
         w(f"        .noc_nmu_i(node{i}_nmu.miso),")
         w(f"        .noc_nsu_o(node{i}_nsu.mosi),")
-        w(f"        {out_comment}")
-        w(f"        .link_req_out_valid({out_valid}),")
-        w(f"        .link_req_out_flit({out_flit}),")
-        w(f"        .link_req_out_credit({out_credit_recv}),  // credit for node{i}'s sent data")
-        w(f"        .link_req_in_valid({in_valid}),")
-        w(f"        .link_req_in_flit({in_flit}),")
-        w(f"        .link_req_in_credit({in_credit_send}),   // credit node{i} returns to peer")
-        w(f"        {rsp_comment}")
-        w(f"        .link_rsp_out_valid({rsp_out_valid}),")
-        w(f"        .link_rsp_out_flit({rsp_out_flit}),")
-        w(f"        .link_rsp_out_credit({rsp_out_credit_recv}),")
-        w(f"        .link_rsp_in_valid({rsp_in_valid}),")
-        w(f"        .link_rsp_in_flit({rsp_in_flit}),")
-        w(f"        .link_rsp_in_credit({rsp_in_credit_send})")
+        w(f"        // LINK face: whole per-direction arrays; live dir = {live_dir[i]}.")
+        w(f"        .link_req_out_valid(n{i}_link_req_out_valid),")
+        w(f"        .link_req_out_flit(n{i}_link_req_out_flit),")
+        w(f"        .link_req_out_credit(n{i}_link_req_out_credit),")
+        w(f"        .link_req_in_valid(n{i}_link_req_in_valid),")
+        w(f"        .link_req_in_flit(n{i}_link_req_in_flit),")
+        w(f"        .link_req_in_credit(n{i}_link_req_in_credit),")
+        w(f"        .link_rsp_out_valid(n{i}_link_rsp_out_valid),")
+        w(f"        .link_rsp_out_flit(n{i}_link_rsp_out_flit),")
+        w(f"        .link_rsp_out_credit(n{i}_link_rsp_out_credit),")
+        w(f"        .link_rsp_in_valid(n{i}_link_rsp_in_valid),")
+        w(f"        .link_rsp_in_flit(n{i}_link_rsp_in_flit),")
+        w(f"        .link_rsp_in_credit(n{i}_link_rsp_in_credit)")
         w(f"    );")
         w(f"")
+
+    # Cross-node link wiring. Each node's IN face is driven once per network by a
+    # procedural block: unconnected directions are 0; the live direction takes the
+    # peer's matching OUT slot (data) and the peer returns our credit. Credit for
+    # data flowing self->peer returns on peer.in_credit -> our out_credit.
+    w("    // -------------------------------------------------------------------------")
+    w("    // Cross-node link wiring (per-direction; only the live direction is hooked)")
+    w("    // -------------------------------------------------------------------------")
+    for i in ids:
+        ld = live_dir[i]
+        pnode, _pdir = peer[i]
+        for net in ("req", "rsp"):
+            w(f"    always_comb begin : link_{net}_in_n{i}")
+            w(f"        for (int p = 0; p < LINK_PORTS; p++) begin")
+            w(f"            n{i}_link_{net}_in_valid[p]   = 1'b0;")
+            w(f"            n{i}_link_{net}_in_flit[p]    = '0;")
+            w(f"            n{i}_link_{net}_out_credit[p] = '0;")
+            w(f"        end")
+            w(f"        // live dir {ld}: data IN <- peer node{pnode} OUT; our sent-data")
+            w(f"        // credit (out_credit) <- peer's returned in_credit.")
+            w(f"        n{i}_link_{net}_in_valid[{ld}]   = n{pnode}_link_{net}_out_valid[{_pdir}];")
+            w(f"        n{i}_link_{net}_in_flit[{ld}]    = n{pnode}_link_{net}_out_flit[{_pdir}];")
+            w(f"        n{i}_link_{net}_out_credit[{ld}] = n{pnode}_link_{net}_in_credit[{_pdir}];")
+            w(f"    end")
+            w(f"")
 
     # ------------------------------------------------------------------
     # PMU monitors
@@ -517,36 +532,28 @@ def emit_tb_top(topo: dict) -> str:
         w(f"    );")
         w(f"")
 
-    w("    // Inter-router link monitors: valid paired with credit from the OPPOSITE direction")
-    w("    // (credit for data flowing 0→1 returns on the 1→0 net, and vice versa).")
+    w("    // Inter-router link monitors: a node's OUT valid paired with the credit it")
+    w("    // RECEIVES for that sent data (out_credit, OR-reduced across VCs).")
     for a, b in edges:
-        w(f"    link_perf_monitor #(")
-        w(f'        .LINK_NAME("req_{a}to{b}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
-        w(f"    ) u_perf_link_req{a}{b} (")
-        w(f"        .clk_i, .rst_ni,")
-        w(f"        .valid(link_req_{a}to{b}_valid), .credit_pulse(link_req_{b}to{a}_credit)")
-        w(f"    );")
-        w(f"")
-        w(f"    link_perf_monitor #(")
-        w(f'        .LINK_NAME("req_{b}to{a}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
-        w(f"    ) u_perf_link_req{b}{a} (")
-        w(f"        .clk_i, .rst_ni,")
-        w(f"        .valid(link_req_{b}to{a}_valid), .credit_pulse(link_req_{a}to{b}_credit)")
-        w(f"    );")
-        w(f"")
-        w(f"    link_perf_monitor #(")
-        w(f'        .LINK_NAME("rsp_{a}to{b}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
-        w(f"    ) u_perf_link_rsp{a}{b} (")
-        w(f"        .clk_i, .rst_ni,")
-        w(f"        .valid(link_rsp_{a}to{b}_valid), .credit_pulse(link_rsp_{b}to{a}_credit)")
-        w(f"    );")
-        w(f"")
-        w(f"    link_perf_monitor #(")
-        w(f'        .LINK_NAME("rsp_{b}to{a}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
-        w(f"    ) u_perf_link_rsp{b}{a} (")
-        w(f"        .clk_i, .rst_ni,")
-        w(f"        .valid(link_rsp_{b}to{a}_valid), .credit_pulse(link_rsp_{a}to{b}_credit)")
-        w(f"    );")
+        # node a OUT toward b is on a's live direction slot; node b OUT toward a on b's.
+        da, db = live_dir[a], live_dir[b]
+        for net in ("req", "rsp"):
+            w(f"    link_perf_monitor #(")
+            w(f'        .LINK_NAME("{net}_{a}to{b}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
+            w(f"    ) u_perf_link_{net}{a}{b} (")
+            w(f"        .clk_i, .rst_ni,")
+            w(f"        .valid(n{a}_link_{net}_out_valid[{da}]),")
+            w(f"        .credit_pulse(|n{a}_link_{net}_out_credit[{da}])")
+            w(f"    );")
+            w(f"")
+            w(f"    link_perf_monitor #(")
+            w(f'        .LINK_NAME("{net}_{b}to{a}"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)')
+            w(f"    ) u_perf_link_{net}{b}{a} (")
+            w(f"        .clk_i, .rst_ni,")
+            w(f"        .valid(n{b}_link_{net}_out_valid[{db}]),")
+            w(f"        .credit_pulse(|n{b}_link_{net}_out_credit[{db}])")
+            w(f"    );")
+            w(f"")
         w(f"")
 
     # ------------------------------------------------------------------

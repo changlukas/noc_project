@@ -21,54 +21,74 @@
 //     credit pulses are single-cycle (per VC), NOT the level used on NI bundles.
 #pragma once
 #include "wrap/channel_model_wrap_io.hpp"  // FlitBytes
+#include "router/router.hpp"               // ROUTER_PORT_COUNT
+#include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
+#include <array>
 #include <cstdint>
 
 namespace ni::cmodel::wrap {
+
+// Per-(direction,VC) credit marshalling sizes (DPI ABI is fixed at the max so
+// Task 7 only fills more directions — it never re-shapes the struct).
+//   ROUTER_LINK_PORTS  : router has 5 ports (LOCAL + N/E/S/W). LINK indices use
+//                        the 4 non-LOCAL directions; the array is sized for all 5
+//                        so RouterPort enum values index it directly (LOCAL slot
+//                        unused on the LINK face).
+//   ROUTER_NUM_VC_MAX  : credit vectors carry up to 2^VC_ID_WIDTH VCs; only the
+//                        low num_vc entries are live.
+inline constexpr std::size_t ROUTER_LINK_PORTS = router::ROUTER_PORT_COUNT;
+inline constexpr std::size_t ROUTER_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
+
+// Per-VC credit pulse vector: bit/entry vc set => one credit pulse on VC vc this
+// cycle. Sized to the max; only [0 .. num_vc) are meaningful.
+using VcCreditVec = std::array<bool, ROUTER_NUM_VC_MAX>;
 
 struct RouterInputs {
     // --- NMU/NSU-facing (NI edge, FlooNoC pulse credit) ---
     bool req_in_valid;  // NMU injects a request
     FlitBytes req_in_flit;
-    bool req_in_credit_return;  // PULSE: NMU consumed an ejected rsp flit ->
-                                // router.receive_credit(LOCAL) (router->NI dir)
+    VcCreditVec req_in_credit_return;  // PULSE/VC: NMU consumed an ejected rsp flit ->
+                                       // router.receive_credit(LOCAL, vc) (router->NI dir)
 
     bool rsp_in_valid;  // NSU injects a response
     FlitBytes rsp_in_flit;
-    bool rsp_in_credit_return;  // PULSE: NSU consumed an ejected req flit ->
-                                // router.receive_credit(LOCAL)
+    VcCreditVec rsp_in_credit_return;  // PULSE/VC: NSU consumed an ejected req flit ->
+                                       // router.receive_credit(LOCAL, vc)
 
-    // --- LINK: REQ network (neighbor -> this node, pulse credit) ---
-    bool link_req_out_credit;  // credit pulse from neighbor for our sent REQ flits
-    bool link_req_in_valid;    // neighbor's REQ flit entering our LINK input
-    FlitBytes link_req_in_flit;
+    // --- LINK: REQ network (neighbor -> this node, pulse credit), per direction ---
+    std::array<VcCreditVec, ROUTER_LINK_PORTS> link_req_out_credit;  // credit/VC from neighbor
+                                                                     // for our sent REQ flits
+    std::array<bool, ROUTER_LINK_PORTS> link_req_in_valid;           // neighbor's REQ flit in
+    std::array<FlitBytes, ROUTER_LINK_PORTS> link_req_in_flit;
 
-    // --- LINK: RSP network (neighbor -> this node, pulse credit) ---
-    bool link_rsp_out_credit;  // credit pulse from neighbor for our sent RSP flits
-    bool link_rsp_in_valid;    // neighbor's RSP flit entering our LINK input
-    FlitBytes link_rsp_in_flit;
+    // --- LINK: RSP network (neighbor -> this node, pulse credit), per direction ---
+    std::array<VcCreditVec, ROUTER_LINK_PORTS> link_rsp_out_credit;
+    std::array<bool, ROUTER_LINK_PORTS> link_rsp_in_valid;
+    std::array<FlitBytes, ROUTER_LINK_PORTS> link_rsp_in_flit;
 };
 
 struct RouterOutputs {
     // --- NMU/NSU-facing (NI edge, FlooNoC pulse credit) ---
     bool req_out_valid;  // request ejected toward local NSU
     FlitBytes req_out_flit;
-    bool req_out_credit_return;  // PULSE: router LOCAL input drained an NMU req
-                                 // -> one credit back to the NMU (NI->router dir)
+    VcCreditVec req_out_credit_return;  // PULSE/VC: router LOCAL input drained an NMU req
+                                        // -> one credit back to the NMU (NI->router dir)
 
     bool rsp_out_valid;  // response ejected toward local NMU
     FlitBytes rsp_out_flit;
-    bool rsp_out_credit_return;  // PULSE: router LOCAL input drained an NSU rsp
-                                 // -> one credit back to the NSU
+    VcCreditVec rsp_out_credit_return;  // PULSE/VC: router LOCAL input drained an NSU rsp
+                                        // -> one credit back to the NSU
 
-    // --- LINK: REQ network (this node -> neighbor, pulse credit) ---
-    bool link_req_out_valid;  // our LINK REQ output flit toward neighbor
-    FlitBytes link_req_out_flit;
-    bool link_req_in_credit;  // credit pulse we return when our REQ LINK input drains
+    // --- LINK: REQ network (this node -> neighbor, pulse credit), per direction ---
+    std::array<bool, ROUTER_LINK_PORTS> link_req_out_valid;  // our LINK REQ output toward neighbor
+    std::array<FlitBytes, ROUTER_LINK_PORTS> link_req_out_flit;
+    std::array<VcCreditVec, ROUTER_LINK_PORTS> link_req_in_credit;  // credit/VC we return when our
+                                                                    // REQ LINK input drains
 
-    // --- LINK: RSP network (this node -> neighbor, pulse credit) ---
-    bool link_rsp_out_valid;  // our LINK RSP output flit toward neighbor
-    FlitBytes link_rsp_out_flit;
-    bool link_rsp_in_credit;  // credit pulse we return when our RSP LINK input drains
+    // --- LINK: RSP network (this node -> neighbor, pulse credit), per direction ---
+    std::array<bool, ROUTER_LINK_PORTS> link_rsp_out_valid;
+    std::array<FlitBytes, ROUTER_LINK_PORTS> link_rsp_out_flit;
+    std::array<VcCreditVec, ROUTER_LINK_PORTS> link_rsp_in_credit;
 };
 
 }  // namespace ni::cmodel::wrap

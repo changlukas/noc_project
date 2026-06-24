@@ -39,15 +39,18 @@ namespace ni::cmodel::wrap {
 class NmuWrap {
   public:
     // init — construct NmuStandalone with a minimal PoC NmuConfig.
-    // Defaults: 1 VC, ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
-    void init(uint8_t src_id = 0, std::size_t queue_depth = kPoCAxiQueueDepth) {
+    // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel. num_vc comes
+    // from the create param (cmodel_nmu_create): write packets on write_vc=0,
+    // read packets on read_vc=(num_vc>=2)?1:0 — Mode A, mirrors the MultiVc test.
+    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth) {
         using namespace ni::cmodel::nmu;
+        num_vc_ = num_vc;
         NmuConfig cfg{};
         cfg.src_id = src_id;
-        cfg.num_vc = 1;
+        cfg.num_vc = num_vc;
         cfg.vc_mode = VcMode::ReadWriteSplit;
         cfg.write_vc = 0;
-        cfg.read_vc = 0;
+        cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;
@@ -87,8 +90,11 @@ class NmuWrap {
         // R2: incoming credit pulse — the router's LOCAL input drained an NMU
         // req flit, so replenish the req-out sender counter BEFORE tick() so this
         // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
-        if (in_.noc_req_credit_return) {
-            nmu_->req_receive_credit(0);
+        // Per-VC: replenish each VC that pulsed this cycle.
+        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+            if (in_.noc_req_credit_return[vc]) {
+                nmu_->req_receive_credit(vc);
+            }
         }
 
         // Step 1b: push AW/W/AR beats into axi_slave_port queues — ONLY on
@@ -199,10 +205,12 @@ class NmuWrap {
             out_.noc_req_flit = flit_to_bytes(*f);
         }
 
-        // NoC rsp credit OUT: consumer PULSE — the NMU's Depacketize consumed an
+        // NoC rsp credit OUT: consumer PULSE/VC — the NMU's Depacketize consumed an
         // injected rsp flit this tick, so return one credit upstream (to the
-        // router's LOCAL output sender counter). Drains one pending pulse/tick.
-        out_.noc_rsp_credit_return = nmu_->rsp_take_credit(0);
+        // router's LOCAL output sender counter). Drains one pending pulse/VC/tick.
+        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+            out_.noc_rsp_credit_return[vc] = nmu_->rsp_take_credit(vc);
+        }
 
         // Save this tick's ready outputs: next tick, valid && prev_ready
         // identifies the wire-handshake cycle.
@@ -213,7 +221,11 @@ class NmuWrap {
 
     void get_outputs(NmuOutputs& out) const { out = out_; }
 
+    // VC count — read by the DPI handlers to size the per-VC credit loops.
+    uint8_t num_vc() const { return num_vc_; }
+
   private:
+    uint8_t num_vc_ = 1;
     std::unique_ptr<nmu::NmuStandalone> nmu_;
     NmuInputs in_{};
     NmuOutputs out_{};

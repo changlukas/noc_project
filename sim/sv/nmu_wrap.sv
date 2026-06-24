@@ -49,16 +49,9 @@ module nmu_wrap #(
 );
 
     // -------------------------------------------------------------------------
-    // PoC scope guard (T1.3): single-VC only
+    // Multi-VC: credit_return marshalled per-VC across DPI as a [NUM_VC-1:0]
+    // vector (bit vc = credit pulse on VC vc). No single-VC elaboration guard.
     // -------------------------------------------------------------------------
-    // c_model + DPI marshalling assume single-VC. Multi-VC support requires
-    // plumbing per-VC credit_return through DPI; until then, fail elaboration
-    // if NUM_VC > 1 instead of silently reducing credit_return to bit 0.
-    initial begin
-        if (NUM_VC != 1) begin
-            $fatal(1, "%m: NUM_VC=%0d; PoC supports NUM_VC=1 only", NUM_VC);
-        end
-    end
 
     // -------------------------------------------------------------------------
     // DPI imports — 3-step pattern per spec §5.1
@@ -94,7 +87,7 @@ module nmu_wrap #(
         input  bit                    rready,
         input  bit                    noc_rsp_valid,
         input  bit [FLIT_WIDTH-1:0]   noc_rsp_flit,
-        input  bit                    noc_req_credit_return
+        input  bit [NUM_VC-1:0]       noc_req_credit_return
     );
 
     import "DPI-C" context function void cmodel_nmu_tick(
@@ -116,7 +109,7 @@ module nmu_wrap #(
         output bit                    rlast,
         output bit                    noc_req_valid,
         output bit [FLIT_WIDTH-1:0]   noc_req_flit,
-        output bit                    noc_rsp_credit_return
+        output bit [NUM_VC-1:0]       noc_rsp_credit_return
     );
 
     // Lifecycle / error polling lives in tb_top.sv (T1.4).
@@ -144,8 +137,8 @@ module nmu_wrap #(
     bit                    noc_req_valid_q;
     bit [FLIT_WIDTH-1:0]   noc_req_flit_q;
 
-    // NoC rsp credit return (Nmu drives back upstream; PoC always 0)
-    bit                    noc_rsp_credit_return_q;
+    // NoC rsp credit return (Nmu drives back upstream; per-VC pulse vector)
+    bit [NUM_VC-1:0]       noc_rsp_credit_return_q;
 
     // -------------------------------------------------------------------------
     // always_ff: sync-reset, 3-step DPI call, registered outputs, error check
@@ -201,8 +194,8 @@ module nmu_wrap #(
                 // NoC rsp side — rsp flit arriving from ChannelModel toward Nmu
                 noc_mosi_o.rsp_valid,
                 noc_mosi_o.rsp_flit,
-                // NoC req credit — ChannelModel returns credit to Nmu
-                noc_mosi_o.req_credit_return[0]
+                // NoC req credit — ChannelModel returns credit to Nmu (per-VC vector)
+                noc_mosi_o.req_credit_return
             );
 
             // Step 2: advance C++ model one cycle.
@@ -224,7 +217,7 @@ module nmu_wrap #(
                 bit                    t_rlast;
                 bit                    t_noc_req_valid;
                 bit [FLIT_WIDTH-1:0]   t_noc_req_flit;
-                bit                    t_noc_rsp_credit_return;
+                bit [NUM_VC-1:0]       t_noc_rsp_credit_return;
                 cmodel_nmu_get_outputs(
                     ctx_i,
                     t_awready, t_wready, t_arready,
@@ -275,8 +268,8 @@ module nmu_wrap #(
     assign noc_mosi_o.req_flit  = noc_req_flit_q;
 
     // NoC rsp credit — Nmu drives rsp_credit_return back upstream (registered
-    // FlooNoC consumer pulse from the C model; pure pass-through bit)
-    assign noc_mosi_o.rsp_credit_return = {NUM_VC{noc_rsp_credit_return_q}};
+    // FlooNoC consumer pulse vector from the C model; per-VC pass-through)
+    assign noc_mosi_o.rsp_credit_return = noc_rsp_credit_return_q;
 
 endmodule
 

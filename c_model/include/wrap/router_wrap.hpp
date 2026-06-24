@@ -26,7 +26,9 @@
 // route_compute: a (1,0)-dst flit leaves node0 EAST, a (0,0)-dst flit leaves
 // node1 WEST) is identical, over the link_<N>_* pins toward the neighbor.
 //
-// num_vc=1 pinned (SV wraps fatal otherwise); LOCAL/LINK depths = kPoCChannelModelDepth.
+// num_vc comes from cmodel_router_create; LOCAL/LINK depths = kPoCChannelModelDepth.
+// Credit pulses marshal per-VC across the DPI boundary (VcCreditVec); the LINK
+// face is per-direction (ROUTER_LINK_PORTS), only link_port_ live at 2-node.
 //
 // Reset invariant (construction-is-reset): the wrap holds no SV-driven reset and
 // is created (cmodel_router_create) after rst_ni deasserts, so LinkCreditOut
@@ -52,16 +54,17 @@ namespace ni::cmodel::wrap {
 
 class RouterWrap {
   public:
-    void init(uint8_t x_coord, uint8_t num_vc = 1) {
+    void init(uint8_t x_coord, uint8_t y_coord = 0, uint8_t mesh_x_dim = 2, uint8_t mesh_y_dim = 1,
+              uint8_t num_vc = 1) {
         num_vc_ = num_vc;
         link_port_ = (x_coord == 0) ? static_cast<std::size_t>(router::RouterPort::EAST)
                                     : static_cast<std::size_t>(router::RouterPort::WEST);
 
         router::RouterConfig c;
         c.x = x_coord;
-        c.y = 0;
-        c.mesh_x_dim = 2;
-        c.mesh_y_dim = 1;
+        c.y = y_coord;
+        c.mesh_x_dim = mesh_x_dim;
+        c.mesh_y_dim = mesh_y_dim;
         c.num_vc = num_vc;
         c.vc_depth = kPoCChannelModelDepth;
         c.output_fifo_depth = kPoCChannelModelDepth;
@@ -91,20 +94,26 @@ class RouterWrap {
         if (in_.rsp_in_valid) {
             rsp_router_->input(LOCAL).push_flit(flit_from_bytes(in_.rsp_in_flit));
         }
-        if (in_.link_req_in_valid) {
-            req_router_->input(link_port_).push_flit(flit_from_bytes(in_.link_req_in_flit));
+        if (in_.link_req_in_valid[link_port_]) {
+            req_router_->input(link_port_)
+                .push_flit(flit_from_bytes(in_.link_req_in_flit[link_port_]));
         }
-        if (in_.link_rsp_in_valid) {
-            rsp_router_->input(link_port_).push_flit(flit_from_bytes(in_.link_rsp_in_flit));
+        if (in_.link_rsp_in_valid[link_port_]) {
+            rsp_router_->input(link_port_)
+                .push_flit(flit_from_bytes(in_.link_rsp_in_flit[link_port_]));
         }
         // LOCAL credit IN: the NMU/NSU returned a pulse for a flit drained from
         // the router's LOCAL OUTPUT (router->NI direction). Replenish the
-        // router's built-in credit_[LOCAL] sender counter.
-        if (in_.req_in_credit_return) req_router_->receive_credit(LOCAL, 0);
-        if (in_.rsp_in_credit_return) rsp_router_->receive_credit(LOCAL, 0);
-        // Neighbor credit pulses for flits we previously sent over the LINK.
-        if (in_.link_req_out_credit) req_router_->receive_credit(link_port_, 0);
-        if (in_.link_rsp_out_credit) rsp_router_->receive_credit(link_port_, 0);
+        // router's built-in credit_[LOCAL] sender counter, per VC.
+        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+            if (in_.req_in_credit_return[vc]) req_router_->receive_credit(LOCAL, vc);
+            if (in_.rsp_in_credit_return[vc]) rsp_router_->receive_credit(LOCAL, vc);
+            // Neighbor credit pulses for flits we previously sent over the LINK.
+            if (in_.link_req_out_credit[link_port_][vc])
+                req_router_->receive_credit(link_port_, vc);
+            if (in_.link_rsp_out_credit[link_port_][vc])
+                rsp_router_->receive_credit(link_port_, vc);
+        }
 
         // Step 2: advance both routers one stage.
         req_router_->tick();
@@ -120,21 +129,25 @@ class RouterWrap {
             out_.rsp_out_valid = true;
             out_.rsp_out_flit = flit_to_bytes(*f);
         }
-        // LOCAL credit OUT: PULSE — the router's LOCAL INPUT drained a flit from
-        // the NMU/NSU, so return one credit to the NMU/NSU (NI->router direction).
-        out_.req_out_credit_return = req_local_credit_->take(0);
-        out_.rsp_out_credit_return = rsp_local_credit_->take(0);
+        // LOCAL credit OUT: PULSE/VC — the router's LOCAL INPUT drained a flit
+        // from the NMU/NSU, so return one credit to the NMU/NSU (NI->router dir).
+        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+            out_.req_out_credit_return[vc] = req_local_credit_->take(vc);
+            out_.rsp_out_credit_return[vc] = rsp_local_credit_->take(vc);
+        }
 
         if (auto f = req_link_eject_->pop_flit()) {
-            out_.link_req_out_valid = true;
-            out_.link_req_out_flit = flit_to_bytes(*f);
+            out_.link_req_out_valid[link_port_] = true;
+            out_.link_req_out_flit[link_port_] = flit_to_bytes(*f);
         }
         if (auto f = rsp_link_eject_->pop_flit()) {
-            out_.link_rsp_out_valid = true;
-            out_.link_rsp_out_flit = flit_to_bytes(*f);
+            out_.link_rsp_out_valid[link_port_] = true;
+            out_.link_rsp_out_flit[link_port_] = flit_to_bytes(*f);
         }
-        out_.link_req_in_credit = req_link_credit_->take(0);
-        out_.link_rsp_in_credit = rsp_link_credit_->take(0);
+        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
+            out_.link_req_in_credit[link_port_][vc] = req_link_credit_->take(vc);
+            out_.link_rsp_in_credit[link_port_][vc] = rsp_link_credit_->take(vc);
+        }
     }
 
     void get_outputs(RouterOutputs& out) const { out = out_; }
@@ -145,6 +158,11 @@ class RouterWrap {
     router::Router& req_router() { return *req_router_; }
     // RSP router accessor — used by cmodel_perf_sample_tick to sample occupancy.
     router::Router& rsp_router() { return *rsp_router_; }
+
+    // VC count + active link direction — read by the DPI handlers to size the
+    // per-VC credit marshalling loops and pick the live link-array slot.
+    uint8_t num_vc() const { return num_vc_; }
+    std::size_t link_port() const { return link_port_; }
 
   private:
     static constexpr std::size_t LOCAL = static_cast<std::size_t>(router::RouterPort::LOCAL);

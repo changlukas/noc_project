@@ -16,10 +16,16 @@
 #pragma once
 #include "axi/types.hpp"                   // axi::DATA_BYTES
 #include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
 
 namespace ni::cmodel::wrap {
+
+// Per-VC credit pulse vector (bit/entry vc = one credit pulse on VC vc). Sized to
+// the max VC count; only [0 .. num_vc) live. Mirrors router_wrap_io VcCreditVec.
+inline constexpr std::size_t NMU_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
+using NmuVcCreditVec = std::array<bool, NMU_NUM_VC_MAX>;
 
 // 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
 // wire width agrees across master/slave/nmu/nsu wrap IO structs.
@@ -61,9 +67,9 @@ struct NmuInputs {
     // NoC rsp side — flit arriving from channel toward Nmu Depacketize
     bool noc_rsp_valid;
     FlitBytes noc_rsp_flit;
-    // NoC req credit — PULSE: router LOCAL input drained an Nmu req flit, return
-    // one credit to the req-out sender counter (NUM_VC=1 PoC: 1 bit)
-    bool noc_req_credit_return;
+    // NoC req credit — PULSE/VC: router LOCAL input drained an Nmu req flit, return
+    // one credit per VC to the req-out sender counter (bit/entry vc = VC vc pulse).
+    NmuVcCreditVec noc_req_credit_return;
 };
 
 // NmuOutputs: signals driven by Nmu each cycle.
@@ -85,9 +91,9 @@ struct NmuOutputs {
     // NoC req side — flit produced by Nmu Packetize, leaving toward channel
     bool noc_req_valid;
     FlitBytes noc_req_flit;
-    // NoC rsp credit — consumer PULSE: Nmu Depacketize consumed an injected rsp
-    // flit, return one credit to the router LOCAL output sender counter
-    bool noc_rsp_credit_return;
+    // NoC rsp credit — consumer PULSE/VC: Nmu Depacketize consumed an injected rsp
+    // flit, return one credit per VC to the router LOCAL output sender counter.
+    NmuVcCreditVec noc_rsp_credit_return;
 };
 
 }  // namespace ni::cmodel::wrap

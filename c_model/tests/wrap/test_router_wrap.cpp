@@ -41,14 +41,15 @@ TEST(RouterWrap, NmuReqRoutesToLinkOut) {
     a.tick();
     a.set_inputs(RouterInputs{});
 
+    const std::size_t lp = a.link_port();
     RouterOutputs out{};
     bool seen = false;
     for (int cyc = 0; cyc < 16 && !seen; ++cyc) {
         a.tick();
         a.get_outputs(out);
-        if (out.link_req_out_valid) {
+        if (out.link_req_out_valid[lp]) {
             seen = true;
-            auto f = flit_from_bytes(out.link_req_out_flit);
+            auto f = flit_from_bytes(out.link_req_out_flit[lp]);
             EXPECT_EQ(f.get_header_field("dst_id"), 0x01u);
         }
     }
@@ -60,9 +61,10 @@ TEST(RouterWrap, NmuReqRoutesToLinkOut) {
 TEST(RouterWrap, LinkInReqEjectsAtNsu) {
     RouterWrap a;
     a.init(/*x_coord=*/0);
+    const std::size_t lp = a.link_port();
     RouterInputs in{};
-    in.link_req_in_valid = true;
-    in.link_req_in_flit = flit_to_bytes(make_req(/*dst=*/0x00));
+    in.link_req_in_valid[lp] = true;
+    in.link_req_in_flit[lp] = flit_to_bytes(make_req(/*dst=*/0x00));
     a.set_inputs(in);
     a.tick();
     a.set_inputs(RouterInputs{});
@@ -86,9 +88,10 @@ TEST(RouterWrap, LinkInReqEjectsAtNsu) {
 TEST(RouterWrap, LinkInRspEjectsAtNmu) {
     RouterWrap a;
     a.init(/*x_coord=*/0);
+    const std::size_t lp = a.link_port();
     RouterInputs in{};
-    in.link_rsp_in_valid = true;
-    in.link_rsp_in_flit = flit_to_bytes(make_rsp(/*dst=*/0x00));
+    in.link_rsp_in_valid[lp] = true;
+    in.link_rsp_in_flit[lp] = flit_to_bytes(make_rsp(/*dst=*/0x00));
     a.set_inputs(in);
     a.tick();
     a.set_inputs(RouterInputs{});
@@ -109,9 +112,10 @@ TEST(RouterWrap, LinkInRspEjectsAtNmu) {
 TEST(RouterWrap, LinkInputDrainEmitsCreditPulse) {
     RouterWrap a;
     a.init(/*x_coord=*/0);
+    const std::size_t lp = a.link_port();
     RouterInputs in{};
-    in.link_req_in_valid = true;
-    in.link_req_in_flit = flit_to_bytes(make_req(/*dst=*/0x00));  // LOCAL-bound
+    in.link_req_in_valid[lp] = true;
+    in.link_req_in_flit[lp] = flit_to_bytes(make_req(/*dst=*/0x00));  // LOCAL-bound
     a.set_inputs(in);
     a.tick();
     a.set_inputs(RouterInputs{});
@@ -121,7 +125,7 @@ TEST(RouterWrap, LinkInputDrainEmitsCreditPulse) {
     for (int cyc = 0; cyc < 16; ++cyc) {
         a.tick();
         a.get_outputs(out);
-        if (out.link_req_in_credit) ++pulses;
+        if (out.link_req_in_credit[lp][0]) ++pulses;
     }
     // Exactly one flit drained from the LINK input FIFO -> exactly one credit pulse.
     EXPECT_EQ(pulses, 1) << "expected exactly one LINK-input drain credit pulse";
@@ -148,7 +152,7 @@ TEST(RouterWrap, LocalInputDrainEmitsCreditPulse) {
     for (int cyc = 0; cyc < 16; ++cyc) {
         a.tick();
         a.get_outputs(out);
-        if (out.req_out_credit_return) ++pulses;
+        if (out.req_out_credit_return[0]) ++pulses;
     }
     // Exactly one flit drained from the LOCAL input FIFO -> exactly one pulse.
     EXPECT_EQ(pulses, 1) << "expected exactly one LOCAL-input drain credit pulse";
@@ -195,7 +199,7 @@ TEST(RouterWrap, LocalInCreditReturnReplenishesRouter) {
     // router.receive_credit(LOCAL, 0), incrementing credit_[LOCAL] back to seed.
     // If the hop were dropped the counter would stay at seed-1 and this fails.
     in = RouterInputs{};
-    in.req_in_credit_return = true;
+    in.req_in_credit_return[0] = true;
     a.set_inputs(in);
     a.tick();
     a.get_outputs(out);
@@ -215,12 +219,13 @@ TEST(RouterWrap, Node1NmuReqRoutesToLinkOut) {
     a.tick();
     a.set_inputs(RouterInputs{});
 
+    const std::size_t lp = a.link_port();
     RouterOutputs out{};
     bool seen = false;
     for (int cyc = 0; cyc < 16 && !seen; ++cyc) {
         a.tick();
         a.get_outputs(out);
-        if (out.link_req_out_valid) seen = true;
+        if (out.link_req_out_valid[lp]) seen = true;
     }
     EXPECT_TRUE(seen) << "node1 NMU request never appeared on link_req_out";
 }

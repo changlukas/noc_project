@@ -52,13 +52,18 @@ module tb_top;
     import "DPI-C" context function int     cmodel_done();
     import "DPI-C" context function int     cmodel_scoreboard_clean();
     import "DPI-C" context function void    cmodel_dump_scoreboard();
-    import "DPI-C" context function longint unsigned cmodel_router_create(input string name, input int x_coord);
+    import "DPI-C" context function longint unsigned cmodel_router_create(input string name,
+                                                                  input int x_coord, input int y_coord,
+                                                                  input int mesh_x_dim, input int mesh_y_dim,
+                                                                  input int num_vc);
     import "DPI-C" context function longint unsigned cmodel_master_create(input string name,
                                                                  input string scenario_path);
     import "DPI-C" context function longint unsigned cmodel_slave_create(input string name,
                                                                 input string scenario_path);
-    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name, input int src_id);
-    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name, input int src_id);
+    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,
+                                                              input int src_id, input int num_vc);
+    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,
+                                                              input int src_id, input int num_vc);
     import "DPI-C" context function int     cmodel_master_count();
     import "DPI-C" context function int     cmodel_reads_checked();
 
@@ -74,18 +79,18 @@ module tb_top;
             $finish(1);
         end
         cmodel_init(scn_node1);  // shared config; either variant is fine
-        router0_ctx = cmodel_router_create("router_0", 0);
-        router1_ctx = cmodel_router_create("router_1", 1);
+        router0_ctx = cmodel_router_create("router_0", 0, 0, 2, 1, NUM_VC);
+        router1_ctx = cmodel_router_create("router_1", 1, 0, 2, 1, NUM_VC);
         // node0.master drives node1-variant (targets node1); ejects at node1.NSU.
         m0_ctx     = cmodel_master_create("master_0", scn_node1);
         s0_ctx     = cmodel_slave_create ("slave_1",  scn_node1);  // node1.slave: receives node1-range data
-        n0_nmu_ctx = cmodel_nmu_create("nmu_0", 0);                // src_id = node0 coordinate
-        n0_nsu_ctx = cmodel_nsu_create("nsu_0", 0);
+        n0_nmu_ctx = cmodel_nmu_create("nmu_0", 0, NUM_VC);        // src_id = node0 coordinate; num_vc from topology
+        n0_nsu_ctx = cmodel_nsu_create("nsu_0", 0, NUM_VC);
         // node1.master drives node0-variant (targets node0); ejects at node0.NSU.
         m1_ctx     = cmodel_master_create("master_1", scn_node0);
         s1_ctx     = cmodel_slave_create ("slave_0",  scn_node0);  // node0.slave: receives node0-range data
-        n1_nmu_ctx = cmodel_nmu_create("nmu_1", 1);                // src_id = node1 coordinate
-        n1_nsu_ctx = cmodel_nsu_create("nsu_1", 1);
+        n1_nmu_ctx = cmodel_nmu_create("nmu_1", 1, NUM_VC);        // src_id = node1 coordinate; num_vc from topology
+        n1_nsu_ctx = cmodel_nsu_create("nsu_1", 1, NUM_VC);
     end
 
     // -------------------------------------------------------------------------
@@ -187,60 +192,135 @@ module tb_top;
     // -------------------------------------------------------------------------
     // Link nets named <net>_<src>to<dst>_*: data flows src->dst, credit pulse
     // flows on the net whose direction matches the credit's travel.
-    logic                  link_req_0to1_valid, link_req_1to0_valid;
-    logic [FLIT_WIDTH-1:0] link_req_0to1_flit,  link_req_1to0_flit;
-    logic                  link_req_0to1_credit, link_req_1to0_credit;  // pulse
-    logic                  link_rsp_0to1_valid, link_rsp_1to0_valid;
-    logic [FLIT_WIDTH-1:0] link_rsp_0to1_flit,  link_rsp_1to0_flit;
-    logic                  link_rsp_0to1_credit, link_rsp_1to0_credit;  // pulse
+    localparam int unsigned LINK_PORTS = 5;  // LOCAL + N/E/S/W (mirrors c_model)
+    localparam int unsigned RP_EAST    = 2;
+    localparam int unsigned RP_WEST    = 4;
+
+    // node0 LINK face arrays (one slot per direction)
+    logic [LINK_PORTS-1:0]   n0_link_req_out_valid,  n0_link_rsp_out_valid;
+    logic [FLIT_WIDTH-1:0]   n0_link_req_out_flit   [LINK_PORTS];
+    logic [FLIT_WIDTH-1:0]   n0_link_rsp_out_flit   [LINK_PORTS];
+    logic [NUM_VC-1:0]       n0_link_req_in_credit  [LINK_PORTS];
+    logic [NUM_VC-1:0]       n0_link_rsp_in_credit  [LINK_PORTS];
+    logic [LINK_PORTS-1:0]   n0_link_req_in_valid,   n0_link_rsp_in_valid;
+    logic [FLIT_WIDTH-1:0]   n0_link_req_in_flit    [LINK_PORTS];
+    logic [FLIT_WIDTH-1:0]   n0_link_rsp_in_flit    [LINK_PORTS];
+    logic [NUM_VC-1:0]       n0_link_req_out_credit [LINK_PORTS];
+    logic [NUM_VC-1:0]       n0_link_rsp_out_credit [LINK_PORTS];
+    // node1 LINK face arrays (one slot per direction)
+    logic [LINK_PORTS-1:0]   n1_link_req_out_valid,  n1_link_rsp_out_valid;
+    logic [FLIT_WIDTH-1:0]   n1_link_req_out_flit   [LINK_PORTS];
+    logic [FLIT_WIDTH-1:0]   n1_link_rsp_out_flit   [LINK_PORTS];
+    logic [NUM_VC-1:0]       n1_link_req_in_credit  [LINK_PORTS];
+    logic [NUM_VC-1:0]       n1_link_rsp_in_credit  [LINK_PORTS];
+    logic [LINK_PORTS-1:0]   n1_link_req_in_valid,   n1_link_rsp_in_valid;
+    logic [FLIT_WIDTH-1:0]   n1_link_req_in_flit    [LINK_PORTS];
+    logic [FLIT_WIDTH-1:0]   n1_link_rsp_in_flit    [LINK_PORTS];
+    logic [NUM_VC-1:0]       n1_link_req_out_credit [LINK_PORTS];
+    logic [NUM_VC-1:0]       n1_link_rsp_out_credit [LINK_PORTS];
 
     router_wrap #(
-        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),
+        .LINK_PORTS(LINK_PORTS)
     ) u_router_0 (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .ctx_i(router0_ctx),
         .noc_nmu_i(node0_nmu.miso),
         .noc_nsu_o(node0_nsu.mosi),
-        // REQ link: node0 OUT -> 0to1 data; node0 IN <- 1to0 data.
-        .link_req_out_valid(link_req_0to1_valid),
-        .link_req_out_flit(link_req_0to1_flit),
-        .link_req_out_credit(link_req_1to0_credit),  // credit for node0's sent data
-        .link_req_in_valid(link_req_1to0_valid),
-        .link_req_in_flit(link_req_1to0_flit),
-        .link_req_in_credit(link_req_0to1_credit),   // credit node0 returns to peer
-        // RSP link: mirrored.
-        .link_rsp_out_valid(link_rsp_0to1_valid),
-        .link_rsp_out_flit(link_rsp_0to1_flit),
-        .link_rsp_out_credit(link_rsp_1to0_credit),
-        .link_rsp_in_valid(link_rsp_1to0_valid),
-        .link_rsp_in_flit(link_rsp_1to0_flit),
-        .link_rsp_in_credit(link_rsp_0to1_credit)
+        // LINK face: whole per-direction arrays; live dir = RP_EAST.
+        .link_req_out_valid(n0_link_req_out_valid),
+        .link_req_out_flit(n0_link_req_out_flit),
+        .link_req_out_credit(n0_link_req_out_credit),
+        .link_req_in_valid(n0_link_req_in_valid),
+        .link_req_in_flit(n0_link_req_in_flit),
+        .link_req_in_credit(n0_link_req_in_credit),
+        .link_rsp_out_valid(n0_link_rsp_out_valid),
+        .link_rsp_out_flit(n0_link_rsp_out_flit),
+        .link_rsp_out_credit(n0_link_rsp_out_credit),
+        .link_rsp_in_valid(n0_link_rsp_in_valid),
+        .link_rsp_in_flit(n0_link_rsp_in_flit),
+        .link_rsp_in_credit(n0_link_rsp_in_credit)
     );
 
     router_wrap #(
-        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),
+        .LINK_PORTS(LINK_PORTS)
     ) u_router_1 (
         .clk_i(clk_i),
         .rst_ni(rst_ni),
         .ctx_i(router1_ctx),
         .noc_nmu_i(node1_nmu.miso),
         .noc_nsu_o(node1_nsu.mosi),
-        // REQ link: node1 OUT -> 1to0 data; node1 IN <- 0to1 data.
-        .link_req_out_valid(link_req_1to0_valid),
-        .link_req_out_flit(link_req_1to0_flit),
-        .link_req_out_credit(link_req_0to1_credit),  // credit for node1's sent data
-        .link_req_in_valid(link_req_0to1_valid),
-        .link_req_in_flit(link_req_0to1_flit),
-        .link_req_in_credit(link_req_1to0_credit),   // credit node1 returns to peer
-        // RSP link: mirrored.
-        .link_rsp_out_valid(link_rsp_1to0_valid),
-        .link_rsp_out_flit(link_rsp_1to0_flit),
-        .link_rsp_out_credit(link_rsp_0to1_credit),
-        .link_rsp_in_valid(link_rsp_0to1_valid),
-        .link_rsp_in_flit(link_rsp_0to1_flit),
-        .link_rsp_in_credit(link_rsp_1to0_credit)
+        // LINK face: whole per-direction arrays; live dir = RP_WEST.
+        .link_req_out_valid(n1_link_req_out_valid),
+        .link_req_out_flit(n1_link_req_out_flit),
+        .link_req_out_credit(n1_link_req_out_credit),
+        .link_req_in_valid(n1_link_req_in_valid),
+        .link_req_in_flit(n1_link_req_in_flit),
+        .link_req_in_credit(n1_link_req_in_credit),
+        .link_rsp_out_valid(n1_link_rsp_out_valid),
+        .link_rsp_out_flit(n1_link_rsp_out_flit),
+        .link_rsp_out_credit(n1_link_rsp_out_credit),
+        .link_rsp_in_valid(n1_link_rsp_in_valid),
+        .link_rsp_in_flit(n1_link_rsp_in_flit),
+        .link_rsp_in_credit(n1_link_rsp_in_credit)
     );
+
+    // -------------------------------------------------------------------------
+    // Cross-node link wiring (per-direction; only the live direction is hooked)
+    // -------------------------------------------------------------------------
+    always_comb begin : link_req_in_n0
+        for (int p = 0; p < LINK_PORTS; p++) begin
+            n0_link_req_in_valid[p]   = 1'b0;
+            n0_link_req_in_flit[p]    = '0;
+            n0_link_req_out_credit[p] = '0;
+        end
+        // live dir RP_EAST: data IN <- peer node1 OUT; our sent-data
+        // credit (out_credit) <- peer's returned in_credit.
+        n0_link_req_in_valid[RP_EAST]   = n1_link_req_out_valid[RP_WEST];
+        n0_link_req_in_flit[RP_EAST]    = n1_link_req_out_flit[RP_WEST];
+        n0_link_req_out_credit[RP_EAST] = n1_link_req_in_credit[RP_WEST];
+    end
+
+    always_comb begin : link_rsp_in_n0
+        for (int p = 0; p < LINK_PORTS; p++) begin
+            n0_link_rsp_in_valid[p]   = 1'b0;
+            n0_link_rsp_in_flit[p]    = '0;
+            n0_link_rsp_out_credit[p] = '0;
+        end
+        // live dir RP_EAST: data IN <- peer node1 OUT; our sent-data
+        // credit (out_credit) <- peer's returned in_credit.
+        n0_link_rsp_in_valid[RP_EAST]   = n1_link_rsp_out_valid[RP_WEST];
+        n0_link_rsp_in_flit[RP_EAST]    = n1_link_rsp_out_flit[RP_WEST];
+        n0_link_rsp_out_credit[RP_EAST] = n1_link_rsp_in_credit[RP_WEST];
+    end
+
+    always_comb begin : link_req_in_n1
+        for (int p = 0; p < LINK_PORTS; p++) begin
+            n1_link_req_in_valid[p]   = 1'b0;
+            n1_link_req_in_flit[p]    = '0;
+            n1_link_req_out_credit[p] = '0;
+        end
+        // live dir RP_WEST: data IN <- peer node0 OUT; our sent-data
+        // credit (out_credit) <- peer's returned in_credit.
+        n1_link_req_in_valid[RP_WEST]   = n0_link_req_out_valid[RP_EAST];
+        n1_link_req_in_flit[RP_WEST]    = n0_link_req_out_flit[RP_EAST];
+        n1_link_req_out_credit[RP_WEST] = n0_link_req_in_credit[RP_EAST];
+    end
+
+    always_comb begin : link_rsp_in_n1
+        for (int p = 0; p < LINK_PORTS; p++) begin
+            n1_link_rsp_in_valid[p]   = 1'b0;
+            n1_link_rsp_in_flit[p]    = '0;
+            n1_link_rsp_out_credit[p] = '0;
+        end
+        // live dir RP_WEST: data IN <- peer node0 OUT; our sent-data
+        // credit (out_credit) <- peer's returned in_credit.
+        n1_link_rsp_in_valid[RP_WEST]   = n0_link_rsp_out_valid[RP_EAST];
+        n1_link_rsp_in_flit[RP_WEST]    = n0_link_rsp_out_flit[RP_EAST];
+        n1_link_rsp_out_credit[RP_WEST] = n0_link_rsp_in_credit[RP_EAST];
+    end
 
     // -------------------------------------------------------------------------
     // PMU monitors — passive; no drives
@@ -314,35 +394,40 @@ module tb_top;
         .rlast(nsu_slave_axi_1.rlast),     .rid(nsu_slave_axi_1.rid)
     );
 
-    // Inter-router link monitors: valid paired with credit from the OPPOSITE direction
-    // (credit for data flowing 0→1 returns on the 1→0 net, and vice versa).
+    // Inter-router link monitors: a node's OUT valid paired with the credit it
+    // RECEIVES for that sent data (out_credit, OR-reduced across VCs).
     link_perf_monitor #(
         .LINK_NAME("req_0to1"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_req01 (
         .clk_i, .rst_ni,
-        .valid(link_req_0to1_valid), .credit_pulse(link_req_1to0_credit)
+        .valid(n0_link_req_out_valid[RP_EAST]),
+        .credit_pulse(|n0_link_req_out_credit[RP_EAST])
     );
 
     link_perf_monitor #(
         .LINK_NAME("req_1to0"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_req10 (
         .clk_i, .rst_ni,
-        .valid(link_req_1to0_valid), .credit_pulse(link_req_0to1_credit)
+        .valid(n1_link_req_out_valid[RP_WEST]),
+        .credit_pulse(|n1_link_req_out_credit[RP_WEST])
     );
 
     link_perf_monitor #(
         .LINK_NAME("rsp_0to1"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_rsp01 (
         .clk_i, .rst_ni,
-        .valid(link_rsp_0to1_valid), .credit_pulse(link_rsp_1to0_credit)
+        .valid(n0_link_rsp_out_valid[RP_EAST]),
+        .credit_pulse(|n0_link_rsp_out_credit[RP_EAST])
     );
 
     link_perf_monitor #(
         .LINK_NAME("rsp_1to0"), .BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_perf_link_rsp10 (
         .clk_i, .rst_ni,
-        .valid(link_rsp_1to0_valid), .credit_pulse(link_rsp_0to1_credit)
+        .valid(n1_link_rsp_out_valid[RP_WEST]),
+        .credit_pulse(|n1_link_rsp_out_credit[RP_WEST])
     );
+
 
     // -------------------------------------------------------------------------
     // Perf instrumentation — sample every rising edge; dump on final
