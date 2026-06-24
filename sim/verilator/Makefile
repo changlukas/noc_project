@@ -97,6 +97,14 @@ TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
+# tb_top.sv does `include "noc_fabric_<topo>.sv"` (bare filename) for the fabric
+# emitted beside it. Put tb_top's OWN directory on the Verilator include path so
+# the beside-it fabric resolves wherever tb_top lives. Default build: sim/sv/
+# (already implied by -I$(COSIM_ROOT)/sv). vc2 driver override: build/verilator/
+# (the out-of-tree case this fixes). Appended after TB_TOP_SV so a command-line
+# TB_TOP_SV= override (sim/run_vc2_driver.py) is reflected.
+VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
+
 # TOPOLOGY stamp records the last-built topology. The FORCE-driven rule rewrites
 # the stamp ONLY when TOPOLOGY changed (content compare), bumping its mtime so the
 # tb_top.sv prerequisite check re-emits tb_top.sv + fabric even though the output
