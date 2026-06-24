@@ -40,7 +40,7 @@ module tb_top;
     localparam int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT;
     localparam int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;
     localparam int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT;
-    localparam int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT;
+    localparam int unsigned NUM_VC                = 1;  // from topology YAML (single source)
     localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT;
     localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;
 

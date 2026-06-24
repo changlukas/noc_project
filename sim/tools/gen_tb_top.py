@@ -164,8 +164,8 @@ def emit_tb_top(topo: dict) -> str:
     w("    localparam int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
-    # TODO(Task 5): drive the NUM_VC localparam from topology num_vc
-    w("    localparam int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT;")
+    num_vc = topo["topology"]["num_vc"]
+    w(f"    localparam int unsigned NUM_VC                = {num_vc};  // from topology YAML (single source)")
     w("    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT;")
     w("    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;")
     w("")
