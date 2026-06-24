@@ -259,9 +259,17 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 # ---------------------------------------------------------------------------
 
 def _load_topology(name):
-    """Return (nodes, x_dim, y_dim) where nodes = [(idx, x, y, cid), ...]."""
-    here = os.path.dirname(os.path.abspath(__file__))
-    topo_path = os.path.join(here, "..", "topologies", f"{name}.yaml")
+    """Return (nodes, x_dim, y_dim) where nodes = [(idx, x, y, cid), ...].
+
+    `name` is either a topology name resolved against sim/topologies/<name>.yaml, or
+    a direct path to a topology yaml (ends in .yaml or names an existing file).  The
+    path form lets callers point at a temp topology without writing into the live tree.
+    """
+    if name.endswith(".yaml") or os.path.isfile(name):
+        topo_path = name
+    else:
+        here = os.path.dirname(os.path.abspath(__file__))
+        topo_path = os.path.join(here, "..", "topologies", f"{name}.yaml")
     with open(topo_path) as f:
         topo = yaml.safe_load(f)
     x_dim = topo["topology"]["x_dim"]
@@ -320,7 +328,7 @@ def _check_transpose_guard(x_dim, y_dim):
     if x_dim != y_dim:
         sys.exit(
             f"ERROR: transpose pattern requires a square mesh (x_dim == y_dim); "
-            f"got {x_dim}x{y_dim}.  Use a square topology (e.g. mesh_4x4_vc1)."
+            f"got {x_dim}x{y_dim}.  Use a square topology (e.g. a 4x4 square mesh)."
         )
     if x_dim == 0 or (x_dim & (x_dim - 1)) != 0:
         sys.exit(
@@ -452,7 +460,8 @@ def main(argv=None):
                     choices=["neighbor", "transpose", "uniform_random", "hotspot"],
                     help="Traffic pattern")
     ap.add_argument("--topology", default="mesh_4x4_vc1",
-                    help="Topology name (matches sim/topologies/<name>.yaml)")
+                    help="Topology name (matches sim/topologies/<name>.yaml) or a "
+                         "direct path to a topology yaml")
     ap.add_argument("--out", required=True,
                     help="Output directory; writes <out>/node<i>/scenario.yaml")
     # Per-packet random pattern options
@@ -498,7 +507,7 @@ def main(argv=None):
             memory_size = a.memory_size  # explicit CLI override wins
 
         for (idx, x, y, src_cid) in nodes:
-            dst_x, dst_y = neighbor_dst(x, y, x_dim, y_dim)
+            dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
             dst_cid = coord_id(dst_x, dst_y)
             out_dir = os.path.join(a.out, f"node{idx}")
             _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
@@ -522,7 +531,7 @@ def main(argv=None):
             memory_size = a.memory_size  # explicit CLI override wins
 
         for (idx, x, y, src_cid) in nodes:
-            dst_x, dst_y = transpose_dst(x, y)
+            dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
             dst_cid = coord_id(dst_x, dst_y)
             # Each of transactions_per_node pairs targets the same fixed dst.
             dst_cids = [dst_cid] * a.transactions_per_node

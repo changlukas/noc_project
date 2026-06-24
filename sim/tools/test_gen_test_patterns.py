@@ -360,33 +360,29 @@ def test_transpose_is_involution_4x4():
 
 
 def test_transpose_requires_square_mesh():
-    """Non-square topology must cause a SystemExit (fail-fast)."""
+    """Non-square topology must cause a SystemExit (fail-fast).
+
+    The temp topology lives entirely under a TemporaryDirectory and is passed as a
+    PATH to --topology, so nothing is ever written into the live sim/topologies tree.
+    """
     import subprocess
     import tempfile
-    import shutil
     repo = os.path.abspath(os.path.join(HERE, "..", ".."))
-    topo_dir = os.path.join(HERE, "..", "topologies")
-    name = "mesh_3x2_vc1"
-    dest = os.path.join(topo_dir, f"{name}.yaml")
     with tempfile.TemporaryDirectory(dir=repo) as tmp:
-        with open(os.path.join(tmp, f"{name}.yaml"), "w") as f:
-            yaml.safe_dump({"topology": {"name": name,
+        topo_path = os.path.join(tmp, "mesh_3x2_vc1.yaml")
+        with open(topo_path, "w") as f:
+            yaml.safe_dump({"topology": {"name": "mesh_3x2_vc1",
                                           "x_dim": 3, "y_dim": 2, "num_vc": 1}}, f)
-        shutil.copy(os.path.join(tmp, f"{name}.yaml"), dest)
-        try:
-            result = subprocess.run(
-                [sys.executable,
-                 os.path.join(HERE, "gen_test_patterns.py"),
-                 "--pattern", "transpose",
-                 "--topology", name,
-                 "--out", os.path.join(tmp, "out"),
-                 "--transactions-per-node", "1",
-                 "--memory-size", "0x1000"],
-                capture_output=True, text=True
-            )
-        finally:
-            if os.path.exists(dest):
-                os.remove(dest)
+        result = subprocess.run(
+            [sys.executable,
+             os.path.join(HERE, "gen_test_patterns.py"),
+             "--pattern", "transpose",
+             "--topology", topo_path,
+             "--out", os.path.join(tmp, "out"),
+             "--transactions-per-node", "1",
+             "--memory-size", "0x1000"],
+            capture_output=True, text=True
+        )
     assert result.returncode != 0, "transpose on non-square mesh must exit non-zero"
     assert "square" in result.stderr.lower() or "x_dim" in result.stderr, (
         f"expected square-mesh guard message; stderr={result.stderr!r}"
