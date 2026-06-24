@@ -97,13 +97,29 @@ check-yamlcpp:
 $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
-# tb_top.sv is a generated artifact; regenerate from the topology config before
-# building. Pattern mirrors sim/verilator/Makefile and the filelist.f recipe.
+# tb_top.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate from the
+# topology config before building. Pattern mirrors sim/verilator/Makefile and the
+# filelist.f recipe.
 TB_TOP_SV     := $(COSIM_ROOT)/sv/tb_top.sv
 TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
+TOPO_STAMP    := $(VCS_BUILD)/.topology
 
-$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
+# TOPOLOGY stamp records the last-built topology. The FORCE-driven rule rewrites
+# the stamp ONLY when TOPOLOGY changed (content compare), bumping its mtime so the
+# tb_top.sv prerequisite check re-emits tb_top.sv + fabric even though the output
+# path is fixed. Without it, switching TOPOLOGY to one with an older YAML mtime
+# (e.g. mesh_2x2 -> mesh_2x1) would reuse a stale tb_top.sv. Mirrors the Verilator
+# Makefile's mechanism exactly. Unchanged topology leaves the stamp alone.
+.PHONY: FORCE
+FORCE:
+$(TOPO_STAMP): FORCE
+	@mkdir -p $(VCS_BUILD)
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)" ]; then \
+	    echo "$(TOPOLOGY)" > $@; \
+	fi
+
+$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs

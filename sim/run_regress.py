@@ -9,7 +9,7 @@ mesh_2x2) materializes node0..node<N-1> coordinate variants on the fly from each
 pattern's base scenario.yaml via gen_coordinate_scenarios.py, then drives all N
 +scenario_node<i> plusargs. Either way the run is non-vacuous: every node both
 sends (its own master) and receives (its NSU slave), and the PASS guard inside
-tb_top asserts master_count == N and reads_checked > 0."""
+tb_top asserts master_count == N and reads_checked >= N (one read per node)."""
 import os
 import subprocess
 import sys

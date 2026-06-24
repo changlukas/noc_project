@@ -37,8 +37,9 @@ sim/output/
 sim/filelist.f
 
 # Generated SV: tb_top.sv + per-topology noc_fabric_<name>.sv are emitted by
-# sim/tools/gen_tb_top.py on every build (see sim/verilator/Makefile $(TB_TOP_SV)
-# rule). Edit the generator or sim/topologies/*.yaml, never these files directly.
+# sim/tools/gen_tb_top.py on every build (the $(TB_TOP_SV) rule in both
+# sim/verilator/Makefile and sim/vcs/Makefile regenerates them). Edit the
+# generator or sim/topologies/*.yaml, never these files directly.
 sim/sv/tb_top.sv
 sim/sv/noc_fabric_*.sv
 

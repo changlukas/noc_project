@@ -56,24 +56,28 @@ def load_topology(name: str) -> dict:
     return topo
 
 
-# Y_WIDTH mirrors the flit spec (ni_packet.json field_widths.Y_WIDTH = 4).
+# Y_WIDTH / VC_ID_WIDTH mirror the flit spec (ni_packet.json field_widths).
 Y_WIDTH = 4
+VC_ID_WIDTH = 3
 DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
 
 
 def _check_flit_capacity(topo: dict, path) -> None:
-    """Reject a topology whose mesh dims exceed the flit field capacity.
+    """Reject a topology whose mesh dims / num_vc exceed the flit field capacity.
 
     Mirrors specgen/ni_spec/invariants.py:check_mesh_within_flit for the
-    sim-topology-YAML path.  Fails with a clear message so the user knows to
-    reduce dims or widen the flit fields (via the specgen constants).
+    sim-topology-YAML path (X/Y/node + VC bounds).  Fails with a clear message so
+    the user knows to reduce dims / num_vc or widen the flit fields (via the
+    specgen constants).
     """
     t = topo["topology"]
     x_dim = int(t["x_dim"])
     y_dim = int(t["y_dim"])
+    num_vc = int(t["num_vc"])
     cap_x = 1 << X_WIDTH
     cap_y = 1 << Y_WIDTH
     cap_nodes = 1 << DST_ID_WIDTH
+    cap_vc = 1 << VC_ID_WIDTH
     errors = []
     if x_dim > cap_x:
         errors.append(f"x_dim={x_dim} > 2^X_WIDTH={cap_x}")
@@ -81,6 +85,8 @@ def _check_flit_capacity(topo: dict, path) -> None:
         errors.append(f"y_dim={y_dim} > 2^Y_WIDTH={cap_y}")
     if x_dim * y_dim > cap_nodes:
         errors.append(f"x_dim*y_dim={x_dim * y_dim} > 2^DST_ID_WIDTH={cap_nodes}")
+    if num_vc > cap_vc:
+        errors.append(f"num_vc={num_vc} > 2^VC_ID_WIDTH={cap_vc}")
     if errors:
         raise SystemExit(
             f"gen_tb_top: flit-capacity violated in {path}:\n"
