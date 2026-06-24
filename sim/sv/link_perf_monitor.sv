@@ -9,13 +9,14 @@
 module link_perf_monitor #(
     parameter string LINK_NAME    = "link",
     parameter int    BUFFER_DEPTH = 4,
-    parameter int    NUM_VC       = 1
+    parameter int    NUM_VC       = 1,
+    parameter int    VC_ID_WIDTH  = 3  // full flit-header VC_ID field width (ni_flit_pkg::VC_ID_WIDTH)
 ) (
     input logic clk_i,
     input logic rst_ni,
-    input logic valid,                                           // a flit is on the wire this cycle
-    input logic [$clog2(NUM_VC < 2 ? 2 : NUM_VC)-1:0] vc_id,  // VC of the flit this cycle
-    input logic [NUM_VC-1:0] credit_pulse                       // per-VC downstream slot freed
+    input logic valid,                          // a flit is on the wire this cycle
+    input logic [VC_ID_WIDTH-1:0] vc_id,       // full VC_ID field from flit header
+    input logic [NUM_VC-1:0] credit_pulse       // per-VC downstream slot freed
 );
     import "DPI-C" context function void cmodel_perf_link(
         input string name, input longint flit_count, input longint stall_cyc);
@@ -61,6 +62,14 @@ module link_perf_monitor #(
         !(valid && credit[vc_id] == 0))
         else $error("[%s] credit underflow on VC%0d: valid asserted with zero credit",
                     LINK_NAME, vc_id);
+
+    // vc_id in flit header must be a valid VC index. The flit field is VC_ID_WIDTH
+    // bits wide (fixed by the packet spec) but NUM_VC may be < 2^VC_ID_WIDTH; a
+    // mis-configured encoder would otherwise silently alias into a valid credit[].
+    assert property (@(posedge clk_i) disable iff (!rst_ni)
+        !(valid && (int'(vc_id) >= NUM_VC)))
+        else $error("[%s] out-of-range vc_id=%0d on valid flit (NUM_VC=%0d)",
+                    LINK_NAME, vc_id, NUM_VC);
 endmodule
 
 `endif  // LINK_PERF_MONITOR_SV

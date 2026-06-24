@@ -184,8 +184,8 @@ TEST(AxiMasterRawOrder, ArvalidNotStuckWhileReadRawHeld) {
         prev_arvalid = arv;
     }
 
-    // The AR may be offered transiently before the write's AW handshake registers
-    // the RAW range. Once held, ARVALID must drop. A stuck ARVALID shows up as
+    // The RAW range is registered at op-admission, before any AR can be presented,
+    // so ARVALID is held off from the start. A stuck ARVALID shows up as
     // near-every-cycle presence.
     EXPECT_LT(ar_present_cycles, 5)
         << "ARVALID stuck high while read is RAW-held: present " << ar_present_cycles << " of "

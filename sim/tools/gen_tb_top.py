@@ -353,7 +353,7 @@ def emit_fabric(topo: dict) -> str:
                 vc_slice = f"{flit_wire}[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]"
                 w(f"    link_perf_monitor #(")
                 w(f'        .LINK_NAME("{net}_{i}to{pi}"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),')
-                w(f"        .NUM_VC(NUM_VC)")
+                w(f"        .NUM_VC(NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)")
                 w(f"    ) u_perf_link_{net}_{i}_{pi} (")
                 w(f"        .clk_i, .rst_ni,")
                 w(f"        .valid(n{i}_link_{net}_out_valid[RP_{d}]),")
