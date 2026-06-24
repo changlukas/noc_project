@@ -9,7 +9,7 @@
 **Tech Stack:** Python(generator + runner)、SystemVerilog/Verilator(`--timing`)、CMake/GoogleTest、Git Bash/MSYS2、GNU make。
 
 ## Global Constraints
-- **python**:`PYTHON3=python3`(mingw64),**不用 `py -3`**。
+- **python**:`PYTHON3=python3`(mingw64),**不用 `py -3`**。unit tests 用 pytest;若 env 無 pytest,用 `python3 -c` harness 跑同樣斷言(別因缺 pytest 而跳過)。
 - **spec**:`docs/internal/superpowers/specs/2026-06-24-noc-benchmark-generator-design.md`(fb5376e);每 task 隱含 spec 全約束。
 - **branch**:feature branch off main(2916e6a 之後 HEAD,含 spec/plan commit);**不 push**;commit 格式 `type(scope): description`;不 amend、不 `--no-verify`。
 - **address-driven destination 契約**:`master_i`/`slave_i` ← `scn_node{i}`;dst 由 `addr[39:32]=dst_id`(`addr_trans` coord_id=`(y<<X_WIDTH)|x`,X_WIDTH=4)決定。
@@ -66,8 +66,11 @@ def test_nn_never_self():
 - [ ] **Step 2: 跑測試確認 fail**
 Run: `cd sim/tools && python3 -m pytest test_gen_test_patterns.py -v`(或 `python3 -c` import,若無 pytest)
 Expected: FAIL(函式/模組未完成)。
-- [ ] **Step 3: 實作 gen_test_patterns `--from` × nearest_neighbor 到能寫 per-node scenario**
-讀 base scenario,對每 node i:deepcopy base、把每筆 transaction 的 `addr` 設為 `nearest_neighbor_dst 的 coord<<32 + (base 的 local addr 低位)`、`config.memory_base = coord(i)<<32 + base.memory_base`、rewrite `data_file`/`dump_file`/`strb_file` 為相對路徑(沿用舊 gen_coordinate 的檔案改寫邏輯,從 git 史 `gen_coordinate_scenarios.py` 取)。寫 `node<i>/scenario.yaml`。CLI:`--from/--pattern/--topology/--out`。
+- [ ] **Step 3: 實作 gen_test_patterns `--from` × nearest_neighbor + 全域唯一位址 allocator**
+讀 base scenario,對每 node i(src):
+- dst = `nearest_neighbor_dst(x,y)`;每筆 write/read 對的 `addr = dst_coord<<32 + uniq_offset`,**`uniq_offset` 由全域 allocator 依 (src_node, seq) 給,確保多源收斂到同一 dst node 時不撞同絕對位址**(`nearest_neighbor` 會收斂:node1→node2、node3→node2)。write/read 同 addr 成對。`uniq_offset` 落在 dst node `memory_base..+memory_size` 內。
+- `config.memory_base = coord(i)<<32 + base.memory_base`;rewrite `data_file`/`dump_file`/`strb_file` 為相對路徑(沿用舊 gen_coordinate 的檔案改寫邏輯,從 git 史 `gen_coordinate_scenarios.py` 取)。寫 `node<i>/scenario.yaml`。CLI:`--from/--pattern/--topology/--out`。
+- **此 allocator(`alloc_unique_offset(dst_node, src_node, seq)`)是核心,T2/T3 的 synthetic/uniform/hotspot/transpose 全部複用**(不可只在 --from 用)。加單元測試:nearest_neighbor 下,所有 write 的絕對位址全域唯一。
 - [ ] **Step 4: 改 gen_tb_top identity 配對**
 `sim/tools/gen_tb_top.py` emit_tb_top:`m{i}_ctx = cmodel_master_create("master_{i}", scn_node{i})`、`s{i}_ctx = cmodel_slave_create("slave_{i}", scn_node{i})`(去掉 `(i+1)%n` shift)。`cmodel_init` 用 `scn_node{0}`(任一變體 config 相同)。對應的 nmu/nsu/master/slave 都用同 i。
 - [ ] **Step 5: 刪 gen_coordinate + 改 call sites**
@@ -81,8 +84,10 @@ make check PYTHON3=python3                                  # ctest 545/545
 make build-verilator TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3
 make sim-regress TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3      # 6/6,scoreboard clean(nearest_neighbor 分佈)
 python3 sim/tools/gen_tb_top.py --topology mesh_4x4_vc1 --check   # exit 0
+# all-VC behavior-preserving(契約改動影響所有 topology,spec §6 要求):
+for N in 2 4 8; do make build-verilator TOPOLOGY=mesh_4x4_vc$N PYTHON3=python3 && make sim-regress TOPOLOGY=mesh_4x4_vc$N PYTHON3=python3; done
 ```
-Expected: 6/6 + ctest 545(現有 conformity 在 nearest_neighbor 下仍對得上)。若 scoreboard mismatch → systematic-debug address/memory_base 對齊,**不弱化 scoreboard**。
+Expected: mesh_4x4_vc{1,2,4,8} 全 6/6 + ctest 545(現有 conformity 在 nearest_neighbor 下仍對得上)。若 scoreboard mismatch → systematic-debug address/memory_base 對齊,**不弱化 scoreboard**。
 - [ ] **Step 7: Commit**
 ```bash
 git add sim/tools/gen_test_patterns.py sim/tools/test_gen_test_patterns.py sim/tools/gen_tb_top.py sim/run_regress.py sim/verilator/Makefile sim/vcs/Makefile
@@ -98,7 +103,7 @@ git commit -m "feat(sim): address-driven destination contract; gen_test_patterns
 - Modify: `sim/tools/test_gen_test_patterns.py`(uniform/hotspot/uniqueness 測試)
 
 **Interfaces:**
-- Produces:`--pattern {uniform_random,hotspot}`、`--transactions-per-node N`、`--seed S`、`--hotspot <ids>`、`--allow-self`、synthetic AXI shape(`--size/--len` 預設)。每 node 產 `transactions-per-node` 筆 write+read 對,dst 每筆隨機,addr 全域唯一。
+- Produces:`--pattern {uniform_random,hotspot}`、`--transactions-per-node N`、`--seed S`、`--hotspot <linear-node-ids>`(0..N-1 線性 node 索引,非 coord id)、`--allow-self`、synthetic AXI shape(`--size/--len` 預設)。每 node 產 `transactions-per-node` 筆 write+read 對,dst 每筆隨機,addr 全域唯一。
 
 - [ ] **Step 1: 唯一位址 + uniform 取樣 失敗測試**
 ```python
@@ -117,7 +122,7 @@ Run: `python3 -m pytest sim/tools/test_gen_test_patterns.py -k 'uniform or uniqu
 Expected: FAIL。
 - [ ] **Step 3: 實作 synthetic + uniform + hotspot + 唯一位址**
 - per-packet 取樣:`rng = random.Random(seed); dst = rng.choice(non_self_nodes)`(uniform);hotspot 用加權 choice 於 `--hotspot` node。
-- 唯一 local offset:每 node、每筆遞增 `off = base + (global_seq * STRIDE)`,STRIDE = AXI beat bytes,確保 `< memory_size`;addr = `dst_coord<<32 | off`;write/read 同 addr 成對。
+- 唯一 local offset:**複用 T1 的 `alloc_unique_offset(dst_node, src, seq)`**;每筆 burst 保留 `(len+1)*(1<<size)` bytes(WRAP/INCR 對齊足夠),且 `base + reserved ≤ memory_size`(超出 → fail-fast,提示加大 memory_size);addr = `dst_coord<<32 | off`;write/read 同 addr 成對。
 - synthetic payload:無 `--from` 時用 `--size/--len` 預設產 write+read。
 - [ ] **Step 4: guard 測試 + 實作**
 ```python
@@ -186,7 +191,7 @@ def test_summary_computes_p95(tmp_path):
 - [ ] **Step 2: 跑測試確認 fail**
 Run: `python3 -m pytest sim/tools/test_run_benchmark.py -v` → FAIL。
 - [ ] **Step 3: 實作 runner + summarize**
-`summarize(perf_json)`:從 `latency.transactions` 算 mean/p95(nearest-rank)/max + per-slot throughput;標 `"injection":"greedy-finite-trace-stress"` + window。runner:呼 gen_test_patterns、launch exe、check PASS marker(scoreboard clean + master_count==N + reads_checked>=N)、dump `bench_summary.json`。
+`summarize(perf_json)`:從 `latency.transactions` 算 mean/p95(nearest-rank)/max + per-slot throughput;標 `"injection":"greedy-finite-trace-stress"` + window。runner:呼 gen_test_patterns、launch exe、**check `PASS: scoreboard complete, scoreboard clean` marker**(tb_top 的 PASS guard 已內含 master_count==N + reads_checked≥N + scoreboard clean,只在全數通過才印此 marker — runner 靠 marker,不另解析未列印的 stats)、dump `bench_summary.json`。
 - [ ] **Step 4: hotspot smoke(非-ring,必要)**
 ```bash
 make build-verilator TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3
@@ -197,7 +202,7 @@ Expected: `PASS: scoreboard clean`(non-ring 流量真的 route + 驗證)+ `bench
 Run: `python3 -m pytest sim/tools/test_run_benchmark.py -v`;`make check PYTHON3=python3`(545);Step 4 hotspot smoke PASS。
 - [ ] **Step 6: Commit**
 ```bash
-git add sim/tools/run_benchmark.py sim/tools/test_run_benchmark.py Makefile
+git add sim/tools/run_benchmark.py sim/tools/test_run_benchmark.py Makefile sim/verilator/perf_cli_summary.py
 git commit -m "feat(sim): NoC benchmark runner + per-pattern perf summary (greedy stress); hotspot smoke"
 ```
 
@@ -214,9 +219,10 @@ git commit -m "feat(sim): NoC benchmark runner + per-pattern perf summary (greed
 - [ ] **Step 1: 移檔 + 改引用**
 ```bash
 git mv sim/gen_filelist.py sim/tools/gen_filelist.py
-grep -rIl 'gen_filelist.py' --include=Makefile --include=*.mk sim/ | xargs sed -i 's@\(sim/\)\?gen_filelist.py@sim/tools/gen_filelist.py@g'
-```
-(確認路徑變數正確;`gen_filelist` 在 Makefile 的呼叫指向新路徑。)
+# 實際 callers:sim/verilator/Makefile:81、sim/vcs/Makefile:97,皆用 $(COSIM_ROOT)/gen_filelist.py
+# (COSIM_ROOT=sim/)→ 改成 $(COSIM_ROOT)/tools/gen_filelist.py(精準,勿用會把路徑接歪的鬆散 sed):
+sed -i 's@\$(COSIM_ROOT)/gen_filelist.py@$(COSIM_ROOT)/tools/gen_filelist.py@g' sim/verilator/Makefile sim/vcs/Makefile
+grep -rn 'gen_filelist.py' sim/ --include=Makefile --include=*.mk   # 確認全部指向 tools/，無殘留舊路徑
 - [ ] **Step 2: gate**
 ```bash
 make clean-verilator PYTHON3=python3
