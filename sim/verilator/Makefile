@@ -4,6 +4,9 @@ TOP           := tb_top
 # Linux, lacks it).
 SHELL         := bash
 
+# Topology used to generate tb_top.sv. Override to switch topologies.
+TOPOLOGY ?= mesh_2x1
+
 # Build environment config, include dirs, and genamba source lists are shared
 # with sim/vcs/Makefile via sim/build_config.mk. tb_top SV sources are in
 # sim/filelist.f (generated from TB_TOP_SV_SRC in build_config.mk).
@@ -77,6 +80,16 @@ all: $(TBTOP_EXE)
 # make` regenerates it too; gen_filelist.py + FILELIST_GEN_ARGS keep them in sync.
 $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
+
+# tb_top.sv is a generated artifact; regenerate from the topology config before
+# Verilating.  Depends on the generator script and the topology YAML so a change
+# to either triggers a rebuild.  Pattern mirrors the filelist.f recipe above.
+TB_TOP_SV     := $(COSIM_ROOT)/sv/tb_top.sv
+TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
+GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
+
+$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
 # Python3 executable — auto-detected so build/run commands stay identical on
 # Windows and Linux. Prefer the Windows `py -3` launcher when present (the

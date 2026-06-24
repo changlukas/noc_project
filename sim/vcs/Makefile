@@ -1,5 +1,7 @@
 # VCS build for the cosim testbenches. Source lists are shared with the
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
+# Topology used to generate tb_top.sv. Override to switch topologies.
+TOPOLOGY ?= mesh_2x1
 # Build artifacts land under $(BUILD_ROOT)/vcs/ (top-level build/), run logs
 # under ./output/.
 #
@@ -94,6 +96,15 @@ check-yamlcpp:
 # absent; gen_filelist.py + FILELIST_GEN_ARGS keep the two recipes in sync.
 $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
+
+# tb_top.sv is a generated artifact; regenerate from the topology config before
+# building. Pattern mirrors sim/verilator/Makefile and the filelist.f recipe.
+TB_TOP_SV     := $(COSIM_ROOT)/sv/tb_top.sv
+TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
+GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
+
+$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.
