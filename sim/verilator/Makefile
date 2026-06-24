@@ -4,8 +4,8 @@ TOP           := tb_top
 # Linux, lacks it).
 SHELL         := bash
 
-# Topology used to generate tb_top.sv. Override to switch topologies.
-TOPOLOGY ?= mesh_2x1
+# Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
+TOPOLOGY ?= mesh_4x4_vc1
 
 # Build environment config, include dirs, and genamba source lists are shared
 # with sim/vcs/Makefile via sim/build_config.mk. tb_top SV sources are in
@@ -14,17 +14,10 @@ TOPOLOGY ?= mesh_2x1
 # artifacts land under $(BUILD_ROOT)/verilator/, run logs under ./output/.
 include ../build_config.mk
 
-# OBJDIR_SUFFIX isolates a variant build (e.g. the num_vc=2 multi-VC driver) into
-# its own obj_dir + filelist + tb_top.sv so it never clobbers the default
-# (num_vc=1) artifacts that sim-regress + gen_tb_top --check depend on. Empty by
-# default. The vc2 driver (sim/run_vc2_driver.py) sets OBJDIR_SUFFIX=_vc2 plus a
-# matching TOPOLOGY + TB_TOP_SV + FILELIST_F override.
-OBJDIR_SUFFIX ?=
-
 VL_BUILD := $(BUILD_ROOT)/verilator
 
-# FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist.f is a
-# generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
+# FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<TOPOLOGY>.f
+# is a generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
 # absolute paths whenever build_config.mk changes.
 
 # Waveforms are captured via VCS/FSDB; Verilator VCD tracing is not used.
@@ -62,7 +55,7 @@ VERILATOR_FLAGS := \
     --top-module $(TOP) \
     --timing \
     --output-split 0 \
-    --Mdir $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX) \
+    --Mdir $(VL_BUILD)/obj_dir_$(TOPOLOGY) \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
 
@@ -75,7 +68,7 @@ VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 # does not. Naming the real artifact makes the source-dependency check
 # fire correctly on both (a phony or wrong-name target rebuilds always).
 EXEEXT := $(if $(findstring NT,$(shell uname -s)),.exe,)
-TBTOP_EXE := $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)/V$(TOP)$(EXEEXT)
+TBTOP_EXE := $(VL_BUILD)/obj_dir_$(TOPOLOGY)/V$(TOP)$(EXEEXT)
 
 all: $(TBTOP_EXE)
 
@@ -88,27 +81,24 @@ all: $(TBTOP_EXE)
 $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
-# tb_top.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate from the
-# topology config before Verilating. Depends on the generator script, the topology
-# YAML, and a TOPOLOGY stamp (so switching TOPOLOGY between builds re-emits, even
-# though the output path is fixed). Pattern mirrors the filelist.f recipe above.
-TB_TOP_SV     := $(COSIM_ROOT)/sv/tb_top.sv
+# tb_top_<TOPOLOGY>.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate
+# from the topology config before Verilating. Depends on the generator script, the
+# topology YAML, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
+# (deferred = so TOPOLOGY expands correctly).
 TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
-# tb_top.sv does `include "noc_fabric_<topo>.sv"` (bare filename) for the fabric
-# emitted beside it. Put tb_top's OWN directory on the Verilator include path so
-# the beside-it fabric resolves wherever tb_top lives. Default build: sim/sv/
-# (already implied by -I$(COSIM_ROOT)/sv). vc2 driver override: build/verilator/
-# (the out-of-tree case this fixes). Appended after TB_TOP_SV so a command-line
-# TB_TOP_SV= override (sim/run_vc2_driver.py) is reflected.
+# tb_top_<TOPOLOGY>.sv does `include "noc_fabric_<topo>.sv"` (bare filename) for
+# the fabric emitted beside it. Put tb_top's OWN directory on the Verilator
+# include path so the beside-it fabric resolves. Both tb_top and fabric land in
+# sim/sv/, which is already implied by -I$(COSIM_ROOT)/sv.
 VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 
-# TOPOLOGY stamp records the last-built topology. The FORCE-driven rule rewrites
-# the stamp ONLY when TOPOLOGY changed (content compare), bumping its mtime so the
-# tb_top.sv prerequisite check re-emits tb_top.sv + fabric even though the output
-# path is fixed. Unchanged topology leaves the stamp alone (no needless rebuild).
+# TOPOLOGY stamp records the last-built topology name. The FORCE-driven rule
+# rewrites it ONLY when TOPOLOGY changed (content compare), bumping its mtime so
+# the tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch even
+# if the YAML itself hasn't changed. Unchanged topology leaves the stamp alone.
 .PHONY: FORCE
 FORCE:
 $(TOPO_STAMP): FORCE
@@ -146,11 +136,11 @@ check-yamlcpp:
 #   source paths with backslashes in generated C-string literals — rewrite them
 #   to forward slashes before g++ sees them (same workaround as genamba target).
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
-	@mkdir -p $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)
+	@mkdir -p $(VL_BUILD)/obj_dir_$(TOPOLOGY)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
-	    $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)/*.cpp $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX)/*.h
-	$(MAKE) -C $(VL_BUILD)/obj_dir$(OBJDIR_SUFFIX) -f V$(TOP).mk \
+	    $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.cpp $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.h
+	$(MAKE) -C $(VL_BUILD)/obj_dir_$(TOPOLOGY) -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=-Wl,--stack,67108864"
 
@@ -197,7 +187,7 @@ hello:
 	/tmp/empty_tb_obj/Vempty_tb && echo "TOOLCHAIN OK"
 
 clean: clean-genamba
-	rm -rf $(VL_BUILD)/obj_dir output
+	rm -rf $(VL_BUILD)/obj_dir_* output
 	rm -f master_wrap_read_dump*.txt
 	rm -f $(VL_BUILD)/master_wrap_read_dump*.txt  # ctest runs Vtb_top with cwd build/verilator
 

@@ -15,7 +15,7 @@ Generated artifacts: edit the generator or the topology YAML, never the emitted
 compiled via the existing -I sim/sv include path (no build_config.mk edit needed).
 
 Usage:
-    python3 gen_tb_top.py [--topology mesh_2x1] [--out sim/sv/tb_top.sv]
+    python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/sv/tb_top_<topology>.sv]
     python3 gen_tb_top.py --check            # drift gate (exit 1 if stale)
 
 Parameterised from topology YAML:
@@ -673,10 +673,11 @@ def _fabric_path(out_path: Path, topo: dict) -> Path:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Generate tb_top.sv + noc_fabric_<topo>.sv.")
-    ap.add_argument("--topology", default="mesh_2x1",
+    ap.add_argument("--topology", default="mesh_4x4_vc1",
                     help="Topology name (matches sim/topologies/<name>.yaml)")
-    ap.add_argument("--out", default=str(ROOT / "sim" / "sv" / "tb_top.sv"),
-                    help="Output tb_top.sv path (fabric emitted alongside)")
+    ap.add_argument("--out", default=None,
+                    help="Output tb_top.sv path (default: sim/sv/tb_top_<topology>.sv; "
+                         "fabric emitted alongside)")
     ap.add_argument("--check", action="store_true",
                     help="Drift gate: regenerate both files and diff vs committed; exit 1 if different")
     a = ap.parse_args()
@@ -684,7 +685,8 @@ def main() -> int:
     topo = load_topology(a.topology)
     tb_text = emit_tb_top(topo)
     fab_text = emit_fabric(topo)
-    out_path = Path(a.out)
+    out_path = Path(a.out) if a.out is not None else \
+        ROOT / "sim" / "sv" / f"tb_top_{a.topology}.sv"
     fab_path = _fabric_path(out_path, topo)
 
     if a.check:

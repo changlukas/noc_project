@@ -32,15 +32,15 @@ sim/*/output/
 # Legacy run-output location
 sim/output/
 
-# Generated tb_top filelist (regenerated from build_config.mk's TB_TOP_SV_SRC
-# by both sim flows; bakes in host-absolute paths so it must not be committed)
-sim/filelist.f
+# Generated tb_top filelists (regenerated from build_config.mk's TB_TOP_SV_SRC
+# by both sim flows; bakes in host-absolute paths so they must not be committed)
+sim/filelist_*.f
 
-# Generated SV: tb_top.sv + per-topology noc_fabric_<name>.sv are emitted by
-# sim/tools/gen_tb_top.py on every build (the $(TB_TOP_SV) rule in both
-# sim/verilator/Makefile and sim/vcs/Makefile regenerates them). Edit the
+# Generated SV: tb_top_<TOPOLOGY>.sv + per-topology noc_fabric_<name>.sv are
+# emitted by sim/tools/gen_tb_top.py on every build (the $(TB_TOP_SV) rule in
+# both sim/verilator/Makefile and sim/vcs/Makefile regenerates them). Edit the
 # generator or sim/topologies/*.yaml, never these files directly.
-sim/sv/tb_top.sv
+sim/sv/tb_top_*.sv
 sim/sv/noc_fabric_*.sv
 
 # Local Python installs (project-local 3.14, ~278 MB total)

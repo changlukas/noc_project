@@ -3,13 +3,13 @@
 Replaces the retired ctest test_cosim_integration.cpp (sim != test: co-sim is a
 simulation regression, run here, not in the C++ ctest suite).
 
-Topology-aware: $TOPOLOGY (default mesh_2x1) selects the node count. A 2-node
-topology uses the committed node0/node1 variant dirs; an N>2 topology (e.g.
-mesh_2x2) materializes node0..node<N-1> coordinate variants on the fly from each
-pattern's base scenario.yaml via gen_coordinate_scenarios.py, then drives all N
-+scenario_node<i> plusargs. Either way the run is non-vacuous: every node both
-sends (its own master) and receives (its NSU slave), and the PASS guard inside
-tb_top asserts master_count == N and reads_checked >= N (one read per node)."""
+Topology-aware: $TOPOLOGY (default mesh_4x4_vc1) selects the node count and the
+per-topology Vtb_top binary (build/verilator/obj_dir_<TOPOLOGY>/Vtb_top). A 2-node
+topology uses the committed node0/node1 variant dirs; an N>2 topology materializes
+node0..node<N-1> coordinate variants on the fly from each pattern's base
+scenario.yaml via gen_coordinate_scenarios.py, then drives all N +scenario_node<i>
+plusargs. Either way the run is non-vacuous: every node both sends and receives,
+and the PASS guard inside tb_top asserts master_count == N and reads_checked >= N."""
 import os
 import subprocess
 import sys
@@ -19,11 +19,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent          # repo root
 PATTERNS = ROOT / "sim" / "test_patterns"
 COORD_GEN = ROOT / "sim" / "tools" / "gen_coordinate_scenarios.py"
-EXE = next((ROOT / "build/verilator").rglob("Vtb_top.exe"), None) \
-      or next((ROOT / "build/verilator").rglob("Vtb_top"), None)
 PASS = "PASS: scenario complete, scoreboard clean"
 
-TOPOLOGY = os.environ.get("TOPOLOGY", "mesh_2x1")
+TOPOLOGY = os.environ.get("TOPOLOGY", "mesh_4x4_vc1")
+
+
+def _find_exe(topology: str):
+    """Locate Vtb_top under build/verilator/obj_dir_<topology>/."""
+    obj_dir = ROOT / "build" / "verilator" / f"obj_dir_{topology}"
+    for name in ("Vtb_top.exe", "Vtb_top"):
+        p = obj_dir / name
+        if p.exists():
+            return p
+    return None
 
 
 def node_count(topology: str) -> int:
@@ -58,8 +66,10 @@ def node_scenarios(scn_dir: Path, n: int, out_dir: Path):
 
 
 def main():
+    EXE = _find_exe(TOPOLOGY)
     if EXE is None:
-        print("Vtb_top not built — run `make build-verilator` first"); return 2
+        print(f"Vtb_top not built for {TOPOLOGY} — run `make build-verilator TOPOLOGY={TOPOLOGY}` first")
+        return 2
     n = node_count(TOPOLOGY)
     scns = sorted(p.name for p in PATTERNS.glob("AX4-*") if p.is_dir())
     run = fail = skip = 0

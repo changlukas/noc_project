@@ -9,9 +9,9 @@ config.memory_base, where coord_id = (y << X_WIDTH) | x mirrors the c_model
 route_compute / addr_trans dst_id encoding (bit 32+ of the address selects the
 destination tile). node0 (coord 0) is the identity variant.
 
---topology defaults to mesh_2x1 (2 nodes: node0 identity, node1 +1<<32), which
-reproduces the prior committed node0/node1 layout byte-for-byte. For mesh_2x2 it
-emits node0..node3 at coord ids 0,1,16,17.
+--topology defaults to mesh_4x4_vc1 (16 nodes). For mesh_2x1 it emits node0/node1
+at coord ids 0,1; for mesh_4x4_vc1 it emits node0..node15 at coord ids matching
+the (y<<X_WIDTH)|x encoding.
 
 File references (data_file/dump_file/strb_file) are rewritten to relative paths
 from the variant subdir back to the source data file (load_scenario resolves
@@ -79,7 +79,7 @@ def main(argv):
     ap = argparse.ArgumentParser()
     ap.add_argument("src")
     ap.add_argument("out")
-    ap.add_argument("--topology", default="mesh_2x1")
+    ap.add_argument("--topology", default="mesh_4x4_vc1")
     a = ap.parse_args(argv[1:])
 
     src_dir = os.path.dirname(os.path.abspath(a.src))

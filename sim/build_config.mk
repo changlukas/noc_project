@@ -67,10 +67,9 @@ endif
 # TB_TOP_SV_SRC is consumed by the filelist.f generation recipe below and by
 # VCS (via -f filelist.f). Paths are relative to COSIM_ROOT so the variable
 # stays readable; gen_filelist.py absolutizes them.
-# TB_TOP_SV is the generated top file; overridable so a variant build (e.g. the
-# num_vc=2 multi-VC driver) can swap in an isolated tb_top .sv without touching
-# the committed default. Default = the committed num_vc=1 artifact.
-TB_TOP_SV ?= $(COSIM_ROOT)/sv/tb_top.sv
+# TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
+# (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
+TB_TOP_SV = $(COSIM_ROOT)/sv/tb_top_$(TOPOLOGY).sv
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
@@ -83,13 +82,13 @@ TB_TOP_SV_SRC := \
     $(COSIM_ROOT)/sv/link_perf_monitor.sv \
     $(TB_TOP_SV)
 
-# sim/filelist.f is a GENERATED build artifact (gitignored), not committed —
-# it bakes in host-absolute paths. Both sim flows regenerate it from
-# TB_TOP_SV_SRC via gen_filelist.py before use. The recipe is duplicated in
-# each Makefile (rather than defined here) so it never becomes the default
+# sim/filelist_<TOPOLOGY>.f is a GENERATED build artifact (gitignored), not
+# committed — it bakes in host-absolute paths. Both sim flows regenerate it
+# from TB_TOP_SV_SRC via gen_filelist.py before use. The recipe is duplicated
+# in each Makefile (rather than defined here) so it never becomes the default
 # goal of an includer. FILELIST_F / FILELIST_GEN_ARGS centralize the shared
 # bits so the two recipes stay in sync.
-FILELIST_F := $(COSIM_ROOT)/filelist.f
+FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY).f
 # gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
 # -I/+incdir+ the simulators already pass; listing them in the .f makes it
 # self-contained for tool-native -f consumption.
