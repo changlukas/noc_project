@@ -160,7 +160,7 @@ def emit_fabric(topo: dict) -> str:
     w(f"// Fabric for topology {name} ({x_dim}x{y_dim}, num_vc={num_vc}).")
     w("// DO NOT EDIT - modify the generator or sim/topologies/*.yaml instead.")
     w("//")
-    w("// N nodes, each = nmu_wrap + REQ/RSP router_wrap + nsu_wrap, joined by")
+    w("// N nodes, each = ni_wrap (nmu+nsu) + REQ/RSP router_wrap, joined by")
     w("// inter-router directional links (N/E/S/W). Boundary directions are tied")
     w("// off; a tied-off direction DRIVING a valid flit is a $fatal (guards a fabric")
     w("// wiring mistake; the C++ route leak is caught by route_compute's abort). The")
@@ -226,18 +226,20 @@ def emit_fabric(topo: dict) -> str:
         w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_out_credit [LINK_PORTS];")
         w("")
 
-    # Node instances: NMU + router + NSU.
+    # Node instances: ni_wrap (= NMU+NSU) + router_wrap.
     for (i, x, y, _c) in nodes:
         w("    // -------------------------------------------------------------------------")
-        w(f"    // node{i} (x={x}, y={y}): nmu_wrap + router_wrap + nsu_wrap")
+        w(f"    // node{i} (x={x}, y={y}): ni_wrap (nmu+nsu) + router_wrap")
         w("    // -------------------------------------------------------------------------")
-        w(f"    nmu_wrap #(")
+        w(f"    ni_wrap #(")
         w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
         w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
           f".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
-        w(f"    ) u_nmu_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nmu{i}_ctx),")
-        w(f"        .axi_i(master_axi_{i}), .noc_mosi_o(node{i}_nmu.mosi)")
+        w(f"    ) u_ni_{i} (")
+        w(f"        .clk_i(clk_i), .rst_ni(rst_ni),")
+        w(f"        .nmu_ctx_i(nmu{i}_ctx), .nsu_ctx_i(nsu{i}_ctx),")
+        w(f"        .master_axi_i(master_axi_{i}), .slave_axi_o(slave_axi_{i}),")
+        w(f"        .noc_nmu_o(node{i}_nmu.mosi), .noc_nsu_i(node{i}_nsu.miso)")
         w(f"    );")
         w("")
         w(f"    router_wrap #(")
@@ -260,15 +262,6 @@ def emit_fabric(topo: dict) -> str:
         w(f"        .link_rsp_in_valid(n{i}_link_rsp_in_valid),")
         w(f"        .link_rsp_in_flit(n{i}_link_rsp_in_flit),")
         w(f"        .link_rsp_in_credit(n{i}_link_rsp_in_credit)")
-        w(f"    );")
-        w("")
-        w(f"    nsu_wrap #(")
-        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-          f".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
-        w(f"    ) u_nsu_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nsu{i}_ctx),")
-        w(f"        .noc_miso_i(node{i}_nsu.miso), .axi_o(slave_axi_{i})")
         w(f"    );")
         w("")
 
@@ -380,10 +373,10 @@ def emit_tb_top(topo: dict) -> str:
     w(f"// Topology: {name}  ({x_dim}x{y_dim}, num_vc={num_vc})")
     w("// DO NOT EDIT - modify the generator or sim/topologies/*.yaml instead.")
     w("//")
-    w(f"// {n} nodes live inside noc_fabric_{name} (NMU + REQ/RSP router + NSU per")
-    w("// node, joined by directional links). tb_top creates the DPI handles, drives")
-    w("// each node's master-side AXI with a test master_wrap, ejects each node's")
-    w("// slave-side AXI with a test slave_wrap, and owns the scoreboard exit logic.")
+    w(f"// {n} nodes live inside noc_fabric_{name} (ni_wrap=NMU+NSU + REQ/RSP router per")
+    w("// node, joined by directional links). tb_top creates the DPI handles, attaches a")
+    w("// user_node_endpoint (test master_wrap + slave_wrap + perf monitors) to each")
+    w("// node's master/slave AXI faces, and owns the scoreboard exit logic.")
     w("// Variant->instance pairing: master at node k is fed node (k+1)'s coordinate")
     w("// scenario, so traffic crosses the fabric to node (k+1) and ejects there.")
     w("//")
@@ -525,51 +518,28 @@ def emit_tb_top(topo: dict) -> str:
     w("    );")
     w("")
 
-    # Test master/slave per node.
-    for (i, _x, _y, _c) in nodes:
-        dest = (i + 1) % n
-        w("    // -------------------------------------------------------------------------")
-        w(f"    // Test endpoints - node{i}")
-        w("    // -------------------------------------------------------------------------")
-        w(f"    axi_master_wrap #(")
-        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)")
-        w(f"    ) u_master_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(m{i}_ctx), "
-          f".axi_o(master_nmu_axi_{i}.master)")
-        w(f"    );")
-        w("")
-        w(f"    axi_slave_wrap #(")
-        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)")
-        w(f"    ) u_slave_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(s{i}_ctx), "
-          f".axi_i(nsu_slave_axi_{i}.slave)")
-        w(f"    );")
-        w("")
-
-    # AXI perf monitors (watch the tb-level AXI buses).
+    # Test endpoints per node: user_node_endpoint = test master + slave + AXI perf
+    # monitors. user_node_endpoint.sv is USER-OWNED (committed, hand-written); the
+    # generator only INSTANTIATES it, never emits/overwrites it. SLOT_NAME strings are
+    # passed as params so the perf.json slot labels stay "node<i>.manager" /
+    # "node<i>.subordinate" — byte-identical to the prior inline emission.
     w("    // -------------------------------------------------------------------------")
-    w("    // AXI perf monitors - passive; one per node x {manager, subordinate}")
+    w("    // Test endpoints - one user_node_endpoint per node (test master/slave/monitors)")
+    w("    // user_node_endpoint.sv is user-owned and NOT regenerated by this script.")
     w("    // -------------------------------------------------------------------------")
     for (i, _x, _y, _c) in nodes:
-        for role, bus in (("manager", f"master_nmu_axi_{i}"),
-                          ("subordinate", f"nsu_slave_axi_{i}")):
-            w(f"    axi_perf_monitor #(")
-            w(f'        .SLOT_NAME("node{i}.{role}"), .ID_W($bits({bus}.awid))')
-            w(f"    ) u_perf_{role[:3]}_{i} (")
-            w(f"        .clk_i, .rst_ni,")
-            w(f"        .awvalid({bus}.awvalid), .awready({bus}.awready),")
-            w(f"        .awid({bus}.awid),       .awaddr({bus}.awaddr),")
-            w(f"        .awlen({bus}.awlen),     .awsize({bus}.awsize),")
-            w(f"        .wvalid({bus}.wvalid),   .wready({bus}.wready),")
-            w(f"        .bvalid({bus}.bvalid),   .bready({bus}.bready),")
-            w(f"        .bid({bus}.bid),")
-            w(f"        .arvalid({bus}.arvalid), .arready({bus}.arready),")
-            w(f"        .arid({bus}.arid),       .araddr({bus}.araddr),")
-            w(f"        .arlen({bus}.arlen),     .arsize({bus}.arsize),")
-            w(f"        .rvalid({bus}.rvalid),   .rready({bus}.rready),")
-            w(f"        .rlast({bus}.rlast),     .rid({bus}.rid)")
-            w(f"    );")
-            w("")
+        w(f"    user_node_endpoint #(")
+        w(f"        .NODE_ID({i}),")
+        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+        w(f'        .MASTER_SLOT_NAME("node{i}.manager"), '
+          f'.SLAVE_SLOT_NAME("node{i}.subordinate")')
+        w(f"    ) u_endpoint_{i} (")
+        w(f"        .clk_i(clk_i), .rst_ni(rst_ni),")
+        w(f"        .master_ctx_i(m{i}_ctx), .slave_ctx_i(s{i}_ctx),")
+        w(f"        .master_axi_o(master_nmu_axi_{i}.master),")
+        w(f"        .slave_axi_i(nsu_slave_axi_{i}.slave)")
+        w(f"    );")
+        w("")
 
     # Perf instrumentation.
     w("    // -------------------------------------------------------------------------")

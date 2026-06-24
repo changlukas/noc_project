@@ -78,8 +78,10 @@ TB_TOP_SV_SRC := \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \
     $(COSIM_ROOT)/sv/router_wrap.sv \
     $(COSIM_ROOT)/sv/nsu_wrap.sv \
+    $(COSIM_ROOT)/sv/ni_wrap.sv \
     $(COSIM_ROOT)/sv/axi_slave_wrap.sv \
     $(COSIM_ROOT)/sv/axi_perf_monitor.sv \
+    $(COSIM_ROOT)/sv/user_node_endpoint.sv \
     $(COSIM_ROOT)/sv/link_perf_monitor.sv \
     $(TB_TOP_SV)
 
