@@ -78,8 +78,8 @@ all: $(TBTOP_EXE)
 # Python3 on Windows returns E:/... native paths that Verilator handles correctly.
 # Duplicated (intentionally) in sim/vcs/Makefile so a standalone `cd sim/vcs &&
 # make` regenerates it too; gen_filelist.py + FILELIST_GEN_ARGS keep them in sync.
-$(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/gen_filelist.py
-	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
+$(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
+	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
 # tb_top_<TOPOLOGY>.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate
 # from the topology config before Verilating. Depends on the generator script, the

@@ -94,8 +94,8 @@ check-yamlcpp:
 # Duplicated from sim/verilator/Makefile (intentionally) so a standalone
 # `cd sim/vcs && make` regenerates filelist.f on a fresh clone where it is
 # absent; gen_filelist.py + FILELIST_GEN_ARGS keep the two recipes in sync.
-$(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/gen_filelist.py
-	$(PYTHON3) $(COSIM_ROOT)/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
+$(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
+	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
 # tb_top_<TOPOLOGY>.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate
 # from the topology config before building. TB_TOP_SV comes from build_config.mk
