@@ -74,6 +74,7 @@ TB_TOP_SV = $(COSIM_ROOT)/sv/tb_top_$(TOPOLOGY).sv
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
+    $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
     $(COSIM_ROOT)/sv/axi_master_wrap.sv \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \
     $(COSIM_ROOT)/sv/router_wrap.sv \

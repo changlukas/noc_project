@@ -61,3 +61,32 @@ All four points now share a single source.
 - `sim/tools/gen_tb_top.py` — per-VC wiring (vc_id decode + full credit_pulse vector)
 - `c_model/include/wrap/nmu_wrap.hpp` — LOCAL credit seeded from NOC_ROUTER_VC_DEPTH
 - `c_model/include/wrap/nsu_wrap.hpp` — LOCAL credit seeded from NOC_ROUTER_VC_DEPTH
+
+## Follow-up (Codex Minor): vc_id slice from spec localparams
+
+**Finding**: the generated `vc_id` slice used a magic-number `[21:19]`, violating the
+"everything generated from spec constants" rule. A future flit-layout change in
+constants.yaml would silently mis-decode the VC.
+
+**Fix**: `gen_tb_top.py` now emits the slice as
+`flit_wire[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]` (spec-generated
+localparams; currently 21/19 — numerically identical to before). `ni_flit_pkg.sv`
+is a leaf package not previously in the sim build, so it was added to `TB_TOP_SV_SRC`
+in `sim/build_config.mk` (before the wraps/fabric) so the `ni_flit_pkg::` scope
+resolves at compile time. The other generated SV imports `ni_params_pkg`, not the
+flit pkg; there were no prior flit-pkg slice references to mirror.
+
+**Provenance**: `constants.yaml` field widths -> codegen -> `ni_flit_pkg::VC_ID_LSB/MSB`
+-> generated fabric monitor slice. A flit-layout change now flows through on regen.
+
+**Changed files**: `sim/tools/gen_tb_top.py`, `sim/build_config.mk`.
+
+**Gate results (follow-up)**:
+
+| Gate | Result |
+|------|--------|
+| gen_tb_top.py --check (mesh_4x4_vc4) | exit 0 |
+| multi-VC hotspot (mesh_4x4_vc4) | PASS, scoreboard clean (mean lat 42.22 == pre-refactor) |
+| sim-regress mesh_4x4_vc4 | 6/6 PASS |
+| ctest (make check) | 545/545 PASS |
+| git status | clean (2 source files; generated SV gitignored) |
