@@ -40,13 +40,13 @@ flit header 用 **flat node id**,非獨立 x/y 欄位(`ni_flit_constants.h`):
 | `DST_ID_WIDTH` | 8 | ≤ 256 nodes |
 | `VC_ID_WIDTH` | 3 | ≤ 8 VC |
 
-- x/y 由 node id bit-split 解出:低 `X_WIDTH` bits = x,其餘 = y(沿用 `addr_trans.hpp` 的 `(y<<X_WIDTH)|x`,bit 32 之上)。
+- node id 由 x/y bit-split 組成:低 `X_WIDTH` bits = x,高 `Y_WIDTH` bits = y。`X_WIDTH + Y_WIDTH = DST_ID_WIDTH`(`addr_trans.hpp:18`;X_WIDTH=4、Y_WIDTH=4、DST_ID_WIDTH=8)。
 - specgen 新增 L2 invariant:
+  - `MESH_X_DIM ≤ 2^X_WIDTH`、`MESH_Y_DIM ≤ 2^Y_WIDTH`。
   - `MESH_X_DIM × MESH_Y_DIM ≤ 2^DST_ID_WIDTH`。
-  - `MESH_X_DIM ≤ 2^X_WIDTH`、`MESH_Y_DIM ≤ 2^(DST_ID_WIDTH − X_WIDTH)`。
   - `NUM_VC ≤ 2^VC_ID_WIDTH`。
 - 違反 → `codegen.py --check` fail,不默默截斷。
-- `DST_ID_WIDTH` 維持 8(`addr_trans.hpp` 有 `static_assert(DST_ID_BITS==8)`);本輪改的是 mesh 維度,非 dst 編碼寬度。
+- `DST_ID_WIDTH` 維持 8(`addr_trans.hpp:20` 有 `static_assert(DST_ID_BITS==8)`);本輪改的是 mesh 維度,非 dst 編碼寬度。
 
 ## 4. Generator（D3/D4/D7）
 
@@ -56,6 +56,7 @@ flit header 用 **flat node id**,非獨立 x/y 欄位(`ni_flit_constants.h`):
 **產物 1 — `noc_fabric_<topo>.sv`(可重用 fabric):**
 - N = `MESH_X_DIM × MESH_Y_DIM` 個 node,每 node = NMU + req/rsp router + NSU。
 - 相鄰 router 間方向 link 連線(N/E/S/W);邊界未用方向 tie-off。
+- edge tie-off **配 assertion**:未接的方向 port 若收到 valid flit 即報錯(否則 `Router::tick` 不 drain 該 output FIFO → 變 timeout 而非即時錯,`router.hpp:201,203`)。XY routing 在 `dst < mesh_dim` 內保證不指向不存在鄰居(`router.hpp:64` 已 bounds-check),assertion 為 defense-in-depth。
 - 每 node 對外露一個 AXI port(整合邊界)。
 - DPI handle(`ctx`)由 **port 收入**,fabric 不自行 `cmodel_*_create`(create 留給 instantiator)。
 
@@ -67,11 +68,11 @@ flit header 用 **flat node id**,非獨立 x/y 欄位(`ni_flit_constants.h`):
 
 ## 5. DPI ABI（D2，一次定型）
 
-S2 與 S3 改**同一組 DPI signature**;ABI **一次定成 per-direction × per-VC**,S3 不再改型,只填更多方向。
+S2 一次把 router 的 **link DPI port 全部改成 per-direction(`[PORT]` indexed)** 形,credit 再 × `[NUM_VC]`;S3 只把多出來的方向接上(wiring),不再改 signature。**只改 credit、不改 valid/flit 的話,S3 仍會被迫改 signature** —— 故 valid/flit 也要在 S2 一併 `[PORT]` 化。
 
-- `cmodel_router_create(name, x, y, mesh_x, mesh_y, num_vc)`(現只收 `x`)。
-- `cmodel_*_set_inputs` / `get_outputs` 的 credit 欄位:標量 → **`[PORT][NUM_VC]` 結構**。
-  - NI↔router credit 早已 per-VC(`noc_intf.req/rsp_credit_return[NUM_VC]`),PoC 用 `{NUM_VC{...}}` 壓扁;改為原樣搬 c_model 的 `credit_[port][vc]`。
+- `cmodel_router_create(name, x, y, mesh_x, mesh_y, num_vc)`(現只收 `x`,`RouterWrap` 寫死 y=0/mesh 2x1)。
+- `cmodel_router_set_inputs` / `get_outputs`:link 的 **valid / flit / credit 全部 `[PORT]` 化**;credit 再 × `[NUM_VC]`。
+  - NI↔router credit **介面**早已 per-VC(`noc_intf.req/rsp_credit_return[NUM_VC]`,`ni_signals_pkg.sv:141`),但 **DPI marshalling + C++ wrap 仍傳標量、寫死 `cfg.num_vc=1`**(`cmodel_dpi.h:135`、`nmu_wrap.hpp:47`、`nsu_wrap.hpp:52`)→ 要改 marshalling + wrap config,不只接線。PoC 的 `{NUM_VC{...}}` 壓扁改為原樣搬 c_model 的 `credit_[port][vc]`。
   - router↔router LINK credit(pulse)由 1-bit 加寬為 per-VC。
 - 前向資料維持單 flit/cycle(vc_id 在 header),只有 credit 是 per-VC。
 
@@ -79,12 +80,12 @@ S2 與 S3 改**同一組 DPI signature**;ABI **一次定成 per-direction × per
 
 | 階段 | 內容 | gate |
 |---|---|---|
-| **S-1** 前置改名(D8) | `NI_NOC_*`→`NOC_*`、`NI_AXI_*`→`AXI_*`;改 source + 11 處 + SV | `codegen.py --check` + `make check` 543 |
-| **S0** generator 重現 2-node | `gen_tb_top.py` 產出**行為等價**今日 single-VC tb(非 byte-identical;手寫配對改由 config 推導) | co-sim 6/6 不變 |
-| **S1** multi-VC 走 scenario 路徑(純 C++) | scenario config 加 `num_vc`;IntegrationP 擴 num_vc>1 | ctest 綠 @ num_vc {1,2,4,8} |
-| **S2** wire-level multi-VC | DPI per-VC credit(§5);拔 `router_wrap`/`nmu_wrap`/`nsu_wrap` 的 `$fatal`;NMU/NSU/router C++ wrap 的 `num_vc` 由單一來源穿入 | co-sim 綠 @ num_vc>1 |
-| **S3** directional ports | wrap/DPI 1 link → N/E/S/W;generator 連 2×2、邊界 tie-off | 2×2 co-sim 綠 |
-| **S4** N×M parameterized | per-node scenario 生成(推廣 `gen_coordinate_scenarios` 的 `NODE1_OFFSET`);N-node 定址 | N×M co-sim 綠 |
+| **S-1** 前置改名(D8) | `NI_NOC_*`→`NOC_*`、`NI_AXI_*`→`AXI_*`;改 source + 11 處 + SV | `codegen.py --check` 綠;ctest 全綠;repo 無 `NI_NOC_`/`NI_AXI_` 殘留 |
+| **S0** generator 重現 2-node | `gen_tb_top.py` 產出**行為等價**今日 single-VC tb(非 byte-identical;手寫配對改由 config 推導)。先給 `run_regress.py` 加 **run-count 斷言**(run 0 視為 fail) | co-sim **跑滿 6 且全 PASS**(run-count 斷言生效) |
+| **S1** scenario/config 接入 `num_vc` | scenario/config schema 加 `num_vc` 欄位 + 接到 co-sim wrap 參數(為 S2 鋪路)。c_model NMU→NSU multi-VC 路徑**已由 `test_request_response_loopback`/`test_router_loopback` 的 `MultiVc` instantiation 涵蓋(num_vc {2,4,8})**,不重證 | 既有 `MultiVc` 測試保持綠;`num_vc` 由 config 解析並傳入 wrap |
+| **S2** wire-level multi-VC | DPI per-VC(§5);拔 `router_wrap`/`nmu_wrap`/`nsu_wrap` 三處 `$fatal`;NMU/NSU/router C++ wrap 的 `num_vc` 由單一來源穿入;`run_regress.py` 傳 `num_vc`(plusarg);指名一個 multi-VC co-sim scenario 當 driver | 指名 scenario 在 num_vc=2 co-sim 綠(run-count 斷言) |
+| **S3** directional ports | wrap/DPI link valid/flit/credit 全 `[PORT]` 化(§5)1 link → N/E/S/W;generator 連 2×2、邊界 tie-off + assertion(§4) | 2×2 co-sim 綠(run-count 斷言) |
+| **S4** N×M parameterized | per-node scenario 指派:node i base offset = `node_id_i << 32`(`node_id = (y<<X_WIDTH)\|x`),generator 指 scenario_i→node i;推廣 `gen_coordinate_scenarios` 的 2-node `NODE1_OFFSET` | N×M(N 或 M >2)co-sim 綠(run-count 斷言) |
 
 ## 7. Codex blind-spot review — 已 fold
 
@@ -102,9 +103,10 @@ S2 與 S3 改**同一組 DPI signature**;ABI **一次定成 per-direction × per
 
 ## 8. Success criteria
 
-- `make check` 全綠(含 S-1 改名後 543);specgen drift gate 綠;新 L2 invariant 生效(超限 config 會 fail)。
+- `make check` ctest 全綠;specgen drift gate 綠;新 L2 invariant 生效(超限 config 會 fail)。
 - `gen_tb_top.py --check` drift gate 綠;手改 generated SV 會被擋。
-- co-sim:single-VC 6/6 不變(S0);num_vc>1 綠(S2);2×2 mesh 綠(S3);至少一個 N×M(N 或 M >2)綠(S4)。
+- `run_regress.py` 有 **run-count 斷言**:實跑數低於預期(含 0)即 fail,不再「跳過即 pass」。
+- co-sim(皆斷言 run count):single-VC 6 全 PASS(S0);指名 scenario num_vc=2 綠(S2);2×2 mesh 綠(S3);至少一個 N×M(N 或 M >2)綠(S4)。
 - repo 無 `NI_NOC_`/`NI_AXI_` 殘留(S-1);無新增 single-VC 寫死。
 - edge tie-off 有 assertion/invariant,錯誤拓樸即時報錯而非 timeout。
 
