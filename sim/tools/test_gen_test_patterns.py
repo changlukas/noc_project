@@ -60,18 +60,19 @@ def test_alloc_unique_per_src_seq():
     """Different (src_node, seq) pairs must yield different offsets."""
     n = 16
     base = 0x1000
+    big = n * n * 0x40 + 0x40  # ample window so the bounds assertion never fires here
     offsets = set()
     for src in range(n):
         for seq in range(n):
-            off = alloc_unique_offset(0, src, seq, base, n)
+            off = alloc_unique_offset(0, src, seq, base, n, big)
             offsets.add(off)
     assert len(offsets) == n * n, "alloc_unique_offset must produce distinct values"
 
 
 def test_alloc_same_src_seq_is_stable():
     """Same arguments always return the same offset."""
-    v1 = alloc_unique_offset(5, 3, 2, 0x1000, 16)
-    v2 = alloc_unique_offset(5, 3, 2, 0x1000, 16)
+    v1 = alloc_unique_offset(5, 3, 2, 0x1000, 16, 0x10000)
+    v2 = alloc_unique_offset(5, 3, 2, 0x1000, 16, 0x10000)
     assert v1 == v2
 
 
@@ -79,18 +80,19 @@ def test_alloc_neighbor_no_absolute_collision():
     """Under neighbor on a 4x4 mesh, all write absolute addresses are globally unique.
 
     Simulates what gen_test_patterns produces: for each src_node, the write addr
-    is dst_coord<<32 + alloc_unique_offset(dst_node, src_node, seq, base, n_nodes).
+    is dst_coord<<32 + alloc_unique_offset(dst_node, src_node, seq, base, n_nodes, mem).
     """
     x_dim, y_dim = 4, 4
     n_nodes = x_dim * y_dim
     base_local = 0x1000
+    mem = 0x1000
     # Simulate a single-transaction base scenario (seq=0 for every node).
     abs_addrs = set()
     for i in range(n_nodes):
         x, y = i % x_dim, i // x_dim
         dx, dy = neighbor_dst(x, y, x_dim, y_dim)
         dst_cid = coord_id(dx, dy)
-        local_off = alloc_unique_offset(dst_cid, i, 0, base_local, n_nodes)
+        local_off = alloc_unique_offset(dst_cid, i, 0, base_local, n_nodes, mem)
         abs_addr = (dst_cid << 32) + local_off
         abs_addrs.add(abs_addr)
     assert len(abs_addrs) == n_nodes, (
@@ -103,17 +105,54 @@ def test_alloc_neighbor_multi_txn_no_absolute_collision():
     x_dim, y_dim = 4, 4
     n_nodes = x_dim * y_dim
     base_local = 0x1000
-    n_txn = 4  # simulates AX4-BAS-005 (4 write transactions)
+    mem = 0x1000
+    n_txn = 4  # simulates AX4-BAS-005 (4 write transactions); 16*4*64 = 4096 = mem exact
     abs_addrs = set()
     for i in range(n_nodes):
         x, y = i % x_dim, i // x_dim
         dx, dy = neighbor_dst(x, y, x_dim, y_dim)
         dst_cid = coord_id(dx, dy)
         for seq in range(n_txn):
-            local_off = alloc_unique_offset(dst_cid, i, seq, base_local, n_nodes)
+            local_off = alloc_unique_offset(dst_cid, i, seq, base_local, n_nodes, mem)
             abs_addr = (dst_cid << 32) + local_off
             abs_addrs.add(abs_addr)
     assert len(abs_addrs) == n_nodes * n_txn
+
+
+def test_alloc_raises_on_memory_size_overflow():
+    """Fault injection: an offset that would exceed memory_size must raise ValueError.
+
+    With n_nodes=16, stride=0x40, memory_size=0x1000, the tightest fit is 4 txn/node
+    (16*4*64 = 4096 = memory_size).  A 5th transaction (seq=4) overflows and MUST be
+    caught rather than corrupting the neighbouring dst tile.
+    """
+    n_nodes = 16
+    base_local = 0x1000
+    mem = 0x1000
+    # seq=4 for the last source: offset-base = 15*64 + 4*16*64 = 960 + 4096 > 4096.
+    raised = False
+    try:
+        alloc_unique_offset(0, 15, 4, base_local, n_nodes, mem)
+    except ValueError:
+        raised = True
+    assert raised, "allocator must raise ValueError when offset exceeds memory_size"
+
+
+def test_alloc_reserved_burst_tail_overflow_raises():
+    """A slot that fits its base but whose reserved burst tail overruns must raise."""
+    n_nodes = 16
+    base_local = 0x1000
+    mem = 0x1000
+    # src=15, seq=3: offset-base = 15*64 + 3*16*64 = 4032; +0x40 reserved = 4096 == mem (OK).
+    # Now demand a 0x80 burst tail: 4032 + 128 = 4160 > 4096 -> must raise.
+    ok = alloc_unique_offset(0, 15, 3, base_local, n_nodes, mem, reserved=0x40)
+    assert ok == base_local + 4032
+    raised = False
+    try:
+        alloc_unique_offset(0, 15, 3, base_local, n_nodes, mem, reserved=0x80)
+    except ValueError:
+        raised = True
+    assert raised, "allocator must account for the slot's reserved burst bytes"
 
 
 # ---------------------------------------------------------------------------

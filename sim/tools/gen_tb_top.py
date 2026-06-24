@@ -578,7 +578,7 @@ def emit_tb_top(topo: dict) -> str:
     w("    // Exit logic - non-vacuous PASS guard")
     w("    // -------------------------------------------------------------------------")
     w(f"    // PASS requires scoreboard clean AND all {n} masters created AND at least")
-    w(f"    // {n} reads checked (one per node in the ring — guards weakened scenarios")
+    w(f"    // {n} reads checked (one per node — guards weakened scenarios")
     w("    // where fewer than all nodes complete a read).")
     w("    always @(posedge clk_i) begin")
     w("        /* verilator lint_off WIDTHTRUNC */")

@@ -18,14 +18,18 @@ neighbor  (ported from booksim2 NeighborTrafficPattern::dest, src/traffic.cpp:31
 
 Address allocation
 ------------------
-alloc_unique_offset(dst_node, src_node, seq, base_offset, stride, n_nodes)
+alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes, memory_size, ...)
     Assigns a globally unique local offset within the dst node's memory window so
     converging sources never collide on an absolute address.  The neighbor pattern
     is a bijection (no convergence), but the allocator contract is shared with
     future patterns (T2/T3 synthetic/uniform/hotspot/transpose).
 
-        offset = base_offset + (src_node * stride_per_src + seq * stride)
-    where stride_per_src = n_nodes * stride  (at most n_nodes sources per dst).
+        offset = base_offset + src_node * stride + seq * (n_nodes * stride)
+    (row-major in seq: each src is one stride apart; each seq jumps a full
+    n_nodes-wide band, so src + seq*n_nodes is injective for src,seq in [0,n_nodes)).
+    The allocator ASSERTS the chosen offset + the slot's reserved bytes stays within
+    [base_offset, base_offset + memory_size); a violation raises ValueError rather
+    than silently overflowing into the next dst tile (the contract T2/T3 rely on).
 
 Constants
 ---------
@@ -76,25 +80,23 @@ def neighbor_dst(x, y, x_dim, y_dim):
 # ---------------------------------------------------------------------------
 
 def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
-                        stride=_SLOT_STRIDE):
+                        memory_size, reserved=_SLOT_STRIDE, stride=_SLOT_STRIDE):
     """Return a local offset that is globally unique across all (src_node, seq) pairs.
 
     Layout within the dst node's memory window (row-major in seq, column in src):
         offset = base_offset + src_node * stride + seq * (n_nodes * stride)
 
     This guarantees uniqueness: the value src_node + seq * n_nodes is injective
-    for all (src_node ∈ [0, n_nodes), seq ∈ [0, n_nodes)).  The maximum offset
-    above base_offset is (n_nodes-1)*stride + (n_nodes-1)*(n_nodes*stride) which
-    is bounded by n_nodes^2 * stride.  For n_nodes=16 and stride=64 (=0x40) the
-    max spread is 16*16*64 = 16384 = 0x4000, which fits comfortably in the
-    scenarios' default memory_size=0x1000 per slot class when only a small number
-    of (src, seq) pairs are active per dst.
+    for all (src_node in [0, n_nodes), seq in [0, n_nodes)).
 
-    Practical bound: the formula fits within memory_size when
-        n_nodes * max_seq_per_src * stride <= memory_size.
-    For the default mesh_4x4 (n_nodes=16) with memory_size=0x1000=4096 and
-    stride=0x40=64, this allows up to 4 transactions per node without overflow:
-        16 * 4 * 64 = 4096.  AX4-BAS-005 (4 writes) is the tightest current case.
+    Bounds: the chosen offset plus the slot's reserved bytes must stay within the
+    dst tile's memory window [base_offset, base_offset + memory_size).  A violation
+    raises ValueError instead of silently overflowing into the next dst tile.  The
+    formula fits when n_nodes * max_seq_per_src * stride <= memory_size; for the
+    default mesh_4x4 (n_nodes=16, memory_size=0x1000, stride=0x40) this allows up
+    to 4 transactions per node (16*4*64 = 4096 = memory_size, the tightest current
+    case — AX4-BAS-005's 4 writes).  T2's --transactions-per-node beyond that
+    trips the assertion rather than corrupting a neighbouring tile.
 
     Args:
         dst_node: linear node index of the destination (informational only — not
@@ -103,10 +105,25 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
         seq:      0-based transaction-pair index within this src_node's sequence.
         base_offset: base local address from the scenario (memory_base & 0xFFFFFFFF).
         n_nodes:  total node count in the topology (upper bound on src_node and seq).
+        memory_size: dst tile's memory window size (config.memory_size); the offset
+                  + reserved must stay below base_offset + memory_size.
+        reserved: bytes the slot occupies (default one slot = stride); for a burst,
+                  pass the burst's total byte length so the tail also fits.
         stride:   byte step between adjacent slots (default _SLOT_STRIDE = 0x40).
+
+    Raises:
+        ValueError: if offset + reserved would exceed base_offset + memory_size.
     """
     _ = dst_node  # unused in formula; kept for caller clarity and T2/T3 reuse
-    return base_offset + src_node * stride + seq * (n_nodes * stride)
+    offset = base_offset + src_node * stride + seq * (n_nodes * stride)
+    if (offset - base_offset) + reserved > memory_size:
+        raise ValueError(
+            f"alloc_unique_offset: local offset {offset:#x} (+{reserved:#x} reserved) "
+            f"exceeds memory window [{base_offset:#x}, {base_offset + memory_size:#x}) "
+            f"(memory_size={memory_size:#x}); reduce transactions-per-node or "
+            f"enlarge memory_size"
+        )
+    return offset
 
 
 # ---------------------------------------------------------------------------
@@ -150,7 +167,7 @@ def _as_int(v):
 
 
 def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
-               n_nodes, base_local):
+               n_nodes, base_local, memory_size):
     """Emit <out_dir>/scenario.yaml for one node.
 
     base_sc     -- base scenario dict (read-only; deep-copied internally)
@@ -161,6 +178,7 @@ def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
     src_cid     -- coord_id of the source node (sets config.memory_base)
     n_nodes     -- total node count (allocator domain)
     base_local  -- base local address from config.memory_base & 0xFFFF_FFFF
+    memory_size -- dst tile memory window size (config.memory_size); allocator bound
     """
     sc = copy.deepcopy(base_sc)
 
@@ -177,7 +195,7 @@ def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
             seen_orig[oa] = seq
             # dst_node arg is informational; pass dst_cid as a proxy (not used in formula)
             pair_offset[oa] = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
-                                                  n_nodes)
+                                                  n_nodes, memory_size)
             seq += 1
 
     for t in sc.get("transactions", []):
@@ -229,14 +247,16 @@ def main(argv=None):
 
     nodes, x_dim, y_dim = _load_topology(a.topology)
     n_nodes = len(nodes)
-    base_local = _as_int(base_sc.get("config", {}).get("memory_base", 0)) & 0xFFFFFFFF
+    cfg = base_sc.get("config", {})
+    base_local = _as_int(cfg.get("memory_base", 0)) & 0xFFFFFFFF
+    memory_size = _as_int(cfg.get("memory_size", 0x1000))
 
     for (idx, x, y, src_cid) in nodes:
         dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
         dst_cid = coord_id(dst_x, dst_y)
         out_dir = os.path.join(a.out, f"node{idx}")
         _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
-                   n_nodes, base_local)
+                   n_nodes, base_local, memory_size)
 
 
 if __name__ == "__main__":
