@@ -4,7 +4,7 @@
 
 **Goal:** 在已 merge 的 configurable-topology 上,把 destination 改成 address-driven(修 ring 配對 bug),新增 `gen_test_patterns.py`(spatial NoC traffic pattern + user-custom)與 benchmark runner(per-pattern latency/throughput 彙整)。
 
-**Architecture:** 拔掉 `gen_tb_top` 寫死的 ring 配對(改 `master_i`/`slave_i` ← `scn_node{i}` identity),destination 完全由 transaction `addr=dst_coord<<32` 決定。`gen_coordinate_scenarios` 刪除,功能併入 `gen_test_patterns`(payload × destination-pattern)。correctness 回歸改用確定性 `nearest_neighbor`;benchmark 用 uniform/transpose/hotspot。
+**Architecture:** 拔掉 `gen_tb_top` 寫死的 ring 配對(改 `master_i`/`slave_i` ← `scn_node{i}` identity),destination 完全由 transaction `addr=dst_coord<<32` 決定。`gen_coordinate_scenarios` 刪除,功能併入 `gen_test_patterns`(payload × destination-pattern)。correctness 回歸改用確定性 `neighbor`;benchmark 用 uniform/transpose/hotspot。
 
 **Tech Stack:** Python(generator + runner)、SystemVerilog/Verilator(`--timing`)、CMake/GoogleTest、Git Bash/MSYS2、GNU make。
 
@@ -13,10 +13,11 @@
 - **spec**:`docs/internal/superpowers/specs/2026-06-24-noc-benchmark-generator-design.md`(fb5376e);每 task 隱含 spec 全約束。
 - **branch**:feature branch off main(2916e6a 之後 HEAD,含 spec/plan commit);**不 push**;commit 格式 `type(scope): description`;不 amend、不 `--no-verify`。
 - **address-driven destination 契約**:`master_i`/`slave_i` ← `scn_node{i}`;dst 由 `addr[39:32]=dst_id`(`addr_trans` coord_id=`(y<<X_WIDTH)|x`,X_WIDTH=4)決定。
-- **behavior-preserving 定義**:6 個 AXI conformity scenario 在 `nearest_neighbor` 分佈下 **scoreboard clean**(覆蓋不變,非重現同流量)。
+- **behavior-preserving 定義**:6 個 AXI conformity scenario 在 `neighbor` 分佈下 **scoreboard clean**(覆蓋不變,非重現同流量)。
 - **做減法**:刪 `gen_coordinate_scenarios.py` + `test_gen_coordinate_scenarios.py`,**無 wrapper**;call sites 原子更新。
 - **位址唯一性(全域)**:每筆 write/read 對在 dst node `memory_base..+memory_size` 內分到全域唯一 local offset((src,seq) 決定);write/read 同址成對。
 - **每 task gate** 綠才下一步:`make check PYTHON3=python3`(ctest 545)+ co-sim(`make sim-regress TOPOLOGY=mesh_4x4_vc1`,16-node)。
+- **traffic pattern 演算法一律 port booksim2**(`/e/05_NoC/booksim2/src/traffic.cpp`,**不自己 derive**,確保正確性):port 其語意到 (x,y) 空間,再映到位址 `addr=((dst_y<<X_WIDTH)|dst_x)<<32 + uniq_off`。每 pattern 註明 booksim 來源 file:line。
 - **out of scope(→下一輪)**:injection-rate/saturation curve(動 AxiMaster)。
 - **SURGICAL**:不改 c_model / DPI / scoreboard / scenario 格式。
 
@@ -24,74 +25,70 @@
 
 ---
 
-### Task 1: address-driven 契約修正 + gen_test_patterns(nearest_neighbor)+ 刪 gen_coordinate
+### Task 1: address-driven 契約修正 + gen_test_patterns(neighbor)+ 刪 gen_coordinate
 
 **Files:**
-- Create: `sim/tools/gen_test_patterns.py`(初版:`--from <base>` × `nearest_neighbor` 確定性 destination)
+- Create: `sim/tools/gen_test_patterns.py`(初版:`--from <base>` × `neighbor` 確定性 destination)
 - Modify: `sim/tools/gen_tb_top.py`(identity 配對:`master_i`/`slave_i` ← `scn_node{i}`;移除 `(i+1)%N` ring shift)
 - Delete: `sim/tools/gen_coordinate_scenarios.py`、`sim/tools/test_gen_coordinate_scenarios.py`
 - Modify(call sites):`sim/run_regress.py`、`sim/verilator/Makefile`(`run-tb-top`)、`sim/vcs/Makefile`(`run-tb-top`)
 
 **Interfaces:**
-- Produces:`gen_test_patterns.py --from <base.yaml> --pattern nearest_neighbor --topology <name> --out <dir>` 寫 `<dir>/node<i>/scenario.yaml`,其中 node i 的 transactions addr = `nbr_coord(i)<<32 + local`(nbr = 固定方向鄰居),`config.memory_base` = `coord(i)<<32 + base`。
+- Produces:`gen_test_patterns.py --from <base.yaml> --pattern neighbor --topology <name> --out <dir>` 寫 `<dir>/node<i>/scenario.yaml`,其中 node i 的 transactions addr = `nbr_coord(i)<<32 + local`(nbr = 固定方向鄰居),`config.memory_base` = `coord(i)<<32 + base`。
 - Consumes:topology yaml(x_dim/y_dim);`X_WIDTH=4`;coord(i)=`(y<<4)|x`。
 
-- [ ] **Step 1: 寫 nearest_neighbor dst 公式 + 失敗測試**
+- [ ] **Step 1: 寫 neighbor dst 公式 + 失敗測試**
 建 `sim/tools/gen_test_patterns.py` 骨架 + `sim/tools/test_gen_test_patterns.py`:
 ```python
-# gen_test_patterns.py (excerpt)
+# gen_test_patterns.py (excerpt) — neighbor PORTED from booksim2
+# NeighborTrafficPattern::dest (src/traffic.cpp:316): per dimension digit += 1 mod k.
 X_WIDTH = 4
-def coord_id(x, y): return (y << X_WIDTH) | x
-def nodes_of(x_dim, y_dim):
-    return [(i, i % x_dim, i // x_dim) for i in range(x_dim * y_dim)]
-def nearest_neighbor_dst(x, y, x_dim, y_dim):
-    """Deterministic: prefer +x(East); fall back W->N->S; no-wrap; never self."""
-    for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
-        nx, ny = x+dx, y+dy
-        if 0 <= nx < x_dim and 0 <= ny < y_dim:
-            return nx, ny
-    raise ValueError("isolated node")  # only if 1x1
+def coord_id(x, y): return (y << X_WIDTH) | x          # 我們的 dst_id 編碼
+def neighbor_dst(x, y, x_dim, y_dim):
+    """booksim neighbor: +1 per dimension, wrap mod dim. Deterministic bijection."""
+    return (x + 1) % x_dim, (y + 1) % y_dim
 ```
 ```python
 # test_gen_test_patterns.py
-from gen_test_patterns import nearest_neighbor_dst
-def test_nn_interior_prefers_east():
-    assert nearest_neighbor_dst(1, 1, 4, 4) == (2, 1)
-def test_nn_east_edge_falls_back_west():
-    assert nearest_neighbor_dst(3, 1, 4, 4) == (2, 1)   # no East -> West
-def test_nn_never_self():
-    for i,(x,y) in [(i,(i%4,i//4)) for i in range(16)]:
-        assert nearest_neighbor_dst(x,y,4,4) != (x,y)
+from gen_test_patterns import neighbor_dst
+def test_neighbor_plus1_wrap():                 # booksim traffic.cpp:316
+    assert neighbor_dst(1, 1, 4, 4) == (2, 2)
+    assert neighbor_dst(3, 3, 4, 4) == (0, 0)   # wrap
+def test_neighbor_is_bijection_no_self():
+    dsts = [neighbor_dst(i % 4, i // 4, 4, 4) for i in range(16)]
+    assert len(set(dsts)) == 16                 # permutation
+    assert all(d != (i % 4, i // 4) for i, d in enumerate(dsts))  # non-self (k>1)
 ```
+> 讀 `booksim2/src/traffic.cpp` 確認;`neighbor`(非 nearest)是 booksim 名稱;在無 torus 的 mesh 上 +1-wrap 會繞長路,但仍是合法 in-mesh 目的、確定性 bijection,適合 correctness 回歸。
 - [ ] **Step 2: 跑測試確認 fail**
 Run: `cd sim/tools && python3 -m pytest test_gen_test_patterns.py -v`(或 `python3 -c` import,若無 pytest)
 Expected: FAIL(函式/模組未完成)。
-- [ ] **Step 3: 實作 gen_test_patterns `--from` × nearest_neighbor + 全域唯一位址 allocator**
+- [ ] **Step 3: 實作 gen_test_patterns `--from` × neighbor + 全域唯一位址 allocator**
 讀 base scenario,對每 node i(src):
-- dst = `nearest_neighbor_dst(x,y)`;每筆 write/read 對的 `addr = dst_coord<<32 + uniq_offset`,**`uniq_offset` 由全域 allocator 依 (src_node, seq) 給,確保多源收斂到同一 dst node 時不撞同絕對位址**(`nearest_neighbor` 會收斂:node1→node2、node3→node2)。write/read 同 addr 成對。`uniq_offset` 落在 dst node `memory_base..+memory_size` 內。
+- dst = `neighbor_dst(x,y)`;每筆 write/read 對的 `addr = dst_coord<<32 + uniq_offset`,**`uniq_offset` 由全域 allocator 依 (src_node, seq) 給,確保多源收斂到同一 dst node 時不撞同絕對位址**(`neighbor` 會收斂:node1→node2、node3→node2)。write/read 同 addr 成對。`uniq_offset` 落在 dst node `memory_base..+memory_size` 內。
 - `config.memory_base = coord(i)<<32 + base.memory_base`;rewrite `data_file`/`dump_file`/`strb_file` 為相對路徑(沿用舊 gen_coordinate 的檔案改寫邏輯,從 git 史 `gen_coordinate_scenarios.py` 取)。寫 `node<i>/scenario.yaml`。CLI:`--from/--pattern/--topology/--out`。
-- **此 allocator(`alloc_unique_offset(dst_node, src_node, seq)`)是核心,T2/T3 的 synthetic/uniform/hotspot/transpose 全部複用**(不可只在 --from 用)。加單元測試:nearest_neighbor 下,所有 write 的絕對位址全域唯一。
+- **此 allocator(`alloc_unique_offset(dst_node, src_node, seq)`)是核心,T2/T3 的 synthetic/uniform/hotspot/transpose 全部複用**(不可只在 --from 用)。加單元測試:neighbor 下,所有 write 的絕對位址全域唯一。
 - [ ] **Step 4: 改 gen_tb_top identity 配對**
 `sim/tools/gen_tb_top.py` emit_tb_top:`m{i}_ctx = cmodel_master_create("master_{i}", scn_node{i})`、`s{i}_ctx = cmodel_slave_create("slave_{i}", scn_node{i})`(去掉 `(i+1)%n` shift)。`cmodel_init` 用 `scn_node{0}`(任一變體 config 相同)。對應的 nmu/nsu/master/slave 都用同 i。
 - [ ] **Step 5: 刪 gen_coordinate + 改 call sites**
 ```bash
 git rm sim/tools/gen_coordinate_scenarios.py sim/tools/test_gen_coordinate_scenarios.py
 ```
-`run_regress.py`:把呼叫 `COORD_GEN` 改為 `gen_test_patterns.py --from <base> --pattern nearest_neighbor --topology $TOPOLOGY --out <coord>`;`node_scenarios` 回傳 `node0..node<N-1>`。`sim/verilator/Makefile` + `sim/vcs/Makefile` 的 `run-tb-top` 同樣改呼叫 gen_test_patterns。
+`run_regress.py`:把呼叫 `COORD_GEN` 改為 `gen_test_patterns.py --from <base> --pattern neighbor --topology $TOPOLOGY --out <coord>`;`node_scenarios` 回傳 `node0..node<N-1>`。`sim/verilator/Makefile` + `sim/vcs/Makefile` 的 `run-tb-top` 同樣改呼叫 gen_test_patterns。
 - [ ] **Step 6: gate(behavior-preserving)**
 ```bash
 make check PYTHON3=python3                                  # ctest 545/545
 make build-verilator TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3
-make sim-regress TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3      # 6/6,scoreboard clean(nearest_neighbor 分佈)
+make sim-regress TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3      # 6/6,scoreboard clean(neighbor 分佈)
 python3 sim/tools/gen_tb_top.py --topology mesh_4x4_vc1 --check   # exit 0
 # all-VC behavior-preserving(契約改動影響所有 topology,spec §6 要求):
 for N in 2 4 8; do make build-verilator TOPOLOGY=mesh_4x4_vc$N PYTHON3=python3 && make sim-regress TOPOLOGY=mesh_4x4_vc$N PYTHON3=python3; done
 ```
-Expected: mesh_4x4_vc{1,2,4,8} 全 6/6 + ctest 545(現有 conformity 在 nearest_neighbor 下仍對得上)。若 scoreboard mismatch → systematic-debug address/memory_base 對齊,**不弱化 scoreboard**。
+Expected: mesh_4x4_vc{1,2,4,8} 全 6/6 + ctest 545(現有 conformity 在 neighbor 下仍對得上)。若 scoreboard mismatch → systematic-debug address/memory_base 對齊,**不弱化 scoreboard**。
 - [ ] **Step 7: Commit**
 ```bash
 git add sim/tools/gen_test_patterns.py sim/tools/test_gen_test_patterns.py sim/tools/gen_tb_top.py sim/run_regress.py sim/verilator/Makefile sim/vcs/Makefile
-git commit -m "feat(sim): address-driven destination contract; gen_test_patterns(nearest_neighbor); drop gen_coordinate_scenarios"
+git commit -m "feat(sim): address-driven destination contract; gen_test_patterns(neighbor); drop gen_coordinate_scenarios"
 ```
 
 ---
@@ -121,7 +118,7 @@ def test_global_addr_uniqueness():
 Run: `python3 -m pytest sim/tools/test_gen_test_patterns.py -k 'uniform or uniqueness' -v`
 Expected: FAIL。
 - [ ] **Step 3: 實作 synthetic + uniform + hotspot + 唯一位址**
-- per-packet 取樣:`rng = random.Random(seed); dst = rng.choice(non_self_nodes)`(uniform);hotspot 用加權 choice 於 `--hotspot` node。
+- per-packet 取樣(**port booksim**):`uniform` = `UniformRandomTrafficPattern`(隨機 node,排除 self;對應 `RandomInt(nodes-1)`);`hotspot` = `HotSpotTrafficPattern`(`booksim2/src/traffic.cpp:490`,加權選 `--hotspot` node;單一 hotspot → 固定它)。用 `random.Random(seed)` 取樣以可重現。
 - 唯一 local offset:**複用 T1 的 `alloc_unique_offset(dst_node, src, seq)`**;每筆 burst 保留 `(len+1)*(1<<size)` bytes(WRAP/INCR 對齊足夠),且 `base + reserved ≤ memory_size`(超出 → fail-fast,提示加大 memory_size);addr = `dst_coord<<32 | off`;write/read 同 addr 成對。
 - synthetic payload:無 `--from` 時用 `--size/--len` 預設產 write+read。
 - [ ] **Step 4: guard 測試 + 實作**
@@ -161,7 +158,7 @@ def test_transpose_requires_square():
 - [ ] **Step 2: 跑測試確認 fail**
 Run: `python3 -m pytest sim/tools/test_gen_test_patterns.py -k transpose -v` → FAIL。
 - [ ] **Step 3: 實作 transpose**
-`transpose_dst(x,y)=(y,x)`;`gen_all` 對 transpose:若 `x_dim!=y_dim` → fail-fast;對角 node 允許 self(不排除)。
+**port booksim** `TransposeTrafficPattern`(`booksim2/src/traffic.cpp:244`,node-id bit-half-swap,需偶次方);方形 mesh 下等價 `transpose_dst(x,y)=(y,x)`。`gen_all` 對 transpose:`x_dim!=y_dim` → fail-fast;對角 node 允許 self(不排除)。
 - [ ] **Step 4: gate**
 Run: `python3 -m pytest sim/tools/test_gen_test_patterns.py -v`(全綠)。
 - [ ] **Step 5: Commit**
@@ -241,10 +238,10 @@ git commit -m "refactor(sim): move gen_filelist.py into sim/tools/ (gen_* consol
 ## Self-Review(plan vs spec)
 
 - **spec §1 契約**:T1(identity 配對 + address-driven + 刪 gen_coordinate + call sites + behavior-preserving gate)。✅
-- **spec §2 gen_test_patterns**:nearest_neighbor(T1)、synthetic+uniform+hotspot+唯一位址+guard(T2)、transpose(T3)、custom `--from`(T1 引入、T2/T3 沿用)。✅
+- **spec §2 gen_test_patterns**:neighbor(T1)、synthetic+uniform+hotspot+唯一位址+guard(T2)、transpose(T3)、custom `--from`(T1 引入、T2/T3 沿用)。✅
 - **spec §3 runner + perf**:T4(run_benchmark + summarize p95 + greedy-stress label + bench_summary.json)。✅
 - **spec §4 檔案對齊**:刪 gen_coordinate+test(T1)、gen_filelist→tools/(T5)。✅
 - **spec §5 測試**:pattern 公式 + guard 單元測試(T1-T3)、hotspot 非-ring smoke(T4)、回歸(每 task gate)。✅
 - **spec §6 out of scope**:injection-rate 未列入任何 task。✅
-- **type 一致**:`coord_id=(y<<4)|x`、`nearest_neighbor_dst`、`transpose_dst`、`pattern_dsts`、`summarize`、`bench_summary.json` 全 plan 一致。
+- **type 一致**:`coord_id=(y<<4)|x`、`neighbor_dst`、`transpose_dst`、`pattern_dsts`、`summarize`、`bench_summary.json` 全 plan 一致。
 - **已知執行時定案(非 placeholder)**:T1 的 gen_tb_top identity 配對逐行 SV、檔案改寫邏輯(從 git 史 gen_coordinate 取)以「behavior-preserving + 6/6 gate」為準;runner 與 exe 的 plusarg 細節對齊既有 run_regress。
