@@ -255,9 +255,9 @@ make run-all-fsdb                                         # all 37 scenarios + g
 Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
 workstation's install, taken from its local reference Makefile -- untracked
 `sim/ref/`); override it if the layout
-differs. FSDB builds produce separate `simv_tb_top_fsdb` / `simv_genamba_fsdb`
-binaries beside the normal ones; toggling `FSDB` never reuses a binary from
-the other mode.
+differs. FSDB builds produce separate `simv_tb_top_<TOPOLOGY>_fsdb` /
+`simv_genamba_fsdb` binaries beside the normal `simv_tb_top_<TOPOLOGY>` /
+`simv_genamba`; toggling `FSDB` never reuses a binary from the other mode.
 For memory dumping / interactive Verdi debug, enable the heavier ref-flow
 combo: `FSDB_EXTRA="-debug_access+all -debug_all +fsdb+all +vcsd"`.
 
@@ -557,7 +557,7 @@ Tasks A-G are scenario-independent (the BFM owns the stimulus); the
 something valid to point at.
 
 Build artefacts land in `build/verilator/obj_genamba/` -- separate from
-`tb_top`'s `build/verilator/obj_dir/` because Verilator generates each
+`tb_top`'s `build/verilator/obj_dir_<TOPOLOGY>/` because Verilator generates each
 `--top-module` into a single `--Mdir` and two tops would clobber each
 other.
 

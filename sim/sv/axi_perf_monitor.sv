@@ -1,6 +1,10 @@
 // Passive AXI slot monitor. Reads one AXI interface's wires;
 // correlates latency by per-(id,dir) in-order FIFO; counts idle cycles;
 // reports each completion + end-of-run backpressure via DPI. No drives.
+
+`ifndef AXI_PERF_MONITOR_SV
+`define AXI_PERF_MONITOR_SV
+
 module axi_perf_monitor #(
     parameter string SLOT_NAME = "slot",
     parameter int    ID_W = 8,
@@ -85,3 +89,5 @@ module axi_perf_monitor #(
     end
 
 endmodule
+
+`endif  // AXI_PERF_MONITOR_SV

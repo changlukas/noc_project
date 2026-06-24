@@ -1,6 +1,10 @@
 // Passive inter-router link monitor. Counts flits (valid high) and credit-deficit
 // stall cycles. Credit is a single-cycle pulse; valid is gated on credit upstream,
 // so backpressure is observable only as credit_count==0 (downstream buffer full).
+
+`ifndef LINK_PERF_MONITOR_SV
+`define LINK_PERF_MONITOR_SV
+
 module link_perf_monitor #(
     parameter string LINK_NAME = "link",
     parameter int    BUFFER_DEPTH = 4
@@ -38,3 +42,5 @@ module link_perf_monitor #(
         !(valid && credit == 0))
         else $error("[%s] credit underflow: valid asserted with zero credit", LINK_NAME);
 endmodule
+
+`endif  // LINK_PERF_MONITOR_SV

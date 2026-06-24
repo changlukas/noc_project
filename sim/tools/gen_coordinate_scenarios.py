@@ -9,9 +9,8 @@ config.memory_base, where coord_id = (y << X_WIDTH) | x mirrors the c_model
 route_compute / addr_trans dst_id encoding (bit 32+ of the address selects the
 destination tile). node0 (coord 0) is the identity variant.
 
---topology defaults to mesh_4x4_vc1 (16 nodes). For mesh_2x1 it emits node0/node1
-at coord ids 0,1; for mesh_4x4_vc1 it emits node0..node15 at coord ids matching
-the (y<<X_WIDTH)|x encoding.
+--topology defaults to mesh_4x4_vc1 (16 nodes): it emits node0..node15 at coord
+ids matching the (y<<X_WIDTH)|x encoding.
 
 File references (data_file/dump_file/strb_file) are rewritten to relative paths
 from the variant subdir back to the source data file (load_scenario resolves
