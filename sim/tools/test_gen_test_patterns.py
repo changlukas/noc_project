@@ -718,3 +718,32 @@ def test_base_driven_respects_alloc_capacity(tmp_path):
     assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
         f"Expected memory overflow error; stderr={result.stderr!r}"
     )
+
+
+def test_base_driven_large_burst_overflow_raises(tmp_path):
+    """Fault injection: base-driven path with a burst whose footprint exceeds the dst
+    memory window must exit non-zero (bound assert fires).
+
+    mesh_4x4_vc1: n_nodes=16, memory_size=0x1000 (from base scenario), stride=0x40.
+    Base burst: size=6 (64 B/beat), len=15 (16 beats) -> footprint = 16*64 = 1024 B.
+    The first slot (src=0, seq=0): offset-base = 0*64 + 0*16*64 = 0;
+    0 + 1024 = 1024 <= 4096, so it fits.  But src=15, seq=3:
+    offset-base = 15*64 + 3*16*64 = 960 + 3072 = 4032; 4032 + 1024 = 5056 > 4096.
+    Without the fix, reserved defaults to 0x40 (64), so 4032+64=4096 appears to fit and
+    the check is silently bypassed.  With the fix, reserved=1024 and the check fires.
+
+    We use txn_per_node=4 to force the allocator to reach the overflowing (src=15, seq=3)
+    slot; the test expects a non-zero exit and a memory-overflow message.
+    """
+    # size=6: 64 B/beat; len=15: 16 beats; footprint = 1024 B >> default stride 64 B.
+    base_path = _write_base_scenario(tmp_path, size=6, length=15)
+    out_dir = str(tmp_path / "out")
+    result = _run_gen_from_base(base_path, "uniform_random", "mesh_4x4_vc1", seed=1,
+                                txn_per_node=4, out_dir=out_dir)
+    assert result.returncode != 0, (
+        "Expected non-zero exit: large base burst (size=6 len=15, footprint=1024 B) "
+        "overflows the 0x1000 dst memory window but was not caught"
+    )
+    assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
+        f"Expected memory overflow error; stderr={result.stderr!r}"
+    )

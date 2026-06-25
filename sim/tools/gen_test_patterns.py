@@ -507,11 +507,17 @@ def _emit_base_driven_node(base_sc, src_dir, out_dir, src_idx, dst_cids, src_cid
     # Preserves the base pair structure: each unique addr = one write+read group.
     seen_orig: dict = {}   # orig_local_addr -> base seq index within the base
     base_pair_order = []   # ordered unique orig local addrs
+    # Burst footprint per unique address: (axi_len + 1) * 2**axi_size bytes.
+    # Taken from the first (write) transaction for each unique address.
+    base_pair_reserved: dict = {}  # orig_local_addr -> reserved bytes
     for t in base_txns:
         oa = _as_int(t["addr"]) & 0xFFFFFFFF
         if oa not in seen_orig:
             seen_orig[oa] = len(base_pair_order)
             base_pair_order.append(oa)
+            axi_len = int(t.get("len", 0))
+            axi_size = int(t.get("size", 0))
+            base_pair_reserved[oa] = (axi_len + 1) * (1 << axi_size)
 
     transactions = []
     for rep_seq, dst_cid in enumerate(dst_cids):
@@ -520,8 +526,10 @@ def _emit_base_driven_node(base_sc, src_dir, out_dir, src_idx, dst_cids, src_cid
         for pair_seq, orig_addr in enumerate(base_pair_order):
             # Global seq = rep_seq * len(base_pair_order) + pair_seq
             global_seq = rep_seq * len(base_pair_order) + pair_seq
+            reserved = base_pair_reserved[orig_addr]
             pair_offset[orig_addr] = alloc_unique_offset(
-                dst_cid, src_idx, global_seq, base_local, n_nodes, memory_size
+                dst_cid, src_idx, global_seq, base_local, n_nodes, memory_size,
+                reserved=reserved,
             )
         for t in base_txns:
             tc = copy.deepcopy(t)
