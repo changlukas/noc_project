@@ -19,7 +19,11 @@ module tb_genamba;
     // ---- AXI + NoC interface bundles ----
     axi4_intf #(.ID_WIDTH(8), .ADDR_WIDTH(64), .DATA_WIDTH(256)) bfm_nmu_axi();
     axi4_intf #(.ID_WIDTH(8), .ADDR_WIDTH(64), .DATA_WIDTH(256)) nsu_mem_axi();
-    noc_intf  #(.NUM_VC(1), .FLIT_WIDTH(408)) noc_link();
+    // NoC link as packed structs (noc_intf removed in Task 3 wrap refactor).
+    ni_signals_pkg::noc_chan_t  noc_req_link;   // NMU req_o → NSU req_i
+    noc_types_pkg::noc_credit_t noc_req_cred_link; // NSU req_cred_o → NMU req_cred_i
+    ni_signals_pkg::noc_chan_t  noc_rsp_link;   // NSU rsp_o → NMU rsp_i
+    noc_types_pkg::noc_credit_t noc_rsp_cred_link; // NMU rsp_cred_o → NSU rsp_cred_i
 
     // Tie REGION (not marshalled by DPI per spec §3.2)
     assign bfm_nmu_axi.awregion = 4'b0;
@@ -50,19 +54,25 @@ module tb_genamba;
         .RVALID(bfm_nmu_axi.rvalid), .RREADY(bfm_nmu_axi.rready)
     );
 
-    // ---- DUT bridge: NMU + NSU on one noc_intf ----
+    // ---- DUT bridge: NMU + NSU connected via packed-struct NoC links ----
     // ctx_i: longint unsigned context for per-instance DPI tick (NMU/NSU wrap each
-    // own one); verified against tb_top.sv:137,166 — mandatory port.
+    // own one); verified against tb_top.sv pattern — mandatory port.
     nmu_wrap u_nmu (
         .clk_i(ACLK), .rst_ni(ARESETn),
         .ctx_i(nmu_ctx),
         .axi_i(bfm_nmu_axi.slave),
-        .noc_mosi_o(noc_link.mosi)
+        .noc_req_o(noc_req_link),
+        .noc_req_cred_i(noc_req_cred_link),
+        .noc_rsp_i(noc_rsp_link),
+        .noc_rsp_cred_o(noc_rsp_cred_link)
     );
     nsu_wrap u_nsu (
         .clk_i(ACLK), .rst_ni(ARESETn),
         .ctx_i(nsu_ctx),
-        .noc_miso_i(noc_link.miso),         // _i suffix per nsu_wrap.sv:44
+        .noc_req_i(noc_req_link),
+        .noc_req_cred_o(noc_req_cred_link),
+        .noc_rsp_o(noc_rsp_link),
+        .noc_rsp_cred_i(noc_rsp_cred_link),
         .axi_o(nsu_mem_axi.master)
     );
 

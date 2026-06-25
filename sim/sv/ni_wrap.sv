@@ -52,6 +52,14 @@ module ni_wrap #(
     input  noc_types_pkg::noc_credit_t noc_rsp_cred_i
 );
 
+    // Elaboration guard: noc_types_pkg::noc_credit_t width must match NUM_VC.
+    initial begin
+        if ($bits(noc_types_pkg::noc_credit_t) != NUM_VC) begin
+            $fatal(1, "%m: noc_credit_t width %0d != NUM_VC %0d; use matching noc_types_pkg_vc{N}.sv",
+                   $bits(noc_types_pkg::noc_credit_t), NUM_VC);
+        end
+    end
+
     nmu_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
         .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)

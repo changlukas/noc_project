@@ -111,6 +111,7 @@ DPI_C_SRC := $(COSIM_ROOT)/c/cmodel_dpi.cpp
 GENAMBA_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
+    $(SPECGEN_SV_INC)/noc_types_pkg_vc1.sv \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \
     $(COSIM_ROOT)/sv/nsu_wrap.sv \
     $(COSIM_ROOT)/sv/genamba/mem_axi.v \
@@ -122,6 +123,7 @@ GENAMBA_SV_SRC := \
 GENAMBA_TESTER_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
+    $(SPECGEN_SV_INC)/noc_types_pkg_vc1.sv \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \
     $(COSIM_ROOT)/sv/nsu_wrap.sv \
     $(COSIM_ROOT)/sv/genamba/mem_axi.v \
