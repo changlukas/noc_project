@@ -1,5 +1,7 @@
 `timescale 1ns/1ps
-// SPIKE testbench: mesh_2x1_vc8 struct-port elaboration de-risk.
+// SPIKE REDO testbench: mesh_2x1_vc8 struct-port elaboration de-risk.
+// REDO: credit face now noc_types_pkg::noc_credit_t (credit[7:0], real vc8)
+//       instead of old ni_signals_pkg::noc_credit_t (credit[0:0], vc1).
 // Instantiates noc_fabric_spike, checks the one-cycle req→credit handshake.
 // PASS: prints "SPIKE PASS: struct-port-in-array elaboration + handshake OK"
 // FAIL: $fatal after TIMEOUT_CYCLES.
@@ -30,8 +32,9 @@ module tb_top_spike;
     end
 
     // Struct-typed unpacked arrays driven by the fabric.
+    // channel face: ni_signals_pkg::noc_chan_t; credit face: noc_types_pkg::noc_credit_t (credit[7:0])
     ni_signals_pkg::noc_chan_t    node_req  [NUM_NODES];
-    ni_signals_pkg::noc_credit_t node_cred [NUM_NODES];
+    noc_types_pkg::noc_credit_t  node_cred [NUM_NODES];
     logic                          cred_seen [NUM_NODES];
 
     // DUT: noc_fabric_spike with struct array ports.
@@ -52,7 +55,7 @@ module tb_top_spike;
         $display("SPIKE PASS: struct-port-in-array elaboration + handshake OK");
         $display("  node_req[0].valid=%0b flit[7:0]=0x%02h",
                  node_req[0].valid, node_req[0].flit[7:0]);
-        $display("  node_cred[0].credit=%0b", node_cred[0].credit);
+        $display("  node_cred[0].credit=8'b%08b (vc8 real 8-bit)", node_cred[0].credit);
         $finish;
     end
 
