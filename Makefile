@@ -18,7 +18,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
-        sim \
+        specgen_pytest sim \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -151,7 +151,26 @@ MAINTAINED_DOCS = \
 lint_docs:
 	$(PYTHON3) tools/lint_docs.py $(MAINTAINED_DOCS)
 
-check: lint_scenarios lint_docs build-cmodel build-verilator
+# specgen codegen/golden drift gate. Runs the specgen pytest suite so a stale
+# golden (e.g. an un-regenerated SV package) cannot pass silently. The pytest
+# package is not present in every interpreter on this project's Windows setup
+# (the MSYS2 mingw64 python lacks it); probe a candidate list and run the first
+# interpreter that can import pytest. Fail loudly if none can -- a silent skip
+# would defeat the gate.
+SPECGEN_PYTEST_CANDIDATES := $(PYTHON3) python3 "py -3" python
+specgen_pytest:
+	@interp=""; \
+	for cand in $(SPECGEN_PYTEST_CANDIDATES); do \
+	    if $$cand -c "import pytest" >/dev/null 2>&1; then interp="$$cand"; break; fi; \
+	done; \
+	if [ -z "$$interp" ]; then \
+	    echo "ERROR: no interpreter in [$(SPECGEN_PYTEST_CANDIDATES)] can import pytest; specgen drift gate cannot run" >&2; \
+	    exit 1; \
+	fi; \
+	echo "specgen_pytest: using interpreter '$$interp'"; \
+	cd specgen && $$interp -m pytest tests/ -q
+
+check: lint_scenarios lint_docs specgen_pytest build-cmodel build-verilator
 	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
 	$(PYTHON3) sim/tools/run_benchmark.py --topology mesh_4x4_vc1 --pattern neighbor
 

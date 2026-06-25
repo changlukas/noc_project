@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: ceef98ad4649
 // Generator version: v1.0.0
-// Generated at: 2026-06-09T07:05:47Z
+// Generated at: 2026-06-25T09:55:27Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -64,89 +64,57 @@ package ni_signals_pkg;
   localparam int unsigned AXI_ARUSER_O_RESET = 0;
   localparam int unsigned AXI_ARQOS_O_RESET = 0;
 
+  // NoC link packed-struct typedefs (replaced noc_intf; widths fixed-default).
+  typedef struct packed {
+    logic                                            valid;
+    logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit;
+  } noc_chan_t;
+
+  // AXI packed-struct typedefs (replaced axi4_intf; widths fixed-default).
+  typedef struct packed {
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]     awid;
+    logic [ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0]   awaddr;
+    logic [7:0]                                      awlen;
+    logic [2:0]                                      awsize;
+    logic [1:0]                                      awburst;
+    logic                                            awlock;
+    logic [3:0]                                      awcache;
+    logic [2:0]                                      awprot;
+    logic [3:0]                                      awqos;
+    logic [3:0]                                      awregion;
+    logic                                            awvalid;
+    logic [ni_params_pkg::AXI_DATA_WIDTH_DFLT-1:0]   wdata;
+    logic [ni_params_pkg::AXI_DATA_WIDTH_DFLT/8-1:0] wstrb;
+    logic                                            wlast;
+    logic                                            wvalid;
+    logic                                            bready;
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]     arid;
+    logic [ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0]   araddr;
+    logic [7:0]                                      arlen;
+    logic [2:0]                                      arsize;
+    logic [1:0]                                      arburst;
+    logic                                            arlock;
+    logic [3:0]                                      arcache;
+    logic [2:0]                                      arprot;
+    logic [3:0]                                      arqos;
+    logic [3:0]                                      arregion;
+    logic                                            arvalid;
+    logic                                            rready;
+  } axi_req_t;
+  typedef struct packed {
+    logic                                          awready;
+    logic                                          wready;
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]   bid;
+    logic [1:0]                                    bresp;
+    logic                                          bvalid;
+    logic                                          arready;
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]   rid;
+    logic [ni_params_pkg::AXI_DATA_WIDTH_DFLT-1:0] rdata;
+    logic [1:0]                                    rresp;
+    logic                                          rlast;
+    logic                                          rvalid;
+  } axi_rsp_t;
+
 endpackage
-
-interface axi4_intf #(
-  parameter int unsigned ID_WIDTH   = ni_params_pkg::AXI_ID_WIDTH_DFLT,
-  parameter int unsigned ADDR_WIDTH = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-  parameter int unsigned DATA_WIDTH = ni_params_pkg::AXI_DATA_WIDTH_DFLT
-);
-  localparam int unsigned WSTRB_WIDTH = DATA_WIDTH / 8;
-
-  // AW channel
-  logic [ID_WIDTH-1:0]   awid;
-  logic [ADDR_WIDTH-1:0] awaddr;
-  logic [7:0]            awlen;
-  logic [2:0]            awsize;
-  logic [1:0]            awburst;
-  logic                  awlock;
-  logic [3:0]            awcache;
-  logic [2:0]            awprot;
-  logic [3:0]            awqos;
-  logic [3:0]            awregion;
-  logic                  awvalid;
-  logic                  awready;
-
-  // W channel
-  logic [DATA_WIDTH-1:0]  wdata;
-  logic [WSTRB_WIDTH-1:0] wstrb;
-  logic                   wlast;
-  logic                   wvalid;
-  logic                   wready;
-
-  // B channel
-  logic [ID_WIDTH-1:0] bid;
-  logic [1:0]          bresp;
-  logic                bvalid;
-  logic                bready;
-
-  // AR channel
-  logic [ID_WIDTH-1:0]   arid;
-  logic [ADDR_WIDTH-1:0] araddr;
-  logic [7:0]            arlen;
-  logic [2:0]            arsize;
-  logic [1:0]            arburst;
-  logic                  arlock;
-  logic [3:0]            arcache;
-  logic [2:0]            arprot;
-  logic [3:0]            arqos;
-  logic [3:0]            arregion;
-  logic                  arvalid;
-  logic                  arready;
-
-  // R channel
-  logic [ID_WIDTH-1:0]   rid;
-  logic [DATA_WIDTH-1:0] rdata;
-  logic [1:0]            rresp;
-  logic                  rlast;
-  logic                  rvalid;
-  logic                  rready;
-
-  modport master (
-    output awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awqos, awregion, awvalid, wdata, wstrb, wlast, wvalid, bready, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arqos, arregion, arvalid, rready,
-    input  awready, wready, bid, bresp, bvalid, arready, rid, rdata, rresp, rlast, rvalid
-  );
-
-  modport slave (
-    input  awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awqos, awregion, awvalid, wdata, wstrb, wlast, wvalid, bready, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arqos, arregion, arvalid, rready,
-    output awready, wready, bid, bresp, bvalid, arready, rid, rdata, rresp, rlast, rvalid
-  );
-endinterface : axi4_intf
-
-interface noc_intf #(
-  parameter int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT,
-  parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,
-  parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
-);
-  logic                  req_valid;
-  logic [FLIT_WIDTH-1:0] req_flit;
-  logic [NUM_VC-1:0]     req_credit_return;
-  logic                  rsp_valid;
-  logic [FLIT_WIDTH-1:0] rsp_flit;
-  logic [NUM_VC-1:0]     rsp_credit_return;
-
-  modport mosi ( output req_valid, req_flit, rsp_credit_return, input  req_credit_return, rsp_valid, rsp_flit );
-  modport miso ( input  req_valid, req_flit, rsp_credit_return, output req_credit_return, rsp_valid, rsp_flit );
-endinterface : noc_intf
 
 `endif // NI_SIGNALS_PKG_SVH

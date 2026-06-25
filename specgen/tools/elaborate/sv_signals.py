@@ -116,7 +116,7 @@ def _emit_noc_structs() -> list[str]:
     noc_types_pkg_vc{N}.sv, generated via --domain noc_types --num-vc N.
     """
     out: list[str] = [
-        "  // NoC link packed-struct typedefs (coexist with noc_intf; widths fixed-default).",
+        "  // NoC link packed-struct typedefs (replaced noc_intf; widths fixed-default).",
         "  typedef struct packed {",
         "    logic                                            valid;",
         "    logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit;",
@@ -181,7 +181,7 @@ def _emit_axi_structs(channels: list[str]) -> list[str]:
         ]
 
     out: list[str] = [
-        "  // AXI packed-struct typedefs (coexist with axi4_intf; widths fixed-default).",
+        "  // AXI packed-struct typedefs (replaced axi4_intf; widths fixed-default).",
         "  typedef struct packed {",
     ]
     out.extend(_fields_to_sv(req_fields))
