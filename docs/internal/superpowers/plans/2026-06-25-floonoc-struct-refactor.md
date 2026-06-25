@@ -199,16 +199,18 @@ git commit -m "refactor(sim): noc wrap+fabric interface->struct array+generate; 
 
 ## Stage 3 — AXI full struct (wrap + tb + interface 移除 同 commit)
 
-### Task 4: AXI wrap+endpoint+tb_top emitter 同步改 struct;移除 interface;awregion policy
+### Task 4: AXI wrap+endpoint+tb_top struct + node/ctx genvar generate;移除 interface;awregion policy
+
+> Task 3 把 NoC face 改 struct-array 但 node 實例仍 Python-unrolled(因 ctx handle 還是 individual port)。本 task 把 ctx handle **array 化**(tb_top create→array port),於是 `emit_fabric` 的 node(ni_wrap+router_wrap)實例 + `emit_tb_top` 的 endpoint 都能收進 SV `genvar generate` — 這才真正消攤平、達成「短」的目標。AXI struct + interface 移除一併在此 commit。
 
 **Files:**
 - Modify: `sim/sv/axi_master_wrap.sv`、`axi_slave_wrap.sv`、`ni_wrap.sv`(AXI face)、`user_node_endpoint.sv`(monitor tap)
-- Modify: `sim/tools/gen_tb_top.py`(`emit_tb_top` `:507-557`:`axi4_intf` → struct array + generate)
+- Modify: `sim/tools/gen_tb_top.py`(`emit_tb_top` `:507-557` axi struct array + ctx-handle array + endpoint generate;`emit_fabric` node 實例 + ctx port → `genvar generate`)
 - Modify: `specgen/tools/elaborate/sv_signals.py`(移除 interface emitter)、`specgen/tests/test_codegen_sv.py`(加 interface-absent 斷言)
 
 **Interfaces:**
-- Consumes:Task 1 `axi_req_t`/`axi_rsp_t`。
-- Produces:AXI port = `output axi_req_t axi_req_o, input axi_rsp_t axi_rsp_i`(master 視角);tb_top AXI face 用 array;`ni_signals_pkg.sv` 無 interface。
+- Consumes:Task 1 `ni_signals_pkg::axi_req_t`/`axi_rsp_t`;Task 3 noc struct fabric。
+- Produces:AXI port = `output axi_req_t axi_req_o, input axi_rsp_t axi_rsp_i`(master 視角);tb_top ctx handle 改 array(`longint unsigned nmu_ctx[N]` 等)、fabric node 實例與 endpoint 用 `genvar generate`;`ni_signals_pkg.sv` 無 interface。
 
 - [ ] **Step 1: awregion/arregion policy + grep**
 ```bash
@@ -219,8 +221,12 @@ policy:`axi_req_t` **保留** `awregion`/`arregion` field(carried-but-unused);ma
 `axi4_intf.master`/`.slave` → `axi_req_t`/`axi_rsp_t` struct port。DPI 取值 `axi_i.awvalid`→`axi_req_i.awvalid` 逐 field。DPI 簽章不動。`ni_wrap.sv:35-36` AXI face → struct。
 - [ ] **Step 3: 改 user_node_endpoint monitor tap**
 `user_node_endpoint.sv:60-88` 的 30+ 行 tap(`master_axi_o.awvalid`…`slave_axi_i.rid`)→ struct field(`axi_req.awvalid`…`axi_rsp.rid`);`axi_perf_monitor` 模組(scalar port)不動。
-- [ ] **Step 4: 改 emit_tb_top AXI face struct array + generate**
-`gen_tb_top.py:507-513` per-node `axi4_intf` → `ni_signals_pkg::axi_req_t master_axi_req[n]; axi_rsp_t master_axi_rsp[n];`(NMU 側 + NSU 側)。fabric 連接(`:527-533`)+ endpoint(`:546-557`)的 `.master`/`.slave` token → array index,包 generate。
+- [ ] **Step 4: emit_tb_top AXI struct array + ctx-handle array + node/endpoint genvar generate**
+- **AXI array**:`gen_tb_top.py:507-513` per-node `axi4_intf` → `ni_signals_pkg::axi_req_t master_axi_req[n]; axi_rsp_t master_axi_rsp[n];`(NMU+NSU 側)。
+- **ctx array 化**:tb_top 的 `nmu_ctx`/`nsu_ctx`/`router_ctx`/`m_ctx`/`s_ctx` 從 per-node individual 變 `longint unsigned nmu_ctx[n]` 等 array;`cmodel_*_create` 在 `initial` loop 逐一填 array 元素。fabric 的 ctx port 也改 array(`input longint unsigned nmu_ctx[N]`)。
+- **fabric node generate**:`emit_fabric` 的 node 實例(ni_wrap+router_wrap,Task 3 仍 Python-unrolled)+ inter-router wiring + tie-off + perf 收進 `for (genvar i=0;i<N;i++) begin: g_node ... end`;ctx 用 `nmu_ctx[i]`;coord 用 `localparam X=i%X_DIM, Y=i/X_DIM`(mirror `_nodes()` raster,保 routing id)。
+- **endpoint generate**:`emit_tb_top` 的 `user_node_endpoint`(`:546-557`)收進 generate,`MASTER_SLOT_NAME` 用 `$sformatf("node%0d.manager",i)`(保 perf label 字串等價、byte-identical)。
+- emit 順序(raster + `seen` dedup)與 LINK perf taps 維持 → perf parity gate 會抓任何 drift。
 - [ ] **Step 5: 移除 interface emitter + 加 interface-absent 測試**
 `sv_signals.py`:刪 `endpackage` 後 `_emit_interfaces_from_handshake_schema`(`:267-270`)+ `_emit_axi4_intf`/`_emit_noc_intf`。`test_codegen_sv.py` 加:
 ```python
