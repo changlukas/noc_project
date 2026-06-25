@@ -20,7 +20,7 @@ base-driven generation path.
 
 | | Item | Files touched |
 |--|------|---------------|
-| **C** | `noc_intf` + `axi4_intf` SV interfaces → packed-struct typedefs **inside `ni_signals_pkg`**; fabric + tb_top emit `genvar generate` + struct arrays | `specgen/source/interface_handshake.json`, `specgen/tools/elaborate/sv_signals.py`, `specgen/tests/test_codegen_sv.py`, `*_wrap.sv` (nmu/nsu/router/master/slave/ni), `user_node_endpoint.sv`, `gen_tb_top.py`; **delete** `channel_model_wrap.sv` |
+| **C** | `noc_intf` + `axi4_intf` SV interfaces → packed-struct typedefs (fixed-width in `ni_signals_pkg`; vc-dependent `noc_credit_t` in a **per-topology** `noc_types_pkg`); fabric + tb_top emit `genvar generate` + struct arrays | `specgen/source/interface_handshake.json`, `specgen/tools/elaborate/sv_signals.py` (+ new `noc_types_pkg` per-config target), `specgen/tools/codegen.py`, `specgen/tests/test_codegen_sv.py`, `sim/build_config.mk` + simulator Makefiles (select vc-correct `noc_types_pkg`; `gen_filelist.py` only serializes paths), `*_wrap.sv` (nmu/nsu/router/master/slave/ni), `user_node_endpoint.sv`, `gen_tb_top.py`; **delete** `channel_model_wrap.sv` |
 | **A** | One `make sim TB=<topology> PATTERN=<pattern>` entry; retire `make bench` + `make sim-regress`; **delete** `run_regress.py` | `Makefile`, `sim/tools/run_benchmark.py` |
 | **B** | All four patterns generate from a base scenario (shape from base, dst from pattern) | `sim/tools/gen_test_patterns.py`, `sim/tools/test_gen_test_patterns.py` |
 
@@ -43,14 +43,19 @@ cannot live inside a package (`sv_signals.py:264-265`).
 the interface bodies.
 
 The refactor:
-1. `sv_signals.py` grows a struct-typedef emitter that emits the typedefs **inside the
-   package** (a packed struct, unlike an interface, must be in a package to be used as a
-   cross-module port type). The `_emit_*_intf` interface emitters are removed.
-2. Every wrap/fabric port type becomes `ni_signals_pkg::<struct>` (e.g.
-   `ni_signals_pkg::noc_chan_t`). This package-placement + type-qualification change touches
+1. `sv_signals.py` grows a struct-typedef emitter. Fixed-width typedefs (`noc_chan_t`,
+   `axi_req_t`, `axi_rsp_t`) go **inside `ni_signals_pkg`** (a packed struct, unlike an
+   interface, must be in a package to be a cross-module port type). The vc-dependent
+   `noc_credit_t` is emitted to a separate **per-topology** `noc_types_pkg.sv` via a new
+   codegen target that takes `--num-vc N` (package name fixed `noc_types_pkg`; one file body
+   per topology num_vc; the per-topology filelist selects the matching body). The
+   `_emit_*_intf` interface emitters are removed.
+2. Wrap/fabric port types become `ni_signals_pkg::noc_chan_t` / `axi_req_t` / `axi_rsp_t` and
+   `noc_types_pkg::noc_credit_t`. This package-placement + type-qualification change touches
    every NoC/AXI port in the wrap set and the generator.
-3. `specgen/tests/test_codegen_sv.py` inverts from asserting `interface axi4_intf`/`noc_intf`
-   + modport presence (`:226,231`) to asserting the typedef presence.
+3. `specgen/tests/test_codegen_sv.py` inverts from asserting `interface` + modport presence
+   (`:226,231`) to asserting typedef presence; add a test that `noc_types_pkg --num-vc 8`
+   emits `credit[7:0]` and `--num-vc 1` emits `credit[0:0]`.
 
 ### `noc_intf` → struct
 
@@ -68,15 +73,35 @@ A packed struct is unidirectional at a port, so one bidirectional `noc_intf` edg
 co-named channel:
 
 ```systemverilog
-typedef struct packed { logic valid; logic [FLIT_WIDTH-1:0] flit; } noc_chan_t;   // fwd payload
-typedef struct packed { logic [NUM_VC-1:0] credit; }                 noc_credit_t; // bwd pulse
+// ni_signals_pkg (single file — FIXED widths):
+typedef struct packed { logic valid; logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit; } noc_chan_t;
+
+// noc_types_pkg (per-topology generated — vc-dependent width; package name FIXED):
+typedef struct packed { logic [NUM_VC-1:0] credit; } noc_credit_t;   // NUM_VC baked at generate time
 ```
+
+**Per-config credit width (forward-compatible to production RTL).** A packed-struct typedef
+cannot carry a parameter — Verilator rejects parameterized-struct-typedef-in-interface (issue
+#2783) and class typedefs are non-synthesizable. The only width-precise, synthesizable,
+cross-module path is FlooNoC's: bake the VC count into the typedef at **generate time**. So
+`noc_credit_t` — the ONLY vc-dependent type (`credit` is `[NUM_VC-1:0]`; `noc_chan_t.flit` is
+fixed at 408) — lives in its OWN per-topology generated file `noc_types_pkg.sv` (package name
+FIXED `noc_types_pkg`; specgen emits one body per `num_vc`; the per-topology filelist selects
+the vc-correct body). Wraps/fabric reference `noc_types_pkg::noc_credit_t` — identical source
+regardless of vc — and the build picks the right width. This keeps co-sim width-exact AND lets
+the future synthesizable RTL import the same per-config typedef with no wasted wires. Mirrors
+c_model: the C++ DPI side is already max-width (`NMU_NUM_VC_MAX = 1<<VC_ID_WIDTH`); the wrap
+feeds `credit[NUM_VC-1:0]` to DPI, so the DPI signature is unchanged.
 
 The `mosi` face (was one modport) becomes: `output noc_chan_t req` + `input noc_credit_t
 req_credit` + `input noc_chan_t rsp` + `output noc_credit_t rsp_credit`. The `.mosi`/`.miso`
 token at the fabric port (`gen_tb_top.py:250,260`) is replaced by these explicit directions.
 This is a materially larger generator rewrite than "stop flattening"; field names are locked
 in Stage 1 (see Stages).
+
+**Invariant:** a wrap's `NUM_VC` parameter must equal the `num_vc` baked into the
+`noc_types_pkg` body its build selected (fabric/tb pass `NUM_VC = topology num_vc`; both derive
+from the same topology YAML). A mismatch is a build-wiring error, not a silent truncation.
 
 ### `axi4_intf` → struct
 
@@ -100,9 +125,11 @@ byte-identical property. `cmodel_dpi.cpp`/`.h` are in the explicit not-touched s
 ### fabric / tb_top generate-loop
 
 `gen_tb_top.py` stops flattening. Emit per-node faces as struct arrays
-(`noc_chan_t req [N]; noc_credit_t req_credit [N]; ... axi_req_t axi_req [N]; axi_rsp_t
-axi_rsp [N];`) and place node instances, inter-router wiring, boundary tie-off assertions,
-perf monitors, and endpoints inside `genvar` loops.
+(`ni_signals_pkg::noc_chan_t req [N]; noc_types_pkg::noc_credit_t req_credit [N]; ...
+ni_signals_pkg::axi_req_t axi_req [N]; axi_rsp_t axi_rsp [N];`) and place node instances,
+inter-router wiring, boundary tie-off assertions, perf monitors, and endpoints inside `genvar`
+loops. The per-topology `noc_types_pkg` (vc-correct `noc_credit_t`) is listed in the filelist
+ahead of the wraps.
 
 **Array-indexing contract** (must preserve current behavior): the live-direction wiring and
 boundary tie-off currently emitted per node/direction (`gen_tb_top.py:238,318`) map to
@@ -171,7 +198,7 @@ only per-pattern difference:
 
 | Stage | Deliverable | Gate |
 |-------|-------------|------|
-| **1. struct spike** | `sv_signals.py` emits `noc_chan_t`/`noc_credit_t` **in-package**; convert `mesh_2x1_vc8` fabric NoC face `noc_intf`→struct; **lock the full field-name contract (NoC + AXI)** | `verilator --lint-only` clean on the struct-array shape; one flit+credit handshake scoreboard PASS |
+| **1. struct spike** | `sv_signals.py` emits fixed-width `noc_chan_t`/`axi_*` in `ni_signals_pkg` + a per-config `noc_types_pkg` target (`--num-vc N` → `noc_credit_t.credit[N-1:0]`); convert `mesh_2x1_vc8` fabric NoC face to struct using the **vc8** `noc_types_pkg`; **lock the full field-name contract (NoC + AXI)** | `noc_types_pkg --num-vc 8` emits `credit[7:0]`; `verilator --lint-only` clean on the struct-array shape; one flit+credit handshake PASS proving the real `credit[8]` width elaborates |
 | **2. noc full struct** | NoC struct into ni/router/nsu wrap ports + `gen_tb_top` fabric → struct array + generate loop; delete `channel_model_wrap.sv` | `--lint-only` clean **and** co-sim PASS on vc1/2/4/8; `perf.json` byte-compare vs pre-refactor |
 | **3. axi full struct** | `axi4_intf`→struct into master/slave/ni wrap + endpoint; tb_top → generate loop + struct array | co-sim PASS all topologies; VCS build of one topology green; tb_top line count down ≥50% |
 | **4. A+B** | unified `make sim` (+ `--from` plumbing); four patterns base-driven; delete `run_regress.py`; `make check` smoke | each pattern PASS; `make check` green; `codegen --check` + `gen_tb_top --check` green |

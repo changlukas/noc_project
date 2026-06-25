@@ -13,7 +13,9 @@
 - **spec**:`docs/internal/superpowers/specs/2026-06-25-floonoc-struct-refactor-design.md`;每 task 隱含 spec 全約束。
 - **branch**:feature branch off main;**不 push**;commit `type(scope): description`;不 amend、不 `--no-verify`。
 - **specgen source of truth**:interface body 由 `specgen/source/interface_handshake.json`(field set)+ `sv_signals.py`(emit,`_emit_axi4_intf`/`_emit_noc_intf` 在 `endpackage` 後 append,`:261-270`)生成,**不是** `ni_signals.json`。`ni_signals.json` 不動。
-- **typedef in package**:struct typedef emit 進 `ni_signals_pkg`(package 內);wrap/fabric port type 變 `ni_signals_pkg::<struct>`。struct **不可帶 parameter**,width 一律用 fully-qualified `ni_params_pkg::AXI_ID_WIDTH_DFLT`/`NOC_FLIT_WIDTH_DFLT`/`NOC_NUM_VC_DFLT` 等(package 內無 `FLIT_WIDTH`/`NUM_VC` 裸 localparam)。
+- **fixed-width typedef in package**:`noc_chan_t`/`axi_req_t`/`axi_rsp_t`(寬度固定)放 `ni_signals_pkg`(struct 須在 package 才能當 cross-module port type);width 用 fully-qualified `ni_params_pkg::AXI_ID_WIDTH_DFLT`/`NOC_FLIT_WIDTH_DFLT` 等(struct 不可帶 parameter)。
+- **per-config `noc_credit_t`(forward-compatible synthesizable RTL)**:struct typedef 不能帶 runtime parameter(Verilator issue#2783;class typedef 非 synth)。vc-dependent 的 `noc_credit_t {logic [num_vc-1:0] credit;}` 由 specgen **per-topology 生成**(新 codegen target `--num-vc N`),放獨立檔 `specgen/generated/sv/noc_types_pkg_vc{N}.sv`(**package 名固定 `noc_types_pkg`**;4 份預生成+committed,如同 `tb_top_<topo>.sv`)。**selector 是 `build_config.mk`(+ simulator Makefile),不是 `gen_filelist.py`**(後者只 serialize make 傳的 path):`build_config.mk` 的 `TB_TOP_SV_SRC` 依 `TOPOLOGY` 的 num_vc 把對應 `noc_types_pkg_vc{N}.sv` 列入(排 `ni_signals_pkg` 後、wrap 前);simulator Makefile 加 prereq 確保該檔在 filelist/build 前存在。每 build 只含一份→同名 package 無衝突(specgen pytest 只比對輸出文字、不 elaborate)。wrap/fabric port type 用 `noc_types_pkg::noc_credit_t`;`noc_chan_t`/`axi_*` 用 `ni_signals_pkg::`。drift gate `codegen --check` per-config 涵蓋 4 份(literal `[N-1:0]`,不 emit unresolved `NUM_VC`)。`VC_ID_WIDTH` 在 `ni_flit_pkg` 非 `ni_params_pkg`(若需 max 引用)。
+- **wrap NUM_VC 對齊**:wrap `NUM_VC` parameter 必須 == 該 build 選到的 `noc_credit_t` baked width;加 elaboration assert(`$bits(noc_types_pkg::noc_credit_t)==NUM_VC`)防 silent truncation。DPI 不變:wrap 餵 `credit[NUM_VC-1:0]`(== baked width == topology num_vc),同現行 interface,C++ 端 max-array(`NMU_NUM_VC_MAX=1<<VC_ID_WIDTH`)對齊。
 - **DPI invariant(normative)**:struct member 在每個 DPI 邊界**個別 unpack**;**禁止**把整 struct 傳 DPI。`cmodel_dpi.cpp`/`.h` 是 **hard no-touch**(且 `cmodel_dpi.cpp` 透過 `channel_model_wrap_io.hpp` 鏈到 C++ channel_model,不得牽動)。
 - **channel_model 刪除範圍**:只刪 **SV** `sim/sv/channel_model_wrap.sv`(它 reference `noc_intf`)。**C++ channel_model 全保留**(`channel_model_wrap.hpp`/`_io.hpp` 被 `nmu_wrap_io.hpp:18` 依賴、`test_channel_model_wrap.cpp` 在 ctest 用);不得動 C++ side。
 - **ADDR mirror**:`gen_test_patterns.ADDR_DST_SHIFT == c_model LOCAL_ADDR_BITS == 32`,address scheme 不動。
@@ -57,53 +59,63 @@ git commit -m "test(sim): pin pre-refactor perf.json baselines + parity checker"
 
 ## Stage 1 — struct typedef + spike
 
-### Task 1: specgen 生 NoC + AXI struct typedef(in-package,與 interface 並存)
+### Task 1: specgen — ni_signals_pkg 固定 typedef + per-config noc_types_pkg(與 interface 並存)
+
+> **REDO 註**:既有 commit 1fc2fce 已把 4 typedef **全部**放進 ni_signals_pkg(含 `noc_credit_t.credit[NOC_NUM_VC_DFLT-1:0]`,固定 1 bit — multi-VC 錯)。本 task 把 `noc_credit_t` **移出** ni_signals_pkg → 改由 per-config `noc_types_pkg` 提供;`noc_chan_t`/`axi_req_t`/`axi_rsp_t`(固定寬度)留 ni_signals_pkg。原因:struct 不能帶 parameter,credit 寬度須 per-topology baked(見 Global Constraints)。
 
 **Files:**
-- Modify: `specgen/tools/elaborate/sv_signals.py`(加 struct emitter,emit 進 package;**保留** interface emitter)
-- Test: `specgen/tests/test_codegen_sv.py`(加 typedef-presence 測試;沿用既有 `run_codegen` + `read_text` 風格)
+- Modify: `specgen/tools/elaborate/sv_signals.py`(ni_signals_pkg 移除 `noc_credit_t`、留固定 typedef;新增 `noc_types_pkg` per-config emitter;**保留** interface emitter)
+- Modify: `specgen/tools/codegen.py`(新 target `("sv","noc_types")`,接 `--num-vc N` → 輸出 `noc_types_pkg_vc{N}.sv`)
+- Create: `specgen/generated/sv/noc_types_pkg_vc{1,2,4,8}.sv`(4 份預生成,**package 名固定 `noc_types_pkg`**)
+- Test: `specgen/tests/test_codegen_sv.py`(沿用既有 `run_codegen` + `read_text` 風格)
 
 **Interfaces:**
 - Produces — **field-name contract(全 stage 凍結)**:
   ```systemverilog
-  // ni_signals_pkg 內;width 全用 ni_params_pkg::*_DFLT
+  // ni_signals_pkg (固定寬度;width 用 ni_params_pkg::*_DFLT):
   typedef struct packed { logic valid; logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit; } noc_chan_t;
-  typedef struct packed { logic [ni_params_pkg::NOC_NUM_VC_DFLT-1:0] credit; }              noc_credit_t;
   typedef struct packed { /* AW+W+AR + bready + rready (master drives) */ } axi_req_t;
   typedef struct packed { /* B+R + awready/wready/arready (slave drives) */ } axi_rsp_t;
+  // noc_types_pkg (per-topology;package 名固定;num_vc baked at generate time):
+  typedef struct packed { logic [num_vc-1:0] credit; } noc_credit_t;   // num_vc=8 → credit[7:0]
   ```
-  存取:`noc_o.req.valid`(取代 `noc_mosi_o.req_valid`);`axi_req_i.awvalid`。`axi_req_t`/`axi_rsp_t` 沿用現有 interface member 名;**`awregion`/`arregion` 保留為 carried-but-unused field**(interface 有、wrap 不 drive/sample;見 Task 4 policy)。
+  存取:`noc_o.req.valid`;`axi_req_i.awvalid`;`noc_types_pkg::noc_credit_t`。`axi_*` 沿用現有 interface member 名;`awregion`/`arregion` 保留為 carried-but-unused(Task 4 policy)。
 
-- [ ] **Step 1: 加 typedef-presence 測試(失敗) — 沿用既有 run_codegen 風格**
-`test_codegen_sv.py`(既有 helper:`run_codegen(*args)` `:25`、`read_text` `:43`)。在 signals domain 的 test class(`:131+`)加:
+- [ ] **Step 1: 失敗測試(固定 typedef 與 per-config credit 分家)**
+`test_codegen_sv.py`(既有 helper `run_codegen` `:25`、`read_text` `:43`)。signals domain class 加:
 ```python
-def test_emits_noc_struct_typedefs(self):
-    run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
+def test_ni_signals_fixed_typedefs_no_credit(self):
+    run_codegen("--target","sv","--domain","signals","--out",str(RTL_PKG_DIR))
     sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
-    assert "} noc_chan_t;" in sv and "} noc_credit_t;" in sv
-    assert "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
-def test_struct_typedefs_in_package(self):
-    sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
-    pkg = sv[sv.index("package ni_signals_pkg"):sv.index("endpackage")]
-    assert "noc_chan_t" in pkg and "axi_req_t" in pkg     # typedef 在 package 內
+    assert "} noc_chan_t;" in sv and "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
+    assert "noc_credit_t" not in sv          # 已移到 noc_types_pkg
+def test_noc_types_pkg_per_vc(self, tmp_path):
+    run_codegen("--target","sv","--domain","noc_types","--num-vc","8","--out",str(tmp_path))
+    sv8 = (tmp_path / "noc_types_pkg_vc8.sv").read_text(encoding="ascii")
+    assert "package noc_types_pkg" in sv8 and "} noc_credit_t;" in sv8 and "[7:0]" in sv8
+    run_codegen("--target","sv","--domain","noc_types","--num-vc","1","--out",str(tmp_path))
+    assert "[0:0]" in (tmp_path / "noc_types_pkg_vc1.sv").read_text(encoding="ascii")
 ```
 > interface 消失的斷言**不在此 task**;Task 4 移除 interface 後才加。
 - [ ] **Step 2: 跑測試確認 fail**
-Run: `cd specgen && python3 -m pytest tests/test_codegen_sv.py -k struct -v` → FAIL。
-- [ ] **Step 3: 實作 struct emitter(保留 interface emitter)**
-- `sv_signals.py` 加 `_emit_noc_structs()` / `_emit_axi_structs(iface_spec)`,回傳 typedef 行;width 用 `ni_params_pkg::*_DFLT`。
-- axi:從 `_AXI_CHANNEL_SIGNALS` matrix(`:28-78`)依 master modport 方向切 `axi_req_t`(master 驅動集)/`axi_rsp_t`(master 接收集);含 `awregion`/`arregion`。
-- 在 `emit()` 的 package body **內**(`endpackage` 前)append typedef。**保留** `endpackage` 後的 `_emit_interfaces_from_handshake_schema`(`:267-270`)。結果:interface + typedef 並存,co-sim 全程可編譯。
-- [ ] **Step 4: pass + 重生 + drift gate**
+Run: `cd specgen && python3 -m pytest tests/test_codegen_sv.py -k "credit or noc_types" -v` → FAIL。
+- [ ] **Step 3: 實作**
+- `sv_signals.py`:ni_signals_pkg 的 struct emitter **移除 noc_credit_t**(留 noc_chan_t + axi_req_t/axi_rsp_t,axi 從 `_AXI_CHANNEL_SIGNALS` matrix `:28-78` 依 master modport 切,含 awregion/arregion)。**保留** interface emitter(`:267-270`,並存)。
+- 新增 `_emit_noc_types_pkg(num_vc)` → `\`ifndef ... package noc_types_pkg; typedef struct packed { logic [num_vc-1:0] credit; } noc_credit_t; endpackage ...`(include guard,package 名固定)。
+- `codegen.py` 加 `("sv","noc_types")` target + `--num-vc` arg,輸出檔名 `noc_types_pkg_vc{N}.sv`。
+- [ ] **Step 4: pass + 生成 4 份 + drift**
 ```bash
 cd specgen && python3 -m pytest tests/test_codegen_sv.py -v
-cd /e/05_NoC/noc_project && python3 specgen/tools/codegen.py && python3 specgen/tools/codegen.py --check
+cd /e/05_NoC/noc_project && python3 specgen/tools/codegen.py                              # ni_signals_pkg(無 credit)
+for N in 1 2 4 8; do python3 specgen/tools/codegen.py --target sv --domain noc_types --num-vc $N --out specgen/generated/sv; done
+python3 specgen/tools/codegen.py --check                                                  # ni_signals drift
+for N in 1 2 4 8; do python3 specgen/tools/codegen.py --target sv --domain noc_types --num-vc $N --check; done   # noc_types per-config drift
 ```
-Expected: pytest 綠;`ni_signals_pkg.sv` package 內有 4 typedef + 仍有 interface;`--check` exit 0。
+Expected: pytest 綠;`ni_signals_pkg.sv` 無 `noc_credit_t`;4 份 `noc_types_pkg_vc{N}.sv` 各 `credit[N-1:0]`;所有 `--check` exit 0。
 - [ ] **Step 5: Commit**
 ```bash
-git add specgen/tools/elaborate/sv_signals.py specgen/tests/test_codegen_sv.py specgen/generated/sv/ni_signals_pkg.sv
-git commit -m "feat(specgen): add noc/axi packed-struct typedefs alongside interfaces"
+git add specgen/tools/elaborate/sv_signals.py specgen/tools/codegen.py specgen/tests/test_codegen_sv.py specgen/generated/sv/ni_signals_pkg.sv specgen/generated/sv/noc_types_pkg_vc*.sv
+git commit -m "feat(specgen): per-config noc_types_pkg(noc_credit_t) + fixed-width typedefs in ni_signals_pkg"
 ```
 
 ### Task 2: mesh_2x1_vc8 NoC-struct early spike(快速 GO/NO-GO,非完整 de-risk)
@@ -113,15 +125,16 @@ git commit -m "feat(specgen): add noc/axi packed-struct typedefs alongside inter
 **Files:**
 - Create: `sim/topologies/mesh_2x1_vc8.yaml`、`sim/sv/spike/{noc_fabric_spike,tb_top_spike}.sv`(手寫,spike 後刪)
 
-- [ ] **Step 1: 手寫 2-node vc8 struct fabric + stub**
-`mesh_2x1_vc8.yaml`(`x_dim:2 y_dim:1 num_vc:8`);手寫最小 fabric,NoC NI face 用 `ni_signals_pkg::noc_chan_t req[2]` 等 struct array,node/link 放 `generate for`;wrap 可用 stub module(只驗 elaboration + 一拍 handshake)。
-- [ ] **Step 2: lint-only(關鍵風險:struct-in-array port + vc8 寬度)**
+- [ ] **Step 1: 生成 vc8 noc_types_pkg + 手寫 2-node struct fabric + stub**
+先 `python3 specgen/tools/codegen.py --target sv --domain noc_types --num-vc 8 --out specgen/generated/sv`(產 `noc_types_pkg_vc8.sv`,須含 `credit[7:0]`)。`mesh_2x1_vc8.yaml`(`x_dim:2 y_dim:1 num_vc:8`);手寫最小 fabric,NoC NI face 用 `ni_signals_pkg::noc_chan_t req[2]` + `noc_types_pkg::noc_credit_t req_cred[2]`(**真 credit[8]**,這才是 spike 該驗的形狀)等 struct array,node/link 放 `generate for`;wrap 可用 stub(只驗 elaboration + 一拍 handshake)。
+- [ ] **Step 2: lint-only(關鍵風險:struct-in-array port + 真 vc8 寬度)**
 ```bash
 verilator --lint-only --timing -I specgen/generated/sv -I sim/sv/spike \
   specgen/generated/sv/ni_params_pkg.sv specgen/generated/sv/ni_signals_pkg.sv \
-  specgen/generated/sv/ni_flit_pkg.sv sim/sv/spike/noc_fabric_spike.sv sim/sv/spike/tb_top_spike.sv
+  specgen/generated/sv/ni_flit_pkg.sv specgen/generated/sv/noc_types_pkg_vc8.sv \
+  sim/sv/spike/noc_fabric_spike.sv sim/sv/spike/tb_top_spike.sv
 ```
-Expected: 無 elaboration error。報 unpacked-array element type mismatch → 用 `router_wrap.sv:164-181` 的 `logic`→`bit` mirror 手法。
+Expected: 無 elaboration error;確認 `noc_types_pkg::noc_credit_t` 真的是 `credit[8]`(非舊 spike 的 credit[1])。報 unpacked-array element type mismatch → 用 `router_wrap.sv:164-181` 的 `logic`→`bit` mirror 手法。
 - [ ] **Step 3: 一拍 handshake PASS + Commit**
 build + run spike,driver 打一個 req flit、收 credit。
 ```bash
@@ -139,13 +152,14 @@ git commit -m "test(sim): mesh_2x1_vc8 noc-struct early elaboration spike"
 > wrap port contract 與 generated fabric 的 instantiation **必須同 commit 改**,否則 build 破(Codex top concern)。本 task 一次改 4 個 wrap 的 NoC port + `emit_fabric` + 刪 SV channel_model,gate 直接 build generated fabric。
 
 **Files:**
-- Modify: `sim/sv/nmu_wrap.sv`、`nsu_wrap.sv`、`router_wrap.sv`、`ni_wrap.sv`(NoC port `noc_intf`→struct;DPI 取值點改 struct field)
+- Modify: `sim/sv/nmu_wrap.sv`、`nsu_wrap.sv`、`router_wrap.sv`、`ni_wrap.sv`(NoC port `noc_intf`→struct;DPI 取值點改 struct field;每個用 `noc_types_pkg::noc_credit_t` 的 module 加 `$bits(noc_types_pkg::noc_credit_t)==NUM_VC` elaboration assert 防 silent truncation)
 - Modify: `sim/tools/gen_tb_top.py`(`emit_fabric` `:214-299`:per-node `noc_intf` instance → struct array;node/link/tie-off/perf 進 `generate`)
+- Modify: `sim/build_config.mk`(`TB_TOP_SV_SRC` 依 `TOPOLOGY` num_vc 列入對應 `noc_types_pkg_vc{N}.sv`,排 `ni_signals_pkg` 後、wrap 前)+ `sim/verilator/Makefile`/`sim/vcs/Makefile`(prereq:該 `noc_types_pkg` 在 filelist/build 前存在)
 - Delete: `sim/sv/channel_model_wrap.sv`(SV only)
 
 **Interfaces:**
-- Consumes:Task 1 `noc_chan_t`/`noc_credit_t`。
-- Produces:wrap NoC port = `output noc_chan_t noc_req_o, input noc_credit_t noc_req_cred_i, input noc_chan_t noc_rsp_i, output noc_credit_t noc_rsp_cred_o`(nmu 視角;router/nsu 對應方向)。fabric 用 `noc_chan_t req[N]` 等 array。
+- Consumes:Task 1 `ni_signals_pkg::noc_chan_t` + per-config `noc_types_pkg::noc_credit_t`(該 topology num_vc 的 baked body)。
+- Produces:wrap NoC port = `output ni_signals_pkg::noc_chan_t noc_req_o, input noc_types_pkg::noc_credit_t noc_req_cred_i, input noc_chan_t noc_rsp_i, output noc_credit_t noc_rsp_cred_o`(nmu 視角;router/nsu 對應方向)。fabric 用 `ni_signals_pkg::noc_chan_t req[N]` + `noc_types_pkg::noc_credit_t req_cred[N]` array。
 
 - [ ] **Step 1: 刪 SV channel_model_wrap(C++ 不動)**
 ```bash
