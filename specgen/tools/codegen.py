@@ -43,6 +43,9 @@ DOMAIN_TO_EMITTER: dict[tuple[str, str], tuple] = {
     ("sv",  "params"):    (sv_params.emit,    "ni_params_pkg.sv",     "source/constants.yaml"),
 }
 
+# Per-config domains handled separately (require extra args; not in --check sweep).
+_NOC_TYPES_VALID_VC = (1, 2, 4, 8)
+
 # Default output directories per target.
 _DEFAULT_OUT: dict[str, str] = {
     "cpp": "generated/cpp",
@@ -128,10 +131,37 @@ def _check_invariants() -> bool:
     return True
 
 
+def _run_emit_noc_types(num_vc: int, out_dir: Path) -> Path:
+    """Emit noc_types_pkg_vc{N}.sv for the given num_vc. Returns written path."""
+    out_name = f"noc_types_pkg_vc{num_vc}.sv"
+    spec_version = load_spec_version()
+    body = sv_signals.emit_noc_types_pkg(num_vc, spec_version)
+    # Use a synthetic source path for the banner (no real JSON; num_vc is the input).
+    banner = common.provenance_banner(SPECGEN_ROOT / "source" / "constants.yaml")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / out_name
+    out_path.write_text(banner + body, encoding="ascii", errors="strict")
+    return out_path
+
+
 def cmd_emit(args: argparse.Namespace) -> int:
     if not args.domain:
         print("ERROR: --domain is required with --target", file=sys.stderr)
         return 2
+
+    # noc_types is a per-config domain; handled separately from DOMAIN_TO_EMITTER.
+    if args.target == "sv" and args.domain == "noc_types":
+        if args.num_vc is None:
+            print("ERROR: --num-vc N is required for --domain noc_types", file=sys.stderr)
+            return 2
+        out_dir = Path(args.out) if args.out else SPECGEN_ROOT / _DEFAULT_OUT[args.target]
+        try:
+            written = _run_emit_noc_types(args.num_vc, out_dir)
+            print(f"wrote {written}", file=sys.stderr)
+            return 0
+        except Exception as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 1
 
     out_dir = Path(args.out) if args.out else SPECGEN_ROOT / _DEFAULT_OUT[args.target]
     try:
@@ -240,8 +270,12 @@ def main() -> int:
         help="output language target (default: cpp)",
     )
     parser.add_argument(
-        "--domain", choices=["packet", "signals", "params"],
+        "--domain", choices=["packet", "signals", "params", "noc_types"],
         help="spec domain to emit",
+    )
+    parser.add_argument(
+        "--num-vc", type=int, default=None,
+        help="number of virtual channels (required for --domain noc_types)",
     )
     parser.add_argument(
         "--out", default=None,

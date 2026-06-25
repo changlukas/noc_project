@@ -213,18 +213,49 @@ _IFACE_WIDTH_TO_STRUCT: dict[str, str] = {
 
 
 def _emit_noc_structs() -> list[str]:
-    """Emit noc_chan_t and noc_credit_t typedef lines (in-package)."""
+    """Emit noc_chan_t typedef line (in-package).
+
+    The credit typedef is per-topology (width depends on num_vc) and lives in
+    noc_types_pkg_vc{N}.sv, generated via --domain noc_types --num-vc N.
+    """
     out: list[str] = [
         "  // NoC link packed-struct typedefs (coexist with noc_intf; widths fixed-default).",
         "  typedef struct packed {",
         "    logic                                            valid;",
         "    logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit;",
         "  } noc_chan_t;",
-        "  typedef struct packed {",
-        "    logic [ni_params_pkg::NOC_NUM_VC_DFLT-1:0] credit;",
-        "  } noc_credit_t;",
     ]
     return out
+
+
+def emit_noc_types_pkg(num_vc: int, spec_version: str) -> str:
+    """Return SV package body for noc_types_pkg with credit width baked in.
+
+    Package name is fixed 'noc_types_pkg' regardless of num_vc.
+    Width is a literal [num_vc-1:0] (no unresolved symbols).
+    Caller prepends the provenance banner.
+    """
+    width = f"[{num_vc - 1}:0]"
+    guard = "NOC_TYPES_PKG_SVH"
+    out: list[str] = [
+        "`timescale 1ns/1ps",
+        "",
+        f"`ifndef {guard}",
+        f"`define {guard}",
+        "",
+        "package noc_types_pkg;",
+        "",
+        f"  // noc_credit_t: credit width baked at generate time (num_vc={num_vc}).",
+        "  // Use noc_types_pkg_vc{N}.sv matching your topology's NUM_VC.",
+        "  typedef struct packed {",
+        f"    logic {width} credit;",
+        "  } noc_credit_t;",
+        "",
+        "endpackage",
+        "",
+        f"`endif // {guard}",
+    ]
+    return "\n".join(out) + "\n"
 
 
 def _emit_axi_structs(channels: list[str]) -> list[str]:

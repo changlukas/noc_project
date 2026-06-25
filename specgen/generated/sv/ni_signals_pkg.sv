@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: ceef98ad4649
 // Generator version: v1.0.0
-// Generated at: 2026-06-25T03:45:50Z
+// Generated at: 2026-06-25T07:39:38Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -69,9 +69,6 @@ package ni_signals_pkg;
     logic                                            valid;
     logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit;
   } noc_chan_t;
-  typedef struct packed {
-    logic [ni_params_pkg::NOC_NUM_VC_DFLT-1:0] credit;
-  } noc_credit_t;
 
   // AXI packed-struct typedefs (coexist with axi4_intf; widths fixed-default).
   typedef struct packed {

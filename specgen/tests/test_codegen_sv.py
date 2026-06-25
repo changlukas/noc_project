@@ -165,13 +165,28 @@ class TestSvSignalsEmit:
     def test_emits_noc_struct_typedefs(self):
         run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
-        assert "} noc_chan_t;" in sv and "} noc_credit_t;" in sv
+        assert "} noc_chan_t;" in sv
         assert "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
 
     def test_struct_typedefs_in_package(self):
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
         pkg = sv[sv.index("package ni_signals_pkg"):sv.index("endpackage")]
         assert "noc_chan_t" in pkg and "axi_req_t" in pkg     # typedef 在 package 內
+
+    def test_ni_signals_fixed_typedefs_no_credit(self):
+        run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
+        sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+        assert "} noc_chan_t;" in sv and "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
+        assert "noc_credit_t" not in sv          # 已移到 noc_types_pkg
+
+    def test_noc_types_pkg_per_vc(self, tmp_path):
+        run_codegen("--target", "sv", "--domain", "noc_types", "--num-vc", "8",
+                    "--out", str(tmp_path))
+        sv8 = (tmp_path / "noc_types_pkg_vc8.sv").read_text(encoding="ascii")
+        assert "package noc_types_pkg" in sv8 and "} noc_credit_t;" in sv8 and "[7:0]" in sv8
+        run_codegen("--target", "sv", "--domain", "noc_types", "--num-vc", "1",
+                    "--out", str(tmp_path))
+        assert "[0:0]" in (tmp_path / "noc_types_pkg_vc1.sv").read_text(encoding="ascii")
 
 
 # ---------------------------------------------------------------------------
