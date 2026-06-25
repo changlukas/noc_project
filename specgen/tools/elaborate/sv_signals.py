@@ -1,11 +1,13 @@
 """SV emitter for signals domain.
 
-Produces rtl_pkg/ni_signals_pkg.sv.
-Uses localparam int unsigned for reset constants (design doc 6.2).
-After ``endpackage`` emits one SV ``interface`` block per entry in
-``source/interface_handshake.json`` (SV interfaces cannot be declared
-inside packages). The interface shapes (AXI4 channels and NoC link
-modports) are derived from the handshake schema + constants.yaml.
+Produces rtl_pkg/ni_signals_pkg.sv: reset constants + the packed-struct
+typedefs (noc_chan_t / axi_req_t / axi_rsp_t) used on every wrap/fabric/tb
+port. Uses localparam int unsigned for reset constants (design doc 6.2).
+
+SV interface blocks (axi4_intf / noc_intf) were removed in the FlooNoC struct
+refactor — the field/channel order of the structs is still derived from
+``source/interface_handshake.json`` + constants.yaml, but no interface is
+emitted.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -88,111 +90,6 @@ _MASTER_DRIVES_AXI: frozenset[str] = frozenset({
     "arprot", "arqos", "arregion", "arvalid",
     "rready",
 })
-
-
-def _emit_param_header(name: str, iface_spec: dict, constants: dict) -> list[str]:
-    """Emit the ``interface NAME #( ... );`` header.
-
-    Parameter names are column-aligned. The default expression on each line
-    is ``ni_params_pkg::<sv_symbol>`` taken from constants.yaml via the
-    ``constants_yaml_key`` ref on every handshake parameter entry.
-    """
-    params = iface_spec.get("parameters", [])
-    out: list[str] = [f"interface {name} #("]
-    name_col = max(len(p["name"]) for p in params)
-    for i, p in enumerate(params):
-        domain, _, key = p["constants_yaml_key"].partition(".")
-        sv_symbol = constants[domain][key]["sv_symbol"]
-        sep = "," if i < len(params) - 1 else ""
-        out.append(
-            f"  parameter int unsigned {p['name']:<{name_col}} = "
-            f"ni_params_pkg::{sv_symbol}{sep}"
-        )
-    out.append(");")
-    return out
-
-
-def _emit_axi4_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
-    """Emit a full ``interface axi4_intf #(...) ... endinterface`` block."""
-    out: list[str] = _emit_param_header(name, iface_spec, constants)
-    # AXI requires the WSTRB_WIDTH localparam (depends on DATA_WIDTH).
-    out.append("  localparam int unsigned WSTRB_WIDTH = DATA_WIDTH / 8;")
-    out.append("")
-
-    # Modport names come from JSON so AXI keeps master/slave while NoC can
-    # use mosi/miso (or any future role names) without code changes here.
-    modports = iface_spec.get("modports", ["master", "slave"])
-    mp_out, mp_in = modports[0], modports[1]
-
-    master_sigs: list[str] = []
-    slave_sigs: list[str] = []
-    channels = iface_spec.get("channels", list(_AXI_CHANNEL_SIGNALS.keys()))
-    for ch in channels:
-        sigs = _AXI_CHANNEL_SIGNALS[ch]
-        out.append(f"  // {ch} channel")
-        width_col = max(len(w) for _, w in sigs)
-        for sig_name, width in sigs:
-            out.append(f"  logic {width:<{width_col}} {sig_name};")
-            if sig_name in _MASTER_DRIVES_AXI:
-                master_sigs.append(sig_name)
-            else:
-                slave_sigs.append(sig_name)
-        out.append("")
-
-    # Two modports. mp_out drives master_sigs (output) and receives slave_sigs
-    # (input); mp_in is the mirror.
-    out.append(f"  modport {mp_out} (")
-    out.append(f"    output {', '.join(master_sigs)},")
-    out.append(f"    input  {', '.join(slave_sigs)}")
-    out.append("  );")
-    out.append("")
-    out.append(f"  modport {mp_in} (")
-    out.append(f"    input  {', '.join(master_sigs)},")
-    out.append(f"    output {', '.join(slave_sigs)}")
-    out.append("  );")
-    out.append(f"endinterface : {name}")
-    return out
-
-
-def _emit_noc_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
-    """Emit a NoC-link interface block (one set of signals + 2 modports).
-
-    Modport names + per-signal ``driven_by`` strings come from JSON. The
-    first modport in the list is treated as the producer side (its signals
-    are ``output``); the second is the consumer side (its signals are
-    ``input``). For the canonical noc_intf entry the modports are
-    ``["mosi", "miso"]`` and ``driven_by`` tags signals as ``mosi`` or
-    ``miso`` accordingly.
-    """
-    out: list[str] = _emit_param_header(name, iface_spec, constants)
-    signals = iface_spec.get("signals", [])
-
-    # Translate width_expr -> SV bit-vector field. ``1`` becomes empty (1-bit
-    # scalar uses bare ``logic``); other expressions become ``[EXPR-1:0]``.
-    width_fields: list[str] = []
-    for s in signals:
-        expr = s["width_expr"].strip()
-        width_fields.append("" if expr == "1" else f"[{expr}-1:0]")
-    width_col = max(len(w) for w in width_fields)
-
-    for s, width in zip(signals, width_fields):
-        out.append(f"  logic {width:<{width_col}} {s['name']};")
-    out.append("")
-
-    modports = iface_spec.get("modports", ["master", "slave"])
-    mp_out, mp_in = modports[0], modports[1]
-    out_names = [s["name"] for s in signals if s["driven_by"] == mp_out]
-    in_names = [s["name"] for s in signals if s["driven_by"] == mp_in]
-    out.append(
-        f"  modport {mp_out} ( output {', '.join(out_names)}, "
-        f"input  {', '.join(in_names)} );"
-    )
-    out.append(
-        f"  modport {mp_in} ( input  {', '.join(out_names)}, "
-        f"output {', '.join(in_names)} );"
-    )
-    out.append(f"endinterface : {name}")
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -295,29 +192,6 @@ def _emit_axi_structs(channels: list[str]) -> list[str]:
     return out
 
 
-def _emit_interfaces_from_handshake_schema(
-    interfaces_doc: dict, constants: dict
-) -> list[str]:
-    """Emit every interface declared in interface_handshake.json.
-
-    One blank line separates consecutive interface blocks.
-    """
-    out: list[str] = []
-    items = list(interfaces_doc["interfaces"].items())
-    for i, (name, iface_spec) in enumerate(items):
-        kind = iface_spec["kind"]
-        if kind == "axi4":
-            out.extend(_emit_axi4_intf(name, iface_spec, constants))
-        elif kind == "noc_link":
-            out.extend(_emit_noc_intf(name, iface_spec, constants))
-        else:  # handshake_schema already validates the kind enum.
-            raise ValueError(f"sv_signals: unsupported interface kind {kind!r}")
-        # Trailing blank line after every interface (including the last) so the
-        # caller can append ``endif`` directly.
-        out.append("")
-    return out
-
-
 def emit(signals_json: Path, spec_version: str) -> str:
     """Return SV package body (no provenance banner -- caller prepends it).
 
@@ -375,9 +249,10 @@ def emit(signals_json: Path, spec_version: str) -> str:
     out.append("endpackage")
     out.append("")
 
-    # SV interface blocks live OUTSIDE the package (SV LRM: interface
-    # declarations are top-level, not allowed inside packages).
-    out.extend(_emit_interfaces_from_handshake_schema(interfaces_doc, constants))
-
+    # SV interfaces (axi4_intf / noc_intf) were removed in the FlooNoC struct
+    # refactor: the wraps + fabric + tb now use packed-struct typedefs
+    # (noc_chan_t / axi_req_t / axi_rsp_t above) on every port. The
+    # interface_handshake.json source still drives the struct field/channel
+    # order via load_interfaces() above; only the SV interface emission is gone.
     out.append("`endif // NI_SIGNALS_PKG_SVH")
     return "\n".join(out) + "\n"

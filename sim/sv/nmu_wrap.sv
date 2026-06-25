@@ -20,8 +20,8 @@
 // Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.
 //
-// axi4_intf.slave modport: slave reads AW/W/AR + bready/rready from axi_i;
-//                          slave drives awready/wready/arready + B/R to axi_i.
+// AXI struct ports (slave view): slave reads axi_req_i (AW/W/AR + bready/
+//   rready); slave drives axi_rsp_o (awready/wready/arready + B/R).
 // NoC struct ports:
 //   noc_req_o      — ni_signals_pkg::noc_chan_t: Nmu drives req flit toward router.
 //   noc_req_cred_i — noc_types_pkg::noc_credit_t: router returns req credit to Nmu.
@@ -44,7 +44,8 @@ module nmu_wrap #(
     input  logic              clk_i,
     input  logic              rst_ni,
     input  longint unsigned            ctx_i,
-    axi4_intf.slave                  axi_i,
+    input  ni_signals_pkg::axi_req_t   axi_req_i,
+    output ni_signals_pkg::axi_rsp_t   axi_rsp_o,
     output ni_signals_pkg::noc_chan_t  noc_req_o,
     input  noc_types_pkg::noc_credit_t noc_req_cred_i,
     input  ni_signals_pkg::noc_chan_t  noc_rsp_i,
@@ -176,32 +177,32 @@ module nmu_wrap #(
             cmodel_nmu_set_inputs(
                 ctx_i,
                 // AXI slave side — master drives these
-                axi_i.awvalid,
-                axi_i.awid,
-                axi_i.awaddr,
-                axi_i.awlen,
-                axi_i.awsize,
-                axi_i.awburst,
-                axi_i.awlock,
-                axi_i.awcache,
-                axi_i.awprot,
-                axi_i.awqos,
-                axi_i.wvalid,
-                axi_i.wdata,
-                axi_i.wstrb,
-                axi_i.wlast,
-                axi_i.bready,
-                axi_i.arvalid,
-                axi_i.arid,
-                axi_i.araddr,
-                axi_i.arlen,
-                axi_i.arsize,
-                axi_i.arburst,
-                axi_i.arlock,
-                axi_i.arcache,
-                axi_i.arprot,
-                axi_i.arqos,
-                axi_i.rready,
+                axi_req_i.awvalid,
+                axi_req_i.awid,
+                axi_req_i.awaddr,
+                axi_req_i.awlen,
+                axi_req_i.awsize,
+                axi_req_i.awburst,
+                axi_req_i.awlock,
+                axi_req_i.awcache,
+                axi_req_i.awprot,
+                axi_req_i.awqos,
+                axi_req_i.wvalid,
+                axi_req_i.wdata,
+                axi_req_i.wstrb,
+                axi_req_i.wlast,
+                axi_req_i.bready,
+                axi_req_i.arvalid,
+                axi_req_i.arid,
+                axi_req_i.araddr,
+                axi_req_i.arlen,
+                axi_req_i.arsize,
+                axi_req_i.arburst,
+                axi_req_i.arlock,
+                axi_req_i.arcache,
+                axi_req_i.arprot,
+                axi_req_i.arqos,
+                axi_req_i.rready,
                 // NoC rsp side — rsp flit arriving from router toward Nmu
                 noc_rsp_i.valid,
                 noc_rsp_i.flit,
@@ -260,19 +261,19 @@ module nmu_wrap #(
     // -------------------------------------------------------------------------
 
     // AXI slave side — Nmu drives handshake + response channels
-    assign axi_i.awready = awready_q;
-    assign axi_i.wready  = wready_q;
-    assign axi_i.arready = arready_q;
+    assign axi_rsp_o.awready = awready_q;
+    assign axi_rsp_o.wready  = wready_q;
+    assign axi_rsp_o.arready = arready_q;
 
-    assign axi_i.bvalid  = bvalid_q;
-    assign axi_i.bid     = bid_q;
-    assign axi_i.bresp   = bresp_q;
+    assign axi_rsp_o.bvalid  = bvalid_q;
+    assign axi_rsp_o.bid     = bid_q;
+    assign axi_rsp_o.bresp   = bresp_q;
 
-    assign axi_i.rvalid  = rvalid_q;
-    assign axi_i.rid     = rid_q;
-    assign axi_i.rdata   = rdata_q;
-    assign axi_i.rresp   = rresp_q;
-    assign axi_i.rlast   = rlast_q;
+    assign axi_rsp_o.rvalid  = rvalid_q;
+    assign axi_rsp_o.rid     = rid_q;
+    assign axi_rsp_o.rdata   = rdata_q;
+    assign axi_rsp_o.rresp   = rresp_q;
+    assign axi_rsp_o.rlast   = rlast_q;
 
     // NoC req side — Nmu drives req flit toward router
     assign noc_req_o.valid = noc_req_valid_q;

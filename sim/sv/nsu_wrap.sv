@@ -18,8 +18,8 @@
 // Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.
 //
-// axi4_intf.master modport: master drives AW/W/AR + bready/rready to axi_o;
-//                           master reads awready/wready/arready + B/R from axi_o.
+// AXI struct ports (master view): master drives axi_req_o (AW/W/AR + bready/
+//   rready); master reads axi_rsp_i (awready/wready/arready + B/R).
 // NoC struct ports:
 //   noc_req_i      — ni_signals_pkg::noc_chan_t: router drives req flit toward Nsu.
 //   noc_req_cred_o — noc_types_pkg::noc_credit_t: Nsu returns req credit to router.
@@ -46,7 +46,8 @@ module nsu_wrap #(
     output noc_types_pkg::noc_credit_t noc_req_cred_o,
     output ni_signals_pkg::noc_chan_t  noc_rsp_o,
     input  noc_types_pkg::noc_credit_t noc_rsp_cred_i,
-    axi4_intf.master          axi_o
+    output ni_signals_pkg::axi_req_t   axi_req_o,
+    input  ni_signals_pkg::axi_rsp_t   axi_rsp_i
 );
 
     // Elaboration guard: noc_types_pkg::noc_credit_t width must match NUM_VC.
@@ -211,17 +212,17 @@ module nsu_wrap #(
                 // NoC rsp credit — router returns credit to Nsu (per-VC vector)
                 noc_rsp_cred_i.credit[NUM_VC-1:0],
                 // AXI master side — subordinate drives ready + B/R
-                axi_o.awready,
-                axi_o.wready,
-                axi_o.bvalid,
-                axi_o.bid,
-                axi_o.bresp,
-                axi_o.arready,
-                axi_o.rvalid,
-                axi_o.rid,
-                axi_o.rdata,
-                axi_o.rresp,
-                axi_o.rlast
+                axi_rsp_i.awready,
+                axi_rsp_i.wready,
+                axi_rsp_i.bvalid,
+                axi_rsp_i.bid,
+                axi_rsp_i.bresp,
+                axi_rsp_i.arready,
+                axi_rsp_i.rvalid,
+                axi_rsp_i.rid,
+                axi_rsp_i.rdata,
+                axi_rsp_i.rresp,
+                axi_rsp_i.rlast
             );
 
             // Step 2: advance C++ model one cycle.
@@ -316,36 +317,40 @@ module nsu_wrap #(
     assign noc_req_cred_o.credit = noc_req_credit_return_q;
 
     // AXI master side — Nsu drives request channels toward subordinate
-    assign axi_o.awvalid = awvalid_q;
-    assign axi_o.awid    = awid_q;
-    assign axi_o.awaddr  = awaddr_q;
-    assign axi_o.awlen   = awlen_q;
-    assign axi_o.awsize  = awsize_q;
-    assign axi_o.awburst = awburst_q;
-    assign axi_o.awlock  = awlock_q;
-    assign axi_o.awcache = awcache_q;
-    assign axi_o.awprot  = awprot_q;
-    assign axi_o.awqos   = awqos_q;
+    assign axi_req_o.awvalid  = awvalid_q;
+    assign axi_req_o.awid     = awid_q;
+    assign axi_req_o.awaddr   = awaddr_q;
+    assign axi_req_o.awlen    = awlen_q;
+    assign axi_req_o.awsize   = awsize_q;
+    assign axi_req_o.awburst  = awburst_q;
+    assign axi_req_o.awlock   = awlock_q;
+    assign axi_req_o.awcache  = awcache_q;
+    assign axi_req_o.awprot   = awprot_q;
+    assign axi_req_o.awqos    = awqos_q;
+    // awregion/arregion are carried-but-unused (not marshalled by DPI per spec
+    // §3.2); the Nsu never drives them — tie to '0 so the field is not undriven.
+    assign axi_req_o.awregion = '0;
 
-    assign axi_o.wvalid  = wvalid_q;
-    assign axi_o.wdata   = wdata_q;
-    assign axi_o.wstrb   = wstrb_q;
-    assign axi_o.wlast   = wlast_q;
+    assign axi_req_o.wvalid   = wvalid_q;
+    assign axi_req_o.wdata    = wdata_q;
+    assign axi_req_o.wstrb    = wstrb_q;
+    assign axi_req_o.wlast    = wlast_q;
 
-    assign axi_o.bready  = bready_q;
+    assign axi_req_o.bready   = bready_q;
 
-    assign axi_o.arvalid = arvalid_q;
-    assign axi_o.arid    = arid_q;
-    assign axi_o.araddr  = araddr_q;
-    assign axi_o.arlen   = arlen_q;
-    assign axi_o.arsize  = arsize_q;
-    assign axi_o.arburst = arburst_q;
-    assign axi_o.arlock  = arlock_q;
-    assign axi_o.arcache = arcache_q;
-    assign axi_o.arprot  = arprot_q;
-    assign axi_o.arqos   = arqos_q;
+    assign axi_req_o.arvalid  = arvalid_q;
+    assign axi_req_o.arid     = arid_q;
+    assign axi_req_o.araddr   = araddr_q;
+    assign axi_req_o.arlen    = arlen_q;
+    assign axi_req_o.arsize   = arsize_q;
+    assign axi_req_o.arburst  = arburst_q;
+    assign axi_req_o.arlock   = arlock_q;
+    assign axi_req_o.arcache  = arcache_q;
+    assign axi_req_o.arprot   = arprot_q;
+    assign axi_req_o.arqos    = arqos_q;
+    assign axi_req_o.arregion = '0;
 
-    assign axi_o.rready  = rready_q;
+    assign axi_req_o.rready   = rready_q;
 
 endmodule
 

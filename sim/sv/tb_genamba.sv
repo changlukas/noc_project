@@ -16,42 +16,45 @@ module tb_genamba;
     import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name);
     longint unsigned cm_ctx, master_ctx, slave_ctx, nmu_ctx, nsu_ctx;
 
-    // ---- AXI + NoC interface bundles ----
-    axi4_intf #(.ID_WIDTH(8), .ADDR_WIDTH(64), .DATA_WIDTH(256)) bfm_nmu_axi();
-    axi4_intf #(.ID_WIDTH(8), .ADDR_WIDTH(64), .DATA_WIDTH(256)) nsu_mem_axi();
+    // ---- AXI + NoC bundles as packed structs (interfaces removed in Task 4) ----
+    // bfm_nmu : BFM (master) -> NMU (slave). req = master-driven, rsp = NMU-driven.
+    ni_signals_pkg::axi_req_t   bfm_nmu_req;
+    ni_signals_pkg::axi_rsp_t   bfm_nmu_rsp;
+    // nsu_mem : NSU (master) -> mem_axi (slave). req = NSU-driven, rsp = mem-driven.
+    ni_signals_pkg::axi_req_t   nsu_mem_req;
+    ni_signals_pkg::axi_rsp_t   nsu_mem_rsp;
     // NoC link as packed structs (noc_intf removed in Task 3 wrap refactor).
     ni_signals_pkg::noc_chan_t  noc_req_link;   // NMU req_o → NSU req_i
     noc_types_pkg::noc_credit_t noc_req_cred_link; // NSU req_cred_o → NMU req_cred_i
     ni_signals_pkg::noc_chan_t  noc_rsp_link;   // NSU rsp_o → NMU rsp_i
     noc_types_pkg::noc_credit_t noc_rsp_cred_link; // NMU rsp_cred_o → NSU rsp_cred_i
 
-    // Tie REGION (not marshalled by DPI per spec §3.2)
-    assign bfm_nmu_axi.awregion = 4'b0;
-    assign bfm_nmu_axi.arregion = 4'b0;
-
-    // ---- BFM ↔ bfm_nmu_axi (BFM uppercase port → axi4_intf lowercase) ----
+    // ---- BFM <-> bfm_nmu_{req,rsp} (BFM uppercase port -> struct field) ----
+    // awregion/arregion carried-but-unused (not a BFM port); tie to 0.
+    assign bfm_nmu_req.awregion = 4'b0;
+    assign bfm_nmu_req.arregion = 4'b0;
     genamba_master_bfm #(.WIDTH_AD(64), .WIDTH_DA(256), .WIDTH_ID(8), .P_MST_ID(0)) u_bfm (
         .ACLK(ACLK), .ARESETn(ARESETn),
-        .AWID(bfm_nmu_axi.awid), .AWADDR(bfm_nmu_axi.awaddr),
-        .AWLEN(bfm_nmu_axi.awlen), .AWSIZE(bfm_nmu_axi.awsize),
-        .AWBURST(bfm_nmu_axi.awburst), .AWLOCK(bfm_nmu_axi.awlock),
-        .AWCACHE(bfm_nmu_axi.awcache), .AWPROT(bfm_nmu_axi.awprot),
-        .AWQOS(bfm_nmu_axi.awqos),
-        .AWVALID(bfm_nmu_axi.awvalid), .AWREADY(bfm_nmu_axi.awready),
-        .WDATA(bfm_nmu_axi.wdata), .WSTRB(bfm_nmu_axi.wstrb),
-        .WLAST(bfm_nmu_axi.wlast),
-        .WVALID(bfm_nmu_axi.wvalid), .WREADY(bfm_nmu_axi.wready),
-        .BID(bfm_nmu_axi.bid), .BRESP(bfm_nmu_axi.bresp),
-        .BVALID(bfm_nmu_axi.bvalid), .BREADY(bfm_nmu_axi.bready),
-        .ARID(bfm_nmu_axi.arid), .ARADDR(bfm_nmu_axi.araddr),
-        .ARLEN(bfm_nmu_axi.arlen), .ARSIZE(bfm_nmu_axi.arsize),
-        .ARBURST(bfm_nmu_axi.arburst), .ARLOCK(bfm_nmu_axi.arlock),
-        .ARCACHE(bfm_nmu_axi.arcache), .ARPROT(bfm_nmu_axi.arprot),
-        .ARQOS(bfm_nmu_axi.arqos),
-        .ARVALID(bfm_nmu_axi.arvalid), .ARREADY(bfm_nmu_axi.arready),
-        .RID(bfm_nmu_axi.rid), .RDATA(bfm_nmu_axi.rdata),
-        .RRESP(bfm_nmu_axi.rresp), .RLAST(bfm_nmu_axi.rlast),
-        .RVALID(bfm_nmu_axi.rvalid), .RREADY(bfm_nmu_axi.rready)
+        .AWID(bfm_nmu_req.awid), .AWADDR(bfm_nmu_req.awaddr),
+        .AWLEN(bfm_nmu_req.awlen), .AWSIZE(bfm_nmu_req.awsize),
+        .AWBURST(bfm_nmu_req.awburst), .AWLOCK(bfm_nmu_req.awlock),
+        .AWCACHE(bfm_nmu_req.awcache), .AWPROT(bfm_nmu_req.awprot),
+        .AWQOS(bfm_nmu_req.awqos),
+        .AWVALID(bfm_nmu_req.awvalid), .AWREADY(bfm_nmu_rsp.awready),
+        .WDATA(bfm_nmu_req.wdata), .WSTRB(bfm_nmu_req.wstrb),
+        .WLAST(bfm_nmu_req.wlast),
+        .WVALID(bfm_nmu_req.wvalid), .WREADY(bfm_nmu_rsp.wready),
+        .BID(bfm_nmu_rsp.bid), .BRESP(bfm_nmu_rsp.bresp),
+        .BVALID(bfm_nmu_rsp.bvalid), .BREADY(bfm_nmu_req.bready),
+        .ARID(bfm_nmu_req.arid), .ARADDR(bfm_nmu_req.araddr),
+        .ARLEN(bfm_nmu_req.arlen), .ARSIZE(bfm_nmu_req.arsize),
+        .ARBURST(bfm_nmu_req.arburst), .ARLOCK(bfm_nmu_req.arlock),
+        .ARCACHE(bfm_nmu_req.arcache), .ARPROT(bfm_nmu_req.arprot),
+        .ARQOS(bfm_nmu_req.arqos),
+        .ARVALID(bfm_nmu_req.arvalid), .ARREADY(bfm_nmu_rsp.arready),
+        .RID(bfm_nmu_rsp.rid), .RDATA(bfm_nmu_rsp.rdata),
+        .RRESP(bfm_nmu_rsp.rresp), .RLAST(bfm_nmu_rsp.rlast),
+        .RVALID(bfm_nmu_rsp.rvalid), .RREADY(bfm_nmu_req.rready)
     );
 
     // ---- DUT bridge: NMU + NSU connected via packed-struct NoC links ----
@@ -60,7 +63,7 @@ module tb_genamba;
     nmu_wrap u_nmu (
         .clk_i(ACLK), .rst_ni(ARESETn),
         .ctx_i(nmu_ctx),
-        .axi_i(bfm_nmu_axi.slave),
+        .axi_req_i(bfm_nmu_req), .axi_rsp_o(bfm_nmu_rsp),
         .noc_req_o(noc_req_link),
         .noc_req_cred_i(noc_req_cred_link),
         .noc_rsp_i(noc_rsp_link),
@@ -73,10 +76,10 @@ module tb_genamba;
         .noc_req_cred_o(noc_req_cred_link),
         .noc_rsp_o(noc_rsp_link),
         .noc_rsp_cred_i(noc_rsp_cred_link),
-        .axi_o(nsu_mem_axi.master)
+        .axi_req_o(nsu_mem_req), .axi_rsp_i(nsu_mem_rsp)
     );
 
-    // ---- nsu_mem_axi ↔ mem_axi (axi4_intf lowercase → UPPERCASE) ----
+    // ---- nsu_mem_{req,rsp} <-> mem_axi (struct field -> UPPERCASE port) ----
     // WAITCONST: vendored mem_axi has a low-power handshake (`wait
     // (CSYSREQ==1'b0)`) that this testbench never exercises — CSYSREQ tied
     // high makes the wait condition constant by design.
@@ -86,26 +89,26 @@ module tb_genamba;
         .AXI_WIDTH_DA(256), .SIZE_IN_BYTES(16384)
     ) u_mem (
         .ARESETn(ARESETn), .ACLK(ACLK), .CSYSREQ(1'b1), .CSYSACK(), .CACTIVE(),
-        .AWID(nsu_mem_axi.awid), .AWADDR(nsu_mem_axi.awaddr),
-        .AWLEN(nsu_mem_axi.awlen), .AWSIZE(nsu_mem_axi.awsize),
-        .AWBURST(nsu_mem_axi.awburst), .AWLOCK(nsu_mem_axi.awlock),
-        .AWCACHE(nsu_mem_axi.awcache), .AWPROT(nsu_mem_axi.awprot),
-        .AWQOS(nsu_mem_axi.awqos), .AWREGION(4'b0),
-        .AWVALID(nsu_mem_axi.awvalid), .AWREADY(nsu_mem_axi.awready),
-        .WDATA(nsu_mem_axi.wdata), .WSTRB(nsu_mem_axi.wstrb),
-        .WLAST(nsu_mem_axi.wlast),
-        .WVALID(nsu_mem_axi.wvalid), .WREADY(nsu_mem_axi.wready),
-        .BID(nsu_mem_axi.bid), .BRESP(nsu_mem_axi.bresp),
-        .BVALID(nsu_mem_axi.bvalid), .BREADY(nsu_mem_axi.bready),
-        .ARID(nsu_mem_axi.arid), .ARADDR(nsu_mem_axi.araddr),
-        .ARLEN(nsu_mem_axi.arlen), .ARSIZE(nsu_mem_axi.arsize),
-        .ARBURST(nsu_mem_axi.arburst), .ARLOCK(nsu_mem_axi.arlock),
-        .ARCACHE(nsu_mem_axi.arcache), .ARPROT(nsu_mem_axi.arprot),
-        .ARQOS(nsu_mem_axi.arqos), .ARREGION(4'b0),
-        .ARVALID(nsu_mem_axi.arvalid), .ARREADY(nsu_mem_axi.arready),
-        .RID(nsu_mem_axi.rid), .RDATA(nsu_mem_axi.rdata),
-        .RRESP(nsu_mem_axi.rresp), .RLAST(nsu_mem_axi.rlast),
-        .RVALID(nsu_mem_axi.rvalid), .RREADY(nsu_mem_axi.rready)
+        .AWID(nsu_mem_req.awid), .AWADDR(nsu_mem_req.awaddr),
+        .AWLEN(nsu_mem_req.awlen), .AWSIZE(nsu_mem_req.awsize),
+        .AWBURST(nsu_mem_req.awburst), .AWLOCK(nsu_mem_req.awlock),
+        .AWCACHE(nsu_mem_req.awcache), .AWPROT(nsu_mem_req.awprot),
+        .AWQOS(nsu_mem_req.awqos), .AWREGION(4'b0),
+        .AWVALID(nsu_mem_req.awvalid), .AWREADY(nsu_mem_rsp.awready),
+        .WDATA(nsu_mem_req.wdata), .WSTRB(nsu_mem_req.wstrb),
+        .WLAST(nsu_mem_req.wlast),
+        .WVALID(nsu_mem_req.wvalid), .WREADY(nsu_mem_rsp.wready),
+        .BID(nsu_mem_rsp.bid), .BRESP(nsu_mem_rsp.bresp),
+        .BVALID(nsu_mem_rsp.bvalid), .BREADY(nsu_mem_req.bready),
+        .ARID(nsu_mem_req.arid), .ARADDR(nsu_mem_req.araddr),
+        .ARLEN(nsu_mem_req.arlen), .ARSIZE(nsu_mem_req.arsize),
+        .ARBURST(nsu_mem_req.arburst), .ARLOCK(nsu_mem_req.arlock),
+        .ARCACHE(nsu_mem_req.arcache), .ARPROT(nsu_mem_req.arprot),
+        .ARQOS(nsu_mem_req.arqos), .ARREGION(4'b0),
+        .ARVALID(nsu_mem_req.arvalid), .ARREADY(nsu_mem_rsp.arready),
+        .RID(nsu_mem_rsp.rid), .RDATA(nsu_mem_rsp.rdata),
+        .RRESP(nsu_mem_rsp.rresp), .RLAST(nsu_mem_rsp.rlast),
+        .RVALID(nsu_mem_rsp.rvalid), .RREADY(nsu_mem_req.rready)
     );
     /* verilator lint_on WAITCONST */
 
@@ -180,35 +183,35 @@ module tb_genamba;
     //   the watchdog, but valid-as-activity would keep resetting it.
     time last_event_time = 0;
     always @(posedge ACLK) begin
-        if ((bfm_nmu_axi.awvalid && bfm_nmu_axi.awready) ||
-            (bfm_nmu_axi.wvalid  && bfm_nmu_axi.wready)  ||
-            (bfm_nmu_axi.bvalid  && bfm_nmu_axi.bready)  ||
-            (bfm_nmu_axi.arvalid && bfm_nmu_axi.arready) ||
-            (bfm_nmu_axi.rvalid  && bfm_nmu_axi.rready)  ||
-            (nsu_mem_axi.awvalid && nsu_mem_axi.awready) ||
-            (nsu_mem_axi.wvalid  && nsu_mem_axi.wready)  ||
-            (nsu_mem_axi.bvalid  && nsu_mem_axi.bready)  ||
-            (nsu_mem_axi.arvalid && nsu_mem_axi.arready) ||
-            (nsu_mem_axi.rvalid  && nsu_mem_axi.rready))
+        if ((bfm_nmu_req.awvalid && bfm_nmu_rsp.awready) ||
+            (bfm_nmu_req.wvalid  && bfm_nmu_rsp.wready)  ||
+            (bfm_nmu_rsp.bvalid  && bfm_nmu_req.bready)  ||
+            (bfm_nmu_req.arvalid && bfm_nmu_rsp.arready) ||
+            (bfm_nmu_rsp.rvalid  && bfm_nmu_req.rready)  ||
+            (nsu_mem_req.awvalid && nsu_mem_rsp.awready) ||
+            (nsu_mem_req.wvalid  && nsu_mem_rsp.wready)  ||
+            (nsu_mem_rsp.bvalid  && nsu_mem_req.bready)  ||
+            (nsu_mem_req.arvalid && nsu_mem_rsp.arready) ||
+            (nsu_mem_rsp.rvalid  && nsu_mem_req.rready))
             last_event_time = $time;
         if (ARESETn && ($time - last_event_time) > 1000) begin
             $display("[%0t] WATCHDOG: 1us without AXI handshake progress, dumping final state", $time);
             $display("  BFM-side : AWV=%b AWR=%b AWID=0x%0h AWADDR=0x%0h AWLEN=%0d",
-                     bfm_nmu_axi.awvalid, bfm_nmu_axi.awready,
-                     bfm_nmu_axi.awid, bfm_nmu_axi.awaddr, bfm_nmu_axi.awlen);
+                     bfm_nmu_req.awvalid, bfm_nmu_rsp.awready,
+                     bfm_nmu_req.awid, bfm_nmu_req.awaddr, bfm_nmu_req.awlen);
             $display("  BFM-side : WV=%b WR=%b WLAST=%b WSTRB=0x%0h",
-                     bfm_nmu_axi.wvalid, bfm_nmu_axi.wready,
-                     bfm_nmu_axi.wlast, bfm_nmu_axi.wstrb);
+                     bfm_nmu_req.wvalid, bfm_nmu_rsp.wready,
+                     bfm_nmu_req.wlast, bfm_nmu_req.wstrb);
             $display("  BFM-side : BV=%b BR=%b BID=0x%0h BRESP=%0d",
-                     bfm_nmu_axi.bvalid, bfm_nmu_axi.bready,
-                     bfm_nmu_axi.bid, bfm_nmu_axi.bresp);
+                     bfm_nmu_rsp.bvalid, bfm_nmu_req.bready,
+                     bfm_nmu_rsp.bid, bfm_nmu_rsp.bresp);
             $display("  NSU-side : AWV=%b AWR=%b AWID=0x%0h AWLEN=%0d",
-                     nsu_mem_axi.awvalid, nsu_mem_axi.awready,
-                     nsu_mem_axi.awid, nsu_mem_axi.awlen);
+                     nsu_mem_req.awvalid, nsu_mem_rsp.awready,
+                     nsu_mem_req.awid, nsu_mem_req.awlen);
             $display("  NSU-side : WV=%b WR=%b WLAST=%b",
-                     nsu_mem_axi.wvalid, nsu_mem_axi.wready, nsu_mem_axi.wlast);
+                     nsu_mem_req.wvalid, nsu_mem_rsp.wready, nsu_mem_req.wlast);
             $display("  NSU-side : BV=%b BR=%b BID=0x%0h",
-                     nsu_mem_axi.bvalid, nsu_mem_axi.bready, nsu_mem_axi.bid);
+                     nsu_mem_rsp.bvalid, nsu_mem_req.bready, nsu_mem_rsp.bid);
             $fatal(1, "WATCHDOG: AXI silence");
         end
     end
@@ -218,39 +221,39 @@ module tb_genamba;
 `ifdef GENAMBA_DBG_AXI
     integer w_beat_count = 0;
     always @(posedge ACLK) begin
-        if (ARESETn && bfm_nmu_axi.awvalid && bfm_nmu_axi.awready)
+        if (ARESETn && bfm_nmu_req.awvalid && bfm_nmu_rsp.awready)
             $display("[%0t] DBG BFM AW handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
-                     $time, bfm_nmu_axi.awid, bfm_nmu_axi.awaddr, bfm_nmu_axi.awlen);
-        if (ARESETn && bfm_nmu_axi.wvalid && bfm_nmu_axi.wready && w_beat_count < 30) begin
+                     $time, bfm_nmu_req.awid, bfm_nmu_req.awaddr, bfm_nmu_req.awlen);
+        if (ARESETn && bfm_nmu_req.wvalid && bfm_nmu_rsp.wready && w_beat_count < 30) begin
             $display("[%0t] DBG BFM W#%0d: WLAST=%b WSTRB=0x%0h DATA[31:0]=0x%0h",
-                     $time, w_beat_count, bfm_nmu_axi.wlast,
-                     bfm_nmu_axi.wstrb[31:0], bfm_nmu_axi.wdata[31:0]);
+                     $time, w_beat_count, bfm_nmu_req.wlast,
+                     bfm_nmu_req.wstrb[31:0], bfm_nmu_req.wdata[31:0]);
             w_beat_count = w_beat_count + 1;
         end
-        if (ARESETn && bfm_nmu_axi.bvalid && bfm_nmu_axi.bready)
+        if (ARESETn && bfm_nmu_rsp.bvalid && bfm_nmu_req.bready)
             $display("[%0t] DBG BFM B handshake: BID=0x%0h BRESP=%0d",
-                     $time, bfm_nmu_axi.bid, bfm_nmu_axi.bresp);
-        if (ARESETn && nsu_mem_axi.awvalid && nsu_mem_axi.awready)
+                     $time, bfm_nmu_rsp.bid, bfm_nmu_rsp.bresp);
+        if (ARESETn && nsu_mem_req.awvalid && nsu_mem_rsp.awready)
             $display("[%0t] DBG NSU AW handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
-                     $time, nsu_mem_axi.awid, nsu_mem_axi.awaddr, nsu_mem_axi.awlen);
-        if (ARESETn && nsu_mem_axi.wvalid && nsu_mem_axi.wready)
+                     $time, nsu_mem_req.awid, nsu_mem_req.awaddr, nsu_mem_req.awlen);
+        if (ARESETn && nsu_mem_req.wvalid && nsu_mem_rsp.wready)
             $display("[%0t] DBG NSU W: WLAST=%b WSTRB=0x%0h",
-                     $time, nsu_mem_axi.wlast, nsu_mem_axi.wstrb[31:0]);
-        if (ARESETn && nsu_mem_axi.bvalid && nsu_mem_axi.bready)
+                     $time, nsu_mem_req.wlast, nsu_mem_req.wstrb[31:0]);
+        if (ARESETn && nsu_mem_rsp.bvalid && nsu_mem_req.bready)
             $display("[%0t] DBG NSU B: BID=0x%0h BRESP=%0d",
-                     $time, nsu_mem_axi.bid, nsu_mem_axi.bresp);
-        if (ARESETn && bfm_nmu_axi.arvalid && bfm_nmu_axi.arready)
+                     $time, nsu_mem_rsp.bid, nsu_mem_rsp.bresp);
+        if (ARESETn && bfm_nmu_req.arvalid && bfm_nmu_rsp.arready)
             $display("[%0t] DBG BFM AR handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
-                     $time, bfm_nmu_axi.arid, bfm_nmu_axi.araddr, bfm_nmu_axi.arlen);
-        if (ARESETn && bfm_nmu_axi.rvalid && bfm_nmu_axi.rready)
+                     $time, bfm_nmu_req.arid, bfm_nmu_req.araddr, bfm_nmu_req.arlen);
+        if (ARESETn && bfm_nmu_rsp.rvalid && bfm_nmu_req.rready)
             $display("[%0t] DBG BFM R: RID=0x%0h RLAST=%b RRESP=%0d",
-                     $time, bfm_nmu_axi.rid, bfm_nmu_axi.rlast, bfm_nmu_axi.rresp);
-        if (ARESETn && nsu_mem_axi.arvalid && nsu_mem_axi.arready)
+                     $time, bfm_nmu_rsp.rid, bfm_nmu_rsp.rlast, bfm_nmu_rsp.rresp);
+        if (ARESETn && nsu_mem_req.arvalid && nsu_mem_rsp.arready)
             $display("[%0t] DBG NSU AR handshake: ID=0x%0h ADDR=0x%0h LEN=%0d",
-                     $time, nsu_mem_axi.arid, nsu_mem_axi.araddr, nsu_mem_axi.arlen);
-        if (ARESETn && nsu_mem_axi.rvalid && nsu_mem_axi.rready)
+                     $time, nsu_mem_req.arid, nsu_mem_req.araddr, nsu_mem_req.arlen);
+        if (ARESETn && nsu_mem_rsp.rvalid && nsu_mem_req.rready)
             $display("[%0t] DBG NSU R: RID=0x%0h RLAST=%b RRESP=%0d",
-                     $time, nsu_mem_axi.rid, nsu_mem_axi.rlast, nsu_mem_axi.rresp);
+                     $time, nsu_mem_rsp.rid, nsu_mem_rsp.rlast, nsu_mem_rsp.rresp);
     end
 `endif // GENAMBA_DBG_AXI
 

@@ -242,34 +242,20 @@ class TestCheckModeWithSv:
 # Task 4: Pin-level SV interface per bundle
 # ---------------------------------------------------------------------------
 
-def test_sv_consolidated_interfaces_present():
-    """ni_signals_pkg.sv must expose the 2 consolidated industry-style interfaces
-    from interface_handshake.json: axi4_intf (master/slave modports) + noc_intf
-    (mosi/miso modports — req + rsp channels bundled).
+def test_interfaces_removed():
+    """ni_signals_pkg.sv must NOT emit any SV interface after the FlooNoC struct
+    refactor — every wrap/fabric/tb port now uses the packed-struct typedefs
+    (noc_chan_t / axi_req_t / axi_rsp_t). The interface_handshake.json source
+    still drives the struct field/channel order, but no interface is emitted.
     """
     # Ensure the SV file is freshly regenerated before reading.
     r = run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
     assert r.returncode == 0, r.stderr
 
-    pkg = RTL_PKG_DIR / "ni_signals_pkg.sv"
-    text = pkg.read_text(encoding="ascii")
-    expected_ifaces = (
-        "axi4_intf",
-        "noc_intf",
-    )
-    for iface in expected_ifaces:
-        assert f"interface {iface}" in text, f"missing SV interface: {iface}"
-        assert (
-            f"endinterface : {iface}" in text or "endinterface" in text
-        ), f"missing endinterface for {iface}"
-    # axi4_intf keeps master/slave modports; noc_intf uses mosi/miso.
-    assert "modport master" in text, "axi4_intf master modport missing"
-    assert "modport slave" in text, "axi4_intf slave modport missing"
-    assert "modport mosi" in text, "noc_intf mosi modport missing"
-    assert "modport miso" in text, "noc_intf miso modport missing"
-    # Old split interfaces must be gone.
-    assert "interface noc_req_intf" not in text
-    assert "interface noc_rsp_intf" not in text
+    sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+    assert "interface noc_intf" not in sv and "interface axi4_intf" not in sv
+    # No stray interface/modport/endinterface tokens at all.
+    assert "interface " not in sv and "modport " not in sv and "endinterface" not in sv
 
 
 class TestLintSv:

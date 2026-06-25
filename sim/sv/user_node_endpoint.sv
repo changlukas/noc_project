@@ -7,8 +7,10 @@
 // Ports:
 //   master_ctx_i  — DPI handle for the test master (AxiMaster c_model instance).
 //   slave_ctx_i   — DPI handle for the test slave  (AxiSlave  c_model instance).
-//   master_axi_o  — AXI master modport; drives into the fabric NMU (ni_wrap.master_axi_i).
-//   slave_axi_i   — AXI slave  modport; receives from the fabric NSU (ni_wrap.slave_axi_o).
+//   master_axi_req_o/master_axi_rsp_i — AXI master face (struct); drives req into
+//                   the fabric NMU (ni_wrap.master_axi_req_i), reads rsp back.
+//   slave_axi_req_i/slave_axi_rsp_o   — AXI slave face (struct); receives req from
+//                   the fabric NSU (ni_wrap.slave_axi_req_o), drives rsp back.
 //
 // SLOT_NAME strings are passed as params (MASTER_SLOT_NAME / SLAVE_SLOT_NAME) so the
 // generator can stamp the same "node<i>.manager" / "node<i>.subordinate" perf slot
@@ -31,60 +33,62 @@ module user_node_endpoint #(
     parameter string       MASTER_SLOT_NAME = "node.manager",
     parameter string       SLAVE_SLOT_NAME  = "node.subordinate"
 ) (
-    input  logic              clk_i,
-    input  logic              rst_ni,
-    input  longint unsigned   master_ctx_i,
-    input  longint unsigned   slave_ctx_i,
-    axi4_intf.master          master_axi_o,
-    axi4_intf.slave           slave_axi_i
+    input  logic                       clk_i,
+    input  logic                       rst_ni,
+    input  longint unsigned            master_ctx_i,
+    input  longint unsigned            slave_ctx_i,
+    output ni_signals_pkg::axi_req_t   master_axi_req_o,
+    input  ni_signals_pkg::axi_rsp_t   master_axi_rsp_i,
+    input  ni_signals_pkg::axi_req_t   slave_axi_req_i,
+    output ni_signals_pkg::axi_rsp_t   slave_axi_rsp_o
 );
 
     axi_master_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
     ) u_master (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(master_ctx_i),
-        .axi_o(master_axi_o)
+        .axi_req_o(master_axi_req_o), .axi_rsp_i(master_axi_rsp_i)
     );
 
     axi_slave_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)
     ) u_slave (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(slave_ctx_i),
-        .axi_i(slave_axi_i)
+        .axi_req_i(slave_axi_req_i), .axi_rsp_o(slave_axi_rsp_o)
     );
 
     axi_perf_monitor #(
         .SLOT_NAME(MASTER_SLOT_NAME), .ID_W(ID_WIDTH)
     ) u_perf_man (
         .clk_i, .rst_ni,
-        .awvalid(master_axi_o.awvalid), .awready(master_axi_o.awready),
-        .awid(master_axi_o.awid),       .awaddr(master_axi_o.awaddr),
-        .awlen(master_axi_o.awlen),     .awsize(master_axi_o.awsize),
-        .wvalid(master_axi_o.wvalid),   .wready(master_axi_o.wready),
-        .bvalid(master_axi_o.bvalid),   .bready(master_axi_o.bready),
-        .bid(master_axi_o.bid),
-        .arvalid(master_axi_o.arvalid), .arready(master_axi_o.arready),
-        .arid(master_axi_o.arid),       .araddr(master_axi_o.araddr),
-        .arlen(master_axi_o.arlen),     .arsize(master_axi_o.arsize),
-        .rvalid(master_axi_o.rvalid),   .rready(master_axi_o.rready),
-        .rlast(master_axi_o.rlast),     .rid(master_axi_o.rid)
+        .awvalid(master_axi_req_o.awvalid), .awready(master_axi_rsp_i.awready),
+        .awid(master_axi_req_o.awid),       .awaddr(master_axi_req_o.awaddr),
+        .awlen(master_axi_req_o.awlen),     .awsize(master_axi_req_o.awsize),
+        .wvalid(master_axi_req_o.wvalid),   .wready(master_axi_rsp_i.wready),
+        .bvalid(master_axi_rsp_i.bvalid),   .bready(master_axi_req_o.bready),
+        .bid(master_axi_rsp_i.bid),
+        .arvalid(master_axi_req_o.arvalid), .arready(master_axi_rsp_i.arready),
+        .arid(master_axi_req_o.arid),       .araddr(master_axi_req_o.araddr),
+        .arlen(master_axi_req_o.arlen),     .arsize(master_axi_req_o.arsize),
+        .rvalid(master_axi_rsp_i.rvalid),   .rready(master_axi_req_o.rready),
+        .rlast(master_axi_rsp_i.rlast),     .rid(master_axi_rsp_i.rid)
     );
 
     axi_perf_monitor #(
         .SLOT_NAME(SLAVE_SLOT_NAME), .ID_W(ID_WIDTH)
     ) u_perf_sub (
         .clk_i, .rst_ni,
-        .awvalid(slave_axi_i.awvalid), .awready(slave_axi_i.awready),
-        .awid(slave_axi_i.awid),       .awaddr(slave_axi_i.awaddr),
-        .awlen(slave_axi_i.awlen),     .awsize(slave_axi_i.awsize),
-        .wvalid(slave_axi_i.wvalid),   .wready(slave_axi_i.wready),
-        .bvalid(slave_axi_i.bvalid),   .bready(slave_axi_i.bready),
-        .bid(slave_axi_i.bid),
-        .arvalid(slave_axi_i.arvalid), .arready(slave_axi_i.arready),
-        .arid(slave_axi_i.arid),       .araddr(slave_axi_i.araddr),
-        .arlen(slave_axi_i.arlen),     .arsize(slave_axi_i.arsize),
-        .rvalid(slave_axi_i.rvalid),   .rready(slave_axi_i.rready),
-        .rlast(slave_axi_i.rlast),     .rid(slave_axi_i.rid)
+        .awvalid(slave_axi_req_i.awvalid), .awready(slave_axi_rsp_o.awready),
+        .awid(slave_axi_req_i.awid),       .awaddr(slave_axi_req_i.awaddr),
+        .awlen(slave_axi_req_i.awlen),     .awsize(slave_axi_req_i.awsize),
+        .wvalid(slave_axi_req_i.wvalid),   .wready(slave_axi_rsp_o.wready),
+        .bvalid(slave_axi_rsp_o.bvalid),   .bready(slave_axi_req_i.bready),
+        .bid(slave_axi_rsp_o.bid),
+        .arvalid(slave_axi_req_i.arvalid), .arready(slave_axi_rsp_o.arready),
+        .arid(slave_axi_req_i.arid),       .araddr(slave_axi_req_i.araddr),
+        .arlen(slave_axi_req_i.arlen),     .arsize(slave_axi_req_i.arsize),
+        .rvalid(slave_axi_rsp_o.rvalid),   .rready(slave_axi_req_i.rready),
+        .rlast(slave_axi_rsp_o.rlast),     .rid(slave_axi_rsp_o.rid)
     );
 
 endmodule

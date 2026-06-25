@@ -1,8 +1,10 @@
 // ni_wrap — Network Interface: bundles nmu_wrap + nsu_wrap for one mesh node.
 //
 // Ports:
-//   master_axi_i   — AXI slave modport; test master drives AW/W/AR into the NMU.
-//   slave_axi_o    — AXI master modport; NSU drives AW/W/AR out toward test slave.
+//   master_axi_req_i/master_axi_rsp_o — NMU AXI slave face (struct): test master
+//                    drives req (AW/W/AR) in; NMU drives rsp (awready/B/R) out.
+//   slave_axi_req_o/slave_axi_rsp_i   — NSU AXI master face (struct): NSU drives
+//                    req (AW/W/AR) out toward test slave; slave drives rsp in.
 //   NMU NoC side (forwarded from nmu_wrap):
 //     noc_req_o      — ni_signals_pkg::noc_chan_t: NMU drives req flit toward router.
 //     noc_req_cred_i — noc_types_pkg::noc_credit_t: router returns req credit.
@@ -38,8 +40,12 @@ module ni_wrap #(
     input  logic              rst_ni,
     input  longint unsigned   nmu_ctx_i,
     input  longint unsigned   nsu_ctx_i,
-    axi4_intf.slave           master_axi_i,
-    axi4_intf.master          slave_axi_o,
+    // NMU AXI slave face (struct)
+    input  ni_signals_pkg::axi_req_t   master_axi_req_i,
+    output ni_signals_pkg::axi_rsp_t   master_axi_rsp_o,
+    // NSU AXI master face (struct)
+    output ni_signals_pkg::axi_req_t   slave_axi_req_o,
+    input  ni_signals_pkg::axi_rsp_t   slave_axi_rsp_i,
     // NMU NoC side
     output ni_signals_pkg::noc_chan_t  noc_req_o,
     input  noc_types_pkg::noc_credit_t noc_req_cred_i,
@@ -65,7 +71,7 @@ module ni_wrap #(
         .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_nmu (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nmu_ctx_i),
-        .axi_i(master_axi_i),
+        .axi_req_i(master_axi_req_i), .axi_rsp_o(master_axi_rsp_o),
         .noc_req_o(noc_req_o), .noc_req_cred_i(noc_req_cred_i),
         .noc_rsp_i(noc_rsp_i), .noc_rsp_cred_o(noc_rsp_cred_o)
     );
@@ -77,7 +83,7 @@ module ni_wrap #(
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nsu_ctx_i),
         .noc_req_i(noc_req_i), .noc_req_cred_o(noc_req_cred_o),
         .noc_rsp_o(noc_rsp_o), .noc_rsp_cred_i(noc_rsp_cred_i),
-        .axi_o(slave_axi_o)
+        .axi_req_o(slave_axi_req_o), .axi_rsp_i(slave_axi_rsp_i)
     );
 
 endmodule

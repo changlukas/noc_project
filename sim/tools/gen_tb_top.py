@@ -121,22 +121,10 @@ def _nodes(topo: dict):
     return out, x_dim, y_dim
 
 
-def _neighbors(x, y, x_dim, y_dim):
-    """Map of live directions -> (peer_x, peer_y) for a node at (x,y). +y=NORTH."""
-    nbr = {}
-    if y + 1 < y_dim:
-        nbr["NORTH"] = (x, y + 1)
-    if x + 1 < x_dim:
-        nbr["EAST"] = (x + 1, y)
-    if y - 1 >= 0:
-        nbr["SOUTH"] = (x, y - 1)
-    if x - 1 >= 0:
-        nbr["WEST"] = (x - 1, y)
-    return nbr
-
-
-_OPPOSITE = {"NORTH": "SOUTH", "SOUTH": "NORTH", "EAST": "WEST", "WEST": "EAST"}
-
+# Live-neighbor map / opposite-port logic now lives in the emitted SV genvar
+# generate (localparams HAS_N/E/S/W + PEER_N/E/S/W; +y=NORTH, RP_* opposite
+# pairs), driven by the raster index. The Python model only needs _nodes() to
+# stamp per-node coords/ids; the fabric instances are a single generate loop.
 
 # ---------------------------------------------------------------------------
 # Fabric emitter — noc_fabric_<topo>.sv
@@ -148,9 +136,6 @@ def emit_fabric(topo: dict) -> str:
     n = len(nodes)
     num_vc = topo["topology"]["num_vc"]
     guard = f"NOC_FABRIC_{name.upper()}_SV"
-
-    # idx -> (x,y) and (x,y) -> idx lookups.
-    idx_of = {(x, y): i for (i, x, y, _c) in nodes}
 
     lines = []
     w = lines.append
@@ -190,182 +175,192 @@ def emit_fabric(topo: dict) -> str:
     w(") (")
     w("    input  logic clk_i,")
     w("    input  logic rst_ni,")
-    # ctx ports + AXI interface ports, one set per node.
-    for (i, x, y, _c) in nodes:
-        w(f"    // node{i} (x={x}, y={y}) DPI handles + AXI faces")
-        w(f"    input  longint unsigned router{i}_ctx,")
-        w(f"    input  longint unsigned nmu{i}_ctx,")
-        w(f"    input  longint unsigned nsu{i}_ctx,")
-        w(f"    axi4_intf.slave  master_axi_{i},   // NMU ingress (driven by tb master)")
-        last = (i == n - 1)
-        comma = "" if last else ","
-        w(f"    axi4_intf.master slave_axi_{i}{comma}     // NSU egress (consumed by tb slave)")
+    # ctx handles + AXI faces as PER-NODE ARRAYS (longint unsigned chandle-subst
+    # + packed-struct), so the node instances collapse into a genvar generate.
+    w(f"    // Per-node DPI ctx handle arrays (chandle-substitute longint unsigned).")
+    w(f"    input  longint unsigned router_ctx [{n}],")
+    w(f"    input  longint unsigned nmu_ctx    [{n}],")
+    w(f"    input  longint unsigned nsu_ctx    [{n}],")
+    w(f"    // Per-node AXI faces (struct arrays): NMU ingress (driven by tb master)")
+    w(f"    input  ni_signals_pkg::axi_req_t  master_axi_req [{n}],")
+    w(f"    output ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n}],")
+    w(f"    // Per-node AXI faces (struct arrays): NSU egress (consumed by tb slave)")
+    w(f"    output ni_signals_pkg::axi_req_t  slave_axi_req  [{n}],")
+    w(f"    input  ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n}]")
     w(");")
     w("")
+    w(f"    localparam int unsigned NUM_NODES = {n};")
+    w(f"    localparam int unsigned X_DIM     = {x_dim};")
+    w(f"    localparam int unsigned Y_DIM     = {y_dim};")
     w(f"    localparam int unsigned LINK_PORTS = {LINK_PORTS};  // LOCAL + N/E/S/W")
     w("    // RouterPort direction indices (router.hpp enum).")
     for d, v in (("LOCAL", 0), ("NORTH", 1), ("EAST", 2), ("SOUTH", 3), ("WEST", 4)):
         w(f"    localparam int unsigned RP_{d} = {v};")
     w("")
 
-    # Per-node NoC struct arrays (replace noc_intf instances).
+    # Per-node NoC struct arrays (NI<->router connections).
     w("    // Per-node NoC struct arrays: NI<->router connections.")
-    w(f"    ni_signals_pkg::noc_chan_t          node_req        [{n}];  // NMU req -> router")
-    w(f"    noc_types_pkg::noc_credit_t         node_req_cred   [{n}];  // router credit -> NMU")
-    w(f"    ni_signals_pkg::noc_chan_t          node_rsp        [{n}];  // router rsp -> NMU")
-    w(f"    noc_types_pkg::noc_credit_t         node_rsp_cred   [{n}];  // NMU rsp credit -> router")
-    w(f"    ni_signals_pkg::noc_chan_t          node_nsu_req    [{n}];  // router req -> NSU")
-    w(f"    noc_types_pkg::noc_credit_t         node_nsu_req_cred[{n}]; // NSU credit -> router")
-    w(f"    ni_signals_pkg::noc_chan_t          node_nsu_rsp    [{n}];  // NSU rsp -> router")
-    w(f"    noc_types_pkg::noc_credit_t         node_nsu_rsp_cred[{n}]; // router rsp credit -> NSU")
+    w(f"    ni_signals_pkg::noc_chan_t          node_req         [{n}];  // NMU req -> router")
+    w(f"    noc_types_pkg::noc_credit_t         node_req_cred    [{n}];  // router credit -> NMU")
+    w(f"    ni_signals_pkg::noc_chan_t          node_rsp         [{n}];  // router rsp -> NMU")
+    w(f"    noc_types_pkg::noc_credit_t         node_rsp_cred    [{n}];  // NMU rsp credit -> router")
+    w(f"    ni_signals_pkg::noc_chan_t          node_nsu_req     [{n}];  // router req -> NSU")
+    w(f"    noc_types_pkg::noc_credit_t         node_nsu_req_cred[{n}];  // NSU credit -> router")
+    w(f"    ni_signals_pkg::noc_chan_t          node_nsu_rsp     [{n}];  // NSU rsp -> router")
+    w(f"    noc_types_pkg::noc_credit_t         node_nsu_rsp_cred[{n}];  // router rsp credit -> NSU")
     w("")
 
-    # Per-node LINK face arrays (whole [LINK_PORTS] bundle per node).
-    for (i, _x, _y, _c) in nodes:
-        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_out_valid,  n{i}_link_rsp_out_valid;")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_out_flit   [LINK_PORTS];")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_out_flit   [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_in_credit  [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_in_credit  [LINK_PORTS];")
-        w(f"    logic [LINK_PORTS-1:0]   n{i}_link_req_in_valid,   n{i}_link_rsp_in_valid;")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_req_in_flit    [LINK_PORTS];")
-        w(f"    logic [FLIT_WIDTH-1:0]   n{i}_link_rsp_in_flit    [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_req_out_credit [LINK_PORTS];")
-        w(f"    logic [NUM_VC-1:0]       n{i}_link_rsp_out_credit [LINK_PORTS];")
-        w("")
+    # Per-node LINK face arrays, indexed [node][LINK_PORTS]. Replaces the
+    # Python-unrolled n{i}_link_* nets so the wiring/instances can be a genvar loop.
+    w("    // Per-node inter-router LINK faces, indexed [node][direction].")
+    w(f"    logic [LINK_PORTS-1:0]   link_req_out_valid  [{n}];")
+    w(f"    logic [LINK_PORTS-1:0]   link_rsp_out_valid  [{n}];")
+    w(f"    logic [FLIT_WIDTH-1:0]   link_req_out_flit   [{n}][LINK_PORTS];")
+    w(f"    logic [FLIT_WIDTH-1:0]   link_rsp_out_flit   [{n}][LINK_PORTS];")
+    w(f"    logic [NUM_VC-1:0]       link_req_in_credit  [{n}][LINK_PORTS];")
+    w(f"    logic [NUM_VC-1:0]       link_rsp_in_credit  [{n}][LINK_PORTS];")
+    w(f"    logic [LINK_PORTS-1:0]   link_req_in_valid   [{n}];")
+    w(f"    logic [LINK_PORTS-1:0]   link_rsp_in_valid   [{n}];")
+    w(f"    logic [FLIT_WIDTH-1:0]   link_req_in_flit    [{n}][LINK_PORTS];")
+    w(f"    logic [FLIT_WIDTH-1:0]   link_rsp_in_flit    [{n}][LINK_PORTS];")
+    w(f"    logic [NUM_VC-1:0]       link_req_out_credit [{n}][LINK_PORTS];")
+    w(f"    logic [NUM_VC-1:0]       link_rsp_out_credit [{n}][LINK_PORTS];")
+    w("")
 
-    # Node instances: ni_wrap (= NMU+NSU) + router_wrap.
-    for (i, x, y, _c) in nodes:
-        w("    // -------------------------------------------------------------------------")
-        w(f"    // node{i} (x={x}, y={y}): ni_wrap (nmu+nsu) + router_wrap")
-        w("    // -------------------------------------------------------------------------")
-        w(f"    ni_wrap #(")
-        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-          f".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
-        w(f"    ) u_ni_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni),")
-        w(f"        .nmu_ctx_i(nmu{i}_ctx), .nsu_ctx_i(nsu{i}_ctx),")
-        w(f"        .master_axi_i(master_axi_{i}), .slave_axi_o(slave_axi_{i}),")
-        w(f"        .noc_req_o(node_req[{i}]), .noc_req_cred_i(node_req_cred[{i}]),")
-        w(f"        .noc_rsp_i(node_rsp[{i}]), .noc_rsp_cred_o(node_rsp_cred[{i}]),")
-        w(f"        .noc_req_i(node_nsu_req[{i}]), .noc_req_cred_o(node_nsu_req_cred[{i}]),")
-        w(f"        .noc_rsp_o(node_nsu_rsp[{i}]), .noc_rsp_cred_i(node_nsu_rsp_cred[{i}])")
-        w(f"    );")
-        w("")
-        w(f"    router_wrap #(")
-        w(f"        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-          f".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
-        w(f"        .LINK_PORTS(LINK_PORTS)")
-        w(f"    ) u_router_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(router{i}_ctx),")
-        w(f"        .noc_nmu_req_i(node_req[{i}]), .noc_nmu_req_cred_o(node_req_cred[{i}]),")
-        w(f"        .noc_nmu_rsp_o(node_rsp[{i}]), .noc_nmu_rsp_cred_i(node_rsp_cred[{i}]),")
-        w(f"        .noc_nsu_req_o(node_nsu_req[{i}]), .noc_nsu_req_cred_i(node_nsu_req_cred[{i}]),")
-        w(f"        .noc_nsu_rsp_i(node_nsu_rsp[{i}]), .noc_nsu_rsp_cred_o(node_nsu_rsp_cred[{i}]),")
-        w(f"        .link_req_out_valid(n{i}_link_req_out_valid),")
-        w(f"        .link_req_out_flit(n{i}_link_req_out_flit),")
-        w(f"        .link_req_out_credit(n{i}_link_req_out_credit),")
-        w(f"        .link_req_in_valid(n{i}_link_req_in_valid),")
-        w(f"        .link_req_in_flit(n{i}_link_req_in_flit),")
-        w(f"        .link_req_in_credit(n{i}_link_req_in_credit),")
-        w(f"        .link_rsp_out_valid(n{i}_link_rsp_out_valid),")
-        w(f"        .link_rsp_out_flit(n{i}_link_rsp_out_flit),")
-        w(f"        .link_rsp_out_credit(n{i}_link_rsp_out_credit),")
-        w(f"        .link_rsp_in_valid(n{i}_link_rsp_in_valid),")
-        w(f"        .link_rsp_in_flit(n{i}_link_rsp_in_flit),")
-        w(f"        .link_rsp_in_credit(n{i}_link_rsp_in_credit)")
-        w(f"    );")
-        w("")
-
-    # Per-node IN-face wiring: drive every direction slot. Live directions take
-    # the peer's matching OUT slot (data) + the peer's returned credit; boundary
-    # directions are tied off. Two procedural blocks per node (req/rsp).
+    # ------------------------------------------------------------------
+    # Node generate loop: ni_wrap (= NMU+NSU) + router_wrap + per-node link
+    # wiring + boundary tie-off + perf monitors. Coordinates from the linear
+    # index mirror _nodes() raster order: X = i % X_DIM, Y = i / X_DIM, so the
+    # routing id (y<<X_WIDTH)|x is preserved for every node. Neighbor indices
+    # are computed inline (NORTH=i+X_DIM, EAST=i+1, SOUTH=i-X_DIM, WEST=i-1)
+    # with the same boundary guards _neighbors() applies in the Python model.
+    # ------------------------------------------------------------------
     w("    // -------------------------------------------------------------------------")
-    w("    // Inter-router link wiring (per direction) + boundary tie-off")
+    w("    // Per-node generate: ni_wrap + router_wrap + link wiring + perf monitors")
     w("    // -------------------------------------------------------------------------")
-    for (i, x, y, _c) in nodes:
-        nbr = _neighbors(x, y, x_dim, y_dim)
+    w("    for (genvar i = 0; i < NUM_NODES; i++) begin : g_node")
+    w("        localparam int unsigned X = i % X_DIM;")
+    w("        localparam int unsigned Y = i / X_DIM;")
+    w("        // Live-neighbor flags + peer linear indices (boundary -> tied off).")
+    w("        localparam bit HAS_N = (Y + 1 < Y_DIM);")
+    w("        localparam bit HAS_E = (X + 1 < X_DIM);")
+    w("        localparam bit HAS_S = (Y >= 1);")
+    w("        localparam bit HAS_W = (X >= 1);")
+    w("        localparam int unsigned PEER_N = i + X_DIM;")
+    w("        localparam int unsigned PEER_E = i + 1;")
+    w("        localparam int unsigned PEER_S = i - X_DIM;")
+    w("        localparam int unsigned PEER_W = i - 1;")
+    w("")
+    w("        ni_wrap #(")
+    w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+    w("            .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
+      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+    w("        ) u_ni (")
+    w("            .clk_i(clk_i), .rst_ni(rst_ni),")
+    w("            .nmu_ctx_i(nmu_ctx[i]), .nsu_ctx_i(nsu_ctx[i]),")
+    w("            .master_axi_req_i(master_axi_req[i]), .master_axi_rsp_o(master_axi_rsp[i]),")
+    w("            .slave_axi_req_o(slave_axi_req[i]),   .slave_axi_rsp_i(slave_axi_rsp[i]),")
+    w("            .noc_req_o(node_req[i]), .noc_req_cred_i(node_req_cred[i]),")
+    w("            .noc_rsp_i(node_rsp[i]), .noc_rsp_cred_o(node_rsp_cred[i]),")
+    w("            .noc_req_i(node_nsu_req[i]), .noc_req_cred_o(node_nsu_req_cred[i]),")
+    w("            .noc_rsp_o(node_nsu_rsp[i]), .noc_rsp_cred_i(node_nsu_rsp_cred[i])")
+    w("        );")
+    w("")
+    w("        router_wrap #(")
+    w("            .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
+      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
+    w("            .LINK_PORTS(LINK_PORTS)")
+    w("        ) u_router (")
+    w("            .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(router_ctx[i]),")
+    w("            .noc_nmu_req_i(node_req[i]), .noc_nmu_req_cred_o(node_req_cred[i]),")
+    w("            .noc_nmu_rsp_o(node_rsp[i]), .noc_nmu_rsp_cred_i(node_rsp_cred[i]),")
+    w("            .noc_nsu_req_o(node_nsu_req[i]), .noc_nsu_req_cred_i(node_nsu_req_cred[i]),")
+    w("            .noc_nsu_rsp_i(node_nsu_rsp[i]), .noc_nsu_rsp_cred_o(node_nsu_rsp_cred[i]),")
+    w("            .link_req_out_valid(link_req_out_valid[i]),")
+    w("            .link_req_out_flit(link_req_out_flit[i]),")
+    w("            .link_req_out_credit(link_req_out_credit[i]),")
+    w("            .link_req_in_valid(link_req_in_valid[i]),")
+    w("            .link_req_in_flit(link_req_in_flit[i]),")
+    w("            .link_req_in_credit(link_req_in_credit[i]),")
+    w("            .link_rsp_out_valid(link_rsp_out_valid[i]),")
+    w("            .link_rsp_out_flit(link_rsp_out_flit[i]),")
+    w("            .link_rsp_out_credit(link_rsp_out_credit[i]),")
+    w("            .link_rsp_in_valid(link_rsp_in_valid[i]),")
+    w("            .link_rsp_in_flit(link_rsp_in_flit[i]),")
+    w("            .link_rsp_in_credit(link_rsp_in_credit[i])")
+    w("        );")
+    w("")
+    # Per-node IN-face wiring: drive every direction slot. A live direction takes
+    # the peer's OPPOSITE OUT slot (data) + the peer's returned in_credit; a
+    # boundary direction stays at the tie-off default. One always_comb per net.
+    for net in ("req", "rsp"):
+        w(f"        always_comb begin : link_{net}_in")
+        w(f"            for (int p = 0; p < LINK_PORTS; p++) begin")
+        w(f"                link_{net}_in_valid[i][p]   = 1'b0;")
+        w(f"                link_{net}_in_flit[i][p]    = '0;")
+        w(f"                link_{net}_out_credit[i][p] = '0;")
+        w(f"            end")
+        # NORTH<->peer SOUTH, EAST<->peer WEST, SOUTH<->peer NORTH, WEST<->peer EAST.
+        for d, has, peer, pd in (
+            ("NORTH", "HAS_N", "PEER_N", "SOUTH"),
+            ("EAST",  "HAS_E", "PEER_E", "WEST"),
+            ("SOUTH", "HAS_S", "PEER_S", "NORTH"),
+            ("WEST",  "HAS_W", "PEER_W", "EAST"),
+        ):
+            w(f"            if ({has}) begin  // {d}: <- peer {pd} OUT")
+            w(f"                link_{net}_in_valid[i][RP_{d}]   = "
+              f"link_{net}_out_valid[{peer}][RP_{pd}];")
+            w(f"                link_{net}_in_flit[i][RP_{d}]    = "
+              f"link_{net}_out_flit[{peer}][RP_{pd}];")
+            w(f"                link_{net}_out_credit[i][RP_{d}] = "
+              f"link_{net}_in_credit[{peer}][RP_{pd}];")
+            w(f"            end")
+        w(f"        end")
+        w("")
+    # Boundary tie-off assertion: a boundary direction must never drive OUT valid.
+    w("        // Boundary tie-off assertion: a boundary direction (no neighbor)")
+    w("        // must never drive OUT valid. Fires on a fabric wiring mistake; the")
+    w("        // C++ route leak (dst outside mesh) is caught upstream by")
+    w("        // route_compute's abort.")
+    w("        always_ff @(posedge clk_i) begin")
+    w("            if (rst_ni) begin")
+    for d, has in (("NORTH", "HAS_N"), ("EAST", "HAS_E"),
+                   ("SOUTH", "HAS_S"), ("WEST", "HAS_W")):
         for net in ("req", "rsp"):
-            w(f"    always_comb begin : link_{net}_in_n{i}")
-            w(f"        for (int p = 0; p < LINK_PORTS; p++) begin")
-            w(f"            n{i}_link_{net}_in_valid[p]   = 1'b0;")
-            w(f"            n{i}_link_{net}_in_flit[p]    = '0;")
-            w(f"            n{i}_link_{net}_out_credit[p] = '0;")
-            w(f"        end")
-            for d, (px, py) in nbr.items():
-                pi = idx_of[(px, py)]
-                pd = _OPPOSITE[d]
-                w(f"        // {d}: data IN <- node{pi} {pd} OUT; out_credit <- "
-                  f"node{pi} {pd} in_credit.")
-                w(f"        n{i}_link_{net}_in_valid[RP_{d}]   = n{pi}_link_{net}_out_valid[RP_{pd}];")
-                w(f"        n{i}_link_{net}_in_flit[RP_{d}]    = n{pi}_link_{net}_out_flit[RP_{pd}];")
-                w(f"        n{i}_link_{net}_out_credit[RP_{d}] = n{pi}_link_{net}_in_credit[RP_{pd}];")
-            w(f"    end")
-            w("")
-
-    # Tie-off assertion: any boundary direction (no neighbor) asserting OUT valid
-    # -> $fatal. Scope note: the C++ route leak (a dst outside the mesh) is already
-    # caught upstream by route_compute's assert+abort (router.hpp), and a boundary
-    # direction's eject adapter is never constructed, so a *misrouted in-mesh* flit
-    # would stall silently in the unwired output FIFO rather than drive OUT valid.
-    # What this assertion actually guards is a fabric WIRING mistake — a future
-    # generator/edit that drives a boundary OUT net (e.g. a mis-derived neighbor
-    # map) surfaces here as a $fatal instead of a silent hang. Defense-in-depth on
-    # the SV side; not a substitute for the C++ abort.
-    w("    // -------------------------------------------------------------------------")
-    w("    // Boundary tie-off assertion: a boundary direction (no neighbor) must")
-    w("    // never drive OUT valid. Fires on a fabric wiring mistake; the C++ route")
-    w("    // leak (dst outside mesh) is caught upstream by route_compute's abort.")
-    w("    // -------------------------------------------------------------------------")
-    w("    always_ff @(posedge clk_i) begin")
-    w("        if (rst_ni) begin")
-    for (i, x, y, _c) in nodes:
-        nbr = _neighbors(x, y, x_dim, y_dim)
-        for d in ("NORTH", "EAST", "SOUTH", "WEST"):
-            if d in nbr:
-                continue
-            for net in ("req", "rsp"):
-                w(f"            if (n{i}_link_{net}_out_valid[RP_{d}])")
-                w(f'                $fatal(1, "noc_fabric: node{i} drove a flit on '
-                  f'tied-off {d} ({net}) - fabric link wiring mistake");')
+            w(f"                if (!{has} && link_{net}_out_valid[i][RP_{d}])")
+            w(f'                    $fatal(1, "noc_fabric: node%0d drove a flit on '
+              f'tied-off {d} ({net}) - fabric link wiring mistake", i);')
     w("        end")
-    w("    end")
+    w("        end")
     w("")
-
-    # Link perf monitors: per directed edge, the OUT valid + the credit received.
-    w("    // -------------------------------------------------------------------------")
-    w("    // Inter-router link perf monitors (passive)")
-    w("    // -------------------------------------------------------------------------")
-    seen = set()
-    for (i, x, y, _c) in nodes:
-        nbr = _neighbors(x, y, x_dim, y_dim)
-        for d, (px, py) in nbr.items():
-            pi = idx_of[(px, py)]
-            key = (i, pi)
-            if key in seen:
-                continue
-            seen.add(key)
-            for net in ("req", "rsp"):
-                # vc_id lives in the flit header; its bit window comes from the
-                # spec-generated ni_flit_pkg (VC_ID_LSB/VC_ID_MSB derived from
-                # constants.yaml field widths) rather than a magic [21:19] slice,
-                # so a future flit-layout change flows through on regen.
-                # credit_pulse is per-VC (NOT OR-collapsed): each bit = one VC
-                # slot freed.
-                flit_wire = f"n{i}_link_{net}_out_flit[RP_{d}]"
-                credit_wire = f"n{i}_link_{net}_out_credit[RP_{d}]"
-                vc_slice = f"{flit_wire}[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]"
-                w(f"    link_perf_monitor #(")
-                w(f'        .LINK_NAME("{net}_{i}to{pi}"), .BUFFER_DEPTH(ROUTER_VC_DEPTH),')
-                w(f"        .NUM_VC(NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)")
-                w(f"    ) u_perf_link_{net}_{i}_{pi} (")
-                w(f"        .clk_i, .rst_ni,")
-                w(f"        .valid(n{i}_link_{net}_out_valid[RP_{d}]),")
-                w(f"        .vc_id({vc_slice}),")
-                w(f"        .credit_pulse({credit_wire})")
-                w(f"    );")
-                w("")
+    # Link perf monitors: one per live neighbor direction (req+rsp). Mirrors the
+    # prior emit — every directed (node -> peer) edge gets a monitor, named
+    # "{net}_{i}to{peer}". Wrapped in `if (HAS_*) generate` so boundary dirs emit
+    # nothing.  noc.links is dropped by check_perf_parity, but the slot/edge set
+    # is preserved 1:1 anyway.
+    w("        // Inter-router link perf monitors (passive): one per live")
+    w("        // neighbor direction, named {net}_{i}to{peer}. vc_id bit window")
+    w("        // from ni_flit_pkg; credit_pulse is per-VC (not OR-collapsed).")
+    for d, has, peer in (("NORTH", "HAS_N", "PEER_N"), ("EAST", "HAS_E", "PEER_E"),
+                         ("SOUTH", "HAS_S", "PEER_S"), ("WEST", "HAS_W", "PEER_W")):
+        w(f"        if ({has}) begin : g_perf_{d.lower()}")
+        for net in ("req", "rsp"):
+            flit_wire = f"link_{net}_out_flit[i][RP_{d}]"
+            credit_wire = f"link_{net}_out_credit[i][RP_{d}]"
+            vc_slice = f"{flit_wire}[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]"
+            w(f"            link_perf_monitor #(")
+            w(f'                .LINK_NAME($sformatf("{net}_%0dto%0d", i, {peer})),')
+            w(f"                .BUFFER_DEPTH(ROUTER_VC_DEPTH),")
+            w(f"                .NUM_VC(NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)")
+            w(f"            ) u_perf_link_{net} (")
+            w(f"                .clk_i, .rst_ni,")
+            w(f"                .valid(link_{net}_out_valid[i][RP_{d}]),")
+            w(f"                .vc_id({vc_slice}),")
+            w(f"                .credit_pulse({credit_wire})")
+            w(f"            );")
+        w(f"        end")
+    w("    end : g_node")
+    w("")
 
     w(f"endmodule")
     w("")
@@ -464,11 +459,16 @@ def emit_tb_top(topo: dict) -> str:
     w('    import "DPI-C" context function int     cmodel_reads_checked();')
     w("")
 
-    # Per-node scenario strings + ctx handles.
+    # Per-node scenario strings + ctx handle ARRAYS (chandle-substitute longint
+    # unsigned). Arrays let the fabric take them as array ports and instantiate
+    # nodes via a genvar generate loop.
     for (i, x, y, c) in nodes:
         w(f"    string  scn_node{i};")
-    for (i, _x, _y, _c) in nodes:
-        w(f"    longint unsigned router{i}_ctx, m{i}_ctx, s{i}_ctx, n{i}_nmu_ctx, n{i}_nsu_ctx;")
+    w(f"    longint unsigned router_ctx [{n}];")
+    w(f"    longint unsigned m_ctx      [{n}];")
+    w(f"    longint unsigned s_ctx      [{n}];")
+    w(f"    longint unsigned nmu_ctx    [{n}];")
+    w(f"    longint unsigned nsu_ctx    [{n}];")
     w("")
 
     # Plusargs + cmodel_init + per-node create.
@@ -488,37 +488,34 @@ def emit_tb_top(topo: dict) -> str:
     w("        end")
     last_i = nodes[-1][0]
     w(f"        cmodel_init(scn_node{last_i});  // shared config; any variant is fine")
-    # Router creates: full (x,y,mesh_x,mesh_y,num_vc).
+    # Router creates: full (x,y,mesh_x,mesh_y,num_vc). Fill ctx array element-by-
+    # element (raster index == fabric genvar index).
     for (i, x, y, _c) in nodes:
-        w(f'        router{i}_ctx = cmodel_router_create("router_{i}", {x}, {y}, '
+        w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
     # Per-node master/slave/nmu/nsu creates. Identity pairing: master_i/slave_i <- scn_node{i}.
     for (i, x, y, c) in nodes:
         w(f"        // node{i}: master and slave both use scn_node{i}; dst encoded in addr bits 32+.")
-        w(f'        m{i}_ctx     = cmodel_master_create("master_{i}", scn_node{i});')
-        w(f'        s{i}_ctx     = cmodel_slave_create ("slave_{i}",  scn_node{i});')
-        w(f'        n{i}_nmu_ctx = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC);  '
+        w(f'        m_ctx[{i}]   = cmodel_master_create("master_{i}", scn_node{i});')
+        w(f'        s_ctx[{i}]   = cmodel_slave_create ("slave_{i}",  scn_node{i});')
+        w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC);  '
           f'// src_id = node{i} coord {c}')
-        w(f'        n{i}_nsu_ctx = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC);')
+        w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC);')
     w("    end")
     w("")
 
-    # Per-node AXI interfaces (master-side + slave-side), driven by tb master/slave
-    # and the fabric's NMU/NSU faces.
-    axi_params = "        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH)"
+    # Per-node AXI buses as STRUCT ARRAYS (master-side into the fabric NMU,
+    # slave-side out of NSU), shared by the fabric + the endpoint generate loop.
     w("    // -------------------------------------------------------------------------")
-    w("    // Per-node AXI buses (master-side into the fabric NMU, slave-side out of NSU)")
+    w("    // Per-node AXI buses (struct arrays): master-side into NMU, slave-side out of NSU")
     w("    // -------------------------------------------------------------------------")
-    for (i, _x, _y, _c) in nodes:
-        w(f"    axi4_intf #(")
-        w(f"{axi_params}")
-        w(f"    ) master_nmu_axi_{i} ();")
-        w(f"    axi4_intf #(")
-        w(f"{axi_params}")
-        w(f"    ) nsu_slave_axi_{i} ();")
+    w(f"    ni_signals_pkg::axi_req_t  master_axi_req [{n}];  // tb master -> NMU")
+    w(f"    ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n}];  // NMU -> tb master")
+    w(f"    ni_signals_pkg::axi_req_t  slave_axi_req  [{n}];  // NSU -> tb slave")
+    w(f"    ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n}];  // tb slave -> NSU")
     w("")
 
-    # Fabric instance.
+    # Fabric instance: ctx + AXI arrays passed whole.
     w("    // -------------------------------------------------------------------------")
     w(f"    // NoC fabric ({n} nodes, directional links)")
     w("    // -------------------------------------------------------------------------")
@@ -529,38 +526,35 @@ def emit_tb_top(topo: dict) -> str:
     w("        .ROUTER_VC_DEPTH(ROUTER_VC_DEPTH)")
     w("    ) u_fabric (")
     w("        .clk_i(clk_i), .rst_ni(rst_ni),")
-    for k, (i, _x, _y, _c) in enumerate(nodes):
-        last = (k == n - 1)
-        comma = "" if last else ","
-        w(f"        .router{i}_ctx(router{i}_ctx), .nmu{i}_ctx(n{i}_nmu_ctx), "
-          f".nsu{i}_ctx(n{i}_nsu_ctx),")
-        w(f"        .master_axi_{i}(master_nmu_axi_{i}.slave), "
-          f".slave_axi_{i}(nsu_slave_axi_{i}.master){comma}")
+    w("        .router_ctx(router_ctx), .nmu_ctx(nmu_ctx), .nsu_ctx(nsu_ctx),")
+    w("        .master_axi_req(master_axi_req), .master_axi_rsp(master_axi_rsp),")
+    w("        .slave_axi_req(slave_axi_req),   .slave_axi_rsp(slave_axi_rsp)")
     w("    );")
     w("")
 
-    # Test endpoints per node: user_node_endpoint = test master + slave + AXI perf
-    # monitors. user_node_endpoint.sv is USER-OWNED (committed, hand-written); the
-    # generator only INSTANTIATES it, never emits/overwrites it. SLOT_NAME strings are
-    # passed as params so the perf.json slot labels stay "node<i>.manager" /
-    # "node<i>.subordinate" — byte-identical to the prior inline emission.
+    # Test endpoints per node via genvar generate. user_node_endpoint = test
+    # master + slave + AXI perf monitors. user_node_endpoint.sv is USER-OWNED
+    # (committed, hand-written); the generator only INSTANTIATES it. SLOT_NAME
+    # strings come from $sformatf so perf.json slot labels stay "node<i>.manager"
+    # / "node<i>.subordinate" — byte-identical to the prior inline emission.
     w("    // -------------------------------------------------------------------------")
     w("    // Test endpoints - one user_node_endpoint per node (test master/slave/monitors)")
     w("    // user_node_endpoint.sv is user-owned and NOT regenerated by this script.")
     w("    // -------------------------------------------------------------------------")
-    for (i, _x, _y, _c) in nodes:
-        w(f"    user_node_endpoint #(")
-        w(f"        .NODE_ID({i}),")
-        w(f"        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-        w(f'        .MASTER_SLOT_NAME("node{i}.manager"), '
-          f'.SLAVE_SLOT_NAME("node{i}.subordinate")')
-        w(f"    ) u_endpoint_{i} (")
-        w(f"        .clk_i(clk_i), .rst_ni(rst_ni),")
-        w(f"        .master_ctx_i(m{i}_ctx), .slave_ctx_i(s{i}_ctx),")
-        w(f"        .master_axi_o(master_nmu_axi_{i}.master),")
-        w(f"        .slave_axi_i(nsu_slave_axi_{i}.slave)")
-        w(f"    );")
-        w("")
+    w(f"    for (genvar i = 0; i < {n}; i++) begin : g_endpoint")
+    w("        user_node_endpoint #(")
+    w("            .NODE_ID(i),")
+    w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+    w('            .MASTER_SLOT_NAME($sformatf("node%0d.manager", i)),')
+    w('            .SLAVE_SLOT_NAME($sformatf("node%0d.subordinate", i))')
+    w("        ) u_endpoint (")
+    w("            .clk_i(clk_i), .rst_ni(rst_ni),")
+    w("            .master_ctx_i(m_ctx[i]), .slave_ctx_i(s_ctx[i]),")
+    w("            .master_axi_req_o(master_axi_req[i]), .master_axi_rsp_i(master_axi_rsp[i]),")
+    w("            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i])")
+    w("        );")
+    w("    end : g_endpoint")
+    w("")
 
     # Perf instrumentation.
     w("    // -------------------------------------------------------------------------")
