@@ -195,6 +195,75 @@ def _emit_noc_intf(name: str, iface_spec: dict, constants: dict) -> list[str]:
     return out
 
 
+# ---------------------------------------------------------------------------
+# Width token translation for packed-struct typedefs (parameters not allowed).
+# Interface uses parameterized widths; struct must use fully-qualified pkg refs.
+# ---------------------------------------------------------------------------
+_IFACE_WIDTH_TO_STRUCT: dict[str, str] = {
+    "[ID_WIDTH-1:0]":   "[ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]",
+    "[ADDR_WIDTH-1:0]": "[ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0]",
+    "[DATA_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH_DFLT-1:0]",
+    "[WSTRB_WIDTH-1:0]": "[ni_params_pkg::AXI_DATA_WIDTH_DFLT/8-1:0]",
+    "[7:0]":  "[7:0]",
+    "[2:0]":  "[2:0]",
+    "[1:0]":  "[1:0]",
+    "[3:0]":  "[3:0]",
+    "":       "",
+}
+
+
+def _emit_noc_structs() -> list[str]:
+    """Emit noc_chan_t and noc_credit_t typedef lines (in-package)."""
+    out: list[str] = [
+        "  // NoC link packed-struct typedefs (coexist with noc_intf; widths fixed-default).",
+        "  typedef struct packed {",
+        "    logic                                            valid;",
+        "    logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit;",
+        "  } noc_chan_t;",
+        "  typedef struct packed {",
+        "    logic [ni_params_pkg::NOC_NUM_VC_DFLT-1:0] credit;",
+        "  } noc_credit_t;",
+    ]
+    return out
+
+
+def _emit_axi_structs(channels: list[str]) -> list[str]:
+    """Emit axi_req_t (master-driven) and axi_rsp_t (slave-driven) typedef lines.
+
+    Iterates _AXI_CHANNEL_SIGNALS in channel order (same as interface), separates
+    signals by direction using _MASTER_DRIVES_AXI, translates width tokens to
+    fully-qualified ni_params_pkg::*_DFLT references.
+    """
+    req_fields: list[tuple[str, str]] = []
+    rsp_fields: list[tuple[str, str]] = []
+    for ch in channels:
+        for sig_name, width_tok in _AXI_CHANNEL_SIGNALS[ch]:
+            sv_width = _IFACE_WIDTH_TO_STRUCT[width_tok]
+            if sig_name in _MASTER_DRIVES_AXI:
+                req_fields.append((sig_name, sv_width))
+            else:
+                rsp_fields.append((sig_name, sv_width))
+
+    def _fields_to_sv(fields: list[tuple[str, str]]) -> list[str]:
+        if not fields:
+            return []
+        width_col = max(len(w) for _, w in fields)
+        return [
+            f"    logic {w:<{width_col}} {name};" for name, w in fields
+        ]
+
+    out: list[str] = [
+        "  // AXI packed-struct typedefs (coexist with axi4_intf; widths fixed-default).",
+        "  typedef struct packed {",
+    ]
+    out.extend(_fields_to_sv(req_fields))
+    out.append("  } axi_req_t;")
+    out.append("  typedef struct packed {")
+    out.extend(_fields_to_sv(rsp_fields))
+    out.append("  } axi_rsp_t;")
+    return out
+
+
 def _emit_interfaces_from_handshake_schema(
     interfaces_doc: dict, constants: dict
 ) -> list[str]:
@@ -258,15 +327,25 @@ def emit(signals_json: Path, spec_version: str) -> str:
     else:
         out.append("  // (No output signals with defined reset values in this spec.)")
     out.append("")
+
+    # Packed-struct typedefs go INSIDE the package so they are usable as
+    # cross-module port types via "import ni_signals_pkg::*".
+    constants = load_constants(SPECGEN_ROOT / "source" / "constants.yaml")
+    interfaces_doc = load_interfaces(
+        SPECGEN_ROOT / "source" / "interface_handshake.json", constants
+    )
+    axi_spec = interfaces_doc["interfaces"].get("axi4_intf", {})
+    axi_channels: list[str] = axi_spec.get("channels", list(_AXI_CHANNEL_SIGNALS.keys()))
+    out.extend(_emit_noc_structs())
+    out.append("")
+    out.extend(_emit_axi_structs(axi_channels))
+    out.append("")
+
     out.append("endpackage")
     out.append("")
 
     # SV interface blocks live OUTSIDE the package (SV LRM: interface
     # declarations are top-level, not allowed inside packages).
-    constants = load_constants(SPECGEN_ROOT / "source" / "constants.yaml")
-    interfaces_doc = load_interfaces(
-        SPECGEN_ROOT / "source" / "interface_handshake.json", constants
-    )
     out.extend(_emit_interfaces_from_handshake_schema(interfaces_doc, constants))
 
     out.append("`endif // NI_SIGNALS_PKG_SVH")

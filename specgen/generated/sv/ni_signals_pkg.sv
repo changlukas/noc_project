@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: ceef98ad4649
 // Generator version: v1.0.0
-// Generated at: 2026-06-24T02:11:17Z
+// Generated at: 2026-06-25T03:45:50Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -63,6 +63,60 @@ package ni_signals_pkg;
   localparam int unsigned AXI_ARREGION_O_RESET = 0;
   localparam int unsigned AXI_ARUSER_O_RESET = 0;
   localparam int unsigned AXI_ARQOS_O_RESET = 0;
+
+  // NoC link packed-struct typedefs (coexist with noc_intf; widths fixed-default).
+  typedef struct packed {
+    logic                                            valid;
+    logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit;
+  } noc_chan_t;
+  typedef struct packed {
+    logic [ni_params_pkg::NOC_NUM_VC_DFLT-1:0] credit;
+  } noc_credit_t;
+
+  // AXI packed-struct typedefs (coexist with axi4_intf; widths fixed-default).
+  typedef struct packed {
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]     awid;
+    logic [ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0]   awaddr;
+    logic [7:0]                                      awlen;
+    logic [2:0]                                      awsize;
+    logic [1:0]                                      awburst;
+    logic                                            awlock;
+    logic [3:0]                                      awcache;
+    logic [2:0]                                      awprot;
+    logic [3:0]                                      awqos;
+    logic [3:0]                                      awregion;
+    logic                                            awvalid;
+    logic [ni_params_pkg::AXI_DATA_WIDTH_DFLT-1:0]   wdata;
+    logic [ni_params_pkg::AXI_DATA_WIDTH_DFLT/8-1:0] wstrb;
+    logic                                            wlast;
+    logic                                            wvalid;
+    logic                                            bready;
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]     arid;
+    logic [ni_params_pkg::AXI_ADDR_WIDTH_DFLT-1:0]   araddr;
+    logic [7:0]                                      arlen;
+    logic [2:0]                                      arsize;
+    logic [1:0]                                      arburst;
+    logic                                            arlock;
+    logic [3:0]                                      arcache;
+    logic [2:0]                                      arprot;
+    logic [3:0]                                      arqos;
+    logic [3:0]                                      arregion;
+    logic                                            arvalid;
+    logic                                            rready;
+  } axi_req_t;
+  typedef struct packed {
+    logic                                          awready;
+    logic                                          wready;
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]   bid;
+    logic [1:0]                                    bresp;
+    logic                                          bvalid;
+    logic                                          arready;
+    logic [ni_params_pkg::AXI_ID_WIDTH_DFLT-1:0]   rid;
+    logic [ni_params_pkg::AXI_DATA_WIDTH_DFLT-1:0] rdata;
+    logic [1:0]                                    rresp;
+    logic                                          rlast;
+    logic                                          rvalid;
+  } axi_rsp_t;
 
 endpackage
 

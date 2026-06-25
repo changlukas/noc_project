@@ -162,6 +162,16 @@ class TestSvSignalsEmit:
         text = _sv_text("ni_signals_pkg.sv")
         assert "Source SHA:" in text
 
+    def test_emits_noc_struct_typedefs(self):
+        run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
+        sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+        assert "} noc_chan_t;" in sv and "} noc_credit_t;" in sv
+        assert "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
+
+    def test_struct_typedefs_in_package(self):
+        sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+        pkg = sv[sv.index("package ni_signals_pkg"):sv.index("endpackage")]
+        assert "noc_chan_t" in pkg and "axi_req_t" in pkg     # typedef 在 package 內
 
 
 # ---------------------------------------------------------------------------
