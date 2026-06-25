@@ -483,6 +483,71 @@ def _emit_synthetic_node(out_dir, src_idx, dst_cids, src_cid,
         yaml.safe_dump(sc, f, sort_keys=False)
 
 
+def _emit_base_driven_node(base_sc, src_dir, out_dir, src_idx, dst_cids, src_cid,
+                           n_nodes, base_local, memory_size):
+    """Emit <out_dir>/scenario.yaml for one node, replicating base shape per dst.
+
+    Used by uniform_random and hotspot when --from is present.  Each element in
+    dst_cids corresponds to one replication of the base transaction sequence; shape
+    (size, len, burst, payload) is copied from the base, only addr changes.
+
+    dst_cids    -- list of per-replication dst coord_ids (len == transactions_per_node)
+    base_sc     -- base scenario dict (read-only; deep-copied per replication)
+    src_dir     -- directory of the base scenario.yaml (for relative file rewrites)
+    src_idx     -- linear index of the source node (for alloc_unique_offset)
+    src_cid     -- coord_id of the source node (sets config.memory_base)
+    n_nodes     -- total node count (allocator domain)
+    base_local  -- base local address from config.memory_base & 0xFFFF_FFFF
+    memory_size -- dst tile memory window size; passed to alloc_unique_offset bound
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    base_txns = base_sc.get("transactions", [])
+
+    # Identify unique (write) addresses in the base to group write+read pairs.
+    # Preserves the base pair structure: each unique addr = one write+read group.
+    seen_orig: dict = {}   # orig_local_addr -> base seq index within the base
+    base_pair_order = []   # ordered unique orig local addrs
+    for t in base_txns:
+        oa = _as_int(t["addr"]) & 0xFFFFFFFF
+        if oa not in seen_orig:
+            seen_orig[oa] = len(base_pair_order)
+            base_pair_order.append(oa)
+
+    transactions = []
+    for rep_seq, dst_cid in enumerate(dst_cids):
+        # Each replication: allocate one offset slot per unique base pair.
+        pair_offset: dict = {}
+        for pair_seq, orig_addr in enumerate(base_pair_order):
+            # Global seq = rep_seq * len(base_pair_order) + pair_seq
+            global_seq = rep_seq * len(base_pair_order) + pair_seq
+            pair_offset[orig_addr] = alloc_unique_offset(
+                dst_cid, src_idx, global_seq, base_local, n_nodes, memory_size
+            )
+        for t in base_txns:
+            tc = copy.deepcopy(t)
+            orig = _as_int(tc["addr"]) & 0xFFFFFFFF
+            local_off = pair_offset[orig]
+            tc["addr"] = (dst_cid << ADDR_DST_SHIFT) + local_off
+            for k in _FILE_KEYS:
+                if tc.get(k) and not os.path.isabs(tc[k]):
+                    abs_src = os.path.join(src_dir, tc[k])
+                    try:
+                        rel = os.path.relpath(abs_src, out_dir)
+                    except ValueError:
+                        rel = os.path.abspath(abs_src)
+                    tc[k] = rel.replace(os.sep, "/")
+            transactions.append(tc)
+
+    sc = copy.deepcopy(base_sc)
+    sc["transactions"] = transactions
+    cfg = sc.setdefault("config", {})
+    cfg["memory_base"] = (src_cid << ADDR_DST_SHIFT) + base_local
+    cfg["memory_size"] = memory_size
+
+    with open(os.path.join(out_dir, "scenario.yaml"), "w") as f:
+        yaml.safe_dump(sc, f, sort_keys=False)
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
@@ -583,15 +648,19 @@ def main(argv=None):
                                      a.size, a.burst_len)
 
     else:
-        # Per-packet random pattern (uniform_random / hotspot): synthetic payload.
-        # --size / --len / --transactions-per-node govern output; --from (if given) only
-        # borrows the memory shape (memory_base / memory_size).
+        # Per-packet random pattern (uniform_random / hotspot).
+        # When --from is given: borrow transaction shape (size/len/burst/payload) from
+        # the base scenario — only the dst address changes per replication.
+        # When --from is absent: build synthetic payload from --size / --len (fallback).
         rng = _random_module.Random(a.seed)
         base_local = 0x1000  # default local base for synthetic scenarios
         memory_size = 0x1000  # default dst tile window (same as existing topologies)
+        base_sc = None
+        src_dir = None
         if a.base is not None:
-            # Borrow memory shape from a base scenario.
-            with open(os.path.abspath(a.base)) as f:
+            src_path = os.path.abspath(a.base)
+            src_dir = os.path.dirname(src_path)
+            with open(src_path) as f:
                 base_sc = yaml.safe_load(f)
             cfg = base_sc.get("config", {})
             base_local = _as_int(cfg.get("memory_base", base_local)) & 0xFFFFFFFF
@@ -615,9 +684,13 @@ def main(argv=None):
             # Convert linear dst indices → coord_ids
             dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_linears]
             out_dir = os.path.join(a.out, f"node{idx}")
-            _emit_synthetic_node(out_dir, idx, dst_cids, src_cid,
-                                  n_nodes, base_local, memory_size,
-                                  a.size, a.burst_len)
+            if base_sc is not None:
+                _emit_base_driven_node(base_sc, src_dir, out_dir, idx, dst_cids, src_cid,
+                                       n_nodes, base_local, memory_size)
+            else:
+                _emit_synthetic_node(out_dir, idx, dst_cids, src_cid,
+                                     n_nodes, base_local, memory_size,
+                                     a.size, a.burst_len)
 
 
 if __name__ == "__main__":

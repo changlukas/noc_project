@@ -608,3 +608,113 @@ def test_memory_size_lifts_allocator_bound():
                    if t["op"] == "write"]
     assert len(write_addrs) == 16 * 5, "expected 5 write txns per node"
     assert len(write_addrs) == len(set(write_addrs)), "all write addrs must stay unique"
+
+
+# ---------------------------------------------------------------------------
+# Base-driven shape for uniform_random / hotspot (--from supplies size/len/burst)
+# ---------------------------------------------------------------------------
+
+def _write_base_scenario(tmp_path, size, length):
+    """Write a minimal base scenario.yaml with one write+read pair and return its path."""
+    sc = {
+        "config": {
+            "memory_base": "0x1000",
+            "memory_size": "0x1000",
+        },
+        "transactions": [
+            {
+                "op": "write",
+                "addr": "0x1000",
+                "id": 0,
+                "size": size,
+                "len": length,
+                "burst": "INCR",
+                "data_file": "data.txt",
+            },
+            {
+                "op": "read",
+                "addr": "0x1000",
+                "id": 0,
+                "size": size,
+                "len": length,
+                "burst": "INCR",
+                "dump_file": "data.txt",
+            },
+        ],
+    }
+    base_path = os.path.join(str(tmp_path), "scenario.yaml")
+    with open(base_path, "w") as f:
+        yaml.safe_dump(sc, f, sort_keys=False)
+    # Write a minimal data.txt so file-rewrite logic has something to reference.
+    with open(os.path.join(str(tmp_path), "data.txt"), "w") as f:
+        f.write("00\n")
+    return base_path
+
+
+def _run_gen_from_base(base_path, pattern, topo, seed, txn_per_node, out_dir, extra_args=None):
+    """Run gen_test_patterns CLI with --from <base_path> and return CompletedProcess."""
+    import subprocess
+    cmd = [
+        sys.executable,
+        os.path.join(HERE, "gen_test_patterns.py"),
+        "--from", base_path,
+        "--pattern", pattern,
+        "--topology", topo,
+        "--out", out_dir,
+        "--transactions-per-node", str(txn_per_node),
+        "--seed", str(seed),
+    ]
+    if extra_args:
+        cmd.extend(extra_args)
+    return subprocess.run(cmd, capture_output=True, text=True)
+
+
+def test_uniform_random_uses_base_shape(tmp_path):
+    """uniform_random with --from: transactions must inherit size/len from the base."""
+    repo = os.path.abspath(os.path.join(HERE, "..", ".."))
+    base_path = _write_base_scenario(tmp_path, size=3, length=4)
+    out_dir = str(tmp_path / "out")
+    result = _run_gen_from_base(base_path, "uniform_random", "mesh_4x4_vc1", seed=1,
+                                txn_per_node=1, out_dir=out_dir)
+    assert result.returncode == 0, f"gen failed: {result.stderr}"
+    # Read node0's output and verify shape matches the base.
+    sc = yaml.safe_load(open(os.path.join(out_dir, "node0", "scenario.yaml")))
+    txns = sc["transactions"]
+    assert txns, "expected at least one transaction"
+    for t in txns:
+        assert t.get("size") == 3, f"size={t.get('size')} != 3 (should come from base)"
+        assert t.get("len") == 4, f"len={t.get('len')} != 4 (should come from base)"
+        assert t.get("burst") == "INCR", f"burst={t.get('burst')} != INCR"
+
+
+def test_hotspot_uses_base_shape(tmp_path):
+    """hotspot with --from: transactions must inherit size/len from the base."""
+    base_path = _write_base_scenario(tmp_path, size=1, length=2)
+    out_dir = str(tmp_path / "out")
+    result = _run_gen_from_base(base_path, "hotspot", "mesh_4x4_vc1", seed=0,
+                                txn_per_node=1, out_dir=out_dir,
+                                extra_args=["--hotspot", "5"])
+    assert result.returncode == 0, f"gen failed: {result.stderr}"
+    sc = yaml.safe_load(open(os.path.join(out_dir, "node0", "scenario.yaml")))
+    txns = sc["transactions"]
+    assert txns, "expected at least one transaction"
+    for t in txns:
+        assert t.get("size") == 1, f"size={t.get('size')} != 1 (should come from base)"
+        assert t.get("len") == 2, f"len={t.get('len')} != 2 (should come from base)"
+
+
+def test_base_driven_respects_alloc_capacity(tmp_path):
+    """uniform_random --from: exceeding the memory window must raise (non-zero exit)."""
+    # mesh_4x4_vc1: n_nodes=16, memory_size=0x1000 (from base), stride=0x40
+    # max fits = memory_size / (n_nodes * stride) = 4096 / (16 * 64) = 4 txn/node.
+    # Requesting 8 txn/node must trip alloc_unique_offset's ValueError.
+    base_path = _write_base_scenario(tmp_path, size=2, length=0)
+    out_dir = str(tmp_path / "out")
+    result = _run_gen_from_base(base_path, "uniform_random", "mesh_4x4_vc1", seed=1,
+                                txn_per_node=8, out_dir=out_dir)
+    assert result.returncode != 0, (
+        "Expected non-zero exit when txn/node exceeds memory window"
+    )
+    assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
+        f"Expected memory overflow error; stderr={result.stderr!r}"
+    )
