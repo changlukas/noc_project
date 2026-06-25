@@ -81,3 +81,6 @@ docs/slides/
 # rebuild the generated one with docs/build_perf_probe_slides.py)
 /docs/*.pptx
 docs/issue/
+
+# SDD scratch (ledger, briefs, reports, codex reviews) — not version-controlled
+/.superpowers/
