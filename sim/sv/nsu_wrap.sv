@@ -1,9 +1,8 @@
 // nsu_wrap — Stage 5b DPI wrapper for the Nsu component.
 //
-// The Nsu is the NoC-side inverse of nmu_wrap. Its single NoC port
-// noc_miso_i (noc_intf.miso modport) reads req flit + valid + rsp_credit_return
-// from ChannelModel and drives rsp flit + valid + req_credit_return back.
-// On the AXI side it acts as master toward the downstream subordinate.
+// The Nsu is the NoC-side inverse of nmu_wrap. Its 4 packed-struct NoC ports
+// read req flit + rsp credit from the router and drive rsp flit + req credit
+// back. On the AXI side it acts as master toward the downstream subordinate.
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
@@ -11,8 +10,7 @@
 // outputs via cmodel_nsu_get_outputs, then registers those outputs nonblocking
 // so they are visible to SV wires from the NEXT cycle onward.
 //
-// FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 408. The
-// noc_intf FLIT_WIDTH parameter is overridden at instantiation in tb_top.sv.
+// FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 408.
 //
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
@@ -22,8 +20,11 @@
 //
 // axi4_intf.master modport: master drives AW/W/AR + bready/rready to axi_o;
 //                           master reads awready/wready/arready + B/R from axi_o.
-// noc_intf.miso modport:   Nsu reads req_valid/req_flit + rsp_credit_return;
-//                          Nsu drives req_credit_return + rsp_valid/rsp_flit.
+// NoC struct ports:
+//   noc_req_i      — ni_signals_pkg::noc_chan_t: router drives req flit toward Nsu.
+//   noc_req_cred_o — noc_types_pkg::noc_credit_t: Nsu returns req credit to router.
+//   noc_rsp_o      — ni_signals_pkg::noc_chan_t: Nsu drives rsp flit toward router.
+//   noc_rsp_cred_i — noc_types_pkg::noc_credit_t: router returns rsp credit to Nsu.
 
 `timescale 1ns/1ps
 
@@ -41,9 +42,20 @@ module nsu_wrap #(
     input  logic              clk_i,
     input  logic              rst_ni,
     input  longint unsigned            ctx_i,
-    noc_intf.miso             noc_miso_i,
+    input  ni_signals_pkg::noc_chan_t  noc_req_i,
+    output noc_types_pkg::noc_credit_t noc_req_cred_o,
+    output ni_signals_pkg::noc_chan_t  noc_rsp_o,
+    input  noc_types_pkg::noc_credit_t noc_rsp_cred_i,
     axi4_intf.master          axi_o
 );
+
+    // Elaboration guard: noc_types_pkg::noc_credit_t width must match NUM_VC.
+    initial begin
+        if ($bits(noc_types_pkg::noc_credit_t) != NUM_VC) begin
+            $fatal(1, "%m: noc_credit_t width %0d != NUM_VC %0d; use matching noc_types_pkg_vc{N}.sv",
+                   $bits(noc_types_pkg::noc_credit_t), NUM_VC);
+        end
+    end
 
     // -------------------------------------------------------------------------
     // Multi-VC: credit_return marshalled per-VC across DPI as a [NUM_VC-1:0]
@@ -193,11 +205,11 @@ module nsu_wrap #(
             // Step 1: push current wire values into C++ input latch.
             cmodel_nsu_set_inputs(
                 ctx_i,
-                // NoC req side — req flit arriving from ChannelModel toward Nsu
-                noc_miso_i.req_valid,
-                noc_miso_i.req_flit,
-                // NoC rsp credit — ChannelModel returns credit to Nsu (per-VC vector)
-                noc_miso_i.rsp_credit_return,
+                // NoC req side — req flit arriving from router toward Nsu
+                noc_req_i.valid,
+                noc_req_i.flit,
+                // NoC rsp credit — router returns credit to Nsu (per-VC vector)
+                noc_rsp_cred_i.credit[NUM_VC-1:0],
                 // AXI master side — subordinate drives ready + B/R
                 axi_o.awready,
                 axi_o.wready,
@@ -295,13 +307,13 @@ module nsu_wrap #(
     // Drive interface outputs from registered state
     // -------------------------------------------------------------------------
 
-    // NoC rsp side — Nsu drives rsp flit toward ChannelModel
-    assign noc_miso_i.rsp_valid = noc_rsp_valid_q;
-    assign noc_miso_i.rsp_flit  = noc_rsp_flit_q;
+    // NoC rsp side — Nsu drives rsp flit toward router
+    assign noc_rsp_o.valid = noc_rsp_valid_q;
+    assign noc_rsp_o.flit  = noc_rsp_flit_q;
 
-    // NoC req credit — Nsu drives req_credit_return back upstream (registered
+    // NoC req credit — Nsu drives req credit back to router (registered
     // FlooNoC consumer pulse vector from the C model; per-VC pass-through)
-    assign noc_miso_i.req_credit_return = noc_req_credit_return_q;
+    assign noc_req_cred_o.credit = noc_req_credit_return_q;
 
     // AXI master side — Nsu drives request channels toward subordinate
     assign axi_o.awvalid = awvalid_q;

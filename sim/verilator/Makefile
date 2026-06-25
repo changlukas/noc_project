@@ -138,7 +138,7 @@ check-yamlcpp:
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VL_BUILD)/obj_dir_$(TOPOLOGY)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
-	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
+	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \
 	    $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.cpp $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.h
 	$(MAKE) -C $(VL_BUILD)/obj_dir_$(TOPOLOGY) -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
@@ -241,7 +241,7 @@ GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba$(EXEEXT)
 $(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(GENAMBA_OBJDIR)
 	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
-	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
+	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \
 	    $(GENAMBA_OBJDIR)/*.cpp $(GENAMBA_OBJDIR)/*.h
 	$(MAKE) -C $(GENAMBA_OBJDIR) -f Vtb_genamba.mk \
 	    PYTHON3="$(PYTHON3)"
@@ -298,7 +298,7 @@ GENAMBA_TESTER_TESTS ?= +SINGLE_TEST=1 +BURST_TEST=1 +SINGLE_TEST_MEM=1 +BURST_T
 $(TESTER_EXE): $(GENAMBA_TESTER_SV_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(TESTER_OBJDIR)
 	$(VERILATOR) $(TESTER_FLAGS) $(GENAMBA_TESTER_SV_SRC) $(GENAMBA_C_SRC)
-	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)\\([A-Za-z0-9_])|\1/\2|; ta' \
+	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \
 	    $(TESTER_OBJDIR)/*.cpp $(TESTER_OBJDIR)/*.h
 	$(MAKE) -C $(TESTER_OBJDIR) -f Vtb_genamba_tester.mk \
 	    PYTHON3="$(PYTHON3)"

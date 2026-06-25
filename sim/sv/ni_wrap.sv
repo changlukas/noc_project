@@ -1,12 +1,18 @@
 // ni_wrap — Network Interface: bundles nmu_wrap + nsu_wrap for one mesh node.
 //
 // Ports:
-//   master_axi_i  — AXI slave modport; test master drives AW/W/AR into the NMU.
-//   slave_axi_o   — AXI master modport; NSU drives AW/W/AR out toward test slave.
-//   noc_nmu_o     — noc_intf.mosi: NMU drives req_valid/req_flit + rsp_credit_return
-//                   to router; NMU reads req_credit_return + rsp_valid/rsp_flit back.
-//   noc_nsu_i     — noc_intf.miso: NSU reads req_valid/req_flit + rsp_credit_return
-//                   from router; NSU drives rsp_valid/rsp_flit + req_credit_return.
+//   master_axi_i   — AXI slave modport; test master drives AW/W/AR into the NMU.
+//   slave_axi_o    — AXI master modport; NSU drives AW/W/AR out toward test slave.
+//   NMU NoC side (forwarded from nmu_wrap):
+//     noc_req_o      — ni_signals_pkg::noc_chan_t: NMU drives req flit toward router.
+//     noc_req_cred_i — noc_types_pkg::noc_credit_t: router returns req credit.
+//     noc_rsp_i      — ni_signals_pkg::noc_chan_t: router drives rsp flit toward NMU.
+//     noc_rsp_cred_o — noc_types_pkg::noc_credit_t: NMU returns rsp credit.
+//   NSU NoC side (forwarded from nsu_wrap):
+//     noc_req_i      — ni_signals_pkg::noc_chan_t: router drives req flit toward NSU.
+//     noc_req_cred_o — noc_types_pkg::noc_credit_t: NSU returns req credit.
+//     noc_rsp_o      — ni_signals_pkg::noc_chan_t: NSU drives rsp flit toward router.
+//     noc_rsp_cred_i — noc_types_pkg::noc_credit_t: router returns rsp credit.
 //
 // Does NO cmodel_*_create. The nmu_ctx_i/nsu_ctx_i DPI handles arrive as ports
 // from tb_top. This file is COMMITTED (hand-written, reusable NoC infra); the
@@ -34,8 +40,16 @@ module ni_wrap #(
     input  longint unsigned   nsu_ctx_i,
     axi4_intf.slave           master_axi_i,
     axi4_intf.master          slave_axi_o,
-    noc_intf.mosi             noc_nmu_o,
-    noc_intf.miso             noc_nsu_i
+    // NMU NoC side
+    output ni_signals_pkg::noc_chan_t  noc_req_o,
+    input  noc_types_pkg::noc_credit_t noc_req_cred_i,
+    input  ni_signals_pkg::noc_chan_t  noc_rsp_i,
+    output noc_types_pkg::noc_credit_t noc_rsp_cred_o,
+    // NSU NoC side
+    input  ni_signals_pkg::noc_chan_t  noc_req_i,
+    output noc_types_pkg::noc_credit_t noc_req_cred_o,
+    output ni_signals_pkg::noc_chan_t  noc_rsp_o,
+    input  noc_types_pkg::noc_credit_t noc_rsp_cred_i
 );
 
     nmu_wrap #(
@@ -43,7 +57,9 @@ module ni_wrap #(
         .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_nmu (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nmu_ctx_i),
-        .axi_i(master_axi_i), .noc_mosi_o(noc_nmu_o)
+        .axi_i(master_axi_i),
+        .noc_req_o(noc_req_o), .noc_req_cred_i(noc_req_cred_i),
+        .noc_rsp_i(noc_rsp_i), .noc_rsp_cred_o(noc_rsp_cred_o)
     );
 
     nsu_wrap #(
@@ -51,7 +67,9 @@ module ni_wrap #(
         .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
     ) u_nsu (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nsu_ctx_i),
-        .noc_miso_i(noc_nsu_i), .axi_o(slave_axi_o)
+        .noc_req_i(noc_req_i), .noc_req_cred_o(noc_req_cred_o),
+        .noc_rsp_o(noc_rsp_o), .noc_rsp_cred_i(noc_rsp_cred_i),
+        .axi_o(slave_axi_o)
     );
 
 endmodule

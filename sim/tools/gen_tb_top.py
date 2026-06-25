@@ -208,16 +208,16 @@ def emit_fabric(topo: dict) -> str:
         w(f"    localparam int unsigned RP_{d} = {v};")
     w("")
 
-    # Per-node internal NoC interfaces (NMU<->router, router<->NSU).
-    noc_params = ("        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-                  ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
-    for (i, _x, _y, _c) in nodes:
-        w(f"    noc_intf #(")
-        w(f"{noc_params}")
-        w(f"    ) node{i}_nmu ();")
-        w(f"    noc_intf #(")
-        w(f"{noc_params}")
-        w(f"    ) node{i}_nsu ();")
+    # Per-node NoC struct arrays (replace noc_intf instances).
+    w("    // Per-node NoC struct arrays: NI<->router connections.")
+    w(f"    ni_signals_pkg::noc_chan_t          node_req        [{n}];  // NMU req -> router")
+    w(f"    noc_types_pkg::noc_credit_t         node_req_cred   [{n}];  // router credit -> NMU")
+    w(f"    ni_signals_pkg::noc_chan_t          node_rsp        [{n}];  // router rsp -> NMU")
+    w(f"    noc_types_pkg::noc_credit_t         node_rsp_cred   [{n}];  // NMU rsp credit -> router")
+    w(f"    ni_signals_pkg::noc_chan_t          node_nsu_req    [{n}];  // router req -> NSU")
+    w(f"    noc_types_pkg::noc_credit_t         node_nsu_req_cred[{n}]; // NSU credit -> router")
+    w(f"    ni_signals_pkg::noc_chan_t          node_nsu_rsp    [{n}];  // NSU rsp -> router")
+    w(f"    noc_types_pkg::noc_credit_t         node_nsu_rsp_cred[{n}]; // router rsp credit -> NSU")
     w("")
 
     # Per-node LINK face arrays (whole [LINK_PORTS] bundle per node).
@@ -247,7 +247,10 @@ def emit_fabric(topo: dict) -> str:
         w(f"        .clk_i(clk_i), .rst_ni(rst_ni),")
         w(f"        .nmu_ctx_i(nmu{i}_ctx), .nsu_ctx_i(nsu{i}_ctx),")
         w(f"        .master_axi_i(master_axi_{i}), .slave_axi_o(slave_axi_{i}),")
-        w(f"        .noc_nmu_o(node{i}_nmu.mosi), .noc_nsu_i(node{i}_nsu.miso)")
+        w(f"        .noc_req_o(node_req[{i}]), .noc_req_cred_i(node_req_cred[{i}]),")
+        w(f"        .noc_rsp_i(node_rsp[{i}]), .noc_rsp_cred_o(node_rsp_cred[{i}]),")
+        w(f"        .noc_req_i(node_nsu_req[{i}]), .noc_req_cred_o(node_nsu_req_cred[{i}]),")
+        w(f"        .noc_rsp_o(node_nsu_rsp[{i}]), .noc_rsp_cred_i(node_nsu_rsp_cred[{i}])")
         w(f"    );")
         w("")
         w(f"    router_wrap #(")
@@ -256,8 +259,10 @@ def emit_fabric(topo: dict) -> str:
         w(f"        .LINK_PORTS(LINK_PORTS)")
         w(f"    ) u_router_{i} (")
         w(f"        .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(router{i}_ctx),")
-        w(f"        .noc_nmu_i(node{i}_nmu.miso),")
-        w(f"        .noc_nsu_o(node{i}_nsu.mosi),")
+        w(f"        .noc_nmu_req_i(node_req[{i}]), .noc_nmu_req_cred_o(node_req_cred[{i}]),")
+        w(f"        .noc_nmu_rsp_o(node_rsp[{i}]), .noc_nmu_rsp_cred_i(node_rsp_cred[{i}]),")
+        w(f"        .noc_nsu_req_o(node_nsu_req[{i}]), .noc_nsu_req_cred_i(node_nsu_req_cred[{i}]),")
+        w(f"        .noc_nsu_rsp_i(node_nsu_rsp[{i}]), .noc_nsu_rsp_cred_o(node_nsu_rsp_cred[{i}]),")
         w(f"        .link_req_out_valid(n{i}_link_req_out_valid),")
         w(f"        .link_req_out_flit(n{i}_link_req_out_flit),")
         w(f"        .link_req_out_credit(n{i}_link_req_out_credit),")

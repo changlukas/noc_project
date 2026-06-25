@@ -71,9 +71,13 @@ endif
 # TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
 # (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
 TB_TOP_SV = $(COSIM_ROOT)/sv/tb_top_$(TOPOLOGY).sv
+# Extract num_vc suffix from TOPOLOGY name (e.g. mesh_4x4_vc4 -> vc4 -> noc_types_pkg_vc4.sv).
+# $(lastword $(subst _vc, vc,...)) splits on "_vc", then takes the last word (e.g. "vc4").
+TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_$(lastword $(subst _vc, vc,$(TOPOLOGY))).sv
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
+    $(TOPOLOGY_NOC_TYPES_PKG) \
     $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
     $(COSIM_ROOT)/sv/axi_master_wrap.sv \
     $(COSIM_ROOT)/sv/nmu_wrap.sv \

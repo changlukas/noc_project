@@ -1,12 +1,14 @@
 // router_wrap — Task 4 DPI wrapper for one node's per-node Router component.
 //
 // One node owns its REQ+RSP routers at (x,0). Pins split into three faces:
-//   noc_nmu_i — NMU-facing bundle (noc_intf.miso modport): receives this
-//              node's NMU req_valid/req_flit + rsp_credit_return; drives
-//              req_credit_return + rsp_valid/rsp_flit back to the NMU.
-//   noc_nsu_o — NSU-facing bundle (noc_intf.mosi modport): drives the NSU
-//              req_valid/req_flit + rsp_credit_return; receives
-//              req_credit_return + rsp_valid/rsp_flit from the NSU.
+//   noc_nmu_req_i / noc_nmu_req_cred_o — NMU-facing REQ channel (struct):
+//              receives this node's NMU req flit; drives req credit back.
+//   noc_nmu_rsp_o / noc_nmu_rsp_cred_i — NMU-facing RSP channel (struct):
+//              drives rsp flit back to NMU; receives rsp credit from NMU.
+//   noc_nsu_req_o / noc_nsu_req_cred_i — NSU-facing REQ channel (struct):
+//              drives req flit to NSU; receives req credit back from NSU.
+//   noc_nsu_rsp_i / noc_nsu_rsp_cred_o — NSU-facing RSP channel (struct):
+//              receives rsp flit from NSU; drives rsp credit back to NSU.
 //   link_*    — per-network (req/rsp) LINK to the peer node's router. Plain
 //              signals (NO modport) so the SAME module serves node0 and node1;
 //              tb_top cross-wires node0.link_*_out -> node1.link_*_in and
@@ -45,10 +47,16 @@ module router_wrap #(
     input  logic                  clk_i,
     input  logic                  rst_ni,
     input  longint unsigned                ctx_i,
-    // NMU-facing bundle: receives req_*, drives rsp_* and req_credit_return.
-    noc_intf.miso                 noc_nmu_i,
-    // NSU-facing bundle: drives req_*, receives rsp_* and req_credit_return.
-    noc_intf.mosi                 noc_nsu_o,
+    // NMU-facing struct ports: req IN from NMU + credit OUT; rsp OUT to NMU + credit IN.
+    input  ni_signals_pkg::noc_chan_t  noc_nmu_req_i,
+    output noc_types_pkg::noc_credit_t noc_nmu_req_cred_o,
+    output ni_signals_pkg::noc_chan_t  noc_nmu_rsp_o,
+    input  noc_types_pkg::noc_credit_t noc_nmu_rsp_cred_i,
+    // NSU-facing struct ports: req OUT to NSU + credit IN; rsp IN from NSU + credit OUT.
+    output ni_signals_pkg::noc_chan_t  noc_nsu_req_o,
+    input  noc_types_pkg::noc_credit_t noc_nsu_req_cred_i,
+    input  ni_signals_pkg::noc_chan_t  noc_nsu_rsp_i,
+    output noc_types_pkg::noc_credit_t noc_nsu_rsp_cred_o,
     // REQ-network LINK to peer node(s): per-DIRECTION arrays (router has 5 ports;
     // LOCAL slot unused on the LINK face, N/E/S/W carry inter-router links). At
     // 2-node only one direction is live; Task 7 fills the rest. Credit is a
@@ -68,10 +76,17 @@ module router_wrap #(
     output logic [NUM_VC-1:0]                     link_rsp_in_credit  [LINK_PORTS]
 );
 
+    // Elaboration guard: noc_types_pkg::noc_credit_t width must match NUM_VC.
+    initial begin
+        if ($bits(noc_types_pkg::noc_credit_t) != NUM_VC) begin
+            $fatal(1, "%m: noc_credit_t width %0d != NUM_VC %0d; use matching noc_types_pkg_vc{N}.sv",
+                   $bits(noc_types_pkg::noc_credit_t), NUM_VC);
+        end
+    end
+
     // -------------------------------------------------------------------------
     // Multi-VC: NI credit_return + per-direction LINK credit are marshalled
     // per-VC across DPI as [NUM_VC-1:0] vectors (bit vc = credit pulse on VC vc).
-    // No single-VC elaboration guard.
     // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
@@ -181,12 +196,12 @@ module router_wrap #(
                 end
                 cmodel_router_set_inputs(
                     ctx_i,
-                    noc_nmu_i.req_valid,
-                    noc_nmu_i.req_flit,
-                    noc_nsu_o.req_credit_return,
-                    noc_nsu_o.rsp_valid,
-                    noc_nsu_o.rsp_flit,
-                    noc_nmu_i.rsp_credit_return,
+                    noc_nmu_req_i.valid,
+                    noc_nmu_req_i.flit,
+                    noc_nsu_req_cred_i.credit[NUM_VC-1:0],
+                    noc_nsu_rsp_i.valid,
+                    noc_nsu_rsp_i.flit,
+                    noc_nmu_rsp_cred_i.credit[NUM_VC-1:0],
                     b_link_req_out_credit,
                     b_link_req_in_valid,
                     b_link_req_in_flit,
@@ -249,19 +264,19 @@ module router_wrap #(
     // Drive interface + link outputs from registered state
     // -------------------------------------------------------------------------
 
-    // NSU-facing side: drive req_valid/req_flit forward.
-    assign noc_nsu_o.req_valid          = req_out_valid_q;
-    assign noc_nsu_o.req_flit           = req_out_flit_q;
-    // NMU-facing side: return req credit pulse vector back upstream (registered
+    // NSU-facing side: drive req flit toward NSU.
+    assign noc_nsu_req_o.valid          = req_out_valid_q;
+    assign noc_nsu_req_o.flit           = req_out_flit_q;
+    // NMU-facing side: return req credit pulse vector back to NMU (registered
     // per-VC FlooNoC pulse from the C model; pure pass-through).
-    assign noc_nmu_i.req_credit_return  = req_out_credit_return_q;
+    assign noc_nmu_req_cred_o.credit    = req_out_credit_return_q;
 
-    // NMU-facing side: drive rsp_valid/rsp_flit back toward NMU.
-    assign noc_nmu_i.rsp_valid          = rsp_out_valid_q;
-    assign noc_nmu_i.rsp_flit           = rsp_out_flit_q;
-    // NSU-facing side: return rsp credit pulse vector back upstream (registered
+    // NMU-facing side: drive rsp flit back toward NMU.
+    assign noc_nmu_rsp_o.valid          = rsp_out_valid_q;
+    assign noc_nmu_rsp_o.flit           = rsp_out_flit_q;
+    // NSU-facing side: return rsp credit pulse vector back to NSU (registered
     // per-VC FlooNoC pulse from the C model; pure pass-through).
-    assign noc_nsu_o.rsp_credit_return  = rsp_out_credit_return_q;
+    assign noc_nsu_rsp_cred_o.credit    = rsp_out_credit_return_q;
 
     // REQ-network LINK: per-direction flit forward + credit pulse upstream.
     assign link_req_out_valid           = link_req_out_valid_q;
