@@ -154,6 +154,13 @@ def cmd_emit(args: argparse.Namespace) -> int:
         if args.num_vc is None:
             print("ERROR: --num-vc N is required for --domain noc_types", file=sys.stderr)
             return 2
+        if args.num_vc not in _NOC_TYPES_VALID_VC:
+            print(
+                f"ERROR: --num-vc {args.num_vc} is invalid; "
+                f"must be one of {list(_NOC_TYPES_VALID_VC)}",
+                file=sys.stderr,
+            )
+            return 2
         out_dir = Path(args.out) if args.out else SPECGEN_ROOT / _DEFAULT_OUT[args.target]
         try:
             written = _run_emit_noc_types(args.num_vc, out_dir)
@@ -228,6 +235,37 @@ def cmd_check(_args: argparse.Namespace) -> int:
                 print(f"[drift] {fresh_path.name}:")
                 print("\n".join(diff[:40]))
 
+        # Also check per-config noc_types_pkg_vc{N}.sv files.
+        noc_fresh_dir = fresh_base / "sv"
+        committed_sv_dir = _COMMITTED_DIR["sv"]
+        for num_vc in _NOC_TYPES_VALID_VC:
+            out_name = f"noc_types_pkg_vc{num_vc}.sv"
+            committed_path = committed_sv_dir / out_name
+            if not committed_path.exists():
+                print(f"[missing committed] sv/{out_name}")
+                all_ok = False
+                continue
+            try:
+                fresh_path = _run_emit_noc_types(num_vc, noc_fresh_dir)
+            except Exception as exc:
+                print(f"[error] sv/noc_types vc{num_vc}: {exc}", file=sys.stderr)
+                all_ok = False
+                continue
+
+            fresh_lines = _strip_provenance(fresh_path.read_text(encoding="ascii").splitlines())
+            committed_lines = _strip_provenance(committed_path.read_text(encoding="ascii").splitlines())
+            if fresh_lines != committed_lines:
+                all_ok = False
+                diff = list(difflib.unified_diff(
+                    committed_lines,
+                    fresh_lines,
+                    fromfile=f"committed/{out_name}",
+                    tofile=f"regen/{out_name}",
+                    lineterm="",
+                ))
+                print(f"[drift] {out_name}:")
+                print("\n".join(diff[:40]))
+
     return 0 if all_ok else 1
 
 
@@ -242,10 +280,17 @@ def cmd_lint_sv(_args: argparse.Namespace) -> int:
         return 0
 
     sv_dir = SPECGEN_ROOT / "generated" / "sv"
-    sv_files = sorted(sv_dir.glob("*.sv"))
-    if not sv_files:
+    sv_files_all = sorted(sv_dir.glob("*.sv"))
+    if not sv_files_all:
         print("[skip] no .sv files found in generated/sv/ -- run --target sv first", file=sys.stderr)
         return 0
+
+    # noc_types_pkg_vc*.sv all declare the same package name 'noc_types_pkg' +
+    # include guard -- linting all 4 together triggers duplicate-package errors.
+    # Keep at most one representative (vc8, chosen for maximum bit-width coverage).
+    noc_vc_files = sorted(sv_dir.glob("noc_types_pkg_vc*.sv"))
+    noc_vc_keep = {noc_vc_files[-1]} if noc_vc_files else set()
+    sv_files = [f for f in sv_files_all if not f.name.startswith("noc_types_pkg_vc") or f in noc_vc_keep]
 
     cmd = [verilator, "--lint-only", "--Wall"] + [str(f) for f in sv_files]
     print(f"[lint-sv] running: {' '.join(cmd)}", file=sys.stderr)

@@ -180,13 +180,23 @@ class TestSvSignalsEmit:
         assert "noc_credit_t" not in sv          # 已移到 noc_types_pkg
 
     def test_noc_types_pkg_per_vc(self, tmp_path):
-        run_codegen("--target", "sv", "--domain", "noc_types", "--num-vc", "8",
-                    "--out", str(tmp_path))
-        sv8 = (tmp_path / "noc_types_pkg_vc8.sv").read_text(encoding="ascii")
-        assert "package noc_types_pkg" in sv8 and "} noc_credit_t;" in sv8 and "[7:0]" in sv8
-        run_codegen("--target", "sv", "--domain", "noc_types", "--num-vc", "1",
-                    "--out", str(tmp_path))
-        assert "[0:0]" in (tmp_path / "noc_types_pkg_vc1.sv").read_text(encoding="ascii")
+        for num_vc, expected_width in ((1, "[0:0]"), (2, "[1:0]"), (4, "[3:0]"), (8, "[7:0]")):
+            run_codegen("--target", "sv", "--domain", "noc_types",
+                        "--num-vc", str(num_vc), "--out", str(tmp_path))
+            sv = (tmp_path / f"noc_types_pkg_vc{num_vc}.sv").read_text(encoding="ascii")
+            assert "package noc_types_pkg" in sv, f"vc{num_vc}: missing package declaration"
+            assert "} noc_credit_t;" in sv, f"vc{num_vc}: missing noc_credit_t typedef"
+            assert expected_width in sv, f"vc{num_vc}: expected credit width {expected_width}"
+
+    def test_noc_types_pkg_invalid_vc_rejected(self):
+        """--num-vc with an invalid value must exit non-zero with an error message."""
+        for invalid in (0, 3, 5, 16):
+            r = run_codegen("--target", "sv", "--domain", "noc_types",
+                            "--num-vc", str(invalid))
+            assert r.returncode != 0, f"--num-vc {invalid} should be rejected"
+            assert "invalid" in r.stderr.lower() or "must be one of" in r.stderr.lower(), (
+                f"--num-vc {invalid}: expected error message, got: {r.stderr}"
+            )
 
 
 # ---------------------------------------------------------------------------
