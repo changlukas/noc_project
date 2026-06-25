@@ -439,14 +439,13 @@ template authoring, and extension guide.
    not provide an actual data file.
 
 4. Run `make check`. The scenario is picked up automatically by the
-   c_model integration test via CMake `CONFIGURE_DEPENDS`. Run
-   `make sim-regress` to pick it up in the co-sim regression as well.
+   c_model integration test via CMake `CONFIGURE_DEPENDS`. Use
+   `make sim TB=mesh_4x4_vc1 PATTERN=neighbor` to run a cosim smoke.
 
-5. INF-prefix scenarios are skipped from both run-all paths (marker
-   `INF_DEDICATED_TEST`, set in
-   `c_model/tests/axi/test_integration.cpp:87` and
-   `sim/run_regress.py`) and should only be exercised through their
-   dedicated test.
+5. INF-prefix scenarios are skipped from the c_model integration test
+   (marker `INF_DEDICATED_TEST`, set in
+   `c_model/tests/axi/test_integration.cpp:87`) and should only be
+   exercised through their dedicated test.
 
 6. Commit with a body paragraph citing the IHI 0022H section or
    protocol property the scenario exercises.
@@ -502,18 +501,20 @@ cat sim/verilator/output/AX4-BAS-003_single_write_read_aligned/run.log
 
 A passing run ends with `$finish` and no assertion failure lines.
 
-### Running the co-sim regression
+### Running cosim
 
-Co-sim regression runs via `sim/run_regress.py`, not as a ctest entry.
-Invoke from the repo root:
+The unified sim target builds the chosen topology and runs a benchmark pattern:
 
 ~~~bash
-make sim-regress PYTHON3=python3         # runs all non-INF scenarios via Vtb_top
+make sim TB=mesh_4x4_vc1 PATTERN=neighbor PYTHON3=python3
+make sim TB=mesh_4x4_vc1 PATTERN=transpose PYTHON3=python3
+make sim TB=mesh_4x4_vc1 PATTERN=hotspot HOTSPOT=5 PYTHON3=python3
+make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3    # non-default topology
 ~~~
 
-The Vtb_top binary must be built (`make build-verilator`) before the
-regression can run. Pass/fail is reported per scenario; a non-zero exit
-code means at least one scenario failed.
+Optional vars: `TXN=` (transactions per node), `SEED=`, `BASE=` (base scenario YAML
+forwarded to gen_test_patterns `--from`). A neighbor-pattern smoke is the final step
+of `make check`. The curated AX4 bidirectional sweep is deferred.
 
 ### Vtb_top output log
 

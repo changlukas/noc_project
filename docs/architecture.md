@@ -290,11 +290,11 @@ GoogleTest tests under `c_model/tests/` exercise individual components
 list is generated at CMake configure time from
 `sim/test_patterns/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
 
-**Layer 3 -- cosim regression**
-`sim/run_regress.py` (invoked via `make sim-regress`) runs the same
-scenario list through the Verilator wire-level harness, checking each
-transaction with the c_model scoreboard. INF-prefix scenarios are
-excluded.
+**Layer 3 -- cosim smoke**
+`make sim TB=mesh_4x4_vc1 PATTERN=neighbor` (also the final step of
+`make check`) runs a neighbor-pattern benchmark through the Verilator
+wire-level harness and gates on the PASS marker. The curated AX4
+bidirectional sweep (formerly `run_regress.py`) is deferred.
 
 **Layer 4 -- scoped / targeted tests**
 Two hand-curated test suites exercise specific protocol invariants:
@@ -316,10 +316,9 @@ Phase 1 results:
 `docs/internal/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
 
 `make check` runs lint_scenarios, lint_docs, builds the c_model and the
-Verilator binary, and runs the full ctest suite (Layers 1-2, 4). It does
-not run any simulation (sims are manual, from each simulator's own
-targets). Co-sim regression (Layer 3) runs separately via
-`make sim-regress` (see `sim/run_regress.py`).
+Verilator binary, runs the full ctest suite (Layers 1-2, 4), and ends
+with a neighbor-pattern cosim smoke (Layer 3). To run other patterns or
+topologies: `make sim TB=<topo> PATTERN=<p>`.
 
 ---
 

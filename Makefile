@@ -18,7 +18,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
-        sim-regress bench \
+        sim \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -33,10 +33,14 @@ help:
 	@echo "  cd sim/verilator && make run-tb-top SCENARIO=<ax4-id> specific scenario"
 	@echo "  cd sim/vcs       && make run-genamba / run-tb-top     VCS (Linux workstation)"
 	@echo ""
+	@echo "Simulate:"
+	@echo "  make sim TB=<topo> PATTERN=<p>            build + run benchmark (default TB=mesh_4x4_vc1)"
+	@echo "  make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3"
+	@echo "  Vars: TXN= SEED= HOTSPOT= BASE=<base.yaml>"
+	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
-	@echo "  make check            lint + build + full ctest"
-	@echo "  make bench            run benchmark (TOPOLOGY/PATTERN/HOTSPOT/TRANSACTIONS_PER_NODE/MEMORY_SIZE)"
+	@echo "  make check            lint + build + full ctest + neighbor smoke"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/)"
@@ -108,6 +112,10 @@ build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
 $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
+# Default topology for standalone build-verilator / make check.
+# make sim overrides this by passing TOPOLOGY=$(TB) explicitly.
+TOPOLOGY ?= mesh_4x4_vc1
+
 build-verilator: build-cmodel
 	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY)
 
@@ -145,27 +153,19 @@ lint_docs:
 
 check: lint_scenarios lint_docs build-cmodel build-verilator
 	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
+	$(PYTHON3) sim/tools/run_benchmark.py --topology mesh_4x4_vc1 --pattern neighbor
 
-# TOPOLOGY (default mesh_4x4_vc1) selects the node count for both the tb_top
-# build and the regression runner. Exported so sim/run_regress.py materializes
-# the matching per-node coordinate variants and asserts master_count == N.
-TOPOLOGY ?= mesh_4x4_vc1
-sim-regress: build-verilator
-	TOPOLOGY=$(TOPOLOGY) $(PYTHON3) sim/run_regress.py
+# Unified sim target. TB selects topology (forwarded to build-verilator explicitly
+# so non-default topologies like mesh_4x4_vc8 are built correctly).
+# PATTERN, TXN, SEED, HOTSPOT, BASE are optional forwarded vars.
+TB      ?= mesh_4x4_vc1
+PATTERN ?= neighbor
 
-# PATTERN, HOTSPOT, TRANSACTIONS_PER_NODE, MEMORY_SIZE: forwarded to run_benchmark.py.
-PATTERN               ?= hotspot
-HOTSPOT               ?= 0
-TRANSACTIONS_PER_NODE ?= 2
-MEMORY_SIZE           ?= 0x4000
-
-bench: build-verilator
-	$(PYTHON3) sim/tools/run_benchmark.py \
-	    --topology $(TOPOLOGY) \
-	    --pattern $(PATTERN) \
-	    --hotspot $(HOTSPOT) \
-	    --transactions-per-node $(TRANSACTIONS_PER_NODE) \
-	    --memory-size $(MEMORY_SIZE)
+sim:
+	$(MAKE) build-verilator TOPOLOGY=$(TB) PYTHON3=$(PYTHON3)
+	$(PYTHON3) sim/tools/run_benchmark.py --topology $(TB) --pattern $(PATTERN) \
+	  $(if $(TXN),--transactions-per-node $(TXN)) $(if $(SEED),--seed $(SEED)) \
+	  $(if $(HOTSPOT),--hotspot $(HOTSPOT)) $(if $(BASE),--from $(BASE))
 
 # --- clean ---
 

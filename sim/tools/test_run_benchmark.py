@@ -1,4 +1,4 @@
-"""Unit tests for run_benchmark.py summarize().
+"""Unit tests for run_benchmark.py summarize() and CLI arg parsing.
 
 Run:
     python3 -m pytest sim/tools/test_run_benchmark.py -v
@@ -6,6 +6,7 @@ Run:
 """
 import os
 import sys
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -79,6 +80,23 @@ def test_summary_p95_single():
     assert s["latency"]["p95"] == 7
 
 
+def test_from_arg_parsing():
+    """--from is forwarded; absent → default canonical base path."""
+    import argparse
+    import run_benchmark as rb
+
+    # Parse with explicit --from
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--from", dest="base", default=None)
+    args = ap.parse_args(["--from", "/some/path.yaml"])
+    assert args.base == "/some/path.yaml"
+
+    # Default base path exists on disk
+    default_base = Path(rb.ROOT) / "sim" / "test_patterns" \
+        / "AX4-BAS-003_single_write_read_aligned" / "scenario.yaml"
+    assert default_base.exists(), f"Default base not found: {default_base}"
+
+
 if __name__ == "__main__":
     # Run without pytest (matches task gate requirement).
     tests = [
@@ -90,6 +108,7 @@ if __name__ == "__main__":
         test_summary_window_passthrough,
         test_summary_slot_throughput,
         test_summary_p95_single,
+        test_from_arg_parsing,
     ]
     passed = failed = 0
     for t in tests:

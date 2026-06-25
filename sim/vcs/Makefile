@@ -181,7 +181,7 @@ SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 # $finish(1)s otherwise). Materialize all N neighbor-pattern variants from the
 # base scenario.yaml via gen_test_patterns.py --pattern neighbor --topology $(TOPOLOGY),
 # then pass every +scenario_node<i>= (built by a shell loop over the emitted node
-# dirs). Mirrors sim/verilator/Makefile + sim/run_regress.py. PYTHON3 must have
+# dirs). Mirrors sim/verilator/Makefile run-tb-top. PYTHON3 must have
 # PyYAML — on a host where an EDA tool shadows a broken python3 on PATH, pin it
 # in local.mk:  PYTHON3 := /usr/bin/python3.12
 PYTHON3           ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)

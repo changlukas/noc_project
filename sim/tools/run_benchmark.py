@@ -145,6 +145,16 @@ def main(argv=None):
     ap.add_argument("--exclude-self", action="store_true")
     ap.add_argument("--out-root", default=None,
                     help="Root for output dirs (default: sim/verilator/output/bench_<scenario>)")
+    _DEFAULT_BASE = str(
+        ROOT / "sim" / "test_patterns"
+        / "AX4-BAS-003_single_write_read_aligned" / "scenario.yaml"
+    )
+    ap.add_argument(
+        "--from", dest="base", default=_DEFAULT_BASE,
+        metavar="BASE_YAML",
+        help="Base scenario.yaml forwarded to gen_test_patterns --from "
+             "(default: AX4-BAS-003_single_write_read_aligned/scenario.yaml)",
+    )
     a = ap.parse_args(argv)
 
     topology = a.topology
@@ -196,6 +206,8 @@ def main(argv=None):
         gen_args += ["--memory-size", hex(a.memory_size)]
     if a.exclude_self:
         gen_args.append("--exclude-self")
+    if a.base:
+        gen_args += ["--from", a.base]
 
     r = subprocess.run(gen_args, check=True)
 

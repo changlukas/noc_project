@@ -155,9 +155,7 @@ SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 # $finish(1)s otherwise). Materialize all N neighbor-pattern variants from the
 # base scenario.yaml via gen_test_patterns.py --pattern neighbor --topology $(TOPOLOGY),
 # then pass every +scenario_node<i>= (built by a shell loop over the emitted node dirs).
-# Mirrors sim/run_regress.py's N-node logic.
-# The regression runner (sim/run_regress.py, via make sim-regress) builds its own
-# command and does not use this target.
+# N-node logic mirrors the run_benchmark.py flow used by `make sim`.
 GEN_TEST_PATTERNS := $(COSIM_ROOT)/tools/gen_test_patterns.py
 
 .PHONY: run-tb-top
