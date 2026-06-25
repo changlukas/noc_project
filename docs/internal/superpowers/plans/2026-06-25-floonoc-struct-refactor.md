@@ -1,0 +1,337 @@
+# FlooNoC Struct Refactor + Unified `make sim` Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 把 `noc_intf`/`axi4_intf` 兩個 SV interface 改成 specgen 生成的 in-package packed-struct typedef，fabric/tb generator 從攤平改 `genvar generate` + struct array（對齊 FlooNoC `tb_floo_axi_mesh`）;同時統一 `make sim` 入口、四個 traffic pattern 全部 base-driven。
+
+**Architecture:** struct typedef 由 `sv_signals.py` emit 進 `ni_signals_pkg`（packed struct 當 cross-module port type 必須在 package 內）。一條 NMU↔router edge = 4 個 directed struct port（req-fwd / req-credit-bwd / rsp-fwd / rsp-credit-bwd，credit 方向與 channel 相反）。DPI 邊界**不變**（wrap 早已手動把 member 拆成 scalar 餵 DPI）。**port contract 與其 generated instantiation 必須在同一 commit 改**（wrap port 改 struct 的同一 task 內改 generator，否則 build 破）。
+
+**Tech Stack:** Python（specgen codegen + generator）、SystemVerilog/Verilator(`--timing`)/VCS、CMake/GoogleTest、Git Bash/MSYS2、GNU make。
+
+## Global Constraints
+- **python**:`PYTHON3=python3`(mingw64),**不用 `py -3`**。pytest;無 pytest 時用 `python3 -c` harness 跑同斷言。
+- **spec**:`docs/internal/superpowers/specs/2026-06-25-floonoc-struct-refactor-design.md`;每 task 隱含 spec 全約束。
+- **branch**:feature branch off main;**不 push**;commit `type(scope): description`;不 amend、不 `--no-verify`。
+- **specgen source of truth**:interface body 由 `specgen/source/interface_handshake.json`(field set)+ `sv_signals.py`(emit,`_emit_axi4_intf`/`_emit_noc_intf` 在 `endpackage` 後 append,`:261-270`)生成,**不是** `ni_signals.json`。`ni_signals.json` 不動。
+- **typedef in package**:struct typedef emit 進 `ni_signals_pkg`(package 內);wrap/fabric port type 變 `ni_signals_pkg::<struct>`。struct **不可帶 parameter**,width 一律用 fully-qualified `ni_params_pkg::AXI_ID_WIDTH_DFLT`/`NOC_FLIT_WIDTH_DFLT`/`NOC_NUM_VC_DFLT` 等(package 內無 `FLIT_WIDTH`/`NUM_VC` 裸 localparam)。
+- **DPI invariant(normative)**:struct member 在每個 DPI 邊界**個別 unpack**;**禁止**把整 struct 傳 DPI。`cmodel_dpi.cpp`/`.h` 是 **hard no-touch**(且 `cmodel_dpi.cpp` 透過 `channel_model_wrap_io.hpp` 鏈到 C++ channel_model,不得牽動)。
+- **channel_model 刪除範圍**:只刪 **SV** `sim/sv/channel_model_wrap.sv`(它 reference `noc_intf`)。**C++ channel_model 全保留**(`channel_model_wrap.hpp`/`_io.hpp` 被 `nmu_wrap_io.hpp:18` 依賴、`test_channel_model_wrap.cpp` 在 ctest 用);不得動 C++ side。
+- **ADDR mirror**:`gen_test_patterns.ADDR_DST_SHIFT == c_model LOCAL_ADDR_BITS == 32`,address scheme 不動。
+- **field-name contract(Task 1 鎖定,後續不得改)**:見 Task 1 Interfaces。
+- **perf parity 是 gate**:每次改 generator 後 `perf.json` 對 **預存的 baseline** byte-compare(見 Task 0 baseline harness),非假設。
+- **每 task gate** 綠才下一步:`make check PYTHON3=python3`(ctest 545,純 C++ 不受影響)+ 該 stage 的 co-sim/lint。
+- **accepted regression(decision Y)**:刪 `run_regress.py` → AX4 bidirectional co-sim sweep 暫時流失,replacement deferred,**不宣稱 retained**;Task 6 gate 明示。
+
+**基準**:開工前 `make check PYTHON3=python3` 全綠 + `make sim-regress TOPOLOGY=mesh_4x4_vc1` 6/6 + `python3 sim/tools/gen_tb_top.py --topology mesh_4x4_vc1 --check` exit 0。
+
+---
+
+### Task 0: 預存 perf baseline + 建 byte-compare harness
+
+**Files:**
+- Create: `sim/tools/perf_baseline/`(預存各 topology 一個 scenario 的 pre-refactor `perf.json`)
+- Create: `sim/tools/check_perf_parity.py`(golden compare,排除已知 `noc.links` 浮動欄位)
+
+- [ ] **Step 1: 跑 pre-refactor 一組 perf.json 當 golden**
+```bash
+for N in 1 2 4 8; do
+  make build-verilator TOPOLOGY=mesh_4x4_vc$N PYTHON3=python3
+  TOPOLOGY=mesh_4x4_vc$N python3 sim/run_regress.py    # 產 sim/verilator/output/AX4-BAS-005*/perf.json
+  cp sim/verilator/output/AX4-BAS-005*/perf.json sim/tools/perf_baseline/mesh_4x4_vc$N.json
+done
+```
+- [ ] **Step 2: 寫 check_perf_parity.py**
+```python
+# 比對兩個 perf.json,忽略 noc.links(re-emit 浮動);其餘須 byte/結構一致
+import json, sys
+def load(p): d=json.load(open(p)); d.get("noc",{}).pop("links",None); return d
+sys.exit(0 if load(sys.argv[1])==load(sys.argv[2]) else 1)
+```
+- [ ] **Step 3: Commit**
+```bash
+git add sim/tools/perf_baseline/ sim/tools/check_perf_parity.py
+git commit -m "test(sim): pin pre-refactor perf.json baselines + parity checker"
+```
+
+---
+
+## Stage 1 — struct typedef + spike
+
+### Task 1: specgen 生 NoC + AXI struct typedef(in-package,與 interface 並存)
+
+**Files:**
+- Modify: `specgen/tools/elaborate/sv_signals.py`(加 struct emitter,emit 進 package;**保留** interface emitter)
+- Test: `specgen/tests/test_codegen_sv.py`(加 typedef-presence 測試;沿用既有 `run_codegen` + `read_text` 風格)
+
+**Interfaces:**
+- Produces — **field-name contract(全 stage 凍結)**:
+  ```systemverilog
+  // ni_signals_pkg 內;width 全用 ni_params_pkg::*_DFLT
+  typedef struct packed { logic valid; logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit; } noc_chan_t;
+  typedef struct packed { logic [ni_params_pkg::NOC_NUM_VC_DFLT-1:0] credit; }              noc_credit_t;
+  typedef struct packed { /* AW+W+AR + bready + rready (master drives) */ } axi_req_t;
+  typedef struct packed { /* B+R + awready/wready/arready (slave drives) */ } axi_rsp_t;
+  ```
+  存取:`noc_o.req.valid`(取代 `noc_mosi_o.req_valid`);`axi_req_i.awvalid`。`axi_req_t`/`axi_rsp_t` 沿用現有 interface member 名;**`awregion`/`arregion` 保留為 carried-but-unused field**(interface 有、wrap 不 drive/sample;見 Task 4 policy)。
+
+- [ ] **Step 1: 加 typedef-presence 測試(失敗) — 沿用既有 run_codegen 風格**
+`test_codegen_sv.py`(既有 helper:`run_codegen(*args)` `:25`、`read_text` `:43`)。在 signals domain 的 test class(`:131+`)加:
+```python
+def test_emits_noc_struct_typedefs(self):
+    run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
+    sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+    assert "} noc_chan_t;" in sv and "} noc_credit_t;" in sv
+    assert "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
+def test_struct_typedefs_in_package(self):
+    sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+    pkg = sv[sv.index("package ni_signals_pkg"):sv.index("endpackage")]
+    assert "noc_chan_t" in pkg and "axi_req_t" in pkg     # typedef 在 package 內
+```
+> interface 消失的斷言**不在此 task**;Task 4 移除 interface 後才加。
+- [ ] **Step 2: 跑測試確認 fail**
+Run: `cd specgen && python3 -m pytest tests/test_codegen_sv.py -k struct -v` → FAIL。
+- [ ] **Step 3: 實作 struct emitter(保留 interface emitter)**
+- `sv_signals.py` 加 `_emit_noc_structs()` / `_emit_axi_structs(iface_spec)`,回傳 typedef 行;width 用 `ni_params_pkg::*_DFLT`。
+- axi:從 `_AXI_CHANNEL_SIGNALS` matrix(`:28-78`)依 master modport 方向切 `axi_req_t`(master 驅動集)/`axi_rsp_t`(master 接收集);含 `awregion`/`arregion`。
+- 在 `emit()` 的 package body **內**(`endpackage` 前)append typedef。**保留** `endpackage` 後的 `_emit_interfaces_from_handshake_schema`(`:267-270`)。結果:interface + typedef 並存,co-sim 全程可編譯。
+- [ ] **Step 4: pass + 重生 + drift gate**
+```bash
+cd specgen && python3 -m pytest tests/test_codegen_sv.py -v
+cd /e/05_NoC/noc_project && python3 specgen/tools/codegen.py && python3 specgen/tools/codegen.py --check
+```
+Expected: pytest 綠;`ni_signals_pkg.sv` package 內有 4 typedef + 仍有 interface;`--check` exit 0。
+- [ ] **Step 5: Commit**
+```bash
+git add specgen/tools/elaborate/sv_signals.py specgen/tests/test_codegen_sv.py specgen/generated/sv/ni_signals_pkg.sv
+git commit -m "feat(specgen): add noc/axi packed-struct typedefs alongside interfaces"
+```
+
+### Task 2: mesh_2x1_vc8 NoC-struct early spike(快速 GO/NO-GO,非完整 de-risk)
+
+> **範圍誠實**:這只是 early signal — 驗「struct port + `[N]`/`[LINK_PORTS]` array + vc8 `credit[8]`」基本能 elaborate。**完整的 generated multi-node / tie-off / perf-order elaboration 在 Task 3 用 4x4-vc8 驗**(spike 過 ≠ generator 過)。
+
+**Files:**
+- Create: `sim/topologies/mesh_2x1_vc8.yaml`、`sim/sv/spike/{noc_fabric_spike,tb_top_spike}.sv`(手寫,spike 後刪)
+
+- [ ] **Step 1: 手寫 2-node vc8 struct fabric + stub**
+`mesh_2x1_vc8.yaml`(`x_dim:2 y_dim:1 num_vc:8`);手寫最小 fabric,NoC NI face 用 `ni_signals_pkg::noc_chan_t req[2]` 等 struct array,node/link 放 `generate for`;wrap 可用 stub module(只驗 elaboration + 一拍 handshake)。
+- [ ] **Step 2: lint-only(關鍵風險:struct-in-array port + vc8 寬度)**
+```bash
+verilator --lint-only --timing -I specgen/generated/sv -I sim/sv/spike \
+  specgen/generated/sv/ni_params_pkg.sv specgen/generated/sv/ni_signals_pkg.sv \
+  specgen/generated/sv/ni_flit_pkg.sv sim/sv/spike/noc_fabric_spike.sv sim/sv/spike/tb_top_spike.sv
+```
+Expected: 無 elaboration error。報 unpacked-array element type mismatch → 用 `router_wrap.sv:164-181` 的 `logic`→`bit` mirror 手法。
+- [ ] **Step 3: 一拍 handshake PASS + Commit**
+build + run spike,driver 打一個 req flit、收 credit。
+```bash
+git add sim/topologies/mesh_2x1_vc8.yaml sim/sv/spike/
+git commit -m "test(sim): mesh_2x1_vc8 noc-struct early elaboration spike"
+```
+> GO/NO-GO:綠 → Task 3。紅 → STOP,systematic-debugging。
+
+---
+
+## Stage 2 — NoC full struct (wrap + generator 同 commit)
+
+### Task 3: NoC wrap port + fabric emitter 同步改 struct;刪 SV channel_model_wrap
+
+> wrap port contract 與 generated fabric 的 instantiation **必須同 commit 改**,否則 build 破(Codex top concern)。本 task 一次改 4 個 wrap 的 NoC port + `emit_fabric` + 刪 SV channel_model,gate 直接 build generated fabric。
+
+**Files:**
+- Modify: `sim/sv/nmu_wrap.sv`、`nsu_wrap.sv`、`router_wrap.sv`、`ni_wrap.sv`(NoC port `noc_intf`→struct;DPI 取值點改 struct field)
+- Modify: `sim/tools/gen_tb_top.py`(`emit_fabric` `:214-299`:per-node `noc_intf` instance → struct array;node/link/tie-off/perf 進 `generate`)
+- Delete: `sim/sv/channel_model_wrap.sv`(SV only)
+
+**Interfaces:**
+- Consumes:Task 1 `noc_chan_t`/`noc_credit_t`。
+- Produces:wrap NoC port = `output noc_chan_t noc_req_o, input noc_credit_t noc_req_cred_i, input noc_chan_t noc_rsp_i, output noc_credit_t noc_rsp_cred_o`(nmu 視角;router/nsu 對應方向)。fabric 用 `noc_chan_t req[N]` 等 array。
+
+- [ ] **Step 1: 刪 SV channel_model_wrap(C++ 不動)**
+```bash
+git rm sim/sv/channel_model_wrap.sv
+# SV-build-source gate(只查 SV filelist/build,C++ refs 是 intentional 保留):
+rg -n "channel_model_wrap\.sv|channel_model_wrap\b" sim/filelist_*.f sim/build_config.mk sim/sv/ || echo "no SV refs"
+```
+Expected: SV build source 無殘留(C++ `channel_model_wrap.hpp` 等保留,不在此 gate)。
+- [ ] **Step 2: 改 4 個 wrap 的 NoC port + DPI 取值**
+- `nmu_wrap.sv:48` `noc_intf.mosi noc_mosi_o` → 4 struct port。DPI 取值(`:195-198`):`noc_mosi_o.rsp_valid`→`noc_rsp_i.valid`、`.rsp_flit`→`noc_rsp_i.flit`、`.req_credit_return`→`noc_req_cred_i.credit`。drive(`:267-272`):`noc_mosi_o.req_valid`→`noc_req_o.valid` 等。
+- `nsu_wrap.sv` `noc_miso_i` → struct(對照該檔行號逐一改)。
+- `router_wrap.sv:49-51` `noc_nmu_i`/`noc_nsu_o` → struct;取值 `:184-189`;**LINK face(`:56-68`)不動**(plain `logic [LINK_PORTS]`)。
+- `ni_wrap.sv:37-38` `noc_nmu_o`/`noc_nsu_i` → struct,接 u_nmu/u_nsu 的 struct port。
+- **DPI 函式簽章一律不動**(invariant)。
+- [ ] **Step 3: 改 emit_fabric — NoC face struct array + generate**
+`gen_tb_top.py:214-220` per-node `noc_intf` instance → `ni_signals_pkg::noc_chan_t node_req[n]; noc_credit_t node_req_cred[n]; node_rsp[n]; node_rsp_cred[n];`。node 實例(`:238-273`)`.noc_nmu_o(node{i}_nmu.mosi)` → `.noc_req_o(node_req[i]), .noc_req_cred_i(node_req_cred[i]), ...`,包進 `generate for`。**array-indexing contract**:emit 順序維持 `_nodes()` raster(`:107-121`);link wiring(`:282-299`)/tie-off(`:318-328`,逐 missing direction 的 `$fatal` assertion 必須保留)/perf(`:336-363`)的 `seen` 去重順序不變 → perf label 穩定。LINK perf taps 不動。
+- [ ] **Step 4: gate — 重生 + build generated fabric + co-sim + perf parity(含 4x4-vc8)**
+```bash
+for N in 1 2 4 8; do python3 sim/tools/gen_tb_top.py --topology mesh_4x4_vc$N; done
+for N in 1 2 4 8; do
+  make build-verilator TOPOLOGY=mesh_4x4_vc$N PYTHON3=python3      # 真 build generated fabric
+  TOPOLOGY=mesh_4x4_vc$N python3 sim/run_regress.py                # 6/6 scoreboard clean
+  python3 sim/tools/check_perf_parity.py sim/verilator/output/AX4-BAS-005*/perf.json sim/tools/perf_baseline/mesh_4x4_vc$N.json
+done
+make check PYTHON3=python3                                          # ctest 545(C++ 不受影響)
+python3 sim/tools/gen_tb_top.py --topology mesh_4x4_vc1 --check
+```
+Expected: 四 topology build 綠 + 6/6 + perf parity 0 + ctest 545 + drift exit 0。**4x4-vc8 build 是真正的 multi-node/tie-off/vc8 de-risk**(spike 之外)。
+- [ ] **Step 5: Commit**
+```bash
+git add sim/sv/nmu_wrap.sv sim/sv/nsu_wrap.sv sim/sv/router_wrap.sv sim/sv/ni_wrap.sv sim/tools/gen_tb_top.py sim/sv/noc_fabric_*.sv
+git rm sim/sv/channel_model_wrap.sv
+git commit -m "refactor(sim): noc wrap+fabric interface->struct array+generate; drop SV channel_model_wrap"
+```
+
+---
+
+## Stage 3 — AXI full struct (wrap + tb + interface 移除 同 commit)
+
+### Task 4: AXI wrap+endpoint+tb_top emitter 同步改 struct;移除 interface;awregion policy
+
+**Files:**
+- Modify: `sim/sv/axi_master_wrap.sv`、`axi_slave_wrap.sv`、`ni_wrap.sv`(AXI face)、`user_node_endpoint.sv`(monitor tap)
+- Modify: `sim/tools/gen_tb_top.py`(`emit_tb_top` `:507-557`:`axi4_intf` → struct array + generate)
+- Modify: `specgen/tools/elaborate/sv_signals.py`(移除 interface emitter)、`specgen/tests/test_codegen_sv.py`(加 interface-absent 斷言)
+
+**Interfaces:**
+- Consumes:Task 1 `axi_req_t`/`axi_rsp_t`。
+- Produces:AXI port = `output axi_req_t axi_req_o, input axi_rsp_t axi_rsp_i`(master 視角);tb_top AXI face 用 array;`ni_signals_pkg.sv` 無 interface。
+
+- [ ] **Step 1: awregion/arregion policy + grep**
+```bash
+rg -n "awregion|arregion" sim/sv/axi_master_wrap.sv sim/sv/axi_slave_wrap.sv sim/sv/user_node_endpoint.sv
+```
+policy:`axi_req_t` **保留** `awregion`/`arregion` field(carried-but-unused);master_wrap 不 drive 它們(維持現狀,struct field 留預設 `'0`);不新增 DPI arg。
+- [ ] **Step 2: 改 axi_master/slave_wrap + ni_wrap AXI port + DPI 取值**
+`axi4_intf.master`/`.slave` → `axi_req_t`/`axi_rsp_t` struct port。DPI 取值 `axi_i.awvalid`→`axi_req_i.awvalid` 逐 field。DPI 簽章不動。`ni_wrap.sv:35-36` AXI face → struct。
+- [ ] **Step 3: 改 user_node_endpoint monitor tap**
+`user_node_endpoint.sv:60-88` 的 30+ 行 tap(`master_axi_o.awvalid`…`slave_axi_i.rid`)→ struct field(`axi_req.awvalid`…`axi_rsp.rid`);`axi_perf_monitor` 模組(scalar port)不動。
+- [ ] **Step 4: 改 emit_tb_top AXI face struct array + generate**
+`gen_tb_top.py:507-513` per-node `axi4_intf` → `ni_signals_pkg::axi_req_t master_axi_req[n]; axi_rsp_t master_axi_rsp[n];`(NMU 側 + NSU 側)。fabric 連接(`:527-533`)+ endpoint(`:546-557`)的 `.master`/`.slave` token → array index,包 generate。
+- [ ] **Step 5: 移除 interface emitter + 加 interface-absent 測試**
+`sv_signals.py`:刪 `endpackage` 後 `_emit_interfaces_from_handshake_schema`(`:267-270`)+ `_emit_axi4_intf`/`_emit_noc_intf`。`test_codegen_sv.py` 加:
+```python
+def test_interfaces_removed(self):
+    sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
+    assert "interface noc_intf" not in sv and "interface axi4_intf" not in sv
+```
+```bash
+cd specgen && python3 -m pytest tests/test_codegen_sv.py -v && cd .. && python3 specgen/tools/codegen.py && python3 specgen/tools/codegen.py --check
+```
+- [ ] **Step 6: gate — 全 topology co-sim + VCS one-topology + tb line down + perf parity**
+```bash
+for N in 1 2 4 8; do python3 sim/tools/gen_tb_top.py --topology mesh_4x4_vc$N; done
+for N in 1 2 4 8; do
+  make build-verilator TOPOLOGY=mesh_4x4_vc$N PYTHON3=python3 && TOPOLOGY=mesh_4x4_vc$N python3 sim/run_regress.py
+  python3 sim/tools/check_perf_parity.py sim/verilator/output/AX4-BAS-005*/perf.json sim/tools/perf_baseline/mesh_4x4_vc$N.json
+done
+make -C sim/vcs tb_top TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3   # VCS gate(非 defer;tb_top 是 generated-top build target,sim/vcs/Makefile:202)
+make check PYTHON3=python3
+wc -l sim/sv/tb_top_mesh_4x4_vc1.sv                       # 對比 pre-refactor ~630 行,預期降 >=50%
+```
+Expected: 四 topology 6/6 + VCS 綠 + tb_top 行數降 >=50% + perf parity + ctest 545 + `ni_signals_pkg.sv` 無 interface。
+- [ ] **Step 7: Commit**
+```bash
+git add sim/sv/axi_master_wrap.sv sim/sv/axi_slave_wrap.sv sim/sv/ni_wrap.sv sim/sv/user_node_endpoint.sv sim/tools/gen_tb_top.py specgen/tools/elaborate/sv_signals.py specgen/tests/test_codegen_sv.py specgen/generated/sv/ni_signals_pkg.sv sim/sv/tb_top_*.sv sim/sv/noc_fabric_*.sv
+git commit -m "refactor(sim): axi wrap+tb->struct array+generate; remove SV interfaces"
+```
+
+---
+
+## Stage 4 — A (unified make sim) + B (patterns from base)
+
+### Task 5: B — gen_test_patterns 四 pattern 統一 base-driven
+
+**Files:**
+- Modify: `sim/tools/gen_test_patterns.py`(`uniform_random`/`hotspot` 改吃 `--from` base shape;`transpose` 已 dual-mode)
+- Test: `sim/tools/test_gen_test_patterns.py`
+
+**Interfaces:**
+- Consumes:base `scenario.yaml`(size/len/burst/payload)。
+- Produces:四 pattern 都走 `--from`;`pattern(i)` 只決定 dst;`alloc_unique_offset`(`:210-254`)複用。
+
+- [ ] **Step 1: 失敗測試 — uniform/hotspot 從 base 取 shape + capacity 斷言**
+```python
+def test_uniform_random_uses_base_shape(tmp_path):
+    base = write_base(tmp_path, size=3, length=4)
+    out = run_gen(base, pattern="uniform_random", topo="mesh_4x4_vc1", seed=1, txn=2, frm=True)
+    txns = load(out / "node0" / "scenario.yaml")["transactions"]
+    assert all(t["size"] == 3 and t["len"] == 4 for t in txns)   # shape from base
+def test_base_driven_respects_alloc_capacity(tmp_path):
+    # 每 node txn 超過 memory window(mesh_4x4 @0x1000 = 4 txn 上限)須 raise,不靜默溢出
+    base = write_base(tmp_path, size=2, length=0)
+    with pytest.raises(ValueError):
+        run_gen(base, pattern="uniform_random", topo="mesh_4x4_vc1", seed=1, txn=8, frm=True)
+```
+- [ ] **Step 2: 跑測試確認 fail**
+Run: `cd sim/tools && python3 -m pytest test_gen_test_patterns.py -k "base_shape or capacity" -v` → FAIL。
+- [ ] **Step 3: 實作 — uniform/hotspot 讀 base shape**
+`gen_test_patterns.py:585-620` uniform/hotspot 路徑:`--from` 提供時,copy base transaction 的 size/len/burst/payload,只把 addr 換成 `pattern(i)` dst + `alloc_unique_offset`(其既有 bound assert `:247` 自然涵蓋 capacity 測試)。保留 `--size`/`--len` 當無 `--from` fallback。`transpose`(`:554-583`)確認一致。
+- [ ] **Step 4: 測試 + 不回歸**
+```bash
+cd sim/tools && python3 -m pytest test_gen_test_patterns.py -v
+```
+Expected: 新測試 PASS;neighbor/transpose 既有測試不回歸。
+- [ ] **Step 5: Commit**
+```bash
+git add sim/tools/gen_test_patterns.py sim/tools/test_gen_test_patterns.py
+git commit -m "feat(sim): all four patterns base-driven (shape from --from base)"
+```
+
+### Task 6: A — 統一 make sim;run_benchmark 加 --from;刪 run_regress
+
+**Files:**
+- Modify: `sim/tools/run_benchmark.py`(加 `--from`/`--base`;當 `make sim` 後端)
+- Modify: `Makefile`(`sim` target;`TB` 為 `TOPOLOGY` alias;`check` 加 smoke)
+- Delete: `sim/run_regress.py`
+
+**Interfaces:**
+- Produces:`make sim TB=<topo> PATTERN=<p> [TXN= SEED= HOTSPOT= BASE=]`。
+- Consumes:Task 5 base-driven `gen_test_patterns`。
+
+- [ ] **Step 1: run_benchmark 加 --from/--base**
+`run_benchmark.py` argparse 加 `--from`(`:135` 附近),轉傳 `gen_test_patterns --from`;無指定時用 canonical base `sim/test_patterns/AX4-BAS-003_single_write_read_aligned/scenario.yaml`。加最小 CLI 測試(arg 解析 + 預設 base 存在)。
+- [ ] **Step 2: Makefile sim target(TB 為 TOPOLOGY alias)**
+```makefile
+TB ?= mesh_4x4_vc1
+sim:                                                 # 不用 depend(會丟 TB);recipe 內顯式傳 TOPOLOGY=$(TB)
+	$(MAKE) build-verilator TOPOLOGY=$(TB) PYTHON3=$(PYTHON3)
+	$(PYTHON3) sim/tools/run_benchmark.py --topology $(TB) --pattern $(PATTERN) \
+	  $(if $(TXN),--transactions-per-node $(TXN)) $(if $(SEED),--seed $(SEED)) \
+	  $(if $(HOTSPOT),--hotspot $(HOTSPOT)) $(if $(BASE),--from $(BASE))
+```
+**關鍵**:`build-verilator` 用 `TOPOLOGY`(default `mesh_4x4_vc1`,`Makefile:111,152`),故 `sim` recipe **顯式** `$(MAKE) build-verilator TOPOLOGY=$(TB)`,否則 `make sim TB=mesh_4x4_vc8` 會 build 錯 topology。保留既有 `TOPOLOGY` 使用者相容(TB 預設取 mesh_4x4_vc1)。移除 `bench`/`sim-regress` target;`check` 末加 `$(PYTHON3) sim/tools/run_benchmark.py --topology mesh_4x4_vc1 --pattern neighbor`(smoke)。
+- [ ] **Step 3: 刪 run_regress + 殘留 call sites**
+```bash
+git rm sim/run_regress.py
+rg -n "run_regress|sim-regress" Makefile sim/ docs/ || echo "no refs"
+```
+更新任何 `make sim-regress` 引用。
+- [ ] **Step 4: gate — make sim 各 pattern + make check**
+```bash
+for P in neighbor transpose uniform_random; do make sim TB=mesh_4x4_vc1 PATTERN=$P PYTHON3=python3; done
+make sim TB=mesh_4x4_vc1 PATTERN=hotspot HOTSPOT=5 PYTHON3=python3
+make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3      # 驗 TB 真的傳給 build(非 default topology)
+make check PYTHON3=python3                       # ctest 545 + neighbor smoke
+python3 sim/tools/gen_tb_top.py --topology mesh_4x4_vc1 --check
+```
+Expected: 各 pattern PASS;`make check` 綠;drift exit 0。
+> **coverage 註記(decision Y)**:此 commit 刪除 `run_regress.py` 的 AX4 bidirectional sweep,以 neighbor smoke 為最低 gate;**AX4 curated 覆蓋暫時流失,replacement deferred**,不宣稱 retained。
+- [ ] **Step 5: Commit + spike 清理**
+```bash
+git rm -r sim/sv/spike sim/topologies/mesh_2x1_vc8.yaml   # Task 2 spike 全部移除(含 topology yaml)
+git add Makefile sim/tools/run_benchmark.py
+git rm sim/run_regress.py
+git commit -m "feat(sim): unified make sim (replaces bench+sim-regress); run_benchmark --from; drop run_regress + spike"
+```
+
+---
+
+## Self-Review notes
+- **每 commit 可編譯**:wrap port 與 generator instantiation 同 task 改(Task 3 noc、Task 4 axi);interface 與 typedef 並存到 Task 4 才移除;每 task gate 都 build generated fabric(非僅 wrap lint)。
+- **spike vs 真 gate**:Task 2 spike 是 early signal;真正 multi-node/tie-off/vc8 de-risk 在 Task 3 的 4x4-vc8 build。
+- **channel_model**:只刪 SV;C++ 全留(nmu_wrap_io 依賴);gate 只查 SV build source。
+- **DPI**:`cmodel_dpi.cpp`/`.h` hard no-touch;簽章每 task 不動。
+- **perf**:Task 0 預存 baseline + checker,Task 3/4 byte-compare。
+- **field-name contract**:Task 1 鎖 NoC+AXI;awregion/arregion carried-but-unused(Task 4 policy)。
+- **VCS**:Task 4 Step 6(非 defer)。
+- **coverage regression**:Task 6 明示 deferred,不宣稱 retained。
