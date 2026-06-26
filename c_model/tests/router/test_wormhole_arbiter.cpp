@@ -27,7 +27,7 @@ Flit make_flit(uint8_t axi_ch, uint64_t last, uint64_t wlast = 0) {
 
 }  // namespace
 
-// ---- Functional tests (7) ----
+// ---- Functional tests (8) ----
 
 TEST(NocWormholeArbiter, PassThroughNoPairing) {
     SCENARIO(
@@ -133,22 +133,59 @@ TEST(NocWormholeArbiter, NocRspOutVariantPassThrough) {
 
 TEST(NocWormholeArbiter, BackpressureUpstreamAndDownstream) {
     SCENARIO(
-        "WormholeArbiter backpressure: input pending full -> push_flit "
-        "returns false. Downstream credit_avail=false -> tick is idle.");
-    // Downstream that refuses credit
-    struct NoCreditDown : ni::cmodel::router::NocReqOut {
-        bool push_flit(const Flit&) override { return true; }
-        bool credit_avail(uint8_t) const override { return false; }
-    } no_credit;
-    WormholeArbiter<ni::cmodel::router::NocReqOut> arb(no_credit, /*num_inputs=*/2, {},
+        "WormholeArbiter backpressure: input pending full -> push_flit returns "
+        "false (upstream). A downstream that refuses push_flit (downstream "
+        "backpressure) makes tick retain the front flit -> idle, no drain.");
+    // Downstream with no room: push_flit returns false. The arbiter does not
+    // inspect VC or track credit; push_flit's return value is the authoritative
+    // ready signal, and a false return is retried (front flit retained).
+    struct FullDown : ni::cmodel::router::NocReqOut {
+        bool push_flit(const Flit&) override { return false; }
+    } full;
+    WormholeArbiter<ni::cmodel::router::NocReqOut> arb(full, /*num_inputs=*/2, {},
                                                        /*per_input_depth=*/2);
 
     ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*last=*/1)));
     ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*last=*/1)));
     EXPECT_FALSE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*last=*/1)));  // full
 
-    arb.tick();                          // downstream credit=false -> idle
+    arb.tick();                          // downstream refuses push -> retain -> idle
     EXPECT_EQ(arb.pending_size(0), 2u);  // unchanged
+}
+
+TEST(NocWormholeArbiter, DownstreamBackpressureRetriesNoAbort) {
+    SCENARIO(
+        "WormholeArbiter try-push handshake: a downstream that transiently "
+        "refuses push_flit (e.g. NMU VcArbiter where the flit's landing VC is "
+        "full while header.vc_id reports VC0) is legitimate backpressure, NOT a "
+        "protocol violation. The arbiter must retain the front flit and retry "
+        "until accepted -- no abort, no flit loss/duplication.");
+    // Refuses the first 2 push attempts (credit_avail still true), then accepts.
+    // Models the multi-VC case: credit_avail(header.vc_id) cannot predict the
+    // landing VC that VcArbiter::push_flit actually selects.
+    struct FlakyDown : ni::cmodel::router::NocReqOut {
+        int refuse_remaining = 2;
+        int accepted = 0;
+        bool push_flit(const Flit&) override {
+            if (refuse_remaining > 0) {
+                --refuse_remaining;
+                return false;
+            }
+            ++accepted;
+            return true;
+        }
+        bool credit_avail(uint8_t) const override { return true; }
+    } down;
+    WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/2, {});
+
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*last=*/1)));
+    arb.tick();  // refused (1) -> flit retained, no abort
+    EXPECT_EQ(arb.pending_size(0), 1u);
+    arb.tick();  // refused (2) -> still retained
+    EXPECT_EQ(arb.pending_size(0), 1u);
+    arb.tick();  // accepted -> drained exactly once
+    EXPECT_EQ(arb.pending_size(0), 0u);
+    EXPECT_EQ(down.accepted, 1);
 }
 
 TEST(NocWormholeArbiter, LockLeakIdleStallNoDeadlock) {
@@ -168,7 +205,7 @@ TEST(NocWormholeArbiter, LockLeakIdleStallNoDeadlock) {
     EXPECT_TRUE(arb.is_locked());
 }
 
-// ---- Death tests (4) ----
+// ---- Death tests (3) ----
 
 TEST(NocWormholeArbiterDeath, WBeforeAW) {
     SCENARIO(
@@ -188,19 +225,6 @@ TEST(NocWormholeArbiterDeath, MalformedAwLastEquals1) {
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
     ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AW, /*last=*/1)));
-    EXPECT_DEATH({ arb.tick(); }, ".*");
-}
-
-TEST(NocWormholeArbiterDeath, LyingDownstream) {
-    SCENARIO(
-        "WormholeArbiter: downstream lies (credit_avail=true but "
-        "push_flit=false). tick must assert+abort on protocol violation.");
-    struct LyingDown : ni::cmodel::router::NocReqOut {
-        bool push_flit(const Flit&) override { return false; }
-        bool credit_avail(uint8_t) const override { return true; }
-    } liar;
-    WormholeArbiter<ni::cmodel::router::NocReqOut> arb(liar, /*num_inputs=*/2, {});
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*last=*/1)));
     EXPECT_DEATH({ arb.tick(); }, ".*");
 }
 

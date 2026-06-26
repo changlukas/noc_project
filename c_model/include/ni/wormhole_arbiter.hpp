@@ -185,9 +185,6 @@ inline void WormholeArbiter<Downstream>::tick() {
     }
 
     const Flit& flit = pending_[target].front();
-    uint8_t vc_id = static_cast<uint8_t>(flit.get_header_field("vc_id"));
-    if (!downstream_.credit_avail(vc_id)) return;
-
     uint64_t last = flit.get_header_field("last");
 
     // Defensive guards (Constraint A2)
@@ -205,10 +202,14 @@ inline void WormholeArbiter<Downstream>::tick() {
         std::abort();
     }
 
-    bool ok = downstream_.push_flit(flit);
-    assert(ok &&
-           "WormholeArbiter::tick: lying downstream (credit_avail=true but push_flit refused)");
-    if (!ok) std::abort();  // belt-and-braces for NDEBUG
+    // Pure valid/ready handshake: this arbiter only selects one request out of
+    // the input queues toward the NoC -- it does not decide VC or track credit.
+    // VC selection and per-VC credit gating live entirely in the downstream
+    // nmu::VcArbiter. A false return is legitimate backpressure (req_out.hpp:
+    // "a false return MUST be safely retried"), so retain the front flit and
+    // retry next tick. Mirrors FlooNoC floo_wormhole_arbiter.sv, a pure
+    // handshake with no credit logic.
+    if (!downstream_.push_flit(flit)) return;
 
     pending_[target].pop_front();
     round_robin_ptr_ = (target + 1) % num_inputs_;
