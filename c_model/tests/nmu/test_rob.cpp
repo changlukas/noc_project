@@ -445,13 +445,14 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
-    // Arrive in order: slot 4, 5 (AR2), then 0, 1, 2, 3 (AR1)
-    push_r(4, false, 0xB0);
-    push_r(5, true, 0xB1);
-    push_r(0, false, 0xA0);
-    push_r(1, false, 0xA1);
-    push_r(2, false, 0xA2);
-    push_r(3, true, 0xA3);
+    // Arrive in order: AR2 beats (base=4) then AR1 beats (base=0).
+    // Real NSU stamps every beat with the same base rob_idx.
+    push_r(4, false, 0xB0);  // AR2 beat 0 (base=4)
+    push_r(4, true, 0xB1);   // AR2 beat 1 (base=4)
+    push_r(0, false, 0xA0);  // AR1 beat 0 (base=0)
+    push_r(0, false, 0xA1);  // AR1 beat 1 (base=0)
+    push_r(0, false, 0xA2);  // AR1 beat 2 (base=0)
+    push_r(0, true, 0xA3);   // AR1 beat 3 (base=0)
     depkt.tick();
     // pop_r pulls one downstream flit per call; commits happen when a range
     // is fully ready. Drain by polling, collecting all returned beats in order.
@@ -595,14 +596,14 @@ TEST(RobDrainHook, FiresOncePerIdDrain_Enabled) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
+    // Real NSU stamps every beat of the burst with the SAME base rob_idx.
     push_r(0, false);
-    push_r(1, false);
-    push_r(2, false);
-    push_r(3, true);
+    push_r(0, false);
+    push_r(0, false);
+    push_r(0, true);
     depkt.tick();
-
-    // Drain all 4 committed beats. The whole burst (one order-list entry) is the
-    // only entry for id=5, so the order list empties on the commit -> exactly one fire.
+    // Expect: per-base counter files them into slots 0..3; all 4 beats drain;
+    // id=5 order list empties -> exactly one drain fire.
     int got = 0;
     for (int i = 0; i < 32 && got < 4; ++i) {
         if (rob.pop_r().has_value()) ++got;
@@ -636,26 +637,20 @@ TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
     EXPECT_DEATH(rob.pop_b(), ".*");
 }
 
-TEST(NmuRobDeath, ReadFillSameBaseRobIdxOverwriteGuarded) {
+TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
     SCENARIO(
-        "Enabled read ROB: two R beats stamped with the same base rob_idx (as NSU "
-        "currently stamps every beat of a burst) collide on one slot. The model "
-        "must fail fast (Family C: per-ID arrival offset not implemented), not "
-        "silently overwrite and misorder the burst.");
+        "Enabled read ROB: two R beats stamped with the same base rob_idx (real NSU "
+        "stamping) land at base+0 and base+1 via the per-base arrival counter, in order.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
-    // Allocate a 2-beat AR (len=1) -> slots 0..1; base=0.
     axi::ArBeat ar = make_ar(0x05, 0x100);
-    ar.len = 1;
+    ar.len = 1;  // 2 beats -> slots 0..1, base=0
     ASSERT_TRUE(rob.push_ar(ar));
 
-    // Inject two R beats both with rob_idx=0 (the base slot).
-    // This mirrors the real NSU: every beat of a burst is stamped with the
-    // same MetaBuffer entry (rob_idx = base), not base+beat_offset.
     auto push_r = [&](uint8_t rob_idx, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
@@ -671,17 +666,14 @@ TEST(NmuRobDeath, ReadFillSameBaseRobIdxOverwriteGuarded) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
-
-    // Both beats carry rob_idx=0 (same base -- NSU same-base hazard).
     push_r(/*rob_idx=*/0, /*rlast=*/false, 0xA0);
     push_r(/*rob_idx=*/0, /*rlast=*/true, 0xA1);
     depkt.tick();
 
-    // First pop_r_staged fills slot 0 (ready: false -> true).
-    // Range [0,2) not yet fully ready (slot 1 still empty) -> returns nullopt.
-    rob.pop_r();
-
-    // Second pop_r_staged targets slot 0 again (already ready).
-    // Without guard: silent overwrite. With guard (Family C): abort.
-    EXPECT_DEATH({ rob.pop_r(); }, ".*");
+    auto r0 = rob.pop_r();
+    auto r1 = rob.pop_r();
+    ASSERT_TRUE(r0.has_value());
+    ASSERT_TRUE(r1.has_value());
+    EXPECT_EQ(r0->data[0], 0xA0);  // base+0
+    EXPECT_EQ(r1->data[0], 0xA1);  // base+1
 }
