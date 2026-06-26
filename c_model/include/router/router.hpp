@@ -3,11 +3,13 @@
 // Spec: docs/superpowers/specs/2026-06-12-router-microarch-design.md
 //
 // Fixed-vc 3-stage pipeline: stage 1 per-(input port, vc) FIFO (+RC at the
-// FIFO head), stage 2 per-(output port, vc) wormhole arbitration + per-output
-// VC arbitration + crossbar, stage 3 output FIFO -> link. Credit-based flow
+// FIFO head), stage 2 per-output wormhole arbitration (one wormhole packet per
+// output until last flit) + per-output VC arbitration + crossbar, stage 3
+// output FIFO -> link. Credit-based flow
 // control; credit reserved at output-FIFO admission (the grant event).
-// Lock semantics ported from FlooNoC floo_wormhole_arbiter/floo_vc_arbiter
-// with (input port, vc) ownership; decrement point matches BookSim2
+// Lock semantics ported from FlooNoC floo_wormhole_arbiter/floo_vc_arbiter:
+// per-output ownership locked to one (input port, vc) until packet last flit;
+// decrement point matches BookSim2
 // BufferState::SendingFlit.
 //
 // Convention: +y is NORTH. One Router instance per physical network
