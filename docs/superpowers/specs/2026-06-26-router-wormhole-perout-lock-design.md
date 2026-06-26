@@ -90,10 +90,14 @@ concurrency versus the current (incorrect) model and matches FlooNoC.
 Full C fix (per-ID arrival offset in ROB fill, mirroring `floo_rob.sv` `offset_q[id]`) is out of
 scope this round (unreachable today, larger than B).
 
-**Guard.** In the AR allocation path (`Rob::push_ar`), when `mode_r_ == RobMode::Enabled && b.len != 0`,
-fail fast (assert + `std::abort`) with a message naming the gap: Enabled-mode multi-beat read
-reassembly needs a per-ID arrival offset (Family C) not yet implemented; use ReadWriteSplit or
-single-beat reads. This converts silent corruption into a loud, located failure.
+**Guard.** Not at `push_ar`. Allocating a consecutive slot range for a multi-beat read is correct, and
+existing Enabled tests rely on it (they inject distinct per-beat `rob_idx`, `test_rob.cpp:225-246`,
+`:416-430`). The hazard is the NSU stamping every R beat with the same base `rob_idx`, so the second
+beat lands on an already-filled slot. Guard the read fill in `Rob::pop_r_staged` (`rob.hpp:355-360`):
+if the target read slot is already `ready` when a new R beat arrives, fail fast (assert + `std::abort`)
+with a message naming the gap (Family C: per-ID arrival offset `base + offset_q[id]` from
+`floo_rob.sv` not implemented). This converts silent overwrite into a loud, located failure and leaves
+the legitimate distinct-`rob_idx` path untouched.
 
 ## Test plan
 
@@ -119,8 +123,9 @@ single-beat reads. This converts silent corruption into a loud, located failure.
 **B (regression).** Existing `test_router.cpp` cases that assumed per-VC interleave are reviewed and
 updated to the per-output semantics (do not delete coverage, re-express it).
 
-**C (guard).** Death test: `Rob` with `read_rob_mode = Enabled` + `push_ar(len>0)` aborts. Doc test:
-NSU-built multi-beat R flits all carry the same base `rob_idx` (records the current hazard).
+**C (guard).** Death test: an Enabled read ROB fed two R beats with the same base `rob_idx` aborts on
+the second fill. Existing Enabled tests that inject distinct `rob_idx` still pass. Doc test: NSU-built
+multi-beat R flits all carry the same base `rob_idx` (records the source of the hazard).
 
 ## Out of scope
 
