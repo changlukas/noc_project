@@ -680,3 +680,101 @@ TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
     EXPECT_EQ(got[0], 0xA0);  // base+0
     EXPECT_EQ(got[1], 0xA1);  // base+1
 }
+
+// === Task 2: Defensive boundary tests (lock the computed-slot guard) ===
+
+TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
+    SCENARIO(
+        "Enabled read ROB: a 3rd R beat for a 2-beat burst (offset == len) aborts "
+        "rather than writing into an adjacent burst's slot.");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 1;  // 2 beats
+    ASSERT_TRUE(rob.push_ar(ar));
+
+    auto push_r = [&](bool rlast) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", 0);
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+    push_r(false);  // slot 0
+    push_r(false);  // slot 1 (no rlast yet)
+    push_r(false);  // extra 3rd beat for a 2-beat burst -> must abort when reached
+    depkt.tick();
+    EXPECT_DEATH(
+        {
+            for (int i = 0; i < 8; ++i) (void)rob.pop_r();
+        },
+        ".*");
+}
+
+TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
+    SCENARIO(
+        "Enabled read ROB: after a burst fully commits and frees base 0, a new "
+        "burst that reuses base 0 starts its arrival counter at 0.");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    auto push_r = [&](uint8_t id, bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", 0);
+        f.set_payload_field("R", "rid", id);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+
+    // Burst 1: id=5, len=1 -> base 0, 2 beats. Fill, drain, free.
+    axi::ArBeat ar1 = make_ar(0x05, 0x100);
+    ar1.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar1));
+    push_r(0x05, false, 0xB0);
+    push_r(0x05, true, 0xB1);
+    depkt.tick();
+    std::vector<uint8_t> got1;
+    for (int i = 0; i < 16 && got1.size() < 2; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got1.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got1.size(), 2u);
+
+    // Burst 2 reuses base 0 (slots freed). Counter must start at 0 again.
+    axi::ArBeat ar2 = make_ar(0x06, 0x200);
+    ar2.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar2));
+    push_r(0x06, false, 0xC0);
+    push_r(0x06, true, 0xC1);
+    depkt.tick();
+    std::vector<uint8_t> got2;
+    for (int i = 0; i < 16 && got2.size() < 2; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got2.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got2.size(), 2u);
+    EXPECT_EQ(got2[0], 0xC0);  // proves base-0 counter restarted at offset 0
+    EXPECT_EQ(got2[1], 0xC1);
+}
