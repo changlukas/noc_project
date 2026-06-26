@@ -213,6 +213,38 @@ TEST(RouterWormhole, PacketsDoNotInterleavePerOutputVc) {
     EXPECT_EQ(count_b, 3);
 }
 
+TEST(RouterWormhole, PacketsOnDifferentVcsDoNotInterleavePerOutput) {
+    SCENARIO(
+        "Router per-output wormhole lock: two 3-flit packets to the same output "
+        "on different VCs (A on vc0, B on vc1) drain as two contiguous packets. "
+        "The current per-(output,vc) lock + VC round-robin interleaves them.");
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // routes EAST from center (x=1)
+    Packet a{static_cast<std::size_t>(RouterPort::WEST), /*src_id=*/0x10};
+    Packet b{static_cast<std::size_t>(RouterPort::SOUTH), /*src_id=*/0x20};
+    for (int t = 0; t < 24; ++t) {
+        feed_packet(r, a, dst, /*vc=*/0);
+        if (t >= 1) feed_packet(r, b, dst, /*vc=*/1);
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i)
+            r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
+    }
+    ASSERT_EQ(east.received.size(), 6u);
+    int runs = 1;
+    for (std::size_t i = 1; i < east.received.size(); ++i) {
+        const uint8_t s = static_cast<uint8_t>(east.received[i].get_header_field("src_id"));
+        const uint8_t prev = static_cast<uint8_t>(east.received[i - 1].get_header_field("src_id"));
+        if (s != prev) ++runs;
+    }
+    EXPECT_EQ(runs, 2) << "cross-VC packet flits interleaved on EAST output";
+}
+
 TEST(RouterWormhole, SingleFlitPacketLocksAndReleasesSameCycle) {
     SCENARIO(
         "Router: single-flit packet (last=1 at grant) — next packet from another "

@@ -88,7 +88,6 @@ class Router {
         for (std::size_t p = 0; p < ROUTER_PORT_COUNT; ++p) {
             input_fifo_[p].resize(cfg_.num_vc);
             credit_[p].assign(cfg_.num_vc, cfg_.vc_depth);
-            wormhole_[p].resize(cfg_.num_vc);
             input_adapters_.emplace_back(this, p);
         }
     }
@@ -150,16 +149,17 @@ class Router {
 
     struct WormholeState {
         std::optional<std::size_t> locked_input;
-        std::size_t rr = 0;
+        std::optional<uint8_t> locked_vc;  // VC of the in-flight wormhole packet
+        std::size_t rr = 0;                // input round-robin (unlocked scan)
     };
 
     RouterConfig cfg_;
     // stage-1 input landing register, one flit/port/cycle
     std::array<std::optional<Flit>, ROUTER_PORT_COUNT> landing_{};
     std::array<std::vector<std::deque<Flit>>, ROUTER_PORT_COUNT> input_fifo_{};
-    std::array<std::vector<std::size_t>, ROUTER_PORT_COUNT> credit_{};      // [out][vc]
-    std::array<std::vector<WormholeState>, ROUTER_PORT_COUNT> wormhole_{};  // [out][vc]
-    std::array<std::size_t, ROUTER_PORT_COUNT> vc_rr_{};                    // [out]
+    std::array<std::vector<std::size_t>, ROUTER_PORT_COUNT> credit_{};  // [out][vc]
+    std::array<WormholeState, ROUTER_PORT_COUNT> wormhole_{};           // per-output (across VCs)
+    std::array<std::size_t, ROUTER_PORT_COUNT> vc_rr_{};                // [out]
     std::array<std::deque<Flit>, ROUTER_PORT_COUNT> output_fifo_{};
     std::array<RouterLink*, ROUTER_PORT_COUNT> downstream_{};
     std::array<RouterCreditSink*, ROUTER_PORT_COUNT> upstream_credit_{};
@@ -205,16 +205,33 @@ inline void Router::tick() {
         }
     }
 
-    // Stage 2: per-output grant — wormhole (packet) lock + VC (flit) RR.
+    // Stage 2: per-output grant. One wormhole packet per output across VCs.
     for (std::size_t out = 0; out < ROUTER_PORT_COUNT; ++out) {
         if (output_fifo_[out].size() >= cfg_.output_fifo_depth) continue;
-        for (std::size_t k = 0; k < cfg_.num_vc; ++k) {
-            const std::size_t vc = (vc_rr_[out] + k) % cfg_.num_vc;
-            auto& ws = wormhole_[out][vc];
-            std::optional<std::size_t> candidate;
-            if (ws.locked_input.has_value()) {
-                if (!input_fifo_[*ws.locked_input][vc].empty()) candidate = ws.locked_input;
-            } else {
+        auto& ws = wormhole_[out];
+        std::optional<std::size_t> candidate;
+        uint8_t vc = 0;
+        if (ws.locked_input.has_value()) {
+            // Locked: serve only the in-flight (input, vc) until its last flit.
+            vc = *ws.locked_vc;
+            auto& lq = input_fifo_[*ws.locked_input][vc];
+            if (!lq.empty() && credit_[out][vc] > 0) {
+                const auto dst = static_cast<uint8_t>(lq.front().get_header_field("dst_id"));
+                if (static_cast<std::size_t>(route_compute(dst, cfg_)) != out) {
+                    assert(
+                        false &&
+                        "Router: locked wormhole continuation routes to a different output "
+                        "(malformed packet: last=0 head not closed by last=1 on this (input,vc))");
+                    std::abort();
+                }
+                candidate = ws.locked_input;
+            }
+        } else {
+            // Unlocked: VC round-robin, then input round-robin; first flit routed
+            // here with credit wins.
+            for (std::size_t kv = 0; kv < cfg_.num_vc && !candidate.has_value(); ++kv) {
+                vc = static_cast<uint8_t>((vc_rr_[out] + kv) % cfg_.num_vc);
+                if (credit_[out][vc] == 0) continue;
                 for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
                     const std::size_t in = (ws.rr + j) % ROUTER_PORT_COUNT;
                     const auto& q = input_fifo_[in][vc];
@@ -226,25 +243,26 @@ inline void Router::tick() {
                     }
                 }
             }
-            if (!candidate.has_value() || credit_[out][vc] == 0) continue;
+        }
+        if (!candidate.has_value()) continue;
 
-            // Grant (spec §5): single atomic event.
-            auto& q = input_fifo_[*candidate][vc];
-            const Flit flit = q.front();
-            q.pop_front();
-            assert(credit_[out][vc] > 0 && "Router: credit underflow");
-            --credit_[out][vc];
-            output_fifo_[out].push_back(flit);
-            credit_pulse_pending_.emplace_back(*candidate, static_cast<uint8_t>(vc));
-            const uint64_t last = flit.get_header_field("last");
-            if (last == 0) {
-                ws.locked_input = *candidate;
-            } else {
-                ws.locked_input.reset();
-                ws.rr = (*candidate + 1) % ROUTER_PORT_COUNT;
-            }
-            vc_rr_[out] = (vc + 1) % cfg_.num_vc;
-            break;  // one grant per output port per cycle
+        // Grant (spec sec 5): single atomic event.
+        auto& q = input_fifo_[*candidate][vc];
+        const Flit flit = q.front();
+        q.pop_front();
+        assert(credit_[out][vc] > 0 && "Router: credit underflow");
+        --credit_[out][vc];
+        output_fifo_[out].push_back(flit);
+        credit_pulse_pending_.emplace_back(*candidate, static_cast<uint8_t>(vc));
+        const uint64_t last = flit.get_header_field("last");
+        if (last == 0) {
+            ws.locked_input = *candidate;
+            ws.locked_vc = vc;
+        } else {
+            ws.locked_input.reset();
+            ws.locked_vc.reset();
+            ws.rr = (*candidate + 1) % ROUTER_PORT_COUNT;
+            vc_rr_[out] = static_cast<std::size_t>((vc + 1) % cfg_.num_vc);
         }
     }
 
