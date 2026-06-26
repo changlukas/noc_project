@@ -778,3 +778,57 @@ TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
     EXPECT_EQ(got2[0], 0xC0);  // proves base-0 counter restarted at offset 0
     EXPECT_EQ(got2[1], 0xC1);
 }
+
+TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
+    SCENARIO(
+        "Enabled read ROB: two same-id bursts to different dst get distinct bases; "
+        "interleaved R beats fill per base, not per id. Egress holds AR order.");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // Burst A: id=5, len=1 -> base 0 (slots 0..1). Burst B: id=5, len=1 -> base 2 (slots 2..3).
+    axi::ArBeat arA = make_ar(0x05, 0x100);
+    arA.len = 1;
+    axi::ArBeat arB = make_ar(0x05, 0x200);
+    arB.len = 1;
+    ASSERT_TRUE(rob.push_ar(arA));
+    ASSERT_TRUE(rob.push_ar(arB));
+
+    auto push_r = [&](uint8_t base, bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", base);
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+
+    // Interleave: A0, B0, A1(last), B1(last). Each carries its own base.
+    push_r(/*base=*/0, false, 0xA0);
+    push_r(/*base=*/2, false, 0xB0);
+    push_r(/*base=*/0, true, 0xA1);
+    push_r(/*base=*/2, true, 0xB1);
+    depkt.tick();
+
+    // Egress order = AR order: burst A (0xA0,0xA1) fully, then burst B (0xB0,0xB1).
+    std::vector<uint8_t> got;
+    for (int i = 0; i < 8 && got.size() < 4; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got.size(), 4u);
+    EXPECT_EQ(got[0], 0xA0);
+    EXPECT_EQ(got[1], 0xA1);
+    EXPECT_EQ(got[2], 0xB0);
+    EXPECT_EQ(got[3], 0xB1);
+}
