@@ -72,8 +72,11 @@ endif
 # (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
 TB_TOP_SV = $(COSIM_ROOT)/sv/tb_top_$(TOPOLOGY).sv
 # Extract num_vc suffix from TOPOLOGY name (e.g. mesh_4x4_vc4 -> vc4 -> noc_types_pkg_vc4.sv).
-# $(lastword $(subst _vc, vc,...)) splits on "_vc", then takes the last word (e.g. "vc4").
-TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_$(lastword $(subst _vc, vc,$(TOPOLOGY))).sv
+# Strip a trailing _rob suffix first (e.g. mesh_4x4_vc2_rob -> mesh_4x4_vc2) so the _vc split
+# always lands on the vc word (vc2), not "vc2_rob" which has no matching noc_types_pkg file.
+# $(lastword $(subst _vc, vc,...)) then splits on "_vc" and takes the last word (e.g. "vc2").
+TOPOLOGY_BASE = $(TOPOLOGY:_rob=)
+TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_$(lastword $(subst _vc, vc,$(TOPOLOGY_BASE))).sv
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \

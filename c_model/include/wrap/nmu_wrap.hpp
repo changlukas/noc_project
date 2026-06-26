@@ -28,7 +28,7 @@
 #include "wrap/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
 #include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)
-#include "ni_params.h"             // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "ni_params.h"            // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
 #include <array>
@@ -43,7 +43,8 @@ class NmuWrap {
     // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel. num_vc comes
     // from the create param (cmodel_nmu_create): write packets on write_vc=0,
     // read packets on read_vc=(num_vc>=2)?1:0 — Mode A, mirrors the MultiVc test.
-    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth) {
+    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth,
+              nmu::RobMode rob_mode = nmu::RobMode::Disabled) {
         using namespace ni::cmodel::nmu;
         num_vc_ = num_vc;
         NmuConfig cfg{};
@@ -52,6 +53,8 @@ class NmuWrap {
         cfg.vc_mode = VcMode::ReadWriteSplit;
         cfg.write_vc = 0;
         cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
+        cfg.read_rob_mode = rob_mode;
+        cfg.write_rob_mode = rob_mode;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;
