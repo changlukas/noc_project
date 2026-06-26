@@ -217,7 +217,7 @@ TEST(RouterWormhole, PacketsOnDifferentVcsDoNotInterleavePerOutput) {
     SCENARIO(
         "Router per-output wormhole lock: two 3-flit packets to the same output "
         "on different VCs (A on vc0, B on vc1) drain as two contiguous packets. "
-        "The current per-(output,vc) lock + VC round-robin interleaves them.");
+        "Fix: the per-output lock keeps the two packets contiguous across VCs.");
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;
     Router r(cfg);
@@ -501,7 +501,10 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
 }
 
 TEST(RouterVcArbitration, FlitLevelRrAcrossVcs) {
-    SCENARIO("Router: per-output flit-level RR across VCs under sustained two-VC load");
+    SCENARIO(
+        "Router: per-output VC RR under sustained two-VC load — single-flit packets "
+        "(last=1) only; each packet locks and releases the output in one grant, so "
+        "VC RR advances every cycle.");
     Router r(two_vc_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
