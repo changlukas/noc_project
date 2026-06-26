@@ -669,11 +669,14 @@ TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
     push_r(/*rob_idx=*/0, /*rlast=*/false, 0xA0);
     push_r(/*rob_idx=*/0, /*rlast=*/true, 0xA1);
     depkt.tick();
-
-    auto r0 = rob.pop_r();
-    auto r1 = rob.pop_r();
-    ASSERT_TRUE(r0.has_value());
-    ASSERT_TRUE(r1.has_value());
-    EXPECT_EQ(r0->data[0], 0xA0);  // base+0
-    EXPECT_EQ(r1->data[0], 0xA1);  // base+1
+    // Multi-beat reads legitimately return nullopt until the last beat arrives
+    // and the range commits; pop_r is one-flit-per-call. Drain by polling.
+    std::vector<uint8_t> got;
+    for (int i = 0; i < 16 && got.size() < 2; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_EQ(got[0], 0xA0);  // base+0
+    EXPECT_EQ(got[1], 0xA1);  // base+1
 }

@@ -350,62 +350,58 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         committed_r_queue_.pop_front();
         return r;
     }
-    // Pull flits until a range commits or no more flits are available.
-    // A multi-beat burst needs N flits before the first commit; looping
-    // avoids returning nullopt mid-burst when beats are already queued.
-    while (committed_r_queue_.empty()) {
-        auto opt = next_depkt_.pop_r_with_meta();
-        if (!opt) return std::nullopt;
-        auto [r, meta] = *opt;
-        if (!(meta.rob_req == 1)) {
-            assert(false && "Enabled Rob received Disabled flit");
-            std::abort();
-        }
-        if (!(meta.rob_idx < ROB_CAPACITY)) {
-            assert(false && "rob_idx out of range");
-            std::abort();
-        }
-        uint8_t base = meta.rob_idx;
-        uint8_t off = read_arrival_offset_[base];
-        if (!(off < read_range_len_[base])) {
-            assert(false &&
-                   "nmu::Rob::pop_r_staged: R beat past burst length (Family C: "
-                   "more beats than reserved for this base -- malformed burst)");
-            std::abort();
-        }
-        std::size_t slot_idx = static_cast<std::size_t>(base) + off;
-        if (!(slot_idx < ROB_CAPACITY)) {
-            assert(false && "computed read slot out of range");
-            std::abort();
-        }
-        auto& slot = read_entries_[slot_idx];
-        if (!(slot.occupied && !slot.ready)) {
-            assert(false && "computed read slot unallocated or already filled");
-            std::abort();
-        }
-        slot.r_beat = r;
-        slot.ready = true;
-        ++read_arrival_offset_[base];
-        uint8_t id = slot.axi_id;
-        while (!read_order_by_id_[id].empty()) {
-            BeatRange head = read_order_by_id_[id].front();
-            bool all_ready = true;
-            for (uint8_t i = 0; i < head.len_plus_1; ++i) {
-                if (!read_entries_[head.base + i].ready) {
-                    all_ready = false;
-                    break;
-                }
-            }
-            if (!all_ready) break;
-            for (uint8_t i = 0; i < head.len_plus_1; ++i) {
-                uint8_t idx = static_cast<uint8_t>(head.base + i);
-                committed_r_queue_.push_back({read_entries_[idx].r_beat, idx, id});
-                ++committed_r_pending_[idx];
-            }
-            read_arrival_offset_[head.base] = 0;
-            read_order_by_id_[id].pop_front();
-        }
+    auto opt = next_depkt_.pop_r_with_meta();
+    if (!opt) return std::nullopt;
+    auto [r, meta] = *opt;
+    if (!(meta.rob_req == 1)) {
+        assert(false && "Enabled Rob received Disabled flit");
+        std::abort();
     }
+    if (!(meta.rob_idx < ROB_CAPACITY)) {
+        assert(false && "rob_idx out of range");
+        std::abort();
+    }
+    uint8_t base = meta.rob_idx;
+    uint8_t off = read_arrival_offset_[base];
+    if (!(off < read_range_len_[base])) {
+        assert(false &&
+               "nmu::Rob::pop_r_staged: R beat past burst length (Family C: "
+               "more beats than reserved for this base -- malformed burst)");
+        std::abort();
+    }
+    std::size_t slot_idx = static_cast<std::size_t>(base) + off;
+    if (!(slot_idx < ROB_CAPACITY)) {
+        assert(false && "computed read slot out of range");
+        std::abort();
+    }
+    auto& slot = read_entries_[slot_idx];
+    if (!(slot.occupied && !slot.ready)) {
+        assert(false && "computed read slot unallocated or already filled");
+        std::abort();
+    }
+    slot.r_beat = r;
+    slot.ready = true;
+    ++read_arrival_offset_[base];
+    uint8_t id = slot.axi_id;
+    while (!read_order_by_id_[id].empty()) {
+        BeatRange head = read_order_by_id_[id].front();
+        bool all_ready = true;
+        for (uint8_t i = 0; i < head.len_plus_1; ++i) {
+            if (!read_entries_[head.base + i].ready) {
+                all_ready = false;
+                break;
+            }
+        }
+        if (!all_ready) break;
+        for (uint8_t i = 0; i < head.len_plus_1; ++i) {
+            uint8_t idx = static_cast<uint8_t>(head.base + i);
+            committed_r_queue_.push_back({read_entries_[idx].r_beat, idx, id});
+            ++committed_r_pending_[idx];
+        }
+        read_arrival_offset_[head.base] = 0;
+        read_order_by_id_[id].pop_front();
+    }
+    if (committed_r_queue_.empty()) return std::nullopt;
     auto out = committed_r_queue_.front();
     committed_r_queue_.pop_front();
     return out;
