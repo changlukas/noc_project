@@ -86,6 +86,17 @@ on the next build.
 5. Commit with a body citing the IHI 0022H sec. or VIP test the scenario was
    derived from
 
+## Pinned co-sim combos (ROB Enabled)
+
+| Topology | Pattern | Base scenario | Result | Notes |
+|----------|---------|---------------|--------|-------|
+| `mesh_4x4_vc2_rob` | hotspot hs=0 | AX4-BUR-002 8-beat | PASS | Family C fix: 8-beat INCR read, Enabled ROB |
+| `mesh_4x4_vc2_rob` | hotspot hs=0 | (default single-beat) | PASS | Cross-read interleave, per-base isolation |
+
+`mesh_4x4_vc2_rob` sets `rob_mode: enabled` in its topology YAML; NMU instances are created via
+`cmodel_nmu_create_ex(..., rob_enabled=1)`. BUR-003 (len=255) is excluded: ROB_CAPACITY=32
+causes `push_ar` to legitimately reject bursts longer than 32 beats on Enabled mode.
+
 ## Reference: IHI 0022H sections covered per category
 
 | CAT | IHI sec. |
