@@ -362,14 +362,14 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         std::abort();
     }
     uint8_t base = meta.rob_idx;
-    uint8_t off = read_arrival_offset_[base];
-    if (!(off < read_range_len_[base])) {
+    uint8_t arrival_offset = read_arrival_offset_[base];
+    if (!(arrival_offset < read_range_len_[base])) {
         assert(false &&
                "nmu::Rob::pop_r_staged: R beat past burst length (Family C: "
                "more beats than reserved for this base -- malformed burst)");
         std::abort();
     }
-    std::size_t slot_idx = static_cast<std::size_t>(base) + off;
+    std::size_t slot_idx = static_cast<std::size_t>(base) + arrival_offset;
     if (!(slot_idx < ROB_CAPACITY)) {
         assert(false && "computed read slot out of range");
         std::abort();

@@ -790,12 +790,12 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
     // Burst A: id=5, len=1 -> base 0 (slots 0..1). Burst B: id=5, len=1 -> base 2 (slots 2..3).
-    axi::ArBeat arA = make_ar(0x05, 0x100);
-    arA.len = 1;
-    axi::ArBeat arB = make_ar(0x05, 0x200);
-    arB.len = 1;
-    ASSERT_TRUE(rob.push_ar(arA));
-    ASSERT_TRUE(rob.push_ar(arB));
+    axi::ArBeat ar_a = make_ar(0x05, 0x100);
+    ar_a.len = 1;
+    axi::ArBeat ar_b = make_ar(0x05, 0x200);
+    ar_b.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar_a));
+    ASSERT_TRUE(rob.push_ar(ar_b));
 
     auto push_r = [&](uint8_t base, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
