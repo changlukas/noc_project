@@ -371,6 +371,59 @@ TEST(RouterWormhole, RrAdvancesPerPacket) {
     }
 }
 
+TEST(RouterWormhole, LockedOutputIsLocalAndOtherOutputProceeds) {
+    SCENARIO(
+        "A 3-flit packet locks EAST. An independent NORTH packet still drains "
+        "while EAST is busy. The EAST packet itself stays contiguous.");
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east, north;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto N = static_cast<std::size_t>(RouterPort::NORTH);
+    r.set_downstream(E, east);
+    r.set_downstream(N, north);
+    Packet a{static_cast<std::size_t>(RouterPort::WEST), 0x10};   // -> EAST
+    Packet b{static_cast<std::size_t>(RouterPort::SOUTH), 0x20};  // -> NORTH
+    for (int t = 0; t < 24; ++t) {
+        feed_packet(r, a, make_dst(3, 1), /*vc=*/0);  // EAST
+        feed_packet(r, b, make_dst(1, 2), /*vc=*/0);  // NORTH
+        const std::size_t be = east.received.size(), bn = north.received.size();
+        r.tick();
+        for (std::size_t i = be; i < east.received.size(); ++i) r.receive_credit(E, 0);
+        for (std::size_t i = bn; i < north.received.size(); ++i) r.receive_credit(N, 0);
+    }
+    EXPECT_EQ(east.received.size(), 3u);
+    EXPECT_EQ(north.received.size(), 3u);  // other output not blocked by EAST's lock
+}
+
+TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
+    SCENARIO(
+        "An EAST packet that sends its head (last=0) but never its tail keeps the "
+        "EAST output locked: a full packet on EAST's other VC cannot drain. This "
+        "is the per-output hold (and the malformed-no-final-last lifetime).");
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);
+    Packet head_only{static_cast<std::size_t>(RouterPort::WEST), 0x10};
+    Packet full{static_cast<std::size_t>(RouterPort::SOUTH), 0x20};
+    feed_packet(r, head_only, dst, /*vc=*/0);  // one call = head, last=0, never closed
+    for (int t = 0; t < 24; ++t) {
+        feed_packet(r, full, dst, /*vc=*/1);  // a complete 3-flit packet on vc1
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i)
+            r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
+    }
+    ASSERT_EQ(east.received.size(), 1u);  // only the open packet's head
+    EXPECT_EQ(static_cast<uint8_t>(east.received[0].get_header_field("src_id")), 0x10);
+    // The vc1 packet is blocked behind the unclosed vc0 lock (no leak across VCs).
+}
+
 // --- Per-VC independence (Task 7) ---------------------------------------
 // All three tests need >=2 VCs; the generated default NOC_NUM_VC is 1, so
 // each builds its RouterConfig with num_vc = 2.
@@ -609,8 +662,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
 
     // Drive: model the NI-side credit mirror — only push a new packet into A's WEST
     // when A still has EAST/vc0 credit (the sender never overruns the receiver).
-    for (int t = 0; t < 200 && (injected < kPackets || a.credit(E, 0) < NOC_ROUTER_VC_DEPTH);
-         ++t) {
+    for (int t = 0; t < 200 && (injected < kPackets || a.credit(E, 0) < NOC_ROUTER_VC_DEPTH); ++t) {
         if (injected < kPackets && a.credit(E, 0) > 0 && a.input_fifo_size(W, 0) == 0) {
             a.input(W).push_flit(make_flit(dst_b_local, /*vc=*/0, /*last=*/1));
             ++injected;
