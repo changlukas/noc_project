@@ -181,3 +181,42 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
 // NsuPacketize::PushAwAssertFalse was a runtime wrong_side_() test.
 // After T4 the method no longer exists on nsu::Packetize; wrong-side
 // calls are now caught at compile time. Test removed.
+
+// Multi-beat R burst: NSU stamps every R flit with the same rob_idx.
+// All R beats of a burst peek the same MetaBuffer entry (committed only on
+// rlast=1), so rob_idx is identical for all beats. This documents the
+// source of the Family C hazard caught by the NMU ROB guard.
+TEST(NsuPacketize, MultiBeatR_AllFlitsCarrySameRobIdx) {
+    SCENARIO(
+        "NSU Packetize: three R beats for the same AR share one MetaBuffer entry "
+        "(peeked, not committed, until rlast=1). Every emitted R flit carries the "
+        "same rob_idx, documenting the NSU same-base stamping that the NMU ROB "
+        "Family C guard catches.");
+    RspCapture b_cap, r_cap;
+    MetaBuffer mb(4);
+    constexpr uint8_t kRobIdx = 7;
+    mb.snapshot_read(0x03, {/*src=*/0x12, /*rob_req=*/1, /*rob_idx=*/kRobIdx});
+    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+
+    // Three-beat burst: push_r + tick emits one flit per step.
+    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ false)));
+    pkt.tick();
+    auto f0 = r_cap.pop();
+    ASSERT_TRUE(f0.has_value());
+    EXPECT_EQ(f0->get_header_field("rob_idx"), kRobIdx);
+
+    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ false)));
+    pkt.tick();
+    auto f1 = r_cap.pop();
+    ASSERT_TRUE(f1.has_value());
+    EXPECT_EQ(f1->get_header_field("rob_idx"), kRobIdx);
+
+    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true)));
+    pkt.tick();
+    auto f2 = r_cap.pop();
+    ASSERT_TRUE(f2.has_value());
+    EXPECT_EQ(f2->get_header_field("rob_idx"), kRobIdx);
+
+    // Meta committed on rlast=1.
+    EXPECT_FALSE(mb.peek_read(0x03).has_value());
+}

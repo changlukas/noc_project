@@ -357,6 +357,15 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         assert(false && "R for unallocated rob_idx");
         std::abort();
     }
+    if (slot.ready) {
+        assert(false &&
+               "nmu::Rob::pop_r_staged: a second R beat targets an already-filled read slot "
+               "(Family C). NSU stamps every R beat of a burst with the same base rob_idx, and "
+               "the per-ID arrival offset (floo_rob.sv base+offset_q[id]) is not implemented, so "
+               "multi-beat reads would overwrite slot base. Use ReadWriteSplit / single-beat "
+               "reads, or implement the per-ID read offset first.");
+        std::abort();
+    }
     slot.r_beat = r;
     slot.ready = true;
     uint8_t id = slot.axi_id;

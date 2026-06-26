@@ -635,3 +635,53 @@ TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
     depkt.tick();
     EXPECT_DEATH(rob.pop_b(), ".*");
 }
+
+TEST(NmuRobDeath, ReadFillSameBaseRobIdxOverwriteGuarded) {
+    SCENARIO(
+        "Enabled read ROB: two R beats stamped with the same base rob_idx (as NSU "
+        "currently stamps every beat of a burst) collide on one slot. The model "
+        "must fail fast (Family C: per-ID arrival offset not implemented), not "
+        "silently overwrite and misorder the burst.");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // Allocate a 2-beat AR (len=1) -> slots 0..1; base=0.
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar));
+
+    // Inject two R beats both with rob_idx=0 (the base slot).
+    // This mirrors the real NSU: every beat of a burst is stamped with the
+    // same MetaBuffer entry (rob_idx = base), not base+beat_offset.
+    auto push_r = [&](uint8_t rob_idx, bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", rob_idx);
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+
+    // Both beats carry rob_idx=0 (same base -- NSU same-base hazard).
+    push_r(/*rob_idx=*/0, /*rlast=*/false, 0xA0);
+    push_r(/*rob_idx=*/0, /*rlast=*/true, 0xA1);
+    depkt.tick();
+
+    // First pop_r_staged fills slot 0 (ready: false -> true).
+    // Range [0,2) not yet fully ready (slot 1 still empty) -> returns nullopt.
+    rob.pop_r();
+
+    // Second pop_r_staged targets slot 0 again (already ready).
+    // Without guard: silent overwrite. With guard (Family C): abort.
+    EXPECT_DEATH({ rob.pop_r(); }, ".*");
+}
