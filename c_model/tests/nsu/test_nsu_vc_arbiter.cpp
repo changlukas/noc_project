@@ -1,4 +1,6 @@
 #include "nsu/vc_arbiter.hpp"
+#include "nsu/nsu.hpp"
+#include "ni/vc_pools.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "flit.hpp"
@@ -244,6 +246,26 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcArbParam,
                          [](const ::testing::TestParamInfo<std::size_t>& info) {
                              return "NumVc" + std::to_string(info.param);
                          });
+
+// ---------------------------------------------------------------------------
+// NsuConfig pools wiring — Task 5
+// ---------------------------------------------------------------------------
+
+TEST(NsuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
+    using ni::cmodel::nsu::NsuConfig;
+    using ni::cmodel::nsu::detail::make_vc_arbiter;  // factory lives in nsu::detail
+    SCENARIO("NsuConfig.write_rsp_vcs/read_rsp_vcs -> make_vc_arbiter -> pools arbiter");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    NsuConfig cfg{};
+    cfg.num_vc = 4;
+    cfg.write_rsp_vcs = {0, 1};
+    cfg.read_rsp_vcs = {2, 3};
+    auto arb = make_vc_arbiter(cfg, noc.rsp_out());
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 1)));
+    EXPECT_EQ(arb.pending_size(2), 1u);  // rid5
+    EXPECT_EQ(arb.pending_size(3), 1u);  // rid6
+}
 
 // ---------------------------------------------------------------------------
 // Plain TEST() — not parameterized:

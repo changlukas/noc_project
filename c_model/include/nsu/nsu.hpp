@@ -57,6 +57,10 @@ struct NsuConfig {
     uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
     uint8_t read_rsp_vc = 0;   // R -> read_rsp_vc
     std::array<std::vector<uint8_t>, 5> vc_candidates{};
+    // ReadWriteSplit pool variant (response side): non-empty -> per-class pool
+    // with per-id binding + round-robin, mirroring the NMU request side.
+    std::vector<uint8_t> write_rsp_vcs{};
+    std::vector<uint8_t> read_rsp_vcs{};
     std::size_t wormhole_per_input_depth = 4;
     std::size_t vc_arbiter_pending_depth = 4;
     std::size_t ni_req_extra_depth = 0;  // extra shift stages on the request path
@@ -136,6 +140,11 @@ namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downstream) {
     if (cfg.vc_mode == VcMode::ReadWriteSplit) {
+        if (!cfg.write_rsp_vcs.empty() && !cfg.read_rsp_vcs.empty()) {
+            return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_rsp_vcs,
+                                                     cfg.read_rsp_vcs,
+                                                     cfg.vc_arbiter_pending_depth);
+        }
         return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vc,
                                            cfg.read_rsp_vc, cfg.vc_arbiter_pending_depth);
     }
