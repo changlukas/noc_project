@@ -1,11 +1,4 @@
-add_cmodel_test(test_channel_model_wrap)
-# Add c_model/tests/ to include path so the adapter (and its ChannelModel
-# dependency in tests/common/) resolves via "common/channel_model.hpp".
-target_include_directories(test_channel_model_wrap PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/..)
-
 add_cmodel_test(test_router_wrap)
-# Add c_model/tests/ to include path to mirror the ChannelModel adapter test.
 target_include_directories(test_router_wrap PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
 

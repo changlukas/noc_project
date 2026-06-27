@@ -10,12 +10,11 @@
 namespace ni::cmodel::wrap {
 
 enum class WrapType : uint32_t {
-    Master = 0x4D415354u,        // 'MAST'
-    Slave = 0x534C4156u,         // 'SLAV'
-    Nmu = 0x4E4D5520u,           // 'NMU '
-    Nsu = 0x4E535520u,           // 'NSU '
-    ChannelModel = 0x43484E4Du,  // 'CHNM'
-    Router = 0x524F5554u,        // 'ROUT'
+    Master = 0x4D415354u,  // 'MAST'
+    Slave = 0x534C4156u,   // 'SLAV'
+    Nmu = 0x4E4D5520u,     // 'NMU '
+    Nsu = 0x4E535520u,     // 'NSU '
+    Router = 0x524F5554u,  // 'ROUT'
 };
 
 enum class HandleState { Live };  // closed handles are removed from registry

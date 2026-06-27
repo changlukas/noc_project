@@ -31,11 +31,6 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_finalize();
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Case: *_create before init → ERR_NOT_INITIALIZED.
-    unsigned long long h0 = cmodel_channel_model_create("cm_pre_init");
-    EXPECT_EQ(h0, 0ull);
-    check_and_clear_error(CMODEL_DPI_ERR_NOT_INITIALIZED);
-
     // Case: cmodel_init on bad YAML → ERR_GENERIC, state stays UNINITIALIZED.
     cmodel_init("/nonexistent/path/to/scenario.yaml");
     check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
@@ -50,18 +45,6 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_init(good_yaml);
     check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
 
-    // === ChannelModel cases (T5) ===
-
-    // Case: channel_model_create after init succeeds.
-    unsigned long long cm_handle = cmodel_channel_model_create("cm_test");
-    ASSERT_NE(cm_handle, 0ull);
-    check_and_clear_error(CMODEL_DPI_OK);
-
-    // Case: garbage void* (non-registry) → registry-membership guard, no SIGSEGV.
-    unsigned long long garbage = 0xDEADBEEFCAFEull;
-    cmodel_channel_model_tick(garbage);
-    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
-
     // === Master cases (T6) ===
 
     // Case: master_create after init succeeds; scoreboard callbacks wired.
@@ -69,10 +52,6 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     ASSERT_NE(master_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
     EXPECT_EQ(cmodel_master_count(), 1);
-
-    // Case: type mismatch — channel_model handle passed to master_tick.
-    cmodel_master_tick(cm_handle);
-    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // === Slave case (T7) ===
 
@@ -109,10 +88,6 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // Case: finalize from INITIALIZED → registry destroyed, state = FINALIZED.
     cmodel_finalize();
     check_and_clear_error(CMODEL_DPI_OK);
-
-    // Case: cycle op on stale ctx after finalize → registry-miss → HERMETIC_VIOLATION.
-    cmodel_channel_model_tick(cm_handle);
-    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // Case: finalize twice → second is no-op.
     cmodel_finalize();

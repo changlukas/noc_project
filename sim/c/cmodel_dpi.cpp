@@ -5,7 +5,7 @@
 #include "cmodel_dpi.h"
 #include "dpi_boundary_macros.h"
 #include "handle_block.hpp"
-#include "wrap/channel_model_wrap.hpp"
+#include "wrap/flit_bytes.hpp"
 #include "wrap/master_wrap.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nsu_wrap.hpp"
@@ -237,8 +237,6 @@ extern "C" int cmodel_reads_checked(void) {
 // ceil(FLIT_WIDTH / 32) = 13. Words are little-endian: word[0] carries bits
 // [31:0], word[12] carries bits [407:384] in its low 24 bits.
 
-using ni::cmodel::wrap::ChannelModelInputs;
-using ni::cmodel::wrap::ChannelModelOutputs;
 using ni::cmodel::wrap::FLIT_BYTES;
 using ni::cmodel::wrap::FLIT_VEC_WORDS;
 using ni::cmodel::wrap::FlitBytes;
@@ -293,75 +291,6 @@ void pack_vc_credit(const CreditVec& v, uint8_t num_vc, svBitVecVal* word) {
 }
 
 }  // namespace
-
-extern "C" unsigned long long cmodel_channel_model_create(const char* name) {
-    if (g_session_state != SessionState::Initialized) {
-        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
-                             "cmodel_channel_model_create: not initialized");
-        return 0ull;
-    }
-    DPI_BOUNDARY_BEGIN_R(cmodel_channel_model_create, 0ull) {
-        auto adapter = std::make_unique<ChannelModelWrap>();
-        adapter->init();
-        auto* h = new HandleBlock{
-            static_cast<uint32_t>(WrapType::ChannelModel), WrapType::ChannelModel,
-            HandleState::Live, std::string(name),
-            std::unique_ptr<void, void (*)(void*)>(
-                adapter.release(), [](void* p) { delete static_cast<ChannelModelWrap*>(p); })};
-        g_handle_registry.insert(h);
-        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
-    }
-    DPI_BOUNDARY_END_R(cmodel_channel_model_create);
-}
-
-extern "C" void cmodel_channel_model_set_inputs(unsigned long long ctx, svBit req_in_valid,
-                                                svBitVecVal* req_in_flit,
-                                                svBit req_in_credit_return, svBit rsp_in_valid,
-                                                svBitVecVal* rsp_in_flit,
-                                                svBit rsp_in_credit_return) {
-    DPI_BOUNDARY_BEGIN(cmodel_channel_model_set_inputs) {
-        REQUIRE_HANDLE(ctx, WrapType::ChannelModel, "cmodel_channel_model_set_inputs");
-        auto* cm = static_cast<ChannelModelWrap*>(_h->adapter.get());
-        ChannelModelInputs in{};
-        in.req_in_valid = static_cast<bool>(req_in_valid);
-        in.req_in_flit = unpack_flit(req_in_flit);
-        in.req_in_credit_return = static_cast<bool>(req_in_credit_return);
-        in.rsp_in_valid = static_cast<bool>(rsp_in_valid);
-        in.rsp_in_flit = unpack_flit(rsp_in_flit);
-        in.rsp_in_credit_return = static_cast<bool>(rsp_in_credit_return);
-        cm->set_inputs(in);
-    }
-    DPI_BOUNDARY_END(cmodel_channel_model_set_inputs);
-}
-
-extern "C" void cmodel_channel_model_tick(unsigned long long ctx) {
-    DPI_BOUNDARY_BEGIN(cmodel_channel_model_tick) {
-        REQUIRE_HANDLE(ctx, WrapType::ChannelModel, "cmodel_channel_model_tick");
-        auto* cm = static_cast<ChannelModelWrap*>(_h->adapter.get());
-        cm->tick();
-    }
-    DPI_BOUNDARY_END(cmodel_channel_model_tick);
-}
-
-extern "C" void cmodel_channel_model_get_outputs(unsigned long long ctx, svBit* req_out_valid,
-                                                 svBitVecVal* req_out_flit,
-                                                 svBit* req_out_credit_return, svBit* rsp_out_valid,
-                                                 svBitVecVal* rsp_out_flit,
-                                                 svBit* rsp_out_credit_return) {
-    DPI_BOUNDARY_BEGIN(cmodel_channel_model_get_outputs) {
-        REQUIRE_HANDLE(ctx, WrapType::ChannelModel, "cmodel_channel_model_get_outputs");
-        auto* cm = static_cast<ChannelModelWrap*>(_h->adapter.get());
-        ChannelModelOutputs out{};
-        cm->get_outputs(out);
-        *req_out_valid = static_cast<svBit>(out.req_out_valid);
-        pack_flit(out.req_out_flit, req_out_flit);
-        *req_out_credit_return = static_cast<svBit>(out.req_out_credit_return);
-        *rsp_out_valid = static_cast<svBit>(out.rsp_out_valid);
-        pack_flit(out.rsp_out_flit, rsp_out_flit);
-        *rsp_out_credit_return = static_cast<svBit>(out.rsp_out_credit_return);
-    }
-    DPI_BOUNDARY_END(cmodel_channel_model_get_outputs);
-}
 
 // Router DPI handlers — per-node (Task 3, router-channel split).
 // One RouterWrap owns ONE node's REQ+RSP routers at coordinate (x,0).
