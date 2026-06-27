@@ -507,48 +507,117 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ---
 
-### Task 4: `make sim-regress` + end-to-end smoke
+### Task 4: wire-verifiable filter + `make sim-regress` + end-to-end smoke
 
-Wire the runner into Make and prove a real tier runs green end to end, including an address-sensitive AX4 cell.
+**Design correction (from Task 4 e2e findings):** the wire scoreboard verifies via write->readback (BIST-style) -- it counts only OKAY reads of written data (`scoreboard.hpp:86`), and skips DECERR/SLVERR (`:29`, `:65`). So write-only and error-response AX4 scenarios produce zero verified reads and trip the non-vacuous PASS guard while NOT actually being checked. These belong to the Layer 2 c_model integration suite, not the wire matrix. The matrix therefore AUTO-SKIPS non-wire-verifiable scenarios (a finding, surfaced in `make check`'s console output, not silently dropped). Separately, `AX4-ORD-002` (multi-id concurrent write) hits a PRE-EXISTING co-sim hang (reproduces without preserve_addr) -- it is excluded with a backlog reason.
 
 **Files:**
+- Modify: `sim/regress/run_regress.py` (add `is_wire_verifiable` filter + apply in `main`), `sim/regress/test_run_regress.py` (filter test), `sim/regress/matrix.yaml` (smoke tier + ORD-002 exclusion)
 - Modify: root `Makefile` (add `sim-regress` target + help line)
 
 **Interfaces:**
-- Consumes: `run_regress.main` from Task 3.
+- Consumes: `Cell`, `resolve_scenario`, `main` from Task 3.
+- Produces: `is_wire_verifiable(scenario_path) -> bool`.
 
-- [ ] **Step 1: Add the `sim-regress` target**
+- [ ] **Step 1: Write the failing test for the wire-verifiable filter**
 
-In the root `Makefile`, add (near the `sim:` target) and register it in `.PHONY`:
+In `sim/regress/test_run_regress.py` add (uses the real `sim/test_patterns/` tree):
+```python
+def test_wire_verifiable_filter():
+    rsp_read = run_regress.resolve_scenario("AX4-RSP-001")   # category: response (decerr read)
+    rsp_write = run_regress.resolve_scenario("AX4-RSP-002")  # write-only OOB (0 reads)
+    data = run_regress.resolve_scenario("AX4-BAS-003")       # write+read data scenario
+    assert run_regress.is_wire_verifiable(rsp_read) is False
+    assert run_regress.is_wire_verifiable(rsp_write) is False
+    assert run_regress.is_wire_verifiable(data) is True
+```
+Run: `export PATH="$PATH:/c/Windows/System32"; python3 -m pytest sim/regress/test_run_regress.py -k wire_verifiable -v`
+Expected: FAIL — `module 'run_regress' has no attribute 'is_wire_verifiable'`.
+
+- [ ] **Step 2: Implement the filter and apply it in `main`**
+
+Add to `sim/regress/run_regress.py`:
+```python
+def is_wire_verifiable(scenario_path: str) -> bool:
+    """The wire scoreboard verifies via write->readback (BIST-style): only scenarios
+    that produce OKAY reads of written data are checked here. Write-only scenarios (no
+    read op) and error-response scenarios (metadata.category == 'response', whose
+    accesses intentionally DECERR) are NOT wire-verifiable -- they are covered by the
+    Layer 2 c_model integration suite. Such cells are skipped (reported, not silent)."""
+    sc = yaml.safe_load(Path(scenario_path).read_text())
+    if (sc.get("metadata") or {}).get("category") == "response":
+        return False
+    return any(t.get("op") == "read" for t in (sc.get("transactions") or []))
+```
+In `main`, inside the per-cell loop, AFTER the exclusion check and BEFORE `run_cell`:
+```python
+        if not is_wire_verifiable(resolve_scenario(cell.from_id)):
+            results.append({**asdict(cell), "status": "skipped",
+                            "reason": "non-wire-verifiable (write-only/error-response); Layer 2 covers"})
+            continue
+```
+Run: `python3 -m pytest sim/regress/test_run_regress.py -v`
+Expected: PASS (5 tests now).
+
+- [ ] **Step 3: Update matrix.yaml — smoke tier + ORD-002 exclusion**
+
+Replace the `smoke` tier and extend `exclusions` in `sim/regress/matrix.yaml`:
+```yaml
+  smoke:
+    topologies: [mesh_4x4_vc1, mesh_4x4_vc2]
+    rob_modes: [disabled]
+    stimuli:
+      - from: AX4-BAS-003
+        patterns: [neighbor]
+      - from: [AX4-BND-006]          # read-bearing + 4KB-boundary: exercises preserve_addr
+        patterns: [neighbor]
+        preserve_addr: true
+      - from: [AX4-RSP-002]          # write-only OOB: auto-skipped (demonstrates the filter)
+        patterns: [neighbor]
+        preserve_addr: true
+    # expected: pass=4 (BAS-003 + BND-006, x2 topo), skip=2 (RSP-002), fail=0
+```
+```yaml
+exclusions:
+  - when: {rob_mode: enabled, from: AX4-BUR-003}
+    reason: "burst len 256 > ROB_CAPACITY 32"
+  - when: {from: AX4-ORD-002}
+    reason: "pre-existing multi-id concurrent-write co-sim hang (backlog); re-include when fixed"
+```
+
+- [ ] **Step 4: Add the `sim-regress` Make target**
+
+In the root `Makefile`, add (near the `sim:` target) and register in `.PHONY`:
 ```make
 .PHONY: sim-regress
 sim-regress:
 	$(TOOLPATH) python3 sim/regress/run_regress.py --tier $(TIER)
 ```
-Default `TIER`: add `TIER ?= nightly` near the other `?=` defaults. Add a help line in the `help:` echo block:
+Add `TIER ?= nightly` near the other `?=` defaults, and a `help:` echo line:
 ```make
 	@echo "  make sim-regress TIER=nightly            run the co-sim regression matrix"
 ```
 
-- [ ] **Step 2: End-to-end smoke tier runs green (incl. the address-sensitive AX4 cell)**
+- [ ] **Step 5: End-to-end smoke tier runs green**
 
 Run:
 ```
 export PATH="$PATH:/c/Windows/System32"
 make sim-regress TIER=smoke PYTHON3=python3
 ```
-Expected: the smoke tier (mesh_4x4_vc1/vc2 x neighbor over AX4-BAS-003 + AX4-ORD-002 + AX4-RSP-002, the last two preserve_addr) prints `pass=6 fail=0 skip=0` and writes `sim/regress/output/smoke/matrix.json`.
-The `AX4-RSP-002` (OOB decerr) cell must be `pass` — its OOB condition survives preserve-addr (the original 0x2000 offset is kept, only the dst tile is OR-ed into addr[63:32]) and the scoreboard expects+sees the decerr. If it FAILS, STOP: preserve-addr is not preserving the OOB offset; do not weaken the gate.
+Expected: `pass=4 fail=0 skip=2` and `sim/regress/output/smoke/matrix.json` written. The two `AX4-RSP-002` cells are `skipped` (non-wire-verifiable); `AX4-BAS-003` and `AX4-BND-006` cells `pass`. The `BND-006` pass confirms preserve_addr carries the 4KB-boundary offset through the fabric meaningfully. If `BND-006` FAILS, STOP and report BLOCKED with the run log — it is a real fabric/preserve_addr finding, not something to work around.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add Makefile
-git commit -m "feat(sim): make sim-regress entry + e2e smoke tier
+git add sim/regress/run_regress.py sim/regress/test_run_regress.py sim/regress/matrix.yaml Makefile
+git commit -m "feat(sim): wire-verifiable filter + make sim-regress + e2e smoke
 
-Wire run_regress into Make; the smoke tier (defined in Task 3's matrix.yaml) proves
-the matrix runs green incl. an address-sensitive AX4 (RSP-002 OOB) cell through the
-fabric under preserve-addr.
+Auto-skip non-wire-verifiable AX4 (write-only / error-response category) since the
+wire scoreboard checks via write->readback (BIST-style); those stay at Layer 2.
+Exclude AX4-ORD-002 (pre-existing multi-id-write co-sim hang, backlog). Wire
+run_regress into Make; smoke tier green (pass=4 skip=2) incl. a read-bearing
+4KB-boundary cell exercising preserve_addr.
 
 Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 ```
