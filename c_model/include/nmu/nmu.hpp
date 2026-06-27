@@ -131,6 +131,10 @@ struct NmuConfig {
     // Mode B candidate arrays; ignored when vc_mode == ReadWriteSplit.
     // Indexed by axi_ch (AW=0, W=1, AR=2, B=3, R=4 per ni_flit_constants).
     std::array<std::vector<uint8_t>, 5> vc_candidates{};
+    // ReadWriteSplit pool variant: when non-empty, each class draws from a VC
+    // pool with round-robin selection instead of the single write_vc/read_vc.
+    std::vector<uint8_t> write_vcs{};
+    std::vector<uint8_t> read_vcs{};
     std::size_t wormhole_per_input_depth = 4;
     std::size_t vc_arbiter_pending_depth = 4;
     std::size_t ni_req_extra_depth = 0;  // extra shift stages on the request path
@@ -255,6 +259,10 @@ namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
     if (cfg.vc_mode == VcMode::ReadWriteSplit) {
+        if (!cfg.write_vcs.empty() && !cfg.read_vcs.empty()) {
+            return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_vcs,
+                                                     cfg.read_vcs, cfg.vc_arbiter_pending_depth);
+        }
         return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
                                            cfg.vc_arbiter_pending_depth);
     }

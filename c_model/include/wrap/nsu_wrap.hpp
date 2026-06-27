@@ -33,8 +33,9 @@
 #include "wrap/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
 #include "wrap/nsu_wrap_io.hpp"
 #include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)
-#include "ni_params.h"             // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "ni_params.h"            // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "flit.hpp"
+#include "ni/vc_pools.hpp"
 #include "nsu/nsu_standalone.hpp"
 #include <array>
 #include <memory>
@@ -45,9 +46,9 @@ namespace ni::cmodel::wrap {
 class NsuWrap {
   public:
     // init — construct NsuStandalone with a minimal PoC NsuConfig.
-    // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel. num_vc comes
-    // from the create param (cmodel_nsu_create): write rsp on write_rsp_vc=0,
-    // read rsp on read_rsp_vc=(num_vc>=2)?1:0 — Mode A, mirrors the MultiVc test.
+    // ReadWriteSplit pools, queue_depth = kPoCAxiQueueDepth per channel.
+    // num_vc comes from the create param (cmodel_nsu_create); derive_vc_pools
+    // splits it into write_rsp_vcs (lower half) and read_rsp_vcs (upper half).
     void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth) {
         using namespace ni::cmodel::nsu;
         num_vc_ = num_vc;
@@ -55,8 +56,9 @@ class NsuWrap {
         cfg.src_id = src_id;
         cfg.num_vc = num_vc;
         cfg.vc_mode = VcMode::ReadWriteSplit;
-        cfg.write_rsp_vc = 0;
-        cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
+        const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
+        cfg.write_rsp_vcs = vc_pools.write_vcs;
+        cfg.read_rsp_vcs = vc_pools.read_vcs;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;
