@@ -188,7 +188,7 @@ sim:
 	  $(if $(HOTSPOT),--hotspot $(HOTSPOT)) $(if $(BASE),--from $(BASE))
 
 sim-regress:
-	$(TOOLPATH) python3 sim/regress/run_regress.py --tier $(TIER)
+	$(TOOLPATH) $(PYTHON3) sim/regress/run_regress.py --tier $(TIER)
 
 # --- clean ---
 
