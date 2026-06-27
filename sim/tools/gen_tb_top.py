@@ -51,7 +51,8 @@ LINK_PORTS = 5
 
 def load_topology(name: str) -> dict:
     import yaml
-    path = ROOT / "sim" / "topologies" / f"{name}.yaml"
+    base = name[:-4] if name.endswith("_rob") else name
+    path = ROOT / "sim" / "topologies" / f"{base}.yaml"
     topo = yaml.safe_load(path.read_text())
     _check_flit_capacity(topo, path)
     return topo
@@ -372,12 +373,12 @@ def emit_fabric(topo: dict) -> str:
 # tb_top emitter — instantiates the fabric + test master/slave + exit logic
 # ---------------------------------------------------------------------------
 
-def emit_tb_top(topo: dict) -> str:
+def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
     num_vc = topo["topology"]["num_vc"]
-    rob_enabled = topo["topology"].get("rob_mode", "disabled").strip().lower() == "enabled"
+    rob_enabled = requested_name.endswith("_rob")
 
     # Identity pairing: master_i / slave_i both use scn_node{i}.
     # Destination is encoded in addr bits 32+ by the scenario generator (gen_test_patterns).
@@ -678,7 +679,7 @@ def main() -> int:
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
-    tb_text = emit_tb_top(topo)
+    tb_text = emit_tb_top(topo, a.topology)
     fab_text = emit_fabric(topo)
     out_path = Path(a.out) if a.out is not None else \
         ROOT / "sim" / "sv" / f"tb_top_{a.topology}.sv"

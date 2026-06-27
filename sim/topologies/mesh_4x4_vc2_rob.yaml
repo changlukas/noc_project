@@ -1,6 +1,0 @@
-topology:
-  name: mesh_4x4_vc2_rob
-  x_dim: 4
-  y_dim: 4
-  num_vc: 2
-  rob_mode: enabled

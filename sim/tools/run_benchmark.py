@@ -38,7 +38,8 @@ PASS_MARKER = "PASS: scenario complete, scoreboard clean"
 # ---------------------------------------------------------------------------
 
 def _load_topology(topology: str) -> dict:
-    topo_path = ROOT / "sim" / "topologies" / f"{topology}.yaml"
+    base = topology[:-4] if topology.endswith("_rob") else topology
+    topo_path = ROOT / "sim" / "topologies" / f"{base}.yaml"
     return yaml.safe_load(topo_path.read_text())
 
 
@@ -143,6 +144,8 @@ def main(argv=None):
     ap.add_argument("--size", type=int, default=2)
     ap.add_argument("--len", type=int, default=0, dest="burst_len")
     ap.add_argument("--exclude-self", action="store_true")
+    ap.add_argument("--preserve-addr", action="store_true",
+                    help="Forward to gen_test_patterns --preserve-addr (AX4 conformity cells).")
     ap.add_argument("--out-root", default=None,
                     help="Root for output dirs (default: sim/verilator/output/bench_<scenario>)")
     _DEFAULT_BASE = str(
@@ -206,6 +209,8 @@ def main(argv=None):
         gen_args += ["--memory-size", hex(a.memory_size)]
     if a.exclude_self:
         gen_args.append("--exclude-self")
+    if a.preserve_addr:
+        gen_args.append("--preserve-addr")
     if a.base:
         gen_args += ["--from", a.base]
 
