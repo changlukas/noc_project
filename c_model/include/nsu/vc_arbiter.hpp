@@ -56,6 +56,8 @@ class VcArbiter : public router::NocRspOut {
                     /*read_rsp_vc=*/0, std::move(empty_candidates), pending_depth);
         a.write_rsp_vcs_ = std::move(write_rsp_vcs);
         a.read_rsp_vcs_ = std::move(read_rsp_vcs);
+        for (uint8_t v : a.write_rsp_vcs_) assert(v < num_vc && "write_rsp_vcs element >= num_vc");
+        for (uint8_t v : a.read_rsp_vcs_) assert(v < num_vc && "read_rsp_vcs element >= num_vc");
         a.use_pools_ = true;
         return a;
     }
@@ -110,9 +112,8 @@ class VcArbiter : public router::NocRspOut {
     bool use_pools_ = false;
     uint8_t write_rr_start_ = 0;
     uint8_t read_rr_start_ = 0;
-    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256
-    std::array<std::optional<uint8_t>, AXI_ID_SPACE> write_binding_{};
-    std::array<std::optional<uint8_t>, AXI_ID_SPACE> read_binding_{};
+    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> write_binding_{};
+    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> read_binding_{};
 };
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id) {
@@ -133,7 +134,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
     }
 
     // ReadWriteSplit pools: per-id sticky binding + round-robin within the class pool.
-    std::array<std::optional<uint8_t>, AXI_ID_SPACE>* binding = nullptr;
+    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE>* binding = nullptr;
     const std::vector<uint8_t>* cand = nullptr;
     uint8_t* rr = nullptr;
     if (axi_ch == ni::AXI_CH_B) {

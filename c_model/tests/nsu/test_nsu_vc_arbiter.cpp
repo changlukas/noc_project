@@ -219,6 +219,25 @@ TEST(NsuVcArbiterPools, BUsesWritePoolRUsesReadPool) {
     EXPECT_EQ(arb.pending_size(2), 1u);  // R on read pool
 }
 
+// Two in-flight multi-beat R bursts (rid5, rid6) whose beats interleave must
+// each stay on their own bound VC -- this is the invariant per-id binding
+// exists for (a single current_r_vc_ would misroute the interleaved beats).
+TEST(NsuVcArbiterPools, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
+    SCENARIO("NSU pools: interleaved rid5/rid6 multi-beat R bursts each pin to one VC");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
+                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
+    // rid5 beat1 (binds VC2), rid6 beat1 (binds VC3), then interleave remaining beats.
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC2
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 0)));  // rid6 -> VC3
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC2 (bound)
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 0)));  // rid6 -> VC3 (bound)
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));  // rid5 last -> VC2
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 1)));  // rid6 last -> VC3
+    EXPECT_EQ(arb.pending_size(2), 3u);                                   // all rid5 beats
+    EXPECT_EQ(arb.pending_size(3), 3u);                                   // all rid6 beats
+}
+
 INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcArbParam,
                          ::testing::Values(std::size_t(1), std::size_t(2), std::size_t(4),
                                            std::size_t(8)),
