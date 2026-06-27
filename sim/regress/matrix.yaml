@@ -1,0 +1,23 @@
+tiers:
+  smoke:
+    topologies: [mesh_4x4_vc1, mesh_4x4_vc2]
+    rob_modes: [disabled]
+    stimuli:
+      - from: AX4-BAS-003
+        patterns: [neighbor]
+      - from: [AX4-ORD-002, AX4-RSP-002]   # ORD = multi-id; RSP-002 = OOB decerr (preserve-addr)
+        patterns: [neighbor]
+        preserve_addr: true
+    # cell count = 2 topo x 1 rob x (1 + 2) = 6
+  nightly:
+    topologies: [mesh_4x4_vc1, mesh_4x4_vc2, mesh_4x4_vc4, mesh_4x4_vc8]
+    rob_modes: [disabled, enabled]
+    stimuli:
+      - from: AX4-BAS-003
+        patterns: [neighbor, uniform_random, transpose, hotspot]
+      - from: all_curated_ax4      # AX4-* minus AX4-INF-*
+        patterns: [neighbor]
+        preserve_addr: true
+exclusions:
+  - when: {rob_mode: enabled, from: AX4-BUR-003}
+    reason: "burst len 256 > ROB_CAPACITY 32"
