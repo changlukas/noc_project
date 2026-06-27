@@ -38,7 +38,8 @@ PASS_MARKER = "PASS: scenario complete, scoreboard clean"
 # ---------------------------------------------------------------------------
 
 def _load_topology(topology: str) -> dict:
-    topo_path = ROOT / "sim" / "topologies" / f"{topology}.yaml"
+    base = topology[:-4] if topology.endswith("_rob") else topology
+    topo_path = ROOT / "sim" / "topologies" / f"{base}.yaml"
     return yaml.safe_load(topo_path.read_text())
 
 
