@@ -13,8 +13,7 @@ TOPOLOGY ?= mesh_4x4_vc1
 # - No C++ main driver: VCS owns simulation time. tb_top is self-clocked; no
 #   wrapper module is needed.
 # - None of the Verilator workarounds are needed (--output-split,
-#   backslash-path sed, EXEEXT); the vendored-task latch/shadow patches
-#   are simulator-neutral and stay.
+#   backslash-path sed, EXEEXT).
 
 # bash for `set -o pipefail` in run recipes.
 SHELL := bash

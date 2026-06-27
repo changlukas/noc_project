@@ -15,7 +15,7 @@
 //              vice versa. LINK credit is a PULSE (one cycle per flit), unlike
 //              the level/stub credit on the NI (NMU/NSU) faces.
 //
-// Beta-tick discipline (mirrors channel_model_wrap): on every posedge clk_i
+// Beta-tick discipline (shared by the NI wraps nmu_wrap/nsu_wrap): on every posedge clk_i
 // the module samples the PREVIOUS cycle's registered wire inputs, pushes them to the
 // C++ model via DPI set_inputs, advances the model via tick, pulls outputs
 // via get_outputs, and registers those outputs nonblocking so they are
