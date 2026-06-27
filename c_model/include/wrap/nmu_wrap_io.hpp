@@ -15,7 +15,7 @@
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 #pragma once
 #include "axi/types.hpp"                   // axi::DATA_BYTES
-#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
 #include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>

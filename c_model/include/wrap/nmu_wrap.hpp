@@ -24,7 +24,7 @@
 // Hermetic invariant: no refs to other Wraps.
 #pragma once
 #include "axi/types.hpp"
-#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
 #include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)

@@ -51,18 +51,6 @@ void cmodel_perf_dump(const char* path);
 void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 
 // Per-wrap DPI signatures appended by Tasks 5-11.
-// ChannelModel (Task 5) — NoC-only, simplest wrap; first chandle migration:
-unsigned long long cmodel_channel_model_create(const char* name);
-void cmodel_channel_model_set_inputs(unsigned long long ctx, svBit req_in_valid,
-                                     svBitVecVal* req_in_flit, svBit req_in_credit_return,
-                                     svBit rsp_in_valid, svBitVecVal* rsp_in_flit,
-                                     svBit rsp_in_credit_return);
-void cmodel_channel_model_tick(unsigned long long ctx);
-void cmodel_channel_model_get_outputs(unsigned long long ctx, svBit* req_out_valid,
-                                      svBitVecVal* req_out_flit, svBit* req_out_credit_return,
-                                      svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
-                                      svBit* rsp_out_credit_return);
-
 // Router (Task 3, per-node) — ONE node's REQ+RSP routers at (x,y). Pins split:
 //   NMU/NSU-facing (NI edge, pulse credit) + per-DIRECTION LINK (pulse credit).
 // num_vc threads the topology VC count into the wrap config (NOT hardcoded 1).

@@ -31,11 +31,6 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_finalize();
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Case: *_create before init → ERR_NOT_INITIALIZED.
-    unsigned long long h0 = cmodel_channel_model_create("cm_pre_init");
-    EXPECT_EQ(h0, 0ull);
-    check_and_clear_error(CMODEL_DPI_ERR_NOT_INITIALIZED);
-
     // Case: cmodel_init on bad YAML → ERR_GENERIC, state stays UNINITIALIZED.
     cmodel_init("/nonexistent/path/to/scenario.yaml");
     check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
@@ -50,18 +45,6 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_init(good_yaml);
     check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
 
-    // === ChannelModel cases (T5) ===
-
-    // Case: channel_model_create after init succeeds.
-    unsigned long long cm_handle = cmodel_channel_model_create("cm_test");
-    ASSERT_NE(cm_handle, 0ull);
-    check_and_clear_error(CMODEL_DPI_OK);
-
-    // Case: garbage void* (non-registry) → registry-membership guard, no SIGSEGV.
-    unsigned long long garbage = 0xDEADBEEFCAFEull;
-    cmodel_channel_model_tick(garbage);
-    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
-
     // === Master cases (T6) ===
 
     // Case: master_create after init succeeds; scoreboard callbacks wired.
@@ -70,8 +53,10 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     check_and_clear_error(CMODEL_DPI_OK);
     EXPECT_EQ(cmodel_master_count(), 1);
 
-    // Case: type mismatch — channel_model handle passed to master_tick.
-    cmodel_master_tick(cm_handle);
+    // Case: registry-miss guard — garbage void* (non-registry) on a cycle op →
+    // membership guard fires, no SIGSEGV. Exercised via a non-channel tick.
+    unsigned long long garbage = 0xDEADBEEFCAFEull;
+    cmodel_master_tick(garbage);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // === Slave case (T7) ===
@@ -90,6 +75,11 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     ASSERT_NE(nmu_b, 0ull);
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: type-guard — an NMU handle passed to cmodel_master_tick (WrapType
+    // mismatch) → HERMETIC_VIOLATION; the type tag rejects the wrong wrap.
+    cmodel_master_tick(nmu_a);
+    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // === NSU case (T9 — last per-wrap) ===
 
@@ -110,8 +100,9 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_finalize();
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Case: cycle op on stale ctx after finalize → registry-miss → HERMETIC_VIOLATION.
-    cmodel_channel_model_tick(cm_handle);
+    // Case: cycle op on stale ctx after finalize → registry-miss (registry
+    // emptied by finalize) → HERMETIC_VIOLATION. Uses the now-stale master handle.
+    cmodel_master_tick(master_handle);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // Case: finalize twice → second is no-op.

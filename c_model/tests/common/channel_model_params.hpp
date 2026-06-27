@@ -1,7 +1,7 @@
 #pragma once
 // ChannelModel test-fixture per-direction in-flight flit deque capacity.
-// Not a production parameter — production ChannelModelWrap
-// uses kPoCChannelModelDepth from wrap/poc_defaults.hpp directly.
+// ChannelModel is a test-only stub (c_model/tests/common/); it has no
+// production wrap counterpart.
 #include <yaml-cpp/yaml.h>
 
 #include <cstddef>
