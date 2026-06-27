@@ -311,7 +311,7 @@ Append to `c_model/tests/nmu/test_vc_arbiter.cpp` (before `INSTANTIATE_TEST_SUIT
 // Wiring: NmuConfig carrying pools builds a pools arbiter that spreads.
 TEST(NmuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
     using ni::cmodel::nmu::NmuConfig;
-    using ni::cmodel::nmu::make_vc_arbiter;
+    using ni::cmodel::nmu::detail::make_vc_arbiter;  // factory lives in nmu::detail
     SCENARIO("NmuConfig.write_vcs/read_vcs -> make_vc_arbiter -> pools arbiter");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
@@ -327,7 +327,7 @@ TEST(NmuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
 }
 ```
 
-(If `make_vc_arbiter` is not currently declared at namespace scope / is not externally callable, expose it or test through `NmuStandalone`; verify its current linkage at `nmu.hpp:256` first and adapt the call. It is a free `inline` function in `ni::cmodel::nmu` per `nmu.hpp`.)
+(`make_vc_arbiter` is a free `inline` function in `ni::cmodel::nmu::detail` at `nmu.hpp:254-266` — reference it via the `detail::` qualifier as above.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -660,7 +660,7 @@ Append to `c_model/tests/nsu/test_nsu_vc_arbiter.cpp` (add includes `#include "n
 ```cpp
 TEST(NsuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
     using ni::cmodel::nsu::NsuConfig;
-    using ni::cmodel::nsu::make_vc_arbiter;
+    using ni::cmodel::nsu::detail::make_vc_arbiter;  // factory lives in nsu::detail
     SCENARIO("NsuConfig.write_rsp_vcs/read_rsp_vcs -> make_vc_arbiter -> pools arbiter");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     NsuConfig cfg{};
