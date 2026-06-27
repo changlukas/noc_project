@@ -1,5 +1,7 @@
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/packetize.hpp"
+#include "nmu/nmu.hpp"
+#include "ni/vc_pools.hpp"
 #include "ni/wormhole_arbiter.hpp"
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
@@ -610,4 +612,22 @@ TEST(NmuVcArbDeath, ProtocolViolation_LyingDownstream_DeathTest) {
     auto arb = VcArbiter::read_write_split(liar, /*num_vc=*/1, 0, 0);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
     EXPECT_DEATH({ arb.tick(); }, ".*");
+}
+
+// Wiring: NmuConfig carrying pools builds a pools arbiter that spreads.
+TEST(NmuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
+    using ni::cmodel::nmu::NmuConfig;
+    using ni::cmodel::nmu::detail::make_vc_arbiter;  // factory lives in nmu::detail
+    SCENARIO("NmuConfig.write_vcs/read_vcs -> make_vc_arbiter -> pools arbiter");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    NmuConfig cfg{};
+    cfg.num_vc = 4;
+    cfg.vc_mode = ni::cmodel::nmu::VcMode::ReadWriteSplit;
+    cfg.write_vcs = {0, 1};
+    cfg.read_vcs = {2, 3};
+    auto arb = make_vc_arbiter(cfg, noc.req_out());
+    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x30));
+    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x31));
+    EXPECT_EQ(vc_a, 2u);
+    EXPECT_EQ(vc_b, 3u);
 }

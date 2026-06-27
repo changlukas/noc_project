@@ -29,6 +29,7 @@
 #include "wrap/nmu_wrap_io.hpp"
 #include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)
 #include "ni_params.h"            // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "ni/vc_pools.hpp"
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
 #include <array>
@@ -51,8 +52,9 @@ class NmuWrap {
         cfg.src_id = src_id;
         cfg.num_vc = num_vc;
         cfg.vc_mode = VcMode::ReadWriteSplit;
-        cfg.write_vc = 0;
-        cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
+        const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
+        cfg.write_vcs = vc_pools.write_vcs;
+        cfg.read_vcs = vc_pools.read_vcs;
         cfg.read_rob_mode = rob_mode;
         cfg.write_rob_mode = rob_mode;
         cfg.port_params.aw_queue_depth = queue_depth;
