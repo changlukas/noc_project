@@ -259,7 +259,7 @@ namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
     if (cfg.vc_mode == VcMode::ReadWriteSplit) {
-        if (!cfg.write_vcs.empty() || !cfg.read_vcs.empty()) {
+        if (!cfg.write_vcs.empty() && !cfg.read_vcs.empty()) {
             return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_vcs,
                                                      cfg.read_vcs, cfg.vc_arbiter_pending_depth);
         }

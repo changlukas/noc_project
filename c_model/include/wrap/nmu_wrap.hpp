@@ -41,9 +41,9 @@ namespace ni::cmodel::wrap {
 class NmuWrap {
   public:
     // init — construct NmuStandalone with a minimal PoC NmuConfig.
-    // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel. num_vc comes
-    // from the create param (cmodel_nmu_create): write packets on write_vc=0,
-    // read packets on read_vc=(num_vc>=2)?1:0 — Mode A, mirrors the MultiVc test.
+    // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
+    // num_vc comes from the create param (cmodel_nmu_create); read/write VC
+    // pools are derived from derive_vc_pools(num_vc) (odd num_vc asserts).
     void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth,
               nmu::RobMode rob_mode = nmu::RobMode::Disabled) {
         using namespace ni::cmodel::nmu;
