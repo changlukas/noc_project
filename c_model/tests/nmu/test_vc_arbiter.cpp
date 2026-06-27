@@ -144,7 +144,8 @@ TEST_P(NmuVcArbParam, Binding_SameWriteId_SameVc) {
 }
 
 TEST_P(NmuVcArbParam, Binding_PerIdStickyAndDistinctIdsIndependent) {
-    SCENARIO("VcArbiter: a bound id sticks to its original VC even when a lower-index VC is free");
+    SCENARIO(
+        "VcArbiter: a bound id sticks to its VC across a full drain regardless of pool pressure");
     const auto num_vc = GetParam();
     if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
@@ -157,7 +158,7 @@ TEST_P(NmuVcArbParam, Binding_PerIdStickyAndDistinctIdsIndependent) {
     EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/7)));  // -> vc2
     EXPECT_EQ(arb.pending_size(2), 2u) << "vc2 holds ids 5,7 (round-robin wraps back)";
     EXPECT_EQ(arb.pending_size(3), 1u) << "vc3 holds id=6 (round-robin spread)";
-    // Drain every read-set VC. Bindings persist (id7->vc3) across the drain.
+    // Drain every read-set VC. Bindings persist (id7->vc2) across the drain.
     while (arb.pending_size(2) != 0 || arb.pending_size(3) != 0) {
         arb.tick();
         noc.req_in().pop_flit();

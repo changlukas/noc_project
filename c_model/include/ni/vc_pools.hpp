@@ -7,6 +7,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <vector>
 
 namespace ni::cmodel {
@@ -17,8 +18,11 @@ struct VcPools {
 };
 
 inline VcPools derive_vc_pools(std::size_t num_vc) {
-    assert((num_vc == 1 || num_vc % 2 == 0) &&
-           "derive_vc_pools: num_vc must be 1 or even (no equal read/write split otherwise)");
+    if (!(num_vc == 1 || num_vc % 2 == 0)) {
+        assert(false &&
+               "derive_vc_pools: num_vc must be 1 or even (no equal read/write split otherwise)");
+        std::abort();  // belt-and-braces for NDEBUG
+    }
     VcPools pools;
     if (num_vc == 1) {
         pools.write_vcs = {0};
