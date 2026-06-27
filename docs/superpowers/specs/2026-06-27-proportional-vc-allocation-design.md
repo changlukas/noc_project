@@ -108,14 +108,29 @@ per-beat.
 **Mechanism — port the NMU binding machinery to the NSU arbiter.** Give
 `nsu::VcArbiter` per-id binding keyed on the response id: `rid → read-pool VC`,
 `bid → write-pool VC`, released by an `on_id_drained` hook when the burst
-completes (rlast / B accepted). All beats of one R burst stick to that id's bound
-VC; different rids round-robin onto different read-pool VCs. This is the same
-binding pattern the NMU arbiter already uses for AR/AW, ported to B/R, plus a
-pools-capable factory (`read_write_split_pools` for the NSU class — does not
-exist yet; `nsu/vc_arbiter.hpp:41` is scalar-only). Do NOT reuse the existing
+completes. All beats of one R burst stick to that id's bound VC; different rids
+round-robin onto different read-pool VCs. This is the same binding pattern the
+NMU arbiter already uses for AR/AW, ported to B/R, plus a pools-capable factory
+(`read_write_split_pools` for the NSU class — does not exist yet;
+`nsu/vc_arbiter.hpp:41` is scalar-only). Do NOT reuse the existing
 `MultiCandidate` mode as a stand-in: it scans from index 0 with no binding
 (`nsu/vc_arbiter.hpp:105-111`) and is not behavior-equivalent to a bound pools
 split.
+
+**Burst-end detection.** The R header `last` field is always 1
+(`nsu/packetize.hpp:102`); the arbiter MUST release the rid binding on the
+payload `R.rlast` (`nsu/packetize.hpp:108`), not the header `last`. B is a single
+flit (`nsu/packetize.hpp:90`), released on accept. Different rids' R beats can
+interleave into the arbiter (`push_r` appends to `r_q_` blindly,
+`nsu/axi_master_port.hpp:77-79`), which is exactly why per-id binding — not a
+single in-flight `current_r_vc_` — is required.
+
+**Release ordering vs the wormhole stage.** The NSU wormhole arbiter
+(`nsu.hpp:154-157`) sits upstream of the VC binding and locks nothing (it treats
+each flit as its own packet, `ni/wormhole_arbiter.hpp`). The rid binding must be
+released only after its terminal flit (`R.rlast`, or the single B) has passed
+into the VC arbiter, so a following id's beats cannot inherit a stale binding nor
+race ahead of the release.
 
 With this, intra-burst R order is preserved (one VC per burst) and cross-burst R
 reorder is produced (different bursts on different VCs) — exactly what exercises
