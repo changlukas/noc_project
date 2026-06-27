@@ -2,13 +2,13 @@
 #
 # Convention: the root builds (c_model + Verilator) and runs lint/test
 # gates; SIMULATION runs from each simulator's own directory:
-#   cd sim/verilator && make run-genamba / run-tb-top   (Windows + Linux)
-#   cd sim/vcs       && make run-genamba / run-tb-top   (Linux workstation)
+#   cd sim/verilator && make run-tb-top   (Windows + Linux)
+#   cd sim/vcs       && make run-tb-top   (Linux workstation)
 # Run logs land in sim/<sim>/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
 #   build/cmodel/    CMake (c_model tests + FetchContent deps)
-#   build/verilator/ obj_dir (tb_top) + obj_genamba
+#   build/verilator/ obj_dir (tb_top)
 #   build/vcs/       simv_* + csrc_* (workstation)
 
 CMODEL_DIR      := c_model
@@ -28,10 +28,9 @@ help:
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
 	@echo "Simulate (from each simulator's directory):"
-	@echo "  cd sim/verilator && make run-genamba                  gen_amba role-1 (Tasks A-G)"
-	@echo "  cd sim/verilator && make run-tb-top                   wb2axip cosim, default scenario"
+	@echo "  cd sim/verilator && make run-tb-top                   default scenario"
 	@echo "  cd sim/verilator && make run-tb-top SCENARIO=<ax4-id> specific scenario"
-	@echo "  cd sim/vcs       && make run-genamba / run-tb-top     VCS (Linux workstation)"
+	@echo "  cd sim/vcs       && make run-tb-top                   VCS (Linux workstation)"
 	@echo ""
 	@echo "Simulate:"
 	@echo "  make sim TB=<topo> PATTERN=<p>            build + run benchmark (default TB=mesh_4x4_vc1)"

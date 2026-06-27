@@ -10,8 +10,8 @@ TOPOLOGY ?= mesh_4x4_vc1
 # (module load, license, version) before first use.
 #
 # Differences from the Verilator flow, by design:
-# - No C++ main driver: VCS owns simulation time. Both tb_genamba and tb_top
-#   are self-clocked; no wrapper module is needed.
+# - No C++ main driver: VCS owns simulation time. tb_top is self-clocked; no
+#   wrapper module is needed.
 # - None of the Verilator workarounds are needed (--output-split,
 #   backslash-path sed, EXEEXT); the vendored-task latch/shadow patches
 #   are simulator-neutral and stay.
@@ -67,16 +67,14 @@ else
 FSDB_COMPILE_FLAGS :=
 FSDB_SUFFIX :=
 endif
-# Deferred (=) on purpose: SCENARIO / GENAMBA_SCENARIO are defined later in
-# this file, and the per-run value must win when run-all-fsdb loops.
+# Deferred (=) on purpose: SCENARIO is defined later in this file, and the
+# per-run value must win when run-all-fsdb loops.
 # Use sites attach via $(if $(V), $(V),) — a bare " $(V)" would leave a
 # double space when empty and break FSDB=0 command-line byte-identity.
 ifeq ($(FSDB),1)
 FSDB_PLUSARG_TB_TOP  = "+fsdb=$(CURDIR)/output/$(SCENARIO)/tb_top.fsdb"
-FSDB_PLUSARG_GENAMBA = "+fsdb=$(CURDIR)/output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"
 else
 FSDB_PLUSARG_TB_TOP  =
-FSDB_PLUSARG_GENAMBA =
 endif
 # -----------------------------------------------------------------------------
 
@@ -137,41 +135,6 @@ ifeq ($(FSDB),1)
 # guarded: += of an empty var would add a trailing space and break FSDB=0 byte-identity
 VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
-
-# --- gen_amba role-1 testbench ---
-# Default cmodel_init() input is the standalone stub (no scenario tree
-# dependency); pass GENAMBA_SCENARIO=<ax4-id> to point at a tree scenario
-# instead (content is still inert: NMU/NSU take no config from it).
-GENAMBA_SCENARIO ?=
-ifeq ($(GENAMBA_SCENARIO),)
-GENAMBA_SCENARIO_ABS := $(COSIM_ROOT)/genamba_init.yaml
-GENAMBA_RUN_TAG := default
-else
-GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(GENAMBA_SCENARIO)/scenario.yaml
-GENAMBA_RUN_TAG := $(GENAMBA_SCENARIO)
-endif
-
-SIMV_GENAMBA := $(VCS_BUILD)/simv_genamba$(FSDB_SUFFIX)
-
-$(SIMV_GENAMBA): $(GENAMBA_SV_SRC) $(DPI_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
-	@mkdir -p $(VCS_BUILD)
-	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_genamba$(FSDB_SUFFIX) \
-	    +incdir+$(COSIM_ROOT)/sv/genamba \
-	    $(GENAMBA_DEFINES) \
-	    -top tb_genamba \
-	    $(GENAMBA_SV_SRC) $(DPI_C_SRC) $(YAMLCPP_LIB) \
-	    -o $(SIMV_GENAMBA)
-
-.PHONY: genamba run-genamba
-genamba: $(SIMV_GENAMBA)
-
-run-genamba: $(SIMV_GENAMBA)
-	@mkdir -p output/genamba_$(GENAMBA_RUN_TAG)
-	@rm -f output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb  # drop stale fsdb from a previous FSDB=1 run
-	@set -o pipefail; \
-	$(SIMV_GENAMBA) "+scenario=$(GENAMBA_SCENARIO_ABS)"$(if $(FSDB_PLUSARG_GENAMBA), $(FSDB_PLUSARG_GENAMBA),) \
-	    2>&1 | tee output/genamba_$(GENAMBA_RUN_TAG)/run.log
 
 # --- tb_top cosim (self-clocked) ---
 SCENARIO ?= AX4-BAS-003_single_write_read_aligned
@@ -244,12 +207,6 @@ run-all-fsdb:
 	        fail+=("$$s"); \
 	    fi; \
 	done; \
-	echo ""; echo "=== run-all-fsdb: tb_genamba ($(GENAMBA_RUN_TAG)) ==="; \
-	if $(MAKE) run-genamba FSDB=1 && test -s "output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"; then \
-	    pass+=("genamba_$(GENAMBA_RUN_TAG)"); fsdbs+=("output/genamba_$(GENAMBA_RUN_TAG)/tb_genamba.fsdb"); \
-	else \
-	    fail+=("genamba_$(GENAMBA_RUN_TAG)"); \
-	fi; \
 	echo ""; echo "================ run-all-fsdb summary ================"; \
 	echo "PASS (with fsdb): $${#pass[@]}"; \
 	for s in "$${pass[@]}"; do echo "  PASS $$s"; done; \

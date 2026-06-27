@@ -7,8 +7,8 @@ SHELL         := bash
 # Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
 
-# Build environment config, include dirs, and genamba source lists are shared
-# with sim/vcs/Makefile via sim/build_config.mk. tb_top SV sources are in
+# Build environment config and include dirs are shared with sim/vcs/Makefile
+# via sim/build_config.mk. tb_top SV sources are in
 # sim/filelist_<TOPOLOGY>.f (generated from TB_TOP_SV_SRC in build_config.mk).
 # BUILD_ROOT (top-level build/) also comes from build_config.mk; all Verilator
 # artifacts land under $(BUILD_ROOT)/verilator/, run logs under ./output/.
@@ -30,7 +30,6 @@ C_SRC := \
 
 # c_model is header-only: no -l flag needed; include paths suffice.
 # yaml-cpp is a static archive built by CMake FetchContent; link via full path.
-# Flags shared by every Verilator target in this Makefile (tb_top, genamba).
 VERILATOR_COMMON_FLAGS := \
     --cc --exe \
     --assert \
@@ -134,7 +133,7 @@ check-yamlcpp:
 #   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
 # sed pass (--timing): Verilator 5.036 on Windows joins fork-sync done() debug
 #   source paths with backslashes in generated C-string literals — rewrite them
-#   to forward slashes before g++ sees them (same workaround as genamba target).
+#   to forward slashes before g++ sees them.
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VL_BUILD)/obj_dir_$(TOPOLOGY)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
@@ -191,121 +190,7 @@ hello:
 	    --Mdir /tmp/empty_tb_obj
 	/tmp/empty_tb_obj/Vempty_tb && echo "TOOLCHAIN OK"
 
-clean: clean-genamba
+clean:
 	rm -rf $(VL_BUILD)/obj_dir_* output
 	rm -f master_wrap_read_dump*.txt
 	rm -f $(VL_BUILD)/master_wrap_read_dump*.txt  # ctest runs Vtb_top with cwd build/verilator
-
-# --- gen_amba role-1 testbench (Phase 1) ---
-GENAMBA_OBJDIR := $(VL_BUILD)/obj_genamba
-GENAMBA_SRC := $(GENAMBA_SV_SRC)
-GENAMBA_C_SRC := \
-    $(DPI_C_SRC) \
-    $(COSIM_ROOT)/verilator/main_genamba.cpp
-GENAMBA_FLAGS := \
-    $(VERILATOR_COMMON_FLAGS) \
-    --timing \
-    --top-module tb_genamba \
-    --Mdir $(GENAMBA_OBJDIR) \
-    --output-split 0 \
-    -I$(COSIM_ROOT)/sv/genamba \
-    $(GENAMBA_DEFINES)
-
-# Strict-mode flag injection applies to genamba builds too (mirrors
-# VERILATOR_FLAGS above).
-GENAMBA_FLAGS += $(VERILATOR_EXTRA_FLAGS)
-
-# Two-phase build mirrors tb_top pattern: Verilator generates C++ in
-# $(GENAMBA_OBJDIR), then $(MAKE) compiles it.  --timing is used instead of
-# --no-timing so the SV $time-based $display calls are accurate.
-# --output-split 0: Verilator 5.036's default 20000-statement split can
-# separate a coroutine's `__Vfork_N__sync` declaration from its use across
-# generated .cpp chunks ("was not declared in this scope" C++ error) when
-# fork-bearing tasks grow. Disabling the split keeps each coroutine whole;
-# compile-time cost is acceptable at this design size.
-# -LDFLAGS "-Wl,--stack,N" is intentionally omitted: Verilator 5.036 on
-# Windows/MSYS2 escapes commas in generated .mk, breaking the link step.
-#
-# Incremental: the exe depends on SV + C sources, so an unchanged tree
-# skips both Verilation and the C++ compile on repeat `make run-genamba`.
-# `genamba` stays as the friendly alias. $(EXEEXT) defined near `all:`.
-GENAMBA_EXE := $(GENAMBA_OBJDIR)/Vtb_genamba$(EXEEXT)
-# sed pass between Verilation and C++ compile: Verilator 5.036 on Windows
-# joins include-resolved source paths with backslashes and embeds them in
-# generated C-string literals (fork-sync done() debug info). `\g` etc. are
-# invalid escapes (2300+ g++ warnings) and `\t` silently corrupts to TAB.
-# Rewrite only backslashes that follow a drive-letter path prefix —
-# legitimate \n escapes in $display format strings never match.
-$(GENAMBA_EXE): $(GENAMBA_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
-	@mkdir -p $(GENAMBA_OBJDIR)
-	$(VERILATOR) $(GENAMBA_FLAGS) $(GENAMBA_SRC) $(GENAMBA_C_SRC)
-	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \
-	    $(GENAMBA_OBJDIR)/*.cpp $(GENAMBA_OBJDIR)/*.h
-	$(MAKE) -C $(GENAMBA_OBJDIR) -f Vtb_genamba.mk \
-	    PYTHON3="$(PYTHON3)"
-
-.PHONY: genamba
-genamba: $(GENAMBA_EXE)
-
-# Build + run in one shot. Console output streams live AND lands in
-# output/genamba_$(GENAMBA_RUN_TAG)/run.log (pipefail keeps the sim's
-# exit code through the tee).
-# Default cmodel_init() input is the standalone stub (no scenario tree
-# dependency); pass GENAMBA_SCENARIO=<ax4-id> to point at a tree scenario
-# instead (content is still inert: NMU/NSU take no config from it).
-GENAMBA_SCENARIO ?=
-ifeq ($(GENAMBA_SCENARIO),)
-GENAMBA_SCENARIO_ABS := $(COSIM_ROOT)/genamba_init.yaml
-GENAMBA_RUN_TAG := default
-else
-GENAMBA_SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(GENAMBA_SCENARIO)/scenario.yaml
-GENAMBA_RUN_TAG := $(GENAMBA_SCENARIO)
-endif
-.PHONY: run-genamba
-run-genamba: genamba
-	@mkdir -p output/genamba_$(GENAMBA_RUN_TAG)
-	@set -o pipefail; \
-	$(GENAMBA_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)" \
-	    2>&1 | tee output/genamba_$(GENAMBA_RUN_TAG)/run.log
-
-.PHONY: clean-genamba
-clean-genamba:
-	rm -rf $(VL_BUILD)/obj_genamba $(VL_BUILD)/obj_genamba_tester
-
-# --- pure-referee: gen_amba's own axi_tester drives the bridge ---------------
-# Stimulus, data, and compares are upstream code (test selection via the
-# upstream plusargs). The shared main is retargeted to the tester top via
-# GENAMBA_TOP define + a force-include of the matching verilated header.
-# MULTIPLE_OUTSTANDING is excluded from the default set: upstream task has
-# a known index bug (see ATTRIBUTION.md, "Known upstream issue").
-TESTER_OBJDIR := $(VL_BUILD)/obj_genamba_tester
-TESTER_FLAGS := \
-    $(VERILATOR_COMMON_FLAGS) \
-    --timing \
-    --top-module tb_genamba_tester \
-    --Mdir $(TESTER_OBJDIR) \
-    --output-split 0 \
-    -I$(COSIM_ROOT)/sv/genamba \
-    $(GENAMBA_DEFINES) \
-    -CFLAGS "-DGENAMBA_TESTER_TOP"
-TESTER_FLAGS += $(VERILATOR_EXTRA_FLAGS)
-
-TESTER_EXE := $(TESTER_OBJDIR)/Vtb_genamba_tester$(EXEEXT)
-GENAMBA_TESTER_TESTS ?= +SINGLE_TEST=1 +BURST_TEST=1 +SINGLE_TEST_MEM=1 +BURST_TEST_MEM=1
-
-$(TESTER_EXE): $(GENAMBA_TESTER_SV_SRC) $(GENAMBA_C_SRC) $(GENAMBA_INC_DEPS) $(DPI_HDR_DEPS) | check-yamlcpp
-	@mkdir -p $(TESTER_OBJDIR)
-	$(VERILATOR) $(TESTER_FLAGS) $(GENAMBA_TESTER_SV_SRC) $(GENAMBA_C_SRC)
-	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \
-	    $(TESTER_OBJDIR)/*.cpp $(TESTER_OBJDIR)/*.h
-	$(MAKE) -C $(TESTER_OBJDIR) -f Vtb_genamba_tester.mk \
-	    PYTHON3="$(PYTHON3)"
-
-.PHONY: genamba-tester run-genamba-tester
-genamba-tester: $(TESTER_EXE)
-
-run-genamba-tester: $(TESTER_EXE)
-	@mkdir -p output/genamba_tester
-	@set -o pipefail; \
-	$(TESTER_EXE) "+scenario=$(GENAMBA_SCENARIO_ABS)" $(GENAMBA_TESTER_TESTS) \
-	    2>&1 | tee output/genamba_tester/run.log

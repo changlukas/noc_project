@@ -1,6 +1,5 @@
 # Build environment config and simulator-neutral source lists shared by
-# sim/verilator/Makefile and sim/vcs/Makefile. Contains make-evaluated
-# variables, conditional logic, and genamba source lists.
+# sim/verilator/Makefile and sim/vcs/Makefile.
 #
 # tb_top SV sources live in sim/filelist_<TOPOLOGY>.f (generated from
 # TB_TOP_SV_SRC below); both Makefiles use -f filelist_<TOPOLOGY>.f for the
@@ -18,7 +17,7 @@ PROJ_ROOT   := $(patsubst %/,%,$(dir $(COSIM_ROOT)))
 
 # All build artifacts live under the top-level build/ tree:
 #   build/cmodel/    CMake (c_model tests + FetchContent deps)
-#   build/verilator/ obj_dir (tb_top) + obj_genamba
+#   build/verilator/ obj_dir (tb_top)
 #   build/vcs/       simv_* + csrc_* + *.daidir
 BUILD_ROOT     := $(PROJ_ROOT)/build
 
@@ -105,42 +104,10 @@ FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY).f
 # self-contained for tool-native -f consumption.
 FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/sv -- $(TB_TOP_SV_SRC)
 
-# DPI implementation shared by every simulator; the C++ *main* drivers
-# (main.cpp / main_genamba.cpp) are Verilator-only and listed in
-# sim/verilator/Makefile, NOT here — under VCS the simulator owns time.
+# DPI implementation shared by every simulator; the C++ *main* driver
+# (main.cpp) is Verilator-only and listed in sim/verilator/Makefile, NOT here
+# — under VCS the simulator owns time.
 DPI_C_SRC := $(COSIM_ROOT)/c/cmodel_dpi.cpp
-
-# --- gen_amba role-1 testbench ---
-GENAMBA_SV_SRC := \
-    $(SPECGEN_SV_INC)/ni_params_pkg.sv \
-    $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
-    $(SPECGEN_SV_INC)/noc_types_pkg_vc1.sv \
-    $(COSIM_ROOT)/sv/nmu_wrap.sv \
-    $(COSIM_ROOT)/sv/nsu_wrap.sv \
-    $(COSIM_ROOT)/sv/genamba/mem_axi.v \
-    $(COSIM_ROOT)/sv/genamba_master_bfm.sv \
-    $(COSIM_ROOT)/sv/tb_genamba.sv
-
-# Pure-referee variant: gen_amba's own axi_tester drives the bridge with
-# its upstream test sequence; no project BFM, no project patterns.
-GENAMBA_TESTER_SV_SRC := \
-    $(SPECGEN_SV_INC)/ni_params_pkg.sv \
-    $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
-    $(SPECGEN_SV_INC)/noc_types_pkg_vc1.sv \
-    $(COSIM_ROOT)/sv/nmu_wrap.sv \
-    $(COSIM_ROOT)/sv/nsu_wrap.sv \
-    $(COSIM_ROOT)/sv/genamba/mem_axi.v \
-    $(COSIM_ROOT)/sv/genamba/axi_tester.v \
-    $(COSIM_ROOT)/sv/tb_genamba_tester.sv
-
-# `include'd task bodies — NOT standalone compile units (never pass them to
-# the simulator command line), but they ARE build inputs: list them as extra
-# prerequisites on the genamba build rules so editing them triggers a
-# rebuild (previously invisible to make).
-GENAMBA_INC_DEPS := \
-    $(COSIM_ROOT)/sv/genamba/axi_master_tasks.v \
-    $(COSIM_ROOT)/sv/genamba/mem_test_tasks.v \
-    $(COSIM_ROOT)/sv/genamba/mem_axi_dpram_sync.v
 
 # DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (wrap adapters and
 # their transitive includes). The obj-dir sub-make tracks them via -MMD, but
@@ -152,10 +119,6 @@ DPI_HDR_DEPS := \
     $(wildcard $(PROJ_ROOT)/c_model/include/*/*/*.hpp) \
     $(wildcard $(PROJ_ROOT)/c_model/tests/common/*.hpp) \
     $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.hpp)
-
-GENAMBA_DEFINES := \
-    +define+AMBA_AXI4 +define+AMBA_QOS \
-    +define+AMBA_AXI_CACHE +define+AMBA_AXI_PROT
 
 CPP_INCLUDE_FLAGS := \
     -I$(COSIM_ROOT)/c \
