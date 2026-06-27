@@ -34,3 +34,12 @@ def test_preserve_addr_flag_carried():
     cells = run_regress.expand_tier(MATRIX, "t")
     assert any(c.preserve_addr for c in cells)
     assert any(not c.preserve_addr for c in cells)
+
+
+def test_wire_verifiable_filter():
+    rsp_read = run_regress.resolve_scenario("AX4-RSP-001")   # category: response (decerr read)
+    rsp_write = run_regress.resolve_scenario("AX4-RSP-002")  # write-only OOB (0 reads)
+    data = run_regress.resolve_scenario("AX4-BAS-003")       # write+read data scenario
+    assert run_regress.is_wire_verifiable(rsp_read) is False
+    assert run_regress.is_wire_verifiable(rsp_write) is False
+    assert run_regress.is_wire_verifiable(data) is True

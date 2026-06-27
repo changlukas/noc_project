@@ -76,6 +76,18 @@ def resolve_scenario(scenario_id: str) -> str:
     return hits[0]
 
 
+def is_wire_verifiable(scenario_path: str) -> bool:
+    """The wire scoreboard verifies via write->readback (BIST-style): only scenarios
+    that produce OKAY reads of written data are checked here. Write-only scenarios (no
+    read op) and error-response scenarios (metadata.category == 'response', whose
+    accesses intentionally DECERR) are NOT wire-verifiable -- they are covered by the
+    Layer 2 c_model integration suite. Such cells are skipped (reported, not silent)."""
+    sc = yaml.safe_load(Path(scenario_path).read_text())
+    if (sc.get("metadata") or {}).get("category") == "response":
+        return False
+    return any(t.get("op") == "read" for t in (sc.get("transactions") or []))
+
+
 def run_cell(cell: Cell, out_root: Path, run_cmd=None) -> bool:
     args = ["python3", str(RUN_BENCH),
             "--topology", cell.effective_topology(),
@@ -110,6 +122,10 @@ def main(argv=None) -> int:
         reason = is_excluded(cell, matrix.get("exclusions"))
         if reason:
             results.append({**asdict(cell), "status": "skipped", "reason": reason})
+            continue
+        if not is_wire_verifiable(resolve_scenario(cell.from_id)):
+            results.append({**asdict(cell), "status": "skipped",
+                            "reason": "non-wire-verifiable (write-only/error-response); Layer 2 covers"})
             continue
         ok = run_cell(cell, out_base / cell.label())
         results.append({**asdict(cell), "status": "pass" if ok else "fail"})

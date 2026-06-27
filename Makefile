@@ -18,7 +18,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
-        specgen_pytest sim \
+        specgen_pytest sim sim-regress \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -36,6 +36,7 @@ help:
 	@echo "  make sim TB=<topo> PATTERN=<p>            build + run benchmark (default TB=mesh_4x4_vc1)"
 	@echo "  make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3"
 	@echo "  Vars: TXN= SEED= HOTSPOT= BASE=<base.yaml>"
+	@echo "  make sim-regress TIER=nightly            run the co-sim regression matrix"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -178,12 +179,16 @@ check: lint_scenarios lint_docs specgen_pytest build-cmodel build-verilator
 # PATTERN, TXN, SEED, HOTSPOT, BASE are optional forwarded vars.
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
+TIER    ?= nightly
 
 sim:
 	$(MAKE) build-verilator TOPOLOGY=$(TB) PYTHON3=$(PYTHON3)
 	$(PYTHON3) sim/tools/run_benchmark.py --topology $(TB) --pattern $(PATTERN) \
 	  $(if $(TXN),--transactions-per-node $(TXN)) $(if $(SEED),--seed $(SEED)) \
 	  $(if $(HOTSPOT),--hotspot $(HOTSPOT)) $(if $(BASE),--from $(BASE))
+
+sim-regress:
+	$(TOOLPATH) python3 sim/regress/run_regress.py --tier $(TIER)
 
 # --- clean ---
 
