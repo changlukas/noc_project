@@ -53,6 +53,12 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     check_and_clear_error(CMODEL_DPI_OK);
     EXPECT_EQ(cmodel_master_count(), 1);
 
+    // Case: registry-miss guard — garbage void* (non-registry) on a cycle op →
+    // membership guard fires, no SIGSEGV. Exercised via a non-channel tick.
+    unsigned long long garbage = 0xDEADBEEFCAFEull;
+    cmodel_master_tick(garbage);
+    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
+
     // === Slave case (T7) ===
 
     // Case: slave_create after init succeeds.
@@ -69,6 +75,11 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     ASSERT_NE(nmu_b, 0ull);
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: type-guard — an NMU handle passed to cmodel_master_tick (WrapType
+    // mismatch) → HERMETIC_VIOLATION; the type tag rejects the wrong wrap.
+    cmodel_master_tick(nmu_a);
+    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // === NSU case (T9 — last per-wrap) ===
 
@@ -88,6 +99,11 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // Case: finalize from INITIALIZED → registry destroyed, state = FINALIZED.
     cmodel_finalize();
     check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: cycle op on stale ctx after finalize → registry-miss (registry
+    // emptied by finalize) → HERMETIC_VIOLATION. Uses the now-stale master handle.
+    cmodel_master_tick(master_handle);
+    check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // Case: finalize twice → second is no-op.
     cmodel_finalize();

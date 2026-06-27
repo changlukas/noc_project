@@ -231,7 +231,7 @@ extern "C" int cmodel_reads_checked(void) {
     return static_cast<int>(g_scoreboard->reads_checked());
 }
 
-// ChannelModel DPI handlers — Task 7.
+// Flit marshalling helpers — shared by NMU/NSU/Router DPI handlers.
 //
 // Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
 // ceil(FLIT_WIDTH / 32) = 13. Words are little-endian: word[0] carries bits
