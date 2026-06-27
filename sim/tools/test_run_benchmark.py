@@ -11,6 +11,8 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import run_benchmark  # noqa: E402
+
 from run_benchmark import summarize  # noqa: E402
 
 
@@ -78,6 +80,32 @@ def test_summary_p95_single():
     perf = {"latency": {"transactions": [{"latency": 7}]}}
     s = summarize(perf)
     assert s["latency"]["p95"] == 7
+
+
+def test_preserve_addr_forwarded(monkeypatch):
+    """--preserve-addr must be forwarded to gen_test_patterns in the gen_args list."""
+    import pytest
+    captured = {}
+
+    def fake_run(args, **kw):
+        if "gen_test_patterns.py" in " ".join(map(str, args)):
+            captured["gen"] = list(map(str, args))
+
+        class R:
+            returncode = 0
+            stdout = "PASS: scenario complete, scoreboard clean"
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr(run_benchmark.subprocess, "run", fake_run)
+    monkeypatch.setattr(run_benchmark, "_find_exe", lambda t: __import__("pathlib").Path("Vtb_top"))
+    monkeypatch.setattr(run_benchmark, "_node_count", lambda t: 1)
+    # main() calls sys.exit when perf.json is absent; gen args are captured before that.
+    with pytest.raises(SystemExit):
+        run_benchmark.main(["--topology", "mesh_4x4_vc1", "--pattern", "neighbor",
+                            "--preserve-addr", "--out-root", "x"])
+    assert "--preserve-addr" in captured["gen"]
 
 
 def test_from_arg_parsing():

@@ -14,6 +14,8 @@ sys.path.insert(0, HERE)
 
 import random
 
+import gen_test_patterns  # noqa: E402
+
 from gen_test_patterns import (  # noqa: E402
     DST_ID_WIDTH,
     alloc_unique_offset,
@@ -718,6 +720,37 @@ def test_base_driven_respects_alloc_capacity(tmp_path):
     assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
         f"Expected memory overflow error; stderr={result.stderr!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# --preserve-addr: keeps original local offset, ORs dst tile into addr[63:32]
+# ---------------------------------------------------------------------------
+
+def test_preserve_addr_keeps_local_offset(tmp_path):
+    # A base scenario whose transaction sits at a non-realloc local offset (e.g. OOB 0x2000).
+    base = {"config": {"memory_base": 0, "memory_size": 0x1000},
+            "transactions": [{"op": "write", "addr": 0x2000, "id": 1, "len": 0, "size": 2,
+                              "burst": "INCR", "data_file": "d.txt"}]}
+    out = tmp_path / "node0"
+    # dst tile cid=5, src cid=0; preserve_addr keeps 0x2000, ORs cid into addr[63:32].
+    gen_test_patterns._emit_node(base, str(tmp_path), str(out), 0, 5, 0,
+                                 16, 0, 0x1000, preserve_addr=True)
+    import yaml
+    sc = yaml.safe_load((out / "scenario.yaml").read_text())
+    assert sc["transactions"][0]["addr"] == (5 << 32) + 0x2000
+
+
+def test_default_reallocates_offset(tmp_path):
+    base = {"config": {"memory_base": 0, "memory_size": 0x1000},
+            "transactions": [{"op": "write", "addr": 0x2000, "id": 1, "len": 0, "size": 2,
+                              "burst": "INCR", "data_file": "d.txt"}]}
+    out = tmp_path / "node0"
+    gen_test_patterns._emit_node(base, str(tmp_path), str(out), 0, 5, 0,
+                                 16, 0, 0x1000, preserve_addr=False)
+    import yaml
+    sc = yaml.safe_load((out / "scenario.yaml").read_text())
+    # default path reallocates -> low 32 bits are NOT the original 0x2000.
+    assert (sc["transactions"][0]["addr"] & 0xFFFFFFFF) != 0x2000
 
 
 def test_base_driven_large_burst_overflow_raises(tmp_path):

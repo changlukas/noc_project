@@ -359,7 +359,7 @@ def _as_int(v):
 
 
 def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
-               n_nodes, base_local, memory_size):
+               n_nodes, base_local, memory_size, preserve_addr=False):
     """Emit <out_dir>/scenario.yaml for one node.
 
     base_sc     -- base scenario dict (read-only; deep-copied internally)
@@ -392,7 +392,7 @@ def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
 
     for t in sc.get("transactions", []):
         orig = _as_int(t["addr"]) & 0xFFFFFFFF
-        local_off = pair_offset[orig]
+        local_off = orig if preserve_addr else pair_offset[orig]
         t["addr"] = (dst_cid << ADDR_DST_SHIFT) + local_off
 
         for k in _FILE_KEYS:
@@ -583,6 +583,10 @@ def main(argv=None):
     ap.add_argument("--exclude-self", action="store_true",
                     help="Exclude dst == src (opt-in; default permits self, "
                          "booksim-faithful)")
+    ap.add_argument("--preserve-addr", action="store_true",
+                    help="Keep each transaction's original local offset (OR dst tile into "
+                         "addr[63:32]) instead of reallocating; safe only with bijective "
+                         "patterns like neighbor.")
     # Hotspot options
     ap.add_argument("--hotspot", type=int, nargs="+", default=None,
                     help="Linear node id(s) for hotspot pattern (0..N-1)")
@@ -622,7 +626,7 @@ def main(argv=None):
             dst_cid = coord_id(dst_x, dst_y)
             out_dir = os.path.join(a.out, f"node{idx}")
             _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
-                       n_nodes, base_local, memory_size)
+                       n_nodes, base_local, memory_size, preserve_addr=a.preserve_addr)
 
     elif a.pattern == "transpose":
         # Deterministic: (x,y)→(y,x), square-mesh only.  Supports synthetic mode
@@ -649,7 +653,7 @@ def main(argv=None):
             out_dir = os.path.join(a.out, f"node{idx}")
             if a.base is not None:
                 _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
-                           n_nodes, base_local, memory_size)
+                           n_nodes, base_local, memory_size, preserve_addr=a.preserve_addr)
             else:
                 _emit_synthetic_node(out_dir, idx, dst_cids, src_cid,
                                      n_nodes, base_local, memory_size,
