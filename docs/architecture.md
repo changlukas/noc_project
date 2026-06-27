@@ -233,20 +233,19 @@ components to the Verilator-compiled SV testbench. The layer has three steps:
 1. Each `*_wrap.sv` module calls its per-wrap DPI imports at every
    posedge `clk_i`: `cmodel_<component>_set_inputs` ->
    `cmodel_<component>_tick` -> `cmodel_<component>_get_outputs` (see
-   `sim/c/cmodel_dpi.h` for the five tick functions:
-   `cmodel_master_tick`, `cmodel_nmu_tick`, `cmodel_channel_model_tick`,
+   `sim/c/cmodel_dpi.h` for the four tick functions:
+   `cmodel_master_tick`, `cmodel_nmu_tick`,
    `cmodel_nsu_tick`, `cmodel_slave_tick`).
 2. The DPI implementation reads the SV input wire bundle, calls the
    appropriate `*_wrap.hpp::tick()`, and writes the SV output wire bundle.
 3. SV propagates output wires to the next stage's input ports.
 
-Five wraps mediate the boundary:
+Four wraps mediate the boundary:
 
 - `NmuWrap` -- NMU AXI slave port input / flit output.
 - `NsuWrap` -- flit input / AXI master port output.
 - `MasterWrap` -- AXI master driver output / NMU slave port input.
 - `SlaveWrap` -- NSU master port output / slave receiver input.
-- `ChannelModelWrap` -- NMU flit output to NSU flit input (zero-latency channel stub).
 
 Wrap responsibility invariant: `<comp>_wrap.hpp::tick()` is
 allowed only to:
@@ -303,17 +302,6 @@ Two hand-curated test suites exercise specific protocol invariants:
   x delay sweep.
 - `c_model/tests/integration/test_request_response_loopback.cpp` -- 7
   scenarios x num_vc variants.
-
-**Layer 5 -- gen_amba cross-tool testbench**
-`sim/sv/tb_genamba.sv` drives the NMU/NSU bridge with a vendored
-gen_amba_2021 golden master BFM and memory model (`sim/sv/genamba/`)
-through seven single-master AXI4 patterns: baseline self-check, burst
-sweep, N-outstanding, outstanding burst, same-ID ordering, mixed R+W,
-and deep outstanding pressure. This provides independent evidence from
-a second AXI VIP implementation (gen_amba) that does not share code or
-assumptions with the c_model. Run with `cd sim/verilator && make run-genamba`.
-Phase 1 results:
-`docs/internal/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md`.
 
 `make check` runs lint_scenarios, lint_docs, builds the c_model and the
 Verilator binary, runs the full ctest suite (Layers 1-2, 4), and ends

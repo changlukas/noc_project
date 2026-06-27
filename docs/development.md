@@ -182,17 +182,15 @@ directory; run logs land in that directory's `output/<scenario>/run.log`:
 
 ~~~bash
 cd sim/verilator
-make run-genamba                                # gen_amba role-1 (Tasks A-G)
-make run-genamba GENAMBA_SCENARIO=<ax4-id>      # specific scenario
 make run-tb-top                                 # wire-level cosim, default scenario
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
 
 cd sim/vcs                                    # Linux workstation only
-make run-genamba / run-tb-top
+make run-tb-top
 ~~~
 
 All build artifacts live under the top-level `build/` tree:
-`build/cmodel/` (CMake), `build/verilator/` (obj_dir + obj_genamba),
+`build/cmodel/` (CMake), `build/verilator/` (obj_dir),
 `build/vcs/` (simv + csrc).
 
 ### Recursive make
@@ -212,28 +210,22 @@ if the auto-detection picks the wrong interpreter.
 
 ### Dual-simulator support (Verilator / VCS)
 
-Both sim testbenches build under either simulator from the same source
+The sim testbench builds under either simulator from the same source
 lists; simulator-specific flags live in `sim/verilator/Makefile` and
 `sim/vcs/Makefile`.
-
-~~~bash
-cd sim/verilator && make run-genamba   # Verilator (Windows + Linux)
-cd sim/vcs       && make run-genamba   # VCS (Linux workstation only)
-~~~
 
 Layout of the split:
 
 - `sim/build_config.mk` -- build environment (paths, yaml-cpp, GCC version
-  detection, genamba source lists); included by both Makefiles.
+  detection); included by both Makefiles.
 - `sim/filelist_<TOPOLOGY>.f` -- tb_top SV sources + `+incdir+` entries,
   absolute paths; generated per topology by the Verilator Makefile from
   `TB_TOP_SV_SRC`.
 - `sim/verilator/` -- Verilator flags (`--timing`), `main.cpp`
-  (minimal event-loop entry; tb_top is self-clocked), `main_genamba.cpp`
-  (eval loop), and Verilator 5.036 workarounds (`--output-split 0`,
-  backslash-path sed, `$(EXEEXT)`).
+  (minimal event-loop entry; tb_top is self-clocked), and Verilator 5.036
+  workarounds (`--output-split 0`, backslash-path sed, `$(EXEEXT)`).
 - `sim/vcs/` -- VCS flags only; no C++ main (VCS owns simulation time).
-  Both tb_top and tb_genamba are self-clocked; VCS uses `-top tb_top`.
+  tb_top is self-clocked; VCS uses `-top tb_top`.
   Adjust the `[WORKSTATION]` block in `sim/vcs/Makefile` (vcs path,
   license, site flags) before first use.
 
@@ -248,16 +240,15 @@ Opt-in per run; default off (regression and ctest are unaffected):
 ~~~bash
 cd sim/vcs
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat FSDB=1   # -> output/<scenario>/tb_top.fsdb
-make run-genamba FSDB=1                                   # -> output/genamba_<scenario>/tb_genamba.fsdb
-make run-all-fsdb                                         # all 37 scenarios + genamba, summary at end
+make run-all-fsdb                                         # all 37 scenarios, summary at end
 ~~~
 
 Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
 workstation's install, taken from its local reference Makefile -- untracked
 `sim/ref/`); override it if the layout
-differs. FSDB builds produce separate `simv_tb_top_<TOPOLOGY>_fsdb` /
-`simv_genamba_fsdb` binaries beside the normal `simv_tb_top_<TOPOLOGY>` /
-`simv_genamba`; toggling `FSDB` never reuses a binary from the other mode.
+differs. FSDB builds produce a separate `simv_tb_top_<TOPOLOGY>_fsdb`
+binary beside the normal `simv_tb_top_<TOPOLOGY>`; toggling `FSDB` never
+reuses a binary from the other mode.
 For memory dumping / interactive Verdi debug, enable the heavier ref-flow
 combo: `FSDB_EXTRA="-debug_access+all -debug_all +fsdb+all +vcsd"`.
 
@@ -281,7 +272,7 @@ match the Verilator major.minor where possible.
 
 | Tool | Verified version | Notes |
 |---|---|---|
-| Verilator | 5.036 (MSYS2 mingw64) | `--output-split 0` on the genamba target works around a 5.036 coroutine-split bug; harmless on newer versions |
+| Verilator | 5.036 (MSYS2 mingw64) | `--output-split 0` works around a 5.036 coroutine-split bug; harmless on newer versions |
 | GCC (g++) | 15.2.0 (mingw64) | C++17 |
 | CMake | MSYS2 mingw64 build | ninja generator |
 | GoogleTest / yaml-cpp | pinned by CMake FetchContent | no system install needed |
@@ -534,53 +525,6 @@ ctest -R NmuWrap.multi_beat_w_burst_full_rate_aw_available --output-on-failure
 
 This test proves that each of the 8 W beats in an AWLEN=7 burst is
 individually visible on the wire bundle at successive ticks.
-
-### gen_amba role-1 testbench
-
-The gen_amba role-1 testbench (`tb_genamba`) is a separate sim target
-from `tb_top`. It drives the NMU/NSU bridge with a gen_amba golden master
-BFM through seven AXI4 patterns (baseline, burst, outstanding, outstanding
-burst, same-ID, mixed R+W, deep pressure) -- see
-`docs/internal/superpowers/specs/2026-06-08-genamba-role1-testbench-design.md`
-for the design and the matching findings document for the Phase 1 outcome.
-
-Build + run from repo root:
-
-~~~bash
-cd sim/verilator
-make run-genamba                                     # default scenario
-make run-genamba GENAMBA_SCENARIO=AX4-BUR-002_incr_8beat  # override
-~~~
-
-The default scenario is `AX4-BAS-001_single_write_no_read`. All current
-Tasks A-G are scenario-independent (the BFM owns the stimulus); the
-`+scenario=` plusarg only feeds `cmodel_init` so the DPI lifecycle has
-something valid to point at.
-
-Build artefacts land in `build/verilator/obj_genamba/` -- separate from
-`tb_top`'s `build/verilator/obj_dir_<TOPOLOGY>/` because Verilator generates each
-`--top-module` into a single `--Mdir` and two tops would clobber each
-other.
-
-Per-cycle AW/W/B/AR/R handshake dumps are gated behind
-`+define+GENAMBA_DBG_AXI` (default off; runs stay quiet). Enable for
-bring-up debug:
-
-~~~bash
-make -C sim/verilator clean-genamba run-genamba \
-    VERILATOR_EXTRA_FLAGS=+define+GENAMBA_DBG_AXI
-~~~
-
-If `make run-genamba` fails with "Can't open perl script /mingw64/bin/verilator"
-or similar PATH errors, the shell does not have MSYS2 paths. The Makefile's
-TOOLPATH prefix adds them unconditionally in every recipe (no-op on Linux),
-but if you're in a non-Git-Bash shell (PowerShell / cmd) call the wrapper
-directly:
-
-~~~bash
-./sim/verilator/run_genamba.sh \
-    +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
-~~~
 
 ---
 

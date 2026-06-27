@@ -57,11 +57,9 @@ directory; run logs land in that directory's `output/<scenario>/run.log`:
 cd sim/verilator
 make run-tb-top                                 # wire-level cosim, default scenario
 make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
-make run-genamba                                # gen_amba role-1 testbench (Tasks A-G)
 
 cd sim/vcs                                      # Linux workstation only (VCS)
 make run-tb-top SCENARIO=<ax4-id>
-make run-genamba
 ~~~
 
 Waveform dumping (VCS/FSDB only; opt-in, default off):
