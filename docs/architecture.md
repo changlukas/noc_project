@@ -276,7 +276,7 @@ own internal checks.
 
 ## 5. Verification layers
 
-The project uses five overlapping verification layers:
+The project uses four overlapping verification layers:
 
 **Layer 1 -- c_model unit tests**
 GoogleTest tests under `c_model/tests/` exercise individual components
