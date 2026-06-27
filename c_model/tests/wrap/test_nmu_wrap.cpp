@@ -170,3 +170,13 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
         << "all 8 W beats must transfer at full rate after the one-bubble start";
     EXPECT_FALSE(out.wready) << "after WLAST the window closes -> wready low";
 }
+
+// ---------------------------------------------------------------------------
+// Death test: odd num_vc rejected at the wrap init boundary.
+// derive_vc_pools asserts on any odd num_vc > 1; NmuWrap::init calls it, so
+// the abort must propagate through the wrap path.
+// ---------------------------------------------------------------------------
+TEST(WrapOddNumVcDeath, NmuWrapRejectsOddNumVc) {
+    NmuWrap nmu;
+    EXPECT_DEATH({ nmu.init(/*src_id=*/0, /*num_vc=*/3); }, "num_vc must be 1 or even");
+}
