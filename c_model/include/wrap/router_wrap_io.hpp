@@ -20,7 +20,7 @@
 //                                                LINK input drains (LinkCreditOut.take)
 //     credit pulses are single-cycle (per VC), NOT the level used on NI bundles.
 #pragma once
-#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes
+#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
 #include "router/router.hpp"               // ROUTER_PORT_COUNT
 #include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
 #include <array>

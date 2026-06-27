@@ -7,7 +7,7 @@
 // ensures FLIT_BYTES (DPI marshalling size) equals Flit::WIDTH_BYTES (c_model
 // flit container size), so the per-byte copy is well-defined.
 #pragma once
-#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
 #include "flit.hpp"                        // Flit
 #include <array>
 #include <cstdint>

@@ -19,7 +19,7 @@
 //   Nmu has axi_intf.slave (accepts AW/W/AR) → Nsu has axi_intf.master (drives AW/W/AR).
 #pragma once
 #include "axi/types.hpp"                   // axi::DATA_BYTES
-#include "wrap/channel_model_wrap_io.hpp"  // FlitBytes, FLIT_BYTES
+#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
 #include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
