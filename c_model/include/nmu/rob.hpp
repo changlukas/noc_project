@@ -164,6 +164,14 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
 
+    // Family C: per-base (keyed by rob_idx base) arrival counter. NSU stamps every
+    // R beat of a burst with rob_idx=base; this counter positions beat i at base+i.
+    // Reset when the range is popped from read_order_by_id_ (ties counter lifecycle
+    // to slot-reuse eligibility). read_range_len_[base] = burst length n, set in
+    // push_ar, used to bound the counter (beat past burst length is malformed).
+    std::array<uint8_t, ROB_CAPACITY> read_arrival_offset_{};
+    std::array<uint8_t, ROB_CAPACITY> read_range_len_{};
+
     // Ready-to-emit beats drained by pop_b / pop_r (Task 3).
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
@@ -247,6 +255,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
                 ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
         }
         read_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), static_cast<uint8_t>(n)});
+        read_range_len_[base] = static_cast<uint8_t>(n);
         return true;
     }
     auto t = addr_trans::xy_route(b.addr);
@@ -352,22 +361,27 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         assert(false && "rob_idx out of range");
         std::abort();
     }
-    auto& slot = read_entries_[meta.rob_idx];
-    if (!slot.occupied) {
-        assert(false && "R for unallocated rob_idx");
+    uint8_t base = meta.rob_idx;
+    uint8_t arrival_offset = read_arrival_offset_[base];
+    if (!(arrival_offset < read_range_len_[base])) {
+        assert(false &&
+               "nmu::Rob::pop_r_staged: R beat past burst length (Family C: "
+               "more beats than reserved for this base -- malformed burst)");
         std::abort();
     }
-    if (slot.ready) {
-        assert(false &&
-               "nmu::Rob::pop_r_staged: a second R beat targets an already-filled read slot "
-               "(Family C). NSU stamps every R beat of a burst with the same base rob_idx, and "
-               "the per-ID arrival offset (floo_rob.sv base+offset_q[id]) is not implemented, so "
-               "multi-beat reads would overwrite slot base. Use ReadWriteSplit / single-beat "
-               "reads, or implement the per-ID read offset first.");
+    std::size_t slot_idx = static_cast<std::size_t>(base) + arrival_offset;
+    if (!(slot_idx < ROB_CAPACITY)) {
+        assert(false && "computed read slot out of range");
+        std::abort();
+    }
+    auto& slot = read_entries_[slot_idx];
+    if (!(slot.occupied && !slot.ready)) {
+        assert(false && "computed read slot unallocated or already filled");
         std::abort();
     }
     slot.r_beat = r;
     slot.ready = true;
+    ++read_arrival_offset_[base];
     uint8_t id = slot.axi_id;
     while (!read_order_by_id_[id].empty()) {
         BeatRange head = read_order_by_id_[id].front();
@@ -384,6 +398,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
             committed_r_queue_.push_back({read_entries_[idx].r_beat, idx, id});
             ++committed_r_pending_[idx];
         }
+        read_arrival_offset_[head.base] = 0;
         read_order_by_id_[id].pop_front();
     }
     if (committed_r_queue_.empty()) return std::nullopt;

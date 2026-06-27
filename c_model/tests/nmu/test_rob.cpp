@@ -445,13 +445,14 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
-    // Arrive in order: slot 4, 5 (AR2), then 0, 1, 2, 3 (AR1)
-    push_r(4, false, 0xB0);
-    push_r(5, true, 0xB1);
-    push_r(0, false, 0xA0);
-    push_r(1, false, 0xA1);
-    push_r(2, false, 0xA2);
-    push_r(3, true, 0xA3);
+    // Arrive in order: AR2 beats (base=4) then AR1 beats (base=0).
+    // Real NSU stamps every beat with the same base rob_idx.
+    push_r(4, false, 0xB0);  // AR2 beat 0 (base=4)
+    push_r(4, true, 0xB1);   // AR2 beat 1 (base=4)
+    push_r(0, false, 0xA0);  // AR1 beat 0 (base=0)
+    push_r(0, false, 0xA1);  // AR1 beat 1 (base=0)
+    push_r(0, false, 0xA2);  // AR1 beat 2 (base=0)
+    push_r(0, true, 0xA3);   // AR1 beat 3 (base=0)
     depkt.tick();
     // pop_r pulls one downstream flit per call; commits happen when a range
     // is fully ready. Drain by polling, collecting all returned beats in order.
@@ -595,14 +596,14 @@ TEST(RobDrainHook, FiresOncePerIdDrain_Enabled) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
+    // Real NSU stamps every beat of the burst with the SAME base rob_idx.
     push_r(0, false);
-    push_r(1, false);
-    push_r(2, false);
-    push_r(3, true);
+    push_r(0, false);
+    push_r(0, false);
+    push_r(0, true);
     depkt.tick();
-
-    // Drain all 4 committed beats. The whole burst (one order-list entry) is the
-    // only entry for id=5, so the order list empties on the commit -> exactly one fire.
+    // Expect: per-base counter files them into slots 0..3; all 4 beats drain;
+    // id=5 order list empties -> exactly one drain fire.
     int got = 0;
     for (int i = 0; i < 32 && got < 4; ++i) {
         if (rob.pop_r().has_value()) ++got;
@@ -636,26 +637,20 @@ TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
     EXPECT_DEATH(rob.pop_b(), ".*");
 }
 
-TEST(NmuRobDeath, ReadFillSameBaseRobIdxOverwriteGuarded) {
+TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
     SCENARIO(
-        "Enabled read ROB: two R beats stamped with the same base rob_idx (as NSU "
-        "currently stamps every beat of a burst) collide on one slot. The model "
-        "must fail fast (Family C: per-ID arrival offset not implemented), not "
-        "silently overwrite and misorder the burst.");
+        "Enabled read ROB: two R beats stamped with the same base rob_idx (real NSU "
+        "stamping) land at base+0 and base+1 via the per-base arrival counter, in order.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
-    // Allocate a 2-beat AR (len=1) -> slots 0..1; base=0.
     axi::ArBeat ar = make_ar(0x05, 0x100);
-    ar.len = 1;
+    ar.len = 1;  // 2 beats -> slots 0..1, base=0
     ASSERT_TRUE(rob.push_ar(ar));
 
-    // Inject two R beats both with rob_idx=0 (the base slot).
-    // This mirrors the real NSU: every beat of a burst is stamped with the
-    // same MetaBuffer entry (rob_idx = base), not base+beat_offset.
     auto push_r = [&](uint8_t rob_idx, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
@@ -671,17 +666,169 @@ TEST(NmuRobDeath, ReadFillSameBaseRobIdxOverwriteGuarded) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
-
-    // Both beats carry rob_idx=0 (same base -- NSU same-base hazard).
     push_r(/*rob_idx=*/0, /*rlast=*/false, 0xA0);
     push_r(/*rob_idx=*/0, /*rlast=*/true, 0xA1);
     depkt.tick();
+    // Multi-beat reads legitimately return nullopt until the last beat arrives
+    // and the range commits; pop_r is one-flit-per-call. Drain by polling.
+    std::vector<uint8_t> got;
+    for (int i = 0; i < 16 && got.size() < 2; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got.size(), 2u);
+    EXPECT_EQ(got[0], 0xA0);  // base+0
+    EXPECT_EQ(got[1], 0xA1);  // base+1
+}
 
-    // First pop_r_staged fills slot 0 (ready: false -> true).
-    // Range [0,2) not yet fully ready (slot 1 still empty) -> returns nullopt.
-    rob.pop_r();
+// === Task 2: Defensive boundary tests (lock the computed-slot guard) ===
 
-    // Second pop_r_staged targets slot 0 again (already ready).
-    // Without guard: silent overwrite. With guard (Family C): abort.
-    EXPECT_DEATH({ rob.pop_r(); }, ".*");
+TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
+    SCENARIO(
+        "Enabled read ROB: a 3rd R beat for a 2-beat burst (offset == len) aborts "
+        "rather than writing into an adjacent burst's slot.");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 1;  // 2 beats
+    ASSERT_TRUE(rob.push_ar(ar));
+
+    auto push_r = [&](bool rlast) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", 0);
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+    push_r(false);  // slot 0
+    push_r(false);  // slot 1 (no rlast yet)
+    push_r(false);  // extra 3rd beat for a 2-beat burst -> must abort when reached
+    depkt.tick();
+    EXPECT_DEATH(
+        {
+            for (int i = 0; i < 8; ++i) (void)rob.pop_r();
+        },
+        ".*");
+}
+
+TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
+    SCENARIO(
+        "Enabled read ROB: after a burst fully commits and frees base 0, a new "
+        "burst that reuses base 0 starts its arrival counter at 0.");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    auto push_r = [&](uint8_t id, bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", 0);
+        f.set_payload_field("R", "rid", id);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+
+    // Burst 1: id=5, len=1 -> base 0, 2 beats. Fill, drain, free.
+    axi::ArBeat ar1 = make_ar(0x05, 0x100);
+    ar1.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar1));
+    push_r(0x05, false, 0xB0);
+    push_r(0x05, true, 0xB1);
+    depkt.tick();
+    std::vector<uint8_t> got1;
+    for (int i = 0; i < 16 && got1.size() < 2; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got1.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got1.size(), 2u);
+
+    // Burst 2 reuses base 0 (slots freed). Counter must start at 0 again.
+    axi::ArBeat ar2 = make_ar(0x06, 0x200);
+    ar2.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar2));
+    push_r(0x06, false, 0xC0);
+    push_r(0x06, true, 0xC1);
+    depkt.tick();
+    std::vector<uint8_t> got2;
+    for (int i = 0; i < 16 && got2.size() < 2; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got2.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got2.size(), 2u);
+    EXPECT_EQ(got2[0], 0xC0);  // proves base-0 counter restarted at offset 0
+    EXPECT_EQ(got2[1], 0xC1);
+}
+
+TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
+    SCENARIO(
+        "Enabled read ROB: two same-id bursts to different dst get distinct bases; "
+        "interleaved R beats fill per base, not per id. Egress holds AR order.");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
+
+    // Burst A: id=5, len=1 -> base 0 (slots 0..1). Burst B: id=5, len=1 -> base 2 (slots 2..3).
+    axi::ArBeat ar_a = make_ar(0x05, 0x100);
+    ar_a.len = 1;
+    axi::ArBeat ar_b = make_ar(0x05, 0x200);
+    ar_b.len = 1;
+    ASSERT_TRUE(rob.push_ar(ar_a));
+    ASSERT_TRUE(rob.push_ar(ar_b));
+
+    auto push_r = [&](uint8_t base, bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", base);
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+
+    // Interleave: A0, B0, A1(last), B1(last). Each carries its own base.
+    push_r(/*base=*/0, false, 0xA0);
+    push_r(/*base=*/2, false, 0xB0);
+    push_r(/*base=*/0, true, 0xA1);
+    push_r(/*base=*/2, true, 0xB1);
+    depkt.tick();
+
+    // Egress order = AR order: burst A (0xA0,0xA1) fully, then burst B (0xB0,0xB1).
+    std::vector<uint8_t> got;
+    for (int i = 0; i < 8 && got.size() < 4; ++i) {
+        auto r = rob.pop_r();
+        if (r.has_value()) got.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got.size(), 4u);
+    EXPECT_EQ(got[0], 0xA0);
+    EXPECT_EQ(got[1], 0xA1);
+    EXPECT_EQ(got[2], 0xB0);
+    EXPECT_EQ(got[3], 0xB1);
 }

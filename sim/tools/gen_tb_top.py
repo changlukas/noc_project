@@ -377,6 +377,7 @@ def emit_tb_top(topo: dict) -> str:
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
     num_vc = topo["topology"]["num_vc"]
+    rob_enabled = topo["topology"].get("rob_mode", "disabled").strip().lower() == "enabled"
 
     # Identity pairing: master_i / slave_i both use scn_node{i}.
     # Destination is encoded in addr bits 32+ by the scenario generator (gen_test_patterns).
@@ -451,8 +452,13 @@ def emit_tb_top(topo: dict) -> str:
     w('                                                                 input string scenario_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_slave_create(input string name,')
     w('                                                                input string scenario_path);')
-    w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,')
-    w('                                                              input int src_id, input int num_vc);')
+    if rob_enabled:
+        w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
+        w('                                                                 input int src_id, input int num_vc,')
+        w('                                                                 input int rob_enabled);')
+    else:
+        w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,')
+        w('                                                              input int src_id, input int num_vc);')
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
     w('                                                              input int src_id, input int num_vc);')
     w('    import "DPI-C" context function int     cmodel_master_count();')
@@ -498,8 +504,12 @@ def emit_tb_top(topo: dict) -> str:
         w(f"        // node{i}: master and slave both use scn_node{i}; dst encoded in addr bits 32+.")
         w(f'        m_ctx[{i}]   = cmodel_master_create("master_{i}", scn_node{i});')
         w(f'        s_ctx[{i}]   = cmodel_slave_create ("slave_{i}",  scn_node{i});')
-        w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC);  '
-          f'// src_id = node{i} coord {c}')
+        if rob_enabled:
+            w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1);  '
+              f'// src_id = node{i} coord {c}, ROB Enabled')
+        else:
+            w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC);  '
+              f'// src_id = node{i} coord {c}')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC);')
     w("    end")
     w("")
