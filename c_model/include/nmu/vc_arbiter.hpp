@@ -138,6 +138,8 @@ class VcArbiter : public router::NocReqOut {
     std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;
+    uint8_t write_rr_start_ = 0;  // per-class round-robin scan start (selection)
+    uint8_t read_rr_start_ = 0;
     std::optional<uint8_t> current_aw_vc_;
     static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256; single source of truth
     std::array<std::optional<uint8_t>, AXI_ID_SPACE> write_binding_{};
@@ -170,8 +172,14 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
         return std::nullopt;
     if ((*binding)[id].has_value()) return (*binding)[id];  // bound: stick (even if full)
     const std::vector<uint8_t>* cand = candidates_for(axi_ch);
-    for (uint8_t vc : *cand) {  // unbound: first available
-        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
+    uint8_t& rr = (axi_ch == ni::AXI_CH_AW) ? write_rr_start_ : read_rr_start_;
+    const std::size_t n = cand->size();
+    for (std::size_t k = 0; k < n; ++k) {  // unbound: round-robin from rr, first available
+        uint8_t vc = (*cand)[(rr + k) % n];
+        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) {
+            rr = static_cast<uint8_t>((static_cast<std::size_t>(rr) + k + 1) % n);
+            return vc;
+        }
     }
     return std::nullopt;
 }
