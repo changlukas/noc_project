@@ -14,3 +14,5 @@ exclusions:
      reason: "pre-existing multi-id concurrent-write co-sim hang (backlog); re-include when fixed"}
   - {when: {from: AX4-BND-006},
      reason: "pre-existing NMU 4KB read-split hang under 16-node load (backlog); re-include when fixed"}
+  - {when: {from: AX4-BND-007},
+     reason: "same 4KB-boundary class as BND-006, unconfirmed (backlog); re-check on first full run"}

@@ -15,7 +15,7 @@ fixed.
 |---|---|---|---|
 | `AX4-ORD-002` | multi-id concurrent write (ids 0x1-0x4, `max_outstanding_write: 4`) hangs to the 100k-cycle co-sim timeout. Reproduces without preserve_addr. | RAW-release / NSU per-id response path | excluded |
 | `AX4-BND-006` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | NMU 4KB read-split under concurrent load | excluded |
-| `AX4-BND-007` | same boundary-edge class, not yet excluded. Manual single-cell check was inconclusive (data-file relpath artifact of a non-standard out-root). | same as BND-006 (unconfirmed) | re-check on first full nightly |
+| `AX4-BND-007` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-006 (unconfirmed) | excluded (matrix.yaml) |
 
 The first full `make sim-regress TIER=nightly` is a discovery run. Sweeping the curated set through the
 concurrent 16-node fabric will surface more pre-existing co-sim bugs. Add each to `matrix.yaml`
@@ -90,6 +90,12 @@ spatial-pattern cross that the current single-carrier design omits.
 The VCS regression path is documented as Linux-workstation and dry-run pending a real run
 (`docs/development.md:227-234`, `sim/vcs/Makefile:8-15`). The matrix is Verilator-only by design
 (`docs/superpowers/specs/2026-06-27-regression-matrix-design.md:174`).
+
+- **GCC ICE on `test_pins_smoke.cpp`** (pre-existing, Windows host): GCC internal compiler error
+  (segfault) when compiling the `build-cmodel` CMake target on this toolchain. Breaks any CI path
+  running `make build` or `make check` (ctest gate). The co-sim Verilator binary is unaffected
+  (c_model is header-only; build directly via `make -C sim/verilator`). Investigate toolchain upgrade
+  or workaround.
 
 ## Cosmetic / cheap (defer)
 

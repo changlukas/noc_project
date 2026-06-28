@@ -85,6 +85,13 @@ def test_id_policy_forwarded_and_labeled():
     assert captured["args"][captured["args"].index("--id-policy") + 1] == "round_robin:4"
 
 
+def test_bnd007_excluded():
+    m = run_regress.yaml.safe_load(
+        (_pl.Path(run_regress.__file__).parent / "matrix.yaml").read_text())
+    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BND-007", "neighbor", True)
+    assert run_regress.is_excluded(cell, m["exclusions"])
+
+
 import pathlib as _pl
 def test_real_matrix_expands():
     m = run_regress.yaml.safe_load(
