@@ -7,8 +7,8 @@
 | T1 build target + mem_axi standalone | `6d29be3` | done |
 | T2 BFM + Task A (BFM↔mem_axi) | `470ed96` | Task A PASS |
 | T3 insert NMU/NSU bridge | `01737c2` | Task A PASS through bridge |
-| T4 DPI error pump (faxi_slave bind later removed) | `47cce9e` | done |
-| T5 Task B burst + drop faxi_slave + R-shadow | `d40525d` | B blen=4/8/16 PASS |
+| T4 DPI error pump (wb2axip slave checker bind later removed) | `47cce9e` | done |
+| T5 Task B burst + drop wb2axip slave checker + R-shadow | `d40525d` | B blen=4/8/16 PASS |
 | T6 Task C N-outstanding + project-owned `bfm_drain_r` (revert vendored read_r) | `dfba5fa` | C N=4/8 PASS |
 | T7 Task D outstanding burst N=4 × blen 4/8 | `7bd3a4c` | D PASS |
 | T8 Task E same-ID outstanding (ROB invariant) | `4dfcc2e` | E PASS |
@@ -25,7 +25,7 @@ No DPI errors, no watchdog fires, no `$fatal`.
 
 **Goal:** Build a Verilator `--cc --exe --timing` (two-phase) self-clocked testbench that drives the NMU/NSU bridge with gen_amba's golden VIP through 7 single-master AXI4 patterns (baseline, burst, outstanding, outstanding-burst, same-ID, mixed R+W, deep pressure) and produces independent cross-tool evidence of bridge correctness. Run env: **Git Bash on Windows** (MSYS2 Bash); `--binary --timing` does not work because Verilator 5.036's nested-make subprocess can't find MSYS2 `make` via Windows `CreateProcess()` — discovered T1, see `main_genamba.cpp` driver workaround.
 
-**Architecture:** `gen_amba BFM → NMU → noc_intf (direct mosi↔miso, no router) → NSU → gen_amba mem_axi`. Self-clocked SV top with a minimal C++ driver (`main_genamba.cpp`, eval loop only; DPI finalize in SV `final` block). No wb2axip checker (faxi_slave bind removed in T5 — see Amendments); detection = per-task data compare + DPI error pump + 1 µs handshake-progress watchdog. All 7 BFM tasks live in one `genamba_master_bfm.sv` module; tasks B–G use a thin **adapter task layer** that calls the vendored channel-level primitives positionally (vendored `*_multiple_outstanding` helpers have N≤16 + broken per-address data per spec §2 caveat — do not use).
+**Architecture:** `gen_amba BFM → NMU → noc_intf (direct mosi↔miso, no router) → NSU → gen_amba mem_axi`. Self-clocked SV top with a minimal C++ driver (`main_genamba.cpp`, eval loop only; DPI finalize in SV `final` block). No wb2axip checker (slave-checker bind removed in T5 — see Amendments); detection = per-task data compare + DPI error pump + 1 µs handshake-progress watchdog. All 7 BFM tasks live in one `genamba_master_bfm.sv` module; tasks B–G use a thin **adapter task layer** that calls the vendored channel-level primitives positionally (vendored `*_multiple_outstanding` helpers have N≤16 + broken per-address data per spec §2 caveat — do not use).
 
 **Tech Stack:** Verilator 5.036+ `--cc --exe --timing` (two-phase, mirroring existing `tb_top` Makefile pattern); SystemVerilog 2012; vendored gen_amba_2021 VIP (2-clause BSD, `cosim/sv/genamba/`); wb2axip checker (`cosim/sv/wb2axip/`); Git Bash on Windows (MSYS2).
 
@@ -38,7 +38,7 @@ No DPI errors, no watchdog fires, no `$fatal`.
 These deviations from the as-written task bodies were authorised in-flight by the user and are recorded here so the historical task instructions still parse but the actual state is clear:
 
 - **T1 — Verilator build mode**: rev 6 specified `--binary --timing`, but the Verilator 5.036 + MSYS2 nested-make subprocess can't find `make` via Windows `CreateProcess()`. Switched to `--cc --exe --timing` two-phase build and added `cosim/verilator/main_genamba.cpp` driver + `cosim/verilator/run_genamba.sh` PATH wrapper. Spec §3.1/§3.4 updated.
-- **T4/T5 — wb2axip protocol checker removed**: `faxi_slave`'s `if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)` rule false-fires on AXI4-legal multi-beat writes (NMU correctly holds AWREADY high between W beats). Per `[[dont-silence-the-checker]]`, `$assertoff` is forbidden — the bind itself was removed during T5. Replacement coverage: 1 µs AXI-silence watchdog in `tb_genamba.sv`, DPI error pump (unchanged), per-task data compares. Spec §3 / §3.4 / §3.5 / §3.8 / §5 / §6 updated.
+- **T4/T5 — wb2axip protocol checker removed**: the wb2axip slave checker's `if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)` rule false-fires on AXI4-legal multi-beat writes (NMU correctly holds AWREADY high between W beats). Per `[[dont-silence-the-checker]]`, `$assertoff` is forbidden — the bind itself was removed during T5. Replacement coverage: 1 µs AXI-silence watchdog in `tb_genamba.sv`, DPI error pump (unchanged), per-task data compares. Spec §3 / §3.4 / §3.5 / §3.8 / §5 / §6 updated.
 - **T2/T3/T5 — vendored VIP patches**: documented in `cosim/sv/genamba/ATTRIBUTION.md`. `mem_test_tasks.v` get_mask offset width + `error_flag` watcher removal; `axi_master_tasks.v` B-channel latch reads (T3) and R-channel shadow-array data capture (T5). All workarounds for Verilator `--timing` procedural-vs-NBA semantics.
 
 ---
@@ -47,7 +47,7 @@ These deviations from the as-written task bodies were authorised in-flight by th
 
 ### Created
 
-- `cosim/sv/tb_genamba.sv` — self-clocked SV top, DPI lifecycle, BFM + DUT wraps + mem_axi instantiation, faxi_slave bind, 7-task sequencer
+- `cosim/sv/tb_genamba.sv` — self-clocked SV top, DPI lifecycle, BFM + DUT wraps + mem_axi instantiation, wb2axip slave checker bind, 7-task sequencer
 - `cosim/sv/genamba_master_bfm.sv` — BFM module: full AXI4 5-channel port surface + parameter `P_MST_ID` (required by vendored `mem_test_tasks.v:30`); `` `include "genamba/axi_master_tasks.v" `` + `` `include "genamba/mem_test_tasks.v" `` (vendored fragments included into module body); **adapter task layer** (semantic named tasks `bfm_post_aw`, `bfm_post_w`, `bfm_drain_b`, `bfm_post_ar`, `bfm_drain_r`) wrapping vendored channel-level primitives; 7 helper tasks A–G
 - `cosim/verilator/main_genamba.cpp` — minimal Verilator main: `topp->eval()` + `nextTimeSlot()` loop until `gotFinish()` + `sc_time_stamp()` stub (~28 lines; not the existing `main.cpp` which drives ACLK from C++)
 - `docs/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md` — Phase 1 findings (T11 only)
@@ -62,7 +62,7 @@ These deviations from the as-written task bodies were authorised in-flight by th
 - `cosim/c/cmodel_dpi.cpp` (chandle ABI)
 - `cosim/sv/genamba/mem_axi.v` (vendored pristine); `axi_master_tasks.v` + `mem_test_tasks.v` carry project patches — see `cosim/sv/genamba/ATTRIBUTION.md`
 - `specgen/generated/sv/ni_params_pkg.sv` + `ni_signals_pkg.sv`
-- (wb2axip files were in the original plan via the faxi_slave bind; removed in T5 — the genamba build uses no wb2axip source)
+- (wb2axip files were in the original plan via the wb2axip slave checker bind; removed in T5 — the genamba build uses no wb2axip source)
 
 ### Deleted
 
@@ -721,25 +721,19 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 
 ---
 
-## Task 4: DPI per-cycle error pump + faxi_slave checker
+## Task 4: DPI per-cycle error pump + wb2axip slave checker
 
-**Goal:** Add per-cycle `cmodel_check_error` pump + `faxi_slave` checker on BFM↔NMU AXI with tuned bounds (spec §3.8 — `MAXSTALL=256`, `MAXRSTALL=256`, `MAXDELAY=2000`).
+**Goal:** Add per-cycle `cmodel_check_error` pump + wb2axip slave checker on BFM↔NMU AXI with tuned bounds (spec §3.8 — `MAXSTALL=256`, `MAXRSTALL=256`, `MAXDELAY=2000`).
 
 **Files:**
-- Modify: `cosim/sv/tb_genamba.sv` — add DPI error pump + `faxi_slave` instance
+- Modify: `cosim/sv/tb_genamba.sv` — add DPI error pump + wb2axip slave checker instance
 - Modify: `cosim/verilator/Makefile` — add wb2axip sources to `GENAMBA_SRC`
 
 - [ ] **Step 1: Add wb2axip sources to Makefile**
 
-Append to `GENAMBA_SRC` (after the BFM, before `tb_genamba.sv`):
+Append the wb2axip checker sources (`cosim/sv/wb2axip/`) to `GENAMBA_SRC` (after the BFM, before `tb_genamba.sv`).
 
-```
-    $(COSIM_ROOT)/sv/wb2axip/faxi_wstrb.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_master.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_slave.v \
-```
-
-- [ ] **Step 2: Add DPI error pump + faxi_slave to `tb_genamba.sv`**
+- [ ] **Step 2: Add DPI error pump + wb2axip slave checker to `tb_genamba.sv`**
 
 Insert before the closing `endmodule`:
 
@@ -758,53 +752,6 @@ Insert before the closing `endmodule`:
             end
         end
     end
-
-    // ---- faxi_slave induction outputs (declared per checker port set) ----
-    wire [9:0] nmu_f_awr_nbursts, nmu_f_wr_pending, nmu_f_rd_nbursts, nmu_f_rd_outstanding;
-
-    // ---- faxi_slave on BFM ↔ NMU AXI; tuned params per spec §3.8 ----
-    /* verilator lint_off PINMISSING */
-    faxi_slave #(
-        .C_AXI_ID_WIDTH(8), .C_AXI_DATA_WIDTH(256), .C_AXI_ADDR_WIDTH(64),
-        .OPT_EXCLUSIVE(0),
-        .F_LGDEPTH(10),
-        .F_AXI_MAXSTALL(256),         // bumped 32 -> 256 for outstanding pressure
-        .F_AXI_MAXRSTALL(256),        // bumped 32 -> 256
-        .F_AXI_MAXDELAY(2000)         // bumped 500 -> 2000
-    ) u_nmu_check (
-        .i_clk(ACLK), .i_axi_reset_n(ARESETn),
-        // AW
-        .i_axi_awvalid(bfm_nmu_axi.awvalid), .i_axi_awready(bfm_nmu_axi.awready),
-        .i_axi_awid(bfm_nmu_axi.awid), .i_axi_awaddr(bfm_nmu_axi.awaddr),
-        .i_axi_awlen(bfm_nmu_axi.awlen), .i_axi_awsize(bfm_nmu_axi.awsize),
-        .i_axi_awburst(bfm_nmu_axi.awburst), .i_axi_awlock(bfm_nmu_axi.awlock),
-        .i_axi_awcache(bfm_nmu_axi.awcache), .i_axi_awprot(bfm_nmu_axi.awprot),
-        .i_axi_awqos(bfm_nmu_axi.awqos),
-        // W
-        .i_axi_wvalid(bfm_nmu_axi.wvalid), .i_axi_wready(bfm_nmu_axi.wready),
-        .i_axi_wdata(bfm_nmu_axi.wdata), .i_axi_wstrb(bfm_nmu_axi.wstrb),
-        .i_axi_wlast(bfm_nmu_axi.wlast),
-        // B
-        .i_axi_bvalid(bfm_nmu_axi.bvalid), .i_axi_bready(bfm_nmu_axi.bready),
-        .i_axi_bid(bfm_nmu_axi.bid), .i_axi_bresp(bfm_nmu_axi.bresp),
-        // AR
-        .i_axi_arvalid(bfm_nmu_axi.arvalid), .i_axi_arready(bfm_nmu_axi.arready),
-        .i_axi_arid(bfm_nmu_axi.arid), .i_axi_araddr(bfm_nmu_axi.araddr),
-        .i_axi_arlen(bfm_nmu_axi.arlen), .i_axi_arsize(bfm_nmu_axi.arsize),
-        .i_axi_arburst(bfm_nmu_axi.arburst), .i_axi_arlock(bfm_nmu_axi.arlock),
-        .i_axi_arcache(bfm_nmu_axi.arcache), .i_axi_arprot(bfm_nmu_axi.arprot),
-        .i_axi_arqos(bfm_nmu_axi.arqos),
-        // R
-        .i_axi_rvalid(bfm_nmu_axi.rvalid), .i_axi_rready(bfm_nmu_axi.rready),
-        .i_axi_rid(bfm_nmu_axi.rid), .i_axi_rdata(bfm_nmu_axi.rdata),
-        .i_axi_rresp(bfm_nmu_axi.rresp), .i_axi_rlast(bfm_nmu_axi.rlast),
-        // Induction outputs
-        .f_axi_awr_nbursts(nmu_f_awr_nbursts),
-        .f_axi_wr_pending(nmu_f_wr_pending),
-        .f_axi_rd_nbursts(nmu_f_rd_nbursts),
-        .f_axi_rd_outstanding(nmu_f_rd_outstanding)
-    );
-    /* verilator lint_on PINMISSING */
 ```
 
 - [ ] **Step 3: Build + run**
@@ -815,18 +762,18 @@ make -C cosim/verilator genamba PYTHON3=python3
   +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml
 ```
 
-Expected: same `T3 PASS` outcome + no `Assertion failed` from faxi_slave + no `DPI error pump fired`.
+Expected: same `T3 PASS` outcome + no `Assertion failed` from the wb2axip slave checker + no `DPI error pump fired`.
 
-**If faxi_slave fires**: root-cause first (memory `[[dont-silence-the-checker]]`). Capture violating signal context; do not silence by relaxing bounds.
+**If the wb2axip slave checker fires**: root-cause first (memory `[[dont-silence-the-checker]]`). Capture violating signal context; do not silence by relaxing bounds.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add cosim/sv/tb_genamba.sv cosim/verilator/Makefile
-git commit -m "test(cosim): add DPI error pump + faxi_slave checker on BFM<->NMU AXI
+git commit -m "test(cosim): add DPI error pump + wb2axip slave checker on BFM<->NMU AXI
 
 T4 of role-1 testbench. Per-cycle cmodel_check_error pump copies
-tb_top.sv:374-388 pattern. faxi_slave instance on BFM<->NMU AXI with
+tb_top.sv:374-388 pattern. wb2axip slave checker instance on BFM<->NMU AXI with
 tuned MAXSTALL/MAXRSTALL/MAXDELAY per spec §3.8 for outstanding-pressure
 tasks. Task A still passes; protocol checker silent.
 
@@ -895,7 +842,7 @@ After `u_bfm.test_baseline_mem_test;`:
         u_bfm.test_burst_blen(8);
         u_bfm.test_burst_blen(16);
 
-        // wb2axip faxi_slave does not fully model AXI4 multiple-outstanding —
+        // the wb2axip slave checker does not fully model AXI4 multiple-outstanding —
         // disable from here on per spec §3.8 known limitation. Outstanding
         // tasks C-G rely on error_flag + DPI pump for failure detection.
         $assertoff(0, u_nmu_check);
@@ -1369,7 +1316,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 
 ```powershell
 # stdout -> .log (task PASS markers, cycle counts)
-# stderr -> .err (faxi_slave Assertion fired, $fatal, watchdog fire, DPI error pump)
+# stderr -> .err (wb2axip slave checker Assertion fired, $fatal, watchdog fire, DPI error pump)
 (make -C cosim/verilator genamba PYTHON3=python3 && \
  ./cosim/verilator/obj_genamba/Vtb_genamba.exe \
    +scenario=sim/test_patterns/AX4-BAS-001_single_write_no_read/scenario.yaml) \
@@ -1378,7 +1325,7 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 
 **stdout** sources: `$display` lines (per-task PASS markers, watchdog PASS cycle count, T2/T3 phase markers).
 
-**stderr** sources: `$fatal(1, ...)` (mismatch, watchdog fire, DPI error), `faxi_slave` `Assertion failed`, Verilator runtime errors.
+**stderr** sources: `$fatal(1, ...)` (mismatch, watchdog fire, DPI error), wb2axip slave checker `Assertion failed`, Verilator runtime errors.
 
 Inspect both. Per-task PASS/cycle counts from `.log`; checker / fatal / watchdog from `.err`.
 
@@ -1412,7 +1359,7 @@ Commit range: <T1 SHA>..<T10 SHA> (`git log --oneline <T1>..<T10>`)
 
 ## Stderr observations
 
-- `faxi_slave` violations (**only valid for A+B; $assertoff after B per spec §3.8**): <none / count + signal>
+- wb2axip slave checker violations (**only valid for A+B; $assertoff after B per spec §3.8**): <none / count + signal>
 - DPI error pump fires: <none / count + context>
 - `$fatal` fires: <list with task + line>
 - Watchdog fires: <none / Task G N=K with cycles=X>
@@ -1445,7 +1392,7 @@ git add docs/superpowers/specs/2026-06-08-genamba-role1-testbench-findings.md
 git commit -m "docs(genamba): Phase 1 role-1 testbench findings
 
 T11 of role-1 testbench. Per-task PASS/fail (stdout) + stderr observations
-(faxi_slave, DPI errors, fatal, watchdog), bridge-level findings,
+(wb2axip slave checker, DPI errors, fatal, watchdog), bridge-level findings,
 Phase 2 prerequisites, Phase 1 verdict for Phase 2 gating per spec §1.
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
@@ -1462,11 +1409,11 @@ Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>"
 | §3.1 clocking + build | T1 (ACLK + Makefile + .ps1), T3 (DPI lifecycle), T4 (per-cycle error pump + finalize) |
 | §3.2 widths + `+define+` | T1 (defines in Makefile), T3 (region tie, mem_axi params) |
 | §3.3 address window allocation | T2 (A: 0x0000-0x00FF), T5 (B: 0x0400-0x07FF), T6 (C: 0x0800-0x09FF), T7 (D: 0x0A00-0x0DFF), T8 (E: 0x0E00-0x0EFF), T9 (F: 0x1000-0x117F), T10 (G: 0x1400-0x1FFF) |
-| §3.4 components | T1 (Makefile + skeleton), T2 (BFM module + adapter layer), T3 (bridge wiring + DPI lifecycle), T4 (faxi_slave + DPI pump) |
+| §3.4 components | T1 (Makefile + skeleton), T2 (BFM module + adapter layer), T3 (bridge wiring + DPI lifecycle), T4 (wb2axip slave checker + DPI pump) |
 | §3.5 7 tasks A-G | T2 (A vendored mem_test), T5 (B burst), T6 (C outstanding), T7 (D outstanding burst), T8 (E same-ID), T9 (F mixed R+W), T10 (G deep pressure) |
 | §3.6 channel-level wrapper rationale | T2 introduces adapter layer; T6-T10 all use adapter API, never vendored `_multiple_outstanding` |
 | §3.7 watchdog heuristic + calibration | T10 step 2 (N=8 measure), step 3 (N=16 with calibrated `WATCHDOG_CYCLES`) |
-| §3.8 faxi_slave tuned params | T4 (`MAXSTALL=256`, `MAXRSTALL=256`, `MAXDELAY=2000`) |
+| §3.8 wb2axip slave checker tuned params | T4 (`MAXSTALL=256`, `MAXRSTALL=256`, `MAXDELAY=2000`) |
 | §5 success criteria | T11 findings doc covers all 4 bullets |
 | §6 risks (sequencer correctness, B drain) | T8 (single-sequencer AW + concurrent B drain on separate branch with own loop var) |
 

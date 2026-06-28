@@ -681,7 +681,7 @@ make sim SCENARIO=AX4-BUR-002_incr_8beat     # specific scenario
 
 Multi-beat and multi-outstanding scenarios are SKIPped by the cosim
 integration test (reason codes WB2AXIP_MULTI_BEAT etc.) and will fire
-faxi_slave.v assertions if run through `make sim` directly. See
+wb2axip slave checker assertions if run through `make sim` directly. See
 `docs/architecture.md` for wb2axip structural limits.
 
 ## Documentation
@@ -803,11 +803,11 @@ Structure (write each section in this order):
 - Vtb_top binary; runtime plusarg scenario load
 - **wb2axip slave structural limits** (active list, absorbs
   cosim/KNOWN_LIMITATIONS.md):
-  - Single-beat write only (AWLEN = 0, faxi_slave.v:805-807)
+  - Single-beat write only (AWLEN = 0, wb2axip slave checker)
   - Single outstanding write (wr_pending less than or equal to 1)
-  - AW/W strict in-order (faxi_slave.v:561)
+  - AW/W strict in-order (wb2axip slave checker)
   - No exclusive monitor; no DECERR address-map check
-  - Permissive faxi_wstrb.v stub (cosim/sv/wb2axip/faxi_wstrb.v)
+  - Permissive wb2axip wstrb stub
 - wb2axip is a formal-verification slave; structural limits are temporary
 - cosim/tests/wb2axip_block.hpp - runtime predicate that maps scenario
   content to a SKIP reason
@@ -847,7 +847,7 @@ Structure (write each section in this order):
 When fleshing out each section, draw concrete content from these absorbed
 sources (per the disposition matrix in spec sec 8):
 
-- `cosim/KNOWN_LIMITATIONS.md` headings -> section 4 (multi-beat, faxi_wstrb,
+- `cosim/KNOWN_LIMITATIONS.md` headings -> section 4 (multi-beat, wb2axip wstrb,
   dump accumulation if present) and section 3.2 (C++ vs SV timing nuance)
 - `cosim/CODING_DISCIPLINE.md` headings -> section 3.1 (hermetic-singleton)
   and section 4 (shells only convert wires/methods)
@@ -975,7 +975,7 @@ Structure:
 
 (~50 lines)
 - Quick sanity: `make sim` (default scenario passes wb2axip)
-- When `make sim SCENARIO=<id>` fires faxi_slave.v:807 assertion:
+- When `make sim SCENARIO=<id>` fires the wb2axip slave checker assertion:
   scenario hits a wb2axip structural limit. Check the predicate first:
   scenarios that ctest CosimIntegration SKIPs (WB2AXIP_MULTI_BEAT etc.)
   will also fail `make sim`. Use ctest path for normal debugging.
@@ -1414,7 +1414,7 @@ sec 8 disposition matrix:
   docs/development.md sec 2; shell responsibility in docs/architecture.md
   sec 4; private AI workflow intentionally dropped
 - cosim/KNOWN_LIMITATIONS.md - active wb2axip limits in
-  docs/architecture.md sec 4 (multi-beat, faxi_wstrb permissive stub);
+  docs/architecture.md sec 4 (multi-beat, wb2axip wstrb permissive stub);
   C++ vs SV timing nuance in docs/architecture.md sec 3.2; resolved
   history dropped
 

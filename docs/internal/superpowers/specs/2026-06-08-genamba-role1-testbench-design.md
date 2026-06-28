@@ -53,7 +53,7 @@ gen_amba BFM ─AXI(ID8,AD64,DA256)─→ NMU ── noc_intf (direct mosi↔mis
 
 NMU/NSU NoC modports mate directly via one `noc_intf` instance. Credit stubbed → BFM-side stall is the only backpressure path. Traffic depth bounded by SV watchdog where it could otherwise hang (task G, §3.5/§3.7).
 
-**No wb2axip protocol checker** — rev 6 originally bound `faxi_slave` on the BFM↔NMU side, but its non-pipelined-write model (`if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)`) false-fires on AXI4-legal multi-beat bursts. Removed during T5 per `[[dont-silence-the-checker]]` policy: the checker is wrong about AXI4, the bridge is correct. Detection coverage falls back to (1) the DPI error pump in `tb_genamba.sv` (catches NMU/NSU c_model assertion fires) + (2) per-task SV data compares + (3) `error_flag`-trapped wrapper `$fatal`.
+**No wb2axip protocol checker** — rev 6 originally bound the wb2axip slave checker on the BFM↔NMU side, but its non-pipelined-write model (`if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)`) false-fires on AXI4-legal multi-beat bursts. Removed during T5 per `[[dont-silence-the-checker]]` policy: the checker is wrong about AXI4, the bridge is correct. Detection coverage falls back to (1) the DPI error pump in `tb_genamba.sv` (catches NMU/NSU c_model assertion fires) + (2) per-task SV data compares + (3) `error_flag`-trapped wrapper `$fatal`.
 
 ### 3.1 Clocking + build
 
@@ -149,7 +149,7 @@ Use `WATCHDOG_CYCLES = 2000` (≈ 20 µs at 10 ns period) in the SV `localparam`
 
 ### 3.8 Watchdog (replaces wb2axip checker)
 
-Rev 6 originally specified wb2axip `faxi_slave` / `faxi_master` checkers tuned for outstanding pressure. Removed during T5 — `faxi_slave`'s `if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)` rule false-fires on AXI4-legal multi-beat writes (NMU correctly holds AWREADY high between W beats). User policy `[[dont-silence-the-checker]]` forbids `$assertoff` workarounds to mask a wrong checker, so the bind itself comes out.
+Rev 6 originally specified wb2axip slave / master checkers tuned for outstanding pressure. Removed during T5 — the wb2axip slave checker's `if (f_axi_wr_pending > 1) SLAVE_ASSERT(!awready)` rule false-fires on AXI4-legal multi-beat writes (NMU correctly holds AWREADY high between W beats). User policy `[[dont-silence-the-checker]]` forbids `$assertoff` workarounds to mask a wrong checker, so the bind itself comes out.
 
 Replacement coverage:
 - **Per-task SV data compare** in `genamba_master_bfm.sv` — wrapper raises `error_flag=1` and `$fatal` on any per-address mismatch (already covers C–G's protocol bugs that would manifest as data corruption).

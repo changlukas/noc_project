@@ -69,7 +69,7 @@ fallback filename differs per TB (`dump.fsdb` for tb_top_vcs, `tb_genamba.fsdb`
 for tb_genamba) so a manual run without `+fsdb=` still yields distinguishable
 files. `tb_top.sv` itself needs no change — dumping from the `tb_top_vcs`
 wrapper recursively covers the whole instantiated hierarchy (DPI wrappers and
-the `faxi` checkers included).
+the wb2axip protocol checkers included).
 
 ### Output naming and location
 
@@ -145,7 +145,7 @@ Because the host has no VCS+Verdi, verification is staged:
    - `make run-tb-top SCENARIO=<id> FSDB=1` produces a non-empty, freshly
      written `output/<id>/tb_top.fsdb`. Opening it in Verdi must show the
      representative signals — top-level AXI interfaces, the DPI wrapper
-     boundaries, and `faxi` checker state — not merely a loadable file.
+     boundaries, and the wb2axip protocol checker state — not merely a loadable file.
    - `make run-genamba FSDB=1` produces
      `output/genamba_<scenario>/tb_genamba.fsdb` with the BFM/NMU/NSU/mem
      interfaces visible.
@@ -159,7 +159,7 @@ Because the host has no VCS+Verdi, verification is staged:
 - PLI paths are now defaults from the workstation's own `cosim/ref/Makefile`
   (Verdi 2020.03 / `LINUXAMD64`); whether `LD_LIBRARY_PATH` is additionally
   needed remains `[TBD]` until first run.
-- Whether to also dump SVA (`$fsdbDumpSVA`) for the `faxi` checkers — deferred;
+- Whether to also dump SVA (`$fsdbDumpSVA`) for the wb2axip protocol checkers — deferred;
   not needed for the initial per-pattern signal trace.
 - Dumping of memories / multidimensional arrays may need version-specific
   `$fsdbDumpvars` options (e.g. `+all`); decide at first bring-up if memory

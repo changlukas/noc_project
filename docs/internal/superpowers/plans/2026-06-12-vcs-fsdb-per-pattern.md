@@ -494,7 +494,7 @@ First-run validation on the workstation (record results in the
 1. `FSDB_PLI` paths exist (`$VERDI_HOME/share/PLI/VCS/LINUXAMD64/{novas.tab,pli.a}`).
 2. Whether `LD_LIBRARY_PATH` needs the FSDB runtime libs.
 3. Open one fsdb in Verdi: top-level AXI interfaces, DPI wrapper boundaries,
-   and `faxi` checker state must be visible (not merely a loadable file).
+   and the wb2axip protocol checker state must be visible (not merely a loadable file).
 ```
 
 - [ ] **Step 2: Cross-file consistency check (per CLAUDE.md doc rules)**

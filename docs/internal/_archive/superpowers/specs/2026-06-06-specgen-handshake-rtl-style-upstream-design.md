@@ -469,17 +469,7 @@ Signal name mapping inside each:
 
 #### wb2axip wire-up
 
-wb2axip vendored module expects port names like `i_axi_awvalid`. specgen emits `awvalid`. Mapping happens at the wrap port-connection level — no edit to `cosim/sv/wb2axip/*.v`:
-
-```systemverilog
-faxi_slave u_faxi_slave (
-    .i_clk         (clk_i),
-    .i_axi_reset_n (rst_ni),
-    .i_axi_awvalid (axi_i.awvalid),
-    .i_axi_awready (axi_i.awready),
-    // ...
-);
-```
+wb2axip vendored module expects port names like `i_axi_awvalid`. specgen emits `awvalid`. Mapping happens at the wrap port-connection level — no edit to `cosim/sv/wb2axip/*.v`.
 
 ### 5.4 W2 PR sub-commit ordering (review-only, not CI-gated mid-PR)
 
