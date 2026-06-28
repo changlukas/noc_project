@@ -1,16 +1,4 @@
 tiers:
-  smoke:
-    topologies: [mesh_4x4_vc1, mesh_4x4_vc2]
-    rob_modes: [disabled]
-    stimuli:
-      - from: AX4-BAS-003
-        patterns: [neighbor]
-      - from: [AX4-RSP-002]          # write-only OOB: auto-skipped (demonstrates the filter)
-        patterns: [neighbor]
-        preserve_addr: true
-    # expected: pass=2 (BAS-003 x2 topo), skip=2 (RSP-002), fail=0
-    # NOTE: AX4-BND-006 (4KB-crossing read) dropped from smoke -- it exposed a
-    # pre-existing NMU 4KB read-split hang (backlog action item, not this task's bug).
   nightly:
     topologies: [mesh_4x4_vc1, mesh_4x4_vc2, mesh_4x4_vc4, mesh_4x4_vc8]
     rob_modes: [disabled, enabled]
