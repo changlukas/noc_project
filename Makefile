@@ -36,7 +36,7 @@ help:
 	@echo "  make sim TB=<topo> PATTERN=<p>            build + run benchmark (default TB=mesh_4x4_vc1)"
 	@echo "  make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3"
 	@echo "  Vars: TXN= SEED= HOTSPOT= BASE=<base.yaml>"
-	@echo "  make sim-regress TIER=nightly            run the co-sim regression matrix"
+	@echo "  make sim-regress [BUILD=<build>]    run the co-sim regression (one build, or all)"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -179,7 +179,7 @@ check: lint_scenarios lint_docs specgen_pytest build-cmodel build-verilator
 # PATTERN, TXN, SEED, HOTSPOT, BASE are optional forwarded vars.
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
-TIER    ?= nightly
+BUILD   ?=
 
 sim:
 	$(MAKE) build-verilator TOPOLOGY=$(TB) PYTHON3=$(PYTHON3)
@@ -188,7 +188,7 @@ sim:
 	  $(if $(HOTSPOT),--hotspot $(HOTSPOT)) $(if $(BASE),--from $(BASE))
 
 sim-regress:
-	$(TOOLPATH) $(PYTHON3) sim/regress/run_regress.py --tier $(TIER)
+	$(TOOLPATH) $(PYTHON3) sim/regress/run_regress.py $(if $(BUILD),--build $(BUILD))
 
 # --- clean ---
 

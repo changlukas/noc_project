@@ -93,15 +93,16 @@ def _ax4_curated() -> list:
     return ids
 
 
-def expand_tier(matrix: dict, tier: str) -> list:
-    t = matrix["tiers"][tier]
+def expand(matrix: dict) -> list:
     cells = []
-    for topo in t["topologies"]:
-        for rob in t["rob_modes"]:
-            for st in t["stimuli"]:
+    for topo in matrix["topologies"]:
+        for rob in matrix["rob_modes"]:
+            for st in matrix["stimuli"]:
                 froms = st["from"]
-                if froms == "all_curated_ax4":
-                    froms = _ax4_curated()
+                if froms == "all_independent_ax4":
+                    froms = _ax4_by_address_mode("independent")
+                elif froms == "all_dependent_ax4":
+                    froms = _ax4_by_address_mode("dependent")
                 elif isinstance(froms, str):
                     froms = [froms]
                 pa = bool(st.get("preserve_addr", False))
@@ -121,6 +122,16 @@ def is_excluded(cell: Cell, exclusions: list):
     return None
 
 
+def is_xfail(cell: Cell, xfails: list):
+    for ex in xfails or []:
+        w = ex["when"]
+        if all(getattr(cell, {"rob_mode": "rob_mode", "from": "from_id",
+                              "pattern": "pattern", "topology": "topology"}[k]) == v
+               for k, v in w.items()):
+            return ex["reason"]
+    return None
+
+
 def resolve_scenario(scenario_id: str) -> str:
     hits = sorted(glob.glob(str(TEST_PATTERNS / f"{scenario_id}*" / "scenario.yaml")))
     if not hits:
@@ -128,11 +139,11 @@ def resolve_scenario(scenario_id: str) -> str:
     return hits[0]
 
 
-def is_wire_verifiable(scenario_path: str) -> bool:
+def is_self_checking(scenario_path: str) -> bool:
     """The wire scoreboard verifies via write->readback (BIST-style): only scenarios
     that produce OKAY reads of written data are checked here. Write-only scenarios (no
     read op) and error-response scenarios (metadata.category == 'response', whose
-    accesses intentionally DECERR) are NOT wire-verifiable -- they are covered by the
+    accesses intentionally DECERR) are NOT self-checking -- they are covered by the
     Layer 2 c_model integration suite. Such cells are skipped (reported, not silent)."""
     sc = yaml.safe_load(Path(scenario_path).read_text())
     if (sc.get("metadata") or {}).get("category") == "response":
@@ -156,40 +167,71 @@ def run_cell(cell: Cell, out_root: Path, run_cmd=None) -> bool:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="NoC regression matrix runner.")
-    ap.add_argument("--tier", default="nightly")
+    ap.add_argument("--build", default=None,
+                    help="Run one build (e.g. mesh_4x4_vc1 or mesh_4x4_vc1_rob). "
+                         "Omit to run every build.")
     ap.add_argument("--matrix", default=str(Path(__file__).parent / "matrix.yaml"))
     ap.add_argument("--out", default=str(ROOT / "sim" / "regress" / "output"))
+    ap.add_argument("--dry-run", action="store_true",
+                    help="Print the cell accounting and exit without running.")
     a = ap.parse_args(argv)
 
     matrix = yaml.safe_load(Path(a.matrix).read_text())
-    cells = expand_tier(matrix, a.tier)
-    out_base = Path(a.out) / a.tier
+    cells = expand(matrix)
+    if a.build:
+        cells = [c for c in cells if c.effective_topology() == a.build]
+        if not cells:
+            sys.exit(f"[regress] no cells for BUILD={a.build}")
+
+    # Classify every cell up front (no sim) for accounting.
+    planned = []
+    for cell in cells:
+        reason = is_excluded(cell, matrix.get("exclusions"))
+        if reason:
+            planned.append((cell, "excluded", reason))
+        elif not is_self_checking(resolve_scenario(cell.from_id)):
+            planned.append((cell, "skipped_self_check",
+                            "non-self-checking (write-only/error-response); Layer 2 covers"))
+        else:
+            planned.append((cell, "run", None))
+
+    n_raw = len(planned)
+    n_excluded = sum(s == "excluded" for _, s, _ in planned)
+    n_skip = sum(s == "skipped_self_check" for _, s, _ in planned)
+    n_run = sum(s == "run" for _, s, _ in planned)
+    print(f"[regress] build={a.build or 'ALL'}  raw={n_raw} excluded={n_excluded} "
+          f"skipped_self_check={n_skip} run={n_run}")
+    if a.dry_run:
+        return 0
+
+    out_base = Path(a.out) / (a.build or "all")
     out_base.mkdir(parents=True, exist_ok=True)
 
-    # Prebuild the distinct topology binaries SERIALLY (avoids parallel obj_dir races).
-    for topo in sorted({c.effective_topology() for c in cells}):
+    for topo in sorted({c.effective_topology() for c, s, _ in planned if s == "run"}):
         subprocess.run(["make", "-C", str(ROOT), "build-verilator",
                         f"TOPOLOGY={topo}", "PYTHON3=python3"], check=True)
 
     results = []
-    for cell in cells:
-        reason = is_excluded(cell, matrix.get("exclusions"))
-        if reason:
-            results.append({**asdict(cell), "status": "skipped", "reason": reason})
-            continue
-        if not is_wire_verifiable(resolve_scenario(cell.from_id)):
-            results.append({**asdict(cell), "status": "skipped",
-                            "reason": "non-wire-verifiable (write-only/error-response); Layer 2 covers"})
+    for cell, status, reason in planned:
+        if status != "run":
+            results.append({**asdict(cell), "status": status, "reason": reason})
             continue
         ok = run_cell(cell, out_base / cell.label())
-        results.append({**asdict(cell), "status": "pass" if ok else "fail"})
+        xfail_reason = is_xfail(cell, matrix.get("xfails"))
+        if ok:
+            results.append({**asdict(cell), "status": "pass"})
+        elif xfail_reason:
+            results.append({**asdict(cell), "status": "xfail", "reason": xfail_reason})
+        else:
+            results.append({**asdict(cell), "status": "fail"})
 
     npass = sum(r["status"] == "pass" for r in results)
     nfail = sum(r["status"] == "fail" for r in results)
-    nskip = sum(r["status"] == "skipped" for r in results)
+    nxfail = sum(r["status"] == "xfail" for r in results)
     (out_base / "matrix.json").write_text(json.dumps(results, indent=2))
-    print(f"[regress] tier={a.tier}  pass={npass} fail={nfail} skip={nskip} "
-          f"total={len(results)}")
+    print(f"[regress] pass={npass} fail={nfail} xfail={nxfail} "
+          f"excluded={n_excluded} skipped_self_check={n_skip} "
+          f"(coverage denom = pass+fail+xfail = {npass + nfail + nxfail})")
     for r in results:
         if r["status"] == "fail":
             print(f"  FAIL  {r['topology']}/{r['rob_mode']} {r['from_id']} {r['pattern']}")
