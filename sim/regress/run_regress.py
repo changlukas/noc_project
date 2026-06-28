@@ -11,7 +11,21 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent.parent
 RUN_BENCH = ROOT / "sim" / "tools" / "run_benchmark.py"
 TEST_PATTERNS = ROOT / "sim" / "test_patterns"
+TOPOLOGIES = ROOT / "sim" / "topologies"
 PASS_MARKER = "PASS: scenario complete, scoreboard clean"
+
+
+def _topology_dims(topology: str) -> tuple:
+    base = topology[:-4] if topology.endswith("_rob") else topology
+    topo = yaml.safe_load((TOPOLOGIES / f"{base}.yaml").read_text())
+    t = topo["topology"]
+    return t["x_dim"], t["y_dim"]
+
+
+def _interior_hotspot(topology: str) -> int:
+    """Default hotspot target: a fixed interior linear node id (avoids edge tiles)."""
+    x_dim, y_dim = _topology_dims(topology)
+    return (y_dim // 2) * x_dim + (x_dim // 2)
 
 
 @dataclass(frozen=True)
@@ -94,6 +108,8 @@ def run_cell(cell: Cell, out_root: Path, run_cmd=None) -> bool:
             "--pattern", cell.pattern,
             "--from", resolve_scenario(cell.from_id),
             "--out-root", str(out_root)]
+    if cell.pattern == "hotspot":
+        args += ["--hotspot", str(_interior_hotspot(cell.effective_topology()))]
     if cell.preserve_addr:
         args.append("--preserve-addr")
     runner = run_cmd or (lambda a: subprocess.run(a).returncode == 0)

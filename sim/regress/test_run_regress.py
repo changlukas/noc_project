@@ -43,3 +43,19 @@ def test_wire_verifiable_filter():
     assert run_regress.is_wire_verifiable(rsp_read) is False
     assert run_regress.is_wire_verifiable(rsp_write) is False
     assert run_regress.is_wire_verifiable(data) is True
+
+
+def test_interior_hotspot_4x4():
+    # 4x4 interior linear id = (y//2)*x + (x//2) = 2*4 + 2 = 10
+    assert run_regress._interior_hotspot("mesh_4x4_vc1") == 10
+    assert run_regress._interior_hotspot("mesh_4x4_vc8_rob") == 10  # _rob suffix stripped
+
+
+def test_hotspot_cell_emits_default_target():
+    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-003", "hotspot", False)
+    captured = {}
+    run_regress.run_cell(cell, pathlib.Path("out"),
+                         run_cmd=lambda a: (captured.setdefault("args", a), True)[1])
+    assert "--hotspot" in captured["args"]
+    idx = captured["args"].index("--hotspot")
+    assert captured["args"][idx + 1] == "10"
