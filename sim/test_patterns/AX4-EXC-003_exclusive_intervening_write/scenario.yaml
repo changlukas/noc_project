@@ -2,6 +2,7 @@ schema_version: 1
 metadata:
   name: AX4-EXC-003_exclusive_intervening_write
   category: exclusive
+  address_mode: independent
 
 config:
   memory_base: 0x1000

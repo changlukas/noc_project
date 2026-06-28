@@ -59,3 +59,22 @@ def test_hotspot_cell_emits_default_target():
     assert "--hotspot" in captured["args"]
     idx = captured["args"].index("--hotspot")
     assert captured["args"][idx + 1] == "10"
+
+
+def test_unique_addr_count():
+    assert run_regress.unique_addr_count(
+        run_regress.resolve_scenario("AX4-STR-002")) == 8
+    assert run_regress.unique_addr_count(
+        run_regress.resolve_scenario("AX4-BAS-003")) == 1
+
+
+def test_str002_classified_dependent():
+    # 8 unique addrs > 4-slot bound -> must NOT be in the independent set
+    assert "AX4-STR-002" not in run_regress._ax4_by_address_mode("independent")
+    assert "AX4-STR-002" in run_regress._ax4_by_address_mode("dependent")
+
+
+def test_independent_set_all_fit_capacity():
+    for sid in run_regress._ax4_by_address_mode("independent"):
+        n = run_regress.unique_addr_count(run_regress.resolve_scenario(sid))
+        assert n <= 4, f"{sid} has {n} unique addrs but is tagged independent"

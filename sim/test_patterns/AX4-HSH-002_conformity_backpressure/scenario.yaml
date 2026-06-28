@@ -2,6 +2,7 @@ schema_version: 1
 metadata:
   name: AX4-HSH-002_conformity_backpressure
   category: handshake
+  address_mode: independent
 
 config:
   memory_base: 0x1000

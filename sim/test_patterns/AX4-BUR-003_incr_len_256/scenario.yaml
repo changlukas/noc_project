@@ -5,6 +5,7 @@ schema_version: 1
 metadata:
   name: AX4-BUR-003_incr_len_256
   category: burst
+  address_mode: independent
 
 config:
   memory_base: 0x1000

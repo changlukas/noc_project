@@ -28,6 +28,44 @@ def _interior_hotspot(topology: str) -> int:
     return (y_dim // 2) * x_dim + (x_dim // 2)
 
 
+CAPACITY_SLOTS = 4  # alloc_unique_offset bound on the default 4x4 mesh (gen_test_patterns.py:223-227)
+
+
+def unique_addr_count(scenario_path: str) -> int:
+    sc = yaml.safe_load(Path(scenario_path).read_text())
+    addrs = {int(str(t["addr"]), 0) & 0xFFFFFFFF
+             for t in (sc.get("transactions") or []) if "addr" in t}
+    return len(addrs)
+
+
+def _address_mode(scenario_path: str) -> str:
+    sc = yaml.safe_load(Path(scenario_path).read_text())
+    return (sc.get("metadata") or {}).get("address_mode", "dependent")
+
+
+def _ax4_by_address_mode(mode: str) -> list:
+    """Return AX4 scenario ids whose address_mode == mode (absent defaults to
+    'dependent'). Self-check: an 'independent' scenario exceeding the capacity
+    bound is a misclassification and raises."""
+    ids = []
+    for p in sorted(glob.glob(str(TEST_PATTERNS / "AX4-*"))):
+        name = os.path.basename(p)
+        if name.startswith("AX4-INF-"):
+            continue
+        scenario = os.path.join(p, "scenario.yaml")
+        if not os.path.isfile(scenario):
+            continue
+        sid = name.split("_")[0]
+        if _address_mode(scenario) != mode:
+            continue
+        if mode == "independent" and unique_addr_count(scenario) > CAPACITY_SLOTS:
+            raise ValueError(
+                f"{sid} tagged independent but has "
+                f"{unique_addr_count(scenario)} unique addrs > {CAPACITY_SLOTS}")
+        ids.append(sid)
+    return ids
+
+
 @dataclass(frozen=True)
 class Cell:
     topology: str
