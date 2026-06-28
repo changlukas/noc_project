@@ -342,7 +342,7 @@ namespace noc::tests {
 // wb2axip structural constraint (or names a fault-injection mode that
 // belongs in a dedicated test). nullopt = wb2axip can in principle run it.
 //
-// Verified constraints (wb2axip/rtl/faxi_slave.v audit, Codex review):
+// Verified constraints (wb2axip slave checker audit, Codex review):
 //   - AWLEN must be 0 (single-beat write)         line 805-807
 //   - wr_pending <= 1 (single outstanding write)  line 805-807
 //   - No exclusive-access monitor

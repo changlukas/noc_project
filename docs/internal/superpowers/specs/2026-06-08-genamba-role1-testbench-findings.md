@@ -57,7 +57,6 @@ completed in 156 cycles.
 
 | Source | Observed |
 |---|---|
-| `faxi_slave` violations | N/A -- checker was removed during T5 (commit `d40525d`) because its non-pipelined-write model false-fires on AXI4-legal multi-beat writes; the bind comes out per `[[dont-silence-the-checker]]`, replaced by a handshake-progress watchdog plus per-task data compare |
 | DPI error pump fires | None |
 | `$fatal` fires | None |
 | `tb_genamba` 1 us handshake-progress watchdog | Did not fire |

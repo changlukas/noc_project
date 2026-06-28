@@ -495,7 +495,7 @@ Expected: build error — `wb2axip_block.hpp` not found.
 // wb2axip structural constraint (or names a fault-injection mode reserved
 // for dedicated tests). nullopt = wb2axip can in principle run it.
 //
-// Verified constraints (wb2axip/rtl/faxi_slave.v audit, Codex review):
+// Verified constraints (wb2axip slave checker audit, Codex review):
 //   - AWLEN must be 0 (single-beat write)         line 805-807
 //   - wr_pending <= 1 (single outstanding write)  line 805-807
 //   - No exclusive-access monitor
@@ -784,7 +784,7 @@ Additions:
   (empty array in commit 1, populated as commit 2 migration lands).
 - noc_axi4_scenarios INTERFACE library.
 - cosim/tests/wb2axip_block.hpp: 4-condition runtime predicate after
-  faxi_slave.v audit (max_outstanding_write>1, len>0, Exclusive, inject).
+  wb2axip slave checker audit (max_outstanding_write>1, len>0, Exclusive, inject).
 - sim/test_patterns/scenario_helpers.hpp: RequireKnownScenario aborts on
   unknown id at startup; used by scoped tests in commit 2.
 - tools/lint_scenarios.py: 8 invariants (not yet wired to make check).

@@ -47,7 +47,7 @@ port)` pairs, so they do not overtake each other (B §6 cross-flow isolation).
 | `c_model/include/cosim/router_channel_shell_adapter.hpp` (new) | `RouterChannelShellAdapter`: owns one `RouterChannel`; exposes both nodes' NoC ports via new `RouterChannelInputs/Outputs`; `init/set_inputs/tick/get_outputs` mirror `ChannelModelShellAdapter` for 2 nodes |
 | `cosim/c/cmodel_dpi.cpp` (modify) | `cmodel_router_channel_create/set_inputs/tick/get_outputs`; `ShellType::RouterChannel`; per-master scenario path + per-slave memory_base (see §5) |
 | `cosim/sv/router_channel_wrap.sv` (new) | beta-tick DPI wrapper carrying both nodes' `noc_intf` bundles (mirrors `channel_model_wrap`) |
-| `cosim/sv/tb_top.sv` (rewrite) | 2× {master, NMU, NSU, slave} + one `router_channel_wrap`; no faxi checkers |
+| `cosim/sv/tb_top.sv` (rewrite) | 2× {master, NMU, NSU, slave} + one `router_channel_wrap`; no wb2axip protocol checkers |
 | `specgen/`-adjacent scenario generator (new) | emit the two coordinate-bearing variants per pattern (§6) |
 
 `RouterChannelShellAdapter` reuses B's `RouterChannel` accessors: `nmu_req_out(node)`,
@@ -119,11 +119,11 @@ must assert: (a) exactly two masters were created, and (b) `reads_checked_ > 0` 
 `reads_checked_` (extending the existing scoreboard dump), and the ctest asserts both; the
 generated subset is restricted to patterns that issue reads.
 
-**Coverage delta (honest).** Removing the two faxi checkers drops AXI4 protocol-conformance
+**Coverage delta (honest).** Removing the two wb2axip protocol checkers drops AXI4 protocol-conformance
 checking on the NMU-master and NSU-slave boundaries and the MAXSTALL/MAXRSTALL/MAXDELAY stall
 induction — the scoreboard only compares read-back data, not protocol well-formedness or
 ordering. This is a real reduction versus the prior single-flow tb_top, accepted for this round
-and restored when faxi is re-integrated (checker-first). The generated subset is kept to the
+and restored when the wb2axip protocol checker is re-integrated (checker-first). The generated subset is kept to the
 prior wb2axip-runnable transactions so the *data-layer* set matches, now run through the real
 fabric in both directions.
 
@@ -141,6 +141,6 @@ fabric in both directions.
 
 In scope: bidirectional `tb_top` over the real `RouterChannel`; `RouterChannelShellAdapter` +
 DPI; per-master/per-slave harness generalization; wb2axip-subset coordinate-variant generator;
-scoreboard-only validation. Out of scope: faxi protocol-checker re-integration (deferred,
+scoreboard-only validation. Out of scope: wb2axip protocol-checker re-integration (deferred,
 checker-first to be restored later); >2 nodes / NxM mesh; full 37-pattern augmentation;
 `ChannelModel` co-sim removal (`tb_genamba*` still use it).

@@ -482,7 +482,7 @@ Total ≈ 330 lines.
 
 ## 7. Debugging cosim (~50 lines)
 - `make sim` sanity; default scenario passes wb2axip
-- When `make sim` fires faxi_slave.v:807 assertion → wb2axip structural
+- When `make sim` fires the wb2axip slave checker assertion → wb2axip structural
   limit (multi-beat / multi-outstanding / Exclusive / inject)
 - Use ctest path for normal debugging — SKIP-with-reason instead of opaque
   Verilog assertions
@@ -550,7 +550,7 @@ commit 4 lands.
 |---|---|
 | `cosim/KNOWN_LIMITATIONS.md` Resolved §2 (multi-beat W) | `docs/architecture.md` §4 (Cosim boundary) — wb2axip structural limit list |
 | `cosim/KNOWN_LIMITATIONS.md` Resolved §3 (cmodel_finalize) | Intentionally dropped — resolved + integration-test covered |
-| `cosim/KNOWN_LIMITATIONS.md` Carried §1 (faxi_wstrb permissive stub) | `docs/architecture.md` §4 (Cosim boundary) — note as active limit |
+| `cosim/KNOWN_LIMITATIONS.md` Carried §1 (wb2axip wstrb permissive stub) | `docs/architecture.md` §4 (Cosim boundary) — note as active limit |
 | `cosim/KNOWN_LIMITATIONS.md` (temporary dump accumulation) | `docs/architecture.md` §4 or §5 — verify content during implementation; if present, target one of these |
 | `cosim/KNOWN_LIMITATIONS.md` (C++ vs SV timing-master nuance) | `docs/architecture.md` §3 (tick discipline section) |
 | `cosim/CODING_DISCIPLINE.md` (hermetic-singleton invariants) | `docs/development.md` §2 (Repo conventions) — full hermetic invariants enumerated, not summarized |

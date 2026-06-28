@@ -3,7 +3,7 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire the production `RouterChannel` into the Verilator co-sim by rewriting `tb_top`
-as a 2-node bidirectional testbench driving the real router fabric (no faxi), validated by a
+as a 2-node bidirectional testbench driving the real router fabric (no wb2axip protocol checkers), validated by a
 bidirectional `CosimIntegration` over coordinate-bearing scenario variants.
 
 **Architecture:** A `RouterChannelShellAdapter` mirrors `ChannelModelShellAdapter` but owns one
@@ -739,7 +739,7 @@ git commit -m "feat(cosim): router_channel_wrap.sv (4-bundle 2-node beta-tick DP
 - Rewrite: `cosim/sv/tb_top.sv`
 
 Read the current `cosim/sv/tb_top.sv`. The rewrite duplicates the component pipeline per node,
-drops the two faxi checkers, swaps `channel_model_wrap` for `router_channel_wrap`, and adds the
+drops the two wb2axip protocol checkers, swaps `channel_model_wrap` for `router_channel_wrap`, and adds the
 non-vacuous PASS guard. Keep the module port `(clk_i, rst_ni)`, the localparams, and the
 centralized DPI error poll block unchanged.
 
@@ -799,7 +799,7 @@ Instantiate per node, copying the param lists from the current `tb_top.sv` insta
 `nsu_wrap u_nsu_k(.ctx_i(nK_nsu_ctx), .noc_miso_i(nodeK_nsu.miso), .axi_o(nsu_slave_axi_k.master))`,
 `axi_slave_wrap u_slave_k(.ctx_i(sK_ctx), .axi_i(nsu_slave_axi_k.slave))`. One
 `router_channel_wrap u_rc(.ctx_i(rc_ctx), .node0_nmu_i(node0_nmu.miso), .node0_nsu_o(node0_nsu.mosi),
-.node1_nmu_i(node1_nmu.miso), .node1_nsu_o(node1_nsu.mosi))`. **Delete both faxi blocks and their
+.node1_nmu_i(node1_nmu.miso), .node1_nsu_o(node1_nsu.mosi))`. **Delete both wb2axip protocol-checker blocks and their
 induction-output wire declarations.**
 
 - [ ] **Step 3: Non-vacuous PASS guard in the exit poll**
@@ -838,7 +838,7 @@ moving on. Do NOT run scenarios yet — that's Task 8 (needs the variant files).
 
 ```bash
 git add cosim/sv/tb_top.sv
-git commit -m "feat(cosim): rewrite tb_top as bidirectional 2-node router co-sim (no faxi)"
+git commit -m "feat(cosim): rewrite tb_top as bidirectional 2-node router co-sim (no wb2axip checkers)"
 ```
 (The DPI signature changes this tb_top depends on — `cmodel_master/slave/nmu_create` args,
 `cmodel_master_count`/`cmodel_reads_checked` — already landed in Tasks 3-4.)

@@ -23,6 +23,7 @@
 ## Key Design Docs
 
 - `docs/_archive/noc_cmodel_rtl_plan.md` - stage roadmap (archived 2026-06-07; superseded by `docs/architecture.md`)
+- `docs/backlog.md` - running action items and open bugs, maintained across iteration rounds. Read it at session start; each round adds what it surfaces and strikes what it closes.
 
 ## Doc Writing Rules
 

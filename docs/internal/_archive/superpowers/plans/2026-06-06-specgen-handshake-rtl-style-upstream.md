@@ -1586,9 +1586,6 @@ SV_SRC := \
     $(COSIM_ROOT)/sv/loopback_noc_wrap.sv \
     $(COSIM_ROOT)/sv/nsu_wrap.sv \
     $(COSIM_ROOT)/sv/axi_slave_wrap.sv \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_wstrb.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_master.v \
-    $(COSIM_ROOT)/sv/wb2axip/faxi_slave.v \
     $(COSIM_ROOT)/sv/tb_top.sv
 ```
 
