@@ -72,3 +72,13 @@ def test_independent_set_all_fit_capacity():
     for sid in run_regress._ax4_by_address_mode("independent"):
         n = run_regress.unique_addr_count(run_regress.resolve_scenario(sid))
         assert n <= 4, f"{sid} has {n} unique addrs but is tagged independent"
+
+
+import pathlib as _pl
+def test_real_matrix_expands():
+    m = run_regress.yaml.safe_load(
+        (_pl.Path(run_regress.__file__).parent / "matrix.yaml").read_text())
+    cells = run_regress.expand(m)
+    # independent set runs 4 patterns; dependent set runs neighbor only
+    assert any(c.pattern == "uniform_random" for c in cells)
+    assert any(c.pattern == "neighbor" and c.preserve_addr for c in cells)

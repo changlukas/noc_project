@@ -1,21 +1,15 @@
-tiers:
-  nightly:
-    topologies: [mesh_4x4_vc1, mesh_4x4_vc2, mesh_4x4_vc4, mesh_4x4_vc8]
-    rob_modes: [disabled, enabled]
-    stimuli:
-      - from: AX4-BAS-003
-        patterns: [neighbor, uniform_random, transpose, hotspot]
-      - from: all_curated_ax4      # AX4-* minus AX4-INF-*
-        patterns: [neighbor]
-        preserve_addr: true
-# NOTE: the `nightly` tier is a DISCOVERY run. all_curated_ax4 sweeps every wire-verifiable
-# AX4 scenario through the concurrent 16-node fabric; the first full nightly run is expected to
-# surface further PRE-EXISTING co-sim bugs (that is the matrix's purpose). As each is confirmed,
-# add it here with a backlog reason and re-include it once the underlying bug is fixed.
+# Flat co-sim regression matrix (flat). Run one build with
+# `make sim-regress BUILD=<build>`, or all builds with `make sim-regress`.
+# all_independent_ax4 / all_dependent_ax4 expand from metadata.address_mode.
+topologies: [mesh_4x4_vc1, mesh_4x4_vc2, mesh_4x4_vc4, mesh_4x4_vc8]
+rob_modes:  [disabled, enabled]
+stimuli:
+  - {from: all_independent_ax4, patterns: [neighbor, uniform_random, transpose, hotspot]}
+  - {from: all_dependent_ax4,   patterns: [neighbor], preserve_addr: true}
 exclusions:
-  - when: {rob_mode: enabled, from: AX4-BUR-003}
-    reason: "burst len 256 > ROB_CAPACITY 32"
-  - when: {from: AX4-ORD-002}
-    reason: "pre-existing multi-id concurrent-write co-sim hang (backlog); re-include when fixed"
-  - when: {from: AX4-BND-006}
-    reason: "pre-existing NMU 4KB read-split hang under 16-node load (backlog); re-include when fixed"
+  - {when: {rob_mode: enabled, from: AX4-BUR-003},
+     reason: "burst len 256 > ROB_CAPACITY 32"}
+  - {when: {from: AX4-ORD-002},
+     reason: "pre-existing multi-id concurrent-write co-sim hang (backlog); re-include when fixed"}
+  - {when: {from: AX4-BND-006},
+     reason: "pre-existing NMU 4KB read-split hang under 16-node load (backlog); re-include when fixed"}
