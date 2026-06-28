@@ -17,7 +17,7 @@ fixed.
 | `AX4-BND-006` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | NMU 4KB read-split under concurrent load | excluded |
 | `AX4-BND-007` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-006 (unconfirmed) | excluded (matrix.yaml) |
 
-The first full `make sim-regress TIER=nightly` is a discovery run. Sweeping the curated set through the
+The first full `make sim-regress` is a discovery run. Sweeping the curated set through the
 concurrent 16-node fabric will surface more pre-existing co-sim bugs. Add each to `matrix.yaml`
 exclusions with a reason as it is confirmed.
 
@@ -34,7 +34,7 @@ exclusions with a reason as it is confirmed.
 Traffic pattern decides the destination tile (spatial). AX4 transaction pattern decides the read/write
 shape. The two axes are independent. The current matrix runs all 36 curated AX4 scenarios on `neighbor`
 only because it applies `preserve_addr` to the whole AX4 set. The runner imposes no such limit
-(`expand_tier` cross-products the declared groups). Address-agnostic scenarios can run all 4 patterns
+(`expand` cross-products the declared groups). Address-agnostic scenarios can run all 4 patterns
 through default offset reallocation: `_emit_base_driven_node` copies the base shape and moves only the
 address, grouping transactions by original local address so paired and ordered accesses stay
 consistent.

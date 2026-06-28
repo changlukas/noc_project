@@ -12,9 +12,6 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 RUN_BENCH = ROOT / "sim" / "tools" / "run_benchmark.py"
 TEST_PATTERNS = ROOT / "sim" / "test_patterns"
 TOPOLOGIES = ROOT / "sim" / "topologies"
-PASS_MARKER = "PASS: scenario complete, scoreboard clean"
-
-
 def _topology_dims(topology: str) -> tuple:
     base = topology[:-4] if topology.endswith("_rob") else topology
     topo = yaml.safe_load((TOPOLOGIES / f"{base}.yaml").read_text())
@@ -82,17 +79,6 @@ class Cell:
         pa = "_pa" if self.preserve_addr else ""
         idp = f"_id{self.id_policy.replace(':', '')}" if self.id_policy else ""
         return f"{self.effective_topology()}__{self.from_id}__{self.pattern}{pa}{idp}"
-
-
-def _ax4_curated() -> list:
-    ids = []
-    for p in sorted(glob.glob(str(TEST_PATTERNS / "AX4-*"))):
-        name = os.path.basename(p)
-        if name.startswith("AX4-INF-"):
-            continue
-        if os.path.isfile(os.path.join(p, "scenario.yaml")):
-            ids.append(name.split("_")[0])  # e.g. AX4-BAS-003
-    return ids
 
 
 def expand(matrix: dict) -> list:
