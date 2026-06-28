@@ -101,6 +101,19 @@ The VCS regression path is documented as Linux-workstation and dry-run pending a
 
 M-items from the matrix final review: `preserve_addr=True` still runs the ignored `pair_offset` loop,
 test inline imports, `gen_tb_top.emit_tb_top(requested_name="")` default is a silent-failure trap,
-`run_regress` unused `PASS_MARKER` constant, `is_excluded` KeyError on an unknown `when` key,
-`_ax4_curated` untested, prebuild `check=True` aborts the whole run instead of failing one cell. JUnit
-XML reporting waits until a CI consumer exists.
+`is_excluded` KeyError on an unknown `when` key, prebuild `check=True` aborts the whole run instead of
+failing one cell. JUnit XML reporting waits until a CI consumer exists.
+(Closed in the coverage round: `run_regress` `PASS_MARKER` and `_ax4_curated` orphans deleted, commit
+`aa235f5`.)
+
+M-items from the coverage-round final review (none gate merge): `is_xfail`/`is_excluded` are verbatim
+duplicates -> factor a private `_match_when(cell, rules)` both delegate to (removes a second place the
+`when`-key map can drift); `gen_test_patterns._rewrite_ids` does `t["addr"]` unguarded while
+`unique_addr_count` guards with `if "addr" in t` -> mirror the guard (a base scenario with an addr-less
+transaction would `KeyError`); `test_run_regress.py` `import pathlib as _pl` sits after the test
+functions and is a redundant alias of the top-level `pathlib` import -> hoist and drop the alias;
+`_ax4_by_address_mode` parses `unique_addr_count` twice on the raise path -> use a local var; the
+`effective_topology()` `_rob`-append branch is only indirectly covered after `test_rob_topology_suffix`
+was dropped -> one assert restores it; BND-007 wording differs between the `docs/backlog.md` row
+("excluded (matrix.yaml)") and the `matrix.yaml` reason ("re-check on first full run") -> align if the
+file is touched.
