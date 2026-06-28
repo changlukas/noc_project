@@ -73,13 +73,15 @@ class Cell:
     from_id: str
     pattern: str
     preserve_addr: bool
+    id_policy: str = ""    # "" = none; "round_robin:N" forwarded to the generator
 
     def effective_topology(self) -> str:
         return self.topology + ("_rob" if self.rob_mode == "enabled" else "")
 
     def label(self) -> str:
         pa = "_pa" if self.preserve_addr else ""
-        return f"{self.effective_topology()}__{self.from_id}__{self.pattern}{pa}"
+        idp = f"_id{self.id_policy.replace(':', '')}" if self.id_policy else ""
+        return f"{self.effective_topology()}__{self.from_id}__{self.pattern}{pa}{idp}"
 
 
 def _ax4_curated() -> list:
@@ -106,9 +108,10 @@ def expand(matrix: dict) -> list:
                 elif isinstance(froms, str):
                     froms = [froms]
                 pa = bool(st.get("preserve_addr", False))
+                ip = st.get("id_policy", "")
                 for fr in froms:
                     for pat in st["patterns"]:
-                        cells.append(Cell(topo, rob, fr, pat, pa))
+                        cells.append(Cell(topo, rob, fr, pat, pa, ip))
     return cells
 
 
@@ -161,6 +164,8 @@ def run_cell(cell: Cell, out_root: Path, run_cmd=None) -> bool:
         args += ["--hotspot", str(_interior_hotspot(cell.effective_topology()))]
     if cell.preserve_addr:
         args.append("--preserve-addr")
+    if cell.id_policy:
+        args += ["--id-policy", cell.id_policy]
     runner = run_cmd or (lambda a: subprocess.run(a).returncode == 0)
     return runner(args)
 

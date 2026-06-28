@@ -145,7 +145,9 @@ def main(argv=None):
     ap.add_argument("--len", type=int, default=0, dest="burst_len")
     ap.add_argument("--exclude-self", action="store_true")
     ap.add_argument("--preserve-addr", action="store_true",
-                    help="Forward to gen_test_patterns --preserve-addr (AX4 conformity cells).")
+                    help="Forward to gen_test_patterns --preserve-addr (AX4 conformance cells).")
+    ap.add_argument("--id-policy", default=None,
+                    help="Forward to gen_test_patterns --id-policy (round_robin:N).")
     ap.add_argument("--out-root", default=None,
                     help="Root for output dirs (default: sim/verilator/output/bench_<scenario>)")
     _DEFAULT_BASE = str(
@@ -211,6 +213,8 @@ def main(argv=None):
         gen_args.append("--exclude-self")
     if a.preserve_addr:
         gen_args.append("--preserve-addr")
+    if a.id_policy:
+        gen_args += ["--id-policy", a.id_policy]
     if a.base:
         gen_args += ["--from", a.base]
 

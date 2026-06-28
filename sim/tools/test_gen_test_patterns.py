@@ -753,6 +753,27 @@ def test_default_reallocates_offset(tmp_path):
     assert (sc["transactions"][0]["addr"] & 0xFFFFFFFF) != 0x2000
 
 
+# ---------------------------------------------------------------------------
+# _rewrite_ids: round-robin id assignment preserving write+read pair grouping
+# ---------------------------------------------------------------------------
+
+def test_rewrite_ids_preserves_pairs():
+    import gen_test_patterns as g
+    base = {"transactions": [
+        {"op": "write", "addr": 0x1000, "id": 0},
+        {"op": "read",  "addr": 0x1000, "id": 0},
+        {"op": "write", "addr": 0x1040, "id": 0},
+        {"op": "read",  "addr": 0x1040, "id": 0},
+    ]}
+    g._rewrite_ids(base, 2)
+    t = base["transactions"]
+    # same addr -> same id (W/R pair stays on one id)
+    assert t[0]["id"] == t[1]["id"]
+    assert t[2]["id"] == t[3]["id"]
+    # round-robin across 2 ids -> the two pairs differ
+    assert t[0]["id"] != t[2]["id"]
+
+
 def test_base_driven_large_burst_overflow_raises(tmp_path):
     """Fault injection: base-driven path with a burst whose footprint exceeds the dst
     memory window must exit non-zero (bound assert fires).

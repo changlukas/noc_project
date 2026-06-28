@@ -74,6 +74,17 @@ def test_independent_set_all_fit_capacity():
         assert n <= 4, f"{sid} has {n} unique addrs but is tagged independent"
 
 
+def test_id_policy_forwarded_and_labeled():
+    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-005",
+                            "neighbor", False, "round_robin:4")
+    assert "round_robin4" in cell.label()
+    captured = {}
+    run_regress.run_cell(cell, pathlib.Path("out"),
+                         run_cmd=lambda a: (captured.setdefault("args", a), True)[1])
+    assert "--id-policy" in captured["args"]
+    assert captured["args"][captured["args"].index("--id-policy") + 1] == "round_robin:4"
+
+
 import pathlib as _pl
 def test_real_matrix_expands():
     m = run_regress.yaml.safe_load(

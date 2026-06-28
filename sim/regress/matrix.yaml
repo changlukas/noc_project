@@ -6,6 +6,7 @@ rob_modes:  [disabled, enabled]
 stimuli:
   - {from: all_independent_ax4, patterns: [neighbor, uniform_random, transpose, hotspot]}
   - {from: all_dependent_ax4,   patterns: [neighbor], preserve_addr: true}
+  - {from: AX4-BAS-005, patterns: [neighbor], id_policy: round_robin:4}
 exclusions:
   - {when: {rob_mode: enabled, from: AX4-BUR-003},
      reason: "burst len 256 > ROB_CAPACITY 32"}

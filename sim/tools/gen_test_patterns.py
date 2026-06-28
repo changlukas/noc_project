@@ -558,6 +558,34 @@ def _emit_base_driven_node(base_sc, src_dir, out_dir, src_idx, dst_cids, src_cid
 
 
 # ---------------------------------------------------------------------------
+# Multi-id helpers
+# ---------------------------------------------------------------------------
+
+def _rewrite_ids(base_sc, n_ids):
+    """In-place: assign AXI id round-robin across n_ids, grouped by unique base
+    address so each write+read pair stays on a single id (emit-path-agnostic;
+    both _emit_node and _emit_base_driven_node inherit by deep-copy)."""
+    addr_to_id = {}
+    next_slot = 0
+    for t in base_sc.get("transactions", []):
+        oa = _as_int(t["addr"]) & 0xFFFFFFFF
+        if oa not in addr_to_id:
+            addr_to_id[oa] = next_slot % n_ids
+            next_slot += 1
+        t["id"] = addr_to_id[oa]
+
+
+def _apply_id_policy(base_sc, id_policy):
+    if base_sc is None or not id_policy:
+        return
+    kind, _, n = id_policy.partition(":")
+    if kind != "round_robin" or not n.isdigit() or int(n) < 1:
+        raise SystemExit(f"--id-policy: unsupported value {id_policy!r} "
+                         f"(expected round_robin:N)")
+    _rewrite_ids(base_sc, int(n))
+
+
+# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
@@ -588,6 +616,9 @@ def main(argv=None):
                     help="Keep each transaction's original local offset (OR dst tile into "
                          "addr[63:32]) instead of reallocating; safe only with bijective "
                          "patterns like neighbor.")
+    ap.add_argument("--id-policy", default=None,
+                    help="round_robin:N — rewrite base AXI ids round-robin across "
+                         "N ids (W/R pair preserved). Default: keep base ids.")
     # Hotspot options
     ap.add_argument("--hotspot", type=int, nargs="+", default=None,
                     help="Linear node id(s) for hotspot pattern (0..N-1)")
@@ -616,6 +647,7 @@ def main(argv=None):
         src_dir = os.path.dirname(src_path)
         with open(src_path) as f:
             base_sc = yaml.safe_load(f)
+        _apply_id_policy(base_sc, a.id_policy)
         cfg = base_sc.get("config", {})
         base_local = _as_int(cfg.get("memory_base", 0)) & 0xFFFFFFFF
         memory_size = _as_int(cfg.get("memory_size", 0x1000))
@@ -640,6 +672,7 @@ def main(argv=None):
             src_dir = os.path.dirname(src_path)
             with open(src_path) as f:
                 base_sc = yaml.safe_load(f)
+            _apply_id_policy(base_sc, a.id_policy)
             cfg = base_sc.get("config", {})
             base_local = _as_int(cfg.get("memory_base", 0)) & 0xFFFFFFFF
             memory_size = _as_int(cfg.get("memory_size", 0x1000))
@@ -675,6 +708,7 @@ def main(argv=None):
             src_dir = os.path.dirname(src_path)
             with open(src_path) as f:
                 base_sc = yaml.safe_load(f)
+            _apply_id_policy(base_sc, a.id_policy)
             cfg = base_sc.get("config", {})
             base_local = _as_int(cfg.get("memory_base", base_local)) & 0xFFFFFFFF
             memory_size = _as_int(cfg.get("memory_size", memory_size))
