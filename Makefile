@@ -17,7 +17,7 @@ CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
 COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-verilator test check lint_scenarios lint_docs \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test check lint_scenarios lint_docs \
         specgen_pytest sim sim-regress \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
@@ -109,6 +109,12 @@ endif
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
 	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) -j
 
+# Sim needs only the yaml-cpp static lib (+ c_model/yaml-cpp headers via -I).
+# Build that one target, not the whole c_model tree, so the gtest unit-test
+# executables are never compiled (two of them hit a host GCC ICE).
+build-yamlcpp: $(CMODEL_BUILD)/CMakeCache.txt
+	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) --target yaml-cpp -j
+
 $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
@@ -116,7 +122,7 @@ $(CMODEL_BUILD)/CMakeCache.txt:
 # make sim overrides this by passing TOPOLOGY=$(TB) explicitly.
 TOPOLOGY ?= mesh_4x4_vc1
 
-build-verilator: build-cmodel
+build-verilator: build-yamlcpp
 	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY)
 
 # --- test ---
