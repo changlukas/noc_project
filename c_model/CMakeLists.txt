@@ -27,15 +27,17 @@ include_directories(${SPECGEN_CPP_INCLUDE})
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 include(FetchContent)
-FetchContent_Declare(
-  googletest
-  GIT_REPOSITORY https://github.com/google/googletest.git
-  GIT_TAG        v1.14.0
-)
-# Windows MSVC compatibility
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
 
+# Tests build by default. -DBUILD_TESTING=OFF gives a sim-only / offline
+# configure. Declared before the guard below so the if() sees it. (option +
+# enable_testing rather than include(CTest): the latter also adds unused CDash
+# targets that would appear even at BUILD_TESTING=OFF.)
+option(BUILD_TESTING "Build the c_model gtest tree" ON)
+if(BUILD_TESTING)
+  enable_testing()
+endif()
+
+# yaml-cpp: shared by sim and tests, fetched in both modes.
 FetchContent_Declare(
   yaml-cpp
   GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
@@ -46,7 +48,18 @@ set(YAML_CPP_BUILD_TOOLS  OFF CACHE BOOL "" FORCE)
 set(YAML_CPP_FORMAT_SOURCE OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(yaml-cpp)
 
-enable_testing()
+# googletest: tests only. Skipped entirely when BUILD_TESTING=OFF, so a
+# sim-only / offline configure neither fetches nor builds it.
+if(BUILD_TESTING)
+  FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
+  )
+  # Windows MSVC compatibility
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
+endif()
 
 # GCC < 9 keeps std::filesystem in a separate library (libstdc++fs);
 # scenario_parser.hpp and several tests use std::filesystem, so targets must
@@ -59,9 +72,13 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
   message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} < 9: linking stdc++fs for std::filesystem")
 endif()
 
-# Scenario list INTERFACE library — must come before tests/ so that targets in
-# tests/axi/ and tests/wrap/ can link noc_axi4_scenarios.
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../sim/test_patterns
-                 ${CMAKE_CURRENT_BINARY_DIR}/sim/test_patterns)
-
-add_subdirectory(tests)
+# Tests and their scenario-list INTERFACE library. Both serve only the gtest
+# tree (noc_axi4_scenarios is consumed by tests/axi and tests/wrap, not by sim,
+# which reads scenario YAML at runtime), so they sit under the guard. The
+# scenarios subdir must come before tests/ so tests/axi and tests/wrap can link
+# noc_axi4_scenarios.
+if(BUILD_TESTING)
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../sim/test_patterns
+                   ${CMAKE_CURRENT_BINARY_DIR}/sim/test_patterns)
+  add_subdirectory(tests)
+endif()
