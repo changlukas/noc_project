@@ -34,26 +34,26 @@ cells executed, 64 pass / 10 fail). New fails beyond the excluded set:
 After the prune the real-bug worklist is `BUR-003` (all patterns + rob exclusion), `BUR-002`@hotspot,
 `STR-002`@neighbor, plus the still-excluded `ORD-002` hang. The `HSH-001` fails leave with the HSH delete.
 
-### Confirmed design bug — per-id VC binding (NEXT ROUND, fix first)
+### ~~Confirmed design bug — per-id VC binding~~ RESOLVED 2026-06-30
 
-User confirmed 2026-06-30: the per-id VC binding is a design bug; the mechanism should not exist.
+Fixed on branch `feat/vc-id-agnostic` (merged to main local, commits `253b744..e39d8bd`; spec
+`docs/superpowers/specs/2026-06-30-vc-binding-removal-design.md`, plan `docs/superpowers/plans/2026-06-30-vc-id-agnostic.md`).
+Root-cause confirmed: the cited "spec §8" does not exist (architecture.md ends at §7); the NMU pin was a
+self-added cross-transaction mechanism. RTL-verified FlooNoC alignment (floo_vc_arbiter round-robin,
+floo_rob arrival-offset, R bursts on one VC). Outcome: VC selection id-agnostic round-robin by class;
+same-id ordering = Enabled RoB (rob_idx) / Disabled single-outstanding interlock; NSU R-burst follow
+kept (renamed `r_burst_vc_`, burst coherence not an id pin); unit-test-only MultiCandidate mode deleted.
+ctest 522/522. Codex final review: 0 correctness findings.
 
-**Current (wrong):** for `num_vc>1`, `nmu::VcArbiter::push_flit` reads `awid`/`arid` and pins each AXI
-id to one VC for its read/write class — `write_binding_[id]=vc` / `read_binding_[id]=vc`
-(`nmu/vc_arbiter.hpp:192-228`, NSU `nsu/vc_arbiter.hpp:172-182`). The code comments cite "spec §8".
+**NOT yet verified — moved to next round (pattern/co-sim):** the `ORD-002` hang hypothesis (binding was
+the root cause) is UNPROVEN — this round ran unit tests only, no co-sim, no traffic pattern. Re-run
+`ORD-002` co-sim is the first verification step of the next prune→regress round (sequence unchanged:
+prune scenarios -> re-run regression -> triage). Fix H1 (below) before that run or every `*×hotspot`
+cell errors.
 
-**Correct (FlooNoC, per the survey in Design rounds):** VC selection is id-agnostic, by message class
-(read vs write); same-id ordering is preserved by the response RoB, not by pinning an id to a VC.
-
-**Fix scope:** remove the per-id `*_binding_` maps and id read in both NMU and NSU VcArbiter; select VC
-by class round-robin (id-agnostic). FIRST verify what spec §8 actually says (the comment may be an
-internal simplification mis-citing spec — root-cause the spec-vs-impl gap, do not just delete to match
-the survey).
-
-**Suspected blast radius:** the `ORD-002` hang (multi-id concurrent write, excluded) and the empty OoO
-bucket may be downstream of this binding (a same-class id pinned to a congested VC). Hypothesis, not
-verified — re-run `ORD-002` after the fix and check whether the hang clears. This reorders the
-next-session sequence: **fix VC binding -> prune scenarios -> re-run regression -> triage**.
+**Follow-up (#5, pre-existing, not introduced this round):** NSU `VcArbiter` still carries `use_pools_`
++ scalar `write_rsp_vc_`/`read_rsp_vc_` + a `!use_pools_` branch; NMU collapsed scalar into a size-1
+vector pool (no flag, no branch). Mirror NMU on the NSU side to remove the asymmetry. Shrink, ~-20 lines.
 
 ### Matrix harness bugs (codex-found)
 
@@ -200,7 +200,7 @@ behavior change). Pick a batch and open a round; do not bulk-delete.
 | specgen | `ni_spec/report.py` (0 caller) | delete | ~-190 (specgen area) |
 | specgen | 3 zero-caller invariant checkers (pin-uniqueness / related-features-symmetric / id-uniqueness) | delete | |
 | specgen | `cpp_params.py`/`sv_params.py` duplicate emitter; `constants.py` re-rolled safe-eval; `exceptions.py` 5-class tree | shrink | |
-| c_model | VcArbiter `MultiCandidate` (unit-test only; production = `ReadWriteSplit`) | yagni | ~-130 (headers) |
+| c_model | ~~VcArbiter `MultiCandidate`~~ DONE (deleted on `feat/vc-id-agnostic`, commit `253b744`) | yagni | ~-130 (headers) |
 | c_model | `peek_aw/w/ar/b/r` (10 methods; AxiDpiAdapter caller does not exist) | delete | |
 | c_model | `detail::NullSlavePort` (real owner is WireSlavePort), `check_b_one_response_per_write`, dead config `ni_req_extra_depth` | delete | |
 
