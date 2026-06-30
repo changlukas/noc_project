@@ -14,8 +14,10 @@ fixed.
 | id | symptom | suspected root cause | status |
 |---|---|---|---|
 | `AX4-ORD-002` | multi-id concurrent write (ids 0x1-0x4, `max_outstanding_write: 4`) hangs to the 100k-cycle co-sim timeout. Reproduces without preserve_addr. | RAW-release / NSU per-id response path | excluded |
-| `AX4-BND-006` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | NMU 4KB read-split under concurrent load | excluded |
-| `AX4-BND-007` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-006 (unconfirmed) | excluded (matrix.yaml) |
+| `AX4-BND-005` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | NMU 4KB read-split under concurrent load | excluded |
+| `AX4-BND-006` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-005 (unconfirmed) | excluded (matrix.yaml) |
+
+The 4KB carriers renumbered in the 2026-06-30 prune: old `BND-006` (cross_4kb_auto_split) → `BND-005`, old `BND-007` (4kb_boundary_edges) → `BND-006` (see the prune entry below for the full old→new map).
 
 The first full `make sim-regress` is a discovery run. Sweeping the curated set through the
 concurrent 16-node fabric will surface more pre-existing co-sim bugs. Add each to `matrix.yaml`
@@ -27,12 +29,12 @@ cells executed, 64 pass / 10 fail). New fails beyond the excluded set:
 | id | failing patterns | note | survives prune? |
 |---|---|---|---|
 | `AX4-BUR-003` | neighbor / uniform_random / transpose / hotspot (all 4, non-rob) | len 256; rob already excluded, non-rob fails on every pattern -> scenario-level fabric bug | yes (burst) |
-| `AX4-HSH-001` | all 4 patterns | backpressure/retry, traffic-independent | no (HSH deleted) |
+| `AX4-HSH-001` | all 4 patterns | backpressure/retry, traffic-independent | deleted in prune (was ≡ ORD-002 stimulus) |
 | `AX4-BUR-002` | hotspot only | other 3 pass -> hotspot congestion | yes (burst) |
-| `AX4-STR-002` | neighbor only | outstanding stress | yes (outstanding) |
+| `AX4-STR-002`→`STR-001` | neighbor only | outstanding stress | yes (outstanding) |
 
 After the prune the real-bug worklist is `BUR-003` (all patterns + rob exclusion), `BUR-002`@hotspot,
-`STR-002`@neighbor, plus the still-excluded `ORD-002` hang. The `HSH-001` fails leave with the HSH delete.
+`STR-001`@neighbor, plus the still-excluded `ORD-002` hang. The `HSH-001` fails left with the HSH delete.
 
 ### ~~Confirmed design bug — per-id VC binding~~ RESOLVED 2026-06-30
 
@@ -59,101 +61,48 @@ vector pool (no flag, no branch). Mirror NMU on the NSU side to remove the asymm
 
 | id | location | symptom | fix |
 |---|---|---|---|
-| H1 | `sim/regress/run_regress.py:91-98` (`run_cell`) + `sim/tools/gen_test_patterns.py:691` | `pattern=hotspot` cells error out. `run_cell` passes `--preserve-addr` but never `--hotspot`, and `gen_test_patterns` calls `ap.error("--hotspot is required")` when it is absent. The current nightly group-1 `BAS-003 x hotspot` cell hits this on the first complete run. | `run_cell` passes a default `--hotspot` target (e.g. the center tile) when `pattern == hotspot`. Hotspot stays in the matrix (user decision). |
+| ~~H1~~ DONE | `run_regress.py:149` | hotspot cells errored (no `--hotspot`). | Landed: `run_cell` passes `_interior_hotspot(topology)` when `pattern == hotspot`. |
 | H2 | `sim/tools/gen_test_patterns.py:701-702` | `preserve_addr` is ignored on the `uniform_random` / `hotspot` paths (they call `_emit_base_driven_node` without the preserve option). The deterministic paths honor it at `:630` and `:657`. Dormant today because the AX4 group runs only on `neighbor`. | Honor `preserve_addr` on all paths, or keep the address-agnostic group on default reallocation (which needs no preserve) and document the constraint. |
 | H3 | `sim/regress/run_regress.py:62-69` (`is_excluded`) | Exclusion matches only `from` / `pattern` / `topology` / `rob_mode`. A `from` scenario shared by a preserve group and a non-preserve group makes one exclusion hit both. | The full-cross split puts each `from` in one group, so this stays dormant. Add `preserve_addr` to the `when` key only if a scenario is ever shared. |
 
-## Next-session plan (2): prune scenario set to four shapes
+## AX4 scenario prune — DONE 2026-06-30
 
-(Plan 1 = fix the per-id VC binding bug, see Bugs. This prune runs after it.)
+Spec `docs/superpowers/specs/2026-06-30-ax4-scenario-prune-design.md`, plan
+`docs/superpowers/plans/2026-06-30-ax4-scenario-prune.md`, branch `feat/ax4-scenario-prune`. Supersedes
+the earlier strict-15 plan and the full-cross plan (the full cross — `all_independent_ax4` ×4 patterns /
+`all_dependent_ax4` ×neighbor preserve, classified by `metadata.address_mode` — already landed in
+`matrix.yaml`; this prune shrinks the scenario set feeding it).
 
-User decision (2026-06-30): keep only the single / burst / outstanding / out-of-order read/write
-shapes; delete the rest. Sequence: fix VC binding -> prune -> re-run `make sim-regress
-BUILD=mesh_4x4_vc1` -> triage remaining fails. A second-AI review (2026-06-30) flagged three traps in the literal keep-set:
+**Method: hybrid standard ∩ marginal value.** Surveyed standard AXI4 coverage (AMBA AXI4 spec +
+tim_axi4_vip / cocotbext-axi / OSVVM). Kept every cited standard point that adds marginal stimulus
+value; cut duplicates and non-AXI scenarios. Key correction over the strict-15 plan: BND
+(narrow/unaligned/4KB) and EXC (exclusive) are textbook wire-verifiable coverage and were **kept**, not
+cut.
 
-1. **STR family trap.** STR bundles latency / outstanding / multi-dst under one family name. The keep
-   target is outstanding only -> keep `STR-002`, drop `STR-001` (latency) and `STR-003` (multi-dst).
-   Keeping the whole family by name would smuggle in two dimensions not asked for.
-2. **OoO bucket is empty until the `ORD-002` hang is fixed.** `ORD-001` is same-id (AXI requires
-   same-id in-order, so it verifies "in-order stays in-order"). The real OoO case (diff-id may return
-   out of order) is `ORD-002`, which is the very scenario excluded for the multi-id concurrent-write
-   hang. Coverage reporting MUST state OoO is not yet exercised until that hang is fixed; do not count
-   it as covered.
-3. **ROB axis collapses on this subset.** ROB only acts on multiple-outstanding + may-reorder traffic.
-   single / in-order burst / same-id behave identically ROB on/off, so the ROB axis is redundant for
-   them. Only `STR-002` and `ORD-002` actually bite the ROB (these are the ROB-verifying scenarios).
+**Deleted 12** (stimulus duplicates / non-AXI / within-family redundant): `BAS-001` (write-only),
+`BAS-002` (default-fill), `BAS-004` (≡BAS-003), `BUR-007` (≡BUR-005), `BUR-008/009` (aligned WRAP never
+wraps), `BND-002` (⊂BND-003), `EXC-004` (excl+WRAP marginal), `HSH-001` (≡ORD-002 stimulus), `HSH-002`
+(≡BAS-003), `STR-001` (≡BAS-003), `INF-001` (non-AXI). HSH/STR-001 differed only in `write_latency` /
+`read_latency` — a **slave-model knob, not AXI stimulus** (`scenario→SlaveWrap→axi::Memory` response
+delay), so as patterns they are duplicates.
 
-**Strict wire-verifiable keep set (15):** `BAS-002/003/004` + `BUR-001..009` + `STR-002` +
-`ORD-001/002`. `BAS-001` (single write, no read) and `QOS-001` are write-only -> the wire-verifiable
-filter skips them anyway, so they leave with the prune.
+**Reclassified:** `STR-003` multi_dst_stress → `ORD-003_same_id_multi_dst` (`category: ordering`; only
+same-id-different-dst ordering case).
 
-**Delete:** `BND-001..007` (narrow / unaligned / sparse / 4KB), `EXC-001..004` (exclusive),
-`HSH-001..002` (backpressure), `INF-001` (dpi-fatal), `QOS-001`, `RSP-001..003` (error response),
-`STR-001` (latency), `STR-003` (multi-dst), `BAS-001` (write-only).
+**Renumber (gap-free) old→new:** `BAS-003`→`BAS-001`, `BAS-005`→`BAS-002`; `BND-003`→`BND-002`,
+`BND-004`→`BND-003`, `BND-005`→`BND-004`, `BND-006`→`BND-005`, `BND-007`→`BND-006`; `STR-002`→`STR-001`.
+`BND-001`, `BUR-001..006`, `EXC-001..003`, `ORD-001/002`, `QOS-001`, `RSP-001..003` unchanged.
 
-**Resolved — `BAS-005` drop (strict-15 = 15 scenarios).** VC binding is per-id: `num_vc>1` binds each id round-robin
-to one VC (`nmu/vc_arbiter.hpp:225,227`, NSU `:180,182`), so a single-id flow only ever touches one VC
-and vc4/vc8 spread needs >=4/>=8 distinct ids in flight. `STR-002` already injects ids `0x1..0x8` (8
-distinct) and runs, lighting all of vc8/vc4; `ORD-002` injects `0x1..0x4` (excluded, hang). BAS-005 is
-round_robin:4 -> its VC-spread is a subset of STR-002's and it adds no ROB coverage. Its only unique
-angle is single-beat x multi-id, marginal. (Earlier "only id-spread carrier" framing was wrong —
-STR-002 out-covers it.)
-
-**ROB axis — leave as-is.** Keep `rob_modes: [disabled, enabled]` across the matrix; no per-scenario
-ROB on/off prescription. Just record which scenarios actually verify ROB: **`STR-002`** (multi-
-outstanding) and **`ORD-002`** (diff-id reorder; excluded until the hang / VC-binding bug clears). The
-rest (single / in-order burst / same-id) are ROB-transparent.
-
-**matrix.yaml fallout:** drop the `BND-006`/`BND-007` exclusions (scenarios gone); keep `ORD-002`
-(out-of-order, still a fabric bug) and the `BUR-003`@rob exclusion. The full-cross plan below shrinks
-to the kept set (agnostic = `BAS-002..004`, `BUR-001..004`, `ORD-001`, `STR-002`; sensitive =
-`BUR-005..009`).
-
-## Full cross (orthogonal shape x spatial) — scope shrinks after the prune above
-
-Traffic pattern decides the destination tile (spatial). AX4 transaction pattern decides the read/write
-shape. The two axes are independent. The current matrix runs all 36 curated AX4 scenarios on `neighbor`
-only because it applies `preserve_addr` to the whole AX4 set. The runner imposes no such limit
-(`expand` cross-products the declared groups). Address-agnostic scenarios can run all 4 patterns
-through default offset reallocation: `_emit_base_driven_node` copies the base shape and moves only the
-address, grouping transactions by original local address so paired and ordered accesses stay
-consistent.
-
-`transpose` is a bijection on a square mesh (`gen_test_patterns.py:320-336` requires square power-of-two),
-so it does not converge. Only `uniform_random` and `hotspot` converge.
-
-Classify each AX4 scenario by whether its conformity depends on the absolute or low address bits.
-
-| group | scenarios | patterns | address mode |
-|---|---|---|---|
-| address-agnostic | `BAS-002..005`, `BUR-001..004` (INCR / FIXED), `EXC-001..003`, `HSH-*`, `ORD-001`, `STR-001/002` | neighbor, uniform_random, transpose, hotspot | default reallocation |
-| address-sensitive | `BND-*` (narrow / unaligned / sparse / 4KB), `BUR-005..009` (WRAP, wrap phase depends on start addr), `EXC-004` (WRAP pair), `RSP-*` (OOB vs memory window), `STR-003` (addr encodes dst) | neighbor | preserve_addr |
-
-`BAS-001` and `QOS-001` are write-only and `RSP-*` is `category: response`, so the wire-verifiable
-filter skips them in either group. `ORD-002` and `BND-006` stay excluded (fabric bugs above).
-
-**Cell count.** 16 agnostic scenarios x 4 patterns + 13 sensitive x 1 = 77 stimulus combinations x 8
-builds = 616 raw runnable cells, against 264 today (2.3x). The gain is the transaction-shape x
-spatial-pattern cross that the current single-carrier design omits.
-
-**Prerequisites (land with the cross):**
-- Fix H1 (hotspot default target), or every `agnostic x hotspot` cell errors.
-- Confirm EXC and ORD survive default reallocation under `uniform_random` / `transpose` / `hotspot`
-  (paired addresses stay paired, ids are copied unchanged, so likely fine).
-
-**Open decisions (ask at start of next session):**
-- Classification mechanism: hardcoded family/id lists in `run_regress._ax4_curated`, or a per-scenario
-  `metadata.address_sensitive: true` tag. The tag is self-documenting and survives new scenarios. The
-  lists need no per-scenario edits.
-- Fold the `BAS-003` carrier group into the agnostic group, or keep it explicit.
-- Accept the 2.3x cell-count, or start with a 1-2-per-family sentinel and grow by evidence.
+**Result:** 25 dirs = 21 wire matrix + 4 Layer-2 (`QOS-001`, `RSP-001..003`, kept on disk, auto-skipped
+by `is_self_checking`). Dry-run `mesh_4x4_vc1`: run=49.
 
 ## Verification methodology gaps
 
 | item | summary |
 |---|---|
 | injection-rate / saturation sweep | The benchmark runner measures one operating point and labels itself `greedy-finite-trace-stress`, "single operating point, no injection-rate sweep" (`sim/tools/run_benchmark.py:16-18,84-86,118`). A latency-vs-offered-load sweep is the measurement that exposes VC-count differences. Today vc1..vc8 latency reads flat because no sweep applies congestion. Needs an AxiMaster injection schedule driving the c_model interface. Recurs across the benchmark-generator, struct-refactor, and congestion-bugfix rounds. |
-| coverage + CRV + wire-side SVA | The matrix gates on the scoreboard only and skips non-wire-verifiable response/write-only cases (`sim/regress/README.md:17-23`, `run_regress.py:80-89`). No covergroup, no constrained-random framework, no wire-side protocol assertions. Make it actionable: a coverage plan plus co-sim scenario-coverage accounting (how many of the 37 AX4 actually run at co-sim), not a vague bucket. |
+| coverage + CRV + wire-side SVA | The matrix gates on the scoreboard only and skips non-wire-verifiable response/write-only cases (`sim/regress/README.md:17-23`, `run_regress.py:80-89`). No covergroup, no constrained-random framework, no wire-side protocol assertions. Make it actionable: a coverage plan plus co-sim scenario-coverage accounting (how many AX4 actually run at co-sim), not a vague bucket. |
+| slave-latency testbench axis | Slave-side backpressure coverage (subordinate not ready / response stall) belongs as a matrix axis sweeping a base scenario's `write_latency`/`read_latency` (analogous to `rob_modes`), not duplicate scenario files. The 2026-06-30 prune deleted HSH-001/002 + STR-001, which encoded backpressure only via this slave-model knob. Add the axis if slave-backpressure coverage is wanted; do not reintroduce duplicate scenarios. |
 
 ## Design rounds (broader)
 
