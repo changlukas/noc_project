@@ -1,9 +1,9 @@
 schema_version: 1
 metadata:
-  name: AX4-STR-003_multi_dst_stress
-  category: stress
+  name: AX4-ORD-003_same_id_multi_dst
+  category: ordering
 
-# multi_dst_stress: exercises ROB Disabled stall path + same-id concurrent read.
+# same_id_multi_dst: exercises ROB Disabled stall path + same-id concurrent read.
 #
 # 2 same-id writes at XYRouting dst boundaries (0x100 -> dst=0, 0x10100 -> dst=1).
 # AxiMaster (post AXI4 conformity fix) admits both AWs concurrently. ROB sees

@@ -38,7 +38,7 @@
 // non-zero in-flight pipelines exercise multi-cycle ordering paths the
 // zero-latency case hides.
 //
-// multi_dst_stress fixture acts as the real regression gate for ROB Enabled
+// same_id_multi_dst fixture acts as the real regression gate for ROB Enabled
 // mode reorder: 4 NSU stacks with per-NSU latency variance (NSU_0=10c,
 // NSU_1=2c, NSU_2=5c, NSU_3=3c) make NSU_1 return B for AW2 before NSU_0's B
 // for AW1. Rob Enabled must reorder before handing to AxiMaster so AXI4
@@ -80,12 +80,12 @@ constexpr std::size_t kMaxCycles = 200'000;
 constexpr uint8_t kNmuSrcId = 0x01;
 constexpr uint8_t kNsuSrcId = 0x02;
 
-// Multi-NSU constants for the multi_dst_stress regression gate.
+// Multi-NSU constants for the same_id_multi_dst regression gate.
 constexpr std::size_t kNumNsuMulti = 4;
 constexpr std::array<uint8_t, kNumNsuMulti> kNsuSrcIdsMulti = {0x10, 0x11, 0x12, 0x13};
 
 // PerIdOrderTracker — verifies per-id B/R beat arrival order at AxiMaster.
-// multi_dst_stress: id=0x05 B beats must arrive in submission order (AW1, AW2)
+// same_id_multi_dst: id=0x05 B beats must arrive in submission order (AW1, AW2)
 // regardless of physical NoC latency (AXI4 IHI 0022 §A5.3). Without Rob
 // Enabled mode reordering, NSU_1 (faster) returns B2 before NSU_0's B1,
 // violating the per-id order. We assert this directly as the regression
@@ -132,11 +132,11 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     auto nsu_params = nsu::load_nsu_port_params("config/port_params.yaml");
     auto cm_params = test::load_channel_model_params("config/port_params.yaml");
 
-    const bool is_multi_dst = yaml_path.find("AX4-STR-003_multi_dst_stress/") != std::string::npos;
+    const bool is_multi_dst = yaml_path.find("AX4-ORD-003_same_id_multi_dst/") != std::string::npos;
     const nmu::RobMode rob_mode = is_multi_dst ? nmu::RobMode::Enabled : nmu::RobMode::Disabled;
 
     // NoC test fixture: single-NSU for legacy fixtures (preserves existing
-    // global req/rsp delay path), multi-NSU for multi_dst_stress so we can
+    // global req/rsp delay path), multi-NSU for same_id_multi_dst so we can
     // wire 4 dst boundaries to 4 independent NSU stacks with per-NSU latency.
     std::unique_ptr<test::ChannelModel> channel_ptr;
     if (is_multi_dst) {
@@ -144,7 +144,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
             /*num_nsu=*/kNumNsuMulti,
             /*req_q_depth_per_nsu=*/cm_params.req_depth,
             /*rsp_q_depth_total=*/cm_params.rsp_depth);
-        // multi_dst_stress addresses: 0x100 -> dst=0, 0x10100 -> dst=1 via
+        // same_id_multi_dst addresses: 0x100 -> dst=0, 0x10100 -> dst=1 via
         // addr_trans::xy_route. Map dst_id {0..3} -> NSU {0..3}.
         channel_ptr->set_dst_route(0x00, 0);
         channel_ptr->set_dst_route(0x01, 1);
@@ -178,7 +178,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     nmu_cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
     nmu::Nmu nmu(nmu_cfg, channel.nmu_req_out(), channel.nmu_rsp_in());
 
-    // NSU stacks: 1 for legacy fixtures, 4 for multi_dst_stress.
+    // NSU stacks: 1 for legacy fixtures, 4 for same_id_multi_dst.
     // Each NSU owns its own MetaBuffer / Depacketize / Packetize / AxiMasterPort
     // so per-NSU response ordering is independent and the testbench stresses the
     // cross-NSU reorder path inside Rob (Enabled mode).
@@ -198,7 +198,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
             std::make_unique<nsu::Nsu>(nsu_cfg, channel.nsu_req_in(i), channel.nsu_rsp_out(i)));
     }
 
-    // Per-fixture override for ROB stall coverage: multi_dst_stress needs
+    // Per-fixture override for ROB stall coverage: same_id_multi_dst needs
     // max_outstanding_write >= 2 so AxiMaster admits both same-id writes
     // concurrently, forcing Rob to stall the 2nd until the 1st B returns.
     // ScenarioConfig defaults to 1 outstanding when the YAML omits the field,
@@ -233,7 +233,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     axi::Scoreboard sb;
     PerIdOrderTracker tracker;
     // Submission-order markers: use scenario_line (strictly increasing in
-    // YAML submission order; AW1=line 25, AW2=line 32 for multi_dst_stress).
+    // YAML submission order; AW1=line 25, AW2=line 32 for same_id_multi_dst).
     // record_b in completion order; verify_b_in_order checks the recorded
     // sequence is non-decreasing per id. If Rob fails to reorder and B2
     // arrives at AxiMaster before B1, the recorded sequence for id=0x05
@@ -413,11 +413,11 @@ TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
         << " rsp_delay=" << p.rsp_delay << " num_vc=" << p.num_vc << ")";
     if (r.is_multi_dst) {
         EXPECT_TRUE(r.b_order_ok)
-            << "multi_dst_stress: id=0x05 B beats arrived out of submission "
+            << "same_id_multi_dst: id=0x05 B beats arrived out of submission "
             << "order at AxiMaster. Rob Enabled mode failed to reorder despite "
             << "per-NSU latency variance (NSU_0=10c, NSU_1=2c).";
         EXPECT_TRUE(r.r_order_ok)
-            << "multi_dst_stress: id=0x05 R beats arrived out of submission "
+            << "same_id_multi_dst: id=0x05 R beats arrived out of submission "
             << "order at AxiMaster. Rob Enabled mode failed to reorder despite "
             << "per-NSU latency variance (NSU_0=10c, NSU_1=2c).";
     }
@@ -471,7 +471,7 @@ INSTANTIATE_TEST_SUITE_P(
         // testbench overrides max_outstanding_{write,read} to 2 for this
         // fixture so AxiMaster admits both same-id transactions concurrently.
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-STR-003_multi_dst_stress")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
             0u, 1u}),
     fixture_name_gen);
 
@@ -503,7 +503,7 @@ INSTANTIATE_TEST_SUITE_P(
                 router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
             2u, 3u, 2u},
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-STR-003_multi_dst_stress")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
             0u, 2u},
         // num_vc=4
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-002_incr_8beat")}, 0u,
@@ -526,7 +526,7 @@ INSTANTIATE_TEST_SUITE_P(
                 router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
             2u, 3u, 4u},
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-STR-003_multi_dst_stress")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
             0u, 4u},
         // num_vc=8
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-002_incr_8beat")}, 0u,
@@ -549,6 +549,6 @@ INSTANTIATE_TEST_SUITE_P(
                 router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
             2u, 3u, 8u},
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-STR-003_multi_dst_stress")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
             0u, 8u}),
     fixture_name_gen);
