@@ -11,13 +11,9 @@
 // through to the candidate scan below. The binding is released by
 // on_id_drained (a later task / the Rob drain hook).
 //
-// Two modes (compile-time selected via factory). Both select via the SAME
-// rule: the first VC in the channel's candidate set that has pending space
-// AND downstream credit wins (else backpressure). The modes differ only in
-// where the candidate set comes from:
-//   Mode A (ReadWriteSplit, default): derived per direction -- AW → write_vcs_,
-//     AR → read_vcs_.
-//   Mode B (MultiCandidate): the per-axi_ch candidate_vcs_ array.
+// ReadWriteSplit (only mode): candidate set is derived per direction —
+//   AW → write_vcs_, AR → read_vcs_. First VC in the candidate set with
+//   pending space AND downstream credit wins (else backpressure).
 //
 // W-follows-AW invariant (Constraint A1): this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
@@ -48,11 +44,6 @@
 
 namespace ni::cmodel::nmu {
 
-enum class VcMode {
-    ReadWriteSplit,
-    MultiCandidate,
-};
-
 class VcArbiter : public router::NocReqOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
@@ -62,26 +53,16 @@ class VcArbiter : public router::NocReqOut {
     static VcArbiter read_write_split(router::NocReqOut& downstream, std::size_t num_vc,
                                       uint8_t write_vc, uint8_t read_vc,
                                       std::size_t pending_depth = kDefaultPendingDepth) {
-        std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
-        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit, std::vector<uint8_t>{write_vc},
-                         std::vector<uint8_t>{read_vc}, std::move(empty_candidates), pending_depth);
+        return VcArbiter(downstream, num_vc, std::vector<uint8_t>{write_vc},
+                         std::vector<uint8_t>{read_vc}, pending_depth);
     }
 
     static VcArbiter read_write_split_pools(router::NocReqOut& downstream, std::size_t num_vc,
                                             std::vector<uint8_t> write_vcs,
                                             std::vector<uint8_t> read_vcs,
                                             std::size_t pending_depth = kDefaultPendingDepth) {
-        std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
-        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit, std::move(write_vcs),
-                         std::move(read_vcs), std::move(empty_candidates), pending_depth);
-    }
-
-    static VcArbiter multi_candidate(router::NocReqOut& downstream, std::size_t num_vc,
-                                     std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
-                                     std::size_t pending_depth = kDefaultPendingDepth) {
-        return VcArbiter(downstream, num_vc, VcMode::MultiCandidate,
-                         /*write_vcs*/ std::vector<uint8_t>{}, /*read_vcs*/ std::vector<uint8_t>{},
-                         std::move(candidate_vcs), pending_depth);
+        return VcArbiter(downstream, num_vc, std::move(write_vcs), std::move(read_vcs),
+                         pending_depth);
     }
 
     // NocReqOut decorator interface
@@ -105,16 +86,12 @@ class VcArbiter : public router::NocReqOut {
     bool has_current_aw() const noexcept { return current_aw_vc_.has_value(); }
 
   private:
-    VcArbiter(router::NocReqOut& downstream, std::size_t num_vc, VcMode mode,
-              std::vector<uint8_t> write_vcs, std::vector<uint8_t> read_vcs,
-              std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
-              std::size_t pending_depth)
+    VcArbiter(router::NocReqOut& downstream, std::size_t num_vc, std::vector<uint8_t> write_vcs,
+              std::vector<uint8_t> read_vcs, std::size_t pending_depth)
         : downstream_(downstream),
           num_vc_(num_vc),
-          mode_(mode),
           write_vcs_(std::move(write_vcs)),
           read_vcs_(std::move(read_vcs)),
-          candidate_vcs_(std::move(candidate_vcs)),
           pending_depth_(pending_depth) {
         assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
         for (uint8_t v : write_vcs_) assert(v < num_vc_);
@@ -124,17 +101,13 @@ class VcArbiter : public router::NocReqOut {
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id);
 
     const std::vector<uint8_t>* candidates_for(uint8_t axi_ch) const {
-        if (mode_ == VcMode::ReadWriteSplit)
-            return axi_ch == ni::AXI_CH_AW ? &write_vcs_ : &read_vcs_;
-        return &candidate_vcs_[axi_ch];
+        return axi_ch == ni::AXI_CH_AW ? &write_vcs_ : &read_vcs_;
     }
 
     router::NocReqOut& downstream_;
     std::size_t num_vc_;
-    VcMode mode_;
     std::vector<uint8_t> write_vcs_;
     std::vector<uint8_t> read_vcs_;
-    std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs_;
     std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;

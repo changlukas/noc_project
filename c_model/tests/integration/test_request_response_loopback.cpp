@@ -172,9 +172,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     nmu_cfg.write_rob_mode = rob_mode;
     nmu_cfg.read_rob_mode = rob_mode;
     nmu_cfg.port_params = nmu_params;
-    // Mode A (ReadWriteSplit): AW/W on write_vc=0, AR on read_vc=1 when num_vc>=2.
+    // ReadWriteSplit: AW/W on write_vc=0, AR on read_vc=1 when num_vc>=2.
     nmu_cfg.num_vc = num_vc;
-    nmu_cfg.vc_mode = nmu::VcMode::ReadWriteSplit;
     nmu_cfg.write_vc = 0;
     nmu_cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
     nmu::Nmu nmu(nmu_cfg, channel.nmu_req_out(), channel.nmu_rsp_in());
@@ -191,9 +190,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         nsu::NsuConfig nsu_cfg{};
         nsu_cfg.src_id = this_nsu_src;
         nsu_cfg.port_params = nsu_params;
-        // Mode A (ReadWriteSplit): B on write_rsp_vc=0, R on read_rsp_vc=1 when num_vc>=2.
+        // ReadWriteSplit: B on write_rsp_vc=0, R on read_rsp_vc=1 when num_vc>=2.
         nsu_cfg.num_vc = num_vc;
-        nsu_cfg.vc_mode = nsu::VcMode::ReadWriteSplit;
         nsu_cfg.write_rsp_vc = 0;
         nsu_cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
         nsus.emplace_back(

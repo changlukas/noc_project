@@ -14,7 +14,6 @@
 
 using ni::cmodel::Flit;
 using ni::cmodel::nmu::VcArbiter;
-using ni::cmodel::nmu::VcMode;
 using ni::cmodel::testing::ChannelModel;
 
 namespace {
@@ -83,45 +82,6 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
     EXPECT_EQ(f0->get_header_field("vc_id"), 0u);
     EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_AR);
     EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
-}
-
-// MultiCandidate HoL-avoidance.
-// Candidate lists are adapted to num_vc:
-//   num_vc=1  : single-VC, no multi-candidate overflow possible; skip
-//   num_vc=2  : AR={0,1}
-//   num_vc=4  : AR={0,1,2,3}
-//   num_vc=8  : AR={0,1,2,3,4,5,6,7}
-// The scenario: saturate the first AR candidate VC (VC=0) with pending_depth=2,
-// verify the next AR spills to VC=1 (second candidate). AR has no Constraint
-// A1 restriction (no AW/W pairing needed), so multiple ARs can be pushed freely.
-TEST_P(NmuVcArbParam, MultiCandidate_HoLAvoidance) {
-    const std::size_t num_vc = GetParam();
-    if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 for multi-candidate AR overflow";
-
-    SCENARIO(
-        "NMU VcArbiter Mode B: saturate first AR candidate VC (VC=0) -> "
-        "next AR picks second candidate VC (VC=1), avoiding head-of-line block");
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-
-    // AR spans all VCs in order; AW/W get a single VC=0 candidate.
-    std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
-    candidates[ni::AXI_CH_AW] = {0};
-    candidates[ni::AXI_CH_W] = {0};
-    for (std::size_t i = 0; i < num_vc; ++i) {
-        candidates[ni::AXI_CH_AR].push_back(static_cast<uint8_t>(i));
-    }
-    auto arb = VcArbiter::multi_candidate(noc.req_out(), num_vc, candidates, /*pending_depth=*/2);
-
-    // Distinct ARIDs: round-robin spreads ids across VCs from the start.
-    // id=1 -> vc=0 (rr=0), id=2 -> vc=1 (rr advances to 1 then 0).
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/2)));
-    EXPECT_EQ(arb.pending_size(0), 1u);
-    EXPECT_EQ(arb.pending_size(1), 1u);
-
-    // Next AR (distinct id): round-robin picks vc=0 again (or next free vc for larger pools).
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/3)));
-    EXPECT_EQ(arb.pending_size(1), 1u);
 }
 
 TEST_P(NmuVcArbParam, Binding_SameWriteId_SameVc) {
@@ -294,47 +254,6 @@ TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
     EXPECT_FALSE(arb.has_current_aw());
 }
 
-// Round-robin fairness: num_vc ARs pre-routed to num_vc distinct VCs via
-// Mode B candidates with pending_depth=1; tick num_vc times -> flits emerge
-// in RR order VC=0, VC=1, ..., VC=num_vc-1.
-// Requires num_vc ≥ 2 so there is more than one VC to arbitrate.
-TEST_P(NmuVcArbParam, RoundRobinFairness_AllVcsServiced_NoStarvation) {
-    const std::size_t num_vc = GetParam();
-    if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 to exercise round-robin";
-
-    SCENARIO(
-        "NMU VcArbiter Mode B: num_vc ARs pre-routed to distinct VCs via "
-        "candidate list; tick num_vc times -> flits emerge in RR order");
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
-    candidates[ni::AXI_CH_AW] = {0};
-    candidates[ni::AXI_CH_W] = {0};
-    // AR candidate list spans all VCs; pending_depth=1 fills each VC in order.
-    for (std::size_t i = 0; i < num_vc; ++i) {
-        candidates[ni::AXI_CH_AR].push_back(static_cast<uint8_t>(i));
-    }
-    auto arb = VcArbiter::multi_candidate(noc.req_out(), num_vc, candidates, /*pending_depth=*/1);
-
-    // Push num_vc ARs with DISTINCT ids: depth=1 forces each distinct flow
-    // onto the next free VC, so first fills VC=0, second VC=1, ..., etc.
-    for (std::size_t i = 0; i < num_vc; ++i) {
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, static_cast<uint8_t>(i + 1))));
-        EXPECT_EQ(arb.pending_size(i), 1u);
-    }
-
-    for (std::size_t i = 0; i < num_vc; ++i) arb.tick();
-
-    for (std::size_t i = 0; i < num_vc; ++i) {
-        EXPECT_EQ(arb.pending_size(i), 0u);
-    }
-
-    for (std::size_t expected_vc = 0; expected_vc < num_vc; ++expected_vc) {
-        auto f = noc.req_in().pop_flit();
-        ASSERT_TRUE(f.has_value());
-        EXPECT_EQ(f->get_header_field("vc_id"), expected_vc);
-    }
-}
-
 // Credit gating: ChannelModel per_vc_depth=1 caps downstream credit.
 // Works at any NUM_VC (the per-VC independent credit logic is the same).
 // Uses a single VC (VC=0) via read_write_split to keep the scenario simple.
@@ -443,49 +362,23 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcArbParam,
 
 TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
     SCENARIO(
-        "NMU VcArbiter: NUM_VC=1, both Mode A (read_write_split) and Mode B "
-        "(multi_candidate) route every axi_ch -> VC=0; behavior "
-        "observationally identical to direct Packetize -> ChannelModel");
+        "NMU VcArbiter: NUM_VC=1, read_write_split routes every axi_ch -> VC=0; "
+        "behavior observationally identical to direct Packetize -> ChannelModel");
 
-    // Mode A
-    {
-        ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
-        auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-        EXPECT_EQ(arb.pending_size(0), 3u);
-        arb.tick();
-        arb.tick();
-        arb.tick();
-        EXPECT_EQ(arb.pending_size(0), 0u);
-        for (int i = 0; i < 3; ++i) {
-            auto f = noc.req_in().pop_flit();
-            ASSERT_TRUE(f.has_value());
-            EXPECT_EQ(f->get_header_field("vc_id"), 0u);
-        }
-    }
-    // Mode B -- even with multi_candidate, num_vc=1 forces VC=0.
-    {
-        ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
-        std::array<std::vector<uint8_t>, VcArbiter::AXI_CH_COUNT> candidates{};
-        candidates[ni::AXI_CH_AW] = {0};
-        candidates[ni::AXI_CH_W] = {0};
-        candidates[ni::AXI_CH_AR] = {0};
-        auto arb = VcArbiter::multi_candidate(noc.req_out(), /*num_vc=*/1, candidates);
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
-        ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-        EXPECT_EQ(arb.pending_size(0), 3u);
-        arb.tick();
-        arb.tick();
-        arb.tick();
-        EXPECT_EQ(arb.pending_size(0), 0u);
-        for (int i = 0; i < 3; ++i) {
-            auto f = noc.req_in().pop_flit();
-            ASSERT_TRUE(f.has_value());
-            EXPECT_EQ(f->get_header_field("vc_id"), 0u);
-        }
+    ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
+    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    EXPECT_EQ(arb.pending_size(0), 3u);
+    arb.tick();
+    arb.tick();
+    arb.tick();
+    EXPECT_EQ(arb.pending_size(0), 0u);
+    for (int i = 0; i < 3; ++i) {
+        auto f = noc.req_in().pop_flit();
+        ASSERT_TRUE(f.has_value());
+        EXPECT_EQ(f->get_header_field("vc_id"), 0u);
     }
 }
 
@@ -623,7 +516,6 @@ TEST(NmuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
     cfg.num_vc = 4;
-    cfg.vc_mode = ni::cmodel::nmu::VcMode::ReadWriteSplit;
     cfg.write_vcs = {0, 1};
     cfg.read_vcs = {2, 3};
     auto arb = make_vc_arbiter(cfg, noc.req_out());

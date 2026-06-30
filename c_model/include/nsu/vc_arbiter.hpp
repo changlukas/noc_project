@@ -4,12 +4,8 @@
 // because NSU produces single-flit B (`floo_axi_chimney.sv:608-616`)
 // and multi-flit R uses ROB not wormhole (`floo_axi_chimney.sv:624-633`).
 //
-// Two modes parallel nmu::VcArbiter:
-//   Mode A (ReadWriteSplit, default): B -> write_rsp_vc; R -> read_rsp_vc.
-//   Mode B (MultiCandidate): per-axi_ch candidate VC list.
-//
-// NUM_VC=1 degenerate behavior: both modes route everything to VC=0 and
-// are observationally identical to the prior-round single-VC pipeline.
+// ReadWriteSplit (only mode): B -> write_rsp_vc; R -> read_rsp_vc.
+// NUM_VC=1 degenerate behavior: routes everything to VC=0.
 //
 // References:
 //   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md §7.2
@@ -28,11 +24,6 @@
 
 namespace ni::cmodel::nsu {
 
-enum class VcMode {
-    ReadWriteSplit,
-    MultiCandidate,
-};
-
 class VcArbiter : public router::NocRspOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
@@ -42,32 +33,20 @@ class VcArbiter : public router::NocRspOut {
     static VcArbiter read_write_split(router::NocRspOut& downstream, std::size_t num_vc,
                                       uint8_t write_rsp_vc, uint8_t read_rsp_vc,
                                       std::size_t pending_depth = kDefaultPendingDepth) {
-        std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
-        return VcArbiter(downstream, num_vc, VcMode::ReadWriteSplit, write_rsp_vc, read_rsp_vc,
-                         std::move(empty_candidates), pending_depth);
+        return VcArbiter(downstream, num_vc, write_rsp_vc, read_rsp_vc, pending_depth);
     }
 
     static VcArbiter read_write_split_pools(router::NocRspOut& downstream, std::size_t num_vc,
                                             std::vector<uint8_t> write_rsp_vcs,
                                             std::vector<uint8_t> read_rsp_vcs,
                                             std::size_t pending_depth = kDefaultPendingDepth) {
-        std::array<std::vector<uint8_t>, AXI_CH_COUNT> empty_candidates{};
-        VcArbiter a(downstream, num_vc, VcMode::ReadWriteSplit, /*write_rsp_vc=*/0,
-                    /*read_rsp_vc=*/0, std::move(empty_candidates), pending_depth);
+        VcArbiter a(downstream, num_vc, /*write_rsp_vc=*/0, /*read_rsp_vc=*/0, pending_depth);
         a.write_rsp_vcs_ = std::move(write_rsp_vcs);
         a.read_rsp_vcs_ = std::move(read_rsp_vcs);
         for (uint8_t v : a.write_rsp_vcs_) assert(v < num_vc && "write_rsp_vcs element >= num_vc");
         for (uint8_t v : a.read_rsp_vcs_) assert(v < num_vc && "read_rsp_vcs element >= num_vc");
         a.use_pools_ = true;
         return a;
-    }
-
-    static VcArbiter multi_candidate(router::NocRspOut& downstream, std::size_t num_vc,
-                                     std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
-                                     std::size_t pending_depth = kDefaultPendingDepth) {
-        return VcArbiter(downstream, num_vc, VcMode::MultiCandidate,
-                         /*write_rsp_vc*/ 0, /*read_rsp_vc*/ 0, std::move(candidate_vcs),
-                         pending_depth);
     }
 
     // NocRspOut decorator interface
@@ -81,15 +60,12 @@ class VcArbiter : public router::NocRspOut {
     uint8_t round_robin_ptr() const noexcept { return round_robin_ptr_; }
 
   private:
-    VcArbiter(router::NocRspOut& downstream, std::size_t num_vc, VcMode mode, uint8_t write_rsp_vc,
-              uint8_t read_rsp_vc, std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs,
-              std::size_t pending_depth)
+    VcArbiter(router::NocRspOut& downstream, std::size_t num_vc, uint8_t write_rsp_vc,
+              uint8_t read_rsp_vc, std::size_t pending_depth)
         : downstream_(downstream),
           num_vc_(num_vc),
-          mode_(mode),
           write_rsp_vc_(write_rsp_vc),
           read_rsp_vc_(read_rsp_vc),
-          candidate_vcs_(std::move(candidate_vcs)),
           pending_depth_(pending_depth) {
         assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
         assert(write_rsp_vc_ < num_vc_);
@@ -100,10 +76,8 @@ class VcArbiter : public router::NocRspOut {
 
     router::NocRspOut& downstream_;
     std::size_t num_vc_;
-    VcMode mode_;
     uint8_t write_rsp_vc_;
     uint8_t read_rsp_vc_;
-    std::array<std::vector<uint8_t>, AXI_CH_COUNT> candidate_vcs_;
     std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;
@@ -118,13 +92,6 @@ class VcArbiter : public router::NocRspOut {
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id) {
     if (num_vc_ == 1) return uint8_t{0};
-
-    if (mode_ == VcMode::MultiCandidate) {
-        for (uint8_t vc : candidate_vcs_[axi_ch]) {
-            if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
-        }
-        return std::nullopt;
-    }
 
     // ReadWriteSplit, scalar (no pools configured).
     if (!use_pools_) {

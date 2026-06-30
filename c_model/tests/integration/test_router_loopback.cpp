@@ -278,7 +278,6 @@ struct Flow {
         cfg.read_rob_mode = nmu::RobMode::Disabled;
         cfg.port_params = nmu::load_nmu_port_params("config/port_params.yaml");
         cfg.num_vc = num_vc;
-        cfg.vc_mode = nmu::VcMode::ReadWriteSplit;
         cfg.write_vc = 0;
         cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
         return cfg;
@@ -288,7 +287,6 @@ struct Flow {
         cfg.src_id = node_src_id(node);
         cfg.port_params = nsu::load_nsu_port_params("config/port_params.yaml");
         cfg.num_vc = num_vc;
-        cfg.vc_mode = nsu::VcMode::ReadWriteSplit;
         cfg.write_rsp_vc = 0;
         cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
         return cfg;

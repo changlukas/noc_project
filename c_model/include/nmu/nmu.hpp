@@ -125,12 +125,8 @@ struct NmuConfig {
     RobMode write_rob_mode = RobMode::Disabled;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
-    VcMode vc_mode = VcMode::ReadWriteSplit;
     uint8_t write_vc = 0;
     uint8_t read_vc = 0;
-    // Mode B candidate arrays; ignored when vc_mode == ReadWriteSplit.
-    // Indexed by axi_ch (AW=0, W=1, AR=2, B=3, R=4 per ni_flit_constants).
-    std::array<std::vector<uint8_t>, 5> vc_candidates{};
     // ReadWriteSplit pool variant: when non-empty, each class draws from a VC
     // pool with round-robin selection instead of the single write_vc/read_vc.
     std::vector<uint8_t> write_vcs{};
@@ -258,17 +254,12 @@ class Nmu {
 namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
-    if (cfg.vc_mode == VcMode::ReadWriteSplit) {
-        if (!cfg.write_vcs.empty() && !cfg.read_vcs.empty()) {
-            return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_vcs,
-                                                     cfg.read_vcs, cfg.vc_arbiter_pending_depth);
-        }
-        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
-                                           cfg.vc_arbiter_pending_depth);
+    if (!cfg.write_vcs.empty() && !cfg.read_vcs.empty()) {
+        return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_vcs,
+                                                 cfg.read_vcs, cfg.vc_arbiter_pending_depth);
     }
-    auto candidates = cfg.vc_candidates;  // copy; factory consumes by value
-    return VcArbiter::multi_candidate(downstream, cfg.num_vc, std::move(candidates),
-                                      cfg.vc_arbiter_pending_depth);
+    return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
+                                       cfg.vc_arbiter_pending_depth);
 }
 
 }  // namespace detail

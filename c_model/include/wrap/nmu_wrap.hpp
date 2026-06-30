@@ -51,7 +51,6 @@ class NmuWrap {
         NmuConfig cfg{};
         cfg.src_id = src_id;
         cfg.num_vc = num_vc;
-        cfg.vc_mode = VcMode::ReadWriteSplit;
         const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
         cfg.write_vcs = vc_pools.write_vcs;
         cfg.read_vcs = vc_pools.read_vcs;

@@ -53,10 +53,8 @@ struct NsuConfig {
     uint8_t src_id = 0;
     nsu::PortParams port_params{};
     std::size_t num_vc = 1;
-    VcMode vc_mode = VcMode::ReadWriteSplit;
     uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
     uint8_t read_rsp_vc = 0;   // R -> read_rsp_vc
-    std::array<std::vector<uint8_t>, 5> vc_candidates{};
     // ReadWriteSplit pool variant (response side): non-empty -> per-class pool
     // with per-id binding + round-robin, mirroring the NMU request side.
     std::vector<uint8_t> write_rsp_vcs{};
@@ -139,18 +137,12 @@ class Nsu {
 namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downstream) {
-    if (cfg.vc_mode == VcMode::ReadWriteSplit) {
-        if (!cfg.write_rsp_vcs.empty() && !cfg.read_rsp_vcs.empty()) {
-            return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_rsp_vcs,
-                                                     cfg.read_rsp_vcs,
-                                                     cfg.vc_arbiter_pending_depth);
-        }
-        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vc,
-                                           cfg.read_rsp_vc, cfg.vc_arbiter_pending_depth);
+    if (!cfg.write_rsp_vcs.empty() && !cfg.read_rsp_vcs.empty()) {
+        return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_rsp_vcs,
+                                                 cfg.read_rsp_vcs, cfg.vc_arbiter_pending_depth);
     }
-    auto candidates = cfg.vc_candidates;
-    return VcArbiter::multi_candidate(downstream, cfg.num_vc, std::move(candidates),
-                                      cfg.vc_arbiter_pending_depth);
+    return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vc, cfg.read_rsp_vc,
+                                       cfg.vc_arbiter_pending_depth);
 }
 
 }  // namespace detail
