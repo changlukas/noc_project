@@ -13,7 +13,7 @@ fixed.
 
 | id | symptom | suspected root cause | status |
 |---|---|---|---|
-| `AX4-ORD-002` | multi-id concurrent write (ids 0x1-0x4, `max_outstanding_write: 4`) hangs to the 100k-cycle co-sim timeout. Reproduces without preserve_addr. | RAW-release / NSU per-id response path | excluded |
+| `AX4-ORD-002` | multi-id concurrent write (ids 0x1-0x4, `max_outstanding_write: 4`) hangs to the 100k-cycle co-sim timeout. Reproduces without preserve_addr. | RAW-release / NSU per-id response path (NOT VC binding — see below) | excluded |
 | `AX4-BND-005` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | NMU 4KB read-split under concurrent load | excluded |
 | `AX4-BND-006` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-005 (unconfirmed) | excluded (matrix.yaml) |
 
@@ -101,6 +101,14 @@ fails are pre-existing fabric bugs already in the discovery table — `BUR-003` 
 `BUR-002`@hotspot, `STR-001`@neighbor — no new fail from the prune/renumber, and the `HSH-001` noise is
 gone. Left red (not excluded, user decision) as the active worklist for the next fabric-bug debugging
 round; `matrix.yaml` unchanged.
+
+**ORD-002 hang hypothesis — REFUTED 2026-06-30.** The VC-binding-removal round
+([[project_vc_id_agnostic_landed]]) left open whether removing the per-id VC binding fixed the ORD-002
+hang. Tested at this round's tail: un-excluded ORD-002, ran one cell `mesh_4x4_vc1` / neighbor /
+preserve-addr — **still hangs** (`%Fatal: timeout after 100000 cycles`). So the binding was NOT the
+root cause; ORD-002 is an independent fabric bug. Stays excluded. Next round's fabric-bug worklist is
+**4**: `BUR-003`, `BUR-002`@hotspot, `STR-001`@neighbor, `ORD-002` (debug toward the suspected
+RAW-release / NSU per-id response path, not VC binding).
 
 ## Verification methodology gaps
 
