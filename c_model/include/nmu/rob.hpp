@@ -88,12 +88,12 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Enabled mode is exercised.
     std::size_t write_occupancy() const {
         std::size_t n = 0;
-        for (const auto& s : write_) n += s.write_outstanding ? 1 : 0;
+        for (bool s : write_outstanding_) n += s ? 1 : 0;
         return n;
     }
     std::size_t read_occupancy() const {
         std::size_t n = 0;
-        for (const auto& s : read_) n += s.read_outstanding ? 1 : 0;
+        for (bool s : read_outstanding_) n += s ? 1 : 0;
         return n;
     }
 
@@ -104,14 +104,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 
     // Per-AXI-ID single-outstanding flag. True while one AW/AR is in flight for
     // that id; cleared by B (for writes) or R(last) (for reads) in pop_b/pop_r.
-    struct WriteState {
-        bool write_outstanding = false;
-    };
-    struct ReadState {
-        bool read_outstanding = false;
-    };
-    std::array<WriteState, axi::AXI_ID_SPACE> write_;
-    std::array<ReadState, axi::AXI_ID_SPACE> read_;
+    std::array<bool, axi::AXI_ID_SPACE> write_outstanding_{};
+    std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
 
     // W burst credit gate: prevents W beats from reaching Packetize before
     // their corresponding AW has been ROB-accepted. Single counter (not per-id)
@@ -158,9 +152,6 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::deque<CommittedREntry> committed_r_queue_;
     std::array<uint8_t, ROB_CAPACITY> committed_b_pending_{};
     std::array<uint8_t, ROB_CAPACITY> committed_r_pending_{};
-
-    bool write_id_has_pending_(uint8_t id) const;
-    bool read_id_has_pending_(uint8_t id) const;
 };
 
 // Linear scan for n consecutive free slots. See declaration above.
@@ -199,12 +190,11 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         return true;
     }
     auto t = addr_trans::xy_route(b.addr);
-    auto& s = write_[b.id];
-    if (s.write_outstanding) return false;  // single-outstanding per id
+    if (write_outstanding_[b.id]) return false;  // single-outstanding per id
     if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
         return false;  // downstream backpressure: NO state change
     }
-    s.write_outstanding = true;
+    write_outstanding_[b.id] = true;
     w_burst_credit_++;
     return true;
 }
@@ -238,12 +228,11 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         return true;
     }
     auto t = addr_trans::xy_route(b.addr);
-    auto& s = read_[b.id];
-    if (s.read_outstanding) return false;  // single-outstanding per id
+    if (read_outstanding_[b.id]) return false;  // single-outstanding per id
     if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
         return false;
     }
-    s.read_outstanding = true;
+    read_outstanding_[b.id] = true;
     return true;
 }
 
@@ -256,9 +245,8 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
     }
     auto opt = next_depkt_.pop_b();
     if (!opt) return std::nullopt;
-    auto& s = write_[opt->id];
-    assert(s.write_outstanding && "B for id with no outstanding write");
-    s.write_outstanding = false;
+    assert(write_outstanding_[opt->id] && "B for id with no outstanding write");
+    write_outstanding_[opt->id] = false;
     return opt;
 }
 
@@ -272,9 +260,8 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
     auto opt = next_depkt_.pop_r();
     if (!opt) return std::nullopt;
     if (opt->last) {
-        auto& s = read_[opt->id];
-        assert(s.read_outstanding && "R(last) for id with no outstanding read");
-        s.read_outstanding = false;
+        assert(read_outstanding_[opt->id] && "R(last) for id with no outstanding read");
+        read_outstanding_[opt->id] = false;
     }
     return opt;
 }
@@ -380,20 +367,6 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     auto out = committed_r_queue_.front();
     committed_r_queue_.pop_front();
     return out;
-}
-
-inline bool Rob::write_id_has_pending_(uint8_t id) const {
-    for (std::size_t i = 0; i < ROB_CAPACITY; ++i) {
-        if (committed_b_pending_[i] != 0 && write_entries_[i].axi_id == id) return true;
-    }
-    return false;
-}
-
-inline bool Rob::read_id_has_pending_(uint8_t id) const {
-    for (std::size_t i = 0; i < ROB_CAPACITY; ++i) {
-        if (committed_r_pending_[i] != 0 && read_entries_[i].axi_id == id) return true;
-    }
-    return false;
 }
 
 inline void Rob::commit_b_exit(uint8_t rob_idx, uint8_t axi_id) {

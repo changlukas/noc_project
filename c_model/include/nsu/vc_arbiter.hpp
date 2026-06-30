@@ -31,7 +31,6 @@ namespace ni::cmodel::nsu {
 class VcArbiter : public router::NocRspOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
-    static constexpr std::size_t AXI_CH_COUNT = 5;  // AW, W, AR, B, R (AW/W/AR unused on NSU)
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
     static VcArbiter read_write_split(router::NocRspOut& downstream, std::size_t num_vc,

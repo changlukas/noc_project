@@ -43,7 +43,6 @@ namespace ni::cmodel::nmu {
 class VcArbiter : public router::NocReqOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
-    static constexpr std::size_t AXI_CH_COUNT = 5;  // AW, W, AR, B, R (B/R unused on NMU)
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
     static VcArbiter read_write_split(router::NocReqOut& downstream, std::size_t num_vc,

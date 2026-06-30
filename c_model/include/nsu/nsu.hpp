@@ -55,8 +55,10 @@ struct NsuConfig {
     std::size_t num_vc = 1;
     uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
     uint8_t read_rsp_vc = 0;   // R -> read_rsp_vc
-    // ReadWriteSplit pool variant (response side): non-empty -> per-class pool
-    // with per-id binding + round-robin, mirroring the NMU request side.
+    // ReadWriteSplit pool variant (response side): non-empty -> per-class pool.
+    // B: id-agnostic round-robin over write_rsp_vcs.
+    // R: first beat of each rid round-robins over read_rsp_vcs; later beats of
+    //    that rid reuse the same VC until rlast (burst-follow, not per-id pin).
     std::vector<uint8_t> write_rsp_vcs{};
     std::vector<uint8_t> read_rsp_vcs{};
     std::size_t wormhole_per_input_depth = 4;
