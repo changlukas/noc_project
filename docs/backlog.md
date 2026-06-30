@@ -13,9 +13,9 @@ fixed.
 
 | id | symptom | suspected root cause | status |
 |---|---|---|---|
-| `AX4-ORD-002` | multi-id concurrent write (ids 0x1-0x4, `max_outstanding_write: 4`) hangs to the 100k-cycle co-sim timeout. Reproduces without preserve_addr. | RAW-release / NSU per-id response path (NOT VC binding — see below) | excluded |
-| `AX4-BND-005` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | NMU 4KB read-split under concurrent load | excluded |
-| `AX4-BND-006` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-005 (unconfirmed) | excluded (matrix.yaml) |
+| `AX4-ORD-002` | multi-id concurrent write hang (was flaky/clustered, not deterministic). | **FIXED 2026-06-30** — test-master read sub-burst AR drop (`WireSlavePort::push_ar`), see "Fabric-bug round" below. NOT uninit / RAW-release / VC binding. 0 hangs in 15x loop. Still excluded in `matrix.yaml` pending un-exclude. | fixed, excluded |
+| `AX4-BND-005` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | **Same class as the fixed AR-drop** (4KB-crossing read splits into sub-burst ARs -> dropped). LIKELY FIXED by the push_ar gate; re-check before un-excluding. | excluded (re-check) |
+| `AX4-BND-006` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-005; likely fixed by the push_ar gate, re-check. | excluded (re-check) |
 
 The 4KB carriers renumbered in the 2026-06-30 prune: old `BND-006` (cross_4kb_auto_split) → `BND-005`, old `BND-007` (4kb_boundary_edges) → `BND-006` (see the prune entry below for the full old→new map).
 
@@ -35,6 +35,57 @@ cells executed, 64 pass / 10 fail). New fails beyond the excluded set:
 
 After the prune the real-bug worklist is `BUR-003` (all patterns + rob exclusion), `BUR-002`@hotspot,
 `STR-001`@neighbor, plus the still-excluded `ORD-002` hang. The `HSH-001` fails left with the HSH delete.
+
+### Fabric-bug round — 2026-06-30. Worklist re-triaged into 3 distinct modes
+
+Reproduced each item in isolation (single scenario replicated across 16 nodes). The four entries
+collapse into three unrelated failure modes, not one fabric bug:
+
+| id | actual mode | finding |
+|---|---|---|
+| `BUR-003`, `ORD-002` | **flaky cycle-deadlock — FIXED** | Was non-deterministic + CLUSTERED (isolated reruns pass 20-45x, then a regression-load burst fails the same binary). Root cause = the test master dropping read sub-burst ARs (below), not a fabric bug. Fixed; 0 hangs across repeated regressions + loops. |
+| `STR-001` | gen-crash FIXED; residual data mismatch | The `gen_test_patterns alloc_unique_offset` overflow (8 unique addrs + `preserve_addr` over the `memory_size 0x1000` window) is fixed by enlarging the scenario `memory_size` to `0x4000`. With gen passing and the deadlock fixed, the cell no longer hangs but now fails a scoreboard DATA MISMATCH (8-outstanding multi-id) — folds into the residual data-mismatch worklist, not the deadlock. |
+| `BUR-002`@hotspot | **scoreboard data mismatch, not a hang** | Fails fast with a readback mismatch under hotspot congestion. Independent of the deadlock. Now joined by `BUR-003`@hotspot (its hang was masking the same hotspot mismatch). Next round; may be nmu/nsu/router (apply FlooNoC cross-check). |
+
+**ROOT CAUSE (FIXED) — test AXI master dropped read sub-burst ARs; NOT a fabric/router/uninit bug.**
+
+Found by a timeout state dump (per-router FIFO/credit/wormhole-lock + per-master done/outstanding/
+sub-burst progress). The dump is decisive:
+
+- At every hang the ENTIRE router fabric is EMPTY: all input/output FIFOs empty, all per-VC credits
+  full, zero wormhole locks, both REQ and RSP nets. So it is NOT a fabric wormhole/credit deadlock
+  (refutes the first hypothesis). Nothing is in the network.
+- Every master is stuck `done=0` with nothing in flight: `active_read=1`, and the stuck read shows
+  `ar_sub=N/N r_sub=1` — the read split (4KB boundary) into N same-AXI-id sub-burst ARs, the master
+  marked ALL N issued, but only 1 sub-burst's R-burst ever returned.
+
+The drop site is `detail::WireSlavePort::push_ar` in `c_model/include/axi/axi_master.hpp`. `push_w`
+has a `w_delivered_this_tick_` one-beat-per-tick gate (the registered SV wire transfers one beat per
+clock); `push_ar` (and `push_aw`) lacked it. The read-side caller `push_reads_` loops over all
+sub-burst ARs in one tick; when `arready` is high it consumes the whole loop — every sub-burst AR is
+marked delivered while only ONE reached the wire. The other sub-bursts' ARs are silently dropped, so
+their R-bursts never return and the read never completes. Flaky/clustered because it only fires on a
+tick where `arready` is high while the loop runs; the write path was masked because `push_w`'s gate
+serializes AWs indirectly.
+
+The earlier `-ftrivial-auto-var-init` signal was a RED HERRING: zero/pattern fill only shifts the
+arbitration timing (whether `arready` is high during the loop tick), modulating the trigger rate. It
+was never an uninitialized-read bug. The `CMODEL_CXX_HARDENING` build flag was REMOVED once the real
+fix landed (it fixed nothing).
+
+**FIX:** add `ar_delivered_this_tick_` / `aw_delivered_this_tick_` gates to `push_ar` / `push_aw`,
+reset in `set_arready` / `set_awready`, mirroring `push_w`. One-beat-per-tick on all three request
+channels is the correct registered-wire model. Verified: 3× `make sim-regress BUILD=mesh_4x4_vc1`
+with ZERO timeouts (was a reliable 5-hang cluster), plus 15× BUR-003 neighbor and 15× ORD-002 loops
+with 0 hangs. Debugged with a timeout state dump (since removed) and a read-only Codex cross-check.
+
+**RESIDUAL (separate, deterministic, NOT the deadlock):** `make sim-regress BUILD=mesh_4x4_vc1` now
+`pass=46 fail=3`. The 3 fails are scoreboard DATA MISMATCHES (not hangs): `BUR-002`@hotspot,
+`BUR-003`@hotspot, `STR-001`@neighbor. The hotspot pair is congestion-related; STR-001 is the
+8-outstanding multi-id case. These are the next round's worklist and MAY be in nmu/nsu/router — apply
+the FlooNoC cross-check there. ctest not re-run on this host (pre-existing GCC ICE on
+`test_pins_smoke`); the fix is confined to the cosim `WireSlavePort` so unit tests using other slave
+ports are unaffected.
 
 ### ~~Confirmed design bug — per-id VC binding~~ RESOLVED 2026-06-30
 

@@ -662,20 +662,32 @@ struct WireSlavePort {
     // Beta-tick semantics: set_wready resets the per-tick delivery gate.
     // Only ONE W beat is accepted per tick (modelling the 1-beat-per-clock-edge
     // constraint of the registered SV wire in the co-sim beta-tick discipline).
-    void set_awready(bool v) noexcept { awready_ = v; }
+    void set_awready(bool v) noexcept {
+        awready_ = v;
+        aw_delivered_this_tick_ = false;  // reset gate each tick
+    }
     void set_wready(bool v) noexcept {
         wready_ = v;
         w_delivered_this_tick_ = false;  // reset gate each tick
     }
-    void set_arready(bool v) noexcept { arready_ = v; }
+    void set_arready(bool v) noexcept {
+        arready_ = v;
+        ar_delivered_this_tick_ = false;  // reset gate each tick
+    }
 
     // Called by AxiMasterT to present a request beat. Returns true (handshake
     // complete) only when the corresponding ready signal is high.
     bool push_aw(const AwBeat& b) {
         last_aw_ = b;
         aw_pending_ = true;
-        if (!awready_) return false;
+        // One AW beat per tick: the registered SV wire transfers at most one
+        // AW per clock edge. Without this gate a same-tick caller loop (e.g. a
+        // multi-sub-burst write) would mark every sub-burst AW delivered while
+        // only one reached the wire, silently dropping the rest. Mirrors push_w
+        // / push_ar (see the AR-drop deadlock fix, docs/backlog.md).
+        if (!awready_ || aw_delivered_this_tick_) return false;
         aw_pending_ = false;
+        aw_delivered_this_tick_ = true;
         return true;
     }
     bool push_w(const WBeat& b) {
@@ -689,8 +701,17 @@ struct WireSlavePort {
     bool push_ar(const ArBeat& b) {
         last_ar_ = b;
         ar_pending_ = true;
-        if (!arready_) return false;
+        // One AR beat per tick: the registered SV wire transfers at most one AR
+        // per clock edge. The read-side caller (push_reads_) loops over all
+        // 4KB-split sub-burst ARs in a single tick; without this gate, when
+        // arready is high it would mark EVERY sub-burst AR delivered while only
+        // one reached the wire, silently dropping the rest -> the dropped reads'
+        // R-bursts never return -> co-sim deadlock (AX4-BUR-003/ORD-002). The
+        // bug was masked on the write path because push_w's gate serializes AWs
+        // indirectly. Mirrors push_w. See docs/backlog.md "Fabric-bug round".
+        if (!arready_ || ar_delivered_this_tick_) return false;
         ar_pending_ = false;
+        ar_delivered_this_tick_ = true;
         return true;
     }
 
@@ -744,7 +765,9 @@ struct WireSlavePort {
     bool awready_ = false;
     bool wready_ = false;
     bool arready_ = false;
-    bool w_delivered_this_tick_ = false;  // beta-tick: max 1 W beat per tick
+    bool aw_delivered_this_tick_ = false;  // beta-tick: max 1 AW beat per tick
+    bool w_delivered_this_tick_ = false;   // beta-tick: max 1 W beat per tick
+    bool ar_delivered_this_tick_ = false;  // beta-tick: max 1 AR beat per tick
 
     bool aw_pending_ = false;
     AwBeat last_aw_{};
