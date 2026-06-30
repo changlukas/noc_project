@@ -84,99 +84,6 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
     EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
 }
 
-TEST_P(NmuVcArbParam, Binding_SameWriteId_SameVc) {
-    // AW-path smoke check (the sticky-vs-distinct discriminator tests use the AR path).
-    // Distinct angle: the binding survives the AW + W-burst-close boundary on the
-    // write path (current_aw_vc_ reset on wlast, then re-bind of the same AWID).
-    SCENARIO(
-        "VcArbiter: same AWID re-binds to its VC across the AW + W-burst-close boundary "
-        "(current_aw_vc_ reset, write-path smoke check; multi-element write set)");
-    const auto num_vc = GetParam();
-    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs for a multi-element write set";
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
-    uint8_t v1 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, 0, 0, 0, /*id=*/7));
-    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));  // close burst
-    arb.tick();
-    noc.req_in().pop_flit();
-    uint8_t v2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, 0, 0, 0, /*id=*/7));
-    EXPECT_EQ(v1, v2) << "same AWID must reuse the same VC";
-}
-
-TEST_P(NmuVcArbParam, Binding_PerIdStickyAndDistinctIdsIndependent) {
-    SCENARIO(
-        "VcArbiter: a bound id sticks to its VC across a full drain regardless of pool pressure");
-    const auto num_vc = GetParam();
-    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3},
-                                                 /*pending_depth=*/2);
-    // Round-robin spreads three ids: id=5->vc2 (rr=0), id=6->vc3 (rr=1), id=7->vc2 (rr wraps).
-    // Use raw push_flit (no drain): pending stays filled for the depth-limit to hold.
-    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5)));  // -> vc2
-    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/6)));  // -> vc3
-    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/7)));  // -> vc2
-    EXPECT_EQ(arb.pending_size(2), 2u) << "vc2 holds ids 5,7 (round-robin wraps back)";
-    EXPECT_EQ(arb.pending_size(3), 1u) << "vc3 holds id=6 (round-robin spread)";
-    // Drain every read-set VC. Bindings persist (id7->vc2) across the drain.
-    while (arb.pending_size(2) != 0 || arb.pending_size(3) != 0) {
-        arb.tick();
-        noc.req_in().pop_flit();
-    }
-    EXPECT_EQ(arb.pending_size(2), 0u);
-    EXPECT_EQ(arb.pending_size(3), 0u);
-    // Re-push id=7: binding sticks to vc2 (assigned by round-robin on first push).
-    uint8_t v7b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/7));
-    EXPECT_EQ(v7b, 2) << "bound id=7 must stay on vc2 (its round-robin assignment)";
-}
-
-TEST_P(NmuVcArbParam, Binding_RebindAfterDrain) {
-    SCENARIO("VcArbiter: on_id_drained frees a binding; the id then re-binds (and sticks anew)");
-    const auto num_vc = GetParam();
-    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
-    uint8_t first = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
-    EXPECT_TRUE(first == 2 || first == 3);
-    arb.on_id_drained(/*is_write=*/false, /*id=*/5);  // release the binding
-    // NOTE: selection is deterministic first-available and push_and_vc drains the
-    // queue empty, so `rebind` coincides with `first` here. This test verifies the
-    // release made id=5 re-selectable and that the new choice sticks — it does NOT
-    // (and cannot, without depth plumbing) assert a binding can land on a DIFFERENT
-    // VC after release.
-    uint8_t rebind = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
-    EXPECT_TRUE(rebind == 2 || rebind == 3);
-    uint8_t rebind2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/5));
-    EXPECT_EQ(rebind2, rebind) << "after re-binding, id=5 sticks to the new VC";
-}
-
-TEST_P(NmuVcArbParam, Binding_MidFlightSameIdReusesVc) {
-    SCENARIO("VcArbiter: a second same-id packet before any drain-release reuses the same VC");
-    const auto num_vc = GetParam();
-    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3});
-    uint8_t v = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/9));
-    uint8_t v2 = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/9));  // no release
-    EXPECT_EQ(v2, v);
-}
-
-TEST_P(NmuVcArbParam, Binding_DistinctIdsSpreadUnderDepthPressure) {
-    SCENARIO("VcArbiter: with pending_depth=1, distinct ARIDs land on different VCs");
-    const auto num_vc = GetParam();
-    if (num_vc < 4) GTEST_SKIP() << "needs >=4 VCs";
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    // depth 1: once id=1 binds+fills its VC, the next distinct id cannot reuse it.
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), num_vc, {0, 1}, {2, 3},
-                                                 /*pending_depth=*/1);
-    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/1)));  // binds + fills
-    EXPECT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/2)));  // must pick the other
-    // No tick/drain between: assert the two ids occupy DIFFERENT read-set VCs via introspection.
-    std::size_t in2 = arb.pending_size(2), in3 = arb.pending_size(3);
-    EXPECT_EQ(in2 + in3, 2u) << "both flits queued in the read set";
-    EXPECT_TRUE(in2 == 1 && in3 == 1) << "distinct ids forced onto different VCs under depth=1";
-}
-
 // W follows AW invariant: all W beats of a burst route to the same VC as
 // their paired AW. With Constraint A1 (WormholeArbiter upstream serializes
 // AW + all W beats before next AW), a single outstanding AW at a time is
@@ -332,17 +239,16 @@ TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossPool) {
     EXPECT_EQ(vc_d, 3u);
 }
 
-// Single id pins to one VC: a bound id reuses its VC; round-robin never fires.
-// Documents the precondition that spread needs MULTIPLE distinct unbound ids.
-TEST(NmuVcArbiterRoundRobin, SingleReadIdPinsToOneVc) {
-    SCENARIO("NMU VcArbiter pools: one arid stays on its bound VC across bursts");
+// Same id no longer pins a VC: consecutive same-id ARs round-robin the read pool.
+TEST(NmuVcArbiterRoundRobin, SameReadIdRoundRobinsAcrossPool) {
+    SCENARIO("NMU VcArbiter pools: same arid round-robins the read pool (no id pin)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
                                                  /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
-    uint8_t first = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x20));
-    // Same id never drains its binding here (no on_id_drained call), so it sticks.
-    uint8_t again = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x20));
-    EXPECT_EQ(first, again);
+    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x20));
+    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x20));
+    EXPECT_EQ(a, 2u);
+    EXPECT_EQ(b, 3u) << "same id must NOT pin; round-robin advances to the next pool VC";
 }
 
 INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcArbParam,

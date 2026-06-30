@@ -281,10 +281,7 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       s2_rsp_b_(),
       s2_rsp_r_(),
       rsp_extra_b_shift_(cfg_.ni_rsp_extra_depth),
-      rsp_extra_r_shift_(cfg_.ni_rsp_extra_depth) {
-    rob_.set_drain_observer(
-        [this](bool is_write, uint8_t id) { vc_arbiter_.on_id_drained(is_write, id); });
-}
+      rsp_extra_r_shift_(cfg_.ni_rsp_extra_depth) {}
 
 inline void Nmu::tick() {
     wormhole_arbiter_.tick();

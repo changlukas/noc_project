@@ -11,7 +11,6 @@
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
-#include <functional>
 #include <optional>
 #include <utility>
 
@@ -84,13 +83,6 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // O(ROB_CAPACITY) worst case. Public for direct unit testing (TDD).
     static int find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n);
 
-    // Fired with (is_write, axi_id) exactly once on the transition where that id's
-    // outstanding source becomes empty (edge-triggered, not level) -- i.e. when the
-    // last response of that id is popped. No-op until an observer is set.
-    void set_drain_observer(std::function<void(bool, uint8_t)> cb) {
-        drain_observer_ = std::move(cb);
-    }
-
     // Test introspection: current outstanding-entry count summed over all ids.
     // Counts the Disabled-mode per-id `outstanding` deques (the mode the c_model
     // runs this round). Enabled-mode slot-pool occupancy (write_entries_) is not
@@ -107,11 +99,6 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     }
 
   private:
-    std::function<void(bool, uint8_t)> drain_observer_;
-    void notify_drained(bool is_write, uint8_t id) {
-        if (drain_observer_) drain_observer_(is_write, id);
-    }
-
     NmuPacketizeSink& next_pkt_;
     ResponseDepacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
@@ -282,7 +269,6 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
     auto& s = write_[opt->id];
     assert(!s.outstanding.empty() && "B for id with no outstanding write");
     s.outstanding.pop_front();
-    if (s.outstanding.empty()) notify_drained(true, opt->id);
     return opt;
 }
 
@@ -299,7 +285,6 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
         auto& s = read_[opt->id];
         assert(!s.outstanding.empty() && "R(last) for id with no outstanding read");
         s.outstanding.pop_front();
-        if (s.outstanding.empty()) notify_drained(false, opt->id);
     }
     return opt;
 }
@@ -429,9 +414,6 @@ inline void Rob::commit_b_exit(uint8_t rob_idx, uint8_t axi_id) {
         free_write_entries_.set(rob_idx);
         write_entries_[rob_idx] = WriteEntry{};
     }
-    if (write_order_by_id_[axi_id].empty() && !write_id_has_pending_(axi_id)) {
-        notify_drained(true, axi_id);
-    }
 }
 
 inline void Rob::commit_r_exit(uint8_t rob_idx, uint8_t axi_id) {
@@ -441,9 +423,6 @@ inline void Rob::commit_r_exit(uint8_t rob_idx, uint8_t axi_id) {
     if (committed_r_pending_[rob_idx] == 0) {
         free_read_entries_.set(rob_idx);
         read_entries_[rob_idx] = ReadEntry{};
-    }
-    if (read_order_by_id_[axi_id].empty() && !read_id_has_pending_(axi_id)) {
-        notify_drained(false, axi_id);
     }
 }
 
