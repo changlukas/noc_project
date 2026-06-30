@@ -188,7 +188,7 @@ run-tb-top: $(SIMV_TB_TOP)
 # the batch stops before running any scenario. A scenario counts PASS only if
 # the run succeeds AND its fsdb exists non-empty; failing patterns are
 # reported but do not stop the batch; their partial fsdb is kept for
-# debugging. AX4-INF-001 fails by design.
+# debugging.
 SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/sim/test_patterns/AX4-*))
 
 .PHONY: run-all-fsdb
