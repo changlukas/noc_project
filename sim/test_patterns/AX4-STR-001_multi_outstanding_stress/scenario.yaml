@@ -5,7 +5,10 @@ metadata:
 
 config:
   memory_base: 0x1000
-  memory_size: 0x1000
+  # 8 distinct addresses under the dependent/preserve-addr group need per-node
+  # unique-offset room; the 0x1000 window overflowed alloc_unique_offset at
+  # seq>=4 (16 nodes * stride 0x40). 0x4000 covers the 8-outstanding spread.
+  memory_size: 0x4000
   write_latency: 1
   read_latency: 1
   max_outstanding_write: 8
