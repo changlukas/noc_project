@@ -486,8 +486,8 @@ Before suspecting c_model or checker bugs, run the default scenario
 and inspect the log:
 
 ~~~bash
-cd sim/verilator && make run-tb-top   # AX4-BAS-003_single_write_read_aligned
-cat sim/verilator/output/AX4-BAS-003_single_write_read_aligned/run.log
+cd sim/verilator && make run-tb-top   # AX4-BAS-001_single_write_read_aligned
+cat sim/verilator/output/AX4-BAS-001_single_write_read_aligned/run.log
 ~~~
 
 A passing run ends with `$finish` and no assertion failure lines.

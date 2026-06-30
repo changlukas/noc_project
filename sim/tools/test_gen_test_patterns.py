@@ -114,7 +114,7 @@ def test_alloc_neighbor_multi_txn_no_absolute_collision():
     n_nodes = x_dim * y_dim
     base_local = 0x1000
     mem = 0x1000
-    n_txn = 4  # simulates AX4-BAS-005 (4 write transactions); 16*4*64 = 4096 = mem exact
+    n_txn = 4  # simulates AX4-BAS-002 (4 write transactions); 16*4*64 = 4096 = mem exact
     abs_addrs = set()
     for i in range(n_nodes):
         x, y = i % x_dim, i // x_dim
@@ -173,7 +173,7 @@ def _repo_root():
 
 def _base_scenario():
     return os.path.join(_repo_root(), "sim", "test_patterns",
-                        "AX4-BAS-003_single_write_read_aligned", "scenario.yaml")
+                        "AX4-BAS-001_single_write_read_aligned", "scenario.yaml")
 
 
 def test_neighbor_variant_memory_base_at_src_coord():

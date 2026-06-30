@@ -6,7 +6,7 @@
 # burst2: addr=0x1000, len=3, size=5  -> next 4KB region, same pattern
 schema_version: 1
 metadata:
-  name: AX4-BND-007_4kb_boundary_edges
+  name: AX4-BND-006_4kb_boundary_edges
   category: boundary
 
 config:

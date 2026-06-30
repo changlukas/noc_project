@@ -1,25 +1,25 @@
 schema_version: 1
 metadata:
-  name: AX4-BND-006_cross_4kb_auto_split
+  name: AX4-BND-003_unaligned_start
   category: boundary
 
 config:
-  memory_base: 0x0000
-  memory_size: 0x2000
+  memory_base: 0x1000
+  memory_size: 0x1000
   write_latency: 1
   read_latency: 1
 transactions:
   - op: write
-    addr: 0x0FE0
-    id: 0x7
-    len: 7
+    addr: 0x1005
+    id: 0x9
+    len: 0
     size: 5
     burst: INCR
     data_file: data.txt
   - op: read
-    addr: 0x0FE0
-    id: 0x7
-    len: 7
+    addr: 0x1005
+    id: 0x9
+    len: 0
     size: 5
     burst: INCR
     dump_file: unused_read.txt

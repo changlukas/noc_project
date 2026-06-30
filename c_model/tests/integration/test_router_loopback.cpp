@@ -343,7 +343,7 @@ TEST_P(RouterLoopbackParam, BidirectionalZeroMismatch) {
     const std::size_t num_vc = GetParam();
     TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
 
-    const std::string base = scenario_path("AX4-BAS-003_single_write_read_aligned");
+    const std::string base = scenario_path("AX4-BAS-001_single_write_read_aligned");
     const std::string tmp = std::string(::testing::TempDir());
     const std::string rpath_a =
         tmp + "/router_loopback_a_vc" + std::to_string(num_vc) + ".read.txt";
@@ -390,7 +390,7 @@ std::size_t run_loopback(bool with_observers) {
     using namespace ni::cmodel::testing;
     const std::size_t num_vc = 1;
     TwoNodeFabric ch(static_cast<uint8_t>(num_vc));
-    const std::string base = scenario_path("AX4-BAS-003_single_write_read_aligned");
+    const std::string base = scenario_path("AX4-BAS-001_single_write_read_aligned");
     const std::string tmp = std::string(::testing::TempDir());
     Flow flow_a(ch, /*master_node=*/1, /*slave_node=*/0, base, num_vc, tmp + "/ab_a.read.txt",
                 /*dst=*/0x00);

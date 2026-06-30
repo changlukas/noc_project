@@ -25,7 +25,7 @@ def _write(path: str, obj: dict) -> str:
 
 BASE = {
     "schema_version": 1,
-    "scenario": "AX4-BAS-005",
+    "scenario": "AX4-BAS-002",
     "window": {"start_cyc": 0, "end_cyc": 421},
     "axi_slots": [{"name": "node0.manager", "write_txn_count": 4}],
     "latency": {"measured_at": "manager slot", "transactions": []},

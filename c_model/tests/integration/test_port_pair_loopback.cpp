@@ -345,13 +345,13 @@ INSTANTIATE_TEST_SUITE_P(
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-002_incr_8beat")}, 0},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             0},
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-005_wrap_aligned")},
                      0},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-BND-003_narrow_aligned_multibeat")},
+                router::tests::RequireKnownScenario("AX4-BND-002_narrow_aligned_multibeat")},
             0},
         // Configurable-latency variant: 2-cycle and 3-cycle delays exercise
         // multi-cycle in-flight ordering and surface one-cycle
@@ -359,7 +359,7 @@ INSTANTIATE_TEST_SUITE_P(
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-002_incr_8beat")}, 2},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             3}),
     [](const ::testing::TestParamInfo<FixtureParam>& info) {
         auto n = info.param.yaml;

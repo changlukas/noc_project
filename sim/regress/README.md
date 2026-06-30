@@ -103,7 +103,7 @@ misclassification fails the run before any sim.
 ## Multi-id stimulus (`--id-policy`)
 
 `--id-policy round_robin:N` rewrites the base AXI ids round-robin across N ids, grouped by
-unique base address so each write+read pair keeps one id. The matrix sweeps `AX4-BAS-005`
+unique base address so each write+read pair keeps one id. The matrix sweeps `AX4-BAS-002`
 (4 W/R pairs) with `round_robin:4` on `neighbor` to drive concurrent different-id traffic to
 one dst.
 
@@ -127,8 +127,8 @@ Exclusions live in `matrix.yaml`, each with a reason.
 |---|---|
 | `AX4-BUR-003` @ rob | burst len 256 > ROB capacity 32 |
 | `AX4-ORD-002` | multi-id concurrent-write co-sim hang (backlog) |
-| `AX4-BND-006` | 4KB read-split hang under 16-node load (backlog) |
-| `AX4-BND-007` | same 4KB-boundary class, unconfirmed, excluded preemptively (backlog) |
+| `AX4-BND-005` | 4KB read-split hang under 16-node load (backlog) |
+| `AX4-BND-006` | same 4KB-boundary class, unconfirmed, excluded preemptively (backlog) |
 
 The first full run is a discovery run. Sweeping the set through the concurrent 16-node fabric
 surfaces more pre-existing co-sim bugs, which join the exclusion list as found.

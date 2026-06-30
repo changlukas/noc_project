@@ -444,16 +444,16 @@ INSTANTIATE_TEST_SUITE_P(
                      0u, 1u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             0u, 0u, 1u},
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-005_wrap_aligned")},
                      0u, 0u, 1u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-BND-003_narrow_aligned_multibeat")},
+                router::tests::RequireKnownScenario("AX4-BND-002_narrow_aligned_multibeat")},
             0u, 0u, 1u},
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-BND-005_sparse_multibeat")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-BND-004_sparse_multibeat")}, 0u,
             0u, 1u},
         // Configurable-latency variant on the multi-outstanding fixture:
         // 2-cycle request delay + 3-cycle response delay exercises
@@ -461,7 +461,7 @@ INSTANTIATE_TEST_SUITE_P(
         // registration bugs that the zero-latency path hides.
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             2u, 3u, 1u},
         // Multi-NSU regression gate: 2 same-id writes + 2 same-id reads at
         // different XYRouting dst boundaries (0x100 -> dst=0,
@@ -487,20 +487,20 @@ INSTANTIATE_TEST_SUITE_P(
                      0u, 2u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             0u, 0u, 2u},
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-005_wrap_aligned")},
                      0u, 0u, 2u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-BND-003_narrow_aligned_multibeat")},
+                router::tests::RequireKnownScenario("AX4-BND-002_narrow_aligned_multibeat")},
             0u, 0u, 2u},
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-BND-005_sparse_multibeat")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-BND-004_sparse_multibeat")}, 0u,
             0u, 2u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             2u, 3u, 2u},
         FixtureParam{
             std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
@@ -510,20 +510,20 @@ INSTANTIATE_TEST_SUITE_P(
                      0u, 4u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             0u, 0u, 4u},
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-005_wrap_aligned")},
                      0u, 0u, 4u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-BND-003_narrow_aligned_multibeat")},
+                router::tests::RequireKnownScenario("AX4-BND-002_narrow_aligned_multibeat")},
             0u, 0u, 4u},
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-BND-005_sparse_multibeat")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-BND-004_sparse_multibeat")}, 0u,
             0u, 4u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             2u, 3u, 4u},
         FixtureParam{
             std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
@@ -533,20 +533,20 @@ INSTANTIATE_TEST_SUITE_P(
                      0u, 8u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             0u, 0u, 8u},
         FixtureParam{std::string{router::tests::RequireKnownScenario("AX4-BUR-005_wrap_aligned")},
                      0u, 0u, 8u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-BND-003_narrow_aligned_multibeat")},
+                router::tests::RequireKnownScenario("AX4-BND-002_narrow_aligned_multibeat")},
             0u, 0u, 8u},
         FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-BND-005_sparse_multibeat")}, 0u,
+            std::string{router::tests::RequireKnownScenario("AX4-BND-004_sparse_multibeat")}, 0u,
             0u, 8u},
         FixtureParam{
             std::string{
-                router::tests::RequireKnownScenario("AX4-STR-002_multi_outstanding_stress")},
+                router::tests::RequireKnownScenario("AX4-STR-001_multi_outstanding_stress")},
             2u, 3u, 8u},
         FixtureParam{
             std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,

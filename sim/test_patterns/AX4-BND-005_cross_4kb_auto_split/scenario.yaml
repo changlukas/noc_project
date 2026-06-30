@@ -1,0 +1,25 @@
+schema_version: 1
+metadata:
+  name: AX4-BND-005_cross_4kb_auto_split
+  category: boundary
+
+config:
+  memory_base: 0x0000
+  memory_size: 0x2000
+  write_latency: 1
+  read_latency: 1
+transactions:
+  - op: write
+    addr: 0x0FE0
+    id: 0x7
+    len: 7
+    size: 5
+    burst: INCR
+    data_file: data.txt
+  - op: read
+    addr: 0x0FE0
+    id: 0x7
+    len: 7
+    size: 5
+    burst: INCR
+    dump_file: unused_read.txt

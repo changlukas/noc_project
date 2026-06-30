@@ -136,7 +136,7 @@ VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
 
 # --- tb_top cosim (self-clocked) ---
-SCENARIO ?= AX4-BAS-003_single_write_read_aligned
+SCENARIO ?= AX4-BAS-001_single_write_read_aligned
 SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
 
 # tb_top requires one +scenario_node<i> plusarg per node (its all-node guard

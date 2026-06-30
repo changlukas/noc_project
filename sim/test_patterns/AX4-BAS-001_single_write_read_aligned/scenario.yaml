@@ -1,7 +1,8 @@
 schema_version: 1
 metadata:
-  name: AX4-BND-004_unaligned_start
-  category: boundary
+  name: AX4-BAS-001_single_write_read_aligned
+  category: basic
+  address_mode: independent
 
 config:
   memory_base: 0x1000
@@ -10,16 +11,16 @@ config:
   read_latency: 1
 transactions:
   - op: write
-    addr: 0x1005
-    id: 0x9
+    addr: 0x1000
+    id: 0x5
     len: 0
     size: 5
     burst: INCR
     data_file: data.txt
   - op: read
-    addr: 0x1005
-    id: 0x9
+    addr: 0x1000
+    id: 0x5
     len: 0
     size: 5
     burst: INCR
-    dump_file: unused_read.txt
+    dump_file: unused

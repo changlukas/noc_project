@@ -1,22 +1,22 @@
 schema_version: 1
 metadata:
-  name: AX4-BAS-003_single_write_read_aligned
+  name: AX4-BAS-001_single_write_read_aligned
   category: basic
 config:
-  memory_base: 4294971392
+  memory_base: 4096
   memory_size: 4096
   write_latency: 1
   read_latency: 1
 transactions:
 - op: write
-  addr: 77309415488
+  addr: 73014448128
   id: 5
   len: 0
   size: 5
   burst: INCR
   data_file: ../data.txt
 - op: read
-  addr: 77309415488
+  addr: 73014448128
   id: 5
   len: 0
   size: 5

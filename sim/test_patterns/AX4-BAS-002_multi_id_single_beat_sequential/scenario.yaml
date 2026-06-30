@@ -1,6 +1,6 @@
 schema_version: 1
 metadata:
-  name: AX4-BAS-005_multi_id_single_beat_sequential
+  name: AX4-BAS-002_multi_id_single_beat_sequential
   category: basic
   address_mode: independent
 

@@ -10,7 +10,7 @@ namespace {
 // the subordinate slot (service latencies 14/12). Mirrors spec §5.1 example.
 PerfCollector make_populated() {
     PerfCollector pc;
-    pc.set_scenario("AX4-BAS-003");
+    pc.set_scenario("AX4-BAS-001");
     pc.set_window(0, 64);
     // addr 0x100000000 routes to node1 via xy_route (bit32 remap).
     pc.add_txn("node0.manager", 3, true, 0x100000000ull, 7, 3, 10, 52);

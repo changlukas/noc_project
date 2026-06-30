@@ -6,13 +6,13 @@ rob_modes:  [disabled, enabled]
 stimuli:
   - {from: all_independent_ax4, patterns: [neighbor, uniform_random, transpose, hotspot]}
   - {from: all_dependent_ax4,   patterns: [neighbor], preserve_addr: true}
-  - {from: AX4-BAS-005, patterns: [neighbor], id_policy: round_robin:4}
+  - {from: AX4-BAS-002, patterns: [neighbor], id_policy: round_robin:4}
 exclusions:
   - {when: {rob_mode: enabled, from: AX4-BUR-003},
      reason: "burst len 256 > ROB_CAPACITY 32"}
   - {when: {from: AX4-ORD-002},
      reason: "pre-existing multi-id concurrent-write co-sim hang (backlog); re-include when fixed"}
-  - {when: {from: AX4-BND-006},
+  - {when: {from: AX4-BND-005},
      reason: "pre-existing NMU 4KB read-split hang under 16-node load (backlog); re-include when fixed"}
-  - {when: {from: AX4-BND-007},
+  - {when: {from: AX4-BND-006},
      reason: "same 4KB-boundary class as BND-006, unconfirmed (backlog); re-check on first full run"}

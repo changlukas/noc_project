@@ -121,7 +121,7 @@ def test_from_arg_parsing():
 
     # Default base path exists on disk
     default_base = Path(rb.ROOT) / "sim" / "test_patterns" \
-        / "AX4-BAS-003_single_write_read_aligned" / "scenario.yaml"
+        / "AX4-BAS-001_single_write_read_aligned" / "scenario.yaml"
     assert default_base.exists(), f"Default base not found: {default_base}"
 
 

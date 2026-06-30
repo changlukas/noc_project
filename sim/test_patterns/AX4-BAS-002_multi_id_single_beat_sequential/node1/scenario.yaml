@@ -1,9 +1,9 @@
 schema_version: 1
 metadata:
-  name: AX4-BAS-005_multi_id_single_beat_sequential
+  name: AX4-BAS-002_multi_id_single_beat_sequential
   category: basic
 config:
-  memory_base: 4096
+  memory_base: 4294971392
   memory_size: 4096
   write_latency: 2
   read_latency: 2
@@ -11,56 +11,56 @@ config:
   max_outstanding_read: 1
 transactions:
 - op: write
-  addr: 73014448128
+  addr: 77309415488
   id: 0
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_aa.txt
 - op: write
-  addr: 73014449152
+  addr: 77309416512
   id: 1
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_bb.txt
 - op: write
-  addr: 73014450176
+  addr: 77309417536
   id: 2
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_aa.txt
 - op: write
-  addr: 73014451200
+  addr: 77309418560
   id: 3
   len: 0
   size: 5
   burst: INCR
   data_file: ../../_data/data_bb.txt
 - op: read
-  addr: 73014448128
+  addr: 77309415488
   id: 0
   len: 0
   size: 5
   burst: INCR
   dump_file: ../unused
 - op: read
-  addr: 73014449152
+  addr: 77309416512
   id: 1
   len: 0
   size: 5
   burst: INCR
   dump_file: ../unused
 - op: read
-  addr: 73014450176
+  addr: 77309417536
   id: 2
   len: 0
   size: 5
   burst: INCR
   dump_file: ../unused
 - op: read
-  addr: 73014451200
+  addr: 77309418560
   id: 3
   len: 0
   size: 5

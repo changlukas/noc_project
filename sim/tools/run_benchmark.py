@@ -152,13 +152,13 @@ def main(argv=None):
                     help="Root for output dirs (default: sim/verilator/output/bench_<scenario>)")
     _DEFAULT_BASE = str(
         ROOT / "sim" / "test_patterns"
-        / "AX4-BAS-003_single_write_read_aligned" / "scenario.yaml"
+        / "AX4-BAS-001_single_write_read_aligned" / "scenario.yaml"
     )
     ap.add_argument(
         "--from", dest="base", default=_DEFAULT_BASE,
         metavar="BASE_YAML",
         help="Base scenario.yaml forwarded to gen_test_patterns --from "
-             "(default: AX4-BAS-003_single_write_read_aligned/scenario.yaml)",
+             "(default: AX4-BAS-001_single_write_read_aligned/scenario.yaml)",
     )
     a = ap.parse_args(argv)
 

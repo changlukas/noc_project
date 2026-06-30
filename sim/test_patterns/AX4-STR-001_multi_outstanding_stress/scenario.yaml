@@ -1,6 +1,6 @@
 schema_version: 1
 metadata:
-  name: AX4-STR-002_multi_outstanding_stress
+  name: AX4-STR-001_multi_outstanding_stress
   category: stress
 
 config:

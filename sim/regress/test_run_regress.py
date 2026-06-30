@@ -6,7 +6,7 @@ MATRIX = {
     "topologies": ["mesh_4x4_vc1", "mesh_4x4_vc4"],
     "rob_modes": ["disabled", "enabled"],
     "stimuli": [
-        {"from": "AX4-BAS-003", "patterns": ["neighbor", "hotspot"]},
+        {"from": "AX4-BAS-001", "patterns": ["neighbor", "hotspot"]},
         {"from": ["AX4-BUR-003"], "patterns": ["neighbor"], "preserve_addr": True},
     ],
     "exclusions": [{"when": {"rob_mode": "enabled", "from": "AX4-BUR-003"},
@@ -26,14 +26,14 @@ def test_build_filter():
 def test_is_xfail_matches():
     xfails = [{"when": {"from": "AX4-ORD-002"}, "reason": "known multi-id hang"}]
     hit = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-ORD-002", "neighbor", False)
-    miss = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-003", "neighbor", False)
+    miss = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-001", "neighbor", False)
     assert run_regress.is_xfail(hit, xfails) == "known multi-id hang"
     assert run_regress.is_xfail(miss, xfails) is None
 
 def test_self_checking_filter():
     rsp_read = run_regress.resolve_scenario("AX4-RSP-001")   # category: response (decerr read)
     rsp_write = run_regress.resolve_scenario("AX4-RSP-002")  # write-only OOB (0 reads)
-    data = run_regress.resolve_scenario("AX4-BAS-003")       # write+read data scenario
+    data = run_regress.resolve_scenario("AX4-BAS-001")       # write+read data scenario
     assert run_regress.is_self_checking(rsp_read) is False
     assert run_regress.is_self_checking(rsp_write) is False
     assert run_regress.is_self_checking(data) is True
@@ -46,7 +46,7 @@ def test_interior_hotspot_4x4():
 
 
 def test_hotspot_cell_emits_default_target():
-    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-003", "hotspot", False)
+    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-001", "hotspot", False)
     captured = {}
     run_regress.run_cell(cell, pathlib.Path("out"),
                          run_cmd=lambda a: (captured.setdefault("args", a), True)[1])
@@ -57,15 +57,15 @@ def test_hotspot_cell_emits_default_target():
 
 def test_unique_addr_count():
     assert run_regress.unique_addr_count(
-        run_regress.resolve_scenario("AX4-STR-002")) == 8
+        run_regress.resolve_scenario("AX4-STR-001")) == 8
     assert run_regress.unique_addr_count(
-        run_regress.resolve_scenario("AX4-BAS-003")) == 1
+        run_regress.resolve_scenario("AX4-BAS-001")) == 1
 
 
 def test_str002_classified_dependent():
     # 8 unique addrs > 4-slot bound -> must NOT be in the independent set
-    assert "AX4-STR-002" not in run_regress._ax4_by_address_mode("independent")
-    assert "AX4-STR-002" in run_regress._ax4_by_address_mode("dependent")
+    assert "AX4-STR-001" not in run_regress._ax4_by_address_mode("independent")
+    assert "AX4-STR-001" in run_regress._ax4_by_address_mode("dependent")
 
 
 def test_independent_set_all_fit_capacity():
@@ -75,7 +75,7 @@ def test_independent_set_all_fit_capacity():
 
 
 def test_id_policy_forwarded_and_labeled():
-    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-005",
+    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-002",
                             "neighbor", False, "round_robin:4")
     assert "round_robin4" in cell.label()
     captured = {}
@@ -88,7 +88,7 @@ def test_id_policy_forwarded_and_labeled():
 def test_bnd007_excluded():
     m = run_regress.yaml.safe_load(
         (_pl.Path(run_regress.__file__).parent / "matrix.yaml").read_text())
-    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BND-007", "neighbor", True)
+    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BND-006", "neighbor", True)
     assert run_regress.is_excluded(cell, m["exclusions"])
 
 

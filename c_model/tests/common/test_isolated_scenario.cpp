@@ -23,7 +23,7 @@ std::string make_source(const std::string& dir) {
     const std::string path = dir + "/iso_src.yaml";
     std::ofstream f(path);
     f << "schema_version: 1\n";
-    f << "metadata:\n  name: AX4-BAS-003_single_write_read_aligned\n  category: basic\n";
+    f << "metadata:\n  name: AX4-BAS-001_single_write_read_aligned\n  category: basic\n";
     f << "config:\n  memory_base: 0x0\n  memory_size: 0x10000\n"
          "  write_latency: 2\n  read_latency: 3\n"
          "  max_outstanding_write: 4\n  max_outstanding_read: 5\n"

@@ -223,7 +223,7 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
     formula fits when n_nodes * max_seq_per_src * stride <= memory_size; for the
     default mesh_4x4 (n_nodes=16, memory_size=0x1000, stride=0x40) this allows up
     to 4 transactions per node (16*4*64 = 4096 = memory_size, the tightest current
-    case — AX4-BAS-005's 4 writes).  T2's --transactions-per-node beyond that
+    case — AX4-BAS-002's 4 writes).  T2's --transactions-per-node beyond that
     trips the assertion rather than corrupting a neighbouring tile.
 
     Args:

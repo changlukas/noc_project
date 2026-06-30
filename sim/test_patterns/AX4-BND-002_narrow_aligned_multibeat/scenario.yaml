@@ -1,6 +1,6 @@
 schema_version: 1
 metadata:
-  name: AX4-BND-003_narrow_aligned_multibeat
+  name: AX4-BND-002_narrow_aligned_multibeat
   category: boundary
 
 config:
