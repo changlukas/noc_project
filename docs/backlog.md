@@ -94,7 +94,13 @@ same-id-different-dst ordering case).
 `BND-001`, `BUR-001..006`, `EXC-001..003`, `ORD-001/002`, `QOS-001`, `RSP-001..003` unchanged.
 
 **Result:** 25 dirs = 21 wire matrix + 4 Layer-2 (`QOS-001`, `RSP-001..003`, kept on disk, auto-skipped
-by `is_self_checking`). Dry-run `mesh_4x4_vc1`: run=49.
+by `is_self_checking`).
+
+**Verification — `make sim-regress BUILD=mesh_4x4_vc1` (2026-06-30):** `pass=43 fail=6` (run=49). All 6
+fails are pre-existing fabric bugs already in the discovery table — `BUR-003` (all 4 patterns, non-rob),
+`BUR-002`@hotspot, `STR-001`@neighbor — no new fail from the prune/renumber, and the `HSH-001` noise is
+gone. Left red (not excluded, user decision) as the active worklist for the next fabric-bug debugging
+round; `matrix.yaml` unchanged.
 
 ## Verification methodology gaps
 
