@@ -79,44 +79,45 @@ struct RobRig {
 
 // === ROB-specific core behavior (4 tests) ===
 
-TEST(NmuRob, Disabled_StallSameIdDiffDst) {
-    SCENARIO("Rob Disabled: same-id AW to different dst stalls until 1st AW's B response returns");
+TEST(NmuRob, Disabled_StallSecondSameId) {
+    SCENARIO(
+        "Rob Disabled: a second same-id AW stalls until the first AW's B returns "
+        "(single-outstanding)");
     RobRig r;
     // 1st AW: id=5, addr=0x100 -> dst=0
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    // 2nd AW: same id, addr=0x100000100 -> dst=1 -> must stall
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x100000100)));
+    // 2nd AW: same id, same dst (addr=0x200 -> dst=0) -> must stall (single-outstanding per id)
+    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x200)))
+        << "second same-id AW must stall (one outstanding per id)";
 }
 
 TEST(NmuRob, Disabled_StallReleaseOnBComplete) {
-    SCENARIO(
-        "Rob Disabled: stall on same-id-diff-dst AW released when matching B arrives via pop_b");
+    SCENARIO("Rob Disabled: stall on second same-id AW released when matching B arrives via pop_b");
     RobRig r;
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x100000100)));
+    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x200)));
     // Inject a B flit for id=5 via rsp_in
     ASSERT_TRUE(r.noc.rsp_out().push_flit(make_b_flit(0x05)));
     r.depkt.tick();  // demux into B queue
     auto b = r.rob.pop_b();
     ASSERT_TRUE(b.has_value());
     EXPECT_EQ(b->id, 0x05);
-    // After pop_b, outstanding for id=5 is empty -> next push_aw should pass
-    EXPECT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100000100)));
+    // After pop_b, outstanding for id=5 is cleared -> next push_aw should pass
+    EXPECT_TRUE(r.rob.push_aw(make_aw(0x05, 0x200)));
 }
 
 TEST(NmuRob, Disabled_StallReleaseOnRlast) {
-    SCENARIO(
-        "Rob Disabled: AR stall on same-id-diff-dst released when matching R(rlast=1) arrives");
+    SCENARIO("Rob Disabled: AR stall on second same-id released when matching R(rlast=1) arrives");
     RobRig r;
     ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x100000100)));
+    EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x200)));
     // Inject R(last=true)
     ASSERT_TRUE(r.noc.rsp_out().push_flit(make_r_flit(0x05, /*rlast=*/true)));
     r.depkt.tick();
     auto rb = r.rob.pop_r();
     ASSERT_TRUE(rb.has_value());
     EXPECT_TRUE(rb->last);
-    EXPECT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100000100)));
+    EXPECT_TRUE(r.rob.push_ar(make_ar(0x05, 0x200)));
 }
 
 TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
@@ -146,22 +147,13 @@ TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
     EXPECT_TRUE(rob.push_aw(make_aw(0x06, 0x200)));
 }
 
-TEST(NmuRob, Disabled_MultiOutstandingSameIdSameDst_NoFalseStall) {
-    SCENARIO(
-        "Rob Disabled: two same-id same-dst AWs both admitted (no false stall when dst matches)");
-    RobRig r;
-    // 2 AWs same id, same dst (both addr in 0x100-0xFFFF range -> dst=0)
-    ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x200)));
-    // No stall - same dst
-}
-
 TEST(NmuRob, Disabled_WCreditMultiOutstandingCorrectDecrement) {
     SCENARIO(
         "Rob Disabled: W credit increments per AW, decrements per wlast=1; 3rd wlast fails at 0");
     RobRig r;
+    // Two AWs for different ids: each adds 1 to the global W credit.
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x200)));
+    ASSERT_TRUE(r.rob.push_aw(make_aw(0x06, 0x200)));
     // credit=2; push wlast twice
     ASSERT_TRUE(r.rob.push_w(make_w(/*last=*/true)));  // credit-- to 1
     ASSERT_TRUE(r.rob.push_w(make_w(/*last=*/true)));  // credit-- to 0
@@ -196,7 +188,7 @@ TEST(NmuRob, Disabled_DifferentIdsIndependentNoInterference) {
     SCENARIO("Rob Disabled: id=5 stalled does not block id=6; per-id state is independent");
     RobRig r;
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x100000100)));  // id=5 stalled
+    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x200)));  // id=5 stalled (single-outstanding)
     // id=6 should be independent
     EXPECT_TRUE(r.rob.push_aw(make_aw(0x06, 0x100)));
 }

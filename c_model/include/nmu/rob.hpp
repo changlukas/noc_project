@@ -22,11 +22,10 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 // Implements RequestPacketizer (request gate: push_aw/w/ar) and
 // ResponseDepacketizer (response observe: pop_b/r).
 //
-// Disabled mode (this round): per-AXI-ID transaction ordering filter.
-//   - Same id + same dst -> pass; outstanding deque grows
-//   - Same id + different dst -> stall until deque drained
+// Disabled mode (this round): per-AXI-ID single-outstanding interlock.
+//   - Any id with one outstanding AW/AR -> stall further same-id requests
 //   - Different id -> independent
-//   - Response B/R observe to pop_front per-id deque
+//   - Response B / R(last) observe clears the per-id outstanding flag
 //
 // Enabled mode: per-beat slot pool + rob_idx allocator (implemented; the
 //   asserts in the pop paths are integrity guards, not stubs).
@@ -36,10 +35,10 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 // Tick order (per AxiSlavePort): drain B/R before forwarding AW/W/AR -> response
 // frees IDs in same cycle, request can use freed IDs after.
 //
-// ROB Disabled mode ONLY handles same-id DIFFERENT-dst stall. Same-id same-dst
-// response ordering is guaranteed by AxiMaster's per-id FIFO + NoC's per-pair
-// deterministic routing (XYRouting satisfies). ROB Disabled does NOT add that
-// ordering -- implicit invariant.
+// RoB-less (Disabled) same-id response ordering is guaranteed by the NMU
+// single-outstanding interlock (one transaction in flight per id), not by
+// AxiMaster ordering or XY routing. Enabled mode uses rob_idx for per-beat
+// reorder buffering and does not rely on this interlock.
 class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_w,
@@ -84,17 +83,17 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     static int find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n);
 
     // Test introspection: current outstanding-entry count summed over all ids.
-    // Counts the Disabled-mode per-id `outstanding` deques (the mode the c_model
-    // runs this round). Enabled-mode slot-pool occupancy (write_entries_) is not
-    // counted -- extend here if/when Enabled mode is exercised.
+    // Counts Disabled-mode per-id flags (one per id at most). Enabled-mode
+    // slot-pool occupancy (write_entries_) is not counted -- extend here if/when
+    // Enabled mode is exercised.
     std::size_t write_occupancy() const {
         std::size_t n = 0;
-        for (const auto& s : write_) n += s.outstanding.size();
+        for (const auto& s : write_) n += s.write_outstanding ? 1 : 0;
         return n;
     }
     std::size_t read_occupancy() const {
         std::size_t n = 0;
-        for (const auto& s : read_) n += s.outstanding.size();
+        for (const auto& s : read_) n += s.read_outstanding ? 1 : 0;
         return n;
     }
 
@@ -103,18 +102,13 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     ResponseDepacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
 
-    // Per-AXI-ID FIFO of outstanding entries. Disabled mode invariant:
-    // for any non-empty deque, all entries share the same dst_id (gate enforces).
-    // Forward-compat: OutstandingEntry adds rob_idx field for Enabled mode.
-    struct OutstandingEntry {
-        uint8_t dst_id;
-        // future Enabled mode: uint8_t rob_idx;
-    };
+    // Per-AXI-ID single-outstanding flag. True while one AW/AR is in flight for
+    // that id; cleared by B (for writes) or R(last) (for reads) in pop_b/pop_r.
     struct WriteState {
-        std::deque<OutstandingEntry> outstanding;
+        bool write_outstanding = false;
     };
     struct ReadState {
-        std::deque<OutstandingEntry> outstanding;
+        bool read_outstanding = false;
     };
     std::array<WriteState, axi::AXI_ID_SPACE> write_;
     std::array<ReadState, axi::AXI_ID_SPACE> read_;
@@ -206,13 +200,11 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     }
     auto t = addr_trans::xy_route(b.addr);
     auto& s = write_[b.id];
-    if (!s.outstanding.empty() && s.outstanding.front().dst_id != t.dst_id) {
-        return false;  // stall: same id, different dst
-    }
+    if (s.write_outstanding) return false;  // single-outstanding per id
     if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
         return false;  // downstream backpressure: NO state change
     }
-    s.outstanding.push_back({t.dst_id});
+    s.write_outstanding = true;
     w_burst_credit_++;
     return true;
 }
@@ -247,13 +239,11 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     }
     auto t = addr_trans::xy_route(b.addr);
     auto& s = read_[b.id];
-    if (!s.outstanding.empty() && s.outstanding.front().dst_id != t.dst_id) {
-        return false;
-    }
+    if (s.read_outstanding) return false;  // single-outstanding per id
     if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
         return false;
     }
-    s.outstanding.push_back({t.dst_id});
+    s.read_outstanding = true;
     return true;
 }
 
@@ -267,8 +257,8 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
     auto opt = next_depkt_.pop_b();
     if (!opt) return std::nullopt;
     auto& s = write_[opt->id];
-    assert(!s.outstanding.empty() && "B for id with no outstanding write");
-    s.outstanding.pop_front();
+    assert(s.write_outstanding && "B for id with no outstanding write");
+    s.write_outstanding = false;
     return opt;
 }
 
@@ -283,8 +273,8 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
     if (!opt) return std::nullopt;
     if (opt->last) {
         auto& s = read_[opt->id];
-        assert(!s.outstanding.empty() && "R(last) for id with no outstanding read");
-        s.outstanding.pop_front();
+        assert(s.read_outstanding && "R(last) for id with no outstanding read");
+        s.read_outstanding = false;
     }
     return opt;
 }
