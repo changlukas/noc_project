@@ -31,6 +31,17 @@ Flit make_rsp_flit(uint8_t axi_ch, uint8_t initial_vc = 0, uint8_t id = 0, uint6
     return f;
 }
 
+// Returns the VC a pushed flit landed on (0xFF on push failure).
+uint8_t push_and_vc(VcArbiter& arb, ChannelModel& /*noc*/, const Flit& flit) {
+    std::array<std::size_t, VcArbiter::NUM_VC_MAX> before{};
+    for (uint8_t v = 0; v < VcArbiter::NUM_VC_MAX; ++v) before[v] = arb.pending_size(v);
+    if (!arb.push_flit(flit)) return 0xFF;
+    for (uint8_t v = 0; v < VcArbiter::NUM_VC_MAX; ++v) {
+        if (arb.pending_size(v) > before[v]) return v;
+    }
+    return 0xFF;
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -125,6 +136,18 @@ TEST(NsuVcArbiterPools, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 1)));  // rid6 last -> VC3
     EXPECT_EQ(arb.pending_size(2), 3u);                                   // all rid5 beats
     EXPECT_EQ(arb.pending_size(3), 3u);                                   // all rid6 beats
+}
+
+// B has no burst-follow pin; consecutive same-bid responses round-robin the write pool.
+TEST(NsuVcArbiterPools, SameBidRoundRobinsWritePool) {
+    SCENARIO("NSU VcArbiter pools: same bid round-robins the write pool (B has no pin)");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
+                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
+    uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40));
+    uint8_t b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40));
+    EXPECT_EQ(a, 0u);
+    EXPECT_EQ(b, 1u) << "same bid must not pin; B round-robins the write pool";
 }
 
 INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcArbParam,

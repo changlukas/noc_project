@@ -5,6 +5,10 @@
 // and multi-flit R uses ROB not wormhole (`floo_axi_chimney.sv:624-633`).
 //
 // ReadWriteSplit (only mode): B -> write_rsp_vc; R -> read_rsp_vc.
+// Pools mode: B round-robins write_rsp_vcs_ (no per-id pin; B is single-flit).
+//             R: first beat of an rid round-robins a VC; later beats of that
+//             rid reuse it; released on payload rlast. The id is a
+//             burst-grouping key, not a VC selector. See r_burst_vc_.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
 //
 // References:
@@ -86,8 +90,10 @@ class VcArbiter : public router::NocRspOut {
     bool use_pools_ = false;
     uint8_t write_rr_start_ = 0;
     uint8_t read_rr_start_ = 0;
-    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> write_binding_{};
-    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> read_binding_{};
+    // R-follows-first-beat: the first R beat of an rid round-robins a VC;
+    // later beats of that rid reuse it; released on payload rlast.
+    // The id is a burst-grouping key, not a VC selector.
+    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> r_burst_vc_{};
 };
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id) {
@@ -100,24 +106,22 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
         return std::nullopt;
     }
 
-    // ReadWriteSplit pools: per-id sticky binding + round-robin within the class pool.
-    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE>* binding = nullptr;
+    // ReadWriteSplit pools: B round-robins write pool (no pin);
+    // R follows r_burst_vc_ for burst coherence, round-robins on first beat.
     const std::vector<uint8_t>* cand = nullptr;
     uint8_t* rr = nullptr;
     if (axi_ch == ni::AXI_CH_B) {
-        binding = &write_binding_;
         cand = &write_rsp_vcs_;
         rr = &write_rr_start_;
     } else if (axi_ch == ni::AXI_CH_R) {
-        binding = &read_binding_;
+        if (r_burst_vc_[id].has_value()) return r_burst_vc_[id];  // burst follow
         cand = &read_rsp_vcs_;
         rr = &read_rr_start_;
     } else {
         return std::nullopt;
     }
-    if ((*binding)[id].has_value()) return (*binding)[id];  // bound: stick
     const std::size_t n = cand->size();
-    for (std::size_t k = 0; k < n; ++k) {  // unbound: round-robin from rr
+    for (std::size_t k = 0; k < n; ++k) {  // round-robin from rr
         uint8_t vc = (*cand)[(*rr + k) % n];
         if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) {
             *rr = static_cast<uint8_t>((static_cast<std::size_t>(*rr) + k + 1) % n);
@@ -130,38 +134,24 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
     uint8_t id = 0;
-    if (use_pools_ && num_vc_ > 1) {
-        if (axi_ch == ni::AXI_CH_B)
-            id = static_cast<uint8_t>(flit.get_payload_field("B", "bid"));
-        else if (axi_ch == ni::AXI_CH_R)
-            id = static_cast<uint8_t>(flit.get_payload_field("R", "rid"));
-    }
+    if (use_pools_ && num_vc_ > 1 && axi_ch == ni::AXI_CH_R)
+        id = static_cast<uint8_t>(flit.get_payload_field("R", "rid"));
     auto vc_opt = select_vc_for_axi_ch(axi_ch, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
 
-    // Commit the (class, id) -> vc binding after all accept conditions pass.
-    if (use_pools_ && num_vc_ > 1) {
-        if (axi_ch == ni::AXI_CH_B)
-            write_binding_[id] = vc_id;
-        else if (axi_ch == ni::AXI_CH_R)
-            read_binding_[id] = vc_id;
-    }
+    // Stamp r_burst_vc_ after all accept conditions pass (R only).
+    if (use_pools_ && num_vc_ > 1 && axi_ch == ni::AXI_CH_R) r_burst_vc_[id] = vc_id;
 
     Flit stamped = flit;
     stamped.set_header_field("vc_id", vc_id);
     pending_[vc_id].push_back(stamped);
 
-    // Release the binding on the burst's terminal flit (payload R.rlast, or the
-    // single-flit B) so the next same-id burst rebinds via round-robin. Header
-    // `last` is always 1, so the payload field must be used for R.
-    if (use_pools_ && num_vc_ > 1) {
-        if (axi_ch == ni::AXI_CH_R) {
-            if (flit.get_payload_field("R", "rlast") != 0) read_binding_[id].reset();
-        } else if (axi_ch == ni::AXI_CH_B) {
-            write_binding_[id].reset();
-        }
+    // Release on payload rlast so the next same-rid burst rebinds via round-robin.
+    // Header `last` is always 1, so the payload field must be used for R.
+    if (use_pools_ && num_vc_ > 1 && axi_ch == ni::AXI_CH_R) {
+        if (flit.get_payload_field("R", "rlast") != 0) r_burst_vc_[id].reset();
     }
     return true;
 }
