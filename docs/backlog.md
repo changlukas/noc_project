@@ -13,9 +13,9 @@ fixed.
 
 | id | symptom | suspected root cause | status |
 |---|---|---|---|
-| `AX4-ORD-002` | multi-id concurrent write hang (was flaky/clustered, not deterministic). | **FIXED 2026-06-30** — test-master read sub-burst AR drop (`WireSlavePort::push_ar`), see "Fabric-bug round" below. NOT uninit / RAW-release / VC binding. 0 hangs in 15x loop. Still excluded in `matrix.yaml` pending un-exclude. | fixed, excluded |
-| `AX4-BND-005` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): write OKAY, read phase hangs under 16-node load. NMU 4KB auto-split works for write, read-split does not. | **Same class as the fixed AR-drop** (4KB-crossing read splits into sub-burst ARs -> dropped). LIKELY FIXED by the push_ar gate; re-check before un-excluding. | excluded (re-check) |
-| `AX4-BND-006` | same boundary-edge class. Manual single-cell check was inconclusive (data-file relpath artifact); excluded preemptively until first full run confirms. | same as BND-005; likely fixed by the push_ar gate, re-check. | excluded (re-check) |
+| `AX4-ORD-002` | multi-id concurrent write hang (was flaky/clustered). | **HANG FIXED 2026-06-30** — test-master read sub-burst AR drop (`WireSlavePort::push_ar`). 0 timeouts under regression load. BUT now fails a scoreboard DATA MISMATCH under concurrent load (passes in isolation, 5/5). RE-EXCLUDED with a new reason (data mismatch, not hang); the real task is to FIX the multi-id data mismatch, then un-exclude. | re-excluded (data mismatch) |
+| `AX4-BND-005` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): read phase hung under 16-node load (4KB read-split). | **FIXED 2026-06-30** by the push_ar gate (same AR-drop class). Re-verified green under regression load; un-excluded. | FIXED, un-excluded |
+| `AX4-BND-006` | same 4KB-boundary-edge class (2 writes + 2 reads spanning 0x1000). | **FIXED 2026-06-30** by the push_ar gate. Re-verified green under regression load; un-excluded. | FIXED, un-excluded |
 
 The 4KB carriers renumbered in the 2026-06-30 prune: old `BND-006` (cross_4kb_auto_split) → `BND-005`, old `BND-007` (4kb_boundary_edges) → `BND-006` (see the prune entry below for the full old→new map).
 
@@ -79,13 +79,28 @@ channels is the correct registered-wire model. Verified: 3× `make sim-regress B
 with ZERO timeouts (was a reliable 5-hang cluster), plus 15× BUR-003 neighbor and 15× ORD-002 loops
 with 0 hangs. Debugged with a timeout state dump (since removed) and a read-only Codex cross-check.
 
-**RESIDUAL (separate, deterministic, NOT the deadlock):** `make sim-regress BUILD=mesh_4x4_vc1` now
-`pass=46 fail=3`. The 3 fails are scoreboard DATA MISMATCHES (not hangs): `BUR-002`@hotspot,
-`BUR-003`@hotspot, `STR-001`@neighbor. The hotspot pair is congestion-related; STR-001 is the
-8-outstanding multi-id case. These are the next round's worklist and MAY be in nmu/nsu/router — apply
-the FlooNoC cross-check there. ctest not re-run on this host (pre-existing GCC ICE on
-`test_pins_smoke`); the fix is confined to the cosim `WireSlavePort` so unit tests using other slave
-ports are unaffected.
+**RESIDUAL — data-mismatch worklist (separate bug class, NOT the deadlock; next round).** After the
+AR-drop fix the hangs are gone (zero timeouts). What remains is scoreboard DATA MISMATCHES under
+concurrent 16-node load (each passes in isolation). BND-005/006 are un-excluded (green). ORD-002 is
+re-excluded with a new "data mismatch" reason (its hang is fixed). The open data-mismatch worklist:
+
+| cell | note |
+|---|---|
+| `BUR-002`@hotspot | hotspot congestion |
+| `BUR-003`@hotspot | hotspot congestion (its hang was masking this) |
+| `ORD-002`@neighbor | multi-id concurrent write/read (excluded) |
+| `STR-001`@neighbor | 8-outstanding multi-id |
+
+These MAY be in nmu/nsu/router -- apply the FlooNoC cross-check there. With ORD-002 re-excluded,
+`make sim-regress BUILD=mesh_4x4_vc1` is `pass=48 fail=3` (BUR-002/BUR-003 hotspot, STR-001), zero
+timeouts. ctest not re-run on this host (pre-existing GCC ICE on `test_pins_smoke`); the fix is
+confined to the cosim `WireSlavePort` so unit tests using other slave ports are unaffected.
+
+**VERIFICATION SCOPE — only `mesh_4x4_vc1` (disabled) was run this round.** The matrix also has
+vc2 / vc4 / vc8 and the `enabled` (rob) builds; NONE were run yet. The AR-drop fix is in the test
+master (topology- and VC-count-independent), so the hangs should be fixed on all builds, but this is
+UNVERIFIED. **Next session: run the full `make sim-regress` (all builds)** to confirm the fix across
+vc2/4/8 + rob and to see whether the data-mismatch worklist changes with VC count.
 
 ### ~~Confirmed design bug — per-id VC binding~~ RESOLVED 2026-06-30
 

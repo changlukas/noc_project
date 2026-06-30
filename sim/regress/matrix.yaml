@@ -10,9 +10,10 @@ stimuli:
 exclusions:
   - {when: {rob_mode: enabled, from: AX4-BUR-003},
      reason: "burst len 256 > ROB_CAPACITY 32"}
+  # BND-005 / BND-006 un-excluded 2026-06-30: both HUNG on the read sub-burst
+  # AR-drop deadlock, fixed by the WireSlavePort push_ar gate
+  # (commit fix/cosim-ar-drop-deadlock). Re-verified green under 16-node load.
   - {when: {from: AX4-ORD-002},
-     reason: "pre-existing multi-id concurrent-write co-sim hang (backlog); re-include when fixed"}
-  - {when: {from: AX4-BND-005},
-     reason: "pre-existing NMU 4KB read-split hang under 16-node load (backlog); re-include when fixed"}
-  - {when: {from: AX4-BND-006},
-     reason: "same 4KB-boundary class as BND-006, unconfirmed (backlog); re-check on first full run"}
+     reason: "AR-drop hang FIXED (push_ar gate), but a scoreboard DATA MISMATCH
+       remains under concurrent load (passes in isolation); re-include when the
+       multi-id data-mismatch is fixed"}
