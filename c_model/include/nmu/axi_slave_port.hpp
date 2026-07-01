@@ -124,29 +124,6 @@ class AxiSlavePort {
         return ar_q_.size() < params_.ar_queue_depth;
     }
 
-    // Non-consuming peek at the front of each queue (returns nullopt if empty).
-    // Used by AxiDpiAdapter to snapshot pin state without advancing the queue.
-    std::optional<axi::AwBeat> peek_aw() const {
-        if (aw_q_.empty()) return std::nullopt;
-        return aw_q_.front();
-    }
-    std::optional<axi::WBeat> peek_w() const {
-        if (w_q_.empty()) return std::nullopt;
-        return w_q_.front();
-    }
-    std::optional<axi::ArBeat> peek_ar() const {
-        if (ar_q_.empty()) return std::nullopt;
-        return ar_q_.front();
-    }
-    std::optional<axi::BBeat> peek_b() const {
-        if (b_q_.empty()) return std::nullopt;
-        return b_q_.front();
-    }
-    std::optional<axi::RBeat> peek_r() const {
-        if (r_q_.empty()) return std::nullopt;
-        return r_q_.front();
-    }
-
   private:
     void drain_b_from_depacketizer_() {
         if (b_q_.size() >= params_.b_queue_depth) return;

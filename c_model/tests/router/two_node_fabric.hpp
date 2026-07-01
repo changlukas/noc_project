@@ -73,15 +73,6 @@ class TwoNodeFabric {
     std::size_t req_eject_buffered(std::size_t node) const { return req_eject_[node]->buffered(); }
     std::size_t rsp_eject_buffered(std::size_t node) const { return rsp_eject_[node]->buffered(); }
 
-    // By-coordinate accessors (mesh-agnostic). (x,y) -> node id x | (y << 4);
-    // for this 2x1 mesh node == x. An N x M fabric exposes the same two methods.
-    Router& req_router_at(uint8_t x, uint8_t y) {
-        return *req_routers_[static_cast<std::size_t>(x | (y << 4))];
-    }
-    Router& rsp_router_at(uint8_t x, uint8_t y) {
-        return *rsp_routers_[static_cast<std::size_t>(x | (y << 4))];
-    }
-
   private:
     void wire_local(Router& r, std::unique_ptr<InjectAdapter>& inj,
                     std::unique_ptr<EjectAdapter>& ej) {

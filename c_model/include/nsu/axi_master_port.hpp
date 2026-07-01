@@ -111,29 +111,6 @@ class AxiMasterPort {
     [[nodiscard]] bool can_accept_b() const noexcept { return b_q_.size() < params_.b_queue_depth; }
     [[nodiscard]] bool can_accept_r() const noexcept { return r_q_.size() < params_.r_queue_depth; }
 
-    // Non-consuming peek at the front of each queue (returns nullopt if empty).
-    // Used by AxiDpiAdapter to snapshot pin state without advancing the queue.
-    std::optional<axi::AwBeat> peek_aw() const {
-        if (aw_q_.empty()) return std::nullopt;
-        return aw_q_.front();
-    }
-    std::optional<axi::WBeat> peek_w() const {
-        if (w_q_.empty()) return std::nullopt;
-        return w_q_.front();
-    }
-    std::optional<axi::ArBeat> peek_ar() const {
-        if (ar_q_.empty()) return std::nullopt;
-        return ar_q_.front();
-    }
-    std::optional<axi::BBeat> peek_b() const {
-        if (b_q_.empty()) return std::nullopt;
-        return b_q_.front();
-    }
-    std::optional<axi::RBeat> peek_r() const {
-        if (r_q_.empty()) return std::nullopt;
-        return r_q_.front();
-    }
-
   private:
     // S2 stage: advance <=1 beat per channel per tick from the S1 stage
     // registers (held by Depacketize). The while-loops are replaced by a

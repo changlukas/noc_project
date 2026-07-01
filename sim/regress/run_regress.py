@@ -106,23 +106,14 @@ def expand(matrix: dict) -> list:
     return cells
 
 
-def is_excluded(cell: Cell, exclusions: list):
-    for ex in exclusions or []:
-        w = ex["when"]
-        if all(getattr(cell, {"rob_mode": "rob_mode", "from": "from_id",
-                               "pattern": "pattern", "topology": "topology"}[k]) == v
-               for k, v in w.items()):
-            return ex["reason"]
-    return None
-
-
-def is_xfail(cell: Cell, xfails: list):
-    for ex in xfails or []:
-        w = ex["when"]
-        if all(getattr(cell, {"rob_mode": "rob_mode", "from": "from_id",
-                              "pattern": "pattern", "topology": "topology"}[k]) == v
-               for k, v in w.items()):
-            return ex["reason"]
+def _match(cell: Cell, rules: list):
+    """Return the reason of the first rule whose `when` fully matches, else None.
+    Shared by exclusions and xfails (same when-key schema)."""
+    attr = {"rob_mode": "rob_mode", "from": "from_id",
+            "pattern": "pattern", "topology": "topology"}
+    for r in rules or []:
+        if all(getattr(cell, attr[k]) == v for k, v in r["when"].items()):
+            return r["reason"]
     return None
 
 
@@ -182,7 +173,7 @@ def main(argv=None) -> int:
     # Classify every cell up front (no sim) for accounting.
     planned = []
     for cell in cells:
-        reason = is_excluded(cell, matrix.get("exclusions"))
+        reason = _match(cell, matrix.get("exclusions"))
         if reason:
             planned.append((cell, "excluded", reason))
         elif not is_self_checking(resolve_scenario(cell.from_id)):
@@ -213,7 +204,7 @@ def main(argv=None) -> int:
             results.append({**asdict(cell), "status": status, "reason": reason})
             continue
         ok = run_cell(cell, out_base / cell.label())
-        xfail_reason = is_xfail(cell, matrix.get("xfails"))
+        xfail_reason = _match(cell, matrix.get("xfails"))
         if ok:
             results.append({**asdict(cell), "status": "pass"})
         elif xfail_reason:

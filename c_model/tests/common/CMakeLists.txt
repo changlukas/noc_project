@@ -39,22 +39,5 @@ add_cmodel_test(test_flit_link_probe)
 target_include_directories(test_flit_link_probe PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_component_dwell_observer)
-target_include_directories(test_component_dwell_observer PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..)
-
-add_cmodel_test(test_router_path)
-target_include_directories(test_router_path PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..)
-
-add_cmodel_test(test_isolated_scenario)
-target_include_directories(test_isolated_scenario PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(test_isolated_scenario PRIVATE yaml-cpp::yaml-cpp)
-
 add_cmodel_test(test_perf_collector)
 target_include_directories(test_perf_collector PRIVATE ${CMAKE_SOURCE_DIR}/include)
-
-add_cmodel_test(test_ni_stage)
-target_include_directories(test_ni_stage PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..)

@@ -1,5 +1,4 @@
 #include "axi/types.hpp"
-#include "axi/memory_port.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
@@ -27,36 +26,8 @@ TEST(AxiScaffold, RespEnumValues) {
     EXPECT_EQ(static_cast<int>(axi::Resp::DECERR), 3);
 }
 
-TEST(AxiScaffold, BeatStructsAreConstructible) {
-    SCENARIO("axi scaffold: AW/W/AR/B/R beat POD structs default-construct without error");
-    axi::AwBeat aw{};
-    axi::WBeat w{};
-    axi::ArBeat ar{};
-    axi::BBeat b{};
-    axi::RBeat r{};
-    (void)aw;
-    (void)w;
-    (void)ar;
-    (void)b;
-    (void)r;
-    SUCCEED();
-}
-
 TEST(AxiScaffold, WBeatDataArrayMatchesDataBytes) {
     SCENARIO("axi scaffold: WBeat.data std::array size equals DATA_BYTES");
     axi::WBeat w{};
     EXPECT_EQ(w.data.size(), static_cast<std::size_t>(axi::DATA_BYTES));
-}
-
-TEST(AxiScaffold, MemoryPortStructsAreConstructible) {
-    SCENARIO("axi scaffold: MemWriteReq/Resp and MemReadReq/Resp default-construct without error");
-    axi::MemWriteReq wr{};
-    axi::MemWriteResp wresp{};
-    axi::MemReadReq rr{};
-    axi::MemReadResp rresp{};
-    (void)wr;
-    (void)wresp;
-    (void)rr;
-    (void)rresp;
-    SUCCEED();
 }

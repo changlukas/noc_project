@@ -19,7 +19,3 @@ target_include_directories(test_router_front_route PRIVATE
 add_cmodel_test(test_router_config_getters)
 target_include_directories(test_router_config_getters PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
-
-add_cmodel_test(test_two_node_fabric_at)
-target_include_directories(test_two_node_fabric_at PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..)

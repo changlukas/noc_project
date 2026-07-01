@@ -167,31 +167,6 @@ def _check_one_reset(sig: dict, legal_domains: set, issues: List[Issue]) -> None
             f"signal {sig.get('pin_name')}: reset domain {domain!r} not in meta.reset_signals"))
 
 
-def check_signals_pin_uniqueness(signals_spec) -> List[Issue]:
-    """L2: every signal must have a non-null, unique pin_name."""
-    issues: List[Issue] = []
-    seen: dict = {}
-    for iface in signals_spec.get("interfaces", []):
-        for ch in iface.get("channels", []):
-            for sig in ch.get("signals", []):
-                _check_pin_unique(sig, seen, issues)
-        for sig in iface.get("signals", []):
-            _check_pin_unique(sig, seen, issues)
-    return issues
-
-
-def _check_pin_unique(sig: dict, seen: dict, issues: List[Issue]) -> None:
-    pin = sig.get("pin_name")
-    if pin is None:
-        issues.append(_err("L2-SIG-PIN", f"signal (pin_name=null) has null pin_name"))
-        return
-    if pin in seen:
-        issues.append(_err("L2-SIG-PIN",
-            f"pin_name {pin!r} duplicated (also seen at {seen[pin]})"))
-    else:
-        seen[pin] = pin
-
-
 def check_blocks_xref_packet(fb_spec, pkt_spec) -> List[Issue]:
     """L2: every uses_packet_fields entry must exist in ni_packet.json."""
     issues: List[Issue] = []
@@ -219,40 +194,6 @@ def check_blocks_param_uniqueness(fb_spec) -> List[Issue]:
                         f"{pname!r} defined in both {seen[pname]} and {feat['id']}"))
                 else:
                     seen[pname] = feat["id"]
-    return issues
-
-
-def check_blocks_related_features_symmetric(fb_spec) -> List[Issue]:
-    """L2: if A.related_features contains B, then B.related_features should contain A.
-    Issues WARN (not ERROR) since one-way pointers may be intentional."""
-    issues: List[Issue] = []
-    all_feats: dict = {}  # id -> related_features set
-    for block in fb_spec.get("blocks", []):
-        for feat in block.get("features", []):
-            all_feats[feat["id"]] = set(feat.get("related_features", []))
-    for fid, refs in all_feats.items():
-        for ref in refs:
-            if ref not in all_feats:
-                issues.append(_err("L2-FB-REL",
-                    f"{fid}: related_features {ref!r} doesn't exist"))
-                continue
-            if fid not in all_feats[ref]:
-                issues.append(_warn("L2-FB-REL",
-                    f"{fid} -> {ref} is one-way (not symmetric)"))
-    return issues
-
-
-def check_protocol_rules_id_uniqueness(rule_spec) -> List[Issue]:
-    """L2: no two rules share the same id."""
-    issues = []
-    seen: dict = {}
-    for r in rule_spec.get("rules", []):
-        rid = r["id"]
-        if rid in seen:
-            issues.append(_err("L2-PROTO-ID",
-                f"rule id {rid!r} duplicated (first at line {seen[rid]}, also at line {r['source_line']})"))
-        else:
-            seen[rid] = r["source_line"]
     return issues
 
 

@@ -27,8 +27,8 @@ def test_is_xfail_matches():
     xfails = [{"when": {"from": "AX4-ORD-002"}, "reason": "known multi-id hang"}]
     hit = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-ORD-002", "neighbor", False)
     miss = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BAS-001", "neighbor", False)
-    assert run_regress.is_xfail(hit, xfails) == "known multi-id hang"
-    assert run_regress.is_xfail(miss, xfails) is None
+    assert run_regress._match(hit, xfails) == "known multi-id hang"
+    assert run_regress._match(miss, xfails) is None
 
 def test_self_checking_filter():
     rsp_read = run_regress.resolve_scenario("AX4-RSP-001")   # category: response (decerr read)
@@ -85,11 +85,11 @@ def test_id_policy_forwarded_and_labeled():
     assert captured["args"][captured["args"].index("--id-policy") + 1] == "round_robin:4"
 
 
-def test_bnd007_excluded():
+def test_exclusion_matches():
     m = run_regress.yaml.safe_load(
         (_pl.Path(run_regress.__file__).parent / "matrix.yaml").read_text())
-    cell = run_regress.Cell("mesh_4x4_vc1", "disabled", "AX4-BND-006", "neighbor", True)
-    assert run_regress.is_excluded(cell, m["exclusions"])
+    cell = run_regress.Cell("mesh_4x4_vc1", "enabled", "AX4-BUR-003", "neighbor", False)
+    assert run_regress._match(cell, m["exclusions"]) == "burst len 256 > ROB_CAPACITY 32"
 
 
 import pathlib as _pl

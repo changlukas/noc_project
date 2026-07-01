@@ -16,7 +16,6 @@ is compiled via the existing -I sim/sv include path (no build_config.mk edit nee
 
 Usage:
     python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/sv/tb_top_<topology>.sv]
-    python3 gen_tb_top.py --check            # drift gate (exit 1 if stale)
 
 Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
@@ -34,7 +33,6 @@ Constants kept as template (not derived from topology YAML):
 """
 
 import argparse
-import difflib
 import sys
 from pathlib import Path
 
@@ -337,8 +335,8 @@ def emit_fabric(topo: dict) -> str:
     # Link perf monitors: one per live neighbor direction (req+rsp). Mirrors the
     # prior emit — every directed (node -> peer) edge gets a monitor, named
     # "{net}_{i}to{peer}". Wrapped in `if (HAS_*) generate` so boundary dirs emit
-    # nothing.  noc.links is dropped by check_perf_parity, but the slot/edge set
-    # is preserved 1:1 anyway.
+    # nothing.  noc.links carries no monitor, but the slot/edge set is
+    # preserved 1:1 anyway.
     w("        // Inter-router link perf monitors (passive): one per live")
     w("        // neighbor direction, named {net}_{i}to{peer}. vc_id bit window")
     w("        // from ni_flit_pkg; credit_pulse is per-VC (not OR-collapsed).")
@@ -674,8 +672,6 @@ def main() -> int:
     ap.add_argument("--out", default=None,
                     help="Output tb_top.sv path (default: sim/sv/tb_top_<topology>.sv; "
                          "fabric emitted alongside)")
-    ap.add_argument("--check", action="store_true",
-                    help="Drift gate: regenerate both files and diff vs committed; exit 1 if different")
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
@@ -684,22 +680,6 @@ def main() -> int:
     out_path = Path(a.out) if a.out is not None else \
         ROOT / "sim" / "sv" / f"tb_top_{a.topology}.sv"
     fab_path = _fabric_path(out_path, topo)
-
-    if a.check:
-        rc = 0
-        for path, text, label in ((out_path, tb_text, "tb_top.sv"),
-                                  (fab_path, fab_text, fab_path.name)):
-            if not path.exists():
-                print(f"DRIFT: {path} does not exist (never generated)")
-                rc = 1
-                continue
-            cur = path.read_text(encoding="utf-8")
-            if cur != text:
-                sys.stdout.writelines(difflib.unified_diff(
-                    cur.splitlines(True), text.splitlines(True), "committed", "regenerated"))
-                print(f"DRIFT: {label} differs from generator output")
-                rc = 1
-        return rc
 
     out_path.write_text(tb_text, encoding="utf-8")
     fab_path.write_text(fab_text, encoding="utf-8")

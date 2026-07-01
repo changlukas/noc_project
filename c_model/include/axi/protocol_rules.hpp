@@ -108,13 +108,6 @@ inline bool check_r_last_timing(bool last, std::size_t beat_idx, uint8_t len) {
     return last == (beat_idx == static_cast<std::size_t>(len));
 }
 
-// B_ONE_RESPONSE_PER_WRITE — exactly one B per write transaction.
-// `b_count` is the number of B responses observed so far for an operation
-// whose sub-burst count is `expected`; before completion, b_count <= expected.
-inline bool check_b_one_response_per_write(std::size_t b_count, std::size_t expected) {
-    return b_count <= expected;
-}
-
 // STRB_VALID_BITS — only the lower WSTRB_WIDTH (= DATA_BYTES) bits of strb
 // are defined; higher bits must be 0 (IHI 0022 A3.4.3).
 inline bool check_strb_valid_bits(uint32_t strb) {

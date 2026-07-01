@@ -101,7 +101,7 @@ struct IssueInfo {
 };
 
 // SFINAE helper: call slave.force_aw_not_pending() only if the slave type
-// provides that method (WireSlavePort does; NullSlavePort, AxiSlave do not).
+// provides that method (WireSlavePort does; AxiSlave does not).
 // Used by the fault-injection path to clear stale AW-pending state so that
 // AWVALID drops on the registered SV wire (beta-tick discipline).
 template <typename SlaveT>
@@ -619,26 +619,13 @@ using AxiMaster = AxiMasterT<AxiSlave>;
 // Stage 5b: AxiMasterStandalone — hermetic, no external SlaveT& ref.
 //
 // Wraps that drive AxiMaster without a concrete AxiSlave (e.g.,
-// DPI-wired cosim) use this class. It owns a NullSlavePort (all push_*
-// calls return false; pop_* return nullopt) so AxiMasterT construction
-// succeeds without a real slave. The Wrap overrides the
-// tick-level slave interaction via the DPI layer instead of calling
-// slave_.push_aw etc. directly.
+// DPI-wired cosim) use this class. It owns a WireSlavePort so AxiMasterT
+// construction succeeds without a real slave. The Wrap drives the
+// tick-level slave interaction (ready/valid, response injection) via the
+// DPI layer.
 // -------------------------------------------------------------------------
 
 namespace detail {
-
-// NullSlavePort satisfies the AxiMasterT<SlaveT> interface.
-// push_* always returns false (no backpressure modeling needed at this layer
-// when the real channel is wired externally by the Wrap).
-// pop_* return nullopt (responses injected via external call by Wrap).
-struct NullSlavePort {
-    bool push_aw(const AwBeat&) { return false; }
-    bool push_w(const WBeat&) { return false; }
-    bool push_ar(const ArBeat&) { return false; }
-    std::optional<BBeat> pop_b() { return std::nullopt; }
-    std::optional<RBeat> pop_r() { return std::nullopt; }
-};
 
 // WireSlavePort — handshake-aware intermediary for Stage 5b Wrap.
 //

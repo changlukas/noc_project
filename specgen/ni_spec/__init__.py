@@ -13,7 +13,6 @@ from .invariants import (
     check_mesh_within_flit,
     check_all,
 )
-from .report import n_err, n_warn, print_report
 from . import constants
 
 __all__ = [
@@ -26,8 +25,5 @@ __all__ = [
     "check_flit_arithmetic",
     "check_mesh_within_flit",
     "check_all",
-    "n_err",
-    "n_warn",
-    "print_report",
     "constants",
 ]

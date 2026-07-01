@@ -49,11 +49,6 @@ def _cpp_type_for_width(width: int) -> str:
     return f"std::array<uint8_t, {bytes_needed}>"
 
 
-def _to_pascal(name: str) -> str:
-    """``AXI_SLAVE_PORT`` -> ``AxiSlavePort``; ``axi_slave`` -> ``AxiSlave``."""
-    return "".join(part.capitalize() for part in name.split("_") if part)
-
-
 def _emit_pin_bundles(signals_spec, packet_spec) -> list[str]:
     """Emit ``ni::pins::*Pins`` structs from interfaces[].channels[].signals[]
     and interfaces[].signals[]."""
@@ -62,7 +57,7 @@ def _emit_pin_bundles(signals_spec, packet_spec) -> list[str]:
     out.append("")
     grouped = C.signals_pins_by_interface(signals_spec)
     for iface_name, sigs in grouped.items():
-        bundle = f"{_to_pascal(iface_name)}Pins"
+        bundle = "".join(p.capitalize() for p in iface_name.split("_") if p) + "Pins"
         out.append(f"struct {bundle} {{")
         if not sigs:
             out.append("  // (no signals defined for this interface)")

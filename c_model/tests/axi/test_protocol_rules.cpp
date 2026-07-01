@@ -141,17 +141,6 @@ TEST_F(AxiProtocolDeath, RLastTiming_RejectsEarlyLast) {
         { AXI_PROTOCOL_ASSERT(rules::check_r_last_timing(true, 1, 3), "R_LAST_TIMING"); }, ".*");
 }
 
-TEST_F(AxiProtocolDeath, BOneResponsePerWrite_RejectsOverflow) {
-    SCENARIO("protocol_rules: B_ONE_RESPONSE_PER_WRITE trips when B count exceeds sub-burst count");
-    // Operation has 2 sub-bursts; observing a 3rd B response must trip.
-    EXPECT_DEATH(
-        {
-            AXI_PROTOCOL_ASSERT(rules::check_b_one_response_per_write(3, 2),
-                                "B_ONE_RESPONSE_PER_WRITE");
-        },
-        ".*");
-}
-
 TEST_F(AxiProtocolDeath, StrbValidBits_AcceptsAllOnesAt32Bytes) {
     SCENARIO("protocol_rules: STRB_VALID_BITS is tautological at 32B bus (all 32 lanes legal)");
     // DATA_BYTES = WSTRB_WIDTH = 32 → all 32 bits are valid. The rule is a

@@ -4,6 +4,27 @@ Running action items and open bugs, maintained across iteration rounds. Each rou
 surfaces and strikes what it closes. Read it at session start. An item is not started unless a round
 picks it up.
 
+## Next round — ranked (set 2026-07-01, after the ultra dead-code sweep)
+
+1. **Triage `test_router_loopback` `BidirectionalZeroMismatch/vc4,vc8`** — a REAL failing c_model unit
+   test on current `main` (5 FAILs), surfaced 2026-07-01. Reproduces on a clean `HEAD` header + ninja
+   rebuild against current sources, so it is not stale-build and not the dead-code sweep. vc1/vc2 pass;
+   vc4/vc8 mismatch → smells like a per-VC bidirectional router bug. FIRST verify against a fresh
+   `build/cmodel` (rule out host artifact), then `systematic-debugging`. Highest priority: a live wrong
+   answer outranks cleanup and features. (Details in Infra section.)
+2. **GCC ICE on `test_pins_smoke.cpp`** — blocks the whole `make check` ctest gate on this host, so no
+   CI path can run the unit suite. Investigate a toolchain bump or a narrow workaround. Unblocks #1's
+   full-suite verification too. (Infra section.)
+3. **Injection-rate / saturation sweep** — the recurring measurement gap: vc1..vc8 latency reads flat
+   because no sweep applies congestion, so VC-count value is invisible. Needs an AxiMaster injection
+   schedule. (Verification methodology gaps.)
+4. **Cleanup leftovers** (low priority, own refactor round): the ultra-sweep SKIPPED items —
+   `cpp_params`/`sv_params` dedup, `constants.py` eval-swap, `_load_topology` 4-way consolidation — plus
+   the remaining Dead-code-prune candidates not yet touched. Deletion<addition; do only if a round wants it.
+
+Design-round candidates (SAM remap, multi-id stimulus, NoC-layer QoS, non-4x4 topology) remain in the
+Design rounds section; none is urgent.
+
 ## Bugs
 
 ### Pre-existing fabric bugs (the matrix caught these, which is its purpose)
@@ -244,6 +265,12 @@ The VCS regression path is documented as Linux-workstation and dry-run pending a
   (c_model is header-only; build directly via `make -C sim/verilator`). Investigate toolchain upgrade
   or workaround.
 
+- **`test_router_loopback` `BidirectionalZeroMismatch/vc4,vc8` fails (observed 2026-07-01, needs
+  triage):** 5 FAILs in the c_model unit test on this host. Reproduces on a clean `HEAD` version of
+  `two_node_fabric.hpp` (verified by revert-rebuild-rerun), so it is pre-existing, NOT caused by the
+  dead-code prune round. vc1/vc2 params pass; vc4/vc8 mismatch. Could be a real router bidirectional/VC
+  bug or a stale-build artifact — triage against a fresh `build/cmodel` before assuming either.
+
 ## Dead-code prune candidates (ponytail-audit, 2026-06-30)
 
 Audit ran read-only, no working-tree change. Net ~-1606 lines, 0 dependencies removable. Zero-caller
@@ -251,25 +278,57 @@ claims NOT independently verified — confirm each against existing code before 
 verify-before-change). Lowest-risk first batch = orphans that die with their own self-test (zero
 behavior change). Pick a batch and open a round; do not bulk-delete.
 
+**Re-audit + first execution — 2026-07-01.** Re-ran `/ponytail-audit` (4 parallel read-only agents,
+one per tree) to grep-verify every zero-caller claim against current code. Corrected estimate: ~-1367
+lines (not -1606), 0 deps. Two claims REFUTED: the `gen_test_patterns.py` synthetic path is LIVE
+(`test_gen_test_patterns.py` calls it 5× without `--from`, ~-75 was wrong), and `report.py` is -40 not
+-190. `exceptions.py` is also NOT over-built (all 5 classes raised/caught) — struck from the specgen row.
+**Executed this round — tests batch + docs batch (~-540 lines):** deleted `router_path`/`isolated_scenario`/
+`component_dwell_observer` (+tests), `test_two_node_fabric_at.cpp` + the `req_router_at`/`rsp_router_at`
+accessors, `test_ni_stage.cpp` (EnumValuesAreDistinct trivial), the two `*StructsAreConstructible`
+blocks in `test_scaffold.cpp`, `perf-probe-report.md`, `build_perf_probe_slides.py`. CMake registrations
++ `docs/issue/ARCHITECTURE.md` external-doc tree updated.
+
+**Second execution (ponytail ultra) — 2026-07-01, sim + specgen + c_model batches (~-330 more lines).**
+Deleted: `check_perf_parity.py` + its test; `gen_tb_top.py --check` drift gate (+ dead `difflib`
+import, docstring, stale `check_perf_parity` comment); specgen `report.py` (+ `__init__` re-exports);
+3 zero-caller invariant checkers (`check_signals_pin_uniqueness` + its `_check_pin_unique` helper,
+`check_blocks_related_features_symmetric`, `check_protocol_rules_id_uniqueness`); c_model 10 `peek_aw/w/
+ar/b/r` methods (nmu `axi_slave_port` + nsu `axi_master_port`, intended `AxiDpiAdapter` never built),
+`detail::NullSlavePort` (AxiMasterStandalone owns WireSlavePort — 3 stale comments fixed),
+`check_b_one_response_per_write` (+ its death test; the wired `check_b_front_can_accept_response`
+subsumes it), dead config fields `NmuConfig::ni_req_extra_depth` + `NsuConfig::{ni_req,ni_rsp}_extra_depth`
+(`NmuConfig::ni_rsp_extra_depth` is LIVE — kept). Merged `is_excluded`/`is_xfail` → one `_match`
+(4 call sites); inlined `cpp_signals._to_pascal`. Fixed a **pre-existing** stale test
+(`test_bnd007_excluded` asserted BND-006 excluded, but it was un-excluded 2026-06-30 → retargeted to the
+live BUR-003 rob exclusion). **Verified:** specgen pytest 158 pass (1 pre-existing `jsonschema`-missing
+env fail); run_regress 12 pass; 10 affected ctest targets pass (111 tests); co-sim `mesh_4x4_vc1`
+build + run = scoreboard clean. Generated-file timestamp churn restored (confirms `_to_pascal` inline is
+byte-identical output).
+
+**Deliberately SKIPPED in the ultra sweep (deletion < addition, or risk > reward):**
+`cpp_params.py`/`sv_params.py` shared-emitter dedup (-26) and `constants.py` `_eval_ast`→`eval` (-9) both
+touch codegen output — drift risk over the specgen gate outweighs the lines, and the `eval` swap trades
+an ast-walk for a flimsier `eval`. `_load_topology` 4-way consolidation (-30) is a new shared abstraction
+across 4 files with 4 different return shapes — addition, not deletion. Left for a dedicated refactor
+round if wanted. Remaining `check_b`/peek were the last c_model batch; the deferred latent MetaBuffer
+id-remap hardening (Bugs section) is untouched.
+
 | area | candidate | kind | ~lines |
 |---|---|---|---|
-| tests | `router_path.hpp` + `test_router_path.cpp` (XY predictor, self-test only) | delete | ~-470 (whole tests batch) |
-| tests | `isolated_scenario.hpp` + test (self-test only) | delete | |
-| tests | `component_dwell_observer.hpp` (SegmentDwell/OccupancyPeak) + test (no harness) | delete | |
-| tests | `req_router_at`/`rsp_router_at` + `test_two_node_fabric_at.cpp` (alias assert only) | delete | |
-| tests | `test_scaffold.cpp` `*StructsAreConstructible`, `test_ni_stage.cpp` `EnumValuesAreDistinct` (compile-trivial) | delete | |
-| docs | `perf-probe-report.md` vs `performance-probe.md` near-duplicate (keep one) | delete | -265 |
-| docs | `build_perf_probe_slides.py` (input .pptx + output both gitignored, unrunnable on clone) | delete | -271 |
-| sim | `check_perf_parity.py` + test + 4 golden JSON (no Makefile/CI ref) | yagni | -135 |
-| sim | `gen_test_patterns.py` synthetic-scenario dead path (`--from` always passed) | delete | -75 |
-| sim | `gen_tb_top.py --check` drift gate (no CI, diffs gitignored file) | yagni | -17 |
-| sim | `run_regress.py` `is_excluded`/`is_xfail` -> one `_match` (mirrors coverage-round M-item) | shrink | |
-| specgen | `ni_spec/report.py` (0 caller) | delete | ~-190 (specgen area) |
-| specgen | 3 zero-caller invariant checkers (pin-uniqueness / related-features-symmetric / id-uniqueness) | delete | |
-| specgen | `cpp_params.py`/`sv_params.py` duplicate emitter; `constants.py` re-rolled safe-eval; `exceptions.py` 5-class tree | shrink | |
+| tests | ~~`router_path.hpp`/`isolated_scenario.hpp`/`component_dwell_observer.hpp` + tests, `test_two_node_fabric_at.cpp` + `req_router_at`/`rsp_router_at`, `test_ni_stage.cpp`, 2 `*StructsAreConstructible` blocks~~ | DONE 2026-07-01 | -470 |
+| docs | ~~`perf-probe-report.md` (dup of `performance-probe.md`), `build_perf_probe_slides.py` (unrunnable)~~ | DONE 2026-07-01 | -535 |
+| sim | ~~`check_perf_parity.py` + test (no Makefile/CI ref; no golden JSON existed)~~ | DONE 2026-07-01 | -170 |
+| sim | ~~`gen_test_patterns.py` synthetic-scenario dead path~~ REFUTED 2026-07-01: LIVE, `test_gen_test_patterns.py` calls it 5× without `--from` | keep | 0 |
+| sim | ~~`gen_tb_top.py --check` drift gate~~ | DONE 2026-07-01 | -24 |
+| sim | ~~`run_regress.py` `is_excluded`/`is_xfail` -> one `_match`~~ | DONE 2026-07-01 | -18 |
+| sim | `_load_topology` 4-way consolidation (4 files, 4 return shapes) | SKIPPED (addition>deletion; own refactor round) | ~-30 |
+| specgen | ~~`ni_spec/report.py` (0 caller)~~ | DONE 2026-07-01 | -40 |
+| specgen | ~~3 zero-caller invariant checkers (pin-uniqueness / related-features-symmetric / id-uniqueness)~~ + `_check_pin_unique` helper | DONE 2026-07-01 | -59 |
+| specgen | ~~`cpp_signals._to_pascal` inline~~ DONE 2026-07-01 (-6). `cpp_params`/`sv_params` dedup + `constants.py` eval-swap SKIPPED (codegen drift risk; `eval` flimsier than ast). `exceptions.py` REFUTED (keep) | shrink | -6 |
 | c_model | ~~VcArbiter `MultiCandidate`~~ DONE (deleted on `feat/vc-id-agnostic`, commit `253b744`) | yagni | ~-130 (headers) |
-| c_model | `peek_aw/w/ar/b/r` (10 methods; AxiDpiAdapter caller does not exist) | delete | |
-| c_model | `detail::NullSlavePort` (real owner is WireSlavePort), `check_b_one_response_per_write`, dead config `ni_req_extra_depth` | delete | |
+| c_model | ~~`peek_aw/w/ar/b/r` (10 methods; AxiDpiAdapter never built)~~ | DONE 2026-07-01 | -46 |
+| c_model | ~~`detail::NullSlavePort`, `check_b_one_response_per_write` (+test), dead config `ni_req_extra_depth`×2 + NSU `ni_rsp_extra_depth`~~ | DONE 2026-07-01 | -35 |
 
 Correctly excluded as live (do not touch): `RobMode::Enabled`, `IMemoryPort` (2 impl), `PerfCollector`,
 fault injection. Cross-repo theme: dead code kept alive only by its own self-test.
@@ -283,9 +342,8 @@ failing one cell. JUnit XML reporting waits until a CI consumer exists.
 (Closed in the coverage round: `run_regress` `PASS_MARKER` and `_ax4_curated` orphans deleted, commit
 `aa235f5`.)
 
-M-items from the coverage-round final review (none gate merge): `is_xfail`/`is_excluded` are verbatim
-duplicates -> factor a private `_match_when(cell, rules)` both delegate to (removes a second place the
-`when`-key map can drift); `gen_test_patterns._rewrite_ids` does `t["addr"]` unguarded while
+M-items from the coverage-round final review (none gate merge): ~~`is_xfail`/`is_excluded` verbatim
+duplicates -> one `_match`~~ DONE 2026-07-01 (ultra sweep); `gen_test_patterns._rewrite_ids` does `t["addr"]` unguarded while
 `unique_addr_count` guards with `if "addr" in t` -> mirror the guard (a base scenario with an addr-less
 transaction would `KeyError`); `test_run_regress.py` `import pathlib as _pl` sits after the test
 functions and is a redundant alias of the top-level `pathlib` import -> hoist and drop the alias;

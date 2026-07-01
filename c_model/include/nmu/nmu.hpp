@@ -133,7 +133,6 @@ struct NmuConfig {
     std::vector<uint8_t> read_vcs{};
     std::size_t wormhole_per_input_depth = 4;
     std::size_t vc_arbiter_pending_depth = 4;
-    std::size_t ni_req_extra_depth = 0;  // extra shift stages on the request path
     std::size_t ni_rsp_extra_depth = 0;  // extra shift stages on the response path
 };
 
