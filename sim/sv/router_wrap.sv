@@ -146,11 +146,11 @@ module router_wrap #(
     bit [FLIT_WIDTH-1:0]           rsp_out_flit_q;
     bit [NUM_VC-1:0]              rsp_out_credit_return_q;
     bit [LINK_PORTS-1:0]          link_req_out_valid_q;
-    bit [FLIT_WIDTH-1:0]           link_req_out_flit_q  [LINK_PORTS];
-    bit [NUM_VC-1:0]              link_req_in_credit_q [LINK_PORTS];
+    logic [FLIT_WIDTH-1:0]         link_req_out_flit_q  [LINK_PORTS];
+    logic [NUM_VC-1:0]            link_req_in_credit_q [LINK_PORTS];
     bit [LINK_PORTS-1:0]          link_rsp_out_valid_q;
-    bit [FLIT_WIDTH-1:0]           link_rsp_out_flit_q  [LINK_PORTS];
-    bit [NUM_VC-1:0]              link_rsp_in_credit_q [LINK_PORTS];
+    logic [FLIT_WIDTH-1:0]         link_rsp_out_flit_q  [LINK_PORTS];
+    logic [NUM_VC-1:0]            link_rsp_in_credit_q [LINK_PORTS];
 
     // -------------------------------------------------------------------------
     // always_ff: sync-reset, 3-step DPI call, registered outputs
@@ -251,11 +251,16 @@ module router_wrap #(
                 rsp_out_flit_q          <= t_rsp_out_flit;
                 rsp_out_credit_return_q <= t_rsp_out_credit_return;
                 link_req_out_valid_q    <= t_link_req_out_valid;
-                link_req_out_flit_q     <= t_link_req_out_flit;
-                link_req_in_credit_q    <= t_link_req_in_credit;
                 link_rsp_out_valid_q    <= t_link_rsp_out_valid;
-                link_rsp_out_flit_q     <= t_link_rsp_out_flit;
-                link_rsp_in_credit_q    <= t_link_rsp_in_credit;
+                // Unpacked LINK arrays: bit temp -> logic reg element-wise. 5.048
+                // enforces IEEE 1800-2023 6.22.2 element-type equivalence on whole
+                // unpacked-array assigns; per-port packed 2->4 state stays legal.
+                for (int p = 0; p < LINK_PORTS; p++) begin
+                    link_req_out_flit_q[p]  <= t_link_req_out_flit[p];
+                    link_req_in_credit_q[p] <= t_link_req_in_credit[p];
+                    link_rsp_out_flit_q[p]  <= t_link_rsp_out_flit[p];
+                    link_rsp_in_credit_q[p] <= t_link_rsp_in_credit[p];
+                end
             end
         end
     end
