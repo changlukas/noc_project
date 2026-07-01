@@ -103,28 +103,41 @@ channels is the correct registered-wire model. Verified: 3× `make sim-regress B
 with ZERO timeouts (was a reliable 5-hang cluster), plus 15× BUR-003 neighbor and 15× ORD-002 loops
 with 0 hangs. Debugged with a timeout state dump (since removed) and a read-only Codex cross-check.
 
-**RESIDUAL — data-mismatch worklist (separate bug class, NOT the deadlock; next round).** After the
-AR-drop fix the hangs are gone (zero timeouts). What remains is scoreboard DATA MISMATCHES under
-concurrent 16-node load (each passes in isolation). BND-005/006 are un-excluded (green). ORD-002 is
-re-excluded with a new "data mismatch" reason (its hang is fixed). The open data-mismatch worklist:
+**RESIDUAL — data-mismatch worklist — ALL RESOLVED (see below).** After the AR-drop + AW-replay fixes
+the hangs and the STR-001/ORD-002 B-assert are gone. The remaining scoreboard DATA MISMATCHES
+(`BUR-002`/`BUR-003`@hotspot) were **NOT a fabric/nmu/nsu/router bug** — root cause below.
 
-| cell | note |
-|---|---|
-| `BUR-002`@hotspot | hotspot congestion |
-| `BUR-003`@hotspot | hotspot congestion (its hang was masking this) |
-| `ORD-002`@neighbor | multi-id concurrent write/read (excluded) |
-| `STR-001`@neighbor | 8-outstanding multi-id |
+### Root cause — test-generator slot overlap (FIXED 2026-07-01)
 
-These MAY be in nmu/nsu/router -- apply the FlooNoC cross-check there. With ORD-002 re-excluded,
-`make sim-regress BUILD=mesh_4x4_vc1` is `pass=48 fail=3` (BUR-002/BUR-003 hotspot, STR-001), zero
-timeouts. ctest not re-run on this host (pre-existing GCC ICE on `test_pins_smoke`); the fix is
-confined to the cosim `WireSlavePort` so unit tests using other slave ports are unaffected.
+`BUR-002`/`BUR-003`@hotspot readback was off by exactly one stride (0x40). Root cause = the test
+pattern generator, not the fabric. `sim/tools/gen_test_patterns.py` `alloc_unique_offset` spaced slots
+by a fixed `_SLOT_STRIDE=0x40` while a burst reserves `(len+1)*2**size` bytes (BUR-002=256B,
+BUR-003=8192B). The offsets were distinct in VALUE but their FOOTPRINTS overlapped. Under many-to-one
+(hotspot: many sources into one dst tile) neighbouring sources overwrote each other, so a readback
+returned the neighbour slot's data — off by one stride. `neighbor` (bijection, one writer per tile)
+passed because slots never shared a tile; hence VC-independent and pattern-specific.
 
-**VERIFICATION SCOPE — only `mesh_4x4_vc1` (disabled) was run this round.** The matrix also has
-vc2 / vc4 / vc8 and the `enabled` (rob) builds; NONE were run yet. The AR-drop fix is in the test
-master (topology- and VC-count-independent), so the hangs should be fixed on all builds, but this is
-UNVERIFIED. **Next session: run the full `make sim-regress` (all builds)** to confirm the fix across
-vc2/4/8 + rob and to see whether the data-mismatch worklist changes with VC count.
+Diagnosed from the captured `sim/regress/output/run_prune.log` mismatch report (`actual = expected -
+0x40`, a clean monotonic whole-burst shift — overlap, not fabric corruption) plus the allocator code;
+no sim re-run needed. The earlier "NSU MetaBuffer" suspicion was REFUTED: a read-only Codex pass showed
+the C++ modeled path (depacketize/AxiMasterPort/AxiSlave) preserves same-id order, and a FlooNoC survey
+placed our MetaBuffer at FlooNoC's `MaxUniqueIds==1` corner — a real LATENT hazard, but not this bug.
+
+FIX (branch `fix/hotspot-slot-overlap`): `stride = max(stride, reserved)` in `alloc_unique_offset`;
+both emit callers auto-grow `memory_size` to `n_nodes*n_seq*stride`. TDD (disjoint-footprint test);
+the old fixed-window-overflow contract folded into a cross-node disjoint test. Verified: full
+`make sim-regress` all 8 builds = **pass=400 fail=0** excluded=16 (only BUR-003 rob-capacity, legit)
+skipped=32. BUR-002/003 hotspot + STR-001 green, zero regression. vc1 verilator rebuilt to confirm the
+NSU `snapshot_*`→`allocate_*` rename compiles (GCC ICE still blocks only the ctest `test_pins_smoke`).
+
+**Deferred (latent, not triggered):** the MetaBuffer per-id-FIFO src recovery (id-agnostic many-to-one)
+was NOT unmasked by the fix (no new different-signature mismatch). FlooNoC `id_queue` / unique-slot
+id-remap alignment stays a future hardening item, not needed for any current test. `run_regress.py`
+`CAPACITY_SLOTS=4` cap is now loosenable (memory_size auto-grows).
+
+**VERIFICATION SCOPE — full `make sim-regress` (all 8 builds) run 2026-07-01: pass=400 fail=0.**
+vc1/2/4/8 × {disabled, enabled} all green (the `enabled` verilator exes exist and run; GCC ICE blocks
+only the ctest build). The AR-drop / AW-replay / slot-overlap fixes are confirmed across every build.
 
 ### ~~Confirmed design bug — per-id VC binding~~ RESOLVED 2026-06-30
 
