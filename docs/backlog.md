@@ -13,11 +13,35 @@ fixed.
 
 | id | symptom | suspected root cause | status |
 |---|---|---|---|
-| `AX4-ORD-002` | multi-id concurrent write hang (was flaky/clustered). | **HANG FIXED 2026-06-30** — test-master read sub-burst AR drop (`WireSlavePort::push_ar`). 0 timeouts under regression load. BUT now fails a scoreboard DATA MISMATCH under concurrent load (passes in isolation, 5/5). RE-EXCLUDED with a new reason (data mismatch, not hang); the real task is to FIX the multi-id data mismatch, then un-exclude. | re-excluded (data mismatch) |
+| `AX4-ORD-002` | multi-id concurrent write hang (was flaky/clustered). | **FIXED 2026-07-01** — the residual "data mismatch" was the `WireSlavePort` AW-replay bug (below). Un-excluded; re-verified green (64 reads, 0 mismatch, 16-node concurrent). | FIXED, un-excluded |
 | `AX4-BND-005` | 4KB-crossing burst at `0x0FE0` (`len:7`, `size:5`): read phase hung under 16-node load (4KB read-split). | **FIXED 2026-06-30** by the push_ar gate (same AR-drop class). Re-verified green under regression load; un-excluded. | FIXED, un-excluded |
 | `AX4-BND-006` | same 4KB-boundary-edge class (2 writes + 2 reads spanning 0x1000). | **FIXED 2026-06-30** by the push_ar gate. Re-verified green under regression load; un-excluded. | FIXED, un-excluded |
 
 The 4KB carriers renumbered in the 2026-06-30 prune: old `BND-006` (cross_4kb_auto_split) → `BND-005`, old `BND-007` (4kb_boundary_edges) → `BND-006` (see the prune entry below for the full old→new map).
+
+### Root cause — WireSlavePort AW-replay (FIXED 2026-07-01)
+
+Symptom: STR-001 / ORD-002 aborted on `B_FRONT_CAN_ACCEPT` (`axi_master.hpp` — a master drained a
+B with an empty per-id deque). Localized by instrumented co-sim + a `[MST-ADMIT-W]` vs `[NMU-AW-IN]`
+correlation: masters ADMIT all N distinct writes (128 = 16 nodes x 8 distinct id/addr), but each
+NMU ingress saw only ONE of them (the highest id) replayed N times — ids 1..7 lost, id 8 replayed.
+
+`detail::WireSlavePort::push_aw` latched `last_aw_ = b` BEFORE the `aw_delivered_this_tick_` gate.
+`tick_push_aw_w_` walks the WHOLE `active_write_ops_` std::map (ascending id) every tick, so multiple
+ids call push_aw in one tick. On the wait cycles (awready low, no delivery) the gate was never set,
+so each later id overwrote `last_aw_` to the LAST id walked (id 8). The wire presented id 8 and
+replayed it; the subordinate executed duplicate writes and returned extra B's → the assert. It is a
+regression from the AR-drop fix (`9d218bb`), which added the delivered gate but left the latch on the
+wrong side of it (the pre-gate code was also not beta-tick-correct — it marked all N delivered in one
+tick — but did not create the replay).
+
+FIX: gate at OFFER time — `if (X_offered_this_tick_) return false;` before latching, so the FIRST
+(oldest) id's beat stays presented and later ids retry next tick. Applied to push_aw / push_w /
+push_ar; flag renamed `*_delivered_this_tick_` → `*_offered_this_tick_`. Regression test
+`c_model/tests/axi/test_wire_slave_port.cpp` (first offered wins while not ready; one delivery per
+tick; progression to next id; AR channel). Verified: STR-001 green (128/128, 0 mismatch), ORD-002
+green (un-excluded), BUR-003 fixed on 3/4 patterns (hotspot remains), `mesh_4x4_vc1` matrix
+pass=49 fail=2 (was 48/3), existing unit tests green (test_axi_master 44, raw_order 2, integration 25).
 
 The first full `make sim-regress` is a discovery run. Sweeping the curated set through the
 concurrent 16-node fabric will surface more pre-existing co-sim bugs. Add each to `matrix.yaml`
