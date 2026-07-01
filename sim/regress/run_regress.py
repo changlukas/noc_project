@@ -25,7 +25,12 @@ def _interior_hotspot(topology: str) -> int:
     return (y_dim // 2) * x_dim + (x_dim // 2)
 
 
-CAPACITY_SLOTS = 4  # alloc_unique_offset bound on the default 4x4 mesh (gen_test_patterns.py:223-227)
+# Coverage gate on independent-mode scenarios: caps unique write addresses per
+# scenario. Historically also the alloc_unique_offset window bound (16*4*0x40 =
+# 0x1000); since alloc_unique_offset now auto-grows the window to hold disjoint
+# slots this is only a coverage cap and could be raised (see gen_test_patterns.py
+# _write_footprint / memory_size auto-grow).
+CAPACITY_SLOTS = 4
 
 
 def unique_addr_count(scenario_path: str) -> int:

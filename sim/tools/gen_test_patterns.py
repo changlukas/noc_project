@@ -207,24 +207,34 @@ def _linear_to_coord(node, x_dim):
 # Global unique-offset allocator
 # ---------------------------------------------------------------------------
 
+def _write_footprint(txns):
+    """Largest write-burst footprint in bytes across `txns`: (len+1)*2**size.
+
+    A slot must reserve this many bytes; the slot stride must be at least this so
+    neighbouring sources do not overlap under many-to-one traffic. Falls back to
+    _SLOT_STRIDE when there is no write transaction (read-only base)."""
+    footprints = [(int(t.get("len", 0)) + 1) * (1 << int(t.get("size", 0)))
+                  for t in txns if t.get("op") == "write"]
+    return max([_SLOT_STRIDE, *footprints])
+
+
 def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
                         memory_size, reserved=_SLOT_STRIDE, stride=_SLOT_STRIDE):
     """Return a local offset that is globally unique across all (src_node, seq) pairs.
 
     Layout within the dst node's memory window (row-major in seq, column in src):
+        stride = max(stride, reserved)   # a slot must be at least its footprint
         offset = base_offset + src_node * stride + seq * (n_nodes * stride)
 
-    This guarantees uniqueness: the value src_node + seq * n_nodes is injective
-    for all (src_node in [0, n_nodes), seq in [0, n_nodes)).
+    Uniqueness AND disjointness: distinct (src_node, seq) map to distinct slots
+    spaced by `stride`, and since stride >= reserved each slot's footprint fits
+    inside its own spacing — no two slots overlap even under many-to-one traffic.
+    A burst footprint larger than the default _SLOT_STRIDE therefore widens the
+    stride (callers size memory_size to n_nodes * n_seq * stride to hold them all).
 
     Bounds: the chosen offset plus the slot's reserved bytes must stay within the
     dst tile's memory window [base_offset, base_offset + memory_size).  A violation
-    raises ValueError instead of silently overflowing into the next dst tile.  The
-    formula fits when n_nodes * max_seq_per_src * stride <= memory_size; for the
-    default mesh_4x4 (n_nodes=16, memory_size=0x1000, stride=0x40) this allows up
-    to 4 transactions per node (16*4*64 = 4096 = memory_size, the tightest current
-    case — AX4-BAS-002's 4 writes).  T2's --transactions-per-node beyond that
-    trips the assertion rather than corrupting a neighbouring tile.
+    raises ValueError instead of silently overflowing into the next dst tile.
 
     Args:
         dst_node: linear node index of the destination (informational only — not
@@ -243,6 +253,10 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
         ValueError: if offset + reserved would exceed base_offset + memory_size.
     """
     _ = dst_node  # unused in formula; kept for caller clarity and T2/T3 reuse
+    # A slot occupies `reserved` bytes; the spacing between slots must be at least
+    # that, or a burst footprint larger than the default stride overlaps its
+    # neighbour (root cause of BUR-002/003 hotspot off-by-0x40 under many-to-one).
+    stride = max(stride, reserved)
     offset = base_offset + src_node * stride + seq * (n_nodes * stride)
     if (offset - base_offset) + reserved > memory_size:
         raise ValueError(
@@ -380,6 +394,11 @@ def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
     # rewrite all transactions sharing that addr to the same new offset.
     orig_addrs = [_as_int(t["addr"]) & 0xFFFFFFFF
                   for t in sc.get("transactions", [])]
+    # Uniform slot stride = largest write footprint; grow the dst window so the
+    # allocator's per-source columns of disjoint slots fit (see alloc_unique_offset).
+    slot_stride = _write_footprint(sc.get("transactions", []))
+    n_pairs = len(dict.fromkeys(orig_addrs))
+    memory_size = max(memory_size, n_nodes * n_pairs * slot_stride)
     seen_orig: dict = {}  # orig_local_addr -> seq index
     pair_offset: dict = {}  # orig_local_addr -> allocated local_offset
     seq = 0
@@ -388,7 +407,7 @@ def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
             seen_orig[oa] = seq
             # dst_node arg is informational; pass dst_cid as a proxy (not used in formula)
             pair_offset[oa] = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
-                                                  n_nodes, memory_size)
+                                                  n_nodes, memory_size, reserved=slot_stride)
             seq += 1
 
     for t in sc.get("transactions", []):
@@ -408,6 +427,7 @@ def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
 
     cfg = sc.setdefault("config", {})
     cfg["memory_base"] = (src_cid << ADDR_DST_SHIFT) + base_local
+    cfg["memory_size"] = memory_size
 
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "scenario.yaml"), "w") as f:
@@ -508,17 +528,19 @@ def _emit_base_driven_node(base_sc, src_dir, out_dir, src_idx, dst_cids, src_cid
     # Preserves the base pair structure: each unique addr = one write+read group.
     seen_orig: dict = {}   # orig_local_addr -> base seq index within the base
     base_pair_order = []   # ordered unique orig local addrs
-    # Burst footprint per unique address: (axi_len + 1) * 2**axi_size bytes.
-    # Taken from the first (write) transaction for each unique address.
-    base_pair_reserved: dict = {}  # orig_local_addr -> reserved bytes
     for t in base_txns:
         oa = _as_int(t["addr"]) & 0xFFFFFFFF
         if oa not in seen_orig:
             seen_orig[oa] = len(base_pair_order)
             base_pair_order.append(oa)
-            axi_len = int(t.get("len", 0))
-            axi_size = int(t.get("size", 0))
-            base_pair_reserved[oa] = (axi_len + 1) * (1 << axi_size)
+
+    # One uniform slot stride for the whole scenario = the largest write footprint
+    # (so mixed-size pairs share a stride and never overlap). Grow the dst window
+    # to hold n_nodes * n_seq disjoint slots — under many-to-one (hotspot) every
+    # source lands in ONE dst tile, so the tile must fit them all side by side.
+    slot_stride = _write_footprint(base_txns)
+    n_seq = len(dst_cids) * len(base_pair_order)
+    memory_size = max(memory_size, n_nodes * n_seq * slot_stride)
 
     transactions = []
     for rep_seq, dst_cid in enumerate(dst_cids):
@@ -527,10 +549,9 @@ def _emit_base_driven_node(base_sc, src_dir, out_dir, src_idx, dst_cids, src_cid
         for pair_seq, orig_addr in enumerate(base_pair_order):
             # Global seq = rep_seq * len(base_pair_order) + pair_seq
             global_seq = rep_seq * len(base_pair_order) + pair_seq
-            reserved = base_pair_reserved[orig_addr]
             pair_offset[orig_addr] = alloc_unique_offset(
                 dst_cid, src_idx, global_seq, base_local, n_nodes, memory_size,
-                reserved=reserved,
+                reserved=slot_stride,
             )
         for t in base_txns:
             tc = copy.deepcopy(t)

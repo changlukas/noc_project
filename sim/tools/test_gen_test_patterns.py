@@ -163,6 +163,28 @@ def test_alloc_reserved_burst_tail_overflow_raises():
     assert raised, "allocator must account for the slot's reserved burst bytes"
 
 
+def test_alloc_disjoint_footprints_many_to_one():
+    """Under many-to-one (hotspot) every source writes into ONE dst tile, so each
+    slot's [offset, offset+footprint) must be DISJOINT — otherwise one source's
+    burst overwrites a neighbour's and the readback is off by one slot stride.
+    A burst footprint larger than _SLOT_STRIDE must WIDEN the slot spacing, not
+    silently overlap (root cause of BUR-002/003 hotspot off-by-0x40)."""
+    n_nodes = 16
+    base_local = 0x1000
+    footprint = 0x2000  # AX4-BUR-003: 256 beats * 32 B
+    mem = n_nodes * footprint  # room for n disjoint slots
+    intervals = []
+    for src in range(n_nodes):
+        off = alloc_unique_offset(0, src, 0, base_local, n_nodes, mem, reserved=footprint)
+        intervals.append((off, off + footprint))
+    intervals.sort()
+    for (a_lo, a_hi), (b_lo, b_hi) in zip(intervals, intervals[1:]):
+        assert a_hi <= b_lo, (
+            f"slot footprints overlap: [{a_lo:#x},{a_hi:#x}) vs [{b_lo:#x},{b_hi:#x}) "
+            "— stride must account for the reserved burst footprint"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Integration: gen_test_patterns CLI (neighbor, 4x4 topology)
 # ---------------------------------------------------------------------------
@@ -705,21 +727,42 @@ def test_hotspot_uses_base_shape(tmp_path):
         assert t.get("len") == 2, f"len={t.get('len')} != 2 (should come from base)"
 
 
-def test_base_driven_respects_alloc_capacity(tmp_path):
-    """uniform_random --from: exceeding the memory window must raise (non-zero exit)."""
-    # mesh_4x4_vc1: n_nodes=16, memory_size=0x1000 (from base), stride=0x40
-    # max fits = memory_size / (n_nodes * stride) = 4096 / (16 * 64) = 4 txn/node.
-    # Requesting 8 txn/node must trip alloc_unique_offset's ValueError.
-    base_path = _write_base_scenario(tmp_path, size=2, length=0)
+def _all_write_intervals(out_dir):
+    """Collect [addr, addr+footprint) for every write across all node scenarios."""
+    intervals = []
+    for name in sorted(os.listdir(out_dir)):
+        node_sc = os.path.join(out_dir, name, "scenario.yaml")
+        if not os.path.isfile(node_sc):
+            continue
+        sc = yaml.safe_load(open(node_sc))
+        for t in sc.get("transactions", []):
+            if t.get("op") == "write":
+                fp = (int(t["len"]) + 1) * (1 << int(t["size"]))
+                a = int(t["addr"])
+                intervals.append((a, a + fp))
+    intervals.sort()
+    return intervals
+
+
+def test_base_driven_large_burst_grows_window_no_overlap(tmp_path):
+    """Many-to-one (hotspot) with a burst footprint larger than the default slot
+    stride must GROW the dst window and keep every source's write footprint DISJOINT
+    — the fix for BUR-002/003 off-by-0x40. (Replaces the old fixed-window overflow
+    contract; the allocator's bound guard stays covered by
+    test_alloc_raises_on_memory_size_overflow.)"""
+    # size=6 (64 B/beat), len=15 (16 beats) -> 1024 B footprint >> default 0x40 stride.
+    base_path = _write_base_scenario(tmp_path, size=6, length=15)
     out_dir = str(tmp_path / "out")
-    result = _run_gen_from_base(base_path, "uniform_random", "mesh_4x4_vc1", seed=1,
-                                txn_per_node=8, out_dir=out_dir)
-    assert result.returncode != 0, (
-        "Expected non-zero exit when txn/node exceeds memory window"
-    )
-    assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
-        f"Expected memory overflow error; stderr={result.stderr!r}"
-    )
+    result = _run_gen_from_base(base_path, "hotspot", "mesh_4x4_vc1", seed=1,
+                                txn_per_node=1, out_dir=out_dir, extra_args=["--hotspot", "5"])
+    assert result.returncode == 0, f"gen failed: {result.stderr}"
+    intervals = _all_write_intervals(out_dir)
+    assert len(intervals) == 16, f"expected one write per node, got {len(intervals)}"
+    for (a_lo, a_hi), (b_lo, b_hi) in zip(intervals, intervals[1:]):
+        assert a_hi <= b_lo, (
+            f"write footprints overlap: [{a_lo:#x},{a_hi:#x}) vs [{b_lo:#x},{b_hi:#x}) "
+            "— many-to-one slots must be disjoint"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -774,30 +817,3 @@ def test_rewrite_ids_preserves_pairs():
     assert t[0]["id"] != t[2]["id"]
 
 
-def test_base_driven_large_burst_overflow_raises(tmp_path):
-    """Fault injection: base-driven path with a burst whose footprint exceeds the dst
-    memory window must exit non-zero (bound assert fires).
-
-    mesh_4x4_vc1: n_nodes=16, memory_size=0x1000 (from base scenario), stride=0x40.
-    Base burst: size=6 (64 B/beat), len=15 (16 beats) -> footprint = 16*64 = 1024 B.
-    The first slot (src=0, seq=0): offset-base = 0*64 + 0*16*64 = 0;
-    0 + 1024 = 1024 <= 4096, so it fits.  But src=15, seq=3:
-    offset-base = 15*64 + 3*16*64 = 960 + 3072 = 4032; 4032 + 1024 = 5056 > 4096.
-    Without the fix, reserved defaults to 0x40 (64), so 4032+64=4096 appears to fit and
-    the check is silently bypassed.  With the fix, reserved=1024 and the check fires.
-
-    We use txn_per_node=4 to force the allocator to reach the overflowing (src=15, seq=3)
-    slot; the test expects a non-zero exit and a memory-overflow message.
-    """
-    # size=6: 64 B/beat; len=15: 16 beats; footprint = 1024 B >> default stride 64 B.
-    base_path = _write_base_scenario(tmp_path, size=6, length=15)
-    out_dir = str(tmp_path / "out")
-    result = _run_gen_from_base(base_path, "uniform_random", "mesh_4x4_vc1", seed=1,
-                                txn_per_node=4, out_dir=out_dir)
-    assert result.returncode != 0, (
-        "Expected non-zero exit: large base burst (size=6 len=15, footprint=1024 B) "
-        "overflows the 0x1000 dst memory window but was not caught"
-    )
-    assert "memory" in result.stderr.lower() or "ValueError" in result.stderr, (
-        f"Expected memory overflow error; stderr={result.stderr!r}"
-    )
