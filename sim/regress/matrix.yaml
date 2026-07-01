@@ -13,7 +13,8 @@ exclusions:
   # BND-005 / BND-006 un-excluded 2026-06-30: both HUNG on the read sub-burst
   # AR-drop deadlock, fixed by the WireSlavePort push_ar gate
   # (commit fix/cosim-ar-drop-deadlock). Re-verified green under 16-node load.
-  - {when: {from: AX4-ORD-002},
-     reason: "AR-drop hang FIXED (push_ar gate), but a scoreboard DATA MISMATCH
-       remains under concurrent load (passes in isolation); re-include when the
-       multi-id data-mismatch is fixed"}
+  # ORD-002 un-excluded 2026-07-01: the multi-id "data mismatch" was the
+  # WireSlavePort AW-replay bug (push_aw latched last_aw_ before the delivered
+  # gate, so a multi-id same-tick walk presented the LAST id and replayed it).
+  # Fixed by gating push_aw/w/ar at OFFER time. Re-verified green (64 reads, 0
+  # mismatch under 16-node concurrent load).
