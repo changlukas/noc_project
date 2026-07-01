@@ -13,6 +13,9 @@ target_include_directories(test_integration PRIVATE
     "${CMAKE_SOURCE_DIR}/../sim/test_patterns")
 add_cmodel_test(test_axi_master_raw_order)
 target_link_libraries(test_axi_master_raw_order PRIVATE yaml-cpp::yaml-cpp)
+
+add_cmodel_test(test_wire_slave_port)
+target_link_libraries(test_wire_slave_port PRIVATE yaml-cpp::yaml-cpp)
 add_cmodel_test(test_protocol_rules)
 
 # Stage B unified scenario tree. test_integration consumes scenarios via
