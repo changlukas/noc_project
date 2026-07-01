@@ -54,7 +54,7 @@ static void inject_single_ar_flit(NsuStandalone& nsu, uint8_t id, uint64_t addr)
 }
 
 // Seed the MetaBuffer for a B response with the given AXI id.
-// Injects an AW flit and ticks once so Depacketize::tick() snapshots the
+// Injects an AW flit and ticks once so Depacketize::tick() allocates the
 // MetaBuffer entry (src_id=0x10, rob_req=0, rob_idx=0). The AW beat may
 // land in AxiMasterPort's aw_q on subsequent ticks; it does not affect B.
 static void seed_meta_for_b(NsuStandalone& nsu, uint8_t id) {
@@ -72,7 +72,7 @@ static void seed_meta_for_b(NsuStandalone& nsu, uint8_t id) {
     f.set_payload_field("AW", "awsize", 2);
     f.set_payload_field("AW", "awburst", static_cast<uint64_t>(axi::Burst::INCR));
     nsu.inject_req_flit(f);
-    nsu.tick();  // Depacketize runs: AW → s1_aw_ + MetaBuffer.snapshot_write(id)
+    nsu.tick();  // Depacketize runs: AW → s1_aw_ + MetaBuffer.allocate_write(id)
 }
 
 // Build a B beat for a given AXI id.
@@ -137,7 +137,7 @@ TEST(NsuPipeline, RspLatencyIsThreeStages) {
     NsuStandalone nsu(cfg);
 
     // Seed MetaBuffer so Packetize can build the B flit.
-    // seed_meta_for_b injects AW flit and runs 1 tick to snapshot MetaBuffer.
+    // seed_meta_for_b injects AW flit and runs 1 tick to allocate MetaBuffer entry.
     seed_meta_for_b(nsu, /*id=*/3);
 
     // Push B into AxiMasterPort (external accept handshake = cycle 0).

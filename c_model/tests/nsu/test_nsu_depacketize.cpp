@@ -51,7 +51,7 @@ ni::cmodel::Flit make_ar_flit(uint8_t arid, uint64_t addr, uint8_t src_id = 0x10
 
 TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
     SCENARIO(
-        "NSU Depacketize: AW flit snapshots src_id/rob_req/rob_idx into MetaBuffer + emits AW "
+        "NSU Depacketize: AW flit allocates src_id/rob_req/rob_idx into MetaBuffer + emits AW "
         "beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
@@ -63,7 +63,7 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
     ASSERT_TRUE(aw.has_value());
     EXPECT_EQ(aw->id, 0x05);
     EXPECT_EQ(aw->addr, 0x1000u);
-    // MetaBuffer snapshot
+    // MetaBuffer entry
     auto m = mb.peek_write(0x05);
     ASSERT_TRUE(m.has_value());
     EXPECT_EQ(m->src_id, 0x12);
@@ -104,7 +104,7 @@ TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
 }
 
 TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
-    SCENARIO("NSU Depacketize: AR flit snapshots read-side meta into MetaBuffer + emits AR beat");
+    SCENARIO("NSU Depacketize: AR flit allocates read-side meta into MetaBuffer + emits AR beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, 16, 16, 16);

@@ -5,7 +5,7 @@
 // side) and no addr_trans (uses incoming flit dst_id directly).
 //
 // Pipeline (req in, AXI out):
-//   external NocReqIn ──> Depacketize (snapshots meta to MetaBuffer)
+//   external NocReqIn ──> Depacketize (allocates meta in MetaBuffer)
 //     ──> AxiMasterPort ──> external AXI slave
 //
 // Pipeline (rsp from AXI slave, NoC out):

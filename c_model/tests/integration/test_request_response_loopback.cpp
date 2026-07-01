@@ -262,7 +262,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // This is essential for multi-NSU: when AW1 (id=5) routes via NSU_0 and
     // AW2 (id=5) routes via NSU_1, the slave still emits B1 before B2, and
     // the testbench must hand B1 back to NSU_0 (whose MetaBuffer holds the
-    // matching dst/src snapshot) and B2 back to NSU_1.
+    // matching dst/src entry) and B2 back to NSU_1.
     std::array<std::deque<std::size_t>, 256> b_owner_nsu;
     std::array<std::deque<std::size_t>, 256> r_owner_nsu;
 

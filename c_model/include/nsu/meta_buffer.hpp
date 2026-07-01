@@ -16,7 +16,7 @@ struct MetaEntry {
     uint8_t rob_idx;
 };
 
-// Per-AXI-ID FIFO of {src_id, rob_req, rob_idx} snapshots captured at AW/AR
+// Per-AXI-ID FIFO of {src_id, rob_req, rob_idx} entries allocated at AW/AR
 // flit ingress. Looked up at B/R flit egress via peek+commit pattern.
 //
 // AXI4 ordering: per-ID transactions complete in issue order. Each FIFO front
@@ -29,8 +29,8 @@ class MetaBuffer {
         assert(per_id_depth > 0 && "MetaBuffer: per_id_depth must be positive");
     }
 
-    // -- Write side (AW snapshot + B consume) --
-    void snapshot_write(uint8_t awid, MetaEntry e) {
+    // -- Write side (AW allocate + B consume) --
+    void allocate_write(uint8_t awid, MetaEntry e) {
         if (!(write_[awid].size() < per_id_depth_)) {
             assert(false && "MetaBuffer: per-ID depth exceeded");
             std::abort();  // belt-and-braces for NDEBUG
@@ -46,9 +46,9 @@ class MetaBuffer {
         write_[bid].pop_front();
     }
 
-    // -- Read side (AR snapshot + R consume) --
+    // -- Read side (AR allocate + R consume) --
     // Multi-beat R burst: peek every beat, commit only on rlast.
-    void snapshot_read(uint8_t arid, MetaEntry e) {
+    void allocate_read(uint8_t arid, MetaEntry e) {
         if (!(read_[arid].size() < per_id_depth_)) {
             assert(false && "MetaBuffer: per-ID depth exceeded");
             std::abort();  // belt-and-braces for NDEBUG

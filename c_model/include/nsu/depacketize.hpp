@@ -16,16 +16,16 @@ namespace ni::cmodel::nsu {
 
 // NSU-side request depacketizer. Stateful demux: tick() pulls flits from
 // NocReqIn, decodes axi_ch, demuxes into AW/W/AR queues. AW/AR flits
-// additionally snapshot {src_id, rob_req, rob_idx} into MetaBuffer keyed by
+// additionally allocate a MetaBuffer entry {src_id, rob_req, rob_idx} keyed by
 // awid/arid for the response path. W flits have no MetaBuffer side effect —
 // W carries no AXI ID; W ordering is handled by a downstream W-meta FIFO.
 //
 // Pending-flit stash semantics: if a pulled flit's target queue is full,
 // the flit is held in `pending_` and re-attempted next tick. This blocks
 // any other flits behind it (head-of-line blocking on single-FIFO ingress).
-// Critical: MetaBuffer snapshot for AW/AR happens AFTER the q_depth check
+// Critical: MetaBuffer allocate for AW/AR happens AFTER the q_depth check
 // passes, so a backpressure-induced retry of the same pending_ flit never
-// double-snapshots.
+// double-allocates.
 class Depacketize : public RequestDepacketizer {
   public:
     Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t aw_q_depth,
@@ -124,7 +124,7 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
 // stage registers. If a register is already occupied (not yet consumed by the
 // S2 AxiMasterPort), backpressure the flit into pending_ (head-of-line
 // blocking on single-FIFO ingress, same semantics as the original queue-based
-// implementation). MetaBuffer snapshot is atomic with decode into S1 (R4).
+// implementation). MetaBuffer allocate is atomic with decode into S1 (R4).
 inline void Depacketize::tick() {
     while (true) {
         Flit f;
@@ -144,7 +144,7 @@ inline void Depacketize::tick() {
                 }
                 {
                     auto aw = decode_aw(f);
-                    meta_.snapshot_write(aw.id,
+                    meta_.allocate_write(aw.id,
                                          {
                                              static_cast<uint8_t>(f.get_header_field("src_id")),
                                              static_cast<uint8_t>(f.get_header_field("rob_req")),
@@ -167,7 +167,7 @@ inline void Depacketize::tick() {
                 }
                 {
                     auto ar = decode_ar(f);
-                    meta_.snapshot_read(ar.id,
+                    meta_.allocate_read(ar.id,
                                         {
                                             static_cast<uint8_t>(f.get_header_field("src_id")),
                                             static_cast<uint8_t>(f.get_header_field("rob_req")),

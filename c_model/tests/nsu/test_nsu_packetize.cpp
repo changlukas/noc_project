@@ -52,7 +52,7 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
         "(src/rob_req/rob_idx), stamps onto B flit header, commits meta");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
-    mb.snapshot_write(0x05, {/*src=*/0x12, /*rob_req=*/1, /*rob_idx=*/3});
+    mb.allocate_write(0x05, {/*src=*/0x12, /*rob_req=*/1, /*rob_idx=*/3});
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));
@@ -78,7 +78,7 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
 TEST(NsuPacketize, TickAssertsOnBWithoutMatchingMeta) {
     SCENARIO(
         "NSU Packetize: tick() with B in S1 but no matching MetaBuffer entry aborts "
-        "(pipeline protocol violation — B without prior AW snapshot)");
+        "(pipeline protocol violation — B without prior AW allocate)");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
@@ -91,8 +91,8 @@ TEST(NsuPacketize, PushBBackpressureWhenS1Full) {
     SCENARIO("NSU Packetize: push_b returns false when S1 register is occupied");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
-    mb.snapshot_write(0x05, {0x12, 0, 0});
-    mb.snapshot_write(0x06, {0x20, 0, 0});
+    mb.allocate_write(0x05, {0x12, 0, 0});
+    mb.allocate_write(0x06, {0x20, 0, 0});
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));   // S1 now occupied
@@ -110,7 +110,7 @@ TEST(NsuPacketize, PushBNoCommitOnNocFull) {
     ChannelModel noc(/*req*/ 16, /*rsp*/ 1);
     RspCapture r_cap;
     MetaBuffer mb(4);
-    mb.snapshot_write(0x05, {0x12, 0, 0});
+    mb.allocate_write(0x05, {0x12, 0, 0});
     Packetize pkt(noc.rsp_out(), r_cap, mb, kNsuSrcId);
 
     // B(0x05): push to S1, tick() → goes to noc (cap=1, now full), meta consumed.
@@ -120,7 +120,7 @@ TEST(NsuPacketize, PushBNoCommitOnNocFull) {
     EXPECT_EQ(pkt.s1_b_occupancy(), 0u);
 
     // B(0x06): push to S1. tick() → noc still full → push fails, S1 stays, meta kept.
-    mb.snapshot_write(0x06, {0x20, 0, 0});
+    mb.allocate_write(0x06, {0x20, 0, 0});
     ASSERT_TRUE(pkt.push_b(make_b(0x06)));
     pkt.tick();
     EXPECT_TRUE(mb.peek_write(0x06).has_value()) << "meta must NOT be consumed when noc full";
@@ -141,7 +141,7 @@ TEST(NsuPacketize, PushRMultiBeatPeekUntilRLast) {
         "tick() with R rlast=1 commits (multi-beat read burst)");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
-    mb.snapshot_read(0x03, {0x12, 0, 5});
+    mb.allocate_read(0x03, {0x12, 0, 5});
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ false)));
@@ -164,7 +164,7 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
         "flit after push_r()+tick()");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
-    mb.snapshot_read(0x03, {0x12, 0, 0});
+    mb.allocate_read(0x03, {0x12, 0, 0});
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true, axi::Resp::SLVERR)));
     pkt.tick();
@@ -195,7 +195,7 @@ TEST(NsuPacketize, MultiBeatR_AllFlitsCarrySameRobIdx) {
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     constexpr uint8_t kRobIdx = 7;
-    mb.snapshot_read(0x03, {/*src=*/0x12, /*rob_req=*/1, /*rob_idx=*/kRobIdx});
+    mb.allocate_read(0x03, {/*src=*/0x12, /*rob_req=*/1, /*rob_idx=*/kRobIdx});
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
 
     // Three-beat burst: push_r + tick emits one flit per step.

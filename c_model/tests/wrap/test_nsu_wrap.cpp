@@ -26,7 +26,7 @@ using ni::cmodel::wrap::NsuWrap;
 namespace {
 
 // Build an AW-channel req flit to inject into Nsu's NoC consumer side.
-// src_id = requester's NMU id (needed for MetaBuffer snapshot).
+// src_id = requester's NMU id (needed for MetaBuffer entry).
 FlitBytes make_aw_flit_bytes(uint8_t awid, uint64_t awaddr, uint8_t src_id = 0x10) {
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_AW);

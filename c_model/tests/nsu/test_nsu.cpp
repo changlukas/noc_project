@@ -54,7 +54,7 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
 // Pinpoints: member-declaration order (MetaBuffer must be live before
 // Depacketize and Packetize), tick-order (depacketize before
 // axi_master_port, then wormhole, then vc_arbiter), shared MetaBuffer
-// snapshot-on-AW + lookup-on-B path, and Packetize -> WormholeArbiter
+// allocate-on-AW + lookup-on-B path, and Packetize -> WormholeArbiter
 // -> VcArbiter -> NocRspOut wiring. Uses NsuStandalone so the test
 // does not depend on ChannelModel / NMU side.
 TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
@@ -85,7 +85,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     cfg.port_params.meta_buffer_per_id_depth = 4;
     NsuStandalone nsu(cfg);
 
-    // Build an AW flit. NSU Depacketize snapshots {src_id, rob_req,
+    // Build an AW flit. NSU Depacketize allocates {src_id, rob_req,
     // rob_idx} into MetaBuffer keyed by awid; Packetize.push_b later
     // reads m.src_id back as the response flit's dst_id.
     Flit aw_flit;
@@ -132,7 +132,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     // Push the B response into the downstream-facing AXI port. The
     // response path runs Packetize.push_b -> wormhole_arbiter -> vc_arbiter
     // -> NullNocRspOut; Packetize reads dst_id from the MetaBuffer
-    // snapshot saved at AW ingress.
+    // entry saved at AW ingress.
     axi::BBeat b{};
     b.id = kAxiId;
     b.resp = axi::Resp::OKAY;
@@ -149,7 +149,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
         << "rsp flit src_id should be the NSU's own src_id";
     EXPECT_EQ(b_flit->get_header_field("dst_id"), kRequesterSrcId)
         << "rsp flit dst_id should route back to the original requester "
-           "(MetaBuffer.peek_write read of the AW's src_id snapshot)";
+           "(MetaBuffer.peek_write read of the AW's src_id entry)";
     EXPECT_EQ(b_flit->get_payload_field("B", "bid"), kAxiId);
     EXPECT_EQ(b_flit->get_payload_field("B", "bresp"), static_cast<uint64_t>(axi::Resp::OKAY));
 }
