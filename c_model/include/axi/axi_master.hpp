@@ -664,54 +664,60 @@ struct WireSlavePort {
     // constraint of the registered SV wire in the co-sim beta-tick discipline).
     void set_awready(bool v) noexcept {
         awready_ = v;
-        aw_delivered_this_tick_ = false;  // reset gate each tick
+        aw_offered_this_tick_ = false;  // reset gate each tick
     }
     void set_wready(bool v) noexcept {
         wready_ = v;
-        w_delivered_this_tick_ = false;  // reset gate each tick
+        w_offered_this_tick_ = false;  // reset gate each tick
     }
     void set_arready(bool v) noexcept {
         arready_ = v;
-        ar_delivered_this_tick_ = false;  // reset gate each tick
+        ar_offered_this_tick_ = false;  // reset gate each tick
     }
 
     // Called by AxiMasterT to present a request beat. Returns true (handshake
     // complete) only when the corresponding ready signal is high.
     bool push_aw(const AwBeat& b) {
+        // One AW beat presented per tick: the registered SV wire transfers at
+        // most one AW per clock edge. `tick_push_aw_w_` walks the WHOLE
+        // active_write_ops_ map every tick, so multiple ids call push_aw in one
+        // tick. The gate marks "an AW was already OFFERED this tick" and MUST be
+        // set at latch time (below), NOT only on delivery: during the wait
+        // cycles (awready_ low, no delivery) a later id would otherwise overwrite
+        // last_aw_ to the LAST id walked, so the wire presents the wrong AW and
+        // replays it (STR-001 multi-outstanding: id 1..7 lost, id 8 replayed).
+        // Gating on offer keeps the FIRST (oldest) id's AW presented; later ids
+        // retry next tick. A previous fix gated on delivery only and did not fix
+        // the wait-cycle overwrite.
+        if (aw_offered_this_tick_) return false;
         last_aw_ = b;
         aw_pending_ = true;
-        // One AW beat per tick: the registered SV wire transfers at most one
-        // AW per clock edge. Without this gate a same-tick caller loop (e.g. a
-        // multi-sub-burst write) would mark every sub-burst AW delivered while
-        // only one reached the wire, silently dropping the rest. Mirrors push_w
-        // / push_ar (see the AR-drop deadlock fix, docs/backlog.md).
-        if (!awready_ || aw_delivered_this_tick_) return false;
-        aw_pending_ = false;
-        aw_delivered_this_tick_ = true;
+        aw_offered_this_tick_ = true;
+        if (!awready_) return false;  // presented, holding until ready (A3.2.1)
+        aw_pending_ = false;          // ready observed -> handshake complete
         return true;
     }
     bool push_w(const WBeat& b) {
+        if (w_offered_this_tick_) return false;
         last_w_ = b;
         w_pending_ = true;
-        if (!wready_ || w_delivered_this_tick_) return false;
+        w_offered_this_tick_ = true;
+        if (!wready_) return false;
         w_pending_ = false;
-        w_delivered_this_tick_ = true;
         return true;
     }
     bool push_ar(const ArBeat& b) {
+        // One AR presented per tick, gated at OFFER time (same rationale as
+        // push_aw): push_reads_ loops over all 4KB-split sub-burst ARs in one
+        // tick; gating only on delivery would let a wait-cycle push overwrite
+        // last_ar_ to the last sub-burst, replaying the wrong AR. Offer-gating
+        // presents the first sub-burst's AR; the rest retry next tick.
+        if (ar_offered_this_tick_) return false;
         last_ar_ = b;
         ar_pending_ = true;
-        // One AR beat per tick: the registered SV wire transfers at most one AR
-        // per clock edge. The read-side caller (push_reads_) loops over all
-        // 4KB-split sub-burst ARs in a single tick; without this gate, when
-        // arready is high it would mark EVERY sub-burst AR delivered while only
-        // one reached the wire, silently dropping the rest -> the dropped reads'
-        // R-bursts never return -> co-sim deadlock (AX4-BUR-003/ORD-002). The
-        // bug was masked on the write path because push_w's gate serializes AWs
-        // indirectly. Mirrors push_w. See docs/backlog.md "Fabric-bug round".
-        if (!arready_ || ar_delivered_this_tick_) return false;
+        ar_offered_this_tick_ = true;
+        if (!arready_) return false;
         ar_pending_ = false;
-        ar_delivered_this_tick_ = true;
         return true;
     }
 
@@ -765,9 +771,9 @@ struct WireSlavePort {
     bool awready_ = false;
     bool wready_ = false;
     bool arready_ = false;
-    bool aw_delivered_this_tick_ = false;  // beta-tick: max 1 AW beat per tick
-    bool w_delivered_this_tick_ = false;   // beta-tick: max 1 W beat per tick
-    bool ar_delivered_this_tick_ = false;  // beta-tick: max 1 AR beat per tick
+    bool aw_offered_this_tick_ = false;  // beta-tick: max 1 AW beat per tick
+    bool w_offered_this_tick_ = false;   // beta-tick: max 1 W beat per tick
+    bool ar_offered_this_tick_ = false;  // beta-tick: max 1 AR beat per tick
 
     bool aw_pending_ = false;
     AwBeat last_aw_{};
