@@ -57,8 +57,9 @@ cells executed, 64 pass / 10 fail). New fails beyond the excluded set:
 | `AX4-BUR-002` | hotspot only | other 3 pass -> hotspot congestion | yes (burst) |
 | `AX4-STR-002`→`STR-001` | neighbor only | outstanding stress | yes (outstanding) |
 
-After the prune the real-bug worklist is `BUR-003` (all patterns + rob exclusion), `BUR-002`@hotspot,
-`STR-001`@neighbor, plus the still-excluded `ORD-002` hang. The `HSH-001` fails left with the HSH delete.
+After the prune the real-bug worklist was `BUR-003` (all patterns + rob exclusion), `BUR-002`@hotspot,
+`STR-001`@neighbor, plus the then-excluded `ORD-002` hang. The `HSH-001` fails left with the HSH delete.
+All of these are now RESOLVED (AW-replay + generator slot-overlap fixes; matrix `pass=400 fail=0`).
 
 ### Fabric-bug round — 2026-06-30. Worklist re-triaged into 3 distinct modes
 
@@ -200,18 +201,18 @@ same-id-different-dst ordering case).
 by `is_self_checking`).
 
 **Verification — `make sim-regress BUILD=mesh_4x4_vc1` (2026-06-30):** `pass=43 fail=6` (run=49). All 6
-fails are pre-existing fabric bugs already in the discovery table — `BUR-003` (all 4 patterns, non-rob),
-`BUR-002`@hotspot, `STR-001`@neighbor — no new fail from the prune/renumber, and the `HSH-001` noise is
-gone. Left red (not excluded, user decision) as the active worklist for the next fabric-bug debugging
-round; `matrix.yaml` unchanged.
+fails were pre-existing fabric/harness bugs already in the discovery table — `BUR-003` (all 4 patterns,
+non-rob), `BUR-002`@hotspot, `STR-001`@neighbor — no new fail from the prune/renumber, and the
+`HSH-001` noise is gone. All 6 were subsequently FIXED (STR-001 by the AW-replay fix; BUR-002/003 by
+the generator slot-overlap fix, both above); the full 8-build matrix is now `pass=400 fail=0`.
 
-**ORD-002 hang hypothesis — REFUTED 2026-06-30.** The VC-binding-removal round
+**ORD-002 hang hypothesis — REFUTED 2026-06-30 (historical).** The VC-binding-removal round
 ([[project_vc_id_agnostic_landed]]) left open whether removing the per-id VC binding fixed the ORD-002
-hang. Tested at this round's tail: un-excluded ORD-002, ran one cell `mesh_4x4_vc1` / neighbor /
-preserve-addr — **still hangs** (`%Fatal: timeout after 100000 cycles`). So the binding was NOT the
-root cause; ORD-002 is an independent fabric bug. Stays excluded. Next round's fabric-bug worklist is
-**4**: `BUR-003`, `BUR-002`@hotspot, `STR-001`@neighbor, `ORD-002` (debug toward the suspected
-RAW-release / NSU per-id response path, not VC binding).
+hang. Un-excluding ORD-002 and running one cell still hung — so the binding was NOT the cause. That
+put a 4-item worklist (`BUR-003`, `BUR-002`@hotspot, `STR-001`@neighbor, `ORD-002`) on the next round.
+**All 4 are now RESOLVED, and none was where this note guessed** (not VC binding, not a RAW-release /
+NSU per-id path): the ORD-002 / STR-001 hangs were the `WireSlavePort` AR-drop + AW-replay bugs (test
+master), and the BUR-002/003 mismatches were the generator slot overlap. See the Bugs section above.
 
 ## Verification methodology gaps
 
