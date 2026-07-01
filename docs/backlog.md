@@ -6,18 +6,22 @@ picks it up.
 
 ## Next round — ranked (set 2026-07-01, after the ultra dead-code sweep)
 
-1. **Triage `test_router_loopback` `BidirectionalZeroMismatch/vc4,vc8`** — a REAL failing c_model unit
-   test on current `main` (5 FAILs), surfaced 2026-07-01. Reproduces on a clean `HEAD` header + ninja
-   rebuild against current sources, so it is not stale-build and not the dead-code sweep. vc1/vc2 pass;
-   vc4/vc8 mismatch → smells like a per-VC bidirectional router bug. FIRST verify against a fresh
-   `build/cmodel` (rule out host artifact), then `systematic-debugging`. Highest priority: a live wrong
-   answer outranks cleanup and features. (Details in Infra section.)
-2. **GCC ICE on `test_pins_smoke.cpp`** — blocks the whole `make check` ctest gate on this host, so no
-   CI path can run the unit suite. Investigate a toolchain bump or a narrow workaround. Unblocks #1's
-   full-suite verification too. (Infra section.)
+1. ~~**Triage `test_router_loopback` `BidirectionalZeroMismatch/vc4,vc8`**~~ **RESOLVED 2026-07-01 —
+   stale build artifact, not a router VC bug.** The failing set was 24 ctest cases (not just
+   router_loopback), all `bad file: .../sim/test_patterns/AX4-{STR-002,BND-003,BND-005,STR-003,
+   BAS-001_single_write_no_read}/scenario.yaml` — scenario dirs the 2026-06-30 AX4 prune renamed. Test
+   SOURCE already carries the new names (`STR-001`/`BND-002`/`BND-004`/`ORD-003`); only the `build/cmodel`
+   `.exe`s were stale (compiled pre-prune, old id string baked in — which is why `RequireKnownScenario`
+   did not fire: a stale binary's own known-list is stale too). A clean `ninja -k 0` rebuild → **ctest
+   499/499 pass**, all router_loopback vc1/2/4/8 green. No source fix; the rename was already on `main`
+   (git clean). The "reproduces on a fresh rebuild" claim did not hold up — a real fresh rebuild passes.
+2. **GCC ICE on `test_pins_smoke.cpp`** — **did NOT recur 2026-07-01**: the `ninja -k 0` rebuild
+   recompiled `test_pins_smoke.cpp.obj` cleanly (mtime today) and it ran inside the 499/499. Downgrade to
+   intermittent (toolchain flakiness, likely memory pressure), not a hard `make check` block. Still worth
+   a toolchain bump if it returns. (Infra section.)
 3. **Injection-rate / saturation sweep** — the recurring measurement gap: vc1..vc8 latency reads flat
    because no sweep applies congestion, so VC-count value is invisible. Needs an AxiMaster injection
-   schedule. (Verification methodology gaps.)
+   schedule. (Verification methodology gaps.) **Now the top open item.**
 4. **Cleanup leftovers** (low priority, own refactor round): the ultra-sweep SKIPPED items —
    `cpp_params`/`sv_params` dedup, `constants.py` eval-swap, `_load_topology` 4-way consolidation — plus
    the remaining Dead-code-prune candidates not yet touched. Deletion<addition; do only if a round wants it.
@@ -265,11 +269,11 @@ The VCS regression path is documented as Linux-workstation and dry-run pending a
   (c_model is header-only; build directly via `make -C sim/verilator`). Investigate toolchain upgrade
   or workaround.
 
-- **`test_router_loopback` `BidirectionalZeroMismatch/vc4,vc8` fails (observed 2026-07-01, needs
-  triage):** 5 FAILs in the c_model unit test on this host. Reproduces on a clean `HEAD` version of
-  `two_node_fabric.hpp` (verified by revert-rebuild-rerun), so it is pre-existing, NOT caused by the
-  dead-code prune round. vc1/vc2 params pass; vc4/vc8 mismatch. Could be a real router bidirectional/VC
-  bug or a stale-build artifact — triage against a fresh `build/cmodel` before assuming either.
+- **`test_router_loopback` triage — RESOLVED 2026-07-01: stale build artifact.** The real failing set
+  was 24 ctest cases (Packetize/PortPair/VcArb/DpiLifecycle loopbacks + router_loopback), all `bad file`
+  on pruned scenario paths (`AX4-STR-002`/`BND-003`/`BND-005`/`STR-003`/`BAS-001_single_write_no_read`).
+  Source already had the post-prune names; only `build/cmodel` binaries were pre-prune. Clean `ninja -k 0`
+  rebuild → ctest 499/499. Not a router VC bug. See ranked-list #1 above.
 
 ## Dead-code prune candidates (ponytail-audit, 2026-06-30)
 
