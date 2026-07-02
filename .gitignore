@@ -46,7 +46,7 @@ sim/filelist_*.f
 # both sim/verilator/Makefile and sim/vcs/Makefile regenerates them). Edit the
 # generator or sim/topologies/*.yaml, never these files directly.
 sim/sv/tb_top_*.sv
-sim/sv/noc_fabric_*.sv
+src/sv/noc_fabric_*.sv
 
 # Local Python installs (project-local 3.14, ~278 MB total)
 /Python/

@@ -124,6 +124,7 @@ VCS_COMMON_FLAGS := \
     -timescale=1ns/1ps \
     -assert svaext \
     +incdir+$(COSIM_ROOT)/sv \
+    +incdir+$(SRC_SV) \
     +incdir+$(SPECGEN_SV_INC) \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \

@@ -34,6 +34,7 @@ VERILATOR_COMMON_FLAGS := \
     --cc --exe \
     --assert \
     -I$(COSIM_ROOT)/sv \
+    -I$(SRC_SV) \
     -I$(SPECGEN_SV_INC) \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
@@ -88,10 +89,8 @@ TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY_BASE).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
-# tb_top_<TOPOLOGY>.sv does `include "noc_fabric_<topo>.sv"` (bare filename) for
-# the fabric emitted beside it. Put tb_top's OWN directory on the Verilator
-# include path so the beside-it fabric resolves. Both tb_top and fabric land in
-# sim/sv/, which is already implied by -I$(COSIM_ROOT)/sv.
+# tb_top_<TOPOLOGY>.sv does `include "noc_fabric_<topo>.sv"` (bare filename);
+# the fabric is emitted into src/sv/, already implied by -I$(SRC_SV) above.
 VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 
 # TOPOLOGY stamp records the last-built topology name. The FORCE-driven rule

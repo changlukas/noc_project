@@ -25,6 +25,8 @@ CMODEL_INC     := $(PROJ_ROOT)/c_model/include
 CMODEL_TESTS   := $(PROJ_ROOT)/c_model/tests
 SPECGEN_INC    := $(PROJ_ROOT)/specgen/generated/cpp
 SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
+SRC_SV         := $(PROJ_ROOT)/src/sv
+SRC_DPI        := $(PROJ_ROOT)/src/dpi
 
 # yaml-cpp HEADERS: online builds clone the source into the build tree; offline
 # (DEPS_SRC) builds use the pre-fetched source IN PLACE, so the headers live
@@ -82,10 +84,10 @@ TB_TOP_SV_SRC := \
     $(TOPOLOGY_NOC_TYPES_PKG) \
     $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
     $(COSIM_ROOT)/sv/axi_master_wrap.sv \
-    $(COSIM_ROOT)/sv/nmu_wrap.sv \
-    $(COSIM_ROOT)/sv/router_wrap.sv \
-    $(COSIM_ROOT)/sv/nsu_wrap.sv \
-    $(COSIM_ROOT)/sv/ni_wrap.sv \
+    $(SRC_SV)/nmu_wrap.sv \
+    $(SRC_SV)/router_wrap.sv \
+    $(SRC_SV)/nsu_wrap.sv \
+    $(SRC_SV)/ni_wrap.sv \
     $(COSIM_ROOT)/sv/axi_slave_wrap.sv \
     $(COSIM_ROOT)/sv/axi_perf_monitor.sv \
     $(COSIM_ROOT)/sv/user_node_endpoint.sv \
@@ -102,12 +104,12 @@ FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY).f
 # gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
 # -I/+incdir+ the simulators already pass; listing them in the .f makes it
 # self-contained for tool-native -f consumption.
-FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/sv -- $(TB_TOP_SV_SRC)
+FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/sv $(SRC_SV) -- $(TB_TOP_SV_SRC)
 
 # DPI implementation shared by every simulator; the C++ *main* driver
 # (main.cpp) is Verilator-only and listed in sim/verilator/Makefile, NOT here
 # — under VCS the simulator owns time.
-DPI_C_SRC := $(COSIM_ROOT)/c/cmodel_dpi.cpp
+DPI_C_SRC := $(SRC_DPI)/cmodel_dpi.cpp
 
 # DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (wrap adapters and
 # their transitive includes). The obj-dir sub-make tracks them via -MMD, but
@@ -121,7 +123,7 @@ DPI_HDR_DEPS := \
     $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.hpp)
 
 CPP_INCLUDE_FLAGS := \
-    -I$(COSIM_ROOT)/c \
+    -I$(SRC_DPI) \
     -I$(CMODEL_INC) \
     -I$(CMODEL_TESTS) \
     -I$(SPECGEN_INC) \
