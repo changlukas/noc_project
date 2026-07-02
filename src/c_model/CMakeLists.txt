@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Locate elaborated headers from specgen
-set(SPECGEN_CPP_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../specgen/generated/cpp")
+set(SPECGEN_CPP_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/../../specgen/generated/cpp")
 if(NOT EXISTS "${SPECGEN_CPP_INCLUDE}/ni_flit_constants.h")
   message(FATAL_ERROR "specgen generated/cpp dir not found: ${SPECGEN_CPP_INCLUDE}")
 endif()
@@ -18,8 +18,8 @@ endif()
 # different Python installs (and only one of them has the required PyYAML).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_custom_target(codegen_check
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../specgen/tools/codegen.py --check
-  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../specgen
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/../../specgen/tools/codegen.py --check
+  WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../specgen
   COMMENT "Verifying codegen artifacts are not stale"
 )
 
@@ -78,7 +78,7 @@ endif()
 # scenarios subdir must come before tests/ so tests/axi and tests/wrap can link
 # noc_axi4_scenarios.
 if(BUILD_TESTING)
-  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../sim/test_patterns
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../sim/test_patterns
                    ${CMAKE_CURRENT_BINARY_DIR}/sim/test_patterns)
   add_subdirectory(tests)
 endif()

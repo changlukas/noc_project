@@ -6,12 +6,12 @@
 # (build/cmodel, build/verilator, build/vcs)
 /build/
 Testing/
-c_model/Testing/
+src/c_model/Testing/
 # Legacy locations (pre build/-tree restructure); keep ignored so stale
 # checkouts don't show noise
 sim/verilator/obj_dir/
 sim/verilator/obj_genamba/
-c_model/build/
+src/c_model/build/
 
 # Temporary files
 *.tmp

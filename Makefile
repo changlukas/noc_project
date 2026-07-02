@@ -11,7 +11,7 @@
 #   build/verilator/ obj_dir (tb_top)
 #   build/vcs/       simv_* + csrc_* (workstation)
 
-CMODEL_DIR      := c_model
+CMODEL_DIR      := src/c_model
 BUILD_ROOT      := build
 CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
 COSIM_VERILATOR := sim/verilator
