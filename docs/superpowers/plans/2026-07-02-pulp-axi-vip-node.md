@@ -338,8 +338,8 @@ Single commit: old endpoint flow out, VIP data-integrity flow in. Every sub-piec
 **Interfaces:**
 - Consumes: `sim/dv/` file set (Task 4), WSL flow (Task 5).
 - Produces:
-  - `user_node_endpoint` ports: `clk_i, rst_ni` (in), `master_axi_req_o` (out flat), `master_axi_rsp_i` (in flat), `slave_axi_req_i` (in flat), `slave_axi_rsp_o` (out flat), `end_of_sim_o` (out logic), `txn_cnt_o` (out int unsigned). Params: `NODE_ID`, `NUM_NODES`, `NUM_READS`/`NUM_WRITES` defaults 0 (plusarg-overridden), `REGION_BASE` (unpacked `logic [63:0] [NUM_NODES]` array param stamped by generator), `REGION_BYTES`.
-  - `axi_vip_types_pkg`: `vip_req_t`, `vip_rsp_t` (pulp nested structs) + `vip_req_from_flat()`, `vip_rsp_from_flat()` functions.
+  - `user_node_endpoint` ports: `clk_i, rst_ni` (in), `master_axi_req_o` (out flat), `master_axi_rsp_i` (in flat), `slave_axi_req_i` (in flat), `slave_axi_rsp_o` (out flat), `end_of_sim_o` (out logic), `txn_cnt_o` (out int unsigned). Params: `NODE_ID`, `NUM_NODES`, `DEFAULT_NUM_READS`/`DEFAULT_NUM_WRITES` (plusarg-overridden), `REGION_BASE` (unpacked `logic [63:0] [NUM_NODES]` array param stamped by generator), `REGION_BYTES`.
+  - `axi_vip_types_pkg`: `vip_req_t`, `vip_resp_t` (pulp nested structs; `AXI_TYPEDEF_ALL` emits `_resp_`, not `_rsp_`) + `vip_req_from_flat()`, `vip_rsp_from_flat()` functions.
   - DPI surface KEPT: `cmodel_init` (no-arg — signature change), `cmodel_finalize`, `cmodel_check_error`, `cmodel_router_create`, `cmodel_nmu_create[_ex]`, `cmodel_nsu_create`, all nmu/nsu/router cycle ops, `cmodel_perf_*`.
   - DPI surface REMOVED: `cmodel_master_create`, `cmodel_slave_create`, all `cmodel_master_*`/`cmodel_slave_*` cycle ops, `cmodel_done`, `cmodel_scoreboard_clean`, `cmodel_dump_scoreboard`, `cmodel_master_count`, `cmodel_reads_checked`, `g_scoreboard`, `g_scenario`, `g_ever_created_master`.
 
@@ -689,6 +689,8 @@ endmodule
 
 Field-name ground truth is `sim/dv/axi-0.39.7/src/axi_intf.sv` (`AXI_BUS_DV` signal list) — verify each `master_dv.*`/`slave_dv.*` name against it before compiling; fix wiring, never the interface.
 
+Scoreboard never-written-read check: before Step 8, read the `handle_read` task in `sim/dv/axi-0.39.7/src/axi_test.sv` and confirm what `axi_scoreboard` does when R data arrives for a byte its model never saw written (expected: it skips or learns unknown bytes; the MAPPED rand_slave randomly initializes memory on first read, so read-before-write IS a legal random sequence here). If the scoreboard instead flags unknown-byte reads as errors, constrain it: call `enable_b_resp_check()`/`enable_r_resp_check()` + `enable_read_check()` only if tolerant, else report BLOCKED with the source excerpt — do not tweak dv sources.
+
 - [ ] **Step 3: gen_tb_top.py tb emitter rewrite**
 
 In `emit_tb_top()` only (fabric emitter untouched). Replace the old blocks as follows.
@@ -818,7 +820,32 @@ TB_TOP_SV_SRC := \
 
 Add `+incdir` for the svh: append `$(DV_ROOT)/axi-0.39.7/include` to `FILELIST_GEN_ARGS` incdirs and `-I$(DV_ROOT)/axi-0.39.7/include` to both simulator Makefiles.
 `src/c_model/tests/wrap/CMakeLists.txt`: remove the two deleted test targets; if nothing remains, delete the file + its `add_subdirectory(wrap)` in the parent.
-`sim/verilator/Makefile`: delete the `master_wrap_read_dump` mv/clean lines (dump feature retired with the C++ master).
+`sim/verilator/Makefile`: delete the `master_wrap_read_dump` mv/clean lines (dump feature retired with the C++ master), and REWRITE the `run-tb-top` recipe — the scenario flow (`gen_test_patterns.py` call + `+scenario_node*` args) is dead. New recipe:
+
+```makefile
+NUM_READS  ?= 8
+NUM_WRITES ?= 8
+SEED       ?= 1
+RUN_TAG    ?= vip_$(TOPOLOGY)_s$(SEED)
+
+.PHONY: run-tb-top
+run-tb-top: $(TBTOP_EXE)
+	@mkdir -p output/$(RUN_TAG)
+	@echo "running $(RUN_TAG) (reads=$(NUM_READS) writes=$(NUM_WRITES) seed=$(SEED))"
+	$(TBTOP_EXE) \
+	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
+	    "+verilator+seed+$(SEED)" \
+	    "+perf_out=output/$(RUN_TAG)/perf.json" \
+	    "+perf_scenario=$(RUN_TAG)" \
+	    > output/$(RUN_TAG)/run.log 2>&1; \
+	rc=$$?; \
+	echo "--- run.log (tail) ---"; \
+	tail -8 output/$(RUN_TAG)/run.log; \
+	$(PYTHON3) perf_cli_summary.py output/$(RUN_TAG)/perf.json || true; \
+	exit $$rc
+```
+
+Also delete the now-unused `SCENARIO`/`SCENARIO_ABS`/`GEN_TEST_PATTERNS` variables in this Makefile, and mirror the recipe change in `sim/vcs/Makefile` (its seed plusarg is `+ntb_random_seed=$(SEED)`). `sim/tools/gen_test_patterns.py` itself stays (25 patterns remain on disk; converter backlog).
 
 - [ ] **Step 6: regenerate + ctest green (Windows)**
 
@@ -838,17 +865,13 @@ cd E:/05_NoC/noc_project && make build-verilator TOPOLOGY=mesh_4x4_vc1 PYTHON3=p
 
 Expected: rc=0. (Running it on Windows would fail at first `std::randomize` — solver unavailable; that is expected and not a gate.)
 
-- [ ] **Step 8: WSL smoke run (data-integrity flavor)**
+- [ ] **Step 8: WSL smoke run (data-integrity flavor, through run-tb-top)**
 
 ```bash
 wsl.exe -d Ubuntu -u root -- bash -c 'export PATH=/usr/bin:/bin:/usr/local/bin; \
-  cd /mnt/e/05_NoC/noc_project && make build-verilator TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3 && \
-  cd sim/verilator && mkdir -p output/vip_smoke && \
-  VERILATOR_SOLVER="z3 --in" \
-  ../../build/verilator/obj_dir_mesh_4x4_vc1/Vtb_top \
-    +num_reads=8 +num_writes=8 +verilator+seed+1 \
-    +perf_out=output/vip_smoke/perf.json +perf_scenario=vip_smoke \
-    2>&1 | tee output/vip_smoke/run.log | tail -20'
+  export VERILATOR_SOLVER="z3 --in"; \
+  cd /mnt/e/05_NoC/noc_project/sim/verilator && \
+  make run-tb-top TOPOLOGY=mesh_4x4_vc1 NUM_READS=8 NUM_WRITES=8 SEED=1 PYTHON3=python3'
 ```
 
 Expected: `[Monitor node*.manager]` bw lines, `PASS: all 16 nodes done, non-vacuous`, no `%Error`/scoreboard messages, rc=0. Debug loop if hung: reduce to `TOPOLOGY=mesh_2x4_vc1`, add `+num_reads=1 +num_writes=1`; check the TA/TT vs DPI phase first (spec 實作驗證項 4) — the DPI wraps register on posedge, the VIP applies at +2 ns and samples at +8 ns, which lines up with a 10 ns clock; a hang at the very first AW usually means a DV-interface field wiring mistake (Step 2 ground-truth check). After 3 failed hypotheses: STOP, report BLOCKED with the run.log.
@@ -881,7 +904,7 @@ VERILATOR_FLAGS += +define+TB_TRANSPORT_RUN
 endif
 ```
 
-and make the obj dir per-class: `--Mdir $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)` with `TBTOP_EXE` updated to match. Mirror the define in `sim/vcs/Makefile` (`+define+TB_TRANSPORT_RUN`). Regenerate-on-switch: extend the `TOPO_STAMP` content compare to `"$(TOPOLOGY)_$(RUN_CLASS)"`.
+and make the obj dir per-class for BOTH classes (uniform naming — Task 8's runner depends on it): every `obj_dir_$(TOPOLOGY)` occurrence in `sim/verilator/Makefile` becomes `obj_dir_$(TOPOLOGY)_$(RUN_CLASS)`. There are FOUR spots: the `--Mdir` flag in `VERILATOR_FLAGS`, the `TBTOP_EXE` definition, the `mkdir -p` line and the `sed -i` + sub-`$(MAKE)` lines inside the `$(TBTOP_EXE)` recipe. Mirror the define in `sim/vcs/Makefile` (`+define+TB_TRANSPORT_RUN`). Regenerate-on-switch: extend the `TOPO_STAMP` content compare to `"$(TOPOLOGY)_$(RUN_CLASS)"`.
 
 - [ ] **Step 2: generator — transport compare block**
 
@@ -1012,9 +1035,12 @@ def run_cell(cell: Cell, out_dir: Path, run_cmd=None) -> bool:
            / f"obj_dir_{cell.effective_topology()}_{cell.run_class}" / "Vtb_top")
     out_dir.mkdir(parents=True, exist_ok=True)
     log = out_dir / "run.log"
+    # per-simulator seed plusarg (spec seed table); this runner drives Verilator,
+    # the vcs entry documents the mapping for the workstation flow.
+    SEED_ARG = {"verilator": "+verilator+seed+{n}", "vcs": "+ntb_random_seed={n}"}
     args = [str(exe),
             f"+num_reads={cell.num_reads}", f"+num_writes={cell.num_writes}",
-            f"+verilator+seed+{cell.seed}",
+            SEED_ARG["verilator"].format(n=cell.seed),
             f"+perf_out={out_dir / 'perf.json'}",
             f"+perf_scenario={cell.label()}"]
     env = {**os.environ, "VERILATOR_SOLVER": "z3 --in"}
@@ -1036,7 +1062,7 @@ wsl.exe -d Ubuntu -u root -- bash -c 'export PATH=/usr/bin:/bin:/usr/local/bin; 
   cd /mnt/e/05_NoC/noc_project && python3 sim/regress/run_regress.py --build mesh_4x4_vc1'
 ```
 
-Expected: dry-run prints raw=192 (4 topo × 2 rob × 2 class × 3 seeds × ... = 48/build × 4) — verify arithmetic against the printout; subset run pass=12 fail=0 for one build. Full matrix run is allowed to take long; if wall-clock is prohibitive, trim `seeds: [1]` in a follow-up commit with the trade-off noted in `docs/backlog.md` (per "class-fix record trade-off").
+Expected: dry-run prints raw=48 (4 topo × 2 rob × 2 class × 3 seeds); subset `--build mesh_4x4_vc1` selects the rob-DISABLED build only (effective_topology exact match) = 2 class × 3 seeds = 6 cells → pass=6 fail=0. Full matrix run is allowed to take long; if wall-clock is prohibitive, trim `seeds: [1]` in a follow-up commit with the trade-off noted in `docs/backlog.md` (per "class-fix record trade-off").
 
 - [ ] **Step 4: Commit**
 

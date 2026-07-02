@@ -16,7 +16,7 @@ FlooNoC `floo_axi_test_node` pattern。原則:pulp / FlooNoC 元件原封不動,
 | # | 決策 | 依據 |
 |---|------|------|
 | D1 | Verilator 5.048;constrained-random run 跑 WSL Linux(自建 5.048 + z3)。Windows 的 Verilator solver pipe 依賴 `fork()`,不可用 | source 驗證 `_VL_SOLVER_PIPE` 只在 `__unix__`;WSL 實測 `std::randomize with{}` solve 成功 |
-| D2 | directed 覆蓋 = seeded `axi_rand_master` config matrix(pulp 官方 testbench 原生用法)。既有 25 個 `sim/test_patterns` 留檔不刪;`axi_file_master` 轉換器待證明缺口後再做(backlog) | pulp repo 無現成 directed stimulus 檔(`axi_file_master` 零使用者);旋鈕覆蓋 burst/EXC/ordering/outstanding/wait-cycle/對齊 |
+| D2 | directed 覆蓋 = seeded `axi_rand_master` config matrix(pulp 官方 testbench 原生用法)。v1 matrix 只含 data-integrity/transport 兩個 run class;outstanding/wait-cycle/alignment 旋鈕軸 = backlog。既有 25 個 `sim/test_patterns` 留檔不刪;`axi_file_master` 轉換器待證明缺口後再做(backlog) | pulp repo 無現成 directed stimulus 檔(`axi_file_master` 零使用者);旋鈕覆蓋 burst/EXC/ordering/outstanding/wait-cycle/對齊 |
 | D3 | 雙 checker 依 run 型態配對(下表)。data-integrity run 位址依 region contract 保證 disjoint | `MAPPED=1` 拒 WRAP 且一律回 `RESP_OKAY`(source `$error` 實錘);per-node scoreboard 在共享位址下失明(Codex 確認) |
 | D4 | 對稱 per-node 佈局。改動範圍:`user_node_endpoint.sv` 換內臟並新增 `end_of_sim_o` port;`gen_tb_top.py` 改寫(endpoint 接線、exit 邏輯 cutover、region/seed stamp)。fabric、`ni_wrap`/`nmu_wrap`/`nsu_wrap`、topology YAML 不動 | 現行 tb 已是每 node 一 master+slave;`user_node_endpoint.sv` 本為 user-editable 接縫 |
 
@@ -146,4 +146,4 @@ noc_project/
 2. flat struct ↔ DV interface 接線的欄位對齊 review(一次性,實作後跑 rtl lint + 單 node loopback smoke)
 3. `axi_scoreboard` 啟用細節(monitor mode、check enable API)按其 source 用法接
 4. VIP TA/TT 與 DPI cycle-stepped wrap 的相位驗證(單 node smoke 看 handshake 波形)
-5. VCS compile gate(filelist + macro 相容)
+5. VCS compile gate(filelist + macro 相容)— 本環境無 VCS,列 backlog 待 workstation 驗
