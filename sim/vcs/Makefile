@@ -123,7 +123,7 @@ VCS_COMMON_FLAGS := \
     -full64 -sverilog \
     -timescale=1ns/1ps \
     -assert svaext \
-    +incdir+$(COSIM_ROOT)/sv \
+    +incdir+$(COSIM_ROOT)/tb \
     +incdir+$(SRC_SV) \
     +incdir+$(SPECGEN_SV_INC) \
     -CFLAGS "-std=c++17" \

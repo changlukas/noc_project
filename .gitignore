@@ -45,7 +45,7 @@ sim/filelist_*.f
 # emitted by sim/tools/gen_tb_top.py on every build (the $(TB_TOP_SV) rule in
 # both sim/verilator/Makefile and sim/vcs/Makefile regenerates them). Edit the
 # generator or sim/topologies/*.yaml, never these files directly.
-sim/sv/tb_top_*.sv
+sim/tb/tb_top_*.sv
 src/sv/noc_fabric_*.sv
 
 # Local Python installs (project-local 3.14, ~278 MB total)

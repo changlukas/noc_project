@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate sim/sv/tb_top_<topology>.sv + src/sv/noc_fabric_<topo>.sv from a topology config.
+"""Generate sim/tb/tb_top_<topology>.sv + src/sv/noc_fabric_<topo>.sv from a topology config.
 
 The fabric/tb split (S3):
   - noc_fabric_<topo>.sv : N nodes, each = NMU + REQ/RSP router_wrap + NSU, joined
@@ -15,7 +15,7 @@ Generated artifacts: edit the generator or the topology YAML, never the emitted
 the -I src/sv include path.
 
 Usage:
-    python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/sv/tb_top_<topology>.sv]
+    python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/tb/tb_top_<topology>.sv]
 
 Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
@@ -670,7 +670,7 @@ def main() -> int:
     ap.add_argument("--topology", default="mesh_4x4_vc1",
                     help="Topology name (matches sim/topologies/<name>.yaml)")
     ap.add_argument("--out", default=None,
-                    help="Output tb_top.sv path (default: sim/sv/tb_top_<topology>.sv; "
+                    help="Output tb_top.sv path (default: sim/tb/tb_top_<topology>.sv; "
                          "fabric emitted alongside)")
     a = ap.parse_args()
 
@@ -678,7 +678,7 @@ def main() -> int:
     tb_text = emit_tb_top(topo, a.topology)
     fab_text = emit_fabric(topo)
     out_path = Path(a.out) if a.out is not None else \
-        ROOT / "sim" / "sv" / f"tb_top_{a.topology}.sv"
+        ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"
     fab_path = _fabric_path(out_path, topo)
 
     out_path.write_text(tb_text, encoding="utf-8")

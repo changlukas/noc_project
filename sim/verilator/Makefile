@@ -33,7 +33,7 @@ C_SRC := \
 VERILATOR_COMMON_FLAGS := \
     --cc --exe \
     --assert \
-    -I$(COSIM_ROOT)/sv \
+    -I$(COSIM_ROOT)/tb \
     -I$(SRC_SV) \
     -I$(SPECGEN_SV_INC) \
     -CFLAGS "-std=c++17" \
