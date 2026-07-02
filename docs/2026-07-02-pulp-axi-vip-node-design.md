@@ -97,7 +97,7 @@ guard)隨 C++ scoreboard 退役,`gen_tb_top.py` 生成下列新 scheme:
 
 ## File tree(含既有目錄歸位)
 
-判斷準則:DUT 本體與化身 → `src/`;驗它的 → `sim/`;別人寫的 → `sim/third_party/`。
+判斷準則:DUT 本體與化身 → `src/`;驗它的 → `sim/`;引入的 DV IP → `sim/dv/`。
 
 ```
 noc_project/
@@ -111,7 +111,7 @@ noc_project/
 └── sim/
     ├── tb/                        #   tb_top_* user_node_endpoint link_perf_monitor
     │                              #   ← sim/sv 剩餘 tb 件
-    ├── third_party/               # NEW:VIP 原封不動 + 原 LICENSE + 版本釘死
+    ├── dv/                        # NEW:引入的 DV IP,原封不動 + 原 LICENSE + 版本釘死
     │   ├── axi-0.39.7/
     │   ├── common_cells-1.39.0/
     │   ├── common_verification-0.2.5/
@@ -124,7 +124,7 @@ noc_project/
 
 | 處置 | 元件 |
 |------|------|
-| 新增(第三方原始碼) | 上表 `sim/third_party/` 四包 |
+| 新增(引入 DV IP) | 上表 `sim/dv/` 四包 |
 | 改寫 | `user_node_endpoint.sv`(換內臟 + `end_of_sim_o`)、`gen_tb_top.py`(接線、exit cutover、region/seed stamp、watchdog 公式)、`gen_filelist.py` + filelist 重生(新路徑 + 退役檔移除)、`sim/build_config.mk`(路徑 + 退役檔移除)、root `CMakeLists.txt` / `Makefile`(c_model 新路徑)、`matrix.yaml` / `run_regress.py`(config-matrix entries、seed、toolchain 標籤)、路徑引用文件同步(`CLAUDE.md`、`docs/architecture.md`、`docs/development.md`) |
 | 退役 | `axi_master_wrap.sv`、`axi_slave_wrap.sv`、`axi_perf_monitor.sv`、C++ `AxiMaster` / `AxiSlave` / `Memory` / scoreboard 及其 DPI entry points 與 tb exit guards |
 | 搬移(內容不改) | `src/c_model/`、`src/sv/`、`src/dpi/` 如上表 |
