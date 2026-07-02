@@ -29,14 +29,23 @@ FlooNoC `floo_axi_test_node` pattern。原則:pulp / FlooNoC 元件原封不動,
 
 ## Run type × checker 配對
 
-| Run class | Slave 參數 | Checker | 驗什麼 |
-|-----------|-----------|---------|--------|
-| data-integrity(INCR/FIXED、ORD、STR、QOS) | `MAPPED=1` | pulp `axi_scoreboard` per node(ReadCheck/BRespCheck/RRespCheck) | end-to-end 資料正確 |
-| transport(WRAP、EXC、error-response) | `MAPPED=0, RAND_RESP=1` | FlooNoC `axi_reorder_compare`(mst 端 vs slv 端逐欄位比對 + same-ID order) | fabric 對 addr/lock/resp 等欄位搬運不失真 |
+兩個 run class 統一由 FlooNoC `axi_reorder_compare` 檢查(mst 端 vs slv 端逐欄位比對 +
+same-ID order)。DUT = fabric + NI,搬運不失真即責任全履行;slave 端儲存行為屬 pulp
+MAPPED memory(引入元件,不重驗)。此即 FlooNoC 自家 testbench 的原生 checking 架構。
 
-transport run 限 **permutation pairing**(master m 只打 node p(m),一對一):`axi_reorder_compare`
-靠成對 stream 歸屬(FlooNoC 原生 2-node 用法),16 masters all-to-all 時 slave 端交錯流量
-無法歸屬(ID 空間重疊)。all-to-all transport 驗證 = backlog。
+| Run class | Slave 參數 | Stimulus 差異 |
+|-----------|-----------|--------------|
+| data-integrity(INCR、ORD、STR、QOS) | `MAPPED=1` | INCR-only,資料真實流動(write→read 有記憶) |
+| transport(WRAP、EXC、error-response) | `MAPPED=0, RAND_RESP=1` | WRAP+EXC 開,R data/resp 隨機 |
+
+**pulp `axi_scoreboard` 撤下(2026-07-02 Task 6 實測定案)**:其「未知 byte 不比對」機制
+靠 `8'hxx` sentinel + `===` wildcard(`axi_test.sv:2140`),為 4-state 模擬器語意;
+Verilator 2-state 下 X 塌 0,跳過機制失效 → 合法讀全報 mismatch。scoreboard 列 backlog,
+待 VCS workstation(4-state)驗證資料完整性軸。
+
+全部 run 限 **permutation pairing**(master m 只打 node p(m)):`axi_reorder_compare`
+靠成對 stream 歸屬(FlooNoC 原生用法),16 masters all-to-all 時 slave 端交錯流量無法
+歸屬(ID 空間重疊)。all-to-all checked run = backlog(VCS scoreboard 或 filtering compare)。
 
 歸類依據:
 - WRAP:MAPPED mode `$error` 拒收。
