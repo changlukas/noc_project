@@ -312,6 +312,39 @@ DEPS_SRC   := /scratch/noc_deps
 VERDI_HOME := /tools/verdi_2020.03
 ~~~
 
+### WSL (random-run platform)
+
+Runs the same flow on WSL Ubuntu (where the constraint solver works).
+Prerequisites:
+
+- Verilator 5.048 self-built with `--with-solver="z3 --in"`, installed
+  to `/usr/local/bin`.
+- `apt-get install -y build-essential cmake python3-yaml z3`.
+- PATH must put `/usr/local/bin` first: `/usr/bin/verilator` is the
+  Debian 5.032 package and shadows the 5.048 build otherwise.
+- The repo working tree is shared with Windows, so two artifacts clash:
+  `build/cmodel/CMakeCache.txt` (Windows CMake cache) and
+  `sim/filelist_<TOPOLOGY>.f` (bakes host-absolute paths). Override
+  both to a WSL-side build root on the make command line; the Windows
+  `build/` tree is left untouched.
+
+~~~bash
+wsl.exe -d Ubuntu -u root -- bash -c 'export PATH=/usr/local/bin:/usr/bin:/bin; \
+  cd /mnt/e/05_NoC/noc_project && \
+  make build-cmodel PYTHON3=python3 BUILD_ROOT=/root/noc_build && \
+  make build-verilator TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3 \
+    BUILD_ROOT=/root/noc_build \
+    FILELIST_F=/root/noc_build/filelist_mesh_4x4_vc1.f'
+
+wsl.exe -d Ubuntu -u root -- bash -c 'export PATH=/usr/local/bin:/usr/bin:/bin; \
+  cd /mnt/e/05_NoC/noc_project/sim/verilator && \
+  make run-tb-top TOPOLOGY=mesh_4x4_vc1 PYTHON3=python3 \
+    BUILD_ROOT=/root/noc_build \
+    FILELIST_F=/root/noc_build/filelist_mesh_4x4_vc1.f'
+~~~
+
+Expected: `PASS: scenario complete, scoreboard clean`.
+
 ### Offline / firewalled hosts
 
 FetchContent cannot download googletest/yaml-cpp there. Copy `googletest-src/`

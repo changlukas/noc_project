@@ -70,6 +70,12 @@ VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 EXEEXT := $(if $(findstring NT,$(shell uname -s)),.exe,)
 TBTOP_EXE := $(VL_BUILD)/obj_dir_$(TOPOLOGY)/V$(TOP)$(EXEEXT)
 
+# PE stack-reserve ldflag (see USER_LDFLAGS note at the link recipe below):
+# Windows-only, Linux GNU ld rejects --stack.
+ifneq ($(EXEEXT),)
+STACK_LDFLAGS := -Wl,--stack,67108864
+endif
+
 all: $(TBTOP_EXE)
 
 # filelist.f recipe: placed after `all:` so it is not the default goal.
@@ -130,6 +136,7 @@ check-yamlcpp:
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
 # USER_LDFLAGS: set PE stack reserve to 64 MiB so MinGW pthread initialises
 #   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
+#   --stack is PE-only; Linux GNU ld rejects it, so gate on EXEEXT (Windows).
 # sed pass (--timing): Verilator 5.036 on Windows joins fork-sync done() debug
 #   source paths with backslashes in generated C-string literals — rewrite them
 #   to forward slashes before g++ sees them.
@@ -140,7 +147,7 @@ $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-ya
 	    $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.cpp $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.h
 	$(MAKE) -C $(VL_BUILD)/obj_dir_$(TOPOLOGY) -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
-	    "USER_LDFLAGS=-Wl,--stack,67108864"
+	    "USER_LDFLAGS=$(STACK_LDFLAGS)"
 
 # Run tb_top with cwd here so the in-project read-dump file lands locally,
 # then move it into output/$(SCENARIO)/ alongside run.log. scenario_parser
