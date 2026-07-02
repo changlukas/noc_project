@@ -689,8 +689,6 @@ endmodule
 
 Field-name ground truth is `sim/dv/axi-0.39.7/src/axi_intf.sv` (`AXI_BUS_DV` signal list) — verify each `master_dv.*`/`slave_dv.*` name against it before compiling; fix wiring, never the interface.
 
-Scoreboard never-written-read check: before Step 8, read the `handle_read` task in `sim/dv/axi-0.39.7/src/axi_test.sv` and confirm what `axi_scoreboard` does when R data arrives for a byte its model never saw written (expected: it skips or learns unknown bytes; the MAPPED rand_slave randomly initializes memory on first read, so read-before-write IS a legal random sequence here). If the scoreboard instead flags unknown-byte reads as errors, constrain it: call `enable_b_resp_check()`/`enable_r_resp_check()` + `enable_read_check()` only if tolerant, else report BLOCKED with the source excerpt — do not tweak dv sources.
-
 - [ ] **Step 3: gen_tb_top.py tb emitter rewrite**
 
 In `emit_tb_top()` only (fabric emitter untouched). Replace the old blocks as follows.
