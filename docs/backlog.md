@@ -4,7 +4,23 @@ Running action items and open bugs, maintained across iteration rounds. Each rou
 surfaces and strikes what it closes. Read it at session start. An item is not started unless a round
 picks it up.
 
-## Next round — ranked (set 2026-07-01, after the ultra dead-code sweep)
+## Next round — ranked (set 2026-07-03, after the VIP cutover round)
+
+0. **Load-dependent DUT deadlock under random traffic** — found by the pulp rand VIP on its first
+   heavy run (commit `70db5a0`). Repro: WSL, `make run-tb-top TOPOLOGY=mesh_4x4_vc1 NUM_READS=8
+   NUM_WRITES=8 SEED=1`. Evidence (gdb, 2x reproduced, `.superpowers/sdd/task-6-report.md`): txn_cnt
+   frozen ~10/16 per node from cycle ~388K; masters parked `rready=1` (AR accepted, R never returns);
+   destination slave faces all-zero — reads lost inside NMU/fabric/NSU. 2R/2W clean. Matches the old
+   "co-sim burst bug (c_model passes ctest, hangs under co-sim load)" item. Own debug round
+   (systematic-debugging), top priority.
+0b. **Verilator+z3 wall-time budget** — measured ~34 sim-cycles/s under random stimulus (z3 89% CPU;
+   every randomize round-trips the solver pipe). Matrix/smoke loads must budget for this: local WSL
+   gate = 2R/2W-scale; heavy seeded runs → VCS (native solver). Affects Task 8 matrix sizing.
+0c. **pulp `axi_scoreboard` data-integrity axis on VCS** — withdrawn from Verilator flow (2-state X
+   collapse, spec `2a2db6c`); re-enable on the 4-state workstation to restore write→readback checking
+   and all-to-all checked runs.
+
+## Previous round — ranked (set 2026-07-01, after the ultra dead-code sweep)
 
 1. ~~**Triage `test_router_loopback` `BidirectionalZeroMismatch/vc4,vc8`**~~ **RESOLVED 2026-07-01 —
    stale build artifact, not a router VC bug.** The failing set was 24 ctest cases (not just
