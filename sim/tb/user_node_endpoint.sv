@@ -3,7 +3,11 @@
 // ni_signals_pkg structs to pulp AXI_BUS_DV interfaces with explicit per-field
 // wiring (no protocol logic). Checking lives at tb level: one FlooNoC
 // axi_reorder_compare per master (permutation pairing — master m targets only
-// node NUM_NODES-1-m, so the compare can attribute streams). pulp
+// node NUM_NODES-1-m, so the compare can attribute streams). Single region per
+// master is a compare precondition beyond attribution: the pulp master sends
+// AW/W in parallel, so a W beat can handshake before its AW; the compare's
+// w_slv_idx then reads an empty queue (default 0), which stays correct only
+// while every W belongs to decode slot 0. pulp
 // axi_scoreboard is withdrawn from the Verilator flow: its 8'hxx uninitialized
 // -byte wildcard collapses to 8'h00 under 2-state simulation, turning every
 // protocol-legal read/write race into a false mismatch (VCS-only, backlog).
@@ -265,8 +269,9 @@ module user_node_endpoint #(
     always_ff @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) txn_cnt_o <= 0;
         else begin
-            if (master_axi_req_o.awvalid && master_axi_rsp_i.awready) txn_cnt_o <= txn_cnt_o + 1;
-            if (master_axi_req_o.arvalid && master_axi_rsp_i.arready) txn_cnt_o <= txn_cnt_o + 1;
+            txn_cnt_o <= txn_cnt_o
+                + 32'(master_axi_req_o.awvalid && master_axi_rsp_i.awready)
+                + 32'(master_axi_req_o.arvalid && master_axi_rsp_i.arready);
         end
     end
 

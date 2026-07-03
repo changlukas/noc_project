@@ -2,7 +2,8 @@
 
 Date: 2026-07-02
 Branch: `feat/verilator-5048-axi-sv-bfm` (Stage 2 of `IMPLEMENTATION_PLAN.md`)
-Status: rev2 (Codex review 修正後), pending user approval
+Status: rev3 (2026-07-03,Task 6 落地後同步:permutation pairing 全 run 生效、
+watchdog beat-based、non-vacuous 改 txn_cnt、common_cells 已引入)
 
 ## Motivation
 
@@ -17,7 +18,7 @@ FlooNoC `floo_axi_test_node` pattern。原則:pulp / FlooNoC 元件原封不動,
 |---|------|------|
 | D1 | Verilator 5.048;constrained-random run 跑 WSL Linux(自建 5.048 + z3)。Windows 的 Verilator solver pipe 依賴 `fork()`,不可用 | source 驗證 `_VL_SOLVER_PIPE` 只在 `__unix__`;WSL 實測 `std::randomize with{}` solve 成功 |
 | D2 | directed 覆蓋 = seeded `axi_rand_master` config matrix(pulp 官方 testbench 原生用法)。v1 matrix 只含 data-integrity/transport 兩個 run class;outstanding/wait-cycle/alignment 旋鈕軸 = backlog。既有 25 個 `sim/test_patterns` 留檔不刪;`axi_file_master` 轉換器待證明缺口後再做(backlog) | pulp repo 無現成 directed stimulus 檔(`axi_file_master` 零使用者);旋鈕覆蓋 burst/EXC/ordering/outstanding/wait-cycle/對齊 |
-| D3 | 雙 checker 依 run 型態配對(下表)。data-integrity run 位址依 region contract 保證 disjoint | `MAPPED=1` 拒 WRAP 且一律回 `RESP_OKAY`(source `$error` 實錘);per-node scoreboard 在共享位址下失明(Codex 確認) |
+| D3 | checking 統一 `axi_reorder_compare`(rev3;原「雙 checker」的 scoreboard 撤下,見下節)。位址依 region contract 保證 disjoint | `MAPPED=1` 拒 WRAP 且一律回 `RESP_OKAY`(source `$error` 實錘);per-node scoreboard 在共享位址下失明(Codex 確認) |
 | D4 | 對稱 per-node 佈局。改動範圍:`user_node_endpoint.sv` 換內臟並新增 `end_of_sim_o` port;`gen_tb_top.py` 改寫(endpoint 接線、exit 邏輯 cutover、region/seed stamp)。fabric、`ni_wrap`/`nmu_wrap`/`nsu_wrap`、topology YAML 不動 | 現行 tb 已是每 node 一 master+slave;`user_node_endpoint.sv` 本為 user-editable 接縫 |
 
 ## Scope 排除
@@ -52,19 +53,24 @@ Verilator 2-state 下 X 塌 0,跳過機制失效 → 合法讀全報 mismatch。
 - EXC:exclusive ownership 語意屬 endpoint slave,非 DUT(fabric+NI)責任;DUT 責任 = `awlock/arlock` 與 resp code 原樣搬運,reorder_compare 正是驗這個。MAPPED mode 一律 `RESP_OKAY`,無法回 `EXOKAY`。
 - error-response:非 OKAY response 由 `RAND_RESP=1` 隨機產生,reorder_compare 驗 resp 不被 fabric 改寫。
 
-## Region contract(data-integrity run)
+## Region contract(全 run)
 
-沿用現行「address 高位 bits 選 destination node」機制(`gen_test_patterns.py` 同款)。
-在 destination node s 的位址空間內,per-source-master 切 disjoint 視窗:
+沿用現行「address 高位 bits 選 destination node」機制。一 master 一 region
+(permutation pairing,兩種 run flavor 同):
 
 ```
-region(m → s) = node_base(s) + m × W        # W = 視窗大小,generator 常數
+region(m) = REGION_BASE[p(m)] + [0, REGION_BYTES)    # p(m) = NUM_NODES-1-m
+REGION_BASE[s] = coord_id(s) << 32                   # generator 從 topology YAML stamp
 ```
 
-non-overlap by construction;每個 master 對每個 remote node 都有視窗(all-to-all)。
-`gen_tb_top.py` 從 topology YAML 算出後 stamp 進 endpoint 參數,endpoint 內呼叫
-`add_memory_region()`。transport run 不受此限(reorder_compare 不需 memory 語意),
-可故意用重疊位址打 same-address 交錯。
+disjoint by construction(不同 master 打不同 node)。`gen_tb_top.py` stamp 成 tb-level
+localparam 傳進 endpoint(packed array;Verilator 5.048 對 unpacked array param override
+有 sizing bug),endpoint 呼叫一次 `add_memory_region()`。
+
+single-region-per-master 是 `axi_reorder_compare` 的使用前提,不只為 stream 歸屬:
+pulp master AW/W 平行發送,W 可先於 AW handshake,此時 compare 的 `w_slv_idx` 讀空
+佇列回 default 0 — 僅在所有 W 都屬 decode slot 0 時恆正確,多 region 會誤歸屬 → 誤報。
+same-address 交錯 stimulus 與 all-to-all checked run 同列 backlog(VCS scoreboard)。
 
 ## Node 架構(user_node_endpoint 改後)
 
@@ -90,13 +96,14 @@ guard)隨 C++ scoreboard 退役,`gen_tb_top.py` 生成下列新 scheme:
 
 1. per node `end_of_sim[i]` = 該 node `rand_master.run(N_reads, N_writes)` 返回。
    source 實錘:`run()` 為 `fork...join` 含 `recv_rs`/`recv_bs`,返回即 R/B 全收
-2. transport run 另 AND `axi_reorder_compare` 的 `end_of_sim_o`(compare queue 空)
+2. 一律 AND 每個 `axi_reorder_compare` 的 `end_of_sim_o`(compare queue 空;兩 flavor 同)
 3. 全 node AND 後等 settle window(generator 常數,default 100 cycles)→ checker
    終檢 → `$finish`
-4. watchdog:`TIMEOUT_CYCLES = BASE + K × (N_reads + N_writes) × NUM_NODES`
-   (BASE=100000、K=200,generator 常數),逾時 `$fatal`
-5. non-vacuous:終檢斷言每 node `aw_cnt + ar_cnt > 0`(hierarchical ref 取
-   `axi_bw_monitor` 內部計數)
+4. watchdog:`TIMEOUT_CYCLES = BASE + K_CYC_PER_BEAT × (N_reads + N_writes) ×
+   MAX_BURST_BEATS × NUM_NODES`(BASE=100000、K_CYC_PER_BEAT=40(vc1 實測
+   15-30 cycles/beat)、MAX_BURST_BEATS = REGION_BYTES/(DATA_WIDTH/8)),逾時 `$fatal`
+5. non-vacuous:終檢斷言每 node endpoint `txn_cnt_o > 0`(AW/AR handshake 計數,
+   endpoint 自有 counter,不 hierarchical ref 進引入 IP)
 
 ## Seed management
 
@@ -127,6 +134,7 @@ noc_project/
     ├── dv/                        # NEW:引入的 DV IP,原封不動 + 原 LICENSE + 版本釘死
     │   ├── axi-0.39.7/            #   axi_pkg.sv axi_intf.sv axi_test.sv include/axi/*.svh
     │   ├── common_verification-0.2.5/  # rand_id_queue.sv
+    │   ├── common_cells-1.37.0/   #   cf_math_pkg addr_decode(axi_reorder_compare 依賴)
     │   └── floonoc-test-<rev>/    #   axi_reorder_compare.sv axi_bw_monitor.sv
     ├── test_patterns/  topologies/  regress/  tools/  verilator/  vcs/
     └── filelist_*.f               # gen_filelist.py 重生
@@ -136,7 +144,7 @@ noc_project/
 
 | 處置 | 元件 |
 |------|------|
-| 新增(引入 DV IP) | 上表 `sim/dv/` 三包(WSL 實編驗證:此最小集即建得起 rand VIP,`common_cells` 不需要) |
+| 新增(引入 DV IP) | 上表 `sim/dv/` 三包 + `common_cells-1.37.0`(`axi_reorder_compare` 依賴其 `addr_decode`;rand VIP 本身不需要) |
 | 改寫 | `user_node_endpoint.sv`(換內臟 + `end_of_sim_o`)、`gen_tb_top.py`(接線、exit cutover、region/seed stamp、watchdog 公式)、`gen_filelist.py` + filelist 重生(新路徑 + 退役檔移除)、`sim/build_config.mk`(路徑 + 退役檔移除)、root `CMakeLists.txt` / `Makefile`(c_model 新路徑)、`matrix.yaml` / `run_regress.py`(config-matrix entries、seed、toolchain 標籤)、路徑引用文件同步(`CLAUDE.md`、`docs/architecture.md`、`docs/development.md`) |
 | 退役(co-sim 側) | `axi_master_wrap.sv`、`axi_slave_wrap.sv`、`axi_perf_monitor.sv`、`cmodel_dpi.cpp` 的 master/slave/scoreboard DPI 段與 tb exit guards、`wrap/master_wrap.hpp` / `slave_wrap.hpp` + 其 tests |
 | 降級為 c_model test harness | C++ `AxiMaster` / `AxiSlave` / `Memory` / scoreboard 類保留於 `src/c_model/`,僅供 ctest 使用(15 個 unit/integration test 以其為驅動;不再出現於 co-sim wire-level testbench) |

@@ -5,11 +5,13 @@
 #include <memory>
 
 // Legacy SystemC timestamp stub (must NOT call VerilatedContext::time()).
-double sc_time_stamp() { return 0.0; }
+double sc_time_stamp() {
+    return 0.0;
+}
 
 int main(int argc, char** argv) {
     auto contextp = std::make_unique<VerilatedContext>();
-    contextp->commandArgs(argc, argv);  // forwards +scenario_node*/+perf_* to SV
+    contextp->commandArgs(argc, argv);  // forwards +num_reads/+num_writes/+perf_* to SV
     contextp->threads(1);
     auto top = std::make_unique<Vtb_top>(contextp.get());
     while (!contextp->gotFinish()) {
