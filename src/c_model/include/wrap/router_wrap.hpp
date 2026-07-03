@@ -50,7 +50,7 @@
 #include "wrap/router_wrap_io.hpp"
 #include "router/router.hpp"
 #include "router/router_adapters.hpp"
-#include "ni_params.h"              // NOC_ROUTER_VC_DEPTH, NOC_ROUTER_OUTPUT_FIFO_DEPTH
+#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH, NOC_ROUTER_OUTPUT_FIFO_DEPTH
 #include <array>
 #include <memory>
 #include <stdexcept>
@@ -198,6 +198,25 @@ class RouterWrap {
             if (p != LOCAL && link_live_[p]) return p;
         }
         return LOCAL;  // isolated node (no neighbor) — no live link
+    }
+
+    // Fabric-state-dump introspection (read-only): flits parked in the eject
+    // adapters and undelivered credit pulses, per port (LOCAL + LINK slots).
+    std::size_t req_eject_buffered(std::size_t port) const {
+        const auto& ej = (port == LOCAL) ? req_local_eject_ : req_link_eject_[port];
+        return ej ? ej->buffered() : 0;
+    }
+    std::size_t rsp_eject_buffered(std::size_t port) const {
+        const auto& ej = (port == LOCAL) ? rsp_local_eject_ : rsp_link_eject_[port];
+        return ej ? ej->buffered() : 0;
+    }
+    std::size_t req_credit_pending(std::size_t port, uint8_t vc) const {
+        const auto& cr = (port == LOCAL) ? req_local_credit_ : req_link_credit_[port];
+        return cr ? cr->pending(vc) : 0;
+    }
+    std::size_t rsp_credit_pending(std::size_t port, uint8_t vc) const {
+        const auto& cr = (port == LOCAL) ? rsp_local_credit_ : rsp_link_credit_[port];
+        return cr ? cr->pending(vc) : 0;
     }
 
   private:

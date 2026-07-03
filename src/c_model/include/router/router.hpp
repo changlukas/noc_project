@@ -129,6 +129,14 @@ class Router {
     std::size_t vc_depth() const { return cfg_.vc_depth; }
     // Configured per-output FIFO capacity.
     std::size_t output_fifo_depth() const { return cfg_.output_fifo_depth; }
+    // Wormhole lock state per output port (nullopt = unlocked). Read-only
+    // introspection for the co-sim fabric state dump.
+    std::optional<std::size_t> wormhole_locked_input(std::size_t out_port) const {
+        return wormhole_[out_port].locked_input;
+    }
+    std::optional<uint8_t> wormhole_locked_vc(std::size_t out_port) const {
+        return wormhole_[out_port].locked_vc;
+    }
     // Front flit's routed output port for (in_port, vc), or nullopt if empty.
     // Pure read; mirrors stage-2's route check without side effects.
     std::optional<RouterPort> front_route(std::size_t in_port, uint8_t vc) const {

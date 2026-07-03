@@ -15,6 +15,7 @@
 #include "ni_flit_constants.h"  // ni::FLIT_WIDTH
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <string>
 
@@ -664,4 +665,154 @@ extern "C" void cmodel_perf_dump(const char* path) {
 extern "C" void cmodel_perf_set_run(const char* scenario, long long total_cyc) {
     g_perf.set_scenario(scenario);
     g_perf.set_window(0, static_cast<uint64_t>(total_cyc));
+}
+
+// ---------------------------------------------------------------------------
+// Fabric state dump — watchdog forensics. Prints every non-idle piece of
+// c_model state (router FIFO/credit/wormhole, NMU/NSU stage occupancy and
+// in-flight trackers) so a deadlocked run localizes the stuck hop without
+// waveforms. Read-only; the tb watchdog calls it once before $fatal.
+// ---------------------------------------------------------------------------
+namespace {
+
+const char* kPortName[] = {"LOCAL", "N", "E", "S", "W"};
+
+void dump_one_router(const std::string& name, const char* net, ni::cmodel::router::Router& r) {
+    const uint8_t nvc = r.num_vc();
+    for (std::size_t p = 0; p < ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
+        for (uint8_t vc = 0; vc < nvc; ++vc) {
+            const std::size_t occ = r.input_fifo_size(p, vc);
+            if (occ > 0) {
+                std::printf("[FABRIC-DUMP] %s.%s in_fifo[%s][vc%u]=%zu/%zu\n", name.c_str(), net,
+                            kPortName[p], vc, occ, r.vc_depth());
+            }
+            const std::size_t cr = r.credit(p, vc);
+            if (cr < r.vc_depth()) {
+                std::printf("[FABRIC-DUMP] %s.%s credit[%s][vc%u]=%zu/%zu\n", name.c_str(), net,
+                            kPortName[p], vc, cr, r.vc_depth());
+            }
+        }
+        const std::size_t out_occ = r.output_fifo_size(p);
+        if (out_occ > 0) {
+            std::printf("[FABRIC-DUMP] %s.%s out_fifo[%s]=%zu/%zu\n", name.c_str(), net,
+                        kPortName[p], out_occ, r.output_fifo_depth());
+        }
+        if (auto lock = r.wormhole_locked_input(p)) {
+            std::printf("[FABRIC-DUMP] %s.%s wormhole[%s] locked_input=%s locked_vc=%u\n",
+                        name.c_str(), net, kPortName[p], kPortName[*lock],
+                        static_cast<unsigned>(r.wormhole_locked_vc(p).value_or(255)));
+        }
+    }
+}
+
+void dump_one_router_wrap(const std::string& name, RouterWrap& rw) {
+    dump_one_router(name, "req", rw.req_router());
+    dump_one_router(name, "rsp", rw.rsp_router());
+    const uint8_t nvc = rw.num_vc();
+    for (std::size_t p = 0; p < ni::cmodel::router::ROUTER_PORT_COUNT; ++p) {
+        const std::size_t req_ej = rw.req_eject_buffered(p);
+        const std::size_t rsp_ej = rw.rsp_eject_buffered(p);
+        if (req_ej > 0)
+            std::printf("[FABRIC-DUMP] %s.req eject[%s]=%zu\n", name.c_str(), kPortName[p], req_ej);
+        if (rsp_ej > 0)
+            std::printf("[FABRIC-DUMP] %s.rsp eject[%s]=%zu\n", name.c_str(), kPortName[p], rsp_ej);
+        for (uint8_t vc = 0; vc < nvc; ++vc) {
+            const std::size_t req_cp = rw.req_credit_pending(p, vc);
+            const std::size_t rsp_cp = rw.rsp_credit_pending(p, vc);
+            if (req_cp > 0)
+                std::printf("[FABRIC-DUMP] %s.req credit_pending[%s][vc%u]=%zu\n", name.c_str(),
+                            kPortName[p], vc, req_cp);
+            if (rsp_cp > 0)
+                std::printf("[FABRIC-DUMP] %s.rsp credit_pending[%s][vc%u]=%zu\n", name.c_str(),
+                            kPortName[p], vc, rsp_cp);
+        }
+    }
+}
+
+void dump_one_nmu(const std::string& name, NmuWrap& nw) {
+    using ni::cmodel::NiPath;
+    auto* sa = nw.standalone();
+    if (!sa) return;
+    auto& port = sa->axi_slave_port();
+    std::printf(
+        "[FABRIC-DUMP] %s port_q aw=%zu w=%zu ar=%zu b=%zu r=%zu held_b=%d held_r=%d "
+        "w_expected=%u\n",
+        name.c_str(), port.aw_q_size(), port.w_q_size(), port.ar_q_size(), port.b_q_size(),
+        port.r_q_size(), nw.holding_b() ? 1 : 0, nw.holding_r() ? 1 : 0, nw.w_expected());
+    std::printf(
+        "[FABRIC-DUMP] %s req_stage s0[aw,w,ar]=%zu,%zu,%zu s1[aw,w,ar]=%zu,%zu,%zu s2=%zu\n",
+        name.c_str(), sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_AW),
+        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_W),
+        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_AR),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_AW),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_W),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_AR),
+        sa->stage_occupancy(NiPath::NmuReq, 2, 0));
+    std::printf("[FABRIC-DUMP] %s rsp_stage s0[b,r]=%zu,%zu s1[b,r]=%zu,%zu s2[b,r]=%zu,%zu\n",
+                name.c_str(), sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_B),
+                sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_R),
+                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_B),
+                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_R),
+                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_B),
+                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_R));
+    std::printf("[FABRIC-DUMP] %s rob write_outstanding=%zu read_outstanding=%zu", name.c_str(),
+                sa->rob().write_occupancy(), sa->rob().read_occupancy());
+    for (uint8_t vc = 0; vc < nw.num_vc(); ++vc) {
+        std::printf(" req_credit_avail[vc%u]=%d", vc, sa->req_credit_avail(vc) ? 1 : 0);
+    }
+    std::printf("\n");
+}
+
+void dump_one_nsu(const std::string& name, NsuWrap& nw) {
+    using ni::cmodel::NiPath;
+    auto* sa = nw.standalone();
+    if (!sa) return;
+    auto& port = sa->axi_master_port();
+    std::printf(
+        "[FABRIC-DUMP] %s port_q aw=%zu w=%zu ar=%zu b=%zu r=%zu held[aw,w,ar]=%d,%d,%d "
+        "outstanding_w=%u expected_r_beats=%u w_pop_budget=%u\n",
+        name.c_str(), port.aw_q_size(), port.w_q_size(), port.ar_q_size(), port.b_q_size(),
+        port.r_q_size(), nw.holding_aw() ? 1 : 0, nw.holding_w() ? 1 : 0, nw.holding_ar() ? 1 : 0,
+        nw.outstanding_w(), nw.expected_r_beats(), nw.w_pop_budget());
+    std::printf("[FABRIC-DUMP] %s req_stage s0[aw,w,ar]=%zu,%zu,%zu s1[aw,w,ar]=%zu,%zu,%zu\n",
+                name.c_str(), sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_AW),
+                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_W),
+                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_AR),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_AW),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_W),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_AR));
+    std::printf("[FABRIC-DUMP] %s rsp_stage s0[b,r]=%zu,%zu s1[b,r]=%zu,%zu s2=%zu", name.c_str(),
+                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_B),
+                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_R),
+                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_B),
+                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_R),
+                sa->stage_occupancy(NiPath::NsuRsp, 2, 0));
+    for (uint8_t vc = 0; vc < nw.num_vc(); ++vc) {
+        std::printf(" rsp_credit_avail[vc%u]=%d", vc, sa->rsp_credit_avail(vc) ? 1 : 0);
+    }
+    std::printf("\n");
+}
+
+}  // namespace
+
+extern "C" void cmodel_dump_fabric_state(void) {
+    using namespace ni::cmodel::wrap;
+    std::printf("[FABRIC-DUMP] ===== begin (non-idle state only for router lines) =====\n");
+    for (HandleBlock* h : g_handle_registry) {
+        switch (h->type) {
+            case WrapType::Router:
+                dump_one_router_wrap(h->name, *static_cast<RouterWrap*>(h->adapter.get()));
+                break;
+            case WrapType::Nmu:
+                dump_one_nmu(h->name, *static_cast<NmuWrap*>(h->adapter.get()));
+                break;
+            case WrapType::Nsu:
+                dump_one_nsu(h->name, *static_cast<NsuWrap*>(h->adapter.get()));
+                break;
+            default:
+                break;
+        }
+    }
+    std::printf("[FABRIC-DUMP] ===== end =====\n");
+    std::fflush(stdout);
 }

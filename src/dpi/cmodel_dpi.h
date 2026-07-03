@@ -43,6 +43,11 @@ void cmodel_perf_sample_tick(void);
 void cmodel_perf_dump(const char* path);
 void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 
+// Watchdog forensics: print every non-idle piece of fabric state (router
+// FIFO/credit/wormhole, NMU/NSU stage occupancy and in-flight trackers) to
+// stdout. Read-only; the tb watchdog calls it once before $fatal.
+void cmodel_dump_fabric_state(void);
+
 // Per-wrap DPI signatures appended by Tasks 5-11.
 // Router (Task 3, per-node) — ONE node's REQ+RSP routers at (x,y). Pins split:
 //   NMU/NSU-facing (NI edge, pulse credit) + per-DIRECTION LINK (pulse credit).

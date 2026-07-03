@@ -29,8 +29,8 @@
 // Hermetic invariant: no refs to other Wraps.
 #pragma once
 #include "axi/types.hpp"
-#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
-#include "wrap/flit_byte_conv.hpp"         // flit_from_bytes, flit_to_bytes
+#include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
+#include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nsu_wrap_io.hpp"
 #include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)
 #include "ni_params.h"            // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
@@ -243,6 +243,15 @@ class NsuWrap {
 
     // VC count — read by the DPI handlers to size the per-VC credit loops.
     uint8_t num_vc() const { return num_vc_; }
+
+    // Fabric-state-dump introspection (read-only by convention).
+    nsu::NsuStandalone* standalone() { return nsu_.get(); }
+    bool holding_aw() const { return held_aw_.has_value(); }
+    bool holding_w() const { return held_w_.has_value(); }
+    bool holding_ar() const { return held_ar_.has_value(); }
+    uint32_t outstanding_w() const { return outstanding_w_; }
+    uint32_t expected_r_beats() const { return expected_r_beats_; }
+    uint32_t w_pop_budget() const { return w_pop_budget_; }
 
   private:
     uint8_t num_vc_ = 1;
