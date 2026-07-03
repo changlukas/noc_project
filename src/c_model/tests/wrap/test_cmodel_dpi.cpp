@@ -1,11 +1,10 @@
 // c_model/tests/wrap/test_cmodel_dpi.cpp
 // Single ordered TEST_F walking the DPI session state machine
-// (Uninitialized → Initialized → Finalized phases).
+// (Uninitialized → Initialized → Finalized) + per-instance handle guards.
 // Each negative assertion calls check_and_clear_error() to drain the latch.
 #include "cmodel_dpi.h"
 #include "handle_block.hpp"
 #include <atomic>
-#include <cstdlib>
 #include <gtest/gtest.h>
 #include <string>
 
@@ -31,42 +30,21 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     cmodel_finalize();
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Case: cmodel_init on bad YAML → ERR_GENERIC, state stays UNINITIALIZED.
-    cmodel_init("/nonexistent/path/to/scenario.yaml");
-    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
-
-    // Case: cmodel_init with good YAML → succeeds.
-    const char* good_yaml = std::getenv("CMODEL_TEST_SCENARIO_YAML");
-    ASSERT_NE(good_yaml, nullptr) << "set CMODEL_TEST_SCENARIO_YAML to a valid scenario";
-    cmodel_init(good_yaml);
+    // Case: cmodel_init → succeeds (no-arg; no scenario load, perf reset only).
+    cmodel_init();
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Case: cmodel_init called twice (both successful) → second rejected.
-    cmodel_init(good_yaml);
+    // Case: cmodel_init called twice → second rejected (REINIT_FORBIDDEN).
+    cmodel_init();
     check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
 
-    // === Master cases (T6) ===
-
-    // Case: master_create after init succeeds; scoreboard callbacks wired.
-    unsigned long long master_handle = cmodel_master_create("master_test", good_yaml);
-    ASSERT_NE(master_handle, 0ull);
-    check_and_clear_error(CMODEL_DPI_OK);
-    EXPECT_EQ(cmodel_master_count(), 1);
-
     // Case: registry-miss guard — garbage void* (non-registry) on a cycle op →
-    // membership guard fires, no SIGSEGV. Exercised via a non-channel tick.
+    // membership guard fires, no SIGSEGV.
     unsigned long long garbage = 0xDEADBEEFCAFEull;
-    cmodel_master_tick(garbage);
+    cmodel_nmu_tick(garbage);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
-    // === Slave case (T7) ===
-
-    // Case: slave_create after init succeeds.
-    unsigned long long slave_handle = cmodel_slave_create("slave_test", good_yaml);
-    ASSERT_NE(slave_handle, 0ull);
-    check_and_clear_error(CMODEL_DPI_OK);
-
-    // === NMU multi-instance independence (T8) ===
+    // === NMU multi-instance independence ===
 
     // Case: create 2 NMU adapters — distinct void* + both validate as live.
     unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0, /*num_vc=*/1);
@@ -76,33 +54,27 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // Case: type-guard — an NMU handle passed to cmodel_master_tick (WrapType
+    // Case: type-guard — an NMU handle passed to cmodel_nsu_tick (WrapType
     // mismatch) → HERMETIC_VIOLATION; the type tag rejects the wrong wrap.
-    cmodel_master_tick(nmu_a);
+    cmodel_nsu_tick(nmu_a);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
-    // === NSU case (T9 — last per-wrap) ===
+    // === NSU case ===
 
     // Case: nsu_create after init succeeds.
     unsigned long long nsu_handle = cmodel_nsu_create("nsu_test", 0, /*num_vc=*/1);
     ASSERT_NE(nsu_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
 
-    // === Lifecycle aggregation + FINALIZED phase (T10) ===
-
-    // Case: cmodel_done with master created but not driven → 0.
-    //   ever_created_master ≥ 1 (T6 created master_handle) but master.done()
-    //   is false until scenario completes. Exercises BOTH the non-vacuous
-    //   guard AND the "any master not done → return 0" path.
-    EXPECT_EQ(cmodel_done(), 0);
+    // === FINALIZED phase ===
 
     // Case: finalize from INITIALIZED → registry destroyed, state = FINALIZED.
     cmodel_finalize();
     check_and_clear_error(CMODEL_DPI_OK);
 
     // Case: cycle op on stale ctx after finalize → registry-miss (registry
-    // emptied by finalize) → HERMETIC_VIOLATION. Uses the now-stale master handle.
-    cmodel_master_tick(master_handle);
+    // emptied by finalize) → HERMETIC_VIOLATION.
+    cmodel_nmu_tick(nmu_a);
     check_and_clear_error(CMODEL_DPI_ERR_HERMETIC_VIOLATION);
 
     // Case: finalize twice → second is no-op.
@@ -110,7 +82,7 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     check_and_clear_error(CMODEL_DPI_OK);
 
     // Case: cmodel_init after finalize → REINIT_FORBIDDEN (terminal state).
-    cmodel_init(good_yaml);
+    cmodel_init();
     check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
 }
 

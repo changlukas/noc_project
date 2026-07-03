@@ -6,14 +6,10 @@
 #include "dpi_boundary_macros.h"
 #include "handle_block.hpp"
 #include "wrap/flit_bytes.hpp"
-#include "wrap/master_wrap.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nsu_wrap.hpp"
 #include "wrap/router_wrap.hpp"
-#include "wrap/slave_wrap.hpp"
 
-#include "axi/scenario_parser.hpp"
-#include "axi/scoreboard.hpp"
 #include "axi/types.hpp"  // ni::cmodel::axi::DATA_BYTES
 #include "wrap/perf_collector.hpp"
 #include "ni_flit_constants.h"  // ni::FLIT_WIDTH
@@ -53,14 +49,6 @@ std::string g_dpi_error_msg;
 // cmodel_finalize → Finalized; both REINIT_FORBIDDEN-guarded.
 enum class SessionState { Uninitialized, Initialized, Finalized };
 SessionState g_session_state = SessionState::Uninitialized;
-
-std::size_t g_ever_created_master = 0;  // bumped on each cmodel_master_create
-
-// Cached scenario + original YAML path — read by *_create handlers in Tasks 6-9.
-// Scenario struct lacks a `path` field so the literal path string is stashed
-// separately. Both are immutable after cmodel_init success.
-ni::cmodel::axi::Scenario g_scenario;
-std::string g_scenario_yaml_path;
 
 // Process-wide handle registry — definition (declaration is in handle_block.hpp).
 // Every live HandleBlock* is inserted here at *_create time and erased at
@@ -116,9 +104,6 @@ HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const ch
     return h;
 }
 
-// Real scoreboard — wired to MasterWrap callbacks in cmodel_master_create.
-std::unique_ptr<ni::cmodel::axi::Scoreboard> g_scoreboard;
-
 // Perf collector — reset on cmodel_init; populated via cmodel_perf_* DPI calls.
 static ni::cmodel::wrap::PerfCollector g_perf;
 
@@ -126,7 +111,7 @@ static ni::cmodel::wrap::PerfCollector g_perf;
 
 using namespace ni::cmodel::wrap;
 
-extern "C" void cmodel_init(const char* scenario_yaml_path) {
+extern "C" void cmodel_init(void) {
     // Session state machine guard.
     if (g_session_state == SessionState::Initialized ||
         g_session_state == SessionState::Finalized) {
@@ -134,15 +119,11 @@ extern "C" void cmodel_init(const char* scenario_yaml_path) {
                              "cmodel_init: session already initialized or finalized");
         return;
     }
-    // Retry from UNINITIALIZED: clear prior latch before parsing.
+    // Retry from UNINITIALIZED: clear prior latch.
     g_dpi_error_code.store(CMODEL_DPI_OK);
     g_dpi_error_msg.clear();
 
     DPI_BOUNDARY_BEGIN(cmodel_init) {
-        auto scenario = ni::cmodel::axi::load_scenario(std::string(scenario_yaml_path));
-        g_scenario = std::move(scenario);
-        g_scenario_yaml_path = scenario_yaml_path;
-        g_scoreboard = std::make_unique<ni::cmodel::axi::Scoreboard>();
         g_perf = ni::cmodel::wrap::PerfCollector{};
         g_session_state = SessionState::Initialized;
     }
@@ -161,9 +142,6 @@ extern "C" void cmodel_finalize(void) {
         }
         g_handle_registry.clear();
 
-        g_scoreboard.reset();
-        g_ever_created_master = 0;
-
         g_session_state = SessionState::Finalized;
     }
     DPI_BOUNDARY_END(cmodel_finalize);
@@ -173,62 +151,6 @@ extern "C" int cmodel_check_error(const char** msg) {
     // No try/catch — this IS the error reporting boundary
     *msg = g_dpi_error_msg.c_str();
     return g_dpi_error_code.load();
-}
-
-// cmodel_done — returns 1 when all live MasterWrap instances report
-// done(). Returns 0 if no master was ever created (non-vacuous guard) or if
-// any master has not yet completed all in-flight transactions.
-extern "C" int cmodel_done(void) {
-    using namespace ni::cmodel::wrap;
-    if (g_session_state != SessionState::Initialized) return 0;
-    if (g_ever_created_master == 0) return 0;
-    for (HandleBlock* h : g_handle_registry) {
-        if (h->type != WrapType::Master) continue;
-        auto* m = static_cast<MasterWrap*>(h->adapter.get());
-        if (!m->done()) return 0;
-    }
-    return 1;
-}
-
-// cmodel_scoreboard_clean — returns 1 when the scoreboard has no mismatches.
-// g_scoreboard is wired via MasterWrap on_write_completed /
-// on_read_observed callbacks in cmodel_master_create.
-extern "C" int cmodel_scoreboard_clean(void) {
-    if (!g_scoreboard) return 1;
-    return (g_scoreboard->mismatch_count() == 0) ? 1 : 0;
-}
-
-// cmodel_dump_scoreboard — print scoreboard stats + mismatch log + per-master
-// read-dump file path to stderr. Iterates g_handle_registry for all live
-// Master handles. Safe to call multiple times; safe before init / after
-// finalize (scoreboard pointer check guards the null case).
-extern "C" void cmodel_dump_scoreboard(void) {
-    using namespace ni::cmodel::wrap;
-    DPI_BOUNDARY_BEGIN(cmodel_dump_scoreboard) {
-        if (g_scoreboard) {
-            std::fprintf(stderr, "[scoreboard] %zu reads checked, %zu mismatches\n",
-                         g_scoreboard->reads_checked(), g_scoreboard->mismatch_count());
-            for (const auto& msg : g_scoreboard->mismatch_report()) {
-                std::fprintf(stderr, "  %s\n", msg.c_str());
-            }
-        }
-        for (HandleBlock* h : g_handle_registry) {
-            if (h->type != WrapType::Master) continue;
-            auto* m = static_cast<MasterWrap*>(h->adapter.get());
-            std::fprintf(stderr, "[dump] master=%s read-dump file: %s\n", h->name.c_str(),
-                         m->read_dump_path().c_str());
-        }
-    }
-    DPI_BOUNDARY_END(cmodel_dump_scoreboard);
-}
-
-// Master count + reads-checked, for tb_top's non-vacuous PASS guard.
-extern "C" int cmodel_master_count(void) {
-    return static_cast<int>(g_ever_created_master);
-}
-extern "C" int cmodel_reads_checked(void) {
-    if (!g_scoreboard) return 0;
-    return static_cast<int>(g_scoreboard->reads_checked());
 }
 
 // Flit marshalling helpers — shared by NMU/NSU/Router DPI handlers.
@@ -398,18 +320,11 @@ extern "C" void cmodel_router_get_outputs(
     DPI_BOUNDARY_END(cmodel_router_get_outputs);
 }
 
-// AxiMaster DPI handlers — Task 8.
+// Shared AXI beat marshalling helpers — used by the NMU/NSU DPI handlers below.
 //
 // Packing convention (multi-bit fields, little-endian word order):
-//   8-bit  id/attr  : word[0] low byte
-//   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
-//   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
-//   32-bit wstrb    : word[0]
-//   2-bit resp/attr : word[0] low 2 bits
-
-using ni::cmodel::wrap::AXI_DATA_BYTES;
-using ni::cmodel::wrap::MasterInputs;
-using ni::cmodel::wrap::MasterOutputs;
+//   64-bit addr  : word[0] = bits[31:0], word[1] = bits[63:32]
+//   256-bit data : words[0..7] (32 bytes, 8 x uint32_t)
 
 namespace {
 
@@ -442,264 +357,9 @@ void pack_addr64(uint64_t addr, svBitVecVal* vec) {
 
 }  // namespace
 
-extern "C" unsigned long long cmodel_master_create(const char* name, const char* scenario_path) {
-    if (g_session_state != SessionState::Initialized) {
-        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
-                             "cmodel_master_create: not initialized");
-        return 0ull;
-    }
-    DPI_BOUNDARY_BEGIN_R(cmodel_master_create, 0ull) {
-        const std::string dump_path = "master_wrap_read_dump_" + std::string(name) + ".txt";
-        auto adapter = std::make_unique<MasterWrap>();
-        adapter->init(std::string(scenario_path), dump_path,
-                      g_scenario.config.max_outstanding_write,
-                      g_scenario.config.max_outstanding_read);
-        adapter->configure_inject(g_scenario.config.inject);
-
-        // Wire scoreboard callbacks. g_scoreboard outlives all masters
-        // (single global; created in cmodel_init, destroyed in cmodel_finalize).
-        auto* sb_raw = g_scoreboard.get();
-        auto resp_str = [](ni::cmodel::axi::Resp r) -> const char* {
-            switch (r) {
-                case ni::cmodel::axi::Resp::OKAY:
-                    return "OKAY";
-                case ni::cmodel::axi::Resp::EXOKAY:
-                    return "EXOKAY";
-                case ni::cmodel::axi::Resp::SLVERR:
-                    return "SLVERR";
-                case ni::cmodel::axi::Resp::DECERR:
-                    return "DECERR";
-            }
-            return "?";
-        };
-        adapter->on_write_completed([sb_raw, resp_str](const ni::cmodel::axi::WriteResult& wr) {
-            sb_raw->handle_write_completed(wr, wr.data, wr.strb_per_beat);
-            std::fprintf(stderr, "[axi-w] id=0x%x addr=0x%llx len=%u size=%u resp=%s\n",
-                         static_cast<unsigned>(wr.id), static_cast<unsigned long long>(wr.addr),
-                         static_cast<unsigned>(wr.len), static_cast<unsigned>(wr.size),
-                         resp_str(wr.resp));
-        });
-        adapter->on_read_observed([sb_raw, resp_str](const ni::cmodel::axi::ReadResult& rr) {
-            sb_raw->handle_read_observed(rr);
-            const uint8_t first_byte = rr.data.empty() ? 0 : rr.data[0];
-            std::fprintf(stderr,
-                         "[axi-r] id=0x%x addr=0x%llx len=%u size=%u resp=%s data[0]=0x%02x\n",
-                         static_cast<unsigned>(rr.id), static_cast<unsigned long long>(rr.addr),
-                         static_cast<unsigned>(rr.len), static_cast<unsigned>(rr.size),
-                         resp_str(rr.resp), static_cast<unsigned>(first_byte));
-        });
-
-        auto* h = new HandleBlock{
-            static_cast<uint32_t>(WrapType::Master), WrapType::Master, HandleState::Live,
-            std::string(name),
-            std::unique_ptr<void, void (*)(void*)>(
-                adapter.release(), [](void* p) { delete static_cast<MasterWrap*>(p); })};
-        g_handle_registry.insert(h);
-        ++g_ever_created_master;
-        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
-    }
-    DPI_BOUNDARY_END_R(cmodel_master_create);
-}
-
-extern "C" void cmodel_master_set_inputs(unsigned long long ctx, svBit awready, svBit wready,
-                                         svBit arready, svBit bvalid, svBitVecVal* bid,
-                                         svBitVecVal* bresp, svBit rvalid, svBitVecVal* rid,
-                                         svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast) {
-    DPI_BOUNDARY_BEGIN(cmodel_master_set_inputs) {
-        REQUIRE_HANDLE(ctx, WrapType::Master, "cmodel_master_set_inputs");
-        auto* master = static_cast<MasterWrap*>(_h->adapter.get());
-        MasterInputs in{};
-        in.awready = static_cast<bool>(awready);
-        in.wready = static_cast<bool>(wready);
-        in.arready = static_cast<bool>(arready);
-        in.bvalid = static_cast<bool>(bvalid);
-        in.bid = static_cast<uint8_t>(bid[0] & 0xFF);
-        in.bresp = static_cast<uint8_t>(bresp[0] & 0x3);
-        in.rvalid = static_cast<bool>(rvalid);
-        in.rid = static_cast<uint8_t>(rid[0] & 0xFF);
-        in.rdata = unpack_data256(rdata);
-        in.rresp = static_cast<uint8_t>(rresp[0] & 0x3);
-        in.rlast = static_cast<bool>(rlast);
-        master->set_inputs(in);
-    }
-    DPI_BOUNDARY_END(cmodel_master_set_inputs);
-}
-
-extern "C" void cmodel_master_tick(unsigned long long ctx) {
-    DPI_BOUNDARY_BEGIN(cmodel_master_tick) {
-        REQUIRE_HANDLE(ctx, WrapType::Master, "cmodel_master_tick");
-        auto* master = static_cast<MasterWrap*>(_h->adapter.get());
-        master->tick();
-    }
-    DPI_BOUNDARY_END(cmodel_master_tick);
-}
-
-extern "C" void cmodel_master_get_outputs(unsigned long long ctx, svBit* awvalid, svBitVecVal* awid,
-                                          svBitVecVal* awaddr, svBitVecVal* awlen,
-                                          svBitVecVal* awsize, svBitVecVal* awburst, svBit* awlock,
-                                          svBitVecVal* awcache, svBitVecVal* awprot,
-                                          svBitVecVal* awqos, svBit* wvalid, svBitVecVal* wdata,
-                                          svBitVecVal* wstrb, svBit* wlast, svBit* bready,
-                                          svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
-                                          svBitVecVal* arlen, svBitVecVal* arsize,
-                                          svBitVecVal* arburst, svBit* arlock, svBitVecVal* arcache,
-                                          svBitVecVal* arprot, svBitVecVal* arqos, svBit* rready) {
-    DPI_BOUNDARY_BEGIN(cmodel_master_get_outputs) {
-        REQUIRE_HANDLE(ctx, WrapType::Master, "cmodel_master_get_outputs");
-        auto* master = static_cast<MasterWrap*>(_h->adapter.get());
-        MasterOutputs out{};
-        master->get_outputs(out);
-
-        *awvalid = static_cast<svBit>(out.awvalid);
-        awid[0] = out.awid;
-        pack_addr64(out.awaddr, awaddr);
-        awlen[0] = out.awlen;
-        awsize[0] = out.awsize;
-        awburst[0] = out.awburst;
-        *awlock = static_cast<svBit>(out.awlock & 0x01u);
-        awcache[0] = out.awcache;
-        awprot[0] = out.awprot;
-        awqos[0] = out.awqos;
-
-        *wvalid = static_cast<svBit>(out.wvalid);
-        pack_data256(out.wdata, wdata);
-        wstrb[0] = out.wstrb;
-        *wlast = static_cast<svBit>(out.wlast);
-
-        *bready = static_cast<svBit>(out.bready);
-
-        *arvalid = static_cast<svBit>(out.arvalid);
-        arid[0] = out.arid;
-        pack_addr64(out.araddr, araddr);
-        arlen[0] = out.arlen;
-        arsize[0] = out.arsize;
-        arburst[0] = out.arburst;
-        *arlock = static_cast<svBit>(out.arlock & 0x01u);
-        arcache[0] = out.arcache;
-        arprot[0] = out.arprot;
-        arqos[0] = out.arqos;
-
-        *rready = static_cast<svBit>(out.rready);
-    }
-    DPI_BOUNDARY_END(cmodel_master_get_outputs);
-}
-
-// AxiSlave DPI handlers — Task 9.
-//
-// Packing convention mirrors cmodel_master_*:
-//   8-bit  id/attr  : word[0] low byte
-//   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
-//   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
-//   32-bit wstrb    : word[0]
-//   2-bit resp/attr : word[0] low 2 bits
-
-using ni::cmodel::wrap::SlaveInputs;
-using ni::cmodel::wrap::SlaveOutputs;
-
-// unpack_data256 and pack_addr64 are defined in the master block above (same
-// anonymous namespace); they are reused here for the slave handlers.
-
-extern "C" unsigned long long cmodel_slave_create(const char* name, const char* scenario_path) {
-    if (g_session_state != SessionState::Initialized) {
-        DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
-                             "cmodel_slave_create: not initialized");
-        return 0ull;
-    }
-    DPI_BOUNDARY_BEGIN_R(cmodel_slave_create, 0ull) {
-        auto variant = ni::cmodel::axi::load_scenario(std::string(scenario_path));
-        auto adapter = std::make_unique<SlaveWrap>();
-        adapter->init(variant.config.memory_base, variant.config.memory_size,
-                      g_scenario.config.write_latency, g_scenario.config.read_latency);
-        auto* h = new HandleBlock{
-            static_cast<uint32_t>(WrapType::Slave), WrapType::Slave, HandleState::Live,
-            std::string(name),
-            std::unique_ptr<void, void (*)(void*)>(
-                adapter.release(), [](void* p) { delete static_cast<SlaveWrap*>(p); })};
-        g_handle_registry.insert(h);
-        return static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(h));
-    }
-    DPI_BOUNDARY_END_R(cmodel_slave_create);
-}
-
-extern "C" void cmodel_slave_set_inputs(
-    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
-    svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock,
-    svBitVecVal* awcache, svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
-    svBitVecVal* wstrb, svBit wlast, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
-    svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
-    svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit bready, svBit rready) {
-    DPI_BOUNDARY_BEGIN(cmodel_slave_set_inputs) {
-        REQUIRE_HANDLE(ctx, WrapType::Slave, "cmodel_slave_set_inputs");
-        auto* slave = static_cast<SlaveWrap*>(_h->adapter.get());
-        SlaveInputs in{};
-        in.awvalid = static_cast<bool>(awvalid);
-        in.awid = static_cast<uint8_t>(awid[0] & 0xFF);
-        in.awaddr = static_cast<uint64_t>(awaddr[0]) | (static_cast<uint64_t>(awaddr[1]) << 32);
-        in.awlen = static_cast<uint8_t>(awlen[0] & 0xFF);
-        in.awsize = static_cast<uint8_t>(awsize[0] & 0x07);
-        in.awburst = static_cast<uint8_t>(awburst[0] & 0x03);
-        in.awlock = static_cast<uint8_t>(awlock & 0x01);
-        in.awcache = static_cast<uint8_t>(awcache[0] & 0x0F);
-        in.awprot = static_cast<uint8_t>(awprot[0] & 0x07);
-        in.awqos = static_cast<uint8_t>(awqos[0] & 0x0F);
-        in.wvalid = static_cast<bool>(wvalid);
-        in.wdata = unpack_data256(wdata);
-        in.wstrb = wstrb[0];
-        in.wlast = static_cast<bool>(wlast);
-        in.arvalid = static_cast<bool>(arvalid);
-        in.arid = static_cast<uint8_t>(arid[0] & 0xFF);
-        in.araddr = static_cast<uint64_t>(araddr[0]) | (static_cast<uint64_t>(araddr[1]) << 32);
-        in.arlen = static_cast<uint8_t>(arlen[0] & 0xFF);
-        in.arsize = static_cast<uint8_t>(arsize[0] & 0x07);
-        in.arburst = static_cast<uint8_t>(arburst[0] & 0x03);
-        in.arlock = static_cast<uint8_t>(arlock & 0x01);
-        in.arcache = static_cast<uint8_t>(arcache[0] & 0x0F);
-        in.arprot = static_cast<uint8_t>(arprot[0] & 0x07);
-        in.arqos = static_cast<uint8_t>(arqos[0] & 0x0F);
-        in.bready = static_cast<bool>(bready);
-        in.rready = static_cast<bool>(rready);
-        slave->set_inputs(in);
-    }
-    DPI_BOUNDARY_END(cmodel_slave_set_inputs);
-}
-
-extern "C" void cmodel_slave_tick(unsigned long long ctx) {
-    DPI_BOUNDARY_BEGIN(cmodel_slave_tick) {
-        REQUIRE_HANDLE(ctx, WrapType::Slave, "cmodel_slave_tick");
-        auto* slave = static_cast<SlaveWrap*>(_h->adapter.get());
-        slave->tick();
-    }
-    DPI_BOUNDARY_END(cmodel_slave_tick);
-}
-
-extern "C" void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready,
-                                         svBit* arready, svBit* bvalid, svBitVecVal* bid,
-                                         svBitVecVal* bresp, svBit* rvalid, svBitVecVal* rid,
-                                         svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast) {
-    DPI_BOUNDARY_BEGIN(cmodel_slave_get_outputs) {
-        REQUIRE_HANDLE(ctx, WrapType::Slave, "cmodel_slave_get_outputs");
-        auto* slave = static_cast<SlaveWrap*>(_h->adapter.get());
-        SlaveOutputs out{};
-        slave->get_outputs(out);
-
-        *awready = static_cast<svBit>(out.awready);
-        *wready = static_cast<svBit>(out.wready);
-        *arready = static_cast<svBit>(out.arready);
-        *bvalid = static_cast<svBit>(out.bvalid);
-        bid[0] = out.bid;
-        bresp[0] = out.bresp & 0x3u;
-        *rvalid = static_cast<svBit>(out.rvalid);
-        rid[0] = out.rid;
-        pack_data256(out.rdata, rdata);
-        rresp[0] = out.rresp & 0x3u;
-        *rlast = static_cast<svBit>(out.rlast);
-    }
-    DPI_BOUNDARY_END(cmodel_slave_get_outputs);
-}
-
 // Nmu DPI handlers — Task 8.
 //
-// Packing conventions mirror cmodel_slave_*:
+// Packing conventions (little-endian word order):
 //   8-bit  id/attr  : word[0] low byte
 //   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
 //   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)

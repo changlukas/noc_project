@@ -27,6 +27,9 @@ SPECGEN_INC    := $(PROJ_ROOT)/specgen/generated/cpp
 SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
 SRC_SV         := $(PROJ_ROOT)/src/sv
 SRC_DPI        := $(PROJ_ROOT)/src/dpi
+# Imported DV/VIP source set (pulp axi + common_verification + FlooNoC monitors).
+# NEVER edit files under $(DV_ROOT) — they are vendored verbatim.
+DV_ROOT        := $(COSIM_ROOT)/dv
 
 # yaml-cpp HEADERS: online builds clone the source into the build tree; offline
 # (DEPS_SRC) builds use the pre-fetched source IN PLACE, so the headers live
@@ -83,13 +86,20 @@ TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
     $(TOPOLOGY_NOC_TYPES_PKG) \
     $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
-    $(COSIM_ROOT)/tb/axi_master_wrap.sv \
+    $(DV_ROOT)/common_cells-1.37.0/src/cf_math_pkg.sv \
+    $(DV_ROOT)/common_cells-1.37.0/src/addr_decode_dync.sv \
+    $(DV_ROOT)/common_cells-1.37.0/src/addr_decode.sv \
+    $(DV_ROOT)/common_verification-0.2.5/src/rand_id_queue.sv \
+    $(DV_ROOT)/axi-0.39.7/src/axi_pkg.sv \
+    $(DV_ROOT)/axi-0.39.7/src/axi_intf.sv \
+    $(DV_ROOT)/axi-0.39.7/src/axi_test.sv \
+    $(DV_ROOT)/floonoc-test/axi_bw_monitor.sv \
+    $(DV_ROOT)/floonoc-test/axi_reorder_compare.sv \
+    $(COSIM_ROOT)/tb/axi_vip_types_pkg.sv \
     $(SRC_SV)/nmu_wrap.sv \
     $(SRC_SV)/router_wrap.sv \
     $(SRC_SV)/nsu_wrap.sv \
     $(SRC_SV)/ni_wrap.sv \
-    $(COSIM_ROOT)/tb/axi_slave_wrap.sv \
-    $(COSIM_ROOT)/tb/axi_perf_monitor.sv \
     $(COSIM_ROOT)/tb/user_node_endpoint.sv \
     $(COSIM_ROOT)/tb/link_perf_monitor.sv \
     $(TB_TOP_SV)
@@ -104,7 +114,8 @@ FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY).f
 # gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
 # -I/+incdir+ the simulators already pass; listing them in the .f makes it
 # self-contained for tool-native -f consumption.
-FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/tb $(SRC_SV) -- $(TB_TOP_SV_SRC)
+FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/tb $(SRC_SV) \
+    $(DV_ROOT)/axi-0.39.7/include -- $(TB_TOP_SV_SRC)
 
 # DPI implementation shared by every simulator; the C++ *main* driver
 # (main.cpp) is Verilator-only and listed in sim/verilator/Makefile, NOT here

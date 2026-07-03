@@ -6,9 +6,9 @@ The fabric/tb split (S3):
     by inter-router directional (N/E/S/W) links with boundary tie-off + assertion.
     Every node exposes a clean per-node AXI port (master-side + slave-side). The
     DPI `ctx` handles arrive as PORTS — the fabric itself does no cmodel_*_create.
-  - tb_top_<topology>.sv : clk/rst, plusargs, cmodel_*_create (incl. router/nmu/nsu/
-    master/slave ctx), instantiates the fabric, attaches test master_wrap/slave_wrap
-    + AXI perf monitors + scoreboard exit logic.
+  - tb_top_<topology>.sv : clk/rst, watchdog, cmodel_*_create (router/nmu/nsu ctx),
+    instantiates the fabric, attaches a user_node_endpoint (pulp axi_rand_master +
+    axi_rand_slave + bw monitor) per node + reorder-compare checking + exit logic.
 
 Generated artifacts: edit the generator or the topology YAML, never the emitted
 .sv directly. tb_top_<topology>.sv includes the fabric (SV `include), resolved via
@@ -20,14 +20,14 @@ Usage:
 Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
     - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
-    - per-node plusarg names (+scenario_node<i>), scenario strings, ctx handles
-    - master at node k uses node k's scenario (identity pairing); addr bit 32+
-      encodes the destination tile (neighbor or any address-driven dst)
+    - per-node router/nmu/nsu ctx handles; REGION_BASE[s] = coord_id(s) << 32
+      (dst tile in addr bits 32+), stamped into each endpoint
     - inter-router links wired per XY direction; boundary directions tied off
-    - PASS guard: cmodel_master_count() == len(nodes) AND reads_checked() >= len(nodes)
+    - PASS guard: all endpoints done (end_of_sim) AND all reorder-compares drained
+      (cmp_eos) AND every node non-vacuous (txn_cnt > 0)
 
 Constants kept as template (not derived from topology YAML):
-    - clk/rst timing (10 ns clock, 4-cycle reset), TIMEOUT_CYCLES = 100000
+    - clk/rst timing (10 ns clock, 4-cycle reset); load-scaled watchdog
     - localparam width constants from ni_params_pkg, DPI signatures
     - perf instrumentation, FSDB block, DPI error poll structure
 """
@@ -368,7 +368,7 @@ def emit_fabric(topo: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# tb_top emitter — instantiates the fabric + test master/slave + exit logic
+# tb_top emitter — instantiates the fabric + pulp VIP endpoints + exit logic
 # ---------------------------------------------------------------------------
 
 def emit_tb_top(topo: dict, requested_name: str = "") -> str:
@@ -378,9 +378,14 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     num_vc = topo["topology"]["num_vc"]
     rob_enabled = requested_name.endswith("_rob")
 
-    # Identity pairing: master_i / slave_i both use scn_node{i}.
-    # Destination is encoded in addr bits 32+ by the scenario generator (gen_test_patterns).
-    coord_id = {i: c for (i, _x, _y, c) in nodes}
+    # REGION_BASE[s] = coord_id(s) << 32 — dst tile in addr bits 32+. Stamped
+    # into every endpoint so the VIP rand_master targets per-destination windows.
+    # Emitted as a PACKED-array concatenation in descending index order (element
+    # for index n-1 first) so REGION_BASE[i] == coord_id(node i) << 32. Packed
+    # because Verilator 5.048 mis-sizes an unpacked-array param override whose
+    # size depends on a sibling param override.
+    region_base = ", ".join(f"64'h{(c << 32):016X}"
+                            for (_i, _x, _y, c) in reversed(nodes))
 
     lines = []
     w = lines.append
@@ -393,13 +398,16 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("//")
     w(f"// {n} nodes live inside noc_fabric_{name} (ni_wrap=NMU+NSU + REQ/RSP router per")
     w("// node, joined by directional links). tb_top creates the DPI handles, attaches a")
-    w("// user_node_endpoint (test master_wrap + slave_wrap + perf monitors) to each")
-    w("// node's master/slave AXI faces, and owns the scoreboard exit logic.")
-    w("// Identity pairing: master/slave at node k both use scn_node{k}. Destination")
-    w("// is address-driven: addr bit 32+ encodes the dst tile (set by gen_test_patterns).")
+    w("// user_node_endpoint (pulp axi_rand_master + axi_rand_slave + FlooNoC")
+    w("// axi_bw_monitor) to each node's master/slave AXI faces, and owns the exit logic.")
+    w("// Checking: one FlooNoC axi_reorder_compare per master with permutation pairing")
+    w("// (master i <-> slave face of node NUM_NODES-1-i); it compares every AW/W/AR beat")
+    w("// at the destination slave face and every B/R beat back at the master against")
+    w("// the issued stream. (pulp axi_scoreboard is VCS-only: its 'x wildcard collapses")
+    w("// under Verilator 2-state.)")
     w("//")
     w("// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).")
-    w(f"// Plusargs +scenario_node0=<path> ... +scenario_node{n-1}=<path> kick off the run.")
+    w("// Plusargs: +num_reads=<n> +num_writes=<n> (per node); seed via +verilator+seed+<N>.")
     w("")
     w("`ifndef TB_TOP_SV")
     w("`define TB_TOP_SV")
@@ -414,15 +422,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("        repeat (4) @(posedge clk_i);")
     w("        rst_ni = 1'b1;")
     w("    end")
-    w("    localparam int unsigned TIMEOUT_CYCLES = 100000;")
-    w("    initial begin")
-    w("        repeat (TIMEOUT_CYCLES) @(posedge clk_i);")
-    w('        $fatal(1, "tb_top: timeout after %0d cycles", TIMEOUT_CYCLES);')
-    w("    end")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Parameters")
     w("    // -------------------------------------------------------------------------")
+    w(f"    localparam int unsigned NUM_NODES             = {n};")
     w("    localparam int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
@@ -434,23 +438,42 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // link_perf_monitor tracks the ACTUAL receiving buffer depth (not SLAVE_VC_BUFFER_DEPTH).")
     w("    localparam int unsigned ROUTER_VC_DEPTH       = "
       "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
+    w("    // Per-destination region windows: REGION_BASE[s] = coord_id(s) << 32 (dst")
+    w("    // tile in addr bits 32+). Packed array: Verilator 5.048 mis-sizes an")
+    w("    // unpacked-array param override whose size depends on a sibling override.")
+    w(f"    localparam logic [NUM_NODES-1:0][63:0] REGION_BASE = {{{region_base}}};")
+    w("    localparam longint unsigned REGION_BYTES = 64'h1000;")
+    w("")
+    w("    // -------------------------------------------------------------------------")
+    w("    // Watchdog - sized by worst-case beats in flight: measured vc1 fabric rate is")
+    w("    // ~15-30 cycles per R/W beat (credit window 4, all nodes contending), K=40")
+    w("    // adds margin. MAX_BURST_BEATS mirrors the endpoint's AXI_MAX_BURST_LEN cap.")
+    w("    // -------------------------------------------------------------------------")
+    w("    localparam int unsigned TIMEOUT_BASE    = 100000;")
+    w("    localparam int unsigned K_CYC_PER_BEAT  = 40;")
+    w("    localparam int unsigned MAX_BURST_BEATS = "
+      "int'(REGION_BYTES) / (DATA_WIDTH / 8);")
+    w("    int unsigned tb_num_reads  = 8;   // mirror endpoint defaults")
+    w("    int unsigned tb_num_writes = 8;")
+    w("    initial begin")
+    w("        int unsigned timeout_cycles;")
+    w('        void\'($value$plusargs("num_reads=%d",  tb_num_reads));')
+    w('        void\'($value$plusargs("num_writes=%d", tb_num_writes));')
+    w("        timeout_cycles = TIMEOUT_BASE")
+    w("            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * NUM_NODES;")
+    w("        repeat (timeout_cycles) @(posedge clk_i);")
+    w('        $fatal(1, "tb_top: timeout after %0d cycles", timeout_cycles);')
+    w("    end")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // DPI lifecycle")
     w("    // -------------------------------------------------------------------------")
-    w('    import "DPI-C" context function void    cmodel_init(input string path);')
+    w('    import "DPI-C" context function void    cmodel_init();')
     w('    import "DPI-C" context function void    cmodel_finalize();')
-    w('    import "DPI-C" context function int     cmodel_done();')
-    w('    import "DPI-C" context function int     cmodel_scoreboard_clean();')
-    w('    import "DPI-C" context function void    cmodel_dump_scoreboard();')
     w('    import "DPI-C" context function longint unsigned cmodel_router_create(input string name,')
     w('                                                                  input int x_coord, input int y_coord,')
     w('                                                                  input int mesh_x_dim, input int mesh_y_dim,')
     w('                                                                  input int num_vc);')
-    w('    import "DPI-C" context function longint unsigned cmodel_master_create(input string name,')
-    w('                                                                 input string scenario_path);')
-    w('    import "DPI-C" context function longint unsigned cmodel_slave_create(input string name,')
-    w('                                                                input string scenario_path);')
     if rob_enabled:
         w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
         w('                                                                 input int src_id, input int num_vc,')
@@ -460,49 +483,22 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w('                                                              input int src_id, input int num_vc);')
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
     w('                                                              input int src_id, input int num_vc);')
-    w('    import "DPI-C" context function int     cmodel_master_count();')
-    w('    import "DPI-C" context function int     cmodel_reads_checked();')
     w("")
 
-    # Per-node scenario strings + ctx handle ARRAYS (chandle-substitute longint
-    # unsigned). Arrays let the fabric take them as array ports and instantiate
-    # nodes via a genvar generate loop.
-    for (i, x, y, c) in nodes:
-        w(f"    string  scn_node{i};")
+    # ctx handle ARRAYS (chandle-substitute longint unsigned). Arrays let the
+    # fabric take them as array ports and instantiate nodes via a genvar loop.
     w(f"    longint unsigned router_ctx [{n}];")
-    w(f"    longint unsigned m_ctx      [{n}];")
-    w(f"    longint unsigned s_ctx      [{n}];")
     w(f"    longint unsigned nmu_ctx    [{n}];")
     w(f"    longint unsigned nsu_ctx    [{n}];")
     w("")
 
-    # Plusargs + cmodel_init + per-node create.
+    # cmodel_init (no-arg) + per-node router/nmu/nsu create.
     w("    initial begin")
-    cond = [f'!$value$plusargs("scenario_node{i}=%s", scn_node{i})' for (i, *_r) in nodes]
-    indent = "        "
-    if len(cond) == 1:
-        w(f"{indent}if ({cond[0]}) begin")
-    else:
-        w(f"{indent}if ({cond[0]} ||")
-        for c in cond[1:-1]:
-            w(f"{indent}    {c} ||")
-        w(f"{indent}    {cond[-1]}) begin")
-    scn_args = " ".join(f"+scenario_node{i}=<path>" for (i, *_r) in nodes)
-    w(f'            $display("ERROR: {scn_args} required");')
-    w("            $finish(1);")
-    w("        end")
-    last_i = nodes[-1][0]
-    w(f"        cmodel_init(scn_node{last_i});  // shared config; any variant is fine")
-    # Router creates: full (x,y,mesh_x,mesh_y,num_vc). Fill ctx array element-by-
-    # element (raster index == fabric genvar index).
+    w("        cmodel_init();")
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
-    # Per-node master/slave/nmu/nsu creates. Identity pairing: master_i/slave_i <- scn_node{i}.
     for (i, x, y, c) in nodes:
-        w(f"        // node{i}: master and slave both use scn_node{i}; dst encoded in addr bits 32+.")
-        w(f'        m_ctx[{i}]   = cmodel_master_create("master_{i}", scn_node{i});')
-        w(f'        s_ctx[{i}]   = cmodel_slave_create ("slave_{i}",  scn_node{i});')
         if rob_enabled:
             w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1);  '
               f'// src_id = node{i} coord {c}, ROB Enabled')
@@ -541,28 +537,84 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    );")
     w("")
 
-    # Test endpoints per node via genvar generate. user_node_endpoint = test
-    # master + slave + AXI perf monitors. user_node_endpoint.sv is USER-OWNED
-    # (committed, hand-written); the generator only INSTANTIATES it. SLOT_NAME
-    # strings come from $sformatf so perf.json slot labels stay "node<i>.manager"
-    # / "node<i>.subordinate" — byte-identical to the prior inline emission.
+    # Test endpoints per node via genvar generate. user_node_endpoint = pulp
+    # rand master + slave + bw monitor. user_node_endpoint.sv is
+    # USER-OWNED (committed, hand-written); the generator only INSTANTIATES it.
+    # REGION_BASE is stamped from the topology coord ids (dst tile in addr 32+).
     w("    // -------------------------------------------------------------------------")
-    w("    // Test endpoints - one user_node_endpoint per node (test master/slave/monitors)")
-    w("    // user_node_endpoint.sv is user-owned and NOT regenerated by this script.")
+    w("    // Test endpoints - one user_node_endpoint per node (pulp rand master/slave +")
+    w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT")
+    w("    // regenerated by this script.")
     w("    // -------------------------------------------------------------------------")
+    w(f"    logic        end_of_sim [{n}];")
+    w(f"    int unsigned txn_cnt    [{n}];")
     w(f"    for (genvar i = 0; i < {n}; i++) begin : g_endpoint")
     w("        user_node_endpoint #(")
-    w("            .NODE_ID(i),")
+    w("            .NODE_ID(i), .NUM_NODES(NUM_NODES),")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-    w('            .MASTER_SLOT_NAME($sformatf("node%0d.manager", i)),')
-    w('            .SLAVE_SLOT_NAME($sformatf("node%0d.subordinate", i))')
+    w("            .REGION_BASE(REGION_BASE), .REGION_BYTES(REGION_BYTES)")
     w("        ) u_endpoint (")
     w("            .clk_i(clk_i), .rst_ni(rst_ni),")
-    w("            .master_ctx_i(m_ctx[i]), .slave_ctx_i(s_ctx[i]),")
     w("            .master_axi_req_o(master_axi_req[i]), .master_axi_rsp_i(master_axi_rsp[i]),")
-    w("            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i])")
+    w("            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),")
+    w("            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i])")
     w("        );")
     w("    end : g_endpoint")
+    w("")
+
+    # Checking: one FlooNoC axi_reorder_compare per master, permutation pairing.
+    # Taps derive BOTH stream sides from the flat structs via axi_vip_types_pkg
+    # so out-of-scope fields (user/atop) compare as constant 0 on both ends.
+    w("    // -------------------------------------------------------------------------")
+    w("    // Checking - one axi_reorder_compare per master (permutation pairing:")
+    w("    // master i <-> slave face of node NUM_NODES-1-i). A mismatch is a $error")
+    w("    // (%Error in the log) = real DUT finding.")
+    w("    // -------------------------------------------------------------------------")
+    w("    axi_vip_types_pkg::vip_req_t  cmp_mst_req [NUM_NODES];")
+    w("    axi_vip_types_pkg::vip_resp_t cmp_mst_rsp [NUM_NODES];")
+    w("    axi_vip_types_pkg::vip_req_t  cmp_slv_req [NUM_NODES];")
+    w("    axi_vip_types_pkg::vip_resp_t cmp_slv_rsp [NUM_NODES];")
+    w("    logic cmp_eos [NUM_NODES];")
+    w("    for (genvar i = 0; i < NUM_NODES; i++) begin : g_compare")
+    w("        localparam int unsigned DST = NUM_NODES - 1 - i;")
+    w("        assign cmp_mst_req[i] = axi_vip_types_pkg::vip_req_from_flat(master_axi_req[i]);")
+    w("        assign cmp_mst_rsp[i] = axi_vip_types_pkg::vip_rsp_from_flat(master_axi_rsp[i]);")
+    w("        assign cmp_slv_req[i] = axi_vip_types_pkg::vip_req_from_flat(slave_axi_req[DST]);")
+    w("        assign cmp_slv_rsp[i] = axi_vip_types_pkg::vip_rsp_from_flat(slave_axi_rsp[DST]);")
+    w("        axi_reorder_compare #(")
+    w("            // NumSlaves=2 with slot 1 tied off: at NumSlaves=1 the module's")
+    w("            // slv_id_t becomes logic[$clog2(1)-1:0] = logic[-1:0], a degenerate")
+    w("            // range that corrupts its queue indexing under Verilator.")
+    w("            .NumSlaves(2),")
+    w("            .AxiIdWidth(ID_WIDTH),")
+    w("            .NumAddrRegions(2),")
+    w("            .addr_t(axi_vip_types_pkg::vip_addr_t),")
+    w("            .rule_t(axi_vip_types_pkg::vip_rule_t),")
+    w("            .AddrRegions({")
+    w("                axi_vip_types_pkg::vip_rule_t'{")
+    w("                    idx: 32'd1,")
+    w("                    start_addr: '1,  // dummy slot: never decoded")
+    w("                    end_addr: '1},")
+    w("                axi_vip_types_pkg::vip_rule_t'{")
+    w("                    idx: 32'd0,")
+    w("                    start_addr: REGION_BASE[DST],")
+    w("                    end_addr: REGION_BASE[DST] + REGION_BYTES}}),")
+    w("            .aw_chan_t(axi_vip_types_pkg::vip_aw_chan_t),")
+    w("            .w_chan_t(axi_vip_types_pkg::vip_w_chan_t),")
+    w("            .b_chan_t(axi_vip_types_pkg::vip_b_chan_t),")
+    w("            .ar_chan_t(axi_vip_types_pkg::vip_ar_chan_t),")
+    w("            .r_chan_t(axi_vip_types_pkg::vip_r_chan_t),")
+    w("            .req_t(axi_vip_types_pkg::vip_req_t),")
+    w("            .rsp_t(axi_vip_types_pkg::vip_resp_t)")
+    w("        ) u_compare (")
+    w("            .clk_i(clk_i), .rst_ni(rst_ni),")
+    w("            .mon_mst_req_i(cmp_mst_req[i]), .mon_mst_rsp_i(cmp_mst_rsp[i]),")
+    w("            // slot 1 tied off (see NumSlaves note above)")
+    w("            .mon_slv_req_i({axi_vip_types_pkg::vip_req_t'('0), cmp_slv_req[i]}),")
+    w("            .mon_slv_rsp_i({axi_vip_types_pkg::vip_resp_t'('0), cmp_slv_rsp[i]}),")
+    w("            .end_of_sim_o(cmp_eos[i])")
+    w("        );")
+    w("    end : g_compare")
     w("")
 
     # Perf instrumentation.
@@ -604,29 +656,35 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("`endif")
     w("")
 
-    # Exit logic.
+    # Exit logic — non-vacuous PASS guard: wait all endpoints done, settle, then
+    # require every node moved at least one AW/AR handshake.
     w("    // -------------------------------------------------------------------------")
     w("    // Exit logic - non-vacuous PASS guard")
     w("    // -------------------------------------------------------------------------")
-    w(f"    // PASS requires scoreboard clean AND all {n} masters created AND at least")
-    w(f"    // {n} reads checked (one per node — guards weakened scenarios")
-    w("    // where fewer than all nodes complete a read).")
-    w("    always @(posedge clk_i) begin")
-    w("        /* verilator lint_off WIDTHTRUNC */")
-    w("        if (rst_ni && (cmodel_done() != 0)) begin")
-    w(f"            if (cmodel_scoreboard_clean() != 0 &&")
-    w(f"                cmodel_master_count() == {n} && cmodel_reads_checked() >= {n}) begin")
-    w("        /* verilator lint_on WIDTHTRUNC */")
-    w('                $display("PASS: scenario complete, scoreboard clean");')
-    w("                cmodel_dump_scoreboard();")
-    w("                $finish(0);")
-    w("            end else begin")
-    w(f'                $display("FAIL: scoreboard mismatch or vacuous run (masters=%0d reads=%0d, need>={n})",')
-    w("                         cmodel_master_count(), cmodel_reads_checked());")
-    w("                cmodel_dump_scoreboard();")
-    w('                $fatal(1, "tb_top: run failed");')
+    w("    localparam int unsigned SETTLE_CYCLES = 100;")
+    w("    initial begin")
+    w("        bit vacuous;")
+    w("        bit all_done;")
+    w("        // clock-polled (not wait()): end_of_sim/cmp_eos are procedurally")
+    w("        // driven through port aliases; Verilator --timing wait() on them")
+    w("        // does not wake reliably.")
+    w("        do begin")
+    w("            @(posedge clk_i);")
+    w("            all_done = rst_ni;")
+    w("            for (int i = 0; i < NUM_NODES; i++)")
+    w("                all_done &= end_of_sim[i] & cmp_eos[i];  // compares drained too")
+    w("        end while (!all_done);")
+    w("        repeat (SETTLE_CYCLES) @(posedge clk_i);")
+    w("        vacuous = 1'b0;")
+    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w("            if (txn_cnt[i] == 0) begin")
+    w("                vacuous = 1'b1;")
+    w('                $display("FAIL: node%0d completed zero transactions (vacuous)", i);')
     w("            end")
     w("        end")
+    w('        if (vacuous) $fatal(1, "tb_top: vacuous run");')
+    w('        $display("PASS: all %0d nodes done, non-vacuous", NUM_NODES);')
+    w("        $finish(0);")
     w("    end")
     w("")
     w("    // -------------------------------------------------------------------------")
@@ -643,7 +701,6 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("            if (dpi_err_code != 0) begin")
     w('                $display("[tb_top] DPI fatal (code=%0d): %s",')
     w("                         dpi_err_code, dpi_err_msg);")
-    w("                cmodel_dump_scoreboard();")
     w("                cmodel_finalize();")
     w('                $fatal(1, "tb_top: DPI error, simulation aborted");')
     w("            end")

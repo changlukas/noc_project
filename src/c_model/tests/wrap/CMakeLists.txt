@@ -2,11 +2,6 @@ add_cmodel_test(test_router_wrap)
 target_include_directories(test_router_wrap PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_master_wrap test_master_wrap.cpp)
-target_link_libraries(test_master_wrap PRIVATE yaml-cpp::yaml-cpp)
-
-add_cmodel_test(test_slave_wrap test_slave_wrap.cpp)
-
 add_cmodel_test(test_nmu_wrap test_nmu_wrap.cpp)
 target_link_libraries(test_nmu_wrap PRIVATE yaml-cpp::yaml-cpp)
 
@@ -14,8 +9,8 @@ add_cmodel_test(test_nsu_wrap test_nsu_wrap.cpp)
 target_link_libraries(test_nsu_wrap PRIVATE yaml-cpp::yaml-cpp)
 
 # test_cmodel_dpi — DPI session state-machine / lifecycle test.
-# Expanded inline (not via add_cmodel_test) so gtest_discover_tests can receive
-# PROPERTIES ENVIRONMENT — the shared helper has no way to forward per-target env.
+# Expanded inline (not via add_cmodel_test): it links cmodel_dpi.cpp in and needs
+# the Verilator svdpi.h include dir, which the shared helper does not wire.
 add_executable(test_cmodel_dpi test_cmodel_dpi.cpp)
 target_link_libraries(test_cmodel_dpi PRIVATE gtest_main)
 target_include_directories(test_cmodel_dpi PRIVATE
@@ -42,8 +37,4 @@ target_include_directories(test_cmodel_dpi PRIVATE
     ${CMAKE_SOURCE_DIR}/../dpi
     ${VERILATOR_INCLUDE_DIR}
     ${VERILATOR_INCLUDE_DIR}/vltstd)
-# Pass scenario YAML env var to every discovered test case (e.g.
-# CmodelDpiLifecycleTest.walk_session_state_machine).
-gtest_discover_tests(test_cmodel_dpi
-    PROPERTIES ENVIRONMENT
-        "CMODEL_TEST_SCENARIO_YAML=${CMAKE_SOURCE_DIR}/../../sim/test_patterns/AX4-BAS-001_single_write_read_aligned/scenario.yaml")
+gtest_discover_tests(test_cmodel_dpi)

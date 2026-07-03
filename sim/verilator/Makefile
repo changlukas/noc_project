@@ -36,6 +36,7 @@ VERILATOR_COMMON_FLAGS := \
     -I$(COSIM_ROOT)/tb \
     -I$(SRC_SV) \
     -I$(SPECGEN_SV_INC) \
+    -I$(DV_ROOT)/axi-0.39.7/include \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
@@ -149,42 +150,27 @@ $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-ya
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=$(STACK_LDFLAGS)"
 
-# Run tb_top with cwd here so the in-project read-dump file lands locally,
-# then move it into output/$(SCENARIO)/ alongside run.log. scenario_parser
-# resolves data_file: relative to the YAML's own dir so cwd does not matter
-# for input resolution.
-SCENARIO ?= AX4-BAS-001_single_write_read_aligned
-SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
-
-# tb_top requires one +scenario_node<i> plusarg per node (its all-node guard
-# $finish(1)s otherwise). Materialize all N neighbor-pattern variants from the
-# base scenario.yaml via gen_test_patterns.py --pattern neighbor --topology $(TOPOLOGY),
-# then pass every +scenario_node<i>= (built by a shell loop over the emitted node dirs).
-# N-node logic mirrors the run_benchmark.py flow used by `make sim`.
-GEN_TEST_PATTERNS := $(COSIM_ROOT)/tools/gen_test_patterns.py
+# Run tb_top with the pulp VIP endpoints. No scenario files: the per-node
+# axi_rand_master/slave are driven by +num_reads/+num_writes and the RNG seed.
+NUM_READS  ?= 8
+NUM_WRITES ?= 8
+SEED       ?= 1
+RUN_TAG    ?= vip_$(TOPOLOGY)_s$(SEED)
 
 .PHONY: run-tb-top
 run-tb-top: $(TBTOP_EXE)
-	@mkdir -p output/$(SCENARIO)
-	@echo "running scenario $(SCENARIO) on $(TOPOLOGY); output -> output/$(SCENARIO)/"
-	@$(PYTHON3) $(GEN_TEST_PATTERNS) --from "$(SCENARIO_ABS)" --pattern neighbor \
-	    --topology $(TOPOLOGY) --out "output/$(SCENARIO)/coord"
-	@scn_args=(); \
-	for d in output/$(SCENARIO)/coord/node*/; do \
-	    i=$$(basename "$$d" | sed 's/^node//'); \
-	    scn_args+=("+scenario_node$$i=$$d""scenario.yaml"); \
-	done; \
-	$(TBTOP_EXE) "$${scn_args[@]}" \
-	    "+perf_out=output/$(SCENARIO)/perf.json" \
-	    "+perf_scenario=$(SCENARIO)" \
-	    > output/$(SCENARIO)/run.log 2>&1; \
+	@mkdir -p output/$(RUN_TAG)
+	@echo "running $(RUN_TAG) (reads=$(NUM_READS) writes=$(NUM_WRITES) seed=$(SEED))"
+	$(TBTOP_EXE) \
+	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
+	    "+verilator+seed+$(SEED)" \
+	    "+perf_out=output/$(RUN_TAG)/perf.json" \
+	    "+perf_scenario=$(RUN_TAG)" \
+	    > output/$(RUN_TAG)/run.log 2>&1; \
 	rc=$$?; \
-	if ls master_wrap_read_dump*.txt >/dev/null 2>&1; then \
-	    mv master_wrap_read_dump*.txt output/$(SCENARIO)/; \
-	fi; \
 	echo "--- run.log (tail) ---"; \
-	tail -8 output/$(SCENARIO)/run.log; \
-	$(PYTHON3) perf_cli_summary.py output/$(SCENARIO)/perf.json || true; \
+	tail -8 output/$(RUN_TAG)/run.log; \
+	$(PYTHON3) perf_cli_summary.py output/$(RUN_TAG)/perf.json || true; \
 	exit $$rc
 
 # Smoke-test the Verilator toolchain with a trivial module before attempting
@@ -198,5 +184,3 @@ hello:
 
 clean:
 	rm -rf $(VL_BUILD)/obj_dir_* output
-	rm -f master_wrap_read_dump*.txt
-	rm -f $(VL_BUILD)/master_wrap_read_dump*.txt  # ctest runs Vtb_top with cwd build/verilator

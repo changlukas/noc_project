@@ -28,16 +28,9 @@ typedef enum {
 } cmodel_dpi_error_e;
 
 // Lifecycle — session state machine (init/finalize) + per-instance *_create.
-void cmodel_init(const char* scenario_yaml_path);
+void cmodel_init(void);
 void cmodel_finalize(void);
 int cmodel_check_error(const char** msg);
-// Scenario completion + scoreboard query (polled by tb_top.sv exit logic).
-int cmodel_done(void);
-int cmodel_scoreboard_clean(void);
-void cmodel_dump_scoreboard(void);
-// Non-vacuous-run guards (polled by tb_top.sv): masters ever created + reads checked.
-int cmodel_master_count(void);
-int cmodel_reads_checked(void);
 
 // Perf instrumentation — SV monitors push per-txn and end-of-run counters;
 // cmodel_perf_sample_tick is called once per clock to snapshot router occupancy.
@@ -81,55 +74,8 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
                                svBitVecVal* link_rsp_out_valid, svBitVecVal* link_rsp_out_flit,
                                svBitVecVal* link_rsp_in_credit);
 
-// AxiMaster (Task 6) — chandle ABI; per-instance dump path + scoreboard wiring.
-// Packing: svBitVecVal* for multi-bit fields (little-endian word order).
-//   id fields     : 1 word (8-bit value in low byte)
-//   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
-//   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
-//   wstrb         : 1 word (32-bit strobe)
-//   other attribs : 1 word each (low bits used per width)
-unsigned long long cmodel_master_create(const char* name, const char* scenario_path);
-void cmodel_master_set_inputs(unsigned long long ctx, svBit awready, svBit wready, svBit arready,
-                              svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit rvalid,
-                              svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
-                              svBit rlast);
-void cmodel_master_tick(unsigned long long ctx);
-void cmodel_master_get_outputs(unsigned long long ctx, svBit* awvalid, svBitVecVal* awid,
-                               svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-                               svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
-                               svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,
-                               svBitVecVal* wdata, svBitVecVal* wstrb, svBit* wlast, svBit* bready,
-                               svBit* arvalid, svBitVecVal* arid, svBitVecVal* araddr,
-                               svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
-                               svBit* arlock, svBitVecVal* arcache, svBitVecVal* arprot,
-                               svBitVecVal* arqos, svBit* rready);
-
-// AxiSlave (Task 7) — chandle ABI; accepts AW/W/AR from master wire; drives
-// awready/wready/arready handshake + B/R response channels back to master.
-// Packing: same conventions as cmodel_master_* (little-endian word order).
-//   id fields     : 1 word (8-bit value in low byte)
-//   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
-//   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
-//   wstrb         : 1 word (32-bit strobe)
-//   other attribs : 1 word each (low bits used per width)
-unsigned long long cmodel_slave_create(const char* name, const char* scenario_path);
-void cmodel_slave_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
-                             svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
-                             svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
-                             svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid,
-                             svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast, svBit arvalid,
-                             svBitVecVal* arid, svBitVecVal* araddr, svBitVecVal* arlen,
-                             svBitVecVal* arsize, svBitVecVal* arburst, svBit arlock,
-                             svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos,
-                             svBit bready, svBit rready);
-void cmodel_slave_tick(unsigned long long ctx);
-void cmodel_slave_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
-                              svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid,
-                              svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
-                              svBit* rlast);
-
 // Nmu (Task 8) — chandle ABI; AXI slave side + NoC req/rsp sides.
-// Packing conventions (same as cmodel_slave_*):
+// Packing conventions (little-endian word order):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)

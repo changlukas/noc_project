@@ -66,12 +66,11 @@ else
 FSDB_COMPILE_FLAGS :=
 FSDB_SUFFIX :=
 endif
-# Deferred (=) on purpose: SCENARIO is defined later in this file, and the
-# per-run value must win when run-all-fsdb loops.
+# Deferred (=) on purpose: RUN_TAG is defined later in this file.
 # Use sites attach via $(if $(V), $(V),) — a bare " $(V)" would leave a
 # double space when empty and break FSDB=0 command-line byte-identity.
 ifeq ($(FSDB),1)
-FSDB_PLUSARG_TB_TOP  = "+fsdb=$(CURDIR)/output/$(SCENARIO)/tb_top.fsdb"
+FSDB_PLUSARG_TB_TOP  = "+fsdb=$(CURDIR)/output/$(RUN_TAG)/tb_top.fsdb"
 else
 FSDB_PLUSARG_TB_TOP  =
 endif
@@ -126,6 +125,7 @@ VCS_COMMON_FLAGS := \
     +incdir+$(COSIM_ROOT)/tb \
     +incdir+$(SRC_SV) \
     +incdir+$(SPECGEN_SV_INC) \
+    +incdir+$(DV_ROOT)/axi-0.39.7/include \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
@@ -137,18 +137,13 @@ VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
 
 # --- tb_top cosim (self-clocked) ---
-SCENARIO ?= AX4-BAS-001_single_write_read_aligned
-SCENARIO_ABS := $(PROJ_ROOT)/sim/test_patterns/$(SCENARIO)/scenario.yaml
-
-# tb_top requires one +scenario_node<i> plusarg per node (its all-node guard
-# $finish(1)s otherwise). Materialize all N neighbor-pattern variants from the
-# base scenario.yaml via gen_test_patterns.py --pattern neighbor --topology $(TOPOLOGY),
-# then pass every +scenario_node<i>= (built by a shell loop over the emitted node
-# dirs). Mirrors sim/verilator/Makefile run-tb-top. PYTHON3 must have
-# PyYAML — on a host where an EDA tool shadows a broken python3 on PATH, pin it
-# in local.mk:  PYTHON3 := /usr/bin/python3.12
-PYTHON3           ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
-GEN_TEST_PATTERNS := $(COSIM_ROOT)/tools/gen_test_patterns.py
+# pulp VIP endpoints: no scenario files; per-node axi_rand_master/slave driven
+# by +num_reads/+num_writes and the RNG seed (+ntb_random_seed under VCS).
+NUM_READS  ?= 8
+NUM_WRITES ?= 8
+SEED       ?= 1
+RUN_TAG    ?= vip_$(TOPOLOGY)_s$(SEED)
+PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
 # Per-topology simv + csrc dir (mirrors the Verilator obj_dir_$(TOPOLOGY)
 # isolation): building one topology must not clobber another's binary.
@@ -166,66 +161,19 @@ $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(DPI_HDR_DEPS) | ch
 tb_top: $(SIMV_TB_TOP)
 
 run-tb-top: $(SIMV_TB_TOP)
-	@mkdir -p output/$(SCENARIO)
-	@rm -f output/$(SCENARIO)/tb_top.fsdb  # drop stale fsdb from a previous FSDB=1 run
-	@$(PYTHON3) $(GEN_TEST_PATTERNS) --from "$(SCENARIO_ABS)" --pattern neighbor \
-	    --topology $(TOPOLOGY) --out "output/$(SCENARIO)/coord"
+	@mkdir -p output/$(RUN_TAG)
+	@rm -f output/$(RUN_TAG)/tb_top.fsdb  # drop stale fsdb from a previous FSDB=1 run
+	@echo "running $(RUN_TAG) (reads=$(NUM_READS) writes=$(NUM_WRITES) seed=$(SEED))"
 	@set -o pipefail; \
-	scn_args=(); \
-	for d in output/$(SCENARIO)/coord/node*/; do \
-	    i=$$(basename "$$d" | sed 's/^node//'); \
-	    scn_args+=("+scenario_node$$i=$$d""scenario.yaml"); \
-	done; \
 	$(SIMV_TB_TOP) \
-	    "$${scn_args[@]}" \
-	    "+perf_out=output/$(SCENARIO)/perf.json" \
-	    "+perf_scenario=$(SCENARIO)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
-	    2>&1 | tee output/$(SCENARIO)/run.log
-	@$(PYTHON3) $(COSIM_ROOT)/verilator/perf_cli_summary.py output/$(SCENARIO)/perf.json || true
-
-# --- batch: one fsdb per scenario, both TBs ----------------------------------
-# Produces waveforms; NOT a regression gate (always exits 0 — ctest is the
-# gate). The FSDB tb_top binary is built once up front — if that build fails
-# the batch stops before running any scenario. A scenario counts PASS only if
-# the run succeeds AND its fsdb exists non-empty; failing patterns are
-# reported but do not stop the batch; their partial fsdb is kept for
-# debugging.
-SCENARIOS_ALL := $(notdir $(wildcard $(PROJ_ROOT)/sim/test_patterns/AX4-*))
-
-.PHONY: run-all-fsdb
-run-all-fsdb:
-	@if ! $(MAKE) tb_top FSDB=1; then \
-	    echo ""; echo "run-all-fsdb: FSDB build failed — no scenarios were run."; \
-	    exit 0; \
-	fi; \
-	pass=(); fail=(); fsdbs=(); \
-	for s in $(SCENARIOS_ALL); do \
-	    echo ""; echo "=== run-all-fsdb: $$s ==="; \
-	    if $(MAKE) run-tb-top SCENARIO=$$s FSDB=1 && test -s "output/$$s/tb_top.fsdb"; then \
-	        pass+=("$$s"); fsdbs+=("output/$$s/tb_top.fsdb"); \
-	    else \
-	        fail+=("$$s"); \
-	    fi; \
-	done; \
-	echo ""; echo "================ run-all-fsdb summary ================"; \
-	echo "PASS (with fsdb): $${#pass[@]}"; \
-	for s in "$${pass[@]}"; do echo "  PASS $$s"; done; \
-	echo "FAIL (fsdb kept for debug): $${#fail[@]}"; \
-	for s in "$${fail[@]}"; do \
-	    case "$$s" in \
-	        AX4-INF-*) echo "  FAIL $$s  (fails by design)";; \
-	        *)         echo "  FAIL $$s";; \
-	    esac; \
-	done; \
-	echo "--- waveforms ---"; \
-	if [ $${#fsdbs[@]} -gt 0 ]; then \
-	    ls -lh "$${fsdbs[@]}" | awk '{print "  " $$5 "\t" $$9}'; \
-	else \
-	    echo "  (none)"; \
-	fi; \
-	exit 0
+	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
+	    "+ntb_random_seed=$(SEED)" \
+	    "+perf_out=output/$(RUN_TAG)/perf.json" \
+	    "+perf_scenario=$(RUN_TAG)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
+	    2>&1 | tee output/$(RUN_TAG)/run.log
+	@$(PYTHON3) $(COSIM_ROOT)/verilator/perf_cli_summary.py output/$(RUN_TAG)/perf.json || true
 
 .PHONY: clean
 clean:
 	rm -rf $(VCS_BUILD) output csrc *.log ucli.key vc_hdrs.h
-	rm -rf verdiLog novas.* master_wrap_read_dump*.txt  # Verdi/FSDB cwd droppings + c_model read dumps
+	rm -rf verdiLog novas.*  # Verdi/FSDB cwd droppings
