@@ -7,6 +7,15 @@ SHELL         := bash
 # Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
 
+# Run class selects the endpoint/checking flavor compiled into the binary
+# (user_node_endpoint.sv `ifdef TB_TRANSPORT_RUN):
+#   data_integrity (default) : MAPPED memory-model slave, INCR bursts.
+#   transport                : MAPPED=0 RAND_RESP=1, WRAP+EXC stimulus on.
+RUN_CLASS ?= data_integrity
+ifeq ($(filter $(RUN_CLASS),data_integrity transport),)
+$(error RUN_CLASS must be data_integrity or transport (got '$(RUN_CLASS)'))
+endif
+
 # Build environment config and include dirs are shared with sim/vcs/Makefile
 # via sim/build_config.mk. tb_top SV sources are in
 # sim/filelist_<TOPOLOGY>.f (generated from TB_TOP_SV_SRC in build_config.mk).
@@ -15,6 +24,10 @@ TOPOLOGY ?= mesh_4x4_vc1
 include ../build_config.mk
 
 VL_BUILD := $(BUILD_ROOT)/verilator
+
+# Per-topology, per-run-class obj dir (uniform naming for both classes — the
+# regression runner keys on it): building one flavor must not clobber another.
+OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)
 
 # FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<TOPOLOGY>.f
 # is a generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
@@ -56,9 +69,12 @@ VERILATOR_FLAGS := \
     --top-module $(TOP) \
     --timing \
     --output-split 0 \
-    --Mdir $(VL_BUILD)/obj_dir_$(TOPOLOGY) \
+    --Mdir $(OBJ_DIR) \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
+ifeq ($(RUN_CLASS),transport)
+VERILATOR_FLAGS += +define+TB_TRANSPORT_RUN
+endif
 
 # Optional strict-mode flag injection for release gates.
 # Override with: make VERILATOR_EXTRA_FLAGS="--Wall --Wpedantic"
@@ -69,7 +85,7 @@ VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 # does not. Naming the real artifact makes the source-dependency check
 # fire correctly on both (a phony or wrong-name target rebuilds always).
 EXEEXT := $(if $(findstring NT,$(shell uname -s)),.exe,)
-TBTOP_EXE := $(VL_BUILD)/obj_dir_$(TOPOLOGY)/V$(TOP)$(EXEEXT)
+TBTOP_EXE := $(OBJ_DIR)/V$(TOP)$(EXEEXT)
 
 # PE stack-reserve ldflag (see USER_LDFLAGS note at the link recipe below):
 # Windows-only, Linux GNU ld rejects --stack.
@@ -108,8 +124,8 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)" ]; then \
-	    echo "$(TOPOLOGY)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
@@ -142,11 +158,11 @@ check-yamlcpp:
 #   source paths with backslashes in generated C-string literals — rewrite them
 #   to forward slashes before g++ sees them.
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
-	@mkdir -p $(VL_BUILD)/obj_dir_$(TOPOLOGY)
+	@mkdir -p $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \
-	    $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.cpp $(VL_BUILD)/obj_dir_$(TOPOLOGY)/*.h
-	$(MAKE) -C $(VL_BUILD)/obj_dir_$(TOPOLOGY) -f V$(TOP).mk \
+	    $(OBJ_DIR)/*.cpp $(OBJ_DIR)/*.h
+	$(MAKE) -C $(OBJ_DIR) -f V$(TOP).mk \
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=$(STACK_LDFLAGS)"
 
@@ -155,7 +171,7 @@ $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-ya
 NUM_READS  ?= 8
 NUM_WRITES ?= 8
 SEED       ?= 1
-RUN_TAG    ?= vip_$(TOPOLOGY)_s$(SEED)
+RUN_TAG    ?= vip_$(TOPOLOGY)_$(RUN_CLASS)_s$(SEED)
 
 .PHONY: run-tb-top
 run-tb-top: $(TBTOP_EXE)

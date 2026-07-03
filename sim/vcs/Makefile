@@ -2,6 +2,11 @@
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
 # Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
+# Run class (mirrors sim/verilator/Makefile): data_integrity | transport.
+RUN_CLASS ?= data_integrity
+ifeq ($(filter $(RUN_CLASS),data_integrity transport),)
+$(error RUN_CLASS must be data_integrity or transport (got '$(RUN_CLASS)'))
+endif
 # Build artifacts land under $(BUILD_ROOT)/vcs/ (top-level build/), run logs
 # under ./output/.
 #
@@ -109,8 +114,8 @@ TOPO_STAMP    := $(VCS_BUILD)/.topology
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VCS_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)" ]; then \
-	    echo "$(TOPOLOGY)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
@@ -135,6 +140,9 @@ ifeq ($(FSDB),1)
 # guarded: += of an empty var would add a trailing space and break FSDB=0 byte-identity
 VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
+ifeq ($(RUN_CLASS),transport)
+VCS_COMMON_FLAGS += +define+TB_TRANSPORT_RUN
+endif
 
 # --- tb_top cosim (self-clocked) ---
 # pulp VIP endpoints: no scenario files; per-node axi_rand_master/slave driven
@@ -142,17 +150,18 @@ endif
 NUM_READS  ?= 8
 NUM_WRITES ?= 8
 SEED       ?= 1
-RUN_TAG    ?= vip_$(TOPOLOGY)_s$(SEED)
+RUN_TAG    ?= vip_$(TOPOLOGY)_$(RUN_CLASS)_s$(SEED)
 PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
-# Per-topology simv + csrc dir (mirrors the Verilator obj_dir_$(TOPOLOGY)
-# isolation): building one topology must not clobber another's binary.
-SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)$(FSDB_SUFFIX)
+# Per-topology, per-run-class simv + csrc dir (mirrors the Verilator
+# obj_dir_$(TOPOLOGY)_$(RUN_CLASS) isolation): building one flavor must not
+# clobber another's binary.
+SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(FSDB_SUFFIX)
 
 $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)$(FSDB_SUFFIX) \
+	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(FSDB_SUFFIX) \
 	    -top tb_top \
 	    -f $(FILELIST_F) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)

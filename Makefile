@@ -120,10 +120,11 @@ $(CMODEL_BUILD)/CMakeCache.txt:
 
 # Default topology for standalone build-verilator / make check.
 # make sim overrides this by passing TOPOLOGY=$(TB) explicitly.
-TOPOLOGY ?= mesh_4x4_vc1
+TOPOLOGY  ?= mesh_4x4_vc1
+RUN_CLASS ?= data_integrity
 
 build-verilator: build-yamlcpp
-	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY)
+	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY) RUN_CLASS=$(RUN_CLASS)
 
 # --- test ---
 
