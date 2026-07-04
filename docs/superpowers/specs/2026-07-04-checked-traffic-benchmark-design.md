@@ -173,7 +173,7 @@ sim/
 | # | stage | success criteria |
 |---|-------|------------------|
 | 1 | ~~scoreboard 2-state spike~~ **DONE 2026-07-04** | clean readback 0 warning、fault(未寫位址讀) 8× Unexpected RData → scoreboard 直接可用於 Verilator directed 軸（plan `2026-07-04-scoreboard-2state-spike.md`）。無 fallback |
-| 2 | emitter | `gen_test_patterns` 出 file_master 格式；4 pattern × per-src 分割；unit test 驗 disjoint footprint + `data=f(addr)` |
+| 2 | ~~emitter~~ **DONE 2026-07-04**（commits `fcdfbe4..75f1549`）| `--format file_master` 出 write/read.txt；4 pattern × per-src 分割；address-in-data；寬度讀 constants.yaml SSoT；add-only（legacy YAML 未動）；55 test green；plan `2026-07-04-benchmark-stage2-emitter.md` |
 | 3 | file_master path | endpoint 接 file_master + two-phase + scoreboard；單 node → 4x4 co-sim，4 pattern scoreboard clean |
 | 4 | rand conformance | 同 endpoint 選 rand_master + `reorder_compare`（permutation-paired）；seed 可重現 |
 | 5 | harness | `matrix.yaml`/`run_regress` 驅動兩 driver，全 build checker gate（scoreboard / reorder_compare）|

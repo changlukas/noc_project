@@ -4,6 +4,24 @@ Running action items and open bugs, maintained across iteration rounds. Each rou
 surfaces and strikes what it closes. Read it at session start. An item is not started unless a round
 picks it up.
 
+## In progress — checked-traffic-benchmark (branch `feat/checked-traffic-benchmark`, not pushed)
+
+Rebuild the regression/benchmark on the pulp VIP. Spec:
+`docs/superpowers/specs/2026-07-04-checked-traffic-benchmark-design.md` (read it — all decisions + the
+Stages table live there). Two-checker model: **directed(`axi_file_master`)→`axi_scoreboard`(data integrity)**,
+**random(`axi_rand_master`)→`axi_reorder_compare`(transport)**. Per-stage, subagent-driven, spike-first.
+
+| stage | status | action item (see spec Stages table for success criteria) |
+|---|---|---|
+| 1 scoreboard 2-state spike | **DONE** | scoreboard usable on Verilator directed axis (clean 0 warn / fault 8× warn); D6 resolved, no VCS fallback |
+| 2 emitter | **DONE** (`fcdfbe4..75f1549`) | `gen_test_patterns --format file_master`; add-only; 55 test green; plan `2026-07-04-benchmark-stage2-emitter.md` |
+| 3 file_master path | **NEXT** | wire `user_node_endpoint.sv` → file_master + two-phase (write→barrier→read) + `axi_scoreboard` on master face (compile-time define picks file/rand, mirror `TB_TRANSPORT_RUN`); `gen_tb_top.py` checker wiring + region/partition stamp + two-phase barrier exit; single node → 4x4 WSL co-sim, 4 pattern scoreboard clean |
+| 4 rand conformance | pending | same endpoint selects `rand_master` + `reorder_compare` (permutation-paired); seed reproducible |
+| 5 harness + deletes | pending | rewrite `matrix.yaml`/`run_regress.py` to drive both drivers (checker gate = grep scoreboard mismatch `$warning` / reorder_compare `$error`); **then D7 deletes**: `run_benchmark.py` + old co-sim YAML fan-out + `gen_test_patterns --from` path (KEEP AX4 base YAMLs — ctest consumes them, see Infra section) |
+
+Next-session start: read this spec + backlog, resume at Stage 3. Env fixed on WSL/Linux (Verilator 5.048 + z3);
+Python emitter tests run on Windows `py -3` too. All benchmark work stays on `feat/checked-traffic-benchmark`.
+
 ## Next round — ranked (set 2026-07-03, after the VIP cutover round)
 
 0. ~~**Load-dependent DUT deadlock under random traffic**~~ **RESOLVED 2026-07-04 — NMU
@@ -293,6 +311,14 @@ master), and the BUR-002/003 mismatches were the generator slot overlap. See the
 The VCS regression path is documented as Linux-workstation and dry-run pending a real run
 (`docs/development.md:227-234`, `sim/vcs/Makefile:8-15`). The matrix is Verilator-only by design
 (`docs/superpowers/specs/2026-06-27-regression-matrix-design.md:174`).
+
+- **Decouple C++ ctest from `sim/test_patterns/*/scenario.yaml`** (future, own round). The integration /
+  loopback ctests (`test_integration.cpp:80`, `test_router_loopback.cpp:68-72`,
+  `test_request_response_loopback.cpp:402-403`, `test_port_pair_loopback.cpp:330-331`) read the AX4 base
+  YAMLs as directed stimulus, which is why the benchmark rebuild (`feat/checked-traffic-benchmark`) keeps
+  those YAMLs instead of deleting them under D7. User wants the YAML dependency gone (build the stimulus
+  in-test instead). Blocks a full `sim/test_patterns/` cleanup; do it before/after the benchmark round, not
+  inside it.
 
 - **GCC ICE on `test_pins_smoke.cpp`** (pre-existing, Windows host): GCC internal compiler error
   (segfault) when compiling the `build-cmodel` CMake target on this toolchain. Breaks any CI path
