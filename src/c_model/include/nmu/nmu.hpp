@@ -67,6 +67,12 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
         return true;
     }
 
+    // Drain each AXI sub-channel to Packetize INDEPENDENTLY. A full AW wormhole
+    // input must not block W (the in-flight write's body, needed to release the
+    // wormhole AW->W lock) or AR. Cross-channel HOL here self-deadlocks the
+    // request path under load (spec 2026-07-04-nmu-request-hol-fix-design.md).
+    // AW-before-W ordering is preserved downstream by Packetize's w_meta_fifo_,
+    // not by gating W on AW admission.
     void tick(Packetize& packetize) {
         if (s1_aw_.full()) {
             const auto& e = s1_aw_.peek();
@@ -75,8 +81,6 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
                 s1_aw_.take();
             }
         }
-        if (s1_aw_.full()) return;
-
         if (s1_w_.full()) {
             const auto& e = s1_w_.peek();
             if (packetize.push_w(e.beat)) {

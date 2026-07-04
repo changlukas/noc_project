@@ -125,6 +125,12 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
 // S2 AxiMasterPort), backpressure the flit into pending_ (head-of-line
 // blocking on single-FIFO ingress, same semantics as the original queue-based
 // implementation). MetaBuffer allocate is atomic with decode into S1 (R4).
+// Single-ingress HOL note: unlike the NMU request path, NSU depacketize has NO
+// source-side pairing lock on ingress. It demuxes into independent S1 registers
+// that drain into bounded AxiMasterPort queues, which drain to the subordinate.
+// The pending_ HOL is inherent to a single VC (AW/W/AR serialize on one channel)
+// but cannot self-cycle: no ingress resource waits on a downstream that waits
+// back on it. Given the subordinate eventually drains, pending_ always clears.
 inline void Depacketize::tick() {
     while (true) {
         Flit f;

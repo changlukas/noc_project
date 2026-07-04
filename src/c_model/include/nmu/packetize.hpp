@@ -125,7 +125,12 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
 // FIFO ordering inherits AW issue order; Rob layer enforces this via
 // w_burst_credit_ in Disabled mode (Task 7).
 inline bool Packetize::push_w(const axi::WBeat& b) {
-    assert(!w_meta_fifo_.empty() && "push_w called before any push_aw");
+    // A W beat inherits its AW's dst/rob metadata from the front of w_meta_fifo_.
+    // If empty, the W's AW has not yet been admitted to Packetize (its AW is
+    // still upstream in the bridge). Backpressure so the W waits WITHOUT blocking
+    // AW/AR admission. AXI4 W is non-interleaved (no WID), so the FIFO front is
+    // always the correct write for the next W beat in issue order.
+    if (w_meta_fifo_.empty()) return false;
     const auto& meta = w_meta_fifo_.front();
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_W);
