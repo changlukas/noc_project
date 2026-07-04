@@ -205,6 +205,10 @@ _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),--hotspot $(HOTSPOT),)
 
 .PHONY: run-directed
 run-directed: $(TBTOP_EXE)
+	# Guard runs first in the recipe (before emit/run), so a wrong RUN_CLASS exits
+	# before a vacuous no-scoreboard run. Deliberately a recipe check, not a
+	# parse-time $(error): OBJ_DIR/TBTOP_EXE are := fixed at parse, so a target-
+	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
 	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-directed requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p output/$(DIRECTED_TAG)
 	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) --format file_master \
@@ -221,9 +225,9 @@ run-directed: $(TBTOP_EXE)
 	    > output/$(DIRECTED_TAG)/run.log 2>&1; \
 	rc=$$?; \
 	echo "--- run.log (tail) ---"; tail -12 output/$(DIRECTED_TAG)/run.log; \
-	if grep -qE 'Unexpected RData|Unexpected W last|Not supported (AW|AR) burst|Atomic transfers not supported' \
+	if grep -qE 'Unexpected RData|Unexpected W last|Not supported (AW|AR) burst|Atomic transfers not supported|%Error' \
 	        output/$(DIRECTED_TAG)/run.log; then \
-	    echo "DIRECTED FAIL: scoreboard mismatch/malformed stimulus"; exit 1; \
+	    echo "DIRECTED FAIL: scoreboard mismatch/assertion/malformed stimulus"; exit 1; \
 	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(DIRECTED_TAG)/run.log; then \
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
 	else \
