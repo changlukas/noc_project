@@ -690,6 +690,9 @@ def main(argv=None):
                          "direct path to a topology yaml")
     ap.add_argument("--out", required=True,
                     help="Output directory; writes <out>/node<i>/scenario.yaml")
+    ap.add_argument("--format", choices=["yaml", "file_master"], default="yaml",
+                    help="yaml (legacy per-node scenario.yaml) or file_master "
+                         "(per-node write.txt/read.txt for pulp axi_file_master)")
     # Per-packet random pattern options
     ap.add_argument("--transactions-per-node", type=int, default=1,
                     help="Write+read pairs per node (synthetic / random patterns)")
@@ -724,6 +727,32 @@ def main(argv=None):
     nodes, x_dim, y_dim = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
+
+    if a.format == "file_master":
+        widths = axi_widths()
+        base_local = 0x1000
+        memory_size = a.memory_size if a.memory_size is not None else 0x40000
+        rng = _random_module.Random(a.seed)
+        if a.pattern == "transpose":
+            _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
+        for (idx, x, y, src_cid) in nodes:
+            if a.pattern in ("neighbor", "transpose"):
+                dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
+                dst_cids = [coord_id(dst_x, dst_y)] * a.transactions_per_node
+            elif a.pattern == "uniform_random":
+                dst_lin = uniform_random_dsts(idx, n_nodes, a.transactions_per_node,
+                                              rng, a.exclude_self)
+                dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+            else:  # hotspot
+                if a.hotspot is None:
+                    ap.error("--hotspot is required for the hotspot pattern")
+                dst_lin = hotspot_dsts(idx, n_nodes, a.transactions_per_node, rng,
+                                       a.hotspot, a.hotspot_rates, a.exclude_self)
+                dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+            emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
+                                  n_nodes, base_local, memory_size,
+                                  a.size, a.burst_len, widths["data"])
+        return
 
     if a.pattern == "neighbor":
         # Deterministic bijection: uses base scenario; --from required.

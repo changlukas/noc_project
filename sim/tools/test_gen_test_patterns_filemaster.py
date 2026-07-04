@@ -1,4 +1,7 @@
+import glob
 import os
+
+import pytest
 
 import gen_test_patterns as g
 
@@ -64,3 +67,24 @@ def test_emit_file_master_node_format_and_partition(tmp_path):
     assert w[0]["addr"] != w[1]["addr"]             # disjoint offsets
     rlines = [l for l in open(os.path.join(d, "read.txt")).read().split("\n") if l != ""]
     assert len(rlines) == 2 * 11                    # 11 ax fields, no atop, no beats
+
+
+PATTERNS = [
+    ["--pattern", "neighbor"],
+    ["--pattern", "transpose"],
+    ["--pattern", "uniform_random", "--seed", "1"],
+    ["--pattern", "hotspot", "--hotspot", "5", "--seed", "1"],
+]
+
+
+@pytest.mark.parametrize("pat", PATTERNS, ids=lambda p: p[1])
+def test_main_file_master_all_patterns(tmp_path, pat):
+    out = str(tmp_path / "scn")
+    g.main(["--topology", "mesh_4x4_vc1", "--format", "file_master",
+            "--out", out, "--transactions-per-node", "2",
+            "--size", "5", "--len", "0", "--memory-size", "0x40000"] + pat)
+    nodes = sorted(glob.glob(os.path.join(out, "node*")))
+    assert len(nodes) == 16
+    for n in nodes:
+        assert os.path.isfile(os.path.join(n, "write.txt"))
+        assert os.path.isfile(os.path.join(n, "read.txt"))
