@@ -11,9 +11,10 @@ TOPOLOGY ?= mesh_4x4_vc1
 # (user_node_endpoint.sv `ifdef TB_TRANSPORT_RUN):
 #   data_integrity (default) : MAPPED memory-model slave, INCR bursts.
 #   transport                : MAPPED=0 RAND_RESP=1, WRAP+EXC stimulus on.
+#   directed                 : file_master stimulus + in-endpoint axi_scoreboard.
 RUN_CLASS ?= data_integrity
-ifeq ($(filter $(RUN_CLASS),data_integrity transport),)
-$(error RUN_CLASS must be data_integrity or transport (got '$(RUN_CLASS)'))
+ifeq ($(filter $(RUN_CLASS),data_integrity transport directed),)
+$(error RUN_CLASS must be data_integrity, transport or directed (got '$(RUN_CLASS)'))
 endif
 
 # Build environment config and include dirs are shared with sim/vcs/Makefile
@@ -74,6 +75,9 @@ VERILATOR_FLAGS := \
     -CFLAGS "-O0"
 ifeq ($(RUN_CLASS),transport)
 VERILATOR_FLAGS += +define+TB_TRANSPORT_RUN
+endif
+ifeq ($(RUN_CLASS),directed)
+VERILATOR_FLAGS += +define+TB_DIRECTED
 endif
 
 # Optional strict-mode flag injection for release gates.
@@ -188,6 +192,42 @@ run-tb-top: $(TBTOP_EXE)
 	tail -8 output/$(RUN_TAG)/run.log; \
 	$(PYTHON3) perf_cli_summary.py output/$(RUN_TAG)/perf.json || true; \
 	exit $$rc
+
+# Directed data-integrity run: emit file_master stimulus for one pattern, run the
+# TB_DIRECTED binary, gate on zero axi_scoreboard mismatch $warning + non-vacuous PASS.
+PATTERN        ?= neighbor
+TXNS_PER_NODE  ?= 4
+HOTSPOT        ?= 5
+STIM_ROOT      ?= $(COSIM_ROOT)/test_patterns/directed_$(TOPOLOGY)_$(PATTERN)
+DIRECTED_TAG   ?= directed_$(TOPOLOGY)_$(PATTERN)_s$(SEED)
+GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
+_HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),--hotspot $(HOTSPOT),)
+
+.PHONY: run-directed
+run-directed: $(TBTOP_EXE)
+	@mkdir -p output/$(DIRECTED_TAG)
+	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) --format file_master \
+	    --out $(STIM_ROOT) --pattern $(PATTERN) \
+	    --transactions-per-node $(TXNS_PER_NODE) --size 5 --len 0 \
+	    --memory-size 0x40000 --seed $(SEED) $(_HOTSPOT_ARGS)
+	@echo "running $(DIRECTED_TAG) (txns/node=$(TXNS_PER_NODE) pattern=$(PATTERN))"
+	$(TBTOP_EXE) \
+	    "+stim_dir=$(STIM_ROOT)" \
+	    "+num_reads=$(TXNS_PER_NODE)" "+num_writes=$(TXNS_PER_NODE)" \
+	    "+verilator+seed+$(SEED)" \
+	    "+perf_out=output/$(DIRECTED_TAG)/perf.json" \
+	    "+perf_scenario=$(DIRECTED_TAG)" \
+	    > output/$(DIRECTED_TAG)/run.log 2>&1; \
+	rc=$$?; \
+	echo "--- run.log (tail) ---"; tail -12 output/$(DIRECTED_TAG)/run.log; \
+	if grep -qE 'Unexpected RData|Unexpected W last|Not supported (AW|AR) burst|Atomic transfers not supported' \
+	        output/$(DIRECTED_TAG)/run.log; then \
+	    echo "DIRECTED FAIL: scoreboard mismatch/malformed stimulus"; exit 1; \
+	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(DIRECTED_TAG)/run.log; then \
+	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
+	else \
+	    echo "DIRECTED PASS: $(DIRECTED_TAG) scoreboard clean, non-vacuous"; \
+	fi
 
 # Smoke-test the Verilator toolchain with a trivial module before attempting
 # the full co-sim build.  Expected output: "TOOLCHAIN OK"
