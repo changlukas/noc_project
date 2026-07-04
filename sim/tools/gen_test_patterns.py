@@ -98,6 +98,25 @@ def axi_widths():
     }
 
 
+def encode_write_beats(addr, axi_size, axi_len, data_width):
+    """file_master W-beat lines: "0x<data> 0x<strb> 0", INCR, full strobe,
+    address-in-data (byte A = A & 0xFF). data/strb sized to the DW bus."""
+    bus_bytes = data_width // 8
+    beat_bytes = 1 << axi_size
+    lines = []
+    for b in range(axi_len + 1):
+        beat_addr = addr + b * beat_bytes
+        lane0 = beat_addr % bus_bytes            # byte-lane of the beat's first byte
+        data = 0
+        strb = 0
+        for k in range(beat_bytes):
+            lane = lane0 + k
+            data |= ((beat_addr + k) & 0xFF) << (8 * lane)
+            strb |= 1 << lane
+        lines.append(f"0x{data:0{bus_bytes * 2}x} 0x{strb:0{bus_bytes // 4}x} 0")
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Coordinate helpers
 # ---------------------------------------------------------------------------
