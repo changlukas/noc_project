@@ -6,13 +6,20 @@ picks it up.
 
 ## Next round — ranked (set 2026-07-03, after the VIP cutover round)
 
-0. **Load-dependent DUT deadlock under random traffic** — found by the pulp rand VIP on its first
-   heavy run (commit `70db5a0`). Repro: WSL, `make run-tb-top TOPOLOGY=mesh_4x4_vc1 NUM_READS=8
-   NUM_WRITES=8 SEED=1`. Evidence (gdb, 2x reproduced, `.superpowers/sdd/task-6-report.md`): txn_cnt
-   frozen ~10/16 per node from cycle ~388K; masters parked `rready=1` (AR accepted, R never returns);
-   destination slave faces all-zero — reads lost inside NMU/fabric/NSU. 2R/2W clean. Matches the old
-   "co-sim burst bug (c_model passes ctest, hangs under co-sim load)" item. Own debug round
-   (systematic-debugging), top priority.
+0. ~~**Load-dependent DUT deadlock under random traffic**~~ **RESOLVED 2026-07-04 — NMU
+   request-path HOL, not a fabric bug.** Root cause: `NmuReqS1Bridge::tick` (`nmu.hpp` old line 78,
+   `if (s1_aw_.full()) return;`) head-of-line-blocked W and AR whenever the AW slot could not drain.
+   Combined with the WormholeArbiter AW->W pairing lock (needs the W body to release, then drain the
+   AW input), a full depth-4 AW input self-deadlocked: W blocked -> lock never releases -> AW input
+   stays full. The read AR was collateral (HOL-blocked behind the same full AW), so R never returned.
+   Load-dependent because the AW input only fills at >=4 outstanding writes. NOT a network wormhole
+   deadlock: the forensic dump (`run_8r8w_s1.log`) showed 5 NMUs internally wedged with
+   `req_credit_avail=1` (network had space). Diagnosed via a fabric-state dump + 4 parallel hypothesis
+   analyses + Codex cross-check against FlooNoC. Fix (spec `docs/superpowers/specs/2026-07-04-nmu-request-hol-fix-design.md`,
+   commit `0a50480`): independent per-channel bridge drain + `Packetize::push_w` backpressure on empty
+   `w_meta_fifo_` (AW-before-W preserved by the meta FIFO, FlooNoC-aligned SelAw/SelW equivalent).
+   Verified: deterministic ctest deadlock-repro (2/2), full ctest 497/497, and the exact prior repro
+   `8R/8W seed 1` co-sim now PASS (all 16 nodes done, non-vacuous, zero %Error/dump).
 0b. **Verilator+z3 wall-time budget** — measured ~34 sim-cycles/s under random stimulus (z3 89% CPU;
    every randomize round-trips the solver pipe). Matrix/smoke loads must budget for this: local WSL
    gate = 2R/2W-scale; heavy seeded runs → VCS (native solver). Affects Task 8 matrix sizing.

@@ -2,7 +2,7 @@
 
 Date: 2026-07-04
 Branch: `feat/verilator-5048-axi-sv-bfm`
-Status: rev1, pending Codex FlooNoC-alignment review + user approval
+Status: landed 2026-07-04 (commit 0a50480; Codex FlooNoC-alignment review passed; ctest 2/2 + 497/497; co-sim 8R/8W seed 1 PASS)
 
 ## Problem
 
