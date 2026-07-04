@@ -88,11 +88,13 @@ axi::ArBeat make_ar(uint8_t id) {
 AwHeaderMeta meta() { return AwHeaderMeta{kDst, 0x1000, 0, 0}; }
 }  // namespace
 
-// Wires the request sub-assembly exactly as Nmu does: Packetize -> WormholeArbiter
-// (3 inputs, AW->W pairing {0,1}, per-input depth 4) -> ReqCapture. The bridge
-// feeds Packetize. step() advances the bridge then the arbiter, matching
-// Nmu::tick order (wormhole_arbiter_.tick precedes req_s1_bridge_.tick in the
-// real Nmu, but the sub-assembly converges either way; we drain then grant).
+// Wires the request sub-assembly as Nmu does: Packetize -> WormholeArbiter
+// (3 inputs, AW->W pairing {0,1}, per-input depth 4) -> ReqCapture; the bridge
+// feeds Packetize. step() advances the bridge THEN the arbiter (drain then
+// grant). This is the opposite local order from Nmu::tick (which ticks the
+// arbiter before the bridge). It is intentional: combining enqueue and grant in
+// one helper step keeps the isolated regression deterministic. The deadlock
+// under test is order-independent (a held lock never releases either way).
 TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
     SCENARIO(
         "Bridge must drain W (for the locked write) and admit AR even when the "
