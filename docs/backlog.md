@@ -26,6 +26,14 @@ picks it up.
 0c. **pulp `axi_scoreboard` data-integrity axis on VCS** — withdrawn from Verilator flow (2-state X
    collapse, spec `2a2db6c`); re-enable on the 4-state workstation to restore write→readback checking
    and all-to-all checked runs.
+   **UPDATE 2026-07-04 (branch `feat/checked-traffic-benchmark`, spike):** the 2-state withdrawal is
+   too broad. A standalone Verilator spike (file_master two-phase + rand_slave MAPPED + scoreboard on
+   one bus) showed the scoreboard does NOT false-report on a **directed full-readback** (clean read of
+   a written address = 0 warning; fault read of an unwritten `0x2000` = 8× `Unexpected RData`, so the
+   checker is live and the X-collapse only bites unwritten-byte reads). → the **directed data axis runs
+   on Verilator/WSL, no VCS needed**. Only all-to-all *random* data-integrity still needs VCS (out of
+   the new benchmark's scope; random uses reorder_compare instead). See spec
+   `docs/superpowers/specs/2026-07-04-checked-traffic-benchmark-design.md`.
 
 ## Previous round — ranked (set 2026-07-01, after the ultra dead-code sweep)
 

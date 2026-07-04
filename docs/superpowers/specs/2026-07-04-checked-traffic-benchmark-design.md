@@ -26,7 +26,7 @@ random conformance 帶 transport 比對。（唯一非比對角落 random×all-t
 | D4 | directed two-phase 執行：全寫 → barrier → 全讀，讀相才能驗寫相 | AXI 不保證 W-before-R ordering；scoreboard 讀相需 golden 已建立。random 路徑不需（reorder_compare 逐 beat 對，不 readback）|
 | D5 | emitter 自寫（Python，`gen_test_patterns` 換 output emitter，走現有 **synthetic 路徑無 `--from`**，`_emit_synthetic_node`），出 file_master `$fscanf` 格式。**scoreboard 前提約束：INCR-only、atop=0、full readback（讀集合⊇寫集合）、full strobe、`data=f(addr)`** | 上游無 file_master generator；synthetic 路徑已 LIVE（不需 base scenario）；scoreboard 只 model INCR、拒 atomic（`axi_test.sv:2036,2112`）；pattern 數學沿用 |
 | D7 | **全面換新，舊不留**：刪 `sim/test_patterns/` 全部舊 AX4 + Layer-2 scenario YAMLs、`run_benchmark.py`、`gen_test_patterns` 的 `--from` base-driven 路徑。emitter 生成物改放 `sim/test_patterns/` | 舊 corner（BND/EXC/QOS/RSP）覆蓋移交 rand_master conformance；directed 只需 synthetic INCR。user 定案不保留舊物 |
-| D6 | scoreboard 2-state 相容性 = **gating spike（Stage 1）**，只 gate directed 資料軸。實測 directed two-phase 於 Verilator；X-collapse 誤報則僅 patch 已 root-cause 的 don't-care-byte 類（非無差別靜音），否則 fallback（VCS / 自寫 `f(addr)` 比較器）| backlog 0c 的「2-state incompatible」是上輪推論未實測；受控 full-readback 下觸發情境可能不出現 |
+| D6 | ~~scoreboard 2-state 相容性 = gating spike~~ **RESOLVED 2026-07-04（spike）**：directed two-phase full-readback clean 案 = **0 warning**；fault 案（讀未寫 `0x2000`）= 8× `Unexpected RData`（axi_test.sv:2142，checker live）。**scoreboard 直接可用於 Verilator directed 軸，無需 patch、無需退 VCS** | X-collapse 只咬未寫位址讀；directed 讀集合⊆寫集合 + full strobe 天生避開。backlog 0c 的「2-state incompatible」對受控 directed 案 REFUTED |
 
 ## Scope
 
@@ -172,7 +172,7 @@ sim/
 
 | # | stage | success criteria |
 |---|-------|------------------|
-| 1 | scoreboard 2-state spike | 單 node 接 scoreboard 跑 directed two-phase（full readback + full strobe）；判定 Verilator 是否誤報 X-sentinel（Codex item 5：partial-strobe read 仍會踩）。誤報且不可 patch → 於此定 fallback（VCS / 自寫 `f(addr)` 比較器）。**只 gate directed 資料軸**；random（reorder_compare）路徑不依賴此 spike |
+| 1 | ~~scoreboard 2-state spike~~ **DONE 2026-07-04** | clean readback 0 warning、fault(未寫位址讀) 8× Unexpected RData → scoreboard 直接可用於 Verilator directed 軸（plan `2026-07-04-scoreboard-2state-spike.md`）。無 fallback |
 | 2 | emitter | `gen_test_patterns` 出 file_master 格式；4 pattern × per-src 分割；unit test 驗 disjoint footprint + `data=f(addr)` |
 | 3 | file_master path | endpoint 接 file_master + two-phase + scoreboard；單 node → 4x4 co-sim，4 pattern scoreboard clean |
 | 4 | rand conformance | 同 endpoint 選 rand_master + `reorder_compare`（permutation-paired）；seed 可重現 |
@@ -195,7 +195,7 @@ sim/
 
 | 風險 | 處置 |
 |------|------|
-| scoreboard 2-state 誤報不可 patch | Stage 1 gate，**只影響 directed 資料軸**；random（reorder_compare）不受影響、WSL 照跑。fallback VCS 或自寫 `f(addr)` 比較器（極薄、Verilator-safe）|
+| ~~scoreboard 2-state 誤報不可 patch~~ **RESOLVED 2026-07-04** | spike 證 directed full-readback 下 scoreboard 在 Verilator 不誤報（clean 0 warning / fault 8× warning）；無需 patch/VCS fallback |
 | directed data-check 涵蓋 transport 但不驗 same-id ordering fidelity | ordering fidelity 由 random 的 reorder_compare 涵蓋（same-id order 檢查）；兩軸互補 |
 | emitter 為我方唯一 SV 外自製碼 | 純 Python、沿用舊 pattern 數學、產上游規定格式，不觸 DUT/SV |
 | 刪舊 AX4 後，BND/EXC 等 directed corner 從「確定命中」變 rand_master「機率命中」 | rand_master 多 seed 覆蓋；若需釘死特定 corner（如 4KB 邊界精確位址），Stage 4 後評估補少量 directed conformance 檔（backlog） |
