@@ -15,8 +15,8 @@ Stages table live there). Two-checker model: **directed(`axi_file_master`)→`ax
 |---|---|---|
 | 1 scoreboard 2-state spike | **DONE** | scoreboard usable on Verilator directed axis (clean 0 warn / fault 8× warn); D6 resolved, no VCS fallback |
 | 2 emitter | **DONE** (`fcdfbe4..75f1549`) | `gen_test_patterns --format file_master`; add-only; 55 test green; plan `2026-07-04-benchmark-stage2-emitter.md` |
-| 3 file_master path | **NEXT** | wire `user_node_endpoint.sv` → file_master + two-phase (write→barrier→read) + `axi_scoreboard` on master face (compile-time define picks file/rand, mirror `TB_TRANSPORT_RUN`); `gen_tb_top.py` checker wiring + region/partition stamp + two-phase barrier exit; single node → 4x4 WSL co-sim, 4 pattern scoreboard clean |
-| 4 rand conformance | pending | same endpoint selects `rand_master` + `reorder_compare` (permutation-paired); seed reproducible |
+| 3 file_master path | **DONE** (`334387f..bd884be`) | `TB_DIRECTED` endpoint flavor (file_master + in-endpoint `axi_scoreboard` on master face + per-node two-phase); `gen_tb_top` `ifdef TB_DIRECTED` guard (reorder_compare out, cmp_eos kept unconditional so watchdog compiles); `RUN_CLASS=directed` + `run-directed` recipe w/ fail-loud RUN_CLASS guard; new `mesh_1x1_vc1.yaml`. Verified: fault-injection fires `Unexpected RData`, then 1x1 + 4x4 all-4-pattern scoreboard clean, 16-node non-vacuous, 0 %Error. plan `2026-07-04-benchmark-stage3-file-master-path.md` |
+| 4 rand conformance | **NEXT** | same endpoint selects `rand_master` + `reorder_compare` (permutation-paired); seed reproducible |
 | 5 harness + deletes | pending | rewrite `matrix.yaml`/`run_regress.py` to drive both drivers (checker gate = grep scoreboard mismatch `$warning` / reorder_compare `$error`); **then D7 deletes**: `run_benchmark.py` + old co-sim YAML fan-out + `gen_test_patterns --from` path (KEEP AX4 base YAMLs — ctest consumes them, see Infra section) |
 
 Next-session start: read this spec + backlog, resume at Stage 3. Env fixed on WSL/Linux (Verilator 5.048 + z3);
