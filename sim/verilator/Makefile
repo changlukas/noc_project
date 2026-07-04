@@ -205,6 +205,7 @@ _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),--hotspot $(HOTSPOT),)
 
 .PHONY: run-directed
 run-directed: $(TBTOP_EXE)
+	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-directed requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p output/$(DIRECTED_TAG)
 	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) --format file_master \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
