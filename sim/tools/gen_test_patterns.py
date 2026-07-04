@@ -103,6 +103,10 @@ def encode_write_beats(addr, axi_size, axi_len, data_width):
     address-in-data (byte A = A & 0xFF). data/strb sized to the DW bus."""
     bus_bytes = data_width // 8
     beat_bytes = 1 << axi_size
+    if beat_bytes > bus_bytes:
+        raise ValueError(
+            f"axi_size={axi_size} (beat {beat_bytes} B) exceeds the {data_width}-bit "
+            f"data bus ({bus_bytes} B); narrow the burst or widen DATA_WIDTH")
     lines = []
     for b in range(axi_len + 1):
         beat_addr = addr + b * beat_bytes
@@ -729,6 +733,8 @@ def main(argv=None):
     n_nodes = len(nodes)
 
     if a.format == "file_master":
+        if a.id_policy or a.preserve_addr:
+            ap.error("--id-policy / --preserve-addr apply only to --format yaml")
         widths = axi_widths()
         base_local = 0x1000
         memory_size = a.memory_size if a.memory_size is not None else 0x40000

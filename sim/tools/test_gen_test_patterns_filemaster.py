@@ -32,6 +32,12 @@ def test_encode_write_beats_multibeat_incr():
     assert data & 0xFF == (0x2000 + 2 * 32) & 0xFF
 
 
+def test_encode_write_beats_rejects_oversize():
+    import pytest
+    with pytest.raises(ValueError):
+        g.encode_write_beats(0x1000, axi_size=6, axi_len=0, data_width=256)  # 64B > 32B bus
+
+
 def _parse_write(path):
     """Parse a write.txt back into txns. Mirrors axi_file_master.parse_write field order."""
     toks = open(path).read().split("\n")
@@ -88,3 +94,8 @@ def test_main_file_master_all_patterns(tmp_path, pat):
     for n in nodes:
         assert os.path.isfile(os.path.join(n, "write.txt"))
         assert os.path.isfile(os.path.join(n, "read.txt"))
+    w = _parse_write(os.path.join(nodes[0], "write.txt"))
+    assert len(w) == 2                              # transactions-per-node
+    for t in w:
+        assert t["burst"] == 1 and t["size"] == 5 and t["len"] == 0
+        assert len(t["beats"]) == 1
