@@ -152,10 +152,15 @@ TEST(NmuReqBridge, PushWBackpressuresOnEmptyMeta) {
 
 - [ ] **Step 2: Register the test and run it to verify it fails**
 
-Add to `src/c_model/tests/nmu/CMakeLists.txt` (after the `add_cmodel_test(test_packetize)` line):
+Add to `src/c_model/tests/nmu/CMakeLists.txt` (after the `add_cmodel_test(test_packetize)` line).
+The test includes `nmu/nmu.hpp`, which transitively pulls yaml-cpp via `nmu/port_params.hpp`, so
+it must link yaml-cpp (matching the sibling `test_nmu` / `test_nmu_credit` / `test_nmu_pipeline`
+targets that include the full Nmu; `test_packetize` does not link it because it only includes
+`packetize.hpp`):
 
 ```cmake
 add_cmodel_test(test_nmu_req_bridge)
+target_link_libraries(test_nmu_req_bridge PRIVATE yaml-cpp::yaml-cpp)
 ```
 
 Run:
