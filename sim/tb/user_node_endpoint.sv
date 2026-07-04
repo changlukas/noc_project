@@ -7,14 +7,19 @@
 // master is a compare precondition beyond attribution: the pulp master sends
 // AW/W in parallel, so a W beat can handshake before its AW; the compare's
 // w_slv_idx then reads an empty queue (default 0), which stays correct only
-// while every W belongs to decode slot 0. pulp
-// axi_scoreboard is withdrawn from the Verilator flow: its 8'hxx uninitialized
-// -byte wildcard collapses to 8'h00 under 2-state simulation, turning every
-// protocol-legal read/write race into a false mismatch (VCS-only, backlog).
+// while every W belongs to decode slot 0.
+// pulp axi_scoreboard is usable on the Verilator directed axis (2026-07-04 spike +
+// review): the 8'hxx->8'h00 2-state collapse only bites reads of never-written
+// addresses, which a full-readback directed run never issues. Wired in-endpoint on
+// master_dv under +define+TB_DIRECTED. (Rationale: spec D6 / cross-review aggregate.)
 //
 // Run flavors (compile-time):
 //   default            : data-integrity — MAPPED memory-model slave, INCR bursts.
 //   +define+TB_TRANSPORT_RUN : transport — MAPPED=0 RAND_RESP=1, WRAP+EXC on.
+//   +define+TB_DIRECTED : data integrity — axi_file_master two-phase (write ->
+//                         barrier -> read) + in-endpoint axi_scoreboard on
+//                         master_dv, MAPPED rand_slave as tile memory. Stimulus
+//                         from <stim_dir>/node<ID>/{write,read}.txt (+stim_dir=).
 //
 // Plusargs: +num_reads=<n> +num_writes=<n> (per node, defaults below).
 
@@ -173,7 +178,19 @@ module user_node_endpoint #(
     // window, making the addr constraint unsat. Cap beats so the largest
     // burst exactly fits the region.
     localparam int unsigned MAX_BURST_LEN = REGION_BYTES / (DATA_WIDTH / 8);
-`ifdef TB_TRANSPORT_RUN
+`ifdef TB_DIRECTED
+    typedef axi_test::axi_file_master #(
+        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
+        .TA(ApplTime), .TT(TestTime)
+    ) file_master_t;
+    typedef axi_test::axi_rand_slave #(
+        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
+        .TA(ApplTime), .TT(TestTime), .MAPPED(1'b1)
+    ) rand_slave_t;
+    typedef axi_test::axi_scoreboard #(
+        .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(1), .TT(TestTime)
+    ) scoreboard_t;
+`elsif TB_TRANSPORT_RUN
     typedef axi_test::axi_rand_master #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
         .TA(ApplTime), .TT(TestTime),
@@ -203,21 +220,69 @@ module user_node_endpoint #(
     ) rand_slave_t;
 `endif
 
-    rand_master_t rand_master;
-    rand_slave_t  rand_slave;
-
-    int unsigned num_reads;
-    int unsigned num_writes;
-    // run_done is set by the stimulus initial (procedural, blocking); the
-    // output port is refreshed through a clocked register because Verilator
-    // does not reliably propagate a procedurally-assigned output-port variable
-    // to the instantiating scope.
+    // run_done drives end_of_sim_o for ALL flavors: declare it exactly ONCE here,
+    // above the ifdef, and delete the per-arm copies. run_done is set by the
+    // stimulus initial (procedural, blocking); the output port is refreshed
+    // through a clocked register because Verilator does not reliably propagate
+    // a procedurally-assigned output-port variable to the instantiating scope.
     logic run_done = 1'b0;
 
     always_ff @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) end_of_sim_o <= 1'b0;
         else end_of_sim_o <= run_done;
     end
+
+`ifdef TB_DIRECTED
+    file_master_t file_master;
+    rand_slave_t  rand_slave;
+    scoreboard_t  scoreboard;
+
+    // Stimulus root: <stim_dir>/node<NODE_ID>/{write,read}.txt (emitter output).
+    string stim_dir = "sim/test_patterns/directed";
+    string write_path;
+    string read_path;
+
+    // MAPPED memory slave = this node's tile memory (persists across both phases).
+    initial begin
+        rand_slave = new(slave_dv);
+        rand_slave.reset();
+        @(posedge rst_ni);
+        rand_slave.run();
+    end
+
+    // In-endpoint scoreboard on master_dv: golden from this node's W, check on
+    // its R (end-to-end round trip through the NoC). enable_all_checks turns on
+    // read-data + B-resp + R-resp checks; monitor() forks the sampling.
+    initial begin
+        scoreboard = new(master_dv);
+        scoreboard.reset();
+        @(posedge rst_ni);
+        scoreboard.enable_all_checks();
+        scoreboard.monitor();
+    end
+
+    // Directed driver: per-node two-phase. load_files() fills the queues (do NOT
+    // call run(): it re-forks all five and double-consumes the queues, spec
+    // Two-phase). Phase 1 drains all writes (wait_b => committed at the slave);
+    // phase 2 issues reads, checked by the scoreboard against golden.
+    initial begin
+        void'($value$plusargs("stim_dir=%s", stim_dir));
+        write_path = $sformatf("%s/node%0d/write.txt", stim_dir, NODE_ID);
+        read_path  = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
+        file_master = new(master_dv);
+        file_master.load_files(read_path, write_path);
+        @(posedge rst_ni);
+        fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
+        fork file_master.run_ar(); file_master.wait_r(); join
+        run_done = 1'b1;
+    end
+`else
+    // ---- existing rand flavors (data_integrity default + TB_TRANSPORT_RUN) ----
+    rand_master_t rand_master;
+    rand_slave_t  rand_slave;
+
+    int unsigned num_reads;
+    int unsigned num_writes;
 
     initial begin
         num_reads  = DEFAULT_NUM_READS;
@@ -245,6 +310,7 @@ module user_node_endpoint #(
         @(posedge rst_ni);
         rand_slave.run();
     end
+`endif
 
     // ------------------------------------------------------------------
     // FlooNoC bw monitor (endpoint perf; $display at end_of_sim) +
