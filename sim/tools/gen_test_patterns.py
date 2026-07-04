@@ -65,6 +65,7 @@ import copy
 import os
 import random as _random_module
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -81,6 +82,20 @@ _FILE_KEYS = ("data_file", "dump_file", "strb_file")
 # Per-transaction slot stride for the unique-offset allocator.  Must be at least
 # as large as the max transaction data payload (one cache-line = 64 B = 0x40).
 _SLOT_STRIDE = 0x40
+
+_CONSTANTS_YAML = Path(__file__).resolve().parents[2] / "specgen" / "source" / "constants.yaml"
+
+
+def axi_widths():
+    """AXI ID/ADDR/DATA widths from the DUT single source of truth
+    (specgen/source/constants.yaml -- the same file ni_params_pkg is generated from).
+    Read directly (values only); the specgen validator owns schema checking."""
+    axi = yaml.safe_load(_CONSTANTS_YAML.read_text(encoding="utf-8"))["axi"]
+    return {
+        "id":   int(axi["ID_WIDTH"]["default"]),
+        "addr": int(axi["ADDR_WIDTH"]["default"]),
+        "data": int(axi["DATA_WIDTH"]["default"]),
+    }
 
 
 # ---------------------------------------------------------------------------
