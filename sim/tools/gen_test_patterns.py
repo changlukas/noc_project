@@ -117,6 +117,37 @@ def encode_write_beats(addr, axi_size, axi_len, data_width):
     return lines
 
 
+def _ax_fields(axid, addr, axi_len, axi_size, include_atop):
+    """The AW/AR field lines in parse_write/parse_read order. Write includes atop
+    (12 fields); read omits it (11 fields, matching axi_file_master.parse_read)."""
+    lines = [str(axid), f"0x{addr:x}", str(axi_len), str(axi_size),
+             "1", "0", "0", "0", "0", "0"]          # burst=INCR lock cache prot qos region
+    if include_atop:
+        lines.append("0")                            # atop (write only)
+    lines.append("0")                                # user
+    return lines
+
+
+def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
+                          base_local, memory_size, axi_size, axi_len, data_width):
+    """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
+    src-partitioned address, address-in-data payload. INCR, atop=0, full strobe."""
+    os.makedirs(out_dir, exist_ok=True)
+    reserved = (axi_len + 1) * (1 << axi_size)
+    write_lines, read_lines = [], []
+    for seq, dst_cid in enumerate(dst_cids):
+        local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
+                                        n_nodes, memory_size, reserved=reserved)
+        addr = (dst_cid << ADDR_DST_SHIFT) + local_off
+        write_lines += _ax_fields(0, addr, axi_len, axi_size, include_atop=True)
+        write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
+        read_lines += _ax_fields(0, addr, axi_len, axi_size, include_atop=False)
+    with open(os.path.join(out_dir, "write.txt"), "w") as f:
+        f.write("\n".join(write_lines) + "\n")
+    with open(os.path.join(out_dir, "read.txt"), "w") as f:
+        f.write("\n".join(read_lines) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # Coordinate helpers
 # ---------------------------------------------------------------------------
