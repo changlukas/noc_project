@@ -86,9 +86,10 @@ removed WID, so this is the protocol guarantee, not an added constraint. Documen
 ## FlooNoC alignment
 
 FlooNoC's source chimney (`hw/floo_axi_chimney.sv`) enforces AW-before-W with an explicit
-`aw_w_sel_q` FSM (SelAw -> SelW on AW accept, SelW -> SelAw on W `last`), sources W directly
-from `axi_req_in.w` (no deep W FIFO), and gives AW/AR independent spill queues; AW+W mux onto
-one request route, AR onto the other.
+`aw_w_sel_q` FSM (SelAw -> SelW on AW accept, SelW -> SelAw on W `last`) and sources W directly
+from `axi_req_in.w` (no deep W FIFO). AW and W mux onto one request route, AR onto the other.
+AW and AR sit on independent paths, spill-registered only when `ChimneyCfg.CutAx` is set and
+direct passthrough otherwise (verified against upstream source, not unconditional).
 
 | property | FlooNoC | this fix |
 |---|---|---|
@@ -113,17 +114,27 @@ independently by the next stage.
 NSU depacketize receives already-ordered NoC flits and only demuxes. FlooNoC shows the same
 source-vs-destination asymmetry, so keeping it is alignment, not divergence.
 
-**NSU has no analogous self-deadlock.** Its single-ingress `pending_` HOL is inherent to a
-single VC (AW/W/AR serialize on one channel) and drains because the S1 registers feed the AXI
-subordinate, which always accepts (MAPPED, bounded wait). No circular self-dependency. Action:
-add an invariant comment at `Depacketize::tick` `pending_` documenting this, mirroring the
-statement at the NMU sites. No structural change to NSU.
+**NSU has no analogous self-deadlock.** The NMU self-deadlock needs a source-side lock (the
+WormholeArbiter AW->W pairing) whose release depends on a body flit blocked upstream. NSU
+depacketize has no such pairing lock on its ingress: it demuxes into independent S1 registers
+that drain into the bounded `AxiMasterPort` queues (`nsu/axi_master_port.hpp:119-155`), which
+drain to the subordinate. The single-ingress `pending_` HOL is inherent to a single VC (AW/W/AR
+serialize on one channel) but cannot self-cycle, since no NSU-ingress resource waits on a
+downstream that waits back on it. Given the subordinate eventually drains, `pending_` always
+clears. Action: add an invariant comment at `Depacketize::tick` `pending_` documenting this.
+No structural change to NSU.
 
 ## Scope
 
 Changed: `src/c_model/include/nmu/nmu.hpp` (bridge tick), `src/c_model/include/nmu/packetize.hpp`
 (push_w backpressure + comment), `src/c_model/include/nsu/depacketize.hpp` (invariant comment only).
 Unchanged: WormholeArbiter, VcArbiter, Rob, AxiSlavePort, all SV wrap, DPI, fabric.
+
+**Validation scope.** The bridge and `push_w` are common to every config, so the fix is
+VC-count-independent and RobMode-independent. This round validates `mesh_4x4_vc1` with RobMode
+Disabled (the deadlock repro). RobMode Enabled (which shares `w_burst_credit_` and the bridge)
+and multi-VC vc2/4/8 (packetize still stamps `vc_id=0`) exercise the same code path but are not
+separately co-sim-validated here. They stay out of the pass claim.
 
 ## Testing
 
