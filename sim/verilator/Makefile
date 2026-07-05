@@ -230,6 +230,31 @@ run-directed: $(TBTOP_EXE)
 	    echo "DIRECTED PASS: $(DIRECTED_TAG) scoreboard clean, non-vacuous"; \
 	fi
 
+# Constrained-random run: rand_master (WRAP/EXC) + tb-level axi_reorder_compare.
+# Gate on zero reorder_compare $error (%Error) + non-vacuous PASS (cmp_eos drain is
+# in the tb exit). Seed is echoed into the tag so a FAIL is replayable.
+CR_TAG ?= constrained_random_$(TOPOLOGY)_s$(SEED)
+.PHONY: run-constrained-random
+run-constrained-random: $(TBTOP_EXE)
+	@[ "$(RUN_CLASS)" = "constrained_random" ] || { echo "ERROR: run-constrained-random requires RUN_CLASS=constrained_random (got '$(RUN_CLASS)')"; exit 1; }
+	@mkdir -p output/$(CR_TAG)
+	@echo "running $(CR_TAG) (seed=$(SEED) reads=$(NUM_READS) writes=$(NUM_WRITES))"
+	$(TBTOP_EXE) \
+	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
+	    "+verilator+seed+$(SEED)" \
+	    "+perf_out=output/$(CR_TAG)/perf.json" \
+	    "+perf_scenario=$(CR_TAG)" \
+	    > output/$(CR_TAG)/run.log 2>&1; \
+	rc=$$?; \
+	echo "--- run.log (tail) ---"; tail -10 output/$(CR_TAG)/run.log; \
+	if grep -qE '%Error' output/$(CR_TAG)/run.log; then \
+	    echo "CR FAIL: reorder_compare error / assertion"; exit 1; \
+	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(CR_TAG)/run.log; then \
+	    echo "CR FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
+	else \
+	    echo "CR PASS: $(CR_TAG) reorder_compare clean, drained, non-vacuous"; \
+	fi
+
 # Smoke-test the Verilator toolchain with a trivial module before attempting
 # the full co-sim build.  Expected output: "TOOLCHAIN OK"
 hello:
