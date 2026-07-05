@@ -2,10 +2,10 @@
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
 # Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
-# Run class (mirrors sim/verilator/Makefile): data_integrity | transport.
-RUN_CLASS ?= data_integrity
-ifeq ($(filter $(RUN_CLASS),data_integrity transport),)
-$(error RUN_CLASS must be data_integrity or transport (got '$(RUN_CLASS)'))
+# Run class (mirrors sim/verilator/Makefile): directed | constrained_random.
+RUN_CLASS ?= constrained_random
+ifeq ($(filter $(RUN_CLASS),directed constrained_random),)
+$(error RUN_CLASS must be directed or constrained_random (got '$(RUN_CLASS)'))
 endif
 # Build artifacts land under $(BUILD_ROOT)/vcs/ (top-level build/), run logs
 # under ./output/.
@@ -140,8 +140,8 @@ ifeq ($(FSDB),1)
 # guarded: += of an empty var would add a trailing space and break FSDB=0 byte-identity
 VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
-ifeq ($(RUN_CLASS),transport)
-VCS_COMMON_FLAGS += +define+TB_TRANSPORT_RUN
+ifeq ($(RUN_CLASS),directed)
+VCS_COMMON_FLAGS += +define+TB_DIRECTED
 endif
 
 # --- tb_top cosim (self-clocked) ---

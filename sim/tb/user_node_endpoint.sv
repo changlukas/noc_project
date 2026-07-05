@@ -14,8 +14,8 @@
 // master_dv under +define+TB_DIRECTED. (Rationale: spec D6 / cross-review aggregate.)
 //
 // Run flavors (compile-time):
-//   default            : data-integrity — MAPPED memory-model slave, INCR bursts.
-//   +define+TB_TRANSPORT_RUN : transport — MAPPED=0 RAND_RESP=1, WRAP+EXC on.
+//   default            : constrained_random — rand_master (WRAP/EXC), RAND_RESP
+//                        slave, tb-level reorder_compare.
 //   +define+TB_DIRECTED : data integrity — axi_file_master two-phase (write ->
 //                         barrier -> read) + in-endpoint axi_scoreboard on
 //                         master_dv, MAPPED rand_slave as tile memory. Stimulus
@@ -190,7 +190,9 @@ module user_node_endpoint #(
     typedef axi_test::axi_scoreboard #(
         .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(1), .TT(TestTime)
     ) scoreboard_t;
-`elsif TB_TRANSPORT_RUN
+`else
+    // constrained_random: full AXI conformance corner (INCR/FIXED/WRAP + exclusive),
+    // random burst/size/addr within the per-master region; RAND_RESP slave.
     typedef axi_test::axi_rand_master #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
         .TA(ApplTime), .TT(TestTime),
@@ -202,21 +204,6 @@ module user_node_endpoint #(
     typedef axi_test::axi_rand_slave #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
         .TA(ApplTime), .TT(TestTime), .MAPPED(1'b0), .RAND_RESP(1'b1)
-    ) rand_slave_t;
-`else
-    typedef axi_test::axi_rand_master #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
-        .TA(ApplTime), .TT(TestTime),
-        .MAX_READ_TXNS(MAX_READ_TXNS_IN_FLIGHT), .MAX_WRITE_TXNS(MAX_WRITE_TXNS_IN_FLIGHT),
-        .AXI_MAX_BURST_LEN(MAX_BURST_LEN),
-        .AXI_EXCLS(1'b0), .AXI_ATOPS(1'b0), .UNIQUE_IDS(1'b0),
-        // INCR only per the data-integrity run-class definition; FIXED/WRAP
-        // are exercised by the transport flavor.
-        .AXI_BURST_FIXED(1'b0), .AXI_BURST_INCR(1'b1), .AXI_BURST_WRAP(1'b0)
-    ) rand_master_t;
-    typedef axi_test::axi_rand_slave #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
-        .TA(ApplTime), .TT(TestTime), .MAPPED(1'b1)
     ) rand_slave_t;
 `endif
 
@@ -277,7 +264,7 @@ module user_node_endpoint #(
         run_done = 1'b1;
     end
 `else
-    // ---- existing rand flavors (data_integrity default + TB_TRANSPORT_RUN) ----
+    // ---- constrained_random flavor (rand_master + tb-level reorder_compare) ----
     rand_master_t rand_master;
     rand_slave_t  rand_slave;
 
@@ -291,7 +278,7 @@ module user_node_endpoint #(
         void'($value$plusargs("num_writes=%d", num_writes));
 
         rand_master = new(master_dv);
-        // Permutation pairing (both flavors): this master targets ONLY node
+        // Permutation pairing: this master targets ONLY node
         // (NUM_NODES-1-NODE_ID) so the tb-level axi_reorder_compare can
         // attribute every slave-face handshake to exactly one master.
         rand_master.add_memory_region(

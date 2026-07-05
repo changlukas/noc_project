@@ -8,13 +8,12 @@ SHELL         := bash
 TOPOLOGY ?= mesh_4x4_vc1
 
 # Run class selects the endpoint/checking flavor compiled into the binary
-# (user_node_endpoint.sv `ifdef TB_TRANSPORT_RUN):
-#   data_integrity (default) : MAPPED memory-model slave, INCR bursts.
-#   transport                : MAPPED=0 RAND_RESP=1, WRAP+EXC stimulus on.
-#   directed                 : file_master stimulus + in-endpoint axi_scoreboard.
-RUN_CLASS ?= data_integrity
-ifeq ($(filter $(RUN_CLASS),data_integrity transport directed),)
-$(error RUN_CLASS must be data_integrity, transport or directed (got '$(RUN_CLASS)'))
+# (user_node_endpoint.sv `ifdef TB_DIRECTED):
+#   constrained_random (default) : rand_master WRAP/EXC, RAND_RESP slave, reorder_compare.
+#   directed                     : file_master + scoreboard, INCR two-phase.
+RUN_CLASS ?= constrained_random
+ifeq ($(filter $(RUN_CLASS),directed constrained_random),)
+$(error RUN_CLASS must be directed or constrained_random (got '$(RUN_CLASS)'))
 endif
 
 # Build environment config and include dirs are shared with sim/vcs/Makefile
@@ -73,9 +72,6 @@ VERILATOR_FLAGS := \
     --Mdir $(OBJ_DIR) \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
-ifeq ($(RUN_CLASS),transport)
-VERILATOR_FLAGS += +define+TB_TRANSPORT_RUN
-endif
 ifeq ($(RUN_CLASS),directed)
 VERILATOR_FLAGS += +define+TB_DIRECTED
 endif

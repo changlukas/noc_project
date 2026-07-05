@@ -405,7 +405,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("// at the destination slave face and every B/R beat back at the master against")
     w("// the issued stream. (pulp axi_scoreboard is not wired at tb level: in the +define+TB_DIRECTED")
     w("// directed build it lives inside each endpoint on master_dv; this reorder")
-    w("// compare block is the transport-axis checker and is compiled out under")
+    w("// compare block is the constrained_random-axis checker and is compiled out under")
     w("// TB_DIRECTED.)")
     w("//")
     w("// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).")
