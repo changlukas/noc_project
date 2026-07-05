@@ -264,7 +264,8 @@ header instead.
 
 The Verilator binary `Vtb_top` is built per topology and run class in
 `build/verilator/obj_dir_<TOPOLOGY>_<RUN_CLASS>/` using `--timing`
-(`RUN_CLASS=transport` compiles the endpoint's `TB_TRANSPORT_RUN` flavor). The generated
+(`RUN_CLASS=constrained_random` is the default flavor; `RUN_CLASS=directed`
+compiles the endpoint's `TB_DIRECTED` flavor). The generated
 `tb_top_<TOPOLOGY>.sv` is self-clocked (clock, reset, and timeout are
 internal); `sim/verilator/main.cpp` is a minimal event-loop entry that
 calls `eval()` and advances time until `$finish`. The same

@@ -33,9 +33,9 @@ help:
 	@echo "  cd sim/vcs       && make run-tb-top                   VCS (Linux workstation)"
 	@echo ""
 	@echo "Simulate:"
-	@echo "  make sim TB=<topo> PATTERN=<p>            build + run benchmark (default TB=mesh_4x4_vc1)"
-	@echo "  make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3"
-	@echo "  Vars: TXN= SEED= HOTSPOT= BASE=<base.yaml>"
+	@echo "  make sim TB=tb_<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot) or constrained_random"
+	@echo "  make sim TB=tb_mesh_4x4_vc8 PATTERN=neighbor"
+	@echo "  Vars: TXN= HOTSPOT= (directed only); SEED unset draws + prints a random seed"
 	@echo "  make sim-regress [BUILD=<build>]    run the co-sim regression (one build, or all)"
 	@echo ""
 	@echo "Test:"
@@ -73,6 +73,12 @@ TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/Syst
 # Per-host overrides (gitignored). Lets a machine pin CMAKE / DEPS_SRC / etc.
 # once so the command line stays identical everywhere. Optional — the
 # auto-detection below covers the common Windows + RHEL cases with no file.
+#
+# Per-host WSL config: create a gitignored `local.mk` at the repo root with:
+#   BUILD_ROOT := $(HOME)/noc_build   # native-Linux build dir (WSL rejects /mnt COFF)
+#   PYTHON3    := python3
+#   VERILATOR  := verilator
+# Then `make sim TB=tb_mesh_4x4_vc1 PATTERN=hotspot` needs no path/tool args.
 -include local.mk
 
 # CMake binary — auto-detected so the same `make build` works on every host.
@@ -181,18 +187,28 @@ check: lint_scenarios lint_docs specgen_pytest build-cmodel build-verilator
 	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
 	$(PYTHON3) sim/tools/run_benchmark.py --topology mesh_4x4_vc1 --pattern neighbor
 
-# Unified sim target. TB selects topology (forwarded to build-verilator explicitly
-# so non-default topologies like mesh_4x4_vc8 are built correctly).
-# PATTERN, TXN, SEED, HOTSPOT, BASE are optional forwarded vars.
+# Unified DV run launcher. TB selects the testbench (topology; accepts a tb_ prefix).
+# PATTERN selects the axis: the 4 spatial patterns run directed (file_master +
+# scoreboard); constrained_random runs rand_master + reorder_compare. SEED unset ->
+# a random 30-bit seed is drawn and printed so any run is replayable.
+# BUILD_ROOT/PYTHON3/VERILATOR/FILELIST_F are NOT passed here -- they flow from
+# root local.mk through sim/build_config.mk (see the local.mk note above).
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
-BUILD   ?=
+_TOPO   := $(TB:tb_%=%)
+_CLASS  := $(if $(filter constrained_random,$(PATTERN)),constrained_random,directed)
+_SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$RANDOM$$RANDOM'))
 
+.PHONY: sim
 sim:
-	$(MAKE) build-verilator TOPOLOGY=$(TB) PYTHON3=$(PYTHON3)
-	$(PYTHON3) sim/tools/run_benchmark.py --topology $(TB) --pattern $(PATTERN) \
-	  $(if $(TXN),--transactions-per-node $(TXN)) $(if $(SEED),--seed $(SEED)) \
-	  $(if $(HOTSPOT),--hotspot $(HOTSPOT)) $(if $(BASE),--from $(BASE))
+	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) class=$(_CLASS) SEED=$(_SEED)"
+ifeq ($(_CLASS),constrained_random)
+	$(MAKE) -C sim/verilator run-constrained-random TOPOLOGY=$(_TOPO) RUN_CLASS=constrained_random \
+	    SEED=$(_SEED) $(if $(NUM_READS),NUM_READS=$(NUM_READS)) $(if $(NUM_WRITES),NUM_WRITES=$(NUM_WRITES))
+else
+	$(MAKE) -C sim/verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
+	    PATTERN=$(PATTERN) SEED=$(_SEED) $(if $(TXN),TXNS_PER_NODE=$(TXN)) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT))
+endif
 
 sim-regress:
 	$(TOOLPATH) $(PYTHON3) sim/regress/run_regress.py $(if $(BUILD),--build $(BUILD))

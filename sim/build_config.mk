@@ -19,7 +19,10 @@ PROJ_ROOT   := $(patsubst %/,%,$(dir $(COSIM_ROOT)))
 #   build/cmodel/    CMake (c_model tests + FetchContent deps)
 #   build/verilator/ obj_dir (tb_top)
 #   build/vcs/       simv_* + csrc_* + *.daidir
-BUILD_ROOT     := $(PROJ_ROOT)/build
+# ?= (not :=) so a repo-root local.mk BUILD_ROOT (included above) survives — WSL
+# needs a native-Linux build dir; /mnt COFF archives are rejected by the WSL ld.
+# A command-line BUILD_ROOT= still wins over both.
+BUILD_ROOT     ?= $(PROJ_ROOT)/build
 
 CMODEL_INC     := $(PROJ_ROOT)/src/c_model/include
 CMODEL_TESTS   := $(PROJ_ROOT)/src/c_model/tests
