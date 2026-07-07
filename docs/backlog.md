@@ -69,9 +69,19 @@ Same push (2026-07-07) also landed a **ctest audit + prune** (branch `chore/ctes
    recompiled `test_pins_smoke.cpp.obj` cleanly (mtime today) and it ran inside the 499/499. Downgrade to
    intermittent (toolchain flakiness, likely memory pressure), not a hard `make check` block. Still worth
    a toolchain bump if it returns. (Infra section.)
-3. **Injection-rate / saturation sweep** — the recurring measurement gap: vc1..vc8 latency reads flat
-   because no sweep applies congestion, so VC-count value is invisible. Needs an AxiMaster injection
-   schedule. (Verification methodology gaps.) **Now the top open item.**
+3. ~~**Injection-rate / saturation sweep**~~ **DONE 2026-07-07** (branch `feat/saturation-throughput-sweep`,
+   spec `docs/superpowers/specs/2026-07-07-injection-rate-sweep-design.md`, plan
+   `docs/superpowers/plans/2026-07-07-saturation-throughput-sweep.md`). Directed path, z3-free. Ported
+   FlooNoC's method (per-cycle injection at `+traffic_inj_ratio`, reuse the existing per-node
+   `axi_bw_monitor`), booksim2-informed (saturation throughput, not a bus-tap latency curve which cannot
+   see saturation). Two bring-up findings were the crux: (a) the `rand_slave` default AX_MAX_WAIT=100
+   throttled responses (util 1.2%) -> set to zero-wait ideal sink; (b) single AXI id serialized -> new
+   `gen_test_patterns --ids-per-tile` gives each tile a non-overlapping id block (concurrency knob, NOT
+   VC spread -- VC is id-agnostic). Result (4x4 uniform, ids_per_tile=16, inj=1.0): saturation
+   throughput vc1=1248 vc2=1710 vc4=1916 vc8=1935 bits/cyc -> +53% vc1->vc4, plateau by vc8; latency
+   169->98. VC value is now measurable. `sim/tools/collect_saturation.py` + `plot_saturation.py` render
+   the per-VC table. Note: c_model `perf.json` records 0 bytes in traffic mode (perf DPI not wired for
+   it) -> bw_monitor is the sole readout, cross-check deferred (below).
 4. **Cleanup leftovers** (low priority, own refactor round): the ultra-sweep SKIPPED items —
    `cpp_params`/`sv_params` dedup, `constants.py` eval-swap, `_load_topology` 4-way consolidation — plus
    the remaining Dead-code-prune candidates not yet touched. Deletion<addition; do only if a round wants it.
@@ -293,7 +303,7 @@ master), and the BUR-002/003 mismatches were the generator slot overlap. See the
 
 | item | summary |
 |---|---|
-| injection-rate / saturation sweep | A latency-vs-offered-load sweep is the measurement that exposes VC-count differences. Today vc1..vc8 latency reads flat because no sweep applies congestion. Needs an AxiMaster injection schedule driving the c_model interface. Recurs across the benchmark-generator, struct-refactor, and congestion-bugfix rounds. NOTE: the old `run_benchmark.py` (single operating point, `greedy-finite-trace-stress`) was retired 2026-07-07; build the sweep fresh against `make sim`. Budget for z3 wall-time (~34 sim-cycles/s under random, item 0b): heavy sweeps need VCS. |
+| injection-rate / saturation sweep | **DONE 2026-07-07** (ranked #3 above): saturation throughput per VC on `make sim` run-traffic (`+traffic_inj_ratio`, `--ids-per-tile`), directed/z3-free. vc1->vc4 +53%. Deferred follow-ups: (1) c_model perf DPI not wired for traffic mode (`perf.json`=0 bytes) so the bw_monitor vs perf.json cross-check (spec Verify #2) is unrun -- wire it or validate bw_monitor against a hand-computed single-stream case; (2) full `+traffic_inj_ratio` low-to-high curve (only the saturation point at inj=1.0 was run; the concurrency axis `ids_per_tile` showed the plateau instead); (3) plot_saturation.py minors (cwd-relative path, vc1 baseline by insertion order). |
 | coverage + CRV + wire-side SVA | The matrix gates on the scoreboard only and skips non-wire-verifiable response/write-only cases (`sim/regress/README.md:17-23`, `run_regress.py:80-89`). No covergroup, no constrained-random framework, no wire-side protocol assertions. Make it actionable: a coverage plan plus co-sim scenario-coverage accounting (how many AX4 actually run at co-sim), not a vague bucket. |
 | slave-latency testbench axis | Slave-side backpressure coverage (subordinate not ready / response stall) belongs as a matrix axis sweeping a base scenario's `write_latency`/`read_latency` (analogous to `rob_modes`), not duplicate scenario files. The 2026-06-30 prune deleted HSH-001/002 + STR-001, which encoded backpressure only via this slave-model knob. Add the axis if slave-backpressure coverage is wanted; do not reintroduce duplicate scenarios. |
 
