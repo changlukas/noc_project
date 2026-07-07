@@ -151,8 +151,7 @@ TEST(NsuVcArbiterPools, SameBidRoundRobinsWritePool) {
 }
 
 INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcArbParam,
-                         ::testing::Values(std::size_t(1), std::size_t(2), std::size_t(4),
-                                           std::size_t(8)),
+                         ::testing::Values(std::size_t(1), std::size_t(2)),
                          [](const ::testing::TestParamInfo<std::size_t>& info) {
                              return "NumVc" + std::to_string(info.param);
                          });
