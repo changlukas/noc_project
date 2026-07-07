@@ -47,15 +47,13 @@ lowercase, no trailing period.
 
 ### Pre-submit gate
 
-Run `make check` before every commit that touches code or docs:
+Run `make test` before every commit that touches code (builds the
+c_model, runs the full ctest suite). When you touch scenarios or docs,
+also `make lint_scenarios lint_docs`.
 
-~~~bash
-make check    # lint_scenarios + lint_docs + build-cmodel + build-verilator + ctest
-~~~
-
-Both lint checks and the full ctest suite must be green. If a test
-that previously passed now fails, fix it -- do not skip or comment out
-the test. Do not disable ctest discovery to hide failures.
+The ctest suite must be green. If a test that previously passed now
+fails, fix it -- do not skip or comment out the test. Do not disable
+ctest discovery to hide failures.
 
 ### Never --no-verify
 
@@ -173,7 +171,6 @@ make build           # c_model + Verilator (correct dep order)
 make build-cmodel    # c_model only (CMake + ninja) -> build/cmodel/
 make build-verilator # Verilator binaries -> build/verilator/
 make test            # run c_model ctest suite
-make check           # lint + build + full ctest
 make clean           # remove all build artifacts
 ~~~
 
@@ -280,7 +277,7 @@ match the Verilator major.minor where possible.
 
 On a new host (e.g. a Linux workstation): `git clone`, install
 verilator + g++ + cmake + ninja + python3 from the distro or a user-space
-prefix, then `make check` -- build artifacts are per-clone (the whole
+prefix, then `make build test` -- build artifacts are per-clone (the whole
 `build/` tree and per-sim `output/` dirs are gitignored), so Windows and
 Linux working copies never share or clobber binaries. Line endings are pinned by `.gitattributes` (LF in repo
 objects; shell/build files LF in the working tree on every platform).
@@ -427,7 +424,7 @@ py -3 specgen/tools/codegen.py --check
 
 Exit code 0 means the committed headers match what the generator would
 produce from the current JSON sources. Exit code 1 means drift -- regenerate and
-commit the updated headers before `make check` will pass.
+commit the updated headers before `make specgen_pytest` will pass.
 
 ### specgen sub-project guide
 
@@ -462,7 +459,7 @@ template authoring, and extension guide.
    that deliberately reference a missing data file (e.g. INF-001) do
    not provide an actual data file.
 
-4. Run `make check`. The scenario is picked up automatically by the
+4. Run `make test`. The scenario is picked up automatically by the
    c_model integration test via CMake `CONFIGURE_DEPENDS`. Use
    `make sim TB=mesh_4x4_vc1 PATTERN=neighbor` to run a cosim smoke.
 
@@ -499,7 +496,7 @@ naming convention `test_<subject>.cpp`. Every new file must:
 
 - Include at least one test that exercises the primary new behaviour.
 - Include at least one test that verifies the primary error path.
-- Pass `make check` before the first commit that adds the file.
+- Pass `make test` before the first commit that adds the file.
 
 ### Unit test vs integration test
 
@@ -536,9 +533,8 @@ make sim TB=mesh_4x4_vc1 PATTERN=hotspot HOTSPOT=5 PYTHON3=python3
 make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3    # non-default topology
 ~~~
 
-Optional vars: `TXN=` (transactions per node), `SEED=`, `BASE=` (base scenario YAML
-forwarded to gen_test_patterns `--from`). A neighbor-pattern smoke is the final step
-of `make check`. The curated AX4 bidirectional sweep is deferred.
+Optional vars: `TXN=` (transactions per node), `SEED=`, `HOTSPOT=` (hotspot node ids).
+The curated AX4 bidirectional sweep is deferred.
 
 ### Vtb_top output log
 
@@ -565,8 +561,8 @@ individually visible on the wire bundle at successive ticks.
 
 Before opening a PR or merging a branch:
 
-- [ ] `make check` passes clean (lint_scenarios + lint_docs + build +
-      ctest -- all green, no SKIPs that are not pre-existing).
+- [ ] `make test` passes clean (ctest all green, no SKIPs that are not
+      pre-existing); `make lint_scenarios lint_docs` if scenarios/docs changed.
 - [ ] `clang-format -i` applied to every `.hpp` and `.cpp` file touched.
 - [ ] Commit message follows `type(scope): description` format (English).
 - [ ] New behaviour covered by at least one new test that was passing

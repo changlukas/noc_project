@@ -31,6 +31,8 @@ w_beats_received_
 sim/*/output/
 # Legacy run-output location
 sim/output/
+# Stray generated perf summary (canonical copy lives under sim/*/output/)
+sim/verilator/perf.json
 
 # Generated per-node scenario variants (node2+ created by gen_test_patterns at runtime;
 # node0/node1 are the committed curated-subset gate markers and stay tracked).

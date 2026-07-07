@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""Generate per-node scenario variants from a base scenario.yaml + a traffic pattern.
+"""Emit per-node pulp axi_file_master stimulus (write.txt/read.txt) for a traffic pattern.
 
 Usage:
-    gen_test_patterns.py --from <base.yaml> --pattern neighbor \\
+    gen_test_patterns.py --pattern neighbor \\
         --topology <name> --out <dir>
 
     gen_test_patterns.py --pattern uniform_random \\
         --topology mesh_4x4_vc1 --out <dir> \\
         --transactions-per-node 4 --seed 42
 
-Writes <out>/node<i>/scenario.yaml for each node i. Each variant:
-  - Transaction addr = dst_coord<<32 + local_offset  (bit 32+ selects destination tile)
-  - config.memory_base = coord(i)<<32 + base.memory_base  (slave at i serves its own tile)
-  - data_file/dump_file/strb_file rewritten to relative paths from the variant subdir
+Writes <out>/node<i>/{write,read}.txt for each node i. Each transaction:
+  - addr = dst_coord<<32 + local_offset  (bit 32+ selects destination tile)
+  - src-partitioned local offset (alloc_unique_offset) so converging sources never collide
+  - INCR, atop=0, full strobe, address-in-data payload (byte A = A & 0xFF)
 
 Patterns
 --------
@@ -61,7 +61,6 @@ DST_ID_WIDTH = 8  -- mirrors ni_flit_constants.h header::DST_ID_WIDTH (X_WIDTH +
 """
 
 import argparse
-import copy
 import os
 import random as _random_module
 import sys
@@ -276,17 +275,6 @@ def _linear_to_coord(node, x_dim):
 # Global unique-offset allocator
 # ---------------------------------------------------------------------------
 
-def _write_footprint(txns):
-    """Largest write-burst footprint in bytes across `txns`: (len+1)*2**size.
-
-    A slot must reserve this many bytes; the slot stride must be at least this so
-    neighbouring sources do not overlap under many-to-one traffic. Falls back to
-    _SLOT_STRIDE when there is no write transaction (read-only base)."""
-    footprints = [(int(t.get("len", 0)) + 1) * (1 << int(t.get("size", 0)))
-                  for t in txns if t.get("op") == "write"]
-    return max([_SLOT_STRIDE, *footprints])
-
-
 def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
                         memory_size, reserved=_SLOT_STRIDE, stride=_SLOT_STRIDE):
     """Return a local offset that is globally unique across all (src_node, seq) pairs.
@@ -435,257 +423,13 @@ def _dst_for(pattern, x, y, x_dim, y_dim):
 
 
 # ---------------------------------------------------------------------------
-# Per-node variant emitter
-# ---------------------------------------------------------------------------
-
-def _as_int(v):
-    return v if isinstance(v, int) else int(str(v), 0)
-
-
-def _emit_node(base_sc, src_dir, out_dir, src_idx, dst_cid, src_cid,
-               n_nodes, base_local, memory_size, preserve_addr=False):
-    """Emit <out_dir>/scenario.yaml for one node.
-
-    base_sc     -- base scenario dict (read-only; deep-copied internally)
-    src_dir     -- directory of the base scenario.yaml (for relative file rewrites)
-    out_dir     -- destination directory for this node's variant
-    src_idx     -- linear index of the source node (for alloc_unique_offset)
-    dst_cid     -- coord_id of the destination tile (encodes into addr bits 32+)
-    src_cid     -- coord_id of the source node (sets config.memory_base)
-    n_nodes     -- total node count (allocator domain)
-    base_local  -- base local address from config.memory_base & 0xFFFF_FFFF
-    memory_size -- dst tile memory window size (config.memory_size); allocator bound
-    """
-    sc = copy.deepcopy(base_sc)
-
-    # Assign unique offsets to write/read pairs.  Pair identity = same original addr.
-    # Two-pass: first build a mapping from original addr -> allocated offset, then
-    # rewrite all transactions sharing that addr to the same new offset.
-    orig_addrs = [_as_int(t["addr"]) & 0xFFFFFFFF
-                  for t in sc.get("transactions", [])]
-    # Uniform slot stride = largest write footprint; grow the dst window so the
-    # allocator's per-source columns of disjoint slots fit (see alloc_unique_offset).
-    slot_stride = _write_footprint(sc.get("transactions", []))
-    n_pairs = len(dict.fromkeys(orig_addrs))
-    memory_size = max(memory_size, n_nodes * n_pairs * slot_stride)
-    seen_orig: dict = {}  # orig_local_addr -> seq index
-    pair_offset: dict = {}  # orig_local_addr -> allocated local_offset
-    seq = 0
-    for oa in orig_addrs:
-        if oa not in seen_orig:
-            seen_orig[oa] = seq
-            # dst_node arg is informational; pass dst_cid as a proxy (not used in formula)
-            pair_offset[oa] = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
-                                                  n_nodes, memory_size, reserved=slot_stride)
-            seq += 1
-
-    for t in sc.get("transactions", []):
-        orig = _as_int(t["addr"]) & 0xFFFFFFFF
-        local_off = orig if preserve_addr else pair_offset[orig]
-        t["addr"] = (dst_cid << ADDR_DST_SHIFT) + local_off
-
-        for k in _FILE_KEYS:
-            if t.get(k) and not os.path.isabs(t[k]):
-                abs_src = os.path.join(src_dir, t[k])
-                try:
-                    rel = os.path.relpath(abs_src, out_dir)
-                except ValueError:
-                    # Different Windows drives: emit absolute path instead.
-                    rel = os.path.abspath(abs_src)
-                t[k] = rel.replace(os.sep, "/")
-
-    cfg = sc.setdefault("config", {})
-    cfg["memory_base"] = (src_cid << ADDR_DST_SHIFT) + base_local
-    cfg["memory_size"] = memory_size
-
-    os.makedirs(out_dir, exist_ok=True)
-    with open(os.path.join(out_dir, "scenario.yaml"), "w") as f:
-        yaml.safe_dump(sc, f, sort_keys=False)
-
-
-def _write_data_file(out_dir, seq, axi_size, axi_len):
-    """Write a data file for one write transaction; return the relative file path.
-
-    The file contains (axi_len + 1) * 2**axi_size bytes encoded as space-separated
-    hex tokens (e.g. "01 02 03 04") — the format required by AxiMaster.load_write_data_.
-    Data bytes are a deterministic pattern: repeating (seq & 0xFF) for the entire burst.
-    """
-    n_bytes = (axi_len + 1) * (1 << axi_size)
-    fill = seq & 0xFF
-    tokens = " ".join(f"{fill:02X}" for _ in range(n_bytes))
-    fname = f"data_seq{seq}.txt"
-    with open(os.path.join(out_dir, fname), "w") as f:
-        f.write(tokens + "\n")
-    return fname
-
-
-def _emit_synthetic_node(out_dir, src_idx, dst_cids, src_cid,
-                         n_nodes, base_local, memory_size, axi_size, axi_len):
-    """Emit <out_dir>/scenario.yaml with synthetic write+read pairs (no base scenario).
-
-    dst_cids    -- list of per-transaction dst coord_ids (one per pair)
-    axi_size    -- AxSIZE field (0..7; bytes per beat = 2**axi_size)
-    axi_len     -- AxLEN field (0..255; beats per burst; 0 = single beat)
-
-    Burst footprint = (axi_len + 1) * 2**axi_size bytes; passed as `reserved` to
-    alloc_unique_offset so the tail also fits within the dst tile memory window.
-
-    The scenario_parser requires id, burst, data_file (write), and dump_file (read)
-    in every transaction.  This function writes per-seq data files alongside the
-    scenario.yaml and references them with relative paths.  dump_file is set to the
-    same data file (its content is unused; the slave scoreboard drives correctness).
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    reserved = (axi_len + 1) * (1 << axi_size)
-    transactions = []
-    for seq, dst_cid in enumerate(dst_cids):
-        local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
-                                        n_nodes, memory_size, reserved=reserved)
-        addr = (dst_cid << ADDR_DST_SHIFT) + local_off
-        data_fname = _write_data_file(out_dir, seq, axi_size, axi_len)
-        transactions.append({
-            "op": "write",
-            "addr": addr,
-            "id": 0,
-            "size": axi_size,
-            "len": axi_len,
-            "burst": "INCR",
-            "data_file": data_fname,
-        })
-        transactions.append({
-            "op": "read",
-            "addr": addr,
-            "id": 0,
-            "size": axi_size,
-            "len": axi_len,
-            "burst": "INCR",
-            "dump_file": data_fname,
-        })
-
-    sc = {
-        "config": {
-            "memory_base": (src_cid << ADDR_DST_SHIFT) + base_local,
-            "memory_size": memory_size,
-        },
-        "transactions": transactions,
-    }
-    with open(os.path.join(out_dir, "scenario.yaml"), "w") as f:
-        yaml.safe_dump(sc, f, sort_keys=False)
-
-
-def _emit_base_driven_node(base_sc, src_dir, out_dir, src_idx, dst_cids, src_cid,
-                           n_nodes, base_local, memory_size):
-    """Emit <out_dir>/scenario.yaml for one node, replicating base shape per dst.
-
-    Used by uniform_random and hotspot when --from is present.  Each element in
-    dst_cids corresponds to one replication of the base transaction sequence; shape
-    (size, len, burst, payload) is copied from the base, only addr changes.
-
-    dst_cids    -- list of per-replication dst coord_ids (len == transactions_per_node)
-    base_sc     -- base scenario dict (read-only; deep-copied per replication)
-    src_dir     -- directory of the base scenario.yaml (for relative file rewrites)
-    src_idx     -- linear index of the source node (for alloc_unique_offset)
-    src_cid     -- coord_id of the source node (sets config.memory_base)
-    n_nodes     -- total node count (allocator domain)
-    base_local  -- base local address from config.memory_base & 0xFFFF_FFFF
-    memory_size -- dst tile memory window size; passed to alloc_unique_offset bound
-    """
-    os.makedirs(out_dir, exist_ok=True)
-    base_txns = base_sc.get("transactions", [])
-
-    # Identify unique (write) addresses in the base to group write+read pairs.
-    # Preserves the base pair structure: each unique addr = one write+read group.
-    seen_orig: dict = {}   # orig_local_addr -> base seq index within the base
-    base_pair_order = []   # ordered unique orig local addrs
-    for t in base_txns:
-        oa = _as_int(t["addr"]) & 0xFFFFFFFF
-        if oa not in seen_orig:
-            seen_orig[oa] = len(base_pair_order)
-            base_pair_order.append(oa)
-
-    # One uniform slot stride for the whole scenario = the largest write footprint
-    # (so mixed-size pairs share a stride and never overlap). Grow the dst window
-    # to hold n_nodes * n_seq disjoint slots — under many-to-one (hotspot) every
-    # source lands in ONE dst tile, so the tile must fit them all side by side.
-    slot_stride = _write_footprint(base_txns)
-    n_seq = len(dst_cids) * len(base_pair_order)
-    memory_size = max(memory_size, n_nodes * n_seq * slot_stride)
-
-    transactions = []
-    for rep_seq, dst_cid in enumerate(dst_cids):
-        # Each replication: allocate one offset slot per unique base pair.
-        pair_offset: dict = {}
-        for pair_seq, orig_addr in enumerate(base_pair_order):
-            # Global seq = rep_seq * len(base_pair_order) + pair_seq
-            global_seq = rep_seq * len(base_pair_order) + pair_seq
-            pair_offset[orig_addr] = alloc_unique_offset(
-                dst_cid, src_idx, global_seq, base_local, n_nodes, memory_size,
-                reserved=slot_stride,
-            )
-        for t in base_txns:
-            tc = copy.deepcopy(t)
-            orig = _as_int(tc["addr"]) & 0xFFFFFFFF
-            local_off = pair_offset[orig]
-            tc["addr"] = (dst_cid << ADDR_DST_SHIFT) + local_off
-            for k in _FILE_KEYS:
-                if tc.get(k) and not os.path.isabs(tc[k]):
-                    abs_src = os.path.join(src_dir, tc[k])
-                    try:
-                        rel = os.path.relpath(abs_src, out_dir)
-                    except ValueError:
-                        rel = os.path.abspath(abs_src)
-                    tc[k] = rel.replace(os.sep, "/")
-            transactions.append(tc)
-
-    sc = copy.deepcopy(base_sc)
-    sc["transactions"] = transactions
-    cfg = sc.setdefault("config", {})
-    cfg["memory_base"] = (src_cid << ADDR_DST_SHIFT) + base_local
-    cfg["memory_size"] = memory_size
-
-    with open(os.path.join(out_dir, "scenario.yaml"), "w") as f:
-        yaml.safe_dump(sc, f, sort_keys=False)
-
-
-# ---------------------------------------------------------------------------
-# Multi-id helpers
-# ---------------------------------------------------------------------------
-
-def _rewrite_ids(base_sc, n_ids):
-    """In-place: assign AXI id round-robin across n_ids, grouped by unique base
-    address so each write+read pair stays on a single id (emit-path-agnostic;
-    both _emit_node and _emit_base_driven_node inherit by deep-copy)."""
-    addr_to_id = {}
-    next_slot = 0
-    for t in base_sc.get("transactions", []):
-        oa = _as_int(t["addr"]) & 0xFFFFFFFF
-        if oa not in addr_to_id:
-            addr_to_id[oa] = next_slot % n_ids
-            next_slot += 1
-        t["id"] = addr_to_id[oa]
-
-
-def _apply_id_policy(base_sc, id_policy):
-    if base_sc is None or not id_policy:
-        return
-    kind, _, n = id_policy.partition(":")
-    if kind != "round_robin" or not n.isdigit() or int(n) < 1:
-        raise SystemExit(f"--id-policy: unsupported value {id_policy!r} "
-                         f"(expected round_robin:N)")
-    _rewrite_ids(base_sc, int(n))
-
-
-# ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Generate per-node scenario variants from a base scenario + traffic pattern."
+        description="Emit per-node file_master write.txt/read.txt for a traffic pattern."
     )
-    ap.add_argument("--from", dest="base", default=None,
-                    help="Base scenario.yaml path (omit for synthetic payload mode; for "
-                         "random patterns it only borrows the memory shape)")
     ap.add_argument("--pattern", required=True,
                     choices=["neighbor", "transpose", "uniform_random", "hotspot"],
                     help="Traffic pattern")
@@ -693,10 +437,7 @@ def main(argv=None):
                     help="Topology name (matches sim/topologies/<name>.yaml) or a "
                          "direct path to a topology yaml")
     ap.add_argument("--out", required=True,
-                    help="Output directory; writes <out>/node<i>/scenario.yaml")
-    ap.add_argument("--format", choices=["yaml", "file_master"], default="yaml",
-                    help="yaml (legacy per-node scenario.yaml) or file_master "
-                         "(per-node write.txt/read.txt for pulp axi_file_master)")
+                    help="Output directory; writes <out>/node<i>/{write,read}.txt")
     # Per-packet random pattern options
     ap.add_argument("--transactions-per-node", type=int, default=1,
                     help="Write+read pairs per node (synthetic / random patterns)")
@@ -705,160 +446,48 @@ def main(argv=None):
     ap.add_argument("--exclude-self", action="store_true",
                     help="Exclude dst == src (opt-in; default permits self, "
                          "booksim-faithful)")
-    ap.add_argument("--preserve-addr", action="store_true",
-                    help="Keep each transaction's original local offset (OR dst tile into "
-                         "addr[63:32]) instead of reallocating; safe only with bijective "
-                         "patterns like neighbor.")
-    ap.add_argument("--id-policy", default=None,
-                    help="round_robin:N — rewrite base AXI ids round-robin across "
-                         "N ids (W/R pair preserved). Default: keep base ids.")
     # Hotspot options
     ap.add_argument("--hotspot", type=int, nargs="+", default=None,
                     help="Linear node id(s) for hotspot pattern (0..N-1)")
     ap.add_argument("--hotspot-rates", type=int, nargs="+", default=None,
                     help="Weights for each hotspot (parallel to --hotspot; default: equal)")
-    # Synthetic payload shape (only used when --from is absent)
+    # Synthetic payload shape
     ap.add_argument("--size", type=int, default=2,
                     help="AxSIZE for synthetic transactions (0..7; default 2 = 4 bytes)")
     ap.add_argument("--len", type=int, default=0, dest="burst_len",
                     help="AxLEN for synthetic transactions (0..255; default 0 = single beat)")
     ap.add_argument("--memory-size", type=lambda v: int(str(v), 0), default=None,
-                    help="dst tile memory window size (default: from --from scenario "
-                         "config.memory_size, else 0x1000); sizes the allocator bound "
-                         "and the emitted config.memory_size")
+                    help="dst tile memory window size (default 0x40000); sizes the "
+                         "allocator bound")
     a = ap.parse_args(argv)
 
     nodes, x_dim, y_dim = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
 
-    if a.format == "file_master":
-        if a.id_policy or a.preserve_addr:
-            ap.error("--id-policy / --preserve-addr apply only to --format yaml")
-        widths = axi_widths()
-        base_local = 0x1000
-        memory_size = a.memory_size if a.memory_size is not None else 0x40000
-        rng = _random_module.Random(a.seed)
-        if a.pattern == "transpose":
-            _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
-        for (idx, x, y, src_cid) in nodes:
-            if a.pattern in ("neighbor", "transpose"):
-                dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
-                dst_cids = [coord_id(dst_x, dst_y)] * a.transactions_per_node
-            elif a.pattern == "uniform_random":
-                dst_lin = uniform_random_dsts(idx, n_nodes, a.transactions_per_node,
-                                              rng, a.exclude_self)
-                dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
-            else:  # hotspot
-                if a.hotspot is None:
-                    ap.error("--hotspot is required for the hotspot pattern")
-                dst_lin = hotspot_dsts(idx, n_nodes, a.transactions_per_node, rng,
-                                       a.hotspot, a.hotspot_rates, a.exclude_self)
-                dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
-            emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
-                                  n_nodes, base_local, memory_size,
-                                  a.size, a.burst_len, widths["data"])
-        return
-
-    if a.pattern == "neighbor":
-        # Deterministic bijection: uses base scenario; --from required.
-        if a.base is None:
-            ap.error("--from is required for the neighbor pattern")
-        src_path = os.path.abspath(a.base)
-        src_dir = os.path.dirname(src_path)
-        with open(src_path) as f:
-            base_sc = yaml.safe_load(f)
-        _apply_id_policy(base_sc, a.id_policy)
-        cfg = base_sc.get("config", {})
-        base_local = _as_int(cfg.get("memory_base", 0)) & 0xFFFFFFFF
-        memory_size = _as_int(cfg.get("memory_size", 0x1000))
-        if a.memory_size is not None:
-            memory_size = a.memory_size  # explicit CLI override wins
-
-        for (idx, x, y, src_cid) in nodes:
+    widths = axi_widths()
+    base_local = 0x1000
+    memory_size = a.memory_size if a.memory_size is not None else 0x40000
+    rng = _random_module.Random(a.seed)
+    if a.pattern == "transpose":
+        _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
+    for (idx, x, y, src_cid) in nodes:
+        if a.pattern in ("neighbor", "transpose"):
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
-            dst_cid = coord_id(dst_x, dst_y)
-            out_dir = os.path.join(a.out, f"node{idx}")
-            _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
-                       n_nodes, base_local, memory_size, preserve_addr=a.preserve_addr)
-
-    elif a.pattern == "transpose":
-        # Deterministic: (x,y)→(y,x), square-mesh only.  Supports synthetic mode
-        # (--from absent) and base-scenario mode (--from present).
-        _check_transpose_guard(x_dim, y_dim)
-        base_local = 0x1000
-        memory_size = 0x1000
-        if a.base is not None:
-            src_path = os.path.abspath(a.base)
-            src_dir = os.path.dirname(src_path)
-            with open(src_path) as f:
-                base_sc = yaml.safe_load(f)
-            _apply_id_policy(base_sc, a.id_policy)
-            cfg = base_sc.get("config", {})
-            base_local = _as_int(cfg.get("memory_base", 0)) & 0xFFFFFFFF
-            memory_size = _as_int(cfg.get("memory_size", 0x1000))
-        if a.memory_size is not None:
-            memory_size = a.memory_size  # explicit CLI override wins
-
-        for (idx, x, y, src_cid) in nodes:
-            dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
-            dst_cid = coord_id(dst_x, dst_y)
-            # Each of transactions_per_node pairs targets the same fixed dst.
-            dst_cids = [dst_cid] * a.transactions_per_node
-            out_dir = os.path.join(a.out, f"node{idx}")
-            if a.base is not None:
-                _emit_node(base_sc, src_dir, out_dir, idx, dst_cid, src_cid,
-                           n_nodes, base_local, memory_size, preserve_addr=a.preserve_addr)
-            else:
-                _emit_synthetic_node(out_dir, idx, dst_cids, src_cid,
-                                     n_nodes, base_local, memory_size,
-                                     a.size, a.burst_len)
-
-    else:
-        # Per-packet random pattern (uniform_random / hotspot).
-        # When --from is given: borrow transaction shape (size/len/burst/payload) from
-        # the base scenario — only the dst address changes per replication.
-        # When --from is absent: build synthetic payload from --size / --len (fallback).
-        rng = _random_module.Random(a.seed)
-        base_local = 0x1000  # default local base for synthetic scenarios
-        memory_size = 0x1000  # default dst tile window (same as existing topologies)
-        base_sc = None
-        src_dir = None
-        if a.base is not None:
-            src_path = os.path.abspath(a.base)
-            src_dir = os.path.dirname(src_path)
-            with open(src_path) as f:
-                base_sc = yaml.safe_load(f)
-            _apply_id_policy(base_sc, a.id_policy)
-            cfg = base_sc.get("config", {})
-            base_local = _as_int(cfg.get("memory_base", base_local)) & 0xFFFFFFFF
-            memory_size = _as_int(cfg.get("memory_size", memory_size))
-        if a.memory_size is not None:
-            memory_size = a.memory_size  # explicit CLI override wins
-
-        for (idx, x, y, src_cid) in nodes:
-            if a.pattern == "uniform_random":
-                dst_linears = uniform_random_dsts(
-                    idx, n_nodes, a.transactions_per_node, rng, a.exclude_self
-                )
-            else:  # hotspot
-                if a.hotspot is None:
-                    ap.error("--hotspot is required for the hotspot pattern")
-                dst_linears = hotspot_dsts(
-                    idx, n_nodes, a.transactions_per_node, rng,
-                    a.hotspot, a.hotspot_rates, a.exclude_self
-                )
-
-            # Convert linear dst indices → coord_ids
-            dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_linears]
-            out_dir = os.path.join(a.out, f"node{idx}")
-            if base_sc is not None:
-                _emit_base_driven_node(base_sc, src_dir, out_dir, idx, dst_cids, src_cid,
-                                       n_nodes, base_local, memory_size)
-            else:
-                _emit_synthetic_node(out_dir, idx, dst_cids, src_cid,
-                                     n_nodes, base_local, memory_size,
-                                     a.size, a.burst_len)
+            dst_cids = [coord_id(dst_x, dst_y)] * a.transactions_per_node
+        elif a.pattern == "uniform_random":
+            dst_lin = uniform_random_dsts(idx, n_nodes, a.transactions_per_node,
+                                          rng, a.exclude_self)
+            dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+        else:  # hotspot
+            if a.hotspot is None:
+                ap.error("--hotspot is required for the hotspot pattern")
+            dst_lin = hotspot_dsts(idx, n_nodes, a.transactions_per_node, rng,
+                                   a.hotspot, a.hotspot_rates, a.exclude_self)
+            dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+        emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
+                              n_nodes, base_local, memory_size,
+                              a.size, a.burst_len, widths["data"])
 
 
 if __name__ == "__main__":

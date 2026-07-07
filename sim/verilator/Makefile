@@ -207,7 +207,7 @@ run-directed: $(TBTOP_EXE)
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
 	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-directed requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p output/$(DIRECTED_TAG)
-	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) --format file_master \
+	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(TXNS_PER_NODE) --size 5 --len 0 \
 	    --memory-size 0x40000 --seed $(SEED) $(_HOTSPOT_ARGS)

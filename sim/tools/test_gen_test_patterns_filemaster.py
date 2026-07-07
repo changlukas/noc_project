@@ -86,7 +86,7 @@ PATTERNS = [
 @pytest.mark.parametrize("pat", PATTERNS, ids=lambda p: p[1])
 def test_main_file_master_all_patterns(tmp_path, pat):
     out = str(tmp_path / "scn")
-    g.main(["--topology", "mesh_4x4_vc1", "--format", "file_master",
+    g.main(["--topology", "mesh_4x4_vc1",
             "--out", out, "--transactions-per-node", "2",
             "--size", "5", "--len", "0", "--memory-size", "0x40000"] + pat)
     nodes = sorted(glob.glob(os.path.join(out, "node*")))

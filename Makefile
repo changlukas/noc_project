@@ -17,8 +17,8 @@ CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
 COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test check lint_scenarios lint_docs \
-        specgen_pytest sim sim-regress \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test lint_scenarios lint_docs \
+        specgen_pytest sim \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -36,11 +36,9 @@ help:
 	@echo "  make sim TB=tb_<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot) or constrained_random"
 	@echo "  make sim TB=tb_mesh_4x4_vc8 PATTERN=neighbor"
 	@echo "  Vars: TXN= HOTSPOT= (directed only); SEED unset draws + prints a random seed"
-	@echo "  make sim-regress [BUILD=<build>]    run the co-sim regression (one build, or all)"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
-	@echo "  make check            lint + build + full ctest + neighbor smoke"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/)"
@@ -183,10 +181,6 @@ specgen_pytest:
 	echo "specgen_pytest: using interpreter '$$interp'"; \
 	cd specgen && $$interp -m pytest tests/ -q
 
-check: lint_scenarios lint_docs specgen_pytest build-cmodel build-verilator
-	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
-	$(PYTHON3) sim/tools/run_benchmark.py --topology mesh_4x4_vc1 --pattern neighbor
-
 # Unified DV run launcher. TB selects the testbench (topology; accepts a tb_ prefix).
 # PATTERN selects the axis: the 4 spatial patterns run directed (file_master +
 # scoreboard); constrained_random runs rand_master + reorder_compare. SEED unset ->
@@ -209,9 +203,6 @@ else
 	$(MAKE) -C sim/verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
 	    PATTERN=$(PATTERN) SEED=$(_SEED) $(if $(TXN),TXNS_PER_NODE=$(TXN)) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT))
 endif
-
-sim-regress:
-	$(TOOLPATH) $(PYTHON3) sim/regress/run_regress.py $(if $(BUILD),--build $(BUILD))
 
 # --- clean ---
 
