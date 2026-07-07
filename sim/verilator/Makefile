@@ -230,6 +230,44 @@ run-directed: $(TBTOP_EXE)
 	    echo "DIRECTED PASS: $(DIRECTED_TAG) scoreboard clean, non-vacuous"; \
 	fi
 
+# Saturation sweep: one operating point at INJ_RATIO on the directed build.
+# Traffic mode (user_node_endpoint +traffic_inj_ratio) injects continuous
+# interleaved traffic instead of the two-phase directed run, so the in-endpoint
+# axi_scoreboard (which assumes write-then-readback) prints spurious warnings
+# here -- this recipe does NOT gate on them. Gate is: ran to completion + the
+# axi_bw_monitor reported non-zero bandwidth. Uniform_random pattern; run length
+# is set by TRAFFIC_TXNS (fork...join drains the stimulus, so more = longer,
+# steadier measurement).
+INJ_RATIO    ?= 1.0
+TRAFFIC_TXNS ?= 200
+TRAFFIC_TAG  ?= traffic_$(TOPOLOGY)_r$(INJ_RATIO)
+TRAFFIC_STIM := $(COSIM_ROOT)/test_patterns/traffic_$(TOPOLOGY)
+
+.PHONY: run-traffic
+run-traffic: $(TBTOP_EXE)
+	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-traffic requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
+	@mkdir -p output/$(TRAFFIC_TAG)
+	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
+	    --out $(TRAFFIC_STIM) --pattern uniform_random \
+	    --transactions-per-node $(TRAFFIC_TXNS) --size 5 --len 0 \
+	    --memory-size 0x40000 --seed $(SEED)
+	@echo "running $(TRAFFIC_TAG) (txns/node=$(TRAFFIC_TXNS) inj_ratio=$(INJ_RATIO))"
+	$(TBTOP_EXE) \
+	    "+stim_dir=$(TRAFFIC_STIM)" \
+	    "+traffic_inj_ratio=$(INJ_RATIO)" \
+	    "+perf_out=output/$(TRAFFIC_TAG)/perf.json" \
+	    "+perf_scenario=$(TRAFFIC_TAG)" \
+	    > output/$(TRAFFIC_TAG)/run.log 2>&1; \
+	rc=$$?; \
+	echo "--- run.log (tail) ---"; tail -20 output/$(TRAFFIC_TAG)/run.log; \
+	echo "--- bw_monitor ---"; grep -iE '\[Monitor .*\]\[(Read|Write)\]' output/$(TRAFFIC_TAG)/run.log; \
+	if [ $$rc -ne 0 ]; then echo "run-traffic FAIL (rc=$$rc)"; exit 1; fi; \
+	if grep -qiE '\[Monitor .*\]\[(Read|Write)\].*BW:\s*[1-9]' output/$(TRAFFIC_TAG)/run.log; then \
+	    echo "run-traffic OK: non-zero bandwidth"; \
+	else \
+	    echo "run-traffic FAIL: no non-zero bandwidth reported"; exit 1; \
+	fi
+
 # Constrained-random run: rand_master (WRAP/EXC) + tb-level axi_reorder_compare.
 # Gate on zero reorder_compare $error (%Error) + non-vacuous PASS (cmp_eos drain is
 # in the tb exit). Seed is echoed into the tag so a FAIL is replayable.

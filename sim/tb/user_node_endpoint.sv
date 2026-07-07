@@ -183,9 +183,17 @@ module user_node_endpoint #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
         .TA(ApplTime), .TT(TestTime)
     ) file_master_t;
+    // Zero response wait: an ideal sink so the FABRIC is the bottleneck, not the
+    // slave. The pulp default (AX_MAX_WAIT_CYCLES=100, RESP=20, R=5) throttles
+    // responses and hides fabric saturation (measured util ~1.2% at greedy
+    // injection). Standard NoC-eval practice (booksim2 consumes at the sink).
+    // The directed two-phase run is a data-integrity gate (scoreboard compares
+    // read data vs golden, timing-independent), so a fast slave keeps it passing;
+    // OoO/response-timing variability is covered by the constrained_random axis.
     typedef axi_test::axi_rand_slave #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
-        .TA(ApplTime), .TT(TestTime), .MAPPED(1'b1)
+        .TA(ApplTime), .TT(TestTime), .MAPPED(1'b1),
+        .AX_MAX_WAIT_CYCLES(0), .R_MAX_WAIT_CYCLES(0), .RESP_MAX_WAIT_CYCLES(0)
     ) rand_slave_t;
     typedef axi_test::axi_scoreboard #(
         .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(1), .TT(TestTime)
