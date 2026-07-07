@@ -248,6 +248,30 @@ module user_node_endpoint #(
         scoreboard.monitor();
     end
 
+    // Traffic mode (perf sweep): continuous interleaved injection paced by a
+    // per-cycle gate. Selected at runtime by +traffic_inj_ratio; absent => the
+    // two-phase directed run below is unchanged. Gate uses $urandom_range (PRNG,
+    // no constraint solver => no z3). Gated copies of run_aw/run_ar: same body as
+    // axi_test.sv:2540-2565 plus a per-cycle idle before each send.
+    real traffic_inj_ratio;
+    int  unsigned inj_gate_pct;
+
+    task automatic gated_run_aw();
+        while (file_master.aw_queue.size() > 0) begin
+            while ($urandom_range(0, 99) >= inj_gate_pct) @(posedge clk_i);
+            file_master.drv.send_aw(file_master.aw_queue[0]);
+            void'(file_master.aw_queue.pop_front());
+        end
+    endtask
+
+    task automatic gated_run_ar();
+        while (file_master.ar_queue.size() > 0) begin
+            while ($urandom_range(0, 99) >= inj_gate_pct) @(posedge clk_i);
+            file_master.drv.send_ar(file_master.ar_queue[0]);
+            void'(file_master.ar_queue.pop_front());
+        end
+    endtask
+
     // Directed driver: per-node two-phase. load_files() fills the queues (do NOT
     // call run(): it re-forks all five and double-consumes the queues, spec
     // Two-phase). Phase 1 drains all writes (wait_b => committed at the slave);
@@ -259,9 +283,23 @@ module user_node_endpoint #(
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
         @(posedge rst_ni);
-        fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
-        fork file_master.run_ar(); file_master.wait_r(); join
-        run_done = 1'b1;
+        if ($value$plusargs("traffic_inj_ratio=%f", traffic_inj_ratio)) begin
+            inj_gate_pct = int'(traffic_inj_ratio * 100.0);
+            // Mirror axi_file_master::run() but with gated AW/AR. join (not
+            // join_none) so B/R are consumed and the pass terminates cleanly.
+            fork
+                gated_run_aw();
+                file_master.run_w();
+                gated_run_ar();
+                file_master.wait_b();
+                file_master.wait_r();
+            join
+            run_done = 1'b1;
+        end else begin
+            fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
+            fork file_master.run_ar(); file_master.wait_r(); join
+            run_done = 1'b1;
+        end
     end
 `else
     // ---- constrained_random flavor (rand_master + tb-level reorder_compare) ----
