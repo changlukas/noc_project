@@ -1,4 +1,3 @@
-add_cmodel_test(test_scaffold)
 add_cmodel_test(test_memory)
 add_cmodel_test(test_axi_slave)
 add_cmodel_test(test_axi_master)

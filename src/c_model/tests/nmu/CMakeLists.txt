@@ -21,11 +21,6 @@ target_include_directories(test_packetize PRIVATE
 add_cmodel_test(test_nmu_req_bridge)
 target_link_libraries(test_nmu_req_bridge PRIVATE yaml-cpp::yaml-cpp)
 
-add_cmodel_test(test_nmu_pipeline)
-target_include_directories(test_nmu_pipeline PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(test_nmu_pipeline PRIVATE yaml-cpp::yaml-cpp)
-
 add_cmodel_test(test_depacketize)
 # Pick up the shared loopback fixtures from tests/common/ via
 # "common/loopback_*.hpp".

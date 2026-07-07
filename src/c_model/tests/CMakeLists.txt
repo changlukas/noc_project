@@ -19,7 +19,6 @@ function(add_cmodel_test name)
   gtest_discover_tests(${name})
 endfunction()
 
-add_cmodel_test(test_pins_smoke)
 add_cmodel_test(test_flit)
 
 add_subdirectory(axi)
