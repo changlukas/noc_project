@@ -29,45 +29,39 @@
 - Consumes: existing `file_master` (`axi_test::axi_file_master`), its public `aw_queue`/`ar_queue` (`ax_beat_t[$]`), `drv.send_aw(ax_beat_t)` / `drv.send_ar(ax_beat_t)`, `run_w()`, `clk_i`, `rst_ni`, `run_done`.
 - Produces: when `+traffic_inj_ratio=<f>` (0.0..1.0) is passed, the endpoint injects continuously at that rate for `TRAFFIC_CYCLES` then sets `run_done`. When absent, behavior is unchanged (two-phase). New output signal is only the existing `end_of_sim_o` timing (no new ports).
 
-- [ ] **Step 1: Add traffic-mode signals + a gated replay task above the directed stimulus `initial` (after line 254)**
+Design (post-Codex fix): mirror the VIP's own `axi_file_master::run()` (which forks all five of
+AW / W / AR / B / R concurrently, `axi_test.sv:2589`) so B/R responses are consumed by `wait_b`/`wait_r`
+and each W follows its AW in order. The ONLY change from `run()` is swapping `run_aw`/`run_ar` for gated
+copies that idle before each launch. Single ordered pass (`pop_front`, no replay), so no W-vs-AW
+desync, no aliasing, no lockstep periodicity. `wait_b`/`wait_r` drain `b_outst`/`r_outst` (sized at
+`load_files`, `axi_test.sv:2567-2587`), so the `fork ... join` terminates naturally when the stimulus is
+drained and all responses received. Sustained-ness comes from a LARGE stimulus (Task 2), not a fixed
+timer, so there is no `run_done` race.
+
+- [ ] **Step 1: Add traffic-mode signals + two gated launch tasks above the directed stimulus `initial` (after line 254)**
 
 ```systemverilog
     // Traffic mode (perf sweep): continuous interleaved injection paced by a
     // per-cycle gate. Selected at runtime by +traffic_inj_ratio; absent => the
     // two-phase directed run below is unchanged. Gate uses $urandom_range (PRNG,
-    // no constraint solver => no z3). Only AW/AR launches are gated; run_w feeds
-    // W freely so each W still follows its own AW.
-    localparam int unsigned TRAFFIC_CYCLES = 40000;  // long run; warmup+drain negligible
+    // no constraint solver => no z3). Gated copies of run_aw/run_ar: same body as
+    // axi_test.sv:2540-2565 plus a per-cycle idle before each send.
     real traffic_inj_ratio;
     int  unsigned inj_gate_pct;
-    // cap-block-ish instrumentation: cycles where the gate fired but the bus was
-    // not ready (fabric backpressure). Reported for the steady-state sanity check.
-    longint unsigned ax_launch_attempt = 0;
-    longint unsigned ax_launch_done    = 0;
 
-    // Gated, replaying AX launcher. `is_write` picks aw_queue+send_aw vs
-    // ar_queue+send_ar. `start_off` rotates the replay start so nodes are not in
-    // lockstep. Loops until run_done (set by the fixed-window timer).
-    task automatic gated_run_ax(input bit is_write, input int unsigned start_off);
-        int unsigned idx;
-        idx = start_off;
-        forever begin
-            if (run_done) return;
-            // gate: idle one cycle unless the coin is under the ratio
-            if (($urandom_range(0, 99)) >= inj_gate_pct) begin
-                @(posedge clk_i);
-            end else begin
-                ax_launch_attempt++;
-                if (is_write) begin
-                    if (file_master.aw_queue.size() == 0) @(posedge clk_i);
-                    else file_master.drv.send_aw(file_master.aw_queue[idx % file_master.aw_queue.size()]);
-                end else begin
-                    if (file_master.ar_queue.size() == 0) @(posedge clk_i);
-                    else file_master.drv.send_ar(file_master.ar_queue[idx % file_master.ar_queue.size()]);
-                end
-                ax_launch_done++;
-                idx++;
-            end
+    task automatic gated_run_aw();
+        while (file_master.aw_queue.size() > 0) begin
+            while ($urandom_range(0, 99) >= inj_gate_pct) @(posedge clk_i);
+            file_master.drv.send_aw(file_master.aw_queue[0]);
+            void'(file_master.aw_queue.pop_front());
+        end
+    endtask
+
+    task automatic gated_run_ar();
+        while (file_master.ar_queue.size() > 0) begin
+            while ($urandom_range(0, 99) >= inj_gate_pct) @(posedge clk_i);
+            file_master.drv.send_ar(file_master.ar_queue[0]);
+            void'(file_master.ar_queue.pop_front());
         end
     endtask
 ```
@@ -89,12 +83,15 @@ with:
         @(posedge rst_ni);
         if ($value$plusargs("traffic_inj_ratio=%f", traffic_inj_ratio)) begin
             inj_gate_pct = int'(traffic_inj_ratio * 100.0);
+            // Mirror axi_file_master::run() but with gated AW/AR. join (not
+            // join_none) so B/R are consumed and the pass terminates cleanly.
             fork
-                gated_run_ax(1'b1, NODE_ID);              // writes, rotated start
-                gated_run_ax(1'b0, NODE_ID + 1);          // reads, rotated start
-                file_master.run_w();                      // W follows AW freely
-            join_none
-            repeat (TRAFFIC_CYCLES) @(posedge clk_i);     // fixed steady window
+                gated_run_aw();
+                file_master.run_w();
+                gated_run_ar();
+                file_master.wait_b();
+                file_master.wait_r();
+            join
             run_done = 1'b1;
         end else begin
             fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
@@ -108,10 +105,10 @@ with:
 Run (WSL): `cd sim/verilator && make TBTOP_EXE RUN_CLASS=directed TOPOLOGY=mesh_4x4_vc1`
 Expected: Verilator build succeeds (no compile error on the new task / plusarg).
 
-- [ ] **Step 4: Smoke-run traffic mode at ratio=1.0 and confirm sustained non-vacuous traffic**
+- [ ] **Step 4: Confirm the build links and the two-phase path is unchanged**
 
-Run (WSL): `cd sim/verilator && make run-directed RUN_CLASS=directed TOPOLOGY=mesh_4x4_vc1 VERILATOR_RUN_EXTRA="+traffic_inj_ratio=1.0"`
-Expected: the run reaches `end_of_sim` after ~TRAFFIC_CYCLES, and each node's `axi_bw_monitor` `$display` prints non-zero `read_bw` / `write_bw`. (If `VERILATOR_RUN_EXTRA` is not already a passthrough, add it in Task 2 first.)
+Run (WSL): `cd sim/verilator && make run-directed RUN_CLASS=directed TOPOLOGY=mesh_4x4_vc1` (no `+traffic_inj_ratio`)
+Expected: the existing two-phase directed run still passes (the `else` branch is byte-identical to the old code). The functional traffic-mode run (sustained non-zero bw) is validated in Task 2 Step 2, once the `run-traffic` recipe exists to pass `+traffic_inj_ratio` and a large stimulus.
 
 - [ ] **Step 5: Commit**
 
@@ -144,14 +141,16 @@ run-traffic: $(TBTOP_EXE)
 	@mkdir -p output/$(TRAFFIC_TAG)
 	$(PYTHON3) ../tools/gen_test_patterns.py --pattern uniform_random \
 	    --topology $(TOPOLOGY) --out $(STIM_ROOT) --format file_master
-	./$(TBTOP_EXE) \
+	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \
 	    "+traffic_inj_ratio=$(INJ_RATIO)" \
 	    "+perf_out=output/$(TRAFFIC_TAG)/perf.json" \
 	    2>&1 | tee output/$(TRAFFIC_TAG)/run.log
 ```
 
-(Match the exact `gen_test_patterns.py` flags and `STIM_ROOT` / `TBTOP_EXE` variables already used by the `run-directed` recipe at lines 203-219. Copy that recipe's stimulus-gen line verbatim and only swap the pattern to `uniform_random` and add `+traffic_inj_ratio`.)
+Two things to get right by copying the working `run-directed` recipe (`Makefile:203-219`) verbatim, not from memory:
+- Invoke the binary exactly as `run-directed` does (bare `$(TBTOP_EXE)`, where `TBTOP_EXE := $(OBJ_DIR)/V$(TOP)$(EXEEXT)`, `Makefile:88`). Do NOT prefix `./` — with an absolute `BUILD_ROOT` from `local.mk` that breaks.
+- Copy the exact `gen_test_patterns.py` invocation from `run-directed` and swap only the pattern to `uniform_random`, AND raise the per-node transaction count to its large-volume flag so the run sustains long enough that warmup + drain are a small fraction of the window (the fork terminates when the stimulus drains, so the file size sets the run length). Confirm the flag name against `gen_test_patterns.py --help`.
 
 - [ ] **Step 2: Run one point end-to-end**
 
@@ -189,10 +188,14 @@ Record the exact format. Use it in the parser regex below (adjust the pattern to
 from collect_saturation import parse_bw
 
 def test_parse_bw_sums_nodes():
-    # Replace this sample with two real lines captured in Step 1.
+    # Real axi_bw_monitor format (axi_bw_monitor.sv:146-149): one Read line and
+    # one Write line per node, "[Monitor <Name>][Read|Write] ... BW: <f> Bits/cycle".
+    # Re-confirm the exact wording against a real Step-1 log before trusting this.
     log = (
-        "node0.manager: read_bw = 4.0 bits/cyc, write_bw = 2.0 bits/cyc\n"
-        "node1.manager: read_bw = 3.0 bits/cyc, write_bw = 1.0 bits/cyc\n"
+        "[Monitor node0.manager][Read] BW: 4.00 Bits/cycle\n"
+        "[Monitor node0.manager][Write] BW: 2.00 Bits/cycle\n"
+        "[Monitor node1.manager][Read] BW: 3.00 Bits/cycle\n"
+        "[Monitor node1.manager][Write] BW: 1.00 Bits/cycle\n"
     )
     out = parse_bw(log)
     assert out["read_bw"] == 7.0
@@ -208,15 +211,20 @@ Expected: FAIL (`collect_saturation` not found).
 
 ```python
 # sim/tools/collect_saturation.py
-import re, sys
+import re
 
-_BW = re.compile(r"read_bw\s*=\s*([\d.]+).*?write_bw\s*=\s*([\d.]+)", re.I)
+# axi_bw_monitor prints one line per node per direction:
+#   [Monitor <Name>][Read]  ... BW: <f> Bits/cycle
+#   [Monitor <Name>][Write] ... BW: <f> Bits/cycle
+_BW = re.compile(r"\[Monitor[^\]]*\]\[(Read|Write)\].*?BW:\s*([\d.]+)\s*Bits/cycle", re.I)
 
 def parse_bw(log_text: str) -> dict:
     read = write = 0.0
     for m in _BW.finditer(log_text):
-        read += float(m.group(1))
-        write += float(m.group(2))
+        if m.group(1).lower() == "read":
+            read += float(m.group(2))
+        else:
+            write += float(m.group(2))
     return {"read_bw": read, "write_bw": write}
 ```
 
@@ -337,5 +345,10 @@ git commit -m "feat(sim): saturation bar chart + verification (plateau, perf.jso
 ## Self-review notes
 
 - Spec coverage: injection gate (Task 1), reuse u_bw_mst / link_perf_monitor untouched (Task 1 constraints), sweep + CSV (Tasks 2-3), bar chart (Task 4), verification incl perf.json cross-check + plateau + VC separation (Task 4). Offered-load-as-payload-bits is folded into the accepted-throughput readout (bw_monitor reports bits/cyc directly), so the x-axis-quantity concern is handled by measuring accepted bits rather than launch counts.
-- Known implementation risk (Task 1): the exact `send_aw`/`send_ar` blocking semantics and `w_queue` ordering under replay may need tuning against `make sim`. The verification step (non-zero sustained bw) is the gate. If W ordering desyncs the scoreboard, note the scoreboard is not the goal here and can be left disabled in traffic mode.
-- Numbers marked to tune during bring-up: `TRAFFIC_CYCLES` (40000), `RATIOS` ({0.7,0.85,1.0}). Adjust once the first run shows the fill time and the plateau location.
+- Known implementation risk (Task 1): traffic mode is a perf run, not a scoreboard run. It mirrors the
+  VIP `run()` (concurrent AW/W/AR/B/R) so responses are consumed and W follows AW in order. Confirm at
+  ratio=1.0 the interleaved pass actually saturates the fabric (sustained non-zero bw across a long run);
+  if bw is low, the per-node stimulus volume is too small or an outstanding limit binds.
+- Numbers marked to tune during bring-up: per-node stimulus volume (must be large enough that the run is
+  long and warmup/drain are a small fraction), `RATIOS` ({0.7,0.85,1.0}). Adjust once the first run shows
+  the run length and the plateau location.

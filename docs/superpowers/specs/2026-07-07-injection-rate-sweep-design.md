@@ -81,9 +81,10 @@ traffic held in steady state. The traffic mode runs its own continuous injection
 
 **INPUT** `+traffic_inj_ratio=%f` (0.0 to 1.0), the parsed `aw_queue` / `ar_queue`.
 **COMPUTE** each cycle inject the next transaction with probability `traffic_inj_ratio` (else idle one
-cycle), interleaving AW and AR, replaying the queues to sustain traffic. Preserve the emitter's
-read/write proportion. Rotate the replay start offset per node so replay does not create lockstep
-periodic traffic (booksim2 keeps generation continuous, not looped).
+cycle), interleaving AW and AR by mirroring the VIP's own `run()` (which forks AW/W/AR/B/R concurrently)
+with gated AW/AR launches. Single ordered pass over a large-enough stimulus, so W follows its AW in
+order and B/R are consumed by `wait_b`/`wait_r`. Sustained-ness comes from stimulus volume, not a fixed
+timer or lockstep replay.
 **OUTPUT** transactions offered at a controlled fraction of peak.
 
 Zero upstream edit. `aw_queue`, `ar_queue`, `drv` are public in the pulp `axi_file_master`, and the
