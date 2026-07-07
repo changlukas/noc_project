@@ -1,119 +1,139 @@
-# Injection-rate / saturation sweep — design
+# Saturation-throughput measurement (injection-rate driven) — design
 
 Date: 2026-07-07
-Status: Draft (brainstormed, pending Codex + ponytail review)
+Status: Draft (brainstormed + Codex + booksim2 survey, pending final user review)
 
 ## Goal
 
-Produce a latency-vs-offered-load curve per VC count (vc1/2/4/8) on the 4x4 mesh, so the
-value of adding VCs becomes measurable. Today vc1..vc8 end-to-end latency reads flat because
-every co-sim run injects at a single greedy operating point, so no run applies enough congestion
-to separate the configs.
+Show the value of VC count on the 4x4 mesh by measuring the saturation throughput of each VC
+configuration (vc1, vc2, vc4, vc8). Today vc1..vc8 end-to-end latency reads flat, because every
+co-sim run injects at a single greedy operating point with no steady-state throughput readout, so the
+configs cannot be separated.
 
-## Success criteria
+## Deliverable and success criteria
 
-1. One CSV + plot per topology holding, for each vc config, points of (offered_load, achieved_bw, mean_latency).
-2. The curve is non-vacuous: at low load latency is flat, past a knee it rises sharply.
-3. The vc8 curve reaches its knee at a higher offered load than vc1 (VCs delay saturation). If it does
-   not, that is itself a reportable result about the fabric, not a test failure.
-4. The whole sweep runs on Verilator/WSL with no z3 in the loop.
+1. A bar chart: saturation throughput (accepted payload bits/cycle) per VC config, plus the CSV behind it.
+2. Non-vacuous: accepted throughput rises with offered load then plateaus, and the plateau is the reported number.
+3. vc8 saturation throughput is higher than vc1 (more VCs sustain more load before the fabric saturates).
+   If it is not, that is a reportable result about the fabric, not a test failure.
+4. Runs on Verilator/WSL with no z3 in the loop.
 
-## Method (locked in brainstorm)
+## Why throughput, not a latency curve
 
-Port FlooNoC's own bandwidth methodology. FlooNoC separates two orthogonal axes:
+booksim2 (`src/trafficmanager.cpp`, `src/injection.cpp`) is the canonical reference. It measures two
+latencies: network latency `flat/nlat = atime - itime` (network entry to arrival, bounded even at
+saturation) and packet latency `plat`, measured from packet GENERATION and including the source-queue
+wait (`_partial_packets[source]`). Only `plat` diverges at saturation, because the source queue is what
+explodes once offered load exceeds capacity.
 
-| axis | mechanism | FlooNoC source |
+A ported `axi_bw_monitor` taps the AXI bus, so it can only measure network-latency-equivalent (bus
+issue to completion), which stays bounded at saturation. A latency curve built from it would read flat
+across vc1..vc8, reproducing the exact problem we are trying to fix. Capturing the latency knee would
+require timestamping each transaction at GENERATION inside the injector (the AXI analogue of booksim2's
+source queue), which is a larger change.
+
+Saturation throughput sidesteps this. Accepted throughput is what `axi_bw_monitor` measures accurately.
+The plateau of accepted-vs-offered is the saturation point, and its height is the VC-value metric. This
+also matches the relaxed deliverable (a bar chart is enough, no curve required).
+
+## Method
+
+Port FlooNoC's injection mechanism and measure with FlooNoC's monitor, using booksim2's steady-state
+discipline.
+
+| axis | mechanism | source |
 |---|---|---|
-| spatial (where traffic goes) | deterministic pattern files | `util/gen_jobs.py` |
-| temporal (offered rate) | per-cycle Bernoulli inject gate, runtime `+TRAFFIC_INJ_RATIO=%f` | `hw/test/floo_dma_test_node.sv` |
-| measurement | achieved bandwidth + latency mean/std | `hw/test/axi_bw_monitor.sv` |
+| spatial pattern | deterministic stimulus file | our `gen_test_patterns` (uniform etc.), = FlooNoC `traffic_type` |
+| offered load | per-cycle injection at rate `traffic_inj_ratio` | FlooNoC `TRAFFIC_INJ_RATIO`, = booksim2 `BernoulliInjectionProcess` |
+| measurement | accepted throughput (payload bits/cycle) | ported FlooNoC `axi_bw_monitor` |
+| steady state | run past convergence, sample in the stable region | booksim2 sample_period / stopping_thres |
 
-We mirror all three on the directed path. Directed addresses come from a stimulus file, so no
-`randomize()` runs, so Verilator never invokes z3. z3 was only ever a cost on the constrained-random
-conformance axis, which this work does not touch.
-
-We do NOT use the c_model `perf.json` for this sweep. `perf.json` is project-authored. The perf
-numbers here come from the ported upstream `axi_bw_monitor` so the results are trustworthy and
-directly comparable to FlooNoC's own.
+Directed addresses come from the file, so no `randomize()` runs and Verilator never calls z3. z3 was
+only ever a cost on the constrained-random conformance axis, which this work does not touch.
 
 ## Architecture
 
 ```
-gen_test_patterns (existing: neighbor/transpose/uniform_random/hotspot)
-     |  spatial pattern -> per-node file_master stimulus (no timing)
-     v
-per-node endpoint (sim/tb/user_node_endpoint.sv, NEW perf-sweep mode)
-     file_master.load_files() -> aw_queue / ar_queue           (reuse, public members)
-     sustained gated inject:  loop, interleave AW/AR, replay to sustain,
-        each cycle: if !($urandom_range(0,99) < inject_ratio*100) @(posedge clk)  (FlooNoC Bernoulli)
-        else drv.send_aw / drv.send_ar
-     v  node AXI master bus
-     axi_bw_monitor (ported, en_i gated to the steady-state window)
-        -> $display: achieved_bw (bits/cyc), latency mean +/- std, util%
-     v
-sweep driver (NEW, thin, external — FlooNoC has no built-in loop either)
-     for ratio in {points}:  make sim <perf-sweep mode> +inject_ratio=$ratio
-     collect (offered=ratio*peak, achieved_bw, mean_latency) -> CSV -> curve
+gen_test_patterns (existing: uniform_random etc.)  -> per-node stimulus file (spatial pattern, no timing)
+        v
+per-node endpoint (sim/tb/user_node_endpoint.sv, NEW traffic mode)
+   file_master.load_files() -> aw_queue / ar_queue                (reuse public members)
+   continuous injection at traffic_inj_ratio:
+       each cycle, inject the next transaction with probability traffic_inj_ratio,
+       else idle one cycle (RandomFloat gate, booksim2 Bernoulli; no z3)
+       replay the queues to sustain traffic through the measurement window
+        v  node AXI master bus
+   axi_bw_monitor (ported): accepted throughput (payload bits/cyc), + network latency as sanity only
+        v
+collect (thin external script)
+   for a few high traffic_inj_ratio points per VC config: run, read accepted throughput,
+   confirm the plateau -> saturation throughput -> CSV -> bar chart
 ```
 
-## Component 1 — injection-rate gate + sustained mode
+## Component 1 — continuous injection at traffic_inj_ratio
 
-**Where** `sim/tb/user_node_endpoint.sv`, a new runtime-selected perf-sweep mode (`+perf_sweep`
-plusarg). The existing two-phase `TB_DIRECTED` scoreboard path is left untouched.
+**Where** `sim/tb/user_node_endpoint.sv`, a new runtime-selected traffic mode (`+traffic_inj_ratio=%f`
+present selects it). The existing two-phase `TB_DIRECTED` scoreboard path is left untouched.
 
-**Why a new mode, not a gate on the existing path.** The existing directed run is two-phase (all
-writes drain, then all reads) because the scoreboard needs write-before-readback. A latency-load
-curve needs sustained, interleaved, constant-rate traffic that reaches steady state. Gating the
-two-phase run would measure a ramp plus drain, not steady state. The perf-sweep mode therefore runs
-its own sustained interleaved loop.
+**Why a new mode.** The existing directed run is two-phase (all writes drain, then all reads), needed
+for write-before-readback scoreboarding. Saturation throughput needs sustained, continuous, mixed
+traffic held in steady state. The traffic mode runs its own continuous injection loop.
 
-**INPUT** `+inject_ratio=%f` (0.0 to 1.0, default 1.0), the parsed `aw_queue` / `ar_queue`.
-**COMPUTE** interleave AW and AR launches, replay the queues to sustain traffic for the run window,
-apply the per-cycle Bernoulli gate before each launch.
-**OUTPUT** AXI transactions offered at rate `inject_ratio` of the greedy peak.
+**INPUT** `+traffic_inj_ratio=%f` (0.0 to 1.0), the parsed `aw_queue` / `ar_queue`.
+**COMPUTE** each cycle inject the next transaction with probability `traffic_inj_ratio` (else idle one
+cycle), interleaving AW and AR, replaying the queues to sustain traffic. Preserve the emitter's
+read/write proportion. Rotate the replay start offset per node so replay does not create lockstep
+periodic traffic (booksim2 keeps generation continuous, not looped).
+**OUTPUT** transactions offered at a controlled fraction of peak.
 
 Zero upstream edit. `aw_queue`, `ar_queue`, `drv` are public in the pulp `axi_file_master`, and the
-endpoint already calls `file_master.run_aw()` / `load_files()` today. The gate uses `$urandom_range`
-(PRNG, not the constraint solver), so no z3.
+endpoint already calls `file_master.run_aw()` / `load_files()` today. The gate uses `RandomFloat` /
+`$urandom_range` (PRNG, not the constraint solver), so no z3.
 
-`MAX_*_TXNS` (outstanding) must stay high enough that the Bernoulli gate, not the outstanding cap,
-limits offered load across the whole sweep. Proposed 20 (FlooNoC's value). [TBD-tune] confirm the cap
-never binds below fabric saturation.
+`MAX_*_TXNS` (outstanding) must be high enough that the fabric saturates before the outstanding cap
+binds, otherwise accepted throughput measures endpoint credit pressure, not fabric capacity. Proposed
+20 (FlooNoC's value). Instrument attempted / accepted / cap-blocked injection cycles per node.
+Acceptance rule: cap-blocked cycles at the reported plateau must be near zero. Raise the cap until the
+plateau stops moving.
 
 ## Component 2 — bw_monitor (ported)
 
-**Provenance** copy `axi_bw_monitor.sv` from FlooNoC into `sim/tb/` (or `sim/dv/`), record source
-+ license in an attribution note, following the repo pattern (`c_model/tests/axi/ATTRIBUTION.md`).
-The copy may need its tap adapted to our AXI struct field names or driven from the DV interface. That
-adaptation is on our copy, not the FlooNoC original.
+**Provenance** copy `axi_bw_monitor.sv` from FlooNoC into `sim/tb/`, record source + license in an
+attribution note (repo pattern: `c_model/tests/axi/ATTRIBUTION.md`). Adapt the tap to our AXI struct or
+DV interface in our copy, not the FlooNoC original.
 
-**Wiring** one instance per manager node, tapping that node's AXI master bus (the bus the sustained
-injector drives). `end_of_sim_i` pulsed at run end.
+**Wiring** one instance per manager node on its AXI master bus. Aggregate accepted throughput is the
+sum across managers. Report per-node throughput too, to expose imbalance (uniform_random should be
+symmetric, a large spread flags a problem).
 
-**Measurement window** `en_i` gates counting to the steady-state window. Enable after a warmup that
-lets the fabric fill, disable before drain. Proposed warmup 500 cyc, measure 2000 cyc [TBD-tune]
-against the observed fill time at the highest load.
+**Primary output** accepted throughput = delivered payload bits / measurement-window cycles.
+**Secondary (sanity only)** network latency mean, explicitly not used to locate saturation.
 
-**OUTPUT** per-node `$display` of achieved_bw, latency mean/std, util. The sweep driver parses these.
+## Component 3 — collect saturation throughput
 
-## Component 3 — sweep driver
+**Where** a thin external shell or make loop over `make sim` in traffic mode. FlooNoC has no built-in
+sweep loop either.
 
-**Where** a thin shell or make loop, external to the testbench. FlooNoC has no built-in sweep loop
-either, it drives one `TRAFFIC_INJ_RATIO` point per run and loops externally.
+**Steady state (booksim2-derived).** Do not use a fixed warmup/measure window. Run long, and in the
+collector detect the steady region: compute accepted throughput over successive sample windows and take
+the plateau once the value stops changing beyond a small threshold across consecutive windows. Flag a
+point as unstable if accepted throughput keeps drifting (backlog growing), which means past saturation
+or cap-bound. This mirrors booksim2's stopping_thres convergence rather than guessing window sizes.
 
-**INPUT** a list of ratio points, the vc configs, the topology, the spatial pattern.
-**COMPUTE** for each (vc, ratio): run `make sim` in perf-sweep mode with `+inject_ratio`, parse the
-bw_monitor output.
-**OUTPUT** one CSV row per run `(vc, pattern, inject_ratio, offered_load, achieved_bw, mean_latency,
-p_latency_std)`, then a plot with one latency-vs-offered curve per vc.
+**Saturation throughput.** Accepted throughput equals offered while below saturation, then plateaus.
+Run a few high offered-load points per VC config (proposed `traffic_inj_ratio` in {0.7, 0.85, 1.0}
+[TBD-tune]) and confirm accepted throughput has flattened across them. The flattened value is the
+saturation throughput. A full low-to-high sweep is optional supporting evidence (the accepted-vs-offered
+curve), not required for the bar chart.
 
-**x-axis** offered load = `inject_ratio * peak_rate`, not achieved bandwidth. Past saturation achieved
-plateaus while offered keeps rising and latency explodes, so plotting against achieved would collapse
-the post-knee points. achieved_bw is reported as a second series, the gap achieved < offered marks the
-saturation point.
+**Offered load** defined as payload bits/cycle, not the AW/AR launch count:
+`traffic_inj_ratio * peak_payload_rate`, where peak accounts for the read/write mix and bytes per
+transaction. Record observed AW / AR / W-bytes / R-bytes per run so offered and accepted are
+apples-to-apples.
 
-**Point spacing** denser near the knee. Proposed `{0.1, 0.2, 0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0}`
-[TBD-tune] refine around the observed knee after a first coarse pass.
+**OUTPUT** CSV `(vc, pattern, traffic_inj_ratio, offered_bits_per_cyc, accepted_bits_per_cyc,
+cap_blocked_frac, stable?)`, and a bar chart of saturation throughput per VC config built by a
+throwaway script (no plotting infrastructure).
 
 ## Scope (one-shot measurement study)
 
@@ -121,32 +141,46 @@ saturation point.
 |---|---|
 | topology | mesh 4x4 |
 | vc configs | vc1, vc2, vc4, vc8 |
-| spatial pattern | uniform_random (primary). transpose / hotspot optional second pass |
-| ratio points | ~9, knee-dense (above) |
-| runs | 4 vc x ~9 = ~36, directed, no z3 |
+| spatial pattern | uniform_random only (Phase 1). transpose / hotspot only if Phase 1 is inconclusive |
+| offered-load points | a few high points to confirm the plateau (above) |
+| runs | ~4 vc x ~3 points, directed, no z3 |
 
-Not a permanent framework. The sweep driver is a throwaway loop over the existing `make sim`. If a
-reusable sweep is wanted later, build it fresh against this.
+Not a permanent framework. The collector is a throwaway loop over the existing `make sim`. Build a
+reusable sweep fresh against this only if later wanted.
 
 ## What does NOT change
 
-- pulp axi VIP (`sim/dv/axi-0.39.7`) source: untouched. We reuse public members only.
-- FlooNoC `axi_bw_monitor` original: untouched. We bring in a copy.
+- pulp axi VIP (`sim/dv/axi-0.39.7`) source: untouched, public members reused only.
+- FlooNoC `axi_bw_monitor` original: untouched, brought in as a copy.
 - The existing two-phase `TB_DIRECTED` scoreboard path and the constrained_random axis: untouched.
+
+## Naming (aligned to FlooNoC + Dally)
+
+| concept | term used | source |
+|---|---|---|
+| injection knob | `traffic_inj_ratio` | FlooNoC `TRAFFIC_INJ_RATIO` |
+| per-cycle probabilistic injection | injection at rate `traffic_inj_ratio` | booksim2 BernoulliInjectionProcess |
+| x-quantity | offered load (payload bits/cyc) | Dally interconnect texts |
+| y-quantity | accepted throughput, saturation throughput | Dally, booksim2 |
+| traffic pattern | uniform / transpose / hotspot | FlooNoC `traffic_type` |
+| stable-region sampling | steady state, convergence | booksim2 |
 
 ## Risks
 
 | risk | mitigation |
 |---|---|
-| warmup/measure window mis-sized, curve reads transient not steady state | tune window against fill time at max load, sanity-check low-load latency is flat |
-| outstanding cap binds before fabric saturates, curve measures the master not the NoC | set cap high (20), verify it never binds below saturation |
-| bw_monitor tap does not match our AXI struct | adapt the copy to our struct / DV interface, verify against a known single-txn latency |
-| knee falls between sampled points | coarse pass first, then add points around the knee |
-| replay-to-sustain changes address footprint vs a single pass | replay reuses the same pattern addresses, so spatial pattern is preserved across the window |
+| outstanding cap binds before fabric saturates, plateau measures the endpoint not the NoC | instrument cap-blocked cycles, require near zero at the plateau, raise cap until plateau stops moving |
+| replay creates periodic lockstep traffic instead of the intended pattern | long queues, per-node rotated replay start offset, report per-destination distribution |
+| steady region mis-identified, plateau read off a transient | detect convergence across sample windows, flag drifting (unstable) points |
+| offered vs accepted not comparable (AW/AR count vs payload bits) | define offered as payload bits/cyc, record observed AW/AR/W/R per run |
+| bw_monitor tap does not match our AXI struct | adapt the copy, verify accepted throughput against a hand-computed single-stream case |
+| read/write mix drift changes the plateau | preserve emitter R/W proportion, report the observed mix |
 
 ## Verification
 
-1. Single-txn sanity: at very low load the mean latency matches a hand-computed zero-load latency
-   (pipeline depth + hop count), confirming the monitor and window are correct.
-2. Monotonic knee: latency rises with offered load, flat then sharp.
-3. VC separation: compare the four curves, report where each saturates.
+1. Throughput sanity: a single stream at low load shows accepted equal to offered (linear region).
+2. Cross-check (ponytail): at one point, compare bw_monitor accepted bytes against the c_model
+   `perf.json` byte counts over the same window. Agreement validates both, disagreement shows which to
+   trust.
+3. Plateau: accepted throughput flattens across the high offered-load points, cap-blocked near zero.
+4. VC separation: compare the four saturation numbers, report the bar chart.
