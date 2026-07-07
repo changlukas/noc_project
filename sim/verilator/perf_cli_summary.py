@@ -1,100 +1,17 @@
 #!/usr/bin/env python3
-"""CLI summary printer for perf.json (spec §5.1).
+"""CLI summary printer for perf.json (spec §5.1, NoC section).
 
 Usage: perf_cli_summary.py <perf.json>
 
-Prints the aggregate summary to stdout.  Raw transactions[] are JSON-only;
-this script never prints them.
+Prints per-router fifo occupancy and per-link flit/stall counters.
 """
 
 import json
-import math
 import sys
 
 
 def _hdr(s):
     print(s)
-
-
-def print_axi_slots(slots):
-    _hdr("  AXI throughput / backpressure")
-    fmt = "    {:<24} {:>8} {:>8} {:>6} {:>6} {:>7} {:>7}"
-    print(fmt.format(
-        "slot", "bytes_wr", "bytes_rd",
-        "txn_wr", "txn_rd", "idle_wr", "idle_rd"
-    ))
-    for s in slots:
-        print(fmt.format(
-            s.get("name", "?"),
-            s.get("write_byte_count", 0),
-            s.get("read_byte_count", 0),
-            s.get("write_txn_count", 0),
-            s.get("read_txn_count", 0),
-            s.get("slave_write_idle_cyc", 0),
-            s.get("master_read_idle_cyc", 0),
-        ))
-
-
-def _p95(transactions):
-    """Nearest-rank p95 from transactions list (each has a 'latency' field)."""
-    lats = sorted(t["latency"] for t in transactions)
-    n = len(lats)
-    if n == 0:
-        return None
-    idx = math.ceil(0.95 * n) - 1  # 0-based nearest-rank
-    return lats[idx]
-
-
-def print_latency(latency, slots):
-    _hdr("  Latency -- end-to-end (manager; min = best-case observed)")
-    txns = latency.get("transactions", [])
-    p95_val = _p95(txns)
-    if p95_val is not None:
-        print(f"    p95 (all txns, nearest-rank): {p95_val} cyc  (n={len(txns)})")
-    by_class = latency.get("by_class", [])
-    if by_class:
-        fmt = "    {:<36} {:>4} {:>5} {:>6} {:>5}"
-        print(fmt.format("class", "n", "min", "mean", "max"))
-        for s in by_class:
-            src = s.get("src")
-            dst = s.get("dst", "?")
-            flow = "{}->{}" .format(src, dst) if src else dst
-            cls = "{} {}  len{} size{}".format(
-                s.get("op", "?"),
-                flow,
-                s.get("len", "?"),
-                s.get("size", "?"),
-            )
-            mean_val = s.get("mean", 0)
-            if isinstance(mean_val, float):
-                mean_str = "{:.1f}".format(mean_val)
-            else:
-                mean_str = str(mean_val)
-            print(fmt.format(cls, s.get("count", 0), s.get("min", 0),
-                             mean_str, s.get("max", 0)))
-
-    hist = latency.get("histogram", [])
-    nonzero = [b for b in hist if b.get("count", 0) > 0]
-    if nonzero:
-        parts = []
-        for b in nonzero:
-            lo = b.get("low", 0)
-            hi = b.get("high", 0)
-            cnt = b.get("count", 0)
-            rng = "[{},{})".format(lo, hi) if hi != 0 else "[{},inf)".format(lo)
-            parts.append("{}={}".format(rng, cnt))
-        print("    histogram (cyc): " + "  ".join(parts))
-
-    # slave service latency from subordinate slots
-    for s in slots:
-        if s.get("role") == "subordinate" and "service_latency" in s:
-            svc = s["service_latency"]
-            w = svc.get("write", {})
-            r = svc.get("read", {})
-            w_str = str(w.get("min", "?")) if s.get("write_txn_count", 0) > 0 else "n/a"
-            r_str = str(r.get("min", "?")) if s.get("read_txn_count", 0) > 0 else "n/a"
-            print("    slave service @{}: write {}  read {}".format(
-                s.get("name", "?"), w_str, r_str))
 
 
 def print_noc(noc):
@@ -149,16 +66,10 @@ def main():
     window = data.get("window", {})
     w_start = window.get("start_cyc", 0)
     w_end = window.get("end_cyc", "?")
-    slots = data.get("axi_slots", [])
-    latency = data.get("latency", {})
     noc = data.get("noc", {})
-    txn_count = len(latency.get("transactions", []))
 
     print("[perf] {}   window [{},{}) cyc".format(scenario, w_start, w_end))
-    print_axi_slots(slots)
-    print_latency(latency, slots)
     print_noc(noc)
-    print("  {} transactions -> {}".format(txn_count, path))
 
 
 if __name__ == "__main__":

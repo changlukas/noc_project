@@ -631,19 +631,6 @@ void sample_one_router(const std::string& node, ni::cmodel::router::Router& r, c
 
 }  // namespace
 
-extern "C" void cmodel_perf_axi_txn(const char* slot, int id, int is_write, long long addr, int len,
-                                    int size, long long accept_cyc, long long complete_cyc) {
-    g_perf.add_txn(slot, static_cast<uint32_t>(id), is_write != 0, static_cast<uint64_t>(addr),
-                   static_cast<uint32_t>(len), static_cast<uint32_t>(size),
-                   static_cast<uint64_t>(accept_cyc), static_cast<uint64_t>(complete_cyc));
-}
-
-extern "C" void cmodel_perf_axi_backpressure(const char* slot, long long slave_write_idle_cyc,
-                                             long long master_read_idle_cyc) {
-    g_perf.set_slot_backpressure(slot, static_cast<uint64_t>(slave_write_idle_cyc),
-                                 static_cast<uint64_t>(master_read_idle_cyc));
-}
-
 extern "C" void cmodel_perf_link(const char* name, long long flit_count, long long stall_cyc) {
     g_perf.set_link(name, static_cast<uint64_t>(flit_count), static_cast<uint64_t>(stall_cyc));
 }
