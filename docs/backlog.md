@@ -323,13 +323,16 @@ The VCS regression path is documented as Linux-workstation and dry-run pending a
 (`docs/development.md:227-234`, `sim/vcs/Makefile:8-15`). The matrix is Verilator-only by design
 (`docs/superpowers/specs/2026-06-27-regression-matrix-design.md:174`).
 
-- **Decouple C++ ctest from `sim/test_patterns/*/scenario.yaml`** (future, own round). The integration /
-  loopback ctests (`test_integration.cpp:80`, `test_router_loopback.cpp:68-72`,
-  `test_request_response_loopback.cpp:402-403`, `test_port_pair_loopback.cpp:330-331`) read the AX4 base
-  YAMLs as directed stimulus, which is why the benchmark rebuild (`feat/checked-traffic-benchmark`) keeps
-  those YAMLs instead of deleting them under D7. User wants the YAML dependency gone (build the stimulus
-  in-test instead). Blocks a full `sim/test_patterns/` cleanup; do it before/after the benchmark round, not
-  inside it.
+- ~~**Decouple C++ ctest from `sim/test_patterns/*/scenario.yaml`**~~ **DONE 2026-07-07** (commit `35e5bdc`).
+  The ctest-prune round had already deleted the integration/loopback tests that replayed AX4 YAMLs; only
+  `test_request_response_loopback` still read one scenario (`AX4-ORD-003`). Codex + GoogleTest-primer
+  survey confirmed self-contained fixtures are idiomatic (a globbed manifest + runtime known-id registry
+  is not). Removed all 25 `sim/test_patterns/AX4-*/` dirs (~4.5 MB), the generated `scenarios_list.hpp`
+  manifest, the `noc_axi4_scenarios` INTERFACE lib, `scenario_helpers.hpp` (RequireKnownScenario), and the
+  `SCENARIO_TREE_ROOT` compile-def; inlined ORD-003 into its test (temp scenario.yaml + data.txt via
+  `common/tmp_path.hpp`, loaded through the real `axi::load_scenario`). ctest now has zero
+  `sim/test_patterns/` dependency; the dir stays only as the co-sim generated-stimulus location. Verified
+  ctest 381/381.
 
 - **GCC ICE on `test_pins_smoke.cpp`** (pre-existing, Windows host): GCC internal compiler error
   (segfault) when compiling the `build-cmodel` CMake target on this toolchain. Breaks any path
