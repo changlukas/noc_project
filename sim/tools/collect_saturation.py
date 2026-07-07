@@ -14,7 +14,6 @@ Run the four points first (each builds + runs its VC config):
     done
 then: python3 collect_saturation.py
 """
-import csv
 import pathlib
 import re
 import sys

@@ -263,6 +263,9 @@ run-traffic: $(TBTOP_EXE)
 	echo "--- run.log (tail) ---"; tail -20 output/$(TRAFFIC_TAG)/run.log; \
 	echo "--- bw_monitor ---"; grep -iE '\[Monitor .*\]\[(Read|Write)\]' output/$(TRAFFIC_TAG)/run.log; \
 	if [ $$rc -ne 0 ]; then echo "run-traffic FAIL (rc=$$rc)"; exit 1; fi; \
+	if grep -qE '%Error' output/$(TRAFFIC_TAG)/run.log; then \
+	    echo "run-traffic FAIL: %Error (fabric/protocol assertion during stress)"; exit 1; \
+	fi; \
 	if grep -qiE '\[Monitor .*\]\[(Read|Write)\].*BW:\s*[1-9]' output/$(TRAFFIC_TAG)/run.log; then \
 	    echo "run-traffic OK: non-zero bandwidth"; \
 	else \

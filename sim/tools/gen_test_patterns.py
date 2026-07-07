@@ -482,6 +482,9 @@ def main(argv=None):
     n_nodes = len(nodes)
 
     widths = axi_widths()
+    if n_nodes * a.ids_per_tile > (1 << widths["id"]):
+        ap.error(f"--ids-per-tile {a.ids_per_tile} x {n_nodes} nodes exceeds the "
+                 f"{1 << widths['id']} AXI id space; per-tile id blocks would overlap")
     base_local = 0x1000
     memory_size = a.memory_size if a.memory_size is not None else 0x40000
     rng = _random_module.Random(a.seed)
