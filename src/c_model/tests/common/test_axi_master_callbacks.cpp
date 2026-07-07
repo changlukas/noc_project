@@ -2,6 +2,7 @@
 #include "axi/axi_slave.hpp"
 #include "axi/memory.hpp"
 #include "axi/scenario_parser.hpp"
+#include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
 #include <string>
@@ -14,10 +15,10 @@ namespace {
 // The parser requires data_file for write ops and dump_file for read ops;
 // schema_version is omitted (non-strict mode) to avoid metadata regex checks.
 std::string write_inline_scenario() {
-    const std::string dir = std::string(::testing::TempDir()) + "/cb_scn";
-    const std::string data_path = dir + ".data";
-    const std::string dump_path = dir + ".rdump";
-    const std::string yaml_path = dir + ".yaml";
+    const std::string base = ni::cmodel::testing::unique_temp_path("cb_scn");
+    const std::string data_path = base + ".data";
+    const std::string dump_path = base + ".rdump";
+    const std::string yaml_path = base + ".yaml";
 
     std::ofstream(data_path) << "AA\n";
     {
@@ -53,7 +54,7 @@ TEST(AxiMasterCallbacks, FanoutAndIssueBeforeCompletion) {
     axi::AxiSlave slave(mem);
     // axi::AxiMaster = AxiMasterT<AxiSlave> (axi_master.hpp:520). 3rd arg is the
     // read-dump path (the master opens it on construction).
-    axi::AxiMaster master(scn, slave, std::string(::testing::TempDir()) + "/cb.read.txt",
+    axi::AxiMaster master(scn, slave, ni::cmodel::testing::unique_temp_path("cb") + ".read.txt",
                           /*max_out_w=*/1, /*max_out_r=*/1);
 
     int wc1 = 0, wc2 = 0, w_issue = 0;

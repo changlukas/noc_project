@@ -3,6 +3,7 @@
 #include "axi/axi_slave.hpp"
 #include "axi/memory.hpp"
 #include "common/scenario.hpp"
+#include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <fstream>
@@ -13,7 +14,10 @@ namespace axi = ni::cmodel::axi;
 class ScenarioParser : public ::testing::Test {
   protected:
     std::string write_tmp(const std::string& contents) {
-        auto path = std::string(::testing::TempDir()) + "/scenario.yaml";
+        // Unique dir per test+process so parallel ctest runners (and the bare
+        // data_file/dump_file sidecars w.txt/r.txt that resolve next to the
+        // YAML) never collide.
+        auto path = ni::cmodel::testing::unique_temp_dir("axi_master_scn") + "/scenario.yaml";
         std::ofstream f(path);
         f << contents;
         return path;

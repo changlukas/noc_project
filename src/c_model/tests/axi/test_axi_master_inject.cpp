@@ -1,6 +1,7 @@
 // Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/scenario_parser.hpp"
 #include "common/scenario.hpp"
+#include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
 #include <filesystem>
@@ -11,10 +12,10 @@ namespace {
 
 // Write YAML content to a temp file; return the file path as a string.
 std::string write_temp_yaml(const std::string& content) {
-    auto path = std::filesystem::temp_directory_path() / "test_axi_master_inject_tmp.yaml";
+    auto path = ni::cmodel::testing::unique_temp_path("axi_inject") + ".yaml";
     std::ofstream f(path);
     f << content;
-    return path.string();
+    return path;
 }
 
 }  // namespace

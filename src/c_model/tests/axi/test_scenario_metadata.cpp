@@ -1,5 +1,6 @@
 // Tests for metadata block parsing (schema_version: 1 strict mode).
 #include "axi/scenario_parser.hpp"
+#include "common/tmp_path.hpp"
 #include "scenario_helpers.hpp"
 #include <filesystem>
 #include <fstream>
@@ -8,11 +9,9 @@
 namespace {
 
 std::string write_tmp_yaml(std::string const& body) {
-    auto p =
-        std::filesystem::temp_directory_path() /
-        ("scn_meta_" + std::to_string(::testing::UnitTest::GetInstance()->random_seed()) + ".yaml");
+    auto p = ni::cmodel::testing::unique_temp_path("scn_meta") + ".yaml";
     std::ofstream(p) << body;
-    return p.string();
+    return p;
 }
 
 TEST(ScenarioMetadata, parses_name_and_category) {

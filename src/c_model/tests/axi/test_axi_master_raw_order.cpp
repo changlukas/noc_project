@@ -22,6 +22,7 @@
 #include "axi/axi_slave.hpp"
 #include "axi/memory.hpp"
 #include "common/scenario.hpp"
+#include "common/tmp_path.hpp"
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -36,10 +37,10 @@ namespace {
 // Write temp scenario files. Returns yaml path.
 // Write 0xAA to 0x1000, then read 0x1000.
 std::string write_raw_scenario() {
-    const std::string dir = std::string(::testing::TempDir()) + "/raw_order_test";
-    const std::string data_path = dir + ".data";
-    const std::string dump_path = dir + ".rdump";
-    const std::string yaml_path = dir + ".yaml";
+    const std::string base = ni::cmodel::testing::unique_temp_path("raw_order");
+    const std::string data_path = base + ".data";
+    const std::string dump_path = base + ".rdump";
+    const std::string yaml_path = base + ".yaml";
 
     std::ofstream(data_path) << "AA\n";
     {
@@ -88,7 +89,7 @@ TEST(AxiMasterRawOrder, ArHeldUntilOverlappingWriteReceivesB) {
 
     // max_out_w=1, max_out_r=1: both write and read are admitted at tick 0.
     // The RAW guard is the only mechanism preventing AR from issuing immediately.
-    axi::AxiMaster master(scn, slave, std::string(::testing::TempDir()) + "/raw.read.txt",
+    axi::AxiMaster master(scn, slave, ni::cmodel::testing::unique_temp_path("raw") + ".read.txt",
                           /*max_out_w=*/1, /*max_out_r=*/1);
 
     // Sentinels: -1 = never-set. Separate boolean gates guard first-occurrence
@@ -159,7 +160,7 @@ TEST(AxiMasterRawOrder, ArvalidNotStuckWhileReadRawHeld) {
     const std::string scn = write_raw_scenario();
     axi::AxiMasterConfig cfg;
     cfg.scenario_yaml = scn;
-    cfg.read_dump_path = std::string(::testing::TempDir()) + "/arv_stuck.read.txt";
+    cfg.read_dump_path = ni::cmodel::testing::unique_temp_path("arv_stuck") + ".read.txt";
     cfg.max_outstanding_write = 1;
     cfg.max_outstanding_read = 1;
     axi::AxiMasterStandalone master(cfg);

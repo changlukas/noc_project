@@ -7,6 +7,7 @@
 // per-side config logic co-sim does not exercise: asymmetric queue-depth
 // independence and the YAML loader's fail-loud contracts.
 #include "common/loopback_channel_set.hpp"
+#include "common/tmp_path.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/port_params.hpp"
 #include <filesystem>
@@ -43,23 +44,22 @@ TEST(PortParamsSplit, AsymmetricNmuNsuAwQueueSaturationIndependent) {
 
 // 2. Loader fail-loud: YAML missing 'nmu:' block throws std::runtime_error.
 TEST(PortParamsSplit, LoaderMissingNmuBlockThrows) {
-    auto p = std::filesystem::temp_directory_path() / "bad_nmu.yaml";
-    std::ofstream(p.string()) << "nsu: {}\nchannel_model: {}\n";
-    EXPECT_THROW(nmu::load_nmu_port_params(p.string()), std::runtime_error);
+    auto p = ni::cmodel::testing::unique_temp_path("bad_nmu") + ".yaml";
+    std::ofstream(p) << "nsu: {}\nchannel_model: {}\n";
+    EXPECT_THROW(nmu::load_nmu_port_params(p), std::runtime_error);
 }
 
 // 3. Loader fail-loud: YAML with 'nmu:' present but missing 'w_queue_depth'
 //    inside 'queues:' throws (yaml-cpp throws BadConversion or KeyNotFound).
 TEST(PortParamsSplit, LoaderMissingNmuQueueKeyThrows) {
-    auto p = std::filesystem::temp_directory_path() / "bad_nmu_key.yaml";
-    std::ofstream(p.string())
-        << "nmu:\n  queues:\n    aw_queue_depth: 32\n"
-           "    # w_queue_depth intentionally missing\n"
-           "    ar_queue_depth: 32\n    b_queue_depth: 32\n    r_queue_depth: 32\n"
-           "  depacketize: { b_q_depth: 32, r_q_depth: 32 }\n";
+    auto p = ni::cmodel::testing::unique_temp_path("bad_nmu_key") + ".yaml";
+    std::ofstream(p) << "nmu:\n  queues:\n    aw_queue_depth: 32\n"
+                        "    # w_queue_depth intentionally missing\n"
+                        "    ar_queue_depth: 32\n    b_queue_depth: 32\n    r_queue_depth: 32\n"
+                        "  depacketize: { b_q_depth: 32, r_q_depth: 32 }\n";
     // EXPECT_ANY_THROW (not EXPECT_THROW with a specific type) because
     // yaml-cpp's missing-key path throws YAML::TypedBadConversion (a
     // yaml-cpp internal subclass of std::runtime_error), not the explicit
     // std::runtime_error the block-level guards throw.
-    EXPECT_ANY_THROW(nmu::load_nmu_port_params(p.string()));
+    EXPECT_ANY_THROW(nmu::load_nmu_port_params(p));
 }
