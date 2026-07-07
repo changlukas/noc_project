@@ -72,13 +72,6 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_L
   message(STATUS "GCC ${CMAKE_CXX_COMPILER_VERSION} < 9: linking stdc++fs for std::filesystem")
 endif()
 
-# Tests and their scenario-list INTERFACE library. Both serve only the gtest
-# tree (noc_axi4_scenarios is consumed by tests/axi and tests/wrap, not by sim,
-# which reads scenario YAML at runtime), so they sit under the guard. The
-# scenarios subdir must come before tests/ so tests/axi and tests/wrap can link
-# noc_axi4_scenarios.
 if(BUILD_TESTING)
-  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../sim/test_patterns
-                   ${CMAKE_CURRENT_BINARY_DIR}/sim/test_patterns)
   add_subdirectory(tests)
 endif()

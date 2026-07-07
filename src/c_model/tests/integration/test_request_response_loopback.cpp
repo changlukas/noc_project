@@ -56,12 +56,13 @@
 #include "nmu/port_params.hpp"
 #include "nsu/nsu.hpp"
 #include "nsu/port_params.hpp"
-#include "scenario_helpers.hpp"
+#include "common/tmp_path.hpp"
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
@@ -119,6 +120,33 @@ struct LoopbackResult {
     bool is_multi_dst = false;
 };
 
+// ORD-003 (same_id_multi_dst) stimulus, written inline to a per-test temp dir so
+// the test carries its own scenario (no external sim/test_patterns/ tree). Two
+// same-id writes + two same-id reads at XY-routing dst boundaries (0x100 -> dst0,
+// 0x10100 -> dst1); data.txt is the 32-byte write payload the writes reference.
+std::string write_ord003_scenario() {
+    const std::string dir = ni::cmodel::testing::unique_temp_dir("ord003");
+    std::ofstream(dir + "/data.txt") << "DE AD BE EF CA FE BA BE 11 22 33 44 55 66 77 88 "
+                                        "99 AA BB CC DD EE FF 00 01 02 03 04 05 06 07 08\n";
+    std::ofstream(dir + "/scenario.yaml") << R"YAML(
+schema_version: 1
+metadata:
+  name: AX4-ORD-003_same_id_multi_dst
+  category: ordering
+config:
+  memory_base: 0x0
+  memory_size: 0x12000
+  write_latency: 0
+  read_latency: 0
+transactions:
+  - { op: write, addr: 0x100,   id: 0x5, len: 0, size: 5, burst: INCR, data_file: data.txt }
+  - { op: write, addr: 0x10100, id: 0x5, len: 0, size: 5, burst: INCR, data_file: data.txt }
+  - { op: read,  addr: 0x100,   id: 0x5, len: 0, size: 5, burst: INCR, dump_file: unused }
+  - { op: read,  addr: 0x10100, id: 0x5, len: 0, size: 5, burst: INCR, dump_file: unused }
+)YAML";
+    return dir + "/scenario.yaml";
+}
+
 LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read_dump_path,
                            unsigned req_delay, unsigned rsp_delay, std::size_t num_vc = 1) {
     auto sc = axi::load_scenario(yaml_path);
@@ -132,7 +160,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     auto nsu_params = nsu::load_nsu_port_params("config/port_params.yaml");
     auto cm_params = test::load_channel_model_params("config/port_params.yaml");
 
-    const bool is_multi_dst = yaml_path.find("AX4-ORD-003_same_id_multi_dst/") != std::string::npos;
+    // This test now runs only the ORD-003 same_id_multi_dst gate (inlined above).
+    const bool is_multi_dst = true;
     const nmu::RobMode rob_mode = is_multi_dst ? nmu::RobMode::Enabled : nmu::RobMode::Disabled;
 
     // NoC test fixture: single-NSU for legacy fixtures (preserves existing
@@ -399,8 +428,7 @@ TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
     SCENARIO(
         "req/rsp loopback: NMU+NSU packetize/depacketize + ChannelModel end-to-end zero mismatch");
     auto p = GetParam();
-    // p.yaml is an AX4-CAT-NNN_slug scenario id; scenario.yaml path built from SCENARIO_TREE_ROOT.
-    std::string yaml_path = std::string(SCENARIO_TREE_ROOT) + p.yaml + "/scenario.yaml";
+    std::string yaml_path = write_ord003_scenario();
     std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml + ".pkt_e2e_q" +
                         std::to_string(p.req_delay) + "_s" + std::to_string(p.rsp_delay) + "_vc" +
                         std::to_string(p.num_vc) + ".read.txt";
@@ -434,27 +462,22 @@ static auto fixture_name_gen = [](const ::testing::TestParamInfo<FixtureParam>& 
            std::to_string(info.param.rsp_delay) + "_vc" + std::to_string(info.param.num_vc);
 };
 
-INSTANTIATE_TEST_SUITE_P(
-    Fixtures, PacketizeLoopbackFixture,
-    ::testing::Values(
-        // Only the ORD-003 multi-NSU ROB-reorder gate survives the audit: the
-        // other scoreboard-clean fixtures (BUR/STR/BND) duplicate the
-        // wire-level co-sim end-to-end coverage. ORD-003 injects per-NSU
-        // latency skew {10,2,5,3} that co-sim does not set up, forcing
-        // out-of-order B/R. At num_vc=1 the NMU single-outstanding interlock
-        // must keep per-id order.
-        FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
-            0u, 1u}),
-    fixture_name_gen);
+INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
+                         ::testing::Values(
+                             // Only the ORD-003 multi-NSU ROB-reorder gate survives the audit: the
+                             // other scoreboard-clean fixtures (BUR/STR/BND) duplicate the
+                             // wire-level co-sim end-to-end coverage. ORD-003 injects per-NSU
+                             // latency skew {10,2,5,3} that co-sim does not set up, forcing
+                             // out-of-order B/R. At num_vc=1 the NMU single-outstanding interlock
+                             // must keep per-id order.
+                             FixtureParam{std::string{"AX4-ORD-003_same_id_multi_dst"}, 0u, 0u,
+                                          1u}),
+                         fixture_name_gen);
 
 // ORD-003 reorder gate at num_vc=2: Rob Enabled must reorder per-id B/R back
 // into submission order. RoB rob_idx ordering is VC-count independent, so
 // vc4/vc8 add no new boundary and were dropped.
-INSTANTIATE_TEST_SUITE_P(
-    MultiVc, PacketizeLoopbackFixture,
-    ::testing::Values(
-        FixtureParam{
-            std::string{router::tests::RequireKnownScenario("AX4-ORD-003_same_id_multi_dst")}, 0u,
-            0u, 2u}),
-    fixture_name_gen);
+INSTANTIATE_TEST_SUITE_P(MultiVc, PacketizeLoopbackFixture,
+                         ::testing::Values(FixtureParam{
+                             std::string{"AX4-ORD-003_same_id_multi_dst"}, 0u, 0u, 2u}),
+                         fixture_name_gen);

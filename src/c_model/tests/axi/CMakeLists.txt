@@ -15,6 +15,4 @@ add_cmodel_test(test_protocol_rules)
 
 # test_scenario_metadata — unit tests for metadata block parsing + strict mode.
 add_cmodel_test(test_scenario_metadata)
-target_link_libraries(test_scenario_metadata PRIVATE yaml-cpp::yaml-cpp noc_axi4_scenarios)
-target_include_directories(test_scenario_metadata PRIVATE
-    "${CMAKE_SOURCE_DIR}/../../sim/test_patterns")
+target_link_libraries(test_scenario_metadata PRIVATE yaml-cpp::yaml-cpp)

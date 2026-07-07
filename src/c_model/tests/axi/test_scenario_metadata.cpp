@@ -1,7 +1,6 @@
 // Tests for metadata block parsing (schema_version: 1 strict mode).
 #include "axi/scenario_parser.hpp"
 #include "common/tmp_path.hpp"
-#include "scenario_helpers.hpp"
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -72,12 +71,6 @@ transactions:
 )");
     auto sc = ni::cmodel::axi::load_scenario(path);
     EXPECT_TRUE(sc.metadata.name.empty());
-}
-
-TEST(ScenarioHelpers, helper_compiles) {
-    // After commit 2 migration, kAllAxi4Scenarios has 31 AX4-* scenarios.
-    using router::tests::kAllAxi4Scenarios;
-    EXPECT_GT(kAllAxi4Scenarios.size(), 0u);
 }
 
 }  // namespace
