@@ -238,10 +238,11 @@ run-directed: $(TBTOP_EXE)
 # axi_bw_monitor reported non-zero bandwidth. Uniform_random pattern; run length
 # is set by TRAFFIC_TXNS (fork...join drains the stimulus, so more = longer,
 # steadier measurement).
-INJ_RATIO    ?= 1.0
-TRAFFIC_TXNS ?= 200
-TRAFFIC_TAG  ?= traffic_$(TOPOLOGY)_r$(INJ_RATIO)
-TRAFFIC_STIM := $(COSIM_ROOT)/test_patterns/traffic_$(TOPOLOGY)
+INJ_RATIO     ?= 1.0
+TRAFFIC_TXNS  ?= 200
+IDS_PER_TILE  ?= 1
+TRAFFIC_TAG   ?= traffic_$(TOPOLOGY)_r$(INJ_RATIO)_id$(IDS_PER_TILE)
+TRAFFIC_STIM  := $(COSIM_ROOT)/test_patterns/traffic_$(TOPOLOGY)_id$(IDS_PER_TILE)
 
 .PHONY: run-traffic
 run-traffic: $(TBTOP_EXE)
@@ -249,8 +250,8 @@ run-traffic: $(TBTOP_EXE)
 	@mkdir -p output/$(TRAFFIC_TAG)
 	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
 	    --out $(TRAFFIC_STIM) --pattern uniform_random \
-	    --transactions-per-node $(TRAFFIC_TXNS) --size 5 --len 0 \
-	    --memory-size 0x40000 --seed $(SEED)
+	    --transactions-per-node $(TRAFFIC_TXNS) --ids-per-tile $(IDS_PER_TILE) \
+	    --size 5 --len 0 --memory-size 0x40000 --seed $(SEED)
 	@echo "running $(TRAFFIC_TAG) (txns/node=$(TRAFFIC_TXNS) inj_ratio=$(INJ_RATIO))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(TRAFFIC_STIM)" \

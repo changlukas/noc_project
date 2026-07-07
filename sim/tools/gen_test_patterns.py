@@ -132,19 +132,29 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop):
 
 
 def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
-                          base_local, memory_size, axi_size, axi_len, data_width):
+                          base_local, memory_size, axi_size, axi_len, data_width,
+                          ids_per_tile=1, num_axi_ids=256):
     """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
-    src-partitioned address, address-in-data payload. INCR, atop=0, full strobe."""
+    src-partitioned address, address-in-data payload. INCR, atop=0, full strobe.
+
+    AXI ids: each tile owns an independent, non-overlapping block of `ids_per_tile`
+    ids starting at src_idx*ids_per_tile (mod num_axi_ids), so no two tiles share
+    an id. ids_per_tile=1 gives each tile one distinct id (= src_idx); >1 lets a
+    tile keep several transactions outstanding (distinct ids escape same-id
+    ordering), raising injected concurrency for saturation runs. VC allocation is
+    id-agnostic (VC id only), so this changes concurrency, not VC spread."""
     os.makedirs(out_dir, exist_ok=True)
     reserved = (axi_len + 1) * (1 << axi_size)
+    id_base = (src_idx * ids_per_tile) % num_axi_ids
     write_lines, read_lines = [], []
     for seq, dst_cid in enumerate(dst_cids):
         local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
                                         n_nodes, memory_size, reserved=reserved)
         addr = (dst_cid << ADDR_DST_SHIFT) + local_off
-        write_lines += _ax_fields(0, addr, axi_len, axi_size, include_atop=True)
+        axid = (id_base + (seq % ids_per_tile)) % num_axi_ids
+        write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
         write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
-        read_lines += _ax_fields(0, addr, axi_len, axi_size, include_atop=False)
+        read_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=False)
     with open(os.path.join(out_dir, "write.txt"), "w") as f:
         f.write("\n".join(write_lines) + "\n")
     with open(os.path.join(out_dir, "read.txt"), "w") as f:
@@ -459,6 +469,12 @@ def main(argv=None):
     ap.add_argument("--memory-size", type=lambda v: int(str(v), 0), default=None,
                     help="dst tile memory window size (default 0x40000); sizes the "
                          "allocator bound")
+    ap.add_argument("--ids-per-tile", type=int, default=1,
+                    help="Distinct AXI ids per tile (default 1 = one independent id "
+                         "per tile). >1 gives each tile a non-overlapping id block, "
+                         "round-robin within the tile, so more transactions stay "
+                         "outstanding (escape same-id ordering) to load the fabric. "
+                         "Does not affect VC allocation (VC is id-agnostic).")
     a = ap.parse_args(argv)
 
     nodes, x_dim, y_dim = _load_topology(a.topology)
@@ -487,7 +503,8 @@ def main(argv=None):
             dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
         emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
                               n_nodes, base_local, memory_size,
-                              a.size, a.burst_len, widths["data"])
+                              a.size, a.burst_len, widths["data"],
+                              ids_per_tile=a.ids_per_tile, num_axi_ids=(1 << widths["id"]))
 
 
 if __name__ == "__main__":
