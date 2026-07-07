@@ -63,7 +63,7 @@ per-node endpoint (sim/tb/user_node_endpoint.sv, NEW traffic mode)
        else idle one cycle (RandomFloat gate, booksim2 Bernoulli; no z3)
        replay the queues to sustain traffic through the measurement window
         v  node AXI master bus
-   axi_bw_monitor (ported): accepted throughput (payload bits/cyc), + network latency as sanity only
+   axi_bw_monitor (EXISTING u_bw_mst): accepted throughput (payload bits/cyc), + network latency as sanity only
         v
 collect (thin external script)
    for a few high traffic_inj_ratio points per VC config: run, read accepted throughput,
@@ -96,18 +96,27 @@ binds, otherwise accepted throughput measures endpoint credit pressure, not fabr
 Acceptance rule: cap-blocked cycles at the reported plateau must be near zero. Raise the cap until the
 plateau stops moving.
 
-## Component 2 — bw_monitor (ported)
+## Component 2 — accepted throughput from the existing bw_monitor
 
-**Provenance** copy `axi_bw_monitor.sv` from FlooNoC into `sim/tb/`, record source + license in an
-attribution note (repo pattern: `c_model/tests/axi/ATTRIBUTION.md`). Adapt the tap to our AXI struct or
-DV interface in our copy, not the FlooNoC original.
+The FlooNoC `axi_bw_monitor` is ALREADY ported and instantiated: `user_node_endpoint.sv` wires one
+`u_bw_mst` per manager node onto the AXI master face, with the struct tap already adapted
+(`vip_req_from_flat` / `vip_rsp_from_flat`). No porting, no attribution, no tap work remains. It already
+emits accepted bandwidth + latency + util via `$display` at `end_of_sim`.
 
-**Wiring** one instance per manager node on its AXI master bus. Aggregate accepted throughput is the
-sum across managers. Report per-node throughput too, to expose imbalance (uniform_random should be
-symmetric, a large spread flags a problem).
+**The only change** it currently runs with `en_i = rst_ni`, so it counts the whole run including warmup
+and drain. For saturation throughput we need the steady-state value. Leanest approach: run the sustained
+traffic long enough that warmup and drain are a negligible fraction, take the whole-run accepted
+throughput, and confirm steady state by comparing first-half vs second-half accepted throughput (a
+minimal booksim2-style stability check). Gate `en_i` to an explicit window only if the halves disagree.
 
-**Primary output** accepted throughput = delivered payload bits / measurement-window cycles.
+**Primary output** accepted throughput = delivered payload bits / measured cycles, aggregated as the sum
+across managers, plus per-node values to expose imbalance (uniform_random should be symmetric).
 **Secondary (sanity only)** network latency mean, explicitly not used to locate saturation.
+
+The NoC-side `link_perf_monitor` (8 instances on the inter-router links in
+`src/sv/noc_fabric_mesh_4x4_vc1.sv`, counting flits + credit-deficit stall) stays untouched. It gives
+NoC-level flit/stall visibility, complementary to the AXI-side accepted throughput. This work replaces
+only the AXI-side perf readout, not the link monitor.
 
 ## Component 3 — collect saturation throughput
 
@@ -151,7 +160,8 @@ reusable sweep fresh against this only if later wanted.
 ## What does NOT change
 
 - pulp axi VIP (`sim/dv/axi-0.39.7`) source: untouched, public members reused only.
-- FlooNoC `axi_bw_monitor` original: untouched, brought in as a copy.
+- `axi_bw_monitor` (`u_bw_mst`, already instantiated per node): reused as-is, only `en_i` windowing may change.
+- `link_perf_monitor` (8 instances on the router inter-router links): untouched, keeps NoC-side flit/stall.
 - The existing two-phase `TB_DIRECTED` scoreboard path and the constrained_random axis: untouched.
 
 ## Naming (aligned to FlooNoC + Dally)
@@ -173,7 +183,7 @@ reusable sweep fresh against this only if later wanted.
 | replay creates periodic lockstep traffic instead of the intended pattern | long queues, per-node rotated replay start offset, report per-destination distribution |
 | steady region mis-identified, plateau read off a transient | detect convergence across sample windows, flag drifting (unstable) points |
 | offered vs accepted not comparable (AW/AR count vs payload bits) | define offered as payload bits/cyc, record observed AW/AR/W/R per run |
-| bw_monitor tap does not match our AXI struct | adapt the copy, verify accepted throughput against a hand-computed single-stream case |
+| accepted-throughput readout wrong | tap already adapted (vip_req_from_flat), verify against a hand-computed single-stream case |
 | read/write mix drift changes the plateau | preserve emitter R/W proportion, report the observed mix |
 
 ## Verification
