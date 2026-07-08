@@ -28,7 +28,7 @@ constexpr uint8_t kSrcId = 0x01;
 // unchanged -- reproduces the retired addr_trans::xy_route mapping exactly,
 // so every legacy dst-from-addr[39:32] expectation below holds unchanged.
 addr_trans::SamTable legacy_sam() {
-    return addr_trans::SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
+    return addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
 }
 
 axi::AwBeat make_aw(uint8_t id, uint64_t addr, uint8_t len = 0) {

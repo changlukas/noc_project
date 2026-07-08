@@ -11,14 +11,13 @@ namespace ni::cmodel::nmu::addr_trans {
 
 struct Translated {
     uint8_t dst_id;       // X_WIDTH + Y_WIDTH bits per ni_packet.json
-    uint64_t local_addr;  // for c_model = addr (no remap)
+    uint64_t local_addr;  // tile-local (rebased): addr - tile base
 };
 
 struct SamEntry {
     uint64_t base;
     uint64_t size;
     uint8_t dst_id;
-    uint64_t remove_offset;
 };
 
 class SamTable {
@@ -27,13 +26,13 @@ class SamTable {
     explicit SamTable(std::vector<SamEntry> entries) : entries_(std::move(entries)) {}
 
     // Uniform map: dst_id = coord_id = (y<<X_WIDTH)|x, base = coord_id * tile_size.
-    static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size, bool rebase) {
+    static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size) {
         std::vector<SamEntry> es;
         for (unsigned y = 0; y < y_dim; ++y) {
             for (unsigned x = 0; x < x_dim; ++x) {
                 uint8_t dst = static_cast<uint8_t>((y << ni::width::X_WIDTH) | x);
                 uint64_t base = static_cast<uint64_t>(dst) * tile_size;
-                es.push_back({base, tile_size, dst, rebase ? base : 0});
+                es.push_back({base, tile_size, dst});
             }
         }
         return SamTable(std::move(es));
@@ -50,7 +49,7 @@ class SamTable {
     Translated translate(uint64_t addr) const {
         const SamEntry* e = lookup(addr);
         assert(e && "SAM miss: address maps to no tile (config/stimulus bug)");
-        return {e->dst_id, addr - e->remove_offset};
+        return {e->dst_id, addr - e->base};  // rebase: subordinate sees 0-based local address
     }
 
     const std::vector<SamEntry>& entries() const { return entries_; }
@@ -65,7 +64,6 @@ class SamTable {
             assert((e.base % k4k == 0) && (e.size % k4k == 0) &&
                    "SAM: base and size must be 4 KB aligned");
             assert(e.base + e.size > e.base && "SAM: base+size overflow");
-            assert(e.remove_offset <= e.base && "SAM: remove_offset > base (local underflow)");
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
             assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");

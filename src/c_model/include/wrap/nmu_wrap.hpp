@@ -57,11 +57,10 @@ class NmuWrap {
         if (config_path != nullptr && config_path[0] != '\0') {
             cfg.sam = addr_trans::load_sam_table(config_path);
         } else {
-            // PoC SAM: 16x16 uniform, 4 GB/tile, no rebase -- reproduces the
-            // retired addr_trans::xy_route bit-slice mapping (dst =
-            // addr[39:32], local_addr = addr unchanged) so existing PoC
-            // addressing is unaffected by the Task 5 migration off xy_route.
-            cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
+            // Default SAM when no config path: 16x16 uniform, 4 GB/tile. dst =
+            // addr[39:32] (matches the retired xy_route decode); local_addr is
+            // rebased (addr - tile base), as in every real config.
+            cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
         }
         cfg.num_vc = num_vc;
         const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc

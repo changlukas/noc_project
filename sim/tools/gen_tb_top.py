@@ -128,16 +128,16 @@ _DEFAULT_TEST_APERTURE = 0x1000
 
 
 def _address_map(topo: dict) -> dict:
-    """address_map block (optional): tile_size, rebase, test_aperture.
+    """address_map block (optional): tile_size, test_aperture.
 
     tile_size feeds REGION_BASE (SAM base = dst_id * tile_size); test_aperture
     feeds REGION_BYTES (the per-master compare/rand_master window — NOT
-    tile_size, which would blow up MAX_BURST_LEN). rebase controls whether the
-    slave face is expected to see a local or global address."""
+    tile_size, which would blow up MAX_BURST_LEN). The c_model always rebases
+    (subordinate sees a tile-local address), so the reorder_compare Rebase is
+    hardwired on."""
     am = topo.get("address_map") or {}
     return {
         "tile_size": int(am.get("tile_size", _DEFAULT_TILE_SIZE)),
-        "rebase": bool(am.get("rebase", False)),
         "test_aperture": int(am.get("test_aperture", _DEFAULT_TEST_APERTURE)),
     }
 
@@ -410,8 +410,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     # whose size depends on a sibling param override.
     am = _address_map(topo)
     tile_size = am["tile_size"]
-    rebase = am["rebase"]
-    rebase_bit = "1'b1" if rebase else "1'b0"
+    rebase_bit = "1'b1"  # c_model always rebases; reorder_compare slave face is tile-local
     region_base = ", ".join(f"64'h{(c * tile_size):016X}"
                             for (_i, _x, _y, c) in reversed(nodes))
 
@@ -542,7 +541,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w(f"    longint unsigned nsu_ctx    [{n}];")
     w("")
     w("    // SAM config: topology YAML with an address_map block. Empty (the")
-    w("    // default) keeps each NMU's legacy 16x16 uniform, no-rebase SAM.")
+    w("    // default) keeps each NMU's default 16x16 uniform, 4 GB/tile SAM.")
     w('    string sam_config_path = "";')
     w("")
 

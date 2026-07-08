@@ -180,21 +180,20 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
 
 // ---------------------------------------------------------------------------
 // Task 6: init(config_path) loads the topology YAML's address_map into
-// NmuConfig.sam instead of the legacy 16x16-uniform/no-rebase default.
+// NmuConfig.sam instead of the legacy 16x16-uniform default.
 // ---------------------------------------------------------------------------
 TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     SCENARIO(
         "NmuWrap::init(config_path) loads a hand-written topology YAML's "
-        "address_map (4 KB tiles, rebase=true, 2x2 mesh) into NmuConfig.sam; "
-        "the legacy default (4 GB tiles, no rebase) would resolve the same "
+        "address_map (4 KB tiles, 2x2 mesh) into NmuConfig.sam; "
+        "the legacy default (4 GB tiles) would resolve the same "
         "address to a different dst_id/local_addr, so observing the "
         "YAML-mapped values proves the config path was actually loaded.");
 
     auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_sam.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
-                           "  tile_size: 0x1000\n"
-                           "  rebase: true\n";
+                           "  tile_size: 0x1000\n";
 
     NmuWrap adapter;
     adapter.init(/*src_id=*/0, /*num_vc=*/1, kPoCAxiQueueDepth, ni::cmodel::nmu::RobMode::Disabled,
@@ -205,9 +204,9 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
 
     // Global 0x1040 -> under the 4 KB/tile 2x2 SAM this is tile (x=1,y=0),
     // dst_id = (y<<X_WIDTH)|x = 1, rebased local_addr = 0x40. Under the
-    // legacy 4 GB/tile default it would resolve to dst 0 with local_addr
-    // unchanged (0x1040) -- the two SAMs disagree on this address, so this
-    // pins the YAML load.
+    // legacy 4 GB/tile default it resolves to dst 0, local 0x1040 (tile 0,
+    // base 0, so rebase is a no-op) -- the two SAMs disagree on this address,
+    // so this pins the YAML load.
     in.awvalid = true;
     in.awid = 0x01;
     in.awaddr = 0x1040;

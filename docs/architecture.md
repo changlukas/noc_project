@@ -69,13 +69,13 @@ The NMU sits on the AXI-master ingress side. Its responsibilities:
 - Manages a Reorder Buffer (RoB) for incoming B and R responses so that
   out-of-order network delivery is re-serialized per AXI4 ID ordering rules.
 - Address translation is a System Address Map (SAM) lookup, not a
-  bit-slice: a per-tile `{base, size, dst_id, remove_offset}` table
+  bit-slice: a per-tile `{base, size, dst_id}` table
   (`addr_trans::SamTable`, `c_model/include/nmu/addr_trans.hpp`), loaded
   from the topology YAML `address_map` block
   (`c_model/include/nmu/sam_yaml.hpp`) -- the single source of truth
   shared by the c_model, the stimulus generator, and the testbench. At
   packetize time the address is range-matched to a tile, giving
-  `dst_id` (from the table) and `local_addr = addr - remove_offset`
+  `dst_id` (from the table) and `local_addr = addr - tile base`
   (rebase: the subordinate sees a 0-based local address, not a
   coordinate-bearing global one). A miss (address maps to no tile)
   asserts (model policy, not AXI-faithful). A real interconnect would

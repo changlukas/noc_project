@@ -24,7 +24,7 @@ namespace axi = ni::cmodel::axi;
 // unchanged) so this file's fixed test addresses are unaffected by the
 // Task 5 migration off xy_route.
 SamTable legacy_sam() {
-    return SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
+    return SamTable::uniform(16, 16, 0x100000000ull);
 }
 
 TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
