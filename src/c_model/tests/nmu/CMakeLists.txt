@@ -29,6 +29,8 @@ target_include_directories(test_depacketize PRIVATE
 
 add_cmodel_test(test_addr_trans)
 
+add_cmodel_test(test_sam_table)
+
 add_cmodel_test(test_rob)
 # Pick up the shared loopback fixtures from tests/common/ via
 # "common/loopback_*.hpp".

@@ -1,6 +1,11 @@
 #pragma once
 #include "ni_flit_constants.h"  // ni::width::X_WIDTH / Y_WIDTH (DST_ID composition)
+#include "axi/types.hpp"        // axi::Burst (used by burst_last_byte, Task 4)
+#include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <utility>  // std::move
+#include <vector>
 
 namespace ni::cmodel::nmu::addr_trans {
 
@@ -23,6 +28,51 @@ static_assert(DST_ID_BITS == 8,
 struct Translated {
     uint8_t dst_id;       // X_WIDTH + Y_WIDTH bits per ni_packet.json
     uint64_t local_addr;  // for c_model = addr (no remap)
+};
+
+struct SamEntry {
+    uint64_t base;
+    uint64_t size;
+    uint8_t dst_id;
+    uint64_t remove_offset;
+};
+
+class SamTable {
+  public:
+    SamTable() = default;
+    explicit SamTable(std::vector<SamEntry> entries) : entries_(std::move(entries)) {}
+
+    // Uniform map: dst_id = coord_id = (y<<X_WIDTH)|x, base = coord_id * tile_size.
+    static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size, bool rebase) {
+        std::vector<SamEntry> es;
+        for (unsigned y = 0; y < y_dim; ++y) {
+            for (unsigned x = 0; x < x_dim; ++x) {
+                uint8_t dst = static_cast<uint8_t>((y << ni::width::X_WIDTH) | x);
+                uint64_t base = static_cast<uint64_t>(dst) * tile_size;
+                es.push_back({base, tile_size, dst, rebase ? base : 0});
+            }
+        }
+        return SamTable(std::move(es));
+    }
+
+    // First-match by start address (FlooNoC get_entry). Miss -> nullptr.
+    const SamEntry* lookup(uint64_t addr) const {
+        for (const auto& e : entries_) {
+            if (addr >= e.base && addr < e.base + e.size) return &e;
+        }
+        return nullptr;
+    }
+
+    Translated translate(uint64_t addr) const {
+        const SamEntry* e = lookup(addr);
+        assert(e && "SAM miss: address maps to no tile (config/stimulus bug)");
+        return {e->dst_id, addr - e->remove_offset};
+    }
+
+    const std::vector<SamEntry>& entries() const { return entries_; }
+
+  private:
+    std::vector<SamEntry> entries_;
 };
 
 // local_addr is unmodified -- XYRouting only extracts dst_id; address space
