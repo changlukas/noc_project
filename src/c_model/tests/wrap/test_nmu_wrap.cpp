@@ -13,10 +13,17 @@
 //      gets its ready pulse — multi-outstanding AW (post addresses ahead of
 //      data) is legitimate AXI4 and load-bearing for the RoB/multi-ID paths.
 #include "common/scenario.hpp"
+#include "common/tmp_path.hpp"
+#include "ni_flit_constants.h"
+#include "wrap/flit_byte_conv.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nmu_wrap_io.hpp"
+#include "wrap/poc_defaults.hpp"
+#include <fstream>
 #include <gtest/gtest.h>
 
+using ni::cmodel::wrap::flit_from_bytes;
+using ni::cmodel::wrap::kPoCAxiQueueDepth;
 using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
 using ni::cmodel::wrap::NmuWrap;
@@ -169,6 +176,71 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
     EXPECT_EQ(beats_accepted, 8)
         << "all 8 W beats must transfer at full rate after the one-bubble start";
     EXPECT_FALSE(out.wready) << "after WLAST the window closes -> wready low";
+}
+
+// ---------------------------------------------------------------------------
+// Task 6: init(config_path) loads the topology YAML's address_map into
+// NmuConfig.sam instead of the legacy 16x16-uniform/no-rebase default.
+// ---------------------------------------------------------------------------
+TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
+    SCENARIO(
+        "NmuWrap::init(config_path) loads a hand-written topology YAML's "
+        "address_map (4 KB tiles, rebase=true, 2x2 mesh) into NmuConfig.sam; "
+        "the legacy default (4 GB tiles, no rebase) would resolve the same "
+        "address to a different dst_id/local_addr, so observing the "
+        "YAML-mapped values proves the config path was actually loaded.");
+
+    auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_sam.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+                           "address_map:\n"
+                           "  tile_size: 0x1000\n"
+                           "  rebase: true\n";
+
+    NmuWrap adapter;
+    adapter.init(/*src_id=*/0, /*num_vc=*/1, kPoCAxiQueueDepth, ni::cmodel::nmu::RobMode::Disabled,
+                 path.c_str());
+
+    NmuInputs in{};
+    NmuOutputs out{};
+
+    // Global 0x1040 -> under the 4 KB/tile 2x2 SAM this is tile (x=1,y=0),
+    // dst_id = (y<<X_WIDTH)|x = 1, rebased local_addr = 0x40. Under the
+    // legacy 4 GB/tile default it would resolve to dst 0 with local_addr
+    // unchanged (0x1040) -- the two SAMs disagree on this address, so this
+    // pins the YAML load.
+    in.awvalid = true;
+    in.awid = 0x01;
+    in.awaddr = 0x1040;
+    in.awlen = 0;
+    in.awsize = 2;   // 4 B/beat: keeps the burst inside the 4 KB tile
+    in.awburst = 1;  // INCR
+    adapter.set_inputs(in);
+    adapter.tick();
+    adapter.get_outputs(out);
+    ASSERT_TRUE(out.awready) << "cycle 1: AWVALID observed -> awready pulses";
+
+    adapter.set_inputs(in);  // valid held; prev ready -> AW handshake tick
+    adapter.tick();
+    adapter.get_outputs(out);
+
+    // Drain the NoC req-out face for the AW flit (bounded loop mirrors
+    // test_nmu.cpp's WriteRoundTrip pipeline-drain pattern).
+    bool saw_aw_flit = false;
+    in = NmuInputs{};
+    for (int i = 0; i < 32 && !saw_aw_flit; ++i) {
+        adapter.set_inputs(in);
+        adapter.tick();
+        adapter.get_outputs(out);
+        if (out.noc_req_valid) {
+            auto flit = flit_from_bytes(out.noc_req_flit);
+            if (flit.get_header_field("axi_ch") == ni::AXI_CH_AW) {
+                EXPECT_EQ(flit.get_header_field("dst_id"), 0x01u);
+                EXPECT_EQ(flit.get_payload_field("AW", "awaddr"), 0x40ull);
+                saw_aw_flit = true;
+            }
+        }
+    }
+    ASSERT_TRUE(saw_aw_flit) << "NmuWrap never produced an AW flit from the config-path SAM";
 }
 
 // ---------------------------------------------------------------------------

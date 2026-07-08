@@ -32,6 +32,7 @@
 #include "ni/vc_pools.hpp"
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
+#include "nmu/sam_yaml.hpp"
 #include <array>
 #include <memory>
 #include <optional>
@@ -44,18 +45,24 @@ class NmuWrap {
     // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
     // num_vc comes from the create param (cmodel_nmu_create); read/write VC
     // pools are derived from derive_vc_pools(num_vc) (odd num_vc asserts).
+    // config_path: topology YAML with an `address_map` block. Null/empty
+    // (the default) keeps the legacy PoC SAM below so existing unit-test
+    // callers are unaffected.
     void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth,
-              nmu::RobMode rob_mode = nmu::RobMode::Disabled) {
+              nmu::RobMode rob_mode = nmu::RobMode::Disabled, const char* config_path = nullptr) {
         using namespace ni::cmodel::nmu;
         num_vc_ = num_vc;
         NmuConfig cfg{};
         cfg.src_id = src_id;
-        // PoC SAM: 16x16 uniform, 4 GB/tile, no rebase -- reproduces the
-        // retired addr_trans::xy_route bit-slice mapping (dst = addr[39:32],
-        // local_addr = addr unchanged) so existing PoC addressing is
-        // unaffected by the Task 5 migration off xy_route. Per-deployment SAM
-        // config (sam_yaml.hpp) is not yet wired into the wrap layer.
-        cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
+        if (config_path != nullptr && config_path[0] != '\0') {
+            cfg.sam = addr_trans::load_sam_table(config_path);
+        } else {
+            // PoC SAM: 16x16 uniform, 4 GB/tile, no rebase -- reproduces the
+            // retired addr_trans::xy_route bit-slice mapping (dst =
+            // addr[39:32], local_addr = addr unchanged) so existing PoC
+            // addressing is unaffected by the Task 5 migration off xy_route.
+            cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
+        }
         cfg.num_vc = num_vc;
         const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
         cfg.write_vcs = vc_pools.write_vcs;

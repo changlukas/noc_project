@@ -495,10 +495,12 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     if rob_enabled:
         w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
         w('                                                                 input int src_id, input int num_vc,')
-        w('                                                                 input int rob_enabled);')
+        w('                                                                 input int rob_enabled,')
+        w('                                                                 input string config_path);')
     else:
         w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,')
-        w('                                                              input int src_id, input int num_vc);')
+        w('                                                              input int src_id, input int num_vc,')
+        w('                                                              input string config_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
     w('                                                              input int src_id, input int num_vc);')
     w("")
@@ -509,19 +511,24 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w(f"    longint unsigned nmu_ctx    [{n}];")
     w(f"    longint unsigned nsu_ctx    [{n}];")
     w("")
+    w("    // SAM config: topology YAML with an address_map block. Empty (the")
+    w("    // default) keeps each NMU's legacy 16x16 uniform, no-rebase SAM.")
+    w('    string sam_config_path = "";')
+    w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
     w("    initial begin")
     w("        cmodel_init();")
+    w('        void\'($value$plusargs("sam_config=%s", sam_config_path));')
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
     for (i, x, y, c) in nodes:
         if rob_enabled:
-            w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1);  '
+            w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1, sam_config_path);  '
               f'// src_id = node{i} coord {c}, ROB Enabled')
         else:
-            w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC);  '
+            w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC, sam_config_path);  '
               f'// src_id = node{i} coord {c}')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC);')
     w("    end")

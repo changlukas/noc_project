@@ -90,8 +90,12 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
 // num_vc threads the topology VC count into the NmuConfig (write_vc=0,
 // read_vc=(num_vc>=2)?1:0 — Mode A). noc_req_credit_return / noc_rsp_credit_return
 // are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
-unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc);
-unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int num_vc, int rob_enabled);
+// config_path: topology YAML with an `address_map` block (NULL/empty ->
+// legacy 16x16 uniform, no-rebase SAM).
+unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc,
+                                     const char* config_path);
+unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int num_vc, int rob_enabled,
+                                        const char* config_path);
 void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
                            svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
                            svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,

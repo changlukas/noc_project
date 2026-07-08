@@ -47,8 +47,8 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === NMU multi-instance independence ===
 
     // Case: create 2 NMU adapters — distinct void* + both validate as live.
-    unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0, /*num_vc=*/1);
-    unsigned long long nmu_b = cmodel_nmu_create("nmu_b", 0, /*num_vc=*/1);
+    unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0, /*num_vc=*/1, /*config_path=*/nullptr);
+    unsigned long long nmu_b = cmodel_nmu_create("nmu_b", 0, /*num_vc=*/1, /*config_path=*/nullptr);
     ASSERT_NE(nmu_a, 0ull);
     ASSERT_NE(nmu_b, 0ull);
     EXPECT_NE(nmu_a, nmu_b);
