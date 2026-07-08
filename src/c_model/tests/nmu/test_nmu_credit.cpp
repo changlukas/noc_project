@@ -24,6 +24,7 @@
 using ni::cmodel::Flit;
 using ni::cmodel::nmu::NmuConfig;
 using ni::cmodel::nmu::NmuStandalone;
+using ni::cmodel::nmu::addr_trans::SamTable;
 namespace axi = ni::cmodel::axi;
 
 namespace {
@@ -31,6 +32,10 @@ namespace {
 NmuConfig make_cfg(uint8_t src_id) {
     NmuConfig cfg{};
     cfg.src_id = src_id;
+    // 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired
+    // addr_trans::xy_route mapping so this file's fixed test address (0x100)
+    // is unaffected by the Task 5 migration off xy_route.
+    cfg.sam = SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
     // PortParams has no defaults ("fail loud"); set the depths this test drives.
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;

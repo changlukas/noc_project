@@ -198,6 +198,11 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // WormholeArbiter, VcArbiter, and Depacketize into one object.
     nmu::NmuConfig nmu_cfg{};
     nmu_cfg.src_id = kNmuSrcId;
+    // 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired
+    // addr_trans::xy_route mapping (dst = addr[39:32], local_addr = addr
+    // unchanged) so scenario-driven stimulus addressing is unaffected by the
+    // Task 5 migration off xy_route.
+    nmu_cfg.sam = nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
     nmu_cfg.write_rob_mode = rob_mode;
     nmu_cfg.read_rob_mode = rob_mode;
     nmu_cfg.port_params = nmu_params;

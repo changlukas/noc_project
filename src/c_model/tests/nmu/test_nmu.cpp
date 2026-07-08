@@ -15,8 +15,17 @@ using ni::cmodel::Flit;
 using ni::cmodel::nmu::Nmu;
 using ni::cmodel::nmu::NmuConfig;
 using ni::cmodel::nmu::NmuStandalone;
+using ni::cmodel::nmu::addr_trans::SamTable;
 using ni::cmodel::testing::ChannelModel;
 namespace axi = ni::cmodel::axi;
+
+// 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired
+// addr_trans::xy_route mapping (dst = addr[39:32], local_addr = addr
+// unchanged) so this file's fixed test addresses are unaffected by the
+// Task 5 migration off xy_route.
+SamTable legacy_sam() {
+    return SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
+}
 
 TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
     SCENARIO(
@@ -25,6 +34,7 @@ TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
     ChannelModel channel(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
     cfg.src_id = 0x12;
+    cfg.sam = legacy_sam();
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;
     cfg.port_params.ar_queue_depth = 16;
@@ -68,6 +78,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
 
     NmuConfig cfg{};
     cfg.src_id = kSrcId;
+    cfg.sam = legacy_sam();
     // PortParams has no defaults ("fail loud" — see nmu/port_params.hpp);
     // a hermetic test sets just the per-channel queue depths it exercises.
     cfg.port_params.aw_queue_depth = 16;

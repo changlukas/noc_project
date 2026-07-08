@@ -42,8 +42,12 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_w,
-        RobMode mode_r)
-        : next_pkt_(next_pkt), next_depkt_(next_depkt), mode_w_(mode_w), mode_r_(mode_r) {
+        RobMode mode_r, addr_trans::SamTable sam)
+        : next_pkt_(next_pkt),
+          next_depkt_(next_depkt),
+          mode_w_(mode_w),
+          mode_r_(mode_r),
+          sam_(std::move(sam)) {
         free_write_entries_.set();
         free_read_entries_.set();
     }
@@ -101,6 +105,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     NmuPacketizeSink& next_pkt_;
     ResponseDepacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
+    addr_trans::SamTable sam_;
 
     // Per-AXI-ID single-outstanding flag. True while one AW/AR is in flight for
     // that id; cleared by B (for writes) or R(last) (for reads) in pop_b/pop_r.
@@ -178,7 +183,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         // Find first free slot.
         int base = find_consecutive_free(free_write_entries_, 1);
         if (base < 0) return false;
-        auto t = addr_trans::xy_route(b.addr);
+        auto t = sam_.translate(b.addr);
         if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
                                              /*rob_idx=*/static_cast<uint8_t>(base)})) {
             return false;  // downstream backpressure: no state mutation
@@ -189,7 +194,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         ++w_burst_credit_;
         return true;
     }
-    auto t = addr_trans::xy_route(b.addr);
+    auto t = sam_.translate(b.addr);
     if (write_outstanding_[b.id]) return false;  // single-outstanding per id
     if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
         return false;  // downstream backpressure: NO state change
@@ -213,7 +218,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         if (n > ROB_CAPACITY) return false;
         int base = find_consecutive_free(free_read_entries_, n);
         if (base < 0) return false;  // no consecutive run
-        auto t = addr_trans::xy_route(b.addr);
+        auto t = sam_.translate(b.addr);
         if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
                                              /*rob_idx=*/static_cast<uint8_t>(base)})) {
             return false;  // downstream backpressure: no state mutation
@@ -227,7 +232,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         read_range_len_[base] = static_cast<uint8_t>(n);
         return true;
     }
-    auto t = addr_trans::xy_route(b.addr);
+    auto t = sam_.translate(b.addr);
     if (read_outstanding_[b.id]) return false;  // single-outstanding per id
     if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
         return false;

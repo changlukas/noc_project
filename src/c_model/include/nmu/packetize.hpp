@@ -8,8 +8,8 @@
 //   dst_id      — frozen Packetizer interface path: derived from b.addr via
 //                 sam_.translate (SamTable, Task 4). Rob-driven path
 //                 (push_*_with_meta) supplies dst_id directly via
-//                 AwHeaderMeta and still uses addr_trans::xy_route (Task 5
-//                 migrates Rob to the SAM). For W beats, dst inherited from
+//                 AwHeaderMeta, computed from Rob's own SamTable member
+//                 (sam_.translate, Task 5). For W beats, dst inherited from
 //                 the AW write-meta FIFO front.
 //   vc_id       — hardcoded 0 (NUM_VC=1)
 //   axi_ch      — implicit per push_* method

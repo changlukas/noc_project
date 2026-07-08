@@ -50,6 +50,12 @@ class NmuWrap {
         num_vc_ = num_vc;
         NmuConfig cfg{};
         cfg.src_id = src_id;
+        // PoC SAM: 16x16 uniform, 4 GB/tile, no rebase -- reproduces the
+        // retired addr_trans::xy_route bit-slice mapping (dst = addr[39:32],
+        // local_addr = addr unchanged) so existing PoC addressing is
+        // unaffected by the Task 5 migration off xy_route. Per-deployment SAM
+        // config (sam_yaml.hpp) is not yet wired into the wrap layer.
+        cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull, /*rebase=*/false);
         cfg.num_vc = num_vc;
         const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
         cfg.write_vcs = vc_pools.write_vcs;
