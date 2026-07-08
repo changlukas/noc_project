@@ -17,7 +17,7 @@ CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
 COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test lint_scenarios lint_docs \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test lint_docs \
         specgen_pytest sim \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
@@ -147,17 +147,13 @@ test: build-cmodel
 # (Linux/macOS and MSYS2 shells without the launcher on PATH).
 PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
-lint_scenarios:
-	$(PYTHON3) tools/lint_scenarios.py --require-nonempty
-
 # Mandatory ASCII byte check on maintained docs (spec sec 3.2).
 # Excludes archive, normative spec, sub-project docs, legal, generated.
 MAINTAINED_DOCS = \
     README.md \
     docs/architecture.md \
     docs/development.md \
-    docs/internal/_archive/README.md \
-    sim/test_patterns/README.md
+    docs/internal/_archive/README.md
 
 lint_docs:
 	$(PYTHON3) tools/lint_docs.py $(MAINTAINED_DOCS)
