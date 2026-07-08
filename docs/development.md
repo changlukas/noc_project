@@ -173,14 +173,13 @@ make clean           # remove all build artifacts
 ~~~
 
 The root Makefile builds only. Simulation runs from each simulator's own
-directory; run logs land in that directory's `output/<scenario>/run.log`:
+directory; run logs land in that directory's `output/<run-tag>/run.log`:
 
 ~~~bash
 cd sim/verilator
-make run-tb-top                                 # wire-level cosim, default scenario
-make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
+make run-tb-top                                 # wire-level smoke (random reads/writes)
 
-cd sim/vcs                                    # Linux workstation only
+cd sim/vcs                                      # Linux workstation only
 make run-tb-top
 ~~~
 
@@ -234,8 +233,7 @@ Opt-in per run; default off (regression and ctest are unaffected):
 
 ~~~bash
 cd sim/vcs
-make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat FSDB=1   # -> output/<scenario>/tb_top.fsdb
-make run-all-fsdb                                         # all 37 scenarios, summary at end
+make run-tb-top FSDB=1   # -> output/<run-tag>/tb_top.fsdb (needs VERDI_HOME)
 ~~~
 
 Requirements: `VERDI_HOME` defaults to `/tools/verdi_2020.03` (the
@@ -246,10 +244,6 @@ binary beside the normal `simv_tb_top_<TOPOLOGY>`; toggling `FSDB` never
 reuses a binary from the other mode.
 For memory dumping / interactive Verdi debug, enable the heavier ref-flow
 combo: `FSDB_EXTRA="-debug_access+all -debug_all +fsdb+all +vcsd"`.
-
-`run-all-fsdb` always exits 0 -- it is not a regression gate; failing
-patterns are reported and their partial fsdb is kept for debug.
-`AX4-INF-*` failures are annotated "fails by design" in the summary.
 
 First-run validation on the workstation (record results in the
 `[WORKSTATION]` block of `sim/vcs/Makefile`):
@@ -431,43 +425,14 @@ template authoring, and extension guide.
 
 ---
 
-## 5. Adding a scenario
+## 5. Traffic patterns and fixtures
 
-1. Pick a category code (CAT) and the next available sequence number
-   (NNN) within that category. Create the directory:
-
-   ~~~bash
-   mkdir sim/test_patterns/AX4-CAT-NNN_my_slug
-   ~~~
-
-2. Write `scenario.yaml` with `schema_version: 1` and a full
-   `metadata:` block. The `name` field must equal the directory basename
-   exactly.
-
-3. Add `data.txt` for write transactions. The parser
-   (`c_model/include/axi/axi_master.hpp:251,327-330`) requires at least
-   `(len + 1) * (1 << size)` bytes total (extra bytes past that point
-   are read but unused), where `len` and `size` are the AXI awlen /
-   awsize fields of the transaction (number of beats minus one, and
-   beat byte-width log2). Tokens are whitespace-delimited hex bytes
-   (one `uint8_t` per token); per-line layout (e.g. one beat per
-   line, 32 bytes per line for a 256-bit data bus) is a project
-   convention, not enforced by the parser. Add `strb.txt` or
-   `excl.txt` if the scenario requires them. Infrastructure scenarios
-   that deliberately reference a missing data file (e.g. INF-001) do
-   not provide an actual data file.
-
-4. Run `make test`. The scenario is picked up automatically by the
-   c_model integration test via CMake `CONFIGURE_DEPENDS`. Use
-   `make sim TB=mesh_4x4_vc1 PATTERN=neighbor` to run a cosim smoke.
-
-5. INF-prefix scenarios are skipped from the c_model integration test
-   (marker `INF_DEDICATED_TEST`, set in
-   `c_model/tests/axi/test_integration.cpp:87`) and should only be
-   exercised through their dedicated test.
-
-6. Commit with a body paragraph citing the IHI 0022H section or
-   protocol property the scenario exercises.
+Cosim stimulus is generated, not hand-authored. `sim/tools/gen_test_patterns.py`
+emits per-node transaction files for a topology and traffic pattern
+(`neighbor` / `transpose` / `uniform_random` / `hotspot`); run one with
+`make sim TB=<topo> PATTERN=<p>`. c_model ctest fixtures build their stimulus
+inline in the test source (see `test_request_response_loopback.cpp` for the
+ORD-003 example), so no external scenario files are involved.
 
 ---
 
@@ -510,12 +475,12 @@ property under test.
 
 ### run-tb-top sanity check
 
-Before suspecting c_model or checker bugs, run the default scenario
+Before suspecting c_model or checker bugs, run the wire-level smoke
 and inspect the log:
 
 ~~~bash
-cd sim/verilator && make run-tb-top   # AX4-BAS-001_single_write_read_aligned
-cat sim/verilator/output/AX4-BAS-001_single_write_read_aligned/run.log
+cd sim/verilator && make run-tb-top
+cat sim/verilator/output/*/run.log
 ~~~
 
 A passing run ends with `$finish` and no assertion failure lines.
@@ -536,7 +501,7 @@ The curated AX4 bidirectional sweep is deferred.
 
 ### Vtb_top output log
 
-Vtb_top writes run.log to `sim/verilator/output/<SCENARIO>/run.log` when
+Vtb_top writes run.log to `sim/verilator/output/<run-tag>/run.log` when
 invoked via `make run-tb-top`. When invoked via ctest, output goes to stdout, captured
 by `--output-on-failure`.
 

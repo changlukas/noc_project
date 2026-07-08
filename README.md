@@ -44,29 +44,25 @@ make build       # c_model + Verilator (correct dep order)
 ## Test
 
 ~~~bash
-make test                                    # c_model gtest suite (543 tests)
-make check                                   # lint + build + tests
+make test                                    # c_model gtest suite
 ~~~
 
 ## Simulate (cosim)
 
-The root Makefile builds only. Simulation runs from each simulator's own
-directory; run logs land in that directory's `output/<scenario>/run.log`:
+Cosim runs from the repo root via `make sim`; per-run logs land in
+`sim/<simulator>/output/<run-tag>/run.log`:
 
 ~~~bash
-cd sim/verilator
-make run-tb-top                                 # wire-level cosim, default scenario
-make run-tb-top SCENARIO=AX4-BUR-002_incr_8beat # specific scenario
-
-cd sim/vcs                                      # Linux workstation only (VCS)
-make run-tb-top SCENARIO=<ax4-id>
+make sim TB=mesh_4x4_vc1 PATTERN=neighbor        # directed cosim (Verilator)
+make sim TB=mesh_4x4_vc8 PATTERN=uniform_random  # another topology / pattern
 ~~~
 
-Waveform dumping (VCS/FSDB only; opt-in, default off):
+A self-contained wire-level smoke (random reads/writes, no stimulus files)
+runs from each simulator's directory; add `FSDB=1` on VCS for a Verdi dump:
 
 ~~~bash
-cd sim/vcs && make run-tb-top SCENARIO=<id> FSDB=1   # FSDB -> output/<id>/tb_top.fsdb (needs Verdi/VERDI_HOME)
-cd sim/vcs && make run-all-fsdb                      # one FSDB per scenario + summary
+cd sim/verilator && make run-tb-top              # Verilator
+cd sim/vcs       && make run-tb-top FSDB=1       # VCS (needs VERDI_HOME)
 ~~~
 
 See `docs/architecture.md` for the cosim architecture, and
@@ -83,7 +79,7 @@ See `docs/architecture.md` for the cosim architecture, and
 
 Branches target `main` via PR. Required before merging:
 
-- `make check` clean (lint + build + tests)
+- `make test` clean (builds c_model + full ctest)
 - `clang-format -i` on every C++ file touched
 - Commit message format: `type(scope): description` (English)
 - Never `--no-verify`

@@ -49,8 +49,8 @@ network interface, and the memory edge between network interface and memory), on
 monitor sits on each link direction, and router queue occupancy is sampled every
 cycle. All of them feed a single collector that writes the output. None of them
 drive any signal in the design. Each scenario is launched with
-`make run-tb-top SCENARIO=<scenario-id>`, which produces `perf.json` beside the
-run log and prints the summary.
+`make run-tb-top` (or `make sim TB=<topo> PATTERN=<p>`), which produces
+`perf.json` beside the run log and prints the summary.
 
 **Figure 2: Monitor structure and data flow.**
 

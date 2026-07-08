@@ -286,10 +286,10 @@ GoogleTest tests under `c_model/tests/` exercise individual components
 `make test`.
 
 **Layer 2 -- c_model integration test**
-`c_model/tests/axi/test_integration.cpp` runs all AX4-* scenarios
-(excluding INF prefix) through the full c_model pipeline. The scenario
-list is generated at CMake configure time from
-`sim/test_patterns/AX4-*/scenario.yaml` via `file(GLOB CONFIGURE_DEPENDS)`.
+`c_model/tests/integration/test_request_response_loopback.cpp` drives the
+full NMU + NSU packetize/depacketize pipeline through ChannelModel and
+checks the scoreboard. Its fixture is the ORD-003 same-id-multi-dst reorder
+gate, built inline in the test source (no external scenario files).
 
 **Layer 3 -- cosim smoke**
 `make sim TB=mesh_4x4_vc1 PATTERN=neighbor` runs a neighbor-pattern

@@ -28,8 +28,7 @@ help:
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
 	@echo "Simulate (from each simulator's directory):"
-	@echo "  cd sim/verilator && make run-tb-top                   default scenario"
-	@echo "  cd sim/verilator && make run-tb-top SCENARIO=<ax4-id> specific scenario"
+	@echo "  cd sim/verilator && make run-tb-top                   wire-level smoke (random)"
 	@echo "  cd sim/vcs       && make run-tb-top                   VCS (Linux workstation)"
 	@echo ""
 	@echo "Simulate:"
@@ -122,7 +121,7 @@ build-yamlcpp: $(CMODEL_BUILD)/CMakeCache.txt
 $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
-# Default topology for standalone build-verilator / make check.
+# Default topology for standalone build-verilator.
 # make sim overrides this by passing TOPOLOGY=$(TB) explicitly.
 TOPOLOGY  ?= mesh_4x4_vc1
 RUN_CLASS ?= constrained_random
