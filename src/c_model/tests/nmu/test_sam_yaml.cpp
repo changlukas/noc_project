@@ -30,3 +30,14 @@ TEST(SamYaml, ExplicitTilesOverride) {
     ASSERT_NE(e, nullptr);
     EXPECT_EQ(e->size, 0x10000000ull);
 }
+
+// Guards the real topology config (Task 7): topologies/ is copied next to the
+// test binary at build time (CMakeLists.txt), mirroring the config/
+// port_params.yaml pattern in test_axi_slave_port.
+TEST(SamYaml, RealMesh4x4TopologyLoads) {
+    auto sam = load_sam_table("topologies/mesh_4x4_vc1.yaml");
+    EXPECT_EQ(sam.entries().size(), 16u);
+    auto t = sam.translate(0x1200000000ull);  // tile (2,1) -> coord_id 0x12
+    EXPECT_EQ(t.dst_id, 0x12u);
+    EXPECT_EQ(t.local_addr, 0x0ull);  // rebased: addr - base
+}

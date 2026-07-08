@@ -3,3 +3,8 @@ topology:
   x_dim: 4
   y_dim: 4
   num_vc: 1
+
+address_map:
+  tile_size: 0x100000000
+  rebase: true
+  test_aperture: 0x1000
