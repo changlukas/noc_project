@@ -78,8 +78,8 @@ The NMU sits on the AXI-master ingress side. Its responsibilities:
   `dst_id` (from the table) and `local_addr = addr - remove_offset`
   (rebase: the subordinate sees a 0-based local address, not a
   coordinate-bearing global one). A miss (address maps to no tile)
-  asserts -- model policy; a real interconnect would return DECERR,
-  tracked as a separate feature. Tiles are 4 KB-granular (`base` and
+  asserts (model policy, not AXI-faithful). A real interconnect would
+  return DECERR, tracked as a separate feature. Tiles are 4 KB-granular (`base` and
   `size` both 4 KB multiples), so an AXI-legal burst (<=4 KB, cannot
   cross a 4 KB boundary) never crosses a tile boundary -- the NI does
   not split bursts across tiles. The wire flit format is unchanged:
