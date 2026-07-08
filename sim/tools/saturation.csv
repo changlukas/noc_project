@@ -1,5 +1,0 @@
-vc,inj_ratio,ids_per_tile,aggregate_bits_per_cyc,read_bits_per_cyc,write_bits_per_cyc
-vc1,1.0,16,1248.3,624.1,624.1
-vc2,1.0,16,1710.0,855.0,855.0
-vc4,1.0,16,1915.9,957.9,957.9
-vc8,1.0,16,1935.1,967.5,967.5

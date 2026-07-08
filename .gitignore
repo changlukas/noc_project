@@ -90,3 +90,7 @@ docs/issue/
 
 # SDD scratch (ledger, briefs, reports, codex reviews) — not version-controlled
 /.superpowers/
+
+# saturation sweep outputs (make sim-saturation)
+sim/tools/saturation.csv
+sim/tools/saturation.png

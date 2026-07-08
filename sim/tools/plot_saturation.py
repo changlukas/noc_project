@@ -5,8 +5,10 @@ Throwaway: prints a table always; renders saturation.png if matplotlib is presen
 import csv
 import pathlib
 
+_CSV = pathlib.Path(__file__).resolve().parent / "saturation.csv"
 
-def saturation_per_vc(csv_path="saturation.csv") -> dict:
+
+def saturation_per_vc(csv_path=_CSV) -> dict:
     out = {}
     for row in csv.DictReader(open(csv_path)):
         out[row["vc"]] = float(row["aggregate_bits_per_cyc"])

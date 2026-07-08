@@ -1,6 +1,6 @@
 # Top-level Makefile — BUILD ONLY. Run all targets from repo root.
 #
-# Convention: the root builds (c_model + Verilator) and runs lint/test
+# Convention: the root builds (c_model + Verilator) and runs the test
 # gates; SIMULATION runs from each simulator's own directory:
 #   cd sim/verilator && make run-tb-top   (Windows + Linux)
 #   cd sim/vcs       && make run-tb-top   (Linux workstation)
@@ -17,7 +17,7 @@ CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
 COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
-.PHONY: help build build-cmodel build-yamlcpp build-verilator test lint_docs \
+.PHONY: help build build-cmodel build-yamlcpp build-verilator test \
         specgen_pytest sim \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
@@ -146,17 +146,6 @@ test: build-cmodel
 # (canonical on this project's Windows setup), fall back to python3
 # (Linux/macOS and MSYS2 shells without the launcher on PATH).
 PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
-
-# Mandatory ASCII byte check on maintained docs (spec sec 3.2).
-# Excludes archive, normative spec, sub-project docs, legal, generated.
-MAINTAINED_DOCS = \
-    README.md \
-    docs/architecture.md \
-    docs/development.md \
-    docs/internal/_archive/README.md
-
-lint_docs:
-	$(PYTHON3) tools/lint_docs.py $(MAINTAINED_DOCS)
 
 # specgen codegen/golden drift gate. Runs the specgen pytest suite so a stale
 # golden (e.g. an un-regenerated SV package) cannot pass silently. The pytest

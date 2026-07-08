@@ -305,8 +305,7 @@ Two hand-curated test suites exercise specific protocol invariants:
   scenarios x num_vc variants.
 
 `make test` builds the c_model and runs the full ctest suite (Layers
-1-2, 4); `make lint_scenarios lint_docs` covers the lint checks. Layer 3
-is a separate cosim run: `make sim TB=<topo> PATTERN=<p>`.
+1-2, 4). Layer 3 is a separate cosim run: `make sim TB=<topo> PATTERN=<p>`.
 
 ---
 

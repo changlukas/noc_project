@@ -272,6 +272,21 @@ run-traffic: $(TBTOP_EXE)
 	    echo "run-traffic FAIL: no non-zero bandwidth reported"; exit 1; \
 	fi
 
+# VC-value saturation sweep: run-traffic on vc1/2/4/8 at max injected concurrency,
+# then collect accepted bandwidth into a CSV + table. The operating point
+# (IDS_PER_TILE=16, INJ_RATIO=1.0, and the four vc topologies) is fixed to match
+# collect_saturation.py, which parses the per-config run logs. Heavy: builds each
+# VC config (Verilator) in turn; run on WSL. Each sub-make derives its own
+# FILELIST_F from TOPOLOGY, so do not pass a fixed FILELIST_F.
+.PHONY: sim-saturation
+sim-saturation:
+	@for t in mesh_4x4_vc1 mesh_4x4_vc2 mesh_4x4_vc4 mesh_4x4_vc8; do \
+	    echo ">>> saturation: $$t"; \
+	    $(MAKE) run-traffic RUN_CLASS=directed TOPOLOGY=$$t IDS_PER_TILE=16 INJ_RATIO=1.0 || exit 1; \
+	done
+	$(PYTHON3) $(COSIM_ROOT)/tools/collect_saturation.py
+	$(PYTHON3) $(COSIM_ROOT)/tools/plot_saturation.py
+
 # Constrained-random run: rand_master (WRAP/EXC) + tb-level axi_reorder_compare.
 # Gate on zero reorder_compare $error (%Error) + non-vacuous PASS (cmp_eos drain is
 # in the tb exit). Seed is echoed into the tag so a FAIL is replayable.

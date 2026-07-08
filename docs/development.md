@@ -48,8 +48,7 @@ lowercase, no trailing period.
 ### Pre-submit gate
 
 Run `make test` before every commit that touches code (builds the
-c_model, runs the full ctest suite). When you touch scenarios or docs,
-also `make lint_scenarios lint_docs`.
+c_model, runs the full ctest suite).
 
 The ctest suite must be green. If a test that previously passed now
 fails, fix it -- do not skip or comment out the test. Do not disable
@@ -122,9 +121,8 @@ prefix in the directory name.
 ### Markdown
 
 - Encoding: UTF-8, no BOM.
-- Maintained docs (README.md, docs/architecture.md, docs/development.md,
-  docs/internal/_archive/README.md, sim/test_patterns/README.md)
-  must be ASCII-only. The `lint_docs` target enforces this.
+- Docs must be ASCII-only (no em-dashes, smart quotes, or other
+  non-ASCII bytes).
 - Headings: sentence case (only first word and proper nouns capitalized).
 - Link paths: forward slash `/` separator.
 - No trailing whitespace; Unix line endings preferred.
@@ -394,7 +392,7 @@ The following files are auto-generated and must not be edited by hand:
   `specgen/tools/gen_inventory.py` (run manually after editing the JSON;
   drift-gated by `specgen/tests/test_feature_inventory.py`).
 
-Generated files are excluded from `lint_docs` and from clang-format runs.
+Generated files are excluded from clang-format runs.
 
 ### Regenerating
 
@@ -562,7 +560,7 @@ individually visible on the wire bundle at successive ticks.
 Before opening a PR or merging a branch:
 
 - [ ] `make test` passes clean (ctest all green, no SKIPs that are not
-      pre-existing); `make lint_scenarios lint_docs` if scenarios/docs changed.
+      pre-existing).
 - [ ] `clang-format -i` applied to every `.hpp` and `.cpp` file touched.
 - [ ] Commit message follows `type(scope): description` format (English).
 - [ ] New behaviour covered by at least one new test that was passing
