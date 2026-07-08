@@ -71,6 +71,36 @@ class SamTable {
 
     const std::vector<SamEntry>& entries() const { return entries_; }
 
+    // Validate explicit entries; fail-loud. Uniform tables satisfy these by construction.
+    // Two passes (Codex): validate every entry's fields FIRST so the overlap pass can
+    // trust each `base+size` (no overflow) when it reads it.
+    void validate(unsigned x_dim, unsigned y_dim) const {
+        constexpr uint64_t k4k = 0x1000;
+        for (const auto& e : entries_) {
+            assert(e.size != 0 && "SAM: zero-size tile");
+            assert((e.base % k4k == 0) && (e.size % k4k == 0) &&
+                   "SAM: base and size must be 4 KB aligned");
+            assert(e.base + e.size > e.base && "SAM: base+size overflow");
+            assert(e.remove_offset <= e.base && "SAM: remove_offset > base (local underflow)");
+            unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
+            unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");
+        }
+        for (std::size_t i = 0; i < entries_.size(); ++i) {
+            for (std::size_t j = i + 1; j < entries_.size(); ++j) {
+                const auto& e = entries_[i];
+                const auto& f = entries_[j];
+                assert(!(e.base < f.base + f.size && f.base < e.base + e.size) &&
+                       "SAM: overlapping tile ranges");
+            }
+        }
+    }
+
+    bool burst_footprint_ok(uint64_t addr, uint64_t last_byte) const {
+        const SamEntry* a = lookup(addr);
+        return a != nullptr && last_byte >= a->base && last_byte < a->base + a->size;
+    }
+
   private:
     std::vector<SamEntry> entries_;
 };

@@ -25,3 +25,36 @@ TEST(SamTable, LookupMissReturnsNull) {
     EXPECT_EQ(sam.lookup(0x0300000000ull),
               nullptr);  // coord_id 3 = (0,0..)+? x=3>=x_dim -> unmapped
 }
+
+#include <vector>
+using ni::cmodel::nmu::addr_trans::SamEntry;
+
+TEST(SamValidator, RejectsOverlap) {
+    SamTable bad(std::vector<SamEntry>{
+        {0x0, 0x2000, 0x00, 0x0}, {0x1000, 0x2000, 0x01, 0x1000},  // overlaps first
+    });
+    EXPECT_DEATH(bad.validate(4, 4), "overlap");
+}
+
+TEST(SamValidator, RejectsNon4KBSize) {
+    SamTable bad(std::vector<SamEntry>{{0x0, 0x1800, 0x00, 0x0}});  // 6 KB, not a 4 KB multiple
+    EXPECT_DEATH(bad.validate(4, 4), "4 ?KB|aligned");
+}
+
+TEST(SamValidator, RejectsRemoveOffsetGtBase) {
+    SamTable bad(std::vector<SamEntry>{{0x1000, 0x1000, 0x00, 0x2000}});  // remove_offset > base
+    EXPECT_DEATH(bad.validate(4, 4), "remove_offset");
+}
+
+TEST(SamValidator, RejectsDstOutsideMesh) {
+    SamTable bad(std::vector<SamEntry>{{0x0, 0x1000, 0x33, 0x0}});  // x=3,y=3 outside 2x2
+    EXPECT_DEATH(bad.validate(2, 2), "mesh");
+}
+
+TEST(SamFootprint, RejectsBurstCrossingTile) {
+    auto sam = SamTable::uniform(4, 4, 0x100000000ull, true);
+    // burst inside tile 0x12: [base+0x40, base+0x80] ok
+    EXPECT_TRUE(sam.burst_footprint_ok(0x1200000040ull, 0x1200000080ull));
+    // burst spilling past tile end into the next tile: not ok
+    EXPECT_FALSE(sam.burst_footprint_ok(0x12FFFFFFF0ull, 0x1300000010ull));
+}
