@@ -68,11 +68,23 @@ The NMU sits on the AXI-master ingress side. Its responsibilities:
   `c_model/include/nmu/packetize.hpp` lines 24-26).
 - Manages a Reorder Buffer (RoB) for incoming B and R responses so that
   out-of-order network delivery is re-serialized per AXI4 ID ordering rules.
-- Address translation extracts the destination ID from the upper address
-  bits at packetize time (`nmu::addr_trans::xy_route` in
-  `c_model/include/nmu/addr_trans.hpp`); the local address passed through
-  the NoC is the full input address unmodified. There is no remap table
-  in the c_model.
+- Address translation is a System Address Map (SAM) lookup, not a
+  bit-slice: a per-tile `{base, size, dst_id, remove_offset}` table
+  (`addr_trans::SamTable`, `c_model/include/nmu/addr_trans.hpp`), loaded
+  from the topology YAML `address_map` block
+  (`c_model/include/nmu/sam_yaml.hpp`) -- the single source of truth
+  shared by the c_model, the stimulus generator, and the testbench. At
+  packetize time the address is range-matched to a tile, giving
+  `dst_id` (from the table) and `local_addr = addr - remove_offset`
+  (rebase: the subordinate sees a 0-based local address, not a
+  coordinate-bearing global one). A miss (address maps to no tile)
+  asserts -- model policy; a real interconnect would return DECERR,
+  tracked as a separate feature. Tiles are 4 KB-granular (`base` and
+  `size` both 4 KB multiples), so an AXI-legal burst (<=4 KB, cannot
+  cross a 4 KB boundary) never crosses a tile boundary -- the NI does
+  not split bursts across tiles. The wire flit format is unchanged:
+  `dst_id` is already a header field and `awaddr` / `araddr` is already
+  the payload address; SAM only changes which value each carries.
 
 The RoB holds in-flight response slots indexed by AXI ID, releases them
 in-order per ID, and asserts BVALID / RVALID only when the slot at the
@@ -102,10 +114,10 @@ testbench-only NoC bridge that conducts NMU TX flits to NSU RX. By
 default it is zero-delay; the test fixture can set a per-NSU response
 latency via `set_nsu_latency` / `set_nsu_latency_range`, or a global
 request / response delay via `set_req_delay` / `set_rsp_delay` (single-
-NSU mode only). Destination derivation (XY bit-slice on `awaddr` /
-`araddr`) is performed at NMU packetize time via
-`nmu::addr_trans::xy_route` (`c_model/include/nmu/addr_trans.hpp`), not
-at the NoC level. A router model can replace `ChannelModel` by
+NSU mode only). Destination derivation is a SAM lookup on `awaddr` /
+`araddr` (see NMU above), performed at NMU packetize time via
+`addr_trans::SamTable::translate` (`c_model/include/nmu/addr_trans.hpp`),
+not at the NoC level. A router model can replace `ChannelModel` by
 implementing the four `NocReqOut` / `NocRspIn` / `NocReqIn` /
 `NocRspOut` abstract interfaces declared in `c_model/include/router/`.
 
