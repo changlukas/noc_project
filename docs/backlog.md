@@ -23,6 +23,22 @@ Checked-traffic-benchmark work COMPLETE (Stages 1-5). Run interface: **`make sim
 
 Same push (2026-07-07) also landed a **ctest audit + prune** (branch `chore/ctest-prune`, memory `project_ctest_audit_prune`): 5-agent audit of all 54 test files, then trimmed low-value / co-sim-redundant tests and root-caused a `-j` flakiness (fixed shared temp paths -> unique per pid+test via new `tests/common/tmp_path.hpp`). Result: ctest 497 -> 385, parallel-safe (`ctest -j8 --repeat until-fail:2` green). The multi-hour "hang" scare was `cmake --build -j`(all cores) thrashing WSL, not a test deadlock. Fine-grained in-file mirror cuts deferred (list in memory).
 
+## Done — hygiene sweep (2026-07-07/08, merged + pushed to `main` through `5b0acbf`)
+
+Between-rounds cleanup, no new feature:
+- **Saturation sweep productized**: `make sim-saturation` runs the VC-value sweep (run-traffic on vc1/2/4/8 at `ids_per_tile=16`, `inj=1.0`) -> `collect_saturation.py` CSV + `plot_saturation.py` table. Recorded result: vc1=1248 vc2=1710 vc4=1916 vc8=1935 bits/cyc (**+53% vc1->vc4**, plateau by vc8).
+- **ctest decoupled from `sim/test_patterns/`** (`35e5bdc`): deleted all 25 `AX4-*` dirs + `scenarios_list.hpp` manifest + `noc_axi4_scenarios` lib + `RequireKnownScenario` registry + `SCENARIO_TREE_ROOT`; the one surviving fixture (ORD-003) is inlined into its test. ctest now has zero external-scenario dependency (381/381).
+- **Dead perf path removed**: `axi_slots`/`latency` (txn-perf DPI never wired) dropped; perf.json is noc-only (routers + links, which are live).
+- **AI-ism removals** (user: no real project ships these): the doc-ASCII `lint_docs` linter + `lint_scenarios` + their make targets. Emptied root `tools/` -> `sim/tools/` is the only tools dir. See [[feedback_reject_ai_invented_mechanisms]].
+- **Dead files + doc staleness**: dead headers (`ni_spec.hpp`, `master/slave_wrap_io.hpp`), stale `perf_baseline/*.json`, 17 stray root `master_wrap_read_dump*.txt`; `make clean` now sweeps generated stimulus; all live-doc refs to removed machinery (`make check`, `run-tb-top SCENARIO=`, `test_integration`, AX4 GLOB) reconciled.
+
+## NEXT SESSION -> design round
+
+Hygiene is done; the next action is a **design round** (brainstorm-first, per [[feedback_superpowers_entry]]). Pick ONE from the Design rounds table below:
+- **SAM remap** — largest: reworks address gen + NMU/NSU, needs an AMBA System Address Map / FlooNoC survey.
+- **NoC-layer QoS** — medium: QoS-aware VC arbitration + mapping (`NOC_QOS_WIDTH=0`, `noc_qos` zero-filled today).
+- **non-4x4 topology** — smallest: a non-square YAML smoke to prove the generator path.
+
 ## Next round — ranked (set 2026-07-03, after the VIP cutover round)
 
 0. ~~**Load-dependent DUT deadlock under random traffic**~~ **RESOLVED 2026-07-04 — NMU
