@@ -31,6 +31,9 @@ add_cmodel_test(test_addr_trans)
 
 add_cmodel_test(test_sam_table)
 
+add_cmodel_test(test_sam_yaml)
+target_link_libraries(test_sam_yaml PRIVATE yaml-cpp::yaml-cpp)
+
 add_cmodel_test(test_rob)
 # Pick up the shared loopback fixtures from tests/common/ via
 # "common/loopback_*.hpp".
