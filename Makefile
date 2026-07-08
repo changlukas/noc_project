@@ -209,6 +209,7 @@ endif
 clean: clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 	rm -rf $(BUILD_ROOT)
 	rm -rf $(COSIM_VERILATOR)/../test_patterns/directed_* $(COSIM_VERILATOR)/../test_patterns/traffic_*
+	rm -f master_wrap_read_dump*.txt
 
 clean-cmodel:
 	rm -rf $(CMODEL_BUILD)
