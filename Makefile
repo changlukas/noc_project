@@ -41,7 +41,7 @@ help:
 	@echo "  make test             run c_model ctest suite"
 	@echo ""
 	@echo "Clean:"
-	@echo "  make clean                  everything (build/ + per-sim output/)"
+	@echo "  make clean                  everything (build/ + per-sim output/ + generated stimulus)"
 	@echo "  make clean-cmodel           build/cmodel/"
 	@echo "  make clean-verilator        build/verilator/ + sim/verilator/output/"
 	@echo "  make clean-vcs              build/vcs/ + sim/vcs/output/ + Verdi droppings"
@@ -208,6 +208,7 @@ endif
 
 clean: clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 	rm -rf $(BUILD_ROOT)
+	rm -rf $(COSIM_VERILATOR)/../test_patterns/directed_* $(COSIM_VERILATOR)/../test_patterns/traffic_*
 
 clean-cmodel:
 	rm -rf $(CMODEL_BUILD)
