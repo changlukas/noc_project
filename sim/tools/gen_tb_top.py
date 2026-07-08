@@ -120,6 +120,28 @@ def _nodes(topo: dict):
     return out, x_dim, y_dim
 
 
+# Default tile stride / test aperture when the topology YAML omits the
+# address_map block. Mirrors c_model addr_trans.hpp SamTable::uniform's base
+# formula and gen_test_patterns.py's _DEFAULT_TILE_SIZE.
+_DEFAULT_TILE_SIZE = 0x100000000
+_DEFAULT_TEST_APERTURE = 0x1000
+
+
+def _address_map(topo: dict) -> dict:
+    """address_map block (optional): tile_size, rebase, test_aperture.
+
+    tile_size feeds REGION_BASE (SAM base = dst_id * tile_size); test_aperture
+    feeds REGION_BYTES (the per-master compare/rand_master window — NOT
+    tile_size, which would blow up MAX_BURST_LEN). rebase controls whether the
+    slave face is expected to see a local or global address."""
+    am = topo.get("address_map") or {}
+    return {
+        "tile_size": int(am.get("tile_size", _DEFAULT_TILE_SIZE)),
+        "rebase": bool(am.get("rebase", False)),
+        "test_aperture": int(am.get("test_aperture", _DEFAULT_TEST_APERTURE)),
+    }
+
+
 # Live-neighbor map / opposite-port logic now lives in the emitted SV genvar
 # generate (localparams HAS_N/E/S/W + PEER_N/E/S/W; +y=NORTH, RP_* opposite
 # pairs), driven by the raster index. The Python model only needs _nodes() to
@@ -378,13 +400,19 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     num_vc = topo["topology"]["num_vc"]
     rob_enabled = requested_name.endswith("_rob")
 
-    # REGION_BASE[s] = coord_id(s) << 32 — dst tile in addr bits 32+. Stamped
-    # into every endpoint so the VIP rand_master targets per-destination windows.
+    # REGION_BASE[s] = SAM base for tile s = coord_id(s) * tile_size (mirrors
+    # c_model addr_trans.hpp SamTable::uniform; byte-identical to the old
+    # coord_id<<32 stamp for the default 4 GiB tile_size). Stamped into every
+    # endpoint so the VIP rand_master targets per-destination windows.
     # Emitted as a PACKED-array concatenation in descending index order (element
-    # for index n-1 first) so REGION_BASE[i] == coord_id(node i) << 32. Packed
-    # because Verilator 5.048 mis-sizes an unpacked-array param override whose
-    # size depends on a sibling param override.
-    region_base = ", ".join(f"64'h{(c << 32):016X}"
+    # for index n-1 first) so REGION_BASE[i] == coord_id(node i) * tile_size.
+    # Packed because Verilator 5.048 mis-sizes an unpacked-array param override
+    # whose size depends on a sibling param override.
+    am = _address_map(topo)
+    tile_size = am["tile_size"]
+    rebase = am["rebase"]
+    rebase_bit = "1'b1" if rebase else "1'b0"
+    region_base = ", ".join(f"64'h{(c * tile_size):016X}"
                             for (_i, _x, _y, c) in reversed(nodes))
 
     lines = []
@@ -440,11 +468,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // link_perf_monitor tracks the ACTUAL receiving buffer depth (not SLAVE_VC_BUFFER_DEPTH).")
     w("    localparam int unsigned ROUTER_VC_DEPTH       = "
       "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
-    w("    // Per-destination region windows: REGION_BASE[s] = coord_id(s) << 32 (dst")
-    w("    // tile in addr bits 32+). Packed array: Verilator 5.048 mis-sizes an")
-    w("    // unpacked-array param override whose size depends on a sibling override.")
+    w("    // Per-destination region windows: REGION_BASE[s] = SAM base for tile s")
+    w("    // (coord_id(s) * tile_size, from topology address_map.tile_size). Packed")
+    w("    // array: Verilator 5.048 mis-sizes an unpacked-array param override whose")
+    w("    // size depends on a sibling override. REGION_BYTES = address_map.test_aperture")
+    w("    // (NOT tile_size -- that would blow up the rand_master's MAX_BURST_LEN).")
     w(f"    localparam logic [NUM_NODES-1:0][63:0] REGION_BASE = {{{region_base}}};")
-    w("    localparam longint unsigned REGION_BYTES = 64'h1000;")
+    w(f"    localparam longint unsigned REGION_BYTES = 64'h{am['test_aperture']:X};")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Watchdog - sized by worst-case beats in flight: measured vc1 fabric rate is")
@@ -625,6 +655,10 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("                    idx: 32'd0,")
     w("                    start_addr: REGION_BASE[DST],")
     w("                    end_addr: REGION_BASE[DST] + REGION_BYTES}}),")
+    w(f"            .Rebase({rebase_bit}),")
+    w("            // RegionBase[0]=this master's tile base (real slot, decode idx=0);")
+    w("            // RegionBase[1] is don't-care (dummy slot, .aw_valid tied to 0).")
+    w("            .RegionBase({64'h0, REGION_BASE[DST]}),")
     w("            .aw_chan_t(axi_vip_types_pkg::vip_aw_chan_t),")
     w("            .w_chan_t(axi_vip_types_pkg::vip_w_chan_t),")
     w("            .b_chan_t(axi_vip_types_pkg::vip_b_chan_t),")

@@ -180,6 +180,7 @@ run-tb-top: $(TBTOP_EXE)
 	$(TBTOP_EXE) \
 	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
 	    "+verilator+seed+$(SEED)" \
+	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(RUN_TAG)/perf.json" \
 	    "+perf_scenario=$(RUN_TAG)" \
 	    > output/$(RUN_TAG)/run.log 2>&1; \
@@ -216,6 +217,7 @@ run-directed: $(TBTOP_EXE)
 	    "+stim_dir=$(STIM_ROOT)" \
 	    "+num_reads=$(TXNS_PER_NODE)" "+num_writes=$(TXNS_PER_NODE)" \
 	    "+verilator+seed+$(SEED)" \
+	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(DIRECTED_TAG)/perf.json" \
 	    "+perf_scenario=$(DIRECTED_TAG)" \
 	    > output/$(DIRECTED_TAG)/run.log 2>&1; \
@@ -256,6 +258,7 @@ run-traffic: $(TBTOP_EXE)
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(TRAFFIC_STIM)" \
 	    "+traffic_inj_ratio=$(INJ_RATIO)" \
+	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(TRAFFIC_TAG)/perf.json" \
 	    "+perf_scenario=$(TRAFFIC_TAG)" \
 	    > output/$(TRAFFIC_TAG)/run.log 2>&1; \
@@ -299,6 +302,7 @@ run-constrained-random: $(TBTOP_EXE)
 	$(TBTOP_EXE) \
 	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
 	    "+verilator+seed+$(SEED)" \
+	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(CR_TAG)/perf.json" \
 	    "+perf_scenario=$(CR_TAG)" \
 	    > output/$(CR_TAG)/run.log 2>&1; \

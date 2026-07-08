@@ -12,6 +12,13 @@ module axi_reorder_compare #(
   parameter type addr_t = logic,
   parameter type rule_t = logic,
   parameter rule_t [NumAddrRegions-1:0] AddrRegions = '0,
+  // SAM rebase support: the master face always sees a global address; the
+  // slave face sees a local (tile-relative) address iff Rebase is set. Both
+  // are normalized to the tile-local offset before compare (see step_2).
+  // RegionBase[s] = the tile base subtracted for slave slot s. Defaults keep
+  // today's behavior unchanged (no offset subtracted on either face).
+  parameter bit Rebase = 1'b0,
+  parameter addr_t [NumSlaves-1:0] RegionBase = '0,
   parameter bit Verbose = 0,
   parameter type aw_chan_t = logic,
   parameter type w_chan_t = logic,
@@ -210,6 +217,10 @@ module axi_reorder_compare #(
         // Ignore ID since it is modified in the network interface
         aw_act.id = 'X;
         aw_exp.id = 'X;
+        // Normalize .addr to the tile-local offset: the master face (aw_exp)
+        // is always global; the slave face (aw_act) is local iff Rebase.
+        aw_exp.addr = aw_exp.addr - RegionBase[i];
+        aw_act.addr = Rebase ? aw_act.addr : (aw_act.addr - RegionBase[i]);
         if (aw_exp !== aw_act) begin
           $error("AW mismatch");
           print_aw(aw_exp, aw_act);
@@ -241,6 +252,10 @@ module axi_reorder_compare #(
         // Ignore ID since it is modified in the network interface
         ar_act.id = 'X;
         ar_exp.id = 'X;
+        // Normalize .addr to the tile-local offset: the master face (ar_exp)
+        // is always global; the slave face (ar_act) is local iff Rebase.
+        ar_exp.addr = ar_exp.addr - RegionBase[i];
+        ar_act.addr = Rebase ? ar_act.addr : (ar_act.addr - RegionBase[i]);
         if (ar_exp !== ar_act) begin
           $error("AR mismatch");
           print_ar(ar_exp, ar_act);

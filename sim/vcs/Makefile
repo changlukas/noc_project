@@ -177,6 +177,7 @@ run-tb-top: $(SIMV_TB_TOP)
 	$(SIMV_TB_TOP) \
 	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
 	    "+ntb_random_seed=$(SEED)" \
+	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(RUN_TAG)/perf.json" \
 	    "+perf_scenario=$(RUN_TAG)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
 	    2>&1 | tee output/$(RUN_TAG)/run.log
