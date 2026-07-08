@@ -125,6 +125,7 @@ struct NmuRspREntry {
 
 struct NmuConfig {
     uint8_t src_id = 0;
+    addr_trans::SamTable sam{};
     RobMode read_rob_mode = RobMode::Disabled;
     RobMode write_rob_mode = RobMode::Disabled;
     nmu::PortParams port_params{};
@@ -277,7 +278,7 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
                    cfg_.port_params.depkt_r_q_depth),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
-                 cfg_.src_id),
+                 cfg_.src_id, cfg_.sam),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode),
       axi_slave_port_(rob_, rob_, cfg_.port_params),

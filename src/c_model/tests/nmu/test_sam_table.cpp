@@ -1,8 +1,10 @@
 #include "nmu/addr_trans.hpp"
+#include "axi/types.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nmu::addr_trans::SamEntry;
 using ni::cmodel::nmu::addr_trans::SamTable;
+namespace axi = ni::cmodel::axi;
 
 // tile_size 4 GB reproduces the legacy coord_id<<32 layout. X_WIDTH=4 -> dst (2,1)=0x12.
 TEST(SamTable, UniformRebase_DstFromTableLocalRebased) {
@@ -57,4 +59,19 @@ TEST(SamFootprint, RejectsBurstCrossingTile) {
     EXPECT_TRUE(sam.burst_footprint_ok(0x1200000040ull, 0x1200000080ull));
     // burst spilling past tile end into the next tile: not ok
     EXPECT_FALSE(sam.burst_footprint_ok(0x12FFFFFFF0ull, 0x1300000010ull));
+}
+
+using ni::cmodel::nmu::addr_trans::burst_last_byte;
+
+TEST(BurstLastByte, IncrSpansTotal) {
+    // len=3, size=3 (8 B/beat) -> 32 B span
+    EXPECT_EQ(burst_last_byte(0x1000, 3, 3, axi::Burst::INCR), 0x1000 + 32 - 1);
+}
+TEST(BurstLastByte, WrapWindowAligned) {
+    // len=3,size=3 -> total 32; addr 0x1018 -> window [0x1000,0x1020)
+    EXPECT_EQ(burst_last_byte(0x1018, 3, 3, axi::Burst::WRAP), 0x1020 - 1);
+}
+TEST(BurstLastByte, FixedMatchesSlaveTotal) {
+    // FIXED uses total to match the slave OOB math (Codex #6)
+    EXPECT_EQ(burst_last_byte(0x1000, 3, 3, axi::Burst::FIXED), 0x1000 + 32 - 1);
 }

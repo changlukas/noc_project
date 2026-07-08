@@ -113,4 +113,20 @@ inline Translated xy_route(uint64_t addr) noexcept {
     return {dst, /*local_addr=*/addr};
 }
 
+// Highest byte a burst touches, for the SAM footprint guard (Task 4).
+inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::Burst burst) {
+    uint64_t bytes_per_beat = uint64_t{1} << size;
+    uint64_t total = bytes_per_beat * (static_cast<uint64_t>(len) + 1);
+    if (burst == axi::Burst::WRAP) {
+        // Legal WRAP len is 1/3/7/15 (protocol_rules.hpp:65-75) so total is a power of
+        // two; the window is [addr - addr%total, +total). Same window axi types.hpp uses.
+        uint64_t wrap_lower = addr - (addr % total);
+        return wrap_lower + total - 1;
+    }
+    // INCR and FIXED both use [addr, addr+total): match the slave's OOB math
+    // (axi_slave.hpp:316-318,:519-520 treats FIXED like INCR), so the SAM guard and the
+    // slave agree at a tile edge (Codex #6). Conservative for FIXED, but consistent.
+    return addr + total - 1;
+}
+
 }  // namespace ni::cmodel::nmu::addr_trans

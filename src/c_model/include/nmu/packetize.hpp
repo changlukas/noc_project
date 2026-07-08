@@ -6,9 +6,11 @@
 // Header fields per push:
 //   src_id      — constructor arg (NMU tile coord, fixed per instance)
 //   dst_id      — frozen Packetizer interface path: derived from b.addr via
-//                 addr_trans::xy_route. Rob-driven path (push_*_with_meta)
-//                 supplies dst_id directly via AwHeaderMeta. For W beats, dst
-//                 inherited from the AW write-meta FIFO front.
+//                 sam_.translate (SamTable, Task 4). Rob-driven path
+//                 (push_*_with_meta) supplies dst_id directly via
+//                 AwHeaderMeta and still uses addr_trans::xy_route (Task 5
+//                 migrates Rob to the SAM). For W beats, dst inherited from
+//                 the AW write-meta FIFO front.
 //   vc_id       — hardcoded 0 (NUM_VC=1)
 //   axi_ch      — implicit per push_* method
 //   last        — wormhole packet boundary marker (FlooNoC pattern):
@@ -32,6 +34,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <deque>
+#include <utility>
 
 namespace ni::cmodel::nmu {
 
@@ -56,12 +59,15 @@ class NmuPacketizeSink {
 class Packetize : public RequestPacketizer, public NmuPacketizeSink {
   public:
     Packetize(router::NocReqOut& aw_out, router::NocReqOut& w_out, router::NocReqOut& ar_out,
-              uint8_t src_id)
-        : aw_out_(aw_out), w_out_(w_out), ar_out_(ar_out), src_id_(src_id) {}
+              uint8_t src_id, addr_trans::SamTable sam)
+        : aw_out_(aw_out), w_out_(w_out), ar_out_(ar_out), src_id_(src_id), sam_(std::move(sam)) {}
 
     // ---- RequestPacketizer interface ----
     bool push_aw(const axi::AwBeat& b) override {
-        auto t = addr_trans::xy_route(b.addr);
+        auto t = sam_.translate(b.addr);
+        assert(sam_.burst_footprint_ok(
+                   b.addr, addr_trans::burst_last_byte(b.addr, b.len, b.size, b.burst)) &&
+               "SAM: AW burst footprint crosses a tile boundary");
         return push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0});
     }
     // INVARIANT: caller must push_aw before push_w for the same write txn. W
@@ -69,7 +75,10 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     // w_burst_credit_ in Disabled mode (Task 7).
     bool push_w(const axi::WBeat& b) override;
     bool push_ar(const axi::ArBeat& b) override {
-        auto t = addr_trans::xy_route(b.addr);
+        auto t = sam_.translate(b.addr);
+        assert(sam_.burst_footprint_ok(
+                   b.addr, addr_trans::burst_last_byte(b.addr, b.len, b.size, b.burst)) &&
+               "SAM: AR burst footprint crosses a tile boundary");
         return push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0});
     }
 
@@ -83,6 +92,7 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     router::NocReqOut& w_out_;
     router::NocReqOut& ar_out_;
     uint8_t src_id_;
+    addr_trans::SamTable sam_;
 
     // W FIFO carries the meta inherited from AW. local_addr NOT stored:
     // W payload has no address field; only header dst_id/rob_* needed.

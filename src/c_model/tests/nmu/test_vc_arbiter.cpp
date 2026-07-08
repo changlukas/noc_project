@@ -297,8 +297,11 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
     ni::cmodel::router::WormholeArbiter<ni::cmodel::router::NocReqOut> wh_arb(
         vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::router::ChannelPairing>{{0, 1}});
+    // 16x16 uniform, no rebase: dst = addr/4GB, matching the pre-SAM xy_route mapping.
+    auto sam = ni::cmodel::nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull,
+                                                              /*rebase=*/false);
     ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1), wh_arb.input(2),
-                                   /*src_id=*/0x12);
+                                   /*src_id=*/0x12, sam);
 
     ni::cmodel::axi::AwBeat aw{};
     aw.id = 0x07;
@@ -338,8 +341,11 @@ TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
     ni::cmodel::router::WormholeArbiter<ni::cmodel::router::NocReqOut> wh_arb(
         vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::router::ChannelPairing>{{0, 1}});
+    // 16x16 uniform, no rebase: dst = addr/4GB, matching the pre-SAM xy_route mapping.
+    auto sam = ni::cmodel::nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull,
+                                                              /*rebase=*/false);
     ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1), wh_arb.input(2),
-                                   /*src_id=*/0x12);
+                                   /*src_id=*/0x12, sam);
 
     ni::cmodel::axi::AwBeat aw{};
     aw.id = 0x07;

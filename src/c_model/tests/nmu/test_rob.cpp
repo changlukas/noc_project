@@ -71,7 +71,9 @@ ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
 struct RobRig {
     ChannelModel noc{16, 16};
     ReqCapture w_cap, ar_cap;
-    Packetize pkt{noc.req_out(), w_cap, ar_cap, kSrcId};
+    // Rob always calls xy_route itself and drives push_*_with_meta, never
+    // Packetize::push_aw/push_ar directly, so sam_ is never touched here.
+    Packetize pkt{noc.req_out(), w_cap, ar_cap, kSrcId, {}};
     Depacketize depkt{noc.rsp_in(), 16, 16};
     Rob rob{pkt, depkt, RobMode::Disabled, RobMode::Disabled};
 };
@@ -134,7 +136,7 @@ TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
     // Force downstream NoC full via small req_depth.
     // All 3 Packetize outputs share the same ChannelModel req_out.
     ChannelModel noc(/*req*/ 1, /*rsp*/ 16);
-    Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId);
+    Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Disabled, RobMode::Disabled);
 
@@ -171,7 +173,7 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
     // All 3 Packetize outputs share the same ChannelModel req_out so depth
     // limits apply regardless of which channel (AW or W) is being pushed.
     ChannelModel noc(/*req*/ 2, /*rsp*/ 16);
-    Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId);
+    Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Disabled, RobMode::Disabled);
 
@@ -203,7 +205,7 @@ TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
     SCENARIO("Rob Enabled: push_aw allocates ROB slot, stamps rob_req=1 + rob_idx on AW header");
     ChannelModel noc(/*req=*/16, /*rsp=*/16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -220,7 +222,7 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
         "header");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -268,7 +270,7 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_ReturnFalse) {
     SCENARIO("Rob Enabled: AR burst > ROB_CAPACITY rejected (return false), no state mutation");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -290,7 +292,7 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
     // All 3 Packetize outputs share the same ChannelModel req_out so the
     // depth limit applies to AR pushes as well as AW.
     ChannelModel noc(/*req=*/1, /*rsp=*/16);
-    Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId);
+    Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -316,7 +318,7 @@ TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
     SCENARIO("Rob Enabled: 32 AWs fill write pool to ROB_CAPACITY; 33rd push_aw returns false");
     ChannelModel noc(64, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);  // aw uses noc; w/ar use captures
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});  // aw uses noc; w/ar use captures
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -333,7 +335,7 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
         "Rob Enabled: push_aw rolled back on downstream backpressure; slot stays free for retry");
     ChannelModel noc(/*req=*/1, /*rsp=*/16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);  // aw uses noc for backpressure
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});  // aw uses noc for backpressure
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -349,7 +351,7 @@ TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
     SCENARIO("Rob Enabled: B for rob_idx=0 (per-id head) commits immediately on pop_b");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -375,7 +377,7 @@ TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
         "Rob Enabled: out-of-order B (slot 1 before 0) held; chain-flushes when head (0) arrives");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -411,7 +413,7 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
         "order");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -472,7 +474,7 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
         "id)");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -513,7 +515,7 @@ TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
     SCENARIO("Rob Enabled: pop_b on B flit with unallocated rob_idx aborts (defensive assert)");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -535,7 +537,7 @@ TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
     SCENARIO("Rob Enabled: pop_b on Disabled-mode flit (rob_req=0) aborts (mode mismatch)");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -560,7 +562,7 @@ TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
         "stamping) land at base+0 and base+1 via the per-base arrival counter, in order.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -606,7 +608,7 @@ TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
         "rather than writing into an adjacent burst's slot.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -645,7 +647,7 @@ TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
         "burst that reuses base 0 starts its arrival counter at 0.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
@@ -702,7 +704,7 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
         "interleaved R beats fill per base, not per id. Egress holds AR order.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId);
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled);
 
