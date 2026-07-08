@@ -4,6 +4,31 @@ Running action items and open bugs, maintained across iteration rounds. Each rou
 surfaces and strikes what it closes. Read it at session start. An item is not started unless a round
 picks it up.
 
+## SAM address remap — implemented on `feat/sam-remap` (2026-07-08, pending merge review)
+
+Replaced the `addr[39:32]` bit-slice decode with a per-tile SAM table `{base, size, dst_id,
+remove_offset}` loaded from the topology YAML `address_map` block; NMU rebases `local_addr = addr -
+remove_offset` so subordinates see 0-based local addresses. Spec
+`docs/superpowers/specs/2026-07-08-sam-remap-design.md`, plan `docs/superpowers/plans/2026-07-08-sam-remap.md`.
+11 tasks, subagent-driven, each task + a final whole-branch review clean. Verified: ctest 397/397,
+directed co-sim rebase-proven (slave sees local `0x1000`-range), constrained_random zero-%Error with the
+offset-normalized `axi_reorder_compare`, non-uniform-size tile-map smoke clean, generator pytest 16/16.
+
+**Follow-ups (deferred, none merge-blocking):**
+- **Per-tile arbitrary `base` guard.** The c_model SAM honors an explicit `tiles:` `base`, but
+  `gen_tb_top.py`/`gen_test_patterns.py` compute the region/address as `coord_id*tile_size` only. A
+  future non-uniform YAML with `base != coord_id*tile_size` would silent-misroute (stimulus/REGION_BASE
+  vs c_model SAM diverge, no assert). No shipped YAML triggers it (the smoke overrides size only, base=0).
+  Add a fail-loud guard (generators assert `base == coord_id*tile_size`, or honor the override) before any
+  arbitrary-base map ships. Co-sim non-uniform is SIZE-override-only today.
+- **`translate` miss under `NDEBUG`.** Miss ⇒ `assert` (fail-loud), but a release/`NDEBUG` DPI build would
+  null-deref instead. ctest/co-sim build with asserts on; only matters if a release DPI lib is produced.
+- **`+sam_config` unconditional.** Run recipes always pass it; a topology YAML lacking `address_map` would
+  assert in `load_sam_table`. All 6 current YAMLs carry the block. A clearer error string is nice-to-have.
+- **`make build-cmodel` ignores `local.mk` BUILD_ROOT** (`Makefile:16` `:=` evaluated before `-include
+  local.mk :79`) → targets stale `build/cmodel`. Pre-existing, unrelated to SAM. One-line fix. WSL builds
+  use `cmake --build $HOME/noc_build/cmodel` directly to work around it.
+
 ## Done — checked-traffic-benchmark (Stages 1-5 complete, merged + pushed to `main` 2026-07-07)
 
 Rebuild the regression/benchmark on the pulp VIP. Spec:
