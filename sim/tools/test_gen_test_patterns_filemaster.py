@@ -75,6 +75,64 @@ def test_emit_file_master_node_format_and_partition(tmp_path):
     assert len(rlines) == 2 * 11                    # 11 ax fields, no atop, no beats
 
 
+def test_emit_file_master_node_default_tile_size_matches_legacy_4gb(tmp_path):
+    """Regression pin: default tile_size (unspecified) reproduces the legacy
+    dst_cid<<32 layout byte-for-byte -- dst coord_id 0x12, offset 0x40 -> 0x1200000040."""
+    d = str(tmp_path / "node0")
+    g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
+                            base_local=0x40, memory_size=0x40000,
+                            axi_size=5, axi_len=0, data_width=256)
+    w = _parse_write(os.path.join(d, "write.txt"))
+    assert w[0]["addr"] == 0x1200000040
+
+
+def test_emit_file_master_node_non_4gb_tile_size_shifts_base(tmp_path):
+    d = str(tmp_path / "node0")
+    g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
+                            base_local=0x40, memory_size=0x40000,
+                            axi_size=5, axi_len=0, data_width=256,
+                            tile_size=0x40000000)
+    w = _parse_write(os.path.join(d, "write.txt"))
+    assert w[0]["addr"] == 0x12 * 0x40000000 + 0x40
+
+
+def test_load_topology_reads_tile_size_from_address_map(tmp_path):
+    topo_path = tmp_path / "t.yaml"
+    topo_path.write_text(
+        "topology: { name: t, x_dim: 4, y_dim: 4, num_vc: 1 }\n"
+        "address_map:\n"
+        "  tile_size: 0x40000000\n"
+    )
+    nodes, x_dim, y_dim, tile_size = g._load_topology(str(topo_path))
+    assert tile_size == 0x40000000
+
+
+def test_load_topology_defaults_tile_size_when_address_map_absent(tmp_path):
+    topo_path = tmp_path / "t.yaml"
+    topo_path.write_text("topology: { name: t, x_dim: 4, y_dim: 4, num_vc: 1 }\n")
+    nodes, x_dim, y_dim, tile_size = g._load_topology(str(topo_path))
+    assert tile_size == 0x100000000
+
+
+def test_main_sources_tile_base_from_address_map(tmp_path):
+    """End-to-end: main() threads address_map.tile_size into the emitted address."""
+    topo_path = tmp_path / "custom.yaml"
+    topo_path.write_text(
+        "topology: { name: custom, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+        "address_map:\n"
+        "  tile_size: 0x40000000\n"
+    )
+    out = str(tmp_path / "scn")
+    g.main(["--topology", str(topo_path), "--out", out,
+            "--pattern", "neighbor", "--transactions-per-node", "1",
+            "--size", "5", "--len", "0", "--memory-size", "0x40000"])
+    w = _parse_write(os.path.join(out, "node0", "write.txt"))
+    # node0 = (x=0,y=0); neighbor wraps to (1,1) on a 2x2 mesh -> coord_id (1<<4)|1 = 0x11
+    dst_cid = (1 << 4) | 1
+    expected_base = dst_cid * 0x40000000
+    assert expected_base <= w[0]["addr"] < expected_base + 0x40000000
+
+
 PATTERNS = [
     ["--pattern", "neighbor"],
     ["--pattern", "transpose"],

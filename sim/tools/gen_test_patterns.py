@@ -10,7 +10,9 @@ Usage:
         --transactions-per-node 4 --seed 42
 
 Writes <out>/node<i>/{write,read}.txt for each node i. Each transaction:
-  - addr = dst_coord<<32 + local_offset  (bit 32+ selects destination tile)
+  - addr = dst_coord * tile_size + local_offset  (tile_size from the topology's
+    address_map.tile_size; defaults to 0x100000000 / 4 GB, matching the legacy
+    dst_coord<<32 layout, if the block or key is absent)
   - src-partitioned local offset (alloc_unique_offset) so converging sources never collide
   - INCR, atop=0, full strobe, address-in-data payload (byte A = A & 0xFF)
 
@@ -56,8 +58,11 @@ alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes, memory_size, 
 Constants
 ---------
 X_WIDTH = 4  -- mirrors c_model addr_trans.hpp / ni_flit_constants.h
-ADDR_DST_SHIFT = 32  -- addr[63:32] carries dst_id (LOCAL_ADDR_BITS = 32)
 DST_ID_WIDTH = 8  -- mirrors ni_flit_constants.h header::DST_ID_WIDTH (X_WIDTH + Y_WIDTH)
+
+Per-tile base address = dst_id * tile_size, where tile_size is read from the topology
+YAML's address_map.tile_size (default 0x100000000 = 4 GB if the block or key is
+absent). Mirrors c_model SamTable::uniform's base formula (addr_trans.hpp).
 """
 
 import argparse
@@ -68,15 +73,17 @@ from pathlib import Path
 
 import yaml
 
-# Must mirror c_model addr_trans.hpp:
+# Must mirror c_model addr_trans.hpp SamTable::uniform:
 #   dst_id = (y << X_WIDTH) | x
-#   addr[LOCAL_ADDR_BITS + DST_ID_BITS - 1 : LOCAL_ADDR_BITS] = y
-#   addr[LOCAL_ADDR_BITS + X_WIDTH - 1 : LOCAL_ADDR_BITS] = x
+#   base(dst_id) = dst_id * tile_size   (tile_size from topology address_map.tile_size)
 X_WIDTH = 4
 Y_WIDTH = 4          # mirrors ni_flit_constants.h width::Y_WIDTH
-ADDR_DST_SHIFT = 32  # LOCAL_ADDR_BITS
 DST_ID_WIDTH = 8     # header::DST_ID_WIDTH = X_WIDTH + Y_WIDTH; max nodes = 2**8 = 256
 _FILE_KEYS = ("data_file", "dump_file", "strb_file")
+
+# Default per-tile stride when the topology has no address_map.tile_size; matches the
+# legacy dst_cid<<32 layout (addr[63:32] = dst_id) byte-for-byte.
+_DEFAULT_TILE_SIZE = 0x100000000
 
 # Per-transaction slot stride for the unique-offset allocator.  Must be at least
 # as large as the max transaction data payload (one cache-line = 64 B = 0x40).
@@ -133,7 +140,7 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop):
 
 def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
                           base_local, memory_size, axi_size, axi_len, data_width,
-                          ids_per_tile=1, num_axi_ids=256):
+                          ids_per_tile=1, num_axi_ids=256, tile_size=_DEFAULT_TILE_SIZE):
     """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
     src-partitioned address, address-in-data payload. INCR, atop=0, full strobe.
 
@@ -150,7 +157,7 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
     for seq, dst_cid in enumerate(dst_cids):
         local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
                                         n_nodes, memory_size, reserved=reserved)
-        addr = (dst_cid << ADDR_DST_SHIFT) + local_off
+        addr = dst_cid * tile_size + local_off
         axid = (id_base + (seq % ids_per_tile)) % num_axi_ids
         write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
         write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
@@ -340,11 +347,14 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 # ---------------------------------------------------------------------------
 
 def _load_topology(name):
-    """Return (nodes, x_dim, y_dim) where nodes = [(idx, x, y, cid), ...].
+    """Return (nodes, x_dim, y_dim, tile_size) where nodes = [(idx, x, y, cid), ...].
 
     `name` is either a topology name resolved against sim/topologies/<name>.yaml, or
     a direct path to a topology yaml (ends in .yaml or names an existing file).  The
     path form lets callers point at a temp topology without writing into the live tree.
+
+    tile_size is read from the topology's address_map.tile_size (default
+    _DEFAULT_TILE_SIZE if the address_map block or the key is absent).
     """
     if name.endswith(".yaml") or os.path.isfile(name):
         topo_path = name
@@ -356,13 +366,14 @@ def _load_topology(name):
         topo = yaml.safe_load(f)
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
+    tile_size = (topo.get("address_map") or {}).get("tile_size", _DEFAULT_TILE_SIZE)
     nodes = []
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
             nodes.append((idx, x, y, coord_id(x, y)))
             idx += 1
-    return nodes, x_dim, y_dim
+    return nodes, x_dim, y_dim, tile_size
 
 
 # ---------------------------------------------------------------------------
@@ -477,7 +488,7 @@ def main(argv=None):
                          "Does not affect VC allocation (VC is id-agnostic).")
     a = ap.parse_args(argv)
 
-    nodes, x_dim, y_dim = _load_topology(a.topology)
+    nodes, x_dim, y_dim, tile_size = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
 
@@ -507,7 +518,8 @@ def main(argv=None):
         emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
                               n_nodes, base_local, memory_size,
                               a.size, a.burst_len, widths["data"],
-                              ids_per_tile=a.ids_per_tile, num_axi_ids=(1 << widths["id"]))
+                              ids_per_tile=a.ids_per_tile, num_axi_ids=(1 << widths["id"]),
+                              tile_size=tile_size)
 
 
 if __name__ == "__main__":
