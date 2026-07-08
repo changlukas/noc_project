@@ -11,8 +11,10 @@ remove_offset}` loaded from the topology YAML `address_map` block; NMU rebases `
 remove_offset` so subordinates see 0-based local addresses. Spec
 `docs/superpowers/specs/2026-07-08-sam-remap-design.md`, plan `docs/superpowers/plans/2026-07-08-sam-remap.md`.
 11 tasks, subagent-driven, each task + a final whole-branch review clean. Verified: ctest 397/397,
-directed co-sim rebase-proven (slave sees local `0x1000`-range), constrained_random zero-%Error with the
-offset-normalized `axi_reorder_compare`, non-uniform-size tile-map smoke clean, generator pytest 16/16.
+directed co-sim rebase-proven (slave sees local `0x1000`-range) on all 4 directed patterns
+(`neighbor`/`transpose`/`uniform_random`/`hotspot`, `mesh_4x4_vc1`, scoreboard clean, 16 nodes non-vacuous),
+constrained_random zero-%Error with the offset-normalized `axi_reorder_compare`, non-uniform-size tile-map
+smoke clean, generator pytest 16/16.
 
 **Follow-ups (deferred, none merge-blocking):**
 - **Per-tile arbitrary `base` guard.** The c_model SAM honors an explicit `tiles:` `base`, but
