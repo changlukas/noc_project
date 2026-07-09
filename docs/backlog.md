@@ -64,10 +64,15 @@ count computed from the pattern.
 - `neighbor`, `transpose`, and single-hotspot give one destination per tile. `uniform_random` and
   multi-hotspot sample a destination per transaction, so report per-tile mean hop count with the seed
   and sample count.
+- The recorded `sim-saturation` series (`vc1=1248 ... vc8=1935 bits/cyc`) is INVALID. It predates the
+  NSU meta buffer change. Set `kMetaBufferMaxUniqueIds = 256` in `wrap/wrap_defaults.hpp` before
+  measuring, or the subordinate serializes every manager and flattens the sweep. State the setting in
+  the figure caption.
 
 **Open**
 
-- ID value per tile: `0` everywhere, or `NODE_ID` for log clarity.
+- RESOLVED — the AXI ID is a manager-local handle, not a topology field. The NSU no longer depends on
+  system-wide-unique IDs (spec 2026-07-09-nsu-meta-buffer-floonoc-alignment-design.md). Stimulus IDs are free.
 - Which pattern drives the first figure.
 - Where the per-run CSV comes from. Today only `sim-saturation` writes one.
 
