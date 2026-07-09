@@ -163,6 +163,7 @@ inline void Depacketize::tick() {
                     meta_.allocate_write(aw.id,
                                          {
                                              static_cast<uint8_t>(f.get_header_field("src_id")),
+                                             aw.id,
                                              static_cast<uint8_t>(f.get_header_field("rob_req")),
                                              static_cast<uint8_t>(f.get_header_field("rob_idx")),
                                          });
@@ -186,6 +187,7 @@ inline void Depacketize::tick() {
                     meta_.allocate_read(ar.id,
                                         {
                                             static_cast<uint8_t>(f.get_header_field("src_id")),
+                                            ar.id,
                                             static_cast<uint8_t>(f.get_header_field("rob_req")),
                                             static_cast<uint8_t>(f.get_header_field("rob_idx")),
                                         });
