@@ -1069,21 +1069,32 @@ Do not silently pick the setting that makes the curve look better. The default i
 
 - [ ] **Step 7: Run the headline sweep at the design point**
 
+Clear the output tree first. `plot_injection_sweep.py` globs every `continuous_*/result.csv` under it, and the fault-injection and bring-up steps above have just written rows at `MAX_OUTSTANDING=1`, `512` and `MAX_UNIQUE_IDS=1`, `5`. Those rows would land in the headline curve, and the mixed-settings warning would be the only thing standing between you and a corrupted figure.
+
 ```bash
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && rm -rf sim/verilator/output/continuous_* && ls sim/verilator/output/ | head'
 wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make sim-injection-sweep PATTERN=uniform_random MAX_OUTSTANDING=32 > /tmp/sweep.log 2>&1; echo "rc=$?"; tail -20 /tmp/sweep.log'
 ```
 
-Expected: 36 runs, then the merged table and the PNG. `MAX_OUTSTANDING=32` is the shipped NI buffer depth and the figure's subject.
+Expected: 36 runs, then the merged table. `MAX_OUTSTANDING=32` is the shipped NI buffer depth and the figure's subject.
+
+**No PNG appears here, and that is correct.** `matplotlib` is not installed in the WSL interpreter, so the script takes its `ImportError` branch and prints the table. That branch is the designed degradation, not a failure. The PNGs are rendered in the next step.
 
 The throughput curve must show a knee. A flat line at every VC count means VC count changes nothing, which Step 5 should already have caught. Do not publish a flat curve as a VC comparison.
 
-- [ ] **Step 8: Render the dark variant**
+- [ ] **Step 8: Render both PNGs on the Windows interpreter**
+
+`matplotlib` 3.10.8 lives in the Windows `py -3`, not in WSL. The plot script reads CSV files and builds nothing, so it runs happily there. Use the normal Bash tool, not WSL:
 
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && python3 sim/tools/plot_injection_sweep.py uniform_random --dark && ls -la sim/tools/injection_sweep*.png'
+py -3 sim/tools/plot_injection_sweep.py uniform_random
+py -3 sim/tools/plot_injection_sweep.py uniform_random --dark
+ls -la sim/tools/injection_sweep*.png
 ```
 
-Expected: both PNGs exist. Open them. The validator checks colour, not layout — look for label collisions and overflow before calling this done.
+Expected: `injection_sweep.png` and `injection_sweep_dark.png`, both at `dpi=300`, and no mixed-settings warning.
+
+Open both. The palette validator checked colour, not layout — look for label collisions, axis-label overflow, and a legend covering the knee before calling this done.
 
 Note what is **not** here: there is no `MAX_OUTSTANDING=512` sweep. The four numbers from Step 5 already say what the NI buffer costs. Spending eighteen more runs to draw that as a curve nobody will publish would buy nothing. Every figure in this round is at the design point, 32.
 
