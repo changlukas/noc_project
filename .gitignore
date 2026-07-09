@@ -94,3 +94,8 @@ docs/issue/
 # saturation sweep outputs (make sim-saturation)
 sim/tools/saturation.csv
 sim/tools/saturation.png
+
+# injection-rate sweep outputs (make sim-injection-sweep)
+sim/tools/injection_sweep.csv
+sim/tools/injection_sweep.png
+sim/tools/injection_sweep_dark.png

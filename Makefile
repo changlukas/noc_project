@@ -200,6 +200,27 @@ else
 	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT))
 endif
 
+# Injection-rate sweep: four VC configs x nine rates, one point per make sim.
+# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
+# NI parameters, and the figure's subject is the machine as built. The bring-up
+# step measures what other settings would buy, and reports it as a number.
+# Heavy: rebuilds Verilator once per VC config. Run on WSL.
+SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
+SWEEP_VCS   ?= 1 2 4 8
+
+.PHONY: sim-injection-sweep
+sim-injection-sweep:
+	@for vc in $(SWEEP_VCS); do \
+	    for r in $(SWEEP_RATES); do \
+	        echo ">>> sweep vc$$vc rate $$r"; \
+	        $(MAKE) sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=$(PATTERN) SEED=$(_SEED) \
+	            INJECTION_MODE=1 INJECTION_RATE=$$r \
+	            $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
+	            $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
+	    done; \
+	done
+	$(PYTHON3) sim/tools/plot_injection_sweep.py $(PATTERN)
+
 # --- clean ---
 
 clean: clean-cmodel clean-verilator clean-vcs clean-specgen-cache
