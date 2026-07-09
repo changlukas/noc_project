@@ -18,12 +18,12 @@
 #include "wrap/flit_byte_conv.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nmu_wrap_io.hpp"
-#include "wrap/poc_defaults.hpp"
+#include "wrap/wrap_defaults.hpp"
 #include <fstream>
 #include <gtest/gtest.h>
 
 using ni::cmodel::wrap::flit_from_bytes;
-using ni::cmodel::wrap::kPoCAxiQueueDepth;
+using ni::cmodel::wrap::kAxiQueueDepth;
 using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
 using ni::cmodel::wrap::NmuWrap;
@@ -196,7 +196,7 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
                            "  tile_size: 0x1000\n";
 
     NmuWrap adapter;
-    adapter.init(/*src_id=*/0, /*num_vc=*/1, kPoCAxiQueueDepth, ni::cmodel::nmu::RobMode::Disabled,
+    adapter.init(/*src_id=*/0, /*num_vc=*/1, kAxiQueueDepth, ni::cmodel::nmu::RobMode::Disabled,
                  path.c_str());
 
     NmuInputs in{};

@@ -27,8 +27,8 @@
 #include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
-#include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)
-#include "ni_params.h"            // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "wrap/wrap_defaults.hpp"  // co-sim default depths (kChannelModelDepth kept for ChannelModel stub)
+#include "ni_params.h"             // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "ni/vc_pools.hpp"
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
@@ -41,14 +41,14 @@ namespace ni::cmodel::wrap {
 
 class NmuWrap {
   public:
-    // init — construct NmuStandalone with a minimal PoC NmuConfig.
-    // ReadWriteSplit, queue_depth = kPoCAxiQueueDepth per channel.
+    // init — construct NmuStandalone with the co-sim default NmuConfig.
+    // ReadWriteSplit, queue_depth = kAxiQueueDepth per channel.
     // num_vc comes from the create param (cmodel_nmu_create); read/write VC
     // pools are derived from derive_vc_pools(num_vc) (odd num_vc asserts).
     // config_path: topology YAML with an `address_map` block. Null/empty
-    // (the default) keeps the legacy PoC SAM below so existing unit-test
+    // (the default) keeps the legacy co-sim default SAM below so existing unit-test
     // callers are unaffected.
-    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth,
+    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kAxiQueueDepth,
               nmu::RobMode rob_mode = nmu::RobMode::Disabled, const char* config_path = nullptr) {
         using namespace ni::cmodel::nmu;
         num_vc_ = num_vc;
@@ -75,14 +75,14 @@ class NmuWrap {
         cfg.port_params.r_queue_depth = queue_depth;
         cfg.port_params.depkt_b_q_depth = queue_depth;
         cfg.port_params.depkt_r_q_depth = queue_depth;
-        cfg.wormhole_per_input_depth = kPoCArbiterFifoDepth;
-        cfg.vc_arbiter_pending_depth = kPoCArbiterFifoDepth;
+        cfg.wormhole_per_input_depth = kArbiterFifoDepth;
+        cfg.vc_arbiter_pending_depth = kArbiterFifoDepth;
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
         // R2: close the NI-edge credit loop. Seed the req-out sender counter to
         // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
         // constants.yaml) — the single source of truth that also seeds the
         // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
-        // kPoCChannelModelDepth (64) is reserved for the ChannelModel stub only.
+        // kChannelModelDepth (64) is reserved for the ChannelModel stub only.
         nmu_->enable_noc_credit(static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
         in_ = NmuInputs{};
         out_ = NmuOutputs{};

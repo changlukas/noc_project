@@ -46,7 +46,7 @@
 // router input never overflows.
 #pragma once
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
-#include "wrap/poc_defaults.hpp"    // kPoCChannelModelDepth (ChannelModel only)
+#include "wrap/wrap_defaults.hpp"   // kChannelModelDepth (ChannelModel only)
 #include "wrap/router_wrap_io.hpp"
 #include "router/router.hpp"
 #include "router/router_adapters.hpp"
@@ -83,7 +83,7 @@ class RouterWrap {
         c.num_vc = num_vc;
         // Use spec-aligned depths (matching SLAVE_VC_BUFFER_DEPTH and
         // NOC_ROUTER_OUTPUT_FIFO_DEPTH from ni_params.h / constants.yaml).
-        // kPoCChannelModelDepth (64) is reserved for the ChannelModel stub.
+        // kChannelModelDepth (64) is reserved for the ChannelModel stub.
         c.vc_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH);
         c.output_fifo_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH);
         req_router_ = std::make_unique<router::Router>(c);

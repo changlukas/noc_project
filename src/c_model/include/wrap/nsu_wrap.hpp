@@ -32,8 +32,8 @@
 #include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nsu_wrap_io.hpp"
-#include "wrap/poc_defaults.hpp"  // kPoC* depths (kPoCChannelModelDepth kept for ChannelModel stub)
-#include "ni_params.h"            // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "wrap/wrap_defaults.hpp"  // co-sim default depths (kChannelModelDepth kept for ChannelModel stub)
+#include "ni_params.h"             // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "flit.hpp"
 #include "ni/vc_pools.hpp"
 #include "nsu/nsu_standalone.hpp"
@@ -45,11 +45,11 @@ namespace ni::cmodel::wrap {
 
 class NsuWrap {
   public:
-    // init — construct NsuStandalone with a minimal PoC NsuConfig.
-    // ReadWriteSplit pools, queue_depth = kPoCAxiQueueDepth per channel.
+    // init — construct NsuStandalone with the co-sim default NsuConfig.
+    // ReadWriteSplit pools, queue_depth = kAxiQueueDepth per channel.
     // num_vc comes from the create param (cmodel_nsu_create); derive_vc_pools
     // splits it into write_rsp_vcs (lower half) and read_rsp_vcs (upper half).
-    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kPoCAxiQueueDepth) {
+    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kAxiQueueDepth) {
         using namespace ni::cmodel::nsu;
         num_vc_ = num_vc;
         NsuConfig cfg{};
@@ -66,15 +66,15 @@ class NsuWrap {
         cfg.port_params.depkt_aw_q_depth = queue_depth;
         cfg.port_params.depkt_w_q_depth = queue_depth;
         cfg.port_params.depkt_ar_q_depth = queue_depth;
-        cfg.port_params.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;
-        cfg.wormhole_per_input_depth = kPoCArbiterFifoDepth;
-        cfg.vc_arbiter_pending_depth = kPoCArbiterFifoDepth;
+        cfg.port_params.meta_buffer_per_id_depth = kMetaBufferPerIdDepth;
+        cfg.wormhole_per_input_depth = kArbiterFifoDepth;
+        cfg.vc_arbiter_pending_depth = kArbiterFifoDepth;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
         // R2: close the NI-edge credit loop. Seed the rsp-out sender counter to
         // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
         // constants.yaml) — the single source of truth that also seeds the
         // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
-        // kPoCChannelModelDepth (64) is reserved for the ChannelModel stub only.
+        // kChannelModelDepth (64) is reserved for the ChannelModel stub only.
         nsu_->enable_noc_credit(static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
         in_ = NsuInputs{};
         out_ = NsuOutputs{};

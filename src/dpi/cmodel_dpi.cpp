@@ -379,7 +379,7 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int num_
     }
     DPI_BOUNDARY_BEGIN_R(nmu_create_impl, 0ull) {
         auto adapter = std::make_unique<NmuWrap>();
-        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc), kPoCAxiQueueDepth,
+        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc), kAxiQueueDepth,
                       rob_mode, config_path);
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nmu), WrapType::Nmu, HandleState::Live,
