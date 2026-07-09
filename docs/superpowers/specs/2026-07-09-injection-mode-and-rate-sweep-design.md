@@ -63,9 +63,9 @@ interleaving, not pacing, or the next reader will conclude that pacing breaks ch
 | **A** — injection mode is a run parameter, not a `RUN_CLASS` value | `RUN_CLASS` already decides which binary to compile (the `TB_DIRECTED` `ifdef`) and which recipe to run. Both injection modes share one binary, one `file_master`, one stimulus file set. Only the send loop differs. |
 | **B** — `INJECTION_COUNT` has a mode-dependent default | Single mode checks data (4 per node, 64 transactions, fast enough for every regression). Continuous mode measures steady state (200 per node, so warm-up and drain do not dominate the window). One knob, two defaults, documented. A single default fails both ways: 4 gives a perf curve no steady state, 200 makes every directed regression 50x slower. |
 | **C** — continuous mode disables the scoreboard explicitly | Today it runs and emits warnings that `sim/verilator/Makefile:270` deliberately does not gate on. A live checker whose output is ignored trains the reader to ignore it. Disabled, the run log is clean and any warning in it is real. |
-| **D** — `max_unique_ids` and `max_outstanding` become plusargs, delivered through a new `cmodel_nsu_create_ex` | Both move the bottleneck off the fabric, and both must travel with the number in `result.csv`. There is **no** existing path: `cmodel_nsu_create(name, src_id, num_vc)` takes three arguments (`cmodel_dpi.h:130`), `gen_tb_top.py` emits that three-argument import (`:533-534`) and call (`:562`), and `gen_tb_top.py` reads only `+sam_config` today (`:545-551`). The repo's own precedent for widening a DPI create is a second symbol, not a changed one: `cmodel_nmu_create` and `cmodel_nmu_create_ex` coexist (`cmodel_dpi.h:95,97`). Do the same. The old three-argument `cmodel_nsu_create` survives untouched, so `tests/wrap/test_cmodel_dpi.cpp:65` and any hand-written testbench keep compiling. |
+| **D** — `max_unique_ids` and `max_outstanding` become plusargs, and `cmodel_nsu_create` grows two parameters | Both move the bottleneck off the fabric, and both must travel with the number in `result.csv`. A compile-time constant cannot be recorded by the run that used it, which is exactly how the last saturation series lost its provenance. There is **no** existing path: `cmodel_nsu_create(name, src_id, num_vc)` takes three arguments (`cmodel_dpi.h:130`), `gen_tb_top.py` emits that three-argument import (`:533-534`) and call (`:562`), and reads only `+sam_config` today (`:545-551`). Widen the existing symbol rather than adding `cmodel_nsu_create_ex`: the only hand-written caller is `tests/wrap/test_cmodel_dpi.cpp:65`, and the eleven `sim/tb/tb_top_*.sv` are generator output. A permanent second symbol to spare one line is the wrong trade. (`cmodel_nmu_create` / `cmodel_nmu_create_ex` coexist for historical reasons, not as a pattern to copy.) |
 | **E** — each run writes its own `result.csv` | `collect_saturation.py` guesses the log path from a tag it did not build (`:26-28,43-44`), which is why adding a pattern breaks it. The run recipe knows its own tag. One row per run, six parameters plus the measurements. |
-| **F** — no per-tile hop-count figure | It is computed statically from the pattern, not simulated, shares no data with the curve, and under `uniform_random` reduces to a mean over samples. `avg_hops` belongs as a CSV column, not a figure. This drops one of the two figures `docs/backlog.md` originally scoped. |
+| **F** — no hop count anywhere: no figure, no CSV column | It is computed statically from the pattern and the topology, not simulated, and shares no data with the curve. Nothing this round consumes it, and it can be recomputed from the pattern at any time. Dropping it means `gen_test_patterns.py` needs no change at all. This drops one of the two figures `docs/backlog.md` originally scoped. |
 
 ## Design
 
@@ -127,18 +127,16 @@ All of this is new. Nothing on this path exists today.
 **INPUT** `+max_unique_ids` and `+max_outstanding` plusargs.
 **COMPUTE** the generated `tb_top` reads both with `$value$plusargs` beside the existing `+sam_config`
 read (`gen_tb_top.py:545-551`), echoes them with `$display` so `run.log` records what actually ran, and
-passes them to a new `cmodel_nsu_create_ex(name, src_id, num_vc, max_unique_ids, max_outstanding)`.
+passes them to `cmodel_nsu_create(name, src_id, num_vc, max_unique_ids, max_outstanding)`.
 `NsuWrap::init` gains the two parameters, defaulted from `wrap_defaults.hpp`, and stops hardcoding them
 (`nsu_wrap.hpp:69-70`). `Nsu` already forwards `max_unique_ids` to `Depacketize`, whose constructor
 asserts it is 1 or `AXI_ID_SPACE` (`depacketize.hpp:50-51`).
 **OUTPUT** every NSU in the fabric configured identically, and both values in `run.log`.
 
-The old `cmodel_nsu_create` stays, forwarding the `wrap_defaults.hpp` values. That keeps
-`tests/wrap/test_cmodel_dpi.cpp:65` and every ctest fixture compiling unchanged.
-
-The six checked-in `sim/tb/tb_top_*.sv` files are generator output (`sim/tb/tb_top_mesh_4x4_vc1.sv:105`
-declares the three-argument import, `:136` calls it). They are regenerated by the build and must be
-regenerated and committed as part of this change.
+`cmodel_nsu_create` is widened rather than duplicated. Callers: `tests/wrap/test_cmodel_dpi.cpp:65`
+(one line, update it) and the eleven `sim/tb/tb_top_*.sv`, which are generator output
+(`tb_top_mesh_4x4_vc1.sv:105` declares the import, `:136` calls it) and must be regenerated and
+committed as part of this change.
 
 ### Per-run output
 
@@ -153,7 +151,7 @@ sim/verilator/output/mesh_4x4_vc4_rob_uniform_random_m1_r0.4_s12345/
 `result.csv`, one header line and one row:
 
 ```
-topology,vc,pattern,injection_mode,injection_rate,injection_count,seed,max_unique_ids,max_outstanding,avg_hops,accepted_bits_per_cycle,mean_latency
+topology,vc,pattern,injection_mode,injection_rate,injection_count,seed,max_unique_ids,max_outstanding,accepted_bits_per_cycle,mean_latency
 ```
 
 The recipe knows its own tag, so no path is guessed.
@@ -179,14 +177,8 @@ The alternative — recovering `N_i` from the printed `Util`, which is proportio
 holds only while the stimulus is single-beat (`--len 0`, `sim/verilator/Makefile:214`). Printing the
 count costs one line and does not carry that assumption.
 
-**`avg_hops`**: **new generator logic, does not exist today.** `gen_test_patterns.py` loads `x_dim` /
-`y_dim` (`:367-374`) and has the coordinate helpers (`:175-177`), but computes no hop count and emits no
-metadata (`:518-522`). Add: for each emitted transaction accumulate the XY Manhattan distance
-`abs(dx) + abs(dy)` between source and destination coordinates, average over all transactions, and write
-it to a sidecar `<stim_root>/pattern_info.json`. The recipe copies it into the row.
-
-It is a property of the pattern and the topology, not a simulation result. It is carried so the curve's
-shape can be explained, and it is the reason Decision F drops the separate hop-count figure.
+`gen_test_patterns.py` is unchanged by this design. `--transactions-per-node` already exists; only the
+Makefile variable that feeds it is renamed.
 
 ### Sweep
 
@@ -258,7 +250,6 @@ The bring-up step measures which one binds. It does not assume.
 
 | level | check |
 |---|---|
-| unit | `gen_test_patterns.py` emits `INJECTION_COUNT` transactions per node for each of the four patterns. Existing pytest, extended. |
 | co-sim | Mode 0 on all four patterns, `mesh_4x4_vc1`: scoreboard clean, non-vacuous. This is today's behaviour and must not change. |
 | co-sim | Mode 1 on all four patterns at `INJECTION_RATE=0.4`: non-zero bandwidth, zero `%Error`, **zero `Unexpected RData`** (the scoreboard is disarmed, so a warning means it was not). |
 | co-sim | `MAX_UNIQUE_IDS=1` and `256`, and `MAX_OUTSTANDING=32` and `256`, reach the c_model. Verify by reading the values back out of `run.log`, not by assuming the plusarg was parsed. |
@@ -275,14 +266,13 @@ A parameter that changes nothing when set to an absurd value was never wired.
 | `sim/verilator/Makefile` | fold `run-traffic` into `run-directed`, gate branches on mode; retire `INJ_RATIO` / `TRAFFIC_TXNS` / `IDS_PER_TILE` / `TRAFFIC_TAG`; emit `result.csv` |
 | `sim/tb/user_node_endpoint.sv` | `+injection_mode` replaces the `+traffic_inj_ratio` presence test; skip `enable_all_checks()` and `monitor()` under mode 1 |
 | `sim/dv/floonoc-test/axi_bw_monitor.sv` | print the latency sample count; mark the file locally modified per its licence |
-| `sim/tools/gen_tb_top.py` | read and echo `+max_unique_ids` / `+max_outstanding`; emit the `cmodel_nsu_create_ex` import and call |
-| `sim/tb/tb_top_*.sv` (6 files) | regenerate and commit; they carry the DPI import (`tb_top_mesh_4x4_vc1.sv:105,136`) |
-| `src/dpi/cmodel_dpi.{h,cpp}` | add `cmodel_nsu_create_ex`; leave `cmodel_nsu_create` intact |
+| `sim/tools/gen_tb_top.py` | read and echo `+max_unique_ids` / `+max_outstanding`; emit the widened `cmodel_nsu_create` import and call |
+| `sim/tb/tb_top_*.sv` (11 files) | regenerate and commit; they carry the DPI import (`tb_top_mesh_4x4_vc1.sv:105,136`) |
+| `src/dpi/cmodel_dpi.{h,cpp}` | `cmodel_nsu_create` gains two parameters |
+| `src/c_model/tests/wrap/test_cmodel_dpi.cpp` | one call site, `:65` |
 | `src/c_model/include/wrap/nsu_wrap.hpp` | `init` gains two parameters, defaulted from `wrap_defaults.hpp`; stop hardcoding at `:69-70` |
-| `sim/tools/gen_test_patterns.py` | compute mean XY Manhattan hop count, emit `pattern_info.json` |
 | `sim/tools/collect_saturation.py` | delete |
 | `sim/tools/plot_saturation.py` | replace with `plot_injection_sweep.py` |
 | `docs/development.md`, `docs/backlog.md` | reconcile |
 
-`tests/wrap/test_cmodel_dpi.cpp` needs no change: it calls the three-argument `cmodel_nsu_create`, which
-survives.
+`sim/tools/gen_test_patterns.py` is untouched.
