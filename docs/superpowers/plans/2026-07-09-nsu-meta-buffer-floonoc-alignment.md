@@ -12,8 +12,16 @@ Spec: `docs/superpowers/specs/2026-07-09-nsu-meta-buffer-floonoc-alignment-desig
 
 ## Global Constraints
 
-- Run all builds and simulations on WSL/Linux, never Windows. `make build` / `make test` / `make sim`.
+- **Every build, test and simulation runs inside WSL.** The agent's shell is Git Bash on Windows, which cannot build this project. Wrap each command:
+
+  ```bash
+  wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make test > /tmp/out.log 2>&1; echo "rc=$?"; tail -20 /tmp/out.log'
+  ```
+
+  Redirect to a file and `tail` it. Piping `make` output straight through `wsl -e` swallows it. Editing files with the Read/Edit/Write tools uses the Windows path `E:\05_NoC\noc_project\...` as normal.
+- **Baseline before any change: `395 tests passed, 0 failed`.** Every task must end at 395 plus whatever it adds. If a task ends below 395, a test was silently broken.
 - `local.mk` at repo root already sets `BUILD_ROOT := $(HOME)/noc_build`, `PYTHON3 := python3`, `VERILATOR := verilator`. Do not override them on the command line.
+- If the build fails on `libgtest.a: archive has no index`, the build tree is corrupt, not the code. Recover with `rm -rf ~/noc_build/cmodel/_deps/googletest-build/googletest/CMakeFiles/gtest.dir ~/noc_build/cmodel/lib/libgtest.a && cmake -S src/c_model -B ~/noc_build/cmodel` then rebuild. Do not "fix" source to work around it.
 - Parameter values are fixed by the spec and approved by the user: `max_unique_ids = 1`, `max_outstanding = 32`. No `max_atomic_transactions`, no `IdMinWidth`. Do not change these values.
 - No change to the flit format, `specgen` `AXI_ID_WIDTH`, the SV interface, or the DPI marshalling. The subordinate-facing ID width stays 8.
 - Naming: `snake_case` for variables/methods/fields, `PascalCase` for types, full words, no abbreviations, no camelCase.
