@@ -527,9 +527,11 @@ Note the `Unexpected RData` grep now runs in **both** modes. In mode 1 the score
 Delete lines 236-292 of `sim/verilator/Makefile` in their entirety: the `INJ_RATIO` / `TRAFFIC_TXNS` / `IDS_PER_TILE` / `TRAFFIC_TAG` / `TRAFFIC_STIM` block, the `run-traffic` recipe, and the `sim-saturation` target.
 
 ```bash
-git rm sim/tools/collect_saturation.py sim/tools/plot_saturation.py
+git rm sim/tools/collect_saturation.py sim/tools/plot_saturation.py sim/tools/test_collect_saturation.py
 grep -rn "run-traffic\|sim-saturation\|collect_saturation\|plot_saturation\|TXNS_PER_NODE\|INJ_RATIO\|TRAFFIC_TXNS\|IDS_PER_TILE" --include=Makefile --include=*.mk --include=*.py sim/ Makefile
 ```
+
+`test_collect_saturation.py` tests the script being deleted, and its fixtures hard-code the pre-Task-1 monitor line format. It goes with its subject. A test whose contract no longer exists is deleted, not disabled.
 
 The `grep` must return nothing outside `docs/`. Anything it finds is a caller the deletion just broke. `docs/` is reconciled in Task 8.
 
@@ -1092,6 +1094,8 @@ In `docs/backlog.md`, replace the "Next round: injection rate in `make sim`, VC 
 Add one new backlog item: **`max_outstanding` as its own sweep axis.** It is an NI buffer-depth parameter, hence area. Sweeping it against VC count would say how the two trade off. Not this round.
 
 In `docs/development.md`, replace every reference to `run-traffic`, `sim-saturation`, `collect_saturation.py` and `plot_saturation.py`. Add the `INJECTION_COUNT` mode-dependent default, because a default that changes with another variable will surprise someone. State that `MAX_OUTSTANDING` is an architectural parameter, not a knob to raise until a curve looks good.
+
+In `docs/cosim-log.md:13`, the sample monitor line predates Task 1 and lacks the `N:` field. Update it to match what the monitor now prints.
 
 - [ ] **Step 10: Full ctest**
 
