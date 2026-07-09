@@ -105,6 +105,9 @@ def main():
     # Two charts, never two y-scales: throughput and latency differ by orders of
     # magnitude, and a dual axis is the single most common charting error.
     fig, (ax_throughput, ax_latency) = plt.subplots(1, 2, figsize=(11, 4))
+    # Per-axis list of (vc, color, x_end, y_end); labels are placed after all
+    # lines are drawn, once each axis's y-range is known.
+    line_ends = {ax_throughput: [], ax_latency: []}
     for color, vc in zip(ramp, vcs):
         xs = [p[0] for p in by_vc[vc]]
         ys_throughput = [p[1] for p in by_vc[vc]]
@@ -113,12 +116,33 @@ def main():
                             label=f"vc{vc}")
         ax_latency.plot(xs, ys_latency, color=color, lw=2, marker="o", ms=4,
                          label=f"vc{vc}")
-        # Four series, so identity never rests on colour alone: a legend AND a
-        # direct label at each line end, in the line's own colour.
-        for ax, ys in ((ax_throughput, ys_throughput), (ax_latency, ys_latency)):
-            ax.annotate(f"vc{vc}", xy=(xs[-1], ys[-1]), xytext=(6, 0),
+        line_ends[ax_throughput].append((vc, color, xs[-1], ys_throughput[-1]))
+        line_ends[ax_latency].append((vc, color, xs[-1], ys_latency[-1]))
+
+    # Four series, so identity never rests on colour alone: a legend AND a
+    # direct label at each line end, in the line's own colour. But a label that
+    # overprints another is worse than no label, so skip one whose final y
+    # lands within a small fraction of the axis's y-range of an already-placed
+    # label. Whichever VC converges this sweep, this catches it without
+    # hard-coding which series collide.
+    label_collision_frac = 0.03
+    axis_name = {ax_throughput: "throughput subplot", ax_latency: "latency subplot"}
+    for ax, ends in line_ends.items():
+        y_lo, y_hi = ax.get_ylim()
+        threshold = label_collision_frac * (y_hi - y_lo)
+        placed_ys = []
+        skipped = []
+        for vc, color, x_end, y_end in ends:
+            if any(abs(y_end - placed) < threshold for placed in placed_ys):
+                skipped.append(f"vc{vc}")
+                continue
+            placed_ys.append(y_end)
+            ax.annotate(f"vc{vc}", xy=(x_end, y_end), xytext=(6, 0),
                         textcoords="offset points", color=color, va="center",
                         fontsize=9, fontweight="bold", clip_on=False)
+        if skipped:
+            print(f"skipped end label(s) on {axis_name[ax]} (converges with an "
+                  f"already-labelled series): {', '.join(skipped)}")
 
     ax_throughput.set(xlabel="offered injection rate", ylabel="accepted throughput (bits/cycle)")
     ax_latency.set(xlabel="offered injection rate", ylabel="mean latency (cycles)")
