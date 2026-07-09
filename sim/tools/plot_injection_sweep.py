@@ -80,6 +80,11 @@ def main():
     ramp = (["#184f95", "#2a78d6", "#6da7ec", "#b7d3f6"] if dark
             else ["#86b6ef", "#5598e7", "#2a78d6", "#104281"])
 
+    vcs = sorted(by_vc)
+    if len(vcs) > len(ramp):
+        sys.exit(f"{len(vcs)} VC counts {vcs} exceed the {len(ramp)}-colour validated ramp; "
+                  f"add a validated colour before plotting this many VC counts")
+
     # rcParams follow the plot-from-data line_training_curve reference
     # (github.com/Trae1ounG/paper-plot-skills). Parameter values only; that repo
     # ships no licence, so no code is copied from it.
@@ -99,26 +104,34 @@ def main():
 
     # Two charts, never two y-scales: throughput and latency differ by orders of
     # magnitude, and a dual axis is the single most common charting error.
-    fig, (ax_bw, ax_lat) = plt.subplots(1, 2, figsize=(11, 4))
-    for color, vc in zip(ramp, sorted(by_vc)):
+    fig, (ax_throughput, ax_latency) = plt.subplots(1, 2, figsize=(11, 4))
+    for color, vc in zip(ramp, vcs):
         xs = [p[0] for p in by_vc[vc]]
-        ax_bw.plot(xs, [p[1] for p in by_vc[vc]], color=color, lw=2, marker="o", ms=4,
-                   label=f"vc{vc}")
-        ax_lat.plot(xs, [p[2] for p in by_vc[vc]], color=color, lw=2, marker="o", ms=4,
-                    label=f"vc{vc}")
+        ys_throughput = [p[1] for p in by_vc[vc]]
+        ys_latency = [p[2] for p in by_vc[vc]]
+        ax_throughput.plot(xs, ys_throughput, color=color, lw=2, marker="o", ms=4,
+                            label=f"vc{vc}")
+        ax_latency.plot(xs, ys_latency, color=color, lw=2, marker="o", ms=4,
+                         label=f"vc{vc}")
+        # Four series, so identity never rests on colour alone: a legend AND a
+        # direct label at each line end, in the line's own colour.
+        for ax, ys in ((ax_throughput, ys_throughput), (ax_latency, ys_latency)):
+            ax.annotate(f"vc{vc}", xy=(xs[-1], ys[-1]), xytext=(6, 0),
+                        textcoords="offset points", color=color, va="center",
+                        fontsize=9, fontweight="bold", clip_on=False)
 
-    ax_bw.set(xlabel="offered injection rate", ylabel="accepted throughput (bits/cycle)")
-    ax_lat.set(xlabel="offered injection rate", ylabel="mean latency (cycles)")
-    for ax in (ax_bw, ax_lat):
+    ax_throughput.set(xlabel="offered injection rate", ylabel="accepted throughput (bits/cycle)")
+    ax_latency.set(xlabel="offered injection rate", ylabel="mean latency (cycles)")
+    for ax in (ax_throughput, ax_latency):
         for sp in ax.spines.values():
             sp.set_visible(True)
             sp.set_linewidth(1.0)
             sp.set_color(ink)
         ax.tick_params(direction="out", length=4, width=0.8)
         ax.grid(False)
-        # Four series, so identity never rests on colour alone: a legend AND a
-        # direct label at each line end.
-        ax.legend(loc="lower right", facecolor=surface, edgecolor="0.6", labelcolor=ink)
+        # Right-hand margin so the end labels have room and don't get clipped.
+        ax.margins(x=0.16)
+        ax.legend(loc="best", facecolor=surface, edgecolor="0.6", labelcolor=ink)
 
     fig.suptitle(f"{pattern}, max_unique_ids={rows[0]['max_unique_ids']}, "
                  f"max_outstanding={rows[0]['max_outstanding']}", color=ink)
