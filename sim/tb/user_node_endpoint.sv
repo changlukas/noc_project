@@ -248,20 +248,36 @@ module user_node_endpoint #(
     // In-endpoint scoreboard on master_dv: golden from this node's W, check on
     // its R (end-to-end round trip through the NoC). enable_all_checks turns on
     // read-data + B-resp + R-resp checks; monitor() forks the sampling.
+    // Read once per caller, into a local. A shared module-scope variable written
+    // by one initial block and read by another has no defined ordering.
+    function automatic int unsigned get_injection_mode();
+        int unsigned m = 0;
+        void'($value$plusargs("injection_mode=%d", m));
+        return m;
+    endfunction
+
     initial begin
         scoreboard = new(master_dv);
         scoreboard.reset();
         @(posedge rst_ni);
-        scoreboard.enable_all_checks();
-        scoreboard.monitor();
+        // Mode 1 interleaves reads and writes, so a read may precede the write to
+        // its address and the scoreboard's write-before-read precondition fails.
+        // Skip BOTH enable_all_checks() and monitor(): construction hooks nothing,
+        // but monitor() forks the sampling tasks and mutates the memory model even
+        // with checks off.
+        if (get_injection_mode() == 0) begin
+            scoreboard.enable_all_checks();
+            scoreboard.monitor();
+        end
     end
 
     // Traffic mode (perf sweep): continuous interleaved injection paced by a
-    // per-cycle gate. Selected at runtime by +traffic_inj_ratio; absent => the
-    // two-phase directed run below is unchanged. Gate uses $urandom_range (PRNG,
-    // no constraint solver => no z3). Gated copies of run_aw/run_ar: same body as
-    // axi_test.sv:2540-2565 plus a per-cycle idle before each send.
-    real traffic_inj_ratio;
+    // per-cycle gate. Selected at runtime by +injection_mode=1, paced by
+    // +injection_rate; mode 0 (default) runs the two-phase directed run below
+    // unchanged. Gate uses $urandom_range (PRNG, no constraint solver => no z3).
+    // Gated copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 plus a
+    // per-cycle idle before each send.
+    real injection_rate;
     int  unsigned inj_gate_pct;
 
     task automatic gated_run_aw();
@@ -291,10 +307,13 @@ module user_node_endpoint #(
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
         @(posedge rst_ni);
-        if ($value$plusargs("traffic_inj_ratio=%f", traffic_inj_ratio)) begin
-            inj_gate_pct = int'(traffic_inj_ratio * 100.0);
-            // Mirror axi_file_master::run() but with gated AW/AR. join (not
-            // join_none) so B/R are consumed and the pass terminates cleanly.
+        if (get_injection_mode() == 1) begin
+            injection_rate = 1.0;
+            void'($value$plusargs("injection_rate=%f", injection_rate));
+            inj_gate_pct = int'(injection_rate * 100.0);
+            // Continuous injection: one phase, reads and writes interleaved, each
+            // send gated per cycle on injection_rate. join (not join_none) so B/R
+            // are consumed and the pass terminates cleanly.
             fork
                 gated_run_aw();
                 file_master.run_w();
