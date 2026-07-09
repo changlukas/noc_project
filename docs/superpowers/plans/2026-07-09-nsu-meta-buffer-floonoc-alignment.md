@@ -733,6 +733,12 @@ Mirrors the 2026-07-04 NMU request-path independent-drain fix."
 
 ## Task 6: Restore `upstream_id` on the response path
 
+> **MERGED INTO TASK 5 during execution (commit `90e1df7`).** Splitting them was a plan defect. Task 5
+> is the first task where the collapse actually reaches the wire, so a Task-5-only commit leaks the
+> collapsed `0xFF` back to the manager and fails `AX4_ORD_003_same_id_multi_dst` on vc1 and vc2. The
+> project requires every commit to pass the suite. The request-side remap and the response-side restore
+> are two halves of one atomic change. Kept below as the record of what the merged commit had to do.
+
 Without this the manager receives the collapsed `0xFF` as its `bid` / `rid`.
 
 **Files:**
