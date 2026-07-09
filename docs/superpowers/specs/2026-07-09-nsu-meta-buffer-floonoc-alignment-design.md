@@ -262,15 +262,24 @@ behavioural model and is exactly the slack FlooNoC leaves in its own `AxiCfg` (`
 
 ## Consequences
 
-- `max_unique_ids = 1` serializes every manager against every other at each subordinate. This is
-  FlooNoC's documented default behaviour, and it is AXI-legal: aliasing two IDs adds ordering the
-  manager did not request, and removes the subordinate's freedom to reorder them.
-- **The recorded `sim-saturation` series (vc1=1248, vc2=1710, vc4=1916, vc8=1935 bits/cyc) is
-  invalidated.** The bottleneck moves from the fabric to the subordinate. The VC comparison round must
-  set `max_unique_ids = AXI_ID_SPACE` before measuring, and must say so in the figure caption.
+- `max_unique_ids = 1` orders every manager against every other at each subordinate. This is FlooNoC's
+  documented default, and it is AXI-legal: aliasing two IDs adds ordering the manager did not request,
+  and removes the subordinate's freedom to reorder them.
+- **CORRECTED 2026-07-09.** This section originally read: "The bottleneck moves from the fabric to the
+  subordinate. The VC comparison round must set `max_unique_ids = AXI_ID_SPACE` before measuring." That
+  claim had no evidence and is withdrawn. FlooNoC never asserts a subordinate throughput loss
+  (`docs/floonoc/chimneys.md:50`: the serialization "should not cause any big performance problems"),
+  and our co-sim subordinate is a zero-wait `MAPPED` pulp `axi_rand_slave`
+  (`sim/tb/user_node_endpoint.sv:193-196`) whose uniform service latency makes in-order same-ID return
+  free. `max_unique_ids` constrains **ordering**, not bandwidth. See `docs/architecture.md`, "What
+  `max_unique_ids` is, and is not".
+- **The recorded `sim-saturation` series (vc1=1248, vc2=1710, vc4=1916, vc8=1935 bits/cyc) is still
+  invalidated**, but for a different reason: it predates the capacity-model change, ran RoB Disabled with
+  `IDS_PER_TILE=16`, and its configuration was never recorded alongside it. Whether `max_unique_ids`
+  moves a saturation curve is a question to measure, not to assume.
 - The static footprint of `MetaBuffer` (two 256-entry deque arrays) is unchanged. It is a C++ modelling
-  artifact, not an RTL cost, and shrinking it is not in scope.
-- Serialization plus a 32-entry shared pool lengthens co-sim wall time.
+  artifact, not an RTL cost, and shrinking it is not in scope. The model therefore reproduces neither the
+  FIFO area saving that `max_unique_ids = 1` buys in RTL, nor the `id_queue` cost that `> 1` pays.
 
 ## Observation, not a proposal
 

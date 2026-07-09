@@ -106,6 +106,73 @@ The NSU sits on the AXI-subordinate egress side. Its responsibilities:
 The NSU is asymmetric with the NMU: it does not have a RoB (response
 ordering is the master's responsibility).
 
+#### Meta buffer and downstream AXI ID remap
+
+Ported from FlooNoC's `floo_meta_buffer` (spec
+`docs/superpowers/specs/2026-07-09-nsu-meta-buffer-floonoc-alignment-design.md`).
+
+A request flit carries the manager's AXI ID and, separately, the requesting tile
+in the header field `src_id`. The NSU stores `{src_id, upstream_id, rob_req,
+rob_idx}` in a **meta buffer** keyed by the ID it presents downstream, and
+restores the manager's original ID into the B/R response
+(`nsu/meta_buffer.hpp`, `nsu/packetize.hpp:93,108`). The response finds its way
+home through `src_id`, never through the AXI ID.
+
+| parameter | meaning | default |
+|---|---|---|
+| `max_outstanding` | shared pool depth per direction. One entry per in-flight transaction. This is a physical buffer, hence area. FlooNoC's `MaxTxns`. | 32 |
+| `max_unique_ids` | count of distinct AXI IDs presented downstream. `1` collapses every request onto the all-ones ID; `AXI_ID_SPACE` passes the manager's ID through. No other value is legal. | 1 |
+
+`remap_downstream_id` is a function of `upstream_id` alone. Feeding it `src_id`
+would let two sources' read bursts sharing a restored `rid` be interleaved by
+the subordinate, which would contend `nsu::VcArbiter::r_burst_vc_`.
+
+#### What `max_unique_ids` is, and is not
+
+**It is a statement about the downstream subordinate's ability to return
+responses out of order**, and about the storage that ability forces on the NI.
+
+- `max_unique_ids = 1`: one downstream ID, so AXI compels the subordinate to
+  return responses in request order. The NI's metadata store can therefore be a
+  plain FIFO. FlooNoC's `ChimneyDefaultCfg`.
+- `max_unique_ids > 1`: several downstream IDs, so responses may return out of
+  order across IDs. The metadata store must be an ID-addressable queue
+  (FlooNoC's `id_queue`), which costs area.
+
+FlooNoC states this directly (`docs/floonoc/chimneys.md:50`): "The serialization
+should not cause any big performance problems if the downstream AXI subordinates
+cannot handle out-of-order transactions. Alternatively ... `MaxUniqueIds` ...
+comes at a higher cost, since the `src_id` and additional information need to be
+stored in an ID queue, that allows out-of-order access."
+
+**It is not a throughput knob.** FlooNoC nowhere claims that a single downstream
+ID lowers a subordinate's achievable bandwidth, and for a single-port
+constant-latency subordinate it cannot: the port is busy every cycle regardless
+of how many distinct IDs the requests carry. Two independent surveys
+(2026-07-09) confirmed this against the FlooNoC source and against our own
+co-sim, whose subordinate is a zero-wait `MAPPED` pulp `axi_rand_slave`
+(`sim/tb/user_node_endpoint.sv:193-196,242`). Under uniform service latency,
+in-order same-ID return costs nothing.
+
+The measurable effects of collapsing are confined to ordering: the subordinate
+loses the freedom to interleave bursts of different IDs, and the response path
+sees a different arrival order. Whether that shifts a saturation curve is a
+question to measure, not to assume.
+
+**It is unrelated to the RoB.** The two sit on opposite sides of the NI. A RoB
+reorders responses arriving from the NoC toward a local manager, and its knob is
+FlooNoC's `MaxTxnsPerId`. `max_unique_ids` governs the IDs the NI emits toward a
+downstream subordinate. On the manager side, RoB absence is what limits a single
+AXI ID to one outstanding transaction at a time (FlooNoC `NoRoB`: "stalls
+transactions of the same `txnID` going to different destinations until the
+previous transaction is completed"); our `RobMode::Disabled` interlock is the
+same mechanism.
+
+**Not modelled.** The C++ meta buffer keeps its `AXI_ID_SPACE`-wide bucket array
+under both settings, so the model reproduces neither the FIFO's area saving nor
+the `id_queue`'s cost. `max_unique_ids` is carried as a configuration point, not
+as a mechanism the behaviour model exploits.
+
 ### NoC fabric stub
 
 The c_model contains no router class. The only NoC component is the

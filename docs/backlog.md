@@ -68,10 +68,20 @@ count computed from the pattern.
 - `neighbor`, `transpose`, and single-hotspot give one destination per tile. `uniform_random` and
   multi-hotspot sample a destination per transaction, so report per-tile mean hop count with the seed
   and sample count.
-- The recorded `sim-saturation` series (`vc1=1248 ... vc8=1935 bits/cyc`) is INVALID. It predates the
-  NSU meta buffer change. Set `kMetaBufferMaxUniqueIds = 256` in `wrap/wrap_defaults.hpp` before
-  measuring, or the subordinate serializes every manager and flattens the sweep. State the setting in
-  the figure caption.
+- The recorded `sim-saturation` series (`vc1=1248 ... vc8=1935 bits/cyc`) is INVALID. It predates the NSU
+  meta buffer change, ran RoB Disabled with `IDS_PER_TILE=16`, and its configuration was never recorded
+  with it. State every knob in the figure caption.
+- **`max_unique_ids` is not a throughput knob.** Surveyed 2026-07-09 against the FlooNoC source and our
+  own co-sim; both refute the earlier claim that collapsing IDs moves the bottleneck to the subordinate.
+  FlooNoC says the serialization "should not cause any big performance problems"
+  (`docs/floonoc/chimneys.md:50`), and our co-sim subordinate is a zero-wait `MAPPED` pulp
+  `axi_rand_slave` whose uniform latency makes in-order same-ID return free. It constrains **ordering**
+  and dictates whether the NI's metadata store is a FIFO or an `id_queue`. It is unrelated to the RoB,
+  which sits on the opposite side of the NI. Full note: `docs/architecture.md`, "What `max_unique_ids`
+  is, and is not". **Do not fault-inject it with throughput** — pass an illegal value (5) and require the
+  `Depacketize` ctor assert to fire.
+- Whether `max_unique_ids` shifts a saturation curve is unmeasured. The injection-rate round runs `1` vs
+  `256` at `rate=1.0` on `vc1`/`vc8` and reports the delta rather than assuming one.
 
 **Open**
 

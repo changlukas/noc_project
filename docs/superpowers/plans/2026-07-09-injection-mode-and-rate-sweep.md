@@ -926,10 +926,9 @@ Append after the `sim` target:
 
 ```makefile
 # Injection-rate sweep: four VC configs x nine rates, one point per make sim.
-# MAX_UNIQUE_IDS defaults to 256 here, not 1: the shipped default collapses every
-# manager onto one downstream AXI id at each subordinate, which serialises them
-# and flattens the curve. MAX_OUTSTANDING is inherited so the bring-up step can
-# sweep it without editing this target.
+# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
+# NI parameters, and the figure's subject is the machine as built. The bring-up
+# step measures what other settings would buy, and reports it as a number.
 # Heavy: rebuilds Verilator once per VC config. Run on WSL.
 SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
 SWEEP_VCS   ?= 1 2 4 8
@@ -941,7 +940,7 @@ sim-injection-sweep:
 	        echo ">>> sweep vc$$vc rate $$r"; \
 	        $(MAKE) sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=$(PATTERN) SEED=$(_SEED) \
 	            INJECTION_MODE=1 INJECTION_RATE=$$r \
-	            MAX_UNIQUE_IDS=$(if $(MAX_UNIQUE_IDS),$(MAX_UNIQUE_IDS),256) \
+	            $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
 	            $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
 	    done; \
 	done
@@ -998,13 +997,17 @@ If the two numbers are equal, **the plusarg is not reaching the c_model**. Check
 
 - [ ] **Step 2: Fault-inject `MAX_UNIQUE_IDS`**
 
+**Do not fault-inject this one with throughput.** Two independent surveys established that ID collapse does not reduce subordinate throughput: FlooNoC never claims it (`docs/floonoc/chimneys.md:50` says the serialization "should not cause any big performance problems"), and our co-sim subordinate is a zero-wait `MAPPED` pulp `axi_rand_slave` (`user_node_endpoint.sv:193-196,242`) whose service latency is uniform, so in-order same-ID return costs nothing. Expecting a throughput drop here would produce a false alarm.
+
+Use the `Depacketize` constructor assert instead. It accepts only 1 or `AXI_ID_SPACE` (`depacketize.hpp:50-51`), so an illegal value must abort — which proves the plusarg reached the c_model, and proves it for the right reason.
+
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && TAG=sim/verilator/output/continuous_mesh_4x4_vc1_rob_hotspot_r1.0_s1; for n in 1 256; do make sim TB=tb_mesh_4x4_vc1_rob PATTERN=hotspot SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=$n > /tmp/fu_$n.log 2>&1 || { echo "run failed at n=$n"; break; }; echo "MAX_UNIQUE_IDS=$n -> $(tail -1 $TAG/result.csv | cut -d, -f10) bits/cyc"; done'
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make sim TB=tb_mesh_4x4_vc1 PATTERN=neighbor SEED=1 MAX_UNIQUE_IDS=5 > /tmp/fu_illegal.log 2>&1; echo "rc=$? (non-zero expected)"; grep -m1 "max_unique_ids must be" /tmp/fu_illegal.log sim/verilator/output/directed_mesh_4x4_vc1_neighbor_s1/run.log 2>/dev/null'
 ```
 
-Expected: `MAX_UNIQUE_IDS=1` yields lower throughput than `=256` on `hotspot`, where all sixteen managers converge on one subordinate and the collapse serialises them.
+Expected: non-zero rc and the assertion text `max_unique_ids must be 1 or AXI_ID_SPACE`.
 
-Equal numbers mean the plusarg is not reaching the NSU. Stop and report.
+A clean PASS means the plusarg never reached the constructor. Check the `[Config]` line, then stop and report.
 
 - [ ] **Step 3: Mode 1 on all four patterns, scoreboard silent**
 
@@ -1043,9 +1046,26 @@ Four numbers. Compute and record two things:
 
 If `vc1` and `vc8` coincide at **both** arms, neither the fabric nor the NI pool binds. Suspect the `AxiMasterPort` per-channel queue (16, `wrap_defaults.hpp:12`), the router per-VC input depth (4), or the router inject credit. **Stop and report** — a VC comparison is meaningless when VC count changes nothing.
 
-**Record all four numbers.** The next reader will not rerun this.
+- [ ] **Step 6: Bring-up — does `max_unique_ids` move the curve at all?**
 
-- [ ] **Step 6: Run the headline sweep at the design point**
+The evidence says probably not. FlooNoC never claims a throughput loss from collapsing IDs (`docs/floonoc/chimneys.md:50`), and the co-sim subordinate is a zero-wait `MAPPED` pulp `axi_rand_slave` whose uniform latency makes in-order same-ID return free. What survives is an ordering effect on the response path, which may or may not interact with return-path backpressure.
+
+Measure it. Do not assume either way.
+
+```bash
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mu in 1 256; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=$mu MAX_OUTSTANDING=32 > /dev/null 2>&1; echo -n "mu=$mu vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc$${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
+```
+
+| observation | what it means | headline figure uses |
+|---|---|---|
+| the four numbers pair up (1 ≈ 256 at each VC) | ID diversity buys nothing, as predicted | `MAX_UNIQUE_IDS=1`, the shipped default |
+| 256 beats 1 materially | an ordering effect on the response path is real and worth its own investigation | report both; **stop and ask** before choosing |
+
+Do not silently pick the setting that makes the curve look better. The default is 1, and 1 is what ships.
+
+**Record all eight bring-up numbers** — four from Step 5, four from here. The next reader will not rerun them.
+
+- [ ] **Step 7: Run the headline sweep at the design point**
 
 ```bash
 wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make sim-injection-sweep PATTERN=uniform_random MAX_OUTSTANDING=32 > /tmp/sweep.log 2>&1; echo "rc=$?"; tail -20 /tmp/sweep.log'
@@ -1055,7 +1075,7 @@ Expected: 36 runs, then the merged table and the PNG. `MAX_OUTSTANDING=32` is th
 
 The throughput curve must show a knee. A flat line at every VC count means VC count changes nothing, which Step 5 should already have caught. Do not publish a flat curve as a VC comparison.
 
-- [ ] **Step 7: Render the dark variant**
+- [ ] **Step 8: Render the dark variant**
 
 ```bash
 wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && python3 sim/tools/plot_injection_sweep.py uniform_random --dark && ls -la sim/tools/injection_sweep*.png'
@@ -1065,15 +1085,15 @@ Expected: both PNGs exist. Open them. The validator checks colour, not layout �
 
 Note what is **not** here: there is no `MAX_OUTSTANDING=512` sweep. The four numbers from Step 5 already say what the NI buffer costs. Spending eighteen more runs to draw that as a curve nobody will publish would buy nothing. Every figure in this round is at the design point, 32.
 
-- [ ] **Step 8: Update the docs**
+- [ ] **Step 9: Update the docs**
 
-In `docs/backlog.md`, replace the "Next round: injection rate in `make sim`, VC comparison figures" section with a `## Done` entry recording: the interface (`make sim TB= PATTERN= [INJECTION_MODE=1 INJECTION_RATE= INJECTION_COUNT=] [MAX_UNIQUE_IDS= MAX_OUTSTANDING=]`), the sweep target, the four bring-up numbers from Step 5, the VC delta at the design point, and what the 32-entry NI buffer costs against the ideal sink. Strike the two remaining "Open" bullets.
+In `docs/backlog.md`, replace the "Next round: injection rate in `make sim`, VC comparison figures" section with a `## Done` entry recording: the interface (`make sim TB= PATTERN= [INJECTION_MODE=1 INJECTION_RATE= INJECTION_COUNT=] [MAX_UNIQUE_IDS= MAX_OUTSTANDING=]`), the sweep target, all eight bring-up numbers from Steps 5 and 6, the VC delta at the design point, what the 32-entry NI buffer costs against the ideal sink, and whether `max_unique_ids` moved the curve. Strike the two remaining "Open" bullets, and strike the two `max_unique_ids` bullets this round's survey added, replacing them with the measurement.
 
 Add one new backlog item: **`max_outstanding` as its own sweep axis.** It is an NI buffer-depth parameter, hence area. Sweeping it against VC count would say how the two trade off. Not this round.
 
 In `docs/development.md`, replace every reference to `run-traffic`, `sim-saturation`, `collect_saturation.py` and `plot_saturation.py`. Add the `INJECTION_COUNT` mode-dependent default, because a default that changes with another variable will surprise someone. State that `MAX_OUTSTANDING` is an architectural parameter, not a knob to raise until a curve looks good.
 
-- [ ] **Step 9: Full ctest**
+- [ ] **Step 10: Full ctest**
 
 ```bash
 wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make test 2>&1 | grep -E "tests passed|tests failed"'
@@ -1081,20 +1101,20 @@ wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make test 2>&1 | grep -E "tests
 
 Expected: `397 tests passed, 0 tests failed`.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Commit**
 
 ```bash
 git add docs/
 git commit -m "docs: injection-mode interface, sweep results, retire the traffic vocabulary
 
-Records the four bring-up numbers beside the figures, so the next reader does
+Records all eight bring-up numbers beside the figures, so the next reader does
 not have to rerun them. max_outstanding is documented as an NI buffer depth,
 not a knob to raise until the curve looks good."
 ```
 
-- [ ] **Step 11: Report, do not push**
+- [ ] **Step 12: Report, do not push**
 
-Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected RData`, the mode-0 regression, the four bring-up numbers, the VC delta at the design point, what the 32-entry buffer costs against the ideal sink, and the final ctest count.
+Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected RData`, the mode-0 regression, all eight bring-up numbers, the VC delta at the design point, what the 32-entry buffer costs against the ideal sink, whether max_unique_ids moved the curve, and the final ctest count.
 
 ---
 
@@ -1122,7 +1142,7 @@ Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected
 | `plot_saturation.py` replaced | 7 |
 | fault injection first | 8 |
 | headline at the design point (`MAX_OUTSTANDING=32`) | 8 |
-| what the NI buffer costs, as four bring-up numbers | 8 |
+| what the NI buffer costs, and whether max_unique_ids matters, as eight bring-up numbers | 8 |
 | `max_outstanding` documented as an NI buffer depth | 8 |
 | publication-quality figure, validated ordinal palette, light and dark | 7, 8 |
 | mode 0 unchanged on all four patterns | 5, 8 |
