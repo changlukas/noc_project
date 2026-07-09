@@ -5,6 +5,9 @@
 // Authors:
 //  - Tim Fischer <fischeti@iis.ee.ethz.ch>
 
+// Locally modified: the two $display calls print the latency sample count (N),
+// which the aggregate weighting in sim/tools/emit_result_csv.py requires.
+
 /// A AXI4 Bus Monitor for measuring the throughput and latency of the AXI4 Bus
 module axi_bw_monitor #(
   parameter type req_t     = logic,
@@ -143,10 +146,10 @@ module axi_bw_monitor #(
     read_util = real'(r_cnt) * 100 / real'(cycle_cnt);
     write_util = real'(w_cnt) * 100 / real'(cycle_cnt);
 
-    $display("[Monitor %s][Read] Latency: %0.2f +- %0.2f, BW: %0.2f Bits/cycle, Util: %0.2f%%",
-             Name, read_latency_mean, read_latency_stddev, read_bw, read_util);
-    $display("[Monitor %s][Write] Latency: %0.2f +- %0.2f, BW: %0.2f Bits/cycle, Util: %0.2f%%",
-             Name, write_latency_mean, write_latency_stddev, write_bw, write_util);
+    $display("[Monitor %s][Read] Latency: %0.2f +- %0.2f, N: %0d, BW: %0.2f Bits/cycle, Util: %0.2f%%",
+             Name, read_latency_mean, read_latency_stddev, read_latency.size(), read_bw, read_util);
+    $display("[Monitor %s][Write] Latency: %0.2f +- %0.2f, N: %0d, BW: %0.2f Bits/cycle, Util: %0.2f%%",
+             Name, write_latency_mean, write_latency_stddev, write_latency.size(), write_bw, write_util);
   end
 
 endmodule
