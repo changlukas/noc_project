@@ -358,7 +358,7 @@ module user_node_endpoint #(
         .req_t(axi_vip_types_pkg::vip_req_t),
         .rsp_t(axi_vip_types_pkg::vip_resp_t),
         .AxiIdWidth(ID_WIDTH),
-        .Name($sformatf("node%0d.manager", NODE_ID))
+        .Name($sformatf("node%0d.master", NODE_ID))
     ) u_bw_mst (
         .clk_i(clk_i), .en_i(rst_ni), .end_of_sim_i(end_of_sim_o),
         .req_i(mon_mst_req), .rsp_i(mon_mst_rsp),

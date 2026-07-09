@@ -60,6 +60,7 @@ VERILATOR_COMMON_FLAGS := \
     -Wno-REDEFMACRO \
     -Wno-WIDTHEXPAND \
     -Wno-WIDTHTRUNC \
+    -Wno-ASCRANGE \
     -CFLAGS "-Wno-attributes"
 # -Wno-attributes (g++): verilator's own svdpi.h triggers "'dllimport'
 # attribute ignored" under MinGW for every DPI-bearing translation unit —
@@ -222,7 +223,7 @@ run-directed: $(TBTOP_EXE)
 	    "+perf_scenario=$(DIRECTED_TAG)" \
 	    > output/$(DIRECTED_TAG)/run.log 2>&1; \
 	rc=$$?; \
-	echo "--- run.log (tail) ---"; tail -12 output/$(DIRECTED_TAG)/run.log; \
+	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(DIRECTED_TAG)/run.log; tail -4 output/$(DIRECTED_TAG)/run.log; \
 	if grep -qE 'Unexpected RData|Unexpected W last|Not supported (AW|AR) burst|Atomic transfers not supported|%Error' \
 	        output/$(DIRECTED_TAG)/run.log; then \
 	    echo "DIRECTED FAIL: scoreboard mismatch/assertion/malformed stimulus"; exit 1; \
@@ -307,7 +308,7 @@ run-constrained-random: $(TBTOP_EXE)
 	    "+perf_scenario=$(CR_TAG)" \
 	    > output/$(CR_TAG)/run.log 2>&1; \
 	rc=$$?; \
-	echo "--- run.log (tail) ---"; tail -10 output/$(CR_TAG)/run.log; \
+	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(CR_TAG)/run.log; tail -4 output/$(CR_TAG)/run.log; \
 	if grep -qE '%Error' output/$(CR_TAG)/run.log; then \
 	    echo "CR FAIL: reorder_compare error / assertion"; exit 1; \
 	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(CR_TAG)/run.log; then \
