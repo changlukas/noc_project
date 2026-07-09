@@ -31,6 +31,46 @@ smoke clean, generator pytest 16/16.
   `:=` to `=` (deferred) so the `local.mk` BUILD_ROOT override (`$(HOME)/noc_build` on WSL) applies.
   `make build` / `make test` now target `$HOME/noc_build/cmodel` correctly; no cmake workaround needed.
 
+## Next round: injection rate in `make sim`, VC comparison figures (planned 2026-07-09)
+
+Add traffic mode to the root `make sim` launcher, run one VC sweep on the RoB Enabled 4x4 topologies,
+and produce a CSV plus two figures for the same traffic pattern: measured throughput, and per-tile hop
+count computed from the pattern.
+
+**Decisions made**
+
+- Run the `_rob` topologies. RoB Enabled.
+- One AXI ID per tile, matching one manager per tile. The AXI ID identifies the manager. Do not use the
+  generated AXI ID count as an outstanding-depth knob, and drop `--ids-per-tile` from this path. When a
+  tile later holds several managers, the ID count follows the manager count.
+- Traffic mode is a performance test, not a data-integrity test. Directed runs keep the readback scoreboard.
+- First figure: one pattern across `vc1/vc2/vc4/vc8`. No pattern x VC matrix this round.
+
+**Facts that prevent a wasted session**
+
+- RoB Enabled admits several same-ID requests until the ROB entries fill (32 read, 32 write,
+  `rob.hpp:80`). The AXI port queue depth also bounds acceptance (`axi_slave_port.hpp:119-124`). RoB
+  Disabled allows one outstanding request per ID (`rob.hpp:198,236`), which would flatten the sweep.
+- `_rob` name plumbing already works. `make sim TB=tb_mesh_4x4_vc1_rob PATTERN=neighbor SEED=12345`
+  passes (log: `sim/verilator/output/directed_mesh_4x4_vc1_rob_neighbor_s12345/run.log`).
+- The recorded `sim-saturation` series (`vc1=1248 ... vc4=1916 bits/cyc`) used RoB Disabled with
+  `IDS_PER_TILE=16`. The new numbers will not compare against it. More VCs reduce fabric congestion.
+  They do not bypass AXI same-ID ordering, which the ROB still enforces on retirement (`rob.hpp:300-305`).
+- AXI IDs come from the generated `axi_file_master` stimulus files. SV cannot override them after
+  `load_files()`.
+- `run-traffic` hardcodes `--pattern uniform_random` (`sim/verilator/Makefile:255`), its tag omits the
+  pattern (`:247-248`), and `collect_saturation.py` expects the old hardcoded log path (`:26-28`). Fix
+  the naming before adding a second pattern.
+- `neighbor`, `transpose`, and single-hotspot give one destination per tile. `uniform_random` and
+  multi-hotspot sample a destination per transaction, so report per-tile mean hop count with the seed
+  and sample count.
+
+**Open**
+
+- ID value per tile: `0` everywhere, or `NODE_ID` for log clarity.
+- Which pattern drives the first figure.
+- Where the per-run CSV comes from. Today only `sim-saturation` writes one.
+
 ## Done — checked-traffic-benchmark (Stages 1-5 complete, merged + pushed to `main` 2026-07-07)
 
 Rebuild the regression/benchmark on the pulp VIP. Spec:
