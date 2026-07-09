@@ -182,18 +182,7 @@ Replace the field and its loader line:
     p.meta_buffer_max_unique_ids = m["max_unique_ids"].as<std::size_t>();
 ```
 
-Then, immediately before `return p;`, add the build guard:
-
-```cpp
-    if (p.meta_buffer_max_unique_ids != 1 && p.meta_buffer_max_unique_ids != 256) {
-        throw std::runtime_error(
-            "port_params.yaml: nsu.meta_buffer.max_unique_ids must be 1 or 256. Upstream and "
-            "downstream AXI ID widths are both 8, so any value above 1 degenerates to the "
-            "identity remap; an intermediate value would silently do nothing.");
-    }
-```
-
-`256` is spelled literally rather than as `axi::AXI_ID_SPACE` because `port_params.hpp` does not include `axi/types.hpp` and should not start doing so for one constant. The `static_assert` at `axi/types.hpp:21-23` already pins `AXI_ID_SPACE == 256`, so the two cannot drift silently.
+No guard here. The YAML is read by exactly one test (`tests/integration/test_request_response_loopback.cpp:160`); the co-sim wrap path and the direct `NsuConfig cfg{}` test fixtures never touch it. A guard here would protect the one caller that needs it least. It goes in the `Depacketize` constructor instead — Step 6 — which every path funnels through.
 
 - [ ] **Step 3: Update `wrap/wrap_defaults.hpp`**
 
@@ -215,13 +204,9 @@ constexpr std::size_t kMetaBufferMaxUniqueIds = 1;
 Replace `cfg.port_params.meta_buffer_per_id_depth = kPoCMetaBufferPerIdDepth;` with:
 
 ```cpp
-        static_assert(kMetaBufferMaxUniqueIds == 1 || kMetaBufferMaxUniqueIds == 256,
-                      "max_unique_ids must be 1 or 256; see nsu/port_params.hpp");
         cfg.port_params.meta_buffer_max_outstanding = kMetaBufferMaxOutstanding;
         cfg.port_params.meta_buffer_max_unique_ids = kMetaBufferMaxUniqueIds;
 ```
-
-The wrap path never loads the YAML, so it needs its own guard.
 
 - [ ] **Step 5: Update `nsu/nsu.hpp` ctor**
 
@@ -239,7 +224,7 @@ and the `depacketize_` initializer gains the new argument:
                    cfg_.port_params.meta_buffer_max_unique_ids),
 ```
 
-- [ ] **Step 6: Update the `Depacketize` ctor**
+- [ ] **Step 6: Update the `Depacketize` ctor, and put the only guard here**
 
 In `src/c_model/include/nsu/depacketize.hpp`, extend the constructor and add the member:
 
@@ -251,7 +236,15 @@ In `src/c_model/include/nsu/depacketize.hpp`, extend the constructor and add the
           aw_q_depth_(aw_q_depth),
           w_q_depth_(w_q_depth),
           ar_q_depth_(ar_q_depth),
-          max_unique_ids_(max_unique_ids) {}
+          max_unique_ids_(max_unique_ids) {
+        // Every path that configures an NSU funnels through here: the YAML loader,
+        // the co-sim wrap defaults, and the direct NsuConfig test fixtures. Upstream
+        // and downstream AXI ID widths are both 8, so any value above 1 degenerates to
+        // the identity remap and an intermediate value would silently do nothing. A
+        // default-constructed NsuConfig leaves this 0, which would also read as identity.
+        assert((max_unique_ids == 1 || max_unique_ids == axi::AXI_ID_SPACE) &&
+               "max_unique_ids must be 1 or AXI_ID_SPACE");
+    }
 ```
 
 Add to the private section, next to `aw_q_depth_`:
@@ -260,11 +253,24 @@ Add to the private section, next to `aw_q_depth_`:
     std::size_t max_unique_ids_;
 ```
 
-- [ ] **Step 7: Find and fix every other `Depacketize` construction site**
+`meta_buffer.hpp` already includes `axi/types.hpp` for `AXI_ID_SPACE`, and `depacketize.hpp` already includes `meta_buffer.hpp`. Add `#include <cassert>` if it is not already there.
 
-Run: `grep -rn "Depacketize(" src/`
+- [ ] **Step 7: Fix every construction site the guard will now catch**
 
-Every direct construction (tests under `src/c_model/tests/nsu/`) needs the trailing argument. Pass `256` in existing tests so their behaviour is unchanged (identity remap) — Task 5 is what makes the argument matter, and Task 4's `MetaBuffer` is keyed on whatever ID is handed to it, so `256` preserves today's semantics exactly.
+Run: `grep -rn "Depacketize(\|NsuConfig cfg" src/`
+
+Two distinct sets, both must be fixed or the new assert fires:
+
+1. **Direct `Depacketize` construction** — `tests/nsu/test_nsu_depacketize.cpp:58,80,96,110,124,137,152,179`. Each needs the trailing argument. Pass `256`: `remap_downstream_id(id, 256)` is the identity, so beat IDs and every existing expectation are unchanged.
+
+2. **Direct `NsuConfig cfg{}` construction** — `tests/nsu/test_nsu.cpp:26,73` and `tests/nsu/test_nsu_vc_arbiter.cpp:168`. These are aggregate-zeroed, so `meta_buffer_max_unique_ids` would be `0` and `meta_buffer_max_outstanding` would be `0` (which trips the existing `MetaBuffer` positive-size assert). Set both explicitly:
+
+```cpp
+    cfg.port_params.meta_buffer_max_outstanding = 32;
+    cfg.port_params.meta_buffer_max_unique_ids = 256;
+```
+
+These three sites are the reason the guard lives in the constructor rather than in the YAML loader. Before this change they silently inherited a working default; after it, a zeroed config would silently select the identity remap.
 
 - [ ] **Step 8: Build and test**
 
@@ -414,7 +420,23 @@ TEST(MetaBuffer, SharedPoolFullReportsInsteadOfAborting) {
 }
 ```
 
-Update the two pre-existing tests in this file for the new `MetaEntry` layout and ctor name. `MetaBuffer mb(/*per_id_depth=*/4)` becomes `MetaBuffer mb(/*max_outstanding=*/4)`, and every `{src_id, rob_req, rob_idx}` brace-init gains the `upstream_id` field in second position — for example `mb.allocate_write(0x05, {0x10, 1, 7})` becomes `mb.allocate_write(0x05, {0x10, 0x05, 1, 7})`.
+**This is the dangerous step.** `MetaEntry` goes from 3 fields to 4, and every existing brace-init is positional. `{0x10, 1, 7}` keeps compiling — it just means `upstream_id=1, rob_req=7, rob_idx=0` now. Some of those sites will fail loudly; the `{0, 0, 0}` ones will pass silently while testing nothing. There is no compiler help here.
+
+Fix every site. Run `grep -rn "allocate_write(\|allocate_read(" src/c_model/tests/` and expect exactly these:
+
+| file | lines |
+|---|---|
+| `tests/nsu/test_meta_buffer.cpp` | 11, 30, 31, 32, 45, 46, 54, 74, 75, 76 |
+| `tests/nsu/test_nsu_packetize.cpp` | 55, 94, 95, 113, 123, 144, 167, 198 |
+
+If the grep returns any other line, stop and report — the plan's list is stale.
+
+Each `{src_id, rob_req, rob_idx}` gains `upstream_id` in **second** position. `mb.allocate_write(0x05, {0x10, 1, 7})` becomes `mb.allocate_write(0x05, {0x10, 0x05, 1, 7})` — the `upstream_id` matches the key because these tests predate the remap and run at the identity setting.
+
+Two further edits in `test_meta_buffer.cpp`:
+
+- `MetaBuffer mb(/*per_id_depth=*/4)` becomes `MetaBuffer mb(/*max_outstanding=*/4)`.
+- **Delete `TEST(MetaBuffer, PerIdDepthExceededDies)` at lines 71-77.** It is an `EXPECT_DEATH` on the per-ID depth abort, which this task removes. The new `SharedPoolFullReportsInsteadOfAborting` test replaces it: the pool reports fullness rather than dying. Deleting a test whose contract no longer exists is correct; it is not the same as disabling a failing test.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -551,40 +573,27 @@ The load-bearing change. Allocation leaves the shared ingress loop so a full poo
 
 **Interfaces:**
 - Consumes: `remap_downstream_id` (Task 3), `MetaBuffer::write_full` / `read_full` / `allocate_*` (Task 4), `max_unique_ids_` (Task 2).
-- Produces: `Depacketize::pop_aw()` / `pop_ar()` return `std::nullopt` when the matching pool is full. The returned beat's `id` is the **downstream** ID.
+- Produces: `Depacketize::pop_aw()` / `pop_ar()` return `std::nullopt` when the matching pool is full. The returned beat's `id` is the **downstream** ID. No new types.
 
-- [ ] **Step 1: Add the S1 element types**
+- [ ] **Step 1: Hold the flit in the AW / AR stage registers**
 
-In `src/c_model/include/nsu/depacketize.hpp`, above `class Depacketize`:
+The NMU needed an `AdmittedAw` struct because its input was already an AXI beat plus SAM-computed metadata, with nothing else to carry the header fields. The NSU's input **is** the flit. Store it, and decode at the drain.
 
-```cpp
-// S1 payloads carry the beat together with the flit-header metadata the
-// response path needs. Mirrors nmu::AdmittedAw (nmu.hpp), which the NMU
-// independent-drain fix introduced for the same reason: the drain stage, not
-// the shared ingress, is where a beat commits to a downstream resource.
-struct PendingAw {
-    axi::AwBeat beat;
-    uint8_t src_id;
-    uint8_t rob_req;
-    uint8_t rob_idx;
-};
-struct PendingAr {
-    axi::ArBeat beat;
-    uint8_t src_id;
-    uint8_t rob_req;
-    uint8_t rob_idx;
-};
-```
-
-Change the member declarations:
+In `src/c_model/include/nsu/depacketize.hpp`, change two member declarations:
 
 ```cpp
-    router::PipelineStage<PendingAw> s1_aw_;
+    // AW / AR hold the raw flit until pop_aw / pop_ar admit it: the drain stage
+    // needs the header's src_id / rob_req / rob_idx to allocate the MetaBuffer
+    // entry, and decoding is pure. W carries no id and no metadata, so it stays
+    // a decoded beat.
+    router::PipelineStage<Flit> s1_aw_;
     router::PipelineStage<axi::WBeat> s1_w_;
-    router::PipelineStage<PendingAr> s1_ar_;
+    router::PipelineStage<Flit> s1_ar_;
 ```
 
-- [ ] **Step 2: Strip the MetaBuffer out of `tick()`**
+No new structs.
+
+- [ ] **Step 2: Strip the MetaBuffer and the decode out of `tick()`**
 
 Replace the `AXI_CH_AW` and `AXI_CH_AR` cases in `Depacketize::tick()`:
 
@@ -594,10 +603,7 @@ Replace the `AXI_CH_AW` and `AXI_CH_AR` cases in `Depacketize::tick()`:
                     pending_ = f;
                     return;
                 }
-                s1_aw_.accept({decode_aw(f),
-                               static_cast<uint8_t>(f.get_header_field("src_id")),
-                               static_cast<uint8_t>(f.get_header_field("rob_req")),
-                               static_cast<uint8_t>(f.get_header_field("rob_idx"))});
+                s1_aw_.accept(f);
                 break;
 ```
 
@@ -607,26 +613,25 @@ Replace the `AXI_CH_AW` and `AXI_CH_AR` cases in `Depacketize::tick()`:
                     pending_ = f;
                     return;
                 }
-                s1_ar_.accept({decode_ar(f),
-                               static_cast<uint8_t>(f.get_header_field("src_id")),
-                               static_cast<uint8_t>(f.get_header_field("rob_req")),
-                               static_cast<uint8_t>(f.get_header_field("rob_idx"))});
+                s1_ar_.accept(f);
                 break;
 ```
+
+The `AXI_CH_W` case is unchanged.
 
 Rewrite the class comment block above `class Depacketize` (currently lines 17-28 and the block at 123-133) so it says where allocation happens now:
 
 ```cpp
 // NSU-side request depacketizer. Stateful demux: tick() pulls flits from
-// NocReqIn, decodes axi_ch, and parks each beat plus its header metadata in a
-// per-channel S1 stage register. tick() touches no MetaBuffer state.
+// NocReqIn, reads axi_ch, and parks the flit in a per-channel S1 stage register.
+// tick() touches no MetaBuffer state and decodes nothing but W.
 //
-// pop_aw() / pop_ar() are the drain stage. Each remaps the manager's AXI id to
-// the downstream id, allocates the MetaBuffer entry under that key, and hands
-// the beat to AxiMasterPort. Each gates ONLY on its own pool: a full write pool
-// stalls pop_aw and leaves pop_ar untouched. Allocating here rather than at
-// ingress is what keeps a full pool from head-of-line blocking the other
-// channels, mirroring the 2026-07-04 NMU request-path fix.
+// pop_aw() / pop_ar() are the drain stage. Each decodes its flit, remaps the
+// manager's AXI id to the downstream id, allocates the MetaBuffer entry under
+// that key, and hands the beat to AxiMasterPort. Each gates ONLY on its own
+// pool: a full write pool stalls pop_aw and leaves pop_ar untouched. Allocating
+// here rather than at ingress is what keeps a full pool from head-of-line
+// blocking the other channels, mirroring the 2026-07-04 NMU request-path fix.
 //
 // Pending-flit stash semantics: if a pulled flit's S1 register is occupied, the
 // flit is held in `pending_` and re-attempted next tick, blocking flits behind
@@ -637,7 +642,7 @@ Rewrite the class comment block above `class Depacketize` (currently lines 17-28
 // handled by a downstream W-meta FIFO.
 ```
 
-- [ ] **Step 3: Move remap and allocation into `pop_aw` / `pop_ar`**
+- [ ] **Step 3: Move decode, remap and allocation into `pop_aw` / `pop_ar`**
 
 Replace the three pop functions:
 
@@ -645,15 +650,22 @@ Replace the three pop functions:
 // pop_aw/pop_w/pop_ar: S2 consumer interface — take from the S1 register.
 // Called <=1 time per channel per tick by AxiMasterPort::drain_*_from_depkt.
 // Returns nullopt when the S1 register is empty, or when this channel's
-// MetaBuffer pool is full (backpressure: the entry stays in S1).
+// MetaBuffer pool is full (backpressure: the flit stays in S1).
 inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     if (!s1_aw_.full()) return std::nullopt;
     if (meta_.write_full()) return std::nullopt;
-    PendingAw p = s1_aw_.take();
-    const uint8_t downstream_id = remap_downstream_id(p.beat.id, max_unique_ids_);
-    meta_.allocate_write(downstream_id, {p.src_id, p.beat.id, p.rob_req, p.rob_idx});
-    p.beat.id = downstream_id;
-    return p.beat;
+    const Flit f = s1_aw_.take();
+    axi::AwBeat b = decode_aw(f);
+    const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
+    meta_.allocate_write(downstream_id,
+                         {
+                             static_cast<uint8_t>(f.get_header_field("src_id")),
+                             b.id,
+                             static_cast<uint8_t>(f.get_header_field("rob_req")),
+                             static_cast<uint8_t>(f.get_header_field("rob_idx")),
+                         });
+    b.id = downstream_id;
+    return b;
 }
 inline std::optional<axi::WBeat> Depacketize::pop_w() {
     if (!s1_w_.full()) return std::nullopt;
@@ -662,23 +674,34 @@ inline std::optional<axi::WBeat> Depacketize::pop_w() {
 inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
     if (!s1_ar_.full()) return std::nullopt;
     if (meta_.read_full()) return std::nullopt;
-    PendingAr p = s1_ar_.take();
-    const uint8_t downstream_id = remap_downstream_id(p.beat.id, max_unique_ids_);
-    meta_.allocate_read(downstream_id, {p.src_id, p.beat.id, p.rob_req, p.rob_idx});
-    p.beat.id = downstream_id;
-    return p.beat;
+    const Flit f = s1_ar_.take();
+    axi::ArBeat b = decode_ar(f);
+    const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
+    meta_.allocate_read(downstream_id,
+                        {
+                            static_cast<uint8_t>(f.get_header_field("src_id")),
+                            b.id,
+                            static_cast<uint8_t>(f.get_header_field("rob_req")),
+                            static_cast<uint8_t>(f.get_header_field("rob_idx")),
+                        });
+    b.id = downstream_id;
+    return b;
 }
 ```
 
-Note the ordering: `s1_*.take()` runs only after both guards pass, so a stalled entry is re-examined next tick and never allocated twice.
+Two orderings are load-bearing. `s1_*.take()` runs only after both guards pass, so a stalled flit is re-examined next tick and never allocated twice (`PipelineStage::take()` returns by value and clears the slot, `ni/pipeline_stage.hpp:25-30`). And `b.id` is captured into the `MetaEntry` as `upstream_id` **before** it is overwritten with `downstream_id`.
+
+Also revert the Task 4 Step 4 brace-inits in `tick()` — they move here.
 
 - [ ] **Step 4: Fix the existing tests**
 
 Run: `make test 2>&1 | tail -40`
 
-The failures will be compile errors where a test reaches into `s1_aw_` / `s1_ar_` expecting a bare beat, or asserts on a MetaBuffer entry right after `tick()`. Fix each by moving the assertion after the corresponding `pop_aw()` / `pop_ar()` call. **Do not add new test cases** — only adapt existing ones. If a test's intent is genuinely invalidated (it asserted allocation-at-ingress, which is the behaviour being removed), retarget it to assert allocation-at-pop rather than deleting it.
+`s1_aw_` / `s1_ar_` are private, so no test can observe the element-type change directly. The failures will be tests that call `tick()` and then assert a MetaBuffer entry exists before calling `pop_aw()` / `pop_ar()` — allocation-at-ingress was the old contract. Expect them at `tests/nsu/test_nsu_depacketize.cpp:62-68,101-115` and around `:142-188`.
 
-If a test constructs `Depacketize` directly, it already passes `256` from Task 2 Step 7, so `remap_downstream_id` is the identity and beat IDs are unchanged.
+Fix each by moving the assertion after the corresponding `pop_*()` call. **Do not add new test cases** — only adapt existing ones. If a test's whole intent was allocation-at-ingress, retarget it to assert allocation-at-pop rather than deleting it.
+
+Every test that constructs `Depacketize` directly already passes `256` from Task 2 Step 7, so `remap_downstream_id` is the identity and beat IDs are unchanged.
 
 - [ ] **Step 5: Verify the full suite**
 
@@ -711,6 +734,8 @@ Without this the manager receives the collapsed `0xFF` as its `bid` / `rid`.
 **Interfaces:**
 - Consumes: `MetaEntry::upstream_id` (Task 4).
 - Produces: response flits whose `B.bid` / `R.rid` payload fields carry the manager's original AXI ID.
+
+Three consumers depend on this restore, which is why the collapsed ID must never reach the NoC: the NMU decodes the payload straight into AXI beats (`nmu/depacketize.hpp:60-70`), the NMU RoB carries the AXI ID through committed entries (`nmu/rob.hpp:66-77,244-265`), and `AxiMaster` validates every B and R against its per-ID outstanding maps (`axi/axi_master.hpp:161-171,209-214`). The NSU `VcArbiter` also keys `r_burst_vc_` on the restored `rid` (`nsu/vc_arbiter.hpp:136-144`). The DPI only marshals the field (`src/dpi/cmodel_dpi.cpp:480,483,545,549`); no remap exists on the SV side.
 
 - [ ] **Step 1: Restore the ID in both flit builders**
 
@@ -793,7 +818,9 @@ Change nothing else. A single-line fault proves a single checker.
 make sim TB=tb_mesh_4x4_vc1 PATTERN=hotspot SEED=12345
 ```
 
-Expected: FAIL. The run log at `sim/verilator/output/directed_mesh_4x4_vc1_hotspot_s12345/run.log` must show either the `B_FRONT_CAN_ACCEPT` assertion from `axi_master.hpp` (a master drained a B with an empty per-ID deque) or a scoreboard `Unexpected RData`.
+Expected: FAIL. The run log at `sim/verilator/output/directed_mesh_4x4_vc1_hotspot_s12345/run.log` must show the `B_FRONT_CAN_ACCEPT` assertion (`axi_master.hpp:165-167`); an unknown `bid` returns false from `check_b_front_can_accept_response` (`protocol_rules.hpp:190-195`). The directed stimulus gives each tile one distinct ID (`gen_test_patterns.py:143-161`, `--ids-per-tile` defaults to 1 at `:483`), so a collapsed `bid = 0xFF` is unknown to every master.
+
+`AXI_PROTOCOL_ASSERT` compiles out under `NDEBUG` (`protocol_rules.hpp:21-27`), and then `.at(b->id)` at `axi_master.hpp:171` throws instead. The Verilator build passes `-O0` and never defines `NDEBUG` (`sim/verilator/Makefile:74-75`), so the assertion is live. Do not run this step against a release build.
 
 If it PASSES, the co-sim is not exercising the response ID path and the whole gate is worthless — **stop and report**. Do not proceed to Step 3.
 
@@ -880,7 +907,7 @@ Summarize: the ctest pass count before and after, the fault-injection FAIL follo
 | `upstream_id` restored into `bid` / `rid` | 6 |
 | `max_unique_ids` / `max_outstanding` parameters, values 1 and 32 | 2 |
 | `poc_defaults.hpp` renamed | 1 |
-| build assert `max_unique_ids == 1 || == AXI_ID_SPACE` | 2 (YAML loader guard + wrap `static_assert`) |
+| build assert `max_unique_ids == 1 || == AXI_ID_SPACE` | 2 (one assert in the `Depacketize` ctor, where the YAML, wrap and direct-config paths converge) |
 | fault injection first | 7 |
 | hotspot co-sim gate, both `max_unique_ids` values | 7 |
 | directed x4 + constrained_random regression | 7 |
@@ -888,8 +915,21 @@ Summarize: the ctest pass count before and after, the fault-injection FAIL follo
 | no flit / specgen / SV / DPI change | all tasks; enforced by Global Constraints |
 | subordinate ID width stays 8 | all tasks; no task touches it |
 
-Two gaps were found and fixed inline: the build assert now lives in Task 2 (YAML loader guard plus a `static_assert` on the wrap path, which never loads the YAML), and Task 7's fault injection was reduced from two simultaneous edits to one line, so a single checker is proven rather than an ambiguous pair.
-
 **Placeholder scan:** no TBD, no "handle edge cases", every code step carries the code.
 
-**Type consistency:** `remap_downstream_id(uint8_t, std::size_t) -> uint8_t` is defined in Task 3 and used in Task 5 with that signature. `MetaEntry` field order `{src_id, upstream_id, rob_req, rob_idx}` is fixed in Task 4 and brace-initialized in that order in Tasks 4 and 5. `write_full` / `read_full` are declared in Task 4 and called in Task 5. `PendingAw` / `PendingAr` are introduced and consumed entirely within Task 5.
+**Type consistency:** `remap_downstream_id(uint8_t, std::size_t) -> uint8_t` is defined in Task 3 and used in Task 5 with that signature. `MetaEntry` field order `{src_id, upstream_id, rob_req, rob_idx}` is fixed in Task 4 and brace-initialized in that order in Tasks 4 and 5. `write_full` / `read_full` are declared in Task 4 and called in Task 5. No new types are introduced anywhere.
+
+## Review findings applied (Codex + ponytail, 2026-07-09)
+
+| finding | source | resolution |
+|---|---|---|
+| Guard missed three `NsuConfig cfg{}` sites, where a zeroed `max_unique_ids = 0` silently selects the identity remap | Codex | One assert in the `Depacketize` ctor replaces the YAML `runtime_error` and the wrap `static_assert`. Every path converges there. Task 2 Step 6. |
+| Guard sat in the YAML loader, the one path that needs it least | ponytail | same fix |
+| Task 4 named "two pre-existing tests"; there are 18 positional `MetaEntry` brace-inits across two files, and 3-to-4 fields keeps compiling while shifting them | Codex | Exact file and line table added to Task 4 Step 1, plus the `EXPECT_DEATH` deletion. |
+| `PendingAw` / `PendingAr` are unnecessary. The NMU needed `AdmittedAw` because its input was a beat plus SAM metadata; the NSU's input is the flit | ponytail | S1 holds the `Flit` for AW and AR; `pop_*` decodes. Two structs and the metadata copying deleted. |
+| `AXI_PROTOCOL_ASSERT` compiles out under `NDEBUG`, which would gut the fault-injection gate | Codex | Task 7 Step 2 records that the Verilator build defines no `NDEBUG` (`sim/verilator/Makefile:74-75`). |
+| `PipelineStage::take()` returns by value, so mutating the popped beat is safe | Codex | CONFIRMED, cited in Task 5 Step 3. |
+| `AxiMasterPort` calls each drain once per tick and tolerates `nullopt`, so no double-allocate | Codex | CONFIRMED, no change. |
+| `make sim` rebuilds on a `wrap_defaults.hpp` edit via `DPI_HDR_DEPS` | Codex | CONFIRMED, Task 7 Step 6 is executable as written. |
+
+**Not applied, needs a decision:** `depkt_aw_q_depth` / `depkt_w_q_depth` / `depkt_ar_q_depth` and the matching `Depacketize` members have been dead since the S1 rewrite (`depacketize.hpp:65-67`). Deleting them is roughly -12 lines and Task 2 already edits that constructor, but it removes three `port_params.yaml` parameters, which needs user approval. Left in place.

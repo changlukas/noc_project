@@ -227,9 +227,16 @@ separate commit.
 | `max_outstanding` | 32 | `per_id_depth` |
 
 Both live in `nsu.meta_buffer` of `config/port_params.yaml` and in `wrap/wrap_defaults.hpp`. This
-converges the existing split-brain: the co-sim path used `kPoCMetaBufferPerIdDepth = 16`
-(`poc_defaults.hpp:21`) while the ctest path used `per_id_depth: 4` (`port_params.yaml:34`), despite
-`axi_master_port.hpp:39` naming the YAML the single source of truth.
+converges the **values** of an existing split-brain, not its sources: the co-sim path used
+`kPoCMetaBufferPerIdDepth = 16` (`poc_defaults.hpp:21`) while the ctest path used `per_id_depth: 4`
+(`port_params.yaml:34`), despite `axi_master_port.hpp:39` naming the YAML the single source of truth.
+After this change both say 32, but the wrap layer still hardcodes and the YAML is still read by exactly
+one test (`tests/integration/test_request_response_loopback.cpp:160`). Collapsing the two sources is a
+separate round.
+
+Because no single configuration path is authoritative, the `max_unique_ids` guard belongs where they all
+converge: the `Depacketize` constructor. A default-constructed `NsuConfig` leaves the field 0, which
+would otherwise read as the identity remap.
 
 Build assert: `max_unique_ids == 1 || max_unique_ids == AXI_ID_SPACE`.
 
