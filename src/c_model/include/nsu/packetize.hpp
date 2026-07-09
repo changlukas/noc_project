@@ -116,8 +116,9 @@ inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uin
 
 // S2 stage transform: ≤1 B and ≤1 R per tick.
 // MetaBuffer assert: a B/R beat in S1 must have a matching MetaBuffer entry
-// (the entry was allocated at AW/AR ingress). Absence is a pipeline protocol
-// violation (beat injected without a prior AW/AR flit), not recoverable.
+// (the entry was allocated on the request path, in Depacketize::pop_aw / pop_ar).
+// Absence is a pipeline protocol violation (beat injected without a prior AW/AR
+// flit), not recoverable.
 inline void Packetize::tick() {
     // B channel: read S1, build flit, push to S2→S3 boundary.
     if (s1_b_.full()) {

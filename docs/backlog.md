@@ -25,6 +25,10 @@ smoke clean, generator pytest 16/16.
   arbitrary-base map ships. Co-sim non-uniform is SIZE-override-only today.
 - **`translate` miss under `NDEBUG`.** Miss ⇒ `assert` (fail-loud), but a release/`NDEBUG` DPI build would
   null-deref instead. ctest/co-sim build with asserts on; only matters if a release DPI lib is produced.
+- **`max_unique_ids` guard under `NDEBUG`.** Same class. The only validity check on `max_unique_ids` is an
+  `assert` in the `Depacketize` ctor (`nsu/depacketize.hpp:31-33`). Under `NDEBUG` a misconfigured value
+  (say 5) would silently take the identity remap instead of failing. Inert today: only 1 or 256 ever reach
+  the ctor, and no release build exists. Promote to a runtime `throw` if an `NDEBUG` DPI build ever lands.
 - **`+sam_config` unconditional.** Run recipes always pass it; a topology YAML lacking `address_map` would
   assert in `load_sam_table`. All 6 current YAMLs carry the block. A clearer error string is nice-to-have.
 - ~~`make build-cmodel` ignores `local.mk` BUILD_ROOT~~ **FIXED** (`0981828`): `CMODEL_BUILD` changed from
