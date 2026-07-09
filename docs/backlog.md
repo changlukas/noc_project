@@ -27,9 +27,9 @@ smoke clean, generator pytest 16/16.
   null-deref instead. ctest/co-sim build with asserts on; only matters if a release DPI lib is produced.
 - **`+sam_config` unconditional.** Run recipes always pass it; a topology YAML lacking `address_map` would
   assert in `load_sam_table`. All 6 current YAMLs carry the block. A clearer error string is nice-to-have.
-- **`make build-cmodel` ignores `local.mk` BUILD_ROOT** (`Makefile:16` `:=` evaluated before `-include
-  local.mk :79`) → targets stale `build/cmodel`. Pre-existing, unrelated to SAM. One-line fix. WSL builds
-  use `cmake --build $HOME/noc_build/cmodel` directly to work around it.
+- ~~`make build-cmodel` ignores `local.mk` BUILD_ROOT~~ **FIXED** (`0981828`): `CMODEL_BUILD` changed from
+  `:=` to `=` (deferred) so the `local.mk` BUILD_ROOT override (`$(HOME)/noc_build` on WSL) applies.
+  `make build` / `make test` now target `$HOME/noc_build/cmodel` correctly; no cmake workaround needed.
 
 ## Done — checked-traffic-benchmark (Stages 1-5 complete, merged + pushed to `main` 2026-07-07)
 
