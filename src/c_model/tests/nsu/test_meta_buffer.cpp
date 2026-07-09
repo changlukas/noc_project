@@ -75,3 +75,19 @@ TEST(MetaBuffer, SnapshotOverDepthAsserts) {
     mb.allocate_write(0x01, {0, 0, 0});
     EXPECT_DEATH(mb.allocate_write(0x01, {0, 0, 0}), ".*");
 }
+
+using ni::cmodel::nsu::remap_downstream_id;
+
+TEST(RemapDownstreamId, CollapsesToAllOnesWhenSingleUniqueId) {
+    SCENARIO("remap_downstream_id: max_unique_ids=1 maps every upstream id to 0xFF");
+    EXPECT_EQ(remap_downstream_id(0x00, 1), 0xFF);
+    EXPECT_EQ(remap_downstream_id(0x05, 1), 0xFF);
+    EXPECT_EQ(remap_downstream_id(0xFF, 1), 0xFF);
+}
+
+TEST(RemapDownstreamId, IdentityWhenFullIdSpace) {
+    SCENARIO("remap_downstream_id: max_unique_ids=AXI_ID_SPACE passes the id through");
+    EXPECT_EQ(remap_downstream_id(0x00, ni::cmodel::axi::AXI_ID_SPACE), 0x00);
+    EXPECT_EQ(remap_downstream_id(0x05, ni::cmodel::axi::AXI_ID_SPACE), 0x05);
+    EXPECT_EQ(remap_downstream_id(0xFF, ni::cmodel::axi::AXI_ID_SPACE), 0xFF);
+}

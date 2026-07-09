@@ -16,6 +16,17 @@ struct MetaEntry {
     uint8_t rob_idx;
 };
 
+// Downstream AXI ID presented to the subordinate, from the manager's upstream ID.
+// Ported from FlooNoC floo_meta_buffer.sv:89-91 (collapse to '1) and :138-139
+// (offset by MaxAtomicTxns, which is 0 here because AtopSupport is off).
+//
+// The remap is a function of upstream_id ALONE. Feeding it src_id would let two
+// sources' R bursts with the same restored rid be interleaved by the subordinate,
+// which would contend nsu::VcArbiter::r_burst_vc_. See the design spec.
+inline uint8_t remap_downstream_id(uint8_t upstream_id, std::size_t max_unique_ids) {
+    return max_unique_ids == 1 ? static_cast<uint8_t>(axi::AXI_ID_SPACE - 1) : upstream_id;
+}
+
 // Per-AXI-ID FIFO of {src_id, rob_req, rob_idx} entries allocated at AW/AR
 // flit ingress. Looked up at B/R flit egress via peek+commit pattern.
 //
