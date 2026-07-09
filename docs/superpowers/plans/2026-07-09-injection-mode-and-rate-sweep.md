@@ -768,7 +768,9 @@ mean_latency is sample-weighted; the unweighted average it used was wrong."
 
 **Interfaces:**
 - Consumes: `output/*/result.csv` (Task 6).
-- Produces: `sim/tools/injection_sweep.csv`, a printed table, and `injection_sweep.png` when matplotlib is present.
+- Produces: `sim/tools/injection_sweep.csv`, a printed table, and `injection_sweep.png` (`--dark` yields `injection_sweep_dark.png`) when matplotlib is present.
+
+The script needs `import sys` for `--dark`; it is already imported for the `sys.exit` calls.
 
 - [ ] **Step 1: Write the plot script**
 
@@ -805,7 +807,8 @@ def load(pattern):
 
 
 def main():
-    pattern = sys.argv[1] if len(sys.argv) > 1 else "uniform_random"
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    pattern = args[0] if args else "uniform_random"
     rows = load(pattern)
 
     with _MERGED.open("w", newline="") as f:
@@ -846,22 +849,62 @@ def main():
         print("(matplotlib absent; the table above is the deliverable)")
         return
 
+    dark = "--dark" in sys.argv
+    surface, ink = ("#1a1a19", "#ffffff") if dark else ("#fcfcfb", "#0b0b0b")
+    # Ordinal ramp, one blue hue, light->dark. vc1..vc8 in fixed order, never cycled.
+    # Validated with the dataviz skill's validate_palette.js --ordinal against both
+    # surfaces: monotone lightness, adjacent dL >= 0.06, single hue, and the step
+    # nearest the surface clears 2:1. Dark is a separate selection, not a flip:
+    # on a dark surface the brighter step is the prominent one.
+    ramp = (["#184f95", "#2a78d6", "#6da7ec", "#b7d3f6"] if dark
+            else ["#86b6ef", "#5598e7", "#2a78d6", "#104281"])
+
+    # rcParams follow the plot-from-data line_training_curve reference
+    # (github.com/Trae1ounG/paper-plot-skills). Parameter values only; that repo
+    # ships no licence, so no code is copied from it.
+    plt.rcParams.update({
+        "font.family": "sans-serif",
+        "font.sans-serif": ["DejaVu Sans", "Arial", "Helvetica"],
+        "text.usetex": False,
+        "axes.labelsize": 12,
+        "axes.labelweight": "bold",
+        "figure.facecolor": surface,
+        "axes.facecolor": surface,
+        "text.color": ink,
+        "axes.labelcolor": ink,
+        "xtick.color": ink,
+        "ytick.color": ink,
+    })
+
+    # Two charts, never two y-scales: throughput and latency differ by orders of
+    # magnitude, and a dual axis is the single most common charting error.
     fig, (ax_bw, ax_lat) = plt.subplots(1, 2, figsize=(11, 4))
-    for vc in sorted(by_vc):
+    for color, vc in zip(ramp, sorted(by_vc)):
         xs = [p[0] for p in by_vc[vc]]
-        ax_bw.plot(xs, [p[1] for p in by_vc[vc]], marker="o", label=f"vc{vc}")
-        ax_lat.plot(xs, [p[2] for p in by_vc[vc]], marker="o", label=f"vc{vc}")
-    caption = (f"{pattern}, max_unique_ids={rows[0]['max_unique_ids']}, "
-               f"max_outstanding={rows[0]['max_outstanding']}")
+        ax_bw.plot(xs, [p[1] for p in by_vc[vc]], color=color, lw=2, marker="o", ms=4,
+                   label=f"vc{vc}")
+        ax_lat.plot(xs, [p[2] for p in by_vc[vc]], color=color, lw=2, marker="o", ms=4,
+                    label=f"vc{vc}")
+
     ax_bw.set(xlabel="offered injection rate", ylabel="accepted throughput (bits/cycle)")
     ax_lat.set(xlabel="offered injection rate", ylabel="mean latency (cycles)")
     for ax in (ax_bw, ax_lat):
-        ax.legend()
-        ax.grid(alpha=0.3)
-    fig.suptitle(caption)
+        for sp in ax.spines.values():
+            sp.set_visible(True)
+            sp.set_linewidth(1.0)
+            sp.set_color(ink)
+        ax.tick_params(direction="out", length=4, width=0.8)
+        ax.grid(False)
+        # Four series, so identity never rests on colour alone: a legend AND a
+        # direct label at each line end.
+        ax.legend(loc="lower right", facecolor=surface, edgecolor="0.6", labelcolor=ink)
+
+    fig.suptitle(f"{pattern}, max_unique_ids={rows[0]['max_unique_ids']}, "
+                 f"max_outstanding={rows[0]['max_outstanding']}", color=ink)
     fig.tight_layout()
-    out = pathlib.Path(__file__).resolve().parent / "injection_sweep.png"
-    fig.savefig(out, dpi=120)
+    out = pathlib.Path(__file__).resolve().parent / (
+        "injection_sweep_dark.png" if dark else "injection_sweep.png")
+    fig.savefig(out, dpi=300, facecolor=surface)
     print(f"wrote {out}")
 
 
@@ -870,6 +913,12 @@ if __name__ == "__main__":
 ```
 
 The caption carries `max_unique_ids` and `max_outstanding` because both bound the result. The mixed-settings warning exists because `output/` accumulates across runs and a stale row would silently corrupt the curve.
+
+Three notes on the chart itself:
+
+- **Two subplots, not two y-scales.** Throughput and latency differ by orders of magnitude. A dual axis is the most common charting error and is never correct here.
+- **The four series are ordered, not categorical.** `vc1 < vc2 < vc4 < vc8` is a magnitude, so the palette is a single-hue ordinal ramp, light to dark. That is what makes "more VCs push the knee right" legible at a glance.
+- **The hover layer does not apply.** That rule governs HTML and SVG charts. This is a static PNG for a deck.
 
 - [ ] **Step 2: Add the sweep target to the root `Makefile`**
 
@@ -1006,21 +1055,15 @@ Expected: 36 runs, then the merged table and the PNG. `MAX_OUTSTANDING=32` is th
 
 The throughput curve must show a knee. A flat line at every VC count means VC count changes nothing, which Step 5 should already have caught. Do not publish a flat curve as a VC comparison.
 
-- [ ] **Step 7: Run the diagnostic reference line**
-
-Only the two extreme VC counts, only to bound the headline figure from above.
+- [ ] **Step 7: Render the dark variant**
 
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make sim-injection-sweep PATTERN=uniform_random MAX_OUTSTANDING=512 SWEEP_VCS="1 8" > /tmp/sweep_ideal.log 2>&1; echo "rc=$?"; tail -12 /tmp/sweep_ideal.log'
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && python3 sim/tools/plot_injection_sweep.py uniform_random --dark && ls -la sim/tools/injection_sweep*.png'
 ```
 
-`plot_injection_sweep.py` will warn that the rows mix NSU settings, because `output/` now holds both arms. That warning is doing its job. Move the 512 rows aside before replotting the headline:
+Expected: both PNGs exist. Open them. The validator checks colour, not layout — look for label collisions and overflow before calling this done.
 
-```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && mkdir -p sim/verilator/output_ideal && for d in sim/verilator/output/continuous_*; do grep -q ",512," $d/result.csv 2>/dev/null && mv $d sim/verilator/output_ideal/; done; python3 sim/tools/plot_injection_sweep.py uniform_random'
-```
-
-Expected: the headline table replots with no warning, and `output_ideal/` holds the reference rows.
+Note what is **not** here: there is no `MAX_OUTSTANDING=512` sweep. The four numbers from Step 5 already say what the NI buffer costs. Spending eighteen more runs to draw that as a curve nobody will publish would buy nothing. Every figure in this round is at the design point, 32.
 
 - [ ] **Step 8: Update the docs**
 
@@ -1079,8 +1122,9 @@ Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected
 | `plot_saturation.py` replaced | 7 |
 | fault injection first | 8 |
 | headline at the design point (`MAX_OUTSTANDING=32`) | 8 |
-| diagnostic reference line (`=512`, ideal sink) | 8 |
+| what the NI buffer costs, as four bring-up numbers | 8 |
 | `max_outstanding` documented as an NI buffer depth | 8 |
+| publication-quality figure, validated ordinal palette, light and dark | 7, 8 |
 | mode 0 unchanged on all four patterns | 5, 8 |
 | mode 1 on all four patterns, zero `Unexpected RData` | 8 |
 | `gen_test_patterns.py` untouched | all; enforced by Global Constraints |
@@ -1090,11 +1134,12 @@ Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected
 
 **Type consistency.** `emit_result_csv.py`'s CLI flags (`--injection-mode`, `--max-unique-ids`, ...) match the recipe invocation in Task 5 Step 2 exactly. The column order in Task 6 Step 1 matches the header in the Interfaces block. `plot_injection_sweep.py` reads `vc`, `injection_rate`, `accepted_bits_per_cycle`, `mean_latency`, `pattern`, `max_unique_ids`, `max_outstanding`, all of which `emit_result_csv.py` writes. Task 8 Step 5 cuts field 10 of the row, which is `accepted_bits_per_cycle`.
 
-**Four things the spec did not say, resolved here.**
+**Five things the spec did not say, resolved here.**
 
 1. `cat output/*/result.csv` would repeat the header on every file. `plot_injection_sweep.py` globs and merges with `csv.DictReader` instead. No `cat`.
 2. Two `initial` blocks in `user_node_endpoint.sv` need `injection_mode`, and SystemVerilog does not order them. Each reads it independently through `get_injection_mode()` rather than sharing a module-scope variable.
 3. `DIRECTED_TAG` names both modes now, so it becomes `SIM_TAG`. `RUN_TAG` was already taken by `run-tb-top`. A backslash continuation inside its `?=` value would fold the next line's leading whitespace into the tag, so `_CONTINUOUS := $(filter 1,$(INJECTION_MODE))` hoists the condition and the assignment stays on one line.
 4. `STIM_ROOT` gains `_n$(INJECTION_COUNT)`. Without it, switching between mode 0 (4 transactions) and mode 1 (200) would silently reuse the other mode's stimulus directory.
+5. The figure is publication-quality and rendered by `make`, not by hand. Its `rcParams` are the parameter values from the `plot-from-data` `line_training_curve` reference; no code is copied, because that repo ships no licence. Its palette is a single-hue ordinal ramp because `vc1 < vc2 < vc4 < vc8` is a magnitude, not a set of categories, and both the light and dark ramps were checked with the `dataviz` skill's `validate_palette.js --ordinal` rather than chosen by eye. Throughput and latency get one subplot each: a dual y-axis would be the most common charting error, not a shortcut.
 
 **A note on the two commits that span tasks.** Task 5 stages but does not commit, because the recipe it writes calls `emit_result_csv.py`, which Task 6 creates. Committing Task 5 alone would leave mode 1 broken. The pair lands together at Task 6 Step 6. Every other task commits on its own.
