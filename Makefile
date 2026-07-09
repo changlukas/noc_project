@@ -180,6 +180,15 @@ _TOPO   := $(TB:tb_%=%)
 _CLASS  := $(if $(filter constrained_random,$(PATTERN)),constrained_random,directed)
 _SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$RANDOM$$RANDOM'))
 
+# Forwarded only when set, so sim/verilator/Makefile's own defaults apply otherwise.
+# INJECTION_COUNT's default depends on INJECTION_MODE and is computed there.
+_INJ_ARGS := \
+    $(if $(INJECTION_MODE),INJECTION_MODE=$(INJECTION_MODE)) \
+    $(if $(INJECTION_RATE),INJECTION_RATE=$(INJECTION_RATE)) \
+    $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT)) \
+    $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
+    $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING))
+
 .PHONY: sim
 sim:
 	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) class=$(_CLASS) SEED=$(_SEED)"
@@ -188,7 +197,7 @@ ifeq ($(_CLASS),constrained_random)
 	    SEED=$(_SEED) $(if $(NUM_READS),NUM_READS=$(NUM_READS)) $(if $(NUM_WRITES),NUM_WRITES=$(NUM_WRITES))
 else
 	$(MAKE) -C sim/verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
-	    PATTERN=$(PATTERN) SEED=$(_SEED) $(if $(TXN),TXNS_PER_NODE=$(TXN)) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT))
+	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT))
 endif
 
 # --- clean ---

@@ -191,14 +191,30 @@ run-tb-top: $(TBTOP_EXE)
 	$(PYTHON3) perf_cli_summary.py output/$(RUN_TAG)/perf.json || true; \
 	exit $$rc
 
-# Directed data-integrity run: emit file_master stimulus for one pattern, run the
-# TB_DIRECTED binary, gate on zero axi_scoreboard mismatch $warning + non-vacuous PASS.
-PATTERN        ?= neighbor
-TXNS_PER_NODE  ?= 4
-HOTSPOT        ?= 5
-STIM_ROOT      ?= $(COSIM_ROOT)/test_patterns/directed_$(TOPOLOGY)_$(PATTERN)
-DIRECTED_TAG   ?= directed_$(TOPOLOGY)_$(PATTERN)_s$(SEED)
+# One directed run recipe, two injection modes.
+#   INJECTION_MODE=0 (default): two phases, writes drain before reads, scoreboard gates.
+#   INJECTION_MODE=1: one phase, reads and writes interleave, paced per cycle by
+#     INJECTION_RATE. The scoreboard's write-before-read precondition fails, so the
+#     testbench disarms it and the axi_bw_monitor gates instead.
+# INJECTION_COUNT bounds the run. Past saturation the queues never empty, and
+# wait_b/wait_r would not terminate without it (booksim solves the same problem
+# with sim_type=throughput, which skips its drain).
+PATTERN         ?= neighbor
+INJECTION_MODE  ?= 0
+INJECTION_RATE  ?= 1.0
+INJECTION_COUNT ?= $(if $(filter 1,$(INJECTION_MODE)),200,4)
+MAX_UNIQUE_IDS  ?= 1
+MAX_OUTSTANDING ?= 32
+HOTSPOT         ?= 5
+
+# _CONTINUOUS is non-empty exactly when INJECTION_MODE is 1. Kept on one line:
+# a backslash continuation inside a `?=` value folds the leading whitespace of
+# the next line into the value.
+_CONTINUOUS    := $(filter 1,$(INJECTION_MODE))
+STIM_ROOT      ?= $(COSIM_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(PATTERN)_n$(INJECTION_COUNT)
+SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(TOPOLOGY)_$(PATTERN)_r$(INJECTION_RATE)_s$(SEED),directed_$(TOPOLOGY)_$(PATTERN)_s$(SEED))
 GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
+EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py
 _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),--hotspot $(HOTSPOT),)
 
 .PHONY: run-directed
@@ -208,88 +224,45 @@ run-directed: $(TBTOP_EXE)
 	# parse-time $(error): OBJ_DIR/TBTOP_EXE are := fixed at parse, so a target-
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
 	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-directed requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
-	@mkdir -p output/$(DIRECTED_TAG)
+	@mkdir -p output/$(SIM_TAG)
 	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
-	    --transactions-per-node $(TXNS_PER_NODE) --size 5 --len 0 \
+	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len 0 \
 	    --memory-size 0x40000 --seed $(SEED) $(_HOTSPOT_ARGS)
-	@echo "running $(DIRECTED_TAG) (txns/node=$(TXNS_PER_NODE) pattern=$(PATTERN))"
+	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \
-	    "+num_reads=$(TXNS_PER_NODE)" "+num_writes=$(TXNS_PER_NODE)" \
+	    "+num_reads=$(INJECTION_COUNT)" "+num_writes=$(INJECTION_COUNT)" \
+	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
+	    "+max_unique_ids=$(MAX_UNIQUE_IDS)" "+max_outstanding=$(MAX_OUTSTANDING)" \
 	    "+verilator+seed+$(SEED)" \
 	    "+sam_config=$(TB_TOP_TOPO)" \
-	    "+perf_out=output/$(DIRECTED_TAG)/perf.json" \
-	    "+perf_scenario=$(DIRECTED_TAG)" \
-	    > output/$(DIRECTED_TAG)/run.log 2>&1; \
+	    "+perf_out=output/$(SIM_TAG)/perf.json" \
+	    "+perf_scenario=$(SIM_TAG)" \
+	    > output/$(SIM_TAG)/run.log 2>&1; \
 	rc=$$?; \
-	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(DIRECTED_TAG)/run.log; tail -4 output/$(DIRECTED_TAG)/run.log; \
+	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(SIM_TAG)/run.log; tail -4 output/$(SIM_TAG)/run.log; \
 	if grep -qE 'Unexpected RData|Unexpected W last|Not supported (AW|AR) burst|Atomic transfers not supported|%Error' \
-	        output/$(DIRECTED_TAG)/run.log; then \
-	    echo "DIRECTED FAIL: scoreboard mismatch/assertion/malformed stimulus"; exit 1; \
-	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(DIRECTED_TAG)/run.log; then \
+	        output/$(SIM_TAG)/run.log; then \
+	    echo "RUN FAIL: scoreboard mismatch/assertion/malformed stimulus"; exit 1; \
+	fi; \
+	if [ "$(INJECTION_MODE)" = "1" ]; then \
+	    if [ $$rc -ne 0 ]; then echo "CONTINUOUS FAIL (rc=$$rc)"; exit 1; fi; \
+	    if ! grep -qiE '\[Monitor .*\]\[(Read|Write)\].*BW:\s*[1-9]' output/$(SIM_TAG)/run.log; then \
+	        echo "CONTINUOUS FAIL: no non-zero bandwidth reported"; exit 1; \
+	    fi; \
+	    $(PYTHON3) $(EMIT_CSV) --log output/$(SIM_TAG)/run.log \
+	        --out output/$(SIM_TAG)/result.csv \
+	        --topology $(TOPOLOGY) --pattern $(PATTERN) \
+	        --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
+	        --injection-count $(INJECTION_COUNT) --seed $(SEED) \
+	        --max-unique-ids $(MAX_UNIQUE_IDS) --max-outstanding $(MAX_OUTSTANDING); \
+	    echo "CONTINUOUS PASS: $(SIM_TAG)"; \
+	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(SIM_TAG)/run.log; then \
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
 	else \
-	    echo "DIRECTED PASS: $(DIRECTED_TAG) scoreboard clean, non-vacuous"; \
+	    echo "DIRECTED PASS: $(SIM_TAG) scoreboard clean, non-vacuous"; \
 	fi
-
-# Saturation sweep: one operating point at INJ_RATIO on the directed build.
-# Traffic mode (user_node_endpoint +traffic_inj_ratio) injects continuous
-# interleaved traffic instead of the two-phase directed run, so the in-endpoint
-# axi_scoreboard (which assumes write-then-readback) prints spurious warnings
-# here -- this recipe does NOT gate on them. Gate is: ran to completion + the
-# axi_bw_monitor reported non-zero bandwidth. Uniform_random pattern; run length
-# is set by TRAFFIC_TXNS (fork...join drains the stimulus, so more = longer,
-# steadier measurement).
-INJ_RATIO     ?= 1.0
-TRAFFIC_TXNS  ?= 200
-IDS_PER_TILE  ?= 1
-TRAFFIC_TAG   ?= traffic_$(TOPOLOGY)_r$(INJ_RATIO)_id$(IDS_PER_TILE)
-TRAFFIC_STIM  := $(COSIM_ROOT)/test_patterns/traffic_$(TOPOLOGY)_id$(IDS_PER_TILE)
-
-.PHONY: run-traffic
-run-traffic: $(TBTOP_EXE)
-	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-traffic requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
-	@mkdir -p output/$(TRAFFIC_TAG)
-	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
-	    --out $(TRAFFIC_STIM) --pattern uniform_random \
-	    --transactions-per-node $(TRAFFIC_TXNS) --ids-per-tile $(IDS_PER_TILE) \
-	    --size 5 --len 0 --memory-size 0x40000 --seed $(SEED)
-	@echo "running $(TRAFFIC_TAG) (txns/node=$(TRAFFIC_TXNS) inj_ratio=$(INJ_RATIO))"
-	$(TBTOP_EXE) \
-	    "+stim_dir=$(TRAFFIC_STIM)" \
-	    "+traffic_inj_ratio=$(INJ_RATIO)" \
-	    "+sam_config=$(TB_TOP_TOPO)" \
-	    "+perf_out=output/$(TRAFFIC_TAG)/perf.json" \
-	    "+perf_scenario=$(TRAFFIC_TAG)" \
-	    > output/$(TRAFFIC_TAG)/run.log 2>&1; \
-	rc=$$?; \
-	echo "--- run.log (tail) ---"; tail -20 output/$(TRAFFIC_TAG)/run.log; \
-	echo "--- bw_monitor ---"; grep -iE '\[Monitor .*\]\[(Read|Write)\]' output/$(TRAFFIC_TAG)/run.log; \
-	if [ $$rc -ne 0 ]; then echo "run-traffic FAIL (rc=$$rc)"; exit 1; fi; \
-	if grep -qE '%Error' output/$(TRAFFIC_TAG)/run.log; then \
-	    echo "run-traffic FAIL: %Error (fabric/protocol assertion during stress)"; exit 1; \
-	fi; \
-	if grep -qiE '\[Monitor .*\]\[(Read|Write)\].*BW:\s*[1-9]' output/$(TRAFFIC_TAG)/run.log; then \
-	    echo "run-traffic OK: non-zero bandwidth"; \
-	else \
-	    echo "run-traffic FAIL: no non-zero bandwidth reported"; exit 1; \
-	fi
-
-# VC-value saturation sweep: run-traffic on vc1/2/4/8 at max injected concurrency,
-# then collect accepted bandwidth into a CSV + table. The operating point
-# (IDS_PER_TILE=16, INJ_RATIO=1.0, and the four vc topologies) is fixed to match
-# collect_saturation.py, which parses the per-config run logs. Heavy: builds each
-# VC config (Verilator) in turn; run on WSL. Each sub-make derives its own
-# FILELIST_F from TOPOLOGY, so do not pass a fixed FILELIST_F.
-.PHONY: sim-saturation
-sim-saturation:
-	@for t in mesh_4x4_vc1 mesh_4x4_vc2 mesh_4x4_vc4 mesh_4x4_vc8; do \
-	    echo ">>> saturation: $$t"; \
-	    $(MAKE) run-traffic RUN_CLASS=directed TOPOLOGY=$$t IDS_PER_TILE=16 INJ_RATIO=1.0 || exit 1; \
-	done
-	$(PYTHON3) $(COSIM_ROOT)/tools/collect_saturation.py
-	$(PYTHON3) $(COSIM_ROOT)/tools/plot_saturation.py
 
 # Constrained-random run: rand_master (WRAP/EXC) + tb-level axi_reorder_compare.
 # Gate on zero reorder_compare $error (%Error) + non-vacuous PASS (cmp_eos drain is
