@@ -84,29 +84,40 @@ TEST(RemapDownstreamId, IdentityWhenFullIdSpace) {
 
 TEST(MetaBuffer, SharedPoolFullReportsInsteadOfAborting) {
     SCENARIO(
-        "MetaBuffer: the write pool is shared across ids. 16 sources on one collapsed "
-        "downstream id fill it to max_outstanding, write_full() reports, read pool is "
-        "unaffected, and a commit frees one slot.");
+        "MetaBuffer: the write pool is shared across ids, not bounded per-id. Allocations "
+        "spread across 3 downstream ids (bucket sizes 2/1/1, none reaching max_outstanding) "
+        "still trip write_full() on the global count; read pool is unaffected; FIFO order "
+        "within a bucket and commit_write's freed slot both hold.");
     constexpr std::size_t kMaxOutstanding = 4;
     MetaBuffer mb(kMaxOutstanding);
-    const uint8_t down = 0xFF;  // remap_downstream_id(any, 1)
+    constexpr uint8_t kDownA = 0x01;  // bucket ends up with 2 entries
+    constexpr uint8_t kDownB = 0x02;  // bucket ends up with 1 entry
+    constexpr uint8_t kDownC = 0x03;  // bucket ends up with 1 entry
 
-    for (uint8_t src = 0; src < kMaxOutstanding; ++src) {
-        EXPECT_FALSE(mb.write_full());
-        mb.allocate_write(down, {src, /*upstream_id=*/0x05, 0, src});
-    }
+    EXPECT_FALSE(mb.write_full());
+    mb.allocate_write(kDownA, {/*src_id=*/0, /*upstream_id=*/0x05, 0, 0});
+    EXPECT_FALSE(mb.write_full());
+    mb.allocate_write(kDownA, {/*src_id=*/1, /*upstream_id=*/0x05, 0, 1});
+    EXPECT_FALSE(mb.write_full());
+    mb.allocate_write(kDownB, {/*src_id=*/2, /*upstream_id=*/0x06, 0, 0});
+    EXPECT_FALSE(mb.write_full());
+    mb.allocate_write(kDownC, {/*src_id=*/3, /*upstream_id=*/0x07, 0, 0});
+
+    // Global count is now 4 == max_outstanding, but every single bucket is well
+    // under it (sizes 2, 1, 1) -- the only case where a shared pool and a
+    // per-id bound disagree.
     EXPECT_TRUE(mb.write_full());
 
     // The read pool is a separate pool.
     EXPECT_FALSE(mb.read_full());
 
-    // FIFO order survives: the first source out is the first source in.
-    auto e = mb.peek_write(down);
+    // FIFO order survives within a bucket: the first source in is the first out.
+    auto e = mb.peek_write(kDownA);
     ASSERT_TRUE(e.has_value());
     EXPECT_EQ(e->src_id, 0);
     EXPECT_EQ(e->upstream_id, 0x05);
 
-    mb.commit_write(down);
+    mb.commit_write(kDownA);
     EXPECT_FALSE(mb.write_full());
-    EXPECT_EQ(mb.peek_write(down)->src_id, 1);
+    EXPECT_EQ(mb.peek_write(kDownA)->src_id, 1);
 }
