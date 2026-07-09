@@ -506,14 +506,17 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
 using ni::cmodel::wrap::NsuInputs;
 using ni::cmodel::wrap::NsuOutputs;
 
-extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, int num_vc) {
+extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, int num_vc,
+                                                int max_unique_ids, int max_outstanding) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nsu_create: not initialized");
         return 0ull;
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, 0ull) {
         auto adapter = std::make_unique<NsuWrap>();
-        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc));
+        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc), kAxiQueueDepth,
+                      static_cast<std::size_t>(max_unique_ids),
+                      static_cast<std::size_t>(max_outstanding));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nsu), WrapType::Nsu, HandleState::Live,
             std::string(name),
