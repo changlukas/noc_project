@@ -975,13 +975,25 @@ Expected: four `DIRECTED PASS` and one `CR PASS`.
 
 - [ ] **Step 5: Bring-up — is the fabric the bottleneck?**
 
-The NSU meta buffer change cut NSU outstanding capacity from `per_id_depth(16) x distinct ids` to one shared pool of 32. Three other finite resources sit on the same path: the `AxiMasterPort` per-channel queue (16), the router per-VC input depth (4), and the router inject credit. Measure, do not assume.
+The NSU meta buffer change cut NSU outstanding capacity from `per_id_depth(16) x distinct ids` to one shared pool of `max_outstanding`. There is no code cap; 32 is FlooNoC's `MaxTxns` default, not a limit (`meta_buffer.hpp:48` only asserts it is positive).
+
+**Where the ceiling actually is.** RoB Enabled admits at most `ROB_CAPACITY = 1 << ROB_IDX_WIDTH = 32` outstanding transactions per NMU per direction (`rob.hpp:80`, `ni_flit_constants.h:234`), and the stimulus is `--len 0` so each occupies one slot. Sixteen NMUs therefore offer at most **512** concurrent writes to a single NSU under `hotspot`. Under `uniform_random` they spread, so the expected per-NSU share is `512 / 16 = 32` — **exactly the default pool depth**. The default is not merely near the binding point; it sits on it, and any burstiness pushes past it.
+
+So the comparison arm must be a value that cannot bind: `512`. A smaller arm such as `256` still binds under `hotspot` and would measure the NSU, not the fabric.
+
+Three other finite resources sit on the same path: the `AxiMasterPort` per-channel queue (16, `wrap_defaults.hpp:12`), the router per-VC input depth (4), and the router inject credit. Measure, do not assume.
 
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mo in 32 256; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=256 MAX_OUTSTANDING=$mo > /dev/null 2>&1; echo -n "mo=$mo vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc$${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mo in 32 512; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=256 MAX_OUTSTANDING=$mo > /dev/null 2>&1; echo -n "mo=$mo vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc$${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
 ```
 
-Read the four numbers. If `vc1` and `vc8` coincide at `MAX_OUTSTANDING=32` but separate at `256`, the NSU pool binds before the fabric and the headline figure must use the larger value. If they separate at both, the fabric already binds and 32 is fine.
+Read the four numbers:
+
+| observation | meaning | headline figure uses |
+|---|---|---|
+| `vc1` and `vc8` coincide at 32, separate at 512 | the NSU pool binds before the fabric | `MAX_OUTSTANDING=512` |
+| they separate at both | the fabric already binds | `MAX_OUTSTANDING=32` |
+| they coincide at both | something else binds. Suspect the `AxiMasterPort` queue (16) or the router credit. **Stop and report** | nothing yet |
 
 **Record which it was.** The figure caption depends on it, and the next reader will not rerun this.
 

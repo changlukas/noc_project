@@ -218,14 +218,24 @@ The previous injection-rate round turned on two bring-up findings, not on the sw
 `rand_slave` default `AX_MAX_WAIT=100` throttled responses to 1.2% utilisation, and a single AXI ID
 serialised injection. Budget for the same here.
 
-**Is the fabric the bottleneck?** Run `vc1` and `vc8` at `MAX_OUTSTANDING=32` and again at `256`. If the
-two curves coincide at 32 but separate at 256, the NSU pool binds before the fabric does and the
-headline figure must use a setting where the fabric binds. State the setting in the caption either way.
+**Is the fabric the bottleneck?** Run `vc1` and `vc8` at `MAX_OUTSTANDING=32` and again at `512`. If the
+two curves coincide at 32 but separate at 512, the NSU pool binds before the fabric does and the
+headline figure must use the larger value. State the setting in the caption either way.
 
-The NSU meta buffer change did cut NSU outstanding capacity. Before it, capacity was
-`per_id_depth(16) x distinct ids in use`, up to 256 at a hotspot NSU. After it, one shared pool of 32
-(`meta_buffer.hpp:52-56,70-74`; `wrap_defaults.hpp:20`). RoB Enabled admits up to 32 same-ID requests per
-NMU (`rob.hpp:80`), so sixteen NMUs can offer far more than one NSU now accepts.
+`max_outstanding` has no code cap. `MetaBuffer` asserts only that it is positive (`meta_buffer.hpp:48`).
+32 is FlooNoC's `MaxTxns` default, not a limit.
+
+**512 is the comparison arm because it is the ceiling.** RoB Enabled admits at most
+`ROB_CAPACITY = 1 << ROB_IDX_WIDTH = 32` outstanding transactions per NMU per direction (`rob.hpp:80`,
+`ni_flit_constants.h:234`), and the stimulus is single-beat (`--len 0`), so each occupies one slot.
+Sixteen NMUs therefore offer at most `16 x 32 = 512` concurrent writes to one NSU under `hotspot`. A pool
+of 512 cannot bind. A pool of 256 still can, and would measure the NSU rather than the fabric.
+
+Under `uniform_random` the offered load spreads, so the expected per-NSU share is `512 / 16 = 32` —
+**exactly the shipped default**. The default does not merely sit near the binding point; it sits on it,
+and any burstiness pushes past it. The NSU meta buffer change is what put it there: before, capacity was
+`per_id_depth(16) x distinct ids in use`, up to 256 at a hotspot NSU; after, one shared pool of 32
+(`meta_buffer.hpp:52-56,70-74`; `wrap_defaults.hpp:20`).
 
 **That is a hypothesis, not a conclusion.** Three other finite resources sit on the same path and any of
 them could bind first:
