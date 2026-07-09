@@ -15,9 +15,14 @@ constexpr std::size_t kAxiQueueDepth = 16;
 // and the standalone ChannelModel ctor depths.
 constexpr std::size_t kChannelModelDepth = 64;
 
-// MetaBuffer per-ID depth (port_params.meta_buffer_per_id_depth and
-// NsuConfig::meta_buffer_per_id_depth).
-constexpr std::size_t kMetaBufferPerIdDepth = 16;
+// MetaBuffer shared outstanding pool size, per direction
+// (port_params.meta_buffer_max_outstanding).
+constexpr std::size_t kMetaBufferMaxOutstanding = 32;
+
+// Distinct AXI IDs presented downstream (port_params.meta_buffer_max_unique_ids).
+// 1 matches FlooNoC's ChimneyDefaultCfg. Set to 256 to pass the manager's ID
+// through, which the VC throughput round requires.
+constexpr std::size_t kMetaBufferMaxUniqueIds = 1;
 
 // Wormhole + VC arbiter staging depth (wormhole_per_input_depth and
 // vc_arbiter_pending_depth).

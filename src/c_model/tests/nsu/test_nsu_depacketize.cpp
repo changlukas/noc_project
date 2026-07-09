@@ -55,7 +55,7 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
         "beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
+    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16, /*max_unique_ids*/ 256);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000,
                                                      /*src*/ 0x12, /*rob_req*/ 1, /*rob_idx*/ 3)));
     depkt.tick();
@@ -77,7 +77,7 @@ TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
         "(verifies awqos is not forced to 0)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
+    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16, /*max_unique_ids*/ 256);
     auto flit = make_aw_flit(0x05, 0x1000, /*src*/ 0x12, /*rob_req*/ 0, /*rob_idx*/ 0);
     flit.set_payload_field("AW", "awqos", 0xA);
     ASSERT_TRUE(noc.req_out().push_flit(flit));
@@ -93,7 +93,7 @@ TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
         "(verifies arqos is not forced to 0)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16);
+    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16, /*max_unique_ids*/ 256);
     auto flit = make_ar_flit(0x07, 0x2000, /*src*/ 0x12);
     flit.set_payload_field("AR", "arqos", 0xA);
     ASSERT_TRUE(noc.req_out().push_flit(flit));
@@ -107,7 +107,7 @@ TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
     SCENARIO("NSU Depacketize: AR flit allocates read-side meta into MetaBuffer + emits AR beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
+    Depacketize depkt(noc.req_in(), mb, 16, 16, 16, /*max_unique_ids*/ 256);
     ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x07, 0x2000, 0x12)));
     depkt.tick();
     EXPECT_TRUE(depkt.pop_ar().has_value());
@@ -121,7 +121,7 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
         "AW)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
+    Depacketize depkt(noc.req_in(), mb, 16, 16, 16, /*max_unique_ids*/ 256);
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFFFF, true)));
     depkt.tick();
     EXPECT_TRUE(depkt.pop_w().has_value());
@@ -134,7 +134,7 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
         "NSU Depacketize: interleaved AW/W/AR flits demux to per-channel queues by axi_ch header");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
+    Depacketize depkt(noc.req_in(), mb, 16, 16, 16, /*max_unique_ids*/ 256);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x01, 0x0)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFF, true)));
     ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x02, 0x1000)));
@@ -149,7 +149,7 @@ TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
         "NSU Depacketize: HoL W queue full holds pending W; AW behind blocked until W drained");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w cap*/ 1, /*ar*/ 16);
+    Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w cap*/ 1, /*ar*/ 16, /*max_unique_ids*/ 256);
     // Order: W, W, AW
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xAA, true)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xBB, true)));
@@ -176,7 +176,7 @@ TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
         "(one per tick per staged S1 contract)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, 16, 16, 16);
+    Depacketize depkt(noc.req_in(), mb, 16, 16, 16, /*max_unique_ids*/ 256);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(1, 0x0)));
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(2, 0x0)));
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(3, 0x0)));

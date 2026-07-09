@@ -66,7 +66,8 @@ class NsuWrap {
         cfg.port_params.depkt_aw_q_depth = queue_depth;
         cfg.port_params.depkt_w_q_depth = queue_depth;
         cfg.port_params.depkt_ar_q_depth = queue_depth;
-        cfg.port_params.meta_buffer_per_id_depth = kMetaBufferPerIdDepth;
+        cfg.port_params.meta_buffer_max_outstanding = kMetaBufferMaxOutstanding;
+        cfg.port_params.meta_buffer_max_unique_ids = kMetaBufferMaxUniqueIds;
         cfg.wormhole_per_input_depth = kArbiterFifoDepth;
         cfg.vc_arbiter_pending_depth = kArbiterFifoDepth;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));

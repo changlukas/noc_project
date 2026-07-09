@@ -169,6 +169,8 @@ TEST(NsuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
     cfg.num_vc = 4;
     cfg.write_rsp_vcs = {0, 1};
     cfg.read_rsp_vcs = {2, 3};
+    cfg.port_params.meta_buffer_max_outstanding = 32;
+    cfg.port_params.meta_buffer_max_unique_ids = 256;
     auto arb = make_vc_arbiter(cfg, noc.rsp_out());
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 1)));

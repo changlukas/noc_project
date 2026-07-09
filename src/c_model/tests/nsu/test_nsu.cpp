@@ -33,7 +33,8 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
     cfg.port_params.depkt_aw_q_depth = 16;
     cfg.port_params.depkt_w_q_depth = 16;
     cfg.port_params.depkt_ar_q_depth = 16;
-    cfg.port_params.meta_buffer_per_id_depth = 4;
+    cfg.port_params.meta_buffer_max_outstanding = 32;
+    cfg.port_params.meta_buffer_max_unique_ids = 256;
     Nsu nsu(cfg, channel.nsu_req_in(0), channel.nsu_rsp_out(0));
 
     EXPECT_EQ(&nsu.axi_master_port(), &nsu.axi_master_port())
@@ -82,7 +83,8 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     cfg.port_params.depkt_aw_q_depth = 16;
     cfg.port_params.depkt_w_q_depth = 16;
     cfg.port_params.depkt_ar_q_depth = 16;
-    cfg.port_params.meta_buffer_per_id_depth = 4;
+    cfg.port_params.meta_buffer_max_outstanding = 32;
+    cfg.port_params.meta_buffer_max_unique_ids = 256;
     NsuStandalone nsu(cfg);
 
     // Build an AW flit. NSU Depacketize allocates {src_id, rob_req,

@@ -22,8 +22,11 @@ struct PortParams {
     std::size_t depkt_aw_q_depth;
     std::size_t depkt_w_q_depth;
     std::size_t depkt_ar_q_depth;
-    // NSU MetaBuffer per-AXI-ID outstanding-request depth.
-    std::size_t meta_buffer_per_id_depth;
+    // NSU MetaBuffer shared outstanding pool size, per direction (write / read).
+    std::size_t meta_buffer_max_outstanding;
+    // Count of distinct AXI IDs the NSU presents downstream. 1 collapses every
+    // request onto the all-ones ID; AXI_ID_SPACE passes the manager's ID through.
+    std::size_t meta_buffer_max_unique_ids;
 };
 
 inline PortParams load_nsu_port_params(const std::string& path) {
@@ -45,7 +48,8 @@ inline PortParams load_nsu_port_params(const std::string& path) {
     p.depkt_aw_q_depth = d["aw_q_depth"].as<std::size_t>();
     p.depkt_w_q_depth = d["w_q_depth"].as<std::size_t>();
     p.depkt_ar_q_depth = d["ar_q_depth"].as<std::size_t>();
-    p.meta_buffer_per_id_depth = m["per_id_depth"].as<std::size_t>();
+    p.meta_buffer_max_outstanding = m["max_outstanding"].as<std::size_t>();
+    p.meta_buffer_max_unique_ids = m["max_unique_ids"].as<std::size_t>();
     return p;
 }
 

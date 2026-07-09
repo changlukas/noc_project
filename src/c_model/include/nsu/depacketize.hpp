@@ -29,12 +29,21 @@ namespace ni::cmodel::nsu {
 class Depacketize : public RequestDepacketizer {
   public:
     Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t aw_q_depth,
-                std::size_t w_q_depth, std::size_t ar_q_depth)
+                std::size_t w_q_depth, std::size_t ar_q_depth, std::size_t max_unique_ids)
         : req_in_(req_in),
           meta_(meta),
           aw_q_depth_(aw_q_depth),
           w_q_depth_(w_q_depth),
-          ar_q_depth_(ar_q_depth) {}
+          ar_q_depth_(ar_q_depth),
+          max_unique_ids_(max_unique_ids) {
+        // Every path that configures an NSU funnels through here: the YAML loader,
+        // the co-sim wrap defaults, and the direct NsuConfig test fixtures. Upstream
+        // and downstream AXI ID widths are both 8, so any value above 1 degenerates to
+        // the identity remap and an intermediate value would silently do nothing. A
+        // default-constructed NsuConfig leaves this 0, which would also read as identity.
+        assert((max_unique_ids == 1 || max_unique_ids == axi::AXI_ID_SPACE) &&
+               "max_unique_ids must be 1 or AXI_ID_SPACE");
+    }
 
     void tick();
 
@@ -65,6 +74,7 @@ class Depacketize : public RequestDepacketizer {
     // Unused: old per-channel queues replaced by S1 PipelineStage registers.
     // Depths are kept as members to preserve backpressure checks if needed.
     std::size_t aw_q_depth_, w_q_depth_, ar_q_depth_;
+    std::size_t max_unique_ids_;
     std::optional<Flit> pending_;
 
     // S1 stage registers: one per AXI channel (AW/W/AR). Depacketize::tick()
