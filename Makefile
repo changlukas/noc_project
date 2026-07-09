@@ -13,7 +13,10 @@
 
 CMODEL_DIR      := src/c_model
 BUILD_ROOT      := build
-CMODEL_BUILD    := $(BUILD_ROOT)/cmodel
+# Recursive (=) not immediate (:=): BUILD_ROOT can be overridden by `-include
+# local.mk` below (e.g. $(HOME)/noc_build on WSL), and CMODEL_BUILD must pick up
+# that override rather than freezing the pre-include `build` value.
+CMODEL_BUILD     = $(BUILD_ROOT)/cmodel
 COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
