@@ -35,60 +35,53 @@ smoke clean, generator pytest 16/16.
   `:=` to `=` (deferred) so the `local.mk` BUILD_ROOT override (`$(HOME)/noc_build` on WSL) applies.
   `make build` / `make test` now target `$HOME/noc_build/cmodel` correctly; no cmake workaround needed.
 
-## Next round: injection rate in `make sim`, VC comparison figures (planned 2026-07-09)
+## Done -- injection-mode + rate sweep, VC comparison figures (2026-07-09, branch `feat/injection-mode-sweep`)
 
-Add traffic mode to the root `make sim` launcher, run one VC sweep on the RoB Enabled 4x4 topologies,
-and produce a CSV plus two figures for the same traffic pattern: measured throughput, and per-tile hop
-count computed from the pattern.
+Spec `docs/superpowers/specs/2026-07-09-injection-mode-and-rate-sweep-design.md`, plan
+`docs/superpowers/plans/2026-07-09-injection-mode-and-rate-sweep.md`. Folded continuous injection into
+`make sim`, retired the `run-traffic` / `sim-saturation` / `collect_saturation.py` / `plot_saturation.py`
+path, and produced the VC comparison figure at the shipped design point.
 
-**Decisions made**
+**Interface:** `make sim TB=<topo> PATTERN=<p> [INJECTION_MODE=1 INJECTION_RATE=<r> INJECTION_COUNT=<n>]
+[MAX_UNIQUE_IDS=<n> MAX_OUTSTANDING=<n>] [SEED=<n>]`. `INJECTION_MODE=0` (default) is the directed/checked
+run; `=1` is continuous injection for a throughput measurement, one `continuous_*/result.csv` per run.
+`INJECTION_COUNT` default is mode-dependent (`4` in mode 0, `200` in mode 1). `make sim-injection-sweep
+PATTERN=<p>` loops `vc1/vc2/vc4/vc8` at nine rates; `sim/tools/plot_injection_sweep.py <p>` renders the
+throughput + latency figure (light `injection_sweep.png`, dark `injection_sweep_dark.png`, dpi=300).
 
-- Run the `_rob` topologies. RoB Enabled.
-- One AXI ID per tile, matching one manager per tile. The AXI ID identifies the manager. Do not use the
-  generated AXI ID count as an outstanding-depth knob, and drop `--ids-per-tile` from this path. When a
-  tile later holds several managers, the ID count follows the manager count.
-- Traffic mode is a performance test, not a data-integrity test. Directed runs keep the readback scoreboard.
-- First figure: one pattern across `vc1/vc2/vc4/vc8`. No pattern x VC matrix this round.
+**Sweep result** (`uniform_random`, `_rob`, `max_unique_ids=1`, `max_outstanding=32`, saturation at
+rate 1.0, seed 99425787): vc1=1240, vc2=1642, vc4=2071, vc8=2179 bits/cyc. Clear knee at rate ~0.2-0.4,
+then plateau. VC value vc1->vc8 = +75.7% at saturation.
 
-**Facts that prevent a wasted session**
+**Bring-up numbers** (all eight, `uniform_random`, `_rob`, mode 1, rate 1.0, seed 1; fault injection
+confirmed both knobs wired: `MAX_OUTSTANDING=1`->1105.1 vs `=32`->1227.7 differ; illegal
+`MAX_UNIQUE_IDS=5` aborts at `depacketize.hpp:50`, rc=2):
 
-- RoB Enabled admits several same-ID requests until the ROB entries fill (32 read, 32 write,
-  `rob.hpp:80`). The AXI port queue depth also bounds acceptance (`axi_slave_port.hpp:119-124`). RoB
-  Disabled allows one outstanding request per ID (`rob.hpp:198,236`), which would flatten the sweep.
-- `_rob` name plumbing already works. `make sim TB=tb_mesh_4x4_vc1_rob PATTERN=neighbor SEED=12345`
-  passes (log: `sim/verilator/output/directed_mesh_4x4_vc1_rob_neighbor_s12345/run.log`).
-- The recorded `sim-saturation` series (`vc1=1248 ... vc4=1916 bits/cyc`) used RoB Disabled with
-  `IDS_PER_TILE=16`. The new numbers will not compare against it. More VCs reduce fabric congestion.
-  They do not bypass AXI same-ID ordering, which the ROB still enforces on retirement (`rob.hpp:300-305`).
-- AXI IDs come from the generated `axi_file_master` stimulus files. SV cannot override them after
-  `load_files()`.
-- `run-traffic` hardcodes `--pattern uniform_random` (`sim/verilator/Makefile:255`), its tag omits the
-  pattern (`:247-248`), and `collect_saturation.py` expects the old hardcoded log path (`:26-28`). Fix
-  the naming before adding a second pattern.
-- `neighbor`, `transpose`, and single-hotspot give one destination per tile. `uniform_random` and
-  multi-hotspot sample a destination per transaction, so report per-tile mean hop count with the seed
-  and sample count.
-- The recorded `sim-saturation` series (`vc1=1248 ... vc8=1935 bits/cyc`) is INVALID. It predates the NSU
-  meta buffer change, ran RoB Disabled with `IDS_PER_TILE=16`, and its configuration was never recorded
-  with it. State every knob in the figure caption.
-- **`max_unique_ids` is not a throughput knob.** Surveyed 2026-07-09 against the FlooNoC source and our
-  own co-sim; both refute the earlier claim that collapsing IDs moves the bottleneck to the subordinate.
-  FlooNoC says the serialization "should not cause any big performance problems"
-  (`docs/floonoc/chimneys.md:50`), and our co-sim subordinate is a zero-wait `MAPPED` pulp
-  `axi_rand_slave` whose uniform latency makes in-order same-ID return free. It constrains **ordering**
-  and dictates whether the NI's metadata store is a FIFO or an `id_queue`. It is unrelated to the RoB,
-  which sits on the opposite side of the NI. Full note: `docs/architecture.md`, "What `max_unique_ids`
-  is, and is not". **Do not fault-inject it with throughput** — pass an illegal value (5) and require the
-  `Depacketize` ctor assert to fire.
-- Whether `max_unique_ids` shifts a saturation curve is unmeasured. The injection-rate round runs `1` vs
-  `256` at `rate=1.0` on `vc1`/`vc8` and reports the delta rather than assuming one.
+| axis | value | vc1 | vc8 |
+|---|---|---|---|
+| `MAX_OUTSTANDING` (`MAX_UNIQUE_IDS=256`) | 32 (shipped) | 1227.7 | 2127.8 |
+| | 512 (ideal sink) | 1227.7 | 2127.8 |
+| `MAX_UNIQUE_IDS` (`MAX_OUTSTANDING=32`) | 1 (shipped) | 1227.7 | 2127.8 |
+| | 256 | 1227.7 | 2127.8 |
 
-**Open**
+- **VC value at the design point** `(vc8-vc1)/vc1` at `MAX_OUTSTANDING=32`: **+73.3%**. The headline
+  figure shows this.
+- **What the 32-entry NI buffer costs** `(mo512-mo32)/mo32`: **0.0% at both VC counts.** This is not a
+  stuck knob (Step 1 fault injection moved the number, `=1`->`=32`: 1105.1->1227.7). Under
+  `uniform_random` the per-NMU RoB ceiling (32 entries, `rob.hpp:80`) is the true limiter, and some
+  resource upstream of the NSU pool binds first -- candidates are the `AxiMasterPort` per-channel queue
+  (16, `wrap_defaults.hpp:12`), the router per-VC input depth (4), and the router inject credit. The
+  shipped 32-entry pool already reaches the RoB-limited throughput, so 512 buys nothing. 0.0% means the
+  pool is not the bottleneck at 32, not that the knob does nothing.
+- **`max_unique_ids` did not move the curve.** `1` and `256` are byte-identical at each VC, to the
+  decimal, as a prior survey predicted (it constrains ordering, not throughput: FlooNoC
+  `docs/floonoc/chimneys.md:50`, and the co-sim subordinate is a zero-wait `MAPPED` pulp `axi_rand_slave`
+  whose uniform latency makes in-order same-ID return free). The headline runs at the shipped default `1`.
 
-- RESOLVED — the AXI ID is a manager-local handle, not a topology field. The NSU no longer depends on
-  system-wide-unique IDs (spec 2026-07-09-nsu-meta-buffer-floonoc-alignment-design.md). Stimulus IDs are free.
-- Which pattern drives the first figure.
-- Where the per-run CSV comes from. Today only `sim-saturation` writes one.
+New backlog item: **`max_outstanding` as its own sweep axis.** It is an NI metadata buffer depth, hence
+area. Sweeping it against VC count would show how the two trade off. Not this round; at
+`uniform_random`/`_rob` the RoB ceiling masks it, so the axis needs a pattern whose RoB ceiling is 512
+(`hotspot`) to be informative.
 
 ## Done — checked-traffic-benchmark (Stages 1-5 complete, merged + pushed to `main` 2026-07-07)
 

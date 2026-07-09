@@ -496,7 +496,30 @@ make sim TB=mesh_4x4_vc1 PATTERN=hotspot HOTSPOT=5 PYTHON3=python3
 make sim TB=mesh_4x4_vc8 PATTERN=neighbor PYTHON3=python3    # non-default topology
 ~~~
 
-Optional vars: `TXN=` (transactions per node), `SEED=`, `HOTSPOT=` (hotspot node ids).
+Optional vars:
+
+| var | meaning | default |
+|---|---|---|
+| `SEED=` | stimulus/randomization seed; unset draws and prints a random seed | random |
+| `HOTSPOT=` | hotspot node ids (hotspot pattern) | pattern default |
+| `INJECTION_MODE=` | `0` directed/checked run, `1` continuous injection for a throughput measurement | `0` |
+| `INJECTION_RATE=` | offered injection rate per cycle (mode 1) | `1.0` |
+| `INJECTION_COUNT=` | transactions per node; **mode-dependent default** -- `4` in mode 0 (fast enough for every regression), `200` in mode 1 (so warm-up and drain do not dominate the steady-state window) | `4` / `200` |
+| `MAX_UNIQUE_IDS=` | NI depacketize ID space: `1` (shipped) or `AXI_ID_SPACE` | `1` |
+| `MAX_OUTSTANDING=` | subordinate-side NI metadata buffer depth (one entry per in-flight transaction) | `32` |
+
+`INJECTION_COUNT`'s default changes with `INJECTION_MODE`; state it explicitly when a
+run's count matters.
+
+`MAX_OUTSTANDING` is an architectural parameter -- the physical depth of the NI's
+per-transaction metadata buffer, hence area. It is not a knob to raise until a
+throughput curve looks good; the headline figures run at the shipped depth (32).
+
+`make sim-injection-sweep PATTERN=<p>` loops `make sim` over `vc1/vc2/vc4/vc8` at nine
+injection rates in mode 1, writing one `continuous_*/result.csv` per point;
+`sim/tools/plot_injection_sweep.py <pattern>` merges them into the throughput/latency
+figure.
+
 The curated AX4 bidirectional sweep is deferred.
 
 ### Vtb_top output log

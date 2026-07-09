@@ -10,7 +10,7 @@ FlooNoC `axi_bw_monitor` (`sim/dv/floonoc-test/axi_bw_monitor.sv`, imported
 unmodified). Tapped on each node's AXI master bus.
 
 ```
-[Monitor node0.master][Read] Latency: 72.00 +- 31.30, BW: 4.11 Bits/cycle, Util: 1.61%
+[Monitor node0.master][Read] Latency: 72.00 +- 31.30, N: 4, BW: 4.11 Bits/cycle, Util: 1.61%
 ```
 
 | field | meaning | computed as |
@@ -19,6 +19,7 @@ unmodified). Tapped on each node's AXI master bus.
 | `[Read]` / `[Write]` | AR to R channel / AW+W to B channel | one line each |
 | `Latency: 72.00` | mean per-transaction round-trip, in **cycles** | `cycle(response) - cycle(request)`, averaged (`axi_bw_monitor.sv:96,101`) |
 | `+- 31.30` | standard deviation across that node's own transactions | spread from queueing and contention, not from multiple destinations |
+| `N: 4` | number of latency samples the mean and stddev are over | that channel's completed transaction count (`axi_bw_monitor.sv:150,152`) |
 | `BW: 4.11 Bits/cycle` | accepted throughput on that channel | `beats * data_width / total_cycles` (`:141-142`) |
 | `Util: 1.61%` | how busy the data channel was | `beats * 100 / total_cycles` (`:143-144`) |
 
