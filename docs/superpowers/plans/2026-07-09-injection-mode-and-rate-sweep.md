@@ -1095,6 +1095,8 @@ Add one new backlog item: **`max_outstanding` as its own sweep axis.** It is an 
 
 In `docs/development.md`, replace every reference to `run-traffic`, `sim-saturation`, `collect_saturation.py` and `plot_saturation.py`. Add the `INJECTION_COUNT` mode-dependent default, because a default that changes with another variable will surprise someone. State that `MAX_OUTSTANDING` is an architectural parameter, not a knob to raise until a curve looks good.
 
+`docs/development.md:499` still advertises the retired `TXN=`, the same dead knob the root `Makefile`'s help text carried. Replace it with the knobs that exist.
+
 In `docs/cosim-log.md:13`, the sample monitor line predates Task 1 and lacks the `N:` field. Update it to match what the monitor now prints.
 
 - [ ] **Step 10: Full ctest**
