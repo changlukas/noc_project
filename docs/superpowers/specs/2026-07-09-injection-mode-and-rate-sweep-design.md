@@ -218,24 +218,49 @@ The previous injection-rate round turned on two bring-up findings, not on the sw
 `rand_slave` default `AX_MAX_WAIT=100` throttled responses to 1.2% utilisation, and a single AXI ID
 serialised injection. Budget for the same here.
 
-**Is the fabric the bottleneck?** Run `vc1` and `vc8` at `MAX_OUTSTANDING=32` and again at `512`. If the
-two curves coincide at 32 but separate at 512, the NSU pool binds before the fabric does and the
-headline figure must use the larger value. State the setting in the caption either way.
+### `max_outstanding` is an architectural parameter, not a measurement knob
+
+The subordinate-side NI stores one metadata entry per in-flight transaction (`{src_id, upstream_id,
+rob_req, rob_idx}`). That is a physical buffer, and `max_outstanding` is its depth. It is area. FlooNoC
+names the same parameter `MaxTxns` and ships 32.
+
+The headline figure therefore runs at the **design point, 32**. Raising it until the curve looks good
+would plot a machine nobody will build.
 
 `max_outstanding` has no code cap. `MetaBuffer` asserts only that it is positive (`meta_buffer.hpp:48`).
-32 is FlooNoC's `MaxTxns` default, not a limit.
+No cap is added: a value above the reachable ceiling merely allocates capacity that is never used, and
+asserting an upper bound would require teaching the NSU the node count. What must never pass silently is
+a value too *small*, and fault injection covers that.
 
-**512 is the comparison arm because it is the ceiling.** RoB Enabled admits at most
-`ROB_CAPACITY = 1 << ROB_IDX_WIDTH = 32` outstanding transactions per NMU per direction (`rob.hpp:80`,
-`ni_flit_constants.h:234`), and the stimulus is single-beat (`--len 0`), so each occupies one slot.
-Sixteen NMUs therefore offer at most `16 x 32 = 512` concurrent writes to one NSU under `hotspot`. A pool
-of 512 cannot bind. A pool of 256 still can, and would measure the NSU rather than the fabric.
+### Reachable ceiling, and why it is pattern-dependent
 
-Under `uniform_random` the offered load spreads, so the expected per-NSU share is `512 / 16 = 32` —
-**exactly the shipped default**. The default does not merely sit near the binding point; it sits on it,
-and any burstiness pushes past it. The NSU meta buffer change is what put it there: before, capacity was
-`per_id_depth(16) x distinct ids in use`, up to 256 at a hotspot NSU; after, one shared pool of 32
-(`meta_buffer.hpp:52-56,70-74`; `wrap_defaults.hpp:20`).
+RoB Enabled admits at most `ROB_CAPACITY = 1 << ROB_IDX_WIDTH = 32` outstanding transactions per NMU per
+direction (`rob.hpp:80`, `ni_flit_constants.h:234`); the stimulus is single-beat (`--len 0`), so each
+occupies one slot. `rob_idx` indexes the **requesting NMU's** reorder buffer, not anything in the NSU:
+the NSU carries it as opaque payload (`meta_buffer.hpp:16`, restamped at `packetize.hpp:93,108`), so two
+NMUs may both hold `rob_idx=7`.
+
+The per-NSU ceiling is therefore the number of NMUs that can target it at once, times 32:
+
+| pattern | sources per destination | ceiling at one NSU |
+|---|---|---|
+| `neighbor`, `transpose` | 1 (permutation) | 32 |
+| `uniform_random` | 1 expected, up to 16 | 32 expected, 512 peak |
+| `hotspot` | 16 | 512 |
+
+Under `neighbor` and `transpose` a pool deeper than 32 is unreachable by construction. Under
+`uniform_random` the expected per-NSU share is exactly the shipped default, so bursts cross it routinely.
+
+### Two curves, not one setting
+
+**Headline: `MAX_OUTSTANDING=32`.** Four VC curves. This is the machine.
+
+**Diagnostic: `MAX_OUTSTANDING=512`, `vc1` and `vc8` only.** 512 is the hotspot ceiling, so the NI pool
+cannot bind and the sink is ideal. The gap between the two headline curves and their diagnostic
+counterparts is the throughput the NI's buffer sizing costs. That number is worth reporting; a curve
+inflated to hide it is not.
+
+Both captions state `max_unique_ids` and `max_outstanding`.
 
 **That is a hypothesis, not a conclusion.** Three other finite resources sit on the same path and any of
 them could bind first:

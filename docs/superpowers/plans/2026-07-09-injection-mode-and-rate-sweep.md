@@ -973,47 +973,64 @@ wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for p in neighbor transpose uni
 
 Expected: four `DIRECTED PASS` and one `CR PASS`.
 
-- [ ] **Step 5: Bring-up — is the fabric the bottleneck?**
+- [ ] **Step 5: Bring-up — how much throughput does the NI's buffer sizing cost?**
 
-The NSU meta buffer change cut NSU outstanding capacity from `per_id_depth(16) x distinct ids` to one shared pool of `max_outstanding`. There is no code cap; 32 is FlooNoC's `MaxTxns` default, not a limit (`meta_buffer.hpp:48` only asserts it is positive).
+`max_outstanding` is the depth of a physical buffer in the subordinate-side NI: one metadata entry per in-flight transaction. It is area. FlooNoC names the same parameter `MaxTxns` and ships 32. **The headline figure runs at 32, the design point.** Raising it until the curve looks good would plot a machine nobody will build.
 
-**Where the ceiling actually is.** RoB Enabled admits at most `ROB_CAPACITY = 1 << ROB_IDX_WIDTH = 32` outstanding transactions per NMU per direction (`rob.hpp:80`, `ni_flit_constants.h:234`), and the stimulus is `--len 0` so each occupies one slot. Sixteen NMUs therefore offer at most **512** concurrent writes to a single NSU under `hotspot`. Under `uniform_random` they spread, so the expected per-NSU share is `512 / 16 = 32` — **exactly the default pool depth**. The default is not merely near the binding point; it sits on it, and any burstiness pushes past it.
+512 is the reachable ceiling under `hotspot`: RoB Enabled admits `ROB_CAPACITY = 1 << ROB_IDX_WIDTH = 32` per NMU per direction (`rob.hpp:80`, `ni_flit_constants.h:234`), single-beat stimulus, sixteen NMUs. A 512-deep pool cannot bind, so it models an ideal sink. It is a **reference line, not a candidate headline setting.**
 
-So the comparison arm must be a value that cannot bind: `512`. A smaller arm such as `256` still binds under `hotspot` and would measure the NSU, not the fabric.
+`rob_idx` indexes the requesting NMU's reorder buffer, not anything in the NSU, which carries it as opaque payload (`meta_buffer.hpp:16`, restamped at `packetize.hpp:93,108`). Two NMUs may both hold `rob_idx=7`. So the ceiling is pattern-dependent: 32 under the permutations (`neighbor`, `transpose`, one source per destination), 512 under `hotspot`, and 32-expected-512-peak under `uniform_random`.
 
-Three other finite resources sit on the same path: the `AxiMasterPort` per-channel queue (16, `wrap_defaults.hpp:12`), the router per-VC input depth (4), and the router inject credit. Measure, do not assume.
+Run both arms on the two extreme VC counts:
 
 ```bash
 wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mo in 32 512; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=256 MAX_OUTSTANDING=$mo > /dev/null 2>&1; echo -n "mo=$mo vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc$${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
 ```
 
-Read the four numbers:
+Four numbers. Compute and record two things:
 
-| observation | meaning | headline figure uses |
-|---|---|---|
-| `vc1` and `vc8` coincide at 32, separate at 512 | the NSU pool binds before the fabric | `MAX_OUTSTANDING=512` |
-| they separate at both | the fabric already binds | `MAX_OUTSTANDING=32` |
-| they coincide at both | something else binds. Suspect the `AxiMasterPort` queue (16) or the router credit. **Stop and report** | nothing yet |
+1. **VC value at the design point**: `(vc8 - vc1) / vc1` at `mo=32`. This is what the headline figure shows.
+2. **What the NI buffer costs**: `(mo512 - mo32) / mo32`, at each VC count. This is the throughput the 32-entry pool gives up against an ideal sink.
 
-**Record which it was.** The figure caption depends on it, and the next reader will not rerun this.
+If `vc1` and `vc8` coincide at **both** arms, neither the fabric nor the NI pool binds. Suspect the `AxiMasterPort` per-channel queue (16, `wrap_defaults.hpp:12`), the router per-VC input depth (4), or the router inject credit. **Stop and report** — a VC comparison is meaningless when VC count changes nothing.
 
-- [ ] **Step 6: Run the sweep**
+**Record all four numbers.** The next reader will not rerun this.
+
+- [ ] **Step 6: Run the headline sweep at the design point**
 
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make sim-injection-sweep PATTERN=uniform_random MAX_OUTSTANDING=<value from Step 5> > /tmp/sweep.log 2>&1; echo "rc=$?"; tail -20 /tmp/sweep.log'
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make sim-injection-sweep PATTERN=uniform_random MAX_OUTSTANDING=32 > /tmp/sweep.log 2>&1; echo "rc=$?"; tail -20 /tmp/sweep.log'
 ```
 
-Expected: 36 runs, then the merged table and the PNG.
+Expected: 36 runs, then the merged table and the PNG. `MAX_OUTSTANDING=32` is the shipped NI buffer depth and the figure's subject.
 
-The throughput curve must show a knee. **A flat line means the bottleneck is not the fabric**, and Step 5 was misread. Do not publish a flat curve as a VC comparison.
+The throughput curve must show a knee. A flat line at every VC count means VC count changes nothing, which Step 5 should already have caught. Do not publish a flat curve as a VC comparison.
 
-- [ ] **Step 7: Update the docs**
+- [ ] **Step 7: Run the diagnostic reference line**
 
-In `docs/backlog.md`, replace the "Next round: injection rate in `make sim`, VC comparison figures" section with a `## Done` entry recording: the interface (`make sim TB= PATTERN= [INJECTION_MODE=1 INJECTION_RATE= INJECTION_COUNT=] [MAX_UNIQUE_IDS= MAX_OUTSTANDING=]`), the sweep target, the bring-up answer from Step 5, and the measured VC deltas. Strike the two remaining "Open" bullets.
+Only the two extreme VC counts, only to bound the headline figure from above.
 
-In `docs/development.md`, replace every reference to `run-traffic`, `sim-saturation`, `collect_saturation.py` and `plot_saturation.py`. Add the `INJECTION_COUNT` mode-dependent default, because a default that changes with another variable will surprise someone.
+```bash
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make sim-injection-sweep PATTERN=uniform_random MAX_OUTSTANDING=512 SWEEP_VCS="1 8" > /tmp/sweep_ideal.log 2>&1; echo "rc=$?"; tail -12 /tmp/sweep_ideal.log'
+```
 
-- [ ] **Step 8: Full ctest**
+`plot_injection_sweep.py` will warn that the rows mix NSU settings, because `output/` now holds both arms. That warning is doing its job. Move the 512 rows aside before replotting the headline:
+
+```bash
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && mkdir -p sim/verilator/output_ideal && for d in sim/verilator/output/continuous_*; do grep -q ",512," $d/result.csv 2>/dev/null && mv $d sim/verilator/output_ideal/; done; python3 sim/tools/plot_injection_sweep.py uniform_random'
+```
+
+Expected: the headline table replots with no warning, and `output_ideal/` holds the reference rows.
+
+- [ ] **Step 8: Update the docs**
+
+In `docs/backlog.md`, replace the "Next round: injection rate in `make sim`, VC comparison figures" section with a `## Done` entry recording: the interface (`make sim TB= PATTERN= [INJECTION_MODE=1 INJECTION_RATE= INJECTION_COUNT=] [MAX_UNIQUE_IDS= MAX_OUTSTANDING=]`), the sweep target, the four bring-up numbers from Step 5, the VC delta at the design point, and what the 32-entry NI buffer costs against the ideal sink. Strike the two remaining "Open" bullets.
+
+Add one new backlog item: **`max_outstanding` as its own sweep axis.** It is an NI buffer-depth parameter, hence area. Sweeping it against VC count would say how the two trade off. Not this round.
+
+In `docs/development.md`, replace every reference to `run-traffic`, `sim-saturation`, `collect_saturation.py` and `plot_saturation.py`. Add the `INJECTION_COUNT` mode-dependent default, because a default that changes with another variable will surprise someone. State that `MAX_OUTSTANDING` is an architectural parameter, not a knob to raise until a curve looks good.
+
+- [ ] **Step 9: Full ctest**
 
 ```bash
 wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make test 2>&1 | grep -E "tests passed|tests failed"'
@@ -1021,19 +1038,20 @@ wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && make test 2>&1 | grep -E "tests
 
 Expected: `397 tests passed, 0 tests failed`.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
 git add docs/
 git commit -m "docs: injection-mode interface, sweep results, retire the traffic vocabulary
 
-Records the bring-up answer (which resource binds) beside the figures, so the
-next reader does not have to rerun it."
+Records the four bring-up numbers beside the figures, so the next reader does
+not have to rerun them. max_outstanding is documented as an NI buffer depth,
+not a knob to raise until the curve looks good."
 ```
 
-- [ ] **Step 10: Report, do not push**
+- [ ] **Step 11: Report, do not push**
 
-Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected RData`, the mode-0 regression, the bring-up answer, the VC deltas from the curve, and the final ctest count.
+Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected RData`, the mode-0 regression, the four bring-up numbers, the VC delta at the design point, what the 32-entry buffer costs against the ideal sink, and the final ctest count.
 
 ---
 
@@ -1060,13 +1078,15 @@ Summarize: both fault injections, the four mode-1 patterns with zero `Unexpected
 | two figures from one CSV, caption carries both knobs | 7 |
 | `plot_saturation.py` replaced | 7 |
 | fault injection first | 8 |
-| bring-up: which resource binds | 8 |
+| headline at the design point (`MAX_OUTSTANDING=32`) | 8 |
+| diagnostic reference line (`=512`, ideal sink) | 8 |
+| `max_outstanding` documented as an NI buffer depth | 8 |
 | mode 0 unchanged on all four patterns | 5, 8 |
 | mode 1 on all four patterns, zero `Unexpected RData` | 8 |
 | `gen_test_patterns.py` untouched | all; enforced by Global Constraints |
 | no new unit tests | all; enforced by Global Constraints |
 
-**Placeholder scan.** One deliberate placeholder survives: Task 8 Step 6 says `MAX_OUTSTANDING=<value from Step 5>`. That value is a measurement, not a decision, and inventing it here would be worse than naming its source.
+**Placeholder scan.** Clean. The headline sweep runs at `MAX_OUTSTANDING=32` unconditionally: it is the shipped NI buffer depth, so it is a design fact, not a measurement outcome. The bring-up produces numbers to report, not a setting to choose.
 
 **Type consistency.** `emit_result_csv.py`'s CLI flags (`--injection-mode`, `--max-unique-ids`, ...) match the recipe invocation in Task 5 Step 2 exactly. The column order in Task 6 Step 1 matches the header in the Interfaces block. `plot_injection_sweep.py` reads `vc`, `injection_rate`, `accepted_bits_per_cycle`, `mean_latency`, `pattern`, `max_unique_ids`, `max_outstanding`, all of which `emit_result_csv.py` writes. Task 8 Step 5 cuts field 10 of the row, which is `accepted_bits_per_cycle`.
 
