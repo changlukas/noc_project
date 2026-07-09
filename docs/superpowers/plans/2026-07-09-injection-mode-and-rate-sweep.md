@@ -1038,7 +1038,7 @@ Expected: four `DIRECTED PASS` and one `CR PASS`.
 Run both arms on the two extreme VC counts:
 
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mo in 32 512; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=256 MAX_OUTSTANDING=$mo > /dev/null 2>&1; echo -n "mo=$mo vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc$${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mo in 32 512; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=256 MAX_OUTSTANDING=$mo > /dev/null 2>&1; echo -n "mo=$mo vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
 ```
 
 Four numbers. Compute and record two things:
@@ -1055,7 +1055,7 @@ The evidence says probably not. FlooNoC never claims a throughput loss from coll
 Measure it. Do not assume either way.
 
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mu in 1 256; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=$mu MAX_OUTSTANDING=32 > /dev/null 2>&1; echo -n "mu=$mu vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc$${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for mu in 1 256; do for vc in 1 8; do make sim TB=tb_mesh_4x4_vc${vc}_rob PATTERN=uniform_random SEED=1 INJECTION_MODE=1 INJECTION_RATE=1.0 MAX_UNIQUE_IDS=$mu MAX_OUTSTANDING=32 > /dev/null 2>&1; echo -n "mu=$mu vc=$vc: "; tail -1 sim/verilator/output/continuous_mesh_4x4_vc${vc}_rob_uniform_random_r1.0_s1/result.csv | cut -d, -f10; done; done'
 ```
 
 | observation | what it means | headline figure uses |
