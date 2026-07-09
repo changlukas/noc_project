@@ -37,7 +37,7 @@ help:
 	@echo "Simulate:"
 	@echo "  make sim TB=tb_<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot) or constrained_random"
 	@echo "  make sim TB=tb_mesh_4x4_vc8 PATTERN=neighbor"
-	@echo "  Vars: TXN= HOTSPOT= (directed only); SEED unset draws + prints a random seed"
+	@echo "  Vars: INJECTION_MODE= INJECTION_RATE= INJECTION_COUNT= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= (directed only); SEED unset draws + prints a random seed"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -204,7 +204,7 @@ endif
 
 clean: clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 	rm -rf $(BUILD_ROOT)
-	rm -rf $(COSIM_VERILATOR)/../test_patterns/directed_* $(COSIM_VERILATOR)/../test_patterns/traffic_*
+	rm -rf $(COSIM_VERILATOR)/../test_patterns/stim_*
 	rm -f master_wrap_read_dump*.txt
 
 clean-cmodel:
