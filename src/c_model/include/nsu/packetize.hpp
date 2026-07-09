@@ -78,6 +78,10 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
     return true;
 }
 
+// The subordinate echoes the DOWNSTREAM id, which is the MetaBuffer key. The flit
+// must carry the manager's original id, recovered from the buffered entry (FlooNoC
+// floo_meta_buffer.sv:344-346, "Use original, buffered ID again for responses").
+// nsu::VcArbiter keys r_burst_vc_ on this restored rid.
 inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id) {
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
@@ -87,7 +91,7 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
     f.set_header_field("last", 1);
     f.set_header_field("rob_req", m.rob_req);
     f.set_header_field("rob_idx", m.rob_idx);
-    f.set_payload_field("B", "bid", b.id);
+    f.set_payload_field("B", "bid", m.upstream_id);
     f.set_payload_field("B", "bresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("B", "buser", b.user);
     return f;
@@ -102,7 +106,7 @@ inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uin
     f.set_header_field("last", 1);
     f.set_header_field("rob_req", m.rob_req);
     f.set_header_field("rob_idx", m.rob_idx);
-    f.set_payload_field("R", "rid", b.id);
+    f.set_payload_field("R", "rid", m.upstream_id);
     f.set_payload_field("R", "rresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("R", "ruser", b.user);
     f.set_payload_field("R", "rlast", b.last ? 1u : 0u);

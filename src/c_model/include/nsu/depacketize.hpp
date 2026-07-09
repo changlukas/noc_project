@@ -15,17 +15,23 @@
 namespace ni::cmodel::nsu {
 
 // NSU-side request depacketizer. Stateful demux: tick() pulls flits from
-// NocReqIn, decodes axi_ch, demuxes into AW/W/AR queues. AW/AR flits
-// additionally allocate a MetaBuffer entry {src_id, rob_req, rob_idx} keyed by
-// awid/arid for the response path. W flits have no MetaBuffer side effect —
-// W carries no AXI ID; W ordering is handled by a downstream W-meta FIFO.
+// NocReqIn, reads axi_ch, and parks the flit in a per-channel S1 stage register.
+// tick() touches no MetaBuffer state and decodes nothing but W.
 //
-// Pending-flit stash semantics: if a pulled flit's target queue is full,
-// the flit is held in `pending_` and re-attempted next tick. This blocks
-// any other flits behind it (head-of-line blocking on single-FIFO ingress).
-// Critical: MetaBuffer allocate for AW/AR happens AFTER the q_depth check
-// passes, so a backpressure-induced retry of the same pending_ flit never
-// double-allocates.
+// pop_aw() / pop_ar() are the drain stage. Each decodes its flit, remaps the
+// manager's AXI id to the downstream id, allocates the MetaBuffer entry under
+// that key, and hands the beat to AxiMasterPort. Each gates ONLY on its own
+// pool: a full write pool stalls pop_aw and leaves pop_ar untouched. Allocating
+// here rather than at ingress is what keeps a full pool from head-of-line
+// blocking the other channels, mirroring the 2026-07-04 NMU request-path fix.
+//
+// Pending-flit stash semantics: if a pulled flit's S1 register is occupied, the
+// flit is held in `pending_` and re-attempted next tick, blocking flits behind
+// it. That is inherent to a serialized NoC link, not a modelling defect, and
+// NocReqIn offers no peek to avoid it.
+//
+// W flits have no MetaBuffer side effect — W carries no AXI ID; W ordering is
+// handled by a downstream W-meta FIFO.
 class Depacketize : public RequestDepacketizer {
   public:
     Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t aw_q_depth,
@@ -77,12 +83,13 @@ class Depacketize : public RequestDepacketizer {
     std::size_t max_unique_ids_;
     std::optional<Flit> pending_;
 
-    // S1 stage registers: one per AXI channel (AW/W/AR). Depacketize::tick()
-    // decodes <=1 flit/channel/tick into these registers. pop_aw/pop_w/pop_ar
-    // (called by AxiMasterPort as the S2 stage) take from them.
-    router::PipelineStage<axi::AwBeat> s1_aw_;
+    // AW / AR hold the raw flit until pop_aw / pop_ar admit it: the drain stage
+    // needs the header's src_id / rob_req / rob_idx to allocate the MetaBuffer
+    // entry, and decoding is pure. W carries no id and no metadata, so it stays
+    // a decoded beat.
+    router::PipelineStage<Flit> s1_aw_;
     router::PipelineStage<axi::WBeat> s1_w_;
-    router::PipelineStage<axi::ArBeat> s1_ar_;
+    router::PipelineStage<Flit> s1_ar_;
 
     static axi::AwBeat decode_aw(const Flit& f);
     static axi::WBeat decode_w(const Flit& f);
@@ -130,11 +137,12 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
     return b;
 }
 
-// tick() is the S1 stage: decode <=1 flit per channel per tick into the S1
-// stage registers. If a register is already occupied (not yet consumed by the
-// S2 AxiMasterPort), backpressure the flit into pending_ (head-of-line
-// blocking on single-FIFO ingress, same semantics as the original queue-based
-// implementation). MetaBuffer allocate is atomic with decode into S1 (R4).
+// tick() is the S1 stage: park <=1 flit per channel per tick into the S1
+// stage registers (only W is decoded here; AW/AR are decoded at the drain).
+// If a register is already occupied (not yet consumed by the S2 AxiMasterPort),
+// backpressure the flit into pending_ (head-of-line blocking on single-FIFO
+// ingress, same semantics as the original queue-based implementation). tick()
+// touches no MetaBuffer state; allocation happens in pop_aw / pop_ar.
 // Single-ingress HOL note: unlike the NMU request path, NSU depacketize has NO
 // source-side pairing lock on ingress. It demuxes into independent S1 registers
 // that drain into bounded AxiMasterPort queues, which drain to the subordinate.
@@ -158,17 +166,7 @@ inline void Depacketize::tick() {
                     pending_ = f;
                     return;
                 }
-                {
-                    auto aw = decode_aw(f);
-                    meta_.allocate_write(aw.id,
-                                         {
-                                             static_cast<uint8_t>(f.get_header_field("src_id")),
-                                             aw.id,
-                                             static_cast<uint8_t>(f.get_header_field("rob_req")),
-                                             static_cast<uint8_t>(f.get_header_field("rob_idx")),
-                                         });
-                    s1_aw_.accept(aw);
-                }
+                s1_aw_.accept(f);
                 break;
             case ni::AXI_CH_W:
                 if (s1_w_.full()) {
@@ -182,17 +180,7 @@ inline void Depacketize::tick() {
                     pending_ = f;
                     return;
                 }
-                {
-                    auto ar = decode_ar(f);
-                    meta_.allocate_read(ar.id,
-                                        {
-                                            static_cast<uint8_t>(f.get_header_field("src_id")),
-                                            ar.id,
-                                            static_cast<uint8_t>(f.get_header_field("rob_req")),
-                                            static_cast<uint8_t>(f.get_header_field("rob_idx")),
-                                        });
-                    s1_ar_.accept(ar);
-                }
+                s1_ar_.accept(f);
                 break;
             default:
                 assert(false &&
@@ -222,10 +210,22 @@ inline void Depacketize::tick() {
 
 // pop_aw/pop_w/pop_ar: S2 consumer interface — take from the S1 register.
 // Called <=1 time per channel per tick by AxiMasterPort::drain_*_from_depkt.
-// Returns nullopt when the S1 register is empty (no beat ready this tick).
+// Returns nullopt when the S1 register is empty, or when this channel's
+// MetaBuffer pool is full (backpressure: the flit stays in S1).
 inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     if (!s1_aw_.full()) return std::nullopt;
-    return s1_aw_.take();
+    if (meta_.write_full()) return std::nullopt;
+    const Flit f = s1_aw_.take();
+    axi::AwBeat b = decode_aw(f);
+    const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
+    meta_.allocate_write(downstream_id, {
+                                            static_cast<uint8_t>(f.get_header_field("src_id")),
+                                            b.id,
+                                            static_cast<uint8_t>(f.get_header_field("rob_req")),
+                                            static_cast<uint8_t>(f.get_header_field("rob_idx")),
+                                        });
+    b.id = downstream_id;
+    return b;
 }
 inline std::optional<axi::WBeat> Depacketize::pop_w() {
     if (!s1_w_.full()) return std::nullopt;
@@ -233,7 +233,18 @@ inline std::optional<axi::WBeat> Depacketize::pop_w() {
 }
 inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
     if (!s1_ar_.full()) return std::nullopt;
-    return s1_ar_.take();
+    if (meta_.read_full()) return std::nullopt;
+    const Flit f = s1_ar_.take();
+    axi::ArBeat b = decode_ar(f);
+    const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
+    meta_.allocate_read(downstream_id, {
+                                           static_cast<uint8_t>(f.get_header_field("src_id")),
+                                           b.id,
+                                           static_cast<uint8_t>(f.get_header_field("rob_req")),
+                                           static_cast<uint8_t>(f.get_header_field("rob_idx")),
+                                       });
+    b.id = downstream_id;
+    return b;
 }
 
 }  // namespace ni::cmodel::nsu
