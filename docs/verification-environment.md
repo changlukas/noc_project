@@ -53,19 +53,34 @@ Directed patterns come from `gen_test_patterns.py` (booksim2 spatial patterns).
 
 ## Injection rate
 
-The directed run defaults to two-phase (drain all writes, then reads). Pass
-`+traffic_inj_ratio=<r>` to switch to steady-state injection instead
-(`user_node_endpoint.sv:294`).
+`INJECTION_MODE` (`make sim` var, read as `+injection_mode`) selects the run shape:
 
-- **`+traffic_inj_ratio=<r>`** (`0.0`..`1.0`): a per-cycle Bernoulli gate. Each
-  cycle the driver injects with probability `r`, else stalls one cycle
-  (`while $urandom_range(0,99) >= r*100`). This is booksim2's
-  `BernoulliInjectionProcess`. `r=1.0` is greedy (offer every cycle).
-- **`--ids-per-tile=<n>`** (`gen_test_patterns.py`): gives each tile a
-  non-overlapping AXI ID block. This is a concurrency knob (a single ID caps
-  outstanding transactions and starves the fabric). It is not VC spread: VC
-  allocation is ID-agnostic.
-- **`make sim-saturation`** sweeps VC count at `inj=1.0`, `ids_per_tile=16`, and
-  reports saturation throughput per config from `axi_bw_monitor`.
+| mode | run shape | scoreboard | `INJECTION_COUNT` default |
+|---|---|---|---|
+| `0` (default) | directed two-phase: drain all writes, then reads | armed | `4` |
+| `1` | continuous, reads/writes interleaved, paced by `INJECTION_RATE` | disarmed (write-before-read precondition doesn't hold); `axi_bw_monitor` gates instead | `200` |
+
+```
+make sim TB=<topo> PATTERN=<p> INJECTION_MODE=1 INJECTION_RATE=<r> \
+    [INJECTION_COUNT=<n> MAX_UNIQUE_IDS=<n> MAX_OUTSTANDING=<n>] [SEED=<n>]
+```
+
+- **`INJECTION_RATE`** (`0.0`..`1.0`, `+injection_rate`): a per-cycle Bernoulli
+  gate. This is booksim2's `BernoulliInjectionProcess`. `r=1.0` is greedy
+  (offer every cycle).
+- **`MAX_UNIQUE_IDS`** / **`MAX_OUTSTANDING`** (`+max_unique_ids`,
+  `+max_outstanding`): NSU knobs, not injection-side. `max_unique_ids=1`
+  (default) collapses every manager onto one downstream ID; `max_outstanding`
+  (default `32`) sizes the shared MetaBuffer pool per direction.
+- Each mode-1 run writes `sim/verilator/output/<tag>/result.csv`.
+
+`make sim-injection-sweep PATTERN=<p>` loops the four VC topologies
+(`vc1/vc2/vc4/vc8`) at nine rates in mode 1, then runs
+`sim/tools/plot_injection_sweep.py <pattern> [--dark]`. The script always
+prints the merged rate/throughput/latency table; it also renders
+`injection_sweep.png` / `_dark.png` when `matplotlib` is importable.
+`matplotlib` is absent from the WSL interpreter this project builds/runs
+under, so the sweep prints the table there; render the PNGs separately with
+the Windows `py -3`.
 
 Read the accepted throughput and latency numbers per [cosim-log.md](cosim-log.md).

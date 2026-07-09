@@ -41,7 +41,9 @@ cycle). BW is the absolute bits per cycle.
 - **Directed runs show low Util (~1-2%) by design.** They inject a few
   transactions per node against a fast slave to check correctness (scoreboard),
   not to load the fabric. Read PASS and Latency, ignore Util. For throughput use
-  the saturation sweep (`make sim-saturation`, `+traffic_inj_ratio`).
+  the injection-rate sweep (`make sim-injection-sweep PATTERN=<p>`, mode 1
+  paced by `INJECTION_RATE`); see
+  [verification-environment.md](verification-environment.md#injection-rate).
 - **Latency tracks hop distance.** The `neighbor` pattern is booksim2's
   NeighborTrafficPattern (`dst = (x+1, y+1) mod dim`), a diagonal shift with
   wrap, not a single hop. On a mesh (no torus links) the wrap routes edge nodes
