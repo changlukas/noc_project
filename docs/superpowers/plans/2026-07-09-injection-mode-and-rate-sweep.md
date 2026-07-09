@@ -265,15 +265,15 @@ Replace line 562:
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC, max_unique_ids, max_outstanding);')
 ```
 
-- [ ] **Step 4: Regenerate every testbench**
+- [ ] **Step 4: Confirm the testbenches regenerate themselves**
 
-The build regenerates `sim/tb/tb_top_<topo>.sv` from the topology YAML. Force all eleven:
+`sim/tb/tb_top_*.sv` are **generated build artifacts, not source.** `.gitignore:54` ignores them, `git ls-files sim/tb/` tracks only the three hand-written files, and `sim/verilator/Makefile:132` makes `$(TB_TOP_SV)` depend on `$(GEN_TB_TOP)`. Editing the generator is therefore sufficient: the next build regenerates every testbench it needs. Nothing to commit, nothing to force-add.
 
 ```bash
-wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && for t in mesh_1x1_vc1 mesh_2x2_nonuniform_vc1 mesh_2x4_vc1 mesh_4x4_vc1 mesh_4x4_vc2 mesh_4x4_vc4 mesh_4x4_vc8; do for suffix in "" "_rob"; do python3 sim/tools/gen_tb_top.py --topology $t$suffix --out sim/tb/tb_top_$t$suffix.sv; done; done 2>&1 | tail -3; git status --short sim/tb/'
+wsl -e bash -lc 'cd /mnt/e/05_NoC/noc_project && git check-ignore -v sim/tb/tb_top_mesh_4x4_vc1.sv; git ls-files sim/tb/'
 ```
 
-Expected: the `git status` lists the regenerated `tb_top_*.sv` files as modified. If a topology has no `_rob` variant checked in, do not create one — check `git status` against `ls sim/tb/tb_top_*.sv` and regenerate only files that already exist.
+Expected: the file is ignored by `.gitignore:54`, and only `axi_vip_types_pkg.sv`, `link_perf_monitor.sv`, `user_node_endpoint.sv` are tracked.
 
 - [ ] **Step 5: Confirm the `[Config]` line appears**
 
@@ -298,7 +298,7 @@ Expected: `397 tests passed`.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add sim/tools/gen_tb_top.py sim/tb/
+git add sim/tools/gen_tb_top.py
 git commit -m "feat(sim): read and echo the NSU knobs as plusargs
 
 +max_unique_ids and +max_outstanding reach every NSU, and a [Config] line
