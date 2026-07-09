@@ -531,7 +531,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w('                                                              input int src_id, input int num_vc,')
         w('                                                              input string config_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
-    w('                                                              input int src_id, input int num_vc);')
+    w('                                                              input int src_id, input int num_vc,')
+    w('                                                              input int max_unique_ids,')
+    w('                                                              input int max_outstanding);')
     w("")
 
     # ctx handle ARRAYS (chandle-substitute longint unsigned). Arrays let the
@@ -544,11 +546,20 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // default) keeps each NMU's default 16x16 uniform, 4 GB/tile SAM.")
     w('    string sam_config_path = "";')
     w("")
+    w("    // NSU knobs. max_unique_ids=1 collapses every manager onto one downstream")
+    w("    // AXI id (FlooNoC default); 256 passes the manager's id through.")
+    w("    // max_outstanding is the shared MetaBuffer pool per direction.")
+    w("    int unsigned max_unique_ids  = 1;")
+    w("    int unsigned max_outstanding = 32;")
+    w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
     w("    initial begin")
     w("        cmodel_init();")
     w('        void\'($value$plusargs("sam_config=%s", sam_config_path));')
+    w('        void\'($value$plusargs("max_unique_ids=%d", max_unique_ids));')
+    w('        void\'($value$plusargs("max_outstanding=%d", max_outstanding));')
+    w('        $display("[Config] max_unique_ids=%0d max_outstanding=%0d", max_unique_ids, max_outstanding);')
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
@@ -559,7 +570,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         else:
             w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC, sam_config_path);  '
               f'// src_id = node{i} coord {c}')
-        w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC);')
+        w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC, max_unique_ids, max_outstanding);')
     w("    end")
     w("")
 
