@@ -297,7 +297,7 @@ Design rounds section; none is urgent.
 
 ## Bugs
 
-### OPEN — `RobMode::Enabled` wedges the AR channel on a read burst longer than the RoB (2026-07-10)
+### FIXED 2026-07-11 — `RobMode::Enabled` wedges the AR channel on a read burst longer than the RoB
 
 `Rob::push_ar` returns `false` for any `len + 1 > ROB_CAPACITY` = 32 (`rob.hpp:218`) and has no other
 path. `AxiSlavePort::forward_ar_to_packetizer_` (`axi_slave_port.hpp:153-158`) retries the same
@@ -314,6 +314,22 @@ FlooNoC's 64-entry RoB accepts the same burst: `rob_free_space > ax_len_i` is co
 the `ax_rob_req_o` path (`floo_rob.sv:336-355`), so a transaction that needs no reordering is admitted
 at any length. Bypass clause 1 is the fix, not a bigger pool. Spec:
 `docs/superpowers/specs/2026-07-10-nmu-rob-bypass-and-depth-design.md`.
+
+**Verified on the wire (2026-07-11).** A 64-beat read burst (`BURST_LEN=63`, `--size 5` = 2048 B,
+inside the 4 KB boundary) driven through Verilator co-sim, gated by the new `BURST_LEN` knob:
+
+```
+make sim TB=tb_mesh_4x4_vc1_rob PATTERN=neighbor SEED=1 BURST_LEN=63
+```
+
+- Pre-bypass (`rob.hpp` at the Task 6 "max_txns_per_id gates" commit): the run wedged. It loaded all
+  16 nodes' stimulus, printed `[Config] max_unique_ids=1 max_outstanding=32`, then made no forward
+  progress past time `[0]`; no `PASS` ever emitted and the 900 s `timeout` reaped it. The AR head of
+  line never popped — exactly the wedge above.
+- Post-bypass (HEAD): `PASS: all 16 nodes done, non-vacuous` →
+  `DIRECTED PASS: directed_mesh_4x4_vc1_rob_neighbor_s1 scoreboard clean, non-vacuous` (rc=0). The
+  64-beat AR drains. No regression at `BURST_LEN=0` across neighbor / transpose / uniform_random /
+  hotspot.
 
 ### Pre-existing fabric bugs (the matrix caught these, which is its purpose)
 

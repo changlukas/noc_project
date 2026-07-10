@@ -211,6 +211,10 @@ HOTSPOT         ?= 5
 B_ROB_DEPTH     ?= 32
 R_ROB_DEPTH     ?= 32
 
+# AXI burst length passed to gen_test_patterns (--len). 0 = single beat.
+# At --size 5 (32 B/beat), 63 gives 64 beats = 2048 B, inside the 4 KB boundary.
+BURST_LEN       ?= 0
+
 # Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId, floo_rob.sv:12).
 MAX_TXNS_PER_ID ?= 32
 
@@ -234,7 +238,7 @@ run-directed: $(TBTOP_EXE)
 	@mkdir -p output/$(SIM_TAG)
 	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
-	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len 0 \
+	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
 	    --memory-size 0x40000 --seed $(SEED) $(_HOTSPOT_ARGS)
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
