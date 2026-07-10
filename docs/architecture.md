@@ -86,9 +86,16 @@ The NMU sits on the AXI-master ingress side. Its responsibilities:
   `dst_id` is already a header field and `awaddr` / `araddr` is already
   the payload address; SAM only changes which value each carries.
 
-The RoB holds in-flight response slots indexed by AXI ID, releases them
-in-order per ID, and asserts BVALID / RVALID only when the slot at the
-head of each ID queue drains.
+The RoB holds in-flight response slots indexed by `rob_idx` -- a header
+field the NSU echoes back, not an AXI ID. A separate per-ID order list
+records the program order of that ID's transactions; a response is
+released only once every earlier transaction of the same ID has
+released. `RobMode::Disabled`, the shipped default, allocates no slots
+at all and instead permits one outstanding transaction per AXI ID.
+
+Structure-by-structure, including the sizes and allocator choices the
+C++ makes implicitly, and the FlooNoC parameters they correspond to:
+`docs/nmu-rob-microarchitecture.md`.
 
 ### NSU (Network Subordinate Unit)
 
@@ -162,11 +169,17 @@ question to measure, not to assume.
 **It is unrelated to the RoB.** The two sit on opposite sides of the NI. A RoB
 reorders responses arriving from the NoC toward a local manager, and its knob is
 FlooNoC's `MaxTxnsPerId`. `max_unique_ids` governs the IDs the NI emits toward a
-downstream subordinate. On the manager side, RoB absence is what limits a single
-AXI ID to one outstanding transaction at a time (FlooNoC `NoRoB`: "stalls
-transactions of the same `txnID` going to different destinations until the
-previous transaction is completed"); our `RobMode::Disabled` interlock is the
-same mechanism.
+downstream subordinate. FlooNoC's `MaxTxns` -- the meta buffer depth -- likewise
+belongs to the subordinate face, guarded by `EnSbrPort`
+(`floo_axi_chimney.sv:811-816`), and a chimney without a manager port carries no
+RoB at all (`floo_axi_chimney.sv:872-873`).
+
+On the manager side, RoB absence is what limits a single AXI ID's outstanding
+transactions. FlooNoC's `NoRoB` stalls only same-`txnID` transactions **going to
+a different destination**, and admits further same-destination ones up to a
+per-ID counter (`floo_rob_wrapper.sv:139`). Our `RobMode::Disabled` stalls on
+same-ID regardless of destination -- strictly more conservative. The gap is
+unmeasured. See `docs/nmu-rob-microarchitecture.md` section 2.
 
 **Not modelled.** The C++ meta buffer keeps its `AXI_ID_SPACE`-wide bucket array
 under both settings, so the model reproduces neither the FIFO's area saving nor

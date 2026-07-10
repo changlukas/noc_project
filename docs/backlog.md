@@ -35,56 +35,116 @@ smoke clean, generator pytest 16/16.
   `:=` to `=` (deferred) so the `local.mk` BUILD_ROOT override (`$(HOME)/noc_build` on WSL) applies.
   `make build` / `make test` now target `$HOME/noc_build/cmodel` correctly; no cmake workaround needed.
 
-## Next round: decouple the NMU RoB from the outstanding limit (surfaced 2026-07-10)
+## NMU RoB -- as-built spec written, direction reset (2026-07-10)
 
-One constant, `ni::header::ROB_IDX_WIDTH = 5` (`ni_flit_constants.h:56`; the field is declared in
-`specgen/generated/json/ni_packet.json:82-84` as `width_param: ROB_IDX_WIDTH`, not in `constants.yaml`),
-currently decides three separate things. FlooNoC keeps them as independent parameters.
+The 2026-07-10 item that stood here ("decouple the NMU RoB from the outstanding limit") rested on
+three false premises. A FlooNoC source survey (me + Codex, both against `E:/05_NoC/FlooNoC`) killed
+all three. The as-built microarchitecture is now written down: **`docs/nmu-rob-microarchitecture.md`**.
 
-Every claim below was fact-checked against the FlooNoC RTL and our own code (Codex pass, 2026-07-10):
-all CONFIRMED.
+| the old claim | what the RTL says |
+|---|---|
+| "outstanding request limit: FlooNoC `MaxTxns`, here none" | `MaxTxns` is the **NSU** meta buffer depth (`floo_axi_chimney.sv:811-816`, guarded by `EnSbrPort`; `floo_meta_buffer.sv:21` "Maximum number of non-atomic outstanding requests"). We already model it as `meta_buffer.max_outstanding` = 32. `floo_axi_chimney.sv:872-873` asserts RoB and meta buffer sit on opposite faces. |
+| "our slot pool doubles as the outstanding limit -- that is the coupling to fix" | It is the **deadlock guarantee**, and FlooNoC gates identically (`floo_rob.sv:345`). `docs/floonoc/chimneys.md:18`: "Stalling the network is not an option ... the NI also needs to track or allocate space in the RoB and only inject new requests into the network if it can guarantee that the responses can be handled." |
+| "add an independent outstanding counter before slot allocation" | Pointless alone. An independent per-ID limit (`MaxTxnsPerId`) becomes **mandatory** only once a bypass exists, because a bypassed transaction still occupies an order-list entry while consuming no slot (`floo_rob.sv:443` pushes unconditionally). Bypass and `MaxTxnsPerId` are one feature. |
 
-| concern | FlooNoC | here |
-|---|---|---|
-| outstanding request limit | `ChimneyCfg.MaxTxns` (default 32) | none. Falls out of the slot pool below. |
-| B-response RoB depth | `ChimneyCfg.BRoBSize` | `1 << ROB_IDX_WIDTH` = 32 (`rob.hpp:80,136`) |
-| R-data RoB depth | `ChimneyCfg.RRoBSize` | `1 << ROB_IDX_WIDTH` = 32 (`rob.hpp:80,137`) |
-| B-RoB storage | flip-flops. `i_b_rob` is instantiated with `OnlyMetaData = 1'b1`, so `floo_rob.sv:122` skips the SRAM. A B response is `{id, resp, user}`; there is no payload to hold. | a `WriteEntry` struct. Storage class not modelled. |
-| R-RoB storage | `tc_sram_impl(.NumWords(RRoBSize), .DataWidth($bits(axi_data_t)))`. `i_r_rob` passes `OnlyMetaData = 1'b0`. | a `ReadEntry` struct. Storage class not modelled. |
+What FlooNoC actually does that we do not: `floo_rob_status_table` skips slot allocation for two
+classes of transaction (`floo_rob.sv:422-433`) -- the first transaction of an ID, and a follow-on to
+the same destination as the previous one. Only the `else` branch allocates. That is why a 64-entry
+FlooNoC RoB is mostly idle.
 
-`rob_idx` itself is legitimately one field of one width: the header type is shared by B and R flits, in
-FlooNoC too (`typedef.svh:56`). The coupling to fix is **not** the field width. It is that our slot pool
-doubles as the outstanding limit, with no `MaxTxns` equivalent.
+**Clause 2 (same destination) does not hold in our fabric.** It assumes same destination implies
+in-order arrival, which FlooNoC buys by hardwiring `NumVirtChannels(1)` into `floo_axi_router`
+(`:100,132`). Our VC arbiter spreads one ID's packets across a VC pool ID-agnostically
+(`nmu/vc_arbiter.hpp:10-13`) and the router round-robins VCs per output (`router/router.hpp:240-250`).
+Restoring the clause needs per-ID VC pinning -- the mechanism deliberately deleted on 2026-06-30
+([[project_vc_id_agnostic_landed]]) -- which surrenders the VC spread that a multi-VC fabric exists
+to provide. FlooNoC has never shipped clause 2 together with multiple VCs; its VC router is in
+`hw/deprecated/`, and it assigns VC by next-hop direction with free-VC overflow, never by AXI ID
+(`hw/deprecated/vc_router_util/floo_vc_assignment.sv:70-88`, `floo_vc_selection.sv:36-46`).
 
-**Why it is invisible today.** The co-sim stimulus is `--len 0` (`sim/verilator/Makefile:228-230`), so one
-transaction occupies one beat slot and "32 slots" and "32 outstanding" are the same number.
+### Measured, but NOT validated -- do not build on these numbers
 
-The two directions do not behave alike under a burst, which is the second thing the single constant hides:
+A throwaway probe counted, per admitted transaction, whether each FlooNoC bypass clause *would* have
+fired. Reverted after the run; the patch is not in the tree. The aggregation reproduced the published
+sweep numbers exactly (`vc1 uniform_random` = 1227.7, `vc8` = 2127.8), which validates the harness but
+not the counters.
 
-- `Rob::push_aw` allocates exactly **one** slot (`rob.hpp:184`, `find_consecutive_free(free_write_entries_, 1)`).
-  A write burst returns one B response regardless of length, so the write pool always admits 32
-  outstanding writes.
-- `Rob::push_ar` allocates `len + 1` **consecutive** slots (`rob.hpp:216,219`). An 8-beat read consumes
-  eight, so the read outstanding limit collapses to four. Fragmentation makes it worse: eight free slots
-  that are not contiguous will refuse an 8-beat burst that would otherwise fit.
+Saturation, `INJECTION_MODE=1 INJECTION_RATE=1.0`, 200 txn/node x 16 nodes, seed 1:
 
-So `ROB_IDX_WIDTH` bounds writes by transaction and reads by beat. Nothing in the code says so.
+| tb | pattern | ids/tile | clause 1 (AW) | clause 2 (AW) | agg BW |
+|---|---|---|---|---|---|
+| vc1 | neighbor | 1 | 0.5% | 99.5% | 2079.3 |
+| vc1 | neighbor | 16 | 59.8% | 40.2% | 2079.3 |
+| vc1 | uniform_random | 1 | 0.5% | 0.0% | 1227.7 |
+| vc1 | uniform_random | 16 | 93.6% | 0.4% | 1228.3 |
+| vc8 | neighbor | 1 | 0.5% | 99.5% | 2564.3 |
+| vc8 | neighbor | 16 | 59.8% | 40.2% | 2564.3 |
+| vc8 | uniform_random | 1 | 0.6% | 0.1% | 2127.8 |
+| vc8 | uniform_random | 16 | 24.2% | 1.2% | 2219.2 |
 
-**Shape of the fix.** Add an independent outstanding counter, checked before slot allocation. Leave
-`ROB_IDX_WIDTH` alone: `rob_idx` is legitimately one field of one width, in FlooNoC too. Optionally split
-the write and read pool depths so the write side, which needs no data storage, can be sized differently.
+- **clause 1 at the shipped stimulus is 0.5%**, i.e. exactly 16/3200 -- the first transaction of each
+  node, once. Injection rate does not move it (0.2 / 0.5 / 1.0 all give 0.5%). Structural: `--ids-per-tile`
+  defaults to 1 (`gen_test_patterns.py:483`, never passed by `sim/verilator/Makefile`), so each tile
+  drives one AXI ID whose order list never drains while the master pipelines.
+- **RoB occupancy does not govern throughput here.** Raising ids/tile 1 -> 16 swings clause-1 hit rate
+  from 0.5% to 24-94% (so the RoB empties) while BW moves +0.05% (vc1) / +4.3% (vc8). This **refutes**
+  the earlier backlog claim that "the per-NMU RoB ceiling (32 entries, `rob.hpp:80`) is the true limiter".
+  Caveat: ids/tile also raises master-side concurrency, so the +4.3% is not cleanly attributable.
+- **The probe was never fault-injected.** A sticky-flag clear bug would produce the identical 16/3200
+  signature. Before any number above is used, delete the sticky flag and confirm the count changes
+  ([[feedback_verification_ip_fault_injection]]).
+- **`neighbor` BW is bit-identical across ids/tile** (2079.3 / 2564.3 to the decimal) while
+  `uniform_random` moves. Unexplained.
+- **Nothing here sees a burst.** All runs are `--len 0`, so one read slot = one transaction. The read
+  pool's beat-granular allocation (`rob.hpp:216-219`, `len+1` linearly consecutive slots) and its
+  fragmentation are the one place the RoB plausibly binds, and this matrix cannot see them.
 
-Nothing in FlooNoC couples `MaxTxns` to either RoB size. Codex searched `floo_axi_chimney.sv` for an
-assert naming both and found none, so the decoupling is real, not an accident of their defaults.
+### Next
 
-Admission in `RobMode::Enabled` is blocked **only** by slot-allocation failure (`rob.hpp:182,219`). The
-`s1_aw_.full()` / `s1_ar_.full()` checks upstream are ordinary queue backpressure, not a transaction-count
-limit.
+Per user (2026-07-10): the c_model is where hardware design decisions get pinned, so area is now a
+first-class concern. Do **not** build an area model inside the c_model -- FlooNoC does not. Expose the
+parameters that determine area, sweep performance against them, compute area outside.
+`docs/nmu-rob-microarchitecture.md` section 7 lists the five shapes C++ chose by accident; section 6
+maps them onto FlooNoC's five named sizes. Ranked candidates:
 
-**Measured context** (this round, `--len 0`, `uniform_random`, `_rob`, rate 1.0): in-flight transactions
-per node are 27.2 at vc1 and 36.6 at vc8, derived by Little's law from the monitor's throughput and
-latency. Both exceed the 32-slot read pool, because the monitor timestamps at the AXI interface and the
-NMU's 16-deep AR queue sits ahead of the RoB. Any change here moves those numbers.
+**IN PROGRESS.** Spec `docs/superpowers/specs/2026-07-10-nmu-rob-bypass-and-depth-design.md` covers
+items 1-3 below: `b_rob_depth` / `r_rob_depth` as independent runtime parameters, bypass clause 1,
+`max_txns_per_id`. Codex-reviewed; two decisions were refuted and rewritten (`max_txns_per_id` is a
+sizing parameter, not a safety requirement; bypass adds no backpressure class the shipped
+`RobMode::Disabled` path does not already have).
+
+1. Fault-inject the probe (blocking for every number above).
+2. `BRoBSize` / `RRoBSize` as independent runtime parameters, each asserted `<= 1 << ROB_IDX_WIDTH`.
+   Laziest form: keep the 32-entry arrays, add a runtime `depth_` bound. Unblocks a depth sweep;
+   today 32 is a compile-time constant and the interesting region is below it.
+3. Burst co-sim (`--len > 0`). Required before the R-side depth curve means anything, and the only
+   way to exercise the AR wedge above.
+3b. **Per-beat R release.** `pop_r_staged` holds every slot of a burst until its last beat lands
+   (`rob.hpp:353-362`). Stricter than AXI4, which permits read data of different `ARID`s to
+   interleave on R (`RID` distinguishes; only *write* interleaving and `WID` were removed), and
+   stricter than FlooNoC, which releases one beat at a time, frees each slot as its beat leaves
+   (`floo_rob.sv:250-266`), and forwards another ID's response when the next beat is late
+   (`floo_rob.sv:287-297`). Costs latency and blocks mid-burst slot recycling. Own round.
+4. Per-ID order table structure and `NumIds`: 256 independent FIFOs (`floo_rob.sv:450-465`) vs a
+   shared `id_queue` (`floo_meta_buffer.sv:146-151`, which FlooNoC uses for the same problem) differ
+   by roughly an order of magnitude at 256 IDs. Third option: pulp `axi_id_remap`
+   (`axi/v0.39.7/src/axi_id_remap.sv`, params `AxiSlvPortMaxUniqIds` / `AxiMaxTxnsPerId`) in front of
+   the RoB, which is the standard way to give a RoB a small `NumIds` without narrowing the NI's
+   external AXI ID width. `AWID_WIDTH = 8` is a spec value; changing it needs approval.
+5. `RobMode` per direction. `NmuConfig` has `read_rob_mode` / `write_rob_mode`; `nmu_wrap.hpp:69-70`
+   ties them. A B-only RoB is FlooNoC's cheap point (`BRoBType` != `RRoBType`) and is unreachable today.
+6. `RobMode::Disabled` vs FlooNoC `NoRoB`: ours stalls same-ID regardless of destination, FlooNoC
+   admits same-destination follow-ons up to a counter (`floo_rob_wrapper.sv:139`). **Not a gap we
+   can close.** It rests on the same "same destination implies in-order arrival" premise as bypass
+   clause 2, and fails for the same reason -- multiple VCs, ID-agnostic round-robin, no reorder
+   storage in `NoRoB` to catch the overtake.
+
+**Consequence worth stating once.** Under ID-agnostic VC round-robin, *every* cheap ordering path
+FlooNoC offers -- bypass clause 2, `NoRoB`'s same-destination counter -- is closed to us. The only
+way to hold more than one outstanding transaction per AXI ID is a RoB. `RobMode::Disabled`
+(one per ID) and `RobMode::Enabled` (RoB) are therefore not two points on a spectrum with a middle;
+they are the only two points. Bypass clause 1 remains available because it assumes nothing about the
+network. This is the price the VC spread charges, and it has never been written down.
 
 ## Done -- injection-mode + rate sweep, VC comparison figures (2026-07-09, branch `feat/injection-mode-sweep`)
 
@@ -236,6 +296,24 @@ Design-round candidates (SAM remap, multi-id stimulus, NoC-layer QoS, non-4x4 to
 Design rounds section; none is urgent.
 
 ## Bugs
+
+### OPEN — `RobMode::Enabled` wedges the AR channel on a read burst longer than the RoB (2026-07-10)
+
+`Rob::push_ar` returns `false` for any `len + 1 > ROB_CAPACITY` = 32 (`rob.hpp:218`) and has no other
+path. `AxiSlavePort::forward_ar_to_packetizer_` (`axi_slave_port.hpp:153-158`) retries the same
+`ar_q_.front()` and never pops it, so the oversized AR head-of-line-blocks every later AR, including
+short ones on other AXI IDs. `arready` is driven from queue capacity alone (`nmu_wrap.hpp:188-190`),
+so it drops once `ar_q_` fills behind the stuck head and never rises. AXI4 permits `len` up to 255
+(`axi/protocol_rules.hpp:40`). Confirmed by inspection, Codex-verified; no upstream limit prevents
+such an AR from being presented.
+
+Recorded until now only as a matrix exclusion (`AX4-BUR-003`, `len 256`, "rob capacity") and as an
+`EXPECT_FALSE` in `test_rob.cpp:278-293`. Neither names it a defect.
+
+FlooNoC's 64-entry RoB accepts the same burst: `rob_free_space > ax_len_i` is consulted **only** on
+the `ax_rob_req_o` path (`floo_rob.sv:336-355`), so a transaction that needs no reordering is admitted
+at any length. Bypass clause 1 is the fix, not a bigger pool. Spec:
+`docs/superpowers/specs/2026-07-10-nmu-rob-bypass-and-depth-design.md`.
 
 ### Pre-existing fabric bugs (the matrix caught these, which is its purpose)
 
