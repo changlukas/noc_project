@@ -35,6 +35,57 @@ smoke clean, generator pytest 16/16.
   `:=` to `=` (deferred) so the `local.mk` BUILD_ROOT override (`$(HOME)/noc_build` on WSL) applies.
   `make build` / `make test` now target `$HOME/noc_build/cmodel` correctly; no cmake workaround needed.
 
+## Next round: decouple the NMU RoB from the outstanding limit (surfaced 2026-07-10)
+
+One constant, `ni::header::ROB_IDX_WIDTH = 5` (`ni_flit_constants.h:56`; the field is declared in
+`specgen/generated/json/ni_packet.json:82-84` as `width_param: ROB_IDX_WIDTH`, not in `constants.yaml`),
+currently decides three separate things. FlooNoC keeps them as independent parameters.
+
+Every claim below was fact-checked against the FlooNoC RTL and our own code (Codex pass, 2026-07-10):
+all CONFIRMED.
+
+| concern | FlooNoC | here |
+|---|---|---|
+| outstanding request limit | `ChimneyCfg.MaxTxns` (default 32) | none. Falls out of the slot pool below. |
+| B-response RoB depth | `ChimneyCfg.BRoBSize` | `1 << ROB_IDX_WIDTH` = 32 (`rob.hpp:80,136`) |
+| R-data RoB depth | `ChimneyCfg.RRoBSize` | `1 << ROB_IDX_WIDTH` = 32 (`rob.hpp:80,137`) |
+| B-RoB storage | flip-flops. `i_b_rob` is instantiated with `OnlyMetaData = 1'b1`, so `floo_rob.sv:122` skips the SRAM. A B response is `{id, resp, user}`; there is no payload to hold. | a `WriteEntry` struct. Storage class not modelled. |
+| R-RoB storage | `tc_sram_impl(.NumWords(RRoBSize), .DataWidth($bits(axi_data_t)))`. `i_r_rob` passes `OnlyMetaData = 1'b0`. | a `ReadEntry` struct. Storage class not modelled. |
+
+`rob_idx` itself is legitimately one field of one width: the header type is shared by B and R flits, in
+FlooNoC too (`typedef.svh:56`). The coupling to fix is **not** the field width. It is that our slot pool
+doubles as the outstanding limit, with no `MaxTxns` equivalent.
+
+**Why it is invisible today.** The co-sim stimulus is `--len 0` (`sim/verilator/Makefile:228-230`), so one
+transaction occupies one beat slot and "32 slots" and "32 outstanding" are the same number.
+
+The two directions do not behave alike under a burst, which is the second thing the single constant hides:
+
+- `Rob::push_aw` allocates exactly **one** slot (`rob.hpp:184`, `find_consecutive_free(free_write_entries_, 1)`).
+  A write burst returns one B response regardless of length, so the write pool always admits 32
+  outstanding writes.
+- `Rob::push_ar` allocates `len + 1` **consecutive** slots (`rob.hpp:216,219`). An 8-beat read consumes
+  eight, so the read outstanding limit collapses to four. Fragmentation makes it worse: eight free slots
+  that are not contiguous will refuse an 8-beat burst that would otherwise fit.
+
+So `ROB_IDX_WIDTH` bounds writes by transaction and reads by beat. Nothing in the code says so.
+
+**Shape of the fix.** Add an independent outstanding counter, checked before slot allocation. Leave
+`ROB_IDX_WIDTH` alone: `rob_idx` is legitimately one field of one width, in FlooNoC too. Optionally split
+the write and read pool depths so the write side, which needs no data storage, can be sized differently.
+
+Nothing in FlooNoC couples `MaxTxns` to either RoB size. Codex searched `floo_axi_chimney.sv` for an
+assert naming both and found none, so the decoupling is real, not an accident of their defaults.
+
+Admission in `RobMode::Enabled` is blocked **only** by slot-allocation failure (`rob.hpp:182,219`). The
+`s1_aw_.full()` / `s1_ar_.full()` checks upstream are ordinary queue backpressure, not a transaction-count
+limit.
+
+**Measured context** (this round, `--len 0`, `uniform_random`, `_rob`, rate 1.0): in-flight transactions
+per node are 27.2 at vc1 and 36.6 at vc8, derived by Little's law from the monitor's throughput and
+latency. Both exceed the 32-slot read pool, because the monitor timestamps at the AXI interface and the
+NMU's 16-deep AR queue sits ahead of the RoB. Any change here moves those numbers.
+
 ## Done -- injection-mode + rate sweep, VC comparison figures (2026-07-09, branch `feat/injection-mode-sweep`)
 
 Spec `docs/superpowers/specs/2026-07-09-injection-mode-and-rate-sweep-design.md`, plan
