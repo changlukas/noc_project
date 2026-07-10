@@ -591,6 +591,7 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdGate_AppliesToReadsIndependently) {
     ASSERT_TRUE(rob.push_ar(make_ar(0x0B, 0x100)));
     ASSERT_TRUE(rob.push_ar(make_ar(0x0B, 0x200)));
     EXPECT_FALSE(rob.push_ar(make_ar(0x0B, 0x300)));
+    EXPECT_GT(rob.read_free_space(), 0u) << "the cap refused, not the pool";
     EXPECT_TRUE(rob.push_aw(make_aw(0x0B, 0x400)))
         << "the write list of the same id is independent";
 }
