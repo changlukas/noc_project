@@ -251,10 +251,53 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
     EXPECT_EQ(f2.get_header_field("rob_idx"), 4u);
 }
 
+TEST(NmuRob, Enabled_ConstructorMarksOnlyDepthSlotsFree) {
+    SCENARIO("Rob Enabled: only [0, depth) is free at construction; slots above it never are");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 4, 8);
+    EXPECT_EQ(rob.b_rob_depth(), 4u);
+    EXPECT_EQ(rob.r_rob_depth(), 8u);
+    EXPECT_EQ(rob.free_write_slots(), 4u);
+    EXPECT_EQ(rob.free_read_slots(), 8u);
+}
+
+TEST(NmuRob, Enabled_DefaultDepthIsThirtyTwo) {
+    SCENARIO("Rob Enabled: the default pool is 32 entries, not the 256-entry index space");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    EXPECT_EQ(rob.b_rob_depth(), 32u);
+    EXPECT_EQ(rob.r_rob_depth(), 32u);
+    EXPECT_EQ(Rob::ROB_IDX_SPACE, 256u);
+}
+
+TEST(NmuRob, Enabled_MaxBurst_LenPlus1DoesNotOverflow) {
+    SCENARIO("Rob Enabled: a 256-beat AR into a 256-deep read pool allocates 256 slots");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE,
+            Rob::ROB_IDX_SPACE);
+
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 255;  // 256 beats: len_plus_1 does not fit in uint8_t
+    ASSERT_TRUE(rob.push_ar(ar));
+    EXPECT_EQ(rob.free_read_slots(), 0u) << "all 256 slots consumed";
+    auto f = *ar_cap.pop();
+    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);
+    EXPECT_EQ(f.get_header_field("rob_req"), 1u);
+}
+
 TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
     SCENARIO(
         "Rob Enabled: find_consecutive_free returns -1 when fragmented free pool lacks a run of n");
-    std::bitset<Rob::ROB_CAPACITY> free;
+    std::bitset<Rob::ROB_IDX_SPACE> free;
     // Fragmented free state: bits 1 at positions 0, 2, 4, 6 only.
     free.set(0);
     free.set(2);
@@ -268,11 +311,11 @@ TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
     // n=1 always finds position 0 first.
     EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
 
-    // All free (32 free bits): n up to 32 succeeds at base=0; n=33 fails (over capacity).
+    // All free: n up to ROB_IDX_SPACE succeeds at base=0; one more fails.
     free.set();
     EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
-    EXPECT_EQ(Rob::find_consecutive_free(free, 32), 0);
-    EXPECT_EQ(Rob::find_consecutive_free(free, 33), -1);
+    EXPECT_EQ(Rob::find_consecutive_free(free, Rob::ROB_IDX_SPACE), 0);
+    EXPECT_EQ(Rob::find_consecutive_free(free, Rob::ROB_IDX_SPACE + 1), -1);
 }
 
 TEST(NmuRob, Enabled_PushAr_OversizedBurst_ReturnFalse) {
@@ -563,6 +606,30 @@ TEST(NmuRobDeath, Enabled_PopBWithDisabledFlit_Abort) {
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
     depkt.tick();
     EXPECT_DEATH(rob.pop_b(), ".*");
+}
+
+TEST(NmuRobDeath, Enabled_DepthZeroAborts) {
+    SCENARIO("Rob: b_rob_depth = 0 is rejected at construction");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    EXPECT_DEATH(
+        { Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 0, 32); }, ".*");
+}
+
+TEST(NmuRobDeath, Enabled_DepthAboveIdxSpaceAborts) {
+    SCENARIO("Rob: r_rob_depth > ROB_IDX_SPACE is rejected at construction");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    EXPECT_DEATH(
+        {
+            Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32,
+                    Rob::ROB_IDX_SPACE + 1);
+        },
+        ".*");
 }
 
 TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {

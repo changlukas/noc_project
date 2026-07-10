@@ -32,8 +32,10 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 //
 // Single-threaded tick model: state mutations from RequestPacketizer-side (push_aw/ar)
 // and ResponseDepacketizer-side (pop_b/r) happen in the same thread, no synchronization.
-// Tick order (per AxiSlavePort): drain B/R before forwarding AW/W/AR -> response
-// frees IDs in same cycle, request can use freed IDs after.
+// Tick order: standalone AxiSlavePort::tick() drains B/R before forwarding AW/W/AR.
+// The integrated Nmu::tick() (nmu.hpp) runs the opposite order -- request side
+// (push_aw/w/ar via axi_slave_port_.tick_req()) before response drain -- so an id
+// freed by this cycle's B/R is not available to this cycle's request side.
 //
 // RoB-less (Disabled) same-id response ordering is guaranteed by the NMU
 // single-outstanding interlock (one transaction in flight per id), not by
@@ -42,14 +44,23 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_w,
-        RobMode mode_r, addr_trans::SamTable sam)
+        RobMode mode_r, addr_trans::SamTable sam, std::size_t b_rob_depth = 32,
+        std::size_t r_rob_depth = 32)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
           mode_w_(mode_w),
           mode_r_(mode_r),
-          sam_(std::move(sam)) {
-        free_write_entries_.set();
-        free_read_entries_.set();
+          sam_(std::move(sam)),
+          b_rob_depth_(b_rob_depth),
+          r_rob_depth_(r_rob_depth) {
+        assert(b_rob_depth_ >= 1 && b_rob_depth_ <= ROB_IDX_SPACE &&
+               "nmu::Rob: b_rob_depth outside [1, ROB_IDX_SPACE]");
+        assert(r_rob_depth_ >= 1 && r_rob_depth_ <= ROB_IDX_SPACE &&
+               "nmu::Rob: r_rob_depth outside [1, ROB_IDX_SPACE]");
+        if (b_rob_depth_ < 1 || b_rob_depth_ > ROB_IDX_SPACE) std::abort();
+        if (r_rob_depth_ < 1 || r_rob_depth_ > ROB_IDX_SPACE) std::abort();
+        for (std::size_t i = 0; i < b_rob_depth_; ++i) free_write_entries_.set(i);
+        for (std::size_t i = 0; i < r_rob_depth_; ++i) free_read_entries_.set(i);
     }
 
     // ===== RequestPacketizer interface =====
@@ -77,14 +88,22 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     void commit_r_exit(uint8_t rob_idx, uint8_t axi_id);
 
     // === Enabled mode public constants (for testing + caller info) ===
-    static constexpr std::size_t ROB_CAPACITY = 1u << ni::header::ROB_IDX_WIDTH;  // 32
+    // Addressable range of the rob_idx header field, NOT the pool depth.
+    // Pool depths are b_rob_depth_ / r_rob_depth_ and may be smaller.
+    static constexpr std::size_t ROB_IDX_SPACE = 1u << ni::header::ROB_IDX_WIDTH;  // 256
     // AXI ID space alias — single source of truth lives in axi::AXI_ID_SPACE.
     static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256
 
-    // Linear scan for first run of n consecutive 1s in bitset<ROB_CAPACITY>.
-    // Returns base index (0..ROB_CAPACITY-1), or -1 if no such run exists.
-    // O(ROB_CAPACITY) worst case. Public for direct unit testing (TDD).
-    static int find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n);
+    // Linear scan for first run of n consecutive 1s in bitset<ROB_IDX_SPACE>.
+    // Returns base index (0..ROB_IDX_SPACE-1), or -1 if no such run exists.
+    // O(ROB_IDX_SPACE) worst case. Public for direct unit testing (TDD).
+    static int find_consecutive_free(const std::bitset<ROB_IDX_SPACE>& free, std::size_t n);
+
+    std::size_t b_rob_depth() const noexcept { return b_rob_depth_; }
+    std::size_t r_rob_depth() const noexcept { return r_rob_depth_; }
+    // Free Enabled-mode slots. Slots >= depth are never free.
+    std::size_t free_write_slots() const noexcept { return free_write_entries_.count(); }
+    std::size_t free_read_slots() const noexcept { return free_read_entries_.count(); }
 
     // Test introspection: current outstanding-entry count summed over all ids.
     // Counts Disabled-mode per-id flags (one per id at most). Enabled-mode
@@ -106,6 +125,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     ResponseDepacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
     addr_trans::SamTable sam_;
+    std::size_t b_rob_depth_;
+    std::size_t r_rob_depth_;
 
     // Per-AXI-ID single-outstanding flag. True while one AW/AR is in flight for
     // that id; cleared by B (for writes) or R(last) (for reads) in pop_b/pop_r.
@@ -131,15 +152,15 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         uint8_t axi_id = 0;
         axi::RBeat r_beat = {};
     };
-    std::array<WriteEntry, ROB_CAPACITY> write_entries_;
-    std::array<ReadEntry, ROB_CAPACITY> read_entries_;
-    std::bitset<ROB_CAPACITY> free_write_entries_;
-    std::bitset<ROB_CAPACITY> free_read_entries_;
+    std::array<WriteEntry, ROB_IDX_SPACE> write_entries_;
+    std::array<ReadEntry, ROB_IDX_SPACE> read_entries_;
+    std::bitset<ROB_IDX_SPACE> free_write_entries_;
+    std::bitset<ROB_IDX_SPACE> free_read_entries_;
 
     // Per-id ordered range list. AW = {base, 1}; AR = {base, len+1}.
     struct BeatRange {
         uint8_t base;
-        uint8_t len_plus_1;
+        uint16_t len_plus_1;  // up to 256
     };
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
@@ -149,21 +170,21 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Reset when the range is popped from read_order_by_id_ (ties counter lifecycle
     // to slot-reuse eligibility). read_range_len_[base] = burst length n, set in
     // push_ar, used to bound the counter (beat past burst length is malformed).
-    std::array<uint8_t, ROB_CAPACITY> read_arrival_offset_{};
-    std::array<uint8_t, ROB_CAPACITY> read_range_len_{};
+    std::array<uint16_t, ROB_IDX_SPACE> read_arrival_offset_{};
+    std::array<uint16_t, ROB_IDX_SPACE> read_range_len_{};
 
     // Ready-to-emit beats drained by pop_b / pop_r (Task 3).
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
-    std::array<uint8_t, ROB_CAPACITY> committed_b_pending_{};
-    std::array<uint8_t, ROB_CAPACITY> committed_r_pending_{};
+    std::array<uint8_t, ROB_IDX_SPACE> committed_b_pending_{};
+    std::array<uint8_t, ROB_IDX_SPACE> committed_r_pending_{};
 };
 
 // Linear scan for n consecutive free slots. See declaration above.
-inline int Rob::find_consecutive_free(const std::bitset<ROB_CAPACITY>& free, std::size_t n) {
-    if (n == 0 || n > ROB_CAPACITY) return -1;
+inline int Rob::find_consecutive_free(const std::bitset<ROB_IDX_SPACE>& free, std::size_t n) {
+    if (n == 0 || n > ROB_IDX_SPACE) return -1;
     std::size_t run = 0;
-    for (std::size_t i = 0; i < ROB_CAPACITY; ++i) {
+    for (std::size_t i = 0; i < ROB_IDX_SPACE; ++i) {
         if (free.test(i)) {
             ++run;
             if (run == n) return static_cast<int>(i - n + 1);
@@ -214,8 +235,8 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (mode_r_ == RobMode::Enabled) {
         std::size_t n = static_cast<std::size_t>(b.len) + 1u;
-        // Oversized burst: cannot fit in pool at all.
-        if (n > ROB_CAPACITY) return false;
+        // Oversized burst: cannot fit in the read pool at all.
+        if (n > r_rob_depth_) return false;
         int base = find_consecutive_free(free_read_entries_, n);
         if (base < 0) return false;  // no consecutive run
         auto t = sam_.translate(b.addr);
@@ -228,8 +249,8 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
             read_entries_[base + i] =
                 ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
         }
-        read_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), static_cast<uint8_t>(n)});
-        read_range_len_[base] = static_cast<uint8_t>(n);
+        read_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), static_cast<uint16_t>(n)});
+        read_range_len_[base] = static_cast<uint16_t>(n);
         return true;
     }
     auto t = sam_.translate(b.addr);
@@ -285,7 +306,7 @@ inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
         assert(false && "Enabled Rob received Disabled flit");
         std::abort();
     }
-    if (!(meta.rob_idx < ROB_CAPACITY)) {
+    if (!(meta.rob_idx < ROB_IDX_SPACE)) {
         assert(false && "rob_idx out of range");
         std::abort();
     }
@@ -324,7 +345,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         assert(false && "Enabled Rob received Disabled flit");
         std::abort();
     }
-    if (!(meta.rob_idx < ROB_CAPACITY)) {
+    if (!(meta.rob_idx < ROB_IDX_SPACE)) {
         assert(false && "rob_idx out of range");
         std::abort();
     }
@@ -337,7 +358,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         std::abort();
     }
     std::size_t slot_idx = static_cast<std::size_t>(base) + arrival_offset;
-    if (!(slot_idx < ROB_CAPACITY)) {
+    if (!(slot_idx < ROB_IDX_SPACE)) {
         assert(false && "computed read slot out of range");
         std::abort();
     }
@@ -353,16 +374,17 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     while (!read_order_by_id_[id].empty()) {
         BeatRange head = read_order_by_id_[id].front();
         bool all_ready = true;
-        for (uint8_t i = 0; i < head.len_plus_1; ++i) {
+        for (std::size_t i = 0; i < head.len_plus_1; ++i) {
             if (!read_entries_[head.base + i].ready) {
                 all_ready = false;
                 break;
             }
         }
         if (!all_ready) break;
-        for (uint8_t i = 0; i < head.len_plus_1; ++i) {
-            uint8_t idx = static_cast<uint8_t>(head.base + i);
-            committed_r_queue_.push_back({read_entries_[idx].r_beat, idx, id});
+        for (std::size_t i = 0; i < head.len_plus_1; ++i) {
+            const std::size_t idx = static_cast<std::size_t>(head.base) + i;
+            committed_r_queue_.push_back(
+                {read_entries_[idx].r_beat, static_cast<uint8_t>(idx), id});
             ++committed_r_pending_[idx];
         }
         read_arrival_offset_[head.base] = 0;
@@ -375,7 +397,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
 }
 
 inline void Rob::commit_b_exit(uint8_t rob_idx, uint8_t axi_id) {
-    assert(rob_idx < ROB_CAPACITY);
+    assert(rob_idx < ROB_IDX_SPACE);
     assert(committed_b_pending_[rob_idx] > 0);
     --committed_b_pending_[rob_idx];
     if (committed_b_pending_[rob_idx] == 0) {
@@ -385,7 +407,7 @@ inline void Rob::commit_b_exit(uint8_t rob_idx, uint8_t axi_id) {
 }
 
 inline void Rob::commit_r_exit(uint8_t rob_idx, uint8_t axi_id) {
-    assert(rob_idx < ROB_CAPACITY);
+    assert(rob_idx < ROB_IDX_SPACE);
     assert(committed_r_pending_[rob_idx] > 0);
     --committed_r_pending_[rob_idx];
     if (committed_r_pending_[rob_idx] == 0) {
