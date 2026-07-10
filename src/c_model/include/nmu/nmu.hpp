@@ -113,14 +113,14 @@ struct NmuRspBEntry {
     axi::BBeat beat;
     uint8_t rob_idx = 0;
     uint8_t axi_id = 0;
-    bool rob_enabled = false;
+    bool rob_req = false;  // owns a RoB slot; false => bypassed
 };
 
 struct NmuRspREntry {
     axi::RBeat beat;
     uint8_t rob_idx = 0;
     uint8_t axi_id = 0;
-    bool rob_enabled = false;
+    bool rob_req = false;
 };
 
 struct NmuConfig {
@@ -319,13 +319,13 @@ inline void Nmu::tick() {
 
 inline bool Nmu::push_rsp_b_to_axi_(const NmuRspBEntry& entry) {
     if (!axi_slave_port_.push_b_staged(entry.beat)) return false;
-    if (entry.rob_enabled) rob_.commit_b_exit(entry.rob_idx, entry.axi_id);
+    if (entry.rob_req) rob_.commit_b_exit(entry.rob_idx, entry.axi_id);
     return true;
 }
 
 inline bool Nmu::push_rsp_r_to_axi_(const NmuRspREntry& entry) {
     if (!axi_slave_port_.push_r_staged(entry.beat)) return false;
-    if (entry.rob_enabled) rob_.commit_r_exit(entry.rob_idx, entry.axi_id);
+    if (entry.rob_req) rob_.commit_r_exit(entry.rob_idx, entry.axi_id);
     return true;
 }
 

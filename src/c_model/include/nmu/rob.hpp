@@ -74,11 +74,13 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         axi::BBeat beat;
         uint8_t rob_idx;
         uint8_t axi_id;
+        bool rob_req;  // false => bypassed, owns no slot, must skip commit_b_exit
     };
     struct CommittedREntry {
         axi::RBeat beat;
         uint8_t rob_idx;
         uint8_t axi_id;
+        bool rob_req;
     };
     std::optional<CommittedBEntry> pop_b_staged();
     std::optional<CommittedREntry> pop_r_staged();
@@ -269,7 +271,7 @@ inline std::optional<axi::BBeat> Rob::pop_b() {
     if (mode_w_ == RobMode::Enabled) {
         auto out = pop_b_staged();
         if (!out) return std::nullopt;
-        commit_b_exit(out->rob_idx, out->axi_id);
+        if (out->rob_req) commit_b_exit(out->rob_idx, out->axi_id);
         return out->beat;
     }
     auto opt = next_depkt_.pop_b();
@@ -283,7 +285,7 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
     if (mode_r_ == RobMode::Enabled) {
         auto out = pop_r_staged();
         if (!out) return std::nullopt;
-        commit_r_exit(out->rob_idx, out->axi_id);
+        if (out->rob_req) commit_r_exit(out->rob_idx, out->axi_id);
         return out->beat;
     }
     auto opt = next_depkt_.pop_r();
@@ -324,7 +326,7 @@ inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
     while (!write_order_by_id_[id].empty()) {
         BeatRange head = write_order_by_id_[id].front();
         if (!write_entries_[head.base].ready) break;
-        committed_b_queue_.push_back({write_entries_[head.base].b_beat, head.base, id});
+        committed_b_queue_.push_back({write_entries_[head.base].b_beat, head.base, id, true});
         ++committed_b_pending_[head.base];
         write_order_by_id_[id].pop_front();
     }
@@ -380,7 +382,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         while (release_off < head.len_plus_1 && read_entries_[head.base + release_off].ready) {
             const std::size_t idx = static_cast<std::size_t>(head.base) + release_off;
             committed_r_queue_.push_back(
-                {read_entries_[idx].r_beat, static_cast<uint8_t>(idx), id});
+                {read_entries_[idx].r_beat, static_cast<uint8_t>(idx), id, true});
             ++committed_r_pending_[idx];
             ++release_off;
         }
