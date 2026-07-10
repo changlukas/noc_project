@@ -132,6 +132,8 @@ struct NmuConfig {
     // docs/nmu-rob-microarchitecture.md section 6.
     std::size_t b_rob_depth = 32;
     std::size_t r_rob_depth = 32;
+    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). Enabled mode only.
+    std::size_t max_txns_per_id = 32;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
     uint8_t write_vc = 0;
@@ -285,7 +287,7 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
                  cfg_.src_id, cfg_.sam),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode, cfg_.sam,
-           cfg_.b_rob_depth, cfg_.r_rob_depth),
+           cfg_.b_rob_depth, cfg_.r_rob_depth, cfg_.max_txns_per_id),
       axi_slave_port_(rob_, rob_, cfg_.port_params),
       s2_rsp_b_(),
       s2_rsp_r_(),

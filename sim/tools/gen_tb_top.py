@@ -527,6 +527,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w('                                                                 input int rob_enabled,')
         w('                                                                 input int b_rob_depth,')
         w('                                                                 input int r_rob_depth,')
+        w('                                                                 input int max_txns_per_id,')
         w('                                                                 input string config_path);')
     else:
         w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,')
@@ -558,6 +559,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w("    // NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits).")
         w("    int unsigned b_rob_depth = 32;")
         w("    int unsigned r_rob_depth = 32;")
+        w("    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).")
+        w("    int unsigned max_txns_per_id = 32;")
         w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
@@ -570,13 +573,14 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     if rob_enabled:
         w('        void\'($value$plusargs("b_rob_depth=%d", b_rob_depth));')
         w('        void\'($value$plusargs("r_rob_depth=%d", r_rob_depth));')
+        w('        void\'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));')
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
     for (i, x, y, c) in nodes:
         if rob_enabled:
             w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1, '
-              f'b_rob_depth, r_rob_depth, sam_config_path);  '
+              f'b_rob_depth, r_rob_depth, max_txns_per_id, sam_config_path);  '
               f'// src_id = node{i} coord {c}, ROB Enabled')
         else:
             w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC, sam_config_path);  '

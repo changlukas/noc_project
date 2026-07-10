@@ -564,6 +564,47 @@ TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
     EXPECT_FALSE(rob.push_aw(make_aw(0x33, 0x200)));
 }
 
+TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable) {
+    SCENARIO("Rob Enabled: the (max_txns_per_id+1)-th same-id AW is refused while slots remain");
+    ChannelModel noc(256, 256);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 256, 256);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 3);
+
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(rob.push_aw(make_aw(0x09, 0x100 + 0x40 * i))) << "same-id AW " << i;
+    }
+    EXPECT_FALSE(rob.push_aw(make_aw(0x09, 0x400))) << "per-id cap bites before the pool does";
+    EXPECT_GT(rob.write_free_space(), 0u);
+    EXPECT_TRUE(rob.push_aw(make_aw(0x0A, 0x500))) << "the gate is per-id, not global";
+}
+
+TEST(NmuRob, Enabled_MaxTxnsPerIdGate_AppliesToReadsIndependently) {
+    SCENARIO("Rob Enabled: the per-id cap gates AR independently of AW");
+    ChannelModel noc(256, 256);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 256, 256);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 2);
+
+    ASSERT_TRUE(rob.push_ar(make_ar(0x0B, 0x100)));
+    ASSERT_TRUE(rob.push_ar(make_ar(0x0B, 0x200)));
+    EXPECT_FALSE(rob.push_ar(make_ar(0x0B, 0x300)));
+    EXPECT_TRUE(rob.push_aw(make_aw(0x0B, 0x400)))
+        << "the write list of the same id is independent";
+}
+
+TEST(NmuRob, Enabled_MaxTxnsPerIdDefaultIsThirtyTwo) {
+    SCENARIO("Rob Enabled: the default per-id cap is FlooNoC's MaxRoTxnsPerId = 32");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    EXPECT_EQ(rob.max_txns_per_id(), 32u);
+}
+
 TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
     SCENARIO(
         "Rob Enabled: push_aw rolled back on downstream backpressure; slot stays free for retry");
@@ -861,6 +902,17 @@ TEST(NmuRobDeath, Enabled_DepthAboveIdxSpaceAborts) {
             Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32,
                     Rob::ROB_IDX_SPACE + 1);
         },
+        ".*");
+}
+
+TEST(NmuRobDeath, Enabled_MaxTxnsPerIdZeroAborts) {
+    SCENARIO("Rob: max_txns_per_id = 0 is rejected at construction");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    EXPECT_DEATH(
+        { Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 0); },
         ".*");
 }
 

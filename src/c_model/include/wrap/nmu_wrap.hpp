@@ -50,7 +50,8 @@ class NmuWrap {
     // callers are unaffected.
     void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kAxiQueueDepth,
               nmu::RobMode rob_mode = nmu::RobMode::Disabled, const char* config_path = nullptr,
-              std::size_t b_rob_depth = kRobBDepth, std::size_t r_rob_depth = kRobRDepth) {
+              std::size_t b_rob_depth = kRobBDepth, std::size_t r_rob_depth = kRobRDepth,
+              std::size_t max_txns_per_id = kRobMaxTxnsPerId) {
         using namespace ni::cmodel::nmu;
         num_vc_ = num_vc;
         NmuConfig cfg{};
@@ -71,6 +72,7 @@ class NmuWrap {
         cfg.write_rob_mode = rob_mode;
         cfg.b_rob_depth = b_rob_depth;
         cfg.r_rob_depth = r_rob_depth;
+        cfg.max_txns_per_id = max_txns_per_id;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;

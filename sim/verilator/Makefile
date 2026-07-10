@@ -211,6 +211,9 @@ HOTSPOT         ?= 5
 B_ROB_DEPTH     ?= 32
 R_ROB_DEPTH     ?= 32
 
+# Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId, floo_rob.sv:12).
+MAX_TXNS_PER_ID ?= 32
+
 # _CONTINUOUS is non-empty exactly when INJECTION_MODE is 1. Kept on one line:
 # a backslash continuation inside a `?=` value folds the leading whitespace of
 # the next line into the value.
@@ -240,6 +243,7 @@ run-directed: $(TBTOP_EXE)
 	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
 	    "+max_unique_ids=$(MAX_UNIQUE_IDS)" "+max_outstanding=$(MAX_OUTSTANDING)" \
 	    "+b_rob_depth=$(B_ROB_DEPTH)" "+r_rob_depth=$(R_ROB_DEPTH)" \
+	    "+max_txns_per_id=$(MAX_TXNS_PER_ID)" \
 	    "+verilator+seed+$(SEED)" \
 	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(SIM_TAG)/perf.json" \

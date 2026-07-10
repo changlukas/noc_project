@@ -45,20 +45,23 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_w,
         RobMode mode_r, addr_trans::SamTable sam, std::size_t b_rob_depth = 32,
-        std::size_t r_rob_depth = 32)
+        std::size_t r_rob_depth = 32, std::size_t max_txns_per_id = 32)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
           mode_w_(mode_w),
           mode_r_(mode_r),
           sam_(std::move(sam)),
           b_rob_depth_(b_rob_depth),
-          r_rob_depth_(r_rob_depth) {
+          r_rob_depth_(r_rob_depth),
+          max_txns_per_id_(max_txns_per_id) {
         assert(b_rob_depth_ >= 1 && b_rob_depth_ <= ROB_IDX_SPACE &&
                "nmu::Rob: b_rob_depth outside [1, ROB_IDX_SPACE]");
         assert(r_rob_depth_ >= 1 && r_rob_depth_ <= ROB_IDX_SPACE &&
                "nmu::Rob: r_rob_depth outside [1, ROB_IDX_SPACE]");
         if (b_rob_depth_ < 1 || b_rob_depth_ > ROB_IDX_SPACE) std::abort();
         if (r_rob_depth_ < 1 || r_rob_depth_ > ROB_IDX_SPACE) std::abort();
+        assert(max_txns_per_id_ >= 1 && "nmu::Rob: max_txns_per_id must be positive");
+        if (max_txns_per_id_ < 1) std::abort();
     }
 
     // ===== RequestPacketizer interface =====
@@ -96,6 +99,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 
     std::size_t b_rob_depth() const noexcept { return b_rob_depth_; }
     std::size_t r_rob_depth() const noexcept { return r_rob_depth_; }
+    std::size_t max_txns_per_id() const noexcept { return max_txns_per_id_; }
 
     // lzc over the allocation bitmap (floo_rob.sv:155-164). Free space is what lies
     // above the high-water mark; the next base is the index just past it.
@@ -130,6 +134,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     addr_trans::SamTable sam_;
     std::size_t b_rob_depth_;
     std::size_t r_rob_depth_;
+    std::size_t max_txns_per_id_;
 
     // Per-AXI-ID single-outstanding flag. True while one AW/AR is in flight for
     // that id; cleared by B (for writes) or R(last) (for reads) in pop_b/pop_r.
@@ -209,6 +214,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
     if (mode_w_ == RobMode::Enabled) {
+        // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
+        if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
         if (write_free_space() < 1) return false;
         const std::size_t base = b_rob_depth_ - write_free_space();
         auto t = sam_.translate(b.addr);
@@ -241,6 +248,7 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (mode_r_ == RobMode::Enabled) {
+        if (read_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
         const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
         if (read_free_space() < n) return false;  // subsumes the old n > r_rob_depth_ check
         const std::size_t base = r_rob_depth_ - read_free_space();

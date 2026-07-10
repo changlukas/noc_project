@@ -30,6 +30,10 @@ constexpr std::size_t kMetaBufferMaxUniqueIds = 1;
 constexpr std::size_t kRobBDepth = 32;
 constexpr std::size_t kRobRDepth = 32;
 
+// Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId, floo_rob.sv:12). [TBD] --
+// 32 is FlooNoC's default over 8 ids; ours spans 256. The depth sweep decides.
+constexpr std::size_t kRobMaxTxnsPerId = 32;
+
 // Wormhole + VC arbiter staging depth (wormhole_per_input_depth and
 // vc_arbiter_pending_depth).
 constexpr std::size_t kArbiterFifoDepth = 4;
