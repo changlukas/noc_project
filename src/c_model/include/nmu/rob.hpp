@@ -350,7 +350,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         std::abort();
     }
     uint8_t base = meta.rob_idx;
-    uint8_t arrival_offset = read_arrival_offset_[base];
+    std::size_t arrival_offset = read_arrival_offset_[base];
     if (!(arrival_offset < read_range_len_[base])) {
         assert(false &&
                "nmu::Rob::pop_r_staged: R beat past burst length (Family C: "

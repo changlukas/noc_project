@@ -87,7 +87,7 @@ entries and no more. `tb_floo_rob.sv:38` ties them by hand: `logic [$clog2(BRoBS
 `Rob::ROB_CAPACITY` is renamed **`ROB_IDX_SPACE`** (`= 1 << ROB_IDX_WIDTH` = 256), mirroring the
 adjacent `AXI_ID_SPACE`. The old name asserted a capacity it no longer sets.
 
-**D1b. Six `uint8_t` sites overflow once a range can hold 256 beats.** A read range holds
+**D1b. Seven `uint8_t` sites overflow once a range can hold 256 beats.** A read range holds
 `n = len + 1` beats, up to 256. Today `n <= 32`, so every one of these is unreachable. D1 makes them
 reachable; it does not introduce them.
 
@@ -99,9 +99,13 @@ reachable; it does not introduce them.
 | loop counter `i` (`rob.hpp:356`) | `uint8_t` | `std::size_t` | `i` never reaches 256 → **infinite loop** |
 | loop counter `i` (`rob.hpp:363`) | `uint8_t` | `std::size_t` | same |
 | `idx` (`rob.hpp:364`) | `uint8_t` | `std::size_t` | `head.base + i` truncates, writes the wrong slot |
+| `arrival_offset` (`rob.hpp:353`) | `uint8_t` | `std::size_t` | reads a `uint16_t` back into a `uint8_t` by plain assignment, so no `-Wnarrowing`. A 257th beat stores `256`, truncates to `0`, and `0 < read_range_len_[base]` lets it past **the guard that exists to catch it**. Found by the Task-1 reviewer; this spec, two Codex passes and a Fable pass all missed it. |
 
 The two loop counters are the dangerous pair: widening `len_plus_1` alone converts a silent truncation
 into a hang. Widen the counters in the same commit.
+
+The lesson from `arrival_offset`: widening a member is not enough. **Grep every local that reads one of
+these members**, and prefer `std::size_t` for locals over matching the member's width.
 
 `rob_idx` itself stays `uint8_t` everywhere (`AwHeaderMeta::rob_idx`, `ResponseMeta::rob_idx`,
 `NmuRsp*Entry::rob_idx`, `CommittedBEntry::rob_idx`, `BeatRange::base`): an 8-bit index addresses
