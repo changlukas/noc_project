@@ -59,8 +59,6 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
                "nmu::Rob: r_rob_depth outside [1, ROB_IDX_SPACE]");
         if (b_rob_depth_ < 1 || b_rob_depth_ > ROB_IDX_SPACE) std::abort();
         if (r_rob_depth_ < 1 || r_rob_depth_ > ROB_IDX_SPACE) std::abort();
-        for (std::size_t i = 0; i < b_rob_depth_; ++i) free_write_entries_.set(i);
-        for (std::size_t i = 0; i < r_rob_depth_; ++i) free_read_entries_.set(i);
     }
 
     // ===== RequestPacketizer interface =====
@@ -94,16 +92,19 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // AXI ID space alias — single source of truth lives in axi::AXI_ID_SPACE.
     static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256
 
-    // Linear scan for first run of n consecutive 1s in bitset<ROB_IDX_SPACE>.
-    // Returns base index (0..ROB_IDX_SPACE-1), or -1 if no such run exists.
-    // O(ROB_IDX_SPACE) worst case. Public for direct unit testing (TDD).
-    static int find_consecutive_free(const std::bitset<ROB_IDX_SPACE>& free, std::size_t n);
-
     std::size_t b_rob_depth() const noexcept { return b_rob_depth_; }
     std::size_t r_rob_depth() const noexcept { return r_rob_depth_; }
-    // Free Enabled-mode slots. Slots >= depth are never free.
-    std::size_t free_write_slots() const noexcept { return free_write_entries_.count(); }
-    std::size_t free_read_slots() const noexcept { return free_read_entries_.count(); }
+
+    // lzc over the allocation bitmap (floo_rob.sv:155-164). Free space is what lies
+    // above the high-water mark; the next base is the index just past it.
+    std::size_t write_free_space() const noexcept {
+        const int msb = highest_set(alloc_write_, b_rob_depth_);
+        return msb < 0 ? b_rob_depth_ : b_rob_depth_ - 1u - static_cast<std::size_t>(msb);
+    }
+    std::size_t read_free_space() const noexcept {
+        const int msb = highest_set(alloc_read_, r_rob_depth_);
+        return msb < 0 ? r_rob_depth_ : r_rob_depth_ - 1u - static_cast<std::size_t>(msb);
+    }
 
     // Test introspection: current outstanding-entry count summed over all ids.
     // Counts Disabled-mode per-id flags (one per id at most). Enabled-mode
@@ -154,8 +155,24 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     };
     std::array<WriteEntry, ROB_IDX_SPACE> write_entries_;
     std::array<ReadEntry, ROB_IDX_SPACE> read_entries_;
-    std::bitset<ROB_IDX_SPACE> free_write_entries_;
-    std::bitset<ROB_IDX_SPACE> free_read_entries_;
+
+    // FlooNoC's rob_alloc_q (floo_rob.sv:146): one bit per allocated RANGE, set at
+    // the range's top index. Free space is the leading-zero count above it, so the
+    // pool behaves as a stack: space returns only from the top.
+    std::bitset<ROB_IDX_SPACE> alloc_write_;
+    std::bitset<ROB_IDX_SPACE> alloc_read_;
+
+    // Highest set bit below `depth`, or -1 if none. std::bitset has no such query.
+    // Scanning above `depth` would be wrong as well as wasteful: a stray bit there
+    // makes `depth - 1 - msb` underflow, and std::size_t underflow is silent.
+    // Allocation never sets one (base + n - 1 <= depth - 1), so the bound is also
+    // the assertion.
+    static int highest_set(const std::bitset<ROB_IDX_SPACE>& b, std::size_t depth) {
+        for (std::size_t i = depth; i-- > 0;) {
+            if (b.test(i)) return static_cast<int>(i);
+        }
+        return -1;
+    }
 
     // Per-id ordered range list. AW = {base, 1}; AR = {base, len+1}.
     struct BeatRange {
@@ -180,36 +197,18 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<uint8_t, ROB_IDX_SPACE> committed_r_pending_{};
 };
 
-// Linear scan for n consecutive free slots. See declaration above.
-inline int Rob::find_consecutive_free(const std::bitset<ROB_IDX_SPACE>& free, std::size_t n) {
-    if (n == 0 || n > ROB_IDX_SPACE) return -1;
-    std::size_t run = 0;
-    for (std::size_t i = 0; i < ROB_IDX_SPACE; ++i) {
-        if (free.test(i)) {
-            ++run;
-            if (run == n) return static_cast<int>(i - n + 1);
-        } else {
-            run = 0;
-        }
-    }
-    return -1;
-}
-
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
     if (mode_w_ == RobMode::Enabled) {
-        // Pool full? Cannot allocate.
-        if (free_write_entries_.none()) return false;
-        // Find first free slot.
-        int base = find_consecutive_free(free_write_entries_, 1);
-        if (base < 0) return false;
+        if (write_free_space() < 1) return false;
+        const std::size_t base = b_rob_depth_ - write_free_space();
         auto t = sam_.translate(b.addr);
         if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
                                              /*rob_idx=*/static_cast<uint8_t>(base)})) {
             return false;  // downstream backpressure: no state mutation
         }
-        free_write_entries_.reset(static_cast<std::size_t>(base));
+        alloc_write_.set(base);  // a 1-slot range: base is its own top
         write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
         write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1});
         ++w_burst_credit_;
@@ -234,23 +233,21 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (mode_r_ == RobMode::Enabled) {
-        std::size_t n = static_cast<std::size_t>(b.len) + 1u;
-        // Oversized burst: cannot fit in the read pool at all.
-        if (n > r_rob_depth_) return false;
-        int base = find_consecutive_free(free_read_entries_, n);
-        if (base < 0) return false;  // no consecutive run
+        const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
+        if (read_free_space() < n) return false;  // subsumes the old n > r_rob_depth_ check
+        const std::size_t base = r_rob_depth_ - read_free_space();
         auto t = sam_.translate(b.addr);
         if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
                                              /*rob_idx=*/static_cast<uint8_t>(base)})) {
             return false;  // downstream backpressure: no state mutation
         }
         for (std::size_t i = 0; i < n; ++i) {
-            free_read_entries_.reset(static_cast<std::size_t>(base) + i);
             read_entries_[base + i] =
                 ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
         }
-        read_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), static_cast<uint16_t>(n)});
+        alloc_read_.set(base + n - 1);  // only the range TOP is marked
         read_range_len_[base] = static_cast<uint16_t>(n);
+        read_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), static_cast<uint16_t>(n)});
         return true;
     }
     auto t = sam_.translate(b.addr);
@@ -401,7 +398,7 @@ inline void Rob::commit_b_exit(uint8_t rob_idx, uint8_t axi_id) {
     assert(committed_b_pending_[rob_idx] > 0);
     --committed_b_pending_[rob_idx];
     if (committed_b_pending_[rob_idx] == 0) {
-        free_write_entries_.set(rob_idx);
+        alloc_write_.reset(rob_idx);  // no-op unless rob_idx is a range top
         write_entries_[rob_idx] = WriteEntry{};
     }
 }
@@ -411,7 +408,7 @@ inline void Rob::commit_r_exit(uint8_t rob_idx, uint8_t axi_id) {
     assert(committed_r_pending_[rob_idx] > 0);
     --committed_r_pending_[rob_idx];
     if (committed_r_pending_[rob_idx] == 0) {
-        free_read_entries_.set(rob_idx);
+        alloc_read_.reset(rob_idx);  // no-op unless rob_idx is a range top
         read_entries_[rob_idx] = ReadEntry{};
     }
 }

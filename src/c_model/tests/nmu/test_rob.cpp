@@ -6,7 +6,6 @@
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <array>
-#include <bitset>
 #include <set>
 #include <utility>
 #include <vector>
@@ -260,8 +259,8 @@ TEST(NmuRob, Enabled_ConstructorMarksOnlyDepthSlotsFree) {
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 4, 8);
     EXPECT_EQ(rob.b_rob_depth(), 4u);
     EXPECT_EQ(rob.r_rob_depth(), 8u);
-    EXPECT_EQ(rob.free_write_slots(), 4u);
-    EXPECT_EQ(rob.free_read_slots(), 8u);
+    EXPECT_EQ(rob.write_free_space(), 4u);
+    EXPECT_EQ(rob.read_free_space(), 8u);
 }
 
 TEST(NmuRob, Enabled_DefaultDepthIsThirtyTwo) {
@@ -288,7 +287,7 @@ TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
     axi::ArBeat ar = make_ar(0x05, 0x100);
     ar.len = 255;  // 256 beats: len_plus_1 does not fit in uint8_t
     ASSERT_TRUE(rob.push_ar(ar));
-    EXPECT_EQ(rob.free_read_slots(), 0u) << "all 256 slots consumed";
+    EXPECT_EQ(rob.read_free_space(), 0u) << "all 256 slots consumed";
     auto f = *ar_cap.pop();
     EXPECT_EQ(f.get_header_field("rob_idx"), 0u);
     EXPECT_EQ(f.get_header_field("rob_req"), 1u);
@@ -341,42 +340,177 @@ TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
     }
 }
 
-TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
+TEST(NmuRob, Enabled_LzcAllocator_IsAStack) {
     SCENARIO(
-        "Rob Enabled: find_consecutive_free returns -1 when fragmented free pool lacks a run of n");
-    std::bitset<Rob::ROB_IDX_SPACE> free;
-    // Fragmented free state: bits 1 at positions 0, 2, 4, 6 only.
-    free.set(0);
-    free.set(2);
-    free.set(4);
-    free.set(6);
+        "Rob Enabled: freeing a low range does not return its space while a higher range lives");
+    ChannelModel noc(64, 64);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 64, 64);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
 
-    // 4 total free bits, but no run of 2+ consecutive.
-    EXPECT_EQ(Rob::find_consecutive_free(free, 3), -1);
-    EXPECT_EQ(Rob::find_consecutive_free(free, 2), -1);
+    axi::ArBeat a = make_ar(0x05, 0x100);
+    a.len = 3;  // A occupies [0..3]; only index 3 is marked
+    ASSERT_TRUE(rob.push_ar(a));
+    axi::ArBeat b = make_ar(0x06, 0x200);
+    b.len = 1;  // B occupies [4..5]; only index 5 is marked
+    ASSERT_TRUE(rob.push_ar(b));
+    EXPECT_EQ(rob.read_free_space(), 2u);
 
-    // n=1 always finds position 0 first.
-    EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
+    auto push_r = [&](uint8_t base, bool rlast, uint8_t rid) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", base);
+        f.set_payload_field("R", "rid", rid);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+        depkt.tick();
+    };
 
-    // All free: n up to ROB_IDX_SPACE succeeds at base=0; one more fails.
-    free.set();
-    EXPECT_EQ(Rob::find_consecutive_free(free, 1), 0);
-    EXPECT_EQ(Rob::find_consecutive_free(free, Rob::ROB_IDX_SPACE), 0);
-    EXPECT_EQ(Rob::find_consecutive_free(free, Rob::ROB_IDX_SPACE + 1), -1);
+    // Drain A completely. pop_r() pulls ONE depacketized flit per call and, before
+    // Task 3, only commits once every beat of the burst is ready -- so four beats
+    // take more than four calls. Poll. The loop is also correct after Task 3.
+    push_r(0, false, 0x05);
+    push_r(0, false, 0x05);
+    push_r(0, false, 0x05);
+    push_r(0, true, 0x05);
+    std::size_t got = 0;
+    for (int i = 0; i < 32 && got < 4; ++i) {
+        if (rob.pop_r().has_value()) ++got;
+    }
+    ASSERT_EQ(got, 4u) << "all four beats of A must be released";
+
+    EXPECT_EQ(rob.read_free_space(), 2u) << "high-water is still B's top at index 5";
+    axi::ArBeat c = make_ar(0x07, 0x300);
+    c.len = 3;  // four beats: four slots are notionally free but unreachable
+    EXPECT_FALSE(rob.push_ar(c));
+}
+
+TEST(NmuRob, Enabled_LzcAllocator_NonTopReleaseDoesNotGrowFreeSpace) {
+    SCENARIO("Rob Enabled: clearing a non-highest range top leaves free_space unchanged");
+    ChannelModel noc(64, 64);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 64, 64);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // slot 0
+    ASSERT_TRUE(rob.push_aw(make_aw(0x06, 0x200)));  // slot 1
+    EXPECT_EQ(rob.write_free_space(), 6u);
+
+    auto push_b = [&](uint8_t rob_idx, uint8_t bid) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_B);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", rob_idx);
+        f.set_payload_field("B", "bid", bid);
+        f.set_payload_field("B", "bresp", 0);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+        depkt.tick();
+    };
+
+    push_b(0, 0x05);
+    ASSERT_TRUE(rob.pop_b().has_value());
+    EXPECT_EQ(rob.write_free_space(), 6u) << "slot 0 is below the high-water mark";
+    push_b(1, 0x06);
+    ASSERT_TRUE(rob.pop_b().has_value());
+    EXPECT_EQ(rob.write_free_space(), 8u) << "the mark cleared; everything is free again";
+}
+
+// Depth is a parameter now. The stack allocator must respect it at every legal value.
+class RobDepthParam : public ::testing::TestWithParam<std::size_t> {};
+
+TEST_P(RobDepthParam, Enabled_AllocationNeverExceedsDepth) {
+    SCENARIO("Rob Enabled: free_space starts at depth and no base ever reaches it");
+    const std::size_t depth = GetParam();
+    ChannelModel noc(512, 512);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 512, 512);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), depth, depth);
+
+    EXPECT_EQ(rob.write_free_space(), depth);
+    EXPECT_EQ(rob.read_free_space(), depth);
+
+    // Distinct ids, so the per-id order list never gates. One slot each.
+    for (std::size_t i = 0; i < depth; ++i) {
+        ASSERT_TRUE(rob.push_aw(make_aw(static_cast<uint8_t>(i & 0xFF), 0x100))) << "AW " << i;
+        auto f = *noc.req_in().pop_flit();
+        EXPECT_LT(f.get_header_field("rob_idx"), depth) << "base " << i << " escaped the pool";
+    }
+    EXPECT_EQ(rob.write_free_space(), 0u);
+    EXPECT_FALSE(rob.push_aw(make_aw(0xFF, 0x200)));
+}
+
+INSTANTIATE_TEST_SUITE_P(Depths, RobDepthParam,
+                         ::testing::Values(1u, 2u, 4u, 8u, 16u, 32u, 64u, 128u, 256u));
+
+TEST(NmuRob, Enabled_LzcAllocator_ReusesFromTheTop) {
+    SCENARIO("Rob Enabled: once the bitmap is empty the next base is 0");
+    ChannelModel noc(64, 64);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 64, 64);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
+
+    axi::ArBeat a = make_ar(0x05, 0x100);
+    a.len = 3;
+    ASSERT_TRUE(rob.push_ar(a));
+    ar_cap.pop();
+
+    auto push_r = [&](bool rlast) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", 0);
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+        depkt.tick();
+    };
+    push_r(false);
+    push_r(false);
+    push_r(false);
+    push_r(true);
+    std::size_t got = 0;  // see the polling note in Enabled_LzcAllocator_IsAStack
+    for (int i = 0; i < 32 && got < 4; ++i) {
+        if (rob.pop_r().has_value()) ++got;
+    }
+    ASSERT_EQ(got, 4u);
+    EXPECT_EQ(rob.read_free_space(), 8u);
+
+    axi::ArBeat b = make_ar(0x06, 0x200);
+    b.len = 1;
+    ASSERT_TRUE(rob.push_ar(b));
+    auto f = *ar_cap.pop();
+    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);
 }
 
 TEST(NmuRob, Enabled_PushAr_OversizedBurst_ReturnFalse) {
-    SCENARIO("Rob Enabled: AR burst > ROB_CAPACITY rejected (return false), no state mutation");
+    SCENARIO("Rob Enabled: AR burst > read depth rejected (return false), no state mutation");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
 
-    // AR len=31 → 32 beats = ROB_CAPACITY; len=32 → 33 beats > ROB_CAPACITY.
+    // AR len=31 → 32 beats = default depth; len=32 → 33 beats > depth.
     // Use len=255 (AXI4 INCR max) for an obviously-oversized burst.
     axi::ArBeat ar = make_ar(0x05, 0x100);
-    ar.len = 255;  // 256 beats, exceeds ROB_CAPACITY (32)
+    ar.len = 255;  // 256 beats, exceeds the default depth (32)
     EXPECT_FALSE(rob.push_ar(ar));
     // No state mutation: a normal-sized AR should still succeed.
     axi::ArBeat ar_ok = make_ar(0x06, 0x200);
@@ -404,7 +538,7 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
     axi::ArBeat ar2 = make_ar(0x06, 0x200);
     ar2.len = 3;
     ASSERT_TRUE(rob.push_ar(ar2));
-    // Now downstream full. Next push_ar must return false WITHOUT touching free_read_entries_.
+    // Now downstream full. Next push_ar must return false WITHOUT touching the read pool.
     axi::ArBeat ar3 = make_ar(0x07, 0x300);
     ar3.len = 1;  // 2 beats
     EXPECT_FALSE(rob.push_ar(ar3));
@@ -414,7 +548,8 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
 }
 
 TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
-    SCENARIO("Rob Enabled: 32 AWs fill write pool to ROB_CAPACITY; 33rd push_aw returns false");
+    SCENARIO(
+        "Rob Enabled: 32 AWs fill write pool to the default depth; 33rd push_aw returns false");
     ChannelModel noc(64, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});  // aw uses noc; w/ar use captures
