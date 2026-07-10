@@ -330,7 +330,7 @@ TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
         push_r(/*rlast=*/i == 255, static_cast<uint8_t>(i));
         if (auto r = rob.pop_r()) got.push_back(r->data[0]);
     }
-    // Whole-burst release commits on the last beat; poll the rest out.
+    // Per-beat release: each beat commits as it lands. This drains any tail.
     for (int i = 0; i < 512 && got.size() < 256; ++i) {
         if (auto r = rob.pop_r()) got.push_back(r->data[0]);
     }
