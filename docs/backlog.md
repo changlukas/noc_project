@@ -96,7 +96,7 @@ Saturation, `INJECTION_MODE=1 INJECTION_RATE=1.0`, 200 txn/node x 16 nodes, seed
 - **`neighbor` BW is bit-identical across ids/tile** (2079.3 / 2564.3 to the decimal) while
   `uniform_random` moves. Unexplained.
 - **Nothing here sees a burst.** All runs are `--len 0`, so one read slot = one transaction. The read
-  pool's beat-granular allocation (`rob.hpp:216-219`, `len+1` linearly consecutive slots) and its
+  pool's beat-granular allocation (`len+1` slots per read burst, since rewritten to the lzc allocator) and its
   fragmentation are the one place the RoB plausibly binds, and this matrix cannot see them.
 
 ### Next
@@ -305,7 +305,7 @@ Design rounds section; none is urgent.
 
 ### FIXED 2026-07-11 — `RobMode::Enabled` wedges the AR channel on a read burst longer than the RoB
 
-`Rob::push_ar` returns `false` for any `len + 1 > ROB_CAPACITY` = 32 (`rob.hpp:218`) and has no other
+`Rob::push_ar` (pre-bypass) returned `false` for any `len + 1 > ROB_IDX_SPACE` = 32 and had no other
 path. `AxiSlavePort::forward_ar_to_packetizer_` (`axi_slave_port.hpp:153-158`) retries the same
 `ar_q_.front()` and never pops it, so the oversized AR head-of-line-blocks every later AR, including
 short ones on other AXI IDs. `arready` is driven from queue capacity alone (`nmu_wrap.hpp:188-190`),

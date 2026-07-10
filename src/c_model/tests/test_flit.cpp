@@ -21,14 +21,14 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
     f.set_header_field("vc_id", 0x2);
     f.set_header_field("last", 0x1);
     f.set_header_field("rob_req", 0x1);
-    f.set_header_field("rob_idx", 0x1F);
+    f.set_header_field("rob_idx", 0xFF);
     EXPECT_EQ(f.get_header_field("axi_ch"), 0x4u);
     EXPECT_EQ(f.get_header_field("src_id"), 0x12u);
     EXPECT_EQ(f.get_header_field("dst_id"), 0x34u);
     EXPECT_EQ(f.get_header_field("vc_id"), 0x2u);
     EXPECT_EQ(f.get_header_field("last"), 0x1u);
     EXPECT_EQ(f.get_header_field("rob_req"), 0x1u);
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0x1Fu);
+    EXPECT_EQ(f.get_header_field("rob_idx"), 0xFFu);
 }
 
 TEST(Flit, SetGetPayloadAwFields) {
