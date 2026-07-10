@@ -330,6 +330,9 @@ make sim TB=tb_mesh_4x4_vc1_rob PATTERN=neighbor SEED=1 BURST_LEN=63
   `DIRECTED PASS: directed_mesh_4x4_vc1_rob_neighbor_s1 scoreboard clean, non-vacuous` (rc=0). The
   64-beat AR drains. No regression at `BURST_LEN=0` across neighbor / transpose / uniform_random /
   hotspot.
+- Timing evidence (independent hang confirmation): post-bypass burst completes in 24.2s; pre-bypass
+  killed by a 300s `timeout` (>10x that) with no `PASS` line and no forward progress past sim time
+  `[0]` — a hang, not slowness.
 
 ### Pre-existing fabric bugs (the matrix caught these, which is its purpose)
 
