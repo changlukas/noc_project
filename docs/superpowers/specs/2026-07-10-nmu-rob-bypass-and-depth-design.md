@@ -99,13 +99,15 @@ reachable; it does not introduce them.
 | loop counter `i` (`rob.hpp:356`) | `uint8_t` | `std::size_t` | `i` never reaches 256 → **infinite loop** |
 | loop counter `i` (`rob.hpp:363`) | `uint8_t` | `std::size_t` | same |
 | `idx` (`rob.hpp:364`) | `uint8_t` | `std::size_t` | `head.base + i` truncates, writes the wrong slot |
-| `arrival_offset` (`rob.hpp:353`) | `uint8_t` | `std::size_t` | reads a `uint16_t` back into a `uint8_t` by plain assignment, so no `-Wnarrowing`. A 257th beat stores `256`, truncates to `0`, and `0 < read_range_len_[base]` lets it past **the guard that exists to catch it**. Found by the Task-1 reviewer; this spec, two Codex passes and a Fable pass all missed it. |
+| `arrival_offset` (`rob.hpp:353`) | `uint8_t` | `std::size_t` | **defence in depth, not a demonstrated defect.** It reads a `uint16_t` member back into a `uint8_t` by plain assignment, so no `-Wnarrowing`. Unreachable today: `n = 256` needs the whole pool, so the range is its ID's only entry, and the drain loop resets `read_arrival_offset_[base] = 0` in the same `pop_r_staged` call that receives the last beat. Two independent attempts to write a test that distinguishes the two types failed. Found by the Task-1 reviewer; this spec, two Codex passes and a Fable pass all missed it. |
 
 The two loop counters are the dangerous pair: widening `len_plus_1` alone converts a silent truncation
 into a hang. Widen the counters in the same commit.
 
 The lesson from `arrival_offset`: widening a member is not enough. **Grep every local that reads one of
-these members**, and prefer `std::size_t` for locals over matching the member's width.
+these members**, and prefer `std::size_t` for locals over matching the member's width. That row alone is
+defence in depth -- the invariant that masks it (a 256-beat range owns the whole pool, so its offset is
+reset synchronously) is exactly the kind of thing a later change to the drain loop would break silently.
 
 `rob_idx` itself stays `uint8_t` everywhere (`AwHeaderMeta::rob_idx`, `ResponseMeta::rob_idx`,
 `NmuRsp*Entry::rob_idx`, `CommittedBEntry::rob_idx`, `BeatRange::base`): an 8-bit index addresses
