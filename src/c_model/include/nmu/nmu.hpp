@@ -391,14 +391,14 @@ inline void Nmu::advance_rsp_s2_b_() {
     if (s2_rsp_b_.full()) return;
     auto b = rob_.pop_b_staged();
     if (!b) return;
-    s2_rsp_b_.accept({b->beat, b->rob_idx, b->axi_id, true});
+    s2_rsp_b_.accept({b->beat, b->rob_idx, b->axi_id, b->rob_req});
 }
 
 inline void Nmu::advance_rsp_s2_r_() {
     if (s2_rsp_r_.full()) return;
     auto r = rob_.pop_r_staged();
     if (!r) return;
-    s2_rsp_r_.accept({r->beat, r->rob_idx, r->axi_id, true});
+    s2_rsp_r_.accept({r->beat, r->rob_idx, r->axi_id, r->rob_req});
 }
 
 inline void Nmu::drain_rsp_robless_b_() {
