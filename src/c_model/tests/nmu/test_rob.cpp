@@ -276,7 +276,7 @@ TEST(NmuRob, Enabled_DefaultDepthIsThirtyTwo) {
     EXPECT_EQ(Rob::ROB_IDX_SPACE, 256u);
 }
 
-TEST(NmuRob, Enabled_MaxBurst_LenPlus1DoesNotOverflow) {
+TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
     SCENARIO("Rob Enabled: a 256-beat AR into a 256-deep read pool allocates 256 slots");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
@@ -292,6 +292,53 @@ TEST(NmuRob, Enabled_MaxBurst_LenPlus1DoesNotOverflow) {
     auto f = *ar_cap.pop();
     EXPECT_EQ(f.get_header_field("rob_idx"), 0u);
     EXPECT_EQ(f.get_header_field("rob_req"), 1u);
+}
+
+TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
+    SCENARIO("Rob Enabled: all 256 beats of a max-length burst land and release in order");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE,
+            Rob::ROB_IDX_SPACE);
+
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 255;  // 256 beats; len_plus_1 = 256 does not fit in uint8_t
+    ASSERT_TRUE(rob.push_ar(ar));
+    ar_cap.pop();
+
+    auto push_r = [&](bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", 0);  // the NSU stamps the burst base on every beat
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+        depkt.tick();
+    };
+
+    // One beat per iteration, draining as we go: the rsp queue is only 16 deep.
+    std::vector<uint8_t> got;
+    for (int i = 0; i < 256; ++i) {
+        push_r(/*rlast=*/i == 255, static_cast<uint8_t>(i));
+        if (auto r = rob.pop_r()) got.push_back(r->data[0]);
+    }
+    // Whole-burst release commits on the last beat; poll the rest out.
+    for (int i = 0; i < 512 && got.size() < 256; ++i) {
+        if (auto r = rob.pop_r()) got.push_back(r->data[0]);
+    }
+    ASSERT_EQ(got.size(), 256u) << "len_plus_1 truncated, or the drain loop never terminated";
+    for (int i = 0; i < 256; ++i) {
+        EXPECT_EQ(got[i], static_cast<uint8_t>(i)) << "beat " << i << " out of order";
+    }
 }
 
 TEST(NmuRob, Enabled_FindConsecutiveFree_FragmentedFailNoConsecutiveRun) {
