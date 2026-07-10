@@ -128,6 +128,12 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     }
 
   private:
+    // Drain ready order-list heads into the committed queues (the Task 3 loops,
+    // reused by the direct-forward bypass arms). Stops at a bypassed head, which
+    // waits on its own response through pop_*_staged.
+    void drain_ready_write_heads_(uint8_t id);
+    void drain_ready_read_heads_(uint8_t id);
+
     NmuPacketizeSink& next_pkt_;
     ResponseDepacketizer& next_depkt_;
     RobMode mode_w_, mode_r_;
@@ -182,9 +188,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     }
 
     // Per-id ordered range list. AW = {base, 1}; AR = {base, len+1}.
+    // rob_req == false: bypassed, no slot reserved, base is meaningless.
     struct BeatRange {
         uint8_t base;
         uint16_t len_plus_1;  // up to 256
+        bool rob_req;
     };
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
@@ -216,16 +224,26 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     if (mode_w_ == RobMode::Enabled) {
         // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
         if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
-        if (write_free_space() < 1) return false;
-        const std::size_t base = b_rob_depth_ - write_free_space();
+        // Clause 1: nothing in flight for this id, so nothing can overtake this
+        // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
+        const bool needs_rob = !write_order_by_id_[b.id].empty();
         auto t = sam_.translate(b.addr);
-        if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
-                                             /*rob_idx=*/static_cast<uint8_t>(base)})) {
+        std::size_t base = 0;
+        if (needs_rob) {
+            if (write_free_space() < 1) return false;
+            base = b_rob_depth_ - write_free_space();
+        }
+        if (!next_pkt_.push_aw_with_meta(
+                b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
+                    static_cast<uint8_t>(needs_rob ? base : 0)})) {
             return false;  // downstream backpressure: no state mutation
         }
-        alloc_write_.set(base);  // a 1-slot range: base is its own top
-        write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
-        write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1});
+        if (needs_rob) {
+            alloc_write_.set(base);  // a 1-slot range: base is its own top
+            write_entries_[base] =
+                WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
+        }
+        write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob});
         ++w_burst_credit_;
         return true;
     }
@@ -250,20 +268,30 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (mode_r_ == RobMode::Enabled) {
         if (read_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
         const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
-        if (read_free_space() < n) return false;  // subsumes the old n > r_rob_depth_ check
-        const std::size_t base = r_rob_depth_ - read_free_space();
+        // Clause 1: an idle id's burst cannot be overtaken, so it needs no slots.
+        // A bypassed burst of any length is admissible. Ported from floo_rob.sv:422-425.
+        const bool needs_rob = !read_order_by_id_[b.id].empty();
         auto t = sam_.translate(b.addr);
-        if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, /*rob_req=*/1,
-                                             /*rob_idx=*/static_cast<uint8_t>(base)})) {
+        std::size_t base = 0;
+        if (needs_rob) {
+            if (read_free_space() < n) return false;  // subsumes the old n > r_rob_depth_ check
+            base = r_rob_depth_ - read_free_space();
+        }
+        if (!next_pkt_.push_ar_with_meta(
+                b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
+                    static_cast<uint8_t>(needs_rob ? base : 0)})) {
             return false;  // downstream backpressure: no state mutation
         }
-        for (std::size_t i = 0; i < n; ++i) {
-            read_entries_[base + i] =
-                ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
+        if (needs_rob) {
+            for (std::size_t i = 0; i < n; ++i) {
+                read_entries_[base + i] =
+                    ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
+            }
+            alloc_read_.set(base + n - 1);  // only the range TOP is marked
+            read_range_len_[base] = static_cast<uint16_t>(n);
         }
-        alloc_read_.set(base + n - 1);  // only the range TOP is marked
-        read_range_len_[base] = static_cast<uint16_t>(n);
-        read_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), static_cast<uint16_t>(n)});
+        read_order_by_id_[b.id].push_back(
+            {static_cast<uint8_t>(base), static_cast<uint16_t>(n), needs_rob});
         return true;
     }
     auto t = sam_.translate(b.addr);
@@ -305,6 +333,36 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
     return opt;
 }
 
+inline void Rob::drain_ready_write_heads_(uint8_t id) {
+    while (!write_order_by_id_[id].empty()) {
+        const BeatRange head = write_order_by_id_[id].front();
+        if (!head.rob_req) break;  // waiting on a bypassed response
+        if (!write_entries_[head.base].ready) break;
+        committed_b_queue_.push_back({write_entries_[head.base].b_beat, head.base, id, true});
+        ++committed_b_pending_[head.base];
+        write_order_by_id_[id].pop_front();
+    }
+}
+
+inline void Rob::drain_ready_read_heads_(uint8_t id) {
+    while (!read_order_by_id_[id].empty()) {
+        const BeatRange head = read_order_by_id_[id].front();
+        if (!head.rob_req) break;  // waiting on a bypassed response
+        uint16_t& release_off = read_release_offset_[head.base];
+        while (release_off < head.len_plus_1 && read_entries_[head.base + release_off].ready) {
+            const std::size_t idx = static_cast<std::size_t>(head.base) + release_off;
+            committed_r_queue_.push_back(
+                {read_entries_[idx].r_beat, static_cast<uint8_t>(idx), id, true});
+            ++committed_r_pending_[idx];
+            ++release_off;
+        }
+        if (release_off < head.len_plus_1) break;  // burst not drained yet
+        read_arrival_offset_[head.base] = 0;
+        release_off = 0;
+        read_order_by_id_[id].pop_front();
+    }
+}
+
 inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
     if (mode_w_ != RobMode::Enabled) return std::nullopt;
     if (!committed_b_queue_.empty()) {
@@ -315,9 +373,16 @@ inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
     auto opt = next_depkt_.pop_b_with_meta();
     if (!opt) return std::nullopt;
     auto [b, meta] = *opt;
-    if (!(meta.rob_req == 1)) {
-        assert(false && "Enabled Rob received Disabled flit");
-        std::abort();
+    if (meta.rob_req == 0) {
+        // Bypassed B: by the head invariant it is the head of its id's order list.
+        const uint8_t id = b.id;
+        if (write_order_by_id_[id].empty() || write_order_by_id_[id].front().rob_req) {
+            assert(false && "bypassed B does not match the head of its id's order list");
+            std::abort();
+        }
+        write_order_by_id_[id].pop_front();
+        drain_ready_write_heads_(id);  // the entry behind it may already be ready
+        return CommittedBEntry{b, 0, id, /*rob_req=*/false};
     }
     if (!(meta.rob_idx < ROB_IDX_SPACE)) {
         assert(false && "rob_idx out of range");
@@ -331,13 +396,7 @@ inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
     slot.b_beat = b;
     slot.ready = true;
     uint8_t id = slot.axi_id;
-    while (!write_order_by_id_[id].empty()) {
-        BeatRange head = write_order_by_id_[id].front();
-        if (!write_entries_[head.base].ready) break;
-        committed_b_queue_.push_back({write_entries_[head.base].b_beat, head.base, id, true});
-        ++committed_b_pending_[head.base];
-        write_order_by_id_[id].pop_front();
-    }
+    drain_ready_write_heads_(id);
     if (committed_b_queue_.empty()) return std::nullopt;
     auto out = committed_b_queue_.front();
     committed_b_queue_.pop_front();
@@ -354,9 +413,19 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     auto opt = next_depkt_.pop_r_with_meta();
     if (!opt) return std::nullopt;
     auto [r, meta] = *opt;
-    if (!(meta.rob_req == 1)) {
-        assert(false && "Enabled Rob received Disabled flit");
-        std::abort();
+    if (meta.rob_req == 0) {
+        // Bypassed R streams beat by beat; the list entry pops on last, and only
+        // then can a robbed entry behind it become releasable.
+        const uint8_t id = r.id;
+        if (read_order_by_id_[id].empty() || read_order_by_id_[id].front().rob_req) {
+            assert(false && "bypassed R does not match the head of its id's order list");
+            std::abort();
+        }
+        if (r.last) {
+            read_order_by_id_[id].pop_front();
+            drain_ready_read_heads_(id);
+        }
+        return CommittedREntry{r, 0, id, /*rob_req=*/false};
     }
     if (!(meta.rob_idx < ROB_IDX_SPACE)) {
         assert(false && "rob_idx out of range");
@@ -384,21 +453,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     slot.ready = true;
     ++read_arrival_offset_[base];
     uint8_t id = slot.axi_id;
-    while (!read_order_by_id_[id].empty()) {
-        const BeatRange head = read_order_by_id_[id].front();
-        uint16_t& release_off = read_release_offset_[head.base];
-        while (release_off < head.len_plus_1 && read_entries_[head.base + release_off].ready) {
-            const std::size_t idx = static_cast<std::size_t>(head.base) + release_off;
-            committed_r_queue_.push_back(
-                {read_entries_[idx].r_beat, static_cast<uint8_t>(idx), id, true});
-            ++committed_r_pending_[idx];
-            ++release_off;
-        }
-        if (release_off < head.len_plus_1) break;  // burst not drained yet
-        read_arrival_offset_[head.base] = 0;
-        release_off = 0;
-        read_order_by_id_[id].pop_front();
-    }
+    drain_ready_read_heads_(id);
     if (committed_r_queue_.empty()) return std::nullopt;
     auto out = committed_r_queue_.front();
     committed_r_queue_.pop_front();
