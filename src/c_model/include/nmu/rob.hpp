@@ -190,6 +190,12 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<uint16_t, ROB_IDX_SPACE> read_arrival_offset_{};
     std::array<uint16_t, ROB_IDX_SPACE> read_range_len_{};
 
+    // Beats of the head burst released so far, keyed by range base. FlooNoC keys the
+    // same counter by ID (read_rob_idx_offset_q, floo_rob.sv:177-180); a range belongs
+    // to exactly one ID, so keying by base carries the same information. Distinct from
+    // read_arrival_offset_: arrival places landing beats, release tracks how many left.
+    std::array<uint16_t, ROB_IDX_SPACE> read_release_offset_{};
+
     // Ready-to-emit beats drained by pop_b / pop_r (Task 3).
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
@@ -369,22 +375,18 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     ++read_arrival_offset_[base];
     uint8_t id = slot.axi_id;
     while (!read_order_by_id_[id].empty()) {
-        BeatRange head = read_order_by_id_[id].front();
-        bool all_ready = true;
-        for (std::size_t i = 0; i < head.len_plus_1; ++i) {
-            if (!read_entries_[head.base + i].ready) {
-                all_ready = false;
-                break;
-            }
-        }
-        if (!all_ready) break;
-        for (std::size_t i = 0; i < head.len_plus_1; ++i) {
-            const std::size_t idx = static_cast<std::size_t>(head.base) + i;
+        const BeatRange head = read_order_by_id_[id].front();
+        uint16_t& release_off = read_release_offset_[head.base];
+        while (release_off < head.len_plus_1 && read_entries_[head.base + release_off].ready) {
+            const std::size_t idx = static_cast<std::size_t>(head.base) + release_off;
             committed_r_queue_.push_back(
                 {read_entries_[idx].r_beat, static_cast<uint8_t>(idx), id});
             ++committed_r_pending_[idx];
+            ++release_off;
         }
+        if (release_off < head.len_plus_1) break;  // burst not drained yet
         read_arrival_offset_[head.base] = 0;
+        release_off = 0;
         read_order_by_id_[id].pop_front();
     }
     if (committed_r_queue_.empty()) return std::nullopt;

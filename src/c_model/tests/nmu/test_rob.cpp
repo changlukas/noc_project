@@ -702,6 +702,56 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
     EXPECT_FALSE(rob.pop_r().has_value());
 }
 
+TEST(NmuRob, Enabled_PerBeatRelease_HeadBurstStreams) {
+    SCENARIO("Rob Enabled: beat 0 of the head burst leaves before beats 1-3 have arrived");
+    ChannelModel noc(64, 64);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 64, 64);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
+
+    axi::ArBeat ar = make_ar(0x05, 0x100);
+    ar.len = 3;  // 4 beats, base 0
+    ASSERT_TRUE(rob.push_ar(ar));
+
+    auto push_r = [&](bool rlast, uint8_t marker) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", 0);  // the NSU stamps the burst base on every beat
+        f.set_payload_field("R", "rid", 0x05);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, 32> d{};
+        d[0] = marker;
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+        depkt.tick();
+    };
+
+    // The range is [0..3]; only index 3 is marked, so free_space is 8 - 1 - 3 = 4.
+    EXPECT_EQ(rob.read_free_space(), 4u);
+
+    // After this task, one injected beat yields one pop_r(). Before it, this line
+    // is exactly what fails: the burst gate holds beat 0 until beat 3 lands.
+    push_r(false, 0xA0);  // only beat 0 has arrived
+    ASSERT_TRUE(rob.pop_r().has_value()) << "beat 0 must not wait for beats 1-3";
+    EXPECT_FALSE(rob.pop_r().has_value()) << "beat 1 has not arrived";
+    EXPECT_EQ(rob.read_free_space(), 4u) << "beat 0 is not the range top; no marker cleared";
+
+    push_r(false, 0xA1);
+    ASSERT_TRUE(rob.pop_r().has_value());
+    push_r(false, 0xA2);
+    ASSERT_TRUE(rob.pop_r().has_value());
+    EXPECT_EQ(rob.read_free_space(), 4u) << "still no marker cleared";
+
+    push_r(true, 0xA3);
+    ASSERT_TRUE(rob.pop_r().has_value());
+    EXPECT_EQ(rob.read_free_space(), 8u) << "the range top cleared, so the pool is empty";
+}
+
 TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
     SCENARIO(
         "Rob Enabled: different-id Rs may commit interleaved (per-id order preserved within each "
