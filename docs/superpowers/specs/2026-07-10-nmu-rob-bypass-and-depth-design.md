@@ -357,6 +357,16 @@ slot `0` while a live transaction holds it. Silent corruption.
 `NmuRspBEntry::rob_enabled` is misnamed: it never meant "`RobMode` is Enabled", it meant "this entry
 owns a RoB slot". Rename it **`rob_req`**, matching the wire field.
 
+**Correction (found during Task 7 execution, 2026-07-11).** Renaming the field is not enough. Task 5
+renamed `NmuRspBEntry::rob_enabled` -> `rob_req` and added the `if (entry.rob_req)` commit guard, but
+`Nmu::advance_rsp_s2_b_` / `_r_` still built the staged entry with a hardcoded `true`
+(`s2_rsp_b_.accept({..., true})`), discarding `CommittedBEntry::rob_req`. Latent while `rob_req` was
+true everywhere; the moment clause 1 produced the first `rob_req == 0`, a bypassed B reached
+`commit_b_exit` and aborted on `assert(committed_b_pending_[rob_idx] > 0)` -- the exact slot-0
+corruption three reviewers named as the top risk. Six review passes missed it because each checked
+that the construction sites *set a value*, not that the value flowed from producer to consumer. The
+producer must forward `b->rob_req` / `r->rob_req`.
+
 ### Parameters
 
 The three live in `NmuConfig`, **not** in `port_params.yaml`. `load_nmu_port_params`
