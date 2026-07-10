@@ -114,30 +114,36 @@ sizing parameter, not a safety requirement; bypass adds no backpressure class th
 `RobMode::Disabled` path does not already have).
 
 1. Fault-inject the probe (blocking for every number above).
-2. `BRoBSize` / `RRoBSize` as independent runtime parameters, each asserted `<= 1 << ROB_IDX_WIDTH`.
-   Laziest form: keep the 32-entry arrays, add a runtime `depth_` bound. Unblocks a depth sweep;
-   today 32 is a compile-time constant and the interesting region is below it.
-3. Burst co-sim (`--len > 0`). Required before the R-side depth curve means anything, and the only
-   way to exercise the AR wedge above.
-3b. **Per-beat R release.** `pop_r_staged` holds every slot of a burst until its last beat lands
-   (`rob.hpp:353-362`). Stricter than AXI4, which permits read data of different `ARID`s to
-   interleave on R (`RID` distinguishes; only *write* interleaving and `WID` were removed), and
-   stricter than FlooNoC, which releases one beat at a time, frees each slot as its beat leaves
-   (`floo_rob.sv:250-266`), and forwards another ID's response when the next beat is late
-   (`floo_rob.sv:287-297`). Costs latency and blocks mid-burst slot recycling. Own round.
+2. ~~`BRoBSize` / `RRoBSize` as independent runtime parameters~~ **DONE.** `b_rob_depth_` /
+   `r_rob_depth_` are ctor parameters (default 32, `rob.hpp:47-48`), plumbed from a Makefile knob
+   (`B_ROB_DEPTH` / `R_ROB_DEPTH`, `sim/verilator/Makefile:211-212`) end to end. See
+   `docs/nmu-rob-microarchitecture.md` section 6.
+3. ~~Burst co-sim (`--len > 0`)~~ **DONE.** `BURST_LEN` knob (`sim/verilator/Makefile`), verified
+   with a 64-beat read burst -- see "FIXED 2026-07-11" in the Bugs section below.
+3b. ~~**Per-beat R release.**~~ **DONE.** `drain_ready_read_heads_` releases one beat at a time via
+   `read_release_offset_` (`rob.hpp:347-364`), matching FlooNoC (`floo_rob.sv:250-266,287-297`).
+   See `docs/nmu-rob-microarchitecture.md` section 3, Release.
 4. Per-ID order table structure and `NumIds`: 256 independent FIFOs (`floo_rob.sv:450-465`) vs a
    shared `id_queue` (`floo_meta_buffer.sv:146-151`, which FlooNoC uses for the same problem) differ
    by roughly an order of magnitude at 256 IDs. Third option: pulp `axi_id_remap`
    (`axi/v0.39.7/src/axi_id_remap.sv`, params `AxiSlvPortMaxUniqIds` / `AxiMaxTxnsPerId`) in front of
    the RoB, which is the standard way to give a RoB a small `NumIds` without narrowing the NI's
    external AXI ID width. `AWID_WIDTH = 8` is a spec value; changing it needs approval.
-5. `RobMode` per direction. `NmuConfig` has `read_rob_mode` / `write_rob_mode`; `nmu_wrap.hpp:69-70`
+5. `RobMode` per direction. `NmuConfig` has `read_rob_mode` / `write_rob_mode`; `nmu_wrap.hpp:71-72`
    ties them. A B-only RoB is FlooNoC's cheap point (`BRoBType` != `RRoBType`) and is unreachable today.
 6. `RobMode::Disabled` vs FlooNoC `NoRoB`: ours stalls same-ID regardless of destination, FlooNoC
    admits same-destination follow-ons up to a counter (`floo_rob_wrapper.sv:139`). **Not a gap we
    can close.** It rests on the same "same destination implies in-order arrival" premise as bypass
    clause 2, and fails for the same reason -- multiple VCs, ID-agnostic round-robin, no reorder
    storage in `NoRoB` to catch the overtake.
+7. `max_txns_per_id` default (32) is still `[TBD]` -- needs the depth sweep before it is a
+   considered value rather than a placeholder.
+8. `r_rob_depth = 256` (8 KiB, the paper's design point) is now expressible
+   (`R_ROB_DEPTH=256`, `sim/verilator/Makefile:212`) but unswept.
+9. **VC allocation** -- new design round. Port `floo_vc_assignment.sv:70-88`: per-hop turn-model VC
+   assignment with look-ahead routing, per-port VC counts `{2,4,2,4,4}`, `AllowVCOverflow = 0`. It
+   would unlock bypass clause 2 and the `NoRoB` NI (25 kGE vs 281 kGE, paper §VI-C) at the cost of
+   the `vc1/2/4/8` configuration axis. Lives in `hw/deprecated/`.
 
 **Consequence worth stating once.** Under ID-agnostic VC round-robin, *every* cheap ordering path
 FlooNoC offers -- bypass clause 2, `NoRoB`'s same-destination counter -- is closed to us. The only

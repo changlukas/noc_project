@@ -91,7 +91,10 @@ field the NSU echoes back, not an AXI ID. A separate per-ID order list
 records the program order of that ID's transactions; a response is
 released only once every earlier transaction of the same ID has
 released. `RobMode::Disabled`, the shipped default, allocates no slots
-at all and instead permits one outstanding transaction per AXI ID.
+at all and instead permits one outstanding transaction per AXI ID. In
+`RobMode::Enabled`, a transaction whose AXI ID has nothing in flight
+allocates no slot either -- its response is forwarded directly -- which
+is why a read burst longer than the pool is admissible.
 
 Structure-by-structure, including the sizes and allocator choices the
 C++ makes implicitly, and the FlooNoC parameters they correspond to:

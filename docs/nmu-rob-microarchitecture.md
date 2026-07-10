@@ -17,21 +17,21 @@ Two header fields carry the RoB across the wire:
 | field | width | declared | set by | consumed by |
 |---|---|---|---|---|
 | `rob_req` | 1 | `ni_packet.json:77` | NMU `Packetize` | NMU `Depacketize`, after the NSU echoes it back |
-| `rob_idx` | `ROB_IDX_WIDTH` = 5 | `ni_packet.json:82-83` (`width_param`) | NMU `Packetize` | same |
+| `rob_idx` | `ROB_IDX_WIDTH` = 8 | `ni_packet.json:82-83` (`width_param`) | NMU `Packetize` | same |
 
 The NSU stores both in its meta buffer and replays them onto the B/R response
 (`nsu/meta_buffer.hpp`, `nsu/packetize.hpp:92-93,107-108`). The NoC never reads them.
 
-Mode is per direction: `mode_w_`, `mode_r_` (`rob.hpp:107`), from `NmuConfig::write_rob_mode` /
+Mode is per direction: `mode_w_`, `mode_r_` (`rob.hpp:139`), from `NmuConfig::write_rob_mode` /
 `read_rob_mode` (`nmu.hpp:129-130`). FlooNoC carries the same split as `BRoBType` / `RRoBType`
-(`floo_pkg.sv:301,305`). **The wrap layer collapses it**: `nmu_wrap.hpp:69-70` assigns one
-`rob_mode` to both, and the DPI entry point (`cmodel_dpi.cpp:400-406`) exposes a single
+(`floo_pkg.sv:301,305`). **The wrap layer collapses it**: `nmu_wrap.hpp:71-72` assigns one
+`rob_mode` to both, and the DPI entry point (`cmodel_dpi.cpp:402-411`) exposes a single
 `rob_enabled` int. A B-only RoB -- FlooNoC's cheap configuration, since B carries no payload --
 is unreachable from the co-sim.
 
 ## 2. `RobMode::Disabled` -- as built
 
-The shipped default (`cmodel_nmu_create`, `cmodel_dpi.cpp:395-398`).
+The shipped default (`cmodel_nmu_create`, `cmodel_dpi.cpp:396-400`).
 
 | structure | type | size | HW counterpart |
 |---|---|---|---|
@@ -39,16 +39,16 @@ The shipped default (`cmodel_nmu_create`, `cmodel_dpi.cpp:395-398`).
 | `read_outstanding_` | `array<bool, 256>` | 256 b | 256 FF |
 | `w_burst_credit_` | `uint32_t` | -- | counter |
 
-**INPUT** `push_aw` refuses while `write_outstanding_[id]` is set (`rob.hpp:198`).
+**INPUT** `push_aw` refuses while `write_outstanding_[id]` is set (`rob.hpp:251`).
 **COMPUTE** On a successful downstream push the flag is set and the flit leaves with
-`rob_req = 0` (`rob.hpp:199,202`). `push_ar` mirrors it (`rob.hpp:236-240`).
+`rob_req = 0` (`rob.hpp:252,255`). `push_ar` mirrors it (`rob.hpp:297-303`).
 **OUTPUT** `pop_b` clears the write flag; `pop_r` clears the read flag on `last`
-(`rob.hpp:253-254,267-270`).
+(`rob.hpp:316,330-331`).
 
 One transaction in flight per AXI ID, so no response can overtake another of the same ID and
 no reorder storage is needed. Ordering is a property of the interlock, not of the network.
 
-`w_burst_credit_` gates W beats behind their AW (`rob.hpp:208`). A single counter suffices
+`w_burst_credit_` gates W beats behind their AW (`rob.hpp:261`). A single counter suffices
 because AXI4 W beats follow AW issue order strictly -- there is no `WID`.
 
 **Gap against FlooNoC `NoRoB`.** FlooNoC admits multiple outstanding transactions per ID as
@@ -59,89 +59,119 @@ conservative, strictly less throughput, and the difference has never been measur
 
 ## 3. `RobMode::Enabled` -- as built
 
-One constant, `ROB_CAPACITY = 1u << ni::header::ROB_IDX_WIDTH` = 32 (`rob.hpp:80`), sizes
-eight of the twelve structures below. The other four are sized by the AXI ID space, 256.
+`rob_idx`'s addressable range is `ROB_IDX_SPACE = 1u << ni::header::ROB_IDX_WIDTH` = 256
+(`rob.hpp:96`), which sizes every structure below to 256 entries. Each direction's actual pool
+depth is a runtime ctor parameter -- `b_rob_depth_` / `r_rob_depth_`, default 32 -- so only the
+low `depth_` entries of a 256-entry array are ever allocated (`rob.hpp:47-48,54-55,141-142`). The
+per-ID order-list depth, `max_txns_per_id_`, is a third ctor parameter, also default 32
+(`rob.hpp:48,56,143`).
 
 | structure | type | per-entry content | HW counterpart |
 |---|---|---|---|
-| `write_entries_` | `array<WriteEntry, 32>` | `{occupied, ready, axi_id, BBeat}` | B RoB. Metadata only; no payload exists on B. |
-| `read_entries_` | `array<ReadEntry, 32>` | `{occupied, ready, axi_id, RBeat}` | R RoB. `RBeat` carries `RDATA_WIDTH` = 256 b of data. |
-| `free_write_entries_` | `bitset<32>` | free flag | allocation bitmap |
-| `free_read_entries_` | `bitset<32>` | free flag | allocation bitmap |
-| `write_order_by_id_` | `array<deque<BeatRange>, 256>` | `{base, len_plus_1}` | per-ID program-order list |
-| `read_order_by_id_` | `array<deque<BeatRange>, 256>` | same | same |
-| `read_arrival_offset_` | `array<uint8_t, 32>` | beat counter, keyed by burst base | per-burst arrival counter |
-| `read_range_len_` | `array<uint8_t, 32>` | burst length, keyed by base | bound for the above |
-| `committed_b_queue_` | `deque<CommittedBEntry>` | released beat | output FIFO |
-| `committed_r_queue_` | `deque<CommittedREntry>` | released beat | output FIFO |
-| `committed_b_pending_` | `array<uint8_t, 32>` | release refcount | per-slot counter |
-| `committed_r_pending_` | `array<uint8_t, 32>` | release refcount | per-slot counter |
+| `write_entries_` | `array<WriteEntry, 256>` (`rob.hpp:169`) | `{occupied, ready, axi_id, BBeat}` | B RoB. Metadata only; no payload exists on B. |
+| `read_entries_` | `array<ReadEntry, 256>` (`rob.hpp:170`) | `{occupied, ready, axi_id, RBeat}` | R RoB. `RBeat` carries `RDATA_WIDTH` = 256 b of data. |
+| `alloc_write_` | `bitset<256>` (`rob.hpp:175`) | one bit per allocated range, set at the range's top | FlooNoC `rob_alloc_q` (`floo_rob.sv:146`) |
+| `alloc_read_` | `bitset<256>` (`rob.hpp:176`) | same | same |
+| `write_order_by_id_` | `array<deque<BeatRange>, 256>` (`rob.hpp:197`) | `{base, len_plus_1, rob_req}` | per-ID program-order / status list |
+| `read_order_by_id_` | `array<deque<BeatRange>, 256>` (`rob.hpp:198`) | same | same |
+| `read_arrival_offset_` | `array<uint16_t, 256>` (`rob.hpp:205`) | beat counter, keyed by burst base | per-burst arrival counter |
+| `read_range_len_` | `array<uint16_t, 256>` (`rob.hpp:206`) | burst length, keyed by base | bound for the above |
+| `read_release_offset_` | `array<uint16_t, 256>` (`rob.hpp:212`) | beats of the head burst released so far, keyed by base | per-burst release counter |
+| `committed_b_queue_` | `deque<CommittedBEntry>` (`rob.hpp:215`) | released beat | output FIFO |
+| `committed_r_queue_` | `deque<CommittedREntry>` (`rob.hpp:216`) | released beat | output FIFO |
+| `committed_b_pending_` | `array<uint8_t, 256>` (`rob.hpp:217`) | release refcount | per-slot counter |
+| `committed_r_pending_` | `array<uint8_t, 256>` (`rob.hpp:218`) | release refcount | per-slot counter |
+
+`free_write_entries_` / `free_read_entries_` and `find_consecutive_free` (section 7 row 2, as
+built through Task 5) are deleted; `alloc_write_` / `alloc_read_` replace them.
 
 ### Allocation
 
 **INPUT** `push_aw(b)` / `push_ar(b)`.
-**COMPUTE** `push_aw` takes exactly one slot: `find_consecutive_free(free_write_entries_, 1)`
-(`rob.hpp:184`). `push_ar` takes `len + 1` **linearly consecutive** slots
-(`rob.hpp:216-219`), refusing outright when `len + 1 > 32` (`rob.hpp:218`) or when no
-consecutive run exists.
-**OUTPUT** The run's base index becomes `rob_idx` on the outbound flit, with `rob_req = 1`
-(`rob.hpp:187-188,222-223`). The `{base, len+1}` pair is appended to that ID's order deque.
+**COMPUTE** Both first gate on the per-ID order-list depth: FlooNoC's `ax_gnt_o`
+(`floo_rob.sv:414`), ported as `write_order_by_id_[b.id].size() >= max_txns_per_id_`
+(`rob.hpp:226`) and the AR mirror (`rob.hpp:269`). **Bypass clause 1**: if that ID's order list
+is empty, nothing in flight can overtake this response, so it needs no slot
+(`needs_rob = !...empty()`, `rob.hpp:229,273`, ported from `floo_rob.sv:422-425`). Otherwise
+`push_aw` takes one slot from `write_free_space()` (`rob.hpp:233-234`); `push_ar` takes `len + 1`
+slots from `read_free_space()`, refusing if free space is short (`rob.hpp:277-278`). The
+allocator is FlooNoC's `lzc` high-water stack (`floo_rob.sv:155-164`), ported as `alloc_write_` /
+`alloc_read_` marking only the top of each allocated range and `write_free_space()` /
+`read_free_space()` counting leading zero bits above it (`rob.hpp:106-113`, `highest_set`,
+`rob.hpp:183-188`). Space returns only from the top (`commit_b_exit` / `commit_r_exit`,
+`rob.hpp:463-481`); a hole below the high-water mark cannot be reused until the mark retreats
+past it. `find_consecutive_free`'s any-consecutive-run scan is gone.
+**OUTPUT** The allocated (or bypassed) base becomes `rob_idx` on the outbound flit, with
+`rob_req = needs_rob` (`rob.hpp:236-238` AW, `rob.hpp:280-282` AR). The `{base, len+1, rob_req}`
+triple is appended to that ID's order deque whether or not a slot was taken (`rob.hpp:246` AW,
+`rob.hpp:293-294` AR).
 
-A write burst returns one B regardless of length, so the write pool admits 32 outstanding
-writes. A read burst consumes one slot per beat, because each slot *is* the storage for one
-beat of `rdata`. So the same constant bounds writes by transaction and reads by beat.
+A write burst still returns one B regardless of length; a read burst still consumes one slot
+per beat, because each slot *is* the storage for one beat of `rdata`. Depth is no longer a
+single shared constant: `b_rob_depth_` and `r_rob_depth_` are independent runtime parameters
+(section 6).
 
 ### Release
 
 **B** `pop_b_staged` marks slot `rob_idx` ready, then drains that ID's order deque from the
-head while the head slot is ready (`rob.hpp:300-306`). Out-of-order arrivals wait.
+head while the head slot is ready and not itself bypassed (`drain_ready_write_heads_`,
+`rob.hpp:336-345`, called from `rob.hpp:384,399`). Out-of-order arrivals wait.
 
 **R** `pop_r_staged` reads `rob_idx` as the **burst base**, not the beat index. The NSU stamps
 every beat of a burst with the same base, so beat *i* lands at
-`base + read_arrival_offset_[base]` (`rob.hpp:331-339`). A burst is released only when **all** its
-beats are ready (`rob.hpp:353-362`).
-
-That whole-burst gate is stricter than AXI4 and stricter than FlooNoC. AXI4 permits read data
-for different `ARID`s to interleave on the R channel -- `RID` distinguishes them; only *write*
-data interleaving was removed, along with `WID`. Beats of one burst must stay in order, nothing
-more. FlooNoC releases one beat at a time and frees each slot as its beat leaves
-(`floo_rob.sv:250-266`), and when the next beat has not arrived it drops back to `RoBWrite` and
-forwards a different ID's response directly (`floo_rob.sv:287-297`). Our RoB holds every slot of
-a burst until its last beat lands. This costs latency and blocks slot recycling mid-burst; it
-buys nothing AXI4 asks for.
+`base + read_arrival_offset_[base]` (`rob.hpp:434-454`). Release is now **per-beat**, not
+whole-burst: `drain_ready_read_heads_` walks `read_release_offset_[base]` forward one beat at a
+time while `read_entries_[base + offset]` is ready, pushing each beat onto `committed_r_queue_`
+as it becomes available (`rob.hpp:347-364`). The order-list entry pops only once every beat of
+its burst has been released (`rob.hpp:359-362`). This matches FlooNoC, which frees each slot as
+its beat leaves and forwards another ID's response directly when the next beat is late
+(`floo_rob.sv:250-266,287-297`); the earlier whole-burst gate (held every slot until the last
+beat landed) is retired.
 
 `commit_b_exit` / `commit_r_exit` free a slot when its release refcount reaches zero
-(`rob.hpp:377-395`).
+(`rob.hpp:463-481`).
 
-Mixing is forbidden: an Enabled-mode RoB that receives a `rob_req = 0` response aborts
-(`rob.hpp:284-287,323-326`).
+Bypass and slotted responses are not distinguished by rejecting one or the other outright: a
+bypassed response must match the head of its ID's order list, or the model aborts
+(`rob.hpp:379-382` B, `rob.hpp:420-423` R).
 
 ## 4. Invariants that hold today and are written nowhere
 
-1. **Every admitted transaction consumes at least one slot.** There is no bypass path.
-2. Therefore the total length of all order deques, summed over all 256 IDs, is at most 32.
-   `std::deque` is unbounded; the slot pool bounds it.
-3. Therefore `committed_b_queue_.size()` and `committed_r_queue_.size()` are each at most 32.
-4. Therefore **the slot pool is the outstanding limit.** B: 32 transactions. R: 32 beats.
+1. **At most one bypassed entry per AXI ID.** Bypass clause 1 admits an entry onto an order list
+   only when that list is empty (`rob.hpp:229` AW, `273` AR), so a second transaction to the same
+   ID always finds a non-empty list and takes a slot.
+2. **Every other order-list entry of that ID owns a slot.** Combined with 1, a per-ID order list
+   holds at most `1 + depth` entries, where `depth` is `b_rob_depth_` or `r_rob_depth_`.
+3. Therefore the total length of all order deques, summed over all `AXI_ID_SPACE` = 256 IDs, is at
+   most `NumIds + depth` = `256 + b_rob_depth_` (write) or `256 + r_rob_depth_` (read) -- not
+   `depth` alone. `std::deque` is unbounded; this bound is asserted nowhere in code.
+4. **The slot pool is no longer the outstanding limit.** It still bounds reorder storage for
+   slotted transactions and still guarantees the NoC can always find somewhere to put a response
+   (section 5); the per-ID outstanding count is `max_txns_per_id_` (`rob.hpp:226,269`),
+   independent of pool depth.
 
-Admission in Enabled mode is blocked only by slot-allocation failure (`rob.hpp:182,219`). The
-`s1_aw_.full()` / `s1_ar_.full()` checks upstream are ordinary queue backpressure, not a
-transaction-count limit.
+Admission in Enabled mode is blocked by two independent checks: the per-ID order-list depth
+(`rob.hpp:226,269`) and, for a non-bypassed transaction, slot-allocation failure
+(`rob.hpp:233,277`). The `s1_aw_.full()` / `s1_ar_.full()` checks upstream are ordinary queue
+backpressure, not a transaction-count limit.
 
-### A read burst longer than the pool wedges the port
+### A read burst longer than the pool wedged the port -- fixed
 
-`push_ar` returns `false` for any `len + 1 > ROB_CAPACITY` (`rob.hpp:218`) and there is no other
-path. AXI4 permits `len` up to 255. A 256-beat `INCR` read therefore never leaves the AXI slave
-port in `RobMode::Enabled`: not slowly, never. `test_rob.cpp:278-293` pins the `return false`; the
-regression matrix records the consequence as an exclusion (`AX4-BUR-003`, `len 256`, "rob
-capacity"). Neither names it as a limitation.
+Before bypass, `push_ar` returned `false` for any `len + 1` exceeding the pool depth, with no
+other path, so a 256-beat `INCR` read never left the AXI slave port in `RobMode::Enabled`: not
+slowly, never. Recorded until the fix only as a matrix exclusion (`AX4-BUR-003`, `len 256`, "rob
+capacity"), never named a defect.
 
-FlooNoC does not have it, and bypass is the reason. `floo_rob.sv:336-355` checks
-`rob_free_space > ax_len_i` **only on the `ax_rob_req_o` path**; a transaction that needs no
-reordering is admitted at any length. So the first read of an ID, however long, passes a 64-entry
-RoB untouched.
+FlooNoC never had it, because of bypass: `floo_rob.sv:336-355` checks `rob_free_space >
+ax_len_i` **only on the `ax_rob_req_o` path**; a transaction that needs no reordering is admitted
+at any length. Bypass clause 1 (section 3) is the same fix here: `needs_rob` is false for the
+first burst of an idle ID, so no slot check applies (`rob.hpp:273,277`) and the burst is admitted
+at any length. `test_rob.cpp:1213-1229` covers the admit; `:1231-1248` confirms a second oversized
+burst on the same, now non-idle, ID is still refused -- per-ID, not a channel wedge. Verified on
+the wire: `docs/backlog.md`, "FIXED 2026-07-11" (a 64-beat burst that hung pre-fix drains
+post-fix; all shorter patterns unaffected).
 
-Bypass clause 1 is therefore not only an area optimization. It is what makes long bursts
+Bypass clause 1 was therefore not only an area optimization. It is what makes long bursts
 admissible at all.
 
 ## 5. What the slot pool is, and is not
@@ -166,14 +196,15 @@ reorder storage, and neither does a follow-on transaction to the same destinatio
 previous one. Only the `else` branch allocates.
 
 **A bypassed transaction still occupies an order-list entry.** FlooNoC pushes its status FIFO
-unconditionally; `rob_req` is merely a bit inside the entry (`floo_rob.sv:443-446`). Invariant 2
-above -- the slot pool bounds the order lists -- must therefore be re-derived once a bypass exists.
+unconditionally; `rob_req` is merely a bit inside the entry (`floo_rob.sv:443-446`). Section 4's
+invariants 1-3 are this re-derivation, now that bypass clause 1 is shipped.
 
-Under clause 1 alone it survives. A bypassed entry is admitted only onto an empty list, so an ID
+Under clause 1 alone it holds: a bypassed entry is admitted only onto an empty list, so an ID
 holds at most one of them, and every other entry of that ID owns a slot. Per-ID list length is at
-most `1 + depth`; the total at most `NumIds + depth`. Under clause 2 it does not survive: one ID may
-bypass repeatedly while its destination holds steady, and the list grows without bound. That is why
-FlooNoC carries `MaxTxnsPerId`, enforced as `ax_gnt_o = !fifo_full[ax_id_i]` (`floo_rob.sv:414`).
+most `1 + depth`; the total at most `NumIds + depth`. Under clause 2 it would not hold: one ID
+could bypass repeatedly while its destination holds steady, and the list would grow without
+bound. That is why FlooNoC carries `MaxTxnsPerId`, enforced as `ax_gnt_o = !fifo_full[ax_id_i]`
+(`floo_rob.sv:414`). Clause 2 is not implemented here (below).
 
 The trade the two clauses make is RoB storage against status-table storage.
 
@@ -199,11 +230,18 @@ absent.
 
 | FlooNoC | what it sizes | FlooNoC source | here |
 |---|---|---|---|
-| `BRoBSize` | B RoB depth, flip-flops (`OnlyMetaData = 1` skips the SRAM, `floo_rob.sv:122`) | `floo_pkg.sv:303` | `1 << ROB_IDX_WIDTH` |
-| `RRoBSize` | R RoB depth, `tc_sram_impl(.NumWords(RRoBSize), .DataWidth($bits(axi_data_t)))` (`floo_rob.sv:123-126`) | `floo_pkg.sv:307` | the same constant |
-| `MaxTxnsPerId` | per-ID status FIFO depth | `floo_pkg.sv:299` | absent; implied by invariant 2 |
+| `BRoBSize` | B RoB depth, flip-flops (`OnlyMetaData = 1` skips the SRAM, `floo_rob.sv:122`) | `floo_pkg.sv:303` | `b_rob_depth_`, ctor param, default 32 (`rob.hpp:47,54,141`) |
+| `RRoBSize` | R RoB depth, `tc_sram_impl(.NumWords(RRoBSize), .DataWidth($bits(axi_data_t)))` (`floo_rob.sv:123-126`) | `floo_pkg.sv:307` | `r_rob_depth_`, ctor param, default 32 (`rob.hpp:48,55,142`) |
+| `MaxTxnsPerId` | per-ID status FIFO depth | `floo_pkg.sv:299` | `max_txns_per_id_`, ctor param, default 32 (`rob.hpp:48,56,143`), gates admission (`rob.hpp:226,269`) |
 | RoB `NumIds` | per-ID status FIFO count | `2**AxiIdWidth`, `floo_rob.sv:53-54` | 256, inherited from `AWID_WIDTH = 8` |
 | `MaxTxns` | meta buffer depth on the **subordinate** side (`floo_axi_chimney.sv:811-816`, guarded by `EnSbrPort`) | `floo_pkg.sv:288` | already modelled as NSU `meta_buffer.max_outstanding` = 32 |
+
+All three are now plumbed end to end: `NmuConfig` fields (`nmu.hpp:133-136`) through `Nmu`'s ctor
+(`nmu.hpp:289-290`) to `Rob`'s ctor (`rob.hpp:46-48`), from `NmuWrap::init` params
+(`nmu_wrap.hpp:51-54,73-75`) with co-sim defaults in `wrap_defaults.hpp` (`kRobBDepth` /
+`kRobRDepth` / `kRobMaxTxnsPerId`, lines 30-31,35) and DPI params on `cmodel_nmu_create_ex`
+(`cmodel_dpi.cpp:402-411`), to a Makefile knob (`B_ROB_DEPTH` / `R_ROB_DEPTH` /
+`MAX_TXNS_PER_ID`, `sim/verilator/Makefile:211-212,219`).
 
 `MaxTxns` belongs to the NSU, not the NMU. `floo_axi_chimney.sv:872-873` asserts that a chimney
 without a manager port carries no RoB at all; the RoB and the meta buffer sit on opposite faces
@@ -219,38 +257,40 @@ them. `floo_simple_rob.sv:25` merely *defaults* `rob_idx_t` to `logic[$clog2(RoB
 
 Each row is a shape the model asserts and an RTL implementer would have to honour or overrule.
 
-| # | as built | what it becomes in RTL | the choice nobody made |
-|---|---|---|---|
-| 1 | B and R pools share `ROB_CAPACITY` | two independent memories, one of them SRAM | B costs ~11 b/entry, R costs 256 b/entry. Sizing them together sizes the cheap one after the expensive one. |
-| 2 | `find_consecutive_free` (`rob.hpp:163-175`), first-fit linear scan | a 32-bit priority-encoder chain, evaluated every cycle | Three different allocators with three different reuse rules. Ours: any consecutive run, found by scan, so eight scattered free slots refuse an 8-beat burst. FlooNoC `floo_rob`: one `lzc` over an allocation bitmap (`floo_rob.sv:155-164`), O(1), but slots below the high-water mark cannot be reused until it clears. `floo_simple_rob`: a wrapping ring pointer (`floo_simple_rob.sv:126-137`), O(1), no fragmentation, bursts may straddle the wrap. Nobody chose ours. |
-| 3 | `array<deque<BeatRange>, 256>` | 256 parallel FIFOs, or one shared linked-list store | FlooNoC builds `fifo_v3 [NumIds-1:0]` for the RoB status table (`floo_rob.sv:450-465`) and an `id_queue` with a shared `CAPACITY` for the meta buffer (`floo_meta_buffer.sv:146-151`). The two differ by roughly an order of magnitude in area at 256 IDs. |
-| 4 | `ReadEntry` holds `axi::RBeat` by value | 256 b of `rdata` and ~11 b of metadata, in different memories | FlooNoC splits them: SRAM for `rob_wdata`, flip-flops for `rob_meta_q` (`floo_rob.sv:122-153`). |
-| 5 | `mode_w_` and `mode_r_` exist but the wrap ties them | `BRoBType` and `RRoBType`, independently selectable | A B-only RoB is FlooNoC's cheap point and we cannot express it end to end. |
-| 6 | a read burst releases only when every beat is ready (`rob.hpp:353-362`) | hold the whole burst, or stream it | AXI4 permits read data of different `ARID`s to interleave (`RID` distinguishes; only write interleaving and `WID` were removed). FlooNoC streams beat by beat and frees each slot as it leaves (`floo_rob.sv:250-266`), interleaving another ID's response when the next beat is late (`floo_rob.sv:287-297`). Ours neither streams nor recycles. |
+| # | status | as built | what it becomes in RTL | the choice |
+|---|---|---|---|---|
+| 1 | **CLOSED** | B and R pool depths are independent ctor parameters, `b_rob_depth_` / `r_rob_depth_` (`rob.hpp:47-48`), sharing only the 256-entry `ROB_IDX_SPACE` array bound (`rob.hpp:169-170`) | two independent memories, one of them SRAM, each sized to its own depth | Was fused into one `ROB_CAPACITY` constant; now expressible. B costs ~11 b/entry, R costs 256 b/entry, so sizing them independently lets the cheap one shrink without the expensive one. |
+| 2 | **CLOSED** | `alloc_write_` / `alloc_read_` high-water bitsets, `write_free_space()` / `read_free_space()` as leading-zero count (`rob.hpp:106-113,175-176,183-188`) | one `lzc` over an allocation bitmap, O(1) | Ported from FlooNoC `floo_rob` (`floo_rob.sv:155-164`): slots below the high-water mark cannot be reused until it clears. `find_consecutive_free`'s any-consecutive-run scan is deleted. `floo_simple_rob`'s wrapping ring pointer (`floo_simple_rob.sv:126-137`) remains a documented alternative, not chosen. |
+| 3 | open | `array<deque<BeatRange>, 256>` (`rob.hpp:197-198`) | 256 parallel FIFOs, or one shared linked-list store | FlooNoC builds `fifo_v3 [NumIds-1:0]` for the RoB status table (`floo_rob.sv:450-465`) and an `id_queue` with a shared `CAPACITY` for the meta buffer (`floo_meta_buffer.sv:146-151`). The two differ by roughly an order of magnitude in area at 256 IDs. |
+| 4 | open | `ReadEntry` holds `axi::RBeat` by value (`rob.hpp:163-168`) | 256 b of `rdata` and ~11 b of metadata, in different memories | FlooNoC splits them: SRAM for `rob_wdata`, flip-flops for `rob_meta_q` (`floo_rob.sv:122-153`). |
+| 5 | open | `mode_w_` and `mode_r_` exist but the wrap ties them (`nmu_wrap.hpp:71-72`) | `BRoBType` and `RRoBType`, independently selectable | A B-only RoB is FlooNoC's cheap point and we cannot express it end to end. |
+| 6 | **CLOSED** | a read burst releases beat by beat via `read_release_offset_` (`rob.hpp:347-364`) | stream it, freeing each slot as its beat leaves | Matches FlooNoC (`floo_rob.sv:250-266,287-297`): AXI4 permits read data of different `ARID`s to interleave (`RID` distinguishes; only write interleaving and `WID` were removed). The earlier whole-burst gate held every slot until the last beat landed; retired. |
 
-## 7a. One comment that is wrong
+## 7a. One comment that was wrong -- CLOSED
 
-`rob.hpp:33-36` states the tick order as "drain B/R before forwarding AW/W/AR -> response frees IDs in
-same cycle, request can use freed IDs after". That holds for standalone `AxiSlavePort::tick()`. The
-integrated `Nmu::tick()` runs the request side **first** (`nmu.hpp:291-294`) and drains the response
-side after (`nmu.hpp:296-311`). No `Rob` behaviour depends on the order, but the comment has been
-quoted as if it did.
+`rob.hpp:35-38` used to state the tick order as "drain B/R before forwarding AW/W/AR -> response
+frees IDs in same cycle, request can use freed IDs after", true only of standalone
+`AxiSlavePort::tick()`. It now states the correct order: the integrated `Nmu::tick()` runs the
+request side **first** (`nmu.hpp:297-301`) and drains the response side after
+(`nmu.hpp:303-319`), and the comment says so (`rob.hpp:35-38`). No `Rob` behaviour depends on the
+order.
 
 ## 8. Not modelled
 
 - **Storage class.** No structure distinguishes SRAM from flip-flops, so the model reports no
   area and cannot rank the two pools by cost.
-- **Bounded per-ID order lists.** `std::deque` grows on demand. Nothing in the model would
-  notice a `MaxTxnsPerId` violation, because the bound does not exist.
-- **Allocator timing.** `find_consecutive_free` is O(32) per call and free of cost in C++.
-- **`RobMode` per direction.** Reachable in `NmuConfig`, unreachable through `NmuWrap`.
-- **Bypass.** `rob_req` is always `1` in Enabled mode and always `0` in Disabled mode. The wire
-  field is present and the NSU replays it faithfully; nothing ever sets it per transaction.
+- **Allocator timing.** `highest_set` (`rob.hpp:183-188`) is a linear scan over the allocation
+  bitset in C++, modelling FlooNoC's O(1) `lzc` combinational priority encoder
+  (`floo_rob.sv:155-164`); the model reports no timing cost for either shape.
+- **`RobMode` per direction.** Reachable in `NmuConfig`, unreachable through `NmuWrap`
+  (`nmu_wrap.hpp:71-72`).
 
 ## 9. References
 
-**Ours.** `src/c_model/include/nmu/rob.hpp`, `nmu/nmu.hpp:126-138`, `wrap/nmu_wrap.hpp:66-71`,
-`src/dpi/cmodel_dpi.cpp:373-406`, `specgen/generated/json/ni_packet.json:77,82-83`,
+**Ours.** `src/c_model/include/nmu/rob.hpp`, `nmu/nmu.hpp:126-148`,
+`wrap/nmu_wrap.hpp:51-54,71-75`, `wrap/wrap_defaults.hpp:30-31,35`,
+`src/dpi/cmodel_dpi.cpp:373-411`, `sim/verilator/Makefile:211-212,219`,
+`specgen/generated/json/ni_packet.json:77,82-83`,
 `specgen/generated/cpp/ni_flit_constants.h:56,219`, `docs/architecture.md` section 2.
 
 **FlooNoC** (`E:/05_NoC/FlooNoC`, read-only reference). `hw/floo_rob.sv`,
