@@ -128,6 +128,10 @@ struct NmuConfig {
     addr_trans::SamTable sam{};
     RobMode read_rob_mode = RobMode::Disabled;
     RobMode write_rob_mode = RobMode::Disabled;
+    // RoB pool depths, per direction. Enabled mode only. See
+    // docs/nmu-rob-microarchitecture.md section 6.
+    std::size_t b_rob_depth = 32;
+    std::size_t r_rob_depth = 32;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
     uint8_t write_vc = 0;
@@ -280,7 +284,8 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
                  cfg_.src_id, cfg_.sam),
       req_s1_bridge_(),
-      rob_(req_s1_bridge_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode, cfg_.sam),
+      rob_(req_s1_bridge_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode, cfg_.sam,
+           cfg_.b_rob_depth, cfg_.r_rob_depth),
       axi_slave_port_(rob_, rob_, cfg_.port_params),
       s2_rsp_b_(),
       s2_rsp_r_(),

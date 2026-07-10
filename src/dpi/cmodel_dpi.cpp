@@ -372,7 +372,8 @@ using ni::cmodel::wrap::NmuOutputs;
 
 static unsigned long long nmu_create_impl(const char* name, int src_id, int num_vc,
                                           ni::cmodel::nmu::RobMode rob_mode,
-                                          const char* config_path) {
+                                          const char* config_path, std::size_t b_rob_depth,
+                                          std::size_t r_rob_depth) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nmu_create: not initialized");
         return 0ull;
@@ -380,7 +381,7 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int num_
     DPI_BOUNDARY_BEGIN_R(nmu_create_impl, 0ull) {
         auto adapter = std::make_unique<NmuWrap>();
         adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc), kAxiQueueDepth,
-                      rob_mode, config_path);
+                      rob_mode, config_path, b_rob_depth, r_rob_depth);
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nmu), WrapType::Nmu, HandleState::Live,
             std::string(name),
@@ -394,15 +395,17 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int num_
 
 extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc,
                                                 const char* config_path) {
-    return nmu_create_impl(name, src_id, num_vc, ni::cmodel::nmu::RobMode::Disabled, config_path);
+    return nmu_create_impl(name, src_id, num_vc, ni::cmodel::nmu::RobMode::Disabled, config_path,
+                           kRobBDepth, kRobRDepth);
 }
 
 extern "C" unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int num_vc,
-                                                   int rob_enabled, const char* config_path) {
+                                                   int rob_enabled, int b_rob_depth,
+                                                   int r_rob_depth, const char* config_path) {
     return nmu_create_impl(
         name, src_id, num_vc,
         rob_enabled ? ni::cmodel::nmu::RobMode::Enabled : ni::cmodel::nmu::RobMode::Disabled,
-        config_path);
+        config_path, static_cast<std::size_t>(b_rob_depth), static_cast<std::size_t>(r_rob_depth));
 }
 
 extern "C" void cmodel_nmu_set_inputs(

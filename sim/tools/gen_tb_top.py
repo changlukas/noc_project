@@ -525,6 +525,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
         w('                                                                 input int src_id, input int num_vc,')
         w('                                                                 input int rob_enabled,')
+        w('                                                                 input int b_rob_depth,')
+        w('                                                                 input int r_rob_depth,')
         w('                                                                 input string config_path);')
     else:
         w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,')
@@ -552,6 +554,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    int unsigned max_unique_ids  = 1;")
     w("    int unsigned max_outstanding = 32;")
     w("")
+    if rob_enabled:
+        w("    // NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits).")
+        w("    int unsigned b_rob_depth = 32;")
+        w("    int unsigned r_rob_depth = 32;")
+        w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
     w("    initial begin")
@@ -560,12 +567,16 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('        void\'($value$plusargs("max_unique_ids=%d", max_unique_ids));')
     w('        void\'($value$plusargs("max_outstanding=%d", max_outstanding));')
     w('        $display("[Config] max_unique_ids=%0d max_outstanding=%0d", max_unique_ids, max_outstanding);')
+    if rob_enabled:
+        w('        void\'($value$plusargs("b_rob_depth=%d", b_rob_depth));')
+        w('        void\'($value$plusargs("r_rob_depth=%d", r_rob_depth));')
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
     for (i, x, y, c) in nodes:
         if rob_enabled:
-            w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1, sam_config_path);  '
+            w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1, '
+              f'b_rob_depth, r_rob_depth, sam_config_path);  '
               f'// src_id = node{i} coord {c}, ROB Enabled')
         else:
             w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC, sam_config_path);  '

@@ -24,6 +24,12 @@ constexpr std::size_t kMetaBufferMaxOutstanding = 32;
 // through, which the VC throughput round requires.
 constexpr std::size_t kMetaBufferMaxUniqueIds = 1;
 
+// NMU RoB pool depths, per direction. Both <= 1 << ROB_IDX_WIDTH = 256, the
+// addressable range of the rob_idx header field. A B entry holds {id, resp};
+// an R entry holds one beat of rdata, so the two are sized independently.
+constexpr std::size_t kRobBDepth = 32;
+constexpr std::size_t kRobRDepth = 32;
+
 // Wormhole + VC arbiter staging depth (wormhole_per_input_depth and
 // vc_arbiter_pending_depth).
 constexpr std::size_t kArbiterFifoDepth = 4;

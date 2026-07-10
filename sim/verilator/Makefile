@@ -207,6 +207,10 @@ MAX_UNIQUE_IDS  ?= 1
 MAX_OUTSTANDING ?= 32
 HOTSPOT         ?= 5
 
+# NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits).
+B_ROB_DEPTH     ?= 32
+R_ROB_DEPTH     ?= 32
+
 # _CONTINUOUS is non-empty exactly when INJECTION_MODE is 1. Kept on one line:
 # a backslash continuation inside a `?=` value folds the leading whitespace of
 # the next line into the value.
@@ -235,6 +239,7 @@ run-directed: $(TBTOP_EXE)
 	    "+num_reads=$(INJECTION_COUNT)" "+num_writes=$(INJECTION_COUNT)" \
 	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
 	    "+max_unique_ids=$(MAX_UNIQUE_IDS)" "+max_outstanding=$(MAX_OUTSTANDING)" \
+	    "+b_rob_depth=$(B_ROB_DEPTH)" "+r_rob_depth=$(R_ROB_DEPTH)" \
 	    "+verilator+seed+$(SEED)" \
 	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(SIM_TAG)/perf.json" \
