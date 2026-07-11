@@ -4,83 +4,59 @@ Running action items and open bugs, maintained across iteration rounds. Each rou
 surfaces and strikes what it closes. Read it at session start. An item is not started unless a round
 picks it up.
 
-## NEXT SESSION -- co-sim parameter-entry cleanup (brainstormed 2026-07-11, not started)
+## DONE 2026-07-11 -- DUT depth params single-sourced via specgen (merged main, pushed `6f4ec86`)
 
-Branch `feat/nmu-rob-floonoc-alignment` is complete + reviewed (ctest 424, HEAD `0a3eb3b`, not
-pushed). This next round is a follow-up refactor. **Working tree currently holds two uncommitted
-Makefile changes** (`MEMORY_SIZE` knob in `Makefile` + `sim/verilator/Makefile`) prototyped during
-the burst-matrix run below -- decide their fate in this round; do not lose them.
+All 11 NMU/NSU microarchitecture depths now live in one place: `specgen/source/constants.yaml`,
+generated to `ni_params.h` (C++) and `ni_params_pkg.sv` (SV). Every consumer -- model config, wraps,
+DPI, tests, SV tb, Makefile -- reads the generated symbols. `wrap_defaults.hpp` and `port_params.yaml`
+deleted; the two C++ YAML loaders retired. This kills the old scatter where one depth was defined in up
+to four places (C++ default, Python bake, Makefile `?= 32`, plusarg).
 
-**The correct mental model (settled with the user 2026-07-11, RTL-based):** two kinds, not three.
+**Approach (settled with user):** not the earlier "NMU params to port_params.yaml" but the FlooNoC
+model -- one config source, both languages generated from it, DV/stimulus knobs kept out. FlooNoC keeps
+these in the single `ChimneyDefaultCfg` localparam (`hw/floo_pkg.sv:342`); specgen is our bilingual
+equivalent. Values: queue/depkt 16, RoB b/r + max_txns_per_id + meta_outstanding 32, meta_unique_ids 1,
+arbiter 4. NMU and NSU keep separate symbols; a unit's 5 AXI channels share one `QUEUE_DEPTH`.
 
-- **DUT parameters** -- what the hardware *is*. `b_rob_depth`, `r_rob_depth`, `max_txns_per_id`, NSU
-  `meta_buffer` depth, VC count. In RTL these are `parameter` / `localparam` -- **compile-time
-  (elaboration)**. Single source of truth = the config that describes the hardware (YAML). We pass
-  them via DPI plusarg today; that is a c_model modelling convenience (sweep a compile-time param
-  without re-elaborating), **not** a runtime knob.
-- **Stimulus** -- what you drive *into* the DUT. pattern, burst length, count: **generate-time**
-  (gen_test_patterns produces the .txt). injection_mode / injection_rate: **runtime** pacing.
+Verified: ctest 424 -> 422 (two retired loader-error negative tests); co-sim directed + CR + override +
+continuous all pass; specgen codegen green; plusarg override still swaps a depth (`B_ROB_DEPTH=64`
+reaches the model). NSU MetaBuffer recording (`emit_result_csv`) now derives its value from the tb's
+`[Config]` log line instead of a duplicated Makefile literal, so all 11 are truly single-sourced. Spec
+`docs/superpowers/specs/2026-07-11-config-simplification-design.md`, plan `.../plans/2026-07-11-config-simplification.md`.
 
-**Scope this round (user, 2026-07-11): NMU three params + MEMORY_SIZE + hotspot observation. NSU
-consolidation is a follow-up once this round's sim runs green and proves the YAML-driven path.**
+## NEXT -- DV-tier stimulus cleanup (deferred from the round above)
 
-1. **Move the three NMU RoB params to `port_params.yaml` as the single source.** Add an `nmu.rob`
-   block (`b_rob_depth` / `r_rob_depth` / `max_txns_per_id`, all 32). Two readers consume it:
-   `load_nmu_port_params` (C++, unit tests -- already reads `nmu.queues`) and `gen_tb_top.py` (Python
-   -- already reads topology YAML via `load_topology`; add `load_port_params`). `gen_tb_top` bakes
-   the YAML value as the generated SV int default (today those `= 32` are hardcoded Python strings at
-   `gen_tb_top.py:559-563`). Keep the `$value$plusargs` override for sweeps (same-build value swap,
-   no re-elaborate). Strip the three `?= 32` defaults from `sim/verilator/Makefile:211-219`; the
-   plusarg-forwarding lines stay. **New maintenance surface:** two readers, one YAML schema -- the
-   spec must name the schema authoritative and require both readers to track it. Low risk: these
-   three params were added this round, no historical co-sim behaviour depends on them. NSU already
-   passes `max_outstanding`/`max_unique_ids` the same plusarg way -- consolidating it is the
-   follow-up, and needs a check that the injection-sweep headline numbers stay bit-identical.
+Two stimulus/DV numbers, orthogonal to the DUT depths above, still need tidying. **Working tree holds
+two uncommitted Makefile edits** (`MEMORY_SIZE` knob in `Makefile` + `sim/verilator/Makefile`,
+prototyped earlier) -- decide their fate here; do not lose them.
 
-2. **MEMORY_SIZE is the slave-side tile memory, and it should be YAML-driven, NOT a caller knob.**
-   (User correction 2026-07-11.) `--memory-size` (gen_test_patterns) and `REGION_BYTES` (the SV
-   `axi_rand_slave` MAPPED memory window, `user_node_endpoint.sv:41`) are the SAME physical thing --
-   the per-tile memory a subordinate serves -- but they are NOT wired together today: `REGION_BYTES`
-   comes from `address_map.test_aperture` in the topology YAML (`gen_tb_top.py:476`, default
-   `0x1000`), while `--memory-size` is a separate hardcoded `0x40000` in the recipe. Stimulus
-   addresses (bounded by `--memory-size`) must land inside the slave memory (`REGION_BYTES`), or a
-   read returns unwritten data. The mode1+burst `ValueError` was the stimulus window being too small;
-   the real question is whether the slave memory is large enough. Fix: make `--memory-size` derive
-   from the same YAML `address_map` field the slave memory does, so one number sizes both. This is
-   the concrete instance of the user's broader point: **all DUT storage sizes (fifo/sram/memory)
-   should come from YAML** -- `REGION_BYTES` already does, `--memory-size` is the outlier. The
-   uncommitted `MEMORY_SIZE` Makefile knob is a stopgap; the right home is the topology YAML
-   `address_map`, feeding both readers. (For reference the recipe currently needs `base +
-   (count-1)*n_nodes*stride + reserved`, `stride = max(0x40, (len+1)*(1<<size))`; at
-   count=200/BURST_LEN=63 that is `0x640000` -- so the slave tile aperture must be at least that for
-   a saturating burst run.)
+**Premise correction (2026-07-11).** The earlier backlog claimed `--memory-size` and `REGION_BYTES` are
+the same physical thing (the slave tile memory). They are not: the co-sim slave (`axi_rand_slave`
+MAPPED) is an associative byte array -- unbounded, no depth param, ceiling = the DUT aperture. So:
 
-   Reference -- **R RoB SRAM size vs `r_rob_depth`** (settled 2026-07-11, for the depth-sweep item):
-   an R RoB entry stores one beat of `rdata` = `RDATA_WIDTH` 256 b = 32 B in SRAM (metadata
-   `{id,resp,last,user}` ~12 b in FF, as FlooNoC's `OnlyMetaData=0` R RoB). So SRAM = `depth * 32 B`:
-   depth 32 -> 1 KiB, 64 -> 2 KiB, 128 -> 4 KiB (one full 4 KB burst at AxSIZE=5), 256 -> **8 KiB**
-   (AXI4 max burst, the paper's 8 kB design point, NI-area 91%). The 32->256 sweep is the
-   SRAM-vs-reorderable-burst-length trade curve from 1 KiB to 8 KiB, per direction per NMU. B RoB
-   carries no payload (~12 b/entry, no SRAM in FlooNoC), which is why `b_rob_depth` and `r_rob_depth`
-   are split: B can go deep cheaply, every R slot is 32 B of SRAM.
+- `--memory-size` (gen_test_patterns) is a **generator layout window** = `n_nodes * count * stride`, not
+  a hardware size. The mode1+burst `ValueError` was the generator's own slot layout overflowing its
+  declared window. Fix: auto-derive it in the generator (it already holds n_nodes/count/stride); drop
+  the Makefile knob.
+- `test_aperture` in the topology YAML feeds only DV `REGION_BYTES` (rand_master burst window /
+  reorder_compare / watchdog). It is a DV param sitting in the DUT YAML -- move it to a tb-side DV
+  constant, leaving topology YAML DUT-only. `tile_size` (the real DUT decode aperture, per-tile 4 GB)
+  stays.
+- Not building a sized per-tile memory model: pulp `axi_rand_slave` has no size knob and the DV IP is
+  ported unmodified; the tile is a test placeholder for a future heterogeneous subsystem.
 
-3. **hotspot mode1 count=200 timeout is a saturation observation, not a bug.** In the burst matrix,
-   `directed_mode1_hotspot_burst_r0.5` at `INJECTION_COUNT=200` hit the 550 s wall clock (rc=124).
-   Congestion, not a hang: at `INJECTION_COUNT=40` the same config is `CONTINUOUS PASS`, all 16 nodes
-   reporting (36 monitor lines) -- it advances, unlike the Task-8 pre-bypass wedge (zero progress).
-   hotspot is many-to-one; long bursts queue at the one hot tile. Record the saturation point.
+**Reference -- R RoB SRAM size vs `r_rob_depth`** (for the depth-sweep item): an R RoB entry stores one
+beat of `rdata` = `RDATA_WIDTH` 256 b = 32 B in SRAM (metadata `{id,resp,last,user}` ~12 b in FF, as
+FlooNoC's `OnlyMetaData=0` R RoB). So SRAM = `depth * 32 B`: depth 32 -> 1 KiB, 64 -> 2 KiB, 128 ->
+4 KiB, 256 -> **8 KiB** (AXI4 max burst, the paper's 8 kB design point). B RoB carries no payload
+(~12 b/entry, no SRAM), which is why `b_rob_depth`/`r_rob_depth` are split: B goes deep cheaply, every R
+slot is 32 B of SRAM.
 
-**Burst verification matrix (2026-07-11, `tb_mesh_4x4_vc1_rob`, RobMode::Enabled, seed 1): 8/9 pass.**
-directed mode0 (two-phase, scoreboard checks data) x {neighbor, transpose, uniform_random, hotspot}
-all DIRECTED PASS with `axi_len=63` (64-beat burst confirmed in the stimulus file). directed mode1
-(injection rate 0.5, scoreboard disarmed, throughput) x {neighbor, transpose, uniform_random}
-CONTINUOUS PASS; hotspot = the saturation timeout above. constrained_random (random-length burst +
-random pacing + tb-level `reorder_compare`) CR PASS. **Fact corrected this session:** only
-directed+mode1 disarms the scoreboard (`user_node_endpoint.sv:264-270`); CR has no injection_mode
-branch and checks `reorder_compare` unconditionally. **Also confirmed (answers a user question):**
-same-id-different-dst does NOT bypass -- `needs_rob = !order_by_id_[id].empty()` ignores dst; only an
-idle id's first transaction bypasses; test `ReadSameIdDifferentDstInterleavedFilesPerBase` pins two
-same-id different-dst bursts both taking the RoB (bases 0 and 2, both `rob_req=1`).
+## Pre-existing (surfaced this round, not fixed)
+- Makefile random `SEED` can exceed Verilator's int32 limit (`+verilator+seed+ must be < 2147483648`),
+  an occasional co-sim flake; clamp the generated seed.
+- hotspot mode1 count=200 is a **saturation** point (many-to-one congestion), not a hang: count=40 is
+  `CONTINUOUS PASS`. Recorded, not a bug.
 
 ## SAM address remap — implemented on `feat/sam-remap` (2026-07-08, pending merge review)
 
