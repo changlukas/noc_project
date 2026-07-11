@@ -156,8 +156,8 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     axi::AxiSlave slave(mem);
     slave.set_memory_bounds(sc.config.memory_base, sc.config.memory_size);
 
-    auto nmu_params = nmu::load_nmu_port_params("config/port_params.yaml");
-    auto nsu_params = nsu::load_nsu_port_params("config/port_params.yaml");
+    nmu::PortParams nmu_params{};
+    nsu::PortParams nsu_params{};
     auto cm_params = test::load_channel_model_params("config/port_params.yaml");
 
     // This test now runs only the ORD-003 same_id_multi_dst gate (inlined above).

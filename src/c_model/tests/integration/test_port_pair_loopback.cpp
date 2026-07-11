@@ -5,15 +5,11 @@
 // re-proved scoreboard-clean transport over a hand-assembled C++ fabric, which
 // the wire-level co-sim already gates more truthfully. What survives is the
 // per-side config logic co-sim does not exercise: asymmetric queue-depth
-// independence and the YAML loader's fail-loud contracts.
+// independence.
 #include "common/loopback_channel_set.hpp"
-#include "common/tmp_path.hpp"
 #include "nmu/axi_slave_port.hpp"
 #include "nmu/port_params.hpp"
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <stdexcept>
 
 namespace axi = ni::cmodel::axi;
 namespace nmu = ni::cmodel::nmu;
@@ -40,26 +36,4 @@ TEST(PortParamsSplit, AsymmetricNmuNsuAwQueueSaturationIndependent) {
     EXPECT_TRUE(nmu_port.push_aw(aw));
     EXPECT_TRUE(nmu_port.push_aw(aw));
     EXPECT_FALSE(nmu_port.push_aw(aw));  // NMU side full at depth 2
-}
-
-// 2. Loader fail-loud: YAML missing 'nmu:' block throws std::runtime_error.
-TEST(PortParamsSplit, LoaderMissingNmuBlockThrows) {
-    auto p = ni::cmodel::testing::unique_temp_path("bad_nmu") + ".yaml";
-    std::ofstream(p) << "nsu: {}\nchannel_model: {}\n";
-    EXPECT_THROW(nmu::load_nmu_port_params(p), std::runtime_error);
-}
-
-// 3. Loader fail-loud: YAML with 'nmu:' present but missing 'w_queue_depth'
-//    inside 'queues:' throws (yaml-cpp throws BadConversion or KeyNotFound).
-TEST(PortParamsSplit, LoaderMissingNmuQueueKeyThrows) {
-    auto p = ni::cmodel::testing::unique_temp_path("bad_nmu_key") + ".yaml";
-    std::ofstream(p) << "nmu:\n  queues:\n    aw_queue_depth: 32\n"
-                        "    # w_queue_depth intentionally missing\n"
-                        "    ar_queue_depth: 32\n    b_queue_depth: 32\n    r_queue_depth: 32\n"
-                        "  depacketize: { b_q_depth: 32, r_q_depth: 32 }\n";
-    // EXPECT_ANY_THROW (not EXPECT_THROW with a specific type) because
-    // yaml-cpp's missing-key path throws YAML::TypedBadConversion (a
-    // yaml-cpp internal subclass of std::runtime_error), not the explicit
-    // std::runtime_error the block-level guards throw.
-    EXPECT_ANY_THROW(nmu::load_nmu_port_params(p));
 }

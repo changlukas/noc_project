@@ -5,8 +5,8 @@
 //   - LoopbackChannelSet (loopback_channel_set.hpp) wires a
 //     RequestPacketizer + ResponseDepacketizer pair so the port can be
 //     exercised without standing up the NoC fabric.
-//   - PortParams come from c_model/config/port_params.yaml (loaded at
-//     fixture setup; NO hardcoded queue-depth literals in the port header).
+//   - PortParams self-default from specgen/generated/cpp/ni_params.h (NO
+//     hardcoded queue-depth literals in the port header).
 //   - Port contract: per-channel FIFO order for all beats regardless of
 //     AXI ID. Cross-ID completion ordering / per-ID response reordering
 //     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
@@ -24,9 +24,8 @@ namespace test = ni::cmodel::testing;
 
 namespace {
 
-// PortParams come from the project-level YAML via the shared
-// ni::cmodel::load_port_params_yaml helper. Tests that need different depths
-// construct cmod::PortParams directly via brace-init.
+// PortParams self-default from the generated ni::NMU_* constants. Tests that
+// need different depths construct cmod::PortParams directly via brace-init.
 
 axi::AwBeat make_aw(uint8_t id, uint64_t addr, uint8_t len = 0, uint8_t size = 5,
                     axi::Burst burst = axi::Burst::INCR, uint8_t cache = 0xA, uint8_t lock = 0,
@@ -68,8 +67,7 @@ struct PortFixture {
     nmu::PortParams params;
     nmu::AxiSlavePort port;
 
-    PortFixture()
-        : params(nmu::load_nmu_port_params("config/port_params.yaml")), port(pkt, depkt, params) {}
+    PortFixture() : params{}, port(pkt, depkt, params) {}
 
     // Tighter loopback caps so backpressure tests can drive saturation
     // without exhausting the default 32-deep ports.
