@@ -380,8 +380,9 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int num_
     }
     DPI_BOUNDARY_BEGIN_R(nmu_create_impl, 0ull) {
         auto adapter = std::make_unique<NmuWrap>();
-        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc), kAxiQueueDepth,
-                      rob_mode, config_path, b_rob_depth, r_rob_depth, max_txns_per_id);
+        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc),
+                      ni::NMU_QUEUE_DEPTH, rob_mode, config_path, b_rob_depth, r_rob_depth,
+                      max_txns_per_id);
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nmu), WrapType::Nmu, HandleState::Live,
             std::string(name),
@@ -396,7 +397,7 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int num_
 extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc,
                                                 const char* config_path) {
     return nmu_create_impl(name, src_id, num_vc, ni::cmodel::nmu::RobMode::Disabled, config_path,
-                           kRobBDepth, kRobRDepth, kRobMaxTxnsPerId);
+                           ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH, ni::NMU_MAX_TXNS_PER_ID);
 }
 
 extern "C" unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int num_vc,
@@ -519,8 +520,8 @@ extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, in
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, 0ull) {
         auto adapter = std::make_unique<NsuWrap>();
-        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc), kAxiQueueDepth,
-                      static_cast<std::size_t>(max_unique_ids),
+        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(num_vc),
+                      ni::NSU_QUEUE_DEPTH, static_cast<std::size_t>(max_unique_ids),
                       static_cast<std::size_t>(max_outstanding));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nsu), WrapType::Nsu, HandleState::Live,

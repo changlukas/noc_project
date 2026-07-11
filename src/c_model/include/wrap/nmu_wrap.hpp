@@ -42,16 +42,17 @@ namespace ni::cmodel::wrap {
 class NmuWrap {
   public:
     // init — construct NmuStandalone with the co-sim default NmuConfig.
-    // ReadWriteSplit, queue_depth = kAxiQueueDepth per channel.
+    // ReadWriteSplit, queue_depth = ni::NMU_QUEUE_DEPTH per channel.
     // num_vc comes from the create param (cmodel_nmu_create); read/write VC
     // pools are derived from derive_vc_pools(num_vc) (odd num_vc asserts).
     // config_path: topology YAML with an `address_map` block. Null/empty
     // (the default) keeps the legacy co-sim default SAM below so existing unit-test
     // callers are unaffected.
-    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = kAxiQueueDepth,
+    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
               nmu::RobMode rob_mode = nmu::RobMode::Disabled, const char* config_path = nullptr,
-              std::size_t b_rob_depth = kRobBDepth, std::size_t r_rob_depth = kRobRDepth,
-              std::size_t max_txns_per_id = kRobMaxTxnsPerId) {
+              std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
+              std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
+              std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID) {
         using namespace ni::cmodel::nmu;
         num_vc_ = num_vc;
         NmuConfig cfg{};
@@ -78,10 +79,10 @@ class NmuWrap {
         cfg.port_params.ar_queue_depth = queue_depth;
         cfg.port_params.b_queue_depth = queue_depth;
         cfg.port_params.r_queue_depth = queue_depth;
-        cfg.port_params.depkt_b_q_depth = queue_depth;
-        cfg.port_params.depkt_r_q_depth = queue_depth;
-        cfg.wormhole_per_input_depth = kArbiterFifoDepth;
-        cfg.vc_arbiter_pending_depth = kArbiterFifoDepth;
+        cfg.port_params.depkt_b_q_depth = ni::NMU_DEPKT_Q_DEPTH;
+        cfg.port_params.depkt_r_q_depth = ni::NMU_DEPKT_Q_DEPTH;
+        cfg.wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
+        cfg.vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
         // R2: close the NI-edge credit loop. Seed the req-out sender counter to
         // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
