@@ -129,7 +129,7 @@ $(TOPO_STAMP): FORCE
 	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
 	fi
 
-$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
+$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
 # Python3 executable — auto-detected so build/run commands stay identical on
@@ -207,16 +207,16 @@ MAX_UNIQUE_IDS  ?= 1
 MAX_OUTSTANDING ?= 32
 HOTSPOT         ?= 5
 
-# NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits).
-B_ROB_DEPTH     ?= 32
-R_ROB_DEPTH     ?= 32
+# NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits). No ?=
+# default: unset leaves the plusarg unpassed (see the $(if) guards below) and
+# the tb falls back to its ni_params_pkg::NMU_ROB_*_DFLT-initialised local.
 
 # AXI burst length passed to gen_test_patterns (--len). 0 = single beat.
 # At --size 5 (32 B/beat), 63 gives 64 beats = 2048 B, inside the 4 KB boundary.
 BURST_LEN       ?= 0
 
-# Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId, floo_rob.sv:12).
-MAX_TXNS_PER_ID ?= 32
+# Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId, floo_rob.sv:12). No ?=
+# default; see B_ROB_DEPTH note above.
 
 # _CONTINUOUS is non-empty exactly when INJECTION_MODE is 1. Kept on one line:
 # a backslash continuation inside a `?=` value folds the leading whitespace of
@@ -246,8 +246,9 @@ run-directed: $(TBTOP_EXE)
 	    "+num_reads=$(INJECTION_COUNT)" "+num_writes=$(INJECTION_COUNT)" \
 	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
 	    "+max_unique_ids=$(MAX_UNIQUE_IDS)" "+max_outstanding=$(MAX_OUTSTANDING)" \
-	    "+b_rob_depth=$(B_ROB_DEPTH)" "+r_rob_depth=$(R_ROB_DEPTH)" \
-	    "+max_txns_per_id=$(MAX_TXNS_PER_ID)" \
+	    $(if $(B_ROB_DEPTH),"+b_rob_depth=$(B_ROB_DEPTH)") \
+	    $(if $(R_ROB_DEPTH),"+r_rob_depth=$(R_ROB_DEPTH)") \
+	    $(if $(MAX_TXNS_PER_ID),"+max_txns_per_id=$(MAX_TXNS_PER_ID)") \
 	    "+verilator+seed+$(SEED)" \
 	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(SIM_TAG)/perf.json" \

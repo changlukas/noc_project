@@ -552,15 +552,15 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // NSU knobs. max_unique_ids=1 collapses every manager onto one downstream")
     w("    // AXI id (FlooNoC default); 256 passes the manager's id through.")
     w("    // max_outstanding is the shared MetaBuffer pool per direction.")
-    w("    int unsigned max_unique_ids  = 1;")
-    w("    int unsigned max_outstanding = 32;")
+    w("    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;")
+    w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;")
     w("")
     if rob_enabled:
         w("    // NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits).")
-        w("    int unsigned b_rob_depth = 32;")
-        w("    int unsigned r_rob_depth = 32;")
+        w("    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT;")
+        w("    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;")
         w("    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).")
-        w("    int unsigned max_txns_per_id = 32;")
+        w("    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;")
         w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
