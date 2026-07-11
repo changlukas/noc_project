@@ -24,26 +24,33 @@ reaches the model). NSU MetaBuffer recording (`emit_result_csv`) now derives its
 `[Config]` log line instead of a duplicated Makefile literal, so all 11 are truly single-sourced. Spec
 `docs/superpowers/specs/2026-07-11-config-simplification-design.md`, plan `.../plans/2026-07-11-config-simplification.md`.
 
-## NEXT -- DV-tier stimulus cleanup (deferred from the round above)
+## DONE 2026-07-11 -- DV-tier stimulus cleanup (branch `chore/dv-region-bytes-cleanup`, local commits `390268a..a20a482`, not pushed)
 
-Two stimulus/DV numbers, orthogonal to the DUT depths above, still need tidying. **Working tree holds
-two uncommitted Makefile edits** (`MEMORY_SIZE` knob in `Makefile` + `sim/verilator/Makefile`,
-prototyped earlier) -- decide their fate here; do not lose them.
+Both DV/stimulus "size" numbers unified under one name (`region_bytes`) and split cleanly from the DUT
+address map. The unbounded MAPPED slave (`axi_rand_slave`, `byte_t memory_q[addr_t]`, no depth param)
+means neither number was ever a hardware size; both are per-tile test-address windows.
 
-**Premise correction (2026-07-11).** The earlier backlog claimed `--memory-size` and `REGION_BYTES` are
-the same physical thing (the slave tile memory). They are not: the co-sim slave (`axi_rand_slave`
-MAPPED) is an associative byte array -- unbounded, no depth param, ceiling = the DUT aperture. So:
-
-- `--memory-size` (gen_test_patterns) is a **generator layout window** = `n_nodes * count * stride`, not
+- `--memory-size` (gen_test_patterns) was a **generator layout window** = `n_nodes * count * stride`, not
   a hardware size. The mode1+burst `ValueError` was the generator's own slot layout overflowing its
-  declared window. Fix: auto-derive it in the generator (it already holds n_nodes/count/stride); drop
-  the Makefile knob.
-- `test_aperture` in the topology YAML feeds only DV `REGION_BYTES` (rand_master burst window /
-  reorder_compare / watchdog). It is a DV param sitting in the DUT YAML -- move it to a tb-side DV
-  constant, leaving topology YAML DUT-only. `tile_size` (the real DUT decode aperture, per-tile 4 GB)
-  stays.
+  declared window. **Auto-derived** it in `main()` (formula is a proven tight upper bound on
+  `alloc_unique_offset`'s worst case; retained `ValueError` now unreachable on the CLI path); the
+  `--memory-size` CLI + `MEMORY_SIZE` Makefile knob are gone. Internal name `memory_size` -> `region_bytes`.
+- `test_aperture` (topology YAML) fed only DV `REGION_BYTES` (rand_master window / reorder_compare /
+  watchdog). **Moved out of the DUT YAML** to the tb-generator constant `_DEFAULT_REGION_BYTES = 0x1000`
+  in `gen_tb_top.py`; the `test_aperture` field is deleted from all 7 topology YAMLs (`tile_size`, the
+  real SAM decode field, stays). SV param names `REGION_BYTES`/`REGION_BASE` unchanged.
+- **Knob collapsed, not exposed.** An interim `--region-bytes` CLI + dual-Makefile passthrough was
+  reverted after cross-review: FlooNoC sets the DV region size as a named tb-level parameter
+  (`tb_floo_axi_mesh.sv:30-31` `localparam MemSize = 64KB`, base from SAM), never a runtime knob. The DV
+  window lives as the named `gen_tb_top.py` constant; a sweep would edit the parameter, FlooNoC-style.
 - Not building a sized per-tile memory model: pulp `axi_rand_slave` has no size knob and the DV IP is
   ported unmodified; the tile is a test placeholder for a future heterogeneous subsystem.
+
+Verified: `pytest sim/tools/` 15/15 (incl. new root-cause regression: 16-node hotspot, count 200, burst
+`--len 3` -- the exact mode1+burst combo that overflowed the old fixed `0x40000` window, now generates
+disjoint slots cleanly). Co-sim `make sim TB=tb_mesh_4x4_vc1 PATTERN={hotspot,neighbor}` DIRECTED PASS,
+scoreboard clean, non-vacuous. Cross-review (Codex GPT-5.5 + Claude opus) both SHIP; artifacts in
+`cross-review/`. Plan `docs/superpowers/plans/2026-07-11-dv-region-bytes-cleanup.md`.
 
 **Reference -- R RoB SRAM size vs `r_rob_depth`** (for the depth-sweep item): an R RoB entry stores one
 beat of `rdata` = `RDATA_WIDTH` 256 b = 32 B in SRAM (metadata `{id,resp,last,user}` ~12 b in FF, as
