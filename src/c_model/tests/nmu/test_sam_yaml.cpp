@@ -30,8 +30,7 @@ TEST(SamYaml, ExplicitTilesOverride) {
 }
 
 // Guards the real topology config (Task 7): topologies/ is copied next to the
-// test binary at build time (CMakeLists.txt), mirroring the config/
-// port_params.yaml pattern in test_axi_slave_port.
+// test binary at build time (CMakeLists.txt).
 TEST(SamYaml, RealMesh4x4TopologyLoads) {
     auto sam = load_sam_table("topologies/mesh_4x4_vc1.yaml");
     EXPECT_EQ(sam.entries().size(), 16u);

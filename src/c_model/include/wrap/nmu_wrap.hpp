@@ -27,8 +27,7 @@
 #include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
-#include "wrap/wrap_defaults.hpp"  // co-sim default depths (kChannelModelDepth kept for ChannelModel stub)
-#include "ni_params.h"             // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "ni/vc_pools.hpp"
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
@@ -88,7 +87,6 @@ class NmuWrap {
         // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
         // constants.yaml) — the single source of truth that also seeds the
         // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
-        // kChannelModelDepth (64) is reserved for the ChannelModel stub only.
         nmu_->enable_noc_credit(static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
         in_ = NmuInputs{};
         out_ = NmuOutputs{};

@@ -10,7 +10,3 @@ target_link_libraries(test_request_response_loopback PRIVATE yaml-cpp::yaml-cpp)
 # Pick up tests/common/channel_model.hpp via "common/..." includes.
 target_include_directories(test_request_response_loopback PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
-add_custom_command(TARGET test_request_response_loopback POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../config
-    $<TARGET_FILE_DIR:test_request_response_loopback>/config)

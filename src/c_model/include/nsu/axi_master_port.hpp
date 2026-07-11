@@ -35,10 +35,8 @@
 
 namespace ni::cmodel::nsu {
 
-// Per-channel internal FIFO depths come from nsu::PortParams.
-// Single source of truth is c_model/config/port_params.yaml nsu: block;
-// see nsu/port_params.hpp for the loader helper and the "fail loud / no
-// defaults" rationale.
+// Per-channel internal FIFO depths come from nsu::PortParams; see
+// nsu/port_params.hpp for defaults (sourced from ni_params.h).
 
 class AxiMasterPort {
   public:

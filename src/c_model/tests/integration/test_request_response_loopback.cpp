@@ -158,7 +158,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
 
     nmu::PortParams nmu_params{};
     nsu::PortParams nsu_params{};
-    auto cm_params = test::load_channel_model_params("config/port_params.yaml");
+    test::ChannelModelParams cm_params{};
 
     // This test now runs only the ORD-003 same_id_multi_dst gate (inlined above).
     const bool is_multi_dst = true;
