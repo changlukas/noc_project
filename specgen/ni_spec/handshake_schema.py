@@ -27,7 +27,7 @@ class HandshakeSchemaError(ValueError):
     """Raised when validation fails."""
 
 
-_TOP_LEVEL_KEYS = {"schema_version", "axi", "noc", "derived"}
+_TOP_LEVEL_KEYS = {"schema_version", "axi", "noc", "nmu", "nsu", "derived"}
 # Plain (axi/noc) and derived require different field sets:
 #   plain   -> {type, default, sv_symbol, cpp_symbol}
 #   derived -> {type, expression, sv_symbol, cpp_symbol}
@@ -66,9 +66,9 @@ def load_constants(path: Path) -> Dict[str, Any]:
     if data.get("schema_version") != "1.0":
         raise HandshakeSchemaError(f"{path}: schema_version must be \"1.0\"")
 
-    # Validate plain params first (axi, noc)
+    # Validate plain params first (axi, noc, nmu, nsu)
     resolved: Dict[str, int] = {}
-    for domain in ("axi", "noc"):
+    for domain in ("axi", "noc", "nmu", "nsu"):
         if domain not in data:
             continue
         for name, spec in data[domain].items():

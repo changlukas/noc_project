@@ -107,6 +107,108 @@ noc:
     sv_symbol: NOC_MESH_Y_DIM_DFLT
     cpp_symbol: NOC_MESH_Y_DIM
 
+nmu:
+  ROB_B_DEPTH:
+    type: int
+    units: entries
+    description: "NMU write-response RoB pool depth. <= 2^ROB_IDX_WIDTH."
+    default: 32
+    min: 1
+    max: 256
+    sv_symbol: NMU_ROB_B_DEPTH_DFLT
+    cpp_symbol: NMU_ROB_B_DEPTH
+  ROB_R_DEPTH:
+    type: int
+    units: entries
+    description: "NMU read-response RoB pool depth. Holds one rdata beat per slot."
+    default: 32
+    min: 1
+    max: 256
+    sv_symbol: NMU_ROB_R_DEPTH_DFLT
+    cpp_symbol: NMU_ROB_R_DEPTH
+  MAX_TXNS_PER_ID:
+    type: int
+    units: transactions
+    description: "NMU per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId)."
+    default: 32
+    min: 1
+    max: 256
+    sv_symbol: NMU_MAX_TXNS_PER_ID_DFLT
+    cpp_symbol: NMU_MAX_TXNS_PER_ID
+  QUEUE_DEPTH:
+    type: int
+    units: beats
+    description: "NMU slave-port AXI-channel FIFO depth (shared by AW/W/AR/B/R)."
+    default: 16
+    min: 1
+    max: 1024
+    sv_symbol: NMU_QUEUE_DEPTH_DFLT
+    cpp_symbol: NMU_QUEUE_DEPTH
+  DEPKT_Q_DEPTH:
+    type: int
+    units: beats
+    description: "NMU Depacketize demux FIFO depth (shared by B/R)."
+    default: 16
+    min: 1
+    max: 1024
+    sv_symbol: NMU_DEPKT_Q_DEPTH_DFLT
+    cpp_symbol: NMU_DEPKT_Q_DEPTH
+  ARBITER_FIFO_DEPTH:
+    type: int
+    units: entries
+    description: "NMU wormhole per-input + VC-arbiter pending staging depth."
+    default: 4
+    min: 1
+    max: 64
+    sv_symbol: NMU_ARBITER_FIFO_DEPTH_DFLT
+    cpp_symbol: NMU_ARBITER_FIFO_DEPTH
+
+nsu:
+  QUEUE_DEPTH:
+    type: int
+    units: beats
+    description: "NSU master-port AXI-channel FIFO depth (shared by AW/W/AR/B/R)."
+    default: 16
+    min: 1
+    max: 1024
+    sv_symbol: NSU_QUEUE_DEPTH_DFLT
+    cpp_symbol: NSU_QUEUE_DEPTH
+  DEPKT_Q_DEPTH:
+    type: int
+    units: beats
+    description: "NSU Depacketize demux FIFO depth (shared by AW/W/AR)."
+    default: 16
+    min: 1
+    max: 1024
+    sv_symbol: NSU_DEPKT_Q_DEPTH_DFLT
+    cpp_symbol: NSU_DEPKT_Q_DEPTH
+  META_BUFFER_MAX_OUTSTANDING:
+    type: int
+    units: transactions
+    description: "NSU MetaBuffer shared outstanding pool size, per direction."
+    default: 32
+    min: 1
+    max: 256
+    sv_symbol: NSU_META_BUFFER_MAX_OUTSTANDING_DFLT
+    cpp_symbol: NSU_META_BUFFER_MAX_OUTSTANDING
+  META_BUFFER_MAX_UNIQUE_IDS:
+    type: int
+    units: count
+    description: "Distinct AXI IDs the NSU presents downstream (1 collapses; 256 passes through)."
+    default: 1
+    allowed: [1, 256]
+    sv_symbol: NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT
+    cpp_symbol: NSU_META_BUFFER_MAX_UNIQUE_IDS
+  ARBITER_FIFO_DEPTH:
+    type: int
+    units: entries
+    description: "NSU wormhole per-input + VC-arbiter pending staging depth."
+    default: 4
+    min: 1
+    max: 64
+    sv_symbol: NSU_ARBITER_FIFO_DEPTH_DFLT
+    cpp_symbol: NSU_ARBITER_FIFO_DEPTH
+
 derived:
   WSTRB_WIDTH:
     type: int

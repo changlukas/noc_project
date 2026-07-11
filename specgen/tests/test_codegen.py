@@ -274,6 +274,17 @@ def test_packet_cpp_has_payload_static_assert():
         assert f"ni::payload::{ch}_WIDTH" in text, f"missing static_assert for {ch}"
 
 
+def test_nmu_nsu_domains_load():
+    from ni_spec.handshake_schema import load_constants
+    from pathlib import Path
+    c = load_constants(Path(__file__).resolve().parent.parent / "source" / "constants.yaml")
+    assert c["nmu"]["ROB_B_DEPTH"]["default"] == 32
+    assert c["nmu"]["QUEUE_DEPTH"]["default"] == 16
+    assert c["nmu"]["QUEUE_DEPTH"]["cpp_symbol"] == "NMU_QUEUE_DEPTH"
+    assert c["nsu"]["META_BUFFER_MAX_UNIQUE_IDS"]["default"] == 1
+    assert c["nsu"]["QUEUE_DEPTH"]["sv_symbol"] == "NSU_QUEUE_DEPTH_DFLT"
+
+
 def test_emit_ni_params_h_matches_spec_derived_golden():
     """cpp_params.emit() output must match the hand-authored golden."""
     from tools.elaborate import cpp_params
