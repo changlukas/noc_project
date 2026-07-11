@@ -38,6 +38,7 @@
 #include "nsu/meta_buffer.hpp"
 #include "nsu/packetize.hpp"
 #include "nsu/vc_arbiter.hpp"
+#include "ni_params.h"
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -61,8 +62,8 @@ struct NsuConfig {
     //    that rid reuse the same VC until rlast (burst-follow, not per-id pin).
     std::vector<uint8_t> write_rsp_vcs{};
     std::vector<uint8_t> read_rsp_vcs{};
-    std::size_t wormhole_per_input_depth = 4;
-    std::size_t vc_arbiter_pending_depth = 4;
+    std::size_t wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
+    std::size_t vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
 };
 
 class Nsu {

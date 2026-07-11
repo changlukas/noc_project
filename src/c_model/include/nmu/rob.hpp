@@ -1,6 +1,7 @@
 #pragma once
 #include "axi/types.hpp"
 #include "ni_flit_constants.h"
+#include "ni_params.h"
 #include "nmu/addr_trans.hpp"
 #include "nmu/packetize.hpp"
 #include "request_io.hpp"
@@ -44,8 +45,9 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_w,
-        RobMode mode_r, addr_trans::SamTable sam, std::size_t b_rob_depth = 32,
-        std::size_t r_rob_depth = 32, std::size_t max_txns_per_id = 32)
+        RobMode mode_r, addr_trans::SamTable sam, std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
+        std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
+        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
           mode_w_(mode_w),

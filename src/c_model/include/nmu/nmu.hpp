@@ -34,6 +34,7 @@
 #include "nmu/rob.hpp"
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/ni_tokens.hpp"
+#include "ni_params.h"
 #include "router/req_out.hpp"
 #include "router/rsp_in.hpp"
 #include "ni/pipeline_stage.hpp"
@@ -130,10 +131,10 @@ struct NmuConfig {
     RobMode write_rob_mode = RobMode::Disabled;
     // RoB pool depths, per direction. Enabled mode only. See
     // docs/nmu-rob-microarchitecture.md section 6.
-    std::size_t b_rob_depth = 32;
-    std::size_t r_rob_depth = 32;
+    std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH;
+    std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). Enabled mode only.
-    std::size_t max_txns_per_id = 32;
+    std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
     uint8_t write_vc = 0;
@@ -142,8 +143,8 @@ struct NmuConfig {
     // pool with round-robin selection instead of the single write_vc/read_vc.
     std::vector<uint8_t> write_vcs{};
     std::vector<uint8_t> read_vcs{};
-    std::size_t wormhole_per_input_depth = 4;
-    std::size_t vc_arbiter_pending_depth = 4;
+    std::size_t wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
+    std::size_t vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
     std::size_t ni_rsp_extra_depth = 0;  // extra shift stages on the response path
 };
 
