@@ -4,6 +4,66 @@ Running action items and open bugs, maintained across iteration rounds. Each rou
 surfaces and strikes what it closes. Read it at session start. An item is not started unless a round
 picks it up.
 
+## NEXT SESSION -- co-sim parameter-entry cleanup (brainstormed 2026-07-11, not started)
+
+Branch `feat/nmu-rob-floonoc-alignment` is complete + reviewed (ctest 424, HEAD `0a3eb3b`, not
+pushed). This next round is a follow-up refactor. **Working tree currently holds two uncommitted
+Makefile changes** (`MEMORY_SIZE` knob in `Makefile` + `sim/verilator/Makefile`) prototyped during
+the burst-matrix run below -- decide their fate in this round; do not lose them.
+
+**The correct mental model (settled with the user 2026-07-11, RTL-based):** two kinds, not three.
+
+- **DUT parameters** -- what the hardware *is*. `b_rob_depth`, `r_rob_depth`, `max_txns_per_id`, NSU
+  `meta_buffer` depth, VC count. In RTL these are `parameter` / `localparam` -- **compile-time
+  (elaboration)**. Single source of truth = the config that describes the hardware (YAML). We pass
+  them via DPI plusarg today; that is a c_model modelling convenience (sweep a compile-time param
+  without re-elaborating), **not** a runtime knob.
+- **Stimulus** -- what you drive *into* the DUT. pattern, burst length, count: **generate-time**
+  (gen_test_patterns produces the .txt). injection_mode / injection_rate: **runtime** pacing.
+
+**Scope this round (user, 2026-07-11): NMU three params + MEMORY_SIZE + hotspot observation. NSU
+consolidation is a follow-up once this round's sim runs green and proves the YAML-driven path.**
+
+1. **Move the three NMU RoB params to `port_params.yaml` as the single source.** Add an `nmu.rob`
+   block (`b_rob_depth` / `r_rob_depth` / `max_txns_per_id`, all 32). Two readers consume it:
+   `load_nmu_port_params` (C++, unit tests -- already reads `nmu.queues`) and `gen_tb_top.py` (Python
+   -- already reads topology YAML via `load_topology`; add `load_port_params`). `gen_tb_top` bakes
+   the YAML value as the generated SV int default (today those `= 32` are hardcoded Python strings at
+   `gen_tb_top.py:559-563`). Keep the `$value$plusargs` override for sweeps (same-build value swap,
+   no re-elaborate). Strip the three `?= 32` defaults from `sim/verilator/Makefile:211-219`; the
+   plusarg-forwarding lines stay. **New maintenance surface:** two readers, one YAML schema -- the
+   spec must name the schema authoritative and require both readers to track it. Low risk: these
+   three params were added this round, no historical co-sim behaviour depends on them. NSU already
+   passes `max_outstanding`/`max_unique_ids` the same plusarg way -- consolidating it is the
+   follow-up, and needs a check that the injection-sweep headline numbers stay bit-identical.
+
+2. **MEMORY_SIZE is decided up front, NOT computed per generate.** (User correction 2026-07-11 -- do
+   NOT re-derive it as a per-run value; my two attempts to compute/hand-set it this session were both
+   the wrong framing.) It is the per-tile stimulus window and is related to the data width. In the
+   brainstorm, find its real home: fixed from the address map / data-width, likely alongside the SAM
+   in the topology YAML, not a caller-set knob. For reference only, the arithmetic the recipe
+   currently needs is `base + (count-1)*n_nodes*stride + reserved`, `stride = max(0x40,
+   (len+1)*(1<<size))` -- at count=200/BURST_LEN=63 that is `0x640000`. The uncommitted `MEMORY_SIZE`
+   Makefile knob is a stopgap; replace it with the right home, do not formalize the stopgap.
+
+3. **hotspot mode1 count=200 timeout is a saturation observation, not a bug.** In the burst matrix,
+   `directed_mode1_hotspot_burst_r0.5` at `INJECTION_COUNT=200` hit the 550 s wall clock (rc=124).
+   Congestion, not a hang: at `INJECTION_COUNT=40` the same config is `CONTINUOUS PASS`, all 16 nodes
+   reporting (36 monitor lines) -- it advances, unlike the Task-8 pre-bypass wedge (zero progress).
+   hotspot is many-to-one; long bursts queue at the one hot tile. Record the saturation point.
+
+**Burst verification matrix (2026-07-11, `tb_mesh_4x4_vc1_rob`, RobMode::Enabled, seed 1): 8/9 pass.**
+directed mode0 (two-phase, scoreboard checks data) x {neighbor, transpose, uniform_random, hotspot}
+all DIRECTED PASS with `axi_len=63` (64-beat burst confirmed in the stimulus file). directed mode1
+(injection rate 0.5, scoreboard disarmed, throughput) x {neighbor, transpose, uniform_random}
+CONTINUOUS PASS; hotspot = the saturation timeout above. constrained_random (random-length burst +
+random pacing + tb-level `reorder_compare`) CR PASS. **Fact corrected this session:** only
+directed+mode1 disarms the scoreboard (`user_node_endpoint.sv:264-270`); CR has no injection_mode
+branch and checks `reorder_compare` unconditionally. **Also confirmed (answers a user question):**
+same-id-different-dst does NOT bypass -- `needs_rob = !order_by_id_[id].empty()` ignores dst; only an
+idle id's first transaction bypasses; test `ReadSameIdDifferentDstInterleavedFilesPerBase` pins two
+same-id different-dst bursts both taking the RoB (bases 0 and 2, both `rob_req=1`).
+
 ## SAM address remap — implemented on `feat/sam-remap` (2026-07-08, pending merge review)
 
 Replaced the `addr[39:32]` bit-slice decode with a per-tile SAM table `{base, size, dst_id,
