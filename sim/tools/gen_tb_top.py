@@ -120,25 +120,26 @@ def _nodes(topo: dict):
     return out, x_dim, y_dim
 
 
-# Default tile stride / test aperture when the topology YAML omits the
-# address_map block. Mirrors c_model addr_trans.hpp SamTable::uniform's base
-# formula and gen_test_patterns.py's _DEFAULT_TILE_SIZE.
+# Default tile stride when the topology YAML omits the address_map block.
+# Mirrors c_model addr_trans.hpp SamTable::uniform's base formula and
+# gen_test_patterns.py's _DEFAULT_TILE_SIZE.
 _DEFAULT_TILE_SIZE = 0x100000000
-_DEFAULT_TEST_APERTURE = 0x1000
+
+# CR window default (region_bytes): the per-master compare/rand_master window
+# fed to REGION_BYTES. DV-side constant, not a DUT parameter — overridable via
+# --region-bytes.
+_DEFAULT_REGION_BYTES = 0x1000
 
 
 def _address_map(topo: dict) -> dict:
-    """address_map block (optional): tile_size, test_aperture.
+    """address_map block (optional, DUT-only): tile_size.
 
-    tile_size feeds REGION_BASE (SAM base = dst_id * tile_size); test_aperture
-    feeds REGION_BYTES (the per-master compare/rand_master window — NOT
-    tile_size, which would blow up MAX_BURST_LEN). The c_model always rebases
-    (subordinate sees a tile-local address), so the reorder_compare Rebase is
-    hardwired on."""
+    tile_size feeds REGION_BASE (SAM base = dst_id * tile_size). The c_model
+    always rebases (subordinate sees a tile-local address), so the
+    reorder_compare Rebase is hardwired on."""
     am = topo.get("address_map") or {}
     return {
         "tile_size": int(am.get("tile_size", _DEFAULT_TILE_SIZE)),
-        "test_aperture": int(am.get("test_aperture", _DEFAULT_TEST_APERTURE)),
     }
 
 
@@ -393,7 +394,8 @@ def emit_fabric(topo: dict) -> str:
 # tb_top emitter — instantiates the fabric + pulp VIP endpoints + exit logic
 # ---------------------------------------------------------------------------
 
-def emit_tb_top(topo: dict, requested_name: str = "") -> str:
+def emit_tb_top(topo: dict, requested_name: str = "",
+                 region_bytes: int = _DEFAULT_REGION_BYTES) -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -470,10 +472,10 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // Per-destination region windows: REGION_BASE[s] = SAM base for tile s")
     w("    // (coord_id(s) * tile_size, from topology address_map.tile_size). Packed")
     w("    // array: Verilator 5.048 mis-sizes an unpacked-array param override whose")
-    w("    // size depends on a sibling override. REGION_BYTES = address_map.test_aperture")
-    w("    // (NOT tile_size -- that would blow up the rand_master's MAX_BURST_LEN).")
+    w("    // size depends on a sibling override. REGION_BYTES = the DV region_bytes")
+    w("    // constant (NOT tile_size -- that would blow up the rand_master's MAX_BURST_LEN).")
     w(f"    localparam logic [NUM_NODES-1:0][63:0] REGION_BASE = {{{region_base}}};")
-    w(f"    localparam longint unsigned REGION_BYTES = 64'h{am['test_aperture']:X};")
+    w(f"    localparam longint unsigned REGION_BYTES = 64'h{region_bytes:X};")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Watchdog - sized by worst-case beats in flight: measured vc1 fabric rate is")
@@ -819,10 +821,13 @@ def main() -> int:
     ap.add_argument("--out", default=None,
                     help="Output tb_top.sv path (default: sim/tb/tb_top_<topology>.sv; "
                          "fabric emitted alongside)")
+    ap.add_argument("--region-bytes", type=lambda s: int(s, 0), default=_DEFAULT_REGION_BYTES,
+                    help="CR window (REGION_BYTES): per-master compare/rand_master "
+                         f"region size (default {_DEFAULT_REGION_BYTES:#x})")
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
-    tb_text = emit_tb_top(topo, a.topology)
+    tb_text = emit_tb_top(topo, a.topology, a.region_bytes)
     fab_text = emit_fabric(topo)
     out_path = Path(a.out) if a.out is not None else \
         ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"

@@ -6,6 +6,5 @@ topology:
 
 address_map:
   tile_size: 0x100000000
-  test_aperture: 0x1000
   tiles:
     - { x: 0, y: 0, base: 0x0, size: 0x10000000 }
