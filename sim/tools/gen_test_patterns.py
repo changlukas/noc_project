@@ -340,8 +340,7 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
         raise ValueError(
             f"alloc_unique_offset: local offset {offset:#x} (+{reserved:#x} reserved) "
             f"exceeds memory window [{base_offset:#x}, {base_offset + region_bytes:#x}) "
-            f"(region_bytes={region_bytes:#x}); reduce transactions-per-node or "
-            f"enlarge region_bytes"
+            f"(region_bytes={region_bytes:#x}); reduce transactions-per-node"
         )
     return offset
 

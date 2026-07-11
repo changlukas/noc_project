@@ -125,9 +125,10 @@ def _nodes(topo: dict):
 # gen_test_patterns.py's _DEFAULT_TILE_SIZE.
 _DEFAULT_TILE_SIZE = 0x100000000
 
-# CR window default (region_bytes): the per-master compare/rand_master window
-# fed to REGION_BYTES. DV-side constant, not a DUT parameter — overridable via
-# --region-bytes.
+# CR window (REGION_BYTES): the per-master compare/rand_master window fed to
+# REGION_BYTES. DV-side tb constant (FlooNoC mesh tb pattern), not a runtime
+# knob. Distinct from gen_test_patterns.py's auto-derived directed-side
+# region_bytes (a different, per-run-derived value of the same name).
 _DEFAULT_REGION_BYTES = 0x1000
 
 
@@ -394,8 +395,7 @@ def emit_fabric(topo: dict) -> str:
 # tb_top emitter — instantiates the fabric + pulp VIP endpoints + exit logic
 # ---------------------------------------------------------------------------
 
-def emit_tb_top(topo: dict, requested_name: str = "",
-                 region_bytes: int = _DEFAULT_REGION_BYTES) -> str:
+def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -475,7 +475,7 @@ def emit_tb_top(topo: dict, requested_name: str = "",
     w("    // size depends on a sibling override. REGION_BYTES = the DV region_bytes")
     w("    // constant (NOT tile_size -- that would blow up the rand_master's MAX_BURST_LEN).")
     w(f"    localparam logic [NUM_NODES-1:0][63:0] REGION_BASE = {{{region_base}}};")
-    w(f"    localparam longint unsigned REGION_BYTES = 64'h{region_bytes:X};")
+    w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Watchdog - sized by worst-case beats in flight: measured vc1 fabric rate is")
@@ -821,13 +821,10 @@ def main() -> int:
     ap.add_argument("--out", default=None,
                     help="Output tb_top.sv path (default: sim/tb/tb_top_<topology>.sv; "
                          "fabric emitted alongside)")
-    ap.add_argument("--region-bytes", type=lambda s: int(s, 0), default=_DEFAULT_REGION_BYTES,
-                    help="CR window (REGION_BYTES): per-master compare/rand_master "
-                         f"region size (default {_DEFAULT_REGION_BYTES:#x})")
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
-    tb_text = emit_tb_top(topo, a.topology, a.region_bytes)
+    tb_text = emit_tb_top(topo, a.topology)
     fab_text = emit_fabric(topo)
     out_path = Path(a.out) if a.out is not None else \
         ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"

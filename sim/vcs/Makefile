@@ -7,9 +7,6 @@ RUN_CLASS ?= constrained_random
 ifeq ($(filter $(RUN_CLASS),directed constrained_random),)
 $(error RUN_CLASS must be directed or constrained_random (got '$(RUN_CLASS)'))
 endif
-# CR window (REGION_BYTES): DV-side rand_master/reorder_compare/watchdog region
-# size, passed to gen_tb_top.py --region-bytes. DV-only; not a DUT parameter.
-REGION_BYTES ?= 0x1000
 # Build artifacts land under $(BUILD_ROOT)/vcs/ (top-level build/), run logs
 # under ./output/.
 #
@@ -108,22 +105,21 @@ TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY_BASE).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VCS_BUILD)/.topology
 
-# TOPOLOGY stamp records the last-built topology (+ REGION_BYTES, since both
-# are baked into tb_top.sv as localparams). The FORCE-driven rule rewrites the
-# stamp ONLY when the key changed (content compare), bumping its mtime so the
-# tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a switch. Mirrors the
-# Verilator Makefile's mechanism exactly. Unchanged key leaves the stamp alone.
+# TOPOLOGY stamp records the last-built topology. The FORCE-driven rule rewrites
+# the stamp ONLY when TOPOLOGY changed (content compare), bumping its mtime so the
+# tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch. Mirrors
+# the Verilator Makefile's mechanism exactly. Unchanged topology leaves the stamp
+# alone.
 .PHONY: FORCE
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VCS_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_$(REGION_BYTES)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)_$(REGION_BYTES)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV) \
-	    --region-bytes $(REGION_BYTES)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.

@@ -7,10 +7,6 @@ SHELL         := bash
 # Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
 
-# CR window (REGION_BYTES): DV-side rand_master/reorder_compare/watchdog region
-# size, passed to gen_tb_top.py --region-bytes. DV-only; not a DUT parameter.
-REGION_BYTES ?= 0x1000
-
 # Run class selects the endpoint/checking flavor compiled into the binary
 # (user_node_endpoint.sv `ifdef TB_DIRECTED):
 #   constrained_random (default) : rand_master WRAP/EXC, RAND_RESP slave, reorder_compare.
@@ -121,22 +117,20 @@ TOPO_STAMP    := $(VL_BUILD)/.topology
 # the fabric is emitted into src/sv/, already implied by -I$(SRC_SV) above.
 VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 
-# TOPOLOGY stamp records the last-built topology name (+ REGION_BYTES, since
-# both are baked into tb_top.sv as localparams). The FORCE-driven rule rewrites
-# it ONLY when the key changed (content compare), bumping its mtime so the
-# tb_top_<TOPOLOGY>.sv prerequisite check re-emits even if the YAML itself
-# hasn't changed. Unchanged key leaves the stamp alone.
+# TOPOLOGY stamp records the last-built topology name. The FORCE-driven rule
+# rewrites it ONLY when TOPOLOGY changed (content compare), bumping its mtime so
+# the tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch even
+# if the YAML itself hasn't changed. Unchanged topology leaves the stamp alone.
 .PHONY: FORCE
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_$(REGION_BYTES)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)_$(REGION_BYTES)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV) \
-	    --region-bytes $(REGION_BYTES)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
 # Python3 executable — auto-detected so build/run commands stay identical on
 # Windows and Linux. Prefer the Windows `py -3` launcher when present (the
