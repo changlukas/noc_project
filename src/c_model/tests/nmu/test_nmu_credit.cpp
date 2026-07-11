@@ -36,7 +36,8 @@ NmuConfig make_cfg(uint8_t src_id) {
     // addr_trans::xy_route mapping so this file's fixed test address (0x100)
     // is unaffected by the Task 5 migration off xy_route.
     cfg.sam = SamTable::uniform(16, 16, 0x100000000ull);
-    // PortParams has no defaults ("fail loud"); set the depths this test drives.
+    // PortParams self-defaults from ni::NMU_QUEUE_DEPTH; set explicitly here
+    // for a hermetic, self-documenting test.
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;
     cfg.port_params.ar_queue_depth = 16;

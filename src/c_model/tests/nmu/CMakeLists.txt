@@ -1,5 +1,4 @@
 add_cmodel_test(test_axi_slave_port)
-target_link_libraries(test_axi_slave_port PRIVATE yaml-cpp::yaml-cpp)
 # Pick up the shared loopback fixtures from tests/common/ via
 # "common/loopback_*.hpp" — single source of truth for both NMU + NSU tests.
 target_include_directories(test_axi_slave_port PRIVATE

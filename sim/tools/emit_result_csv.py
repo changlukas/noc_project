@@ -24,6 +24,7 @@ _MON = re.compile(
     re.I,
 )
 _VC = re.compile(r"_vc(\d+)")
+_CONFIG = re.compile(r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)")
 
 
 def parse_monitors(log_text):
@@ -48,6 +49,24 @@ def vc_count(topology):
     return int(m.group(1))
 
 
+def resolve_meta_buffer_depths(log_text, cli_max_unique_ids, cli_max_outstanding):
+    """CLI arg wins as an explicit override; otherwise fall back to the tb's own
+    `[Config] max_unique_ids=... max_outstanding=...` line, which reflects the
+    ni_params_pkg::NSU_META_BUFFER_*_DFLT the tb actually ran with."""
+    if cli_max_unique_ids is not None and cli_max_outstanding is not None:
+        return cli_max_unique_ids, cli_max_outstanding
+    m = _CONFIG.search(log_text)
+    if not m:
+        sys.exit(
+            "emit_result_csv: --max-unique-ids/--max-outstanding not given and no "
+            "[Config] max_unique_ids=... line found in the log"
+        )
+    return (
+        cli_max_unique_ids if cli_max_unique_ids is not None else m.group(1),
+        cli_max_outstanding if cli_max_outstanding is not None else m.group(2),
+    )
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--log", required=True)
@@ -58,11 +77,15 @@ def main():
     ap.add_argument("--injection-rate", required=True)
     ap.add_argument("--injection-count", required=True)
     ap.add_argument("--seed", required=True)
-    ap.add_argument("--max-unique-ids", required=True)
-    ap.add_argument("--max-outstanding", required=True)
+    ap.add_argument("--max-unique-ids", default=None)
+    ap.add_argument("--max-outstanding", default=None)
     a = ap.parse_args()
 
-    bw, latency = parse_monitors(pathlib.Path(a.log).read_text())
+    log_text = pathlib.Path(a.log).read_text()
+    bw, latency = parse_monitors(log_text)
+    max_unique_ids, max_outstanding = resolve_meta_buffer_depths(
+        log_text, a.max_unique_ids, a.max_outstanding
+    )
     row = {
         "topology": a.topology,
         "vc": vc_count(a.topology),
@@ -71,8 +94,8 @@ def main():
         "injection_rate": a.injection_rate,
         "injection_count": a.injection_count,
         "seed": a.seed,
-        "max_unique_ids": a.max_unique_ids,
-        "max_outstanding": a.max_outstanding,
+        "max_unique_ids": max_unique_ids,
+        "max_outstanding": max_outstanding,
         "accepted_bits_per_cycle": f"{bw:.1f}",
         "mean_latency": f"{latency:.1f}",
     }

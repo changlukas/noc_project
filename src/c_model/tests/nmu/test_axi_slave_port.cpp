@@ -70,7 +70,7 @@ struct PortFixture {
     PortFixture() : params{}, port(pkt, depkt, params) {}
 
     // Tighter loopback caps so backpressure tests can drive saturation
-    // without exhausting the default 32-deep ports.
+    // without exhausting the default 16-deep ports.
     void set_loopback_caps(std::size_t aw, std::size_t w, std::size_t ar, std::size_t b,
                            std::size_t r) {
         ch.request.aw_capacity = aw;

@@ -1,5 +1,4 @@
 add_cmodel_test(test_port_pair_loopback)
-target_link_libraries(test_port_pair_loopback PRIVATE yaml-cpp::yaml-cpp)
 
 # Stage 3 packetize/depacketize end-to-end: extends the port-pair loopback
 # by inserting the four real packetize/depacketize modules + ChannelModel

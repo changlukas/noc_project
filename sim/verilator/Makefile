@@ -203,9 +203,11 @@ PATTERN         ?= neighbor
 INJECTION_MODE  ?= 0
 INJECTION_RATE  ?= 1.0
 INJECTION_COUNT ?= $(if $(filter 1,$(INJECTION_MODE)),200,4)
-MAX_UNIQUE_IDS  ?= 1
-MAX_OUTSTANDING ?= 32
 HOTSPOT         ?= 5
+
+# NSU MetaBuffer depths. No ?= default: unset leaves the plusarg unpassed (see
+# the $(if) guards below) and the tb falls back to its
+# ni_params_pkg::NSU_META_BUFFER_*_DFLT-initialised local.
 
 # NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits). No ?=
 # default: unset leaves the plusarg unpassed (see the $(if) guards below) and
@@ -245,7 +247,8 @@ run-directed: $(TBTOP_EXE)
 	    "+stim_dir=$(STIM_ROOT)" \
 	    "+num_reads=$(INJECTION_COUNT)" "+num_writes=$(INJECTION_COUNT)" \
 	    "+injection_mode=$(INJECTION_MODE)" "+injection_rate=$(INJECTION_RATE)" \
-	    "+max_unique_ids=$(MAX_UNIQUE_IDS)" "+max_outstanding=$(MAX_OUTSTANDING)" \
+	    $(if $(MAX_UNIQUE_IDS),"+max_unique_ids=$(MAX_UNIQUE_IDS)") \
+	    $(if $(MAX_OUTSTANDING),"+max_outstanding=$(MAX_OUTSTANDING)") \
 	    $(if $(B_ROB_DEPTH),"+b_rob_depth=$(B_ROB_DEPTH)") \
 	    $(if $(R_ROB_DEPTH),"+r_rob_depth=$(R_ROB_DEPTH)") \
 	    $(if $(MAX_TXNS_PER_ID),"+max_txns_per_id=$(MAX_TXNS_PER_ID)") \
@@ -270,7 +273,8 @@ run-directed: $(TBTOP_EXE)
 	        --topology $(TOPOLOGY) --pattern $(PATTERN) \
 	        --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
 	        --injection-count $(INJECTION_COUNT) --seed $(SEED) \
-	        --max-unique-ids $(MAX_UNIQUE_IDS) --max-outstanding $(MAX_OUTSTANDING); \
+	        $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \
+	        $(if $(MAX_OUTSTANDING),--max-outstanding $(MAX_OUTSTANDING)); \
 	    echo "CONTINUOUS PASS: $(SIM_TAG)"; \
 	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(SIM_TAG)/run.log; then \
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
