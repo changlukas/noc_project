@@ -39,26 +39,30 @@ Two precedents, one external, one in-project:
 ## Parameter taxonomy (shared vs independent)
 
 Shared params are already single-sourced in `constants.yaml` and left untouched. Only the per-unit
-depths move. NMU and NSU depths get **separate symbols even at equal defaults**, honouring the design's
-deliberate NMU/NSU independence (`nmu/port_params.hpp` comment: "independent NMU/NSU evolution, no
-spec-mandated symmetry").
+depths move. **NMU and NSU keep separate symbols even at equal defaults** (deliberate NMU/NSU
+independence), but **within a unit the 5 AXI channels share one queue-depth symbol** and one
+depacketize-depth symbol — no shipped path ever sizes the channels differently, and FlooNoC's
+`ChimneyDefaultCfg` is likewise a single depth, not per-channel (ponytail + Codex both flagged 5
+per-channel symbols as dead once only one is wired). 11 symbols total.
 
 | param | consumer | classification | new symbol (cpp / sv) | default |
 |---|---|---|---|---|
 | `num_vc`, VC depth, mesh dims, AXI widths | NMU+NSU+router | SHARED (untouched) | existing `NOC_*` / `AXI_*` | — |
-| RoB B / R depth | NMU | NMU-only | `NMU_ROB_B_DEPTH` / `_DFLT` | 32 |
+| RoB B / R depth | NMU | NMU-only | `NMU_ROB_B_DEPTH` / `NMU_ROB_R_DEPTH` (+`_DFLT`) | 32 |
 | max_txns_per_id | NMU | NMU-only | `NMU_MAX_TXNS_PER_ID` | 32 |
-| AW/W/AR/B/R queue depth | NMU | independent | `NMU_{AW..R}_QUEUE_DEPTH` | 16 |
-| depacketize B / R FIFO | NMU | independent | `NMU_DEPKT_{B,R}_Q_DEPTH` | 16 |
-| wormhole / vc-arbiter staging | NMU | independent | `NMU_ARBITER_FIFO_DEPTH` | 4 |
-| AW/W/AR/B/R queue depth | NSU | independent | `NSU_{AW..R}_QUEUE_DEPTH` | 16 |
-| depacketize AW/W/AR FIFO | NSU | independent | `NSU_DEPKT_{AW,W,AR}_Q_DEPTH` | 16 |
+| AXI-channel queue depth (all 5) | NMU | one per unit | `NMU_QUEUE_DEPTH` | 16 |
+| depacketize FIFO (B+R) | NMU | one per unit | `NMU_DEPKT_Q_DEPTH` | 16 |
+| wormhole / vc-arbiter staging | NMU | NMU-only | `NMU_ARBITER_FIFO_DEPTH` | 4 |
+| AXI-channel queue depth (all 5) | NSU | one per unit | `NSU_QUEUE_DEPTH` | 16 |
+| depacketize FIFO (AW+W+AR) | NSU | one per unit | `NSU_DEPKT_Q_DEPTH` | 16 |
 | MetaBuffer max_outstanding | NSU | NSU-only | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 |
 | MetaBuffer max_unique_ids | NSU | NSU-only | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 |
-| wormhole / vc-arbiter staging | NSU | independent | `NSU_ARBITER_FIFO_DEPTH` | 4 |
+| wormhole / vc-arbiter staging | NSU | NSU-only | `NSU_ARBITER_FIFO_DEPTH` | 4 |
 
-Queue + depacketize unify to **16** (user decision 2026-07-11): preserve the validated co-sim behaviour;
-unit tests drop 32 → 16 (depth-insensitive). All other depths already agreed across both homes.
+Every value here is a configurable default, not a fixed constant — the number is just the elaboration
+default (plusarg still overrides for sweeps). Queue + depacketize default to **16**, which happens to
+keep the co-sim path bit-identical (co-sim already used 16 via `wrap_defaults`); unit tests, which read
+32 from the retired YAML, move to 16 (depth-insensitive — most read `fx.params.*`, not a literal 32).
 
 `kChannelModelDepth` (64) is a **test-fixture** depth (ChannelModel stub), not DUT — it stays a
 test-only constant, out of specgen.
@@ -98,7 +102,8 @@ test-only constant, out of specgen.
   pulled `kChannelModelDepth`; audit that no symbol is actually used, then drop the include).
 - `nmu/rob.hpp` ctor defaults reference `ni::NMU_ROB_*`.
 - Unit tests that built `NmuConfig`/`NsuConfig` from `load_*_port_params` construct from the generated
-  constants instead; delete the loader calls.
+  constants instead; delete the loader calls. Includes `tests/wrap/test_nmu_wrap.cpp` (uses
+  `wrap_defaults.hpp` / `kAxiQueueDepth`).
 - `gen_tb_top.py`: initialise the RoB **and NSU MetaBuffer** SV plusarg locals from `ni_params_pkg::
   NMU_*_DFLT` / `NSU_*_DFLT`; remove the `= 32` / `= 1` literals (`:555`, `:556`, `:570`, `:571`, `:582`,
   `:588`). Keep the plusarg override forwarding conditional (Codex MAJOR-2, earlier review) and add
@@ -108,8 +113,12 @@ test-only constant, out of specgen.
   ChannelModel is a test stub (not DUT), retire that reader too: move `req_depth`/`rsp_depth` (and
   `kChannelModelDepth`) into test-fixture constants, so `port_params.yaml` is deleted with no YAML config
   file left.
-- Delete `port_params.yaml`, `wrap_defaults.hpp`, `nmu/port_params.hpp`, `nsu/port_params.hpp` YAML
-  loaders (keep a pure struct only if a consumer still needs the aggregate; otherwise delete).
+- **`nmu/port_params.hpp` / `nsu/port_params.hpp` are NOT deleted** — they also define the
+  `PortParams` struct still used by `nmu.hpp:137`, `nsu.hpp:54`, `axi_slave_port.hpp`, `axi_master_port.hpp`
+  (Codex). Strip each to the struct only (member initialisers = `ni::NMU_*` / `ni::NSU_*`), delete the
+  `load_*_port_params` function and the `<yaml-cpp>` include.
+- Delete `port_params.yaml` and `wrap_defaults.hpp` (their values now live in the generated header /
+  the ChannelModel test fixture).
 
 ## Non-goals
 
