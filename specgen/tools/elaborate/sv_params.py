@@ -30,7 +30,7 @@ def emit(src_path: Path, spec_version: str) -> str:
 
     # Resolve plain values for derived expression evaluation.
     plain_values: dict[str, int] = {}
-    for domain in ("axi", "noc"):
+    for domain in ("axi", "noc", "nmu", "nsu"):
         for n, s in constants.get(domain, {}).items():
             plain_values[n] = s["default"]
 
@@ -53,6 +53,16 @@ def emit(src_path: Path, spec_version: str) -> str:
     _emit_group(
         list(constants.get("noc", {}).items()),
         "NoC parameter defaults",
+        lambda _n, s: s["default"],
+    )
+    _emit_group(
+        list(constants.get("nmu", {}).items()),
+        "NMU depth defaults",
+        lambda _n, s: s["default"],
+    )
+    _emit_group(
+        list(constants.get("nsu", {}).items()),
+        "NSU depth defaults",
         lambda _n, s: s["default"],
     )
     _emit_group(

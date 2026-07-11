@@ -19,6 +19,21 @@ package ni_params_pkg;
   localparam int unsigned NOC_MESH_X_DIM_DFLT               = 4;
   localparam int unsigned NOC_MESH_Y_DIM_DFLT               = 4;
 
+  // NMU depth defaults
+  localparam int unsigned NMU_ROB_B_DEPTH_DFLT        = 32;
+  localparam int unsigned NMU_ROB_R_DEPTH_DFLT        = 32;
+  localparam int unsigned NMU_MAX_TXNS_PER_ID_DFLT    = 32;
+  localparam int unsigned NMU_QUEUE_DEPTH_DFLT        = 16;
+  localparam int unsigned NMU_DEPKT_Q_DEPTH_DFLT      = 16;
+  localparam int unsigned NMU_ARBITER_FIFO_DEPTH_DFLT = 4;
+
+  // NSU depth defaults
+  localparam int unsigned NSU_QUEUE_DEPTH_DFLT                 = 16;
+  localparam int unsigned NSU_DEPKT_Q_DEPTH_DFLT               = 16;
+  localparam int unsigned NSU_META_BUFFER_MAX_OUTSTANDING_DFLT = 32;
+  localparam int unsigned NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT  = 1;
+  localparam int unsigned NSU_ARBITER_FIFO_DEPTH_DFLT          = 4;
+
   // Derived parameter defaults
   localparam int unsigned AXI_WSTRB_WIDTH_DFLT = 32;
 
