@@ -37,14 +37,32 @@ consolidation is a follow-up once this round's sim runs green and proves the YAM
    passes `max_outstanding`/`max_unique_ids` the same plusarg way -- consolidating it is the
    follow-up, and needs a check that the injection-sweep headline numbers stay bit-identical.
 
-2. **MEMORY_SIZE is decided up front, NOT computed per generate.** (User correction 2026-07-11 -- do
-   NOT re-derive it as a per-run value; my two attempts to compute/hand-set it this session were both
-   the wrong framing.) It is the per-tile stimulus window and is related to the data width. In the
-   brainstorm, find its real home: fixed from the address map / data-width, likely alongside the SAM
-   in the topology YAML, not a caller-set knob. For reference only, the arithmetic the recipe
-   currently needs is `base + (count-1)*n_nodes*stride + reserved`, `stride = max(0x40,
-   (len+1)*(1<<size))` -- at count=200/BURST_LEN=63 that is `0x640000`. The uncommitted `MEMORY_SIZE`
-   Makefile knob is a stopgap; replace it with the right home, do not formalize the stopgap.
+2. **MEMORY_SIZE is the slave-side tile memory, and it should be YAML-driven, NOT a caller knob.**
+   (User correction 2026-07-11.) `--memory-size` (gen_test_patterns) and `REGION_BYTES` (the SV
+   `axi_rand_slave` MAPPED memory window, `user_node_endpoint.sv:41`) are the SAME physical thing --
+   the per-tile memory a subordinate serves -- but they are NOT wired together today: `REGION_BYTES`
+   comes from `address_map.test_aperture` in the topology YAML (`gen_tb_top.py:476`, default
+   `0x1000`), while `--memory-size` is a separate hardcoded `0x40000` in the recipe. Stimulus
+   addresses (bounded by `--memory-size`) must land inside the slave memory (`REGION_BYTES`), or a
+   read returns unwritten data. The mode1+burst `ValueError` was the stimulus window being too small;
+   the real question is whether the slave memory is large enough. Fix: make `--memory-size` derive
+   from the same YAML `address_map` field the slave memory does, so one number sizes both. This is
+   the concrete instance of the user's broader point: **all DUT storage sizes (fifo/sram/memory)
+   should come from YAML** -- `REGION_BYTES` already does, `--memory-size` is the outlier. The
+   uncommitted `MEMORY_SIZE` Makefile knob is a stopgap; the right home is the topology YAML
+   `address_map`, feeding both readers. (For reference the recipe currently needs `base +
+   (count-1)*n_nodes*stride + reserved`, `stride = max(0x40, (len+1)*(1<<size))`; at
+   count=200/BURST_LEN=63 that is `0x640000` -- so the slave tile aperture must be at least that for
+   a saturating burst run.)
+
+   Reference -- **R RoB SRAM size vs `r_rob_depth`** (settled 2026-07-11, for the depth-sweep item):
+   an R RoB entry stores one beat of `rdata` = `RDATA_WIDTH` 256 b = 32 B in SRAM (metadata
+   `{id,resp,last,user}` ~12 b in FF, as FlooNoC's `OnlyMetaData=0` R RoB). So SRAM = `depth * 32 B`:
+   depth 32 -> 1 KiB, 64 -> 2 KiB, 128 -> 4 KiB (one full 4 KB burst at AxSIZE=5), 256 -> **8 KiB**
+   (AXI4 max burst, the paper's 8 kB design point, NI-area 91%). The 32->256 sweep is the
+   SRAM-vs-reorderable-burst-length trade curve from 1 KiB to 8 KiB, per direction per NMU. B RoB
+   carries no payload (~12 b/entry, no SRAM in FlooNoC), which is why `b_rob_depth` and `r_rob_depth`
+   are split: B can go deep cheaply, every R slot is 32 B of SRAM.
 
 3. **hotspot mode1 count=200 timeout is a saturation observation, not a bug.** In the burst matrix,
    `directed_mode1_hotspot_burst_r0.5` at `INJECTION_COUNT=200` hit the 550 s wall clock (rc=124).
