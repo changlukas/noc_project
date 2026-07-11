@@ -241,7 +241,7 @@ run-directed: $(TBTOP_EXE)
 	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
-	    --memory-size 0x40000 --seed $(SEED) $(_HOTSPOT_ARGS)
+	    --seed $(SEED) $(_HOTSPOT_ARGS)
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \

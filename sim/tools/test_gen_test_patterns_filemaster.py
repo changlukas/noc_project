@@ -62,7 +62,7 @@ def _parse_write(path):
 def test_emit_file_master_node_format_and_partition(tmp_path):
     d = str(tmp_path / "node0")
     g.emit_file_master_node(d, src_idx=0, dst_cids=[1, 1], n_nodes=16,
-                            base_local=0x1000, memory_size=0x40000,
+                            base_local=0x1000, region_bytes=0x40000,
                             axi_size=5, axi_len=0, data_width=256)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert len(w) == 2
@@ -80,7 +80,7 @@ def test_emit_file_master_node_default_tile_size_matches_legacy_4gb(tmp_path):
     dst_cid<<32 layout byte-for-byte -- dst coord_id 0x12, offset 0x40 -> 0x1200000040."""
     d = str(tmp_path / "node0")
     g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
-                            base_local=0x40, memory_size=0x40000,
+                            base_local=0x40, region_bytes=0x40000,
                             axi_size=5, axi_len=0, data_width=256)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert w[0]["addr"] == 0x1200000040
@@ -89,7 +89,7 @@ def test_emit_file_master_node_default_tile_size_matches_legacy_4gb(tmp_path):
 def test_emit_file_master_node_non_4gb_tile_size_shifts_base(tmp_path):
     d = str(tmp_path / "node0")
     g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
-                            base_local=0x40, memory_size=0x40000,
+                            base_local=0x40, region_bytes=0x40000,
                             axi_size=5, axi_len=0, data_width=256,
                             tile_size=0x40000000)
     w = _parse_write(os.path.join(d, "write.txt"))
@@ -125,7 +125,7 @@ def test_main_sources_tile_base_from_address_map(tmp_path):
     out = str(tmp_path / "scn")
     g.main(["--topology", str(topo_path), "--out", out,
             "--pattern", "neighbor", "--transactions-per-node", "1",
-            "--size", "5", "--len", "0", "--memory-size", "0x40000"])
+            "--size", "5", "--len", "0"])
     w = _parse_write(os.path.join(out, "node0", "write.txt"))
     # node0 = (x=0,y=0); neighbor wraps to (1,1) on a 2x2 mesh -> coord_id (1<<4)|1 = 0x11
     dst_cid = (1 << 4) | 1
@@ -146,7 +146,7 @@ def test_main_file_master_all_patterns(tmp_path, pat):
     out = str(tmp_path / "scn")
     g.main(["--topology", "mesh_4x4_vc1",
             "--out", out, "--transactions-per-node", "2",
-            "--size", "5", "--len", "0", "--memory-size", "0x40000"] + pat)
+            "--size", "5", "--len", "0"] + pat)
     nodes = sorted(glob.glob(os.path.join(out, "node*")))
     assert len(nodes) == 16
     for n in nodes:
@@ -157,3 +157,25 @@ def test_main_file_master_all_patterns(tmp_path, pat):
     for t in w:
         assert t["burst"] == 1 and t["size"] == 5 and t["len"] == 0
         assert len(t["beats"]) == 1
+
+
+def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
+    """Root-cause regression: injection-mode transactions_per_node (200) with a
+    non-zero burst footprint on a 16-node topology used to overflow the old fixed
+    0x40000 window (ValueError). region_bytes is now auto-derived, so this must
+    generate cleanly, and every hotspot-converging slot must stay disjoint."""
+    out = str(tmp_path / "scn")
+    g.main(["--topology", "mesh_4x4_vc1", "--out", out,
+            "--pattern", "hotspot", "--hotspot", "5", "--seed", "1",
+            "--transactions-per-node", "200",
+            "--size", "5", "--len", "3"])
+    nodes = sorted(glob.glob(os.path.join(out, "node*")))
+    assert len(nodes) == 16
+    intervals = []
+    for n in nodes:
+        for t in _parse_write(os.path.join(n, "write.txt")):
+            footprint = (t["len"] + 1) * (1 << t["size"])
+            intervals.append((t["addr"], t["addr"] + footprint))
+    intervals.sort()
+    for (s0, e0), (s1, e1) in zip(intervals, intervals[1:]):
+        assert e0 <= s1, f"overlapping slots: [{s0:#x},{e0:#x}) vs [{s1:#x},{e1:#x})"

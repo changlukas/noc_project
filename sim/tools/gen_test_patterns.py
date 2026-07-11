@@ -42,7 +42,7 @@ hotspot  (ported from booksim2 HotSpotTrafficPattern::dest, src/traffic.cpp:506-
 
 Address allocation
 ------------------
-alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes, memory_size, ...)
+alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes, region_bytes, ...)
     Assigns a globally unique local offset within the dst node's memory window so
     converging sources never collide on an absolute address.  The neighbor pattern
     is a bijection (no convergence), but the allocator contract is shared with
@@ -52,8 +52,11 @@ alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes, memory_size, 
     (row-major in seq: each src is one stride apart; each seq jumps a full
     n_nodes-wide band, so src + seq*n_nodes is injective for src,seq in [0,n_nodes)).
     The allocator ASSERTS the chosen offset + the slot's reserved bytes stays within
-    [base_offset, base_offset + memory_size); a violation raises ValueError rather
+    [base_offset, base_offset + region_bytes); a violation raises ValueError rather
     than silently overflowing into the next dst tile (the contract T2/T3 rely on).
+    region_bytes is auto-derived in main() as n_nodes * transactions_per_node * stride
+    (stride = max(_SLOT_STRIDE, burst_footprint)), a tight upper bound on the
+    allocator's max offset + reserved, so the ValueError never fires in practice.
 
 Constants
 ---------
@@ -139,7 +142,7 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop):
 
 
 def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
-                          base_local, memory_size, axi_size, axi_len, data_width,
+                          base_local, region_bytes, axi_size, axi_len, data_width,
                           ids_per_tile=1, num_axi_ids=256, tile_size=_DEFAULT_TILE_SIZE):
     """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
     src-partitioned address, address-in-data payload. INCR, atop=0, full strobe.
@@ -156,7 +159,7 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
     write_lines, read_lines = [], []
     for seq, dst_cid in enumerate(dst_cids):
         local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
-                                        n_nodes, memory_size, reserved=reserved)
+                                        n_nodes, region_bytes, reserved=reserved)
         addr = dst_cid * tile_size + local_off
         axid = (id_base + (seq % ids_per_tile)) % num_axi_ids
         write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
@@ -293,7 +296,7 @@ def _linear_to_coord(node, x_dim):
 # ---------------------------------------------------------------------------
 
 def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
-                        memory_size, reserved=_SLOT_STRIDE, stride=_SLOT_STRIDE):
+                        region_bytes, reserved=_SLOT_STRIDE, stride=_SLOT_STRIDE):
     """Return a local offset that is globally unique across all (src_node, seq) pairs.
 
     Layout within the dst node's memory window (row-major in seq, column in src):
@@ -304,10 +307,10 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
     spaced by `stride`, and since stride >= reserved each slot's footprint fits
     inside its own spacing — no two slots overlap even under many-to-one traffic.
     A burst footprint larger than the default _SLOT_STRIDE therefore widens the
-    stride (callers size memory_size to n_nodes * n_seq * stride to hold them all).
+    stride (callers size region_bytes to n_nodes * n_seq * stride to hold them all).
 
     Bounds: the chosen offset plus the slot's reserved bytes must stay within the
-    dst tile's memory window [base_offset, base_offset + memory_size).  A violation
+    dst tile's memory window [base_offset, base_offset + region_bytes).  A violation
     raises ValueError instead of silently overflowing into the next dst tile.
 
     Args:
@@ -317,14 +320,15 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
         seq:      0-based transaction-pair index within this src_node's sequence.
         base_offset: base local address from the scenario (memory_base & 0xFFFFFFFF).
         n_nodes:  total node count in the topology (upper bound on src_node and seq).
-        memory_size: dst tile's memory window size (config.memory_size); the offset
-                  + reserved must stay below base_offset + memory_size.
+        region_bytes: dst tile's memory window size (auto-derived in main() as
+                  n_nodes * transactions_per_node * stride); the offset + reserved
+                  must stay below base_offset + region_bytes.
         reserved: bytes the slot occupies (default one slot = stride); for a burst,
                   pass the burst's total byte length so the tail also fits.
         stride:   byte step between adjacent slots (default _SLOT_STRIDE = 0x40).
 
     Raises:
-        ValueError: if offset + reserved would exceed base_offset + memory_size.
+        ValueError: if offset + reserved would exceed base_offset + region_bytes.
     """
     _ = dst_node  # unused in formula; kept for caller clarity and T2/T3 reuse
     # A slot occupies `reserved` bytes; the spacing between slots must be at least
@@ -332,12 +336,12 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
     # neighbour (root cause of BUR-002/003 hotspot off-by-0x40 under many-to-one).
     stride = max(stride, reserved)
     offset = base_offset + src_node * stride + seq * (n_nodes * stride)
-    if (offset - base_offset) + reserved > memory_size:
+    if (offset - base_offset) + reserved > region_bytes:
         raise ValueError(
             f"alloc_unique_offset: local offset {offset:#x} (+{reserved:#x} reserved) "
-            f"exceeds memory window [{base_offset:#x}, {base_offset + memory_size:#x}) "
-            f"(memory_size={memory_size:#x}); reduce transactions-per-node or "
-            f"enlarge memory_size"
+            f"exceeds memory window [{base_offset:#x}, {base_offset + region_bytes:#x}) "
+            f"(region_bytes={region_bytes:#x}); reduce transactions-per-node or "
+            f"enlarge region_bytes"
         )
     return offset
 
@@ -477,9 +481,6 @@ def main(argv=None):
                     help="AxSIZE for synthetic transactions (0..7; default 2 = 4 bytes)")
     ap.add_argument("--len", type=int, default=0, dest="burst_len",
                     help="AxLEN for synthetic transactions (0..255; default 0 = single beat)")
-    ap.add_argument("--memory-size", type=lambda v: int(str(v), 0), default=None,
-                    help="dst tile memory window size (default 0x40000); sizes the "
-                         "allocator bound")
     ap.add_argument("--ids-per-tile", type=int, default=1,
                     help="Distinct AXI ids per tile (default 1 = one independent id "
                          "per tile). >1 gives each tile a non-overlapping id block, "
@@ -497,7 +498,13 @@ def main(argv=None):
         ap.error(f"--ids-per-tile {a.ids_per_tile} x {n_nodes} nodes exceeds the "
                  f"{1 << widths['id']} AXI id space; per-tile id blocks would overlap")
     base_local = 0x1000
-    memory_size = a.memory_size if a.memory_size is not None else 0x40000
+    # Auto-derived dst-tile window: n_nodes * transactions_per_node slots, each
+    # `stride` bytes apart. stride matches alloc_unique_offset's own
+    # max(_SLOT_STRIDE, reserved) so this is a tight upper bound on its max
+    # offset + reserved (see alloc_unique_offset docstring).
+    burst_footprint = (a.burst_len + 1) * (1 << a.size)
+    stride = max(_SLOT_STRIDE, burst_footprint)
+    region_bytes = n_nodes * a.transactions_per_node * stride
     rng = _random_module.Random(a.seed)
     if a.pattern == "transpose":
         _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
@@ -516,7 +523,7 @@ def main(argv=None):
                                    a.hotspot, a.hotspot_rates, a.exclude_self)
             dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
         emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
-                              n_nodes, base_local, memory_size,
+                              n_nodes, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
                               ids_per_tile=a.ids_per_tile, num_axi_ids=(1 << widths["id"]),
                               tile_size=tile_size)
