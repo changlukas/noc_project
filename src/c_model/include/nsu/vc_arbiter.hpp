@@ -5,15 +5,22 @@
 // and multi-flit R uses ROB not wormhole (`floo_axi_chimney.sv:624-633`).
 //
 // ReadWriteSplit (only mode): B -> write_rsp_vc; R -> read_rsp_vc.
-// Pools mode: B round-robins write_rsp_vcs_ (no per-id pin; B is single-flit).
-//             R: first beat of an rid round-robins a VC; later beats of that
-//             rid reuse it; released on payload rlast. The id is a
-//             burst-grouping key, not a VC selector. See r_burst_vc_.
+// Pools mode:
+//   Clause 2 return-path static map (microarch §5a, RZ1): a rob_req=0 B, or
+//   ANY R (regardless of rob_req), maps to
+//   pool[(dst_id ^ id) % pool.size()] -- a deterministic pure function, zero
+//   state. This pins a same-(dst,id) bypassed response stream to one VC (so
+//   it cannot be reordered in-fabric) and gives R burst coherence for free:
+//   every beat of a burst shares (dst_id, rid) and hashes identically. A
+//   mapped VC that is full/no-credit refuses (`return false`) rather than
+//   spilling to another pool VC -- spilling a pinned stream would reorder it.
+//   rob_req=1 B is order-free at the NMU slot path and round-robins the
+//   write pool, same as before clause 2.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
 //
 // References:
 //   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md §7.2
-#include "axi/types.hpp"
+//   docs/superpowers/specs/2026-07-12-clause2-vc-safe-bypass-design.md (return path)
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "router/rsp_out.hpp"
@@ -75,7 +82,8 @@ class VcArbiter : public router::NocRspOut {
         assert(read_rsp_vc_ < num_vc_);
     }
 
-    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id);
+    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id, uint8_t rob_req,
+                                                uint8_t id);
 
     router::NocRspOut& downstream_;
     std::size_t num_vc_;
@@ -89,13 +97,10 @@ class VcArbiter : public router::NocRspOut {
     bool use_pools_ = false;
     uint8_t write_rr_start_ = 0;
     uint8_t read_rr_start_ = 0;
-    // R-follows-first-beat: the first R beat of an rid round-robins a VC;
-    // later beats of that rid reuse it; released on payload rlast.
-    // The id is a burst-grouping key, not a VC selector.
-    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> r_burst_vc_{};
 };
 
-inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t id) {
+inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
+                                                              uint8_t rob_req, uint8_t id) {
     if (num_vc_ == 1) return uint8_t{0};
 
     // ReadWriteSplit, scalar (no pools configured).
@@ -105,20 +110,31 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
         return std::nullopt;
     }
 
-    // ReadWriteSplit pools: B round-robins write pool (no pin);
-    // R follows r_burst_vc_ for burst coherence, round-robins on first beat.
+    // ReadWriteSplit pools.
     const std::vector<uint8_t>* cand = nullptr;
     uint8_t* rr = nullptr;
+    bool pinned = false;
     if (axi_ch == ni::AXI_CH_B) {
         cand = &write_rsp_vcs_;
         rr = &write_rr_start_;
+        pinned = (rob_req == 0);  // rob_req=1 B is order-free; round-robins.
     } else if (axi_ch == ni::AXI_CH_R) {
-        if (r_burst_vc_[id].has_value()) return r_burst_vc_[id];  // burst follow
         cand = &read_rsp_vcs_;
         rr = &read_rr_start_;
+        pinned = true;  // ALL R: static map gives burst coherence, was r_burst_vc_'s role.
     } else {
         return std::nullopt;
     }
+
+    if (pinned) {
+        // Clause 2 return-path static map (microarch §5a, RZ1): deterministic
+        // pure function of (dst_id, id), zero state. Full/no-credit -> refuse,
+        // never spill (spilling a pinned stream to another VC would reorder it).
+        uint8_t vc = (*cand)[static_cast<uint8_t>(dst_id ^ id) % cand->size()];
+        if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
+        return std::nullopt;
+    }
+
     const std::size_t n = cand->size();
     for (std::size_t k = 0; k < n; ++k) {  // round-robin from rr
         uint8_t vc = (*cand)[(*rr + k) % n];
@@ -132,26 +148,21 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
-    uint8_t id = 0;
-    if (use_pools_ && num_vc_ > 1 && axi_ch == ni::AXI_CH_R)
-        id = static_cast<uint8_t>(flit.get_payload_field("R", "rid"));
-    auto vc_opt = select_vc_for_axi_ch(axi_ch, id);
+    uint8_t dst_id = 0, rob_req = 0, id = 0;
+    if (use_pools_ && num_vc_ > 1 && (axi_ch == ni::AXI_CH_B || axi_ch == ni::AXI_CH_R)) {
+        dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
+        rob_req = static_cast<uint8_t>(flit.get_header_field("rob_req"));
+        id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_B ? flit.get_payload_field("B", "bid")
+                                                         : flit.get_payload_field("R", "rid"));
+    }
+    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, rob_req, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
 
-    // Stamp r_burst_vc_ after all accept conditions pass (R only).
-    if (use_pools_ && num_vc_ > 1 && axi_ch == ni::AXI_CH_R) r_burst_vc_[id] = vc_id;
-
     Flit stamped = flit;
     stamped.set_header_field("vc_id", vc_id);
     pending_[vc_id].push_back(stamped);
-
-    // Release on payload rlast so the next same-rid burst rebinds via round-robin.
-    // Header `last` is always 1, so the payload field must be used for R.
-    if (use_pools_ && num_vc_ > 1 && axi_ch == ni::AXI_CH_R) {
-        if (flit.get_payload_field("R", "rlast") != 0) r_burst_vc_[id].reset();
-    }
     return true;
 }
 
