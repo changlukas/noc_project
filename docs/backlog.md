@@ -60,8 +60,10 @@ FlooNoC's `OnlyMetaData=0` R RoB). So SRAM = `depth * 32 B`: depth 32 -> 1 KiB, 
 slot is 32 B of SRAM.
 
 ## Pre-existing (surfaced this round, not fixed)
-- Makefile random `SEED` can exceed Verilator's int32 limit (`+verilator+seed+ must be < 2147483648`),
-  an occasional co-sim flake; clamp the generated seed.
+- ~~Makefile random `SEED` can exceed Verilator's int32 limit~~ **FIXED** (branch
+  `chore/nsu-guard-seed-clamp`, `6ee762c`): `$RANDOM$RANDOM` string-concat could reach ~3.3e9, over the
+  `+verilator+seed+ < 2147483648` ceiling. Now draws a uniform 30-bit seed (`RANDOM*32768+RANDOM`,
+  `Makefile:181`); verified < 2**31 over 100k draws.
 - hotspot mode1 count=200 is a **saturation** point (many-to-one congestion), not a hang: count=40 is
   `CONTINUOUS PASS`. Recorded, not a bug.
 
@@ -86,10 +88,20 @@ smoke clean, generator pytest 16/16.
   arbitrary-base map ships. Co-sim non-uniform is SIZE-override-only today.
 - **`translate` miss under `NDEBUG`.** Miss ⇒ `assert` (fail-loud), but a release/`NDEBUG` DPI build would
   null-deref instead. ctest/co-sim build with asserts on; only matters if a release DPI lib is produced.
-- **`max_unique_ids` guard under `NDEBUG`.** Same class. The only validity check on `max_unique_ids` is an
-  `assert` in the `Depacketize` ctor (`nsu/depacketize.hpp:31-33`). Under `NDEBUG` a misconfigured value
-  (say 5) would silently take the identity remap instead of failing. Inert today: only 1 or 256 ever reach
-  the ctor, and no release build exists. Promote to a runtime `throw` if an `NDEBUG` DPI build ever lands.
+- ~~**`max_unique_ids` guard under `NDEBUG`.**~~ **FIXED** (branch `chore/nsu-guard-seed-clamp`,
+  `6ee762c`): the `Depacketize` ctor `assert` is now a runtime `throw std::invalid_argument`, so a
+  misconfigured value fails loud at the YAML/DPI config trust boundary even under `NDEBUG`. ctest
+  `NsuDepacketize.CtorRejectsIntermediateMaxUniqueIds` covers it; full suite 423/423.
+  **FlooNoC survey settled the semantics** (me + Codex, both against `E:/05_NoC/FlooNoC`): `{1,
+  AXI_ID_SPACE}` is not a simplification but FlooNoC-faithful. `floo_meta_buffer` has exactly two
+  branches -- collapse to one id (`MaxUniqueIds==1`, `:87`) vs passthrough (else, unique-id count set by
+  `OutIdWidth`, `:129`); `MaxUniqueIds` never appears in the else path except a width assert (`:381`).
+  Nothing in `hw/` instantiates `axi_id_remap`. So **genuine arbitrary-N unique-id limiting is not a
+  FlooNoC feature** -- our collapse-or-passthrough model already matches the reference. Porting pulp
+  `axi_id_remap` (the module FlooNoC declined to use) to add arbitrary N was considered and **rejected**
+  as modelling a mechanism the reference architecture does not have. Do not re-open without a concrete
+  need. The real FlooNoC lever for fewer unique ids is `OutIdWidth` (id bit-width), gated by the spec
+  `AWID_WIDTH=8`.
 - **`+sam_config` unconditional.** Run recipes always pass it; a topology YAML lacking `address_map` would
   assert in `load_sam_table`. All 6 current YAMLs carry the block. A clearer error string is nice-to-have.
 - ~~`make build-cmodel` ignores `local.mk` BUILD_ROOT~~ **FIXED** (`0981828`): `CMODEL_BUILD` changed from
