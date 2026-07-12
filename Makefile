@@ -178,7 +178,10 @@ TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
 _TOPO   := $(TB:tb_%=%)
 _CLASS  := $(if $(filter constrained_random,$(PATTERN)),constrained_random,directed)
-_SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$RANDOM$$RANDOM'))
+# RANDOM is 0..32767; RANDOM*32768+RANDOM draws a uniform 30-bit seed (< 2**30),
+# staying under Verilator's +verilator+seed+ int32 ceiling (< 2147483648). The old
+# $RANDOM$RANDOM string-concat could reach 10 digits (~3.3e9) and abort the run.
+_SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$(( RANDOM * 32768 + RANDOM ))'))
 
 # Forwarded only when set, so sim/verilator/Makefile's own defaults apply otherwise.
 # INJECTION_COUNT's default depends on INJECTION_MODE and is computed there.

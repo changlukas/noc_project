@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <deque>
 #include <optional>
+#include <stdexcept>
 
 namespace ni::cmodel::nsu {
 
@@ -42,13 +43,24 @@ class Depacketize : public RequestDepacketizer {
           w_q_depth_(w_q_depth),
           ar_q_depth_(ar_q_depth),
           max_unique_ids_(max_unique_ids) {
-        // Every path that configures an NSU funnels through here: the YAML loader,
-        // the co-sim wrap defaults, and the direct NsuConfig test fixtures. Upstream
-        // and downstream AXI ID widths are both 8, so any value above 1 degenerates to
-        // the identity remap and an intermediate value would silently do nothing. A
-        // default-constructed NsuConfig leaves this 0, which would also read as identity.
-        assert((max_unique_ids == 1 || max_unique_ids == axi::AXI_ID_SPACE) &&
-               "max_unique_ids must be 1 or AXI_ID_SPACE");
+        // Every path that configures an NSU funnels through here (YAML loader, co-sim
+        // wrap defaults, direct NsuConfig test fixtures), so this is the config trust
+        // boundary: validate with a throw, not an assert, so a misconfigured value fails
+        // loud even in a release/NDEBUG build where asserts are compiled out.
+        //
+        // Only 1 and AXI_ID_SPACE are legal. This mirrors FlooNoC's floo_meta_buffer,
+        // whose MaxUniqueIds has exactly two behaviors: collapse every id to one
+        // downstream id (MaxUniqueIds==1, floo_meta_buffer.sv:87) or passthrough (else,
+        // the unique-id count is set by OutIdWidth, floo_meta_buffer.sv:129). FlooNoC
+        // provides no arbitrary-N remap (nothing in the chimney instantiates
+        // axi_id_remap), so an intermediate value is intentionally unsupported, not a
+        // modelling gap: with InIdWidth==OutIdWidth==8 it would silently degenerate to
+        // the identity (full 256) remap.
+        if (max_unique_ids != 1 && max_unique_ids != axi::AXI_ID_SPACE) {
+            throw std::invalid_argument(
+                "max_unique_ids must be 1 (collapse) or AXI_ID_SPACE (passthrough); "
+                "FlooNoC provides no arbitrary-N unique-id remap");
+        }
     }
 
     void tick();

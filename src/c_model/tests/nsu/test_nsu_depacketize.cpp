@@ -187,3 +187,19 @@ TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
     depkt.tick();
     EXPECT_EQ(depkt.pop_aw()->id, 3);  // flit 3 decoded into S1 third tick
 }
+
+TEST(NsuDepacketize, CtorRejectsIntermediateMaxUniqueIds) {
+    SCENARIO(
+        "NSU Depacketize: max_unique_ids must be 1 (collapse) or AXI_ID_SPACE (passthrough); an "
+        "intermediate value throws (config trust boundary, fail-loud even under NDEBUG)");
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    // FlooNoC provides only collapse-or-passthrough; an intermediate N is unsupported.
+    EXPECT_THROW(Depacketize(noc.req_in(), mb, 16, 16, 16, /*max_unique_ids*/ 5),
+                 std::invalid_argument);
+    EXPECT_THROW(Depacketize(noc.req_in(), mb, 16, 16, 16, /*max_unique_ids*/ 0),
+                 std::invalid_argument);
+    // Both legal endpoints construct without throwing.
+    EXPECT_NO_THROW(Depacketize(noc.req_in(), mb, 16, 16, 16, /*collapse*/ 1));
+    EXPECT_NO_THROW(Depacketize(noc.req_in(), mb, 16, 16, 16, axi::AXI_ID_SPACE));
+}
