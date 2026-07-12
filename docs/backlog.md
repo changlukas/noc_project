@@ -24,7 +24,7 @@ reaches the model). NSU MetaBuffer recording (`emit_result_csv`) now derives its
 `[Config]` log line instead of a duplicated Makefile literal, so all 11 are truly single-sourced. Spec
 `docs/superpowers/specs/2026-07-11-config-simplification-design.md`, plan `.../plans/2026-07-11-config-simplification.md`.
 
-## DONE 2026-07-11 -- DV-tier stimulus cleanup (branch `chore/dv-region-bytes-cleanup`, local commits `390268a..a20a482`, not pushed)
+## DONE 2026-07-11 -- DV-tier stimulus cleanup (merged + pushed main `2066bbb`)
 
 Both DV/stimulus "size" numbers unified under one name (`region_bytes`) and split cleanly from the DUT
 address map. The unbounded MAPPED slave (`axi_rand_slave`, `byte_t memory_q[addr_t]`, no depth param)
@@ -300,44 +300,6 @@ Between-rounds cleanup, no new feature:
 - **Dead perf path removed**: `axi_slots`/`latency` (txn-perf DPI never wired) dropped; perf.json is noc-only (routers + links, which are live).
 - **AI-ism removals** (user: no real project ships these): the doc-ASCII `lint_docs` linter + `lint_scenarios` + their make targets. Emptied root `tools/` -> `sim/tools/` is the only tools dir. See [[feedback_reject_ai_invented_mechanisms]].
 - **Dead files + doc staleness**: dead headers (`ni_spec.hpp`, `master/slave_wrap_io.hpp`), stale `perf_baseline/*.json`, 17 stray root `master_wrap_read_dump*.txt`; `make clean` now sweeps generated stimulus; all live-doc refs to removed machinery (`make check`, `run-tb-top SCENARIO=`, `test_integration`, AX4 GLOB) reconciled.
-
-## NEXT SESSION -> design round
-
-Hygiene is done; the next action is a **design round** (brainstorm-first, per [[feedback_superpowers_entry]]). Pick ONE from the Design rounds table below:
-- **SAM remap** — largest: reworks address gen + NMU/NSU, needs an AMBA System Address Map / FlooNoC survey.
-- **NoC-layer QoS** — medium: QoS-aware VC arbitration + mapping (`NOC_QOS_WIDTH=0`, `noc_qos` zero-filled today).
-- **non-4x4 topology** — smallest: a non-square YAML smoke to prove the generator path.
-
-## Next round — ranked (set 2026-07-03, after the VIP cutover round)
-
-0. ~~**Load-dependent DUT deadlock under random traffic**~~ **RESOLVED 2026-07-04 — NMU
-   request-path HOL, not a fabric bug.** Root cause: `NmuReqS1Bridge::tick` (`nmu.hpp` old line 78,
-   `if (s1_aw_.full()) return;`) head-of-line-blocked W and AR whenever the AW slot could not drain.
-   Combined with the WormholeArbiter AW->W pairing lock (needs the W body to release, then drain the
-   AW input), a full depth-4 AW input self-deadlocked: W blocked -> lock never releases -> AW input
-   stays full. The read AR was collateral (HOL-blocked behind the same full AW), so R never returned.
-   Load-dependent because the AW input only fills at >=4 outstanding writes. NOT a network wormhole
-   deadlock: the forensic dump (`run_8r8w_s1.log`) showed 5 NMUs internally wedged with
-   `req_credit_avail=1` (network had space). Diagnosed via a fabric-state dump + 4 parallel hypothesis
-   analyses + Codex cross-check against FlooNoC. Fix (spec `docs/superpowers/specs/2026-07-04-nmu-request-hol-fix-design.md`,
-   commit `0a50480`): independent per-channel bridge drain + `Packetize::push_w` backpressure on empty
-   `w_meta_fifo_` (AW-before-W preserved by the meta FIFO, FlooNoC-aligned SelAw/SelW equivalent).
-   Verified: deterministic ctest deadlock-repro (2/2), full ctest 497/497, and the exact prior repro
-   `8R/8W seed 1` co-sim now PASS (all 16 nodes done, non-vacuous, zero %Error/dump).
-0b. **Verilator+z3 wall-time budget** — measured ~34 sim-cycles/s under random stimulus (z3 89% CPU;
-   every randomize round-trips the solver pipe). Matrix/smoke loads must budget for this: local WSL
-   gate = 2R/2W-scale; heavy seeded runs → VCS (native solver). Affects Task 8 matrix sizing.
-0c. **pulp `axi_scoreboard` data-integrity axis on VCS** — withdrawn from Verilator flow (2-state X
-   collapse, spec `2a2db6c`); re-enable on the 4-state workstation to restore write→readback checking
-   and all-to-all checked runs.
-   **UPDATE 2026-07-04 (branch `feat/checked-traffic-benchmark`, spike):** the 2-state withdrawal is
-   too broad. A standalone Verilator spike (file_master two-phase + rand_slave MAPPED + scoreboard on
-   one bus) showed the scoreboard does NOT false-report on a **directed full-readback** (clean read of
-   a written address = 0 warning; fault read of an unwritten `0x2000` = 8× `Unexpected RData`, so the
-   checker is live and the X-collapse only bites unwritten-byte reads). → the **directed data axis runs
-   on Verilator/WSL, no VCS needed**. Only all-to-all *random* data-integrity still needs VCS (out of
-   the new benchmark's scope; random uses reorder_compare instead). See spec
-   `docs/superpowers/specs/2026-07-04-checked-traffic-benchmark-design.md`.
 
 ## Previous round — ranked (set 2026-07-01, after the ultra dead-code sweep)
 
