@@ -125,15 +125,34 @@ classes of transaction (`floo_rob.sv:422-433`) -- the first transaction of an ID
 the same destination as the previous one. Only the `else` branch allocates. That is why a 64-entry
 FlooNoC RoB is mostly idle.
 
-**Clause 2 (same destination) does not hold in our fabric.** It assumes same destination implies
-in-order arrival, which FlooNoC buys by hardwiring `NumVirtChannels(1)` into `floo_axi_router`
-(`:100,132`). Our VC arbiter spreads one ID's packets across a VC pool ID-agnostically
-(`nmu/vc_arbiter.hpp:10-13`) and the router round-robins VCs per output (`router/router.hpp:240-250`).
-Restoring the clause needs per-ID VC pinning -- the mechanism deliberately deleted on 2026-06-30
-([[project_vc_id_agnostic_landed]]) -- which surrenders the VC spread that a multi-VC fabric exists
-to provide. FlooNoC has never shipped clause 2 together with multiple VCs; its VC router is in
-`hw/deprecated/`, and it assigns VC by next-hop direction with free-VC overflow, never by AXI ID
-(`hw/deprecated/vc_router_util/floo_vc_assignment.sv:70-88`, `floo_vc_selection.sv:36-46`).
+**Clause 2 (same destination) does not hold under our VC allocation.** It assumes same destination
+implies in-order arrival at the NI; bypassed responses are forwarded in arrival order with no reorder
+(`FlooNoC floo_rob.sv:292-297`). Cross-AI verified 2026-07-12 (Codex GPT-5.5 + Claude subagent, both
+re-derived against the RTL; `cross-review/REVIEW_AGGREGATE.md`):
+
+- **Hazard is gated on per-class VC pool size, not total VC count.** The NMU VC arbiter round-robins
+  one class's packets across its VC pool ID-agnostically (`src/c_model/include/nmu/vc_arbiter.hpp:105-134`)
+  and the router round-robins VCs per output (`src/c_model/include/router/router.hpp:242-243,275`), so
+  same-id same-dest packets on different VCs can overtake each other. If a class (read or write) maps
+  to one VC the round-robin is a no-op. **Clause 2 is unsafe iff some AXI-class VC pool has size > 1**
+  (vc4/vc8; vc2 only if both VCs serve one class). vc1 is safe.
+- **FlooNoC keeps same-dest order via deterministic overflow-off direction-VC, not `NumVC=1`.**
+  Corrects the earlier note: the VC chimney (`hw/deprecated/floo_nw_vc_chimney.sv`) does carry the
+  clause-2 RoB, but only when configured `NormalRoB`; `ChimneyDefaultCfg` is `NoRoB`
+  (`floo_pkg.sv:348,350`). VC is a pure function of output port + next-hop direction, never AXI id
+  (`floo_vc_assignment.sv:81-93`); with `AllowVCOverflow=0` a (src,dst) pair holds one VC per hop.
+  Default `AllowVCOverflow=1` would break even FlooNoC's own guarantee. Real axis: deterministic
+  overflow-off direction-VC (FlooNoC) vs round-robin VC (us), not the presence of VCs.
+- **Same invariant gates `NoRoB` too (confirms item 6).** The `NoRoB` default path admits in flight
+  only `!in_flight || ax_dest_i==prev_dest` (`floo_rob_wrapper.sv:139`) -- the same same-dest bet. Both
+  cheap ordering paths (clause 2, NoRoB same-dest counter) are closed to us for one root reason:
+  round-robin VC does not preserve same-dest order. [[project_vc_id_agnostic_landed]]
+
+**IN PROGRESS (2026-07-12): keep bypass under VC>1.** VC version is a hard requirement (user's manager).
+Target: restore clause-2 safety on vc4/vc8 without surrendering inter-stream VC spread. Lead candidate
+= a same-(id,dest) -> same-VC pin at the NMU: different streams still spread round-robin, but one
+in-flight (id,dest) streak holds one VC. Viable here because our router has no VC overflow, so a pinned
+flow never leaves its VC (unlike FlooNoC default). Brainstorm + Codex/FlooNoC cross-check before design.
 
 ### Measured, but NOT validated -- do not build on these numbers
 

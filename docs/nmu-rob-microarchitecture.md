@@ -3,7 +3,8 @@
 What `nmu::Rob` (`src/c_model/include/nmu/rob.hpp`) is today, structure by structure, and
 which of its shapes are decisions and which are accidents of C++.
 
-This is a description, not a proposal. Every row that a future RTL implementer would have to
+This is a description, not a proposal, with one marked exception -- section 5a records a
+designed-not-built path for clause 2. Every row that a future RTL implementer would have to
 choose is marked. Where the C++ has no buildable counterpart, it says so.
 
 ## 1. Placement and interface
@@ -208,20 +209,107 @@ bound. That is why FlooNoC carries `MaxTxnsPerId`, enforced as `ax_gnt_o = !fifo
 
 The trade the two clauses make is RoB storage against status-table storage.
 
-**The second clause does not hold here.** It assumes same destination implies in-order
-arrival, which FlooNoC buys by hardwiring one virtual channel into the AXI router
-(`floo_axi_router.sv:100,132`, request and response nets alike). Our VC arbiter spreads a
-single ID's packets across a VC pool by round-robin, ID-agnostically
-(`nmu/vc_arbiter.hpp:10-13`), and the router arbitrates VCs round-robin per output
-(`router/router.hpp:240-250`, pointer bumped at `:275`), so two same-ID same-destination
-packets can be reordered.
-Restoring the clause would require pinning an ID's packets to one VC, which surrenders the
-VC spread that a multi-VC fabric exists to provide.
+**The second clause is unsafe as the fabric stands -- but recoverable (section 5a).** It
+assumes same destination implies in-order arrival. FlooNoC gets that from deterministic VC
+assignment: a flit's VC is a function of the next-hop direction, never the AXI ID
+(`hw/deprecated/vc_router_util/floo_vc_assignment.sv:81-93`), so with `AllowVCOverflow = 0` a
+(src, dst) pair holds one VC per hop. Our VC arbiter instead spreads a single ID's packets
+across a VC pool by round-robin, ID-agnostically (`nmu/vc_arbiter.hpp:10-13`); the router
+arbitrates VCs round-robin per output (`router/router.hpp:240-250`, pointer bumped at `:275`);
+and the NSU round-robins the response VC too (B takes a fresh write-pool VC with no pin; every
+read burst round-robins a new VC, `nsu/vc_arbiter.hpp:8-11,92-95`, `r_burst_vc_` being burst
+coherence, not an ID pin). So two same-ID same-destination packets can be reordered on either
+network. The hazard is gated on per-class VC pool size > 1: at vc1 the round-robin is a no-op
+and clause 2 is already safe.
 
-Pinning the request VC would not be enough. The NSU round-robins the response VC too: B takes a fresh VC from the write pool with no pin at all, and the first beat of every read burst round-robins a new VC that the rest of that burst follows (`nsu/vc_arbiter.hpp:8-11,92-95`; `r_burst_vc_` is burst coherence, not an ID pin). Two same-ID responses can therefore be reordered on the way home even if their requests were not. Clause 2 needs per-ID VC pinning on **both** networks, which is strictly more than the NMU-side mechanism deleted on 2026-06-30. FlooNoC has never shipped clause 2
-alongside multiple VCs: its VC router lives in `hw/deprecated/` and picks a VC from the
-next-hop direction with free-VC overflow, never from the AXI ID
-(`hw/deprecated/vc_router_util/floo_vc_assignment.sv:70-88`, `floo_vc_selection.sv:36-46`).
+Two earlier claims here were wrong (cross-AI verified 2026-07-12, Codex + Fable,
+`cross-review/REVIEW_AGGREGATE.md`). First, FlooNoC's VC-capable chimney *does* instantiate the
+clause-2 RoB (`hw/deprecated/floo_nw_vc_chimney.sv`), just under a non-default `NormalRoB`
+config -- `ChimneyDefaultCfg` is `NoRoB` (`floo_pkg.sv:348,350`) -- so the real axis is
+deterministic-overflow-off direction-VC (FlooNoC) versus round-robin VC (ours), not the presence
+of VCs. Second, recovering the clause does *not* require surrendering VC spread: a naive per-ID
+pin would, but a per-(dst, id) pin holds only the streak that ordering needs while
+same-dst-different-id traffic keeps spreading (section 5a).
+
+## 5a. Clause 2 made safe under multi-VC -- designed, not built
+
+Designed 2026-07-12; spec `docs/superpowers/specs/2026-07-12-clause2-vc-safe-bypass-design.md`;
+cross-AI verified (Codex GPT-5.5 + Fable 5, `cross-review/REVIEW_AGGREGATE.md`,
+`.../clause2-pinning_REVIEW_AGGREGATE.md`, `.../return-path_REVIEW_AGGREGATE.md`). Not
+implemented. Gated on a measurement (below).
+
+### Why it is possible
+
+Four facts, each verified against the RTL:
+
+1. **The head-invariant is per-AXI-id, not per-VC** (`rob.hpp:381-383` B, `:422-424` R). Clause 2
+   needs only that all same-(dst, id) bypassed packets take one VC on each network -- nothing about
+   which VC, or correspondence between the two networks.
+2. **Routers never change a flit's VC** -- no overflow (`router.hpp:181-187,242-243`). A fixed
+   injection VC stays in-order end to end.
+3. **REQ and RSP are separate networks.** Forward and return VC choices are independent.
+4. **One-source lemma.** All concurrently in-flight bypassed responses of one (dst, id) originate
+   from a single NSU: clause 2 robs on any dest change and is sticky (`floo_rob.sv:427-433`), and a
+   new bypass streak needs the id FIFO empty (`floo_rob.sv:423,437-441`) = full drain at the NMU.
+   So a per-NSU-local VC choice is sufficient; no cross-NSU coordination.
+
+The philosophy mirrors FlooNoC's two-layer split: decide ordering at **injection VC selection**
+with a deterministic key, leave the link-mux layer round-robin (`floo_vc_arbiter.sv` is a plain
+round-robin `rr_arb_tree`). FlooNoC keys injection by next-hop direction because its VC is not a
+spreading tool (it serves deadlock-freedom and traffic-class separation). Ours keys by (dst, id)
+because our VC *is* a spreading tool -- the vc1->vc8 sweep buys ~+75% throughput
+(`docs/backlog.md`) -- and (dst, id) keeps same-dst-different-id traffic spread while pinning only
+the streak that ordering needs.
+
+### The mechanism (zero new packet fields)
+
+| side | where | rob_req == 0 (bypass) | rob_req == 1 (robbed) |
+|---|---|---|---|
+| forward | `nmu::Rob` + `nmu::VcArbiter` | Rob adds clause 2 (sticky `prev_dest`, `floo_rob.sv:399,423-441`). VcArbiter keeps per-id `(last_dst, last_vc)`; if flit `dst_id == last_dst[id]` reuse `last_vc[id]`, else credit-aware round-robin + update. Uses the existing `dst_id` header. | round-robin (RoB reorders; VC order-free) |
+| return | `nsu::VcArbiter::push_flit` | static map `rsp_vc = pool[f(dst_id, id) % \|pool\|]`; pinned-VC full -> refuse, never spill. Uses existing `dst_id` + `bid`/`rid`. | round-robin |
+
+Forward ordering is race-free without feedback: AW share one wormhole-input FIFO, AR another, so
+txn N passes VcArbiter before its follower and `last_vc[id]` is always populated when read.
+
+### Trade-offs
+
+| decision | chosen | reason | alternative / cost |
+|---|---|---|---|
+| recover clause 2 at all | designed, GATED | saves R-RoB SRAM slots | clause-1-only = status quo, zero cost; wins if clause 2 rarely fires |
+| ordering decision point | injection VC selection, deterministic key | FlooNoC's two-layer split; link mux stays RR | -- |
+| pin granularity | per-(dst, id) | keeps same-dst-different-id spread | dst-only (candidate A): also binds different id -> kills the spread the VC exists for; per-id: too coarse |
+| forward VC record | VcArbiter per-id `(last_dst, last_vc)`, existing `dst_id` | zero field; wormhole FIFO ordering makes it race-free | follow-bit: one new header bit; report-back: layering inversion + tick race |
+| return VC | RZ1 static map, zero field | one-source lemma -> NSU-local suffices | echo req-VC: one MetaBuffer field, buys dynamic spread; RZ2 dynamic follow: proven impossible zero-field (no NSU-observable streak boundary) |
+| return vs forward VC | independent, each self-orders | REQ/RSP separate; head-invariant per-id | -- |
+| `r_burst_vc_` | delete (option b) | net code deletion; W6 (same-rid multi-source contention, `meta_buffer.hpp:22-28`) vanishes; lifts the `remap_downstream_id` src_id constraint | rekey to (dst, rid) (option a): keeps per-burst spread, more state |
+| echo / follow-bit field | rejected | not a correctness requirement, only a spread optimization | -- |
+| landing order | forward + return together | neither half is safe alone | -- |
+
+### The directed / random duality
+
+RZ1 pins by (dst, id), so the two workload extremes trade opposite things, and the trades are
+complementary rather than competing:
+
+| workload | clause 2 (area) | VC utilization (spread) |
+|---|---|---|
+| directed (dst fixed, few ids) | fires often -> large slot saving | flows pile onto few VCs -> low |
+| random (dst varies) | rarely fires -> little saving | flows fan out across VCs -> high |
+
+Directed takes the area win and has little spread to lose; random keeps its spread and was never a
+bypass candidate anyway (dest keeps changing -> `else` -> robbed -> round-robin, untouched by the
+pin). So RZ1 costs VC utilization only where the workload concentrates on few (dst, id) pairs --
+exactly where clause 2 pays for it in area. The cost is the zero-field price: to hold order it pins
+same-(dst, id) to one VC; a dynamic follow would recover that spread but only by adding a field
+(return path) whose safe streak boundary lives at the NMU, not the NSU.
+
+### Gate (measure before building)
+
+Clause 2 fires only for multi-outstanding same-id same-dest streaks. Under single-outstanding-per-id
+stimulus it never fires and clause 1 covers everything. And clause 2 does not shrink `r_rob_depth`
+by itself -- the saving banks only when the constant is cut afterward. So: add a multi-outstanding
+same-dest streaming pattern, measure the robbed-slot high-water with clause 1 only at vc4/vc8, and
+build only if it funds a real `r_rob_depth` cut. No fundable cut -> clause-1-only stays, at zero
+cost.
 
 ## 6. Parameters that are not parameters
 
