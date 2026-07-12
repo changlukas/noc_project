@@ -523,6 +523,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('                                                                  input int x_coord, input int y_coord,')
     w('                                                                  input int mesh_x_dim, input int mesh_y_dim,')
     w('                                                                  input int num_vc);')
+    w('    import "DPI-C" context function int unsigned cmodel_nmu_read_slot_hwm(input longint unsigned ctx);')
     if rob_enabled:
         w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
         w('                                                                 input int src_id, input int num_vc,')
@@ -775,6 +776,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("            end")
     w("        end")
     w('        if (vacuous) $fatal(1, "tb_top: vacuous run");')
+    w("        // Stage 0 clause-2 gate measurement: peak R-RoB slot occupancy per node.")
+    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w('            $display("[HWM] node=%0d read_slot_hwm=%0d", i, '
+      "cmodel_nmu_read_slot_hwm(nmu_ctx[i]));")
+    w("        end")
     w('        $display("PASS: all %0d nodes done, non-vacuous", NUM_NODES);')
     w("        $finish(0);")
     w("    end")

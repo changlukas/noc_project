@@ -497,6 +497,21 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
     DPI_BOUNDARY_END(cmodel_nmu_get_outputs);
 }
 
+// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — Stage 0 clause-2 gate
+// measurement readout. 0 if the handle is invalid or RoB is Disabled.
+extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
+    DPI_BOUNDARY_BEGIN_R(cmodel_nmu_read_slot_hwm, 0u) {
+        auto* _h =
+            ni::cmodel::wrap::validate_handle(ctx, WrapType::Nmu, "cmodel_nmu_read_slot_hwm");
+        if (!_h) return 0u;
+        auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
+        auto* sa = nmu->standalone();
+        if (!sa) return 0u;
+        return static_cast<unsigned int>(sa->rob().read_slot_hwm());
+    }
+    DPI_BOUNDARY_END_R(cmodel_nmu_read_slot_hwm);
+}
+
 // Nsu DPI handlers — Task 9.
 //
 // Direction inversion vs. Nmu:
