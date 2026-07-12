@@ -239,16 +239,88 @@ TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossPool) {
     EXPECT_EQ(vc_d, 3u);
 }
 
-// Same id no longer pins a VC: consecutive same-id ARs round-robin the read pool.
-TEST(NmuVcArbiterRoundRobin, SameReadIdRoundRobinsAcrossPool) {
-    SCENARIO("NMU VcArbiter pools: same arid round-robins the read pool (no id pin)");
+// Clause 2 VC pin (microarch §5a): a rob_req=0 flit whose (dst_id, id) matches
+// the id's previous same-channel flit reuses that VC instead of round-robining
+// -- pins the bypass streak to one VC so it cannot be reordered in-fabric.
+TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestPinsVc) {
+    SCENARIO("NMU VcArbiter pools: same arid + same dst_id (rob_req=0) pins the read pool VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
                                                  /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
-    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x20));
-    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x20));
+    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(a, 2u);
-    EXPECT_EQ(b, 3u) << "same id must NOT pin; round-robin advances to the next pool VC";
+    EXPECT_EQ(b, a) << "same (dst,id) with rob_req=0 must pin to the same VC";
+}
+
+// Pin miss: same id, different dst_id -- the streak broke, so round-robin
+// (spread) resumes, matching the pre-existing id-agnostic pool behavior.
+TEST(NmuVcArbiterRoundRobin, SameReadIdDifferentDestRoundRobins) {
+    SCENARIO("NMU VcArbiter pools: same arid, different dst_id -- pin miss, round-robins");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
+                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/1, 0, 0, /*id=*/0x20));
+    EXPECT_EQ(a, 2u);
+    EXPECT_EQ(b, 3u) << "different dst_id -- pin miss, round-robin advances";
+}
+
+// rob_req=1 (RoB-owned) flits are order-free by construction -- the RoB
+// reorders them, so the VC pin is skipped and they always round-robin, even
+// with a matching (dst, id).
+TEST(NmuVcArbiterRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
+    SCENARIO("NMU VcArbiter pools: rob_req=1 flits round-robin even with same (dst,id)");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
+                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+    Flit f1 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    f1.set_header_field("rob_req", 1);
+    Flit f2 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    f2.set_header_field("rob_req", 1);
+    uint8_t a = push_and_vc(arb, noc, f1);
+    uint8_t b = push_and_vc(arb, noc, f2);
+    EXPECT_EQ(a, 2u);
+    EXPECT_EQ(b, 3u) << "rob_req=1 -- always round-robin, no pin";
+}
+
+// NUM_VC==1 short-circuits before the pin check (select_vc_for_axi_ch's
+// num_vc_==1 branch returns early) -- degenerate path unaffected.
+TEST(NmuVcArbiterRoundRobin, NumVc1SameIdSameDestUnaffected) {
+    SCENARIO("NMU VcArbiter: NUM_VC=1, pin logic short-circuited, everything -> VC 0");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/1, 0, 0, /*id=*/0x20));
+    EXPECT_EQ(a, 0u);
+    EXPECT_EQ(b, 0u);
+}
+
+// W follows its AW's VC even when that VC came from a pin reuse, not a fresh
+// round-robin pick -- the second AW's W beat must land on the reused VC (0),
+// not the pool's next round-robin slot (1).
+TEST(NmuVcArbiter, WFollowsAW_ReusedPinnedVc) {
+    SCENARIO(
+        "NMU VcArbiter pools: second same-(dst,awid) AW reuses its pinned VC; "
+        "W beat follows current_aw_vc_ (the reused VC), not round-robin");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
+                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+
+    // AW1 (dst=0, id=0x20): first sighting -> round-robin picks write pool VC 0.
+    uint8_t aw1_vc =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    EXPECT_EQ(aw1_vc, 0u);
+    uint8_t w1_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1));
+    EXPECT_EQ(w1_vc, 0u);
+    EXPECT_FALSE(arb.has_current_aw());
+
+    // AW2 same (dst,id): pin hit -> reuses VC 0 (round-robin would pick VC 1).
+    uint8_t aw2_vc =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    EXPECT_EQ(aw2_vc, 0u) << "pin hit must reuse VC0, not round-robin to VC1";
+    uint8_t w2_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1));
+    EXPECT_EQ(w2_vc, 0u) << "W must follow AW2's reused VC";
 }
 
 INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcArbParam,

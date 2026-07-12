@@ -8,9 +8,14 @@
 // ReadWriteSplit (only mode): candidate set is derived per direction —
 //   AW → write_vcs_, AR → read_vcs_. Candidates are scanned round-robin
 //   from rr_start_; first VC with pending space AND downstream credit wins
-//   (else backpressure). The axi_id is NOT considered: same-id transactions
-//   freely spread across the pool; ordering is enforced by the RoB / single-
-//   outstanding interlock, not by VC pinning.
+//   (else backpressure).
+//
+// Clause 2 VC pin (microarch §5a): a rob_req=0 AW/AR flit whose (dst_id, id)
+// matches the id's previous same-channel flit reuses that VC instead of
+// round-robining -- pins a same-(dst,id) bypass streak to one VC so it
+// cannot be reordered in-fabric. A pin miss (new id, or dst changed) falls
+// back to round-robin and records the new (dst, VC) for next time. rob_req=1
+// flits are RoB-owned and order-free, so they always round-robin, unpinned.
 //
 // W-follows-AW invariant (Constraint A1): this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
@@ -26,6 +31,7 @@
 //   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
 //   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
 //   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
+#include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "router/req_out.hpp"
@@ -84,7 +90,8 @@ class VcArbiter : public router::NocReqOut {
         for (uint8_t v : read_vcs_) assert(v < num_vc_);
     }
 
-    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch);
+    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id, uint8_t rob_req,
+                                                uint8_t id);
 
     const std::vector<uint8_t>* candidates_for(uint8_t axi_ch) const {
         return axi_ch == ni::AXI_CH_AW ? &write_vcs_ : &read_vcs_;
@@ -100,9 +107,17 @@ class VcArbiter : public router::NocReqOut {
     uint8_t write_rr_start_ = 0;  // per-class round-robin scan start (selection)
     uint8_t read_rr_start_ = 0;
     std::optional<uint8_t> current_aw_vc_;
+
+    // Clause 2 VC pin (microarch §5a): last (dst_id, VC) a given AXI id took
+    // on a rob_req=0 flit, per direction. nullopt dst = id never seen.
+    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_aw_dst_{};
+    std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
+    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_ar_dst_{};
+    std::array<uint8_t, axi::AXI_ID_SPACE> last_ar_vc_{};
 };
 
-inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
+inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
+                                                              uint8_t rob_req, uint8_t id) {
     // W invariant fires regardless of NUM_VC (Constraint A1: must be
     // downstream of WormholeArbiter; W must always follow AW)
     if (axi_ch == ni::AXI_CH_W) {
@@ -120,6 +135,23 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
     if (num_vc_ == 1) return uint8_t{0};
 
     if (axi_ch != ni::AXI_CH_AW && axi_ch != ni::AXI_CH_AR) return std::nullopt;
+
+    // Clause 2 VC pin: rob_req=0 flit whose dst_id matches this id's last
+    // same-channel dst_id reuses that VC. No fallback to round-robin on
+    // block -- rerouting a pinned streak mid-flight is exactly the reorder
+    // this pin exists to prevent.
+    if (rob_req == 0) {
+        std::optional<uint8_t>& last_dst =
+            (axi_ch == ni::AXI_CH_AW) ? last_aw_dst_[id] : last_ar_dst_[id];
+        uint8_t last_vc = (axi_ch == ni::AXI_CH_AW) ? last_aw_vc_[id] : last_ar_vc_[id];
+        if (last_dst.has_value() && *last_dst == dst_id) {
+            if (pending_[last_vc].size() < pending_depth_ && downstream_.credit_avail(last_vc)) {
+                return last_vc;
+            }
+            return std::nullopt;
+        }
+    }
+
     const std::vector<uint8_t>* cand = candidates_for(axi_ch);
     uint8_t& rr = (axi_ch == ni::AXI_CH_AW) ? write_rr_start_ : read_rr_start_;
     const std::size_t n = cand->size();
@@ -136,7 +168,15 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch) {
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
 
-    auto vc_opt = select_vc_for_axi_ch(axi_ch);
+    uint8_t dst_id = 0, rob_req = 0, id = 0;
+    if (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR) {
+        dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
+        rob_req = static_cast<uint8_t>(flit.get_header_field("rob_req"));
+        id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_AW ? flit.get_payload_field("AW", "awid")
+                                                          : flit.get_payload_field("AR", "arid"));
+    }
+
+    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, rob_req, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
@@ -154,6 +194,19 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     } else if (axi_ch == ni::AXI_CH_W) {
         if (flit.get_payload_field("W", "wlast") != 0) {
             current_aw_vc_.reset();
+        }
+    }
+
+    // Clause 2 VC pin: record (dst_id, VC) for this id only after all accept
+    // conditions pass (mirrors current_aw_vc_'s atomicity above). rob_req=1
+    // flits are RoB-owned/order-free -- do not pin them.
+    if (rob_req == 0 && (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR)) {
+        if (axi_ch == ni::AXI_CH_AW) {
+            last_aw_dst_[id] = dst_id;
+            last_aw_vc_[id] = vc_id;
+        } else {
+            last_ar_dst_[id] = dst_id;
+            last_ar_vc_[id] = vc_id;
         }
     }
 
