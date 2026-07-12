@@ -1414,7 +1414,7 @@ TEST(RobClause2, SameDestStreakBypassesAll) {
 TEST(RobClause2, DestChangeTriggersStickyFallback) {
     SCENARIO(
         "Rob Enabled: a dest change mid-streak robs and stays sticky-robbed even after the dest "
-        "reverts, until the id's list fully drains");
+        "reverts, until the id's list fully drains, at which point clause 1 re-opens");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
@@ -1431,11 +1431,54 @@ TEST(RobClause2, DestChangeTriggersStickyFallback) {
     EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 0u);
 
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_b)));  // dest change: robs, sticky set
-    EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 1u);
+    auto f_dst_b = *ar_cap.pop();
+    EXPECT_EQ(f_dst_b.get_header_field("rob_req"), 1u);
 
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));  // dest reverts to A: still robs (sticky)
-    EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 1u)
+    auto f_dst_a2 = *ar_cap.pop();
+    EXPECT_EQ(f_dst_a2.get_header_field("rob_req"), 1u)
         << "sticky flag outlives the dest reverting to a prior value";
+
+    // Drain the id's order deque in push order, exercising the sticky-clear sites:
+    // the two bypassed entries via retire_read_primer's bypass-response pattern
+    // (pop_r_staged's bypassed arm), then the two robbed entries via
+    // Enabled_PopR_MultiBeatBurstCommitInOrder's rob_idx-addressed response
+    // pattern (drain_ready_read_heads_).
+    retire_read_primer(rob, noc, depkt, id);  // drains bypassed entry 1 (dst_a)
+    retire_read_primer(rob, noc, depkt, id);  // drains bypassed entry 2 (dst_a)
+
+    const auto rob_idx_dst_b = static_cast<uint8_t>(f_dst_b.get_header_field("rob_idx"));
+    const auto rob_idx_dst_a2 = static_cast<uint8_t>(f_dst_a2.get_header_field("rob_idx"));
+    auto push_r = [&](uint8_t rob_idx) {
+        ni::cmodel::Flit f;
+        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("dst_id", kSrcId);
+        f.set_header_field("last", 1);
+        f.set_header_field("rob_req", 1);
+        f.set_header_field("rob_idx", rob_idx);
+        f.set_payload_field("R", "rid", id);
+        f.set_payload_field("R", "rresp", 0);
+        f.set_payload_field("R", "rlast", 1u);
+        std::array<uint8_t, 32> d{};
+        f.set_payload_bytes("R", "rdata", d.data(), 256);
+        ASSERT_TRUE(noc.rsp_out().push_flit(f));
+    };
+    push_r(rob_idx_dst_b);
+    depkt.tick();
+    EXPECT_TRUE(rob.pop_r().has_value());  // drains robbed entry 3 (dst_b)
+
+    push_r(rob_idx_dst_a2);
+    depkt.tick();
+    EXPECT_TRUE(rob.pop_r().has_value());  // drains robbed entry 4 (dst_a revert)
+    EXPECT_FALSE(rob.pop_r().has_value());
+
+    // The order deque is now empty: fallen_back_read_ was reset by the sticky-clear
+    // site in drain_ready_read_heads_, so a same-id push takes clause 1 (empty list)
+    // and bypasses again -- proving the sticky flag actually cleared, not just that
+    // it survived a dest revert.
+    ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));
+    EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 0u)
+        << "clause re-enables bypass once the id's order list fully drains";
 }
 
 TEST(RobClause2, MaxTxnsPerIdStillBoundsBypassedEntries) {

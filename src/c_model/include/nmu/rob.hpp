@@ -207,7 +207,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // dst_id of the last accepted push for that id, updated on every push.
     // fallen_back_* is the sticky "this id started reordering" flag: once a push
     // robs, every later push for that id robs too (even if dest matches an earlier
-    // one) until the id's order list drains to empty (floo_rob.sv:435-441).
+    // one) until a new streak begins. The reset is the clause-1 branch itself: an
+    // id's first push (empty order list) sets fallen_back_*=false, so the flag is
+    // fresh at every streak start. FlooNoC instead clears at drain (floo_rob.sv:435-441)
+    // because its clause 1 READS the sticky flag (!ax_rob_req_q); ours tests the empty
+    // list, which makes a drain-time clear a dead store -- so it is omitted here.
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
@@ -398,7 +402,6 @@ inline void Rob::drain_ready_write_heads_(uint8_t id) {
         committed_b_queue_.push_back({write_entries_[head.base].b_beat, head.base, id, true});
         ++committed_b_pending_[head.base];
         write_order_by_id_[id].pop_front();
-        if (write_order_by_id_[id].empty()) fallen_back_write_[id] = false;
     }
 }
 
@@ -418,7 +421,6 @@ inline void Rob::drain_ready_read_heads_(uint8_t id) {
         read_arrival_offset_[head.base] = 0;
         release_off = 0;
         read_order_by_id_[id].pop_front();
-        if (read_order_by_id_[id].empty()) fallen_back_read_[id] = false;
     }
 }
 
@@ -440,7 +442,6 @@ inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
             std::abort();
         }
         write_order_by_id_[id].pop_front();
-        if (write_order_by_id_[id].empty()) fallen_back_write_[id] = false;
         drain_ready_write_heads_(id);  // the entry behind it may already be ready
         return CommittedBEntry{b, 0, id, /*rob_req=*/false};
     }
@@ -483,7 +484,6 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         }
         if (r.last) {
             read_order_by_id_[id].pop_front();
-            if (read_order_by_id_[id].empty()) fallen_back_read_[id] = false;
             drain_ready_read_heads_(id);
         }
         return CommittedREntry{r, 0, id, /*rob_req=*/false};
