@@ -1373,3 +1373,22 @@ TEST(NmuRob, Enabled_MaxTxnsPerId1_MatchesDisabled) {
     }
     EXPECT_EQ(rob_e.read_free_space(), rob_e.r_rob_depth()) << "Enabled took no slot either";
 }
+
+TEST(RobSlotHwm, SameIdSameDestStreakRaisesReadHwm) {
+    SCENARIO(
+        "Rob Enabled: a same-id same-dest AR streak raises read_slot_hwm by one per robbed AR");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(),
+            /*b_rob_depth=*/32, /*r_rob_depth=*/32, /*max_txns_per_id=*/32);
+
+    // 5 single-beat reads, same id, same dest (addr in one tile), none drained.
+    const uint8_t id = 3;
+    const uint64_t addr = 0x100000000ull * 4;  // dst tile 4, len 0
+    for (int i = 0; i < 5; ++i) EXPECT_TRUE(rob.push_ar(make_ar(id, addr)));
+
+    // Clause 1 bypasses the 1st (no slot); the next 4 each take a slot.
+    EXPECT_EQ(rob.read_slot_hwm(), 4u);
+}

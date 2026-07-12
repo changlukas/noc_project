@@ -6,6 +6,7 @@
 #include "nmu/packetize.hpp"
 #include "request_io.hpp"
 #include "response_io.hpp"
+#include <algorithm>
 #include <array>
 #include <bitset>
 #include <cassert>
@@ -128,6 +129,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         for (bool s : read_outstanding_) n += s ? 1 : 0;
         return n;
     }
+    // High-water mark of occupied R RoB slots, updated on every AR that
+    // allocates a slot in Enabled mode. Measurement-only; no behaviour effect.
+    std::size_t read_slot_hwm() const noexcept { return read_slot_hwm_; }
 
   private:
     // Drain ready order-list heads into the committed queues (the Task 3 loops,
@@ -213,6 +217,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // read_arrival_offset_: arrival places landing beats, release tracks how many left.
     std::array<uint16_t, ROB_IDX_SPACE> read_release_offset_{};
 
+    // High-water mark backing read_slot_hwm(). See getter for details.
+    std::size_t read_slot_hwm_ = 0;
+
     // Ready-to-emit beats drained by pop_b / pop_r (Task 3).
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
@@ -290,6 +297,8 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
                     ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
             }
             alloc_read_.set(base + n - 1);  // only the range TOP is marked
+            read_slot_hwm_ =
+                std::max<std::size_t>(read_slot_hwm_, r_rob_depth_ - read_free_space());
             read_range_len_[base] = static_cast<uint16_t>(n);
         }
         read_order_by_id_[b.id].push_back(
