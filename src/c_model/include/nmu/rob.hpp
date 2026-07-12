@@ -203,6 +203,16 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
 
+    // Bypass clause 2 state (floo_rob.sv:399,417-420,427-428). prev_dest_* is the
+    // dst_id of the last accepted push for that id, updated on every push.
+    // fallen_back_* is the sticky "this id started reordering" flag: once a push
+    // robs, every later push for that id robs too (even if dest matches an earlier
+    // one) until the id's order list drains to empty (floo_rob.sv:435-441).
+    std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
+    std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
+    std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
+    std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
+
     // Family C: per-base (keyed by rob_idx base) arrival counter. NSU stamps every
     // R beat of a burst with rob_idx=base; this counter positions beat i at base+i.
     // Reset when the range is popped from read_order_by_id_ (ties counter lifecycle
@@ -233,10 +243,26 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     if (mode_w_ == RobMode::Enabled) {
         // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
         if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
-        // Clause 1: nothing in flight for this id, so nothing can overtake this
-        // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
-        const bool needs_rob = !write_order_by_id_[b.id].empty();
         auto t = sam_.translate(b.addr);
+        const uint8_t dst = t.dst_id;
+        const bool empty = write_order_by_id_[b.id].empty();
+        bool needs_rob;
+        bool fallen_back;  // trial value; committed only once the push is accepted
+        if (empty) {
+            // Clause 1: nothing in flight for this id, so nothing can overtake this
+            // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
+            needs_rob = false;
+            fallen_back = false;  // fresh streak
+        } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id]) {
+            // Clause 2: same dest as the previous same-id push, not yet reordering.
+            // Ported from floo_rob.sv:427-428.
+            needs_rob = false;
+            fallen_back = false;
+        } else {
+            // Ported from floo_rob.sv:430-432.
+            needs_rob = true;
+            fallen_back = true;  // sticky
+        }
         std::size_t base = 0;
         if (needs_rob) {
             if (write_free_space() < 1) return false;
@@ -247,6 +273,8 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
                     static_cast<uint8_t>(needs_rob ? base : 0)})) {
             return false;  // downstream backpressure: no state mutation
         }
+        prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
+        fallen_back_write_[b.id] = fallen_back;
         if (needs_rob) {
             alloc_write_.set(base);  // a 1-slot range: base is its own top
             write_entries_[base] =
@@ -277,10 +305,26 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     if (mode_r_ == RobMode::Enabled) {
         if (read_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
         const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
-        // Clause 1: an idle id's burst cannot be overtaken, so it needs no slots.
-        // A bypassed burst of any length is admissible. Ported from floo_rob.sv:422-425.
-        const bool needs_rob = !read_order_by_id_[b.id].empty();
         auto t = sam_.translate(b.addr);
+        const uint8_t dst = t.dst_id;
+        const bool empty = read_order_by_id_[b.id].empty();
+        bool needs_rob;
+        bool fallen_back;  // trial value; committed only once the push is accepted
+        if (empty) {
+            // Clause 1: an idle id's burst cannot be overtaken, so it needs no slots.
+            // A bypassed burst of any length is admissible. Ported from floo_rob.sv:422-425.
+            needs_rob = false;
+            fallen_back = false;  // fresh streak
+        } else if (!fallen_back_read_[b.id] && dst == prev_dest_read_[b.id]) {
+            // Clause 2: same dest as the previous same-id push, not yet reordering.
+            // Ported from floo_rob.sv:427-428.
+            needs_rob = false;
+            fallen_back = false;
+        } else {
+            // Ported from floo_rob.sv:430-432.
+            needs_rob = true;
+            fallen_back = true;  // sticky
+        }
         std::size_t base = 0;
         if (needs_rob) {
             if (read_free_space() < n) return false;  // subsumes the old n > r_rob_depth_ check
@@ -291,6 +335,8 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
                     static_cast<uint8_t>(needs_rob ? base : 0)})) {
             return false;  // downstream backpressure: no state mutation
         }
+        prev_dest_read_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
+        fallen_back_read_[b.id] = fallen_back;
         if (needs_rob) {
             for (std::size_t i = 0; i < n; ++i) {
                 read_entries_[base + i] =
@@ -352,6 +398,7 @@ inline void Rob::drain_ready_write_heads_(uint8_t id) {
         committed_b_queue_.push_back({write_entries_[head.base].b_beat, head.base, id, true});
         ++committed_b_pending_[head.base];
         write_order_by_id_[id].pop_front();
+        if (write_order_by_id_[id].empty()) fallen_back_write_[id] = false;
     }
 }
 
@@ -371,6 +418,7 @@ inline void Rob::drain_ready_read_heads_(uint8_t id) {
         read_arrival_offset_[head.base] = 0;
         release_off = 0;
         read_order_by_id_[id].pop_front();
+        if (read_order_by_id_[id].empty()) fallen_back_read_[id] = false;
     }
 }
 
@@ -392,6 +440,7 @@ inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
             std::abort();
         }
         write_order_by_id_[id].pop_front();
+        if (write_order_by_id_[id].empty()) fallen_back_write_[id] = false;
         drain_ready_write_heads_(id);  // the entry behind it may already be ready
         return CommittedBEntry{b, 0, id, /*rob_req=*/false};
     }
@@ -434,6 +483,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         }
         if (r.last) {
             read_order_by_id_[id].pop_front();
+            if (read_order_by_id_[id].empty()) fallen_back_read_[id] = false;
             drain_ready_read_heads_(id);
         }
         return CommittedREntry{r, 0, id, /*rob_req=*/false};
