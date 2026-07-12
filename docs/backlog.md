@@ -132,10 +132,12 @@ re-derived against the RTL; `cross-review/REVIEW_AGGREGATE.md`):
 
 - **Hazard is gated on per-class VC pool size, not total VC count.** The NMU VC arbiter round-robins
   one class's packets across its VC pool ID-agnostically (`src/c_model/include/nmu/vc_arbiter.hpp:105-134`)
-  and the router round-robins VCs per output (`src/c_model/include/router/router.hpp:242-243,275`), so
-  same-id same-dest packets on different VCs can overtake each other. If a class (read or write) maps
-  to one VC the round-robin is a no-op. **Clause 2 is unsafe iff some AXI-class VC pool has size > 1**
-  (vc4/vc8; vc2 only if both VCs serve one class). vc1 is safe.
+  the router round-robins VCs per output (`src/c_model/include/router/router.hpp:242-243,275`), and the
+  NSU round-robins the response VC too (B unpinned, R per-burst, `src/c_model/include/nsu/vc_arbiter.hpp:108-153`),
+  so same-id same-dest packets can overtake each other on either network. If a class maps to one VC the
+  round-robin is a no-op. **Clause 2 is potentially unsafe when either the request or the response class
+  pool carrying bypassed traffic has size > 1** (vc4/vc8; vc2 only if both VCs serve one class); singleton
+  pools / vc1 are safe.
 - **FlooNoC keeps same-dest order via deterministic overflow-off direction-VC, not `NumVC=1`.**
   Corrects the earlier note: the VC chimney (`hw/deprecated/floo_nw_vc_chimney.sv`) does carry the
   clause-2 RoB, but only when configured `NormalRoB`; `ChimneyDefaultCfg` is `NoRoB`
@@ -148,11 +150,14 @@ re-derived against the RTL; `cross-review/REVIEW_AGGREGATE.md`):
   cheap ordering paths (clause 2, NoRoB same-dest counter) are closed to us for one root reason:
   round-robin VC does not preserve same-dest order. [[project_vc_id_agnostic_landed]]
 
-**IN PROGRESS (2026-07-12): keep bypass under VC>1.** VC version is a hard requirement (user's manager).
-Target: restore clause-2 safety on vc4/vc8 without surrendering inter-stream VC spread. Lead candidate
-= a same-(id,dest) -> same-VC pin at the NMU: different streams still spread round-robin, but one
-in-flight (id,dest) streak holds one VC. Viable here because our router has no VC overflow, so a pinned
-flow never leaves its VC (unlike FlooNoC default). Brainstorm + Codex/FlooNoC cross-check before design.
+**IN PROGRESS (2026-07-12): keep bypass under VC>1 -- DESIGNED, gated on measurement.** VC version is a
+hard requirement (user's manager). Design complete and cross-AI verified (Codex GPT-5.5 + Fable 5): spec
+`docs/superpowers/specs/2026-07-12-clause2-vc-safe-bypass-design.md`, microarchitecture section 5a. RZ1,
+zero new packet fields, BOTH networks: forward NMU VcArbiter pins same-(dst,id) via the existing `dst_id`;
+return NSU VcArbiter static-maps `f(dst_id,id)` (deletes `r_burst_vc_`, dissolves W6). Viable because our
+router has no VC overflow. NEXT = Stage 0 gate: add a multi-outstanding same-dest streaming pattern,
+measure robbed-slot high-water with clause 1 only at vc4/vc8; build only if it funds an `r_rob_depth` cut,
+else clause-1-only stays at zero cost.
 
 ### Measured, but NOT validated -- do not build on these numbers
 
@@ -237,12 +242,14 @@ sizing parameter, not a safety requirement; bypass adds no backpressure class th
    would unlock bypass clause 2 and the `NoRoB` NI (25 kGE vs 281 kGE, paper §VI-C) at the cost of
    the `vc1/2/4/8` configuration axis. Lives in `hw/deprecated/`.
 
-**Consequence worth stating once.** Under ID-agnostic VC round-robin, *every* cheap ordering path
-FlooNoC offers -- bypass clause 2, `NoRoB`'s same-destination counter -- is closed to us. The only
-way to hold more than one outstanding transaction per AXI ID is a RoB. `RobMode::Disabled`
-(one per ID) and `RobMode::Enabled` (RoB) are therefore not two points on a spectrum with a middle;
-they are the only two points. Bypass clause 1 remains available because it assumes nothing about the
-network. This is the price the VC spread charges, and it has never been written down.
+**Consequence worth stating once.** Under the *current unmodified* ID-agnostic VC round-robin, every
+cheap ordering path FlooNoC offers -- bypass clause 2, `NoRoB`'s same-destination counter -- is closed
+to us, and `RobMode::Disabled` (one per ID) / `RobMode::Enabled` (RoB) are the only two points; bypass
+clause 1 remains available because it assumes nothing about the network. This is the price the
+ID-agnostic VC spread charges. **It is not permanent**: the designed RZ1 pin (2026-07-12, "IN PROGRESS"
+above + spec) reopens clause 2 as a third point by keying VC selection on (dst, id) instead of pure
+round-robin -- deterministic per-(dst,id) ordering while same-dst-different-id traffic still spreads.
+The "only two points" holds only while the fabric stays purely ID-agnostic.
 
 ## Done -- injection-mode + rate sweep, VC comparison figures (2026-07-09, branch `feat/injection-mode-sweep`)
 

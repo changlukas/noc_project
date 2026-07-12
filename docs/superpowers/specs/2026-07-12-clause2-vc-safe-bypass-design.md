@@ -86,7 +86,7 @@ together.
 ### Stage 0 — GATE (measure before building)
 
 clause 2 fires ONLY for multi-outstanding same-id **same-dest** streaks (directed-style
-traffic; random/uniform never fires it because the dest keeps changing → every 2nd txn
+traffic; random/uniform rarely fires it -- only on a chance same-dest repeat while the id is still outstanding, since the dest otherwise keeps changing → every 2nd txn
 reorders). And clause 2 does not shrink `r_rob_depth` by itself — the saving banks only when
 the constant is cut afterward.
 
