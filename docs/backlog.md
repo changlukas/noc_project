@@ -150,14 +150,48 @@ re-derived against the RTL; `cross-review/REVIEW_AGGREGATE.md`):
   cheap ordering paths (clause 2, NoRoB same-dest counter) are closed to us for one root reason:
   round-robin VC does not preserve same-dest order. [[project_vc_id_agnostic_landed]]
 
-**IN PROGRESS (2026-07-12): keep bypass under VC>1 -- DESIGNED, gated on measurement.** VC version is a
-hard requirement (user's manager). Design complete and cross-AI verified (Codex GPT-5.5 + Fable 5): spec
-`docs/superpowers/specs/2026-07-12-clause2-vc-safe-bypass-design.md`, microarchitecture section 5a. RZ1,
-zero new packet fields, BOTH networks: forward NMU VcArbiter pins same-(dst,id) via the existing `dst_id`;
-return NSU VcArbiter static-maps `f(dst_id,id)` (deletes `r_burst_vc_`, dissolves W6). Viable because our
-router has no VC overflow. NEXT = Stage 0 gate: add a multi-outstanding same-dest streaming pattern,
-measure robbed-slot high-water with clause 1 only at vc4/vc8; build only if it funds an `r_rob_depth` cut,
-else clause-1-only stays at zero cost.
+**IMPLEMENTED + VC binding PROVEN NECESSARY (2026-07-12/13).** clause 2 + bidirectional (dst,id) VC
+binding, zero new packet fields, on branch `docs/clause2-vc-safe-bypass` (not pushed). Commits:
+fc742a2/5648f86 (Stage-0 hwm instrument + DPI export), 265f2ca (clause 2 sticky prev_dest), 5c2e958
+(drop dead sticky-clears + re-enable test), 59cc946 (NMU VcArbiter per-id last-VC follow), 2e0892d (NSU
+static VC alloc `f(dst_id,id)` + delete r_burst_vc_, dissolves W6). ctest 434/434; each task opus-reviewed
+(Spec ✅+Approved). Spec/microarch-5a/plan under `docs/superpowers/`. `MAX_TXNS_PER_ID`/`read_free_space`
+still backpressure AR by burst length (deadlock guarantee intact, rob.hpp:310-334).
+
+Stage 0: hwm 15 (clause-1-only) -> 0 (clause 2) under same-dest streaming = clause 2 frees the R slots.
+
+Stage 3 -- necessity PROVEN (theory + empirics closed loop):
+- Fable + Codex both (a): router VC arbitration is age-blind rotating grant into a shared per-output FIFO
+  (router.hpp:242-255), NO structural same-id ordering (wormhole lock is a no-op on single-flit responses;
+  every other serializer ruled out at 5c2e958). id-agnostic multi-VC striping breaks clause 2's "same
+  dest => in-order"; binding restores it. NOT dead/defensive.
+- Falsification (controller foreground, 6th subagent backgrounded its build again): raise
+  MAX_READ_TXNS_IN_FLIGHT 1->16 (directed single-id = safe), hotspot INJECTION_COUNT=200 BURST_LEN=63
+  vc8 -> no-binding (5c2e958) `axi_scoreboard.handle_read` FAIL (read data wrong), HEAD PASS. Present
+  bug fix, not future-proofing. Testbench edit reverted, tree clean.
+
+OPEN (收尾):
+- **Land the read-outstanding coverage raise on the DIRECTED axis** (single-id + axi_scoreboard = safe;
+  HEAD-verified PASS). Without it regression can't catch a VC-binding regression (co-sim read-single-
+  outstanding hides it). Per-flavor: directed raises, constrained_random MUST stay single-outstanding
+  (checker limit below). Expose as a tb-layer named DV param ([[feedback_dv_params_named_in_tb]]), not
+  hardcoded=1.
+- **`r_rob_depth` cut** -- hwm->0 under same-dest funds a cut; needs a user parameter decision (parameter
+  discipline). Then commit Stage 3 + close this item.
+- **DV-IP naming/no-edit sweep**: `MAX_READ_TXNS_IN_FLIGHT` is a self-added suffix over pulp VIP
+  `MAX_READ_TXNS` (axi_test.sv:692). Audit EVERY wrap/instantiation of vendored DV IP under `sim/dv/`
+  for self-added param renames + any edits to the vendored IP body; align to upstream, never modify
+  vendored IP. ([[feedback_no_ai_naming_use_standard_terms]], [[feedback_trust_upstream_defaults]].)
+
+**constrained_random pre-existing FAIL -- checker limit, NOT a fabric/binding bug.**
+`axi_reorder_compare.sv:225` AW mismatch, fires WITH and WITHOUT the binding, max_unique_ids=1. Root cause:
+the checker attributes AW per-slave in issue order (`aw_queue`, :185) and R via `ar_id_queue` front
+(:285), assuming the slave receives/returns in AR order; but `rand_master UNIQUE_IDS=0` + `MAX_WRITE_TXNS=8`
+drive multiple AXI ids, and AXI legally reorders across ids -> checker mis-attributes -> false mismatch.
+Same root cause the read side already dodges via `MAX_READ_TXNS_IN_FLIGHT=1`. Single-id burst read
+verifies fine (attribution is per-id correct); burst is NOT the issue, multi-id is. Do NOT edit the
+vendored floonoc-test IP. Recorded as a checker known-limitation; a real multi-id transport check would
+need a per-id-attributing checker. Revisit only if multi-id transport coverage is wanted.
 
 ### Measured, but NOT validated -- do not build on these numbers
 
