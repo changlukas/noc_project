@@ -21,9 +21,9 @@ package axi_vip_types_pkg;
 
     `AXI_TYPEDEF_ALL(vip, vip_addr_t, vip_id_t, vip_data_t, vip_strb_t, vip_user_t)
 
-    // Address-map rule for axi_reorder_compare's addr_decode (common_cells):
-    // field names idx/start_addr/end_addr are the addr_decode contract;
-    // end_addr is exclusive.
+    // Address-map rule type for addr_decode (common_cells): field names
+    // idx/start_addr/end_addr are the addr_decode contract; end_addr is
+    // exclusive.
     typedef struct packed {
         int unsigned idx;
         vip_addr_t   start_addr;

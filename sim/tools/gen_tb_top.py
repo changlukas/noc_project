@@ -7,8 +7,8 @@ The fabric/tb split (S3):
     Every node exposes a clean per-node AXI port (master-side + slave-side). The
     DPI `ctx` handles arrive as PORTS — the fabric itself does no cmodel_*_create.
   - tb_top_<topology>.sv : clk/rst, watchdog, cmodel_*_create (router/nmu/nsu ctx),
-    instantiates the fabric, attaches a user_node_endpoint (pulp axi_rand_master +
-    axi_rand_slave + bw monitor) per node + reorder-compare checking + exit logic.
+    instantiates the fabric, attaches a user_node_endpoint (pulp axi_file_master +
+    axi_rand_slave + in-endpoint scoreboard + bw monitor) per node + exit logic.
 
 Generated artifacts: edit the generator or the topology YAML, never the emitted
 .sv directly. tb_top_<topology>.sv includes the fabric (SV `include), resolved via
@@ -23,8 +23,8 @@ Parameterised from topology YAML:
     - per-node router/nmu/nsu ctx handles; REGION_BASE[s] = coord_id(s) << 32
       (dst tile in addr bits 32+), stamped into each endpoint
     - inter-router links wired per XY direction; boundary directions tied off
-    - PASS guard: all endpoints done (end_of_sim) AND all reorder-compares drained
-      (cmp_eos) AND every node non-vacuous (txn_cnt > 0)
+    - PASS guard: all endpoints done (end_of_sim) AND every node non-vacuous
+      (txn_cnt > 0)
 
 Constants kept as template (not derived from topology YAML):
     - clk/rst timing (10 ns clock, 4-cycle reset); load-scaled watchdog
@@ -125,10 +125,10 @@ def _nodes(topo: dict):
 # gen_test_patterns.py's _DEFAULT_TILE_SIZE.
 _DEFAULT_TILE_SIZE = 0x100000000
 
-# CR window (REGION_BYTES): the per-master compare/rand_master window fed to
-# REGION_BYTES. DV-side tb constant (FlooNoC mesh tb pattern), not a runtime
-# knob. Distinct from gen_test_patterns.py's auto-derived directed-side
-# region_bytes (a different, per-run-derived value of the same name).
+# REGION_BYTES: the per-node MAPPED-slave memory window. DV-side tb constant
+# (FlooNoC mesh tb pattern), not a runtime knob. Distinct from
+# gen_test_patterns.py's auto-derived directed-side region_bytes (a different,
+# per-run-derived value of the same name).
 _DEFAULT_REGION_BYTES = 0x1000
 
 
@@ -136,8 +136,7 @@ def _address_map(topo: dict) -> dict:
     """address_map block (optional, DUT-only): tile_size.
 
     tile_size feeds REGION_BASE (SAM base = dst_id * tile_size). The c_model
-    always rebases (subordinate sees a tile-local address), so the
-    reorder_compare Rebase is hardwired on."""
+    always rebases, so the subordinate sees a tile-local address."""
     am = topo.get("address_map") or {}
     return {
         "tile_size": int(am.get("tile_size", _DEFAULT_TILE_SIZE)),
@@ -405,14 +404,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     # REGION_BASE[s] = SAM base for tile s = coord_id(s) * tile_size (mirrors
     # c_model addr_trans.hpp SamTable::uniform; byte-identical to the old
     # coord_id<<32 stamp for the default 4 GiB tile_size). Stamped into every
-    # endpoint so the VIP rand_master targets per-destination windows.
+    # endpoint so the file_master's MAPPED slave targets per-destination windows.
     # Emitted as a PACKED-array concatenation in descending index order (element
     # for index n-1 first) so REGION_BASE[i] == coord_id(node i) * tile_size.
     # Packed because Verilator 5.048 mis-sizes an unpacked-array param override
     # whose size depends on a sibling param override.
     am = _address_map(topo)
     tile_size = am["tile_size"]
-    rebase_bit = "1'b1"  # c_model always rebases; reorder_compare slave face is tile-local
     region_base = ", ".join(f"64'h{(c * tile_size):016X}"
                             for (_i, _x, _y, c) in reversed(nodes))
 
@@ -427,15 +425,10 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("//")
     w(f"// {n} nodes live inside noc_fabric_{name} (ni_wrap=NMU+NSU + REQ/RSP router per")
     w("// node, joined by directional links). tb_top creates the DPI handles, attaches a")
-    w("// user_node_endpoint (pulp axi_rand_master + axi_rand_slave + FlooNoC")
+    w("// user_node_endpoint (pulp axi_file_master + axi_rand_slave + FlooNoC")
     w("// axi_bw_monitor) to each node's master/slave AXI faces, and owns the exit logic.")
-    w("// Checking: one FlooNoC axi_reorder_compare per master with permutation pairing")
-    w("// (master i <-> slave face of node NUM_NODES-1-i); it compares every AW/W/AR beat")
-    w("// at the destination slave face and every B/R beat back at the master against")
-    w("// the issued stream. (pulp axi_scoreboard is not wired at tb level: in the +define+TB_DIRECTED")
-    w("// directed build it lives inside each endpoint on master_dv; this reorder")
-    w("// compare block is the constrained_random-axis checker and is compiled out under")
-    w("// TB_DIRECTED.)")
+    w("// Checking: pulp axi_scoreboard lives inside each endpoint on master_dv,")
+    w("// comparing read data end-to-end through the NoC against golden write data.")
     w("//")
     w("// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).")
     w("// Plusargs: +num_reads=<n> +num_writes=<n> (per node); seed via +verilator+seed+<N>.")
@@ -473,14 +466,14 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // (coord_id(s) * tile_size, from topology address_map.tile_size). Packed")
     w("    // array: Verilator 5.048 mis-sizes an unpacked-array param override whose")
     w("    // size depends on a sibling override. REGION_BYTES = the DV region_bytes")
-    w("    // constant (NOT tile_size -- that would blow up the rand_master's MAX_BURST_LEN).")
+    w("    // constant (NOT tile_size -- that would blow up MAX_BURST_BEATS below).")
     w(f"    localparam logic [NUM_NODES-1:0][63:0] REGION_BASE = {{{region_base}}};")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Watchdog - sized by worst-case beats in flight: measured vc1 fabric rate is")
     w("    // ~15-30 cycles per R/W beat (credit window 4, all nodes contending), K=40")
-    w("    // adds margin. MAX_BURST_BEATS mirrors the endpoint's AXI_MAX_BURST_LEN cap.")
+    w("    // adds margin. MAX_BURST_BEATS caps the largest burst per REGION_BYTES.")
     w("    // -------------------------------------------------------------------------")
     w("    localparam int unsigned TIMEOUT_BASE    = 100000;")
     w("    localparam int unsigned K_CYC_PER_BEAT  = 40;")
@@ -501,8 +494,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("        repeat (timeout_cycles) @(posedge clk_i);")
     w("        // Per-node SV-side summary, then the c_model fabric state dump.")
     w("        for (int i = 0; i < NUM_NODES; i++) begin")
-    w('            $display("[WATCHDOG] node%0d txn_cnt=%0d end_of_sim=%0d cmp_eos=%0d mst[awv=%0d wv=%0d arv=%0d rr=%0d br=%0d] slv[awv=%0d wv=%0d arv=%0d rv=%0d bv=%0d]",')
-    w("                     i, txn_cnt[i], end_of_sim[i], cmp_eos[i],")
+    w('            $display("[WATCHDOG] node%0d txn_cnt=%0d end_of_sim=%0d mst[awv=%0d wv=%0d arv=%0d rr=%0d br=%0d] slv[awv=%0d wv=%0d arv=%0d rv=%0d bv=%0d]",')
+    w("                     i, txn_cnt[i], end_of_sim[i],")
     w("                     master_axi_req[i].awvalid, master_axi_req[i].wvalid,")
     w("                     master_axi_req[i].arvalid, master_axi_req[i].rready,")
     w("                     master_axi_req[i].bready,")
@@ -621,13 +614,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("")
 
     # Test endpoints per node via genvar generate. user_node_endpoint = pulp
-    # rand master + slave + bw monitor. user_node_endpoint.sv is
+    # file_master + rand_slave + bw monitor. user_node_endpoint.sv is
     # USER-OWNED (committed, hand-written); the generator only INSTANTIATES it.
     # REGION_BASE is stamped from the topology coord ids (dst tile in addr 32+).
     w("    // -------------------------------------------------------------------------")
-    w("    // Test endpoints - one user_node_endpoint per node (pulp rand master/slave +")
-    w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT")
-    w("    // regenerated by this script.")
+    w("    // Test endpoints - one user_node_endpoint per node (pulp file_master +")
+    w("    // rand_slave + in-endpoint scoreboard + bw monitor). user_node_endpoint.sv")
+    w("    // is user-owned and NOT regenerated by this script.")
     w("    // -------------------------------------------------------------------------")
     w(f"    logic        end_of_sim [{n}];")
     w(f"    int unsigned txn_cnt    [{n}];")
@@ -643,67 +636,6 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i])")
     w("        );")
     w("    end : g_endpoint")
-    w("")
-
-    # Checking: one FlooNoC axi_reorder_compare per master, permutation pairing.
-    # Taps derive BOTH stream sides from the flat structs via axi_vip_types_pkg
-    # so out-of-scope fields (user/atop) compare as constant 0 on both ends.
-    w("    // -------------------------------------------------------------------------")
-    w("    // Checking - one axi_reorder_compare per master (permutation pairing:")
-    w("    // master i <-> slave face of node NUM_NODES-1-i). A mismatch is a $error")
-    w("    // (%Error in the log) = real DUT finding.")
-    w("    // -------------------------------------------------------------------------")
-    w("    logic cmp_eos [NUM_NODES];")
-    w("`ifndef TB_DIRECTED")
-    w("    axi_vip_types_pkg::vip_req_t  cmp_mst_req [NUM_NODES];")
-    w("    axi_vip_types_pkg::vip_resp_t cmp_mst_rsp [NUM_NODES];")
-    w("    axi_vip_types_pkg::vip_req_t  cmp_slv_req [NUM_NODES];")
-    w("    axi_vip_types_pkg::vip_resp_t cmp_slv_rsp [NUM_NODES];")
-    w("    for (genvar i = 0; i < NUM_NODES; i++) begin : g_compare")
-    w("        localparam int unsigned DST = NUM_NODES - 1 - i;")
-    w("        assign cmp_mst_req[i] = axi_vip_types_pkg::vip_req_from_flat(master_axi_req[i]);")
-    w("        assign cmp_mst_rsp[i] = axi_vip_types_pkg::vip_rsp_from_flat(master_axi_rsp[i]);")
-    w("        assign cmp_slv_req[i] = axi_vip_types_pkg::vip_req_from_flat(slave_axi_req[DST]);")
-    w("        assign cmp_slv_rsp[i] = axi_vip_types_pkg::vip_rsp_from_flat(slave_axi_rsp[DST]);")
-    w("        axi_reorder_compare #(")
-    w("            // NumSlaves=2 with slot 1 tied off: at NumSlaves=1 the module's")
-    w("            // slv_id_t becomes logic[$clog2(1)-1:0] = logic[-1:0], a degenerate")
-    w("            // range that corrupts its queue indexing under Verilator.")
-    w("            .NumSlaves(2),")
-    w("            .AxiIdWidth(ID_WIDTH),")
-    w("            .NumAddrRegions(2),")
-    w("            .addr_t(axi_vip_types_pkg::vip_addr_t),")
-    w("            .rule_t(axi_vip_types_pkg::vip_rule_t),")
-    w("            .AddrRegions({")
-    w("                axi_vip_types_pkg::vip_rule_t'{")
-    w("                    idx: 32'd1,")
-    w("                    start_addr: '1,  // dummy slot: matches only addr=='1 (never issued);")
-    w("                    end_addr: '0},   // end=='0 = end-of-space per addr_decode map contract")
-    w("                axi_vip_types_pkg::vip_rule_t'{")
-    w("                    idx: 32'd0,")
-    w("                    start_addr: REGION_BASE[DST],")
-    w("                    end_addr: REGION_BASE[DST] + REGION_BYTES}}),")
-    w(f"            .Rebase({rebase_bit}),")
-    w("            // RegionBase[0]=this master's tile base (real slot, decode idx=0);")
-    w("            // RegionBase[1] is don't-care (dummy slot, .aw_valid tied to 0).")
-    w("            .RegionBase({64'h0, REGION_BASE[DST]}),")
-    w("            .aw_chan_t(axi_vip_types_pkg::vip_aw_chan_t),")
-    w("            .w_chan_t(axi_vip_types_pkg::vip_w_chan_t),")
-    w("            .b_chan_t(axi_vip_types_pkg::vip_b_chan_t),")
-    w("            .ar_chan_t(axi_vip_types_pkg::vip_ar_chan_t),")
-    w("            .r_chan_t(axi_vip_types_pkg::vip_r_chan_t),")
-    w("            .req_t(axi_vip_types_pkg::vip_req_t),")
-    w("            .rsp_t(axi_vip_types_pkg::vip_resp_t)")
-    w("        ) u_compare (")
-    w("            .clk_i(clk_i), .rst_ni(rst_ni),")
-    w("            .mon_mst_req_i(cmp_mst_req[i]), .mon_mst_rsp_i(cmp_mst_rsp[i]),")
-    w("            // slot 1 tied off (see NumSlaves note above)")
-    w("            .mon_slv_req_i({axi_vip_types_pkg::vip_req_t'('0), cmp_slv_req[i]}),")
-    w("            .mon_slv_rsp_i({axi_vip_types_pkg::vip_resp_t'('0), cmp_slv_rsp[i]}),")
-    w("            .end_of_sim_o(cmp_eos[i])")
-    w("        );")
-    w("    end : g_compare")
-    w("`endif")
     w("")
 
     # Perf instrumentation.
@@ -754,18 +686,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    initial begin")
     w("        bit vacuous;")
     w("        bit all_done;")
-    w("        // clock-polled (not wait()): end_of_sim/cmp_eos are procedurally")
-    w("        // driven through port aliases; Verilator --timing wait() on them")
-    w("        // does not wake reliably.")
+    w("        // clock-polled (not wait()): end_of_sim is driven through port")
+    w("        // aliases; Verilator --timing wait() on it does not wake reliably.")
     w("        do begin")
     w("            @(posedge clk_i);")
     w("            all_done = rst_ni;")
     w("            for (int i = 0; i < NUM_NODES; i++)")
-    w("`ifdef TB_DIRECTED")
-    w("                all_done &= end_of_sim[i];  // scoreboard is in-endpoint; no cmp_eos")
-    w("`else")
-    w("                all_done &= end_of_sim[i] & cmp_eos[i];  // compares drained too")
-    w("`endif")
+    w("                all_done &= end_of_sim[i];  // scoreboard is in-endpoint")
     w("        end while (!all_done);")
     w("        repeat (SETTLE_CYCLES) @(posedge clk_i);")
     w("        vacuous = 1'b0;")

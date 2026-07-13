@@ -35,7 +35,7 @@ help:
 	@echo "  cd sim/vcs       && make run-tb-top                   VCS (Linux workstation)"
 	@echo ""
 	@echo "Simulate:"
-	@echo "  make sim TB=tb_<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot) or constrained_random"
+	@echo "  make sim TB=tb_<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot)"
 	@echo "  make sim TB=tb_mesh_4x4_vc8 PATTERN=neighbor"
 	@echo "  Vars: INJECTION_MODE= INJECTION_RATE= INJECTION_COUNT= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= (directed only); SEED unset draws + prints a random seed"
 	@echo ""
@@ -127,7 +127,7 @@ $(CMODEL_BUILD)/CMakeCache.txt:
 # Default topology for standalone build-verilator.
 # make sim overrides this by passing TOPOLOGY=$(TB) explicitly.
 TOPOLOGY  ?= mesh_4x4_vc1
-RUN_CLASS ?= constrained_random
+RUN_CLASS ?= directed
 
 build-verilator: build-yamlcpp
 	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY) RUN_CLASS=$(RUN_CLASS)
@@ -169,15 +169,18 @@ specgen_pytest:
 	cd specgen && $$interp -m pytest tests/ -q
 
 # Unified DV run launcher. TB selects the testbench (topology; accepts a tb_ prefix).
-# PATTERN selects the axis: the 4 spatial patterns run directed (file_master +
-# scoreboard); constrained_random runs rand_master + reorder_compare. SEED unset ->
-# a random 30-bit seed is drawn and printed so any run is replayable.
+# PATTERN selects one of the 4 spatial patterns, run directed (file_master +
+# scoreboard). SEED unset -> a random 30-bit seed is drawn and printed so any
+# run is replayable.
 # BUILD_ROOT/PYTHON3/VERILATOR/FILELIST_F are NOT passed here -- they flow from
 # root local.mk through sim/build_config.mk (see the local.mk note above).
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
 _TOPO   := $(TB:tb_%=%)
-_CLASS  := $(if $(filter constrained_random,$(PATTERN)),constrained_random,directed)
+_VALID_PATTERNS := neighbor transpose uniform_random hotspot
+ifeq ($(filter $(PATTERN),$(_VALID_PATTERNS)),)
+$(error PATTERN must be one of: $(_VALID_PATTERNS) (got '$(PATTERN)'))
+endif
 # RANDOM is 0..32767; RANDOM*32768+RANDOM draws a uniform 30-bit seed (< 2**30),
 # staying under Verilator's +verilator+seed+ int32 ceiling (< 2147483648). The old
 # $RANDOM$RANDOM string-concat could reach 10 digits (~3.3e9) and abort the run.
@@ -198,14 +201,9 @@ _INJ_ARGS := \
 
 .PHONY: sim
 sim:
-	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) class=$(_CLASS) SEED=$(_SEED)"
-ifeq ($(_CLASS),constrained_random)
-	$(MAKE) -C sim/verilator run-constrained-random TOPOLOGY=$(_TOPO) RUN_CLASS=constrained_random \
-	    SEED=$(_SEED) $(if $(NUM_READS),NUM_READS=$(NUM_READS)) $(if $(NUM_WRITES),NUM_WRITES=$(NUM_WRITES))
-else
+	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
 	$(MAKE) -C sim/verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
 	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT))
-endif
 
 # Injection-rate sweep: four VC configs x nine rates, one point per make sim.
 # MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped

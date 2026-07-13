@@ -97,7 +97,6 @@ TB_TOP_SV_SRC := \
     $(DV_ROOT)/axi-0.39.7/src/axi_intf.sv \
     $(DV_ROOT)/axi-0.39.7/src/axi_test.sv \
     $(DV_ROOT)/floonoc-test/axi_bw_monitor.sv \
-    $(DV_ROOT)/floonoc-test/axi_reorder_compare.sv \
     $(COSIM_ROOT)/tb/axi_vip_types_pkg.sv \
     $(SRC_SV)/nmu_wrap.sv \
     $(SRC_SV)/router_wrap.sv \

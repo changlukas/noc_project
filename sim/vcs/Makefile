@@ -2,10 +2,10 @@
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
 # Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
-# Run class (mirrors sim/verilator/Makefile): directed | constrained_random.
-RUN_CLASS ?= constrained_random
-ifeq ($(filter $(RUN_CLASS),directed constrained_random),)
-$(error RUN_CLASS must be directed or constrained_random (got '$(RUN_CLASS)'))
+# Run class (mirrors sim/verilator/Makefile): directed only.
+RUN_CLASS ?= directed
+ifeq ($(filter $(RUN_CLASS),directed),)
+$(error RUN_CLASS must be directed (got '$(RUN_CLASS)'))
 endif
 # Build artifacts land under $(BUILD_ROOT)/vcs/ (top-level build/), run logs
 # under ./output/.
@@ -140,13 +140,11 @@ ifeq ($(FSDB),1)
 # guarded: += of an empty var would add a trailing space and break FSDB=0 byte-identity
 VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
-ifeq ($(RUN_CLASS),directed)
 VCS_COMMON_FLAGS += +define+TB_DIRECTED
-endif
 
 # --- tb_top cosim (self-clocked) ---
-# pulp VIP endpoints: no scenario files; per-node axi_rand_master/slave driven
-# by +num_reads/+num_writes and the RNG seed (+ntb_random_seed under VCS).
+# pulp VIP endpoints driven by +num_reads/+num_writes and the RNG seed
+# (+ntb_random_seed under VCS).
 NUM_READS  ?= 8
 NUM_WRITES ?= 8
 SEED       ?= 1

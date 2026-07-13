@@ -7,13 +7,11 @@ SHELL         := bash
 # Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
 TOPOLOGY ?= mesh_4x4_vc1
 
-# Run class selects the endpoint/checking flavor compiled into the binary
-# (user_node_endpoint.sv `ifdef TB_DIRECTED):
-#   constrained_random (default) : rand_master WRAP/EXC, RAND_RESP slave, reorder_compare.
-#   directed                     : file_master + scoreboard, INCR two-phase.
-RUN_CLASS ?= constrained_random
-ifeq ($(filter $(RUN_CLASS),directed constrained_random),)
-$(error RUN_CLASS must be directed or constrained_random (got '$(RUN_CLASS)'))
+# Run class selects the endpoint/checking flavor compiled into the binary:
+#   directed (only) : file_master + scoreboard, INCR two-phase.
+RUN_CLASS ?= directed
+ifeq ($(filter $(RUN_CLASS),directed),)
+$(error RUN_CLASS must be directed (got '$(RUN_CLASS)'))
 endif
 
 # Build environment config and include dirs are shared with sim/vcs/Makefile
@@ -167,8 +165,8 @@ $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-ya
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=$(STACK_LDFLAGS)"
 
-# Run tb_top with the pulp VIP endpoints. No scenario files: the per-node
-# axi_rand_master/slave are driven by +num_reads/+num_writes and the RNG seed.
+# Run tb_top with the pulp VIP endpoints, driven by +num_reads/+num_writes
+# and the RNG seed.
 NUM_READS  ?= 8
 NUM_WRITES ?= 8
 SEED       ?= 1
@@ -280,32 +278,6 @@ run-directed: $(TBTOP_EXE)
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
 	else \
 	    echo "DIRECTED PASS: $(SIM_TAG) scoreboard clean, non-vacuous"; \
-	fi
-
-# Constrained-random run: rand_master (WRAP/EXC) + tb-level axi_reorder_compare.
-# Gate on zero reorder_compare $error (%Error) + non-vacuous PASS (cmp_eos drain is
-# in the tb exit). Seed is echoed into the tag so a FAIL is replayable.
-CR_TAG ?= constrained_random_$(TOPOLOGY)_s$(SEED)
-.PHONY: run-constrained-random
-run-constrained-random: $(TBTOP_EXE)
-	@[ "$(RUN_CLASS)" = "constrained_random" ] || { echo "ERROR: run-constrained-random requires RUN_CLASS=constrained_random (got '$(RUN_CLASS)')"; exit 1; }
-	@mkdir -p output/$(CR_TAG)
-	@echo "running $(CR_TAG) (seed=$(SEED) reads=$(NUM_READS) writes=$(NUM_WRITES))"
-	$(TBTOP_EXE) \
-	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
-	    "+verilator+seed+$(SEED)" \
-	    "+sam_config=$(TB_TOP_TOPO)" \
-	    "+perf_out=output/$(CR_TAG)/perf.json" \
-	    "+perf_scenario=$(CR_TAG)" \
-	    > output/$(CR_TAG)/run.log 2>&1; \
-	rc=$$?; \
-	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(CR_TAG)/run.log; tail -4 output/$(CR_TAG)/run.log; \
-	if grep -qE '%Error' output/$(CR_TAG)/run.log; then \
-	    echo "CR FAIL: reorder_compare error / assertion"; exit 1; \
-	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(CR_TAG)/run.log; then \
-	    echo "CR FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
-	else \
-	    echo "CR PASS: $(CR_TAG) reorder_compare clean, drained, non-vacuous"; \
 	fi
 
 # Smoke-test the Verilator toolchain with a trivial module before attempting

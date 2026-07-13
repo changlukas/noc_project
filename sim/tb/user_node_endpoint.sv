@@ -1,25 +1,16 @@
-// user_node_endpoint — per-node test endpoint: pulp axi_rand_master +
-// axi_rand_slave + FlooNoC axi_bw_monitor. Bridges the fabric's flat
-// ni_signals_pkg structs to pulp AXI_BUS_DV interfaces with explicit per-field
-// wiring (no protocol logic). Checking lives at tb level: one FlooNoC
-// axi_reorder_compare per master (permutation pairing — master m targets only
-// node NUM_NODES-1-m, so the compare can attribute streams). Single region per
-// master is a compare precondition beyond attribution: the pulp master sends
-// AW/W in parallel, so a W beat can handshake before its AW; the compare's
-// w_slv_idx then reads an empty queue (default 0), which stays correct only
-// while every W belongs to decode slot 0.
+// user_node_endpoint — per-node test endpoint: pulp axi_file_master +
+// axi_rand_slave (MAPPED tile memory) + in-endpoint axi_scoreboard +
+// FlooNoC axi_bw_monitor. Bridges the fabric's flat ni_signals_pkg structs
+// to pulp AXI_BUS_DV interfaces with explicit per-field wiring (no protocol
+// logic).
 // pulp axi_scoreboard is usable on the Verilator directed axis (2026-07-04 spike +
 // review): the 8'hxx->8'h00 2-state collapse only bites reads of never-written
 // addresses, which a full-readback directed run never issues. Wired in-endpoint on
-// master_dv under +define+TB_DIRECTED. (Rationale: spec D6 / cross-review aggregate.)
+// master_dv. (Rationale: spec D6 / cross-review aggregate.)
 //
-// Run flavors (compile-time):
-//   default            : constrained_random — rand_master (WRAP/EXC), RAND_RESP
-//                        slave, tb-level reorder_compare.
-//   +define+TB_DIRECTED : data integrity — axi_file_master two-phase (write ->
-//                         barrier -> read) + in-endpoint axi_scoreboard on
-//                         master_dv, MAPPED rand_slave as tile memory. Stimulus
-//                         from <stim_dir>/node<ID>/{write,read}.txt (+stim_dir=).
+// Run flavor: data integrity — axi_file_master two-phase (write -> barrier ->
+// read) + in-endpoint axi_scoreboard on master_dv, MAPPED rand_slave as tile
+// memory. Stimulus from <stim_dir>/node<ID>/{write,read}.txt (+stim_dir=).
 //
 // Plusargs: +num_reads=<n> +num_writes=<n> (per node, defaults below).
 
@@ -40,14 +31,7 @@ module user_node_endpoint #(
     parameter logic [NUM_NODES-1:0][63:0] REGION_BASE = '0,
     parameter longint unsigned REGION_BYTES = 64'h1000,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
-    parameter int unsigned DEFAULT_NUM_WRITES = 8,
-    // Reads single-outstanding: axi_rand_slave services outstanding ARs in
-    // RANDOM id order (rand_id_queue), which breaks axi_reorder_compare's
-    // in-AR-order slave-face R attribution when >1 read id is in flight at a
-    // slave. B responses are issued in AW order (plain queue), so writes keep
-    // full pipelining.
-    parameter int unsigned MAX_READ_TXNS_IN_FLIGHT  = 1,
-    parameter int unsigned MAX_WRITE_TXNS_IN_FLIGHT = 8
+    parameter int unsigned DEFAULT_NUM_WRITES = 8
 ) (
     input  logic                       clk_i,
     input  logic                       rst_ni,
@@ -75,7 +59,7 @@ module user_node_endpoint #(
         .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(1)
     ) slave_dv (clk_i);
 
-    // master face: rand_master drives master_dv; forward to the flat NMU port.
+    // master face: file_master drives master_dv; forward to the flat NMU port.
     always_comb begin
         master_axi_req_o = '0;
         master_axi_req_o.awid     = master_dv.aw_id;
@@ -173,12 +157,6 @@ module user_node_endpoint #(
     // ------------------------------------------------------------------
     // VIP classes
     // ------------------------------------------------------------------
-    // MAX_BURST_LEN: new_rand_burst randomizes len/size BEFORE addr; an
-    // unconstrained len (256 beats x 32 B = 8 KiB) cannot fit a REGION_BYTES
-    // window, making the addr constraint unsat. Cap beats so the largest
-    // burst exactly fits the region.
-    localparam int unsigned MAX_BURST_LEN = REGION_BYTES / (DATA_WIDTH / 8);
-`ifdef TB_DIRECTED
     typedef axi_test::axi_file_master #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
         .TA(ApplTime), .TT(TestTime)
@@ -188,8 +166,7 @@ module user_node_endpoint #(
     // responses and hides fabric saturation (measured util ~1.2% at greedy
     // injection). Standard NoC-eval practice (booksim2 consumes at the sink).
     // The directed two-phase run is a data-integrity gate (scoreboard compares
-    // read data vs golden, timing-independent), so a fast slave keeps it passing;
-    // OoO/response-timing variability is covered by the constrained_random axis.
+    // read data vs golden, timing-independent), so a fast slave keeps it passing.
     typedef axi_test::axi_rand_slave #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
         .TA(ApplTime), .TT(TestTime), .MAPPED(1'b1),
@@ -198,22 +175,6 @@ module user_node_endpoint #(
     typedef axi_test::axi_scoreboard #(
         .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(1), .TT(TestTime)
     ) scoreboard_t;
-`else
-    // constrained_random: full AXI conformance corner (INCR/FIXED/WRAP + exclusive),
-    // random burst/size/addr within the per-master region; RAND_RESP slave.
-    typedef axi_test::axi_rand_master #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
-        .TA(ApplTime), .TT(TestTime),
-        .MAX_READ_TXNS(MAX_READ_TXNS_IN_FLIGHT), .MAX_WRITE_TXNS(MAX_WRITE_TXNS_IN_FLIGHT),
-        .AXI_MAX_BURST_LEN(MAX_BURST_LEN),
-        .AXI_EXCLS(1'b1), .AXI_ATOPS(1'b0), .UNIQUE_IDS(1'b0),
-        .AXI_BURST_FIXED(1'b1), .AXI_BURST_INCR(1'b1), .AXI_BURST_WRAP(1'b1)
-    ) rand_master_t;
-    typedef axi_test::axi_rand_slave #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
-        .TA(ApplTime), .TT(TestTime), .MAPPED(1'b0), .RAND_RESP(1'b1)
-    ) rand_slave_t;
-`endif
 
     // run_done drives end_of_sim_o for ALL flavors: declare it exactly ONCE here,
     // above the ifdef, and delete the per-arm copies. run_done is set by the
@@ -227,7 +188,6 @@ module user_node_endpoint #(
         else end_of_sim_o <= run_done;
     end
 
-`ifdef TB_DIRECTED
     file_master_t file_master;
     rand_slave_t  rand_slave;
     scoreboard_t  scoreboard;
@@ -328,41 +288,6 @@ module user_node_endpoint #(
             run_done = 1'b1;
         end
     end
-`else
-    // ---- constrained_random flavor (rand_master + tb-level reorder_compare) ----
-    rand_master_t rand_master;
-    rand_slave_t  rand_slave;
-
-    int unsigned num_reads;
-    int unsigned num_writes;
-
-    initial begin
-        num_reads  = DEFAULT_NUM_READS;
-        num_writes = DEFAULT_NUM_WRITES;
-        void'($value$plusargs("num_reads=%d", num_reads));
-        void'($value$plusargs("num_writes=%d", num_writes));
-
-        rand_master = new(master_dv);
-        // Permutation pairing: this master targets ONLY node
-        // (NUM_NODES-1-NODE_ID) so the tb-level axi_reorder_compare can
-        // attribute every slave-face handshake to exactly one master.
-        rand_master.add_memory_region(
-            REGION_BASE[NUM_NODES-1-NODE_ID],
-            REGION_BASE[NUM_NODES-1-NODE_ID] + REGION_BYTES,
-            axi_pkg::DEVICE_NONBUFFERABLE);
-        rand_master.reset();
-        @(posedge rst_ni);
-        rand_master.run(num_reads, num_writes);
-        run_done = 1'b1;
-    end
-
-    initial begin
-        rand_slave = new(slave_dv);
-        rand_slave.reset();
-        @(posedge rst_ni);
-        rand_slave.run();
-    end
-`endif
 
     // ------------------------------------------------------------------
     // FlooNoC bw monitor (endpoint perf; $display at end_of_sim) +
