@@ -178,20 +178,43 @@ OPEN (收尾):
   hardcoded=1.
 - **`r_rob_depth` cut** -- hwm->0 under same-dest funds a cut; needs a user parameter decision (parameter
   discipline). Then commit Stage 3 + close this item.
-- **DV-IP naming/no-edit sweep**: `MAX_READ_TXNS_IN_FLIGHT` is a self-added suffix over pulp VIP
-  `MAX_READ_TXNS` (axi_test.sv:692). Audit EVERY wrap/instantiation of vendored DV IP under `sim/dv/`
-  for self-added param renames + any edits to the vendored IP body; align to upstream, never modify
-  vendored IP. ([[feedback_no_ai_naming_use_standard_terms]], [[feedback_trust_upstream_defaults]].)
+- **DV-IP no-edit / naming debt (audit DONE 2026-07-13, `cross-review/dvip-audit.md`).** Good news:
+  pulp `axi-0.39.7`, `common_verification-0.2.5`, `common_cells-1.37.0` are all PRISTINE (no post-import
+  edits). Bad: two `sim/dv/floonoc-test/` files were hand-edited despite the tree's "imported verbatim,
+  do not edit" note, and the edits are silent (in commit msgs, not isolated patches), so the source
+  diverges from upstream `pulp-platform/FlooNoC@14c253c`:
+  - `axi_reorder_compare.sv` (commit fa64fd1): added `Rebase`/`RegionBase` params + addr-normalization on
+    the AW/AR compare path. Same file as the tb_top-misuse above — fix together: dropping reorder_compare
+    from tb_top (→ scoreboard) removes the need for this patch.
+  - `axi_bw_monitor.sv` (commit b7b5db3): hand-edited (inspect what changed; perf-monitor adaptation).
+  - Param rename: `MAX_READ_TXNS_IN_FLIGHT`/`_WRITE_` (user_node_endpoint.sv:49-50) over upstream
+    `MAX_READ_TXNS`/`MAX_WRITE_TXNS` (axi_test.sv:692) — only occurrence; drop the suffix.
+  Fix direction: never modify vendored IP in place — either (a) upstream the change, or (b) isolate as a
+  documented patch / a thin wrapper that instantiates pristine IP. ([[feedback_no_ai_naming_use_standard_terms]],
+  [[feedback_trust_upstream_defaults]].) Own round, not this clause-2 round.
 
-**constrained_random pre-existing FAIL -- checker limit, NOT a fabric/binding bug.**
-`axi_reorder_compare.sv:225` AW mismatch, fires WITH and WITHOUT the binding, max_unique_ids=1. Root cause:
-the checker attributes AW per-slave in issue order (`aw_queue`, :185) and R via `ar_id_queue` front
-(:285), assuming the slave receives/returns in AR order; but `rand_master UNIQUE_IDS=0` + `MAX_WRITE_TXNS=8`
-drive multiple AXI ids, and AXI legally reorders across ids -> checker mis-attributes -> false mismatch.
-Same root cause the read side already dodges via `MAX_READ_TXNS_IN_FLIGHT=1`. Single-id burst read
-verifies fine (attribution is per-id correct); burst is NOT the issue, multi-id is. Do NOT edit the
-vendored floonoc-test IP. Recorded as a checker known-limitation; a real multi-id transport check would
-need a per-id-attributing checker. Revisit only if multi-id transport coverage is wanted.
+**constrained_random pre-existing FAIL -- ARCHITECTURAL MISUSE of a unit-test checker in tb_top, NOT a
+fabric/binding bug.** `axi_reorder_compare.sv:225` AW mismatch, fires WITH and WITHOUT the binding,
+max_unique_ids=1. Mechanism: the checker attributes AW per-slave in issue order (`aw_queue`, :185) and R
+via `ar_id_queue` front (:285), assuming the slave receives/returns in AR order; but `rand_master
+UNIQUE_IDS=0` + `MAX_WRITE_TXNS=8` drive multiple AXI ids, and AXI legally reorders across ids -> checker
+mis-attributes -> false mismatch. Same reason the read side already dodges via `MAX_READ_TXNS_IN_FLIGHT=1`.
+Single-id burst read verifies fine (per-id attribution correct); burst is NOT the issue, multi-id is.
+
+**ROOT CAUSE (user's insight, verified): `axi_reorder_compare` is FlooNoC's RoB-ISOLATION unit-test
+checker.** FlooNoC only instantiates it in `hw/tb/tb_floo_rob.sv` (+ `_multicast`) -- the tb that tests
+the `floo_rob` module in isolation, a controlled single-stream environment where the per-slave
+issue-order attribution holds. FlooNoC's full mesh tb (`tb_floo_axi_mesh`) does NOT use it. We wired it
+into the full-mesh `tb_top_mesh_*.sv` (one per master), where multi-id concurrency + network reorder
+break its attribution assumption. That is the misuse.
+
+**Fix direction (own round; NOT this clause-2 round; don't edit vendored floonoc-test IP):** tb_top
+transport should use the data-integrity `axi_scoreboard` (already on the directed axis; compares readback
+DATA, id-order-agnostic, so it supports multi-id multi-outstanding -- proven by the falsification run).
+RoB reorder behavior is already covered in isolation by C++ `test_rob.cpp`. So the constrained_random
+axis should drop `axi_reorder_compare` for a scoreboard (revisit the 2026-07-04 checked-benchmark
+two-checker design, [[project_checked_benchmark_spec]]). Until then constrained_random stays red /
+single-id-only; do NOT modify the vendored checker.
 
 ### Measured, but NOT validated -- do not build on these numbers
 
