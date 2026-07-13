@@ -4,6 +4,21 @@ Running action items and open bugs, maintained across iteration rounds. Each rou
 surfaces and strikes what it closes. Read it at session start. An item is not started unless a round
 picks it up.
 
+## DONE 2026-07-13 -- retired the constrained_random co-sim axis (branch `docs/clause2-vc-safe-bypass`)
+
+Removed the whole constrained_random co-sim axis: `axi_rand_master`, the tb-level `axi_reorder_compare`,
+the `RAND_RESP`/`MAPPED=0` slave, the `MAX_READ_TXNS_IN_FLIGHT`/`MAX_WRITE_TXNS_IN_FLIGHT` params, and the
+`PATTERN=constrained_random` run path across the three Makefiles. The directed axis (`axi_file_master` +
+`axi_scoreboard` + `MAPPED=1` slave) is the sole co-sim data-integrity check. Deleted the vendored
+`axi_reorder_compare.sv` (unused), which dissolves its `Rebase`/`RegionBase` hand-edit debt. This closes
+the reorder_compare tb_top-misuse and its DV-IP hand-edit debt recorded below.
+
+Not re-checkered onto a scoreboard this round (the earlier "drop reorder_compare for a scoreboard" plan):
+a random-traffic axis with a sound data-integrity checker needs a `MAPPED` slave, INCR-only bursts,
+single-outstanding writes (same-address hazard), and a non-vacuity mechanism -- its own round. Spec
+`docs/superpowers/specs/2026-07-13-retire-constrained-random-axis-design.md`. Verified: ctest 434/434,
+directed co-sim neighbor PASS scoreboard clean non-vacuous, unknown `PATTERN` fails loud.
+
 ## DONE 2026-07-11 -- DUT depth params single-sourced via specgen (merged main, pushed `6f4ec86`)
 
 All 11 NMU/NSU microarchitecture depths now live in one place: `specgen/source/constants.yaml`,
@@ -183,15 +198,17 @@ OPEN (收尾):
   edits). Bad: two `sim/dv/floonoc-test/` files were hand-edited despite the tree's "imported verbatim,
   do not edit" note, and the edits are silent (in commit msgs, not isolated patches), so the source
   diverges from upstream `pulp-platform/FlooNoC@14c253c`:
-  - `axi_reorder_compare.sv` (commit fa64fd1): added `Rebase`/`RegionBase` params + addr-normalization on
-    the AW/AR compare path. Same file as the tb_top-misuse above — fix together: dropping reorder_compare
-    from tb_top (→ scoreboard) removes the need for this patch.
+  - ~~`axi_reorder_compare.sv` (commit fa64fd1): added `Rebase`/`RegionBase` params~~ **RESOLVED
+    2026-07-13**: the file was deleted (axis retired), so the patch is gone.
   - `axi_bw_monitor.sv` (commit b7b5db3): hand-edited (inspect what changed; perf-monitor adaptation).
-  - Param rename: `MAX_READ_TXNS_IN_FLIGHT`/`_WRITE_` (user_node_endpoint.sv:49-50) over upstream
-    `MAX_READ_TXNS`/`MAX_WRITE_TXNS` (axi_test.sv:692) — only occurrence; drop the suffix.
+  - ~~Param rename: `MAX_READ_TXNS_IN_FLIGHT`/`_WRITE_`~~ **MOOT 2026-07-13**: both params deleted with
+    the axis, so nothing to rename.
   Fix direction: never modify vendored IP in place — either (a) upstream the change, or (b) isolate as a
   documented patch / a thin wrapper that instantiates pristine IP. ([[feedback_no_ai_naming_use_standard_terms]],
   [[feedback_trust_upstream_defaults]].) Own round, not this clause-2 round.
+
+**CLOSED 2026-07-13 -- the axis (and `axi_reorder_compare`) was removed, not re-checkered; see the DONE
+entry at the top. Analysis retained for the record.**
 
 **constrained_random pre-existing FAIL -- ARCHITECTURAL MISUSE of a unit-test checker in tb_top, NOT a
 fabric/binding bug.** `axi_reorder_compare.sv:225` AW mismatch, fires WITH and WITHOUT the binding,

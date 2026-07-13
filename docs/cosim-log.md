@@ -33,8 +33,7 @@ cycle). BW is the absolute bits per cycle.
 |---|---|
 | `PASS: all 16 nodes done, non-vacuous` | every node finished its stimulus and did real work (not a zero-transaction pass). From the tb. |
 | `DIRECTED PASS: ... scoreboard clean, non-vacuous` | directed axis, the master-face `axi_scoreboard` saw no data mismatch. From the `run-directed` recipe. |
-| `CR PASS: ... reorder_compare clean, drained` | constrained-random axis, `axi_reorder_compare` saw no transport mismatch. |
-| `DIRECTED FAIL` / `CR FAIL` | a mismatch, an assertion, or the run never reached the non-vacuous pass. |
+| `DIRECTED FAIL` | a mismatch, an assertion, or the run never reached the non-vacuous pass. |
 
 ## Reading the numbers
 

@@ -14,34 +14,33 @@ manager BFM --> master_dv --> NMU --> routers --> NSU --> slave_dv --> subordina
 ## Verification IP
 
 Imported at commit `5332300`: pulp `axi` 0.39.7, `common_verification` 0.2.5, and
-the FlooNoC test components. We patched `axi_reorder_compare` (Task 9). The rest
-run unmodified.
+the FlooNoC test components. All run unmodified.
 
 | VIP | source | role | connects to |
 |---|---|---|---|
 | `axi_file_master` | pulp axi | directed driver, two-phase (write, barrier, read) | drives `master_dv` |
-| `axi_rand_master` | pulp axi | constrained-random driver (INCR/FIXED/WRAP + exclusive) | drives `master_dv` |
-| `axi_rand_slave` | pulp axi | subordinate model: `MAPPED` memory (directed), `RAND_RESP` (CR) | answers on `slave_dv` |
+| `axi_rand_slave` | pulp axi | subordinate model: `MAPPED` memory as tile memory | answers on `slave_dv` |
 | `axi_scoreboard` | pulp axi | data-integrity checker (per-transaction write vs readback) | monitors `master_dv` |
-| `axi_reorder_compare` | FlooNoC | transport + ID-order checker | monitors `master_dv` and `slave_dv` |
 | `axi_bw_monitor` | FlooNoC | throughput + latency monitor | monitors `master_dv` |
 
-## Two axes
+## Test axis
 
-Set by `+define+TB_DIRECTED` (the run recipe picks it from `PATTERN`).
+The testbench runs one axis: directed. `axi_file_master` replays stimulus files,
+the master-face `axi_scoreboard` checks each readback against the value written,
+and `axi_rand_slave` in `MAPPED` mode is the tile memory.
 
 | axis | driver | checker | subordinate |
 |---|---|---|---|
 | directed | `axi_file_master` (replays stimulus files) | `axi_scoreboard` on the manager face | `axi_rand_slave` MAPPED as tile memory |
-| constrained-random | `axi_rand_master` | `axi_reorder_compare` (tb level, one per manager) | `axi_rand_slave` RAND_RESP |
 
-`axi_reorder_compare` uses permutation pairing: manager `m` targets only node
-`N-1-m`, so the checker attributes every subordinate-face beat to one manager.
+The constrained-random axis (`axi_rand_master` + `axi_reorder_compare`) was
+retired 2026-07-13; a random-traffic axis with a sound data-integrity checker is
+deferred to a future round.
 
 ## Traffic patterns
 
 Directed patterns come from `gen_test_patterns.py` (booksim2 spatial patterns).
-`PATTERN=` selects one; `constrained_random` selects the CR axis.
+`PATTERN=` selects one.
 
 | pattern | destination rule | note |
 |---|---|---|
@@ -49,7 +48,6 @@ Directed patterns come from `gen_test_patterns.py` (booksim2 spatial patterns).
 | `transpose` | `dst = (y, x)` | requires `X == Y`, power of two |
 | `uniform_random` | random destination per transaction | |
 | `hotspot` | many managers target one tile | many-to-one congestion |
-| `constrained_random` | random within each manager's region | not a spatial pattern, the CR axis |
 
 ## Injection rate
 
