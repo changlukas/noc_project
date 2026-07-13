@@ -1,10 +1,8 @@
 # Top-level Makefile — BUILD ONLY. Run all targets from repo root.
 #
-# Convention: the root builds (c_model + Verilator) and runs the test
-# gates; SIMULATION runs from each simulator's own directory:
-#   cd sim/verilator && make run-tb-top   (Windows + Linux)
-#   cd sim/vcs       && make run-tb-top   (Linux workstation)
-# Run logs land in sim/<sim>/output/<scenario>/run.log.
+# Convention: the root builds (c_model + Verilator), runs the test gates, and
+# runs simulations via `make sim TB=... PATTERN=...`.
+# Run logs land in sim/verilator/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
 #   build/cmodel/    CMake (c_model tests + FetchContent deps)
@@ -29,10 +27,6 @@ help:
 	@echo "  make build            c_model + Verilator (correct dep order)"
 	@echo "  make build-cmodel     c_model only -> build/cmodel/"
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
-	@echo ""
-	@echo "Simulate (from each simulator's directory):"
-	@echo "  cd sim/verilator && make run-tb-top                   wire-level smoke (random)"
-	@echo "  cd sim/vcs       && make run-tb-top                   VCS (Linux workstation)"
 	@echo ""
 	@echo "Simulate:"
 	@echo "  make sim TB=tb_<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot)"

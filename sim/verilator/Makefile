@@ -71,9 +71,6 @@ VERILATOR_FLAGS := \
     --Mdir $(OBJ_DIR) \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
-ifeq ($(RUN_CLASS),directed)
-VERILATOR_FLAGS += +define+TB_DIRECTED
-endif
 
 # Optional strict-mode flag injection for release gates.
 # Override with: make VERILATOR_EXTRA_FLAGS="--Wall --Wpedantic"
@@ -165,29 +162,7 @@ $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-ya
 	    PYTHON3="$(PYTHON3)" \
 	    "USER_LDFLAGS=$(STACK_LDFLAGS)"
 
-# Run tb_top with the pulp VIP endpoints, driven by +num_reads/+num_writes
-# and the RNG seed.
-NUM_READS  ?= 8
-NUM_WRITES ?= 8
 SEED       ?= 1
-RUN_TAG    ?= vip_$(TOPOLOGY)_$(RUN_CLASS)_s$(SEED)
-
-.PHONY: run-tb-top
-run-tb-top: $(TBTOP_EXE)
-	@mkdir -p output/$(RUN_TAG)
-	@echo "running $(RUN_TAG) (reads=$(NUM_READS) writes=$(NUM_WRITES) seed=$(SEED))"
-	$(TBTOP_EXE) \
-	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
-	    "+verilator+seed+$(SEED)" \
-	    "+sam_config=$(TB_TOP_TOPO)" \
-	    "+perf_out=output/$(RUN_TAG)/perf.json" \
-	    "+perf_scenario=$(RUN_TAG)" \
-	    > output/$(RUN_TAG)/run.log 2>&1; \
-	rc=$$?; \
-	echo "--- run.log (tail) ---"; \
-	tail -8 output/$(RUN_TAG)/run.log; \
-	$(PYTHON3) perf_cli_summary.py output/$(RUN_TAG)/perf.json || true; \
-	exit $$rc
 
 # One directed run recipe, two injection modes.
 #   INJECTION_MODE=0 (default): two phases, writes drain before reads, scoreboard gates.

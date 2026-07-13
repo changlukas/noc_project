@@ -71,14 +71,6 @@ else
 FSDB_COMPILE_FLAGS :=
 FSDB_SUFFIX :=
 endif
-# Deferred (=) on purpose: RUN_TAG is defined later in this file.
-# Use sites attach via $(if $(V), $(V),) — a bare " $(V)" would leave a
-# double space when empty and break FSDB=0 command-line byte-identity.
-ifeq ($(FSDB),1)
-FSDB_PLUSARG_TB_TOP  = "+fsdb=$(CURDIR)/output/$(RUN_TAG)/tb_top.fsdb"
-else
-FSDB_PLUSARG_TB_TOP  =
-endif
 # -----------------------------------------------------------------------------
 
 # yaml-cpp comes from the c_model CMake build; surface a clear hint instead
@@ -140,15 +132,8 @@ ifeq ($(FSDB),1)
 # guarded: += of an empty var would add a trailing space and break FSDB=0 byte-identity
 VCS_COMMON_FLAGS += $(FSDB_COMPILE_FLAGS)
 endif
-VCS_COMMON_FLAGS += +define+TB_DIRECTED
 
 # --- tb_top cosim (self-clocked) ---
-# pulp VIP endpoints driven by +num_reads/+num_writes and the RNG seed
-# (+ntb_random_seed under VCS).
-NUM_READS  ?= 8
-NUM_WRITES ?= 8
-SEED       ?= 1
-RUN_TAG    ?= vip_$(TOPOLOGY)_$(RUN_CLASS)_s$(SEED)
 PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
 # Per-topology, per-run-class simv + csrc dir (mirrors the Verilator
@@ -164,22 +149,8 @@ $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(DPI_HDR_DEPS) | ch
 	    -f $(FILELIST_F) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)
 
-.PHONY: tb_top run-tb-top
+.PHONY: tb_top
 tb_top: $(SIMV_TB_TOP)
-
-run-tb-top: $(SIMV_TB_TOP)
-	@mkdir -p output/$(RUN_TAG)
-	@rm -f output/$(RUN_TAG)/tb_top.fsdb  # drop stale fsdb from a previous FSDB=1 run
-	@echo "running $(RUN_TAG) (reads=$(NUM_READS) writes=$(NUM_WRITES) seed=$(SEED))"
-	@set -o pipefail; \
-	$(SIMV_TB_TOP) \
-	    "+num_reads=$(NUM_READS)" "+num_writes=$(NUM_WRITES)" \
-	    "+ntb_random_seed=$(SEED)" \
-	    "+sam_config=$(TB_TOP_TOPO)" \
-	    "+perf_out=output/$(RUN_TAG)/perf.json" \
-	    "+perf_scenario=$(RUN_TAG)"$(if $(FSDB_PLUSARG_TB_TOP), $(FSDB_PLUSARG_TB_TOP),) \
-	    2>&1 | tee output/$(RUN_TAG)/run.log
-	@$(PYTHON3) $(COSIM_ROOT)/verilator/perf_cli_summary.py output/$(RUN_TAG)/perf.json || true
 
 .PHONY: clean
 clean:
