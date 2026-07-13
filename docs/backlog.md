@@ -186,11 +186,11 @@ Stage 3 -- necessity PROVEN (theory + empirics closed loop):
   bug fix, not future-proofing. Testbench edit reverted, tree clean.
 
 OPEN (收尾):
-- **Land the read-outstanding coverage raise on the DIRECTED axis** (single-id + axi_scoreboard = safe;
-  HEAD-verified PASS). Without it regression can't catch a VC-binding regression (co-sim read-single-
-  outstanding hides it). Per-flavor: directed raises, constrained_random MUST stay single-outstanding
-  (checker limit below). Expose as a tb-layer named DV param ([[feedback_dv_params_named_in_tb]]), not
-  hardcoded=1.
+- **Binding regression coverage on the DIRECTED axis.** The directed axis is already multi-outstanding
+  (`axi_file_master` fires all ARs); a RoB-Enabled same-dest deep run (`tb_mesh_4x4_vc8_rob`, hotspot
+  INJECTION_COUNT=200 BURST_LEN=63) exercises the same-dest bypass and the scoreboard catches a binding
+  regression -- verified PASS on HEAD 2026-07-13. Open piece: no STANDING co-sim regression harness runs
+  it automatically. (The constrained_random axis this bullet used to except was retired 2026-07-13.)
 - **`r_rob_depth` cut** -- hwm->0 under same-dest funds a cut; needs a user parameter decision (parameter
   discipline). Then commit Stage 3 + close this item.
 - **DV-IP no-edit / naming debt (audit DONE 2026-07-13, `cross-review/dvip-audit.md`).** Good news:

@@ -8,7 +8,7 @@ drives traffic into `master_dv`. A subordinate BFM answers on `slave_dv`.
 
 ```
 manager BFM --> master_dv --> NMU --> routers --> NSU --> slave_dv --> subordinate BFM
-                (checkers tap here)                       (compare taps here too)
+                (scoreboard taps here)
 ```
 
 ## Verification IP
