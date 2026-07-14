@@ -217,8 +217,8 @@ void pack_vc_credit(const CreditVec& v, uint8_t num_vc, svBitVecVal* word) {
 }  // namespace
 
 // Router DPI handlers — per-node.
-// One RouterWrap owns ONE node's REQ+RSP routers at coordinate (x,0).
-// Pins split into NMU/NSU-facing (NI edge) + per-network LINK (pulse credit).
+// One RouterWrap owns ONE node's REQ+RSP routers at (x_coord, y_coord) in an
+// NxM mesh. Pins split into NMU/NSU-facing (NI edge) + per-network LINK (pulse credit).
 
 using ni::cmodel::wrap::RouterInputs;
 using ni::cmodel::wrap::RouterOutputs;

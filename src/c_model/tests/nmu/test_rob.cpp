@@ -133,10 +133,10 @@ void retire_read_primer(Rob& rob, ChannelModel& noc, Depacketize& depkt, uint8_t
     ASSERT_TRUE(rob.pop_r().has_value());
 }
 
-// Test rig: Rob wraps Packetize + Depacketize over ChannelModel.
+// Testbench: Rob wraps Packetize + Depacketize over ChannelModel.
 // PerChannelCapture is used for w/ar outputs; aw_out is ChannelModel.req_out()
 // so the rsp side (noc.rsp_out) still works for injecting B/R flits.
-struct RobRig {
+struct RobTestbench {
     ChannelModel noc{16, 16};
     ReqCapture w_cap, ar_cap;
     // Rob always calls sam_.translate itself (its own SamTable member) and
@@ -156,7 +156,7 @@ struct RobRig {
 
 TEST(NmuRob, Disabled_StallReleaseOnRlast) {
     SCENARIO("Rob Disabled: AR stall on second same-id released when matching R(rlast=1) arrives");
-    RobRig r;
+    RobTestbench r;
     ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
     EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x200)));
     // Inject R(last=true)
@@ -170,7 +170,7 @@ TEST(NmuRob, Disabled_StallReleaseOnRlast) {
 
 TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
     SCENARIO("Rob Disabled: W-burst credit starts at 0; push_w before any push_aw returns false");
-    RobRig r;
+    RobTestbench r;
     // No push_aw yet -> credit=0 -> push_w must return false
     EXPECT_FALSE(r.rob.push_w(make_w(/*last=*/true)));
 }
@@ -198,7 +198,7 @@ TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
 TEST(NmuRob, Disabled_WCreditMultiOutstandingCorrectDecrement) {
     SCENARIO(
         "Rob Disabled: W credit increments per AW, decrements per wlast=1; 3rd wlast fails at 0");
-    RobRig r;
+    RobTestbench r;
     // Two AWs for different ids: each adds 1 to the global W credit.
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x06, 0x200)));

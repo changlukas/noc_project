@@ -864,7 +864,7 @@ TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
             << "vc=" << vc << " did not deliver all packets (num_vc=" << num_vc << ")";
 }
 
-INSTANTIATE_TEST_SUITE_P(Spec12_6, RouterGrid,
+INSTANTIATE_TEST_SUITE_P(NumVcDepthGrid, RouterGrid,
                          ::testing::Combine(::testing::Values(1, 2, 4, 8),
                                             ::testing::Values(1, 2, 4, 8)));
 

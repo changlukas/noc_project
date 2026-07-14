@@ -338,7 +338,7 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcArbParam,
 // ---------------------------------------------------------------------------
 // Plain TEST() — not parameterized:
 //   Degenerate_NumVc1_AllModesPassthrough  : specifically tests NUM_VC=1 behavior
-//   EnabledModeMixedWith_PriorRoundTests   : decorator transparency at NUM_VC=1
+//   EnabledModeMixedWith_SingleVcTests     : decorator transparency at NUM_VC=1
 //   WHeaderLastMatchesWlast                : decorator at NUM_VC=1
 //   2 death tests                          : EXPECT_DEATH doesn't compose with TEST_P
 // ---------------------------------------------------------------------------
@@ -365,7 +365,7 @@ TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
     }
 }
 
-TEST(NmuVcArbiter, EnabledModeMixedWith_PriorRoundTests) {
+TEST(NmuVcArbiter, EnabledModeMixedWith_SingleVcTests) {
     SCENARIO(
         "NMU VcArbiter decorator is transparent to nmu::Packetize: wire "
         "Packetize -> WormholeArbiter -> VcArbiter -> ChannelModel with "
