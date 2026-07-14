@@ -29,10 +29,10 @@ deletion scope and packaging ride-alongs. Output: manager-reviewable internal re
 | header | one-paragraph positioning: AXI4 NoC network-interface behavioural c_model + Verilator co-sim; IHI 0022 conformity intent |
 | Status | readiness statement (internal release); no perishable numbers — point at `make test` |
 | Architecture | ASCII datapath + where-code-lives table matching the real tree (`src/c_model`, `src/sv`, `src/dpi`, `sim/`, `specgen/`, `docs/`) |
-| Prerequisites | verified toolchain (CMake floor, Verilator 5.048 WSL / 5.036 legacy-Win note, GCC, python3+PyYAML) + platform matrix: Linux/WSL = full flow; Windows = ctest only (known gtest `\|`-regex death-test limitation); VCS = build-only, never run on real install |
+| Prerequisites | verified toolchain (CMake >= 3.20 — the resolved floor per src/c_model/CMakeLists.txt; Verilator 5.048 WSL / 5.036 legacy-Win note, GCC, python3+PyYAML) + platform matrix: Linux/WSL = full flow (dry-run verified); Windows = ctest only, VCS = build-only — both marked as DECLARED limitations, not dry-run-verified |
 | Build | `make build`; offline via `DEPS_SRC` + `FETCHCONTENT_FULLY_DISCONNECTED`; `local.mk` overrides |
 | Test | `make test` (ctest), `make specgen_pytest`, `codegen.py --check` drift gate |
-| Simulate | `make sim TB=<topo> PATTERN=<pattern> [SEED=]`; available topologies + patterns; output location `sim/<simulator>/output/<run-tag>/run.log`; how to read DIRECTED PASS / monitor lines / HWM lines |
+| Simulate | `make sim TB=<topo> PATTERN=<pattern> [SEED=]` — canonical TB form is the bare topology name (`mesh_4x4_vc1`; the Makefile also strips a `tb_` prefix, README uses ONE form only); available topologies + patterns (list from sim/topologies/ + gen_test_patterns.py, verified); output location `sim/<simulator>/output/<run-tag>/run.log`; how to read DIRECTED PASS / monitor lines / HWM lines |
 | Regenerate | specgen codegen commands per domain; tb_top/fabric auto-regen at build |
 | Documentation | links to the three docs/ files + specgen guide |
 | Contributing | current rules (make test clean, clang-format, commit format, no --no-verify) |
@@ -55,9 +55,11 @@ unwired in traffic mode) · references (floo_* file map, IHI clauses, booksim).
 
 ### docs/trade-off.md (new)
 
-T-01..T-30 from the skeleton with Rationale filled. Updates: T-04 wording per D1 (master/slave);
-T-12/T-13 vocabulary per Round-2 renames (fixed VC id, same-destination bypass); T-18 marked
-CLOSED (Round-2 D6a collapsed the NSU scalar branch); T-22/T-19 cross-ref known-limitations.
+T-01..T-30 from the skeleton with Rationale filled. Updates (this spec OVERRIDES the stale
+skeleton text where they disagree): T-04 wording per D1 (master/slave); T-12/T-13 vocabulary per
+Round-2 renames (fixed VC id, same-destination bypass); T-18 marked CLOSED (Round-2 D6a collapsed
+the NSU scalar branch — skeleton still says "pending D6a", it is not); T-22/T-19 cross-ref
+known-limitations.
 
 ### docs/verification-environment.md (rewrite)
 
@@ -74,8 +76,13 @@ sim/dv/README.md details) · traffic pattern semantics · checkers + non-vacuous
   make-target NAMES, never file line numbers (they rot).
 - Dedicated doc-vs-tree reviewer per document: re-verify each claim independently.
 - **Doc-driven dry run**: a fresh subagent, allowed to read ONLY README.md, executes the
-  documented path end-to-end on a clean native copy (build → test → sim to DIRECTED PASS).
-  Any step that fails or needs undocumented knowledge = doc bug; fix the doc, not the code.
+  documented path end-to-end on a clean WSL-native copy (the `~/noc_project` rsync flow — Linux
+  is the documented full-flow platform; Windows/VCS rows are declared limitations, not dry-run
+  targets). Coverage: build → test → sim to DIRECTED PASS on the README's primary example, PLUS
+  the README's second listed TB/PATTERN example (catches single-combo staleness). Any step that
+  fails or needs undocumented knowledge = doc bug; fix the doc, not the code.
+- Writers and reviewers work from an explicit CHECKLIST (salvage-inventory rows + ledger
+  ride-alongs + backlog Round-3 queue) so omissions are caught, not just wrong claims.
 - Final Codex + fresh-Claude cross-review of the whole doc set.
 
 ## Deletion scope (executed after the fresh docs land)
@@ -89,7 +96,20 @@ first). Keep: `docs/image/` (spec ground truth), `docs/backlog.md` (switched to 
 ## Ride-alongs
 
 - Delete `src/c_model/include/axi/ATTRIBUTION.md` (content not migrated; provenance paragraph
-  lives in verification-environment.md per D5 revision).
+  lives in verification-environment.md per D5 revision) — AND update every source comment that
+  references it (`grep -rn "ATTRIBUTION" src/`: axi headers + tests say "see axi/ATTRIBUTION.md")
+  to point at docs/verification-environment.md instead. No dangling references.
+- **Comment-ref sweep** (backlog Round-3 queue): before deleting docs/, sweep code comments for
+  references to soon-deleted paths — `docs/superpowers/...`, `microarch §`, deleted top-level doc
+  names. Known survivors: References blocks in nmu/vc_arbiter.hpp, nsu/vc_arbiter.hpp,
+  router.hpp, wormhole_arbiter.hpp, nmu.hpp, nsu.hpp, nmu_wrap.hpp,
+  tests/common/{scenario,test_logger}.hpp, plus nsu/vc_arbiter.hpp:22's doc-filename mention.
+  Delete the reference or repoint at docs/spec.md sections. `grep -rn "docs/" src/ sim/ specgen/`
+  must resolve to live paths afterwards.
+- **gen_inventory.py content paths** (backlog Round-3 queue): fix the `c_model/include/...`
+  strings the generator writes (real tree is `src/c_model/include/...`), regenerate
+  src/c_model/FEATURE_INVENTORY.md in the same commit (pytest drift gate).
+- Makefile:82-area stale comment "cmake >= 3.14" → 3.20 (align with src/c_model/CMakeLists.txt).
 - Delete the LICENSE third-party section (dead path; L4-002 revised).
 - `sim/dv/README.md`: add modified-flag to the provenance table row for `axi_bw_monitor.sv` (D8).
 - CLAUDE.md: fix stale claims (L3-001 list: router-class claim, xy_route, MasterWrap/SlaveWrap
@@ -105,8 +125,10 @@ first). Keep: `docs/image/` (spec ground truth), `docs/backlog.md` (switched to 
 ## Style charter
 
 Current README shape. English. Tables over prose. No semicolons/em-dash mannerisms, no filler.
-Only what exists. No line-number citations. No external vendor/IP names outside the DV-IP
-provenance section (legal exception per D5).
+Only what exists. No line-number citations. External vendor/IP names: in the FRESH DOCS they
+appear only in the verification-environment.md provenance section (D5 exception); in-code
+informal "Ported from floo_*.sv" comments stay untouched per D5(b) — the charter governs the
+docs being written, not source comments.
 
 ## Gates
 
