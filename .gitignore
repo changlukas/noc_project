@@ -61,8 +61,7 @@ src/sv/noc_fabric_*.sv
 # Codegraph MCP database
 /.codegraph/
 
-# User-local workspace (kept local-only by default; see
-# docs/_archive/superpowers/specs/2026-06-07-doc-cleanup-and-rewrite-design.md sec 4)
+# User-local workspace (kept local-only by default)
 /dpi_ref/
 /issue/
 
@@ -73,18 +72,10 @@ __pycache__/
 
 # Cross-AI review artifacts (transient; not normative)
 /cross-review/
-docs/slides/
 
-# Local-only doc references (vendor PDF + markitdown conversion + superseded draft)
-/docs/pg037_axi_perf_mon.pdf
-/docs/pg037_axi_perf_mon.md
+# Local-only doc references (not version-controlled)
 /docs/probe_section_layout_draft.md
 /docs/backlog.md
-
-# Slide decks (company-master binaries: source template + generated output;
-# rebuild the generated one with docs/build_perf_probe_slides.py)
-/docs/*.pptx
-docs/issue/
 
 # SDD scratch (ledger, briefs, reports, codex reviews) — not version-controlled
 /.superpowers/

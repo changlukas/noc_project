@@ -22,6 +22,5 @@ A toolchain that generates C++ headers and SystemVerilog packages from machine-r
 
 ## Links
 
-- Design rationale: [`docs/_archive/specgen/2026-05-26-spec-as-code-unified-design.md`](../../../docs/_archive/specgen/2026-05-26-spec-as-code-unified-design.md) (archived)
 - Codegen entry point: `tools/codegen.py`
 - Public Python API: `ni_spec/constants.py`
