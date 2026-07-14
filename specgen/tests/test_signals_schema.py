@@ -36,15 +36,15 @@ def test_pins_bundle_struct_emitted_per_interface():
     """Each ni_signals interface should produce a ni::pins::<Name>Pins struct.
 
     Interface names in ni_signals.json are UPPERCASE_SNAKE
-    (e.g. AXI_SLAVE_PORT, NOC_INTF_MOSI). PascalCase + 'Pins' suffix.
+    (e.g. AXI_SLAVE_PORT, NOC_INTF_UPSTREAM). PascalCase + 'Pins' suffix.
     """
     header = SPECGEN_ROOT / "generated" / "cpp" / "ni_signals.h"
     text = header.read_text(encoding="ascii")
     expected_bundles = (
         "AxiSlavePortPins",
         "AxiMasterPortPins",
-        "NocIntfMosiPins",
-        "NocIntfMisoPins",
+        "NocIntfUpstreamPins",
+        "NocIntfDownstreamPins",
         "CsrPins",
     )
     for bundle in expected_bundles:

@@ -251,7 +251,7 @@ def test_load_interfaces_returns_two_named_interfaces():
     c = load_constants(SOURCE_DIR / "constants.yaml")
     data = load_interfaces(SOURCE_DIR / "interface_handshake.json", c)
     assert set(data["interfaces"].keys()) == {"axi4_intf", "noc_intf"}
-    assert data["interfaces"]["noc_intf"]["modports"] == ["mosi", "miso"]
+    assert data["interfaces"]["noc_intf"]["modports"] == ["upstream", "downstream"]
 
 
 def test_noc_intf_protocol_semantics_complete():

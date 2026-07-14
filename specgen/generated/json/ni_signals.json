@@ -447,7 +447,7 @@
       ]
     },
     {
-      "name": "NOC_INTF_MOSI",
+      "name": "NOC_INTF_UPSTREAM",
       "block": "NMU",
       "direction": "out request, in response",
       "protocol": "NoC",
@@ -960,7 +960,7 @@
       ]
     },
     {
-      "name": "NOC_INTF_MISO",
+      "name": "NOC_INTF_DOWNSTREAM",
       "block": "NSU",
       "direction": "in request, out response",
       "protocol": "NoC",
