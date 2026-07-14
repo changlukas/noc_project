@@ -9,17 +9,22 @@ Round 1 (audit) DONE 2026-07-14: user-approved ledger + gate decisions D1-D8 in
 `docs/superpowers/audit/2026-07-14-ledger.md`; trade-off skeleton + salvage inventory alongside.
 Spec: `docs/superpowers/specs/2026-07-14-commercialization-textbook-alignment-design.md`.
 
-- **Round 2 (code)**: prose master/slave unification (D1), RZ1 tag removal + `pinned` rename to
-  deterministic-VC-allocation wording (D2/D3), `landing_`→input register + `mosi/miso`→
-  upstream/downstream (D4), FlooNoC ATTRIBUTION + per-file tags (D5), NSU `use_pools_` branch
-  deletion + noc_types_pkg banner regen (D6), sim/dv README modified-flag (D8), LICENSE dead-path
-  fix (L4-002), root third-party notice fold-in (L4-003). Gates: ctest / regen diff / WSL make sim
-  directed per surface.
+2026-07-14 post-gate brainstorm amendments (in spec §Amendments): `pinned`→**fixed VC id**;
+attribution minimalized (D5 revised: no formal files/tags, L4-003/005 cancelled); doc set 3→4
+(verification-environment.md); attribution/LICENSE/sim-dv-README actions moved to Round 3.
+
+- **Round 2 (code, pure renames)**: prose master/slave unification (D1), RZ1 tag removal +
+  `pinned`→fixed-VC-id wording (D2/D3), `landing_`→input register + `mosi/miso`→
+  upstream/downstream (D4), NSU `use_pools_` branch deletion + noc_types_pkg banner regen (D6).
+  Gates: ctest / regen diff / WSL make sim directed per surface; full-diff Codex review at end.
 - **Round 3 (docs)**: delete old doc set (docs/superpowers, docs/internal, top-level dying docs,
-  issue/, slides/); write fresh README + docs/spec.md + docs/trade-off.md from the salvage
-  inventory (as-built only — probe AXI/Trace and pulp-vip CR machinery are UNBUILT/retired);
-  fix CLAUDE.md stale claims; gitignore backlog.md; release checklist (known limitations,
-  verification summary, platform matrix, quickstart).
+  issue/, slides/); write fresh README + docs/spec.md + docs/trade-off.md +
+  docs/verification-environment.md (test env: co-sim architecture, testbench, scoreboard,
+  patterns, DV IP provenance) from the salvage inventory (as-built only — probe AXI/Trace and
+  pulp-vip CR machinery are UNBUILT/retired); delete src/c_model/include/axi/ATTRIBUTION.md +
+  LICENSE third-party section (D5 revised); sim/dv README modified-flag (D8); fix CLAUDE.md stale
+  claims; gitignore backlog.md; release checklist (known limitations, verification summary,
+  platform matrix, quickstart).
 
 ## Open -- defensive / correctness (small)
 

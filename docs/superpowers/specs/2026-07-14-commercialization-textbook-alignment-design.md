@@ -34,6 +34,7 @@ Final doc set:
 | `README.md` | rewritten, every claim aligned with the current tree |
 | `docs/spec.md` | full design spec, written fresh (sources: salvage inventory, code, specgen json) |
 | `docs/trade-off.md` | textbook design vs ours, with rationale |
+| `docs/verification-environment.md` | test environment: co-sim architecture, testbench, scoreboard, traffic patterns, DV IP provenance (cocotbext-axi ports, sim/dv pulp packages) |
 | `docs/backlog.md` | kept as working doc, switched to git-ignored (local only) |
 
 Deletion scope (executed in Round 3): `docs/superpowers/`, `docs/internal/`, and top-level docs
@@ -112,7 +113,10 @@ Output: green tree, identifiers final.
 ### Round 3 -- fresh doc set + packaging + release
 
 Write `docs/spec.md` from scratch (salvage inventory + code + specgen json as sources), write out
-`docs/trade-off.md`, rewrite `README.md`, execute the deletion scope, gitignore `docs/backlog.md`.
+`docs/trade-off.md` and `docs/verification-environment.md`, rewrite `README.md`, execute the
+deletion scope, gitignore `docs/backlog.md`. Attribution simplification (amendment below) executes
+here: delete `src/c_model/include/axi/ATTRIBUTION.md`, delete the LICENSE third-party section,
+add the sim/dv README modified-flag (D8).
 Minimum release content: readiness statement, known limitations, verification summary, quickstart.
 Further checklist items enter only if the lane-4 packaging audit shows real IP repos carry them.
 Final cross-review (Claude + Codex). Output: manager-reviewable version.
@@ -121,6 +125,19 @@ Rounds 2/3 merge into one if the approved rename count is small; decided after R
 
 Ordering constraint: code before docs -- docs cite code identifiers, so renames must be final
 before the doc rewrite.
+
+## Amendments (2026-07-14, post-gate brainstorm)
+
+- `pinned` replacement picked: **fixed VC id** (`bool fixed_vc`, verb "fixes ... to one VC",
+  test names `*FixedVc*`). Consistent with the design's existing fixed-VC vocabulary (L2-003:
+  vc_id stamped at injection, no per-hop VA stage).
+- Attribution minimalized (supersedes D5): no formal attribution files, no per-file license tags.
+  `src/c_model/include/axi/ATTRIBUTION.md` deleted, content not migrated. LICENSE third-party
+  section deleted. DV IP provenance = one short paragraph in `docs/verification-environment.md`.
+  Informal "Ported from floo_*.sv" source comments stay (traceability). L4-003/L4-005 cancelled.
+- Final doc set is 4 docs (verification-environment.md added).
+- Round split: all attribution/LICENSE/sim-dv-README doc actions move to Round 3; Round 2 is
+  pure code renames (D1, D2/D3, D4, D6).
 
 ## Out of scope
 
