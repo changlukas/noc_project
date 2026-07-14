@@ -149,7 +149,7 @@ struct RobRig {
 }  // namespace
 
 // === ROB-specific core behavior (2 tests) ===
-// The B single-outstanding-stall tests were removed 2026-07-14: the B RoB is now
+// The B single-outstanding-stall tests were removed: the B RoB is now
 // unconditional, so a second same-id same-dest AW rides the same-destination bypass
 // rather than stalling. B RoB behavior is covered by the RobSameDestBypass / Enabled
 // tests below.
@@ -233,10 +233,10 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
 }
 
 // NmuRobDeath/Disabled_AbortPaths was a runtime wrong_side_() test.
-// After T4 Rob inherits only RequestPacketizer + ResponseDepacketizer;
+// Rob inherits only RequestPacketizer + ResponseDepacketizer;
 // the wrong-direction methods don't exist — compile-time protection. Removed.
 
-// === ROB Enabled mode: push-side tests (Task 2) ===
+// === ROB Enabled mode: push-side tests ===
 
 TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
     SCENARIO("Rob Enabled: push_aw allocates ROB slot, stamps rob_req=1 + rob_idx on AW header");
@@ -413,9 +413,9 @@ TEST(NmuRob, Enabled_LzcAllocator_IsAStack) {
         depkt.tick();
     };
 
-    // Drain A completely. pop_r() pulls ONE depacketized flit per call and, before
-    // Task 3, only commits once every beat of the burst is ready -- so four beats
-    // take more than four calls. Poll. The loop is also correct after Task 3.
+    // Drain A completely. pop_r() pulls ONE depacketized flit per call and only
+    // commits once every beat of the burst is ready -- so four beats take more
+    // than four calls. Poll.
     push_r(0, false, 0x05);
     push_r(0, false, 0x05);
     push_r(0, false, 0x05);
@@ -610,15 +610,16 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable) {
     Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 3);
 
     // The idle-ID bypass exempts the 1st (idle id). The 2nd changes dest, so the
-    // same-destination bypass does not apply -- it robs and sets the sticky fallback flag.
-    // The 3rd reverts to the 1st's dest but stays robbed (sticky), so the cap admits a
-    // bypass plus two robbed. The cap counts list entries, not slots.
+    // same-destination bypass does not apply -- it allocates a RoB slot and sets
+    // the sticky fallback flag. The 3rd reverts to the 1st's dest but stays
+    // allocated (sticky), so the cap admits a bypass plus two allocated. The cap
+    // counts list entries, not slots.
     const std::size_t free_before = rob.write_free_space();
     ASSERT_TRUE(rob.push_aw(make_aw(0x09, 0x100)));                   // dst 0: bypass
-    ASSERT_TRUE(rob.push_aw(make_aw(0x09, 0x100000000ull + 0x140)));  // dst 1: robs, sticky
-    ASSERT_TRUE(rob.push_aw(make_aw(0x09, 0x180)));                   // dst 0: robs (sticky)
+    ASSERT_TRUE(rob.push_aw(make_aw(0x09, 0x100000000ull + 0x140)));  // dst 1: allocates, sticky
+    ASSERT_TRUE(rob.push_aw(make_aw(0x09, 0x180)));                   // dst 0: allocates (sticky)
     EXPECT_FALSE(rob.push_aw(make_aw(0x09, 0x400))) << "per-id cap bites before the pool does";
-    EXPECT_EQ(rob.write_free_space(), free_before - 2) << "one bypass plus two robbed slots";
+    EXPECT_EQ(rob.write_free_space(), free_before - 2) << "one bypass plus two allocated slots";
     EXPECT_TRUE(rob.push_aw(make_aw(0x0A, 0x500))) << "the gate is per-id, not global";
 }
 
@@ -667,7 +668,7 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
     EXPECT_TRUE(rob.push_aw(make_aw(0x06, 0x200)));   // retry succeeds with slot still available
 }
 
-// === ROB Enabled mode: pop-side tests (Task 3) ===
+// === ROB Enabled mode: pop-side tests ===
 
 TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
     SCENARIO("Rob Enabled: B for rob_idx=0 (per-id head) commits immediately on pop_b");
@@ -991,7 +992,7 @@ TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
     EXPECT_EQ(got[1], 0xA1);  // base+1
 }
 
-// === Task 2: Defensive boundary tests (lock the computed-slot guard) ===
+// === Defensive boundary tests (lock the computed-slot guard) ===
 
 TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
     SCENARIO(
@@ -1151,7 +1152,7 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
     EXPECT_EQ(got[3], 0xB1);
 }
 
-// === Task 7: idle-ID bypass ===
+// === Idle-ID bypass ===
 
 TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
     SCENARIO("Rob Enabled: a rob_req=0 B whose id's list head owns a slot is malformed, aborts");
@@ -1207,8 +1208,8 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_SecondSameIdRefusedNotWedged) {
     axi::ArBeat first = make_ar(0x05, 0x100);  // dst 0
     first.len = 255;
     ASSERT_TRUE(rob.push_ar(first));
-    // Different dest than `first`: the same-destination bypass does not apply, so this robs (needs
-    // 256 slots) and is refused by the pool, not bypassed.
+    // Different dest than `first`: the same-destination bypass does not apply, so this
+    // allocates a slot (needs 256 slots) and is refused by the pool, not bypassed.
     axi::ArBeat second = make_ar(0x05, 0x100000000ull + 0x200);  // dst 1
     second.len = 255;
     EXPECT_FALSE(rob.push_ar(second)) << "list non-empty -> rob_req=1 -> 256 slots -> refuse";
@@ -1232,7 +1233,8 @@ TEST(NmuRob, Enabled_IdleIdBypass_FirstTxnPerIdAllocatesNoSlot) {
     EXPECT_EQ(f0.get_header_field("rob_req"), 0u);
     EXPECT_EQ(rob.write_free_space(), free_before);
 
-    // Different dest than the first: the same-destination bypass does not apply, so this robs.
+    // Different dest than the first: the same-destination bypass does not apply, so this
+    // allocates a slot.
     ASSERT_TRUE(rob.push_aw(make_aw(0x11, 0x100000000ull + 0x200)));  // dst 1
     auto f1 = *noc.req_in().pop_flit();
     EXPECT_EQ(f1.get_header_field("rob_req"), 1u);
@@ -1283,7 +1285,7 @@ TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
 
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // dst 0, bypassed, rob_req=0
     // Different dest than the first: the same-destination bypass does not apply, so this
-    // robs, slot 0.
+    // allocates a slot, slot 0.
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100000000ull + 0x200)));  // dst 1
 
     auto push_b = [&](unsigned rob_req, unsigned rob_idx, unsigned bresp) {
@@ -1347,7 +1349,7 @@ TEST(NmuRob, Enabled_MaxTxnsPerId1_MatchesDisabled) {
     EXPECT_EQ(rob_e.read_free_space(), rob_e.r_rob_depth()) << "Enabled took no slot either";
 }
 
-// === Task 1.1: same-destination bypass (same-dest, sticky prev_dest) ===
+// === Same-destination bypass (same-dest, sticky prev_dest) ===
 
 TEST(RobSameDestBypass, SameDestStreakBypassesAll) {
     SCENARIO(
@@ -1373,7 +1375,8 @@ TEST(RobSameDestBypass, SameDestStreakBypassesAll) {
 
 TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
     SCENARIO(
-        "Rob Enabled: a dest change mid-streak robs and stays sticky-robbed even after the dest "
+        "Rob Enabled: a dest change mid-streak allocates a RoB slot and stays sticky-allocated "
+        "even after the dest "
         "reverts, until the id's list fully drains, at which point the idle-ID bypass re-opens");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
@@ -1390,11 +1393,11 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));  // same-destination bypass: same dest
     EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 0u);
 
-    ASSERT_TRUE(rob.push_ar(make_ar(id, dst_b)));  // dest change: robs, sticky set
+    ASSERT_TRUE(rob.push_ar(make_ar(id, dst_b)));  // dest change: allocates a slot, sticky set
     auto f_dst_b = *ar_cap.pop();
     EXPECT_EQ(f_dst_b.get_header_field("rob_req"), 1u);
 
-    ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));  // dest reverts to A: still robs (sticky)
+    ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));  // dest reverts to A: still allocates (sticky)
     auto f_dst_a2 = *ar_cap.pop();
     EXPECT_EQ(f_dst_a2.get_header_field("rob_req"), 1u)
         << "sticky flag outlives the dest reverting to a prior value";

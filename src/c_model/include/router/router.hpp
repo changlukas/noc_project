@@ -1,6 +1,5 @@
 #pragma once
 // Wormhole VC router for the c_model NoC fabric.
-// Spec: docs/superpowers/specs/2026-06-12-router-microarch-design.md
 //
 // Fixed-vc 3-stage pipeline: stage 1 per-(input port, vc) FIFO (+RC at the
 // FIFO head), stage 2 per-output wormhole arbitration (one wormhole packet per
@@ -42,7 +41,7 @@ struct RouterConfig {
     std::size_t output_fifo_depth = NOC_ROUTER_OUTPUT_FIFO_DEPTH;
 };
 
-// Forward half of the router link contract (spec §6). push_flit is always
+// Forward half of the router link contract. push_flit is always
 // accepted — the sender's credit counter guarantees receiver buffer space.
 class RouterLink {
   public:
@@ -57,7 +56,7 @@ class RouterCreditSink {
     virtual void receive_credit(uint8_t vc_id) = 0;
 };
 
-// XY dimension-order route (spec §4): X first, then Y, equal ejects LOCAL.
+// XY dimension-order route: X first, then Y, equal ejects LOCAL.
 // dst_id layout matches nmu::addr_trans (X in low bits).
 inline RouterPort route_compute(uint8_t dst_id, const RouterConfig& cfg) {
     const uint8_t dst_x = dst_id & static_cast<uint8_t>((1u << ni::width::X_WIDTH) - 1);
@@ -116,7 +115,7 @@ class Router {
         ++credit_[port][vc_id];
     }
 
-    void tick();  // Task 5
+    void tick();
 
     // Test introspection
     std::size_t credit(std::size_t out_port, uint8_t vc) const { return credit_[out_port][vc]; }
@@ -125,7 +124,7 @@ class Router {
     }
     std::size_t output_fifo_size(std::size_t port) const { return output_fifo_[port].size(); }
     uint8_t num_vc() const { return cfg_.num_vc; }
-    // Configured per-VC input FIFO capacity (spec sec 9 occupancy capacity).
+    // Configured per-VC input FIFO capacity.
     std::size_t vc_depth() const { return cfg_.vc_depth; }
     // Configured per-output FIFO capacity.
     std::size_t output_fifo_depth() const { return cfg_.output_fifo_depth; }
@@ -155,7 +154,7 @@ class Router {
         void push_flit(const Flit& f) override { parent->accept_flit(port, f); }
     };
 
-    void accept_flit(std::size_t port, const Flit& f);  // Task 5
+    void accept_flit(std::size_t port, const Flit& f);
 
     struct WormholeState {
         std::optional<std::size_t> locked_input;
@@ -256,7 +255,7 @@ inline void Router::tick() {
         }
         if (!candidate.has_value()) continue;
 
-        // Grant (spec sec 5): single atomic event.
+        // Grant: single atomic event.
         auto& q = input_fifo_[*candidate][vc];
         const Flit flit = q.front();
         q.pop_front();

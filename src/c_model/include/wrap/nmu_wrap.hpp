@@ -1,9 +1,9 @@
-// NmuWrap — Stage 5b Wrap for the Nmu component.
+// NmuWrap — Wrap for the Nmu component.
 //
-// Owns an NmuStandalone (T3 hermetic wrapper). The Nmu is the most complex
+// Owns an NmuStandalone (hermetic wrapper). The Nmu is the most complex
 // wrap — it has BOTH an AXI slave side (incoming AW/W/AR, outgoing B/R)
-// AND NoC sides (req_out producer toward ChannelModel, rsp_in consumer from
-// ChannelModel). Each tick follows the 3-step pattern:
+// AND NoC sides (req_out producer toward the router, rsp_in consumer from
+// the router). Each tick follows the 3-step pattern:
 //   set_inputs(in)   → latch NmuInputs
 //   tick()           → inject NoC rsp flit (if valid) into NmuStandalone,
 //                      push AW/W/AR beats (if valid) into axi_slave_port(),
@@ -19,7 +19,7 @@
 //                    tick() so Depacketize can consume them this cycle.
 //
 // B/R held-latch pattern (AXI4 §A3.2.1): bvalid / rvalid must not deassert
-// until bready / rready is observed. Same pattern as SlaveWrap (T9).
+// until bready / rready is observed. Same pattern as SlaveWrap.
 //
 // Hermetic invariant: no refs to other Wraps.
 #pragma once
@@ -84,7 +84,7 @@ class NmuWrap {
         cfg.wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
         cfg.vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
-        // R2: close the NI-edge credit loop. Seed the req-out sender counter to
+        // Close the NI-edge credit loop. Seed the req-out sender counter to
         // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
         // constants.yaml) — the single source of truth that also seeds the
         // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
@@ -111,7 +111,7 @@ class NmuWrap {
             nmu_->inject_rsp_flit(flit_from_bytes(in_.noc_rsp_flit));
         }
 
-        // R2: incoming credit pulse — the router's LOCAL input drained an NMU
+        // Incoming credit pulse — the router's LOCAL input drained an NMU
         // req flit, so replenish the req-out sender counter BEFORE tick() so this
         // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
         // Per-VC: replenish each VC that pulsed this cycle.
@@ -178,8 +178,7 @@ class NmuWrap {
         // Step 3: build NmuOutputs.
         out_ = NmuOutputs{};
 
-        // wait_valid / context-gated ready policy (see
-        // docs/superpowers/specs/2026-06-12-wait-valid-ready-policy-design.md):
+        // wait_valid / context-gated ready policy:
         // - AW/AR (address channels): one-shot wait_valid — ready stays low
         //   until VALID is observed, pulses for exactly one wire cycle (the
         //   handshake completes on that cycle), then returns low. AW is NOT

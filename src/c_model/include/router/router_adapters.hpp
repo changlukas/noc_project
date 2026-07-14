@@ -71,7 +71,7 @@ class InjectAdapter : public NocReqOut, public NocRspOut, public RouterCreditSin
 // seeded to vc_depth, so it can grant up to num_vc*vc_depth flits total before
 // any credit is returned (NSU stalled). Buffer depth MUST therefore cover the
 // AGGREGATE LOCAL-output credit = num_vc*vc_depth so the void push_flit never
-// overflows (credit gating is the only backpressure -- see spec section 4); the
+// overflows (credit gating is the only backpressure); the
 // per-VC seed alone is insufficient when num_vc>1.
 // One instance per direction: the NocReqIn/NocRspIn pop_flit bases share one
 // queue, so bind a given EjectAdapter to a single network's LOCAL output only

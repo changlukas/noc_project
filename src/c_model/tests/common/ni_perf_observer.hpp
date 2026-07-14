@@ -12,7 +12,7 @@ namespace ni::cmodel::testing {
 // (the harness forwards them). Latency keyed by scenario_line within ONE NMU
 // (one instance per NMU). Read-only: records issue cycle on on_issue, emits
 // (now - issue) into the matching Stats on on_complete. No phase gating, no
-// outstanding/RoB sampling (dropped with the v1 probe, spec sec 3).
+// outstanding/RoB sampling.
 class NIPerfObserver {
   public:
     NIPerfObserver(const uint64_t& now, std::string flow_label)

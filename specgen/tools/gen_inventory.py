@@ -66,8 +66,8 @@ def render(spec, when):
     out.append("this file is documentation + a drift gate.")
     out.append("")
     out.append("Column **Expected c_model header** points to the conventional path for that ")
-    out.append("feature's c_model implementation. Existence is **not enforced** — most features ")
-    out.append("won't have an implementation until Layer B / Stage 2.")
+    out.append("feature's c_model implementation. Existence is **not enforced** — some features ")
+    out.append("may not have an implementation yet.")
     out.append("")
     for block in spec.get("blocks", []):
         name = block["name"]

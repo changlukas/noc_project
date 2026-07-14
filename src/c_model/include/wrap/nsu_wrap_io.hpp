@@ -1,7 +1,7 @@
-// NsuWrap IO POD structs — Stage 5b spec §6 (combined NoC consumer + AXI master).
+// NsuWrap IO POD structs — combined NoC consumer + AXI master pin bundle.
 //
 // NsuInputs: signals consumed by the Nsu each cycle.
-//   NoC req side:    flit arriving from channel model toward Nsu's Depacketize.
+//   NoC req side:    flit arriving from the router toward Nsu's Depacketize.
 //   NoC rsp credit:  credit_return from downstream (channel credits back to Nsu).
 //   AXI master side: ready signals + B/R beats returning from the AXI slave.
 //

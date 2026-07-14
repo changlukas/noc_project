@@ -1,12 +1,12 @@
-// DPI signatures for Stage 5b wire-wrap co-sim. 6 wraps x 3 calls/cycle
+// DPI signatures for the wire-wrap co-sim. 6 wraps x 3 calls/cycle
 // (set_inputs/tick/get_outputs) + lifecycle (init/finalize/check_error).
 //
 // Error propagation: try/catch in handlers sets g_dpi_error_code; SV side
 // polls cmodel_check_error() per wrap per cycle and raises $fatal on
-// non-zero. See spec §5.2.
+// non-zero.
 
-#ifndef COSIM2_CMODEL_DPI_H
-#define COSIM2_CMODEL_DPI_H
+#ifndef NI_COSIM_CMODEL_DPI_H
+#define NI_COSIM_CMODEL_DPI_H
 
 #include "svdpi.h"
 
@@ -15,7 +15,6 @@ extern "C" {
 #endif
 
 // Categorized DPI error codes (return value of cmodel_check_error).
-// Per Stage 5b spec §5.2.
 typedef enum {
     CMODEL_DPI_OK = 0,
     CMODEL_DPI_ERR_GENERIC = 1,
@@ -48,12 +47,12 @@ void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 // stdout. Read-only; the tb watchdog calls it once before $fatal.
 void cmodel_dump_fabric_state(void);
 
-// Per-wrap DPI signatures appended by Tasks 5-11.
-// Router (Task 3, per-node) — ONE node's REQ+RSP routers at (x,y). Pins split:
+// Per-wrap DPI signatures, one block per component.
+// Router (per-node) — ONE node's REQ+RSP routers at (x,y). Pins split:
 //   NMU/NSU-facing (NI edge, pulse credit) + per-DIRECTION LINK (pulse credit).
 // num_vc threads the topology VC count into the wrap config (NOT hardcoded 1).
 //
-// Per-PORT x per-VC ABI (fixed this task so Task 7 only fills directions):
+// Per-PORT x per-VC ABI (fixed shape; unused directions stay unwired):
 //   - LINK valid/flit/credit are PORT-indexed: SV passes packed arrays sized
 //     ROUTER_LINK_PORTS (= router's 5 ports; LOCAL slot unused on the LINK face,
 //     N/E/S/W carry the inter-router links). At 2-node only one direction is live.
@@ -79,7 +78,8 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
                                svBitVecVal* link_rsp_out_valid, svBitVecVal* link_rsp_out_flit,
                                svBitVecVal* link_rsp_in_credit);
 
-// Nmu (Task 8) — chandle ABI; AXI slave side + NoC req/rsp sides.
+// Nmu — longint-handle ABI (chandle avoided; VCS rejects it as a module
+// port); AXI slave side + NoC req/rsp sides.
 // Packing conventions (little-endian word order):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
@@ -117,7 +117,7 @@ void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wread
 // handle is invalid or RoB is Disabled.
 unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 
-// Nsu (Task 9) — NoC consumer (req in) + producer (rsp out) + AXI master side.
+// Nsu — NoC consumer (req in) + producer (rsp out) + AXI master side.
 // Direction inversion vs. Nmu:
 //   cmodel_nsu_set_inputs receives noc_req_flit (consumer) + AXI master ready/B/R.
 //   cmodel_nsu_get_outputs produces noc_rsp_flit (producer) + AXI master AW/W/AR.
@@ -158,4 +158,4 @@ void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* noc_rsp_valid, svBitV
 }
 #endif
 
-#endif  // COSIM2_CMODEL_DPI_H
+#endif  // NI_COSIM_CMODEL_DPI_H

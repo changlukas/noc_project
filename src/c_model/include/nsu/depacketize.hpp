@@ -24,7 +24,8 @@ namespace ni::cmodel::nsu {
 // that key, and hands the beat to AxiMasterPort. Each gates ONLY on its own
 // pool: a full write pool stalls pop_aw and leaves pop_ar untouched. Allocating
 // here rather than at ingress is what keeps a full pool from head-of-line
-// blocking the other channels, mirroring the 2026-07-04 NMU request-path fix.
+// blocking the other channels, mirroring the same independent-channel-draining
+// pattern used by the NMU request path.
 //
 // Pending-flit stash semantics: if a pulled flit's S1 register is occupied, the
 // flit is held in `pending_` and re-attempted next tick, blocking flits behind

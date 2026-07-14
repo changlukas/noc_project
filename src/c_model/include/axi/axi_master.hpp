@@ -64,7 +64,7 @@ struct WriteResult {
     uint8_t size;   // log2(bytes_per_beat)
     uint8_t len;    // beats - 1
     Burst burst;
-    // Phase C: mirrors the originating scenario_txn.lock so the scoreboard can
+    // Mirrors the originating scenario_txn.lock so the scoreboard can
     // distinguish a failed exclusive write (lock=Exclusive + resp=OKAY → no
     // memory commit) from a normal write (resp=OKAY → commit) without peeking
     // at the slave's exclusive monitor state.
@@ -438,7 +438,7 @@ class AxiMasterT {
         std::size_t r_beats_in_cur_ = 0;
         std::vector<uint8_t> read_accumulator;  // packed user bytes, full operation
 
-        // Phase A: request-phase completion predicates. The outer FIFO loop in
+        // Request-phase completion predicates. The outer FIFO loop in
         // tick() breaks on the first op whose request phase is incomplete so
         // same-id ops emit their AW + W stream in submission order (AXI4 W has
         // no WID; W beats follow AW issue order — IHI 0022 §A5.3).
@@ -478,7 +478,7 @@ class AxiMasterT {
                 aw.len = sub.len;
                 aw.size = sub.size;
                 aw.burst = sub.burst;
-                // Phase C: pure wire-through of scenario_txn.lock onto AW.lock. AXI4
+                // Pure wire-through of scenario_txn.lock onto AW.lock. AXI4
                 // AxLOCK is 1-bit; LockType::Exclusive maps to 1, Normal to 0. Every
                 // sub-burst of one operation carries the same lock value.
                 aw.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
@@ -561,7 +561,7 @@ class AxiMasterT {
             ar.len = sub.len;
             ar.size = sub.size;
             ar.burst = sub.burst;
-            // Phase C: wire-through scenario_txn.lock onto AR.lock (1-bit).
+            // Wire-through scenario_txn.lock onto AR.lock (1-bit).
             ar.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
             ar.qos = op.src_txn.qos;
             const bool first_ar = (op.next_ar_sub_idx_ == 0);
@@ -615,7 +615,7 @@ class AxiSlave;
 using AxiMaster = AxiMasterT<AxiSlave>;
 
 // -------------------------------------------------------------------------
-// Stage 5b: AxiMasterStandalone — hermetic, no external SlaveT& ref.
+// AxiMasterStandalone — hermetic, no external SlaveT& ref.
 //
 // Wraps that drive AxiMaster without a concrete AxiSlave (e.g.,
 // DPI-wired cosim) use this class. It owns a WireSlavePort so AxiMasterT
@@ -626,7 +626,7 @@ using AxiMaster = AxiMasterT<AxiSlave>;
 
 namespace detail {
 
-// WireSlavePort — handshake-aware intermediary for Stage 5b Wrap.
+// WireSlavePort — handshake-aware intermediary for the Wrap.
 //
 // Models the AXI4 wire handshake from the master's perspective:
 //   - push_aw/push_w/push_ar model the master PRESENTING a beat (driving valid+
@@ -671,10 +671,8 @@ struct WireSlavePort {
         // set at latch time (below), NOT only on delivery: during the wait
         // cycles (awready_ low, no delivery) a later id would otherwise overwrite
         // last_aw_ to the LAST id walked, so the wire presents the wrong AW and
-        // replays it (STR-001 multi-outstanding: id 1..7 lost, id 8 replayed).
-        // Gating on offer keeps the FIRST (oldest) id's AW presented; later ids
-        // retry next tick. A previous fix gated on delivery only and did not fix
-        // the wait-cycle overwrite.
+        // replays it. Gating on offer keeps the FIRST (oldest) id's AW presented;
+        // later ids retry next tick.
         if (aw_offered_this_tick_) return false;
         last_aw_ = b;
         aw_pending_ = true;
@@ -774,7 +772,7 @@ struct WireSlavePort {
 
 }  // namespace detail
 
-// Config struct for Stage 5b Wrap hermetic construction.
+// Config struct for the Wrap's hermetic construction.
 struct AxiMasterConfig {
     std::string scenario_yaml;
     std::string read_dump_path;

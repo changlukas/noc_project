@@ -16,7 +16,7 @@
 namespace ni::cmodel::nsu {
 
 // -------------------------------------------------------------------------
-// Stage 5b: NsuStandalone — hermetic wrapper, no external NoC refs.
+// NsuStandalone — hermetic wrapper, no external NoC refs.
 //
 // Wraps construct NsuStandalone(NsuConfig{...}) without supplying
 // NocReqIn& / NocRspOut&. The wrapper owns queue-backed terminal endpoints for
@@ -41,7 +41,7 @@ struct QueueNocReqIn : router::NocReqIn {
     // Wrap accessor: inject one flit per tick from DPI wire.
     void inject_req_flit(const Flit& f) { queue_.push_back(f); }
 
-    // R2 consumer-pulse: size the per-VC pending counter before traffic. Always
+    // Consumer-pulse: size the per-VC pending counter before traffic. Always
     // present (no enable flag — pending only matters when the wrap drains it via
     // take_credit, which is cosim-only). Defaults to 1 VC.
     void size_pending(uint8_t num_vc) { pending_.assign(num_vc, 0); }
@@ -80,7 +80,7 @@ struct QueueNocRspOut : router::NocRspOut {
     // the check (and the queue is still allowed to grow unboundedly).
     static constexpr std::size_t kMaxQueueDepth = 1024;
 
-    // R2 opt-in FlooNoC sender credit (default OFF = today's always-available).
+    // FlooNoC-style NI-edge sender credit (default OFF = today's always-available).
     // When enabled, this models the InjectAdapter credit pattern: a per-VC
     // counter seeded to the downstream (router LOCAL input) depth; push_flit
     // decrements on accept, receive_credit increments on a credit pulse.
@@ -146,14 +146,15 @@ class NsuStandalone {
     }
     Nsu& nsu() noexcept { return nsu_; }
 
-    // Stage 5b Wrap accessors — inject req side, drain rsp side.
+    // Wrap accessors — inject req side, drain rsp side.
     void inject_req_flit(const Flit& f) { queue_req_in_.inject_req_flit(f); }
     std::optional<Flit> pop_rsp_flit() { return queue_rsp_out_.pop_rsp_flit(); }
     bool rsp_credit_avail(uint8_t vc = 0) const { return queue_rsp_out_.credit_avail(vc); }
 
-    // R2 opt-in FlooNoC credit at the NoC terminal edge (cosim-only; default
-    // OFF). Seeds the rsp-out sender counter; the req-in consumer pulse is
-    // always active (sized in the ctor) but inert unless req_take_credit drains.
+    // FlooNoC-style NI-edge credit at the NoC terminal edge (cosim-only; the
+    // wraps call this unconditionally in init()). Seeds the rsp-out sender
+    // counter; the req-in consumer pulse is always active (sized in the ctor)
+    // but inert unless req_take_credit drains.
     void enable_noc_credit(std::size_t seed) { queue_rsp_out_.enable_credit(num_vc_, seed); }
     void rsp_receive_credit(uint8_t vc = 0) { queue_rsp_out_.receive_credit(vc); }
     bool req_take_credit(uint8_t vc = 0) { return queue_req_in_.take_credit(vc); }

@@ -1,8 +1,8 @@
-// NsuWrap — Stage 5b Wrap for the Nsu component.
+// NsuWrap — Wrap for the Nsu component.
 //
-// Owns an NsuStandalone (T3 hermetic wrapper). Nsu is the inverse of Nmu:
-// it has a NoC consumer side (receives req flits from ChannelModel), a NoC
-// producer side (sends rsp flits to ChannelModel), and an AXI master side
+// Owns an NsuStandalone (hermetic wrapper). Nsu is the inverse of Nmu:
+// it has a NoC consumer side (receives req flits from the router), a NoC
+// producer side (sends rsp flits to the router), and an AXI master side
 // (drives AW/W/AR to a slave; consumes B/R from that slave).
 //
 // Each tick follows the 3-step pattern:
@@ -73,7 +73,7 @@ class NsuWrap {
         cfg.wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
         cfg.vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
-        // R2: close the NI-edge credit loop. Seed the rsp-out sender counter to
+        // Close the NI-edge credit loop. Seed the rsp-out sender counter to
         // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
         // constants.yaml) — the single source of truth that also seeds the
         // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
@@ -102,7 +102,7 @@ class NsuWrap {
             nsu_->inject_req_flit(flit_from_bytes(in_.noc_req_flit));
         }
 
-        // R2: incoming credit pulse — the router's LOCAL input drained an NSU
+        // Incoming credit pulse — the router's LOCAL input drained an NSU
         // rsp flit, so replenish the rsp-out sender counter BEFORE tick() so this
         // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
         // Per-VC: replenish each VC that pulsed this cycle.

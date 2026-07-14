@@ -198,7 +198,7 @@ def check_blocks_param_uniqueness(fb_spec) -> List[Issue]:
 
 
 def check_mesh_within_flit(packet_spec, constants) -> List[Issue]:
-    """L2: mesh dims must fit flit dst_id / vc_id field capacity (spec 2026-06-24 sec 3).
+    """L2: mesh dims must fit flit dst_id / vc_id field capacity.
 
     Flit field widths are read from packet_spec["flit"]["field_widths"] (int values).
     Mesh/VC params are read from constants["noc"][name]["default"] (constants.yaml shape).

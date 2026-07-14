@@ -5,7 +5,7 @@
 // LockIn=1, release on `last_out & ready_i`) and collapses FlooNoC's separate
 // SelW state machine into a single arbiter via the optional ChannelPairing
 // config. Used at NI side for 5->2 AXI-to-NoC channel mapping; reusable at
-// NoC fabric router output ports (future Stage 4 round).
+// NoC fabric router output ports.
 //
 // Pipeline placement:
 //   NMU: Packetize{aw,w,ar} -> WormholeArbiter<NocReqOut>(3 in, {{0,1}})
@@ -21,9 +21,9 @@
 //     drained from the currently locked `to` port, unlock.
 //   * Without pairing (NSU case), every flit is its own packet; no lock.
 //
-// Constraint A2 (from spec): REQUIRES Packetize stamps header.last per
-// FlooNoC pattern (AW=0, W=wlast, AR/B/R=1). Malformed AW (from-port flit
-// with last=1) triggers assert+abort at runtime.
+// REQUIRES Packetize stamps header.last per FlooNoC pattern (AW=0, W=wlast,
+// AR/B/R=1). Malformed AW (from-port flit with last=1) triggers assert+abort
+// at runtime.
 //
 // Lifetime: heap-allocate via std::unique_ptr OR construct as a stable
 // named member of an owning class. Do NOT push_back into a
@@ -32,7 +32,6 @@
 // remain valid for the arbiter's lifetime.
 //
 // References:
-//   docs/superpowers/specs/2026-06-04-wormhole-arbiter-design.md
 //   FlooNoC hw/floo_wormhole_arbiter.sv, hw/floo_axi_chimney.sv:744 / :758
 
 #include "flit.hpp"
@@ -187,12 +186,11 @@ inline void WormholeArbiter<Downstream>::tick() {
     const Flit& flit = pending_[target].front();
     uint64_t last = flit.get_header_field("last");
 
-    // Defensive guards (Constraint A2)
+    // Defensive guards (header.last stamping invariant)
     if (is_from_port(target) && last == 1) {
-        assert(
-            false &&
-            "WormholeArbiter::tick: from-port flit with header.last=1 -- malformed AW (Packetize "
-            "regression on header.last stamping; vc_arb round commit 1f82ba8 stamps AW=0)");
+        assert(false &&
+               "WormholeArbiter::tick: from-port flit with header.last=1 -- malformed AW; "
+               "Packetize must stamp header.last=0 on AW");
         std::abort();
     }
     if (is_to_port(target) && !locked_to_.has_value()) {

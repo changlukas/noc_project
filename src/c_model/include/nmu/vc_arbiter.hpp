@@ -18,17 +18,16 @@
 // records the new (dst, VC) for next time. rob_req=1 flits are RoB-owned
 // and order-free, so they always round-robin, never fixed.
 //
-// W-follows-AW invariant (Constraint A1): this arbiter MUST be downstream
+// W-follows-AW invariant: this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
 // admitting the next AW. Given that guarantee, a single
 // std::optional<uint8_t> current_aw_vc_ is sufficient to track the in-flight
 // burst's VC (push on AW, reset on W with payload.W.wlast=1).
 //
 // NUM_VC=1 degenerate behavior: routes everything to VC=0, observationally
-// identical to the prior-round single-VC pipeline.
+// identical to a single-VC pipeline.
 //
 // References:
-//   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md
 //   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
 //   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
 //   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
@@ -118,14 +117,14 @@ class VcArbiter : public router::NocReqOut {
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
                                                               uint8_t rob_req, uint8_t id) {
-    // W invariant fires regardless of NUM_VC (Constraint A1: must be
-    // downstream of WormholeArbiter; W must always follow AW)
+    // W invariant fires regardless of NUM_VC: this arbiter must be
+    // downstream of a WormholeArbiter that serializes AW+W; W must always follow AW.
     if (axi_ch == ni::AXI_CH_W) {
         if (!current_aw_vc_.has_value()) {
             assert(false &&
                    "nmu::VcArbiter::push_flit: W arrived with no current AW VC -- "
-                   "Constraint A1 violated: must be downstream of WormholeArbiter "
-                   "(which serializes AW + all W beats before next AW). Standalone "
+                   "must be downstream of a WormholeArbiter that serializes AW+W "
+                   "(all W beats complete before the next AW). Standalone "
                    "VcArbiter use without upstream serialization is unsupported.");
             std::abort();
         }
@@ -186,8 +185,8 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         if (current_aw_vc_.has_value()) {
             assert(false &&
                    "nmu::VcArbiter::push_flit: AW arrived while previous AW's W burst "
-                   "still in progress -- Constraint A1 violated: must be downstream of "
-                   "WormholeArbiter (which holds next AW until current W burst ends).");
+                   "still in progress -- must be downstream of a WormholeArbiter "
+                   "that serializes AW+W (holds next AW until current W burst ends).");
             std::abort();  // belt-and-braces for NDEBUG
         }
         current_aw_vc_ = vc_id;

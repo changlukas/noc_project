@@ -1,11 +1,11 @@
-// NSU Packetize unit tests — updated for T4 staged pipeline.
+// NSU Packetize unit tests — staged pipeline.
 //
 // Packetize is now a two-step component:
 //   push_b/r() accepts ≤1 beat into the S1 stage register (returns false when
 //              S1 is occupied).
 //   tick()     reads the S1 register, builds the Flit, pushes to b_out_/r_out_
 //              (WormholeArbiter input = S2→S3 boundary); commits MetaBuffer only
-//              on successful push to the downstream (spec §5.1).
+//              on successful push to the downstream.
 //
 // Each test reflects the new two-step contract.
 #include "nsu/packetize.hpp"
@@ -179,7 +179,7 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
 }
 
 // NsuPacketize::PushAwAssertFalse was a runtime wrong_side_() test.
-// After T4 the method no longer exists on nsu::Packetize; wrong-side
+// The method no longer exists on nsu::Packetize; wrong-side
 // calls are now caught at compile time. Test removed.
 
 // Multi-beat R burst: NSU stamps every R flit with the same rob_idx.

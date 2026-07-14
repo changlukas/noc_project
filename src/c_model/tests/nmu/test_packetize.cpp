@@ -71,7 +71,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
     // awaddr. dst_id derivation is covered by WMetaFifoInheritsAwDst below.
     // Address is the low 40 bits of the original 0xDEADBEEFCAFEBABE pattern:
     // the legacy SAM covers addr < 2^40 (256 tiles x 4GB), unlike xy_route
-    // (Task 4) which masked dst_id and tolerated any 64-bit address.
+    // which masked dst_id and tolerated any 64-bit address.
     ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0xEFCAFEBABEull)));
 
     auto flit_opt = aw_cap.pop();
@@ -296,7 +296,7 @@ TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
 TEST(NmuPacketize, SamTranslateRebasesAddrAndSetsDstFromTable) {
     SCENARIO(
         "NMU Packetize: push_aw runs a rebasing SamTable::translate; dst_id comes from the "
-        "table and awaddr is rebased to the tile-local offset (Task 4)");
+        "table and awaddr is rebased to the tile-local offset");
     ReqCapture aw_cap, w_cap, ar_cap;
     auto sam = addr_trans::SamTable::uniform(4, 4, 0x100000000ull);
     Packetize pkt(aw_cap, w_cap, ar_cap, /*src_id=*/0, sam);

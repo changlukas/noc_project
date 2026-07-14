@@ -1,6 +1,5 @@
-// Unit tests for NmuWrap — Stage 5b T10, updated for the
-// wait_valid / context-gated ready policy (see
-// docs/superpowers/specs/2026-06-12-wait-valid-ready-policy-design.md).
+// Unit tests for NmuWrap, covering the
+// wait_valid / context-gated ready policy.
 //
 // Tests verify the 3-step pattern (set_inputs / tick / get_outputs) without any
 // DPI or SV involvement. Three cases cover the key behavioral invariants:
@@ -178,7 +177,7 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
 }
 
 // ---------------------------------------------------------------------------
-// Task 6: init(config_path) loads the topology YAML's address_map into
+// init(config_path) loads the topology YAML's address_map into
 // NmuConfig.sam instead of the legacy 16x16-uniform default.
 // ---------------------------------------------------------------------------
 TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {

@@ -6,10 +6,10 @@
 // Header fields per push:
 //   src_id      — constructor arg (NMU tile coord, fixed per instance)
 //   dst_id      — direct-path Packetizer interface: derived from b.addr via
-//                 sam_.translate (SamTable, Task 4). Rob-driven path
+//                 sam_.translate (SamTable). Rob-driven path
 //                 (push_*_with_meta) supplies dst_id directly via
 //                 AwHeaderMeta, computed from Rob's own SamTable member
-//                 (sam_.translate, Task 5). For W beats, dst inherited from
+//                 (sam_.translate). For W beats, dst inherited from
 //                 the AW write-meta FIFO front.
 //   vc_id       — hardcoded 0 (NUM_VC=1)
 //   axi_ch      — implicit per push_* method
@@ -72,7 +72,7 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     }
     // INVARIANT: caller must push_aw before push_w for the same write txn. W
     // FIFO ordering inherits AW issue order; Rob layer enforces this via
-    // w_bursts_owed_ (AW-before-W interlock) in Disabled mode (Task 7).
+    // w_bursts_owed_ (AW-before-W interlock) in Disabled mode.
     bool push_w(const axi::WBeat& b) override;
     bool push_ar(const axi::ArBeat& b) override {
         auto t = sam_.translate(b.addr);
@@ -133,7 +133,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
 
 // INVARIANT: caller must push_aw before push_w for the same write txn. W
 // FIFO ordering inherits AW issue order; Rob layer enforces this via
-// w_bursts_owed_ (AW-before-W interlock) in Disabled mode (Task 7).
+// w_bursts_owed_ (AW-before-W interlock) in Disabled mode.
 inline bool Packetize::push_w(const axi::WBeat& b) {
     // A W beat inherits its AW's dst/rob metadata from the front of w_meta_fifo_.
     // If empty, the W's AW has not yet been admitted to Packetize (its AW is

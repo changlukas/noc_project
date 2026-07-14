@@ -36,7 +36,7 @@ No project-wide license has been selected yet (see README.md, License
 section); until one is added, the rest of c_model is not offered under
 an open-source license.
 
-## Phase C — Exclusive Access (AxLOCK + EXOKAY)
+## Exclusive Access (AxLOCK + EXOKAY)
 
 Independent design per AXI4 IHI 0022 §A7. cocotbext-axi (MIT) does NOT implement
 exclusive monitor (only carries lock signal). Closest OSS reference is

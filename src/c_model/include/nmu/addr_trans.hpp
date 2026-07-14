@@ -1,6 +1,6 @@
 #pragma once
 #include "ni_flit_constants.h"  // ni::width::X_WIDTH / Y_WIDTH (DST_ID composition)
-#include "axi/types.hpp"        // axi::Burst (used by burst_last_byte, Task 4)
+#include "axi/types.hpp"        // axi::Burst (used by burst_last_byte)
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -55,7 +55,7 @@ class SamTable {
     const std::vector<SamEntry>& entries() const { return entries_; }
 
     // Validate explicit entries; fail-loud. Uniform tables satisfy these by construction.
-    // Two passes (Codex): validate every entry's fields FIRST so the overlap pass can
+    // Two passes: validate every entry's fields FIRST so the overlap pass can
     // trust each `base+size` (no overflow) when it reads it.
     void validate(unsigned x_dim, unsigned y_dim) const {
         constexpr uint64_t k4k = 0x1000;
@@ -87,7 +87,7 @@ class SamTable {
     std::vector<SamEntry> entries_;
 };
 
-// Highest byte a burst touches, for the SAM footprint guard (Task 4).
+// Highest byte a burst touches, for the SAM footprint guard.
 inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::Burst burst) {
     uint64_t bytes_per_beat = uint64_t{1} << size;
     uint64_t total = bytes_per_beat * (static_cast<uint64_t>(len) + 1);
@@ -99,7 +99,7 @@ inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::B
     }
     // INCR and FIXED both use [addr, addr+total): match the slave's OOB math
     // (axi_slave.hpp:316-318,:519-520 treats FIXED like INCR), so the SAM guard and the
-    // slave agree at a tile edge (Codex #6). Conservative for FIXED, but consistent.
+    // slave agree at a tile edge. Conservative for FIXED, but consistent.
     return addr + total - 1;
 }
 

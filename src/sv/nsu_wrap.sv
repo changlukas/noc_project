@@ -1,10 +1,10 @@
-// nsu_wrap — Stage 5b DPI wrapper for the Nsu component.
+// nsu_wrap — DPI wrapper for the Nsu component.
 //
 // The Nsu is the NoC-side inverse of nmu_wrap. Its 4 packed-struct NoC ports
 // read req flit + rsp credit from the router and drive rsp flit + req credit
 // back. On the AXI side it acts as master toward the downstream slave.
 //
-// Registered-DPI-tick discipline (spec §5.1): on every posedge clk_i the module
+// Registered-DPI-tick discipline: on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
 // via cmodel_nsu_set_inputs, advances the model via cmodel_nsu_tick, pulls
 // outputs via cmodel_nsu_get_outputs, then registers those outputs nonblocking
@@ -15,7 +15,7 @@
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
 //
-// Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
+// Error polling is centralized in tb_top.sv; this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.
 //
 // AXI struct ports (master view): master drives axi_req_o (AW/W/AR + bready/
@@ -64,7 +64,7 @@ module nsu_wrap #(
     // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
-    // DPI imports — 3-step pattern per spec §5.1
+    // DPI imports — 3-step pattern (set_inputs/tick/get_outputs)
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_nsu_set_inputs(
@@ -122,13 +122,13 @@ module nsu_wrap #(
         output bit                    rready
     );
 
-    // Lifecycle / error polling lives in tb_top.sv (T1.4).
+    // Lifecycle / error polling lives in tb_top.sv.
 
     // -------------------------------------------------------------------------
     // Output registers (registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
-    // NoC rsp side outputs (Nsu drives toward ChannelModel)
+    // NoC rsp side outputs (Nsu drives toward the router)
     bit                    noc_rsp_valid_q;
     bit [FLIT_WIDTH-1:0]       noc_rsp_flit_q;
 
@@ -327,8 +327,8 @@ module nsu_wrap #(
     assign axi_req_o.awcache  = awcache_q;
     assign axi_req_o.awprot   = awprot_q;
     assign axi_req_o.awqos    = awqos_q;
-    // awregion/arregion are carried-but-unused (not marshalled by DPI per spec
-    // §3.2); the Nsu never drives them — tie to '0 so the field is not undriven.
+    // awregion/arregion are carried-but-unused (not marshalled by DPI); the
+    // Nsu never drives them — tie to '0 so the field is not undriven.
     assign axi_req_o.awregion = '0;
 
     assign axi_req_o.wvalid   = wvalid_q;

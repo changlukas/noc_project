@@ -1,5 +1,5 @@
 #pragma once
-// NSU top-level assembly. Encapsulates Stage 3 NI response-side
+// NSU top-level assembly. Encapsulates the NI response-side
 // sub-modules into one class with single tick() entrypoint. Mirror of
 // nmu::Nmu but asymmetric: NSU has no Rob (no reorder buffer on response
 // side) and no addr_trans (uses incoming flit dst_id directly).
@@ -13,7 +13,7 @@
 //     (reads meta from MetaBuffer) ──> WormholeArbiter<NocRspOut>(2 in,
 //     no pairing) ──> VcArbiter ──> external NocRspOut
 //
-// Per-cycle tick order: reverse-order staged pipeline (spec §5.3) — later
+// Per-cycle tick order: reverse-order staged pipeline — later
 // stages drain before earlier stages fill, so a beat advances one stage/tick:
 //   wormhole_arbiter_.tick(); vc_arbiter_.tick();  // rsp S3 (-> NoC)
 //   packetize_.tick();                             // rsp S2
@@ -25,9 +25,6 @@
 //
 // AXI binding: axi_master_port() getter. Testbench wires its
 // AxiSlave-side adapters through this getter.
-//
-// References:
-//   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
 #include "ni_flit_constants.h"
 #include "ni/ni_stage.hpp"
 #include "router/req_in.hpp"
@@ -164,7 +161,7 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {
-    // Reverse-order tick for both req and rsp paths (spec §5.3).
+    // Reverse-order tick for both req and rsp paths.
     // A beat advances exactly one stage per tick; later stages drain before
     // earlier stages fill, so no double-advance occurs.
     //
@@ -176,12 +173,12 @@ inline void Nsu::tick() {
     //       Flits, pushes to wormhole input (the S2→S3 register boundary).
     //       Because wormhole_.tick() already ran, the flits pushed here
     //       cannot escape to NoC until the next tick — the arbiter-final-stage
-    //       property (spec §5.2: no same-tick Packetize→NoC escape).
+    //       property (no same-tick Packetize→NoC escape).
     //   S1: axi_master_port_ forward_b/r_to_packetizer_() takes ≤1 beat from
     //       b_q_/r_q_ and calls packetize_.push_b/r() (writes s1_b_/s1_r_).
     //       Packetize_.tick() already drained s1 this tick, so no overwrite.
     //
-    // REQ path (S2 → S1, reverse order, unchanged from Task 3):
+    // REQ path (S2 → S1, reverse order):
     //   S2: axi_master_port_ drain_*_from_depacketizer_ consumes from
     //       depacketize_.s1_* stage registers.
     //   S1: depacketize_.tick() decodes a new flit into s1_* registers.

@@ -1,6 +1,6 @@
 // Smoke test: Nsu class constructs cleanly + tick() doesn't crash.
 // Verifies ctor sequence (member init order, factory return-by-value, no-Rob
-// asymmetry vs Nmu) before Task 3 integration.
+// asymmetry vs Nmu) in isolation.
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"

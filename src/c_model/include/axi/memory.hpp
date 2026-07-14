@@ -92,7 +92,7 @@ class Memory : public IMemoryPort {
     //   on the bus corresponds to storage_[aligned_word + j]. WSTRB enables
     //   per-lane writes; reads return the full bus image with the user-byte
     //   bytes placed at lanes [byte_lane, byte_lane + (1<<size)). Aligned-word
-    //   indexing keeps Phase A (size=5, byte_lane=0) bit-for-bit identical and
+    //   indexing keeps the full-width aligned case (size=5, byte_lane=0) bit-for-bit identical and
     //   generalizes to unaligned/narrow transfers.
     MemWriteResp perform_write_(const MemWriteReq& req) {
         const uint64_t aligned_word = req.addr & ~static_cast<uint64_t>(DATA_BYTES - 1);

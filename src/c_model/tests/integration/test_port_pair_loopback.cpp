@@ -1,4 +1,4 @@
-// PortParamsSplit: regression gate for the T3 refactor that split the single
+// PortParamsSplit: regression gate for the refactor that split the single
 // shared PortParams into independent NMU / NSU per-side params.
 //
 // The end-to-end port-pair loopback that used to live here was retired: it

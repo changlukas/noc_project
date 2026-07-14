@@ -23,7 +23,7 @@ struct FlitCrossing {
 };
 
 // Per-boundary ordered crossing log. The probes write here; the dwell observer
-// (Task 5) reads pairs of logs and matches by FIFO order.
+// reads pairs of logs and matches by FIFO order.
 class FlitLog {
   public:
     explicit FlitLog(std::string boundary_id) : boundary_id_(std::move(boundary_id)) {}

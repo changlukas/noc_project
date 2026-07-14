@@ -3,15 +3,13 @@
 // B/R beats from AxiMasterPort) and the S2 transform (builds Flit from S1,
 // pushes into the S2→S3 stage register = WormholeArbiter pending queue).
 //
-// Stage model (spec §5.0, §5.1, §5.2):
+// Stage model:
 //   S1: push_b/r() accepts ≤1 beat/channel into s1_b_/s1_r_ stage registers.
 //       Returns false (backpressure) when the S1 register is occupied.
 //   S2: tick() reads S1, builds Flit (MetaBuffer peek), pushes to b_out_/r_out_
 //       (= WormholeArbiter input = the S2→S3 stage register boundary).
-//       MetaBuffer commit_* fires on successful push to the S2→S3 boundary
-//       (spec §5.1: "commit moves to the stage that pushes into the S2→S3
-//       register").
-//   Arbiter-final-stage (spec §5.2): Packetize::tick() runs after
+//       MetaBuffer commit_* fires on successful push to the S2→S3 boundary.
+//   Arbiter-final-stage: Packetize::tick() runs after
 //   WormholeArbiter::tick() in the reverse-order tick sequence (Nsu::tick()),
 //   so a flit written into the arbiter's pending queue in this tick cannot
 //   escape to NoC until the next tick — no same-tick Packetize→NoC path.
@@ -131,7 +129,7 @@ inline void Packetize::tick() {
         Flit f = build_b_flit(b, *meta_opt, src_id_);
         if (b_out_.push_flit(f)) {
             s1_b_.take();
-            meta_.commit_write(b.id);  // commit on successful S2→S3 push (spec §5.1)
+            meta_.commit_write(b.id);  // commit on successful S2→S3 push
         }
         // On push failure: beat stays in S1 register; arbiter will drain
         // its own pending queue next tick, freeing space.
@@ -148,7 +146,7 @@ inline void Packetize::tick() {
         Flit f = build_r_flit(b, *meta_opt, src_id_);
         if (r_out_.push_flit(f)) {
             s1_r_.take();
-            if (b.last) meta_.commit_read(b.id);  // commit on rlast only (spec §5.1)
+            if (b.last) meta_.commit_read(b.id);  // commit on rlast only
         }
     }
 }

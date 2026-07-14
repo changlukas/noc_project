@@ -18,8 +18,6 @@
 //   AxiMasterObserver obs(master, "NMU");
 //   // ... run test loop ...
 //   // Summary auto-prints at scope exit, OR call obs.print_summary() early.
-//
-// See docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md
 #pragma once
 
 // SCENARIO macro lives in the standalone scenario.hpp so tests that only need
@@ -77,7 +75,7 @@ class AxiMasterObserver {
     void print_summary() {
         summary_printed_ = true;
 
-        // Auto-fail #4 (spec §8): stuck transactions at end of test.
+        // Auto-fail: stuck transactions at end of test.
         if (b_count_ < aw_count_) {
             failures_.push_back("stuck_writes: aw_count=" + std::to_string(aw_count_) +
                                 " > b_count=" + std::to_string(b_count_) +
@@ -130,7 +128,7 @@ class AxiMasterObserver {
         if (wr.resp != axi::Resp::OKAY) ++mismatches_;
         check_b_order(wr.id, wr.scenario_line);
         if (verbose_) {
-            // Spec §6.2: emit AW then B per write completion. WriteResult
+            // Emit AW then B per write completion. WriteResult
             // carries the original AW info (addr/size/len/burst) so the
             // trace pair can be reconstructed from a single callback.
             // obs_seq increments per emitted line so the AW/B pair gets

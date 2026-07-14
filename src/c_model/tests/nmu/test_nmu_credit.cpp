@@ -1,4 +1,4 @@
-// R2 Task 1 conservation test: the opt-in FlooNoC credit at the NMU NoC
+// NI-edge credit conservation test: the FlooNoC-style credit at the NMU NoC
 // terminal edge. Drives a NmuStandalone with credit ENABLED (the cosim path;
 // the default-OFF path is exercised implicitly by every other NmuStandalone
 // test, which must stay byte-identical to today).
@@ -7,8 +7,8 @@
 //   (a) Backpressure: with a small seed and no receive_credit, after `seed`
 //       req flits drain the sink reports credit_avail=false, pop_req_flit dries
 //       up, and the internal queues stay bounded (VcArbiter self-gates — no
-//       unbounded growth). This is the conservation guarantee that R2 buys over
-//       the old always-grant stub.
+//       unbounded growth). This is the conservation guarantee that this credit
+//       mechanism buys over the old always-grant stub.
 //   (b) Re-open: receive_credit pulses re-open the sink one flit per pulse.
 //   (c) Multi-consume-per-tick: Depacketize drains >1 flit in one tick, so the
 //       consumer pulse MUST be an accumulating counter — take_credit then drains
@@ -34,7 +34,7 @@ NmuConfig make_cfg(uint8_t src_id) {
     cfg.src_id = src_id;
     // 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired
     // addr_trans::xy_route mapping so this file's fixed test address (0x100)
-    // is unaffected by the Task 5 migration off xy_route.
+    // is unaffected by the migration off xy_route.
     cfg.sam = SamTable::uniform(16, 16, 0x100000000ull);
     // PortParams self-defaults from ni::NMU_QUEUE_DEPTH; set explicitly here
     // for a hermetic, self-documenting test.

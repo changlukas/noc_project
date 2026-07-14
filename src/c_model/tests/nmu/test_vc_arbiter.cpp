@@ -85,8 +85,8 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
 }
 
 // W follows AW invariant: all W beats of a burst route to the same VC as
-// their paired AW. With Constraint A1 (WormholeArbiter upstream serializes
-// AW + all W beats before next AW), a single outstanding AW at a time is
+// their paired AW. With the WormholeArbiter upstream serializing AW + all W
+// beats before the next AW, a single outstanding AW at a time is
 // the supported pattern. Requires num_vc >= 2 so the AW vs W VC assignment
 // is observable (write_vc=0 for both in the read/write VC split; read_vc=1 for AR).
 TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
@@ -339,7 +339,7 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcArbParam,
 // Plain TEST() — not parameterized:
 //   Degenerate_NumVc1_AllModesPassthrough  : specifically tests NUM_VC=1 behavior
 //   EnabledModeMixedWith_PriorRoundTests   : decorator transparency at NUM_VC=1
-//   WHeaderLastMatchesWlast                : §12 fix; decorator at NUM_VC=1
+//   WHeaderLastMatchesWlast                : decorator at NUM_VC=1
 //   2 death tests                          : EXPECT_DEATH doesn't compose with TEST_P
 // ---------------------------------------------------------------------------
 
@@ -412,7 +412,7 @@ TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
     SCENARIO(
         "NMU VcArbiter: header.last on W flits emitted via Packetize -> "
         "WormholeArbiter -> VcArbiter -> downstream matches payload.wlast "
-        "(verifies §12 packetize fix is preserved end-to-end through the "
+        "(verifies the packetize header.last fix is preserved end-to-end through the "
         "decorator pipeline).");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
@@ -468,8 +468,8 @@ class LyingDownstream : public ni::cmodel::router::NocReqOut {
 
 TEST(NmuVcArbDeath, WFollowsAW_WBeforeAW_DeathTest) {
     SCENARIO(
-        "NMU VcArbiter: push_flit(W) before any push_flit(AW) violates "
-        "Constraint A1; current_aw_vc_ has no value so VcArbiter must "
+        "NMU VcArbiter: push_flit(W) before any push_flit(AW) violates the "
+        "W-follows-AW invariant; current_aw_vc_ has no value so VcArbiter must "
         "assert+abort instead of UB.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/2, 0, 1);

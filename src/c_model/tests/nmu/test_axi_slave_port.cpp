@@ -1,7 +1,7 @@
 // Unit tests for nmu/axi_slave_port.hpp — the NMU upstream-facing AXI4
 // slave transparent transport port.
 //
-// Test strategy (per Stage 3 brief):
+// Test strategy:
 //   - LoopbackChannelSet (loopback_channel_set.hpp) wires a
 //     RequestPacketizer + ResponseDepacketizer pair so the port can be
 //     exercised without standing up the NoC fabric.
@@ -9,7 +9,7 @@
 //     hardcoded queue-depth literals in the port header).
 //   - Port contract: per-channel FIFO order for all beats regardless of
 //     AXI ID. Cross-ID completion ordering / per-ID response reordering
-//     is the ROB stage's responsibility (see plan §3.1), NOT this port's.
+//     is the ROB stage's responsibility, NOT this port's.
 #include "common/loopback_channel_set.hpp"
 #include "common/scenario.hpp"
 #include "nmu/axi_slave_port.hpp"
@@ -173,7 +173,7 @@ TEST(NmuAxiSlavePort, AwFifoOrder_PreservedAcrossMixedIds) {
     PortFixture fx;
     // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
     // Cross-ID completion ordering / per-ID response reordering is the ROB
-    // stage's responsibility (see plan §3.1), NOT this port's.
+    // stage's responsibility, NOT this port's.
     const std::vector<uint8_t> ids{3, 5, 3, 7, 5, 0, 7, 3};
     for (auto id : ids) ASSERT_TRUE(fx.port.push_aw(make_aw(id, 0x1000)));
     fx.port.tick();
@@ -191,7 +191,7 @@ TEST(NmuAxiSlavePort, ArFifoOrder_PreservedAcrossMixedIds) {
     PortFixture fx;
     // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
     // Cross-ID completion ordering / per-ID response reordering is the ROB
-    // stage's responsibility (see plan §3.1), NOT this port's.
+    // stage's responsibility, NOT this port's.
     const std::vector<uint8_t> ids{1, 2, 1, 3, 2, 0, 3, 1};
     for (auto id : ids) ASSERT_TRUE(fx.port.push_ar(make_ar(id, 0x2000)));
     fx.port.tick();

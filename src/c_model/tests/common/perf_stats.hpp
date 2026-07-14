@@ -5,11 +5,10 @@
 namespace ni::cmodel::testing {
 
 // Empty tag struct, retained so existing `Stats(StatsConfig{})` call sites
-// compile unchanged. Histogram thresholds were dropped with the v1 probe.
+// compile unchanged.
 struct StatsConfig {};
 
-// One metric's accumulator: count/sum/min/max only. variance() and the
-// threshold-bin histogram were removed with the v1 perf probe (spec sec 3).
+// One metric's accumulator: count/sum/min/max only.
 class Stats {
   public:
     explicit Stats(StatsConfig /*cfg*/ = StatsConfig{}) {}

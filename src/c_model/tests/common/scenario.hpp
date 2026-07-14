@@ -7,8 +7,6 @@
 // "common/test_logger.hpp" instead, which re-uses this header.
 //
 // Output: "[scenario] <desc>"
-//
-// See docs/superpowers/specs/2026-06-03-test-logger-scenario-observer-design.md
 #pragma once
 
 #include <iostream>

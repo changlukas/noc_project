@@ -1,7 +1,7 @@
 // Smoke test: Nmu class constructs cleanly + tick() doesn't crash.
 // Verifies ctor sequence (member init order, factory return-by-value via
-// detail::make_vc_arbiter, sub-module ref dependencies) before Task 3
-// integration. Does NOT exercise full e2e flow; that's integration testbench.
+// detail::make_vc_arbiter, sub-module ref dependencies) in isolation. Does
+// NOT exercise full e2e flow; that's integration testbench.
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
@@ -22,7 +22,7 @@ namespace axi = ni::cmodel::axi;
 // 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired
 // addr_trans::xy_route mapping (dst = addr[39:32], local_addr = addr
 // unchanged) so this file's fixed test addresses are unaffected by the
-// Task 5 migration off xy_route.
+// migration off xy_route.
 SamTable legacy_sam() {
     return SamTable::uniform(16, 16, 0x100000000ull);
 }

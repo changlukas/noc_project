@@ -164,10 +164,10 @@ TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
 }
 
 // NsuDepacketize::PopBAssertFalse was a runtime wrong_side_() test.
-// After T4 the method no longer exists on nsu::Depacketize; wrong-side
+// The method no longer exists on nsu::Depacketize; wrong-side
 // calls are now caught at compile time. Test removed.
 
-// Tick-cardinality update (spec §5.3): S1 register holds <=1 AW per tick.
+// Tick-cardinality: S1 register holds <=1 AW per tick.
 // For 3 sequential AW flits on the same channel, tick 3 times — one flit
 // per tick — to drain all 3. FIFO order coverage is unchanged.
 TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {

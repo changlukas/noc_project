@@ -1,5 +1,5 @@
 #pragma once
-// NMU top-level assembly. Encapsulates Stage 3 NI sub-modules into one
+// NMU top-level assembly. Encapsulates the NI sub-modules into one
 // class with a single tick() entrypoint, hiding the manual wiring that
 // previously lived in test_request_response_loopback.cpp.
 //
@@ -12,8 +12,8 @@
 //   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort
 //     ──> back to external AXI master
 //
-// Per-cycle tick order (upstream-first; matches vc_arb/wormhole_arbiter
-// round established pattern):
+// Per-cycle tick order (upstream-first; matches the established
+// vc_arb/wormhole_arbiter pattern):
 //   depacketize_.tick(); axi_slave_port_.tick();
 //   wormhole_arbiter_.tick(); vc_arbiter_.tick();
 //
@@ -24,9 +24,6 @@
 // AXI binding: NOT via ctor (AxiMasterT<AxiSlavePort> template type
 // collision in testbench). Use axi_slave_port() getter to obtain the
 // AxiSlavePort& for the testbench's AxiMaster<AxiSlavePort> wiring.
-//
-// References:
-//   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
 #include "nmu/axi_slave_port.hpp"
 #include "ni/ni_stage.hpp"
 #include "nmu/depacketize.hpp"
@@ -71,7 +68,7 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     // Drain each AXI sub-channel to Packetize INDEPENDENTLY. A full AW wormhole
     // input must not block W (the in-flight write's body, needed to release the
     // wormhole AW->W lock) or AR. Cross-channel HOL here self-deadlocks the
-    // request path under load (spec 2026-07-04-nmu-request-hol-fix-design.md).
+    // request path under load.
     // AW-before-W ordering is preserved downstream by Packetize's w_meta_fifo_,
     // not by gating W on AW admission.
     void tick(Packetize& packetize) {
@@ -128,8 +125,7 @@ struct NmuConfig {
     uint8_t src_id = 0;
     addr_trans::SamTable sam{};
     RobMode read_rob_mode = RobMode::Disabled;
-    // RoB pool depths, per direction. Enabled mode only. See
-    // docs/nmu-rob-microarchitecture.md section 6.
+    // RoB pool depths, per direction. Enabled mode only.
     std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH;
     std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). Enabled mode only.

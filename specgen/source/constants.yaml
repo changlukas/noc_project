@@ -1,6 +1,6 @@
 # specgen/source/constants.yaml
 # Language-neutral parameter defaults. Source of truth for both ni_params_pkg.sv
-# and ni_params.h. See design spec §4.1.
+# and ni_params.h.
 schema_version: "1.0"
 
 axi:

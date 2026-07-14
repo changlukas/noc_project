@@ -18,13 +18,13 @@
 
 namespace ni::cmodel::nmu {
 
-enum class RobMode { Disabled, Enabled };  // Enabled = next round
+enum class RobMode { Disabled, Enabled };
 
 // In-line layer between AxiSlavePort and {Packetize, Depacketize}.
 // Implements RequestPacketizer (request gate: push_aw/w/ar) and
 // ResponseDepacketizer (response observe: pop_b/r).
 //
-// Disabled mode (this round): per-AXI-ID single-outstanding interlock.
+// Disabled mode: per-AXI-ID single-outstanding interlock.
 //   - Any id with one outstanding AW/AR -> stall further same-id requests
 //   - Different id -> independent
 //   - Response B / R(last) observe clears the per-id outstanding flag
@@ -129,7 +129,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t read_slot_hwm() const noexcept { return read_slot_hwm_; }
 
   private:
-    // Drain ready order-list heads into the committed queues (the Task 3 loops,
+    // Drain ready order-list heads into the committed queues (the pop-side loops,
     // reused by the direct-forward bypass arms). Stops at a bypassed head, which
     // waits on its own response through pop_*_staged.
     void drain_ready_write_heads_(uint8_t id);
@@ -201,9 +201,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Same-destination bypass state (floo_rob.sv:399,417-420,427-428). prev_dest_* is
     // the dst_id of the last accepted push for that id, updated on every push.
     // fallen_back_* is the sticky same-destination-bypass flag: once a push
-    // robs, every later push for that id robs too (even if dest matches an earlier
-    // one) until a new streak begins. The reset is the idle-ID bypass branch itself: an
-    // id's first push (empty order list) sets fallen_back_*=false, so the flag is
+    // allocates a RoB slot, every later push for that id allocates one too (even
+    // if dest matches an earlier one) until a new streak begins. The reset is the idle-ID bypass
+    // branch itself: an id's first push (empty order list) sets fallen_back_*=false, so the flag is
     // fresh at every streak start. FlooNoC instead clears at drain (floo_rob.sv:435-441)
     // because its idle-ID bypass READS the sticky flag (!ax_rob_req_q); ours tests the empty
     // list, which makes a drain-time clear a dead store -- so it is omitted here.
@@ -229,7 +229,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // High-water mark backing read_slot_hwm(). See getter for details.
     std::size_t read_slot_hwm_ = 0;
 
-    // Ready-to-emit beats drained by pop_b / pop_r (Task 3).
+    // Ready-to-emit beats drained by pop_b / pop_r.
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
     std::array<uint8_t, ROB_IDX_SPACE> committed_b_pending_{};

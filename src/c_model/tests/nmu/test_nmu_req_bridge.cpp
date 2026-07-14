@@ -1,7 +1,6 @@
 // Regression: the NMU request bridge must NOT head-of-line-block W/AR behind a
 // full AW wormhole input. Reproduces the 8R/8W co-sim self-deadlock
-// deterministically at the bridge+packetize+wormhole level (spec
-// 2026-07-04-nmu-request-hol-fix-design.md).
+// deterministically at the bridge+packetize+wormhole level.
 #include "nmu/nmu.hpp"
 #include "nmu/packetize.hpp"
 #include "ni/wormhole_arbiter.hpp"

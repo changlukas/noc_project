@@ -207,7 +207,7 @@ TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWriteVnet) {
 // W6: keying by (dst_id,id) dissolves the same-id multi-source contention
 // the old r_burst_vc_[id] array had -- two sources (different dst_id) with
 // the same id now get distinct VCs instead of contending one array slot.
-// Covers both brief bullets: same-id different-dst, and same-dst different-id.
+// Covers both cases: same-id different-dst, and same-dst different-id.
 TEST(NsuVcArbiterVnets, DifferentDstOrIdYieldsDistinctVcs) {
     SCENARIO("NSU vnets: rob_req=0 responses differing in dst_id or id can land on different VCs");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
@@ -256,7 +256,7 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcArbParam,
                          });
 
 // ---------------------------------------------------------------------------
-// NsuConfig vnets wiring — Task 5
+// NsuConfig vnets wiring
 // ---------------------------------------------------------------------------
 
 TEST(NsuConfigVnets, ConfigVnetsBuildSpreadingArbiter) {

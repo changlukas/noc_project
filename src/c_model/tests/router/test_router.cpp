@@ -78,7 +78,7 @@ TEST(RouterConstructionDeath, BadParametersAbort) {
 }
 
 TEST(RouterDatapath, ZeroLoadLatencyIsThreeTicks) {
-    SCENARIO("Router: flit pushed at T reaches downstream.push_flit during tick T+3 (spec §12.5)");
+    SCENARIO("Router: flit pushed at T reaches downstream.push_flit during tick T+3");
     Router r(center_cfg());
     FlitSink east;
     r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
@@ -93,7 +93,7 @@ TEST(RouterDatapath, ZeroLoadLatencyIsThreeTicks) {
 }
 
 TEST(RouterDatapath, HeaderTransparency) {
-    SCENARIO("Router: header bits identical at ingress and egress (spec §12.8)");
+    SCENARIO("Router: header bits identical at ingress and egress");
     Router r(center_cfg());
     FlitSink east;
     r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
@@ -132,7 +132,7 @@ TEST(RouterDatapath, CreditDecrementAtGrantAndPulseAfterDequeue) {
     EXPECT_EQ(r.credit(E, 0), NOC_ROUTER_VC_DEPTH);
 }
 
-// --- Wormhole locking helpers (Task 6) ----------------------------------
+// --- Wormhole locking helpers --------------------------------------------
 // A 3-flit packet (head last=0, body last=0, tail last=1) tagged by src_id so
 // flits of concurrent packets can be told apart at the sink. dst routes EAST.
 struct Packet {
@@ -170,7 +170,7 @@ void tick_and_return_credit(Router& r, FlitSink& sink, std::size_t out_port) {
 TEST(RouterWormhole, PacketsDoNotInterleavePerOutputVc) {
     SCENARIO(
         "Router: two inputs, same (output, vc) — flits of packet B never appear "
-        "inside packet A (spec §12.2)");
+        "inside packet A");
     Router r(center_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -276,7 +276,7 @@ TEST(RouterWormhole, SingleFlitPacketLocksAndReleasesSameCycle) {
 TEST(RouterWormhole, LockedEmptyVcIdlesButDoesNotLoseLock) {
     SCENARIO(
         "Router: locked input VC with empty FIFO idles the (output,vc) arbiter; "
-        "competitor cannot steal (spec §5)");
+        "competitor cannot steal");
     Router r(center_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -424,7 +424,7 @@ TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
     // The vc1 packet is blocked behind the unclosed vc0 lock (no leak across VCs).
 }
 
-// --- Per-VC independence (Task 7) ---------------------------------------
+// --- Per-VC independence --------------------------------------------------
 // All three tests need >=2 VCs; the generated default NOC_NUM_VC is 1, so
 // each builds its RouterConfig with num_vc = 2.
 
@@ -447,9 +447,7 @@ void tick_return_credit_for_vc(Router& r, FlitSink& sink, std::size_t out_port, 
 }
 
 TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
-    SCENARIO(
-        "Router: vc0 head-blocked (credits exhausted, none returned) — vc1 traffic flows "
-        "(spec §12.3)");
+    SCENARIO("Router: vc0 head-blocked (credits exhausted, none returned) — vc1 traffic flows");
     Router r(two_vc_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -457,7 +455,7 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
     r.set_downstream(E, east);
     const uint8_t dst = make_dst(3, 1);  // routes EAST from center
 
-    // Phase A — exhaust EAST vc0 credit. Feed one vc0 single-flit packet per tick
+    // First, exhaust EAST vc0 credit. Feed one vc0 single-flit packet per tick
     // from WEST; each grant decrements credit (4 -> 0) and we NEVER return vc0
     // credit. Stop feeding once vc0 credit is gone and 2 extras sit queued (the
     // input VC FIFO is vc_depth=4 deep, so 2 extras can never overflow it).
@@ -475,7 +473,7 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
     const std::size_t vc0_blocked = r.input_fifo_size(WEST, 0);
     const std::size_t sink_after_vc0 = east.received.size();
 
-    // Phase B — feed vc1 single-flit packets from WEST (one/tick) and return vc1
+    // Then feed vc1 single-flit packets from WEST (one/tick) and return vc1
     // credit on delivery. vc1 has full, fresh credit, so it must flow despite vc0
     // being permanently blocked on the same input/output ports.
     int vc1_received = 0;
@@ -542,14 +540,14 @@ TEST(RouterVcArbitration, FlitLevelRrAcrossVcs) {
 TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
     SCENARIO(
         "Router: full output FIFO frees one slot at stage 3 and accepts a new grant the same "
-        "tick (spec §5)");
+        "tick");
     Router r(two_vc_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     const uint8_t dst = make_dst(3, 1);
 
-    // Phase A — fill the EAST output FIFO to its depth (NOC_ROUTER_OUTPUT_FIFO_DEPTH)
+    // Fill the EAST output FIFO to its depth (NOC_ROUTER_OUTPUT_FIFO_DEPTH)
     // WITHOUT a downstream attached, so stage 3 cannot drain it. Keep a backlog queued
     // in the input FIFO so a grant is available on every later tick. Feed one vc0 flit/tick.
     for (int t = 0; t < 12; ++t) {
@@ -579,11 +577,10 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
         << "stage 2 did not grant one from the backlog the same tick";
 }
 
-// --- Credit conservation + error behaviors (Task 8) ---
+// --- Credit conservation + error behaviors ---------------------------------
 
 TEST(RouterCredit, ConservationAcrossChainedRouters) {
-    SCENARIO(
-        "Router: credit + in-flight + downstream occupancy == depth, every tick (spec §6/§12.1)");
+    SCENARIO("Router: credit + in-flight + downstream occupancy == depth, every tick");
     // Chain: A(1,1) EAST -> B(2,1) WEST; B ejects LOCAL into a sink.
     RouterConfig acfg = center_cfg();
     RouterConfig bcfg = center_cfg();
@@ -692,18 +689,18 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
 }
 
 TEST(RouterCreditDeath, OverflowAborts) {
-    SCENARIO("Router: credit return when already full (seeded at DEPTH) -> assert+abort (spec §9)");
+    SCENARIO("Router: credit return when already full (seeded at DEPTH) -> assert+abort");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     Router r(center_cfg());
     EXPECT_DEATH(r.receive_credit(static_cast<std::size_t>(RouterPort::EAST), 0), "overflow");
 }
 
-// --- All-to-one fairness + parameterized grid (Task 9) ------------------
+// --- All-to-one fairness + parameterized grid -----------------------------
 
 TEST(RouterFairness, AllToOneNoStarvation) {
     SCENARIO(
         "Router: 4 inputs flood one output, no backpressure — per-packet wait bounded by "
-        "(inputs-1) x MAX_PACKET_FLITS (spec §5/§12.4)");
+        "(inputs-1) x MAX_PACKET_FLITS");
     Router r(center_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -762,7 +759,7 @@ TEST(RouterFairness, AllToOneNoStarvation) {
         EXPECT_GT(per_src[i], 0) << "input label 0x" << std::hex << static_cast<int>(labels[i])
                                  << " starved (zero grants)";
 
-    // Fairness bound (spec §5): between two consecutive grants of the SAME input,
+    // Fairness bound: between two consecutive grants of the SAME input,
     // at most (inputs-1) x MAX_PACKET_FLITS flits from OTHER inputs may interpose.
     // Packet-level RR serves each of the other 3 inputs one full kPacketFlits
     // packet before returning, so the worst case is exactly 3 x 3 = 9 intervening
@@ -792,8 +789,7 @@ TEST(RouterFairness, AllToOneNoStarvation) {
 class RouterGrid : public ::testing::TestWithParam<std::tuple<int, int>> {};
 
 TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
-    SCENARIO(
-        "Router: NUM_VC x ROUTER_VC_DEPTH grid — mixed traffic end-to-end intact (spec §12.6)");
+    SCENARIO("Router: NUM_VC x ROUTER_VC_DEPTH grid — mixed traffic end-to-end intact");
     auto [num_vc, depth] = GetParam();
     RouterConfig cfg = center_cfg();
     cfg.num_vc = static_cast<uint8_t>(num_vc);
@@ -873,7 +869,7 @@ INSTANTIATE_TEST_SUITE_P(Spec12_6, RouterGrid,
                                             ::testing::Values(1, 2, 4, 8)));
 
 TEST(RouterDatapathDeath, BadVcIdAborts) {
-    SCENARIO("Router: input flit vc_id >= num_vc -> assert+abort (spec §9)");
+    SCENARIO("Router: input flit vc_id >= num_vc -> assert+abort");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     Router r(center_cfg());
     EXPECT_DEATH(r.input(static_cast<std::size_t>(RouterPort::WEST))

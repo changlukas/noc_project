@@ -1,12 +1,12 @@
-// nmu_wrap — Stage 5b DPI wrapper for the Nmu component.
+// nmu_wrap — DPI wrapper for the Nmu component.
 //
 // The Nmu is the most complex wrap — it has BOTH an AXI slave side
 // (incoming AW/W/AR from master, outgoing B/R + handshake to master) AND
 // a NoC side: 4 packed-struct ports drive/read req and rsp flits and credits
 // toward/from the router. Registered-DPI-tick discipline and error checking follow the
-// same pattern as axi_slave_wrap (T9).
+// same pattern as every wrap in this directory.
 //
-// Registered-DPI-tick discipline (spec §5.1): on every posedge clk_i the module
+// Registered-DPI-tick discipline: on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
 // via cmodel_nmu_set_inputs, advances the model via cmodel_nmu_tick, pulls
 // outputs via cmodel_nmu_get_outputs, then registers those outputs nonblocking
@@ -17,7 +17,7 @@
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default per rtl-style.
 //
-// Error polling is centralized in tb_top.sv (T1.4); this wrap no longer
+// Error polling is centralized in tb_top.sv; this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.
 //
 // AXI struct ports (slave view): slave reads axi_req_i (AW/W/AR + bready/
@@ -66,7 +66,7 @@ module nmu_wrap #(
     // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
-    // DPI imports — 3-step pattern per spec §5.1
+    // DPI imports — 3-step pattern (set_inputs/tick/get_outputs)
     // -------------------------------------------------------------------------
 
     import "DPI-C" context function void cmodel_nmu_set_inputs(
@@ -124,7 +124,7 @@ module nmu_wrap #(
         output bit [NUM_VC-1:0]       noc_rsp_credit_return
     );
 
-    // Lifecycle / error polling lives in tb_top.sv (T1.4).
+    // Lifecycle / error polling lives in tb_top.sv.
 
     // -------------------------------------------------------------------------
     // Output registers (registered one cycle behind DPI sample)
@@ -145,7 +145,7 @@ module nmu_wrap #(
     bit [1:0]              rresp_q;
     bit                    rlast_q;
 
-    // NoC req side outputs (Nmu drives toward ChannelModel)
+    // NoC req side outputs (Nmu drives toward the router)
     bit                    noc_req_valid_q;
     bit [FLIT_WIDTH-1:0]   noc_req_flit_q;
 

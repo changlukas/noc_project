@@ -16,10 +16,6 @@
 //   vnet VC -- spilling a fixed-VC stream would reorder it. rob_req=1 B is
 //   order-free at the NMU slot path and round-robins the write vnet.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
-//
-// References:
-//   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md §7.2
-//   docs/superpowers/specs/2026-07-12-clause2-vc-safe-bypass-design.md (return path)
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "router/rsp_out.hpp"
