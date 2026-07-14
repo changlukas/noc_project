@@ -3,7 +3,7 @@
 // Owns an NsuStandalone (T3 hermetic wrapper). Nsu is the inverse of Nmu:
 // it has a NoC consumer side (receives req flits from ChannelModel), a NoC
 // producer side (sends rsp flits to ChannelModel), and an AXI master side
-// (drives AW/W/AR to a subordinate; consumes B/R from that subordinate).
+// (drives AW/W/AR to a slave; consumes B/R from that slave).
 //
 // Each tick follows the 3-step pattern:
 //   set_inputs(in)   → latch NsuInputs
@@ -18,12 +18,12 @@
 //   NoC rsp side:  pop_rsp_flit() on NsuStandalone drains flits produced by
 //                  the Packetize stage (captured in NullNocRspOut queue).
 //   AXI master side: AxiMasterPort.pop_aw/pop_w/pop_ar() drains beats that
-//                  Depacketize deposited; push_b/push_r() feeds subordinate
+//                  Depacketize deposited; push_b/push_r() feeds slave
 //                  responses back to Packetize.
 //
 // AW/W/AR held-latch pattern (AXI4 §A3.2.1): awvalid/wvalid/arvalid must
-// not deassert until awready/wready/arready is observed from the subordinate.
-// Pending beats are held in held_aw_/held_w_/held_ar_ until the subordinate
+// not deassert until awready/wready/arready is observed from the slave.
+// Pending beats are held in held_aw_/held_w_/held_ar_ until the slave
 // asserts the corresponding ready.
 //
 // Hermetic invariant: no refs to other Wraps.
@@ -119,7 +119,7 @@ class NsuWrap {
         out_ = NsuOutputs{};
 
         // AXI master side — drain AW/W/AR beats produced by Depacketize.
-        // Held-latch pattern: hold each beat until the subordinate asserts
+        // Held-latch pattern: hold each beat until the slave asserts
         // awready/wready/arready (AXI4 §A3.2.1 — master must not deassert
         // valid until ready is seen).
 
@@ -192,9 +192,9 @@ class NsuWrap {
             out_.arqos = held_ar_->qos;
         }
 
-        // B/R: push subordinate responses into AxiMasterPort — ONLY on true
+        // B/R: push slave responses into AxiMasterPort — ONLY on true
         // wire-handshake ticks (valid && our previously driven ready). The
-        // subordinate holds the beat (A3.2.1 held latch) while our ready is
+        // slave holds the beat (A3.2.1 held latch) while our ready is
         // low, so gating cannot lose beats — but pushing on bare valid WOULD
         // double-count once ready can be low while valid is held.
         if (in_.bvalid && prev_bready_) {

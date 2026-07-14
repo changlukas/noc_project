@@ -1,13 +1,13 @@
 #pragma once
-// NSU AxiMasterPort — thin transparent AXI4 manager transport, peer of
+// NSU AxiMasterPort — thin transparent AXI4 master transport, peer of
 // nmu/axi_slave_port.hpp.
 //
 // Role (per docs/_archive/noc_cmodel_rtl_plan.md §3): the NSU's downstream-facing
 // AXI boundary. Pre-shaped AW / W / AR beats arrive from the NoC fabric
-// via a Depacketizer; this port queues them and exposes a manager-side
-// pop interface (pop_aw / pop_w / pop_ar) so an external AXI subordinate
+// via a Depacketizer; this port queues them and exposes a master-side
+// pop interface (pop_aw / pop_w / pop_ar) so an external AXI slave
 // (e.g. AxiSlave + Memory) can drain them. B / R beats returned from that
-// subordinate are pushed back in (push_b / push_r), queued, and handed to
+// slave are pushed back in (push_b / push_r), queued, and handed to
 // a Packetizer for NoC return-path transport.
 //
 // Scope mirror image of AxiSlavePort: 5-channel handshake + channel
@@ -20,7 +20,7 @@
 // stage's responsibility (see plan §3.1), NOT this port's.
 //
 // Wiring convention: the upstream side (Depacketizer + Packetizer) is the
-// NoC. The downstream side is the AXI subordinate; the integration
+// NoC. The downstream side is the AXI slave; the integration
 // harness pulls AW/W/AR via pop_* and pushes B/R via push_* once per tick.
 // This keeps the port's constructor signature symmetric with AxiSlavePort
 // (just NoC handles + PortParams) — the test rig owns the explicit
@@ -44,10 +44,10 @@ class AxiMasterPort {
                   PortParams params)
         : depkt_(depacketizer), pkt_(packetizer), params_(params) {}
 
-    // ---- Downstream-facing AXI manager API ----
+    // ---- Downstream-facing AXI master API ----
     // Symmetric mirror of AxiSlavePort's push_*/pop_*: pop_* hands out AW/W/AR
     // beats that the NoC delivered to this NSU; push_* takes B/R beats coming
-    // back from the local subordinate. The harness wires these one-for-one to
+    // back from the local slave. The harness wires these one-for-one to
     // the AxiSlave's push_aw / push_w / push_ar / pop_b / pop_r each cycle.
     std::optional<axi::AwBeat> pop_aw() {
         if (aw_q_.empty()) return std::nullopt;

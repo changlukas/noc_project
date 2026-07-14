@@ -20,7 +20,7 @@ namespace ni::cmodel::nsu {
 // tick() touches no MetaBuffer state and decodes nothing but W.
 //
 // pop_aw() / pop_ar() are the drain stage. Each decodes its flit, remaps the
-// manager's AXI id to the downstream id, allocates the MetaBuffer entry under
+// master's AXI id to the downstream id, allocates the MetaBuffer entry under
 // that key, and hands the beat to AxiMasterPort. Each gates ONLY on its own
 // pool: a full write pool stalls pop_aw and leaves pop_ar untouched. Allocating
 // here rather than at ingress is what keeps a full pool from head-of-line
@@ -157,10 +157,10 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
 // touches no MetaBuffer state; allocation happens in pop_aw / pop_ar.
 // Single-ingress HOL note: unlike the NMU request path, NSU depacketize has NO
 // source-side pairing lock on ingress. It demuxes into independent S1 registers
-// that drain into bounded AxiMasterPort queues, which drain to the subordinate.
+// that drain into bounded AxiMasterPort queues, which drain to the slave.
 // The pending_ HOL is inherent to a single VC (AW/W/AR serialize on one channel)
 // but cannot self-cycle: no ingress resource waits on a downstream that waits
-// back on it. Given the subordinate eventually drains, pending_ always clears.
+// back on it. Given the slave eventually drains, pending_ always clears.
 inline void Depacketize::tick() {
     while (true) {
         Flit f;

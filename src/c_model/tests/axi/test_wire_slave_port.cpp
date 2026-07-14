@@ -6,7 +6,7 @@
 // push_aw latched last_aw_ BEFORE the gate, so during the wait cycles (awready
 // low) a later id overwrote last_aw_ to the LAST id walked. The wire then
 // presented the wrong AW (id 8) and replayed it while ids 1..7 were lost, so
-// the subordinate saw duplicate writes and returned an extra B -> master
+// the slave saw duplicate writes and returned an extra B -> master
 // B_FRONT_CAN_ACCEPT assert. Fix: gate at OFFER time so the first offered beat
 // stays presented; later ids retry next tick.
 
@@ -37,7 +37,7 @@ axi::ArBeat ar_with_id(uint8_t id) {
 TEST(WireSlavePortPresentation, AwFirstOfferedWinsWhileNotReady) {
     axi::detail::WireSlavePort wp;
 
-    wp.set_awready(false);  // tick start: reset offer gate, subordinate not ready
+    wp.set_awready(false);                    // tick start: reset offer gate, slave not ready
     EXPECT_FALSE(wp.push_aw(aw_with_id(1)));  // offered, held (A3.2.1)
     EXPECT_FALSE(wp.push_aw(aw_with_id(2)));  // blocked: one AW already offered this tick
     EXPECT_FALSE(wp.push_aw(aw_with_id(3)));  // blocked
@@ -52,8 +52,8 @@ TEST(WireSlavePortPresentation, AwOneDeliveryPerTick) {
     axi::detail::WireSlavePort wp;
 
     wp.set_awready(true);
-    EXPECT_TRUE(wp.push_aw(aw_with_id(1)));   // id 1 handshakes
-    EXPECT_FALSE(wp.push_aw(aw_with_id(2)));  // blocked this tick
+    EXPECT_TRUE(wp.push_aw(aw_with_id(1)));    // id 1 handshakes
+    EXPECT_FALSE(wp.push_aw(aw_with_id(2)));   // blocked this tick
     EXPECT_FALSE(wp.pending_aw().has_value())  // delivered -> nothing left pending
         << "after delivery the AW is consumed, awvalid drops";
 }

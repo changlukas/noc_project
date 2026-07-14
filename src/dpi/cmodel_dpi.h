@@ -131,8 +131,8 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 // num_vc threads the topology VC count into the NsuConfig (write_rsp_vc=0,
 // read_rsp_vc=(num_vc>=2)?1:0 — Mode A). noc_rsp_credit_return / noc_req_credit_return
 // are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
-// max_unique_ids: 1 collapses every manager onto the all-ones downstream AXI id
-// (FlooNoC's ChimneyDefaultCfg); 256 passes the manager's id through. No other
+// max_unique_ids: 1 collapses every master onto the all-ones downstream AXI id
+// (FlooNoC's ChimneyDefaultCfg); 256 passes the master's id through. No other
 // value is legal, and the Depacketize constructor asserts it.
 // max_outstanding: shared MetaBuffer pool size per direction (FlooNoC MaxTxns).
 unsigned long long cmodel_nsu_create(const char* name, int src_id, int num_vc, int max_unique_ids,

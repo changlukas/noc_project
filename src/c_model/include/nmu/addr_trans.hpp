@@ -49,7 +49,7 @@ class SamTable {
     Translated translate(uint64_t addr) const {
         const SamEntry* e = lookup(addr);
         assert(e && "SAM miss: address maps to no tile (config/stimulus bug)");
-        return {e->dst_id, addr - e->base};  // rebase: subordinate sees 0-based local address
+        return {e->dst_id, addr - e->base};  // rebase: slave sees 0-based local address
     }
 
     const std::vector<SamEntry>& entries() const { return entries_; }

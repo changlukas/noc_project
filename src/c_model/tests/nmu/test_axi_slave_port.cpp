@@ -1,5 +1,5 @@
 // Unit tests for nmu/axi_slave_port.hpp — the NMU upstream-facing AXI4
-// subordinate transparent transport port.
+// slave transparent transport port.
 //
 // Test strategy (per Stage 3 brief):
 //   - LoopbackChannelSet (loopback_channel_set.hpp) wires a
