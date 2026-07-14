@@ -81,7 +81,7 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
 // The slave echoes the DOWNSTREAM id, which is the MetaBuffer key. The flit
 // must carry the master's original id, recovered from the buffered entry (FlooNoC
 // floo_meta_buffer.sv:344-346, "Use original, buffered ID again for responses").
-// nsu::VcArbiter's clause-2 static map keys on this restored rid (microarch §5a).
+// nsu::VcArbiter's clause-2 fixed VC map keys on this restored rid.
 inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id) {
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);

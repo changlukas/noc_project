@@ -82,11 +82,11 @@ class VcArbiter : public router::NocRspOut {
 
     router::NocRspOut& downstream_;
     std::size_t num_vc_;
+    std::vector<uint8_t> write_rsp_vcs_;
+    std::vector<uint8_t> read_rsp_vcs_;
     std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;
-    std::vector<uint8_t> write_rsp_vcs_;
-    std::vector<uint8_t> read_rsp_vcs_;
     uint8_t write_rr_start_ = 0;
     uint8_t read_rr_start_ = 0;
 };
