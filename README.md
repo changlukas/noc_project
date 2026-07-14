@@ -1,97 +1,124 @@
 # noc_project - AXI4 NoC c_model + cosim
 
-A behavioural C++ model and Verilator co-sim of an AXI4 Network-on-Chip
-Interface (NMU + NSU). The c_model passes IHI 0022H AXI4 conformity
-scenarios; the cosim runs them through a Verilator wire-level testbench
-and checks results with the c_model scoreboard.
+A behavioural C++ model of an AXI4 Network-on-Chip interface (NMU, NSU,
+router mesh) with a Verilator wire-level co-simulation. The cosim drives
+generated traffic through a per-topology testbench and checks every
+transaction with a write-to-readback scoreboard plus AXI protocol
+assertions.
 
 ## Status
 
-Research / alpha. Stage 5b in progress; behavioural c_model + Verilator
-cosim. Run `make test` for the current pass count.
+Internal engineering release. Build, unit tests, and directed cosim run
+end to end on the platforms below. `make test` reports the current unit
+suite; `make help` lists all targets.
 
 ## Architecture
 
 ~~~
-AXI Master --> NMU --> [NoC fabric] --> NSU --> AXI Slave
-              behavioural c_model in C++17
-              Verilator wire-level cosim with scoreboard check
+AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
+                C++17 model, one SV wrap per component (DPI handle ABI)
+                generated per-topology tb_top + scoreboard
 ~~~
 
 ### Where code lives
 
-- `c_model/` - C++17 behavioural model + GoogleTest
-- `sim/` - Verilator wire-level cosim
-- `sim/test_patterns/` - AXI4 scenario tree (AX4-CAT-NNN_slug)
-- `specgen/` - spec-to-header codegen sub-project
-- `tools/` - repo-level tooling
-- `docs/` - architecture + development guide
+- `src/c_model/` - C++17 model (`axi`, `nmu`, `nsu`, `router`, `wrap`) + GoogleTest suites
+- `src/sv/` - SV wrapper modules around the model components
+- `src/dpi/` - DPI bridge between SV wraps and the C++ model
+- `sim/` - testbench sources, topology YAMLs, stimulus/plot tooling, `verilator/` and `vcs/` flows
+- `specgen/` - spec-to-code generator (C++ headers + SV packages)
+- `docs/` - spec, trade-off record, verification environment
 
 ## Prerequisites
 
-- CMake 3.20 or newer
-- Verilator 5.036
-- Python 3.9 or newer (with PyYAML)
-- MSYS2 mingw64 toolchain (Windows host)
+- CMake 3.20 or newer, GCC with C++17, GNU make
+- Verilator 5.048 (primary, WSL); 5.036 also works (the Makefile carries its workarounds)
+- Python 3 with PyYAML
+- GoogleTest and yaml-cpp are fetched by CMake; no system install
+
+| Platform | Scope | Verified |
+|---|---|---|
+| Linux (WSL Ubuntu, Verilator 5.048) | build + ctest + cosim | dry-run verified for this release |
+| Windows 11 + MSYS2 mingw64 (Verilator 5.036) | build + ctest | declared |
+| Linux workstation (VCS) | testbench build | declared |
+
+On WSL, work from a native-filesystem copy of the repo; `/mnt/*` mounts
+are slow and unreliable under parallel builds. Per-host settings
+(`BUILD_ROOT`, `PYTHON3`, `VERILATOR`, `CMAKE`) go in a gitignored
+`local.mk` at the repo root. Offline hosts: unpack pre-fetched
+`googletest-src/` and `yaml-cpp-src/` into `~/noc_offline_deps`; the
+build auto-detects it and configures fully disconnected.
 
 ## Build
 
 ~~~bash
 git clone <url> && cd noc_project
-make build       # c_model + Verilator (correct dep order)
+make build       # c_model (CMake) + Verilator testbench, correct dep order
 ~~~
+
+Artifacts land under `build/` (gitignored); `make clean` removes them.
 
 ## Test
 
 ~~~bash
-make test                                    # c_model gtest suite
+make test                                  # c_model ctest suite
+make specgen_pytest                        # specgen suite + golden drift gate
+python3 specgen/tools/codegen.py --check   # committed generated code matches sources
 ~~~
+
+On Windows, invoke Python scripts with `py -3` instead of `python3`.
 
 ## Simulate (cosim)
 
-Cosim runs from the repo root via `make sim`; per-run logs land in
-`sim/<simulator>/output/<run-tag>/run.log`:
+`make sim` builds the chosen topology and runs one directed pattern.
+`TB` is a YAML name from `sim/topologies/` (`mesh_1x1_vc1`,
+`mesh_2x2_nonuniform_vc1`, `mesh_2x4_vc1`, `mesh_4x4_vc1`,
+`mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`); append `_rob` for the
+reorder-buffer variant of the same topology. `PATTERN` is one of
+`neighbor`, `transpose`, `uniform_random`, `hotspot` (`transpose` needs
+a square power-of-two mesh). `SEED` unset draws and prints a random
+seed; pass `SEED=<n>` to replay a run.
 
 ~~~bash
-make sim TB=mesh_4x4_vc1 PATTERN=neighbor        # directed cosim (Verilator)
-make sim TB=mesh_4x4_vc8 PATTERN=uniform_random  # another topology / pattern
+make sim TB=mesh_4x4_vc1 PATTERN=neighbor
+make sim TB=mesh_4x4_vc8_rob PATTERN=transpose
 ~~~
 
-A self-contained wire-level smoke (random reads/writes, no stimulus files)
-runs from each simulator's directory; add `FSDB=1` on VCS for a Verdi dump:
+Each run logs to `sim/verilator/output/<run-tag>/run.log` and ends with
+`DIRECTED PASS: <run-tag> scoreboard clean, non-vacuous` on success. The
+log carries per-node `[Monitor nodeN.master]` latency/bandwidth lines,
+`[HWM]` buffer high-water marks, and `PASS: all N nodes done,
+non-vacuous`.
+
+## Regenerate
+
+Packet, signal, and parameter definitions are single-sourced in
+`specgen/`; generated headers and packages are committed and
+drift-gated at build time.
 
 ~~~bash
-cd sim/verilator && make run-tb-top              # Verilator
-cd sim/vcs       && make run-tb-top FSDB=1       # VCS (needs VERDI_HOME)
+python3 specgen/tools/codegen.py --target cpp --domain packet     # domains: packet, signals, params
+python3 specgen/tools/codegen.py --target sv --domain noc_types --num-vc 4
+python3 specgen/tools/codegen.py --check
 ~~~
-
-See `docs/architecture.md` for the cosim architecture, and
-`docs/development.md` for the full build/run/waveform reference.
 
 ## Documentation
 
-- [Architecture overview](docs/architecture.md)
-- [Development guide](docs/development.md)
-- [specgen sub-project](specgen/docs/guide/index.md)
-- [Historical archive](docs/internal/_archive/README.md)
+- [NI specification](docs/spec.md)
+- [Design trade-off record](docs/trade-off.md)
+- [Verification environment](docs/verification-environment.md)
+- [specgen sub-project guide](specgen/docs/guide/index.md)
 
 ## Contributing
 
-Branches target `main` via PR. Required before merging:
+Feature branches target `main` via PR. Required before merging:
 
 - `make test` clean (builds c_model + full ctest)
 - `clang-format -i` on every C++ file touched
 - Commit message format: `type(scope): description` (English)
 - Never `--no-verify`
 
-Detailed conventions and workflow: `docs/development.md`.
+## License
 
-## License and third-party
-
-No project-wide license has been selected. Until one is added,
-project-owned material is not offered under an open-source license.
-
-Vendored / derived material has its own license:
-
-- `c_model/include/axi/` ported from cocotbext-axi (MIT); see
-  `c_model/include/axi/ATTRIBUTION.md`
+Proprietary and confidential, internal use only. No license is granted
+without written permission of the copyright holder. See `LICENSE`.
