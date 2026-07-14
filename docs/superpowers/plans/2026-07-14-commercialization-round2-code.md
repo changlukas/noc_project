@@ -4,7 +4,7 @@
 
 **Goal:** Execute the Round-1 ledger's approved renames and the two pulled-in code debts, leaving a green tree with final identifiers (spec: `docs/superpowers/specs/2026-07-14-commercialization-textbook-alignment-design.md`, ledger: `docs/superpowers/audit/2026-07-14-ledger.md`).
 
-**Architecture:** Six batches, one commit each: (1) NSU `use_pools_` collapse [D6a], (2) fixed-VC-id wording [D2/D3], (3) `landing_` → input register [D4a], (4) master/slave prose in c_model+dpi [D1], (5) master/slave prose in SV/tools + tb regen [D1], (6) mosi/miso → upstream/downstream [D4b], (7) noc_types banner regen [D6b], (8) full-diff Codex review + final gates. Batches 1-4 are C++-only (ctest gate); 5-7 touch specgen/SV (regen-diff + WSL sim gate).
+**Architecture:** Eight tasks, one commit each: (1) NSU `use_pools_` collapse [D6a], (2) fixed-VC-id wording [D2/D3], (3) `landing_` → input register [D4a], (4) master/slave prose in c_model+dpi [D1], (5) master/slave prose in SV/tools + tb regen [D1], (6) mosi/miso → upstream/downstream [D4b], (7) noc_types banner regen [D6b], (8) full-diff Codex review + final gates. Batches 1-4 are C++-only (ctest gate); 5-7 touch specgen/SV (regen-diff + WSL sim gate).
 
 **Tech Stack:** C++17 header-only c_model, GoogleTest via ctest, specgen Python codegen, Verilator co-sim on WSL.
 
@@ -35,7 +35,8 @@ git checkout docs/commercialization-audit-round1
 git checkout -b refactor/commercialization-round2
 ```
 
-Expected: on `refactor/commercialization-round2`, clean tree, HEAD `211c475`.
+Expected: on `refactor/commercialization-round2`, clean tree, HEAD = current tip of
+`docs/commercialization-audit-round1` (the branch carries the ledger, spec amendments, and this plan).
 
 ---
 
@@ -49,7 +50,7 @@ Expected: on `refactor/commercialization-round2`, clean tree, HEAD `211c475`.
 - Produces: `nsu::VcArbiter::read_write_split(downstream, num_vc, write_rsp_vc, read_rsp_vc, pending_depth)` and `read_write_split_pools(downstream, num_vc, write_rsp_vcs, read_rsp_vcs, pending_depth)` — same signatures as today; scalar factory now delegates to size-1 pools (mirror of `nmu::VcArbiter`, nmu/vc_arbiter.hpp:54-67).
 - Consumes: nothing from other tasks.
 
-Known behavior delta (accepted, mirrors the NMU collapse): in scalar mode, `push_flit` for B/R now also gates on `downstream_.credit_avail(vc)` at select time (previously scalar select returned the VC unconditionally and only pending-depth gated). `num_vc_ == 1` short-circuit is unchanged. If a test fails on this delta, STOP and report — do not adapt the test silently.
+Known behavior delta (accepted, mirrors the NMU collapse): in scalar mode, `push_flit` for B/R now also gates on `downstream_.credit_avail(vc)` at select time (previously scalar select returned the VC unconditionally and only pending-depth gated). `num_vc_ == 1` short-circuit is unchanged. Production co-sim is unaffected (both wraps always build the pools variant via `derive_vc_pools`); the real exposure surface is `src/c_model/tests/integration/test_request_response_loopback.cpp` (builds NSU in scalar mode with num_vc=2 and runs full-pipeline congestion under a cycle watchdog). If a test fails after this task, look there first, then STOP and report — do not adapt the test silently.
 
 - [ ] **Step 1: Rewrite the factories + constructor**
 
@@ -90,11 +91,15 @@ Replace the private constructor (lines 73-83) with:
 
 - [ ] **Step 2: Delete the scalar members and flag**
 
-In the private member block delete these three lines (keep everything else):
+In the private member block delete these three lines — note they are NOT adjacent
+(`write_rsp_vc_`/`read_rsp_vc_` sit above `pending_`; `use_pools_` sits below the pool vectors);
+delete each individually:
 
 ```cpp
     uint8_t write_rsp_vc_;
     uint8_t read_rsp_vc_;
+```
+```cpp
     bool use_pools_ = false;
 ```
 
@@ -329,17 +334,26 @@ with (matches the as-built clause-2 behavior):
 
 - [ ] **Step 4: nsu/meta_buffer.hpp stale member ref**
 
-Line 25, replace:
+Lines 23-25, replace:
 
 ```
+// The remap is a function of upstream_id ALONE. Feeding it src_id would let two
+// sources' R bursts with the same restored rid be interleaved by the subordinate,
 // which would contend nsu::VcArbiter::r_burst_vc_. See the design spec.
 ```
 
-with:
+with (the old r_burst_vc_ contention rationale is obsolete — the (dst_id ^ id) keyed
+fixed-VC map dissolved it; the surviving rationale is upstream parity):
 
 ```
-// which would collide on the (dst_id ^ rid) fixed-VC map in nsu::VcArbiter.
+// The remap is a function of upstream_id ALONE, matching the ported source
+// above. Ordering no longer depends on this choice: the response-path fixed
+// VC map keys on (dst_id ^ id), so same-id streams from different sources
+// land on distinct keys instead of contending.
 ```
+
+(Note "manager's"/"subordinate" words inside these lines belong to Task 4; the replacement
+above already avoids them, which is fine — Task 4's verify grep is the safety net.)
 
 - [ ] **Step 5: test files**
 
@@ -362,15 +376,29 @@ Comment/string rewrites in the same file: lines 225 ("would pin all"→"would fi
 | `TEST(NsuVcArbiterPools, SameBidSameDstBypassPinsOneVc)` | `TEST(NsuVcArbiterPools, SameBidSameDstBypassFixedVcId)` |
 | `TEST(NsuVcArbiterPools, PinnedVcFullRefusesInsteadOfSpilling)` | `TEST(NsuVcArbiterPools, FixedVcFullRefusesInsteadOfSpilling)` |
 
-Comment rewrites: line 83 drop `(RZ1)`; lines 169-175, 200, 221-226 per wording rules ("was r_burst_vc_'s role" phrasing at :84 and :200 may stay — it explains a design lineage in a test explanation; keep it factual: "replaces the retired r_burst_vc_ array's burst-coherence role").
+Comment rewrites: line 83 drop the whole `microarch §5a (RZ1):` prefix (keep the formula description); line 199 drop the `(microarch §5a / meta_buffer.hpp:22-28)` parenthetical (keep the `W6` tag and the keying explanation); lines 169-175, 200, 221-226 per wording rules ("was r_burst_vc_'s role" phrasing at :84 and :200 may stay — it explains a design lineage in a test explanation; keep it factual: "replaces the retired r_burst_vc_ array's burst-coherence role").
 
 - [ ] **Step 6: Verify no survivor**
 
+Run the BROAD sweep and adjudicate the residue by hand (an empty-output expectation is not
+achievable with any sane pattern here):
+
 ```bash
-grep -rniE "rz1|pinn|vc pin|pin miss" src/c_model/ | grep -viE "pinpoint|pins the yaml|rtl pin|pin set|pin bundle|_pins"
+grep -rniE "rz1|\bpin(s|ned|ning)?\b|pinn" src/c_model/
 ```
 
-Expected: no output. (The excluded patterns are hardware-pin/struct-name uses that stay.)
+Expected: `rz1` → zero hits. For pin words, the ONLY legitimate survivors are the
+hardware-pin/struct senses — this allowlist, nothing else:
+
+| file | sense |
+|---|---|
+| `router/req_in.hpp`, `req_out.hpp`, `rsp_in.hpp`, `rsp_out.hpp` | "RTL pin set" / pin bundle (Task 6 rewords bundle NAMES but the pin-bundle sense stays) |
+| `wrap/router_wrap.hpp:17,27`, `wrap/router_wrap_io.hpp` | "LOCAL pin mapping" / pin groups |
+| `tests/wrap/test_nmu_wrap.cpp:208` | "pins the YAML load" (idiom, non-VC) |
+| `tests/router/test_router.cpp:18` | "pinned by RouterDatapath..." — reword this one too: "pinned by" → "verified by" (cheap, keeps the sweep clean) |
+| `tests/nsu/test_nsu.cpp:55`, `tests/nmu/test_nmu.cpp:61` | "Pinpoints:" (unrelated word) |
+
+Any OTHER pin hit = missed rewrite; fix it before proceeding.
 
 - [ ] **Step 7: Format, test, commit**
 
@@ -418,6 +446,7 @@ Wording rules: "landing register" → "input register" (textbook input-buffered-
 - `test_router_adapters.cpp`: `TEST(InjectAdapter, LandingGuardResetsOnTick)` → `TEST(InjectAdapter, InputRegGuardResetsOnTick)`; comments :54 ("landing free"→"input register free"), :68 ("landing->fifo"→"input register -> fifo").
 - `test_router_front_route.cpp:39`: `// landing -> input FIFO` → `// input register -> input FIFO`
 - `test_wormhole_arbiter.cpp:159,165`: "landing VC" → "selected VC".
+- `nmu/rob.hpp:225`: "arrival places landing beats" → "arrival places incoming beats" (RoB usage of the same metaphor; reword so the sweep below comes back clean).
 
 - [ ] **Step 4: Verify, format, test, commit**
 
@@ -433,12 +462,14 @@ git add -u src/c_model
 git commit -m "refactor(router): rename landing register to input register"
 ```
 
+(File list for this commit now includes `nmu/rob.hpp` from Step 3.)
+
 ---
 
 ### Task 4: master/slave prose unification, c_model + dpi [D1, ledger L1-003]
 
 **Files (from the audit sweep — every hit is a comment; no identifier changes):**
-- Modify: `src/c_model/include/nsu/axi_master_port.hpp` (:2,7,8,10,23,47,50), `src/c_model/include/nmu/axi_slave_port.hpp` (:2,5,8,15,47), `src/c_model/include/nsu/depacketize.hpp` (:23,160,163), `src/c_model/include/nsu/meta_buffer.hpp` (:14,19,24,31), `src/c_model/include/nsu/packetize.hpp` (:81,82), `src/c_model/include/nsu/port_params.hpp` (:27), `src/c_model/include/nmu/addr_trans.hpp` (:52), `src/c_model/include/wrap/nsu_wrap.hpp` (:6,21,25,26,122,195,197), `src/c_model/include/wrap/nsu_wrap_io.hpp` (:6,11,46,48,50,54,56,72,83,88,90,101), `src/c_model/tests/nmu/test_axi_slave_port.cpp` (:2), `src/c_model/tests/axi/test_wire_slave_port.cpp` (:9), `src/dpi/cmodel_dpi.h` (:134,135)
+- Modify: `src/c_model/include/nsu/axi_master_port.hpp` (:2,7,8,10,23,47,50), `src/c_model/include/nmu/axi_slave_port.hpp` (:2,5,8,15,47), `src/c_model/include/nsu/depacketize.hpp` (:23,160,163), `src/c_model/include/nsu/meta_buffer.hpp` (:14,19,24,31), `src/c_model/include/nsu/packetize.hpp` (:81,82), `src/c_model/include/nsu/port_params.hpp` (:27), `src/c_model/include/nmu/addr_trans.hpp` (:52), `src/c_model/include/wrap/nsu_wrap.hpp` (:6,21,25,26,122,195,197), `src/c_model/include/wrap/nsu_wrap_io.hpp` (:6,11,46,48,50,54,56,72,83,88,90,101), `src/c_model/tests/nmu/test_axi_slave_port.cpp` (:2), `src/c_model/tests/axi/test_wire_slave_port.cpp` (:9,:40 "subordinate not ready"), `src/dpi/cmodel_dpi.h` (:134,135)
 
 **Interfaces:** none; comments only.
 
@@ -484,7 +515,7 @@ git commit -m "docs(cmodel): unify AXI role prose to master/slave"
 
 - [ ] **Step 2: Regenerate committed tb files**
 
-From repo root (Windows), for each committed tb (topology name = filename minus `tb_top_` prefix and `.sv` suffix):
+From repo root in **Git Bash** (the loop is bash syntax; `py -3` is the canonical Windows interpreter), for each committed tb (topology name = filename minus `tb_top_` prefix and `.sv` suffix):
 
 ```bash
 for t in mesh_1x1_vc1 mesh_2x2_nonuniform_vc1 mesh_2x4_vc1 mesh_4x4_vc1 mesh_4x4_vc1_rob \
@@ -493,7 +524,9 @@ for t in mesh_1x1_vc1 mesh_2x2_nonuniform_vc1 mesh_2x4_vc1 mesh_4x4_vc1 mesh_4x4
 done
 ```
 
-Then `git diff --stat sim/tb/` — expected: exactly the 11 tb files, comment-line deltas only (inspect one full diff: `git diff sim/tb/tb_top_mesh_4x4_vc1.sv`, expect only the NSU-knobs comment lines changed). If gen_tb_top emits anything else (e.g. `src/sv/noc_fabric_*.sv`), check those diffs are empty or comment-only; if unexpectedly non-comment, STOP and report.
+Then `git diff --stat sim/tb/` — expected: exactly the 11 tb files, comment-line deltas only (inspect one full diff: `git diff sim/tb/tb_top_mesh_4x4_vc1.sv`, expect only the NSU-knobs comment lines changed). gen_tb_top also re-emits `src/sv/noc_fabric_*.sv` each run; those carry no role prose and regenerate byte-identical — `git status src/sv` must show no change. If any non-comment delta appears anywhere, STOP and report.
+
+Coverage note: the sim gate below compiles only `mesh_4x4_vc1`; the other 10 regenerated tbs are covered by generator determinism + this diff inspection, not by compilation. Accepted for a comment-only delta.
 
 - [ ] **Step 3: Verify sweep-level completion**
 
@@ -547,7 +580,10 @@ Expected: `generated/cpp/ni_signals.h` diff shows struct renames only; `generate
 
 - [ ] **Step 3: Refresh the golden**
 
+From repo root (NOT from inside `specgen/` — Step 2 changed directory):
+
 ```bash
+cd <repo-root>
 cp specgen/generated/cpp/ni_signals.h specgen/tests/golden/ni_signals.h.golden
 ```
 
