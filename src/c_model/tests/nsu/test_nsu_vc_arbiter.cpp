@@ -80,9 +80,9 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
 }
 
-// microarch §5a (RZ1): rsp VC = pool[(dst_id ^ id) % pool.size()], zero state.
-// Replaces r_burst_vc_'s burst-coherence role -- a burst's beats share
-// (dst_id, rid) so they hash to the same pool slot automatically.
+// Clause 2 fixed VC id: rsp VC = pool[(dst_id ^ id) % pool.size()], zero state.
+// Replaces the retired r_burst_vc_ array's burst-coherence role -- a burst's
+// beats share (dst_id, rid) so they hash to the same pool slot automatically.
 //
 // A multi-beat R burst (one rid) keeps every beat on its single mapped VC.
 TEST(NsuVcArbiterPools, RBurstStaysOnOneVc) {
@@ -166,13 +166,13 @@ TEST(NsuVcArbiterPools, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
 }
 
 // INVERTED from the pre-clause-2 test "SameBidRoundRobinsWritePool": that test
-// asserted B has no pin and round-robins same-bid responses. The clause-2
-// return-path static map now pins rob_req=0 B the same way it pins R -- a
+// asserted B has no fixed VC and round-robins same-bid responses. The clause-2
+// return-path map now fixes rob_req=0 B the same way it fixes R -- a
 // same-(dst,bid) bypass stream must share one VC to stay in order at the NMU.
 // rob_req=1 (robbed) B keeps the old round-robin behavior; see the next test.
-TEST(NsuVcArbiterPools, SameBidSameDstBypassPinsOneVc) {
+TEST(NsuVcArbiterPools, SameBidSameDstBypassFixedVcId) {
     SCENARIO(
-        "NSU pools: rob_req=0 same-(dst,bid) B responses pin to one VC (clause-2 return-path map)");
+        "NSU pools: rob_req=0 same-(dst,bid) B responses fix to one VC (clause-2 return-path map)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
                                                  /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
@@ -196,11 +196,10 @@ TEST(NsuVcArbiterPools, SameBidRobbedRoundRobinsWritePool) {
     EXPECT_EQ(b, 1u) << "rob_req=1 B is order-free; round-robins the write pool";
 }
 
-// W6 (microarch §5a / meta_buffer.hpp:22-28): keying by (dst_id,id) dissolves
-// the same-id multi-source contention the old r_burst_vc_[id] array had --
-// two sources (different dst_id) with the same id now get distinct VCs
-// instead of contending one array slot. Covers both brief bullets: same-id
-// different-dst, and same-dst different-id.
+// W6: keying by (dst_id,id) dissolves the same-id multi-source contention
+// the old r_burst_vc_[id] array had -- two sources (different dst_id) with
+// the same id now get distinct VCs instead of contending one array slot.
+// Covers both brief bullets: same-id different-dst, and same-dst different-id.
 TEST(NsuVcArbiterPools, DifferentDstOrIdYieldsDistinctVcs) {
     SCENARIO("NSU pools: rob_req=0 responses differing in dst_id or id can land on different VCs");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
@@ -218,12 +217,12 @@ TEST(NsuVcArbiterPools, DifferentDstOrIdYieldsDistinctVcs) {
     EXPECT_NE(same_dst_id_a, same_dst_id_b) << "different id, same dst_id must be able to spread";
 }
 
-// Pinned-VC-full refuses rather than spills to another VC (design: spilling a
+// Fixed-VC-full refuses rather than spills to another VC (design: spilling a
 // same-(dst,id) stream to a second VC would reorder it -- the exact hazard
-// the pin exists to prevent). Fill the mapped VC to pending_depth_, then a
-// same-(dst,id) push must fail, and no flit lands on the other pool VC.
-TEST(NsuVcArbiterPools, PinnedVcFullRefusesInsteadOfSpilling) {
-    SCENARIO("NSU pools: pinned VC full -> push_flit refuses, never spills to the pool's other VC");
+// the fixed VC exists to prevent). Fill the mapped VC to pending_depth_, then
+// a same-(dst,id) push must fail, and no flit lands on the other pool VC.
+TEST(NsuVcArbiterPools, FixedVcFullRefusesInsteadOfSpilling) {
+    SCENARIO("NSU pools: fixed VC full -> push_flit refuses, never spills to the pool's other VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
                                                  /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});

@@ -10,12 +10,13 @@
 //   from rr_start_; first VC with pending space AND downstream credit wins
 //   (else backpressure).
 //
-// Clause 2 VC pin (microarch §5a): a rob_req=0 AW/AR flit whose (dst_id, id)
-// matches the id's previous same-channel flit reuses that VC instead of
-// round-robining -- pins a same-(dst,id) bypass streak to one VC so it
-// cannot be reordered in-fabric. A pin miss (new id, or dst changed) falls
-// back to round-robin and records the new (dst, VC) for next time. rob_req=1
-// flits are RoB-owned and order-free, so they always round-robin, unpinned.
+// Clause 2 fixed VC id: a rob_req=0 AW/AR flit whose (dst_id, id) matches
+// the id's previous same-channel flit reuses that VC instead of
+// round-robining -- deterministic VC allocation that fixes a same-(dst,id)
+// bypass streak to one VC so it cannot be reordered in-fabric. With no
+// fixed VC yet (new id, or dst changed) it falls back to round-robin and
+// records the new (dst, VC) for next time. rob_req=1 flits are RoB-owned
+// and order-free, so they always round-robin, never fixed.
 //
 // W-follows-AW invariant (Constraint A1): this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
@@ -108,8 +109,8 @@ class VcArbiter : public router::NocReqOut {
     uint8_t read_rr_start_ = 0;
     std::optional<uint8_t> current_aw_vc_;
 
-    // Clause 2 VC pin (microarch §5a): last (dst_id, VC) a given AXI id took
-    // on a rob_req=0 flit, per direction. nullopt dst = id never seen.
+    // Clause 2 fixed VC id: last (dst_id, VC) a given AXI id took on a
+    // rob_req=0 flit, per direction. nullopt dst = id never seen.
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_aw_dst_{};
     std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_ar_dst_{};
@@ -136,10 +137,10 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
     if (axi_ch != ni::AXI_CH_AW && axi_ch != ni::AXI_CH_AR) return std::nullopt;
 
-    // Clause 2 VC pin: rob_req=0 flit whose dst_id matches this id's last
-    // same-channel dst_id reuses that VC. No fallback to round-robin on
-    // block -- rerouting a pinned streak mid-flight is exactly the reorder
-    // this pin exists to prevent.
+    // Clause 2 fixed VC id: rob_req=0 flit whose dst_id matches this id's
+    // last same-channel dst_id reuses that VC. No fallback to round-robin on
+    // block -- rerouting a fixed-VC streak mid-flight is exactly the reorder
+    // the fixed VC exists to prevent.
     if (rob_req == 0) {
         std::optional<uint8_t>& last_dst =
             (axi_ch == ni::AXI_CH_AW) ? last_aw_dst_[id] : last_ar_dst_[id];
@@ -197,9 +198,9 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         }
     }
 
-    // Clause 2 VC pin: record (dst_id, VC) for this id only after all accept
-    // conditions pass (mirrors current_aw_vc_'s atomicity above). rob_req=1
-    // flits are RoB-owned/order-free -- do not pin them.
+    // Clause 2 fixed VC id: record (dst_id, VC) for this id only after all
+    // accept conditions pass (mirrors current_aw_vc_'s atomicity above).
+    // rob_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
     if (rob_req == 0 && (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR)) {
         if (axi_ch == ni::AXI_CH_AW) {
             last_aw_dst_[id] = dst_id;

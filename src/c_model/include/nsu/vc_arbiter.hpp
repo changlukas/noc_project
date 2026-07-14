@@ -6,16 +6,15 @@
 //
 // ReadWriteSplit (only mode): per-class VC pool; the scalar factory wraps a
 // single VC into a size-1 pool (mirror of nmu::VcArbiter).
-//   Clause 2 return-path static map (microarch §5a, RZ1): a rob_req=0 B, or
-//   ANY R (regardless of rob_req), maps to
-//   pool[(dst_id ^ id) % pool.size()] -- a deterministic pure function, zero
-//   state. This pins a same-(dst,id) bypassed response stream to one VC (so
-//   it cannot be reordered in-fabric) and gives R burst coherence for free:
-//   every beat of a burst shares (dst_id, rid) and hashes identically. A
-//   mapped VC that is full/no-credit refuses (`return false`) rather than
-//   spilling to another pool VC -- spilling a pinned stream would reorder it.
-//   rob_req=1 B is order-free at the NMU slot path and round-robins the
-//   write pool, same as before clause 2.
+//   Clause 2 fixed VC id (return path): a rob_req=0 B, or ANY R (regardless
+//   of rob_req), maps to pool[(dst_id ^ id) % pool.size()] -- deterministic
+//   VC allocation, a pure function with zero state. This fixes a
+//   same-(dst,id) bypassed response stream to one VC (so it cannot be
+//   reordered in-fabric) and gives R burst coherence for free: every beat of
+//   a burst shares (dst_id, rid) and hashes identically. A mapped VC that is
+//   full/no-credit refuses (`return false`) rather than spilling to another
+//   pool VC -- spilling a fixed-VC stream would reorder it. rob_req=1 B is
+//   order-free at the NMU slot path and round-robins the write pool.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
 //
 // References:
@@ -98,23 +97,23 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
     const std::vector<uint8_t>* cand = nullptr;
     uint8_t* rr = nullptr;
-    bool pinned = false;
+    bool fixed_vc = false;
     if (axi_ch == ni::AXI_CH_B) {
         cand = &write_rsp_vcs_;
         rr = &write_rr_start_;
-        pinned = (rob_req == 0);  // rob_req=1 B is order-free; round-robins.
+        fixed_vc = (rob_req == 0);  // rob_req=1 B is order-free; round-robins.
     } else if (axi_ch == ni::AXI_CH_R) {
         cand = &read_rsp_vcs_;
         rr = &read_rr_start_;
-        pinned = true;  // ALL R: static map gives burst coherence, was r_burst_vc_'s role.
+        fixed_vc = true;  // ALL R: the fixed map gives burst coherence.
     } else {
         return std::nullopt;
     }
 
-    if (pinned) {
-        // Clause 2 return-path static map (microarch §5a, RZ1): deterministic
-        // pure function of (dst_id, id), zero state. Full/no-credit -> refuse,
-        // never spill (spilling a pinned stream to another VC would reorder it).
+    if (fixed_vc) {
+        // Clause 2 fixed VC id (return path): deterministic pure function of
+        // (dst_id, id), zero state. Full/no-credit -> refuse, never spill
+        // (spilling a fixed-VC stream to another VC would reorder it).
         uint8_t vc = (*cand)[static_cast<uint8_t>(dst_id ^ id) % cand->size()];
         if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
         return std::nullopt;

@@ -57,9 +57,10 @@ struct NsuConfig {
     uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
     uint8_t read_rsp_vc = 0;   // R -> read_rsp_vc
     // ReadWriteSplit pool variant (response side): non-empty -> per-class pool.
-    // B: id-agnostic round-robin over write_rsp_vcs.
-    // R: first beat of each rid round-robins over read_rsp_vcs; later beats of
-    //    that rid reuse the same VC until rlast (burst-follow, not per-id pin).
+    // B: rob_req=0 -> fixed VC id pool[(dst_id ^ bid) % size]; rob_req=1 ->
+    //    id-agnostic round-robin over write_rsp_vcs.
+    // R: fixed VC id pool[(dst_id ^ rid) % size] for every beat; a burst's
+    //    beats share (dst_id, rid) so the whole burst lands on one VC.
     std::vector<uint8_t> write_rsp_vcs{};
     std::vector<uint8_t> read_rsp_vcs{};
     std::size_t wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;

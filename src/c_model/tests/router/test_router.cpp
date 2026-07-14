@@ -15,7 +15,7 @@ using ni::cmodel::router::RouterPort;
 namespace {
 
 // Router zero-load latency: a flit pushed at tick T is delivered at T+3
-// (3-stage reverse-order pipeline; pinned by RouterDatapath.ZeroLoadLatencyIsThreeTicks).
+// (3-stage reverse-order pipeline; verified by RouterDatapath.ZeroLoadLatencyIsThreeTicks).
 constexpr int kPipelineDepth = 3;
 
 RouterConfig center_cfg() {
