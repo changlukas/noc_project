@@ -43,15 +43,16 @@ enum class RobMode { Disabled, Enabled };  // Enabled = next round
 // single-outstanding interlock (one transaction in flight per id), not by
 // AxiMaster ordering or XY routing. Enabled mode uses rob_idx for per-beat
 // reorder buffering and does not rely on this interlock.
+// B RoB is unconditional in this model (cheap, no payload) -- a deliberate
+// divergence from FlooNoC's optional BRoBType=NoRoB. Only R keeps a Disabled mode.
 class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
-    Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_w,
-        RobMode mode_r, addr_trans::SamTable sam, std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
+    Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_r,
+        addr_trans::SamTable sam, std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
         std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
         std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
-          mode_w_(mode_w),
           mode_r_(mode_r),
           sam_(std::move(sam)),
           b_rob_depth_(b_rob_depth),
@@ -115,15 +116,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         return msb < 0 ? r_rob_depth_ : r_rob_depth_ - 1u - static_cast<std::size_t>(msb);
     }
 
-    // Test introspection: current outstanding-entry count summed over all ids.
-    // Counts Disabled-mode per-id flags (one per id at most). Enabled-mode
-    // slot-pool occupancy (write_entries_) is not counted -- extend here if/when
-    // Enabled mode is exercised.
-    std::size_t write_occupancy() const {
-        std::size_t n = 0;
-        for (bool s : write_outstanding_) n += s ? 1 : 0;
-        return n;
-    }
+    // Test introspection: current read outstanding-entry count summed over all ids
+    // (the R Disabled-mode per-id interlock flags). Writes are always RoB'd, so there
+    // is no write interlock to count.
     std::size_t read_occupancy() const {
         std::size_t n = 0;
         for (bool s : read_outstanding_) n += s ? 1 : 0;
@@ -142,15 +137,14 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 
     NmuPacketizeSink& next_pkt_;
     ResponseDepacketizer& next_depkt_;
-    RobMode mode_w_, mode_r_;
+    RobMode mode_r_;
     addr_trans::SamTable sam_;
     std::size_t b_rob_depth_;
     std::size_t r_rob_depth_;
     std::size_t max_txns_per_id_;
 
-    // Per-AXI-ID single-outstanding flag. True while one AW/AR is in flight for
-    // that id; cleared by B (for writes) or R(last) (for reads) in pop_b/pop_r.
-    std::array<bool, axi::AXI_ID_SPACE> write_outstanding_{};
+    // Per-AXI-ID single-outstanding flag for the R Disabled path. True while one AR
+    // is in flight for that id; cleared by R(last) in pop_r.
     std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
 
     // W burst credit gate: prevents W beats from reaching Packetize before
@@ -244,57 +238,46 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
-    if (mode_w_ == RobMode::Enabled) {
-        // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
-        if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
-        auto t = sam_.translate(b.addr);
-        const uint8_t dst = t.dst_id;
-        const bool empty = write_order_by_id_[b.id].empty();
-        bool needs_rob;
-        bool fallen_back;  // trial value; committed only once the push is accepted
-        if (empty) {
-            // Clause 1: nothing in flight for this id, so nothing can overtake this
-            // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
-            needs_rob = false;
-            fallen_back = false;  // fresh streak
-        } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id]) {
-            // Clause 2: same dest as the previous same-id push, not yet reordering.
-            // Ported from floo_rob.sv:427-428.
-            needs_rob = false;
-            fallen_back = false;
-        } else {
-            // Ported from floo_rob.sv:430-432.
-            needs_rob = true;
-            fallen_back = true;  // sticky
-        }
-        std::size_t base = 0;
-        if (needs_rob) {
-            if (write_free_space() < 1) return false;
-            base = b_rob_depth_ - write_free_space();
-        }
-        if (!next_pkt_.push_aw_with_meta(
-                b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
-                    static_cast<uint8_t>(needs_rob ? base : 0)})) {
-            return false;  // downstream backpressure: no state mutation
-        }
-        prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
-        fallen_back_write_[b.id] = fallen_back;
-        if (needs_rob) {
-            alloc_write_.set(base);  // a 1-slot range: base is its own top
-            write_entries_[base] =
-                WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
-        }
-        write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob});
-        ++w_burst_credit_;
-        return true;
-    }
+    // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
+    if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
     auto t = sam_.translate(b.addr);
-    if (write_outstanding_[b.id]) return false;  // single-outstanding per id
-    if (!next_pkt_.push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
-        return false;  // downstream backpressure: NO state change
+    const uint8_t dst = t.dst_id;
+    const bool empty = write_order_by_id_[b.id].empty();
+    bool needs_rob;
+    bool fallen_back;  // trial value; committed only once the push is accepted
+    if (empty) {
+        // Clause 1: nothing in flight for this id, so nothing can overtake this
+        // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
+        needs_rob = false;
+        fallen_back = false;  // fresh streak
+    } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id]) {
+        // Clause 2: same dest as the previous same-id push, not yet reordering.
+        // Ported from floo_rob.sv:427-428.
+        needs_rob = false;
+        fallen_back = false;
+    } else {
+        // Ported from floo_rob.sv:430-432.
+        needs_rob = true;
+        fallen_back = true;  // sticky
     }
-    write_outstanding_[b.id] = true;
-    w_burst_credit_++;
+    std::size_t base = 0;
+    if (needs_rob) {
+        if (write_free_space() < 1) return false;
+        base = b_rob_depth_ - write_free_space();
+    }
+    if (!next_pkt_.push_aw_with_meta(
+            b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
+                static_cast<uint8_t>(needs_rob ? base : 0)})) {
+        return false;  // downstream backpressure: no state mutation
+    }
+    prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
+    fallen_back_write_[b.id] = fallen_back;
+    if (needs_rob) {
+        alloc_write_.set(base);  // a 1-slot range: base is its own top
+        write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
+    }
+    write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob});
+    ++w_burst_credit_;
     return true;
 }
 
@@ -365,17 +348,10 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
 }
 
 inline std::optional<axi::BBeat> Rob::pop_b() {
-    if (mode_w_ == RobMode::Enabled) {
-        auto out = pop_b_staged();
-        if (!out) return std::nullopt;
-        if (out->rob_req) commit_b_exit(out->rob_idx, out->axi_id);
-        return out->beat;
-    }
-    auto opt = next_depkt_.pop_b();
-    if (!opt) return std::nullopt;
-    assert(write_outstanding_[opt->id] && "B for id with no outstanding write");
-    write_outstanding_[opt->id] = false;
-    return opt;
+    auto out = pop_b_staged();
+    if (!out) return std::nullopt;
+    if (out->rob_req) commit_b_exit(out->rob_idx, out->axi_id);
+    return out->beat;
 }
 
 inline std::optional<axi::RBeat> Rob::pop_r() {
@@ -425,7 +401,6 @@ inline void Rob::drain_ready_read_heads_(uint8_t id) {
 }
 
 inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
-    if (mode_w_ != RobMode::Enabled) return std::nullopt;
     if (!committed_b_queue_.empty()) {
         auto b = committed_b_queue_.front();
         committed_b_queue_.pop_front();

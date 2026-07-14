@@ -769,8 +769,8 @@ void dump_one_nmu(const std::string& name, NmuWrap& nw) {
                 sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_R),
                 sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_B),
                 sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_R));
-    std::printf("[FABRIC-DUMP] %s rob write_outstanding=%zu read_outstanding=%zu", name.c_str(),
-                sa->rob().write_occupancy(), sa->rob().read_occupancy());
+    std::printf("[FABRIC-DUMP] %s rob read_outstanding=%zu", name.c_str(),
+                sa->rob().read_occupancy());
     for (uint8_t vc = 0; vc < nw.num_vc(); ++vc) {
         std::printf(" req_credit_avail[vc%u]=%d", vc, sa->req_credit_avail(vc) ? 1 : 0);
     }

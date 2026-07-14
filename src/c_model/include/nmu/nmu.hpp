@@ -128,7 +128,6 @@ struct NmuConfig {
     uint8_t src_id = 0;
     addr_trans::SamTable sam{};
     RobMode read_rob_mode = RobMode::Disabled;
-    RobMode write_rob_mode = RobMode::Disabled;
     // RoB pool depths, per direction. Enabled mode only. See
     // docs/nmu-rob-microarchitecture.md section 6.
     std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH;
@@ -196,8 +195,8 @@ class Nmu {
             // NmuRsp ROB Disabled: 2 stages
             //   S0 = Depacketize deque
             //   S1 = AxiSlavePort b_q/r_q
-            bool rob_enabled = (axi_ch == ni::AXI_CH_B) ? (cfg_.write_rob_mode == RobMode::Enabled)
-                                                        : (cfg_.read_rob_mode == RobMode::Enabled);
+            bool rob_enabled =
+                (axi_ch == ni::AXI_CH_B) ? true : (cfg_.read_rob_mode == RobMode::Enabled);
             if (stage == 0) {
                 if (axi_ch == ni::AXI_CH_B) return depacketize_.b_occupancy();
                 if (axi_ch == ni::AXI_CH_R) return depacketize_.r_occupancy();
@@ -234,7 +233,6 @@ class Nmu {
     void drain_rsp_s2_r_();
     void advance_rsp_s2_b_();
     void advance_rsp_s2_r_();
-    void drain_rsp_robless_b_();
     void drain_rsp_robless_r_();
 
     // Declaration order respects ctor ref dependencies:
@@ -287,8 +285,8 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
                  cfg_.src_id, cfg_.sam),
       req_s1_bridge_(),
-      rob_(req_s1_bridge_, depacketize_, cfg_.write_rob_mode, cfg_.read_rob_mode, cfg_.sam,
-           cfg_.b_rob_depth, cfg_.r_rob_depth, cfg_.max_txns_per_id),
+      rob_(req_s1_bridge_, depacketize_, cfg_.read_rob_mode, cfg_.sam, cfg_.b_rob_depth,
+           cfg_.r_rob_depth, cfg_.max_txns_per_id),
       axi_slave_port_(rob_, rob_, cfg_.port_params),
       s2_rsp_b_(),
       s2_rsp_r_(),
@@ -305,12 +303,9 @@ inline void Nmu::tick() {
     drain_rsp_r_output_();
     advance_rsp_b_shift_();
     advance_rsp_r_shift_();
-    if (cfg_.write_rob_mode == RobMode::Enabled) {
-        drain_rsp_s2_b_();
-        advance_rsp_s2_b_();
-    } else {
-        drain_rsp_robless_b_();
-    }
+    // B RoB is always on; unlike R there is no RobLess drain path here.
+    drain_rsp_s2_b_();
+    advance_rsp_s2_b_();
     if (cfg_.read_rob_mode == RobMode::Enabled) {
         drain_rsp_s2_r_();
         advance_rsp_s2_r_();
@@ -400,17 +395,6 @@ inline void Nmu::advance_rsp_s2_r_() {
     auto r = rob_.pop_r_staged();
     if (!r) return;
     s2_rsp_r_.accept({r->beat, r->rob_idx, r->axi_id, r->rob_req});
-}
-
-inline void Nmu::drain_rsp_robless_b_() {
-    if (rsp_extra_b_shift_.empty() &&
-        axi_slave_port_.b_q_size() >= axi_slave_port_.params().b_queue_depth) {
-        return;
-    }
-    if (!rsp_extra_b_shift_.empty() && rsp_extra_b_shift_.front().full()) return;
-    auto b = rob_.pop_b();
-    if (!b) return;
-    (void)accept_rsp_b_entry_({*b, 0, b->id, false});
 }
 
 inline void Nmu::drain_rsp_robless_r_() {

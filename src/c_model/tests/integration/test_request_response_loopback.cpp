@@ -203,8 +203,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // unchanged) so scenario-driven stimulus addressing is unaffected by the
     // Task 5 migration off xy_route.
     nmu_cfg.sam = nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
-    nmu_cfg.write_rob_mode = rob_mode;
-    nmu_cfg.read_rob_mode = rob_mode;
+    nmu_cfg.read_rob_mode = rob_mode;  // B RoB is always on; rob_mode now controls R only
     nmu_cfg.port_params = nmu_params;
     // ReadWriteSplit: AW/W on write_vc=0, AR on read_vc=1 when num_vc>=2.
     nmu_cfg.num_vc = num_vc;

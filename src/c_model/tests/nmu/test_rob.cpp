@@ -144,38 +144,14 @@ struct RobRig {
     // Packetize's sam is never touched here.
     Packetize pkt{noc.req_out(), w_cap, ar_cap, kSrcId, {}};
     Depacketize depkt{noc.rsp_in(), 16, 16};
-    Rob rob{pkt, depkt, RobMode::Disabled, RobMode::Disabled, legacy_sam()};
+    Rob rob{pkt, depkt, RobMode::Disabled, legacy_sam()};
 };
 }  // namespace
 
-// === ROB-specific core behavior (4 tests) ===
-
-TEST(NmuRob, Disabled_StallSecondSameId) {
-    SCENARIO(
-        "Rob Disabled: a second same-id AW stalls until the first AW's B returns "
-        "(single-outstanding)");
-    RobRig r;
-    // 1st AW: id=5, addr=0x100 -> dst=0
-    ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    // 2nd AW: same id, same dst (addr=0x200 -> dst=0) -> must stall (single-outstanding per id)
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x200)))
-        << "second same-id AW must stall (one outstanding per id)";
-}
-
-TEST(NmuRob, Disabled_StallReleaseOnBComplete) {
-    SCENARIO("Rob Disabled: stall on second same-id AW released when matching B arrives via pop_b");
-    RobRig r;
-    ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x200)));
-    // Inject a B flit for id=5 via rsp_in
-    ASSERT_TRUE(r.noc.rsp_out().push_flit(make_b_flit(0x05)));
-    r.depkt.tick();  // demux into B queue
-    auto b = r.rob.pop_b();
-    ASSERT_TRUE(b.has_value());
-    EXPECT_EQ(b->id, 0x05);
-    // After pop_b, outstanding for id=5 is cleared -> next push_aw should pass
-    EXPECT_TRUE(r.rob.push_aw(make_aw(0x05, 0x200)));
-}
+// === ROB-specific core behavior (2 tests) ===
+// The B single-outstanding-stall tests were removed 2026-07-14: the B RoB is now
+// unconditional, so a second same-id same-dest AW rides the clause-2 bypass rather
+// than stalling. B RoB behavior is covered by the RobClause2 / Enabled tests below.
 
 TEST(NmuRob, Disabled_StallReleaseOnRlast) {
     SCENARIO("Rob Disabled: AR stall on second same-id released when matching R(rlast=1) arrives");
@@ -207,7 +183,7 @@ TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
     ChannelModel noc(/*req*/ 1, /*rsp*/ 16);
     Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Disabled, RobMode::Disabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Disabled, legacy_sam());
 
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // 1st fills req queue
     // 2nd push: should also stall on downstream backpressure, but ROB state must NOT mutate
@@ -244,7 +220,7 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
     ChannelModel noc(/*req*/ 2, /*rsp*/ 16);
     Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Disabled, RobMode::Disabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Disabled, legacy_sam());
 
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));   // AW flit (req queue 1/2)
     ASSERT_TRUE(rob.push_w(make_w(/*last=*/false)));  // W beat 1 (req queue 2/2 full)
@@ -253,15 +229,6 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
     // Drain + retry - verify credit still 1, succeeds without becoming negative
     noc.req_in().pop_flit();                         // drain AW
     EXPECT_TRUE(rob.push_w(make_w(/*last=*/true)));  // now succeeds, credit-- to 0
-}
-
-TEST(NmuRob, Disabled_DifferentIdsIndependentNoInterference) {
-    SCENARIO("Rob Disabled: id=5 stalled does not block id=6; per-id state is independent");
-    RobRig r;
-    ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
-    EXPECT_FALSE(r.rob.push_aw(make_aw(0x05, 0x200)));  // id=5 stalled (single-outstanding)
-    // id=6 should be independent
-    EXPECT_TRUE(r.rob.push_aw(make_aw(0x06, 0x100)));
 }
 
 // NmuRobDeath/Disabled_AbortPaths was a runtime wrong_side_() test.
@@ -276,7 +243,7 @@ TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     prime_write_id(rob, noc, 0x05);
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));
@@ -294,7 +261,7 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     prime_read_id(rob, ar_cap, 0x05);
     prime_read_id(rob, ar_cap, 0x06);
@@ -320,7 +287,7 @@ TEST(NmuRob, Enabled_ConstructorMarksOnlyDepthSlotsFree) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 4, 8);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 4, 8);
     EXPECT_EQ(rob.b_rob_depth(), 4u);
     EXPECT_EQ(rob.r_rob_depth(), 8u);
     EXPECT_EQ(rob.write_free_space(), 4u);
@@ -333,7 +300,7 @@ TEST(NmuRob, Enabled_DefaultDepthIsThirtyTwo) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
     EXPECT_EQ(rob.b_rob_depth(), 32u);
     EXPECT_EQ(rob.r_rob_depth(), 32u);
     EXPECT_EQ(Rob::ROB_IDX_SPACE, 256u);
@@ -345,8 +312,7 @@ TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE,
-            Rob::ROB_IDX_SPACE);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE, Rob::ROB_IDX_SPACE);
 
     prime_read_id(rob, ar_cap, 0x05);
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -364,8 +330,7 @@ TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE,
-            Rob::ROB_IDX_SPACE);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE, Rob::ROB_IDX_SPACE);
 
     prime_read_id(rob, ar_cap, 0x05);
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -414,7 +379,7 @@ TEST(NmuRob, Enabled_LzcAllocator_IsAStack) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 64, 64);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 8, 8);
 
     // Prime every id so its burst takes the RoB path; c (0x07) must attempt an
     // allocation to hit the pool-full refusal instead of bypassing.
@@ -472,7 +437,7 @@ TEST(NmuRob, Enabled_LzcAllocator_NonTopReleaseDoesNotGrowFreeSpace) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 64, 64);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 8, 8);
 
     prime_write_id(rob, noc, 0x05);
     prime_write_id(rob, noc, 0x06);
@@ -515,7 +480,7 @@ TEST_P(RobDepthParam, Enabled_AllocationNeverExceedsDepth) {
     Depacketize depkt(noc.rsp_in(), 512, 512);
     // Clause 1 exempts the first AW of an id, so drive one primed id. Raise the
     // per-id cap above depth so the pool, not the cap, is the binding constraint.
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), depth, depth, depth + 2);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), depth, depth, depth + 2);
 
     EXPECT_EQ(rob.write_free_space(), depth);
     EXPECT_EQ(rob.read_free_space(), depth);
@@ -539,7 +504,7 @@ TEST(NmuRob, Enabled_LzcAllocator_ReusesFromTheTop) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 64, 64);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 8, 8);
 
     prime_read_id(rob, ar_cap, 0x05);
     prime_read_id(rob, ar_cap, 0x06);
@@ -591,7 +556,7 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
     ChannelModel noc(/*req=*/1, /*rsp=*/16);
     Packetize pkt(noc.req_out(), noc.req_out(), noc.req_out(), kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     // ar3 (id 0x07) is the request that gets rolled back, so prime 0x07 to force
     // it onto the RoB path -- otherwise it bypasses and there is no allocation to
@@ -625,7 +590,7 @@ TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
     // One id, primed so clause 1 does not exempt the transactions under test.
     // Distinct ids would each bypass and never fill the pool. The per-id cap must
     // exceed the pool depth for the pool to be the binding constraint (spec D4).
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 64);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 64);
 
     prime_write_id(rob, noc, 0x40);
     for (std::size_t i = 0; i < rob.b_rob_depth(); ++i) {
@@ -641,7 +606,7 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 256, 256);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 3);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 3);
 
     // Clause 1 bypasses the 1st (idle id). The 2nd changes dest, so clause 2 does
     // not apply -- it robs and sets the sticky fallback flag. The 3rd reverts to
@@ -662,7 +627,7 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdGate_AppliesToReadsIndependently) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 256, 256);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 2);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 2);
 
     ASSERT_TRUE(rob.push_ar(make_ar(0x0B, 0x100)));
     ASSERT_TRUE(rob.push_ar(make_ar(0x0B, 0x200)));
@@ -678,7 +643,7 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdDefaultIsThirtyTwo) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
     EXPECT_EQ(rob.max_txns_per_id(), 32u);
 }
 
@@ -689,7 +654,7 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});  // aw uses noc for backpressure
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     // The 0x06 AW is the one rolled back, so prime 0x06 to force it onto the RoB
     // path -- otherwise it bypasses and there is no slot allocation to roll back.
@@ -709,7 +674,7 @@ TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     prime_write_id(rob, noc, 0x05);
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // allocates slot 0
@@ -737,7 +702,7 @@ TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     // id=5: two AWs in flight, slots 0 + 1
     prime_write_id(rob, noc, 0x05);
@@ -775,7 +740,7 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     // id=5: AR1 len=3 -> slots 0..3; AR2 len=1 -> slots 4..5
     prime_read_id(rob, ar_cap, 0x05);
@@ -836,7 +801,7 @@ TEST(NmuRob, Enabled_PerBeatRelease_HeadBurstStreams) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 64, 64);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 8, 8);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 8, 8);
 
     prime_read_id(rob, ar_cap, 0x05);
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -890,7 +855,7 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     // id=5 AR slot 0; id=6 AR slot 1
     prime_read_id(rob, ar_cap, 0x05);
@@ -935,7 +900,7 @@ TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     // Inject B with rob_idx=7, but no AW allocated that slot -> assert fires
     ni::cmodel::Flit f;
@@ -957,8 +922,7 @@ TEST(NmuRobDeath, Enabled_DepthZeroAborts) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    EXPECT_DEATH(
-        { Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 0, 32); }, ".*");
+    EXPECT_DEATH({ Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 0, 32); }, ".*");
 }
 
 TEST(NmuRobDeath, Enabled_DepthAboveIdxSpaceAborts) {
@@ -968,11 +932,7 @@ TEST(NmuRobDeath, Enabled_DepthAboveIdxSpaceAborts) {
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     EXPECT_DEATH(
-        {
-            Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32,
-                    Rob::ROB_IDX_SPACE + 1);
-        },
-        ".*");
+        { Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, Rob::ROB_IDX_SPACE + 1); }, ".*");
 }
 
 TEST(NmuRobDeath, Enabled_MaxTxnsPerIdZeroAborts) {
@@ -981,9 +941,7 @@ TEST(NmuRobDeath, Enabled_MaxTxnsPerIdZeroAborts) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    EXPECT_DEATH(
-        { Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 0); },
-        ".*");
+    EXPECT_DEATH({ Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 0); }, ".*");
 }
 
 TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
@@ -994,7 +952,7 @@ TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     prime_read_id(rob, ar_cap, 0x05);
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -1042,7 +1000,7 @@ TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     prime_read_id(rob, ar_cap, 0x05);  // the AR under test allocates, so read_range_len_ is set
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -1082,7 +1040,7 @@ TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     prime_read_id(rob, ar_cap, 0x05);
     prime_read_id(rob, ar_cap, 0x06);
@@ -1144,7 +1102,7 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     // Burst A: id=5, len=1 -> base 0 (slots 0..1). Burst B: id=5, len=1 -> base 2 (slots 2..3).
     prime_read_id(rob, ar_cap, 0x05);
@@ -1200,7 +1158,7 @@ TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     prime_write_id(rob, noc, 0x05);                  // bypassed head
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // robbed, slot 0
@@ -1225,7 +1183,7 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());  // depth 32
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());  // depth 32
 
     const std::size_t free_before = rob.read_free_space();
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -1243,7 +1201,7 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_SecondSameIdRefusedNotWedged) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     axi::ArBeat first = make_ar(0x05, 0x100);  // dst 0
     first.len = 255;
@@ -1265,7 +1223,7 @@ TEST(NmuRob, Enabled_Clause1_FirstTxnPerIdAllocatesNoSlot) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     const std::size_t free_before = rob.write_free_space();
     ASSERT_TRUE(rob.push_aw(make_aw(0x11, 0x100)));  // dst 0
@@ -1287,7 +1245,7 @@ TEST(NmuRob, Enabled_BypassedBeat_ReleasesNoSlot) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     const std::size_t free_before = rob.write_free_space();
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // bypassed: id 5 was idle
@@ -1320,7 +1278,7 @@ TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // dst 0, bypassed, rob_req=0
     // Different dest than the first: clause 2 does not apply, so this robs, slot 0.
@@ -1360,13 +1318,13 @@ TEST(NmuRob, Enabled_MaxTxnsPerId1_MatchesDisabled) {
     ReqCapture w_e, ar_e;
     Packetize pkt_e(noc_e.req_out(), w_e, ar_e, kSrcId, {});
     Depacketize depkt_e(noc_e.rsp_in(), 64, 64);
-    Rob rob_e(pkt_e, depkt_e, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32, 1);
+    Rob rob_e(pkt_e, depkt_e, RobMode::Enabled, legacy_sam(), 32, 32, 1);
 
     ChannelModel noc_d(64, 64);
     ReqCapture w_d, ar_d;
     Packetize pkt_d(noc_d.req_out(), w_d, ar_d, kSrcId, {});
     Depacketize depkt_d(noc_d.rsp_in(), 64, 64);
-    Rob rob_d(pkt_d, depkt_d, RobMode::Disabled, RobMode::Disabled, legacy_sam());
+    Rob rob_d(pkt_d, depkt_d, RobMode::Disabled, legacy_sam());
 
     axi::ArBeat a0 = make_ar(0x21, 0x100);
     axi::ArBeat a1 = make_ar(0x21, 0x200);  // same id: both must refuse
@@ -1397,7 +1355,7 @@ TEST(RobClause2, SameDestStreakBypassesAll) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(),
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(),
             /*b_rob_depth=*/32, /*r_rob_depth=*/32, /*max_txns_per_id=*/32);
 
     // 5 single-beat reads, same id, same dest (addr in one tile), none drained.
@@ -1419,7 +1377,7 @@ TEST(RobClause2, DestChangeTriggersStickyFallback) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam());
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
     const uint8_t id = 3;
     const uint64_t dst_a = 0x100000000ull * 4;  // tile 4
@@ -1487,7 +1445,7 @@ TEST(RobClause2, MaxTxnsPerIdStillBoundsBypassedEntries) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, RobMode::Enabled, legacy_sam(), 32, 32,
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32,
             /*max_txns_per_id=*/3);
 
     const uint8_t id = 3;

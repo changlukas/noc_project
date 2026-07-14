@@ -68,8 +68,8 @@ class NmuWrap {
         const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
         cfg.write_vcs = vc_pools.write_vcs;
         cfg.read_vcs = vc_pools.read_vcs;
+        // rob_mode / the tb's `_rob` suffix controls the R RoB only; B RoB is always on.
         cfg.read_rob_mode = rob_mode;
-        cfg.write_rob_mode = rob_mode;
         cfg.b_rob_depth = b_rob_depth;
         cfg.r_rob_depth = r_rob_depth;
         cfg.max_txns_per_id = max_txns_per_id;
