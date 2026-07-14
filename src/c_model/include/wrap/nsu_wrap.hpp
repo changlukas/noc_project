@@ -16,7 +16,7 @@
 //   NoC req side:  inject_req_flit() on NsuStandalone inserts flits before
 //                  tick() so Depacketize can consume them this cycle.
 //   NoC rsp side:  pop_rsp_flit() on NsuStandalone drains flits produced by
-//                  the Packetize stage (captured in NullNocRspOut queue).
+//                  the Packetize stage (captured in QueueNocRspOut queue).
 //   AXI master side: AxiMasterPort.pop_aw/pop_w/pop_ar() drains beats that
 //                  Depacketize deposited; push_b/push_r() feeds slave
 //                  responses back to Packetize.

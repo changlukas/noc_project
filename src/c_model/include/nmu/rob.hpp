@@ -147,10 +147,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // is in flight for that id; cleared by R(last) in pop_r.
     std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
 
-    // W burst credit gate: prevents W beats from reaching Packetize before
-    // their corresponding AW has been ROB-accepted. Single counter (not per-id)
-    // because AXI4 W beats follow AW issue order strictly (no WID).
-    uint32_t w_burst_credit_ = 0;
+    // AW-before-W interlock: AW-accepted bursts whose W beats are still owed.
+    // Prevents W beats from reaching Packetize before their corresponding AW
+    // has been ROB-accepted. Single counter (not per-id) because AXI4 W beats
+    // follow AW issue order strictly (no WID).
+    uint32_t w_bursts_owed_ = 0;
 
     // === Enabled mode (per-beat slot pool) ===
 
@@ -211,7 +212,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
 
-    // Family C: per-base (keyed by rob_idx base) arrival counter. NSU stamps every
+    // Per-base (keyed by rob_idx base) arrival counter. NSU stamps every
     // R beat of a burst with rob_idx=base; this counter positions beat i at base+i.
     // Reset when the range is popped from read_order_by_id_ (ties counter lifecycle
     // to slot-reuse eligibility). read_range_len_[base] = burst length n, set in
@@ -277,14 +278,14 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
     }
     write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob});
-    ++w_burst_credit_;
+    ++w_bursts_owed_;
     return true;
 }
 
 inline bool Rob::push_w(const axi::WBeat& b) {
-    if (w_burst_credit_ == 0) return false;  // W cannot proceed before its AW
-    if (!next_pkt_.push_w(b)) return false;  // downstream backpressure: NO credit change
-    if (b.last) w_burst_credit_--;
+    if (w_bursts_owed_ == 0) return false;   // W cannot proceed before its AW
+    if (!next_pkt_.push_w(b)) return false;  // downstream backpressure: NO change to owed count
+    if (b.last) w_bursts_owed_--;
     return true;
 }
 
@@ -471,8 +472,8 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     std::size_t arrival_offset = read_arrival_offset_[base];
     if (!(arrival_offset < read_range_len_[base])) {
         assert(false &&
-               "nmu::Rob::pop_r_staged: R beat past burst length (Family C: "
-               "more beats than reserved for this base -- malformed burst)");
+               "nmu::Rob::pop_r_staged: R beat past the burst's reserved slot range "
+               "-- malformed burst");
         std::abort();
     }
     std::size_t slot_idx = static_cast<std::size_t>(base) + arrival_offset;

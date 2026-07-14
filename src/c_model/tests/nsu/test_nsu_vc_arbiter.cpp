@@ -58,7 +58,7 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2";
 
-    SCENARIO("NSU VcArbiter Mode A: B -> write_rsp_vc=0, R -> read_rsp_vc=1");
+    SCENARIO("NSU VcArbiter read/write VC split: B -> write_rsp_vc=0, R -> read_rsp_vc=1");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), num_vc, 0, 1);
 

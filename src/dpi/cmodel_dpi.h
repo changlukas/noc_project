@@ -88,7 +88,7 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
 // num_vc threads the topology VC count into the NmuConfig (write_vc=0,
-// read_vc=(num_vc>=2)?1:0 — Mode A). noc_req_credit_return / noc_rsp_credit_return
+// read_vc=(num_vc>=2)?1:0 — read/write VC split). noc_req_credit_return / noc_rsp_credit_return
 // are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
 // config_path: topology YAML with an `address_map` block (NULL/empty ->
 // legacy 16x16 uniform, no-rebase SAM).
@@ -129,7 +129,7 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
 // num_vc threads the topology VC count into the NsuConfig (write_rsp_vc=0,
-// read_rsp_vc=(num_vc>=2)?1:0 — Mode A). noc_rsp_credit_return / noc_req_credit_return
+// read_rsp_vc=(num_vc>=2)?1:0 — read/write VC split). noc_rsp_credit_return / noc_req_credit_return
 // are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
 // max_unique_ids: 1 collapses every master onto the all-ones downstream AXI id
 // (FlooNoC's ChimneyDefaultCfg); 256 passes the master's id through. No other

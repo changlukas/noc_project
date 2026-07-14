@@ -60,7 +60,7 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2";
 
     SCENARIO(
-        "NMU VcArbiter Mode A: AW -> write_vc=0, AR -> read_vc=1; "
+        "NMU VcArbiter read/write VC split: AW -> write_vc=0, AR -> read_vc=1; "
         "verify pending queues + downstream stamps");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc,
@@ -88,7 +88,7 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
 // their paired AW. With Constraint A1 (WormholeArbiter upstream serializes
 // AW + all W beats before next AW), a single outstanding AW at a time is
 // the supported pattern. Requires num_vc >= 2 so the AW vs W VC assignment
-// is observable (write_vc=0 for both in Mode A; read_vc=1 for AR).
+// is observable (write_vc=0 for both in the read/write VC split; read_vc=1 for AR).
 TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs num_vc >= 2";

@@ -105,7 +105,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
 
     // Drain the req-out face. Bounded loop: pipeline is
     // AxiSlavePort -> Rob -> Packetize -> WormholeArbiter -> VcArbiter
-    // -> NullNocReqOut, each tick boundary forwards one stage. 32 ticks
+    // -> QueueNocReqOut, each tick boundary forwards one stage. 32 ticks
     // is generous; any breakage stalls indefinitely and trips the loop bound.
     bool saw_aw_flit = false;
     bool saw_w_flit = false;

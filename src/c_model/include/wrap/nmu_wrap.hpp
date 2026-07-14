@@ -14,7 +14,7 @@
 //   AXI slave side:  push_aw/push_w/push_ar API on axi_slave_port(); ready
 //                    reported via can_accept_aw/w/ar() after tick.
 //   NoC req side:    pop_req_flit() on NmuStandalone drains flits produced by
-//                    the Packetize stage (captured in NullNocReqOut queue).
+//                    the Packetize stage (captured in QueueNocReqOut queue).
 //   NoC rsp side:    inject_rsp_flit() on NmuStandalone inserts flits before
 //                    tick() so Depacketize can consume them this cycle.
 //

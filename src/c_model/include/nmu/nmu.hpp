@@ -33,7 +33,7 @@
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
 #include "nmu/vc_arbiter.hpp"
-#include "nmu/ni_tokens.hpp"
+#include "nmu/staged_beats.hpp"
 #include "ni_params.h"
 #include "router/req_out.hpp"
 #include "router/rsp_in.hpp"
