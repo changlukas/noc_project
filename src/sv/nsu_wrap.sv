@@ -4,7 +4,7 @@
 // read req flit + rsp credit from the router and drive rsp flit + req credit
 // back. On the AXI side it acts as master toward the downstream slave.
 //
-// Beta-tick discipline (spec §5.1): on every posedge clk_i the module
+// Registered-DPI-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
 // via cmodel_nsu_set_inputs, advances the model via cmodel_nsu_tick, pulls
 // outputs via cmodel_nsu_get_outputs, then registers those outputs nonblocking
@@ -125,7 +125,7 @@ module nsu_wrap #(
     // Lifecycle / error polling lives in tb_top.sv (T1.4).
 
     // -------------------------------------------------------------------------
-    // Output registers (beta-tick: registered one cycle behind DPI sample)
+    // Output registers (registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
     // NoC rsp side outputs (Nsu drives toward ChannelModel)

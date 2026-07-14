@@ -152,7 +152,7 @@ TEST(AxiMasterRawOrder, ArHeldUntilOverlappingWriteReceivesB) {
 // cycle), turning one read into many AR transfers at the memory edge.
 //
 // Drive AxiMasterStandalone (which owns the WireSlavePort wire model) with the
-// MasterWrap's beta-tick ready policy (accept a beat only if VALID was
+// MasterWrap's registered-DPI-tick ready policy (accept a beat only if VALID was
 // driven last cycle). The write's B is never injected, so the write stays
 // outstanding and the read overlaps it for the whole run: the read must stay
 // held and ARVALID must drop, not latch high.
@@ -170,7 +170,7 @@ TEST(AxiMasterRawOrder, ArvalidNotStuckWhileReadRawHeld) {
     int ar_present_cycles = 0;
     constexpr int kCycles = 40;
     for (int c = 0; c < kCycles; ++c) {
-        // Beta-tick ready: a beat handshakes only if it was VALID last cycle.
+        // Registered DPI tick ready: a beat handshakes only if it was VALID last cycle.
         // B/R are never injected -> write stays outstanding -> read RAW-held.
         wp.set_awready(prev_awvalid);
         wp.set_wready(prev_wvalid);

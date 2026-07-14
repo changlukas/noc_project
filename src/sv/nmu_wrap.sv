@@ -3,10 +3,10 @@
 // The Nmu is the most complex wrap — it has BOTH an AXI slave side
 // (incoming AW/W/AR from master, outgoing B/R + handshake to master) AND
 // a NoC side: 4 packed-struct ports drive/read req and rsp flits and credits
-// toward/from the router. Beta-tick discipline and error checking follow the
+// toward/from the router. Registered-DPI-tick discipline and error checking follow the
 // same pattern as axi_slave_wrap (T9).
 //
-// Beta-tick discipline (spec §5.1): on every posedge clk_i the module
+// Registered-DPI-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
 // via cmodel_nmu_set_inputs, advances the model via cmodel_nmu_tick, pulls
 // outputs via cmodel_nmu_get_outputs, then registers those outputs nonblocking
@@ -127,7 +127,7 @@ module nmu_wrap #(
     // Lifecycle / error polling lives in tb_top.sv (T1.4).
 
     // -------------------------------------------------------------------------
-    // Output registers (beta-tick: registered one cycle behind DPI sample)
+    // Output registers (registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
     // AXI slave side outputs (Nmu drives)
