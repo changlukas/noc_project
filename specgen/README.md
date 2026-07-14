@@ -10,8 +10,8 @@ regenerate it from the source instead.
 - `source/` - `constants.yaml` (parameters), `interface_handshake.json`,
   `noc_function_blocks.json` (feature inventory / cross-domain check, not
   codegen input)
-- `generated/json/` - `ni_signals.json` (hand-curated) plus packet/param JSON
-  elaborated from `source/`
+- `generated/json/` - hand-curated JSON SSoT (`ni_packet.json`, `ni_signals.json`)
+  plus their schemas; codegen input, not codegen output
 - `generated/cpp/` - elaborated C++ headers for `src/c_model/`
 - `generated/sv/` - elaborated SystemVerilog packages for the testbench
 - `tools/codegen.py` - the elaborator; `tools/elaborate/` - per-domain emitters
@@ -35,9 +35,8 @@ py -3 tools/codegen.py --target sv --domain noc_types --num-vc 4   # noc_types n
 ## Boundary
 
 Generated files under `generated/cpp/` and `generated/sv/` are committed and
-never hand-edited; a source change regenerates them. `generated/json/
-ni_signals.json` is the one hand-curated input in `generated/` and is edited
-directly.
+never hand-edited; a source change regenerates them. The JSON under
+`generated/json/` is hand-curated input and is edited directly.
 
 ## Documentation
 
