@@ -96,9 +96,11 @@ first). Keep: `docs/image/` (spec ground truth), `docs/backlog.md` (switched to 
 ## Ride-alongs
 
 - Delete `src/c_model/include/axi/ATTRIBUTION.md` (content not migrated; provenance paragraph
-  lives in verification-environment.md per D5 revision) — AND update every source comment that
-  references it (`grep -rn "ATTRIBUTION" src/`: axi headers + tests say "see axi/ATTRIBUTION.md")
-  to point at docs/verification-environment.md instead. No dangling references.
+  lives in verification-environment.md per D5 revision) — AND delete the first-line reference
+  comments in the 12 files that point at it (user decision 2026-07-14: whole line, e.g.
+  "// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md"; the
+  scoreboard/scenario_parser "independent design" variants included). `grep -rn "ATTRIBUTION"
+  src/` must be empty afterwards.
 - **Comment-ref sweep** (backlog Round-3 queue): before deleting docs/, sweep code comments for
   references to soon-deleted paths — `docs/superpowers/...`, `microarch §`, deleted top-level doc
   names. Known survivors: References blocks in nmu/vc_arbiter.hpp, nsu/vc_arbiter.hpp,
