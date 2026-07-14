@@ -10,7 +10,7 @@ assertions.
 
 Internal engineering release. Build, unit tests, and directed cosim run
 end to end on the platforms below. `make test` reports the current unit
-suite; `make help` lists all targets.
+suite; `make help` lists the main targets.
 
 ## Architecture
 
@@ -71,24 +71,25 @@ On Windows, invoke Python scripts with `py -3` instead of `python3`.
 ## Simulate (cosim)
 
 `make sim` builds the chosen topology and runs one directed pattern.
-`TB` is a YAML name from `sim/topologies/` (`mesh_1x1_vc1`,
-`mesh_2x2_nonuniform_vc1`, `mesh_2x4_vc1`, `mesh_4x4_vc1`,
-`mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`); append `_rob` for the
-reorder-buffer variant of the same topology. `PATTERN` is one of
-`neighbor`, `transpose`, `uniform_random`, `hotspot` (`transpose` needs
-a square power-of-two mesh). `SEED` unset draws and prints a random
-seed; pass `SEED=<n>` to replay a run.
+
+| var | values |
+|---|---|
+| `TB` | topology YAML name from `sim/topologies/`: `mesh_1x1_vc1`, `mesh_2x2_nonuniform_vc1`, `mesh_2x4_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`; append `_rob` for the reorder-buffer variant |
+| `PATTERN` | `neighbor`, `transpose`, `uniform_random`, `hotspot` (`transpose` needs a square power-of-two mesh) |
+
+`SEED` unset draws and prints a random seed; pass `SEED=<n>` to replay
+a run.
 
 ~~~bash
 make sim TB=mesh_4x4_vc1 PATTERN=neighbor
 make sim TB=mesh_4x4_vc8_rob PATTERN=transpose
 ~~~
 
-Each run logs to `sim/verilator/output/<run-tag>/run.log` and ends with
-`DIRECTED PASS: <run-tag> scoreboard clean, non-vacuous` on success. The
-log carries per-node `[Monitor nodeN.master]` latency/bandwidth lines,
-`[HWM]` buffer high-water marks, and `PASS: all N nodes done,
-non-vacuous`.
+On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
+clean, non-vacuous` to the console. The full log at
+`sim/verilator/output/<run-tag>/run.log` ends with `PASS: all N nodes
+done, non-vacuous` and carries per-node `[Monitor nodeN.master]`
+latency/bandwidth lines and `[HWM]` buffer high-water marks.
 
 ## Regenerate
 
@@ -97,7 +98,7 @@ Packet, signal, and parameter definitions are single-sourced in
 drift-gated at build time.
 
 ~~~bash
-python3 specgen/tools/codegen.py --target cpp --domain packet     # domains: packet, signals, params
+python3 specgen/tools/codegen.py --target cpp --domain packet     # domains: packet, signals, params, noc_types
 python3 specgen/tools/codegen.py --target sv --domain noc_types --num-vc 4
 python3 specgen/tools/codegen.py --check
 ~~~
