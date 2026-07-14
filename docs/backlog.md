@@ -3,20 +3,19 @@
 Forward-only: open work items and known gaps only. Completed work lives in git history, not here.
 Read at session start; each round strikes what it closes and adds what it surfaces.
 
-## NEXT ROUND (headline) -- commercialization Rounds 2+3: execute ledger, fresh doc set, release
+## NEXT ROUND (headline) -- commercialization Round 3: fresh doc set, release
 
 Round 1 (audit) DONE 2026-07-14: user-approved ledger + gate decisions D1-D8 in
 `docs/superpowers/audit/2026-07-14-ledger.md`; trade-off skeleton + salvage inventory alongside.
 Spec: `docs/superpowers/specs/2026-07-14-commercialization-textbook-alignment-design.md`.
 
-2026-07-14 post-gate brainstorm amendments (in spec §Amendments): `pinned`→**fixed VC id**;
-attribution minimalized (D5 revised: no formal files/tags, L4-003/005 cancelled); doc set 3→4
-(verification-environment.md); attribution/LICENSE/sim-dv-README actions moved to Round 3.
+Round 2 (code) DONE 2026-07-14 on branch `refactor/commercialization-round2` (not pushed):
+D1 master/slave prose, D2/D3 RZ1 removal + fixed-VC-id wording, D4 input register +
+upstream/downstream modports, D6 NSU use_pools_ collapse + noc_types banner regen; ride-along
+fix of pre-existing stale test path (test_feature_inventory.py, redded specgen pytest since
+eca0c93). All gates green (ctest 431/431, specgen pytest 160/0, codegen --check, WSL directed
+sim); Codex + fresh-Claude full-diff reviews applied.
 
-- **Round 2 (code, pure renames)**: prose master/slave unification (D1), RZ1 tag removal +
-  `pinned`→fixed-VC-id wording (D2/D3), `landing_`→input register + `mosi/miso`→
-  upstream/downstream (D4), NSU `use_pools_` branch deletion + noc_types_pkg banner regen (D6).
-  Gates: ctest / regen diff / WSL make sim directed per surface; full-diff Codex review at end.
 - **Round 3 (docs)**: delete old doc set (docs/superpowers, docs/internal, top-level dying docs,
   issue/, slides/); write fresh README + docs/spec.md + docs/trade-off.md +
   docs/verification-environment.md (test env: co-sim architecture, testbench, scoreboard,
@@ -25,6 +24,12 @@ attribution minimalized (D5 revised: no formal files/tags, L4-003/005 cancelled)
   LICENSE third-party section (D5 revised); sim/dv README modified-flag (D8); fix CLAUDE.md stale
   claims; gitignore backlog.md; release checklist (known limitations, verification summary,
   platform matrix, quickstart).
+  Queued additions from Round-2 reviews:
+  - sweep code comments for `docs/superpowers/...` / `microarch §` refs before doc deletion
+    (References blocks in nmu/vc_arbiter.hpp, nsu/vc_arbiter.hpp, router.hpp, wormhole_arbiter.hpp,
+    nmu.hpp, nsu.hpp, nmu_wrap.hpp, tests/common/{scenario,test_logger}.hpp).
+  - gen_inventory.py content strings still write `c_model/include/...` paths into
+    src/c_model/FEATURE_INVENTORY.md (real tree is `src/c_model/include/...`); regen after fixing.
 
 ## Open -- defensive / correctness (small)
 
@@ -35,6 +40,9 @@ attribution minimalized (D5 revised: no formal files/tags, L4-003/005 cancelled)
   assert (`nmu/sam_yaml.hpp:15`); give a descriptive runtime error that survives `NDEBUG`.
 - **`gen_tb_top.emit_tb_top(requested_name="")`** silently yields `rob_enabled=False` with no
   validation (`gen_tb_top.py:397-402`); reject an empty name loudly.
+- **specgen pytest dirties the tree.** `specgen/tests/test_codegen.py` (cpp+sv twins) invokes
+  codegen with `--out` pointing at the real `specgen/generated/` dirs, so every pytest gate run
+  rewrites committed files (banner timestamps). Point those tests at a tmp dir.
 
 ## Open -- NMU RoB / NSU sizing & structure
 
@@ -42,8 +50,6 @@ attribution minimalized (D5 revised: no formal files/tags, L4-003/005 cancelled)
   (`nmu/rob.hpp:249,310`); the value needs a depth sweep to be considered rather than a placeholder.
 - **`r_rob_depth = 256`** (8 KiB, the paper's design point) is expressible (`R_ROB_DEPTH=256`,
   `sim/verilator/Makefile`) but unswept.
-- **NSU `VcArbiter` `use_pools_` asymmetry.** The NMU collapsed the scalar-VC case into a size-1 pool;
-  the NSU still carries the `use_pools_` branch (`nsu/vc_arbiter.hpp:58,97,107,152`). Mirror it.
 - **DV-IP no-edit debt: `axi_bw_monitor.sv`.** Hand-edited in the vendored floonoc-test tree
   (commit `b7b5db3` + a follow-up), not isolated as a patch/wrapper. Either upstream the change or wrap
   pristine IP. ([[feedback_trust_upstream_defaults]])
