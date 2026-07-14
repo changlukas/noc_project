@@ -31,7 +31,7 @@ Covered (IHI 0022H):
 
 | area | sections | where exercised |
 |---|---|---|
-| VALID/READY handshake, stall, backpressure | A3.2 | unit tests + wire-level co-sim (held-valid latches in every wrap) |
+| VALID/READY handshake, stall, backpressure | A3.2 | unit tests + wire-level co-sim (held-valid latches in both NI wraps) |
 | Burst types INCR/WRAP/FIXED, length, alignment, 4 KB boundary | A3.4.1 | `protocol_rules.hpp` checks + unit tests + burst stimulus |
 | Per-ID response ordering: same-ID R returns in AR-issue order; W follows AW (no WID in AXI4) | A5.3 | RoB / interlock design (below) + integration tests + co-sim scoreboard |
 | Response codes; DECERR on out-of-bounds access | A3.4.4 | memory model returns DECERR past its bounds; unit tests |
@@ -57,8 +57,8 @@ in this table.
 | `specgen/` | spec-as-code: JSON/YAML sources, `codegen.py` emits `ni_flit_constants.h`, `ni_params.h`, SV packages (committed, drift-gated) |
 | `src/c_model/include/axi/` | AXI4 base types, master/slave BFM endpoints, memory model, `protocol_rules.hpp`, scoreboard |
 | `src/c_model/include/ni/` | shared NI primitives: `PipelineStage`, `WormholeArbiter`, `make_virtual_networks` |
-| `src/c_model/include/nmu/`, `nsu/` | the two NI units |
 | `src/c_model/include/router/` | wormhole VC router + the four NI-to-NoC interface contracts (`NocReqOut`, `NocRspIn`, `NocReqIn`, `NocRspOut`) |
+| `src/c_model/include/nmu/`, `nsu/` | the two NI units (implement/consume the router interface contracts) |
 | `src/c_model/include/wrap/` | per-component co-sim adapters (`*Wrap` + `*WrapIo` POD wire bundles), `PerfCollector` |
 | `src/dpi/`, `src/sv/`, `sim/` | DPI bridge, SV wrap modules, generated `tb_top_<topology>.sv`, testbench and tooling |
 
@@ -151,7 +151,8 @@ storage:
 
 The allocated (or zero) base becomes `rob_idx` on the outbound flit with
 `rob_req` marking slot ownership. Every accepted push appends
-`{base, len + 1, rob_req}` to its ID's order list, slot or no slot.
+`{base, beat count, rob_req}` to its ID's order list, slot or no slot
+(beat count: 1 for AW, `len + 1` for AR).
 
 ### Allocator
 
@@ -230,7 +231,8 @@ to the slave:
 | 1 (default) | all-ones for every request | AXI forces the slave to respond in request order; the metadata store is FIFO-equivalent |
 | `AXI_ID_SPACE` (256) | pass-through | the slave may return responses out of order across IDs; the store must be ID-addressable |
 
-No other value is legal (the depacketize constructor asserts). The remap is
+No other value is legal (the depacketize constructor throws
+`std::invalid_argument`, deliberately `NDEBUG`-safe). The remap is
 a function of `upstream_id` alone, matching the ported source; response
 ordering no longer depends on this choice because the response-path fixed
 VC id keys on `(dst_id ^ id)`, so same-ID streams from different sources
