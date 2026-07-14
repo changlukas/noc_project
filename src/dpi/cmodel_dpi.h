@@ -113,8 +113,8 @@ void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wread
                             svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
                             svBit* noc_req_valid, svBitVecVal* noc_req_flit,
                             svBitVecVal* noc_rsp_credit_return);
-// Peak R-RoB slot occupancy (Rob::read_slot_hwm) for the Stage 0 clause-2 gate
-// measurement. 0 if the handle is invalid or RoB is Disabled.
+// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing telemetry. 0 if the
+// handle is invalid or RoB is Disabled.
 unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 
 // Nsu (Task 9) — NoC consumer (req in) + producer (rsp out) + AXI master side.

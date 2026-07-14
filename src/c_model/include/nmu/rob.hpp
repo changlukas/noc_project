@@ -197,14 +197,14 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
 
-    // Bypass clause 2 state (floo_rob.sv:399,417-420,427-428). prev_dest_* is the
-    // dst_id of the last accepted push for that id, updated on every push.
-    // fallen_back_* is the sticky "this id started reordering" flag: once a push
+    // Same-destination bypass state (floo_rob.sv:399,417-420,427-428). prev_dest_* is
+    // the dst_id of the last accepted push for that id, updated on every push.
+    // fallen_back_* is the sticky same-destination-bypass flag: once a push
     // robs, every later push for that id robs too (even if dest matches an earlier
-    // one) until a new streak begins. The reset is the clause-1 branch itself: an
+    // one) until a new streak begins. The reset is the idle-ID bypass branch itself: an
     // id's first push (empty order list) sets fallen_back_*=false, so the flag is
     // fresh at every streak start. FlooNoC instead clears at drain (floo_rob.sv:435-441)
-    // because its clause 1 READS the sticky flag (!ax_rob_req_q); ours tests the empty
+    // because its idle-ID bypass READS the sticky flag (!ax_rob_req_q); ours tests the empty
     // list, which makes a drain-time clear a dead store -- so it is omitted here.
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
@@ -246,12 +246,12 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     bool needs_rob;
     bool fallen_back;  // trial value; committed only once the push is accepted
     if (empty) {
-        // Clause 1: nothing in flight for this id, so nothing can overtake this
+        // Idle-ID bypass: nothing in flight for this id, so nothing can overtake this
         // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
         needs_rob = false;
         fallen_back = false;  // fresh streak
     } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id]) {
-        // Clause 2: same dest as the previous same-id push, not yet reordering.
+        // Same-destination bypass: same dest as the previous same-id push, not yet reordering.
         // Ported from floo_rob.sv:427-428.
         needs_rob = false;
         fallen_back = false;
@@ -298,12 +298,12 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         bool needs_rob;
         bool fallen_back;  // trial value; committed only once the push is accepted
         if (empty) {
-            // Clause 1: an idle id's burst cannot be overtaken, so it needs no slots.
+            // Idle-ID bypass: an idle id's burst cannot be overtaken, so it needs no slots.
             // A bypassed burst of any length is admissible. Ported from floo_rob.sv:422-425.
             needs_rob = false;
             fallen_back = false;  // fresh streak
         } else if (!fallen_back_read_[b.id] && dst == prev_dest_read_[b.id]) {
-            // Clause 2: same dest as the previous same-id push, not yet reordering.
+            // Same-destination bypass: same dest as the previous same-id push, not yet reordering.
             // Ported from floo_rob.sv:427-428.
             needs_rob = false;
             fallen_back = false;

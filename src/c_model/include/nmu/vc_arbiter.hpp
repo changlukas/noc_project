@@ -10,7 +10,7 @@
 //   from rr_start_; first VC with pending space AND downstream credit wins
 //   (else backpressure).
 //
-// Clause 2 fixed VC id: a rob_req=0 AW/AR flit whose (dst_id, id) matches
+// Fixed VC id (same-destination bypass): a rob_req=0 AW/AR flit whose (dst_id, id) matches
 // the id's previous same-channel flit reuses that VC instead of
 // round-robining -- deterministic VC allocation that fixes a same-(dst,id)
 // bypass streak to one VC so it cannot be reordered in-fabric. With no
@@ -108,7 +108,7 @@ class VcArbiter : public router::NocReqOut {
     uint8_t read_rr_start_ = 0;
     std::optional<uint8_t> current_aw_vc_;
 
-    // Clause 2 fixed VC id: last (dst_id, VC) a given AXI id took on a
+    // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on a
     // rob_req=0 flit, per direction. nullopt dst = id never seen.
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_aw_dst_{};
     std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
@@ -136,7 +136,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
     if (axi_ch != ni::AXI_CH_AW && axi_ch != ni::AXI_CH_AR) return std::nullopt;
 
-    // Clause 2 fixed VC id: rob_req=0 flit whose dst_id matches this id's
+    // Fixed VC id (same-destination bypass): rob_req=0 flit whose dst_id matches this id's
     // last same-channel dst_id reuses that VC. No fallback to round-robin on
     // block -- rerouting a fixed-VC streak mid-flight is exactly the reorder
     // the fixed VC exists to prevent.
@@ -197,7 +197,7 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         }
     }
 
-    // Clause 2 fixed VC id: record (dst_id, VC) for this id only after all
+    // Fixed VC id (same-destination bypass): record (dst_id, VC) for this id only after all
     // accept conditions pass (mirrors current_aw_vc_'s atomicity above).
     // rob_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
     if (rob_req == 0 && (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR)) {

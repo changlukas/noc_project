@@ -497,8 +497,8 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
     DPI_BOUNDARY_END(cmodel_nmu_get_outputs);
 }
 
-// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — Stage 0 clause-2 gate
-// measurement readout. 0 if the handle is invalid or RoB is Disabled.
+// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing telemetry readout.
+// 0 if the handle is invalid or RoB is Disabled.
 extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN_R(cmodel_nmu_read_slot_hwm, 0u) {
         auto* _h =

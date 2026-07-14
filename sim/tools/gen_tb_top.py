@@ -715,7 +715,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("            end")
     w("        end")
     w('        if (vacuous) $fatal(1, "tb_top: vacuous run");')
-    w("        // Stage 0 clause-2 gate measurement: peak R-RoB slot occupancy per node.")
+    w("        // Peak R-RoB slot occupancy (sizing telemetry) per node.")
     w("        for (int i = 0; i < NUM_NODES; i++) begin")
     w('            $display("[HWM] node=%0d read_slot_hwm=%0d", i, '
       "cmodel_nmu_read_slot_hwm(nmu_ctx[i]));")

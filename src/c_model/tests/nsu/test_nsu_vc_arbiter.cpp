@@ -80,7 +80,7 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
 }
 
-// Clause 2 fixed VC id: rsp VC = vnet[(dst_id ^ id) % vnet.size()], zero state.
+// Fixed VC id (same-destination bypass): rsp VC = vnet[(dst_id ^ id) % vnet.size()], zero state.
 // Replaces the retired r_burst_vc_ array's burst-coherence role -- a burst's
 // beats share (dst_id, rid) so they hash to the same vnet slot automatically.
 //
@@ -170,14 +170,15 @@ TEST(NsuVcArbiterVnets, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
     EXPECT_EQ(arb.pending_size(2), 3u);                                   // all rid6 beats
 }
 
-// INVERTED from the retired pre-clause-2 same-bid round-robin test: that test
-// asserted B has no fixed VC and round-robins same-bid responses. The clause-2
-// return-path map now fixes rob_req=0 B the same way it fixes R -- a
-// same-(dst,bid) bypass stream must share one VC to stay in order at the NMU.
+// INVERTED from the retired pre-same-destination-bypass same-bid round-robin test: that
+// test asserted B has no fixed VC and round-robins same-bid responses. The
+// same-destination-bypass return-path map now fixes rob_req=0 B the same way it fixes R --
+// a same-(dst,bid) bypass stream must share one VC to stay in order at the NMU.
 // rob_req=1 (robbed) B keeps the old round-robin behavior; see the next test.
 TEST(NsuVcArbiterVnets, SameBidSameDstBypassFixedVcId) {
     SCENARIO(
-        "NSU vnets: rob_req=0 same-(dst,bid) B responses fix to one VC (clause-2 return-path map)");
+        "NSU vnets: rob_req=0 same-(dst,bid) B responses fix to one VC (same-destination-bypass "
+        "return-path map)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
@@ -188,7 +189,7 @@ TEST(NsuVcArbiterVnets, SameBidSameDstBypassFixedVcId) {
 }
 
 // rob_req=1 (robbed) B is order-free at the NMU slot path, so it keeps
-// round-robining the write vnet exactly as before clause 2.
+// round-robining the write vnet exactly as before the same-destination bypass.
 TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWriteVnet) {
     SCENARIO("NSU vnets: rob_req=1 same-bid B responses still round-robin the write vnet");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);

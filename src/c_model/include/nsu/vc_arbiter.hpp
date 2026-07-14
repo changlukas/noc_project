@@ -6,7 +6,7 @@
 //
 // ReadWriteSplit (only mode): per-class virtual network (vnet); the scalar
 // factory wraps a single VC into a size-1 vnet (mirror of nmu::VcArbiter).
-//   Clause 2 fixed VC id (return path): a rob_req=0 B, or ANY R (regardless
+//   Fixed VC id (same-destination bypass, return path): a rob_req=0 B, or ANY R (regardless
 //   of rob_req), maps to vnet[(dst_id ^ id) % vnet.size()] -- deterministic
 //   VC allocation, a pure function with zero state. This fixes a
 //   same-(dst,id) bypassed response stream to one VC (so it cannot be
@@ -111,7 +111,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
     }
 
     if (fixed_vc) {
-        // Clause 2 fixed VC id (return path): deterministic pure function of
+        // Fixed VC id (same-destination bypass, return path): deterministic pure function of
         // (dst_id, id), zero state. Full/no-credit -> refuse, never spill
         // (spilling a fixed-VC stream to another VC would reorder it).
         uint8_t vc = (*cand)[static_cast<uint8_t>(dst_id ^ id) % cand->size()];
