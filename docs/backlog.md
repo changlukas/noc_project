@@ -3,14 +3,23 @@
 Forward-only: open work items and known gaps only. Completed work lives in git history, not here.
 Read at session start; each round strikes what it closes and adds what it surfaces.
 
-## NEXT ROUND (headline) -- commercialize to IP + textbook alignment + de-AI, then release
+## NEXT ROUND (headline) -- commercialization Rounds 2+3: execute ledger, fresh doc set, release
 
-Use the `on-chip-networks` skill (Enright Jerger / Krishna / Peh, *On-Chip Networks 2nd Ed*) as the
-textbook authority and scan the whole project. Verify that the **design**, **function naming**, and
-**variable naming** align with the textbook's standard terminology. For each divergence, produce a
-trade-off list documenting our design rationale (why we diverge). Goal: a professional IP with no AI
-traces; the round ends in a release. Companion skill `noc-ordering` covers the ordering/RoB material.
-(memory: `project_noc_textbook_alignment_commercialization`)
+Round 1 (audit) DONE 2026-07-14: user-approved ledger + gate decisions D1-D8 in
+`docs/superpowers/audit/2026-07-14-ledger.md`; trade-off skeleton + salvage inventory alongside.
+Spec: `docs/superpowers/specs/2026-07-14-commercialization-textbook-alignment-design.md`.
+
+- **Round 2 (code)**: prose master/slave unification (D1), RZ1 tag removal + `pinned` rename to
+  deterministic-VC-allocation wording (D2/D3), `landing_`→input register + `mosi/miso`→
+  upstream/downstream (D4), FlooNoC ATTRIBUTION + per-file tags (D5), NSU `use_pools_` branch
+  deletion + noc_types_pkg banner regen (D6), sim/dv README modified-flag (D8), LICENSE dead-path
+  fix (L4-002), root third-party notice fold-in (L4-003). Gates: ctest / regen diff / WSL make sim
+  directed per surface.
+- **Round 3 (docs)**: delete old doc set (docs/superpowers, docs/internal, top-level dying docs,
+  issue/, slides/); write fresh README + docs/spec.md + docs/trade-off.md from the salvage
+  inventory (as-built only — probe AXI/Trace and pulp-vip CR machinery are UNBUILT/retired);
+  fix CLAUDE.md stale claims; gitignore backlog.md; release checklist (known limitations,
+  verification summary, platform matrix, quickstart).
 
 ## Open -- defensive / correctness (small)
 
