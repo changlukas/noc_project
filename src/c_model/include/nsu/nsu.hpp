@@ -56,10 +56,10 @@ struct NsuConfig {
     std::size_t num_vc = 1;
     uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
     uint8_t read_rsp_vc = 0;   // R -> read_rsp_vc
-    // ReadWriteSplit pool variant (response side): non-empty -> per-class pool.
-    // B: rob_req=0 -> fixed VC id pool[(dst_id ^ bid) % size]; rob_req=1 ->
+    // ReadWriteSplit vnet variant (response side): non-empty -> per-class vnet.
+    // B: rob_req=0 -> fixed VC id vnet[(dst_id ^ bid) % size]; rob_req=1 ->
     //    id-agnostic round-robin over write_rsp_vcs.
-    // R: fixed VC id pool[(dst_id ^ rid) % size] for every beat; a burst's
+    // R: fixed VC id vnet[(dst_id ^ rid) % size] for every beat; a burst's
     //    beats share (dst_id, rid) so the whole burst lands on one VC.
     std::vector<uint8_t> write_rsp_vcs{};
     std::vector<uint8_t> read_rsp_vcs{};
@@ -140,8 +140,8 @@ namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downstream) {
     if (!cfg.write_rsp_vcs.empty() && !cfg.read_rsp_vcs.empty()) {
-        return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_rsp_vcs,
-                                                 cfg.read_rsp_vcs, cfg.vc_arbiter_pending_depth);
+        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vcs,
+                                           cfg.read_rsp_vcs, cfg.vc_arbiter_pending_depth);
     }
     return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vc, cfg.read_rsp_vc,
                                        cfg.vc_arbiter_pending_depth);

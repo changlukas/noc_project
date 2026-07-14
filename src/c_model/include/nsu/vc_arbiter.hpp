@@ -4,17 +4,17 @@
 // because NSU produces single-flit B (`floo_axi_chimney.sv:608-616`)
 // and multi-flit R uses ROB not wormhole (`floo_axi_chimney.sv:624-633`).
 //
-// ReadWriteSplit (only mode): per-class VC pool; the scalar factory wraps a
-// single VC into a size-1 pool (mirror of nmu::VcArbiter).
+// ReadWriteSplit (only mode): per-class virtual network (vnet); the scalar
+// factory wraps a single VC into a size-1 vnet (mirror of nmu::VcArbiter).
 //   Clause 2 fixed VC id (return path): a rob_req=0 B, or ANY R (regardless
-//   of rob_req), maps to pool[(dst_id ^ id) % pool.size()] -- deterministic
+//   of rob_req), maps to vnet[(dst_id ^ id) % vnet.size()] -- deterministic
 //   VC allocation, a pure function with zero state. This fixes a
 //   same-(dst,id) bypassed response stream to one VC (so it cannot be
 //   reordered in-fabric) and gives R burst coherence for free: every beat of
 //   a burst shares (dst_id, rid) and hashes identically. A mapped VC that is
 //   full/no-credit refuses (`return false`) rather than spilling to another
-//   pool VC -- spilling a fixed-VC stream would reorder it. rob_req=1 B is
-//   order-free at the NMU slot path and round-robins the write pool.
+//   vnet VC -- spilling a fixed-VC stream would reorder it. rob_req=1 B is
+//   order-free at the NMU slot path and round-robins the write vnet.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
 //
 // References:
@@ -46,10 +46,10 @@ class VcArbiter : public router::NocRspOut {
                          std::vector<uint8_t>{read_rsp_vc}, pending_depth);
     }
 
-    static VcArbiter read_write_split_pools(router::NocRspOut& downstream, std::size_t num_vc,
-                                            std::vector<uint8_t> write_rsp_vcs,
-                                            std::vector<uint8_t> read_rsp_vcs,
-                                            std::size_t pending_depth = kDefaultPendingDepth) {
+    static VcArbiter read_write_split(router::NocRspOut& downstream, std::size_t num_vc,
+                                      std::vector<uint8_t> write_rsp_vcs,
+                                      std::vector<uint8_t> read_rsp_vcs,
+                                      std::size_t pending_depth = kDefaultPendingDepth) {
         return VcArbiter(downstream, num_vc, std::move(write_rsp_vcs), std::move(read_rsp_vcs),
                          pending_depth);
     }

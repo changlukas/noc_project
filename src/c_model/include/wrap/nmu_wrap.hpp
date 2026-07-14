@@ -28,7 +28,7 @@
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
-#include "ni/vc_pools.hpp"
+#include "ni/virtual_network.hpp"
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
 #include "nmu/sam_yaml.hpp"
@@ -42,8 +42,9 @@ class NmuWrap {
   public:
     // init — construct NmuStandalone with the co-sim default NmuConfig.
     // ReadWriteSplit, queue_depth = ni::NMU_QUEUE_DEPTH per channel.
-    // num_vc comes from the create param (cmodel_nmu_create); read/write VC
-    // pools are derived from derive_vc_pools(num_vc) (odd num_vc asserts).
+    // num_vc comes from the create param (cmodel_nmu_create); read/write
+    // virtual networks are derived from make_virtual_networks(num_vc) (odd
+    // num_vc asserts).
     // config_path: topology YAML with an `address_map` block. Null/empty
     // (the default) keeps the legacy co-sim default SAM below so existing unit-test
     // callers are unaffected.
@@ -65,9 +66,9 @@ class NmuWrap {
             cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
         }
         cfg.num_vc = num_vc;
-        const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
-        cfg.write_vcs = vc_pools.write_vcs;
-        cfg.read_vcs = vc_pools.read_vcs;
+        const auto vnets = ni::cmodel::make_virtual_networks(num_vc);  // asserts odd num_vc
+        cfg.write_vcs = vnets.write_vcs;
+        cfg.read_vcs = vnets.read_vcs;
         // rob_mode / the tb's `_rob` suffix controls the R RoB only; B RoB is always on.
         cfg.read_rob_mode = rob_mode;
         cfg.b_rob_depth = b_rob_depth;

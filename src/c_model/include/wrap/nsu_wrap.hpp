@@ -34,7 +34,7 @@
 #include "wrap/nsu_wrap_io.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "flit.hpp"
-#include "ni/vc_pools.hpp"
+#include "ni/virtual_network.hpp"
 #include "nsu/nsu_standalone.hpp"
 #include <array>
 #include <memory>
@@ -45,9 +45,10 @@ namespace ni::cmodel::wrap {
 class NsuWrap {
   public:
     // init — construct NsuStandalone with the co-sim default NsuConfig.
-    // ReadWriteSplit pools, queue_depth = ni::NSU_QUEUE_DEPTH per channel.
-    // num_vc comes from the create param (cmodel_nsu_create); derive_vc_pools
-    // splits it into write_rsp_vcs (lower half) and read_rsp_vcs (upper half).
+    // ReadWriteSplit virtual networks, queue_depth = ni::NSU_QUEUE_DEPTH per
+    // channel. num_vc comes from the create param (cmodel_nsu_create);
+    // make_virtual_networks splits it into write_rsp_vcs (lower half) and
+    // read_rsp_vcs (upper half).
     void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
               std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
               std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING) {
@@ -56,9 +57,9 @@ class NsuWrap {
         NsuConfig cfg{};
         cfg.src_id = src_id;
         cfg.num_vc = num_vc;
-        const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
-        cfg.write_rsp_vcs = vc_pools.write_vcs;
-        cfg.read_rsp_vcs = vc_pools.read_vcs;
+        const auto vnets = ni::cmodel::make_virtual_networks(num_vc);  // asserts odd num_vc
+        cfg.write_rsp_vcs = vnets.write_vcs;
+        cfg.read_rsp_vcs = vnets.read_vcs;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;

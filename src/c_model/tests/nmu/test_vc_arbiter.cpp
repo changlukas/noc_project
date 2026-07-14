@@ -1,7 +1,7 @@
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/nmu.hpp"
-#include "ni/vc_pools.hpp"
+#include "ni/virtual_network.hpp"
 #include "ni/wormhole_arbiter.hpp"
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
@@ -221,14 +221,15 @@ TEST_P(NmuVcArbParam, BackpressureChain_VcArbToUpstream) {
     EXPECT_FALSE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
 }
 
-// Round-robin spread: with a read pool {2,3} (num_vc=4), four DISTINCT unbound
-// arids must not all land on the lowest pool VC. First-available would fix all
+// Round-robin spread: with a read vnet {2,3} (num_vc=4), four DISTINCT unbound
+// arids must not all land on the lowest vnet VC. First-available would fix all
 // to VC=2; round-robin alternates 2,3,2,3.
 TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossPool) {
-    SCENARIO("NMU VcArbiter pools: distinct unbound arids round-robin over read pool");
+    SCENARIO("NMU VcArbiter vnets: distinct unbound arids round-robin over read vnet");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
-                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
+                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
     uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x10));
     uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x11));
     uint8_t vc_c = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x12));
@@ -243,10 +244,11 @@ TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossPool) {
 // previous same-channel flit reuses that VC instead of round-robining -- fixes
 // the bypass streak to one VC so it cannot be reordered in-fabric.
 TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestFixedVcId) {
-    SCENARIO("NMU VcArbiter pools: same arid + same dst_id (rob_req=0) fixes the read pool VC");
+    SCENARIO("NMU VcArbiter vnets: same arid + same dst_id (rob_req=0) fixes the read vnet VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
-                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
+                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
     uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(a, 2u);
@@ -254,13 +256,14 @@ TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestFixedVcId) {
 }
 
 // No fixed VC yet: same id, different dst_id -- the streak broke, so
-// round-robin (spread) resumes, matching the pre-existing id-agnostic pool
+// round-robin (spread) resumes, matching the pre-existing id-agnostic vnet
 // behavior.
 TEST(NmuVcArbiterRoundRobin, SameReadIdDifferentDestRoundRobins) {
-    SCENARIO("NMU VcArbiter pools: same arid, different dst_id -- no fixed VC yet, round-robins");
+    SCENARIO("NMU VcArbiter vnets: same arid, different dst_id -- no fixed VC yet, round-robins");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
-                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
+                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
     uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/1, 0, 0, /*id=*/0x20));
     EXPECT_EQ(a, 2u);
@@ -271,10 +274,11 @@ TEST(NmuVcArbiterRoundRobin, SameReadIdDifferentDestRoundRobins) {
 // reorders them, so the fixed VC id logic is skipped and they always
 // round-robin, even with a matching (dst, id).
 TEST(NmuVcArbiterRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
-    SCENARIO("NMU VcArbiter pools: rob_req=1 flits round-robin even with same (dst,id)");
+    SCENARIO("NMU VcArbiter vnets: rob_req=1 flits round-robin even with same (dst,id)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
-                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
+                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
     Flit f1 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
     f1.set_header_field("rob_req", 1);
     Flit f2 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
@@ -299,16 +303,17 @@ TEST(NmuVcArbiterRoundRobin, NumVc1SameIdSameDestUnaffected) {
 
 // W follows its AW's VC even when that VC came from a fixed VC id reuse, not
 // a fresh round-robin pick -- the second AW's W beat must land on the reused
-// VC (0), not the pool's next round-robin slot (1).
+// VC (0), not the vnet's next round-robin slot (1).
 TEST(NmuVcArbiter, WFollowsAW_ReusedFixedVc) {
     SCENARIO(
-        "NMU VcArbiter pools: second same-(dst,awid) AW reuses its fixed VC; "
+        "NMU VcArbiter vnets: second same-(dst,awid) AW reuses its fixed VC; "
         "W beat follows current_aw_vc_ (the reused VC), not round-robin");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.req_out(), /*num_vc=*/4,
-                                                 /*write_vcs=*/{0, 1}, /*read_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
+                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
 
-    // AW1 (dst=0, id=0x20): first sighting -> round-robin picks write pool VC 0.
+    // AW1 (dst=0, id=0x20): first sighting -> round-robin picks write vnet VC 0.
     uint8_t aw1_vc =
         push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(aw1_vc, 0u);
@@ -490,11 +495,11 @@ TEST(NmuVcArbDeath, ProtocolViolation_LyingDownstream_DeathTest) {
     EXPECT_DEATH({ arb.tick(); }, ".*");
 }
 
-// Wiring: NmuConfig carrying pools builds a pools arbiter that spreads.
-TEST(NmuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
+// Wiring: NmuConfig carrying vnets builds a vnet arbiter that spreads.
+TEST(NmuConfigVnets, ConfigVnetsBuildSpreadingArbiter) {
     using ni::cmodel::nmu::NmuConfig;
     using ni::cmodel::nmu::detail::make_vc_arbiter;  // factory lives in nmu::detail
-    SCENARIO("NmuConfig.write_vcs/read_vcs -> make_vc_arbiter -> pools arbiter");
+    SCENARIO("NmuConfig.write_vcs/read_vcs -> make_vc_arbiter -> vnet arbiter");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
     cfg.num_vc = 4;

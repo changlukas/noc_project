@@ -59,10 +59,9 @@ class VcArbiter : public router::NocReqOut {
                          std::vector<uint8_t>{read_vc}, pending_depth);
     }
 
-    static VcArbiter read_write_split_pools(router::NocReqOut& downstream, std::size_t num_vc,
-                                            std::vector<uint8_t> write_vcs,
-                                            std::vector<uint8_t> read_vcs,
-                                            std::size_t pending_depth = kDefaultPendingDepth) {
+    static VcArbiter read_write_split(router::NocReqOut& downstream, std::size_t num_vc,
+                                      std::vector<uint8_t> write_vcs, std::vector<uint8_t> read_vcs,
+                                      std::size_t pending_depth = kDefaultPendingDepth) {
         return VcArbiter(downstream, num_vc, std::move(write_vcs), std::move(read_vcs),
                          pending_depth);
     }

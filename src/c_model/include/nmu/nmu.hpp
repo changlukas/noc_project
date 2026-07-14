@@ -138,8 +138,9 @@ struct NmuConfig {
     std::size_t num_vc = 1;
     uint8_t write_vc = 0;
     uint8_t read_vc = 0;
-    // ReadWriteSplit pool variant: when non-empty, each class draws from a VC
-    // pool with round-robin selection instead of the single write_vc/read_vc.
+    // ReadWriteSplit vnet variant: when non-empty, each class draws from a VC
+    // virtual network with round-robin selection instead of the single
+    // write_vc/read_vc.
     std::vector<uint8_t> write_vcs{};
     std::vector<uint8_t> read_vcs{};
     std::size_t wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
@@ -264,8 +265,8 @@ namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
     if (!cfg.write_vcs.empty() && !cfg.read_vcs.empty()) {
-        return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_vcs,
-                                                 cfg.read_vcs, cfg.vc_arbiter_pending_depth);
+        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vcs, cfg.read_vcs,
+                                           cfg.vc_arbiter_pending_depth);
     }
     return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
                                        cfg.vc_arbiter_pending_depth);

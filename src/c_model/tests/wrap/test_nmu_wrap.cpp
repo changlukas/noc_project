@@ -243,7 +243,7 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
 
 // ---------------------------------------------------------------------------
 // Death test: odd num_vc rejected at the wrap init boundary.
-// derive_vc_pools asserts on any odd num_vc > 1; NmuWrap::init calls it, so
+// make_virtual_networks asserts on any odd num_vc > 1; NmuWrap::init calls it, so
 // the abort must propagate through the wrap path.
 // ---------------------------------------------------------------------------
 TEST(WrapOddNumVcDeath, NmuWrapRejectsOddNumVc) {
