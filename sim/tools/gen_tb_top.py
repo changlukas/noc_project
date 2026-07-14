@@ -136,7 +136,7 @@ def _address_map(topo: dict) -> dict:
     """address_map block (optional, DUT-only): tile_size.
 
     tile_size feeds REGION_BASE (SAM base = dst_id * tile_size). The c_model
-    always rebases, so the subordinate sees a tile-local address."""
+    always rebases, so the slave sees a tile-local address."""
     am = topo.get("address_map") or {}
     tile_size = int(am.get("tile_size", _DEFAULT_TILE_SIZE))
     # REGION_BASE lays every tile at base = coord_id * tile_size. The c_model SAM
@@ -557,8 +557,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // default) keeps each NMU's default 16x16 uniform, 4 GB/tile SAM.")
     w('    string sam_config_path = "";')
     w("")
-    w("    // NSU knobs. max_unique_ids=1 collapses every manager onto one downstream")
-    w("    // AXI id (FlooNoC default); 256 passes the manager's id through.")
+    w("    // NSU knobs. max_unique_ids=1 collapses every master onto one downstream")
+    w("    // AXI id (FlooNoC default); 256 passes the master's id through.")
     w("    // max_outstanding is the shared MetaBuffer pool per direction.")
     w("    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;")
     w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;")

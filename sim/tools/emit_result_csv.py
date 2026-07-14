@@ -17,7 +17,7 @@ import pathlib
 import re
 import sys
 
-# [Monitor node0.manager][Read] Latency: 98.30 +- 4.10, N: 200, BW: 107.02 Bits/cycle, Util: 41.80%
+# [Monitor node0.master][Read] Latency: 98.30 +- 4.10, N: 200, BW: 107.02 Bits/cycle, Util: 41.80%
 _MON = re.compile(
     r"\[Monitor[^\]]*\]\[(?:Read|Write)\]\s+Latency:\s*([\d.]+)\s*\+-\s*[\d.]+,\s*"
     r"N:\s*(\d+),\s*BW:\s*([\d.]+)\s*Bits/cycle",

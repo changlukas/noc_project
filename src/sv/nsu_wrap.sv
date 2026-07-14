@@ -2,7 +2,7 @@
 //
 // The Nsu is the NoC-side inverse of nmu_wrap. Its 4 packed-struct NoC ports
 // read req flit + rsp credit from the router and drive rsp flit + req credit
-// back. On the AXI side it acts as master toward the downstream subordinate.
+// back. On the AXI side it acts as master toward the downstream slave.
 //
 // Beta-tick discipline (spec §5.1): on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
@@ -135,7 +135,7 @@ module nsu_wrap #(
     // NoC req credit return (Nsu drives back upstream; per-VC pulse vector)
     bit [NUM_VC-1:0]       noc_req_credit_return_q;
 
-    // AXI master side outputs (Nsu drives toward subordinate)
+    // AXI master side outputs (Nsu drives toward slave)
     bit                    awvalid_q;
     bit [ID_WIDTH-1:0]     awid_q;
     bit [ADDR_WIDTH-1:0]   awaddr_q;
@@ -211,7 +211,7 @@ module nsu_wrap #(
                 noc_req_i.flit,
                 // NoC rsp credit — router returns credit to Nsu (per-VC vector)
                 noc_rsp_cred_i.credit[NUM_VC-1:0],
-                // AXI master side — subordinate drives ready + B/R
+                // AXI master side — slave drives ready + B/R
                 axi_rsp_i.awready,
                 axi_rsp_i.wready,
                 axi_rsp_i.bvalid,
@@ -316,7 +316,7 @@ module nsu_wrap #(
     // FlooNoC consumer pulse vector from the C model; per-VC pass-through)
     assign noc_req_cred_o.credit = noc_req_credit_return_q;
 
-    // AXI master side — Nsu drives request channels toward subordinate
+    // AXI master side — Nsu drives request channels toward slave
     assign axi_req_o.awvalid  = awvalid_q;
     assign axi_req_o.awid     = awid_q;
     assign axi_req_o.awaddr   = awaddr_q;

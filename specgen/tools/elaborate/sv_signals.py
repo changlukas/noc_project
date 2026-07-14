@@ -79,7 +79,7 @@ _AXI_CHANNEL_SIGNALS: dict[str, list[tuple[str, str]]] = {
     ],
 }
 
-# AXI signals driven by the master (manager) side. Everything else in the
+# AXI signals driven by the master side. Everything else in the
 # channel matrix is slave-driven. Used to compose modport direction lists.
 _MASTER_DRIVES_AXI: frozenset[str] = frozenset({
     "awid", "awaddr", "awlen", "awsize", "awburst", "awlock", "awcache",
