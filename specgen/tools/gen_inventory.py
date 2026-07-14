@@ -16,7 +16,7 @@ from pathlib import Path
 
 SPECGEN_ROOT = Path(__file__).resolve().parent.parent
 JSON_PATH    = SPECGEN_ROOT / "source" / "noc_function_blocks.json"
-DEFAULT_OUT  = SPECGEN_ROOT.parent / "c_model" / "FEATURE_INVENTORY.md"
+DEFAULT_OUT  = SPECGEN_ROOT.parent / "src" / "c_model" / "FEATURE_INVENTORY.md"
 
 
 # Implemented filenames that differ from the ID-derived short name.
