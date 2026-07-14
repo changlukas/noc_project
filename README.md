@@ -33,7 +33,7 @@ AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
 
 - CMake 3.20 or newer, GCC with C++17, GNU make
 - Verilator 5.048 (primary, WSL); 5.036 also works (the Makefile carries its workarounds)
-- Python 3 with PyYAML
+- Python 3 with PyYAML, pytest (specgen drift gate)
 - GoogleTest and yaml-cpp are fetched by CMake; no system install
 
 | Platform | Scope | Verified |
