@@ -138,8 +138,20 @@ def _address_map(topo: dict) -> dict:
     tile_size feeds REGION_BASE (SAM base = dst_id * tile_size). The c_model
     always rebases, so the subordinate sees a tile-local address."""
     am = topo.get("address_map") or {}
+    tile_size = int(am.get("tile_size", _DEFAULT_TILE_SIZE))
+    # REGION_BASE lays every tile at base = coord_id * tile_size. The c_model SAM
+    # honors an explicit per-tile `base`, but this generator does not read it, so a
+    # custom base would silently misroute. Reject it loudly (honor it when a real
+    # non-uniform map needs it).
+    for t in am.get("tiles") or []:
+        if "base" in t and int(t["base"]) != _coord_id(t["x"], t["y"]) * tile_size:
+            raise ValueError(
+                f"topology tile (x={t['x']},y={t['y']}) base={int(t['base']):#x} != uniform "
+                f"base {_coord_id(t['x'], t['y']) * tile_size:#x} (coord_id*tile_size); the "
+                f"tb generator supports only the uniform per-tile base"
+            )
     return {
-        "tile_size": int(am.get("tile_size", _DEFAULT_TILE_SIZE)),
+        "tile_size": tile_size,
     }
 
 

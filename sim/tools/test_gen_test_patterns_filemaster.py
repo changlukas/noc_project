@@ -179,3 +179,48 @@ def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
     intervals.sort()
     for (s0, e0), (s1, e1) in zip(intervals, intervals[1:]):
         assert e0 <= s1, f"overlapping slots: [{s0:#x},{e0:#x}) vs [{s1:#x},{e1:#x})"
+
+
+# --- per-tile base guard: generators lay tiles at coord_id*tile_size and do not
+#     read a custom `base`; a mismatch must fail loud, not silently misroute. ---
+
+def test_load_topology_rejects_custom_tile_base(tmp_path):
+    # coord_id(1,0)=1, tile_size=0x1000 -> uniform base 0x1000; 0x9999 must be rejected.
+    topo = tmp_path / "custom_base.yaml"
+    topo.write_text(
+        "topology: {name: t, x_dim: 2, y_dim: 1, num_vc: 1}\n"
+        "address_map:\n"
+        "  tile_size: 0x1000\n"
+        "  tiles:\n"
+        "    - { x: 1, y: 0, base: 0x9999, size: 0x1000 }\n"
+    )
+    with pytest.raises(ValueError, match="uniform per-tile base"):
+        g._load_topology(str(topo))
+
+
+def test_load_topology_accepts_uniform_base_with_size_override(tmp_path):
+    # base == coord_id*tile_size (0x1000) + a size override is fine (the shipped
+    # non-uniform map does exactly this).
+    topo = tmp_path / "uniform_base.yaml"
+    topo.write_text(
+        "topology: {name: t, x_dim: 2, y_dim: 1, num_vc: 1}\n"
+        "address_map:\n"
+        "  tile_size: 0x1000\n"
+        "  tiles:\n"
+        "    - { x: 1, y: 0, base: 0x1000, size: 0x400 }\n"
+    )
+    _nodes, x_dim, y_dim, ts = g._load_topology(str(topo))
+    assert (ts, x_dim, y_dim) == (0x1000, 2, 1)
+
+
+def test_gen_tb_top_address_map_rejects_custom_base():
+    import gen_tb_top as gt
+    topo = {
+        "topology": {"name": "t", "x_dim": 2, "y_dim": 1, "num_vc": 1},
+        "address_map": {
+            "tile_size": 0x1000,
+            "tiles": [{"x": 1, "y": 0, "base": 0x9999, "size": 0x1000}],
+        },
+    }
+    with pytest.raises(ValueError, match="uniform per-tile base"):
+        gt._address_map(topo)

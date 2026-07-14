@@ -370,6 +370,17 @@ def _load_topology(name):
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
     tile_size = (topo.get("address_map") or {}).get("tile_size", _DEFAULT_TILE_SIZE)
+    # The address formula lays every tile at base = coord_id * tile_size. The c_model
+    # SAM honors an explicit per-tile `base`, but this generator does not read it, so a
+    # custom base would silently misroute. Reject it loudly (honor it when a real
+    # non-uniform map needs it).
+    for t in (topo.get("address_map") or {}).get("tiles") or []:
+        if "base" in t and int(t["base"]) != coord_id(t["x"], t["y"]) * tile_size:
+            raise ValueError(
+                f"topology tile (x={t['x']},y={t['y']}) base={int(t['base']):#x} != uniform "
+                f"base {coord_id(t['x'], t['y']) * tile_size:#x} (coord_id*tile_size); the "
+                f"stimulus generator supports only the uniform per-tile base"
+            )
     nodes = []
     idx = 0
     for y in range(y_dim):
