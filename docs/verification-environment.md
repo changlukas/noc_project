@@ -53,9 +53,10 @@ vendored under `sim/dv/` from the pulp `axi` / `common_verification` /
 `common_cells` packages and a FlooNoC test component (Solderpad 0.51);
 per-package version, upstream commit, and the one flagged local modification
 (`axi_bw_monitor.sv`, a two-line `$display` addition) are in
-`sim/dv/README.md`. This is the only section in the documentation set that
-names external IP; the rest of this document and `docs/spec.md` describe the
-environment in the DUT's own vocabulary.
+`sim/dv/README.md`. This is the only section in this document that names
+external IP; the rest of this document describes the environment in the
+DUT's own vocabulary. `docs/spec.md`'s References section carries the
+upstream RTL file map.
 
 ## Traffic-pattern semantics
 
@@ -140,6 +141,4 @@ and prints it:
 
 The same seed drives both the stimulus generator (`--seed`, used by
 `uniform_random`/`hotspot`) and the simulator's own `+verilator+seed+`, so
-passing back the printed value reproduces the run exactly. Accepted
-throughput and latency numbers per topology are tracked in
-[cosim-log.md](cosim-log.md).
+passing back the printed value reproduces the run exactly.
