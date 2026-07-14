@@ -102,7 +102,8 @@ sim/tools/emit_result_csv.py)`.
 
 - Remove the line `/docs/image/*.jpg` (contradicts 6 tracked jpgs, L4-011).
 - Add `/docs/backlog.md` under the docs section.
-- `git rm --cached docs/backlog.md` (file stays on disk as the local working doc).
+- `git rm --cached docs/backlog.md` (file stays on disk as the local working doc — LOCAL SCRATCH
+  ONLY, not a release artifact; a fresh clone will not have it, by design).
 - (`/cross-review/` and `/.superpowers/` are already ignored — verify, do not duplicate.)
 
 - [ ] **Step 4: Commit**
@@ -142,7 +143,8 @@ git commit -m "chore(release): license third-party section out, dv modified-flag
 | output location `sim/<simulator>/output/<run-tag>/run.log` | `sim/verilator/Makefile` run rules |
 | PASS line formats (`DIRECTED PASS: ... scoreboard clean, non-vacuous`, `[Monitor nodeN.master]`, `[HWM]`) | a real run.log or the emitting SV/tools |
 | offline build (`DEPS_SRC`, `FETCHCONTENT_FULLY_DISCONNECTED`), `local.mk` overrides | root `Makefile` comments + `docs/development.md` |
-| specgen regen commands (`codegen.py --target {cpp,sv} --domain {packet,signals,params,noc_types}`, `--check`) | `specgen/tools/codegen.py` docstring |
+| specgen regen commands (`codegen.py --target {cpp,sv} --domain {packet,signals,params}`, `--domain noc_types --num-vc N` needs the extra flag, `--check`) | `specgen/tools/codegen.py` docstring + argparse |
+| WSL guidance line: on WSL work from a native-filesystem copy of the repo, not `/mnt/*` (drvfs is slow/unreliable under parallel builds) | this round's environment record |
 | contributing gate list | current README Contributing + CLAUDE.md quality gates |
 
 - [ ] **Step 2: Write README.md** with exactly the spec's section table (header positioning /
@@ -301,18 +303,25 @@ Keep `docs/image/` untouched. `docs/backlog.md` already untracked (Task 2) — l
   quality gates) untouched.
 
 - [ ] **Step 3: specgen/README.md** (new, one screen): what specgen owns (JSON/YAML sources →
-  generated cpp/sv/json), regen entry points (codegen.py per-domain commands), the drift gates
-  (`--check`, CMake codegen_check, `make specgen_pytest`), boundary statement (generated files
-  never hand-edited; ni_signals.json hand-curated input). Match main-README style.
+  generated cpp/sv/json), regen entry points (codegen.py per-domain commands; note `noc_types`
+  needs `--num-vc`), the drift gates (`--check`, CMake codegen_check, `make specgen_pytest`),
+  boundary statement (generated files never hand-edited; ni_signals.json hand-curated input).
+  Match main-README style.
+
+- [ ] **Step 3b: specgen stale archive links** — `specgen/tools/README.md:23` and
+  `specgen/docs/guide/index.md:25` reference `docs/_archive/...` (deleted with docs/internal).
+  Delete the two reference sentences (the archived design docs do not ship; do not repoint).
 
 - [ ] **Step 4: Verify nothing references deleted paths**
 
+ALL file types (C++/SV/Python/Markdown/Make — no --include filter), excluding vendored sim/dv:
+
 ```bash
-grep -rn "docs/architecture\|docs/development\|docs/cosim-log\|docs/nmu-rob\|docs/performance-probe\|docs/pg037\|docs/internal\|docs/issue\|docs/slides\|docs/superpowers\|_archive" \
-  --include="*.md" --include="*.py" --include="*.mk" --include="Makefile*" --include="*.cmake" --include="CMakeLists.txt" \
-  README.md CLAUDE.md docs/ src/ sim/ specgen/ Makefile .gitignore
+grep -rn "docs/architecture\|docs/development\|docs/cosim-log\|docs/nmu-rob\|docs/performance-probe\|docs/pg037\|docs/internal\|docs/issue\|docs/slides\|docs/superpowers\|_archive\|microarch" \
+  README.md CLAUDE.md docs/ src/ sim/ specgen/ Makefile .gitignore | grep -v "sim/dv\|docs/backlog.md"
 ```
-Expected: only hits inside `docs/backlog.md` (local working doc, allowed) — fix any other.
+Expected: no output (Round-2 Task 13 already swept the C++/SV comments; this proves it held).
+Fix any hit before committing.
 
 - [ ] **Step 5: Gates + commit**
 
