@@ -62,7 +62,8 @@ upstream RTL file map.
 
 `sim/tools/gen_test_patterns.py` emits per-node stimulus
 (`<out>/node<i>/{write,read}.txt`) for the directed driver. Destination
-rules are ported from BookSim2's traffic-pattern classes:
+rules are ported from an established NoC simulator's traffic-pattern
+classes (upstream reference in `docs/spec.md` References):
 
 | pattern | destination rule | note |
 |---|---|---|

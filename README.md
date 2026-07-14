@@ -8,9 +8,10 @@ assertions.
 
 ## Status
 
-Internal engineering release. Build, unit tests, and directed cosim run
-end to end on the platforms below. `make test` reports the current unit
-suite; `make help` lists the main targets.
+Internal engineering release. Build, unit tests, and directed cosim are
+verified end-to-end by a documentation-driven dry run for this release on
+the platforms below. `make test` reports the current unit suite;
+`make help` lists the main targets.
 
 ## Architecture
 
@@ -38,7 +39,7 @@ AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
 
 | Platform | Scope | Verified |
 |---|---|---|
-| Linux (WSL Ubuntu, Verilator 5.048) | build + ctest + cosim | dry-run verified for this release |
+| Linux (WSL Ubuntu, Verilator 5.048) | build + ctest + cosim | full flow (dry-run verified) |
 | Windows 11 + MSYS2 mingw64 (Verilator 5.036) | build + ctest | declared |
 | Linux workstation (VCS) | testbench build | declared |
 
@@ -89,7 +90,7 @@ On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
 clean, non-vacuous` to the console. The full log at
 `sim/verilator/output/<run-tag>/run.log` ends with `PASS: all N nodes
 done, non-vacuous` and carries per-node `[Monitor nodeN.master]`
-latency/bandwidth lines and `[HWM]` buffer high-water marks.
+latency/bandwidth lines and `[HWM]` R-RoB slot high-water marks.
 
 ## Regenerate
 

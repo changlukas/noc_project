@@ -91,7 +91,8 @@ NMU/NSU asymmetries are role differences, not gaps:
   `bvalid`/`rvalid` asserted until the matching ready (IHI 0022H A3.2.1).
 - The generated `tb_top` is self-clocked (10 ns clock, 4-cycle reset);
   `sim/verilator/main.cpp` is a minimal `eval()` + time-advance loop and
-  never toggles the clock. The same file drives VCS (`-top tb_top`).
+  never toggles the clock. The same generated `tb_top` drives VCS
+  (`-top tb_top`); VCS owns simulation time and needs no C++ driver.
 
 ## Address translation
 
@@ -407,7 +408,8 @@ the `cmodel_perf_axi_txn` / `cmodel_perf_axi_backpressure` DPI signatures
 exist but nothing drives them, and the corresponding output section was
 dropped from the perf dump.
 
-NoC counters (`PerfCollector`, dumped to `perf.json` via `+perf_out`):
+NoC counters (`PerfCollector`, dumped to `perf.json` via `+perf_out` at the
+end of every run, in both injection modes):
 
 | counter | source | semantics |
 |---|---|---|
@@ -432,8 +434,8 @@ few transactions per node against a fast slave; read PASS and latency,
 ignore Util; throughput questions belong to the mode-1 rate sweep).
 Latency tracks hop distance: on a 4x4 mesh the `neighbor` pattern shows
 three tiers, interior 2 hops, one-axis wrap 4, corner 6, because the mesh
-has no torus links and the wrap routes back across the array. `[HWM]`
-lines report buffer high-water marks, including the R-RoB peak from
+has no torus links and the wrap routes back across the array. The `[HWM]`
+lines report one high-water mark: the per-node R-RoB slot peak from
 `cmodel_nmu_read_slot_hwm`.
 
 ## Known limitations
@@ -441,11 +443,11 @@ lines report buffer high-water marks, including the R-RoB peak from
 | limitation | detail |
 |---|---|
 | SAM failure mode | `translate()` miss and a topology YAML without `address_map` fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
-| Unswept sizing | `max_txns_per_id` = 32 is a placeholder, never depth-swept [TBD]. `r_rob_depth` = 256 (the full `rob_idx` space) is expressible via `R_ROB_DEPTH` but equally unswept. |
+| Unswept sizing | `max_txns_per_id` = 32 is a placeholder, never depth-swept [TBD]. `r_rob_depth` defaults to 32 (`NMU_ROB_R_DEPTH`) and is expressible up to 256 (the full `rob_idx` space) via `R_ROB_DEPTH`; equally unswept at every setting. |
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
 | Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
 | Verification gaps | no covergroups, no constrained-random axis, no wire-side SVA framework; no standing co-sim regression harness (fabric coverage relies on manual `make sim` runs); no slave-latency sweep axis. |
-| Perf DPI in mode 1 | the perf dump is not wired for continuous-injection runs (`perf.json` is empty there), so the bandwidth-monitor cross-check is unrun. |
+| AXI-side perf DPI undriven | `perf.json` carries only the NoC section (dumped every run, both injection modes); the `cmodel_perf_axi_txn` / `cmodel_perf_axi_backpressure` hooks are never driven, so no AXI-side perf dump exists to cross-check against `axi_bw_monitor`. |
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
 | Deferred header fields | `NOC_QOS_WIDTH`, `ROUTE_PAR_WIDTH`, `FLIT_ECC_WIDTH` are width-0 placeholders; QoS, route parity, and flit ECC are unbuilt. |
 | Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |
@@ -463,7 +465,9 @@ lines report buffer high-water marks, including the R-RoB peak from
   `floo_meta_buffer.sv` (meta buffer, downstream-ID collapse),
   `floo_axi_chimney.sv` (single-flit B / RoB-side R split, `MaxTxns` on the
   slave face), `floo_wormhole_arbiter.sv` (per-output wormhole lock) and
-  `floo_vc_arbiter.sv` (VC arbitration without the lock), `floo_pkg.sv` (parameter names `BRoBSize`, `RRoBSize`,
+  `floo_vc_arbiter.sv` (VC arbitration without the lock),
+  `floo_vc_assignment.sv` (per-hop turn-model VC assignment, deprecated
+  upstream, not ported), `floo_pkg.sv` (parameter names `BRoBSize`, `RRoBSize`,
   `MaxTxnsPerId`, `MaxTxns`), `axi_bw_monitor.sv` (DV bandwidth monitor,
   imported with one flagged modification, `sim/dv/README.md`).
 - ID-space narrowing for a small-`NumIds` RoB: `axi_id_remap.sv`
