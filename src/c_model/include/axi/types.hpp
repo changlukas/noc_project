@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #pragma once
 #include "ni_flit_constants.h"
 #include <array>
@@ -36,8 +35,7 @@ static_assert(DATA_BYTES == 32,
 
 // WBeat::strb is uint32_t. If DATA_BYTES ever exceeds 32, WSTRB no longer fits
 // in a single uint32_t — widen the struct field before relaxing this.
-static_assert(DATA_BYTES <= 32,
-              "WBeat::strb is uint32_t; widen the strb field if DATA_BYTES > 32");
+static_assert(DATA_BYTES <= 32, "WBeat::strb is uint32_t; widen the strb field if DATA_BYTES > 32");
 
 enum class Burst : uint8_t { FIXED = 0, INCR = 1, WRAP = 2 };
 enum class Resp : uint8_t { OKAY = 0, EXOKAY = 1, SLVERR = 2, DECERR = 3 };

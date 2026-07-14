@@ -79,7 +79,7 @@ TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/Syst
 # Prefer `cmake3` when present (RHEL ships the modern 3.x under that name, while
 # bare `cmake` may be an ancient one shadowed onto PATH by e.g. a Xilinx SDK);
 # otherwise fall through to `cmake` resolved at recipe time. Override in
-# local.mk or on the command line if neither is right. Build needs cmake >= 3.14
+# local.mk or on the command line if neither is right. Build needs cmake >= 3.20
 # (FetchContent_MakeAvailable + gtest 1.14).
 CMAKE ?= $(shell command -v cmake3 2>/dev/null || echo cmake)
 

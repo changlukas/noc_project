@@ -1,4 +1,3 @@
-// Independent design (cocotbext-axi has no scenario file format) — see axi/ATTRIBUTION.md
 #pragma once
 #include "axi/protocol_rules.hpp"
 #include "axi/types.hpp"
@@ -85,10 +84,9 @@ inline Scenario load_scenario(const std::string& path) {
     static const std::regex kNameRegex(
         R"(^AX4-(BAS|BUR|BND|ORD|EXC|RSP|STR|HSH|INF|QOS)-\d{3}_[a-z0-9_]+$)");
     static const std::map<std::string, std::string> kCatCategory = {
-        {"BAS", "basic"},    {"BUR", "burst"},     {"BND", "boundary"},
-        {"ORD", "ordering"}, {"EXC", "exclusive"}, {"RSP", "response"},
-        {"STR", "stress"},   {"HSH", "handshake"}, {"INF", "infrastructure"},
-        {"QOS", "qos"},
+        {"BAS", "basic"},          {"BUR", "burst"},    {"BND", "boundary"}, {"ORD", "ordering"},
+        {"EXC", "exclusive"},      {"RSP", "response"}, {"STR", "stress"},   {"HSH", "handshake"},
+        {"INF", "infrastructure"}, {"QOS", "qos"},
     };
 
     bool strict = false;

@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/scenario_parser.hpp"
 #include "axi/axi_slave.hpp"
 #include "axi/memory.hpp"

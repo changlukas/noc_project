@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/axi_slave.hpp"
 #include "common/scenario.hpp"
 #include "mock_memory_port.hpp"

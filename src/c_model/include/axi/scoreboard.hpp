@@ -1,4 +1,3 @@
-// (Scoreboard pattern is independent; see ATTRIBUTION.md)
 #pragma once
 #include "axi/axi_master.hpp"
 #include "axi/types.hpp"
