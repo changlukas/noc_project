@@ -38,7 +38,7 @@ namespace ni::cmodel::router {
 // NI -> router LOCAL input. Implements all four producer-side NoC interfaces
 // (NocReqOut and NocRspOut share the same shape) and is the router's
 // RouterCreditSink for that input port. A per-VC credit mirror (seeded to the
-// router input FIFO depth) plus a per-tick landing-register guard translate the
+// router input FIFO depth) plus a per-tick input-register guard translate the
 // router's void/assert push into a retryable false.
 class InjectAdapter : public NocReqOut, public NocRspOut, public RouterCreditSink {
   public:

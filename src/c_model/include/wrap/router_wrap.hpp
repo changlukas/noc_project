@@ -105,7 +105,7 @@ class RouterWrap {
         // Step 1: push all inbound flits straight into the router inputs. LOCAL
         // and LINK are now symmetric FlooNoC pulse-credit ports (no InjectAdapter
         // mirror). The single NMU/NSU source sends <=1 LOCAL flit/tick, but the
-        // router landing register asserts on a 2nd push/port/cycle (router.hpp),
+        // router input register asserts on a 2nd push/port/cycle (router.hpp),
         // so guard it: exactly one LOCAL push per network per tick.
         if (in_.req_in_valid) {
             req_router_->input(LOCAL).push_flit(flit_from_bytes(in_.req_in_flit));

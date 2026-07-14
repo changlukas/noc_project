@@ -164,8 +164,8 @@ class Router {
     };
 
     RouterConfig cfg_;
-    // stage-1 input landing register, one flit/port/cycle
-    std::array<std::optional<Flit>, ROUTER_PORT_COUNT> landing_{};
+    // stage-1 input register, one flit/port/cycle
+    std::array<std::optional<Flit>, ROUTER_PORT_COUNT> input_reg_{};
     std::array<std::vector<std::deque<Flit>>, ROUTER_PORT_COUNT> input_fifo_{};
     std::array<std::vector<std::size_t>, ROUTER_PORT_COUNT> credit_{};  // [out][vc]
     std::array<WormholeState, ROUTER_PORT_COUNT> wormhole_{};           // per-output (across VCs)
@@ -192,11 +192,11 @@ inline void Router::accept_flit(std::size_t port, const Flit& f) {
         assert(false && "Router::accept_flit: nonzero multicast unsupported");
         std::abort();
     }
-    if (landing_[port].has_value()) {
+    if (input_reg_[port].has_value()) {
         assert(false && "Router::accept_flit: >1 flit per link per cycle");
         std::abort();
     }
-    landing_[port] = f;
+    input_reg_[port] = f;
 }
 
 inline void Router::tick() {
@@ -276,11 +276,11 @@ inline void Router::tick() {
         }
     }
 
-    // Stage 1: landing register -> input VC FIFO.
+    // Stage 1: input register -> input VC FIFO.
     for (std::size_t port = 0; port < ROUTER_PORT_COUNT; ++port) {
-        if (!landing_[port].has_value()) continue;
-        const Flit f = *landing_[port];
-        landing_[port].reset();
+        if (!input_reg_[port].has_value()) continue;
+        const Flit f = *input_reg_[port];
+        input_reg_[port].reset();
         const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
         assert(input_fifo_[port][vc].size() < cfg_.vc_depth &&
                "Router: input FIFO overflow — upstream credit discipline broken");

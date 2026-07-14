@@ -5,7 +5,7 @@
 #include <optional>
 #include <utility>
 namespace ni::cmodel::router {
-// One-token stage register; the staged-NI building block. Mirrors Router::landing_
+// One-token stage register; the staged-NI building block. Mirrors Router::input_reg_
 // (router.hpp:157) + overwrite assert (router.hpp:185). Reverse-order tick drains
 // (take) before upstream fills (accept), so a token advances one stage/tick.
 template <class Token>

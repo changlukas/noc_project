@@ -222,7 +222,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Beats of the head burst released so far, keyed by range base. FlooNoC keys the
     // same counter by ID (read_rob_idx_offset_q, floo_rob.sv:177-180); a range belongs
     // to exactly one ID, so keying by base carries the same information. Distinct from
-    // read_arrival_offset_: arrival places landing beats, release tracks how many left.
+    // read_arrival_offset_: arrival places incoming beats, release tracks how many left.
     std::array<uint16_t, ROB_IDX_SPACE> read_release_offset_{};
 
     // High-water mark backing read_slot_hwm(). See getter for details.

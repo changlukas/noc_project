@@ -42,7 +42,7 @@ TEST(InjectAdapter, CreditMirrorGatesPush) {
         << "second push in the same tick must backpressure, not hit the router assert";
 }
 
-TEST(InjectAdapter, LandingGuardResetsOnTick) {
+TEST(InjectAdapter, InputRegGuardResetsOnTick) {
     SCENARIO("InjectAdapter: the per-tick push flag resets so the next tick accepts again");
     Router r(cfg_at(0, 0));
     InjectAdapter inj(r, static_cast<std::size_t>(RouterPort::LOCAL), 2, 2);
@@ -51,7 +51,7 @@ TEST(InjectAdapter, LandingGuardResetsOnTick) {
     EXPECT_FALSE(inj.push_flit(req_flit(0, 0)));
     inj.on_tick();
     r.tick();
-    EXPECT_TRUE(inj.push_flit(req_flit(0, 0))) << "new tick: landing free, one push allowed";
+    EXPECT_TRUE(inj.push_flit(req_flit(0, 0))) << "new tick: input register free, one push allowed";
 }
 
 TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
@@ -65,7 +65,7 @@ TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
     const std::size_t local_out_seed = r.credit(LOCAL, 0);  // full before any grant
     EXPECT_TRUE(inj.push_flit(req_flit(/*dst=*/0, /*vc=*/0)));
     inj.on_tick();
-    r.tick();  // stage1: landing->fifo
+    r.tick();  // stage1: input register -> fifo
     r.tick();  // stage2: grant->output fifo (LOCAL), LOCAL output credit--
     r.tick();  // stage3: output fifo -> downstream (ej buffers)
     EXPECT_EQ(r.credit(LOCAL, 0), local_out_seed - 1) << "LOCAL output credit spent on eject";

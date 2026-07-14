@@ -512,7 +512,7 @@ TEST(RouterVcArbitration, FlitLevelRrAcrossVcs) {
     r.set_downstream(E, east);
     const uint8_t dst = make_dst(3, 1);
 
-    // One flit/input-port/tick (landing register), so "sustained two-VC load from
+    // One flit/input-port/tick (input register), so "sustained two-VC load from
     // the same input" is fed by alternating vc0 / vc1 on successive ticks. Both
     // VCs keep a flit queued; the output grants one flit/cycle and round-robins
     // across VCs, so delivered vc_ids must alternate. Ample credit (returned per
@@ -601,11 +601,11 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     relay.target = &a;
     relay.port = static_cast<std::size_t>(RouterPort::EAST);
 
-    // A's stage-3 push lands in B's WEST landing register; it becomes FIFO-visible
+    // A's stage-3 push lands in B's WEST input register; it becomes FIFO-visible
     // only after B's next stage-1. `wire_inflight` counts flits A has pushed but B
     // has not yet absorbed into its WEST FIFO. We increment here and decrement once
-    // per b.tick() (stage 1 always drains a present landing). Since A pushes <=1
-    // flit/tick on EAST and B absorbs its landing every tick, wire_inflight is 0 or
+    // per b.tick() (stage 1 always drains a present input register). Since A pushes <=1
+    // flit/tick on EAST and B absorbs its input register every tick, wire_inflight is 0 or
     // 1 at any post-tick sampling point.
     struct CountingLink : ni::cmodel::router::RouterLink {
         Router* target;
@@ -671,8 +671,8 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
             ++injected;
         }
         a.tick();  // A may push <=1 flit onto the wire (a_to_b.push_flit)
-        b.tick();  // B absorbs its WEST landing this tick
-        if (a_to_b.in_flight > 0) --a_to_b.in_flight;  // landing consumed by B stage 1
+        b.tick();  // B absorbs its WEST input register this tick
+        if (a_to_b.in_flight > 0) --a_to_b.in_flight;  // input register consumed by B stage 1
 
         // No credit created: the observable occupancy never exceeds DEPTH.
         EXPECT_LE(occupancy_lower(), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH))
@@ -819,7 +819,7 @@ TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
 
     // Feeding must be credit-aware so depth=1 never overflows the vc_depth-deep
     // input FIFO: push a vc's next packet only when that vc's input FIFO has room.
-    // One flit/input-port/tick (landing register), so per-vc injection naturally
+    // One flit/input-port/tick (input register), so per-vc injection naturally
     // interleaves across ticks. Track the next packet sequence to push per vc.
     std::vector<int> fed(num_vc, 0);
     const int total = num_vc * kPacketsPerVc;
@@ -833,7 +833,7 @@ TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
                 r.input(WEST).push_flit(make_tagged_flit(dst, static_cast<uint8_t>(vc),
                                                          /*last=*/1, label(vc, fed[vc])));
                 ++fed[vc];
-                break;  // one flit/input-port/tick (landing register)
+                break;  // one flit/input-port/tick (input register)
             }
         }
         const std::size_t before = east.received.size();
