@@ -224,7 +224,7 @@ TEST_P(NmuVcArbParam, BackpressureChain_VcArbToUpstream) {
 // Round-robin spread: with a read vnet {2,3} (num_vc=4), four DISTINCT unbound
 // arids must not all land on the lowest vnet VC. First-available would fix all
 // to VC=2; round-robin alternates 2,3,2,3.
-TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossPool) {
+TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossVnet) {
     SCENARIO("NMU VcArbiter vnets: distinct unbound arids round-robin over read vnet");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,

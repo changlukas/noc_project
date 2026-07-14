@@ -120,7 +120,7 @@ TEST(NsuVcArbiterVnets, RobbedRBurstStaysOnOneVcToo) {
 
 // Distinct rids (each a single-beat read) hash to different vnet slots -- the
 // static map replaces round-robin spread with deterministic (dst,id) spread.
-TEST(NsuVcArbiterVnets, DistinctRidsSpreadAcrossPool) {
+TEST(NsuVcArbiterVnets, DistinctRidsSpreadAcrossVnet) {
     SCENARIO("NSU vnets: distinct rids hash across read vnet {2,3} via static map");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
@@ -136,7 +136,7 @@ TEST(NsuVcArbiterVnets, DistinctRidsSpreadAcrossPool) {
 }
 
 // B uses the write vnet, R uses the read vnet (response-class separation).
-TEST(NsuVcArbiterVnets, BUsesWritePoolRUsesReadPool) {
+TEST(NsuVcArbiterVnets, BUsesWriteVnetRUsesReadVnet) {
     SCENARIO("NSU vnets: B -> write vnet {0,1}, R -> read vnet {2,3}");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
@@ -159,7 +159,7 @@ TEST(NsuVcArbiterVnets, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
-    // rid5 -> VC3, rid6 -> VC2 (same hash as DistinctRidsSpreadAcrossPool above).
+    // rid5 -> VC3, rid6 -> VC2 (same hash as DistinctRidsSpreadAcrossVnet above).
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC3
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 0)));  // rid6 -> VC2
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC3
@@ -170,7 +170,7 @@ TEST(NsuVcArbiterVnets, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
     EXPECT_EQ(arb.pending_size(2), 3u);                                   // all rid6 beats
 }
 
-// INVERTED from the pre-clause-2 test "SameBidRoundRobinsWritePool": that test
+// INVERTED from the retired pre-clause-2 same-bid round-robin test: that test
 // asserted B has no fixed VC and round-robins same-bid responses. The clause-2
 // return-path map now fixes rob_req=0 B the same way it fixes R -- a
 // same-(dst,bid) bypass stream must share one VC to stay in order at the NMU.
@@ -189,7 +189,7 @@ TEST(NsuVcArbiterVnets, SameBidSameDstBypassFixedVcId) {
 
 // rob_req=1 (robbed) B is order-free at the NMU slot path, so it keeps
 // round-robining the write vnet exactly as before clause 2.
-TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWritePool) {
+TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWriteVnet) {
     SCENARIO("NSU vnets: rob_req=1 same-bid B responses still round-robin the write vnet");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
