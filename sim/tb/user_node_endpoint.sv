@@ -219,12 +219,14 @@ module user_node_endpoint #(
         scoreboard = new(master_dv);
         scoreboard.reset();
         @(posedge rst_ni);
-        // Mode 1 interleaves reads and writes, so a read may precede the write to
-        // its address and the scoreboard's write-before-read precondition fails.
-        // Skip BOTH enable_all_checks() and monitor(): construction hooks nothing,
-        // but monitor() forks the sampling tasks and mutates the memory model even
-        // with checks off.
-        if (get_injection_mode() == 0) begin
+        // Mode 1 interleaves reads and writes with no pairing, so a read may
+        // precede the write to its address and the scoreboard's
+        // write-before-read precondition fails. Modes 0 and 2 order every read
+        // after its write (phase barrier / per-pair B interlock), so both arm.
+        // In mode 1 skip BOTH enable_all_checks() and monitor(): construction
+        // hooks nothing, but monitor() forks the sampling tasks and mutates the
+        // memory model even with checks off.
+        if (get_injection_mode() != 1) begin
             scoreboard.enable_all_checks();
             scoreboard.monitor();
         end
@@ -257,37 +259,89 @@ module user_node_endpoint #(
         end
     endtask
 
-    // Directed driver: per-node two-phase. load_files() fills the queues (do NOT
-    // call run(): it re-forks all five and double-consumes the queues, spec
-    // Two-phase). Phase 1 drains all writes (wait_b => committed at the slave);
-    // phase 2 issues reads, checked by the scoreboard against golden.
+    // Mode-2 interlock state: B responses returned per AXI id, snooped off the
+    // flat wires (same sampling pattern as txn_cnt_o). Per-id, not total: with
+    // stimulus ids_per_tile > 1, B responses reorder across ids; within one id
+    // AXI returns B in AW issue order, so a per-id count identifies the paired
+    // write's B exactly.
+    int unsigned b_returned[2**ID_WIDTH];
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+            b_returned <= '{default: '0};
+        end else if (master_axi_rsp_i.bvalid && master_axi_req_o.bready) begin
+            b_returned[master_axi_rsp_i.bid] <= b_returned[master_axi_rsp_i.bid] + 1;
+        end
+    end
+
+    // Mode 2: read i issues only after write i's B returns. Pair i is
+    // transaction i of write.txt/read.txt (same id, same address), so the
+    // paired write is the issued[id]-th write with that id and
+    // b_returned[id] >= issued[id] is the exact release condition.
+    task automatic run_ar_after_b();
+        int unsigned issued[2**ID_WIDTH];
+        int unsigned id;
+        issued = '{default: '0};
+        while (file_master.ar_queue.size() > 0) begin
+            id = 32'(file_master.ar_queue[0].ax_id);
+            issued[id] += 1;
+            while (b_returned[id] < issued[id]) @(posedge clk_i);
+            file_master.drv.send_ar(file_master.ar_queue[0]);
+            void'(file_master.ar_queue.pop_front());
+        end
+    endtask
+
+    // Stimulus driver, one shape per +injection_mode. load_files() fills the
+    // queues (do NOT call run(): it re-forks all five and double-consumes the
+    // queues, spec Two-phase). join (not join_none) everywhere so B/R are
+    // consumed and the pass terminates cleanly.
     initial begin
         void'($value$plusargs("stim_dir=%s", stim_dir));
         write_path = $sformatf("%s/node%0d/write.txt", stim_dir, NODE_ID);
         read_path  = $sformatf("%s/node%0d/read.txt",  stim_dir, NODE_ID);
         file_master = new(master_dv);
         file_master.load_files(read_path, write_path);
+        injection_rate = 1.0;
+        void'($value$plusargs("injection_rate=%f", injection_rate));
+        injection_rate_pct = int'(injection_rate * 100.0);
         @(posedge rst_ni);
-        if (get_injection_mode() == 1) begin
-            injection_rate = 1.0;
-            void'($value$plusargs("injection_rate=%f", injection_rate));
-            injection_rate_pct = int'(injection_rate * 100.0);
-            // Continuous injection: one phase, reads and writes interleaved, each
-            // send paced per cycle on injection_rate. join (not join_none) so B/R
-            // are consumed and the pass terminates cleanly.
-            fork
-                run_aw_paced();
-                file_master.run_w();
-                run_ar_paced();
-                file_master.wait_b();
-                file_master.wait_r();
-            join
-            run_done = 1'b1;
-        end else begin
-            fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
-            fork file_master.run_ar(); file_master.wait_r(); join
-            run_done = 1'b1;
-        end
+        case (get_injection_mode())
+            0: begin
+                // Directed two-phase: phase 1 drains all writes (wait_b =>
+                // committed at the slave); phase 2 issues reads, checked by the
+                // scoreboard against golden.
+                fork file_master.run_aw(); file_master.run_w(); file_master.wait_b(); join
+                fork file_master.run_ar(); file_master.wait_r(); join
+            end
+            1: begin
+                // Continuous: one phase, reads and writes interleaved, each
+                // send paced per cycle on injection_rate.
+                fork
+                    run_aw_paced();
+                    file_master.run_w();
+                    run_ar_paced();
+                    file_master.wait_b();
+                    file_master.wait_r();
+                join
+            end
+            2: begin
+                // Checked-continuous: AW paced as mode 1; each read waits for
+                // its paired write's B, so the armed scoreboard checks exact
+                // data under continuous write load.
+                fork
+                    run_aw_paced();
+                    file_master.run_w();
+                    run_ar_after_b();
+                    file_master.wait_b();
+                    file_master.wait_r();
+                join
+            end
+            default: begin
+                $fatal(1, "unknown +injection_mode=%0d (0, 1, 2 supported)",
+                    get_injection_mode());
+            end
+        endcase
+        run_done = 1'b1;
     end
 
     // ------------------------------------------------------------------
