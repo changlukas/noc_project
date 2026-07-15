@@ -230,26 +230,28 @@ module user_node_endpoint #(
         end
     end
 
-    // Traffic mode (perf sweep): continuous interleaved injection paced by a
-    // per-cycle gate. Selected at runtime by +injection_mode=1, paced by
+    // Traffic mode (perf sweep): continuous interleaved injection, paced per
+    // cycle. Selected at runtime by +injection_mode=1, paced by
     // +injection_rate; mode 0 (default) runs the two-phase directed run below
-    // unchanged. Gate uses $urandom_range (PRNG, no constraint solver => no z3).
-    // Gated copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 plus a
+    // unchanged. Pacing uses $urandom_range (PRNG, no constraint solver => no
+    // z3): one Bernoulli trial per cycle at p = injection_rate (booksim2
+    // injection process).
+    // Paced copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 plus a
     // per-cycle idle before each send.
     real injection_rate;
-    int  unsigned inj_gate_pct;
+    int  unsigned injection_rate_pct;
 
-    task automatic gated_run_aw();
+    task automatic run_aw_paced();
         while (file_master.aw_queue.size() > 0) begin
-            while ($urandom_range(0, 99) >= inj_gate_pct) @(posedge clk_i);
+            while ($urandom_range(0, 99) >= injection_rate_pct) @(posedge clk_i);
             file_master.drv.send_aw(file_master.aw_queue[0]);
             void'(file_master.aw_queue.pop_front());
         end
     endtask
 
-    task automatic gated_run_ar();
+    task automatic run_ar_paced();
         while (file_master.ar_queue.size() > 0) begin
-            while ($urandom_range(0, 99) >= inj_gate_pct) @(posedge clk_i);
+            while ($urandom_range(0, 99) >= injection_rate_pct) @(posedge clk_i);
             file_master.drv.send_ar(file_master.ar_queue[0]);
             void'(file_master.ar_queue.pop_front());
         end
@@ -269,14 +271,14 @@ module user_node_endpoint #(
         if (get_injection_mode() == 1) begin
             injection_rate = 1.0;
             void'($value$plusargs("injection_rate=%f", injection_rate));
-            inj_gate_pct = int'(injection_rate * 100.0);
+            injection_rate_pct = int'(injection_rate * 100.0);
             // Continuous injection: one phase, reads and writes interleaved, each
-            // send gated per cycle on injection_rate. join (not join_none) so B/R
+            // send paced per cycle on injection_rate. join (not join_none) so B/R
             // are consumed and the pass terminates cleanly.
             fork
-                gated_run_aw();
+                run_aw_paced();
                 file_master.run_w();
-                gated_run_ar();
+                run_ar_paced();
                 file_master.wait_b();
                 file_master.wait_r();
             join
