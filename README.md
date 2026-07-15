@@ -92,6 +92,34 @@ clean, non-vacuous` to the console. The full log at
 done, non-vacuous` and carries per-node `[Monitor nodeN.master]`
 latency/bandwidth lines and `[HWM]` R-RoB slot high-water marks.
 
+### Injection-rate mode
+
+`INJECTION_MODE=1` switches the run from the two-phase directed flow to
+continuous traffic: reads and writes interleave in one phase, paced per
+cycle by `INJECTION_RATE` (0.0 to 1.0). The scoreboard cannot arm in this
+mode (its write-before-read precondition fails), so a continuous run
+measures bandwidth and latency without data checking.
+
+| var | default | meaning |
+|---|---|---|
+| `INJECTION_RATE` | `1.0` | per-cycle injection probability |
+| `INJECTION_COUNT` | `200` (mode 1), `4` (mode 0) | transactions per node |
+| `HOTSPOT` | `5` | target node for the `hotspot` pattern |
+
+~~~bash
+make sim TB=mesh_4x4_vc4_rob PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
+~~~
+
+On success the wrapper prints `CONTINUOUS PASS: <run-tag>` and each run
+writes `sim/verilator/output/continuous_<topo>_<pattern>_r<rate>_s<seed>/result.csv`
+with the monitor's bandwidth and latency numbers.
+
+`make sim-injection-sweep PATTERN=<p>` runs the full saturation sweep
+(VC configs 1/2/4/8, nine rates each, overridable via `SWEEP_VCS` and
+`SWEEP_RATES`), then merges every `result.csv` and plots
+`sim/tools/injection_sweep.png`. The sweep rebuilds Verilator once per
+VC config; expect a long run.
+
 ## Regenerate
 
 Packet, signal, and parameter definitions are single-sourced in
