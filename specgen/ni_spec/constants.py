@@ -20,9 +20,9 @@ def _resolved_field_widths(packet_spec) -> dict:
     return {**_int_params(packet_spec), **packet_spec["flit"].get("field_widths", {})}
 
 
-# PP-10: legacy thin getters (flit_width/header_width/payload_width/link_width/
+# Legacy thin getters (flit_width/header_width/payload_width/link_width/
 # header_field_pos/payload_field_pos/all_header_fields) were removed.
-# They read flit.derived[...] / lsb / msb which PP-6 dropped from JSON. Use the
+# They read flit.derived[...] / lsb / msb which are no longer in the JSON. Use the
 # *_resolved variants and header_field_position / payload_field_position below.
 
 
@@ -108,9 +108,9 @@ def signals_pins_by_interface(signals_spec) -> dict:
     Direction for channeled signals is inherited from the channel;
     interface-level (NoC link) signals carry their own ``direction`` field.
 
-    PP-9: per-pin ``default`` is no longer present in JSON. Callers MUST
-    resolve widths via ``signal_pin_width`` (which consults the merged
-    namespace of packet field_widths + interface port_parameters).
+    JSON no longer stores a per-pin ``default``; callers resolve via the
+    merged namespace of packet field_widths + interface port_parameters
+    (via ``signal_pin_width``).
     """
     out: dict = {}
     for iface in signals_spec.get("interfaces", []):
@@ -138,12 +138,12 @@ def signals_pins_by_interface(signals_spec) -> dict:
     return out
 
 
-# ---------- pure-parameterization elaborator helpers (PP-2) ----------
+# ---------- pure-parameterization elaborator helpers ----------
 #
 # These compute the same values currently stored as `derived` / `lsb` / `msb`
 # in ni_packet.json. They are introduced here so codegen + tests can switch
-# to them in subsequent tasks (PP-3+), at which point the stored fields
-# can be removed from the JSON entirely (PP-6).
+# to them, at which point the stored fields
+# can be removed from the JSON entirely.
 
 import ast as _ast
 from typing import Mapping as _Mapping
@@ -320,8 +320,8 @@ def payload_field_position(spec: dict, channel: str, name: str):
 # ---------- derived totals (computed from helpers above) ----------
 #
 # All consumers (codegen, invariants, tests) use these resolved helpers.
-# PP-6 dropped flit.derived from JSON; PP-10 removed the legacy thin
-# getters that read it. The `_resolved` suffix is kept for explicit
+# flit.derived was dropped from JSON; the legacy thin getters that read
+# it were removed. The `_resolved` suffix is kept for explicit
 # "computed on demand" semantics.
 
 def header_width_resolved(spec: dict) -> int:
@@ -375,7 +375,7 @@ def wstrb_width_resolved(spec: dict) -> int:
     return int(fw.get("NOC_DATA_WIDTH", 0)) // 8
 
 
-# ---------- signals domain resolvers (PP-7) ----------
+# ---------- signals domain resolvers ----------
 #
 # Signals reference symbols from two namespaces:
 #   1) the interface's own port_parameters (e.g. NUM_VC, ENABLE_AXI_PARITY)
@@ -486,7 +486,7 @@ def signal_pin_width(signals_spec: dict, packet_spec: dict,
     Priority:
       1) width_param (symbolic; resolved against merged namespace)
       2) width_expr  (symbolic expression; resolved against merged namespace)
-      3) default     (legacy stored integer; tolerated during PP-7..PP-9)
+      3) default     (legacy stored integer; tolerated during the schema migration)
       4) 1           (fall-through for valid/strobe-style 1-bit pins)
     """
     for sig in signal_interface_pins(signals_spec, interface):

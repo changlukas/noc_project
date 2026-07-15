@@ -141,7 +141,7 @@ def test_payload_field_position_b_after_rsvd_mc_status_removed(packet_spec):
 
 
 # -- derived totals -------------------------------------------------
-# PP-6: flit.derived no longer exists in JSON. These tests now assert
+# flit.derived no longer exists in JSON. These tests now assert
 # self-consistency between the resolved helpers and the symbolic source
 # (field_widths + width_param + per-channel payload_width). When the spec
 # numbers change, these assertions remain valid by construction.

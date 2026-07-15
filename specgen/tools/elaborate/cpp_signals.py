@@ -24,7 +24,7 @@ from ni_spec.loader import load_doc
 def _resolve_pin_width(signals_spec, packet_spec, iface_name: str, pin: dict) -> int:
     """Return the pin width as an int.
 
-    PP-9: every AXI/CSR/NoC pin in the spec now resolves to an int through
+    Every AXI/CSR/NoC pin in the spec now resolves to an int through
     ``signal_pin_width`` (the AXI_*_WIDTH symbol gap is closed by per-port
     ``port_parameters``). No string fallback path remains; any
     ``ExprNameError`` here is a real spec bug and propagates to the caller.

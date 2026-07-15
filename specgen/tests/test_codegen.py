@@ -1,4 +1,4 @@
-"""Codegen smoke tests -- Task 7.
+"""Codegen smoke tests.
 
 Tests cover:
 - Each --target cpp --domain X produces a valid file with provenance banner.
@@ -249,7 +249,7 @@ def test_pins_bundle_compiles_with_gxx(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Per-payload-field LSB/MSB constants (Task 3)
+# Per-payload-field LSB/MSB constants
 # ---------------------------------------------------------------------------
 
 def test_packet_cpp_emits_payload_field_positions():

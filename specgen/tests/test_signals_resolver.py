@@ -1,4 +1,4 @@
-"""Unit tests for signals-domain resolvers (PP-7 + PP-9).
+"""Unit tests for signals-domain resolvers.
 
 Signals reference symbols from two namespaces:
   - the interface's port_parameters (local: NUM_VC, ENABLE_AXI_PARITY,
@@ -6,8 +6,8 @@ Signals reference symbols from two namespaces:
   - packet domain (cross-domain: FLIT_WIDTH, AXI_ID_WIDTH, AXI_ADDR_WIDTH, ...)
 
 Tests pull real interface/pin names from generated/ni_signals.json to
-keep the suite aligned with the authored spec. PP-9 closed the AXI_*_WIDTH
-namespace gap, so every pin in the spec must resolve to an int.
+keep the suite aligned with the authored spec. The AXI_*_WIDTH
+namespace gap is closed, so every pin in the spec must resolve to an int.
 """
 from __future__ import annotations
 import pytest
@@ -82,7 +82,7 @@ def test_pin_width_from_packet_field_widths(signals_spec, packet_spec):
 def test_pin_width_cross_domain_flit_width(signals_spec, packet_spec):
     """noc_req_flit_o.width_param = FLIT_WIDTH — the cross-domain edge.
 
-    FLIT_WIDTH is NOT in packet.flit.field_widths (PP-6 removed it as a
+    FLIT_WIDTH is NOT in packet.flit.field_widths (it is not a
     stored value). The resolver must compute it via flit_width_resolved.
     """
     expected = C.flit_width_resolved(packet_spec)
@@ -135,7 +135,7 @@ def test_signal_eval_expr_arithmetic(signals_spec, packet_spec):
     assert actual == expected
 
 
-# -- AXI_*_WIDTH resolution via per-interface port_parameters (PP-9) -
+# -- AXI_*_WIDTH resolution via per-interface port_parameters -
 
 # Expected widths for every AXI scalar symbol. These match the defaults
 # carried by the merged namespace (ni_signals.json port_parameters +
@@ -177,7 +177,7 @@ _AXI_WIDTH_PIN_SAMPLES = [
 def test_axi_width_pin_resolves(signals_spec, packet_spec, iface, pin, symbol):
     """Each AXI scalar-width symbol resolves via the interface's port_parameters.
 
-    PP-9 closed the namespace gap by adding AXI_DATA_WIDTH / AXI_STRB_WIDTH /
+    The namespace gap is closed by AXI_DATA_WIDTH / AXI_STRB_WIDTH /
     AXI_QOS_WIDTH / AXI_*USER_WIDTH (8 symbols) as port_parameters on both
     AXI_SLAVE_PORT and AXI_MASTER_PORT. The resolver must answer with the
     expected width without falling through to any legacy stored default.
@@ -204,7 +204,7 @@ def test_axi_interface_carries_eight_width_port_parameters(signals_spec, iface_n
 
 
 def test_every_pin_resolves_to_int(signals_spec, packet_spec):
-    """PP-9 hard invariant: every pin in ni_signals.json MUST resolve to an int.
+    """Hard invariant: every pin in ni_signals.json MUST resolve to an int.
 
     The transition-guard skip that tolerated ExprNameError on AXI_*_WIDTH
     symbols is removed — the resolver now answers every pin via the merged

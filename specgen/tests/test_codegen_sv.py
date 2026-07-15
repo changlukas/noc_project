@@ -1,4 +1,4 @@
-"""Codegen SV emitter tests -- Task 8.
+"""Codegen SV emitter tests.
 
 Tests cover:
 - --target sv --domain {packet|signals|params} each produces a .sv file.
@@ -239,7 +239,7 @@ class TestCheckModeWithSv:
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# Task 4: Pin-level SV interface per bundle
+# Pin-level SV interface per bundle
 # ---------------------------------------------------------------------------
 
 def test_interfaces_removed():

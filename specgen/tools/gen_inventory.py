@@ -62,7 +62,7 @@ def render(spec, when):
     out.append("# NoC Feature Inventory")
     out.append("")
     out.append("Inventory of NMU / NSU / ROUTER features defined in `noc_function_blocks.json`. ")
-    out.append("Per Invariant 1, the JSON does not drive codegen of internal unit classes; ")
+    out.append("The JSON does not drive codegen of internal unit classes; ")
     out.append("this file is documentation + a drift gate.")
     out.append("")
     out.append("Column **Expected c_model header** points to the conventional path for that ")

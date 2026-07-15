@@ -1,4 +1,4 @@
-"""Foundation gate tests — Task 1."""
+"""Foundation gate tests."""
 from pathlib import Path
 
 from ni_spec import loader

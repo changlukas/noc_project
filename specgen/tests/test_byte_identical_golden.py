@@ -20,7 +20,7 @@ def _strip_provenance(text: str) -> str:
     Strips:
       - ``// Generated at: <UTC>``    (re-runs change the timestamp)
       - ``// Source SHA: <hash>``     (JSON content evolves as the spec
-                                       schema is normalised, e.g. PP-6 drops
+                                       schema is normalised, e.g. dropping
                                        resolved fields; the body is unchanged)
 
     The intent of these goldens is to gate the *elaborated* artifact body,
@@ -31,7 +31,7 @@ def _strip_provenance(text: str) -> str:
     return text
 
 
-# Backwards-compatible alias (was the public name before PP-6).
+# Backwards-compatible alias (was the public name previously).
 _strip_timestamp = _strip_provenance
 
 

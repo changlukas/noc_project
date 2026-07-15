@@ -1,4 +1,4 @@
-"""Pin-level reset cross-merge — Task 3."""
+"""Pin-level reset cross-merge."""
 from pathlib import Path
 import pytest
 from ni_spec import loader, constants, invariants

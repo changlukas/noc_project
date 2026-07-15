@@ -1,9 +1,9 @@
 add_cmodel_test(test_port_pair_loopback)
 
-# Stage 3 packetize/depacketize end-to-end: extends the port-pair loopback
+# Packetize/depacketize end-to-end: extends the port-pair loopback
 # by inserting the four real packetize/depacketize modules + ChannelModel
 # between the NMU AxiSlavePort and the NSU AxiMasterPort, and asserts the
-# Stage 2 Scoreboard sees zero mismatch on each fixture.
+# Scoreboard sees zero mismatch on each fixture.
 add_cmodel_test(test_request_response_loopback)
 target_link_libraries(test_request_response_loopback PRIVATE yaml-cpp::yaml-cpp)
 # Pick up tests/common/channel_model.hpp via "common/..." includes.

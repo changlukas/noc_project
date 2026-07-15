@@ -1,4 +1,4 @@
-"""Function blocks JSON + validator — Task 5."""
+"""Function blocks JSON + validator."""
 from pathlib import Path
 import json
 import re

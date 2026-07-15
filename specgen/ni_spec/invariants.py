@@ -5,7 +5,7 @@ Layer 2 不變量同時是 C-model packer 的 runtime assertion 來源：
 - SECDED bound: ECC 寬度必須滿足 Hamming inequality
 - route_par_coverage 參照的 header 欄位必須存在
 
-PP-10 (post-PP-6): JSON 已不再儲存 lsb/msb/width/derived，欄位位置由
+JSON 已不再儲存 lsb/msb/width/derived，欄位位置由
 ``ni_spec.constants`` 的 *_resolved helpers 在 read time 推算；所以
 原來檢查「stored vs computed 不一致」的不變量被刪除（恆等式）。
 """
@@ -51,7 +51,7 @@ def check_schema(packet_spec, packet_schema) -> List[Issue]:
 
 def check_flit_arithmetic(packet_spec) -> List[Issue]:
     """Layer 2 packet arithmetic. Reads via ``ni_spec.constants`` helpers
-    rather than legacy lsb/msb/width/derived JSON fields (dropped by PP-6)."""
+    rather than legacy lsb/msb/width/derived JSON fields (no longer stored)."""
     TAG = "L2-FLIT"
     issues: List[Issue] = []
     flit = packet_spec["flit"]

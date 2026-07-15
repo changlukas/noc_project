@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "ni-spec/ni_signals.schema.json",
-  "title": "NoC NI Signal Interface Schema — top-level only (Task 3.5 clean shape)",
+  "title": "NoC NI Signal Interface Schema — top-level only",
   "type": "object",
   "required": ["$schema_version", "meta", "block_enables", "interfaces"],
   "additionalProperties": false,
@@ -20,7 +20,7 @@
     },
     "signal": {
       "type": "object",
-      "description": "Signal entry. Identifier is always pin_name. AXI channel signals use pin_name derived from channel+suffix. NoC signals use pin_name derived from noc_<logical_name>. PP-9: per-pin width is purely symbolic — width_param + width_expr only; resolution against the merged namespace (packet field_widths + interface port_parameters) is the consumer's responsibility.",
+      "description": "Signal entry. Identifier is always pin_name. AXI channel signals use pin_name derived from channel+suffix. NoC signals use pin_name derived from noc_<logical_name>. Per-pin width is purely symbolic — width_param + width_expr only; resolution against the merged namespace (packet field_widths + interface port_parameters) is the consumer's responsibility.",
       "required": ["width_param", "pin_name"],
       "additionalProperties": false,
       "properties": {
