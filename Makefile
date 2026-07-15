@@ -31,7 +31,7 @@ help:
 	@echo "Simulate:"
 	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot)"
 	@echo "  make sim TB=mesh_4x4_vc1 PATTERN=neighbor"
-	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_TILE= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= (directed only); SEED unset draws + prints a random seed"
+	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_TILE= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT=; SEED unset draws + prints a random seed"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"

@@ -232,12 +232,10 @@ module user_node_endpoint #(
         end
     end
 
-    // Traffic mode (perf sweep): continuous interleaved injection, paced per
-    // cycle. Selected at runtime by +injection_mode=1, paced by
-    // +injection_rate; mode 0 (default) runs the two-phase directed run below
-    // unchanged. Pacing uses $urandom_range (PRNG, no constraint solver => no
-    // z3): one Bernoulli trial per cycle at p = injection_rate (booksim2
-    // injection process).
+    // Continuous-injection pacing, shared by modes 1 and 2 (mode selection is
+    // the case dispatch in the stimulus initial below). Pacing uses
+    // $urandom_range (PRNG, no constraint solver => no z3): one Bernoulli
+    // trial per cycle at p = injection_rate (booksim2 injection process).
     // Paced copies of run_aw/run_ar: same body as axi_test.sv:2540-2565 plus a
     // per-cycle idle before each send.
     real injection_rate;

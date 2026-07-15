@@ -410,7 +410,7 @@ exist but nothing drives them, and the corresponding output section was
 dropped from the perf dump.
 
 NoC counters (`PerfCollector`, dumped to `perf.json` via `+perf_out` at the
-end of every run, in both injection modes):
+end of every run, in all injection modes):
 
 | counter | source | semantics |
 |---|---|---|
