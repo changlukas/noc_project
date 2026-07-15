@@ -404,10 +404,8 @@ topologies over nine rates in mode 1.
 ## Performance counters
 
 As-built instrumentation is NoC-side counters plus the DV bandwidth
-monitor. No AXI-side per-transaction profile or trace machinery is built:
-the `cmodel_perf_axi_txn` / `cmodel_perf_axi_backpressure` DPI signatures
-exist but nothing drives them, and the corresponding output section was
-dropped from the perf dump.
+monitor. No AXI-side per-transaction profile or trace machinery is built,
+and the perf dump carries no AXI section.
 
 NoC counters (`PerfCollector`, dumped to `perf.json` via `+perf_out` at the
 end of every run, in all injection modes):
@@ -448,7 +446,7 @@ lines report one high-water mark: the per-node R-RoB slot peak from
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
 | Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
 | Verification gaps | no covergroups, no constrained-random axis, no wire-side SVA framework; no standing co-sim regression harness (fabric coverage relies on manual `make sim` runs); no slave-latency sweep axis. |
-| AXI-side perf DPI undriven | `perf.json` carries only the NoC section (dumped every run, both injection modes); the `cmodel_perf_axi_txn` / `cmodel_perf_axi_backpressure` hooks are never driven, so no AXI-side perf dump exists to cross-check against `axi_bw_monitor`. |
+| AXI-side perf instrumentation absent | `perf.json` carries only the NoC section (dumped at the end of every run, all injection modes); no AXI-side per-transaction hooks exist, so nothing cross-checks `axi_bw_monitor` from the model side. |
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
 | Deferred header fields | `NOC_QOS_WIDTH`, `ROUTE_PAR_WIDTH`, `FLIT_ECC_WIDTH` are width-0 placeholders; QoS, route parity, and flit ECC are unbuilt. |
 | Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |
