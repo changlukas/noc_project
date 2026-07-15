@@ -240,7 +240,7 @@ run-directed: $(TBTOP_EXE)
 	    "+perf_scenario=$(SIM_TAG)" \
 	    > output/$(SIM_TAG)/run.log 2>&1; \
 	rc=$$?; \
-	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(SIM_TAG)/run.log; tail -4 output/$(SIM_TAG)/run.log; \
+	echo "--- run.log: per-node monitors + tail ---"; grep -F '[Monitor' output/$(SIM_TAG)/run.log; grep -vF '[HWM]' output/$(SIM_TAG)/run.log | tail -4; \
 	if grep -qE 'Unexpected RData|Unexpected W last|Not supported (AW|AR) burst|Atomic transfers not supported|%Error' \
 	        output/$(SIM_TAG)/run.log; then \
 	    echo "RUN FAIL: scoreboard mismatch/assertion/malformed stimulus"; exit 1; \
