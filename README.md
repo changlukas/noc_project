@@ -57,6 +57,11 @@ git clone <url> && cd noc_project
 make build       # c_model (CMake) + Verilator testbench, correct dep order
 ~~~
 
+Simulation-only setups can skip the c_model test binaries: `make
+build-verilator` builds the yaml-cpp library and the Verilator testbench
+and nothing else. `make build` (or `make build-cmodel`) is needed only
+before `make test`.
+
 Artifacts land under `build/` (gitignored); `make clean` removes them.
 
 ## Test

@@ -140,7 +140,8 @@ PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 check-yamlcpp:
 	@if [ ! -f "$(YAMLCPP_LIB)" ]; then \
 	    echo "ERROR: yaml-cpp static lib missing ($(YAMLCPP_LIB))."; \
-	    echo "Run \`make build-cmodel\` at the repo root first."; \
+	    echo "Run \`make build-verilator\` at the repo root first (builds only the"; \
+	    echo "yaml-cpp target, not the full c_model test suite)."; \
 	    exit 1; \
 	fi
 
