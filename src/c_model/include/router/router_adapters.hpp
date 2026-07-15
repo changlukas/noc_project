@@ -56,7 +56,6 @@ class InjectAdapter : public NocReqOut, public NocRspOut, public RouterCreditSin
     }
     void receive_credit(uint8_t vc) override { ++credit_[vc]; }
     void on_tick() { pushed_this_tick_ = false; }
-    std::size_t mirror_credit(uint8_t vc) const { return credit_[vc]; }  // test introspection
 
   private:
     Router& router_;

@@ -77,8 +77,6 @@ class Memory : public IMemoryPort {
     }
 
     uint8_t peek(uint64_t addr) const { return in_bounds_(addr, 1) ? storage_[addr - base_] : 0u; }
-    std::size_t pending_writes() const { return pending_writes_.size(); }
-    std::size_t pending_reads() const { return pending_reads_.size(); }
 
   private:
     bool in_bounds_(uint64_t addr, std::size_t bytes) const {
