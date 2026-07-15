@@ -131,7 +131,7 @@ TEST(RouterWrap, LinkInputDrainEmitsCreditPulse) {
     EXPECT_EQ(pulses, 1) << "expected exactly one LINK-input drain credit pulse";
 }
 
-// R2: the LOCAL (NI-edge) credit is now a single-cycle PULSE, identical to the
+// The LOCAL (NI-edge) credit is a single-cycle PULSE, identical to the
 // LINK. When the router's LOCAL input FIFO drains an NMU-injected req flit
 // (grant), the wrap must surface exactly one req_out_credit_return pulse — NOT
 // a steady credit_avail level. Inject one LOCAL-bound req at node0 (dst=(0,0)
@@ -158,7 +158,7 @@ TEST(RouterWrap, LocalInputDrainEmitsCreditPulse) {
     EXPECT_EQ(pulses, 1) << "expected exactly one LOCAL-input drain credit pulse";
 }
 
-// R2: the router's built-in credit_[LOCAL] sender counter (router->NI output
+// The router's built-in credit_[LOCAL] sender counter (router->NI output
 // direction) is replenished by the NI's returned pulse on req_in_credit_return.
 // Eject one LOCAL-bound req first (which spends one credit_[LOCAL] on the router
 // output), THEN return the credit pulse; router.receive_credit(LOCAL) must

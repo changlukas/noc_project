@@ -6,7 +6,7 @@
 // Separated from nsu.hpp so the production core does not carry co-sim
 // harness weight.
 #include "nsu/nsu.hpp"
-// router bases needed by NullNoc*
+// router bases needed by QueueNoc*
 #include "router/req_in.hpp"
 #include "router/rsp_out.hpp"
 #include <deque>
@@ -16,17 +16,17 @@
 namespace ni::cmodel::nsu {
 
 // -------------------------------------------------------------------------
-// Stage 5b: NsuStandalone — hermetic wrapper, no external NoC refs.
+// NsuStandalone — hermetic wrapper, no external NoC refs.
 //
 // Wraps construct NsuStandalone(NsuConfig{...}) without supplying
 // NocReqIn& / NocRspOut&. The wrapper owns queue-backed terminal endpoints for
 // both interfaces; real DPI wiring drives/drains them at the Wrap tick
 // boundary.
 //
-// NullNocReqIn: Wrap injects flits via inject_req_flit() before
+// QueueNocReqIn: Wrap injects flits via inject_req_flit() before
 //   calling nsu_.tick(); Nsu's Depacketize stage drains via pop_flit().
 //
-// NullNocRspOut: push_flit enqueues into an internal deque (capped at
+// QueueNocRspOut: push_flit enqueues into an internal deque (capped at
 //   kMaxQueueDepth as a drain-forgotten sanity check). With FlooNoC credit
 //   enabled (cosim opt-in) push_flit also gates+consumes per-VC credit and
 //   credit_avail reflects the counter; with credit OFF (default) it accepts
@@ -37,11 +37,11 @@ namespace ni::cmodel::nsu {
 
 namespace detail {
 
-struct NullNocReqIn : router::NocReqIn {
+struct QueueNocReqIn : router::NocReqIn {
     // Wrap accessor: inject one flit per tick from DPI wire.
     void inject_req_flit(const Flit& f) { queue_.push_back(f); }
 
-    // R2 consumer-pulse: size the per-VC pending counter before traffic. Always
+    // Consumer-pulse: size the per-VC pending counter before traffic. Always
     // present (no enable flag — pending only matters when the wrap drains it via
     // take_credit, which is cosim-only). Defaults to 1 VC.
     void size_pending(uint8_t num_vc) { pending_.assign(num_vc, 0); }
@@ -74,13 +74,13 @@ struct NullNocReqIn : router::NocReqIn {
     std::vector<std::size_t> pending_{1, 0};
 };
 
-struct NullNocRspOut : router::NocRspOut {
+struct QueueNocRspOut : router::NocRspOut {
     // Sanity cap: a real Wrap drains every tick, so a queue this deep
     // means the test forgot to drain. Asserts in debug; release builds skip
     // the check (and the queue is still allowed to grow unboundedly).
     static constexpr std::size_t kMaxQueueDepth = 1024;
 
-    // R2 opt-in FlooNoC sender credit (default OFF = today's always-available).
+    // FlooNoC-style NI-edge sender credit (default OFF = today's always-available).
     // When enabled, this models the InjectAdapter credit pattern: a per-VC
     // counter seeded to the downstream (router LOCAL input) depth; push_flit
     // decrements on accept, receive_credit increments on a credit pulse.
@@ -102,7 +102,7 @@ struct NullNocRspOut : router::NocRspOut {
             --credit_[vc];
         }
         assert(queue_.size() < kMaxQueueDepth &&
-               "NullNocRspOut overflow — did the test Wrap forget to drain?");
+               "QueueNocRspOut overflow — did the test Wrap forget to drain?");
         queue_.push_back(f);
         return true;
     }
@@ -128,10 +128,10 @@ class NsuStandalone {
   public:
     explicit NsuStandalone(NsuConfig cfg)
         : num_vc_(static_cast<uint8_t>(cfg.num_vc)),
-          null_req_in_(),
-          null_rsp_out_(),
-          nsu_(std::move(cfg), null_req_in_, null_rsp_out_) {
-        null_req_in_.size_pending(num_vc_);
+          queue_req_in_(),
+          queue_rsp_out_(),
+          nsu_(std::move(cfg), queue_req_in_, queue_rsp_out_) {
+        queue_req_in_.size_pending(num_vc_);
     }
 
     NsuStandalone(const NsuStandalone&) = delete;
@@ -146,22 +146,23 @@ class NsuStandalone {
     }
     Nsu& nsu() noexcept { return nsu_; }
 
-    // Stage 5b Wrap accessors — inject req side, drain rsp side.
-    void inject_req_flit(const Flit& f) { null_req_in_.inject_req_flit(f); }
-    std::optional<Flit> pop_rsp_flit() { return null_rsp_out_.pop_rsp_flit(); }
-    bool rsp_credit_avail(uint8_t vc = 0) const { return null_rsp_out_.credit_avail(vc); }
+    // Wrap accessors — inject req side, drain rsp side.
+    void inject_req_flit(const Flit& f) { queue_req_in_.inject_req_flit(f); }
+    std::optional<Flit> pop_rsp_flit() { return queue_rsp_out_.pop_rsp_flit(); }
+    bool rsp_credit_avail(uint8_t vc = 0) const { return queue_rsp_out_.credit_avail(vc); }
 
-    // R2 opt-in FlooNoC credit at the NoC terminal edge (cosim-only; default
-    // OFF). Seeds the rsp-out sender counter; the req-in consumer pulse is
-    // always active (sized in the ctor) but inert unless req_take_credit drains.
-    void enable_noc_credit(std::size_t seed) { null_rsp_out_.enable_credit(num_vc_, seed); }
-    void rsp_receive_credit(uint8_t vc = 0) { null_rsp_out_.receive_credit(vc); }
-    bool req_take_credit(uint8_t vc = 0) { return null_req_in_.take_credit(vc); }
+    // FlooNoC-style NI-edge credit at the NoC terminal edge (cosim-only; the
+    // wraps call this unconditionally in init()). Seeds the rsp-out sender
+    // counter; the req-in consumer pulse is always active (sized in the ctor)
+    // but inert unless req_take_credit drains.
+    void enable_noc_credit(std::size_t seed) { queue_rsp_out_.enable_credit(num_vc_, seed); }
+    void rsp_receive_credit(uint8_t vc = 0) { queue_rsp_out_.receive_credit(vc); }
+    bool req_take_credit(uint8_t vc = 0) { return queue_req_in_.take_credit(vc); }
 
   private:
     uint8_t num_vc_;
-    detail::NullNocReqIn null_req_in_;
-    detail::NullNocRspOut null_rsp_out_;
+    detail::QueueNocReqIn queue_req_in_;
+    detail::QueueNocRspOut queue_rsp_out_;
     Nsu nsu_;
 };
 

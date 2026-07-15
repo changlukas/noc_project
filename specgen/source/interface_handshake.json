@@ -21,14 +21,14 @@
         { "name": "SLAVE_VC_BUFFER_DEPTH", "constants_yaml_key": "noc.SLAVE_VC_BUFFER_DEPTH" }
       ],
       "signals": [
-        { "name": "req_valid",         "width_expr": "1",          "driven_by": "mosi" },
-        { "name": "req_flit",          "width_expr": "FLIT_WIDTH", "driven_by": "mosi" },
-        { "name": "req_credit_return", "width_expr": "NUM_VC",     "driven_by": "miso" },
-        { "name": "rsp_valid",         "width_expr": "1",          "driven_by": "miso" },
-        { "name": "rsp_flit",          "width_expr": "FLIT_WIDTH", "driven_by": "miso" },
-        { "name": "rsp_credit_return", "width_expr": "NUM_VC",     "driven_by": "mosi" }
+        { "name": "req_valid",         "width_expr": "1",          "driven_by": "upstream" },
+        { "name": "req_flit",          "width_expr": "FLIT_WIDTH", "driven_by": "upstream" },
+        { "name": "req_credit_return", "width_expr": "NUM_VC",     "driven_by": "downstream" },
+        { "name": "rsp_valid",         "width_expr": "1",          "driven_by": "downstream" },
+        { "name": "rsp_flit",          "width_expr": "FLIT_WIDTH", "driven_by": "downstream" },
+        { "name": "rsp_credit_return", "width_expr": "NUM_VC",     "driven_by": "upstream" }
       ],
-      "modports": ["mosi", "miso"],
+      "modports": ["upstream", "downstream"],
       "protocol_semantics": {
         "placeholder_convention": "<chan> ∈ {req, rsp} — protocol applies symmetrically to both channels of the bundle",
         "transfer_condition": "producer-internal credit counter for selected VC > 0 AND <chan>_valid asserted; selected VC encoded inside <chan>_flit header. Each channel (req, rsp) has independent credit accounting.",

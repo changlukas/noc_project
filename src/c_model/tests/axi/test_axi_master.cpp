@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/scenario_parser.hpp"
 #include "axi/axi_slave.hpp"
 #include "axi/memory.hpp"
@@ -93,7 +92,7 @@ transactions:
     EXPECT_THROW(axi::load_scenario(path), std::runtime_error);
 }
 
-// Phase B-4: WRAP burst is now accepted with constraints (len ∈ {1,3,7,15}
+// WRAP burst is now accepted with constraints (len ∈ {1,3,7,15}
 // and addr aligned to (1<<size)). FIXED is accepted unconditionally.
 TEST_F(ScenarioParser, WrapAcceptedWithValidLen) {
     SCENARIO(
@@ -241,7 +240,7 @@ transactions:
     EXPECT_EQ(sc.transactions[0].strb_file, "");
 }
 
-// Phase C: lock field parsing. Uses per-test unique tempfile names because
+// Lock field parsing. Uses per-test unique tempfile names because
 // the shared write_tmp() helper races with parallel ctest runners.
 TEST_F(ScenarioParser, LockNormalAccepted) {
     SCENARIO("scenario_parser: lock=normal parses to LockType::Normal");
@@ -531,7 +530,7 @@ transactions:
     EXPECT_THROW(master.tick(), std::runtime_error);
 }
 
-// Phase B-2.2: AxiMaster aligns AW.addr DOWN to (1<<size) and masks first-beat
+// AxiMaster aligns AW.addr DOWN to (1<<size) and masks first-beat
 // WSTRB lanes 0..first_lane-1 where first_lane = txn.addr & (DATA_BYTES - 1).
 
 namespace {
@@ -653,7 +652,7 @@ transactions:
     EXPECT_EQ(mock.captured_w[1].last, true);
 }
 
-// Phase B-3b: AxiMaster aligned narrow transfers (size<5). bpb = 1<<size;
+// AxiMaster aligned narrow transfers (size<5). bpb = 1<<size;
 // lane_mask = ((1<<bpb)-1) << byte_lane; user bytes land on bus lanes
 // [byte_lane, byte_lane+bpb).
 namespace {
@@ -805,7 +804,7 @@ transactions:
     EXPECT_EQ(mock.captured_w[1].last, true);
 }
 
-// Phase B-5a: split_into_sub_bursts. AXI4 (IHI 0022 A3.4.1) forbids INCR
+// split_into_sub_bursts. AXI4 (IHI 0022 A3.4.1) forbids INCR
 // bursts crossing a 4KB boundary and caps a single burst at 256 beats. The
 // helper carves a scenario_txn into a chain of legal sub-bursts.
 namespace {
@@ -880,7 +879,7 @@ TEST(SplitIntoSubBursts, FixedNoSplit) {
     EXPECT_EQ(subs[0].burst, axi::Burst::FIXED);
 }
 
-// Phase B-5a: AxiMaster with 4KB-crossing scenario_txn emits multiple AWs
+// AxiMaster with 4KB-crossing scenario_txn emits multiple AWs
 // (one per sub-burst) sharing the same id. WriteResult fires ONCE after the
 // final sub-burst's B response.
 TEST_F(AxiMasterTest, Cross4KB_EmitsTwoAwsOneWriteResult) {
@@ -957,7 +956,7 @@ transactions:
     EXPECT_TRUE(master.done());
 }
 
-// Phase B-5a: 4KB-crossing read scenario_txn emits multiple ARs; the master
+// 4KB-crossing read scenario_txn emits multiple ARs; the master
 // accumulates R beats across sub-bursts into a single ReadResult.
 TEST_F(AxiMasterTest, Cross4KB_EmitsTwoArsOneReadResult) {
     SCENARIO(
@@ -1019,7 +1018,7 @@ transactions:
     EXPECT_TRUE(master.done());
 }
 
-// Phase C: AxiMaster propagates scenario_txn.lock onto the AW/AR.lock wire as
+// AxiMaster propagates scenario_txn.lock onto the AW/AR.lock wire as
 // a 1-bit value (LockType::Exclusive → 1, Normal → 0). Pure wire-through —
 // the master does not interpret the lock; the slave's exclusive monitor does.
 TEST_F(AxiMasterTest, LockFieldPropagatesToAwLock) {
@@ -1093,7 +1092,7 @@ transactions:
     EXPECT_EQ(mock.captured_aw[0].lock, 0u);
 }
 
-// Phase A (Task 1): two same-id writes must be admitted into the AxiMaster
+// Two same-id writes must be admitted into the AxiMaster
 // pipeline CONCURRENTLY (per AXI4 IHI 0022 §A5.3 — same-id multiple outstanding
 // is legal).
 //

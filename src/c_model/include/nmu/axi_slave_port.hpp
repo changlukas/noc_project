@@ -1,24 +1,24 @@
 #pragma once
-// NMU AxiSlavePort — thin transparent AXI4 subordinate transport.
+// NMU AxiSlavePort — thin transparent AXI4 slave transport.
 //
-// Role (per docs/_archive/noc_cmodel_rtl_plan.md §3): the NMU's upstream-facing AXI
-// boundary. An external manager (AxiMaster) drives AW / W / AR into this
+// Role: the NMU's upstream-facing AXI
+// boundary. An external master (AxiMaster) drives AW / W / AR into this
 // port; this port hands those beats unmodified to a Packetizer for NoC
 // transport, and surfaces B / R beats popped from a Depacketizer back to
-// the manager.
+// the master.
 //
 // Scope: 5-channel valid/ready handshake + channel-attribute pass-through +
 // wlast / rlast framing as-is. EXPLICITLY NOT done here:
 //   - per-beat address generation (FIXED/INCR/WRAP) — that's beat_addr at
 //     the memory endpoint
 //   - memory bounds / DECERR generation
-//   - burst splitting (4KB cross etc) — the upstream manager already shapes
+//   - burst splitting (4KB cross etc) — the upstream master already shapes
 //     legal sub-bursts
-//   - per-AXI-ID response reordering — that's the ROB stage (plan §3.1)
+//   - per-AXI-ID response reordering — that's the ROB stage
 //
 // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
 // Cross-ID completion ordering / per-ID response reordering is the ROB
-// stage's responsibility (see plan §3.1), NOT this port's.
+// stage's responsibility, NOT this port's.
 //
 // Structure mirrors c_model/include/axi/axi_slave.hpp (Stage 2 canonical
 // header-only pattern): one std::deque per channel, bounded by PortParams.
@@ -44,7 +44,7 @@ class AxiSlavePort {
                  PortParams params)
         : pkt_(packetizer), depkt_(depacketizer), params_(params) {}
 
-    // ---- Upstream-facing AXI subordinate API (mirrors axi/axi_slave.hpp) ----
+    // ---- Upstream-facing AXI slave API (mirrors axi/axi_slave.hpp) ----
     bool push_aw(const axi::AwBeat& b) {
         if (aw_q_.size() >= params_.aw_queue_depth) return false;
         aw_q_.push_back(b);
@@ -109,7 +109,7 @@ class AxiSlavePort {
     std::size_t r_q_size() const { return r_q_.size(); }
     const PortParams& params() const { return params_; }
 
-    // Tick-end capacity queries (Stage 5b Wrap contract per spec §6.4):
+    // Tick-end capacity queries (co-sim Wrap layer contract):
     // Returns true iff one more AW/W/AR beat can be pushed when the next tick
     // begins. MUST be called at tick end (after the c_model has drained /
     // produced for this cycle). Wrap samples these to drive the

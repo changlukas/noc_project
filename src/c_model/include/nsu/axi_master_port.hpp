@@ -1,13 +1,13 @@
 #pragma once
-// NSU AxiMasterPort — thin transparent AXI4 manager transport, peer of
+// NSU AxiMasterPort — thin transparent AXI4 master transport, peer of
 // nmu/axi_slave_port.hpp.
 //
-// Role (per docs/_archive/noc_cmodel_rtl_plan.md §3): the NSU's downstream-facing
+// Role: the NSU's downstream-facing
 // AXI boundary. Pre-shaped AW / W / AR beats arrive from the NoC fabric
-// via a Depacketizer; this port queues them and exposes a manager-side
-// pop interface (pop_aw / pop_w / pop_ar) so an external AXI subordinate
+// via a Depacketizer; this port queues them and exposes a master-side
+// pop interface (pop_aw / pop_w / pop_ar) so an external AXI slave
 // (e.g. AxiSlave + Memory) can drain them. B / R beats returned from that
-// subordinate are pushed back in (push_b / push_r), queued, and handed to
+// slave are pushed back in (push_b / push_r), queued, and handed to
 // a Packetizer for NoC return-path transport.
 //
 // Scope mirror image of AxiSlavePort: 5-channel handshake + channel
@@ -17,13 +17,13 @@
 //
 // Port contract: per-channel FIFO order for all beats regardless of AXI ID.
 // Cross-ID completion ordering / per-ID response reordering is the ROB
-// stage's responsibility (see plan §3.1), NOT this port's.
+// stage's responsibility, NOT this port's.
 //
 // Wiring convention: the upstream side (Depacketizer + Packetizer) is the
-// NoC. The downstream side is the AXI subordinate; the integration
+// NoC. The downstream side is the AXI slave; the integration
 // harness pulls AW/W/AR via pop_* and pushes B/R via push_* once per tick.
 // This keeps the port's constructor signature symmetric with AxiSlavePort
-// (just NoC handles + PortParams) — the test rig owns the explicit
+// (just NoC handles + PortParams) — the testbench owns the explicit
 // AxiMasterPort <-> AxiSlave glue, exactly one cycle per cycle.
 #include "axi/types.hpp"
 #include "nsu/port_params.hpp"
@@ -44,10 +44,10 @@ class AxiMasterPort {
                   PortParams params)
         : depkt_(depacketizer), pkt_(packetizer), params_(params) {}
 
-    // ---- Downstream-facing AXI manager API ----
+    // ---- Downstream-facing AXI master API ----
     // Symmetric mirror of AxiSlavePort's push_*/pop_*: pop_* hands out AW/W/AR
     // beats that the NoC delivered to this NSU; push_* takes B/R beats coming
-    // back from the local subordinate. The harness wires these one-for-one to
+    // back from the local slave. The harness wires these one-for-one to
     // the AxiSlave's push_aw / push_w / push_ar / pop_b / pop_r each cycle.
     std::optional<axi::AwBeat> pop_aw() {
         if (aw_q_.empty()) return std::nullopt;
@@ -101,7 +101,7 @@ class AxiMasterPort {
     std::size_t r_q_size() const { return r_q_.size(); }
     const PortParams& params() const { return params_; }
 
-    // Tick-end capacity queries (Stage 5b Wrap contract per spec §6.4):
+    // Tick-end capacity queries (co-sim Wrap layer contract):
     // Returns true iff one more B/R beat can be pushed when the next tick
     // begins. MUST be called at tick end (after the c_model has drained /
     // produced for this cycle). Wrap samples these to drive the
@@ -113,7 +113,7 @@ class AxiMasterPort {
     // S2 stage: advance <=1 beat per channel per tick from the S1 stage
     // registers (held by Depacketize). The while-loops are replaced by a
     // single pop per channel, implementing the register-parked advance
-    // described in spec §5.3 (one beat per stage per tick, not a drain).
+    // (one beat per stage per tick, not a drain).
     void drain_aw_from_depacketizer_() {
         if (aw_q_.size() < params_.aw_queue_depth) {
             if (auto a = depkt_.pop_aw()) aw_q_.push_back(*a);
@@ -130,7 +130,7 @@ class AxiMasterPort {
         }
     }
     // S1 advance: ≤1 beat/channel/tick into the Packetize S1 stage register.
-    // Replaces the while-loop drain (spec §5.3: one beat per stage per tick).
+    // Replaces the while-loop drain (one beat per stage per tick).
     // Packetize::push_b/r() return false when S1 is full (backpressure).
     void forward_b_to_packetizer_() {
         if (!b_q_.empty()) {

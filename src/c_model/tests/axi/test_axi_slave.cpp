@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/axi_slave.hpp"
 #include "common/scenario.hpp"
 #include "mock_memory_port.hpp"
@@ -362,7 +361,7 @@ TEST(AxiSlave, SequentialBurstsDifferentIds) {
     EXPECT_EQ(mem.captured_writes[0].data[0], 0x22);
 }
 
-// Phase B-3b: narrow burst (size=2, bpb=4) addr+strb forwarded per-beat
+// Narrow burst (size=2, bpb=4) addr+strb forwarded per-beat
 // without slave-side reinterpretation. AxiSlave just propagates the W beats
 // to the memory port; addr increments by bpb per INCR beat.
 TEST(AxiSlave, NarrowTransferForwardedToMemory) {
@@ -404,7 +403,7 @@ TEST(AxiSlave, NarrowTransferForwardedToMemory) {
     EXPECT_EQ(mem.captured_writes[1].last, true);
 }
 
-// Phase B-2.3: WSTRB on the W channel passes through to MemWriteReq.strb
+// WSTRB on the W channel passes through to MemWriteReq.strb
 // unchanged. AxiSlave does not interpret WSTRB; the memory port records the
 // exact mask the master emitted so per-byte enable semantics survive.
 TEST(AxiSlave, SparseStrbForwardedToMemory) {
@@ -489,7 +488,7 @@ TEST(AxiSlave, ConcurrentBurstsDifferentIds_WRoutingAdvances) {
     EXPECT_EQ(mem.captured_writes[2].data[0], 0x33);
 }
 
-// Phase B-4: WRAP burst per-beat address wraps at wrap_upper = wrap_lower +
+// WRAP burst per-beat address wraps at wrap_upper = wrap_lower +
 // total_burst_bytes (AXI4 IHI 0022 B1.4.3). wrap_lower = addr &
 // ~(total_burst_bytes - 1). WRAP requires len ∈ {1,3,7,15} and addr aligned
 // to (1<<size); the parser enforces these, so the slave can assume total is
@@ -583,7 +582,7 @@ TEST(AxiSlave, WrapBurstLen15_16Beat) {
     EXPECT_EQ(mem.captured_reads[15].addr, 0x10E0u);
 }
 
-// Phase B-5a: Per-ID FIFO. AXI4 allows multi-outstanding bursts with the same
+// Per-ID FIFO. AXI4 allows multi-outstanding bursts with the same
 // ID provided responses come back in issue order. The slave now keys
 // active_writes_ / active_reads_ as map<id, deque<state>>, so stacked same-id
 // AWs are admitted (no exclusion) and W beats route to the oldest in-flight
@@ -632,7 +631,7 @@ TEST(AxiSlave, SameIdMultiOutstanding_FifoOrder) {
     }
 }
 
-// Phase B-4: FIXED burst — every beat targets the same address (AXI4 IHI 0022
+// FIXED burst — every beat targets the same address (AXI4 IHI 0022
 // B1.4.3). Memory sees N writes at addr; last-beat-wins semantics emerge
 // from sequential storage updates.
 TEST(AxiSlave, FixedBurstAllBeatsSameAddr) {
@@ -662,7 +661,7 @@ TEST(AxiSlave, FixedBurstAllBeatsSameAddr) {
 }
 
 // ===========================================================================
-// Phase C — AxiSlave exclusive monitor (IHI 0022 §A7.2.4)
+// AxiSlave exclusive monitor (IHI 0022 §A7.2.4)
 // ===========================================================================
 
 namespace {
@@ -1036,7 +1035,7 @@ TEST(AxiSlaveExclusive, ExclusiveAR_SameId_SecondOverwritesFirst) {
     EXPECT_FALSE(tag.ready) << "the new tag starts not-ready";
 }
 
-// Audit fix D3-2 regression: when a 2nd exclusive AR with the same ID arrives
+// Regression: when a 2nd exclusive AR with the same ID arrives
 // while the 1st AR's R is still in flight, the 1st AR's RLAST must NOT promote
 // the new tag to ready. The new tag should only become ready after its OWN
 // RLAST. pending_rlasts accounts for in-flight RLASTs ahead of the new tag.

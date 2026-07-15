@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #pragma once
 #include "axi/types.hpp"
 #include <optional>

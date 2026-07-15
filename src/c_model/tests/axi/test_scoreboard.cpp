@@ -7,7 +7,7 @@ namespace axi = ni::cmodel::axi;
 // Under lane-positioned bus semantics, WriteResult/ReadResult carry
 // size/len/burst so the scoreboard can re-derive per-beat byte_lane. Tests
 // pass size=5, len=0, burst=INCR (1-beat, full-bus) unless the case requires
-// otherwise — that combination matches Phase A's only-supported geometry.
+// otherwise — that combination matches the original full-width aligned geometry.
 TEST(Scoreboard, NoUpdateOnDecerr) {
     SCENARIO("scoreboard: DECERR write does not update expected_, so later read sees no mismatch");
     axi::Scoreboard sb;

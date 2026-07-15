@@ -1,7 +1,7 @@
 #pragma once
 // Test-local hand-assembled 2-node, 1-hop, full-duplex fabric segment, built
 // from individual Routers + the relocated LOCAL adapters (InjectAdapter /
-// EjectAdapter / CreditRelay from noc/router_adapters.hpp). This is the verbatim
+// EjectAdapter / CreditRelay from router/router_adapters.hpp). This is the verbatim
 // internal assembly of the (deleted) production RouterChannel: two physical
 // networks (REQ + RSP), each a 2-router 2x1 mesh, node 0 = (0,0), node 1 = (1,0),
 // with the inter-router link over WEST/EAST: router(1).WEST <-> router(0).EAST.
@@ -31,8 +31,7 @@ class TwoNodeFabric {
     static constexpr std::size_t EAST = static_cast<std::size_t>(RouterPort::EAST);
     static constexpr std::size_t WEST = static_cast<std::size_t>(RouterPort::WEST);
 
-    explicit TwoNodeFabric(uint8_t num_vc = NOC_NUM_VC,
-                           std::size_t vc_depth = NOC_ROUTER_VC_DEPTH,
+    explicit TwoNodeFabric(uint8_t num_vc = NOC_NUM_VC, std::size_t vc_depth = NOC_ROUTER_VC_DEPTH,
                            std::size_t out_fifo_depth = NOC_ROUTER_OUTPUT_FIFO_DEPTH)
         : num_vc_(num_vc), vc_depth_(vc_depth) {
         for (std::size_t n = 0; n < kNodes; ++n) {

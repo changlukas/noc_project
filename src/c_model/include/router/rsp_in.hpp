@@ -5,7 +5,7 @@
 // and reassembles them into AXI beats. Concrete implementations are the
 // real NoC adapter (DPI bridge from the SystemVerilog router) and the
 // ChannelModel test fixture. The matching RTL pin set is the response-in
-// half of the merged `NocIntfMosiPins` bundle (ni_signals.json NOC_INTF_MOSI
+// half of the merged `NocIntfUpstreamPins` bundle (ni_signals.json NOC_INTF_UPSTREAM
 // — noc_rsp_valid_i / noc_rsp_flit_i / noc_rsp_credit_o); the req-out half
 // of that same pin bundle is driven by NocReqOut.
 //

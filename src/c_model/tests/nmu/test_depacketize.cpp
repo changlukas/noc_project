@@ -81,7 +81,7 @@ TEST(NmuDepacketize, PopBEmptyReturnsNullopt) {
 }
 
 // NmuDepacketize::PopAwAssertFalse was a runtime wrong_side_() test.
-// After T4 the method no longer exists on nmu::Depacketize; wrong-side
+// The method no longer exists on nmu::Depacketize; wrong-side
 // calls are now caught at compile time. Test removed.
 
 TEST(NmuDepacketize, BFifoOrderPreserved) {

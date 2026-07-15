@@ -29,8 +29,8 @@ help:
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
 	@echo "Simulate:"
-	@echo "  make sim TB=tb_<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot)"
-	@echo "  make sim TB=tb_mesh_4x4_vc8 PATTERN=neighbor"
+	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot)"
+	@echo "  make sim TB=mesh_4x4_vc1 PATTERN=neighbor"
 	@echo "  Vars: INJECTION_MODE= INJECTION_RATE= INJECTION_COUNT= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= (directed only); SEED unset draws + prints a random seed"
 	@echo ""
 	@echo "Test:"
@@ -79,7 +79,7 @@ TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/Syst
 # Prefer `cmake3` when present (RHEL ships the modern 3.x under that name, while
 # bare `cmake` may be an ancient one shadowed onto PATH by e.g. a Xilinx SDK);
 # otherwise fall through to `cmake` resolved at recipe time. Override in
-# local.mk or on the command line if neither is right. Build needs cmake >= 3.14
+# local.mk or on the command line if neither is right. Build needs cmake >= 3.20
 # (FetchContent_MakeAvailable + gtest 1.14).
 CMAKE ?= $(shell command -v cmake3 2>/dev/null || echo cmake)
 

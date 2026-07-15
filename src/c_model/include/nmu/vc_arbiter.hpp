@@ -10,24 +10,24 @@
 //   from rr_start_; first VC with pending space AND downstream credit wins
 //   (else backpressure).
 //
-// Clause 2 VC pin (microarch §5a): a rob_req=0 AW/AR flit whose (dst_id, id)
-// matches the id's previous same-channel flit reuses that VC instead of
-// round-robining -- pins a same-(dst,id) bypass streak to one VC so it
-// cannot be reordered in-fabric. A pin miss (new id, or dst changed) falls
-// back to round-robin and records the new (dst, VC) for next time. rob_req=1
-// flits are RoB-owned and order-free, so they always round-robin, unpinned.
+// Fixed VC id (same-destination bypass): a rob_req=0 AW/AR flit whose (dst_id, id) matches
+// the id's previous same-channel flit reuses that VC instead of
+// round-robining -- deterministic VC allocation that fixes a same-(dst,id)
+// bypass streak to one VC so it cannot be reordered in-fabric. With no
+// fixed VC yet (new id, or dst changed) it falls back to round-robin and
+// records the new (dst, VC) for next time. rob_req=1 flits are RoB-owned
+// and order-free, so they always round-robin, never fixed.
 //
-// W-follows-AW invariant (Constraint A1): this arbiter MUST be downstream
+// W-follows-AW invariant: this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
 // admitting the next AW. Given that guarantee, a single
 // std::optional<uint8_t> current_aw_vc_ is sufficient to track the in-flight
 // burst's VC (push on AW, reset on W with payload.W.wlast=1).
 //
 // NUM_VC=1 degenerate behavior: routes everything to VC=0, observationally
-// identical to the prior-round single-VC pipeline.
+// identical to a single-VC pipeline.
 //
 // References:
-//   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md
 //   FlooNoC floo_wormhole_arbiter.sv (output-port wormhole lock)
 //   FlooNoC floo_vc_arbiter.sv (VC arbiter without wormhole lock)
 //   gem5 Garnet OutputUnit::has_credit / OutVcState::m_credit_count
@@ -58,10 +58,9 @@ class VcArbiter : public router::NocReqOut {
                          std::vector<uint8_t>{read_vc}, pending_depth);
     }
 
-    static VcArbiter read_write_split_pools(router::NocReqOut& downstream, std::size_t num_vc,
-                                            std::vector<uint8_t> write_vcs,
-                                            std::vector<uint8_t> read_vcs,
-                                            std::size_t pending_depth = kDefaultPendingDepth) {
+    static VcArbiter read_write_split(router::NocReqOut& downstream, std::size_t num_vc,
+                                      std::vector<uint8_t> write_vcs, std::vector<uint8_t> read_vcs,
+                                      std::size_t pending_depth = kDefaultPendingDepth) {
         return VcArbiter(downstream, num_vc, std::move(write_vcs), std::move(read_vcs),
                          pending_depth);
     }
@@ -108,8 +107,8 @@ class VcArbiter : public router::NocReqOut {
     uint8_t read_rr_start_ = 0;
     std::optional<uint8_t> current_aw_vc_;
 
-    // Clause 2 VC pin (microarch §5a): last (dst_id, VC) a given AXI id took
-    // on a rob_req=0 flit, per direction. nullopt dst = id never seen.
+    // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on a
+    // rob_req=0 flit, per direction. nullopt dst = id never seen.
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_aw_dst_{};
     std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_ar_dst_{};
@@ -118,14 +117,14 @@ class VcArbiter : public router::NocReqOut {
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
                                                               uint8_t rob_req, uint8_t id) {
-    // W invariant fires regardless of NUM_VC (Constraint A1: must be
-    // downstream of WormholeArbiter; W must always follow AW)
+    // W invariant fires regardless of NUM_VC: this arbiter must be
+    // downstream of a WormholeArbiter that serializes AW+W; W must always follow AW.
     if (axi_ch == ni::AXI_CH_W) {
         if (!current_aw_vc_.has_value()) {
             assert(false &&
                    "nmu::VcArbiter::push_flit: W arrived with no current AW VC -- "
-                   "Constraint A1 violated: must be downstream of WormholeArbiter "
-                   "(which serializes AW + all W beats before next AW). Standalone "
+                   "must be downstream of a WormholeArbiter that serializes AW+W "
+                   "(all W beats complete before the next AW). Standalone "
                    "VcArbiter use without upstream serialization is unsupported.");
             std::abort();
         }
@@ -136,10 +135,10 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
     if (axi_ch != ni::AXI_CH_AW && axi_ch != ni::AXI_CH_AR) return std::nullopt;
 
-    // Clause 2 VC pin: rob_req=0 flit whose dst_id matches this id's last
-    // same-channel dst_id reuses that VC. No fallback to round-robin on
-    // block -- rerouting a pinned streak mid-flight is exactly the reorder
-    // this pin exists to prevent.
+    // Fixed VC id (same-destination bypass): rob_req=0 flit whose dst_id matches this id's
+    // last same-channel dst_id reuses that VC. No fallback to round-robin on
+    // block -- rerouting a fixed-VC streak mid-flight is exactly the reorder
+    // the fixed VC exists to prevent.
     if (rob_req == 0) {
         std::optional<uint8_t>& last_dst =
             (axi_ch == ni::AXI_CH_AW) ? last_aw_dst_[id] : last_ar_dst_[id];
@@ -186,8 +185,8 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         if (current_aw_vc_.has_value()) {
             assert(false &&
                    "nmu::VcArbiter::push_flit: AW arrived while previous AW's W burst "
-                   "still in progress -- Constraint A1 violated: must be downstream of "
-                   "WormholeArbiter (which holds next AW until current W burst ends).");
+                   "still in progress -- must be downstream of a WormholeArbiter "
+                   "that serializes AW+W (holds next AW until current W burst ends).");
             std::abort();  // belt-and-braces for NDEBUG
         }
         current_aw_vc_ = vc_id;
@@ -197,9 +196,9 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         }
     }
 
-    // Clause 2 VC pin: record (dst_id, VC) for this id only after all accept
-    // conditions pass (mirrors current_aw_vc_'s atomicity above). rob_req=1
-    // flits are RoB-owned/order-free -- do not pin them.
+    // Fixed VC id (same-destination bypass): record (dst_id, VC) for this id only after all
+    // accept conditions pass (mirrors current_aw_vc_'s atomicity above).
+    // rob_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
     if (rob_req == 0 && (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR)) {
         if (axi_ch == ni::AXI_CH_AW) {
             last_aw_dst_[id] = dst_id;

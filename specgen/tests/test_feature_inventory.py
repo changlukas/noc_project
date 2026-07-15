@@ -7,7 +7,7 @@ from pathlib import Path
 
 SPECGEN_ROOT  = Path(__file__).resolve().parent.parent
 PROJECT_ROOT  = SPECGEN_ROOT.parent
-INVENTORY_MD  = PROJECT_ROOT / "c_model" / "FEATURE_INVENTORY.md"
+INVENTORY_MD  = PROJECT_ROOT / "src" / "c_model" / "FEATURE_INVENTORY.md"
 GENERATOR     = SPECGEN_ROOT / "tools" / "gen_inventory.py"
 
 

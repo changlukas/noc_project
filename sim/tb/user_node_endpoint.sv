@@ -3,10 +3,9 @@
 // FlooNoC axi_bw_monitor. Bridges the fabric's flat ni_signals_pkg structs
 // to pulp AXI_BUS_DV interfaces with explicit per-field wiring (no protocol
 // logic).
-// pulp axi_scoreboard is usable on the Verilator directed axis (2026-07-04 spike +
-// review): the 8'hxx->8'h00 2-state collapse only bites reads of never-written
-// addresses, which a full-readback directed run never issues. Wired in-endpoint on
-// master_dv. (Rationale: spec D6 / cross-review aggregate.)
+// pulp axi_scoreboard is usable on the Verilator directed axis: the 8'hxx->8'h00
+// 2-state collapse only bites reads of never-written addresses, which a
+// full-readback directed run never issues. Wired in-endpoint on master_dv.
 //
 // Run flavor: data integrity — axi_file_master two-phase (write -> barrier ->
 // read) + in-endpoint axi_scoreboard on master_dv, MAPPED rand_slave as tile

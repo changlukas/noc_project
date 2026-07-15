@@ -4,23 +4,18 @@
 // because NSU produces single-flit B (`floo_axi_chimney.sv:608-616`)
 // and multi-flit R uses ROB not wormhole (`floo_axi_chimney.sv:624-633`).
 //
-// ReadWriteSplit (only mode): B -> write_rsp_vc; R -> read_rsp_vc.
-// Pools mode:
-//   Clause 2 return-path static map (microarch §5a, RZ1): a rob_req=0 B, or
-//   ANY R (regardless of rob_req), maps to
-//   pool[(dst_id ^ id) % pool.size()] -- a deterministic pure function, zero
-//   state. This pins a same-(dst,id) bypassed response stream to one VC (so
-//   it cannot be reordered in-fabric) and gives R burst coherence for free:
-//   every beat of a burst shares (dst_id, rid) and hashes identically. A
-//   mapped VC that is full/no-credit refuses (`return false`) rather than
-//   spilling to another pool VC -- spilling a pinned stream would reorder it.
-//   rob_req=1 B is order-free at the NMU slot path and round-robins the
-//   write pool, same as before clause 2.
+// ReadWriteSplit (only mode): per-class virtual network (vnet); the scalar
+// factory wraps a single VC into a size-1 vnet (mirror of nmu::VcArbiter).
+//   Fixed VC id (same-destination bypass, return path): a rob_req=0 B, or ANY R (regardless
+//   of rob_req), maps to vnet[(dst_id ^ id) % vnet.size()] -- deterministic
+//   VC allocation, a pure function with zero state. This fixes a
+//   same-(dst,id) bypassed response stream to one VC (so it cannot be
+//   reordered in-fabric) and gives R burst coherence for free: every beat of
+//   a burst shares (dst_id, rid) and hashes identically. A mapped VC that is
+//   full/no-credit refuses (`return false`) rather than spilling to another
+//   vnet VC -- spilling a fixed-VC stream would reorder it. rob_req=1 B is
+//   order-free at the NMU slot path and round-robins the write vnet.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
-//
-// References:
-//   docs/superpowers/specs/2026-06-03-vc-arb-multi-mode-design.md §7.2
-//   docs/superpowers/specs/2026-07-12-clause2-vc-safe-bypass-design.md (return path)
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "router/rsp_out.hpp"
@@ -43,20 +38,16 @@ class VcArbiter : public router::NocRspOut {
     static VcArbiter read_write_split(router::NocRspOut& downstream, std::size_t num_vc,
                                       uint8_t write_rsp_vc, uint8_t read_rsp_vc,
                                       std::size_t pending_depth = kDefaultPendingDepth) {
-        return VcArbiter(downstream, num_vc, write_rsp_vc, read_rsp_vc, pending_depth);
+        return VcArbiter(downstream, num_vc, std::vector<uint8_t>{write_rsp_vc},
+                         std::vector<uint8_t>{read_rsp_vc}, pending_depth);
     }
 
-    static VcArbiter read_write_split_pools(router::NocRspOut& downstream, std::size_t num_vc,
-                                            std::vector<uint8_t> write_rsp_vcs,
-                                            std::vector<uint8_t> read_rsp_vcs,
-                                            std::size_t pending_depth = kDefaultPendingDepth) {
-        VcArbiter a(downstream, num_vc, /*write_rsp_vc=*/0, /*read_rsp_vc=*/0, pending_depth);
-        a.write_rsp_vcs_ = std::move(write_rsp_vcs);
-        a.read_rsp_vcs_ = std::move(read_rsp_vcs);
-        for (uint8_t v : a.write_rsp_vcs_) assert(v < num_vc && "write_rsp_vcs element >= num_vc");
-        for (uint8_t v : a.read_rsp_vcs_) assert(v < num_vc && "read_rsp_vcs element >= num_vc");
-        a.use_pools_ = true;
-        return a;
+    static VcArbiter read_write_split(router::NocRspOut& downstream, std::size_t num_vc,
+                                      std::vector<uint8_t> write_rsp_vcs,
+                                      std::vector<uint8_t> read_rsp_vcs,
+                                      std::size_t pending_depth = kDefaultPendingDepth) {
+        return VcArbiter(downstream, num_vc, std::move(write_rsp_vcs), std::move(read_rsp_vcs),
+                         pending_depth);
     }
 
     // NocRspOut decorator interface
@@ -70,16 +61,16 @@ class VcArbiter : public router::NocRspOut {
     uint8_t round_robin_ptr() const noexcept { return round_robin_ptr_; }
 
   private:
-    VcArbiter(router::NocRspOut& downstream, std::size_t num_vc, uint8_t write_rsp_vc,
-              uint8_t read_rsp_vc, std::size_t pending_depth)
+    VcArbiter(router::NocRspOut& downstream, std::size_t num_vc, std::vector<uint8_t> write_rsp_vcs,
+              std::vector<uint8_t> read_rsp_vcs, std::size_t pending_depth)
         : downstream_(downstream),
           num_vc_(num_vc),
-          write_rsp_vc_(write_rsp_vc),
-          read_rsp_vc_(read_rsp_vc),
+          write_rsp_vcs_(std::move(write_rsp_vcs)),
+          read_rsp_vcs_(std::move(read_rsp_vcs)),
           pending_depth_(pending_depth) {
         assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
-        assert(write_rsp_vc_ < num_vc_);
-        assert(read_rsp_vc_ < num_vc_);
+        for (uint8_t v : write_rsp_vcs_) assert(v < num_vc_ && "write_rsp_vcs element >= num_vc");
+        for (uint8_t v : read_rsp_vcs_) assert(v < num_vc_ && "read_rsp_vcs element >= num_vc");
     }
 
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id, uint8_t rob_req,
@@ -87,14 +78,11 @@ class VcArbiter : public router::NocRspOut {
 
     router::NocRspOut& downstream_;
     std::size_t num_vc_;
-    uint8_t write_rsp_vc_;
-    uint8_t read_rsp_vc_;
+    std::vector<uint8_t> write_rsp_vcs_;
+    std::vector<uint8_t> read_rsp_vcs_;
     std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;
-    std::vector<uint8_t> write_rsp_vcs_;
-    std::vector<uint8_t> read_rsp_vcs_;
-    bool use_pools_ = false;
     uint8_t write_rr_start_ = 0;
     uint8_t read_rr_start_ = 0;
 };
@@ -103,33 +91,25 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
                                                               uint8_t rob_req, uint8_t id) {
     if (num_vc_ == 1) return uint8_t{0};
 
-    // ReadWriteSplit, scalar (no pools configured).
-    if (!use_pools_) {
-        if (axi_ch == ni::AXI_CH_B) return write_rsp_vc_;
-        if (axi_ch == ni::AXI_CH_R) return read_rsp_vc_;
-        return std::nullopt;
-    }
-
-    // ReadWriteSplit pools.
     const std::vector<uint8_t>* cand = nullptr;
     uint8_t* rr = nullptr;
-    bool pinned = false;
+    bool fixed_vc = false;
     if (axi_ch == ni::AXI_CH_B) {
         cand = &write_rsp_vcs_;
         rr = &write_rr_start_;
-        pinned = (rob_req == 0);  // rob_req=1 B is order-free; round-robins.
+        fixed_vc = (rob_req == 0);  // rob_req=1 B is order-free; round-robins.
     } else if (axi_ch == ni::AXI_CH_R) {
         cand = &read_rsp_vcs_;
         rr = &read_rr_start_;
-        pinned = true;  // ALL R: static map gives burst coherence, was r_burst_vc_'s role.
+        fixed_vc = true;  // ALL R: the fixed map gives burst coherence.
     } else {
         return std::nullopt;
     }
 
-    if (pinned) {
-        // Clause 2 return-path static map (microarch §5a, RZ1): deterministic
-        // pure function of (dst_id, id), zero state. Full/no-credit -> refuse,
-        // never spill (spilling a pinned stream to another VC would reorder it).
+    if (fixed_vc) {
+        // Fixed VC id (same-destination bypass, return path): deterministic pure function of
+        // (dst_id, id), zero state. Full/no-credit -> refuse, never spill
+        // (spilling a fixed-VC stream to another VC would reorder it).
         uint8_t vc = (*cand)[static_cast<uint8_t>(dst_id ^ id) % cand->size()];
         if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) return vc;
         return std::nullopt;
@@ -149,7 +129,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
     uint8_t dst_id = 0, rob_req = 0, id = 0;
-    if (use_pools_ && num_vc_ > 1 && (axi_ch == ni::AXI_CH_B || axi_ch == ni::AXI_CH_R)) {
+    if (num_vc_ > 1 && (axi_ch == ni::AXI_CH_B || axi_ch == ni::AXI_CH_R)) {
         dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
         rob_req = static_cast<uint8_t>(flit.get_header_field("rob_req"));
         id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_B ? flit.get_payload_field("B", "bid")

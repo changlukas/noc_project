@@ -34,12 +34,12 @@ namespace ni::cmodel::axi::rules {
 
 // 4KB-page math: INCR bursts must not cross a 4KB address boundary
 // (IHI 0022H §A3.4.1). Codify the page size as log2 + derived bytes/mask.
-constexpr int      kAxi4PageBits      = 12;                  // log2(page bytes)
-constexpr uint64_t kAxi4PageBytes     = 1ull << kAxi4PageBits;
-constexpr uint64_t kAxi4PageMask      = kAxi4PageBytes - 1ull;
+constexpr int kAxi4PageBits = 12;  // log2(page bytes)
+constexpr uint64_t kAxi4PageBytes = 1ull << kAxi4PageBits;
+constexpr uint64_t kAxi4PageMask = kAxi4PageBytes - 1ull;
 // INCR max burst length: AxLEN is 8-bit → up to 256 beats per AW/AR
 // (IHI 0022H §A3.4.1).
-constexpr int      kAxi4MaxBurstBeats = 256;
+constexpr int kAxi4MaxBurstBeats = 256;
 
 // AxSIZE encodes log2(bytes-per-beat); must not exceed log2(DATA_BYTES) so a
 // beat fits the bus (IHI 0022H §A3.4.1). DATA_BYTES = 32 → max size = 5.
@@ -230,7 +230,7 @@ inline bool check_w_before_b(bool all_w_done) {
 }
 
 // ============================================================================
-// Phase C: AXI4 Exclusive Access (IHI 0022 §A7.2.4)
+// AXI4 Exclusive Access (IHI 0022 §A7.2.4)
 // ============================================================================
 
 // LOCK_ENCODING — AXI4 AxLOCK is 1-bit; only 0 (Normal) and 1 (Exclusive)

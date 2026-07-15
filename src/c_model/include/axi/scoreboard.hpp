@@ -1,4 +1,3 @@
-// (Scoreboard pattern is independent; see ATTRIBUTION.md)
 #pragma once
 #include "axi/axi_master.hpp"
 #include "axi/types.hpp"
@@ -27,7 +26,7 @@ class Scoreboard {
                                 const std::vector<uint32_t>& strb_per_beat) {
         // Skip memory-error completions (slave never reached memory).
         if (wr.resp == Resp::DECERR || wr.resp == Resp::SLVERR) return;
-        // Phase C: a failed exclusive write (AxLOCK=Exclusive that did not earn
+        // A failed exclusive write (AxLOCK=Exclusive that did not earn
         // EXOKAY at the slave) returns OKAY without committing to memory per
         // IHI 0022 §A7.2.3. Skip the expected_ update so the next read still
         // observes the pre-attempt value. A successful exclusive (EXOKAY) and a

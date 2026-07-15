@@ -1,12 +1,12 @@
 // DPI boundary try/catch macros — every extern "C" DPI handler MUST wrap its
 // body in DPI_BOUNDARY_BEGIN/END so C++ exceptions do not cross the DPI ABI
-// (which is IEEE 1800 undefined behavior). Per Stage 5b spec §5.2.
+// (which is IEEE 1800 undefined behavior).
 //
 // On exception: sets g_dpi_error_{code,msg}, returns silently. The SV side
 // polls cmodel_check_error() at each wrap's always_ff end and raises $fatal.
 
-#ifndef COSIM2_DPI_BOUNDARY_MACROS_H
-#define COSIM2_DPI_BOUNDARY_MACROS_H
+#ifndef NI_COSIM_DPI_BOUNDARY_MACROS_H
+#define NI_COSIM_DPI_BOUNDARY_MACROS_H
 
 #include "cmodel_dpi.h"
 #include "handle_block.hpp"
@@ -62,7 +62,7 @@ HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const ch
         return _dpi_boundary_fail_val_;                                                      \
     }
 
-// REQUIRE_HANDLE — used by ctx-taking handlers (Tasks 5-9). validate_handle
+// REQUIRE_HANDLE — used by ctx-taking handlers. validate_handle
 // sets the error latch and returns nullptr on failure; this macro then returns
 // from the void handler. The caller pulls the typed adapter with:
 //     auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
@@ -72,4 +72,4 @@ HandleBlock* validate_handle(unsigned long long ctx, WrapType expected, const ch
         if (!_h) return;                                                             \
     } while (0)
 
-#endif  // COSIM2_DPI_BOUNDARY_MACROS_H
+#endif  // NI_COSIM_DPI_BOUNDARY_MACROS_H

@@ -1,6 +1,6 @@
 # specgen/source/constants.yaml
 # Language-neutral parameter defaults. Source of truth for both ni_params_pkg.sv
-# and ni_params.h. See design spec §4.1.
+# and ni_params.h.
 schema_version: "1.0"
 
 axi:
@@ -129,7 +129,7 @@ nmu:
   MAX_TXNS_PER_ID:
     type: int
     units: transactions
-    description: "NMU per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId)."
+    description: "NMU per-AXI-ID order-list depth (FlooNoC MaxTxnsPerId)."
     default: 32
     min: 1
     max: 256

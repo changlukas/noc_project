@@ -1,14 +1,14 @@
-// NsuWrap IO POD structs — Stage 5b spec §6 (combined NoC consumer + AXI master).
+// NsuWrap IO POD structs — combined NoC consumer + AXI master pin bundle.
 //
 // NsuInputs: signals consumed by the Nsu each cycle.
-//   NoC req side:    flit arriving from channel model toward Nsu's Depacketize.
+//   NoC req side:    flit arriving from the router toward Nsu's Depacketize.
 //   NoC rsp credit:  credit_return from downstream (channel credits back to Nsu).
-//   AXI master side: ready signals + B/R beats returning from the AXI subordinate.
+//   AXI master side: ready signals + B/R beats returning from the AXI slave.
 //
 // NsuOutputs: signals driven by the Nsu each cycle.
 //   NoC rsp side:    flit produced by Nsu's Packetize stage, leaving toward NoC.
 //   NoC req credit:  credit_return Nsu returns to the req-side upstream.
-//   AXI master side: Nsu drives AW/W/AR to subordinate; accepts bready/rready from it.
+//   AXI master side: Nsu drives AW/W/AR to slave; accepts bready/rready from it.
 //
 // FLIT_BYTES = 51 (ni::FLIT_WIDTH = 408 bits, rounded to bytes).
 // AXI_DATA_BYTES = 32 (256-bit data bus).
@@ -18,9 +18,9 @@
 //   Nmu consumes noc_rsp / produces noc_req  → Nsu produces noc_rsp / consumes noc_req.
 //   Nmu has axi_intf.slave (accepts AW/W/AR) → Nsu has axi_intf.master (drives AW/W/AR).
 #pragma once
-#include "axi/types.hpp"                   // axi::DATA_BYTES
-#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
-#include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
+#include "axi/types.hpp"        // axi::DATA_BYTES
+#include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES
+#include "ni_flit_constants.h"  // ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
 
@@ -43,17 +43,17 @@ struct NsuInputs {
     // NoC rsp credit — PULSE/VC: router LOCAL input drained an Nsu rsp flit, return
     // one credit per VC to the rsp-out sender counter (bit/entry vc = VC vc pulse).
     NsuVcCreditVec noc_rsp_credit_return;
-    // AXI master side — AW channel (subordinate drives ready)
+    // AXI master side — AW channel (slave drives ready)
     bool awready;
-    // AXI master side — W channel (subordinate drives ready)
+    // AXI master side — W channel (slave drives ready)
     bool wready;
-    // AXI master side — B channel (subordinate drives write response)
+    // AXI master side — B channel (slave drives write response)
     bool bvalid;
     uint8_t bid;
     uint8_t bresp;  // 2-bit AXI4 response code in low 2 bits
-    // AXI master side — AR channel (subordinate drives ready)
+    // AXI master side — AR channel (slave drives ready)
     bool arready;
-    // AXI master side — R channel (subordinate drives read data)
+    // AXI master side — R channel (slave drives read data)
     bool rvalid;
     uint8_t rid;
     std::array<uint8_t, NSU_AXI_DATA_BYTES> rdata;
@@ -69,7 +69,7 @@ struct NsuOutputs {
     // NoC req credit — consumer PULSE/VC: Nsu Depacketize consumed an injected req
     // flit, return one credit per VC to the router LOCAL output sender counter.
     NsuVcCreditVec noc_req_credit_return;
-    // AXI master side — AW channel (Nsu drives write address to subordinate)
+    // AXI master side — AW channel (Nsu drives write address to slave)
     bool awvalid;
     uint8_t awid;
     uint64_t awaddr;
@@ -80,14 +80,14 @@ struct NsuOutputs {
     uint8_t awcache;
     uint8_t awprot;
     uint8_t awqos;
-    // AXI master side — W channel (Nsu drives write data to subordinate)
+    // AXI master side — W channel (Nsu drives write data to slave)
     bool wvalid;
     std::array<uint8_t, NSU_AXI_DATA_BYTES> wdata;
     uint32_t wstrb;
     bool wlast;
-    // AXI master side — B channel (Nsu accepts write response from subordinate)
+    // AXI master side — B channel (Nsu accepts write response from slave)
     bool bready;
-    // AXI master side — AR channel (Nsu drives read address to subordinate)
+    // AXI master side — AR channel (Nsu drives read address to slave)
     bool arvalid;
     uint8_t arid;
     uint64_t araddr;
@@ -98,7 +98,7 @@ struct NsuOutputs {
     uint8_t arcache;
     uint8_t arprot;
     uint8_t arqos;
-    // AXI master side — R channel (Nsu accepts read data from subordinate)
+    // AXI master side — R channel (Nsu accepts read data from slave)
     bool rready;
 };
 

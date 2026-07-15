@@ -1,6 +1,6 @@
 #include "nsu/vc_arbiter.hpp"
 #include "nsu/nsu.hpp"
-#include "ni/vc_pools.hpp"
+#include "ni/virtual_network.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "flit.hpp"
@@ -58,7 +58,7 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     const std::size_t num_vc = GetParam();
     if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2";
 
-    SCENARIO("NSU VcArbiter Mode A: B -> write_rsp_vc=0, R -> read_rsp_vc=1");
+    SCENARIO("NSU VcArbiter read/write VC split: B -> write_rsp_vc=0, R -> read_rsp_vc=1");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), num_vc, 0, 1);
 
@@ -80,18 +80,19 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
 }
 
-// microarch §5a (RZ1): rsp VC = pool[(dst_id ^ id) % pool.size()], zero state.
-// Replaces r_burst_vc_'s burst-coherence role -- a burst's beats share
-// (dst_id, rid) so they hash to the same pool slot automatically.
+// Fixed VC id (same-destination bypass): rsp VC = vnet[(dst_id ^ id) % vnet.size()], zero state.
+// Replaces the retired r_burst_vc_ array's burst-coherence role -- a burst's
+// beats share (dst_id, rid) so they hash to the same vnet slot automatically.
 //
 // A multi-beat R burst (one rid) keeps every beat on its single mapped VC.
-TEST(NsuVcArbiterPools, RBurstStaysOnOneVc) {
+TEST(NsuVcArbiterVnets, RBurstStaysOnOneVc) {
     SCENARIO(
-        "NSU pools: all beats of one rid's R burst map to one VC (static map, not follow-state)");
+        "NSU vnets: all beats of one rid's R burst map to one VC (static map, not follow-state)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
-    // 4-beat burst, dst_id=0x12, rid=0x05 -> (0x12^0x05)%2=1 -> read pool[1]=VC3.
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
+    // 4-beat burst, dst_id=0x12, rid=0x05 -> (0x12^0x05)%2=1 -> read vnet[1]=VC3.
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));
@@ -105,24 +106,26 @@ TEST(NsuVcArbiterPools, RBurstStaysOnOneVc) {
 // ALL R regardless of rob_req (design: burst coherence must hold even though
 // the NMU RoB will reorder by rob_idx; the map only needs to keep one burst's
 // beats together, which a pure function of (dst_id,rid) does unconditionally).
-TEST(NsuVcArbiterPools, RobbedRBurstStaysOnOneVcToo) {
-    SCENARIO("NSU pools: rob_req=1 R burst still maps every beat to one VC");
+TEST(NsuVcArbiterVnets, RobbedRBurstStaysOnOneVcToo) {
+    SCENARIO("NSU vnets: rob_req=1 R burst still maps every beat to one VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0, 0x12, /*rob_req=*/1)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1, 0x12, /*rob_req=*/1)));
     EXPECT_EQ(arb.pending_size(3), 2u);
     EXPECT_EQ(arb.pending_size(2), 0u);
 }
 
-// Distinct rids (each a single-beat read) hash to different pool slots -- the
+// Distinct rids (each a single-beat read) hash to different vnet slots -- the
 // static map replaces round-robin spread with deterministic (dst,id) spread.
-TEST(NsuVcArbiterPools, DistinctRidsSpreadAcrossPool) {
-    SCENARIO("NSU pools: distinct rids hash across read pool {2,3} via static map");
+TEST(NsuVcArbiterVnets, DistinctRidsSpreadAcrossVnet) {
+    SCENARIO("NSU vnets: distinct rids hash across read vnet {2,3} via static map");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     // dst_id=0x12 for all: rid5 -> (0x12^0x05)%2=1 -> VC3; rid6 -> (0x12^0x06)%2=0 -> VC2;
     // rid7 -> (0x12^0x07)%2=1 -> VC3.
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));  // rid5 -> VC3
@@ -132,29 +135,31 @@ TEST(NsuVcArbiterPools, DistinctRidsSpreadAcrossPool) {
     EXPECT_EQ(arb.pending_size(3), 2u);                                   // rid5 + rid7
 }
 
-// B uses the write pool, R uses the read pool (response-class separation).
-TEST(NsuVcArbiterPools, BUsesWritePoolRUsesReadPool) {
-    SCENARIO("NSU pools: B -> write pool {0,1}, R -> read pool {2,3}");
+// B uses the write vnet, R uses the read vnet (response-class separation).
+TEST(NsuVcArbiterVnets, BUsesWriteVnetRUsesReadVnet) {
+    SCENARIO("NSU vnets: B -> write vnet {0,1}, R -> read vnet {2,3}");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
-    // id=0x05, dst_id=0x12: B -> (0x12^0x05)%2=1 -> write pool[1]=VC1;
-    // R -> same hash -> read pool[1]=VC3.
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
+    // id=0x05, dst_id=0x12: B -> (0x12^0x05)%2=1 -> write vnet[1]=VC1;
+    // R -> same hash -> read vnet[1]=VC3.
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B, 0, 0x05, 1)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));
-    EXPECT_EQ(arb.pending_size(1), 1u);  // B on write pool
-    EXPECT_EQ(arb.pending_size(3), 1u);  // R on read pool
+    EXPECT_EQ(arb.pending_size(1), 1u);  // B on write vnet
+    EXPECT_EQ(arb.pending_size(3), 1u);  // R on read vnet
 }
 
 // Two in-flight multi-beat R bursts (rid5, rid6) whose beats interleave must
 // each stay on their own mapped VC -- the invariant per-(dst,id) hashing
 // exists for (a single VC choice would misroute the interleaved beats).
-TEST(NsuVcArbiterPools, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
-    SCENARIO("NSU pools: interleaved rid5/rid6 multi-beat R bursts each map to one VC");
+TEST(NsuVcArbiterVnets, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
+    SCENARIO("NSU vnets: interleaved rid5/rid6 multi-beat R bursts each map to one VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
-    // rid5 -> VC3, rid6 -> VC2 (same hash as DistinctRidsSpreadAcrossPool above).
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
+    // rid5 -> VC3, rid6 -> VC2 (same hash as DistinctRidsSpreadAcrossVnet above).
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC3
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 0)));  // rid6 -> VC2
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC3
@@ -165,47 +170,50 @@ TEST(NsuVcArbiterPools, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
     EXPECT_EQ(arb.pending_size(2), 3u);                                   // all rid6 beats
 }
 
-// INVERTED from the pre-clause-2 test "SameBidRoundRobinsWritePool": that test
-// asserted B has no pin and round-robins same-bid responses. The clause-2
-// return-path static map now pins rob_req=0 B the same way it pins R -- a
-// same-(dst,bid) bypass stream must share one VC to stay in order at the NMU.
+// INVERTED from the retired pre-same-destination-bypass same-bid round-robin test: that
+// test asserted B has no fixed VC and round-robins same-bid responses. The
+// same-destination-bypass return-path map now fixes rob_req=0 B the same way it fixes R --
+// a same-(dst,bid) bypass stream must share one VC to stay in order at the NMU.
 // rob_req=1 (robbed) B keeps the old round-robin behavior; see the next test.
-TEST(NsuVcArbiterPools, SameBidSameDstBypassPinsOneVc) {
+TEST(NsuVcArbiterVnets, SameBidSameDstBypassFixedVcId) {
     SCENARIO(
-        "NSU pools: rob_req=0 same-(dst,bid) B responses pin to one VC (clause-2 return-path map)");
+        "NSU vnets: rob_req=0 same-(dst,bid) B responses fix to one VC (same-destination-bypass "
+        "return-path map)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, 0));
     uint8_t b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, 0));
     EXPECT_EQ(a, b) << "same (dst,bid) bypass responses must share one VC";
 }
 
 // rob_req=1 (robbed) B is order-free at the NMU slot path, so it keeps
-// round-robining the write pool exactly as before clause 2.
-TEST(NsuVcArbiterPools, SameBidRobbedRoundRobinsWritePool) {
-    SCENARIO("NSU pools: rob_req=1 same-bid B responses still round-robin the write pool");
+// round-robining the write vnet exactly as before the same-destination bypass.
+TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWriteVnet) {
+    SCENARIO("NSU vnets: rob_req=1 same-bid B responses still round-robin the write vnet");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     uint8_t a =
         push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*rob_req=*/1));
     uint8_t b =
         push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*rob_req=*/1));
     EXPECT_EQ(a, 0u);
-    EXPECT_EQ(b, 1u) << "rob_req=1 B is order-free; round-robins the write pool";
+    EXPECT_EQ(b, 1u) << "rob_req=1 B is order-free; round-robins the write vnet";
 }
 
-// W6 (microarch §5a / meta_buffer.hpp:22-28): keying by (dst_id,id) dissolves
-// the same-id multi-source contention the old r_burst_vc_[id] array had --
-// two sources (different dst_id) with the same id now get distinct VCs
-// instead of contending one array slot. Covers both brief bullets: same-id
-// different-dst, and same-dst different-id.
-TEST(NsuVcArbiterPools, DifferentDstOrIdYieldsDistinctVcs) {
-    SCENARIO("NSU pools: rob_req=0 responses differing in dst_id or id can land on different VCs");
+// W6: keying by (dst_id,id) dissolves the same-id multi-source contention
+// the old r_burst_vc_[id] array had -- two sources (different dst_id) with
+// the same id now get distinct VCs instead of contending one array slot.
+// Covers both cases: same-id different-dst, and same-dst different-id.
+TEST(NsuVcArbiterVnets, DifferentDstOrIdYieldsDistinctVcs) {
+    SCENARIO("NSU vnets: rob_req=0 responses differing in dst_id or id can land on different VCs");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     // Same id (0x05), different dst_id: (0x10^0x05)%2=1 vs (0x11^0x05)%2=0.
     uint8_t same_id_dst_a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, 0x05, 1, 0x10, 0));
     uint8_t same_id_dst_b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, 0x05, 1, 0x11, 0));
@@ -218,16 +226,17 @@ TEST(NsuVcArbiterPools, DifferentDstOrIdYieldsDistinctVcs) {
     EXPECT_NE(same_dst_id_a, same_dst_id_b) << "different id, same dst_id must be able to spread";
 }
 
-// Pinned-VC-full refuses rather than spills to another VC (design: spilling a
+// Fixed-VC-full refuses rather than spills to another VC (design: spilling a
 // same-(dst,id) stream to a second VC would reorder it -- the exact hazard
-// the pin exists to prevent). Fill the mapped VC to pending_depth_, then a
-// same-(dst,id) push must fail, and no flit lands on the other pool VC.
-TEST(NsuVcArbiterPools, PinnedVcFullRefusesInsteadOfSpilling) {
-    SCENARIO("NSU pools: pinned VC full -> push_flit refuses, never spills to the pool's other VC");
+// the fixed VC exists to prevent). Fill the mapped VC to pending_depth_, then
+// a same-(dst,id) push must fail, and no flit lands on the other vnet VC.
+TEST(NsuVcArbiterVnets, FixedVcFullRefusesInsteadOfSpilling) {
+    SCENARIO("NSU vnets: fixed VC full -> push_flit refuses, never spills to the vnet's other VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split_pools(noc.rsp_out(), /*num_vc=*/4,
-                                                 /*write_rsp_vcs=*/{0, 1}, /*read_rsp_vcs=*/{2, 3});
-    // dst_id=0x12, id=0x05 -> (0x12^0x05)%2=1 -> read pool[1]=VC3. Fill VC3 to
+    auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
+                                           /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
+                                           /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
+    // dst_id=0x12, id=0x05 -> (0x12^0x05)%2=1 -> read vnet[1]=VC3. Fill VC3 to
     // the default pending_depth_ (4) with distinct rids that hash the same way
     // (rid must differ per beat's rlast semantics is irrelevant here; reuse rid5
     // across 4 separate single-beat "bursts").
@@ -237,7 +246,7 @@ TEST(NsuVcArbiterPools, PinnedVcFullRefusesInsteadOfSpilling) {
     EXPECT_EQ(arb.pending_size(3), 4u);
     EXPECT_FALSE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)))
         << "must refuse, not spill";
-    EXPECT_EQ(arb.pending_size(2), 0u) << "refused push must not land on the pool's other VC";
+    EXPECT_EQ(arb.pending_size(2), 0u) << "refused push must not land on the vnet's other VC";
 }
 
 INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcArbParam,
@@ -247,13 +256,13 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcArbParam,
                          });
 
 // ---------------------------------------------------------------------------
-// NsuConfig pools wiring — Task 5
+// NsuConfig vnets wiring
 // ---------------------------------------------------------------------------
 
-TEST(NsuConfigPools, ConfigPoolsBuildSpreadingArbiter) {
+TEST(NsuConfigVnets, ConfigVnetsBuildSpreadingArbiter) {
     using ni::cmodel::nsu::NsuConfig;
     using ni::cmodel::nsu::detail::make_vc_arbiter;  // factory lives in nsu::detail
-    SCENARIO("NsuConfig.write_rsp_vcs/read_rsp_vcs -> make_vc_arbiter -> pools arbiter");
+    SCENARIO("NsuConfig.write_rsp_vcs/read_rsp_vcs -> make_vc_arbiter -> vnet arbiter");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     NsuConfig cfg{};
     cfg.num_vc = 4;

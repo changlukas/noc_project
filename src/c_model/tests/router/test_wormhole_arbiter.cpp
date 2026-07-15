@@ -156,13 +156,13 @@ TEST(NocWormholeArbiter, BackpressureUpstreamAndDownstream) {
 TEST(NocWormholeArbiter, DownstreamBackpressureRetriesNoAbort) {
     SCENARIO(
         "WormholeArbiter try-push handshake: a downstream that transiently "
-        "refuses push_flit (e.g. NMU VcArbiter where the flit's landing VC is "
+        "refuses push_flit (e.g. NMU VcArbiter where the flit's selected VC is "
         "full while header.vc_id reports VC0) is legitimate backpressure, NOT a "
         "protocol violation. The arbiter must retain the front flit and retry "
         "until accepted -- no abort, no flit loss/duplication.");
     // Refuses the first 2 push attempts (credit_avail still true), then accepts.
-    // Models the multi-VC case: credit_avail(header.vc_id) cannot predict the
-    // landing VC that VcArbiter::push_flit actually selects.
+    // Models the multi-VC case: credit_avail(header.vc_id) cannot predict
+    // which VC VcArbiter::push_flit actually selects.
     struct FlakyDown : ni::cmodel::router::NocReqOut {
         int refuse_remaining = 2;
         int accepted = 0;

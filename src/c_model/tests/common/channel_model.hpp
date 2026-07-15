@@ -9,7 +9,7 @@
 // explicit set_dst_route(dst_id, nsu_idx) -- unmapped dst pushes assert.
 //
 // Per-NSU response latency (set_nsu_latency / set_nsu_latency_range) replaces
-// global rsp_delay_ for the configured NSU (not additive; see spec sec 7.3).
+// global rsp_delay_ for the configured NSU (not additive).
 //
 // Bounded deque per direction. Accepts multiple flits per tick -- does NOT
 // model 1-flit/cycle physical NoC pacing. That's vc_arb's responsibility.
@@ -35,7 +35,7 @@
 
 namespace ni::cmodel::testing {
 
-// Config struct for Stage 5b Wrap hermetic construction.
+// Config struct for the Wrap's hermetic construction.
 // Mirrors the multi-NSU ctor parameters; Wraps construct via
 // ChannelModel(ChannelModelConfig{...}) without needing cross-component refs.
 struct ChannelModelConfig {
@@ -46,7 +46,7 @@ struct ChannelModelConfig {
 
 class ChannelModel {
   public:
-    // Stage 5b standalone ctor: hermetic, no cross-component refs.
+    // Standalone ctor: hermetic, no cross-component refs.
     explicit ChannelModel(ChannelModelConfig cfg)
         : ChannelModel(cfg.num_nsu, cfg.req_q_depth_per_nsu, cfg.rsp_q_depth_total) {}
 

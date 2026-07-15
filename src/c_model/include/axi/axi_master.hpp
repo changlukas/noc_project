@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #pragma once
 #include "axi/types.hpp"
 #include "axi/protocol_rules.hpp"
@@ -64,7 +63,7 @@ struct WriteResult {
     uint8_t size;   // log2(bytes_per_beat)
     uint8_t len;    // beats - 1
     Burst burst;
-    // Phase C: mirrors the originating scenario_txn.lock so the scoreboard can
+    // Mirrors the originating scenario_txn.lock so the scoreboard can
     // distinguish a failed exclusive write (lock=Exclusive + resp=OKAY → no
     // memory commit) from a normal write (resp=OKAY → commit) without peeking
     // at the slave's exclusive monitor state.
@@ -103,7 +102,7 @@ struct IssueInfo {
 // SFINAE helper: call slave.force_aw_not_pending() only if the slave type
 // provides that method (WireSlavePort does; AxiSlave does not).
 // Used by the fault-injection path to clear stale AW-pending state so that
-// AWVALID drops on the registered SV wire (beta-tick discipline).
+// AWVALID drops on the registered SV wire (registered-DPI-tick discipline).
 template <typename SlaveT>
 auto clear_aw_pending_if_supported(SlaveT& s) -> decltype(s.force_aw_not_pending(), void()) {
     s.force_aw_not_pending();
@@ -294,8 +293,7 @@ class AxiMasterT {
                 // before the write even hits the network.
                 {
                     const uint64_t w_addr = txn.addr & ~((1ull << txn.size) - 1);
-                    const uint64_t w_bytes =
-                        (static_cast<uint64_t>(txn.len) + 1u) << txn.size;
+                    const uint64_t w_bytes = (static_cast<uint64_t>(txn.len) + 1u) << txn.size;
                     outstanding_write_ranges_.emplace_back(w_addr, w_bytes);
                 }
                 active_write_ops_[txn.id].push_back(std::move(op));
@@ -439,7 +437,7 @@ class AxiMasterT {
         std::size_t r_beats_in_cur_ = 0;
         std::vector<uint8_t> read_accumulator;  // packed user bytes, full operation
 
-        // Phase A: request-phase completion predicates. The outer FIFO loop in
+        // Request-phase completion predicates. The outer FIFO loop in
         // tick() breaks on the first op whose request phase is incomplete so
         // same-id ops emit their AW + W stream in submission order (AXI4 W has
         // no WID; W beats follow AW issue order — IHI 0022 §A5.3).
@@ -479,7 +477,7 @@ class AxiMasterT {
                 aw.len = sub.len;
                 aw.size = sub.size;
                 aw.burst = sub.burst;
-                // Phase C: pure wire-through of scenario_txn.lock onto AW.lock. AXI4
+                // Pure wire-through of scenario_txn.lock onto AW.lock. AXI4
                 // AxLOCK is 1-bit; LockType::Exclusive maps to 1, Normal to 0. Every
                 // sub-burst of one operation carries the same lock value.
                 aw.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
@@ -488,7 +486,7 @@ class AxiMasterT {
                 // push_aw as rejected. Auto-clear the flag after this cycle.
                 if (force_awvalid_low_one_cycle_) {
                     force_awvalid_low_one_cycle_ = false;
-                    // Beta-tick: clear any pending AW beat so AWVALID drops on
+                    // Registered DPI tick: clear any pending AW beat so AWVALID drops on
                     // the SV wire. detail::clear_aw_pending is a helper that calls
                     // force_aw_not_pending() if the slave type exposes it (SFINAE).
                     clear_aw_pending_if_supported(slave_);
@@ -562,7 +560,7 @@ class AxiMasterT {
             ar.len = sub.len;
             ar.size = sub.size;
             ar.burst = sub.burst;
-            // Phase C: wire-through scenario_txn.lock onto AR.lock (1-bit).
+            // Wire-through scenario_txn.lock onto AR.lock (1-bit).
             ar.lock = (op.src_txn.lock == LockType::Exclusive) ? 1u : 0u;
             ar.qos = op.src_txn.qos;
             const bool first_ar = (op.next_ar_sub_idx_ == 0);
@@ -616,7 +614,7 @@ class AxiSlave;
 using AxiMaster = AxiMasterT<AxiSlave>;
 
 // -------------------------------------------------------------------------
-// Stage 5b: AxiMasterStandalone — hermetic, no external SlaveT& ref.
+// AxiMasterStandalone — hermetic, no external SlaveT& ref.
 //
 // Wraps that drive AxiMaster without a concrete AxiSlave (e.g.,
 // DPI-wired cosim) use this class. It owns a WireSlavePort so AxiMasterT
@@ -627,7 +625,7 @@ using AxiMaster = AxiMasterT<AxiSlave>;
 
 namespace detail {
 
-// WireSlavePort — handshake-aware intermediary for Stage 5b Wrap.
+// WireSlavePort — handshake-aware intermediary for the Wrap.
 //
 // Models the AXI4 wire handshake from the master's perspective:
 //   - push_aw/push_w/push_ar model the master PRESENTING a beat (driving valid+
@@ -646,9 +644,9 @@ namespace detail {
 struct WireSlavePort {
     // Backpressure controls: Wrap sets these from MasterInputs before
     // each call to AxiMasterT::tick().
-    // Beta-tick semantics: set_wready resets the per-tick delivery gate.
+    // Registered DPI tick semantics: set_wready resets the per-tick delivery gate.
     // Only ONE W beat is accepted per tick (modelling the 1-beat-per-clock-edge
-    // constraint of the registered SV wire in the co-sim beta-tick discipline).
+    // constraint of the registered SV wire in the co-sim registered-DPI-tick discipline).
     void set_awready(bool v) noexcept {
         awready_ = v;
         aw_offered_this_tick_ = false;  // reset gate each tick
@@ -672,10 +670,8 @@ struct WireSlavePort {
         // set at latch time (below), NOT only on delivery: during the wait
         // cycles (awready_ low, no delivery) a later id would otherwise overwrite
         // last_aw_ to the LAST id walked, so the wire presents the wrong AW and
-        // replays it (STR-001 multi-outstanding: id 1..7 lost, id 8 replayed).
-        // Gating on offer keeps the FIRST (oldest) id's AW presented; later ids
-        // retry next tick. A previous fix gated on delivery only and did not fix
-        // the wait-cycle overwrite.
+        // replays it. Gating on offer keeps the FIRST (oldest) id's AW presented;
+        // later ids retry next tick.
         if (aw_offered_this_tick_) return false;
         last_aw_ = b;
         aw_pending_ = true;
@@ -742,7 +738,7 @@ struct WireSlavePort {
     void inject_b(const BBeat& b) { b_queue_.push_back(b); }
     void inject_r(const RBeat& r) { r_queue_.push_back(r); }
 
-    // Beta-tick inject support: force-clear AW pending state so that AWVALID
+    // Registered DPI tick inject support: force-clear AW pending state so that AWVALID
     // drops to 0 on the wire. Called by MasterWrap when fault injection
     // suppresses the AW push for the current cycle.
     void force_aw_not_pending() noexcept { aw_pending_ = false; }
@@ -758,9 +754,9 @@ struct WireSlavePort {
     bool awready_ = false;
     bool wready_ = false;
     bool arready_ = false;
-    bool aw_offered_this_tick_ = false;  // beta-tick: max 1 AW beat per tick
-    bool w_offered_this_tick_ = false;   // beta-tick: max 1 W beat per tick
-    bool ar_offered_this_tick_ = false;  // beta-tick: max 1 AR beat per tick
+    bool aw_offered_this_tick_ = false;  // registered DPI tick: max 1 AW beat per tick
+    bool w_offered_this_tick_ = false;   // registered DPI tick: max 1 W beat per tick
+    bool ar_offered_this_tick_ = false;  // registered DPI tick: max 1 AR beat per tick
 
     bool aw_pending_ = false;
     AwBeat last_aw_{};
@@ -775,7 +771,7 @@ struct WireSlavePort {
 
 }  // namespace detail
 
-// Config struct for Stage 5b Wrap hermetic construction.
+// Config struct for the Wrap's hermetic construction.
 struct AxiMasterConfig {
     std::string scenario_yaml;
     std::string read_dump_path;

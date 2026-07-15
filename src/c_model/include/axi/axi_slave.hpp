@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #pragma once
 #include "axi/memory.hpp"
 #include "axi/memory_port.hpp"
@@ -11,7 +10,7 @@
 
 namespace ni::cmodel::axi {
 
-// Config struct for Stage 5b Wrap hermetic construction.
+// Config struct for the Wrap's hermetic construction.
 // AxiSlave(AxiSlaveConfig) owns its Memory internally; no IMemoryPort& ref needed.
 struct AxiSlaveConfig {
     uint64_t memory_base_addr = 0;
@@ -44,7 +43,7 @@ struct ExclusiveTag {
 
 class AxiSlave {
   public:
-    // Stage 5b standalone ctor: owns Memory internally, no IMemoryPort& ref needed.
+    // Standalone ctor: owns Memory internally, no IMemoryPort& ref needed.
     // owned_memory_ is declared before memory_port_ so it is constructed first.
     explicit AxiSlave(AxiSlaveConfig cfg)
         : owned_memory_(std::in_place, cfg.memory_base_addr, cfg.memory_size, cfg.write_latency,
@@ -85,7 +84,7 @@ class AxiSlave {
         return r;
     }
 
-    void tick();  // implemented in Task 3.2+; also advances owned_memory_ if present
+    void tick();  // also advances owned_memory_ if present
 
     // Advance the owned Memory one tick (standalone-ctor path only).
     // External-ref ctor: caller is responsible for ticking the IMemoryPort
@@ -107,7 +106,7 @@ class AxiSlave {
     std::size_t b_q_size() const { return b_q_.size(); }
     std::size_t r_q_size() const { return r_q_.size(); }
 
-    // Phase C: exclusive-monitor inspection helpers (unit-test surface).
+    // Exclusive-monitor inspection helpers (unit-test surface).
     bool has_exclusive_tag(uint8_t id) const {
         return exclusive_tags_.find(id) != exclusive_tags_.end();
     }
@@ -116,8 +115,8 @@ class AxiSlave {
         return it != exclusive_tags_.end() && it->second.ready;
     }
     ExclusiveTag peek_exclusive_tag(uint8_t id) const { return exclusive_tags_.at(id); }
-    // Phase C audit fix (D3-2): expose pending-RLAST counter so the race
-    // regression test can verify the tag-promotion accounting end to end.
+    // Exposes the pending-RLAST counter so the race regression test can
+    // verify the tag-promotion accounting end to end.
     std::size_t exclusive_tag_pending_rlasts(uint8_t id) const {
         return exclusive_tags_.at(id).pending_rlasts;
     }
@@ -144,7 +143,7 @@ class AxiSlave {
         std::size_t beats_submitted = 0;
         std::size_t beats_completed = 0;
         Resp worst_resp = Resp::OKAY;  // accumulate worst across burst
-        // Phase C: locked-in at AW admission. is_exclusive=true means W beats are
+        // Locked-in at AW admission. is_exclusive=true means W beats are
         // gated (E4: suppress memory submit when !exclusive_match), and the B
         // response carries EXOKAY / OKAY based on exclusive_match (E6).
         bool is_exclusive = false;
@@ -166,12 +165,12 @@ class AxiSlave {
     std::deque<uint8_t> aw_issue_order_;  // oldest first; for W matching per AXI4
     // Per-ID FIFO: AXI4 requires same-ID burst responses to come back in issue
     // order, so each id maps to a deque of in-flight bursts (front = oldest).
-    // Phase B-5a master can stack same-id sub-bursts (4KB cross auto-split), so
+    // The master can stack same-id sub-bursts (4KB cross auto-split), so
     // a single-slot map would block. Multi-id concurrency still works via the
     // map keying — each id has its own FIFO chain.
     std::map<uint8_t, std::deque<WriteBurstState>> active_writes_;
     std::map<uint8_t, std::deque<ReadBurstState>> active_reads_;
-    // Phase C: per-ID exclusive monitor (IHI 0022 §A7.2). At most one tag per
+    // Per-ID exclusive monitor (IHI 0022 §A7.2). At most one tag per
     // ID; admitted on exclusive AR (E1), invalidated on overlapping normal AW
     // (E2) or on exclusive AW lookup (E3), turned ready on RLAST (E5).
     std::map<uint8_t, ExclusiveTag> exclusive_tags_;
@@ -215,7 +214,7 @@ inline void AxiSlave::tick_drain_write_resp_() {
             AXI_PROTOCOL_ASSERT(rules::check_w_before_b(st.beats_submitted ==
                                                         static_cast<std::size_t>(st.aw.len) + 1u),
                                 "W_BEFORE_B: B response fired before all W beats submitted");
-            // Phase C — E6: response priority. Memory error (SLVERR/DECERR) trumps
+            // E6: response priority. Memory error (SLVERR/DECERR) trumps
             // exclusive status. Otherwise an exclusive AW with matched tag returns
             // EXOKAY; everything else (normal AW, or exclusive with no-match — but
             // no-match is suppressed in step 4 / drained in step 4b) returns
@@ -263,11 +262,11 @@ inline void AxiSlave::tick_drain_read_resp_() {
         r_q_.push_back(rb);
         ++st.beats_returned;
         if (rb.last) {
-            // Phase C — E5: an exclusive AR's tag becomes ready on RLAST so a
+            // E5: an exclusive AR's tag becomes ready on RLAST so a
             // following exclusive AW can match it (§A7.2.3). Only an existing tag
             // for this id is promoted; absent tag (normal AR) is left alone.
             //
-            // Audit fix (D3-2): when a 2nd exclusive AR with the same ID overwrites
+            // When a 2nd exclusive AR with the same ID overwrites
             // an in-flight tag, the in-flight AR's RLAST must not falsely promote
             // the NEW tag. pending_rlasts is set at E1 to (in-flight ARs + self) so
             // every same-id RLAST decrements once; only when the counter reaches 0
@@ -327,7 +326,7 @@ inline void AxiSlave::tick_admit_aw_() {
                 continue;
             }
         }
-        // Phase C — E2/E3: exclusive-monitor side-effects at AW admission.
+        // E2/E3: exclusive-monitor side-effects at AW admission.
         //   E2 normal AW (lock=0): erase every tag whose address window overlaps
         //                          this AW's effective address range (§A7.2.3:
         //                          any non-exclusive write that may affect the
@@ -432,7 +431,7 @@ inline void AxiSlave::tick_submit_w_() {
         req.id = st.aw.id;
         req.last = w_q_.front().last;
         req.tag = (static_cast<uint64_t>(front_id) << 32) | beat_idx;
-        // Phase C — E4: a failed exclusive write must NOT commit to memory
+        // E4: a failed exclusive write must NOT commit to memory
         // (§A7.2.3). Drop the W beat from w_q_ and advance both beats_submitted
         // and beats_completed (synthetic completion — no memory_port traffic).
         // The terminal B response is emitted later in step 4b respecting per-ID
@@ -461,7 +460,7 @@ inline void AxiSlave::tick_submit_w_() {
 }
 
 inline void AxiSlave::tick_drain_failed_exclusive_b_() {
-    // 4b. Phase C — emit B for failed exclusive writes (E6 partial: no-match).
+    // 4b. Emit B for failed exclusive writes (E6 partial: no-match).
     //     These bursts never reach memory_port_, so step 1 cannot drain them.
     //     Walk each id's chain front-to-back: drain any prefix of bursts whose
     //     synthetic completion is done. Stop at the first burst still in flight
@@ -533,7 +532,7 @@ inline void AxiSlave::tick_admit_ar_() {
                 continue;
             }
         }
-        // Phase C — E1: admit exclusive AR (lock=1) → record tag (ready=false).
+        // E1: admit exclusive AR (lock=1) → record tag (ready=false).
         // Per-ID; a same-id second exclusive AR overwrites the previous tag per
         // §A7.2.3 ("a master can only have one outstanding exclusive read per
         // ID"). The tag becomes ready on RLAST (E5) and is consumed/erased on the

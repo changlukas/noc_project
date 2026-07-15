@@ -1,7 +1,6 @@
 // Regression: the NMU request bridge must NOT head-of-line-block W/AR behind a
 // full AW wormhole input. Reproduces the 8R/8W co-sim self-deadlock
-// deterministically at the bridge+packetize+wormhole level (spec
-// 2026-07-04-nmu-request-hol-fix-design.md).
+// deterministically at the bridge+packetize+wormhole level.
 #include "nmu/nmu.hpp"
 #include "nmu/packetize.hpp"
 #include "ni/wormhole_arbiter.hpp"
@@ -72,7 +71,7 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
     WormholeArbiter<NocReqOut> wh(out, /*num_inputs=*/3, std::vector<ChannelPairing>{{0, 1}},
                                   kAwInputDepth);
     // Bridge always drives push_*_with_meta (never push_aw/push_ar), so the
-    // frozen interface's SamTable is never touched here — default is fine.
+    // direct-path interface's SamTable is never touched here — default is fine.
     Packetize pkt(wh.input(0), wh.input(1), wh.input(2), kSrcId, {});
     NmuReqS1Bridge bridge;
 

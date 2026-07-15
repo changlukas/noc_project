@@ -13,14 +13,14 @@ int main() {
     ni::pins::AxiMasterPortPins mst{};
     mst.reset_outputs();
 
-    ni::pins::NocIntfMosiPins noc_mosi{};
-    noc_mosi.reset_outputs();
+    ni::pins::NocIntfUpstreamPins noc_upstream{};
+    noc_upstream.reset_outputs();
 
     ni::pins::CsrPins csr{};
     csr.reset_outputs();
 
-    ni::pins::NocIntfMisoPins noc_miso{};
-    noc_miso.reset_outputs();
+    ni::pins::NocIntfDownstreamPins noc_downstream{};
+    noc_downstream.reset_outputs();
 
     std::printf("AxiSlavePortPins sizeof=%zu\n", sizeof(slv));
     std::printf("CsrPins sizeof=%zu\n", sizeof(csr));

@@ -1,6 +1,6 @@
 // Smoke test: Nsu class constructs cleanly + tick() doesn't crash.
 // Verifies ctor sequence (member init order, factory return-by-value, no-Rob
-// asymmetry vs Nmu) before Task 3 integration.
+// asymmetry vs Nmu) in isolation.
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
@@ -134,7 +134,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
 
     // Push the B response into the downstream-facing AXI port. The
     // response path runs Packetize.push_b -> wormhole_arbiter -> vc_arbiter
-    // -> NullNocRspOut; Packetize reads dst_id from the MetaBuffer
+    // -> QueueNocRspOut; Packetize reads dst_id from the MetaBuffer
     // entry saved at AW ingress.
     axi::BBeat b{};
     b.id = kAxiId;

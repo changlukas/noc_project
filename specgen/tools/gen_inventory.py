@@ -16,7 +16,7 @@ from pathlib import Path
 
 SPECGEN_ROOT = Path(__file__).resolve().parent.parent
 JSON_PATH    = SPECGEN_ROOT / "source" / "noc_function_blocks.json"
-DEFAULT_OUT  = SPECGEN_ROOT.parent / "c_model" / "FEATURE_INVENTORY.md"
+DEFAULT_OUT  = SPECGEN_ROOT.parent / "src" / "c_model" / "FEATURE_INVENTORY.md"
 
 
 # Implemented filenames that differ from the ID-derived short name.
@@ -24,19 +24,19 @@ DEFAULT_OUT  = SPECGEN_ROOT.parent / "c_model" / "FEATURE_INVENTORY.md"
 # VC mapping policy is implemented inside the arbiter header (enum
 # VcMode), not a standalone file.
 _HEADER_OVERRIDES = {
-    "FEAT-NMU-VC_ARB":     "c_model/include/nmu/vc_arbiter.hpp",
-    "FEAT-NSU-VC_ARB":     "c_model/include/nsu/vc_arbiter.hpp",
-    "FEAT-NMU-VC_MAPPING": "c_model/include/nmu/vc_arbiter.hpp (VcMode)",
-    "FEAT-ROUTER-ROUTE_COMPUTATION":    "c_model/include/router/router.hpp (route_compute)",
-    "FEAT-ROUTER-WORMHOLE_ARBITRATION": "c_model/include/router/router.hpp",
-    "FEAT-ROUTER-VC_ARBITRATION":       "c_model/include/router/router.hpp",
-    "FEAT-ROUTER-CREDIT_FLOW_CONTROL":  "c_model/include/router/router.hpp",
-    "FEAT-ROUTER-ROUTE_PARITY_CHECK":   "c_model/include/router/router.hpp",
+    "FEAT-NMU-VC_ARB":     "src/c_model/include/nmu/vc_arbiter.hpp",
+    "FEAT-NSU-VC_ARB":     "src/c_model/include/nsu/vc_arbiter.hpp",
+    "FEAT-NMU-VC_MAPPING": "src/c_model/include/nmu/vc_arbiter.hpp (VcMode)",
+    "FEAT-ROUTER-ROUTE_COMPUTATION":    "src/c_model/include/router/router.hpp (route_compute)",
+    "FEAT-ROUTER-WORMHOLE_ARBITRATION": "src/c_model/include/router/router.hpp",
+    "FEAT-ROUTER-VC_ARBITRATION":       "src/c_model/include/router/router.hpp",
+    "FEAT-ROUTER-CREDIT_FLOW_CONTROL":  "src/c_model/include/router/router.hpp",
+    "FEAT-ROUTER-ROUTE_PARITY_CHECK":   "src/c_model/include/router/router.hpp",
 }
 
 
 def _expected_header(feat_id: str) -> str:
-    """FEAT-NMU-AXI_SLAVE_PORT -> c_model/include/nmu/axi_slave_port.hpp"""
+    """FEAT-NMU-AXI_SLAVE_PORT -> src/c_model/include/nmu/axi_slave_port.hpp"""
     if feat_id in _HEADER_OVERRIDES:
         return _HEADER_OVERRIDES[feat_id]
     parts = feat_id.split("-")
@@ -44,7 +44,7 @@ def _expected_header(feat_id: str) -> str:
         return "(unknown id format)"
     block = parts[1].lower()
     short = "_".join(parts[2:]).lower()
-    return f"c_model/include/{block}/{short}.hpp"
+    return f"src/c_model/include/{block}/{short}.hpp"
 
 
 def _format_modes(modes):
@@ -66,8 +66,8 @@ def render(spec, when):
     out.append("this file is documentation + a drift gate.")
     out.append("")
     out.append("Column **Expected c_model header** points to the conventional path for that ")
-    out.append("feature's c_model implementation. Existence is **not enforced** — most features ")
-    out.append("won't have an implementation until Layer B / Stage 2.")
+    out.append("feature's c_model implementation. Existence is **not enforced** — some features ")
+    out.append("may not have an implementation yet.")
     out.append("")
     for block in spec.get("blocks", []):
         name = block["name"]

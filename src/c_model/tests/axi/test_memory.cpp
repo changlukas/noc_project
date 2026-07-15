@@ -1,4 +1,3 @@
-// Algorithms ported from cocotbext-axi (MIT) — see axi/ATTRIBUTION.md
 #include "axi/memory.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>

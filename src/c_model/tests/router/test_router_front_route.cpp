@@ -36,7 +36,7 @@ TEST(RouterFrontRoute, FrontFlitRoutesEast) {
     router::Router r(c);
     r.input(static_cast<std::size_t>(router::RouterPort::LOCAL))
         .push_flit(make_flit(/*dst=(1,0)*/ 0x01, 0));
-    r.tick();  // landing -> input FIFO
+    r.tick();  // input register -> input FIFO
     auto out = r.front_route(static_cast<std::size_t>(router::RouterPort::LOCAL), 0);
     ASSERT_TRUE(out.has_value());
     EXPECT_EQ(*out, router::RouterPort::EAST);

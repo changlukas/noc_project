@@ -201,7 +201,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired
     // addr_trans::xy_route mapping (dst = addr[39:32], local_addr = addr
     // unchanged) so scenario-driven stimulus addressing is unaffected by the
-    // Task 5 migration off xy_route.
+    // migration off xy_route.
     nmu_cfg.sam = nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
     nmu_cfg.read_rob_mode = rob_mode;  // B RoB is always on; rob_mode now controls R only
     nmu_cfg.port_params = nmu_params;
@@ -250,8 +250,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     // Observability hook: AxiMasterObserver tracks per-transaction counts,
     // AXI4 IHI 0022 §A5.3 per-id ordering, and (under NOC_LOG=1) emits a
     // parse-friendly trace line per AW/B/AR/R. RAII dtor prints
-    // [summary:NMU] at scope exit; ok()-driven hard fail deferred to a
-    // future round per plan Task 3 spec.
+    // [summary:NMU] at scope exit; ok()-driven hard fail is not yet wired up.
     //
     // Wiring note: this testbench uses AxiMasterT<nmu::AxiSlavePort> (not
     // the default AxiMasterT<AxiSlave> = axi::AxiMaster type expected by

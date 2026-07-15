@@ -1,6 +1,7 @@
-// Stage 5b DPI bridge — lifecycle handlers + global error state.
+// DPI bridge — lifecycle handlers + global error state.
 // Per-wrap {set_inputs,tick,get_outputs} handlers + per-instance *_create
-// lifecycle (chandle ABI). Handle validation via REQUIRE_HANDLE.
+// lifecycle (longint-handle ABI; chandle was rejected by VCS as a module
+// port). Handle validation via REQUIRE_HANDLE.
 
 #include "cmodel_dpi.h"
 #include "dpi_boundary_macros.h"
@@ -215,9 +216,9 @@ void pack_vc_credit(const CreditVec& v, uint8_t num_vc, svBitVecVal* word) {
 
 }  // namespace
 
-// Router DPI handlers — per-node (Task 3, router-channel split).
-// One RouterWrap owns ONE node's REQ+RSP routers at coordinate (x,0).
-// Pins split into NMU/NSU-facing (NI edge) + per-network LINK (pulse credit).
+// Router DPI handlers — per-node.
+// One RouterWrap owns ONE node's REQ+RSP routers at (x_coord, y_coord) in an
+// NxM mesh. Pins split into NMU/NSU-facing (NI edge) + per-network LINK (pulse credit).
 
 using ni::cmodel::wrap::RouterInputs;
 using ni::cmodel::wrap::RouterOutputs;
@@ -358,7 +359,7 @@ void pack_addr64(uint64_t addr, svBitVecVal* vec) {
 
 }  // namespace
 
-// Nmu DPI handlers — Task 8.
+// Nmu DPI handlers.
 //
 // Packing conventions (little-endian word order):
 //   8-bit  id/attr  : word[0] low byte
@@ -497,8 +498,8 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
     DPI_BOUNDARY_END(cmodel_nmu_get_outputs);
 }
 
-// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — Stage 0 clause-2 gate
-// measurement readout. 0 if the handle is invalid or RoB is Disabled.
+// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing telemetry readout.
+// 0 if the handle is invalid or RoB is Disabled.
 extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN_R(cmodel_nmu_read_slot_hwm, 0u) {
         auto* _h =
@@ -512,7 +513,7 @@ extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
     DPI_BOUNDARY_END_R(cmodel_nmu_read_slot_hwm);
 }
 
-// Nsu DPI handlers — Task 9.
+// Nsu DPI handlers.
 //
 // Direction inversion vs. Nmu:
 //   set_inputs receives noc_req_flit (NoC consumer) + AXI master ready signals / B/R.

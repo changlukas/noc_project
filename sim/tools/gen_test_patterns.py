@@ -402,7 +402,7 @@ def _check_mesh_capacity(x_dim, y_dim):
       - y_dim <= 2**Y_WIDTH  (else y overflows DST_ID_WIDTH)
       - x_dim * y_dim <= 2**DST_ID_WIDTH  (total node count fits dst_id)
     The product check alone misses e.g. 17x15 (=255 <= 256 but x_dim 17 > 16 aliases)
-    or 32x8 (=256 but x_dim 32 > 16).  All three must hold (spec section 3 invariant).
+    or 32x8 (=256 but x_dim 32 > 16).  All three must hold.
     """
     if x_dim > 2 ** X_WIDTH:
         sys.exit(

@@ -1,5 +1,5 @@
 #pragma once
-// NMU top-level assembly. Encapsulates Stage 3 NI sub-modules into one
+// NMU top-level assembly. Encapsulates the NI sub-modules into one
 // class with a single tick() entrypoint, hiding the manual wiring that
 // previously lived in test_request_response_loopback.cpp.
 //
@@ -12,8 +12,8 @@
 //   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort
 //     ──> back to external AXI master
 //
-// Per-cycle tick order (upstream-first; matches vc_arb/wormhole_arbiter
-// round established pattern):
+// Per-cycle tick order (upstream-first; matches the established
+// vc_arb/wormhole_arbiter pattern):
 //   depacketize_.tick(); axi_slave_port_.tick();
 //   wormhole_arbiter_.tick(); vc_arbiter_.tick();
 //
@@ -24,16 +24,13 @@
 // AXI binding: NOT via ctor (AxiMasterT<AxiSlavePort> template type
 // collision in testbench). Use axi_slave_port() getter to obtain the
 // AxiSlavePort& for the testbench's AxiMaster<AxiSlavePort> wiring.
-//
-// References:
-//   docs/superpowers/specs/2026-06-04-nmu-nsu-top-level-design.md
 #include "nmu/axi_slave_port.hpp"
 #include "ni/ni_stage.hpp"
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
 #include "nmu/vc_arbiter.hpp"
-#include "nmu/ni_tokens.hpp"
+#include "nmu/staged_beats.hpp"
 #include "ni_params.h"
 #include "router/req_out.hpp"
 #include "router/rsp_in.hpp"
@@ -71,7 +68,7 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     // Drain each AXI sub-channel to Packetize INDEPENDENTLY. A full AW wormhole
     // input must not block W (the in-flight write's body, needed to release the
     // wormhole AW->W lock) or AR. Cross-channel HOL here self-deadlocks the
-    // request path under load (spec 2026-07-04-nmu-request-hol-fix-design.md).
+    // request path under load.
     // AW-before-W ordering is preserved downstream by Packetize's w_meta_fifo_,
     // not by gating W on AW admission.
     void tick(Packetize& packetize) {
@@ -128,8 +125,7 @@ struct NmuConfig {
     uint8_t src_id = 0;
     addr_trans::SamTable sam{};
     RobMode read_rob_mode = RobMode::Disabled;
-    // RoB pool depths, per direction. Enabled mode only. See
-    // docs/nmu-rob-microarchitecture.md section 6.
+    // RoB pool depths, per direction. Enabled mode only.
     std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH;
     std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). Enabled mode only.
@@ -138,8 +134,9 @@ struct NmuConfig {
     std::size_t num_vc = 1;
     uint8_t write_vc = 0;
     uint8_t read_vc = 0;
-    // ReadWriteSplit pool variant: when non-empty, each class draws from a VC
-    // pool with round-robin selection instead of the single write_vc/read_vc.
+    // ReadWriteSplit vnet variant: when non-empty, each class draws from a VC
+    // virtual network with round-robin selection instead of the single
+    // write_vc/read_vc.
     std::vector<uint8_t> write_vcs{};
     std::vector<uint8_t> read_vcs{};
     std::size_t wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
@@ -264,8 +261,8 @@ namespace detail {
 
 inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
     if (!cfg.write_vcs.empty() && !cfg.read_vcs.empty()) {
-        return VcArbiter::read_write_split_pools(downstream, cfg.num_vc, cfg.write_vcs,
-                                                 cfg.read_vcs, cfg.vc_arbiter_pending_depth);
+        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vcs, cfg.read_vcs,
+                                           cfg.vc_arbiter_pending_depth);
     }
     return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
                                        cfg.vc_arbiter_pending_depth);

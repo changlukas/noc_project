@@ -1,6 +1,6 @@
 """Loader + validator for constants.yaml and interface_handshake.json.
 
-Covers all spec §4.2 rules:
+Covers the following rules:
 - Unknown top-level key / unknown per-parameter field rejected
 - Required fields enforced (type, default, sv_symbol, cpp_symbol)
 - Type validation (currently only "int" supported)

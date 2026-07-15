@@ -1,17 +1,17 @@
 // Per-node Router wrap IO — one node's NoC pin bundle.
 //
 // A single cosim RouterWrap owns ONE node's REQ+RSP routers at
-// coordinate (x,0). Its pins split into three groups:
+// (x_coord, y_coord) in an NxM mesh. Its pins split into three groups:
 //   - NMU/NSU-facing (NI edge): FlooNoC pulse-credit, identical mechanism to the
-//     LINK (R2) — req_in (NMU injects a request), rsp_in (NSU injects a response),
+//     LINK — req_in (NMU injects a request), rsp_in (NSU injects a response),
 //     req_out (request ejected toward NSU), rsp_out (response ejected toward NMU).
 //     *_out_credit_return is a single-cycle PULSE (router LOCAL input drained ->
 //     credit to NMU/NSU); *_in_credit_return is the NMU/NSU's returned pulse
 //     (consumed an ejected flit -> router.receive_credit(LOCAL)). FlitBytes
 //     reused unchanged; only the credit-bit semantics changed (level -> pulse).
 //   - LINK (per network req/rsp): the cross-DPI FlooNoC pulse-credit inter-router
-//     link toward the neighbor node. Naming mirrors the plan's explicit link
-//     ports on router_wrap:
+//     link toward the neighbor node. Per-direction naming mirrors router_wrap's
+//     link ports:
 //       link_<N>_out_valid / link_<N>_out_flit : this node's LINK output (-> neighbor)
 //       link_<N>_out_credit                    : credit pulse IN from neighbor for
 //                                                our sent flits (-> receive_credit(LINK))
@@ -20,16 +20,17 @@
 //                                                LINK input drains (LinkCreditOut.take)
 //     credit pulses are single-cycle (per VC), NOT the level used on NI bundles.
 #pragma once
-#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
-#include "router/router.hpp"               // ROUTER_PORT_COUNT
-#include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
+#include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES
+#include "router/router.hpp"    // ROUTER_PORT_COUNT
+#include "ni_flit_constants.h"  // ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
 
 namespace ni::cmodel::wrap {
 
-// Per-(direction,VC) credit marshalling sizes (DPI ABI is fixed at the max so
-// Task 7 only fills more directions — it never re-shapes the struct).
+// Per-(direction,VC) credit marshalling sizes (DPI ABI is fixed at the max;
+// boundary directions with no neighbor are simply left unwired, so the
+// struct shape never changes with mesh size).
 //   ROUTER_LINK_PORTS  : router has 5 ports (LOCAL + N/E/S/W). LINK indices use
 //                        the 4 non-LOCAL directions; the array is sized for all 5
 //                        so RouterPort enum values index it directly (LOCAL slot

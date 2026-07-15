@@ -71,7 +71,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
     // awaddr. dst_id derivation is covered by WMetaFifoInheritsAwDst below.
     // Address is the low 40 bits of the original 0xDEADBEEFCAFEBABE pattern:
     // the legacy SAM covers addr < 2^40 (256 tiles x 4GB), unlike xy_route
-    // (Task 4) which masked dst_id and tolerated any 64-bit address.
+    // which masked dst_id and tolerated any 64-bit address.
     ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0xEFCAFEBABEull)));
 
     auto flit_opt = aw_cap.pop();
@@ -238,7 +238,7 @@ TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
     // addr 0x9900004000 → dst = (0x9900004000 >> 32) & 0xFF = 0x99, rebased
-    // local araddr = 0x4000 (addr - base 0x9900000000). Frozen interface
+    // local araddr = 0x4000 (addr - base 0x9900000000). Direct-path interface
     // auto-fills rob_req/rob_idx = 0; Rob-driven path uses push_ar_with_meta
     // (covered by PushAwWithMeta_OverrideDefault).
     ASSERT_TRUE(pkt.push_ar(make_ar(0x07, 0x9900004000)));
@@ -280,13 +280,14 @@ TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
 
 TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
     SCENARIO(
-        "NMU Packetize: frozen push_aw runs SamTable::translate (16x16 uniform) to fill dst_id "
+        "NMU Packetize: direct-path push_aw runs SamTable::translate (16x16 uniform) to fill "
+        "dst_id "
         "(from the table) and the rebased local_addr");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, /*src=*/0x01, legacy_sam());
     // addr 0x100000100 → tile 1 (0x100000100 / 4GB = 1); rebased -> local 0x100
     axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100000100);
-    ASSERT_TRUE(pkt.push_aw(b));  // frozen interface auto-computes
+    ASSERT_TRUE(pkt.push_aw(b));  // direct-path interface auto-computes
     auto f = *aw_cap.pop();
     EXPECT_EQ(f.get_header_field("dst_id"), 0x01u);            // from SamTable::translate
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x100ull);  // rebased: addr - base 0x100000000
@@ -295,7 +296,7 @@ TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
 TEST(NmuPacketize, SamTranslateRebasesAddrAndSetsDstFromTable) {
     SCENARIO(
         "NMU Packetize: push_aw runs a rebasing SamTable::translate; dst_id comes from the "
-        "table and awaddr is rebased to the tile-local offset (Task 4)");
+        "table and awaddr is rebased to the tile-local offset");
     ReqCapture aw_cap, w_cap, ar_cap;
     auto sam = addr_trans::SamTable::uniform(4, 4, 0x100000000ull);
     Packetize pkt(aw_cap, w_cap, ar_cap, /*src_id=*/0, sam);

@@ -1,8 +1,8 @@
-// NmuWrap IO POD structs — Stage 5b spec §6 (combined AXI slave + NoC).
+// NmuWrap IO POD structs — combined AXI slave + NoC pin bundle.
 //
 // NmuInputs: signals consumed by the Nmu each cycle.
 //   AXI slave side: master drives AW/W/AR onto axi_intf; Nmu accepts them.
-//   NoC rsp side:   flit arriving from channel model toward Nmu's Depacketize.
+//   NoC rsp side:   flit arriving from the router toward Nmu's Depacketize.
 //   NoC req credit: credit_return from downstream (channel credits back to Nmu).
 //
 // NmuOutputs: signals driven by the Nmu each cycle.
@@ -14,9 +14,9 @@
 // AXI_DATA_BYTES = 32 (256-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 #pragma once
-#include "axi/types.hpp"                   // axi::DATA_BYTES
-#include "wrap/flit_bytes.hpp"             // FlitBytes, FLIT_BYTES
-#include "ni_flit_constants.h"             // ni::header::VC_ID_WIDTH
+#include "axi/types.hpp"        // axi::DATA_BYTES
+#include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES
+#include "ni_flit_constants.h"  // ni::header::VC_ID_WIDTH
 #include <array>
 #include <cstdint>
 

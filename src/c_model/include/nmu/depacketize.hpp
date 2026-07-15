@@ -19,7 +19,7 @@ namespace ni::cmodel::nmu {
 // Pending-flit stash semantics: if a pulled flit's target queue is full,
 // the flit is held in `pending_` and re-attempted next tick. This blocks
 // any other flits behind it (head-of-line blocking on single-FIFO ingress).
-// Documented in spec §4.4; not a bug.
+// This is intentional, not a bug.
 class Depacketize : public ResponseDepacketizer {
   public:
     Depacketize(router::NocRspIn& rsp_in, std::size_t b_q_depth, std::size_t r_q_depth)

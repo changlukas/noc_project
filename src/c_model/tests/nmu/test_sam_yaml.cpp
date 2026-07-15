@@ -29,7 +29,7 @@ TEST(SamYaml, ExplicitTilesOverride) {
     EXPECT_EQ(e->size, 0x10000000ull);
 }
 
-// Guards the real topology config (Task 7): topologies/ is copied next to the
+// Guards the real topology config: topologies/ is copied next to the
 // test binary at build time (CMakeLists.txt).
 TEST(SamYaml, RealMesh4x4TopologyLoads) {
     auto sam = load_sam_table("topologies/mesh_4x4_vc1.yaml");

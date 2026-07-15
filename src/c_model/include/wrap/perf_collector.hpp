@@ -12,7 +12,7 @@ namespace ni::cmodel::wrap {
 
 // Single-run NoC perf readout. C-side sampling pushes per-router fifo occupancy
 // (max-tracked) and per-link flit/stall counters; dump() writes the noc section
-// of the spec 5.1 schema. (The AXI per-transaction slots/latency section was
+// of the perf.json schema. (The AXI per-transaction slots/latency section was
 // dropped: its DPI hook was never wired, so it only ever emitted empty output.)
 class PerfCollector {
   public:

@@ -59,6 +59,6 @@ TEST(BurstLastByte, WrapWindowAligned) {
     EXPECT_EQ(burst_last_byte(0x1018, 3, 3, axi::Burst::WRAP), 0x1020 - 1);
 }
 TEST(BurstLastByte, FixedMatchesSlaveTotal) {
-    // FIXED uses total to match the slave OOB math (Codex #6)
+    // FIXED uses total to match the slave OOB math
     EXPECT_EQ(burst_last_byte(0x1000, 3, 3, axi::Burst::FIXED), 0x1000 + 32 - 1);
 }

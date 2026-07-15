@@ -18,13 +18,13 @@
 
 namespace ni::cmodel::nmu {
 
-enum class RobMode { Disabled, Enabled };  // Enabled = next round
+enum class RobMode { Disabled, Enabled };
 
 // In-line layer between AxiSlavePort and {Packetize, Depacketize}.
 // Implements RequestPacketizer (request gate: push_aw/w/ar) and
 // ResponseDepacketizer (response observe: pop_b/r).
 //
-// Disabled mode (this round): per-AXI-ID single-outstanding interlock.
+// Disabled mode: per-AXI-ID single-outstanding interlock.
 //   - Any id with one outstanding AW/AR -> stall further same-id requests
 //   - Different id -> independent
 //   - Response B / R(last) observe clears the per-id outstanding flag
@@ -129,7 +129,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t read_slot_hwm() const noexcept { return read_slot_hwm_; }
 
   private:
-    // Drain ready order-list heads into the committed queues (the Task 3 loops,
+    // Drain ready order-list heads into the committed queues (the pop-side loops,
     // reused by the direct-forward bypass arms). Stops at a bypassed head, which
     // waits on its own response through pop_*_staged.
     void drain_ready_write_heads_(uint8_t id);
@@ -147,10 +147,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // is in flight for that id; cleared by R(last) in pop_r.
     std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
 
-    // W burst credit gate: prevents W beats from reaching Packetize before
-    // their corresponding AW has been ROB-accepted. Single counter (not per-id)
-    // because AXI4 W beats follow AW issue order strictly (no WID).
-    uint32_t w_burst_credit_ = 0;
+    // AW-before-W interlock: AW-accepted bursts whose W beats are still owed.
+    // Prevents W beats from reaching Packetize before their corresponding AW
+    // has been ROB-accepted. Single counter (not per-id) because AXI4 W beats
+    // follow AW issue order strictly (no WID).
+    uint32_t w_bursts_owed_ = 0;
 
     // === Enabled mode (per-beat slot pool) ===
 
@@ -197,21 +198,21 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
 
-    // Bypass clause 2 state (floo_rob.sv:399,417-420,427-428). prev_dest_* is the
-    // dst_id of the last accepted push for that id, updated on every push.
-    // fallen_back_* is the sticky "this id started reordering" flag: once a push
-    // robs, every later push for that id robs too (even if dest matches an earlier
-    // one) until a new streak begins. The reset is the clause-1 branch itself: an
-    // id's first push (empty order list) sets fallen_back_*=false, so the flag is
+    // Same-destination bypass state (floo_rob.sv:399,417-420,427-428). prev_dest_* is
+    // the dst_id of the last accepted push for that id, updated on every push.
+    // fallen_back_* is the sticky same-destination-bypass flag: once a push
+    // allocates a RoB slot, every later push for that id allocates one too (even
+    // if dest matches an earlier one) until a new streak begins. The reset is the idle-ID bypass
+    // branch itself: an id's first push (empty order list) sets fallen_back_*=false, so the flag is
     // fresh at every streak start. FlooNoC instead clears at drain (floo_rob.sv:435-441)
-    // because its clause 1 READS the sticky flag (!ax_rob_req_q); ours tests the empty
+    // because its idle-ID bypass READS the sticky flag (!ax_rob_req_q); ours tests the empty
     // list, which makes a drain-time clear a dead store -- so it is omitted here.
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
 
-    // Family C: per-base (keyed by rob_idx base) arrival counter. NSU stamps every
+    // Per-base (keyed by rob_idx base) arrival counter. NSU stamps every
     // R beat of a burst with rob_idx=base; this counter positions beat i at base+i.
     // Reset when the range is popped from read_order_by_id_ (ties counter lifecycle
     // to slot-reuse eligibility). read_range_len_[base] = burst length n, set in
@@ -222,13 +223,13 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Beats of the head burst released so far, keyed by range base. FlooNoC keys the
     // same counter by ID (read_rob_idx_offset_q, floo_rob.sv:177-180); a range belongs
     // to exactly one ID, so keying by base carries the same information. Distinct from
-    // read_arrival_offset_: arrival places landing beats, release tracks how many left.
+    // read_arrival_offset_: arrival places incoming beats, release tracks how many left.
     std::array<uint16_t, ROB_IDX_SPACE> read_release_offset_{};
 
     // High-water mark backing read_slot_hwm(). See getter for details.
     std::size_t read_slot_hwm_ = 0;
 
-    // Ready-to-emit beats drained by pop_b / pop_r (Task 3).
+    // Ready-to-emit beats drained by pop_b / pop_r.
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
     std::array<uint8_t, ROB_IDX_SPACE> committed_b_pending_{};
@@ -246,12 +247,12 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     bool needs_rob;
     bool fallen_back;  // trial value; committed only once the push is accepted
     if (empty) {
-        // Clause 1: nothing in flight for this id, so nothing can overtake this
+        // Idle-ID bypass: nothing in flight for this id, so nothing can overtake this
         // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
         needs_rob = false;
         fallen_back = false;  // fresh streak
     } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id]) {
-        // Clause 2: same dest as the previous same-id push, not yet reordering.
+        // Same-destination bypass: same dest as the previous same-id push, not yet reordering.
         // Ported from floo_rob.sv:427-428.
         needs_rob = false;
         fallen_back = false;
@@ -277,14 +278,14 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
     }
     write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob});
-    ++w_burst_credit_;
+    ++w_bursts_owed_;
     return true;
 }
 
 inline bool Rob::push_w(const axi::WBeat& b) {
-    if (w_burst_credit_ == 0) return false;  // W cannot proceed before its AW
-    if (!next_pkt_.push_w(b)) return false;  // downstream backpressure: NO credit change
-    if (b.last) w_burst_credit_--;
+    if (w_bursts_owed_ == 0) return false;   // W cannot proceed before its AW
+    if (!next_pkt_.push_w(b)) return false;  // downstream backpressure: NO change to owed count
+    if (b.last) w_bursts_owed_--;
     return true;
 }
 
@@ -298,12 +299,12 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         bool needs_rob;
         bool fallen_back;  // trial value; committed only once the push is accepted
         if (empty) {
-            // Clause 1: an idle id's burst cannot be overtaken, so it needs no slots.
+            // Idle-ID bypass: an idle id's burst cannot be overtaken, so it needs no slots.
             // A bypassed burst of any length is admissible. Ported from floo_rob.sv:422-425.
             needs_rob = false;
             fallen_back = false;  // fresh streak
         } else if (!fallen_back_read_[b.id] && dst == prev_dest_read_[b.id]) {
-            // Clause 2: same dest as the previous same-id push, not yet reordering.
+            // Same-destination bypass: same dest as the previous same-id push, not yet reordering.
             // Ported from floo_rob.sv:427-428.
             needs_rob = false;
             fallen_back = false;
@@ -471,8 +472,8 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     std::size_t arrival_offset = read_arrival_offset_[base];
     if (!(arrival_offset < read_range_len_[base])) {
         assert(false &&
-               "nmu::Rob::pop_r_staged: R beat past burst length (Family C: "
-               "more beats than reserved for this base -- malformed burst)");
+               "nmu::Rob::pop_r_staged: R beat past the burst's reserved slot range "
+               "-- malformed burst");
         std::abort();
     }
     std::size_t slot_idx = static_cast<std::size_t>(base) + arrival_offset;

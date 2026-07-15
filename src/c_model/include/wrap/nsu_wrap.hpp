@@ -1,9 +1,9 @@
-// NsuWrap — Stage 5b Wrap for the Nsu component.
+// NsuWrap — Wrap for the Nsu component.
 //
-// Owns an NsuStandalone (T3 hermetic wrapper). Nsu is the inverse of Nmu:
-// it has a NoC consumer side (receives req flits from ChannelModel), a NoC
-// producer side (sends rsp flits to ChannelModel), and an AXI master side
-// (drives AW/W/AR to a subordinate; consumes B/R from that subordinate).
+// Owns an NsuStandalone (hermetic wrapper). Nsu is the inverse of Nmu:
+// it has a NoC consumer side (receives req flits from the router), a NoC
+// producer side (sends rsp flits to the router), and an AXI master side
+// (drives AW/W/AR to a slave; consumes B/R from that slave).
 //
 // Each tick follows the 3-step pattern:
 //   set_inputs(in)   → latch NsuInputs
@@ -16,14 +16,14 @@
 //   NoC req side:  inject_req_flit() on NsuStandalone inserts flits before
 //                  tick() so Depacketize can consume them this cycle.
 //   NoC rsp side:  pop_rsp_flit() on NsuStandalone drains flits produced by
-//                  the Packetize stage (captured in NullNocRspOut queue).
+//                  the Packetize stage (captured in QueueNocRspOut queue).
 //   AXI master side: AxiMasterPort.pop_aw/pop_w/pop_ar() drains beats that
-//                  Depacketize deposited; push_b/push_r() feeds subordinate
+//                  Depacketize deposited; push_b/push_r() feeds slave
 //                  responses back to Packetize.
 //
 // AW/W/AR held-latch pattern (AXI4 §A3.2.1): awvalid/wvalid/arvalid must
-// not deassert until awready/wready/arready is observed from the subordinate.
-// Pending beats are held in held_aw_/held_w_/held_ar_ until the subordinate
+// not deassert until awready/wready/arready is observed from the slave.
+// Pending beats are held in held_aw_/held_w_/held_ar_ until the slave
 // asserts the corresponding ready.
 //
 // Hermetic invariant: no refs to other Wraps.
@@ -34,7 +34,7 @@
 #include "wrap/nsu_wrap_io.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
 #include "flit.hpp"
-#include "ni/vc_pools.hpp"
+#include "ni/virtual_network.hpp"
 #include "nsu/nsu_standalone.hpp"
 #include <array>
 #include <memory>
@@ -45,9 +45,10 @@ namespace ni::cmodel::wrap {
 class NsuWrap {
   public:
     // init — construct NsuStandalone with the co-sim default NsuConfig.
-    // ReadWriteSplit pools, queue_depth = ni::NSU_QUEUE_DEPTH per channel.
-    // num_vc comes from the create param (cmodel_nsu_create); derive_vc_pools
-    // splits it into write_rsp_vcs (lower half) and read_rsp_vcs (upper half).
+    // ReadWriteSplit virtual networks, queue_depth = ni::NSU_QUEUE_DEPTH per
+    // channel. num_vc comes from the create param (cmodel_nsu_create);
+    // make_virtual_networks splits it into write_rsp_vcs (lower half) and
+    // read_rsp_vcs (upper half).
     void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
               std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
               std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING) {
@@ -56,9 +57,9 @@ class NsuWrap {
         NsuConfig cfg{};
         cfg.src_id = src_id;
         cfg.num_vc = num_vc;
-        const auto vc_pools = ni::cmodel::derive_vc_pools(num_vc);  // asserts odd num_vc
-        cfg.write_rsp_vcs = vc_pools.write_vcs;
-        cfg.read_rsp_vcs = vc_pools.read_vcs;
+        const auto vnets = ni::cmodel::make_virtual_networks(num_vc);  // asserts odd num_vc
+        cfg.write_rsp_vcs = vnets.write_vcs;
+        cfg.read_rsp_vcs = vnets.read_vcs;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;
@@ -72,7 +73,7 @@ class NsuWrap {
         cfg.wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
         cfg.vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
-        // R2: close the NI-edge credit loop. Seed the rsp-out sender counter to
+        // Close the NI-edge credit loop. Seed the rsp-out sender counter to
         // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
         // constants.yaml) — the single source of truth that also seeds the
         // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
@@ -101,7 +102,7 @@ class NsuWrap {
             nsu_->inject_req_flit(flit_from_bytes(in_.noc_req_flit));
         }
 
-        // R2: incoming credit pulse — the router's LOCAL input drained an NSU
+        // Incoming credit pulse — the router's LOCAL input drained an NSU
         // rsp flit, so replenish the rsp-out sender counter BEFORE tick() so this
         // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
         // Per-VC: replenish each VC that pulsed this cycle.
@@ -119,7 +120,7 @@ class NsuWrap {
         out_ = NsuOutputs{};
 
         // AXI master side — drain AW/W/AR beats produced by Depacketize.
-        // Held-latch pattern: hold each beat until the subordinate asserts
+        // Held-latch pattern: hold each beat until the slave asserts
         // awready/wready/arready (AXI4 §A3.2.1 — master must not deassert
         // valid until ready is seen).
 
@@ -192,9 +193,9 @@ class NsuWrap {
             out_.arqos = held_ar_->qos;
         }
 
-        // B/R: push subordinate responses into AxiMasterPort — ONLY on true
+        // B/R: push slave responses into AxiMasterPort — ONLY on true
         // wire-handshake ticks (valid && our previously driven ready). The
-        // subordinate holds the beat (A3.2.1 held latch) while our ready is
+        // slave holds the beat (A3.2.1 held latch) while our ready is
         // low, so gating cannot lose beats — but pushing on bare valid WOULD
         // double-count once ready can be low while valid is held.
         if (in_.bvalid && prev_bready_) {

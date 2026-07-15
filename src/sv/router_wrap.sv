@@ -1,6 +1,7 @@
-// router_wrap — Task 4 DPI wrapper for one node's per-node Router component.
+// router_wrap — DPI wrapper for one node's per-node Router component.
 //
-// One node owns its REQ+RSP routers at (x,0). Pins split into three faces:
+// One node owns its REQ+RSP routers at (x_coord, y_coord) in an NxM mesh.
+// Pins split into three faces:
 //   noc_nmu_req_i / noc_nmu_req_cred_o — NMU-facing REQ channel (struct):
 //              receives this node's NMU req flit; drives req credit back.
 //   noc_nmu_rsp_o / noc_nmu_rsp_cred_i — NMU-facing RSP channel (struct):
@@ -15,7 +16,7 @@
 //              vice versa. LINK credit is a PULSE (one cycle per flit), unlike
 //              the level/stub credit on the NI (NMU/NSU) faces.
 //
-// Beta-tick discipline (shared by the NI wraps nmu_wrap/nsu_wrap): on every posedge clk_i
+// Registered-DPI-tick discipline (shared by the NI wraps nmu_wrap/nsu_wrap): on every posedge clk_i
 // the module samples the PREVIOUS cycle's registered wire inputs, pushes them to the
 // C++ model via DPI set_inputs, advances the model via tick, pulls outputs
 // via get_outputs, and registers those outputs nonblocking so they are
@@ -58,8 +59,8 @@ module router_wrap #(
     input  ni_signals_pkg::noc_chan_t  noc_nsu_rsp_i,
     output noc_types_pkg::noc_credit_t noc_nsu_rsp_cred_o,
     // REQ-network LINK to peer node(s): per-DIRECTION arrays (router has 5 ports;
-    // LOCAL slot unused on the LINK face, N/E/S/W carry inter-router links). At
-    // 2-node only one direction is live; Task 7 fills the rest. Credit is a
+    // LOCAL slot unused on the LINK face, N/E/S/W carry inter-router links).
+    // Boundary directions with no neighbor are left unwired. Credit is a
     // per-VC pulse vector.
     output logic [LINK_PORTS-1:0]                 link_req_out_valid,
     output logic [FLIT_WIDTH-1:0]                 link_req_out_flit   [LINK_PORTS],
@@ -136,7 +137,7 @@ module router_wrap #(
     // Lifecycle / error polling lives in tb_top.sv.
 
     // -------------------------------------------------------------------------
-    // Output registers (beta-tick: registered one cycle behind DPI sample)
+    // Output registers (registered one cycle behind DPI sample)
     // -------------------------------------------------------------------------
 
     bit                            req_out_valid_q;

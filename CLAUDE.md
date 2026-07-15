@@ -2,14 +2,14 @@
 
 ## Project Overview
 
-**Namespace**: `ni::cmodel::` (production sub-namespaces under `c_model/include/`: `axi`, `ni`, `nmu`, `nsu`, `router`, `wrap`. Tests under `c_model/tests/common/` add a `ni::cmodel::testing` sub-namespace).
+**Namespace**: `ni::cmodel::` (production sub-namespaces under `src/c_model/include/`: `axi`, `ni`, `nmu`, `nsu`, `router`, `wrap`. Tests under `src/c_model/tests/common/` add a `ni::cmodel::testing` sub-namespace).
 
-**Architecture**: AXI4 Master → NMU → ChannelModel (test stub) → NSU → AXI4 Slave. Verilator co-sim wraps each c_model component in a `*_wrap.hpp` and drives the scenarios through the wire-level testbench; correctness is checked by the c_model scoreboard (per-transaction write→readback compare) plus the model's own internal checks.
+**Architecture**: AXI4 Master → NMU → router mesh → NSU → AXI4 Slave. Verilator co-sim wraps NMU, NSU, and Router in `*_wrap.hpp` / `*_wrap.sv` (DPI handle ABI) and drives the scenarios through a generated per-topology testbench; AXI4 Master/Slave are SV-side test stimulus and memory, not DPI-wrapped. Correctness is checked by the c_model scoreboard (per-transaction write→readback compare) plus the model's own internal checks.
 
-- **NMU / NSU**: per-direction units (`c_model/include/nmu/`, `c_model/include/nsu/`). Packetize / depacketize, AXI port adapters, per-ID RoB on the NMU response path.
-- **NoC fabric**: no router class in c_model; `ChannelModel` (`c_model/tests/common/channel_model.hpp`) is the only NoC stub. Destination derivation (XY bit-slice) is done at NMU packetize time via `nmu::addr_trans::xy_route`.
-- **Wrap layer**: `NmuWrap` / `NsuWrap` / `MasterWrap` / `SlaveWrap` in `c_model/include/wrap/`. Per-instance via a 64-bit integer handle ABI — `unsigned long long cmodel_<component>_create(name)` returns an integer-encoded `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops take `unsigned long long ctx` (SV `longint unsigned`) and validate via `REQUIRE_HANDLE`. (chandle is avoided because VCS rejects it as a module port.) No cross-component pointers.
-- **Config**: YAML (`c_model/config/`); no JSON, no compile-time `<Mode>` templates.
+- **NMU / NSU**: per-direction units (`src/c_model/include/nmu/`, `src/c_model/include/nsu/`). Packetize / depacketize, AXI port adapters, per-ID RoB on the NMU response path.
+- **NoC fabric**: `router` (`src/c_model/include/router/`) is the real per-node fabric element, wrapped into co-sim via `RouterWrap`. `ChannelModel` (`src/c_model/tests/common/channel_model.hpp`) is a ctest-only stub standing in for the fabric in NMU/NSU unit tests, not the co-sim datapath. Destination derivation is a SAM (System Address Map) range-lookup (`nmu::addr_trans::SamTable`, first-match by address range) done at NMU packetize time, not a bit-slice XY decode.
+- **Wrap layer**: `NmuWrap` / `NsuWrap` / `RouterWrap` in `src/c_model/include/wrap/`. Per-instance via a 64-bit integer handle ABI — `unsigned long long cmodel_<component>_create(name)` returns an integer-encoded `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops take `unsigned long long ctx` (SV `longint unsigned`) and validate via `REQUIRE_HANDLE`. (chandle is avoided because VCS rejects it as a module port.) No cross-component pointers.
+- **Config**: parameters and packet/signal types are specgen-generated from JSON/YAML sources (`specgen/source/`) into `specgen/generated/cpp/` and `specgen/generated/sv/`, drift-gated at build (`codegen.py --check`). The SAM address map is topology YAML (`sim/topologies/*.yaml`, `address_map:` block), loaded at runtime — not compiled in.
 
 **Build**: C++17, CMake 3.20+, GoogleTest.
 - Use `py -3` instead of `python3` (Windows).
@@ -22,8 +22,8 @@
 
 ## Key Design Docs
 
-- `docs/_archive/noc_cmodel_rtl_plan.md` - stage roadmap (archived 2026-06-07; superseded by `docs/architecture.md`)
-- `docs/backlog.md` - running action items and open bugs, maintained across iteration rounds. Read it at session start; each round adds what it surfaces and strikes what it closes.
+- `docs/spec.md` - NI specification (spec-as-code SSoT plus the design intent around it)
+- `docs/backlog.md` - local, gitignored; running action items and open bugs, maintained across iteration rounds. Read it at session start; each round adds what it surfaces and strikes what it closes.
 
 ## Doc Writing Rules
 
@@ -43,7 +43,7 @@
 
 - Claims about external architectures require a cited source. Public protocol specs (AMBA, etc.) are acceptable references; vendor-specific IP/product guides are not.
 - Mark uncertain technical facts `[UNVERIFIED]`; distinguish confirmed from inferred.
-- Do not reference specific external IP, vendor, or product-guide names in code or docs.
+- Do not reference specific external IP, vendor, or product-guide names in code or docs (exceptions: the Provenance section of `docs/verification-environment.md`, the References section of `docs/spec.md`, and upstream ported-from comments in source headers).
 
 ### Writing Quality
 
@@ -87,7 +87,7 @@ Never:
 - Disable tests instead of fixing them.
 - Commit non-compiling code.
 - Make assumptions — verify against existing code.
-- Reference external IP, vendor, or product-guide names in code or docs.
+- Reference external IP, vendor, or product-guide names in code or docs, outside the sanctioned locations (the Provenance section of `docs/verification-environment.md`, the References section of `docs/spec.md`, upstream ported-from comments in source headers).
 
 Always:
 - Commit working code incrementally.

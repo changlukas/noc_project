@@ -265,7 +265,7 @@ TEST_F(AxiProtocolDeath, AxiSlave_FiresOnInvalidAwBurstEncoding) {
 }
 
 // ============================================================================
-// Phase C: AXI4 Exclusive Access (IHI 0022 §A7.2.4)
+// AXI4 Exclusive Access (IHI 0022 §A7.2.4)
 // ============================================================================
 
 TEST_F(AxiProtocolDeath, LockEncoding_RejectsRawTwo) {
@@ -370,7 +370,7 @@ TEST_F(AxiProtocolDeath, ExclusiveValid_WRAP_4Beat_Size5) {
 #endif  // NDEBUG
 
 // ============================================================================
-// Phase A: per-id FIFO B/R routing helpers (always compiled — no death tests).
+// Per-id FIFO B/R routing helpers (always compiled — no death tests).
 // ============================================================================
 
 namespace {

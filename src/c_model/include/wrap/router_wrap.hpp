@@ -1,12 +1,12 @@
 // RouterWrap — per-node Wrap wrapping ONE node's router subsystem.
 //
-// Owns this node's REQ router + RSP router at coordinate (x,0) (2-node 2x1 mesh:
-// mesh_x_dim=2, mesh_y_dim=1) plus their LOCAL adapters (NI edge) and LINK
-// adapters (cross-DPI FlooNoC pulse-credit link toward the neighbor). Two of
-// these wired in tb_top replace the bundled RouterChannel.
+// Owns this node's REQ router + RSP router at (x_coord, y_coord) in an NxM
+// mesh plus their LOCAL adapters (NI edge) and LINK adapters (cross-DPI
+// FlooNoC pulse-credit links toward each existing neighbor). One RouterWrap
+// per mesh node; boundary directions with no neighbor are left unwired.
 //
-// Per node BOTH the LOCAL (NI edge) and LINK ports now use identical FlooNoC
-// pulse-credit wiring (R2: the NI edge no longer uses the level-credit stub).
+// Per node BOTH the LOCAL (NI edge) and LINK ports use identical FlooNoC
+// pulse-credit wiring.
 // LOCAL (NMU/NSU edge) and LINK (cross-DPI inter-router) per network:
 //   set_downstream(port, LinkEjectAdapter)   — router output -> SV transport
 //     buffer (no pop credit; credit returns over SV as a pulse).
@@ -22,9 +22,8 @@
 //   in  cred : in_.req_in_credit_return / rsp_in_credit_return (NMU/NSU consumed
 //              an ejected flit) -> router.receive_credit(LOCAL, 0) (replenishes
 //              the router's built-in credit_[LOCAL] sender counter, router->NI dir)
-// The LINK port mapping (x_coord==0 -> EAST, x_coord==1 -> WEST, matching
-// route_compute: a (1,0)-dst flit leaves node0 EAST, a (0,0)-dst flit leaves
-// node1 WEST) is identical, over the link_<N>_* pins toward the neighbor.
+// The LINK port mapping (N/E/S/W, matching route_compute's dimension-order
+// routing) is identical, over the link_<N>_* pins toward each neighbor.
 //
 // num_vc comes from cmodel_router_create; LOCAL/LINK depths = NOC_ROUTER_VC_DEPTH
 // (spec-aligned, matching SLAVE_VC_BUFFER_DEPTH so link_perf_monitor assertions hold
@@ -105,7 +104,7 @@ class RouterWrap {
         // Step 1: push all inbound flits straight into the router inputs. LOCAL
         // and LINK are now symmetric FlooNoC pulse-credit ports (no InjectAdapter
         // mirror). The single NMU/NSU source sends <=1 LOCAL flit/tick, but the
-        // router landing register asserts on a 2nd push/port/cycle (router.hpp),
+        // router input register asserts on a 2nd push/port/cycle (router.hpp),
         // so guard it: exactly one LOCAL push per network per tick.
         if (in_.req_in_valid) {
             req_router_->input(LOCAL).push_flit(flit_from_bytes(in_.req_in_flit));
