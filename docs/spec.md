@@ -4,8 +4,8 @@ As-built design spec for the AXI4 NoC network-interface behavioural model
 (`src/c_model/`) and its Verilator co-simulation (`src/sv/`, `src/dpi/`,
 `sim/`). Every mechanism described here exists in the tree; deliberate
 simplifications and open gaps are listed under
-[Known limitations](#known-limitations). Design alternatives and their
-rejections live in `docs/trade-off.md`.
+[Known limitations](#known-limitations). The response-ordering design
+rationale and its rejected alternatives live in `docs/trade-off.md`.
 
 ## Overview
 
