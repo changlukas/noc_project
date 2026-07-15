@@ -18,12 +18,12 @@
 //                 W=wlast (end on last W beat of burst);
 //                 AR=1 (single-flit read request packet).
 //   rob_req,
-//   rob_idx     — 0 in direct-path interface (Disabled mode); Rob path
-//                 supplies via AwHeaderMeta (future Enabled mode).
+//   rob_idx     — 0 in direct-path interface (Disabled mode); Enabled mode
+//                 supplies via AwHeaderMeta.
 //   commtype,
 //   multicast,
 //   noc_qos,
-//   flit_ecc    — 0-filled (deferred to future tasks)
+//   flit_ecc    — 0-filled placeholder (width 0, ECC unbuilt)
 //   rsvd        — 0 by Flit default
 #include "axi/types.hpp"
 #include "flit.hpp"

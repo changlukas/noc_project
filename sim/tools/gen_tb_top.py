@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate sim/tb/tb_top_<topology>.sv + src/sv/noc_fabric_<topo>.sv from a topology config.
 
-The fabric/tb split (S3):
+The fabric/tb split:
   - noc_fabric_<topo>.sv : N nodes, each = NMU + REQ/RSP router_wrap + NSU, joined
     by inter-router directional (N/E/S/W) links with boundary tie-off + assertion.
     Every node exposes a clean per-node AXI port (master-side + slave-side). The

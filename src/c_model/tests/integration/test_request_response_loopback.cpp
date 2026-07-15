@@ -1,10 +1,10 @@
-// Stage 3 integration: full request/response e2e loopback through the
+// Full request/response e2e loopback through the
 // four packetize/depacketize modules + ChannelModel, sourced and oracled
-// by the Stage 2 AxiMaster / AxiSlave / Memory / Scoreboard fixtures.
+// by the AxiMaster / AxiSlave / Memory / Scoreboard fixtures.
 //
 // Wiring (request path: NMU -> NoC -> NSU):
 //
-//   AxiMaster (Stage 2 traffic source, YAML-driven)
+//   AxiMaster (traffic source, YAML-driven)
 //      | push_aw / push_w / push_ar      ^ pop_b / pop_r
 //      v                                  |
 //   AxiSlavePort (NMU)                    |
@@ -25,7 +25,7 @@
 //      v                                  |
 //   AxiSlave + Memory + Scoreboard
 //
-// This test extends the Stage 3 port-pair loopback (test_port_pair_loopback.cpp)
+// This test extends the port-pair loopback (test_port_pair_loopback.cpp)
 // by inserting the real four-packetize layers (nmu::Packetize +
 // nmu::Depacketize on the NMU side; nsu::Depacketize + nsu::Packetize on
 // the NSU side, sharing the per-AXI-ID MetaBuffer) between the two ports
@@ -243,7 +243,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         mor = std::max<std::size_t>(mor, 2);
     }
 
-    // Stage 2 endpoints + oracle.
+    // Endpoints + oracle.
     axi::AxiMasterT<nmu::AxiSlavePort> master(yaml_path, nmu.axi_slave_port(), read_dump_path, mow,
                                               mor);
 
@@ -467,7 +467,7 @@ static auto fixture_name_gen = [](const ::testing::TestParamInfo<FixtureParam>& 
 
 INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
                          ::testing::Values(
-                             // Only the ORD-003 multi-NSU ROB-reorder gate survives the audit: the
+                             // Only the ORD-003 multi-NSU ROB-reorder fixture is kept: the
                              // other scoreboard-clean fixtures (BUR/STR/BND) duplicate the
                              // wire-level co-sim end-to-end coverage. ORD-003 injects per-NSU
                              // latency skew {10,2,5,3} that co-sim does not set up, forcing

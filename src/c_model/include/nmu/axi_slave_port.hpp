@@ -20,7 +20,7 @@
 // Cross-ID completion ordering / per-ID response reordering is the ROB
 // stage's responsibility, NOT this port's.
 //
-// Structure mirrors c_model/include/axi/axi_slave.hpp (Stage 2 canonical
+// Structure mirrors c_model/include/axi/axi_slave.hpp (canonical
 // header-only pattern): one std::deque per channel, bounded by PortParams.
 // push_* returns false on full; pop_* returns nullopt on empty. tick()
 // drains responses BEFORE forwarding requests so a packetizer that empties
@@ -86,8 +86,9 @@ class AxiSlavePort {
     }
 
     void tick() {
-        // Response drain BEFORE request forward (mirrors Stage 2 AxiMaster::tick
-        // and frees upstream-visible B/R slots before this cycle's new pushes).
+        // Response drain BEFORE request forward (mirrors AxiMaster::tick
+        // (axi/axi_master.hpp) and frees upstream-visible B/R slots before
+        // this cycle's new pushes).
         drain_b_from_depacketizer_();
         drain_r_from_depacketizer_();
         forward_aw_to_packetizer_();

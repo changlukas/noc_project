@@ -84,8 +84,8 @@ class AxiMasterPort {
         // queue slots are freed before this cycle's new push_b / push_r calls,
         // then ingest fresh AW/W/AR from the depacketizer for downstream pop_*.
         // Mirrors the response-before-request ordering rationale of AxiSlavePort
-        // + Stage 2 AxiMaster::tick (frees response-side backpressure first so a
-        // new producer push lands in the same cycle).
+        // + AxiMaster::tick (axi/axi_master.hpp) (frees response-side backpressure
+        // first so a new producer push lands in the same cycle).
         forward_b_to_packetizer_();
         forward_r_to_packetizer_();
         drain_aw_from_depacketizer_();

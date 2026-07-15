@@ -77,14 +77,14 @@ TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/Syst
 
 # CMake binary — auto-detected so the same `make build` works on every host.
 # Prefer `cmake3` when present (RHEL ships the modern 3.x under that name, while
-# bare `cmake` may be an ancient one shadowed onto PATH by e.g. a Xilinx SDK);
+# bare `cmake` may be an ancient one shadowed onto PATH by e.g. a vendor tool install);
 # otherwise fall through to `cmake` resolved at recipe time. Override in
 # local.mk or on the command line if neither is right. Build needs cmake >= 3.20
 # (FetchContent_MakeAvailable + gtest 1.14).
 CMAKE ?= $(shell command -v cmake3 2>/dev/null || echo cmake)
 
 # Extra cmake configure flags (escape hatch for host quirks). Common need:
-# pin the Python interpreter when an EDA tool (e.g. Calibre) puts a broken
+# pin the Python interpreter when an EDA tool puts a broken
 # python3 on PATH ahead of the system one and CMake's find_package(Python3)
 # picks it. Set in local.mk, e.g.:
 #   CMAKE_EXTRA := -DPython3_EXECUTABLE=/usr/bin/python3.12

@@ -15,7 +15,7 @@
 // FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 408.
 //
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
-// No async reset path — sync reset is the project default per rtl-style.
+// No async reset path — sync reset is the project default.
 //
 // Error polling is centralized in tb_top.sv; this wrap no longer
 // calls cmodel_check_error/cmodel_finalize itself.

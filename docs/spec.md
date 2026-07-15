@@ -366,7 +366,7 @@ description; this section fixes the design-relevant facts.
   wormhole lock, and NI stage) before `$fatal`.
 - Checkers are trusted only after fault injection has shown they fire; a
   checker that has never caught a planted violation verifies nothing.
-- The constrained-random axis was retired (2026-07-13): no sound
+- The constrained-random axis was retired: no sound
   data-integrity checker for random traffic exists yet. A future random
   axis must run on Linux; Verilator's constraint solver drives an external
   solver through a fork()-based pipe that Windows lacks.

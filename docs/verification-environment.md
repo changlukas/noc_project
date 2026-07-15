@@ -106,7 +106,7 @@ golden value without a separate scoreboard model.
   deliberately planted violation; a checker that has never caught a planted
   mismatch verifies nothing.
 - The constrained-random axis (a random driver plus a reorder-based checker)
-  was retired 2026-07-13. No sound data-integrity checker for random traffic
+  was retired. No sound data-integrity checker for random traffic
   exists yet; a future random axis is deferred (see `docs/spec.md` Known
   limitations).
 
