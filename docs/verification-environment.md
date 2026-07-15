@@ -95,9 +95,13 @@ golden value without a separate scoreboard model.
   |---|---|---|
   | `0` (default) | two-phase: all writes drain, then reads | scoreboard armed, `DIRECTED PASS` gate |
   | `1` | continuous, reads and writes interleaved, paced per cycle by `INJECTION_RATE` | scoreboard disarmed (write-before-read does not hold); `axi_bw_monitor` gates instead, `result.csv` emitted |
+  | `2` | continuous, writes paced per cycle by `INJECTION_RATE`, each read issues after its paired write's B response | scoreboard armed, `CHECKED PASS` gate |
 
   Mode 1 exists to measure throughput and latency under load, not to check
-  data. It is not a substitute data-integrity axis.
+  data. Mode 2 is the data-integrity axis under continuous write load: the
+  per-pair B interlock restores the scoreboard's write-before-read
+  precondition, at the cost of a read stream that couples to response
+  latency (so it does not measure offered injection rate).
 - Checkers are trusted only once fault injection has shown they fire on a
   deliberately planted violation; a checker that has never caught a planted
   mismatch verifies nothing.

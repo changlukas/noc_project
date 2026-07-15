@@ -389,12 +389,13 @@ Addresses are SAM-composed (`dst tile base + src-partitioned local
 offset`), so converging sources never collide; payload is
 address-in-data, giving the scoreboard a computable golden value.
 
-Two injection modes (`INJECTION_MODE`):
+Three injection modes (`INJECTION_MODE`):
 
 | mode | shape | checking |
 |---|---|---|
 | 0 (default) | directed two-phase: all writes drain, then reads | scoreboard armed; `DIRECTED PASS` gate |
-| 1 | continuous, reads and writes interleaved, paced per cycle by `INJECTION_RATE` (a per-cycle Bernoulli gate, 0.0 to 1.0) | scoreboard disarmed (write-before-read does not hold); `axi_bw_monitor` gates, `result.csv` emitted |
+| 1 | continuous, reads and writes interleaved, paced per cycle by `INJECTION_RATE` (one Bernoulli trial per cycle, 0.0 to 1.0) | scoreboard disarmed (write-before-read does not hold); `axi_bw_monitor` gates, `result.csv` emitted |
+| 2 | checked-continuous: writes paced as mode 1, each read issues after its paired write's B response (per-pair interlock, per-AXI-id B counting) | scoreboard armed; `CHECKED PASS` gate |
 
 `MAX_UNIQUE_IDS` and `MAX_OUTSTANDING` are NSU configuration, not
 injection knobs. `make sim-injection-sweep PATTERN=<p>` sweeps the four VC
