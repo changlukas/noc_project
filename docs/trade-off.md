@@ -1,8 +1,8 @@
 # Response-ordering trade-off record
 
-Rationale for the NI's AXI response ordering. `docs/spec.md` (Response ordering,
-Virtual networks) specifies the as-built mechanisms. This record explains the
-choice behind them.
+Rationale for the NI's AXI response ordering. `docs/nmu-spec.md` (RoB, virtual
+networks) and `docs/nsu-spec.md` (meta buffer, response VC selection) specify the
+as-built mechanisms. This record explains the choice behind them.
 
 ## The problem
 

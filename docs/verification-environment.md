@@ -2,8 +2,35 @@
 
 Environment details for the DUT (NMU + NoC routers + NSU) testbench: how the
 testbench is generated, what drives and checks it, and how to reproduce a run.
-For DUT design content (SAM, RoB, VC allocation, known limitations), see
-`docs/spec.md`.
+For DUT design content (SAM, RoB, VC allocation), see the block specs
+`docs/nmu-spec.md`, `docs/nsu-spec.md`, and `docs/router-spec.md`.
+
+## Conformity scope
+
+Verification intent: demonstrate AXI4 (IHI 0022H) conformity at the NMU and
+NSU pin boundaries. The router fabric is exercised as transport and checked
+end to end by the write-to-readback scoreboard; AXI conformity claims attach
+to the NI boundary, not to the fabric.
+
+Covered (IHI 0022H):
+
+| area | sections | where exercised |
+|---|---|---|
+| VALID/READY handshake, stall, backpressure | A3.2 | unit tests + wire-level co-sim (held-valid latches in both NI wraps) |
+| Burst types INCR/WRAP/FIXED, length, alignment, 4 KB boundary | A3.4.1 | `protocol_rules.hpp` checks + unit tests + burst stimulus |
+| Per-ID response ordering: same-ID R returns in AR-issue order; W follows AW (no WID in AXI4) | A5.3 | RoB / interlock design + integration tests + co-sim scoreboard |
+| Response codes; DECERR on out-of-bounds access | A3.4.4 | memory model returns DECERR past its bounds; unit tests |
+| Exclusive access rules and monitor | A7.2.4 | `protocol_rules.hpp` + the C++ `AxiSlave` exclusive monitor, unit tests only |
+
+Excluded, with reasons:
+
+| exclusion | reason |
+|---|---|
+| Exclusive access through the fabric | co-sim stimulus issues no exclusive transactions; monitor coverage is unit-level |
+| SLVERR | no component generates it and no scenario provokes it |
+| Atomic transactions, user signals | out of scope; the endpoint bridge ties `aw_atop` and `*_user` off |
+| Dual-clock CDC | single-clock model; CDC is a property of the RTL implementation |
+| NoC-layer QoS | `NOC_QOS_WIDTH = 0`; `awqos`/`arqos` ride the AXI payload but drive nothing |
 
 ## Testbench architecture
 
@@ -55,15 +82,40 @@ per-package version, upstream commit, and the one flagged local modification
 (`axi_bw_monitor.sv`, a two-line `$display` addition) are in
 `sim/dv/README.md`. This is the only section in this document that names
 external IP; the rest of this document describes the environment in the
-DUT's own vocabulary. `docs/spec.md`'s References section carries the
-upstream RTL file map.
+DUT's own vocabulary.
+
+Upstream references:
+
+- IHI 0022H, AMBA AXI protocol specification (Arm Ltd.), cited by section
+  throughout the block specs. The A5.3 rule set relied on for ordering:
+  same-ID read data returns in AR-issue order, read data of different ARIDs
+  may interleave, and AXI4 removed WID with write-data interleaving.
+- FlooNoC RTL (read-only): `floo_rob.sv` (slot pool, high-water allocator,
+  idle-ID and same-destination bypass, per-beat release), `floo_rob_wrapper.sv`
+  (RoB type selection), `floo_simple_rob.sv` (ring-pointer allocator,
+  documented alternative, not chosen), `floo_meta_buffer.sv` (meta buffer,
+  downstream-ID collapse), `floo_axi_chimney.sv` (single-flit B / RoB-side R
+  split, `MaxTxns` on the slave face), `floo_wormhole_arbiter.sv` (per-output
+  wormhole lock), `floo_vc_arbiter.sv` (VC arbitration without the lock),
+  `floo_vc_assignment.sv` (per-hop turn-model VC assignment, deprecated
+  upstream, not ported), `floo_pkg.sv` (parameter names `BRoBSize`,
+  `RRoBSize`, `MaxTxnsPerId`, `MaxTxns`), `axi_bw_monitor.sv` (DV bandwidth
+  monitor, imported with one flagged modification).
+- ID-space narrowing for a small-`NumIds` RoB: `axi_id_remap.sv`
+  (pulp-platform axi v0.39.7) is the standard component, noted as the RTL
+  path if a dense ID space is ever needed.
+- Traffic patterns and injection process: BookSim2 `src/traffic.cpp`
+  (`NeighborTrafficPattern`, `TransposeTrafficPattern`,
+  `UniformRandomTrafficPattern`, `HotSpotTrafficPattern`) and
+  `BernoulliInjectionProcess`, ported destination-rule by destination-rule
+  in `gen_test_patterns.py`.
 
 ## Traffic-pattern semantics
 
 `sim/tools/gen_test_patterns.py` emits per-node stimulus
 (`<out>/node<i>/{write,read}.txt`) for the directed driver. Destination
 rules are ported from an established NoC simulator's traffic-pattern
-classes (upstream reference in `docs/spec.md` References):
+classes (upstream reference in Provenance):
 
 | pattern | destination rule | note |
 |---|---|---|
@@ -107,8 +159,42 @@ golden value without a separate scoreboard model.
   mismatch verifies nothing.
 - The constrained-random axis (a random driver plus a reorder-based checker)
   was retired. No sound data-integrity checker for random traffic
-  exists yet; a future random axis is deferred (see `docs/spec.md` Known
-  limitations).
+  exists yet; a future random axis is deferred (see Known limitations).
+
+## Performance counters
+
+As-built instrumentation is NoC-side counters plus the DV bandwidth monitor.
+No AXI-side per-transaction profile or trace machinery is built, and the perf
+dump carries no AXI section.
+
+NoC counters (`PerfCollector`, dumped to `perf.json` via `+perf_out` at the
+end of every run, in all injection modes):
+
+| counter | source | semantics |
+|---|---|---|
+| `in_fifo_occ_max` / `out_fifo_occ_max` per router | `cmodel_perf_sample_tick` once per clock | max observed input/output FIFO occupancy |
+| `flit_count` per link | `link_perf_monitor` (passive, per inter-router link) | cycles with a valid flit on the wire |
+| `stall_cyc` per link | same | cycles with no flit moving while at least one VC credit counter is zero (credit-deficit backpressure) |
+
+`link_perf_monitor` also asserts the credit protocol: valid with zero credit
+on that VC, or an out-of-range `vc_id`, is an error.
+
+DV bandwidth monitor (`axi_bw_monitor`, one `[Read]` + `[Write]` line per node
+in `run.log`):
+
+| field | semantics |
+|---|---|
+| `Latency: m +- s, N: n` | mean and stddev of per-transaction round-trip in cycles (response cycle minus request cycle) over n completed transactions |
+| `BW` (bits/cycle) | accepted throughput: `beats * data_width / total_cycles` |
+| `Util` (%) | `beats * 100 / total_cycles`; fraction of the one-beat-per-cycle peak. `BW = (Util/100) * data_width`: same measurement, two units |
+
+Reading the numbers: directed runs show 1 to 2 percent Util by design (a few
+transactions per node against a fast slave; read PASS and latency, ignore Util;
+throughput questions belong to the mode-1 rate sweep). Latency tracks hop
+distance: on a 4x4 mesh the `neighbor` pattern shows three tiers, interior 2
+hops, one-axis wrap 4, corner 6, because the mesh has no torus links and the
+wrap routes back across the array. The `[HWM]` lines report one high-water
+mark: the per-node R-RoB slot peak from `cmodel_nmu_read_slot_hwm`.
 
 ## Topology YAML to generator to testbench
 
@@ -147,3 +233,17 @@ and prints it:
 The same seed drives both the stimulus generator (`--seed`, used by
 `uniform_random`/`hotspot`) and the simulator's own `+verilator+seed+`, so
 passing back the printed value reproduces the run exactly.
+
+## Known limitations
+
+| limitation | detail |
+|---|---|
+| SAM failure mode | `translate()` miss and a topology YAML without `address_map` fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
+| Unswept sizing | `max_txns_per_id` = 32 is a placeholder, never depth-swept [TBD]. `r_rob_depth` defaults to 32 (`NMU_ROB_R_DEPTH`) and is expressible up to 256 (the full `rob_idx` space) via `R_ROB_DEPTH`; equally unswept at every setting. |
+| RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
+| Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
+| Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
+| AXI-side perf instrumentation absent | `perf.json` carries only the NoC section (dumped at the end of every run, all injection modes); no AXI-side per-transaction hooks exist, so nothing cross-checks `axi_bw_monitor` from the model side. |
+| VCS flow | build-only; no directed run target, never executed on a real VCS install. |
+| Deferred header fields | `NOC_QOS_WIDTH`, `ROUTE_PAR_WIDTH`, `FLIT_ECC_WIDTH` are width-0 placeholders; QoS, route parity, and flit ECC are unbuilt. |
+| Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |

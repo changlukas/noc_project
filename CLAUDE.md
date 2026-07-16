@@ -22,7 +22,7 @@
 
 ## Key Design Docs
 
-- `docs/spec.md` - NI specification (spec-as-code SSoT plus the design intent around it)
+- `docs/nmu-spec.md`, `docs/nsu-spec.md`, `docs/router-spec.md` - block-level design specs (interface, timing, functional behavior, verifiable per cycle)
 - `docs/backlog.md` - local, gitignored; running action items and open bugs, maintained across iteration rounds. Read it at session start; each round adds what it surfaces and strikes what it closes.
 
 ## Doc Writing Rules
@@ -43,7 +43,7 @@
 
 - Claims about external architectures require a cited source. Public protocol specs (AMBA, etc.) are acceptable references; vendor-specific IP/product guides are not.
 - Mark uncertain technical facts `[UNVERIFIED]`; distinguish confirmed from inferred.
-- Do not reference specific external IP, vendor, or product-guide names in code or docs (exceptions: the Provenance section of `docs/verification-environment.md`, the References section of `docs/spec.md`, and upstream ported-from comments in source headers).
+- Do not reference specific external IP, vendor, or product-guide names in code or docs (exceptions: the Provenance section of `docs/verification-environment.md` and upstream ported-from comments in source headers).
 
 ### Writing Quality
 
@@ -87,7 +87,7 @@ Never:
 - Disable tests instead of fixing them.
 - Commit non-compiling code.
 - Make assumptions — verify against existing code.
-- Reference external IP, vendor, or product-guide names in code or docs, outside the sanctioned locations (the Provenance section of `docs/verification-environment.md`, the References section of `docs/spec.md`, upstream ported-from comments in source headers).
+- Reference external IP, vendor, or product-guide names in code or docs, outside the sanctioned locations (the Provenance section of `docs/verification-environment.md`, upstream ported-from comments in source headers).
 
 Always:
 - Commit working code incrementally.
