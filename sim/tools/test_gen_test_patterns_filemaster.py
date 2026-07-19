@@ -3,6 +3,7 @@ import os
 
 import pytest
 
+import address_map
 import gen_test_patterns as g
 
 
@@ -59,11 +60,28 @@ def _parse_write(path):
     return txns
 
 
+def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000):
+    """New packed-address_map topology YAML text, every tile the same size.
+
+    Temp-file use only -- the real sim/topologies/*.yaml files are still the old
+    tile_size format until a later task rewrites them.
+    """
+    tiles = "\n".join(
+        f"    - {{ x: {x}, y: {y}, size: {tile_size:#x} }}"
+        for y in range(y_dim) for x in range(x_dim)
+    )
+    return (
+        f"topology: {{ name: {name}, x_dim: {x_dim}, y_dim: {y_dim}, num_vc: {num_vc} }}\n"
+        f"address_map:\n  tiles:\n{tiles}\n"
+    )
+
+
 def test_emit_file_master_node_format_and_partition(tmp_path):
     d = str(tmp_path / "node0")
+    bases = {1: 0x100000000}
     g.emit_file_master_node(d, src_idx=0, dst_cids=[1, 1], n_nodes=16,
                             base_local=0x1000, region_bytes=0x40000,
-                            axi_size=5, axi_len=0, data_width=256)
+                            axi_size=5, axi_len=0, data_width=256, bases=bases)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert len(w) == 2
     for t in w:
@@ -75,61 +93,58 @@ def test_emit_file_master_node_format_and_partition(tmp_path):
     assert len(rlines) == 2 * 11                    # 11 ax fields, no atop, no beats
 
 
-def test_emit_file_master_node_default_tile_size_matches_legacy_4gb(tmp_path):
-    """Regression pin: default tile_size (unspecified) reproduces the legacy
-    dst_cid<<32 layout byte-for-byte -- dst coord_id 0x12, offset 0x40 -> 0x1200000040."""
+def test_emit_file_master_node_addr_from_bases_dict(tmp_path):
+    """addr = bases[dst_cid] + local_off -- dst coord_id 0x12, base 0x12*4GB,
+    offset 0x40 -> 0x1200000040 (byte-for-byte the legacy dst_cid<<32 layout)."""
     d = str(tmp_path / "node0")
+    bases = {0x12: 0x12 * 0x100000000}
     g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
                             base_local=0x40, region_bytes=0x40000,
-                            axi_size=5, axi_len=0, data_width=256)
+                            axi_size=5, axi_len=0, data_width=256, bases=bases)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert w[0]["addr"] == 0x1200000040
 
 
-def test_emit_file_master_node_non_4gb_tile_size_shifts_base(tmp_path):
+def test_emit_file_master_node_arbitrary_base_from_bases_dict(tmp_path):
     d = str(tmp_path / "node0")
+    bases = {0x12: 0x12 * 0x40000000}
     g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
                             base_local=0x40, region_bytes=0x40000,
-                            axi_size=5, axi_len=0, data_width=256,
-                            tile_size=0x40000000)
+                            axi_size=5, axi_len=0, data_width=256, bases=bases)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert w[0]["addr"] == 0x12 * 0x40000000 + 0x40
 
 
-def test_load_topology_reads_tile_size_from_address_map(tmp_path):
+def test_load_topology_reads_packed_bases_from_address_map(tmp_path):
     topo_path = tmp_path / "t.yaml"
-    topo_path.write_text(
-        "topology: { name: t, x_dim: 4, y_dim: 4, num_vc: 1 }\n"
-        "address_map:\n"
-        "  tile_size: 0x40000000\n"
-    )
-    nodes, x_dim, y_dim, tile_size = g._load_topology(str(topo_path))
-    assert tile_size == 0x40000000
+    topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000))
+    nodes, x_dim, y_dim, bases = g._load_topology(str(topo_path))
+    assert (x_dim, y_dim) == (4, 4)
+    # packed in raster (y, x) order, matching _uniform_topology_yaml's emit order
+    assert bases[g.coord_id(0, 0)] == 0
+    assert bases[g.coord_id(1, 0)] == 0x40000000
+    assert bases[g.coord_id(0, 1)] == 4 * 0x40000000
 
 
-def test_load_topology_defaults_tile_size_when_address_map_absent(tmp_path):
+def test_load_topology_raises_when_address_map_missing(tmp_path):
     topo_path = tmp_path / "t.yaml"
     topo_path.write_text("topology: { name: t, x_dim: 4, y_dim: 4, num_vc: 1 }\n")
-    nodes, x_dim, y_dim, tile_size = g._load_topology(str(topo_path))
-    assert tile_size == 0x100000000
+    with pytest.raises(ValueError, match="address_map.tiles"):
+        g._load_topology(str(topo_path))
 
 
 def test_main_sources_tile_base_from_address_map(tmp_path):
-    """End-to-end: main() threads address_map.tile_size into the emitted address."""
+    """End-to-end: main() threads the packed address_map base into the emitted address."""
     topo_path = tmp_path / "custom.yaml"
-    topo_path.write_text(
-        "topology: { name: custom, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-        "address_map:\n"
-        "  tile_size: 0x40000000\n"
-    )
+    topo_path.write_text(_uniform_topology_yaml("custom", 2, 2, tile_size=0x40000000))
     out = str(tmp_path / "scn")
     g.main(["--topology", str(topo_path), "--out", out,
             "--pattern", "neighbor", "--transactions-per-node", "1",
             "--size", "5", "--len", "0"])
     w = _parse_write(os.path.join(out, "node0", "write.txt"))
     # node0 = (x=0,y=0); neighbor wraps to (1,1) on a 2x2 mesh -> coord_id (1<<4)|1 = 0x11
-    dst_cid = (1 << 4) | 1
-    expected_base = dst_cid * 0x40000000
+    # raster order (0,0),(1,0),(0,1),(1,1) -> (1,1) is the 4th packed tile -> base 3*tile_size
+    expected_base = 3 * 0x40000000
     assert expected_base <= w[0]["addr"] < expected_base + 0x40000000
 
 
@@ -143,8 +158,10 @@ PATTERNS = [
 
 @pytest.mark.parametrize("pat", PATTERNS, ids=lambda p: p[1])
 def test_main_file_master_all_patterns(tmp_path, pat):
+    topo_path = tmp_path / "mesh_4x4.yaml"
+    topo_path.write_text(_uniform_topology_yaml("mesh_4x4", 4, 4))
     out = str(tmp_path / "scn")
-    g.main(["--topology", "mesh_4x4_vc1",
+    g.main(["--topology", str(topo_path),
             "--out", out, "--transactions-per-node", "2",
             "--size", "5", "--len", "0"] + pat)
     nodes = sorted(glob.glob(os.path.join(out, "node*")))
@@ -164,8 +181,10 @@ def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
     non-zero burst footprint on a 16-node topology used to overflow the old fixed
     0x40000 window (ValueError). region_bytes is now auto-derived, so this must
     generate cleanly, and every hotspot-converging slot must stay disjoint."""
+    topo_path = tmp_path / "mesh_4x4.yaml"
+    topo_path.write_text(_uniform_topology_yaml("mesh_4x4", 4, 4))
     out = str(tmp_path / "scn")
-    g.main(["--topology", "mesh_4x4_vc1", "--out", out,
+    g.main(["--topology", str(topo_path), "--out", out,
             "--pattern", "hotspot", "--hotspot", "5", "--seed", "1",
             "--transactions-per-node", "200",
             "--size", "5", "--len", "3"])
@@ -181,46 +200,86 @@ def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
         assert e0 <= s1, f"overlapping slots: [{s0:#x},{e0:#x}) vs [{s1:#x},{e1:#x})"
 
 
-# --- per-tile base guard: generators lay tiles at coord_id*tile_size and do not
-#     read a custom `base`; a mismatch must fail loud, not silently misroute. ---
+# ---------------------------------------------------------------------------
+# address_map.py: packing + validation (mirrors c_model SamTable::packed /
+# SamTable::validate, nmu/addr_trans.hpp).
+# ---------------------------------------------------------------------------
 
-def test_load_topology_rejects_custom_tile_base(tmp_path):
-    # coord_id(1,0)=1, tile_size=0x1000 -> uniform base 0x1000; 0x9999 must be rejected.
-    topo = tmp_path / "custom_base.yaml"
-    topo.write_text(
-        "topology: {name: t, x_dim: 2, y_dim: 1, num_vc: 1}\n"
-        "address_map:\n"
-        "  tile_size: 0x1000\n"
-        "  tiles:\n"
-        "    - { x: 1, y: 0, base: 0x9999, size: 0x1000 }\n"
-    )
-    with pytest.raises(ValueError, match="uniform per-tile base"):
-        g._load_topology(str(topo))
-
-
-def test_load_topology_accepts_uniform_base_with_size_override(tmp_path):
-    # base == coord_id*tile_size (0x1000) + a size override is fine (the shipped
-    # non-uniform map does exactly this).
-    topo = tmp_path / "uniform_base.yaml"
-    topo.write_text(
-        "topology: {name: t, x_dim: 2, y_dim: 1, num_vc: 1}\n"
-        "address_map:\n"
-        "  tile_size: 0x1000\n"
-        "  tiles:\n"
-        "    - { x: 1, y: 0, base: 0x1000, size: 0x400 }\n"
-    )
-    _nodes, x_dim, y_dim, ts = g._load_topology(str(topo))
-    assert (ts, x_dim, y_dim) == (0x1000, 2, 1)
-
-
-def test_gen_tb_top_address_map_rejects_custom_base():
-    import gen_tb_top as gt
-    topo = {
-        "topology": {"name": "t", "x_dim": 2, "y_dim": 1, "num_vc": 1},
-        "address_map": {
-            "tile_size": 0x1000,
-            "tiles": [{"x": 1, "y": 0, "base": 0x9999, "size": 0x1000}],
-        },
+def test_address_map_pack_accumulates_bases_in_list_order():
+    am = {"tiles": [
+        {"x": 0, "y": 0, "size": 0x1000},
+        {"x": 1, "y": 0, "size": 0x2000},
+        {"x": 0, "y": 1, "size": 0x1000},
+        {"x": 1, "y": 1, "size": 0x1000},
+    ]}
+    bases, entries = address_map.pack(am, x_dim=2, y_dim=2)
+    assert bases == {
+        address_map.dst_id(0, 0): 0,
+        address_map.dst_id(1, 0): 0x1000,
+        address_map.dst_id(0, 1): 0x3000,
+        address_map.dst_id(1, 1): 0x4000,
     }
-    with pytest.raises(ValueError, match="uniform per-tile base"):
-        gt._address_map(topo)
+    assert [e["base"] for e in entries] == [0, 0x1000, 0x3000, 0x4000]
+
+
+def test_address_map_pack_rejects_zero_size():
+    am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
+    with pytest.raises(ValueError, match="non-zero"):
+        address_map.pack(am, x_dim=1, y_dim=1)
+
+
+def test_address_map_pack_rejects_non_4k_aligned_size():
+    am = {"tiles": [{"x": 0, "y": 0, "size": 0x1234}]}
+    with pytest.raises(ValueError, match="4 KB aligned"):
+        address_map.pack(am, x_dim=1, y_dim=1)
+
+
+def test_address_map_pack_rejects_node_outside_mesh():
+    am = {"tiles": [{"x": 2, "y": 0, "size": 0x1000}]}
+    with pytest.raises(ValueError, match="outside mesh"):
+        address_map.pack(am, x_dim=2, y_dim=1)
+
+
+def test_address_map_pack_rejects_missing_node():
+    am = {"tiles": [{"x": 0, "y": 0, "size": 0x1000}]}  # 2x1 mesh needs 2 tiles
+    with pytest.raises(ValueError, match="expected 2"):
+        address_map.pack(am, x_dim=2, y_dim=1)
+
+
+def test_address_map_pack_rejects_duplicate_node():
+    am = {"tiles": [
+        {"x": 0, "y": 0, "size": 0x1000},
+        {"x": 0, "y": 0, "size": 0x1000},
+    ]}
+    with pytest.raises(ValueError, match="duplicate mesh node"):
+        address_map.pack(am, x_dim=2, y_dim=1)
+
+
+def test_address_map_pack_rejects_missing_tiles_key():
+    with pytest.raises(ValueError, match="address_map.tiles"):
+        address_map.pack({}, x_dim=1, y_dim=1)
+    with pytest.raises(ValueError, match="address_map.tiles"):
+        address_map.pack(None, x_dim=1, y_dim=1)
+
+
+def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
+    """Cross-site invariant: both generators must compute the same base(dst_id)
+    from the same address_map (they share address_map.pack())."""
+    import yaml
+
+    import gen_tb_top as gt
+
+    topo_path = tmp_path / "nonuniform.yaml"
+    topo_path.write_text(
+        "topology: { name: nonuniform, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+        "address_map:\n"
+        "  tiles:\n"
+        "    - { x: 0, y: 0, size: 0x1000 }\n"
+        "    - { x: 1, y: 0, size: 0x2000 }\n"
+        "    - { x: 0, y: 1, size: 0x1000 }\n"
+        "    - { x: 1, y: 1, size: 0x4000 }\n"
+    )
+    _nodes, _x, _y, bases_from_patterns = g._load_topology(str(topo_path))
+    topo = yaml.safe_load(topo_path.read_text())
+    bases_from_tb_top = gt._address_map(topo)
+    assert bases_from_patterns == bases_from_tb_top

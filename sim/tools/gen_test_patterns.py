@@ -10,9 +10,8 @@ Usage:
         --transactions-per-node 4 --seed 42
 
 Writes <out>/node<i>/{write,read}.txt for each node i. Each transaction:
-  - addr = dst_coord * tile_size + local_offset  (tile_size from the topology's
-    address_map.tile_size; defaults to 0x100000000 / 4 GB, matching the legacy
-    dst_coord<<32 layout, if the block or key is absent)
+  - addr = base(dst_coord) + local_offset  (base from the topology's packed
+    address_map.tiles list; see address_map.py)
   - src-partitioned local offset (alloc_unique_offset) so converging sources never collide
   - INCR, atop=0, full strobe, address-in-data payload (byte A = A & 0xFF)
 
@@ -63,9 +62,9 @@ Constants
 X_WIDTH = 4  -- mirrors c_model addr_trans.hpp / ni_flit_constants.h
 DST_ID_WIDTH = 8  -- mirrors ni_flit_constants.h header::DST_ID_WIDTH (X_WIDTH + Y_WIDTH)
 
-Per-tile base address = dst_id * tile_size, where tile_size is read from the topology
-YAML's address_map.tile_size (default 0x100000000 = 4 GB if the block or key is
-absent). Mirrors c_model SamTable::uniform's base formula (addr_trans.hpp).
+Per-tile base address = base(dst_id), packed from the topology YAML's
+address_map.tiles list (see address_map.py). Mirrors c_model SamTable::packed's
+base formula (addr_trans.hpp).
 """
 
 import argparse
@@ -76,17 +75,15 @@ from pathlib import Path
 
 import yaml
 
-# Must mirror c_model addr_trans.hpp SamTable::uniform:
+import address_map
+
+# Must mirror c_model addr_trans.hpp SamTable::packed:
 #   dst_id = (y << X_WIDTH) | x
-#   base(dst_id) = dst_id * tile_size   (tile_size from topology address_map.tile_size)
+#   base(i) = base(i-1) + size(i-1), in address_map.tiles list order
 X_WIDTH = 4
 Y_WIDTH = 4          # mirrors ni_flit_constants.h width::Y_WIDTH
 DST_ID_WIDTH = 8     # header::DST_ID_WIDTH = X_WIDTH + Y_WIDTH; max nodes = 2**8 = 256
 _FILE_KEYS = ("data_file", "dump_file", "strb_file")
-
-# Default per-tile stride when the topology has no address_map.tile_size; matches the
-# legacy dst_cid<<32 layout (addr[63:32] = dst_id) byte-for-byte.
-_DEFAULT_TILE_SIZE = 0x100000000
 
 # Per-transaction slot stride for the unique-offset allocator.  Must be at least
 # as large as the max transaction data payload (one cache-line = 64 B = 0x40).
@@ -143,9 +140,12 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop):
 
 def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
                           base_local, region_bytes, axi_size, axi_len, data_width,
-                          ids_per_tile=1, num_axi_ids=256, tile_size=_DEFAULT_TILE_SIZE):
+                          ids_per_tile=1, num_axi_ids=256, bases=None):
     """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
     src-partitioned address, address-in-data payload. INCR, atop=0, full strobe.
+
+    bases: {dst_id: base}, from address_map.pack() -- the packed tile base for
+    each dst_cid in dst_cids.
 
     AXI ids: each tile owns an independent, non-overlapping block of `ids_per_tile`
     ids starting at src_idx*ids_per_tile (mod num_axi_ids), so no two tiles share
@@ -160,7 +160,7 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
     for seq, dst_cid in enumerate(dst_cids):
         local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
                                         n_nodes, region_bytes, reserved=reserved)
-        addr = dst_cid * tile_size + local_off
+        addr = bases[dst_cid] + local_off
         axid = (id_base + (seq % ids_per_tile)) % num_axi_ids
         write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
         write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
@@ -350,14 +350,12 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 # ---------------------------------------------------------------------------
 
 def _load_topology(name):
-    """Return (nodes, x_dim, y_dim, tile_size) where nodes = [(idx, x, y, cid), ...].
+    """Return (nodes, x_dim, y_dim, bases) where nodes = [(idx, x, y, cid), ...]
+    and bases = {dst_id: base} (address_map.pack()).
 
     `name` is either a topology name resolved against sim/topologies/<name>.yaml, or
     a direct path to a topology yaml (ends in .yaml or names an existing file).  The
     path form lets callers point at a temp topology without writing into the live tree.
-
-    tile_size is read from the topology's address_map.tile_size (default
-    _DEFAULT_TILE_SIZE if the address_map block or the key is absent).
     """
     if name.endswith(".yaml") or os.path.isfile(name):
         topo_path = name
@@ -369,25 +367,14 @@ def _load_topology(name):
         topo = yaml.safe_load(f)
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
-    tile_size = (topo.get("address_map") or {}).get("tile_size", _DEFAULT_TILE_SIZE)
-    # The address formula lays every tile at base = coord_id * tile_size. The c_model
-    # SAM honors an explicit per-tile `base`, but this generator does not read it, so a
-    # custom base would silently misroute. Reject it loudly (honor it when a real
-    # non-uniform map needs it).
-    for t in (topo.get("address_map") or {}).get("tiles") or []:
-        if "base" in t and int(t["base"]) != coord_id(t["x"], t["y"]) * tile_size:
-            raise ValueError(
-                f"topology tile (x={t['x']},y={t['y']}) base={int(t['base']):#x} != uniform "
-                f"base {coord_id(t['x'], t['y']) * tile_size:#x} (coord_id*tile_size); the "
-                f"stimulus generator supports only the uniform per-tile base"
-            )
+    bases, _entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
     nodes = []
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
             nodes.append((idx, x, y, coord_id(x, y)))
             idx += 1
-    return nodes, x_dim, y_dim, tile_size
+    return nodes, x_dim, y_dim, bases
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +486,7 @@ def main(argv=None):
                          "Does not affect VC allocation (VC is id-agnostic).")
     a = ap.parse_args(argv)
 
-    nodes, x_dim, y_dim, tile_size = _load_topology(a.topology)
+    nodes, x_dim, y_dim, bases = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
 
@@ -536,7 +523,7 @@ def main(argv=None):
                               n_nodes, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
                               ids_per_tile=a.ids_per_tile, num_axi_ids=(1 << widths["id"]),
-                              tile_size=tile_size)
+                              bases=bases)
 
 
 if __name__ == "__main__":

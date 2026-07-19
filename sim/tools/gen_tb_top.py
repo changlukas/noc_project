@@ -20,8 +20,9 @@ Usage:
 Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
     - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
-    - per-node router/nmu/nsu ctx handles; REGION_BASE[s] = coord_id(s) << 32
-      (dst tile in addr bits 32+), stamped into each endpoint
+    - per-node router/nmu/nsu ctx handles; REGION_BASE[s] = base(coord_id(s)),
+      packed from the topology's address_map.tiles list (see address_map.py),
+      stamped into each endpoint
     - inter-router links wired per XY direction; boundary directions tied off
     - PASS guard: all endpoints done (end_of_sim) AND every node non-vacuous
       (txn_cnt > 0)
@@ -35,6 +36,8 @@ Constants kept as template (not derived from topology YAML):
 import argparse
 import sys
 from pathlib import Path
+
+import address_map
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -120,11 +123,6 @@ def _nodes(topo: dict):
     return out, x_dim, y_dim
 
 
-# Default tile stride when the topology YAML omits the address_map block.
-# Mirrors c_model addr_trans.hpp SamTable::uniform's base formula and
-# gen_test_patterns.py's _DEFAULT_TILE_SIZE.
-_DEFAULT_TILE_SIZE = 0x100000000
-
 # REGION_BYTES: the per-node MAPPED-slave memory window. DV-side tb constant
 # (FlooNoC mesh tb pattern), not a runtime knob. Distinct from
 # gen_test_patterns.py's auto-derived directed-side region_bytes (a different,
@@ -133,26 +131,15 @@ _DEFAULT_REGION_BYTES = 0x1000
 
 
 def _address_map(topo: dict) -> dict:
-    """address_map block (optional, DUT-only): tile_size.
+    """Packed {dst_id: base} from the topology's address_map.tiles list.
 
-    tile_size feeds REGION_BASE (SAM base = dst_id * tile_size). The c_model
-    always rebases, so the slave sees a tile-local address."""
-    am = topo.get("address_map") or {}
-    tile_size = int(am.get("tile_size", _DEFAULT_TILE_SIZE))
-    # REGION_BASE lays every tile at base = coord_id * tile_size. The c_model SAM
-    # honors an explicit per-tile `base`, but this generator does not read it, so a
-    # custom base would silently misroute. Reject it loudly (honor it when a real
-    # non-uniform map needs it).
-    for t in am.get("tiles") or []:
-        if "base" in t and int(t["base"]) != _coord_id(t["x"], t["y"]) * tile_size:
-            raise ValueError(
-                f"topology tile (x={t['x']},y={t['y']}) base={int(t['base']):#x} != uniform "
-                f"base {_coord_id(t['x'], t['y']) * tile_size:#x} (coord_id*tile_size); the "
-                f"tb generator supports only the uniform per-tile base"
-            )
-    return {
-        "tile_size": tile_size,
-    }
+    REGION_BASE feeds off this (SAM base per tile). The c_model always rebases,
+    so the slave sees a tile-local address. See address_map.py for the packing
+    rule (must match c_model SamTable::packed byte-for-byte)."""
+    x_dim = topo["topology"]["x_dim"]
+    y_dim = topo["topology"]["y_dim"]
+    bases, _entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    return bases
 
 
 # Live-neighbor map / opposite-port logic now lives in the emitted SV genvar
@@ -413,17 +400,15 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     num_vc = topo["topology"]["num_vc"]
     rob_enabled = requested_name.endswith("_rob")
 
-    # REGION_BASE[s] = SAM base for tile s = coord_id(s) * tile_size (mirrors
-    # c_model addr_trans.hpp SamTable::uniform; byte-identical to the old
-    # coord_id<<32 stamp for the default 4 GiB tile_size). Stamped into every
-    # endpoint so the file_master's MAPPED slave targets per-destination windows.
-    # Emitted as a PACKED-array concatenation in descending index order (element
-    # for index n-1 first) so REGION_BASE[i] == coord_id(node i) * tile_size.
-    # Packed because Verilator 5.048 mis-sizes an unpacked-array param override
-    # whose size depends on a sibling param override.
-    am = _address_map(topo)
-    tile_size = am["tile_size"]
-    region_base = ", ".join(f"64'h{(c * tile_size):016X}"
+    # REGION_BASE[s] = SAM base for tile s, packed from address_map.tiles (mirrors
+    # c_model addr_trans.hpp SamTable::packed). Stamped into every endpoint so the
+    # file_master's MAPPED slave targets per-destination windows. Emitted as a
+    # PACKED-array concatenation in descending index order (element for index n-1
+    # first) so REGION_BASE[i] == base(coord_id(node i)). Packed because Verilator
+    # 5.048 mis-sizes an unpacked-array param override whose size depends on a
+    # sibling param override.
+    bases = _address_map(topo)
+    region_base = ", ".join(f"64'h{bases[c]:016X}"
                             for (_i, _x, _y, c) in reversed(nodes))
 
     lines = []
@@ -475,10 +460,10 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    localparam int unsigned ROUTER_VC_DEPTH       = "
       "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
     w("    // Per-destination region windows: REGION_BASE[s] = SAM base for tile s")
-    w("    // (coord_id(s) * tile_size, from topology address_map.tile_size). Packed")
-    w("    // array: Verilator 5.048 mis-sizes an unpacked-array param override whose")
-    w("    // size depends on a sibling override. REGION_BYTES = the DV region_bytes")
-    w("    // constant (NOT tile_size -- that would blow up MAX_BURST_BEATS below).")
+    w("    // (packed from topology address_map.tiles). Packed array: Verilator")
+    w("    // 5.048 mis-sizes an unpacked-array param override whose size depends")
+    w("    // on a sibling override. REGION_BYTES = the DV region_bytes constant")
+    w("    // (NOT a tile size -- that would blow up MAX_BURST_BEATS below).")
     w(f"    localparam logic [NUM_NODES-1:0][63:0] REGION_BASE = {{{region_base}}};")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w("")
