@@ -191,7 +191,11 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_sam.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
-                           "  tile_size: 0x1000\n";
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"
+                           "    - { x: 1, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n"
+                           "    - { x: 1, y: 1, size: 0x1000 }\n";
 
     NmuWrap adapter;
     adapter.init(/*src_id=*/0, /*num_vc=*/1, ni::NMU_QUEUE_DEPTH,

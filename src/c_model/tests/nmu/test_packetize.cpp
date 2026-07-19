@@ -298,10 +298,11 @@ TEST(NmuPacketize, SamTranslateRebasesAddrAndSetsDstFromTable) {
         "NMU Packetize: push_aw runs a rebasing SamTable::translate; dst_id comes from the "
         "table and awaddr is rebased to the tile-local offset");
     ReqCapture aw_cap, w_cap, ar_cap;
-    auto sam = addr_trans::SamTable::uniform(4, 4, 0x100000000ull);
+    // Single packed tile at (2,1) -> dst_id 0x12, base 0 (only entry in the list).
+    auto sam = addr_trans::SamTable::packed({{2, 1, 0x100000000ull}});
     Packetize pkt(aw_cap, w_cap, ar_cap, /*src_id=*/0, sam);
     axi::AwBeat aw{};
-    aw.addr = 0x1200000040ull;
+    aw.addr = 0x40ull;
     aw.id = 5;
     aw.len = 0;
     aw.size = 3;

@@ -1,38 +1,65 @@
 #include "nmu/addr_trans.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
+#include <vector>
 
+using ni::cmodel::nmu::addr_trans::PackedTile;
 using ni::cmodel::nmu::addr_trans::SamEntry;
 using ni::cmodel::nmu::addr_trans::SamTable;
 namespace axi = ni::cmodel::axi;
 
-// tile_size 4 GB reproduces the legacy coord_id<<32 layout. X_WIDTH=4 -> dst (2,1)=0x12.
-TEST(SamTable, UniformRebase_DstFromTableLocalRebased) {
-    auto sam = SamTable::uniform(/*x_dim=*/4, /*y_dim=*/4, /*tile_size=*/0x100000000ull);
-    auto t = sam.translate(0x1200000040ull);  // tile (2,1) coord_id 0x12, offset 0x40
-    EXPECT_EQ(t.dst_id, 0x12u);
+TEST(SamTable, PackedAccumulatesBasesGapFree) {
+    // base(0)=0, base(1)=size(0), base(2)=size(0)+size(1) -- heterogeneous sizes.
+    auto sam = SamTable::packed({
+        {0, 0, 0x1000},
+        {1, 0, 0x2000},
+        {2, 0, 0x1000},
+    });
+    ASSERT_EQ(sam.entries().size(), 3u);
+    EXPECT_EQ(sam.entries()[0].base, 0x0ull);
+    EXPECT_EQ(sam.entries()[1].base, 0x1000ull);
+    EXPECT_EQ(sam.entries()[2].base, 0x3000ull);
+}
+
+TEST(SamTable, PackedDstIdFromXY) {
+    auto sam = SamTable::packed({{2, 1, 0x1000}});  // dst = (1<<X_WIDTH)|2 = 0x12
+    EXPECT_EQ(sam.entries()[0].dst_id, 0x12u);
+}
+
+TEST(SamTable, PackedTranslateRebasesFromAccumulatedBase) {
+    auto sam = SamTable::packed({
+        {0, 0, 0x100000000ull},
+        {1, 0, 0x100000000ull},
+    });
+    auto t = sam.translate(0x100000040ull);  // tile 1, offset 0x40
+    EXPECT_EQ(t.dst_id, 0x01u);
     EXPECT_EQ(t.local_addr, 0x40ull);  // rebased: addr - base
 }
 
 TEST(SamTable, LookupMissReturnsNull) {
-    auto sam = SamTable::uniform(2, 2, 0x100000000ull);  // tiles 0,1,16,17 (coord_id)
-    EXPECT_EQ(sam.lookup(0x0300000000ull),
-              nullptr);  // coord_id 3 = (0,0..)+? x=3>=x_dim -> unmapped
+    auto sam = SamTable::packed({{0, 0, 0x1000}});
+    EXPECT_EQ(sam.lookup(0x2000ull), nullptr);
 }
 
-#include <vector>
-using ni::cmodel::nmu::addr_trans::SamEntry;
-
 TEST(SamValidator, RejectsOverlap) {
+    // 2-node mesh (2x1) so entry count matches x_dim*y_dim and the overlap
+    // pass (which runs after exactly-once coverage) is actually reached.
     SamTable bad(std::vector<SamEntry>{
         {0x0, 0x2000, 0x00}, {0x1000, 0x2000, 0x01},  // overlaps first
     });
-    EXPECT_DEATH(bad.validate(4, 4), "overlap");
+    EXPECT_DEATH(bad.validate(2, 1), "overlap");
 }
 
 TEST(SamValidator, RejectsNon4KBSize) {
     SamTable bad(std::vector<SamEntry>{{0x0, 0x1800, 0x00}});  // 6 KB, not a 4 KB multiple
-    EXPECT_DEATH(bad.validate(4, 4), "4 ?KB|aligned");
+    // "|" alternation is unsupported by gtest's simple regex engine (used
+    // when GTEST_USES_POSIX_RE=0, e.g. MSVC/MinGW) -- keep this a plain literal.
+    EXPECT_DEATH(bad.validate(4, 4), "aligned");
+}
+
+TEST(SamValidator, RejectsZeroSize) {
+    SamTable bad(std::vector<SamEntry>{{0x0, 0x0, 0x00}});
+    EXPECT_DEATH(bad.validate(4, 4), "zero-size");
 }
 
 TEST(SamValidator, RejectsDstOutsideMesh) {
@@ -40,12 +67,28 @@ TEST(SamValidator, RejectsDstOutsideMesh) {
     EXPECT_DEATH(bad.validate(2, 2), "mesh");
 }
 
+TEST(SamValidator, RejectsMissingNode) {
+    // 2x2 mesh needs 4 nodes; only 3 given -- (1,1) missing.
+    SamTable bad(
+        std::vector<SamEntry>{{0x0, 0x1000, 0x00}, {0x1000, 0x1000, 0x01}, {0x2000, 0x1000, 0x10}});
+    EXPECT_DEATH(bad.validate(2, 2), "exactly once");
+}
+
+TEST(SamValidator, RejectsDuplicateNode) {
+    // 2x2 mesh: dst 0x00 listed twice, (1,1) missing.
+    SamTable bad(std::vector<SamEntry>{{0x0, 0x1000, 0x00},
+                                       {0x1000, 0x1000, 0x00},
+                                       {0x2000, 0x1000, 0x01},
+                                       {0x3000, 0x1000, 0x10}});
+    EXPECT_DEATH(bad.validate(2, 2), "duplicate");
+}
+
 TEST(SamFootprint, RejectsBurstCrossingTile) {
-    auto sam = SamTable::uniform(4, 4, 0x100000000ull);
-    // burst inside tile 0x12: [base+0x40, base+0x80] ok
-    EXPECT_TRUE(sam.burst_footprint_ok(0x1200000040ull, 0x1200000080ull));
-    // burst spilling past tile end into the next tile: not ok
-    EXPECT_FALSE(sam.burst_footprint_ok(0x12FFFFFFF0ull, 0x1300000010ull));
+    auto sam = SamTable::packed({{0, 0, 0x100000000ull}, {1, 0, 0x100000000ull}});
+    // burst inside tile 0: [0x40, 0x80] ok
+    EXPECT_TRUE(sam.burst_footprint_ok(0x40, 0x80));
+    // burst spilling past tile 0 end into tile 1: not ok
+    EXPECT_FALSE(sam.burst_footprint_ok(0xFFFFFFF0, 0x100000010ull));
 }
 
 using ni::cmodel::nmu::addr_trans::burst_last_byte;

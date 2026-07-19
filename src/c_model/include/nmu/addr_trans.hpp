@@ -20,22 +20,45 @@ struct SamEntry {
     uint8_t dst_id;
 };
 
+// One packed-map input tile: mesh coordinate + size. Bases are not given here;
+// SamTable::packed() derives them by accumulation in list order.
+struct PackedTile {
+    unsigned x;
+    unsigned y;
+    uint64_t size;
+};
+
 class SamTable {
   public:
     SamTable() = default;
     explicit SamTable(std::vector<SamEntry> entries) : entries_(std::move(entries)) {}
 
-    // Uniform map: dst_id = coord_id = (y<<X_WIDTH)|x, base = coord_id * tile_size.
-    static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size) {
+    // Packed map: base(0) = 0, base(i) = base(i-1) + size(i-1), in list order.
+    // dst_id = (y << X_WIDTH) | x per tile.
+    static SamTable packed(const std::vector<PackedTile>& tiles) {
         std::vector<SamEntry> es;
-        for (unsigned y = 0; y < y_dim; ++y) {
-            for (unsigned x = 0; x < x_dim; ++x) {
-                uint8_t dst = static_cast<uint8_t>((y << ni::width::X_WIDTH) | x);
-                uint64_t base = static_cast<uint64_t>(dst) * tile_size;
-                es.push_back({base, tile_size, dst});
-            }
+        es.reserve(tiles.size());
+        uint64_t base = 0;
+        for (const auto& t : tiles) {
+            uint8_t dst = static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x);
+            es.push_back({base, t.size, dst});
+            base += t.size;
         }
         return SamTable(std::move(es));
+    }
+
+    // Convenience: pack x_dim*y_dim equal-size tiles in row-major (x, then y)
+    // order. Used as the co-sim default SAM (no config_path) and by test
+    // fixtures that don't need heterogeneous tile sizes.
+    static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size) {
+        std::vector<PackedTile> tiles;
+        tiles.reserve(static_cast<std::size_t>(x_dim) * y_dim);
+        for (unsigned y = 0; y < y_dim; ++y) {
+            for (unsigned x = 0; x < x_dim; ++x) {
+                tiles.push_back({x, y, tile_size});
+            }
+        }
+        return packed(tiles);
     }
 
     // First-match by start address (FlooNoC get_entry). Miss -> nullptr.
@@ -54,9 +77,10 @@ class SamTable {
 
     const std::vector<SamEntry>& entries() const { return entries_; }
 
-    // Validate explicit entries; fail-loud. Uniform tables satisfy these by construction.
-    // Two passes: validate every entry's fields FIRST so the overlap pass can
-    // trust each `base+size` (no overflow) when it reads it.
+    // Validate explicit entries; fail-loud. Packed tables satisfy these by construction.
+    // Passes run in order so each later pass can trust the earlier ones: field
+    // checks first (so base+size doesn't overflow), then exactly-once mesh
+    // coverage, then overlap (which also relies on base+size not overflowing).
     void validate(unsigned x_dim, unsigned y_dim) const {
         constexpr uint64_t k4k = 0x1000;
         for (const auto& e : entries_) {
@@ -67,6 +91,19 @@ class SamTable {
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
             assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");
+        }
+        // Exactly-once coverage: every (x, y) in the mesh must appear once. Count
+        // equal to x_dim*y_dim plus no duplicates (checked via `seen`) together
+        // imply no node is missing.
+        assert(entries_.size() == static_cast<std::size_t>(x_dim) * y_dim &&
+               "SAM: every mesh node must appear exactly once (tile count mismatch)");
+        std::vector<bool> seen(static_cast<std::size_t>(x_dim) * y_dim, false);
+        for (const auto& e : entries_) {
+            unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
+            unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            std::size_t idx = static_cast<std::size_t>(y) * x_dim + x;
+            assert(!seen[idx] && "SAM: duplicate mesh node");
+            seen[idx] = true;
         }
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             for (std::size_t j = i + 1; j < entries_.size(); ++j) {

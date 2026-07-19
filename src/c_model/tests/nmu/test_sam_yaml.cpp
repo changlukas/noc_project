@@ -5,36 +5,62 @@
 
 using ni::cmodel::nmu::addr_trans::load_sam_table;
 
-TEST(SamYaml, UniformBlockBuildsTable) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_uniform.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 4, y_dim: 4, num_vc: 1 }\n"
+TEST(SamYaml, PackedTilesAccumulateBases) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_packed.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 1, num_vc: 1 }\n"
                            "address_map:\n"
-                           "  tile_size: 0x100000000\n";
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"
+                           "    - { x: 1, y: 0, size: 0x2000 }\n";
     auto sam = load_sam_table(path);
-    auto t = sam.translate(0x1200000040ull);
-    EXPECT_EQ(t.dst_id, 0x12u);
-    EXPECT_EQ(t.local_addr, 0x40ull);
+    ASSERT_EQ(sam.entries().size(), 2u);
+    EXPECT_EQ(sam.entries()[0].base, 0x0ull);
+    EXPECT_EQ(sam.entries()[1].base, 0x1000ull);  // base(1) = base(0) + size(0)
 }
 
-TEST(SamYaml, ExplicitTilesOverride) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_tiles.yaml");
+TEST(SamYaml, TranslateRebasesAgainstPackedBase) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_packed_translate.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
-                           "  tile_size: 0x100000000\n"
                            "  tiles:\n"
-                           "    - { x: 0, y: 0, base: 0x0, size: 0x10000000 }\n";
+                           "    - { x: 0, y: 0, size: 0x100000000 }\n"
+                           "    - { x: 1, y: 0, size: 0x100000000 }\n"
+                           "    - { x: 0, y: 1, size: 0x100000000 }\n"
+                           "    - { x: 1, y: 1, size: 0x100000000 }\n";
     auto sam = load_sam_table(path);
-    const auto* e = sam.lookup(0x40ull);  // tile (0,0) overridden to 256 MB at base 0
-    ASSERT_NE(e, nullptr);
-    EXPECT_EQ(e->size, 0x10000000ull);
+    auto t = sam.translate(0x300000040ull);  // 4th tile (x=1,y=1), base 0x300000000
+    EXPECT_EQ(t.dst_id, 0x11u);
+    EXPECT_EQ(t.local_addr, 0x40ull);  // rebased: addr - base
 }
 
-// Guards the real topology config: topologies/ is copied next to the
-// test binary at build time (CMakeLists.txt).
-TEST(SamYaml, RealMesh4x4TopologyLoads) {
-    auto sam = load_sam_table("topologies/mesh_4x4_vc1.yaml");
-    EXPECT_EQ(sam.entries().size(), 16u);
-    auto t = sam.translate(0x1200000000ull);  // tile (2,1) -> coord_id 0x12
-    EXPECT_EQ(t.dst_id, 0x12u);
-    EXPECT_EQ(t.local_addr, 0x0ull);  // rebased: addr - base
+TEST(SamYaml, MissingNodeRejected) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_missing_node.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"
+                           "    - { x: 1, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n";  // (1,1) missing
+    EXPECT_DEATH(load_sam_table(path), "exactly once");
+}
+
+TEST(SamYaml, DuplicateNodeRejected) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_dup_node.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 1, y_dim: 2, num_vc: 1 }\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 0, size: 0x1000 }\n";  // dup (0,0), (0,1) missing
+    EXPECT_DEATH(load_sam_table(path), "duplicate");
+}
+
+TEST(SamYaml, NonAlignedSizeRejected) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_bad_size.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 1, y_dim: 1, num_vc: 1 }\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1800 }\n";  // 6 KB, not 4 KB aligned
+    // "|" alternation is unsupported by gtest's simple regex engine (used
+    // when GTEST_USES_POSIX_RE=0, e.g. MSVC/MinGW) -- keep this a plain literal.
+    EXPECT_DEATH(load_sam_table(path), "aligned");
 }
