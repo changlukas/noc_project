@@ -268,6 +268,26 @@ def test_address_map_pack_rejects_missing_tiles_key():
         address_map.pack(None, x_dim=1, y_dim=1)
 
 
+def test_address_map_pack_real_topologies_gap_free():
+    """Cross-check: every real sim/topologies/*.yaml packs cleanly and the
+    resulting bases are gap-free contiguous (base(0)=0, base(i)=base(i-1)+size(i-1)).
+    Proves the Python loader accepts the migrated real YAMLs (see also the C++
+    SamYaml.RealTopologies test loading the same files)."""
+    import yaml
+
+    topo_dir = os.path.join(os.path.dirname(__file__), "..", "topologies")
+    paths = sorted(glob.glob(os.path.join(topo_dir, "*.yaml")))
+    assert len(paths) >= 7, f"expected the real topology YAMLs, found {paths}"
+    for path in paths:
+        topo = yaml.safe_load(open(path))["topology"]
+        _bases, entries = address_map.pack(
+            yaml.safe_load(open(path))["address_map"], topo["x_dim"], topo["y_dim"])
+        expected_base = 0
+        for e in entries:
+            assert e["base"] == expected_base, f"{path}: gap at dst_id {e['dst_id']:#x}"
+            expected_base += e["size"]
+
+
 def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
     """Cross-site invariant: both generators must compute the same base(dst_id)
     from the same address_map (they share address_map.pack())."""

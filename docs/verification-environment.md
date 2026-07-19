@@ -233,29 +233,24 @@ topology:
   y_dim: 4
   num_vc: 1
 
-address_map:                 # optional; omit -> uniform, tile_size 0x1_0000_0000
-  tile_size: 0x100000000     # per-node window size
-  tiles:                     # optional per-node overrides on the uniform default
-    - { x: 0, y: 0, base: 0x0, size: 0x10000000 }
+address_map:
+  tiles:                      # ordered, every mesh node exactly once, row-major (y outer, x inner)
+    - { x: 0, y: 0, size: 0x100000000 }
+    - { x: 1, y: 0, size: 0x100000000 }
+    # ... one entry per node
 ```
 
 The SAM is a first-match `{base, size, dst_id}` range table, loaded from this
-block and shared by both ends: the generator places each request at
-`base(dst) + offset`, and the NMU SAM translates the address back to `dst_id`.
-One source, so the two never disagree.
+block and shared by the C++ loader and both Python generators: the generator
+places each request at `base(dst) + offset`, and the NMU SAM translates the
+address back to `dst_id`. One source, so the two never disagree.
 
-**Uniform default** (no `tiles:`): `base(node) = ((y << X_WIDTH) | x) * tile_size`,
-which makes `dst_id = addr[39:32]` at the default `tile_size = 2^32`. Windows are
-ordered by the `{y, x}` coordinate id, so they are contiguous within a row and
-jump at each row boundary. On a 4x4 mesh node (3,0) sits at `0x3_0000_0000` and
-node (0,1) at `0x10_0000_0000`, because `x` and `y` are 4-bit fields and only
-0..3 are used. No node occupies a gap, and the generator emits only in-window
-addresses, so a SAM miss cannot occur.
-
-**Per-tile override** (`tiles:`): each `{x, y, base, size}` replaces that node's
-entry, so any base and size are legal and the map need not be uniform or
-contiguous. `mesh_2x2_nonuniform_vc1` shrinks tile (0,0) to a 256 MB window this
-way.
+`tiles:` gives each node its own `size`; there is no `tile_size` and no
+`base` key. Bases are packed by accumulation in list order: `base(0) = 0`,
+`base(i) = base(i-1) + size(i-1)`, so the map is always gap-free and tiles can
+be heterogeneous. `dst_id = (y << X_WIDTH) | x`. `mesh_2x2_nonuniform_vc1`
+shrinks tile (0,0) to a 256 MB window; every other real topology uses a
+uniform `0x100000000` per node.
 
 `gen_tb_top.py` rejects a topology whose mesh dimensions or `num_vc` exceed
 the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit

@@ -54,6 +54,30 @@ TEST(SamYaml, DuplicateNodeRejected) {
     EXPECT_DEATH(load_sam_table(path), "duplicate");
 }
 
+// Guards the real topology configs: sim/topologies/ is copied next to the
+// test binary at build time (CMakeLists.txt). Cross-checked against the
+// Python loader on the same files (test_address_map_pack_real_topologies_gap_free
+// in sim/tools/test_gen_test_patterns_filemaster.py) -- if both pass, the C++
+// and Python packing agree on every real topology YAML.
+TEST(SamYaml, RealTopologiesGapFreePacked) {
+    static const char* kFiles[] = {
+        "topologies/mesh_1x1_vc1.yaml", "topologies/mesh_2x2_nonuniform_vc1.yaml",
+        "topologies/mesh_2x4_vc1.yaml", "topologies/mesh_4x4_vc1.yaml",
+        "topologies/mesh_4x4_vc2.yaml", "topologies/mesh_4x4_vc4.yaml",
+        "topologies/mesh_4x4_vc8.yaml",
+    };
+    for (const char* file : kFiles) {
+        SCOPED_TRACE(file);
+        auto sam = load_sam_table(file);
+        ASSERT_FALSE(sam.entries().empty());
+        uint64_t expected_base = 0;
+        for (const auto& e : sam.entries()) {
+            EXPECT_EQ(e.base, expected_base);
+            expected_base += e.size;
+        }
+    }
+}
+
 TEST(SamYaml, NonAlignedSizeRejected) {
     auto path = ni::cmodel::testing::unique_temp_path("sam_bad_size.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 1, y_dim: 1, num_vc: 1 }\n"

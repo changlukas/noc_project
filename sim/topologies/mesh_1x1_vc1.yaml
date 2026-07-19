@@ -5,4 +5,5 @@ topology:
   num_vc: 1
 
 address_map:
-  tile_size: 0x100000000
+  tiles:
+    - { x: 0, y: 0, size: 0x100000000 }

@@ -25,6 +25,13 @@ add_cmodel_test(test_sam_table)
 
 add_cmodel_test(test_sam_yaml)
 target_link_libraries(test_sam_yaml PRIVATE yaml-cpp::yaml-cpp)
+# sim/topologies/*.yaml is loaded at runtime from topologies/ (relative to
+# the test binary's working dir). Mirror the test_axi_slave_port pattern of
+# copying real config next to the binary at build time.
+add_custom_command(TARGET test_sam_yaml POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/topologies
+    $<TARGET_FILE_DIR:test_sam_yaml>/topologies)
 
 add_cmodel_test(test_rob)
 # Pick up the shared loopback fixtures from tests/common/ via
