@@ -3,7 +3,6 @@
 #include <gtest/gtest.h>
 #include <vector>
 
-using ni::cmodel::nmu::addr_trans::PackedTile;
 using ni::cmodel::nmu::addr_trans::SamEntry;
 using ni::cmodel::nmu::addr_trans::SamTable;
 namespace axi = ni::cmodel::axi;

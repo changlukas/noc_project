@@ -63,8 +63,7 @@ def _parse_write(path):
 def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000):
     """New packed-address_map topology YAML text, every tile the same size.
 
-    Temp-file use only -- the real sim/topologies/*.yaml files are still the old
-    tile_size format until a later task rewrites them.
+    Builds a temp topology YAML in the packed `tiles:` format for the test.
     """
     tiles = "\n".join(
         f"    - {{ x: {x}, y: {y}, size: {tile_size:#x} }}"
