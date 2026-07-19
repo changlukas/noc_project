@@ -28,8 +28,8 @@ def pack(address_map, x_dim, y_dim):
     """Pack address_map["tiles"] into {dst_id: base} + ordered entries.
 
     Raises ValueError (fail-loud, mirrors SamTable::validate) on: missing/empty
-    tiles list, zero or non-4KB-aligned size, a tile outside the mesh, a
-    missing/duplicate mesh node, or overlapping ranges.
+    tiles list, non-positive or non-4KB-aligned size, a tile outside the mesh,
+    or a missing/duplicate mesh node.
 
     Returns (bases, entries):
         bases:   {dst_id: base}
@@ -43,9 +43,9 @@ def pack(address_map, x_dim, y_dim):
     base = 0
     for t in tiles:
         x, y, size = int(t["x"]), int(t["y"]), int(t["size"])
-        if size == 0 or size % 0x1000 != 0:
+        if size <= 0 or size % 0x1000 != 0:
             raise ValueError(
-                f"address_map tile (x={x},y={y}) size {size:#x} must be non-zero "
+                f"address_map tile (x={x},y={y}) size {size:#x} must be positive "
                 f"and 4 KB aligned")
         if not (x < x_dim and y < y_dim):
             raise ValueError(
@@ -63,12 +63,8 @@ def pack(address_map, x_dim, y_dim):
         if node in seen:
             raise ValueError(f"address_map: duplicate mesh node (x={e['x']},y={e['y']})")
         seen.add(node)
-    for i, e in enumerate(entries):
-        for f in entries[i + 1:]:
-            if e["base"] < f["base"] + f["size"] and f["base"] < e["base"] + e["size"]:
-                raise ValueError(
-                    f"address_map: overlapping tiles (x={e['x']},y={e['y']}) and "
-                    f"(x={f['x']},y={f['y']})")
+    # No overlap check needed: sizes are validated positive above, so packing
+    # (base(i) = base(i-1) + size(i-1)) always yields disjoint, contiguous ranges.
 
     bases = {e["dst_id"]: e["base"] for e in entries}
     return bases, entries

@@ -224,7 +224,13 @@ def test_address_map_pack_accumulates_bases_in_list_order():
 
 def test_address_map_pack_rejects_zero_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
-    with pytest.raises(ValueError, match="non-zero"):
+    with pytest.raises(ValueError, match="positive"):
+        address_map.pack(am, x_dim=1, y_dim=1)
+
+
+def test_address_map_pack_rejects_negative_size():
+    am = {"tiles": [{"x": 0, "y": 0, "size": -0x1000}]}
+    with pytest.raises(ValueError, match="positive"):
         address_map.pack(am, x_dim=1, y_dim=1)
 
 
