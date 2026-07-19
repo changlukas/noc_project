@@ -148,9 +148,10 @@ the address-phase fields; write adds `atop` and the W-beat lines.
 
 `write.txt`, 12 lines per AW then one line per W beat:
 - lines 1 to 10 as above, then line 11 `atop`, line 12 `user`.
-- then `len + 1` beat lines, each `0x<data> 0x<strb> 0` (write data, byte strobe,
-  file-master flag), with address-in-data payload (byte at address A holds
-  `A & 0xFF`), full strobe, sized to the data bus.
+- then `len + 1` beat lines, each `0x<data> 0x<strb> 0` (`w_data`, `w_strb`,
+  `w_user`), with address-in-data payload (byte at address A holds `A & 0xFF`),
+  full strobe, sized to the data bus. `w_last` is not in the file; the driver
+  derives it from the burst length.
 
 A single-beat 32 B write is 12 field lines plus 1 beat line; the matching read is
 the 11 field lines at the same address.
