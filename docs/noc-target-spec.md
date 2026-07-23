@@ -51,11 +51,9 @@ rules unchanged. Collective attributes ride in 10 of the 18 `AWUSER` bits.
 - GALS multi-domain integration, endpoint clocks independent of the NoC clock
 
 **Scope.** Collectives cover a full row or a full column, not an arbitrary node set and not the
-whole mesh. On the data path the only reduction operator is addition on floating-point data.
-Reduction arithmetic is performed by the compute tile. No router contains an arithmetic unit, and
-no packet carries an operand format, since every node that joins a reduction also contributes to
-it and so already holds the operand type. All members of one reduction agree that type out of
-band. Scalar exchanges smaller than an operand tile are left to software over ordinary unicast.
+whole mesh. The only reduction operator is addition on floating-point data, and the members of one
+reduction agree that type out of band. Scalar exchanges smaller than an operand tile are left to
+software over ordinary unicast.
 
 ---
 
@@ -85,7 +83,8 @@ in-network reduction      L + (H_max + 1) t_r + D C_offload
 ```
 
 Injection is one flit per cycle, so `L` is in cycles, and the forms above take a source or root at
-one end of its set. An interior one is served by two paths, which doubles the serialization term.
+one end of its set. An interior one is served by two paths, which doubles the in-network
+serialization term.
 The transport term is identical in all three, and a collective replaces the `(N-1)L` serialization
 at one port with a single tile. A multicast carries no further term. A reduction adds one offload
 round trip per join on the critical path, `D` of them, and is the shorter form while
@@ -148,62 +147,23 @@ Inside one node:
    └────────────┘          │
 ~~~
 
-**Network separation.** Separating bulk data from the rest keeps a tile transfer from delaying a
-control transaction, and keeps small messages off a wide flit they would barely fill. The
-separation is physical rather than virtual because link wires are plentiful in modern nodes while
-router buffers and crossbar area are not.
+Bulk data is kept off the networks that carry control traffic, and small messages are kept off a
+wide flit they would barely fill. The split is physical rather than virtual, since link wires are
+plentiful in modern nodes while router buffers and crossbar area are not.
 
-**Deadlock freedom.** Across networks, a target answers a request or write data taken from `req`
-on either `wide` or `rsp`, and answers the same taken from `wide` on `rsp`. The ordering `req`
-before `wide` before `rsp` therefore holds and no answer returns to an earlier network. `wide`
-carries requests and read data together, but the two never answer each other: its write requests
-are answered on `rsp`, and its read data answers a request that arrived on `req`.
+Complexity sits at the network interface. A router routes, replicates, and merges, and holds no
+arithmetic and no address decode, which is what puts a 3 to 5 cycle pipeline within reach at
+1 GHz.
 
-Within a network, replication is path-based rather than tree-based. A source emits one packet per
-direction along its row or column, each following a single dimension-order path, so no packet ever
-holds two network output channels at once and the channel dependency graph stays acyclic.
-Tree-based replication would not have that property. A source at one end of the set emits one
-packet, an interior source two.
+**Requirements on the fabric.**
 
-A member in the middle of a path both ejects the packet and forwards it, so it holds an ejection
-port alongside a network channel. Every endpoint shall therefore accept any packet delivered to it
-in bounded time, and the offload port shall accept operands and return results in bounded time, so
-neither an ejection port nor a compute tile can stall the path it shares.
-
-A response merge waits on an arrival from the network while holding only its own local response,
-so it allocates its output once every response is present and blocks nothing upstream.
-
-A join is the other way round: it waits on a local contribution while an operand already sits in
-the channel. A node shall therefore take an arriving operand into local storage rather than hold
-it in the channel, so that traffic behind it keeps moving and the compute that produces the local
-contribution is never queued behind the join waiting for it. With that, one virtual channel per
-network channel stays sufficient.
-
-**Edge complexity.** The network interface holds the address map, packetisation, the reorder
-buffer, the per-direction split, and the offload interface. A router routes, replicates, and
-merges collective responses. It holds no arithmetic, no address decode, and no ordering state
-beyond the collective responses in flight through it. Keeping the router that thin is what puts a
-3 to 5 cycle pipeline within reach at 1 GHz.
-
-**Per-direction paths.** A source or root inside its set is served by one path per direction. The
-network interface splits a collective into those paths on the way out and combines their responses
-on the way in, so the AXI interface issues one write and receives one response wherever the source
-or root sits. Only the network ports see two.
-
-**Reduction offload.** Operands cross to the compute tile through the network interface and the
-combined result returns the same way.
-
-**Response merging.** A multicast write produces one `B` per destination, and AXI4 permits exactly
-one `B` per `AW`. Because a collective spans one row or one column, the return path retraces the
-outbound one. A multicast merges the responses along it on `rsp` into a single response, and an
-error `BRESP` dominates. A reduction runs the other way: the root answers once, and the fabric
-replicates that response back along the same path so that every contributing node receives the one
-`B` its own `AW` is owed. Each replica carries the `ordering_tag` that contributor injected, which
-the join that absorbed the operand retains for the return.
-
-**Ordering.** Responses reach the master in AXI order within an ID in every configuration.
-`ordering_tag` carries the slot the initiator NI reserved before injection, so a response can be
-placed back into per-ID issue order on arrival.
+| | |
+|---|---|
+| AXI4 response contract | One `B` per `AW`, and an error `BRESP` dominates when a multicast write is answered by several targets |
+| Ordering | Responses reach a master in AXI order within an ID in every configuration |
+| Reduction arithmetic | Performed by the compute tile, reached through the network interface. No router holds an arithmetic unit |
+| Freedom from deadlock | Guaranteed at one virtual channel per network channel, with collectives enabled |
+| Write data pairing | A target pairs each write request with its own write data, whatever the mix of sources |
 
 ---
 
