@@ -74,7 +74,7 @@ of AXI payload, so payload bandwidth is data width x 1 GHz / 8. The wide class i
 
 Request traffic carries write data, response traffic carries read data. Narrow req and rsp take
 separate networks and run concurrently. Wide req and rsp share the `wide` network, so 64 GB/s is
-their combined ceiling. Flit width and per-channel utilization are in §7.
+their combined ceiling. Flit width and per-channel utilization are in §8.
 
 **Off-chip access.** These workloads are bounded by off-chip memory bandwidth, and a row or column
 of `k` tiles reuses one operand of size `L`. Under per-tile fetch every tile reads the operand from
@@ -221,14 +221,130 @@ arithmetic unit and no address decode.
 
 ---
 
-## 6. Configuration Options
+## 6. Interfaces
+
+Each node exposes the data-plane interfaces below. The AXI ports carry the AXI4 signal set at the
+widths configured in §7. The Source column names the driver of each signal. Signals are named at
+the protocol level. A port pin prefixes the AXI signals with `axi_` and suffixes every signal with
+`_i` or `_o` by its direction at that port.
+
+### 6.1 Global signals
+
+| Signal | Source | Description |
+|---|---|---|
+| `ACLK` | Clock source | AXI domain clock. AXI port signals are sampled on its rising edge |
+| `ARESETn` | Reset source | AXI domain reset, active low, asynchronous |
+| `noc_clk` | Clock source | NoC domain clock, 1 GHz target |
+| `noc_rst_n` | Reset source | NoC domain reset, active low, asynchronous |
+
+The two domains are asynchronous. Endpoint clocks are independent of the NoC clock, and the
+crossing sits at the AXI boundary of the network interface.
+
+### 6.2 AXI interfaces
+
+A master attaches to the subordinate port of its network interface, and the fabric's manager port
+drives each target. Both ports carry the same channels, so one set of tables covers them and the
+Source column names the driver. With two endpoint interfaces per node, each AXI class carries its
+own port at its class data width, with the same channel set.
+
+**Write address channel**
+
+| Signal | Width | Source | Description |
+|---|---:|---|---|
+| `AWID` | 8 | Manager | Write transaction ID |
+| `AWADDR` | 64 | Manager | Write address |
+| `AWLEN` | 8 | Manager | Burst length |
+| `AWSIZE` | 3 | Manager | Burst size |
+| `AWBURST` | 2 | Manager | Burst type |
+| `AWLOCK` | 1 | Manager | Lock type |
+| `AWCACHE` | 4 | Manager | Memory type |
+| `AWPROT` | 3 | Manager | Protection type |
+| `AWQOS` | 4 | Manager | Quality of service |
+| `AWREGION` | 4 | Manager | Region identifier |
+| `AWUSER` | 18 | Manager | User signal. 10 bits carry the collective attributes, see §8 |
+| `AWVALID` | 1 | Manager | Write address valid |
+| `AWREADY` | 1 | Subordinate | Write address ready |
+
+**Write data channel**
+
+| Signal | Width | Source | Description |
+|---|---:|---|---|
+| `WDATA` | `W_data` | Manager | Write data |
+| `WSTRB` | `W_data`/8 | Manager | Write strobes |
+| `WLAST` | 1 | Manager | Last beat of the burst |
+| `WUSER` | 8 | Manager | User signal |
+| `WVALID` | 1 | Manager | Write data valid |
+| `WREADY` | 1 | Subordinate | Write data ready |
+
+**Write response channel**
+
+| Signal | Width | Source | Description |
+|---|---:|---|---|
+| `BID` | 8 | Subordinate | Response transaction ID |
+| `BRESP` | 2 | Subordinate | Write response |
+| `BUSER` | 8 | Subordinate | User signal |
+| `BVALID` | 1 | Subordinate | Write response valid |
+| `BREADY` | 1 | Manager | Write response ready |
+
+**Read address channel**
+
+| Signal | Width | Source | Description |
+|---|---:|---|---|
+| `ARID` | 8 | Manager | Read transaction ID |
+| `ARADDR` | 64 | Manager | Read address |
+| `ARLEN` | 8 | Manager | Burst length |
+| `ARSIZE` | 3 | Manager | Burst size |
+| `ARBURST` | 2 | Manager | Burst type |
+| `ARLOCK` | 1 | Manager | Lock type |
+| `ARCACHE` | 4 | Manager | Memory type |
+| `ARPROT` | 3 | Manager | Protection type |
+| `ARQOS` | 4 | Manager | Quality of service |
+| `ARREGION` | 4 | Manager | Region identifier |
+| `ARUSER` | 8 | Manager | User signal |
+| `ARVALID` | 1 | Manager | Read address valid |
+| `ARREADY` | 1 | Subordinate | Read address ready |
+
+**Read data channel**
+
+| Signal | Width | Source | Description |
+|---|---:|---|---|
+| `RID` | 8 | Subordinate | Read transaction ID |
+| `RDATA` | `W_data` | Subordinate | Read data |
+| `RRESP` | 2 | Subordinate | Read response |
+| `RLAST` | 1 | Subordinate | Last beat of the burst |
+| `RUSER` | 8 | Subordinate | User signal |
+| `RVALID` | 1 | Subordinate | Read data valid |
+| `RREADY` | 1 | Manager | Read data ready |
+
+### 6.3 NoC link interface
+
+Each link carries the three physical networks, and each network is an independent signal group in
+each direction. Flow control is credit based, with no ready signal. A flit transfers on a cycle
+where valid is high and the transmitter holds a credit for the target virtual channel. The receiver
+returns one credit per virtual channel as a buffer frees. Driven signals reset low.
+
+| Signal | Width | Source | Description |
+|---|---:|---|---|
+| `noc_req_valid` | 1 | Transmitter | `req` flit valid |
+| `noc_req_flit` | 165 | Transmitter | `req` flit, header and body |
+| `noc_req_credit` | `NUM_VC` | Receiver | `req` credit return |
+| `noc_rsp_valid` | 1 | Transmitter | `rsp` flit valid |
+| `noc_rsp_flit` | 139 | Transmitter | `rsp` flit, header and body |
+| `noc_rsp_credit` | `NUM_VC` | Receiver | `rsp` credit return |
+| `noc_wide_valid` | 1 | Transmitter | `wide` flit valid |
+| `noc_wide_flit` | 353, 641, or 1217 | Transmitter | `wide` flit, width by wide class, see §8 |
+| `noc_wide_credit` | `NUM_VC` | Receiver | `wide` credit return |
+
+---
+
+## 7. Configuration Options
 
 | Feature | Parameter | Values (default) | Comments |
 |---|---|---|---|
 | Topology | Mesh X and Y dimension | 2-16 (4) | Square meshes only. 256 nodes maximum, set by the 8-bit node ID |
 | AXI interface | Address width | 64 b | - |
 | AXI interface | ID width | 8 b | - |
-| AXI interface | `AWUSER` width | 18 b | 10 bits hold collective attributes, see §7 |
+| AXI interface | `AWUSER` width | 18 b | 10 bits hold collective attributes, see §8 |
 | AXI interface | `ARUSER`, `WUSER`, `RUSER`, `BUSER` width | 8 b | - |
 | AXI interface | Narrow class data width | 64 b | - |
 | AXI interface | Wide class data width | 256, 512, 1024 b (512) | §4 quotes derived bandwidth at 512 b |
@@ -241,7 +357,7 @@ arithmetic unit and no address decode.
 
 ---
 
-## 7. Packet Format
+## 8. Packet Format
 
 **Flit header, 56 b.** 43 b allocated, 13 b reserved.
 
@@ -382,7 +498,7 @@ narrower channels account for the remainder. `WideAw` is the outlier and falls f
 12.5 % as the wide class widens, since it rides `wide` for transaction ordering rather than for
 its size. That cost is one flit per write burst and amortizes over the burst length.
 
-### 7.1 AXI4 Compliance and Ordering
+### 8.1 AXI4 Compliance and Ordering
 
 Full AXI4 is supported: INCR / WRAP / FIXED bursts, narrow and unaligned transfers, `AxLOCK`,
 `AxCACHE`, `AxPROT`, `AxQOS`, `AxREGION`, and `xUSER`. Of the 18 `AWUSER` bits, 8 are carried
