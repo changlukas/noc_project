@@ -1,37 +1,35 @@
 # Collective-Capable AXI4 NoC Target Specification
 
-Revision 0.1, 2026-07-22, draft.
+Revision 0.2, 2026-07-23, draft.
 
 ## 1. Overview
 
 This specification defines an AXI4 network-on-chip for accelerators running tiled GEMM and
 multi-head attention, one compute tile per node on a 2D mesh.
 
-These workloads move the same data to many places. Every node in a row needs the same Q tile, and
-every node in a column the same K and V tiles. The output tile is then summed back across the row.
-On a unicast fabric each of these becomes a separate transfer per node, and they all queue at one
-port. Control traffic waiting behind them is delayed with them.
+These workloads move the same data to many places. Every node in a row needs the same query (Q)
+tile, and every node in a column the same key (K) and value (V) tiles. The output (O) tile is then
+summed back across the row. On a unicast fabric each of these becomes a separate transfer per node,
+and they all queue at one port. Control traffic waiting behind them is delayed with them.
 
-This fabric carries each pattern as one operation. A multicast delivers a tile to a whole row or
-column from a single write. A reduction sums the output tiles on their way to the destination, so
-one result arrives instead of many. Bulk data runs on a network of its own, so once injected a
-tile cannot hold up a control transaction.
+A multicast delivers a tile to a whole row or column from a single write. A reduction sums the
+output tiles on their way to the destination, so one result arrives instead of many. Bulk data runs
+on a network of its own, so once injected a tile cannot hold up a control transaction.
 
 ---
 
 ## 2. Benefits
 
-**Reduced operand distribution traffic.** In-network multicast replaces `N-1` unicast injections
-with one, cutting source-port traffic 15 x on a 16-node row when the source sits at one end of it.
+**Reduced operand distribution traffic.** In-network multicast replaces one unicast injection per
+other node in the set with one injection total, reducing source-port traffic by a factor of 15 on a
+16-node row when the source sits at one end of it.
 
 **Reduced root-port traffic for output accumulation.** Accumulating the output tile across a row
-sends `N-1` full tiles into one port under unicast. In-network combining leaves one arrival, or
-two when the root sits inside the row and each direction converges separately.
+sends one full tile per other node into a single port under unicast. In-network reduction leaves
+one arrival at an end root, or two at an interior root.
 
-**Control latency isolated from bulk data.** Tile payload never shares a network with control
-traffic, and the networks share no channel, buffer, or arbiter. With one endpoint interface the
-isolation starts once a transaction is injected. With one interface per AXI class it starts at the
-endpoint.
+**Control latency isolation from bulk data.** Tile payload never shares a network with control
+traffic.
 
 **AXI4 interface compatibility.** A master keeps its AXI4 channel set, handshake, and response
 rules unchanged. Collective attributes ride in 10 of the 18 `AWUSER` bits.
@@ -43,12 +41,13 @@ rules unchanged. Collective attributes ride in 10 of the 18 `AWUSER` bits.
 - 1 GHz NoC clock target
 - Full AXI4 protocol support
 - In-network multicast and reduction on the write path
-- Three physical networks, `req`, `rsp` and `wide`, sharing no channel, buffer, or arbiter
-- 64-bit narrow AXI class for control and synchronization, up to 1024-bit wide class for bulk data
-- One wide flit per AXI beat, so an endpoint is never throttled by flit serialization
-- Complexity at the network interface, leaving routers to route, replicate and merge
+- Three physical networks, `req`, `rsp` and `wide`, with no shared channel, buffer, or arbiter
+- 64-bit narrow AXI class for control and synchronization, 256, 512, or 1024-bit wide class for
+  bulk data
+- One wide flit per AXI beat
 - Wormhole switching, dimension-order (XY) routing, credit-based flow control
-- GALS multi-domain integration, endpoint clocks independent of the NoC clock
+- Globally asynchronous, locally synchronous integration, endpoint clocks independent of the
+  NoC clock
 
 **Scope.** Collectives cover a full row or a full column, not an arbitrary node set and not the
 whole mesh. The only reduction operator is addition on floating-point data, and the members of one
@@ -57,43 +56,95 @@ software over ordinary unicast.
 
 ---
 
-## 4. Performance Targets
+## 4. Performance
 
-Bandwidth is given as raw / data and applies to the `wide` network. Derivations are in §7.
+Bandwidth below is arithmetic on the configuration parameters. Delivered throughput and latency
+depend on traffic, routing delay and buffering, and follow from the models in this section once
+those terms are measured.
 
-| Metric | 16 x 16 (max) | 4 x 4 (default) |
-|---|---:|---:|
-| Bisection bandwidth | 4.87 / 4.10 TB/s | 1.22 / 1.02 TB/s |
-| Aggregate injection bandwidth | 38.9 / 32.8 TB/s | 2.43 / 2.05 TB/s |
-| Source or root port traffic ratio, at one end of the set | 15 x | 3 x |
+**Payload bandwidth.** A channel carries one flit per cycle and a flit holds at most one data width
+of AXI payload, so payload bandwidth is data width x 1 GHz / 8. The wide class is shown at 512 b.
 
-**Collective phase latency.** For a row or column collective with `N` members and tile length `L`:
+| AXI traffic | Data width | Physical network | Payload bandwidth |
+|---|---:|---|---:|
+| Narrow req | 64 b | `req` | 8 GB/s |
+| Narrow rsp | 64 b | `rsp` | 8 GB/s |
+| Wide req | 512 b | `wide` | 64 GB/s |
+| Wide rsp | 512 b | `wide` | 64 GB/s |
+
+Request traffic carries write data, response traffic carries read data. Narrow req and rsp take
+separate networks and run concurrently. Wide req and rsp share the `wide` network, so 64 GB/s is
+their combined ceiling. Flit width and per-channel utilization are in §7.
+
+**Off-chip access.** These workloads are bounded by off-chip memory bandwidth, and a row or column
+of `k` tiles reuses one operand of size `L`. Under per-tile fetch every tile reads the operand from
+memory. A collective reads it once and shares it on-chip. Where partial outputs would otherwise be
+written to memory independently, a reduction sums the `k` partial tiles to one before writeback.
 
 ```text
-unicast              (N-1)L + (H_max + 1) t_r
-in-network multicast      L + (H_max + 1) t_r
-in-network reduction      L + (H_max + 1) t_r + D C_offload
+                off-chip access    latency
+per-tile fetch  k L                k L / B
+collective      L                  L / B
 
-  N          nodes in the set, including the source or root
-  L          tile payload length, in data flits
-  H_max      hops from the source or root to the farthest member
-  t_r        router pipeline latency per hop, in cycles
-  D          joins on the critical path of a reduction
-  C_offload  combine round trip to the compute tile and back, in cycles
+  k  tiles in the participating row or column
+  L  operand tile size
+  B  off-chip memory bandwidth
 ```
 
-Injection is one flit per cycle, so `L` is in cycles, and the forms above take a source or root at
-one end of its set. An interior one is served by two paths, which doubles the in-network
-serialization term.
-The transport term is identical in all three, and a collective replaces the `(N-1)L` serialization
-at one port with a single tile. A multicast carries no further term. A reduction adds one offload
-round trip per join on the critical path, `D` of them, and is the shorter form while
-`D C_offload` stays below `(N-2)L`. The inner loop issues three multicasts and one reduction, all
-on a tile of the same size. Absolute latency follows from `L` and `C_offload`, neither of which is
-characterized.
+The off-chip access and the off-chip-bandwidth term of latency each drop by `k`, since that term
+tracks access on a memory-bound path. The remaining subsections size the on-chip cost the collective
+adds in place of that access.
 
-Area and energy are open characterization items, concentrated in the additional crossbars, since
-the three networks share no datapath.
+**Latency.** Zero-load latency is the floor reached with no queueing. A packet crossing `H` hops
+traverses `H` links and passes `H` + 1 routers, counting the source router.
+
+```text
+T_zero_load = H t_wire + (H + 1) t_router + L
+
+  H            Manhattan hop count from source to destination
+  t_wire       link traversal delay per hop, in NoC cycles
+  t_router     router pipeline latency per hop, in NoC cycles
+  L            tile payload length in flits, injected one flit per cycle
+```
+
+Mean hop count in a `k x k` mesh is `2(k^2 - 1) / (3k)`, 2.5 at `k` = 4 and 10.625 at `k` = 16.
+
+Tail arrival at the farthest member of a row or column collective:
+
+| Case | Form |
+|---|---|
+| Repeated unicast | `(k - 1)L + H_max t_wire + (H_max + 1) t_router` |
+| In-network multicast | `L + H_max t_wire + (H_max + 1) t_router` |
+| In-network reduction | `L + H_max t_wire + (H_max + 1) t_router + H_max C_offload` |
+
+```text
+  k          nodes in the participating row or column
+  L          tile payload length in flits, tile bytes / (W_data / 8)
+  H_max      maximum hop count from the source or root to a member of its set, and the
+             number of joins on the critical path of a reduction
+  C_offload  combine round trip to the compute tile, in NoC cycles
+```
+
+The transport term is identical in all three. A collective replaces the `(k - 1)L` serialization at
+one port with a single tile. A reduction is the shorter form while `H_max C_offload` stays below
+`(k - 2)L`. At one end of the set `H_max` is `k - 1`, at the centre `⌊k/2⌋`.
+
+**Collective traffic reduction.** Counting results on a row or column of `k` nodes.
+
+| Quantity | Unicast | In network | Ratio, `k` = 4 | Ratio, `k` = 16 |
+|---|---|---|---:|---:|
+| Source or root network port flits | `(k - 1)L` | `L` per path | 3 x | 15 x |
+| Flit hops | `L [s(s + 1)/2 + (k - 1 - s)(k - s)/2]` | `L(k - 1)` | 2 x | 8 x |
+
+```text
+  s  source or root index in the row or column, 0 to k - 1
+```
+
+Both ratios are for a source or root at one end of the set. An interior one is served by one path
+per direction, which halves the port ratio and lowers the flit-hop ratio to 1.33 x at `k` = 4 and
+4.27 x at `k` = 16. A reduction moves the root's traffic to the joining nodes rather than removing
+it, since each join passes its operand to the compute tile and takes the combined result back
+across its own local port.
 
 ---
 
@@ -124,7 +175,9 @@ collective takes, and a reduction retraces the multicast path in reverse.
     y3    │ Tile  │───│ Tile  │───│ Tile  │───│ Tile  │
           └───────┘   └───────┘   └───────┘   └───────┘
 
-          every link = req 175 b + rsp 139 b + wide 1217 b, 4 x 4 shown, 16 x 16 max
+          every link, per direction, flit wires only
+          req 165 b + rsp 139 b + wide 353 / 641 / 1217 b
+          4 x 4 shown, 16 x 16 max
 ~~~
 
 Inside one node:
@@ -137,224 +190,79 @@ Inside one node:
    │  tile      │ ────────────▶│   interface    │──────▶│  XY route    │
    │  + FPU     │  addr 64 │   │                │       │  VC allocate │  rsp  ══▶
    │  (master)  │  ID 8    │   │  address map   │       │  replicate   │  wide ══▶
-   │            │◀═════════════│  packetise     │◀═════▶│  merge       │  ◀══ 4 neighbours
-   │            │  offload │   │  depacketise   │       │              │
-   └────────────┘          │   │  reorder buf   │       │              │
+   │            │◀═════════════│  packetize     │◀═════▶│  merge       │  ◀══ 4 neighbours
+   │            │  offload │   │  depacketize   │       │              │
+   └────────────┘          │   │  response order│       │              │
    ┌────────────┐          │   │                │       │              │
    │  Local     │◀─────────────│                │◀──────│              │
    │  memory    │   AXI4   │   └────────────────┘       └──────────────┘
-   │  (slave)   │  64/1024 │
+   │  (slave)   │ data 512 │
    └────────────┘          │
 ~~~
 
-Bulk data is kept off the networks that carry control traffic, and small messages are kept off a
-wide flit they would barely fill. The split is physical rather than virtual, since link wires are
-plentiful in modern nodes while router buffers and crossbar area are not.
+The split is physical rather than virtual, trading additional link wires for reduced sharing of
+router buffering and arbitration. Separate request and response networks are required for
+message-level forward progress, so that a node can always accept a response while its own request
+path is blocked.
 
-Complexity sits at the network interface. A router routes, replicates, and merges, and holds no
-arithmetic and no address decode, which is what puts a 3 to 5 cycle pipeline within reach at
-1 GHz.
+Complexity sits at the network interface. A router routes, replicates, and merges. It holds no
+arithmetic unit and no address decode.
 
 **Requirements on the fabric.**
 
-| | |
+| Requirement | Statement |
 |---|---|
-| AXI4 response contract | One `B` per `AW`, and an error `BRESP` dominates when a multicast write is answered by several targets |
+| AXI4 response contract | One `B` per `Aw`, and an error `BRESP` dominates when a multicast write is answered by several targets |
 | Ordering | Responses reach a master in AXI order within an ID in every configuration |
-| Reduction arithmetic | Performed by the compute tile, reached through the network interface. No router holds an arithmetic unit |
+| Reduction arithmetic | Performed by the compute tile. No router holds an arithmetic unit |
 | Freedom from deadlock | Guaranteed at one virtual channel per network channel, with collectives enabled |
 | Write data pairing | A target pairs each write request with its own write data, whatever the mix of sources |
+| Credit capacity | Every credit-controlled receiver holds at least one flit per virtual channel per cycle of buffer turnaround time, below which a link idles with no contention present |
 
 ---
 
 ## 6. Configuration Options
 
-| Option | Supported values |
-|---|---|
-| Mesh dimensions | up to 16 x 16, 256 nodes |
-| Virtual channels per network channel | 1 to 8 |
-| Outstanding transactions per ID | up to 32, within the 256 a master holds in total |
-| Narrow AXI class data width | 64 b |
-| Wide AXI class data width | up to 1024 b |
-| Address apertures per node | one per AXI class, uniform across nodes, power of two, loaded at runtime |
-| Endpoint AXI interfaces | one at the wide data width, class selected by address aperture, or two, one per class |
-| Per-ID reorder buffer | enabled, or disabled with same-ID outstanding limited to 1 |
+| Feature | Parameter | Values (default) | Comments |
+|---|---|---|---|
+| Topology | Mesh X and Y dimension | 2-16 (4) | Square meshes only. 256 nodes maximum, set by the 8-bit node ID |
+| AXI interface | Address width | 64 b | - |
+| AXI interface | ID width | 8 b | - |
+| AXI interface | `AWUSER` width | 18 b | 10 bits hold collective attributes, see §7 |
+| AXI interface | `ARUSER`, `WUSER`, `RUSER`, `BUSER` width | 8 b | - |
+| AXI interface | Narrow class data width | 64 b | - |
+| AXI interface | Wide class data width | 256, 512, 1024 b (512) | §4 quotes derived bandwidth at 512 b |
+| AXI interface | Endpoint interfaces | 1, 2 (1) | One interface carries both classes with the class selected by address aperture. Two carry one class each |
+| Flow control | Virtual channels per network channel | 1-8 (1) | - |
+| Ordering | Outstanding transactions per ID | 1-32 (32) | 1 when same-ID response reordering is disabled. A master holds at most 256 in total, one per `ordering_tag` |
+| Ordering | Same-ID response reordering | enabled, disabled (enabled) | - |
+| Address map | Apertures per node | 1, 2 (2) | One per AXI class. Uniform across nodes, loaded at runtime |
+| Address map | Aperture size | power of two | - |
 
 ---
 
-## 7. Performance Model
+## 7. Packet Format
 
-### 7.1 Notation
-
-| Symbol | Meaning |
-|---|---|
-| `k` | Mesh dimension. The fabric has `k x k` nodes |
-| `N` | Nodes in the participating row or column, so `N` = `k` in this scope |
-| `s` | Source index in a row or column, numbered `0` to `k - 1` |
-| `L` | Tile payload length in data flits, excluding address and response flits |
-| `H` | Manhattan hop count from source to destination |
-| `H_max` | Maximum hop count from a source or root to a member of its set |
-| `H_mean` | Mean hop count between two uniformly selected nodes |
-| `H_worst` | Corner to corner hop count |
-| `t_r` | Router pipeline latency per hop, in NoC cycles |
-| `C_offload` | Combine round trip to the compute tile and back, in NoC cycles |
-| `D` | Joins on the critical path of a reduction |
-| `f_noc` | NoC clock frequency |
-| `W_raw` | Physical flit width, in bits |
-| `W_data` | AXI data width, the delivered data per beat, in bits |
-| `B_link` | Bandwidth of one simplex channel, in B/s |
-| `T_head` | Zero-load head-flit latency |
-
-| Parameter | Value |
-|---|---:|
-| `f_noc` | 1 GHz |
-| `t_r` | 3 to 5 cycles |
-| `req` `W_raw` / `W_data` | 175 / 64 b |
-| `rsp` `W_raw` / `W_data` | 139 / 64 b |
-| `wide` `W_raw` / `W_data` | 1217 / 1024 b |
-
-### 7.2 Throughput
-
-```text
-B_link_raw  = W_raw  f_noc / 8
-B_link_data = W_data f_noc / 8
-
-  B_link_raw   bandwidth of one simplex channel carrying flits, in B/s
-  B_link_data  the part of it that is AXI data, in B/s
-  W_raw        physical flit width, in bits
-  W_data       AXI data width, the delivered data per beat, in bits
-  f_noc        NoC clock frequency
-
-req      W_raw  175 b ->  21.875 GB/s,  W_data   64 b ->   8 GB/s
-rsp      W_raw  139 b ->  17.375 GB/s,  W_data   64 b ->   8 GB/s
-wide     W_raw 1217 b -> 152.125 GB/s,  W_data 1024 b -> 128 GB/s
-```
-
-Bisection counts the `2k` simplex channels crossing a vertical bisection, where a bidirectional
-link counts as two channels. Aggregate injection counts all `k^2` local ports feeding the `wide`
-network at line rate.
-
-```text
-B_bisection = 2k  B_link
-B_injection = k^2 B_link
-
-  B_bisection  bandwidth across a vertical cut of the mesh
-  B_injection  bandwidth of all local ports injecting at line rate
-  B_link       bandwidth of one simplex channel, in B/s
-  k            mesh dimension, so the fabric holds k x k nodes
-```
-
-| Mesh | Bisection raw | Bisection data | Aggregate raw | Aggregate data |
-|---|---:|---:|---:|---:|
-| `4 x 4` | 1.217 TB/s | 1.024 TB/s | 2.434 TB/s | 2.048 TB/s |
-| `16 x 16` | 4.868 TB/s | 4.096 TB/s | 38.944 TB/s | 32.768 TB/s |
-
-### 7.3 Zero-Load Head-Flit Latency
-
-A head flit crossing `H` hops passes `H + 1` routers, counting the source router. Serialization
-occupies the source port for `L` cycles and is counted separately in §7.6.
-
-```text
-T_head = (H + 1) t_r
-
-  T_head  zero-load head-flit latency
-  H       Manhattan hop count from source to destination
-  t_r     router pipeline latency per hop, in cycles
-```
-
-Mean Manhattan distance between two uniformly selected nodes in a `k x k` mesh is
-`2(k^2 - 1) / 3k`. Worst case is corner to corner, `2(k - 1)`.
-
-| Mesh | `H_mean` | `H_worst` |
-|---|---:|---:|
-| `4 x 4` | 2.5 | 6 |
-| `16 x 16` | 10.625 | 30 |
-
-A collective sets `H_max` from the shape of its set rather than from these, see §7.6.
-
-### 7.4 Source and Root Network Port Traffic
-
-| Case | Flits at the source or root network port |
-|---|---:|
-| Unicast baseline | `(N - 1)L` |
-| In-network collective | `L` per path |
-
-The traffic ratio is measured at the source port for multicast and at the root port for
-reduction, against a baseline of repeated unicast from a single port. With the source or root at
-one end of the set the ratio is `N - 1`. An interior one is served by two paths, so a source emits
-one packet per direction and a root receives one per direction, which halves it either way.
-
-### 7.5 Flit-Hop Traffic
-
-Traffic is counted in flit-hops.
-
-| Case | Flit-hops, row or column of `k` with the source at `s` |
-|---|---:|
-| Unicast baseline | `L [s(s + 1)/2 + (k - 1 - s)(k - s)/2]` |
-| In-network multicast | `L(k - 1)` |
-
-For a source at one end, `s = 0` or `s = k - 1`, the baseline reduces to `L k(k - 1)/2` and the
-flit-hop ratio to `k/2`. A centered source gains less because its unicast destinations are
-closer on average.
-
-| Row or column size | Flit-hop ratio, source at one end | Source centered |
-|---|---:|---:|
-| `k = 4` | `2 x` | `1.33 x` |
-| `k = 16` | `8 x` | `4.27 x` |
-
-A join point combines two operands and forwards one, so every downstream link carries `L` flits
-once and a reduction has the same flit-hop count as a multicast.
-
-### 7.6 Collective Tail Latency
-
-The three forms in §4 give tail arrival at the farthest destination, with one flit per cycle
-injection, and subtracting the unicast and reduction forms gives the condition stated there.
-
-Both `H_max` and `D` follow from where the source or root sits. At one end of the set the chain
-is serial, giving `H_max` = `k - 1` and `D` = `k - 1`. At the centre the two halves converge
-in parallel, giving `H_max` = `⌊k/2⌋` and `D` about `k/2`, while the two paths share one network
-port and so double the serialization term to `2L`.
-
-### 7.7 Model Assumptions
-
-| Assumption | Effect |
-|---|---|
-| Zero load | No queueing, contention, or credit-stall delay is included |
-| Synchronous endpoints | GALS clock-domain crossing at the AXI boundary is excluded |
-| `C_offload` not characterized | The combine round trip appears in the model but has no measured value |
-| Back-to-back unicast baseline | The baseline injects `N - 1` copies from one source port or receives `N - 1` arrivals at one root port |
-
----
-
-## 8. Packet Format
-
-**Flit header, 56 b.** 42 b allocated, 14 b reserved.
+**Flit header, 56 b.** 43 b allocated, 13 b reserved.
 
 | Field | Bits | Width | Note |
 |---|---|---|---|
-| `axi_ch` | [2:0] | 3 | AXI channel code |
-| `src_id` | [10:3] | 8 | source node, `{y[3:0], x[3:0]}` |
-| `dst_id` | [18:11] | 8 | destination node, same composition |
-| `vc_id` | [21:19] | 3 | virtual channel index, 0 to one less than the configured count |
-| `flit_tail` | [22] | 1 | 1 = last flit of the packet |
-| `ordering_req` | [23] | 1 | 1 = `ordering_tag` is valid |
-| `ordering_tag` | [31:24] | 8 | reorder slot handle, one per transaction, so a master holds at most 256 outstanding |
-| `collective_op` | [33:32] | 2 | see encoding below |
-| `collective_mask` | [41:34] | 8 | wildcard node mask, same composition as `dst_id` |
-| `rsvd` | [55:42] | 14 | reserved, transmitted as zero |
+| `axi_ch` | [3:0] | 4 | channel type, one of the ten in the mapping table |
+| `src_id` | [11:4] | 8 | source node, `{y[3:0], x[3:0]}` |
+| `dst_id` | [19:12] | 8 | destination node, same composition |
+| `vc_id` | [22:20] | 3 | virtual channel index, 0 to one less than the configured count |
+| `flit_tail` | [23] | 1 | 1 = last flit of the packet |
+| `ordering_req` | [24] | 1 | 1 = `ordering_tag` is valid |
+| `ordering_tag` | [32:25] | 8 | reorder slot handle, one per transaction, so a master holds at most 256 outstanding |
+| `collective_op` | [34:33] | 2 | see encoding below |
+| `collective_mask` | [42:35] | 8 | wildcard node mask, same composition as `dst_id` |
+| `rsvd` | [55:43] | 13 | reserved, transmitted as zero |
 
-The 8-bit node ID limits the mesh to 16 x 16 nodes.
-
-**`axi_ch` encoding**
-
-| Value | Channel |
-|---|---|
-| 0 | AW |
-| 1 | W |
-| 2 | AR |
-| 3 | B |
-| 4 | R |
-| 5 to 7 | reserved |
+`axi_ch` names which of the ten channel types in the mapping table a flit carries. Ten codes are
+needed rather than five, since `req` carries both `NarrowAr` and `WideAr` and `rsp` carries both
+`NarrowB` and `WideB`, so the network a flit arrives on does not by itself identify the AXI class.
+The value assignment is local to a configuration and is not fixed here. `collective_op` is
+different, since a master writes it through `AWUSER`, so its values are part of the interface.
 
 **`collective_op` encoding**
 
@@ -365,7 +273,7 @@ The 8-bit node ID limits the mesh to 16 x 16 nodes.
 | 2 | `REDUCE` | on a request, combine operands from the set named by `collective_mask` into one arrival at `dst_id`, with addition as the operator. On a response, replicate the single response back to the set |
 | 3 | reserved | |
 
-Collectives exist only on the write path, so `AR` and `R` are always `UNICAST`. A response carries
+Collectives exist only on the write path, so `Ar` and `R` are always `UNICAST`. A response carries
 the dual of the code its request carried, so a `MULTICAST` write is answered by a merge and a
 `REDUCE` write by a replication. An operand is fetched once by an ordinary read, then distributed
 by one multicast write.
@@ -377,8 +285,8 @@ from the set, so it names the same nodes on a request and on the response that a
 | `collective_mask` | Node set |
 |---|---|
 | all zero | a single node |
-| x field all ones | the whole row, Y fixed |
-| y field all ones | the whole column, X fixed |
+| x bits in use all ones | the whole row, Y fixed |
+| y bits in use all ones | the whole column, X fixed |
 
 Only the id bits in use by the configured mesh are set, so the row mask is `0000_1111` at
 16 x 16 and `0000_0011` at 4 x 4. Other patterns are reserved.
@@ -386,7 +294,7 @@ Only the id bits in use by the configured mesh are set, so the row mask is `0000
 The named set holds `k` nodes and includes the source. A source is not a destination of its own
 multicast and a root does not send to itself, so both collectives move `k - 1` operand tiles.
 
-**`awuser` layout, 18 b.** `aruser` is 8 b.
+**`AWUSER` layout, 18 b.** `ARUSER` is 8 b.
 
 | Field | Bits | Width |
 |---|---|---|
@@ -396,29 +304,89 @@ multicast and a root does not send to itself, so both collectives move `k - 1` o
 
 **Channel to network mapping.** A channel rides the network that suits its direction and its
 message size. Narrow-class requests and responses take separate networks so that a receiver can
-always accept a response. A wide read request and a wide write response are small, so they ride
-`req` and `rsp` rather than occupy a wide flit. A wide write request is the exception: it stays on
-`wide` with its write data, because AXI4 gives `W` no ID and a target pairs write data with write
-requests by arrival order alone. A shared network does not by itself order flits that take
-different virtual channels, so all `AW` and `W` from one source to one destination take the same
-virtual channel, and wormhole allocation keeps each write burst contiguous. Ordering across sources
-is settled at the destination: the target NI presents each write request together with its own
-write data, so bursts from different sources cannot be paired with the wrong request.
+always accept a response. `WideAr` and `WideB` are small, so they ride `req` and `rsp` rather than
+occupy a wide flit. `WideAw` is the exception: it stays on `wide` with its write data, because
+AXI4 gives `W` no ID, a target pairs write data with write requests by arrival order alone, and
+two networks do not carry equal congestion.
 
-| Channel | Fields | 64-bit class | 1024-bit class |
-|---|---|---|---|
-| `AW` | id 8, addr 64, len 8, size 3, burst 2, cache 4, lock 1, prot 3, region 4, qos 4, user 18 | 119 b, `req` | 119 b, `wide` |
-| `AR` | as `AW` with `aruser` 8 b | 109 b, `req` | 109 b, `req` |
-| `W` | last 1, user 8, strb `W_data`/8, data `W_data` | 81 b, `req` | 1161 b, `wide` |
-| `B` | id 8, resp 2, user 8 | 18 b, `rsp` | 18 b, `rsp` |
-| `R` | last 1, id 8, resp 2, user 8, data `W_data` | 83 b, `rsp` | 1043 b, `wide` |
+**Channel bodies.** A body excludes the 56 b header.
 
-Each network is as wide as the widest body it carries. `req` is sized by `AW` at 119 b, `rsp` by
-the narrow `R` at 83 b, and `wide` by `W` at 1161 b, giving flits of 175 b, 139 b and 1217 b.
+| Channel | Fields | Body |
+|---|---|---|
+| `Aw` | id 8, addr 64, len 8, size 3, burst 2, cache 4, lock 1, prot 3, region 4, qos 4, user 8, the opaque `AWUSER` remainder | 109 b |
+| `Ar` | as `Aw`, carrying `ARUSER` in place of the opaque `AWUSER` bits | 109 b |
+| `W` | last 1, user 8, strb `W_data`/8, data `W_data` | `9 + 9 W_data / 8` |
+| `B` | id 8, resp 2, user 8 | 18 b |
+| `R` | last 1, id 8, resp 2, user 8, data `W_data` | `19 + W_data` |
 
-### 8.1 AXI4 Compliance and Ordering
+**Mapping.**
 
-The full AXI4 signal set is transported on every channel: INCR / WRAP / FIXED bursts, narrow and
-unaligned transfers, `AxLOCK`, `AxCACHE`, `AxPROT`, `AxQOS`, `AxREGION`, and `xUSER`. Of the 18
-`AWUSER` bits, 8 are carried opaquely and 10 hold collective attributes. Outstanding transactions
-may complete out of order across IDs.
+| AXI channel | Network | Body |
+|---|---|---:|
+| `NarrowAw` | `req` | 109 b |
+| `NarrowAr` | `req` | 109 b |
+| `NarrowW` | `req` | 81 b |
+| `NarrowR` | `rsp` | 83 b |
+| `NarrowB` | `rsp` | 18 b |
+| `WideAw` | `wide` | 109 b |
+| `WideAr` | `req` | 109 b |
+| `WideW` | `wide` | `9 + 9 W_data / 8` |
+| `WideR` | `wide` | `19 + W_data` |
+| `WideB` | `rsp` | 18 b |
+
+Each network is as wide as the widest body it carries, plus the header.
+
+```text
+req  = max(NarrowAw 109, NarrowAr 109, NarrowW 81, WideAr 109) + 56 = 165 b
+rsp  = max(NarrowR 83, NarrowB 18, WideB 18)                   + 56 = 139 b
+wide = max(WideAw 109, WideW, WideR)                           + 56
+```
+
+`req` is sized by its address channels and `rsp` by `NarrowR`, none of which depends on the wide
+class, so both are fixed. Only `wide` follows `W_data`, and `WideW` exceeds `WideR` by
+`W_data / 8 - 10` bits, so `WideW` sets the width at every supported value. The wide flit is
+353, 641, or 1217 b for a wide class of 256, 512, or 1024 b, tabulated by channel below.
+
+**Field utilization.** The 13 reserved header bits carry no information, so they count in `W_raw`
+but never in the used total. Field utilization is what the flit carries. Data utilization is the
+AXI payload alone, and applies only to a data-bearing channel.
+
+```text
+field utilization = (43 + body) / W_raw
+data  utilization = W_data / W_raw
+
+  43      allocated header bits, excluding the 13 reserved
+  body    channel body width, from the channel bodies table
+  W_raw   physical flit width of the network, in bits
+  W_data  data width of the AXI class the channel belongs to, in bits
+```
+
+| Network | Channel | Body | Field | Data |
+|---|---|---:|---:|---:|
+| `req` 165 b | `NarrowAw`, `NarrowAr`, `WideAr` | 109 b | 92.1 % | |
+| | `NarrowW` | 81 b | 75.2 % | 38.8 % |
+| `rsp` 139 b | `NarrowR` | 83 b | 90.6 % | 46.0 % |
+| | `NarrowB`, `WideB` | 18 b | 43.9 % | |
+| `wide` 353 b, 256 b data | `WideW` | 297 b | 96.3 % | 72.5 % |
+| | `WideR` | 275 b | 90.1 % | 72.5 % |
+| | `WideAw` | 109 b | 43.1 % | |
+| `wide` 641 b, 512 b data | `WideW` | 585 b | 98.0 % | 79.9 % |
+| | `WideR` | 531 b | 89.5 % | 79.9 % |
+| | `WideAw` | 109 b | 23.7 % | |
+| `wide` 1217 b, 1024 b data | `WideW` | 1161 b | 98.9 % | 84.1 % |
+| | `WideR` | 1043 b | 89.2 % | 84.1 % |
+| | `WideAw` | 109 b | 12.5 % | |
+
+The channel that sets each network width runs at 90 % or above, so the reserved bits and the
+narrower channels account for the remainder. `WideAw` is the outlier and falls from 43.1 % to
+12.5 % as the wide class widens, since it rides `wide` for transaction ordering rather than for
+its size. That cost is one flit per write burst and amortizes over the burst length.
+
+### 7.1 AXI4 Compliance and Ordering
+
+Full AXI4 is supported: INCR / WRAP / FIXED bursts, narrow and unaligned transfers, `AxLOCK`,
+`AxCACHE`, `AxPROT`, `AxQOS`, `AxREGION`, and `xUSER`. Of the 18 `AWUSER` bits, 8 are carried
+opaquely in the packet body and 10 hold collective attributes, which
+the fabric lifts into the flit header and does not also carry in the body. A target receives those
+10 bits cleared, since the fabric has already acted on them. Outstanding transactions may complete
+out of order across IDs.
