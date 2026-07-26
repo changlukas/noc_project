@@ -1,0 +1,86 @@
+[
+  {
+    "id": "b-response-merge",
+    "question": "How are the multiple write responses produced by a multicast write combined into one?",
+    "golden_source": "floonoc-collectives.md",
+    "golden_phrase": "CollectB"
+  },
+  {
+    "id": "reduction-concurrency-limit",
+    "question": "What restriction limits how many reductions a router performs at once, and why is it there?",
+    "golden_source": "floonoc-collectives.md",
+    "golden_phrase": "single reduction operation"
+  },
+  {
+    "id": "collective-region-shape",
+    "question": "What shape must the region of nodes targeted by a collective operation form?",
+    "golden_source": "floonoc-collectives.md",
+    "golden_phrase": "submesh"
+  },
+  {
+    "id": "reduction-arithmetic-location",
+    "question": "Where is the arithmetic of an in-network reduction actually performed if the router has no ALU?",
+    "golden_source": "floonoc-collectives.md",
+    "golden_phrase": "offload interface"
+  },
+  {
+    "id": "collective-area-cost",
+    "question": "What router area overhead does collective communication support cost?",
+    "golden_source": "floonoc-collectives.md",
+    "golden_phrase": "16.9"
+  },
+  {
+    "id": "two-dimensional-reduction",
+    "question": "How is a two-dimensional reduction decomposed on a mesh?",
+    "golden_source": "floonoc-collectives.md",
+    "golden_phrase": "column-wise"
+  },
+  {
+    "id": "axi-multicast-encoding",
+    "question": "How is a multicast destination set carried over AXI without breaking protocol compatibility?",
+    "golden_source": "axi-multicast-crossbar.md",
+    "golden_phrase": "aw_user"
+  },
+  {
+    "id": "multicast-error-response",
+    "question": "What write response is returned when one target of a multicast write reports an error?",
+    "golden_source": "axi-multicast-crossbar.md",
+    "golden_phrase": "SLVERR"
+  },
+  {
+    "id": "b-handshake-join",
+    "question": "What mechanism holds the write response handshake until every target has answered?",
+    "golden_source": "axi-multicast-crossbar.md",
+    "golden_phrase": "stream_join_dynamic"
+  },
+  {
+    "id": "kv-multicast-axis",
+    "question": "Along which axis are the K and V slices distributed in the FlatAttention dataflow?",
+    "golden_source": "flatattention.md",
+    "golden_phrase": "multicasting them column-wise"
+  },
+  {
+    "id": "flatattention-utilization",
+    "question": "What peak utilization does FlatAttention report, and against which baseline?",
+    "golden_source": "flatattention.md",
+    "golden_phrase": "89.3"
+  },
+  {
+    "id": "router-flow-control",
+    "question": "What flow control mechanism do the fabric routers use between neighbours?",
+    "golden_source": "floonoc.md",
+    "golden_phrase": "valid-ready handshake"
+  },
+  {
+    "id": "why-no-header-tail-flits",
+    "question": "Why is serializing a packet into header and tail flits inefficient on a wide physical link?",
+    "golden_source": "floonoc.md",
+    "golden_phrase": "single flit"
+  },
+  {
+    "id": "dataflow-partial-sums",
+    "question": "In a weight-stationary dataflow, which operands move across the processing element array?",
+    "golden_source": "in-network-accumulation.md",
+    "golden_phrase": "partial sums"
+  }
+]

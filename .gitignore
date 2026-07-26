@@ -88,3 +88,10 @@ sim/tools/saturation.png
 sim/tools/injection_sweep.csv
 sim/tools/injection_sweep.png
 sim/tools/injection_sweep_dark.png
+
+# Knowledge-base sources and derived index. The manifest and the extraction scripts
+# are tracked, the source content is not: it is third-party copyrighted material and
+# is reproducible from the manifest.
+kb/corpus/*.pdf
+kb/corpus/*.md
+kb/index.npz
