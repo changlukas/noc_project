@@ -89,9 +89,8 @@ sim/tools/injection_sweep.csv
 sim/tools/injection_sweep.png
 sim/tools/injection_sweep_dark.png
 
-# Knowledge-base sources and derived index. The manifest and the extraction scripts
-# are tracked, the source content is not: it is third-party copyrighted material and
-# is reproducible from the manifest.
+# Knowledge-base binaries and derived index. Text extractions are tracked so the
+# corpus travels with the repository; the source PDFs and the embedding index are
+# rebuildable from the manifest and the extraction scripts.
 kb/corpus/*.pdf
-kb/corpus/*.md
 kb/index.npz
