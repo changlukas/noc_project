@@ -4,39 +4,39 @@ Revision 0.2, 2026-07-23, draft.
 
 ## 1. Overview
 
-This specification defines an AXI4 network-on-chip for accelerators running multi-head attention,
-one compute tile per node on a 2D mesh.
+This IP is a collective-capable, AMBA AXI4-compliant network-on-chip (NoC) for transformer
+attention accelerators, organized as one compute tile per node on a 2D mesh. It accelerates
+multi-head attention by distributing shared operands through hardware multicast and by isolating
+latency-critical control traffic from bulk data on dedicated physical networks, while presenting a
+standard AXI4 interface to every compute tile.
 
-The workload moves the same data to many places. A group of tiles computes one attention block,
-every node in a row of that group needs the same query (Q) sub-tile, and every node in a column
-needs the same key (K) and value (V) sub-tiles. On a unicast fabric every node fetches the shared
-operand for itself, so one sub-tile is read once per node instead of once per row, and those
-transfers all queue at one port. Control traffic waiting behind them is delayed with them.
+The two planes serve the two communication patterns of an attention layer.
 
-A multicast delivers a sub-tile to the whole row or column from a single write, and the fabric
-returns one response for it. Bulk data runs on a network of its own, so once injected a sub-tile
-cannot hold up a control transaction.
+- **Wide data plane, operand distribution (one-to-many).** Attention tiles a query-by-key matrix
+  multiply across the mesh, so tiles in a row share one query operand and tiles in a column share one
+  key and value operand. The wide plane carries these bulk tensors: the shared Q, K, and V operands,
+  activation tiles between stages, and the output write-back. The fabric distributes each shared
+  operand with a single hardware multicast instead of one copy per tile.
+- **Narrow control plane, coordination and gather (many-to-one).** Attention then combines results
+  across the group. The narrow plane carries the small, latency-critical messages of that step, the
+  softmax statistics (row maximum and running denominator), inter-tile synchronization, barriers, and
+  scheduling traffic, and it merges the responses of a multicast write into one.
+
+**Highlights**
+
+- **Hardware multicast** on the write path. One injection replaces one unicast per destination,
+  reducing source-port bandwidth by up to 15x on a 16-node set.
+- **Write-response aggregation.** Multicast responses are merged into a single AXI response, with an
+  error response taking precedence.
+- **Dual-plane traffic isolation.** A 64-bit narrow control plane and a 256, 512, or 1024-bit wide
+  data plane on physically separate networks, isolating high-bandwidth data bursts from
+  latency-sensitive control traffic.
+- **AXI4-compatible interface.** Endpoints expose standard AXI4 channels. Unicast traffic needs no
+  changes, and a collective write encodes its operation and mask in `AWUSER`.
 
 ---
 
-## 2. Benefits
-
-**Reduced operand distribution traffic.** In-network multicast replaces one unicast injection per
-other node in the set with one injection total, reducing source-port traffic by a factor of 15 on a
-16-node row when the source sits at one end of it.
-
-**Reduced external memory traffic.** A shared operand is fetched once per row or column rather than
-once per node, so external traffic for that operand falls by the length of the set.
-
-**Control latency isolation from bulk data.** Tile payload never shares a network with control
-traffic.
-
-**AXI4 interface compatibility.** A master keeps its AXI4 channel set, handshake, and response
-rules unchanged. Collective attributes ride in 10 of the 18 `AWUSER` bits, see §8.
-
----
-
-## 3. Key Features
+## 2. Key Features
 
 - 1 GHz NoC clock target
 - Full AXI4 protocol support
@@ -60,95 +60,122 @@ rules unchanged. Collective attributes ride in 10 of the 18 `AWUSER` bits, see �
 
 ---
 
-## 4. Performance
+## 3. Performance
 
-Bandwidth below is arithmetic on the configuration parameters. Delivered throughput and latency
-depend on traffic, routing delay and buffering, and follow from the models in this section once
-those terms are measured.
+This section reports peak payload bandwidth derived from the configured data width and NoC clock.
+Delivered throughput and latency depend on traffic, routing delay, and buffering, and follow from
+the models below once those terms are measured.
 
-### 4.1 The workload written twice
+### 3.1 Tiled attention dataflow
 
-A group `G` of `Gx x Gy` tiles computes one attention block. Tile `(gx, gy)` holds the `Q` slice of
-row `gy` and the `K` and `V` slices of column `gx`, and the sequence is walked in blocks indexed by
-`j`. The two programs below compute the same block under the same tiling. They differ only in which
-tile reads external memory.
+**Model-level execution flow.** The model runs an embedding step, then `N` attention layers in
+sequence, then a detokenizer that produces the output tokens. Each layer carries two traffic classes:
+
+- Each layer's output (its activations) is passed on as the next layer's input. This is the feature
+  pipeline, and it travels on the wide data plane.
+- A scheduler decides when each tile group starts and signals when its work is done. These are small
+  control and synchronization messages, and they travel on the narrow control plane.
+
+Weights are preloaded from LPDDR into each tile's local 3D DRAM and stay resident for the run, so a
+layer does not fetch weights over the fabric.
+
+```text
+place once:  DMA copies weights from LPDDR into each tile's 3D DRAM   # stays resident
+x = embed(tokens)                                                    # first activations
+for layer = 1 .. N:                                                  # static schedule
+    for each tile group in the layer:
+        attention_block(group, x)                                    # Q/K/V on [wide], m/l on [narrow]
+        scheduler marks the group done                               # control        [narrow]
+    x = this layer's output activations, passed to the next layer    # feature pipeline [wide]
+tokens = detokenize(x)
+```
+
+**Attention block mapping.** A tile group computes one attention block together. The score comes
+from multiplying queries by keys, so it forms a grid whose rows come from the queries and columns
+from the keys. The tile group maps this grid onto the mesh as follows:
+
+- Each mesh **row** holds one slice of the **queries**. Every tile in the row uses it, so the query
+  is shared along the row.
+- Each mesh **column** holds one slice of the **keys and values**. Every tile in the column uses
+  them, so they are shared down the column.
+- Tile `(x, y)` computes the score cell for query-slice `y` and key-slice `x`.
+- The softmax for query-slice `y` combines the scores against all key-slices, so it is combined
+  across the tiles in that row.
+
+```text
+                       key / value slices  (each shared down its column)
+                          x=0     x=1     x=2     x=3
+                        ┌─────┬─────┬─────┬─────┐
+   y=0  Q slice 0  ──▶  │  S  │  S  │  S  │  S  │   each row shares one query slice
+   y=1  Q slice 1  ──▶  │  S  │  S  │  S  │  S  │
+   y=2  Q slice 2  ──▶  │  S  │  S  │  S  │  S  │
+   y=3  Q slice 3  ──▶  │  S  │  S  │  S  │  S  │
+                        └─────┴─────┴─────┴─────┘
+                           │     │     │     │
+                           ▼     ▼     ▼     ▼
+                       each column shares one key / value slice
+   softmax for row y combines the scores across the whole row (all x)
+```
+
+Memory tiers:
+
+- Backing memory: `LPDDR` (external, via host DMA) or the tile's local `3D DRAM`.
+- `buf`: the on-chip compute buffer.
+- The running state `O_i^y, m_i^y, l_i^y` stays on-tile across the loop.
+- The fabric does no arithmetic, so each reduction is computed by the tiles and only its traffic crosses the fabric.
+
+Running softmax update for query row-slice `y`, reduced across `x` (the key shards) within the group row:
+
+```text
+s_local = rowmax(S)                                                # on each tile (x,y)
+m_new   = max(m_old, reduce_x max(s_local))                        # all-reduced across x   [narrow]
+P       = exp(S - m_new)
+l_new   = exp(m_old - m_new) * l_old + reduce_x sum(rowsum(P))     # all-reduced across x   [narrow]
+O_i^y   = (exp(m_old - m_new) * l_old * O_i^y + reduce_x(P V_j^x)) / l_new   # PV to row owner [wide]
+```
 
 **Algorithm 1  Per-tile fetch**
 
 ```text
- 1: parallel for each tile (gx, gy) in G:
- 2:     o = 0
- 3:     q = hbm_read(Q[gy])                            # every tile of row gy issues this read
- 4:     for j in 0 .. blocks-1:
- 5:         k = hbm_read(K[gx][j])                     # every tile of column gx issues this read
- 6:         v = hbm_read(V[gx][j])                     # every tile of column gx issues this read
- 7:         s = matmul(q, transpose(k))
- 8:         o = accumulate(o, softmax_step(s), v)      # row statistics exchanged in software
- 9:     row_exchange(o, row gy)                        # software, over unicast
-10:     hbm_write(O[gy][gx], o)
+Require: Q, K, V in backing memory (LPDDR or 3D DRAM);  O written to 3D DRAM
+ 1: Br, Bc;  Tr = ceil(Sq/Br),  Tc = ceil(Sk/Bc)
+ 2: for j = 1 .. Tc:                                                # key/value blocks
+ 3:   for i = 1 .. Tr:                                              # query blocks
+ 4:     parallel for each tile (x,y) in G:
+ 5:        load Q_i^y from backing memory -> buf         # re-read on every column x  [wide]
+ 6:        load K_j^x, V_j^x from backing memory -> buf  # re-read on every row y     [wide]
+ 7:        S = Q_i^y (K_j^x)^T / sqrt(d)
+ 8:        running softmax update (O_i^y, m_i^y, l_i^y)
+ 9: row-owner tile of each row y:  store O_i^y -> 3D DRAM
 ```
+
+Memory reads per block, per unique slice: `Q_i^y` read `Gx` times, `K_j^x`/`V_j^x` read `Gy` times.
 
 **Algorithm 2  Multicast**
 
 ```text
- 1: parallel for gy in 0 .. Gy-1:
- 2:     at tile (0, gy):  q = hbm_read(Q[gy])
- 3:                       multicast(q, row gy of G)
- 4: parallel for each tile (gx, gy) in G:  o = 0
- 5: for j in 0 .. blocks-1:
- 6:     parallel for gx in 0 .. Gx-1:
- 7:         at tile (gx, 0):  k = hbm_read(K[gx][j])
- 8:                           v = hbm_read(V[gx][j])
- 9:                           multicast(k, column gx of G)
-10:                           multicast(v, column gx of G)
-11:     parallel for each tile (gx, gy) in G:
-12:         s = matmul(q, transpose(k))
-13:         o = accumulate(o, softmax_step(s), v)      # row statistics exchanged in software
-14: parallel for each tile (gx, gy) in G:
-15:     row_exchange(o, row gy)                        # software, over unicast
-16:     hbm_write(O[gy][gx], o)
+Require: Q, K, V in backing memory (LPDDR or 3D DRAM);  O written to 3D DRAM
+ 1: Br, Bc;  Tr = ceil(Sq/Br),  Tc = ceil(Sk/Bc)
+ 2: for j = 1 .. Tc:                                                # key/value blocks
+ 3:   each column x:  source tile loads K_j^x, V_j^x -> buf   # once per column  [wide]
+ 4:   multicast K_j^x, V_j^x down the group column                    [wide]
+ 5:   for i = 1 .. Tr:                                              # query blocks
+ 6:     each row y:  source tile loads Q_i^y -> buf           # once per row      [wide]
+ 7:     multicast Q_i^y across the group row                          [wide]
+ 8:     parallel for each tile (x,y) in G:
+ 9:        S = Q_i^y (K_j^x)^T / sqrt(d)
+10:        running softmax update (O_i^y, m_i^y, l_i^y)
+11: row-owner tile of each row y:  store O_i^y -> 3D DRAM
 ```
 
-Only the tiles on the west edge of the group read `Q` from external memory (line 2), then multicast
-it row-wise 3. At each sequence block only the tiles on the south edge read `K` and `V` 7 8,
-followed by multicasting them column-wise 9 10. Lines 12 and 13 are the same computation as lines 7
-and 8 of Algorithm 1.
+Memory reads per block, per unique slice: `Q_i^y` and `K_j^x`/`V_j^x` read once. Relative to per-tile
+fetch, multicast cuts each shared operand from `Gx` or `Gy` fetches to one source fetch plus on-chip
+replication, so both the backing-memory reads and the memory-bound term of latency fall with the set size.
 
-Lines 15 and 16 are unchanged as well, and deliberately so. The fabric performs no arithmetic on
-payload data, so the row exchange of `O` and the statistics inside `softmax_step` are carried out by
-the compute tiles over ordinary unicast in both programs. Multicast changes operand distribution
-and nothing else.
+Source tiles follow memory-controller placement. Diagonal tiles balance row-wise and column-wise
+multicast traffic.
 
-**Off-chip reads per group, per sequence block.**
-
-```text
-per-tile fetch  Gx Gy (|k| + |v|)  and  Gx Gy |q| once
-multicast       Gx (|k| + |v|)     and  Gy |q| once
-```
-
-Each shared operand is read once per set rather than once per member, so external traffic for that
-operand falls by the length of the set.
-
-### 4.2 Off-chip access
-
-This workload is bounded by off-chip memory bandwidth, and a row or column of `k` tiles reuses one
-operand of size `S`. Under per-tile fetch every tile reads the operand from memory. A multicast
-reads it once and shares it on-chip.
-
-```text
-                off-chip access    latency
-per-tile fetch  k S                k S / B
-multicast       S                  S / B
-
-  k  tiles in the participating row or column
-  S  operand sub-tile size, in bytes
-  B  off-chip memory bandwidth
-```
-
-The off-chip access and the off-chip-bandwidth term of latency each drop by `k`, since that term
-tracks access on a memory-bound path.
-
-### 4.3 Payload bandwidth
+### 3.2 Payload bandwidth
 
 A channel carries one flit per cycle and a flit holds at most one data width of AXI payload, so
 payload bandwidth is data width x 1 GHz / 8. The wide class is shown at 512 b.
@@ -162,64 +189,58 @@ payload bandwidth is data width x 1 GHz / 8. The wide class is shown at 512 b.
 
 Request traffic carries write data, response traffic carries read data. Narrow req and rsp take
 separate networks and run concurrently. Wide req and rsp share the `wide` network, so 64 GB/s is
-their combined ceiling. Flit width and per-channel utilization are in §8.
+their combined ceiling. Flit width and per-channel utilization are in §7.
 
-### 4.4 Latency
+### 3.3 Latency and multicast reduction
 
-Zero-load latency is the floor reached with no queueing. A packet crossing `H` hops traverses `H`
-links and passes `H` + 1 routers, counting the source router.
+Zero-load latency is the packet latency with no queueing or contention. A packet crossing `H` hops
+traverses `H` links and passes `H + 1` routers, counting the source router.
 
 ```text
 T_zero_load = H t_wire + (H + 1) t_router + L
 
-  H            Manhattan hop count from source to destination
-  t_wire       link traversal delay per hop, in NoC cycles
-  t_router     router pipeline latency per hop, in NoC cycles
-  L            tile payload length in flits, injected one flit per cycle
+  H         Manhattan hop count from source to destination
+  t_wire    link traversal delay per hop, in NoC cycles
+  t_router  router pipeline latency per hop, in NoC cycles
+  L         payload length in flits, injected one flit per cycle
 ```
 
-Mean hop count in a `k x k` mesh is `2(k^2 - 1) / (3k)`, 2.5 at `k` = 4 and 10.625 at `k` = 16.
+Mean hop count in a `k x k` mesh is `2(k^2 - 1) / (3k)`, which is 2.5 at `k = 4` and 10.625 at `k = 16`.
 
-The forms below are for a multicast along one axis. A submesh multicast runs one phase per axis,
-`2^b` row multicasts in parallel followed by one column multicast over their results.
+The forms below cover a multicast along one axis over a set of `k` nodes. A submesh multicast runs
+in two phases, one per axis.
 
-Tail arrival at the farthest member of a one-axis multicast:
+```text
+  k        nodes in the participating row or column
+  L        sub-tile payload length in flits, sub-tile bytes / (W_data / 8)
+  W_data   data width of the AXI class carrying the sub-tile, in bits
+  H_max    maximum hop count from the source to a member of the set
+  s        source index in the set, 0 to k - 1
+```
 
-| Case | Form |
+Tail arrival at the farthest member of the set:
+
+| Case | Latency |
 |---|---|
 | Repeated unicast | `(k - 1)L + H_max t_wire + (H_max + 1) t_router` |
 | In-network multicast | `L + H_max t_wire + (H_max + 1) t_router` |
 
-```text
-  k          nodes in the participating row or column
-  L          sub-tile payload length in flits, sub-tile bytes / (W_data / 8)
-  W_data     data width of the AXI class carrying the sub-tile, in bits
-  H_max      maximum hop count from the source to a member of its set
-```
+Traffic generated by one multicast, source at one end of the set:
 
-The transport term is identical in both. A multicast replaces the `(k - 1)L` serialization at one
-port with a single sub-tile. At one end of the set `H_max` is `k - 1`, at the center `⌊k/2⌋`.
-
-### 4.5 Multicast traffic reduction
-
-Counting results on a row or column of `k` nodes.
-
-| Quantity | Unicast | In network | Ratio, `k` = 4 | Ratio, `k` = 16 |
+| Quantity | Unicast | In-network | Ratio, `k = 4` | Ratio, `k = 16` |
 |---|---|---|---:|---:|
-| Source network port flits | `(k - 1)L` | `L` per path | 3 x | 15 x |
-| Flit hops | `L [s(s + 1)/2 + (k - 1 - s)(k - s)/2]` | `L(k - 1)` | 2 x | 8 x |
+| Source port flits | `(k - 1)L` | `L` per path | 3x | 15x |
+| Flit hops | `L [s(s + 1)/2 + (k - 1 - s)(k - s)/2]` | `L(k - 1)` | 2x | 8x |
 
-```text
-  s  source index in the row or column, 0 to k - 1
-```
-
-Both ratios are for a source at one end of the set. An interior one is served by one path per
-direction, which halves the port ratio and lowers the flit-hop ratio to 1.33 x at `k` = 4 and
-4.27 x at `k` = 16.
+The transport term of latency is identical in both cases. Multicast replaces the `(k - 1)L`
+serialization at one source port with a single sub-tile, so both the tail latency and the source
+traffic fall with the set size. A source at one end of the set uses one path with `H_max = k - 1`. An
+interior source uses one path per direction, so `H_max = floor(k/2)`, the port ratio halves, and the
+flit-hop ratio drops to 1.33x at `k = 4` and 4.27x at `k = 16`.
 
 ---
 
-## 5. Architecture
+## 4. Architecture
 
 Each node holds one compute tile and its local memory, so it is both an AXI master and an AXI
 slave. Each link carries three physical networks. XY dimension-order routing fixes the path a
@@ -271,35 +292,39 @@ Inside one node:
    └────────────┘          │
 ~~~
 
-The split is physical rather than virtual, trading additional link wires for reduced sharing of
-router buffering and arbitration. Separate request and response networks are required for
-message-level forward progress, so that a node can always accept a response while its own request
+The networks are physically separate rather than virtual channels on a shared link, trading wire
+count for independent buffering and arbitration. Separate request and response networks are required
+for message-level forward progress, so that a node can always accept a response while its own request
 path is blocked.
 
-The network interface carries the address map, packetization, depacketization, and response
-ordering. The router routes, replicates, and merges, with no arithmetic unit and no address
-decode.
+The network interface holds the system address map (SAM), packetizes and depacketizes, and orders
+responses. The SAM defines a global config space and a global memory space, and the NI looks up each
+request address in it to select the destination node and the AXI class: a config-space access uses
+the narrow class and a memory-space access uses the wide class. Each channel of the chosen class then
+maps to a physical network as in §7, and the bulk wide data travels on the `wide` network. The router
+performs route selection, multicast replication, and response aggregation. It does not decode AXI
+addresses or perform arithmetic on payload data.
 
 **Requirements on the fabric.**
 
 | Requirement | Statement |
 |---|---|
-| AXI4 response contract | One `B` per `Aw`, and an error `BRESP` dominates when a multicast write is answered by several targets |
+| AXI4 response contract | One `B` per `Aw`, and an error `BRESP` dominates when a multicast write is answered by several slaves |
 | Ordering | Responses reach a master in AXI order within an ID in every configuration |
 | Deadlock-free | Guaranteed at one virtual channel per network channel, with multicast enabled |
-| Write data pairing | A target pairs each write request with its own write data, whatever the mix of sources |
+| Write data pairing | A slave pairs each write request with its own write data, whatever the mix of sources |
 | Credit capacity | A credit-controlled receiver holds, per virtual channel, at least one flit of buffer for each cycle of buffer turnaround time. Below that capacity a link idles with no contention present |
 
 ---
 
-## 6. Interfaces
+## 5. Interfaces
 
 Each node exposes the data-plane interfaces below. The AXI ports carry the AXI4 signal set at the
-widths configured in §7. The Source column names the driver of each signal. Signals are named at
+widths configured in §6. The Source column names the driver of each signal. Signals are named at
 the protocol level. At the port pins the AXI signals carry an `axi_` prefix and an `_i` or `_o`
 suffix by direction.
 
-### 6.1 Global signals
+### 5.1 Global signals
 
 | Signal | Source | Description |
 |---|---|---|
@@ -311,83 +336,83 @@ suffix by direction.
 The two domains are asynchronous. Endpoint clocks are independent of the NoC clock, and the
 crossing sits at the AXI boundary of the network interface.
 
-### 6.2 AXI interfaces
+### 5.2 AXI interfaces
 
-A master attaches to the subordinate port of its network interface, and the fabric's manager port
-drives each target. Both ports carry the same channels, so one set of tables covers them and the
-Source column names the driver. When a node is configured with two endpoint interfaces (§7),
+An AXI master connects to the slave-side port of its network interface, and the interface's
+master-side port drives each AXI slave. Both ports carry the same channels, so one set of tables covers them and the
+Source column names the driver. When a node is configured with two endpoint interfaces (§6),
 each AXI class has its own port at its class data width, with the same channel set.
 
 **Write address channel**
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `AWID` | 8 | Manager | Write transaction ID |
-| `AWADDR` | 64 | Manager | Write address |
-| `AWLEN` | 8 | Manager | Burst length |
-| `AWSIZE` | 3 | Manager | Burst size |
-| `AWBURST` | 2 | Manager | Burst type |
-| `AWLOCK` | 1 | Manager | Lock type |
-| `AWCACHE` | 4 | Manager | Memory type |
-| `AWPROT` | 3 | Manager | Protection type |
-| `AWQOS` | 4 | Manager | Quality of service |
-| `AWREGION` | 4 | Manager | Region identifier |
-| `AWUSER` | 21 | Manager | User signal. 13 bits carry the collective attributes, see §8 |
-| `AWVALID` | 1 | Manager | Write address valid |
-| `AWREADY` | 1 | Subordinate | Write address ready |
+| `AWID` | 8 | Master | Write transaction ID |
+| `AWADDR` | 64 | Master | Write address |
+| `AWLEN` | 8 | Master | Burst length |
+| `AWSIZE` | 3 | Master | Burst size |
+| `AWBURST` | 2 | Master | Burst type |
+| `AWLOCK` | 1 | Master | Lock type |
+| `AWCACHE` | 4 | Master | Memory type |
+| `AWPROT` | 3 | Master | Protection type |
+| `AWQOS` | 4 | Master | Quality of service |
+| `AWREGION` | 4 | Master | Region identifier |
+| `AWUSER` | 18 | Master | User signal. 10 bits carry the collective attributes, see §7 |
+| `AWVALID` | 1 | Master | Write address valid |
+| `AWREADY` | 1 | Slave | Write address ready |
 
 **Write data channel**
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `WDATA` | `W_data` | Manager | Write data |
-| `WSTRB` | `W_data`/8 | Manager | Write strobes |
-| `WLAST` | 1 | Manager | Last beat of the burst |
-| `WUSER` | 8 | Manager | User signal |
-| `WVALID` | 1 | Manager | Write data valid |
-| `WREADY` | 1 | Subordinate | Write data ready |
+| `WDATA` | `W_data` | Master | Write data |
+| `WSTRB` | `W_data`/8 | Master | Write strobes |
+| `WLAST` | 1 | Master | Last beat of the burst |
+| `WUSER` | 8 | Master | User signal |
+| `WVALID` | 1 | Master | Write data valid |
+| `WREADY` | 1 | Slave | Write data ready |
 
 **Write response channel**
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `BID` | 8 | Subordinate | Response transaction ID |
-| `BRESP` | 2 | Subordinate | Write response |
-| `BUSER` | 8 | Subordinate | User signal |
-| `BVALID` | 1 | Subordinate | Write response valid |
-| `BREADY` | 1 | Manager | Write response ready |
+| `BID` | 8 | Slave | Response transaction ID |
+| `BRESP` | 2 | Slave | Write response |
+| `BUSER` | 8 | Slave | User signal |
+| `BVALID` | 1 | Slave | Write response valid |
+| `BREADY` | 1 | Master | Write response ready |
 
 **Read address channel**
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `ARID` | 8 | Manager | Read transaction ID |
-| `ARADDR` | 64 | Manager | Read address |
-| `ARLEN` | 8 | Manager | Burst length |
-| `ARSIZE` | 3 | Manager | Burst size |
-| `ARBURST` | 2 | Manager | Burst type |
-| `ARLOCK` | 1 | Manager | Lock type |
-| `ARCACHE` | 4 | Manager | Memory type |
-| `ARPROT` | 3 | Manager | Protection type |
-| `ARQOS` | 4 | Manager | Quality of service |
-| `ARREGION` | 4 | Manager | Region identifier |
-| `ARUSER` | 8 | Manager | User signal |
-| `ARVALID` | 1 | Manager | Read address valid |
-| `ARREADY` | 1 | Subordinate | Read address ready |
+| `ARID` | 8 | Master | Read transaction ID |
+| `ARADDR` | 64 | Master | Read address |
+| `ARLEN` | 8 | Master | Burst length |
+| `ARSIZE` | 3 | Master | Burst size |
+| `ARBURST` | 2 | Master | Burst type |
+| `ARLOCK` | 1 | Master | Lock type |
+| `ARCACHE` | 4 | Master | Memory type |
+| `ARPROT` | 3 | Master | Protection type |
+| `ARQOS` | 4 | Master | Quality of service |
+| `ARREGION` | 4 | Master | Region identifier |
+| `ARUSER` | 8 | Master | User signal |
+| `ARVALID` | 1 | Master | Read address valid |
+| `ARREADY` | 1 | Slave | Read address ready |
 
 **Read data channel**
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `RID` | 8 | Subordinate | Read transaction ID |
-| `RDATA` | `W_data` | Subordinate | Read data |
-| `RRESP` | 2 | Subordinate | Read response |
-| `RLAST` | 1 | Subordinate | Last beat of the burst |
-| `RUSER` | 8 | Subordinate | User signal |
-| `RVALID` | 1 | Subordinate | Read data valid |
-| `RREADY` | 1 | Manager | Read data ready |
+| `RID` | 8 | Slave | Read transaction ID |
+| `RDATA` | `W_data` | Slave | Read data |
+| `RRESP` | 2 | Slave | Read response |
+| `RLAST` | 1 | Slave | Last beat of the burst |
+| `RUSER` | 8 | Slave | User signal |
+| `RVALID` | 1 | Slave | Read data valid |
+| `RREADY` | 1 | Master | Read data ready |
 
-### 6.3 NoC link interface
+### 5.3 NoC link interface
 
 Each link carries the three physical networks, and each network is an independent signal group in
 each direction. Flow control is credit based, with no ready signal. A flit transfers on a cycle
@@ -403,32 +428,32 @@ returns one credit per virtual channel as a buffer frees. Driven signals reset l
 | `noc_rsp_flit` | 139 | Transmitter | `rsp` flit, header and body |
 | `noc_rsp_credit` | `NUM_VC` | Receiver | `rsp` credit return |
 | `noc_wide_valid` | 1 | Transmitter | `wide` flit valid |
-| `noc_wide_flit` | 353, 641, or 1217 | Transmitter | `wide` flit, width by wide class, see §8 |
+| `noc_wide_flit` | 353, 641, or 1217 | Transmitter | `wide` flit, width by wide class, see §7 |
 | `noc_wide_credit` | `NUM_VC` | Receiver | `wide` credit return |
 
 ---
 
-## 7. Configuration Options
+## 6. Configuration Options
 
 | Feature | Parameter | Values (default) | Comments |
 |---|---|---|---|
 | Topology | Mesh X and Y dimension | 2-16 (4) | Square meshes only. 256 nodes maximum, set by the 8-bit node ID |
 | AXI interface | Address width | 64 b | - |
 | AXI interface | ID width | 8 b | - |
-| AXI interface | `AWUSER` width | 18 b | 10 bits hold collective attributes, see §8 |
+| AXI interface | `AWUSER` width | 18 b | 10 bits hold collective attributes, see §7 |
 | AXI interface | `ARUSER`, `WUSER`, `RUSER`, `BUSER` width | 8 b | - |
 | AXI interface | Narrow class data width | 64 b | - |
-| AXI interface | Wide class data width | 256, 512, 1024 b (512) | §4 quotes derived bandwidth at 512 b |
-| AXI interface | Endpoint interfaces | 1, 2 (1) | One interface carries both classes with the class selected by address aperture. Two carry one class each |
+| AXI interface | Wide class data width | 256, 512, 1024 b (512) | §3 quotes derived bandwidth at 512 b |
+| AXI interface | Endpoint interfaces | 1, 2 (1) | One interface carries both classes, with the class selected by the SAM address space. Two carry one class each |
 | Flow control | Virtual channels per network channel | 1-8 (1) | - |
-| Ordering | Outstanding transactions per ID | 1-32 (32) | 1 when same-ID response reordering is disabled. A master holds at most 256 in total, one per `ordering_tag`, see §8 |
-| Ordering | Same-ID response reordering | enabled, disabled (enabled) | The §5 ordering requirement holds in either setting |
-| Address map | Apertures per node | 1, 2 (2) | One per AXI class. Uniform across nodes, loaded at runtime |
-| Address map | Aperture size | power of two | - |
+| Ordering | Outstanding transactions per ID | 1-32 (32) | 1 when same-ID response reordering is disabled. A master holds at most 256 in total, one per `ordering_tag`, see §7 |
+| Ordering | Same-ID response reordering | enabled, disabled (enabled) | The §4 ordering requirement holds in either setting |
+| Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the wide class. Uniform across nodes, loaded at runtime |
+| Address map | Space region size | power of two | - |
 
 ---
 
-## 8. Packet Format
+## 7. Packet Format
 
 **Flit header, 56 b.** 43 b allocated, 13 b reserved.
 
@@ -491,13 +516,14 @@ multicast and a root does not send to itself, so both collectives move `k - 1` o
 | `collective_op` | [9:8] | 2 |
 | `collective_mask` | [17:10] | 8 |
 
-**Channel to network mapping.** A channel rides the network that suits its direction and its
+**Channel to network mapping.** Each channel maps to the network chosen by its direction and
 message size. Narrow-class requests and responses take separate networks so that a receiver can
-always accept a response. `WideAr` and `WideB` are small, so they ride `req` and `rsp` rather than
+always accept a response. `WideAr` and `WideB` are small, so they use `req` and `rsp` rather than
 occupy a wide flit. `WideAw` is the exception and stays on `wide` with its
-write data. AXI4 gives `W` no ID, so a target pairs write data with write requests by arrival
-order alone. On separate networks under unequal congestion the requests could fall out of step
-with their data and mispair at the target, so the request travels with its data.
+write data. AXI4 gives `W` no ID, so a slave associates write data with write requests by their
+arrival order. On separate networks under unequal congestion, the requests could arrive in a
+different order from their write data and be associated with the wrong request, so the request
+travels with its data.
 
 **Channel bodies.** A body excludes the 56 b header.
 
@@ -569,15 +595,15 @@ data  utilization = W_data / W_raw
 
 The channel that sets each network width runs at 90 % or above, so the reserved bits and the
 narrower channels account for the remainder. `WideAw` is the outlier and falls from 43.1 % to
-12.5 % as the wide class widens, since it rides `wide` for transaction ordering rather than for
+12.5 % as the wide class widens, since it uses `wide` for transaction ordering rather than for
 its size. That cost is one flit per write burst and amortizes over the burst length.
 
-### 8.1 AXI4 Compliance and Ordering
+### 7.1 AXI4 Compliance and Ordering
 
 Full AXI4 is supported: INCR / WRAP / FIXED bursts, narrow and unaligned transfers, `AxLOCK`,
 `AxCACHE`, `AxPROT`, `AxQOS`, `AxREGION`, and `xUSER`. `AxLOCK` applies to unicast, and a
 collective transaction is not an exclusive access. Of the 18 `AWUSER` bits, 8 are carried
 opaquely in the packet body and 10 hold collective attributes, which
-the fabric lifts into the flit header and does not also carry in the body. A target receives those
+the fabric lifts into the flit header and does not also carry in the body. A slave receives those
 10 bits cleared, since the fabric has already acted on them. Outstanding transactions may complete
 out of order across IDs.
