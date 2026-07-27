@@ -119,61 +119,99 @@ from the keys. The tile group maps this grid onto the mesh as follows:
 
 Memory tiers:
 
-- Backing memory: `LPDDR` (external, via host DMA) or the tile's local `3D DRAM`.
+- `3D DRAM`: the tile's local memory, where `Q`, `K`, `V`, and `O` reside during compute. It is
+  tile-local, so a source-tile load is a local read and generates no NoC traffic.
+- `LPDDR`: external memory, feeding `3D DRAM` through the host DMA.
 - `buf`: the on-chip compute buffer.
-- The running state `O_i^y, m_i^y, l_i^y` stays on-tile across the loop.
-- The fabric does no arithmetic, so each reduction is computed by the tiles and only its traffic crosses the fabric.
+- The running state `O_iy, m_iy, l_iy` stays on-tile across the loop.
+- The fabric does no arithmetic, so each reduce is computed by the tiles and only its traffic crosses the fabric.
 
-Running softmax update for query row-slice `y`, reduced across `x` (the key shards) within the group row:
+The two algorithms below compute the same block and differ only in how the shared operands reach the
+group. Both keep a running maximum `m` and a running sum `l` per query row-slice and update the
+output `O` block by block. All arithmetic runs on the tiles. Each `reduce` is computed by the edge
+tile of the row (the row max, the row sum, and the final output sum), and the fabric carries only the
+distribution and reduce traffic. The wide plane carries the `Q`, `K`, `V`, and `O` tensors, and the
+narrow plane carries the `m` and `l` statistics.
 
-```text
-s_local = rowmax(S)                                                # on each tile (x,y)
-m_new   = max(m_old, reduce_x max(s_local))                        # all-reduced across x   [narrow]
-P       = exp(S - m_new)
-l_new   = exp(m_old - m_new) * l_old + reduce_x sum(rowsum(P))     # all-reduced across x   [narrow]
-O_i^y   = (exp(m_old - m_new) * l_old * O_i^y + reduce_x(P V_j^x)) / l_new   # PV to row owner [wide]
-```
-
-**Algorithm 1  Per-tile fetch**
+**Algorithm 1  Per-tile fetch.**
 
 ```text
-Require: Q, K, V in backing memory (LPDDR or 3D DRAM);  O written to 3D DRAM
- 1: Br, Bc;  Tr = ceil(Sq/Br),  Tc = ceil(Sk/Bc)
- 2: for j = 1 .. Tc:                                                # key/value blocks
- 3:   for i = 1 .. Tr:                                              # query blocks
- 4:     parallel for each tile (x,y) in G:
- 5:        load Q_i^y from backing memory -> buf         # re-read on every column x  [wide]
- 6:        load K_j^x, V_j^x from backing memory -> buf  # re-read on every row y     [wide]
- 7:        S = Q_i^y (K_j^x)^T / sqrt(d)
- 8:        running softmax update (O_i^y, m_i^y, l_i^y)
- 9: row-owner tile of each row y:  store O_i^y -> 3D DRAM
+Require: Q, K, V, O resident in per-tile 3D DRAM, placed from LPDDR by host DMA before this block
+Require: src_Q(y) holds Q_iy, src_KV(x) holds K_jx/V_jx, dst_O(y) stores O_iy; the fabric performs no arithmetic
+ 1: divide Q, O into Tr = ceil(S/Br) row blocks;  K, V into Tc = ceil(S/Bc) column blocks
+ 2: divide each block over the group:  Q_i, O_i into Gy row slices;  K_j, V_j into Gx column slices
+ 3: for i = 1 .. Tr:                                                          # query blocks
+ 4:   on chip:  O_iy = 0,  m_iy = -inf,  l_iy = 0
+ 5:   tile (x,y):  read Q_iy from src_Q(y)'s 3D DRAM -> buf     # Gx unicast reads per slice  [wide]
+ 6:   for j = 1 .. Tc:                                                        # key/value blocks
+ 7:     tile (x,y):  read K_jx, V_jx from src_KV(x)'s 3D DRAM -> buf   # Gy unicast reads per slice [wide]
+ 8:     tile (x,y):  S_iy^{jx} = Q_iy (K_jx)^T / sqrt(D)
+ 9:     tile (x,y):  m_iy^{jx} = max(m_iy, rowmax(S_iy^{jx}))
+10:     row owner dst_O(y):  row-wise reduce   m_iy^{j} = max over x of m_iy^{jx}  [narrow]
+11:     row owner dst_O(y):  row-wise multicast m_iy^{j} to the group row          [narrow]
+12:     tile (x,y):  P_iy^{jx} = exp(S_iy^{jx} - m_iy^{j})
+13:     tile (x,y):  l_iy^{jx} = rowsum(P_iy^{jx})
+14:     row owner dst_O(y):  row-wise reduce   l_iy^{j} = sum over x of l_iy^{jx}  [narrow]
+15:     row owner dst_O(y):  row-wise multicast l_iy^{j} to the group row          [narrow]
+16:     tile (x,y):  l_iy = exp(m_iy - m_iy^{j}) * l_iy + l_iy^{j}
+17:     tile (x,y):  O_iy = diag(exp(m_iy - m_iy^{j})) O_iy + P_iy^{jx} V_jx
+18:     tile (x,y):  m_iy = m_iy^{j}
+19:   end for
+20:   tile (x,y):  O_iy = diag(l_iy)^{-1} O_iy
+21:   row owner dst_O(y):  row-wise reduce O_iy = sum over x of O_iy               [wide]
+22:   row owner dst_O(y):  write O_iy to its local 3D DRAM              # local write
+23: end for
 ```
 
-Memory reads per block, per unique slice: `Q_i^y` read `Gx` times, `K_j^x`/`V_j^x` read `Gy` times.
+Plane use. Wide (data): the per-tile fetch of `Q`, `K`, `V`, and all `O` traffic. Narrow (control):
+the `m` and `l` row-wise reduce and multicast.
 
-**Algorithm 2  Multicast**
+**Algorithm 2  Multicast.**
 
 ```text
-Require: Q, K, V in backing memory (LPDDR or 3D DRAM);  O written to 3D DRAM
- 1: Br, Bc;  Tr = ceil(Sq/Br),  Tc = ceil(Sk/Bc)
- 2: for j = 1 .. Tc:                                                # key/value blocks
- 3:   each column x:  source tile loads K_j^x, V_j^x -> buf   # once per column  [wide]
- 4:   multicast K_j^x, V_j^x down the group column                    [wide]
- 5:   for i = 1 .. Tr:                                              # query blocks
- 6:     each row y:  source tile loads Q_i^y -> buf           # once per row      [wide]
- 7:     multicast Q_i^y across the group row                          [wide]
- 8:     parallel for each tile (x,y) in G:
- 9:        S = Q_i^y (K_j^x)^T / sqrt(d)
-10:        running softmax update (O_i^y, m_i^y, l_i^y)
-11: row-owner tile of each row y:  store O_i^y -> 3D DRAM
+Require: Q, K, V, O resident in per-tile 3D DRAM, placed from LPDDR by host DMA before this block
+Require: src_Q(y) holds Q_iy, src_KV(x) holds K_jx/V_jx, dst_O(y) stores O_iy; the fabric performs no arithmetic
+ 1: divide Q, O into Tr = ceil(S/Br) row blocks;  K, V into Tc = ceil(S/Bc) column blocks
+ 2: divide each block over the group:  Q_i, O_i into Gy row slices;  K_j, V_j into Gx column slices
+ 3: for i = 1 .. Tr:                                                          # query blocks
+ 4:   on chip:  O_iy = 0,  m_iy = -inf,  l_iy = 0
+ 5:   row source src_Q(y):  load Q_iy from local 3D DRAM -> buf        # local read
+ 6:   row source src_Q(y):  row-wise multicast Q_iy to the group row          [wide]
+ 7:   for j = 1 .. Tc:                                                        # key/value blocks
+ 8:     column source src_KV(x):  load K_jx, V_jx from local 3D DRAM -> buf   # local read
+ 9:     column source src_KV(x):  column-wise multicast K_jx, V_jx to the group column  [wide]
+10:     tile (x,y):  S_iy^{jx} = Q_iy (K_jx)^T / sqrt(D)
+11:     tile (x,y):  m_iy^{jx} = max(m_iy, rowmax(S_iy^{jx}))
+12:     row owner dst_O(y):  row-wise reduce   m_iy^{j} = max over x of m_iy^{jx}  [narrow]
+13:     row owner dst_O(y):  row-wise multicast m_iy^{j} to the group row          [narrow]
+14:     tile (x,y):  P_iy^{jx} = exp(S_iy^{jx} - m_iy^{j})
+15:     tile (x,y):  l_iy^{jx} = rowsum(P_iy^{jx})
+16:     row owner dst_O(y):  row-wise reduce   l_iy^{j} = sum over x of l_iy^{jx}  [narrow]
+17:     row owner dst_O(y):  row-wise multicast l_iy^{j} to the group row          [narrow]
+18:     tile (x,y):  l_iy = exp(m_iy - m_iy^{j}) * l_iy + l_iy^{j}
+19:     tile (x,y):  O_iy = diag(exp(m_iy - m_iy^{j})) O_iy + P_iy^{jx} V_jx
+20:     tile (x,y):  m_iy = m_iy^{j}
+21:   end for
+22:   tile (x,y):  O_iy = diag(l_iy)^{-1} O_iy
+23:   row owner dst_O(y):  row-wise reduce O_iy = sum over x of O_iy               [wide]
+24:   row owner dst_O(y):  write O_iy to its local 3D DRAM              # local write
+25: end for
 ```
 
-Memory reads per block, per unique slice: `Q_i^y` and `K_j^x`/`V_j^x` read once. Relative to per-tile
-fetch, multicast cuts each shared operand from `Gx` or `Gy` fetches to one source fetch plus on-chip
-replication, so both the backing-memory reads and the memory-bound term of latency fall with the set size.
+Plane use. Wide (data): one multicast per `Q`, `K`, `V` slice, and all `O` traffic. Narrow (control):
+the `m` and `l` row-wise reduce and multicast.
 
-Source tiles follow memory-controller placement. Diagonal tiles balance row-wise and column-wise
-multicast traffic.
+Algorithm 1 fetches each shared slice once per consumer tile, so `Q_iy` is read by all `Gx` tiles of
+its row and `K_jx, V_jx` by all `Gy` tiles of its column, each a unicast read across the fabric.
+Algorithm 2 reads each slice once from the source tile's local 3D DRAM and multicasts it, cutting
+the shared-operand transfers from `Gx` or `Gy` to one and lowering the memory-bound term of latency
+accordingly.
+
+Placement invariant. The source tile `src_Q(y)` holds `Q_iy`, the source tile `src_KV(x)` holds
+`K_jx, V_jx`, and the output owner `dst_O(y)` collects and stores `O_iy`. Choosing the sources as
+edge tiles (`x = 0`, `y = 0`) or diagonal tiles is a scheduling policy, not a semantic requirement.
+Cold or evicted slices are staged from LPDDR into the owning tile's 3D DRAM by the model-level
+placement pipeline, outside this block-level algorithm.
 
 ### 3.2 Payload bandwidth
 
@@ -187,9 +225,11 @@ payload bandwidth is data width x 1 GHz / 8. The wide class is shown at 512 b.
 | Wide req | 512 b | `wide` | 64 GB/s |
 | Wide rsp | 512 b | `wide` | 64 GB/s |
 
-Request traffic carries write data, response traffic carries read data. Narrow req and rsp take
-separate networks and run concurrently. Wide req and rsp share the `wide` network, so 64 GB/s is
-their combined ceiling. Flit width and per-channel utilization are in §7.
+- Request traffic carries write data, and response traffic carries read data.
+- Narrow `req` and `rsp` take separate networks and run concurrently.
+- Wide `req` and `rsp` share the `wide` network, so 64 GB/s is their combined ceiling.
+
+Flit width and per-channel utilization are in §7.
 
 ### 3.3 Latency and multicast reduction
 
@@ -242,9 +282,9 @@ flit-hop ratio drops to 1.33x at `k = 4` and 4.27x at `k = 16`.
 
 ## 4. Architecture
 
-Each node holds one compute tile and its local memory, so it is both an AXI master and an AXI
-slave. Each link carries three physical networks. XY dimension-order routing fixes the path a
-multicast takes, and its merged response retraces that path in reverse.
+- Each node holds one compute tile and its local memory, so it is both an AXI master and an AXI slave.
+- Each link carries three physical networks.
+- XY dimension-order routing fixes the path a multicast takes, and its merged response retraces that path in reverse.
 
 ~~~
                  K, V column-wise multicast
@@ -297,13 +337,13 @@ count for independent buffering and arbitration. Separate request and response n
 for message-level forward progress, so that a node can always accept a response while its own request
 path is blocked.
 
-The network interface holds the system address map (SAM), packetizes and depacketizes, and orders
-responses. The SAM defines a global config space and a global memory space, and the NI looks up each
-request address in it to select the destination node and the AXI class: a config-space access uses
-the narrow class and a memory-space access uses the wide class. Each channel of the chosen class then
-maps to a physical network as in §7, and the bulk wide data travels on the `wide` network. The router
-performs route selection, multicast replication, and response aggregation. It does not decode AXI
-addresses or perform arithmetic on payload data.
+- **Network interface.** Holds the system address map (SAM), packetizes and depacketizes, and orders
+  responses. The SAM defines a global config space and a global memory space, and the NI looks up each
+  request address to select the destination node and the AXI class: a config-space access uses the
+  narrow class and a memory-space access uses the wide class. Each channel of the chosen class then
+  maps to a physical network as in §7.
+- **Router.** Performs route selection, multicast replication, and response aggregation. It does not
+  decode AXI addresses or perform arithmetic on payload data.
 
 **Requirements on the fabric.**
 
@@ -414,10 +454,11 @@ each AXI class has its own port at its class data width, with the same channel s
 
 ### 5.3 NoC link interface
 
-Each link carries the three physical networks, and each network is an independent signal group in
-each direction. Flow control is credit based, with no ready signal. A flit transfers on a cycle
-where valid is high and the transmitter holds a credit for the target virtual channel. The receiver
-returns one credit per virtual channel as a buffer frees. Driven signals reset low.
+- Each link carries the three physical networks, each an independent signal group per direction.
+- Flow control is credit based, with no ready signal.
+- A flit transfers on a cycle where valid is high and the transmitter holds a credit for the target virtual channel.
+- The receiver returns one credit per virtual channel as a buffer frees.
+- Driven signals reset low.
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|

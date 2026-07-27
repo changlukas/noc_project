@@ -1,0 +1,125 @@
+% Attention dataflow algorithms for the Collective-Capable AXI4 NoC target spec.
+%
+% Algorithm 2 keeps the FlatAttention (Zhang et al.) Algorithm 2 structure line for line,
+% rebound to the Edge-LPDDR-PIM memory model:
+%   - the residence tier is per-tile 3D DRAM (tile-local), not a shared HBM pool; slices are
+%     placed from LPDDR by the host DMA before the block runs, so a source-tile load is a
+%     LOCAL 3D DRAM read and generates no NoC traffic;
+%   - source and owner tiles are named src_Q(y), src_KV(x), dst_O(y); the paper's x=0 / y=0
+%     edge tiles (or diagonal tiles) are one placement policy, not a semantic requirement;
+%   - plane annotation on NoC transfers only: [wide] = data plane, [narrow] = control plane.
+% The online-softmax recurrence, the if-j>1 guards, the superscripts (jx)/(j)/(j-1)x, and the
+% row-wise reduce/multicast structure are kept exactly as in the paper.
+%
+% Algorithm 1 is the per-tile-fetch (unicast) baseline: no multicast, so every consumer tile
+% pulls the shared slice itself with a remote read over the NoC.
+%
+% Notation: x, y are tile coordinates in the group. Q_{iy} is the y-th of the G_y slices of
+% query block i (used by mesh row y); K^T_{jx}, V_{jx} are the x-th of the G_x slices of block
+% j (used by mesh column x); S_{iy}^{(jx)} is the score computed at tile (x, y).
+%
+% Compile:  pdflatex attention_dataflow.tex   (needs algorithm2e, amsmath, amssymb)
+% Overleaf: upload this file and Recompile.
+
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage[ruled,linesnumbered]{algorithm2e}
+\usepackage{float}
+
+\newcommand{\rowmax}{\operatorname{rowmax}}
+\newcommand{\rowsum}{\operatorname{rowsum}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\srcQ}{\mathrm{src}_{Q}}
+\newcommand{\srcKV}{\mathrm{src}_{KV}}
+\newcommand{\dstO}{\mathrm{dst}_{O}}
+
+\begin{document}
+
+\noindent\textbf{Placement invariant.} Source tile $\srcQ(y)$ holds $Q_{iy}$, source tile
+$\srcKV(x)$ holds $K^\top_{jx}, V_{jx}$, and output owner $\dstO(y)$ collects and stores
+$O_{iy}$. 3D DRAM is tile-local, so a source-tile load is a local read and generates no NoC
+traffic. Choosing the sources as edge tiles ($x{=}0$, $y{=}0$) or diagonal tiles is a
+scheduling policy, not a semantic requirement. Cold or evicted slices are staged from LPDDR
+into the owning tile's 3D DRAM by the model-level placement pipeline, outside this block-level
+algorithm.
+
+\begin{algorithm}[H]
+\DontPrintSemicolon
+\SetKwInput{KwReq}{Require}
+\SetKwComment{Comment}{\quad// }{}
+\SetKwFor{For}{for}{do}{end}
+\caption{Per-tile fetch (unicast baseline) on a $G_x\times G_y$ tile group}
+\KwReq{$Q, K^\top, V, O \in \mathbb{R}^{S\times D}$ resident in per-tile 3D DRAM, placed from LPDDR by host DMA before this block. Block sizes $B_c, B_r$, tile group sizes $G_x, G_y$. In the following algorithm, $x, y$ denote tile coordinates relative to the group.}
+Divide $Q, O$ into $T_r=\lceil S/B_r\rceil$ blocks $Q_1,\dots,Q_{T_r}\in\mathbb{R}^{B_r\times D}$ and $O_1,\dots,O_{T_r}$. Divide $K^\top, V$ into $T_c=\lceil S/B_c\rceil$ blocks.\;
+Further divide each $Q_i, O_i$ into $G_y$ slices $Q_{i1},\dots,Q_{iG_y}\in\mathbb{R}^{(B_r/G_y)\times D}$, and each $K^\top_j, V_j$ into $G_x$ slices. Slices are accessed according to tile coordinates $x, y$.\;
+\For{$1 \leq i \leq T_r$}{
+  On chip, initialize $O_{iy}^{(0x)} = 0$.\;
+  each tile $(x,y)$: read $Q_{iy}$ from $\srcQ(y)$'s 3D DRAM to on-chip L1. \Comment*[r]{$G_x$ unicast reads per slice \ [wide]}
+  \For{$1 \leq j \leq T_c$}{
+    each tile $(x,y)$: read $K^\top_{jx}, V_{jx}$ from $\srcKV(x)$'s 3D DRAM to on-chip L1. \Comment*[r]{$G_y$ unicast reads per slice \ [wide]}
+    Tile on-chip compute $S_{iy}^{(jx)} = Q_{iy} K^\top_{jx}$.\;
+    Tile on-chip compute $S_{iy}^{(jx)} = S_{iy}^{(jx)}/\sqrt{D}$, \ $m_{iy}^{(jx)} = \rowmax(S_{iy}^{(jx)})$.\;
+    \If{$j > 1$}{
+      Tile on-chip compute $m_{iy}^{(jx)} = \max(m_{iy}^{(j-1)}, m_{iy}^{(jx)})$.\;
+    }
+    (row owner $\dstO(y)$) Row-wise reduce $m_{iy}^{(j)} = \max(m_{iy}^{(jx)})$ in tile group. \Comment*[r]{[narrow]}
+    (row owner $\dstO(y)$) Row-wise multicast $m_{iy}^{(j)}$ in tile group. \Comment*[r]{[narrow]}
+    Tile on-chip compute $\tilde{P}_{iy}^{(jx)} = \exp(S_{iy}^{(jx)} - m_{iy}^{(j)})$.\;
+    Tile on-chip compute $\ell_{iy}^{(jx)} = \rowsum(\tilde{P}_{iy}^{(jx)})$.\;
+    (row owner $\dstO(y)$) Row-wise reduce $\ell_{iy}^{(j)} = \textstyle\sum(\ell_{iy}^{(jx)})$ in tile group. \Comment*[r]{[narrow]}
+    (row owner $\dstO(y)$) Row-wise multicast $\ell_{iy}^{(j)}$ in tile group. \Comment*[r]{[narrow]}
+    \If{$j > 1$}{
+      Tile on-chip compute $\ell_{iy}^{(j)} = e^{\,m_{iy}^{(j-1)}-m_{iy}^{(j)}}\,\ell_{iy}^{(j-1)} + \ell_{iy}^{(j)}$.\;
+      Tile on-chip compute $O_{iy}^{(jx)} = \diag\!\big(e^{\,m_{iy}^{(j-1)}-m_{iy}^{(j)}}\big) O_{iy}^{(j-1)x}$.\;
+    }
+    Tile on-chip compute $O_{iy}^{(jx)} = O_{iy}^{(jx)} + \tilde{P}_{iy}^{(jx)} V_{jx}$.\;
+    Tile on-chip update $m_{iy}^{(j-1)} \leftarrow m_{iy}^{(j)}$, \ $\ell_{iy}^{(j-1)} \leftarrow \ell_{iy}^{(j)}$.\;
+  }
+  Tile on-chip compute $O_{iy}^{(T_c)x} = \diag(\ell_{iy}^{(T_c)})^{-1} O_{iy}^{(T_c)x}$.\;
+  (row owner $\dstO(y)$) Row-wise reduce $O_{iy}^{(T_c)} = \textstyle\sum(O_{iy}^{(T_c)x})$ in tile group. \Comment*[r]{[wide]}
+  (row owner $\dstO(y)$) Write $O_{iy}$ to its local 3D DRAM as the $y$-th slice in $i$-th block of $O$. \Comment*[r]{local write}
+}
+\end{algorithm}
+
+\begin{algorithm}[H]
+\DontPrintSemicolon
+\SetKwInput{KwReq}{Require}
+\SetKwComment{Comment}{\quad// }{}
+\SetKwFor{For}{for}{do}{end}
+\caption{Multicast on a $G_x\times G_y$ tile group (FlatAttention structure on per-tile 3D DRAM)}
+\KwReq{$Q, K^\top, V, O \in \mathbb{R}^{S\times D}$ resident in per-tile 3D DRAM, placed from LPDDR by host DMA before this block. Block sizes $B_c, B_r$, tile group sizes $G_x, G_y$. In the following algorithm, $x, y$ denote tile coordinates relative to the group.}
+Divide $Q, O$ into $T_r=\lceil S/B_r\rceil$ blocks $Q_1,\dots,Q_{T_r}\in\mathbb{R}^{B_r\times D}$ and $O_1,\dots,O_{T_r}$. Divide $K^\top, V$ into $T_c=\lceil S/B_c\rceil$ blocks.\;
+Further divide each $Q_i, O_i$ into $G_y$ slices $Q_{i1},\dots,Q_{iG_y}\in\mathbb{R}^{(B_r/G_y)\times D}$, and each $K^\top_j, V_j$ into $G_x$ slices. Slices are accessed according to tile coordinates $x, y$.\;
+\For{$1 \leq i \leq T_r$}{
+  On chip, initialize $O_{iy}^{(0x)} = 0$.\;
+  (row source $\srcQ(y)$) Load $Q_{iy}$ from local 3D DRAM to tile on-chip L1. \Comment*[r]{local read}
+  (row source $\srcQ(y)$) Row-wise multicast $Q_{iy}$ in tile group. \Comment*[r]{[wide]}
+  \For{$1 \leq j \leq T_c$}{
+    (column source $\srcKV(x)$) Load $K^\top_{jx}, V_{jx}$ from local 3D DRAM to tile on-chip L1. \Comment*[r]{local read}
+    (column source $\srcKV(x)$) Column-wise multicast $K^\top_{jx}, V_{jx}$ in tile group. \Comment*[r]{[wide]}
+    Tile on-chip compute $S_{iy}^{(jx)} = Q_{iy} K^\top_{jx}$.\;
+    Tile on-chip compute $S_{iy}^{(jx)} = S_{iy}^{(jx)}/\sqrt{D}$, \ $m_{iy}^{(jx)} = \rowmax(S_{iy}^{(jx)})$.\;
+    \If{$j > 1$}{
+      Tile on-chip compute $m_{iy}^{(jx)} = \max(m_{iy}^{(j-1)}, m_{iy}^{(jx)})$.\;
+    }
+    (row owner $\dstO(y)$) Row-wise reduce $m_{iy}^{(j)} = \max(m_{iy}^{(jx)})$ in tile group. \Comment*[r]{[narrow]}
+    (row owner $\dstO(y)$) Row-wise multicast $m_{iy}^{(j)}$ in tile group. \Comment*[r]{[narrow]}
+    Tile on-chip compute $\tilde{P}_{iy}^{(jx)} = \exp(S_{iy}^{(jx)} - m_{iy}^{(j)})$.\;
+    Tile on-chip compute $\ell_{iy}^{(jx)} = \rowsum(\tilde{P}_{iy}^{(jx)})$.\;
+    (row owner $\dstO(y)$) Row-wise reduce $\ell_{iy}^{(j)} = \textstyle\sum(\ell_{iy}^{(jx)})$ in tile group. \Comment*[r]{[narrow]}
+    (row owner $\dstO(y)$) Row-wise multicast $\ell_{iy}^{(j)}$ in tile group. \Comment*[r]{[narrow]}
+    \If{$j > 1$}{
+      Tile on-chip compute $\ell_{iy}^{(j)} = e^{\,m_{iy}^{(j-1)}-m_{iy}^{(j)}}\,\ell_{iy}^{(j-1)} + \ell_{iy}^{(j)}$.\;
+      Tile on-chip compute $O_{iy}^{(jx)} = \diag\!\big(e^{\,m_{iy}^{(j-1)}-m_{iy}^{(j)}}\big) O_{iy}^{(j-1)x}$.\;
+    }
+    Tile on-chip compute $O_{iy}^{(jx)} = O_{iy}^{(jx)} + \tilde{P}_{iy}^{(jx)} V_{jx}$.\;
+    Tile on-chip update $m_{iy}^{(j-1)} \leftarrow m_{iy}^{(j)}$, \ $\ell_{iy}^{(j-1)} \leftarrow \ell_{iy}^{(j)}$.\;
+  }
+  Tile on-chip compute $O_{iy}^{(T_c)x} = \diag(\ell_{iy}^{(T_c)})^{-1} O_{iy}^{(T_c)x}$.\;
+  (row owner $\dstO(y)$) Row-wise reduce $O_{iy}^{(T_c)} = \textstyle\sum(O_{iy}^{(T_c)x})$ in tile group. \Comment*[r]{[wide]}
+  (row owner $\dstO(y)$) Write $O_{iy}$ to its local 3D DRAM as the $y$-th slice in $i$-th block of $O$. \Comment*[r]{local write}
+}
+\end{algorithm}
+
+\end{document}
