@@ -50,6 +50,17 @@ sources:
     role: Extended journal version of flatattention - deeper dataflow analysis, MoE inference, expanded evaluation. Prefer this over the conference version when the two overlap.
     word_count: 9271
 
+  - id: attention-is-all-you-need
+    title: Attention Is All You Need
+    authors: Ashish Vaswani et al.
+    year: 2017
+    url: https://arxiv.org/abs/1706.03762
+    pdf: attention-is-all-you-need.pdf
+    text: attention-is-all-you-need.md
+    status: ok
+    role: Authoritative for multi-head attention and the Transformer - scaled dot-product attention, multi-head attention, encoder-decoder structure, positional encoding. Workload-side definition behind the attention benchmark (B4).
+    word_count: 4967
+
   - id: floonoc
     title: "FlooNoC: A 645 Gbps/link 0.15 pJ/B/hop Open-Source Network-on-Chip with Wide Physical Links and End-to-End AXI4 Parallel Multi-Stream Support"
     authors: Tim Fischer et al.
