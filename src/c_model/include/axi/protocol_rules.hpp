@@ -41,9 +41,22 @@ constexpr uint64_t kAxi4PageMask = kAxi4PageBytes - 1ull;
 // (IHI 0022H §A3.4.1).
 constexpr int kAxi4MaxBurstBeats = 256;
 
+namespace detail {
+// Constexpr floor(log2(v)) for a positive power-of-2 v — keeps kMaxSize
+// derived instead of hardcoded as the bus widens.
+constexpr int log2_pow2(int v) {
+    int r = 0;
+    while (v > 1) {
+        v >>= 1;
+        ++r;
+    }
+    return r;
+}
+}  // namespace detail
+
 // AxSIZE encodes log2(bytes-per-beat); must not exceed log2(DATA_BYTES) so a
-// beat fits the bus (IHI 0022H §A3.4.1). DATA_BYTES = 32 → max size = 5.
-constexpr int kMaxSize = 5;  // log2(DATA_BYTES) for DATA_BYTES = 32
+// beat fits the bus (IHI 0022H §A3.4.1).
+constexpr int kMaxSize = detail::log2_pow2(DATA_BYTES);
 static_assert(DATA_BYTES == (1 << kMaxSize),
               "kMaxSize must equal log2(DATA_BYTES); update if bus widens");
 
@@ -110,25 +123,20 @@ inline bool check_r_last_timing(bool last, std::size_t beat_idx, uint8_t len) {
 
 // STRB_VALID_BITS — only the lower WSTRB_WIDTH (= DATA_BYTES) bits of strb
 // are defined; higher bits must be 0 (IHI 0022 A3.4.3).
-inline bool check_strb_valid_bits(uint32_t strb) {
-    if constexpr (DATA_BYTES >= 32) {
-        return true;  // full uint32_t range is valid
-    } else {
-        const uint32_t mask = static_cast<uint32_t>((1ull << DATA_BYTES) - 1u);
-        return (strb & ~mask) == 0;
-    }
+inline bool check_strb_valid_bits(uint64_t strb) {
+    return (strb & ~kFullStrbMask) == 0;
 }
 
 // STRB_SPARSE_LEGAL — at any beat, strb may enable only byte lanes inside
 // that beat's transfer window: a contiguous (1<<size)-byte window starting
 // at byte_lane = beat_addr & (DATA_BYTES-1). Bits outside the window must
 // be 0 (IHI 0022 A3.4.3 + lane-positioning rules).
-inline bool check_strb_sparse_legal(uint32_t strb, uint8_t size, uint64_t beat_addr_v) {
+inline bool check_strb_sparse_legal(uint64_t strb, uint8_t size, uint64_t beat_addr_v) {
     const std::size_t bpb = 1ull << size;
     const std::size_t byte_lane = static_cast<std::size_t>(beat_addr_v & (DATA_BYTES - 1));
     const uint64_t window = ((1ull << bpb) - 1ull) << byte_lane;
     // strb bits set outside the window are illegal.
-    return (static_cast<uint64_t>(strb) & ~window) == 0;
+    return (strb & ~window) == 0;
 }
 
 // CROSS_4KB — INCR bursts must not cross a 4KB address boundary

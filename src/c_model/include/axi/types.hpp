@@ -9,6 +9,10 @@ namespace ni::cmodel::axi {
 constexpr int DATA_BYTES = ni::WSTRB_WIDTH;
 constexpr int DATA_WIDTH = DATA_BYTES * 8;
 
+// Full (all-lanes) WSTRB mask for the current DATA_BYTES. Ternary avoids UB
+// from shifting a 64-bit value by 64 when the bus reaches its uint64_t ceiling.
+constexpr uint64_t kFullStrbMask = (DATA_BYTES >= 64) ? ~0ull : ((1ull << DATA_BYTES) - 1ull);
+
 // AXI data field width in bits used by NoC payload bulk-bytes accessors
 // (set_payload_bytes / get_payload_bytes for wdata / rdata).
 constexpr int NOC_DATA_WIDTH_BITS = DATA_BYTES * 8;
@@ -33,9 +37,10 @@ static_assert(DATA_BYTES == 32,
               "c_model assumes AXI DATA_WIDTH = 256 bits; widen DATA_BYTES + "
               "WBeat/RBeat data array + WSTRB type if the spec changes");
 
-// WBeat::strb is uint32_t. If DATA_BYTES ever exceeds 32, WSTRB no longer fits
-// in a single uint32_t — widen the struct field before relaxing this.
-static_assert(DATA_BYTES <= 32, "WBeat::strb is uint32_t; widen the strb field if DATA_BYTES > 32");
+// WBeat::strb is uint64_t. If DATA_BYTES ever exceeds 64, WSTRB no longer
+// fits in a single uint64_t — widen the struct field (e.g. std::bitset)
+// before relaxing this.
+static_assert(DATA_BYTES <= 64, "WBeat::strb is uint64_t; widen the strb field if DATA_BYTES > 64");
 
 enum class Burst : uint8_t { FIXED = 0, INCR = 1, WRAP = 2 };
 enum class Resp : uint8_t { OKAY = 0, EXOKAY = 1, SLVERR = 2, DECERR = 3 };
@@ -92,7 +97,7 @@ struct AwBeat {
 
 struct WBeat {
     std::array<uint8_t, DATA_BYTES> data;
-    uint32_t strb;
+    uint64_t strb;
     bool last;
     uint8_t user;
 };

@@ -7,7 +7,7 @@ namespace ni::cmodel::axi {
 struct MemWriteReq {
     uint64_t addr;
     std::array<uint8_t, DATA_BYTES> data;
-    uint32_t strb;
+    uint64_t strb;
     uint8_t id;
     bool last;
     uint64_t tag;

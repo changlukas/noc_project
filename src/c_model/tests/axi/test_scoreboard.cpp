@@ -11,7 +11,7 @@ namespace axi = ni::cmodel::axi;
 TEST(Scoreboard, NoUpdateOnDecerr) {
     SCENARIO("scoreboard: DECERR write does not update expected_, so later read sees no mismatch");
     axi::Scoreboard sb;
-    std::vector<uint32_t> strb1(1, 0xFFFF'FFFFu);
+    std::vector<uint64_t> strb1(1, 0xFFFF'FFFFu);
     sb.handle_write_completed(axi::WriteResult{0x100,
                                                /*size*/ 5,
                                                /*len*/ 0,
@@ -31,7 +31,7 @@ TEST(Scoreboard, NoUpdateOnDecerr) {
 TEST(Scoreboard, MismatchDetected) {
     SCENARIO("scoreboard: read returning altered byte vs OKAY-written data raises 1 mismatch");
     axi::Scoreboard sb;
-    std::vector<uint32_t> strb1(1, 0xFFFF'FFFFu);
+    std::vector<uint64_t> strb1(1, 0xFFFF'FFFFu);
     std::vector<uint8_t> wdata(axi::DATA_BYTES, 0x00u);
     wdata[0] = 0xAB;
     wdata[1] = 0xCD;
@@ -56,7 +56,7 @@ TEST(Scoreboard, MismatchDetected) {
 TEST(Scoreboard, MatchPassesSilent) {
     SCENARIO("scoreboard: exact write-then-read byte match produces zero mismatches");
     axi::Scoreboard sb;
-    std::vector<uint32_t> strb1(1, 0xFFFF'FFFFu);
+    std::vector<uint64_t> strb1(1, 0xFFFF'FFFFu);
     std::vector<uint8_t> wdata(axi::DATA_BYTES, 0x00u);
     wdata[0] = 0xDE;
     wdata[1] = 0xAD;
@@ -102,7 +102,7 @@ TEST(Scoreboard, SparseWstrbByteMerge) {
     // map to memory addrs 0x100..0x103.
     axi::Scoreboard sb;
     std::vector<uint8_t> data(axi::DATA_BYTES, 0xAAu);
-    std::vector<uint32_t> strb{0x0000000Fu};
+    std::vector<uint64_t> strb{0x0000000Fu};
     axi::WriteResult wr{
         0x100,           /*size*/ 5, /*len*/ 0, axi::Burst::INCR, axi::LockType::Normal, data, strb,
         axi::Resp::OKAY, 1,          1};

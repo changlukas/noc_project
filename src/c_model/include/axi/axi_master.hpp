@@ -69,7 +69,7 @@ struct WriteResult {
     // at the slave's exclusive monitor state.
     LockType lock = LockType::Normal;
     std::vector<uint8_t> data;            // packed user bytes, (len+1)*(1<<size)
-    std::vector<uint32_t> strb_per_beat;  // bus-level WSTRB per beat (lane-positioned)
+    std::vector<uint64_t> strb_per_beat;  // bus-level WSTRB per beat (lane-positioned)
     Resp resp;
     uint8_t id;
     std::size_t scenario_line;
@@ -391,22 +391,18 @@ class AxiMasterT {
         return bytes;
     }
 
-    static std::vector<uint32_t> load_strb_file_(const std::string& path,
+    static std::vector<uint64_t> load_strb_file_(const std::string& path,
                                                  std::size_t expected_beats,
-                                                 uint32_t default_full = 0xFFFF'FFFFu) {
+                                                 uint64_t default_full = kFullStrbMask) {
         if (path.empty()) {
-            return std::vector<uint32_t>(expected_beats, default_full);
+            return std::vector<uint64_t>(expected_beats, default_full);
         }
         std::ifstream f(path);
         if (!f.is_open()) throw std::runtime_error("AxiMaster: cannot open strb_file: " + path);
-        std::vector<uint32_t> strbs;
+        std::vector<uint64_t> strbs;
         std::string tok;
         while (f >> tok) {
-            unsigned long long v = std::stoull(tok, nullptr, 16);
-            if (v > 0xFFFFFFFFull)
-                throw std::runtime_error("AxiMaster: strb_file token out of uint32_t range: " +
-                                         tok);
-            strbs.push_back(static_cast<uint32_t>(v));
+            strbs.push_back(static_cast<uint64_t>(std::stoull(tok, nullptr, 16)));
         }
         if (strbs.size() != expected_beats)
             throw std::runtime_error("AxiMaster: strb_file line count " +
@@ -425,7 +421,7 @@ class AxiMasterT {
         std::vector<BurstSpec> sub_bursts;
         // Write-side state
         std::vector<uint8_t> data;            // packed user bytes, full operation
-        std::vector<uint32_t> strb_per_beat;  // operation-level, 1 entry per user beat
+        std::vector<uint64_t> strb_per_beat;  // operation-level, 1 entry per user beat
         std::size_t next_aw_sub_idx_ = 0;     // index of next sub-burst's AW to push
         std::size_t cur_w_sub_idx_ = 0;       // sub-burst currently emitting W beats
         std::size_t w_pushed_in_cur_ = 0;     // W beats pushed for current sub-burst
@@ -519,7 +515,7 @@ class AxiMasterT {
                     const std::size_t off = op_beat * bpb + j;
                     w.data[byte_lane + j] = (off < op.data.size()) ? op.data[off] : 0;
                 }
-                const uint32_t lane_mask = static_cast<uint32_t>(((1ull << bpb) - 1) << byte_lane);
+                const uint64_t lane_mask = ((1ull << bpb) - 1) << byte_lane;
                 w.strb = op.strb_per_beat[op_beat] & lane_mask;
                 w.last = (op.w_pushed_in_cur_ == sub.len);
                 if (!slave_.push_w(w)) return op.write_request_done();

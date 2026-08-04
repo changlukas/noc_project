@@ -126,7 +126,7 @@ inline axi::WBeat Depacketize::decode_w(const Flit& f) {
     axi::WBeat b{};
     b.last = f.get_payload_field(ch, "wlast") != 0;
     b.user = static_cast<uint8_t>(f.get_payload_field(ch, "wuser"));
-    b.strb = static_cast<uint32_t>(f.get_payload_field(ch, "wstrb"));
+    b.strb = f.get_payload_field(ch, "wstrb");
     f.get_payload_bytes(ch, "wdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
     return b;
 }

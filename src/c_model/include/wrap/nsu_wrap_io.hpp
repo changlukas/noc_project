@@ -83,7 +83,7 @@ struct NsuOutputs {
     // AXI master side — W channel (Nsu drives write data to slave)
     bool wvalid;
     std::array<uint8_t, NSU_AXI_DATA_BYTES> wdata;
-    uint32_t wstrb;
+    uint64_t wstrb;
     bool wlast;
     // AXI master side — B channel (Nsu accepts write response from slave)
     bool bready;

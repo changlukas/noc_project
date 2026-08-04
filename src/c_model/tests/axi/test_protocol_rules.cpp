@@ -142,10 +142,25 @@ TEST_F(AxiProtocolDeath, RLastTiming_RejectsEarlyLast) {
 }
 
 TEST_F(AxiProtocolDeath, StrbValidBits_AcceptsAllOnesAt32Bytes) {
-    SCENARIO("protocol_rules: STRB_VALID_BITS is tautological at 32B bus (all 32 lanes legal)");
-    // DATA_BYTES = WSTRB_WIDTH = 32 → all 32 bits are valid. The rule is a
-    // tautology at this bus width; document via a positive assertion.
+    SCENARIO("protocol_rules: STRB_VALID_BITS accepts all 32 lanes set at today's 32B bus");
+    // DATA_BYTES = WSTRB_WIDTH = 32 → mask = 0xFFFF'FFFF; all 32 bits set is
+    // exactly the upper boundary of the valid range.
     EXPECT_TRUE(rules::check_strb_valid_bits(0xFFFF'FFFFu));
+}
+
+TEST_F(AxiProtocolDeath, StrbValidBits_RejectsBitAboveDataBytes) {
+    SCENARIO(
+        "protocol_rules: STRB_VALID_BITS rejects a strb bit above DATA_BYTES — the mask is live, "
+        "not the removed always-true shortcut");
+    // Bit 32 is one past the 32-lane mask at today's DATA_BYTES=32. Regression
+    // guard for the `if constexpr (DATA_BYTES >= 32) return true` shortcut
+    // that used to silently accept any value at this width.
+    EXPECT_DEATH(
+        {
+            AXI_PROTOCOL_ASSERT(rules::check_strb_valid_bits(1ull << axi::DATA_BYTES),
+                                "STRB_VALID_BITS");
+        },
+        ".*");
 }
 
 TEST_F(AxiProtocolDeath, StrbSparseLegal_RejectsBitsOutsideWindow) {

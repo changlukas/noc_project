@@ -23,7 +23,7 @@ class Scoreboard {
     //   (byte_lane + j) for j in [0, bpb) and records data[beat*bpb + j] at
     //   memory address beat_addr + j when the corresponding strb bit is set.
     void handle_write_completed(const WriteResult& wr, const std::vector<uint8_t>& data,
-                                const std::vector<uint32_t>& strb_per_beat) {
+                                const std::vector<uint64_t>& strb_per_beat) {
         // Skip memory-error completions (slave never reached memory).
         if (wr.resp == Resp::DECERR || wr.resp == Resp::SLVERR) return;
         // A failed exclusive write (AxLOCK=Exclusive that did not earn
@@ -44,7 +44,7 @@ class Scoreboard {
             // shadowing with the local 'beat' loop variable.
             const uint64_t beat_addr_v = axi::beat_addr(wr.addr, wr.len, wr.size, wr.burst, beat);
             const std::size_t byte_lane = static_cast<std::size_t>(beat_addr_v & (DATA_BYTES - 1));
-            const uint32_t strb = strb_per_beat[beat];
+            const uint64_t strb = strb_per_beat[beat];
             // Cap the byte loop at the bus lane room to avoid shifting uint32_t by
             // >=32 (C++ UB). Mirrors the lane_room/copy_bytes pattern used in
             // Memory::perform_read_, AxiMaster W push, and AxiMaster R accumulator.

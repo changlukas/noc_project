@@ -47,7 +47,7 @@ struct NmuInputs {
     // AXI slave side — W channel (master drives write data)
     bool wvalid;
     std::array<uint8_t, NMU_AXI_DATA_BYTES> wdata;
-    uint32_t wstrb;
+    uint64_t wstrb;
     bool wlast;
     // AXI slave side — B channel (master accepts write response)
     bool bready;
