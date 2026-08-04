@@ -19,7 +19,7 @@ while buffer and outstanding depths move the queuing part.
 |---|---|---|---|
 | `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets flit width, so it sets both payload bandwidth and per-router buffer and crossbar area | 256 b (32, 64, 128, 256, 512, 1024) |
 | `NUM_VC` | Peak bandwidth, area | Recovers link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC`, so it scales with data width | 1 (1 to 8) |
-| `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (1 to 16) |
+| `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (2 to 16) |
 | `ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender, sized by rule 1 below | 4 (1 to 16) |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 2 (1 to 16) |
 | `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID, hence the memory latency a master can hide behind concurrency | 32 (1 to 256) |

@@ -547,9 +547,13 @@ scoreboard divergence.
 SPEC 19 (parameter legality). Construction rejects (assert then abort) exactly three
 conditions: `NUM_VC` outside 1..8 (= 2^VC_ID_WIDTH), a zero VC depth or zero output
 FIFO depth, and an own coordinate outside the mesh (`router.hpp:77-88`). The upper
-bounds on VC depth, output FIFO depth, and mesh dims (all stated as 1..16) are design
-assumptions bounded by the flit field widths (X and Y coordinate 4 bits each), not
-construction-checked. Verified by ctest death tests
+bounds on VC depth, output FIFO depth, and mesh dims (VC depth and output FIFO depth
+stated as 1..16, mesh dims stated as 2..16) are design assumptions bounded by the
+flit field widths (X and Y coordinate 4 bits each), not construction-checked. The
+mesh-dim lower bound (2 per dimension: a mesh communicating through NI + router
+needs at least 2x2; 1x1/1xN illegal) is enforced at topology load time
+(`gen_tb_top.py`, `gen_test_patterns.py`, `sam_yaml.hpp::load_sam_table`), not by
+Router construction. Verified by ctest death tests
 `RouterConstructionDeath.BadParametersAbort` (covers `num_vc = 9` and `vc_depth = 0`),
 `RouterRouteComputeDeath.DstOutsideMeshAborts`, `RouterDatapathDeath.BadVcIdAborts`.
 Failure: construction succeeds on `num_vc` outside 1..8, a zero depth, or an
