@@ -49,10 +49,11 @@ axi::RBeat make_r(uint8_t id, bool last, axi::Resp resp = axi::Resp::OKAY) {
 TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
     SCENARIO(
         "NSU Packetize: push_b accepts beat into S1; tick() reads MetaBuffer "
-        "(src/rob_req/rob_idx), stamps onto B flit header, commits meta");
+        "(src/ordering_req/ordering_tag), stamps onto B flit header, commits meta");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
-    mb.allocate_write(0x05, {/*src=*/0x12, /*upstream_id=*/0x05, /*rob_req=*/1, /*rob_idx=*/3});
+    mb.allocate_write(0x05,
+                      {/*src=*/0x12, /*upstream_id=*/0x05, /*ordering_req=*/1, /*ordering_tag=*/3});
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));
@@ -66,8 +67,8 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
     EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_B);
     EXPECT_EQ(f->get_header_field("dst_id"), 0x12u);  // = orig src_id
     EXPECT_EQ(f->get_header_field("src_id"), kNsuSrcId);
-    EXPECT_EQ(f->get_header_field("rob_req"), 1u);
-    EXPECT_EQ(f->get_header_field("rob_idx"), 3u);
+    EXPECT_EQ(f->get_header_field("ordering_req"), 1u);
+    EXPECT_EQ(f->get_header_field("ordering_tag"), 3u);
     EXPECT_EQ(f->get_payload_field("B", "bid"), 0x05u);
     EXPECT_EQ(f->get_payload_field("B", "bresp"), static_cast<uint64_t>(axi::Resp::OKAY));
     // metadata consumed on successful push
@@ -182,21 +183,21 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
 // The method no longer exists on nsu::Packetize; wrong-side
 // calls are now caught at compile time. Test removed.
 
-// Multi-beat R burst: NSU stamps every R flit with the same rob_idx.
+// Multi-beat R burst: NSU stamps every R flit with the same ordering_tag.
 // All R beats of a burst peek the same MetaBuffer entry (committed only on
-// rlast=1), so rob_idx is identical for all beats. This documents the
+// rlast=1), so ordering_tag is identical for all beats. This documents the
 // source of the past-reserved-slot-range hazard caught by the NMU ROB guard.
-TEST(NsuPacketize, MultiBeatR_AllFlitsCarrySameRobIdx) {
+TEST(NsuPacketize, MultiBeatR_AllFlitsCarrySameOrderingTag) {
     SCENARIO(
         "NSU Packetize: three R beats for the same AR share one MetaBuffer entry "
         "(peeked, not committed, until rlast=1). Every emitted R flit carries the "
-        "same rob_idx, documenting the NSU same-base stamping that the NMU ROB "
+        "same ordering_tag, documenting the NSU same-base stamping that the NMU ROB "
         "reserved-slot-range guard catches.");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
-    constexpr uint8_t kRobIdx = 7;
-    mb.allocate_read(0x03,
-                     {/*src=*/0x12, /*upstream_id=*/0x03, /*rob_req=*/1, /*rob_idx=*/kRobIdx});
+    constexpr uint8_t kOrderingTag = 7;
+    mb.allocate_read(0x03, {/*src=*/0x12, /*upstream_id=*/0x03, /*ordering_req=*/1,
+                            /*ordering_tag=*/kOrderingTag});
     Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
 
     // Three-beat burst: push_r + tick emits one flit per step.
@@ -204,19 +205,19 @@ TEST(NsuPacketize, MultiBeatR_AllFlitsCarrySameRobIdx) {
     pkt.tick();
     auto f0 = r_cap.pop();
     ASSERT_TRUE(f0.has_value());
-    EXPECT_EQ(f0->get_header_field("rob_idx"), kRobIdx);
+    EXPECT_EQ(f0->get_header_field("ordering_tag"), kOrderingTag);
 
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ false)));
     pkt.tick();
     auto f1 = r_cap.pop();
     ASSERT_TRUE(f1.has_value());
-    EXPECT_EQ(f1->get_header_field("rob_idx"), kRobIdx);
+    EXPECT_EQ(f1->get_header_field("ordering_tag"), kOrderingTag);
 
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true)));
     pkt.tick();
     auto f2 = r_cap.pop();
     ASSERT_TRUE(f2.has_value());
-    EXPECT_EQ(f2->get_header_field("rob_idx"), kRobIdx);
+    EXPECT_EQ(f2->get_header_field("ordering_tag"), kOrderingTag);
 
     // Meta committed on rlast=1.
     EXPECT_FALSE(mb.peek_read(0x03).has_value());

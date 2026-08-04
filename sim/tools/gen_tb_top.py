@@ -549,7 +549,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;")
     w("")
     if rob_enabled:
-        w("    // NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits).")
+        w("    // NMU RoB pool depths, per direction. Both <= 256 (ordering_tag is 8 bits).")
         w("    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT;")
         w("    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;")
         w("    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).")

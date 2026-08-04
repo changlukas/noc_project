@@ -12,23 +12,24 @@ TEST(Flit, ConstructFromRawHasMatchingWidth) {
 
 TEST(Flit, SetGetHeaderRoundtripAllFields) {
     SCENARIO(
-        "Flit: every enabled header field (axi_ch/src_id/dst_id/vc_id/last/rob_req/rob_idx) "
+        "Flit: every enabled header field "
+        "(axi_ch/src_id/dst_id/vc_id/flit_tail/ordering_req/ordering_tag) "
         "set/get bit-perfect");
     Flit f;
     f.set_header_field("axi_ch", 0x4);  // R
     f.set_header_field("src_id", 0x12);
     f.set_header_field("dst_id", 0x34);
     f.set_header_field("vc_id", 0x2);
-    f.set_header_field("last", 0x1);
-    f.set_header_field("rob_req", 0x1);
-    f.set_header_field("rob_idx", 0xFF);
+    f.set_header_field("flit_tail", 0x1);
+    f.set_header_field("ordering_req", 0x1);
+    f.set_header_field("ordering_tag", 0xFF);
     EXPECT_EQ(f.get_header_field("axi_ch"), 0x4u);
     EXPECT_EQ(f.get_header_field("src_id"), 0x12u);
     EXPECT_EQ(f.get_header_field("dst_id"), 0x34u);
     EXPECT_EQ(f.get_header_field("vc_id"), 0x2u);
-    EXPECT_EQ(f.get_header_field("last"), 0x1u);
-    EXPECT_EQ(f.get_header_field("rob_req"), 0x1u);
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0xFFu);
+    EXPECT_EQ(f.get_header_field("flit_tail"), 0x1u);
+    EXPECT_EQ(f.get_header_field("ordering_req"), 0x1u);
+    EXPECT_EQ(f.get_header_field("ordering_tag"), 0xFFu);
 }
 
 TEST(Flit, SetGetPayloadAwFields) {

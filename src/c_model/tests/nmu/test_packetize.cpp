@@ -63,11 +63,12 @@ axi::ArBeat make_ar(uint8_t id, uint64_t addr) {
 
 TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
     SCENARIO(
-        "NMU Packetize: push_aw stamps src_id/axi_ch=AW/vc=0/last=0/awid/awaddr on emitted flit "
+        "NMU Packetize: push_aw stamps src_id/axi_ch=AW/vc=0/flit_tail=0/awid/awaddr on emitted "
+        "flit "
         "(AW starts wormhole packet)");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
-    // Legacy test: only verifies packetize stamps src + axi_ch + last + awid +
+    // Legacy test: only verifies packetize stamps src + axi_ch + flit_tail + awid +
     // awaddr. dst_id derivation is covered by WMetaFifoInheritsAwDst below.
     // Address is the low 40 bits of the original 0xDEADBEEFCAFEBABE pattern:
     // the legacy SAM covers addr < 2^40 (256 tiles x 4GB), unlike xy_route
@@ -80,7 +81,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
     EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AW);
     EXPECT_EQ(f.get_header_field("src_id"), kSrcId);
     EXPECT_EQ(f.get_header_field("vc_id"), 0u);
-    EXPECT_EQ(f.get_header_field("last"), 0u);  // AW starts wormhole packet (FlooNoC)
+    EXPECT_EQ(f.get_header_field("flit_tail"), 0u);  // AW starts wormhole packet (FlooNoC)
     EXPECT_EQ(f.get_payload_field("AW", "awid"), 0x05u);
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xCAFEBABEull);  // rebased: - base 0xEF00000000
 }
@@ -119,12 +120,12 @@ TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
     EXPECT_EQ(w2->get_header_field("dst_id"), 0x56u);
 }
 
-TEST(NmuPacketize, WHeaderLastMatchesWlast) {
+TEST(NmuPacketize, WHeaderFlitTailMatchesWlast) {
     SCENARIO(
-        "NMU Packetize: header.last on W flits matches payload.wlast — "
+        "NMU Packetize: header.flit_tail on W flits matches payload.wlast — "
         "intermediate W beats stamp 0, terminal beat stamps 1 "
         "(FlooNoC wormhole packet boundary semantic; "
-        "fixes pre-existing bug where every W flit stamped header.last=1)");
+        "fixes pre-existing bug where every W flit stamped header.flit_tail=1)");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
     ASSERT_TRUE(pkt.push_aw(make_aw(0x07, 0x340000, /*len*/ 2)));
@@ -136,10 +137,10 @@ TEST(NmuPacketize, WHeaderLastMatchesWlast) {
     for (int i = 0; i < 3; ++i) {
         auto f = w_cap.pop();
         ASSERT_TRUE(f.has_value());
-        uint64_t expected_last = (i == 2) ? 1u : 0u;
-        EXPECT_EQ(f->get_header_field("last"), expected_last)
-            << "W beat " << i << ": header.last expected " << expected_last;
-        EXPECT_EQ(f->get_payload_field("W", "wlast"), expected_last);
+        uint64_t expected_flit_tail = (i == 2) ? 1u : 0u;
+        EXPECT_EQ(f->get_header_field("flit_tail"), expected_flit_tail)
+            << "W beat " << i << ": header.flit_tail expected " << expected_flit_tail;
+        EXPECT_EQ(f->get_payload_field("W", "wlast"), expected_flit_tail);
     }
 }
 
@@ -231,22 +232,23 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
     for (int i = 0; i < 32; ++i) EXPECT_EQ(wdata_out[i], static_cast<uint8_t>(i));
 }
 
-TEST(NmuPacketize, ArEncodesAxiChAndRobIdx) {
+TEST(NmuPacketize, ArEncodesAxiChAndOrderingTag) {
     SCENARIO(
-        "NMU Packetize: AR flit stamps axi_ch=AR, dst from addr_trans, rob_req/rob_idx defaults to "
+        "NMU Packetize: AR flit stamps axi_ch=AR, dst from addr_trans, ordering_req/ordering_tag "
+        "defaults to "
         "0");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
     // addr 0x9900004000 → dst = (0x9900004000 >> 32) & 0xFF = 0x99, rebased
     // local araddr = 0x4000 (addr - base 0x9900000000). Direct-path interface
-    // auto-fills rob_req/rob_idx = 0; Rob-driven path uses push_ar_with_meta
+    // auto-fills ordering_req/ordering_tag = 0; Rob-driven path uses push_ar_with_meta
     // (covered by PushAwWithMeta_OverrideDefault).
     ASSERT_TRUE(pkt.push_ar(make_ar(0x07, 0x9900004000)));
     auto f = *ar_cap.pop();
     EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AR);
     EXPECT_EQ(f.get_header_field("dst_id"), 0x99u);
-    EXPECT_EQ(f.get_header_field("rob_req"), 0u);
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);
+    EXPECT_EQ(f.get_header_field("ordering_req"), 0u);
+    EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);
     EXPECT_EQ(f.get_payload_field("AR", "arid"), 0x07u);
     EXPECT_EQ(f.get_payload_field("AR", "araddr"), 0x4000ull);  // rebased: - base 0x9900000000
 }
@@ -262,19 +264,20 @@ TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
 
 TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
     SCENARIO(
-        "NMU Packetize: push_aw_with_meta overrides dst_id/local_addr/rob_req/rob_idx from meta");
+        "NMU Packetize: push_aw_with_meta overrides dst_id/local_addr/ordering_req/ordering_tag "
+        "from meta");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, /*src=*/0x01, legacy_sam());
     axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100);  // addr → dst=0 by default
     ni::cmodel::nmu::AwHeaderMeta meta{/*dst_id=*/0x42,
                                        /*local_addr=*/0x9999,
-                                       /*rob_req=*/1,
-                                       /*rob_idx=*/0x07};
+                                       /*ordering_req=*/1,
+                                       /*ordering_tag=*/0x07};
     ASSERT_TRUE(pkt.push_aw_with_meta(b, meta));
     auto f = *aw_cap.pop();
     EXPECT_EQ(f.get_header_field("dst_id"), 0x42u);
-    EXPECT_EQ(f.get_header_field("rob_req"), 1u);
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0x07u);
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u);
+    EXPECT_EQ(f.get_header_field("ordering_tag"), 0x07u);
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x9999u);  // meta.local_addr, NOT b.addr
 }
 

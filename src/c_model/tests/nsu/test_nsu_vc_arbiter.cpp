@@ -16,14 +16,14 @@ using ni::cmodel::testing::ChannelModel;
 namespace {
 
 Flit make_rsp_flit(uint8_t axi_ch, uint8_t initial_vc = 0, uint8_t id = 0, uint64_t rlast = 1,
-                   uint8_t dst_id = 0x12, uint8_t rob_req = 0) {
+                   uint8_t dst_id = 0x12, uint8_t ordering_req = 0) {
     Flit f;
     f.set_header_field("axi_ch", axi_ch);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", initial_vc);
     f.set_header_field("src_id", 0x34);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", rob_req);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", ordering_req);
     if (axi_ch == ni::AXI_CH_R) {
         f.set_payload_field("R", "rid", id);
         f.set_payload_field("R", "rlast", rlast);
@@ -102,18 +102,18 @@ TEST(NsuVcArbiterVnets, RBurstStaysOnOneVc) {
     EXPECT_EQ(arb.pending_size(2), 0u);
 }
 
-// Robbed (rob_req=1) R still goes through the static map -- the map applies to
-// ALL R regardless of rob_req (design: burst coherence must hold even though
-// the NMU RoB will reorder by rob_idx; the map only needs to keep one burst's
+// Robbed (ordering_req=1) R still goes through the static map -- the map applies to
+// ALL R regardless of ordering_req (design: burst coherence must hold even though
+// the NMU RoB will reorder by ordering_tag; the map only needs to keep one burst's
 // beats together, which a pure function of (dst_id,rid) does unconditionally).
 TEST(NsuVcArbiterVnets, RobbedRBurstStaysOnOneVcToo) {
-    SCENARIO("NSU vnets: rob_req=1 R burst still maps every beat to one VC");
+    SCENARIO("NSU vnets: ordering_req=1 R burst still maps every beat to one VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0, 0x12, /*rob_req=*/1)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1, 0x12, /*rob_req=*/1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0, 0x12, /*ordering_req=*/1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1, 0x12, /*ordering_req=*/1)));
     EXPECT_EQ(arb.pending_size(3), 2u);
     EXPECT_EQ(arb.pending_size(2), 0u);
 }
@@ -172,12 +172,13 @@ TEST(NsuVcArbiterVnets, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
 
 // INVERTED from the retired pre-same-destination-bypass same-bid round-robin test: that
 // test asserted B has no fixed VC and round-robins same-bid responses. The
-// same-destination-bypass return-path map now fixes rob_req=0 B the same way it fixes R --
+// same-destination-bypass return-path map now fixes ordering_req=0 B the same way it fixes R --
 // a same-(dst,bid) bypass stream must share one VC to stay in order at the NMU.
-// rob_req=1 (robbed) B keeps the old round-robin behavior; see the next test.
+// ordering_req=1 (robbed) B keeps the old round-robin behavior; see the next test.
 TEST(NsuVcArbiterVnets, SameBidSameDstBypassFixedVcId) {
     SCENARIO(
-        "NSU vnets: rob_req=0 same-(dst,bid) B responses fix to one VC (same-destination-bypass "
+        "NSU vnets: ordering_req=0 same-(dst,bid) B responses fix to one VC "
+        "(same-destination-bypass "
         "return-path map)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
@@ -188,20 +189,20 @@ TEST(NsuVcArbiterVnets, SameBidSameDstBypassFixedVcId) {
     EXPECT_EQ(a, b) << "same (dst,bid) bypass responses must share one VC";
 }
 
-// rob_req=1 (robbed) B is order-free at the NMU slot path, so it keeps
+// ordering_req=1 (robbed) B is order-free at the NMU slot path, so it keeps
 // round-robining the write vnet exactly as before the same-destination bypass.
 TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWriteVnet) {
-    SCENARIO("NSU vnets: rob_req=1 same-bid B responses still round-robin the write vnet");
+    SCENARIO("NSU vnets: ordering_req=1 same-bid B responses still round-robin the write vnet");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
-    uint8_t a =
-        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*rob_req=*/1));
-    uint8_t b =
-        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*rob_req=*/1));
+    uint8_t a = push_and_vc(
+        arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*ordering_req=*/1));
+    uint8_t b = push_and_vc(
+        arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*ordering_req=*/1));
     EXPECT_EQ(a, 0u);
-    EXPECT_EQ(b, 1u) << "rob_req=1 B is order-free; round-robins the write vnet";
+    EXPECT_EQ(b, 1u) << "ordering_req=1 B is order-free; round-robins the write vnet";
 }
 
 // W6: keying by (dst_id,id) dissolves the same-id multi-source contention
@@ -209,7 +210,8 @@ TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWriteVnet) {
 // the same id now get distinct VCs instead of contending one array slot.
 // Covers both cases: same-id different-dst, and same-dst different-id.
 TEST(NsuVcArbiterVnets, DifferentDstOrIdYieldsDistinctVcs) {
-    SCENARIO("NSU vnets: rob_req=0 responses differing in dst_id or id can land on different VCs");
+    SCENARIO(
+        "NSU vnets: ordering_req=0 responses differing in dst_id or id can land on different VCs");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},

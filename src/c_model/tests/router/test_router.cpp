@@ -39,11 +39,11 @@ struct CreditCounter : ni::cmodel::router::RouterCreditSink {
     void receive_credit(uint8_t vc) override { pulses.push_back(vc); }
 };
 
-ni::cmodel::Flit make_flit(uint8_t dst, uint8_t vc, uint64_t last) {
+ni::cmodel::Flit make_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail) {
     ni::cmodel::Flit f;
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", vc);
-    f.set_header_field("last", last);
+    f.set_header_field("flit_tail", flit_tail);
     return f;
 }
 
@@ -82,7 +82,7 @@ TEST(RouterDatapath, ZeroLoadLatencyIsThreeTicks) {
     Router r(center_cfg());
     FlitSink east;
     r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
-    auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*last=*/1);
+    auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/1);
     r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(f);  // T
     r.tick();
     EXPECT_TRUE(east.received.empty());  // T+1: stage 1
@@ -97,9 +97,9 @@ TEST(RouterDatapath, HeaderTransparency) {
     Router r(center_cfg());
     FlitSink east;
     r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
-    auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*last=*/1);
-    f.set_header_field("rob_req", 1);
-    f.set_header_field("rob_idx", 7);
+    auto f = make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/1);
+    f.set_header_field("ordering_req", 1);
+    f.set_header_field("ordering_tag", 7);
     f.set_header_field("src_id", make_dst(0, 2));
     r.input(static_cast<std::size_t>(RouterPort::WEST)).push_flit(f);
     r.tick();
@@ -133,7 +133,7 @@ TEST(RouterDatapath, CreditDecrementAtGrantAndPulseAfterDequeue) {
 }
 
 // --- Wormhole locking helpers --------------------------------------------
-// A 3-flit packet (head last=0, body last=0, tail last=1) tagged by src_id so
+// A 3-flit packet (head flit_tail=0, body flit_tail=0, tail flit_tail=1) tagged by src_id so
 // flits of concurrent packets can be told apart at the sink. dst routes EAST.
 struct Packet {
     std::size_t in_port;
@@ -143,8 +143,8 @@ struct Packet {
 
 constexpr int kMaxPacketFlits = 3;  // head + body + tail; see feed_packet()
 
-ni::cmodel::Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t last, uint8_t src_id) {
-    auto f = make_flit(dst, vc, last);
+ni::cmodel::Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail, uint8_t src_id) {
+    auto f = make_flit(dst, vc, flit_tail);
     f.set_header_field("src_id", src_id);
     return f;
 }
@@ -153,8 +153,8 @@ ni::cmodel::Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t last, uint8_
 // once the packet (head/body/tail) is already fully drained.
 void feed_packet(Router& r, Packet& pkt, uint8_t dst, uint8_t vc) {
     if (pkt.next >= kMaxPacketFlits) return;
-    const uint64_t last = (pkt.next == kMaxPacketFlits - 1) ? 1 : 0;
-    r.input(pkt.in_port).push_flit(make_tagged_flit(dst, vc, last, pkt.src_id));
+    const uint64_t flit_tail = (pkt.next == kMaxPacketFlits - 1) ? 1 : 0;
+    r.input(pkt.in_port).push_flit(make_tagged_flit(dst, vc, flit_tail, pkt.src_id));
     ++pkt.next;
 }
 
@@ -247,7 +247,7 @@ TEST(RouterWormhole, PacketsOnDifferentVcsDoNotInterleavePerOutput) {
 
 TEST(RouterWormhole, SingleFlitPacketLocksAndReleasesSameCycle) {
     SCENARIO(
-        "Router: single-flit packet (last=1 at grant) — next packet from another "
+        "Router: single-flit packet (flit_tail=1 at grant) — next packet from another "
         "input can win the very next arbitration");
     Router r(center_cfg());
     FlitSink east;
@@ -257,9 +257,9 @@ TEST(RouterWormhole, SingleFlitPacketLocksAndReleasesSameCycle) {
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     const auto SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
 
-    // Tick 0: WEST single-flit (last=1) lands; SOUTH single-flit lands too.
-    r.input(WEST).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x10));
-    r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x20));
+    // Tick 0: WEST single-flit (flit_tail=1) lands; SOUTH single-flit lands too.
+    r.input(WEST).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x10));
+    r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x20));
     // S1 latch (tick 1) -> two back-to-back grants (ticks 2,3) since each
     // single-flit packet releases the lock the cycle it is granted. The later
     // grant (tick 3) lands at the sink kPipelineDepth ticks afterward, so 3 +
@@ -285,14 +285,14 @@ TEST(RouterWormhole, LockedEmptyVcIdlesButDoesNotLoseLock) {
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     const auto SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
 
-    // SOUTH establishes the lock alone (head, last=0) with no competitor present,
+    // SOUTH establishes the lock alone (head, flit_tail=0) with no competitor present,
     // then stalls its FIFO empty. WEST (the competitor) then offers a complete
     // 3-flit packet on the same (EAST, vc0). The locked-but-empty SOUTH must idle
     // the arbiter — WEST cannot steal until SOUTH's tail releases the lock.
     Packet west{WEST, 0x10};
 
     // Tick 0: SOUTH head lands alone -> wins arbitration -> locks (EAST, vc0).
-    r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*last=*/0, 0x20));
+    r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/0, 0x20));
     tick_and_return_credit(r, east, E);
 
     // SOUTH stalls (FIFO drains to empty). WEST starts pushing its packet, which
@@ -311,8 +311,8 @@ TEST(RouterWormhole, LockedEmptyVcIdlesButDoesNotLoseLock) {
     }
     ASSERT_EQ(east.received.size(), 1u);  // exactly SOUTH's head delivered
 
-    // SOUTH sends its tail (last=1) to release the lock.
-    r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x20));
+    // SOUTH sends its tail (flit_tail=1) to release the lock.
+    r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x20));
     // Drain SOUTH's tail + WEST's 3 queued flits through the kPipelineDepth-deep
     // pipe. Bound 10 is generous slack; the real settle point is the
     // count_w==3 / count_s==2 assertions below.
@@ -345,7 +345,7 @@ TEST(RouterWormhole, RrAdvancesPerPacket) {
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
     const auto SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
 
-    // Both inputs continuously offer single-flit packets (last=1) to EAST vc0.
+    // Both inputs continuously offer single-flit packets (flit_tail=1) to EAST vc0.
     // Keep at most one flit queued per input (refill only when its FIFO is empty)
     // so the input FIFO never overflows; the output grants one input per cycle, so
     // a saturated single-flit stream from both inputs exercises the packet-level
@@ -355,9 +355,9 @@ TEST(RouterWormhole, RrAdvancesPerPacket) {
     // a regression that stops granting fails fast instead of spinning forever.
     for (int t = 0; t < 40 && east.received.size() < 8; ++t) {
         if (r.input_fifo_size(WEST, 0) == 0)
-            r.input(WEST).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x10));
+            r.input(WEST).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x10));
         if (r.input_fifo_size(SOUTH, 0) == 0)
-            r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*last=*/1, 0x20));
+            r.input(SOUTH).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x20));
         tick_and_return_credit(r, east, E);
     }
     ASSERT_GE(east.received.size(), 8u);
@@ -399,9 +399,9 @@ TEST(RouterWormhole, LockedOutputIsLocalAndOtherOutputProceeds) {
 
 TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
     SCENARIO(
-        "An EAST packet that sends its head (last=0) but never its tail keeps the "
+        "An EAST packet that sends its head (flit_tail=0) but never its tail keeps the "
         "EAST output locked: a full packet on EAST's other VC cannot drain. This "
-        "is the per-output hold (and the malformed-no-final-last lifetime).");
+        "is the per-output hold (and the malformed-no-final-flit_tail lifetime).");
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;
     Router r(cfg);
@@ -411,7 +411,7 @@ TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
     const uint8_t dst = make_dst(3, 1);
     Packet head_only{static_cast<std::size_t>(RouterPort::WEST), 0x10};
     Packet full{static_cast<std::size_t>(RouterPort::SOUTH), 0x20};
-    feed_packet(r, head_only, dst, /*vc=*/0);  // one call = head, last=0, never closed
+    feed_packet(r, head_only, dst, /*vc=*/0);  // one call = head, flit_tail=0, never closed
     for (int t = 0; t < 24; ++t) {
         feed_packet(r, full, dst, /*vc=*/1);  // a complete 3-flit packet on vc1
         const std::size_t before = east.received.size();
@@ -464,7 +464,7 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
         const bool credit_left = r.credit(E, 0) > 0;
         const bool want_extra = !credit_left && r.input_fifo_size(WEST, 0) < 2;
         if (credit_left || want_extra)
-            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/0, /*last=*/1, 0x10));
+            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/0, /*flit_tail=*/1, 0x10));
         r.tick();  // never return vc0 credit
         if (!credit_left && r.input_fifo_size(WEST, 0) >= 2) break;
     }
@@ -479,7 +479,7 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
     int vc1_received = 0;
     for (int t = 0; t < 12 && vc1_received < 4; ++t) {
         if (r.input_fifo_size(WEST, 1) == 0)
-            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/1, /*last=*/1, 0x20));
+            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/1, /*flit_tail=*/1, 0x20));
         const std::size_t before = east.received.size();
         tick_return_credit_for_vc(r, east, E, /*keep_vc=*/1);
         for (std::size_t i = before; i < east.received.size(); ++i)
@@ -501,7 +501,7 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
 TEST(RouterVcArbitration, FlitLevelRrAcrossVcs) {
     SCENARIO(
         "Router: per-output VC RR under sustained two-VC load — single-flit packets "
-        "(last=1) only; each packet locks and releases the output in one grant, so "
+        "(flit_tail=1) only; each packet locks and releases the output in one grant, so "
         "VC RR advances every cycle.");
     Router r(two_vc_cfg());
     FlitSink east;
@@ -518,7 +518,7 @@ TEST(RouterVcArbitration, FlitLevelRrAcrossVcs) {
     uint8_t feed_vc = 0;
     for (int t = 0; t < 40 && east.received.size() < 8; ++t) {
         if (r.input_fifo_size(WEST, feed_vc) == 0)
-            r.input(WEST).push_flit(make_flit(dst, feed_vc, /*last=*/1));
+            r.input(WEST).push_flit(make_flit(dst, feed_vc, /*flit_tail=*/1));
         feed_vc ^= 1;  // alternate the input we top up each tick
         const std::size_t before = east.received.size();
         r.tick();
@@ -552,7 +552,7 @@ TEST(RouterVcArbitration, SameCycleOutputFifoEnqueueDequeue) {
     // in the input FIFO so a grant is available on every later tick. Feed one vc0 flit/tick.
     for (int t = 0; t < 12; ++t) {
         if (r.input_fifo_size(WEST, 0) < NOC_ROUTER_OUTPUT_FIFO_DEPTH + 1)
-            r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*last=*/1));
+            r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/1));
         r.tick();
         if (r.output_fifo_size(E) >= NOC_ROUTER_OUTPUT_FIFO_DEPTH &&
             r.input_fifo_size(WEST, 0) >= 1)
@@ -664,7 +664,7 @@ TEST(RouterCredit, ConservationAcrossChainedRouters) {
     // when A still has EAST/vc0 credit (the sender never overruns the receiver).
     for (int t = 0; t < 200 && (injected < kPackets || a.credit(E, 0) < NOC_ROUTER_VC_DEPTH); ++t) {
         if (injected < kPackets && a.credit(E, 0) > 0 && a.input_fifo_size(W, 0) == 0) {
-            a.input(W).push_flit(make_flit(dst_b_local, /*vc=*/0, /*last=*/1));
+            a.input(W).push_flit(make_flit(dst_b_local, /*vc=*/0, /*flit_tail=*/1));
             ++injected;
         }
         a.tick();  // A may push <=1 flit onto the wire (a_to_b.push_flit)
@@ -713,7 +713,7 @@ TEST(RouterFairness, AllToOneNoStarvation) {
     // tick_and_return_credit), so there is no downstream backpressure and the
     // only contention is for the single EAST grant/cycle.
     constexpr int kInputs = 4;
-    // feed_packet emits a head(last=0)/body(last=0)/tail(last=1) stream, so each
+    // feed_packet emits a head(flit_tail=0)/body(flit_tail=0)/tail(flit_tail=1) stream, so each
     // packet here is MAX_PACKET_FLITS = 3 flits. The §5 fairness bound scales with
     // this packet length.
     constexpr int kPacketFlits = kMaxPacketFlits;
@@ -827,7 +827,7 @@ TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
             if (r.input_fifo_size(WEST, static_cast<uint8_t>(vc)) <
                 static_cast<std::size_t>(depth)) {
                 r.input(WEST).push_flit(make_tagged_flit(dst, static_cast<uint8_t>(vc),
-                                                         /*last=*/1, label(vc, fed[vc])));
+                                                         /*flit_tail=*/1, label(vc, fed[vc])));
                 ++fed[vc];
                 break;  // one flit/input-port/tick (input register)
             }

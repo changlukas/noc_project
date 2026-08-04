@@ -51,7 +51,7 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
   public:
     bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) override {
         if (s1_aw_.full()) return false;
-        s1_aw_.accept({b, meta.dst_id, meta.local_addr, meta.rob_req, meta.rob_idx});
+        s1_aw_.accept({b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag});
         return true;
     }
     bool push_w(const axi::WBeat& b) override {
@@ -61,7 +61,7 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     }
     bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) override {
         if (s1_ar_.full()) return false;
-        s1_ar_.accept({b, meta.dst_id, meta.local_addr, meta.rob_req, meta.rob_idx});
+        s1_ar_.accept({b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag});
         return true;
     }
 
@@ -74,8 +74,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     void tick(Packetize& packetize) {
         if (s1_aw_.full()) {
             const auto& e = s1_aw_.peek();
-            if (packetize.push_aw_with_meta(e.beat,
-                                            {e.dst_id, e.local_addr, e.rob_req, e.rob_idx})) {
+            if (packetize.push_aw_with_meta(
+                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag})) {
                 s1_aw_.take();
             }
         }
@@ -87,8 +87,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
         }
         if (s1_ar_.full()) {
             const auto& e = s1_ar_.peek();
-            if (packetize.push_ar_with_meta(e.beat,
-                                            {e.dst_id, e.local_addr, e.rob_req, e.rob_idx})) {
+            if (packetize.push_ar_with_meta(
+                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag})) {
                 s1_ar_.take();
             }
         }
@@ -109,16 +109,16 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
 
 struct NmuRspBEntry {
     axi::BBeat beat;
-    uint8_t rob_idx = 0;
+    uint8_t ordering_tag = 0;
     uint8_t axi_id = 0;
-    bool rob_req = false;  // owns a RoB slot; false => bypassed
+    bool ordering_req = false;  // owns a RoB slot; false => bypassed
 };
 
 struct NmuRspREntry {
     axi::RBeat beat;
-    uint8_t rob_idx = 0;
+    uint8_t ordering_tag = 0;
     uint8_t axi_id = 0;
-    bool rob_req = false;
+    bool ordering_req = false;
 };
 
 struct NmuConfig {
@@ -314,13 +314,13 @@ inline void Nmu::tick() {
 
 inline bool Nmu::push_rsp_b_to_axi_(const NmuRspBEntry& entry) {
     if (!axi_slave_port_.push_b_staged(entry.beat)) return false;
-    if (entry.rob_req) rob_.commit_b_exit(entry.rob_idx, entry.axi_id);
+    if (entry.ordering_req) rob_.commit_b_exit(entry.ordering_tag, entry.axi_id);
     return true;
 }
 
 inline bool Nmu::push_rsp_r_to_axi_(const NmuRspREntry& entry) {
     if (!axi_slave_port_.push_r_staged(entry.beat)) return false;
-    if (entry.rob_req) rob_.commit_r_exit(entry.rob_idx, entry.axi_id);
+    if (entry.ordering_req) rob_.commit_r_exit(entry.ordering_tag, entry.axi_id);
     return true;
 }
 
@@ -384,14 +384,14 @@ inline void Nmu::advance_rsp_s2_b_() {
     if (s2_rsp_b_.full()) return;
     auto b = rob_.pop_b_staged();
     if (!b) return;
-    s2_rsp_b_.accept({b->beat, b->rob_idx, b->axi_id, b->rob_req});
+    s2_rsp_b_.accept({b->beat, b->ordering_tag, b->axi_id, b->ordering_req});
 }
 
 inline void Nmu::advance_rsp_s2_r_() {
     if (s2_rsp_r_.full()) return;
     auto r = rob_.pop_r_staged();
     if (!r) return;
-    s2_rsp_r_.accept({r->beat, r->rob_idx, r->axi_id, r->rob_req});
+    s2_rsp_r_.accept({r->beat, r->ordering_tag, r->axi_id, r->ordering_req});
 }
 
 inline void Nmu::drain_rsp_robless_r_() {

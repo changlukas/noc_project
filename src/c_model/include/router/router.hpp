@@ -227,10 +227,10 @@ inline void Router::tick() {
             if (!lq.empty() && credit_[out][vc] > 0) {
                 const auto dst = static_cast<uint8_t>(lq.front().get_header_field("dst_id"));
                 if (static_cast<std::size_t>(route_compute(dst, cfg_)) != out) {
-                    assert(
-                        false &&
-                        "Router: locked wormhole continuation routes to a different output "
-                        "(malformed packet: last=0 head not closed by last=1 on this (input,vc))");
+                    assert(false &&
+                           "Router: locked wormhole continuation routes to a different output "
+                           "(malformed packet: flit_tail=0 head not closed by flit_tail=1 on this "
+                           "(input,vc))");
                     std::abort();
                 }
                 candidate = ws.locked_input;
@@ -263,8 +263,8 @@ inline void Router::tick() {
         --credit_[out][vc];
         output_fifo_[out].push_back(flit);
         credit_pulse_pending_.emplace_back(*candidate, static_cast<uint8_t>(vc));
-        const uint64_t last = flit.get_header_field("last");
-        if (last == 0) {
+        const uint64_t flit_tail = flit.get_header_field("flit_tail");
+        if (flit_tail == 0) {
             ws.locked_input = *candidate;
             ws.locked_vc = vc;
         } else {

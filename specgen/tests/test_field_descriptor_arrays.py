@@ -22,7 +22,7 @@ def test_header_fields_array_skips_disabled():
     assert m, "HEADER_FIELDS[] array not emitted"
     body = m.group(1)
     # The 7 mandatory header fields present (in declaration order).
-    for name in ["axi_ch", "src_id", "dst_id", "vc_id", "last", "rob_req", "rob_idx"]:
+    for name in ["axi_ch", "src_id", "dst_id", "vc_id", "flit_tail", "ordering_req", "ordering_tag"]:
         assert f'"{name}"' in body, f"missing {name} in HEADER_FIELDS"
     # All 6 optional fields + rsvd are enabled=false; skipped.
     for name in ["noc_qos", "route_par", "commtype", "multicast", "seq", "flit_ecc", "rsvd"]:

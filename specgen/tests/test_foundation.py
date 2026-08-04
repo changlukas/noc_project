@@ -29,9 +29,9 @@ def test_header_field_enabled_returns_true_for_functional():
     spec = _load_packet()
     assert C.header_field_enabled(spec, "src_id") is True
     assert C.header_field_enabled(spec, "dst_id") is True
-    assert C.header_field_enabled(spec, "last") is True
-    assert C.header_field_enabled(spec, "rob_req") is True
-    assert C.header_field_enabled(spec, "rob_idx") is True
+    assert C.header_field_enabled(spec, "flit_tail") is True
+    assert C.header_field_enabled(spec, "ordering_req") is True
+    assert C.header_field_enabled(spec, "ordering_tag") is True
     assert C.header_field_enabled(spec, "vc_id") is True
 
 

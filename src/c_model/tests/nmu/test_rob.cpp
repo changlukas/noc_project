@@ -57,7 +57,7 @@ ni::cmodel::Flit make_b_flit(uint8_t bid) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("dst_id", 0x01);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     f.set_payload_field("B", "bid", bid);
     f.set_payload_field("B", "bresp", 0);
     return f;
@@ -66,7 +66,7 @@ ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_R);
     f.set_header_field("dst_id", 0x01);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     f.set_payload_field("R", "rid", rid);
     f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
     return f;
@@ -74,13 +74,13 @@ ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
 
 // The idle-ID bypass exempts the first transaction of an idle id. A test that wants
 // the transaction under test to take the RoB path must first put one transaction in
-// flight for that id. The primer allocates no slot, so every rob_idx expectation
+// flight for that id. The primer allocates no slot, so every ordering_tag expectation
 // in the migrated tests below is unchanged.
 //
 // Primer dest is tile 15 (kPrimerAddr), deliberately far from the small
 // (tile-0) addresses the tests below push -- so the same-destination bypass
 // never fires between the primer and the transaction under test, matching the
-// idle-ID-bypass-only rob_idx/free_space expectations those tests were written against.
+// idle-ID-bypass-only ordering_tag/free_space expectations those tests were written against.
 constexpr uint64_t kPrimerAddr = 0x100000000ull * 15 + 0x8000;
 
 void prime_write_id(Rob& rob, ChannelModel& noc, uint8_t id) {
@@ -106,9 +106,9 @@ void retire_write_primer(Rob& rob, ChannelModel& noc, Depacketize& depkt, uint8_
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("dst_id", kSrcId);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", 0);
-    f.set_header_field("rob_idx", 0);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", 0);
+    f.set_header_field("ordering_tag", 0);
     f.set_payload_field("B", "bid", id);
     f.set_payload_field("B", "bresp", 0);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
@@ -120,9 +120,9 @@ void retire_read_primer(Rob& rob, ChannelModel& noc, Depacketize& depkt, uint8_t
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_R);
     f.set_header_field("dst_id", kSrcId);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", 0);
-    f.set_header_field("rob_idx", 0);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", 0);
+    f.set_header_field("ordering_tag", 0);
     f.set_payload_field("R", "rid", id);
     f.set_payload_field("R", "rresp", 0);
     f.set_payload_field("R", "rlast", 1u);
@@ -238,8 +238,10 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
 
 // === ROB Enabled mode: push-side tests ===
 
-TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
-    SCENARIO("Rob Enabled: push_aw allocates ROB slot, stamps rob_req=1 + rob_idx on AW header");
+TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsOrderingTag) {
+    SCENARIO(
+        "Rob Enabled: push_aw allocates ROB slot, stamps ordering_req=1 + ordering_tag on AW "
+        "header");
     ChannelModel noc(/*req=*/16, /*rsp=*/16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
@@ -250,13 +252,14 @@ TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsRobIdx) {
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));
     auto f = *noc.req_in().pop_flit();
     EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AW);
-    EXPECT_EQ(f.get_header_field("rob_req"), 1u);
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);  // first allocated slot
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u);
+    EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);  // first allocated slot
 }
 
 TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
     SCENARIO(
-        "Rob Enabled: AR len=3 (4 beats) -> 4 consecutive ROB slots, base rob_idx stamped to AR "
+        "Rob Enabled: AR len=3 (4 beats) -> 4 consecutive ROB slots, base ordering_tag stamped to "
+        "AR "
         "header");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
@@ -272,14 +275,14 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
     ASSERT_TRUE(rob.push_ar(ar));
     auto f = *ar_cap.pop();
     EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AR);
-    EXPECT_EQ(f.get_header_field("rob_req"), 1u);
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);  // base = 0
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u);
+    EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);  // base = 0
     // Next AR should allocate slot 4 (slots 0-3 occupied)
     axi::ArBeat ar2 = make_ar(0x06, 0x200);
     ar2.len = 1;
     ASSERT_TRUE(rob.push_ar(ar2));
     auto f2 = *ar_cap.pop();
-    EXPECT_EQ(f2.get_header_field("rob_idx"), 4u);
+    EXPECT_EQ(f2.get_header_field("ordering_tag"), 4u);
 }
 
 TEST(NmuRob, Enabled_ConstructorMarksOnlyDepthSlotsFree) {
@@ -304,7 +307,7 @@ TEST(NmuRob, Enabled_DefaultDepthIsThirtyTwo) {
     Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
     EXPECT_EQ(rob.b_rob_depth(), 32u);
     EXPECT_EQ(rob.r_rob_depth(), 32u);
-    EXPECT_EQ(Rob::ROB_IDX_SPACE, 256u);
+    EXPECT_EQ(Rob::ORDERING_TAG_SPACE, 256u);
 }
 
 TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
@@ -313,7 +316,8 @@ TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE, Rob::ROB_IDX_SPACE);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), Rob::ORDERING_TAG_SPACE,
+            Rob::ORDERING_TAG_SPACE);
 
     prime_read_id(rob, ar_cap, 0x05);
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -321,8 +325,8 @@ TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
     ASSERT_TRUE(rob.push_ar(ar));
     EXPECT_EQ(rob.read_free_space(), 0u) << "all 256 slots consumed";
     auto f = *ar_cap.pop();
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);
-    EXPECT_EQ(f.get_header_field("rob_req"), 1u);
+    EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u);
 }
 
 TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
@@ -331,7 +335,8 @@ TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), Rob::ROB_IDX_SPACE, Rob::ROB_IDX_SPACE);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), Rob::ORDERING_TAG_SPACE,
+            Rob::ORDERING_TAG_SPACE);
 
     prime_read_id(rob, ar_cap, 0x05);
     axi::ArBeat ar = make_ar(0x05, 0x100);
@@ -344,9 +349,9 @@ TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", 0);  // the NSU stamps the burst base on every beat
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", 0);  // the NSU stamps the burst base on every beat
         f.set_payload_field("R", "rid", 0x05);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -401,9 +406,9 @@ TEST(NmuRob, Enabled_LzcAllocator_IsAStack) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", base);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", base);
         f.set_payload_field("R", "rid", rid);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -448,13 +453,13 @@ TEST(NmuRob, Enabled_LzcAllocator_NonTopReleaseDoesNotGrowFreeSpace) {
     retire_write_primer(rob, noc, depkt, 0x06);
     EXPECT_EQ(rob.write_free_space(), 6u);
 
-    auto push_b = [&](uint8_t rob_idx, uint8_t bid) {
+    auto push_b = [&](uint8_t ordering_tag, uint8_t bid) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_B);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", rob_idx);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", ordering_tag);
         f.set_payload_field("B", "bid", bid);
         f.set_payload_field("B", "bresp", 0);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
@@ -490,7 +495,7 @@ TEST_P(RobDepthParam, Enabled_AllocationNeverExceedsDepth) {
     for (std::size_t i = 0; i < depth; ++i) {
         ASSERT_TRUE(rob.push_aw(make_aw(0x40, 0x100))) << "AW " << i;
         auto f = *noc.req_in().pop_flit();
-        EXPECT_LT(f.get_header_field("rob_idx"), depth) << "base " << i << " escaped the pool";
+        EXPECT_LT(f.get_header_field("ordering_tag"), depth) << "base " << i << " escaped the pool";
     }
     EXPECT_EQ(rob.write_free_space(), 0u);
     EXPECT_FALSE(rob.push_aw(make_aw(0x40, 0x200)));
@@ -519,9 +524,9 @@ TEST(NmuRob, Enabled_LzcAllocator_ReusesFromTheTop) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", 0);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", 0);
         f.set_payload_field("R", "rid", 0x05);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -545,7 +550,7 @@ TEST(NmuRob, Enabled_LzcAllocator_ReusesFromTheTop) {
     b.len = 1;
     ASSERT_TRUE(rob.push_ar(b));
     auto f = *ar_cap.pop();
-    EXPECT_EQ(f.get_header_field("rob_idx"), 0u);
+    EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);
 }
 
 TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
@@ -671,7 +676,7 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
 // === ROB Enabled mode: pop-side tests ===
 
 TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
-    SCENARIO("Rob Enabled: B for rob_idx=0 (per-id head) commits immediately on pop_b");
+    SCENARIO("Rob Enabled: B for ordering_tag=0 (per-id head) commits immediately on pop_b");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
@@ -681,13 +686,13 @@ TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
     prime_write_id(rob, noc, 0x05);
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // allocates slot 0
     retire_write_primer(rob, noc, depkt, 0x05);      // the robbed AW is now the head
-    // Inject B with rob_idx=0, matching the head of id=5's sequence
+    // Inject B with ordering_tag=0, matching the head of id=5's sequence
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("dst_id", kSrcId);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", 1);
-    f.set_header_field("rob_idx", 0);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", 1);
+    f.set_header_field("ordering_tag", 0);
     f.set_payload_field("B", "bid", 0x05);
     f.set_payload_field("B", "bresp", 0);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
@@ -711,21 +716,21 @@ TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100000100)));
     retire_write_primer(rob, noc, depkt, 0x05);  // the robbed AWs (slots 0,1) are now the head
-    auto push_b = [&](uint8_t rob_idx, uint8_t bresp) {
+    auto push_b = [&](uint8_t ordering_tag, uint8_t bresp) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_B);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", rob_idx);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", ordering_tag);
         f.set_payload_field("B", "bid", 0x05);
         f.set_payload_field("B", "bresp", bresp);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
-    push_b(/*rob_idx=*/1, /*bresp=*/0);  // B for AW2 arrives first
+    push_b(/*ordering_tag=*/1, /*bresp=*/0);  // B for AW2 arrives first
     depkt.tick();
-    EXPECT_FALSE(rob.pop_b().has_value());  // not head, held
-    push_b(/*rob_idx=*/0, /*bresp=*/0);     // B for AW1 arrives second
+    EXPECT_FALSE(rob.pop_b().has_value());    // not head, held
+    push_b(/*ordering_tag=*/0, /*bresp=*/0);  // B for AW1 arrives second
     depkt.tick();
     auto b1 = rob.pop_b();
     ASSERT_TRUE(b1.has_value());  // chain-flush: AW1's B
@@ -753,13 +758,13 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
     ASSERT_TRUE(rob.push_ar(ar1));
     ASSERT_TRUE(rob.push_ar(ar2));
     retire_read_primer(rob, noc, depkt, 0x05);  // AR1 is now the head of id 0x05
-    auto push_r = [&](uint8_t rob_idx, bool rlast, uint8_t marker) {
+    auto push_r = [&](uint8_t ordering_tag, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", rob_idx);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", ordering_tag);
         f.set_payload_field("R", "rid", 0x05);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -769,7 +774,7 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
     // Arrive in order: AR2 beats (base=4) then AR1 beats (base=0).
-    // Real NSU stamps every beat with the same base rob_idx.
+    // Real NSU stamps every beat with the same base ordering_tag.
     push_r(4, false, 0xB0);  // AR2 beat 0 (base=4)
     push_r(4, true, 0xB1);   // AR2 beat 1 (base=4)
     push_r(0, false, 0xA0);  // AR1 beat 0 (base=0)
@@ -815,9 +820,9 @@ TEST(NmuRob, Enabled_PerBeatRelease_HeadBurstStreams) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", 0);  // the NSU stamps the burst base on every beat
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", 0);  // the NSU stamps the burst base on every beat
         f.set_payload_field("R", "rid", 0x05);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -866,13 +871,13 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
     ASSERT_TRUE(rob.push_ar(make_ar(0x06, 0x100)));  // slot 1
     retire_read_primer(rob, noc, depkt, 0x05);       // each burst under test is now its list head
     retire_read_primer(rob, noc, depkt, 0x06);
-    auto push_r = [&](uint8_t rob_idx, uint8_t rid) {
+    auto push_r = [&](uint8_t ordering_tag, uint8_t rid) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", rob_idx);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", ordering_tag);
         f.set_payload_field("R", "rid", rid);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", 1u);
@@ -896,21 +901,22 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
     EXPECT_TRUE(ids.count(0x05) && ids.count(0x06));
 }
 
-TEST(NmuRobDeath, Enabled_PopBWithUnallocatedRobIdx_Abort) {
-    SCENARIO("Rob Enabled: pop_b on B flit with unallocated rob_idx aborts (defensive assert)");
+TEST(NmuRobDeath, Enabled_PopBWithUnallocatedOrderingTag_Abort) {
+    SCENARIO(
+        "Rob Enabled: pop_b on B flit with unallocated ordering_tag aborts (defensive assert)");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
-    // Inject B with rob_idx=7, but no AW allocated that slot -> assert fires
+    // Inject B with ordering_tag=7, but no AW allocated that slot -> assert fires
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("dst_id", kSrcId);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", 1);
-    f.set_header_field("rob_idx", 7);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", 1);
+    f.set_header_field("ordering_tag", 7);
     f.set_payload_field("B", "bid", 0x05);
     f.set_payload_field("B", "bresp", 0);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
@@ -928,13 +934,14 @@ TEST(NmuRobDeath, Enabled_DepthZeroAborts) {
 }
 
 TEST(NmuRobDeath, Enabled_DepthAboveIdxSpaceAborts) {
-    SCENARIO("Rob: r_rob_depth > ROB_IDX_SPACE is rejected at construction");
+    SCENARIO("Rob: r_rob_depth > ORDERING_TAG_SPACE is rejected at construction");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     EXPECT_DEATH(
-        { Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, Rob::ROB_IDX_SPACE + 1); }, ".*");
+        { Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, Rob::ORDERING_TAG_SPACE + 1); },
+        ".*");
 }
 
 TEST(NmuRobDeath, Enabled_MaxTxnsPerIdZeroAborts) {
@@ -946,9 +953,9 @@ TEST(NmuRobDeath, Enabled_MaxTxnsPerIdZeroAborts) {
     EXPECT_DEATH({ Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 0); }, ".*");
 }
 
-TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
+TEST(NmuRob, ReadFillSameBaseOrderingTagLandsInOrder) {
     SCENARIO(
-        "Enabled read ROB: two R beats stamped with the same base rob_idx (real NSU "
+        "Enabled read ROB: two R beats stamped with the same base ordering_tag (real NSU "
         "stamping) land at base+0 and base+1 via the per-base arrival counter, in order.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
@@ -962,13 +969,13 @@ TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
     ASSERT_TRUE(rob.push_ar(ar));
     retire_read_primer(rob, noc, depkt, 0x05);  // the burst under test is now the head
 
-    auto push_r = [&](uint8_t rob_idx, bool rlast, uint8_t marker) {
+    auto push_r = [&](uint8_t ordering_tag, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", rob_idx);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", ordering_tag);
         f.set_payload_field("R", "rid", 0x05);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -977,8 +984,8 @@ TEST(NmuRob, ReadFillSameBaseRobIdxLandsInOrder) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
-    push_r(/*rob_idx=*/0, /*rlast=*/false, 0xA0);
-    push_r(/*rob_idx=*/0, /*rlast=*/true, 0xA1);
+    push_r(/*ordering_tag=*/0, /*rlast=*/false, 0xA0);
+    push_r(/*ordering_tag=*/0, /*rlast=*/true, 0xA1);
     depkt.tick();
     // Multi-beat reads legitimately return nullopt until the last beat arrives
     // and the range commits; pop_r is one-flit-per-call. Drain by polling.
@@ -1013,9 +1020,9 @@ TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", 0);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", 0);
         f.set_payload_field("R", "rid", 0x05);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -1051,9 +1058,9 @@ TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", 0);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", 0);
         f.set_payload_field("R", "rid", id);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -1120,9 +1127,9 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", base);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", base);
         f.set_payload_field("R", "rid", 0x05);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
@@ -1155,7 +1162,8 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
 // === Idle-ID bypass ===
 
 TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
-    SCENARIO("Rob Enabled: a rob_req=0 B whose id's list head owns a slot is malformed, aborts");
+    SCENARIO(
+        "Rob Enabled: a ordering_req=0 B whose id's list head owns a slot is malformed, aborts");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
@@ -1169,9 +1177,9 @@ TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("dst_id", kSrcId);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", 0);
-    f.set_header_field("rob_idx", 0);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", 0);
+    f.set_header_field("ordering_tag", 0);
     f.set_payload_field("B", "bid", 0x05);
     f.set_payload_field("B", "bresp", 0);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
@@ -1180,7 +1188,8 @@ TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
 }
 
 TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
-    SCENARIO("Rob Enabled: a 256-beat AR on an idle id is admitted with rob_req=0, no slots taken");
+    SCENARIO(
+        "Rob Enabled: a 256-beat AR on an idle id is admitted with ordering_req=0, no slots taken");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
@@ -1193,7 +1202,7 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
     EXPECT_TRUE(rob.push_ar(ar));
     auto f = *ar_cap.pop();
     EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AR);
-    EXPECT_EQ(f.get_header_field("rob_req"), 0u) << "bypassed AR carries rob_req=0";
+    EXPECT_EQ(f.get_header_field("ordering_req"), 0u) << "bypassed AR carries ordering_req=0";
     EXPECT_EQ(rob.read_free_space(), free_before) << "bypass allocates nothing";
 }
 
@@ -1212,7 +1221,7 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_SecondSameIdRefusedNotWedged) {
     // allocates a slot (needs 256 slots) and is refused by the pool, not bypassed.
     axi::ArBeat second = make_ar(0x05, 0x100000000ull + 0x200);  // dst 1
     second.len = 255;
-    EXPECT_FALSE(rob.push_ar(second)) << "list non-empty -> rob_req=1 -> 256 slots -> refuse";
+    EXPECT_FALSE(rob.push_ar(second)) << "list non-empty -> ordering_req=1 -> 256 slots -> refuse";
 
     axi::ArBeat other = make_ar(0x06, 0x300);
     other.len = 255;
@@ -1220,7 +1229,8 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_SecondSameIdRefusedNotWedged) {
 }
 
 TEST(NmuRob, Enabled_IdleIdBypass_FirstTxnPerIdAllocatesNoSlot) {
-    SCENARIO("Rob Enabled: the first AW of an id takes no slot, stamps rob_req=0; the second does");
+    SCENARIO(
+        "Rob Enabled: the first AW of an id takes no slot, stamps ordering_req=0; the second does");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
@@ -1230,15 +1240,15 @@ TEST(NmuRob, Enabled_IdleIdBypass_FirstTxnPerIdAllocatesNoSlot) {
     const std::size_t free_before = rob.write_free_space();
     ASSERT_TRUE(rob.push_aw(make_aw(0x11, 0x100)));  // dst 0
     auto f0 = *noc.req_in().pop_flit();
-    EXPECT_EQ(f0.get_header_field("rob_req"), 0u);
+    EXPECT_EQ(f0.get_header_field("ordering_req"), 0u);
     EXPECT_EQ(rob.write_free_space(), free_before);
 
     // Different dest than the first: the same-destination bypass does not apply, so this
     // allocates a slot.
     ASSERT_TRUE(rob.push_aw(make_aw(0x11, 0x100000000ull + 0x200)));  // dst 1
     auto f1 = *noc.req_in().pop_flit();
-    EXPECT_EQ(f1.get_header_field("rob_req"), 1u);
-    EXPECT_EQ(f1.get_header_field("rob_idx"), 0u) << "first allocated slot";
+    EXPECT_EQ(f1.get_header_field("ordering_req"), 1u);
+    EXPECT_EQ(f1.get_header_field("ordering_tag"), 0u) << "first allocated slot";
     EXPECT_EQ(rob.write_free_space(), free_before - 1);
 }
 
@@ -1257,9 +1267,9 @@ TEST(NmuRob, Enabled_BypassedBeat_ReleasesNoSlot) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("dst_id", kSrcId);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", 0);
-    f.set_header_field("rob_idx", 0);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", 0);
+    f.set_header_field("ordering_tag", 0);
     f.set_payload_field("B", "bid", 0x05);
     f.set_payload_field("B", "bresp", 0);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
@@ -1272,7 +1282,7 @@ TEST(NmuRob, Enabled_BypassedBeat_ReleasesNoSlot) {
 
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x200)));  // the id is idle again
     auto f2 = *noc.req_in().pop_flit();
-    EXPECT_EQ(f2.get_header_field("rob_req"), 0u);
+    EXPECT_EQ(f2.get_header_field("ordering_req"), 0u);
 }
 
 TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
@@ -1283,18 +1293,18 @@ TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
 
-    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // dst 0, bypassed, rob_req=0
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));  // dst 0, bypassed, ordering_req=0
     // Different dest than the first: the same-destination bypass does not apply, so this
     // allocates a slot, slot 0.
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100000000ull + 0x200)));  // dst 1
 
-    auto push_b = [&](unsigned rob_req, unsigned rob_idx, unsigned bresp) {
+    auto push_b = [&](unsigned ordering_req, unsigned ordering_tag, unsigned bresp) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_B);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", rob_req);
-        f.set_header_field("rob_idx", rob_idx);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", ordering_req);
+        f.set_header_field("ordering_tag", ordering_tag);
         f.set_payload_field("B", "bid", 0x05);
         f.set_payload_field("B", "bresp", bresp);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
@@ -1303,10 +1313,11 @@ TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
 
     // Both responses carry bid=5, so bresp is the only way to tell them apart.
     // axi::Resp is an enum class: EXOKAY = 1, SLVERR = 2.
-    push_b(/*rob_req=*/1, /*rob_idx=*/0, /*bresp=*/2);  // the LATER transaction returns first
+    push_b(/*ordering_req=*/1, /*ordering_tag=*/0,
+           /*bresp=*/2);  // the LATER transaction returns first
     EXPECT_FALSE(rob.pop_b().has_value()) << "must wait behind the bypassed head";
 
-    push_b(/*rob_req=*/0, /*rob_idx=*/0, /*bresp=*/1);  // the bypassed head returns
+    push_b(/*ordering_req=*/0, /*ordering_tag=*/0, /*bresp=*/1);  // the bypassed head returns
     auto first = rob.pop_b();
     ASSERT_TRUE(first.has_value());
     EXPECT_EQ(first->resp, axi::Resp::EXOKAY) << "bypassed head released first";
@@ -1342,8 +1353,8 @@ TEST(NmuRob, Enabled_MaxTxnsPerId1_MatchesDisabled) {
     while (ar_e.size() > 0) {
         auto fe = *ar_e.pop();
         auto fd = *ar_d.pop();
-        EXPECT_EQ(fe.get_header_field("rob_req"), fd.get_header_field("rob_req"));
-        EXPECT_EQ(fe.get_header_field("rob_idx"), fd.get_header_field("rob_idx"));
+        EXPECT_EQ(fe.get_header_field("ordering_req"), fd.get_header_field("ordering_req"));
+        EXPECT_EQ(fe.get_header_field("ordering_tag"), fd.get_header_field("ordering_tag"));
         EXPECT_EQ(fe.get_header_field("dst_id"), fd.get_header_field("dst_id"));
     }
     EXPECT_EQ(rob_e.read_free_space(), rob_e.r_rob_depth()) << "Enabled took no slot either";
@@ -1368,7 +1379,7 @@ TEST(RobSameDestBypass, SameDestStreakBypassesAll) {
     for (int i = 0; i < 5; ++i) {
         ASSERT_TRUE(rob.push_ar(make_ar(id, addr)));
         auto f = *ar_cap.pop();
-        EXPECT_EQ(f.get_header_field("rob_req"), 0u) << "beat " << i << " must bypass";
+        EXPECT_EQ(f.get_header_field("ordering_req"), 0u) << "beat " << i << " must bypass";
     }
     EXPECT_EQ(rob.read_slot_hwm(), 0u) << "the same-destination bypass took no slot for the streak";
 }
@@ -1389,36 +1400,37 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
     const uint64_t dst_b = 0x100000000ull * 5;  // tile 5
 
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));  // idle-ID bypass
-    EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 0u);
+    EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u);
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));  // same-destination bypass: same dest
-    EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 0u);
+    EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u);
 
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_b)));  // dest change: allocates a slot, sticky set
     auto f_dst_b = *ar_cap.pop();
-    EXPECT_EQ(f_dst_b.get_header_field("rob_req"), 1u);
+    EXPECT_EQ(f_dst_b.get_header_field("ordering_req"), 1u);
 
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));  // dest reverts to A: still allocates (sticky)
     auto f_dst_a2 = *ar_cap.pop();
-    EXPECT_EQ(f_dst_a2.get_header_field("rob_req"), 1u)
+    EXPECT_EQ(f_dst_a2.get_header_field("ordering_req"), 1u)
         << "sticky flag outlives the dest reverting to a prior value";
 
     // Drain the id's order deque in push order, exercising the sticky-clear sites:
     // the two bypassed entries via retire_read_primer's bypass-response pattern
     // (pop_r_staged's bypassed arm), then the two robbed entries via
-    // Enabled_PopR_MultiBeatBurstCommitInOrder's rob_idx-addressed response
+    // Enabled_PopR_MultiBeatBurstCommitInOrder's ordering_tag-addressed response
     // pattern (drain_ready_read_heads_).
     retire_read_primer(rob, noc, depkt, id);  // drains bypassed entry 1 (dst_a)
     retire_read_primer(rob, noc, depkt, id);  // drains bypassed entry 2 (dst_a)
 
-    const auto rob_idx_dst_b = static_cast<uint8_t>(f_dst_b.get_header_field("rob_idx"));
-    const auto rob_idx_dst_a2 = static_cast<uint8_t>(f_dst_a2.get_header_field("rob_idx"));
-    auto push_r = [&](uint8_t rob_idx) {
+    const auto ordering_tag_dst_b = static_cast<uint8_t>(f_dst_b.get_header_field("ordering_tag"));
+    const auto ordering_tag_dst_a2 =
+        static_cast<uint8_t>(f_dst_a2.get_header_field("ordering_tag"));
+    auto push_r = [&](uint8_t ordering_tag) {
         ni::cmodel::Flit f;
         f.set_header_field("axi_ch", ni::AXI_CH_R);
         f.set_header_field("dst_id", kSrcId);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", rob_idx);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", ordering_tag);
         f.set_payload_field("R", "rid", id);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "rlast", 1u);
@@ -1426,11 +1438,11 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
         f.set_payload_bytes("R", "rdata", d.data(), 256);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
-    push_r(rob_idx_dst_b);
+    push_r(ordering_tag_dst_b);
     depkt.tick();
     EXPECT_TRUE(rob.pop_r().has_value());  // drains robbed entry 3 (dst_b)
 
-    push_r(rob_idx_dst_a2);
+    push_r(ordering_tag_dst_a2);
     depkt.tick();
     EXPECT_TRUE(rob.pop_r().has_value());  // drains robbed entry 4 (dst_a revert)
     EXPECT_FALSE(rob.pop_r().has_value());
@@ -1440,7 +1452,7 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
     // list) and bypasses again -- proving the sticky flag actually cleared, not just that
     // it survived a dest revert.
     ASSERT_TRUE(rob.push_ar(make_ar(id, dst_a)));
-    EXPECT_EQ(ar_cap.pop()->get_header_field("rob_req"), 0u)
+    EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u)
         << "the idle-ID bypass re-enables bypass once the id's order list fully drains";
 }
 

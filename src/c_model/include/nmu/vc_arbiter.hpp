@@ -10,12 +10,12 @@
 //   from rr_start_; first VC with pending space AND downstream credit wins
 //   (else backpressure).
 //
-// Fixed VC id (same-destination bypass): a rob_req=0 AW/AR flit whose (dst_id, id) matches
+// Fixed VC id (same-destination bypass): a ordering_req=0 AW/AR flit whose (dst_id, id) matches
 // the id's previous same-channel flit reuses that VC instead of
 // round-robining -- deterministic VC allocation that fixes a same-(dst,id)
 // bypass streak to one VC so it cannot be reordered in-fabric. With no
 // fixed VC yet (new id, or dst changed) it falls back to round-robin and
-// records the new (dst, VC) for next time. rob_req=1 flits are RoB-owned
+// records the new (dst, VC) for next time. ordering_req=1 flits are RoB-owned
 // and order-free, so they always round-robin, never fixed.
 //
 // W-follows-AW invariant: this arbiter MUST be downstream
@@ -89,8 +89,8 @@ class VcArbiter : public router::NocReqOut {
         for (uint8_t v : read_vcs_) assert(v < num_vc_);
     }
 
-    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id, uint8_t rob_req,
-                                                uint8_t id);
+    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
+                                                uint8_t ordering_req, uint8_t id);
 
     const std::vector<uint8_t>* candidates_for(uint8_t axi_ch) const {
         return axi_ch == ni::AXI_CH_AW ? &write_vcs_ : &read_vcs_;
@@ -108,7 +108,7 @@ class VcArbiter : public router::NocReqOut {
     std::optional<uint8_t> current_aw_vc_;
 
     // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on a
-    // rob_req=0 flit, per direction. nullopt dst = id never seen.
+    // ordering_req=0 flit, per direction. nullopt dst = id never seen.
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_aw_dst_{};
     std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_ar_dst_{};
@@ -116,7 +116,7 @@ class VcArbiter : public router::NocReqOut {
 };
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
-                                                              uint8_t rob_req, uint8_t id) {
+                                                              uint8_t ordering_req, uint8_t id) {
     // W invariant fires regardless of NUM_VC: this arbiter must be
     // downstream of a WormholeArbiter that serializes AW+W; W must always follow AW.
     if (axi_ch == ni::AXI_CH_W) {
@@ -135,11 +135,11 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
     if (axi_ch != ni::AXI_CH_AW && axi_ch != ni::AXI_CH_AR) return std::nullopt;
 
-    // Fixed VC id (same-destination bypass): rob_req=0 flit whose dst_id matches this id's
+    // Fixed VC id (same-destination bypass): ordering_req=0 flit whose dst_id matches this id's
     // last same-channel dst_id reuses that VC. No fallback to round-robin on
     // block -- rerouting a fixed-VC streak mid-flight is exactly the reorder
     // the fixed VC exists to prevent.
-    if (rob_req == 0) {
+    if (ordering_req == 0) {
         std::optional<uint8_t>& last_dst =
             (axi_ch == ni::AXI_CH_AW) ? last_aw_dst_[id] : last_ar_dst_[id];
         uint8_t last_vc = (axi_ch == ni::AXI_CH_AW) ? last_aw_vc_[id] : last_ar_vc_[id];
@@ -167,15 +167,15 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
 
-    uint8_t dst_id = 0, rob_req = 0, id = 0;
+    uint8_t dst_id = 0, ordering_req = 0, id = 0;
     if (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR) {
         dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
-        rob_req = static_cast<uint8_t>(flit.get_header_field("rob_req"));
+        ordering_req = static_cast<uint8_t>(flit.get_header_field("ordering_req"));
         id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_AW ? flit.get_payload_field("AW", "awid")
                                                           : flit.get_payload_field("AR", "arid"));
     }
 
-    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, rob_req, id);
+    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, ordering_req, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
@@ -198,8 +198,8 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
 
     // Fixed VC id (same-destination bypass): record (dst_id, VC) for this id only after all
     // accept conditions pass (mirrors current_aw_vc_'s atomicity above).
-    // rob_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
-    if (rob_req == 0 && (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR)) {
+    // ordering_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
+    if (ordering_req == 0 && (axi_ch == ni::AXI_CH_AW || axi_ch == ni::AXI_CH_AR)) {
         if (axi_ch == ni::AXI_CH_AW) {
             last_aw_dst_[id] = dst_id;
             last_aw_vc_[id] = vc_id;

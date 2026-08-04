@@ -12,14 +12,14 @@ namespace axi = ni::cmodel::axi;
 
 namespace {
 ni::cmodel::Flit make_aw_flit(uint8_t awid, uint64_t addr, uint8_t src_id = 0x10,
-                              uint8_t rob_req = 0, uint8_t rob_idx = 0) {
+                              uint8_t ordering_req = 0, uint8_t ordering_tag = 0) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_AW);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", 0x02);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", rob_req);
-    f.set_header_field("rob_idx", rob_idx);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", ordering_req);
+    f.set_header_field("ordering_tag", ordering_tag);
     f.set_payload_field("AW", "awid", awid);
     f.set_payload_field("AW", "awaddr", addr);
     f.set_payload_field("AW", "awsize", 5);
@@ -30,7 +30,7 @@ ni::cmodel::Flit make_w_flit(uint32_t strb, bool last) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_W);
     f.set_header_field("dst_id", 0x02);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     f.set_payload_field("W", "wlast", last ? 1u : 0u);
     f.set_payload_field("W", "wstrb", strb);
     return f;
@@ -40,7 +40,7 @@ ni::cmodel::Flit make_ar_flit(uint8_t arid, uint64_t addr, uint8_t src_id = 0x10
     f.set_header_field("axi_ch", ni::AXI_CH_AR);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", 0x02);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     f.set_payload_field("AR", "arid", arid);
     f.set_payload_field("AR", "araddr", addr);
     f.set_payload_field("AR", "arsize", 5);
@@ -51,13 +51,15 @@ ni::cmodel::Flit make_ar_flit(uint8_t arid, uint64_t addr, uint8_t src_id = 0x10
 
 TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
     SCENARIO(
-        "NSU Depacketize: AW flit allocates src_id/rob_req/rob_idx into MetaBuffer + emits AW "
+        "NSU Depacketize: AW flit allocates src_id/ordering_req/ordering_tag into MetaBuffer + "
+        "emits AW "
         "beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16, /*max_unique_ids*/ 256);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000,
-                                                     /*src*/ 0x12, /*rob_req*/ 1, /*rob_idx*/ 3)));
+                                                     /*src*/ 0x12, /*ordering_req*/ 1,
+                                                     /*ordering_tag*/ 3)));
     depkt.tick();
     auto aw = depkt.pop_aw();
     ASSERT_TRUE(aw.has_value());
@@ -67,8 +69,8 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
     auto m = mb.peek_write(0x05);
     ASSERT_TRUE(m.has_value());
     EXPECT_EQ(m->src_id, 0x12);
-    EXPECT_EQ(m->rob_req, 1);
-    EXPECT_EQ(m->rob_idx, 3);
+    EXPECT_EQ(m->ordering_req, 1);
+    EXPECT_EQ(m->ordering_tag, 3);
 }
 
 TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
@@ -78,7 +80,7 @@ TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*aw*/ 16, /*w*/ 16, /*ar*/ 16, /*max_unique_ids*/ 256);
-    auto flit = make_aw_flit(0x05, 0x1000, /*src*/ 0x12, /*rob_req*/ 0, /*rob_idx*/ 0);
+    auto flit = make_aw_flit(0x05, 0x1000, /*src*/ 0x12, /*ordering_req*/ 0, /*ordering_tag*/ 0);
     flit.set_payload_field("AW", "awqos", 0xA);
     ASSERT_TRUE(noc.req_out().push_flit(flit));
     depkt.tick();

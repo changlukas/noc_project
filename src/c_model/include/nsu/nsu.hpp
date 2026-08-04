@@ -54,7 +54,7 @@ struct NsuConfig {
     uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
     uint8_t read_rsp_vc = 0;   // R -> read_rsp_vc
     // ReadWriteSplit vnet variant (response side): non-empty -> per-class vnet.
-    // B: rob_req=0 -> fixed VC id vnet[(dst_id ^ bid) % size]; rob_req=1 ->
+    // B: ordering_req=0 -> fixed VC id vnet[(dst_id ^ bid) % size]; ordering_req=1 ->
     //    id-agnostic round-robin over write_rsp_vcs.
     // R: fixed VC id vnet[(dst_id ^ rid) % size] for every beat; a burst's
     //    beats share (dst_id, rid) so the whole burst lands on one VC.

@@ -86,9 +86,9 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", m.rob_req);
-    f.set_header_field("rob_idx", m.rob_idx);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", m.ordering_req);
+    f.set_header_field("ordering_tag", m.ordering_tag);
     f.set_payload_field("B", "bid", m.upstream_id);
     f.set_payload_field("B", "bresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("B", "buser", b.user);
@@ -101,9 +101,9 @@ inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uin
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", m.rob_req);
-    f.set_header_field("rob_idx", m.rob_idx);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", m.ordering_req);
+    f.set_header_field("ordering_tag", m.ordering_tag);
     f.set_payload_field("R", "rid", m.upstream_id);
     f.set_payload_field("R", "rresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("R", "ruser", b.user);

@@ -12,8 +12,8 @@ namespace ni::cmodel::nsu {
 struct MetaEntry {
     uint8_t src_id;       // requesting tile; becomes the response flit dst_id
     uint8_t upstream_id;  // master's original AXI id; restored into bid / rid
-    uint8_t rob_req;
-    uint8_t rob_idx;
+    uint8_t ordering_req;
+    uint8_t ordering_tag;
 };
 
 // Downstream AXI ID presented to the slave, from the master's upstream ID.
@@ -28,7 +28,7 @@ inline uint8_t remap_downstream_id(uint8_t upstream_id, std::size_t max_unique_i
     return max_unique_ids == 1 ? static_cast<uint8_t>(axi::AXI_ID_SPACE - 1) : upstream_id;
 }
 
-// Per-downstream-AXI-ID FIFO of {src_id, upstream_id, rob_req, rob_idx} entries,
+// Per-downstream-AXI-ID FIFO of {src_id, upstream_id, ordering_req, ordering_tag} entries,
 // allocated at AW/AR egress toward the slave and looked up at B/R ingress
 // via a peek+commit pattern.
 //

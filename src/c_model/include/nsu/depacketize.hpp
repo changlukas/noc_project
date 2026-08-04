@@ -97,7 +97,7 @@ class Depacketize : public RequestDepacketizer {
     std::optional<Flit> pending_;
 
     // AW / AR hold the raw flit until pop_aw / pop_ar admit it: the drain stage
-    // needs the header's src_id / rob_req / rob_idx to allocate the MetaBuffer
+    // needs the header's src_id / ordering_req / ordering_tag to allocate the MetaBuffer
     // entry, and decoding is pure. W carries no id and no metadata, so it stays
     // a decoded beat.
     router::PipelineStage<Flit> s1_aw_;
@@ -231,12 +231,13 @@ inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     const Flit f = s1_aw_.take();
     axi::AwBeat b = decode_aw(f);
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
-    meta_.allocate_write(downstream_id, {
-                                            static_cast<uint8_t>(f.get_header_field("src_id")),
-                                            b.id,
-                                            static_cast<uint8_t>(f.get_header_field("rob_req")),
-                                            static_cast<uint8_t>(f.get_header_field("rob_idx")),
-                                        });
+    meta_.allocate_write(downstream_id,
+                         {
+                             static_cast<uint8_t>(f.get_header_field("src_id")),
+                             b.id,
+                             static_cast<uint8_t>(f.get_header_field("ordering_req")),
+                             static_cast<uint8_t>(f.get_header_field("ordering_tag")),
+                         });
     b.id = downstream_id;
     return b;
 }
@@ -253,8 +254,8 @@ inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
     meta_.allocate_read(downstream_id, {
                                            static_cast<uint8_t>(f.get_header_field("src_id")),
                                            b.id,
-                                           static_cast<uint8_t>(f.get_header_field("rob_req")),
-                                           static_cast<uint8_t>(f.get_header_field("rob_idx")),
+                                           static_cast<uint8_t>(f.get_header_field("ordering_req")),
+                                           static_cast<uint8_t>(f.get_header_field("ordering_tag")),
                                        });
     b.id = downstream_id;
     return b;

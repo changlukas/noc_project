@@ -189,7 +189,7 @@ IDS_PER_TILE    ?=
 # the $(if) guards below) and the tb falls back to its
 # ni_params_pkg::NSU_META_BUFFER_*_DFLT-initialised local.
 
-# NMU RoB pool depths, per direction. Both <= 256 (rob_idx is 8 bits). No ?=
+# NMU RoB pool depths, per direction. Both <= 256 (ordering_tag is 8 bits). No ?=
 # default: unset leaves the plusarg unpassed (see the $(if) guards below) and
 # the tb falls back to its ni_params_pkg::NMU_ROB_*_DFLT-initialised local.
 

@@ -76,8 +76,8 @@ class TestSvPacketEmit:
 
     def test_header_field_lsb_msb(self):
         text = _sv_text("ni_flit_pkg.sv")
-        assert "ROB_IDX_LSB" in text
-        assert "ROB_IDX_MSB" in text
+        assert "ORDERING_TAG_LSB" in text
+        assert "ORDERING_TAG_MSB" in text
 
     def test_ifndef_include_guard(self):
         text = _sv_text("ni_flit_pkg.sv")
@@ -112,7 +112,7 @@ class TestSvPacketEmit:
         """Functional fields must emit ENABLED = 1'b1 in SV package."""
         text = _sv_text("ni_flit_pkg.sv")
         # axi_ch is MUST functional (AXI channel routing)
-        for field in ("AXI_CH", "SRC_ID", "DST_ID", "VC_ID", "LAST", "ROB_REQ", "ROB_IDX"):
+        for field in ("AXI_CH", "SRC_ID", "DST_ID", "VC_ID", "FLIT_TAIL", "ORDERING_REQ", "ORDERING_TAG"):
             assert f"localparam bit          {field}_ENABLED = 1'b1;" in text, (
                 f"Expected {field}_ENABLED = 1'b1; not found in ni_flit_pkg.sv"
             )

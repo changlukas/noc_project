@@ -14,7 +14,7 @@ ni::cmodel::Flit make_req(uint8_t dst_id) {
     f.set_header_field("axi_ch", ni::AXI_CH_AR);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     return f;
 }
 
@@ -23,7 +23,7 @@ ni::cmodel::Flit make_rsp(uint8_t dst_id) {
     f.set_header_field("axi_ch", ni::AXI_CH_R);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     return f;
 }
 

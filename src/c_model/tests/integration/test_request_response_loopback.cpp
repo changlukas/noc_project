@@ -478,7 +478,7 @@ INSTANTIATE_TEST_SUITE_P(Fixtures, PacketizeLoopbackFixture,
                          fixture_name_gen);
 
 // ORD-003 reorder gate at num_vc=2: Rob Enabled must reorder per-id B/R back
-// into submission order. RoB rob_idx ordering is VC-count independent, so
+// into submission order. RoB ordering_tag ordering is VC-count independent, so
 // vc4/vc8 add no new boundary and were dropped.
 INSTANTIATE_TEST_SUITE_P(MultiVc, PacketizeLoopbackFixture,
                          ::testing::Values(FixtureParam{

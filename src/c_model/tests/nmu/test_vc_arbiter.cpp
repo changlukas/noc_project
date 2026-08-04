@@ -25,7 +25,7 @@ Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint6
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", initial_vc);
     f.set_header_field("src_id", 0x12);
-    f.set_header_field("last", 1);  // legacy; VcArbiter does not consult header.last
+    f.set_header_field("flit_tail", 1);  // legacy; VcArbiter does not consult header.flit_tail
     if (axi_ch == ni::AXI_CH_W) {
         f.set_payload_field("W", "wlast", wlast);
     } else if (axi_ch == ni::AXI_CH_AW) {
@@ -122,7 +122,7 @@ TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
 }
 
-// current_aw_vc_ resets based on payload.W.wlast, NOT header.last.
+// current_aw_vc_ resets based on payload.W.wlast, NOT header.flit_tail.
 // Requires num_vc >= 2 (uses read_write_split with write_vc=0, read_vc=1).
 TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
     const std::size_t num_vc = GetParam();
@@ -130,32 +130,32 @@ TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
 
     SCENARIO(
         "NMU VcArbiter: current_aw_vc_ resets based on payload.W.wlast, "
-        "NOT header.last. Push AW + 3 W beats; only the 3rd has "
+        "NOT header.flit_tail. Push AW + 3 W beats; only the 3rd has "
         "payload.wlast=1; verify current_aw_vc_ only resets on the 3rd.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
     EXPECT_TRUE(arb.has_current_aw());
 
-    // Beat 1: payload.wlast=0 (intermediate W beat); even if header.last=1 in
+    // Beat 1: payload.wlast=0 (intermediate W beat); even if header.flit_tail=1 in
     // the input flit (legacy bug shape), current_aw_vc_ MUST NOT reset.
     Flit w1;
     w1.set_header_field("axi_ch", ni::AXI_CH_W);
-    w1.set_header_field("last", 1);  // bait: legacy bug-shape header.last
+    w1.set_header_field("flit_tail", 1);  // bait: legacy bug-shape header.flit_tail
     w1.set_payload_field("W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w1));
     EXPECT_TRUE(arb.has_current_aw()) << "wlast=0 -> must not reset";
 
     Flit w2;
     w2.set_header_field("axi_ch", ni::AXI_CH_W);
-    w2.set_header_field("last", 1);
+    w2.set_header_field("flit_tail", 1);
     w2.set_payload_field("W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w2));
     EXPECT_TRUE(arb.has_current_aw());
 
     Flit w3;
     w3.set_header_field("axi_ch", ni::AXI_CH_W);
-    w3.set_header_field("last", 1);
+    w3.set_header_field("flit_tail", 1);
     w3.set_payload_field("W", "wlast", 1);  // genuine burst end
     ASSERT_TRUE(arb.push_flit(w3));
     EXPECT_FALSE(arb.has_current_aw());
@@ -240,11 +240,12 @@ TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossVnet) {
     EXPECT_EQ(vc_d, 3u);
 }
 
-// Fixed VC id (same-destination bypass): a rob_req=0 flit whose (dst_id, id) matches the id's
+// Fixed VC id (same-destination bypass): a ordering_req=0 flit whose (dst_id, id) matches the id's
 // previous same-channel flit reuses that VC instead of round-robining -- fixes
 // the bypass streak to one VC so it cannot be reordered in-fabric.
 TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestFixedVcId) {
-    SCENARIO("NMU VcArbiter vnets: same arid + same dst_id (rob_req=0) fixes the read vnet VC");
+    SCENARIO(
+        "NMU VcArbiter vnets: same arid + same dst_id (ordering_req=0) fixes the read vnet VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
                                            /*write_vcs=*/std::vector<uint8_t>{0, 1},
@@ -252,7 +253,7 @@ TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestFixedVcId) {
     uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(a, 2u);
-    EXPECT_EQ(b, a) << "same (dst,id) with rob_req=0 must fix to the same VC";
+    EXPECT_EQ(b, a) << "same (dst,id) with ordering_req=0 must fix to the same VC";
 }
 
 // No fixed VC yet: same id, different dst_id -- the streak broke, so
@@ -270,23 +271,23 @@ TEST(NmuVcArbiterRoundRobin, SameReadIdDifferentDestRoundRobins) {
     EXPECT_EQ(b, 3u) << "different dst_id -- no fixed VC yet, round-robin advances";
 }
 
-// rob_req=1 (RoB-owned) flits are order-free by construction -- the RoB
+// ordering_req=1 (RoB-owned) flits are order-free by construction -- the RoB
 // reorders them, so the fixed VC id logic is skipped and they always
 // round-robin, even with a matching (dst, id).
 TEST(NmuVcArbiterRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
-    SCENARIO("NMU VcArbiter vnets: rob_req=1 flits round-robin even with same (dst,id)");
+    SCENARIO("NMU VcArbiter vnets: ordering_req=1 flits round-robin even with same (dst,id)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
                                            /*write_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_vcs=*/std::vector<uint8_t>{2, 3});
     Flit f1 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
-    f1.set_header_field("rob_req", 1);
+    f1.set_header_field("ordering_req", 1);
     Flit f2 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
-    f2.set_header_field("rob_req", 1);
+    f2.set_header_field("ordering_req", 1);
     uint8_t a = push_and_vc(arb, noc, f1);
     uint8_t b = push_and_vc(arb, noc, f2);
     EXPECT_EQ(a, 2u);
-    EXPECT_EQ(b, 3u) << "rob_req=1 -- always round-robin, never fixed";
+    EXPECT_EQ(b, 3u) << "ordering_req=1 -- always round-robin, never fixed";
 }
 
 // NUM_VC==1 short-circuits before the fixed VC id check (select_vc_for_axi_ch's
@@ -339,7 +340,7 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcArbParam,
 // Plain TEST() — not parameterized:
 //   Degenerate_NumVc1_AllModesPassthrough  : specifically tests NUM_VC=1 behavior
 //   EnabledModeMixedWith_SingleVcTests     : decorator transparency at NUM_VC=1
-//   WHeaderLastMatchesWlast                : decorator at NUM_VC=1
+//   WHeaderFlitTailMatchesWlast             : decorator at NUM_VC=1
 //   2 death tests                          : EXPECT_DEATH doesn't compose with TEST_P
 // ---------------------------------------------------------------------------
 
@@ -408,11 +409,11 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_SingleVcTests) {
     EXPECT_EQ(f_w->get_header_field("dst_id"), 0x34u);
 }
 
-TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
+TEST(NmuVcArbiter, WHeaderFlitTailMatchesWlast) {
     SCENARIO(
-        "NMU VcArbiter: header.last on W flits emitted via Packetize -> "
+        "NMU VcArbiter: header.flit_tail on W flits emitted via Packetize -> "
         "WormholeArbiter -> VcArbiter -> downstream matches payload.wlast "
-        "(verifies the packetize header.last fix is preserved end-to-end through the "
+        "(verifies the packetize header.flit_tail fix is preserved end-to-end through the "
         "decorator pipeline).");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
@@ -451,7 +452,7 @@ TEST(NmuVcArbiter, WHeaderLastMatchesWlast) {
         auto f = noc.req_in().pop_flit();
         ASSERT_TRUE(f.has_value());
         uint64_t expected = (i == 2) ? 1u : 0u;
-        EXPECT_EQ(f->get_header_field("last"), expected);
+        EXPECT_EQ(f->get_header_field("flit_tail"), expected);
         EXPECT_EQ(f->get_payload_field("W", "wlast"), expected);
     }
 }

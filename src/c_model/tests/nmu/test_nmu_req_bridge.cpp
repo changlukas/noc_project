@@ -83,7 +83,7 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
     // AW0 flows through and locks the arbiter to the W input (pairing {0,1}).
     ASSERT_TRUE(bridge.push_aw_with_meta(make_aw(0), meta()));
     step();
-    EXPECT_TRUE(wh.is_locked()) << "AW0 (last=0) must lock the arbiter to its W";
+    EXPECT_TRUE(wh.is_locked()) << "AW0 (flit_tail=0) must lock the arbiter to its W";
 
     // AW1..AW4 accumulate in the wormhole AW input (locked -> not granted),
     // filling it to depth 4.

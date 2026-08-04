@@ -21,27 +21,27 @@ using ni::cmodel::testing::ChannelModel;
 
 namespace {
 
-Flit make_req_flit(uint8_t src, uint8_t dst, uint8_t rob_req, uint8_t rob_idx) {
+Flit make_req_flit(uint8_t src, uint8_t dst, uint8_t ordering_req, uint8_t ordering_tag) {
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_AW);
     f.set_header_field("src_id", src);
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", rob_req);
-    f.set_header_field("rob_idx", rob_idx);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", ordering_req);
+    f.set_header_field("ordering_tag", ordering_tag);
     return f;
 }
 
-Flit make_rsp_flit(uint8_t src, uint8_t dst, uint8_t rob_req, uint8_t rob_idx) {
+Flit make_rsp_flit(uint8_t src, uint8_t dst, uint8_t ordering_req, uint8_t ordering_tag) {
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("src_id", src);
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", rob_req);
-    f.set_header_field("rob_idx", rob_idx);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", ordering_req);
+    f.set_header_field("ordering_tag", ordering_tag);
     return f;
 }
 

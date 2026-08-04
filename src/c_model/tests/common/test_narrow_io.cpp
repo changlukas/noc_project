@@ -22,8 +22,8 @@ TEST(NarrowInterface, ResponseDepacketizerDefaultMetaForwards) {
     auto out = d.pop_b_with_meta();
     ASSERT_TRUE(out.has_value());
     EXPECT_EQ(out->first.id, 7);
-    EXPECT_EQ(out->second.rob_idx, 0);
-    EXPECT_EQ(out->second.rob_req, 0);
+    EXPECT_EQ(out->second.ordering_tag, 0);
+    EXPECT_EQ(out->second.ordering_req, 0);
 }
 
 TEST(NarrowInterface, RequestDepacketizerPopsRequestBeats) {
@@ -55,6 +55,6 @@ TEST(NarrowInterface, ResponseDepacketizerPopRWithMetaForwards) {
     auto out = d.pop_r_with_meta();
     ASSERT_TRUE(out.has_value());
     EXPECT_EQ(out->first.id, 9);
-    EXPECT_EQ(out->second.rob_idx, 0);
-    EXPECT_EQ(out->second.rob_req, 0);
+    EXPECT_EQ(out->second.ordering_tag, 0);
+    EXPECT_EQ(out->second.ordering_req, 0);
 }

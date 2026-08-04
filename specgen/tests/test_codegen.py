@@ -140,8 +140,8 @@ def test_use_constants_cpp_compiles_and_runs(tmp_path):
     )
     assert run_result.returncode == 0, run_result.stderr
     # All optional fields disabled: axi_ch is the first enabled field at LSB 0,
-    # so packed hex of (axi_ch=2, src_id=5, dst_id=0x12, last=1, rob_req=1,
-    # rob_idx=7) is the minimal-header value.
+    # so packed hex of (axi_ch=2, src_id=5, dst_id=0x12, flit_tail=1, ordering_req=1,
+    # ordering_tag=7) is the minimal-header value.
     assert "0x0000000007C0902A" in run_result.stdout, (
         f"Expected header value not found in output:\n{run_result.stdout}"
     )
@@ -200,7 +200,7 @@ def test_packet_cpp_functional_fields_have_enabled_true():
     """Functional fields must emit ENABLED = true in C++ header."""
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
     # axi_ch is MUST functional (AXI channel routing)
-    for field in ("AXI_CH", "SRC_ID", "DST_ID", "VC_ID", "LAST", "ROB_REQ", "ROB_IDX"):
+    for field in ("AXI_CH", "SRC_ID", "DST_ID", "VC_ID", "FLIT_TAIL", "ORDERING_REQ", "ORDERING_TAG"):
         assert f"constexpr bool {field}_ENABLED = true;" in text, (
             f"Expected {field}_ENABLED = true; not found in ni_flit_constants.h"
         )

@@ -30,8 +30,8 @@ int main() {
                 ni::header::AXI_CH_LSB, ni::header::AXI_CH_WIDTH);
     std::printf("dst_id    at [%2d:%2d] (width %d)\n", ni::header::DST_ID_MSB,
                 ni::header::DST_ID_LSB, ni::header::DST_ID_WIDTH);
-    std::printf("rob_idx   at [%2d:%2d] (width %d)\n", ni::header::ROB_IDX_MSB,
-                ni::header::ROB_IDX_LSB, ni::header::ROB_IDX_WIDTH);
+    std::printf("ordering_tag   at [%2d:%2d] (width %d)\n", ni::header::ORDERING_TAG_MSB,
+                ni::header::ORDERING_TAG_LSB, ni::header::ORDERING_TAG_WIDTH);
     std::printf("\n");
 
     std::printf("=== Payload widths ===\n");
@@ -41,16 +41,16 @@ int main() {
 
     // Demo: 用 constexpr 常數實際打包一個 AR header
     // 假設目的地 dst_id=0x12 (x=2, y=1), src_id=0x05, axi_ch=AR(2),
-    //         last=1, rob_req=1, rob_idx=7
+    //         flit_tail=1, ordering_req=1, ordering_tag=7
     // (noc_qos / vc_id / route_par / commtype / multicast / flit_ecc 留 0 不 demo 打包)
     std::printf("=== Demo: pack an AR header using compile-time constants ===\n");
     uint64_t hdr_lo = 0;                                  // bits 0..63 of header
     hdr_lo |= (uint64_t)(0x2) << ni::header::AXI_CH_LSB;  // AR
     hdr_lo |= (uint64_t)(0x05) << ni::header::SRC_ID_LSB;
     hdr_lo |= (uint64_t)(0x12) << ni::header::DST_ID_LSB;
-    hdr_lo |= (uint64_t)(0x1) << ni::header::LAST_LSB;
-    hdr_lo |= (uint64_t)(0x1) << ni::header::ROB_REQ_LSB;
-    hdr_lo |= (uint64_t)(0x7) << ni::header::ROB_IDX_LSB;
+    hdr_lo |= (uint64_t)(0x1) << ni::header::FLIT_TAIL_LSB;
+    hdr_lo |= (uint64_t)(0x1) << ni::header::ORDERING_REQ_LSB;
+    hdr_lo |= (uint64_t)(0x7) << ni::header::ORDERING_TAG_LSB;
     std::printf("header[63:0] = 0x%016llX\n", (unsigned long long)hdr_lo);
 
     return 0;

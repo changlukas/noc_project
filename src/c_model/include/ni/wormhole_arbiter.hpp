@@ -14,15 +14,15 @@
 //        -> NocRspOut
 //
 // Lock semantic:
-//   * When a flit with header.last=0 (packet start, e.g., AW) is drained
+//   * When a flit with header.flit_tail=0 (packet start, e.g., AW) is drained
 //     from a `pairing.from` port, lock to the corresponding `pairing.to`
 //     port (e.g., w_in). Only the `to` port is serviceable until released.
-//   * When a flit with header.last=1 (packet end, e.g., W with wlast) is
+//   * When a flit with header.flit_tail=1 (packet end, e.g., W with wlast) is
 //     drained from the currently locked `to` port, unlock.
 //   * Without pairing (NSU case), every flit is its own packet; no lock.
 //
-// REQUIRES Packetize stamps header.last per FlooNoC pattern (AW=0, W=wlast,
-// AR/B/R=1). Malformed AW (from-port flit with last=1) triggers assert+abort
+// REQUIRES Packetize stamps header.flit_tail per FlooNoC pattern (AW=0, W=wlast,
+// AR/B/R=1). Malformed AW (from-port flit with flit_tail=1) triggers assert+abort
 // at runtime.
 //
 // Lifetime: heap-allocate via std::unique_ptr OR construct as a stable
@@ -184,13 +184,13 @@ inline void WormholeArbiter<Downstream>::tick() {
     }
 
     const Flit& flit = pending_[target].front();
-    uint64_t last = flit.get_header_field("last");
+    uint64_t flit_tail = flit.get_header_field("flit_tail");
 
-    // Defensive guards (header.last stamping invariant)
-    if (is_from_port(target) && last == 1) {
+    // Defensive guards (header.flit_tail stamping invariant)
+    if (is_from_port(target) && flit_tail == 1) {
         assert(false &&
-               "WormholeArbiter::tick: from-port flit with header.last=1 -- malformed AW; "
-               "Packetize must stamp header.last=0 on AW");
+               "WormholeArbiter::tick: from-port flit with header.flit_tail=1 -- malformed AW; "
+               "Packetize must stamp header.flit_tail=0 on AW");
         std::abort();
     }
     if (is_to_port(target) && !locked_to_.has_value()) {
@@ -213,14 +213,14 @@ inline void WormholeArbiter<Downstream>::tick() {
     round_robin_ptr_ = (target + 1) % num_inputs_;
 
     // Lock/unlock transition
-    if (last == 0 && !locked_to_.has_value()) {
+    if (flit_tail == 0 && !locked_to_.has_value()) {
         for (const auto& p : pairings_) {
             if (p.from == target) {
                 locked_to_ = p.to;
                 break;
             }
         }
-    } else if (last == 1 && locked_to_.has_value()) {
+    } else if (flit_tail == 1 && locked_to_.has_value()) {
         assert(*locked_to_ == target && "WormholeArbiter::tick: unlock target mismatch");
         locked_to_ = std::nullopt;
     }

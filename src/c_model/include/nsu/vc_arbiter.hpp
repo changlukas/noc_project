@@ -6,14 +6,14 @@
 //
 // ReadWriteSplit (only mode): per-class virtual network (vnet); the scalar
 // factory wraps a single VC into a size-1 vnet (mirror of nmu::VcArbiter).
-//   Fixed VC id (same-destination bypass, return path): a rob_req=0 B, or ANY R (regardless
-//   of rob_req), maps to vnet[(dst_id ^ id) % vnet.size()] -- deterministic
+//   Fixed VC id (same-destination bypass, return path): a ordering_req=0 B, or ANY R (regardless
+//   of ordering_req), maps to vnet[(dst_id ^ id) % vnet.size()] -- deterministic
 //   VC allocation, a pure function with zero state. This fixes a
 //   same-(dst,id) bypassed response stream to one VC (so it cannot be
 //   reordered in-fabric) and gives R burst coherence for free: every beat of
 //   a burst shares (dst_id, rid) and hashes identically. A mapped VC that is
 //   full/no-credit refuses (`return false`) rather than spilling to another
-//   vnet VC -- spilling a fixed-VC stream would reorder it. rob_req=1 B is
+//   vnet VC -- spilling a fixed-VC stream would reorder it. ordering_req=1 B is
 //   order-free at the NMU slot path and round-robins the write vnet.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
 #include "flit.hpp"
@@ -73,8 +73,8 @@ class VcArbiter : public router::NocRspOut {
         for (uint8_t v : read_rsp_vcs_) assert(v < num_vc_ && "read_rsp_vcs element >= num_vc");
     }
 
-    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id, uint8_t rob_req,
-                                                uint8_t id);
+    std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
+                                                uint8_t ordering_req, uint8_t id);
 
     router::NocRspOut& downstream_;
     std::size_t num_vc_;
@@ -88,7 +88,7 @@ class VcArbiter : public router::NocRspOut {
 };
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
-                                                              uint8_t rob_req, uint8_t id) {
+                                                              uint8_t ordering_req, uint8_t id) {
     if (num_vc_ == 1) return uint8_t{0};
 
     const std::vector<uint8_t>* cand = nullptr;
@@ -97,7 +97,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
     if (axi_ch == ni::AXI_CH_B) {
         cand = &write_rsp_vcs_;
         rr = &write_rr_start_;
-        fixed_vc = (rob_req == 0);  // rob_req=1 B is order-free; round-robins.
+        fixed_vc = (ordering_req == 0);  // ordering_req=1 B is order-free; round-robins.
     } else if (axi_ch == ni::AXI_CH_R) {
         cand = &read_rsp_vcs_;
         rr = &read_rr_start_;
@@ -128,14 +128,14 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
-    uint8_t dst_id = 0, rob_req = 0, id = 0;
+    uint8_t dst_id = 0, ordering_req = 0, id = 0;
     if (num_vc_ > 1 && (axi_ch == ni::AXI_CH_B || axi_ch == ni::AXI_CH_R)) {
         dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
-        rob_req = static_cast<uint8_t>(flit.get_header_field("rob_req"));
+        ordering_req = static_cast<uint8_t>(flit.get_header_field("ordering_req"));
         id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_B ? flit.get_payload_field("B", "bid")
                                                          : flit.get_payload_field("R", "rid"));
     }
-    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, rob_req, id);
+    auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, ordering_req, id);
     if (!vc_opt.has_value()) return false;
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;

@@ -88,17 +88,17 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     cfg.port_params.meta_buffer_max_unique_ids = 256;
     NsuStandalone nsu(cfg);
 
-    // Build an AW flit. NSU Depacketize allocates {src_id, rob_req,
-    // rob_idx} into MetaBuffer keyed by awid; Packetize.push_b later
+    // Build an AW flit. NSU Depacketize allocates {src_id, ordering_req,
+    // ordering_tag} into MetaBuffer keyed by awid; Packetize.push_b later
     // reads m.src_id back as the response flit's dst_id.
     Flit aw_flit;
     aw_flit.set_header_field("axi_ch", ni::AXI_CH_AW);
     aw_flit.set_header_field("src_id", kRequesterSrcId);
     aw_flit.set_header_field("dst_id", kNsuSrcId);
     aw_flit.set_header_field("vc_id", 0);
-    aw_flit.set_header_field("last", 0);  // AW opens wormhole packet
-    aw_flit.set_header_field("rob_req", 0);
-    aw_flit.set_header_field("rob_idx", 0);
+    aw_flit.set_header_field("flit_tail", 0);  // AW opens wormhole packet
+    aw_flit.set_header_field("ordering_req", 0);
+    aw_flit.set_header_field("ordering_tag", 0);
     aw_flit.set_payload_field("AW", "awid", kAxiId);
     aw_flit.set_payload_field("AW", "awaddr", kAddr);
     aw_flit.set_payload_field("AW", "awlen", 0);
@@ -111,7 +111,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     w_flit.set_header_field("src_id", kRequesterSrcId);
     w_flit.set_header_field("dst_id", kNsuSrcId);
     w_flit.set_header_field("vc_id", 0);
-    w_flit.set_header_field("last", 1);  // wlast closes wormhole packet
+    w_flit.set_header_field("flit_tail", 1);  // wlast closes wormhole packet
     w_flit.set_payload_field("W", "wlast", 1);
     w_flit.set_payload_field("W", "wstrb", 0xF);
     nsu.inject_req_flit(w_flit);

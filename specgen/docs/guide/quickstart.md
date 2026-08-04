@@ -54,7 +54,7 @@ LINK_WIDTH       = 410
 noc_qos   at [ 3: 0] (width 4)
 axi_ch    at [ 6: 4] (width 3)
 dst_id    at [22:15] (width 8)
-rob_idx   at [33:29] (width 5)
+ordering_tag   at [33:29] (width 5)
 ```
 
 ## 5. Detect drift

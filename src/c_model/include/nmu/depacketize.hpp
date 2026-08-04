@@ -92,8 +92,8 @@ inline void Depacketize::tick() {
                     pending_ = f;
                     return;
                 }
-                ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("rob_idx")),
-                                  static_cast<uint8_t>(f.get_header_field("rob_req"))};
+                ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("ordering_tag")),
+                                  static_cast<uint8_t>(f.get_header_field("ordering_req"))};
                 b_q_.push_back({decode_b(f), meta});
                 break;
             }
@@ -102,8 +102,8 @@ inline void Depacketize::tick() {
                     pending_ = f;
                     return;
                 }
-                ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("rob_idx")),
-                                  static_cast<uint8_t>(f.get_header_field("rob_req"))};
+                ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("ordering_tag")),
+                                  static_cast<uint8_t>(f.get_header_field("ordering_req"))};
                 r_q_.push_back({decode_r(f), meta});
                 break;
             }

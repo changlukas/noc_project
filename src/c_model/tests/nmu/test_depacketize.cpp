@@ -13,7 +13,7 @@ ni::cmodel::Flit make_b_flit(uint8_t bid, axi::Resp resp = axi::Resp::OKAY) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_B);
     f.set_header_field("dst_id", 0x10);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     f.set_payload_field("B", "bid", bid);
     f.set_payload_field("B", "bresp", static_cast<uint64_t>(resp));
     return f;
@@ -22,7 +22,7 @@ ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_R);
     f.set_header_field("dst_id", 0x10);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     f.set_payload_field("R", "rid", rid);
     f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
     return f;
@@ -114,9 +114,10 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
     EXPECT_EQ(r->data, data);
 }
 
-TEST(NmuDepacketize, PopBWithMeta_ExtractsRobIdxAndRobReq) {
+TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
     SCENARIO(
-        "NMU Depacketize: pop_b_with_meta returns rob_req/rob_idx from header for ROB routing");
+        "NMU Depacketize: pop_b_with_meta returns ordering_req/ordering_tag from header for ROB "
+        "routing");
     using namespace ni::cmodel;
     ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
@@ -126,9 +127,9 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsRobIdxAndRobReq) {
     f.set_header_field("src_id", 0x10);
     f.set_header_field("dst_id", 0x01);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", 1);
-    f.set_header_field("rob_idx", 5);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", 1);
+    f.set_header_field("ordering_tag", 5);
     f.set_payload_field("B", "bid", 0x42);
     f.set_payload_field("B", "bresp", 0);
     f.set_payload_field("B", "buser", 0);
@@ -140,13 +141,14 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsRobIdxAndRobReq) {
     ASSERT_TRUE(opt.has_value());
     auto [b, meta] = *opt;
     EXPECT_EQ(b.id, 0x42u);
-    EXPECT_EQ(meta.rob_idx, 5u);
-    EXPECT_EQ(meta.rob_req, 1u);
+    EXPECT_EQ(meta.ordering_tag, 5u);
+    EXPECT_EQ(meta.ordering_req, 1u);
 }
 
-TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatRobIdx) {
+TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
     SCENARIO(
-        "NMU Depacketize: pop_r_with_meta returns per-beat rob_idx (5,6,7,8) for 4-beat burst");
+        "NMU Depacketize: pop_r_with_meta returns per-beat ordering_tag (5,6,7,8) for 4-beat "
+        "burst");
     using namespace ni::cmodel;
     ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
@@ -157,9 +159,9 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatRobIdx) {
         f.set_header_field("src_id", 0x10);
         f.set_header_field("dst_id", 0x01);
         f.set_header_field("vc_id", 0);
-        f.set_header_field("last", 1);
-        f.set_header_field("rob_req", 1);
-        f.set_header_field("rob_idx", 5 + i);
+        f.set_header_field("flit_tail", 1);
+        f.set_header_field("ordering_req", 1);
+        f.set_header_field("ordering_tag", 5 + i);
         f.set_payload_field("R", "rid", 0x42);
         f.set_payload_field("R", "rresp", 0);
         f.set_payload_field("R", "ruser", 0);
@@ -175,8 +177,8 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatRobIdx) {
         auto opt = depkt.pop_r_with_meta();
         ASSERT_TRUE(opt.has_value()) << "beat " << static_cast<int>(i);
         auto [r, meta] = *opt;
-        EXPECT_EQ(meta.rob_idx, 5u + i);
-        EXPECT_EQ(meta.rob_req, 1u);
+        EXPECT_EQ(meta.ordering_tag, 5u + i);
+        EXPECT_EQ(meta.ordering_req, 1u);
         EXPECT_EQ(r.last, i == 3);
         EXPECT_EQ(r.data[0], 0xA0u + i);
     }

@@ -7,8 +7,8 @@
 //   ResponseDepacketizer — consumes response beats (NMU side)
 //
 // ResponseMeta carries ROB-related header fields extracted from a response
-// flit. rob_req=0 → Disabled mode (rob_idx has no meaning);
-// rob_req=1 → Enabled mode (rob_idx identifies the ROB slot).
+// flit. ordering_req=0 → Disabled mode (ordering_tag has no meaning);
+// ordering_req=1 → Enabled mode (ordering_tag identifies the ROB slot).
 //
 // ResponseDepacketizer provides default pop_b_with_meta / pop_r_with_meta
 // implementations that delegate to the pure-virtual pop_b / pop_r and inject
@@ -22,8 +22,8 @@
 namespace ni::cmodel {
 
 struct ResponseMeta {
-    uint8_t rob_idx;
-    uint8_t rob_req;
+    uint8_t ordering_tag;
+    uint8_t ordering_req;
 };
 
 class ResponsePacketizer {

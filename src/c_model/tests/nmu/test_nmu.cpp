@@ -131,14 +131,14 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     ASSERT_TRUE(saw_w_flit) << "Nmu never produced W flit on NoC req-out face";
 
     // Inject a synthetic B response flit. The NMU Depacketize tick reads
-    // axi_ch + bid + bresp + buser; src_id/dst_id/last are honored but
+    // axi_ch + bid + bresp + buser; src_id/dst_id/flit_tail are honored but
     // not consumed by the AxiSlavePort drain.
     Flit b_flit;
     b_flit.set_header_field("axi_ch", ni::AXI_CH_B);
     b_flit.set_header_field("src_id", 0x00);
     b_flit.set_header_field("dst_id", kSrcId);
     b_flit.set_header_field("vc_id", 0);
-    b_flit.set_header_field("last", 1);
+    b_flit.set_header_field("flit_tail", 1);
     b_flit.set_payload_field("B", "bid", kAxiId);
     b_flit.set_payload_field("B", "bresp", static_cast<uint64_t>(axi::Resp::OKAY));
     b_flit.set_payload_field("B", "buser", 0);

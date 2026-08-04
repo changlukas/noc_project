@@ -12,8 +12,8 @@ TEST(MetaBuffer, WriteSnapshotPeekCommit) {
     auto e = mb.peek_write(0x05);
     ASSERT_TRUE(e.has_value());
     EXPECT_EQ(e->src_id, 0x10);
-    EXPECT_EQ(e->rob_req, 1);
-    EXPECT_EQ(e->rob_idx, 7);
+    EXPECT_EQ(e->ordering_req, 1);
+    EXPECT_EQ(e->ordering_tag, 7);
 
     // peek without commit — entry stays
     auto e2 = mb.peek_write(0x05);
@@ -25,16 +25,17 @@ TEST(MetaBuffer, WriteSnapshotPeekCommit) {
 }
 
 TEST(MetaBuffer, MultiOutstandingSameIdFifoOrder) {
-    SCENARIO("MetaBuffer: 3 same-id writes returned by peek+commit in FIFO order (rob_idx 1,2,3)");
+    SCENARIO(
+        "MetaBuffer: 3 same-id writes returned by peek+commit in FIFO order (ordering_tag 1,2,3)");
     MetaBuffer mb(4);
     mb.allocate_write(0x05, {0x10, 0x05, 0, 1});
     mb.allocate_write(0x05, {0x10, 0x05, 0, 2});
     mb.allocate_write(0x05, {0x10, 0x05, 0, 3});
-    EXPECT_EQ(mb.peek_write(0x05)->rob_idx, 1);
+    EXPECT_EQ(mb.peek_write(0x05)->ordering_tag, 1);
     mb.commit_write(0x05);
-    EXPECT_EQ(mb.peek_write(0x05)->rob_idx, 2);
+    EXPECT_EQ(mb.peek_write(0x05)->ordering_tag, 2);
     mb.commit_write(0x05);
-    EXPECT_EQ(mb.peek_write(0x05)->rob_idx, 3);
+    EXPECT_EQ(mb.peek_write(0x05)->ordering_tag, 3);
     mb.commit_write(0x05);
     EXPECT_FALSE(mb.peek_write(0x05).has_value());
 }
@@ -53,8 +54,8 @@ TEST(MetaBuffer, ReadPeekCommitMultiBeat) {
     MetaBuffer mb(4);
     mb.allocate_read(0x03, {0x10, 0x03, 0, 5});
     // R burst: peek twice for r0/r1, commit only on r1 (last)
-    EXPECT_EQ(mb.peek_read(0x03)->rob_idx, 5);
-    EXPECT_EQ(mb.peek_read(0x03)->rob_idx, 5);  // still there
+    EXPECT_EQ(mb.peek_read(0x03)->ordering_tag, 5);
+    EXPECT_EQ(mb.peek_read(0x03)->ordering_tag, 5);  // still there
     mb.commit_read(0x03);
     EXPECT_FALSE(mb.peek_read(0x03).has_value());
 }

@@ -10,7 +10,7 @@ static Flit make_flit(uint8_t dst_id, uint8_t vc) {
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", vc);
     f.set_header_field("axi_ch", 0);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     return f;
 }
 

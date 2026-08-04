@@ -26,7 +26,7 @@ Flit req_flit(uint8_t dst, uint8_t vc, uint8_t tag = 0) {
     Flit f;
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", vc);
-    f.set_header_field("last", 1);
+    f.set_header_field("flit_tail", 1);
     f.set_header_field("src_id", tag);
     return f;
 }

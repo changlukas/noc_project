@@ -13,12 +13,12 @@
 //                 the AW write-meta FIFO front.
 //   vc_id       — hardcoded 0 (NUM_VC=1)
 //   axi_ch      — implicit per push_* method
-//   last        — wormhole packet boundary marker (FlooNoC pattern):
+//   flit_tail   — wormhole packet boundary marker (FlooNoC pattern):
 //                 AW=0 (start of AW+W wormhole packet);
 //                 W=wlast (end on last W beat of burst);
 //                 AR=1 (single-flit read request packet).
-//   rob_req,
-//   rob_idx     — 0 in direct-path interface (Disabled mode); Enabled mode
+//   ordering_req,
+//   ordering_tag     — 0 in direct-path interface (Disabled mode); Enabled mode
 //                 supplies via AwHeaderMeta.
 //   commtype,
 //   multicast,
@@ -42,10 +42,10 @@ namespace ni::cmodel::nmu {
 // interface (auto-filled from addr_trans + rob_*=0) and the explicit
 // push_*_with_meta path (called by Rob with full metadata).
 struct AwHeaderMeta {
-    uint8_t dst_id;       // from addr_trans
-    uint64_t local_addr;  // from addr_trans (= awaddr in c_model)
-    uint8_t rob_req;      // 0 in Disabled mode, 1 in Enabled mode
-    uint8_t rob_idx;      // 0 in Disabled, allocated in Enabled
+    uint8_t dst_id;        // from addr_trans
+    uint64_t local_addr;   // from addr_trans (= awaddr in c_model)
+    uint8_t ordering_req;  // 0 in Disabled mode, 1 in Enabled mode
+    uint8_t ordering_tag;  // 0 in Disabled, allocated in Enabled
 };
 
 class NmuPacketizeSink {
@@ -83,7 +83,7 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     }
 
     // ---- Non-interface methods, called by Rob with full metadata ----
-    // Future Enabled mode supplies rob_idx via this path.
+    // Future Enabled mode supplies ordering_tag via this path.
     bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) override;
     bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) override;
 
@@ -98,8 +98,8 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     // W payload has no address field; only header dst_id/rob_* needed.
     struct WMeta {
         uint8_t dst_id;
-        uint8_t rob_req;
-        uint8_t rob_idx;
+        uint8_t ordering_req;
+        uint8_t ordering_tag;
     };
     std::deque<WMeta> w_meta_fifo_;
 };
@@ -112,9 +112,9 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 0);  // AW starts wormhole packet (FlooNoC pattern)
-    f.set_header_field("rob_req", meta.rob_req);
-    f.set_header_field("rob_idx", meta.rob_idx);
+    f.set_header_field("flit_tail", 0);  // AW starts wormhole packet (FlooNoC pattern)
+    f.set_header_field("ordering_req", meta.ordering_req);
+    f.set_header_field("ordering_tag", meta.ordering_tag);
     f.set_payload_field("AW", "awid", b.id);
     f.set_payload_field("AW", "awaddr", meta.local_addr);  // NOT b.addr (future remap-safe)
     f.set_payload_field("AW", "awlen", b.len);
@@ -127,7 +127,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_payload_field("AW", "awqos", b.qos);
     f.set_payload_field("AW", "awuser", b.user);
     if (!aw_out_.push_flit(f)) return false;
-    w_meta_fifo_.push_back({meta.dst_id, meta.rob_req, meta.rob_idx});
+    w_meta_fifo_.push_back({meta.dst_id, meta.ordering_req, meta.ordering_tag});
     return true;
 }
 
@@ -147,9 +147,9 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", b.last ? 1u : 0u);  // W's wlast ends wormhole packet (FlooNoC)
-    f.set_header_field("rob_req", meta.rob_req);
-    f.set_header_field("rob_idx", meta.rob_idx);
+    f.set_header_field("flit_tail", b.last ? 1u : 0u);  // W's wlast ends wormhole packet (FlooNoC)
+    f.set_header_field("ordering_req", meta.ordering_req);
+    f.set_header_field("ordering_tag", meta.ordering_tag);
     f.set_payload_field("W", "wlast", b.last ? 1u : 0u);
     f.set_payload_field("W", "wuser", b.user);
     f.set_payload_field("W", "wstrb", b.strb);
@@ -165,9 +165,9 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("last", 1);
-    f.set_header_field("rob_req", meta.rob_req);
-    f.set_header_field("rob_idx", meta.rob_idx);
+    f.set_header_field("flit_tail", 1);
+    f.set_header_field("ordering_req", meta.ordering_req);
+    f.set_header_field("ordering_tag", meta.ordering_tag);
     f.set_payload_field("AR", "arid", b.id);
     f.set_payload_field("AR", "araddr", meta.local_addr);
     f.set_payload_field("AR", "arlen", b.len);

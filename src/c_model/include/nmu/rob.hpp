@@ -29,7 +29,7 @@ enum class RobMode { Disabled, Enabled };
 //   - Different id -> independent
 //   - Response B / R(last) observe clears the per-id outstanding flag
 //
-// Enabled mode: per-beat slot pool + rob_idx allocator (implemented; the
+// Enabled mode: per-beat slot pool + ordering_tag allocator (implemented; the
 //   asserts in the pop paths are integrity guards, not stubs).
 //
 // Single-threaded tick model: state mutations from RequestPacketizer-side (push_aw/ar)
@@ -41,7 +41,7 @@ enum class RobMode { Disabled, Enabled };
 //
 // RoB-less (Disabled) same-id response ordering is guaranteed by the NMU
 // single-outstanding interlock (one transaction in flight per id), not by
-// AxiMaster ordering or XY routing. Enabled mode uses rob_idx for per-beat
+// AxiMaster ordering or XY routing. Enabled mode uses ordering_tag for per-beat
 // reorder buffering and does not rely on this interlock.
 // B RoB is unconditional in this model (cheap, no payload) -- a deliberate
 // divergence from FlooNoC's optional BRoBType=NoRoB. Only R keeps a Disabled mode.
@@ -58,12 +58,12 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
           b_rob_depth_(b_rob_depth),
           r_rob_depth_(r_rob_depth),
           max_txns_per_id_(max_txns_per_id) {
-        assert(b_rob_depth_ >= 1 && b_rob_depth_ <= ROB_IDX_SPACE &&
-               "nmu::Rob: b_rob_depth outside [1, ROB_IDX_SPACE]");
-        assert(r_rob_depth_ >= 1 && r_rob_depth_ <= ROB_IDX_SPACE &&
-               "nmu::Rob: r_rob_depth outside [1, ROB_IDX_SPACE]");
-        if (b_rob_depth_ < 1 || b_rob_depth_ > ROB_IDX_SPACE) std::abort();
-        if (r_rob_depth_ < 1 || r_rob_depth_ > ROB_IDX_SPACE) std::abort();
+        assert(b_rob_depth_ >= 1 && b_rob_depth_ <= ORDERING_TAG_SPACE &&
+               "nmu::Rob: b_rob_depth outside [1, ORDERING_TAG_SPACE]");
+        assert(r_rob_depth_ >= 1 && r_rob_depth_ <= ORDERING_TAG_SPACE &&
+               "nmu::Rob: r_rob_depth outside [1, ORDERING_TAG_SPACE]");
+        if (b_rob_depth_ < 1 || b_rob_depth_ > ORDERING_TAG_SPACE) std::abort();
+        if (r_rob_depth_ < 1 || r_rob_depth_ > ORDERING_TAG_SPACE) std::abort();
         assert(max_txns_per_id_ >= 1 && "nmu::Rob: max_txns_per_id must be positive");
         if (max_txns_per_id_ < 1) std::abort();
     }
@@ -79,25 +79,25 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 
     struct CommittedBEntry {
         axi::BBeat beat;
-        uint8_t rob_idx;
+        uint8_t ordering_tag;
         uint8_t axi_id;
-        bool rob_req;  // false => bypassed, owns no slot, must skip commit_b_exit
+        bool ordering_req;  // false => bypassed, owns no slot, must skip commit_b_exit
     };
     struct CommittedREntry {
         axi::RBeat beat;
-        uint8_t rob_idx;
+        uint8_t ordering_tag;
         uint8_t axi_id;
-        bool rob_req;
+        bool ordering_req;
     };
     std::optional<CommittedBEntry> pop_b_staged();
     std::optional<CommittedREntry> pop_r_staged();
-    void commit_b_exit(uint8_t rob_idx, uint8_t axi_id);
-    void commit_r_exit(uint8_t rob_idx, uint8_t axi_id);
+    void commit_b_exit(uint8_t ordering_tag, uint8_t axi_id);
+    void commit_r_exit(uint8_t ordering_tag, uint8_t axi_id);
 
     // === Enabled mode public constants (for testing + caller info) ===
-    // Addressable range of the rob_idx header field, NOT the pool depth.
+    // Addressable range of the ordering_tag header field, NOT the pool depth.
     // Pool depths are b_rob_depth_ / r_rob_depth_ and may be smaller.
-    static constexpr std::size_t ROB_IDX_SPACE = 1u << ni::header::ROB_IDX_WIDTH;  // 256
+    static constexpr std::size_t ORDERING_TAG_SPACE = 1u << ni::header::ORDERING_TAG_WIDTH;  // 256
     // AXI ID space alias — single source of truth lives in axi::AXI_ID_SPACE.
     static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256
 
@@ -167,21 +167,21 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         uint8_t axi_id = 0;
         axi::RBeat r_beat = {};
     };
-    std::array<WriteEntry, ROB_IDX_SPACE> write_entries_;
-    std::array<ReadEntry, ROB_IDX_SPACE> read_entries_;
+    std::array<WriteEntry, ORDERING_TAG_SPACE> write_entries_;
+    std::array<ReadEntry, ORDERING_TAG_SPACE> read_entries_;
 
     // FlooNoC's rob_alloc_q (floo_rob.sv:146): one bit per allocated RANGE, set at
     // the range's top index. Free space is the leading-zero count above it, so the
     // pool behaves as a stack: space returns only from the top.
-    std::bitset<ROB_IDX_SPACE> alloc_write_;
-    std::bitset<ROB_IDX_SPACE> alloc_read_;
+    std::bitset<ORDERING_TAG_SPACE> alloc_write_;
+    std::bitset<ORDERING_TAG_SPACE> alloc_read_;
 
     // Highest set bit below `depth`, or -1 if none. std::bitset has no such query.
     // Scanning above `depth` would be wrong as well as wasteful: a stray bit there
     // makes `depth - 1 - msb` underflow, and std::size_t underflow is silent.
     // Allocation never sets one (base + n - 1 <= depth - 1), so the bound is also
     // the assertion.
-    static int highest_set(const std::bitset<ROB_IDX_SPACE>& b, std::size_t depth) {
+    static int highest_set(const std::bitset<ORDERING_TAG_SPACE>& b, std::size_t depth) {
         for (std::size_t i = depth; i-- > 0;) {
             if (b.test(i)) return static_cast<int>(i);
         }
@@ -189,11 +189,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     }
 
     // Per-id ordered range list. AW = {base, 1}; AR = {base, len+1}.
-    // rob_req == false: bypassed, no slot reserved, base is meaningless.
+    // ordering_req == false: bypassed, no slot reserved, base is meaningless.
     struct BeatRange {
         uint8_t base;
         uint16_t len_plus_1;  // up to 256
-        bool rob_req;
+        bool ordering_req;
     };
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
@@ -205,26 +205,26 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // if dest matches an earlier one) until a new streak begins. The reset is the idle-ID bypass
     // branch itself: an id's first push (empty order list) sets fallen_back_*=false, so the flag is
     // fresh at every streak start. FlooNoC instead clears at drain (floo_rob.sv:435-441)
-    // because its idle-ID bypass READS the sticky flag (!ax_rob_req_q); ours tests the empty
+    // because its idle-ID bypass READS the sticky flag (!ax_ordering_req_q); ours tests the empty
     // list, which makes a drain-time clear a dead store -- so it is omitted here.
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
 
-    // Per-base (keyed by rob_idx base) arrival counter. NSU stamps every
-    // R beat of a burst with rob_idx=base; this counter positions beat i at base+i.
+    // Per-base (keyed by ordering_tag base) arrival counter. NSU stamps every
+    // R beat of a burst with ordering_tag=base; this counter positions beat i at base+i.
     // Reset when the range is popped from read_order_by_id_ (ties counter lifecycle
     // to slot-reuse eligibility). read_range_len_[base] = burst length n, set in
     // push_ar, used to bound the counter (beat past burst length is malformed).
-    std::array<uint16_t, ROB_IDX_SPACE> read_arrival_offset_{};
-    std::array<uint16_t, ROB_IDX_SPACE> read_range_len_{};
+    std::array<uint16_t, ORDERING_TAG_SPACE> read_arrival_offset_{};
+    std::array<uint16_t, ORDERING_TAG_SPACE> read_range_len_{};
 
     // Beats of the head burst released so far, keyed by range base. FlooNoC keys the
-    // same counter by ID (read_rob_idx_offset_q, floo_rob.sv:177-180); a range belongs
+    // same counter by ID (read_ordering_tag_offset_q, floo_rob.sv:177-180); a range belongs
     // to exactly one ID, so keying by base carries the same information. Distinct from
     // read_arrival_offset_: arrival places incoming beats, release tracks how many left.
-    std::array<uint16_t, ROB_IDX_SPACE> read_release_offset_{};
+    std::array<uint16_t, ORDERING_TAG_SPACE> read_release_offset_{};
 
     // High-water mark backing read_slot_hwm(). See getter for details.
     std::size_t read_slot_hwm_ = 0;
@@ -232,8 +232,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Ready-to-emit beats drained by pop_b / pop_r.
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
-    std::array<uint8_t, ROB_IDX_SPACE> committed_b_pending_{};
-    std::array<uint8_t, ROB_IDX_SPACE> committed_r_pending_{};
+    std::array<uint8_t, ORDERING_TAG_SPACE> committed_b_pending_{};
+    std::array<uint8_t, ORDERING_TAG_SPACE> committed_r_pending_{};
 };
 
 // ===== inline impl =====
@@ -351,7 +351,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
 inline std::optional<axi::BBeat> Rob::pop_b() {
     auto out = pop_b_staged();
     if (!out) return std::nullopt;
-    if (out->rob_req) commit_b_exit(out->rob_idx, out->axi_id);
+    if (out->ordering_req) commit_b_exit(out->ordering_tag, out->axi_id);
     return out->beat;
 }
 
@@ -359,7 +359,7 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
     if (mode_r_ == RobMode::Enabled) {
         auto out = pop_r_staged();
         if (!out) return std::nullopt;
-        if (out->rob_req) commit_r_exit(out->rob_idx, out->axi_id);
+        if (out->ordering_req) commit_r_exit(out->ordering_tag, out->axi_id);
         return out->beat;
     }
     auto opt = next_depkt_.pop_r();
@@ -374,7 +374,7 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
 inline void Rob::drain_ready_write_heads_(uint8_t id) {
     while (!write_order_by_id_[id].empty()) {
         const BeatRange head = write_order_by_id_[id].front();
-        if (!head.rob_req) break;  // waiting on a bypassed response
+        if (!head.ordering_req) break;  // waiting on a bypassed response
         if (!write_entries_[head.base].ready) break;
         committed_b_queue_.push_back({write_entries_[head.base].b_beat, head.base, id, true});
         ++committed_b_pending_[head.base];
@@ -385,7 +385,7 @@ inline void Rob::drain_ready_write_heads_(uint8_t id) {
 inline void Rob::drain_ready_read_heads_(uint8_t id) {
     while (!read_order_by_id_[id].empty()) {
         const BeatRange head = read_order_by_id_[id].front();
-        if (!head.rob_req) break;  // waiting on a bypassed response
+        if (!head.ordering_req) break;  // waiting on a bypassed response
         uint16_t& release_off = read_release_offset_[head.base];
         while (release_off < head.len_plus_1 && read_entries_[head.base + release_off].ready) {
             const std::size_t idx = static_cast<std::size_t>(head.base) + release_off;
@@ -410,24 +410,24 @@ inline std::optional<Rob::CommittedBEntry> Rob::pop_b_staged() {
     auto opt = next_depkt_.pop_b_with_meta();
     if (!opt) return std::nullopt;
     auto [b, meta] = *opt;
-    if (meta.rob_req == 0) {
+    if (meta.ordering_req == 0) {
         // Bypassed B: by the head invariant it is the head of its id's order list.
         const uint8_t id = b.id;
-        if (write_order_by_id_[id].empty() || write_order_by_id_[id].front().rob_req) {
+        if (write_order_by_id_[id].empty() || write_order_by_id_[id].front().ordering_req) {
             assert(false && "bypassed B does not match the head of its id's order list");
             std::abort();
         }
         write_order_by_id_[id].pop_front();
         drain_ready_write_heads_(id);  // the entry behind it may already be ready
-        return CommittedBEntry{b, 0, id, /*rob_req=*/false};
+        return CommittedBEntry{b, 0, id, /*ordering_req=*/false};
     }
-    if (!(meta.rob_idx < ROB_IDX_SPACE)) {
-        assert(false && "rob_idx out of range");
+    if (!(meta.ordering_tag < ORDERING_TAG_SPACE)) {
+        assert(false && "ordering_tag out of range");
         std::abort();
     }
-    auto& slot = write_entries_[meta.rob_idx];
+    auto& slot = write_entries_[meta.ordering_tag];
     if (!(slot.occupied && !slot.ready)) {
-        assert(false && "B for unallocated or already-completed rob_idx");
+        assert(false && "B for unallocated or already-completed ordering_tag");
         std::abort();
     }
     slot.b_beat = b;
@@ -450,11 +450,11 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     auto opt = next_depkt_.pop_r_with_meta();
     if (!opt) return std::nullopt;
     auto [r, meta] = *opt;
-    if (meta.rob_req == 0) {
+    if (meta.ordering_req == 0) {
         // Bypassed R streams beat by beat; the list entry pops on last, and only
         // then can a robbed entry behind it become releasable.
         const uint8_t id = r.id;
-        if (read_order_by_id_[id].empty() || read_order_by_id_[id].front().rob_req) {
+        if (read_order_by_id_[id].empty() || read_order_by_id_[id].front().ordering_req) {
             assert(false && "bypassed R does not match the head of its id's order list");
             std::abort();
         }
@@ -462,13 +462,13 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
             read_order_by_id_[id].pop_front();
             drain_ready_read_heads_(id);
         }
-        return CommittedREntry{r, 0, id, /*rob_req=*/false};
+        return CommittedREntry{r, 0, id, /*ordering_req=*/false};
     }
-    if (!(meta.rob_idx < ROB_IDX_SPACE)) {
-        assert(false && "rob_idx out of range");
+    if (!(meta.ordering_tag < ORDERING_TAG_SPACE)) {
+        assert(false && "ordering_tag out of range");
         std::abort();
     }
-    uint8_t base = meta.rob_idx;
+    uint8_t base = meta.ordering_tag;
     std::size_t arrival_offset = read_arrival_offset_[base];
     if (!(arrival_offset < read_range_len_[base])) {
         assert(false &&
@@ -477,7 +477,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         std::abort();
     }
     std::size_t slot_idx = static_cast<std::size_t>(base) + arrival_offset;
-    if (!(slot_idx < ROB_IDX_SPACE)) {
+    if (!(slot_idx < ORDERING_TAG_SPACE)) {
         assert(false && "computed read slot out of range");
         std::abort();
     }
@@ -497,23 +497,23 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
     return out;
 }
 
-inline void Rob::commit_b_exit(uint8_t rob_idx, uint8_t axi_id) {
-    assert(rob_idx < ROB_IDX_SPACE);
-    assert(committed_b_pending_[rob_idx] > 0);
-    --committed_b_pending_[rob_idx];
-    if (committed_b_pending_[rob_idx] == 0) {
-        alloc_write_.reset(rob_idx);  // no-op unless rob_idx is a range top
-        write_entries_[rob_idx] = WriteEntry{};
+inline void Rob::commit_b_exit(uint8_t ordering_tag, uint8_t axi_id) {
+    assert(ordering_tag < ORDERING_TAG_SPACE);
+    assert(committed_b_pending_[ordering_tag] > 0);
+    --committed_b_pending_[ordering_tag];
+    if (committed_b_pending_[ordering_tag] == 0) {
+        alloc_write_.reset(ordering_tag);  // no-op unless ordering_tag is a range top
+        write_entries_[ordering_tag] = WriteEntry{};
     }
 }
 
-inline void Rob::commit_r_exit(uint8_t rob_idx, uint8_t axi_id) {
-    assert(rob_idx < ROB_IDX_SPACE);
-    assert(committed_r_pending_[rob_idx] > 0);
-    --committed_r_pending_[rob_idx];
-    if (committed_r_pending_[rob_idx] == 0) {
-        alloc_read_.reset(rob_idx);  // no-op unless rob_idx is a range top
-        read_entries_[rob_idx] = ReadEntry{};
+inline void Rob::commit_r_exit(uint8_t ordering_tag, uint8_t axi_id) {
+    assert(ordering_tag < ORDERING_TAG_SPACE);
+    assert(committed_r_pending_[ordering_tag] > 0);
+    --committed_r_pending_[ordering_tag];
+    if (committed_r_pending_[ordering_tag] == 0) {
+        alloc_read_.reset(ordering_tag);  // no-op unless ordering_tag is a range top
+        read_entries_[ordering_tag] = ReadEntry{};
     }
 }
 

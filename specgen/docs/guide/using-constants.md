@@ -45,9 +45,9 @@ uint64_t hdr_lo = 0;
 hdr_lo |= (uint64_t)(0x2)  << ni::header::AXI_CH_LSB;   // AR
 hdr_lo |= (uint64_t)(0x05) << ni::header::SRC_ID_LSB;
 hdr_lo |= (uint64_t)(0x12) << ni::header::DST_ID_LSB;
-hdr_lo |= (uint64_t)(0x1)  << ni::header::LAST_LSB;
-hdr_lo |= (uint64_t)(0x1)  << ni::header::ROB_REQ_LSB;
-hdr_lo |= (uint64_t)(0x7)  << ni::header::ROB_IDX_LSB;
+hdr_lo |= (uint64_t)(0x1)  << ni::header::FLIT_TAIL_LSB;
+hdr_lo |= (uint64_t)(0x1)  << ni::header::ORDERING_REQ_LSB;
+hdr_lo |= (uint64_t)(0x7)  << ni::header::ORDERING_TAG_LSB;
 ```
 
 Build and run via [Quickstart § 3-4](quickstart.md#3-compile-the-sample).
