@@ -25,12 +25,12 @@ posedge N of `clk_i`. An output registered at posedge K is first sampled at pose
 at most one flit per direction per cycle.
 
 **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
-or more flits sharing the same header `dst_id`. The header bit `last` marks packet
-boundaries: `last = 1'b0` on every flit except the final one, `last = 1'b1` on the final
-flit. A single-flit packet has `last = 1'b1` on its only flit. The router forwards
+or more flits sharing the same header `dst_id`. The header bit `flit_tail` marks packet
+boundaries: `flit_tail = 1'b0` on every flit except the final one, `flit_tail = 1'b1` on the final
+flit. A single-flit packet has `flit_tail = 1'b1` on its only flit. The router forwards
 wormhole style: it does not wait for a whole packet before forwarding, and once a
 packet's head flit has been granted to an output, that output serves only that packet
-until its tail (`last = 1'b1`) passes. Flits of two packets therefore never interleave
+until its tail (`flit_tail = 1'b1`) passes. Flits of two packets therefore never interleave
 on one output.
 
 **Virtual channels (VC).** Each input port holds `NUM_VC` independent FIFOs. A flit's
@@ -59,13 +59,13 @@ Header occupies flit bits [55:0], payload occupies flit bits [407:56].
 | `src_id` | [10:3] | 8 | Source node id, `{y[3:0], x[3:0]}`. |
 | `dst_id` | [18:11] | 8 | Destination node id, `{y[3:0], x[3:0]}`. Read by the router for routing. |
 | `vc_id` | [21:19] | 3 | Virtual channel index, `0 <= vc_id < NUM_VC`. Read by the router. |
-| `last` | [22] | 1 | 1'b1 on the final flit of a packet. Read by the router. |
-| `rob_req` | [23] | 1 | NI reorder-buffer flag. Transparent to the router. |
-| `rob_idx` | [31:24] | 8 | NI reorder-buffer index. Transparent to the router. |
+| `flit_tail` | [22] | 1 | 1'b1 on the final flit of a packet. Read by the router. |
+| `ordering_req` | [23] | 1 | NI reorder-buffer flag. Transparent to the router. |
+| `ordering_tag` | [31:24] | 8 | NI reorder-buffer index. Transparent to the router. |
 | `rsvd` | [55:32] | 24 | Header padding, driven 0 by the NI. Transparent to the router. |
 | payload | [407:56] | 352 | AXI channel payload. Transparent to the router. |
 
-IMPORTANT: the router reads only `dst_id`, `vc_id`, and `last`. Every other bit,
+IMPORTANT: the router reads only `dst_id`, `vc_id`, and `flit_tail`. Every other bit,
 header and payload alike, passes through unmodified, byte for byte. Payload layout is
 owned by the NMU/NSU specs and is out of scope here.
 
@@ -152,7 +152,7 @@ front of (SOUTH, VC1), both routing EAST.
 - Counter-case: with `credit_[EAST][1] = 0`, VC1 is skipped entirely. VC0 is scanned;
   (SOUTH, VC0) is empty, next input is WEST -> winner (WEST, VC0).
 
-Both pointers advance only when a tail flit (`last = 1'b1`) is granted:
+Both pointers advance only when a tail flit (`flit_tail = 1'b1`) is granted:
 `ws.rr = winner_input + 1`, `vc_rr_[out] = winner_vc + 1` (packet-granularity
 round-robin, `router.hpp:273-274`). In the example above, if the (SOUTH, VC1) flit is a
 tail, the next unlocked scan starts at VC0 and input WEST. For streams of single-flit
@@ -163,15 +163,15 @@ the flit header has no QoS field (`NOC_QOS_WIDTH = 0`).
 
 Each output holds one lock record `(locked_input, locked_vc)` (`router.hpp:159-163`).
 
-1. Granting a flit with `last = 1'b0` locks the output to that (input, VC) pair.
+1. Granting a flit with `flit_tail = 1'b0` locks the output to that (input, VC) pair.
 2. While locked, only the locked (input, VC) FIFO is served at this output. If it is
    empty, or `credit_[out][locked_vc]` is 0, the output idles this cycle and keeps the
    lock. Other inputs and other VCs wait, even with credit available.
-3. Granting a flit with `last = 1'b1` releases the lock and advances both RR pointers.
-4. A single-flit packet (`last = 1'b1` on its head) locks and releases within the one
+3. Granting a flit with `flit_tail = 1'b1` releases the lock and advances both RR pointers.
+4. A single-flit packet (`flit_tail = 1'b1` on its head) locks and releases within the one
    grant: the output is never observed locked between cycles.
 
-Example: a 3-flit packet (H `last=0`, B `last=0`, T `last=1`) from (LOCAL, VC0) to
+Example: a 3-flit packet (H `flit_tail=0`, B `flit_tail=0`, T `flit_tail=1`) from (LOCAL, VC0) to
 EAST. Cycle k grants H and locks EAST to (LOCAL, VC0). Cycle k+1 grants B, lock held.
 Cycle k+2 grants T, lock released, `ws.rr` and `vc_rr_[EAST]` advance. A competing
 packet at (WEST, VC1) routing EAST waits cycles k..k+2 even though VC1 has credit.
@@ -216,7 +216,7 @@ router (carries B/R flits, NSU -> NMU direction). They share nothing: separate F
 credits, locks, and separate `link_req_*` / `link_rsp_*` pins. This REQ/RSP physical
 split removes request-response protocol deadlock.
 
-On the RSP network every packet is single-flit: the NSU emits `last = 1'b1` on every B
+On the RSP network every packet is single-flit: the NSU emits `flit_tail = 1'b1` on every B
 flit and on every R beat flit. The RSP router's wormhole lock therefore only ever
 engages degenerately (lock and release within one grant, rule 2.6.4), and RSP
 arbitration behaves as flit-level round-robin.
@@ -224,7 +224,7 @@ arbitration behaves as flit-level round-robin.
 ### 2.9 Worked example: 3-flit packet, 2 hops
 
 Topology: nodes A = (0,0) and B = (1,0). The NMU at A sends one 3-flit REQ packet
-(F0 `last=0`, F1 `last=0`, F2 `last=1`, all VC0, `dst_id` = 8'h01) to the NSU at B.
+(F0 `flit_tail=0`, F1 `flit_tail=0`, F2 `flit_tail=1`, all VC0, `dst_id` = 8'h01) to the NSU at B.
 Flits enter A's `noc_nmu_req_i` at cycles 0, 1, 2. All credit counters start at 4.
 
 | Cycle | Router A (x=0,y=0) | Router B (x=1,y=0) | Wires (sampled this cycle) |
@@ -423,9 +423,9 @@ router obligation.
 | G2 | Every valid flit has `vc_id < NUM_VC` | abort, `router.hpp:182-185`; SVA `link_perf_monitor.sv:69-72` |
 | G3 | Every valid flit has `dst_id` inside the mesh (`dst_x < mesh_x_dim`, `dst_y < mesh_y_dim`). The NMU SAM lookup validates destinations at packetize time, so an out-of-mesh `dst_id` cannot happen | abort, `router.hpp:65-68` |
 | G4 | No sender drives a flit on VC v while its credit for that (port, VC) is 0 | input FIFO overflow assert, `router.hpp:284-286`; SVA `link_perf_monitor.sv:61-64` |
-| G5 | Packets are well-formed per (input, VC): after a head (`last=0`), every following flit on that (input, VC) routes to the same output until a tail (`last=1`) closes the packet. Guaranteed because all flits of a packet share `dst_id` | abort, `router.hpp:228-234` |
+| G5 | Packets are well-formed per (input, VC): after a head (`flit_tail=0`), every following flit on that (input, VC) routes to the same output until a tail (`flit_tail=1`) closes the packet. Guaranteed because all flits of a packet share `dst_id` | abort, `router.hpp:228-234` |
 | G6 | No credit pulse arrives beyond the outstanding flit count (counter never exceeds the seed of 4) | abort, `router.hpp:111-114` |
-| G7 | On the RSP network every flit has `last = 1'b1` (the NSU emits each B and each R beat as a single-flit packet) | consequence: RSP wormhole lock only engages degenerately |
+| G7 | On the RSP network every flit has `flit_tail = 1'b1` (the NSU emits each B and each R beat as a single-flit packet) | consequence: RSP wormhole lock only engages degenerately |
 | G8 | `rst_ni` is given once at simulation start; the handle from `cmodel_router_create` is valid and constant | tb_top sequencing, `gen_tb_top.py:585-587` |
 | G9 | Boundary-direction inputs are tied to 0 and never pulse | generated tie-off, `gen_tb_top.py:330-336` |
 
@@ -492,7 +492,7 @@ every live directed edge: `valid && credit[vc_id] == 0` raises
 `$error("[%s] credit underflow on VC%0d ...")`. Failure: that assertion fires.
 
 SPEC 10 (wormhole non-interleave). Flits of two packets never interleave on one
-output: from a granted head (`last=0`) to its tail (`last=1`), the output serves only
+output: from a granted head (`flit_tail=0`) to its tail (`flit_tail=1`), the output serves only
 the locked (input, VC). Verified by ctest
 `RouterWormhole.PacketsDoNotInterleavePerOutputVc` and
 `RouterWormhole.OpenPacketHoldsOutputAndBlocksOtherVc`. Failure: any foreign flit
@@ -610,7 +610,7 @@ Both waveforms use the sampling convention of section 1: the value shown in colu
 is the value sampled at posedge N.
 
 Waveform 1: zero-load single-flit hop plus credit return. Node A (0,0), single-flit
-packet F (`last=1`, VC0, `dst_id`=8'h01) injected by the NMU, routed EAST.
+packet F (`flit_tail=1`, VC0, `dst_id`=8'h01) injected by the NMU, routed EAST.
 
 ```
 cycle (posedge idx)      |  0 |  1 |  2 |  3 |  4 |
@@ -663,9 +663,9 @@ stage per cycle, and a full output FIFO that drains in stage 3 accepts a grant i
 same cycle (SPEC 14). Any structure with the same observable cycle behavior is
 equally acceptable.
 
-Hint: no datapath logic ever needs to decode `axi_ch`, `src_id`, `rob_req`, `rob_idx`,
+Hint: no datapath logic ever needs to decode `axi_ch`, `src_id`, `ordering_req`, `ordering_tag`,
 or the payload. Flit bits [10:0] and [407:23] form an opaque bundle steered by the
-12 control bits [22:11] = {`last` [22], `vc_id` [21:19], `dst_id` [18:11]}.
+12 control bits [22:11] = {`flit_tail` [22], `vc_id` [21:19], `dst_id` [18:11]}.
 
 Hint: the per-(port, VC) credit counter needs ceil(log2(`NOC_ROUTER_VC_DEPTH`+1)) = 3
 bits at the default depth 4 (values 0..4).

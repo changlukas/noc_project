@@ -67,9 +67,9 @@ dedicated narrow plane is what recovers this.
 - **Virtual channels**: 1 per link default, up to 8 (`VC_ID` 3-bit)
 - **Clocking**: GALS, router clock domain decoupled from IP clock domain, NoC target 1 GHz
 - **AXI conformance**: AXI4 (IHI 0022H), supporting single transfer, burst transfer (INCR / WRAP / FIXED), outstanding transactions, out-of-order completion across IDs (same-ID order preserved), and read data interleaving
-- **Ordering**: per-ID reorder buffer, 32 entries (`rob_idx` 5-bit), preserves AXI same-ID order, up to 32 outstanding transactions per ID
-- **Header**: fixed **56-bit** (qos, axi_ch, src/dst_id, vc_id, route_par, last, rob_req/idx,
-  commtype, multicast mask, flit_ecc, rsvd)
+- **Ordering**: per-ID reorder buffer, 32 entries (`ordering_tag` 5-bit), preserves AXI same-ID order, up to 32 outstanding transactions per ID
+- **Header**: fixed **56-bit** (qos, axi_ch, src/dst_id, vc_id, route_par, flit_tail, ordering_req,
+  ordering_tag, commtype, multicast mask, flit_ecc, rsvd)
 - **Plane separation**: dual physical network
   - **Control plane (narrow)**: AXI `DATA_WIDTH` = **32 b**, flit **≈ 164 b** (56 hdr + ~108 payload, address-led)
   - **Data plane (wide)**: AXI `DATA_WIDTH` = **1024 b**, flit **≈ 1217 b** (56 hdr + 1024 data + 128 wstrb + ctrl), one flit per beat

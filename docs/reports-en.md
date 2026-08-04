@@ -21,7 +21,7 @@ Condensed and reworded, not literal. No em dashes, no semicolons.
 
 **Packet-format change**
 - Add a 1-bit `vc_fixed` field. When the router sees `vc_fixed = 1` it skips the VA stage, keeping the flow pinned to one VC.
-- Flit header: `rob_idx | rob_req | tail | vc_fixed | vc_id | dst_id | src_id | axi_ch`
+- Flit header: `ordering_tag | ordering_req | tail | vc_fixed | vc_id | dst_id | src_id | axi_ch`
 
 ---
 

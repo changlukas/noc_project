@@ -16,7 +16,7 @@
       "features": [
         {
           "id": "FEAT-NMU-AXI_SLAVE_PORT",
-          "summary": "AXI4 full-protocol slave port (AW/W/AR/B/R) with built-in async data boundary crossing between aclk_i and noc_clk_i.",
+          "summary": "AXI4 full-protocol slave port (AW/W/AR/B/R): per-channel FIFO queuing, single-clock (no CDC in c_model).",
           "modes": ["Active", "Passive"],
           "compile_time_params": {},
           "uses_packet_fields": ["AW", "W", "AR", "B", "R"],
@@ -73,7 +73,7 @@
         },
         {
           "id": "FEAT-NMU-DEPACKETIZE",
-          "summary": "Parses inbound NoC response flit streams into AXI B/R beats (with flit_tail) before delivery to the AXI slave port.",
+          "summary": "Parses inbound NoC response flit streams into AXI B/R beats (with last) before delivery to the AXI slave port.",
           "modes": [],
           "compile_time_params": {},
           "uses_packet_fields": ["B", "R", "flit_tail"],
@@ -89,7 +89,7 @@
       "features": [
         {
           "id": "FEAT-NSU-AXI_MASTER_PORT",
-          "summary": "AXI4 full-protocol master port (AW/W/AR/B/R) with built-in async data boundary crossing between noc_clk_i and aclk_i.",
+          "summary": "AXI4 full-protocol master port (AW/W/AR/B/R): per-channel FIFO queuing, single-clock (no CDC in c_model).",
           "modes": ["Active", "Passive"],
           "compile_time_params": {},
           "uses_packet_fields": ["AW", "W", "AR", "B", "R"],

@@ -281,7 +281,7 @@ passing back the printed value reproduces the run exactly.
 | limitation | detail |
 |---|---|
 | SAM failure mode | `translate()` miss and a topology YAML without `address_map` fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
-| Unswept sizing | `max_txns_per_id` = 32 is a placeholder, never depth-swept [TBD]. `r_rob_depth` defaults to 32 (`NMU_ROB_R_DEPTH`) and is expressible up to 256 (the full `rob_idx` space) via `R_ROB_DEPTH`; equally unswept at every setting. |
+| Unswept sizing | `max_txns_per_id` = 32 is a placeholder, never depth-swept [TBD]. `r_rob_depth` defaults to 32 (`NMU_ROB_R_DEPTH`) and is expressible up to 256 (the full `ordering_tag` space) via `R_ROB_DEPTH`; equally unswept at every setting. |
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
 | Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
 | Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |

@@ -12,7 +12,7 @@ The NSU is the slave-side network interface of the NoC. It terminates the reques
 **COMPUTE** depacketize each flit into exactly one AXI beat, remap the AXI id, remember per-request metadata, drive the beats out of an AXI4 master face in arrival order. When the tile slave answers, packetize each B/R beat into exactly one response flit, restoring the original id and the requester's node id from the remembered metadata, then arbitrate the flit onto a virtual channel.
 **OUTPUT** response flits (B, R) to the router LOCAL input port, plus per-VC credit pulses in both directions.
 
-The NSU contains no reorder buffer and no address map. Requests are issued toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id responses back into request order is the job of the master-side NI, which the NSU supports only by echoing the `rob_req` / `rob_idx` header fields verbatim into every response flit.
+The NSU contains no reorder buffer and no address map. Requests are issued toward the slave in NoC arrival order per channel, regardless of AXI id. Reordering same-id responses back into request order is the job of the master-side NI, which the NSU supports only by echoing the `ordering_req` / `ordering_tag` header fields verbatim into every response flit.
 
 Depacketization is a one-flit-one-beat mapping. There is no burst splitting, merging, or reassembly anywhere in the NSU:
 
@@ -36,9 +36,9 @@ Header, flit bits [55:0]:
 | `src_id` | [10:3] | 8 | Sender node id, `(y << 4) \| x`. On a request flit this is the requester. On a response flit the NSU stamps its own node id. |
 | `dst_id` | [18:11] | 8 | Destination node id. On a response flit the NSU writes the `src_id` it captured from the matching request. |
 | `vc_id` | [21:19] | 3 | Virtual channel carrying the flit. On egress the VC arbiter stamps it. On ingress it selects the VC of the returned credit pulse, nothing else. |
-| `last` | [22] | 1 | Fabric wormhole packet delimiter. See the IMPORTANT note in 2.4. |
-| `rob_req` | [23] | 1 | Reorder-buffer flag from the source NI. The NSU echoes it into the response, it also selects the B VC policy (2.4). |
-| `rob_idx` | [31:24] | 8 | Reorder-buffer slot from the source NI. Echoed verbatim. |
+| `flit_tail` | [22] | 1 | Fabric wormhole packet delimiter. See the IMPORTANT note in 2.4. |
+| `ordering_req` | [23] | 1 | Reorder-buffer flag from the source NI. The NSU echoes it into the response, it also selects the B VC policy (2.4). |
+| `ordering_tag` | [31:24] | 8 | Reorder-buffer slot from the source NI. Echoed verbatim. |
 | `rsvd` | [55:32] | 24 | Padding, always 0. |
 
 Request payloads consumed by the NSU (bit positions payload-relative):
@@ -62,7 +62,7 @@ Response payloads produced by the NSU:
 
 An AXI B or R beat carries only an id. It does not say which node asked, nor which reorder slot the master-side NI reserved. The NSU therefore captures, at the moment an AW or AR is admitted toward the slave, the 4-tuple
 
-`{src_id, upstream_id, rob_req, rob_idx}`
+`{src_id, upstream_id, ordering_req, ordering_tag}`
 
 into the `MetaBuffer` (`nsu/meta_buffer.hpp`), keyed by the **downstream** id it presents to the slave. The buffer is a per-downstream-id FIFO bucket array (256 buckets per direction) with a **shared** occupancy pool of `NSU_META_BUFFER_MAX_OUTSTANDING` = 32 entries per direction (write and read pools are independent). AXI4 guarantees per-id in-order completion (IHI 0022, A6.3), so the front of a bucket is always the oldest outstanding request on that id, and every arriving B/R matches its bucket front.
 
@@ -77,9 +77,9 @@ Only {1, 256} are legal. The constructor throws on any other value (`nsu/depacke
 
 ### 2.4 Response packetization and VC selection
 
-Each B/R beat is looked up against its MetaBuffer bucket front, built into one flit (id restored, `dst_id` = stored `src_id`, `src_id` = NSU node id, `rob_req`/`rob_idx` echoed), then committed: a B entry is retired when its flit is accepted by the arbiter, an R entry is retired only when the beat with `rlast` = 1 is accepted (every earlier beat of the burst peeks the same front entry).
+Each B/R beat is looked up against its MetaBuffer bucket front, built into one flit (id restored, `dst_id` = stored `src_id`, `src_id` = NSU node id, `ordering_req`/`ordering_tag` echoed), then committed: a B entry is retired when its flit is accepted by the arbiter, an R entry is retired only when the beat with `rlast` = 1 is accepted (every earlier beat of the burst peeks the same front entry).
 
-**IMPORTANT:** header `last` = 1 on every B flit and on **every** R beat flit. Header `last` is the packet delimiter for fabric wormhole arbitration only. AXI burst framing lives exclusively in the payload `rlast` bit. Every response packet is therefore single-flit, and no wormhole lock is ever taken on the response path. Example: a 4-beat read returns 4 R flits, each with header `last` = 1, and payload `rlast` = 1 only in the fourth.
+**IMPORTANT:** header `flit_tail` = 1 on every B flit and on **every** R beat flit. Header `flit_tail` is the packet delimiter for fabric wormhole arbitration only. AXI burst framing lives exclusively in the payload `rlast` bit. Every response packet is therefore single-flit, and no wormhole lock is ever taken on the response path. Example: a 4-beat read returns 4 R flits, each with header `flit_tail` = 1, and payload `rlast` = 1 only in the fourth.
 
 B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, input 1 = R, no channel pairing, at most 1 flit per cycle) into the `VcArbiter`, which assigns the VC. The VC configuration surface is the virtual-network vector pair produced by `make_virtual_networks(num_vc)` (`ni/virtual_network.hpp`): write vnet {0 .. n/2-1}, read vnet {n/2 .. n-1}, and for `num_vc` = 1 both vnets are {0}. `num_vc` must be 1 or even.
 
@@ -87,9 +87,9 @@ B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, inpu
 
 | flit | rule |
 |---|---|
-| R (always, any `rob_req`) | fixed hash `read_vcs[(dst_id ^ rid) % read_vcs.size()]` |
-| B with `rob_req` = 0 | fixed hash `write_vcs[(dst_id ^ bid) % write_vcs.size()]` |
-| B with `rob_req` = 1 | id-agnostic round-robin over the write vnet (order-free at the source RoB) |
+| R (always, any `ordering_req`) | fixed hash `read_vcs[(dst_id ^ rid) % read_vcs.size()]` |
+| B with `ordering_req` = 0 | fixed hash `write_vcs[(dst_id ^ bid) % write_vcs.size()]` |
+| B with `ordering_req` = 1 | id-agnostic round-robin over the write vnet (order-free at the source RoB) |
 
 The hash is a pure function with zero state. Every beat of an R burst shares `(dst_id, rid)`, so a whole burst lands on one VC, and a same-`(dst, id)` response stream can never be reordered in-fabric. A fixed-hash flit whose VC is full or has no downstream credit is **refused** and retried, it never spills to another VC (spilling would reorder the stream).
 
@@ -97,8 +97,8 @@ Worked example, `num_vc` = 4, so write vnet {0, 1} and read vnet {2, 3}:
 
 - R flit, `dst_id` = 8'h12, `rid` = 8'h07: 8'h12 ^ 8'h07 = 8'h15 = 21, 21 % 2 = 1, so `read_vcs[1]` = **VC 3**. All beats of this burst take VC 3.
 - Comparison, R flit with `rid` = 8'h06: 8'h12 ^ 8'h06 = 8'h14 = 20, 20 % 2 = 0, so `read_vcs[0]` = **VC 2**. Different id, different VC, the two bursts may interleave in the fabric.
-- B flit, `rob_req` = 0, `dst_id` = 8'h12, `bid` = 8'h07: `write_vcs[1]` = **VC 1**.
-- B flit, `rob_req` = 1: round-robin pointer starts at 0 after reset, so the first such B takes VC 0 (if it has space and credit), the next takes VC 1.
+- B flit, `ordering_req` = 0, `dst_id` = 8'h12, `bid` = 8'h07: `write_vcs[1]` = **VC 1**.
+- B flit, `ordering_req` = 1: round-robin pointer starts at 0 after reset, so the first such B takes VC 0 (if it has space and credit), the next takes VC 1.
 - If VC 3 is full or creditless, the VC-3-hashed R flit waits in the wormhole arbiter pending queue. It is never sent on VC 2.
 
 Admission by configuration: for `num_vc` > 1 a flit is admitted to its per-VC pending queue only if that queue has space and the downstream credit counter for that VC is nonzero (round-robin B scans the vnet for the first VC meeting both). For `num_vc` = 1 the selection returns VC 0 without the entry-time credit check, only the pending-space check applies at admission, and the credit gate is enforced at the drain stage. This asymmetry is as-built. In all configurations the drain (`VcArbiter::tick`) sends at most 1 flit per cycle, round-robin over VCs, only to a VC with downstream credit.
@@ -111,15 +111,15 @@ Request packet arriving on `noc_req_i` (3 flits):
 
 | flit | header | payload |
 |---|---|---|
-| AW | `axi_ch`=3'd0, `src_id`=8'h12, `dst_id`=8'h34, `last`=0, `rob_req`=1, `rob_idx`=8'h05 | `awid`=8'h07, `awaddr`=64'h0000_0000_0000_0200, `awlen`=8'd1, `awsize`=3'd5, `awburst`=2'd1 (INCR) |
-| W beat 0 | `axi_ch`=3'd1, `last`=0 | `wlast`=0, `wstrb`=32'hFFFF_FFFF, `wdata`=beat 0 |
-| W beat 1 | `axi_ch`=3'd1, `last`=1 | `wlast`=1, `wstrb`=32'hFFFF_FFFF, `wdata`=beat 1 |
+| AW | `axi_ch`=3'd0, `src_id`=8'h12, `dst_id`=8'h34, `flit_tail`=0, `ordering_req`=1, `ordering_tag`=8'h05 | `awid`=8'h07, `awaddr`=64'h0000_0000_0000_0200, `awlen`=8'd1, `awsize`=3'd5, `awburst`=2'd1 (INCR) |
+| W beat 0 | `axi_ch`=3'd1, `flit_tail`=0 | `wlast`=0, `wstrb`=32'hFFFF_FFFF, `wdata`=beat 0 |
+| W beat 1 | `axi_ch`=3'd1, `flit_tail`=1 | `wlast`=1, `wstrb`=32'hFFFF_FFFF, `wdata`=beat 1 |
 
-Depacketize admits the AW: downstream id = `remap(8'h07, 1)` = 8'hFF, MetaBuffer write bucket 8'hFF gets `{src_id=8'h12, upstream_id=8'h07, rob_req=1, rob_idx=8'h05}`, write pool count 0 to 1.
+Depacketize admits the AW: downstream id = `remap(8'h07, 1)` = 8'hFF, MetaBuffer write bucket 8'hFF gets `{src_id=8'h12, upstream_id=8'h07, ordering_req=1, ordering_tag=8'h05}`, write pool count 0 to 1.
 
 AXI master face issues: `awid`=8'hFF, `awaddr`=64'h200, `awlen`=8'd1, `awsize`=3'd5, then 2 W beats, `wlast` on the second. The slave responds `bvalid` with `bid`=8'hFF, `bresp`=2'b00.
 
-Packetize peeks write bucket 8'hFF, builds the single B flit: header `axi_ch`=3'd3, `src_id`=8'h34, `dst_id`=8'h12, `last`=1, `rob_req`=1, `rob_idx`=8'h05, payload `bid`=8'h07 (restored), `bresp`=2'b00, `buser`=8'h00. `rob_req`=1 selects round-robin over the write vnet {0}, so VC 0. On acceptance the MetaBuffer entry is committed, pool count back to 0.
+Packetize peeks write bucket 8'hFF, builds the single B flit: header `axi_ch`=3'd3, `src_id`=8'h34, `dst_id`=8'h12, `flit_tail`=1, `ordering_req`=1, `ordering_tag`=8'h05, payload `bid`=8'h07 (restored), `bresp`=2'b00, `buser`=8'h00. `ordering_req`=1 selects round-robin over the write vnet {0}, so VC 0. On acceptance the MetaBuffer entry is committed, pool count back to 0.
 
 ### 2.6 Pipeline stages and latency
 
@@ -271,13 +271,13 @@ Each item names its verification and failure condition. ctest paths are under `s
 2. One flit maps to exactly one AXI beat in both directions, no burst split or merge. Verify: `nsu/test_nsu_depacketize.cpp` `DemuxMixedAwWAr`, co-sim scoreboard. Fail: beat count differs from flit count for any transaction.
 3. Request beats are presented to the slave in NoC arrival order per channel, regardless of AXI id. Verify: `nsu/test_nsu_depacketize.cpp` `FifoOrderPreservedAcrossChannels`. Fail: any beat overtakes an earlier beat of the same channel.
 4. Request ingress is one serialized VC-blind stream with a single head-of-line pending slot and a 1-entry stage register per channel. A stalled channel blocks flits behind it, never reorders or drops them. Verify: `nsu/test_nsu_depacketize.cpp` `PendingHolBlockingWFullBlocksAwBehind`. Fail: a blocked flit is dropped or a later flit passes it.
-5. AW/AR admission captures `{src_id, upstream_id, rob_req, rob_idx}` keyed by downstream id, within a shared per-direction pool of `NSU_META_BUFFER_MAX_OUTSTANDING` entries. A full pool reports backpressure, never aborts. Verify: `nsu/test_nsu_depacketize.cpp` `AwFlitSnapshotsMetadataAndPopsBeat`, `ArFlitSnapshotsReadMeta`, `nsu/test_meta_buffer.cpp` `SharedPoolFullReportsInsteadOfAborting`. Fail: wrong tuple stored or admission proceeds past a full pool.
+5. AW/AR admission captures `{src_id, upstream_id, ordering_req, ordering_tag}` keyed by downstream id, within a shared per-direction pool of `NSU_META_BUFFER_MAX_OUTSTANDING` entries. A full pool reports backpressure, never aborts. Verify: `nsu/test_nsu_depacketize.cpp` `AwFlitSnapshotsMetadataAndPopsBeat`, `ArFlitSnapshotsReadMeta`, `nsu/test_meta_buffer.cpp` `SharedPoolFullReportsInsteadOfAborting`. Fail: wrong tuple stored or admission proceeds past a full pool.
 6. Admission gating is per direction: a full write pool stalls AW only, a full read pool stalls AR only, W is never gated by either pool. Verify: `nsu/test_nsu_depacketize.cpp` `WFlitNoMetaSideEffect`, co-sim regression under write-hotspot patterns (reads keep progressing). Fail: cross-channel stall.
 7. Id remap: `max_unique_ids` = 1 presents constant 8'hFF downstream, 256 presents the upstream id, any other value is rejected at construction with a throw that survives NDEBUG. Verify: `nsu/test_meta_buffer.cpp` `CollapsesToAllOnesWhenSingleUniqueId`, `IdentityWhenFullIdSpace`, `nsu/test_nsu_depacketize.cpp` `CtorRejectsIntermediateMaxUniqueIds`. Fail: wrong downstream id or an illegal configuration constructs.
 8. Every response flit restores the original upstream id into `bid`/`rid`, sets `dst_id` to the captured requester `src_id`, and sets `src_id` to the NSU node id. Verify: `nsu/test_nsu_packetize.cpp` `PushBLooksUpMetaAndEmitsFlit`, `RPayloadBitPerfect`, `nsu/test_nsu.cpp` `WriteRoundTripDecodesReqFlitsAndProducesBRspFlit`, co-sim scoreboard. Fail: any field differs.
 9. MetaBuffer commit discipline: the bucket front is matched, a write entry is retired when the B flit is accepted by the arbiter (not before, not on a refused push), a read entry is retired only on the accepted `rlast` beat, every earlier burst beat peeks the same entry. Verify: `nsu/test_nsu_packetize.cpp` `PushRMultiBeatPeekUntilRLast`, `PushBNoCommitOnNocFull`, `nsu/test_meta_buffer.cpp` `MultiOutstandingSameIdFifoOrder`. Fail: early or skipped commit, wrong entry consumed.
-10. Header `last` = 1 on every B flit and every R beat flit, burst framing only in payload `rlast`. Verify: `nsu/test_nsu_packetize.cpp` flit field checks, co-sim (a `last` = 0 response flit wedges downstream wormhole arbitration and hangs the run). Fail: any response flit with header `last` = 0.
-11. `rob_req` and `rob_idx` are echoed verbatim from the matching request into every response flit, including every beat of a multi-beat R burst. Verify: `nsu/test_nsu_packetize.cpp` `MultiBeatR_AllFlitsCarrySameRobIdx`. Fail: any beat carries a different value than its request.
+10. Header `flit_tail` = 1 on every B flit and every R beat flit, burst framing only in payload `rlast`. Verify: `nsu/test_nsu_packetize.cpp` flit field checks, co-sim (a `flit_tail` = 0 response flit wedges downstream wormhole arbitration and hangs the run). Fail: any response flit with header `flit_tail` = 0.
+11. `ordering_req` and `ordering_tag` are echoed verbatim from the matching request into every response flit, including every beat of a multi-beat R burst. Verify: `nsu/test_nsu_packetize.cpp` `MultiBeatR_AllFlitsCarrySameOrderingTag`. Fail: any beat carries a different value than its request.
 12. VC selection implements the 2.4 table exactly, including refuse-not-spill for fixed-hash flits and the `num_vc` = 1 degenerate path (everything on VC 0, no entry-time credit check). Verify: `nsu/test_nsu_vc_arbiter.cpp` `SameBidSameDstBypassFixedVcId`, `SameBidRobbedRoundRobinsWriteVnet`, `RBurstStaysOnOneVc`, `DistinctRidsSpreadAcrossVnet`, `FixedVcFullRefusesInsteadOfSpilling`, `Nsu_Degenerate_NumVc1_Passthrough`. Fail: flit observed on any VC other than the rule's choice.
 13. Response arbitration sends at most 1 flit per cycle, round-robin between B and R at the wormhole stage and round-robin over VCs at the drain, no starvation of a nonempty input. Verify: `router/test_wormhole_arbiter.cpp`, `nsu/test_nsu_vc_arbiter.cpp` `Nsu_ReadWriteSplit_B_R_GoSeparateVcs` (parameterized over VC counts). Fail: 2 flits in one cycle or a nonempty input never served while the other drains.
 14. Credit conformance per rules 11 and 12, including the seed-4 sender invariant. Verify: co-sim link monitors and the model abort on downstream credit lies (G8). Fail: counter divergence, pulse without a consumed/drained flit, or flit sent without credit.
@@ -300,7 +300,7 @@ Each item names its verification and failure condition. ctest paths are under `s
  │       ▲              │            │                              held_ar_  │
  │  noc_req_cred_o <────┘            │ allocate on pop_aw/pop_ar    (A3.2.1)  │
  │  (pulse/VC)                       ▼                                        │
- │                          MetaBuffer {src_id,id,rob_req,rob_idx}            │
+ │                          MetaBuffer {src_id,id,ordering_req,ordering_tag}  │
  │                          write pool 32 | read pool 32                      │
  │                                   ▲                                        │
  │  RSP path                         │ peek/commit (restore id, dst_id)       │
@@ -344,4 +344,4 @@ Annotations:
 - `awvalid` in cycle 2, exactly 2 cycles after the AW flit (rule 8). With `awready` high it is a 1-cycle presentation.
 - `wvalid` first rises in cycle 3, one cycle after the AW handshake in cycle 2, never earlier: the W budget went 0 to 2 at the AW handshake (rule 9). W0 in cycle 3, W1 with `wlast` in cycle 4, back to back.
 - `bready` rises in cycle 5, after the `wlast` handshake made `outstanding_w_` = 1, and without waiting for `bvalid` (rule 10). It falls in cycle 7 after the B handshake in cycle 6 returned `outstanding_w_` to 0.
-- The B wire handshake in cycle 6 (bvalid and bready both high) starts the response pipeline: `b_q_` end of 6, Packetize S1 end of 7, wormhole pending end of 8, VC pending and NoC output queue end of 9 (zero-cycle hop, 2.6), `noc_rsp_o.valid` in cycle 10. The flit carries `bid` = 8'h07, `dst_id` = 8'h12, header `last` = 1, VC 0. The VC 0 sender credit counter went 4 to 3 at end of cycle 9 and returns to 4 when `noc_rsp_cred_i[0]` later pulses.
+- The B wire handshake in cycle 6 (bvalid and bready both high) starts the response pipeline: `b_q_` end of 6, Packetize S1 end of 7, wormhole pending end of 8, VC pending and NoC output queue end of 9 (zero-cycle hop, 2.6), `noc_rsp_o.valid` in cycle 10. The flit carries `bid` = 8'h07, `dst_id` = 8'h12, header `flit_tail` = 1, VC 0. The VC 0 sender credit counter went 4 to 3 at end of cycle 9 and returns to 4 when `noc_rsp_cred_i[0]` later pulses.

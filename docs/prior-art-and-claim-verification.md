@@ -27,10 +27,10 @@ does not serve it.
 | Three physical networks `req`, `rsp`, `wide` | CONFIRMED | FlooNoC docs state physical channels were chosen over virtual ones |
 | 64 b narrow, 512 b wide | CONFIRMED as reference config | widths are generator parameters |
 | One wide flit per AXI beat | CONFIRMED | sizing rule is "fit all packets into a single flit" |
-| Wormhole, XY dimension-order | CONFIRMED | wormhole enabled per flit, `last` field gates it |
+| Wormhole, XY dimension-order | CONFIRMED | wormhole enabled per flit, `flit_tail` field gates it |
 | `WideAr` on `req`, `WideB` on `rsp`, only wide AW/W/R on `wide` | CONFIRMED against RTL | `FLOO_TYPEDEF_NW_CHAN_ALL` in `typedef.svh` |
 | Separate req and rsp for message-level forward progress | CONFIRMED | paper gives deadlock, latency isolation, width matching |
-| Same-ID ordering by reorder buffer in the network interface | CONFIRMED | per-chimney B and R RoBs, `rob_idx` in header |
+| Same-ID ordering by reorder buffer in the network interface | CONFIRMED | per-chimney B and R RoBs, `ordering_tag` in header |
 | Credit-based flow control | **Not FlooNoC** | FlooNoC baseline links are valid-ready. Credits existed only in the deprecated VC router. This is an own design decision |
 | GALS, endpoint clocks independent of NoC clock | **Not FlooNoC** | the paper claims one synchronous domain. The repo has an optional link-level CDC module only. Own requirement, own cost |
 

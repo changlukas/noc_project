@@ -52,14 +52,14 @@ with a bypass path handles cross-destination reordering at the endpoint.
 | piece | mechanism |
 |---|---|
 | routing | XY dimension-order, one fixed path per source-destination pair |
-| fixed VC id, request | `nmu::VcArbiter` reuses the ID's recorded VC when a `rob_req = 0` flit repeats its `(dst_id, id)`. A blocked fixed VC waits instead of rerouting |
+| fixed VC id, request | `nmu::VcArbiter` reuses the ID's recorded VC when a `ordering_req = 0` flit repeats its `(dst_id, id)`. A blocked fixed VC waits instead of rerouting |
 | fixed VC id, response | `nsu::VcArbiter` maps to `vnet[(dst_id ^ id) % size]`, stateless. Full or no-credit refuses, never spills |
 | endpoint reorder | `nmu::Rob` re-sorts only same-ID responses interleaved across destinations. Ordering toward the master lives in the NMU because only the NMU knows its own issue order |
-| identity echo | `nsu::MetaBuffer` holds `{src_id, upstream_id, rob_req, rob_idx}` per response; `nsu::Packetize` stamps them onto B/R. Neither reorders, and the fabric never reads either field |
+| identity echo | `nsu::MetaBuffer` holds `{src_id, upstream_id, ordering_req, ordering_tag}` per response; `nsu::Packetize` stamps them onto B/R. Neither reorders, and the fabric never reads either field |
 
 The bypass path does the area work. An in-order response is by construction the
 next to release, so it drains without taking a slot: idle-ID and
-same-destination-streak requests leave with `rob_req = 0` and skip slot
+same-destination-streak requests leave with `ordering_req = 0` and skip slot
 allocation end to end. This buys two things. The RoB shrinks beyond what
 fabric-side same-destination ordering alone allows, because it holds only the
 responses that can arrive out of order rather than one entry per outstanding
@@ -82,7 +82,7 @@ only, so the B RoB stays on.
 - The ordering guarantee must hold on the response network, the direction the
   master observes. Determinism on the request network alone proves nothing
   about R/B arrival order.
-- `rob_req = 1` traffic enters the network only with a reserved slot. Admission
+- `ordering_req = 1` traffic enters the network only with a reserved slot. Admission
   gates on RoB space up front, because a response stalled in-fabric with
   nowhere to land would block every flit behind it. Slot reservation before
   injection is the fabric's deadlock gate.
