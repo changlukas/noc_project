@@ -1,6 +1,11 @@
 # c_model spec-alignment campaign
 
 Authority: `docs/noc-target-spec.md`. Where code disagrees, code changes.
+Architecture reference (user-drawn block diagrams, check every stage's structure against them):
+
+![NMU block diagram](docs/image/nmu.jpg)
+
+![NSU block diagram](docs/image/nsu.jpg)
 Inputs: gap analysis (26 deltas, 2026-08-04), gvsoc soft_hier floonoc inventory, FlooNoC v0.8.4
 RTL study, Codex plan review, backlog trade-off round (2026-08-04).
 
