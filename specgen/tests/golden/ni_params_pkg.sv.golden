@@ -22,6 +22,7 @@ package ni_params_pkg;
   localparam int unsigned NMU_ROB_B_DEPTH_DFLT        = 32;
   localparam int unsigned NMU_ROB_R_DEPTH_DFLT        = 32;
   localparam int unsigned NMU_MAX_TXNS_PER_ID_DFLT    = 32;
+  localparam int unsigned NMU_OUTSTANDING_DEPTH_DFLT  = 32;
   localparam int unsigned NMU_QUEUE_DEPTH_DFLT        = 16;
   localparam int unsigned NMU_DEPKT_Q_DEPTH_DFLT      = 16;
   localparam int unsigned NMU_ARBITER_FIFO_DEPTH_DFLT = 4;

@@ -52,7 +52,8 @@ class NmuWrap {
               nmu::RobMode rob_mode = nmu::RobMode::Disabled, const char* config_path = nullptr,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
-              std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID) {
+              std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID,
+              std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH) {
         using namespace ni::cmodel::nmu;
         num_vc_ = num_vc;
         NmuConfig cfg{};
@@ -74,6 +75,7 @@ class NmuWrap {
         cfg.b_rob_depth = b_rob_depth;
         cfg.r_rob_depth = r_rob_depth;
         cfg.max_txns_per_id = max_txns_per_id;
+        cfg.outstanding_depth = outstanding_depth;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;

@@ -515,18 +515,16 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('                                                                  input int mesh_x_dim, input int mesh_y_dim,')
     w('                                                                  input int num_vc);')
     w('    import "DPI-C" context function int unsigned cmodel_nmu_read_slot_hwm(input longint unsigned ctx);')
-    if rob_enabled:
-        w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
-        w('                                                                 input int src_id, input int num_vc,')
-        w('                                                                 input int rob_enabled,')
-        w('                                                                 input int b_rob_depth,')
-        w('                                                                 input int r_rob_depth,')
-        w('                                                                 input int max_txns_per_id,')
-        w('                                                                 input string config_path);')
-    else:
-        w('    import "DPI-C" context function longint unsigned cmodel_nmu_create(input string name,')
-        w('                                                              input int src_id, input int num_vc,')
-        w('                                                              input string config_path);')
+    # create_ex in both RoB modes: the outstanding pool applies to either, so its
+    # depth has to be settable either way, and create_ex is the call that carries it.
+    w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
+    w('                                                                 input int src_id, input int num_vc,')
+    w('                                                                 input int rob_enabled,')
+    w('                                                                 input int b_rob_depth,')
+    w('                                                                 input int r_rob_depth,')
+    w('                                                                 input int max_txns_per_id,')
+    w('                                                                 input int outstanding_depth,')
+    w('                                                                 input string config_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
     w('                                                              input int src_id, input int num_vc,')
     w('                                                              input int max_unique_ids,')
@@ -549,13 +547,15 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;")
     w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;")
     w("")
-    if rob_enabled:
-        w("    // NMU RoB pool depths, per direction. Both <= 256 (ordering_tag is 8 bits).")
-        w("    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT;")
-        w("    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;")
-        w("    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).")
-        w("    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;")
-        w("")
+    w("    // NMU RoB pool depths, per direction. Both <= 256 (ordering_tag is 8 bits).")
+    w("    int unsigned b_rob_depth = ni_params_pkg::NMU_ROB_B_DEPTH_DFLT;")
+    w("    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;")
+    w("    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).")
+    w("    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;")
+    w("    // Shared outstanding pool per direction, all AXI ids (FlooNoC MaxTxns).")
+    w("    // The master-side injection budget; applies in both RoB modes.")
+    w("    int unsigned outstanding_depth = ni_params_pkg::NMU_OUTSTANDING_DEPTH_DFLT;")
+    w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
     w("    initial begin")
@@ -564,6 +564,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('        void\'($value$plusargs("max_unique_ids=%d", max_unique_ids));')
     w('        void\'($value$plusargs("max_outstanding=%d", max_outstanding));')
     w('        $display("[Config] max_unique_ids=%0d max_outstanding=%0d", max_unique_ids, max_outstanding);')
+    w('        void\'($value$plusargs("outstanding_depth=%d", outstanding_depth));')
+    w('        $display("[Config] outstanding_depth=%0d", outstanding_depth);')
     if rob_enabled:
         w('        void\'($value$plusargs("b_rob_depth=%d", b_rob_depth));')
         w('        void\'($value$plusargs("r_rob_depth=%d", r_rob_depth));')
@@ -572,13 +574,10 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
           f'{x_dim}, {y_dim}, NUM_VC);')
     for (i, x, y, c) in nodes:
-        if rob_enabled:
-            w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, 1, '
-              f'b_rob_depth, r_rob_depth, max_txns_per_id, sam_config_path);  '
-              f'// src_id = node{i} coord {c}, ROB Enabled')
-        else:
-            w(f'        nmu_ctx[{i}] = cmodel_nmu_create("nmu_{i}", {c}, NUM_VC, sam_config_path);  '
-              f'// src_id = node{i} coord {c}')
+        w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, NUM_VC, '
+          f'{1 if rob_enabled else 0}, b_rob_depth, r_rob_depth, max_txns_per_id, '
+          f'outstanding_depth, sam_config_path);  '
+          f'// src_id = node{i} coord {c}, ROB {"Enabled" if rob_enabled else "Disabled"}')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, NUM_VC, max_unique_ids, max_outstanding);')
     w("    end")
     w("")

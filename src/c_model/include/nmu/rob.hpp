@@ -32,6 +32,11 @@ enum class RobMode { Disabled, Enabled };
 // Enabled mode: per-beat slot pool + ordering_tag allocator (implemented; the
 //   asserts in the pop paths are integrity guards, not stubs).
 //
+// Both modes: two shared outstanding-transaction pools of outstanding_depth_ each,
+// one for AW and one for AR, shared across all AXI ids. Pushed on an accepted
+// request, released at AXI-side response acceptance (retire_b / retire_r). This is
+// the only aggregate limiter on bypassed traffic, which allocates no RoB slot.
+//
 // Single-threaded tick model: state mutations from RequestPacketizer-side (push_aw/ar)
 // and ResponseDepacketizer-side (pop_b/r) happen in the same thread, no synchronization.
 // Tick order: standalone AxiSlavePort::tick() drains B/R before forwarding AW/W/AR.
@@ -50,14 +55,16 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_r,
         addr_trans::SamTable sam, std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
         std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
-        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID)
+        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID,
+        std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
           mode_r_(mode_r),
           sam_(std::move(sam)),
           b_rob_depth_(b_rob_depth),
           r_rob_depth_(r_rob_depth),
-          max_txns_per_id_(max_txns_per_id) {
+          max_txns_per_id_(max_txns_per_id),
+          outstanding_depth_(outstanding_depth) {
         assert(b_rob_depth_ >= 1 && b_rob_depth_ <= ORDERING_TAG_SPACE &&
                "nmu::Rob: b_rob_depth outside [1, ORDERING_TAG_SPACE]");
         assert(r_rob_depth_ >= 1 && r_rob_depth_ <= ORDERING_TAG_SPACE &&
@@ -66,6 +73,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         if (r_rob_depth_ < 1 || r_rob_depth_ > ORDERING_TAG_SPACE) std::abort();
         assert(max_txns_per_id_ >= 1 && "nmu::Rob: max_txns_per_id must be positive");
         if (max_txns_per_id_ < 1) std::abort();
+        assert(outstanding_depth_ >= 1 && "nmu::Rob: outstanding_depth must be positive");
+        if (outstanding_depth_ < 1) std::abort();
     }
 
     // ===== RequestPacketizer interface =====
@@ -94,6 +103,19 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     void commit_b_exit(uint8_t ordering_tag, uint8_t axi_id);
     void commit_r_exit(uint8_t ordering_tag, uint8_t axi_id);
 
+    // Transaction retirement, at the AXI-side response acceptance point and nowhere
+    // else (floo_meta_buffer.sv:205-206,210 pops on the AXI response handshake). One
+    // event releases the shared outstanding-pool entry, the RoB slot when the response
+    // owns one, and -- Disabled mode only -- the per-id single-outstanding flag.
+    // Callers: Nmu::push_rsp_{b,r}_to_axi_ integrated; Rob::pop_{b,r} standalone, where
+    // AxiSlavePort pops only into a slot it already has room for.
+    // R retires on its last beat: a burst is one transaction, n RoB slots.
+    void retire_b(bool ordering_req, uint8_t ordering_tag, uint8_t axi_id);
+    void retire_r(bool ordering_req, uint8_t ordering_tag, uint8_t axi_id, bool last);
+
+    // Non-retiring RoBless R pop for a pipeline that retires downstream (Nmu).
+    std::optional<axi::RBeat> pop_r_robless();
+
     // === Enabled mode public constants (for testing + caller info) ===
     // Addressable range of the ordering_tag header field, NOT the pool depth.
     // Pool depths are b_rob_depth_ / r_rob_depth_ and may be smaller.
@@ -104,6 +126,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t b_rob_depth() const noexcept { return b_rob_depth_; }
     std::size_t r_rob_depth() const noexcept { return r_rob_depth_; }
     std::size_t max_txns_per_id() const noexcept { return max_txns_per_id_; }
+    std::size_t outstanding_depth() const noexcept { return outstanding_depth_; }
+
+    // Shared outstanding-pool occupancy, per direction. Test introspection.
+    std::size_t write_txns() const noexcept { return write_txns_; }
+    std::size_t read_txns() const noexcept { return read_txns_; }
 
     // lzc over the allocation bitmap (floo_rob.sv:155-164). Free space is what lies
     // above the high-water mark; the next base is the index just past it.
@@ -143,8 +170,17 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t r_rob_depth_;
     std::size_t max_txns_per_id_;
 
+    // Shared outstanding-transaction pools, one per direction, shared across all AXI
+    // ids -- FlooNoC's MaxTxns (floo_meta_buffer.sv:148,173, the id_queue branch:
+    // shared CAPACITY, per-id order). Only the capacity is ported, not the storage:
+    // responses are self-describing (b.id / r.id return in the flit), so a counter
+    // plus the per-id order lists below carries what id_queue carries.
+    std::size_t outstanding_depth_;
+    std::size_t write_txns_ = 0;
+    std::size_t read_txns_ = 0;
+
     // Per-AXI-ID single-outstanding flag for the R Disabled path. True while one AR
-    // is in flight for that id; cleared by R(last) in pop_r.
+    // is in flight for that id; cleared by R(last) in retire_r, with the pool entry.
     std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
 
     // AW-before-W interlock: AW-accepted bursts whose W beats are still owed.
@@ -241,6 +277,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 inline bool Rob::push_aw(const axi::AwBeat& b) {
     // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
     if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
+    // Shared AW pool, all ids (floo_meta_buffer.sv:157 inp_gnt_o). Bypassed pushes
+    // allocate no RoB slot, so this is their only aggregate limiter.
+    if (write_txns_ >= outstanding_depth_) return false;
     auto t = sam_.translate(b.addr);
     const uint8_t dst = t.dst_id;
     const bool empty = write_order_by_id_[b.id].empty();
@@ -278,6 +317,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
     }
     write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob});
+    ++write_txns_;
     ++w_bursts_owed_;
     return true;
 }
@@ -290,6 +330,8 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 }
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
+    // Shared AR pool, all ids, both modes. A burst is one entry regardless of length.
+    if (read_txns_ >= outstanding_depth_) return false;
     if (mode_r_ == RobMode::Enabled) {
         if (read_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
         const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
@@ -337,6 +379,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         }
         read_order_by_id_[b.id].push_back(
             {static_cast<uint8_t>(base), static_cast<uint16_t>(n), needs_rob});
+        ++read_txns_;
         return true;
     }
     auto t = sam_.translate(b.addr);
@@ -345,13 +388,17 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         return false;
     }
     read_outstanding_[b.id] = true;
+    ++read_txns_;
     return true;
 }
 
+// Standalone pop: AxiSlavePort calls this only when its output queue has room
+// (axi_slave_port.hpp:127-136), so the pop IS the AXI-side acceptance and retires here.
+// The integrated Nmu never calls it -- it retires at push_rsp_b_to_axi_ instead.
 inline std::optional<axi::BBeat> Rob::pop_b() {
     auto out = pop_b_staged();
     if (!out) return std::nullopt;
-    if (out->ordering_req) commit_b_exit(out->ordering_tag, out->axi_id);
+    retire_b(out->ordering_req, out->ordering_tag, out->axi_id);
     return out->beat;
 }
 
@@ -359,16 +406,42 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
     if (mode_r_ == RobMode::Enabled) {
         auto out = pop_r_staged();
         if (!out) return std::nullopt;
-        if (out->ordering_req) commit_r_exit(out->ordering_tag, out->axi_id);
+        retire_r(out->ordering_req, out->ordering_tag, out->axi_id, out->beat.last);
         return out->beat;
     }
-    auto opt = next_depkt_.pop_r();
+    auto opt = pop_r_robless();
     if (!opt) return std::nullopt;
-    if (opt->last) {
-        assert(read_outstanding_[opt->id] && "R(last) for id with no outstanding read");
-        read_outstanding_[opt->id] = false;
-    }
+    retire_r(/*ordering_req=*/false, 0, opt->id, opt->last);
     return opt;
+}
+
+inline std::optional<axi::RBeat> Rob::pop_r_robless() {
+    assert(mode_r_ != RobMode::Enabled &&
+           "nmu::Rob::pop_r_robless: Enabled mode uses pop_r_staged");
+    return next_depkt_.pop_r();
+}
+
+inline void Rob::retire_b(bool ordering_req, uint8_t ordering_tag, uint8_t axi_id) {
+    if (ordering_req) commit_b_exit(ordering_tag, axi_id);
+    // Unconditional, so the bypassed path gets the unmatched-response check the robbed
+    // path already has (floo_meta_buffer.sv:199-200; rob.hpp only checks the head is
+    // bypassed, which a duplicate B would satisfy).
+    assert(write_txns_ > 0 && "nmu::Rob: B response with no outstanding write transaction");
+    if (write_txns_ == 0) std::abort();
+    --write_txns_;
+}
+
+inline void Rob::retire_r(bool ordering_req, uint8_t ordering_tag, uint8_t axi_id, bool last) {
+    // Per beat: a robbed burst holds one slot per beat.
+    if (ordering_req) commit_r_exit(ordering_tag, axi_id);
+    if (!last) return;  // per transaction: the burst retires on its last beat
+    if (mode_r_ != RobMode::Enabled) {
+        assert(read_outstanding_[axi_id] && "R(last) for id with no outstanding read");
+        read_outstanding_[axi_id] = false;
+    }
+    assert(read_txns_ > 0 && "nmu::Rob: R response with no outstanding read transaction");
+    if (read_txns_ == 0) std::abort();
+    --read_txns_;
 }
 
 inline void Rob::drain_ready_write_heads_(uint8_t id) {

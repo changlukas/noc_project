@@ -128,6 +128,15 @@ nmu:
     max: 256
     sv_symbol: NMU_MAX_TXNS_PER_ID_DFLT
     cpp_symbol: NMU_MAX_TXNS_PER_ID
+  OUTSTANDING_DEPTH:
+    type: int
+    units: transactions
+    description: "NMU shared outstanding-transaction pool depth, per direction (AW and AR independent, shared across all AXI IDs)."
+    default: 32
+    min: 1
+    max: 256
+    sv_symbol: NMU_OUTSTANDING_DEPTH_DFLT
+    cpp_symbol: NMU_OUTSTANDING_DEPTH
   QUEUE_DEPTH:
     type: int
     units: beats

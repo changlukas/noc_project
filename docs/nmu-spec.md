@@ -133,6 +133,8 @@ Slot pools, per direction: B pool depth `NMU_ROB_B_DEPTH` = 32, R pool depth `NM
 
 Per-ID transaction gate, both modes' write side and Enabled reads: at most `NMU_MAX_TXNS_PER_ID` = 32 outstanding transactions per ID per direction (order-list depth). The 33rd same-ID AW is refused until one completes, even with free slots.
 
+Shared outstanding gate, both modes, both directions: at most `NMU_OUTSTANDING_DEPTH` = 32 transactions in flight per direction, shared across all IDs. AW and AR draw from independent pools. A burst is one entry regardless of ARLEN. An entry is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. Full refuses the next request, which backpressures through the AxiSlavePort queue to awready / arready. This is the only aggregate gate on bypassed traffic, which reserves no slot: three limiters coexist and which one binds depends on the configuration. With `NMU_OUTSTANDING_DEPTH` at or below `NMU_MAX_TXNS_PER_ID` the per-ID gate never binds first; above it, a single-ID stream hits the per-ID gate while the shared pool still has room.
+
 ### 2.6 Worked example: 2-beat write burst
 
 NMU at node (x=0, y=0), src_id = 8'h00, default SAM, NUM_VC = 1. The master issues AW {awid = 8'h05, awaddr = 0x12_0000_0080, awlen = 8'h01, awsize = 3'h5, awburst = 2'b01} then W0 {wdata = 256'h...11, wstrb = 32'hFFFF_FFFF, wlast = 0} and W1 {wdata = 256'h...22, wstrb = 32'hFFFF_FFFF, wlast = 1}.
@@ -166,11 +168,12 @@ Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and 
 | NMU_ROB_B_DEPTH | 32 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 32 | 1..256 | R slot pool |
 | NMU_MAX_TXNS_PER_ID | 32 | 1..256 | Per-ID order-list depth |
+| NMU_OUTSTANDING_DEPTH | 32 | 1..256 | Shared outstanding pool, per direction |
 | NMU_QUEUE_DEPTH | 16 | 1..1024 | AxiSlavePort AW/W/AR/B/R FIFOs |
 | NMU_DEPKT_Q_DEPTH | 16 | 1..1024 | Depacketize B/R queues |
 | NMU_ARBITER_FIFO_DEPTH | 4 | 1..64 | Wormhole per-input and VC pending queues |
 
-Runtime configuration per instance: src_id, SAM config path, RobMode, and RoB depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`.
+Runtime configuration per instance: src_id, SAM config path, RobMode, RoB depth and outstanding-depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`, `+outstanding_depth=`.
 
 ## 3. Inputs and Outputs
 
@@ -227,7 +230,7 @@ The SV wrap holds no behavior. Each posedge it runs the 3-call discipline: `cmod
 | Function | Signature (summary) | Semantics |
 |---|---|---|
 | cmodel_nmu_create | `unsigned long long (const char* name, int src_id, int num_vc, const char* config_path)` | Constructs the instance, RobMode::Disabled (R side), default depths. NULL/empty config_path selects the default 16x16 / 4 GiB SAM. Returns the 64-bit handle for ctx_i. |
-| cmodel_nmu_create_ex | `(..., int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, const char* config_path)` | As create, plus R-RoB enable and depth overrides. |
+| cmodel_nmu_create_ex | `(..., int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, int outstanding_depth, const char* config_path)` | As create, plus R-RoB enable and depth overrides. The generated testbench calls this in both RoB modes, since the outstanding pool applies to either. |
 | cmodel_nmu_set_inputs | `(ctx, 26 AXI args, svBit noc_rsp_valid, svBitVecVal* noc_rsp_flit, svBitVecVal* noc_req_credit_return)` | Latches inputs only. Packing: 8-bit fields in word[0] low byte, addresses 2 words little-endian, data 8 words little-endian, wstrb 1 word, flit 13 words little-endian, credit vector 1 word bit-per-VC. |
 | cmodel_nmu_tick | `(ctx)` | One full model cycle. One call = one clock edge. |
 | cmodel_nmu_get_outputs | `(ctx, 14 output args)` | Copies the output latch. bresp / rresp masked with 2'b11. |

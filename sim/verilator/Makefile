@@ -234,6 +234,7 @@ run-directed: $(TBTOP_EXE)
 	    $(if $(B_ROB_DEPTH),"+b_rob_depth=$(B_ROB_DEPTH)") \
 	    $(if $(R_ROB_DEPTH),"+r_rob_depth=$(R_ROB_DEPTH)") \
 	    $(if $(MAX_TXNS_PER_ID),"+max_txns_per_id=$(MAX_TXNS_PER_ID)") \
+	    $(if $(OUTSTANDING_DEPTH),"+outstanding_depth=$(OUTSTANDING_DEPTH)") \
 	    "+verilator+seed+$(SEED)" \
 	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(SIM_TAG)/perf.json" \

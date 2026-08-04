@@ -90,11 +90,14 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
 // credit pulse on VC vc.
 // config_path: topology YAML with an `address_map` block (NULL/empty ->
 // legacy 16x16 uniform, no-rebase SAM).
+// outstanding_depth: shared outstanding pool size per direction (FlooNoC MaxTxns).
+// AW and AR pools are independent, each shared across all AXI ids, and the limit
+// applies in both ROB modes -- it is the master-side injection budget.
 unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc,
                                      const char* config_path);
 unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int num_vc, int rob_enabled,
                                         int b_rob_depth, int r_rob_depth, int max_txns_per_id,
-                                        const char* config_path);
+                                        int outstanding_depth, const char* config_path);
 void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
                            svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
                            svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,

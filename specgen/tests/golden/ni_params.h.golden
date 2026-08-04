@@ -21,6 +21,7 @@ constexpr int NOC_MESH_Y_DIM               = 4;
 constexpr int NMU_ROB_B_DEPTH        = 32;
 constexpr int NMU_ROB_R_DEPTH        = 32;
 constexpr int NMU_MAX_TXNS_PER_ID    = 32;
+constexpr int NMU_OUTSTANDING_DEPTH  = 32;
 constexpr int NMU_QUEUE_DEPTH        = 16;
 constexpr int NMU_DEPKT_Q_DEPTH      = 16;
 constexpr int NMU_ARBITER_FIFO_DEPTH = 4;

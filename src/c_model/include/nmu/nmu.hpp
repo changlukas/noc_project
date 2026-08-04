@@ -135,6 +135,9 @@ struct NmuConfig {
     std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). Enabled mode only.
     std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID;
+    // Shared outstanding-transaction pool depth, per direction (FlooNoC MaxTxns).
+    // AW and AR pools are independent; each is shared across all AXI ids. Both modes.
+    std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
     uint8_t write_vc = 0;
@@ -288,7 +291,7 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
                  cfg_.src_id, cfg_.sam),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.read_rob_mode, cfg_.sam, cfg_.b_rob_depth,
-           cfg_.r_rob_depth, cfg_.max_txns_per_id),
+           cfg_.r_rob_depth, cfg_.max_txns_per_id, cfg_.outstanding_depth),
       axi_slave_port_(rob_, rob_, cfg_.port_params),
       s2_rsp_b_(),
       s2_rsp_r_(),
@@ -317,15 +320,20 @@ inline void Nmu::tick() {
     depacketize_.tick();
 }
 
+// The AXI-side acceptance point, and so the single retire point for the RoB slot and
+// the outstanding-pool entry alike (floo_meta_buffer.sv:205-206,210). Retiring any
+// earlier -- e.g. at rob_.pop_*_staged, upstream of s2_rsp_*_, the extra shift stages
+// and the slave-port output queue -- would admit new requests while completed
+// responses are still inside the NI, by as many transactions as those stages hold.
 inline bool Nmu::push_rsp_b_to_axi_(const NmuRspBEntry& entry) {
     if (!axi_slave_port_.push_b_staged(entry.beat)) return false;
-    if (entry.ordering_req) rob_.commit_b_exit(entry.ordering_tag, entry.axi_id);
+    rob_.retire_b(entry.ordering_req, entry.ordering_tag, entry.axi_id);
     return true;
 }
 
 inline bool Nmu::push_rsp_r_to_axi_(const NmuRspREntry& entry) {
     if (!axi_slave_port_.push_r_staged(entry.beat)) return false;
-    if (entry.ordering_req) rob_.commit_r_exit(entry.ordering_tag, entry.axi_id);
+    rob_.retire_r(entry.ordering_req, entry.ordering_tag, entry.axi_id, entry.beat.last);
     return true;
 }
 
@@ -405,9 +413,15 @@ inline void Nmu::drain_rsp_robless_r_() {
         return;
     }
     if (!rsp_extra_r_shift_.empty() && rsp_extra_r_shift_.front().full()) return;
-    auto r = rob_.pop_r();
+    // Non-retiring pop: retirement happens downstream at push_rsp_r_to_axi_, same as
+    // the Enabled path. rob_.pop_r() would retire here and double-count.
+    auto r = rob_.pop_r_robless();
     if (!r) return;
-    (void)accept_rsp_r_entry_({*r, 0, r->id, false});
+    // The beat has left the depacketizer, so a refusal here would lose it and leak the
+    // pool entry. The guards above make that impossible; assert rather than discard.
+    const bool accepted = accept_rsp_r_entry_({*r, 0, r->id, false});
+    assert(accepted && "nmu::Nmu: RoBless R accept failed after its capacity guards passed");
+    (void)accepted;
 }
 
 }  // namespace ni::cmodel::nmu

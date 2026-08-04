@@ -39,10 +39,11 @@ axi::AwBeat make_aw(uint8_t id, uint64_t addr, uint8_t len = 0) {
     b.burst = axi::Burst::INCR;
     return b;
 }
-axi::ArBeat make_ar(uint8_t id, uint64_t addr) {
+axi::ArBeat make_ar(uint8_t id, uint64_t addr, uint8_t len = 0) {
     axi::ArBeat b{};
     b.id = id;
     b.addr = addr;
+    b.len = len;
     b.size = 5;
     b.burst = axi::Burst::INCR;
     return b;
@@ -486,7 +487,10 @@ TEST_P(RobDepthParam, Enabled_AllocationNeverExceedsDepth) {
     Depacketize depkt(noc.rsp_in(), 512, 512);
     // The idle-ID bypass exempts the first AW of an id, so drive one primed id. Raise the
     // per-id cap above depth so the pool, not the cap, is the binding constraint.
-    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), depth, depth, depth + 2);
+    // The outstanding pool must clear depth + 1, not depth: prime_write_id issues one AW
+    // that never retires, then the loop below issues depth more.
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), depth, depth, depth + 2,
+            /*outstanding_depth=*/depth + 2);
 
     EXPECT_EQ(rob.write_free_space(), depth);
     EXPECT_EQ(rob.read_free_space(), depth);
@@ -594,9 +598,11 @@ TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});  // aw uses noc; w/ar use captures
     Depacketize depkt(noc.rsp_in(), 16, 16);
     // One id, primed so the idle-ID bypass does not exempt the transactions under test.
-    // Distinct ids would each bypass and never fill the pool. The per-id cap must
-    // exceed the pool depth for the pool to be the binding constraint (spec D4).
-    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 64);
+    // Distinct ids would each bypass and never fill the pool. The per-id cap and the
+    // shared outstanding pool must both exceed the RoB depth for the RoB to be the
+    // binding constraint (spec D4); the primer's AW never retires, so the pool has to
+    // clear b_rob_depth + 1.
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam(), 32, 32, 64, /*outstanding_depth=*/64);
 
     prime_write_id(rob, noc, 0x40);
     for (std::size_t i = 0; i < rob.b_rob_depth(); ++i) {
@@ -1473,4 +1479,225 @@ TEST(RobSameDestBypass, MaxTxnsPerIdStillBoundsBypassedEntries) {
     }
     EXPECT_FALSE(rob.push_ar(make_ar(id, addr)))
         << "the order-list gate still bounds an all-bypassed streak";
+}
+
+// === Shared outstanding pools (AW / AR, all AXI ids) ===
+//
+// FlooNoC MaxTxns (floo_meta_buffer.sv:148,173): one shared capacity per
+// direction, full -> backpressure at the AXI slave port. Depth is a free
+// parameter, so every case below sweeps it; the RoB depths and the per-id cap
+// are raised above the pool so the pool is what binds.
+namespace {
+
+struct PoolTestbench {
+    ChannelModel noc{1024, 1024};
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt{noc.req_out(), w_cap, ar_cap, kSrcId, {}};
+    Depacketize depkt{noc.rsp_in(), 1024, 1024};
+};
+
+// Bypassed R beat for id, ordering_req = 0 (the idle-ID / same-dest arm).
+ni::cmodel::Flit make_bypassed_r_flit(uint8_t rid, bool rlast) {
+    ni::cmodel::Flit f = make_r_flit(rid, rlast);
+    f.set_header_field("ordering_req", 0);
+    f.set_header_field("ordering_tag", 0);
+    std::array<uint8_t, 32> d{};
+    f.set_payload_bytes("R", "rdata", d.data(), 256);
+    return f;
+}
+
+}  // namespace
+
+// Depth is a free parameter; every pool case runs across its legal range.
+class OutstandingPoolParam : public ::testing::TestWithParam<std::size_t> {};
+
+TEST_P(OutstandingPoolParam, AwPoolIsSharedAcrossIdsAndBackpressuresWhenFull) {
+    SCENARIO(
+        "Rob: the AW pool admits exactly outstanding_depth transactions across all ids, "
+        "refuses the next one without mutating state, and reopens when a B retires");
+    const std::size_t depth = GetParam();
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 256, 256, /*max_txns_per_id=*/256,
+            /*outstanding_depth=*/depth);
+
+    // One AW per distinct id: every push takes the idle-ID bypass, so no RoB slot is
+    // allocated and the pool is the only thing counting.
+    for (std::size_t i = 0; i < depth; ++i) {
+        ASSERT_TRUE(rob.push_aw(make_aw(static_cast<uint8_t>(i), kPrimerAddr))) << "AW " << i;
+    }
+    EXPECT_EQ(rob.write_txns(), depth);
+    EXPECT_FALSE(rob.push_aw(make_aw(0, kPrimerAddr))) << "the pool is full on every id";
+    EXPECT_EQ(rob.write_txns(), depth) << "a refused push must not mutate the pool";
+
+    retire_write_primer(rob, t.noc, t.depkt, /*id=*/0);
+    EXPECT_EQ(rob.write_txns(), depth - 1);
+    EXPECT_TRUE(rob.push_aw(make_aw(0, kPrimerAddr))) << "one retire reopens exactly one slot";
+}
+
+TEST_P(OutstandingPoolParam, AwAndArPoolsAreIndependent) {
+    SCENARIO("Rob: a full AW pool does not block AR, and a full AR pool does not block AW");
+    const std::size_t depth = GetParam();
+    {
+        PoolTestbench t;
+        Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 256, 256, 256, depth);
+        for (std::size_t i = 0; i < depth; ++i) {
+            ASSERT_TRUE(rob.push_aw(make_aw(static_cast<uint8_t>(i), kPrimerAddr)));
+        }
+        ASSERT_FALSE(rob.push_aw(make_aw(0, kPrimerAddr)));
+        EXPECT_TRUE(rob.push_ar(make_ar(0, kPrimerAddr))) << "AR draws from its own pool";
+    }
+    {
+        PoolTestbench t;
+        Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 256, 256, 256, depth);
+        // Disabled mode allows one AR per id, so distinct ids fill the shared pool.
+        for (std::size_t i = 0; i < depth; ++i) {
+            ASSERT_TRUE(rob.push_ar(make_ar(static_cast<uint8_t>(i), kPrimerAddr)));
+        }
+        ASSERT_FALSE(rob.push_ar(make_ar(0, kPrimerAddr)));
+        EXPECT_TRUE(rob.push_aw(make_aw(0, kPrimerAddr))) << "AW draws from its own pool";
+    }
+}
+
+TEST_P(OutstandingPoolParam, TwoIdsShareOnePool) {
+    SCENARIO(
+        "Rob: the pool is shared, not per id -- two ids together exhaust it and the next "
+        "push is refused on either id");
+    const std::size_t depth = GetParam();
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 256, 256, 256, depth);
+
+    const std::size_t n0 = depth / 2;
+    for (std::size_t i = 0; i < n0; ++i) ASSERT_TRUE(rob.push_aw(make_aw(0, kPrimerAddr)));
+    for (std::size_t i = n0; i < depth; ++i) ASSERT_TRUE(rob.push_aw(make_aw(1, kPrimerAddr)));
+    EXPECT_EQ(rob.write_txns(), depth);
+    EXPECT_FALSE(rob.push_aw(make_aw(0, kPrimerAddr)));
+    EXPECT_FALSE(rob.push_aw(make_aw(1, kPrimerAddr)));
+}
+
+TEST_P(OutstandingPoolParam, BypassStreakConsumesThePoolButNoRobSlots) {
+    SCENARIO(
+        "Rob Enabled: an idle-ID / same-destination streak allocates zero RoB slots, so the "
+        "pool is its only aggregate limiter");
+    const std::size_t depth = GetParam();
+    constexpr std::size_t kRobDepth = 32;
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Enabled, legacy_sam(), kRobDepth, kRobDepth,
+            /*max_txns_per_id=*/256, /*outstanding_depth=*/depth);
+
+    // Same id, same destination: the first push is the idle-ID bypass, the rest ride the
+    // same-destination bypass. None reserves an ordering_tag.
+    for (std::size_t i = 0; i < depth; ++i) {
+        ASSERT_TRUE(rob.push_aw(make_aw(7, kPrimerAddr))) << "bypassed AW " << i;
+    }
+    EXPECT_EQ(rob.write_free_space(), kRobDepth) << "a bypassed streak must not touch the RoB";
+    EXPECT_EQ(rob.write_txns(), depth);
+    EXPECT_FALSE(rob.push_aw(make_aw(7, kPrimerAddr)));
+}
+
+TEST_P(OutstandingPoolParam, MultiBeatReadTakesOnePoolEntryAndRetiresOnLast) {
+    SCENARIO(
+        "Rob Enabled: an 8-beat AR burst is one transaction in the pool; the entry is "
+        "released on rlast, not per beat");
+    const std::size_t depth = GetParam();
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Enabled, legacy_sam(), 32, 32, 256,
+            /*outstanding_depth=*/depth);
+
+    constexpr uint8_t kId = 9;
+    constexpr uint8_t kBeats = 8;
+    ASSERT_TRUE(rob.push_ar(make_ar(kId, kPrimerAddr, /*len=*/kBeats - 1)));
+    t.ar_cap.pop();
+    EXPECT_EQ(rob.read_txns(), 1u) << "a burst of any length is one outstanding transaction";
+
+    for (uint8_t beat = 0; beat < kBeats; ++beat) {
+        const bool last = (beat == kBeats - 1);
+        ASSERT_TRUE(t.noc.rsp_out().push_flit(make_bypassed_r_flit(kId, last)));
+        t.depkt.tick();
+        ASSERT_TRUE(rob.pop_r().has_value()) << "beat " << int(beat);
+        EXPECT_EQ(rob.read_txns(), last ? 0u : 1u) << "beat " << int(beat);
+    }
+}
+
+TEST_P(OutstandingPoolParam, RoblessMultiBeatReadTakesOnePoolEntry) {
+    SCENARIO(
+        "Rob Disabled: the RoBless read path also counts one pool entry per burst, "
+        "released on rlast");
+    const std::size_t depth = GetParam();
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 32, 32, 256,
+            /*outstanding_depth=*/depth);
+
+    constexpr uint8_t kId = 9;
+    constexpr uint8_t kBeats = 4;
+    ASSERT_TRUE(rob.push_ar(make_ar(kId, kPrimerAddr, /*len=*/kBeats - 1)));
+    EXPECT_EQ(rob.read_txns(), 1u);
+
+    for (uint8_t beat = 0; beat < kBeats; ++beat) {
+        const bool last = (beat == kBeats - 1);
+        ASSERT_TRUE(t.noc.rsp_out().push_flit(make_bypassed_r_flit(kId, last)));
+        t.depkt.tick();
+        ASSERT_TRUE(rob.pop_r().has_value()) << "beat " << int(beat);
+        EXPECT_EQ(rob.read_txns(), last ? 0u : 1u) << "beat " << int(beat);
+    }
+    // The per-id interlock released with the pool entry, so the id is usable again.
+    EXPECT_TRUE(rob.push_ar(make_ar(kId, kPrimerAddr)));
+}
+
+INSTANTIATE_TEST_SUITE_P(Depths, OutstandingPoolParam,
+                         ::testing::Values(1u, 2u, 4u, 8u, 16u, 32u, 64u, 128u, 256u));
+
+TEST(NmuRobOutstandingPool, BypassedThenRobbedOnOneIdCountOneEach) {
+    SCENARIO(
+        "Rob Enabled: an id that starts bypassed then falls back to the RoB counts one pool "
+        "entry per transaction on both arms, while only the robbed one takes a slot");
+    constexpr std::size_t kRobDepth = 32;
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Enabled, legacy_sam(), kRobDepth, kRobDepth, 256,
+            /*outstanding_depth=*/8);
+
+    constexpr uint8_t kId = 4;
+    ASSERT_TRUE(rob.push_aw(make_aw(kId, kPrimerAddr)));  // idle-ID bypass, no slot
+    t.noc.req_in().pop_flit();
+    ASSERT_TRUE(rob.push_aw(make_aw(kId, 0x100)));  // new destination -> falls back, takes a slot
+    t.noc.req_in().pop_flit();
+
+    EXPECT_EQ(rob.write_txns(), 2u) << "both arms consume a pool entry";
+    EXPECT_EQ(rob.write_free_space(), kRobDepth - 1) << "only the robbed push takes a slot";
+
+    // The bypassed transaction is the list head and retires on its own response.
+    retire_write_primer(rob, t.noc, t.depkt, kId);
+    EXPECT_EQ(rob.write_txns(), 1u);
+}
+
+TEST(NmuRobOutstandingPool, PerIdCapBindsBeforeALargerPool) {
+    SCENARIO(
+        "Rob: with outstanding_depth 64 above max_txns_per_id 32, the per-id order-list cap "
+        "binds first and the shared pool stays half empty");
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 256, 256, /*max_txns_per_id=*/32,
+            /*outstanding_depth=*/64);
+
+    for (int i = 0; i < 32; ++i) ASSERT_TRUE(rob.push_aw(make_aw(2, kPrimerAddr))) << "AW " << i;
+    EXPECT_FALSE(rob.push_aw(make_aw(2, kPrimerAddr))) << "the per-id cap refuses the 33rd";
+    EXPECT_EQ(rob.write_txns(), 32u) << "the pool is only half consumed";
+    EXPECT_TRUE(rob.push_aw(make_aw(3, kPrimerAddr))) << "another id still draws from the pool";
+}
+
+TEST(NmuRobOutstandingPool, WBeatsOfAdmittedBurstsFlowWhileTheAwPoolIsFull) {
+    SCENARIO(
+        "Rob: a pool-full AW refusal does not stall the W beats of already-admitted bursts, "
+        "and the refused burst's own W beat is rejected once the credit runs out");
+    PoolTestbench t;
+    Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 256, 256, 256,
+            /*outstanding_depth=*/2);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(0, kPrimerAddr)));
+    ASSERT_TRUE(rob.push_aw(make_aw(1, kPrimerAddr)));
+    ASSERT_FALSE(rob.push_aw(make_aw(2, kPrimerAddr))) << "pool full";
+
+    // w_bursts_owed_ counts admitted AWs only, so exactly two W bodies are owed.
+    EXPECT_TRUE(rob.push_w(make_w(/*last=*/true)));
+    EXPECT_TRUE(rob.push_w(make_w(/*last=*/true)));
+    EXPECT_FALSE(rob.push_w(make_w(/*last=*/true)))
+        << "the refused burst's W beat has no admitted AW to pair with";
 }
