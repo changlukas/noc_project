@@ -41,8 +41,12 @@ Goal: addr 64 to 48 b; header 56 to 44 b with axi_ch 4 b ten encodings; fixed_vc
 only); collective_op/mask fields (enabled in format, runtime-rejected until S4); Aw/Ar payload
 93 b; AwBeat user 8 to 58 b type + NMU strips [57:8]. Flit widths are interim here — final
 REQ 137 / RSP 127 / DAT 629 need the narrow/data classes and land in S2.
-Confirm with user before landing: mesh dim min 2 vs keep 1 as degenerate (constants min is 1
-today, 1x1 was deliberately legalized); outstanding-per-ID narrowing 1-256 to spec's 1-32.
+User rulings (2026-08-04): mesh dim min = 2 — a mesh communicating through NI + router needs
+at least 2x2, 1x1 de-legalized (supersedes the earlier degenerate-1x1 ruling; LOCAL->LOCAL
+self-traffic stays legal within >=2x2). Outstanding = one shared pool, total depth 32 across
+all IDs — not a per-ID limit; the limiter is a shared outstanding counter, depth a free
+parameter with spec default 32. How this composes with the existing per-ID ordering interlock
+(max_txns_per_id) is S1 design work, not pre-decided here.
 Success Criteria: specgen regenerated both languages, all call sites and tests updated, ctest +
 co-sim green at 256 b.
 Status: Not Started
