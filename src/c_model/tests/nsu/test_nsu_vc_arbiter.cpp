@@ -25,8 +25,8 @@ Flit make_rsp_flit(uint8_t axi_ch, uint8_t initial_vc = 0, uint8_t id = 0, uint6
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", ordering_req);
     if (axi_ch == ni::AXI_CH_NarrowR) {
-        f.set_payload_field("R", "rid", id);
-        f.set_payload_field("R", "rlast", rlast);
+        f.set_payload_field("NARROW_R", "rid", id);
+        f.set_payload_field("NARROW_R", "rlast", rlast);
     } else if (axi_ch == ni::AXI_CH_NarrowB) {
         f.set_payload_field("B", "bid", id);
     }

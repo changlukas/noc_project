@@ -193,9 +193,9 @@
         ]
       },
       {
-        "name": "W",
+        "name": "NARROW_W",
         "network": "REQ",
-        "payload_width": 352,
+        "payload_width": 297,
         "fields": [
           {
             "name": "wlast",
@@ -212,17 +212,36 @@
           {
             "name": "wdata",
             "width_param": "NOC_DATA_WIDTH"
+          }
+        ]
+      },
+      {
+        "name": "DATA_W",
+        "network": "REQ",
+        "payload_width": 297,
+        "fields": [
+          {
+            "name": "wlast",
+            "width_param": "AXI_LAST_WIDTH"
           },
           {
-            "name": "w_rsvd",
-            "width_param": "derived"
+            "name": "wuser",
+            "width_param": "AXI_USER_WIDTH"
+          },
+          {
+            "name": "wstrb",
+            "width_param": "WSTRB_WIDTH"
+          },
+          {
+            "name": "wdata",
+            "width_param": "NOC_DATA_WIDTH"
           }
         ]
       },
       {
         "name": "B",
         "network": "RSP",
-        "payload_width": 64,
+        "payload_width": 18,
         "fields": [
           {
             "name": "bid",
@@ -235,17 +254,13 @@
           {
             "name": "buser",
             "width_param": "AXI_USER_WIDTH"
-          },
-          {
-            "name": "b_rsvd",
-            "width_param": "derived"
           }
         ]
       },
       {
-        "name": "R",
+        "name": "NARROW_R",
         "network": "RSP",
-        "payload_width": 352,
+        "payload_width": 275,
         "fields": [
           {
             "name": "rlast",
@@ -266,10 +281,33 @@
           {
             "name": "rdata",
             "width_param": "NOC_DATA_WIDTH"
+          }
+        ]
+      },
+      {
+        "name": "DATA_R",
+        "network": "RSP",
+        "payload_width": 275,
+        "fields": [
+          {
+            "name": "rlast",
+            "width_param": "AXI_LAST_WIDTH"
           },
           {
-            "name": "r_rsvd",
-            "width_param": "derived"
+            "name": "rid",
+            "width_param": "AXI_ID_WIDTH"
+          },
+          {
+            "name": "rresp",
+            "width_param": "AXI_RESP_WIDTH"
+          },
+          {
+            "name": "ruser",
+            "width_param": "AXI_USER_WIDTH"
+          },
+          {
+            "name": "rdata",
+            "width_param": "NOC_DATA_WIDTH"
           }
         ]
       }

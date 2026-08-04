@@ -9,11 +9,18 @@
 
 namespace ni::cmodel::nsu {
 
+// Request class, read off the request flit's axi_ch at AW/AR allocate time and
+// carried in MetaEntry so the matching B/R response is stamped in the same
+// class (NarrowB/DataB, NarrowR/DataR). No SAM involvement on the NSU side --
+// the class arrives already resolved in the flit header.
+enum class AxiClass : uint8_t { Narrow, Data };
+
 struct MetaEntry {
     uint8_t src_id;       // requesting tile; becomes the response flit dst_id
     uint8_t upstream_id;  // master's original AXI id; restored into bid / rid
     uint8_t ordering_req;
     uint8_t ordering_tag;
+    AxiClass cls;  // request's class; the response echoes it
 };
 
 // Downstream AXI ID presented to the slave, from the master's upstream ID.

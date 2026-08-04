@@ -192,7 +192,7 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         }
         current_aw_vc_ = vc_id;
     } else if (axi_ch == ni::AXI_CH_NarrowW) {
-        if (flit.get_payload_field("W", "wlast") != 0) {
+        if (flit.get_payload_field("NARROW_W", "wlast") != 0) {
             current_aw_vc_.reset();
         }
     }

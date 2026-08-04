@@ -27,7 +27,7 @@ Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint6
     f.set_header_field("src_id", 0x12);
     f.set_header_field("flit_tail", 1);  // legacy; VcArbiter does not consult header.flit_tail
     if (axi_ch == ni::AXI_CH_NarrowW) {
-        f.set_payload_field("W", "wlast", wlast);
+        f.set_payload_field("NARROW_W", "wlast", wlast);
     } else if (axi_ch == ni::AXI_CH_NarrowAw) {
         f.set_payload_field("AW", "awid", id);
     } else if (axi_ch == ni::AXI_CH_NarrowAr) {
@@ -142,21 +142,21 @@ TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
     Flit w1;
     w1.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w1.set_header_field("flit_tail", 1);  // bait: legacy bug-shape header.flit_tail
-    w1.set_payload_field("W", "wlast", 0);
+    w1.set_payload_field("NARROW_W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w1));
     EXPECT_TRUE(arb.has_current_aw()) << "wlast=0 -> must not reset";
 
     Flit w2;
     w2.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w2.set_header_field("flit_tail", 1);
-    w2.set_payload_field("W", "wlast", 0);
+    w2.set_payload_field("NARROW_W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w2));
     EXPECT_TRUE(arb.has_current_aw());
 
     Flit w3;
     w3.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w3.set_header_field("flit_tail", 1);
-    w3.set_payload_field("W", "wlast", 1);  // genuine burst end
+    w3.set_payload_field("NARROW_W", "wlast", 1);  // genuine burst end
     ASSERT_TRUE(arb.push_flit(w3));
     EXPECT_FALSE(arb.has_current_aw());
 }
@@ -459,7 +459,7 @@ TEST(NmuVcArbiter, WHeaderFlitTailMatchesWlast) {
         ASSERT_TRUE(f.has_value());
         uint64_t expected = (i == 2) ? 1u : 0u;
         EXPECT_EQ(f->get_header_field("flit_tail"), expected);
-        EXPECT_EQ(f->get_payload_field("W", "wlast"), expected);
+        EXPECT_EQ(f->get_payload_field("NARROW_W", "wlast"), expected);
     }
 }
 
@@ -484,7 +484,7 @@ TEST(NmuVcArbDeath, WFollowsAW_WBeforeAW_DeathTest) {
         {
             Flit w;
             w.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
-            w.set_payload_field("W", "wlast", 1);
+            w.set_payload_field("NARROW_W", "wlast", 1);
             arb.push_flit(w);
         },
         ".*");

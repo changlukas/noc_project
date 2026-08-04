@@ -122,7 +122,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
                 EXPECT_EQ(f->get_payload_field("AW", "awaddr"), kAddr);
                 saw_aw_flit = true;
             } else if (ch == ni::AXI_CH_NarrowW) {
-                EXPECT_EQ(f->get_payload_field("W", "wlast"), 1u);
+                EXPECT_EQ(f->get_payload_field("NARROW_W", "wlast"), 1u);
                 saw_w_flit = true;
             } else {
                 ADD_FAILURE() << "unexpected req flit axi_ch=" << ch << " (expected AW or W)";
@@ -302,9 +302,9 @@ TEST(NmuOutstandingPool, RoblessReadRetiresAtTheAxiSideAndReopensThePool) {
     r.set_header_field("flit_tail", 1);
     r.set_header_field("ordering_req", 0);
     r.set_header_field("ordering_tag", 0);
-    r.set_payload_field("R", "rid", kAxiId);
-    r.set_payload_field("R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
-    r.set_payload_field("R", "rlast", 1u);
+    r.set_payload_field("NARROW_R", "rid", kAxiId);
+    r.set_payload_field("NARROW_R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
+    r.set_payload_field("NARROW_R", "rlast", 1u);
     nmu.inject_rsp_flit(r);
 
     std::optional<axi::RBeat> r_out;

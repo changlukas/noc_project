@@ -16,6 +16,7 @@
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
+using ni::cmodel::nsu::AxiClass;
 using ni::cmodel::nsu::MetaBuffer;
 using ni::cmodel::nsu::MetaEntry;
 using ni::cmodel::nsu::Packetize;
@@ -171,12 +172,42 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
     pkt.tick();
     auto f = r_cap.pop();
     ASSERT_TRUE(f.has_value());
-    EXPECT_EQ(f->get_payload_field("R", "rid"), 0x03u);
-    EXPECT_EQ(f->get_payload_field("R", "rresp"), static_cast<uint64_t>(axi::Resp::SLVERR));
-    EXPECT_EQ(f->get_payload_field("R", "rlast"), 1u);
+    EXPECT_EQ(f->get_payload_field("NARROW_R", "rid"), 0x03u);
+    EXPECT_EQ(f->get_payload_field("NARROW_R", "rresp"), static_cast<uint64_t>(axi::Resp::SLVERR));
+    EXPECT_EQ(f->get_payload_field("NARROW_R", "rlast"), 1u);
     std::array<uint8_t, 32> out{};
-    f->get_payload_bytes("R", "rdata", out.data(), 256);
+    f->get_payload_bytes("NARROW_R", "rdata", out.data(), 256);
     for (int i = 0; i < 32; ++i) EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
+}
+
+// MetaBuffer.cls threads the request's class into the response: B/R responses
+// stamp axi_ch/payload channel matching the class recorded at AW/AR allocate.
+TEST(NsuPacketize, DataClassMetaStampsDataAxiChAndChannel) {
+    SCENARIO(
+        "NSU Packetize: a MetaBuffer entry with cls=Data makes tick() stamp "
+        "AXI_CH_DataB / AXI_CH_DataR and build the R payload in the DATA_R "
+        "channel instead of NARROW_R");
+    RspCapture b_cap, r_cap;
+    MetaBuffer mb(4);
+    mb.allocate_write(0x05, {/*src=*/0x12, /*upstream_id=*/0x05, /*ordering_req=*/0,
+                             /*ordering_tag=*/0, /*cls=*/AxiClass::Data});
+    mb.allocate_read(0x03, {/*src=*/0x12, /*upstream_id=*/0x03, /*ordering_req=*/0,
+                            /*ordering_tag=*/0, /*cls=*/AxiClass::Data});
+    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+
+    ASSERT_TRUE(pkt.push_b(make_b(0x05)));
+    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true)));
+    pkt.tick();
+
+    auto fb = b_cap.pop();
+    ASSERT_TRUE(fb.has_value());
+    EXPECT_EQ(fb->get_header_field("axi_ch"), ni::AXI_CH_DataB);
+    EXPECT_EQ(fb->get_payload_field("B", "bid"), 0x05u);  // B payload channel is reused as-is
+
+    auto fr = r_cap.pop();
+    ASSERT_TRUE(fr.has_value());
+    EXPECT_EQ(fr->get_header_field("axi_ch"), ni::AXI_CH_DataR);
+    EXPECT_EQ(fr->get_payload_field("DATA_R", "rid"), 0x03u);
 }
 
 // NsuPacketize::PushAwAssertFalse was a runtime wrong_side_() test.

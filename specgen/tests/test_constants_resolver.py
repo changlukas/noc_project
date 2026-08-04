@@ -95,18 +95,6 @@ def test_payload_field_width_basic(packet_spec):
     assert C.payload_field_width(packet_spec, "AW", "awid") == 8
 
 
-def test_payload_field_width_derived(packet_spec):
-    # AW/AR are exactly-sized (93 b, no derived remainder) this stage; W still
-    # carries a derived padding field, so it exercises the "derived" mechanism.
-    w = C.payload_field_width(packet_spec, "W", "w_rsvd")
-    ch = next(c for c in packet_spec["flit"]["payload_channels"] if c["name"] == "W")
-    other_sum = sum(
-        C.payload_field_width(packet_spec, "W", f["name"])
-        for f in ch["fields"] if f["name"] != "w_rsvd"
-    )
-    assert w == C.payload_channel_width(packet_spec, "W") - other_sum
-
-
 def test_payload_field_position(packet_spec):
     assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 7)
 
@@ -117,20 +105,19 @@ def test_payload_field_position_aw(packet_spec):
     assert C.payload_field_position(packet_spec, "AW", "awaddr") == (8, 55)
 
 
-def test_payload_field_position_w_with_reorder(packet_spec):
-    # wstrb comes before wdata per ni_packet.json layout
-    assert C.payload_field_position(packet_spec, "W", "wlast") == (0, 0)
-    assert C.payload_field_position(packet_spec, "W", "wuser") == (1, 8)
-    assert C.payload_field_position(packet_spec, "W", "wstrb") == (9, 40)
-    assert C.payload_field_position(packet_spec, "W", "wdata") == (41, 296)
+def test_payload_field_position_narrow_w_with_reorder(packet_spec):
+    # wstrb comes before wdata per ni_packet.json layout; DATA_W mirrors NARROW_W
+    # at today's width (value-preserving, T2a).
+    assert C.payload_field_position(packet_spec, "NARROW_W", "wlast") == (0, 0)
+    assert C.payload_field_position(packet_spec, "NARROW_W", "wuser") == (1, 8)
+    assert C.payload_field_position(packet_spec, "NARROW_W", "wstrb") == (9, 40)
+    assert C.payload_field_position(packet_spec, "NARROW_W", "wdata") == (41, 296)
 
 
-def test_payload_field_position_b_after_rsvd_mc_status_removed(packet_spec):
+def test_payload_field_position_b(packet_spec):
     assert C.payload_field_position(packet_spec, "B", "bid")   == (0, 7)
     assert C.payload_field_position(packet_spec, "B", "bresp") == (8, 9)
     assert C.payload_field_position(packet_spec, "B", "buser") == (10, 17)
-    # b_rsvd absorbs the removed rsvd_mc_status (46-bit derived)
-    assert C.payload_field_position(packet_spec, "B", "b_rsvd") == (18, 63)
 
 
 # -- derived totals -------------------------------------------------

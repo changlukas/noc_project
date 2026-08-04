@@ -30,7 +30,7 @@ def test_header_fields_array_lists_all_ten_fields():
 
 def test_payload_field_arrays_per_channel():
     text = GENERATED.read_text()
-    for channel in ["AW", "AR", "W", "B", "R"]:
+    for channel in ["AW", "AR", "NARROW_W", "DATA_W", "B", "NARROW_R", "DATA_R"]:
         assert f"constexpr FieldDescriptor {channel}_PAYLOAD_FIELDS[]" in text, \
             f"missing {channel}_PAYLOAD_FIELDS[] array"
 

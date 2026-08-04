@@ -83,7 +83,7 @@
             "required": ["name", "network", "payload_width", "fields"],
             "additionalProperties": true,
             "properties": {
-              "name":          {"enum": ["AW", "W", "AR", "B", "R"]},
+              "name":          {"enum": ["AW", "AR", "NARROW_W", "DATA_W", "B", "NARROW_R", "DATA_R"]},
               "network":       {"enum": ["REQ", "RSP"]},
               "payload_width": {"type": "integer", "minimum": 1},
               "fields": {

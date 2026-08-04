@@ -256,7 +256,7 @@ def test_packet_cpp_emits_payload_field_positions():
     """ni_flit_constants.h must contain per-channel payload field LSB/MSB constants."""
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
     # Per-channel namespace presence
-    for ch_lower in ("aw", "ar", "w", "b", "r"):
+    for ch_lower in ("aw", "ar", "narrow_w", "data_w", "b", "narrow_r", "data_r"):
         assert f"namespace payload::{ch_lower}" in text, (
             f"missing namespace payload::{ch_lower} block"
         )
@@ -270,7 +270,7 @@ def test_packet_cpp_emits_payload_field_positions():
 def test_packet_cpp_has_payload_static_assert():
     """Each payload channel must have a static_assert that field positions sum to channel width."""
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
-    for ch in ("AW", "AR", "W", "B", "R"):
+    for ch in ("AW", "AR", "NARROW_W", "DATA_W", "B", "NARROW_R", "DATA_R"):
         assert f"ni::payload::{ch}_WIDTH" in text, f"missing static_assert for {ch}"
 
 

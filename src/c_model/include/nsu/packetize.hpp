@@ -82,7 +82,7 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
 // nsu::VcArbiter's same-destination-bypass fixed VC map keys on this restored rid.
 inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", m.cls == AxiClass::Data ? ni::AXI_CH_DataB : ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("vc_id", 0);
@@ -96,19 +96,21 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
 }
 
 inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id) {
+    const bool is_data = (m.cls == AxiClass::Data);
+    const char* ch = is_data ? "DATA_R" : "NARROW_R";
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+    f.set_header_field("axi_ch", is_data ? ni::AXI_CH_DataR : ni::AXI_CH_NarrowR);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", m.ordering_req);
     f.set_header_field("ordering_tag", m.ordering_tag);
-    f.set_payload_field("R", "rid", m.upstream_id);
-    f.set_payload_field("R", "rresp", static_cast<uint64_t>(b.resp));
-    f.set_payload_field("R", "ruser", b.user);
-    f.set_payload_field("R", "rlast", b.last ? 1u : 0u);
-    f.set_payload_bytes("R", "rdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
+    f.set_payload_field(ch, "rid", m.upstream_id);
+    f.set_payload_field(ch, "rresp", static_cast<uint64_t>(b.resp));
+    f.set_payload_field(ch, "ruser", b.user);
+    f.set_payload_field(ch, "rlast", b.last ? 1u : 0u);
+    f.set_payload_bytes(ch, "rdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
     return f;
 }
 

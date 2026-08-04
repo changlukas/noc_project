@@ -56,9 +56,9 @@ TEST(Flit, SetGetPayloadBytesWdata) {
     Flit f;
     std::array<uint8_t, 32> wdata{};
     for (int i = 0; i < 32; ++i) wdata[i] = static_cast<uint8_t>(0xA0 + i);
-    f.set_payload_bytes("W", "wdata", wdata.data(), 256);
+    f.set_payload_bytes("NARROW_W", "wdata", wdata.data(), 256);
     std::array<uint8_t, 32> out{};
-    f.get_payload_bytes("W", "wdata", out.data(), 256);
+    f.get_payload_bytes("NARROW_W", "wdata", out.data(), 256);
     EXPECT_EQ(out, wdata);
 }
 
@@ -104,10 +104,10 @@ TEST(Flit, SetGetPayloadBFields) {
 TEST(Flit, SetGetPayloadRFields) {
     SCENARIO("Flit: R payload fields (rid/rresp/rlast) set/get bit-perfect");
     Flit f;
-    f.set_payload_field("R", "rid", 0x37);
-    f.set_payload_field("R", "rresp", 0x3);  // DECERR
-    f.set_payload_field("R", "rlast", 0x1);
-    EXPECT_EQ(f.get_payload_field("R", "rid"), 0x37u);
-    EXPECT_EQ(f.get_payload_field("R", "rresp"), 0x3u);
-    EXPECT_EQ(f.get_payload_field("R", "rlast"), 0x1u);
+    f.set_payload_field("NARROW_R", "rid", 0x37);
+    f.set_payload_field("NARROW_R", "rresp", 0x3);  // DECERR
+    f.set_payload_field("NARROW_R", "rlast", 0x1);
+    EXPECT_EQ(f.get_payload_field("NARROW_R", "rid"), 0x37u);
+    EXPECT_EQ(f.get_payload_field("NARROW_R", "rresp"), 0x3u);
+    EXPECT_EQ(f.get_payload_field("NARROW_R", "rlast"), 0x1u);
 }

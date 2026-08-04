@@ -20,7 +20,7 @@ Flit make_flit(uint8_t axi_ch, uint64_t flit_tail, uint64_t wlast = 0) {
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", flit_tail);
     if (axi_ch == ni::AXI_CH_NarrowW) {
-        f.set_payload_field("W", "wlast", wlast);
+        f.set_payload_field("NARROW_W", "wlast", wlast);
     }
     return f;
 }

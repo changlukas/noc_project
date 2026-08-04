@@ -168,10 +168,10 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     f.set_header_field("flit_tail", b.last ? 1u : 0u);  // W's wlast ends wormhole packet (FlooNoC)
     f.set_header_field("ordering_req", meta.ordering_req);
     f.set_header_field("ordering_tag", meta.ordering_tag);
-    f.set_payload_field("W", "wlast", b.last ? 1u : 0u);
-    f.set_payload_field("W", "wuser", b.user);
-    f.set_payload_field("W", "wstrb", b.strb);
-    f.set_payload_bytes("W", "wdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
+    f.set_payload_field("NARROW_W", "wlast", b.last ? 1u : 0u);
+    f.set_payload_field("NARROW_W", "wuser", b.user);
+    f.set_payload_field("NARROW_W", "wstrb", b.strb);
+    f.set_payload_bytes("NARROW_W", "wdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
     if (!w_out_.push_flit(f)) return false;
     if (b.last) w_meta_fifo_.pop_front();
     return true;

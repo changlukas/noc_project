@@ -140,7 +140,7 @@ TEST(NmuPacketize, WHeaderFlitTailMatchesWlast) {
         uint64_t expected_flit_tail = (i == 2) ? 1u : 0u;
         EXPECT_EQ(f->get_header_field("flit_tail"), expected_flit_tail)
             << "W beat " << i << ": header.flit_tail expected " << expected_flit_tail;
-        EXPECT_EQ(f->get_payload_field("W", "wlast"), expected_flit_tail);
+        EXPECT_EQ(f->get_payload_field("NARROW_W", "wlast"), expected_flit_tail);
     }
 }
 
@@ -263,11 +263,11 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
     ASSERT_TRUE(pkt.push_w(w));
     aw_cap.pop();  // discard AW
     auto f = *w_cap.pop();
-    EXPECT_EQ(f.get_payload_field("W", "wlast"), 1u);
-    EXPECT_EQ(f.get_payload_field("W", "wstrb"), 0xDEADBEEFu);
-    EXPECT_EQ(f.get_payload_field("W", "wuser"), 0xABu);
+    EXPECT_EQ(f.get_payload_field("NARROW_W", "wlast"), 1u);
+    EXPECT_EQ(f.get_payload_field("NARROW_W", "wstrb"), 0xDEADBEEFu);
+    EXPECT_EQ(f.get_payload_field("NARROW_W", "wuser"), 0xABu);
     std::array<uint8_t, 32> wdata_out{};
-    f.get_payload_bytes("W", "wdata", wdata_out.data(), 256);
+    f.get_payload_bytes("NARROW_W", "wdata", wdata_out.data(), 256);
     for (int i = 0; i < 32; ++i) EXPECT_EQ(wdata_out[i], static_cast<uint8_t>(i));
 }
 

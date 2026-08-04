@@ -90,8 +90,9 @@ def test_pin_width_cross_domain_flit_width(signals_spec, packet_spec):
                                 "NOC_INTF_UPSTREAM", "noc_req_flit_o")
     assert actual == expected
     # Sanity: this is the real composed width, not just the legacy default.
-    # Post 44b-header refactor: HEADER_WIDTH=44, PAYLOAD_WIDTH=352, FLIT_WIDTH=396.
-    assert actual == 396
+    # S2 T2a (rsvd deletion, value-preserving at 256 b): HEADER_WIDTH=44,
+    # PAYLOAD_WIDTH=297, FLIT_WIDTH=341. T2d flips this to 629.
+    assert actual == 341
 
 
 def test_pin_width_from_interface_port_parameter(signals_spec, packet_spec):

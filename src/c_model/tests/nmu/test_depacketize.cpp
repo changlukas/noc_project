@@ -18,16 +18,31 @@ ni::cmodel::Flit make_b_flit(uint8_t bid, axi::Resp resp = axi::Resp::OKAY) {
     f.set_payload_field("B", "bresp", static_cast<uint64_t>(resp));
     return f;
 }
-ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
+ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast, uint8_t axi_ch = ni::AXI_CH_NarrowR) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+    f.set_header_field("axi_ch", axi_ch);
     f.set_header_field("dst_id", 0x10);
     f.set_header_field("flit_tail", 1);
-    f.set_payload_field("R", "rid", rid);
-    f.set_payload_field("R", "rlast", rlast ? 1u : 0u);
+    const char* ch = (axi_ch == ni::AXI_CH_DataR) ? "DATA_R" : "NARROW_R";
+    f.set_payload_field(ch, "rid", rid);
+    f.set_payload_field(ch, "rlast", rlast ? 1u : 0u);
     return f;
 }
 }  // namespace
+
+TEST(NmuDepacketize, PopRDecodesDataRFromDataRChannel) {
+    SCENARIO(
+        "NMU Depacketize: an R flit with axi_ch=AXI_CH_DataR is accepted (no abort) and decodes "
+        "its rid from the DATA_R payload channel, not NARROW_R");
+    ChannelModel noc(16, 16);
+    Depacketize depkt(noc.rsp_in(), /*b*/ 16, /*r*/ 16);
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(0x09, /*rlast*/ true, ni::AXI_CH_DataR)));
+    depkt.tick();
+    auto r = depkt.pop_r();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->id, 0x09);
+    EXPECT_TRUE(r->last);
+}
 
 TEST(NmuDepacketize, PopBDecodesFromFlit) {
     SCENARIO("NMU Depacketize: B flit decodes to BBeat with id and resp from payload fields");
@@ -100,11 +115,11 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
     f.set_header_field("dst_id", 0x10);
-    f.set_payload_field("R", "rid", 0x07);
-    f.set_payload_field("R", "rlast", 1);
+    f.set_payload_field("NARROW_R", "rid", 0x07);
+    f.set_payload_field("NARROW_R", "rlast", 1);
     std::array<uint8_t, 32> data;
     for (int i = 0; i < 32; ++i) data[i] = static_cast<uint8_t>(0xE0 + i);
-    f.set_payload_bytes("R", "rdata", data.data(), 256);
+    f.set_payload_bytes("NARROW_R", "rdata", data.data(), 256);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
     depkt.tick();
     auto r = depkt.pop_r();
@@ -162,13 +177,13 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", 5 + i);
-        f.set_payload_field("R", "rid", 0x42);
-        f.set_payload_field("R", "rresp", 0);
-        f.set_payload_field("R", "ruser", 0);
-        f.set_payload_field("R", "rlast", (i == 3) ? 1u : 0u);
+        f.set_payload_field("NARROW_R", "rid", 0x42);
+        f.set_payload_field("NARROW_R", "rresp", 0);
+        f.set_payload_field("NARROW_R", "ruser", 0);
+        f.set_payload_field("NARROW_R", "rlast", (i == 3) ? 1u : 0u);
         std::array<uint8_t, 32> data{};
         data[0] = static_cast<uint8_t>(0xA0 + i);
-        f.set_payload_bytes("R", "rdata", data.data(), 256);
+        f.set_payload_bytes("NARROW_R", "rdata", data.data(), 256);
         ASSERT_TRUE(channel.rsp_out().push_flit(f));
     }
     depkt.tick();

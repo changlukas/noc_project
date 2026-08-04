@@ -164,10 +164,10 @@ TEST(NmuCreditConservation, ConsumerPulseAccumulatesMultiConsumePerTick) {
         r.set_header_field("flit_tail", 1);
         r.set_header_field("ordering_tag", 0);
         r.set_header_field("ordering_req", 0);
-        r.set_payload_field("R", "rid", static_cast<uint64_t>(i));
-        r.set_payload_field("R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
-        r.set_payload_field("R", "ruser", 0);
-        r.set_payload_field("R", "rlast", 1);
+        r.set_payload_field("NARROW_R", "rid", static_cast<uint64_t>(i));
+        r.set_payload_field("NARROW_R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
+        r.set_payload_field("NARROW_R", "ruser", 0);
+        r.set_payload_field("NARROW_R", "rlast", 1);
         nmu.inject_rsp_flit(r);
     }
 

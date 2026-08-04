@@ -35,8 +35,10 @@ int main() {
     std::printf("\n");
 
     std::printf("=== Payload widths ===\n");
-    std::printf("AW=%d  W=%d  AR=%d  B=%d  R=%d\n", ni::payload::AW_WIDTH, ni::payload::W_WIDTH,
-                ni::payload::AR_WIDTH, ni::payload::B_WIDTH, ni::payload::R_WIDTH);
+    std::printf("AW=%d  NARROW_W=%d  DATA_W=%d  AR=%d  B=%d  NARROW_R=%d  DATA_R=%d\n",
+                ni::payload::AW_WIDTH, ni::payload::NARROW_W_WIDTH, ni::payload::DATA_W_WIDTH,
+                ni::payload::AR_WIDTH, ni::payload::B_WIDTH, ni::payload::NARROW_R_WIDTH,
+                ni::payload::DATA_R_WIDTH);
     std::printf("\n");
 
     // Demo: 用 constexpr 常數實際打包一個 AR header

@@ -132,9 +132,9 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     if (num_vc_ > 1 && (axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_NarrowR)) {
         dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
         ordering_req = static_cast<uint8_t>(flit.get_header_field("ordering_req"));
-        id =
-            static_cast<uint8_t>(axi_ch == ni::AXI_CH_NarrowB ? flit.get_payload_field("B", "bid")
-                                                              : flit.get_payload_field("R", "rid"));
+        id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_NarrowB
+                                      ? flit.get_payload_field("B", "bid")
+                                      : flit.get_payload_field("NARROW_R", "rid"));
     }
     auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, ordering_req, id);
     if (!vc_opt.has_value()) return false;

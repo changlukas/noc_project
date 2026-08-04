@@ -24,15 +24,17 @@
 // DPI marshalling assumes a fixed wire format. The packing/unpacking helpers
 // below (unpack_flit, pack_flit, unpack_data256, pack_data256, pack_addr64)
 // hardcode word counts and bit shifts for the current spec defaults:
-//   FLIT_WIDTH = 396 bits → svBitVecVal[13] words
+//   FLIT_WIDTH = 341 bits → svBitVecVal[11] words
 //   DATA_BYTES = 32       → svBitVecVal[8]  words (256-bit data bus)
 //   ADDR_WIDTH = 48 bits  → svBitVecVal[2]  words (pack_addr64)
-// If a future constants.yaml change widens any of these, compile fails here
-// and the DPI pack/unpack must be parameterized before the build can proceed.
+// FLIT_WIDTH moved 396->341 in S2 T2a (payload *_rsvd deletion, value-preserving
+// at 256 b data). If a future constants.yaml/ni_packet.json change widens any of
+// these further (S2 T2d: 341->629), compile fails here and the DPI pack/unpack
+// must be parameterized before the build can proceed (S2 T2c).
 // ---------------------------------------------------------------------------
-static_assert(::ni::FLIT_WIDTH == 396,
-              "cmodel_dpi pack/unpack assumes FLIT_WIDTH = 396 bits "
-              "(svBitVecVal[13]); reparameterize unpack_flit/pack_flit if widened");
+static_assert(::ni::FLIT_WIDTH == 341,
+              "cmodel_dpi pack/unpack assumes FLIT_WIDTH = 341 bits "
+              "(svBitVecVal[11]); reparameterize unpack_flit/pack_flit if widened");
 static_assert(::ni::cmodel::axi::DATA_BYTES == 32,
               "cmodel_dpi pack/unpack assumes 256-bit data bus (DATA_BYTES = 32, "
               "svBitVecVal[8]); reparameterize unpack_data256/pack_data256 if widened");
@@ -159,8 +161,8 @@ extern "C" int cmodel_check_error(const char** msg) {
 // Flit marshalling helpers — shared by NMU/NSU/Router DPI handlers.
 //
 // Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
-// ceil(FLIT_WIDTH / 32) = 13. Words are little-endian: word[0] carries bits
-// [31:0], word[12] carries bits [395:384] in its low 12 bits.
+// ceil(FLIT_WIDTH / 32) = 11. Words are little-endian: word[0] carries bits
+// [31:0], word[10] carries bits [340:320] in its low 21 bits.
 
 using ni::cmodel::wrap::FLIT_BYTES;
 using ni::cmodel::wrap::FLIT_VEC_WORDS;
@@ -367,7 +369,7 @@ void pack_addr64(uint64_t addr, svBitVecVal* vec) {
 //   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
 //   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
 //   32-bit wstrb    : word[0]
-//   396-bit flit    : words[0..12] (50 bytes; unpack_flit/pack_flit defined above)
+//   341-bit flit    : words[0..10] (43 bytes; unpack_flit/pack_flit defined above)
 
 using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
@@ -526,7 +528,7 @@ extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
 //   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
 //   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
 //   32-bit wstrb    : word[0]
-//   396-bit flit    : words[0..12] (50 bytes; unpack_flit/pack_flit defined above)
+//   341-bit flit    : words[0..10] (43 bytes; unpack_flit/pack_flit defined above)
 
 using ni::cmodel::wrap::NsuInputs;
 using ni::cmodel::wrap::NsuOutputs;

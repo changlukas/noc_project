@@ -71,10 +71,13 @@ class Depacketize : public RequestDepacketizer {
     std::size_t s1_occupancy(uint8_t axi_ch) const noexcept {
         switch (axi_ch) {
             case ni::AXI_CH_NarrowAw:
+            case ni::AXI_CH_DataAw:
                 return s1_aw_.occupancy();
             case ni::AXI_CH_NarrowW:
+            case ni::AXI_CH_DataW:
                 return s1_w_.occupancy();
             case ni::AXI_CH_NarrowAr:
+            case ni::AXI_CH_DataAr:
                 return s1_ar_.occupancy();
             default:
                 return 0;
@@ -117,11 +120,14 @@ inline axi::AwBeat Depacketize::decode_aw(const Flit& f) {
 }
 
 inline axi::WBeat Depacketize::decode_w(const Flit& f) {
+    // DataW reuses NarrowW's field layout at today's width (T2a); the axi_ch
+    // picks which channel namespace the flit was packed into.
+    const char* ch = (f.get_header_field("axi_ch") == ni::AXI_CH_DataW) ? "DATA_W" : "NARROW_W";
     axi::WBeat b{};
-    b.last = f.get_payload_field("W", "wlast") != 0;
-    b.user = static_cast<uint8_t>(f.get_payload_field("W", "wuser"));
-    b.strb = static_cast<uint32_t>(f.get_payload_field("W", "wstrb"));
-    f.get_payload_bytes("W", "wdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
+    b.last = f.get_payload_field(ch, "wlast") != 0;
+    b.user = static_cast<uint8_t>(f.get_payload_field(ch, "wuser"));
+    b.strb = static_cast<uint32_t>(f.get_payload_field(ch, "wstrb"));
+    f.get_payload_bytes(ch, "wdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
     return b;
 }
 
@@ -166,6 +172,7 @@ inline void Depacketize::tick() {
         uint64_t ch = f.get_header_field("axi_ch");
         switch (ch) {
             case ni::AXI_CH_NarrowAw:
+            case ni::AXI_CH_DataAw:
                 if (s1_aw_.full()) {
                     pending_ = f;
                     return;
@@ -173,6 +180,7 @@ inline void Depacketize::tick() {
                 s1_aw_.accept(f);
                 break;
             case ni::AXI_CH_NarrowW:
+            case ni::AXI_CH_DataW:
                 if (s1_w_.full()) {
                     pending_ = f;
                     return;
@@ -180,6 +188,7 @@ inline void Depacketize::tick() {
                 s1_w_.accept(decode_w(f));
                 break;
             case ni::AXI_CH_NarrowAr:
+            case ni::AXI_CH_DataAr:
                 if (s1_ar_.full()) {
                     pending_ = f;
                     return;
@@ -189,10 +198,11 @@ inline void Depacketize::tick() {
             default:
                 assert(false &&
                        "nsu::Depacketize::tick: NocReqIn delivered flit with axi_ch outside "
-                       "{AW, W, AR} — NSU request path only accepts request channels. Likely "
-                       "cause: NMU packetizer stamped wrong axi_ch into a request flit, NoC "
-                       "fabric misrouted a response flit into the request ingress, or codegen "
-                       "drift changed ni::AXI_CH_* encoding without rebuilding both sides.");
+                       "{NarrowAw, NarrowW, NarrowAr, DataAw, DataW, DataAr} — NSU request path "
+                       "only accepts request channels. Likely cause: NMU packetizer stamped "
+                       "wrong axi_ch into a request flit, NoC fabric misrouted a response flit "
+                       "into the request ingress, or codegen drift changed ni::AXI_CH_* encoding "
+                       "without rebuilding both sides.");
                 std::abort();
         }
         pending_.reset();
@@ -222,12 +232,15 @@ inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     const Flit f = s1_aw_.take();
     axi::AwBeat b = decode_aw(f);
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
+    const AxiClass cls =
+        (f.get_header_field("axi_ch") == ni::AXI_CH_DataAw) ? AxiClass::Data : AxiClass::Narrow;
     meta_.allocate_write(downstream_id,
                          {
                              static_cast<uint8_t>(f.get_header_field("src_id")),
                              b.id,
                              static_cast<uint8_t>(f.get_header_field("ordering_req")),
                              static_cast<uint8_t>(f.get_header_field("ordering_tag")),
+                             cls,
                          });
     b.id = downstream_id;
     return b;
@@ -242,11 +255,14 @@ inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
     const Flit f = s1_ar_.take();
     axi::ArBeat b = decode_ar(f);
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
+    const AxiClass cls =
+        (f.get_header_field("axi_ch") == ni::AXI_CH_DataAr) ? AxiClass::Data : AxiClass::Narrow;
     meta_.allocate_read(downstream_id, {
                                            static_cast<uint8_t>(f.get_header_field("src_id")),
                                            b.id,
                                            static_cast<uint8_t>(f.get_header_field("ordering_req")),
                                            static_cast<uint8_t>(f.get_header_field("ordering_tag")),
+                                           cls,
                                        });
     b.id = downstream_id;
     return b;

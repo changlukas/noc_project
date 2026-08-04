@@ -27,7 +27,8 @@ class Flit {
     uint64_t get_header_field(std::string_view name) const noexcept;
 
     // ---- Payload field access ----
-    // channel: "AW" | "AR" | "W" | "B" | "R" (case-insensitive accepted)
+    // channel: "AW" | "AR" | "NARROW_W" | "DATA_W" | "B" | "NARROW_R" | "DATA_R"
+    // (case-insensitive accepted)
     void set_payload_field(std::string_view channel, std::string_view field,
                            uint64_t value) noexcept;
     uint64_t get_payload_field(std::string_view channel, std::string_view field) const noexcept;
@@ -109,12 +110,16 @@ inline FieldPos payload_field_pos(std::string_view channel, std::string_view fie
         hit = find_in(ni::AW_PAYLOAD_FIELDS);
     else if (ieq(channel, "AR"))
         hit = find_in(ni::AR_PAYLOAD_FIELDS);
-    else if (ieq(channel, "W"))
-        hit = find_in(ni::W_PAYLOAD_FIELDS);
+    else if (ieq(channel, "NARROW_W"))
+        hit = find_in(ni::NARROW_W_PAYLOAD_FIELDS);
+    else if (ieq(channel, "DATA_W"))
+        hit = find_in(ni::DATA_W_PAYLOAD_FIELDS);
     else if (ieq(channel, "B"))
         hit = find_in(ni::B_PAYLOAD_FIELDS);
-    else if (ieq(channel, "R"))
-        hit = find_in(ni::R_PAYLOAD_FIELDS);
+    else if (ieq(channel, "NARROW_R"))
+        hit = find_in(ni::NARROW_R_PAYLOAD_FIELDS);
+    else if (ieq(channel, "DATA_R"))
+        hit = find_in(ni::DATA_R_PAYLOAD_FIELDS);
     if (hit) return *hit;
     // channel.data() is reused for the array name; case may not match the
     // actual array name (e.g. "aw" prints aw_PAYLOAD_FIELDS[] not AW_...).

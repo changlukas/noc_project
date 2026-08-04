@@ -19,7 +19,7 @@
           "summary": "AXI4 full-protocol slave port (AW/W/AR/B/R): per-channel FIFO queuing, single-clock (no CDC in c_model).",
           "modes": ["Active", "Passive"],
           "compile_time_params": {},
-          "uses_packet_fields": ["AW", "W", "AR", "B", "R"],
+          "uses_packet_fields": ["AW", "NARROW_W", "DATA_W", "AR", "B", "NARROW_R", "DATA_R"],
           "configured_by": [],
           "related_features": ["FEAT-NMU-ADDR_TRANS", "FEAT-NMU-PACKETIZE", "FEAT-NMU-DEPACKETIZE"]
         },
@@ -37,7 +37,7 @@
           "summary": "Assembles AXI AW/W/AR transactions into NoC request flit streams (header + payload), tagging dst_id, src_id, awid/arid, flit_tail, and ordering_tag.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["AW", "W", "AR", "dst_id", "src_id", "flit_tail", "ordering_tag"],
+          "uses_packet_fields": ["AW", "NARROW_W", "AR", "dst_id", "src_id", "flit_tail", "ordering_tag"],
           "configured_by": [],
           "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-ADDR_TRANS", "FEAT-NMU-VC_MAPPING"]
         },
@@ -67,7 +67,7 @@
             "write_rob_mode": "Disabled",
             "read_rob_mode": "Disabled"
           },
-          "uses_packet_fields": ["ordering_req", "ordering_tag", "B", "R"],
+          "uses_packet_fields": ["ordering_req", "ordering_tag", "B", "NARROW_R", "DATA_R"],
           "configured_by": [],
           "related_features": ["FEAT-NMU-DEPACKETIZE"]
         },
@@ -76,7 +76,7 @@
           "summary": "Parses inbound NoC response flit streams into AXI B/R beats (with last) before delivery to the AXI slave port.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["B", "R"],
+          "uses_packet_fields": ["B", "NARROW_R", "DATA_R"],
           "configured_by": [],
           "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-ROB"]
         }
@@ -92,7 +92,7 @@
           "summary": "AXI4 full-protocol master port (AW/W/AR/B/R): per-channel FIFO queuing, single-clock (no CDC in c_model).",
           "modes": ["Active", "Passive"],
           "compile_time_params": {},
-          "uses_packet_fields": ["AW", "W", "AR", "B", "R"],
+          "uses_packet_fields": ["AW", "NARROW_W", "DATA_W", "AR", "B", "NARROW_R", "DATA_R"],
           "configured_by": [],
           "related_features": ["FEAT-NSU-DEPACKETIZE", "FEAT-NSU-PACKETIZE", "FEAT-NSU-META_BUFFER"]
         },
@@ -101,7 +101,7 @@
           "summary": "Parses inbound NoC request flit streams into AXI AW/W/AR transactions before delivery to the AXI master port.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["AW", "W", "AR", "src_id"],
+          "uses_packet_fields": ["AW", "NARROW_W", "DATA_W", "AR", "src_id"],
           "configured_by": [],
           "related_features": ["FEAT-NSU-AXI_MASTER_PORT", "FEAT-NSU-META_BUFFER"]
         },
@@ -119,7 +119,7 @@
           "summary": "Assembles AXI B/R beats from the local slave into NoC response flit streams, using META_BUFFER for dst_id / ordering_tag / bid|rid return-path reconstruction.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["B", "R", "dst_id", "ordering_tag", "vc_id", "flit_tail"],
+          "uses_packet_fields": ["B", "NARROW_R", "DATA_R", "dst_id", "ordering_tag", "vc_id", "flit_tail"],
           "configured_by": [],
           "related_features": ["FEAT-NSU-AXI_MASTER_PORT", "FEAT-NSU-META_BUFFER", "FEAT-NSU-VC_ARB"]
         },

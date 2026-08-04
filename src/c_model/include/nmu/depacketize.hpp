@@ -66,12 +66,15 @@ inline axi::BBeat Depacketize::decode_b(const Flit& f) {
 }
 
 inline axi::RBeat Depacketize::decode_r(const Flit& f) {
+    // DataR reuses NarrowR's field layout at today's width (T2a); the axi_ch
+    // picks which channel namespace the flit was packed into.
+    const char* ch = (f.get_header_field("axi_ch") == ni::AXI_CH_DataR) ? "DATA_R" : "NARROW_R";
     axi::RBeat r{};
-    r.id = static_cast<uint8_t>(f.get_payload_field("R", "rid"));
-    r.resp = static_cast<axi::Resp>(f.get_payload_field("R", "rresp"));
-    r.user = static_cast<uint8_t>(f.get_payload_field("R", "ruser"));
-    r.last = f.get_payload_field("R", "rlast") != 0;
-    f.get_payload_bytes("R", "rdata", r.data.data(), axi::NOC_DATA_WIDTH_BITS);
+    r.id = static_cast<uint8_t>(f.get_payload_field(ch, "rid"));
+    r.resp = static_cast<axi::Resp>(f.get_payload_field(ch, "rresp"));
+    r.user = static_cast<uint8_t>(f.get_payload_field(ch, "ruser"));
+    r.last = f.get_payload_field(ch, "rlast") != 0;
+    f.get_payload_bytes(ch, "rdata", r.data.data(), axi::NOC_DATA_WIDTH_BITS);
     return r;
 }
 
@@ -87,7 +90,8 @@ inline void Depacketize::tick() {
         }
         uint64_t ch = f.get_header_field("axi_ch");
         switch (ch) {
-            case ni::AXI_CH_NarrowB: {
+            case ni::AXI_CH_NarrowB:
+            case ni::AXI_CH_DataB: {
                 if (b_q_.size() >= b_q_depth_) {
                     pending_ = f;
                     return;
@@ -97,7 +101,8 @@ inline void Depacketize::tick() {
                 b_q_.push_back({decode_b(f), meta});
                 break;
             }
-            case ni::AXI_CH_NarrowR: {
+            case ni::AXI_CH_NarrowR:
+            case ni::AXI_CH_DataR: {
                 if (r_q_.size() >= r_q_depth_) {
                     pending_ = f;
                     return;
@@ -110,10 +115,11 @@ inline void Depacketize::tick() {
             default:
                 assert(false &&
                        "nmu::Depacketize::tick: NocRspIn delivered flit with axi_ch outside "
-                       "{B, R} — NMU response path only accepts response channels. Likely cause: "
-                       "NSU packetizer stamped wrong axi_ch into a response flit, NoC fabric "
-                       "misrouted a request flit into the response ingress, or codegen drift "
-                       "changed ni::AXI_CH_* encoding without rebuilding both sides.");
+                       "{NarrowB, NarrowR, DataB, DataR} — NMU response path only accepts "
+                       "response channels. Likely cause: NSU packetizer stamped wrong axi_ch "
+                       "into a response flit, NoC fabric misrouted a request flit into the "
+                       "response ingress, or codegen drift changed ni::AXI_CH_* encoding without "
+                       "rebuilding both sides.");
                 std::abort();
         }
         pending_.reset();

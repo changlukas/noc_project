@@ -105,8 +105,8 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     w_flit.set_header_field("dst_id", kNsuSrcId);
     w_flit.set_header_field("vc_id", 0);
     w_flit.set_header_field("flit_tail", 1);  // wlast closes wormhole packet
-    w_flit.set_payload_field("W", "wlast", 1);
-    w_flit.set_payload_field("W", "wstrb", 0xF);
+    w_flit.set_payload_field("NARROW_W", "wlast", 1);
+    w_flit.set_payload_field("NARROW_W", "wstrb", 0xF);
     nsu.inject_req_flit(w_flit);
 
     // Drain the downstream AXI face. NSU req is a 2-stage pipeline:

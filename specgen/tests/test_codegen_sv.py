@@ -119,8 +119,8 @@ class TestSvPacketEmit:
         """ni_flit_pkg.sv must contain per-channel-prefixed payload field constants."""
         text = _sv_text("ni_flit_pkg.sv")
         # Representative constants from each channel
-        for sig in ("AW_AWID_LSB", "AR_ARID_LSB", "W_WDATA_LSB",
-                    "B_BID_LSB", "R_RDATA_LSB"):
+        for sig in ("AW_AWID_LSB", "AR_ARID_LSB", "NARROW_W_WDATA_LSB", "DATA_W_WDATA_LSB",
+                    "B_BID_LSB", "NARROW_R_RDATA_LSB", "DATA_R_RDATA_LSB"):
             assert f"localparam int unsigned {sig}" in text, (
                 f"missing {sig} in ni_flit_pkg.sv"
             )
