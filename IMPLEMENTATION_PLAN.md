@@ -36,14 +36,6 @@ depth (default 128 = 8 KB at 64 B beats), VC count (1-8), mesh dims, outstanding
 widths all stay free parameters exactly as FlooNoC keeps them; tests cover the parameter range,
 not one value.
 
-## Stage 0: Cheap wins
-Goal: header renames `last`/`rob_req`/`rob_idx` to `flit_tail`/`ordering_req`/`ordering_tag`;
-FEATURE_INVENTORY.md CDC honesty fix; dead-code sweep (`NSU_DEPKT_Q_DEPTH`,
-`NOC_SLAVE_VC_BUFFER_DEPTH`, stale comments nmu.hpp:14-18 / cmodel_dpi.h:90 /
-router_wrap.hpp:16).
-Success Criteria: ctest green, codegen --check clean, grep zero stale names and dead params.
-Status: Not Started
-
 ## Stage 1: Formats and params (specgen-first, data path stays 256 b)
 Goal: addr 64 to 48 b; header 56 to 44 b with axi_ch 4 b ten encodings; fixed_vc field (field
 only); collective_op/mask fields (enabled in format, runtime-rejected until S4); Aw/Ar payload
@@ -115,6 +107,10 @@ unsupported; per-network perf metrics; block specs (nmu/nsu/router) re-synced to
 regression re-baseline. GALS explicitly ignored (user decision 2026-08-04).
 Success Criteria: FEATURE_INVENTORY.md and block specs match code; regression matrix
 re-baselined.
+Carry-in from S0 reviews: block-spec numeric drift vs constants.yaml (credit seed 4 vs
+default 8, multiple table lines in nmu/nsu/router specs — Parameter Discipline applies);
+inventory gaps (ni/wormhole_arbiter.hpp has no feature entry yet FEAT-NMU-VC_MAPPING lists
+flit_tail; DEPACKETIZE uses_packet_fields omit ordering_req/ordering_tag they read).
 Status: Not Started
 
 ## Deferred (post-campaign)
@@ -128,7 +124,8 @@ still open into that round's backlog "This round".
 - Defensive smalls: SAM translate() miss must throw under NDEBUG (asserts today, null-deref in
   release); sam_yaml missing address_map needs a descriptive error; gen_tb_top rejects empty
   requested_name; specgen pytest must write to a temp dir (rewrites committed banners today);
-  axi_bw_monitor.sv carries a 2-line local edit, upstream or wrap it.
+  axi_bw_monitor.sv carries a 2-line local edit, upstream or wrap it; specgen
+  examples/quickstart printf column padding misaligned since the S0 rename (cosmetic).
 - Verification methodology: AXI-side perf DPI hooks never driven (bw_monitor vs perf.json
   cross-check has never run); no coverage, no constrained-random, no wire-level SVA.
 - Infrastructure notes: VCS flow builds but has never executed; WSL host instability
