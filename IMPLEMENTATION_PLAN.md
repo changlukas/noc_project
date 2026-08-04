@@ -77,6 +77,8 @@ DataR on DAT; B/NarrowR on RSP); VCs on DAT only; delete ni/virtual_network.hpp 
 VC split; rename VcArbiter to allocator naming; DAT standard router gains the VA stage
 (deprecated vc_router port, direction-preference assignment) with fixed_vc=1 skipping VA,
 pinned end to end; drop legacy write_rsp_vc/read_rsp_vc.
+Standing ruling (keep): LOCAL->LOCAL is LEGAL by design — the self-transaction path, exercised
+by passing co-sim; suppress self-traffic via the generator's `--exclude-self`, not the router.
 Success Criteria: regression matrix green; write-pairing tests cover DataAw+DataW same-worm;
 fixed_vc=1 stream verified to hold one vc_id end to end under contention.
 Status: Not Started
@@ -87,12 +89,21 @@ Ar-collective rejected at NMU packetize before any fanout or RoB allocation; rou
 fork with credit discipline; CollectB in-network merge with error BRESP precedence; RoB accepts
 one merged B; scoreboard keys writes by (dst_id, local_addr).
 Blocking decisions, resolve before coding:
-- [TBD] merged-B ordering_tag identity: replicas inherit initiator tag at fanout, or NI rebuilds
-  header from stored meta (backlog "blocks multicast write" item)
-- [TBD] SLVERR vs DECERR precedence in merged BRESP (spec says error-first only; RTL prioritizes
-  SLVERR; AXI4 B1.3.1 tie-break is arrival-dependent)
-- Confirm DataAw+W as one indivisible worm on DAT closes the overlapping-destination
-  write-ordering deadlock window (backlog §C); if not, design the fork discipline accordingly
+- [TBD] merged-B ordering_tag identity. The merge forwards one responder's flit, so the
+  surviving header can carry that responder's ordering_tag, not the initiator's; the NMU RoB
+  retires by tag, so an unconstrained merge can retire the wrong slot. Options: every replica
+  inherits the initiator's tag at fanout, or the NI rebuilds the merged header from stored meta.
+  Upstream RTL does not visibly resolve this either (surfaced 2026-07-21).
+- [TBD] SLVERR vs DECERR precedence in merged BRESP. Spec says error-first only; RTL prioritizes
+  SLVERR only; AXI4 B1.3.1 resolves the tie by first-arrival, which is arrival-dependent on a
+  mesh — define a deterministic order.
+- Write-ordering deadlock under overlapping destination sets (AXI4 A5.3.3, no W interleaving):
+  two multicasts sharing >=2 destinations can establish opposite AW orders at two members and
+  wedge (arXiv 2502.19215 §II-A Fig 2(e) for a crossbar; XY makes the inversion geometric).
+  Synchronous replication closes the cycle only with the 2603.26438 stream_fork discipline
+  (accept input only when all output ports ready). Confirm DataAw+W as one indivisible worm on
+  DAT never opens the AW-queued-without-W window; if it does, design the fork discipline
+  accordingly.
 Success Criteria: multicast write matrix (row/col/submesh masks) green in co-sim; deliberate
 illegal-mask and lock-multicast stimulus rejected at NMU; single-B invariant checked by
 scoreboard.
@@ -106,12 +117,25 @@ Success Criteria: FEATURE_INVENTORY.md and block specs match code; regression ma
 re-baselined.
 Status: Not Started
 
-## Backlog absorption
+## Deferred (post-campaign)
 
-Absorbed here: Next-up #1 vc_fixed incl. turn-model VA policy (S1 field + S3b), backlog §A all
-rows (S1/S2/S3), read/write VC split removal + VcArbiter rename + legacy rsp_vc scalars (S3b),
-dead-code sweep (S0), merged-B tag / tie-break / write-ordering deadlock decisions (S4).
-Deleted in the 2026-08-04 trade-off: flat-LRU arbitration, NoC-layer QoS, reduction-operator
-set, collective-scope justification.
-Not absorbed, stays in backlog: ID compression width tiers, per-tile compute rate, defensive
-small items, verification methodology, VCS/WSL infrastructure.
+Long-horizon items parked here; when the campaign ends and this file is deleted, roll what is
+still open into that round's backlog "This round".
+
+- ID compression width tiers: NSU max_unique_ids only 1 or 256; add selectable N per-id FIFOs.
+- Per-tile compute rate: absent from spec and perf docs; every utilization figure and minimum
+  viable tile size depend on it (docs/noc-workload-benchmark.md §9).
+- Defensive smalls: SAM translate() miss must throw under NDEBUG (asserts today, null-deref in
+  release); sam_yaml missing address_map needs a descriptive error; gen_tb_top rejects empty
+  requested_name; specgen pytest must write to a temp dir (rewrites committed banners today);
+  axi_bw_monitor.sv carries a 2-line local edit, upstream or wrap it.
+- Verification methodology: AXI-side perf DPI hooks never driven (bw_monitor vs perf.json
+  cross-check has never run); no coverage, no constrained-random, no wire-level SVA.
+- Infrastructure notes: VCS flow builds but has never executed; WSL host instability
+  (rsync to ~/noc_project, foreground one session at a time, echo-marker + retry).
+- Deck: user regenerates three image-based diagrams (s6/s7 NMU/NSU block diagrams with old
+  ADDR 64 b + NUM_OF_DAT_CHAN_VC, s8 NSU port symbol with old noc_* pin names).
+- Release-package note: the shipped D:\noc_project copy lacks sim/verilator/perf_cli_summary.py
+  and docs/image/pipeline_ref.jpg; send along if the recipient needs those flows.
+- Trade-off record 2026-08-04 (for the ledger): deleted flat-LRU arbitration, NoC-layer QoS,
+  reduction-operator-set, collective-scope items; turn-model VA folded into S3b.
