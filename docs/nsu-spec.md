@@ -308,7 +308,7 @@ Each item names its verification and failure condition. ctest paths are under `s
  │  (1 flit/cyc)  per-VC        2-in RR, B=0 R=1    s1_b_ s1_r_   (depth 16)  │
  │                pending x4    pending x4/input    (1 entry)         ▲       │
  │  noc_rsp_cred_i ─> sender credit counters                     axi_rsp_i    │
- │  (pulse/VC)        (seed 4 per VC)                            (B/R beats)  │
+ │  (pulse/VC)        (seed 8 per VC)                            (B/R beats)  │
  └────────────────────────────────────────────────────────────────────────────┘
    Verification: c_model scoreboard write-then-readback compare + model asserts
 ```

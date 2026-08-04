@@ -1163,7 +1163,7 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
 
 TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
     SCENARIO(
-        "Rob Enabled: a ordering_req=0 B whose id's list head owns a slot is malformed, aborts");
+        "Rob Enabled: an ordering_req=0 B whose id's list head owns a slot is malformed, aborts");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});

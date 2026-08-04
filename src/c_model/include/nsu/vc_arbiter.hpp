@@ -6,7 +6,7 @@
 //
 // ReadWriteSplit (only mode): per-class virtual network (vnet); the scalar
 // factory wraps a single VC into a size-1 vnet (mirror of nmu::VcArbiter).
-//   Fixed VC id (same-destination bypass, return path): a ordering_req=0 B, or ANY R (regardless
+//   Fixed VC id (same-destination bypass, return path): an ordering_req=0 B, or ANY R (regardless
 //   of ordering_req), maps to vnet[(dst_id ^ id) % vnet.size()] -- deterministic
 //   VC allocation, a pure function with zero state. This fixes a
 //   same-(dst,id) bypassed response stream to one VC (so it cannot be

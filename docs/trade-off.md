@@ -52,7 +52,7 @@ with a bypass path handles cross-destination reordering at the endpoint.
 | piece | mechanism |
 |---|---|
 | routing | XY dimension-order, one fixed path per source-destination pair |
-| fixed VC id, request | `nmu::VcArbiter` reuses the ID's recorded VC when a `ordering_req = 0` flit repeats its `(dst_id, id)`. A blocked fixed VC waits instead of rerouting |
+| fixed VC id, request | `nmu::VcArbiter` reuses the ID's recorded VC when an `ordering_req = 0` flit repeats its `(dst_id, id)`. A blocked fixed VC waits instead of rerouting |
 | fixed VC id, response | `nsu::VcArbiter` maps to `vnet[(dst_id ^ id) % size]`, stateless. Full or no-credit refuses, never spills |
 | endpoint reorder | `nmu::Rob` re-sorts only same-ID responses interleaved across destinations. Ordering toward the master lives in the NMU because only the NMU knows its own issue order |
 | identity echo | `nsu::MetaBuffer` holds `{src_id, upstream_id, ordering_req, ordering_tag}` per response; `nsu::Packetize` stamps them onto B/R. Neither reorders, and the fabric never reads either field |

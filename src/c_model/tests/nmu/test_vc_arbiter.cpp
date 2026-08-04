@@ -240,7 +240,7 @@ TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossVnet) {
     EXPECT_EQ(vc_d, 3u);
 }
 
-// Fixed VC id (same-destination bypass): a ordering_req=0 flit whose (dst_id, id) matches the id's
+// Fixed VC id (same-destination bypass): an ordering_req=0 flit whose (dst_id, id) matches the id's
 // previous same-channel flit reuses that VC instead of round-robining -- fixes
 // the bypass streak to one VC so it cannot be reordered in-fabric.
 TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestFixedVcId) {

@@ -13,7 +13,7 @@
 //   set_upstream_credit(port, LinkCreditOut) — captures the router's input-drain
 //     pulses; the wrap drains one/tick onto the *_credit/*_credit_return wire.
 //   inbound flit pushes straight into router.input(port).
-//   each inbound credit pulse calls router.receive_credit(port, 0).
+//   each inbound credit pulse calls router.receive_credit(port, vc), per VC.
 // LOCAL pin mapping (NI edge):
 //   inbound  : in_.req_in_valid/in_.req_in_flit -> req_router_->input(LOCAL).push_flit
 //              in_.rsp_in_valid/in_.rsp_in_flit -> rsp_router_->input(LOCAL).push_flit

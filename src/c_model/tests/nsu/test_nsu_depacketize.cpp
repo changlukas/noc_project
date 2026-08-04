@@ -146,9 +146,10 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
     EXPECT_EQ(depkt.pop_ar()->id, 0x02);
 }
 
-TEST(NsuDepacketize, PendingHolBlockingWFullBlocksAwBehind) {
+TEST(NsuDepacketize, PendingHolBlockingS1WFullBlocksAwBehind) {
     SCENARIO(
-        "NSU Depacketize: HoL W queue full holds pending W; AW behind blocked until W drained");
+        "NSU Depacketize: HoL S1 W register full holds pending W; AW behind blocked until W "
+        "drained");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);

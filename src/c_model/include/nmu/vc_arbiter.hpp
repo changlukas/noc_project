@@ -10,7 +10,7 @@
 //   from rr_start_; first VC with pending space AND downstream credit wins
 //   (else backpressure).
 //
-// Fixed VC id (same-destination bypass): a ordering_req=0 AW/AR flit whose (dst_id, id) matches
+// Fixed VC id (same-destination bypass): an ordering_req=0 AW/AR flit whose (dst_id, id) matches
 // the id's previous same-channel flit reuses that VC instead of
 // round-robining -- deterministic VC allocation that fixes a same-(dst,id)
 // bypass streak to one VC so it cannot be reordered in-fabric. With no
