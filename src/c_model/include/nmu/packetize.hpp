@@ -110,9 +110,19 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     // AWUSER[57:8] (collective_op[9:8] + collective_mask[57:10]) is consumed
     // here and never forwarded to the AW payload (spec: docs/noc-target-spec.md
     // AWUSER layout). S4 will translate the mask into the flit's
-    // collective_mask/collective_op header fields and fan out; until then any
-    // nonzero collective request is rejected (no flit emitted).
-    if ((b.user >> 8) != 0) return false;
+    // collective_mask/collective_op header fields and fan out; until then a
+    // nonzero collective request is a hard failure, not backpressure — `return
+    // false` is the retry-until-it-clears idiom (NoC-full, RoB-full) and a
+    // collective request never clears on retry, so it would wedge the S1
+    // AW/W stage forever indistinguishable from congestion. Fail loud instead,
+    // matching addr_trans.hpp / depacketize.hpp / rob.hpp for this class of
+    // permanent illegal-input condition.
+    if ((b.user >> 8) != 0) {
+        assert(false &&
+               "nmu::Packetize::push_aw_with_meta: nonzero AWUSER collective_op/collective_mask "
+               "unsupported until S4");
+        std::abort();  // belt-and-braces for NDEBUG
+    }
     const uint8_t payload_user = static_cast<uint8_t>(b.user & 0xFFu);
 
     Flit f;
