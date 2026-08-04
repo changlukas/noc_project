@@ -183,14 +183,6 @@ inline void Router::accept_flit(std::size_t port, const Flit& f) {
         assert(false && "Router::accept_flit: vc_id >= num_vc");
         std::abort();
     }
-    // commtype header field is dropped from the 44 b header (no successor).
-    // multicast is superseded by collective_op/collective_mask; the router
-    // does not yet implement collective forwarding, so nonzero collective_op
-    // (anything but UNICAST) stays an unsupported-input abort here.
-    if (ni::header::COLLECTIVE_OP_ENABLED && f.get_header_field("collective_op") != 0) {
-        assert(false && "Router::accept_flit: nonzero collective_op unsupported");
-        std::abort();
-    }
     if (input_reg_[port].has_value()) {
         assert(false && "Router::accept_flit: >1 flit per link per cycle");
         std::abort();
