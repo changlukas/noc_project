@@ -83,9 +83,11 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
 //   wstrb         : 1 word (32-bit strobe)
 //   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
-// num_vc threads the topology VC count into the NmuConfig (write_vc=0,
-// read_vc=(num_vc>=2)?1:0 — read/write VC split). noc_req_credit_return / noc_rsp_credit_return
-// are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
+// num_vc threads the topology VC count into the NmuConfig; make_virtual_networks(num_vc)
+// splits it into disjoint write/read VC pools (lower half write, upper half read; num_vc==1
+// shares VC0 for both), and each direction round-robins id-agnostically within its pool.
+// noc_req_credit_return / noc_rsp_credit_return are per-VC: ONE svBitVecVal word, bit vc =
+// credit pulse on VC vc.
 // config_path: topology YAML with an `address_map` block (NULL/empty ->
 // legacy 16x16 uniform, no-rebase SAM).
 unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc,

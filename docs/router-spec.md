@@ -253,7 +253,6 @@ and returns to 4 by cycle 8.
 |---|---|---|---|
 | `NUM_VC` | `ni_params_pkg::NOC_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs per link, per network. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != NUM_VC`. |
 | `FLIT_WIDTH` | `NOC_FLIT_WIDTH_DFLT` = 408 | fixed 408 in this design | flit bus width, bits |
-| `SLAVE_VC_BUFFER_DEPTH` | 4 | 1..64 | NI-edge buffering parameter, unused by the router core. Owned by the NMU/NSU specs. |
 | `LINK_PORTS` | 5 | fixed 5 | port array size = {LOCAL, NORTH, EAST, SOUTH, WEST} |
 
 Router model configuration, fixed at `cmodel_router_create` time:

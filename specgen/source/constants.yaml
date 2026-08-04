@@ -61,15 +61,6 @@ noc:
     max: 1024
     sv_symbol: NOC_FLIT_WIDTH_DFLT
     cpp_symbol: NOC_FLIT_WIDTH
-  SLAVE_VC_BUFFER_DEPTH:
-    type: int
-    units: flits
-    description: "Per-VC buffer depth at NoC slave; defines initial credit count exposed to producer"
-    default: 8
-    min: 1
-    max: 64
-    sv_symbol: NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
-    cpp_symbol: NOC_SLAVE_VC_BUFFER_DEPTH
   ROUTER_VC_DEPTH:
     type: int
     units: flits
@@ -173,15 +164,6 @@ nsu:
     max: 1024
     sv_symbol: NSU_QUEUE_DEPTH_DFLT
     cpp_symbol: NSU_QUEUE_DEPTH
-  DEPKT_Q_DEPTH:
-    type: int
-    units: beats
-    description: "NSU Depacketize demux FIFO depth (shared by AW/W/AR)."
-    default: 16
-    min: 1
-    max: 1024
-    sv_symbol: NSU_DEPKT_Q_DEPTH_DFLT
-    cpp_symbol: NSU_DEPKT_Q_DEPTH
   META_BUFFER_MAX_OUTSTANDING:
     type: int
     units: transactions

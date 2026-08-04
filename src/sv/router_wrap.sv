@@ -39,7 +39,6 @@
 module router_wrap #(
     parameter int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT,
     parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,
-    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT,
     // Router port count (LOCAL + N/E/S/W). Mirrors c_model ROUTER_PORT_COUNT /
     // ROUTER_LINK_PORTS; the DPI marshals the LINK face port-major over these.
     // Fixed at 5; not overridden (kept as a parameter so the port list can use it).

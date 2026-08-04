@@ -17,10 +17,6 @@ struct PortParams {
     std::size_t ar_queue_depth = ni::NSU_QUEUE_DEPTH;
     std::size_t b_queue_depth = ni::NSU_QUEUE_DEPTH;
     std::size_t r_queue_depth = ni::NSU_QUEUE_DEPTH;
-    // NSU Depacketize internal demux FIFO depths (NSU consumes AW/W/AR).
-    std::size_t depkt_aw_q_depth = ni::NSU_DEPKT_Q_DEPTH;
-    std::size_t depkt_w_q_depth = ni::NSU_DEPKT_Q_DEPTH;
-    std::size_t depkt_ar_q_depth = ni::NSU_DEPKT_Q_DEPTH;
     // NSU MetaBuffer shared outstanding pool size, per direction (write / read).
     std::size_t meta_buffer_max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING;
     // Count of distinct AXI IDs the NSU presents downstream. 1 collapses every

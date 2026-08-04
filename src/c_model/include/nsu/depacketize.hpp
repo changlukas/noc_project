@@ -36,14 +36,8 @@ namespace ni::cmodel::nsu {
 // handled by a downstream W-meta FIFO.
 class Depacketize : public RequestDepacketizer {
   public:
-    Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t aw_q_depth,
-                std::size_t w_q_depth, std::size_t ar_q_depth, std::size_t max_unique_ids)
-        : req_in_(req_in),
-          meta_(meta),
-          aw_q_depth_(aw_q_depth),
-          w_q_depth_(w_q_depth),
-          ar_q_depth_(ar_q_depth),
-          max_unique_ids_(max_unique_ids) {
+    Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t max_unique_ids)
+        : req_in_(req_in), meta_(meta), max_unique_ids_(max_unique_ids) {
         // Every path that configures an NSU funnels through here (YAML loader, co-sim
         // wrap defaults, direct NsuConfig test fixtures), so this is the config trust
         // boundary: validate with a throw, not an assert, so a misconfigured value fails
@@ -90,9 +84,6 @@ class Depacketize : public RequestDepacketizer {
   private:
     router::NocReqIn& req_in_;
     MetaBuffer& meta_;
-    // Unused: old per-channel queues replaced by S1 PipelineStage registers.
-    // Depths are kept as members to preserve backpressure checks if needed.
-    std::size_t aw_q_depth_, w_q_depth_, ar_q_depth_;
     std::size_t max_unique_ids_;
     std::optional<Flit> pending_;
 

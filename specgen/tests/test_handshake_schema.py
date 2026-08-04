@@ -22,7 +22,6 @@ def test_load_constants_returns_expected_shape():
     assert c["axi"]["ID_WIDTH"]["default"] == 8
     assert c["axi"]["DATA_WIDTH"]["allowed"] == [32, 64, 128, 256, 512, 1024]
     assert c["noc"]["FLIT_WIDTH"]["sv_symbol"] == "NOC_FLIT_WIDTH_DFLT"
-    assert c["noc"]["SLAVE_VC_BUFFER_DEPTH"]["default"] == 4
     assert c["derived"]["WSTRB_WIDTH"]["expression"] == "DATA_WIDTH / 8"
 
 
@@ -260,7 +259,7 @@ def test_noc_intf_protocol_semantics_complete():
     sem = data["interfaces"]["noc_intf"]["protocol_semantics"]
     assert sem["credit_return_encoding"]["scheme"] == "per_vc_credit_pulse_vector"
     assert sem["credit_return_encoding"]["onehot_check_required"] is False
-    assert sem["initial_credits"]["value_per_vc"] == "SLAVE_VC_BUFFER_DEPTH"
+    assert sem["initial_credits"]["value_per_vc"] == "ROUTER_VC_DEPTH"
     assert sem["combinational_loops"].startswith("forbidden")
 
 

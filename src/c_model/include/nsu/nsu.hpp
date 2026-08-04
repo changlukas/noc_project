@@ -155,9 +155,7 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
                         cfg_.wormhole_per_input_depth),
       meta_buffer_(cfg_.port_params.meta_buffer_max_outstanding),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), meta_buffer_, cfg_.src_id),
-      depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.depkt_aw_q_depth,
-                   cfg_.port_params.depkt_w_q_depth, cfg_.port_params.depkt_ar_q_depth,
-                   cfg_.port_params.meta_buffer_max_unique_ids),
+      depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids),
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {

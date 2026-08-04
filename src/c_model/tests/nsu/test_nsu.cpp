@@ -30,9 +30,6 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
     cfg.port_params.ar_queue_depth = 16;
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
-    cfg.port_params.depkt_aw_q_depth = 16;
-    cfg.port_params.depkt_w_q_depth = 16;
-    cfg.port_params.depkt_ar_q_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
     cfg.port_params.meta_buffer_max_unique_ids = 256;
     Nsu nsu(cfg, channel.nsu_req_in(0), channel.nsu_rsp_out(0));
@@ -73,17 +70,13 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
 
     NsuConfig cfg{};
     cfg.src_id = kNsuSrcId;
-    // PortParams + depacketize depths self-default from ni_params.h generated
-    // constants (see nsu/port_params.hpp); set explicitly here for a hermetic,
-    // self-documenting test.
+    // PortParams self-defaults from ni_params.h generated constants (see
+    // nsu/port_params.hpp); set explicitly here for a hermetic, self-documenting test.
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;
     cfg.port_params.ar_queue_depth = 16;
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
-    cfg.port_params.depkt_aw_q_depth = 16;
-    cfg.port_params.depkt_w_q_depth = 16;
-    cfg.port_params.depkt_ar_q_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
     cfg.port_params.meta_buffer_max_unique_ids = 256;
     NsuStandalone nsu(cfg);

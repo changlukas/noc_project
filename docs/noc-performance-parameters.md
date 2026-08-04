@@ -21,13 +21,12 @@ while buffer and outstanding depths move the queuing part.
 | `NUM_VC` | Peak bandwidth, area | Recovers link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC`, so it scales with data width | 1 (1 to 8) |
 | `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (1 to 16) |
 | `ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender, sized by rule 1 below | 4 (1 to 16) |
-| `SLAVE_VC_BUFFER_DEPTH` | Sustained throughput | Initial credit exposed to the producer, sized by rule 1 below | 4 (1 to 64) |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 2 (1 to 16) |
 | `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID, hence the memory latency a master can hide behind concurrency | 32 (1 to 256) |
 | `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return | 32, 32 (1 to 256) |
 | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
 | `NMU_QUEUE_DEPTH`, `NSU_QUEUE_DEPTH` | Burst absorption | AXI-channel FIFO depth at the master-side (NMU) and slave-side (NSU) network interfaces, absorbs injection bursts | 16, 16 (1 to 1024) |
-| `NMU_DEPKT_Q_DEPTH`, `NSU_DEPKT_Q_DEPTH` | Burst absorption | Depacketize demux FIFO depth | 16, 16 (1 to 1024) |
+| `NMU_DEPKT_Q_DEPTH` | Burst absorption | Depacketize demux FIFO depth | 16 (1 to 1024) |
 | `NMU_ARBITER_FIFO_DEPTH`, `NSU_ARBITER_FIFO_DEPTH` | Burst absorption | Wormhole and VC-arbiter staging depth | 4, 4 (1 to 64) |
 
 ## Sizing rules
@@ -39,7 +38,7 @@ Both are minimums for full rate, not target values.
 cycle from a credit being consumed until the returned credit is usable at the sender.
 
 ```text
-ROUTER_VC_DEPTH, SLAVE_VC_BUFFER_DEPTH  >=  C_rt
+ROUTER_VC_DEPTH  >=  C_rt
 
   C_rt  credit round-trip, in flits, from credit consumption to the returned credit usable
 ```

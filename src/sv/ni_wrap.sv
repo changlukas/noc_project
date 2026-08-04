@@ -33,8 +33,7 @@ module ni_wrap #(
     parameter int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     parameter int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT,
-    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,
-    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
+    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
@@ -68,7 +67,7 @@ module ni_wrap #(
 
     nmu_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH)
     ) u_nmu (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nmu_ctx_i),
         .axi_req_i(master_axi_req_i), .axi_rsp_o(master_axi_rsp_o),
@@ -78,7 +77,7 @@ module ni_wrap #(
 
     nsu_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
-        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), .SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)
+        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH)
     ) u_nsu (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nsu_ctx_i),
         .noc_req_i(noc_req_i), .noc_req_cred_o(noc_req_cred_o),

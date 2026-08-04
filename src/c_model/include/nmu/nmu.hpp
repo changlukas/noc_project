@@ -12,10 +12,15 @@
 //   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort
 //     ──> back to external AXI master
 //
-// Per-cycle tick order (upstream-first; matches the established
-// vc_arb/wormhole_arbiter pattern):
-//   depacketize_.tick(); axi_slave_port_.tick();
-//   wormhole_arbiter_.tick(); vc_arbiter_.tick();
+// Per-cycle tick order (exact sequence in Nmu::tick()):
+//   req: wormhole_arbiter_.tick(); vc_arbiter_.tick();
+//        req_s1_bridge_.tick(packetize_); axi_slave_port_.tick_req();
+//   rsp: drain_rsp_b_output_(); drain_rsp_r_output_();
+//        advance_rsp_b_shift_(); advance_rsp_r_shift_();
+//        drain_rsp_s2_b_(); advance_rsp_s2_b_();  // B RoB is always on
+//        read_rob_mode == Enabled: drain_rsp_s2_r_(); advance_rsp_s2_r_();
+//        read_rob_mode == Disabled: drain_rsp_robless_r_();
+//        depacketize_.tick();
 //
 // Lifetime: Nmu deletes move/copy (WormholeArbiter is non-movable).
 // Member declaration order respects ctor ref dependencies — see private

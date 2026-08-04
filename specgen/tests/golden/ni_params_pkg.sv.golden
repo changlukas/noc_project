@@ -13,8 +13,7 @@ package ni_params_pkg;
   // NoC parameter defaults
   localparam int unsigned NOC_NUM_VC_DFLT                   = 1;
   localparam int unsigned NOC_FLIT_WIDTH_DFLT               = 408;
-  localparam int unsigned NOC_SLAVE_VC_BUFFER_DEPTH_DFLT    = 4;
-  localparam int unsigned NOC_ROUTER_VC_DEPTH_DFLT          = 4;
+  localparam int unsigned NOC_ROUTER_VC_DEPTH_DFLT          = 8;
   localparam int unsigned NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT = 2;
   localparam int unsigned NOC_MESH_X_DIM_DFLT               = 4;
   localparam int unsigned NOC_MESH_Y_DIM_DFLT               = 4;
@@ -29,7 +28,6 @@ package ni_params_pkg;
 
   // NSU depth defaults
   localparam int unsigned NSU_QUEUE_DEPTH_DFLT                 = 16;
-  localparam int unsigned NSU_DEPKT_Q_DEPTH_DFLT               = 16;
   localparam int unsigned NSU_META_BUFFER_MAX_OUTSTANDING_DFLT = 32;
   localparam int unsigned NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT  = 1;
   localparam int unsigned NSU_ARBITER_FIFO_DEPTH_DFLT          = 4;

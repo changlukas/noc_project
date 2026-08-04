@@ -65,9 +65,6 @@ class NsuWrap {
         cfg.port_params.ar_queue_depth = queue_depth;
         cfg.port_params.b_queue_depth = queue_depth;
         cfg.port_params.r_queue_depth = queue_depth;
-        cfg.port_params.depkt_aw_q_depth = ni::NSU_DEPKT_Q_DEPTH;
-        cfg.port_params.depkt_w_q_depth = ni::NSU_DEPKT_Q_DEPTH;
-        cfg.port_params.depkt_ar_q_depth = ni::NSU_DEPKT_Q_DEPTH;
         cfg.port_params.meta_buffer_max_outstanding = max_outstanding;
         cfg.port_params.meta_buffer_max_unique_ids = max_unique_ids;
         cfg.wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;

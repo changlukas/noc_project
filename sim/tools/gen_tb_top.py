@@ -184,13 +184,9 @@ def emit_fabric(topo: dict) -> str:
     w("    parameter int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT,")
     w(f"    parameter int unsigned NUM_VC                = {num_vc},")
     w("    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT,")
-    w("    parameter int unsigned SLAVE_VC_BUFFER_DEPTH = "
-      "ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT,")
-    w("    // ROUTER_VC_DEPTH: per-VC input FIFO depth inside the router; this is")
-    w("    // the credit window for INTER-ROUTER links (distinct from SLAVE_VC_BUFFER_DEPTH")
-    w("    // which governs the router->NSU eject path).  Both derive from constants.yaml;")
-    w("    // they coincide at the default of 4 but must be threaded separately so the")
-    w("    // link_perf_monitor assertion holds at ANY configurable depth.")
+    w("    // ROUTER_VC_DEPTH: per-VC input FIFO depth inside the router; also the")
+    w("    // credit seed the NMU/NSU sender counters are initialized with, so both ends")
+    w("    // of every link agree on the credit window.")
     w("    parameter int unsigned ROUTER_VC_DEPTH       = "
       "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT")
     w(") (")
@@ -274,8 +270,7 @@ def emit_fabric(topo: dict) -> str:
     w("")
     w("        ni_wrap #(")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-    w("            .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH)")
+    w("            .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH)")
     w("        ) u_ni (")
     w("            .clk_i(clk_i), .rst_ni(rst_ni),")
     w("            .nmu_ctx_i(nmu_ctx[i]), .nsu_ctx_i(nsu_ctx[i]),")
@@ -288,8 +283,7 @@ def emit_fabric(topo: dict) -> str:
     w("        );")
     w("")
     w("        router_wrap #(")
-    w("            .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
+    w("            .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH),")
     w("            .LINK_PORTS(LINK_PORTS)")
     w("        ) u_router (")
     w("            .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(router_ctx[i]),")
@@ -453,10 +447,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    localparam int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
     w(f"    localparam int unsigned NUM_VC                = {num_vc};  // from topology YAML")
     w("    localparam int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT;")
-    w("    localparam int unsigned SLAVE_VC_BUFFER_DEPTH = "
-      "ni_params_pkg::NOC_SLAVE_VC_BUFFER_DEPTH_DFLT;")
     w("    // ROUTER_VC_DEPTH: credit window for inter-router links; passed to fabric so")
-    w("    // link_perf_monitor tracks the ACTUAL receiving buffer depth (not SLAVE_VC_BUFFER_DEPTH).")
+    w("    // link_perf_monitor tracks the actual receiving buffer depth.")
     w("    localparam int unsigned ROUTER_VC_DEPTH       = "
       "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
     w("    // Per-destination region windows: REGION_BASE[s] = SAM base for tile s")
@@ -599,8 +591,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // -------------------------------------------------------------------------")
     w(f"    noc_fabric_{name} #(")
     w("        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-    w("        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH), "
-      ".SLAVE_VC_BUFFER_DEPTH(SLAVE_VC_BUFFER_DEPTH),")
+    w("        .NUM_VC(NUM_VC), .FLIT_WIDTH(FLIT_WIDTH),")
     w("        .ROUTER_VC_DEPTH(ROUTER_VC_DEPTH)")
     w("    ) u_fabric (")
     w("        .clk_i(clk_i), .rst_ni(rst_ni),")

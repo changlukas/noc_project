@@ -15,19 +15,22 @@
 //   inbound flit pushes straight into router.input(port).
 //   each inbound credit pulse calls router.receive_credit(port, 0).
 // LOCAL pin mapping (NI edge):
-//   inbound  : in_.req_in / in_.rsp_in            -> router.input(LOCAL).push_flit
-//   eject    : req_local_eject_ / rsp_local_eject_ -> out_.req_out / out_.rsp_out
-//   out cred : req_local_credit_/rsp_local_credit_.take(0) -> out_.*_out_credit_return
+//   inbound  : in_.req_in_valid/in_.req_in_flit -> req_router_->input(LOCAL).push_flit
+//              in_.rsp_in_valid/in_.rsp_in_flit -> rsp_router_->input(LOCAL).push_flit
+//   eject    : req_local_eject_->pop_flit() -> out_.req_out_valid/req_out_flit
+//              rsp_local_eject_->pop_flit() -> out_.rsp_out_valid/rsp_out_flit
+//   out cred : req_local_credit_/rsp_local_credit_.take(vc), one vc per num_vc_ ->
+//              out_.req_out_credit_return[vc]/rsp_out_credit_return[vc]
 //              (PULSE: router LOCAL input drained -> credit to NMU/NSU)
-//   in  cred : in_.req_in_credit_return / rsp_in_credit_return (NMU/NSU consumed
-//              an ejected flit) -> router.receive_credit(LOCAL, 0) (replenishes
-//              the router's built-in credit_[LOCAL] sender counter, router->NI dir)
+//   in  cred : in_.req_in_credit_return[vc]/rsp_in_credit_return[vc] (NMU/NSU consumed
+//              an ejected flit) -> req_router_/rsp_router_->receive_credit(LOCAL, vc)
+//              (replenishes the router's built-in credit_[LOCAL] sender counter, router->NI dir)
 // The LINK port mapping (N/E/S/W, matching route_compute's dimension-order
 // routing) is identical, over the link_<N>_* pins toward each neighbor.
 //
 // num_vc comes from cmodel_router_create; LOCAL/LINK depths = NOC_ROUTER_VC_DEPTH
-// (spec-aligned, matching SLAVE_VC_BUFFER_DEPTH so link_perf_monitor assertions hold
-// under high-fan-in hotspot traffic).
+// (spec-aligned; matches the NMU/NSU sender credit seed so link_perf_monitor assertions
+// hold under high-fan-in hotspot traffic).
 // Credit pulses marshal per-VC across the DPI boundary (VcCreditVec); the LINK
 // face is per-direction (ROUTER_LINK_PORTS), only link_port_ live at 2-node.
 //
@@ -38,9 +41,10 @@
 // reset stance); the tb_top reset window precedes all *_create + traffic, so no
 // stale pending credit can leak post-reset.
 //
-// Depth rationale: vc_depth = NOC_ROUTER_VC_DEPTH (spec default, matches the SV
-// SLAVE_VC_BUFFER_DEPTH=4 that seeds the link_perf_monitor credit counter).  The
-// eject buffers are sized to num_vc * vc_depth (aggregate output-credit window).
+// Depth rationale: vc_depth = NOC_ROUTER_VC_DEPTH (spec default; also the value the
+// NMU/NSU seed their own sender credit counter with, so both ends of the link agree
+// on the credit window). The eject buffers are sized to num_vc * vc_depth (aggregate
+// output-credit window).
 // The NMU/NSU is credit-gated by *_out_credit_return / link_*_in_credit, so the
 // router input never overflows.
 #pragma once
@@ -79,7 +83,7 @@ class RouterWrap {
         c.mesh_x_dim = mesh_x_dim;
         c.mesh_y_dim = mesh_y_dim;
         c.num_vc = num_vc;
-        // Use spec-aligned depths (matching SLAVE_VC_BUFFER_DEPTH and
+        // Use spec-aligned depths (NOC_ROUTER_VC_DEPTH and
         // NOC_ROUTER_OUTPUT_FIFO_DEPTH from ni_params.h / constants.yaml).
         c.vc_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH);
         c.output_fifo_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH);

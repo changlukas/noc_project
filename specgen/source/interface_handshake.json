@@ -16,9 +16,9 @@
     "noc_intf": {
       "kind": "noc_link",
       "parameters": [
-        { "name": "NUM_VC",                "constants_yaml_key": "noc.NUM_VC" },
-        { "name": "FLIT_WIDTH",            "constants_yaml_key": "noc.FLIT_WIDTH" },
-        { "name": "SLAVE_VC_BUFFER_DEPTH", "constants_yaml_key": "noc.SLAVE_VC_BUFFER_DEPTH" }
+        { "name": "NUM_VC",           "constants_yaml_key": "noc.NUM_VC" },
+        { "name": "FLIT_WIDTH",       "constants_yaml_key": "noc.FLIT_WIDTH" },
+        { "name": "ROUTER_VC_DEPTH",  "constants_yaml_key": "noc.ROUTER_VC_DEPTH" }
       ],
       "signals": [
         { "name": "req_valid",         "width_expr": "1",          "driven_by": "upstream" },
@@ -41,8 +41,8 @@
         },
         "initial_credits": {
           "scheme": "configured_at_reset",
-          "value_per_vc": "SLAVE_VC_BUFFER_DEPTH",
-          "note": "Producer assumes SLAVE_VC_BUFFER_DEPTH credits per VC per channel after rst_ni deassert."
+          "value_per_vc": "ROUTER_VC_DEPTH",
+          "note": "Producer assumes ROUTER_VC_DEPTH credits per VC per channel after rst_ni deassert."
         },
         "valid_stability": "once <chan>_valid asserted, <chan>_valid + <chan>_flit MUST hold until handshake completes (always-accept on receiver side; backpressure via producer credit exhaustion). See IHI 0022H §A3.2.1 analog.",
         "combinational_loops": "forbidden — <chan>_credit_return must be a registered output of the side receiving that channel's valid/flit (per <chan>)"
