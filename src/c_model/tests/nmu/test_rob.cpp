@@ -1231,7 +1231,8 @@ TEST(NmuRobDeath, Enabled_PushAr_OversizedBurst_SecondSameIdAbortsNotWedged) {
     axi::ArBeat second = make_ar(0x05, 0x100000000ull + 0x200);  // dst 1
     second.len = 255;
     // EXPECT_DEATH forks: `second` never actually mutates `rob` in this (parent) process.
-    EXPECT_DEATH(rob.push_ar(second), ".*");
+    // Matcher pins the new guard's message, not just "something aborted".
+    EXPECT_DEATH(rob.push_ar(second), "exceed RoB read depth");
 
     axi::ArBeat other = make_ar(0x06, 0x300);
     other.len = 255;
