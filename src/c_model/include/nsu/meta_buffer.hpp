@@ -12,8 +12,9 @@ namespace ni::cmodel::nsu {
 // Request class, read off the request flit's axi_ch at AW/AR allocate time and
 // carried in MetaEntry so the matching B/R response is stamped in the same
 // class (NarrowB/DataB, NarrowR/DataR). No SAM involvement on the NSU side --
-// the class arrives already resolved in the flit header.
-enum class AxiClass : uint8_t { Narrow, Data };
+// the class arrives already resolved in the flit header. Alias of axi::AxiClass
+// (nmu::addr_trans::SamEntry's class): one enum, shared by both NI halves.
+using AxiClass = axi::AxiClass;
 
 struct MetaEntry {
     uint8_t src_id;       // requesting tile; becomes the response flit dst_id
@@ -21,6 +22,12 @@ struct MetaEntry {
     uint8_t ordering_req;
     uint8_t ordering_tag;
     AxiClass cls;  // request's class; the response echoes it
+    // AR basis for the read side's narrow lane re-anchor (nsu::Packetize::
+    // build_r_flit). Unused by write entries -- B carries no data.
+    uint64_t local_addr = 0;
+    uint8_t len = 0;
+    uint8_t size = 0;
+    axi::Burst burst = axi::Burst::INCR;
 };
 
 // Downstream AXI ID presented to the slave, from the master's upstream ID.
@@ -89,7 +96,15 @@ class MetaBuffer {
         assert(!read_[rid].empty() && "commit_read on empty queue");
         read_[rid].pop_front();
         --read_count_;
+        read_beat_counter_[rid] = 0;  // next queued entry (if any) starts at beat 0
     }
+
+    // Per-downstream-id running beat index within the front read_[rid] entry's
+    // burst. Feeds nsu::Packetize::build_r_flit's narrow lane re-anchor
+    // (axi::beat_addr needs the beat index, not just the AR base address).
+    // Resets to 0 on commit_read, when the next queued burst becomes front.
+    uint16_t read_beat_index(uint8_t rid) const noexcept { return read_beat_counter_[rid]; }
+    void advance_read_beat(uint8_t rid) noexcept { ++read_beat_counter_[rid]; }
 
   private:
     // 256 buckets sized by AXI_ID_SPACE; occupancy is bounded by the shared
@@ -97,6 +112,7 @@ class MetaBuffer {
     // artifact, not an RTL cost.
     std::array<std::deque<MetaEntry>, axi::AXI_ID_SPACE> write_;  // per downstream awid
     std::array<std::deque<MetaEntry>, axi::AXI_ID_SPACE> read_;   // per downstream arid
+    std::array<uint16_t, axi::AXI_ID_SPACE> read_beat_counter_{};
     std::size_t max_outstanding_;
     std::size_t write_count_ = 0;
     std::size_t read_count_ = 0;

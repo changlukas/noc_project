@@ -61,9 +61,11 @@ TEST_F(AxiProtocolDeath, BurstEncoding_AcceptsAllThreeLegalValues) {
 }
 
 TEST_F(AxiProtocolDeath, SizeBound_RejectsAboveMax) {
-    SCENARIO("protocol_rules: SIZE_BOUND rejects size > log2(DATA_BYTES) (>5 at 32B bus)");
-    // DATA_BYTES = 32 → max size = 5; size = 6 must trip.
-    EXPECT_DEATH({ AXI_PROTOCOL_ASSERT(rules::check_size_bound(6), "SIZE_BOUND"); }, ".*");
+    SCENARIO(
+        "protocol_rules: SIZE_BOUND rejects size > log2(DATA_BYTES) (>6 at the 64B data-class "
+        "bus)");
+    // DATA_BYTES = 64 -> max size = 6; size = 7 must trip.
+    EXPECT_DEATH({ AXI_PROTOCOL_ASSERT(rules::check_size_bound(7), "SIZE_BOUND"); }, ".*");
 }
 
 TEST_F(AxiProtocolDeath, WrapLen_RejectsLen2) {
@@ -141,27 +143,21 @@ TEST_F(AxiProtocolDeath, RLastTiming_RejectsEarlyLast) {
         { AXI_PROTOCOL_ASSERT(rules::check_r_last_timing(true, 1, 3), "R_LAST_TIMING"); }, ".*");
 }
 
-TEST_F(AxiProtocolDeath, StrbValidBits_AcceptsAllOnesAt32Bytes) {
-    SCENARIO("protocol_rules: STRB_VALID_BITS accepts all 32 lanes set at today's 32B bus");
-    // DATA_BYTES = WSTRB_WIDTH = 32 → mask = 0xFFFF'FFFF; all 32 bits set is
-    // exactly the upper boundary of the valid range.
-    EXPECT_TRUE(rules::check_strb_valid_bits(0xFFFF'FFFFu));
+TEST_F(AxiProtocolDeath, StrbValidBits_AcceptsAllOnesAt64Bytes) {
+    SCENARIO(
+        "protocol_rules: STRB_VALID_BITS accepts all 64 lanes set at the S2 data-class 64B bus");
+    // DATA_BYTES = WSTRB_WIDTH = 64 -> mask = ~0ull (kFullStrbMask); all 64
+    // bits set is exactly the upper boundary of the valid range.
+    EXPECT_TRUE(rules::check_strb_valid_bits(~0ull));
 }
 
-TEST_F(AxiProtocolDeath, StrbValidBits_RejectsBitAboveDataBytes) {
-    SCENARIO(
-        "protocol_rules: STRB_VALID_BITS rejects a strb bit above DATA_BYTES — the mask is live, "
-        "not the removed always-true shortcut");
-    // Bit 32 is one past the 32-lane mask at today's DATA_BYTES=32. Regression
-    // guard for the `if constexpr (DATA_BYTES >= 32) return true` shortcut
-    // that used to silently accept any value at this width.
-    EXPECT_DEATH(
-        {
-            AXI_PROTOCOL_ASSERT(rules::check_strb_valid_bits(1ull << axi::DATA_BYTES),
-                                "STRB_VALID_BITS");
-        },
-        ".*");
-}
+// StrbValidBits_RejectsBitAboveDataBytes (a T2b-era regression guard for the
+// removed `if constexpr (DATA_BYTES >= 32) return true` shortcut) is gone:
+// at DATA_BYTES=64 the WSTRB type is exactly uint64_t, so no strb value has
+// "a bit above DATA_BYTES" to construct — 1ull << 64 is undefined behaviour,
+// not a valid test input. check_strb_valid_bits' live-mask behavior (as
+// opposed to an always-true shortcut) is still exercised by the AcceptsAllOnes
+// test above and by StrbSparseLegal_* below.
 
 TEST_F(AxiProtocolDeath, StrbSparseLegal_RejectsBitsOutsideWindow) {
     SCENARIO(

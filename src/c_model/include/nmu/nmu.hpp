@@ -56,7 +56,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
   public:
     bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) override {
         if (s1_aw_.full()) return false;
-        s1_aw_.accept({b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag});
+        s1_aw_.accept(
+            {b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag, meta.cls});
         return true;
     }
     bool push_w(const axi::WBeat& b) override {
@@ -66,7 +67,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     }
     bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) override {
         if (s1_ar_.full()) return false;
-        s1_ar_.accept({b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag});
+        s1_ar_.accept(
+            {b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag, meta.cls});
         return true;
     }
 
@@ -80,7 +82,7 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
         if (s1_aw_.full()) {
             const auto& e = s1_aw_.peek();
             if (packetize.push_aw_with_meta(
-                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag})) {
+                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag, e.cls})) {
                 s1_aw_.take();
             }
         }
@@ -93,16 +95,18 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
         if (s1_ar_.full()) {
             const auto& e = s1_ar_.peek();
             if (packetize.push_ar_with_meta(
-                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag})) {
+                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag, e.cls})) {
                 s1_ar_.take();
             }
         }
     }
 
+    // axi_ch is a selector token for "which channel kind" (AW/W/AR), not the
+    // literal encoding of a produced flit -- accept both classes' encodings.
     std::size_t occupancy(uint8_t axi_ch) const noexcept {
-        if (axi_ch == ni::AXI_CH_NarrowAw) return s1_aw_.occupancy();
-        if (axi_ch == ni::AXI_CH_NarrowW) return s1_w_.occupancy();
-        if (axi_ch == ni::AXI_CH_NarrowAr) return s1_ar_.occupancy();
+        if (axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_DataAw) return s1_aw_.occupancy();
+        if (axi_ch == ni::AXI_CH_NarrowW || axi_ch == ni::AXI_CH_DataW) return s1_w_.occupancy();
+        if (axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr) return s1_ar_.occupancy();
         return 0;
     }
 
@@ -178,10 +182,13 @@ class Nmu {
             //   S2 = VcArbiter pending (toward NoC)
             if (stage == 0) return req_s1_bridge_.occupancy(axi_ch);
             if (stage == 1) {
-                // WormholeArbiter inputs: 0=AW, 1=W, 2=AR
-                if (axi_ch == ni::AXI_CH_NarrowAw) return wormhole_arbiter_.pending_size(0);
-                if (axi_ch == ni::AXI_CH_NarrowW) return wormhole_arbiter_.pending_size(1);
-                if (axi_ch == ni::AXI_CH_NarrowAr) return wormhole_arbiter_.pending_size(2);
+                // WormholeArbiter inputs: 0=AW, 1=W, 2=AR (either class)
+                if (axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_DataAw)
+                    return wormhole_arbiter_.pending_size(0);
+                if (axi_ch == ni::AXI_CH_NarrowW || axi_ch == ni::AXI_CH_DataW)
+                    return wormhole_arbiter_.pending_size(1);
+                if (axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr)
+                    return wormhole_arbiter_.pending_size(2);
             }
             if (stage == 2) {
                 // VcArbiter: single VC in default config; sum over all VCs per channel
@@ -200,25 +207,26 @@ class Nmu {
             // NmuRsp ROB Disabled: 2 stages
             //   S0 = Depacketize deque
             //   S1 = AxiSlavePort b_q/r_q
-            bool rob_enabled =
-                (axi_ch == ni::AXI_CH_NarrowB) ? true : (cfg_.read_rob_mode == RobMode::Enabled);
+            const bool is_b = (axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_DataB);
+            const bool is_r = (axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR);
+            bool rob_enabled = is_b ? true : (cfg_.read_rob_mode == RobMode::Enabled);
             if (stage == 0) {
-                if (axi_ch == ni::AXI_CH_NarrowB) return depacketize_.b_occupancy();
-                if (axi_ch == ni::AXI_CH_NarrowR) return depacketize_.r_occupancy();
+                if (is_b) return depacketize_.b_occupancy();
+                if (is_r) return depacketize_.r_occupancy();
             }
             if (rob_enabled) {
                 if (stage == 1) {
-                    if (axi_ch == ni::AXI_CH_NarrowB) return s2_rsp_b_.occupancy();
-                    if (axi_ch == ni::AXI_CH_NarrowR) return s2_rsp_r_.occupancy();
+                    if (is_b) return s2_rsp_b_.occupancy();
+                    if (is_r) return s2_rsp_r_.occupancy();
                 }
                 if (stage == 2) {
-                    if (axi_ch == ni::AXI_CH_NarrowB) return axi_slave_port_.b_q_size();
-                    if (axi_ch == ni::AXI_CH_NarrowR) return axi_slave_port_.r_q_size();
+                    if (is_b) return axi_slave_port_.b_q_size();
+                    if (is_r) return axi_slave_port_.r_q_size();
                 }
             } else {
                 if (stage == 1) {
-                    if (axi_ch == ni::AXI_CH_NarrowB) return axi_slave_port_.b_q_size();
-                    if (axi_ch == ni::AXI_CH_NarrowR) return axi_slave_port_.r_q_size();
+                    if (is_b) return axi_slave_port_.b_q_size();
+                    if (is_r) return axi_slave_port_.r_q_size();
                 }
             }
         }

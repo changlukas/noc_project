@@ -78,7 +78,8 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
     auto flit_opt = aw_cap.pop();
     ASSERT_TRUE(flit_opt.has_value());
     const auto& f = *flit_opt;
-    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
+    // legacy_sam() is memory space (no "space" annotation -> data class).
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_DataAw);
     EXPECT_EQ(f.get_header_field("src_id"), kSrcId);
     EXPECT_EQ(f.get_header_field("vc_id"), 0u);
     EXPECT_EQ(f.get_header_field("flit_tail"), 0u);  // AW starts wormhole packet (FlooNoC)
@@ -98,7 +99,7 @@ TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
     auto w_flit_opt = w_cap.pop();
     ASSERT_TRUE(w_flit_opt.has_value());
     EXPECT_EQ(w_flit_opt->get_header_field("dst_id"), 0x34u);
-    EXPECT_EQ(w_flit_opt->get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
+    EXPECT_EQ(w_flit_opt->get_header_field("axi_ch"), ni::AXI_CH_DataW);
 }
 
 TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
@@ -254,7 +255,8 @@ TEST(NmuPacketize, ArqosRoundTrip) {
 
 TEST(NmuPacketize, WPayloadBitPerfect) {
     SCENARIO(
-        "NMU Packetize: W payload (wdata/wstrb/wlast/wuser) round-trips bit-perfect through flit");
+        "NMU Packetize: W payload (wdata/wstrb/wlast/wuser) round-trips bit-perfect through flit "
+        "(legacy_sam() is memory space -> data class -> DATA_W)");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
     ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
@@ -263,11 +265,12 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
     ASSERT_TRUE(pkt.push_w(w));
     aw_cap.pop();  // discard AW
     auto f = *w_cap.pop();
-    EXPECT_EQ(f.get_payload_field("NARROW_W", "wlast"), 1u);
-    EXPECT_EQ(f.get_payload_field("NARROW_W", "wstrb"), 0xDEADBEEFu);
-    EXPECT_EQ(f.get_payload_field("NARROW_W", "wuser"), 0xABu);
-    std::array<uint8_t, 32> wdata_out{};
-    f.get_payload_bytes("NARROW_W", "wdata", wdata_out.data(), 256);
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_DataW);
+    EXPECT_EQ(f.get_payload_field("DATA_W", "wlast"), 1u);
+    EXPECT_EQ(f.get_payload_field("DATA_W", "wstrb"), 0xDEADBEEFu);
+    EXPECT_EQ(f.get_payload_field("DATA_W", "wuser"), 0xABu);
+    std::array<uint8_t, axi::DATA_BYTES> wdata_out{};
+    f.get_payload_bytes("DATA_W", "wdata", wdata_out.data(), ni::width::NOC_DATA_WIDTH);
     for (int i = 0; i < 32; ++i) EXPECT_EQ(wdata_out[i], static_cast<uint8_t>(i));
 }
 
@@ -284,7 +287,7 @@ TEST(NmuPacketize, ArEncodesAxiChAndOrderingTag) {
     // (covered by PushAwWithMeta_OverrideDefault).
     ASSERT_TRUE(pkt.push_ar(make_ar(0x07, 0x9900004000)));
     auto f = *ar_cap.pop();
-    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAr);
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_DataAr);
     EXPECT_EQ(f.get_header_field("dst_id"), 0x99u);
     EXPECT_EQ(f.get_header_field("ordering_req"), 0u);
     EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);

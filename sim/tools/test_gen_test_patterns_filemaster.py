@@ -9,7 +9,9 @@ import gen_test_patterns as g
 
 def test_axi_widths_follow_constants_ssot():
     w = g.axi_widths()
-    assert w == {"id": 8, "addr": 64, "data": 256}
+    # addr=48 per docs/noc-target-spec.md §6 (pre-S2); data=512 is S2 T2d's
+    # data-class flip (specgen/source/constants.yaml axi.DATA_WIDTH).
+    assert w == {"id": 8, "addr": 48, "data": 512}
 
 
 def test_encode_write_beats_full_width_addr_in_data():

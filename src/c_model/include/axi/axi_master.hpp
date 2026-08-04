@@ -518,8 +518,16 @@ class AxiMasterT {
                     const std::size_t off = op_beat * bpb + j;
                     w.data[byte_lane + j] = (off < op.data.size()) ? op.data[off] : 0;
                 }
-                const uint64_t lane_mask = ((1ull << bpb) - 1) << byte_lane;
-                w.strb = op.strb_per_beat[op_beat] & lane_mask;
+                // bpb can reach DATA_BYTES (size == kMaxSize, a full-width beat);
+                // 1ull << 64 is undefined behaviour, so guard the all-ones case
+                // the same way axi::kFullStrbMask does.
+                const uint64_t bpb_mask = (bpb >= 64) ? ~0ull : ((1ull << bpb) - 1);
+                const uint64_t lane_mask = bpb_mask << byte_lane;
+                // strb_file tokens (and the all-lanes default) are beat-relative,
+                // bit 0 = this beat's first byte -- the same lane-positioning the
+                // data loop above applies, shift into the real bus lane before
+                // masking off anything a malformed token set outside the window.
+                w.strb = (op.strb_per_beat[op_beat] << byte_lane) & lane_mask;
                 w.last = (op.w_pushed_in_cur_ == sub.len);
                 if (!slave_.push_w(w)) return op.write_request_done();
                 ++op.w_pushed_in_cur_;

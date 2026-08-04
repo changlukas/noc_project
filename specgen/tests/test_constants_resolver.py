@@ -106,12 +106,12 @@ def test_payload_field_position_aw(packet_spec):
 
 
 def test_payload_field_position_narrow_w_with_reorder(packet_spec):
-    # wstrb comes before wdata per ni_packet.json layout; DATA_W mirrors NARROW_W
-    # at today's width (value-preserving, T2a).
+    # wstrb comes before wdata per ni_packet.json layout. S2 T2d: NARROW_W carries
+    # the 8 B narrow lane (NOC_NARROW_DATA_WIDTH=64), distinct from DATA_W's 512 b.
     assert C.payload_field_position(packet_spec, "NARROW_W", "wlast") == (0, 0)
     assert C.payload_field_position(packet_spec, "NARROW_W", "wuser") == (1, 8)
-    assert C.payload_field_position(packet_spec, "NARROW_W", "wstrb") == (9, 40)
-    assert C.payload_field_position(packet_spec, "NARROW_W", "wdata") == (41, 296)
+    assert C.payload_field_position(packet_spec, "NARROW_W", "wstrb") == (9, 16)
+    assert C.payload_field_position(packet_spec, "NARROW_W", "wdata") == (17, 80)
 
 
 def test_payload_field_position_b(packet_spec):

@@ -105,8 +105,7 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
 
     bool got_w = false;
     while (auto f = out.pop())
-        if (f->get_header_field("axi_ch") == static_cast<uint64_t>(ni::AXI_CH_NarrowW))
-            got_w = true;
+        if (f->get_header_field("axi_ch") == static_cast<uint64_t>(ni::AXI_CH_DataW)) got_w = true;
     EXPECT_TRUE(got_w) << "W must drain despite full AW input (pre-fix deadlocks here)";
     EXPECT_EQ(bridge.occupancy(ni::AXI_CH_NarrowW), 0u) << "W left the bridge";
     EXPECT_EQ(bridge.occupancy(ni::AXI_CH_NarrowAr), 0u) << "AR admitted independently of stuck AW";

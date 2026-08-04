@@ -35,12 +35,12 @@ axi:
     type: int
     units: bits
     description: "AXI data bus width"
-    default: 256
+    default: 512
     allowed: [32, 64, 128, 256, 512, 1024]
-    # NOTE: spec allows the widths listed in `allowed`, but c_model + DPI currently
-    # hardcode 256-bit (DATA_BYTES = 32 in c_model/include/axi/types.hpp, and the
-    # svBitVecVal[8] data marshalling in sim/c/cmodel_dpi.cpp). Widen the impl
-    # side before picking a different `allowed` value.
+    # NOTE: spec allows the widths listed in `allowed`. The shared endpoint carries
+    # the data class at this width (DATA_BYTES = 64 in c_model/include/axi/types.hpp,
+    # and the parameterized data marshalling in sim/c/cmodel_dpi.cpp); the narrow
+    # class rides the addressed 8 B lane of the same port (docs/noc-target-spec.md §5).
     sv_symbol: AXI_DATA_WIDTH_DFLT
     cpp_symbol: AXI_DATA_WIDTH
 
@@ -58,7 +58,7 @@ noc:
     type: int
     units: bits
     description: "NoC flit payload width"
-    default: 341
+    default: 629
     min: 64
     max: 1024
     sv_symbol: NOC_FLIT_WIDTH_DFLT

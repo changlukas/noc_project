@@ -117,12 +117,12 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
             uint64_t ch = f->get_header_field("axi_ch");
             uint64_t src = f->get_header_field("src_id");
             EXPECT_EQ(src, kSrcId) << "req flit src_id should match NmuConfig.src_id";
-            if (ch == ni::AXI_CH_NarrowAw) {
+            if (ch == ni::AXI_CH_DataAw) {
                 EXPECT_EQ(f->get_payload_field("AW", "awid"), kAxiId);
                 EXPECT_EQ(f->get_payload_field("AW", "awaddr"), kAddr);
                 saw_aw_flit = true;
-            } else if (ch == ni::AXI_CH_NarrowW) {
-                EXPECT_EQ(f->get_payload_field("NARROW_W", "wlast"), 1u);
+            } else if (ch == ni::AXI_CH_DataW) {
+                EXPECT_EQ(f->get_payload_field("DATA_W", "wlast"), 1u);
                 saw_w_flit = true;
             } else {
                 ADD_FAILURE() << "unexpected req flit axi_ch=" << ch << " (expected AW or W)";
@@ -136,7 +136,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     // axi_ch + bid + bresp + buser; src_id/dst_id/flit_tail are honored but
     // not consumed by the AxiSlavePort drain.
     Flit b_flit;
-    b_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    b_flit.set_header_field("axi_ch", ni::AXI_CH_DataB);
     b_flit.set_header_field("src_id", 0x00);
     b_flit.set_header_field("dst_id", kSrcId);
     b_flit.set_header_field("vc_id", 0);
@@ -188,7 +188,7 @@ void push_write(NmuStandalone& nmu, uint8_t id, uint64_t addr) {
 
 Flit bypassed_b_flit(uint8_t id, uint8_t src_id) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("src_id", 0x00);
     f.set_header_field("dst_id", src_id);
     f.set_header_field("vc_id", 0);
@@ -241,7 +241,7 @@ TEST(NmuOutstandingPool, PoolEntryIsHeldUntilTheAxiSideAcceptsTheResponse) {
         }
         nmu.tick();
         while (auto f = nmu.pop_req_flit()) {
-            if (f->get_header_field("axi_ch") == ni::AXI_CH_NarrowAw) {
+            if (f->get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
                 ++aw_flits;
                 nmu.inject_rsp_flit(bypassed_b_flit(kAxiId, kSrcId));
             }
@@ -288,23 +288,26 @@ TEST(NmuOutstandingPool, RoblessReadRetiresAtTheAxiSideAndReopensThePool) {
     for (int i = 0; i < 32 && !saw_ar; ++i) {
         nmu.tick();
         while (auto f = nmu.pop_req_flit()) {
-            if (f->get_header_field("axi_ch") == ni::AXI_CH_NarrowAr) saw_ar = true;
+            if (f->get_header_field("axi_ch") == ni::AXI_CH_DataAr) saw_ar = true;
         }
     }
     ASSERT_TRUE(saw_ar);
     EXPECT_EQ(nmu.rob().read_txns(), 1u);
 
+    // Response class must match the request's (legacy_sam() -> data class);
+    // Rob's RoBless path recovers the AR basis keyed by class, and a mismatch
+    // here would abort on a missing narrow AR-meta entry.
     Flit r;
-    r.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+    r.set_header_field("axi_ch", ni::AXI_CH_DataR);
     r.set_header_field("src_id", 0x00);
     r.set_header_field("dst_id", kSrcId);
     r.set_header_field("vc_id", 0);
     r.set_header_field("flit_tail", 1);
     r.set_header_field("ordering_req", 0);
     r.set_header_field("ordering_tag", 0);
-    r.set_payload_field("NARROW_R", "rid", kAxiId);
-    r.set_payload_field("NARROW_R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
-    r.set_payload_field("NARROW_R", "rlast", 1u);
+    r.set_payload_field("DATA_R", "rid", kAxiId);
+    r.set_payload_field("DATA_R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
+    r.set_payload_field("DATA_R", "rlast", 1u);
     nmu.inject_rsp_flit(r);
 
     std::optional<axi::RBeat> r_out;
@@ -321,7 +324,7 @@ TEST(NmuOutstandingPool, RoblessReadRetiresAtTheAxiSideAndReopensThePool) {
     for (int i = 0; i < 32 && !saw_second_ar; ++i) {
         nmu.tick();
         while (auto f = nmu.pop_req_flit()) {
-            if (f->get_header_field("axi_ch") == ni::AXI_CH_NarrowAr) saw_second_ar = true;
+            if (f->get_header_field("axi_ch") == ni::AXI_CH_DataAr) saw_second_ar = true;
         }
     }
     EXPECT_TRUE(saw_second_ar) << "the retired entry never reopened the pool";

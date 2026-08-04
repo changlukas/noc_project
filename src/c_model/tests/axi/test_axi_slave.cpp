@@ -51,7 +51,7 @@ TEST(AxiSlave, WriteBurstSingleBeatInBoundsOkay) {
 }
 
 TEST(AxiSlave, WriteBurstIncr8Beat_InBounds) {
-    SCENARIO("AxiSlave: 8-beat INCR forwards each beat with per-beat addr increment of 32B");
+    SCENARIO("AxiSlave: 8-beat INCR forwards each beat with per-beat addr increment of 64B");
     test::MockMemoryPort mem;
     axi::AxiSlave slave(mem);
 
@@ -59,14 +59,14 @@ TEST(AxiSlave, WriteBurstIncr8Beat_InBounds) {
     aw.id = 3;
     aw.addr = 0x2000;
     aw.len = 7;
-    aw.size = 5;
+    aw.size = 6;  // full DATA_BYTES-wide beats: every beat stays lane-0 (STRB_SPARSE_LEGAL)
     aw.burst = axi::Burst::INCR;
     slave.push_aw(aw);
 
     for (uint8_t i = 0; i < 8; ++i) {
         axi::WBeat w{};
         w.data.fill(0x10 + i);
-        w.strb = 0xFFFF'FFFFu;
+        w.strb = ~0ull;
         w.last = (i == 7);
         slave.push_w(w);
     }
@@ -74,7 +74,7 @@ TEST(AxiSlave, WriteBurstIncr8Beat_InBounds) {
     for (int t = 0; t < 16; ++t) slave.tick();
     ASSERT_EQ(mem.captured_writes.size(), 8u);
     for (std::size_t i = 0; i < 8; ++i) {
-        EXPECT_EQ(mem.captured_writes[i].addr, 0x2000u + i * 32u);
+        EXPECT_EQ(mem.captured_writes[i].addr, 0x2000u + i * 64u);
         EXPECT_EQ(mem.captured_writes[i].data[0], 0x10 + static_cast<uint8_t>(i));
         EXPECT_EQ(mem.captured_writes[i].last, i == 7);
     }
@@ -97,7 +97,7 @@ TEST(AxiSlave, AwWIndependence_WBeforeAw) {
     for (uint8_t i = 0; i < 2; ++i) {
         axi::WBeat w{};
         w.data.fill(0xAA + i);
-        w.strb = 0xFFFF'FFFFu;
+        w.strb = ~0ull;
         w.last = (i == 1);
         slave.push_w(w);
     }
@@ -108,7 +108,7 @@ TEST(AxiSlave, AwWIndependence_WBeforeAw) {
     aw.id = 5;
     aw.addr = 0x3000;
     aw.len = 1;
-    aw.size = 5;
+    aw.size = 6;  // full DATA_BYTES-wide beats: every beat stays lane-0 (STRB_SPARSE_LEGAL)
     aw.burst = axi::Burst::INCR;
     slave.push_aw(aw);
 
@@ -251,13 +251,13 @@ TEST(AxiSlave, BackpressureRetry_NoBeatDropped) {
     aw.id = 1;
     aw.addr = 0x1000;
     aw.len = 2;
-    aw.size = 5;
+    aw.size = 6;  // full DATA_BYTES-wide beats: every beat stays lane-0 (STRB_SPARSE_LEGAL)
     aw.burst = axi::Burst::INCR;
     slave.push_aw(aw);
     for (uint8_t i = 0; i < 3; ++i) {
         axi::WBeat w{};
         w.data.fill(0x40 + i);
-        w.strb = 0xFFFF'FFFFu;
+        w.strb = ~0ull;
         w.last = (i == 2);
         slave.push_w(w);
     }
@@ -290,13 +290,13 @@ TEST(AxiSlave, WriteBurstWorstRespAccumulatedAcrossBeats) {
     aw.id = 11;
     aw.addr = 0x4000;
     aw.len = 2;
-    aw.size = 5;
+    aw.size = 6;  // full DATA_BYTES-wide beats: every beat stays lane-0 (STRB_SPARSE_LEGAL)
     aw.burst = axi::Burst::INCR;
     slave.push_aw(aw);
     for (uint8_t i = 0; i < 3; ++i) {
         axi::WBeat w{};
         w.data.fill(0);
-        w.strb = 0xFFFF'FFFFu;
+        w.strb = ~0ull;
         w.last = (i == 2);
         slave.push_w(w);
     }
@@ -448,18 +448,20 @@ TEST(AxiSlave, ConcurrentBurstsDifferentIds_WRoutingAdvances) {
     aw1.id = 1;
     aw1.addr = 0x1000;
     aw1.len = 0;
-    aw1.size = 5;
+    // full DATA_BYTES-wide beats at 64 B-aligned addresses: every beat stays
+    // lane-0 (STRB_SPARSE_LEGAL), matching the full-mask strb below.
+    aw1.size = 6;
     aw1.burst = axi::Burst::INCR;
     axi::AwBeat aw2 = aw1;
     aw2.id = 2;
-    aw2.addr = 0x1020;
+    aw2.addr = 0x1040;
     axi::AwBeat aw3 = aw1;
     aw3.id = 3;
-    aw3.addr = 0x1040;
+    aw3.addr = 0x1080;
 
     axi::WBeat w1{};
     w1.data.fill(0x11);
-    w1.strb = 0xFFFF'FFFFu;
+    w1.strb = ~0ull;
     w1.last = true;
     axi::WBeat w2 = w1;
     w2.data.fill(0x22);
@@ -481,10 +483,10 @@ TEST(AxiSlave, ConcurrentBurstsDifferentIds_WRoutingAdvances) {
     EXPECT_EQ(mem.captured_writes[0].addr, 0x1000u);
     EXPECT_EQ(mem.captured_writes[0].data[0], 0x11);
     EXPECT_EQ(mem.captured_writes[1].id, 2);
-    EXPECT_EQ(mem.captured_writes[1].addr, 0x1020u);
+    EXPECT_EQ(mem.captured_writes[1].addr, 0x1040u);
     EXPECT_EQ(mem.captured_writes[1].data[0], 0x22);
     EXPECT_EQ(mem.captured_writes[2].id, 3);
-    EXPECT_EQ(mem.captured_writes[2].addr, 0x1040u);
+    EXPECT_EQ(mem.captured_writes[2].addr, 0x1080u);
     EXPECT_EQ(mem.captured_writes[2].data[0], 0x33);
 }
 
@@ -706,7 +708,10 @@ inline void push_exclusive_aw_and_w(axi::AxiSlave& slave, uint8_t id, uint64_t a
     for (uint8_t i = 0; i <= len; ++i) {
         const uint64_t beat_a = axi::beat_addr(addr, len, size, burst, i);
         const std::size_t byte_lane = static_cast<std::size_t>(beat_a & (axi::DATA_BYTES - 1));
-        const uint32_t strb = static_cast<uint32_t>(((1ull << bpb) - 1ull) << byte_lane);
+        // bpb can reach DATA_BYTES (size == kMaxSize); 1ull << 64 is undefined
+        // behaviour, so guard the all-ones case the same way axi::kFullStrbMask does.
+        const uint64_t bpb_mask = (bpb >= 64) ? ~0ull : ((1ull << bpb) - 1ull);
+        const uint64_t strb = bpb_mask << byte_lane;
         axi::WBeat w{};
         w.data.fill(0xE0 + i);
         w.strb = strb;
@@ -986,8 +991,9 @@ TEST(AxiSlaveExclusive, MultiId_NormalWriteErasesMultipleTags_IteratorSafe) {
     EXPECT_TRUE(slave.has_exclusive_tag(3));
 
     // Normal AW with addr range [0x1000, 0x1040) — overlaps id 1 and 2, not 3.
-    // 16 beats × 4B = 64B. Per-beat byte_lane rolls 0,4,8,...,28,0,... so
-    // STRB must track it to satisfy STRB_SPARSE_LEGAL.
+    // 16 beats × 4B = 64B = DATA_BYTES: per-beat byte_lane rolls 0,4,8,...,60
+    // across the bus in one pass (no wrap), so STRB must track it to satisfy
+    // STRB_SPARSE_LEGAL.
     axi::AwBeat aw{};
     aw.id = 9;
     aw.addr = 0x1000;
@@ -1001,7 +1007,7 @@ TEST(AxiSlaveExclusive, MultiId_NormalWriteErasesMultipleTags_IteratorSafe) {
         const std::size_t bl = static_cast<std::size_t>(ba & (axi::DATA_BYTES - 1));
         axi::WBeat w{};
         w.data.fill(0xC0);
-        w.strb = static_cast<uint32_t>(0xFu << bl);
+        w.strb = 0xFull << bl;
         w.last = (i == 15);
         slave.push_w(w);
     }

@@ -52,13 +52,26 @@ TEST(Flit, SetGetPayloadAwFields) {
 }
 
 TEST(Flit, SetGetPayloadBytesWdata) {
-    SCENARIO("Flit: W payload wdata (32B) byte-array set/get round-trips bit-perfect");
+    SCENARIO("Flit: DATA_W payload wdata (64B) byte-array set/get round-trips bit-perfect");
     Flit f;
-    std::array<uint8_t, 32> wdata{};
-    for (int i = 0; i < 32; ++i) wdata[i] = static_cast<uint8_t>(0xA0 + i);
-    f.set_payload_bytes("NARROW_W", "wdata", wdata.data(), 256);
-    std::array<uint8_t, 32> out{};
-    f.get_payload_bytes("NARROW_W", "wdata", out.data(), 256);
+    constexpr int kBytes = ni::width::NOC_DATA_WIDTH / 8;
+    std::array<uint8_t, kBytes> wdata{};
+    for (int i = 0; i < kBytes; ++i) wdata[i] = static_cast<uint8_t>(0xA0 + i);
+    f.set_payload_bytes("DATA_W", "wdata", wdata.data(), ni::width::NOC_DATA_WIDTH);
+    std::array<uint8_t, kBytes> out{};
+    f.get_payload_bytes("DATA_W", "wdata", out.data(), ni::width::NOC_DATA_WIDTH);
+    EXPECT_EQ(out, wdata);
+}
+
+TEST(Flit, SetGetPayloadBytesNarrowWdata) {
+    SCENARIO("Flit: NARROW_W payload wdata (8B lane) byte-array set/get round-trips bit-perfect");
+    Flit f;
+    constexpr int kBytes = ni::width::NOC_NARROW_DATA_WIDTH / 8;
+    std::array<uint8_t, kBytes> wdata{};
+    for (int i = 0; i < kBytes; ++i) wdata[i] = static_cast<uint8_t>(0xA0 + i);
+    f.set_payload_bytes("NARROW_W", "wdata", wdata.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    std::array<uint8_t, kBytes> out{};
+    f.get_payload_bytes("NARROW_W", "wdata", out.data(), ni::width::NOC_NARROW_DATA_WIDTH);
     EXPECT_EQ(out, wdata);
 }
 

@@ -12,12 +12,18 @@ namespace ni::cmodel::nmu::addr_trans {
 struct Translated {
     uint8_t dst_id;       // X_WIDTH + Y_WIDTH bits per ni_packet.json
     uint64_t local_addr;  // tile-local (rebased): addr - tile base
+    // Default Data: every SamTable built without a "space" annotation (the
+    // uniform()/packed() C++ test helpers, and the co-sim no-config_path
+    // fallback) is memory space. sam_yaml.hpp's YAML loader picks the real
+    // per-tile default explicitly instead of relying on this one.
+    axi::AxiClass cls = axi::AxiClass::Data;
 };
 
 struct SamEntry {
     uint64_t base;
     uint64_t size;
     uint8_t dst_id;
+    axi::AxiClass cls = axi::AxiClass::Data;
 };
 
 // One packed-map input tile: mesh coordinate + size. Bases are not given here;
@@ -26,6 +32,7 @@ struct PackedTile {
     unsigned x;
     unsigned y;
     uint64_t size;
+    axi::AxiClass cls = axi::AxiClass::Data;
 };
 
 class SamTable {
@@ -41,7 +48,7 @@ class SamTable {
         uint64_t base = 0;
         for (const auto& t : tiles) {
             uint8_t dst = static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x);
-            es.push_back({base, t.size, dst});
+            es.push_back({base, t.size, dst, t.cls});
             base += t.size;
         }
         return SamTable(std::move(es));
@@ -72,15 +79,21 @@ class SamTable {
     Translated translate(uint64_t addr) const {
         const SamEntry* e = lookup(addr);
         assert(e && "SAM miss: address maps to no tile (config/stimulus bug)");
-        return {e->dst_id, addr - e->base};  // rebase: slave sees 0-based local address
+        return {e->dst_id, addr - e->base, e->cls};  // rebase: slave sees 0-based local address
     }
 
     const std::vector<SamEntry>& entries() const { return entries_; }
 
     // Validate explicit entries; fail-loud. Packed tables satisfy these by construction.
     // Passes run in order so each later pass can trust the earlier ones: field
-    // checks first (so base+size doesn't overflow), then exactly-once mesh
-    // coverage, then overlap (which also relies on base+size not overflowing).
+    // checks first (so base+size doesn't overflow), then per-space coverage,
+    // then overlap (which also relies on base+size not overflowing).
+    //
+    // Per-space coverage (spec §5 "A node may appear once per space"): a node
+    // may carry one memory-space tile and, optionally, one config-space tile.
+    // Memory space must cover the mesh exactly once per node (every node has a
+    // data-class home); config space is sparse -- at most one tile per node,
+    // no full-mesh requirement.
     void validate(unsigned x_dim, unsigned y_dim) const {
         constexpr uint64_t k4k = 0x1000;
         for (const auto& e : entries_) {
@@ -92,19 +105,21 @@ class SamTable {
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
             assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");
         }
-        // Exactly-once coverage: every (x, y) in the mesh must appear once. Count
-        // equal to x_dim*y_dim plus no duplicates (checked via `seen`) together
-        // imply no node is missing.
-        assert(entries_.size() == static_cast<std::size_t>(x_dim) * y_dim &&
-               "SAM: every mesh node must appear exactly once (tile count mismatch)");
-        std::vector<bool> seen(static_cast<std::size_t>(x_dim) * y_dim, false);
+        const std::size_t mesh_nodes = static_cast<std::size_t>(x_dim) * y_dim;
+        std::vector<bool> seen_memory(mesh_nodes, false);
+        std::vector<bool> seen_config(mesh_nodes, false);
+        std::size_t memory_count = 0;
         for (const auto& e : entries_) {
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
             std::size_t idx = static_cast<std::size_t>(y) * x_dim + x;
-            assert(!seen[idx] && "SAM: duplicate mesh node");
+            std::vector<bool>& seen = (e.cls == axi::AxiClass::Data) ? seen_memory : seen_config;
+            assert(!seen[idx] && "SAM: duplicate mesh node (same space)");
             seen[idx] = true;
+            if (e.cls == axi::AxiClass::Data) ++memory_count;
         }
+        assert(memory_count == mesh_nodes &&
+               "SAM: memory space must cover the mesh exactly once (tile count mismatch)");
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             for (std::size_t j = i + 1; j < entries_.size(); ++j) {
                 const auto& e = entries_[i];

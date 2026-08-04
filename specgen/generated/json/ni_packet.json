@@ -18,7 +18,8 @@
       "COLLECTIVE_MASK_WIDTH": 8,
       "AXI_ADDR_WIDTH": 48,
       "AXI_ID_WIDTH": 8,
-      "NOC_DATA_WIDTH": 256,
+      "NOC_DATA_WIDTH": 512,
+      "NOC_NARROW_DATA_WIDTH": 64,
       "AXI_USER_WIDTH": 8,
       "AXI_LEN_WIDTH": 8,
       "AXI_SIZE_WIDTH": 3,
@@ -30,7 +31,8 @@
       "AXI_QOS_WIDTH": 4,
       "AXI_RESP_WIDTH": 2,
       "AXI_LAST_WIDTH": 1,
-      "WSTRB_WIDTH": 32,
+      "WSTRB_WIDTH": 64,
+      "NARROW_WSTRB_WIDTH": 8,
       "HEADER_TOTAL_WIDTH": 44
     },
     "header_fields": [
@@ -195,7 +197,7 @@
       {
         "name": "NARROW_W",
         "network": "REQ",
-        "payload_width": 297,
+        "payload_width": 81,
         "fields": [
           {
             "name": "wlast",
@@ -207,18 +209,18 @@
           },
           {
             "name": "wstrb",
-            "width_param": "WSTRB_WIDTH"
+            "width_param": "NARROW_WSTRB_WIDTH"
           },
           {
             "name": "wdata",
-            "width_param": "NOC_DATA_WIDTH"
+            "width_param": "NOC_NARROW_DATA_WIDTH"
           }
         ]
       },
       {
         "name": "DATA_W",
         "network": "REQ",
-        "payload_width": 297,
+        "payload_width": 585,
         "fields": [
           {
             "name": "wlast",
@@ -260,7 +262,7 @@
       {
         "name": "NARROW_R",
         "network": "RSP",
-        "payload_width": 275,
+        "payload_width": 83,
         "fields": [
           {
             "name": "rlast",
@@ -280,14 +282,14 @@
           },
           {
             "name": "rdata",
-            "width_param": "NOC_DATA_WIDTH"
+            "width_param": "NOC_NARROW_DATA_WIDTH"
           }
         ]
       },
       {
         "name": "DATA_R",
         "network": "RSP",
-        "payload_width": 275,
+        "payload_width": 531,
         "fields": [
           {
             "name": "rlast",

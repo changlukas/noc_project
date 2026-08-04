@@ -13,6 +13,7 @@ struct AdmittedAw {
     uint64_t local_addr;
     uint8_t ordering_req;
     uint8_t ordering_tag;
+    axi::AxiClass cls = axi::AxiClass::Data;
 };
 struct AdmittedAr {
     axi::ArBeat beat;
@@ -20,6 +21,7 @@ struct AdmittedAr {
     uint64_t local_addr;
     uint8_t ordering_req;
     uint8_t ordering_tag;
+    axi::AxiClass cls = axi::AxiClass::Data;
 };
 // W carries AW-inherited meta (matches packetize.hpp w_meta_fifo_ contract).
 struct AdmittedW {

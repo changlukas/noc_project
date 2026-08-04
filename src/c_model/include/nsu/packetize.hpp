@@ -60,7 +60,8 @@ class Packetize : public ResponsePacketizer {
     router::PipelineStage<axi::RBeat> s1_r_;
 
     static Flit build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id);
-    static Flit build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id);
+    static Flit build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id,
+                             uint16_t beat_idx);
 };
 
 // S1 accept: write into stage register (backpressure if full).
@@ -95,7 +96,8 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
     return f;
 }
 
-inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id) {
+inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id,
+                                    uint16_t beat_idx) {
     const bool is_data = (m.cls == AxiClass::Data);
     const char* ch = is_data ? "DATA_R" : "NARROW_R";
     Flit f;
@@ -110,7 +112,18 @@ inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uin
     f.set_payload_field(ch, "rresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field(ch, "ruser", b.user);
     f.set_payload_field(ch, "rlast", b.last ? 1u : 0u);
-    f.set_payload_bytes(ch, "rdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
+    if (is_data) {
+        f.set_payload_bytes(ch, "rdata", b.data.data(), ni::width::NOC_DATA_WIDTH);
+    } else {
+        // Narrow: the slave already placed this beat's data at its natural
+        // byte lane (AXI4 IHI 0022 A3.4.2); the MetaEntry's AR basis + the
+        // per-id running beat index (m is a snapshot -- the index lives in
+        // MetaBuffer, threaded in by the caller) recompute that lane here.
+        const uint64_t addr = axi::beat_addr(m.local_addr, m.len, m.size, m.burst, beat_idx);
+        const unsigned lane = axi::narrow_lane(addr);
+        f.set_payload_bytes(ch, "rdata", b.data.data() + lane * axi::NARROW_DATA_BYTES,
+                            ni::width::NOC_NARROW_DATA_WIDTH);
+    }
     return f;
 }
 
@@ -145,10 +158,11 @@ inline void Packetize::tick() {
             assert(false && "Packetize::tick: R in S1 with no matching AR MetaBuffer entry");
             std::abort();
         }
-        Flit f = build_r_flit(b, *meta_opt, src_id_);
+        Flit f = build_r_flit(b, *meta_opt, src_id_, meta_.read_beat_index(b.id));
         if (r_out_.push_flit(f)) {
             s1_r_.take();
-            if (b.last) meta_.commit_read(b.id);  // commit on rlast only
+            meta_.advance_read_beat(b.id);
+            if (b.last) meta_.commit_read(b.id);  // commit on rlast only (also resets beat index)
         }
     }
 }

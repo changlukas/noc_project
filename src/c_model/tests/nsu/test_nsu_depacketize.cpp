@@ -162,7 +162,10 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFFFF, true)));
+    // Data class: no preceding AW needed (unlike narrow, whose lane re-anchor
+    // reads the AW's address basis) -- this test is about MetaBuffer
+    // independence, not the AW-before-W address dependency.
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFFFF, true, ni::AXI_CH_DataW)));
     depkt.tick();
     EXPECT_TRUE(depkt.pop_w().has_value());
     // MetaBuffer untouched
@@ -191,9 +194,11 @@ TEST(NsuDepacketize, PendingHolBlockingS1WFullBlocksAwBehind) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
-    // Order: W, W, AW
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xAA, true)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xBB, true)));
+    // Order: W, W, AW -- data class, so the two W beats (deliberately with no
+    // preceding AW, to isolate the HoL blocking mechanics under test) don't
+    // need a staged address basis.
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xAA, true, ni::AXI_CH_DataW)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xBB, true, ni::AXI_CH_DataW)));
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x07, 0x0)));
     depkt.tick();
     EXPECT_TRUE(depkt.pop_w().has_value());    // first W (0xAA) demuxed

@@ -56,7 +56,7 @@ axi::WBeat make_w(bool last) {
 // Helper to construct + feed a B flit to nmu::Depacketize for pop_b to return
 ni::cmodel::Flit make_b_flit(uint8_t bid) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("dst_id", 0x01);
     f.set_header_field("flit_tail", 1);
     f.set_payload_field("B", "bid", bid);
@@ -65,11 +65,11 @@ ni::cmodel::Flit make_b_flit(uint8_t bid) {
 }
 ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataR);
     f.set_header_field("dst_id", 0x01);
     f.set_header_field("flit_tail", 1);
-    f.set_payload_field("NARROW_R", "rid", rid);
-    f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
+    f.set_payload_field("DATA_R", "rid", rid);
+    f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
     return f;
 }
 
@@ -105,7 +105,7 @@ void prime_read_id(Rob& rob, ChannelModel& noc, uint8_t id) {
 // pushing the transaction under test, so that transaction becomes the list head.
 void retire_write_primer(Rob& rob, ChannelModel& noc, Depacketize& depkt, uint8_t id) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("dst_id", kSrcId);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 0);
@@ -119,16 +119,16 @@ void retire_write_primer(Rob& rob, ChannelModel& noc, Depacketize& depkt, uint8_
 
 void retire_read_primer(Rob& rob, ChannelModel& noc, Depacketize& depkt, uint8_t id) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataR);
     f.set_header_field("dst_id", kSrcId);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 0);
     f.set_header_field("ordering_tag", 0);
-    f.set_payload_field("NARROW_R", "rid", id);
-    f.set_payload_field("NARROW_R", "rresp", 0);
-    f.set_payload_field("NARROW_R", "rlast", 1u);
-    std::array<uint8_t, 32> d{};
-    f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+    f.set_payload_field("DATA_R", "rid", id);
+    f.set_payload_field("DATA_R", "rresp", 0);
+    f.set_payload_field("DATA_R", "rlast", 1u);
+    std::array<uint8_t, axi::DATA_BYTES> d{};
+    f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
     depkt.tick();
     ASSERT_TRUE(rob.pop_r().has_value());
@@ -252,7 +252,7 @@ TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsOrderingTag) {
     prime_write_id(rob, noc, 0x05);
     ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x100)));
     auto f = *noc.req_in().pop_flit();
-    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_DataAw);
     EXPECT_EQ(f.get_header_field("ordering_req"), 1u);
     EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);  // first allocated slot
 }
@@ -275,7 +275,7 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
     ar.len = 3;
     ASSERT_TRUE(rob.push_ar(ar));
     auto f = *ar_cap.pop();
-    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAr);
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_DataAr);
     EXPECT_EQ(f.get_header_field("ordering_req"), 1u);
     EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);  // base = 0
     // Next AR should allocate slot 4 (slots 0-3 occupied)
@@ -348,17 +348,17 @@ TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
 
     auto push_r = [&](bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", 0);  // the NSU stamps the burst base on every beat
-        f.set_payload_field("NARROW_R", "rid", 0x05);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
+        f.set_payload_field("DATA_R", "rid", 0x05);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
         d[0] = marker;
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
         depkt.tick();
     };
@@ -405,16 +405,16 @@ TEST(NmuRob, Enabled_LzcAllocator_IsAStack) {
 
     auto push_r = [&](uint8_t base, bool rlast, uint8_t rid) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", base);
-        f.set_payload_field("NARROW_R", "rid", rid);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_field("DATA_R", "rid", rid);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
         depkt.tick();
     };
@@ -456,7 +456,7 @@ TEST(NmuRob, Enabled_LzcAllocator_NonTopReleaseDoesNotGrowFreeSpace) {
 
     auto push_b = [&](uint8_t ordering_tag, uint8_t bid) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataB);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
@@ -526,16 +526,16 @@ TEST(NmuRob, Enabled_LzcAllocator_ReusesFromTheTop) {
 
     auto push_r = [&](bool rlast) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", 0);
-        f.set_payload_field("NARROW_R", "rid", 0x05);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_field("DATA_R", "rid", 0x05);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
         depkt.tick();
     };
@@ -694,7 +694,7 @@ TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
     retire_write_primer(rob, noc, depkt, 0x05);      // the robbed AW is now the head
     // Inject B with ordering_tag=0, matching the head of id=5's sequence
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("dst_id", kSrcId);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 1);
@@ -724,7 +724,7 @@ TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
     retire_write_primer(rob, noc, depkt, 0x05);  // the robbed AWs (slots 0,1) are now the head
     auto push_b = [&](uint8_t ordering_tag, uint8_t bresp) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataB);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
@@ -766,17 +766,17 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
     retire_read_primer(rob, noc, depkt, 0x05);  // AR1 is now the head of id 0x05
     auto push_r = [&](uint8_t ordering_tag, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", ordering_tag);
-        f.set_payload_field("NARROW_R", "rid", 0x05);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
+        f.set_payload_field("DATA_R", "rid", 0x05);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
         d[0] = marker;
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
     // Arrive in order: AR2 beats (base=4) then AR1 beats (base=0).
@@ -824,17 +824,17 @@ TEST(NmuRob, Enabled_PerBeatRelease_HeadBurstStreams) {
 
     auto push_r = [&](bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", 0);  // the NSU stamps the burst base on every beat
-        f.set_payload_field("NARROW_R", "rid", 0x05);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
+        f.set_payload_field("DATA_R", "rid", 0x05);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
         d[0] = marker;
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
         depkt.tick();
     };
@@ -879,17 +879,17 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
     retire_read_primer(rob, noc, depkt, 0x06);
     auto push_r = [&](uint8_t ordering_tag, uint8_t rid) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", ordering_tag);
-        f.set_payload_field("NARROW_R", "rid", rid);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", 1u);
-        std::array<uint8_t, 32> d{};
+        f.set_payload_field("DATA_R", "rid", rid);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", 1u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
         d[0] = rid;
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
     push_r(1, 0x06);  // id=6 R arrives first
@@ -918,7 +918,7 @@ TEST(NmuRobDeath, Enabled_PopBWithUnallocatedOrderingTag_Abort) {
 
     // Inject B with ordering_tag=7, but no AW allocated that slot -> assert fires
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("dst_id", kSrcId);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 1);
@@ -977,17 +977,17 @@ TEST(NmuRob, ReadFillSameBaseOrderingTagLandsInOrder) {
 
     auto push_r = [&](uint8_t ordering_tag, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", ordering_tag);
-        f.set_payload_field("NARROW_R", "rid", 0x05);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
+        f.set_payload_field("DATA_R", "rid", 0x05);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
         d[0] = marker;
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
     push_r(/*ordering_tag=*/0, /*rlast=*/false, 0xA0);
@@ -1024,16 +1024,16 @@ TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
 
     auto push_r = [&](bool rlast) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", 0);
-        f.set_payload_field("NARROW_R", "rid", 0x05);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_field("DATA_R", "rid", 0x05);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
     push_r(false);  // slot 0
@@ -1062,17 +1062,17 @@ TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
 
     auto push_r = [&](uint8_t id, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", 0);
-        f.set_payload_field("NARROW_R", "rid", id);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
+        f.set_payload_field("DATA_R", "rid", id);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
         d[0] = marker;
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
 
@@ -1131,17 +1131,17 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
 
     auto push_r = [&](uint8_t base, bool rlast, uint8_t marker) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", base);
-        f.set_payload_field("NARROW_R", "rid", 0x05);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", rlast ? 1u : 0u);
-        std::array<uint8_t, 32> d{};
+        f.set_payload_field("DATA_R", "rid", 0x05);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", rlast ? 1u : 0u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
         d[0] = marker;
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
 
@@ -1181,7 +1181,7 @@ TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
     retire_write_primer(rob, noc, depkt, 0x05);      // head is now the robbed entry
 
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("dst_id", kSrcId);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 0);
@@ -1207,7 +1207,7 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
     ar.len = 255;  // 256 beats, twice the 128-slot read pool
     EXPECT_TRUE(rob.push_ar(ar));
     auto f = *ar_cap.pop();
-    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAr);
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_DataAr);
     EXPECT_EQ(f.get_header_field("ordering_req"), 0u) << "bypassed AR carries ordering_req=0";
     EXPECT_EQ(rob.read_free_space(), free_before) << "bypass allocates nothing";
 }
@@ -1276,7 +1276,7 @@ TEST(NmuRob, Enabled_BypassedBeat_ReleasesNoSlot) {
     noc.req_in().pop_flit();
 
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("dst_id", kSrcId);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 0);
@@ -1311,7 +1311,7 @@ TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
 
     auto push_b = [&](unsigned ordering_req, unsigned ordering_tag, unsigned bresp) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataB);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", ordering_req);
@@ -1437,16 +1437,16 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
         static_cast<uint8_t>(f_dst_a2.get_header_field("ordering_tag"));
     auto push_r = [&](uint8_t ordering_tag) {
         ni::cmodel::Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        f.set_header_field("axi_ch", ni::AXI_CH_DataR);
         f.set_header_field("dst_id", kSrcId);
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", ordering_tag);
-        f.set_payload_field("NARROW_R", "rid", id);
-        f.set_payload_field("NARROW_R", "rresp", 0);
-        f.set_payload_field("NARROW_R", "rlast", 1u);
-        std::array<uint8_t, 32> d{};
-        f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+        f.set_payload_field("DATA_R", "rid", id);
+        f.set_payload_field("DATA_R", "rresp", 0);
+        f.set_payload_field("DATA_R", "rlast", 1u);
+        std::array<uint8_t, axi::DATA_BYTES> d{};
+        f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
         ASSERT_TRUE(noc.rsp_out().push_flit(f));
     };
     push_r(ordering_tag_dst_b);
@@ -1506,8 +1506,8 @@ ni::cmodel::Flit make_bypassed_r_flit(uint8_t rid, bool rlast) {
     ni::cmodel::Flit f = make_r_flit(rid, rlast);
     f.set_header_field("ordering_req", 0);
     f.set_header_field("ordering_tag", 0);
-    std::array<uint8_t, 32> d{};
-    f.set_payload_bytes("NARROW_R", "rdata", d.data(), 256);
+    std::array<uint8_t, axi::DATA_BYTES> d{};
+    f.set_payload_bytes("DATA_R", "rdata", d.data(), ni::width::NOC_DATA_WIDTH);
     return f;
 }
 

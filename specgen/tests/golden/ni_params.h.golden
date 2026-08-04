@@ -7,11 +7,11 @@ namespace ni {
 // AXI parameter defaults
 constexpr int AXI_ID_WIDTH   = 8;
 constexpr int AXI_ADDR_WIDTH = 48;
-constexpr int AXI_DATA_WIDTH = 256;
+constexpr int AXI_DATA_WIDTH = 512;
 
 // NoC parameter defaults
 constexpr int NOC_NUM_VC                   = 1;
-constexpr int NOC_FLIT_WIDTH               = 341;
+constexpr int NOC_FLIT_WIDTH               = 629;
 constexpr int NOC_ROUTER_VC_DEPTH          = 8;
 constexpr int NOC_ROUTER_OUTPUT_FIFO_DEPTH = 2;
 constexpr int NOC_MESH_X_DIM               = 4;
@@ -33,6 +33,6 @@ constexpr int NSU_META_BUFFER_MAX_UNIQUE_IDS  = 1;
 constexpr int NSU_ARBITER_FIFO_DEPTH          = 4;
 
 // Derived parameter defaults
-constexpr int AXI_WSTRB_WIDTH = 32;
+constexpr int AXI_WSTRB_WIDTH = 64;
 
 }  // namespace ni

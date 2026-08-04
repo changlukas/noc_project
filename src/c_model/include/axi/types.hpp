@@ -29,21 +29,35 @@ static_assert(DATA_BYTES * 8 == ni::width::NOC_DATA_WIDTH,
               "DATA_BYTES (= WSTRB_WIDTH) * 8 must equal NOC_DATA_WIDTH "
               "for byte-level WSTRB semantics");
 
-// constants.yaml allows DATA_WIDTH ∈ {32..1024} per spec, but the c_model and
-// DPI marshalling currently hardcode 256-bit (DATA_BYTES = 32). Lock that
-// assumption so any future widening of the bus fails the build here instead of
-// silently corrupting payloads.
-static_assert(DATA_BYTES == 32,
-              "c_model assumes AXI DATA_WIDTH = 256 bits; widen DATA_BYTES + "
-              "WBeat/RBeat data array + WSTRB type if the spec changes");
+// constants.yaml allows DATA_WIDTH ∈ {32..1024} per spec; the c_model and DPI
+// marshalling lock to the S2 final shape, the shared 512 b data-class endpoint
+// (DATA_BYTES = 64). Widen DATA_BYTES + WBeat/RBeat data array + WSTRB type if
+// the spec changes.
+static_assert(DATA_BYTES == 64,
+              "c_model assumes the S2 data-class AXI DATA_WIDTH = 512 bits; widen "
+              "DATA_BYTES + WBeat/RBeat data array + WSTRB type if the spec changes");
 
 // WBeat::strb is uint64_t. If DATA_BYTES ever exceeds 64, WSTRB no longer
 // fits in a single uint64_t — widen the struct field (e.g. std::bitset)
 // before relaxing this.
 static_assert(DATA_BYTES <= 64, "WBeat::strb is uint64_t; widen the strb field if DATA_BYTES > 64");
 
+// Narrow-class data width: the fixed 8 B lane the narrow class occupies on the
+// shared DATA_BYTES-wide port (docs/noc-target-spec.md §5). Independent of
+// DATA_BYTES / DATA_WIDTH, which describe only the data class.
+constexpr int NARROW_DATA_BYTES = ni::width::NOC_NARROW_DATA_WIDTH / 8;
+static_assert(NARROW_DATA_BYTES == 8, "narrow class data width is fixed at 64 b (8 B) per spec §5");
+
 enum class Burst : uint8_t { FIXED = 0, INCR = 1, WRAP = 2 };
 enum class Resp : uint8_t { OKAY = 0, EXOKAY = 1, SLVERR = 2, DECERR = 3 };
+
+// SAM address-space class (spec §5 "SAM address spaces: config, memory"):
+// config selects the narrow class, memory the data class. Resolved once per
+// transaction at NMU packetize from the matched SAM entry; carried end to end
+// through the flit's axi_ch encoding (Narrow*/Data*) so the NSU response path
+// and the NMU response path (RoB / RoBless AR-meta) can recover it without a
+// second address decode.
+enum class AxiClass : uint8_t { Narrow = 0, Data = 1 };
 
 // AXI4 IHI 0022 §A7.2: AxLOCK is 1-bit in AXI4 (0=Normal, 1=Exclusive).
 // AXI3 deprecated LOCKED bit is not modeled. AwBeat/ArBeat::lock keeps
@@ -78,6 +92,26 @@ inline uint64_t beat_addr(uint64_t base_addr, uint8_t len, uint8_t size, Burst b
         }
     }
     return base_addr;  // unreachable
+}
+
+// Narrow-class byte lane a beat occupies on the shared DATA_BYTES-wide port:
+// bus lane (beat_addr >> 3) & 7, one of DATA_BYTES/NARROW_DATA_BYTES = 8 lanes.
+inline unsigned narrow_lane(uint64_t addr) {
+    return static_cast<unsigned>((addr >> 3) & 0x7u);
+}
+
+// Re-anchor a narrow-class beat's data from lane 0 (where a class-agnostic
+// flit decode places it -- the decode step has no address, only the AR/AW
+// basis does) into its real byte lane. No-op at lane 0. Used only where the
+// address arrives asynchronously relative to the decode (nmu::Rob's R path,
+// docs/noc-target-spec.md / S2 design doc §2 lane re-anchor table); every
+// other site knows the lane at decode time and addresses the lane directly.
+inline void reanchor_narrow_lane(std::array<uint8_t, DATA_BYTES>& data, unsigned lane) {
+    if (lane == 0) return;
+    std::array<uint8_t, NARROW_DATA_BYTES> tmp{};
+    for (int i = 0; i < NARROW_DATA_BYTES; ++i) tmp[i] = data[i];
+    for (int i = 0; i < NARROW_DATA_BYTES; ++i) data[i] = 0;
+    for (int i = 0; i < NARROW_DATA_BYTES; ++i) data[lane * NARROW_DATA_BYTES + i] = tmp[i];
 }
 
 struct AwBeat {

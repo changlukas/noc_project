@@ -134,7 +134,11 @@ inline bool check_strb_valid_bits(uint64_t strb) {
 inline bool check_strb_sparse_legal(uint64_t strb, uint8_t size, uint64_t beat_addr_v) {
     const std::size_t bpb = 1ull << size;
     const std::size_t byte_lane = static_cast<std::size_t>(beat_addr_v & (DATA_BYTES - 1));
-    const uint64_t window = ((1ull << bpb) - 1ull) << byte_lane;
+    // bpb can reach DATA_BYTES (size == kMaxSize, a full-width beat); 1ull << 64
+    // is undefined behaviour, so guard the all-ones case the same way
+    // axi::kFullStrbMask does.
+    const uint64_t bpb_mask = (bpb >= 64) ? ~0ull : ((1ull << bpb) - 1ull);
+    const uint64_t window = bpb_mask << byte_lane;
     // strb bits set outside the window are illegal.
     return (strb & ~window) == 0;
 }

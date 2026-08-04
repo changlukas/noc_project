@@ -162,8 +162,8 @@ TEST(NsuPacketize, PushRMultiBeatPeekUntilRLast) {
 // R payload bit-perfect: all fields (rid/rresp/rlast/rdata) survive push_r+tick.
 TEST(NsuPacketize, RPayloadBitPerfect) {
     SCENARIO(
-        "NSU Packetize: R payload (rid/rresp/rlast/32B rdata) round-trips bit-perfect through "
-        "flit after push_r()+tick()");
+        "NSU Packetize: R payload (rid/rresp/rlast/8B narrow rdata) round-trips bit-perfect "
+        "through flit after push_r()+tick() (default MetaEntry.cls -> narrow, lane 0)");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_read(0x03, {0x12, 0x03, 0, 0});
@@ -175,9 +175,10 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
     EXPECT_EQ(f->get_payload_field("NARROW_R", "rid"), 0x03u);
     EXPECT_EQ(f->get_payload_field("NARROW_R", "rresp"), static_cast<uint64_t>(axi::Resp::SLVERR));
     EXPECT_EQ(f->get_payload_field("NARROW_R", "rlast"), 1u);
-    std::array<uint8_t, 32> out{};
-    f->get_payload_bytes("NARROW_R", "rdata", out.data(), 256);
-    for (int i = 0; i < 32; ++i) EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> out{};
+    f->get_payload_bytes("NARROW_R", "rdata", out.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i)
+        EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
 }
 
 // MetaBuffer.cls threads the request's class into the response: B/R responses

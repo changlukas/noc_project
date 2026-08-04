@@ -202,6 +202,10 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         bool ready = false;
         uint8_t axi_id = 0;
         axi::RBeat r_beat = {};
+        // Narrow-class byte lane for this beat (axi::narrow_lane, computed at
+        // push_ar from the AR basis -- all n beats' addresses are known
+        // upfront for a robbed burst). 0 / unused for Data class.
+        uint8_t lane = 0;
     };
     std::array<WriteEntry, ORDERING_TAG_SPACE> write_entries_;
     std::array<ReadEntry, ORDERING_TAG_SPACE> read_entries_;
@@ -265,6 +269,23 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // High-water mark backing read_slot_hwm(). See getter for details.
     std::size_t read_slot_hwm_ = 0;
 
+    // Narrow-class lane re-anchor for read beats that never touch
+    // read_entries_ -- Enabled-mode bypass and Disabled/RoBless reads. Both
+    // stream FIFO-order per id (AXI4 IHI 0022 §A5.3), so a per-id FIFO of the
+    // AR basis (populated at push_ar, drained beat by beat, popped on last)
+    // recovers each beat's address the same way read_entries_[].lane does for
+    // robbed bursts. S2 design doc §2 site 4 (the risky one): the R flit
+    // carries no address, only its AR does.
+    struct ArLaneMeta {
+        uint64_t local_addr;
+        uint8_t len;
+        uint8_t size;
+        axi::Burst burst;
+        uint16_t beat_counter = 0;
+    };
+    std::array<std::deque<ArLaneMeta>, AXI_ID_SPACE> ar_lane_meta_;
+    void reanchor_from_fifo_(axi::RBeat& r);
+
     // Ready-to-emit beats drained by pop_b / pop_r.
     std::deque<CommittedBEntry> committed_b_queue_;
     std::deque<CommittedREntry> committed_r_queue_;
@@ -307,7 +328,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     }
     if (!next_pkt_.push_aw_with_meta(
             b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
-                static_cast<uint8_t>(needs_rob ? base : 0)})) {
+                static_cast<uint8_t>(needs_rob ? base : 0), t.cls})) {
         return false;  // downstream backpressure: no state mutation
     }
     prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
@@ -372,20 +393,31 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         }
         if (!next_pkt_.push_ar_with_meta(
                 b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
-                    static_cast<uint8_t>(needs_rob ? base : 0)})) {
+                    static_cast<uint8_t>(needs_rob ? base : 0), t.cls})) {
             return false;  // downstream backpressure: no state mutation
         }
         prev_dest_read_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
         fallen_back_read_[b.id] = fallen_back;
         if (needs_rob) {
             for (std::size_t i = 0; i < n; ++i) {
+                // Robbed: every beat's address (and so its narrow-class lane)
+                // is known upfront, unlike the bypass/RoBless FIFO below.
+                uint8_t lane = 0;
+                if (t.cls == axi::AxiClass::Narrow) {
+                    const uint64_t addr = axi::beat_addr(t.local_addr, b.len, b.size, b.burst, i);
+                    lane = static_cast<uint8_t>(axi::narrow_lane(addr));
+                }
                 read_entries_[base + i] =
-                    ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}};
+                    ReadEntry{/*occupied=*/true, /*ready=*/false, b.id, /*r_beat=*/{}, lane};
             }
             alloc_read_.set(base + n - 1);  // only the range TOP is marked
             read_slot_hwm_ =
                 std::max<std::size_t>(read_slot_hwm_, r_rob_depth_ - read_free_space());
             read_range_len_[base] = static_cast<uint16_t>(n);
+        } else if (t.cls == axi::AxiClass::Narrow) {
+            // Bypass: no read_entries_ slot, so pop_r_staged's bypass branch
+            // needs its own AR basis (see ar_lane_meta_'s comment).
+            ar_lane_meta_[b.id].push_back({t.local_addr, b.len, b.size, b.burst, 0});
         }
         read_order_by_id_[b.id].push_back(
             {static_cast<uint8_t>(base), static_cast<uint16_t>(n), needs_rob});
@@ -394,8 +426,11 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     }
     auto t = sam_.translate(b.addr);
     if (read_outstanding_[b.id]) return false;  // single-outstanding per id
-    if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0})) {
+    if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0, t.cls})) {
         return false;
+    }
+    if (t.cls == axi::AxiClass::Narrow) {
+        ar_lane_meta_[b.id].push_back({t.local_addr, b.len, b.size, b.burst, 0});
     }
     read_outstanding_[b.id] = true;
     ++read_txns_;
@@ -428,7 +463,24 @@ inline std::optional<axi::RBeat> Rob::pop_r() {
 inline std::optional<axi::RBeat> Rob::pop_r_robless() {
     assert(mode_r_ != RobMode::Enabled &&
            "nmu::Rob::pop_r_robless: Enabled mode uses pop_r_staged");
-    return next_depkt_.pop_r();
+    auto opt = next_depkt_.pop_r_with_meta();
+    if (!opt) return std::nullopt;
+    auto [r, meta] = *opt;
+    if (meta.cls == axi::AxiClass::Narrow) reanchor_from_fifo_(r);
+    return r;
+}
+
+// Shared by the Disabled/RoBless path and Enabled mode's bypass sub-path:
+// neither owns a read_entries_ slot, so both recover the AR basis from the
+// per-id ar_lane_meta_ FIFO pushed at push_ar.
+inline void Rob::reanchor_from_fifo_(axi::RBeat& r) {
+    auto& fifo = ar_lane_meta_[r.id];
+    assert(!fifo.empty() && "nmu::Rob: narrow R beat with no staged AR basis");
+    ArLaneMeta& am = fifo.front();
+    const uint64_t addr = axi::beat_addr(am.local_addr, am.len, am.size, am.burst, am.beat_counter);
+    axi::reanchor_narrow_lane(r.data, axi::narrow_lane(addr));
+    ++am.beat_counter;
+    if (r.last) fifo.pop_front();
 }
 
 inline void Rob::retire_b(bool ordering_req, uint8_t ordering_tag, uint8_t axi_id) {
@@ -541,6 +593,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
             assert(false && "bypassed R does not match the head of its id's order list");
             std::abort();
         }
+        if (meta.cls == axi::AxiClass::Narrow) reanchor_from_fifo_(r);
         if (r.last) {
             read_order_by_id_[id].pop_front();
             drain_ready_read_heads_(id);
@@ -569,6 +622,7 @@ inline std::optional<Rob::CommittedREntry> Rob::pop_r_staged() {
         assert(false && "computed read slot unallocated or already filled");
         std::abort();
     }
+    if (meta.cls == axi::AxiClass::Narrow) axi::reanchor_narrow_lane(r.data, slot.lane);
     slot.r_beat = r;
     slot.ready = true;
     ++read_arrival_offset_[base];

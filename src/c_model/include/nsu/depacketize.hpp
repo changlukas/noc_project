@@ -98,8 +98,23 @@ class Depacketize : public RequestDepacketizer {
     router::PipelineStage<axi::WBeat> s1_w_;
     router::PipelineStage<Flit> s1_ar_;
 
+    // Narrow-class W lane re-anchor (S2 design doc §2 site 2): the AW basis a
+    // W burst's beats need is decoded eagerly here, at AW arrival, and staged
+    // FIFO-order -- AXI4 W beats stream non-interleaved, one wormhole packet
+    // (AW + its W beats) at a time, so the front entry always matches the W
+    // beats currently arriving. Populated for every AW (both classes); Data
+    // class ignores it (full-width payload, decoded directly, no lane math).
+    struct WAddrMeta {
+        uint64_t local_addr;
+        uint8_t len;
+        uint8_t size;
+        axi::Burst burst;
+        uint16_t beat_counter = 0;
+    };
+    std::deque<WAddrMeta> w_addr_fifo_;
+
     static axi::AwBeat decode_aw(const Flit& f);
-    static axi::WBeat decode_w(const Flit& f);
+    axi::WBeat decode_w(const Flit& f);
     static axi::ArBeat decode_ar(const Flit& f);
 };
 
@@ -120,14 +135,29 @@ inline axi::AwBeat Depacketize::decode_aw(const Flit& f) {
 }
 
 inline axi::WBeat Depacketize::decode_w(const Flit& f) {
-    // DataW reuses NarrowW's field layout at today's width (T2a); the axi_ch
-    // picks which channel namespace the flit was packed into.
-    const char* ch = (f.get_header_field("axi_ch") == ni::AXI_CH_DataW) ? "DATA_W" : "NARROW_W";
+    const bool is_data = f.get_header_field("axi_ch") == ni::AXI_CH_DataW;
+    const char* ch = is_data ? "DATA_W" : "NARROW_W";
     axi::WBeat b{};
     b.last = f.get_payload_field(ch, "wlast") != 0;
     b.user = static_cast<uint8_t>(f.get_payload_field(ch, "wuser"));
-    b.strb = f.get_payload_field(ch, "wstrb");
-    f.get_payload_bytes(ch, "wdata", b.data.data(), axi::NOC_DATA_WIDTH_BITS);
+    if (is_data) {
+        b.strb = f.get_payload_field(ch, "wstrb");
+        f.get_payload_bytes(ch, "wdata", b.data.data(), ni::width::NOC_DATA_WIDTH);
+        return b;
+    }
+    // Narrow: the flit carries only the addressed 8 B lane. w_addr_fifo_'s
+    // front entry is this beat's paired AW (see the struct comment).
+    assert(!w_addr_fifo_.empty() &&
+           "nsu::Depacketize::decode_w: narrow W flit with no staged AW address basis");
+    WAddrMeta& am = w_addr_fifo_.front();
+    const uint64_t addr = axi::beat_addr(am.local_addr, am.len, am.size, am.burst, am.beat_counter);
+    const unsigned lane = axi::narrow_lane(addr);
+    const uint64_t narrow_strb = f.get_payload_field(ch, "wstrb");
+    b.strb = narrow_strb << (lane * axi::NARROW_DATA_BYTES);
+    f.get_payload_bytes(ch, "wdata", b.data.data() + lane * axi::NARROW_DATA_BYTES,
+                        ni::width::NOC_NARROW_DATA_WIDTH);
+    ++am.beat_counter;
+    if (b.last) w_addr_fifo_.pop_front();
     return b;
 }
 
@@ -178,6 +208,15 @@ inline void Depacketize::tick() {
                     return;
                 }
                 s1_aw_.accept(f);
+                // Eager decode (in addition to the raw stash above): the W
+                // beats that follow need the AW's address basis before pop_aw
+                // ever runs (W is decoded here, at arrival; pop_aw may drain
+                // later, rate-limited to <=1/tick and gated on meta_.write_full()).
+                {
+                    const axi::AwBeat aw = decode_aw(f);
+                    w_addr_fifo_.push_back(
+                        {aw.addr, aw.len, aw.size, aw.burst, /*beat_counter=*/0});
+                }
                 break;
             case ni::AXI_CH_NarrowW:
             case ni::AXI_CH_DataW:
@@ -263,6 +302,10 @@ inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
                                            static_cast<uint8_t>(f.get_header_field("ordering_req")),
                                            static_cast<uint8_t>(f.get_header_field("ordering_tag")),
                                            cls,
+                                           b.addr,
+                                           b.len,
+                                           b.size,
+                                           b.burst,
                                        });
     b.id = downstream_id;
     return b;

@@ -92,8 +92,22 @@ class VcArbiter : public router::NocReqOut {
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
                                                 uint8_t ordering_req, uint8_t id);
 
+    // Channel-kind classification is class-independent: narrow and data class
+    // AW/AR/W route through the same VC-selection logic (steering both
+    // classes onto the shared REQ/RSP link is S2's interim shape; S3a splits
+    // this). Every axi_ch comparison below must accept both encodings.
+    static bool is_aw(uint8_t axi_ch) {
+        return axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_DataAw;
+    }
+    static bool is_ar(uint8_t axi_ch) {
+        return axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr;
+    }
+    static bool is_w(uint8_t axi_ch) {
+        return axi_ch == ni::AXI_CH_NarrowW || axi_ch == ni::AXI_CH_DataW;
+    }
+
     const std::vector<uint8_t>* candidates_for(uint8_t axi_ch) const {
-        return axi_ch == ni::AXI_CH_NarrowAw ? &write_vcs_ : &read_vcs_;
+        return is_aw(axi_ch) ? &write_vcs_ : &read_vcs_;
     }
 
     router::NocReqOut& downstream_;
@@ -119,7 +133,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
                                                               uint8_t ordering_req, uint8_t id) {
     // W invariant fires regardless of NUM_VC: this arbiter must be
     // downstream of a WormholeArbiter that serializes AW+W; W must always follow AW.
-    if (axi_ch == ni::AXI_CH_NarrowW) {
+    if (is_w(axi_ch)) {
         if (!current_aw_vc_.has_value()) {
             assert(false &&
                    "nmu::VcArbiter::push_flit: W arrived with no current AW VC -- "
@@ -133,16 +147,15 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
     if (num_vc_ == 1) return uint8_t{0};
 
-    if (axi_ch != ni::AXI_CH_NarrowAw && axi_ch != ni::AXI_CH_NarrowAr) return std::nullopt;
+    if (!is_aw(axi_ch) && !is_ar(axi_ch)) return std::nullopt;
 
     // Fixed VC id (same-destination bypass): ordering_req=0 flit whose dst_id matches this id's
     // last same-channel dst_id reuses that VC. No fallback to round-robin on
     // block -- rerouting a fixed-VC streak mid-flight is exactly the reorder
     // the fixed VC exists to prevent.
     if (ordering_req == 0) {
-        std::optional<uint8_t>& last_dst =
-            (axi_ch == ni::AXI_CH_NarrowAw) ? last_aw_dst_[id] : last_ar_dst_[id];
-        uint8_t last_vc = (axi_ch == ni::AXI_CH_NarrowAw) ? last_aw_vc_[id] : last_ar_vc_[id];
+        std::optional<uint8_t>& last_dst = is_aw(axi_ch) ? last_aw_dst_[id] : last_ar_dst_[id];
+        uint8_t last_vc = is_aw(axi_ch) ? last_aw_vc_[id] : last_ar_vc_[id];
         if (last_dst.has_value() && *last_dst == dst_id) {
             if (pending_[last_vc].size() < pending_depth_ && downstream_.credit_avail(last_vc)) {
                 return last_vc;
@@ -152,7 +165,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
     }
 
     const std::vector<uint8_t>* cand = candidates_for(axi_ch);
-    uint8_t& rr = (axi_ch == ni::AXI_CH_NarrowAw) ? write_rr_start_ : read_rr_start_;
+    uint8_t& rr = is_aw(axi_ch) ? write_rr_start_ : read_rr_start_;
     const std::size_t n = cand->size();
     for (std::size_t k = 0; k < n; ++k) {  // round-robin from rr, first available
         uint8_t vc = (*cand)[(rr + k) % n];
@@ -168,12 +181,13 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
 
     uint8_t dst_id = 0, ordering_req = 0, id = 0;
-    if (axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_NarrowAr) {
+    if (is_aw(axi_ch) || is_ar(axi_ch)) {
         dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
         ordering_req = static_cast<uint8_t>(flit.get_header_field("ordering_req"));
-        id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_NarrowAw
-                                      ? flit.get_payload_field("AW", "awid")
-                                      : flit.get_payload_field("AR", "arid"));
+        // "AW"/"AR" payload channel layout is shared by both classes (spec
+        // §6: no Narrow*/Data* split for Aw/Ar).
+        id = static_cast<uint8_t>(is_aw(axi_ch) ? flit.get_payload_field("AW", "awid")
+                                                : flit.get_payload_field("AR", "arid"));
     }
 
     auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, ordering_req, id);
@@ -182,7 +196,7 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     if (pending_[vc_id].size() >= pending_depth_) return false;
 
     // Update W-follows-AW optional only after pass conditions (atomicity)
-    if (axi_ch == ni::AXI_CH_NarrowAw) {
+    if (is_aw(axi_ch)) {
         if (current_aw_vc_.has_value()) {
             assert(false &&
                    "nmu::VcArbiter::push_flit: AW arrived while previous AW's W burst "
@@ -191,7 +205,10 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
             std::abort();  // belt-and-braces for NDEBUG
         }
         current_aw_vc_ = vc_id;
-    } else if (axi_ch == ni::AXI_CH_NarrowW) {
+    } else if (is_w(axi_ch)) {
+        // wlast sits at bit 0 of both NARROW_W and DATA_W (same relative
+        // position in both channel layouts), so reading it via either
+        // channel name returns the same bit -- no class branch needed here.
         if (flit.get_payload_field("NARROW_W", "wlast") != 0) {
             current_aw_vc_.reset();
         }
@@ -200,8 +217,8 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     // Fixed VC id (same-destination bypass): record (dst_id, VC) for this id only after all
     // accept conditions pass (mirrors current_aw_vc_'s atomicity above).
     // ordering_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
-    if (ordering_req == 0 && (axi_ch == ni::AXI_CH_NarrowAw || axi_ch == ni::AXI_CH_NarrowAr)) {
-        if (axi_ch == ni::AXI_CH_NarrowAw) {
+    if (ordering_req == 0 && (is_aw(axi_ch) || is_ar(axi_ch))) {
+        if (is_aw(axi_ch)) {
             last_aw_dst_[id] = dst_id;
             last_aw_vc_[id] = vc_id;
         } else {

@@ -530,34 +530,13 @@ transactions:
     EXPECT_THROW(master.tick(), std::runtime_error);
 }
 
-TEST_F(AxiMasterTest, StrbFileTokenOutOfRangeThrows) {
-    SCENARIO(
-        "AxiMaster: strb_file token wider than DATA_BYTES lanes throws (malformed fixture, not "
-        "silently masked downstream)");
-    auto wpath = std::string(::testing::TempDir()) + "/w_oor.txt";
-    std::ofstream(wpath) << "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 "
-                            "11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20\n";
-    // DATA_BYTES = 32 lanes → bit 32 (0x1'0000'0000) is one lane past legal WSTRB range.
-    auto spath = std::string(::testing::TempDir()) + "/s_oor.txt";
-    std::ofstream(spath) << "100000000\n";
-    auto yaml = write_tmp(std::string(R"YAML(
-transactions:
-  - op: write
-    addr: 0x0
-    id: 0x1
-    len: 0
-    size: 5
-    burst: INCR
-    data_file: )YAML") + wpath +
-                          R"YAML(
-    strb_file: )YAML" + spath +
-                          "\n");
-
-    ni::cmodel::axi::testing::MockSlave mock;
-    axi::AxiMasterT<ni::cmodel::axi::testing::MockSlave> master(
-        yaml, mock, std::string(::testing::TempDir()) + "/r_oor.txt");
-    EXPECT_THROW(master.tick(), std::runtime_error);
-}
+// StrbFileTokenOutOfRangeThrows (a strb_file range-check regression guard) is
+// gone: at DATA_BYTES=64 the WSTRB type is exactly uint64_t (kFullStrbMask =
+// ~0ull), so no token value has "a bit above DATA_BYTES" to construct --
+// 0x1'0000'0000'0000'0000 doesn't fit an unsigned long long, so encoding it
+// overflows std::stoull itself (std::out_of_range) rather than exercising the
+// semantic `v > kFullStrbMask` check this test targeted. Same structural gap
+// as protocol_rules' StrbValidBits_RejectsBitAboveDataBytes.
 
 // AxiMaster aligns AW.addr DOWN to (1<<size) and masks first-beat
 // WSTRB lanes 0..first_lane-1 where first_lane = txn.addr & (DATA_BYTES - 1).
@@ -581,10 +560,12 @@ struct UnalignedCase {
     uint64_t txn_addr;
     uint8_t size;
     uint64_t expected_aw_addr;
-    // expected_strb = ((1 << (1<<size)) - 1) << (txn_addr & (DATA_BYTES-1)),
-    // truncated to uint32. AXI4 lane-positioned semantic: only the bus lanes
-    // [byte_lane, byte_lane + bpb) carry valid bytes for this beat.
-    uint32_t expected_strb;
+    // expected_strb = ((1 << (1<<size)) - 1) << (txn_addr & (DATA_BYTES-1)).
+    // AXI4 lane-positioned semantic: only the bus lanes [byte_lane, byte_lane
+    // + bpb) carry valid bytes for this beat. At size=5 (bpb=32) with the 64
+    // B-wide data-class bus, byte_lane + bpb can exceed 32 -- the full-width
+    // uint64_t WSTRB carries that, no truncation.
+    uint64_t expected_strb;
     const char* label;  // GoogleTest case name suffix
 };
 }  // namespace
@@ -624,11 +605,11 @@ TEST_P(AxiMasterUnalignedP, FirstBeatStrbMaskedAndAwAligned) {
 
 INSTANTIATE_TEST_SUITE_P(
     UnalignedCases, AxiMasterUnalignedP,
-    ::testing::Values(UnalignedCase{0x1003, 5, 0x1000u, 0xFFFFFFF8u, "Size5_Off3"},
-                      UnalignedCase{0x1001, 4, 0x1000u, 0x0001FFFEu, "Size4_Off1"},
-                      UnalignedCase{0x1007, 3, 0x1000u, 0x00007F80u, "Size3_Off7"},
-                      UnalignedCase{0x100F, 2, 0x100Cu, 0x00078000u, "Size2_OffF"},
-                      UnalignedCase{0x101F, 1, 0x101Eu, 0x80000000u, "Size1_Off1F"}),
+    ::testing::Values(UnalignedCase{0x1003, 5, 0x1000u, 0x7FFFFFFF8ull, "Size5_Off3"},
+                      UnalignedCase{0x1001, 4, 0x1000u, 0x0001FFFEull, "Size4_Off1"},
+                      UnalignedCase{0x1007, 3, 0x1000u, 0x00007F80ull, "Size3_Off7"},
+                      UnalignedCase{0x100F, 2, 0x100Cu, 0x00078000ull, "Size2_OffF"},
+                      UnalignedCase{0x101F, 1, 0x101Eu, 0x180000000ull, "Size1_Off1F"}),
     [](const ::testing::TestParamInfo<UnalignedCase>& info) {
         return std::string(info.param.label);
     });
@@ -675,9 +656,15 @@ transactions:
 
     master.tick();
     ASSERT_EQ(mock.captured_w.size(), 2u);
-    EXPECT_EQ(mock.captured_w[0].strb, 0x0000000Fu);
+    // beat0 lands at byte_lane 0 (addr 0), so its strb is unshifted. beat1
+    // lands at byte_lane 32 (addr 32, DATA_BYTES=64) -- strb_file tokens are
+    // beat-relative (bit 0 = this beat's first byte, matching the data_file
+    // convention), so beat1's raw 0xFFFFFFFF token is shifted into bits
+    // [63:32] before it rides the bus, the same lane positioning the data
+    // bytes get.
+    EXPECT_EQ(mock.captured_w[0].strb, 0x0000000Full);
     EXPECT_EQ(mock.captured_w[0].last, false);
-    EXPECT_EQ(mock.captured_w[1].strb, 0xFFFFFFFFu);
+    EXPECT_EQ(mock.captured_w[1].strb, 0xFFFFFFFF00000000ull);
     EXPECT_EQ(mock.captured_w[1].last, true);
 }
 

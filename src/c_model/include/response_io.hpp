@@ -24,6 +24,10 @@ namespace ni::cmodel {
 struct ResponseMeta {
     uint8_t ordering_tag;
     uint8_t ordering_req;
+    // Response class, read off the response flit's axi_ch (NarrowB/DataB,
+    // NarrowR/DataR). Default Data matches ResponseDepacketizer's default
+    // pop_*_with_meta below (Depacketize overrides both to set it for real).
+    axi::AxiClass cls = axi::AxiClass::Data;
 };
 
 class ResponsePacketizer {

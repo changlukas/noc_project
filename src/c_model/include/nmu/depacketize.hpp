@@ -66,15 +66,19 @@ inline axi::BBeat Depacketize::decode_b(const Flit& f) {
 }
 
 inline axi::RBeat Depacketize::decode_r(const Flit& f) {
-    // DataR reuses NarrowR's field layout at today's width (T2a); the axi_ch
-    // picks which channel namespace the flit was packed into.
-    const char* ch = (f.get_header_field("axi_ch") == ni::AXI_CH_DataR) ? "DATA_R" : "NARROW_R";
+    // axi_ch picks which channel namespace the flit was packed into. Narrow's
+    // rdata is the 8 B lane; this decode places it at byte offset 0 -- the
+    // Rob layer (which holds the AR basis this flit has no address for) moves
+    // it to the real lane. Data's rdata is the full width, no re-anchor needed.
+    const bool is_data = f.get_header_field("axi_ch") == ni::AXI_CH_DataR;
+    const char* ch = is_data ? "DATA_R" : "NARROW_R";
     axi::RBeat r{};
     r.id = static_cast<uint8_t>(f.get_payload_field(ch, "rid"));
     r.resp = static_cast<axi::Resp>(f.get_payload_field(ch, "rresp"));
     r.user = static_cast<uint8_t>(f.get_payload_field(ch, "ruser"));
     r.last = f.get_payload_field(ch, "rlast") != 0;
-    f.get_payload_bytes(ch, "rdata", r.data.data(), axi::NOC_DATA_WIDTH_BITS);
+    const std::size_t bits = is_data ? ni::width::NOC_DATA_WIDTH : ni::width::NOC_NARROW_DATA_WIDTH;
+    f.get_payload_bytes(ch, "rdata", r.data.data(), bits);
     return r;
 }
 
@@ -96,8 +100,10 @@ inline void Depacketize::tick() {
                     pending_ = f;
                     return;
                 }
+                const auto cls =
+                    (ch == ni::AXI_CH_DataB) ? axi::AxiClass::Data : axi::AxiClass::Narrow;
                 ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("ordering_tag")),
-                                  static_cast<uint8_t>(f.get_header_field("ordering_req"))};
+                                  static_cast<uint8_t>(f.get_header_field("ordering_req")), cls};
                 b_q_.push_back({decode_b(f), meta});
                 break;
             }
@@ -107,8 +113,10 @@ inline void Depacketize::tick() {
                     pending_ = f;
                     return;
                 }
+                const auto cls =
+                    (ch == ni::AXI_CH_DataR) ? axi::AxiClass::Data : axi::AxiClass::Narrow;
                 ResponseMeta meta{static_cast<uint8_t>(f.get_header_field("ordering_tag")),
-                                  static_cast<uint8_t>(f.get_header_field("ordering_req"))};
+                                  static_cast<uint8_t>(f.get_header_field("ordering_req")), cls};
                 r_q_.push_back({decode_r(f), meta});
                 break;
             }

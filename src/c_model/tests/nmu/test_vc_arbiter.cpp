@@ -409,8 +409,9 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_SingleVcTests) {
     ASSERT_TRUE(f_aw.has_value());
     auto f_w = noc.req_in().pop_flit();
     ASSERT_TRUE(f_w.has_value());
-    EXPECT_EQ(f_aw->get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
-    EXPECT_EQ(f_w->get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
+    // SamTable::uniform() with no "space" annotation defaults to data class.
+    EXPECT_EQ(f_aw->get_header_field("axi_ch"), ni::AXI_CH_DataAw);
+    EXPECT_EQ(f_w->get_header_field("axi_ch"), ni::AXI_CH_DataW);
     EXPECT_EQ(f_aw->get_header_field("dst_id"), 0x34u);
     EXPECT_EQ(f_w->get_header_field("dst_id"), 0x34u);
 }

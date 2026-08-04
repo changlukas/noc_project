@@ -109,7 +109,9 @@ TEST(NmuDepacketize, BFifoOrderPreserved) {
 }
 
 TEST(NmuDepacketize, RPayloadBytesDecoded) {
-    SCENARIO("NMU Depacketize: R flit payload bytes (rdata, 32B) decode bit-perfect to RBeat.data");
+    SCENARIO(
+        "NMU Depacketize: NARROW_R rdata (8B lane) decodes bit-perfect to RBeat.data offset 0 "
+        "(lane re-anchor is Rob's job, not Depacketize's -- it has no address)");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     ni::cmodel::Flit f;
@@ -117,16 +119,18 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
     f.set_header_field("dst_id", 0x10);
     f.set_payload_field("NARROW_R", "rid", 0x07);
     f.set_payload_field("NARROW_R", "rlast", 1);
-    std::array<uint8_t, 32> data;
-    for (int i = 0; i < 32; ++i) data[i] = static_cast<uint8_t>(0xE0 + i);
-    f.set_payload_bytes("NARROW_R", "rdata", data.data(), 256);
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> lane_data;
+    for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i) lane_data[i] = static_cast<uint8_t>(0xE0 + i);
+    f.set_payload_bytes("NARROW_R", "rdata", lane_data.data(), ni::width::NOC_NARROW_DATA_WIDTH);
     ASSERT_TRUE(noc.rsp_out().push_flit(f));
     depkt.tick();
     auto r = depkt.pop_r();
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r->id, 0x07);
     EXPECT_EQ(r->last, true);
-    EXPECT_EQ(r->data, data);
+    std::array<uint8_t, axi::DATA_BYTES> expected{};
+    for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i) expected[i] = lane_data[i];
+    EXPECT_EQ(r->data, expected);
 }
 
 TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
@@ -181,9 +185,9 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
         f.set_payload_field("NARROW_R", "rresp", 0);
         f.set_payload_field("NARROW_R", "ruser", 0);
         f.set_payload_field("NARROW_R", "rlast", (i == 3) ? 1u : 0u);
-        std::array<uint8_t, 32> data{};
+        std::array<uint8_t, axi::NARROW_DATA_BYTES> data{};
         data[0] = static_cast<uint8_t>(0xA0 + i);
-        f.set_payload_bytes("NARROW_R", "rdata", data.data(), 256);
+        f.set_payload_bytes("NARROW_R", "rdata", data.data(), ni::width::NOC_NARROW_DATA_WIDTH);
         ASSERT_TRUE(channel.rsp_out().push_flit(f));
     }
     depkt.tick();

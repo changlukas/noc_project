@@ -1,9 +1,11 @@
 #include "nmu/sam_yaml.hpp"
+#include "axi/types.hpp"
 #include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
 
 using ni::cmodel::nmu::addr_trans::load_sam_table;
+namespace axi = ni::cmodel::axi;
 
 TEST(SamYaml, PackedTilesAccumulateBases) {
     auto path = ni::cmodel::testing::unique_temp_path("sam_packed.yaml");
@@ -90,6 +92,7 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
         "topologies/mesh_4x4_vc2.yaml",
         "topologies/mesh_4x4_vc4.yaml",
         "topologies/mesh_4x4_vc8.yaml",
+        "topologies/mesh_2x2_config_narrow_vc1.yaml",
     };
     for (const char* file : kFiles) {
         SCOPED_TRACE(file);
@@ -101,6 +104,51 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
             expected_base += e.size;
         }
     }
+}
+
+// S2 T2d: SAM class selection from the topology YAML's tile.space attribute
+// (docs/noc-target-spec.md §5). mesh_2x2_config_narrow_vc1.yaml gives node
+// (0,0) both a memory tile (default space) and a config tile.
+TEST(SamYaml, SpaceAttributeSelectsClass) {
+    auto sam = load_sam_table("topologies/mesh_2x2_config_narrow_vc1.yaml");
+    // Memory-space tiles pack first (list order): node (0,0)'s memory tile is
+    // [0, 0x100000).
+    auto memory = sam.translate(0x1000);
+    EXPECT_EQ(memory.dst_id, 0x00u);
+    EXPECT_EQ(memory.cls, axi::AxiClass::Data);
+
+    // The config tile is the 5th (last) entry: base = sum of the 4 memory
+    // tiles' sizes = 4 * 0x100000 = 0x400000, size 0x1000.
+    auto config = sam.translate(0x400010);
+    EXPECT_EQ(config.dst_id, 0x00u);
+    EXPECT_EQ(config.cls, axi::AxiClass::Narrow);
+    EXPECT_EQ(config.local_addr, 0x10ull);  // rebased against the config tile's own base
+}
+
+TEST(SamYaml, UnknownSpaceRejected) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_bad_space.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1000, space: bogus }\n"
+                           "    - { x: 1, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n"
+                           "    - { x: 1, y: 1, size: 0x1000 }\n";
+    EXPECT_DEATH(load_sam_table(path), "space");
+}
+
+TEST(SamYaml, ConfigSpaceDuplicateNodeRejected) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_dup_config.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"
+                           "    - { x: 1, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n"
+                           "    - { x: 1, y: 1, size: 0x1000 }\n"
+                           "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
+                           "    - { x: 0, y: 0, size: 0x1000, space: config }\n";  // dup config
+    EXPECT_DEATH(load_sam_table(path), "duplicate");
 }
 
 TEST(SamYaml, NonAlignedSizeRejected) {

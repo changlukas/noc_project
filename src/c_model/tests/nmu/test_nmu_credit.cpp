@@ -89,7 +89,7 @@ TEST(NmuCreditConservation, BackpressureStallsAtSeedThenReopens) {
     for (int t = 0; t < 64; ++t) {
         nmu.tick();
         while (auto f = nmu.pop_req_flit()) {
-            EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_NarrowAr) << "reads emit AR flits";
+            EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_DataAr) << "reads emit AR flits";
             ++drained;
         }
     }
@@ -156,18 +156,20 @@ TEST(NmuCreditConservation, ConsumerPulseAccumulatesMultiConsumePerTick) {
     // Inject all 5 R(last) responses BEFORE ticking, so a single Depacketize.tick()
     // drains the whole ingress queue (depkt_r_q depth 16 > 5).
     for (int i = 0; i < kRspFlits; ++i) {
+        // Response class must match the AR's (make_cfg()'s SamTable -> data
+        // class): the RoBless path recovers the AR basis keyed by class.
         Flit r;
-        r.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        r.set_header_field("axi_ch", ni::AXI_CH_DataR);
         r.set_header_field("src_id", 0x00);
         r.set_header_field("dst_id", kSrcId);
         r.set_header_field("vc_id", 0);
         r.set_header_field("flit_tail", 1);
         r.set_header_field("ordering_tag", 0);
         r.set_header_field("ordering_req", 0);
-        r.set_payload_field("NARROW_R", "rid", static_cast<uint64_t>(i));
-        r.set_payload_field("NARROW_R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
-        r.set_payload_field("NARROW_R", "ruser", 0);
-        r.set_payload_field("NARROW_R", "rlast", 1);
+        r.set_payload_field("DATA_R", "rid", static_cast<uint64_t>(i));
+        r.set_payload_field("DATA_R", "rresp", static_cast<uint64_t>(axi::Resp::OKAY));
+        r.set_payload_field("DATA_R", "ruser", 0);
+        r.set_payload_field("DATA_R", "rlast", 1);
         nmu.inject_rsp_flit(r);
     }
 
