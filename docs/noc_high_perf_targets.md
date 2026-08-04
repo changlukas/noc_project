@@ -78,7 +78,7 @@ dedicated narrow plane is what recovers this.
 
 **NoC Simplex Bandwidth** (per link @ 1 GHz):
 
-| Plane | AXI data | Flit width | Raw BW | Data BW |
+| Plane | AXI data | Flit width | Channel BW | Data BW |
 |-------|---------:|-----------:|-------:|--------:|
 | Narrow / control | 32 b | ≈ 164 b | ≈ 20.5 GB/s | 4 GB/s |
 | Wide / data | 1024 b | ≈ 1217 b | ≈ 152 GB/s | 128 GB/s |
