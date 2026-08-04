@@ -205,7 +205,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // if dest matches an earlier one) until a new streak begins. The reset is the idle-ID bypass
     // branch itself: an id's first push (empty order list) sets fallen_back_*=false, so the flag is
     // fresh at every streak start. FlooNoC instead clears at drain (floo_rob.sv:435-441)
-    // because its idle-ID bypass READS the sticky flag (!ax_ordering_req_q); ours tests the empty
+    // because its idle-ID bypass READS the sticky flag (!ax_rob_req_q); ours tests the empty
     // list, which makes a drain-time clear a dead store -- so it is omitted here.
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_write_{};
     std::array<uint8_t, AXI_ID_SPACE> prev_dest_read_{};
@@ -221,7 +221,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<uint16_t, ORDERING_TAG_SPACE> read_range_len_{};
 
     // Beats of the head burst released so far, keyed by range base. FlooNoC keys the
-    // same counter by ID (read_ordering_tag_offset_q, floo_rob.sv:177-180); a range belongs
+    // same counter by ID (read_rob_idx_offset_q, floo_rob.sv:177-180); a range belongs
     // to exactly one ID, so keying by base carries the same information. Distinct from
     // read_arrival_offset_: arrival places incoming beats, release tracks how many left.
     std::array<uint16_t, ORDERING_TAG_SPACE> read_release_offset_{};
