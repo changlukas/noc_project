@@ -1,0 +1,26 @@
+% §7.5 sustained bandwidth, piecewise form. Two cases mirror the prose's
+% conditional narration: depth holds -> service rate, depth runs out -> falls.
+\documentclass[border=8pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{varwidth}
+
+\begin{document}
+\begin{varwidth}{7.5in}
+\[
+  \mathrm{sustained\_bandwidth} =
+  \begin{cases}
+    \mathrm{service\_rate}
+      & \text{responses return before the outstanding depth runs out}\\[1.2ex]
+    \dfrac{\mathrm{pending\_data}}{\mathrm{round\_trip\_cycles}}
+      & \text{the depth runs out, new requests wait}
+  \end{cases}
+\]
+\begin{tabular}{@{}ll@{}}
+  $\mathrm{service\_rate}$  & 63.0\,GB/s for writes, 64\,GB/s for reads\\
+  $\mathrm{pending\_data}$  & bytes a resource can hold pending, per the table below\\
+  \multicolumn{2}{@{}l@{}}{the cases meet at
+    $\mathrm{round\_trip\_cycles} = \mathrm{pending\_data} / \mathrm{service\_rate}$,
+    at 1\,GHz 1\,B/cycle is 1\,GB/s}\\
+\end{tabular}
+\end{varwidth}
+\end{document}

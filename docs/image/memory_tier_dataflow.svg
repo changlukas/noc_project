@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Memory tier dataflow, editable master. Import into Visio: Insert > Pictures > this SVG,
+     then right-click > Group > Ungroup (convert to shapes). All text stays editable. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="1150" viewBox="0 0 1500 1150"
+     font-family="Calibri, Arial, sans-serif">
+  <defs>
+    <marker id="ab" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 z" fill="#1f3d99"/></marker>
+    <marker id="ag" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 z" fill="#2e7d32"/></marker>
+    <marker id="agr" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto">
+      <path d="M9,0 L0,4 L9,8 z" fill="#2e7d32"/></marker>
+    <marker id="ao" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 z" fill="#e65100"/></marker>
+    <marker id="aor" markerWidth="10" markerHeight="8" refX="1" refY="4" orient="auto">
+      <path d="M9,0 L0,4 L9,8 z" fill="#e65100"/></marker>
+    <marker id="av" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 z" fill="#6a1b9a"/></marker>
+    <marker id="ac" markerWidth="10" markerHeight="8" refX="8" refY="4" orient="auto">
+      <path d="M0,0 L9,4 L0,8 z" fill="#777777"/></marker>
+  </defs>
+
+  <!-- ================= regions ================= -->
+  <rect x="30" y="70" width="640" height="780" rx="10" fill="none"
+        stroke="#888888" stroke-dasharray="8 5" stroke-width="1.5"/>
+  <text x="40" y="58" font-size="24" font-weight="bold" fill="#555555">host control region</text>
+
+  <line x1="720" y1="60" x2="720" y2="880" stroke="#999999"
+        stroke-dasharray="7 5" stroke-width="2"/>
+  <text x="720" y="36" font-size="20" fill="#666666" text-anchor="middle">NoC boundary: REQ / RSP / DAT links</text>
+
+  <rect x="790" y="150" width="440" height="660" rx="10" fill="none"
+        stroke="#888888" stroke-dasharray="8 5" stroke-width="1.5"/>
+  <text x="800" y="138" font-size="24" font-weight="bold" fill="#555555">NPU mesh region</text>
+  <rect x="830" y="200" width="360" height="540" rx="8" fill="none"
+        stroke="#999999" stroke-width="1.5"/>
+  <text x="845" y="228" font-size="20" fill="#555555">tile (x, y)</text>
+  <text x="1010" y="795" font-size="18" fill="#777777" text-anchor="middle">one tile of N, all tiles identical</text>
+
+  <!-- ================= host tiers ================= -->
+  <g stroke="#444444" stroke-width="1.5">
+    <rect x="120" y="110" width="300" height="72" rx="6" fill="#eef0fa"/>
+    <rect x="120" y="270" width="300" height="72" rx="6" fill="#eef0fa"/>
+    <rect x="450" y="270" width="200" height="72" rx="6" fill="#f2f2f2"/>
+    <rect x="120" y="540" width="300" height="72" rx="6" fill="#eef0fa"/>
+    <rect x="100" y="720" width="340" height="72" rx="6" fill="#f2f2f2"/>
+  </g>
+  <g font-size="22" text-anchor="middle">
+    <text x="270" y="140">Flash / external storage</text>
+    <text x="270" y="166" font-size="17" fill="#777777">persistent model store</text>
+    <text x="270" y="300">LPDDR</text>
+    <text x="270" y="326" font-size="17" fill="#777777">capacity tier</text>
+    <text x="550" y="298">interface buffer /</text>
+    <text x="550" y="322">sequencer DMA</text>
+    <text x="270" y="570">host 3D DRAM</text>
+    <text x="270" y="596" font-size="17" fill="#777777">bandwidth tier</text>
+    <text x="270" y="750">scheduler CPU / local SRAM</text>
+    <text x="270" y="776" font-size="17" fill="#777777">descriptors, sampling</text>
+  </g>
+
+  <!-- ================= tile stack ================= -->
+  <g stroke="#444444" stroke-width="1.5">
+    <rect x="880" y="250" width="260" height="72" rx="6" fill="#eaf6ea"/>
+    <rect x="880" y="430" width="260" height="72" rx="6" fill="#eaf6ea"/>
+    <rect x="880" y="610" width="260" height="72" rx="6" fill="#eaf6ea"/>
+  </g>
+  <g font-size="22" text-anchor="middle">
+    <text x="1010" y="280">tile 3D DRAM</text>
+    <text x="1010" y="306" font-size="17" fill="#777777">near-memory tier</text>
+    <text x="1010" y="460">L1</text>
+    <text x="1010" y="486" font-size="17" fill="#777777">compute scratchpad</text>
+    <text x="1010" y="652">NPU</text>
+  </g>
+
+  <!-- ================= path 1: weights (blue) ================= -->
+  <g stroke="#1f3d99" stroke-width="3.5" fill="none">
+    <line x1="270" y1="182" x2="270" y2="266" marker-end="url(#ab)"/>
+    <line x1="420" y1="306" x2="446" y2="306" marker-end="url(#ab)"/>
+    <line x1="650" y1="292" x2="876" y2="278" marker-end="url(#ab)"/>
+  </g>
+  <g font-size="19" fill="#1f3d99">
+    <text x="285" y="230">model load, once</text>
+    <text x="660" y="262">DAT, staged once, then resident</text>
+  </g>
+  <circle cx="433" cy="272" r="14" fill="#1f3d99"/>
+  <text x="433" y="279" font-size="18" fill="#ffffff" text-anchor="middle" font-weight="bold">1</text>
+
+  <!-- ================= path 2: activations (green) ================= -->
+  <g stroke="#2e7d32" stroke-width="3.5" fill="none">
+    <line x1="1010" y1="326" x2="1010" y2="426" marker-start="url(#agr)" marker-end="url(#ag)"/>
+    <line x1="1010" y1="506" x2="1010" y2="606" marker-start="url(#agr)" marker-end="url(#ag)"/>
+    <line x1="1144" y1="302" x2="1290" y2="302" marker-start="url(#agr)" marker-end="url(#ag)"/>
+  </g>
+  <g font-size="19" fill="#2e7d32">
+    <text x="1030" y="368">tiling,</text>
+    <text x="1030" y="390">double buffering</text>
+    <text x="1300" y="282">to peer tiles, DAT:</text>
+    <text x="1300" y="304">multicast,</text>
+    <text x="1300" y="326">feature pipeline</text>
+  </g>
+  <circle cx="985" cy="376" r="14" fill="#2e7d32"/>
+  <text x="985" y="383" font-size="18" fill="#ffffff" text-anchor="middle" font-weight="bold">2</text>
+
+  <!-- ================= path 3: KV cache (orange) ================= -->
+  <path d="M 424 560 C 620 545, 730 380, 874 312" fill="none"
+        stroke="#e65100" stroke-width="3.5" marker-start="url(#aor)" marker-end="url(#ao)"/>
+  <g font-size="19" fill="#e65100">
+    <text x="470" y="545">DAT, KV cache offload / refill</text>
+  </g>
+  <circle cx="723" cy="428" r="14" fill="#e65100"/>
+  <text x="723" y="435" font-size="18" fill="#ffffff" text-anchor="middle" font-weight="bold">3</text>
+
+  <!-- ================= path 4: results (violet) ================= -->
+  <path d="M 876 660 C 700 700, 560 660, 426 606" fill="none"
+        stroke="#6a1b9a" stroke-width="3.5" marker-end="url(#av)"/>
+  <line x1="270" y1="612" x2="270" y2="716" stroke="#6a1b9a" stroke-width="3.5"
+        marker-end="url(#av)" fill="none"/>
+  <g font-size="19" fill="#6a1b9a">
+    <text x="580" y="712">DAT, results, last layer only</text>
+    <text x="285" y="670">sample next token</text>
+  </g>
+  <circle cx="737" cy="676" r="14" fill="#6a1b9a"/>
+  <text x="737" y="683" font-size="18" fill="#ffffff" text-anchor="middle" font-weight="bold">4</text>
+
+  <!-- ================= control (gray dashed) ================= -->
+  <path d="M 440 756 C 640 820, 760 790, 828 742" fill="none" stroke="#777777"
+        stroke-width="2.5" stroke-dasharray="8 6" marker-end="url(#ac)"/>
+  <text x="460" y="830" font-size="19" fill="#777777">REQ / RSP: start, done, next token</text>
+
+  <!-- ================= legend ================= -->
+  <rect x="140" y="900" width="1220" height="200" rx="8" fill="none"
+        stroke="#aaaaaa" stroke-width="1.5"/>
+  <g font-size="20">
+    <text x="165" y="940" fill="#1f3d99" font-weight="bold">1  weights</text>
+    <text x="330" y="940" fill="#222222">Flash → LPDDR → DMA → tile 3D DRAM, staged once at model load, resident afterward</text>
+    <text x="165" y="984" fill="#2e7d32" font-weight="bold">2  activations</text>
+    <text x="330" y="984" fill="#222222">tile 3D DRAM ↔ L1 ↔ NPU inside a tile, DAT multicast and feature pipeline across tiles</text>
+    <text x="165" y="1028" fill="#e65100" font-weight="bold">3  KV cache</text>
+    <text x="330" y="1028" fill="#222222">appended per token in tile 3D DRAM, offloaded to and refilled from host 3D DRAM</text>
+    <text x="165" y="1072" fill="#6a1b9a" font-weight="bold">4  results</text>
+    <text x="330" y="1072" fill="#222222">last-layer output → host 3D DRAM, scheduler samples the next token, reissues it to the mesh</text>
+  </g>
+</svg>

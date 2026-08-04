@@ -1,0 +1,20 @@
+% §7.3 service rate formula + worked example
+\documentclass[border=8pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{varwidth}
+
+\begin{document}
+\begin{varwidth}{7.5in}
+\[
+  \mathrm{service\_rate}(\mathrm{channel})
+  = \min\bigl(\mathrm{beat\ rate},\ \mathrm{flit\ rate\ of\ the\ channel's\ network}\bigr)
+\]
+\textit{Example, data-class write with 4\,KB bursts (64 beats of 64\,B):}
+\begin{align*}
+  \mathrm{beat\ rate} &= 1\ \mathrm{beat/cycle\ at\ 1\ GHz} && = 64\ \mathrm{GB/s}\\
+  \mathrm{flit\ rate}(\mathrm{DataW}) &= \tfrac{64}{65}\ \mathrm{of\ DAT\ flits},\
+    \mathrm{one\ per\ burst\ is\ its\ DataAw} && = 63.0\ \mathrm{GB/s}\\
+  \mathrm{service\_rate}(\mathrm{write}) &= \min(64,\ 63.0) && = 63.0\ \mathrm{GB/s}
+\end{align*}
+\end{varwidth}
+\end{document}

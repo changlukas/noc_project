@@ -1,0 +1,19 @@
+% §7.4 zero-load latency formula
+\documentclass[border=8pt]{standalone}
+\usepackage{amsmath,amssymb}
+\usepackage{varwidth}
+
+\begin{document}
+\begin{varwidth}{7.5in}
+\[
+  T_{\mathrm{zero\_load}} = H\, t_{\mathrm{wire}} + (H{+}1)\, t_{\mathrm{router}} + L
+\]
+\begin{tabular}{@{}ll@{}}
+  $H$                   & Manhattan hop count from source to destination\\
+  $t_{\mathrm{wire}}$   & link traversal delay per hop, in NoC cycles\\
+  $t_{\mathrm{router}}$ & router pipeline latency per hop, in NoC cycles\\
+  $L$                   & payload length in flits, one injected per cycle,
+                          so serialization contributes $L$ cycles\\
+\end{tabular}
+\end{varwidth}
+\end{document}
