@@ -275,11 +275,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
-    // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
-    if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
     // Shared AW pool, all ids (floo_meta_buffer.sv:157 inp_gnt_o). Bypassed pushes
     // allocate no RoB slot, so this is their only aggregate limiter.
     if (write_txns_ >= outstanding_depth_) return false;
+    // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
+    if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
     auto t = sam_.translate(b.addr);
     const uint8_t dst = t.dst_id;
     const bool empty = write_order_by_id_[b.id].empty();

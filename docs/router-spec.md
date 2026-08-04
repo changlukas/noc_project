@@ -50,6 +50,8 @@ idle at credit 0, and resumes one flit per returned pulse.
 
 ### 2.2 Flit format
 
+> Pre-S1: this table predates the Stage 1 flit-layout change (44 b header, 48 b addr, 396 b flit) and is re-synced in campaign Stage 5.
+
 Bit positions inside the 408-bit flit, from `specgen/generated/cpp/ni_flit_constants.h`.
 Header occupies flit bits [55:0], payload occupies flit bits [407:56].
 

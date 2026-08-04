@@ -123,6 +123,10 @@ Carry-in from S0 reviews: block-spec numeric drift vs constants.yaml (credit see
 default 8, multiple table lines in nmu/nsu/router specs — Parameter Discipline applies);
 inventory gaps (ni/wormhole_arbiter.hpp has no feature entry yet FEAT-NMU-VC_MAPPING lists
 flit_tail; DEPACKETIZE uses_packet_fields omit ordering_req/ordering_tag they read).
+Carry-in from S1: block-spec flit-format tables (nmu/nsu/router §2.2) still show the
+pre-S1 layout — 56 b header, 408 b flit — vs as-built 44 b header, 48 b addr, 396 b flit,
+axi_ch 4 b / 10-value enc, and the NMU_OUTSTANDING_DEPTH outstanding-pool params; re-sync
+alongside the S0 numeric drift above.
 Status: Not Started
 
 ## Deferred (post-campaign)

@@ -25,6 +25,7 @@ while buffer and outstanding depths move the queuing part.
 | `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID, hence the memory latency a master can hide behind concurrency | 32 (1 to 256) |
 | `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return | 32, 32 (1 to 256) |
 | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
+| `NMU_OUTSTANDING_DEPTH` | Latency hiding | Master-side shared outstanding pool per direction, all AXI IDs share it | 32 (1 to 256) |
 | `NMU_QUEUE_DEPTH`, `NSU_QUEUE_DEPTH` | Burst absorption | AXI-channel FIFO depth at the master-side (NMU) and slave-side (NSU) network interfaces, absorbs injection bursts | 16, 16 (1 to 1024) |
 | `NMU_DEPKT_Q_DEPTH` | Burst absorption | Depacketize demux FIFO depth | 16 (1 to 1024) |
 | `NMU_ARBITER_FIFO_DEPTH`, `NSU_ARBITER_FIFO_DEPTH` | Burst absorption | Wormhole and VC-arbiter staging depth | 4, 4 (1 to 64) |
@@ -62,7 +63,7 @@ Below the bound a single ID stream is latency-limited, its throughput capped at
 must not be the tighter bound on the same concurrency. `ROB_R_DEPTH` holds one read-data beat per
 slot, so for read bursts its required depth scales with beats, not transactions. Across several IDs
 a master multiplies concurrency, one `MAX_TXNS_PER_ID` window per ID, with aggregate admission
-limited by the shared pools above.
+limited by `NMU_OUTSTANDING_DEPTH`.
 
 ## Worked example: absorbing a full outstanding window
 

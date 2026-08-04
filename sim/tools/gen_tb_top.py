@@ -118,8 +118,9 @@ def _coord_id(x: int, y: int) -> int:
 def _nodes(topo: dict):
     """Return ordered node list: [(idx, x, y, coord_id), ...] in (y,x) raster order.
 
-    idx is the linear emit index (0..N-1); coord_id is the routing id. For a 1-D
-    mesh the two coincide, so 2x1 output stays byte-identical to the prior gen.
+    idx is the linear emit index (0..N-1); coord_id is the routing id. The two
+    coincide only for nodes in mesh row y=0 (coord_id's y field is 0 there), so
+    a 2x2 mesh's first row stays byte-identical to the prior 1-D gen.
     """
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]

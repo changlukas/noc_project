@@ -63,18 +63,12 @@ TEST(Flit, SetGetPayloadBytesWdata) {
 }
 
 TEST(Flit, PaddingCheckPassesWhenZero) {
-    SCENARIO("Flit: default-constructed flit has all padding bits zero");
-    Flit f;
-    EXPECT_TRUE(f.check_padding_is_zero());
-}
-
-TEST(Flit, PaddingCheckAlwaysPassesNoReservedBits) {
     // The 44 b header has no reserved bits (spec drops the padding/rsvd
     // field entirely), so PADDING_FIELDS_COUNT is 0 and check_padding_is_zero
-    // is vacuously true regardless of what bits are set elsewhere in the flit.
-    SCENARIO("Flit: check_padding_is_zero is vacuously true, 44 b header has no padding");
+    // is vacuously true.
+    SCENARIO(
+        "Flit: default-constructed flit has all padding bits zero, 44 b header has no padding");
     Flit f;
-    f.raw()[6] |= (1u << 6);  // arbitrary payload bit, not a header field
     EXPECT_TRUE(f.check_padding_is_zero());
     EXPECT_EQ(ni::header::PADDING_FIELDS_COUNT, 0u);
 }

@@ -10,7 +10,7 @@
 //   NoC req credit:  credit_return Nsu returns to the req-side upstream.
 //   AXI master side: Nsu drives AW/W/AR to slave; accepts bready/rready from it.
 //
-// FLIT_BYTES = 51 (ni::FLIT_WIDTH = 408 bits, rounded to bytes).
+// FLIT_BYTES = 50 (ni::FLIT_WIDTH = 396 bits, rounded to bytes).
 // AXI_DATA_BYTES = 32 (256-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 //

@@ -17,6 +17,8 @@ The NMU has two independent flit streams:
 
 ### 2.2 Flit format
 
+> Pre-S1: this table predates the Stage 1 flit-layout change (44 b header, 48 b addr, 396 b flit) and is re-synced in campaign Stage 5.
+
 Source of truth: `specgen/generated/cpp/ni_flit_constants.h` (generated from `specgen/generated/json/ni_packet.json`, drift-gated at build). Totals: `FLIT_WIDTH` = 408, `HEADER_WIDTH` = 56, `PAYLOAD_WIDTH` = 352. Header occupies `flit[55:0]`, payload occupies `flit[407:56]`. Payload field positions below are relative to the payload region: payload bit p is flit bit p+56.
 
 Header (`flit[55:0]`):

@@ -81,7 +81,7 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
 //   wstrb         : 1 word (32-bit strobe)
-//   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
+//   flit fields   : FLIT_VEC_WORDS = 13 words (396-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
 // num_vc threads the topology VC count into the NmuConfig; make_virtual_networks(num_vc)
 // splits it into disjoint write/read VC pools (lower half write, upper half read; num_vc==1
@@ -127,7 +127,7 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
 //   wstrb         : 1 word (32-bit strobe)
-//   flit fields   : FLIT_VEC_WORDS = 13 words (408-bit flit, little-endian)
+//   flit fields   : FLIT_VEC_WORDS = 13 words (396-bit flit, little-endian)
 //   other attribs : 1 word each (low bits used per width)
 // num_vc threads the topology VC count into the NsuConfig (write_rsp_vc=0,
 // read_rsp_vc=(num_vc>=2)?1:0 — read/write VC split). noc_rsp_credit_return / noc_req_credit_return

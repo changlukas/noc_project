@@ -229,7 +229,7 @@ TEST(NmuPacketizeDeath, NonzeroCollectiveMaskAborts) {
 TEST(NmuPacketize, AwqosRoundTrip) {
     SCENARIO(
         "NMU Packetize: awqos=0xA set on AwBeat packs into the AW payload field "
-        "(AWQOS_LSB=97, AWQOS_WIDTH=4); flit get_payload_field recovers same value");
+        "(AWQOS_LSB=81, AWQOS_WIDTH=4); flit get_payload_field recovers same value");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
     auto aw = make_aw(/*id*/ 0x01, /*addr*/ 0x340000);

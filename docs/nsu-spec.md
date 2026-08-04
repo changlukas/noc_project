@@ -26,6 +26,8 @@ Depacketization is a one-flit-one-beat mapping. There is no burst splitting, mer
 
 ### 2.2 Flit format
 
+> Pre-S1: this table predates the Stage 1 flit-layout change (44 b header, 48 b addr, 396 b flit) and is re-synced in campaign Stage 5.
+
 `FLIT_WIDTH` = 408 = `HEADER_WIDTH` 56 + `PAYLOAD_WIDTH` 352 (`specgen/generated/cpp/ni_flit_constants.h`). Bit numbering is LSB-first over the whole flit. Payload bit 0 is flit bit 56.
 
 Header, flit bits [55:0]:
