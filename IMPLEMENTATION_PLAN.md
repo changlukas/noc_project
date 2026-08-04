@@ -44,9 +44,12 @@ REQ 137 / RSP 127 / DAT 629 need the narrow/data classes and land in S2.
 User rulings (2026-08-04): mesh dim min = 2 — a mesh communicating through NI + router needs
 at least 2x2, 1x1 de-legalized (supersedes the earlier degenerate-1x1 ruling; LOCAL->LOCAL
 self-traffic stays legal within >=2x2). Outstanding = one shared pool, total depth 32 across
-all IDs — not a per-ID limit; the limiter is a shared outstanding counter, depth a free
-parameter with spec default 32. How this composes with the existing per-ID ordering interlock
-(max_txns_per_id) is S1 design work, not pre-decided here.
+all IDs — not a per-ID limit; per direction, AW and AR each get an independent shared pool of
+depth 32 (two structures, matching FlooNoC `floo_meta_buffer`: `MaxUniqueIds==1` -> two
+`fifo_v3` DEPTH=MaxTxns, else two `id_queue` CAPACITY=MaxTxns; `ChimneyDefaultCfg` MaxTxns=32,
+floo_pkg.sv:342-347). Depth stays a free parameter, spec default 32. FlooNoC's `MaxTxnsPerId`
+sizes only the NormalRoB and is not a flow limiter; how the shared pools compose with our
+per-ID ordering interlock (max_txns_per_id) is S1 design work, not pre-decided here.
 Success Criteria: specgen regenerated both languages, all call sites and tests updated, ctest +
 co-sim green at 256 b.
 Status: Not Started
