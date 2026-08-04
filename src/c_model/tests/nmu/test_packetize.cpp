@@ -187,6 +187,30 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
     EXPECT_EQ(f.get_payload_field("AW", "awuser"), 0xFFu);
 }
 
+TEST(NmuPacketize, CollectiveAwuserRejectedUntilS4) {
+    SCENARIO(
+        "NMU Packetize: AWUSER[57:8] (collective_op/collective_mask) is stripped at packetize "
+        "and never reaches the AW payload; nonzero collective_op or collective_mask rejects the "
+        "push (no flit emitted), zero collective bits pass through unaffected (S1 gate ahead of "
+        "S4 mask-translate + fanout)");
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+
+    auto aw = make_aw(/*id*/ 0x03, /*addr*/ 0x340000);
+    aw.user = (uint64_t{1} << 8) | 0x5Au;  // collective_op=1, user-defined=0x5A
+    EXPECT_FALSE(pkt.push_aw(aw));
+    EXPECT_EQ(aw_cap.size(), 0u);
+
+    aw.user = (uint64_t{0xFFFFFFFFFFFFull} << 10) | 0x5Au;  // nonzero collective_mask only
+    EXPECT_FALSE(pkt.push_aw(aw));
+    EXPECT_EQ(aw_cap.size(), 0u);
+
+    aw.user = 0x5Au;  // no collective bits set
+    ASSERT_TRUE(pkt.push_aw(aw));
+    auto f = *aw_cap.pop();
+    EXPECT_EQ(f.get_payload_field("AW", "awuser"), 0x5Au);  // AWUSER[57:8] never reaches payload
+}
+
 TEST(NmuPacketize, AwqosRoundTrip) {
     SCENARIO(
         "NMU Packetize: awqos=0xA set on AwBeat packs into the AW payload field "

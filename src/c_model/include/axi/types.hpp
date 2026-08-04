@@ -80,7 +80,14 @@ struct AwBeat {
     uint64_t addr;
     uint8_t len, size;
     Burst burst;
-    uint8_t cache, lock, prot, region, user, qos;
+    uint8_t cache, lock, prot, region;
+    // AWUSER, 58 b (docs/noc-target-spec.md AWUSER layout): [7:0] user-defined
+    // (rides into the AW payload `user` field), [9:8] collective_op, [57:10]
+    // collective_mask. Collective bits are consumed by the NMU at packetize
+    // time and never reach the flit payload; nonzero collective_op or
+    // collective_mask is rejected until S4 (nmu::Packetize::push_aw_with_meta).
+    uint64_t user;
+    uint8_t qos;
 };
 
 struct WBeat {

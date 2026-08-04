@@ -107,6 +107,14 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
 // ---- inline impl ----
 
 inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) {
+    // AWUSER[57:8] (collective_op[9:8] + collective_mask[57:10]) is consumed
+    // here and never forwarded to the AW payload (spec: docs/noc-target-spec.md
+    // AWUSER layout). S4 will translate the mask into the flit's
+    // collective_mask/collective_op header fields and fan out; until then any
+    // nonzero collective request is rejected (no flit emitted).
+    if ((b.user >> 8) != 0) return false;
+    const uint8_t payload_user = static_cast<uint8_t>(b.user & 0xFFu);
+
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_NarrowAw);
     f.set_header_field("src_id", src_id_);
@@ -125,7 +133,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_payload_field("AW", "awprot", b.prot);
     f.set_payload_field("AW", "awregion", b.region);
     f.set_payload_field("AW", "awqos", b.qos);
-    f.set_payload_field("AW", "awuser", b.user);
+    f.set_payload_field("AW", "awuser", payload_user);
     if (!aw_out_.push_flit(f)) return false;
     w_meta_fifo_.push_back({meta.dst_id, meta.ordering_req, meta.ordering_tag});
     return true;
