@@ -41,24 +41,6 @@ depth (default 128 = 8 KB at 64 B beats), VC count (1-8), mesh dims, outstanding
 widths all stay free parameters exactly as FlooNoC keeps them; tests cover the parameter range,
 not one value.
 
-## Stage 1: Formats and params (specgen-first, data path stays 256 b)
-Goal: addr 64 to 48 b; header 56 to 44 b with axi_ch 4 b ten encodings; fixed_vc field (field
-only); collective_op/mask fields (enabled in format, runtime-rejected until S4); Aw/Ar payload
-93 b; AwBeat user 8 to 58 b type + NMU strips [57:8]. Flit widths are interim here — final
-REQ 137 / RSP 127 / DAT 629 need the narrow/data classes and land in S2.
-User rulings (2026-08-04): mesh dim min = 2 — a mesh communicating through NI + router needs
-at least 2x2, 1x1 de-legalized (supersedes the earlier degenerate-1x1 ruling; LOCAL->LOCAL
-self-traffic stays legal within >=2x2). Outstanding = one shared pool, total depth 32 across
-all IDs — not a per-ID limit; per direction, AW and AR each get an independent shared pool of
-depth 32 (two structures, matching FlooNoC `floo_meta_buffer`: `MaxUniqueIds==1` -> two
-`fifo_v3` DEPTH=MaxTxns, else two `id_queue` CAPACITY=MaxTxns; `ChimneyDefaultCfg` MaxTxns=32,
-floo_pkg.sv:342-347). Depth stays a free parameter, spec default 32. FlooNoC's `MaxTxnsPerId`
-sizes only the NormalRoB and is not a flow limiter; how the shared pools compose with our
-per-ID ordering interlock (max_txns_per_id) is S1 design work, not pre-decided here.
-Success Criteria: specgen regenerated both languages, all call sites and tests updated, ctest +
-co-sim green at 256 b.
-Status: Not Started
-
 ## Stage 2: Dual data class 64/512
 Goal: narrow 64 b + data 512 b classes; WSTRB past uint32_t; memory/master/slave/DPI
 marshalling/VIP types; payload layouts NarrowW 81, DataW 585, B 18, NarrowR 83, DataR 531;
@@ -111,6 +93,12 @@ Blocking decisions, resolve before coding:
 Success Criteria: multicast write matrix (row/col/submesh masks) green in co-sim; deliberate
 illegal-mask and lock-multicast stimulus rejected at NMU; single-B invariant checked by
 scoreboard.
+Kickoff notes from S1 (final review): (1) today's AWUSER collective reject sits in
+`Rob::push_aw` downstream of pool/RoB bookkeeping and is fatal (abort) — when S4 makes it a
+legal-input path, the mask translate + reject must move upstream of `Rob::push_aw`, per this
+stage's own "before any fanout or RoB allocation". (2) `cmodel_nmu_set_inputs` carries no
+awuser argument — the DPI face needs it before any collective stimulus can be driven from
+co-sim.
 Status: Not Started
 
 ## Stage 5: Alignment tail
@@ -126,7 +114,11 @@ flit_tail; DEPACKETIZE uses_packet_fields omit ordering_req/ordering_tag they re
 Carry-in from S1: block-spec flit-format tables (nmu/nsu/router §2.2) still show the
 pre-S1 layout — 56 b header, 408 b flit — vs as-built 44 b header, 48 b addr, 396 b flit,
 axi_ch 4 b / 10-value enc, and the NMU_OUTSTANDING_DEPTH outstanding-pool params; re-sync
-alongside the S0 numeric drift above.
+alongside the S0 numeric drift above. Also from S1: noc-performance-parameters.md formulas and
+worked example still size concurrency from MAX_TXNS_PER_ID windows multiplying across IDs —
+rework on the pool model (row + attribution already fixed in S1); regression/perf matrix
+re-baseline expected since multi-ID patterns previously reached N_ids x 32 outstanding via the
+bypass path and now cap at the 32-aggregate pools.
 Status: Not Started
 
 ## Deferred (post-campaign)
