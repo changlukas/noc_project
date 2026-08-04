@@ -47,6 +47,9 @@ from "right document, wrong passage".
 
 2026-07-26, 2059 chunks from 7 documents, `e5-small-v2`, k=8: **9 of 14, 64.3%**.
 
+2026-07-30, 2610 chunks from 10 documents (added flashattention, pagedattention, tetris
+archival), same setup: **9 of 14, 64.3%**. The added sources cost no hits.
+
 Four of the five misses retrieved the right document but not the passage holding the answer,
 which is the failure ChipNeMo reports for queries whose answers are not localized in one
 passage. The fifth missed on `stream_join_dynamic`, a rare identifier that dense embeddings

@@ -103,5 +103,38 @@ sources:
     pdf: amba-axi4.pdf
     text: null
     status: pdf-only
-    role: Authoritative for AXI4 channel signals, handshake rules, response semantics, ordering and transaction attributes. Supplied by the user. Text extraction pending - needs pypdf, so it waits on the venv.
+    role: Authoritative for AXI4 channel signals, handshake rules, response semantics, ordering and transaction attributes. Supplied by the user.
+    word_count: 0
+
+  - id: flashattention
+    title: "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"
+    authors: Tri Dao et al.
+    year: 2022
+    url: https://arxiv.org/abs/2205.14135
+    pdf: flashattention.pdf
+    text: flashattention.md
+    status: ok
+    role: Authoritative for IO-aware tiled attention - SRAM tiling, online softmax, and the memory-hierarchy accounting behind the evaluation-model algorithms and the L1 scratchpad tier.
+    word_count: 16257
+
+  - id: pagedattention
+    title: Efficient Memory Management for Large Language Model Serving with PagedAttention
+    authors: Woosuk Kwon et al.
+    year: 2023
+    url: https://arxiv.org/abs/2309.06180
+    pdf: pagedattention.pdf
+    text: pagedattention.md
+    status: ok
+    role: Authoritative for KV cache management - paged KV blocks, block tables, and the offload semantics behind the host 3D DRAM KV cache offload tier.
+    word_count: 10196
+
+  - id: tetris
+    title: "TETRIS: Scalable and Efficient Neural Network Acceleration with 3D Memory"
+    authors: Mingyu Gao et al.
+    year: 2017
+    url: https://web.stanford.edu/~mgao12/pubs/tetris.asplos17.pdf
+    pdf: tetris.pdf
+    text: null
+    status: pdf-only
+    role: 3D-stacked near-memory accelerator precedent for the tile 3D DRAM tier - vault-per-PE placement, near-DRAM compute, buffer sizing trade-off. Archival only, no arXiv HTML to extract.
     word_count: 0
