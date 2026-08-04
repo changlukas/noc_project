@@ -80,7 +80,7 @@ On Windows, invoke Python scripts with `py -3` instead of `python3`.
 
 | var | values |
 |---|---|
-| `TB` | topology YAML name from `sim/topologies/`: `mesh_1x1_vc1`, `mesh_2x2_nonuniform_vc1`, `mesh_2x4_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`; append `_rob` for the reorder-buffer variant |
+| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_nonuniform_vc1`, `mesh_2x4_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`; append `_rob` for the reorder-buffer variant |
 | `PATTERN` | `neighbor`, `transpose`, `uniform_random`, `hotspot` (`transpose` needs a square power-of-two mesh) |
 
 `SEED` unset draws and prints a random seed; pass `SEED=<n>` to replay

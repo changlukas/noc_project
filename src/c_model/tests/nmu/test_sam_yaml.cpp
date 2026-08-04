@@ -7,13 +7,15 @@ using ni::cmodel::nmu::addr_trans::load_sam_table;
 
 TEST(SamYaml, PackedTilesAccumulateBases) {
     auto path = ni::cmodel::testing::unique_temp_path("sam_packed.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 1, num_vc: 1 }\n"
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
                            "  tiles:\n"
                            "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x2000 }\n";
+                           "    - { x: 1, y: 0, size: 0x2000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n"
+                           "    - { x: 1, y: 1, size: 0x1000 }\n";
     auto sam = load_sam_table(path);
-    ASSERT_EQ(sam.entries().size(), 2u);
+    ASSERT_EQ(sam.entries().size(), 4u);
     EXPECT_EQ(sam.entries()[0].base, 0x0ull);
     EXPECT_EQ(sam.entries()[1].base, 0x1000ull);  // base(1) = base(0) + size(0)
 }
@@ -46,12 +48,33 @@ TEST(SamYaml, MissingNodeRejected) {
 
 TEST(SamYaml, DuplicateNodeRejected) {
     auto path = ni::cmodel::testing::unique_temp_path("sam_dup_node.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 1, y_dim: 2, num_vc: 1 }\n"
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
                            "  tiles:\n"
                            "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n";  // dup (0,0), (0,1) missing
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"  // dup (0,0)
+                           "    - { x: 1, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n";  // (1,1) missing
     EXPECT_DEATH(load_sam_table(path), "duplicate");
+}
+
+TEST(SamYaml, MeshDimBelowMinimumRejected) {
+    auto path_x = ni::cmodel::testing::unique_temp_path("sam_mesh_x1.yaml");
+    std::ofstream(path_x) << "topology: { name: t, x_dim: 1, y_dim: 4, num_vc: 1 }\n"
+                             "address_map:\n"
+                             "  tiles:\n"
+                             "    - { x: 0, y: 0, size: 0x1000 }\n"
+                             "    - { x: 0, y: 1, size: 0x1000 }\n"
+                             "    - { x: 0, y: 2, size: 0x1000 }\n"
+                             "    - { x: 0, y: 3, size: 0x1000 }\n";
+    EXPECT_DEATH(load_sam_table(path_x), "mesh dimensions must be >= 2");
+
+    auto path_y = ni::cmodel::testing::unique_temp_path("sam_mesh_y1.yaml");
+    std::ofstream(path_y) << "topology: { name: t, x_dim: 1, y_dim: 1, num_vc: 1 }\n"
+                             "address_map:\n"
+                             "  tiles:\n"
+                             "    - { x: 0, y: 0, size: 0x1000 }\n";
+    EXPECT_DEATH(load_sam_table(path_y), "mesh dimensions must be >= 2");
 }
 
 // Guards the real topology configs: sim/topologies/ is copied next to the
@@ -61,9 +84,11 @@ TEST(SamYaml, DuplicateNodeRejected) {
 // and Python packing agree on every real topology YAML.
 TEST(SamYaml, RealTopologiesGapFreePacked) {
     static const char* kFiles[] = {
-        "topologies/mesh_1x1_vc1.yaml", "topologies/mesh_2x2_nonuniform_vc1.yaml",
-        "topologies/mesh_2x4_vc1.yaml", "topologies/mesh_4x4_vc1.yaml",
-        "topologies/mesh_4x4_vc2.yaml", "topologies/mesh_4x4_vc4.yaml",
+        "topologies/mesh_2x2_nonuniform_vc1.yaml",
+        "topologies/mesh_2x4_vc1.yaml",
+        "topologies/mesh_4x4_vc1.yaml",
+        "topologies/mesh_4x4_vc2.yaml",
+        "topologies/mesh_4x4_vc4.yaml",
         "topologies/mesh_4x4_vc8.yaml",
     };
     for (const char* file : kFiles) {
@@ -80,7 +105,7 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
 
 TEST(SamYaml, NonAlignedSizeRejected) {
     auto path = ni::cmodel::testing::unique_temp_path("sam_bad_size.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 1, y_dim: 1, num_vc: 1 }\n"
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
                            "  tiles:\n"
                            "    - { x: 0, y: 0, size: 0x1800 }\n";  // 6 KB, not 4 KB aligned

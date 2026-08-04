@@ -261,7 +261,7 @@ Router model configuration, fixed at `cmodel_router_create` time:
 |---|---|---|---|
 | `NOC_ROUTER_VC_DEPTH` | 4 | 1..16 | input VC FIFO depth and the upstream credit seed |
 | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 2 | 1..16 | stage-3 output FIFO depth, not credit-counted |
-| `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 1..16 each | mesh dimensions. The 1x1 mesh is legal (all traffic ejects LOCAL). |
+| `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2..16 each | mesh dimensions. Minimum 2 per dimension: a mesh communicating through NI + router needs at least 2x2; 1x1 and 1xN meshes are illegal. |
 | `x_coord`, `y_coord` | per node | `x < mesh_x_dim`, `y < mesh_y_dim` | this node's coordinate |
 
 ### 3.2 Port index encoding

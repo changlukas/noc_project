@@ -382,7 +382,8 @@ def _load_topology(name):
 # ---------------------------------------------------------------------------
 
 def _check_mesh_capacity(x_dim, y_dim):
-    """Fail fast if the mesh exceeds the dst_id address space.
+    """Fail fast if the mesh exceeds the dst_id address space, or falls below the
+    per-dimension minimum.
 
     coord_id = (y << X_WIDTH) | x, so the encoding requires PER-DIMENSION fit:
       - x_dim <= 2**X_WIDTH  (else x aliases into the y field)
@@ -390,7 +391,20 @@ def _check_mesh_capacity(x_dim, y_dim):
       - x_dim * y_dim <= 2**DST_ID_WIDTH  (total node count fits dst_id)
     The product check alone misses e.g. 17x15 (=255 <= 256 but x_dim 17 > 16 aliases)
     or 32x8 (=256 but x_dim 32 > 16).  All three must hold.
+
+    Mesh dim minimum is 2 per dimension: a mesh communicating through NI +
+    router needs at least 2x2. 1x1 and 1xN meshes are illegal.
     """
+    if x_dim < 2:
+        sys.exit(
+            f"ERROR: x_dim={x_dim} < 2; mesh dimension minimum is 2 "
+            f"(1x1/1xN meshes are illegal)."
+        )
+    if y_dim < 2:
+        sys.exit(
+            f"ERROR: y_dim={y_dim} < 2; mesh dimension minimum is 2 "
+            f"(1x1/1xN meshes are illegal)."
+        )
     if x_dim > 2 ** X_WIDTH:
         sys.exit(
             f"ERROR: x_dim={x_dim} exceeds X_WIDTH={X_WIDTH} capacity "

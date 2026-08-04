@@ -14,6 +14,10 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
     YAML::Node root = YAML::LoadFile(yaml_path);
     unsigned x_dim = root["topology"]["x_dim"].as<unsigned>();
     unsigned y_dim = root["topology"]["y_dim"].as<unsigned>();
+    // Mesh dim minimum is 2 per dimension: a mesh communicating through NI +
+    // router needs at least 2x2. 1x1 and 1xN meshes are illegal.
+    assert(x_dim >= 2 && y_dim >= 2 &&
+           "topology: mesh dimensions must be >= 2 per dimension (1x1/1xN mesh illegal)");
     YAML::Node am = root["address_map"];
     assert(am && "address_map block missing from topology YAML");
     YAML::Node tiles_node = am["tiles"];

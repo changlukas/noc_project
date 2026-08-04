@@ -66,12 +66,17 @@ DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
 
 
 def _check_flit_capacity(topo: dict, path) -> None:
-    """Reject a topology whose mesh dims / num_vc exceed the flit field capacity.
+    """Reject a topology whose mesh dims / num_vc exceed the flit field capacity,
+    or whose mesh dims are below the per-dimension minimum.
 
     Mirrors specgen/ni_spec/invariants.py:check_mesh_within_flit for the
     sim-topology-YAML path (X/Y/node + VC bounds).  Fails with a clear message so
     the user knows to reduce dims / num_vc or widen the flit fields (via the
     specgen constants).
+
+    Mesh dim minimum is 2 per dimension (mesh_x_dim >= 2 AND mesh_y_dim >= 2):
+    a mesh communicating through NI + router needs at least 2x2. 1x1 and 1xN
+    meshes are illegal (specgen/source/constants.yaml MESH_X_DIM/MESH_Y_DIM min).
     """
     t = topo["topology"]
     x_dim = int(t["x_dim"])
@@ -82,6 +87,10 @@ def _check_flit_capacity(topo: dict, path) -> None:
     cap_nodes = 1 << DST_ID_WIDTH
     cap_vc = 1 << VC_ID_WIDTH
     errors = []
+    if x_dim < 2:
+        errors.append(f"x_dim={x_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
+    if y_dim < 2:
+        errors.append(f"y_dim={y_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
     if x_dim > cap_x:
         errors.append(f"x_dim={x_dim} > 2^X_WIDTH={cap_x}")
     if y_dim > cap_y:

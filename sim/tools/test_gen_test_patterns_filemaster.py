@@ -132,6 +132,23 @@ def test_load_topology_raises_when_address_map_missing(tmp_path):
         g._load_topology(str(topo_path))
 
 
+@pytest.mark.parametrize("x_dim,y_dim", [(1, 4), (4, 1), (1, 1)])
+def test_check_mesh_capacity_rejects_dim_below_minimum(x_dim, y_dim):
+    """Mesh dim minimum is 2 per dimension (1x1/1xN meshes are illegal)."""
+    with pytest.raises(SystemExit, match="< 2"):
+        g._check_mesh_capacity(x_dim, y_dim)
+
+
+@pytest.mark.parametrize("x_dim,y_dim", [(1, 4), (4, 1), (1, 1)])
+def test_check_flit_capacity_rejects_dim_below_minimum(x_dim, y_dim):
+    """gen_tb_top's own topology-load gate must reject the same illegal dims."""
+    import gen_tb_top as gt
+
+    topo = {"topology": {"x_dim": x_dim, "y_dim": y_dim, "num_vc": 1}}
+    with pytest.raises(SystemExit, match="< 2"):
+        gt._check_flit_capacity(topo, "dummy_path.yaml")
+
+
 def test_main_sources_tile_base_from_address_map(tmp_path):
     """End-to-end: main() threads the packed address_map base into the emitted address."""
     topo_path = tmp_path / "custom.yaml"
@@ -276,7 +293,7 @@ def test_address_map_pack_real_topologies_gap_free():
 
     topo_dir = os.path.join(os.path.dirname(__file__), "..", "topologies")
     paths = sorted(glob.glob(os.path.join(topo_dir, "*.yaml")))
-    assert len(paths) >= 7, f"expected the real topology YAMLs, found {paths}"
+    assert len(paths) >= 6, f"expected the real topology YAMLs, found {paths}"
     for path in paths:
         topo = yaml.safe_load(open(path))["topology"]
         _bases, entries = address_map.pack(
