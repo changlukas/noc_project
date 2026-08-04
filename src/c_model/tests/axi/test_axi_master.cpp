@@ -530,6 +530,35 @@ transactions:
     EXPECT_THROW(master.tick(), std::runtime_error);
 }
 
+TEST_F(AxiMasterTest, StrbFileTokenOutOfRangeThrows) {
+    SCENARIO(
+        "AxiMaster: strb_file token wider than DATA_BYTES lanes throws (malformed fixture, not "
+        "silently masked downstream)");
+    auto wpath = std::string(::testing::TempDir()) + "/w_oor.txt";
+    std::ofstream(wpath) << "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 "
+                            "11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20\n";
+    // DATA_BYTES = 32 lanes → bit 32 (0x1'0000'0000) is one lane past legal WSTRB range.
+    auto spath = std::string(::testing::TempDir()) + "/s_oor.txt";
+    std::ofstream(spath) << "100000000\n";
+    auto yaml = write_tmp(std::string(R"YAML(
+transactions:
+  - op: write
+    addr: 0x0
+    id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: )YAML") + wpath +
+                          R"YAML(
+    strb_file: )YAML" + spath +
+                          "\n");
+
+    ni::cmodel::axi::testing::MockSlave mock;
+    axi::AxiMasterT<ni::cmodel::axi::testing::MockSlave> master(
+        yaml, mock, std::string(::testing::TempDir()) + "/r_oor.txt");
+    EXPECT_THROW(master.tick(), std::runtime_error);
+}
+
 // AxiMaster aligns AW.addr DOWN to (1<<size) and masks first-beat
 // WSTRB lanes 0..first_lane-1 where first_lane = txn.addr & (DATA_BYTES - 1).
 
