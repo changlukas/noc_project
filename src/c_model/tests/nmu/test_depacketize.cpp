@@ -11,7 +11,7 @@ namespace axi = ni::cmodel::axi;
 namespace {
 ni::cmodel::Flit make_b_flit(uint8_t bid, axi::Resp resp = axi::Resp::OKAY) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_B);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
     f.set_header_field("dst_id", 0x10);
     f.set_header_field("flit_tail", 1);
     f.set_payload_field("B", "bid", bid);
@@ -20,7 +20,7 @@ ni::cmodel::Flit make_b_flit(uint8_t bid, axi::Resp resp = axi::Resp::OKAY) {
 }
 ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_R);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
     f.set_header_field("dst_id", 0x10);
     f.set_header_field("flit_tail", 1);
     f.set_payload_field("R", "rid", rid);
@@ -98,7 +98,7 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_R);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
     f.set_header_field("dst_id", 0x10);
     f.set_payload_field("R", "rid", 0x07);
     f.set_payload_field("R", "rlast", 1);
@@ -123,7 +123,7 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
 
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_B);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", 0x10);
     f.set_header_field("dst_id", 0x01);
     f.set_header_field("vc_id", 0);
@@ -155,7 +155,7 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
 
     for (uint8_t i = 0; i < 4; ++i) {
         Flit f;
-        f.set_header_field("axi_ch", ni::AXI_CH_R);
+        f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
         f.set_header_field("src_id", 0x10);
         f.set_header_field("dst_id", 0x01);
         f.set_header_field("vc_id", 0);

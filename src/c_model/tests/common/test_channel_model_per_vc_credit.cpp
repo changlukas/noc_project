@@ -28,10 +28,10 @@ TEST(ChannelModelPerVcCredit, ConfiguredDepth16ExhaustsAfter16Pushes) {
     noc.set_per_vc_depth(16);
     for (int i = 0; i < 16; ++i) {
         EXPECT_TRUE(noc.req_out().credit_avail(0));
-        ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
+        ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
     }
     EXPECT_FALSE(noc.req_out().credit_avail(0));
-    EXPECT_FALSE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
+    EXPECT_FALSE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
 }
 
 TEST(ChannelModelPerVcCredit, PerVcDepthEnforcedIndependently) {
@@ -40,8 +40,8 @@ TEST(ChannelModelPerVcCredit, PerVcDepthEnforcedIndependently) {
         "VC=1 still has full credit (per-VC counters independent)");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
-    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
     EXPECT_FALSE(noc.req_out().credit_avail(0));
     EXPECT_TRUE(noc.req_out().credit_avail(1));
 }
@@ -52,8 +52,8 @@ TEST(ChannelModelPerVcCredit, PopReleasesCredit) {
         "restoring credit_avail for the popped flit's VC");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
-    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
     EXPECT_FALSE(noc.req_out().credit_avail(0));
     auto f = noc.req_in().pop_flit();
     ASSERT_TRUE(f.has_value());
@@ -67,8 +67,8 @@ TEST(ChannelModelPerVcCredit, RspSidePerVcCreditMirrorsReq) {
         "credit_avail on NSU rsp_out queries response-direction counter");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
-    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
-    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowB)));
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowB)));
     EXPECT_FALSE(noc.rsp_out().credit_avail(0));
     auto f = noc.rsp_in().pop_flit();
     ASSERT_TRUE(f.has_value());
@@ -84,8 +84,8 @@ TEST(ChannelModelPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
     // 1-NSU, req-queue depth 2, default per_vc_depth (unlimited)
     ChannelModel noc(/*req*/ 2, /*rsp*/ 32);
     // Fill the per-NSU queue to capacity on VC=0.
-    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_AW)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
     EXPECT_FALSE(noc.req_out().credit_avail(0))
         << "Per-NSU queue full; credit_avail must mirror push_flit";
     EXPECT_FALSE(noc.req_out().credit_avail(1))
@@ -97,8 +97,8 @@ TEST(ChannelModelPerVcCredit, RspSideCreditAvailMatchesPushFlitForRspQueueFull) 
         "ChannelModel rsp side: credit_avail returns false when rsp_q is full "
         "even if per-VC counter has room (same contract as req side)");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 2);
-    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
-    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_B)));
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowB)));
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowB)));
     EXPECT_FALSE(noc.rsp_out().credit_avail(0));
     EXPECT_FALSE(noc.rsp_out().credit_avail(1));
 }

@@ -24,10 +24,10 @@ Flit make_rsp_flit(uint8_t axi_ch, uint8_t initial_vc = 0, uint8_t id = 0, uint6
     f.set_header_field("src_id", 0x34);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", ordering_req);
-    if (axi_ch == ni::AXI_CH_R) {
+    if (axi_ch == ni::AXI_CH_NarrowR) {
         f.set_payload_field("R", "rid", id);
         f.set_payload_field("R", "rlast", rlast);
-    } else if (axi_ch == ni::AXI_CH_B) {
+    } else if (axi_ch == ni::AXI_CH_NarrowB) {
         f.set_payload_field("B", "bid", id);
     }
     return f;
@@ -62,8 +62,8 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), num_vc, 0, 1);
 
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowB)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR)));
     EXPECT_EQ(arb.pending_size(0), 1u);
     EXPECT_EQ(arb.pending_size(1), 1u);
 
@@ -74,9 +74,9 @@ TEST_P(NsuVcArbParam, Nsu_ReadWriteSplit_B_R_GoSeparateVcs) {
     auto f1 = noc.rsp_in().pop_flit();
     ASSERT_TRUE(f1.has_value());
     // Round-robin starts at 0 -> VC=0 (B) drains first, then VC=1 (R).
-    EXPECT_EQ(f0->get_header_field("axi_ch"), ni::AXI_CH_B);
+    EXPECT_EQ(f0->get_header_field("axi_ch"), ni::AXI_CH_NarrowB);
     EXPECT_EQ(f0->get_header_field("vc_id"), 0u);
-    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_R);
+    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_NarrowR);
     EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
 }
 
@@ -93,10 +93,10 @@ TEST(NsuVcArbiterVnets, RBurstStaysOnOneVc) {
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     // 4-beat burst, dst_id=0x12, rid=0x05 -> (0x12^0x05)%2=1 -> read vnet[1]=VC3.
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)));
     // All four beats hash to VC=3; none on VC=2.
     EXPECT_EQ(arb.pending_size(3), 4u);
     EXPECT_EQ(arb.pending_size(2), 0u);
@@ -112,8 +112,10 @@ TEST(NsuVcArbiterVnets, RobbedRBurstStaysOnOneVcToo) {
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0, 0x12, /*ordering_req=*/1)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1, 0x12, /*ordering_req=*/1)));
+    ASSERT_TRUE(
+        arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0, 0x12, /*ordering_req=*/1)));
+    ASSERT_TRUE(
+        arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1, 0x12, /*ordering_req=*/1)));
     EXPECT_EQ(arb.pending_size(3), 2u);
     EXPECT_EQ(arb.pending_size(2), 0u);
 }
@@ -128,11 +130,11 @@ TEST(NsuVcArbiterVnets, DistinctRidsSpreadAcrossVnet) {
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     // dst_id=0x12 for all: rid5 -> (0x12^0x05)%2=1 -> VC3; rid6 -> (0x12^0x06)%2=0 -> VC2;
     // rid7 -> (0x12^0x07)%2=1 -> VC3.
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));  // rid5 -> VC3
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 1)));  // rid6 -> VC2
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x07, 1)));  // rid7 -> VC3
-    EXPECT_EQ(arb.pending_size(2), 1u);                                   // rid6
-    EXPECT_EQ(arb.pending_size(3), 2u);                                   // rid5 + rid7
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)));  // rid5 -> VC3
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x06, 1)));  // rid6 -> VC2
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x07, 1)));  // rid7 -> VC3
+    EXPECT_EQ(arb.pending_size(2), 1u);                                         // rid6
+    EXPECT_EQ(arb.pending_size(3), 2u);                                         // rid5 + rid7
 }
 
 // B uses the write vnet, R uses the read vnet (response-class separation).
@@ -144,8 +146,8 @@ TEST(NsuVcArbiterVnets, BUsesWriteVnetRUsesReadVnet) {
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     // id=0x05, dst_id=0x12: B -> (0x12^0x05)%2=1 -> write vnet[1]=VC1;
     // R -> same hash -> read vnet[1]=VC3.
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B, 0, 0x05, 1)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowB, 0, 0x05, 1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)));
     EXPECT_EQ(arb.pending_size(1), 1u);  // B on write vnet
     EXPECT_EQ(arb.pending_size(3), 1u);  // R on read vnet
 }
@@ -160,14 +162,14 @@ TEST(NsuVcArbiterVnets, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     // rid5 -> VC3, rid6 -> VC2 (same hash as DistinctRidsSpreadAcrossVnet above).
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC3
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 0)));  // rid6 -> VC2
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 0)));  // rid5 -> VC3
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 0)));  // rid6 -> VC2
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));  // rid5 last -> VC3
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 1)));  // rid6 last -> VC2
-    EXPECT_EQ(arb.pending_size(3), 3u);                                   // all rid5 beats
-    EXPECT_EQ(arb.pending_size(2), 3u);                                   // all rid6 beats
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));  // rid5 -> VC3
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x06, 0)));  // rid6 -> VC2
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));  // rid5 -> VC3
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x06, 0)));  // rid6 -> VC2
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)));  // rid5 last -> VC3
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x06, 1)));  // rid6 last -> VC2
+    EXPECT_EQ(arb.pending_size(3), 3u);                                         // all rid5 beats
+    EXPECT_EQ(arb.pending_size(2), 3u);                                         // all rid6 beats
 }
 
 // INVERTED from the retired pre-same-destination-bypass same-bid round-robin test: that
@@ -184,8 +186,10 @@ TEST(NsuVcArbiterVnets, SameBidSameDstBypassFixedVcId) {
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/4,
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
-    uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, 0));
-    uint8_t b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, 0));
+    uint8_t a =
+        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12, 0));
+    uint8_t b =
+        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12, 0));
     EXPECT_EQ(a, b) << "same (dst,bid) bypass responses must share one VC";
 }
 
@@ -198,9 +202,9 @@ TEST(NsuVcArbiterVnets, SameBidRobbedRoundRobinsWriteVnet) {
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     uint8_t a = push_and_vc(
-        arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*ordering_req=*/1));
+        arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12, /*ordering_req=*/1));
     uint8_t b = push_and_vc(
-        arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, /*id=*/0x40, 1, 0x12, /*ordering_req=*/1));
+        arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12, /*ordering_req=*/1));
     EXPECT_EQ(a, 0u);
     EXPECT_EQ(b, 1u) << "ordering_req=1 B is order-free; round-robins the write vnet";
 }
@@ -217,14 +221,18 @@ TEST(NsuVcArbiterVnets, DifferentDstOrIdYieldsDistinctVcs) {
                                            /*write_rsp_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_rsp_vcs=*/std::vector<uint8_t>{2, 3});
     // Same id (0x05), different dst_id: (0x10^0x05)%2=1 vs (0x11^0x05)%2=0.
-    uint8_t same_id_dst_a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, 0x05, 1, 0x10, 0));
-    uint8_t same_id_dst_b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, 0x05, 1, 0x11, 0));
+    uint8_t same_id_dst_a =
+        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, 0x05, 1, 0x10, 0));
+    uint8_t same_id_dst_b =
+        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, 0x05, 1, 0x11, 0));
     EXPECT_NE(same_id_dst_a, same_id_dst_b)
         << "W6: same id, different dst_id must not contend one VC";
 
     // Same dst_id (0x12), different id: (0x12^0x05)%2=1 vs (0x12^0x06)%2=0.
-    uint8_t same_dst_id_a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, 0x05, 1, 0x12, 0));
-    uint8_t same_dst_id_b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_B, 0, 0x06, 1, 0x12, 0));
+    uint8_t same_dst_id_a =
+        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, 0x05, 1, 0x12, 0));
+    uint8_t same_dst_id_b =
+        push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, 0x06, 1, 0x12, 0));
     EXPECT_NE(same_dst_id_a, same_dst_id_b) << "different id, same dst_id must be able to spread";
 }
 
@@ -243,10 +251,10 @@ TEST(NsuVcArbiterVnets, FixedVcFullRefusesInsteadOfSpilling) {
     // (rid must differ per beat's rlast semantics is irrelevant here; reuse rid5
     // across 4 separate single-beat "bursts").
     for (int i = 0; i < 4; ++i) {
-        ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));
+        ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)));
     }
     EXPECT_EQ(arb.pending_size(3), 4u);
-    EXPECT_FALSE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)))
+    EXPECT_FALSE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)))
         << "must refuse, not spill";
     EXPECT_EQ(arb.pending_size(2), 0u) << "refused push must not land on the vnet's other VC";
 }
@@ -274,8 +282,8 @@ TEST(NsuConfigVnets, ConfigVnetsBuildSpreadingArbiter) {
     cfg.port_params.meta_buffer_max_unique_ids = 256;
     auto arb = make_vc_arbiter(cfg, noc.rsp_out());
     // dst_id=0x12 (default): rid5 -> (0x12^0x05)%2=1 -> VC3; rid6 -> (0x12^0x06)%2=0 -> VC2.
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x05, 1)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R, 0, 0x06, 1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x06, 1)));
     EXPECT_EQ(arb.pending_size(2), 1u);  // rid6
     EXPECT_EQ(arb.pending_size(3), 1u);  // rid5
 }
@@ -290,8 +298,8 @@ TEST(NsuVcArbiter, Nsu_Degenerate_NumVc1_Passthrough) {
 
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.rsp_out(), /*num_vc=*/1, 0, 0);
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_B)));
-    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_R)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowB)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR)));
     arb.tick();
     arb.tick();
     for (int i = 0; i < 2; ++i) {

@@ -115,11 +115,11 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
             uint64_t ch = f->get_header_field("axi_ch");
             uint64_t src = f->get_header_field("src_id");
             EXPECT_EQ(src, kSrcId) << "req flit src_id should match NmuConfig.src_id";
-            if (ch == ni::AXI_CH_AW) {
+            if (ch == ni::AXI_CH_NarrowAw) {
                 EXPECT_EQ(f->get_payload_field("AW", "awid"), kAxiId);
                 EXPECT_EQ(f->get_payload_field("AW", "awaddr"), kAddr);
                 saw_aw_flit = true;
-            } else if (ch == ni::AXI_CH_W) {
+            } else if (ch == ni::AXI_CH_NarrowW) {
                 EXPECT_EQ(f->get_payload_field("W", "wlast"), 1u);
                 saw_w_flit = true;
             } else {
@@ -134,7 +134,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     // axi_ch + bid + bresp + buser; src_id/dst_id/flit_tail are honored but
     // not consumed by the AxiSlavePort drain.
     Flit b_flit;
-    b_flit.set_header_field("axi_ch", ni::AXI_CH_B);
+    b_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
     b_flit.set_header_field("src_id", 0x00);
     b_flit.set_header_field("dst_id", kSrcId);
     b_flit.set_header_field("vc_id", 0);

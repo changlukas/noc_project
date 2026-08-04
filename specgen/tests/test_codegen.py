@@ -139,10 +139,10 @@ def test_use_constants_cpp_compiles_and_runs(tmp_path):
         [str(exe)], capture_output=True, text=True,
     )
     assert run_result.returncode == 0, run_result.stderr
-    # All optional fields disabled: axi_ch is the first enabled field at LSB 0,
-    # so packed hex of (axi_ch=2, src_id=5, dst_id=0x12, flit_tail=1, ordering_req=1,
-    # ordering_tag=7) is the minimal-header value.
-    assert "0x0000000007C0902A" in run_result.stdout, (
+    # axi_ch is the first header field at LSB 0, so packed hex of
+    # (axi_ch=2 NarrowAr, src_id=5, dst_id=0x12, flit_tail=1, ordering_req=1,
+    # ordering_tag=7) is the demo header value.
+    assert "0x000000001F012052" in run_result.stdout, (
         f"Expected header value not found in output:\n{run_result.stdout}"
     )
 
@@ -185,22 +185,19 @@ def test_packet_cpp_has_enabled_constants():
 
 
 def test_packet_cpp_padding_fields_have_enabled_false():
-    """Fields declared as padding must emit ENABLED = false in C++ header.
-
-    Post fixed-56b refactor: only the synthetic ``rsvd`` field is padding
-    (derived width = HEADER_TOTAL_WIDTH - sum(enabled fields)).
-    """
+    """The 44 b header has no reserved bits: PADDING_FIELDS_COUNT must be 0."""
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
-    assert "constexpr bool RSVD_ENABLED = false;" in text, (
-        "Expected RSVD_ENABLED = false; not found in ni_flit_constants.h"
+    assert "constexpr std::size_t PADDING_FIELDS_COUNT = 0;" in text, (
+        "Expected PADDING_FIELDS_COUNT = 0; not found in ni_flit_constants.h"
     )
 
 
 def test_packet_cpp_functional_fields_have_enabled_true():
     """Functional fields must emit ENABLED = true in C++ header."""
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
-    # axi_ch is MUST functional (AXI channel routing)
-    for field in ("AXI_CH", "SRC_ID", "DST_ID", "VC_ID", "FLIT_TAIL", "ORDERING_REQ", "ORDERING_TAG"):
+    # All 10 header fields are functional (44 b header has no reserved bits).
+    for field in ("AXI_CH", "SRC_ID", "DST_ID", "FIXED_VC", "VC_ID", "FLIT_TAIL",
+                  "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK"):
         assert f"constexpr bool {field}_ENABLED = true;" in text, (
             f"Expected {field}_ENABLED = true; not found in ni_flit_constants.h"
         )
@@ -211,14 +208,17 @@ def test_packet_cpp_functional_fields_have_enabled_true():
 # ---------------------------------------------------------------------------
 
 def test_padding_fields_array_elaborated():
-    """ni_flit_constants.h must expose PaddingFieldPos struct + PADDING_FIELDS array."""
+    """ni_flit_constants.h must expose PaddingFieldPos struct + PADDING_FIELDS array.
+
+    The 44 b header has no reserved bits, so PADDING_FIELDS is a size-1 dummy
+    array (never read; consumers bound their loop with PADDING_FIELDS_COUNT,
+    which is 0) rather than a zero-size array, which ISO C++ forbids.
+    """
     from pathlib import Path
     text = (Path(__file__).resolve().parent.parent / "generated" / "cpp" / "ni_flit_constants.h").read_text()
     assert "struct PaddingFieldPos" in text, "missing PaddingFieldPos struct"
-    assert "constexpr PaddingFieldPos PADDING_FIELDS[]" in text, "missing PADDING_FIELDS array"
-    assert "constexpr std::size_t PADDING_FIELDS_COUNT" in text, "missing PADDING_FIELDS_COUNT"
-    assert "rsvd" in text, \
-        "expected synthetic 'rsvd' padding field in PADDING_FIELDS"
+    assert "constexpr PaddingFieldPos PADDING_FIELDS[1]" in text, "missing PADDING_FIELDS array"
+    assert "constexpr std::size_t PADDING_FIELDS_COUNT = 0;" in text, "missing PADDING_FIELDS_COUNT"
 
 
 # ---------------------------------------------------------------------------

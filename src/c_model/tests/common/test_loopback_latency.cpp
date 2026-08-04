@@ -23,7 +23,7 @@ namespace {
 
 Flit make_req_flit(uint8_t src, uint8_t dst, uint8_t ordering_req, uint8_t ordering_tag) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_AW);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowAw);
     f.set_header_field("src_id", src);
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", 0);
@@ -35,7 +35,7 @@ Flit make_req_flit(uint8_t src, uint8_t dst, uint8_t ordering_req, uint8_t order
 
 Flit make_rsp_flit(uint8_t src, uint8_t dst, uint8_t ordering_req, uint8_t ordering_tag) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_B);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", src);
     f.set_header_field("dst_id", dst);
     f.set_header_field("vc_id", 0);

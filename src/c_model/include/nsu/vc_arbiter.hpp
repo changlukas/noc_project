@@ -94,11 +94,11 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
     const std::vector<uint8_t>* cand = nullptr;
     uint8_t* rr = nullptr;
     bool fixed_vc = false;
-    if (axi_ch == ni::AXI_CH_B) {
+    if (axi_ch == ni::AXI_CH_NarrowB) {
         cand = &write_rsp_vcs_;
         rr = &write_rr_start_;
         fixed_vc = (ordering_req == 0);  // ordering_req=1 B is order-free; round-robins.
-    } else if (axi_ch == ni::AXI_CH_R) {
+    } else if (axi_ch == ni::AXI_CH_NarrowR) {
         cand = &read_rsp_vcs_;
         rr = &read_rr_start_;
         fixed_vc = true;  // ALL R: the fixed map gives burst coherence.
@@ -129,11 +129,12 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 inline bool VcArbiter::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
     uint8_t dst_id = 0, ordering_req = 0, id = 0;
-    if (num_vc_ > 1 && (axi_ch == ni::AXI_CH_B || axi_ch == ni::AXI_CH_R)) {
+    if (num_vc_ > 1 && (axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_NarrowR)) {
         dst_id = static_cast<uint8_t>(flit.get_header_field("dst_id"));
         ordering_req = static_cast<uint8_t>(flit.get_header_field("ordering_req"));
-        id = static_cast<uint8_t>(axi_ch == ni::AXI_CH_B ? flit.get_payload_field("B", "bid")
-                                                         : flit.get_payload_field("R", "rid"));
+        id =
+            static_cast<uint8_t>(axi_ch == ni::AXI_CH_NarrowB ? flit.get_payload_field("B", "bid")
+                                                              : flit.get_payload_field("R", "rid"));
     }
     auto vc_opt = select_vc_for_axi_ch(axi_ch, dst_id, ordering_req, id);
     if (!vc_opt.has_value()) return false;

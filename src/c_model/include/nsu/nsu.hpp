@@ -84,9 +84,9 @@ class Nsu {
             //   S1 = AxiMasterPort per-channel queues (drain side)
             if (stage == 0) return depacketize_.s1_occupancy(axi_ch);
             if (stage == 1) {
-                if (axi_ch == ni::AXI_CH_AW) return axi_master_port_.aw_q_size();
-                if (axi_ch == ni::AXI_CH_W) return axi_master_port_.w_q_size();
-                if (axi_ch == ni::AXI_CH_AR) return axi_master_port_.ar_q_size();
+                if (axi_ch == ni::AXI_CH_NarrowAw) return axi_master_port_.aw_q_size();
+                if (axi_ch == ni::AXI_CH_NarrowW) return axi_master_port_.w_q_size();
+                if (axi_ch == ni::AXI_CH_NarrowAr) return axi_master_port_.ar_q_size();
             }
         }
         if (path == NiPath::NsuRsp) {
@@ -95,13 +95,13 @@ class Nsu {
             //   S1 = WormholeArbiter pending queue (S2→S3 boundary)
             //   S2 = VcArbiter pending queue (toward NoC)
             if (stage == 0) {
-                if (axi_ch == ni::AXI_CH_B) return packetize_.s1_b_occupancy();
-                if (axi_ch == ni::AXI_CH_R) return packetize_.s1_r_occupancy();
+                if (axi_ch == ni::AXI_CH_NarrowB) return packetize_.s1_b_occupancy();
+                if (axi_ch == ni::AXI_CH_NarrowR) return packetize_.s1_r_occupancy();
             }
             if (stage == 1) {
                 // WormholeArbiter inputs: 0=B, 1=R
-                if (axi_ch == ni::AXI_CH_B) return wormhole_arbiter_.pending_size(0);
-                if (axi_ch == ni::AXI_CH_R) return wormhole_arbiter_.pending_size(1);
+                if (axi_ch == ni::AXI_CH_NarrowB) return wormhole_arbiter_.pending_size(0);
+                if (axi_ch == ni::AXI_CH_NarrowR) return wormhole_arbiter_.pending_size(1);
             }
             if (stage == 2) {
                 std::size_t total = 0;

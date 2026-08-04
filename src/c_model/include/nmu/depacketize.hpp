@@ -87,7 +87,7 @@ inline void Depacketize::tick() {
         }
         uint64_t ch = f.get_header_field("axi_ch");
         switch (ch) {
-            case ni::AXI_CH_B: {
+            case ni::AXI_CH_NarrowB: {
                 if (b_q_.size() >= b_q_depth_) {
                     pending_ = f;
                     return;
@@ -97,7 +97,7 @@ inline void Depacketize::tick() {
                 b_q_.push_back({decode_b(f), meta});
                 break;
             }
-            case ni::AXI_CH_R: {
+            case ni::AXI_CH_NarrowR: {
                 if (r_q_.size() >= r_q_depth_) {
                     pending_ = f;
                     return;

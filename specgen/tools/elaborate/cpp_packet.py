@@ -26,7 +26,12 @@ def _emit_padding_fields(spec) -> list[str]:
             continue
         pos = C.header_field_position(spec, f["name"])
         entries.append((f["name"], pos[0], pos[1]))
-    out.append("constexpr PaddingFieldPos PADDING_FIELDS[] = {")
+    # Explicit size (not PADDING_FIELDS[]) so a spec with zero padding fields
+    # doesn't deduce a zero-size array, which ISO C++ forbids (GCC/Clang only
+    # tolerate it as an extension). The size-1 dummy element is never read:
+    # every consumer bounds its loop with PADDING_FIELDS_COUNT, which stays 0.
+    arr_size = len(entries) if entries else 1
+    out.append(f"constexpr PaddingFieldPos PADDING_FIELDS[{arr_size}] = {{")
     if entries:
         out.append(",\n".join(
             f"  {{ \"{n}\", {lsb}, {msb} }}" for n, lsb, msb in entries))

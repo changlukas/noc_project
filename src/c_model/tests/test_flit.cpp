@@ -12,35 +12,41 @@ TEST(Flit, ConstructFromRawHasMatchingWidth) {
 
 TEST(Flit, SetGetHeaderRoundtripAllFields) {
     SCENARIO(
-        "Flit: every enabled header field "
-        "(axi_ch/src_id/dst_id/vc_id/flit_tail/ordering_req/ordering_tag) "
+        "Flit: every header field (axi_ch/src_id/dst_id/fixed_vc/vc_id/"
+        "flit_tail/ordering_req/ordering_tag/collective_op/collective_mask) "
         "set/get bit-perfect");
     Flit f;
-    f.set_header_field("axi_ch", 0x4);  // R
+    f.set_header_field("axi_ch", 0x4);  // NarrowR
     f.set_header_field("src_id", 0x12);
     f.set_header_field("dst_id", 0x34);
+    f.set_header_field("fixed_vc", 0x1);
     f.set_header_field("vc_id", 0x2);
     f.set_header_field("flit_tail", 0x1);
     f.set_header_field("ordering_req", 0x1);
     f.set_header_field("ordering_tag", 0xFF);
+    f.set_header_field("collective_op", 0x0);  // UNICAST
+    f.set_header_field("collective_mask", 0x00);
     EXPECT_EQ(f.get_header_field("axi_ch"), 0x4u);
     EXPECT_EQ(f.get_header_field("src_id"), 0x12u);
     EXPECT_EQ(f.get_header_field("dst_id"), 0x34u);
+    EXPECT_EQ(f.get_header_field("fixed_vc"), 0x1u);
     EXPECT_EQ(f.get_header_field("vc_id"), 0x2u);
     EXPECT_EQ(f.get_header_field("flit_tail"), 0x1u);
     EXPECT_EQ(f.get_header_field("ordering_req"), 0x1u);
     EXPECT_EQ(f.get_header_field("ordering_tag"), 0xFFu);
+    EXPECT_EQ(f.get_header_field("collective_op"), 0x0u);
+    EXPECT_EQ(f.get_header_field("collective_mask"), 0x00u);
 }
 
 TEST(Flit, SetGetPayloadAwFields) {
     SCENARIO("Flit: AW payload fields (awid/awaddr/awlen/awsize) set/get bit-perfect");
     Flit f;
     f.set_payload_field("AW", "awid", 0x55);
-    f.set_payload_field("AW", "awaddr", 0xDEADBEEFCAFEBABEull);
+    f.set_payload_field("AW", "awaddr", 0xBEEFCAFEBABEull);  // 48 b, max representable
     f.set_payload_field("AW", "awlen", 0xFF);
     f.set_payload_field("AW", "awsize", 0x5);
     EXPECT_EQ(f.get_payload_field("AW", "awid"), 0x55u);
-    EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xDEADBEEFCAFEBABEull);
+    EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xBEEFCAFEBABEull);
     EXPECT_EQ(f.get_payload_field("AW", "awlen"), 0xFFu);
     EXPECT_EQ(f.get_payload_field("AW", "awsize"), 0x5u);
 }
@@ -56,30 +62,31 @@ TEST(Flit, SetGetPayloadBytesWdata) {
     EXPECT_EQ(out, wdata);
 }
 
-TEST(Flit, RsvdPaddingCheckPassesWhenZero) {
-    SCENARIO("Flit: default-constructed flit has all rsvd/padding bits zero");
+TEST(Flit, PaddingCheckPassesWhenZero) {
+    SCENARIO("Flit: default-constructed flit has all padding bits zero");
     Flit f;
     EXPECT_TRUE(f.check_padding_is_zero());
 }
 
-TEST(Flit, RsvdPaddingCheckFailsWhenSet) {
-    SCENARIO("Flit: setting any rsvd bit makes check_padding_is_zero return false");
+TEST(Flit, PaddingCheckAlwaysPassesNoReservedBits) {
+    // The 44 b header has no reserved bits (spec drops the padding/rsvd
+    // field entirely), so PADDING_FIELDS_COUNT is 0 and check_padding_is_zero
+    // is vacuously true regardless of what bits are set elsewhere in the flit.
+    SCENARIO("Flit: check_padding_is_zero is vacuously true, 44 b header has no padding");
     Flit f;
-    // rsvd = header bits 29-55. Write a rsvd bit directly since rsvd is
-    // disabled (enabled=false in spec) and not reachable via set_header_field.
-    f.raw()[6] |= (1u << 6);  // bit 54
-    EXPECT_FALSE(f.check_padding_is_zero());
+    f.raw()[6] |= (1u << 6);  // arbitrary payload bit, not a header field
+    EXPECT_TRUE(f.check_padding_is_zero());
+    EXPECT_EQ(ni::header::PADDING_FIELDS_COUNT, 0u);
 }
 
-TEST(FlitDispatch, RsvdHeaderFieldQueryAborts) {
-    // Spec marks rsvd as enabled=false (ni_packet.json header_fields).
-    // After this refactor, codegen-emitted HEADER_FIELDS[] skips rsvd, so
-    // the generic dispatch loop falls through and aborts.
-    // Regex anchors on the fprintf diagnostic prefix specifically (the
-    // assert string alone would also match the assert message path).
+TEST(FlitDispatch, UnknownHeaderFieldQueryAborts) {
+    // header_field_pos falls through to the not-found abort for any name not
+    // in codegen-emitted HEADER_FIELDS[]. Regex anchors on the fprintf
+    // diagnostic prefix specifically (the assert string alone would also
+    // match the assert message path).
     EXPECT_DEATH(
-        { ni::cmodel::detail::header_field_pos("rsvd"); },
-        "ni::cmodel::detail::header_field_pos: name 'rsvd' not found");
+        { ni::cmodel::detail::header_field_pos("nonexistent_field"); },
+        "ni::cmodel::detail::header_field_pos: name 'nonexistent_field' not found");
 }
 
 TEST(FlitDispatch, EnabledHeaderFieldsStillResolve) {

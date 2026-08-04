@@ -100,9 +100,9 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     }
 
     std::size_t occupancy(uint8_t axi_ch) const noexcept {
-        if (axi_ch == ni::AXI_CH_AW) return s1_aw_.occupancy();
-        if (axi_ch == ni::AXI_CH_W) return s1_w_.occupancy();
-        if (axi_ch == ni::AXI_CH_AR) return s1_ar_.occupancy();
+        if (axi_ch == ni::AXI_CH_NarrowAw) return s1_aw_.occupancy();
+        if (axi_ch == ni::AXI_CH_NarrowW) return s1_w_.occupancy();
+        if (axi_ch == ni::AXI_CH_NarrowAr) return s1_ar_.occupancy();
         return 0;
     }
 
@@ -176,9 +176,9 @@ class Nmu {
             if (stage == 0) return req_s1_bridge_.occupancy(axi_ch);
             if (stage == 1) {
                 // WormholeArbiter inputs: 0=AW, 1=W, 2=AR
-                if (axi_ch == ni::AXI_CH_AW) return wormhole_arbiter_.pending_size(0);
-                if (axi_ch == ni::AXI_CH_W) return wormhole_arbiter_.pending_size(1);
-                if (axi_ch == ni::AXI_CH_AR) return wormhole_arbiter_.pending_size(2);
+                if (axi_ch == ni::AXI_CH_NarrowAw) return wormhole_arbiter_.pending_size(0);
+                if (axi_ch == ni::AXI_CH_NarrowW) return wormhole_arbiter_.pending_size(1);
+                if (axi_ch == ni::AXI_CH_NarrowAr) return wormhole_arbiter_.pending_size(2);
             }
             if (stage == 2) {
                 // VcArbiter: single VC in default config; sum over all VCs per channel
@@ -198,24 +198,24 @@ class Nmu {
             //   S0 = Depacketize deque
             //   S1 = AxiSlavePort b_q/r_q
             bool rob_enabled =
-                (axi_ch == ni::AXI_CH_B) ? true : (cfg_.read_rob_mode == RobMode::Enabled);
+                (axi_ch == ni::AXI_CH_NarrowB) ? true : (cfg_.read_rob_mode == RobMode::Enabled);
             if (stage == 0) {
-                if (axi_ch == ni::AXI_CH_B) return depacketize_.b_occupancy();
-                if (axi_ch == ni::AXI_CH_R) return depacketize_.r_occupancy();
+                if (axi_ch == ni::AXI_CH_NarrowB) return depacketize_.b_occupancy();
+                if (axi_ch == ni::AXI_CH_NarrowR) return depacketize_.r_occupancy();
             }
             if (rob_enabled) {
                 if (stage == 1) {
-                    if (axi_ch == ni::AXI_CH_B) return s2_rsp_b_.occupancy();
-                    if (axi_ch == ni::AXI_CH_R) return s2_rsp_r_.occupancy();
+                    if (axi_ch == ni::AXI_CH_NarrowB) return s2_rsp_b_.occupancy();
+                    if (axi_ch == ni::AXI_CH_NarrowR) return s2_rsp_r_.occupancy();
                 }
                 if (stage == 2) {
-                    if (axi_ch == ni::AXI_CH_B) return axi_slave_port_.b_q_size();
-                    if (axi_ch == ni::AXI_CH_R) return axi_slave_port_.r_q_size();
+                    if (axi_ch == ni::AXI_CH_NarrowB) return axi_slave_port_.b_q_size();
+                    if (axi_ch == ni::AXI_CH_NarrowR) return axi_slave_port_.r_q_size();
                 }
             } else {
                 if (stage == 1) {
-                    if (axi_ch == ni::AXI_CH_B) return axi_slave_port_.b_q_size();
-                    if (axi_ch == ni::AXI_CH_R) return axi_slave_port_.r_q_size();
+                    if (axi_ch == ni::AXI_CH_NarrowB) return axi_slave_port_.b_q_size();
+                    if (axi_ch == ni::AXI_CH_NarrowR) return axi_slave_port_.r_q_size();
                 }
             }
         }

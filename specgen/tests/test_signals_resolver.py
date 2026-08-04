@@ -90,8 +90,8 @@ def test_pin_width_cross_domain_flit_width(signals_spec, packet_spec):
                                 "NOC_INTF_UPSTREAM", "noc_req_flit_o")
     assert actual == expected
     # Sanity: this is the real composed width, not just the legacy default.
-    # Post fixed-56b refactor: HEADER_WIDTH=56, PAYLOAD_WIDTH=352, FLIT_WIDTH=408.
-    assert actual == 408
+    # Post 44b-header refactor: HEADER_WIDTH=44, PAYLOAD_WIDTH=352, FLIT_WIDTH=396.
+    assert actual == 396
 
 
 def test_pin_width_from_interface_port_parameter(signals_spec, packet_spec):

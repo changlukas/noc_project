@@ -26,11 +26,11 @@ Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint6
     f.set_header_field("vc_id", initial_vc);
     f.set_header_field("src_id", 0x12);
     f.set_header_field("flit_tail", 1);  // legacy; VcArbiter does not consult header.flit_tail
-    if (axi_ch == ni::AXI_CH_W) {
+    if (axi_ch == ni::AXI_CH_NarrowW) {
         f.set_payload_field("W", "wlast", wlast);
-    } else if (axi_ch == ni::AXI_CH_AW) {
+    } else if (axi_ch == ni::AXI_CH_NarrowAw) {
         f.set_payload_field("AW", "awid", id);
-    } else if (axi_ch == ni::AXI_CH_AR) {
+    } else if (axi_ch == ni::AXI_CH_NarrowAr) {
         f.set_payload_field("AR", "arid", id);
     }
     return f;
@@ -66,8 +66,8 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc,
                                            /*write_vc=*/0, /*read_vc=*/1);
 
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
     EXPECT_EQ(arb.pending_size(0), 1u);  // AW landed on write_vc
     EXPECT_EQ(arb.pending_size(1), 1u);  // AR landed on read_vc
 
@@ -78,9 +78,9 @@ TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
     auto f1 = noc.req_in().pop_flit();
     ASSERT_TRUE(f1.has_value());
     // Round-robin starts at 0 -> VC=0 (AW) drains first, then VC=1 (AR).
-    EXPECT_EQ(f0->get_header_field("axi_ch"), ni::AXI_CH_AW);
+    EXPECT_EQ(f0->get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
     EXPECT_EQ(f0->get_header_field("vc_id"), 0u);
-    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_AR);
+    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_NarrowAr);
     EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
 }
 
@@ -99,12 +99,12 @@ TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
         "current_aw_vc_ resets, allowing next AW to be pushed.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
     EXPECT_TRUE(arb.has_current_aw());
 
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/0)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/0)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/0)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/0)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)));
     EXPECT_FALSE(arb.has_current_aw());  // reset after wlast
 
     // All 4 flits land on VC=0 (write_vc)
@@ -119,7 +119,7 @@ TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
     EXPECT_EQ(arb.pending_size(0), 0u);
 
     // Next AW can now be pushed (current_aw_vc_ is clear, pending is empty)
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
 }
 
 // current_aw_vc_ resets based on payload.W.wlast, NOT header.flit_tail.
@@ -134,27 +134,27 @@ TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
         "payload.wlast=1; verify current_aw_vc_ only resets on the 3rd.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
     EXPECT_TRUE(arb.has_current_aw());
 
     // Beat 1: payload.wlast=0 (intermediate W beat); even if header.flit_tail=1 in
     // the input flit (legacy bug shape), current_aw_vc_ MUST NOT reset.
     Flit w1;
-    w1.set_header_field("axi_ch", ni::AXI_CH_W);
+    w1.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w1.set_header_field("flit_tail", 1);  // bait: legacy bug-shape header.flit_tail
     w1.set_payload_field("W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w1));
     EXPECT_TRUE(arb.has_current_aw()) << "wlast=0 -> must not reset";
 
     Flit w2;
-    w2.set_header_field("axi_ch", ni::AXI_CH_W);
+    w2.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w2.set_header_field("flit_tail", 1);
     w2.set_payload_field("W", "wlast", 0);
     ASSERT_TRUE(arb.push_flit(w2));
     EXPECT_TRUE(arb.has_current_aw());
 
     Flit w3;
-    w3.set_header_field("axi_ch", ni::AXI_CH_W);
+    w3.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w3.set_header_field("flit_tail", 1);
     w3.set_payload_field("W", "wlast", 1);  // genuine burst end
     ASSERT_TRUE(arb.push_flit(w3));
@@ -176,10 +176,10 @@ TEST_P(NmuVcArbParam, CreditGating_TickIdleWhenAllVcsBlocked) {
     noc.set_per_vc_depth(1);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 0,
                                            /*pending_depth=*/8);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
     EXPECT_EQ(arb.pending_size(0), 4u);
 
     // First tick: VC=0 has pending + downstream credit -> 1 flit out.
@@ -214,11 +214,11 @@ TEST_P(NmuVcArbParam, BackpressureChain_VcArbToUpstream) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 0,
                                            /*pending_depth=*/2);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
     EXPECT_EQ(arb.pending_size(0), 2u);
     EXPECT_FALSE(arb.credit_avail(0));
-    EXPECT_FALSE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    EXPECT_FALSE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
 }
 
 // Round-robin spread: with a read vnet {2,3} (num_vc=4), four DISTINCT unbound
@@ -230,10 +230,10 @@ TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossVnet) {
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
                                            /*write_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_vcs=*/std::vector<uint8_t>{2, 3});
-    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x10));
-    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x11));
-    uint8_t vc_c = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x12));
-    uint8_t vc_d = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x13));
+    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x10));
+    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x11));
+    uint8_t vc_c = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x12));
+    uint8_t vc_d = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x13));
     EXPECT_EQ(vc_a, 2u);
     EXPECT_EQ(vc_b, 3u);
     EXPECT_EQ(vc_c, 2u);
@@ -250,8 +250,10 @@ TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestFixedVcId) {
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
                                            /*write_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_vcs=*/std::vector<uint8_t>{2, 3});
-    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
-    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    uint8_t a =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    uint8_t b =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(a, 2u);
     EXPECT_EQ(b, a) << "same (dst,id) with ordering_req=0 must fix to the same VC";
 }
@@ -265,8 +267,10 @@ TEST(NmuVcArbiterRoundRobin, SameReadIdDifferentDestRoundRobins) {
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
                                            /*write_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_vcs=*/std::vector<uint8_t>{2, 3});
-    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
-    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/1, 0, 0, /*id=*/0x20));
+    uint8_t a =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    uint8_t b =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/1, 0, 0, /*id=*/0x20));
     EXPECT_EQ(a, 2u);
     EXPECT_EQ(b, 3u) << "different dst_id -- no fixed VC yet, round-robin advances";
 }
@@ -280,9 +284,9 @@ TEST(NmuVcArbiterRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
                                            /*write_vcs=*/std::vector<uint8_t>{0, 1},
                                            /*read_vcs=*/std::vector<uint8_t>{2, 3});
-    Flit f1 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    Flit f1 = make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20);
     f1.set_header_field("ordering_req", 1);
-    Flit f2 = make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    Flit f2 = make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20);
     f2.set_header_field("ordering_req", 1);
     uint8_t a = push_and_vc(arb, noc, f1);
     uint8_t b = push_and_vc(arb, noc, f2);
@@ -296,8 +300,10 @@ TEST(NmuVcArbiterRoundRobin, NumVc1SameIdSameDestUnaffected) {
     SCENARIO("NMU VcArbiter: NUM_VC=1, fixed VC id logic short-circuited, everything -> VC 0");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-    uint8_t a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/0, 0, 0, /*id=*/0x20));
-    uint8_t b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, /*dst_id=*/1, 0, 0, /*id=*/0x20));
+    uint8_t a =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    uint8_t b =
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/1, 0, 0, /*id=*/0x20));
     EXPECT_EQ(a, 0u);
     EXPECT_EQ(b, 0u);
 }
@@ -316,17 +322,17 @@ TEST(NmuVcArbiter, WFollowsAW_ReusedFixedVc) {
 
     // AW1 (dst=0, id=0x20): first sighting -> round-robin picks write vnet VC 0.
     uint8_t aw1_vc =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(aw1_vc, 0u);
-    uint8_t w1_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1));
+    uint8_t w1_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
     EXPECT_EQ(w1_vc, 0u);
     EXPECT_FALSE(arb.has_current_aw());
 
     // AW2 same (dst,id): fixed VC hit -> reuses VC 0 (round-robin would pick VC 1).
     uint8_t aw2_vc =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_AW, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(aw2_vc, 0u) << "fixed VC hit must reuse VC0, not round-robin to VC1";
-    uint8_t w2_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1));
+    uint8_t w2_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
     EXPECT_EQ(w2_vc, 0u) << "W must follow AW2's reused VC";
 }
 
@@ -351,9 +357,9 @@ TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
 
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AW)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_W, 0, 0, /*wlast=*/1)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
     EXPECT_EQ(arb.pending_size(0), 3u);
     arb.tick();
     arb.tick();
@@ -403,8 +409,8 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_SingleVcTests) {
     ASSERT_TRUE(f_aw.has_value());
     auto f_w = noc.req_in().pop_flit();
     ASSERT_TRUE(f_w.has_value());
-    EXPECT_EQ(f_aw->get_header_field("axi_ch"), ni::AXI_CH_AW);
-    EXPECT_EQ(f_w->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(f_aw->get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
+    EXPECT_EQ(f_w->get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
     EXPECT_EQ(f_aw->get_header_field("dst_id"), 0x34u);
     EXPECT_EQ(f_w->get_header_field("dst_id"), 0x34u);
 }
@@ -477,7 +483,7 @@ TEST(NmuVcArbDeath, WFollowsAW_WBeforeAW_DeathTest) {
     EXPECT_DEATH(
         {
             Flit w;
-            w.set_header_field("axi_ch", ni::AXI_CH_W);
+            w.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
             w.set_payload_field("W", "wlast", 1);
             arb.push_flit(w);
         },
@@ -492,7 +498,7 @@ TEST(NmuVcArbDeath, ProtocolViolation_LyingDownstream_DeathTest) {
         "success on the next call).");
     LyingDownstream liar;
     auto arb = VcArbiter::read_write_split(liar, /*num_vc=*/1, 0, 0);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_AR)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
     EXPECT_DEATH({ arb.tick(); }, ".*");
 }
 
@@ -507,8 +513,8 @@ TEST(NmuConfigVnets, ConfigVnetsBuildSpreadingArbiter) {
     cfg.write_vcs = {0, 1};
     cfg.read_vcs = {2, 3};
     auto arb = make_vc_arbiter(cfg, noc.req_out());
-    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x30));
-    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_AR, 0, 0, 0, /*id=*/0x31));
+    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x30));
+    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x31));
     EXPECT_EQ(vc_a, 2u);
     EXPECT_EQ(vc_b, 3u);
 }

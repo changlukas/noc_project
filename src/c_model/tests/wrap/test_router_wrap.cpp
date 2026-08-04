@@ -11,7 +11,7 @@ namespace {
 // Build a request flit destined for dst_id, vc 0.
 ni::cmodel::Flit make_req(uint8_t dst_id) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_AR);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowAr);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", 1);
@@ -20,7 +20,7 @@ ni::cmodel::Flit make_req(uint8_t dst_id) {
 
 ni::cmodel::Flit make_rsp(uint8_t dst_id) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_R);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
     f.set_header_field("dst_id", dst_id);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", 1);

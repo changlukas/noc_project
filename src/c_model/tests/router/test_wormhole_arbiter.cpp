@@ -19,7 +19,7 @@ Flit make_flit(uint8_t axi_ch, uint64_t flit_tail, uint64_t wlast = 0) {
     f.set_header_field("dst_id", 0);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", flit_tail);
-    if (axi_ch == ni::AXI_CH_W) {
+    if (axi_ch == ni::AXI_CH_NarrowW) {
         f.set_payload_field("W", "wlast", wlast);
     }
     return f;
@@ -36,8 +36,8 @@ TEST(NocWormholeArbiter, PassThroughNoPairing) {
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/2, {});
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));
-    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
     arb.tick();
     arb.tick();
     EXPECT_EQ(down.size(), 2u);
@@ -51,7 +51,7 @@ TEST(NocWormholeArbiter, AwTriggersLock) {
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AW, /*flit_tail=*/0)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAw, /*flit_tail=*/0)));
     arb.tick();
     EXPECT_EQ(down.size(), 1u);
     EXPECT_TRUE(arb.is_locked());
@@ -65,9 +65,9 @@ TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock) {
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AW, /*flit_tail=*/0)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAw, /*flit_tail=*/0)));
     arb.tick();  // AW drained, locked to w
-    ASSERT_TRUE(arb.input(2).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(2).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
     arb.tick();  // locked to w, w pending empty -> idle
     arb.tick();
     EXPECT_EQ(down.size(), 1u);          // only AW; AR still pending
@@ -83,10 +83,13 @@ TEST(NocWormholeArbiter, MultiBeatWBurstFlowsAndUnlocks) {
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AW, /*flit_tail=*/0)));
-    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_W, /*flit_tail=*/0, /*wlast=*/0)));
-    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_W, /*flit_tail=*/0, /*wlast=*/0)));
-    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_W, /*flit_tail=*/1, /*wlast=*/1)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAw, /*flit_tail=*/0)));
+    ASSERT_TRUE(
+        arb.input(1).push_flit(make_flit(ni::AXI_CH_NarrowW, /*flit_tail=*/0, /*wlast=*/0)));
+    ASSERT_TRUE(
+        arb.input(1).push_flit(make_flit(ni::AXI_CH_NarrowW, /*flit_tail=*/0, /*wlast=*/0)));
+    ASSERT_TRUE(
+        arb.input(1).push_flit(make_flit(ni::AXI_CH_NarrowW, /*flit_tail=*/1, /*wlast=*/1)));
 
     for (int i = 0; i < 4; ++i) arb.tick();
     ASSERT_EQ(down.size(), 4u);
@@ -95,22 +98,22 @@ TEST(NocWormholeArbiter, MultiBeatWBurstFlowsAndUnlocks) {
     // Verify emission ORDER + per-flit header.flit_tail is correct
     auto f1 = down.pop();
     ASSERT_TRUE(f1.has_value());
-    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_AW);
+    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
     EXPECT_EQ(f1->get_header_field("flit_tail"), 0u);
 
     auto f2 = down.pop();
     ASSERT_TRUE(f2.has_value());
-    EXPECT_EQ(f2->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(f2->get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
     EXPECT_EQ(f2->get_header_field("flit_tail"), 0u);
 
     auto f3 = down.pop();
     ASSERT_TRUE(f3.has_value());
-    EXPECT_EQ(f3->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(f3->get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
     EXPECT_EQ(f3->get_header_field("flit_tail"), 0u);
 
     auto f4 = down.pop();
     ASSERT_TRUE(f4.has_value());
-    EXPECT_EQ(f4->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(f4->get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
     EXPECT_EQ(f4->get_header_field("flit_tail"), 1u);
 }
 
@@ -123,8 +126,8 @@ TEST(NocWormholeArbiter, NocRspOutVariantPassThrough) {
     RspCapture down;
     WormholeArbiter<ni::cmodel::router::NocRspOut> arb(down, /*num_inputs=*/2, {});
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_B, /*flit_tail=*/1)));
-    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_R, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowB, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_NarrowR, /*flit_tail=*/1)));
     arb.tick();
     arb.tick();
     EXPECT_EQ(down.size(), 2u);
@@ -145,9 +148,9 @@ TEST(NocWormholeArbiter, BackpressureUpstreamAndDownstream) {
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(full, /*num_inputs=*/2, {},
                                                        /*per_input_depth=*/2);
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));
-    EXPECT_FALSE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));  // full
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
+    EXPECT_FALSE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));  // full
 
     arb.tick();                          // downstream refuses push -> retain -> idle
     EXPECT_EQ(arb.pending_size(0), 2u);  // unchanged
@@ -178,7 +181,7 @@ TEST(NocWormholeArbiter, DownstreamBackpressureRetriesNoAbort) {
     } down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/2, {});
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
     arb.tick();  // refused (1) -> flit retained, no abort
     EXPECT_EQ(arb.pending_size(0), 1u);
     arb.tick();  // refused (2) -> still retained
@@ -196,8 +199,8 @@ TEST(NocWormholeArbiter, LockLeakIdleStallNoDeadlock) {
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AW, /*flit_tail=*/0)));
-    ASSERT_TRUE(arb.input(2).push_flit(make_flit(ni::AXI_CH_AR, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAw, /*flit_tail=*/0)));
+    ASSERT_TRUE(arb.input(2).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
     arb.tick();                               // AW drains, lock to w
     for (int i = 0; i < 10; ++i) arb.tick();  // w pending empty, locked -> idle
     EXPECT_EQ(down.size(), 1u);               // only AW
@@ -214,7 +217,8 @@ TEST(NocWormholeArbiterDeath, WBeforeAW) {
         "assert+abort to fail fast");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
-    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_W, /*flit_tail=*/1, /*wlast=*/1)));
+    ASSERT_TRUE(
+        arb.input(1).push_flit(make_flit(ni::AXI_CH_NarrowW, /*flit_tail=*/1, /*wlast=*/1)));
     EXPECT_DEATH({ arb.tick(); }, ".*");
 }
 
@@ -224,7 +228,7 @@ TEST(NocWormholeArbiterDeath, MalformedAwFlitTailEquals1) {
         "(violates FlooNoC wormhole AW=0 stamping); tick must assert+abort");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
-    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_AW, /*flit_tail=*/1)));
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAw, /*flit_tail=*/1)));
     EXPECT_DEATH({ arb.tick(); }, ".*");
 }
 

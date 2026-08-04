@@ -89,7 +89,7 @@ TEST(NmuCreditConservation, BackpressureStallsAtSeedThenReopens) {
     for (int t = 0; t < 64; ++t) {
         nmu.tick();
         while (auto f = nmu.pop_req_flit()) {
-            EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_AR) << "reads emit AR flits";
+            EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_NarrowAr) << "reads emit AR flits";
             ++drained;
         }
     }
@@ -157,7 +157,7 @@ TEST(NmuCreditConservation, ConsumerPulseAccumulatesMultiConsumePerTick) {
     // drains the whole ingress queue (depkt_r_q depth 16 > 5).
     for (int i = 0; i < kRspFlits; ++i) {
         Flit r;
-        r.set_header_field("axi_ch", ni::AXI_CH_R);
+        r.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
         r.set_header_field("src_id", 0x00);
         r.set_header_field("dst_id", kSrcId);
         r.set_header_field("vc_id", 0);

@@ -21,12 +21,14 @@ axi:
     type: int
     units: bits
     description: "AXI address bus width"
-    default: 64
+    default: 48
     min: 1
     max: 64
-    # NOTE: spec range is 1..64 per AXI4 IHI 0022 §A2.2.1, but the DPI pack_addr64
-    # helper in sim/c/cmodel_dpi.cpp hardcodes a 64-bit split into svBitVecVal[2].
-    # Reparameterize pack_addr64 before narrowing or relaxing this max.
+    # NOTE: spec range is 1..64 per AXI4 IHI 0022 §A2.2.1; default fixed at 48 b
+    # per docs/noc-target-spec.md §6. The DPI pack_addr64 helper in
+    # src/dpi/cmodel_dpi.cpp packs into a 2-word svBitVecVal[2] container
+    # (unchanged: ceil(48/32) == ceil(64/32) == 2); widening past 64 still
+    # needs pack_addr64 reparameterized.
     sv_symbol: AXI_ADDR_WIDTH_DFLT
     cpp_symbol: AXI_ADDR_WIDTH
   DATA_WIDTH:
@@ -56,7 +58,7 @@ noc:
     type: int
     units: bits
     description: "NoC flit payload width"
-    default: 408
+    default: 396
     min: 64
     max: 1024
     sv_symbol: NOC_FLIT_WIDTH_DFLT

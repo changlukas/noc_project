@@ -234,7 +234,7 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
         adapter.get_outputs(out);
         if (out.noc_req_valid) {
             auto flit = flit_from_bytes(out.noc_req_flit);
-            if (flit.get_header_field("axi_ch") == ni::AXI_CH_AW) {
+            if (flit.get_header_field("axi_ch") == ni::AXI_CH_NarrowAw) {
                 EXPECT_EQ(flit.get_header_field("dst_id"), 0x01u);
                 EXPECT_EQ(flit.get_payload_field("AW", "awaddr"), 0x40ull);
                 saw_aw_flit = true;

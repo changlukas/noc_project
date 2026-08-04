@@ -82,7 +82,7 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
 // nsu::VcArbiter's same-destination-bypass fixed VC map keys on this restored rid.
 inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_B);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("vc_id", 0);
@@ -97,7 +97,7 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
 
 inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_R);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
     f.set_header_field("vc_id", 0);

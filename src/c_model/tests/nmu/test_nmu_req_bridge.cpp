@@ -96,7 +96,7 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
     // A further AW is stuck in the bridge slot (wormhole AW input full).
     ASSERT_TRUE(bridge.push_aw_with_meta(make_aw(99), meta()));
     step();
-    EXPECT_EQ(bridge.occupancy(ni::AXI_CH_AW), 1u) << "5th AW stuck in bridge";
+    EXPECT_EQ(bridge.occupancy(ni::AXI_CH_NarrowAw), 1u) << "5th AW stuck in bridge";
 
     // The locked write's W and an independent AR are now offered.
     ASSERT_TRUE(bridge.push_w(make_w(/*last=*/true)));
@@ -105,10 +105,11 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
 
     bool got_w = false;
     while (auto f = out.pop())
-        if (f->get_header_field("axi_ch") == static_cast<uint64_t>(ni::AXI_CH_W)) got_w = true;
+        if (f->get_header_field("axi_ch") == static_cast<uint64_t>(ni::AXI_CH_NarrowW))
+            got_w = true;
     EXPECT_TRUE(got_w) << "W must drain despite full AW input (pre-fix deadlocks here)";
-    EXPECT_EQ(bridge.occupancy(ni::AXI_CH_W), 0u) << "W left the bridge";
-    EXPECT_EQ(bridge.occupancy(ni::AXI_CH_AR), 0u) << "AR admitted independently of stuck AW";
+    EXPECT_EQ(bridge.occupancy(ni::AXI_CH_NarrowW), 0u) << "W left the bridge";
+    EXPECT_EQ(bridge.occupancy(ni::AXI_CH_NarrowAr), 0u) << "AR admitted independently of stuck AW";
 }
 
 // push_w with no prior push_aw must backpressure (return false), not assert, so

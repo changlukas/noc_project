@@ -68,7 +68,7 @@ def test_eval_syntax_error(packet_spec):
 
 # -- header_field_width / position / enabled ------------------------
 def test_header_field_width_basic(packet_spec):
-    assert C.header_field_width(packet_spec, "axi_ch") == 3
+    assert C.header_field_width(packet_spec, "axi_ch") == 4
 
 
 def test_header_field_width_expression(packet_spec):
@@ -76,22 +76,13 @@ def test_header_field_width_expression(packet_spec):
 
 
 def test_header_field_position_cumulative(packet_spec):
-    # All optional fields disabled: axi_ch is the first enabled field at LSB 0.
-    assert C.header_field_position(packet_spec, "axi_ch") == (0, 2)
-    assert C.header_field_position(packet_spec, "src_id") == (3, 10)
-
-
-def test_header_field_position_disabled_still_positioned(packet_spec):
-    # rsvd is the lone disabled (derived padding) field; sits at the end.
-    pos = C.header_field_position(packet_spec, "rsvd")
-    assert pos is not None
-    # width=24 (HEADER_TOTAL_WIDTH 56 - sum of enabled 32), so MSB-LSB == 23.
-    assert pos[1] - pos[0] == 23
+    # axi_ch is the first header field, at LSB 0.
+    assert C.header_field_position(packet_spec, "axi_ch") == (0, 3)
+    assert C.header_field_position(packet_spec, "src_id") == (4, 11)
 
 
 def test_header_field_enabled(packet_spec):
     assert C.header_field_enabled(packet_spec, "src_id") is True
-    assert C.header_field_enabled(packet_spec, "rsvd") is False
 
 
 def test_header_field_not_found(packet_spec):
@@ -105,13 +96,15 @@ def test_payload_field_width_basic(packet_spec):
 
 
 def test_payload_field_width_derived(packet_spec):
-    w = C.payload_field_width(packet_spec, "AW", "aw_rsvd")
-    ch = next(c for c in packet_spec["flit"]["payload_channels"] if c["name"] == "AW")
+    # AW/AR are exactly-sized (93 b, no derived remainder) this stage; W still
+    # carries a derived padding field, so it exercises the "derived" mechanism.
+    w = C.payload_field_width(packet_spec, "W", "w_rsvd")
+    ch = next(c for c in packet_spec["flit"]["payload_channels"] if c["name"] == "W")
     other_sum = sum(
-        C.payload_field_width(packet_spec, "AW", f["name"])
-        for f in ch["fields"] if f["name"] != "aw_rsvd"
+        C.payload_field_width(packet_spec, "W", f["name"])
+        for f in ch["fields"] if f["name"] != "w_rsvd"
     )
-    assert w == C.payload_channel_width(packet_spec, "AW") - other_sum
+    assert w == C.payload_channel_width(packet_spec, "W") - other_sum
 
 
 def test_payload_field_position(packet_spec):
@@ -121,7 +114,7 @@ def test_payload_field_position(packet_spec):
 # -- payload field positions (added with codegen extension) -----------
 def test_payload_field_position_aw(packet_spec):
     assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 7)
-    assert C.payload_field_position(packet_spec, "AW", "awaddr") == (8, 71)
+    assert C.payload_field_position(packet_spec, "AW", "awaddr") == (8, 55)
 
 
 def test_payload_field_position_w_with_reorder(packet_spec):

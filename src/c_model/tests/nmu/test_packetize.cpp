@@ -78,7 +78,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
     auto flit_opt = aw_cap.pop();
     ASSERT_TRUE(flit_opt.has_value());
     const auto& f = *flit_opt;
-    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AW);
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
     EXPECT_EQ(f.get_header_field("src_id"), kSrcId);
     EXPECT_EQ(f.get_header_field("vc_id"), 0u);
     EXPECT_EQ(f.get_header_field("flit_tail"), 0u);  // AW starts wormhole packet (FlooNoC)
@@ -98,7 +98,7 @@ TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
     auto w_flit_opt = w_cap.pop();
     ASSERT_TRUE(w_flit_opt.has_value());
     EXPECT_EQ(w_flit_opt->get_header_field("dst_id"), 0x34u);
-    EXPECT_EQ(w_flit_opt->get_header_field("axi_ch"), ni::AXI_CH_W);
+    EXPECT_EQ(w_flit_opt->get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
 }
 
 TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
@@ -245,7 +245,7 @@ TEST(NmuPacketize, ArEncodesAxiChAndOrderingTag) {
     // (covered by PushAwWithMeta_OverrideDefault).
     ASSERT_TRUE(pkt.push_ar(make_ar(0x07, 0x9900004000)));
     auto f = *ar_cap.pop();
-    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_AR);
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAr);
     EXPECT_EQ(f.get_header_field("dst_id"), 0x99u);
     EXPECT_EQ(f.get_header_field("ordering_req"), 0u);
     EXPECT_EQ(f.get_header_field("ordering_tag"), 0u);

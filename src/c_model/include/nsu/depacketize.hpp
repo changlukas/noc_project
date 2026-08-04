@@ -70,11 +70,11 @@ class Depacketize : public RequestDepacketizer {
     // occupied, 0 otherwise. axi_ch uses ni::AXI_CH_* constants.
     std::size_t s1_occupancy(uint8_t axi_ch) const noexcept {
         switch (axi_ch) {
-            case ni::AXI_CH_AW:
+            case ni::AXI_CH_NarrowAw:
                 return s1_aw_.occupancy();
-            case ni::AXI_CH_W:
+            case ni::AXI_CH_NarrowW:
                 return s1_w_.occupancy();
-            case ni::AXI_CH_AR:
+            case ni::AXI_CH_NarrowAr:
                 return s1_ar_.occupancy();
             default:
                 return 0;
@@ -165,21 +165,21 @@ inline void Depacketize::tick() {
         }
         uint64_t ch = f.get_header_field("axi_ch");
         switch (ch) {
-            case ni::AXI_CH_AW:
+            case ni::AXI_CH_NarrowAw:
                 if (s1_aw_.full()) {
                     pending_ = f;
                     return;
                 }
                 s1_aw_.accept(f);
                 break;
-            case ni::AXI_CH_W:
+            case ni::AXI_CH_NarrowW:
                 if (s1_w_.full()) {
                     pending_ = f;
                     return;
                 }
                 s1_w_.accept(decode_w(f));
                 break;
-            case ni::AXI_CH_AR:
+            case ni::AXI_CH_NarrowAr:
                 if (s1_ar_.full()) {
                     pending_ = f;
                     return;

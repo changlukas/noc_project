@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: aeacb7e3f9c0
 // Generator version: v1.0.0
-// Generated at: 2026-07-28T14:50:28Z
+// Generated at: 2026-08-04T09:25:31Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 

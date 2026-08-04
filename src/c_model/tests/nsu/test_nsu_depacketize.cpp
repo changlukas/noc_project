@@ -14,7 +14,7 @@ namespace {
 ni::cmodel::Flit make_aw_flit(uint8_t awid, uint64_t addr, uint8_t src_id = 0x10,
                               uint8_t ordering_req = 0, uint8_t ordering_tag = 0) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_AW);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowAw);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", 0x02);
     f.set_header_field("flit_tail", 1);
@@ -28,7 +28,7 @@ ni::cmodel::Flit make_aw_flit(uint8_t awid, uint64_t addr, uint8_t src_id = 0x10
 }
 ni::cmodel::Flit make_w_flit(uint32_t strb, bool last) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_W);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     f.set_header_field("dst_id", 0x02);
     f.set_header_field("flit_tail", 1);
     f.set_payload_field("W", "wlast", last ? 1u : 0u);
@@ -37,7 +37,7 @@ ni::cmodel::Flit make_w_flit(uint32_t strb, bool last) {
 }
 ni::cmodel::Flit make_ar_flit(uint8_t arid, uint64_t addr, uint8_t src_id = 0x10) {
     ni::cmodel::Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_AR);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowAr);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", 0x02);
     f.set_header_field("flit_tail", 1);

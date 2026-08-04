@@ -108,7 +108,7 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
 
 inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_AW);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowAw);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("vc_id", 0);
@@ -143,7 +143,7 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     if (w_meta_fifo_.empty()) return false;
     const auto& meta = w_meta_fifo_.front();
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_W);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("vc_id", 0);
@@ -161,7 +161,7 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
 
 inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) {
     Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_AR);
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowAr);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
     f.set_header_field("vc_id", 0);

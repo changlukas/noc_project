@@ -64,7 +64,7 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
 
     auto f = b_cap.pop();
     ASSERT_TRUE(f.has_value()) << "tick() must emit B flit to b_out_";
-    EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_B);
+    EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_NarrowB);
     EXPECT_EQ(f->get_header_field("dst_id"), 0x12u);  // = orig src_id
     EXPECT_EQ(f->get_header_field("src_id"), kNsuSrcId);
     EXPECT_EQ(f->get_header_field("ordering_req"), 1u);

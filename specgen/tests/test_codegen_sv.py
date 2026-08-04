@@ -98,21 +98,19 @@ class TestSvPacketEmit:
         assert "localparam bit" in text
         assert "_ENABLED" in text
 
-    def test_padding_fields_enabled_zero(self):
-        """Fields declared as padding must emit ENABLED = 1'b0 in SV package.
-
-        Post fixed-56b refactor: only the synthetic ``rsvd`` field is padding.
-        """
+    def test_no_padding_fields(self):
+        """The 44 b header has no reserved bits: no _ENABLED = 1'b0 header field."""
         text = _sv_text("ni_flit_pkg.sv")
-        assert "localparam bit          RSVD_ENABLED = 1'b0;" in text, (
-            "Expected RSVD_ENABLED = 1'b0; not found in ni_flit_pkg.sv"
-        )
+        for field in ("AXI_CH", "SRC_ID", "DST_ID", "FIXED_VC", "VC_ID", "FLIT_TAIL",
+                      "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK"):
+            assert f"localparam bit          {field}_ENABLED = 1'b0;" not in text
 
     def test_functional_fields_enabled_one(self):
         """Functional fields must emit ENABLED = 1'b1 in SV package."""
         text = _sv_text("ni_flit_pkg.sv")
-        # axi_ch is MUST functional (AXI channel routing)
-        for field in ("AXI_CH", "SRC_ID", "DST_ID", "VC_ID", "FLIT_TAIL", "ORDERING_REQ", "ORDERING_TAG"):
+        # All 10 header fields are functional (44 b header has no reserved bits).
+        for field in ("AXI_CH", "SRC_ID", "DST_ID", "FIXED_VC", "VC_ID", "FLIT_TAIL",
+                      "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK"):
             assert f"localparam bit          {field}_ENABLED = 1'b1;" in text, (
                 f"Expected {field}_ENABLED = 1'b1; not found in ni_flit_pkg.sv"
             )

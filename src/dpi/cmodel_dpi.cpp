@@ -24,22 +24,23 @@
 // DPI marshalling assumes a fixed wire format. The packing/unpacking helpers
 // below (unpack_flit, pack_flit, unpack_data256, pack_data256, pack_addr64)
 // hardcode word counts and bit shifts for the current spec defaults:
-//   FLIT_WIDTH = 408 bits → svBitVecVal[13] words
+//   FLIT_WIDTH = 396 bits → svBitVecVal[13] words
 //   DATA_BYTES = 32       → svBitVecVal[8]  words (256-bit data bus)
-//   ADDR_WIDTH = 64 bits  → svBitVecVal[2]  words (pack_addr64)
+//   ADDR_WIDTH = 48 bits  → svBitVecVal[2]  words (pack_addr64)
 // If a future constants.yaml change widens any of these, compile fails here
 // and the DPI pack/unpack must be parameterized before the build can proceed.
 // ---------------------------------------------------------------------------
-static_assert(::ni::FLIT_WIDTH == 408,
-              "cmodel_dpi pack/unpack assumes FLIT_WIDTH = 408 bits "
+static_assert(::ni::FLIT_WIDTH == 396,
+              "cmodel_dpi pack/unpack assumes FLIT_WIDTH = 396 bits "
               "(svBitVecVal[13]); reparameterize unpack_flit/pack_flit if widened");
 static_assert(::ni::cmodel::axi::DATA_BYTES == 32,
               "cmodel_dpi pack/unpack assumes 256-bit data bus (DATA_BYTES = 32, "
               "svBitVecVal[8]); reparameterize unpack_data256/pack_data256 if widened");
-// ADDR_WIDTH=64 → 2 svBitVecVal words. pack_addr64 hardcodes the 32/32 split.
-static_assert(::ni::width::AXI_ADDR_WIDTH == 64,
-              "cmodel_dpi pack_addr64 assumes ADDR_WIDTH = 64 bits "
-              "(svBitVecVal[2]); reparameterize pack_addr64 if widened");
+// ADDR_WIDTH=48 → still 2 svBitVecVal words (ceil(48/32) == ceil(64/32) == 2).
+// pack_addr64 hardcodes the 32/32 split; upper 16 bits of word[1] are unused.
+static_assert(::ni::width::AXI_ADDR_WIDTH == 48,
+              "cmodel_dpi pack_addr64 assumes ADDR_WIDTH = 48 bits "
+              "(svBitVecVal[2]); reparameterize pack_addr64 if widened past 64");
 
 namespace ni::cmodel::wrap {
 
@@ -159,7 +160,7 @@ extern "C" int cmodel_check_error(const char** msg) {
 //
 // Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
 // ceil(FLIT_WIDTH / 32) = 13. Words are little-endian: word[0] carries bits
-// [31:0], word[12] carries bits [407:384] in its low 24 bits.
+// [31:0], word[12] carries bits [395:384] in its low 12 bits.
 
 using ni::cmodel::wrap::FLIT_BYTES;
 using ni::cmodel::wrap::FLIT_VEC_WORDS;
@@ -366,7 +367,7 @@ void pack_addr64(uint64_t addr, svBitVecVal* vec) {
 //   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
 //   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
 //   32-bit wstrb    : word[0]
-//   408-bit flit    : words[0..12] (51 bytes; unpack_flit/pack_flit defined above)
+//   396-bit flit    : words[0..12] (50 bytes; unpack_flit/pack_flit defined above)
 
 using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
@@ -523,7 +524,7 @@ extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
 //   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
 //   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
 //   32-bit wstrb    : word[0]
-//   408-bit flit    : words[0..12] (51 bytes; unpack_flit/pack_flit defined above)
+//   396-bit flit    : words[0..12] (50 bytes; unpack_flit/pack_flit defined above)
 
 using ni::cmodel::wrap::NsuInputs;
 using ni::cmodel::wrap::NsuOutputs;
@@ -756,20 +757,20 @@ void dump_one_nmu(const std::string& name, NmuWrap& nw) {
         port.r_q_size(), nw.holding_b() ? 1 : 0, nw.holding_r() ? 1 : 0, nw.w_expected());
     std::printf(
         "[FABRIC-DUMP] %s req_stage s0[aw,w,ar]=%zu,%zu,%zu s1[aw,w,ar]=%zu,%zu,%zu s2=%zu\n",
-        name.c_str(), sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_AW),
-        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_W),
-        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_AR),
-        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_AW),
-        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_W),
-        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_AR),
+        name.c_str(), sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_NarrowAw),
+        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_NarrowW),
+        sa->stage_occupancy(NiPath::NmuReq, 0, ni::AXI_CH_NarrowAr),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_NarrowAw),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_NarrowW),
+        sa->stage_occupancy(NiPath::NmuReq, 1, ni::AXI_CH_NarrowAr),
         sa->stage_occupancy(NiPath::NmuReq, 2, 0));
     std::printf("[FABRIC-DUMP] %s rsp_stage s0[b,r]=%zu,%zu s1[b,r]=%zu,%zu s2[b,r]=%zu,%zu\n",
-                name.c_str(), sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_B),
-                sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_R),
-                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_B),
-                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_R),
-                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_B),
-                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_R));
+                name.c_str(), sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NmuRsp, 0, ni::AXI_CH_NarrowR),
+                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NmuRsp, 1, ni::AXI_CH_NarrowR),
+                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NmuRsp, 2, ni::AXI_CH_NarrowR));
     std::printf("[FABRIC-DUMP] %s rob read_outstanding=%zu", name.c_str(),
                 sa->rob().read_occupancy());
     for (uint8_t vc = 0; vc < nw.num_vc(); ++vc) {
@@ -790,17 +791,17 @@ void dump_one_nsu(const std::string& name, NsuWrap& nw) {
         port.r_q_size(), nw.holding_aw() ? 1 : 0, nw.holding_w() ? 1 : 0, nw.holding_ar() ? 1 : 0,
         nw.outstanding_w(), nw.expected_r_beats(), nw.w_pop_budget());
     std::printf("[FABRIC-DUMP] %s req_stage s0[aw,w,ar]=%zu,%zu,%zu s1[aw,w,ar]=%zu,%zu,%zu\n",
-                name.c_str(), sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_AW),
-                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_W),
-                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_AR),
-                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_AW),
-                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_W),
-                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_AR));
+                name.c_str(), sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_NarrowAw),
+                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_NarrowW),
+                sa->stage_occupancy(NiPath::NsuReq, 0, ni::AXI_CH_NarrowAr),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_NarrowAw),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_NarrowW),
+                sa->stage_occupancy(NiPath::NsuReq, 1, ni::AXI_CH_NarrowAr));
     std::printf("[FABRIC-DUMP] %s rsp_stage s0[b,r]=%zu,%zu s1[b,r]=%zu,%zu s2=%zu", name.c_str(),
-                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_B),
-                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_R),
-                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_B),
-                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_R),
+                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NsuRsp, 0, ni::AXI_CH_NarrowR),
+                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_NarrowB),
+                sa->stage_occupancy(NiPath::NsuRsp, 1, ni::AXI_CH_NarrowR),
                 sa->stage_occupancy(NiPath::NsuRsp, 2, 0));
     for (uint8_t vc = 0; vc < nw.num_vc(); ++vc) {
         std::printf(" rsp_credit_avail[vc%u]=%d", vc, sa->rsp_credit_avail(vc) ? 1 : 0);

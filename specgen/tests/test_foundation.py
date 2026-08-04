@@ -33,27 +33,9 @@ def test_header_field_enabled_returns_true_for_functional():
     assert C.header_field_enabled(spec, "ordering_req") is True
     assert C.header_field_enabled(spec, "ordering_tag") is True
     assert C.header_field_enabled(spec, "vc_id") is True
-
-
-def test_header_field_enabled_returns_false_for_padding():
-    """header_field_enabled returns False for disabled fields.
-
-    All 6 optional header fields are turned off: ``noc_qos``, ``route_par``,
-    ``commtype``, ``multicast``, ``seq``, ``flit_ecc`` (width-0 reserved
-    placeholders), plus the synthetic ``rsvd`` derived padding. The 7
-    mandatory fields stay enabled.
-    """
-    spec = _load_packet()
-    assert C.header_field_enabled(spec, "rsvd") is False
-    # The 6 optional fields are all disabled.
-    assert C.header_field_enabled(spec, "noc_qos") is False
-    assert C.header_field_enabled(spec, "route_par") is False
-    assert C.header_field_enabled(spec, "commtype") is False
-    assert C.header_field_enabled(spec, "multicast") is False
-    assert C.header_field_enabled(spec, "seq") is False
-    assert C.header_field_enabled(spec, "flit_ecc") is False
-    # Mandatory field stays enabled.
-    assert C.header_field_enabled(spec, "axi_ch") is True
+    assert C.header_field_enabled(spec, "fixed_vc") is True
+    assert C.header_field_enabled(spec, "collective_op") is True
+    assert C.header_field_enabled(spec, "collective_mask") is True
 
 
 def test_header_field_enabled_raises_for_unknown():
@@ -64,16 +46,10 @@ def test_header_field_enabled_raises_for_unknown():
         C.header_field_enabled(spec, "nonexistent_field")
 
 
-def test_header_fields_padding_list():
-    """header_fields_padding returns every enabled=false field.
-
-    All 6 optional header fields are disabled plus the synthetic ``rsvd``
-    derived padding.
-    """
+def test_header_fields_padding_list_is_empty():
+    """header_fields_padding returns no fields: the 44 b header has no reserved bits."""
     spec = _load_packet()
-    padding = C.header_fields_padding(spec)
-    assert set(padding) == {"noc_qos", "route_par", "commtype", "multicast",
-                            "seq", "flit_ecc", "rsvd"}
+    assert C.header_fields_padding(spec) == []
 
 
 def test_header_fields_padding_json_has_enabled_bool():

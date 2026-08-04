@@ -12,7 +12,7 @@
 // outputs via cmodel_nmu_get_outputs, then registers those outputs nonblocking
 // so they are visible to SV wires from the NEXT cycle onward.
 //
-// FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 408.
+// FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 396.
 //
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default.

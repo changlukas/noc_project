@@ -85,7 +85,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     // ordering_tag} into MetaBuffer keyed by awid; Packetize.push_b later
     // reads m.src_id back as the response flit's dst_id.
     Flit aw_flit;
-    aw_flit.set_header_field("axi_ch", ni::AXI_CH_AW);
+    aw_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowAw);
     aw_flit.set_header_field("src_id", kRequesterSrcId);
     aw_flit.set_header_field("dst_id", kNsuSrcId);
     aw_flit.set_header_field("vc_id", 0);
@@ -100,7 +100,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     nsu.inject_req_flit(aw_flit);
 
     Flit w_flit;
-    w_flit.set_header_field("axi_ch", ni::AXI_CH_W);
+    w_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w_flit.set_header_field("src_id", kRequesterSrcId);
     w_flit.set_header_field("dst_id", kNsuSrcId);
     w_flit.set_header_field("vc_id", 0);
@@ -140,7 +140,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
         b_flit = nsu.pop_rsp_flit();
     }
     ASSERT_TRUE(b_flit.has_value()) << "Nsu never produced B flit on NoC rsp-out face";
-    EXPECT_EQ(b_flit->get_header_field("axi_ch"), static_cast<uint64_t>(ni::AXI_CH_B));
+    EXPECT_EQ(b_flit->get_header_field("axi_ch"), static_cast<uint64_t>(ni::AXI_CH_NarrowB));
     EXPECT_EQ(b_flit->get_header_field("src_id"), kNsuSrcId)
         << "rsp flit src_id should be the NSU's own src_id";
     EXPECT_EQ(b_flit->get_header_field("dst_id"), kRequesterSrcId)
