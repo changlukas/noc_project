@@ -14,6 +14,7 @@
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
+#include <array>
 #include <gtest/gtest.h>
 
 using ni::cmodel::nsu::AxiClass;
@@ -179,6 +180,38 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
     f->get_payload_bytes("NARROW_R", "rdata", out.data(), ni::width::NOC_NARROW_DATA_WIDTH);
     for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i)
         EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
+}
+
+TEST(NsuPacketize, NarrowRUnalignedAddrExtractsCorrectLane) {
+    SCENARIO(
+        "NSU Packetize: narrow class build_r_flit extracts the addressed 8B lane from a "
+        "genuinely unaligned AR local_addr (not a multiple of the beat size) -- site 3 of the S2 "
+        "design doc's lane re-anchor table");
+    RspCapture b_cap, r_cap;
+    MetaBuffer mb(4);
+    constexpr uint64_t kUnalignedAddr = 0x1B;  // 27, not a multiple of 4 (the beat size)
+    mb.allocate_read(0x03, {/*src_id=*/0x12, /*upstream_id=*/0x03, /*ordering_req=*/0,
+                            /*ordering_tag=*/0, AxiClass::Narrow, kUnalignedAddr, /*len=*/0,
+                            /*size=*/2, axi::Burst::INCR});
+    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+
+    axi::RBeat r{};
+    r.id = 0x03;
+    for (int i = 0; i < axi::DATA_BYTES; ++i) r.data[i] = static_cast<uint8_t>(i);
+    r.last = true;
+    ASSERT_TRUE(pkt.push_r(r));
+    pkt.tick();
+    auto f = r_cap.pop();
+    ASSERT_TRUE(f.has_value());
+    EXPECT_EQ(f->get_header_field("axi_ch"), ni::AXI_CH_NarrowR);
+
+    // narrow_lane(0x1B) = (0x1B >> 3) & 7 = 3 -> byte offset 24: neither the
+    // beat's own address (27) nor a size-aligned/rounded value.
+    constexpr unsigned kByteOffset = 24;
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> out{};
+    f->get_payload_bytes("NARROW_R", "rdata", out.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i)
+        EXPECT_EQ(out[i], static_cast<uint8_t>(kByteOffset + i));
 }
 
 // MetaBuffer.cls threads the request's class into the response: B/R responses

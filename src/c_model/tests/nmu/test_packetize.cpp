@@ -3,6 +3,7 @@
 #include "common/per_channel_capture.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
+#include <array>
 #include <gtest/gtest.h>
 
 using ni::cmodel::nmu::Packetize;
@@ -272,6 +273,42 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
     std::array<uint8_t, axi::DATA_BYTES> wdata_out{};
     f.get_payload_bytes("DATA_W", "wdata", wdata_out.data(), ni::width::NOC_DATA_WIDTH);
     for (int i = 0; i < 32; ++i) EXPECT_EQ(wdata_out[i], static_cast<uint8_t>(i));
+}
+
+TEST(NmuPacketize, NarrowWUnalignedAddrExtractsCorrectLane) {
+    SCENARIO(
+        "NMU Packetize: narrow class push_w extracts the addressed 8B lane from a genuinely "
+        "unaligned local_addr (not a multiple of the beat size) -- site 1 of the S2 design doc's "
+        "lane re-anchor table, bypassing AxiMaster's own aligned-down AW/first-beat-mask "
+        "machinery entirely (push_aw_with_meta takes local_addr directly)");
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId,
+                  addr_trans::SamTable{});  // sam_ unused by *_with_meta
+
+    axi::AwBeat b = make_aw(/*id=*/0x09, /*addr=*/0);  // addr unused: meta.local_addr supplies it
+    b.size = 2;                                        // 4 B/beat -- legal narrow (<=3)
+    constexpr uint64_t kUnalignedAddr = 0x1B;          // 27, not a multiple of 4 (the beat size)
+    ni::cmodel::nmu::AwHeaderMeta meta{/*dst_id=*/0x03, kUnalignedAddr, /*ordering_req=*/0,
+                                       /*ordering_tag=*/0, axi::AxiClass::Narrow};
+    ASSERT_TRUE(pkt.push_aw_with_meta(b, meta));
+    aw_cap.pop();  // discard AW
+
+    axi::WBeat w{};
+    for (int i = 0; i < axi::DATA_BYTES; ++i) w.data[i] = static_cast<uint8_t>(i);
+    w.strb = axi::kFullStrbMask;
+    w.last = true;
+    ASSERT_TRUE(pkt.push_w(w));
+    auto f = *w_cap.pop();
+    EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowW);
+
+    // narrow_lane(0x1B) = (0x1B >> 3) & 7 = 3 -> byte offset 3*8 = 24: neither the
+    // beat's own address (27) nor a size-aligned/rounded value.
+    constexpr unsigned kByteOffset = 24;
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> out{};
+    f.get_payload_bytes("NARROW_W", "wdata", out.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    for (int i = 0; i < axi::NARROW_DATA_BYTES; ++i)
+        EXPECT_EQ(out[i], static_cast<uint8_t>(kByteOffset + i));
+    EXPECT_EQ(f.get_payload_field("NARROW_W", "wstrb"), 0xFFu);
 }
 
 TEST(NmuPacketize, ArEncodesAxiChAndOrderingTag) {

@@ -3,6 +3,7 @@
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "axi/types.hpp"
+#include <array>
 #include <gtest/gtest.h>
 
 using ni::cmodel::nsu::AxiClass;
@@ -170,6 +171,81 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
     EXPECT_TRUE(depkt.pop_w().has_value());
     // MetaBuffer untouched
     EXPECT_FALSE(mb.peek_write(0).has_value());
+}
+
+TEST(NsuDepacketize, NarrowWAfterDataWReadsOwnAwNotStaleFifoEntry) {
+    SCENARIO(
+        "NSU Depacketize: a data-class AW+W fully drained, then a narrow-class AW+W at byte_lane "
+        "32 -- the narrow W must decode its lane from its OWN AW, not a leaked/stale data-class "
+        "w_addr_fifo_ entry (site 2's FIFO must be narrow-only, mirroring nmu::Rob's "
+        "ar_lane_meta_: decode_w's data branch never pops, so an unconditional push on every AW "
+        "either leaks -- data class -- or, worse, hands the next narrow AW's W beats someone "
+        "else's address basis)");
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+
+    // 1. Data-class AW+W, fully drained through pop_aw/pop_w (real usage).
+    ASSERT_TRUE(
+        noc.req_out().push_flit(make_aw_flit(0x01, 0x1000, /*src*/ 0x10, 0, 0, ni::AXI_CH_DataAw)));
+    depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFFFFFFFF, /*last=*/true, ni::AXI_CH_DataW)));
+    depkt.tick();
+    ASSERT_TRUE(depkt.pop_w().has_value());
+
+    // 2. Narrow-class AW at byte_lane 32 (addr & 63 == 32), size=2 (4 B/beat), + its W beat.
+    constexpr uint64_t kAddr = 0x20;      // 0x20 & 63 == 32
+    auto aw = make_aw_flit(0x02, kAddr);  // axi_ch defaults to AXI_CH_NarrowAw
+    aw.set_payload_field("AW", "awsize", 2);
+    ASSERT_TRUE(noc.req_out().push_flit(aw));
+    depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+
+    ni::cmodel::Flit w = make_w_flit(0xF, /*last=*/true);  // beat-relative 4-bit strb, all lanes
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> lane_bytes{};
+    for (int i = 0; i < 4; ++i) lane_bytes[i] = static_cast<uint8_t>(0xC0 + i);
+    w.set_payload_bytes("NARROW_W", "wdata", lane_bytes.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    ASSERT_TRUE(noc.req_out().push_flit(w));
+    depkt.tick();
+    auto wb = depkt.pop_w();
+    ASSERT_TRUE(wb.has_value());
+    EXPECT_EQ(wb->strb, 0xFull << 32) << "lane must come from this beat's own AW (addr 0x20), "
+                                         "not the leaked data-class AW (addr 0x1000, lane 0)";
+    for (int i = 0; i < 4; ++i) EXPECT_EQ(wb->data[32 + i], static_cast<uint8_t>(0xC0 + i));
+}
+
+TEST(NsuDepacketize, NarrowWUnalignedAddrInsertsAtCorrectLane) {
+    SCENARIO(
+        "NSU Depacketize: narrow class decode_w re-inserts the addressed 8B lane from a "
+        "genuinely unaligned AW local_addr (not a multiple of the beat size) -- site 2 of the S2 "
+        "design doc's lane re-anchor table");
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+
+    constexpr uint64_t kUnalignedAddr = 0x1B;      // 27, not a multiple of 4 (the beat size)
+    auto aw = make_aw_flit(0x02, kUnalignedAddr);  // axi_ch defaults to AXI_CH_NarrowAw
+    aw.set_payload_field("AW", "awsize", 2);       // 4 B/beat -- legal narrow (<=3)
+    ASSERT_TRUE(noc.req_out().push_flit(aw));
+    depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+
+    ni::cmodel::Flit w = make_w_flit(0xF, /*last=*/true);  // beat-relative 4-bit strb, all lanes
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> lane_bytes{};
+    for (int i = 0; i < 4; ++i) lane_bytes[i] = static_cast<uint8_t>(0xD0 + i);
+    w.set_payload_bytes("NARROW_W", "wdata", lane_bytes.data(), ni::width::NOC_NARROW_DATA_WIDTH);
+    ASSERT_TRUE(noc.req_out().push_flit(w));
+    depkt.tick();
+    auto wb = depkt.pop_w();
+    ASSERT_TRUE(wb.has_value());
+
+    // narrow_lane(0x1B) = (0x1B >> 3) & 7 = 3 -> byte offset 24: neither the
+    // beat's own address (27) nor a size-aligned/rounded value.
+    constexpr unsigned kByteOffset = 24;
+    EXPECT_EQ(wb->strb, 0xFull << kByteOffset);
+    for (int i = 0; i < 4; ++i)
+        EXPECT_EQ(wb->data[kByteOffset + i], static_cast<uint8_t>(0xD0 + i));
 }
 
 TEST(NsuDepacketize, DemuxMixedAwWAr) {

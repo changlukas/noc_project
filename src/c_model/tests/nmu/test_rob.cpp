@@ -1486,6 +1486,88 @@ TEST(RobSameDestBypass, MaxTxnsPerIdStillBoundsBypassedEntries) {
         << "the order-list gate still bounds an all-bypassed streak";
 }
 
+TEST(NmuRob, Enabled_NarrowReadUnalignedAddrReanchorsToCorrectLane) {
+    SCENARIO(
+        "Rob Enabled (robbed): narrow class read-entry lane re-anchor recovers the correct byte "
+        "lane from a genuinely unaligned AR local_addr (not a multiple of the beat size) -- site "
+        "4 of the S2 design doc's lane re-anchor table, the flagged 'risky' site (the R flit "
+        "carries no address; the RoB read entry supplies the AR basis push_ar computed)");
+    // Narrow-class SAM: every tile is config space, unlike legacy_sam()'s memory-space default.
+    std::vector<addr_trans::PackedTile> tiles;
+    for (unsigned y = 0; y < 16; ++y)
+        for (unsigned x = 0; x < 16; ++x)
+            tiles.push_back({x, y, 0x100000000ull, axi::AxiClass::Narrow});
+    auto narrow_sam = addr_trans::SamTable::packed(tiles);
+
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, addr_trans::SamTable{});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, narrow_sam);
+
+    auto narrow_ar = [](uint8_t id, uint64_t addr) {
+        axi::ArBeat b{};
+        b.id = id;
+        b.addr = addr;
+        b.len = 0;
+        b.size = 2;  // 4 B/beat -- legal narrow (<=3)
+        b.burst = axi::Burst::INCR;
+        return b;
+    };
+    auto narrow_r_flit = [](uint8_t id, uint8_t ordering_req, uint8_t ordering_tag,
+                            const uint8_t* lane_bytes) {
+        ni::cmodel::Flit r;
+        r.set_header_field("axi_ch", ni::AXI_CH_NarrowR);
+        r.set_header_field("dst_id", kSrcId);
+        r.set_header_field("flit_tail", 1);
+        r.set_header_field("ordering_req", ordering_req);
+        r.set_header_field("ordering_tag", ordering_tag);
+        r.set_payload_field("NARROW_R", "rid", id);
+        r.set_payload_field("NARROW_R", "rlast", 1u);
+        r.set_payload_bytes("NARROW_R", "rdata", lane_bytes, ni::width::NOC_NARROW_DATA_WIDTH);
+        return r;
+    };
+
+    // Primer (idle-ID bypass) at a far destination (tile 15) so the AR under
+    // test -- same id, different dest -- takes the robbed path, not same-dest
+    // bypass.
+    ASSERT_TRUE(rob.push_ar(narrow_ar(0x05, 0x100000000ull * 15 + 0x8)));
+    ar_cap.pop();  // discard the primer's AR flit
+
+    // AR under test: genuinely unaligned local_addr (0x1B, not a multiple of
+    // the 4 B beat size), tile 0 (different dest -> robbed).
+    constexpr uint64_t kUnalignedAddr = 0x1B;
+    ASSERT_TRUE(rob.push_ar(narrow_ar(0x05, kUnalignedAddr)));
+    auto f = *ar_cap.pop();
+    const uint8_t ordering_tag = static_cast<uint8_t>(f.get_header_field("ordering_tag"));
+
+    // Retire the primer (bypassed) so it stops blocking the head of id 0x05's
+    // order list.
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> primer_bytes{};
+    ASSERT_TRUE(noc.rsp_out().push_flit(
+        narrow_r_flit(0x05, /*ordering_req=*/0, /*ordering_tag=*/0, primer_bytes.data())));
+    depkt.tick();
+    ASSERT_TRUE(rob.pop_r().has_value());
+
+    // Inject the R response for the AR under test as nmu::Depacketize::decode_r
+    // would produce it: data placed at byte offset 0 (it has no address of its
+    // own to re-anchor with -- that is exactly the risk this site flags).
+    std::array<uint8_t, axi::NARROW_DATA_BYTES> lane_bytes{};
+    for (int i = 0; i < 4; ++i) lane_bytes[i] = static_cast<uint8_t>(0xE0 + i);
+    ASSERT_TRUE(noc.rsp_out().push_flit(
+        narrow_r_flit(0x05, /*ordering_req=*/1, ordering_tag, lane_bytes.data())));
+    depkt.tick();
+
+    auto rb = rob.pop_r();
+    ASSERT_TRUE(rb.has_value());
+    // narrow_lane(0x1B) = (0x1B >> 3) & 7 = 3 -> byte offset 24: the RoB must
+    // move the decoder's lane-0 placement here, not leave it at 0.
+    constexpr unsigned kByteOffset = 24;
+    for (int i = 0; i < 4; ++i)
+        EXPECT_EQ(rb->data[kByteOffset + i], static_cast<uint8_t>(0xE0 + i));
+    EXPECT_EQ(rb->data[0], 0u) << "must not be left at the decoder's lane-0 placeholder";
+}
+
 // === Shared outstanding pools (AW / AR, all AXI ids) ===
 //
 // FlooNoC MaxTxns (floo_meta_buffer.sv:148,173): one shared capacity per

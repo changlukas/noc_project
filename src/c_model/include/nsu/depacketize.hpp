@@ -102,8 +102,12 @@ class Depacketize : public RequestDepacketizer {
     // W burst's beats need is decoded eagerly here, at AW arrival, and staged
     // FIFO-order -- AXI4 W beats stream non-interleaved, one wormhole packet
     // (AW + its W beats) at a time, so the front entry always matches the W
-    // beats currently arriving. Populated for every AW (both classes); Data
-    // class ignores it (full-width payload, decoded directly, no lane math).
+    // beats currently arriving. Pushed only for narrow-class AW (mirrors
+    // nmu::Rob's ar_lane_meta_): decode_w's data branch never pops, so an
+    // unconditional push would leak one entry per data-class AW and, worse,
+    // leave a stale front entry for the next narrow AW to misread.
+    // Data class ignores this FIFO entirely (full-width payload, decoded
+    // directly, no lane math).
     struct WAddrMeta {
         uint64_t local_addr;
         uint8_t len;
@@ -212,7 +216,8 @@ inline void Depacketize::tick() {
                 // beats that follow need the AW's address basis before pop_aw
                 // ever runs (W is decoded here, at arrival; pop_aw may drain
                 // later, rate-limited to <=1/tick and gated on meta_.write_full()).
-                {
+                // Narrow class only -- see w_addr_fifo_'s comment.
+                if (ch == ni::AXI_CH_NarrowAw) {
                     const axi::AwBeat aw = decode_aw(f);
                     w_addr_fifo_.push_back(
                         {aw.addr, aw.len, aw.size, aw.burst, /*beat_counter=*/0});
