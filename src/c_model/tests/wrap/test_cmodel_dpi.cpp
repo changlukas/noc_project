@@ -2,7 +2,14 @@
 // Single ordered TEST_F walking the DPI session state machine
 // (Uninitialized → Initialized → Finalized) + per-instance handle guards.
 // Each negative assertion calls check_and_clear_error() to drain the latch.
+//
+// Also covers the DPI marshal round-trip (dpi_marshal.hpp): beat-exact
+// verification at the wire boundary (S2 T2c) — per-lane-distinct data bytes
+// and walking-1 WSTRB, at the widths current today (341-bit flit, 256-bit
+// data bus). A word swap, lane slip, tail-bit leak, or strb truncation
+// changes a compared byte.
 #include "cmodel_dpi.h"
+#include "dpi_marshal.hpp"
 #include "handle_block.hpp"
 #include <atomic>
 #include <gtest/gtest.h>
@@ -86,6 +93,70 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // Case: cmodel_init after finalize → REINIT_FORBIDDEN (terminal state).
     cmodel_init();
     check_and_clear_error(CMODEL_DPI_ERR_REINIT_FORBIDDEN);
+}
+
+// === DPI marshal round-trip (dpi_marshal.hpp) ===
+//
+// Direct unit coverage of the pack/unpack helpers, independent of any NMU/NSU
+// pipeline: a word swap, lane slip, tail-bit leak, or strb truncation changes
+// a compared byte here exactly as it would through a full co-sim readback.
+
+using namespace ni::cmodel::wrap;
+
+TEST(DpiMarshalTest, PackUnpackFlit_RoundTrip_PerByteDistinctPattern) {
+    // Every flit byte gets a distinct value; the last byte's padding bits
+    // (beyond FLIT_WIDTH) are left at 0, as a real Flit::raw() produces.
+    constexpr int kLastByteValidBits = ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;  // 341-336=5
+    FlitBytes b{};
+    for (int i = 0; i < FLIT_BYTES; ++i) b[i] = static_cast<uint8_t>(i * 7 + 3);
+    b[FLIT_BYTES - 1] &= static_cast<uint8_t>((1u << kLastByteValidBits) - 1u);
+
+    svBitVecVal vec[FLIT_VEC_WORDS];
+    pack_flit(b, vec);
+    FlitBytes rt = unpack_flit(vec);
+    EXPECT_EQ(rt, b);
+}
+
+TEST(DpiMarshalTest, PackFlit_TailWordExplicitlyMasked_RegardlessOfInputPadding) {
+    // Every byte all-ones, including the padding bits above FLIT_WIDTH within
+    // the last byte (a producer bug, not a valid Flit::raw() which would leave
+    // those bits 0). pack_flit must still mask the tail word explicitly: every
+    // real bit position stays 1 (all-ones source), every padding bit position
+    // is forced to 0 — not incidental on the caller having zeroed padding.
+    FlitBytes b{};
+    b.fill(0xFF);
+
+    svBitVecVal vec[FLIT_VEC_WORDS];
+    pack_flit(b, vec);
+    const uint32_t tail = vec[FLIT_VEC_WORDS - 1];
+    EXPECT_EQ(tail & ~FLIT_TAIL_MASK, 0u)
+        << "tail word carries bits past FLIT_WIDTH; explicit mask did not fire";
+    EXPECT_EQ(tail & FLIT_TAIL_MASK, FLIT_TAIL_MASK) << "tail mask over-masked real flit bits";
+}
+
+TEST(DpiMarshalTest, PackUnpackAxiData_RoundTrip_PerLaneDistinctBytes) {
+    std::array<uint8_t, ni::cmodel::axi::DATA_BYTES> data{};
+    for (int i = 0; i < ni::cmodel::axi::DATA_BYTES; ++i) data[i] = static_cast<uint8_t>(i);
+
+    svBitVecVal vec[DATA_VEC_WORDS];
+    pack_axi_data(data, vec);
+    EXPECT_EQ(unpack_axi_data(vec), data);
+}
+
+TEST(DpiMarshalTest, PackUnpackWstrb_RoundTrip_WalkingOne) {
+    for (int lane = 0; lane < ni::cmodel::axi::DATA_BYTES; ++lane) {
+        const uint64_t strb = uint64_t{1} << lane;
+        svBitVecVal vec[WSTRB_VEC_WORDS];
+        pack_wstrb(strb, vec);
+        EXPECT_EQ(unpack_wstrb(vec), strb) << "lane " << lane;
+    }
+}
+
+TEST(DpiMarshalTest, PackUnpackWstrb_RoundTrip_FullStrobe) {
+    const uint64_t full = ni::cmodel::axi::kFullStrbMask;
+    svBitVecVal vec[WSTRB_VEC_WORDS];
+    pack_wstrb(full, vec);
+    EXPECT_EQ(unpack_wstrb(vec), full);
 }
 
 }  // namespace

@@ -226,6 +226,29 @@ def check_mesh_within_flit(packet_spec, constants) -> List[Issue]:
     return issues
 
 
+def check_flit_width_matches_packet(packet_spec, constants) -> List[Issue]:
+    """L2: constants.yaml noc.FLIT_WIDTH must equal the packet-domain flit width
+    (HEADER_WIDTH + max(payload_width)), read via ni_spec.constants.flit_width_resolved.
+
+    Two independent sources computed FLIT_WIDTH: the packet spec (header + widest
+    payload channel, what ni::FLIT_WIDTH / ni_flit_constants.h derive from) and
+    constants.yaml noc.FLIT_WIDTH (a hand-authored default consumed by
+    ni_params_pkg.sv / ni_params.h on the SV/DPI side). A drift between the two is
+    invisible to codegen's per-domain diff (each domain regenerates from its own
+    source) but corrupts the DPI marshal boundary at runtime. Binding them here
+    fails codegen --check instead.
+    """
+    TAG = "L2-FLIT-WIDTH-SRC"
+    issues: List[Issue] = []
+    packet_fw = C.flit_width_resolved(packet_spec)
+    yaml_fw = int(constants["noc"]["FLIT_WIDTH"]["default"])
+    if packet_fw != yaml_fw:
+        issues.append(_err(TAG,
+            f"constants.yaml noc.FLIT_WIDTH={yaml_fw} != packet-domain "
+            f"HEADER_WIDTH+max(payload_width)={packet_fw}"))
+    return issues
+
+
 def check_all(bundle, md_dir: Optional[str] = None) -> List[Issue]:
     """跑 Layer 1 (schema) + Layer 2 (arithmetic) 對 hand-edited JSON spec。
 
@@ -238,4 +261,5 @@ def check_all(bundle, md_dir: Optional[str] = None) -> List[Issue]:
     issues += check_flit_arithmetic(bundle.packet)
     if bundle.constants is not None:
         issues += check_mesh_within_flit(bundle.packet, bundle.constants)
+        issues += check_flit_width_matches_packet(bundle.packet, bundle.constants)
     return issues

@@ -11,7 +11,7 @@ constexpr int AXI_DATA_WIDTH = 256;
 
 // NoC parameter defaults
 constexpr int NOC_NUM_VC                   = 1;
-constexpr int NOC_FLIT_WIDTH               = 396;
+constexpr int NOC_FLIT_WIDTH               = 341;
 constexpr int NOC_ROUTER_VC_DEPTH          = 8;
 constexpr int NOC_ROUTER_OUTPUT_FIFO_DEPTH = 2;
 constexpr int NOC_MESH_X_DIM               = 4;

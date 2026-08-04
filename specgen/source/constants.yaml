@@ -58,7 +58,7 @@ noc:
     type: int
     units: bits
     description: "NoC flit payload width"
-    default: 396
+    default: 341
     min: 64
     max: 1024
     sv_symbol: NOC_FLIT_WIDTH_DFLT

@@ -76,12 +76,15 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
 
 // Nmu — longint-handle ABI (chandle avoided; VCS rejects it as a module
 // port); AXI slave side + NoC req/rsp sides.
-// Packing conventions (little-endian word order):
+// Packing conventions (little-endian word order; word counts derived from
+// ni::FLIT_WIDTH / axi::DATA_WIDTH in src/dpi/dpi_marshal.hpp, current values
+// shown for today's 341-bit flit / 256-bit data bus):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
-//   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
-//   wstrb         : 1 word (32-bit strobe)
-//   flit fields   : FLIT_VEC_WORDS = 11 words (341-bit flit, little-endian)
+//   data fields   : DATA_VEC_WORDS = 8 words (256-bit bus, little-endian)
+//   wstrb         : WSTRB_VEC_WORDS = 1 word (32-bit strobe)
+//   flit fields   : FLIT_VEC_WORDS = 11 words (341-bit flit, little-endian,
+//                   tail word explicitly masked to the last FLIT_WIDTH bits)
 //   other attribs : 1 word each (low bits used per width)
 // num_vc threads the topology VC count into the NmuConfig; make_virtual_networks(num_vc)
 // splits it into disjoint write/read VC pools (lower half write, upper half read; num_vc==1

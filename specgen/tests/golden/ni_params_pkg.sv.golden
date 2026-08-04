@@ -12,7 +12,7 @@ package ni_params_pkg;
 
   // NoC parameter defaults
   localparam int unsigned NOC_NUM_VC_DFLT                   = 1;
-  localparam int unsigned NOC_FLIT_WIDTH_DFLT               = 396;
+  localparam int unsigned NOC_FLIT_WIDTH_DFLT               = 341;
   localparam int unsigned NOC_ROUTER_VC_DEPTH_DFLT          = 8;
   localparam int unsigned NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT = 2;
   localparam int unsigned NOC_MESH_X_DIM_DFLT               = 4;

@@ -5,15 +5,13 @@
 
 #include "cmodel_dpi.h"
 #include "dpi_boundary_macros.h"
+#include "dpi_marshal.hpp"
 #include "handle_block.hpp"
-#include "wrap/flit_bytes.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nsu_wrap.hpp"
 #include "wrap/router_wrap.hpp"
 
-#include "axi/types.hpp"  // ni::cmodel::axi::DATA_BYTES
 #include "wrap/perf_collector.hpp"
-#include "ni_flit_constants.h"  // ni::FLIT_WIDTH
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -21,28 +19,13 @@
 #include <string>
 
 // ---------------------------------------------------------------------------
-// DPI marshalling assumes a fixed wire format. The packing/unpacking helpers
-// below (unpack_flit, pack_flit, unpack_data256, pack_data256, pack_addr64)
-// hardcode word counts and bit shifts for the current spec defaults:
-//   FLIT_WIDTH = 341 bits → svBitVecVal[11] words
-//   DATA_BYTES = 32       → svBitVecVal[8]  words (256-bit data bus)
-//   ADDR_WIDTH = 48 bits  → svBitVecVal[2]  words (pack_addr64)
-// FLIT_WIDTH moved 396->341 in S2 T2a (payload *_rsvd deletion, value-preserving
-// at 256 b data). If a future constants.yaml/ni_packet.json change widens any of
-// these further (S2 T2d: 341->629), compile fails here and the DPI pack/unpack
-// must be parameterized before the build can proceed (S2 T2c).
+// DPI marshalling word counts (FLIT_VEC_WORDS, DATA_VEC_WORDS, WSTRB_VEC_WORDS)
+// and the flit tail mask are derived from ni::FLIT_WIDTH / axi::DATA_WIDTH in
+// dpi_marshal.hpp, not pinned to today's values (341-bit flit, 256-bit data
+// bus). A future constants.yaml/ni_packet.json widening (S2 T2d: 341->629,
+// 256->512) is a constants-only change; the pack/unpack helpers below do not
+// need to change.
 // ---------------------------------------------------------------------------
-static_assert(::ni::FLIT_WIDTH == 341,
-              "cmodel_dpi pack/unpack assumes FLIT_WIDTH = 341 bits "
-              "(svBitVecVal[11]); reparameterize unpack_flit/pack_flit if widened");
-static_assert(::ni::cmodel::axi::DATA_BYTES == 32,
-              "cmodel_dpi pack/unpack assumes 256-bit data bus (DATA_BYTES = 32, "
-              "svBitVecVal[8]); reparameterize unpack_data256/pack_data256 if widened");
-// ADDR_WIDTH=48 → still 2 svBitVecVal words (ceil(48/32) == ceil(64/32) == 2).
-// pack_addr64 hardcodes the 32/32 split; upper 16 bits of word[1] are unused.
-static_assert(::ni::width::AXI_ADDR_WIDTH == 48,
-              "cmodel_dpi pack_addr64 assumes ADDR_WIDTH = 48 bits "
-              "(svBitVecVal[2]); reparameterize pack_addr64 if widened past 64");
 
 namespace ni::cmodel::wrap {
 
@@ -158,44 +141,11 @@ extern "C" int cmodel_check_error(const char** msg) {
     return g_dpi_error_code.load();
 }
 
-// Flit marshalling helpers — shared by NMU/NSU/Router DPI handlers.
-//
-// Flit packing convention: svBitVecVal[FLIT_VEC_WORDS] where FLIT_VEC_WORDS =
-// ceil(FLIT_WIDTH / 32) = 11. Words are little-endian: word[0] carries bits
-// [31:0], word[10] carries bits [340:320] in its low 21 bits.
-
-using ni::cmodel::wrap::FLIT_BYTES;
-using ni::cmodel::wrap::FLIT_VEC_WORDS;
-using ni::cmodel::wrap::FlitBytes;
+// Flit marshalling helpers (unpack_flit/pack_flit) — shared by NMU/NSU/Router
+// DPI handlers, defined in dpi_marshal.hpp (word count + tail mask derived
+// from ni::FLIT_WIDTH, not pinned here).
 
 namespace {
-
-// Unpack svBitVecVal[FLIT_VEC_WORDS] → FlitBytes (little-endian within each word).
-FlitBytes unpack_flit(const svBitVecVal* vec) {
-    FlitBytes b{};
-    for (int w = 0; w < FLIT_VEC_WORDS; ++w) {
-        for (int byte = 0; byte < 4; ++byte) {
-            int idx = w * 4 + byte;
-            if (idx < FLIT_BYTES) {
-                b[idx] = static_cast<uint8_t>((vec[w] >> (byte * 8)) & 0xFF);
-            }
-        }
-    }
-    return b;
-}
-
-// Pack FlitBytes → svBitVecVal[FLIT_VEC_WORDS] (little-endian within each word).
-void pack_flit(const FlitBytes& b, svBitVecVal* vec) {
-    for (int w = 0; w < FLIT_VEC_WORDS; ++w) {
-        vec[w] = 0;
-        for (int byte = 0; byte < 4; ++byte) {
-            int idx = w * 4 + byte;
-            if (idx < FLIT_BYTES) {
-                vec[w] |= static_cast<uint32_t>(b[idx]) << (byte * 8);
-            }
-        }
-    }
-}
 
 // Unpack a per-VC credit word (bit vc = pulse on VC vc) into a VcCreditVec.
 // Only [0 .. num_vc) are read; the rest stay false.
@@ -325,51 +275,18 @@ extern "C" void cmodel_router_get_outputs(
     DPI_BOUNDARY_END(cmodel_router_get_outputs);
 }
 
-// Shared AXI beat marshalling helpers — used by the NMU/NSU DPI handlers below.
-//
-// Packing convention (multi-bit fields, little-endian word order):
-//   64-bit addr  : word[0] = bits[31:0], word[1] = bits[63:32]
-//   256-bit data : words[0..7] (32 bytes, 8 x uint32_t)
-
-namespace {
-
-// Unpack 256-bit data bus: svBitVecVal[8] → std::array<uint8_t, 32>
-std::array<uint8_t, 32> unpack_data256(const svBitVecVal* vec) {
-    std::array<uint8_t, 32> out{};
-    for (int w = 0; w < 8; ++w) {
-        for (int b = 0; b < 4; ++b) {
-            out[w * 4 + b] = static_cast<uint8_t>((vec[w] >> (b * 8)) & 0xFF);
-        }
-    }
-    return out;
-}
-
-// Pack 256-bit data bus: std::array<uint8_t, 32> → svBitVecVal[8]
-void pack_data256(const std::array<uint8_t, 32>& src, svBitVecVal* vec) {
-    for (int w = 0; w < 8; ++w) {
-        vec[w] = 0;
-        for (int b = 0; b < 4; ++b) {
-            vec[w] |= static_cast<uint32_t>(src[w * 4 + b]) << (b * 8);
-        }
-    }
-}
-
-// Pack 64-bit address: uint64_t → svBitVecVal[2]
-void pack_addr64(uint64_t addr, svBitVecVal* vec) {
-    vec[0] = static_cast<uint32_t>(addr & 0xFFFF'FFFFu);
-    vec[1] = static_cast<uint32_t>((addr >> 32) & 0xFFFF'FFFFu);
-}
-
-}  // namespace
+// Shared AXI beat marshalling helpers (unpack_axi_data/pack_axi_data,
+// unpack_wstrb/pack_wstrb, pack_addr64) — defined in dpi_marshal.hpp, word
+// counts derived from axi::DATA_WIDTH / axi::DATA_BYTES, not pinned here.
 
 // Nmu DPI handlers.
 //
 // Packing conventions (little-endian word order):
 //   8-bit  id/attr  : word[0] low byte
-//   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
-//   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
-//   32-bit wstrb    : word[0]
-//   341-bit flit    : words[0..10] (43 bytes; unpack_flit/pack_flit defined above)
+//   64-bit addr     : 2 words fixed (pack_addr64; ADDR_WIDTH unchanged this stage)
+//   data bus        : DATA_VEC_WORDS words (axi::DATA_BYTES bytes; unpack_axi_data/pack_axi_data)
+//   wstrb           : WSTRB_VEC_WORDS words (axi::DATA_BYTES bits; unpack_wstrb/pack_wstrb)
+//   flit            : FLIT_VEC_WORDS words (FLIT_BYTES bytes; unpack_flit/pack_flit, tail-masked)
 
 using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
@@ -440,8 +357,8 @@ extern "C" void cmodel_nmu_set_inputs(
         in.awprot = static_cast<uint8_t>(awprot[0] & 0x07);
         in.awqos = static_cast<uint8_t>(awqos[0] & 0x0F);
         in.wvalid = static_cast<bool>(wvalid);
-        in.wdata = unpack_data256(wdata);
-        in.wstrb = wstrb[0];
+        in.wdata = unpack_axi_data(wdata);
+        in.wstrb = unpack_wstrb(wstrb);
         in.wlast = static_cast<bool>(wlast);
         in.bready = static_cast<bool>(bready);
         in.arvalid = static_cast<bool>(arvalid);
@@ -493,7 +410,7 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
         bresp[0] = out.bresp & 0x3u;
         *rvalid = static_cast<svBit>(out.rvalid);
         rid[0] = out.rid;
-        pack_data256(out.rdata, rdata);
+        pack_axi_data(out.rdata, rdata);
         rresp[0] = out.rresp & 0x3u;
         *rlast = static_cast<svBit>(out.rlast);
         *noc_req_valid = static_cast<svBit>(out.noc_req_valid);
@@ -523,12 +440,7 @@ extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
 // Direction inversion vs. Nmu:
 //   set_inputs receives noc_req_flit (NoC consumer) + AXI master ready signals / B/R.
 //   get_outputs produces noc_rsp_flit (NoC producer) + AXI master AW/W/AR beats.
-// Packing conventions mirror cmodel_nmu_*:
-//   8-bit  id/attr  : word[0] low byte
-//   64-bit addr     : word[0] = bits[31:0], word[1] = bits[63:32]
-//   256-bit data    : words[0..7] (32 bytes, 8 x uint32_t)
-//   32-bit wstrb    : word[0]
-//   341-bit flit    : words[0..10] (43 bytes; unpack_flit/pack_flit defined above)
+// Packing conventions mirror cmodel_nmu_* (see the word-count comment above).
 
 using ni::cmodel::wrap::NsuInputs;
 using ni::cmodel::wrap::NsuOutputs;
@@ -577,7 +489,7 @@ extern "C" void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_vali
         in.arready = static_cast<bool>(arready);
         in.rvalid = static_cast<bool>(rvalid);
         in.rid = static_cast<uint8_t>(rid[0] & 0xFF);
-        in.rdata = unpack_data256(rdata);
+        in.rdata = unpack_axi_data(rdata);
         in.rresp = static_cast<uint8_t>(rresp[0] & 0x3);
         in.rlast = static_cast<bool>(rlast);
         nsu->set_inputs(in);
@@ -625,8 +537,8 @@ extern "C" void cmodel_nsu_get_outputs(
         awqos[0] = out.awqos;
 
         *wvalid = static_cast<svBit>(out.wvalid);
-        pack_data256(out.wdata, wdata);
-        wstrb[0] = out.wstrb;
+        pack_axi_data(out.wdata, wdata);
+        pack_wstrb(out.wstrb, wstrb);
         *wlast = static_cast<svBit>(out.wlast);
 
         *bready = static_cast<svBit>(out.bready);

@@ -22,7 +22,7 @@
 // via get_outputs, and registers those outputs nonblocking so they are
 // visible to SV wires from the NEXT cycle onward.
 //
-// FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 396
+// FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 341
 // (c_model flit width). The noc_intf FLIT_WIDTH parameter is overridden at
 // instantiation in tb_top.sv.
 //
