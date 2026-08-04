@@ -105,7 +105,7 @@ nmu:
     type: int
     units: entries
     description: "NMU write-response RoB pool depth. <= 2^ORDERING_TAG_WIDTH."
-    default: 32
+    default: 128
     min: 1
     max: 256
     sv_symbol: NMU_ROB_B_DEPTH_DFLT
@@ -114,7 +114,7 @@ nmu:
     type: int
     units: entries
     description: "NMU read-response RoB pool depth. Holds one rdata beat per slot."
-    default: 32
+    default: 128
     min: 1
     max: 256
     sv_symbol: NMU_ROB_R_DEPTH_DFLT

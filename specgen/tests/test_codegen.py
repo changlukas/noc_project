@@ -278,7 +278,7 @@ def test_nmu_nsu_domains_load():
     from ni_spec.handshake_schema import load_constants
     from pathlib import Path
     c = load_constants(Path(__file__).resolve().parent.parent / "source" / "constants.yaml")
-    assert c["nmu"]["ROB_B_DEPTH"]["default"] == 32
+    assert c["nmu"]["ROB_B_DEPTH"]["default"] == 128
     assert c["nmu"]["QUEUE_DEPTH"]["default"] == 16
     assert c["nmu"]["QUEUE_DEPTH"]["cpp_symbol"] == "NMU_QUEUE_DEPTH"
     assert c["nsu"]["META_BUFFER_MAX_UNIQUE_IDS"]["default"] == 1

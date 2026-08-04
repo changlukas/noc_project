@@ -357,7 +357,17 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         }
         std::size_t base = 0;
         if (needs_rob) {
-            if (read_free_space() < n) return false;  // subsumes the old n > r_rob_depth_ check
+            // n > r_rob_depth_ can never be admitted -- free space never reaches n, so the
+            // free-space test below would refuse this AR forever, indistinguishable from
+            // ordinary backpressure. That is a configuration/stimulus error (burst beats
+            // exceed the RoB read depth), not backpressure: fail loud instead of wedging.
+            if (n > r_rob_depth_) {
+                assert(false &&
+                       "nmu::Rob::push_ar: burst beats (len+1) exceed RoB read depth "
+                       "(len+1 > ROB_R_DEPTH) -- permanent stimulus error, not backpressure");
+                std::abort();  // belt-and-braces for NDEBUG
+            }
+            if (read_free_space() < n) return false;
             base = r_rob_depth_ - read_free_space();
         }
         if (!next_pkt_.push_ar_with_meta(

@@ -19,8 +19,8 @@ package ni_params_pkg;
   localparam int unsigned NOC_MESH_Y_DIM_DFLT               = 4;
 
   // NMU depth defaults
-  localparam int unsigned NMU_ROB_B_DEPTH_DFLT        = 32;
-  localparam int unsigned NMU_ROB_R_DEPTH_DFLT        = 32;
+  localparam int unsigned NMU_ROB_B_DEPTH_DFLT        = 128;
+  localparam int unsigned NMU_ROB_R_DEPTH_DFLT        = 128;
   localparam int unsigned NMU_MAX_TXNS_PER_ID_DFLT    = 32;
   localparam int unsigned NMU_OUTSTANDING_DEPTH_DFLT  = 32;
   localparam int unsigned NMU_QUEUE_DEPTH_DFLT        = 16;

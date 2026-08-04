@@ -299,15 +299,15 @@ TEST(NmuRob, Enabled_ConstructorMarksOnlyDepthSlotsFree) {
     EXPECT_EQ(rob.read_free_space(), 8u);
 }
 
-TEST(NmuRob, Enabled_DefaultDepthIsThirtyTwo) {
-    SCENARIO("Rob Enabled: the default pool is 32 entries, not the 256-entry index space");
+TEST(NmuRob, Enabled_DefaultDepthIsOneTwentyEight) {
+    SCENARIO("Rob Enabled: the default pool is 128 entries, not the 256-entry index space");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
     Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
-    EXPECT_EQ(rob.b_rob_depth(), 32u);
-    EXPECT_EQ(rob.r_rob_depth(), 32u);
+    EXPECT_EQ(rob.b_rob_depth(), 128u);
+    EXPECT_EQ(rob.r_rob_depth(), 128u);
     EXPECT_EQ(Rob::ORDERING_TAG_SPACE, 256u);
 }
 
@@ -1200,11 +1200,11 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
     Depacketize depkt(noc.rsp_in(), 16, 16);
-    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());  // depth 32
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());  // depth 128
 
     const std::size_t free_before = rob.read_free_space();
     axi::ArBeat ar = make_ar(0x05, 0x100);
-    ar.len = 255;  // 256 beats, eight times the 32-slot read pool
+    ar.len = 255;  // 256 beats, twice the 128-slot read pool
     EXPECT_TRUE(rob.push_ar(ar));
     auto f = *ar_cap.pop();
     EXPECT_EQ(f.get_header_field("axi_ch"), ni::AXI_CH_NarrowAr);
@@ -1212,8 +1212,10 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
     EXPECT_EQ(rob.read_free_space(), free_before) << "bypass allocates nothing";
 }
 
-TEST(NmuRob, Enabled_PushAr_OversizedBurst_SecondSameIdRefusedNotWedged) {
-    SCENARIO("Rob Enabled: a second oversized AR on the same id is refused while the first flies");
+TEST(NmuRobDeath, Enabled_PushAr_OversizedBurst_SecondSameIdAbortsNotWedged) {
+    SCENARIO(
+        "Rob Enabled: a second oversized (needs_rob) AR whose beats exceed r_rob_depth_ aborts "
+        "fail-loud instead of wedging retry-forever; an unrelated id is unaffected");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
@@ -1224,14 +1226,16 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_SecondSameIdRefusedNotWedged) {
     first.len = 255;
     ASSERT_TRUE(rob.push_ar(first));
     // Different dest than `first`: the same-destination bypass does not apply, so this
-    // allocates a slot (needs 256 slots) and is refused by the pool, not bypassed.
+    // needs a RoB slot -- 256 beats into a 128-deep pool can never be admitted, which is
+    // exactly the n > r_rob_depth_ guard's target, not ordinary backpressure.
     axi::ArBeat second = make_ar(0x05, 0x100000000ull + 0x200);  // dst 1
     second.len = 255;
-    EXPECT_FALSE(rob.push_ar(second)) << "list non-empty -> ordering_req=1 -> 256 slots -> refuse";
+    // EXPECT_DEATH forks: `second` never actually mutates `rob` in this (parent) process.
+    EXPECT_DEATH(rob.push_ar(second), ".*");
 
     axi::ArBeat other = make_ar(0x06, 0x300);
     other.len = 255;
-    EXPECT_TRUE(rob.push_ar(other)) << "the refusal is per-id, not a channel wedge";
+    EXPECT_TRUE(rob.push_ar(other)) << "the abort is per-push, not a channel wedge";
 }
 
 TEST(NmuRob, Enabled_IdleIdBypass_FirstTxnPerIdAllocatesNoSlot) {
