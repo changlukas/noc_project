@@ -76,7 +76,7 @@
           "summary": "Parses inbound NoC response flit streams into AXI B/R beats (with last) before delivery to the AXI slave port.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["B", "R", "flit_tail"],
+          "uses_packet_fields": ["B", "R"],
           "configured_by": [],
           "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-ROB"]
         }
@@ -101,7 +101,7 @@
           "summary": "Parses inbound NoC request flit streams into AXI AW/W/AR transactions before delivery to the AXI master port.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["AW", "W", "AR", "flit_tail", "src_id"],
+          "uses_packet_fields": ["AW", "W", "AR", "src_id"],
           "configured_by": [],
           "related_features": ["FEAT-NSU-AXI_MASTER_PORT", "FEAT-NSU-META_BUFFER"]
         },
