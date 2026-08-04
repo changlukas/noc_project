@@ -272,6 +272,25 @@ module user_node_endpoint #(
         end
     end
 
+    // Debug handshake trace: +hs_trace_node=<id> dumps per-cycle AW/W/B
+    // valid/ready pairs of that node's master port to hs_trace_node<id>.log.
+    // Off unless the plusarg names this node.
+    int unsigned hs_trace_node;
+    int hs_fd = 0;
+    int unsigned hs_cyc = 0;
+    initial begin
+        if ($value$plusargs("hs_trace_node=%d", hs_trace_node) && hs_trace_node == NODE_ID)
+            hs_fd = $fopen($sformatf("hs_trace_node%0d.log", NODE_ID), "w");
+    end
+    always_ff @(posedge clk_i) begin
+        hs_cyc <= hs_cyc + 1;
+        if (hs_fd != 0 && rst_ni)
+            $fdisplay(hs_fd, "%0d %b%b %b%b %b%b", hs_cyc,
+                      master_axi_req_o.awvalid, master_axi_rsp_i.awready,
+                      master_axi_req_o.wvalid,  master_axi_rsp_i.wready,
+                      master_axi_rsp_i.bvalid,  master_axi_req_o.bready);
+    end
+
     // Mode 2: read i issues only after write i's B returns. Pair i is
     // transaction i of write.txt/read.txt (same id, same address), so the
     // paired write is the issued[id]-th write with that id and

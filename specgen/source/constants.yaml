@@ -65,7 +65,7 @@ noc:
     type: int
     units: flits
     description: "Per-VC buffer depth at NoC slave; defines initial credit count exposed to producer"
-    default: 4
+    default: 8
     min: 1
     max: 64
     sv_symbol: NOC_SLAVE_VC_BUFFER_DEPTH_DFLT
@@ -74,7 +74,7 @@ noc:
     type: int
     units: flits
     description: "Router input VC FIFO depth; defines the credit seed of the upstream sender"
-    default: 4
+    default: 8
     min: 1
     max: 16
     sv_symbol: NOC_ROUTER_VC_DEPTH_DFLT

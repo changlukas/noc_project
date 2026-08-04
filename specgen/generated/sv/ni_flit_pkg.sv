@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_packet.json
 // Source SHA: e47b96236908
 // Generator version: v1.0.0
-// Generated at: 2026-07-10T12:50:00Z
+// Generated at: 2026-07-28T14:50:27Z
 // ----------------------------------------------------------------------------
 `ifndef NI_FLIT_PKG_SVH
 `define NI_FLIT_PKG_SVH
