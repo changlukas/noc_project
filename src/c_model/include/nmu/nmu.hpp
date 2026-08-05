@@ -297,7 +297,7 @@ class Nmu {
     //      AR, REQ) and dat_wormhole_arbiter_.input(0/1) (Data AW/W, DAT; T6 steering).
     //   8. req_s1_bridge_ stages ROB-admitted requests before Packetize.
     //   9. rob_ takes req_s1_bridge_ + depacketize_.
-    //   9. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
+    //   10. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
     NmuConfig cfg_;
     router::NocReqOut& downstream_req_;
     router::NocRspIn& downstream_rsp_;

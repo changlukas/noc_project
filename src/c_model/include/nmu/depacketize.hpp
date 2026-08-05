@@ -63,7 +63,7 @@ class Depacketize : public ResponseDepacketizer {
 
     static axi::BBeat decode_b(const Flit& f);
     static axi::RBeat decode_r(const Flit& f);
-    void drain_ingress_(router::NocRspIn& src, std::optional<Flit>& pending);
+    void drain_ingress_(router::NocRspIn& src, std::optional<Flit>& pending, bool is_dat_ingress);
 };
 
 inline axi::BBeat Depacketize::decode_b(const Flit& f) {
@@ -91,7 +91,8 @@ inline axi::RBeat Depacketize::decode_r(const Flit& f) {
     return r;
 }
 
-inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Flit>& pending) {
+inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Flit>& pending,
+                                        bool is_dat_ingress) {
     while (true) {
         Flit f;
         if (pending) {
@@ -102,6 +103,12 @@ inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Fli
             f = *opt;
         }
         uint64_t ch = f.get_header_field("axi_ch");
+        // DAT carries DataR only (spec :348; NarrowB/NarrowR/DataB stay on
+        // RSP). A misrouted flit here would land in the wrong queue with a
+        // silently wrong class tag; fail loud instead.
+        assert((!is_dat_ingress || ch == ni::AXI_CH_DataR) &&
+               "nmu::Depacketize::drain_ingress_: DAT ingress delivered a channel outside "
+               "{DataR} -- spec :348 keeps NarrowB/NarrowR/DataB off DAT");
         switch (ch) {
             case ni::AXI_CH_NarrowB:
             case ni::AXI_CH_DataB: {
@@ -144,8 +151,8 @@ inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Fli
 }
 
 inline void Depacketize::tick() {
-    drain_ingress_(rsp_in_, pending_rsp_);
-    drain_ingress_(dat_rsp_in_, pending_dat_);
+    drain_ingress_(rsp_in_, pending_rsp_, /*is_dat_ingress=*/false);
+    drain_ingress_(dat_rsp_in_, pending_dat_, /*is_dat_ingress=*/true);
 }
 
 inline std::optional<axi::BBeat> Depacketize::pop_b() {

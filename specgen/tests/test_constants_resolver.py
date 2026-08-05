@@ -56,7 +56,9 @@ def test_eval_forbidden_subscript(packet_spec):
 
 
 def test_eval_derived_literal_rejected(packet_spec):
-    """packet_eval_expr rejects 'derived' -- must be handled by payload_field_width."""
+    """packet_eval_expr rejects 'derived' outright; no caller special-cases it.
+    'derived' is a header-only padding width_param (invariants.py caps it at one
+    field, to anchor HEADER_TOTAL_WIDTH) -- the live spec has no field using it."""
     with pytest.raises(ExprNotAllowedError, match="derived"):
         C.packet_eval_expr(packet_spec, "derived")
 

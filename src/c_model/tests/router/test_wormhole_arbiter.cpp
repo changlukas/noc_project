@@ -44,6 +44,39 @@ TEST(NocWormholeArbiter, PassThroughNoPairing) {
     EXPECT_FALSE(arb.is_locked());
 }
 
+TEST(NocWormholeArbiter, SelfLockNoPairingExcludesOtherInputUntilTail) {
+    SCENARIO(
+        "WormholeArbiter with no pairing: a multi-flit worm on one input (head "
+        "flit_tail=0) locks the arbiter to that SAME input (self-lock, the default "
+        "used by S3a T5's DatMergeWrap); a competing flit on the other input is "
+        "excluded from arbitration until the locked worm's tail (flit_tail=1) drains");
+    ReqCapture down;
+    WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/2, {});
+
+    ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_DataAw, /*flit_tail=*/0)));
+    ASSERT_TRUE(arb.input(1).push_flit(make_flit(ni::AXI_CH_NarrowAr, /*flit_tail=*/1)));
+
+    arb.tick();  // input 0's head drains, self-locks to input 0 (no pairing target)
+    EXPECT_TRUE(arb.is_locked());
+    EXPECT_EQ(*arb.locked_to(), 0u);
+    EXPECT_EQ(down.size(), 1u);
+    EXPECT_EQ(arb.pending_size(1), 1u) << "input 1's flit excluded while locked to input 0";
+
+    arb.tick();  // locked target (input 0) empty this cycle -> idle; input 1 still excluded
+    EXPECT_EQ(down.size(), 1u);
+    EXPECT_TRUE(arb.is_locked());
+
+    ASSERT_TRUE(
+        arb.input(0).push_flit(make_flit(ni::AXI_CH_DataAw, /*flit_tail=*/1)));  // worm tail
+    arb.tick();                                                                  // unlocks
+    EXPECT_FALSE(arb.is_locked());
+    EXPECT_EQ(down.size(), 2u);
+
+    arb.tick();  // now input 1's flit can win arbitration
+    EXPECT_EQ(down.size(), 3u);
+    EXPECT_EQ(arb.pending_size(1), 0u);
+}
+
 TEST(NocWormholeArbiter, AwTriggersLock) {
     SCENARIO(
         "WormholeArbiter NMU mode (3 inputs, pairing aw->w): pushing an AW "
