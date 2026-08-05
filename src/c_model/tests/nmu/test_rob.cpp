@@ -1486,6 +1486,102 @@ TEST(RobSameDestBypass, MaxTxnsPerIdStillBoundsBypassedEntries) {
         << "the order-list gate still bounds an all-bypassed streak";
 }
 
+// === Same-ID cross-class read ordering guard (S3a T3) ===
+//
+// The same-destination bypass predicate keys on (dst_id, id). Once DataR rides
+// DAT while NarrowR stays on RSP (S3a T6), a same-ID config-then-memory (or
+// memory-then-config) read pair to the same node would bypass on dst alone and
+// return on two independently arbitrated networks with nothing enforcing AR
+// order -- an AXI4 IHI 0022 A5.3 violation. The fix adds a class term: a class
+// change is treated like a dest change, so the second read falls back to the
+// RoB path and retires by ordering_tag in AR order. These tests are provable
+// today (RobMode::Enabled, no fabric/network involved) even though the guard
+// stays inert until T6 actually splits the networks.
+//
+// One SAM tile (dst 0) with two address windows of different class -- the
+// shape the design's "config read then memory read to the same node" hazard
+// requires: same dst_id, different axi::AxiClass.
+addr_trans::SamTable cross_class_sam() {
+    return addr_trans::SamTable::packed({
+        {0, 0, 0x1000, axi::AxiClass::Narrow},        // [0, 0x1000): config space, dst 0
+        {0, 0, 0x100000000ull, axi::AxiClass::Data},  // [0x1000, ...): memory space, dst 0
+    });
+}
+constexpr uint64_t kCrossClassNarrowAddr = 0x100;          // dst 0, Narrow
+constexpr uint64_t kCrossClassDataAddr = 0x1000 + 0x2000;  // dst 0, Data
+
+axi::ArBeat make_narrow_ar(uint8_t id, uint64_t addr) {
+    axi::ArBeat b{};
+    b.id = id;
+    b.addr = addr;
+    b.len = 0;
+    b.size = 2;  // 4 B/beat -- legal narrow (<=3), matches the existing narrow-lane test
+    b.burst = axi::Burst::INCR;
+    return b;
+}
+
+TEST(RobCrossClassRead, NarrowThenDataSameDestFallsBackToRob) {
+    SCENARIO(
+        "Rob Enabled: a config-space (Narrow) read followed by a same-id same-dest memory-space "
+        "(Data) read does NOT take the same-destination bypass -- the class change forces "
+        "ordering_req=1, closing the AXI4 A5.3 hole S3a T6 opens (NarrowR stays on RSP, DataR "
+        "moves to DAT)");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, cross_class_sam());
+
+    const uint8_t id = 5;
+    ASSERT_TRUE(rob.push_ar(make_narrow_ar(id, kCrossClassNarrowAddr)));  // idle-ID bypass
+    EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_ar(make_ar(id, kCrossClassDataAddr)));  // same dst, class change
+    auto f = *ar_cap.pop();
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u)
+        << "same dst but Narrow->Data must fall back to the RoB path, not bypass";
+}
+
+TEST(RobCrossClassRead, DataThenNarrowSameDestFallsBackToRob) {
+    SCENARIO(
+        "Rob Enabled: symmetric case -- memory-space (Data) read then config-space (Narrow) read "
+        "to the same dst also falls back to the RoB path");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, cross_class_sam());
+
+    const uint8_t id = 5;
+    ASSERT_TRUE(rob.push_ar(make_ar(id, kCrossClassDataAddr)));  // idle-ID bypass
+    EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_ar(make_narrow_ar(id, kCrossClassNarrowAddr)));  // same dst, class change
+    auto f = *ar_cap.pop();
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u)
+        << "same dst but Data->Narrow must fall back to the RoB path, not bypass";
+}
+
+TEST(RobCrossClassRead, SameClassSameDestStillBypasses) {
+    SCENARIO(
+        "Rob Enabled: no regression -- a same-id same-dest same-class (Narrow-Narrow) streak "
+        "still takes the same-destination bypass, matching the existing Data-class coverage in "
+        "RobSameDestBypass.SameDestStreakBypassesAll");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, cross_class_sam());
+
+    const uint8_t id = 5;
+    ASSERT_TRUE(rob.push_ar(make_narrow_ar(id, kCrossClassNarrowAddr)));  // idle-ID bypass
+    EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_ar(make_narrow_ar(id, kCrossClassNarrowAddr)));  // same dst, same class
+    EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u)
+        << "same dst, same class must still bypass -- the class term must not over-trigger";
+}
+
 TEST(NmuRob, Enabled_NarrowReadUnalignedAddrReanchorsToCorrectLane) {
     SCENARIO(
         "Rob Enabled (robbed): narrow class read-entry lane re-anchor recovers the correct byte "

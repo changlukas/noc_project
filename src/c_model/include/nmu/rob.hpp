@@ -252,6 +252,15 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
 
+    // Class of the last accepted read push for that id (axi::AxiClass, updated
+    // alongside prev_dest_read_). Write has no counterpart: NarrowB and DataB
+    // both ride RSP (spec §6 :348), so a write class change never crosses
+    // networks and needs no guard. A read class change does -- NarrowR rides
+    // RSP, DataR rides DAT (S3a T6) -- so same-destination bypass alone would
+    // let a same-ID config-then-memory read pair retire out of AR order across
+    // two independently arbitrated networks (AXI4 IHI 0022 §A5.3).
+    std::array<axi::AxiClass, AXI_ID_SPACE> prev_cls_read_{};
+
     // Per-base (keyed by ordering_tag base) arrival counter. NSU stamps every
     // R beat of a burst with ordering_tag=base; this counter positions beat i at base+i.
     // Reset when the range is popped from read_order_by_id_ (ties counter lifecycle
@@ -366,9 +375,15 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
             // A bypassed burst of any length is admissible. Ported from floo_rob.sv:422-425.
             needs_rob = false;
             fallen_back = false;  // fresh streak
-        } else if (!fallen_back_read_[b.id] && dst == prev_dest_read_[b.id]) {
-            // Same-destination bypass: same dest as the previous same-id push, not yet reordering.
-            // Ported from floo_rob.sv:427-428.
+        } else if (!fallen_back_read_[b.id] && dst == prev_dest_read_[b.id] &&
+                   t.cls == prev_cls_read_[b.id]) {
+            // Same-destination bypass: same dest AND same class as the previous same-id
+            // push, not yet reordering. Ported from floo_rob.sv:427-428, with a class
+            // term FlooNoC has no counterpart for (two AXI ports there, one here --
+            // see the class comment on prev_cls_read_). A class change is treated like
+            // a dest change: falls into the needs_rob branch below, so the pair retires
+            // by ordering_tag in AR order regardless of which network (RSP vs DAT) the
+            // response arrives on.
             needs_rob = false;
             fallen_back = false;
         } else {
@@ -397,6 +412,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
             return false;  // downstream backpressure: no state mutation
         }
         prev_dest_read_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
+        prev_cls_read_[b.id] = t.cls;
         fallen_back_read_[b.id] = fallen_back;
         if (needs_rob) {
             for (std::size_t i = 0; i < n; ++i) {
