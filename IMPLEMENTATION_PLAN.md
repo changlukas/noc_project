@@ -45,6 +45,14 @@ not one value.
 Goal: DAT link IO + third router instance; simple-mode ready/valid router class for REQ/RSP
 (1-2 stages); standard credit router retained for DAT; TX*/RX* pin contract; specgen
 first-class per-network flit widths; wrapper/DPI naming; perf probes follow.
+Port constraint (user ruling 2026-08-05, post-S2 bug retrospective): the REQ/RSP simple
+router is a line-by-line translate of mainline `floo_router.sv`; network/channel mapping is a
+translate of `floo_pkg::nw_chan_mapping`. No self-designed arbitration or routing logic in
+S3a — where the RTL and our structure diverge, flag BLOCKED, do not improvise.
+VIP swap (same retrospective — the S2 bug cluster lived in the self-written AXI VIP): bounded
+spike replacing co-sim stimulus with vendored pulp axi_test (sim/dv/axi-0.39.7) on Verilator
+5.048; if the spike passes, retire the self-written co-sim stimulus paths, AxiMasterT narrows
+to ctest unit scope. Spike fails -> document why, stay put.
 Carry-in from S2 reviews: delete specgen's dead "derived" width_param branches
 (constants.py:227-244, :276-310) while touching per-network widths; check_strb_valid_bits is
 vacuous at 64 lanes (kFullStrbMask == ~0ull) — delete the check+call site or mark explicitly.
