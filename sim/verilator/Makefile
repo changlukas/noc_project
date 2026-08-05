@@ -127,6 +127,11 @@ $(TOPO_STAMP): FORCE
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
+# The same generator run writes the fabric; the empty recipe just tells make the
+# file is up to date once tb_top has been made (it is a prerequisite of the
+# binary below so a hand-edited fabric actually rebuilds).
+$(NOC_FABRIC_SV): $(TB_TOP_SV) ;
+
 # Python3 executable — auto-detected so build/run commands stay identical on
 # Windows and Linux. Prefer the Windows `py -3` launcher when present (the
 # canonical interpreter with PyYAML; the MSYS2 mingw64 `python3` often lacks
@@ -154,7 +159,7 @@ check-yamlcpp:
 # sed pass (--timing): Verilator 5.036 on Windows joins fork-sync done() debug
 #   source paths with backslashes in generated C-string literals — rewrite them
 #   to forward slashes before g++ sees them.
-$(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
+$(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
 	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \

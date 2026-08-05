@@ -83,6 +83,12 @@ TB_TOP_SV = $(COSIM_ROOT)/tb/tb_top_$(TOPOLOGY).sv
 # always lands on the vc word (vc2), not "vc2_rob" which has no matching noc_types_pkg file.
 # $(lastword $(subst _vc, vc,...)) then splits on "_vc" and takes the last word (e.g. "vc2").
 TOPOLOGY_BASE = $(TOPOLOGY:_rob=)
+# noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
+# BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
+# twice). It is still a real compile input: each simulator's binary rule lists it
+# separately, otherwise a hand-edit (e.g. a debug probe) leaves the binary "up to
+# date" and the edit is silently never compiled.
+NOC_FABRIC_SV = $(SRC_SV)/noc_fabric_$(TOPOLOGY_BASE).sv
 TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_$(lastword $(subst _vc, vc,$(TOPOLOGY_BASE))).sv
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \

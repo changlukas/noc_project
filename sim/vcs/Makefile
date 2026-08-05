@@ -113,6 +113,11 @@ $(TOPO_STAMP): FORCE
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
 
+# The same generator run writes the fabric; the empty recipe just tells make the
+# file is up to date once tb_top has been made (it is a prerequisite of simv
+# below so a hand-edited fabric actually rebuilds).
+$(NOC_FABRIC_SV): $(TB_TOP_SV) ;
+
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.
 VCS_COMMON_FLAGS := \
@@ -141,7 +146,7 @@ PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 # clobber another's binary.
 SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(FSDB_SUFFIX)
 
-$(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
+$(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
 	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(FSDB_SUFFIX) \
