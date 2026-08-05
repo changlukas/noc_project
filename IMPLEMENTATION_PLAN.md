@@ -157,3 +157,8 @@ still open into that round's backlog "This round".
   and docs/image/pipeline_ref.jpg; send along if the recipient needs those flows.
 - Trade-off record 2026-08-04 (for the ledger): deleted flat-LRU arbitration, NoC-layer QoS,
   reduction-operator-set, collective-scope items; turn-model VA folded into S3b.
+- If REQ/RSP faces ever open >1 VC or AR/B steer to DAT, the ordering_req=0 same-(dst,id)
+  bypass streak loses in-fabric ordering (AR pinning + B fixed-hash deleted in S3b).
+  ChannelModel is vc-blind, so ctest cannot see it.
+- Router VA divergence assert sits behind the credit gate. A zero-credit diverging fixed_vc=0
+  worm idles silently until credit arrives (checker liveness gap, S3b T5).
