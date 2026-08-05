@@ -16,7 +16,8 @@
 // time. ordering_req=1 flits are RoB-owned and order-free, so they always
 // round-robin, never fixed. AR carries no streak state: the production wraps
 // pin the REQ face it rides to num_vc == 1, and an AR reaching a multi-VC face
-// (ctest fixtures do this) round-robins.
+// (ctest fixtures do this) round-robins. Every flit of a fixed-VC stream also
+// leaves with header fixed_vc=1 so downstream routers keep the NI's vc_id.
 //
 // W-follows-AW invariant: this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
@@ -91,6 +92,7 @@ class VcAllocator : public router::NocReqOut {
     uint8_t round_robin_ptr_ = 0;
     uint8_t rr_start_ = 0;  // round-robin scan start (selection)
     std::optional<uint8_t> current_aw_vc_;
+    uint8_t current_aw_fixed_vc_ = 0;  // in-flight burst's fixed_vc, W beats copy it
 
     // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on an
     // ordering_req=0 AW. nullopt dst = id never seen.
@@ -160,6 +162,21 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
     uint8_t vc_id = *vc_opt;
     if (pending_[vc_id].size() >= pending_depth_) return false;
 
+    // fixed_vc: the flit holds this vc_id end to end, routers must not
+    // reallocate it (spec docs/noc-target-spec.md header table). An
+    // ordering_req=0 AW streak is kept in order by same-VC delivery alone, so
+    // EVERY packet of the streak carries the bit -- including the first, which
+    // only records the (dst, VC) pair. ordering_req=1 is RoB-owned and
+    // order-free, AR rides a single-VC face: both leave the bit clear. W copies
+    // its owning AW's bit from current_aw_fixed_vc_ (read before the wlast
+    // reset below), never re-derives it from its own header.
+    uint8_t fixed_vc = 0;
+    if (is_aw(axi_ch)) {
+        fixed_vc = (ordering_req == 0) ? 1u : 0u;
+    } else if (is_w(axi_ch)) {
+        fixed_vc = current_aw_fixed_vc_;
+    }
+
     // Update W-follows-AW optional only after pass conditions (atomicity)
     if (is_aw(axi_ch)) {
         if (current_aw_vc_.has_value()) {
@@ -170,6 +187,7 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
             std::abort();  // belt-and-braces for NDEBUG
         }
         current_aw_vc_ = vc_id;
+        current_aw_fixed_vc_ = fixed_vc;
     } else if (is_w(axi_ch)) {
         // wlast sits at bit 0 of both NARROW_W and DATA_W (same relative
         // position in both channel layouts), so reading it via either
@@ -191,6 +209,7 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
 
     Flit stamped = flit;
     stamped.set_header_field("vc_id", vc_id);
+    stamped.set_header_field("fixed_vc", fixed_vc);
     pending_[vc_id].push_back(stamped);
     return true;
 }

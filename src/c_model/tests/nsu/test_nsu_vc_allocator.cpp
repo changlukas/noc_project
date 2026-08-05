@@ -160,6 +160,44 @@ TEST(NsuVcAllocator, FixedVcFullRefusesInsteadOfSpilling) {
 }
 
 // ---------------------------------------------------------------------------
+// Parameterized fixture — NUM_VC ∈ {1, 2, 4} (see INSTANTIATE below)
+// ---------------------------------------------------------------------------
+
+class NsuVcAllocatorParam : public ::testing::TestWithParam<std::size_t> {};
+
+// R is an ordered same-destination stream held on its mapped VC end to end, so
+// it leaves with fixed_vc=1 and routers must not reallocate it. B is order-free
+// and leaves the bit clear. NUM_VC=1 stamps the same way -- the bit must be
+// honest even on a face that has no second VC to move to.
+TEST_P(NsuVcAllocatorParam, FixedVcStampedOnRNotB) {
+    const std::size_t num_vc = GetParam();
+
+    SCENARIO("NSU VcAllocator: R leaves with fixed_vc=1, B with fixed_vc=0");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    VcAllocator arb(noc.rsp_out(), num_vc);
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, /*id=*/0x05, /*rlast=*/0)));
+    ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, /*id=*/0x05, /*rlast=*/1)));
+    Flit b_in = make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40);
+    b_in.set_header_field("fixed_vc", 1);  // a pass-through (no stamp) would show up here
+    ASSERT_TRUE(arb.push_flit(b_in));
+
+    for (int i = 0; i < 3; ++i) arb.tick();
+    for (int i = 0; i < 3; ++i) {
+        auto f = noc.rsp_in().pop_flit();
+        ASSERT_TRUE(f.has_value());
+        uint64_t expected = (f->get_header_field("axi_ch") == ni::AXI_CH_NarrowR) ? 1u : 0u;
+        EXPECT_EQ(f->get_header_field("fixed_vc"), expected)
+            << "axi_ch=" << f->get_header_field("axi_ch");
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcAllocatorParam,
+                         ::testing::Values(std::size_t(1), std::size_t(2), std::size_t(4)),
+                         [](const ::testing::TestParamInfo<std::size_t>& info) {
+                             return "NumVc" + std::to_string(info.param);
+                         });
+
+// ---------------------------------------------------------------------------
 // Plain TEST() — not parameterized:
 //   Nsu_Degenerate_NumVc1_Passthrough : specifically tests NUM_VC=1 behavior
 // ---------------------------------------------------------------------------

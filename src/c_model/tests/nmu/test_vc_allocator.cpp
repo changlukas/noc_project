@@ -34,13 +34,18 @@ Flit make_flit(uint8_t axi_ch, uint8_t dst_id = 0, uint8_t initial_vc = 0, uint6
     return f;
 }
 
-// Push a flit, drain one to the channel, return the assigned vc_id.
-uint8_t push_and_vc(VcAllocator& arb, ChannelModel& noc, const Flit& f) {
+// Push a flit, drain one to the channel, return the flit as it left the arbiter.
+Flit push_and_pop(VcAllocator& arb, ChannelModel& noc, const Flit& f) {
     EXPECT_TRUE(arb.push_flit(f));
     arb.tick();
     auto out = noc.req_in().pop_flit();
     EXPECT_TRUE(out.has_value());
-    return static_cast<uint8_t>(out->get_header_field("vc_id"));
+    return out.value_or(Flit{});
+}
+
+// Push a flit, drain one to the channel, return the assigned vc_id.
+uint8_t push_and_vc(VcAllocator& arb, ChannelModel& noc, const Flit& f) {
+    return static_cast<uint8_t>(push_and_pop(arb, noc, f).get_header_field("vc_id"));
 }
 
 }  // namespace
@@ -269,6 +274,54 @@ TEST(NmuVcAllocator, WFollowsAW_ReusedFixedVc) {
     EXPECT_EQ(aw2_vc, 0u) << "fixed VC hit must reuse VC0, not round-robin to VC1";
     uint8_t w2_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
     EXPECT_EQ(w2_vc, 0u) << "W must follow AW2's reused VC";
+}
+
+// fixed_vc on an ordering_req=0 AW streak. The FIRST AW of the streak is the
+// hole case: it only records (dst, VC), so leaving it unpinned would let a
+// router restamp it while its successors stay put, inverting same-id write
+// order with nothing downstream to catch it.
+TEST_P(NmuVcAllocatorParam, FixedVcStampedOnOrderedAwStreak) {
+    const std::size_t num_vc = GetParam();
+
+    SCENARIO(
+        "NMU VcAllocator: ordering_req=0 AW streak leaves with fixed_vc=1 on "
+        "every packet including the first, and each W beat carries its AW's bit");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    VcAllocator arb(noc.req_out(), num_vc);
+
+    for (int i = 0; i < 2; ++i) {  // i=0 records the (dst,VC) pair, i=1 reuses it
+        Flit aw = push_and_pop(arb, noc,
+                               make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0,
+                                         /*id=*/0x20));
+        EXPECT_EQ(aw.get_header_field("fixed_vc"), 1u) << "AW #" << i << " of an ordered streak";
+        Flit w = push_and_pop(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
+        EXPECT_EQ(w.get_header_field("fixed_vc"), 1u) << "W must carry its AW's fixed_vc";
+    }
+}
+
+// ordering_req=1 AW is RoB-owned and order-free, AR rides a single-VC face:
+// both leave fixed_vc clear so a router's VC allocation stage may rebalance.
+TEST_P(NmuVcAllocatorParam, FixedVcClearOnRobbedAwAndAr) {
+    const std::size_t num_vc = GetParam();
+
+    SCENARIO(
+        "NMU VcAllocator: ordering_req=1 AW, its W beat, and AR all leave with "
+        "fixed_vc=0 -- pushed in with the bit already set, the arbiter must clear it");
+    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
+    VcAllocator arb(noc.req_out(), num_vc);
+
+    // Inputs arrive with fixed_vc=1 so a pass-through (no stamp) would show up here.
+    Flit aw_in = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    aw_in.set_header_field("ordering_req", 1);
+    aw_in.set_header_field("fixed_vc", 1);
+    EXPECT_EQ(push_and_pop(arb, noc, aw_in).get_header_field("fixed_vc"), 0u);
+    Flit w_in = make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1);
+    w_in.set_header_field("fixed_vc", 1);
+    EXPECT_EQ(push_and_pop(arb, noc, w_in).get_header_field("fixed_vc"), 0u)
+        << "W must carry its AW's fixed_vc, not its own";
+    Flit ar_in = make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x20);
+    ar_in.set_header_field("fixed_vc", 1);
+    EXPECT_EQ(push_and_pop(arb, noc, ar_in).get_header_field("fixed_vc"), 0u);
 }
 
 INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcAllocatorParam,

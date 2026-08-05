@@ -14,7 +14,8 @@
 //   (dst_id, rid) and hashes identically. A mapped VC that is full/no-credit
 //   refuses (`return false`) rather than spilling to another VC -- spilling a
 //   fixed-VC stream would reorder it. B is order-free at the NMU slot path
-//   (or single-VC on RSP) and round-robins.
+//   (or single-VC on RSP) and round-robins. R also leaves with header
+//   fixed_vc=1 so downstream routers keep the NI's vc_id; B leaves it clear.
 // NUM_VC=1 degenerate behavior: routes everything to VC=0.
 #include "flit.hpp"
 #include "ni_flit_constants.h"
@@ -115,6 +116,10 @@ inline bool VcAllocator::push_flit(const Flit& flit) {
 
     Flit stamped = flit;
     stamped.set_header_field("vc_id", vc_id);
+    // fixed_vc: R is an ordered same-destination stream held on its mapped VC
+    // end to end, so routers must not reallocate it. B is order-free (and rides
+    // the single-VC RSP face), leaving the bit clear.
+    stamped.set_header_field("fixed_vc", is_r(axi_ch) ? 1u : 0u);
     pending_[vc_id].push_back(stamped);
     return true;
 }
