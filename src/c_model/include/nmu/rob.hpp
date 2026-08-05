@@ -252,13 +252,20 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::array<bool, AXI_ID_SPACE> fallen_back_write_{};
     std::array<bool, AXI_ID_SPACE> fallen_back_read_{};
 
-    // Class of the last accepted read push for that id (axi::AxiClass, updated
-    // alongside prev_dest_read_). Write has no counterpart: NarrowB and DataB
-    // both ride RSP (spec §6 :348), so a write class change never crosses
-    // networks and needs no guard. A read class change does -- NarrowR rides
-    // RSP, DataR rides DAT (S3a T6) -- so same-destination bypass alone would
-    // let a same-ID config-then-memory read pair retire out of AR order across
-    // two independently arbitrated networks (AXI4 IHI 0022 §A5.3).
+    // Class of the last accepted push for that id (axi::AxiClass, updated
+    // alongside prev_dest_write_ / prev_dest_read_). The REQUEST side splits by
+    // class (S3a T6): NarrowAw/NarrowAr ride REQ, DataAw/DataAr ride DAT. The
+    // RESPONSE side is asymmetric -- B never splits (NarrowB and DataB both
+    // ride RSP, spec §6 :348), R does (NarrowR rides RSP, DataR rides DAT) --
+    // but that only changes which channel a same-ID pair races on, not whether
+    // it can race: the two AWs (or ARs) still went out on independently
+    // arbitrated networks, so nothing prevents the destinations from
+    // completing them out of issue order, regardless of which network their
+    // responses converge on. A class change is therefore treated like a dest
+    // change on both write and read: falls into the needs_rob branch, so a
+    // same-ID cross-class pair retires by ordering_tag in issue order
+    // regardless of which network the response arrives on (AXI4 IHI 0022 §A5.3).
+    std::array<axi::AxiClass, AXI_ID_SPACE> prev_cls_write_{};
     std::array<axi::AxiClass, AXI_ID_SPACE> prev_cls_read_{};
 
     // Per-base (keyed by ordering_tag base) arrival counter. NSU stamps every
@@ -320,9 +327,15 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         // response. No reorder storage needed. Ported from floo_rob.sv:422-425.
         needs_rob = false;
         fallen_back = false;  // fresh streak
-    } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id]) {
-        // Same-destination bypass: same dest as the previous same-id push, not yet reordering.
-        // Ported from floo_rob.sv:427-428.
+    } else if (!fallen_back_write_[b.id] && dst == prev_dest_write_[b.id] &&
+               t.cls == prev_cls_write_[b.id]) {
+        // Same-destination bypass: same dest AND same class as the previous same-id
+        // push, not yet reordering. Ported from floo_rob.sv:427-428, with a class
+        // term FlooNoC has no counterpart for (two AXI ports there, one here --
+        // see the class comment on prev_cls_write_). A class change is treated like
+        // a dest change: falls into the needs_rob branch below, so the pair retires
+        // by ordering_tag in AW order regardless of which network (REQ vs DAT) the
+        // request travels on.
         needs_rob = false;
         fallen_back = false;
     } else {
@@ -341,6 +354,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         return false;  // downstream backpressure: no state mutation
     }
     prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
+    prev_cls_write_[b.id] = t.cls;
     fallen_back_write_[b.id] = fallen_back;
     if (needs_rob) {
         alloc_write_.set(base);  // a 1-slot range: base is its own top

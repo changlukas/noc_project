@@ -1524,6 +1524,15 @@ axi::ArBeat make_narrow_ar(uint8_t id, uint64_t addr) {
     b.burst = axi::Burst::INCR;
     return b;
 }
+axi::AwBeat make_narrow_aw(uint8_t id, uint64_t addr) {
+    axi::AwBeat b{};
+    b.id = id;
+    b.addr = addr;
+    b.len = 0;
+    b.size = 2;  // 4 B/beat -- legal narrow (<=3), matches make_narrow_ar
+    b.burst = axi::Burst::INCR;
+    return b;
+}
 
 TEST(RobCrossClassRead, NarrowThenDataSameDestFallsBackToRob) {
     SCENARIO(
@@ -1584,6 +1593,80 @@ TEST(RobCrossClassRead, SameClassSameDestStillBypasses) {
 
     ASSERT_TRUE(rob.push_ar(make_narrow_ar(id, kCrossClassNarrowAddr)));  // same dst, same class
     EXPECT_EQ(ar_cap.pop()->get_header_field("ordering_req"), 0u)
+        << "same dst, same class must still bypass -- the class term must not over-trigger";
+}
+
+// === Same-ID cross-class write ordering guard (final-review fix wave) ===
+//
+// Mirrors RobCrossClassRead above on the WRITE side. T6 splits the REQUEST
+// side by class regardless of AXI channel direction: NarrowAw rides REQ,
+// DataAw rides DAT. The same-destination bypass predicate keyed on dst_id
+// alone would let a same-ID config-then-memory (or memory-then-config) write
+// pair to the same node bypass, sending the two AWs out on two
+// independently-arbitrated networks with nothing enforcing AW order -- B
+// responses (which always ride RSP, unlike R) would then return out of AW
+// order, an AXI4 IHI 0022 §A5.3 violation. aw_cap is wired to both aw_out_
+// and dat_aw_out_ so it captures the AW header regardless of which network
+// steering sends it to, mirroring how ar_cap captures AR unconditionally
+// (AR never splits by class).
+TEST(RobCrossClassWrite, NarrowThenDataSameDestFallsBackToRob) {
+    SCENARIO(
+        "Rob Enabled: a config-space (Narrow) write followed by a same-id same-dest memory-space "
+        "(Data) write does NOT take the same-destination bypass -- the class change forces "
+        "ordering_req=1, closing the AXI4 A5.3 hole S3a T6 opens (NarrowAw stays on REQ, DataAw "
+        "moves to DAT)");
+    ChannelModel noc(16, 16);
+    ReqCapture aw_cap, w_cap;
+    Packetize pkt(aw_cap, w_cap, w_cap, aw_cap, w_cap, kSrcId, cross_class_sam());
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, cross_class_sam());
+
+    const uint8_t id = 5;
+    ASSERT_TRUE(rob.push_aw(make_narrow_aw(id, kCrossClassNarrowAddr)));  // idle-ID bypass
+    EXPECT_EQ(aw_cap.pop()->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_aw(make_aw(id, kCrossClassDataAddr)));  // same dst, class change
+    auto f = *aw_cap.pop();
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u)
+        << "same dst but Narrow->Data must fall back to the RoB path, not bypass";
+}
+
+TEST(RobCrossClassWrite, DataThenNarrowSameDestFallsBackToRob) {
+    SCENARIO(
+        "Rob Enabled: symmetric case -- memory-space (Data) write then config-space (Narrow) "
+        "write to the same dst also falls back to the RoB path");
+    ChannelModel noc(16, 16);
+    ReqCapture aw_cap, w_cap;
+    Packetize pkt(aw_cap, w_cap, w_cap, aw_cap, w_cap, kSrcId, cross_class_sam());
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, cross_class_sam());
+
+    const uint8_t id = 5;
+    ASSERT_TRUE(rob.push_aw(make_aw(id, kCrossClassDataAddr)));  // idle-ID bypass
+    EXPECT_EQ(aw_cap.pop()->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_aw(make_narrow_aw(id, kCrossClassNarrowAddr)));  // same dst, class change
+    auto f = *aw_cap.pop();
+    EXPECT_EQ(f.get_header_field("ordering_req"), 1u)
+        << "same dst but Data->Narrow must fall back to the RoB path, not bypass";
+}
+
+TEST(RobCrossClassWrite, SameClassSameDestStillBypasses) {
+    SCENARIO(
+        "Rob Enabled: no regression -- a same-id same-dest same-class (Narrow-Narrow) write "
+        "streak still takes the same-destination bypass");
+    ChannelModel noc(16, 16);
+    ReqCapture aw_cap, w_cap;
+    Packetize pkt(aw_cap, w_cap, w_cap, aw_cap, w_cap, kSrcId, cross_class_sam());
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, cross_class_sam());
+
+    const uint8_t id = 5;
+    ASSERT_TRUE(rob.push_aw(make_narrow_aw(id, kCrossClassNarrowAddr)));  // idle-ID bypass
+    EXPECT_EQ(aw_cap.pop()->get_header_field("ordering_req"), 0u);
+
+    ASSERT_TRUE(rob.push_aw(make_narrow_aw(id, kCrossClassNarrowAddr)));  // same dst, same class
+    EXPECT_EQ(aw_cap.pop()->get_header_field("ordering_req"), 0u)
         << "same dst, same class must still bypass -- the class term must not over-trigger";
 }
 
