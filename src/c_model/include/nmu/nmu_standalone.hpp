@@ -1,7 +1,7 @@
 #pragma once
 // NmuStandalone — hermetic wrapper for the Nmu component.
 //
-// Includes nmu.hpp (Nmu, NmuConfig, detail::make_vc_arbiter) plus the
+// Includes nmu.hpp (Nmu, NmuConfig) plus the
 // queue-backed terminal-endpoint scaffolding used by NmuWrap and tests.
 // Separated from nmu.hpp so the production core does not carry co-sim
 // harness weight.

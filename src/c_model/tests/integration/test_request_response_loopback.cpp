@@ -205,10 +205,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     nmu_cfg.sam = nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
     nmu_cfg.read_rob_mode = rob_mode;  // B RoB is always on; rob_mode now controls R only
     nmu_cfg.port_params = nmu_params;
-    // ReadWriteSplit: AW/W on write_vc=0, AR on read_vc=1 when num_vc>=2.
     nmu_cfg.num_vc = num_vc;
-    nmu_cfg.write_vc = 0;
-    nmu_cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
     // DAT face (S3a T6 steering: legacy_sam() below is data class, so AW/W
     // now ride this face for real). ChannelModel is a network-agnostic
     // testbench stub (keys purely off the flit's own dst_id/vc_id header
@@ -231,10 +228,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         nsu::NsuConfig nsu_cfg{};
         nsu_cfg.src_id = this_nsu_src;
         nsu_cfg.port_params = nsu_params;
-        // ReadWriteSplit: B on write_rsp_vc=0, R on read_rsp_vc=1 when num_vc>=2.
         nsu_cfg.num_vc = num_vc;
-        nsu_cfg.write_rsp_vc = 0;
-        nsu_cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
         // DAT face (S3a T6 steering): reuses the same per-NSU REQ/RSP
         // adapters as the DAT sink/source (see the NMU construction above
         // for rationale).

@@ -250,10 +250,7 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
 }
 
 // Note: the wrap-level "odd num_vc rejected" death test was removed in S3a
-// T5. REQ/RSP are fixed single-VC now (S1 Q2) -- NmuWrap::init no longer
-// threads a caller-supplied VC count into make_virtual_networks at all (it is
-// called with the literal 1). DAT's dat_num_vc has no even/odd split
-// (make_dat_vc_arbiter in nmu.hpp uses the same candidate list for both
-// classes), so no oddness constraint exists at this boundary anymore.
-// make_virtual_networks's own odd-rejection is still covered directly in
-// test_virtual_network.cpp.
+// T5. REQ/RSP are fixed single-VC now (S1 Q2), and the S3b VC collapse
+// retired the read/write virtual-network split that owned the even-num_vc
+// rule, so no oddness constraint exists at this boundary anymore: the
+// allocator's candidate set is every VC in [0, dat_num_vc).

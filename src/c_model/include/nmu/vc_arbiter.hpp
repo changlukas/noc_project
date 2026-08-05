@@ -1,22 +1,21 @@
 #pragma once
 // NMU virtual channel arbiter. Decorator pattern over NocReqOut: receives
 // packetized flits from nmu::Packetize, decides which VC each flit goes
-// into (per-axi_ch mapping), enqueues into a per-VC pending queue, and
-// drains to the wrapped downstream via tick() using credit-gated
-// round-robin.
+// into, enqueues into a per-VC pending queue, and drains to the wrapped
+// downstream via tick() using credit-gated round-robin.
 //
-// ReadWriteSplit (only mode): candidate set is derived per direction —
-//   AW → write_vcs_, AR → read_vcs_. Candidates are scanned round-robin
-//   from rr_start_; first VC with pending space AND downstream credit wins
-//   (else backpressure).
+// Candidate set is every VC in [0, num_vc): scanned round-robin from
+// rr_start_; first VC with pending space AND downstream credit wins (else
+// backpressure). Only the DAT face runs num_vc > 1; REQ/RSP are single-VC.
 //
-// Fixed VC id (same-destination bypass): an ordering_req=0 AW/AR flit whose (dst_id, id) matches
-// the id's previous same-channel flit reuses that VC instead of
-// round-robining -- deterministic VC allocation that fixes a same-(dst,id)
-// bypass streak to one VC so it cannot be reordered in-fabric. With no
-// fixed VC yet (new id, or dst changed) it falls back to round-robin and
-// records the new (dst, VC) for next time. ordering_req=1 flits are RoB-owned
-// and order-free, so they always round-robin, never fixed.
+// Fixed VC id (same-destination bypass): an ordering_req=0 AW flit whose (dst_id, awid) matches
+// the id's previous AW reuses that VC instead of round-robining --
+// deterministic VC allocation that fixes a same-(dst,id) bypass streak to one
+// VC so it cannot be reordered in-fabric. With no fixed VC yet (new id, or dst
+// changed) it falls back to round-robin and records the new (dst, VC) for next
+// time. ordering_req=1 flits are RoB-owned and order-free, so they always
+// round-robin, never fixed. AR never reaches a num_vc > 1 face (it rides REQ),
+// so it carries no streak state.
 //
 // W-follows-AW invariant: this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before
@@ -41,8 +40,6 @@
 #include <cstdlib>
 #include <deque>
 #include <optional>
-#include <utility>
-#include <vector>
 
 namespace ni::cmodel::nmu {
 
@@ -51,18 +48,10 @@ class VcArbiter : public router::NocReqOut {
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
-    static VcArbiter read_write_split(router::NocReqOut& downstream, std::size_t num_vc,
-                                      uint8_t write_vc, uint8_t read_vc,
-                                      std::size_t pending_depth = kDefaultPendingDepth) {
-        return VcArbiter(downstream, num_vc, std::vector<uint8_t>{write_vc},
-                         std::vector<uint8_t>{read_vc}, pending_depth);
-    }
-
-    static VcArbiter read_write_split(router::NocReqOut& downstream, std::size_t num_vc,
-                                      std::vector<uint8_t> write_vcs, std::vector<uint8_t> read_vcs,
-                                      std::size_t pending_depth = kDefaultPendingDepth) {
-        return VcArbiter(downstream, num_vc, std::move(write_vcs), std::move(read_vcs),
-                         pending_depth);
+    VcArbiter(router::NocReqOut& downstream, std::size_t num_vc,
+              std::size_t pending_depth = kDefaultPendingDepth)
+        : downstream_(downstream), num_vc_(num_vc), pending_depth_(pending_depth) {
+        assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
     }
 
     // NocReqOut decorator interface
@@ -77,18 +66,6 @@ class VcArbiter : public router::NocReqOut {
     bool has_current_aw() const noexcept { return current_aw_vc_.has_value(); }
 
   private:
-    VcArbiter(router::NocReqOut& downstream, std::size_t num_vc, std::vector<uint8_t> write_vcs,
-              std::vector<uint8_t> read_vcs, std::size_t pending_depth)
-        : downstream_(downstream),
-          num_vc_(num_vc),
-          write_vcs_(std::move(write_vcs)),
-          read_vcs_(std::move(read_vcs)),
-          pending_depth_(pending_depth) {
-        assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
-        for (uint8_t v : write_vcs_) assert(v < num_vc_);
-        for (uint8_t v : read_vcs_) assert(v < num_vc_);
-    }
-
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
                                                 uint8_t ordering_req, uint8_t id);
 
@@ -106,27 +83,18 @@ class VcArbiter : public router::NocReqOut {
         return axi_ch == ni::AXI_CH_NarrowW || axi_ch == ni::AXI_CH_DataW;
     }
 
-    const std::vector<uint8_t>* candidates_for(uint8_t axi_ch) const {
-        return is_aw(axi_ch) ? &write_vcs_ : &read_vcs_;
-    }
-
     router::NocReqOut& downstream_;
     std::size_t num_vc_;
-    std::vector<uint8_t> write_vcs_;
-    std::vector<uint8_t> read_vcs_;
     std::array<std::deque<Flit>, NUM_VC_MAX> pending_;
     std::size_t pending_depth_;
     uint8_t round_robin_ptr_ = 0;
-    uint8_t write_rr_start_ = 0;  // per-class round-robin scan start (selection)
-    uint8_t read_rr_start_ = 0;
+    uint8_t rr_start_ = 0;  // round-robin scan start (selection)
     std::optional<uint8_t> current_aw_vc_;
 
-    // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on a
-    // ordering_req=0 flit, per direction. nullopt dst = id never seen.
+    // Fixed VC id (same-destination bypass): last (dst_id, VC) a given AXI id took on an
+    // ordering_req=0 AW. nullopt dst = id never seen.
     std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_aw_dst_{};
     std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
-    std::array<std::optional<uint8_t>, axi::AXI_ID_SPACE> last_ar_dst_{};
-    std::array<uint8_t, axi::AXI_ID_SPACE> last_ar_vc_{};
 };
 
 inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
@@ -149,28 +117,24 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
 
     if (!is_aw(axi_ch) && !is_ar(axi_ch)) return std::nullopt;
 
-    // Fixed VC id (same-destination bypass): ordering_req=0 flit whose dst_id matches this id's
-    // last same-channel dst_id reuses that VC. No fallback to round-robin on
-    // block -- rerouting a fixed-VC streak mid-flight is exactly the reorder
-    // the fixed VC exists to prevent.
-    if (ordering_req == 0) {
-        std::optional<uint8_t>& last_dst = is_aw(axi_ch) ? last_aw_dst_[id] : last_ar_dst_[id];
-        uint8_t last_vc = is_aw(axi_ch) ? last_aw_vc_[id] : last_ar_vc_[id];
-        if (last_dst.has_value() && *last_dst == dst_id) {
-            if (pending_[last_vc].size() < pending_depth_ && downstream_.credit_avail(last_vc)) {
-                return last_vc;
-            }
-            return std::nullopt;
+    // Fixed VC id (same-destination bypass): ordering_req=0 AW whose dst_id matches this id's
+    // last AW dst_id reuses that VC. No fallback to round-robin on block --
+    // rerouting a fixed-VC streak mid-flight is exactly the reorder the fixed
+    // VC exists to prevent.
+    if (ordering_req == 0 && is_aw(axi_ch) && last_aw_dst_[id].has_value() &&
+        *last_aw_dst_[id] == dst_id) {
+        uint8_t last_vc = last_aw_vc_[id];
+        if (pending_[last_vc].size() < pending_depth_ && downstream_.credit_avail(last_vc)) {
+            return last_vc;
         }
+        return std::nullopt;
     }
 
-    const std::vector<uint8_t>* cand = candidates_for(axi_ch);
-    uint8_t& rr = is_aw(axi_ch) ? write_rr_start_ : read_rr_start_;
-    const std::size_t n = cand->size();
-    for (std::size_t k = 0; k < n; ++k) {  // round-robin from rr, first available
-        uint8_t vc = (*cand)[(rr + k) % n];
+    for (std::size_t k = 0; k < num_vc_; ++k) {  // round-robin from rr_start_, first available
+        uint8_t vc = static_cast<uint8_t>((rr_start_ + k) % num_vc_);
         if (pending_[vc].size() < pending_depth_ && downstream_.credit_avail(vc)) {
-            rr = static_cast<uint8_t>((static_cast<std::size_t>(rr) + k + 1) % n);
+            rr_start_ =
+                static_cast<uint8_t>((static_cast<std::size_t>(rr_start_) + k + 1) % num_vc_);
             return vc;
         }
     }
@@ -219,14 +183,9 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     // Fixed VC id (same-destination bypass): record (dst_id, VC) for this id only after all
     // accept conditions pass (mirrors current_aw_vc_'s atomicity above).
     // ordering_req=1 flits are RoB-owned/order-free -- do not record a fixed VC.
-    if (ordering_req == 0 && (is_aw(axi_ch) || is_ar(axi_ch))) {
-        if (is_aw(axi_ch)) {
-            last_aw_dst_[id] = dst_id;
-            last_aw_vc_[id] = vc_id;
-        } else {
-            last_ar_dst_[id] = dst_id;
-            last_ar_vc_[id] = vc_id;
-        }
+    if (ordering_req == 0 && is_aw(axi_ch)) {
+        last_aw_dst_[id] = dst_id;
+        last_aw_vc_[id] = vc_id;
     }
 
     Flit stamped = flit;

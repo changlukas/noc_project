@@ -1,6 +1,6 @@
 // Smoke test: Nmu class constructs cleanly + tick() doesn't crash.
-// Verifies ctor sequence (member init order, factory return-by-value via
-// detail::make_vc_arbiter, sub-module ref dependencies) in isolation. Does
+// Verifies ctor sequence (member init order, sub-module ref
+// dependencies) in isolation. Does
 // NOT exercise full e2e flow; that's integration testbench.
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"

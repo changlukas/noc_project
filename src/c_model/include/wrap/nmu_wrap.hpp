@@ -51,7 +51,6 @@
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — DAT sender credit seed
-#include "ni/virtual_network.hpp"
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
 #include "nmu/sam_yaml.hpp"
@@ -91,9 +90,6 @@ class NmuWrap {
         }
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;
-        const auto vnets = ni::cmodel::make_virtual_networks(1);
-        cfg.write_vcs = vnets.write_vcs;
-        cfg.read_vcs = vnets.read_vcs;
         cfg.dat_num_vc = dat_num_vc;
         // rob_mode / the tb's `_rob` suffix controls the R RoB only; B RoB is always on.
         cfg.read_rob_mode = rob_mode;

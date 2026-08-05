@@ -1,7 +1,5 @@
 #include "nmu/vc_arbiter.hpp"
 #include "nmu/packetize.hpp"
-#include "nmu/nmu.hpp"
-#include "ni/virtual_network.hpp"
 #include "ni/wormhole_arbiter.hpp"
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
@@ -53,52 +51,19 @@ uint8_t push_and_vc(VcArbiter& arb, ChannelModel& noc, const Flit& f) {
 
 class NmuVcArbParam : public ::testing::TestWithParam<std::size_t> {};
 
-// ReadWriteSplit: AW → write_vc=0, AR → read_vc=1.
-// Requires num_vc ≥ 2 (distinct write/read VCs).
-TEST_P(NmuVcArbParam, ReadWriteSplit_AW_AR_GoSeparateVcs) {
-    const std::size_t num_vc = GetParam();
-    if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2";
-
-    SCENARIO(
-        "NMU VcArbiter read/write VC split: AW -> write_vc=0, AR -> read_vc=1; "
-        "verify pending queues + downstream stamps");
-    ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc,
-                                           /*write_vc=*/0, /*read_vc=*/1);
-
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
-    EXPECT_EQ(arb.pending_size(0), 1u);  // AW landed on write_vc
-    EXPECT_EQ(arb.pending_size(1), 1u);  // AR landed on read_vc
-
-    arb.tick();
-    arb.tick();
-    auto f0 = noc.req_in().pop_flit();
-    ASSERT_TRUE(f0.has_value());
-    auto f1 = noc.req_in().pop_flit();
-    ASSERT_TRUE(f1.has_value());
-    // Round-robin starts at 0 -> VC=0 (AW) drains first, then VC=1 (AR).
-    EXPECT_EQ(f0->get_header_field("axi_ch"), ni::AXI_CH_NarrowAw);
-    EXPECT_EQ(f0->get_header_field("vc_id"), 0u);
-    EXPECT_EQ(f1->get_header_field("axi_ch"), ni::AXI_CH_NarrowAr);
-    EXPECT_EQ(f1->get_header_field("vc_id"), 1u);
-}
-
 // W follows AW invariant: all W beats of a burst route to the same VC as
 // their paired AW. With the WormholeArbiter upstream serializing AW + all W
 // beats before the next AW, a single outstanding AW at a time is
-// the supported pattern. Requires num_vc >= 2 so the AW vs W VC assignment
-// is observable (write_vc=0 for both in the read/write VC split; read_vc=1 for AR).
+// the supported pattern.
 TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
     const std::size_t num_vc = GetParam();
-    if (num_vc < 2) GTEST_SKIP() << "needs num_vc >= 2";
 
     SCENARIO(
-        "NMU VcArbiter NUM_VC=2: single outstanding AW + 3 W beats (last "
+        "NMU VcArbiter: single outstanding AW + 3 W beats (last "
         "with wlast=1) — all W beats route to AW's VC. After W with wlast, "
         "current_aw_vc_ resets, allowing next AW to be pushed.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
+    VcArbiter arb(noc.req_out(), num_vc);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
     EXPECT_TRUE(arb.has_current_aw());
 
@@ -107,7 +72,7 @@ TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)));
     EXPECT_FALSE(arb.has_current_aw());  // reset after wlast
 
-    // All 4 flits land on VC=0 (write_vc)
+    // All 4 flits land on the AW's VC (round-robin starts at 0).
     EXPECT_EQ(arb.pending_size(0), 4u);
     EXPECT_EQ(arb.pending_size(1), 0u);
 
@@ -123,17 +88,15 @@ TEST_P(NmuVcArbParam, WFollowsAW_InvariantEnforced) {
 }
 
 // current_aw_vc_ resets based on payload.W.wlast, NOT header.flit_tail.
-// Requires num_vc >= 2 (uses read_write_split with write_vc=0, read_vc=1).
 TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
     const std::size_t num_vc = GetParam();
-    if (num_vc < 2) GTEST_SKIP() << "needs NUM_VC >= 2 (uses write_vc=0, read_vc=1)";
 
     SCENARIO(
         "NMU VcArbiter: current_aw_vc_ resets based on payload.W.wlast, "
         "NOT header.flit_tail. Push AW + 3 W beats; only the 3rd has "
         "payload.wlast=1; verify current_aw_vc_ only resets on the 3rd.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 1);
+    VcArbiter arb(noc.req_out(), num_vc);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
     EXPECT_TRUE(arb.has_current_aw());
 
@@ -162,24 +125,23 @@ TEST_P(NmuVcArbParam, WlastFromPayloadNotHeader) {
 }
 
 // Credit gating: ChannelModel per_vc_depth=1 caps downstream credit.
-// Works at any NUM_VC (the per-VC independent credit logic is the same).
-// Uses a single VC (VC=0) via read_write_split to keep the scenario simple.
+// Works at any NUM_VC: one AW + its W beats all pin to the AW's VC (VC=0,
+// round-robin start), so every other VC is empty and cannot mask the stall.
 TEST_P(NmuVcArbParam, CreditGating_TickIdleWhenAllVcsBlocked) {
     const std::size_t num_vc = GetParam();
 
     SCENARIO(
-        "NMU VcArbiter: all flits -> VC=0; ChannelModel per_vc_depth=1 caps "
-        "downstream credit. Push 4 AR flits, tick drains 1. Subsequent "
+        "NMU VcArbiter: AW + 3 W beats all -> VC=0; ChannelModel per_vc_depth=1 "
+        "caps downstream credit. Tick drains 1. Subsequent "
         "tick is idle (downstream credit exhausted). Pop downstream -> "
         "credit returns -> next tick drains 1 more.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     noc.set_per_vc_depth(1);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 0,
-                                           /*pending_depth=*/8);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
+    VcArbiter arb(noc.req_out(), num_vc, /*pending_depth=*/8);
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/0)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/0)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)));
     EXPECT_EQ(arb.pending_size(0), 4u);
 
     // First tick: VC=0 has pending + downstream credit -> 1 flit out.
@@ -200,98 +162,73 @@ TEST_P(NmuVcArbParam, CreditGating_TickIdleWhenAllVcsBlocked) {
     EXPECT_EQ(arb.pending_size(0), 2u);
 }
 
-// Backpressure: VcArbiter pending_depth=2, single VC. After 2 pushes, pending
-// is full -> push_flit returns false; credit_avail(0) also returns false.
-// Works at any NUM_VC (tests VC=0 in isolation).
+// Backpressure: VcArbiter pending_depth=2. After 2 pushes the AW's VC is
+// full -> push_flit returns false; credit_avail also returns false.
+// Works at any NUM_VC (AW + W pin to one VC).
 TEST_P(NmuVcArbParam, BackpressureChain_VcArbToUpstream) {
     const std::size_t num_vc = GetParam();
 
     SCENARIO(
-        "NMU VcArbiter: VcArbiter pending_depth=2. After 2 pushes, "
+        "NMU VcArbiter: VcArbiter pending_depth=2. After AW + 1 W beat, "
         "VcArbiter's pending_[0] is full -> push_flit returns false; "
         "credit_avail(0) also returns false. Backpressure visible to "
         "upstream Packetize.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), num_vc, 0, 0,
-                                           /*pending_depth=*/2);
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
-    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
+    VcArbiter arb(noc.req_out(), num_vc, /*pending_depth=*/2);
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
+    ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/0)));
     EXPECT_EQ(arb.pending_size(0), 2u);
     EXPECT_FALSE(arb.credit_avail(0));
-    EXPECT_FALSE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
+    EXPECT_FALSE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/0)));
 }
 
-// Round-robin spread: with a read vnet {2,3} (num_vc=4), four DISTINCT unbound
-// arids must not all land on the lowest vnet VC. First-available would fix all
-// to VC=2; round-robin alternates 2,3,2,3.
-TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossVnet) {
-    SCENARIO("NMU VcArbiter vnets: distinct unbound arids round-robin over read vnet");
+// Round-robin spread: four DISTINCT unbound arids must not all land on VC 0.
+// First-available would fix all to VC=0; round-robin walks 0,1,2,3.
+TEST(NmuVcArbiterRoundRobin, DistinctReadIdsSpreadAcrossVcs) {
+    SCENARIO("NMU VcArbiter: distinct unbound arids round-robin over every VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
-                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
-                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
+    VcArbiter arb(noc.req_out(), /*num_vc=*/4);
     uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x10));
     uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x11));
     uint8_t vc_c = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x12));
     uint8_t vc_d = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x13));
-    EXPECT_EQ(vc_a, 2u);
-    EXPECT_EQ(vc_b, 3u);
+    EXPECT_EQ(vc_a, 0u);
+    EXPECT_EQ(vc_b, 1u);
     EXPECT_EQ(vc_c, 2u);
     EXPECT_EQ(vc_d, 3u);
 }
 
-// Fixed VC id (same-destination bypass): an ordering_req=0 flit whose (dst_id, id) matches the id's
-// previous same-channel flit reuses that VC instead of round-robining -- fixes
-// the bypass streak to one VC so it cannot be reordered in-fabric.
-TEST(NmuVcArbiterRoundRobin, SameReadIdSameDestFixedVcId) {
-    SCENARIO(
-        "NMU VcArbiter vnets: same arid + same dst_id (ordering_req=0) fixes the read vnet VC");
+// No fixed VC yet: same awid, different dst_id -- the streak broke, so
+// round-robin (spread) resumes.
+TEST(NmuVcArbiterRoundRobin, SameWriteIdDifferentDestRoundRobins) {
+    SCENARIO("NMU VcArbiter: same awid, different dst_id -- no fixed VC yet, round-robins");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
-                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
-                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
+    VcArbiter arb(noc.req_out(), /*num_vc=*/4);
     uint8_t a =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+    ASSERT_EQ(push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)), a);
     uint8_t b =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
-    EXPECT_EQ(a, 2u);
-    EXPECT_EQ(b, a) << "same (dst,id) with ordering_req=0 must fix to the same VC";
-}
-
-// No fixed VC yet: same id, different dst_id -- the streak broke, so
-// round-robin (spread) resumes, matching the pre-existing id-agnostic vnet
-// behavior.
-TEST(NmuVcArbiterRoundRobin, SameReadIdDifferentDestRoundRobins) {
-    SCENARIO("NMU VcArbiter vnets: same arid, different dst_id -- no fixed VC yet, round-robins");
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
-                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
-                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
-    uint8_t a =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
-    uint8_t b =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/1, 0, 0, /*id=*/0x20));
-    EXPECT_EQ(a, 2u);
-    EXPECT_EQ(b, 3u) << "different dst_id -- no fixed VC yet, round-robin advances";
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/1, 0, 0, /*id=*/0x20));
+    EXPECT_EQ(a, 0u);
+    EXPECT_EQ(b, 1u) << "different dst_id -- no fixed VC yet, round-robin advances";
 }
 
 // ordering_req=1 (RoB-owned) flits are order-free by construction -- the RoB
 // reorders them, so the fixed VC id logic is skipped and they always
 // round-robin, even with a matching (dst, id).
 TEST(NmuVcArbiterRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
-    SCENARIO("NMU VcArbiter vnets: ordering_req=1 flits round-robin even with same (dst,id)");
+    SCENARIO("NMU VcArbiter: ordering_req=1 flits round-robin even with same (dst,id)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
-                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
-                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
-    Flit f1 = make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    VcArbiter arb(noc.req_out(), /*num_vc=*/4);
+    Flit f1 = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20);
     f1.set_header_field("ordering_req", 1);
-    Flit f2 = make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    Flit f2 = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20);
     f2.set_header_field("ordering_req", 1);
     uint8_t a = push_and_vc(arb, noc, f1);
+    ASSERT_EQ(push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)), a);
     uint8_t b = push_and_vc(arb, noc, f2);
-    EXPECT_EQ(a, 2u);
-    EXPECT_EQ(b, 3u) << "ordering_req=1 -- always round-robin, never fixed";
+    EXPECT_EQ(a, 0u);
+    EXPECT_EQ(b, 1u) << "ordering_req=1 -- always round-robin, never fixed";
 }
 
 // NUM_VC==1 short-circuits before the fixed VC id check (select_vc_for_axi_ch's
@@ -299,7 +236,7 @@ TEST(NmuVcArbiterRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
 TEST(NmuVcArbiterRoundRobin, NumVc1SameIdSameDestUnaffected) {
     SCENARIO("NMU VcArbiter: NUM_VC=1, fixed VC id logic short-circuited, everything -> VC 0");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    VcArbiter arb(noc.req_out(), /*num_vc=*/1);
     uint8_t a =
         push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     uint8_t b =
@@ -310,17 +247,15 @@ TEST(NmuVcArbiterRoundRobin, NumVc1SameIdSameDestUnaffected) {
 
 // W follows its AW's VC even when that VC came from a fixed VC id reuse, not
 // a fresh round-robin pick -- the second AW's W beat must land on the reused
-// VC (0), not the vnet's next round-robin slot (1).
+// VC (0), not the next round-robin slot (1).
 TEST(NmuVcArbiter, WFollowsAW_ReusedFixedVc) {
     SCENARIO(
-        "NMU VcArbiter vnets: second same-(dst,awid) AW reuses its fixed VC; "
+        "NMU VcArbiter: second same-(dst,awid) AW reuses its fixed VC; "
         "W beat follows current_aw_vc_ (the reused VC), not round-robin");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/4,
-                                           /*write_vcs=*/std::vector<uint8_t>{0, 1},
-                                           /*read_vcs=*/std::vector<uint8_t>{2, 3});
+    VcArbiter arb(noc.req_out(), /*num_vc=*/4);
 
-    // AW1 (dst=0, id=0x20): first sighting -> round-robin picks write vnet VC 0.
+    // AW1 (dst=0, id=0x20): first sighting -> round-robin picks VC 0.
     uint8_t aw1_vc =
         push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20));
     EXPECT_EQ(aw1_vc, 0u);
@@ -352,11 +287,11 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NmuVcArbParam,
 
 TEST(NmuVcArbiter, Degenerate_NumVc1_AllModesPassthrough) {
     SCENARIO(
-        "NMU VcArbiter: NUM_VC=1, read_write_split routes every axi_ch -> VC=0; "
+        "NMU VcArbiter: NUM_VC=1 routes every axi_ch -> VC=0; "
         "behavior observationally identical to direct Packetize -> ChannelModel");
 
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    VcArbiter arb(noc.req_out(), /*num_vc=*/1);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAw)));
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)));
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
@@ -379,7 +314,7 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_SingleVcTests) {
         "NUM_VC=1 and verify Packetize-emitted AW + W flits arrive intact "
         "at NSU side.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    VcArbiter vc_arb(noc.req_out(), /*num_vc=*/1);
     ni::cmodel::router::WormholeArbiter<ni::cmodel::router::NocReqOut> wh_arb(
         vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::router::ChannelPairing>{{0, 1}});
     // 16x16 uniform, no rebase: dst = addr/4GB, matching the pre-SAM xy_route mapping.
@@ -423,7 +358,7 @@ TEST(NmuVcArbiter, WHeaderFlitTailMatchesWlast) {
         "(verifies the packetize header.flit_tail fix is preserved end-to-end through the "
         "decorator pipeline).");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto vc_arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/1, 0, 0);
+    VcArbiter vc_arb(noc.req_out(), /*num_vc=*/1);
     ni::cmodel::router::WormholeArbiter<ni::cmodel::router::NocReqOut> wh_arb(
         vc_arb, /*num_inputs=*/3, std::vector<ni::cmodel::router::ChannelPairing>{{0, 1}});
     // 16x16 uniform, no rebase: dst = addr/4GB, matching the pre-SAM xy_route mapping.
@@ -480,7 +415,7 @@ TEST(NmuVcArbDeath, WFollowsAW_WBeforeAW_DeathTest) {
         "W-follows-AW invariant; current_aw_vc_ has no value so VcArbiter must "
         "assert+abort instead of UB.");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    auto arb = VcArbiter::read_write_split(noc.req_out(), /*num_vc=*/2, 0, 1);
+    VcArbiter arb(noc.req_out(), /*num_vc=*/2);
     EXPECT_DEATH(
         {
             Flit w;
@@ -498,24 +433,7 @@ TEST(NmuVcArbDeath, ProtocolViolation_LyingDownstream_DeathTest) {
         "protocol guarantees credit_avail=true implies push_flit "
         "success on the next call).");
     LyingDownstream liar;
-    auto arb = VcArbiter::read_write_split(liar, /*num_vc=*/1, 0, 0);
+    VcArbiter arb(liar, /*num_vc=*/1);
     ASSERT_TRUE(arb.push_flit(make_flit(ni::AXI_CH_NarrowAr)));
     EXPECT_DEATH({ arb.tick(); }, ".*");
-}
-
-// Wiring: NmuConfig carrying vnets builds a vnet arbiter that spreads.
-TEST(NmuConfigVnets, ConfigVnetsBuildSpreadingArbiter) {
-    using ni::cmodel::nmu::NmuConfig;
-    using ni::cmodel::nmu::detail::make_vc_arbiter;  // factory lives in nmu::detail
-    SCENARIO("NmuConfig.write_vcs/read_vcs -> make_vc_arbiter -> vnet arbiter");
-    ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    NmuConfig cfg{};
-    cfg.num_vc = 4;
-    cfg.write_vcs = {0, 1};
-    cfg.read_vcs = {2, 3};
-    auto arb = make_vc_arbiter(cfg, noc.req_out());
-    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x30));
-    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x31));
-    EXPECT_EQ(vc_a, 2u);
-    EXPECT_EQ(vc_b, 3u);
 }

@@ -63,15 +63,6 @@ struct NsuConfig {
     uint8_t src_id = 0;
     nsu::PortParams port_params{};
     std::size_t num_vc = 1;
-    uint8_t write_rsp_vc = 0;  // B -> write_rsp_vc
-    uint8_t read_rsp_vc = 0;   // R -> read_rsp_vc
-    // ReadWriteSplit vnet variant (response side): non-empty -> per-class vnet.
-    // B: ordering_req=0 -> fixed VC id vnet[(dst_id ^ bid) % size]; ordering_req=1 ->
-    //    id-agnostic round-robin over write_rsp_vcs.
-    // R: fixed VC id vnet[(dst_id ^ rid) % size] for every beat; a burst's
-    //    beats share (dst_id, rid) so the whole burst lands on one VC.
-    std::vector<uint8_t> write_rsp_vcs{};
-    std::vector<uint8_t> read_rsp_vcs{};
     // DAT face VC count (S3a T4; R only -- no B rides DAT, per network map §1).
     std::size_t dat_num_vc = ni::NOC_DAT_NUM_VC;
     std::size_t wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
@@ -168,32 +159,6 @@ class Nsu {
     AxiMasterPort axi_master_port_;
 };
 
-namespace detail {
-
-inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downstream) {
-    if (!cfg.write_rsp_vcs.empty() && !cfg.read_rsp_vcs.empty()) {
-        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vcs,
-                                           cfg.read_rsp_vcs, cfg.vc_arbiter_pending_depth);
-    }
-    return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_rsp_vc, cfg.read_rsp_vc,
-                                       cfg.vc_arbiter_pending_depth);
-}
-
-// DAT face carries R only (no B rides DAT in S3a; see stage design §1),
-// so write_rsp_vcs/read_rsp_vcs are both "every DAT VC" -- read is the only
-// candidate list ever consulted (nsu::VcArbiter::select_vc_for_axi_ch's
-// fixed_vc=true path for is_r()); write_rsp_vcs just keeps the ctor's assert
-// satisfied and gives a defensive round-robin instead of an empty candidate
-// set if a misrouted B ever reached this arbiter.
-inline VcArbiter make_dat_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downstream) {
-    std::vector<uint8_t> vcs(cfg.dat_num_vc);
-    for (std::size_t i = 0; i < cfg.dat_num_vc; ++i) vcs[i] = static_cast<uint8_t>(i);
-    return VcArbiter::read_write_split(downstream, cfg.dat_num_vc, vcs, vcs,
-                                       cfg.vc_arbiter_pending_depth);
-}
-
-}  // namespace detail
-
 inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut& downstream_rsp,
                 router::NocReqIn& upstream_dat_req, router::NocRspOut& downstream_dat_rsp)
     : cfg_(std::move(cfg)),
@@ -201,10 +166,10 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
       downstream_rsp_(downstream_rsp),
       upstream_dat_req_(upstream_dat_req),
       downstream_dat_rsp_(downstream_dat_rsp),
-      vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_rsp_)),
+      vc_arbiter_(downstream_rsp_, cfg_.num_vc, cfg_.vc_arbiter_pending_depth),
       wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/2, std::vector<router::ChannelPairing>{},
                         cfg_.wormhole_per_input_depth),
-      dat_vc_arbiter_(detail::make_dat_vc_arbiter(cfg_, downstream_dat_rsp_)),
+      dat_vc_arbiter_(downstream_dat_rsp_, cfg_.dat_num_vc, cfg_.vc_arbiter_pending_depth),
       meta_buffer_(cfg_.port_params.meta_buffer_max_outstanding),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), dat_vc_arbiter_,
                  meta_buffer_, cfg_.src_id),

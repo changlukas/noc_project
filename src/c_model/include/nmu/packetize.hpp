@@ -19,7 +19,7 @@
 //                 AwHeaderMeta, computed from Rob's own SamTable member
 //                 (sam_.translate). For W beats, dst inherited from
 //                 the AW write-meta FIFO front.
-//   vc_id       — hardcoded 0 (NUM_VC=1)
+//   vc_id       — placeholder 0; the downstream VcArbiter stamps the real VC
 //   axi_ch      — implicit per push_* method
 //   flit_tail   — wormhole packet boundary marker (FlooNoC pattern):
 //                 AW=0 (start of AW+W wormhole packet);

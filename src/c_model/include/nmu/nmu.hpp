@@ -162,13 +162,6 @@ struct NmuConfig {
     std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
-    uint8_t write_vc = 0;
-    uint8_t read_vc = 0;
-    // ReadWriteSplit vnet variant: when non-empty, each class draws from a VC
-    // virtual network with round-robin selection instead of the single
-    // write_vc/read_vc.
-    std::vector<uint8_t> write_vcs{};
-    std::vector<uint8_t> read_vcs{};
     // DAT face VC count (S3a T4; AW/W only -- no AR rides DAT). REQ/RSP got
     // their own NOC_{REQ,RSP}_NUM_VC=1 params. Round-robins across [0, dat_num_vc).
     std::size_t dat_num_vc = ni::NOC_DAT_NUM_VC;
@@ -317,31 +310,6 @@ class Nmu {
     std::vector<router::PipelineStage<NmuRspREntry>> rsp_extra_r_shift_;
 };
 
-namespace detail {
-
-inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
-    if (!cfg.write_vcs.empty() && !cfg.read_vcs.empty()) {
-        return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vcs, cfg.read_vcs,
-                                           cfg.vc_arbiter_pending_depth);
-    }
-    return VcArbiter::read_write_split(downstream, cfg.num_vc, cfg.write_vc, cfg.read_vc,
-                                       cfg.vc_arbiter_pending_depth);
-}
-
-// DAT face carries AW/W only (no AR rides DAT in S3a; see stage design §5.2),
-// so write_vcs/read_vcs are both "every DAT VC" -- write is the only
-// candidate list ever consulted, read_vcs just keeps the ctor's assert (every
-// candidate < num_vc) satisfied and gives a defensive round-robin instead of
-// an empty candidate set if a misrouted AR ever reached this arbiter.
-inline VcArbiter make_dat_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
-    std::vector<uint8_t> vcs(cfg.dat_num_vc);
-    for (std::size_t i = 0; i < cfg.dat_num_vc; ++i) vcs[i] = static_cast<uint8_t>(i);
-    return VcArbiter::read_write_split(downstream, cfg.dat_num_vc, vcs, vcs,
-                                       cfg.vc_arbiter_pending_depth);
-}
-
-}  // namespace detail
-
 inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRspIn& downstream_rsp,
                 router::NocReqOut& downstream_dat_req, router::NocRspIn& downstream_dat_rsp)
     : cfg_(std::move(cfg)),
@@ -349,10 +317,10 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       downstream_rsp_(downstream_rsp),
       downstream_dat_req_(downstream_dat_req),
       downstream_dat_rsp_(downstream_dat_rsp),
-      vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_req_)),
+      vc_arbiter_(downstream_req_, cfg_.num_vc, cfg_.vc_arbiter_pending_depth),
       wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/3, std::vector<router::ChannelPairing>{{0, 1}},
                         cfg_.wormhole_per_input_depth),
-      dat_vc_arbiter_(detail::make_dat_vc_arbiter(cfg_, downstream_dat_req_)),
+      dat_vc_arbiter_(downstream_dat_req_, cfg_.dat_num_vc, cfg_.vc_arbiter_pending_depth),
       dat_wormhole_arbiter_(dat_vc_arbiter_, /*num_inputs=*/2,
                             std::vector<router::ChannelPairing>{{0, 1}},
                             cfg_.wormhole_per_input_depth),

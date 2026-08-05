@@ -1,7 +1,7 @@
 #pragma once
 // NsuStandalone — hermetic wrapper for the Nsu component.
 //
-// Includes nsu.hpp (Nsu, NsuConfig, detail::make_vc_arbiter) plus the
+// Includes nsu.hpp (Nsu, NsuConfig) plus the
 // queue-backed terminal-endpoint scaffolding used by NsuWrap and tests.
 // Separated from nsu.hpp so the production core does not carry co-sim
 // harness weight.

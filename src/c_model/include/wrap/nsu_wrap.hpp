@@ -47,7 +47,6 @@
 #include "wrap/nsu_wrap_io.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — DAT sender credit seed
 #include "flit.hpp"
-#include "ni/virtual_network.hpp"
 #include "nsu/nsu_standalone.hpp"
 #include <array>
 #include <memory>
@@ -72,9 +71,6 @@ class NsuWrap {
         cfg.src_id = src_id;
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;
-        const auto vnets = ni::cmodel::make_virtual_networks(1);
-        cfg.write_rsp_vcs = vnets.write_vcs;
-        cfg.read_rsp_vcs = vnets.read_vcs;
         cfg.dat_num_vc = dat_num_vc;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
