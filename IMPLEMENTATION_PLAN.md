@@ -49,24 +49,33 @@ floo_router's blanket NoLoopback, cited in simple_router.hpp).
 ## Stage 4: Collectives
 Goal: NMU 48 b address mask to 8 b node mask translate + reject; AxLOCK-with-collective and
 Ar-collective rejected at NMU packetize before any fanout or RoB allocation; router multicast
-fork with credit discipline; CollectB in-network merge with error BRESP precedence; RoB accepts
-one merged B; scoreboard keys writes by (dst_id, local_addr).
-Blocking decisions, resolve before coding:
-- [TBD] merged-B ordering_tag identity. The merge forwards one responder's flit, so the
-  surviving header can carry that responder's ordering_tag, not the initiator's; the NMU RoB
-  retires by tag, so an unconstrained merge can retire the wrong slot. Options: every replica
-  inherits the initiator's tag at fanout, or the NI rebuilds the merged header from stored meta.
-  Upstream RTL does not visibly resolve this either (surfaced 2026-07-21).
-- [TBD] SLVERR vs DECERR precedence in merged BRESP. Spec says error-first only; RTL prioritizes
-  SLVERR only; AXI4 B1.3.1 resolves the tie by first-arrival, which is arrival-dependent on a
-  mesh — define a deterministic order.
-- Write-ordering deadlock under overlapping destination sets (AXI4 A5.3.3, no W interleaving):
-  two multicasts sharing >=2 destinations can establish opposite AW orders at two members and
-  wedge (arXiv 2502.19215 §II-A Fig 2(e) for a crossbar; XY makes the inversion geometric).
-  Synchronous replication closes the cycle only with the 2603.26438 stream_fork discipline
-  (accept input only when all output ports ready). Confirm DataAw+W as one indivisible worm on
-  DAT never opens the AW-queued-without-W window; if it does, design the fork discipline
-  accordingly.
+fork with credit discipline; CollectB in-network merge with error BRESP precedence; collective
+traffic rides the RoB-bypass/interlock path only (NoRobReduction ruling below); scoreboard keys
+writes by (dst_id, local_addr).
+Blocking decisions RESOLVED against FlooNoC v0.8.4 RTL (2026-08-05, citations spot-verified;
+report cross-review/s4-tbd-floonoc-CODEX.md):
+- Merged-B ordering_tag: upstream stamps rob_idx at AW injection, the remote NI copies the
+  buffered AW's rob_idx onto its B (floo_nw_chimney.sv:1165-1167), so all replicas carry the
+  initiator's tag by construction and the merge just forwards one whole input flit
+  (floo_reduction_arbiter.sv:116-118); join qualifies on dst_id+collective_mask only
+  (floo_reduction_sync.sv:40-43). Port the same shape: NMU stamps ordering_tag pre-fanout,
+  NSU echoes it, merge selects a flit and never rebuilds a header. C++ adds an assert that
+  joined Bs agree on ordering_tag/axi_ch/bid (RTL only enforces the first two fields).
+- BRESP precedence: follow RTL exactly — default survivor = first-valid (lzc) input, then a
+  route-index-order scan where the first SLVERR wins (floo_reduction_arbiter.sv:116-131);
+  DECERR is NOT elevated (deliberate divergence from AXI worst-response, per the standing
+  copy-don't-invent principle; document in the spec).
+- Overlapping-multicast write-ordering deadlock: structurally closed upstream, port both
+  mechanisms — fork accepts per-output across cycles but releases the input only when ALL
+  expected outputs have handshaked (past_handshakes, floo_router.sv:358-394), and AW+W are one
+  indivisible worm (AW last=0, chimney selector locks on W until W.last,
+  floo_nw_chimney.sv:1294-1313), so no destination ever queues AW without its W. Residual
+  risks (slave backpressuring W after AW, RoB capacity) are outside the NoC, documented.
+- RoB x collectives (user ruling 2026-08-05, option a): follow upstream's NoRobReduction
+  restriction (floo_nw_chimney.sv:1834-1838 forces NoRoB when reduction is enabled) —
+  collective traffic rides the RoB-bypass/ordering-interlock path only; the RoB never
+  accepts a merged B; the NMU rejects collective+RoB combinations at packetize alongside the
+  AxLOCK/Ar-collective rejects.
 Success Criteria: multicast write matrix (row/col/submesh masks) green in co-sim; deliberate
 illegal-mask and lock-multicast stimulus rejected at NMU; single-B invariant checked by
 scoreboard.
