@@ -22,7 +22,15 @@
 //     (floo_output_arbiter.sv:69-81); LockIn=1'b1 is hardcoded inside
 //     (floo_wormhole_arbiter.sv:40), not an instantiation parameter — this is
 //     what keeps one input's worm contiguous at a shared output while other
-//     inputs wait.
+//     inputs wait. The WINNER itself is decided by a snapshot/freeze
+//     (floo_wormhole_arbiter.sv:61-77, valid_d/valid_q/last_q): the
+//     contending-input set is captured the instant any input asserts valid
+//     while the output is idle, independent of downstream ready (ready_o is
+//     derived from that frozen selection, not the other way around). An
+//     input that turns valid after the freeze is excluded from this
+//     arbitration round even if the frozen winner has not yet been granted —
+//     backpressure must not let a later-arriving input become a candidate,
+//     let alone win.
 //
 // Ready/valid flow control (floo_router.sv:473-475: "At the end point, we
 // cannot make valid dependent on ready ... there must be cuts at the input of
@@ -87,6 +95,10 @@ struct SimpleRouterConfig {
     // observing it — and is out of reach without co-sim (this task's tier is
     // Windows ctest only). Calibration item: T5 (wrap) or T7 (tail),
     // whichever lands the two-node co-sim harness first.
+    //
+    // Must be >= 1 (construction asserts this): RTL's own FIFO ready is a
+    // slack=1 baseline, so 0 — zero round-trip margin — is unconditionally
+    // wrong, not a legitimate degenerate calibration point.
     std::size_t ready_slack = 2;
 };
 
@@ -128,6 +140,12 @@ class SimpleRouter {
     explicit SimpleRouter(const SimpleRouterConfig& cfg) : cfg_(cfg) {
         if (cfg_.num_vc != 1) {
             assert(false && "SimpleRouter: num_vc must be 1 (no VC arbiter translated)");
+            std::abort();
+        }
+        if (cfg_.ready_slack < 1) {
+            assert(false &&
+                   "SimpleRouter: ready_slack must be >= 1 (0 is unconditionally wrong, "
+                   "not a calibration point — RTL's own FIFO ready baseline is slack=1)");
             std::abort();
         }
         if (cfg_.input_fifo_depth < cfg_.ready_slack + 1) {
@@ -215,8 +233,12 @@ class SimpleRouter {
     }
 
     struct WormholeState {
-        std::optional<std::size_t> locked_input;  // per-output ownership (single VC: no locked_vc)
-        std::size_t rr = 0;                       // input round-robin (unlocked scan)
+        // Frozen winner for this output (single VC: no locked_vc). Set at
+        // the freeze (floo_wormhole_arbiter.sv:61-77), before any grant may
+        // have happened; stays set across the whole worm once granting
+        // starts; cleared only when the worm's tail flit is granted.
+        std::optional<std::size_t> locked_input;
+        std::size_t rr = 0;  // input round-robin (unlocked scan)
     };
 
     SimpleRouterConfig cfg_;
@@ -262,6 +284,38 @@ inline void SimpleRouter::tick() {
     // Stage 2: per-output grant. One wormhole packet per output (single VC:
     // no per-output VC arbitration, floo_vc_arbiter is not translated).
     for (std::size_t out = 0; out < ROUTER_PORT_COUNT; ++out) {
+        auto& ws = wormhole_[out];
+
+        // Winner snapshot/freeze (floo_wormhole_arbiter.sv:61-77
+        // valid_d/valid_q/last_q): determined the instant any input becomes
+        // a valid, non-tied-off candidate, INDEPENDENT of downstream
+        // readiness — ready_o is derived from the frozen winner, not the
+        // other way around (:61-65 gate ready_o on valid_selected_idx, which
+        // is already fixed by then). Runs every tick regardless of
+        // downstream ready so a later-arriving input can never join or steal
+        // an arbitration round that is already in progress.
+        if (!ws.locked_input.has_value()) {
+            for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
+                const std::size_t in = (ws.rr + j) % ROUTER_PORT_COUNT;
+                if (tie_off(static_cast<RouterPort>(in), static_cast<RouterPort>(out))) continue;
+                if (input_fifo_[in][0].empty()) continue;
+                const auto route = head_route(in, 0);
+                if (route.has_value() && static_cast<std::size_t>(*route) == out) {
+                    ws.locked_input = in;
+                    break;
+                }
+            }
+        }
+        if (!ws.locked_input.has_value()) continue;  // nothing valid for this output yet
+
+        // Idle (no steal) while the frozen winner's FIFO is empty —
+        // floo_wormhole_arbiter holds valid_q until last_q, it does not let
+        // another requester in even though nothing has been granted yet.
+        const std::size_t in = *ws.locked_input;
+        if (input_fifo_[in][0].empty()) continue;
+
+        // Downstream/output-fifo readiness gates only the GRANT itself, not
+        // who won — the winner was already frozen above.
         const bool direct = (cfg_.output_fifo_depth == 0);
         if (direct) {
             if (!downstream_[out] || !downstream_[out]->ready(0)) continue;
@@ -269,37 +323,11 @@ inline void SimpleRouter::tick() {
             if (output_fifo_[out].size() >= cfg_.output_fifo_depth) continue;
         }
 
-        auto& ws = wormhole_[out];
-        std::optional<std::size_t> candidate;
-        if (ws.locked_input.has_value()) {
-            // Locked: serve only the in-flight input until its tail flit. Its
-            // route is not re-examined — route_lock_ already pins it to
-            // `out` (set at the same grant that set ws.locked_input) — so
-            // this is the direct translate of floo_route_select's registered
-            // bypass, not a recompute-and-compare. Idle (no steal) while its
-            // FIFO is empty — floo_wormhole_arbiter holds valid_q until
-            // last_q, it does not let another requester in.
-            const std::size_t in = *ws.locked_input;
-            if (!input_fifo_[in][0].empty()) candidate = in;
-        } else {
-            // Unlocked: round-robin arbitration among currently valid,
-            // non-tied-off inputs (floo_wormhole_arbiter.sv rr_arb_tree,
-            // LockIn=1'b1 hardcoded per floo_wormhole_arbiter.sv:40).
-            for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
-                const std::size_t in = (ws.rr + j) % ROUTER_PORT_COUNT;
-                if (tie_off(static_cast<RouterPort>(in), static_cast<RouterPort>(out))) continue;
-                if (input_fifo_[in][0].empty()) continue;
-                const auto route = head_route(in, 0);
-                if (route.has_value() && static_cast<std::size_t>(*route) == out) {
-                    candidate = in;
-                    break;
-                }
-            }
-        }
-        if (!candidate.has_value()) continue;
-
-        // Grant: single atomic event.
-        auto& q = input_fifo_[*candidate][0];
+        // Grant: single atomic event. Its route is not re-examined —
+        // route_lock_ already pins it to `out` once locked (set at the same
+        // grant that set ws.locked_input) — so this is the direct translate
+        // of floo_route_select's registered bypass, not a recompute-and-compare.
+        auto& q = input_fifo_[in][0];
         const Flit flit = q.front();
         q.pop_front();
         if (direct) {
@@ -309,12 +337,13 @@ inline void SimpleRouter::tick() {
         }
         const uint64_t flit_tail = flit.get_header_field("flit_tail");
         if (flit_tail == 0) {
-            route_lock_[*candidate][0] = static_cast<RouterPort>(out);
-            ws.locked_input = *candidate;
+            route_lock_[in][0] = static_cast<RouterPort>(out);
+            // ws.locked_input == in already (frozen above or from a prior
+            // grant this same worm) — stays locked across the worm.
         } else {
-            route_lock_[*candidate][0].reset();
+            route_lock_[in][0].reset();
             ws.locked_input.reset();
-            ws.rr = (*candidate + 1) % ROUTER_PORT_COUNT;
+            ws.rr = (in + 1) % ROUTER_PORT_COUNT;
         }
     }
 

@@ -29,7 +29,8 @@ uint8_t make_dst(uint8_t x, uint8_t y) {
 
 struct FlitSink : SimpleRouterLink {
     std::vector<Flit> received;
-    bool ready(uint8_t /*vc*/) const override { return true; }
+    bool always_ready = true;
+    bool ready(uint8_t /*vc*/) const override { return always_ready; }
     void push_flit(const Flit& f) override { received.push_back(f); }
 };
 
@@ -72,11 +73,15 @@ TEST(SimpleRouterTieOff, LoopbackAndXYIllegalTurnsSkipped) {
 TEST(SimpleRouterConstructionDeath, BadParametersAbort) {
     SCENARIO(
         "SimpleRouter: construction asserts — num_vc must be 1 (no VC arbiter translated), "
+        "ready_slack >= 1 (0 is unconditionally wrong, not a calibration point), "
         "input_fifo_depth >= ready_slack + 1, own coordinate inside the mesh");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     SimpleRouterConfig bad_vc = center_cfg();
     bad_vc.num_vc = 2;
     EXPECT_DEATH(SimpleRouter r(bad_vc), "num_vc");
+    SimpleRouterConfig zero_slack = center_cfg();
+    zero_slack.ready_slack = 0;
+    EXPECT_DEATH(SimpleRouter r(zero_slack), "ready_slack");
     SimpleRouterConfig bad_slack = center_cfg();
     bad_slack.input_fifo_depth = 2;
     bad_slack.ready_slack = 2;  // needs depth >= slack + 1 == 3
@@ -101,17 +106,24 @@ TEST(SimpleRouterDatapathDeath, OverflowIgnoringReadyAborts) {
         "-> assert+abort loud, not silent (guard carried over from router::Router)");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     SimpleRouterConfig cfg = center_cfg();
-    cfg.input_fifo_depth = 1;
-    cfg.ready_slack = 0;  // degenerate: no early-warning margin, by construction
+    cfg.input_fifo_depth = 2;
+    cfg.ready_slack = 1;  // legal minimum (ctor asserts ready_slack >= 1)
     SimpleRouter r(cfg);
     const auto W = static_cast<std::size_t>(RouterPort::WEST);
-    // No downstream attached: nothing ever drains the FIFO.
+    // No downstream attached: nothing ever drains the FIFO. Fill to depth
+    // while ready() correctly says so (compliant, never overflows on its
+    // own), then push one more UNCONDITIONALLY, ignoring ready()'s now-false
+    // value — that ignoring is this test's actual scenario.
     r.input(W).push_flit(make_flit(make_dst(3, 1), 0, 1));
-    r.tick();  // admits: size 0 -> 1 (== depth)
+    r.tick();  // size 0 -> 1
+    ASSERT_TRUE(r.ready(W, 0));
+    r.input(W).push_flit(make_flit(make_dst(3, 1), 0, 1));
+    r.tick();  // size 1 -> 2 (== depth)
+    ASSERT_FALSE(r.ready(W, 0));
     EXPECT_DEATH(
         {
-            r.input(W).push_flit(make_flit(make_dst(3, 1), 0, 1));
-            r.tick();  // size 1 -> would-be 2 > depth 1
+            r.input(W).push_flit(make_flit(make_dst(3, 1), 0, 1));  // ignores ready() == false
+            r.tick();  // size 2 -> would-be 3 > depth 2
         },
         "overflow");
 }
@@ -357,6 +369,42 @@ TEST(SimpleRouterWormhole, RrAdvancesPerPacket) {
         const uint8_t cur = static_cast<uint8_t>(east.received[i].get_header_field("src_id"));
         EXPECT_NE(cur, prev) << "RR did not alternate at grant " << i;
     }
+}
+
+TEST(SimpleRouterWormhole, WinnerFrozenBeforeReadyExcludesLaterArrival) {
+    SCENARIO(
+        "SimpleRouter per-output arbitration winner is frozen the instant a candidate goes "
+        "valid, independent of downstream ready (floo_wormhole_arbiter.sv:61-77 "
+        "valid_d/valid_q/last_q) -- an input that goes valid AFTER the freeze must not join, let "
+        "alone win, that arbitration round even though backpressure has delayed the grant");
+    SimpleRouter r(center_cfg());
+    FlitSink east;
+    east.always_ready = false;  // hold backpressure while both candidates arrive
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto W = static_cast<std::size_t>(RouterPort::WEST);
+    const auto L = static_cast<std::size_t>(RouterPort::LOCAL);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // routes EAST from center; WEST and LOCAL both legal
+
+    // A (WEST) goes valid first, alone.
+    r.input(W).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x10));
+    r.tick();  // admits WEST into its input FIFO; still backpressured
+    r.tick();  // candidate scan runs (unconditionally): only WEST valid -> freezes on WEST
+
+    // B (LOCAL) goes valid only now, after the freeze. A live re-scan once
+    // ready arrives would start at rr=0=LOCAL and pick B over A -- exactly
+    // the divergence under review.
+    r.input(L).push_flit(make_tagged_flit(dst, 0, /*flit_tail=*/1, 0x20));
+    r.tick();  // still backpressured; LOCAL admitted but excluded from this round
+
+    // Backpressure clears; the already-frozen winner (WEST) is what gets granted.
+    east.always_ready = true;
+    r.tick();
+
+    ASSERT_EQ(east.received.size(), 1u);
+    EXPECT_EQ(static_cast<uint8_t>(east.received[0].get_header_field("src_id")), 0x10)
+        << "winner must come from the frozen set (WEST, first to go valid), not a live re-scan "
+           "once ready arrived (which would find LOCAL first at rr=0)";
 }
 
 }  // namespace
