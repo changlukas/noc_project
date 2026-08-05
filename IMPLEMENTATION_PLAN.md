@@ -49,10 +49,12 @@ Port constraint (user ruling 2026-08-05, post-S2 bug retrospective): the REQ/RSP
 router is a line-by-line translate of mainline `floo_router.sv`; network/channel mapping is a
 translate of `floo_pkg::nw_chan_mapping`. No self-designed arbitration or routing logic in
 S3a — where the RTL and our structure diverge, flag BLOCKED, do not improvise.
-VIP swap (same retrospective — the S2 bug cluster lived in the self-written AXI VIP): bounded
-spike replacing co-sim stimulus with vendored pulp axi_test (sim/dv/axi-0.39.7) on Verilator
-5.048; if the spike passes, retire the self-written co-sim stimulus paths, AxiMasterT narrows
-to ctest unit scope. Spike fails -> document why, stay put.
+VIP correction (2026-08-05, supersedes the spike idea): co-sim stimulus is ALREADY upstream
+pulp VIP (`axi_file_master` is in upstream axi v0.39.7 axi_test.sv, vendored unmodified) — no
+swap needed. The S2 bug cluster lived in the C++ ctest-side VIP (cocotbext-axi hand-port,
+drift risk). Sentinel instead of swap: dual-VIP consistency — C++ and SV VIP driving the same
+scenario must agree; divergence = port drift. Acceptance tiers live in docs/backlog.md
+standing Verification section.
 Carry-in from S2 reviews: delete specgen's dead "derived" width_param branches
 (constants.py:227-244, :276-310) while touching per-network widths; check_strb_valid_bits is
 vacuous at 64 lanes (kFullStrbMask == ~0ull) — delete the check+call site or mark explicitly.
