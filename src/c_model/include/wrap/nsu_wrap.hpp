@@ -80,7 +80,7 @@ class NsuWrap {
         cfg.port_params.meta_buffer_max_outstanding = max_outstanding;
         cfg.port_params.meta_buffer_max_unique_ids = max_unique_ids;
         cfg.wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
-        cfg.vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
+        cfg.vc_allocator_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
         // RSP egress: ready/valid, no credit (spec §4.3) — set_inputs feeds
         // the live ready flag from tx_rsp_ready every tick.
@@ -122,7 +122,7 @@ class NsuWrap {
         }
 
         // RSP egress ready — live signal from the router, sampled BEFORE
-        // tick() so this cycle's VcArbiter drain sees it (credit_avail
+        // tick() so this cycle's VcAllocator drain sees it (credit_avail
         // self-gates). DAT egress credit — same pre-tick replenish pattern
         // as before, now via the dat_* accessor.
         nsu_->rsp_set_ready(in_.tx_rsp_ready);
@@ -131,7 +131,7 @@ class NsuWrap {
         }
 
         // Step 2: advance Nsu one cycle (Depacketize + AxiMasterPort +
-        // WormholeArbiter + VcArbiter, in upstream-first order per nsu.hpp).
+        // WormholeArbiter + VcAllocator, in upstream-first order per nsu.hpp).
         nsu_->tick();
 
         // Step 3: build NsuOutputs.

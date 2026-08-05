@@ -55,9 +55,9 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
 //
 // Pinpoints: member-declaration order (MetaBuffer must be live before
 // Depacketize and Packetize), tick-order (depacketize before
-// axi_master_port, then wormhole, then vc_arbiter), shared MetaBuffer
+// axi_master_port, then wormhole, then vc_allocator), shared MetaBuffer
 // allocate-on-AW + lookup-on-B path, and Packetize -> WormholeArbiter
-// -> VcArbiter -> NocRspOut wiring. Uses NsuStandalone so the test
+// -> VcAllocator -> NocRspOut wiring. Uses NsuStandalone so the test
 // does not depend on ChannelModel / NMU side.
 TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     SCENARIO(
@@ -130,7 +130,7 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     EXPECT_TRUE(w_out->last);
 
     // Push the B response into the downstream-facing AXI port. The
-    // response path runs Packetize.push_b -> wormhole_arbiter -> vc_arbiter
+    // response path runs Packetize.push_b -> wormhole_arbiter -> vc_allocator
     // -> QueueNocRspOut; Packetize reads dst_id from the MetaBuffer
     // entry saved at AW ingress.
     axi::BBeat b{};

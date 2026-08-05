@@ -20,13 +20,13 @@ DEFAULT_OUT  = SPECGEN_ROOT.parent / "src" / "c_model" / "FEATURE_INVENTORY.md"
 
 
 # Implemented filenames that differ from the ID-derived short name.
-# Project naming convention is full words (vc_arbiter, not vc_arb); the
+# Project naming convention is full words (vc_allocator, not vc_arb); the
 # VC mapping policy is implemented inside the arbiter header (enum
 # VcMode), not a standalone file.
 _HEADER_OVERRIDES = {
-    "FEAT-NMU-VC_ARB":     "src/c_model/include/nmu/vc_arbiter.hpp",
-    "FEAT-NSU-VC_ARB":     "src/c_model/include/nsu/vc_arbiter.hpp",
-    "FEAT-NMU-VC_MAPPING": "src/c_model/include/nmu/vc_arbiter.hpp (VcMode)",
+    "FEAT-NMU-VC_ARB":     "src/c_model/include/nmu/vc_allocator.hpp",
+    "FEAT-NSU-VC_ARB":     "src/c_model/include/nsu/vc_allocator.hpp",
+    "FEAT-NMU-VC_MAPPING": "src/c_model/include/nmu/vc_allocator.hpp (VcMode)",
     "FEAT-ROUTER-ROUTE_COMPUTATION":    "src/c_model/include/router/router.hpp (route_compute)",
     "FEAT-ROUTER-WORMHOLE_ARBITRATION": "src/c_model/include/router/router.hpp",
     "FEAT-ROUTER-VC_ARBITRATION":       "src/c_model/include/router/router.hpp",

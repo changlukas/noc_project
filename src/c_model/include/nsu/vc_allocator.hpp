@@ -1,5 +1,5 @@
 #pragma once
-// NSU virtual channel arbiter. Mirror of nmu::VcArbiter but for response
+// NSU virtual channel arbiter. Mirror of nmu::VcAllocator but for response
 // side (B + R flits leaving NSU toward NMU). No W-follows-AW logic
 // because NSU produces single-flit B (`floo_axi_chimney.sv:608-616`)
 // and multi-flit R uses ROB not wormhole (`floo_axi_chimney.sv:624-633`).
@@ -28,13 +28,13 @@
 
 namespace ni::cmodel::nsu {
 
-class VcArbiter : public router::NocRspOut {
+class VcAllocator : public router::NocRspOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
-    VcArbiter(router::NocRspOut& downstream, std::size_t num_vc,
-              std::size_t pending_depth = kDefaultPendingDepth)
+    VcAllocator(router::NocRspOut& downstream, std::size_t num_vc,
+                std::size_t pending_depth = kDefaultPendingDepth)
         : downstream_(downstream), num_vc_(num_vc), pending_depth_(pending_depth) {
         assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
     }
@@ -52,7 +52,7 @@ class VcArbiter : public router::NocRspOut {
   private:
     std::optional<uint8_t> select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id, uint8_t id);
 
-    // Channel-kind classification is class-independent (see nmu::VcArbiter's
+    // Channel-kind classification is class-independent (see nmu::VcAllocator's
     // is_aw/is_ar/is_w comment): both narrow and data class B/R route through
     // this same VC-selection logic.
     static bool is_b(uint8_t axi_ch) {
@@ -70,8 +70,8 @@ class VcArbiter : public router::NocRspOut {
     uint8_t rr_start_ = 0;  // round-robin scan start (selection)
 };
 
-inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
-                                                              uint8_t id) {
+inline std::optional<uint8_t> VcAllocator::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
+                                                                uint8_t id) {
     if (num_vc_ == 1) return uint8_t{0};
 
     if (is_r(axi_ch)) {
@@ -95,7 +95,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
     return std::nullopt;
 }
 
-inline bool VcArbiter::push_flit(const Flit& flit) {
+inline bool VcAllocator::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
     uint8_t dst_id = 0, id = 0;
     if (num_vc_ > 1 && (is_b(axi_ch) || is_r(axi_ch))) {
@@ -119,17 +119,17 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     return true;
 }
 
-inline bool VcArbiter::credit_avail(uint8_t vc_id) const {
+inline bool VcAllocator::credit_avail(uint8_t vc_id) const {
     return pending_[vc_id].size() < pending_depth_;
 }
 
-inline void VcArbiter::tick() {
+inline void VcAllocator::tick() {
     for (std::size_t k = 0; k < num_vc_; ++k) {
         uint8_t vc = static_cast<uint8_t>((round_robin_ptr_ + k) % num_vc_);
         if (!pending_[vc].empty() && downstream_.credit_avail(vc)) {
             bool ok = downstream_.push_flit(pending_[vc].front());
             assert(ok &&
-                   "nsu::VcArbiter::tick: downstream returned credit_avail=true "
+                   "nsu::VcAllocator::tick: downstream returned credit_avail=true "
                    "but push_flit refused -- protocol violation, downstream "
                    "must not lie about credit availability");
             if (!ok) std::abort();  // belt-and-braces for NDEBUG

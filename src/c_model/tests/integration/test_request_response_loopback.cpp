@@ -195,7 +195,7 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     test::ChannelModel& channel = *channel_ptr;
 
     // NMU top-level: encapsulates AxiSlavePort, Rob, Packetize,
-    // WormholeArbiter, VcArbiter, and Depacketize into one object.
+    // WormholeArbiter, VcAllocator, and Depacketize into one object.
     nmu::NmuConfig nmu_cfg{};
     nmu_cfg.src_id = kNmuSrcId;
     // 16x16 uniform, 4 GB/tile, no rebase: reproduces the retired

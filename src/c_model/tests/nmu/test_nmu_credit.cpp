@@ -7,7 +7,7 @@
 // Three load-bearing properties:
 //   (a) Backpressure: with a small seed and no receive_credit, after `seed`
 //       AW+W pairs drain the sink reports credit_avail=false and the DAT
-//       egress dries up (WormholeArbiter/VcArbiter self-gate — no unbounded
+//       egress dries up (WormholeArbiter/VcAllocator self-gate — no unbounded
 //       growth). This is the conservation guarantee this credit mechanism
 //       buys over the old always-grant stub.
 //   (b) Re-open: receive_credit pulses re-open the sink one flit per pulse.

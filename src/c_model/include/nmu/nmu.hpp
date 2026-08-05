@@ -5,7 +5,7 @@
 //
 // Pipeline (req path, REQ network -- NarrowAw/NarrowW/NarrowAr/DataAr):
 //   external AXI master ──> AxiSlavePort ──> Rob ──> Packetize{aw,w,ar}
-//     ──> WormholeArbiter<NocReqOut>(3 in, pairing {{0,1}}) ──> VcArbiter
+//     ──> WormholeArbiter<NocReqOut>(3 in, pairing {{0,1}}) ──> VcAllocator
 //     ──> external NocReqOut (ChannelModel or DPI bridge)
 //
 // DAT egress face (S3a T4 arbiter pair + T6 steering -- DataAw/DataW; per-
@@ -14,7 +14,7 @@
 // AW/W here (spec :348); ctest may still push directly into
 // dat_wormhole_arbiter().input(0/1) to exercise the arbiter in isolation):
 //   Packetize{aw,w} (Data class) ──> WormholeArbiter<NocReqOut>(2 in, pairing
-//     {{0,1}}) ──> VcArbiter(dat_num_vc) ──> external NocReqOut (DPI bridge)
+//     {{0,1}}) ──> VcAllocator(dat_num_vc) ──> external NocReqOut (DPI bridge)
 //
 // Pipeline (rsp path, RSP network -- NarrowB/NarrowR/DataB):
 //   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort
@@ -26,8 +26,8 @@
 //   external NocRspIn ──> Depacketize (second ingress) ──> Rob ──> AxiSlavePort
 //
 // Per-cycle tick order (exact sequence in Nmu::tick()):
-//   req: wormhole_arbiter_.tick(); vc_arbiter_.tick();
-//        dat_wormhole_arbiter_.tick(); dat_vc_arbiter_.tick();
+//   req: wormhole_arbiter_.tick(); vc_allocator_.tick();
+//        dat_wormhole_arbiter_.tick(); dat_vc_allocator_.tick();
 //        req_s1_bridge_.tick(packetize_); axi_slave_port_.tick_req();
 //   rsp: drain_rsp_b_output_(); drain_rsp_r_output_();
 //        advance_rsp_b_shift_(); advance_rsp_r_shift_();
@@ -52,7 +52,7 @@
 #include "nmu/depacketize.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/rob.hpp"
-#include "nmu/vc_arbiter.hpp"
+#include "nmu/vc_allocator.hpp"
 #include "nmu/staged_beats.hpp"
 #include "ni_params.h"
 #include "router/req_out.hpp"
@@ -166,7 +166,7 @@ struct NmuConfig {
     // their own NOC_{REQ,RSP}_NUM_VC=1 params. Round-robins across [0, dat_num_vc).
     std::size_t dat_num_vc = ni::NOC_DAT_NUM_VC;
     std::size_t wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
-    std::size_t vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
+    std::size_t vc_allocator_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
     std::size_t ni_rsp_extra_depth = 0;  // extra shift stages on the response path
 };
 
@@ -192,7 +192,7 @@ class Nmu {
 
     // Test introspection (optional getters; add only as test code needs)
     const Rob& rob() const noexcept { return rob_; }
-    const VcArbiter& vc_arbiter() const noexcept { return vc_arbiter_; }
+    const VcAllocator& vc_allocator() const noexcept { return vc_allocator_; }
 
     // DAT egress face (S3a T4 + T6 steering). Non-const: Packetize feeds this
     // (Data-class AW/W, wired via dat_wormhole_arbiter_.input(0/1) in the
@@ -202,13 +202,13 @@ class Nmu {
     router::WormholeArbiter<router::NocReqOut>& dat_wormhole_arbiter() noexcept {
         return dat_wormhole_arbiter_;
     }
-    const VcArbiter& dat_vc_arbiter() const noexcept { return dat_vc_arbiter_; }
+    const VcAllocator& dat_vc_allocator() const noexcept { return dat_vc_allocator_; }
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
         if (path == NiPath::NmuReq) {
             // NmuReq: 3 stages
             //   S0 = NmuReqS1Bridge (AxiSlavePort→Rob→S1Bridge register)
             //   S1 = WormholeArbiter per-input pending (Packetize output)
-            //   S2 = VcArbiter pending (toward NoC)
+            //   S2 = VcAllocator pending (toward NoC)
             if (stage == 0) return req_s1_bridge_.occupancy(axi_ch);
             if (stage == 1) {
                 // WormholeArbiter inputs: 0=AW, 1=W, 2=AR (either class)
@@ -220,11 +220,11 @@ class Nmu {
                     return wormhole_arbiter_.pending_size(2);
             }
             if (stage == 2) {
-                // VcArbiter: single VC in default config; sum over all VCs per channel
-                // (in VC=1 mode this is just vc_arbiter_.pending_size(0))
+                // VcAllocator: single VC in default config; sum over all VCs per channel
+                // (in VC=1 mode this is just vc_allocator_.pending_size(0))
                 std::size_t total = 0;
-                for (std::size_t v = 0; v < VcArbiter::NUM_VC_MAX; ++v)
-                    total += vc_arbiter_.pending_size(static_cast<uint8_t>(v));
+                for (std::size_t v = 0; v < VcAllocator::NUM_VC_MAX; ++v)
+                    total += vc_allocator_.pending_size(static_cast<uint8_t>(v));
                 return total;
             }
         }
@@ -279,11 +279,11 @@ class Nmu {
 
     // Declaration order respects ctor ref dependencies:
     //   1. cfg_ + external downstream refs (no deps).
-    //   2. vc_arbiter_ wraps downstream_req_.
-    //   3. wormhole_arbiter_ wraps vc_arbiter_ as its Downstream.
-    //   4. dat_vc_arbiter_ wraps downstream_dat_req_ (independent DAT egress
+    //   2. vc_allocator_ wraps downstream_req_.
+    //   3. wormhole_arbiter_ wraps vc_allocator_ as its Downstream.
+    //   4. dat_vc_allocator_ wraps downstream_dat_req_ (independent DAT egress
     //      face, S3a T4).
-    //   5. dat_wormhole_arbiter_ wraps dat_vc_arbiter_ (own {AW,W} lock, per §5.2).
+    //   5. dat_wormhole_arbiter_ wraps dat_vc_allocator_ (own {AW,W} lock, per §5.2).
     //   6. depacketize_ wraps downstream_rsp_ + downstream_dat_rsp_ (req path independent).
     //   7. packetize_ takes wormhole_arbiter_.input(0/1/2) (Narrow AW/W/AR + Data
     //      AR, REQ) and dat_wormhole_arbiter_.input(0/1) (Data AW/W, DAT; T6 steering).
@@ -295,9 +295,9 @@ class Nmu {
     router::NocRspIn& downstream_rsp_;
     router::NocReqOut& downstream_dat_req_;
     router::NocRspIn& downstream_dat_rsp_;
-    VcArbiter vc_arbiter_;
+    VcAllocator vc_allocator_;
     router::WormholeArbiter<router::NocReqOut> wormhole_arbiter_;
-    VcArbiter dat_vc_arbiter_;
+    VcAllocator dat_vc_allocator_;
     router::WormholeArbiter<router::NocReqOut> dat_wormhole_arbiter_;
     Depacketize depacketize_;
     Packetize packetize_;
@@ -317,11 +317,11 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       downstream_rsp_(downstream_rsp),
       downstream_dat_req_(downstream_dat_req),
       downstream_dat_rsp_(downstream_dat_rsp),
-      vc_arbiter_(downstream_req_, cfg_.num_vc, cfg_.vc_arbiter_pending_depth),
-      wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/3, std::vector<router::ChannelPairing>{{0, 1}},
-                        cfg_.wormhole_per_input_depth),
-      dat_vc_arbiter_(downstream_dat_req_, cfg_.dat_num_vc, cfg_.vc_arbiter_pending_depth),
-      dat_wormhole_arbiter_(dat_vc_arbiter_, /*num_inputs=*/2,
+      vc_allocator_(downstream_req_, cfg_.num_vc, cfg_.vc_allocator_pending_depth),
+      wormhole_arbiter_(vc_allocator_, /*num_inputs=*/3,
+                        std::vector<router::ChannelPairing>{{0, 1}}, cfg_.wormhole_per_input_depth),
+      dat_vc_allocator_(downstream_dat_req_, cfg_.dat_num_vc, cfg_.vc_allocator_pending_depth),
+      dat_wormhole_arbiter_(dat_vc_allocator_, /*num_inputs=*/2,
                             std::vector<router::ChannelPairing>{{0, 1}},
                             cfg_.wormhole_per_input_depth),
       depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
@@ -340,9 +340,9 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
 
 inline void Nmu::tick() {
     wormhole_arbiter_.tick();
-    vc_arbiter_.tick();
+    vc_allocator_.tick();
     dat_wormhole_arbiter_.tick();
-    dat_vc_arbiter_.tick();
+    dat_vc_allocator_.tick();
     req_s1_bridge_.tick(packetize_);
     axi_slave_port_.tick_req();
 

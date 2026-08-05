@@ -39,10 +39,10 @@ add_cmodel_test(test_rob)
 target_include_directories(test_rob PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-add_cmodel_test(test_vc_arbiter)
-target_include_directories(test_vc_arbiter PRIVATE
+add_cmodel_test(test_vc_allocator)
+target_include_directories(test_vc_allocator PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(test_vc_arbiter PRIVATE yaml-cpp::yaml-cpp)
+target_link_libraries(test_vc_allocator PRIVATE yaml-cpp::yaml-cpp)
 
 add_cmodel_test(test_nmu)
 target_include_directories(test_nmu PRIVATE

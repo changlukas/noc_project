@@ -44,13 +44,13 @@
 
 namespace ni::cmodel::nmu {
 
-class VcArbiter : public router::NocReqOut {
+class VcAllocator : public router::NocReqOut {
   public:
     static constexpr std::size_t NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;  // 8
     static constexpr std::size_t kDefaultPendingDepth = 4;
 
-    VcArbiter(router::NocReqOut& downstream, std::size_t num_vc,
-              std::size_t pending_depth = kDefaultPendingDepth)
+    VcAllocator(router::NocReqOut& downstream, std::size_t num_vc,
+                std::size_t pending_depth = kDefaultPendingDepth)
         : downstream_(downstream), num_vc_(num_vc), pending_depth_(pending_depth) {
         assert(num_vc_ >= 1 && num_vc_ <= NUM_VC_MAX);
     }
@@ -98,17 +98,17 @@ class VcArbiter : public router::NocReqOut {
     std::array<uint8_t, axi::AXI_ID_SPACE> last_aw_vc_{};
 };
 
-inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
-                                                              uint8_t ordering_req, uint8_t id) {
+inline std::optional<uint8_t> VcAllocator::select_vc_for_axi_ch(uint8_t axi_ch, uint8_t dst_id,
+                                                                uint8_t ordering_req, uint8_t id) {
     // W invariant fires regardless of NUM_VC: this arbiter must be
     // downstream of a WormholeArbiter that serializes AW+W; W must always follow AW.
     if (is_w(axi_ch)) {
         if (!current_aw_vc_.has_value()) {
             assert(false &&
-                   "nmu::VcArbiter::push_flit: W arrived with no current AW VC -- "
+                   "nmu::VcAllocator::push_flit: W arrived with no current AW VC -- "
                    "must be downstream of a WormholeArbiter that serializes AW+W "
                    "(all W beats complete before the next AW). Standalone "
-                   "VcArbiter use without upstream serialization is unsupported.");
+                   "VcAllocator use without upstream serialization is unsupported.");
             std::abort();
         }
         return *current_aw_vc_;
@@ -142,7 +142,7 @@ inline std::optional<uint8_t> VcArbiter::select_vc_for_axi_ch(uint8_t axi_ch, ui
     return std::nullopt;
 }
 
-inline bool VcArbiter::push_flit(const Flit& flit) {
+inline bool VcAllocator::push_flit(const Flit& flit) {
     uint8_t axi_ch = static_cast<uint8_t>(flit.get_header_field("axi_ch"));
 
     uint8_t dst_id = 0, ordering_req = 0, id = 0;
@@ -164,7 +164,7 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     if (is_aw(axi_ch)) {
         if (current_aw_vc_.has_value()) {
             assert(false &&
-                   "nmu::VcArbiter::push_flit: AW arrived while previous AW's W burst "
+                   "nmu::VcAllocator::push_flit: AW arrived while previous AW's W burst "
                    "still in progress -- must be downstream of a WormholeArbiter "
                    "that serializes AW+W (holds next AW until current W burst ends).");
             std::abort();  // belt-and-braces for NDEBUG
@@ -195,17 +195,17 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
     return true;
 }
 
-inline bool VcArbiter::credit_avail(uint8_t vc_id) const {
+inline bool VcAllocator::credit_avail(uint8_t vc_id) const {
     return pending_[vc_id].size() < pending_depth_;
 }
 
-inline void VcArbiter::tick() {
+inline void VcAllocator::tick() {
     for (std::size_t k = 0; k < num_vc_; ++k) {
         uint8_t vc = static_cast<uint8_t>((round_robin_ptr_ + k) % num_vc_);
         if (!pending_[vc].empty() && downstream_.credit_avail(vc)) {
             bool ok = downstream_.push_flit(pending_[vc].front());
             assert(ok &&
-                   "nmu::VcArbiter::tick: downstream returned credit_avail=true "
+                   "nmu::VcAllocator::tick: downstream returned credit_avail=true "
                    "but push_flit refused -- protocol violation, downstream "
                    "must not lie about credit availability");
             if (!ok) std::abort();  // belt-and-braces for NDEBUG

@@ -184,7 +184,7 @@ class NsuStandalone {
 
     // DAT face accessors (S3a T4): mirror of the REQ/RSP set above, for the
     // DAT ingress (inject here, Depacketize's second ingress drains it) and
-    // DAT egress (push into nsu().dat_vc_arbiter(), drain here). Unwired to
+    // DAT egress (push into nsu().dat_vc_allocator(), drain here). Unwired to
     // real DPI until T5; ctest-mock-only until then.
     void inject_dat_req_flit(const Flit& f) { queue_dat_req_in_.inject_req_flit(f); }
     std::optional<Flit> pop_dat_rsp_flit() { return queue_dat_rsp_out_.pop_rsp_flit(); }

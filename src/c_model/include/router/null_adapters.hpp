@@ -7,7 +7,7 @@
 // only care about one network default the other ingress/egress to these:
 // pop always empty, push always accepts-and-discards. The accept-and-discard
 // choice on push matches NocReqOut/NocRspOut's own credit_avail() default of
-// `true` -- a VcArbiter/WormholeArbiter sitting in front of one of these
+// `true` -- a VcAllocator/WormholeArbiter sitting in front of one of these
 // never sees a credit_avail=true / push_flit=false contradiction, which
 // would trip their "downstream must not lie about credit" asserts.
 //

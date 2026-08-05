@@ -1,7 +1,7 @@
 // S3a T4 NI restructure — NMU DAT face tests.
 //
 // S3a gave Nmu a second (DAT) NoC face alongside REQ/RSP (stage design §5):
-// a per-network WormholeArbiter+VcArbiter pair for DAT egress (AW/W) and a
+// a per-network WormholeArbiter+VcAllocator pair for DAT egress (AW/W) and a
 // second Depacketize ingress for DAT (R). Packetize now steers Data-class
 // AW/W/R here for real (T6) — this file instead drives the DAT face directly
 // via NmuStandalone's queue-backed mocks, exercising the arbiter/ingress
@@ -115,7 +115,7 @@ TEST(NmuDatFace, EgressPushPopViaMocksPreservesAwWOrder) {
 
 // Per-network face independence: block the REQ face's credit (seed=0, no
 // receive_credit) and confirm the DAT face -- a fully independent
-// WormholeArbiter+VcArbiter pair with its own downstream sink -- still
+// WormholeArbiter+VcAllocator pair with its own downstream sink -- still
 // drains normally. REQ backpressure must not reach DAT.
 TEST(NmuDatFace, ReqBackpressureDoesNotStallDat) {
     SCENARIO(

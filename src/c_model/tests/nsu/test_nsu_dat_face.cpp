@@ -2,7 +2,7 @@
 //
 // S3a gave Nsu a second (DAT) NoC face alongside REQ/RSP (stage design §5):
 // a second Depacketize ingress for DAT (AW/W) demuxing into the SAME shared
-// s1_aw_/s1_w_/s1_ar_ registers as REQ, and a standalone VcArbiter for DAT
+// s1_aw_/s1_w_/s1_ar_ registers as REQ, and a standalone VcAllocator for DAT
 // egress (R) with no wormhole arbiter in front (single input -- a 1-input
 // wormhole arbiter would be dead code). Packetize now steers Data-class R
 // here for real (T6) — this file instead drives the DAT face directly via
@@ -103,17 +103,17 @@ Flit make_data_r_flit(uint8_t rid) {
 }  // namespace
 
 // DAT face push/pop via mocks: push a synthetic DataR flit directly into
-// dat_vc_arbiter() (bypassing Packetize, to isolate the arbiter's own
+// dat_vc_allocator() (bypassing Packetize, to isolate the arbiter's own
 // mechanics from steering; no wormhole arbiter in front either, per §5.2's
 // "single input" ruling), tick, drain via pop_dat_rsp_flit().
 TEST(NsuDatFace, EgressPushPopViaMock) {
     SCENARIO(
-        "NSU DAT egress: push a DataR flit directly into dat_vc_arbiter() (bypassing Packetize's "
+        "NSU DAT egress: push a DataR flit directly into dat_vc_allocator() (bypassing Packetize's "
         "own real steering, to test the arbiter in isolation). pop_dat_rsp_flit() must return it "
         "with axi_ch/rid intact.");
 
     NsuStandalone nsu(make_cfg(kNsuSrcId));
-    ASSERT_TRUE(nsu.nsu().dat_vc_arbiter().push_flit(make_data_r_flit(0x09)));
+    ASSERT_TRUE(nsu.nsu().dat_vc_allocator().push_flit(make_data_r_flit(0x09)));
 
     std::optional<Flit> out;
     for (int t = 0; t < 8 && !out; ++t) {
@@ -126,8 +126,8 @@ TEST(NsuDatFace, EgressPushPopViaMock) {
 }
 
 // Per-network face independence: block RSP's credit (seed=0) and confirm a
-// DAT flit pushed directly into dat_vc_arbiter() still drains -- the two are
-// independent VcArbiter instances with independent downstream sinks.
+// DAT flit pushed directly into dat_vc_allocator() still drains -- the two are
+// independent VcAllocator instances with independent downstream sinks.
 TEST(NsuDatFace, RspBackpressureDoesNotStallDat) {
     SCENARIO(
         "NSU: RSP face credit-blocked (seed=0) while a DataR flit is pushed directly into the "
@@ -137,7 +137,7 @@ TEST(NsuDatFace, RspBackpressureDoesNotStallDat) {
     nsu.enable_rsp_ready_track();  // ready defaults false: RSP face blocked from tick 0
     ASSERT_FALSE(nsu.rsp_credit_avail());
 
-    ASSERT_TRUE(nsu.nsu().dat_vc_arbiter().push_flit(make_data_r_flit(0x01)));
+    ASSERT_TRUE(nsu.nsu().dat_vc_allocator().push_flit(make_data_r_flit(0x01)));
     int dat_drained = 0;
     for (int t = 0; t < 8; ++t) {
         nsu.tick();

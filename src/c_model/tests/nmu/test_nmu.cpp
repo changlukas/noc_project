@@ -65,8 +65,8 @@ TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
 // face, observe the B beat at the AxiSlavePort response side.
 //
 // Pinpoints: member-declaration order, tick-order (depacketize before
-// axi_slave_port, then wormhole, then vc_arbiter), Packetize -> Wormhole
-// -> VcArbiter -> NocReqOut wiring, and the symmetric
+// axi_slave_port, then wormhole, then vc_allocator), Packetize -> Wormhole
+// -> VcAllocator -> NocReqOut wiring, and the symmetric
 // NocRspIn -> Depacketize -> AxiSlavePort return path inside the
 // assembled pipeline. Uses NmuStandalone so the test does not depend on
 // the ChannelModel / NSU side; any break in Nmu-internal wiring surfaces
@@ -111,7 +111,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
 
     // Drain the DAT-out face (S3a T6: Data-class AW/W steer to DAT, spec
     // :348 -- legacy_sam() is data class). Bounded loop: pipeline is
-    // AxiSlavePort -> Rob -> Packetize -> WormholeArbiter -> VcArbiter
+    // AxiSlavePort -> Rob -> Packetize -> WormholeArbiter -> VcAllocator
     // -> QueueNocReqOut, each tick boundary forwards one stage. 32 ticks
     // is generous; any breakage stalls indefinitely and trips the loop bound.
     bool saw_aw_flit = false;

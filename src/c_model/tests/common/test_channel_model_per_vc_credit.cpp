@@ -79,7 +79,7 @@ TEST(ChannelModelPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
     SCENARIO(
         "ChannelModel: credit_avail must return false when per-NSU queue is "
         "full even if per-VC counter still has room (contract: credit_avail=true "
-        "must imply push_flit will succeed; otherwise VcArbiter tick aborts on "
+        "must imply push_flit will succeed; otherwise VcAllocator tick aborts on "
         "the 'lying downstream' guard)");
     // 1-NSU, req-queue depth 2, default per_vc_depth (unlimited)
     ChannelModel noc(/*req*/ 2, /*rsp*/ 32);

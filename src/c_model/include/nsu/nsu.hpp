@@ -14,18 +14,18 @@
 // Pipeline (rsp from AXI slave, NoC out; RSP network -- B/NarrowR):
 //   external B/R from AXI slave ──> AxiMasterPort ──> Packetize{b,r}
 //     (reads meta from MetaBuffer) ──> WormholeArbiter<NocRspOut>(2 in,
-//     no pairing) ──> VcArbiter ──> external NocRspOut
+//     no pairing) ──> VcAllocator ──> external NocRspOut
 //
 // DAT egress face (S3a T4 arbiter + T6 steering -- DataR; single input, so
 // no wormhole arbiter in front -- a 1-input wormhole arbiter is dead code,
 // per stage design §5.2. Packetize steers Data-class R here; ctest may still
-// push directly via dat_vc_arbiter().push_flit(...) to exercise it in isolation):
-//   Packetize{r} (Data class) ──> VcArbiter(dat_num_vc) ──> external NocRspOut (DPI bridge)
+// push directly via dat_vc_allocator().push_flit(...) to exercise it in isolation):
+//   Packetize{r} (Data class) ──> VcAllocator(dat_num_vc) ──> external NocRspOut (DPI bridge)
 //
 // Per-cycle tick order: reverse-order staged pipeline — later
 // stages drain before earlier stages fill, so a beat advances one stage/tick:
-//   wormhole_arbiter_.tick(); vc_arbiter_.tick();  // rsp S3 (-> NoC)
-//   dat_vc_arbiter_.tick();                        // DAT egress drain (independent network)
+//   wormhole_arbiter_.tick(); vc_allocator_.tick();  // rsp S3 (-> NoC)
+//   dat_vc_allocator_.tick();                        // DAT egress drain (independent network)
 //   packetize_.tick();                             // rsp S2
 //   axi_master_port_.tick();                       // rsp S1 + req S2
 //   depacketize_.tick();                           // req S1 (drains BOTH REQ and DAT ingresses)
@@ -46,7 +46,7 @@
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "nsu/packetize.hpp"
-#include "nsu/vc_arbiter.hpp"
+#include "nsu/vc_allocator.hpp"
 #include "ni_params.h"
 #include <array>
 #include <cassert>
@@ -66,7 +66,7 @@ struct NsuConfig {
     // DAT face VC count (S3a T4; R only -- no B rides DAT, per network map §1).
     std::size_t dat_num_vc = ni::NOC_DAT_NUM_VC;
     std::size_t wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
-    std::size_t vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
+    std::size_t vc_allocator_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
 };
 
 class Nsu {
@@ -87,8 +87,8 @@ class Nsu {
 
     // DAT egress face (S3a T4 + T6 steering). Non-const: Packetize feeds this
     // (Data-class R); ctest may still push R flits directly via
-    // dat_vc_arbiter().push_flit(...) to exercise the arbiter in isolation.
-    VcArbiter& dat_vc_arbiter() noexcept { return dat_vc_arbiter_; }
+    // dat_vc_allocator().push_flit(...) to exercise the arbiter in isolation.
+    VcAllocator& dat_vc_allocator() noexcept { return dat_vc_allocator_; }
 
     void tick();
 
@@ -111,7 +111,7 @@ class Nsu {
             // NsuRsp: 3 stages
             //   S0 = Packetize S1 stage registers (accepted B/R beat)
             //   S1 = WormholeArbiter pending queue (S2→S3 boundary)
-            //   S2 = VcArbiter pending queue (toward NoC)
+            //   S2 = VcAllocator pending queue (toward NoC)
             const bool is_b = (axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_DataB);
             const bool is_r = (axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR);
             if (stage == 0) {
@@ -125,8 +125,8 @@ class Nsu {
             }
             if (stage == 2) {
                 std::size_t total = 0;
-                for (std::size_t v = 0; v < VcArbiter::NUM_VC_MAX; ++v)
-                    total += vc_arbiter_.pending_size(static_cast<uint8_t>(v));
+                for (std::size_t v = 0; v < VcAllocator::NUM_VC_MAX; ++v)
+                    total += vc_allocator_.pending_size(static_cast<uint8_t>(v));
                 return total;
             }
         }
@@ -136,13 +136,13 @@ class Nsu {
   private:
     // Declaration order:
     //   1. cfg_ + external refs.
-    //   2. vc_arbiter_ wraps downstream_rsp_.
-    //   3. wormhole_arbiter_ wraps vc_arbiter_.
-    //   4. dat_vc_arbiter_ wraps downstream_dat_rsp_ (independent DAT egress
+    //   2. vc_allocator_ wraps downstream_rsp_.
+    //   3. wormhole_arbiter_ wraps vc_allocator_.
+    //   4. dat_vc_allocator_ wraps downstream_dat_rsp_ (independent DAT egress
     //      face, S3a T4; no wormhole arbiter -- single input, per §5.2).
     //   5. meta_buffer_ (no upstream dep).
     //   6. packetize_ takes wormhole_arbiter_.input(0/1) (Narrow R + B, RSP),
-    //      dat_vc_arbiter_ (Data R, DAT; T6 steering), + meta_buffer_.
+    //      dat_vc_allocator_ (Data R, DAT; T6 steering), + meta_buffer_.
     //   7. depacketize_ takes upstream_req_ + upstream_dat_req_ + meta_buffer_.
     //   8. axi_master_port_ takes depacketize_ + packetize_.
     NsuConfig cfg_;
@@ -150,9 +150,9 @@ class Nsu {
     router::NocRspOut& downstream_rsp_;
     router::NocReqIn& upstream_dat_req_;
     router::NocRspOut& downstream_dat_rsp_;
-    VcArbiter vc_arbiter_;
+    VcAllocator vc_allocator_;
     router::WormholeArbiter<router::NocRspOut> wormhole_arbiter_;
-    VcArbiter dat_vc_arbiter_;
+    VcAllocator dat_vc_allocator_;
     MetaBuffer meta_buffer_;
     Packetize packetize_;
     Depacketize depacketize_;
@@ -166,12 +166,12 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
       downstream_rsp_(downstream_rsp),
       upstream_dat_req_(upstream_dat_req),
       downstream_dat_rsp_(downstream_dat_rsp),
-      vc_arbiter_(downstream_rsp_, cfg_.num_vc, cfg_.vc_arbiter_pending_depth),
-      wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/2, std::vector<router::ChannelPairing>{},
+      vc_allocator_(downstream_rsp_, cfg_.num_vc, cfg_.vc_allocator_pending_depth),
+      wormhole_arbiter_(vc_allocator_, /*num_inputs=*/2, std::vector<router::ChannelPairing>{},
                         cfg_.wormhole_per_input_depth),
-      dat_vc_arbiter_(downstream_dat_rsp_, cfg_.dat_num_vc, cfg_.vc_arbiter_pending_depth),
+      dat_vc_allocator_(downstream_dat_rsp_, cfg_.dat_num_vc, cfg_.vc_allocator_pending_depth),
       meta_buffer_(cfg_.port_params.meta_buffer_max_outstanding),
-      packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), dat_vc_arbiter_,
+      packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), dat_vc_allocator_,
                  meta_buffer_, cfg_.src_id),
       depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids,
                    upstream_dat_req_),
@@ -184,7 +184,7 @@ inline void Nsu::tick() {
     //
     // RSP path (S3 → S2 → S1, reverse order):
     //   S3: wormhole_arbiter_ drains from its pending_ (= S2→S3 register) to
-    //       vc_arbiter_, which drains to NoC. Draining before Packetize fills
+    //       vc_allocator_, which drains to NoC. Draining before Packetize fills
     //       ensures the slot is free for this tick's S2 output.
     //   S2: packetize_.tick() reads s1_b_/s1_r_ stage registers, builds
     //       Flits, pushes to wormhole input (the S2→S3 register boundary).
@@ -199,12 +199,12 @@ inline void Nsu::tick() {
     //   S2: axi_master_port_ drain_*_from_depacketizer_ consumes from
     //       depacketize_.s1_* stage registers.
     //   S1: depacketize_.tick() decodes a new flit into s1_* registers.
-    wormhole_arbiter_.tick();  // RSP S3a: drain S2→S3 boundary to VcArbiter
-    vc_arbiter_.tick();        // RSP S3b: drain VcArbiter pending to NoC
+    wormhole_arbiter_.tick();  // RSP S3a: drain S2→S3 boundary to VcAllocator
+    vc_allocator_.tick();      // RSP S3b: drain VcAllocator pending to NoC
     // DAT egress (S3a T4 + T6 steering): independent network, own drain;
     // Packetize feeds this with Data-class R below (S2), same reverse-order
     // arbiter-final-stage property as the RSP wormhole/VC pair above.
-    dat_vc_arbiter_.tick();
+    dat_vc_allocator_.tick();
     packetize_.tick();        // RSP S2: read S1 regs, push to S2→S3 boundary
     axi_master_port_.tick();  // RSP S1 + REQ S2: bounded B/R accept + req drain
     depacketize_.tick();      // REQ S1: decode flit into S1 stage registers

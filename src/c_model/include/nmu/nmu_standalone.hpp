@@ -167,7 +167,7 @@ class NmuStandalone {
     AxiSlavePort& axi_slave_port() noexcept { return nmu_.axi_slave_port(); }
     void tick() { nmu_.tick(); }
     const Rob& rob() const noexcept { return nmu_.rob(); }
-    const VcArbiter& vc_arbiter() const noexcept { return nmu_.vc_arbiter(); }
+    const VcAllocator& vc_allocator() const noexcept { return nmu_.vc_allocator(); }
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
         return nmu_.stage_occupancy(path, stage, axi_ch);
     }

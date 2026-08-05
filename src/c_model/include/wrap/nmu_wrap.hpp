@@ -15,7 +15,7 @@
 // REQ/RSP ready/valid (spec §4.3, stage design §5.3 "minimal path"):
 //   REQ egress: NmuStandalone::req_credit_avail(vc) is the SAME predicate
 //     name as before, now backed by a live ready flag instead of a credit
-//     pool (queue_req_out_.enable_ready_track()/set_ready()). VcArbiter's
+//     pool (queue_req_out_.enable_ready_track()/set_ready()). VcAllocator's
 //     existing credit-gated drain needs no structural change. Because the
 //     push (inside nmu_->tick()) and the pop (this same tick, Step 3) happen
 //     within one wrap tick, a successful push IS the transfer -- no held-
@@ -105,7 +105,7 @@ class NmuWrap {
         cfg.port_params.depkt_b_q_depth = ni::NMU_DEPKT_Q_DEPTH;
         cfg.port_params.depkt_r_q_depth = ni::NMU_DEPKT_Q_DEPTH;
         cfg.wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
-        cfg.vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
+        cfg.vc_allocator_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
         // REQ egress: ready/valid, no credit (spec §4.3) — set_inputs feeds
         // the live ready flag from tx_req_ready every tick.
@@ -145,7 +145,7 @@ class NmuWrap {
         }
 
         // REQ egress ready — live signal from the router, sampled BEFORE
-        // tick() so this cycle's VcArbiter drain sees it (credit_avail
+        // tick() so this cycle's VcAllocator drain sees it (credit_avail
         // self-gates). DAT egress credit — same pre-tick replenish pattern
         // as before, now via the dat_* accessor.
         nmu_->req_set_ready(in_.tx_req_ready);
@@ -204,7 +204,7 @@ class NmuWrap {
         }
 
         // Step 2: advance Nmu one cycle (Depacketize + AxiSlavePort +
-        // WormholeArbiter + VcArbiter, in upstream-first order per nmu.hpp).
+        // WormholeArbiter + VcAllocator, in upstream-first order per nmu.hpp).
         nmu_->tick();
 
         // Step 3: build NmuOutputs.

@@ -1,4 +1,4 @@
-#include "nsu/vc_arbiter.hpp"
+#include "nsu/vc_allocator.hpp"
 #include "common/channel_model.hpp"
 #include "common/scenario.hpp"
 #include "flit.hpp"
@@ -8,7 +8,7 @@
 #include <vector>
 
 using ni::cmodel::Flit;
-using ni::cmodel::nsu::VcArbiter;
+using ni::cmodel::nsu::VcAllocator;
 using ni::cmodel::testing::ChannelModel;
 
 namespace {
@@ -32,11 +32,11 @@ Flit make_rsp_flit(uint8_t axi_ch, uint8_t initial_vc = 0, uint8_t id = 0, uint6
 }
 
 // Returns the VC a pushed flit landed on (0xFF on push failure).
-uint8_t push_and_vc(VcArbiter& arb, ChannelModel& /*noc*/, const Flit& flit) {
-    std::array<std::size_t, VcArbiter::NUM_VC_MAX> before{};
-    for (uint8_t v = 0; v < VcArbiter::NUM_VC_MAX; ++v) before[v] = arb.pending_size(v);
+uint8_t push_and_vc(VcAllocator& arb, ChannelModel& /*noc*/, const Flit& flit) {
+    std::array<std::size_t, VcAllocator::NUM_VC_MAX> before{};
+    for (uint8_t v = 0; v < VcAllocator::NUM_VC_MAX; ++v) before[v] = arb.pending_size(v);
     if (!arb.push_flit(flit)) return 0xFF;
-    for (uint8_t v = 0; v < VcArbiter::NUM_VC_MAX; ++v) {
+    for (uint8_t v = 0; v < VcAllocator::NUM_VC_MAX; ++v) {
         if (arb.pending_size(v) > before[v]) return v;
     }
     return 0xFF;
@@ -49,12 +49,12 @@ uint8_t push_and_vc(VcArbiter& arb, ChannelModel& /*noc*/, const Flit& flit) {
 // beats share (dst_id, rid) so they hash to the same VC automatically.
 //
 // A multi-beat R burst (one rid) keeps every beat on its single mapped VC.
-TEST(NsuVcArbiter, RBurstStaysOnOneVc) {
+TEST(NsuVcAllocator, RBurstStaysOnOneVc) {
     SCENARIO(
-        "NSU VcArbiter: all beats of one rid's R burst map to one VC (static map, not "
+        "NSU VcAllocator: all beats of one rid's R burst map to one VC (static map, not "
         "follow-state)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/4);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // 4-beat burst, dst_id=0x12, rid=0x05 -> (0x12^0x05)%4=3 -> VC3.
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));
@@ -69,10 +69,10 @@ TEST(NsuVcArbiter, RBurstStaysOnOneVc) {
 // ALL R regardless of ordering_req (design: burst coherence must hold even though
 // the NMU RoB will reorder by ordering_tag; the map only needs to keep one burst's
 // beats together, which a pure function of (dst_id,rid) does unconditionally).
-TEST(NsuVcArbiter, RobbedRBurstStaysOnOneVcToo) {
-    SCENARIO("NSU VcArbiter: ordering_req=1 R burst still maps every beat to one VC");
+TEST(NsuVcAllocator, RobbedRBurstStaysOnOneVcToo) {
+    SCENARIO("NSU VcAllocator: ordering_req=1 R burst still maps every beat to one VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/4);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     ASSERT_TRUE(
         arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0, 0x12, /*ordering_req=*/1)));
     ASSERT_TRUE(
@@ -83,10 +83,10 @@ TEST(NsuVcArbiter, RobbedRBurstStaysOnOneVcToo) {
 
 // Distinct rids (each a single-beat read) hash to different VCs -- the static
 // map replaces round-robin spread with deterministic (dst,id) spread.
-TEST(NsuVcArbiter, DistinctRidsSpreadAcrossVcs) {
-    SCENARIO("NSU VcArbiter: distinct rids hash across the VC set via the static map");
+TEST(NsuVcAllocator, DistinctRidsSpreadAcrossVcs) {
+    SCENARIO("NSU VcAllocator: distinct rids hash across the VC set via the static map");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/4);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // dst_id=0x12 for all: rid5 -> (0x12^0x05)%4=3; rid6 -> (0x12^0x06)%4=0;
     // rid7 -> (0x12^0x07)%4=1.
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1)));  // rid5 -> VC3
@@ -100,10 +100,10 @@ TEST(NsuVcArbiter, DistinctRidsSpreadAcrossVcs) {
 // Two in-flight multi-beat R bursts (rid5, rid6) whose beats interleave must
 // each stay on their own mapped VC -- the invariant per-(dst,id) hashing
 // exists for (a single VC choice would misroute the interleaved beats).
-TEST(NsuVcArbiter, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
-    SCENARIO("NSU VcArbiter: interleaved rid5/rid6 multi-beat R bursts each map to one VC");
+TEST(NsuVcAllocator, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
+    SCENARIO("NSU VcAllocator: interleaved rid5/rid6 multi-beat R bursts each map to one VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/4);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // rid5 -> VC3, rid6 -> VC0 (same hash as DistinctRidsSpreadAcrossVcs above).
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 0)));  // rid5 -> VC3
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x06, 0)));  // rid6 -> VC0
@@ -117,10 +117,10 @@ TEST(NsuVcArbiter, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
 
 // B carries no fixed VC: it is order-free at the NMU slot path (and single-VC
 // on the RSP face), so same-bid responses round-robin the VC set.
-TEST(NsuVcArbiter, SameBidRoundRobins) {
-    SCENARIO("NSU VcArbiter: same-bid B responses round-robin the VC set");
+TEST(NsuVcAllocator, SameBidRoundRobins) {
+    SCENARIO("NSU VcAllocator: same-bid B responses round-robin the VC set");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/4);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12));
     uint8_t b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12));
     EXPECT_EQ(a, 0u);
@@ -130,10 +130,10 @@ TEST(NsuVcArbiter, SameBidRoundRobins) {
 // W6: keying by (dst_id,id) dissolves the same-id multi-source contention the
 // old r_burst_vc_[id] array had -- two sources (different dst_id) with the
 // same rid now get distinct VCs instead of contending one array slot.
-TEST(NsuVcArbiter, SameRidDifferentDstYieldsDistinctVcs) {
-    SCENARIO("NSU VcArbiter: same rid from different dst_id can land on different VCs");
+TEST(NsuVcAllocator, SameRidDifferentDstYieldsDistinctVcs) {
+    SCENARIO("NSU VcAllocator: same rid from different dst_id can land on different VCs");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/4);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // Same rid (0x05), different dst_id: (0x10^0x05)%4=1 vs (0x11^0x05)%4=0.
     uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1, 0x10));
     uint8_t b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowR, 0, 0x05, 1, 0x11));
@@ -144,10 +144,10 @@ TEST(NsuVcArbiter, SameRidDifferentDstYieldsDistinctVcs) {
 // same-(dst,id) stream to a second VC would reorder it -- the exact hazard
 // the fixed VC exists to prevent). Fill the mapped VC to pending_depth_, then
 // a same-(dst,id) push must fail, and no flit lands on any other VC.
-TEST(NsuVcArbiter, FixedVcFullRefusesInsteadOfSpilling) {
-    SCENARIO("NSU VcArbiter: fixed VC full -> push_flit refuses, never spills to another VC");
+TEST(NsuVcAllocator, FixedVcFullRefusesInsteadOfSpilling) {
+    SCENARIO("NSU VcAllocator: fixed VC full -> push_flit refuses, never spills to another VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/4);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // dst_id=0x12, rid=0x05 -> (0x12^0x05)%4=3 -> VC3. Fill VC3 to the default
     // pending_depth_ (4) by reusing rid5 across 4 separate single-beat "bursts".
     for (int i = 0; i < 4; ++i) {
@@ -164,11 +164,11 @@ TEST(NsuVcArbiter, FixedVcFullRefusesInsteadOfSpilling) {
 //   Nsu_Degenerate_NumVc1_Passthrough : specifically tests NUM_VC=1 behavior
 // ---------------------------------------------------------------------------
 
-TEST(NsuVcArbiter, Nsu_Degenerate_NumVc1_Passthrough) {
-    SCENARIO("NSU VcArbiter: NUM_VC=1 routes B + R -> VC=0");
+TEST(NsuVcAllocator, Nsu_Degenerate_NumVc1_Passthrough) {
+    SCENARIO("NSU VcAllocator: NUM_VC=1 routes B + R -> VC=0");
 
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
-    VcArbiter arb(noc.rsp_out(), /*num_vc=*/1);
+    VcAllocator arb(noc.rsp_out(), /*num_vc=*/1);
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowB)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR)));
     arb.tick();

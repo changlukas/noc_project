@@ -9,8 +9,8 @@
 //
 // Pipeline placement:
 //   NMU: Packetize{aw,w,ar} -> WormholeArbiter<NocReqOut>(3 in, {{0,1}})
-//        -> VcArbiter -> NocReqOut
-//   NSU: Packetize{b,r} -> WormholeArbiter<NocRspOut>(2 in, {}) -> VcArbiter
+//        -> VcAllocator -> NocReqOut
+//   NSU: Packetize{b,r} -> WormholeArbiter<NocRspOut>(2 in, {}) -> VcAllocator
 //        -> NocRspOut
 //
 // Lock semantic:
@@ -219,7 +219,7 @@ inline void WormholeArbiter<Downstream>::tick() {
     // Pure valid/ready handshake: this arbiter only selects one request out of
     // the input queues toward the NoC -- it does not decide VC or track credit.
     // VC selection and per-VC credit gating live entirely in the downstream
-    // nmu::VcArbiter. A false return is legitimate backpressure (req_out.hpp:
+    // nmu::VcAllocator. A false return is legitimate backpressure (req_out.hpp:
     // "a false return MUST be safely retried"), so retain the front flit and
     // retry next tick. Mirrors FlooNoC floo_wormhole_arbiter.sv, a pure
     // handshake with no credit logic.

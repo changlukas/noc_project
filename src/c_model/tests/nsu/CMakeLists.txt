@@ -18,13 +18,13 @@ add_cmodel_test(test_nsu_depacketize)
 target_include_directories(test_nsu_depacketize PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-# Note: distinct target name from nmu/test_vc_arbiter to avoid CMake target
+# Note: distinct target name from nmu/test_vc_allocator to avoid CMake target
 # collision (add_cmodel_test creates a bare-named target). Source file
-# mirrors the target name; gtest suite name remains NsuVcArbiter.
-add_cmodel_test(test_nsu_vc_arbiter)
-target_include_directories(test_nsu_vc_arbiter PRIVATE
+# mirrors the target name; gtest suite name remains NsuVcAllocator.
+add_cmodel_test(test_nsu_vc_allocator)
+target_include_directories(test_nsu_vc_allocator PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
-target_link_libraries(test_nsu_vc_arbiter PRIVATE yaml-cpp::yaml-cpp)
+target_link_libraries(test_nsu_vc_allocator PRIVATE yaml-cpp::yaml-cpp)
 
 add_cmodel_test(test_nsu)
 target_include_directories(test_nsu PRIVATE
