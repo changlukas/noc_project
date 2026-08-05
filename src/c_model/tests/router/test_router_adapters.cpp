@@ -28,6 +28,10 @@ Flit req_flit(uint8_t dst, uint8_t vc, uint8_t tag = 0) {
     f.set_header_field("vc_id", vc);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("src_id", tag);
+    // Pinned (fixed_vc=1): every credit/conservation premise in this file is a
+    // 1:1 input-VC/output-VC mapping, which post-VA only the fixed_vc bypass
+    // guarantees. VA restamp behavior is covered by RouterVa* in test_router.cpp.
+    f.set_header_field("fixed_vc", 1);
     return f;
 }
 

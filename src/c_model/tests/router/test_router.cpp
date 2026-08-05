@@ -1,6 +1,8 @@
 #include "router/router.hpp"
+#include "router/two_node_fabric.hpp"
 #include "common/scenario.hpp"
 #include <gtest/gtest.h>
+#include <algorithm>
 #include <ios>
 #include <tuple>
 #include <vector>
@@ -146,6 +148,16 @@ constexpr int kMaxPacketFlits = 3;  // head + body + tail; see feed_packet()
 ni::cmodel::Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail, uint8_t src_id) {
     auto f = make_flit(dst, vc, flit_tail);
     f.set_header_field("src_id", src_id);
+    return f;
+}
+
+// fixed_vc=1: the flit's header vc_id is pinned through the VA stage (D8
+// bypass) — the output VC always equals the input VC. Used by tests whose
+// premise is that 1:1 mapping (per-VC independence, per-VC order); the VA
+// restamp path is covered by the RouterVa* tests.
+ni::cmodel::Flit make_pinned_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail, uint8_t src_id = 0) {
+    auto f = make_tagged_flit(dst, vc, flit_tail, src_id);
+    f.set_header_field("fixed_vc", 1);
     return f;
 }
 
@@ -390,8 +402,12 @@ TEST(RouterWormhole, LockedOutputIsLocalAndOtherOutputProceeds) {
         feed_packet(r, b, make_dst(1, 2), /*vc=*/0);  // NORTH
         const std::size_t be = east.received.size(), bn = north.received.size();
         r.tick();
-        for (std::size_t i = be; i < east.received.size(); ++i) r.receive_credit(E, 0);
-        for (std::size_t i = bn; i < north.received.size(); ++i) r.receive_credit(N, 0);
+        // Return credit on the DELIVERED vc_id: VA restamps these fixed_vc=0
+        // flits to the preferred output VC, not their input VC.
+        for (std::size_t i = be; i < east.received.size(); ++i)
+            r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
+        for (std::size_t i = bn; i < north.received.size(); ++i)
+            r.receive_credit(N, static_cast<uint8_t>(north.received[i].get_header_field("vc_id")));
     }
     EXPECT_EQ(east.received.size(), 3u);
     EXPECT_EQ(north.received.size(), 3u);  // other output not blocked by EAST's lock
@@ -426,7 +442,9 @@ TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
 
 // --- Per-VC independence --------------------------------------------------
 // All three tests need >=2 VCs; the generated default NOC_DAT_NUM_VC is 1, so
-// each builds its RouterConfig with num_vc = 2.
+// each builds its RouterConfig with num_vc = 2. The two per-VC tests drive
+// fixed_vc=1 (pinned) flits: their premise is a 1:1 input-VC/output-VC
+// mapping, which post-VA only the fixed_vc bypass guarantees.
 
 RouterConfig two_vc_cfg() {
     RouterConfig cfg = center_cfg();
@@ -464,7 +482,7 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
         const bool credit_left = r.credit(E, 0) > 0;
         const bool want_extra = !credit_left && r.input_fifo_size(WEST, 0) < 2;
         if (credit_left || want_extra)
-            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/0, /*flit_tail=*/1, 0x10));
+            r.input(WEST).push_flit(make_pinned_flit(dst, /*vc=*/0, /*flit_tail=*/1, 0x10));
         r.tick();  // never return vc0 credit
         if (!credit_left && r.input_fifo_size(WEST, 0) >= 2) break;
     }
@@ -479,7 +497,7 @@ TEST(RouterVcArbitration, BlockedVcDoesNotStallOthers) {
     int vc1_received = 0;
     for (int t = 0; t < 12 && vc1_received < 4; ++t) {
         if (r.input_fifo_size(WEST, 1) == 0)
-            r.input(WEST).push_flit(make_tagged_flit(dst, /*vc=*/1, /*flit_tail=*/1, 0x20));
+            r.input(WEST).push_flit(make_pinned_flit(dst, /*vc=*/1, /*flit_tail=*/1, 0x20));
         const std::size_t before = east.received.size();
         tick_return_credit_for_vc(r, east, E, /*keep_vc=*/1);
         for (std::size_t i = before; i < east.received.size(); ++i)
@@ -518,7 +536,7 @@ TEST(RouterVcArbitration, FlitLevelRrAcrossVcs) {
     uint8_t feed_vc = 0;
     for (int t = 0; t < 40 && east.received.size() < 8; ++t) {
         if (r.input_fifo_size(WEST, feed_vc) == 0)
-            r.input(WEST).push_flit(make_flit(dst, feed_vc, /*flit_tail=*/1));
+            r.input(WEST).push_flit(make_pinned_flit(dst, feed_vc, /*flit_tail=*/1));
         feed_vc ^= 1;  // alternate the input we top up each tick
         const std::size_t before = east.received.size();
         r.tick();
@@ -803,9 +821,12 @@ TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
 
     // Drive kPacketsPerVc single-flit packets per VC from WEST->EAST. Tag each
     // with a per-vc-increasing src_id so per-VC FIFO order can be checked at the
-    // sink. Single-flit packets keep the wormhole lock trivial; the point of this
-    // grid is parameter-space coverage (num_vc, depth), not multi-flit locking
-    // (covered by RouterWormhole.*).
+    // sink. All flits are pinned (fixed_vc=1) so the per-VC order check keys on
+    // a stable vc_id across VA — this grid doubles as fixed_vc-bypass coverage
+    // of the whole (num_vc, depth) space; the VA restamp path is covered by
+    // RouterVa*. Single-flit packets keep the wormhole lock trivial; the point
+    // of this grid is parameter-space coverage (num_vc, depth), not multi-flit
+    // locking (covered by RouterWormhole.*).
     constexpr int kPacketsPerVc = 3;
     // src_id label per (vc, packet): high nibble = vc, low nibble = sequence. With
     // num_vc<=8 and 3 packets this stays inside a byte and is unambiguous.
@@ -826,7 +847,7 @@ TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
             if (fed[vc] >= kPacketsPerVc) continue;
             if (r.input_fifo_size(WEST, static_cast<uint8_t>(vc)) <
                 static_cast<std::size_t>(depth)) {
-                r.input(WEST).push_flit(make_tagged_flit(dst, static_cast<uint8_t>(vc),
+                r.input(WEST).push_flit(make_pinned_flit(dst, static_cast<uint8_t>(vc),
                                                          /*flit_tail=*/1, label(vc, fed[vc])));
                 ++fed[vc];
                 break;  // one flit/input-port/tick (input register)
@@ -867,6 +888,322 @@ TEST_P(RouterGrid, EndToEndTrafficAcrossParameterSpace) {
 INSTANTIATE_TEST_SUITE_P(NumVcDepthGrid, RouterGrid,
                          ::testing::Combine(::testing::Values(1, 2, 4, 8),
                                             ::testing::Values(1, 2, 4, 8)));
+
+// --- VA stage (deprecated vc_router_util port) ------------------------------
+// Preferred-VC map, FVADA selection/overflow, worm no-overflow, fixed_vc
+// bypass, credit consume/return split. RTL provenance:
+// hw/deprecated/vc_router_util/ + hw/deprecated/floo_vc_router.sv.
+
+TEST(RouterVaPreferredMap, AllCellsAllNumVc) {
+    SCENARIO(
+        "preferred_vc: every (output, next-hop) cell of the floo_vc_assignment.sv:86-93 "
+        "XY-optimized map, num_vc 1..8 (whole expression % num_vc)");
+    using ni::cmodel::router::preferred_vc;
+    constexpr RouterPort L = RouterPort::LOCAL, N = RouterPort::NORTH, E = RouterPort::EAST,
+                         S = RouterPort::SOUTH, W = RouterPort::WEST;
+    // (this-hop output, next-hop route, pre-% preferred) — verbatim design table.
+    const struct {
+        RouterPort out, next;
+        uint32_t pref;
+    } kCells[] = {
+        {L, L, 0}, {L, N, 0}, {L, E, 0}, {L, S, 0}, {L, W, 0},  // :86 eject output
+        {N, L, 1}, {S, L, 1},                                   // :88 N/S -> eject
+        {E, L, 3}, {W, L, 3},                                   // :89 E/W -> eject
+        {N, N, 0}, {N, S, 0}, {S, N, 0}, {S, S, 0},             // :90 straight N/S
+        {E, N, 0}, {W, N, 0},                                   // :91
+        {E, S, 2}, {W, S, 1},                                   // :92
+        {E, E, 1}, {W, W, 2},                                   // :93
+    };
+    for (uint8_t num_vc = 1; num_vc <= 8; ++num_vc) {
+        for (const auto& c : kCells) {
+            EXPECT_EQ(preferred_vc(c.out, c.next, num_vc), static_cast<uint8_t>(c.pref % num_vc))
+                << "out=" << static_cast<int>(c.out) << " next=" << static_cast<int>(c.next)
+                << " num_vc=" << static_cast<int>(num_vc);
+        }
+    }
+}
+
+class RouterVaFvada : public ::testing::TestWithParam<int> {};
+
+TEST_P(RouterVaFvada, PreferredThenHighestIndexOverflowThenStall) {
+    SCENARIO(
+        "FVADA: preferred VC taken while not-full; when full, single-flit packets overflow "
+        "to the HIGHEST-index non-full VC (faithful quirk of the overwrite scan, "
+        "floo_vc_selection.sv:37-45 — do not 'fix'); all VCs full -> no grant");
+    const int num_vc = GetParam();
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = static_cast<uint8_t>(num_vc);
+    cfg.vc_depth = 1;  // one credit per output VC: each grant fills one VC
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // EAST; next hop EAST -> preferred 1 % num_vc
+    const uint8_t pref = static_cast<uint8_t>(1 % num_vc);
+
+    // Expected delivered out-VC sequence with credit never returned: preferred
+    // first, then the remaining VCs from the highest index down.
+    std::vector<uint8_t> expect{pref};
+    for (int v = num_vc - 1; v >= 0; --v) {
+        if (v != pref) expect.push_back(static_cast<uint8_t>(v));
+    }
+    for (std::size_t k = 0; k < expect.size(); ++k) {
+        r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/1));  // fixed_vc=0
+        for (int t = 0; t < 6 && east.received.size() < k + 1; ++t) r.tick();
+        ASSERT_EQ(east.received.size(), k + 1)
+            << "grant " << k << " missing (num_vc=" << num_vc << ")";
+        EXPECT_EQ(static_cast<uint8_t>(east.received[k].get_header_field("vc_id")), expect[k])
+            << "FVADA pick order wrong at grant " << k << " (num_vc=" << num_vc << ")";
+    }
+
+    // Every output VC exhausted: the next flit is not grantable (mech 7).
+    r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/1));
+    for (int t = 0; t < 6; ++t) r.tick();
+    EXPECT_EQ(east.received.size(), expect.size()) << "granted with zero credit on every VC";
+    EXPECT_EQ(r.input_fifo_size(WEST, 0), 1u);
+
+    // Returning the preferred VC's credit releases the stalled flit onto it.
+    r.receive_credit(E, pref);
+    for (int t = 0; t < 6 && east.received.size() < expect.size() + 1; ++t) r.tick();
+    ASSERT_EQ(east.received.size(), expect.size() + 1);
+    EXPECT_EQ(static_cast<uint8_t>(east.received.back().get_header_field("vc_id")), pref);
+}
+
+INSTANTIATE_TEST_SUITE_P(NumVc, RouterVaFvada, ::testing::Values(2, 4, 8));
+
+TEST(RouterVaWorm, HeadWaitsForPreferredFullBodyTailFollowLockedOutputVc) {
+    SCENARIO(
+        "Worm no-overflow: a fixed_vc=0 head (flit_tail=0) is granted ONLY on the preferred "
+        "VC (floo_vc_router.sv:295, floo_vc_assignment.sv:110-112) — preferred full stalls "
+        "the head even with other VCs free; once granted, body/tail ride locked_output_vc");
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    cfg.vc_depth = 3;  // fits the 3-flit worm in one input VC FIFO
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // EAST, preferred 1
+
+    // Exhaust EAST vc1 with three pinned vc1 single-flit packets, credit withheld.
+    for (std::size_t k = 0; k < 3; ++k) {
+        r.input(WEST).push_flit(make_pinned_flit(dst, /*vc=*/1, /*flit_tail=*/1));
+        for (int t = 0; t < 6 && east.received.size() < k + 1; ++t) r.tick();
+        ASSERT_EQ(east.received.size(), k + 1);
+    }
+    ASSERT_EQ(r.credit(E, 1), 0u);
+
+    // 3-flit fixed_vc=0 worm on input vc0: the head must idle while vc1 (its
+    // preferred VC) is full, even though vc0 has full credit.
+    r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/0));  // head
+    r.tick();
+    r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/0));  // body
+    r.tick();
+    r.input(WEST).push_flit(make_flit(dst, /*vc=*/0, /*flit_tail=*/1));  // tail
+    for (int t = 0; t < 4; ++t) r.tick();
+    EXPECT_EQ(east.received.size(), 3u) << "worm head overflowed off its preferred VC";
+    EXPECT_EQ(r.input_fifo_size(WEST, 0), 3u);
+    EXPECT_EQ(r.credit(E, 0), 3u) << "head consumed the wrong VC's credit";
+
+    // Return vc1 credit per delivery: the worm flows, every flit stamped vc1.
+    r.receive_credit(E, 1);
+    for (int t = 0; t < 16 && east.received.size() < 6; ++t) {
+        const std::size_t before = east.received.size();
+        r.tick();
+        for (std::size_t i = before; i < east.received.size(); ++i)
+            r.receive_credit(E, static_cast<uint8_t>(east.received[i].get_header_field("vc_id")));
+    }
+    ASSERT_EQ(east.received.size(), 6u);
+    for (std::size_t i = 3; i < 6; ++i)
+        EXPECT_EQ(static_cast<uint8_t>(east.received[i].get_header_field("vc_id")), 1u)
+            << "worm flit " << i << " left locked_output_vc";
+}
+
+TEST(RouterVaWorm, PinnedWormRidesNonPreferredVcNoAssert) {
+    SCENARIO(
+        "fixed_vc=1 worm pinned to a NON-preferred VC: every flit departs on the pinned VC, "
+        "the preferred VC's credit is untouched, and the locked-vs-preferred check "
+        "(conditioned on fixed_vc==0) does not fire");
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    const uint8_t dst = make_dst(3, 1);  // EAST, preferred 1; worm pinned to vc0
+
+    r.input(WEST).push_flit(make_pinned_flit(dst, /*vc=*/0, /*flit_tail=*/0));  // head
+    r.tick();
+    r.input(WEST).push_flit(make_pinned_flit(dst, /*vc=*/0, /*flit_tail=*/0));  // body
+    r.tick();
+    r.input(WEST).push_flit(make_pinned_flit(dst, /*vc=*/0, /*flit_tail=*/1));  // tail
+    for (int t = 0; t < 8; ++t) tick_and_return_credit(r, east, E);
+    ASSERT_EQ(east.received.size(), 3u);
+    for (const auto& f : east.received)
+        EXPECT_EQ(static_cast<uint8_t>(f.get_header_field("vc_id")), 0u) << "pin not honored";
+    EXPECT_EQ(r.credit(E, 1), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH))
+        << "pinned worm consumed the preferred VC's credit";
+}
+
+TEST(RouterVaCredit, ConsumeStampedVcReturnInputVc) {
+    SCENARIO(
+        "Credit split: the grant consumes credit on the VA-ASSIGNED output VC and restamps "
+        "it into the header; the upstream pulse returns the INPUT-side VC (the FIFO slot "
+        "freed)");
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    Router r(cfg);
+    FlitSink east;
+    CreditCounter west_up;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+    r.set_downstream(E, east);
+    r.set_upstream_credit(WEST, west_up);
+    // fixed_vc=0, input vc0, dst next-hop EAST -> assigned output vc1.
+    r.input(WEST).push_flit(make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/1));
+    r.tick();  // stage 1
+    r.tick();  // stage 2: grant
+    EXPECT_EQ(r.credit(E, 1), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH) - 1)
+        << "credit not consumed on the assigned VC";
+    EXPECT_EQ(r.credit(E, 0), static_cast<std::size_t>(NOC_ROUTER_VC_DEPTH))
+        << "credit consumed on the input VC";
+    r.tick();  // stage 3 + registered pulse
+    ASSERT_EQ(east.received.size(), 1u);
+    EXPECT_EQ(static_cast<uint8_t>(east.received[0].get_header_field("vc_id")), 1u)
+        << "header not restamped with the assigned VC";
+    ASSERT_EQ(west_up.pulses.size(), 1u);
+    EXPECT_EQ(west_up.pulses[0], 0u) << "upstream pulse must carry the input-side VC";
+}
+
+TEST(RouterVaDeath, LockedOutputVcVsPreferredMismatchAborts) {
+    SCENARIO(
+        "Fault injection: a fixed_vc=0 worm continuation whose recomputed preferred VC "
+        "diverges from locked_output_vc (same output, different next-hop) trips the "
+        "divergence assert");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(
+        {
+            RouterConfig cfg = center_cfg();
+            cfg.num_vc = 4;
+            Router r(cfg);
+            FlitSink east;
+            r.set_downstream(static_cast<std::size_t>(RouterPort::EAST), east);
+            const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
+            // Head dst (3,1): EAST out, next-hop EAST -> preferred 1. Locks EAST.
+            r.input(WEST).push_flit(make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/0));
+            r.tick();
+            r.tick();
+            // Continuation dst (2,1): still routes EAST here (route-check assert
+            // passes) but its next hop is LOCAL -> preferred 3 != locked 1.
+            r.input(WEST).push_flit(make_flit(make_dst(2, 1), /*vc=*/0, /*flit_tail=*/1));
+            r.tick();
+            r.tick();
+        },
+        "diverges");
+}
+
+// --- VA at fabric level (two routers, two VA stages per flit) ---------------
+
+using ni::cmodel::router::testing::TwoNodeFabric;
+
+TEST(RouterVaFabric, MultiHopPinnedVcPreservedUnderContention) {
+    SCENARIO(
+        "TwoNodeFabric num_vc=2: pinned (fixed_vc=1) packets cross two VA stages "
+        "(node1 WEST out prefers vc1, node0 LOCAL out prefers vc0) under contention from "
+        "restamped fixed_vc=0 self-traffic — every pinned flit ejects with its NI-chosen "
+        "vc_id intact");
+    TwoNodeFabric ch(/*num_vc=*/2);
+    constexpr uint8_t kPinnedTag = 0x50;  // low nibble carries the pinned vc
+    constexpr uint8_t kNoiseTag = 0xCC;
+    constexpr int kPinned = 8;
+    int pinned_sent = 0, noise_sent = 0, pinned_seen = 0;
+    for (int t = 0; t < 300 && pinned_seen < kPinned; ++t) {
+        if (pinned_sent < kPinned) {
+            const uint8_t vc = static_cast<uint8_t>(pinned_sent % 2);
+            if (ch.nmu_req_out(1).push_flit(make_pinned_flit(
+                    make_dst(0, 0), vc, /*flit_tail=*/1, static_cast<uint8_t>(kPinnedTag | vc))))
+                ++pinned_sent;
+        }
+        // Contending traffic: node0 self-addressed fixed_vc=0 packets fight for
+        // node0's LOCAL output (and get restamped by VA there).
+        if (ch.nmu_req_out(0).push_flit(
+                make_tagged_flit(make_dst(0, 0), /*vc=*/0, /*flit_tail=*/1, kNoiseTag)))
+            ++noise_sent;
+        ch.tick();
+        while (auto got = ch.nsu_req_in(0).pop_flit()) {
+            const auto s = static_cast<uint8_t>(got->get_header_field("src_id"));
+            if ((s & 0xF0) == kPinnedTag) {
+                ++pinned_seen;
+                EXPECT_EQ(static_cast<uint8_t>(got->get_header_field("vc_id")),
+                          static_cast<uint8_t>(s & 0x0F))
+                    << "pinned vc_id lost across the 2-hop VA path";
+            }
+        }
+    }
+    EXPECT_EQ(pinned_seen, kPinned) << "pinned packets did not all arrive";
+    EXPECT_GT(noise_sent, 0) << "no contention generated";
+}
+
+TEST(RouterVaFabric, SameStreakPacketOrderAcrossHopUnderContention) {
+    SCENARIO(
+        "U1 hole: two packets of one same-(dst,id) fixed_vc=1 streak (both pinned to one "
+        "VC) stay in injection order across a hop while fixed_vc=0 traffic from both nodes "
+        "contends for the same outputs");
+    TwoNodeFabric ch(/*num_vc=*/2);
+    constexpr uint8_t kP1 = 0xA1, kP2 = 0xA2, kNoiseTag = 0xCC;
+    // node1 injection schedule: noise around and between the streak members.
+    std::vector<ni::cmodel::Flit> node1_feed;
+    node1_feed.push_back(make_tagged_flit(make_dst(0, 0), 0, 1, kNoiseTag));
+    node1_feed.push_back(make_pinned_flit(make_dst(0, 0), /*vc=*/1, /*flit_tail=*/1, kP1));
+    node1_feed.push_back(make_tagged_flit(make_dst(0, 0), 0, 1, kNoiseTag));
+    node1_feed.push_back(make_pinned_flit(make_dst(0, 0), /*vc=*/1, /*flit_tail=*/1, kP2));
+    node1_feed.push_back(make_tagged_flit(make_dst(0, 0), 0, 1, kNoiseTag));
+    std::size_t fed = 0;
+    std::vector<uint8_t> eject_order;
+    for (int t = 0; t < 300 && eject_order.size() < node1_feed.size(); ++t) {
+        if (fed < node1_feed.size() && ch.nmu_req_out(1).push_flit(node1_feed[fed])) ++fed;
+        ch.nmu_req_out(0).push_flit(
+            make_tagged_flit(make_dst(0, 0), 0, 1, kNoiseTag));  // ok if refused
+        ch.tick();
+        while (auto got = ch.nsu_req_in(0).pop_flit()) {
+            const auto s = static_cast<uint8_t>(got->get_header_field("src_id"));
+            if (s == kP1 || s == kP2) eject_order.push_back(s);
+        }
+    }
+    auto p1 = std::find(eject_order.begin(), eject_order.end(), kP1);
+    auto p2 = std::find(eject_order.begin(), eject_order.end(), kP2);
+    ASSERT_TRUE(p1 != eject_order.end() && p2 != eject_order.end())
+        << "streak packets did not both arrive";
+    EXPECT_LT(p1 - eject_order.begin(), p2 - eject_order.begin())
+        << "second streak packet overtook the first";
+}
+
+TEST(RouterVaFabric, NoInputFifoOverflowUnderVaDivergenceAtVcDepth1) {
+    SCENARIO(
+        "Fault-injection SILENT check at vc_depth=1: fixed_vc=0 flits injected on input vc0 "
+        "are restamped to vc1 at node1's WEST output. If the grant consumed or gated credit "
+        "on the INPUT VC, node1 would over-grant into node0's depth-1 vc1 FIFO and the "
+        "stage-1 overflow assert would abort. Silence + full delivery proves the credit "
+        "split sits on the assigned output VC");
+    TwoNodeFabric ch(/*num_vc=*/2, /*vc_depth=*/1);
+    int accepted = 0, ejected = 0;
+    // Phase 1: eject stalled (never popped) — occupancy pushed to the credit bound.
+    for (int t = 0; t < 60; ++t) {
+        if (ch.nmu_req_out(1).push_flit(make_flit(make_dst(0, 0), /*vc=*/0, /*flit_tail=*/1)))
+            ++accepted;
+        ch.tick();
+    }
+    EXPECT_GT(accepted, 0);
+    // Phase 2: drain — every accepted flit must arrive (none lost, no abort).
+    for (int t = 0; t < 200 && ejected < accepted; ++t) {
+        ch.tick();
+        while (ch.nsu_req_in(0).pop_flit().has_value()) ++ejected;
+    }
+    EXPECT_EQ(ejected, accepted) << "flits lost under VA divergence at vc_depth=1";
+}
 
 TEST(RouterDatapathDeath, BadVcIdAborts) {
     SCENARIO("Router: input flit vc_id >= num_vc -> assert+abort");
