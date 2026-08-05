@@ -4,22 +4,35 @@
 // nmu::Nmu but asymmetric: NSU has no Rob (no reorder buffer on response
 // side) and no addr_trans (uses incoming flit dst_id directly).
 //
-// Pipeline (req in, AXI out):
-//   external NocReqIn ──> Depacketize (allocates meta in MetaBuffer)
+// Pipeline (req in, AXI out; REQ network -- Depacketize's REQ ingress -- and
+// DAT network -- Depacketize's second, DAT, ingress, S3a T4; DataAw/DataW/
+// DataR unwired until T6 steering, exercised only by ctest mocks until
+// then. Both ingresses demux into the SAME s1_aw_/s1_w_/s1_ar_ registers --
+// see nsu::Depacketize's class comment):
+//   external NocReqIn (REQ + DAT) ──> Depacketize (allocates meta in MetaBuffer)
 //     ──> AxiMasterPort ──> external AXI slave
 //
-// Pipeline (rsp from AXI slave, NoC out):
+// Pipeline (rsp from AXI slave, NoC out; RSP network -- B/NarrowR):
 //   external B/R from AXI slave ──> AxiMasterPort ──> Packetize{b,r}
 //     (reads meta from MetaBuffer) ──> WormholeArbiter<NocRspOut>(2 in,
 //     no pairing) ──> VcArbiter ──> external NocRspOut
 //
+// DAT egress face (S3a T4 -- DataR; single input, so no wormhole arbiter in
+// front -- a 1-input wormhole arbiter is dead code, per stage design §5.2.
+// Packetize does not steer to it yet (T6); exercised only by ctest mocks
+// pushing directly via dat_vc_arbiter().push_flit(...) until then):
+//   ctest mock ──> VcArbiter(dat_num_vc) ──> external NocRspOut (ctest mock / DPI bridge)
+//
 // Per-cycle tick order: reverse-order staged pipeline — later
 // stages drain before earlier stages fill, so a beat advances one stage/tick:
 //   wormhole_arbiter_.tick(); vc_arbiter_.tick();  // rsp S3 (-> NoC)
+//   dat_vc_arbiter_.tick();                        // DAT egress drain (independent network)
 //   packetize_.tick();                             // rsp S2
 //   axi_master_port_.tick();                       // rsp S1 + req S2
-//   depacketize_.tick();                           // req S1
-// See the per-stage commentary in Nsu::tick() below.
+//   depacketize_.tick();                           // req S1 (drains BOTH REQ and DAT ingresses)
+// See the per-stage commentary in Nsu::tick() below. REQ/RSP/DAT are
+// independent networks draining into disjoint sinks, so relative tick order
+// across networks introduces no coupling (S3a stage design §5.4).
 //
 // Lifetime: Nsu deletes move/copy. Member order respects ctor ref deps.
 //
@@ -60,13 +73,21 @@ struct NsuConfig {
     //    beats share (dst_id, rid) so the whole burst lands on one VC.
     std::vector<uint8_t> write_rsp_vcs{};
     std::vector<uint8_t> read_rsp_vcs{};
+    // DAT face VC count (S3a T4; R only -- no B rides DAT, per network map §1).
+    // NOC_NUM_VC is DAT's VC count going forward (specgen T1 note).
+    std::size_t dat_num_vc = ni::NOC_NUM_VC;
     std::size_t wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
     std::size_t vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
 };
 
 class Nsu {
   public:
-    Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut& downstream_rsp);
+    // upstream_dat_req / downstream_dat_rsp: the DAT face (S3a T4). Every
+    // assembly site wires these explicitly -- no default -- since Nsu is the
+    // top-level product-facing class; see router/null_adapters.hpp for the
+    // sentinel callers that don't yet exercise DAT traffic pass.
+    Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut& downstream_rsp,
+        router::NocReqIn& upstream_dat_req, router::NocRspOut& downstream_dat_rsp);
 
     Nsu(const Nsu&) = delete;
     Nsu(Nsu&&) = delete;
@@ -74,6 +95,10 @@ class Nsu {
     Nsu& operator=(Nsu&&) = delete;
 
     AxiMasterPort& axi_master_port() noexcept { return axi_master_port_; }
+
+    // DAT egress face (S3a T4). Non-const: until T6 steering wires Packetize
+    // to it, ctest mocks push R flits directly via dat_vc_arbiter().push_flit(...).
+    VcArbiter& dat_vc_arbiter() noexcept { return dat_vc_arbiter_; }
 
     void tick();
 
@@ -123,15 +148,20 @@ class Nsu {
     //   1. cfg_ + external refs.
     //   2. vc_arbiter_ wraps downstream_rsp_.
     //   3. wormhole_arbiter_ wraps vc_arbiter_.
-    //   4. meta_buffer_ (no upstream dep).
-    //   5. packetize_ takes wormhole_arbiter_.input(0/1) + meta_buffer_.
-    //   6. depacketize_ takes upstream_req_ + meta_buffer_.
-    //   7. axi_master_port_ takes depacketize_ + packetize_.
+    //   4. dat_vc_arbiter_ wraps downstream_dat_rsp_ (independent DAT egress
+    //      face, S3a T4; no wormhole arbiter -- single input, per §5.2).
+    //   5. meta_buffer_ (no upstream dep).
+    //   6. packetize_ takes wormhole_arbiter_.input(0/1) + meta_buffer_.
+    //   7. depacketize_ takes upstream_req_ + upstream_dat_req_ + meta_buffer_.
+    //   8. axi_master_port_ takes depacketize_ + packetize_.
     NsuConfig cfg_;
     router::NocReqIn& upstream_req_;
     router::NocRspOut& downstream_rsp_;
+    router::NocReqIn& upstream_dat_req_;
+    router::NocRspOut& downstream_dat_rsp_;
     VcArbiter vc_arbiter_;
     router::WormholeArbiter<router::NocRspOut> wormhole_arbiter_;
+    VcArbiter dat_vc_arbiter_;
     MetaBuffer meta_buffer_;
     Packetize packetize_;
     Depacketize depacketize_;
@@ -149,18 +179,36 @@ inline VcArbiter make_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downst
                                        cfg.vc_arbiter_pending_depth);
 }
 
+// DAT face carries R only (no B rides DAT in S3a; see stage design §1),
+// so write_rsp_vcs/read_rsp_vcs are both "every DAT VC" -- read is the only
+// candidate list ever consulted (nsu::VcArbiter::select_vc_for_axi_ch's
+// fixed_vc=true path for is_r()); write_rsp_vcs just keeps the ctor's assert
+// satisfied and gives a defensive round-robin instead of an empty candidate
+// set if a misrouted B ever reached this arbiter.
+inline VcArbiter make_dat_vc_arbiter(const NsuConfig& cfg, router::NocRspOut& downstream) {
+    std::vector<uint8_t> vcs(cfg.dat_num_vc);
+    for (std::size_t i = 0; i < cfg.dat_num_vc; ++i) vcs[i] = static_cast<uint8_t>(i);
+    return VcArbiter::read_write_split(downstream, cfg.dat_num_vc, vcs, vcs,
+                                       cfg.vc_arbiter_pending_depth);
+}
+
 }  // namespace detail
 
-inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut& downstream_rsp)
+inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut& downstream_rsp,
+                router::NocReqIn& upstream_dat_req, router::NocRspOut& downstream_dat_rsp)
     : cfg_(std::move(cfg)),
       upstream_req_(upstream_req),
       downstream_rsp_(downstream_rsp),
+      upstream_dat_req_(upstream_dat_req),
+      downstream_dat_rsp_(downstream_dat_rsp),
       vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_rsp_)),
       wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/2, std::vector<router::ChannelPairing>{},
                         cfg_.wormhole_per_input_depth),
+      dat_vc_arbiter_(detail::make_dat_vc_arbiter(cfg_, downstream_dat_rsp_)),
       meta_buffer_(cfg_.port_params.meta_buffer_max_outstanding),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), meta_buffer_, cfg_.src_id),
-      depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids),
+      depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids,
+                   upstream_dat_req_),
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {
@@ -187,9 +235,12 @@ inline void Nsu::tick() {
     //   S1: depacketize_.tick() decodes a new flit into s1_* registers.
     wormhole_arbiter_.tick();  // RSP S3a: drain S2→S3 boundary to VcArbiter
     vc_arbiter_.tick();        // RSP S3b: drain VcArbiter pending to NoC
-    packetize_.tick();         // RSP S2: read S1 regs, push to S2→S3 boundary
-    axi_master_port_.tick();   // RSP S1 + REQ S2: bounded B/R accept + req drain
-    depacketize_.tick();       // REQ S1: decode flit into S1 stage registers
+    // DAT egress (S3a T4): independent network, own drain; unwired until T6
+    // steering feeds it, so this is a no-op until a ctest mock pushes into it.
+    dat_vc_arbiter_.tick();
+    packetize_.tick();        // RSP S2: read S1 regs, push to S2→S3 boundary
+    axi_master_port_.tick();  // RSP S1 + REQ S2: bounded B/R accept + req drain
+    depacketize_.tick();      // REQ S1: decode flit into S1 stage registers
 }
 
 }  // namespace ni::cmodel::nsu

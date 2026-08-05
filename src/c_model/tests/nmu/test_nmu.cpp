@@ -8,6 +8,7 @@
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nmu/nmu_standalone.hpp"
+#include "router/null_adapters.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -44,7 +45,10 @@ TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
     cfg.port_params.r_queue_depth = 16;
     cfg.port_params.depkt_b_q_depth = 16;
     cfg.port_params.depkt_r_q_depth = 16;
-    Nmu nmu(cfg, channel.nmu_req_out(), channel.nmu_rsp_in());
+    // DAT face (S3a T4): unused by this smoke test, wired to the shared
+    // null sentinel (router/null_adapters.hpp).
+    Nmu nmu(cfg, channel.nmu_req_out(), channel.nmu_rsp_in(), ni::cmodel::router::null_req_out(),
+            ni::cmodel::router::null_rsp_in());
 
     EXPECT_EQ(&nmu.axi_slave_port(), &nmu.axi_slave_port())
         << "axi_slave_port() returns stable reference";

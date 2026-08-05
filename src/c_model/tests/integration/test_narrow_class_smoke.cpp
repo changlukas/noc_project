@@ -30,6 +30,7 @@
 #include "nmu/sam_yaml.hpp"
 #include "nsu/nsu.hpp"
 #include "nsu/port_params.hpp"
+#include "router/null_adapters.hpp"
 #include <deque>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -38,6 +39,7 @@
 namespace axi = ni::cmodel::axi;
 namespace nmu = ni::cmodel::nmu;
 namespace nsu = ni::cmodel::nsu;
+namespace router = ni::cmodel::router;
 namespace test = ni::cmodel::testing;
 
 namespace {
@@ -138,11 +140,15 @@ TEST(NarrowClassSmoke, ConfigSpaceEndToEndZeroMismatch) {
     nmu_cfg.read_rob_mode = nmu::RobMode::Enabled;  // exercises the RoB read-entry lane path too
     test::ChannelModelParams cm_params{};
     test::ChannelModel channel(cm_params.req_depth, cm_params.rsp_depth);
-    nmu::Nmu nmu_inst(nmu_cfg, channel.nmu_req_out(), channel.nmu_rsp_in());
+    // DAT face (S3a T4): unused by this narrow-class smoke test (no steering
+    // until T6), wired to the shared null sentinel (router/null_adapters.hpp).
+    nmu::Nmu nmu_inst(nmu_cfg, channel.nmu_req_out(), channel.nmu_rsp_in(), router::null_req_out(),
+                      router::null_rsp_in());
 
     nsu::NsuConfig nsu_cfg{};
     nsu_cfg.src_id = kNsuSrcId;
-    nsu::Nsu nsu_inst(nsu_cfg, channel.req_in(), channel.rsp_out());
+    nsu::Nsu nsu_inst(nsu_cfg, channel.req_in(), channel.rsp_out(), router::null_req_in(),
+                      router::null_rsp_out());
 
     axi::AxiMasterT<nmu::AxiSlavePort> master(
         yaml_path, nmu_inst.axi_slave_port(),

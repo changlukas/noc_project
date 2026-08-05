@@ -3,24 +3,42 @@
 // class with a single tick() entrypoint, hiding the manual wiring that
 // previously lived in test_request_response_loopback.cpp.
 //
-// Pipeline (req path):
+// Pipeline (req path, REQ network -- NarrowAw/NarrowW/NarrowAr/DataAr):
 //   external AXI master ──> AxiSlavePort ──> Rob ──> Packetize{aw,w,ar}
 //     ──> WormholeArbiter<NocReqOut>(3 in, pairing {{0,1}}) ──> VcArbiter
 //     ──> external NocReqOut (ChannelModel or DPI bridge)
 //
-// Pipeline (rsp path):
+// DAT egress face (S3a T4 -- DataAw/DataW; per-network arbiter pair, {AW,W}
+// lock independent of the REQ face's lock so a DAT AW never blocks a REQ W
+// and vice versa. Steering (T6) has not moved yet: Packetize still emits
+// everything on the REQ face above; this pair is exercised only by ctest
+// mocks pushing directly into dat_wormhole_arbiter().input(0/1) until then):
+//   ctest mock ──> WormholeArbiter<NocReqOut>(2 in, pairing {{0,1}}) ──>
+//     VcArbiter(dat_num_vc) ──> external NocReqOut (ctest mock / DPI bridge)
+//
+// Pipeline (rsp path, RSP network -- NarrowB/NarrowR/DataB):
 //   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort
 //     ──> back to external AXI master
 //
+// DAT ingress (S3a T4 -- DataR; Depacketize's second physical ingress,
+// draining into the SAME b_q_/r_q_ queues as the RSP ingress -- see
+// nmu::Depacketize's class comment):
+//   external NocRspIn ──> Depacketize (second ingress) ──> Rob ──> AxiSlavePort
+//
 // Per-cycle tick order (exact sequence in Nmu::tick()):
 //   req: wormhole_arbiter_.tick(); vc_arbiter_.tick();
+//        dat_wormhole_arbiter_.tick(); dat_vc_arbiter_.tick();
 //        req_s1_bridge_.tick(packetize_); axi_slave_port_.tick_req();
 //   rsp: drain_rsp_b_output_(); drain_rsp_r_output_();
 //        advance_rsp_b_shift_(); advance_rsp_r_shift_();
 //        drain_rsp_s2_b_(); advance_rsp_s2_b_();  // B RoB is always on
 //        read_rob_mode == Enabled: drain_rsp_s2_r_(); advance_rsp_s2_r_();
 //        read_rob_mode == Disabled: drain_rsp_robless_r_();
-//        depacketize_.tick();
+//        depacketize_.tick();  // drains BOTH the RSP and DAT ingresses
+//
+// REQ/DAT are independent networks draining into disjoint sinks, so their
+// relative tick order introduces no coupling (S3a stage design §5.4); DAT
+// calls sit next to their REQ counterparts above for readability only.
 //
 // Lifetime: Nmu deletes move/copy (WormholeArbiter is non-movable).
 // Member declaration order respects ctor ref dependencies — see private
@@ -151,6 +169,10 @@ struct NmuConfig {
     // write_vc/read_vc.
     std::vector<uint8_t> write_vcs{};
     std::vector<uint8_t> read_vcs{};
+    // DAT face VC count (S3a T4; AW/W only -- no AR rides DAT). NOC_NUM_VC is
+    // DAT's VC count going forward (specgen T1 note; REQ/RSP got their own
+    // NOC_{REQ,RSP}_NUM_VC=1 params). Round-robins across [0, dat_num_vc).
+    std::size_t dat_num_vc = ni::NOC_NUM_VC;
     std::size_t wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
     std::size_t vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
     std::size_t ni_rsp_extra_depth = 0;  // extra shift stages on the response path
@@ -158,7 +180,12 @@ struct NmuConfig {
 
 class Nmu {
   public:
-    Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRspIn& downstream_rsp);
+    // downstream_dat_req / downstream_dat_rsp: the DAT face (S3a T4). Every
+    // assembly site wires these explicitly -- no default -- since Nmu is the
+    // top-level product-facing class; see router/null_adapters.hpp for the
+    // sentinel callers that don't yet exercise DAT traffic pass.
+    Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRspIn& downstream_rsp,
+        router::NocReqOut& downstream_dat_req, router::NocRspIn& downstream_dat_rsp);
 
     Nmu(const Nmu&) = delete;
     Nmu(Nmu&&) = delete;
@@ -174,6 +201,14 @@ class Nmu {
     // Test introspection (optional getters; add only as test code needs)
     const Rob& rob() const noexcept { return rob_; }
     const VcArbiter& vc_arbiter() const noexcept { return vc_arbiter_; }
+
+    // DAT egress face (S3a T4). Non-const: until T6 steering wires Packetize
+    // to it, ctest mocks push AW/W flits directly via
+    // dat_wormhole_arbiter().input(0/1).push_flit(...).
+    router::WormholeArbiter<router::NocReqOut>& dat_wormhole_arbiter() noexcept {
+        return dat_wormhole_arbiter_;
+    }
+    const VcArbiter& dat_vc_arbiter() const noexcept { return dat_vc_arbiter_; }
     std::size_t stage_occupancy(NiPath path, std::size_t stage, uint8_t axi_ch) const {
         if (path == NiPath::NmuReq) {
             // NmuReq: 3 stages
@@ -252,16 +287,23 @@ class Nmu {
     //   1. cfg_ + external downstream refs (no deps).
     //   2. vc_arbiter_ wraps downstream_req_.
     //   3. wormhole_arbiter_ wraps vc_arbiter_ as its Downstream.
-    //   4. depacketize_ wraps downstream_rsp_ (req path independent).
-    //   5. packetize_ takes wormhole_arbiter_.input(0/1/2) (req path).
-    //   6. req_s1_bridge_ stages ROB-admitted requests before Packetize.
-    //   7. rob_ takes req_s1_bridge_ + depacketize_.
-    //   7. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
+    //   4. dat_vc_arbiter_ wraps downstream_dat_req_ (independent DAT egress
+    //      face, S3a T4; unwired until T6 steering, exercised by ctest mocks).
+    //   5. dat_wormhole_arbiter_ wraps dat_vc_arbiter_ (own {AW,W} lock, per §5.2).
+    //   6. depacketize_ wraps downstream_rsp_ + downstream_dat_rsp_ (req path independent).
+    //   7. packetize_ takes wormhole_arbiter_.input(0/1/2) (req path).
+    //   8. req_s1_bridge_ stages ROB-admitted requests before Packetize.
+    //   9. rob_ takes req_s1_bridge_ + depacketize_.
+    //   9. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
     NmuConfig cfg_;
     router::NocReqOut& downstream_req_;
     router::NocRspIn& downstream_rsp_;
+    router::NocReqOut& downstream_dat_req_;
+    router::NocRspIn& downstream_dat_rsp_;
     VcArbiter vc_arbiter_;
     router::WormholeArbiter<router::NocReqOut> wormhole_arbiter_;
+    VcArbiter dat_vc_arbiter_;
+    router::WormholeArbiter<router::NocReqOut> dat_wormhole_arbiter_;
     Depacketize depacketize_;
     Packetize packetize_;
     NmuReqS1Bridge req_s1_bridge_;
@@ -284,17 +326,36 @@ inline VcArbiter make_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downst
                                        cfg.vc_arbiter_pending_depth);
 }
 
+// DAT face carries AW/W only (no AR rides DAT in S3a; see stage design §5.2),
+// so write_vcs/read_vcs are both "every DAT VC" -- write is the only
+// candidate list ever consulted, read_vcs just keeps the ctor's assert (every
+// candidate < num_vc) satisfied and gives a defensive round-robin instead of
+// an empty candidate set if a misrouted AR ever reached this arbiter.
+inline VcArbiter make_dat_vc_arbiter(const NmuConfig& cfg, router::NocReqOut& downstream) {
+    std::vector<uint8_t> vcs(cfg.dat_num_vc);
+    for (std::size_t i = 0; i < cfg.dat_num_vc; ++i) vcs[i] = static_cast<uint8_t>(i);
+    return VcArbiter::read_write_split(downstream, cfg.dat_num_vc, vcs, vcs,
+                                       cfg.vc_arbiter_pending_depth);
+}
+
 }  // namespace detail
 
-inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRspIn& downstream_rsp)
+inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRspIn& downstream_rsp,
+                router::NocReqOut& downstream_dat_req, router::NocRspIn& downstream_dat_rsp)
     : cfg_(std::move(cfg)),
       downstream_req_(downstream_req),
       downstream_rsp_(downstream_rsp),
+      downstream_dat_req_(downstream_dat_req),
+      downstream_dat_rsp_(downstream_dat_rsp),
       vc_arbiter_(detail::make_vc_arbiter(cfg_, downstream_req_)),
       wormhole_arbiter_(vc_arbiter_, /*num_inputs=*/3, std::vector<router::ChannelPairing>{{0, 1}},
                         cfg_.wormhole_per_input_depth),
+      dat_vc_arbiter_(detail::make_dat_vc_arbiter(cfg_, downstream_dat_req_)),
+      dat_wormhole_arbiter_(dat_vc_arbiter_, /*num_inputs=*/2,
+                            std::vector<router::ChannelPairing>{{0, 1}},
+                            cfg_.wormhole_per_input_depth),
       depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
-                   cfg_.port_params.depkt_r_q_depth),
+                   cfg_.port_params.depkt_r_q_depth, downstream_dat_rsp_),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
                  cfg_.src_id, cfg_.sam),
       req_s1_bridge_(),
@@ -309,6 +370,8 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
 inline void Nmu::tick() {
     wormhole_arbiter_.tick();
     vc_arbiter_.tick();
+    dat_wormhole_arbiter_.tick();
+    dat_vc_arbiter_.tick();
     req_s1_bridge_.tick(packetize_);
     axi_slave_port_.tick_req();
 

@@ -33,6 +33,14 @@ class NocReqOut {
     // single-VC fixtures); overrides should return false when the
     // sender-side per-VC outstanding count has reached the configured
     // depth.
+    //
+    // S3a: on the REQ/RSP faces this predicate carries no real credit
+    // counter -- the wrap boundary there is ready/valid (spec §4.3), and
+    // credit_avail(vc) reports downstream `ready` instead. DAT keeps real
+    // per-VC credit (the credit Router still serves it). Every caller
+    // (nmu::VcArbiter's drain, ni::router::WormholeArbiter) treats the two
+    // as the same predicate; the name stays imprecise for REQ/RSP by
+    // design -- renaming it is S3b's job, not this stage's.
     virtual bool credit_avail(uint8_t /*vc_id*/) const { return true; }
 };
 

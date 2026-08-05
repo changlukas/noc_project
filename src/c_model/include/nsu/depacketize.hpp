@@ -2,6 +2,7 @@
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
+#include "router/null_adapters.hpp"
 #include "router/req_in.hpp"
 #include "ni/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
@@ -15,8 +16,12 @@
 
 namespace ni::cmodel::nsu {
 
-// NSU-side request depacketizer. Stateful demux: tick() pulls flits from
-// NocReqIn, reads axi_ch, and parks the flit in a per-channel S1 stage register.
+// NSU-side request depacketizer. Stateful demux: tick() pulls flits from two
+// independent NocReqIn ingresses -- REQ (today's shape) and DAT (S3a T4;
+// unwired until T6 steering, exercised only by ctest mocks until then) --
+// reads axi_ch, and parks the flit in the SAME per-channel S1 stage register
+// (S3a stage design §5.2: "second ingress + per-network pending_; s1_aw_/
+// s1_w_/s1_ar_ stay shared" -- both classes already share s1_w_ today).
 // tick() touches no MetaBuffer state and decodes nothing but W.
 //
 // pop_aw() / pop_ar() are the drain stage. Each decodes its flit, remaps the
@@ -36,8 +41,9 @@ namespace ni::cmodel::nsu {
 // handled by a downstream W-meta FIFO.
 class Depacketize : public RequestDepacketizer {
   public:
-    Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t max_unique_ids)
-        : req_in_(req_in), meta_(meta), max_unique_ids_(max_unique_ids) {
+    Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t max_unique_ids,
+                router::NocReqIn& dat_req_in = router::null_req_in())
+        : req_in_(req_in), dat_req_in_(dat_req_in), meta_(meta), max_unique_ids_(max_unique_ids) {
         // Every path that configures an NSU funnels through here (YAML loader, co-sim
         // wrap defaults, direct NsuConfig test fixtures), so this is the config trust
         // boundary: validate with a throw, not an assert, so a misconfigured value fails
@@ -86,9 +92,11 @@ class Depacketize : public RequestDepacketizer {
 
   private:
     router::NocReqIn& req_in_;
+    router::NocReqIn& dat_req_in_;
     MetaBuffer& meta_;
     std::size_t max_unique_ids_;
-    std::optional<Flit> pending_;
+    std::optional<Flit> pending_req_;
+    std::optional<Flit> pending_dat_;
 
     // AW / AR hold the raw flit until pop_aw / pop_ar admit it: the drain stage
     // needs the header's src_id / ordering_req / ordering_tag to allocate the MetaBuffer
@@ -120,6 +128,7 @@ class Depacketize : public RequestDepacketizer {
     static axi::AwBeat decode_aw(const Flit& f);
     axi::WBeat decode_w(const Flit& f);
     static axi::ArBeat decode_ar(const Flit& f);
+    void drain_ingress_(router::NocReqIn& src, std::optional<Flit>& pending);
 };
 
 inline axi::AwBeat Depacketize::decode_aw(const Flit& f) {
@@ -181,25 +190,27 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
     return b;
 }
 
-// tick() is the S1 stage: park <=1 flit per channel per tick into the S1
-// stage registers (only W is decoded here; AW/AR are decoded at the drain).
-// If a register is already occupied (not yet consumed by the S2 AxiMasterPort),
-// backpressure the flit into pending_ (head-of-line blocking on single-FIFO
-// ingress, same semantics as the original queue-based implementation). tick()
-// touches no MetaBuffer state; allocation happens in pop_aw / pop_ar.
+// drain_ingress_ is the S1 stage for one physical ingress: park <=1 flit per
+// channel per tick into the S1 stage registers (only W is decoded here;
+// AW/AR are decoded at the drain). If a register is already occupied (not
+// yet consumed by the S2 AxiMasterPort), backpressure the flit into this
+// ingress's own `pending` stash (head-of-line blocking on single-FIFO
+// ingress, same semantics as the original queue-based implementation).
+// Touches no MetaBuffer state; allocation happens in pop_aw / pop_ar.
 // Single-ingress HOL note: unlike the NMU request path, NSU depacketize has NO
 // source-side pairing lock on ingress. It demuxes into independent S1 registers
 // that drain into bounded AxiMasterPort queues, which drain to the slave.
-// The pending_ HOL is inherent to a single VC (AW/W/AR serialize on one channel)
-// but cannot self-cycle: no ingress resource waits on a downstream that waits
-// back on it. Given the slave eventually drains, pending_ always clears.
-inline void Depacketize::tick() {
+// The per-ingress HOL is inherent to a single VC (AW/W/AR serialize on one
+// channel) but cannot self-cycle: no ingress resource waits on a downstream
+// that waits back on it. Given the slave eventually drains, `pending` always
+// clears.
+inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Flit>& pending) {
     while (true) {
         Flit f;
-        if (pending_) {
-            f = *pending_;
+        if (pending) {
+            f = *pending;
         } else {
-            auto opt = req_in_.pop_flit();
+            auto opt = src.pop_flit();
             if (!opt) return;
             f = *opt;
         }
@@ -208,7 +219,7 @@ inline void Depacketize::tick() {
             case ni::AXI_CH_NarrowAw:
             case ni::AXI_CH_DataAw:
                 if (s1_aw_.full()) {
-                    pending_ = f;
+                    pending = f;
                     return;
                 }
                 s1_aw_.accept(f);
@@ -216,7 +227,8 @@ inline void Depacketize::tick() {
                 // beats that follow need the AW's address basis before pop_aw
                 // ever runs (W is decoded here, at arrival; pop_aw may drain
                 // later, rate-limited to <=1/tick and gated on meta_.write_full()).
-                // Narrow class only -- see w_addr_fifo_'s comment.
+                // Narrow class only -- see w_addr_fifo_'s comment. Narrow class
+                // is REQ-exclusive (S3a §1), so this never races the DAT ingress.
                 if (ch == ni::AXI_CH_NarrowAw) {
                     const axi::AwBeat aw = decode_aw(f);
                     w_addr_fifo_.push_back(
@@ -226,7 +238,7 @@ inline void Depacketize::tick() {
             case ni::AXI_CH_NarrowW:
             case ni::AXI_CH_DataW:
                 if (s1_w_.full()) {
-                    pending_ = f;
+                    pending = f;
                     return;
                 }
                 s1_w_.accept(decode_w(f));
@@ -234,22 +246,22 @@ inline void Depacketize::tick() {
             case ni::AXI_CH_NarrowAr:
             case ni::AXI_CH_DataAr:
                 if (s1_ar_.full()) {
-                    pending_ = f;
+                    pending = f;
                     return;
                 }
                 s1_ar_.accept(f);
                 break;
             default:
                 assert(false &&
-                       "nsu::Depacketize::tick: NocReqIn delivered flit with axi_ch outside "
-                       "{NarrowAw, NarrowW, NarrowAr, DataAw, DataW, DataAr} — NSU request path "
-                       "only accepts request channels. Likely cause: NMU packetizer stamped "
+                       "nsu::Depacketize::drain_ingress_: NocReqIn delivered flit with axi_ch "
+                       "outside {NarrowAw, NarrowW, NarrowAr, DataAw, DataW, DataAr} — NSU request "
+                       "path only accepts request channels. Likely cause: NMU packetizer stamped "
                        "wrong axi_ch into a request flit, NoC fabric misrouted a response flit "
                        "into the request ingress, or codegen drift changed ni::AXI_CH_* encoding "
                        "without rebuilding both sides.");
                 std::abort();
         }
-        pending_.reset();
+        pending.reset();
         // S1 registers accept only one flit per channel per tick.
         // After placing a flit in a register, stop advancing the ingress
         // stream for that channel (subsequent flits for any channel remain
@@ -260,10 +272,19 @@ inline void Depacketize::tick() {
         //
         // The while(true) loop naturally handles this: after the switch we
         // loop back to pull the next flit. When a channel's register is
-        // full, the next flit for that channel goes to pending_. Because
-        // pending_ is a single-slot stash, only one channel can be stalled
-        // at a time (head-of-line blocking on the single ingress stream).
+        // full, the next flit for that channel goes to `pending`. Because
+        // `pending` is a single-slot stash, only one channel can be stalled
+        // at a time per ingress (head-of-line blocking on that ingress's
+        // single stream). The two ingresses drain independently -- REQ
+        // blocked on a full register does not stall DAT, and vice versa.
     }
+}
+
+// tick(): drain both physical ingresses (REQ, DAT) into the shared S1
+// registers. See the class comment for why sharing is correct.
+inline void Depacketize::tick() {
+    drain_ingress_(req_in_, pending_req_);
+    drain_ingress_(dat_req_in_, pending_dat_);
 }
 
 // pop_aw/pop_w/pop_ar: S2 consumer interface — take from the S1 register.

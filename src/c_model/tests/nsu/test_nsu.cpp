@@ -7,6 +7,7 @@
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nsu/nsu_standalone.hpp"
+#include "router/null_adapters.hpp"
 #include <cstdint>
 #include <gtest/gtest.h>
 
@@ -32,7 +33,10 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
     cfg.port_params.r_queue_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
     cfg.port_params.meta_buffer_max_unique_ids = 256;
-    Nsu nsu(cfg, channel.nsu_req_in(0), channel.nsu_rsp_out(0));
+    // DAT face (S3a T4): unused by this smoke test, wired to the shared
+    // null sentinel (router/null_adapters.hpp).
+    Nsu nsu(cfg, channel.nsu_req_in(0), channel.nsu_rsp_out(0), ni::cmodel::router::null_req_in(),
+            ni::cmodel::router::null_rsp_out());
 
     EXPECT_EQ(&nsu.axi_master_port(), &nsu.axi_master_port())
         << "axi_master_port() returns stable reference";

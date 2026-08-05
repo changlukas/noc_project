@@ -1,6 +1,7 @@
 #pragma once
 #include "axi/types.hpp"
 #include "flit.hpp"
+#include "router/null_adapters.hpp"
 #include "router/rsp_in.hpp"
 #include "response_io.hpp"
 #include <cassert>
@@ -12,18 +13,23 @@
 
 namespace ni::cmodel::nmu {
 
-// NMU-side response depacketizer. Stateful demux: tick() pulls from
-// NocRspIn and routes B/R flits into per-channel deques. Upstream port
-// calls pop_b/pop_r to serve from those queues.
+// NMU-side response depacketizer. Stateful demux: tick() pulls from two
+// independent NocRspIn ingresses -- RSP (NarrowB/NarrowR/DataB, today's
+// shape) and DAT (DataR, S3a T4; unwired until T6 steering, exercised only
+// by ctest mocks until then) -- and routes B/R flits into the SAME
+// per-channel deques (S3a stage design §5.2: "second ingress + per-network
+// pending_"). Upstream port calls pop_b/pop_r to serve from those queues.
 //
 // Pending-flit stash semantics: if a pulled flit's target queue is full,
-// the flit is held in `pending_` and re-attempted next tick. This blocks
-// any other flits behind it (head-of-line blocking on single-FIFO ingress).
-// This is intentional, not a bug.
+// the flit is held in that ingress's own `pending_` and re-attempted next
+// tick. This blocks any other flits behind it on THAT ingress only
+// (head-of-line blocking on a single-FIFO link) -- the two ingresses stall
+// independently since each is a physically separate link.
 class Depacketize : public ResponseDepacketizer {
   public:
-    Depacketize(router::NocRspIn& rsp_in, std::size_t b_q_depth, std::size_t r_q_depth)
-        : rsp_in_(rsp_in), b_q_depth_(b_q_depth), r_q_depth_(r_q_depth) {}
+    Depacketize(router::NocRspIn& rsp_in, std::size_t b_q_depth, std::size_t r_q_depth,
+                router::NocRspIn& dat_rsp_in = router::null_rsp_in())
+        : rsp_in_(rsp_in), dat_rsp_in_(dat_rsp_in), b_q_depth_(b_q_depth), r_q_depth_(r_q_depth) {}
 
     void tick();
 
@@ -48,13 +54,16 @@ class Depacketize : public ResponseDepacketizer {
     };
 
     router::NocRspIn& rsp_in_;
+    router::NocRspIn& dat_rsp_in_;
     std::deque<BWithMeta> b_q_;
     std::deque<RWithMeta> r_q_;
     std::size_t b_q_depth_, r_q_depth_;
-    std::optional<Flit> pending_;
+    std::optional<Flit> pending_rsp_;
+    std::optional<Flit> pending_dat_;
 
     static axi::BBeat decode_b(const Flit& f);
     static axi::RBeat decode_r(const Flit& f);
+    void drain_ingress_(router::NocRspIn& src, std::optional<Flit>& pending);
 };
 
 inline axi::BBeat Depacketize::decode_b(const Flit& f) {
@@ -82,13 +91,13 @@ inline axi::RBeat Depacketize::decode_r(const Flit& f) {
     return r;
 }
 
-inline void Depacketize::tick() {
+inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Flit>& pending) {
     while (true) {
         Flit f;
-        if (pending_) {
-            f = *pending_;
+        if (pending) {
+            f = *pending;
         } else {
-            auto opt = rsp_in_.pop_flit();
+            auto opt = src.pop_flit();
             if (!opt) return;
             f = *opt;
         }
@@ -97,7 +106,7 @@ inline void Depacketize::tick() {
             case ni::AXI_CH_NarrowB:
             case ni::AXI_CH_DataB: {
                 if (b_q_.size() >= b_q_depth_) {
-                    pending_ = f;
+                    pending = f;
                     return;
                 }
                 const auto cls =
@@ -110,7 +119,7 @@ inline void Depacketize::tick() {
             case ni::AXI_CH_NarrowR:
             case ni::AXI_CH_DataR: {
                 if (r_q_.size() >= r_q_depth_) {
-                    pending_ = f;
+                    pending = f;
                     return;
                 }
                 const auto cls =
@@ -122,16 +131,21 @@ inline void Depacketize::tick() {
             }
             default:
                 assert(false &&
-                       "nmu::Depacketize::tick: NocRspIn delivered flit with axi_ch outside "
-                       "{NarrowB, NarrowR, DataB, DataR} — NMU response path only accepts "
+                       "nmu::Depacketize::drain_ingress_: NocRspIn delivered flit with axi_ch "
+                       "outside {NarrowB, NarrowR, DataB, DataR} — NMU response path only accepts "
                        "response channels. Likely cause: NSU packetizer stamped wrong axi_ch "
                        "into a response flit, NoC fabric misrouted a request flit into the "
                        "response ingress, or codegen drift changed ni::AXI_CH_* encoding without "
                        "rebuilding both sides.");
                 std::abort();
         }
-        pending_.reset();
+        pending.reset();
     }
+}
+
+inline void Depacketize::tick() {
+    drain_ingress_(rsp_in_, pending_rsp_);
+    drain_ingress_(dat_rsp_in_, pending_dat_);
 }
 
 inline std::optional<axi::BBeat> Depacketize::pop_b() {

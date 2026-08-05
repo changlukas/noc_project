@@ -132,10 +132,15 @@ class NmuStandalone {
   public:
     explicit NmuStandalone(NmuConfig cfg)
         : num_vc_(static_cast<uint8_t>(cfg.num_vc)),
+          dat_num_vc_(static_cast<uint8_t>(cfg.dat_num_vc)),
           queue_req_out_(),
           queue_rsp_in_(),
-          nmu_(std::move(cfg), queue_req_out_, queue_rsp_in_) {
+          queue_dat_req_out_(),
+          queue_dat_rsp_in_(),
+          nmu_(std::move(cfg), queue_req_out_, queue_rsp_in_, queue_dat_req_out_,
+               queue_dat_rsp_in_) {
         queue_rsp_in_.size_pending(num_vc_);
+        queue_dat_rsp_in_.size_pending(dat_num_vc_);
     }
 
     NmuStandalone(const NmuStandalone&) = delete;
@@ -165,10 +170,26 @@ class NmuStandalone {
     void req_receive_credit(uint8_t vc = 0) { queue_req_out_.receive_credit(vc); }
     bool rsp_take_credit(uint8_t vc = 0) { return queue_rsp_in_.take_credit(vc); }
 
+    // DAT face accessors (S3a T4): mirror of the REQ/RSP set above, for the
+    // DAT egress (push into nmu().dat_wormhole_arbiter().input(0/1), drain
+    // here) and DAT ingress (inject here, Depacketize's second ingress
+    // drains it). Unwired to real DPI until T5; ctest-mock-only until then.
+    std::optional<Flit> pop_dat_req_flit() { return queue_dat_req_out_.pop_req_flit(); }
+    void inject_dat_rsp_flit(const Flit& f) { queue_dat_rsp_in_.inject_rsp_flit(f); }
+    bool dat_req_credit_avail(uint8_t vc = 0) const { return queue_dat_req_out_.credit_avail(vc); }
+    void enable_dat_noc_credit(std::size_t seed) {
+        queue_dat_req_out_.enable_credit(dat_num_vc_, seed);
+    }
+    void dat_req_receive_credit(uint8_t vc = 0) { queue_dat_req_out_.receive_credit(vc); }
+    bool dat_rsp_take_credit(uint8_t vc = 0) { return queue_dat_rsp_in_.take_credit(vc); }
+
   private:
     uint8_t num_vc_;
+    uint8_t dat_num_vc_;
     detail::QueueNocReqOut queue_req_out_;
     detail::QueueNocRspIn queue_rsp_in_;
+    detail::QueueNocReqOut queue_dat_req_out_;
+    detail::QueueNocRspIn queue_dat_rsp_in_;
     Nmu nmu_;
 };
 
