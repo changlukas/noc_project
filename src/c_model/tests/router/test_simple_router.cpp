@@ -52,10 +52,14 @@ Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail, uint8_t src_i
 
 TEST(SimpleRouterTieOff, LoopbackAndXYIllegalTurnsSkipped) {
     SCENARIO(
-        "SimpleRouter tie_off(): NoLoopback (all in==out) and XYRouteOpt (South/North input -> "
-        "East/West output) are skipped before arbitration; every other pair stays connected");
+        "SimpleRouter tie_off(): NoLoopback (in==out on the four mesh directions) and XYRouteOpt "
+        "(South/North input -> East/West output) are skipped before arbitration; LOCAL->LOCAL is "
+        "exempt from NoLoopback (standing ruling, IMPLEMENTATION_PLAN.md Stage 3b: self-targeted "
+        "traffic is legal); every other pair stays connected");
     using RP = RouterPort;
-    for (RP p : {RP::LOCAL, RP::NORTH, RP::EAST, RP::SOUTH, RP::WEST}) EXPECT_TRUE(tie_off(p, p));
+    for (RP p : {RP::NORTH, RP::EAST, RP::SOUTH, RP::WEST}) EXPECT_TRUE(tie_off(p, p));
+    EXPECT_FALSE(tie_off(RP::LOCAL, RP::LOCAL))
+        << "LOCAL->LOCAL must stay connected (self-transaction path)";
     EXPECT_TRUE(tie_off(RP::SOUTH, RP::EAST));
     EXPECT_TRUE(tie_off(RP::SOUTH, RP::WEST));
     EXPECT_TRUE(tie_off(RP::NORTH, RP::EAST));
@@ -165,6 +169,24 @@ TEST(SimpleRouterDatapath, ZeroLoadLatencyBufferedModeThreeTicks) {
     EXPECT_TRUE(east.received.empty());
     r.tick();
     ASSERT_EQ(east.received.size(), 1u);
+}
+
+TEST(SimpleRouterDatapath, LocalToLocalSelfTrafficDelivers) {
+    SCENARIO(
+        "SimpleRouter: a flit injected on LOCAL addressed to this router's own coordinates "
+        "routes LOCAL->LOCAL and delivers to the LOCAL downstream -- the self-transaction path "
+        "(IMPLEMENTATION_PLAN.md Stage 3b standing ruling: 'LOCAL->LOCAL is LEGAL by design'). "
+        "Regression test for the S3a T6 node0 hang: tie_off's NoLoopback previously excluded "
+        "this arc from arbitration entirely, stranding the flit in the LOCAL input FIFO forever "
+        "(invisible to the credit Router's FABRIC-DUMP).");
+    SimpleRouter r(center_cfg());
+    FlitSink local;
+    const auto L = static_cast<std::size_t>(RouterPort::LOCAL);
+    r.set_downstream(L, local);
+    r.input(L).push_flit(make_flit(make_dst(1, 1), 0, /*flit_tail=*/1));  // self-targeted
+    r.tick();
+    r.tick();
+    ASSERT_EQ(local.received.size(), 1u) << "self-targeted flit never delivered LOCAL->LOCAL";
 }
 
 // --- Ready/valid backpressure, parameterized over (depth, slack) -----------

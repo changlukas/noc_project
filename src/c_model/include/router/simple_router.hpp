@@ -120,14 +120,25 @@ class SimpleRouterLink {
 // delete connectivity BEFORE arbitration, not an assert checked after the
 // fact. Named by RouterPort, per the port-index convention above.
 //
-// Behaviourally these arcs are unreachable anyway: route_compute is XY-DOR,
-// so it never targets the input's own port (no loopback) and never turns
-// South/North input traffic onto East/West (X is already resolved before a
-// flit starts moving on Y). The skip is required translate fidelity
-// regardless — floo_router.sv physically disconnects these arcs, it does not
-// rely on route_compute's invariant.
+// The XYRouteOpt turn is unreachable anyway: route_compute is XY-DOR, so it
+// never turns South/North input traffic onto East/West (X is already
+// resolved before a flit starts moving on Y). The skip is required translate
+// fidelity regardless — floo_router.sv physically disconnects the arc, it
+// does not rely on route_compute's invariant.
+//
+// NoLoopback's in==out skip is NOT applied to LOCAL — divergence from
+// floo_router.sv's blanket in==out tie-off, per this project's standing
+// ruling (IMPLEMENTATION_PLAN.md Stage 3b: "LOCAL->LOCAL is LEGAL by design
+// -- the self-transaction path, exercised by passing co-sim; suppress
+// self-traffic via the generator's --exclude-self, not the router"). A
+// node's own self-targeted traffic (NMU -> its own NSU) is real and
+// exercised: route_compute(dst=own coords) legitimately resolves to LOCAL on
+// the LOCAL input. Tying that arc off (as floo_router.sv does) strands the
+// flit in the LOCAL input FIFO forever — invisible to the credit Router's
+// FABRIC-DUMP, which doesn't cover SimpleRouter queues (S3a T6 node0 hang,
+// mesh_2x2_config_narrow_vc1).
 inline bool tie_off(RouterPort in, RouterPort out) {
-    if (in == out) return true;  // NoLoopback, floo_router.sv:349
+    if (in == out && in != RouterPort::LOCAL) return true;  // NoLoopback, floo_router.sv:349
     if ((in == RouterPort::SOUTH || in == RouterPort::NORTH) &&
         (out == RouterPort::EAST || out == RouterPort::WEST)) {
         return true;  // XYRouteOpt Y->X turn, floo_router.sv:350-351
