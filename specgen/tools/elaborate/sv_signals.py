@@ -118,15 +118,11 @@ _NOC_NETWORKS: list[tuple[str, str]] = [
 
 
 def _emit_noc_structs() -> list[str]:
-    """Emit one noc_<net>_chan_t typedef per network (in-package), plus a
-    deprecated noc_chan_t alias for consumers not yet split by network.
+    """Emit one noc_<net>_chan_t typedef per network (in-package).
 
     Each network has its own flit width (REQ 137 b, RSP 127 b, DAT 629 b, per
     docs/noc-target-spec.md §6) -- SV structs are not parameterizable, so this
-    is three typedefs rather than one width-generic struct. noc_chan_t aliases
-    noc_dat_chan_t (max width) so the hand-written wraps/fabrics/gen_tb_top
-    (still single-network, T5 scope) keep elaborating; deleted once they move
-    to per-network types.
+    is three typedefs rather than one width-generic struct.
 
     The credit typedef is per-topology (width depends on num_vc) and lives in
     noc_types_pkg_vc{N}.sv, generated via --domain noc_types --num-vc N.
@@ -139,8 +135,6 @@ def _emit_noc_structs() -> list[str]:
         out.append("    logic                                            valid;")
         out.append(f"    logic [ni_params_pkg::{width_sym}-1:0] flit;")
         out.append(f"  }} noc_{net}_chan_t;")
-    out.append("  // deprecated S3a interim alias, deleted when the wraps move to per-network types (T5)")
-    out.append("  typedef noc_dat_chan_t noc_chan_t;")
     return out
 
 
@@ -270,8 +264,9 @@ def emit(signals_json: Path, spec_version: str) -> str:
 
     # SV interfaces (axi4_intf / noc_intf) were removed in the FlooNoC struct
     # refactor: the wraps + fabric + tb now use packed-struct typedefs
-    # (noc_chan_t / axi_req_t / axi_rsp_t above) on every port. The
-    # interface_handshake.json source still drives the struct field/channel
-    # order via load_interfaces() above; only the SV interface emission is gone.
+    # (noc_req_chan_t / noc_rsp_chan_t / noc_dat_chan_t / axi_req_t / axi_rsp_t
+    # above) on every port. The interface_handshake.json source still drives
+    # the struct field/channel order via load_interfaces() above; only the SV
+    # interface emission is gone.
     out.append("`endif // NI_SIGNALS_PKG_SVH")
     return "\n".join(out) + "\n"

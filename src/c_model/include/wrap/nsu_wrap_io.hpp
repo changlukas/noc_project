@@ -1,22 +1,32 @@
-// NsuWrap IO POD structs — combined NoC consumer + AXI master pin bundle.
+// NsuWrap IO POD structs — combined three-physical-network + AXI master pin bundle.
 //
 // NsuInputs: signals consumed by the Nsu each cycle.
-//   NoC req side:    flit arriving from the router toward Nsu's Depacketize.
-//   NoC rsp credit:  credit_return from downstream (channel credits back to Nsu).
+//   REQ face (ingress, ready/valid): rx_req_valid/flit — flit arriving.
+//   RSP face (egress, ready/valid): tx_rsp_ready — downstream's readiness.
+//   DAT face (both directions, credit): rx_dat_valid/flit (ingress) +
+//     tx_dat_crdvalid (egress credit pulse/VC from downstream).
 //   AXI master side: ready signals + B/R beats returning from the AXI slave.
 //
 // NsuOutputs: signals driven by the Nsu each cycle.
-//   NoC rsp side:    flit produced by Nsu's Packetize stage, leaving toward NoC.
-//   NoC req credit:  credit_return Nsu returns to the req-side upstream.
+//   REQ face (ingress): rx_req_ready — this node's readiness, tied constant
+//     true (the c_model's ingress queue is unbounded; see nsu_wrap.hpp).
+//   RSP face (egress): tx_rsp_valid/flit.
+//   DAT face: tx_dat_valid/flit (egress) + rx_dat_crdvalid (ingress credit
+//     pulse/VC returned upstream).
 //   AXI master side: Nsu drives AW/W/AR to slave; accepts bready/rready from it.
 //
-// FLIT_BYTES = 79 (ni::FLIT_WIDTH = 629 bits, rounded to bytes).
+// Naming, node's own view (spec §4.3, S3a T5 mechanical rename): tx_* = this
+// node's transmit side (`noc_rsp_*` before this stage), rx_* = receive side
+// (`noc_req_*` before this stage).
+//
+// FLIT_BYTES = 79 (ni::FLIT_WIDTH = 629 bits, rounded to bytes; stays the max
+// over networks, per-network widths bite only at the DPI/SV wire).
 // AXI_DATA_BYTES = 64 (512-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 //
 // Direction inversion vs. NmuWrapIo:
-//   Nmu consumes noc_rsp / produces noc_req  → Nsu produces noc_rsp / consumes noc_req.
-//   Nmu has axi_intf.slave (accepts AW/W/AR) → Nsu has axi_intf.master (drives AW/W/AR).
+//   Nmu transmits REQ / receives RSP  -> Nsu receives REQ / transmits RSP.
+//   Nmu has axi_intf.slave (accepts AW/W/AR) -> Nsu has axi_intf.master (drives AW/W/AR).
 #pragma once
 #include "axi/types.hpp"        // axi::DATA_BYTES
 #include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES
@@ -27,7 +37,7 @@
 namespace ni::cmodel::wrap {
 
 // Per-VC credit pulse vector (bit/entry vc = one credit pulse on VC vc). Sized to
-// the max VC count; only [0 .. num_vc) live. Mirrors router_wrap_io VcCreditVec.
+// the max VC count; only [0 .. dat_num_vc) live. Mirrors router_wrap_io VcCreditVec.
 inline constexpr std::size_t NSU_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
 using NsuVcCreditVec = std::array<bool, NSU_NUM_VC_MAX>;
 
@@ -37,12 +47,20 @@ constexpr int NSU_AXI_DATA_BYTES = axi::DATA_BYTES;
 
 // NsuInputs: signals consumed by Nsu each cycle.
 struct NsuInputs {
-    // NoC req side — flit arriving from channel toward Nsu Depacketize
-    bool noc_req_valid;
-    FlitBytes noc_req_flit;
-    // NoC rsp credit — PULSE/VC: router LOCAL input drained an Nsu rsp flit, return
-    // one credit per VC to the rsp-out sender counter (bit/entry vc = VC vc pulse).
-    NsuVcCreditVec noc_rsp_credit_return;
+    // REQ face (ingress, ready/valid): flit arriving from the router.
+    bool rx_req_valid;
+    FlitBytes rx_req_flit;
+
+    // RSP face (egress, ready/valid): downstream's readiness for this node's
+    // transmit side.
+    bool tx_rsp_ready;
+
+    // DAT face ingress (credit): flit arriving from the router.
+    bool rx_dat_valid;
+    FlitBytes rx_dat_flit;
+    // DAT face egress (credit): credit pulse/VC from downstream for flits we sent.
+    NsuVcCreditVec tx_dat_crdvalid;
+
     // AXI master side — AW channel (slave drives ready)
     bool awready;
     // AXI master side — W channel (slave drives ready)
@@ -63,12 +81,20 @@ struct NsuInputs {
 
 // NsuOutputs: signals driven by Nsu each cycle.
 struct NsuOutputs {
-    // NoC rsp side — flit produced by Nsu Packetize, leaving toward channel
-    bool noc_rsp_valid;
-    FlitBytes noc_rsp_flit;
-    // NoC req credit — consumer PULSE/VC: Nsu Depacketize consumed an injected req
-    // flit, return one credit per VC to the router LOCAL output sender counter.
-    NsuVcCreditVec noc_req_credit_return;
+    // REQ face (ingress, ready/valid): this node's readiness, returned to
+    // the router. Tied constant true — see nsu_wrap.hpp.
+    bool rx_req_ready;
+
+    // RSP face (egress, ready/valid): this node's transmit flit.
+    bool tx_rsp_valid;
+    FlitBytes tx_rsp_flit;
+
+    // DAT face egress (credit): this node's transmit flit.
+    bool tx_dat_valid;
+    FlitBytes tx_dat_flit;
+    // DAT face ingress (credit): credit pulse/VC this node returns upstream.
+    NsuVcCreditVec rx_dat_crdvalid;
+
     // AXI master side — AW channel (Nsu drives write address to slave)
     bool awvalid;
     uint8_t awid;

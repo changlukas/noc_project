@@ -15,6 +15,10 @@ enum class WrapType : uint32_t {
     Nmu = 0x4E4D5520u,     // 'NMU '
     Nsu = 0x4E535520u,     // 'NSU '
     Router = 0x524F5554u,  // 'ROUT'
+    // S3a T5: NI-level DAT merge point (spec §4.3 -- the DAT router's LOCAL
+    // port is one physical rx/tx pair shared by NMU's DataAw/DataW egress and
+    // NSU's DataR egress; see wrap/dat_merge_wrap.hpp).
+    DatMerge = 0x4441544Du,  // 'DATM'
 };
 
 enum class HandleState { Live };  // closed handles are removed from registry

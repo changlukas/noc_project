@@ -14,12 +14,18 @@
 //        -> NocRspOut
 //
 // Lock semantic:
-//   * When a flit with header.flit_tail=0 (packet start, e.g., AW) is drained
-//     from a `pairing.from` port, lock to the corresponding `pairing.to`
-//     port (e.g., w_in). Only the `to` port is serviceable until released.
+//   * When a flit with header.flit_tail=0 (packet start, e.g., AW) is
+//     drained, lock to the SAME input by default (continue serving it across
+//     the worm -- covers a multi-flit worm pre-merged onto one input, e.g.
+//     wrap/dat_merge_wrap.hpp's NMU-side DataAw+DataW). A configured
+//     `pairing.from == this port` overrides the default and locks to
+//     `pairing.to` instead (the AW-port/W-port shape, e.g. nmu.hpp's req
+//     wormhole_arbiter_: AW on port 0 locks to W's port 1).
 //   * When a flit with header.flit_tail=1 (packet end, e.g., W with wlast) is
-//     drained from the currently locked `to` port, unlock.
-//   * Without pairing (NSU case), every flit is its own packet; no lock.
+//     drained from the currently locked port, unlock.
+//   * Without pairing and flit_tail always 1 (NSU case: B/R are always
+//     single-flit worms), the lock branch never triggers; every flit is its
+//     own packet, matching the pre-existing behavior unchanged.
 //
 // REQUIRES Packetize stamps header.flit_tail per FlooNoC pattern (AW=0, W=wlast,
 // AR/B/R=1). Malformed AW (from-port flit with flit_tail=1) triggers assert+abort
@@ -117,13 +123,23 @@ class WormholeArbiter {
 
     void tick();
 
-    // Test introspection
+    // Introspection (test + production use — see wrap/dat_merge_wrap.hpp,
+    // which peeks the about-to-drain flit's header to attribute a per-VC
+    // credit-return pulse correctly across a DPI boundary this arbiter has
+    // no visibility into).
     std::size_t pending_size(std::size_t idx) const {
         assert(idx < num_inputs_);
         return pending_[idx].size();
     }
     bool is_locked() const noexcept { return locked_to_.has_value(); }
     std::optional<std::size_t> locked_to() const noexcept { return locked_to_; }
+    // Front flit of input idx's pending queue, or nullopt if empty. Read-only
+    // peek — does not affect tick()'s target selection or lock state.
+    std::optional<Flit> peek(std::size_t idx) const {
+        assert(idx < num_inputs_);
+        if (pending_[idx].empty()) return std::nullopt;
+        return pending_[idx].front();
+    }
 
   private:
     struct InputAdapter : Downstream {
@@ -212,8 +228,18 @@ inline void WormholeArbiter<Downstream>::tick() {
     pending_[target].pop_front();
     round_robin_ptr_ = (target + 1) % num_inputs_;
 
-    // Lock/unlock transition
+    // Lock/unlock transition. Default: lock to SELF (continue serving the
+    // same input across the worm) -- covers a multi-flit worm arriving on
+    // one already-merged input (S3a T5 DatMergeWrap: NMU's DataAw+DataW
+    // arrive sequentially on ONE input, not two ports to pair). An explicit
+    // ChannelPairing overrides this to lock a DIFFERENT port instead (the
+    // AW-port/W-port shape, e.g. nmu.hpp's req wormhole_arbiter_). Router's/
+    // SimpleRouter's own inline per-output lock is exactly this same
+    // self-lock rule with no pairing concept at all; this generalizes
+    // WormholeArbiter to the same default instead of adding a second
+    // implementation of it.
     if (flit_tail == 0 && !locked_to_.has_value()) {
+        locked_to_ = target;
         for (const auto& p : pairings_) {
             if (p.from == target) {
                 locked_to_ = p.to;

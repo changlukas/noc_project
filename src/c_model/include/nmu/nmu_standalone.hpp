@@ -59,11 +59,22 @@ struct QueueNocReqOut : router::NocReqOut {
     }
     void receive_credit(uint8_t vc) { ++credit_[vc]; }
 
-    // Accept a flit into the queue. When credit is disabled this models
-    // infinite downstream bandwidth (always accept). When enabled it gates on
-    // and consumes one per-VC credit, returning false (backpressure) if none.
+    // S3a T5: ready/valid mode for the REQ face (SimpleRouter downstream, no
+    // credit at all — spec §4.3). Orthogonal to credit_enabled_; exactly one
+    // of the two is ever enabled by a given caller. ready_ is a live signal
+    // (not consumed), set from the DPI-sampled tx_req_ready wire each tick
+    // (S3a stage design §5.3 — credit_avail(vc) stays the predicate name,
+    // it just reports downstream ready instead of a credit pool).
+    void enable_ready_track() { ready_track_ = true; }
+    void set_ready(bool r) { ready_ = r; }
+
+    // Accept a flit into the queue. Ready-track mode gates on the live ready
+    // signal. Credit mode gates on and consumes one per-VC credit. Neither
+    // enabled models infinite downstream bandwidth (always accept).
     bool push_flit(const Flit& f) override {
-        if (credit_enabled_) {
+        if (ready_track_) {
+            if (!ready_) return false;
+        } else if (credit_enabled_) {
             const auto vc = static_cast<uint8_t>(f.get_header_field("vc_id"));
             if (credit_[vc] == 0) return false;
             --credit_[vc];
@@ -73,7 +84,10 @@ struct QueueNocReqOut : router::NocReqOut {
         queue_.push_back(f);
         return true;
     }
-    bool credit_avail(uint8_t vc) const override { return !credit_enabled_ || credit_[vc] > 0; }
+    bool credit_avail(uint8_t vc) const override {
+        if (ready_track_) return ready_;
+        return !credit_enabled_ || credit_[vc] > 0;
+    }
 
     // Wrap accessor: pop one flit per tick for DPI forwarding.
     std::optional<Flit> pop_req_flit() {
@@ -87,6 +101,8 @@ struct QueueNocReqOut : router::NocReqOut {
     std::deque<Flit> queue_;
     bool credit_enabled_ = false;
     std::vector<std::size_t> credit_;
+    bool ready_track_ = false;
+    bool ready_ = false;
 };
 
 struct QueueNocRspIn : router::NocRspIn {
@@ -162,13 +178,15 @@ class NmuStandalone {
     void inject_rsp_flit(const Flit& f) { queue_rsp_in_.inject_rsp_flit(f); }
     bool req_credit_avail(uint8_t vc = 0) const { return queue_req_out_.credit_avail(vc); }
 
-    // FlooNoC-style NI-edge credit at the NoC terminal edge (cosim-only; the
-    // wraps call this unconditionally in init()). Seeds the req-out sender
-    // counter; the rsp-in consumer pulse is always active (sized in the ctor)
-    // but inert unless rsp_take_credit drains.
-    void enable_noc_credit(std::size_t seed) { queue_req_out_.enable_credit(num_vc_, seed); }
-    void req_receive_credit(uint8_t vc = 0) { queue_req_out_.receive_credit(vc); }
-    bool rsp_take_credit(uint8_t vc = 0) { return queue_rsp_in_.take_credit(vc); }
+    // S3a T5: REQ is a ready/valid network (spec §4.3) — no credit. The wrap
+    // calls enable_req_ready_track() unconditionally in init(), then
+    // req_set_ready(tx_req_ready) every tick from the DPI-sampled wire
+    // (§5.3 — credit_avail(vc) stays the predicate name, it just reports
+    // downstream ready instead of a credit pool). RSP ingress needs no
+    // credit-return at all: the c_model's ingress queue is unbounded, so the
+    // wrap ties rx_rsp_ready constant-high (see nmu_wrap.hpp).
+    void enable_req_ready_track() { queue_req_out_.enable_ready_track(); }
+    void req_set_ready(bool ready) { queue_req_out_.set_ready(ready); }
 
     // DAT face accessors (S3a T4): mirror of the REQ/RSP set above, for the
     // DAT egress (push into nmu().dat_wormhole_arbiter().input(0/1), drain

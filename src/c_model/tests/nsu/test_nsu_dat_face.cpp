@@ -132,7 +132,7 @@ TEST(NsuDatFace, RspBackpressureDoesNotStallDat) {
         "DAT face. The DAT face must still drain to pop_dat_rsp_flit().");
 
     NsuStandalone nsu(make_cfg(kNsuSrcId));
-    nsu.enable_noc_credit(/*seed=*/0);
+    nsu.enable_rsp_ready_track();  // ready defaults false: RSP face blocked from tick 0
     ASSERT_FALSE(nsu.rsp_credit_avail());
 
     ASSERT_TRUE(nsu.nsu().dat_vc_arbiter().push_flit(make_data_r_flit(0x01)));

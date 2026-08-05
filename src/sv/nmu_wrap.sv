@@ -1,18 +1,17 @@
-// nmu_wrap — DPI wrapper for the Nmu component.
+// nmu_wrap — DPI wrapper for the Nmu component, three physical networks (S3a T5).
 //
 // The Nmu is the most complex wrap — it has BOTH an AXI slave side
 // (incoming AW/W/AR from master, outgoing B/R + handshake to master) AND
-// a NoC side: 4 packed-struct ports drive/read req and rsp flits and credits
-// toward/from the router. Registered-DPI-tick discipline and error checking follow the
-// same pattern as every wrap in this directory.
+// three NoC faces: REQ egress (ready/valid), RSP ingress (ready/valid), DAT
+// ingress+egress (credit, unchanged mechanism). Registered-DPI-tick
+// discipline and error checking follow the same pattern as every wrap in
+// this directory.
 //
 // Registered-DPI-tick discipline: on every posedge clk_i the module
 // samples the PREVIOUS cycle's registered wire inputs, pushes them to C++
 // via cmodel_nmu_set_inputs, advances the model via cmodel_nmu_tick, pulls
 // outputs via cmodel_nmu_get_outputs, then registers those outputs nonblocking
 // so they are visible to SV wires from the NEXT cycle onward.
-//
-// FLIT_WIDTH must match ni_params_pkg::NOC_FLIT_WIDTH_DFLT = 629.
 //
 // Reset: synchronous active-low (rst_ni). Output registers cleared on reset.
 // No async reset path — sync reset is the project default.
@@ -22,11 +21,17 @@
 //
 // AXI struct ports (slave view): slave reads axi_req_i (AW/W/AR + bready/
 //   rready); slave drives axi_rsp_o (awready/wready/arready + B/R).
-// NoC struct ports:
-//   noc_req_o      — ni_signals_pkg::noc_chan_t: Nmu drives req flit toward router.
-//   noc_req_cred_i — noc_types_pkg::noc_credit_t: router returns req credit to Nmu.
-//   noc_rsp_i      — ni_signals_pkg::noc_chan_t: router drives rsp flit toward Nmu.
-//   noc_rsp_cred_o — noc_types_pkg::noc_credit_t: Nmu returns rsp credit to router.
+// NoC ports, node's own view (spec §4.3, S3a T5 mechanical rename):
+//   tx_req_valid_o/tx_req_flit_o : Nmu drives req flit toward the router (egress).
+//   tx_req_ready_i               : router's readiness for tx_req (input).
+//   rx_rsp_valid_i/rx_rsp_flit_i : router drives rsp flit toward Nmu (ingress).
+//   rx_rsp_ready_o               : Nmu's readiness, returned to the router.
+//     Tied constant true — the c_model's ingress queue is unbounded
+//     (Depacketize always drains what's injected); see nmu_wrap.hpp.
+//   tx_dat_valid_o/tx_dat_flit_o : Nmu drives DAT (AW/W) flit toward the router.
+//   tx_dat_crdvalid_i            : credit pulse/VC from the router for sent DAT flits.
+//   rx_dat_valid_i/rx_dat_flit_i : router drives DAT (R) flit toward Nmu.
+//   rx_dat_crdvalid_o            : credit pulse/VC Nmu returns for consumed DAT flits.
 
 `timescale 1ns/1ps
 
@@ -34,35 +39,38 @@
 `define NMU_WRAP_SV
 
 module nmu_wrap #(
-    parameter int unsigned ID_WIDTH              = ni_params_pkg::AXI_ID_WIDTH_DFLT,
-    parameter int unsigned ADDR_WIDTH            = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
-    parameter int unsigned DATA_WIDTH            = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    parameter int unsigned NUM_VC                = ni_params_pkg::NOC_NUM_VC_DFLT,
-    parameter int unsigned FLIT_WIDTH            = ni_params_pkg::NOC_FLIT_WIDTH_DFLT
+    parameter int unsigned ID_WIDTH       = ni_params_pkg::AXI_ID_WIDTH_DFLT,
+    parameter int unsigned ADDR_WIDTH     = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
+    parameter int unsigned DATA_WIDTH     = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
+    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_NUM_VC_DFLT,
+    parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
+    parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
     input  longint unsigned            ctx_i,
     input  ni_signals_pkg::axi_req_t   axi_req_i,
     output ni_signals_pkg::axi_rsp_t   axi_rsp_o,
-    output ni_signals_pkg::noc_chan_t  noc_req_o,
-    input  noc_types_pkg::noc_credit_t noc_req_cred_i,
-    input  ni_signals_pkg::noc_chan_t  noc_rsp_i,
-    output noc_types_pkg::noc_credit_t noc_rsp_cred_o
+
+    // REQ face (egress, ready/valid).
+    output logic                      tx_req_valid_o,
+    output logic [REQ_FLIT_WIDTH-1:0] tx_req_flit_o,
+    input  logic                      tx_req_ready_i,
+
+    // RSP face (ingress, ready/valid).
+    input  logic                      rx_rsp_valid_i,
+    input  logic [RSP_FLIT_WIDTH-1:0] rx_rsp_flit_i,
+    output logic                      rx_rsp_ready_o,
+
+    // DAT face (both directions, credit).
+    output logic                  tx_dat_valid_o,
+    output logic [DAT_FLIT_WIDTH-1:0] tx_dat_flit_o,
+    input  logic [DAT_NUM_VC-1:0]     tx_dat_crdvalid_i,
+    input  logic                      rx_dat_valid_i,
+    input  logic [DAT_FLIT_WIDTH-1:0] rx_dat_flit_i,
+    output logic [DAT_NUM_VC-1:0]     rx_dat_crdvalid_o
 );
-
-    // Elaboration guard: noc_types_pkg::noc_credit_t width must match NUM_VC.
-    initial begin
-        if ($bits(noc_types_pkg::noc_credit_t) != NUM_VC) begin
-            $fatal(1, "%m: noc_credit_t width %0d != NUM_VC %0d; use matching noc_types_pkg_vc{N}.sv",
-                   $bits(noc_types_pkg::noc_credit_t), NUM_VC);
-        end
-    end
-
-    // -------------------------------------------------------------------------
-    // Multi-VC: credit_return marshalled per-VC across DPI as a [NUM_VC-1:0]
-    // vector (bit vc = credit pulse on VC vc). No single-VC elaboration guard.
-    // -------------------------------------------------------------------------
 
     // -------------------------------------------------------------------------
     // DPI imports — 3-step pattern (set_inputs/tick/get_outputs)
@@ -96,9 +104,12 @@ module nmu_wrap #(
         input  bit [2:0]              arprot,
         input  bit [3:0]              arqos,
         input  bit                    rready,
-        input  bit                    noc_rsp_valid,
-        input  bit [FLIT_WIDTH-1:0]   noc_rsp_flit,
-        input  bit [NUM_VC-1:0]       noc_req_credit_return
+        input  bit                    tx_req_ready,
+        input  bit                    rx_rsp_valid,
+        input  bit [RSP_FLIT_WIDTH-1:0] rx_rsp_flit,
+        input  bit                    rx_dat_valid,
+        input  bit [DAT_FLIT_WIDTH-1:0] rx_dat_flit,
+        input  bit [DAT_NUM_VC-1:0]   tx_dat_crdvalid
     );
 
     import "DPI-C" context function void cmodel_nmu_tick(
@@ -118,9 +129,12 @@ module nmu_wrap #(
         output bit [DATA_WIDTH-1:0]   rdata,
         output bit [1:0]              rresp,
         output bit                    rlast,
-        output bit                    noc_req_valid,
-        output bit [FLIT_WIDTH-1:0]   noc_req_flit,
-        output bit [NUM_VC-1:0]       noc_rsp_credit_return
+        output bit                    tx_req_valid,
+        output bit [REQ_FLIT_WIDTH-1:0] tx_req_flit,
+        output bit                    rx_rsp_ready,
+        output bit                    tx_dat_valid,
+        output bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit,
+        output bit [DAT_NUM_VC-1:0]   rx_dat_crdvalid
     );
 
     // Lifecycle / error polling lives in tb_top.sv.
@@ -144,12 +158,12 @@ module nmu_wrap #(
     bit [1:0]              rresp_q;
     bit                    rlast_q;
 
-    // NoC req side outputs (Nmu drives toward the router)
-    bit                    noc_req_valid_q;
-    bit [FLIT_WIDTH-1:0]   noc_req_flit_q;
-
-    // NoC rsp credit return (Nmu drives back upstream; per-VC pulse vector)
-    bit [NUM_VC-1:0]       noc_rsp_credit_return_q;
+    bit                    tx_req_valid_q;
+    bit [REQ_FLIT_WIDTH-1:0] tx_req_flit_q;
+    bit                    rx_rsp_ready_q;
+    bit                    tx_dat_valid_q;
+    bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit_q;
+    bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid_q;
 
     // -------------------------------------------------------------------------
     // always_ff: sync-reset, 3-step DPI call, registered outputs, error check
@@ -168,9 +182,12 @@ module nmu_wrap #(
             rdata_q                <= '0;
             rresp_q                <= '0;
             rlast_q                <= '0;
-            noc_req_valid_q        <= '0;
-            noc_req_flit_q         <= '0;
-            noc_rsp_credit_return_q <= '0;
+            tx_req_valid_q         <= '0;
+            tx_req_flit_q          <= '0;
+            rx_rsp_ready_q         <= '0;
+            tx_dat_valid_q         <= '0;
+            tx_dat_flit_q          <= '0;
+            rx_dat_crdvalid_q      <= '0;
         end else begin
             // Step 1: push current wire values into C++ input latch.
             cmodel_nmu_set_inputs(
@@ -202,11 +219,13 @@ module nmu_wrap #(
                 axi_req_i.arprot,
                 axi_req_i.arqos,
                 axi_req_i.rready,
-                // NoC rsp side — rsp flit arriving from router toward Nmu
-                noc_rsp_i.valid,
-                noc_rsp_i.flit,
-                // NoC req credit — router returns credit to Nmu (per-VC vector)
-                noc_req_cred_i.credit[NUM_VC-1:0]
+                // REQ egress ready, RSP ingress, DAT both directions
+                tx_req_ready_i,
+                rx_rsp_valid_i,
+                rx_rsp_flit_i,
+                rx_dat_valid_i,
+                rx_dat_flit_i,
+                tx_dat_crdvalid_i
             );
 
             // Step 2: advance C++ model one cycle.
@@ -226,16 +245,21 @@ module nmu_wrap #(
                 bit [DATA_WIDTH-1:0]   t_rdata;
                 bit [1:0]              t_rresp;
                 bit                    t_rlast;
-                bit                    t_noc_req_valid;
-                bit [FLIT_WIDTH-1:0]   t_noc_req_flit;
-                bit [NUM_VC-1:0]       t_noc_rsp_credit_return;
+                bit                    t_tx_req_valid;
+                bit [REQ_FLIT_WIDTH-1:0] t_tx_req_flit;
+                bit                    t_rx_rsp_ready;
+                bit                    t_tx_dat_valid;
+                bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit;
+                bit [DAT_NUM_VC-1:0]     t_rx_dat_crdvalid;
                 cmodel_nmu_get_outputs(
                     ctx_i,
                     t_awready, t_wready, t_arready,
                     t_bvalid,  t_bid,    t_bresp,
                     t_rvalid,  t_rid,    t_rdata,  t_rresp, t_rlast,
-                    t_noc_req_valid, t_noc_req_flit,
-                    t_noc_rsp_credit_return
+                    t_tx_req_valid, t_tx_req_flit,
+                    t_rx_rsp_ready,
+                    t_tx_dat_valid, t_tx_dat_flit,
+                    t_rx_dat_crdvalid
                 );
                 awready_q               <= t_awready;
                 wready_q                <= t_wready;
@@ -248,9 +272,12 @@ module nmu_wrap #(
                 rdata_q                 <= t_rdata;
                 rresp_q                 <= t_rresp;
                 rlast_q                 <= t_rlast;
-                noc_req_valid_q         <= t_noc_req_valid;
-                noc_req_flit_q          <= t_noc_req_flit;
-                noc_rsp_credit_return_q <= t_noc_rsp_credit_return;
+                tx_req_valid_q          <= t_tx_req_valid;
+                tx_req_flit_q           <= t_tx_req_flit;
+                rx_rsp_ready_q          <= t_rx_rsp_ready;
+                tx_dat_valid_q          <= t_tx_dat_valid;
+                tx_dat_flit_q           <= t_tx_dat_flit;
+                rx_dat_crdvalid_q       <= t_rx_dat_crdvalid;
             end
         end
     end
@@ -274,13 +301,12 @@ module nmu_wrap #(
     assign axi_rsp_o.rresp   = rresp_q;
     assign axi_rsp_o.rlast   = rlast_q;
 
-    // NoC req side — Nmu drives req flit toward router
-    assign noc_req_o.valid = noc_req_valid_q;
-    assign noc_req_o.flit  = noc_req_flit_q;
-
-    // NoC rsp credit — Nmu drives rsp credit back to router (registered
-    // FlooNoC consumer pulse vector from the C model; per-VC pass-through)
-    assign noc_rsp_cred_o.credit = noc_rsp_credit_return_q;
+    assign tx_req_valid_o    = tx_req_valid_q;
+    assign tx_req_flit_o     = tx_req_flit_q;
+    assign rx_rsp_ready_o    = rx_rsp_ready_q;
+    assign tx_dat_valid_o    = tx_dat_valid_q;
+    assign tx_dat_flit_o     = tx_dat_flit_q;
+    assign rx_dat_crdvalid_o = rx_dat_crdvalid_q;
 
 endmodule
 

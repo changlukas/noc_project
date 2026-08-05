@@ -1,6 +1,12 @@
 // DPI signatures for the wire-wrap co-sim. 6 wraps x 3 calls/cycle
 // (set_inputs/tick/get_outputs) + lifecycle (init/finalize/check_error).
 //
+// Three physical networks (S3a T5, spec §4.3): REQ / RSP use ready/valid
+// (scalar per port, single-VC per S1 Q2); DAT uses credit (per-VC pulse
+// vector, unchanged mechanism). Pin naming, node's own view: tx_* = this
+// node's transmit side, rx_* = receive side (mechanical `*_out_*`/`*_in_*`
+// rename).
+//
 // Error propagation: try/catch in handlers sets g_dpi_error_code; SV side
 // polls cmodel_check_error() per wrap per cycle and raises $fatal on
 // non-zero.
@@ -44,63 +50,96 @@ void cmodel_perf_set_run(const char* scenario, long long total_cyc);
 void cmodel_dump_fabric_state(void);
 
 // Per-wrap DPI signatures, one block per component.
-// Router (per-node) — ONE node's REQ+RSP routers at (x,y). Pins split:
-//   NMU/NSU-facing (NI edge, pulse credit) + per-DIRECTION LINK (pulse credit).
-// num_vc threads the topology VC count into the wrap config (NOT hardcoded 1).
 //
-// Per-PORT x per-VC ABI (fixed shape; unused directions stay unwired):
-//   - LINK valid/flit/credit are PORT-indexed: SV passes packed arrays sized
-//     ROUTER_LINK_PORTS (= router's 5 ports; LOCAL slot unused on the LINK face,
-//     N/E/S/W carry the inter-router links). At 2-node only one direction is live.
-//   - All credit_return fields are per-VC: marshalled as ONE svBitVecVal word
-//     (bit vc = credit pulse on VC vc), valid for num_vc <= 2^VC_ID_WIDTH = 8.
-//   - link_*_flit arrays are FLIT_VEC_WORDS-per-port, contiguous (port-major):
-//     word index = port * FLIT_VEC_WORDS + w.
-//   - link credit arrays are ONE word per port (port-major, bit vc per word).
+// Router (per-node) — ONE node's REQ + RSP + DAT routers at (x,y). Every
+// network's pins are ONE uniform per-PORT array (router_wrap_io.hpp
+// ROUTER_LINK_PORTS = 5: LOCAL + N/E/S/W; LOCAL carries this node's own
+// NMU/NSU traffic, N/E/S/W the inter-router links — unused directions stay
+// unwired, driving 0). dat_num_vc threads the topology VC count into the DAT
+// router (REQ/RSP are fixed single-VC, S1 Q2).
+//
+// Per-PORT marshalling (fixed shape):
+//   - REQ/RSP valid/ready are per-port packed bit-vectors [LINK_PORTS-1:0],
+//     ONE svBitVecVal word (scalar per port, single-VC, spec TXREQREADY).
+//   - REQ/RSP flit arrays are <NET>_VEC_WORDS-per-port, contiguous
+//     (port-major): word index = port * <NET>_VEC_WORDS + w. REQ
+//     <NET>_VEC_WORDS = 5 (137 b); RSP = 4 (127 b) — see dpi_marshal.hpp
+//     ReqFlitMarshal/RspFlitMarshal.
+//   - DAT valid/flit mirror the pre-S3a LINK-only shape (DAT_VEC_WORDS = 20,
+//     629 b) now applied uniformly to LOCAL too; DAT credit
+//     (tx_dat_crdvalid/rx_dat_crdvalid) is per-VC: ONE svBitVecVal word per
+//     port (bit vc = credit pulse on VC vc), valid for dat_num_vc <=
+//     2^VC_ID_WIDTH = 8.
 unsigned long long cmodel_router_create(const char* name, int x_coord, int y_coord, int mesh_x_dim,
-                                        int mesh_y_dim, int num_vc);
-void cmodel_router_set_inputs(unsigned long long ctx, svBit req_in_valid, svBitVecVal* req_in_flit,
-                              svBitVecVal* req_in_credit_return, svBit rsp_in_valid,
-                              svBitVecVal* rsp_in_flit, svBitVecVal* rsp_in_credit_return,
-                              svBitVecVal* link_req_out_credit, svBitVecVal* link_req_in_valid,
-                              svBitVecVal* link_req_in_flit, svBitVecVal* link_rsp_out_credit,
-                              svBitVecVal* link_rsp_in_valid, svBitVecVal* link_rsp_in_flit);
+                                        int mesh_y_dim, int dat_num_vc);
+void cmodel_router_set_inputs(unsigned long long ctx, svBitVecVal* rx_req_valid,
+                              svBitVecVal* rx_req_flit, svBitVecVal* tx_req_ready,
+                              svBitVecVal* rx_rsp_valid, svBitVecVal* rx_rsp_flit,
+                              svBitVecVal* tx_rsp_ready, svBitVecVal* rx_dat_valid,
+                              svBitVecVal* rx_dat_flit, svBitVecVal* tx_dat_crdvalid);
 void cmodel_router_tick(unsigned long long ctx);
-void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
-                               svBitVecVal* req_out_flit, svBitVecVal* req_out_credit_return,
-                               svBit* rsp_out_valid, svBitVecVal* rsp_out_flit,
-                               svBitVecVal* rsp_out_credit_return, svBitVecVal* link_req_out_valid,
-                               svBitVecVal* link_req_out_flit, svBitVecVal* link_req_in_credit,
-                               svBitVecVal* link_rsp_out_valid, svBitVecVal* link_rsp_out_flit,
-                               svBitVecVal* link_rsp_in_credit);
+void cmodel_router_get_outputs(unsigned long long ctx, svBitVecVal* tx_req_valid,
+                               svBitVecVal* tx_req_flit, svBitVecVal* rx_req_ready,
+                               svBitVecVal* tx_rsp_valid, svBitVecVal* tx_rsp_flit,
+                               svBitVecVal* rx_rsp_ready, svBitVecVal* tx_dat_valid,
+                               svBitVecVal* tx_dat_flit, svBitVecVal* rx_dat_crdvalid);
+
+// DatMerge — NI-level DAT LOCAL-port merge point (S3a T5, controller ruling,
+// translate of floo_nw_chimney.sv's wide-link merge). One instance per node,
+// created in ni_wrap.sv, sitting between nmu_wrap/nsu_wrap's DAT pins and
+// router_wrap's DAT LOCAL port. See wrap/dat_merge_wrap.hpp for the full
+// rationale. dat_num_vc mirrors cmodel_router_create's / cmodel_nmu_create's
+// same-named parameter (the DAT face's VC count; REQ/RSP have no analog
+// here, DatMerge is DAT-only).
+// Egress (NMU DataAw/W + NSU DataR -> router LOCAL rx): nmu_tx_dat_*/
+// nsu_tx_dat_* are the two producer pushes; tx_dat_crdvalid is the router's
+// credit-return for our sends (per-VC, one word, bit=vc); tx_dat_valid/flit
+// (outputs) is our merged send toward the router.
+// Ingress (router LOCAL tx -> NMU DataR / NSU DataAw+W): rx_dat_valid/flit is
+// the router's ejected flit; nmu_rx_dat_*/nsu_rx_dat_* (outputs) is the
+// axi_ch-demuxed delivery; rx_dat_crdvalid (output) is our credit-return to
+// the router; nmu_tx_dat_crdvalid/nsu_tx_dat_crdvalid (outputs) are our
+// credit-return to each producer for what we drained from their pending
+// stage.
+unsigned long long cmodel_dat_merge_create(const char* name, int dat_num_vc);
+void cmodel_dat_merge_set_inputs(unsigned long long ctx, svBit nmu_tx_dat_valid,
+                                 svBitVecVal* nmu_tx_dat_flit, svBit nsu_tx_dat_valid,
+                                 svBitVecVal* nsu_tx_dat_flit, svBitVecVal* tx_dat_crdvalid,
+                                 svBit rx_dat_valid, svBitVecVal* rx_dat_flit);
+void cmodel_dat_merge_tick(unsigned long long ctx);
+void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_dat_crdvalid,
+                                  svBit* nmu_rx_dat_valid, svBitVecVal* nmu_rx_dat_flit,
+                                  svBitVecVal* nsu_tx_dat_crdvalid, svBit* nsu_rx_dat_valid,
+                                  svBitVecVal* nsu_rx_dat_flit, svBit* tx_dat_valid,
+                                  svBitVecVal* tx_dat_flit, svBitVecVal* rx_dat_crdvalid);
 
 // Nmu — longint-handle ABI (chandle avoided; VCS rejects it as a module
-// port); AXI slave side + NoC req/rsp sides.
+// port); AXI slave side + three NoC faces (REQ egress ready/valid, RSP
+// ingress ready/valid, DAT ingress+egress credit).
 // Packing conventions (little-endian word order; word counts derived from
-// ni::FLIT_WIDTH / axi::DATA_WIDTH in src/dpi/dpi_marshal.hpp, current values
-// shown for today's 629-bit flit / 512-bit data bus):
+// ni::FLIT_WIDTH / axi::DATA_WIDTH in src/dpi/dpi_marshal.hpp):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus, little-endian)
 //   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
-//   flit fields   : FLIT_VEC_WORDS = 20 words (629-bit flit, little-endian,
-//                   tail word explicitly masked to the last FLIT_WIDTH bits)
+//   flit fields   : DAT_VEC_WORDS = 20 words (629-bit flit, little-endian,
+//                   tail word explicitly masked to the last DAT_FLIT_WIDTH bits)
 //   other attribs : 1 word each (low bits used per width)
-// num_vc threads the topology VC count into the NmuConfig; make_virtual_networks(num_vc)
-// splits it into disjoint write/read VC pools (lower half write, upper half read; num_vc==1
-// shares VC0 for both), and each direction round-robins id-agnostically within its pool.
-// noc_req_credit_return / noc_rsp_credit_return are per-VC: ONE svBitVecVal word, bit vc =
-// credit pulse on VC vc.
+// dat_num_vc threads the topology VC count into the NmuConfig DAT face
+// (REQ/RSP are fixed single-VC, S1 Q2 — no VC/vnet split on them anymore).
+// tx_dat_crdvalid / rx_dat_crdvalid are per-VC: ONE svBitVecVal word, bit vc
+// = credit pulse on VC vc.
 // config_path: topology YAML with an `address_map` block (NULL/empty ->
 // legacy 16x16 uniform, no-rebase SAM).
 // outstanding_depth: shared outstanding pool size per direction (FlooNoC MaxTxns).
 // AW and AR pools are independent, each shared across all AXI ids, and the limit
 // applies in both ROB modes -- it is the master-side injection budget.
-unsigned long long cmodel_nmu_create(const char* name, int src_id, int num_vc,
+unsigned long long cmodel_nmu_create(const char* name, int src_id, int dat_num_vc,
                                      const char* config_path);
-unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int num_vc, int rob_enabled,
-                                        int b_rob_depth, int r_rob_depth, int max_txns_per_id,
-                                        int outstanding_depth, const char* config_path);
+unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_num_vc,
+                                        int rob_enabled, int b_rob_depth, int r_rob_depth,
+                                        int max_txns_per_id, int outstanding_depth,
+                                        const char* config_path);
 void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
                            svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
                            svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
@@ -109,47 +148,51 @@ void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* a
                            svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
                            svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
                            svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot,
-                           svBitVecVal* arqos, svBit rready, svBit noc_rsp_valid,
-                           svBitVecVal* noc_rsp_flit, svBitVecVal* noc_req_credit_return);
+                           svBitVecVal* arqos, svBit rready, svBit tx_req_ready, svBit rx_rsp_valid,
+                           svBitVecVal* rx_rsp_flit, svBit rx_dat_valid, svBitVecVal* rx_dat_flit,
+                           svBitVecVal* tx_dat_crdvalid);
 void cmodel_nmu_tick(unsigned long long ctx);
 void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wready, svBit* arready,
                             svBit* bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit* rvalid,
                             svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit* rlast,
-                            svBit* noc_req_valid, svBitVecVal* noc_req_flit,
-                            svBitVecVal* noc_rsp_credit_return);
+                            svBit* tx_req_valid, svBitVecVal* tx_req_flit, svBit* rx_rsp_ready,
+                            svBit* tx_dat_valid, svBitVecVal* tx_dat_flit,
+                            svBitVecVal* rx_dat_crdvalid);
 // Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing telemetry. 0 if the
 // handle is invalid or RoB is Disabled.
 unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 
-// Nsu — NoC consumer (req in) + producer (rsp out) + AXI master side.
+// Nsu — three NoC faces (REQ ingress ready/valid, RSP egress ready/valid,
+// DAT ingress+egress credit) + AXI master side.
 // Direction inversion vs. Nmu:
-//   cmodel_nsu_set_inputs receives noc_req_flit (consumer) + AXI master ready/B/R.
-//   cmodel_nsu_get_outputs produces noc_rsp_flit (producer) + AXI master AW/W/AR.
+//   cmodel_nsu_set_inputs receives rx_req_* (ingress) + AXI master ready/B/R.
+//   cmodel_nsu_get_outputs produces tx_rsp_* (egress) + AXI master AW/W/AR.
 // Packing conventions (same as cmodel_nmu_*):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus = 16 x 32-bit words, little-endian)
 //   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
-//   flit fields   : FLIT_VEC_WORDS = 20 words (629-bit flit, little-endian,
-//                   tail word explicitly masked to the last FLIT_WIDTH bits)
+//   flit fields   : DAT_VEC_WORDS = 20 words (629-bit flit, little-endian,
+//                   tail word explicitly masked to the last DAT_FLIT_WIDTH bits)
 //   other attribs : 1 word each (low bits used per width)
-// num_vc threads the topology VC count into the NsuConfig (write_rsp_vc=0,
-// read_rsp_vc=(num_vc>=2)?1:0 — read/write VC split). noc_rsp_credit_return / noc_req_credit_return
+// dat_num_vc threads the topology VC count into the NsuConfig DAT face
+// (REQ/RSP are fixed single-VC, S1 Q2). tx_dat_crdvalid / rx_dat_crdvalid
 // are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
 // max_unique_ids: 1 collapses every master onto the all-ones downstream AXI id
 // (FlooNoC's ChimneyDefaultCfg); 256 passes the master's id through. No other
 // value is legal, and the Depacketize constructor asserts it.
 // max_outstanding: shared MetaBuffer pool size per direction (FlooNoC MaxTxns).
-unsigned long long cmodel_nsu_create(const char* name, int src_id, int num_vc, int max_unique_ids,
-                                     int max_outstanding);
-void cmodel_nsu_set_inputs(unsigned long long ctx, svBit noc_req_valid, svBitVecVal* noc_req_flit,
-                           svBitVecVal* noc_rsp_credit_return, svBit awready, svBit wready,
-                           svBit bvalid, svBitVecVal* bid, svBitVecVal* bresp, svBit arready,
-                           svBit rvalid, svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp,
-                           svBit rlast);
+unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,
+                                     int max_unique_ids, int max_outstanding);
+void cmodel_nsu_set_inputs(unsigned long long ctx, svBit rx_req_valid, svBitVecVal* rx_req_flit,
+                           svBit tx_rsp_ready, svBit rx_dat_valid, svBitVecVal* rx_dat_flit,
+                           svBitVecVal* tx_dat_crdvalid, svBit awready, svBit wready, svBit bvalid,
+                           svBitVecVal* bid, svBitVecVal* bresp, svBit arready, svBit rvalid,
+                           svBitVecVal* rid, svBitVecVal* rdata, svBitVecVal* rresp, svBit rlast);
 void cmodel_nsu_tick(unsigned long long ctx);
-void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* noc_rsp_valid, svBitVecVal* noc_rsp_flit,
-                            svBitVecVal* noc_req_credit_return, svBit* awvalid, svBitVecVal* awid,
+void cmodel_nsu_get_outputs(unsigned long long ctx, svBit* rx_req_ready, svBit* tx_rsp_valid,
+                            svBitVecVal* tx_rsp_flit, svBit* tx_dat_valid, svBitVecVal* tx_dat_flit,
+                            svBitVecVal* rx_dat_crdvalid, svBit* awvalid, svBitVecVal* awid,
                             svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
                             svBitVecVal* awburst, svBit* awlock, svBitVecVal* awcache,
                             svBitVecVal* awprot, svBitVecVal* awqos, svBit* wvalid,

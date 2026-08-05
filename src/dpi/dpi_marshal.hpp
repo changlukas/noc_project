@@ -12,6 +12,7 @@
 #include "axi/types.hpp"        // ni::cmodel::axi::DATA_BYTES / DATA_WIDTH
 #include "wrap/flit_bytes.hpp"  // FlitBytes, FLIT_BYTES, FLIT_VEC_WORDS
 #include "ni_flit_constants.h"  // ni::FLIT_WIDTH, ni::width::AXI_ADDR_WIDTH
+#include "ni_params.h"          // ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH
 #include <array>
 #include <cstdint>
 
@@ -24,48 +25,80 @@ constexpr int DATA_VEC_WORDS = (axi::DATA_WIDTH + 31) / 32;
 // svBitVecVal words needed for WSTRB (one bit per data-bus byte == DATA_BYTES bits).
 constexpr int WSTRB_VEC_WORDS = (axi::DATA_BYTES + 31) / 32;
 
-// --- flit tail masking --------------------------------------------------
+// --- flit tail masking, templated on per-network width (S3a T5) ------------
 //
-// FLIT_VEC_WORDS * 32 bits are reserved on the wire, but only FLIT_WIDTH of
-// them are real flit content (629 of 640 today; 21 valid bits in the last
-// word). pack_flit masks the tail word explicitly instead of relying on the
-// caller's FlitBytes padding bits already being zero.
+// Each physical network has its own flit width (REQ 137 b, RSP 127 b, DAT
+// 629 b, docs/noc-target-spec.md §6); the C++ Flit/FlitBytes container stays
+// fixed at the max (ni::FLIT_WIDTH = DAT's width, S3a stage design §6) --
+// only the DPI wire word count narrows per network. FlitMarshalT<WIDTH_BITS>
+// VEC_WORDS * 32 bits are reserved on the wire, but only WIDTH_BITS of them
+// are real flit content; pack() masks the tail word explicitly instead of
+// relying on the caller's FlitBytes padding bits already being zero.
+template <int WIDTH_BITS>
+struct FlitMarshalT {
+    static constexpr int VEC_WORDS = (WIDTH_BITS + 31) / 32;
+    static constexpr int TAIL_VALID_BITS = WIDTH_BITS - (VEC_WORDS - 1) * 32;
+    static_assert(TAIL_VALID_BITS > 0 && TAIL_VALID_BITS <= 32,
+                  "TAIL_VALID_BITS must be a real, non-overflowing bit count; "
+                  "VEC_WORDS = ceil(WIDTH_BITS / 32) should guarantee this");
+    static constexpr uint32_t TAIL_MASK =
+        (TAIL_VALID_BITS >= 32) ? 0xFFFFFFFFu : ((1u << TAIL_VALID_BITS) - 1u);
 
-constexpr int FLIT_TAIL_VALID_BITS = ni::FLIT_WIDTH - (FLIT_VEC_WORDS - 1) * 32;
-static_assert(FLIT_TAIL_VALID_BITS > 0 && FLIT_TAIL_VALID_BITS <= 32,
-              "FLIT_TAIL_VALID_BITS must be a real, non-overflowing bit count; "
-              "FLIT_VEC_WORDS = ceil(FLIT_WIDTH / 32) should guarantee this");
-constexpr uint32_t FLIT_TAIL_MASK =
-    (FLIT_TAIL_VALID_BITS >= 32) ? 0xFFFFFFFFu : ((1u << FLIT_TAIL_VALID_BITS) - 1u);
+    // Unpack svBitVecVal[VEC_WORDS] -> FlitBytes (little-endian within each
+    // word). Bytes above VEC_WORDS*4 (this network's unused upper flit range)
+    // are left at 0 from FlitBytes{} value-init.
+    static FlitBytes unpack(const svBitVecVal* vec) {
+        FlitBytes b{};
+        for (int w = 0; w < VEC_WORDS; ++w) {
+            for (int byte = 0; byte < 4; ++byte) {
+                int idx = w * 4 + byte;
+                if (idx < FLIT_BYTES) {
+                    b[idx] = static_cast<uint8_t>((vec[w] >> (byte * 8)) & 0xFF);
+                }
+            }
+        }
+        return b;
+    }
 
-// Unpack svBitVecVal[FLIT_VEC_WORDS] -> FlitBytes (little-endian within each word).
+    // Pack FlitBytes -> svBitVecVal[VEC_WORDS] (little-endian within each
+    // word). The tail word is explicitly masked to TAIL_VALID_BITS so padding
+    // bits never leak onto the wire regardless of what FlitBytes carries past
+    // WIDTH_BITS.
+    static void pack(const FlitBytes& b, svBitVecVal* vec) {
+        for (int w = 0; w < VEC_WORDS; ++w) {
+            vec[w] = 0;
+            for (int byte = 0; byte < 4; ++byte) {
+                int idx = w * 4 + byte;
+                if (idx < FLIT_BYTES) {
+                    vec[w] |= static_cast<uint32_t>(b[idx]) << (byte * 8);
+                }
+            }
+        }
+        vec[VEC_WORDS - 1] &= TAIL_MASK;
+    }
+};
+
+// Per-network flit marshallers (S3a T5). DAT's width equals ni::FLIT_WIDTH
+// (the max), so DatFlitMarshal and the legacy FLIT_VEC_WORDS/unpack_flit/
+// pack_flit names below are the same instantiation.
+using ReqFlitMarshal = FlitMarshalT<ni::NOC_REQ_FLIT_WIDTH>;
+using RspFlitMarshal = FlitMarshalT<ni::NOC_RSP_FLIT_WIDTH>;
+using DatFlitMarshal = FlitMarshalT<ni::NOC_DAT_FLIT_WIDTH>;
+
+// Legacy names, kept for source compatibility with existing callers/tests
+// (test_cmodel_dpi.cpp): the DAT-width instantiation, since DAT carries
+// ni::FLIT_WIDTH end to end. FLIT_VEC_WORDS itself is already defined in
+// flit_bytes.hpp (ni::FLIT_WIDTH-derived) and equals DatFlitMarshal::VEC_WORDS;
+// not redefined here.
+static_assert(FLIT_VEC_WORDS == DatFlitMarshal::VEC_WORDS,
+              "flit_bytes.hpp FLIT_VEC_WORDS must match the DAT-width marshal instantiation");
+constexpr int FLIT_TAIL_VALID_BITS = DatFlitMarshal::TAIL_VALID_BITS;
+constexpr uint32_t FLIT_TAIL_MASK = DatFlitMarshal::TAIL_MASK;
 inline FlitBytes unpack_flit(const svBitVecVal* vec) {
-    FlitBytes b{};
-    for (int w = 0; w < FLIT_VEC_WORDS; ++w) {
-        for (int byte = 0; byte < 4; ++byte) {
-            int idx = w * 4 + byte;
-            if (idx < FLIT_BYTES) {
-                b[idx] = static_cast<uint8_t>((vec[w] >> (byte * 8)) & 0xFF);
-            }
-        }
-    }
-    return b;
+    return DatFlitMarshal::unpack(vec);
 }
-
-// Pack FlitBytes -> svBitVecVal[FLIT_VEC_WORDS] (little-endian within each word).
-// The tail word is explicitly masked to FLIT_TAIL_VALID_BITS so padding bits
-// never leak onto the wire regardless of what FlitBytes carries past FLIT_WIDTH.
 inline void pack_flit(const FlitBytes& b, svBitVecVal* vec) {
-    for (int w = 0; w < FLIT_VEC_WORDS; ++w) {
-        vec[w] = 0;
-        for (int byte = 0; byte < 4; ++byte) {
-            int idx = w * 4 + byte;
-            if (idx < FLIT_BYTES) {
-                vec[w] |= static_cast<uint32_t>(b[idx]) << (byte * 8);
-            }
-        }
-    }
-    vec[FLIT_VEC_WORDS - 1] &= FLIT_TAIL_MASK;
+    DatFlitMarshal::pack(b, vec);
 }
 
 // Unpack svBitVecVal[DATA_VEC_WORDS] -> AXI data bus bytes (little-endian).

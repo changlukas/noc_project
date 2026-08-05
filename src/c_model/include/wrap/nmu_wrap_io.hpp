@@ -1,16 +1,26 @@
-// NmuWrap IO POD structs — combined AXI slave + NoC pin bundle.
+// NmuWrap IO POD structs — combined AXI slave + three-physical-network pin bundle.
 //
 // NmuInputs: signals consumed by the Nmu each cycle.
 //   AXI slave side: master drives AW/W/AR onto axi_intf; Nmu accepts them.
-//   NoC rsp side:   flit arriving from the router toward Nmu's Depacketize.
-//   NoC req credit: credit_return from downstream (channel credits back to Nmu).
+//   REQ face (egress, ready/valid): tx_req_ready — downstream's readiness.
+//   RSP face (ingress, ready/valid): rx_rsp_valid/flit — flit arriving.
+//   DAT face (both directions, credit): rx_dat_valid/flit (ingress) +
+//     tx_dat_crdvalid (egress credit pulse/VC from downstream).
 //
 // NmuOutputs: signals driven by the Nmu each cycle.
 //   AXI slave side: Nmu drives awready/wready/arready handshake + B/R channels.
-//   NoC req side:   flit produced by Nmu's Packetize stage, leaving toward NoC.
-//   NoC rsp credit: credit_return Nmu returns to the rsp-side upstream.
+//   REQ face (egress): tx_req_valid/flit.
+//   RSP face (ingress): rx_rsp_ready — this node's readiness, tied constant
+//     true (the c_model's ingress queue is unbounded; see nmu_wrap.hpp).
+//   DAT face: tx_dat_valid/flit (egress) + rx_dat_crdvalid (ingress credit
+//     pulse/VC returned upstream).
 //
-// FLIT_BYTES = 79 (ni::FLIT_WIDTH = 629 bits, rounded to bytes).
+// Naming, node's own view (spec §4.3, S3a T5 mechanical rename): tx_* = this
+// node's transmit side (`noc_req_*` before this stage), rx_* = receive side
+// (`noc_rsp_*` before this stage).
+//
+// FLIT_BYTES = 79 (ni::FLIT_WIDTH = 629 bits, rounded to bytes; stays the max
+// over networks, per-network widths bite only at the DPI/SV wire).
 // AXI_DATA_BYTES = 64 (512-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 #pragma once
@@ -23,7 +33,7 @@
 namespace ni::cmodel::wrap {
 
 // Per-VC credit pulse vector (bit/entry vc = one credit pulse on VC vc). Sized to
-// the max VC count; only [0 .. num_vc) live. Mirrors router_wrap_io VcCreditVec.
+// the max VC count; only [0 .. dat_num_vc) live. Mirrors router_wrap_io VcCreditVec.
 inline constexpr std::size_t NMU_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
 using NmuVcCreditVec = std::array<bool, NMU_NUM_VC_MAX>;
 
@@ -64,12 +74,20 @@ struct NmuInputs {
     uint8_t arqos;
     // AXI slave side — R channel (master accepts read data)
     bool rready;
-    // NoC rsp side — flit arriving from channel toward Nmu Depacketize
-    bool noc_rsp_valid;
-    FlitBytes noc_rsp_flit;
-    // NoC req credit — PULSE/VC: router LOCAL input drained an Nmu req flit, return
-    // one credit per VC to the req-out sender counter (bit/entry vc = VC vc pulse).
-    NmuVcCreditVec noc_req_credit_return;
+
+    // REQ face (egress, ready/valid): downstream's readiness for this node's
+    // transmit side.
+    bool tx_req_ready;
+
+    // RSP face (ingress, ready/valid): flit arriving from the router.
+    bool rx_rsp_valid;
+    FlitBytes rx_rsp_flit;
+
+    // DAT face ingress (credit): flit arriving from the router.
+    bool rx_dat_valid;
+    FlitBytes rx_dat_flit;
+    // DAT face egress (credit): credit pulse/VC from downstream for flits we sent.
+    NmuVcCreditVec tx_dat_crdvalid;
 };
 
 // NmuOutputs: signals driven by Nmu each cycle.
@@ -88,12 +106,20 @@ struct NmuOutputs {
     std::array<uint8_t, NMU_AXI_DATA_BYTES> rdata;
     uint8_t rresp;  // 2-bit
     bool rlast;
-    // NoC req side — flit produced by Nmu Packetize, leaving toward channel
-    bool noc_req_valid;
-    FlitBytes noc_req_flit;
-    // NoC rsp credit — consumer PULSE/VC: Nmu Depacketize consumed an injected rsp
-    // flit, return one credit per VC to the router LOCAL output sender counter.
-    NmuVcCreditVec noc_rsp_credit_return;
+
+    // REQ face (egress, ready/valid): this node's transmit flit.
+    bool tx_req_valid;
+    FlitBytes tx_req_flit;
+
+    // RSP face (ingress, ready/valid): this node's readiness, returned to the
+    // router. Tied constant true — see nmu_wrap.hpp.
+    bool rx_rsp_ready;
+
+    // DAT face egress (credit): this node's transmit flit.
+    bool tx_dat_valid;
+    FlitBytes tx_dat_flit;
+    // DAT face ingress (credit): credit pulse/VC this node returns upstream.
+    NmuVcCreditVec rx_dat_crdvalid;
 };
 
 }  // namespace ni::cmodel::wrap

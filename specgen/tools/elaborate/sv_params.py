@@ -55,11 +55,6 @@ def emit(src_path: Path, spec_version: str) -> str:
         "NoC parameter defaults",
         lambda _n, s: s["default"],
     )
-    if "DAT_FLIT_WIDTH" in constants.get("noc", {}):
-        # deprecated S3a interim alias, deleted when the wraps move to per-network types (T5)
-        lines.append("  // deprecated S3a interim alias, deleted when the wraps move to per-network types (T5)")
-        lines.append("  localparam int unsigned NOC_FLIT_WIDTH_DFLT = NOC_DAT_FLIT_WIDTH_DFLT;")
-        lines.append("")
     _emit_group(
         list(constants.get("nmu", {}).items()),
         "NMU depth defaults",

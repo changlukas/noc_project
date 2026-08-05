@@ -122,7 +122,7 @@ TEST(NmuDatFace, ReqBackpressureDoesNotStallDat) {
         "do not share backpressure state.");
 
     NmuStandalone nmu(make_cfg(0x12));
-    nmu.enable_noc_credit(/*seed=*/0);  // REQ face fully blocked from tick 0
+    nmu.enable_req_ready_track();  // ready defaults false: REQ face blocked from tick 0
     ASSERT_FALSE(nmu.req_credit_avail());
 
     ASSERT_TRUE(nmu.nmu().dat_wormhole_arbiter().input(0).push_flit(make_data_aw(0x01, 0x01)));

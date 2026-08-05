@@ -1,11 +1,15 @@
 #pragma once
-// Router channel-bridge adapters. Two families:
-//   LOCAL (NI edge): InjectAdapter / EjectAdapter / CreditRelay bridge the NoC
-//     interface (retryable push + credit query + pull) to the Router link
+// Router channel-bridge adapters. Three families:
+//   LOCAL (NI edge, credit Router): InjectAdapter / EjectAdapter / CreditRelay bridge
+//     the NoC interface (retryable push + credit query + pull) to the Router link
 //     contract (void push + registered credit pulse).
-//   LINK (cross-DPI): LinkEjectAdapter / LinkCreditOut carry a FlooNoC pulse-credit
-//     inter-router link over SV — the router holds real per-(port,vc) credit;
-//     these adapters only marshal the wire side.
+//   LINK (cross-DPI, credit Router): LinkEjectAdapter / LinkCreditOut carry a FlooNoC
+//     pulse-credit inter-router link over SV — the router holds real per-(port,vc)
+//     credit; these adapters only marshal the wire side.
+//   SimpleRouter (REQ/RSP, ready/valid, every port incl. LOCAL): SimpleRouterWireLink
+//     marshals one SimpleRouter output port across the DPI/SV boundary — ready is a
+//     live wire sample (not a credit counter), push_flit stashes the grant for the
+//     wrap to drive out as tx_valid/tx_flit this same tick (S3a T5 §7).
 //
 //   InjectAdapter   : NocReqOut/NocRspOut + RouterCreditSink (NI -> router LOCAL input)
 //   EjectAdapter    : NocReqIn/NocRspIn  + RouterLink        (router LOCAL output -> NI)
@@ -13,6 +17,7 @@
 //                                                             -> upstream output credit)
 //   LinkEjectAdapter: RouterLink   (router LINK output -> SV transport buffer, no pop credit)
 //   LinkCreditOut   : RouterCreditSink (router LINK input drain -> SV credit pulse)
+//   SimpleRouterWireLink: SimpleRouterLink (SimpleRouter output port -> SV tx_*/rx_* wires)
 //
 // Reset invariant (construction-is-reset): these adapters model reset as
 // construction. They hold no SV-driven reset and are created after rst_ni
@@ -26,6 +31,7 @@
 #include "router/rsp_in.hpp"
 #include "router/rsp_out.hpp"
 #include "router/router.hpp"
+#include "router/simple_router.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -155,6 +161,35 @@ class LinkCreditOut : public RouterCreditSink {
 
   private:
     std::vector<std::size_t> pending_;
+};
+
+// SimpleRouter output-port wire adapter (S3a T5): bound via
+// SimpleRouter::set_downstream(port, link). ready() reports whatever the wrap
+// last sampled from the DPI input wire (tx_*_ready for a LINK direction,
+// rx_*_ready for the LOCAL/NI direction) -- a live signal, not a credit
+// counter, per stage design §5.3/§7. push_flit() is only ever called by
+// SimpleRouter::tick() when ready() was already true, so the grant IS the
+// transfer: stash it for the wrap to drive out as tx_valid/tx_flit this same
+// tick (take() below), then register it onto the SV wire next posedge.
+class SimpleRouterWireLink : public SimpleRouterLink {
+  public:
+    bool ready(uint8_t /*vc*/) const override { return ready_; }
+    void push_flit(const Flit& f) override {
+        assert(!pending_.has_value() && "SimpleRouterWireLink: >1 flit granted per port per cycle");
+        pending_ = f;
+    }
+    // Wrap: set from the DPI-sampled ready wire before calling SimpleRouter::tick().
+    void set_ready(bool r) { ready_ = r; }
+    // Wrap: drain the grant (if any) after SimpleRouter::tick(), same tick.
+    std::optional<Flit> take() {
+        auto f = pending_;
+        pending_.reset();
+        return f;
+    }
+
+  private:
+    bool ready_ = false;
+    std::optional<Flit> pending_;
 };
 
 }  // namespace ni::cmodel::router

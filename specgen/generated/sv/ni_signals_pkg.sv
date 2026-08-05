@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: aeacb7e3f9c0
 // Generator version: v1.0.0
-// Generated at: 2026-08-05T04:05:34Z
+// Generated at: 2026-08-05T06:29:08Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -77,8 +77,6 @@ package ni_signals_pkg;
     logic                                            valid;
     logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0] flit;
   } noc_dat_chan_t;
-  // deprecated S3a interim alias, deleted when the wraps move to per-network types (T5)
-  typedef noc_dat_chan_t noc_chan_t;
 
   // AXI packed-struct typedefs (replaced axi4_intf; widths fixed-default).
   typedef struct packed {

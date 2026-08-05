@@ -1,101 +1,88 @@
-// RouterWrap — per-node Wrap wrapping ONE node's router subsystem.
+// RouterWrap — per-node Wrap wrapping ONE node's three physical-network routers.
 //
-// Owns this node's REQ router + RSP router at (x_coord, y_coord) in an NxM
-// mesh plus their LOCAL adapters (NI edge) and LINK adapters (cross-DPI
-// FlooNoC pulse-credit links toward each existing neighbor). One RouterWrap
-// per mesh node; boundary directions with no neighbor are left unwired.
+// Owns this node's REQ router + RSP router (both router::SimpleRouter,
+// ready/valid, single VC) and DAT router (router::Router, credit) at
+// (x_coord, y_coord) in an NxM mesh. Every network is wired uniformly across
+// the same 5-port space (LOCAL + N/E/S/W); boundary directions with no
+// neighbor simply never see valid asserted (the fabric ties them to 0 and
+// asserts on a violation) -- RouterWrap does not special-case them.
 //
-// Per node BOTH the LOCAL (NI edge) and LINK ports use identical FlooNoC
-// pulse-credit wiring.
-// LOCAL (NMU/NSU edge) and LINK (cross-DPI inter-router) per network:
-//   set_downstream(port, LinkEjectAdapter)   — router output -> SV transport
-//     buffer (no pop credit; credit returns over SV as a pulse).
-//   set_upstream_credit(port, LinkCreditOut) — captures the router's input-drain
-//     pulses; the wrap drains one/tick onto the *_credit/*_credit_return wire.
-//   inbound flit pushes straight into router.input(port).
-//   each inbound credit pulse calls router.receive_credit(port, vc), per VC.
-// LOCAL pin mapping (NI edge):
-//   inbound  : in_.req_in_valid/in_.req_in_flit -> req_router_->input(LOCAL).push_flit
-//              in_.rsp_in_valid/in_.rsp_in_flit -> rsp_router_->input(LOCAL).push_flit
-//   eject    : req_local_eject_->pop_flit() -> out_.req_out_valid/req_out_flit
-//              rsp_local_eject_->pop_flit() -> out_.rsp_out_valid/rsp_out_flit
-//   out cred : req_local_credit_/rsp_local_credit_.take(vc), one vc per num_vc_ ->
-//              out_.req_out_credit_return[vc]/rsp_out_credit_return[vc]
-//              (PULSE: router LOCAL input drained -> credit to NMU/NSU)
-//   in  cred : in_.req_in_credit_return[vc]/rsp_in_credit_return[vc] (NMU/NSU consumed
-//              an ejected flit) -> req_router_/rsp_router_->receive_credit(LOCAL, vc)
-//              (replenishes the router's built-in credit_[LOCAL] sender counter, router->NI dir)
-// The LINK port mapping (N/E/S/W, matching route_compute's dimension-order
-// routing) is identical, over the link_<N>_* pins toward each neighbor.
+// Two wiring shapes, no common base (S3a stage design §7 -- SimpleRouter and
+// Router are unrelated classes):
+//   REQ/RSP (SimpleRouter): SimpleRouterWireLink per output port marshals
+//     ready/valid across the DPI/SV boundary. ready() is a live signal set
+//     from the DPI-sampled tx_<net>_ready wire BEFORE tick(); push_flit()
+//     (called only when ready() was true) stashes the grant, drained AFTER
+//     tick() onto tx_<net>_valid/flit. rx_<net>_ready is the router's own
+//     ready(port,0), read AFTER tick() so it reflects this cycle's push.
+//   DAT (Router): unchanged FlooNoC pulse-credit LinkEjectAdapter/
+//     LinkCreditOut pattern, now applied uniformly to all 5 ports (LOCAL
+//     included) instead of LOCAL-special-cased + LINK-looped.
 //
-// num_vc comes from cmodel_router_create; LOCAL/LINK depths = NOC_ROUTER_VC_DEPTH
-// (spec-aligned; matches the NMU/NSU sender credit seed so link_perf_monitor assertions
-// hold under high-fan-in hotspot traffic).
-// Credit pulses marshal per-VC across the DPI boundary (VcCreditVec); the LINK
-// face is per-direction (ROUTER_LINK_PORTS), only link_port_ live at 2-node.
+// Registered-DPI-tick discipline (shared by the NI wraps nmu_wrap/nsu_wrap):
+// on every posedge clk_i the module samples the PREVIOUS cycle's registered
+// wire inputs, pushes them to the C++ model via DPI set_inputs, advances the
+// model via tick, pulls outputs via get_outputs, and registers those outputs
+// nonblocking so they are visible to SV wires from the NEXT cycle onward.
 //
-// Reset invariant (construction-is-reset): the wrap holds no SV-driven reset and
-// is created (cmodel_router_create) after rst_ni deasserts, so LinkCreditOut
-// pending, LinkEjectAdapter queues, and the routers' FIFOs/counters all start
-// empty. Mid-sim reset is NOT modeled (consistent with Router's construction-is-
-// reset stance); the tb_top reset window precedes all *_create + traffic, so no
-// stale pending credit can leak post-reset.
+// Reset invariant (construction-is-reset): the wrap holds no SV-driven reset
+// and is created (cmodel_router_create) after rst_ni deasserts, so every
+// adapter's queues/counters start empty. Mid-sim reset is NOT modeled
+// (consistent with Router's/SimpleRouter's construction-is-reset stance); the
+// tb_top reset window precedes all *_create + traffic, so no stale state can
+// leak post-reset.
 //
-// Depth rationale: vc_depth = NOC_ROUTER_VC_DEPTH (spec default; also the value the
-// NMU/NSU seed their own sender credit counter with, so both ends of the link agree
-// on the credit window). The eject buffers are sized to num_vc * vc_depth (aggregate
-// output-credit window).
-// The NMU/NSU is credit-gated by *_out_credit_return / link_*_in_credit, so the
-// router input never overflows.
+// Depth rationale (DAT): vc_depth = NOC_ROUTER_VC_DEPTH (spec default; also
+// the value the NMU/NSU DAT face seeds its own sender credit counter with, so
+// both ends of the link agree on the credit window). The eject buffers are
+// sized to num_vc * vc_depth (aggregate output-credit window).
 #pragma once
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/router_wrap_io.hpp"
 #include "router/router.hpp"
+#include "router/simple_router.hpp"
 #include "router/router_adapters.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH, NOC_ROUTER_OUTPUT_FIFO_DEPTH
 #include <array>
 #include <memory>
-#include <stdexcept>
 
 namespace ni::cmodel::wrap {
 
 class RouterWrap {
   public:
     void init(uint8_t x_coord, uint8_t y_coord = 0, uint8_t mesh_x_dim = 2, uint8_t mesh_y_dim = 1,
-              uint8_t num_vc = 1) {
-        num_vc_ = num_vc;
+              uint8_t dat_num_vc = 1) {
+        dat_num_vc_ = dat_num_vc;
 
-        // Determine which N/E/S/W directions have a neighbor in the mesh. The
-        // router LOCAL port is always wired; each existing directional link gets
-        // its own pulse-credit adapter pair. Boundary directions stay unwired
-        // (downstream_[port] == nullptr): route_compute never routes a flit to an
-        // absent neighbor (dst within mesh), and the SV generator emits a tie-off
-        // assertion as defense-in-depth.
-        using router::RouterPort;
-        link_live_[static_cast<std::size_t>(RouterPort::EAST)] = (x_coord + 1 < mesh_x_dim);
-        link_live_[static_cast<std::size_t>(RouterPort::WEST)] = (x_coord > 0);
-        link_live_[static_cast<std::size_t>(RouterPort::NORTH)] = (y_coord + 1 < mesh_y_dim);
-        link_live_[static_cast<std::size_t>(RouterPort::SOUTH)] = (y_coord > 0);
-
-        router::RouterConfig c;
-        c.x = x_coord;
-        c.y = y_coord;
-        c.mesh_x_dim = mesh_x_dim;
-        c.mesh_y_dim = mesh_y_dim;
-        c.num_vc = num_vc;
-        // Use spec-aligned depths (NOC_ROUTER_VC_DEPTH and
-        // NOC_ROUTER_OUTPUT_FIFO_DEPTH from ni_params.h / constants.yaml).
-        c.vc_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH);
-        c.output_fifo_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH);
-        req_router_ = std::make_unique<router::Router>(c);
-        rsp_router_ = std::make_unique<router::Router>(c);
-
-        wire_port(*req_router_, LOCAL, req_local_eject_, req_local_credit_);
-        wire_port(*rsp_router_, LOCAL, rsp_local_eject_, rsp_local_credit_);
+        router::SimpleRouterConfig sc;
+        sc.x = x_coord;
+        sc.y = y_coord;
+        sc.mesh_x_dim = mesh_x_dim;
+        sc.mesh_y_dim = mesh_y_dim;
+        sc.num_vc = 1;  // S1 Q2: REQ/RSP are ratified single-VC networks.
+        req_router_ = std::make_unique<router::SimpleRouter>(sc);
+        rsp_router_ = std::make_unique<router::SimpleRouter>(sc);
         for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
-            if (p == LOCAL || !link_live_[p]) continue;
-            wire_port(*req_router_, p, req_link_eject_[p], req_link_credit_[p]);
-            wire_port(*rsp_router_, p, rsp_link_eject_[p], rsp_link_credit_[p]);
+            req_router_->set_downstream(p, req_link_[p]);
+            rsp_router_->set_downstream(p, rsp_link_[p]);
+        }
+
+        router::RouterConfig dc;
+        dc.x = x_coord;
+        dc.y = y_coord;
+        dc.mesh_x_dim = mesh_x_dim;
+        dc.mesh_y_dim = mesh_y_dim;
+        dc.num_vc = dat_num_vc;
+        dc.vc_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH);
+        dc.output_fifo_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH);
+        dat_router_ = std::make_unique<router::Router>(dc);
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            dat_eject_[p] = std::make_unique<router::LinkEjectAdapter>(
+                static_cast<std::size_t>(dat_num_vc_) *
+                static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
+            dat_credit_[p] = std::make_unique<router::LinkCreditOut>(dat_num_vc_);
+            dat_router_->set_downstream(p, *dat_eject_[p]);
+            dat_router_->set_upstream_credit(p, *dat_credit_[p]);
         }
 
         in_ = RouterInputs{};
@@ -105,151 +92,80 @@ class RouterWrap {
     void set_inputs(const RouterInputs& in) { in_ = in; }
 
     void tick() {
-        // Step 1: push all inbound flits straight into the router inputs. LOCAL
-        // and LINK are now symmetric FlooNoC pulse-credit ports (no InjectAdapter
-        // mirror). The single NMU/NSU source sends <=1 LOCAL flit/tick, but the
-        // router input register asserts on a 2nd push/port/cycle (router.hpp),
-        // so guard it: exactly one LOCAL push per network per tick.
-        if (in_.req_in_valid) {
-            req_router_->input(LOCAL).push_flit(flit_from_bytes(in_.req_in_flit));
-        }
-        if (in_.rsp_in_valid) {
-            rsp_router_->input(LOCAL).push_flit(flit_from_bytes(in_.rsp_in_flit));
-        }
+        // Step 1: push inbound flits, set ready-mirror state, before tick().
         for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
-            if (p == LOCAL || !link_live_[p]) continue;
-            if (in_.link_req_in_valid[p]) {
-                req_router_->input(p).push_flit(flit_from_bytes(in_.link_req_in_flit[p]));
-            }
-            if (in_.link_rsp_in_valid[p]) {
-                rsp_router_->input(p).push_flit(flit_from_bytes(in_.link_rsp_in_flit[p]));
-            }
-        }
-        // LOCAL credit IN: the NMU/NSU returned a pulse for a flit drained from
-        // the router's LOCAL OUTPUT (router->NI direction). Replenish the
-        // router's built-in credit_[LOCAL] sender counter, per VC.
-        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-            if (in_.req_in_credit_return[vc]) req_router_->receive_credit(LOCAL, vc);
-            if (in_.rsp_in_credit_return[vc]) rsp_router_->receive_credit(LOCAL, vc);
-            // Neighbor credit pulses for flits we previously sent over each LINK.
-            for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
-                if (p == LOCAL || !link_live_[p]) continue;
-                if (in_.link_req_out_credit[p][vc]) req_router_->receive_credit(p, vc);
-                if (in_.link_rsp_out_credit[p][vc]) rsp_router_->receive_credit(p, vc);
+            if (in_.rx_req_valid[p])
+                req_router_->input(p).push_flit(flit_from_bytes(in_.rx_req_flit[p]));
+            if (in_.rx_rsp_valid[p])
+                rsp_router_->input(p).push_flit(flit_from_bytes(in_.rx_rsp_flit[p]));
+            req_link_[p].set_ready(in_.tx_req_ready[p]);
+            rsp_link_[p].set_ready(in_.tx_rsp_ready[p]);
+
+            if (in_.rx_dat_valid[p])
+                dat_router_->input(p).push_flit(flit_from_bytes(in_.rx_dat_flit[p]));
+            for (uint8_t vc = 0; vc < dat_num_vc_; ++vc) {
+                if (in_.tx_dat_crdvalid[p][vc]) dat_router_->receive_credit(p, vc);
             }
         }
 
-        // Step 2: advance both routers one stage.
+        // Step 2: advance all three routers one stage.
         req_router_->tick();
         rsp_router_->tick();
+        dat_router_->tick();
 
         // Step 3: sample outputs.
         out_ = RouterOutputs{};
-        if (auto f = req_local_eject_->pop_flit()) {
-            out_.req_out_valid = true;
-            out_.req_out_flit = flit_to_bytes(*f);
-        }
-        if (auto f = rsp_local_eject_->pop_flit()) {
-            out_.rsp_out_valid = true;
-            out_.rsp_out_flit = flit_to_bytes(*f);
-        }
-        // LOCAL credit OUT: PULSE/VC — the router's LOCAL INPUT drained a flit
-        // from the NMU/NSU, so return one credit to the NMU/NSU (NI->router dir).
-        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-            out_.req_out_credit_return[vc] = req_local_credit_->take(vc);
-            out_.rsp_out_credit_return[vc] = rsp_local_credit_->take(vc);
-        }
-
         for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
-            if (p == LOCAL || !link_live_[p]) continue;
-            if (auto f = req_link_eject_[p]->pop_flit()) {
-                out_.link_req_out_valid[p] = true;
-                out_.link_req_out_flit[p] = flit_to_bytes(*f);
+            if (auto f = req_link_[p].take()) {
+                out_.tx_req_valid[p] = true;
+                out_.tx_req_flit[p] = flit_to_bytes(*f);
             }
-            if (auto f = rsp_link_eject_[p]->pop_flit()) {
-                out_.link_rsp_out_valid[p] = true;
-                out_.link_rsp_out_flit[p] = flit_to_bytes(*f);
+            out_.rx_req_ready[p] = req_router_->ready(p, 0);
+
+            if (auto f = rsp_link_[p].take()) {
+                out_.tx_rsp_valid[p] = true;
+                out_.tx_rsp_flit[p] = flit_to_bytes(*f);
             }
-            for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-                out_.link_req_in_credit[p][vc] = req_link_credit_[p]->take(vc);
-                out_.link_rsp_in_credit[p][vc] = rsp_link_credit_[p]->take(vc);
+            out_.rx_rsp_ready[p] = rsp_router_->ready(p, 0);
+
+            if (auto f = dat_eject_[p]->pop_flit()) {
+                out_.tx_dat_valid[p] = true;
+                out_.tx_dat_flit[p] = flit_to_bytes(*f);
+            }
+            for (uint8_t vc = 0; vc < dat_num_vc_; ++vc) {
+                out_.rx_dat_crdvalid[p][vc] = dat_credit_[p]->take(vc);
             }
         }
     }
 
     void get_outputs(RouterOutputs& out) const { out = out_; }
 
-    // Test introspection: the REQ router, so a test can read its built-in
-    // credit_[LOCAL] sender counter (router->NI direction) across a
-    // credit-return hop. Not used in production wiring.
-    router::Router& req_router() { return *req_router_; }
-    // RSP router accessor — used by cmodel_perf_sample_tick to sample occupancy.
-    router::Router& rsp_router() { return *rsp_router_; }
+    // DAT VC count — read by the DPI handlers to size the DAT per-VC credit
+    // marshalling loops. REQ/RSP are fixed single-VC (no accessor needed).
+    uint8_t num_vc() const { return dat_num_vc_; }
 
-    // VC count — read by the DPI handlers to size the per-VC credit
-    // marshalling loops.
-    uint8_t num_vc() const { return num_vc_; }
+    // Test introspection: routers, so a test can read built-in state directly.
+    router::SimpleRouter& req_router() { return *req_router_; }
+    router::SimpleRouter& rsp_router() { return *rsp_router_; }
+    router::Router& dat_router() { return *dat_router_; }
 
-    // First live LINK direction (LOCAL excluded). For a 2-node line this is the
-    // node's single neighbor (EAST for node0, WEST for node1); used by unit
-    // tests that exercise the single-link case. The DPI now marshals every
-    // direction port-major, so production wiring does not depend on this.
-    std::size_t link_port() const {
-        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
-            if (p != LOCAL && link_live_[p]) return p;
-        }
-        return LOCAL;  // isolated node (no neighbor) — no live link
-    }
-
-    // Fabric-state-dump introspection (read-only): flits parked in the eject
-    // adapters and undelivered credit pulses, per port (LOCAL + LINK slots).
-    std::size_t req_eject_buffered(std::size_t port) const {
-        const auto& ej = (port == LOCAL) ? req_local_eject_ : req_link_eject_[port];
-        return ej ? ej->buffered() : 0;
-    }
-    std::size_t rsp_eject_buffered(std::size_t port) const {
-        const auto& ej = (port == LOCAL) ? rsp_local_eject_ : rsp_link_eject_[port];
-        return ej ? ej->buffered() : 0;
-    }
-    std::size_t req_credit_pending(std::size_t port, uint8_t vc) const {
-        const auto& cr = (port == LOCAL) ? req_local_credit_ : req_link_credit_[port];
-        return cr ? cr->pending(vc) : 0;
-    }
-    std::size_t rsp_credit_pending(std::size_t port, uint8_t vc) const {
-        const auto& cr = (port == LOCAL) ? rsp_local_credit_ : rsp_link_credit_[port];
-        return cr ? cr->pending(vc) : 0;
+    // Fabric-state-dump introspection (read-only): DAT eject/credit-pending
+    // per port. REQ/RSP have no eject buffer (SimpleRouterWireLink stashes at
+    // most one in-flight grant) and no pending credit (ready is a live wire).
+    std::size_t dat_eject_buffered(std::size_t port) const { return dat_eject_[port]->buffered(); }
+    std::size_t dat_credit_pending(std::size_t port, uint8_t vc) const {
+        return dat_credit_[port]->pending(vc);
     }
 
   private:
-    static constexpr std::size_t LOCAL = static_cast<std::size_t>(router::RouterPort::LOCAL);
+    uint8_t dat_num_vc_ = 1;
 
-    // FlooNoC pulse-credit wiring, identical for LOCAL and LINK: transport-only
-    // eject (no pop credit) + a LinkCreditOut that captures the router's
-    // input-drain pulses for the wrap to drain one/tick onto the credit wire.
-    void wire_port(router::Router& r, std::size_t port,
-                   std::unique_ptr<router::LinkEjectAdapter>& ej,
-                   std::unique_ptr<router::LinkCreditOut>& credit) {
-        ej = std::make_unique<router::LinkEjectAdapter>(
-            static_cast<std::size_t>(num_vc_) *
-            static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
-        credit = std::make_unique<router::LinkCreditOut>(num_vc_);
-        r.set_downstream(port, *ej);
-        r.set_upstream_credit(port, *credit);
-    }
+    std::unique_ptr<router::SimpleRouter> req_router_, rsp_router_;
+    std::array<router::SimpleRouterWireLink, ROUTER_LINK_PORTS> req_link_, rsp_link_;
 
-    uint8_t num_vc_ = 1;
-    // Per-direction live mask (LOCAL slot unused): true where the node has a
-    // neighbor in the mesh. Boundary directions stay false (unwired).
-    std::array<bool, ROUTER_LINK_PORTS> link_live_{};
-
-    std::unique_ptr<router::Router> req_router_, rsp_router_;
-    std::unique_ptr<router::LinkEjectAdapter> req_local_eject_, rsp_local_eject_;
-    std::unique_ptr<router::LinkCreditOut> req_local_credit_, rsp_local_credit_;
-    // Per-direction LINK adapters; only live[p] slots are constructed.
-    std::array<std::unique_ptr<router::LinkEjectAdapter>, ROUTER_LINK_PORTS> req_link_eject_,
-        rsp_link_eject_;
-    std::array<std::unique_ptr<router::LinkCreditOut>, ROUTER_LINK_PORTS> req_link_credit_,
-        rsp_link_credit_;
+    std::unique_ptr<router::Router> dat_router_;
+    std::array<std::unique_ptr<router::LinkEjectAdapter>, ROUTER_LINK_PORTS> dat_eject_;
+    std::array<std::unique_ptr<router::LinkCreditOut>, ROUTER_LINK_PORTS> dat_credit_;
 
     RouterInputs in_{};
     RouterOutputs out_{};

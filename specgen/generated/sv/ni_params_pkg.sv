@@ -3,7 +3,7 @@
 // Source:    specgen/source/constants.yaml
 // Source SHA: 08936a402b17
 // Generator version: v1.0.0
-// Generated at: 2026-08-05T04:05:34Z
+// Generated at: 2026-08-05T06:29:08Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -28,9 +28,6 @@ package ni_params_pkg;
   localparam int unsigned NOC_ROUTER_OUTPUT_FIFO_DEPTH_DFLT = 2;
   localparam int unsigned NOC_MESH_X_DIM_DFLT               = 4;
   localparam int unsigned NOC_MESH_Y_DIM_DFLT               = 4;
-
-  // deprecated S3a interim alias, deleted when the wraps move to per-network types (T5)
-  localparam int unsigned NOC_FLIT_WIDTH_DFLT = NOC_DAT_FLIT_WIDTH_DFLT;
 
   // NMU depth defaults
   localparam int unsigned NMU_ROB_B_DEPTH_DFLT        = 128;

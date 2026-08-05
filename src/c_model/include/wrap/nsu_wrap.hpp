@@ -1,22 +1,36 @@
-// NsuWrap — Wrap for the Nsu component.
+// NsuWrap — Wrap for the Nsu component, three physical networks (S3a T5).
 //
 // Owns an NsuStandalone (hermetic wrapper). Nsu is the inverse of Nmu:
-// it has a NoC consumer side (receives req flits from the router), a NoC
-// producer side (sends rsp flits to the router), and an AXI master side
-// (drives AW/W/AR to a slave; consumes B/R from that slave).
+// it has three NoC faces (REQ ingress ready/valid, RSP egress ready/valid,
+// DAT ingress+egress credit) and an AXI master side (drives AW/W/AR to a
+// slave; consumes B/R from that slave).
 //
 // Each tick follows the 3-step pattern:
-//   set_inputs(in)   → latch NsuInputs
-//   tick()           → inject NoC req flit (if valid) into NsuStandalone,
-//                      advance nsu_.tick(), drain rsp flits + AXI master
-//                      AW/W/AR beats into out_
-//   get_outputs(out) → copy output latch to caller
+//   set_inputs(in)   -> latch NsuInputs
+//   tick()           -> inject REQ/DAT req flits (if valid) into NsuStandalone,
+//                      set RSP/DAT ready/credit state, advance nsu_.tick(),
+//                      drain rsp flits + AXI master AW/W/AR beats into out_
+//   get_outputs(out) -> copy output latch to caller
+//
+// REQ/RSP ready/valid (spec §4.3, stage design §5.3 "minimal path"): mirrors
+// nmu_wrap.hpp's REQ face exactly, applied to Nsu's RSP egress:
+// NsuStandalone::rsp_credit_avail(vc) is the SAME predicate name as before,
+// now backed by a live ready flag instead of a credit pool. REQ ingress is
+// tied to rx_req_ready = constant true, same "unbounded ingress queue"
+// simplification as Nmu's RSP ingress.
+//
+// DAT face (credit, unchanged mechanism, newly wired to real DPI in T5):
+// mirrors the pre-T5 REQ/RSP credit pattern exactly, just under the
+// tx_dat_*/rx_dat_* names and NsuStandalone's dat_* accessors. Steering (T6)
+// has not moved yet, so this face carries no real traffic in co-sim yet, but
+// the wires/DPI context are alive and idle.
 //
 // Wire interception:
-//   NoC req side:  inject_req_flit() on NsuStandalone inserts flits before
-//                  tick() so Depacketize can consume them this cycle.
-//   NoC rsp side:  pop_rsp_flit() on NsuStandalone drains flits produced by
-//                  the Packetize stage (captured in QueueNocRspOut queue).
+//   REQ/DAT req side: inject_req_flit()/inject_dat_req_flit() on
+//                  NsuStandalone insert flits before tick() so Depacketize
+//                  can consume them this cycle.
+//   RSP/DAT rsp side: pop_rsp_flit()/pop_dat_rsp_flit() on NsuStandalone
+//                  drain flits produced by the Packetize stage.
 //   AXI master side: AxiMasterPort.pop_aw/pop_w/pop_ar() drains beats that
 //                  Depacketize deposited; push_b/push_r() feeds slave
 //                  responses back to Packetize.
@@ -32,7 +46,7 @@
 #include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nsu_wrap_io.hpp"
-#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — DAT sender credit seed
 #include "flit.hpp"
 #include "ni/virtual_network.hpp"
 #include "nsu/nsu_standalone.hpp"
@@ -45,21 +59,24 @@ namespace ni::cmodel::wrap {
 class NsuWrap {
   public:
     // init — construct NsuStandalone with the co-sim default NsuConfig.
-    // ReadWriteSplit virtual networks, queue_depth = ni::NSU_QUEUE_DEPTH per
-    // channel. num_vc comes from the create param (cmodel_nsu_create);
-    // make_virtual_networks splits it into write_rsp_vcs (lower half) and
-    // read_rsp_vcs (upper half).
-    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
+    // REQ/RSP are fixed single-VC (S1 Q2, spec TXREQREADY/TXRSPREADY are
+    // scalar); dat_num_vc is the topology's VC count (mesh_4x4_vc{2,4,8}
+    // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
+    // AXI channel.
+    void init(uint8_t src_id = 0, uint8_t dat_num_vc = 1,
+              std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
               std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
               std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING) {
         using namespace ni::cmodel::nsu;
-        num_vc_ = num_vc;
+        dat_num_vc_ = dat_num_vc;
         NsuConfig cfg{};
         cfg.src_id = src_id;
-        cfg.num_vc = num_vc;
-        const auto vnets = ni::cmodel::make_virtual_networks(num_vc);  // asserts odd num_vc
+        // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
+        cfg.num_vc = 1;
+        const auto vnets = ni::cmodel::make_virtual_networks(1);
         cfg.write_rsp_vcs = vnets.write_vcs;
         cfg.read_rsp_vcs = vnets.read_vcs;
+        cfg.dat_num_vc = dat_num_vc;
         cfg.port_params.aw_queue_depth = queue_depth;
         cfg.port_params.w_queue_depth = queue_depth;
         cfg.port_params.ar_queue_depth = queue_depth;
@@ -70,11 +87,18 @@ class NsuWrap {
         cfg.wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
         cfg.vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
         nsu_ = std::make_unique<nsu::NsuStandalone>(std::move(cfg));
-        // Close the NI-edge credit loop. Seed the rsp-out sender counter to
-        // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
-        // constants.yaml) — the single source of truth that also seeds the
-        // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
-        nsu_->enable_noc_credit(static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
+        // RSP egress: ready/valid, no credit (spec §4.3) — set_inputs feeds
+        // the live ready flag from tx_rsp_ready every tick.
+        nsu_->enable_rsp_ready_track();
+        // DAT egress: unchanged credit mechanism, but the immediate downstream
+        // is no longer the router directly — it's DatMergeWrap's per-input
+        // pending stage (dat_merge_wrap.hpp), which NSU shares with NMU at the
+        // DAT LOCAL port (controller ruling, floo_nw_chimney.sv wide-link
+        // merge translate). Seed to that stage's own depth
+        // (NSU_ARBITER_FIFO_DEPTH), not the router's LOCAL input depth — the
+        // merge's own downstream credit pool (sized to NOC_ROUTER_VC_DEPTH)
+        // is the one that actually tracks the router's real capacity.
+        nsu_->enable_dat_noc_credit(static_cast<std::size_t>(::ni::NSU_ARBITER_FIFO_DEPTH));
         in_ = NsuInputs{};
         out_ = NsuOutputs{};
         held_aw_ = std::nullopt;
@@ -93,20 +117,22 @@ class NsuWrap {
         if (!nsu_) return;
         auto& port = nsu_->axi_master_port();
 
-        // Step 1: inject NoC req flit (if valid) BEFORE nsu_.tick() so the
-        // Depacketize stage can process it this cycle.
-        if (in_.noc_req_valid) {
-            nsu_->inject_req_flit(flit_from_bytes(in_.noc_req_flit));
+        // Step 1: inject REQ/DAT req flits (if valid) BEFORE nsu_.tick() so
+        // the Depacketize stage can process them this cycle.
+        if (in_.rx_req_valid) {
+            nsu_->inject_req_flit(flit_from_bytes(in_.rx_req_flit));
+        }
+        if (in_.rx_dat_valid) {
+            nsu_->inject_dat_req_flit(flit_from_bytes(in_.rx_dat_flit));
         }
 
-        // Incoming credit pulse — the router's LOCAL input drained an NSU
-        // rsp flit, so replenish the rsp-out sender counter BEFORE tick() so this
-        // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
-        // Per-VC: replenish each VC that pulsed this cycle.
-        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-            if (in_.noc_rsp_credit_return[vc]) {
-                nsu_->rsp_receive_credit(vc);
-            }
+        // RSP egress ready — live signal from the router, sampled BEFORE
+        // tick() so this cycle's VcArbiter drain sees it (credit_avail
+        // self-gates). DAT egress credit — same pre-tick replenish pattern
+        // as before, now via the dat_* accessor.
+        nsu_->rsp_set_ready(in_.tx_rsp_ready);
+        for (uint8_t vc = 0; vc < dat_num_vc_; ++vc) {
+            if (in_.tx_dat_crdvalid[vc]) nsu_->dat_rsp_receive_credit(vc);
         }
 
         // Step 2: advance Nsu one cycle (Depacketize + AxiMasterPort +
@@ -220,17 +246,27 @@ class NsuWrap {
         out_.bready = (outstanding_w_ > 0) && port.can_accept_b();
         out_.rready = (expected_r_beats_ > 0) && port.can_accept_r();
 
-        // NoC rsp side: pop one rsp flit produced by Packetize this cycle.
+        // RSP egress: pop one rsp flit produced by Packetize this cycle. The
+        // push into the terminal queue (inside nsu_->tick() above) already
+        // happened only when tx_rsp_ready was true this cycle, so a
+        // successful pop here IS this cycle's transfer.
         if (auto f = nsu_->pop_rsp_flit()) {
-            out_.noc_rsp_valid = true;
-            out_.noc_rsp_flit = flit_to_bytes(*f);
+            out_.tx_rsp_valid = true;
+            out_.tx_rsp_flit = flit_to_bytes(*f);
+        }
+        // DAT egress: unchanged credit-gated pop.
+        if (auto f = nsu_->pop_dat_rsp_flit()) {
+            out_.tx_dat_valid = true;
+            out_.tx_dat_flit = flit_to_bytes(*f);
         }
 
-        // NoC req credit OUT: consumer PULSE/VC — the NSU's Depacketize consumed an
-        // injected req flit this tick, so return one credit upstream (to the
-        // router's LOCAL output sender counter). Drains one pending pulse/VC/tick.
-        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-            out_.noc_req_credit_return[vc] = nsu_->req_take_credit(vc);
+        // REQ ingress ready: tied constant true — the c_model's ingress
+        // queue is unbounded (Depacketize always drains what's injected).
+        out_.rx_req_ready = true;
+
+        // DAT ingress credit OUT: unchanged consumer PULSE/VC.
+        for (uint8_t vc = 0; vc < dat_num_vc_; ++vc) {
+            out_.rx_dat_crdvalid[vc] = nsu_->dat_req_take_credit(vc);
         }
 
         // Save this tick's ready outputs for next tick's handshake detection.
@@ -240,8 +276,9 @@ class NsuWrap {
 
     void get_outputs(NsuOutputs& out) const { out = out_; }
 
-    // VC count — read by the DPI handlers to size the per-VC credit loops.
-    uint8_t num_vc() const { return num_vc_; }
+    // DAT VC count — read by the DPI handlers to size the DAT per-VC credit
+    // loops. REQ/RSP are fixed single-VC (no accessor needed).
+    uint8_t num_vc() const { return dat_num_vc_; }
 
     // Fabric-state-dump introspection (read-only by convention).
     nsu::NsuStandalone* standalone() { return nsu_.get(); }
@@ -253,7 +290,7 @@ class NsuWrap {
     uint32_t w_pop_budget() const { return w_pop_budget_; }
 
   private:
-    uint8_t num_vc_ = 1;
+    uint8_t dat_num_vc_ = 1;
     std::unique_ptr<nsu::NsuStandalone> nsu_;
     NsuInputs in_{};
     NsuOutputs out_{};

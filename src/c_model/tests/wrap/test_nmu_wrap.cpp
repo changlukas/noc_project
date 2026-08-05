@@ -47,7 +47,7 @@ TEST(NmuWrap, idle_adapter_keeps_readys_low) {
     EXPECT_FALSE(out.arready) << "wait_valid: no ARVALID -> arready must stay low";
     EXPECT_FALSE(out.bvalid) << "no B response without a prior AW+W";
     EXPECT_FALSE(out.rvalid) << "no R response without a prior AR";
-    EXPECT_FALSE(out.noc_req_valid) << "no NoC req flit without any AXI request";
+    EXPECT_FALSE(out.tx_req_valid) << "no REQ flit without any AXI request";
 }
 
 // ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
                            "    - { x: 1, y: 1, size: 0x1000 }\n";
 
     NmuWrap adapter;
-    adapter.init(/*src_id=*/0, /*num_vc=*/1, ni::NMU_QUEUE_DEPTH,
+    adapter.init(/*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
                  ni::cmodel::nmu::RobMode::Disabled, path.c_str());
 
     NmuInputs in{};
@@ -226,16 +226,19 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     adapter.tick();
     adapter.get_outputs(out);
 
-    // Drain the NoC req-out face for the AW flit (bounded loop mirrors
-    // test_nmu.cpp's WriteRoundTrip pipeline-drain pattern).
+    // Drain the REQ egress face for the AW flit (bounded loop mirrors
+    // test_nmu.cpp's WriteRoundTrip pipeline-drain pattern). tx_req_ready
+    // must be held high — REQ is ready/valid now, so the flit can only
+    // transfer on a cycle the downstream (this mock) asserts ready.
     bool saw_aw_flit = false;
     in = NmuInputs{};
+    in.tx_req_ready = true;
     for (int i = 0; i < 32 && !saw_aw_flit; ++i) {
         adapter.set_inputs(in);
         adapter.tick();
         adapter.get_outputs(out);
-        if (out.noc_req_valid) {
-            auto flit = flit_from_bytes(out.noc_req_flit);
+        if (out.tx_req_valid) {
+            auto flit = flit_from_bytes(out.tx_req_flit);
             if (flit.get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
                 EXPECT_EQ(flit.get_header_field("dst_id"), 0x01u);
                 EXPECT_EQ(flit.get_payload_field("AW", "awaddr"), 0x40ull);
@@ -246,12 +249,11 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     ASSERT_TRUE(saw_aw_flit) << "NmuWrap never produced an AW flit from the config-path SAM";
 }
 
-// ---------------------------------------------------------------------------
-// Death test: odd num_vc rejected at the wrap init boundary.
-// make_virtual_networks asserts on any odd num_vc > 1; NmuWrap::init calls it, so
-// the abort must propagate through the wrap path.
-// ---------------------------------------------------------------------------
-TEST(WrapOddNumVcDeath, NmuWrapRejectsOddNumVc) {
-    NmuWrap nmu;
-    EXPECT_DEATH({ nmu.init(/*src_id=*/0, /*num_vc=*/3); }, "num_vc must be 1 or even");
-}
+// Note: the wrap-level "odd num_vc rejected" death test was removed in S3a
+// T5. REQ/RSP are fixed single-VC now (S1 Q2) -- NmuWrap::init no longer
+// threads a caller-supplied VC count into make_virtual_networks at all (it is
+// called with the literal 1). DAT's dat_num_vc has no even/odd split
+// (make_dat_vc_arbiter in nmu.hpp uses the same candidate list for both
+// classes), so no oddness constraint exists at this boundary anymore.
+// make_virtual_networks's own odd-rejection is still covered directly in
+// test_virtual_network.cpp.

@@ -1,22 +1,46 @@
-// NmuWrap — Wrap for the Nmu component.
+// NmuWrap — Wrap for the Nmu component, three physical networks (S3a T5).
 //
 // Owns an NmuStandalone (hermetic wrapper). The Nmu is the most complex
-// wrap — it has BOTH an AXI slave side (incoming AW/W/AR, outgoing B/R)
-// AND NoC sides (req_out producer toward the router, rsp_in consumer from
-// the router). Each tick follows the 3-step pattern:
-//   set_inputs(in)   → latch NmuInputs
-//   tick()           → inject NoC rsp flit (if valid) into NmuStandalone,
-//                      push AW/W/AR beats (if valid) into axi_slave_port(),
-//                      advance nmu_.tick(), drain B/R + NoC req flits into out_
-//   get_outputs(out) → copy output latch to caller
+// wrap — it has an AXI slave side (incoming AW/W/AR, outgoing B/R) AND three
+// NoC faces: REQ egress (ready/valid), RSP ingress (ready/valid), DAT
+// ingress+egress (credit, unchanged flow control). Each tick follows the
+// 3-step pattern:
+//   set_inputs(in)   -> latch NmuInputs
+//   tick()           -> inject RSP/DAT rsp flits (if valid) into NmuStandalone,
+//                      set REQ/DAT ready/credit state, push AW/W/AR beats (if
+//                      valid) into axi_slave_port(), advance nmu_.tick(),
+//                      drain B/R + REQ/DAT req flits into out_
+//   get_outputs(out) -> copy output latch to caller
+//
+// REQ/RSP ready/valid (spec §4.3, stage design §5.3 "minimal path"):
+//   REQ egress: NmuStandalone::req_credit_avail(vc) is the SAME predicate
+//     name as before, now backed by a live ready flag instead of a credit
+//     pool (queue_req_out_.enable_ready_track()/set_ready()). VcArbiter's
+//     existing credit-gated drain needs no structural change. Because the
+//     push (inside nmu_->tick()) and the pop (this same tick, Step 3) happen
+//     within one wrap tick, a successful push IS the transfer -- no held-
+//     latch pattern is needed on this side (unlike the AXI4 channels below).
+//   RSP ingress: the c_model's ingress queue is unbounded (Depacketize
+//     always drains what's pushed), so rx_rsp_ready is tied constant true --
+//     an honest simplification given today's ingress modeling, not a
+//     shortcut specific to this stage (DAT's ingress already behaves this
+//     way, just without needing a ready wire since it's credit-based).
+//
+// DAT face (credit, unchanged mechanism, newly wired to real DPI in T5):
+//   mirrors the pre-T5 REQ/RSP credit pattern exactly, just under the
+//   tx_dat_*/rx_dat_* names and NmuStandalone's dat_* accessors. Steering
+//   (T6) has not moved yet -- Packetize still emits everything on REQ/RSP, so
+//   this face carries no real traffic in co-sim yet, but the wires/DPI
+//   context are alive and idle.
 //
 // Wire interception:
 //   AXI slave side:  push_aw/push_w/push_ar API on axi_slave_port(); ready
 //                    reported via can_accept_aw/w/ar() after tick.
-//   NoC req side:    pop_req_flit() on NmuStandalone drains flits produced by
-//                    the Packetize stage (captured in QueueNocReqOut queue).
-//   NoC rsp side:    inject_rsp_flit() on NmuStandalone inserts flits before
-//                    tick() so Depacketize can consume them this cycle.
+//   REQ/DAT req side: pop_req_flit()/pop_dat_req_flit() on NmuStandalone
+//                    drain flits produced by the Packetize stage.
+//   RSP/DAT rsp side: inject_rsp_flit()/inject_dat_rsp_flit() on
+//                    NmuStandalone insert flits before tick() so Depacketize
+//                    can consume them this cycle.
 //
 // B/R held-latch pattern (AXI4 §A3.2.1): bvalid / rvalid must not deassert
 // until bready / rready is observed. Same pattern as SlaveWrap.
@@ -27,7 +51,7 @@
 #include "wrap/flit_bytes.hpp"      // FlitBytes, FLIT_BYTES
 #include "wrap/flit_byte_conv.hpp"  // flit_from_bytes, flit_to_bytes
 #include "wrap/nmu_wrap_io.hpp"
-#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — LOCAL sender credit seed
+#include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — DAT sender credit seed
 #include "ni/virtual_network.hpp"
 #include "flit.hpp"
 #include "nmu/nmu_standalone.hpp"
@@ -41,21 +65,21 @@ namespace ni::cmodel::wrap {
 class NmuWrap {
   public:
     // init — construct NmuStandalone with the co-sim default NmuConfig.
-    // ReadWriteSplit, queue_depth = ni::NMU_QUEUE_DEPTH per channel.
-    // num_vc comes from the create param (cmodel_nmu_create); read/write
-    // virtual networks are derived from make_virtual_networks(num_vc) (odd
-    // num_vc asserts).
-    // config_path: topology YAML with an `address_map` block. Null/empty
-    // (the default) keeps the legacy co-sim default SAM below so existing unit-test
-    // callers are unaffected.
-    void init(uint8_t src_id = 0, uint8_t num_vc = 1, std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
+    // REQ/RSP are fixed single-VC (S1 Q2, spec TXREQREADY/TXRSPREADY are
+    // scalar); dat_num_vc is the topology's VC count (mesh_4x4_vc{2,4,8}
+    // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
+    // AXI channel. config_path: topology YAML with an `address_map` block.
+    // Null/empty (the default) keeps the legacy co-sim default SAM below so
+    // existing unit-test callers are unaffected.
+    void init(uint8_t src_id = 0, uint8_t dat_num_vc = 1,
+              std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
               nmu::RobMode rob_mode = nmu::RobMode::Disabled, const char* config_path = nullptr,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
               std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID,
               std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH) {
         using namespace ni::cmodel::nmu;
-        num_vc_ = num_vc;
+        dat_num_vc_ = dat_num_vc;
         NmuConfig cfg{};
         cfg.src_id = src_id;
         if (config_path != nullptr && config_path[0] != '\0') {
@@ -66,10 +90,12 @@ class NmuWrap {
             // rebased (addr - tile base), as in every real config.
             cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
         }
-        cfg.num_vc = num_vc;
-        const auto vnets = ni::cmodel::make_virtual_networks(num_vc);  // asserts odd num_vc
+        // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
+        cfg.num_vc = 1;
+        const auto vnets = ni::cmodel::make_virtual_networks(1);
         cfg.write_vcs = vnets.write_vcs;
         cfg.read_vcs = vnets.read_vcs;
+        cfg.dat_num_vc = dat_num_vc;
         // rob_mode / the tb's `_rob` suffix controls the R RoB only; B RoB is always on.
         cfg.read_rob_mode = rob_mode;
         cfg.b_rob_depth = b_rob_depth;
@@ -86,11 +112,18 @@ class NmuWrap {
         cfg.wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
         cfg.vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
         nmu_ = std::make_unique<nmu::NmuStandalone>(std::move(cfg));
-        // Close the NI-edge credit loop. Seed the req-out sender counter to
-        // the router LOCAL input VC FIFO depth (NOC_ROUTER_VC_DEPTH from
-        // constants.yaml) — the single source of truth that also seeds the
-        // router_wrap's LOCAL input buffer and the link_perf_monitor assertion.
-        nmu_->enable_noc_credit(static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH));
+        // REQ egress: ready/valid, no credit (spec §4.3) — set_inputs feeds
+        // the live ready flag from tx_req_ready every tick.
+        nmu_->enable_req_ready_track();
+        // DAT egress: unchanged credit mechanism, but the immediate downstream
+        // is no longer the router directly — it's DatMergeWrap's per-input
+        // pending stage (dat_merge_wrap.hpp), which NMU shares with NSU at the
+        // DAT LOCAL port (controller ruling, floo_nw_chimney.sv wide-link
+        // merge translate). Seed to that stage's own depth
+        // (NMU_ARBITER_FIFO_DEPTH), not the router's LOCAL input depth — the
+        // merge's own downstream credit pool (sized to NOC_ROUTER_VC_DEPTH)
+        // is the one that actually tracks the router's real capacity.
+        nmu_->enable_dat_noc_credit(static_cast<std::size_t>(::ni::NMU_ARBITER_FIFO_DEPTH));
         in_ = NmuInputs{};
         out_ = NmuOutputs{};
         held_b_ = std::nullopt;
@@ -107,20 +140,22 @@ class NmuWrap {
         if (!nmu_) return;
         auto& port = nmu_->axi_slave_port();
 
-        // Step 1a: inject NoC rsp flit (if valid) BEFORE nmu_.tick() so the
-        // Depacketize stage can process it this cycle.
-        if (in_.noc_rsp_valid) {
-            nmu_->inject_rsp_flit(flit_from_bytes(in_.noc_rsp_flit));
+        // Step 1a: inject RSP/DAT rsp flits (if valid) BEFORE nmu_.tick() so
+        // the Depacketize stage can process them this cycle.
+        if (in_.rx_rsp_valid) {
+            nmu_->inject_rsp_flit(flit_from_bytes(in_.rx_rsp_flit));
+        }
+        if (in_.rx_dat_valid) {
+            nmu_->inject_dat_rsp_flit(flit_from_bytes(in_.rx_dat_flit));
         }
 
-        // Incoming credit pulse — the router's LOCAL input drained an NMU
-        // req flit, so replenish the req-out sender counter BEFORE tick() so this
-        // cycle's VcArbiter sees the credit (VcArbiter self-gates on credit_avail).
-        // Per-VC: replenish each VC that pulsed this cycle.
-        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-            if (in_.noc_req_credit_return[vc]) {
-                nmu_->req_receive_credit(vc);
-            }
+        // REQ egress ready — live signal from the router, sampled BEFORE
+        // tick() so this cycle's VcArbiter drain sees it (credit_avail
+        // self-gates). DAT egress credit — same pre-tick replenish pattern
+        // as before, now via the dat_* accessor.
+        nmu_->req_set_ready(in_.tx_req_ready);
+        for (uint8_t vc = 0; vc < dat_num_vc_; ++vc) {
+            if (in_.tx_dat_crdvalid[vc]) nmu_->dat_req_receive_credit(vc);
         }
 
         // Step 1b: push AW/W/AR beats into axi_slave_port queues — ONLY on
@@ -224,17 +259,27 @@ class NmuWrap {
             out_.rlast = held_r_->last;
         }
 
-        // NoC req side: pop one req flit produced by Packetize this cycle.
+        // REQ egress: pop one req flit produced by Packetize this cycle. The
+        // push into the terminal queue (inside nmu_->tick() above) already
+        // happened only when tx_req_ready was true this cycle, so a
+        // successful pop here IS this cycle's transfer.
         if (auto f = nmu_->pop_req_flit()) {
-            out_.noc_req_valid = true;
-            out_.noc_req_flit = flit_to_bytes(*f);
+            out_.tx_req_valid = true;
+            out_.tx_req_flit = flit_to_bytes(*f);
+        }
+        // DAT egress: unchanged credit-gated pop.
+        if (auto f = nmu_->pop_dat_req_flit()) {
+            out_.tx_dat_valid = true;
+            out_.tx_dat_flit = flit_to_bytes(*f);
         }
 
-        // NoC rsp credit OUT: consumer PULSE/VC — the NMU's Depacketize consumed an
-        // injected rsp flit this tick, so return one credit upstream (to the
-        // router's LOCAL output sender counter). Drains one pending pulse/VC/tick.
-        for (uint8_t vc = 0; vc < num_vc_; ++vc) {
-            out_.noc_rsp_credit_return[vc] = nmu_->rsp_take_credit(vc);
+        // RSP ingress ready: tied constant true — the c_model's ingress
+        // queue is unbounded (Depacketize always drains what's injected).
+        out_.rx_rsp_ready = true;
+
+        // DAT ingress credit OUT: unchanged consumer PULSE/VC.
+        for (uint8_t vc = 0; vc < dat_num_vc_; ++vc) {
+            out_.rx_dat_crdvalid[vc] = nmu_->dat_rsp_take_credit(vc);
         }
 
         // Save this tick's ready outputs: next tick, valid && prev_ready
@@ -246,8 +291,9 @@ class NmuWrap {
 
     void get_outputs(NmuOutputs& out) const { out = out_; }
 
-    // VC count — read by the DPI handlers to size the per-VC credit loops.
-    uint8_t num_vc() const { return num_vc_; }
+    // DAT VC count — read by the DPI handlers to size the DAT per-VC credit
+    // loops. REQ/RSP are fixed single-VC (no accessor needed).
+    uint8_t num_vc() const { return dat_num_vc_; }
 
     // Fabric-state-dump introspection (read-only by convention).
     nmu::NmuStandalone* standalone() { return nmu_.get(); }
@@ -256,7 +302,7 @@ class NmuWrap {
     uint32_t w_expected() const { return w_expected_; }
 
   private:
-    uint8_t num_vc_ = 1;
+    uint8_t dat_num_vc_ = 1;
     std::unique_ptr<nmu::NmuStandalone> nmu_;
     NmuInputs in_{};
     NmuOutputs out_{};
