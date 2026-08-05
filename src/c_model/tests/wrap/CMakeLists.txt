@@ -38,3 +38,6 @@ target_include_directories(test_cmodel_dpi PRIVATE
     ${VERILATOR_INCLUDE_DIR}
     ${VERILATOR_INCLUDE_DIR}/vltstd)
 gtest_discover_tests(test_cmodel_dpi)
+
+add_cmodel_test(test_ni_router_chain)
+target_link_libraries(test_ni_router_chain PRIVATE yaml-cpp::yaml-cpp)
