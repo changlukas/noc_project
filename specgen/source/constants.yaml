@@ -48,21 +48,57 @@ noc:
   NUM_VC:
     type: int
     units: count
-    description: "Number of virtual channels per NoC link"
+    description: "Number of virtual channels per NoC link (DAT network; REQ/RSP are single-VC, see REQ_NUM_VC/RSP_NUM_VC)"
     default: 1
     min: 1
     max: 8
     sv_symbol: NOC_NUM_VC_DFLT
     cpp_symbol: NOC_NUM_VC
-  FLIT_WIDTH:
+  REQ_NUM_VC:
+    type: int
+    units: count
+    description: "Number of virtual channels on the REQ network (NarrowAw/NarrowW/NarrowAr/DataAr); spec ready/valid TXREQREADY is scalar, so this defaults to 1"
+    default: 1
+    min: 1
+    max: 8
+    sv_symbol: NOC_REQ_NUM_VC_DFLT
+    cpp_symbol: NOC_REQ_NUM_VC
+  RSP_NUM_VC:
+    type: int
+    units: count
+    description: "Number of virtual channels on the RSP network (NarrowB/NarrowR/DataB); spec ready/valid TXRSPREADY is scalar, so this defaults to 1"
+    default: 1
+    min: 1
+    max: 8
+    sv_symbol: NOC_RSP_NUM_VC_DFLT
+    cpp_symbol: NOC_RSP_NUM_VC
+  REQ_FLIT_WIDTH:
     type: int
     units: bits
-    description: "NoC flit payload width"
+    description: "REQ network flit width: HEADER_WIDTH(44) + max(AW/AR payload, 93) = 137, per docs/noc-target-spec.md §6"
+    default: 137
+    min: 64
+    max: 1024
+    sv_symbol: NOC_REQ_FLIT_WIDTH_DFLT
+    cpp_symbol: NOC_REQ_FLIT_WIDTH
+  RSP_FLIT_WIDTH:
+    type: int
+    units: bits
+    description: "RSP network flit width: HEADER_WIDTH(44) + max(B/NARROW_R payload, 83) = 127, per docs/noc-target-spec.md §6"
+    default: 127
+    min: 64
+    max: 1024
+    sv_symbol: NOC_RSP_FLIT_WIDTH_DFLT
+    cpp_symbol: NOC_RSP_FLIT_WIDTH
+  DAT_FLIT_WIDTH:
+    type: int
+    units: bits
+    description: "DAT network flit width: HEADER_WIDTH(44) + max(AW/DATA_W/DATA_R payload, 585) = 629, per docs/noc-target-spec.md §6"
     default: 629
     min: 64
     max: 1024
-    sv_symbol: NOC_FLIT_WIDTH_DFLT
-    cpp_symbol: NOC_FLIT_WIDTH
+    sv_symbol: NOC_DAT_FLIT_WIDTH_DFLT
+    cpp_symbol: NOC_DAT_FLIT_WIDTH
   ROUTER_VC_DEPTH:
     type: int
     units: flits

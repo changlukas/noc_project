@@ -91,7 +91,7 @@ All width/position accessors are pure functions of `field_widths` + `width_param
 | `wstrb_width_resolved(spec)` | `int` (= `NOC_DATA_WIDTH / 8`) |
 | `header_field_width(spec, name)` | `int`; resolves `width_param`. Raises `FieldNotFoundError`. |
 | `header_field_position(spec, name)` | `(lsb, msb)`; `None` for width-0 placeholders. |
-| `payload_field_width(spec, channel, name)` | `int`; handles `width_param='derived'`. |
+| `payload_field_width(spec, channel, name)` | `int`; resolves `width_param`. |
 | `payload_field_position(spec, channel, name)` | `(lsb, msb)`; `None` for width-0 placeholders. |
 | `all_field_widths(spec)` | `{name: width}` |
 | `header_field_enabled(spec, name)` | `bool` — `False` means padding. Raises `KeyError`. |

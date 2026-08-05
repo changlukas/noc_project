@@ -17,7 +17,7 @@
       "kind": "noc_link",
       "parameters": [
         { "name": "NUM_VC",           "constants_yaml_key": "noc.NUM_VC" },
-        { "name": "FLIT_WIDTH",       "constants_yaml_key": "noc.FLIT_WIDTH" },
+        { "name": "FLIT_WIDTH",       "constants_yaml_key": "noc.DAT_FLIT_WIDTH" },
         { "name": "ROUTER_VC_DEPTH",  "constants_yaml_key": "noc.ROUTER_VC_DEPTH" }
       ],
       "signals": [

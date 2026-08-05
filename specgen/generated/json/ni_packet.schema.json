@@ -80,11 +80,10 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["name", "network", "payload_width", "fields"],
+            "required": ["name", "payload_width", "fields"],
             "additionalProperties": true,
             "properties": {
               "name":          {"enum": ["AW", "AR", "NARROW_W", "DATA_W", "B", "NARROW_R", "DATA_R"]},
-              "network":       {"enum": ["REQ", "RSP"]},
               "payload_width": {"type": "integer", "minimum": 1},
               "fields": {
                 "type": "array",
@@ -108,6 +107,19 @@
         "derived": {
           "type": "object",
           "additionalProperties": {"type": "integer", "minimum": 1}
+        },
+        "networks": {
+          "type": "object",
+          "description": "axi_ch -> {network, payload_channel} binding. Maps every axi_ch encoding value to the physical network it rides (REQ/RSP/DAT) and the payload_channels[] entry that carries its fields.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["network", "payload_channel"],
+            "additionalProperties": false,
+            "properties": {
+              "network":         {"enum": ["REQ", "RSP", "DAT"]},
+              "payload_channel": {"type": "string"}
+            }
+          }
         },
         "route_par_coverage": {
           "type": "array",

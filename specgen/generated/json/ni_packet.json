@@ -94,7 +94,6 @@
     "payload_channels": [
       {
         "name": "AW",
-        "network": "REQ",
         "payload_width": 93,
         "fields": [
           {
@@ -145,7 +144,6 @@
       },
       {
         "name": "AR",
-        "network": "REQ",
         "payload_width": 93,
         "fields": [
           {
@@ -196,7 +194,6 @@
       },
       {
         "name": "NARROW_W",
-        "network": "REQ",
         "payload_width": 81,
         "fields": [
           {
@@ -219,7 +216,6 @@
       },
       {
         "name": "DATA_W",
-        "network": "REQ",
         "payload_width": 585,
         "fields": [
           {
@@ -242,7 +238,6 @@
       },
       {
         "name": "B",
-        "network": "RSP",
         "payload_width": 18,
         "fields": [
           {
@@ -261,7 +256,6 @@
       },
       {
         "name": "NARROW_R",
-        "network": "RSP",
         "payload_width": 83,
         "fields": [
           {
@@ -288,7 +282,6 @@
       },
       {
         "name": "DATA_R",
-        "network": "RSP",
         "payload_width": 531,
         "fields": [
           {
@@ -314,6 +307,18 @@
         ]
       }
     ],
+    "networks": {
+      "NarrowAw": {"network": "REQ", "payload_channel": "AW"},
+      "NarrowW":  {"network": "REQ", "payload_channel": "NARROW_W"},
+      "NarrowAr": {"network": "REQ", "payload_channel": "AR"},
+      "DataAr":   {"network": "REQ", "payload_channel": "AR"},
+      "NarrowB":  {"network": "RSP", "payload_channel": "B"},
+      "NarrowR":  {"network": "RSP", "payload_channel": "NARROW_R"},
+      "DataB":    {"network": "RSP", "payload_channel": "B"},
+      "DataAw":   {"network": "DAT", "payload_channel": "AW"},
+      "DataW":    {"network": "DAT", "payload_channel": "DATA_W"},
+      "DataR":    {"network": "DAT", "payload_channel": "DATA_R"}
+    },
     "route_par_coverage": [
       "dst_id",
       "flit_tail"

@@ -1,5 +1,5 @@
 """Tests for check_flit_width_matches_packet — L2 invariant binding constants.yaml
-noc.FLIT_WIDTH to the packet-domain HEADER_WIDTH + max(payload_width)."""
+noc.<NET>_FLIT_WIDTH to the packet-domain per-network HEADER_WIDTH + max(payload_width)."""
 from __future__ import annotations
 import copy
 from pathlib import Path
@@ -26,19 +26,22 @@ def constants():
 
 
 def test_default_config_no_errors(packet_spec, constants):
-    """Committed constants.yaml noc.FLIT_WIDTH must match the packet spec's
-    resolved HEADER_WIDTH + max(payload_width) with no ERROR."""
+    """Committed constants.yaml noc.{REQ,RSP,DAT}_FLIT_WIDTH must match the
+    packet spec's resolved per-network HEADER_WIDTH + max(payload_width) with
+    no ERROR."""
     issues = check_flit_width_matches_packet(packet_spec, constants)
     errors = [i for i in issues if i.severity == "ERROR"]
     assert not errors, f"unexpected errors: {[i.message for i in errors]}"
 
 
-def test_drifted_yaml_value_fires_error(packet_spec, constants):
-    """noc.FLIT_WIDTH hand-edited out of sync with the packet spec must fire
-    L2-FLIT-WIDTH-SRC ERROR (the two-source drift this invariant exists to catch)."""
+@pytest.mark.parametrize("network", ["REQ", "RSP", "DAT"])
+def test_drifted_yaml_value_fires_error(packet_spec, constants, network):
+    """noc.<NET>_FLIT_WIDTH hand-edited out of sync with the packet spec must
+    fire L2-FLIT-WIDTH-SRC ERROR (the two-source drift this invariant exists
+    to catch), independently for each network."""
     bad = copy.deepcopy(constants)
-    bad["noc"]["FLIT_WIDTH"]["default"] = 396
+    bad["noc"][f"{network}_FLIT_WIDTH"]["default"] = 396
     issues = check_flit_width_matches_packet(packet_spec, bad)
     errors = [i for i in issues if i.severity == "ERROR" and i.check == "L2-FLIT-WIDTH-SRC"]
-    assert errors, "expected an L2-FLIT-WIDTH-SRC ERROR for drifted FLIT_WIDTH but got none"
-    assert any("FLIT_WIDTH" in i.message for i in errors)
+    assert errors, f"expected an L2-FLIT-WIDTH-SRC ERROR for drifted {network}_FLIT_WIDTH but got none"
+    assert any(f"{network}_FLIT_WIDTH" in i.message for i in errors)

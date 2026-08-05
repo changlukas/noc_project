@@ -1,8 +1,9 @@
 """SV emitter for signals domain.
 
 Produces rtl_pkg/ni_signals_pkg.sv: reset constants + the packed-struct
-typedefs (noc_chan_t / axi_req_t / axi_rsp_t) used on every wrap/fabric/tb
-port. Uses localparam int unsigned for reset constants (design doc 6.2).
+typedefs (noc_req_chan_t / noc_rsp_chan_t / noc_dat_chan_t / axi_req_t /
+axi_rsp_t) used on every wrap/fabric/tb port. Uses localparam int unsigned
+for reset constants (design doc 6.2).
 
 SV interface blocks (axi4_intf / noc_intf) were removed in the FlooNoC struct
 refactor — the field/channel order of the structs is still derived from
@@ -109,19 +110,31 @@ _IFACE_WIDTH_TO_STRUCT: dict[str, str] = {
 }
 
 
+_NOC_NETWORKS: list[tuple[str, str]] = [
+    ("req", "NOC_REQ_FLIT_WIDTH_DFLT"),
+    ("rsp", "NOC_RSP_FLIT_WIDTH_DFLT"),
+    ("dat", "NOC_DAT_FLIT_WIDTH_DFLT"),
+]
+
+
 def _emit_noc_structs() -> list[str]:
-    """Emit noc_chan_t typedef line (in-package).
+    """Emit one noc_<net>_chan_t typedef per network (in-package).
+
+    Each network has its own flit width (REQ 137 b, RSP 127 b, DAT 629 b, per
+    docs/noc-target-spec.md §6) -- SV structs are not parameterizable, so this
+    is three typedefs rather than one width-generic struct.
 
     The credit typedef is per-topology (width depends on num_vc) and lives in
     noc_types_pkg_vc{N}.sv, generated via --domain noc_types --num-vc N.
     """
     out: list[str] = [
         "  // NoC link packed-struct typedefs (replaced noc_intf; widths fixed-default).",
-        "  typedef struct packed {",
-        "    logic                                            valid;",
-        "    logic [ni_params_pkg::NOC_FLIT_WIDTH_DFLT-1:0] flit;",
-        "  } noc_chan_t;",
     ]
+    for net, width_sym in _NOC_NETWORKS:
+        out.append("  typedef struct packed {")
+        out.append("    logic                                            valid;")
+        out.append(f"    logic [ni_params_pkg::{width_sym}-1:0] flit;")
+        out.append(f"  }} noc_{net}_chan_t;")
     return out
 
 

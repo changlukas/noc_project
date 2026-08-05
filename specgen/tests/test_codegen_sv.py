@@ -163,18 +163,23 @@ class TestSvSignalsEmit:
     def test_emits_noc_struct_typedefs(self):
         run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
-        assert "} noc_chan_t;" in sv
+        for net in ("req", "rsp", "dat"):
+            assert f"}} noc_{net}_chan_t;" in sv
         assert "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
 
     def test_struct_typedefs_in_package(self):
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
         pkg = sv[sv.index("package ni_signals_pkg"):sv.index("endpackage")]
-        assert "noc_chan_t" in pkg and "axi_req_t" in pkg     # typedef 在 package 內
+        for net in ("req", "rsp", "dat"):
+            assert f"noc_{net}_chan_t" in pkg     # typedef 在 package 內
+        assert "axi_req_t" in pkg
 
     def test_ni_signals_fixed_typedefs_no_credit(self):
         run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))
         sv = (RTL_PKG_DIR / "ni_signals_pkg.sv").read_text(encoding="ascii")
-        assert "} noc_chan_t;" in sv and "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
+        for net in ("req", "rsp", "dat"):
+            assert f"}} noc_{net}_chan_t;" in sv
+        assert "} axi_req_t;" in sv and "} axi_rsp_t;" in sv
         assert "noc_credit_t" not in sv          # 已移到 noc_types_pkg
 
     def test_noc_types_pkg_per_vc(self, tmp_path):
@@ -243,8 +248,9 @@ class TestCheckModeWithSv:
 def test_interfaces_removed():
     """ni_signals_pkg.sv must NOT emit any SV interface after the FlooNoC struct
     refactor — every wrap/fabric/tb port now uses the packed-struct typedefs
-    (noc_chan_t / axi_req_t / axi_rsp_t). The interface_handshake.json source
-    still drives the struct field/channel order, but no interface is emitted.
+    (noc_req_chan_t / noc_rsp_chan_t / noc_dat_chan_t / axi_req_t / axi_rsp_t).
+    The interface_handshake.json source still drives the struct field/channel
+    order, but no interface is emitted.
     """
     # Ensure the SV file is freshly regenerated before reading.
     r = run_codegen("--target", "sv", "--domain", "signals", "--out", str(RTL_PKG_DIR))

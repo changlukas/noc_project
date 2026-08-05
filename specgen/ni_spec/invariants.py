@@ -227,25 +227,33 @@ def check_mesh_within_flit(packet_spec, constants) -> List[Issue]:
 
 
 def check_flit_width_matches_packet(packet_spec, constants) -> List[Issue]:
-    """L2: constants.yaml noc.FLIT_WIDTH must equal the packet-domain flit width
-    (HEADER_WIDTH + max(payload_width)), read via ni_spec.constants.flit_width_resolved.
+    """L2: constants.yaml noc.<NET>_FLIT_WIDTH must equal the packet-domain
+    per-network flit width (HEADER_WIDTH + max(payload_width) over that
+    network's axi_ch), read via ni_spec.constants.network_flit_width_resolved.
+    Looped over every network in flit.networks (REQ/RSP/DAT).
 
-    Two independent sources computed FLIT_WIDTH: the packet spec (header + widest
-    payload channel, what ni::FLIT_WIDTH / ni_flit_constants.h derive from) and
-    constants.yaml noc.FLIT_WIDTH (a hand-authored default consumed by
-    ni_params_pkg.sv / ni_params.h on the SV/DPI side). A drift between the two is
-    invisible to codegen's per-domain diff (each domain regenerates from its own
-    source) but corrupts the DPI marshal boundary at runtime. Binding them here
-    fails codegen --check instead.
+    Two independent sources compute each <NET>_FLIT_WIDTH: the packet spec
+    (header + widest payload channel reachable by that network's axi_ch, what
+    the per-network noc_<net>_chan_t typedefs derive from) and constants.yaml
+    noc.<NET>_FLIT_WIDTH (a hand-authored default consumed by ni_params_pkg.sv /
+    ni_params.h on the SV/DPI side). A drift between the two is invisible to
+    codegen's per-domain diff (each domain regenerates from its own source) but
+    corrupts the DPI marshal boundary at runtime. Binding them here fails
+    codegen --check instead.
     """
     TAG = "L2-FLIT-WIDTH-SRC"
     issues: List[Issue] = []
-    packet_fw = C.flit_width_resolved(packet_spec)
-    yaml_fw = int(constants["noc"]["FLIT_WIDTH"]["default"])
-    if packet_fw != yaml_fw:
-        issues.append(_err(TAG,
-            f"constants.yaml noc.FLIT_WIDTH={yaml_fw} != packet-domain "
-            f"HEADER_WIDTH+max(payload_width)={packet_fw}"))
+    for net in C.network_names(packet_spec):
+        key = f"{net}_FLIT_WIDTH"
+        if key not in constants.get("noc", {}):
+            issues.append(_err(TAG, f"constants.yaml noc.{key} missing for network '{net}'"))
+            continue
+        packet_fw = C.network_flit_width_resolved(packet_spec, net)
+        yaml_fw = int(constants["noc"][key]["default"])
+        if packet_fw != yaml_fw:
+            issues.append(_err(TAG,
+                f"constants.yaml noc.{key}={yaml_fw} != packet-domain "
+                f"HEADER_WIDTH+max(payload_width) for {net}={packet_fw}"))
     return issues
 
 

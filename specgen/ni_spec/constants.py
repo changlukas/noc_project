@@ -194,7 +194,7 @@ def packet_eval_expr(spec: dict, expr) -> int:
         return expr
     if expr == "derived":
         raise ExprNotAllowedError(
-            "width_param='derived' must be resolved by payload_field_width, not packet_eval_expr"
+            "width_param='derived' is not a supported width_param value"
         )
     if not isinstance(expr, str):
         raise ExprSyntaxError(f"width_param must be str or int, got {type(expr).__name__}")
@@ -206,14 +206,6 @@ def packet_eval_expr(spec: dict, expr) -> int:
     return _eval_ast(tree.body, namespace)
 
 
-def packet_param_value(spec: dict, name: str) -> int:
-    """Look up a parameter in flit.field_widths."""
-    fw = spec.get("flit", {}).get("field_widths", {})
-    if name not in fw:
-        raise ExprNameError(f"parameter '{name}' not in field_widths")
-    return int(fw[name])
-
-
 def _find_header_field(spec: dict, name: str) -> dict:
     for f in spec["flit"]["header_fields"]:
         if f["name"] == name:
@@ -222,30 +214,9 @@ def _find_header_field(spec: dict, name: str) -> dict:
 
 
 def header_field_width(spec: dict, name: str) -> int:
-    """Resolve width by evaluating width_param against field_widths.
-
-    Special case ``width_param == "derived"`` mirrors payload's derived
-    handling: the field's width is computed as
-    ``HEADER_TOTAL_WIDTH - sum(other fields' widths)``. This anchors a
-    fixed-size header layout; the derived field acts as compile-time
-    padding to keep HEADER_WIDTH constant regardless of which optional
-    fields are enabled. At most one ``derived`` field per header_fields
-    (enforced in invariants).
-    """
+    """Resolve width by evaluating width_param against field_widths."""
     f = _find_header_field(spec, name)
-    wp = f["width_param"]
-    if wp == "derived":
-        total = packet_param_value(spec, "HEADER_TOTAL_WIDTH")
-        others_sum = 0
-        for of in spec["flit"]["header_fields"]:
-            if of["name"] == name:
-                continue
-            owp = of["width_param"]
-            if owp == "derived":
-                continue
-            others_sum += packet_eval_expr(spec, owp)
-        return total - others_sum
-    return packet_eval_expr(spec, wp)
+    return packet_eval_expr(spec, f["width_param"])
 
 
 def header_field_position(spec: dict, name: str):
@@ -273,36 +244,12 @@ def payload_channel_width(spec: dict, channel: str) -> int:
 
 
 def payload_field_width(spec: dict, channel: str, name: str) -> int:
-    """Resolve width. Special case: width_param='derived' ->
-    payload_width(channel) - sum of all other fields' widths.
-
-    At most one field per channel may declare width_param='derived'.
-    """
+    """Resolve width by evaluating width_param against field_widths."""
     ch = _find_channel(spec, channel)
-    derived_count = sum(1 for f in ch["fields"] if f["width_param"] == "derived")
-    if derived_count > 1:
-        raise ExprNotAllowedError(
-            f"channel '{channel}' has multiple 'derived' fields; "
-            f"only one allowed per channel"
-        )
-    target = None
-    others_sum = 0
     for f in ch["fields"]:
         if f["name"] == name:
-            target = f
-            continue
-        wp = f["width_param"]
-        if wp == "derived":
-            # The channel's lone derived field contributes the remainder; it
-            # cannot itself appear in the running sum used to compute that
-            # remainder. Skip it here.
-            continue
-        others_sum += packet_eval_expr(spec, wp)
-    if target is None:
-        raise FieldNotFoundError(f"payload field '{name}' not in channel '{channel}'")
-    if target["width_param"] == "derived":
-        return payload_channel_width(spec, channel) - others_sum
-    return packet_eval_expr(spec, target["width_param"])
+            return packet_eval_expr(spec, f["width_param"])
+    raise FieldNotFoundError(f"payload field '{name}' not in channel '{channel}'")
 
 
 def payload_field_position(spec: dict, channel: str, name: str):
@@ -339,6 +286,53 @@ def payload_width_resolved(spec: dict) -> int:
 
 def flit_width_resolved(spec: dict) -> int:
     return header_width_resolved(spec) + payload_width_resolved(spec)
+
+
+# ---------- per-network resolvers (flit.networks: axi_ch -> {network, payload_channel}) ----------
+#
+# One payload_channels[] entry (e.g. "AW") can be reached by more than one
+# axi_ch (NarrowAw and DataAw both carry the AW struct); flit.networks binds
+# each axi_ch to the network it rides and the payload_channel it uses, so a
+# network's flit width is HEADER_WIDTH + the widest payload_channel among its
+# axi_ch, not simply payload_channel_width of one name.
+
+def network_names(spec: dict) -> list:
+    """Ordered network names (REQ, RSP, DAT, ...), first-seen order in
+    flit.networks (== axi_ch declaration order in header_fields.encoding)."""
+    seen: list = []
+    for binding in spec["flit"]["networks"].values():
+        net = binding["network"]
+        if net not in seen:
+            seen.append(net)
+    return seen
+
+
+def network_axi_channels(spec: dict, network: str) -> list:
+    """axi_ch names routed to one network, in flit.networks declaration order."""
+    return [name for name, binding in spec["flit"]["networks"].items()
+            if binding["network"] == network]
+
+
+def axi_ch_payload_channel(spec: dict, axi_ch: str) -> str:
+    """payload_channels[] name bound to one axi_ch, from flit.networks."""
+    nets = spec["flit"]["networks"]
+    if axi_ch not in nets:
+        raise FieldNotFoundError(f"axi_ch '{axi_ch}' not in flit.networks")
+    return nets[axi_ch]["payload_channel"]
+
+
+def network_payload_width_resolved(spec: dict, network: str) -> int:
+    """Widest payload_channel width among the axi_ch routed to one network."""
+    chans = network_axi_channels(spec, network)
+    if not chans:
+        raise FieldNotFoundError(f"network '{network}' not in flit.networks")
+    return max(payload_channel_width(spec, axi_ch_payload_channel(spec, ch))
+               for ch in chans)
+
+
+def network_flit_width_resolved(spec: dict, network: str) -> int:
+    """<NET>_FLIT_WIDTH = HEADER_WIDTH + max(payload_width over that network's axi_ch)."""
+    return header_width_resolved(spec) + network_payload_width_resolved(spec, network)
 
 
 def link_width_resolved(spec: dict) -> int:
