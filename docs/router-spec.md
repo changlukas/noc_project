@@ -103,7 +103,7 @@ Each Router is a 3-stage pipeline. A flit advances exactly one stage per cycle.
 | Stage | Storage | Action per cycle |
 |---|---|---|
 | 1. Input | per-port 1-deep input register, then per-(port, VC) FIFO, depth `NOC_ROUTER_VC_DEPTH` = 4 | file the registered flit into the FIFO selected by header `vc_id` |
-| 2. Grant | per-output wormhole lock + RR state + credit counters | per output: pick one (input, VC) candidate, pop its FIFO front, decrement `credit_[out][vc]`, push into the output FIFO, schedule one credit pulse to the upstream of that input |
+| 2. Grant | per-output wormhole lock + RR state + credit counters | per output: pick one (input, VC) candidate, assign the output-side VC `out_vc` (VA, section 2.5), pop its FIFO front, decrement `credit_[out][out_vc]`, restamp header `vc_id = out_vc`, push into the output FIFO, schedule one credit pulse (input-side VC) to the upstream of that input |
 | 3. Link | per-output FIFO, depth `NOC_ROUTER_OUTPUT_FIFO_DEPTH` = 2 | drive at most one flit from each output FIFO onto the link |
 
 The model evaluates stages in reverse order (3, then 2, then 1) within one tick
@@ -134,25 +134,41 @@ Verified by `ZeroLoadLatencyIsThreeTicks`.
 When an output is not wormhole-locked, stage 2 selects a candidate with two nested
 round-robin scans (`router.hpp:239-254`):
 
-1. **Outer, VC-major**: VCs are scanned in order `vc_rr_[out], vc_rr_[out]+1, ...`
-   modulo `NUM_VC`. A VC whose credit counter `credit_[out][vc]` is 0 is skipped before
-   any input is looked at.
+1. **Outer, VC-major**: input VCs are scanned in order `vc_rr_[out], vc_rr_[out]+1, ...`
+   modulo `NUM_VC`. There is no credit pre-filter on the input VC: credit eligibility
+   depends on the VC-assignment result (below), not on the VC the flit arrived on.
 2. **Inner, input-minor**: for the chosen VC, inputs are scanned in order
    `rr, rr+1, ...` modulo 5 (per-output pointer `ws.rr`). The first input whose FIFO
-   front flit routes to this output wins.
+   front flit routes to this output AND passes VC assignment wins; a candidate whose
+   assignment fails (no eligible output VC with credit) is skipped and the scan
+   continues (work-conserving).
 
 IMPORTANT (tie-break): when several (input, VC) pairs simultaneously want the same
 output, the unique winner is the first match in scan order: lowest VC offset from
 `vc_rr_[out]` first, then lowest input offset from `ws.rr`. Worked example, output
-EAST, `NUM_VC = 2`, `vc_rr_[EAST] = 1`, `ws.rr = 3` (SOUTH), credits
-`credit_[EAST][0] = 2`, `credit_[EAST][1] = 1`. Candidates: front of (WEST, VC0) and
-front of (SOUTH, VC1), both routing EAST.
+EAST, `NUM_VC = 2`, `vc_rr_[EAST] = 1`, `ws.rr = 3` (SOUTH). Candidates: front of
+(WEST, VC0) and front of (SOUTH, VC1), both routing EAST with assignable credit.
 
-- VC scan starts at VC1. Credit 1 > 0, so VC1 is examined first.
-- Input scan starts at SOUTH. (SOUTH, VC1) routes EAST -> **winner (SOUTH, VC1)**.
-  (WEST, VC0) is never examined this cycle.
-- Counter-case: with `credit_[EAST][1] = 0`, VC1 is skipped entirely. VC0 is scanned;
-  (SOUTH, VC0) is empty, next input is WEST -> winner (WEST, VC0).
+- VC scan starts at VC1. Input scan starts at SOUTH. (SOUTH, VC1) routes EAST ->
+  **winner (SOUTH, VC1)**. (WEST, VC0) is never examined this cycle.
+- Counter-case: if (SOUTH, VC1)'s assignment fails (no eligible output VC with
+  credit), the scan continues; with no other VC1 candidate, VC0 is scanned and
+  (WEST, VC0) wins if its own assignment passes.
+
+After the scan picks a candidate, stage 2 assigns the OUTPUT-side VC `out_vc`
+(VC assignment, ported from the deprecated FlooNoC `vc_router_util` suite):
+
+| Case | `out_vc` |
+|---|---|
+| `fixed_vc = 1` | header `vc_id` unchanged (NI pin); grantable only if `credit_[out][vc_id] > 0` |
+| `fixed_vc = 0`, preferred VC has credit | preferred VC, a pure function of (output port, next-hop XY route) (`preferred_vc`, `router.hpp`) |
+| `fixed_vc = 0`, preferred full, `flit_tail = 1` | the highest-index other VC with credit (FVADA overflow) |
+| `fixed_vc = 0`, preferred full, `flit_tail = 0` | none — a wormhole head never overflows off its preferred VC; the candidate is not grantable |
+
+The grant decrements `credit_[out][out_vc]` and restamps `vc_id = out_vc` into the
+departing header. The credit pulse to the upstream carries the INPUT-side VC (the
+FIFO slot freed), which after VA can differ from the VC consumed downstream. With
+`NUM_VC = 1` the assignment is the identity.
 
 Both pointers advance only when a tail flit (`flit_tail = 1'b1`) is granted:
 `ws.rr = winner_input + 1`, `vc_rr_[out] = winner_vc + 1` (packet-granularity
@@ -163,12 +179,19 @@ the flit header has no QoS field (`NOC_QOS_WIDTH = 0`).
 
 ### 2.6 Wormhole lock rules (per output, across VCs)
 
-Each output holds one lock record `(locked_input, locked_vc)` (`router.hpp:159-163`).
+Each output holds one lock record `(locked_input, locked_input_vc, locked_output_vc)`:
+the input FIFO the worm drains from, and the VA-assigned output VC every flit of the
+worm departs on.
 
-1. Granting a flit with `flit_tail = 1'b0` locks the output to that (input, VC) pair.
-2. While locked, only the locked (input, VC) FIFO is served at this output. If it is
-   empty, or `credit_[out][locked_vc]` is 0, the output idles this cycle and keeps the
-   lock. Other inputs and other VCs wait, even with credit available.
+1. Granting a flit with `flit_tail = 1'b0` locks the output to that (input, input VC)
+   pair and records the assigned `out_vc` as `locked_output_vc`.
+2. While locked, only the locked `(locked_input, locked_input_vc)` FIFO is served at
+   this output; every continuation departs on `locked_output_vc` and requires
+   `credit_[out][locked_output_vc] > 0`. If the FIFO is empty or that credit is 0, the
+   output idles this cycle and keeps the lock. Other inputs and other VCs wait, even
+   with credit available. For a `fixed_vc = 0` worm the model asserts that
+   `locked_output_vc` equals the continuation's recomputed preferred VC (a pinned
+   `fixed_vc = 1` worm's NI-chosen VC legitimately differs).
 3. Granting a flit with `flit_tail = 1'b1` releases the lock and advances both RR pointers.
 4. A single-flit packet (`flit_tail = 1'b1` on its head) locks and releases within the one
    grant: the output is never observed locked between cycles.
@@ -199,11 +222,12 @@ Counter granularity is per (output port, VC): `credit_[out][vc]`.
    registered: dequeue in cycle N, pulse leaves the core at cycle N+1, and after the
    wrap's output register it is sampled on the SV wire at cycle N+2 (rule R7 in
    section 3.5).
-5. **At zero credit**: the unlocked scan skips the VC before examining inputs. A
-   locked output idles and holds its lock. A zero-credit VC never stalls another VC
-   at an unlocked output. Example: `NUM_VC = 2`, `credit_[EAST][0] = 0`,
-   `credit_[EAST][1] = 3`, traffic waiting on both VCs -> VC1 flits keep flowing to
-   EAST while VC0 waits.
+5. **At zero credit**: an unlocked candidate whose ASSIGNED output VC has no credit
+   is not grantable and the scan moves on. A locked output idles and holds its lock
+   while `credit_[out][locked_output_vc]` is 0. A zero-credit VC never stalls another
+   VC at an unlocked output. Example: `NUM_VC = 2`, `credit_[EAST][0] = 0`,
+   `credit_[EAST][1] = 3` -> flits assigned to VC1 keep flowing to EAST while flits
+   assigned to VC0 wait.
 
 The stage-3 output FIFO (depth 2) is an architectural parameter of this design
 (`NOC_ROUTER_OUTPUT_FIFO_DEPTH`) but is not credit-counted and is invisible to the
@@ -414,9 +438,12 @@ this latency is exactly 3 cycles, every hop, both networks.
 R11 (output uniqueness). At most one flit per output port per network per cycle: each
 `link_*_out_valid` bit and each NI-face `.valid` covers exactly one 408-bit flit bus.
 
-R12 (VC transparency on the wire). The `vc_id` field of an output flit equals the
-`vc_id` it arrived with. Credit pulses for that flit, on both sides of the hop, occur
-on that same VC index.
+R12 (VC on the wire). The `vc_id` field of an output flit equals the `vc_id` it
+arrived with ONLY when `fixed_vc = 1` (NI-pinned); for `fixed_vc = 0` the VA stage
+restamps `vc_id` with the assigned output VC, which may differ from the arrival VC.
+Per hop, the credit pulse back to the sender carries the ARRIVAL (input-side) VC —
+the FIFO slot freed — while the flit's onward credit is consumed on the restamped
+VC.
 
 ### 3.6 Input guarantees
 
@@ -464,20 +491,25 @@ exactly 3 cycles when the granted output is uncontended, has credit, and its out
 FIFO is below depth. Verified by ctest `RouterDatapath.ZeroLoadLatencyIsThreeTicks`.
 Failure: the flit appears on the output wire earlier or later than cycle N+3.
 
-SPEC 5 (bit transparency). Every flit leaves bit-identical to how it entered: all
-408 bits, header and payload. The router writes nothing. Verified by ctest
-`RouterDatapath.HeaderTransparency` (byte-for-byte compare of the whole flit) and by
-the co-sim scoreboard readback. Failure: any flipped bit.
+SPEC 5 (bit transparency). Every flit leaves bit-identical to how it entered — all
+bits, header and payload — except the header `vc_id` field, which the VA stage
+restamps for `fixed_vc = 0` flits (rule R12). The router writes nothing else.
+Verified by ctest `RouterDatapath.HeaderTransparency` (byte-for-byte compare of the
+whole flit at `NUM_VC = 1`, where the restamp is the identity) and by the co-sim
+scoreboard readback. Failure: any flipped bit outside `vc_id`.
 
-SPEC 6 (VC preservation). The router never reassigns a flit's VC. The flit is filed
-under its header `vc_id` at stage 1, consumes credit on that VC, and departs with the
-same `vc_id`. Verified by ctest `RouterGrid.EndToEndTrafficAcrossParameterSpace`
-(ingress `vc_id` preserved to egress across the parameter space),
-`RouterWormhole.PacketsOnDifferentVcsDoNotInterleavePerOutput` (cross-VC
-non-interleave per output), and by the per-VC credit accounting of
-`link_perf_monitor.sv` (a switched VC underflows the true VC's mirror counter).
-Failure: `vc_id` differs between ingress and egress, or credit activity on a VC the
-flit did not use.
+SPEC 6 (VC handling). A `fixed_vc = 1` flit keeps its header `vc_id` end to end:
+filed under it at stage 1, onward credit consumed on it, departs with it. A
+`fixed_vc = 0` flit is filed under its arrival `vc_id`, then the VA stage assigns
+the departure VC (preferred map + FVADA overflow, section 2.5), consumes credit on
+the ASSIGNED VC, and restamps `vc_id`. Verified by ctest
+`RouterGrid.EndToEndTrafficAcrossParameterSpace` (pinned `vc_id` preserved across
+the parameter space), `RouterVaCredit.ConsumeStampedVcReturnInputVc` (credit
+consumed on the assigned VC, upstream pulse on the arrival VC),
+`RouterVaFvada.PreferredThenHighestIndexOverflowThenStall` (assignment order), and
+`RouterVaFabric.MultiHopPinnedVcPreservedUnderContention` (pin across hops).
+Failure: a pinned flit's `vc_id` differs between ingress and egress, or credit
+activity on a VC the flit was not assigned to.
 
 SPEC 7 (credit decrement point). The per-(output, VC) counter is seeded to 4 and
 decremented exactly at the grant event (admission into the output FIFO), not at link
@@ -604,7 +636,8 @@ One Router (per network), 3-stage pipeline, 5 in / 5 out ports:
                                           [FIFO vc1, depth 4] -+--> per-output q:
                                               ...              |    wormhole lock
                                           [FIFO vcN-1]        -+    (locked_input,
-                                                               |     locked_vc)
+                                                               |     locked_input_vc,
+                                                               |     locked_output_vc)
                                        route_compute(dst_id)   |    VC RR vc_rr_[q]
                                        at each FIFO head ------+    input RR ws.rr
                                                                |    credit_[q][vc]
