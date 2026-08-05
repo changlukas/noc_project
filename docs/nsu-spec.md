@@ -83,31 +83,29 @@ Each B/R beat is looked up against its MetaBuffer bucket front, built into one f
 
 **IMPORTANT:** header `flit_tail` = 1 on every B flit and on **every** R beat flit. Header `flit_tail` is the packet delimiter for fabric wormhole arbitration only. AXI burst framing lives exclusively in the payload `rlast` bit. Every response packet is therefore single-flit, and no wormhole lock is ever taken on the response path. Example: a 4-beat read returns 4 R flits, each with header `flit_tail` = 1, and payload `rlast` = 1 only in the fourth.
 
-B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, input 1 = R, no channel pairing, at most 1 flit per cycle) into the `VcArbiter`, which assigns the VC. The VC configuration surface is the virtual-network vector pair produced by `make_virtual_networks(num_vc)` (`ni/virtual_network.hpp`): write vnet {0 .. n/2-1}, read vnet {n/2 .. n-1}, and for `num_vc` = 1 both vnets are {0}. `num_vc` must be 1 or even.
+B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, input 1 = R, no channel pairing, at most 1 flit per cycle) into the `VcArbiter`, which assigns the VC. The candidate set is every VC in {0 .. `num_vc`-1}, with no read/write class split. Only the DAT face carries `num_vc` > 1 (RSP is single-VC), and DAT carries R only.
 
 **IMPORTANT:** VC selection is:
 
 | flit | rule |
 |---|---|
-| R (always, any `ordering_req`) | fixed hash `read_vcs[(dst_id ^ rid) % read_vcs.size()]` |
-| B with `ordering_req` = 0 | fixed hash `write_vcs[(dst_id ^ bid) % write_vcs.size()]` |
-| B with `ordering_req` = 1 | id-agnostic round-robin over the write vnet (order-free at the source RoB) |
+| R (always, any `ordering_req`) | fixed hash `(dst_id ^ rid) % num_vc` |
+| B (always, any `ordering_req`) | id-agnostic round-robin (order-free at the source RoB) |
 
 The hash is a pure function with zero state. Every beat of an R burst shares `(dst_id, rid)`, so a whole burst lands on one VC, and a same-`(dst, id)` response stream can never be reordered in-fabric. A fixed-hash flit whose VC is full or has no downstream credit is **refused** and retried, it never spills to another VC (spilling would reorder the stream).
 
-Worked example, `num_vc` = 4, so write vnet {0, 1} and read vnet {2, 3}:
+Worked example, `num_vc` = 4:
 
-- R flit, `dst_id` = 8'h12, `rid` = 8'h07: 8'h12 ^ 8'h07 = 8'h15 = 21, 21 % 2 = 1, so `read_vcs[1]` = **VC 3**. All beats of this burst take VC 3.
-- Comparison, R flit with `rid` = 8'h06: 8'h12 ^ 8'h06 = 8'h14 = 20, 20 % 2 = 0, so `read_vcs[0]` = **VC 2**. Different id, different VC, the two bursts may interleave in the fabric.
-- B flit, `ordering_req` = 0, `dst_id` = 8'h12, `bid` = 8'h07: `write_vcs[1]` = **VC 1**.
-- B flit, `ordering_req` = 1: round-robin pointer starts at 0 after reset, so the first such B takes VC 0 (if it has space and credit), the next takes VC 1.
-- If VC 3 is full or creditless, the VC-3-hashed R flit waits in the wormhole arbiter pending queue. It is never sent on VC 2.
+- R flit, `dst_id` = 8'h12, `rid` = 8'h07: 8'h12 ^ 8'h07 = 8'h15 = 21, 21 % 4 = 1, so **VC 1**. All beats of this burst take VC 1.
+- Comparison, R flit with `rid` = 8'h06: 8'h12 ^ 8'h06 = 8'h14 = 20, 20 % 4 = 0, so **VC 0**. Different id, different VC, the two bursts may interleave in the fabric.
+- B flit: round-robin pointer starts at 0 after reset, so the first B takes VC 0 (if it has space and credit), the next takes VC 1.
+- If VC 1 is full or creditless, the VC-1-hashed R flit waits in the wormhole arbiter pending queue. It is never sent on another VC.
 
-Admission by configuration: for `num_vc` > 1 a flit is admitted to its per-VC pending queue only if that queue has space and the downstream credit counter for that VC is nonzero (round-robin B scans the vnet for the first VC meeting both). For `num_vc` = 1 the selection returns VC 0 without the entry-time credit check, only the pending-space check applies at admission, and the credit gate is enforced at the drain stage. This asymmetry is as-built. In all configurations the drain (`VcArbiter::tick`) sends at most 1 flit per cycle, round-robin over VCs, only to a VC with downstream credit.
+Admission by configuration: for `num_vc` > 1 a flit is admitted to its per-VC pending queue only if that queue has space and the downstream credit counter for that VC is nonzero (round-robin B scans for the first VC meeting both). For `num_vc` = 1 the selection returns VC 0 without the entry-time credit check, only the pending-space check applies at admission, and the credit gate is enforced at the drain stage. This asymmetry is as-built. In all configurations the drain (`VcArbiter::tick`) sends at most 1 flit per cycle, round-robin over VCs, only to a VC with downstream credit.
 
 ### 2.5 Worked example, 2-beat write end to end
 
-Configuration: `max_unique_ids` = 1, `num_vc` = 2 (write vnet {0}, read vnet {1}), NSU node id 8'h34, requester node 8'h12.
+Configuration: `max_unique_ids` = 1, `num_vc` = 2, NSU node id 8'h34, requester node 8'h12.
 
 Request packet arriving on `noc_req_i` (3 flits):
 
@@ -121,7 +119,7 @@ Depacketize admits the AW: downstream id = `remap(8'h07, 1)` = 8'hFF, MetaBuffer
 
 AXI master face issues: `awid`=8'hFF, `awaddr`=64'h200, `awlen`=8'd1, `awsize`=3'd5, then 2 W beats, `wlast` on the second. The slave responds `bvalid` with `bid`=8'hFF, `bresp`=2'b00.
 
-Packetize peeks write bucket 8'hFF, builds the single B flit: header `axi_ch`=3'd3, `src_id`=8'h34, `dst_id`=8'h12, `flit_tail`=1, `ordering_req`=1, `ordering_tag`=8'h05, payload `bid`=8'h07 (restored), `bresp`=2'b00, `buser`=8'h00. `ordering_req`=1 selects round-robin over the write vnet {0}, so VC 0. On acceptance the MetaBuffer entry is committed, pool count back to 0.
+Packetize peeks write bucket 8'hFF, builds the single B flit: header `axi_ch`=3'd3, `src_id`=8'h34, `dst_id`=8'h12, `flit_tail`=1, `ordering_req`=1, `ordering_tag`=8'h05, payload `bid`=8'h07 (restored), `bresp`=2'b00, `buser`=8'h00. B round-robins, and the pointer starts at 0, so VC 0. On acceptance the MetaBuffer entry is committed, pool count back to 0.
 
 ### 2.6 Pipeline stages and latency
 
@@ -227,7 +225,7 @@ Single-sourced in `specgen/source/constants.yaml`, generated into `ni_params.h` 
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 256} only, constructor throws otherwise | id remap in Depacketize |
 | `NSU_ARBITER_FIFO_DEPTH` | 4 | 1 to 64 | wormhole per-input and VC-arbiter per-VC pending depths |
-| `NOC_DAT_NUM_VC` | 1 | 1 to 8, and 1-or-even | VC count, vnet split, credit vector widths |
+| `NOC_DAT_NUM_VC` | 1 | 1 to 8 | DAT VC count, credit vector widths |
 | `NOC_ROUTER_VC_DEPTH` | 4 | 1 to 16 | response sender credit seed per VC |
 | `NOC_FLIT_WIDTH` | 408 | fixed at 408 in this implementation | flit container and DPI marshalling |
 | `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 8 / 64 / 256 | fixed at defaults in this implementation | beat structs and DPI |

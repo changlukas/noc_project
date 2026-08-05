@@ -108,7 +108,7 @@ AXI master -> AxiSlavePort -> Rob -> S1 (NmuReqS1Bridge) -> Packetize
 - `WormholeArbiter`: 3-input round-robin arbiter with the AW->W lock, 1 flit per cycle, per-input pending depth `NMU_ARBITER_FIFO_DEPTH` = 4. Draining an AW flit (header.flit_tail=0) locks the arbiter to the W input until the W flit with header.flit_tail=1 drains. AR flits (flit_tail=1) never lock.
 - `VcArbiter`: assigns vc_id and stamps it into the header, per-VC pending queue depth `NMU_ARBITER_FIFO_DEPTH` = 4, drains at most 1 flit per cycle to the NoC, gated on per-VC sender credit.
 
-Virtual-network read/write split (`ni/virtual_network.hpp`): NUM_VC = 1 shares VC0 for both directions. NUM_VC even: write class uses VCs {0 .. NUM_VC/2 - 1}, read class uses VCs {NUM_VC/2 .. NUM_VC-1}. Example NUM_VC = 4: AW/W candidates {0,1}, AR candidates {2,3}. Legal NUM_VC values are 1 and any even value up to 8 (1, 2, 4, 6, 8). Odd NUM_VC > 1 aborts at construction. The working co-sim configuration set is {1, 2, 4, 8}.
+VC candidate set: every VC in {0 .. NUM_VC-1}, with no read/write class split. Only the DAT face carries NUM_VC > 1 (REQ and RSP are single-VC), so the candidate set is the DAT VC set and AW/W are its only request-side traffic. Legal NUM_VC values are 1 to 8. The working co-sim configuration set is {1, 2, 4, 8}.
 
 Per-cycle evaluation order inside the model (`Nmu::tick`, nmu.hpp:293-313, this order is the spec): WormholeArbiter, VcArbiter, S1-to-Packetize, AxiSlavePort request forward, then the response drains (S2 stages, B always, R per mode), Depacketize last. Consequences that are cycle-visible: a flit entering the WormholeArbiter and the VcArbiter traverses both in the same cycle (wormhole runs first), and an AXI ID freed by this cycle's B / R response is not yet usable by this cycle's request side (request side runs first).
 
@@ -164,7 +164,7 @@ Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and 
 | AXI_ID_WIDTH | 8 | 1..32 (implementation locked at 8) | ID fields, RoB per-ID arrays (256 IDs) |
 | AXI_ADDR_WIDTH | 64 | 1..64 (implementation locked at 64) | Address fields |
 | AXI_DATA_WIDTH | 256 | {32,64,128,256,512,1024} (implementation locked at 256) | wdata / rdata, WSTRB_WIDTH = 32 |
-| NOC_DAT_NUM_VC | 1 | 1 or even, up to 8 (odd > 1 aborts) | VC arbiter, credit vectors, virtual networks |
+| NOC_DAT_NUM_VC | 1 | 1 to 8 | VC arbiter, credit vectors |
 | NOC_FLIT_WIDTH | 408 | 64..1024 (implementation locked at 408 by the flit format) | Flit ports |
 | NOC_ROUTER_VC_DEPTH | 4 | 1..16 | Request sender credit seed per VC |
 | NMU_ROB_B_DEPTH | 32 | 1..256 | B slot pool |
@@ -267,7 +267,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 | G6 | W beat counts match their AWs (exactly awlen+1 beats, wlast on the final beat, no spurious W). | AXI4 legality is the master's job. The owed-W counter floors at 0 and does not reject an unexpected W. |
 | G7 | The router never pulses more request credits than flits it drained, and never presents a response flit without holding a credit for it. | Credit conservation: per VC, sender credit + in-flight flits = seed (4). A credit lie downstream of the VC arbiter aborts (`vc_arbiter.hpp:226-231`). |
 | G8 | awburst / arburst = 2'b11 never occurs, and header.axi_ch values 3'd5 to 3'd7 never occur. | Reserved encodings. |
-| G9 | NUM_VC is 1 or even, at most 8, and the elaborated `noc_credit_t` width equals NUM_VC. | Odd NUM_VC > 1 aborts (`virtual_network.hpp:21-26`), width mismatch is `$fatal` at elaboration (`nmu_wrap.sv:56-61`). |
+| G9 | NUM_VC is 1 to 8 and the elaborated `noc_credit_t` width equals NUM_VC. | Out-of-range NUM_VC aborts at VC-arbiter construction, width mismatch is `$fatal` at elaboration (`nmu_wrap.sv:56-61`). |
 
 ## 4. Specifications
 
