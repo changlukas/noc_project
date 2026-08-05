@@ -153,6 +153,8 @@ Back-pressure chains, request: stage register occupied stalls ingress (no credit
 
 ### 3.1 NoC face (`nsu_wrap` ports)
 
+> Pre-S3a: the single `noc_chan_t` face below predates the Stage 3a three-network split. As-built, `nsu_wrap` has three separate faces (REQ ingress, RSP egress, DAT ingress+egress) with per-network flit widths (REQ 137 b, RSP 127 b, DAT 629 b), scalar `rx_req_*`/`tx_rsp_*`/`tx_dat_*`/`rx_dat_*` ports, not one `noc_chan_t` pair. Re-synced in campaign Stage 5.
+
 `noc_chan_t` = {`valid` (1 b), `flit` (`FLIT_WIDTH` = 408 b)}. `noc_credit_t` = {`credit` [`NUM_VC`-1:0]}. Elaboration fatals if `$bits(noc_credit_t)` != `NUM_VC`.
 
 | Signal | Bit Width | Definition |

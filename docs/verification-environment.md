@@ -39,8 +39,25 @@ emits two generated files, never hand-edited:
 
 | file | content |
 |---|---|
-| `src/sv/noc_fabric_<topology>.sv` | N nodes (`ni_wrap` = NMU + NSU, plus REQ/RSP `router_wrap`), joined by directional (N/E/S/W) inter-router links via a `genvar` generate loop. Boundary directions are tied off; a tied-off direction driving a valid flit is a `$fatal`. |
+| `src/sv/noc_fabric_<topology>.sv` | N nodes (`ni_wrap` = NMU + NSU + `dat_merge_wrap`, plus `router_wrap`), joined by directional (N/E/S/W) inter-router links via a `genvar` generate loop. Boundary directions are tied off; a tied-off direction driving a valid flit is a `$fatal`. |
 | `sim/tb/tb_top_<topology>.sv` | self-clocked (10 ns clock, 4-cycle reset) top: DPI create calls for every router/NMU/NSU context, the fabric instance, one `user_node_endpoint` per node, the watchdog, and the exit logic. |
+
+`router_wrap` carries three physical networks, each with its own flit width
+(`ni_params_pkg`: REQ 137 b, RSP 127 b, DAT 629 b):
+
+| network | flow control | carries |
+|---|---|---|
+| REQ | `SimpleRouter`, ready/valid, 1-2 stages | Aw/W/Ar/DataAr requests |
+| RSP | `SimpleRouter`, ready/valid, 1-2 stages | B/NarrowR responses |
+| DAT | credit router, VC-capable | DataAw/DataW/DataR payload |
+
+Link ports use a `tx_<net>_*`/`rx_<net>_*` pin contract (`<net>` = `req`/`rsp`/`dat`):
+`tx` is this router's output to the peer, `rx` is the peer's output into this
+router; adjacent nodes cross-wire `tx` to `rx`. DAT is the one shared
+physical LOCAL port between NMU and NSU (NMU sources DataAw/DataW, NSU
+sources DataR); `dat_merge_wrap` (`src/sv/dat_merge_wrap.sv`) arbitrates the
+two onto `router_wrap`'s single DAT LOCAL rx/tx pair, sitting between
+`nmu_wrap`/`nsu_wrap` and `router_wrap` inside `ni_wrap`.
 
 Each node's `user_node_endpoint` (`sim/tb/user_node_endpoint.sv`, hand-written,
 instantiated by the generator but not itself generated) presents two
@@ -123,6 +140,7 @@ classes (upstream reference in Provenance):
 | `transpose` | `dst = (y, x)` | requires a square, power-of-two mesh; diagonal nodes (x==y) self-target |
 | `uniform_random` | independent uniform draw per transaction | self-traffic permitted by default (`--exclude-self` opts out); seeded |
 | `hotspot` | one or more chosen nodes draw the traffic, weighted by `--hotspot-rates` | many-to-one congestion |
+| `beat_exact` | `dst = neighbor_dst(x, y)` (same bijection as `neighbor`) | DPI word-packing fault-injection gate, not a spatial pattern: one full-width beat plus an 8-position walking-strb sweep per node; a config-space tile additionally gets a narrow-class 2-beat burst; ignores `--transactions-per-node`/`--size`/`--len`/`--seed` |
 
 Addresses are allocated so converging sources never collide: local offset =
 `base + src_node * stride + seq * (n_nodes * stride)` inside the destination
@@ -141,7 +159,7 @@ the address-phase fields; write adds `atop` and the W-beat lines.
 | 1 | AXI id |
 | 2 | address (`0x...`) |
 | 3 | len (ARLEN, beats minus 1) |
-| 4 | size (log2 bytes per beat; 5 = 32 B on the 256-bit bus) |
+| 4 | size (log2 bytes per beat; the data bus is 512 b / 64 B: 5 = 32 B half-bus, 6 = 64 B full-bus) |
 | 5 | burst (1 = INCR) |
 | 6 to 10 | lock, cache, prot, qos, region |
 | 11 | user |
@@ -153,8 +171,9 @@ the address-phase fields; write adds `atop` and the W-beat lines.
   full strobe, sized to the data bus. `w_last` is not in the file; the driver
   derives it from the burst length.
 
-A single-beat 32 B write is 12 field lines plus 1 beat line; the matching read is
-the 11 field lines at the same address.
+The default stimulus (`--size 5`, single beat) is a 32 B half-bus write: 12
+field lines plus 1 beat line; the matching read is the 11 field lines at the
+same address.
 
 ## Checkers and non-vacuous pass
 
@@ -187,6 +206,10 @@ the 11 field lines at the same address.
 - The constrained-random axis (a random driver plus a reorder-based checker)
   was retired. No sound data-integrity checker for random traffic
   exists yet; a future random axis is deferred (see Known limitations).
+
+Per-task verification tiers (which pattern/topology combination a change must
+pass before it counts as done) are not duplicated here: they are a standing,
+frequently-updated section of `docs/backlog.md` ("Verification (acceptance)").
 
 ## Performance counters
 
@@ -239,7 +262,13 @@ address_map:
     - { x: 0, y: 0, size: 0x100000000 }
     - { x: 1, y: 0, size: 0x100000000 }
     # ... one entry per node
+    - { x: 0, y: 0, size: 0x1000, space: config }  # optional second tile
 ```
+
+`space` selects the AXI class the tile decodes into: `config` maps to the
+narrow class, `memory` (the default when `space` is omitted) maps to the data
+class. A node may carry one memory tile and, optionally, one config tile
+(`nmu::addr_trans::SamTable::validate`).
 
 The SAM is a first-match `{base, size, dst_id}` range table, loaded from this
 block and shared by the C++ loader and both Python generators: the generator
@@ -281,7 +310,7 @@ passing back the printed value reproduces the run exactly.
 | limitation | detail |
 |---|---|
 | SAM failure mode | `translate()` miss and a topology YAML without `address_map` fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
-| Unswept sizing | `max_txns_per_id` = 32 is a placeholder, never depth-swept [TBD]. `r_rob_depth` defaults to 32 (`NMU_ROB_R_DEPTH`) and is expressible up to 256 (the full `ordering_tag` space) via `R_ROB_DEPTH`; equally unswept at every setting. |
+| Unswept sizing | `NMU_MAX_TXNS_PER_ID` = 32 (per-ID order-list depth) and `NMU_OUTSTANDING_DEPTH` = 32 (shared outstanding pool, per direction, S1) are placeholders, never depth-swept [TBD]. `NMU_ROB_B_DEPTH`/`NMU_ROB_R_DEPTH` default to 128 (S2) and are expressible up to 256 (the full `ordering_tag` space) via `B_ROB_DEPTH`/`R_ROB_DEPTH`; a burst whose beats (len+1) exceed the RoB depth fails loud (`Rob::push_ar` assert) instead of wedging. Equally unswept at every setting. |
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
 | Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
 | Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |

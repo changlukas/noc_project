@@ -251,6 +251,8 @@ and returns to 4 by cycle 8.
 
 `router_wrap` SV parameters (`src/sv/router_wrap.sv:39-46`):
 
+> Pre-S3a: the single `FLIT_WIDTH` row below predates the Stage 3a three-network split. As-built, `router_wrap` takes three per-network flit-width parameters instead (`REQ_FLIT_WIDTH` = 137, `RSP_FLIT_WIDTH` = 127, `DAT_FLIT_WIDTH` = 629); `NOC_FLIT_WIDTH_DFLT` no longer exists. Re-synced in campaign Stage 5.
+
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
 | `NUM_VC` | `ni_params_pkg::NOC_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs per link, per network. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != NUM_VC`. |
@@ -282,6 +284,8 @@ Boundary directions (no neighbor) are left unwired by the generated fabric: inpu
 to 0, outputs must stay 0 (SPEC 17).
 
 ### 3.3 Signal tables
+
+> Pre-S3a: the single `noc_chan_t` struct below predates the Stage 3a three-network split. As-built, `router_wrap` ports are per-network scalars (`tx_req_*`/`rx_req_*`, `tx_rsp_*`/`rx_rsp_*` ready/valid; `tx_dat_*`/`rx_dat_*` credit) with per-network flit widths (REQ 137 b, RSP 127 b, DAT 629 b), not one `noc_chan_t` struct. Re-synced in campaign Stage 5.
 
 Struct types: `ni_signals_pkg::noc_chan_t` = `{valid (1 bit), flit[407:0]}`, 409 bits.
 `noc_types_pkg::noc_credit_t` = `{credit[NUM_VC-1:0]}`, one bit per VC.

@@ -181,6 +181,8 @@ Runtime configuration per instance: src_id, SAM config path, RobMode, RoB depth 
 
 All ports below are the real `nmu_wrap` ports (`src/sv/nmu_wrap.sv:36-53`). AXI signals are fields of the packed structs `ni_signals_pkg::axi_req_t` / `axi_rsp_t`, NoC signals are fields of `ni_signals_pkg::noc_chan_t` and `noc_types_pkg::noc_credit_t`. The `axi_req_t` struct carries `awregion` / `arregion`, but they are not in the DPI signature: the model sees region = 0 and stamps 0 into the flit. No AXI user signals exist on the wire face, the flit's user fields are stamped 0 and response user fields are dropped.
 
+> Pre-S3a: the single `noc_chan_t` NoC face above predates the Stage 3a three-network split. As-built, `nmu_wrap` has three separate faces (REQ egress, RSP ingress, DAT ingress+egress) with per-network flit widths (REQ 137 b, RSP 127 b, DAT 629 b), scalar `tx_req_*`/`rx_rsp_*`/`tx_dat_*`/`rx_dat_*` ports, not one `noc_chan_t` pair. Re-synced in campaign Stage 5.
+
 ### 3.1 Inputs
 
 | Signal | Bit Width | Definition |
