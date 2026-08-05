@@ -119,7 +119,7 @@ def test_emit_file_master_node_arbitrary_base_from_bases_dict(tmp_path):
 def test_load_topology_reads_packed_bases_from_address_map(tmp_path):
     topo_path = tmp_path / "t.yaml"
     topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000))
-    nodes, x_dim, y_dim, bases = g._load_topology(str(topo_path))
+    nodes, x_dim, y_dim, bases, _config_bases = g._load_topology(str(topo_path))
     assert (x_dim, y_dim) == (4, 4)
     # packed in raster (y, x) order, matching _uniform_topology_yaml's emit order
     assert bases[g.coord_id(0, 0)] == 0
@@ -192,6 +192,69 @@ def test_main_file_master_all_patterns(tmp_path, pat):
     for t in w:
         assert t["burst"] == 1 and t["size"] == 5 and t["len"] == 0
         assert len(t["beats"]) == 1
+
+
+def test_emit_beat_exact_node_full_beat_and_walking_strb(tmp_path):
+    """Full beat: full 64 B strobe, per-lane-distinct bytes. Walking sweep: each
+    of the 8 offsets is a single-byte write with exactly one strb bit set at
+    that lane -- the boundary-straddling positions (3/4 and 31/32, the sole
+    WSTRB word boundary) land where expected."""
+    d = str(tmp_path / "node0")
+    g.emit_beat_exact_node(d, src_idx=0, dst_base=0x10000, data_width=512)
+    txns = _parse_write(os.path.join(d, "write.txt"))
+    assert len(txns) == 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
+    full = txns[0]
+    assert full["size"] == 6 and full["len"] == 0 and full["addr"] == 0x10000
+    data_hex, strb_hex, _user = full["beats"][0].split()
+    assert strb_hex == "0x" + "f" * 16                    # 64 lanes all active
+    data = int(data_hex, 16)
+    for j in range(64):
+        assert (data >> (8 * j)) & 0xFF == (0x10000 + j) & 0xFF
+    strb_base = 0x10000 + 64
+    for t, off in zip(txns[1:], g._BEAT_EXACT_STRB_OFFSETS):
+        assert t["addr"] == strb_base + off
+        assert t["size"] == 0 and t["len"] == 0
+        data_hex, strb_hex, _user = t["beats"][0].split()
+        assert int(strb_hex, 16) == 1 << (off % 64)       # exactly one bit, at the lane
+        assert (int(data_hex, 16) >> (8 * (off % 64))) & 0xFF == t["addr"] & 0xFF
+
+
+def test_narrow_beat_exact_lines_shape():
+    """2-beat INCR burst, AxSIZE=3 (8 B narrow lane), full per-beat strobe
+    shifted to the beat's own 8-byte lane."""
+    write, _read = g.narrow_beat_exact_lines(axid=2, config_base=0x400000, data_width=512)
+    # _parse_write reads a path; write the lines to a temp file instead.
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        p = os.path.join(td, "write.txt")
+        with open(p, "w") as f:
+            f.write("\n".join(write) + "\n")
+        txns = _parse_write(p)
+    assert len(txns) == 1
+    t = txns[0]
+    assert t["id"] == 2 and t["addr"] == 0x400000 and t["len"] == 1 and t["size"] == 3
+    assert len(t["beats"]) == 2
+    for beat_idx, beat in enumerate(t["beats"]):
+        data_hex, strb_hex, _user = beat.split()
+        lane0 = (0x400000 + beat_idx * 8) % 64
+        assert int(strb_hex, 16) == (0xFF << lane0)
+
+
+def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
+    """End-to-end wiring check (S2 gate deliverable 2): on a topology with a
+    config-space tile, the owning node's write.txt gains one extra narrow
+    transaction after its beat-exact data-class sequence; a node without a
+    config tile does not."""
+    out = str(tmp_path / "scn")
+    topo_path = os.path.join(os.path.dirname(__file__), "..", "topologies",
+                              "mesh_2x2_config_narrow_vc1.yaml")
+    g.main(["--topology", topo_path, "--out", out, "--pattern", "beat_exact"])
+    txns0 = _parse_write(os.path.join(out, "node0", "write.txt"))
+    txns1 = _parse_write(os.path.join(out, "node1", "write.txt"))
+    n_beat_exact = 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
+    assert len(txns0) == n_beat_exact + 1                 # + narrow probe
+    assert txns0[-1]["addr"] == 0x400000                  # config tile base
+    assert len(txns1) == n_beat_exact                     # no config tile on node1
 
 
 def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
@@ -323,7 +386,7 @@ def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
         "    - { x: 0, y: 1, size: 0x1000 }\n"
         "    - { x: 1, y: 1, size: 0x4000 }\n"
     )
-    _nodes, _x, _y, bases_from_patterns = g._load_topology(str(topo_path))
+    _nodes, _x, _y, bases_from_patterns, _config_bases = g._load_topology(str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
     bases_from_tb_top = gt._address_map(topo)
     assert bases_from_patterns == bases_from_tb_top

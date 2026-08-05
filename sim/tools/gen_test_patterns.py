@@ -39,6 +39,15 @@ hotspot  (ported from booksim2 HotSpotTrafficPattern::dest, src/traffic.cpp:506-
     Multiple hotspots: weighted selection by --hotspot-rates (default: equal weight).
     Uses random.Random(seed) for reproducibility.
 
+beat_exact  (S2 gate: DPI word-packing fault injection, not a spatial pattern)
+    Every node writes one full-width beat (per-lane-distinct bytes, full
+    strobe) plus an 8-position walking-strb sweep to its neighbor
+    (neighbor_dst bijection) -- see emit_beat_exact_node / _BEAT_EXACT_STRB_OFFSETS.
+    A node whose topology entry owns a config-space tile additionally routes
+    one narrow-class 2-beat burst to it (narrow_beat_exact_lines), so a
+    config-space topology exercises both classes in one run. Ignores
+    --transactions-per-node/--size/--len/--seed (own fixed shape).
+
 Address allocation
 ------------------
 alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes, region_bytes, ...)
@@ -88,6 +97,23 @@ _FILE_KEYS = ("data_file", "dump_file", "strb_file")
 # Per-transaction slot stride for the unique-offset allocator.  Must be at least
 # as large as the max transaction data payload (one cache-line = 64 B = 0x40).
 _SLOT_STRIDE = 0x40
+
+# beat_exact pattern: 8 single-byte (walking-1 WSTRB) probe offsets within a
+# 64 B beat, chosen to straddle every DPI word boundary that matters, not all
+# 64 lanes. DATA (512 b) packs as 16 x 32-bit words (word i = bytes[4i:4i+3]);
+# WSTRB (64 b) packs as 2 x 32-bit words (word0 = bytes[0:31], word1 =
+# bytes[32:63]) per specgen/generated DPI marshalling (16 words / 2 words,
+# S2 design doc sec 4). Offsets:
+#   0, 63  -- vector edges (word0 LSB / word15 MSB); MSB (63) is also the
+#             exact tail-mask bit T2c's DPI fix targeted.
+#   3, 4   -- straddle the first DATA word boundary (word0/word1).
+#   31, 32 -- straddle BOTH the WSTRB word0/word1 boundary (its only one,
+#             lane 31|32 = strb bit 31|32) AND a DATA word boundary
+#             (word7/word8); the single pair that most directly proves the
+#             "lo | hi<<32" WSTRB packing together with mid-vector DATA
+#             packing.
+#   59, 60 -- straddle a DATA word boundary near the top (word14/word15).
+_BEAT_EXACT_STRB_OFFSETS = (0, 3, 4, 31, 32, 59, 60, 63)
 
 _CONSTANTS_YAML = Path(__file__).resolve().parents[2] / "specgen" / "source" / "constants.yaml"
 
@@ -140,7 +166,7 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop):
 
 def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
                           base_local, region_bytes, axi_size, axi_len, data_width,
-                          ids_per_tile=1, num_axi_ids=256, bases=None):
+                          ids_per_tile=1, num_axi_ids=256, bases=None, extra=None):
     """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
     src-partitioned address, address-in-data payload. INCR, atop=0, full strobe.
 
@@ -152,7 +178,11 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
     an id. ids_per_tile=1 gives each tile one distinct id (= src_idx); >1 lets a
     tile keep several transactions outstanding (distinct ids escape same-id
     ordering), raising injected concurrency for saturation runs. VC allocation is
-    id-agnostic (VC id only), so this changes concurrency, not VC spread."""
+    id-agnostic (VC id only), so this changes concurrency, not VC spread.
+
+    extra: optional (write_lines, read_lines) tuple appended after the regular
+    dst_cids transactions -- e.g. one narrow-class (config-space) probe for a
+    node that owns a config tile, so a single node routes both classes."""
     os.makedirs(out_dir, exist_ok=True)
     reserved = (axi_len + 1) * (1 << axi_size)
     id_base = (src_idx * ids_per_tile) % num_axi_ids
@@ -165,10 +195,73 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
         write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
         write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
         read_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=False)
+    if extra is not None:
+        extra_write, extra_read = extra
+        write_lines += extra_write
+        read_lines += extra_read
     with open(os.path.join(out_dir, "write.txt"), "w") as f:
         f.write("\n".join(write_lines) + "\n")
     with open(os.path.join(out_dir, "read.txt"), "w") as f:
         f.write("\n".join(read_lines) + "\n")
+
+
+def emit_beat_exact_node(out_dir, src_idx, dst_base, data_width, extra=None):
+    """Write out_dir/{write,read}.txt for one node's beat-exact (data-class)
+    probe: one full-width beat with per-lane-distinct bytes and full strobe,
+    followed by the 8-position walking-strb sweep (_BEAT_EXACT_STRB_OFFSETS),
+    all single-beat writes so address-in-data (encode_write_beats) already
+    gives per-lane-distinct bytes and, at AxSIZE=0, an exact single-bit
+    (walking) WSTRB -- no new data/strb encoding needed.
+
+    Two disjoint 64 B-aligned windows at dst_base: [+0x000, +0x040) for the
+    full beat, [+0x040, +0x080) for the walking-strb sweep, so the sweep's
+    partial-strobe writes can never be masked by the full beat's bytes.
+
+    extra: optional (write_lines, read_lines) tuple appended after the
+    beat-exact transactions -- see emit_file_master_node."""
+    bus_bytes = data_width // 8
+    if bus_bytes != 64:
+        raise ValueError(
+            f"emit_beat_exact_node: _BEAT_EXACT_STRB_OFFSETS are derived for a "
+            f"64 B bus (512 b DATA_WIDTH); got {bus_bytes} B (data_width={data_width})")
+    full_size = bus_bytes.bit_length() - 1  # log2(64) = 6
+    os.makedirs(out_dir, exist_ok=True)
+    axid = src_idx
+    write_lines, read_lines = [], []
+    write_lines += _ax_fields(axid, dst_base, 0, full_size, include_atop=True)
+    write_lines += encode_write_beats(dst_base, full_size, 0, data_width)
+    read_lines += _ax_fields(axid, dst_base, 0, full_size, include_atop=False)
+    strb_base = dst_base + bus_bytes
+    for off in _BEAT_EXACT_STRB_OFFSETS:
+        addr = strb_base + off
+        write_lines += _ax_fields(axid, addr, 0, 0, include_atop=True)
+        write_lines += encode_write_beats(addr, 0, 0, data_width)
+        read_lines += _ax_fields(axid, addr, 0, 0, include_atop=False)
+    if extra is not None:
+        extra_write, extra_read = extra
+        write_lines += extra_write
+        read_lines += extra_read
+    with open(os.path.join(out_dir, "write.txt"), "w") as f:
+        f.write("\n".join(write_lines) + "\n")
+    with open(os.path.join(out_dir, "read.txt"), "w") as f:
+        f.write("\n".join(read_lines) + "\n")
+
+
+def narrow_beat_exact_lines(axid, config_base, data_width):
+    """(write_lines, read_lines) for one narrow-class beat-exact probe: a
+    2-beat INCR burst at AxSIZE=3 (8 B, the narrow lane width) targeting a
+    config-space aperture. encode_write_beats already gives per-lane-distinct
+    bytes and full per-beat strobe -- same formula as the data-class full
+    beat, just narrower. Two beats ('a couple') proves lane re-anchor holds
+    across an address increment; no walking-strb needed here, the narrow
+    class's 81 b NarrowW payload carries the whole 8 B lane in one flit, no
+    multi-word DPI packing to fault-inject. AxSIZE<=3 is required -- narrow
+    class rejects larger (S2 design doc sec 1)."""
+    axi_len, axi_size = 1, 3
+    write = _ax_fields(axid, config_base, axi_len, axi_size, include_atop=True)
+    write += encode_write_beats(config_base, axi_size, axi_len, data_width)
+    read = _ax_fields(axid, config_base, axi_len, axi_size, include_atop=False)
+    return write, read
 
 
 # ---------------------------------------------------------------------------
@@ -350,8 +443,10 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 # ---------------------------------------------------------------------------
 
 def _load_topology(name):
-    """Return (nodes, x_dim, y_dim, bases) where nodes = [(idx, x, y, cid), ...]
-    and bases = {dst_id: base} (address_map.pack()).
+    """Return (nodes, x_dim, y_dim, bases, config_bases) where nodes =
+    [(idx, x, y, cid), ...], bases = {dst_id: base} (memory space) and
+    config_bases = {dst_id: base} (config space, sparse -- most topologies
+    have none), both from address_map.pack().
 
     `name` is either a topology name resolved against sim/topologies/<name>.yaml, or
     a direct path to a topology yaml (ends in .yaml or names an existing file).  The
@@ -367,14 +462,15 @@ def _load_topology(name):
         topo = yaml.safe_load(f)
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
-    bases, _entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    config_bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "config"}
     nodes = []
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
             nodes.append((idx, x, y, coord_id(x, y)))
             idx += 1
-    return nodes, x_dim, y_dim, bases
+    return nodes, x_dim, y_dim, bases, config_bases
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +563,7 @@ def main(argv=None):
         description="Emit per-node file_master write.txt/read.txt for a traffic pattern."
     )
     ap.add_argument("--pattern", required=True,
-                    choices=["neighbor", "transpose", "uniform_random", "hotspot"],
+                    choices=["neighbor", "transpose", "uniform_random", "hotspot", "beat_exact"],
                     help="Traffic pattern")
     ap.add_argument("--topology", default="mesh_4x4_vc1",
                     help="Topology name (matches sim/topologies/<name>.yaml) or a "
@@ -500,7 +596,7 @@ def main(argv=None):
                          "Does not affect VC allocation (VC is id-agnostic).")
     a = ap.parse_args(argv)
 
-    nodes, x_dim, y_dim, bases = _load_topology(a.topology)
+    nodes, x_dim, y_dim, bases, config_bases = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
 
@@ -520,6 +616,18 @@ def main(argv=None):
     if a.pattern == "transpose":
         _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
     for (idx, x, y, src_cid) in nodes:
+        # A node that owns a config-space tile also routes one narrow-class
+        # probe to it (self-targeted; config space is per-node, not spatial),
+        # so a config-space topology exercises both classes in one run
+        # regardless of which pattern drives the data-class traffic below.
+        narrow_extra = (narrow_beat_exact_lines(idx, config_bases[src_cid], widths["data"])
+                        if src_cid in config_bases else None)
+        if a.pattern == "beat_exact":
+            dst_x, dst_y = neighbor_dst(x, y, x_dim, y_dim)
+            dst_base = bases[coord_id(dst_x, dst_y)]
+            emit_beat_exact_node(os.path.join(a.out, f"node{idx}"), idx, dst_base,
+                                 widths["data"], extra=narrow_extra)
+            continue
         if a.pattern in ("neighbor", "transpose"):
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
             dst_cids = [coord_id(dst_x, dst_y)] * a.transactions_per_node
@@ -537,7 +645,7 @@ def main(argv=None):
                               n_nodes, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
                               ids_per_tile=a.ids_per_tile, num_axi_ids=(1 << widths["id"]),
-                              bases=bases)
+                              bases=bases, extra=narrow_extra)
 
 
 if __name__ == "__main__":

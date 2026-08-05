@@ -29,7 +29,7 @@ help:
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
 	@echo "Simulate:"
-	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot)"
+	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot/beat_exact)"
 	@echo "  make sim TB=mesh_4x4_vc1 PATTERN=neighbor"
 	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_TILE= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT=; SEED unset draws + prints a random seed"
 	@echo ""
@@ -163,15 +163,15 @@ specgen_pytest:
 	cd specgen && $$interp -m pytest tests/ -q
 
 # Unified DV run launcher. TB selects the testbench (topology; accepts a tb_ prefix).
-# PATTERN selects one of the 4 spatial patterns, run directed (file_master +
-# scoreboard). SEED unset -> a random 30-bit seed is drawn and printed so any
-# run is replayable.
+# PATTERN selects one of the 4 spatial patterns or beat_exact (S2 gate DPI
+# fault-injection probe), run directed (file_master + scoreboard). SEED unset
+# -> a random 30-bit seed is drawn and printed so any run is replayable.
 # BUILD_ROOT/PYTHON3/VERILATOR/FILELIST_F are NOT passed here -- they flow from
 # root local.mk through sim/build_config.mk (see the local.mk note above).
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
 _TOPO   := $(TB:tb_%=%)
-_VALID_PATTERNS := neighbor transpose uniform_random hotspot
+_VALID_PATTERNS := neighbor transpose uniform_random hotspot beat_exact
 ifeq ($(filter $(PATTERN),$(_VALID_PATTERNS)),)
 $(error PATTERN must be one of: $(_VALID_PATTERNS) (got '$(PATTERN)'))
 endif
