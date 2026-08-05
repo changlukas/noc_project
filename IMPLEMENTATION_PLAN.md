@@ -41,29 +41,10 @@ depth (default 128 = 8 KB at 64 B beats), VC count (1-8), mesh dims, outstanding
 widths all stay free parameters exactly as FlooNoC keeps them; tests cover the parameter range,
 not one value.
 
-## Stage 3b: Steering and VC collapse, semantic
-Goal: VCs on DAT only; delete ni/virtual_network.hpp and read/write VC split; rename VcArbiter
-to allocator naming; VC-count constant renamed to DAT_NUM_VC (T1, done; constants TODO retired); DAT
-standard router gains the VA stage (deprecated vc_router port, direction-preference
-assignment) with fixed_vc=1 skipping VA, pinned end to end; drop legacy
-write_rsp_vc/read_rsp_vc. NOTE: class-aware steering itself landed in S3a (spec :348 map live,
-DataAw/W/R on DAT with same-worm pairing tests) — this stage's steering scope is done.
-Standing ruling (keep): LOCAL->LOCAL is LEGAL by design — the self-transaction path, exercised
-by passing co-sim; suppress self-traffic via the generator's `--exclude-self`, not the router.
+Standing ruling: LOCAL->LOCAL is LEGAL by design — the self-transaction path, exercised by
+passing co-sim; suppress self-traffic via the generator's `--exclude-self`, not the router.
 SimpleRouter honors it via an explicit loopback-tie-off exemption (deliberate divergence from
 floo_router's blanket NoLoopback, cited in simple_router.hpp).
-Carry-ins from S3a: NI ingress backpressure not modeled on any network (ready tied true, DAT
-merge self-credits, unbounded ingress queues — documented in verification-environment.md
-Known limitations; reassess here when VC collapse touches these faces). SimpleRouter
-ready_slack=2 default puts the compliant-sender high-water mark exactly at fifo depth (zero
-spare, one registration from the overflow assert) — calibrate against the measured wire loop.
-SimpleRouter grants up to one flit per OUTPUT per tick from the same input FIFO (multi-read;
-matches the credit Router; mainline floo has 1 FIFO read port) — keep or align consciously.
-Standing ruling (keep): LOCAL->LOCAL is LEGAL by design — the self-transaction path, exercised
-by passing co-sim; suppress self-traffic via the generator's `--exclude-self`, not the router.
-Success Criteria: regression matrix green; write-pairing tests cover DataAw+DataW same-worm;
-fixed_vc=1 stream verified to hold one vc_id end to end under contention.
-Status: Not Started
 
 ## Stage 4: Collectives
 Goal: NMU 48 b address mask to 8 b node mask translate + reject; AxLOCK-with-collective and
@@ -117,6 +98,11 @@ Carry-in from S0 reviews: block-spec numeric drift vs constants.yaml (credit see
 default 8, multiple table lines in nmu/nsu/router specs — Parameter Discipline applies);
 inventory gaps (ni/wormhole_arbiter.hpp has no feature entry yet FEAT-NMU-VC_MAPPING lists
 flit_tail; DEPACKETIZE uses_packet_fields omit ordering_req/ordering_tag they read).
+Carry-in from S3b (doc polish, fold into the block-spec re-sync): nmu-spec §2.4 fixed_vc
+paragraph uses unqualified "AW" in two channel-class senses (line ~111 DataAw vs ~113
+NarrowAw) — add the "narrow" qualifier; residual "VC arbiter" prose in nmu-spec G9 /
+NOC_DAT_NUM_VC parameter row / nsu-spec §3.4; `cmodel_dpi.h:142` "vnet" wording. Also from
+S3b: ready_slack calibration still deferred (needs a measured wire-loop experiment).
 Carry-in from S1: block-spec flit-format tables (nmu/nsu/router §2.2) still show the
 pre-S1 layout — 56 b header, 408 b flit — vs as-built 44 b header, 48 b addr, 396 b flit,
 axi_ch 4 b / 10-value enc, and the NMU_OUTSTANDING_DEPTH outstanding-pool params; re-sync
