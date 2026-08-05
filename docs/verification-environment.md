@@ -318,3 +318,4 @@ passing back the printed value reproduces the run exactly.
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
 | Deferred header fields | `NOC_QOS_WIDTH`, `ROUTE_PAR_WIDTH`, `FLIT_ECC_WIDTH` are width-0 placeholders; QoS, route parity, and flit ECC are unbuilt. |
 | Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |
+| NI ingress backpressure unmodelled | not modeled on any network as of S3a: `ready` tied true / DAT merge self-credits, ingress queues unbounded, LOCAL stall metrics 0 by construction. Reassess at S3b when the VC collapse touches these faces. |

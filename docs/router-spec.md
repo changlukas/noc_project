@@ -287,6 +287,8 @@ to 0, outputs must stay 0 (SPEC 17).
 
 > Pre-S3a: the single `noc_chan_t` struct below predates the Stage 3a three-network split. As-built, `router_wrap` ports are per-network scalars (`tx_req_*`/`rx_req_*`, `tx_rsp_*`/`rx_rsp_*` ready/valid; `tx_dat_*`/`rx_dat_*` credit) with per-network flit widths (REQ 137 b, RSP 127 b, DAT 629 b), not one `noc_chan_t` struct. Re-synced in campaign Stage 5.
 
+> REQ/RSP `ready` is advisory, not a same-cycle accept: the sender grants against a `ready` sampled ~2 registrations earlier, and the receiver pushes unconditionally on `valid`, so a real transfer is `valid` alone.
+
 Struct types: `ni_signals_pkg::noc_chan_t` = `{valid (1 bit), flit[407:0]}`, 409 bits.
 `noc_types_pkg::noc_credit_t` = `{credit[NUM_VC-1:0]}`, one bit per VC.
 

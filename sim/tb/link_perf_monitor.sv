@@ -4,9 +4,16 @@
 //     belongs to), so every valid flit is a real transfer; a stall cycle is
 //     "not moving, but the credit VC buffer is full" (credit[vc_id]==0).
 //     Credit is a single-cycle pulse per VC.
-//   "ready_valid" (REQ/RSP): a transfer only happens on valid && ready; a
-//     stall cycle is "presented but not accepted" (valid && !ready). No
-//     credit array (REQ/RSP are single-VC, ready/valid per spec §4.3).
+//   "ready_valid" (REQ/RSP): ready is advisory, not a same-cycle accept --
+//     the sender grants against a ready sampled 2 registrations earlier
+//     (SimpleRouter::ready() deasserts ready_slack flits before its FIFO is
+//     physically full to cover that lag), and the receiver pushes
+//     unconditionally on valid, never re-checking its own current-cycle
+//     ready. So a transfer is valid alone, like the credit flow; a stall
+//     cycle is "idle, and downstream's advisory ready is still down"
+//     (!valid && !ready), mirroring the credit branch's "idle, but the
+//     credit buffer is full." No credit array (REQ/RSP are single-VC,
+//     ready/valid per spec §4.3).
 
 `ifndef LINK_PERF_MONITOR_SV
 `define LINK_PERF_MONITOR_SV
@@ -49,10 +56,11 @@ module link_perf_monitor #(
             automatic longint next_flit;
             automatic longint next_stall;
             if (FLOW == "ready_valid") begin
-                // A transfer needs both sides; a presented-but-not-accepted
-                // cycle is the stall.
-                next_flit  = flit_count + ((valid && ready) ? 1 : 0);
-                next_stall = stall_cyc  + ((valid && !ready) ? 1 : 0);
+                // ready is advisory (see header comment): every valid flit
+                // already transferred, so count on valid alone. A stall
+                // cycle is idle with downstream still not ready.
+                next_flit  = flit_count + (valid ? 1 : 0);
+                next_stall = stall_cyc  + ((!valid && !ready) ? 1 : 0);
             end else begin
                 // Credit reserves the slot before valid asserts, so every
                 // valid flit is a real transfer; the stall is "idle, but the
@@ -74,10 +82,10 @@ module link_perf_monitor #(
     end
 
     // Credit-flow-only assertions: no analogous protocol violation exists on
-    // the ready_valid side (the sender-side WormholeArbiter/SimpleRouter
-    // already only presents valid when it has a flit to send, and the wire
-    // itself enforces "accept iff ready" -- there is no separate credit pool
-    // to desync from).
+    // the ready_valid side. The sender only ever presents valid after its own
+    // grant against a (stale, advisory) ready, and the receiver pushes
+    // unconditionally on valid -- there is no separate credit pool that can
+    // desync, and no same-cycle ready check to violate.
     if (FLOW != "ready_valid") begin : g_credit_asserts
         // Per-VC credit must never underflow: valid && credit[vc_id]==0 means the
         // upstream sender violated the credit protocol (or a mis-wire). Assert loudly.
