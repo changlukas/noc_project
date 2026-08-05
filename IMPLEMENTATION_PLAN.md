@@ -41,32 +41,24 @@ depth (default 128 = 8 KB at 64 B beats), VC count (1-8), mesh dims, outstanding
 widths all stay free parameters exactly as FlooNoC keeps them; tests cover the parameter range,
 not one value.
 
-## Stage 3a: Third physical network, structural
-Goal: DAT link IO + third router instance; simple-mode ready/valid router class for REQ/RSP
-(1-2 stages); standard credit router retained for DAT; TX*/RX* pin contract; specgen
-first-class per-network flit widths; wrapper/DPI naming; perf probes follow.
-Port constraint (user ruling 2026-08-05, post-S2 bug retrospective): the REQ/RSP simple
-router is a line-by-line translate of mainline `floo_router.sv`; network/channel mapping is a
-translate of `floo_pkg::nw_chan_mapping`. No self-designed arbitration or routing logic in
-S3a — where the RTL and our structure diverge, flag BLOCKED, do not improvise.
-VIP correction (2026-08-05, supersedes the spike idea): co-sim stimulus is ALREADY upstream
-pulp VIP (`axi_file_master` is in upstream axi v0.39.7 axi_test.sv, vendored unmodified) — no
-swap needed. The S2 bug cluster lived in the C++ ctest-side VIP (cocotbext-axi hand-port,
-drift risk). Sentinel instead of swap: dual-VIP consistency — C++ and SV VIP driving the same
-scenario must agree; divergence = port drift. Acceptance tiers live in docs/backlog.md
-standing Verification section.
-Carry-in from S2 reviews: delete specgen's dead "derived" width_param branches
-(constants.py:227-244, :276-310) while touching per-network widths; check_strb_valid_bits is
-vacuous at 64 lanes (kFullStrbMask == ~0ull) — delete the check+call site or mark explicitly.
-Success Criteria: three networks carry traffic in co-sim, REQ/RSP ready/valid observed on wires.
-Status: Not Started
-
 ## Stage 3b: Steering and VC collapse, semantic
-Goal: axi_ch class-aware steering (narrow Aw/W/Ar on REQ; DataAw/DataW on DAT; DataAr on REQ;
-DataR on DAT; B/NarrowR on RSP); VCs on DAT only; delete ni/virtual_network.hpp and read/write
-VC split; rename VcArbiter to allocator naming; DAT standard router gains the VA stage
-(deprecated vc_router port, direction-preference assignment) with fixed_vc=1 skipping VA,
-pinned end to end; drop legacy write_rsp_vc/read_rsp_vc.
+Goal: VCs on DAT only; delete ni/virtual_network.hpp and read/write VC split; rename VcArbiter
+to allocator naming; NOC_NUM_VC renamed DAT_NUM_VC (constants TODO names this stage); DAT
+standard router gains the VA stage (deprecated vc_router port, direction-preference
+assignment) with fixed_vc=1 skipping VA, pinned end to end; drop legacy
+write_rsp_vc/read_rsp_vc. NOTE: class-aware steering itself landed in S3a (spec :348 map live,
+DataAw/W/R on DAT with same-worm pairing tests) — this stage's steering scope is done.
+Standing ruling (keep): LOCAL->LOCAL is LEGAL by design — the self-transaction path, exercised
+by passing co-sim; suppress self-traffic via the generator's `--exclude-self`, not the router.
+SimpleRouter honors it via an explicit loopback-tie-off exemption (deliberate divergence from
+floo_router's blanket NoLoopback, cited in simple_router.hpp).
+Carry-ins from S3a: NI ingress backpressure not modeled on any network (ready tied true, DAT
+merge self-credits, unbounded ingress queues — documented in verification-environment.md
+Known limitations; reassess here when VC collapse touches these faces). SimpleRouter
+ready_slack=2 default puts the compliant-sender high-water mark exactly at fifo depth (zero
+spare, one registration from the overflow assert) — calibrate against the measured wire loop.
+SimpleRouter grants up to one flit per OUTPUT per tick from the same input FIFO (multi-read;
+matches the credit Router; mainline floo has 1 FIFO read port) — keep or align consciously.
 Standing ruling (keep): LOCAL->LOCAL is LEGAL by design — the self-transaction path, exercised
 by passing co-sim; suppress self-traffic via the generator's `--exclude-self`, not the router.
 Success Criteria: regression matrix green; write-pairing tests cover DataAw+DataW same-worm;
@@ -155,7 +147,10 @@ still open into that round's backlog "This round".
 - Verification methodology: AXI-side perf DPI hooks never driven (bw_monitor vs perf.json
   cross-check has never run); no coverage, no constrained-random, no wire-level SVA.
 - Infrastructure notes: VCS flow builds but has never executed; WSL host instability
-  (rsync to ~/noc_project, foreground one session at a time, echo-marker + retry).
+  (rsync to ~/noc_project, foreground one session at a time, echo-marker + retry); generated
+  fabric drives one packed vector from a port connection (bit 0) plus always_comb (bits 1-4)
+  — Verilator tolerates, VCS may reject (check before first VCS run); deleting only
+  noc_fabric_<topo>.sv leaves the build failing on a missing file instead of regenerating.
 - Deck: user regenerates three image-based diagrams (s6/s7 NMU/NSU block diagrams with old
   ADDR 64 b + NUM_OF_DAT_CHAN_VC, s8 NSU port symbol with old noc_* pin names).
 - Release-package note: the shipped D:\noc_project copy lacks sim/verilator/perf_cli_summary.py
