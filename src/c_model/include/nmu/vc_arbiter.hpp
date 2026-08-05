@@ -14,8 +14,9 @@
 // VC so it cannot be reordered in-fabric. With no fixed VC yet (new id, or dst
 // changed) it falls back to round-robin and records the new (dst, VC) for next
 // time. ordering_req=1 flits are RoB-owned and order-free, so they always
-// round-robin, never fixed. AR never reaches a num_vc > 1 face (it rides REQ),
-// so it carries no streak state.
+// round-robin, never fixed. AR carries no streak state: the production wraps
+// pin the REQ face it rides to num_vc == 1, and an AR reaching a multi-VC face
+// (ctest fixtures do this) round-robins.
 //
 // W-follows-AW invariant: this arbiter MUST be downstream
 // of a WormholeArbiter that serializes AW and all its W beats before

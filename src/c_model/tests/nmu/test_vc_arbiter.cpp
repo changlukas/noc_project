@@ -46,7 +46,7 @@ uint8_t push_and_vc(VcArbiter& arb, ChannelModel& noc, const Flit& f) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// Parameterized fixture — NUM_VC ∈ {1, 2, 4, 8}
+// Parameterized fixture — NUM_VC ∈ {1, 2} (see INSTANTIATE below)
 // ---------------------------------------------------------------------------
 
 class NmuVcArbParam : public ::testing::TestWithParam<std::size_t> {};
