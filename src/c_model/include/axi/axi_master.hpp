@@ -217,15 +217,22 @@ class AxiMasterT {
             auto& op = deq.front();
             const auto& sub = op.sub_bursts[op.cur_r_sub_idx_];
             const std::size_t bpb = 1ull << sub.size;
-            // Lane-positioned bus: byte j on the bus is at lane (byte_lane + j),
-            // where byte_lane = (per-beat addr) mod DATA_BYTES. Per-beat addr from
-            // the CURRENT sub-burst (FIXED stays; INCR advances; WRAP wraps).
-            // Lane room caps the per-beat payload at DATA_BYTES - byte_lane; any
-            // trailing user bytes that would have fallen off the bus are zero-
-            // padded so downstream packed-buffer offsets stay aligned at the
+            // Lane-positioned bus, anchored to the ALIGNED per-beat address -- mirrors
+            // the W-loop fix above (IHI 0022 A3.4.1): a real slave always derives its
+            // per-beat lane window from ARADDR rounded down to the size boundary
+            // (push_reads_ already sends ar.addr aligned), so byte j on the bus is at
+            // lane (byte_lane + j), byte_lane = (aligned per-beat addr) mod DATA_BYTES.
+            // No prefix masking needed here (unlike the W-loop's WSTRB): AXI4 has no
+            // per-byte read strobe, so the accumulator captures the beat's full
+            // aligned-window bytes exactly as the write side's op.data does, and the
+            // Scoreboard compares beat-relative offset j against the same aligned base
+            // used at write time. Lane room caps the per-beat payload at DATA_BYTES -
+            // byte_lane; any trailing user bytes that would have fallen off the bus are
+            // zero-padded so downstream packed-buffer offsets stay aligned at the
             // operation-level (beat * bpb) layout.
+            const uint64_t aligned_addr = sub.addr & ~((1ull << sub.size) - 1);
             const uint64_t beat_addr_v =
-                beat_addr(sub.addr, sub.len, sub.size, sub.burst, op.r_beats_in_cur_);
+                beat_addr(aligned_addr, sub.len, sub.size, sub.burst, op.r_beats_in_cur_);
             const std::size_t byte_lane = static_cast<std::size_t>(beat_addr_v & (DATA_BYTES - 1));
             const std::size_t lane_room = (byte_lane < DATA_BYTES) ? (DATA_BYTES - byte_lane) : 0;
             const std::size_t copy_bytes = std::min(bpb, lane_room);

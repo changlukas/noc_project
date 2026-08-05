@@ -616,6 +616,73 @@ INSTANTIATE_TEST_SUITE_P(
         return std::string(info.param.label);
     });
 
+// Read-side mirror of AxiMasterUnalignedP: same (addr, size) cases, verifying
+// AR.addr goes out aligned (like AW) and the read accumulator pulls its bpb
+// bytes from the ALIGNED bus lane, not the pre-alignment sub.addr lane --
+// same root cause and fix as the W-loop, applied to tick_drain_r_resp_.
+class AxiMasterReadUnalignedP : public AxiMasterTest,
+                                public ::testing::WithParamInterface<UnalignedCase> {};
+
+TEST_P(AxiMasterReadUnalignedP, ArAlignedAndAccumulatorReadsAlignedLane) {
+    SCENARIO(
+        "AxiMaster: unaligned addr -> AR.addr aligned down, read accumulator pulls the full "
+        "beat from the ALIGNED bus lane (mirrors the W-loop fix)");
+    const auto& c = GetParam();
+    std::ostringstream yaml_src;
+    yaml_src << "\ntransactions:\n"
+                "  - op: read\n"
+                "    addr: 0x"
+             << std::hex << c.txn_addr
+             << "\n"
+                "    id: 0x1\n"
+                "    len: 0\n"
+                "    size: "
+             << std::dec << static_cast<unsigned>(c.size)
+             << "\n"
+                "    burst: INCR\n"
+                "    dump_file: r_read_u_"
+             << c.label << ".txt\n";
+    auto yaml = write_tmp(yaml_src.str());
+    ni::cmodel::axi::testing::MockSlave mock;
+    axi::AxiMasterT<ni::cmodel::axi::testing::MockSlave> master(
+        yaml, mock, std::string(::testing::TempDir()) + "/r_read_u_" + c.label + ".txt");
+    master.tick();
+    ASSERT_EQ(mock.captured_ar.size(), 1u);
+    EXPECT_EQ(mock.captured_ar[0].addr, c.expected_aw_addr);
+
+    // Distinctive per-lane byte pattern spanning the whole bus, so the
+    // extracted window unambiguously proves which lane it came from.
+    axi::RBeat r{};
+    r.id = 0x1;
+    r.resp = axi::Resp::OKAY;
+    r.last = true;
+    for (int i = 0; i < axi::DATA_BYTES; ++i)
+        r.data[static_cast<std::size_t>(i)] = static_cast<uint8_t>(i);
+    mock.queued_r.push_back(r);
+
+    std::vector<uint8_t> observed;
+    master.on_read_observed([&](const axi::ReadResult& rr) { observed = rr.data; });
+    master.tick();
+
+    const std::size_t bpb = 1u << c.size;
+    const std::size_t byte_lane =
+        static_cast<std::size_t>(c.expected_aw_addr) & (axi::DATA_BYTES - 1);
+    ASSERT_EQ(observed.size(), bpb);
+    for (std::size_t j = 0; j < bpb; ++j) {
+        EXPECT_EQ(observed[j], r.data[byte_lane + j]) << "mismatch at local offset j=" << j;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(UnalignedReadCases, AxiMasterReadUnalignedP,
+                         ::testing::Values(UnalignedCase{0x1003, 5, 0x1000u, 0, "Size5_Off3"},
+                                           UnalignedCase{0x1001, 4, 0x1000u, 0, "Size4_Off1"},
+                                           UnalignedCase{0x1007, 3, 0x1000u, 0, "Size3_Off7"},
+                                           UnalignedCase{0x100F, 2, 0x100Cu, 0, "Size2_OffF"},
+                                           UnalignedCase{0x101F, 1, 0x101Eu, 0, "Size1_Off1F"}),
+                         [](const ::testing::TestParamInfo<UnalignedCase>& info) {
+                             return std::string(info.param.label);
+                         });
+
 // End-to-end companion to AxiMasterUnalignedP: drives the SAME unaligned
 // write through a REAL axi::AxiSlave (not MockSlave) and reads back the
 // exact byte at the true (unaligned) start address. Proves two things at
@@ -744,6 +811,71 @@ std::string write_hex_tmp_data(const std::string& tag, const std::string& hex_by
     return path;
 }
 }  // namespace
+
+// Read-side E2E companion to UnalignedWriteReadbackMatchesRealSlave: writes a
+// known 64 B pattern (byte[i] = i) at an ALIGNED address through a real
+// AxiSlave + Memory, then issues an UNALIGNED read within that window and
+// verifies every returned byte matches memory at its true address -- proving
+// tick_drain_r_resp_'s aligned lane math (mirroring the W-loop fix) extracts
+// from the same lanes a real slave places data on.
+TEST_F(AxiMasterTest, UnalignedReadFromRealSlaveMatchesMemory) {
+    SCENARIO(
+        "AxiMaster+AxiSlave end-to-end: an unaligned read (addr=0x2003 size=5) through a real "
+        "AxiSlave returns the bytes written at their true addresses, not lane-shifted ones");
+    std::string full_window;
+    for (int i = 0; i < axi::DATA_BYTES; ++i) {
+        char buf[4];
+        std::snprintf(buf, sizeof(buf), "%02X", i);
+        if (i) full_window += ' ';
+        full_window += buf;
+    }
+    auto wpath = write_hex_tmp_data("u_read_e2e", full_window);
+    auto yaml = write_tmp(std::string(R"YAML(
+config:
+  memory_base: 0x0
+  memory_size: 0x3000
+transactions:
+  - op: write
+    addr: 0x2000
+    id: 0x1
+    len: 0
+    size: 6
+    burst: INCR
+    data_file: )YAML") + wpath +
+                          R"YAML(
+  - op: read
+    addr: 0x2003
+    id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    dump_file: r_u_read_e2e_scenario.txt
+)YAML");
+
+    axi::Memory memory(0, 0x3000, 0, 0);
+    axi::AxiSlave slave(memory);
+    slave.set_memory_bounds(0, 0x3000);
+    axi::AxiMasterT<axi::AxiSlave> master(yaml, slave,
+                                          std::string(::testing::TempDir()) + "/r_u_read_e2e.txt");
+
+    std::vector<uint8_t> observed;
+    master.on_read_observed([&](const axi::ReadResult& rr) { observed = rr.data; });
+
+    constexpr int kMaxCycles = 200;
+    int cycles = 0;
+    for (; cycles < kMaxCycles && !master.done(); ++cycles) {
+        master.tick();
+        slave.tick();
+        memory.tick();
+    }
+    ASSERT_TRUE(master.done()) << "master did not complete after " << cycles << " cycles";
+    // The read's ALIGNED window is [0x2000, 0x2020); observed[j] is the real
+    // byte at 0x2000+j, which the write above set to j.
+    ASSERT_EQ(observed.size(), 32u);
+    for (std::size_t j = 0; j < observed.size(); ++j) {
+        EXPECT_EQ(observed[j], static_cast<uint8_t>(j)) << "mismatch at local offset j=" << j;
+    }
+}
 
 TEST_F(AxiMasterTest, NarrowSize0_1BytePerBeat) {
     SCENARIO("AxiMaster narrow size=0: 4 beats x 1B, per-beat byte_lane increments, strb=1<<n");

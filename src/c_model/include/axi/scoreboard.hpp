@@ -65,13 +65,19 @@ class Scoreboard {
     }
     // Read verification: rr.data is the packed user-byte buffer the master
     // accumulated (bpb per beat, beat_count total). We re-derive per-beat addr
-    // from rr.addr/size/burst and compare against expected_.
+    // from the ALIGNED rr.addr/size/burst -- mirrors handle_write_completed
+    // (IHI 0022 A3.4.1: a real slave anchors its lane window to the aligned
+    // address it decodes from ARADDR, not the raw rr.addr) -- and compare
+    // against expected_, which handle_write_completed populated on the same
+    // aligned basis.
     void handle_read_observed(const ReadResult& rr) {
         if (rr.resp != Resp::OKAY) return;
         const std::size_t bpb = 1ull << rr.size;
         const std::size_t beat_count = static_cast<std::size_t>(rr.len) + 1u;
+        const uint64_t aligned_addr = rr.addr & ~((1ull << rr.size) - 1);
         for (std::size_t beat = 0; beat < beat_count; ++beat) {
-            const uint64_t beat_addr_v = axi::beat_addr(rr.addr, rr.len, rr.size, rr.burst, beat);
+            const uint64_t beat_addr_v =
+                axi::beat_addr(aligned_addr, rr.len, rr.size, rr.burst, beat);
             for (std::size_t j = 0; j < bpb; ++j) {
                 const std::size_t idx = beat * bpb + j;
                 if (idx >= rr.data.size()) break;
