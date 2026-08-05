@@ -28,6 +28,18 @@
 // via get_outputs, and registers those outputs nonblocking so they are
 // visible to SV wires from the NEXT cycle onward.
 //
+// DPI split one-call-per-network (S3a T5 debug finding): set_inputs/
+// get_outputs are split into three calls each (req/rsp/dat), one tick() call
+// shared. The original single combined call married three DIFFERENT flit
+// widths (137/127/629 b) as [LINK_PORTS]-sized unpacked-array arguments in
+// one DPI signature -- the only place in this codebase asking one DPI call to
+// marshal more than one parameterized per-element width. Co-sim showed
+// rx_req_ready/rx_rsp_ready permanently stuck at 0 despite the standalone
+// C++ model proving correct in isolation (ready=1 after one idle tick,
+// matching SimpleRouter's own math) -- i.e. the fault was in DPI/SV
+// marshalling, not model logic. Splitting removes the mixed-width construct
+// outright: every call below now marshals exactly one flit width.
+//
 // The longint unsigned ctx_i is created by tb_top (cmodel_router_create with x_coord);
 // this wrap only imports set_inputs/tick/get_outputs.
 //
@@ -87,38 +99,51 @@ module router_wrap #(
     end
 
     // -------------------------------------------------------------------------
-    // DPI imports — 3-step pattern; arg order mirrors cmodel_dpi.h Router decls.
-    // valid/ready are packed [LINK_PORTS-1:0] vectors (one word, bit per port).
-    // flit arrays are unpacked [LINK_PORTS], <NET>_VEC_WORDS-per-port
-    // (port-major). DAT credit is an unpacked [LINK_PORTS] array of
-    // [DAT_NUM_VC-1:0] packed words (one word per port, bit per VC).
+    // DPI imports — 3-step pattern, one call per network per step (except
+    // tick, shared); arg order mirrors cmodel_dpi.h Router decls. valid/ready
+    // are packed [LINK_PORTS-1:0] vectors (one word, bit per port). flit
+    // arrays are unpacked [LINK_PORTS], <NET>_VEC_WORDS-per-port (port-major).
+    // DAT credit is an unpacked [LINK_PORTS] array of [DAT_NUM_VC-1:0] packed
+    // words (one word per port, bit per VC).
     // -------------------------------------------------------------------------
 
-    import "DPI-C" context function void cmodel_router_set_inputs(
+    import "DPI-C" context function void cmodel_router_req_set_inputs(
         input  longint unsigned              ctx,
         input  bit [LINK_PORTS-1:0]     rx_req_valid,
         input  bit [REQ_FLIT_WIDTH-1:0] rx_req_flit  [LINK_PORTS],
-        input  bit [LINK_PORTS-1:0]     tx_req_ready,
+        input  bit [LINK_PORTS-1:0]     tx_req_ready
+    );
+    import "DPI-C" context function void cmodel_router_rsp_set_inputs(
+        input  longint unsigned              ctx,
         input  bit [LINK_PORTS-1:0]     rx_rsp_valid,
         input  bit [RSP_FLIT_WIDTH-1:0] rx_rsp_flit  [LINK_PORTS],
-        input  bit [LINK_PORTS-1:0]     tx_rsp_ready,
+        input  bit [LINK_PORTS-1:0]     tx_rsp_ready
+    );
+    import "DPI-C" context function void cmodel_router_dat_set_inputs(
+        input  longint unsigned              ctx,
         input  bit [LINK_PORTS-1:0]     rx_dat_valid,
         input  bit [DAT_FLIT_WIDTH-1:0] rx_dat_flit  [LINK_PORTS],
         input  bit [DAT_NUM_VC-1:0]     tx_dat_crdvalid [LINK_PORTS]
     );
 
-    // tick: advance C++ model one cycle.
+    // tick: advance C++ model one cycle (all three networks together).
     import "DPI-C" context function void cmodel_router_tick(input longint unsigned ctx);
 
-    // get_outputs: read C++ output latch into SV locals.
-    import "DPI-C" context function void cmodel_router_get_outputs(
+    // get_outputs: read C++ output latch into SV locals, one call per network.
+    import "DPI-C" context function void cmodel_router_req_get_outputs(
         input  longint unsigned              ctx,
         output bit [LINK_PORTS-1:0]     tx_req_valid,
         output bit [REQ_FLIT_WIDTH-1:0] tx_req_flit  [LINK_PORTS],
-        output bit [LINK_PORTS-1:0]     rx_req_ready,
+        output bit [LINK_PORTS-1:0]     rx_req_ready
+    );
+    import "DPI-C" context function void cmodel_router_rsp_get_outputs(
+        input  longint unsigned              ctx,
         output bit [LINK_PORTS-1:0]     tx_rsp_valid,
         output bit [RSP_FLIT_WIDTH-1:0] tx_rsp_flit  [LINK_PORTS],
-        output bit [LINK_PORTS-1:0]     rx_rsp_ready,
+        output bit [LINK_PORTS-1:0]     rx_rsp_ready
+    );
+    import "DPI-C" context function void cmodel_router_dat_get_outputs(
+        input  longint unsigned              ctx,
         output bit [LINK_PORTS-1:0]     tx_dat_valid,
         output bit [DAT_FLIT_WIDTH-1:0] tx_dat_flit  [LINK_PORTS],
         output bit [DAT_NUM_VC-1:0]     rx_dat_crdvalid [LINK_PORTS]
@@ -159,12 +184,13 @@ module router_wrap #(
                 rx_dat_crdvalid_q[p] <= '0;
             end
         end else begin
-            // Step 1: push current wire values into C++ input latch. The
-            // flit/credit ports are `logic` unpacked arrays; the DPI imports
-            // declare `bit` unpacked arrays. Verilator requires an exact
-            // element type match when passing whole unpacked arrays, so copy
-            // the `logic` ports into `bit` mirrors first (4-state -> 2-state,
-            // sim-clean here). Packed vectors (valid/ready) pass directly.
+            // Step 1: push current wire values into C++ input latch, one call
+            // per network. The flit/credit ports are `logic` unpacked arrays;
+            // the DPI imports declare `bit` unpacked arrays. Verilator
+            // requires an exact element type match when passing whole
+            // unpacked arrays, so copy the `logic` ports into `bit` mirrors
+            // first (4-state -> 2-state, sim-clean here). Packed vectors
+            // (valid/ready) pass directly.
             begin : set_inputs_blk
                 bit [REQ_FLIT_WIDTH-1:0] b_rx_req_flit [LINK_PORTS];
                 bit [RSP_FLIT_WIDTH-1:0] b_rx_rsp_flit [LINK_PORTS];
@@ -176,12 +202,9 @@ module router_wrap #(
                     b_rx_dat_flit[p]     = rx_dat_flit[p];
                     b_tx_dat_crdvalid[p] = tx_dat_crdvalid[p];
                 end
-                cmodel_router_set_inputs(
-                    ctx_i,
-                    rx_req_valid, b_rx_req_flit, tx_req_ready,
-                    rx_rsp_valid, b_rx_rsp_flit, tx_rsp_ready,
-                    rx_dat_valid, b_rx_dat_flit, b_tx_dat_crdvalid
-                );
+                cmodel_router_req_set_inputs(ctx_i, rx_req_valid, b_rx_req_flit, tx_req_ready);
+                cmodel_router_rsp_set_inputs(ctx_i, rx_rsp_valid, b_rx_rsp_flit, tx_rsp_ready);
+                cmodel_router_dat_set_inputs(ctx_i, rx_dat_valid, b_rx_dat_flit, b_tx_dat_crdvalid);
             end
 
             // Step 2: advance C++ model one cycle.
@@ -189,6 +212,7 @@ module router_wrap #(
 
             // Step 3: pull outputs into local temporaries (blocking to locals is
             // safe; avoids BLKANDNBLK with the nonblocking reset path above).
+            // One call per network.
             begin : get_outputs_blk
                 bit [LINK_PORTS-1:0]     t_tx_req_valid;
                 bit [REQ_FLIT_WIDTH-1:0] t_tx_req_flit [LINK_PORTS];
@@ -199,12 +223,9 @@ module router_wrap #(
                 bit [LINK_PORTS-1:0]     t_tx_dat_valid;
                 bit [DAT_FLIT_WIDTH-1:0] t_tx_dat_flit [LINK_PORTS];
                 bit [DAT_NUM_VC-1:0]     t_rx_dat_crdvalid [LINK_PORTS];
-                cmodel_router_get_outputs(
-                    ctx_i,
-                    t_tx_req_valid, t_tx_req_flit, t_rx_req_ready,
-                    t_tx_rsp_valid, t_tx_rsp_flit, t_rx_rsp_ready,
-                    t_tx_dat_valid, t_tx_dat_flit, t_rx_dat_crdvalid
-                );
+                cmodel_router_req_get_outputs(ctx_i, t_tx_req_valid, t_tx_req_flit, t_rx_req_ready);
+                cmodel_router_rsp_get_outputs(ctx_i, t_tx_rsp_valid, t_tx_rsp_flit, t_rx_rsp_ready);
+                cmodel_router_dat_get_outputs(ctx_i, t_tx_dat_valid, t_tx_dat_flit, t_rx_dat_crdvalid);
                 tx_req_valid_q <= t_tx_req_valid;
                 rx_req_ready_q <= t_rx_req_ready;
                 tx_rsp_valid_q <= t_tx_rsp_valid;

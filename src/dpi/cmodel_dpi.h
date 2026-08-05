@@ -70,19 +70,32 @@ void cmodel_dump_fabric_state(void);
 //     (tx_dat_crdvalid/rx_dat_crdvalid) is per-VC: ONE svBitVecVal word per
 //     port (bit vc = credit pulse on VC vc), valid for dat_num_vc <=
 //     2^VC_ID_WIDTH = 8.
+// Split one-call-per-network (S3a T5 debug finding): cmodel_router_set_inputs/
+// get_outputs originally married REQ/RSP/DAT's three DIFFERENT flit widths
+// (137/127/629 b) as [LINK_PORTS]-sized unpacked-array arguments in ONE DPI
+// call -- the only place in this codebase asking a DPI signature to marshal
+// more than one parameterized per-element width in the same call. Co-sim
+// showed the router's ready outputs stuck at 0 forever despite the
+// standalone C++ model proving correct in isolation (a fresh RouterWrap
+// reaches ready=1 after exactly one idle tick, matching SimpleRouter's own
+// math) -- i.e. the fault is in DPI/SV marshalling, not model logic. Splitting
+// per network removes the mixed-width construct outright: every one of these
+// six calls now marshals exactly one flit width.
 unsigned long long cmodel_router_create(const char* name, int x_coord, int y_coord, int mesh_x_dim,
                                         int mesh_y_dim, int dat_num_vc);
-void cmodel_router_set_inputs(unsigned long long ctx, svBitVecVal* rx_req_valid,
-                              svBitVecVal* rx_req_flit, svBitVecVal* tx_req_ready,
-                              svBitVecVal* rx_rsp_valid, svBitVecVal* rx_rsp_flit,
-                              svBitVecVal* tx_rsp_ready, svBitVecVal* rx_dat_valid,
-                              svBitVecVal* rx_dat_flit, svBitVecVal* tx_dat_crdvalid);
+void cmodel_router_req_set_inputs(unsigned long long ctx, svBitVecVal* rx_req_valid,
+                                  svBitVecVal* rx_req_flit, svBitVecVal* tx_req_ready);
+void cmodel_router_rsp_set_inputs(unsigned long long ctx, svBitVecVal* rx_rsp_valid,
+                                  svBitVecVal* rx_rsp_flit, svBitVecVal* tx_rsp_ready);
+void cmodel_router_dat_set_inputs(unsigned long long ctx, svBitVecVal* rx_dat_valid,
+                                  svBitVecVal* rx_dat_flit, svBitVecVal* tx_dat_crdvalid);
 void cmodel_router_tick(unsigned long long ctx);
-void cmodel_router_get_outputs(unsigned long long ctx, svBitVecVal* tx_req_valid,
-                               svBitVecVal* tx_req_flit, svBitVecVal* rx_req_ready,
-                               svBitVecVal* tx_rsp_valid, svBitVecVal* tx_rsp_flit,
-                               svBitVecVal* rx_rsp_ready, svBitVecVal* tx_dat_valid,
-                               svBitVecVal* tx_dat_flit, svBitVecVal* rx_dat_crdvalid);
+void cmodel_router_req_get_outputs(unsigned long long ctx, svBitVecVal* tx_req_valid,
+                                   svBitVecVal* tx_req_flit, svBitVecVal* rx_req_ready);
+void cmodel_router_rsp_get_outputs(unsigned long long ctx, svBitVecVal* tx_rsp_valid,
+                                   svBitVecVal* tx_rsp_flit, svBitVecVal* rx_rsp_ready);
+void cmodel_router_dat_get_outputs(unsigned long long ctx, svBitVecVal* tx_dat_valid,
+                                   svBitVecVal* tx_dat_flit, svBitVecVal* rx_dat_crdvalid);
 
 // DatMerge — NI-level DAT LOCAL-port merge point (S3a T5, controller ruling,
 // translate of floo_nw_chimney.sv's wide-link merge). One instance per node,

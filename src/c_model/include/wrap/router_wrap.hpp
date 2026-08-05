@@ -91,6 +91,51 @@ class RouterWrap {
 
     void set_inputs(const RouterInputs& in) { in_ = in; }
 
+    // Per-network granular accessors (S3a T5 DPI split — see cmodel_dpi.cpp's
+    // cmodel_router_{req,rsp,dat}_{set_inputs,get_outputs}). REQ/RSP/DAT have
+    // three DIFFERENT flit widths; a single DPI call marshalling all three
+    // networks' unpacked flit arrays together was the only place in this
+    // codebase mixing more than one parameterized element width in one DPI
+    // signature. Splitting per network removes that construct outright
+    // instead of trying to prove which specific Verilator marshalling
+    // assumption broke on it.
+    void set_req_inputs(const PerPort<bool>& rx_valid, const PerPort<FlitBytes>& rx_flit,
+                        const PerPort<bool>& tx_ready) {
+        in_.rx_req_valid = rx_valid;
+        in_.rx_req_flit = rx_flit;
+        in_.tx_req_ready = tx_ready;
+    }
+    void set_rsp_inputs(const PerPort<bool>& rx_valid, const PerPort<FlitBytes>& rx_flit,
+                        const PerPort<bool>& tx_ready) {
+        in_.rx_rsp_valid = rx_valid;
+        in_.rx_rsp_flit = rx_flit;
+        in_.tx_rsp_ready = tx_ready;
+    }
+    void set_dat_inputs(const PerPort<bool>& rx_valid, const PerPort<FlitBytes>& rx_flit,
+                        const PerPort<VcCreditVec>& tx_crdvalid) {
+        in_.rx_dat_valid = rx_valid;
+        in_.rx_dat_flit = rx_flit;
+        in_.tx_dat_crdvalid = tx_crdvalid;
+    }
+    void get_req_outputs(PerPort<bool>& tx_valid, PerPort<FlitBytes>& tx_flit,
+                         PerPort<bool>& rx_ready) const {
+        tx_valid = out_.tx_req_valid;
+        tx_flit = out_.tx_req_flit;
+        rx_ready = out_.rx_req_ready;
+    }
+    void get_rsp_outputs(PerPort<bool>& tx_valid, PerPort<FlitBytes>& tx_flit,
+                         PerPort<bool>& rx_ready) const {
+        tx_valid = out_.tx_rsp_valid;
+        tx_flit = out_.tx_rsp_flit;
+        rx_ready = out_.rx_rsp_ready;
+    }
+    void get_dat_outputs(PerPort<bool>& tx_valid, PerPort<FlitBytes>& tx_flit,
+                         PerPort<VcCreditVec>& rx_crdvalid) const {
+        tx_valid = out_.tx_dat_valid;
+        tx_flit = out_.tx_dat_flit;
+        rx_crdvalid = out_.rx_dat_crdvalid;
+    }
+
     void tick() {
         // Step 1: push inbound flits, set ready-mirror state, before tick().
         for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {

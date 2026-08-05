@@ -204,30 +204,62 @@ extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord
     DPI_BOUNDARY_END_R(cmodel_router_create);
 }
 
-extern "C" void cmodel_router_set_inputs(unsigned long long ctx, svBitVecVal* rx_req_valid,
-                                         svBitVecVal* rx_req_flit, svBitVecVal* tx_req_ready,
-                                         svBitVecVal* rx_rsp_valid, svBitVecVal* rx_rsp_flit,
-                                         svBitVecVal* tx_rsp_ready, svBitVecVal* rx_dat_valid,
-                                         svBitVecVal* rx_dat_flit, svBitVecVal* tx_dat_crdvalid) {
-    DPI_BOUNDARY_BEGIN(cmodel_router_set_inputs) {
-        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_set_inputs");
+// Split one-call-per-network (S3a T5 debug finding — see cmodel_dpi.h). Each
+// of these six marshals exactly one flit width; no DPI signature here mixes
+// REQ/RSP/DAT unpacked-array element widths anymore.
+
+extern "C" void cmodel_router_req_set_inputs(unsigned long long ctx, svBitVecVal* rx_req_valid,
+                                             svBitVecVal* rx_req_flit, svBitVecVal* tx_req_ready) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_req_set_inputs) {
+        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_req_set_inputs");
+        auto* r = static_cast<RouterWrap*>(_h->adapter.get());
+        PerPort<bool> valid{}, ready{};
+        PerPort<FlitBytes> flit{};
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            valid[p] = ((rx_req_valid[0] >> p) & 0x1u) != 0;
+            ready[p] = ((tx_req_ready[0] >> p) & 0x1u) != 0;
+            flit[p] = ReqFlitMarshal::unpack(rx_req_flit + p * ReqFlitMarshal::VEC_WORDS);
+        }
+        r->set_req_inputs(valid, flit, ready);
+    }
+    DPI_BOUNDARY_END(cmodel_router_req_set_inputs);
+}
+
+extern "C" void cmodel_router_rsp_set_inputs(unsigned long long ctx, svBitVecVal* rx_rsp_valid,
+                                             svBitVecVal* rx_rsp_flit, svBitVecVal* tx_rsp_ready) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_rsp_set_inputs) {
+        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_rsp_set_inputs");
+        auto* r = static_cast<RouterWrap*>(_h->adapter.get());
+        PerPort<bool> valid{}, ready{};
+        PerPort<FlitBytes> flit{};
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            valid[p] = ((rx_rsp_valid[0] >> p) & 0x1u) != 0;
+            ready[p] = ((tx_rsp_ready[0] >> p) & 0x1u) != 0;
+            flit[p] = RspFlitMarshal::unpack(rx_rsp_flit + p * RspFlitMarshal::VEC_WORDS);
+        }
+        r->set_rsp_inputs(valid, flit, ready);
+    }
+    DPI_BOUNDARY_END(cmodel_router_rsp_set_inputs);
+}
+
+extern "C" void cmodel_router_dat_set_inputs(unsigned long long ctx, svBitVecVal* rx_dat_valid,
+                                             svBitVecVal* rx_dat_flit,
+                                             svBitVecVal* tx_dat_crdvalid) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_dat_set_inputs) {
+        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_dat_set_inputs");
         auto* r = static_cast<RouterWrap*>(_h->adapter.get());
         const uint8_t nvc = r->num_vc();
-        RouterInputs in{};
+        PerPort<bool> valid{};
+        PerPort<FlitBytes> flit{};
+        PerPort<VcCreditVec> crdvalid{};
         for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
-            in.rx_req_valid[p] = ((rx_req_valid[0] >> p) & 0x1u) != 0;
-            in.rx_rsp_valid[p] = ((rx_rsp_valid[0] >> p) & 0x1u) != 0;
-            in.tx_req_ready[p] = ((tx_req_ready[0] >> p) & 0x1u) != 0;
-            in.tx_rsp_ready[p] = ((tx_rsp_ready[0] >> p) & 0x1u) != 0;
-            in.rx_dat_valid[p] = ((rx_dat_valid[0] >> p) & 0x1u) != 0;
-            in.rx_req_flit[p] = ReqFlitMarshal::unpack(rx_req_flit + p * ReqFlitMarshal::VEC_WORDS);
-            in.rx_rsp_flit[p] = RspFlitMarshal::unpack(rx_rsp_flit + p * RspFlitMarshal::VEC_WORDS);
-            in.rx_dat_flit[p] = DatFlitMarshal::unpack(rx_dat_flit + p * DatFlitMarshal::VEC_WORDS);
-            in.tx_dat_crdvalid[p] = unpack_vc_credit<VcCreditVec>(tx_dat_crdvalid + p, nvc);
+            valid[p] = ((rx_dat_valid[0] >> p) & 0x1u) != 0;
+            flit[p] = DatFlitMarshal::unpack(rx_dat_flit + p * DatFlitMarshal::VEC_WORDS);
+            crdvalid[p] = unpack_vc_credit<VcCreditVec>(tx_dat_crdvalid + p, nvc);
         }
-        r->set_inputs(in);
+        r->set_dat_inputs(valid, flit, crdvalid);
     }
-    DPI_BOUNDARY_END(cmodel_router_set_inputs);
+    DPI_BOUNDARY_END(cmodel_router_dat_set_inputs);
 }
 
 extern "C" void cmodel_router_tick(unsigned long long ctx) {
@@ -238,35 +270,63 @@ extern "C" void cmodel_router_tick(unsigned long long ctx) {
     DPI_BOUNDARY_END(cmodel_router_tick);
 }
 
-extern "C" void cmodel_router_get_outputs(unsigned long long ctx, svBitVecVal* tx_req_valid,
-                                          svBitVecVal* tx_req_flit, svBitVecVal* rx_req_ready,
-                                          svBitVecVal* tx_rsp_valid, svBitVecVal* tx_rsp_flit,
-                                          svBitVecVal* rx_rsp_ready, svBitVecVal* tx_dat_valid,
-                                          svBitVecVal* tx_dat_flit, svBitVecVal* rx_dat_crdvalid) {
-    DPI_BOUNDARY_BEGIN(cmodel_router_get_outputs) {
-        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_get_outputs");
+extern "C" void cmodel_router_req_get_outputs(unsigned long long ctx, svBitVecVal* tx_req_valid,
+                                              svBitVecVal* tx_req_flit, svBitVecVal* rx_req_ready) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_req_get_outputs) {
+        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_req_get_outputs");
         auto* r = static_cast<RouterWrap*>(_h->adapter.get());
-        const uint8_t nvc = r->num_vc();
-        RouterOutputs out{};
-        r->get_outputs(out);
+        PerPort<bool> valid{}, ready{};
+        PerPort<FlitBytes> flit{};
+        r->get_req_outputs(valid, flit, ready);
         tx_req_valid[0] = 0;
-        tx_rsp_valid[0] = 0;
-        tx_dat_valid[0] = 0;
         rx_req_ready[0] = 0;
-        rx_rsp_ready[0] = 0;
         for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
-            if (out.tx_req_valid[p]) tx_req_valid[0] |= (1u << p);
-            if (out.tx_rsp_valid[p]) tx_rsp_valid[0] |= (1u << p);
-            if (out.tx_dat_valid[p]) tx_dat_valid[0] |= (1u << p);
-            if (out.rx_req_ready[p]) rx_req_ready[0] |= (1u << p);
-            if (out.rx_rsp_ready[p]) rx_rsp_ready[0] |= (1u << p);
-            ReqFlitMarshal::pack(out.tx_req_flit[p], tx_req_flit + p * ReqFlitMarshal::VEC_WORDS);
-            RspFlitMarshal::pack(out.tx_rsp_flit[p], tx_rsp_flit + p * RspFlitMarshal::VEC_WORDS);
-            DatFlitMarshal::pack(out.tx_dat_flit[p], tx_dat_flit + p * DatFlitMarshal::VEC_WORDS);
-            pack_vc_credit(out.rx_dat_crdvalid[p], nvc, rx_dat_crdvalid + p);
+            if (valid[p]) tx_req_valid[0] |= (1u << p);
+            if (ready[p]) rx_req_ready[0] |= (1u << p);
+            ReqFlitMarshal::pack(flit[p], tx_req_flit + p * ReqFlitMarshal::VEC_WORDS);
         }
     }
-    DPI_BOUNDARY_END(cmodel_router_get_outputs);
+    DPI_BOUNDARY_END(cmodel_router_req_get_outputs);
+}
+
+extern "C" void cmodel_router_rsp_get_outputs(unsigned long long ctx, svBitVecVal* tx_rsp_valid,
+                                              svBitVecVal* tx_rsp_flit, svBitVecVal* rx_rsp_ready) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_rsp_get_outputs) {
+        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_rsp_get_outputs");
+        auto* r = static_cast<RouterWrap*>(_h->adapter.get());
+        PerPort<bool> valid{}, ready{};
+        PerPort<FlitBytes> flit{};
+        r->get_rsp_outputs(valid, flit, ready);
+        tx_rsp_valid[0] = 0;
+        rx_rsp_ready[0] = 0;
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            if (valid[p]) tx_rsp_valid[0] |= (1u << p);
+            if (ready[p]) rx_rsp_ready[0] |= (1u << p);
+            RspFlitMarshal::pack(flit[p], tx_rsp_flit + p * RspFlitMarshal::VEC_WORDS);
+        }
+    }
+    DPI_BOUNDARY_END(cmodel_router_rsp_get_outputs);
+}
+
+extern "C" void cmodel_router_dat_get_outputs(unsigned long long ctx, svBitVecVal* tx_dat_valid,
+                                              svBitVecVal* tx_dat_flit,
+                                              svBitVecVal* rx_dat_crdvalid) {
+    DPI_BOUNDARY_BEGIN(cmodel_router_dat_get_outputs) {
+        REQUIRE_HANDLE(ctx, WrapType::Router, "cmodel_router_dat_get_outputs");
+        auto* r = static_cast<RouterWrap*>(_h->adapter.get());
+        const uint8_t nvc = r->num_vc();
+        PerPort<bool> valid{};
+        PerPort<FlitBytes> flit{};
+        PerPort<VcCreditVec> crdvalid{};
+        r->get_dat_outputs(valid, flit, crdvalid);
+        tx_dat_valid[0] = 0;
+        for (std::size_t p = 0; p < ROUTER_LINK_PORTS; ++p) {
+            if (valid[p]) tx_dat_valid[0] |= (1u << p);
+            DatFlitMarshal::pack(flit[p], tx_dat_flit + p * DatFlitMarshal::VEC_WORDS);
+            pack_vc_credit(crdvalid[p], nvc, rx_dat_crdvalid + p);
+        }
+    }
+    DPI_BOUNDARY_END(cmodel_router_dat_get_outputs);
 }
 
 // DatMerge DPI handlers — NI-level DAT LOCAL-port merge point (S3a T5,
