@@ -109,7 +109,8 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     w.last = true;
     ASSERT_TRUE(nmu.axi_slave_port().push_w(w));
 
-    // Drain the req-out face. Bounded loop: pipeline is
+    // Drain the DAT-out face (S3a T6: Data-class AW/W steer to DAT, spec
+    // :348 -- legacy_sam() is data class). Bounded loop: pipeline is
     // AxiSlavePort -> Rob -> Packetize -> WormholeArbiter -> VcArbiter
     // -> QueueNocReqOut, each tick boundary forwards one stage. 32 ticks
     // is generous; any breakage stalls indefinitely and trips the loop bound.
@@ -117,7 +118,7 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     bool saw_w_flit = false;
     for (int i = 0; i < 32 && !(saw_aw_flit && saw_w_flit); ++i) {
         nmu.tick();
-        while (auto f = nmu.pop_req_flit()) {
+        while (auto f = nmu.pop_dat_req_flit()) {
             uint64_t ch = f->get_header_field("axi_ch");
             uint64_t src = f->get_header_field("src_id");
             EXPECT_EQ(src, kSrcId) << "req flit src_id should match NmuConfig.src_id";
@@ -129,12 +130,12 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
                 EXPECT_EQ(f->get_payload_field("DATA_W", "wlast"), 1u);
                 saw_w_flit = true;
             } else {
-                ADD_FAILURE() << "unexpected req flit axi_ch=" << ch << " (expected AW or W)";
+                ADD_FAILURE() << "unexpected DAT flit axi_ch=" << ch << " (expected AW or W)";
             }
         }
     }
-    ASSERT_TRUE(saw_aw_flit) << "Nmu never produced AW flit on NoC req-out face";
-    ASSERT_TRUE(saw_w_flit) << "Nmu never produced W flit on NoC req-out face";
+    ASSERT_TRUE(saw_aw_flit) << "Nmu never produced AW flit on NoC DAT-out face";
+    ASSERT_TRUE(saw_w_flit) << "Nmu never produced W flit on NoC DAT-out face";
 
     // Inject a synthetic B response flit. The NMU Depacketize tick reads
     // axi_ch + bid + bresp + buser; src_id/dst_id/flit_tail are honored but
@@ -244,7 +245,7 @@ TEST(NmuOutstandingPool, PoolEntryIsHeldUntilTheAxiSideAcceptsTheResponse) {
             push_write(nmu, kAxiId, kAddr);
         }
         nmu.tick();
-        while (auto f = nmu.pop_req_flit()) {
+        while (auto f = nmu.pop_dat_req_flit()) {
             if (f->get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
                 ++aw_flits;
                 nmu.inject_rsp_flit(bypassed_b_flit(kAxiId, kSrcId));

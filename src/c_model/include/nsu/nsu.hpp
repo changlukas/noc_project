@@ -5,10 +5,9 @@
 // side) and no addr_trans (uses incoming flit dst_id directly).
 //
 // Pipeline (req in, AXI out; REQ network -- Depacketize's REQ ingress -- and
-// DAT network -- Depacketize's second, DAT, ingress, S3a T4; DataAw/DataW/
-// DataR unwired until T6 steering, exercised only by ctest mocks until
-// then. Both ingresses demux into the SAME s1_aw_/s1_w_/s1_ar_ registers --
-// see nsu::Depacketize's class comment):
+// DAT network -- Depacketize's second, DAT, ingress, S3a T4; NMU's Packetize
+// steers DataAw/DataW here per T6. Both ingresses demux into the SAME
+// s1_aw_/s1_w_/s1_ar_ registers -- see nsu::Depacketize's class comment):
 //   external NocReqIn (REQ + DAT) ──> Depacketize (allocates meta in MetaBuffer)
 //     ──> AxiMasterPort ──> external AXI slave
 //
@@ -17,11 +16,11 @@
 //     (reads meta from MetaBuffer) ──> WormholeArbiter<NocRspOut>(2 in,
 //     no pairing) ──> VcArbiter ──> external NocRspOut
 //
-// DAT egress face (S3a T4 -- DataR; single input, so no wormhole arbiter in
-// front -- a 1-input wormhole arbiter is dead code, per stage design §5.2.
-// Packetize does not steer to it yet (T6); exercised only by ctest mocks
-// pushing directly via dat_vc_arbiter().push_flit(...) until then):
-//   ctest mock ──> VcArbiter(dat_num_vc) ──> external NocRspOut (ctest mock / DPI bridge)
+// DAT egress face (S3a T4 arbiter + T6 steering -- DataR; single input, so
+// no wormhole arbiter in front -- a 1-input wormhole arbiter is dead code,
+// per stage design §5.2. Packetize steers Data-class R here; ctest may still
+// push directly via dat_vc_arbiter().push_flit(...) to exercise it in isolation):
+//   Packetize{r} (Data class) ──> VcArbiter(dat_num_vc) ──> external NocRspOut (DPI bridge)
 //
 // Per-cycle tick order: reverse-order staged pipeline — later
 // stages drain before earlier stages fill, so a beat advances one stage/tick:
@@ -96,8 +95,9 @@ class Nsu {
 
     AxiMasterPort& axi_master_port() noexcept { return axi_master_port_; }
 
-    // DAT egress face (S3a T4). Non-const: until T6 steering wires Packetize
-    // to it, ctest mocks push R flits directly via dat_vc_arbiter().push_flit(...).
+    // DAT egress face (S3a T4 + T6 steering). Non-const: Packetize feeds this
+    // (Data-class R); ctest may still push R flits directly via
+    // dat_vc_arbiter().push_flit(...) to exercise the arbiter in isolation.
     VcArbiter& dat_vc_arbiter() noexcept { return dat_vc_arbiter_; }
 
     void tick();
@@ -151,7 +151,8 @@ class Nsu {
     //   4. dat_vc_arbiter_ wraps downstream_dat_rsp_ (independent DAT egress
     //      face, S3a T4; no wormhole arbiter -- single input, per §5.2).
     //   5. meta_buffer_ (no upstream dep).
-    //   6. packetize_ takes wormhole_arbiter_.input(0/1) + meta_buffer_.
+    //   6. packetize_ takes wormhole_arbiter_.input(0/1) (Narrow R + B, RSP),
+    //      dat_vc_arbiter_ (Data R, DAT; T6 steering), + meta_buffer_.
     //   7. depacketize_ takes upstream_req_ + upstream_dat_req_ + meta_buffer_.
     //   8. axi_master_port_ takes depacketize_ + packetize_.
     NsuConfig cfg_;
@@ -206,7 +207,8 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
                         cfg_.wormhole_per_input_depth),
       dat_vc_arbiter_(detail::make_dat_vc_arbiter(cfg_, downstream_dat_rsp_)),
       meta_buffer_(cfg_.port_params.meta_buffer_max_outstanding),
-      packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), meta_buffer_, cfg_.src_id),
+      packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), dat_vc_arbiter_,
+                 meta_buffer_, cfg_.src_id),
       depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids,
                    upstream_dat_req_),
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
@@ -235,8 +237,9 @@ inline void Nsu::tick() {
     //   S1: depacketize_.tick() decodes a new flit into s1_* registers.
     wormhole_arbiter_.tick();  // RSP S3a: drain S2→S3 boundary to VcArbiter
     vc_arbiter_.tick();        // RSP S3b: drain VcArbiter pending to NoC
-    // DAT egress (S3a T4): independent network, own drain; unwired until T6
-    // steering feeds it, so this is a no-op until a ctest mock pushes into it.
+    // DAT egress (S3a T4 + T6 steering): independent network, own drain;
+    // Packetize feeds this with Data-class R below (S2), same reverse-order
+    // arbiter-final-stage property as the RSP wormhole/VC pair above.
     dat_vc_arbiter_.tick();
     packetize_.tick();        // RSP S2: read S1 regs, push to S2→S3 boundary
     axi_master_port_.tick();  // RSP S1 + REQ S2: bounded B/R accept + req drain

@@ -19,11 +19,10 @@
 // tied to rx_req_ready = constant true, same "unbounded ingress queue"
 // simplification as Nmu's RSP ingress.
 //
-// DAT face (credit, unchanged mechanism, newly wired to real DPI in T5):
-// mirrors the pre-T5 REQ/RSP credit pattern exactly, just under the
-// tx_dat_*/rx_dat_* names and NsuStandalone's dat_* accessors. Steering (T6)
-// has not moved yet, so this face carries no real traffic in co-sim yet, but
-// the wires/DPI context are alive and idle.
+// DAT face (credit, unchanged mechanism, wired to real DPI in T5): mirrors
+// the pre-T5 REQ/RSP credit pattern exactly, just under the tx_dat_*/rx_dat_*
+// names and NsuStandalone's dat_* accessors. Packetize steers Data-class R
+// here (T6), so this face carries real traffic in co-sim.
 //
 // Wire interception:
 //   REQ/DAT req side: inject_req_flit()/inject_dat_req_flit() on

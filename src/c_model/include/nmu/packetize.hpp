@@ -3,6 +3,14 @@
 // FIFO (populated by push_aw, consumed by W beats with wlast=1). Implements
 // RequestPacketizer (AW / W / AR only; NMU never emits responses).
 //
+// Network steering (S3a T6, spec :348 axi_ch -> network map): Narrow-class
+// AW/W/AR and Data-class AR all push to the REQ-face outs (aw_out_/w_out_/
+// ar_out_); Data-class AW/W push to the DAT-face outs (dat_aw_out_/
+// dat_w_out_) instead -- DataAr stays on REQ, the only asymmetry in the map.
+// Both AW/W of one Data-class worm land on the SAME network so the caller's
+// WormholeArbiter {AW,W} lock (nmu.hpp) spans the whole worm; splitting them
+// across networks was the S3a stage design §1 correctness hazard this fixes.
+//
 // Header fields per push:
 //   src_id      — constructor arg (NMU tile coord, fixed per instance)
 //   dst_id      — direct-path Packetizer interface: derived from b.addr via
@@ -59,9 +67,19 @@ class NmuPacketizeSink {
 
 class Packetize : public RequestPacketizer, public NmuPacketizeSink {
   public:
+    // dat_aw_out/dat_w_out: DAT face for Data-class AW/W (S3a T6 steering,
+    // spec :348 network map). AR always rides ar_out_ (REQ) regardless of
+    // class -- DataAr stays on REQ; only DataAw/DataW move to DAT.
     Packetize(router::NocReqOut& aw_out, router::NocReqOut& w_out, router::NocReqOut& ar_out,
-              uint8_t src_id, addr_trans::SamTable sam)
-        : aw_out_(aw_out), w_out_(w_out), ar_out_(ar_out), src_id_(src_id), sam_(std::move(sam)) {}
+              router::NocReqOut& dat_aw_out, router::NocReqOut& dat_w_out, uint8_t src_id,
+              addr_trans::SamTable sam)
+        : aw_out_(aw_out),
+          w_out_(w_out),
+          ar_out_(ar_out),
+          dat_aw_out_(dat_aw_out),
+          dat_w_out_(dat_w_out),
+          src_id_(src_id),
+          sam_(std::move(sam)) {}
 
     // ---- RequestPacketizer interface ----
     bool push_aw(const axi::AwBeat& b) override {
@@ -92,6 +110,8 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     router::NocReqOut& aw_out_;
     router::NocReqOut& w_out_;
     router::NocReqOut& ar_out_;
+    router::NocReqOut& dat_aw_out_;
+    router::NocReqOut& dat_w_out_;
     uint8_t src_id_;
     addr_trans::SamTable sam_;
 
@@ -162,7 +182,8 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_payload_field("AW", "awregion", b.region);
     f.set_payload_field("AW", "awqos", b.qos);
     f.set_payload_field("AW", "awuser", payload_user);
-    if (!aw_out_.push_flit(f)) return false;
+    router::NocReqOut& out = is_data ? dat_aw_out_ : aw_out_;
+    if (!out.push_flit(f)) return false;
     w_meta_fifo_.push_back({meta.dst_id, meta.ordering_req, meta.ordering_tag, meta.cls,
                             meta.local_addr, b.len, b.size, b.burst, /*beat_counter=*/0});
     return true;
@@ -206,7 +227,8 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
         f.set_payload_bytes(ch, "wdata", b.data.data() + lane * axi::NARROW_DATA_BYTES,
                             ni::width::NOC_NARROW_DATA_WIDTH);
     }
-    if (!w_out_.push_flit(f)) return false;
+    router::NocReqOut& out = is_data ? dat_w_out_ : w_out_;
+    if (!out.push_flit(f)) return false;
     ++meta.beat_counter;
     if (b.last) w_meta_fifo_.pop_front();
     return true;

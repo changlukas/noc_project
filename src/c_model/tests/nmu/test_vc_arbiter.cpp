@@ -385,7 +385,7 @@ TEST(NmuVcArbiter, EnabledModeMixedWith_SingleVcTests) {
     // 16x16 uniform, no rebase: dst = addr/4GB, matching the pre-SAM xy_route mapping.
     auto sam = ni::cmodel::nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
     ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1), wh_arb.input(2),
-                                   /*src_id=*/0x12, sam);
+                                   wh_arb.input(0), wh_arb.input(1), /*src_id=*/0x12, sam);
 
     ni::cmodel::axi::AwBeat aw{};
     aw.id = 0x07;
@@ -429,7 +429,7 @@ TEST(NmuVcArbiter, WHeaderFlitTailMatchesWlast) {
     // 16x16 uniform, no rebase: dst = addr/4GB, matching the pre-SAM xy_route mapping.
     auto sam = ni::cmodel::nmu::addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
     ni::cmodel::nmu::Packetize pkt(wh_arb.input(0), wh_arb.input(1), wh_arb.input(2),
-                                   /*src_id=*/0x12, sam);
+                                   wh_arb.input(0), wh_arb.input(1), /*src_id=*/0x12, sam);
 
     ni::cmodel::axi::AwBeat aw{};
     aw.id = 0x07;

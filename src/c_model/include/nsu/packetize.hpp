@@ -15,6 +15,11 @@
 //   escape to NoC until the next tick — no same-tick Packetize→NoC path.
 //
 // Implements ResponsePacketizer (B/R only; NSU never emits requests).
+//
+// Network steering (S3a T6, spec :348 axi_ch -> network map): B (both
+// Narrow and Data class) always pushes to b_out_ (RSP) -- B never splits,
+// per the stage design §2 write-path note. R pushes to r_out_ (RSP) for
+// Narrow class, dat_r_out_ (DAT) for Data class -- the only asymmetry.
 #include "axi/types.hpp"
 #include "flit.hpp"
 #include "router/rsp_out.hpp"
@@ -29,8 +34,11 @@ namespace ni::cmodel::nsu {
 
 class Packetize : public ResponsePacketizer {
   public:
-    Packetize(router::NocRspOut& b_out, router::NocRspOut& r_out, MetaBuffer& meta, uint8_t src_id)
-        : b_out_(b_out), r_out_(r_out), meta_(meta), src_id_(src_id) {}
+    // dat_r_out: DAT face for Data-class R (S3a T6 steering). B has no DAT
+    // counterpart -- b_out_ (RSP) is the only B sink, both classes.
+    Packetize(router::NocRspOut& b_out, router::NocRspOut& r_out, router::NocRspOut& dat_r_out,
+              MetaBuffer& meta, uint8_t src_id)
+        : b_out_(b_out), r_out_(r_out), dat_r_out_(dat_r_out), meta_(meta), src_id_(src_id) {}
 
     // ---- ResponsePacketizer interface (S1 accept) ----
     // Accepts ≤1 beat/channel into the S1 stage register.
@@ -51,6 +59,7 @@ class Packetize : public ResponsePacketizer {
   private:
     router::NocRspOut& b_out_;
     router::NocRspOut& r_out_;
+    router::NocRspOut& dat_r_out_;
     MetaBuffer& meta_;
     uint8_t src_id_;
 
@@ -159,7 +168,8 @@ inline void Packetize::tick() {
             std::abort();
         }
         Flit f = build_r_flit(b, *meta_opt, src_id_, meta_.read_beat_index(b.id));
-        if (r_out_.push_flit(f)) {
+        router::NocRspOut& r_sink = (meta_opt->cls == AxiClass::Data) ? dat_r_out_ : r_out_;
+        if (r_sink.push_flit(f)) {
             s1_r_.take();
             meta_.advance_read_beat(b.id);
             if (b.last) meta_.commit_read(b.id);  // commit on rlast only (also resets beat index)

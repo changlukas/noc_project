@@ -56,7 +56,7 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
     MetaBuffer mb(4);
     mb.allocate_write(0x05,
                       {/*src=*/0x12, /*upstream_id=*/0x05, /*ordering_req=*/1, /*ordering_tag=*/3});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));
     // S1 occupied; no flit emitted yet.
@@ -84,7 +84,7 @@ TEST(NsuPacketize, TickAssertsOnBWithoutMatchingMeta) {
         "(pipeline protocol violation — B without prior AW allocate)");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));  // no meta for id=0x05
     EXPECT_DEATH(pkt.tick(), ".*");
 }
@@ -96,7 +96,7 @@ TEST(NsuPacketize, PushBBackpressureWhenS1Full) {
     MetaBuffer mb(4);
     mb.allocate_write(0x05, {0x12, 0x05, 0, 0});
     mb.allocate_write(0x06, {0x20, 0x06, 0, 0});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));   // S1 now occupied
     EXPECT_FALSE(pkt.push_b(make_b(0x06)));  // S1 full → backpressure
@@ -114,7 +114,7 @@ TEST(NsuPacketize, PushBNoCommitOnNocFull) {
     RspCapture r_cap;
     MetaBuffer mb(4);
     mb.allocate_write(0x05, {0x12, 0x05, 0, 0});
-    Packetize pkt(noc.rsp_out(), r_cap, mb, kNsuSrcId);
+    Packetize pkt(noc.rsp_out(), r_cap, r_cap, mb, kNsuSrcId);
 
     // B(0x05): push to S1, tick() → goes to noc (cap=1, now full), meta consumed.
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));
@@ -145,7 +145,7 @@ TEST(NsuPacketize, PushRMultiBeatPeekUntilRLast) {
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_read(0x03, {0x12, 0x03, 0, 5});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ false)));
     pkt.tick();
@@ -168,7 +168,7 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_read(0x03, {0x12, 0x03, 0, 0});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true, axi::Resp::SLVERR)));
     pkt.tick();
     auto f = r_cap.pop();
@@ -193,7 +193,7 @@ TEST(NsuPacketize, NarrowRUnalignedAddrExtractsCorrectLane) {
     mb.allocate_read(0x03, {/*src_id=*/0x12, /*upstream_id=*/0x03, /*ordering_req=*/0,
                             /*ordering_tag=*/0, AxiClass::Narrow, kUnalignedAddr, /*len=*/0,
                             /*size=*/2, axi::Burst::INCR});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
 
     axi::RBeat r{};
     r.id = 0x03;
@@ -227,7 +227,7 @@ TEST(NsuPacketize, DataClassMetaStampsDataAxiChAndChannel) {
                              /*ordering_tag=*/0, /*cls=*/AxiClass::Data});
     mb.allocate_read(0x03, {/*src=*/0x12, /*upstream_id=*/0x03, /*ordering_req=*/0,
                             /*ordering_tag=*/0, /*cls=*/AxiClass::Data});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
 
     ASSERT_TRUE(pkt.push_b(make_b(0x05)));
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true)));
@@ -263,7 +263,7 @@ TEST(NsuPacketize, MultiBeatR_AllFlitsCarrySameOrderingTag) {
     constexpr uint8_t kOrderingTag = 7;
     mb.allocate_read(0x03, {/*src=*/0x12, /*upstream_id=*/0x03, /*ordering_req=*/1,
                             /*ordering_tag=*/kOrderingTag});
-    Packetize pkt(b_cap, r_cap, mb, kNsuSrcId);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
 
     // Three-beat burst: push_r + tick emits one flit per step.
     ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ false)));

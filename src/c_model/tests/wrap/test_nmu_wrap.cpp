@@ -226,19 +226,19 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     adapter.tick();
     adapter.get_outputs(out);
 
-    // Drain the REQ egress face for the AW flit (bounded loop mirrors
-    // test_nmu.cpp's WriteRoundTrip pipeline-drain pattern). tx_req_ready
-    // must be held high — REQ is ready/valid now, so the flit can only
-    // transfer on a cycle the downstream (this mock) asserts ready.
+    // Drain the DAT egress face for the AW flit (S3a T6: Data-class AW/W
+    // steer to DAT, spec :348 -- the default SAM entry above has no "space"
+    // annotation, so it is Data class). DAT is credit-flow (init() pre-seeds
+    // NMU_ARBITER_FIFO_DEPTH toward the DatMergeWrap stage), so no external
+    // credit pulse is needed for one flit; tx_req_ready is irrelevant here.
     bool saw_aw_flit = false;
     in = NmuInputs{};
-    in.tx_req_ready = true;
     for (int i = 0; i < 32 && !saw_aw_flit; ++i) {
         adapter.set_inputs(in);
         adapter.tick();
         adapter.get_outputs(out);
-        if (out.tx_req_valid) {
-            auto flit = flit_from_bytes(out.tx_req_flit);
+        if (out.tx_dat_valid) {
+            auto flit = flit_from_bytes(out.tx_dat_flit);
             if (flit.get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
                 EXPECT_EQ(flit.get_header_field("dst_id"), 0x01u);
                 EXPECT_EQ(flit.get_payload_field("AW", "awaddr"), 0x40ull);

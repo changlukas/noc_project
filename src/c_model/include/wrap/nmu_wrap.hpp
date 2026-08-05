@@ -26,12 +26,11 @@
 //     shortcut specific to this stage (DAT's ingress already behaves this
 //     way, just without needing a ready wire since it's credit-based).
 //
-// DAT face (credit, unchanged mechanism, newly wired to real DPI in T5):
-//   mirrors the pre-T5 REQ/RSP credit pattern exactly, just under the
-//   tx_dat_*/rx_dat_* names and NmuStandalone's dat_* accessors. Steering
-//   (T6) has not moved yet -- Packetize still emits everything on REQ/RSP, so
-//   this face carries no real traffic in co-sim yet, but the wires/DPI
-//   context are alive and idle.
+// DAT face (credit, unchanged mechanism, wired to real DPI in T5): mirrors
+//   the pre-T5 REQ/RSP credit pattern exactly, just under the
+//   tx_dat_*/rx_dat_* names and NmuStandalone's dat_* accessors. Packetize
+//   steers Data-class AW/W here (T6), so this face carries real traffic in
+//   co-sim.
 //
 // Wire interception:
 //   AXI slave side:  push_aw/push_w/push_ar API on axi_slave_port(); ready

@@ -14,9 +14,9 @@
 namespace ni::cmodel::nmu {
 
 // NMU-side response depacketizer. Stateful demux: tick() pulls from two
-// independent NocRspIn ingresses -- RSP (NarrowB/NarrowR/DataB, today's
-// shape) and DAT (DataR, S3a T4; unwired until T6 steering, exercised only
-// by ctest mocks until then) -- and routes B/R flits into the SAME
+// independent NocRspIn ingresses -- RSP (NarrowB/NarrowR/DataB) and DAT
+// (DataR, S3a T4 ingress + T6 steering: NSU's Packetize steers Data-class R
+// here) -- and routes B/R flits into the SAME
 // per-channel deques (S3a stage design §5.2: "second ingress + per-network
 // pending_"). Upstream port calls pop_b/pop_r to serve from those queues.
 //

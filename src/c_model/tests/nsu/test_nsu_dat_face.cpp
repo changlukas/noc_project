@@ -4,10 +4,11 @@
 // a second Depacketize ingress for DAT (AW/W) demuxing into the SAME shared
 // s1_aw_/s1_w_/s1_ar_ registers as REQ, and a standalone VcArbiter for DAT
 // egress (R) with no wormhole arbiter in front (single input -- a 1-input
-// wormhole arbiter would be dead code). Steering (T6) has not moved yet —
-// Packetize still emits everything on RSP — so this file drives the DAT
-// face directly via NsuStandalone's queue-backed mocks (the same pattern
-// nsu_wrap.hpp will use for the real DPI boundary, T5).
+// wormhole arbiter would be dead code). Packetize now steers Data-class R
+// here for real (T6) — this file instead drives the DAT face directly via
+// NsuStandalone's queue-backed mocks, exercising the arbiter/ingress
+// mechanics in isolation from Packetize (the same pattern nsu_wrap.hpp uses
+// at the real DPI boundary, T5).
 //
 // Covers: DAT face push/pop via mocks, per-network face independence
 // (backpressure one face, the other still flows), and that the REQ and DAT
@@ -102,13 +103,14 @@ Flit make_data_r_flit(uint8_t rid) {
 }  // namespace
 
 // DAT face push/pop via mocks: push a synthetic DataR flit directly into
-// dat_vc_arbiter() (no Packetize involved -- steering is T6; no wormhole
-// arbiter in front either, per §5.2's "single input" ruling), tick, drain
-// via pop_dat_rsp_flit().
+// dat_vc_arbiter() (bypassing Packetize, to isolate the arbiter's own
+// mechanics from steering; no wormhole arbiter in front either, per §5.2's
+// "single input" ruling), tick, drain via pop_dat_rsp_flit().
 TEST(NsuDatFace, EgressPushPopViaMock) {
     SCENARIO(
-        "NSU DAT egress: push a DataR flit directly into dat_vc_arbiter() (mocking what "
-        "Packetize will do post-T6). pop_dat_rsp_flit() must return it with axi_ch/rid intact.");
+        "NSU DAT egress: push a DataR flit directly into dat_vc_arbiter() (bypassing Packetize's "
+        "own real steering, to test the arbiter in isolation). pop_dat_rsp_flit() must return it "
+        "with axi_ch/rid intact.");
 
     NsuStandalone nsu(make_cfg(kNsuSrcId));
     ASSERT_TRUE(nsu.nsu().dat_vc_arbiter().push_flit(make_data_r_flit(0x09)));

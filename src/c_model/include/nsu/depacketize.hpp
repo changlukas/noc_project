@@ -17,9 +17,10 @@
 namespace ni::cmodel::nsu {
 
 // NSU-side request depacketizer. Stateful demux: tick() pulls flits from two
-// independent NocReqIn ingresses -- REQ (today's shape) and DAT (S3a T4;
-// unwired until T6 steering, exercised only by ctest mocks until then) --
-// reads axi_ch, and parks the flit in the SAME per-channel S1 stage register
+// independent NocReqIn ingresses -- REQ and DAT (S3a T4 ingress + T6
+// steering: NMU's Packetize steers Data-class AW/W here; DAT never carries
+// Narrow* or DataAr -- see drain_ingress_'s defensive assert) -- reads
+// axi_ch, and parks the flit in the SAME per-channel S1 stage register
 // (S3a stage design §5.2: "second ingress + per-network pending_; s1_aw_/
 // s1_w_/s1_ar_ stay shared" -- both classes already share s1_w_ today).
 // tick() touches no MetaBuffer state and decodes nothing but W.
@@ -128,7 +129,7 @@ class Depacketize : public RequestDepacketizer {
     static axi::AwBeat decode_aw(const Flit& f);
     axi::WBeat decode_w(const Flit& f);
     static axi::ArBeat decode_ar(const Flit& f);
-    void drain_ingress_(router::NocReqIn& src, std::optional<Flit>& pending);
+    void drain_ingress_(router::NocReqIn& src, std::optional<Flit>& pending, bool is_dat_ingress);
 };
 
 inline axi::AwBeat Depacketize::decode_aw(const Flit& f) {
@@ -204,7 +205,8 @@ inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
 // channel) but cannot self-cycle: no ingress resource waits on a downstream
 // that waits back on it. Given the slave eventually drains, `pending` always
 // clears.
-inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Flit>& pending) {
+inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Flit>& pending,
+                                        bool is_dat_ingress) {
     while (true) {
         Flit f;
         if (pending) {
@@ -215,6 +217,14 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
             f = *opt;
         }
         uint64_t ch = f.get_header_field("axi_ch");
+        // DAT carries DataAw/DataW only (spec :348; DataAr and every Narrow*
+        // channel stay on REQ). A Narrow* AW/W arriving here would corrupt
+        // w_addr_fifo_'s FIFO-order contiguity invariant (its front entry
+        // must always be the REQ-ingress narrow AW currently being served);
+        // fail loud instead of silently mis-pairing narrow lanes.
+        assert((!is_dat_ingress || ch == ni::AXI_CH_DataAw || ch == ni::AXI_CH_DataW) &&
+               "nsu::Depacketize::drain_ingress_: DAT ingress delivered a channel outside "
+               "{DataAw, DataW} -- spec :348 keeps Narrow*/DataAr off DAT");
         switch (ch) {
             case ni::AXI_CH_NarrowAw:
             case ni::AXI_CH_DataAw:
@@ -283,8 +293,8 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
 // tick(): drain both physical ingresses (REQ, DAT) into the shared S1
 // registers. See the class comment for why sharing is correct.
 inline void Depacketize::tick() {
-    drain_ingress_(req_in_, pending_req_);
-    drain_ingress_(dat_req_in_, pending_dat_);
+    drain_ingress_(req_in_, pending_req_, /*is_dat_ingress=*/false);
+    drain_ingress_(dat_req_in_, pending_dat_, /*is_dat_ingress=*/true);
 }
 
 // pop_aw/pop_w/pop_ar: S2 consumer interface — take from the S1 register.

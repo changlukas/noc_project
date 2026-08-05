@@ -6,6 +6,7 @@ add_cmodel_test(test_nmu_wrap test_nmu_wrap.cpp)
 target_link_libraries(test_nmu_wrap PRIVATE yaml-cpp::yaml-cpp)
 
 add_cmodel_test(test_dat_merge_wrap)
+target_link_libraries(test_dat_merge_wrap PRIVATE yaml-cpp::yaml-cpp)
 
 
 # test_cmodel_dpi — DPI session state-machine / lifecycle test.

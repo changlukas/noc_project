@@ -72,7 +72,7 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
                                   kAwInputDepth);
     // Bridge always drives push_*_with_meta (never push_aw/push_ar), so the
     // direct-path interface's SamTable is never touched here — default is fine.
-    Packetize pkt(wh.input(0), wh.input(1), wh.input(2), kSrcId, {});
+    Packetize pkt(wh.input(0), wh.input(1), wh.input(2), wh.input(0), wh.input(1), kSrcId, {});
     NmuReqS1Bridge bridge;
 
     auto step = [&] {
@@ -116,7 +116,7 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
 TEST(NmuReqBridge, PushWBackpressuresOnEmptyMeta) {
     SCENARIO("Packetize::push_w returns false when w_meta_fifo_ is empty.");
     ReqCapture aw_out, w_out, ar_out;
-    Packetize pkt(aw_out, w_out, ar_out, kSrcId, {});  // push_w never touches sam_
+    Packetize pkt(aw_out, w_out, ar_out, aw_out, w_out, kSrcId, {});  // push_w never touches sam_
     EXPECT_FALSE(pkt.push_w(make_w(/*last=*/true)))
         << "W with no admitted AW must backpressure, not abort";
 }

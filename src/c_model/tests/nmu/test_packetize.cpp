@@ -68,7 +68,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
         "flit "
         "(AW starts wormhole packet)");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     // Legacy test: only verifies packetize stamps src + axi_ch + flit_tail + awid +
     // awaddr. dst_id derivation is covered by WMetaFifoInheritsAwDst below.
     // Address is the low 40 bits of the original 0xDEADBEEFCAFEBABE pattern:
@@ -91,7 +91,7 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
 TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
     SCENARIO("NMU Packetize: W flit inherits dst_id from preceding AW via W-meta FIFO");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     // addr 0x3400000000 → dst = (0x3400000000 >> 32) & 0xFF = 0x34
     ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x3400000000)));
     ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));
@@ -106,7 +106,7 @@ TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
 TEST(NmuPacketize, MultiOutstandingAwInterleavedW) {
     SCENARIO("NMU Packetize: 2 outstanding AWs (different dst), each W inherits its own AW's dst");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     // addr 0x3400000000 → dst=0x34;  addr 0x5600000000 → dst=0x56.
     ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x3400000000)));
     ASSERT_TRUE(pkt.push_aw(make_aw(0x06, 0x5600000000)));
@@ -129,7 +129,7 @@ TEST(NmuPacketize, WHeaderFlitTailMatchesWlast) {
         "(FlooNoC wormhole packet boundary semantic; "
         "fixes pre-existing bug where every W flit stamped header.flit_tail=1)");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     ASSERT_TRUE(pkt.push_aw(make_aw(0x07, 0x340000, /*len*/ 2)));
     ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ false)));
     ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ false)));
@@ -151,7 +151,7 @@ TEST(NmuPacketize, PushAwFailsOnNocFull) {
         "NMU Packetize: push_aw returns false when NoC req channel is full; succeeds after drain");
     ChannelModel noc(/*req*/ 1, /*rsp*/ 16);
     ReqCapture w_cap, ar_cap;
-    Packetize pkt(noc.req_out(), w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, legacy_sam());
     ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
     EXPECT_FALSE(pkt.push_aw(make_aw(1, 0)));
     noc.req_in().pop_flit();
@@ -163,7 +163,7 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
         "NMU Packetize: every AW payload field (id/addr/len/size/burst/cache/lock/prot/...) "
         "bit-perfect");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     // Address is the low 40 bits of the original 0x123456789ABCDEF0 ascending
     // pattern: the legacy SAM covers addr < 2^40 (256 tiles x 4GB).
     auto aw = make_aw(/*id*/ 0xAB, /*addr*/ 0x789ABCDEF0ull, /*len*/ 0xFF);
@@ -195,7 +195,7 @@ TEST(NmuPacketize, AwuserStripsCollectiveBitsWhenZero) {
         "and never reaches the AW payload; zero collective bits pass through unaffected, only "
         "AWUSER[7:0] lands in the payload's awuser field");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
 
     auto aw = make_aw(/*id*/ 0x03, /*addr*/ 0x340000);
     aw.user = 0x5Au;  // no collective bits set
@@ -211,7 +211,7 @@ TEST(NmuPacketizeDeath, NonzeroCollectiveOpAborts) {
         "it can't wedge the S1 stage indistinguishably from congestion. Collective support lands "
         "in S4");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     auto aw = make_aw(/*id*/ 0x03, /*addr*/ 0x340000);
     aw.user = (uint64_t{1} << 8) | 0x5Au;  // collective_op=1, user-defined=0x5A
     EXPECT_DEATH(pkt.push_aw(aw), "collective_op/collective_mask");
@@ -222,7 +222,7 @@ TEST(NmuPacketizeDeath, NonzeroCollectiveMaskAborts) {
         "NMU Packetize: nonzero AWUSER collective_mask alone (collective_op=0) also aborts — "
         "the reject checks AWUSER[57:8] as a whole, not collective_op in isolation");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     auto aw = make_aw(/*id*/ 0x03, /*addr*/ 0x340000);
     aw.user = (uint64_t{0xFFFFFFFFFFFFull} << 10) | 0x5Au;  // nonzero collective_mask only
     EXPECT_DEATH(pkt.push_aw(aw), "collective_op/collective_mask");
@@ -233,7 +233,7 @@ TEST(NmuPacketize, AwqosRoundTrip) {
         "NMU Packetize: awqos=0xA set on AwBeat packs into the AW payload field "
         "(AWQOS_LSB=81, AWQOS_WIDTH=4); flit get_payload_field recovers same value");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     auto aw = make_aw(/*id*/ 0x01, /*addr*/ 0x340000);
     aw.qos = 0xA;
     ASSERT_TRUE(pkt.push_aw(aw));
@@ -246,7 +246,7 @@ TEST(NmuPacketize, ArqosRoundTrip) {
         "NMU Packetize: arqos=0xA set on ArBeat packs into the AR payload field "
         "(ARQOS_LSB=97, ARQOS_WIDTH=4); flit get_payload_field recovers same value");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     auto ar = make_ar(/*id*/ 0x02, /*addr*/ 0x990000);
     ar.qos = 0xA;
     ASSERT_TRUE(pkt.push_ar(ar));
@@ -259,7 +259,7 @@ TEST(NmuPacketize, WPayloadBitPerfect) {
         "NMU Packetize: W payload (wdata/wstrb/wlast/wuser) round-trips bit-perfect through flit "
         "(legacy_sam() is memory space -> data class -> DATA_W)");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
     auto w = make_w(0xDEADBEEF, /*last*/ true);
     w.user = 0xAB;
@@ -282,7 +282,7 @@ TEST(NmuPacketize, NarrowWUnalignedAddrExtractsCorrectLane) {
         "lane re-anchor table, bypassing AxiMaster's own aligned-down AW/first-beat-mask "
         "machinery entirely (push_aw_with_meta takes local_addr directly)");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId,
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId,
                   addr_trans::SamTable{});  // sam_ unused by *_with_meta
 
     axi::AwBeat b = make_aw(/*id=*/0x09, /*addr=*/0);  // addr unused: meta.local_addr supplies it
@@ -317,7 +317,7 @@ TEST(NmuPacketize, ArEncodesAxiChAndOrderingTag) {
         "defaults to "
         "0");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     // addr 0x9900004000 → dst = (0x9900004000 >> 32) & 0xFF = 0x99, rebased
     // local araddr = 0x4000 (addr - base 0x9900000000). Direct-path interface
     // auto-fills ordering_req/ordering_tag = 0; Rob-driven path uses push_ar_with_meta
@@ -335,7 +335,7 @@ TEST(NmuPacketize, ArEncodesAxiChAndOrderingTag) {
 TEST(NmuPacketize, RsvdAndDisabledFieldsZero) {
     SCENARIO("NMU Packetize: rsvd/disabled header fields all zero");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, kSrcId, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     ASSERT_TRUE(pkt.push_aw(make_aw(0, 0)));
     auto f = *aw_cap.pop();
     EXPECT_TRUE(f.check_padding_is_zero());
@@ -346,7 +346,7 @@ TEST(NmuPacketize, PushAwWithMeta_OverrideDefault) {
         "NMU Packetize: push_aw_with_meta overrides dst_id/local_addr/ordering_req/ordering_tag "
         "from meta");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, /*src=*/0x01, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, /*src=*/0x01, legacy_sam());
     axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100);  // addr → dst=0 by default
     ni::cmodel::nmu::AwHeaderMeta meta{/*dst_id=*/0x42,
                                        /*local_addr=*/0x9999,
@@ -366,7 +366,7 @@ TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
         "dst_id "
         "(from the table) and the rebased local_addr");
     ReqCapture aw_cap, w_cap, ar_cap;
-    Packetize pkt(aw_cap, w_cap, ar_cap, /*src=*/0x01, legacy_sam());
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, /*src=*/0x01, legacy_sam());
     // addr 0x100000100 → tile 1 (0x100000100 / 4GB = 1); rebased -> local 0x100
     axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100000100);
     ASSERT_TRUE(pkt.push_aw(b));  // direct-path interface auto-computes
@@ -382,7 +382,7 @@ TEST(NmuPacketize, SamTranslateRebasesAddrAndSetsDstFromTable) {
     ReqCapture aw_cap, w_cap, ar_cap;
     // Single packed tile at (2,1) -> dst_id 0x12, base 0 (only entry in the list).
     auto sam = addr_trans::SamTable::packed({{2, 1, 0x100000000ull}});
-    Packetize pkt(aw_cap, w_cap, ar_cap, /*src_id=*/0, sam);
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, /*src_id=*/0, sam);
     axi::AwBeat aw{};
     aw.addr = 0x40ull;
     aw.id = 5;

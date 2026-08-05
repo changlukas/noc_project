@@ -8,13 +8,13 @@
 //     ──> WormholeArbiter<NocReqOut>(3 in, pairing {{0,1}}) ──> VcArbiter
 //     ──> external NocReqOut (ChannelModel or DPI bridge)
 //
-// DAT egress face (S3a T4 -- DataAw/DataW; per-network arbiter pair, {AW,W}
-// lock independent of the REQ face's lock so a DAT AW never blocks a REQ W
-// and vice versa. Steering (T6) has not moved yet: Packetize still emits
-// everything on the REQ face above; this pair is exercised only by ctest
-// mocks pushing directly into dat_wormhole_arbiter().input(0/1) until then):
-//   ctest mock ──> WormholeArbiter<NocReqOut>(2 in, pairing {{0,1}}) ──>
-//     VcArbiter(dat_num_vc) ──> external NocReqOut (ctest mock / DPI bridge)
+// DAT egress face (S3a T4 arbiter pair + T6 steering -- DataAw/DataW; per-
+// network arbiter pair, {AW,W} lock independent of the REQ face's lock so a
+// DAT AW never blocks a REQ W and vice versa. Packetize steers Data-class
+// AW/W here (spec :348); ctest may still push directly into
+// dat_wormhole_arbiter().input(0/1) to exercise the arbiter in isolation):
+//   Packetize{aw,w} (Data class) ──> WormholeArbiter<NocReqOut>(2 in, pairing
+//     {{0,1}}) ──> VcArbiter(dat_num_vc) ──> external NocReqOut (DPI bridge)
 //
 // Pipeline (rsp path, RSP network -- NarrowB/NarrowR/DataB):
 //   external NocRspIn ──> Depacketize ──> Rob ──> AxiSlavePort
@@ -22,7 +22,7 @@
 //
 // DAT ingress (S3a T4 -- DataR; Depacketize's second physical ingress,
 // draining into the SAME b_q_/r_q_ queues as the RSP ingress -- see
-// nmu::Depacketize's class comment):
+// nmu::Depacketize's class comment. NSU's Packetize steers DataR here per T6):
 //   external NocRspIn ──> Depacketize (second ingress) ──> Rob ──> AxiSlavePort
 //
 // Per-cycle tick order (exact sequence in Nmu::tick()):
@@ -202,9 +202,11 @@ class Nmu {
     const Rob& rob() const noexcept { return rob_; }
     const VcArbiter& vc_arbiter() const noexcept { return vc_arbiter_; }
 
-    // DAT egress face (S3a T4). Non-const: until T6 steering wires Packetize
-    // to it, ctest mocks push AW/W flits directly via
-    // dat_wormhole_arbiter().input(0/1).push_flit(...).
+    // DAT egress face (S3a T4 + T6 steering). Non-const: Packetize feeds this
+    // (Data-class AW/W, wired via dat_wormhole_arbiter_.input(0/1) in the
+    // ctor init list below); ctest may still push flits directly via
+    // dat_wormhole_arbiter().input(0/1).push_flit(...) to exercise the
+    // arbiter in isolation.
     router::WormholeArbiter<router::NocReqOut>& dat_wormhole_arbiter() noexcept {
         return dat_wormhole_arbiter_;
     }
@@ -288,10 +290,11 @@ class Nmu {
     //   2. vc_arbiter_ wraps downstream_req_.
     //   3. wormhole_arbiter_ wraps vc_arbiter_ as its Downstream.
     //   4. dat_vc_arbiter_ wraps downstream_dat_req_ (independent DAT egress
-    //      face, S3a T4; unwired until T6 steering, exercised by ctest mocks).
+    //      face, S3a T4).
     //   5. dat_wormhole_arbiter_ wraps dat_vc_arbiter_ (own {AW,W} lock, per §5.2).
     //   6. depacketize_ wraps downstream_rsp_ + downstream_dat_rsp_ (req path independent).
-    //   7. packetize_ takes wormhole_arbiter_.input(0/1/2) (req path).
+    //   7. packetize_ takes wormhole_arbiter_.input(0/1/2) (Narrow AW/W/AR + Data
+    //      AR, REQ) and dat_wormhole_arbiter_.input(0/1) (Data AW/W, DAT; T6 steering).
     //   8. req_s1_bridge_ stages ROB-admitted requests before Packetize.
     //   9. rob_ takes req_s1_bridge_ + depacketize_.
     //   9. axi_slave_port_ takes rob_ (as Packetizer + Depacketizer via multi-inherit).
@@ -357,7 +360,8 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
       depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
                    cfg_.port_params.depkt_r_q_depth, downstream_dat_rsp_),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
-                 cfg_.src_id, cfg_.sam),
+                 dat_wormhole_arbiter_.input(0), dat_wormhole_arbiter_.input(1), cfg_.src_id,
+                 cfg_.sam),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.read_rob_mode, cfg_.sam, cfg_.b_rob_depth,
            cfg_.r_rob_depth, cfg_.max_txns_per_id, cfg_.outstanding_depth),

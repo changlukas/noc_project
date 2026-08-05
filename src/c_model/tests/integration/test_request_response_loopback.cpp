@@ -56,7 +56,6 @@
 #include "nmu/port_params.hpp"
 #include "nsu/nsu.hpp"
 #include "nsu/port_params.hpp"
-#include "router/null_adapters.hpp"
 #include "common/tmp_path.hpp"
 #include <algorithm>
 #include <array>
@@ -73,7 +72,6 @@ namespace axi = ni::cmodel::axi;
 namespace nmu = ni::cmodel::nmu;
 namespace nsu = ni::cmodel::nsu;
 namespace cmod = ni::cmodel;
-namespace router = ni::cmodel::router;
 namespace test = ni::cmodel::testing;
 
 namespace {
@@ -211,10 +209,15 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
     nmu_cfg.num_vc = num_vc;
     nmu_cfg.write_vc = 0;
     nmu_cfg.read_vc = (num_vc >= 2) ? 1u : 0u;
-    // DAT face (S3a T4): this fixture predates DAT steering (T6), wired to
-    // the shared null sentinel (router/null_adapters.hpp).
-    nmu::Nmu nmu(nmu_cfg, channel.nmu_req_out(), channel.nmu_rsp_in(), router::null_req_out(),
-                 router::null_rsp_in());
+    // DAT face (S3a T6 steering: legacy_sam() below is data class, so AW/W
+    // now ride this face for real). ChannelModel is a network-agnostic
+    // testbench stub (keys purely off the flit's own dst_id/vc_id header
+    // fields, per common/channel_model.hpp's class comment) -- reusing the
+    // same REQ/RSP adapter objects as the DAT sink/source funnels DAT
+    // traffic through the same per-NSU queues as REQ/RSP instead of adding a
+    // third parallel adapter set that only this ctest-only stub would use.
+    nmu::Nmu nmu(nmu_cfg, channel.nmu_req_out(), channel.nmu_rsp_in(), channel.nmu_req_out(),
+                 channel.nmu_rsp_in());
 
     // NSU stacks: 1 for legacy fixtures, 4 for same_id_multi_dst.
     // Each NSU owns its own MetaBuffer / Depacketize / Packetize / AxiMasterPort
@@ -232,11 +235,12 @@ LoopbackResult run_fixture(const std::string& yaml_path, const std::string& read
         nsu_cfg.num_vc = num_vc;
         nsu_cfg.write_rsp_vc = 0;
         nsu_cfg.read_rsp_vc = (num_vc >= 2) ? 1u : 0u;
-        // DAT face (S3a T4): wired to the shared null sentinel (see the NMU
-        // construction above for rationale).
+        // DAT face (S3a T6 steering): reuses the same per-NSU REQ/RSP
+        // adapters as the DAT sink/source (see the NMU construction above
+        // for rationale).
         nsus.emplace_back(std::make_unique<nsu::Nsu>(nsu_cfg, channel.nsu_req_in(i),
-                                                     channel.nsu_rsp_out(i), router::null_req_in(),
-                                                     router::null_rsp_out()));
+                                                     channel.nsu_rsp_out(i), channel.nsu_req_in(i),
+                                                     channel.nsu_rsp_out(i)));
     }
 
     // Per-fixture override for ROB stall coverage: same_id_multi_dst needs

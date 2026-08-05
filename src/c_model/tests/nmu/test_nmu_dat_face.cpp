@@ -2,10 +2,11 @@
 //
 // S3a gave Nmu a second (DAT) NoC face alongside REQ/RSP (stage design §5):
 // a per-network WormholeArbiter+VcArbiter pair for DAT egress (AW/W) and a
-// second Depacketize ingress for DAT (R). Steering (T6) has not moved yet —
-// Packetize still emits everything on REQ/RSP — so this file drives the DAT
-// face directly via NmuStandalone's queue-backed mocks (the same pattern
-// nmu_wrap.hpp will use for the real DPI boundary, T5).
+// second Depacketize ingress for DAT (R). Packetize now steers Data-class
+// AW/W/R here for real (T6) — this file instead drives the DAT face directly
+// via NmuStandalone's queue-backed mocks, exercising the arbiter/ingress
+// mechanics in isolation from Packetize (the same pattern nmu_wrap.hpp uses
+// at the real DPI boundary, T5).
 //
 // Covers: DAT face push/pop via mocks, per-network face independence
 // (backpressure one face, the other still flows), and that the two Nmu::tick()
@@ -84,15 +85,16 @@ Flit make_data_r(uint8_t rid, uint8_t src_id, uint8_t dst_id) {
 }  // namespace
 
 // DAT face push/pop via mocks: push AW then W directly into
-// dat_wormhole_arbiter().input(0/1) (no Packetize involved -- steering is
-// T6), tick, and drain via pop_dat_req_flit(). The {AW,W} lock must hold on
-// the DAT pair exactly as it does on REQ's (same WormholeArbiter class,
-// per-network instance).
+// dat_wormhole_arbiter().input(0/1) (bypassing Packetize, to isolate the
+// arbiter's own mechanics from steering), tick, and drain via
+// pop_dat_req_flit(). The {AW,W} lock must hold on the DAT pair exactly as it
+// does on REQ's (same WormholeArbiter class, per-network instance).
 TEST(NmuDatFace, EgressPushPopViaMocksPreservesAwWOrder) {
     SCENARIO(
         "NMU DAT egress: push DataAw into dat_wormhole_arbiter().input(0), DataW into input(1) "
-        "(mocking what Packetize will do post-T6). AW drains first (locks {AW,W}), then W "
-        "(unlocks). pop_dat_req_flit() must return them in that order with axi_ch preserved.");
+        "(bypassing Packetize's own real steering, to test the arbiter in isolation). AW drains "
+        "first (locks {AW,W}), then W (unlocks). pop_dat_req_flit() must return them in that "
+        "order with axi_ch preserved.");
 
     NmuStandalone nmu(make_cfg(0x12));
     ASSERT_TRUE(nmu.nmu().dat_wormhole_arbiter().input(0).push_flit(make_data_aw(0x05, 0x01)));
