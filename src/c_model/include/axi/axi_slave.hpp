@@ -417,8 +417,6 @@ inline void AxiSlave::tick_submit_w_() {
         AXI_PROTOCOL_ASSERT(
             rules::check_w_last_timing(w_q_.front().last, beat_idx, st.aw.len),
             "W_LAST_TIMING: WLAST must be asserted on (and only on) the final W beat");
-        AXI_PROTOCOL_ASSERT(rules::check_strb_valid_bits(w_q_.front().strb),
-                            "STRB_VALID_BITS: WSTRB bits above WSTRB_WIDTH must be 0");
         const uint64_t w_beat_addr_v =
             beat_addr(st.aw.addr, st.aw.len, st.aw.size, st.aw.burst, beat_idx);
         AXI_PROTOCOL_ASSERT(

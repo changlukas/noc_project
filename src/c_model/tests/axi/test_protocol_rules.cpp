@@ -143,21 +143,10 @@ TEST_F(AxiProtocolDeath, RLastTiming_RejectsEarlyLast) {
         { AXI_PROTOCOL_ASSERT(rules::check_r_last_timing(true, 1, 3), "R_LAST_TIMING"); }, ".*");
 }
 
-TEST_F(AxiProtocolDeath, StrbValidBits_AcceptsAllOnesAt64Bytes) {
-    SCENARIO(
-        "protocol_rules: STRB_VALID_BITS accepts all 64 lanes set at the S2 data-class 64B bus");
-    // DATA_BYTES = WSTRB_WIDTH = 64 -> mask = ~0ull (kFullStrbMask); all 64
-    // bits set is exactly the upper boundary of the valid range.
-    EXPECT_TRUE(rules::check_strb_valid_bits(~0ull));
-}
-
-// StrbValidBits_RejectsBitAboveDataBytes (a T2b-era regression guard for the
-// removed `if constexpr (DATA_BYTES >= 32) return true` shortcut) is gone:
-// at DATA_BYTES=64 the WSTRB type is exactly uint64_t, so no strb value has
-// "a bit above DATA_BYTES" to construct — 1ull << 64 is undefined behaviour,
-// not a valid test input. check_strb_valid_bits' live-mask behavior (as
-// opposed to an always-true shortcut) is still exercised by the AcceptsAllOnes
-// test above and by StrbSparseLegal_* below.
+// check_strb_valid_bits (STRB_VALID_BITS) was deleted (S3a carry-in): at
+// DATA_BYTES=64 it was a tautology (kFullStrbMask == ~0ull, so
+// `strb & ~kFullStrbMask` is always 0). STRB_SPARSE_LEGAL below is the live
+// per-beat strobe check.
 
 TEST_F(AxiProtocolDeath, StrbSparseLegal_RejectsBitsOutsideWindow) {
     SCENARIO(

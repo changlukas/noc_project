@@ -121,11 +121,12 @@ inline bool check_r_last_timing(bool last, std::size_t beat_idx, uint8_t len) {
     return last == (beat_idx == static_cast<std::size_t>(len));
 }
 
-// STRB_VALID_BITS — only the lower WSTRB_WIDTH (= DATA_BYTES) bits of strb
-// are defined; higher bits must be 0 (IHI 0022 A3.4.3).
-inline bool check_strb_valid_bits(uint64_t strb) {
-    return (strb & ~kFullStrbMask) == 0;
-}
+// STRB_VALID_BITS — deleted (S3a carry-in). strb is uint64_t and
+// WSTRB_WIDTH = DATA_BYTES = 64 at the current bus width, so kFullStrbMask
+// == ~0ull and `strb & ~kFullStrbMask` is always 0: the check was a
+// tautology with no reachable failure, and its negative test was removed
+// in S2 when the bus widened to 64 lanes. STRB_SPARSE_LEGAL below is the
+// live per-beat strobe check.
 
 // STRB_SPARSE_LEGAL — at any beat, strb may enable only byte lanes inside
 // that beat's transfer window: a contiguous (1<<size)-byte window starting
