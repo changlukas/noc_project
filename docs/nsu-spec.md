@@ -87,12 +87,12 @@ B and R merge through a 2-input round-robin `WormholeArbiter` (input 0 = B, inpu
 
 **IMPORTANT:** VC selection is:
 
-| flit | rule |
-|---|---|
-| R (always, any `ordering_req`) | fixed hash `(dst_id ^ rid) % num_vc` |
-| B (always, any `ordering_req`) | id-agnostic round-robin (order-free at the source RoB) |
+| flit | rule | header `fixed_vc` |
+|---|---|---|
+| R (always, any `ordering_req`) | fixed hash `(dst_id ^ rid) % num_vc` | 1 |
+| B (always, any `ordering_req`) | id-agnostic round-robin (order-free at the source RoB) | 0 |
 
-The hash is a pure function with zero state. Every beat of an R burst shares `(dst_id, rid)`, so a whole burst lands on one VC, and a same-`(dst, id)` response stream can never be reordered in-fabric. A fixed-hash flit whose VC is full or has no downstream credit is **refused** and retried, it never spills to another VC (spilling would reorder the stream).
+The hash is a pure function with zero state. Every beat of an R burst shares `(dst_id, rid)`, so a whole burst lands on one VC, and a same-`(dst, id)` response stream can never be reordered in-fabric. A fixed-hash flit whose VC is full or has no downstream credit is **refused** and retried, it never spills to another VC (spilling would reorder the stream). Downstream routers keep this `vc_id` unchanged only where `fixed_vc` = 1, restamping `fixed_vc` = 0 (B) flits at VA (docs/router-spec.md R12/SPEC6).
 
 Worked example, `num_vc` = 4:
 
@@ -280,7 +280,7 @@ Each item names its verification and failure condition. ctest paths are under `s
 9. MetaBuffer commit discipline: the bucket front is matched, a write entry is retired when the B flit is accepted by the arbiter (not before, not on a refused push), a read entry is retired only on the accepted `rlast` beat, every earlier burst beat peeks the same entry. Verify: `nsu/test_nsu_packetize.cpp` `PushRMultiBeatPeekUntilRLast`, `PushBNoCommitOnNocFull`, `nsu/test_meta_buffer.cpp` `MultiOutstandingSameIdFifoOrder`. Fail: early or skipped commit, wrong entry consumed.
 10. Header `flit_tail` = 1 on every B flit and every R beat flit, burst framing only in payload `rlast`. Verify: `nsu/test_nsu_packetize.cpp` flit field checks, co-sim (a `flit_tail` = 0 response flit wedges downstream wormhole arbitration and hangs the run). Fail: any response flit with header `flit_tail` = 0.
 11. `ordering_req` and `ordering_tag` are echoed verbatim from the matching request into every response flit, including every beat of a multi-beat R burst. Verify: `nsu/test_nsu_packetize.cpp` `MultiBeatR_AllFlitsCarrySameOrderingTag`. Fail: any beat carries a different value than its request.
-12. VC selection implements the 2.4 table exactly, including refuse-not-spill for the hashed R flits and the `num_vc` = 1 degenerate path (everything on VC 0, no entry-time credit check). Verify: `nsu/test_nsu_vc_allocator.cpp` `RBurstStaysOnOneVc`, `RobbedRBurstStaysOnOneVcToo`, `DistinctRidsSpreadAcrossVcs`, `SameRidDifferentDstYieldsDistinctVcs`, `SameBidRoundRobins`, `FixedVcFullRefusesInsteadOfSpilling`, `Nsu_Degenerate_NumVc1_Passthrough`. Fail: flit observed on any VC other than the rule's choice.
+12. VC selection implements the 2.4 table exactly, including refuse-not-spill for the hashed R flits, the `num_vc` = 1 degenerate path (everything on VC 0, no entry-time credit check), and header `fixed_vc` (R = 1, B = 0). Verify: `nsu/test_nsu_vc_allocator.cpp` `RBurstStaysOnOneVc`, `RobbedRBurstStaysOnOneVcToo`, `DistinctRidsSpreadAcrossVcs`, `SameRidDifferentDstYieldsDistinctVcs`, `SameBidRoundRobins`, `FixedVcFullRefusesInsteadOfSpilling`, `FixedVcStampedOnRNotB`, `Nsu_Degenerate_NumVc1_Passthrough`. Fail: flit observed on any VC other than the rule's choice, or wrong fixed_vc bit.
 13. Response arbitration sends at most 1 flit per cycle, round-robin between B and R at the wormhole stage and round-robin over VCs at the drain, no starvation of a nonempty input. Verify: `router/test_wormhole_arbiter.cpp` for the B/R stage, `nsu/test_nsu_vc_allocator.cpp` `Nsu_Degenerate_NumVc1_Passthrough` for the one-flit-per-tick drain, and co-sim link monitors for the multi-VC drain order; no ctest pins the multi-VC drain round-robin at the NSU. Fail: 2 flits in one cycle or a nonempty input never served while the other drains.
 14. Credit conformance per rules 11 and 12, including the seed-4 sender invariant. Verify: co-sim link monitors and the model abort on downstream credit lies (G8). Fail: counter divergence, pulse without a consumed/drained flit, or flit sent without credit.
 15. AXI master face conformance: held-valid on AW/W/AR (rule 4), W budget (rule 9), context-gated `bready`/`rready` with handshake-qualified acceptance (rule 10). Verify: co-sim scoreboard (a violation surfaces as a lost or duplicated beat and a readback mismatch or hang). Fail: readback mismatch, hang, or a valid deasserted before ready.
