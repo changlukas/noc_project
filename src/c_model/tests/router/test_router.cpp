@@ -1048,6 +1048,50 @@ TEST(RouterVaWorm, PinnedWormRidesNonPreferredVcNoAssert) {
         << "pinned worm consumed the preferred VC's credit";
 }
 
+TEST(RouterVaWorkConserving, HeadVaFailAlternateCandidateGrantedSameTick) {
+    SCENARIO(
+        "D7 work-conserving re-scan: candidate A (worm head, fixed_vc=0) fails VA — its "
+        "preferred VC is dry and the worm no-overflow rule denies it any alternative even "
+        "though another output VC has credit. Stage 2 does not idle EAST for the tick; the "
+        "scan continues to candidate B (flit_tail=1, different VC) and grants B in the SAME "
+        "tick (D7; RTL floo_vc_router.sv has one SA-global winner and would idle this cycle)");
+    RouterConfig cfg = center_cfg();
+    cfg.num_vc = 2;
+    cfg.vc_depth = 1;  // one credit per output VC: a single pinned flit fully drains it
+    Router r(cfg);
+    FlitSink east;
+    const auto E = static_cast<std::size_t>(RouterPort::EAST);
+    const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
+    const auto NORTH = static_cast<std::size_t>(RouterPort::NORTH);
+    const auto SOUTH = static_cast<std::size_t>(RouterPort::SOUTH);
+    r.set_downstream(E, east);
+
+    // Drain EAST vc1 (candidate A's preferred VC) via a pinned single-flit
+    // packet so it is dry when A arrives; vc0 (candidate B's preferred VC) is
+    // untouched.
+    r.input(LOCAL).push_flit(make_pinned_flit(make_dst(3, 1), /*vc=*/1, /*flit_tail=*/1));
+    for (int t = 0; t < kPipelineDepth + 1 && east.received.empty(); ++t) r.tick();
+    ASSERT_EQ(east.received.size(), 1u);
+    ASSERT_EQ(r.credit(E, 1), 0u);
+    ASSERT_GT(r.credit(E, 0), 0u);
+
+    // Candidate A: worm head, dst (3,1) -> out EAST, next hop EAST -> preferred vc1 (dry).
+    r.input(NORTH).push_flit(make_flit(make_dst(3, 1), /*vc=*/0, /*flit_tail=*/0));
+    // Candidate B: single-flit packet, dst (2,3) -> out EAST, next hop NORTH ->
+    // preferred vc0 (has credit).
+    r.input(SOUTH).push_flit(make_flit(make_dst(2, 3), /*vc=*/0, /*flit_tail=*/1));
+    r.tick();  // stage 1: both land in their input-side vc0 FIFOs
+    r.tick();  // stage 2: A scanned first, fails VA; scan continues and grants B (D7)
+    EXPECT_EQ(r.input_fifo_size(NORTH, 0), 1u) << "candidate A must not be granted";
+    EXPECT_EQ(r.output_fifo_size(E), 1u) << "candidate B must be granted this SAME tick";
+    EXPECT_EQ(r.credit(E, 0), 0u) << "B's preferred VC credit not consumed";
+
+    r.tick();                             // stage 3: B reaches the sink
+    ASSERT_EQ(east.received.size(), 2u);  // drain flit + B
+    EXPECT_EQ(static_cast<uint8_t>(east.received[1].get_header_field("dst_id")), make_dst(2, 3));
+    EXPECT_EQ(static_cast<uint8_t>(east.received[1].get_header_field("vc_id")), 0u);
+}
+
 TEST(RouterVaCredit, ConsumeStampedVcReturnInputVc) {
     SCENARIO(
         "Credit split: the grant consumes credit on the VA-ASSIGNED output VC and restamps "
