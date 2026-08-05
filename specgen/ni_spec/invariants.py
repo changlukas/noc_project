@@ -213,7 +213,7 @@ def check_mesh_within_flit(packet_spec, constants) -> List[Issue]:
     noc = constants["noc"]
     mx = int(noc["MESH_X_DIM"]["default"])
     my = int(noc["MESH_Y_DIM"]["default"])
-    nvc = int(noc["NUM_VC"]["default"])
+    nvc = int(noc["DAT_NUM_VC"]["default"])
     dst_w = x_w + y_w
     if mx > (1 << x_w):
         issues.append(_err(TAG, f"MESH_X_DIM {mx} > 2^X_WIDTH {1 << x_w}"))
@@ -222,7 +222,7 @@ def check_mesh_within_flit(packet_spec, constants) -> List[Issue]:
     if mx * my > (1 << dst_w):
         issues.append(_err(TAG, f"MESH_X_DIM*MESH_Y_DIM {mx * my} > 2^DST_ID_WIDTH {1 << dst_w}"))
     if nvc > (1 << vc_w):
-        issues.append(_err(TAG, f"NOC_NUM_VC {nvc} > 2^VC_ID_WIDTH {1 << vc_w}"))
+        issues.append(_err(TAG, f"DAT_NUM_VC {nvc} > 2^VC_ID_WIDTH {1 << vc_w}"))
     return issues
 
 

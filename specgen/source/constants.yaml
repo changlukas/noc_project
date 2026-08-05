@@ -45,19 +45,15 @@ axi:
     cpp_symbol: AXI_DATA_WIDTH
 
 noc:
-  # TODO(S3b): rename NUM_VC -> DAT_NUM_VC once router.hpp + the 4 SV wraps
-  # (router_wrap/ni_wrap/nmu_wrap/nsu_wrap.sv) move off this symbol as part of
-  # the S3b VC collapse; naming triad with REQ_NUM_VC/RSP_NUM_VC below is
-  # inconsistent until then.
-  NUM_VC:
+  DAT_NUM_VC:
     type: int
     units: count
     description: "Number of virtual channels per NoC link (DAT network; REQ/RSP are single-VC, see REQ_NUM_VC/RSP_NUM_VC)"
     default: 1
     min: 1
     max: 8
-    sv_symbol: NOC_NUM_VC_DFLT
-    cpp_symbol: NOC_NUM_VC
+    sv_symbol: NOC_DAT_NUM_VC_DFLT
+    cpp_symbol: NOC_DAT_NUM_VC
   REQ_NUM_VC:
     type: int
     units: count

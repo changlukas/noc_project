@@ -164,7 +164,7 @@ Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and 
 | AXI_ID_WIDTH | 8 | 1..32 (implementation locked at 8) | ID fields, RoB per-ID arrays (256 IDs) |
 | AXI_ADDR_WIDTH | 64 | 1..64 (implementation locked at 64) | Address fields |
 | AXI_DATA_WIDTH | 256 | {32,64,128,256,512,1024} (implementation locked at 256) | wdata / rdata, WSTRB_WIDTH = 32 |
-| NOC_NUM_VC | 1 | 1 or even, up to 8 (odd > 1 aborts) | VC arbiter, credit vectors, virtual networks |
+| NOC_DAT_NUM_VC | 1 | 1 or even, up to 8 (odd > 1 aborts) | VC arbiter, credit vectors, virtual networks |
 | NOC_FLIT_WIDTH | 408 | 64..1024 (implementation locked at 408 by the flit format) | Flit ports |
 | NOC_ROUTER_VC_DEPTH | 4 | 1..16 | Request sender credit seed per VC |
 | NMU_ROB_B_DEPTH | 32 | 1..256 | B slot pool |

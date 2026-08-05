@@ -425,7 +425,7 @@ TEST(RouterWormhole, OpenPacketHoldsOutputAndBlocksOtherVc) {
 }
 
 // --- Per-VC independence --------------------------------------------------
-// All three tests need >=2 VCs; the generated default NOC_NUM_VC is 1, so
+// All three tests need >=2 VCs; the generated default NOC_DAT_NUM_VC is 1, so
 // each builds its RouterConfig with num_vc = 2.
 
 RouterConfig two_vc_cfg() {

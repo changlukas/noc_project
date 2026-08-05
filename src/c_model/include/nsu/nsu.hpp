@@ -73,8 +73,7 @@ struct NsuConfig {
     std::vector<uint8_t> write_rsp_vcs{};
     std::vector<uint8_t> read_rsp_vcs{};
     // DAT face VC count (S3a T4; R only -- no B rides DAT, per network map §1).
-    // NOC_NUM_VC is DAT's VC count going forward (specgen T1 note).
-    std::size_t dat_num_vc = ni::NOC_NUM_VC;
+    std::size_t dat_num_vc = ni::NOC_DAT_NUM_VC;
     std::size_t wormhole_per_input_depth = ni::NSU_ARBITER_FIFO_DEPTH;
     std::size_t vc_arbiter_pending_depth = ni::NSU_ARBITER_FIFO_DEPTH;
 };

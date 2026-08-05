@@ -29,7 +29,7 @@ def constants():
 # ---------------------------------------------------------------------------
 
 def test_default_config_no_errors(packet_spec, constants):
-    """Default MESH_X_DIM=4, MESH_Y_DIM=4, NUM_VC=1 must produce no ERROR."""
+    """Default MESH_X_DIM=4, MESH_Y_DIM=4, DAT_NUM_VC=1 must produce no ERROR."""
     issues = check_mesh_within_flit(packet_spec, constants)
     errors = [i for i in issues if i.severity == "ERROR"]
     assert not errors, f"unexpected errors: {[i.message for i in errors]}"
@@ -66,9 +66,9 @@ def test_over_limit_mesh_y_dim_fires_error(packet_spec, constants):
 
 
 def test_over_limit_nvc_fires_error(packet_spec, constants):
-    """NUM_VC=16 > 2^VC_ID_WIDTH(3)=8 must produce an L2-MESH-FLIT ERROR."""
-    bad = _make_constants_with_noc_override(constants, NUM_VC=16)
+    """DAT_NUM_VC=16 > 2^VC_ID_WIDTH(3)=8 must produce an L2-MESH-FLIT ERROR."""
+    bad = _make_constants_with_noc_override(constants, DAT_NUM_VC=16)
     issues = check_mesh_within_flit(packet_spec, bad)
     errors = [i for i in issues if i.severity == "ERROR" and i.check == "L2-MESH-FLIT"]
-    assert errors, "expected an L2-MESH-FLIT ERROR for NUM_VC=16 but got none"
-    assert any("NOC_NUM_VC" in i.message for i in errors)
+    assert errors, "expected an L2-MESH-FLIT ERROR for DAT_NUM_VC=16 but got none"
+    assert any("DAT_NUM_VC" in i.message for i in errors)

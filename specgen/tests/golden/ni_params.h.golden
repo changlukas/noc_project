@@ -10,7 +10,7 @@ constexpr int AXI_ADDR_WIDTH = 48;
 constexpr int AXI_DATA_WIDTH = 512;
 
 // NoC parameter defaults
-constexpr int NOC_NUM_VC                   = 1;
+constexpr int NOC_DAT_NUM_VC               = 1;
 constexpr int NOC_REQ_NUM_VC               = 1;
 constexpr int NOC_RSP_NUM_VC               = 1;
 constexpr int NOC_REQ_FLIT_WIDTH           = 137;

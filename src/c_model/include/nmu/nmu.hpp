@@ -169,10 +169,9 @@ struct NmuConfig {
     // write_vc/read_vc.
     std::vector<uint8_t> write_vcs{};
     std::vector<uint8_t> read_vcs{};
-    // DAT face VC count (S3a T4; AW/W only -- no AR rides DAT). NOC_NUM_VC is
-    // DAT's VC count going forward (specgen T1 note; REQ/RSP got their own
-    // NOC_{REQ,RSP}_NUM_VC=1 params). Round-robins across [0, dat_num_vc).
-    std::size_t dat_num_vc = ni::NOC_NUM_VC;
+    // DAT face VC count (S3a T4; AW/W only -- no AR rides DAT). REQ/RSP got
+    // their own NOC_{REQ,RSP}_NUM_VC=1 params. Round-robins across [0, dat_num_vc).
+    std::size_t dat_num_vc = ni::NOC_DAT_NUM_VC;
     std::size_t wormhole_per_input_depth = ni::NMU_ARBITER_FIFO_DEPTH;
     std::size_t vc_arbiter_pending_depth = ni::NMU_ARBITER_FIFO_DEPTH;
     std::size_t ni_rsp_extra_depth = 0;  // extra shift stages on the response path

@@ -28,7 +28,7 @@
 `define DAT_MERGE_WRAP_SV
 
 module dat_merge_wrap #(
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_NUM_VC_DFLT,
+    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
     parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT
 ) (
     input  logic              clk_i,

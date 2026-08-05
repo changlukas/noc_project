@@ -51,7 +51,7 @@
 `define ROUTER_WRAP_SV
 
 module router_wrap #(
-    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_NUM_VC_DFLT,
+    parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
     parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
     parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
     parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,

@@ -255,7 +255,7 @@ and returns to 4 by cycle 8.
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `NUM_VC` | `ni_params_pkg::NOC_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs per link, per network. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != NUM_VC`. |
+| `NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs per link, per network. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != NUM_VC`. |
 | `FLIT_WIDTH` | `NOC_FLIT_WIDTH_DFLT` = 408 | fixed 408 in this design | flit bus width, bits |
 | `LINK_PORTS` | 5 | fixed 5 | port array size = {LOCAL, NORTH, EAST, SOUTH, WEST} |
 

@@ -43,7 +43,7 @@ not one value.
 
 ## Stage 3b: Steering and VC collapse, semantic
 Goal: VCs on DAT only; delete ni/virtual_network.hpp and read/write VC split; rename VcArbiter
-to allocator naming; NOC_NUM_VC renamed DAT_NUM_VC (constants TODO names this stage); DAT
+to allocator naming; VC-count constant renamed to DAT_NUM_VC (T1, done; constants TODO retired); DAT
 standard router gains the VA stage (deprecated vc_router port, direction-preference
 assignment) with fixed_vc=1 skipping VA, pinned end to end; drop legacy
 write_rsp_vc/read_rsp_vc. NOTE: class-aware steering itself landed in S3a (spec :348 map live,

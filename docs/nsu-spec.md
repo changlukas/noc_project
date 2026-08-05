@@ -227,7 +227,7 @@ Single-sourced in `specgen/source/constants.yaml`, generated into `ni_params.h` 
 | `NSU_META_BUFFER_MAX_OUTSTANDING` | 32 | 1 to 256 | MetaBuffer shared pool, per direction |
 | `NSU_META_BUFFER_MAX_UNIQUE_IDS` | 1 | {1, 256} only, constructor throws otherwise | id remap in Depacketize |
 | `NSU_ARBITER_FIFO_DEPTH` | 4 | 1 to 64 | wormhole per-input and VC-arbiter per-VC pending depths |
-| `NOC_NUM_VC` | 1 | 1 to 8, and 1-or-even | VC count, vnet split, credit vector widths |
+| `NOC_DAT_NUM_VC` | 1 | 1 to 8, and 1-or-even | VC count, vnet split, credit vector widths |
 | `NOC_ROUTER_VC_DEPTH` | 4 | 1 to 16 | response sender credit seed per VC |
 | `NOC_FLIT_WIDTH` | 408 | fixed at 408 in this implementation | flit container and DPI marshalling |
 | `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 8 / 64 / 256 | fixed at defaults in this implementation | beat structs and DPI |
