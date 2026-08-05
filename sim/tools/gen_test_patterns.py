@@ -205,7 +205,7 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
         f.write("\n".join(read_lines) + "\n")
 
 
-def emit_beat_exact_node(out_dir, src_idx, dst_base, data_width, extra=None):
+def emit_beat_exact_node(out_dir, src_idx, dst_base, data_width, extra=None, base_local=0x1000):
     """Write out_dir/{write,read}.txt for one node's beat-exact (data-class)
     probe: one full-width beat with per-lane-distinct bytes and full strobe,
     followed by the 8-position walking-strb sweep (_BEAT_EXACT_STRB_OFFSETS),
@@ -213,9 +213,16 @@ def emit_beat_exact_node(out_dir, src_idx, dst_base, data_width, extra=None):
     gives per-lane-distinct bytes and, at AxSIZE=0, an exact single-bit
     (walking) WSTRB -- no new data/strb encoding needed.
 
-    Two disjoint 64 B-aligned windows at dst_base: [+0x000, +0x040) for the
-    full beat, [+0x040, +0x080) for the walking-strb sweep, so the sweep's
-    partial-strobe writes can never be masked by the full beat's bytes.
+    Offset by base_local (same convention emit_file_master_node's slots use),
+    not raw dst_base, so this probe's [+0x000, +0x080) window is disjoint by
+    construction from anything else that may occupy the tile's low offset 0
+    (e.g. a config-space probe sharing the same address-in-data low byte
+    pattern at local offset 0 -- narrow readback couldn't otherwise tell the
+    two probes' bytes apart).
+
+    Two disjoint 64 B-aligned windows at dst_base+base_local: [+0x000, +0x040)
+    for the full beat, [+0x040, +0x080) for the walking-strb sweep, so the
+    sweep's partial-strobe writes can never be masked by the full beat's bytes.
 
     extra: optional (write_lines, read_lines) tuple appended after the
     beat-exact transactions -- see emit_file_master_node."""
@@ -227,11 +234,12 @@ def emit_beat_exact_node(out_dir, src_idx, dst_base, data_width, extra=None):
     full_size = bus_bytes.bit_length() - 1  # log2(64) = 6
     os.makedirs(out_dir, exist_ok=True)
     axid = src_idx
+    probe_base = dst_base + base_local
     write_lines, read_lines = [], []
-    write_lines += _ax_fields(axid, dst_base, 0, full_size, include_atop=True)
-    write_lines += encode_write_beats(dst_base, full_size, 0, data_width)
-    read_lines += _ax_fields(axid, dst_base, 0, full_size, include_atop=False)
-    strb_base = dst_base + bus_bytes
+    write_lines += _ax_fields(axid, probe_base, 0, full_size, include_atop=True)
+    write_lines += encode_write_beats(probe_base, full_size, 0, data_width)
+    read_lines += _ax_fields(axid, probe_base, 0, full_size, include_atop=False)
+    strb_base = probe_base + bus_bytes
     for off in _BEAT_EXACT_STRB_OFFSETS:
         addr = strb_base + off
         write_lines += _ax_fields(axid, addr, 0, 0, include_atop=True)
@@ -626,7 +634,7 @@ def main(argv=None):
             dst_x, dst_y = neighbor_dst(x, y, x_dim, y_dim)
             dst_base = bases[coord_id(dst_x, dst_y)]
             emit_beat_exact_node(os.path.join(a.out, f"node{idx}"), idx, dst_base,
-                                 widths["data"], extra=narrow_extra)
+                                 widths["data"], extra=narrow_extra, base_local=base_local)
             continue
         if a.pattern in ("neighbor", "transpose"):
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)

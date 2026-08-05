@@ -209,6 +209,8 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         // wlast sits at bit 0 of both NARROW_W and DATA_W (same relative
         // position in both channel layouts), so reading it via either
         // channel name returns the same bit -- no class branch needed here.
+        static_assert(ni::payload::narrow_w::WLAST_LSB == ni::payload::data_w::WLAST_LSB,
+                      "narrow_w/data_w WLAST_LSB must match for the class-agnostic read below");
         if (flit.get_payload_field("NARROW_W", "wlast") != 0) {
             current_aw_vc_.reset();
         }

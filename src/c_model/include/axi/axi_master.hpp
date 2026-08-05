@@ -56,8 +56,10 @@ inline std::vector<BurstSpec> split_into_sub_bursts(const ScenarioTransaction& t
 // WriteResult / ReadResult carry the ORIGINAL user txn.addr (the address the
 // scenario asked the master to access), plus enough AXI4 burst geometry to let
 // the scoreboard re-derive per-beat lane offsets under lane-positioned bus
-// semantics. Per-beat byte_lane = (txn.addr + beat*(1<<size)) mod DATA_BYTES;
-// the AW.addr on the wire is still aligned DOWN by the master.
+// semantics. Per-beat byte_lane anchors to the ALIGNED per-beat address (AW.addr
+// on the wire is aligned DOWN by the master; a real slave always derives its
+// lane window from that aligned address, IHI 0022 A3.4.1) -- NOT txn.addr
+// directly, which may be mid-window on an unaligned-start beat 0.
 struct WriteResult {
     uint64_t addr;  // original user txn.addr
     uint8_t size;   // log2(bytes_per_beat)
@@ -68,8 +70,9 @@ struct WriteResult {
     // memory commit) from a normal write (resp=OKAY → commit) without peeking
     // at the slave's exclusive monitor state.
     LockType lock = LockType::Normal;
-    std::vector<uint8_t> data;            // packed user bytes, (len+1)*(1<<size)
-    std::vector<uint64_t> strb_per_beat;  // bus-level WSTRB per beat (lane-positioned)
+    std::vector<uint8_t> data;  // packed user bytes, (len+1)*(1<<size)
+    std::vector<uint64_t>
+        strb_per_beat;  // beat-relative WSTRB per beat (bit 0 = beat's first byte)
     Resp resp;
     uint8_t id;
     std::size_t scenario_line;
@@ -503,10 +506,17 @@ class AxiMasterT {
             const std::size_t bpb = 1ull << sub.size;
             while (op.w_pushed_in_cur_ <= sub.len) {
                 WBeat w{};
-                // Lane-positioned bus: byte j of the user payload lands at bus lane
-                // (byte_lane + j); byte_lane = per-beat-addr mod DATA_BYTES.
+                // Lane-positioned bus, anchored to the ALIGNED per-beat address (what
+                // AWADDR actually carries -- see aligned_addr above): byte j of the
+                // beat's local bpb-byte window lands at bus lane (byte_lane + j). AXI4
+                // IHI 0022 A3.4.1: a slave always derives its per-beat lane window from
+                // AWADDR rounded down to the size boundary, so the master's lane math
+                // must use that same aligned base, not the raw sub.addr -- using
+                // sub.addr directly shifts the whole window off the slave's expected
+                // lanes (and, for an unaligned start, spills past the beat's own
+                // window, tripping STRB_SPARSE_LEGAL at a real AxiSlave).
                 const uint64_t beat_addr_v =
-                    beat_addr(sub.addr, sub.len, sub.size, sub.burst, op.w_pushed_in_cur_);
+                    beat_addr(aligned_addr, sub.len, sub.size, sub.burst, op.w_pushed_in_cur_);
                 const std::size_t byte_lane =
                     static_cast<std::size_t>(beat_addr_v & (DATA_BYTES - 1));
                 w.data.fill(0);
@@ -522,7 +532,17 @@ class AxiMasterT {
                 // 1ull << 64 is undefined behaviour, so guard the all-ones case
                 // the same way axi::kFullStrbMask does.
                 const uint64_t bpb_mask = (bpb >= 64) ? ~0ull : ((1ull << bpb) - 1);
-                const uint64_t lane_mask = bpb_mask << byte_lane;
+                // Only beat 0 of a sub-burst can start mid-window; mask off the prefix
+                // bytes before the true start so an unaligned burst never claims bytes
+                // outside its own transfer (IHI 0022 A3.4.1 first-beat WSTRB masking).
+                // Gated on beat index, not a numeric beat_addr_v/sub.addr comparison --
+                // a WRAP burst's later beats can wrap to an address BELOW sub.addr
+                // (fully in-window, not a prefix case), which a numeric compare would
+                // misread as a prefix.
+                const uint64_t prefix = (op.w_pushed_in_cur_ == 0) ? (sub.addr - aligned_addr) : 0;
+                const uint64_t prefix_mask = (prefix >= 64) ? ~0ull : ((1ull << prefix) - 1);
+                const uint64_t local_mask = bpb_mask & ~prefix_mask;
+                const uint64_t lane_mask = local_mask << byte_lane;
                 // strb_file tokens (and the all-lanes default) are beat-relative,
                 // bit 0 = this beat's first byte -- the same lane-positioning the
                 // data loop above applies, shift into the real bus lane before

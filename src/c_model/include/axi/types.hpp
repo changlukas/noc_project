@@ -97,7 +97,7 @@ inline uint64_t beat_addr(uint64_t base_addr, uint8_t len, uint8_t size, Burst b
 // Narrow-class byte lane a beat occupies on the shared DATA_BYTES-wide port:
 // bus lane (beat_addr >> 3) & 7, one of DATA_BYTES/NARROW_DATA_BYTES = 8 lanes.
 inline unsigned narrow_lane(uint64_t addr) {
-    return static_cast<unsigned>((addr >> 3) & 0x7u);
+    return static_cast<unsigned>((addr >> 3) & (DATA_BYTES / NARROW_DATA_BYTES - 1));
 }
 
 // Re-anchor a narrow-class beat's data from lane 0 (where a class-agnostic

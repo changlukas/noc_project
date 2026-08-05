@@ -200,17 +200,19 @@ def test_emit_beat_exact_node_full_beat_and_walking_strb(tmp_path):
     that lane -- the boundary-straddling positions (3/4 and 31/32, the sole
     WSTRB word boundary) land where expected."""
     d = str(tmp_path / "node0")
-    g.emit_beat_exact_node(d, src_idx=0, dst_base=0x10000, data_width=512)
+    dst_base = 0x10000
+    probe_base = dst_base + 0x1000  # emit_beat_exact_node's default base_local offset
+    g.emit_beat_exact_node(d, src_idx=0, dst_base=dst_base, data_width=512)
     txns = _parse_write(os.path.join(d, "write.txt"))
     assert len(txns) == 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
     full = txns[0]
-    assert full["size"] == 6 and full["len"] == 0 and full["addr"] == 0x10000
+    assert full["size"] == 6 and full["len"] == 0 and full["addr"] == probe_base
     data_hex, strb_hex, _user = full["beats"][0].split()
     assert strb_hex == "0x" + "f" * 16                    # 64 lanes all active
     data = int(data_hex, 16)
     for j in range(64):
-        assert (data >> (8 * j)) & 0xFF == (0x10000 + j) & 0xFF
-    strb_base = 0x10000 + 64
+        assert (data >> (8 * j)) & 0xFF == (probe_base + j) & 0xFF
+    strb_base = probe_base + 64
     for t, off in zip(txns[1:], g._BEAT_EXACT_STRB_OFFSETS):
         assert t["addr"] == strb_base + off
         assert t["size"] == 0 and t["len"] == 0

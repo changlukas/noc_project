@@ -605,14 +605,77 @@ TEST_P(AxiMasterUnalignedP, FirstBeatStrbMaskedAndAwAligned) {
 
 INSTANTIATE_TEST_SUITE_P(
     UnalignedCases, AxiMasterUnalignedP,
-    ::testing::Values(UnalignedCase{0x1003, 5, 0x1000u, 0x7FFFFFFF8ull, "Size5_Off3"},
-                      UnalignedCase{0x1001, 4, 0x1000u, 0x0001FFFEull, "Size4_Off1"},
-                      UnalignedCase{0x1007, 3, 0x1000u, 0x00007F80ull, "Size3_Off7"},
-                      UnalignedCase{0x100F, 2, 0x100Cu, 0x00078000ull, "Size2_OffF"},
-                      UnalignedCase{0x101F, 1, 0x101Eu, 0x180000000ull, "Size1_Off1F"}),
+    // expected_strb: bpb-wide window at aligned_addr's byte_lane, low
+    // (txn_addr - aligned_addr) prefix bits masked off (IHI 0022 A3.4.1).
+    ::testing::Values(UnalignedCase{0x1003, 5, 0x1000u, 0xFFFFFFF8ull, "Size5_Off3"},
+                      UnalignedCase{0x1001, 4, 0x1000u, 0x0000FFFEull, "Size4_Off1"},
+                      UnalignedCase{0x1007, 3, 0x1000u, 0x00000080ull, "Size3_Off7"},
+                      UnalignedCase{0x100F, 2, 0x100Cu, 0x00008000ull, "Size2_OffF"},
+                      UnalignedCase{0x101F, 1, 0x101Eu, 0x80000000ull, "Size1_Off1F"}),
     [](const ::testing::TestParamInfo<UnalignedCase>& info) {
         return std::string(info.param.label);
     });
+
+// End-to-end companion to AxiMasterUnalignedP: drives the SAME unaligned
+// write through a REAL axi::AxiSlave (not MockSlave) and reads back the
+// exact byte at the true (unaligned) start address. Proves two things at
+// once: the corrected lane math doesn't trip AxiSlave's STRB_SPARSE_LEGAL
+// check (the master's WSTRB window now matches what the slave decodes from
+// the aligned AWADDR it receives), and the byte the scenario asked to write
+// lands at the address it asked for, not shifted by the aligned-down offset.
+TEST_F(AxiMasterTest, UnalignedWriteReadbackMatchesRealSlave) {
+    SCENARIO(
+        "AxiMaster+AxiSlave end-to-end: unaligned write (addr=0x1003 size=5) does not trip "
+        "STRB_SPARSE_LEGAL and a size=0 readback at the true start address returns the byte "
+        "the scenario wrote there");
+    // write_32byte_tmp_data content: byte[j] = 0x40 + (j & 0x3F). aligned_addr =
+    // 0x1000, prefix = txn_addr - aligned_addr = 3, so local offset 3 (value 0x43)
+    // is the first byte actually written, landing at addr 0x1000+3 = 0x1003.
+    auto wpath = write_32byte_tmp_data("u_e2e");
+    auto yaml = write_tmp(std::string(R"YAML(
+config:
+  memory_base: 0x0
+  memory_size: 0x2000
+transactions:
+  - op: write
+    addr: 0x1003
+    id: 0x1
+    len: 0
+    size: 5
+    burst: INCR
+    data_file: )YAML") + wpath +
+                          R"YAML(
+  - op: read
+    addr: 0x1003
+    id: 0x1
+    len: 0
+    size: 0
+    burst: INCR
+    dump_file: r_u_e2e_scenario.txt
+)YAML");
+
+    axi::Memory memory(0, 0x2000, 0, 0);
+    axi::AxiSlave slave(memory);
+    slave.set_memory_bounds(0, 0x2000);
+    axi::AxiMasterT<axi::AxiSlave> master(yaml, slave,
+                                          std::string(::testing::TempDir()) + "/r_u_e2e.txt");
+
+    std::vector<uint8_t> observed;
+    master.on_read_observed([&](const axi::ReadResult& rr) { observed = rr.data; });
+
+    constexpr int kMaxCycles = 200;
+    int cycles = 0;
+    for (; cycles < kMaxCycles && !master.done(); ++cycles) {
+        master.tick();
+        slave.tick();
+        memory.tick();
+    }
+    ASSERT_TRUE(master.done()) << "master did not complete after " << cycles
+                               << " cycles (STRB_SPARSE_LEGAL would abort the process before "
+                                  "reaching this point if the lane math regressed)";
+    ASSERT_EQ(observed.size(), 1u);
+    EXPECT_EQ(observed[0], 0x43u);
+}
 
 TEST_F(AxiMasterTest, StrbFilePropagatesToWChannel) {
     SCENARIO(

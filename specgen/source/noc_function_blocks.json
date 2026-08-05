@@ -37,7 +37,7 @@
           "summary": "Assembles AXI AW/W/AR transactions into NoC request flit streams (header + payload), tagging dst_id, src_id, awid/arid, flit_tail, and ordering_tag.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["AW", "NARROW_W", "AR", "dst_id", "src_id", "flit_tail", "ordering_tag"],
+          "uses_packet_fields": ["AW", "NARROW_W", "DATA_W", "AR", "dst_id", "src_id", "flit_tail", "ordering_tag"],
           "configured_by": [],
           "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-ADDR_TRANS", "FEAT-NMU-VC_MAPPING"]
         },

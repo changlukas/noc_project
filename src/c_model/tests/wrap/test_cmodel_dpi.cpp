@@ -5,7 +5,7 @@
 //
 // Also covers the DPI marshal round-trip (dpi_marshal.hpp): beat-exact
 // verification at the wire boundary (S2 T2c) — per-lane-distinct data bytes
-// and walking-1 WSTRB, at the widths current today (341-bit flit, 256-bit
+// and walking-1 WSTRB, at the widths current today (629-bit flit, 512-bit
 // data bus). A word swap, lane slip, tail-bit leak, or strb truncation
 // changes a compared byte.
 #include "cmodel_dpi.h"

@@ -15,13 +15,15 @@ namespace ni::cmodel::axi {
 class Scoreboard {
   public:
     // Lane-positioned bus semantics (AXI4):
-    //   wr.addr is the ORIGINAL user txn.addr. Each beat covers bpb=1<<size
-    //   bytes; the per-beat byte_lane = beat_addr mod DATA_BYTES anchors the
-    //   user payload on the bus. The packed user-byte buffer 'data' supplies
-    //   bpb bytes per beat starting at offset beat*bpb. WSTRB on the wire is
-    //   lane-positioned; the scoreboard checks strb bits at lanes
-    //   (byte_lane + j) for j in [0, bpb) and records data[beat*bpb + j] at
-    //   memory address beat_addr + j when the corresponding strb bit is set.
+    //   wr.addr is the ORIGINAL user txn.addr, which may be mid-window on an
+    //   unaligned-start beat 0; per-beat address is derived from the ALIGNED
+    //   base (IHI 0022 A3.4.1), matching what the master anchors its lane math
+    //   to and what a real slave decodes from AWADDR. Each beat covers
+    //   bpb=1<<size bytes; the packed user-byte buffer 'data' supplies bpb
+    //   bytes per beat starting at offset beat*bpb. strb_per_beat is
+    //   beat-relative (bit j = the beat's local j-th byte, matching
+    //   data[beat*bpb + j]); the scoreboard checks bit j directly and records
+    //   data[beat*bpb + j] at memory address beat_addr + j when set.
     void handle_write_completed(const WriteResult& wr, const std::vector<uint8_t>& data,
                                 const std::vector<uint64_t>& strb_per_beat) {
         // Skip memory-error completions (slave never reached memory).
@@ -37,12 +39,16 @@ class Scoreboard {
         assert(data.size() >= beat_count * bpb &&
                "Scoreboard: data buffer too short for lane-positioned coverage");
         assert(strb_per_beat.size() == beat_count && "Scoreboard: strb_per_beat count mismatch");
+        // AXI4 unaligned start (A3.4.1): the master's lane math -- and what a real
+        // slave decodes from AWADDR -- anchors to this ALIGNED base, not wr.addr.
+        const uint64_t aligned_addr = wr.addr & ~((1ull << wr.size) - 1);
         for (std::size_t beat = 0; beat < beat_count; ++beat) {
             // Per-beat address via the shared axi::beat_addr() helper. FIXED keeps
-            // wr.addr (last-beat-wins on the same address); INCR advances by bpb;
-            // WRAP wraps within the wrap window. The fully-qualified call avoids
-            // shadowing with the local 'beat' loop variable.
-            const uint64_t beat_addr_v = axi::beat_addr(wr.addr, wr.len, wr.size, wr.burst, beat);
+            // aligned_addr (last-beat-wins on the same address); INCR advances by
+            // bpb; WRAP wraps within the wrap window. The fully-qualified call
+            // avoids shadowing with the local 'beat' loop variable.
+            const uint64_t beat_addr_v =
+                axi::beat_addr(aligned_addr, wr.len, wr.size, wr.burst, beat);
             const std::size_t byte_lane = static_cast<std::size_t>(beat_addr_v & (DATA_BYTES - 1));
             const uint64_t strb = strb_per_beat[beat];
             // Cap the byte loop at the bus lane room to avoid shifting uint32_t by
@@ -51,7 +57,7 @@ class Scoreboard {
             const std::size_t lane_room = (byte_lane < DATA_BYTES) ? (DATA_BYTES - byte_lane) : 0;
             const std::size_t j_max = std::min(bpb, lane_room);
             for (std::size_t j = 0; j < j_max; ++j) {
-                if ((strb >> (byte_lane + j)) & 0x1u) {
+                if ((strb >> j) & 0x1u) {
                     expected_[beat_addr_v + j] = data[beat * bpb + j];
                 }
             }

@@ -1,8 +1,8 @@
 // DPI wire-format marshal helpers — svBitVecVal[] <-> c_model byte/word types.
 //
 // Word counts are derived from ni::FLIT_WIDTH / axi::DATA_WIDTH, not pinned to
-// today's values (341-bit flit, 256-bit data bus): S2 T2d widens both constants
-// and this header keeps producing the right word count / tail mask without
+// today's values (629-bit flit, 512-bit data bus): S2 T2d widened both constants
+// and this header kept producing the right word count / tail mask without
 // editing a single formula here. Extracted out of cmodel_dpi.cpp (rather than
 // left as an anonymous-namespace block) so ctest can round-trip pack/unpack
 // directly; the svdpi.h dependency confines this header to src/dpi/, not
@@ -27,7 +27,7 @@ constexpr int WSTRB_VEC_WORDS = (axi::DATA_BYTES + 31) / 32;
 // --- flit tail masking --------------------------------------------------
 //
 // FLIT_VEC_WORDS * 32 bits are reserved on the wire, but only FLIT_WIDTH of
-// them are real flit content (341 of 352 today; 21 valid bits in the last
+// them are real flit content (629 of 640 today; 21 valid bits in the last
 // word). pack_flit masks the tail word explicitly instead of relying on the
 // caller's FlitBytes padding bits already being zero.
 

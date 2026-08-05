@@ -10,8 +10,8 @@
 //   NoC req side:   flit produced by Nmu's Packetize stage, leaving toward NoC.
 //   NoC rsp credit: credit_return Nmu returns to the rsp-side upstream.
 //
-// FLIT_BYTES = 43 (ni::FLIT_WIDTH = 341 bits, rounded to bytes).
-// AXI_DATA_BYTES = 32 (256-bit data bus).
+// FLIT_BYTES = 79 (ni::FLIT_WIDTH = 629 bits, rounded to bytes).
+// AXI_DATA_BYTES = 64 (512-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.
 #pragma once
 #include "axi/types.hpp"        // axi::DATA_BYTES

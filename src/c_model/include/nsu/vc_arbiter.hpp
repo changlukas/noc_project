@@ -145,6 +145,8 @@ inline bool VcArbiter::push_flit(const Flit& flit) {
         // "rid" sits at the same bit offset in NARROW_R and DATA_R (rlast then
         // rid; only rdata's trailing width differs), so reading it via either
         // channel name returns the same bits -- no class branch needed here.
+        static_assert(ni::payload::narrow_r::RID_LSB == ni::payload::data_r::RID_LSB,
+                      "narrow_r/data_r RID_LSB must match for the class-agnostic read below");
         id = static_cast<uint8_t>(is_b(axi_ch) ? flit.get_payload_field("B", "bid")
                                                : flit.get_payload_field("NARROW_R", "rid"));
     }

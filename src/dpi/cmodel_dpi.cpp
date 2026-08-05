@@ -21,10 +21,10 @@
 // ---------------------------------------------------------------------------
 // DPI marshalling word counts (FLIT_VEC_WORDS, DATA_VEC_WORDS, WSTRB_VEC_WORDS)
 // and the flit tail mask are derived from ni::FLIT_WIDTH / axi::DATA_WIDTH in
-// dpi_marshal.hpp, not pinned to today's values (341-bit flit, 256-bit data
-// bus). A future constants.yaml/ni_packet.json widening (S2 T2d: 341->629,
-// 256->512) is a constants-only change; the pack/unpack helpers below do not
-// need to change.
+// dpi_marshal.hpp, not pinned to today's values (629-bit flit, 512-bit data
+// bus). The S2 T2d constants.yaml/ni_packet.json widening (341->629,
+// 256->512) was a constants-only change; the pack/unpack helpers below did not
+// need to change, and the same holds for any future widening.
 // ---------------------------------------------------------------------------
 
 namespace ni::cmodel::wrap {

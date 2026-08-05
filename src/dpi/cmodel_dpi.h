@@ -78,12 +78,12 @@ void cmodel_router_get_outputs(unsigned long long ctx, svBit* req_out_valid,
 // port); AXI slave side + NoC req/rsp sides.
 // Packing conventions (little-endian word order; word counts derived from
 // ni::FLIT_WIDTH / axi::DATA_WIDTH in src/dpi/dpi_marshal.hpp, current values
-// shown for today's 341-bit flit / 256-bit data bus):
+// shown for today's 629-bit flit / 512-bit data bus):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
-//   data fields   : DATA_VEC_WORDS = 8 words (256-bit bus, little-endian)
-//   wstrb         : WSTRB_VEC_WORDS = 1 word (32-bit strobe)
-//   flit fields   : FLIT_VEC_WORDS = 11 words (341-bit flit, little-endian,
+//   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus, little-endian)
+//   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
+//   flit fields   : FLIT_VEC_WORDS = 20 words (629-bit flit, little-endian,
 //                   tail word explicitly masked to the last FLIT_WIDTH bits)
 //   other attribs : 1 word each (low bits used per width)
 // num_vc threads the topology VC count into the NmuConfig; make_virtual_networks(num_vc)
@@ -128,9 +128,10 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 // Packing conventions (same as cmodel_nmu_*):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
-//   data fields   : 8 words (256-bit bus = 8 x 32-bit words, little-endian)
-//   wstrb         : 1 word (32-bit strobe)
-//   flit fields   : FLIT_VEC_WORDS = 11 words (341-bit flit, little-endian)
+//   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus = 16 x 32-bit words, little-endian)
+//   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
+//   flit fields   : FLIT_VEC_WORDS = 20 words (629-bit flit, little-endian,
+//                   tail word explicitly masked to the last FLIT_WIDTH bits)
 //   other attribs : 1 word each (low bits used per width)
 // num_vc threads the topology VC count into the NsuConfig (write_rsp_vc=0,
 // read_rsp_vc=(num_vc>=2)?1:0 — read/write VC split). noc_rsp_credit_return / noc_req_credit_return
