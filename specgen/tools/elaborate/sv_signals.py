@@ -1,14 +1,18 @@
 """SV emitter for signals domain.
 
 Produces rtl_pkg/ni_signals_pkg.sv: reset constants + the packed-struct
-typedefs (noc_req_chan_t / noc_rsp_chan_t / noc_dat_chan_t / axi_req_t /
-axi_rsp_t) used on every wrap/fabric/tb port. Uses localparam int unsigned
-for reset constants (design doc 6.2).
+typedefs (axi_req_t / axi_rsp_t) used on every AXI wrap port. Uses
+localparam int unsigned for reset constants (design doc 6.2).
 
 SV interface blocks (axi4_intf / noc_intf) were removed in the FlooNoC struct
-refactor — the field/channel order of the structs is still derived from
+refactor — the field/channel order of the AXI structs is still derived from
 ``source/interface_handshake.json`` + constants.yaml, but no interface is
-emitted.
+emitted. The NoC-side per-network chan typedefs (noc_req_chan_t /
+noc_rsp_chan_t / noc_dat_chan_t) from that same refactor were dropped again:
+spec §4.3's pin contract for the NoC side is flat TX*/RX* signals, which is
+what S3a T5's wrap ports actually implement, so the struct typedefs were
+unused everywhere but their own golden file. AXI keeps its structs — the AXI
+wrap ports do use axi_req_t/axi_rsp_t.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -108,34 +112,6 @@ _IFACE_WIDTH_TO_STRUCT: dict[str, str] = {
     "[3:0]":  "[3:0]",
     "":       "",
 }
-
-
-_NOC_NETWORKS: list[tuple[str, str]] = [
-    ("req", "NOC_REQ_FLIT_WIDTH_DFLT"),
-    ("rsp", "NOC_RSP_FLIT_WIDTH_DFLT"),
-    ("dat", "NOC_DAT_FLIT_WIDTH_DFLT"),
-]
-
-
-def _emit_noc_structs() -> list[str]:
-    """Emit one noc_<net>_chan_t typedef per network (in-package).
-
-    Each network has its own flit width (REQ 137 b, RSP 127 b, DAT 629 b, per
-    docs/noc-target-spec.md §6) -- SV structs are not parameterizable, so this
-    is three typedefs rather than one width-generic struct.
-
-    The credit typedef is per-topology (width depends on num_vc) and lives in
-    noc_types_pkg_vc{N}.sv, generated via --domain noc_types --num-vc N.
-    """
-    out: list[str] = [
-        "  // NoC link packed-struct typedefs (replaced noc_intf; widths fixed-default).",
-    ]
-    for net, width_sym in _NOC_NETWORKS:
-        out.append("  typedef struct packed {")
-        out.append("    logic                                            valid;")
-        out.append(f"    logic [ni_params_pkg::{width_sym}-1:0] flit;")
-        out.append(f"  }} noc_{net}_chan_t;")
-    return out
 
 
 def emit_noc_types_pkg(num_vc: int, spec_version: str) -> str:
@@ -254,8 +230,6 @@ def emit(signals_json: Path, spec_version: str) -> str:
     )
     axi_spec = interfaces_doc["interfaces"].get("axi4_intf", {})
     axi_channels: list[str] = axi_spec.get("channels", list(_AXI_CHANNEL_SIGNALS.keys()))
-    out.extend(_emit_noc_structs())
-    out.append("")
     out.extend(_emit_axi_structs(axi_channels))
     out.append("")
 
@@ -263,10 +237,10 @@ def emit(signals_json: Path, spec_version: str) -> str:
     out.append("")
 
     # SV interfaces (axi4_intf / noc_intf) were removed in the FlooNoC struct
-    # refactor: the wraps + fabric + tb now use packed-struct typedefs
-    # (noc_req_chan_t / noc_rsp_chan_t / noc_dat_chan_t / axi_req_t / axi_rsp_t
-    # above) on every port. The interface_handshake.json source still drives
-    # the struct field/channel order via load_interfaces() above; only the SV
-    # interface emission is gone.
+    # refactor: AXI wrap ports use the axi_req_t / axi_rsp_t packed-struct
+    # typedefs above. The interface_handshake.json source still drives the
+    # struct field/channel order via load_interfaces() above; only the SV
+    # interface emission is gone. NoC-side ports use flat TX*/RX* signals
+    # (spec §4.3 pin contract), not a struct.
     out.append("`endif // NI_SIGNALS_PKG_SVH")
     return "\n".join(out) + "\n"

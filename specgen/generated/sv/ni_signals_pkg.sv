@@ -3,7 +3,7 @@
 // Source:    specgen/generated/json/ni_signals.json
 // Source SHA: aeacb7e3f9c0
 // Generator version: v1.0.0
-// Generated at: 2026-08-05T06:29:08Z
+// Generated at: 2026-08-05T10:30:00Z
 // ----------------------------------------------------------------------------
 `timescale 1ns/1ps
 
@@ -63,20 +63,6 @@ package ni_signals_pkg;
   localparam int unsigned AXI_ARREGION_O_RESET = 0;
   localparam int unsigned AXI_ARUSER_O_RESET = 0;
   localparam int unsigned AXI_ARQOS_O_RESET = 0;
-
-  // NoC link packed-struct typedefs (replaced noc_intf; widths fixed-default).
-  typedef struct packed {
-    logic                                            valid;
-    logic [ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT-1:0] flit;
-  } noc_req_chan_t;
-  typedef struct packed {
-    logic                                            valid;
-    logic [ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT-1:0] flit;
-  } noc_rsp_chan_t;
-  typedef struct packed {
-    logic                                            valid;
-    logic [ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT-1:0] flit;
-  } noc_dat_chan_t;
 
   // AXI packed-struct typedefs (replaced axi4_intf; widths fixed-default).
   typedef struct packed {
