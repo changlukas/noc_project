@@ -67,7 +67,9 @@ TEST(NmuWrap, single_aw_w_two_phase_handshake) {
     in.awid = 0x01;
     in.awaddr = 0x200;
     in.awlen = 0;    // 1 beat
-    in.awsize = 5;   // 32 bytes (256-bit bus)
+    in.awsize = 5;   // 32 bytes/beat -- a legal half-width beat on the 64 B bus,
+                     // not full-bus (that's size=6); this test checks handshake
+                     // timing, not bus width, so any legal size works.
     in.awburst = 1;  // INCR
     adapter.set_inputs(in);
     adapter.tick();

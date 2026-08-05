@@ -33,7 +33,7 @@ class Flit {
                            uint64_t value) noexcept;
     uint64_t get_payload_field(std::string_view channel, std::string_view field) const noexcept;
 
-    // ---- Bulk payload bytes for wide fields (wdata 256-bit, rdata 256-bit) ----
+    // ---- Bulk payload bytes for wide fields (wdata 512-bit, rdata 512-bit) ----
     void set_payload_bytes(std::string_view channel, std::string_view field, const uint8_t* src,
                            std::size_t bit_width) noexcept;
     void get_payload_bytes(std::string_view channel, std::string_view field, uint8_t* dst,

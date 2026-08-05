@@ -56,7 +56,19 @@ class Scoreboard {
             // Memory::perform_read_, AxiMaster W push, and AxiMaster R accumulator.
             const std::size_t lane_room = (byte_lane < DATA_BYTES) ? (DATA_BYTES - byte_lane) : 0;
             const std::size_t j_max = std::min(bpb, lane_room);
+            // Mirror axi_master.hpp's W-loop first-beat WSTRB mask (IHI 0022
+            // A3.4.1): strb_per_beat is the RAW, un-masked per-beat token (the
+            // wire-level prefix mask lives only in the W-loop's WSTRB shift, not
+            // in what WriteResult carries), so the scoreboard must re-derive which
+            // prefix bytes the slave never actually wrote. Only the operation's
+            // very first beat can start mid-window -- a later beat (including a
+            // second sub-burst after a 4KB-cross split, which always re-aligns)
+            // never is -- so gate on beat index, not a numeric address compare
+            // (same WRAP-wraparound pitfall as the write loop if compared
+            // numerically instead).
+            const uint64_t prefix = (beat == 0) ? (wr.addr - aligned_addr) : 0;
             for (std::size_t j = 0; j < j_max; ++j) {
+                if (j < prefix) continue;  // slave never wrote this byte -- not committed
                 if ((strb >> j) & 0x1u) {
                     expected_[beat_addr_v + j] = data[beat * bpb + j];
                 }

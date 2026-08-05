@@ -93,6 +93,36 @@ TEST(Scoreboard, ReadFromUnwrittenAddrReturnsFillDefault) {
     EXPECT_EQ(sb.mismatch_count(), 0u);
 }
 
+TEST(Scoreboard, UnalignedWriteBeat0PrefixNotCommitted) {
+    SCENARIO(
+        "scoreboard: unaligned write (addr=0x1003 size=5) must not mark the aligned-window "
+        "prefix bytes [0x1000,0x1003) as written -- mirrors axi_master.hpp's wire-level "
+        "first-beat WSTRB mask (IHI 0022 A3.4.1); this is the test that would have caught the "
+        "scoreboard/master divergence when the two were fixed separately");
+    axi::Scoreboard sb;
+    std::vector<uint8_t> data(axi::DATA_BYTES, 0x00u);
+    for (int i = 0; i < axi::DATA_BYTES; ++i) data[i] = static_cast<uint8_t>(i + 1);  // never 0x00
+    // Raw, un-masked strb_per_beat -- exactly what WriteResult::strb_per_beat carries
+    // (op.strb_per_beat is beat-relative and is NOT re-masked before reaching the
+    // scoreboard; the wire-level prefix mask lives only in axi_master.hpp's W-loop).
+    std::vector<uint64_t> strb{axi::kFullStrbMask};
+    axi::WriteResult wr{
+        0x1003,          /*size*/ 5, /*len*/ 0, axi::Burst::INCR, axi::LockType::Normal, data, strb,
+        axi::Resp::OKAY, 1,          1};
+    sb.handle_write_completed(wr, data, strb);
+
+    // Aligned-window readback [0x1000, 0x1020): the slave never wrote the first 3
+    // bytes (prefix, masked off on the wire), so they read as fill-default 0x00;
+    // the true write range [0x1003, 0x1020) reads back data[3..31].
+    std::vector<uint8_t> observed(32, 0x00u);
+    for (int j = 3; j < 32; ++j)
+        observed[static_cast<std::size_t>(j)] = data[static_cast<std::size_t>(j)];
+    axi::ReadResult rr{0x1000,   /*size*/ 5,      /*len*/ 0, axi::Burst::INCR,
+                       observed, axi::Resp::OKAY, 1,         2};
+    sb.handle_read_observed(rr);
+    EXPECT_EQ(sb.mismatch_count(), 0u);
+}
+
 TEST(Scoreboard, SparseWstrbByteMerge) {
     SCENARIO("scoreboard: sparse WSTRB (0x0F) merges only enabled byte lanes into expected_");
     // 1-beat write with strb=0x0F: only byte lanes 0-3 land in expected_;

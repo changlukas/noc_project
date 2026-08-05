@@ -106,7 +106,7 @@ using namespace ni::cmodel::wrap;
 TEST(DpiMarshalTest, PackUnpackFlit_RoundTrip_PerByteDistinctPattern) {
     // Every flit byte gets a distinct value; the last byte's padding bits
     // (beyond FLIT_WIDTH) are left at 0, as a real Flit::raw() produces.
-    constexpr int kLastByteValidBits = ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;  // 341-336=5
+    constexpr int kLastByteValidBits = ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;  // 629-624=5
     FlitBytes b{};
     for (int i = 0; i < FLIT_BYTES; ++i) b[i] = static_cast<uint8_t>(i * 7 + 3);
     b[FLIT_BYTES - 1] &= static_cast<uint8_t>((1u << kLastByteValidBits) - 1u);

@@ -27,7 +27,7 @@ namespace ni::cmodel::wrap {
 inline constexpr std::size_t NMU_NUM_VC_MAX = 1u << ni::header::VC_ID_WIDTH;
 using NmuVcCreditVec = std::array<bool, NMU_NUM_VC_MAX>;
 
-// 256-bit data bus = 32 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
+// 512-bit data bus = 64 bytes. Aliased from axi::DATA_BYTES so the DPI/SV
 // wire width agrees across master/slave/nmu/nsu wrap IO structs.
 constexpr int NMU_AXI_DATA_BYTES = axi::DATA_BYTES;
 
