@@ -14,6 +14,7 @@
 #include "ni_flit_constants.h"  // ni::FLIT_WIDTH, ni::width::AXI_ADDR_WIDTH
 #include "ni_params.h"          // ni::NOC_{REQ,RSP,DAT}_FLIT_WIDTH
 #include <array>
+#include <cassert>
 #include <cstdint>
 
 namespace ni::cmodel::wrap {
@@ -60,11 +61,33 @@ struct FlitMarshalT {
         return b;
     }
 
+    // fits — no live flit bit sits at or above this network's wire width.
+    // pack() discards everything above WIDTH_BITS; when the discarded bits are
+    // real payload the loss is invisible on the wire and shows up far
+    // downstream as corrupt AXI data. Same role as SimpleRouter's input-FIFO
+    // overflow assert: make a wrong configuration loud, not silent.
+    static bool fits(const FlitBytes& b) {
+        for (int idx = 0; idx < FLIT_BYTES; ++idx) {
+            const int lo_bit = idx * 8;
+            if (lo_bit >= WIDTH_BITS) {
+                if (b[idx] != 0) return false;
+            } else if (lo_bit + 8 > WIDTH_BITS) {
+                const uint8_t keep = static_cast<uint8_t>((1u << (WIDTH_BITS - lo_bit)) - 1u);
+                if ((b[idx] & static_cast<uint8_t>(~keep)) != 0) return false;
+            }
+        }
+        return true;
+    }
+
     // Pack FlitBytes -> svBitVecVal[VEC_WORDS] (little-endian within each
     // word). The tail word is explicitly masked to TAIL_VALID_BITS so padding
     // bits never leak onto the wire regardless of what FlitBytes carries past
     // WIDTH_BITS.
     static void pack(const FlitBytes& b, svBitVecVal* vec) {
+        assert(fits(b) &&
+               "flit payload exceeds this network's wire width — the DPI would silently "
+               "discard live bits (check the axi_ch -> network steering against the "
+               "per-network NOC_<NET>_FLIT_WIDTH)");
         for (int w = 0; w < VEC_WORDS; ++w) {
             vec[w] = 0;
             for (int byte = 0; byte < 4; ++byte) {
