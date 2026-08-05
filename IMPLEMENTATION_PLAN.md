@@ -41,19 +41,13 @@ depth (default 128 = 8 KB at 64 B beats), VC count (1-8), mesh dims, outstanding
 widths all stay free parameters exactly as FlooNoC keeps them; tests cover the parameter range,
 not one value.
 
-## Stage 2: Dual data class 64/512
-Goal: narrow 64 b + data 512 b classes; WSTRB past uint32_t; memory/master/slave/DPI
-marshalling/VIP types; payload layouts NarrowW 81, DataW 585, B 18, NarrowR 83, DataR 531;
-final flit widths REQ 137 / RSP 127 / DAT 629; RoB slot depth stays a free parameter, default
-moves to 128 (= 8 KB at the 64 B data-class beat, spec: two 4 KB bursts). Interim: data-class flits ride the existing REQ/RSP links
-(widened) until S3a splits the networks.
-Success Criteria: ctest + co-sim green at both widths; DPI boundary verified beat-exact.
-Status: Not Started
-
 ## Stage 3a: Third physical network, structural
 Goal: DAT link IO + third router instance; simple-mode ready/valid router class for REQ/RSP
 (1-2 stages); standard credit router retained for DAT; TX*/RX* pin contract; specgen
 first-class per-network flit widths; wrapper/DPI naming; perf probes follow.
+Carry-in from S2 reviews: delete specgen's dead "derived" width_param branches
+(constants.py:227-244, :276-310) while touching per-network widths; check_strb_valid_bits is
+vacuous at 64 lanes (kFullStrbMask == ~0ull) — delete the check+call site or mark explicitly.
 Success Criteria: three networks carry traffic in co-sim, REQ/RSP ready/valid observed on wires.
 Status: Not Started
 
@@ -105,6 +99,16 @@ Status: Not Started
 Goal: endpoint interface option (one shared vs two per-class AXI ports) or documented
 unsupported; per-network perf metrics; block specs (nmu/nsu/router) re-synced to as-built;
 regression re-baseline. GALS explicitly ignored (user decision 2026-08-04).
+Tile endpoint integration (user direction 2026-08-05): each tile gains an AXI xbar behind the
+NSU feeding two memories — config-space and data-space — implementing the spec's second-level
+node-local-offset decode; xbar = off-the-shelf pulp axi_xbar RTL in the tb (Verilator compat
+[UNVERIFIED], validate at integration); xbar range parameters derived from the SAME topology
+YAML address_map as the SAM (single source, no second table). Couples with the endpoint-port
+decision: two per-class ports would reduce the xbar to a demux or nothing. Address-map
+semantics to settle with the xbar: config and memory tiles on the same node both rebase to
+0-based node-local offsets, so they alias in a single-slave tb today (S2 gate worked around
+it by disjoint probe offsets) — with the two-memory xbar the aliasing becomes intended
+(separate targets); state it in the spec either way.
 Success Criteria: FEATURE_INVENTORY.md and block specs match code; regression matrix
 re-baselined.
 Carry-in from S0 reviews: block-spec numeric drift vs constants.yaml (credit seed 4 vs
@@ -133,7 +137,11 @@ still open into that round's backlog "This round".
   release); sam_yaml missing address_map needs a descriptive error; gen_tb_top rejects empty
   requested_name; specgen pytest must write to a temp dir (rewrites committed banners today);
   axi_bw_monitor.sv carries a 2-line local edit, upstream or wrap it; specgen
-  examples/quickstart printf column padding misaligned since the S0 rename (cosmetic).
+  examples/quickstart printf column padding misaligned since the S0 rename (cosmetic);
+  gen_test_patterns.py validates neither AxLEN nor the AXI 4 KB rule (illegal BURST_LEN
+  surfaces as the RoB oversized-burst abort, not a stimulus error); co-sim default beat is
+  half-bus (--size 5 at 64 B bus) outside beat_exact; some test helpers still take uint32_t
+  strb params (cannot express lanes >= 32).
 - Verification methodology: AXI-side perf DPI hooks never driven (bw_monitor vs perf.json
   cross-check has never run); no coverage, no constrained-random, no wire-level SVA.
 - Infrastructure notes: VCS flow builds but has never executed; WSL host instability
