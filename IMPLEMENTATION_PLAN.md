@@ -71,22 +71,36 @@ paragraph uses unqualified "AW" in two channel-class senses (line ~111 DataAw vs
 NarrowAw) — add the "narrow" qualifier; residual "VC arbiter" prose in nmu-spec G9 /
 NOC_DAT_NUM_VC parameter row / nsu-spec §3.4; `cmodel_dpi.h:142` "vnet" wording. Also from
 S3b: ready_slack calibration still deferred (needs a measured wire-loop experiment).
-Carry-in from S4: (1) RULED (user, 2026-08-06) — an R burst becomes ONE wormhole packet, per-hop
-VA on the head with body/tail following the head's VC. Rejected the alternative of keeping
-per-beat packets pinned by `fixed_vc`: that mechanism exists to pin ordering-critical streaks
-(the S3b U1 hole) and reusing it as the universal read-data carrier both conflates two purposes
-and permanently excludes all read data from per-hop VC reallocation. As built today
-`nsu/packetize.hpp:125` stamps `flit_tail = 1` on every R beat. Work this implies:
-`build_r_flit` marks only the final beat (burst length is already in the MetaEntry); NSU R
-switches to `fixed_vc = 0` so VA runs per hop and the NI hash becomes just the first-hop pick;
-the DAT router needs no new mechanism (`locked_output_vc` already implements body-follows-head,
-ported and verified in S3b) but its continuation path must be exercised with R worms, not only
-DataAw+W; on RSP there is no VA to gain (single VC) so NarrowR worms buy spec consistency and
-the output lock only. Two consequences to carry into the work: long bursts now hold a VC (DAT,
-other VCs still flow) or the whole link (RSP, single VC) for their duration — a head-of-line
-cost that did not exist under per-beat packets; and T4's join mid-worm hold stops being dormant,
-which re-opens the held-join wait-for edge that S4's final review closed as "unreachable as
-built". B stays single-flit. (2) router-spec §4
+Carry-in from S4: (1) RULED per network (user, 2026-08-06). Read data is carried differently on
+the two networks, and the block specs must say so rather than calling the whole fabric
+"XY wormhole".
+
+**DAT (DataR): virtual-channel flow control.** A read burst is ONE multi-flit packet. VC
+allocation is packet-granular — the VC is allocated to the head flit at each hop and inherited
+by body and tail (the standard VC-router pipeline, where body and tail skip RC and VA); switch
+allocation stays flit-granular, so packets on different VCs interleave on the physical link.
+Rejected alternative: keeping per-beat packets pinned by `fixed_vc`. That mechanism exists to
+pin ordering-critical streaks (the S3b U1 hole); reusing it as the universal read-data carrier
+conflates two purposes and permanently excludes all read data from per-hop VC reallocation.
+Work implied: `nsu::Packetize::build_r_flit` marks only the final beat (burst length is already
+in the MetaEntry) instead of today's unconditional `flit_tail = 1` at `:125`; NSU R switches to
+`fixed_vc = 0` so VA runs per hop and the NI hash becomes only the first-hop pick; the DAT
+router needs no new mechanism (`locked_output_vc` already implements body-follows-head, ported
+and verified in S3b) but its continuation path must be exercised with R packets, not only
+DataAw+W. Cost to accept: a long burst now holds its VC for the burst's duration, though other
+VCs keep flowing.
+
+**RSP (NarrowR, NarrowB, DataB): single-flit packets, unchanged.** Packet and flit coincide, so
+no packet-granular link reservation is ever held; ordering within a burst follows from
+deterministic routing over in-order channels. Rationale for not extending the DAT ruling here:
+RSP is single-VC by spec (:40), so a multi-flit NarrowR would be wormhole-with-one-VC, the
+textbook anti-pattern — a blocked packet holds the link while every packet behind it stalls,
+and here those are the B flits of both classes, which have no ordering relationship to read
+data. The standard remedy (add VCs) is unavailable by spec, so single-flit packets ARE the
+head-of-line-blocking remedy on this network. Consequence: T4's join mid-worm hold stays
+dormant and the held-join wait-for edge stays closed, as S4's final review found.
+
+B stays single-flit on both networks. (2) router-spec §4
 has no numbered SPEC entries for fork/join — §2.10 ends with ctest/co-sim pointers instead;
 add them if the numbered contract list is meant to carry them. (3) router-spec §2.8 still says
 two networks per node (carries the file's own Pre-S3a marker).
