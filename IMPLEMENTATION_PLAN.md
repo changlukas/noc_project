@@ -49,7 +49,8 @@ floo_router's blanket NoLoopback, cited in simple_router.hpp).
 ## Stage 4: Collectives
 Goal: NMU 48 b address mask to 8 b node mask translate + reject; AxLOCK-with-collective and
 Ar-collective rejected at NMU packetize before any fanout or RoB allocation; router multicast
-fork with credit discipline; CollectB in-network merge with error BRESP precedence; collective
+fork on both routers (credit discipline on DAT, ready/valid on REQ); CollectB in-network merge
+with error BRESP precedence; collective
 traffic rides the RoB-bypass/interlock path only (NoRobReduction ruling below); scoreboard keys
 writes by (dst_id, local_addr).
 Blocking decisions RESOLVED against FlooNoC v0.8.4 RTL (2026-08-05, citations spot-verified;
