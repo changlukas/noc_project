@@ -74,17 +74,27 @@ struct CollectiveTestbench {
     Rob rob;
 };
 
-// Feed a bypassed B back so the transaction retires and releases the id.
-void retire_b(CollectiveTestbench& t, uint8_t id) {
+// Deliver a bypassed B into the response ingress. The collective header bits
+// default to a plain unicast B; the merged B of a collective carries the
+// echoed pair the NSU stamped (design §3.1).
+void feed_b(CollectiveTestbench& t, uint8_t id, uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST,
+            uint8_t collective_mask = 0, axi::Resp resp = axi::Resp::OKAY) {
     ni::cmodel::Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_DataB);
     f.set_header_field("dst_id", kSrcId);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 0);
+    f.set_header_field("collective_op", collective_op);
+    f.set_header_field("collective_mask", collective_mask);
     f.set_payload_field("B", "bid", id);
-    f.set_payload_field("B", "bresp", 0);
+    f.set_payload_field("B", "bresp", static_cast<uint64_t>(resp));
     ASSERT_TRUE(t.noc.rsp_out().push_flit(f));
     t.depkt.tick();
+}
+
+// Feed a bypassed B back so the transaction retires and releases the id.
+void retire_b(CollectiveTestbench& t, uint8_t id) {
+    feed_b(t, id);
     ASSERT_TRUE(t.rob.pop_b().has_value());
 }
 
@@ -231,6 +241,58 @@ TEST(NmuCollective, NothingStreamsPastAnInFlightCollective) {
     retire_b(t, 0x05);
     EXPECT_EQ(t.rob.write_txns(), 0u);
     EXPECT_TRUE(t.rob.push_aw(make_aw(0x05, tile_addr(0, 1))));
+}
+
+// === Merged-B ingress (design §2.3a, release side) ===
+
+TEST(NmuCollective, MergedBWithCollectiveBitsRetiresLikeAUnicastB) {
+    SCENARIO(
+        "NMU merged-B ingress: the B of a collective comes back carrying the echoed "
+        "collective_op/collective_mask. Nothing on the response path reads them -- decode_b takes "
+        "bid/bresp/buser from the payload and the meta is ordering_tag/ordering_req/class only -- "
+        "so the merged B retires through the same bypassed path as any unicast B, with zero new "
+        "response-path state");
+    CollectiveTestbench t;
+    ASSERT_TRUE(t.rob.push_aw(
+        make_aw(0x05, tile_addr(0, 1), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))));
+    EXPECT_EQ(t.rob.write_txns(), 1u);
+    feed_b(t, 0x05, axi::COLLECTIVE_OP_MULTICAST, /*collective_mask=*/0x03, axi::Resp::SLVERR);
+    auto b = t.rob.pop_b();
+    ASSERT_TRUE(b.has_value());
+    EXPECT_EQ(b->id, 0x05);
+    EXPECT_EQ(b->resp, axi::Resp::SLVERR);  // the merge's SLVERR precedence result, unaltered here
+    EXPECT_EQ(t.rob.write_txns(), 0u);      // one B releases the shared pool entry
+    // R2 released: the id accepts work again, including a second collective.
+    EXPECT_TRUE(t.rob.push_aw(
+        make_aw(0x05, tile_addr(3, 3), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))));
+}
+
+TEST(NmuCollectiveDeath, SecondBForOneCollectiveAborts) {
+    SCENARIO(
+        "NMU merged-B ingress: one AW gets exactly one B, merged or not. A second B for the same "
+        "collective would double-release the interlock and the shared write pool. The order-list "
+        "head invariant catches it first -- the write_txns_ underflow assert below is the backstop "
+        "for any path that reaches retirement without it");
+    CollectiveTestbench t;
+    ASSERT_TRUE(t.rob.push_aw(
+        make_aw(0x05, tile_addr(0, 1), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))));
+    feed_b(t, 0x05, axi::COLLECTIVE_OP_MULTICAST, 0x03);
+    ASSERT_TRUE(t.rob.pop_b().has_value());
+    feed_b(t, 0x05, axi::COLLECTIVE_OP_MULTICAST, 0x03);
+    EXPECT_DEATH(t.rob.pop_b(), "does not match the head");
+}
+
+TEST(NmuCollectiveDeath, RetireWithoutAnOutstandingWriteAborts) {
+    SCENARIO(
+        "NMU merged-B ingress: the write_txns_ underflow assert IS the single-merged-B invariant "
+        "seen from the NMU side (design §2.3a). Injected directly at the retire entry point, since "
+        "the order-list head check shadows it on the pop_b path");
+    CollectiveTestbench t;
+    ASSERT_TRUE(t.rob.push_aw(
+        make_aw(0x05, tile_addr(0, 1), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))));
+    retire_b(t, 0x05);
+    EXPECT_DEATH(t.rob.retire_b(/*ordering_req=*/false, /*ordering_tag=*/0, 0x05),
+                 "no outstanding write transaction");
 }
 
 // === Reject set (design §2.3) -- one death test per row ===
