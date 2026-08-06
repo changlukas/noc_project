@@ -206,10 +206,10 @@ TEST(NmuPacketize, AwuserStripsCollectiveBitsWhenZero) {
 
 TEST(NmuPacketizeDeath, NonzeroCollectiveOpAborts) {
     SCENARIO(
-        "NMU Packetize: nonzero AWUSER collective_op is a permanent illegal-input condition, not "
-        "backpressure — push_aw_with_meta fails loud (assert+abort) instead of return-false, so "
-        "it can't wedge the S1 stage indistinguishably from congestion. Collective support lands "
-        "in S4");
+        "NMU Packetize: the direct push_aw interface bypasses nmu::Rob, which owns the collective "
+        "validate and translate, so a collective AWUSER here would be silently truncated to the "
+        "8 b payload field. Permanent illegal input, not backpressure — fails loud (assert+abort) "
+        "instead of return-false, which can't wedge the S1 stage as congestion");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     auto aw = make_aw(/*id*/ 0x03, /*addr*/ 0x340000);
@@ -219,8 +219,8 @@ TEST(NmuPacketizeDeath, NonzeroCollectiveOpAborts) {
 
 TEST(NmuPacketizeDeath, NonzeroCollectiveMaskAborts) {
     SCENARIO(
-        "NMU Packetize: nonzero AWUSER collective_mask alone (collective_op=0) also aborts — "
-        "the reject checks AWUSER[57:8] as a whole, not collective_op in isolation");
+        "NMU Packetize: nonzero AWUSER collective_mask alone (collective_op=0) also aborts on the "
+        "direct path — the reject checks AWUSER[57:8] as a whole, not collective_op in isolation");
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     auto aw = make_aw(/*id*/ 0x03, /*addr*/ 0x340000);
