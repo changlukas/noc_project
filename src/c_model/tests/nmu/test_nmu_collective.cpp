@@ -170,13 +170,10 @@ TEST(NmuCollective, S1StageCarriesTheCollectiveFields) {
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, {});
     ni::cmodel::nmu::NmuReqS1Bridge bridge;
     const auto aw = make_aw(0x05, tile_addr(0, 1), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000));
-    const ni::cmodel::nmu::AwHeaderMeta meta{/*dst_id=*/0x10,
-                                             /*local_addr=*/0,
-                                             0,
-                                             0,
-                                             axi::AxiClass::Data,
-                                             axi::COLLECTIVE_OP_MULTICAST,
-                                             /*collective_mask=*/0x03};
+    const ni::cmodel::nmu::AwHeaderMeta meta{
+        /*dst_id=*/0x10,
+        /*local_addr=*/0,        0, 0, axi::AxiClass::Data, axi::COLLECTIVE_OP_MULTICAST,
+        /*collective_mask=*/0x03};
     ASSERT_TRUE(bridge.push_aw_with_meta(aw, meta));
     bridge.tick(pkt);
     auto f = aw_cap.pop();
@@ -334,6 +331,37 @@ TEST(NmuCollectiveDeath, MetaDisagreesWithAwuser) {
     auto aw = make_aw(0x05, tile_addr(0, 0), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000));
     ni::cmodel::nmu::AwHeaderMeta meta{0x00, 0, 0, 0};  // collective fields left at UNICAST / 0
     EXPECT_DEATH(pkt.push_aw_with_meta(aw, meta), "disagrees with AWUSER");
+}
+
+TEST(NmuCollectiveDeath, MetaOpAndMaskDisagree) {
+    SCENARIO(
+        "NMU collective §2.1: the op/mask agreement half of the same guard. meta.collective_op "
+        "can match AWUSER and still be paired with an empty node mask -- a translate that "
+        "returned MULTICAST with nothing to fan out to");
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, mesh_sam());
+    const auto aw = make_aw(0x05, tile_addr(0, 0), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000));
+    ni::cmodel::nmu::AwHeaderMeta meta{0x00,
+                                       0,
+                                       0,
+                                       0,
+                                       axi::AxiClass::Data,
+                                       axi::COLLECTIVE_OP_MULTICAST,
+                                       /*collective_mask=*/0};  // agrees with AWUSER, mask empty
+    EXPECT_DEATH(pkt.push_aw_with_meta(aw, meta), "collective_op and collective_mask disagree");
+}
+
+TEST(NmuCollectiveDeath, AwuserAboveTheFieldWidth) {
+    SCENARIO(
+        "NMU collective: AWUSER is 58 b. The accessors mask to 2 b / 48 b, so a bit above the "
+        "field would be silently dropped on the Rob path -- reject it instead. The direct path "
+        "already catches it by testing AWUSER[57:8] as a whole");
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, mesh_sam());
+    auto aw = make_aw(0x05, tile_addr(0, 0));
+    aw.user = uint64_t{1} << 60;
+    EXPECT_DEATH(pkt.push_aw_with_meta(aw, ni::cmodel::nmu::AwHeaderMeta{0x00, 0, 0, 0}),
+                 "above the 58 b field");
 }
 
 TEST(NmuCollectiveDeath, ReplicaBurstOverrunsItsAperture) {

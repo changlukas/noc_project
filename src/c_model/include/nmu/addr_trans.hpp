@@ -225,6 +225,12 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     // Set-bit positions of the address mask. More set bits than a node id has
     // bits names more wildcard addresses than the mesh has nodes to absorb.
     constexpr unsigned kNodeIdBits = ni::width::X_WIDTH + ni::width::Y_WIDTH;
+    // The uint8_t return IS the flit's collective_mask, so the node id this
+    // function reasons about and the header field it fills must stay the same
+    // width. Same guard route_mask.hpp:43-46 puts on the consumer side.
+    static_assert(kNodeIdBits == ni::width::COLLECTIVE_MASK_WIDTH,
+                  "collective_mask must be one node id wide (X|Y) -- specgen drift");
+    static_assert(kNodeIdBits <= 8, "node id / collective_mask no longer fit uint8_t");
     uint8_t pos[kNodeIdBits];
     unsigned n = 0;
     for (unsigned i = 0; i < 48; ++i) {
@@ -291,6 +297,8 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     // cardinality then forces the set to BE that span. dst0|node_mask is
     // therefore one of the enumerated -- so SAM-real, so in-mesh -- ids, which
     // is design §2.2's step-4 submesh check without needing the mesh dims here.
+    // "SAM-real implies in-mesh" is SamTable::validate's dst-outside-mesh check
+    // (:105-107), which the YAML loader runs; hand-built test tables bypass it.
     unsigned span_bits = 0;
     for (unsigned i = 0; i < kNodeIdBits; ++i) span_bits += (node_mask >> i) & 1u;
     if (span_bits != n) {
