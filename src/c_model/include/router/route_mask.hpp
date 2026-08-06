@@ -37,6 +37,14 @@
 
 namespace ni::cmodel::router {
 
+// The uint8_t node-id/mask API below assumes a mask is exactly one node id
+// wide and that an id fits a byte. Both are specgen facts today; catch drift
+// at compile time rather than in silently truncated coordinates.
+static_assert(ni::width::COLLECTIVE_MASK_WIDTH == ni::width::X_WIDTH + ni::width::Y_WIDTH,
+              "collective_mask must be one node id wide (X|Y) — specgen drift");
+static_assert(ni::width::COLLECTIVE_MASK_WIDTH <= 8,
+              "node id / collective_mask no longer fit uint8_t — widen the route_mask API");
+
 // Multi-hot port set: bit p set means RouterPort p is a member.
 // (route_sel_o, floo_route_xymask.sv:40.)
 using PortMask = uint8_t;

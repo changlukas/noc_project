@@ -50,10 +50,24 @@ RouterPort opposite(RouterPort p) {
     }
 }
 
-// A node belongs to a masked set when every differing bit is a don't-care.
-// x and y occupy disjoint fields of the id, so one whole-id test covers both.
+// Node-id field split, from specgen — same composition node_id() builds and the
+// header decodes (route_mask.hpp:60). Never hardcode the field boundary.
+constexpr uint8_t kXFieldMask = static_cast<uint8_t>((1u << ni::width::X_WIDTH) - 1);
+constexpr uint8_t kYFieldMask = static_cast<uint8_t>((1u << ni::width::Y_WIDTH) - 1);
+
+constexpr uint8_t id_x(uint8_t id) {
+    return static_cast<uint8_t>(id & kXFieldMask);
+}
+constexpr uint8_t id_y(uint8_t id) {
+    return static_cast<uint8_t>((id >> ni::width::X_WIDTH) & kYFieldMask);
+}
+
+// A node belongs to a masked set when every differing coordinate bit is a
+// don't-care. Computed per coordinate with the test's own arithmetic, not the
+// header's helper — the test must not check the implementation against itself.
 bool is_member(uint8_t id, uint8_t anchor, uint8_t mask) {
-    return ((id ^ anchor) & static_cast<uint8_t>(~mask)) == 0;
+    return ((id_x(id) ^ id_x(anchor)) & static_cast<uint8_t>(~id_x(mask) & kXFieldMask)) == 0 &&
+           ((id_y(id) ^ id_y(anchor)) & static_cast<uint8_t>(~id_y(mask) & kYFieldMask)) == 0;
 }
 
 int popcount8(uint8_t v) {
@@ -75,8 +89,9 @@ const Mesh kMeshes[] = {{2, 2}, {2, 4}, {4, 2}, {4, 4}};
 // mesh; every member is <= (anchor | mask) coordinate-wise, so this one test
 // covers all 2^n of them.
 bool mask_legal(uint8_t anchor_x, uint8_t anchor_y, uint8_t mask, const Mesh& m) {
-    const uint8_t mask_x = mask & 0x0fu, mask_y = mask >> 4;
-    return (anchor_x | mask_x) < m.x_dim && (anchor_y | mask_y) < m.y_dim;
+    // A bit outside the X|Y fields is not a coordinate don't-care at all.
+    if (node_id(id_x(mask), id_y(mask)) != mask) return false;
+    return (anchor_x | id_x(mask)) < m.x_dim && (anchor_y | id_y(mask)) < m.y_dim;
 }
 
 struct Cell {
