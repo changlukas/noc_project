@@ -29,7 +29,7 @@
 // Pure functions of (dst_id, src_id, collective_mask, this router's config).
 // No router state — the fork/join state machines live in their consumers.
 #include "ni_flit_constants.h"
-#include "router/router.hpp"
+#include "router/router_types.hpp"
 
 #include <cassert>
 #include <cstdint>
