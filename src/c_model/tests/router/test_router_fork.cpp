@@ -477,6 +477,166 @@ TEST_P(RouterForkPinnedVc, PinnedVcRidesEveryBranchAcrossNumVc) {
 
 INSTANTIATE_TEST_SUITE_P(NumVc, RouterForkPinnedVc, ::testing::Values(1, 2, 4));
 
+// --- §1.2 wedge: overlapping trees, opposite acquisition order --------------
+
+struct WireLink : ni::cmodel::router::RouterLink {
+    Router* target = nullptr;
+    std::size_t port = 0;
+    void push_flit(const Flit& f) override { target->input(port).push_flit(f); }
+};
+
+struct CreditRelay : ni::cmodel::router::RouterCreditSink {
+    Router* target = nullptr;
+    std::size_t out_port = 0;
+    void receive_credit(uint8_t vc) override { target->receive_credit(out_port, vc); }
+};
+
+// Sink that returns the credit inline at delivery (stage 3 runs first in
+// tick(), so the credit is usable the same tick — the EjectSink pattern of
+// test_router.cpp). Models a freely absorbing submesh row.
+struct DrainingSink : ni::cmodel::router::RouterLink {
+    Router* router = nullptr;
+    std::size_t out_port = 0;
+    std::vector<Flit> received;
+    void push_flit(const Flit& f) override {
+        received.push_back(f);
+        router->receive_credit(out_port, static_cast<uint8_t>(f.get_header_field("vc_id")));
+    }
+};
+
+TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
+    SCENARIO(
+        "§1.2/§1.3 detection a: two overlapping multicast trees acquire N@R1 and N@R2 in "
+        "opposite orders under credit exhaustion (burst >> vc_depth). The ported F2/F3 "
+        "discipline DEADLOCKS — this test PASSES by detecting the no-progress state within "
+        "the derived tick bound and attributing it through the fork introspection: both "
+        "fork done_masks frozen short of expected with the missing branches' outputs "
+        "locked to the other worm. This is the R1 restriction's documented hazard "
+        "demonstration, not a bug in the fork");
+    // Row y=0 of a 4x2 mesh. M1 from (0,0) and M2 from (3,0) both multicast
+    // to the full row above (anchor (0,1), mask x=3): fork {E,N} at every
+    // source-row router for M1, {W,N} for M2. M1 locks N@R1 then needs N@R2;
+    // M2 locks N@R2 then needs N@R1. vc_depth 4 << worm length 8 exhausts
+    // the R1<->R2 link credits, freezing both worms mid-burst.
+    RouterConfig cfg1;
+    cfg1.mesh_x_dim = 4;
+    cfg1.mesh_y_dim = 2;
+    cfg1.x = 1;
+    cfg1.y = 0;
+    cfg1.vc_depth = 4;
+    RouterConfig cfg2 = cfg1;
+    cfg2.x = 2;
+    Router r1(cfg1), r2(cfg2);
+
+    // R1.EAST <-> R2.WEST wire + credit return; N/W/E edges drain freely.
+    WireLink r1_to_r2, r2_to_r1;
+    r1_to_r2.target = &r2;
+    r1_to_r2.port = W;
+    r2_to_r1.target = &r1;
+    r2_to_r1.port = E;
+    r1.set_downstream(E, r1_to_r2);
+    r2.set_downstream(W, r2_to_r1);
+    CreditRelay r2w_credit, r1e_credit;
+    r2w_credit.target = &r1;  // R2 pops its WEST input -> credit home to R1.EAST
+    r2w_credit.out_port = E;
+    r2.set_upstream_credit(W, r2w_credit);
+    r1e_credit.target = &r2;  // R1 pops its EAST input -> credit home to R2.WEST
+    r1e_credit.out_port = W;
+    r1.set_upstream_credit(E, r1e_credit);
+    DrainingSink n1, w1, n2, e2;
+    n1.router = &r1;
+    n1.out_port = N;
+    w1.router = &r1;
+    w1.out_port = W;
+    n2.router = &r2;
+    n2.out_port = N;
+    e2.router = &r2;
+    e2.out_port = E;
+    r1.set_downstream(N, n1);
+    r1.set_downstream(W, w1);
+    r2.set_downstream(N, n2);
+    r2.set_downstream(E, e2);
+
+    constexpr int kWormFlits = 8;  // AW head + 6 beats + tail, > vc_depth
+    const auto m1 = make_mc_worm(make_id(0, 1), make_id(0, 0), make_id(3, 0), /*vc=*/0,
+                                 /*fixed_vc=*/1, kWormFlits);
+    const auto m2 = make_mc_worm(make_id(0, 1), make_id(3, 0), make_id(3, 0), /*vc=*/0,
+                                 /*fixed_vc=*/1, kWormFlits);
+
+    // Wedge tick bound — DERIVED, not guessed. While anything still
+    // progresses, at least one flit crosses one pipeline stage somewhere.
+    // Pre-wedge work is bounded by: 2 worms x kWormFlits flits x 2 routers x
+    // (kPipelineDepth + 1) stage advances each (pipeline stages plus the
+    // one-tick registered credit return a grant may wait on), plus
+    // 2 x kWormFlits injection ticks (<= 1 flit/tick/input under the
+    // FIFO-room feed gate). Past this bound every reachable advance has
+    // happened; anything still moving would disprove the wedge.
+    constexpr int kWedgeBound =
+        2 * kWormFlits * 2 * (kPipelineDepth + 1) + 2 * kWormFlits;  // = 144
+    // A live system shows an observable state change at least once per
+    // grant -> stage-3 push -> registered credit pulse -> re-grant round
+    // trip, < 2 x (kPipelineDepth + 1) ticks.
+    constexpr int kQuiescentWindow = 2 * (kPipelineDepth + 1);  // = 8
+
+    auto snapshot = [&]() {
+        return std::vector<std::size_t>{
+            n1.received.size(),       w1.received.size(),       n2.received.size(),
+            e2.received.size(),       r1.fork_done_mask(W, 0),  r1.fork_done_mask(E, 0),
+            r2.fork_done_mask(W, 0),  r2.fork_done_mask(E, 0),  r1.input_fifo_size(W, 0),
+            r1.input_fifo_size(E, 0), r2.input_fifo_size(W, 0), r2.input_fifo_size(E, 0),
+            r1.credit(E, 0),          r2.credit(W, 0)};
+    };
+
+    std::size_t fed1 = 0, fed2 = 0;
+    std::vector<std::size_t> prev;
+    int last_progress = 0;
+    bool wedged = false;
+    for (int t = 0; t < kWedgeBound + kQuiescentWindow + 1; ++t) {
+        feed_worm(r1, m1, fed1, W, 0);
+        feed_worm(r2, m2, fed2, E, 0);
+        r1.tick();
+        r2.tick();
+        auto sig = snapshot();
+        if (sig != prev) {
+            last_progress = t;
+            prev = std::move(sig);
+        }
+        if (t - last_progress >= kQuiescentWindow) {
+            wedged = true;  // the no-progress detection — this IS the pass
+            break;
+        }
+    }
+    ASSERT_TRUE(wedged) << "trees did not wedge: the §1.2 deadlock no longer reproduces "
+                           "(re-derive the R1 restriction before celebrating)";
+    EXPECT_LE(last_progress, kWedgeBound) << "progress past the derived bound";
+    EXPECT_EQ(fed1, static_cast<std::size_t>(kWormFlits));
+    EXPECT_EQ(fed2, static_cast<std::size_t>(kWormFlits));
+
+    // Attribution (§1.3 detection b): the live introspection masks name the
+    // wedge — done frozen short of expected, missing branch = the output the
+    // OTHER worm locked, both link credits exhausted.
+    const PortMask kEN = port_bit(RouterPort::EAST) | port_bit(RouterPort::NORTH);
+    const PortMask kWN = port_bit(RouterPort::WEST) | port_bit(RouterPort::NORTH);
+    // M1 mid-worm at R1: EAST branch starved, NORTH taken.
+    EXPECT_EQ(r1.fork_expected_mask(W, 0), kEN);
+    EXPECT_EQ(r1.fork_done_mask(W, 0), port_bit(RouterPort::NORTH));
+    // M1 head at R2: EAST taken, NORTH held by M2.
+    EXPECT_EQ(r2.fork_expected_mask(W, 0), kEN);
+    EXPECT_EQ(r2.fork_done_mask(W, 0), port_bit(RouterPort::EAST));
+    // M2 mid-worm at R2: WEST branch starved, NORTH taken.
+    EXPECT_EQ(r2.fork_expected_mask(E, 0), kWN);
+    EXPECT_EQ(r2.fork_done_mask(E, 0), port_bit(RouterPort::NORTH));
+    // M2 head at R1: WEST taken, NORTH held by M1.
+    EXPECT_EQ(r1.fork_expected_mask(E, 0), kWN);
+    EXPECT_EQ(r1.fork_done_mask(E, 0), port_bit(RouterPort::WEST));
+    // The wait-for cycle: M1 holds N@R1, M2 holds N@R2.
+    EXPECT_EQ(r1.wormhole_locked_input(N), std::optional<std::size_t>(W));
+    EXPECT_EQ(r2.wormhole_locked_input(N), std::optional<std::size_t>(E));
+    // Credit exhaustion on both directions of the contended link.
+    EXPECT_EQ(r1.credit(E, 0), 0u);
+    EXPECT_EQ(r2.credit(W, 0), 0u);
+}
+
 // --- Fault injection --------------------------------------------------------
 
 TEST(RouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
