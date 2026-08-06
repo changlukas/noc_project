@@ -637,6 +637,62 @@ TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
     EXPECT_EQ(r2.credit(W, 0), 0u);
 }
 
+// --- Multi-hop traversal (divergent one-hot pass-through hop) ---------------
+
+TEST(RouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
+    SCENARIO(
+        "2-router chain: a multicast worm (anchor (0,1), src (0,0), mask x=3) forks {E,N} "
+        "at (2,0) and {N} at (3,0) — at the spread-end hop the one-hot fork direction "
+        "(NORTH) diverges from the anchor's XY route (WEST). The worm must traverse "
+        "cleanly end to end: the locked continuation check keys on the fork set, never "
+        "route_compute, for ANY collective flit (review fix)");
+    RouterConfig ca;
+    ca.mesh_x_dim = 4;
+    ca.mesh_y_dim = 2;
+    ca.x = 2;
+    ca.y = 0;
+    RouterConfig cb = ca;
+    cb.x = 3;
+    Router ra(ca), rb(cb);
+    WireLink a_to_b;
+    a_to_b.target = &rb;
+    a_to_b.port = W;
+    ra.set_downstream(E, a_to_b);
+    CreditRelay b_credit;
+    b_credit.target = &ra;
+    b_credit.out_port = E;
+    rb.set_upstream_credit(W, b_credit);
+    DrainingSink na, nb;
+    na.router = &ra;
+    na.out_port = N;
+    nb.router = &rb;
+    nb.out_port = N;
+    ra.set_downstream(N, na);
+    rb.set_downstream(N, nb);
+
+    constexpr int kFlits = 4;
+    const auto worm = make_mc_worm(make_id(0, 1), make_id(0, 0), make_id(3, 0), /*vc=*/0,
+                                   /*fixed_vc=*/1, kFlits);
+    std::size_t fed = 0;
+    for (int t = 0; t < 40; ++t) {
+        feed_worm(ra, worm, fed, W, 0);
+        ra.tick();
+        rb.tick();
+    }
+    ASSERT_EQ(na.received.size(), static_cast<std::size_t>(kFlits)) << "branch hop (2,0)N";
+    ASSERT_EQ(nb.received.size(), static_cast<std::size_t>(kFlits)) << "divergent hop (3,0)N";
+    for (int i = 0; i < kFlits; ++i) {
+        EXPECT_EQ(na.received[i].get_header_field("ordering_tag"), static_cast<uint64_t>(i));
+        EXPECT_EQ(nb.received[i].get_header_field("ordering_tag"), static_cast<uint64_t>(i));
+    }
+    for (std::size_t o = 0; o < ni::cmodel::router::ROUTER_PORT_COUNT; ++o) {
+        EXPECT_FALSE(ra.wormhole_locked_input(o).has_value()) << "ra output " << o;
+        EXPECT_FALSE(rb.wormhole_locked_input(o).has_value()) << "rb output " << o;
+    }
+    EXPECT_EQ(ra.fork_done_mask(W, 0), 0u);
+    EXPECT_EQ(rb.fork_done_mask(W, 0), 0u);
+}
+
 // --- Fault injection --------------------------------------------------------
 
 TEST(RouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
@@ -706,6 +762,32 @@ TEST(RouterForkDeath, ContinuationBranchSetMismatchAborts) {
             r.tick();
             // Corrupted beat: mask (x=2,y=2) -> {L,E,N}.
             r.input(W).push_flit(make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(2, 2), 0,
+                                              /*flit_tail=*/0, 1, 1));
+            r.tick();
+            r.tick();
+        },
+        "branch set diverges");
+    // ONE-HOT corrupted continuation (review Important): anchor (1,1),
+    // mask 0 -> set {L} at this router, and route_compute(dst)==LOCAL
+    // coincidentally passes — the pre-fix unicast locked path would grant
+    // and pop it, silently skipping the still-locked NORTH branch. The
+    // collective locked path must run the F9 set check instead: {L} !=
+    // locked|done {L,N} -> abort.
+    EXPECT_DEATH(
+        {
+            Router r(center_cfg());
+            FlitSink local;
+            FlitSink north;
+            r.set_downstream(L, local);
+            r.set_downstream(N, north);
+            // Head: {L,N} (mask y=2, anchor (1,1), src (0,1)).
+            r.input(W).push_flit(make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), 0,
+                                              /*flit_tail=*/0, 1, 0));
+            r.tick();
+            r.tick();
+            r.tick();
+            // Corrupted one-hot beat: mask 0 -> {L}.
+            r.input(W).push_flit(make_mc_flit(make_id(1, 1), make_id(0, 1), /*cmask=*/0, 0,
                                               /*flit_tail=*/0, 1, 1));
             r.tick();
             r.tick();

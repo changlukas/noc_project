@@ -175,7 +175,9 @@ class Router {
     // flit (0 when the FIFO is empty); done holds the branch outputs that
     // already granted it. A wedged multicast triages as done != expected
     // frozen across ticks with the missing branches' outputs locked to
-    // another worm, instead of a bare timeout.
+    // another worm, instead of a bare timeout. Note: shares the empty-fork-set
+    // fatal assert with the datapath — reading a misrouted collective front
+    // aborts here exactly as the next tick() would.
     PortMask fork_expected_mask(std::size_t in_port, uint8_t vc) const {
         if (in_port >= ROUTER_PORT_COUNT || vc >= cfg_.num_vc) return 0;
         const auto& q = input_fifo_[in_port][vc];
@@ -186,7 +188,9 @@ class Router {
         return fork_done_[in_port][vc];
     }
     // Front flit's routed output port for (in_port, vc), or nullopt if empty.
-    // Pure read; mirrors stage-2's route check without side effects.
+    // Pure read; mirrors stage-2's route check without side effects — for
+    // UNICAST fronts only. A collective front reports the anchor dst_id's XY
+    // route, which is not the fork set; use fork_expected_mask() for those.
     std::optional<RouterPort> front_route(std::size_t in_port, uint8_t vc) const {
         if (in_port >= ROUTER_PORT_COUNT || vc >= cfg_.num_vc) return std::nullopt;
         const auto& q = input_fifo_[in_port][vc];
@@ -384,20 +388,26 @@ inline void Router::tick() {
             const std::size_t lin = *ws.locked_input;
             auto& lq = input_fifo_[lin][in_vc];
             if (!lq.empty() && credit_[out][*ws.locked_output_vc] > 0) {
-                const PortMask exp = head_expected_mask(lq.front());
-                if (is_fork_set(exp)) {
-                    // Fork worm branch (F6 OUR RULE: one lock per branch, all
-                    // pointing at this (input, vc)). A set done bit means this
-                    // branch already granted the parked flit — idle until the
-                    // slowest branch takes it and the worm advances (§1.1
-                    // skew property).
+                if (lq.front().get_header_field("collective_op") != ni::COLLECTIVE_OP_UNICAST) {
+                    // Collective continuation — EVERY collective flit takes
+                    // this branch, one-hot included: at a pass-through /
+                    // spread-end hop the one-hot fork direction legally
+                    // diverges from the anchor's XY route, so the unicast
+                    // route_compute check below must never see it (F6 OUR
+                    // RULE: one lock per branch, all pointing at this
+                    // (input, vc)). A set done bit means this branch already
+                    // granted the parked flit — idle until the slowest branch
+                    // takes it and the worm advances (§1.1 skew property).
+                    const PortMask exp = head_expected_mask(lq.front());
                     if ((fork_done_[lin][in_vc] & port_bit(static_cast<RouterPort>(out))) == 0) {
                         // F9 (OUR RULE, src-anchored): a continuation's
                         // branch set recomputed from ITS OWN header must equal
                         // the branch set established at the head — locked
                         // branches plus branches already released at their
-                        // tail grant (done). Same shape as the unicast
-                        // continuation route assert below.
+                        // tail grant (done). For a legal one-hot hop this
+                        // degenerates to {this output}, so a corrupted
+                        // one-hot continuation fires too. Same shape as the
+                        // unicast continuation route assert below.
                         if (exp != static_cast<PortMask>(locked_branch_set(lin, in_vc) |
                                                          fork_done_[lin][in_vc])) {
                             assert(false &&
@@ -450,7 +460,7 @@ inline void Router::tick() {
                     // ~past_handshakes_q).
                     const PortMask exp = head_expected_mask(q.front());
                     if (!port_in_mask(exp, static_cast<RouterPort>(out))) continue;
-                    if (is_fork_set(exp)) {
+                    if (q.front().get_header_field("collective_op") != ni::COLLECTIVE_OP_UNICAST) {
                         if ((fork_done_[in][vc] & port_bit(static_cast<RouterPort>(out))) != 0) {
                             continue;  // F2: this branch already granted the parked flit
                         }
@@ -458,7 +468,8 @@ inline void Router::tick() {
                         // only while the parked flit is the worm's HEAD —
                         // i.e. every lock on this (input, vc) was set by a
                         // branch granting this same flit (locked subset-of
-                        // done). A multi-hot CONTINUATION reaching an
+                        // done; for a fresh one-hot collective head: no lock
+                        // at all). A collective CONTINUATION reaching an
                         // unlocked output is a corrupted branch set: leave it
                         // parked for the locked branches' F9 assert.
                         if ((locked_branch_set(in, vc) &

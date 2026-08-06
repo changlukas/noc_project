@@ -4,7 +4,6 @@
 // share them without an include cycle: the DAT router's stage-2 multicast
 // fork calls route_mask_fork(), and route_mask.hpp needs RouterPort /
 // RouterConfig. Definitions are verbatim moves from router.hpp.
-#include "ni_flit_constants.h"
 #include "ni_params.h"
 
 #include <cstddef>
