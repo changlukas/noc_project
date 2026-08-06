@@ -91,6 +91,27 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   a DENSE array, so `ADDR_W` must be sized to the tile region, never to the 48 b system
   address (pulp's associative array hid this). Verilator include paths are
   `src/axi/rtl` + `src/prim/rtl` (`taxi_arbiter`).
+- **Tile-local address layering (user ruling 2026-08-06)** — the prerequisite that makes the
+  xbar decode possible at all. Today `SamTable::translate` rebases to the matched ENTRY's base
+  (`nmu/addr_trans.hpp:83`), and a node owns two entries (memory, config), so both spaces
+  arrive at the tile starting at local 0 and the decoder has no bits to discriminate on.
+  Re-ordering the system map to group a node's regions is NOT available: the memory-first /
+  config-second layout is forced by the multicast masks (replica addresses must differ only in
+  node-index bits, so the node index has to sit in a clean field per space — memory [22:20],
+  config [14:12] on the 2x4 map). Ruling: keep the system map exactly as it is and add a fixed
+  tile-local base at rebase time, `tile_local_addr = space_base(space) + (addr - entry_base)`,
+  with `space_base` derived from the same YAML sizes (config 0x0, memory 0x100000 on today's
+  map, i.e. each region rounded to a power of two and packed aligned). The NMU already reads
+  `space` to pick the class, so this is one added term; the NSU still does no lookup; the xbar
+  decodes on `M_BASE_ADDR`/`M_ADDR_W` generated from the same source. Rejected alternative:
+  demuxing on the AXI class instead of the address — taxi's crossbar decodes by address only,
+  and it would permanently bind config to narrow.
+- **Sizing rule**: the xbar's `ADDR_W` is the tile-local span (21 b on today's map); each
+  target's `M_ADDR_W` is its rounded region size (config 12, memory 20); each `taxi_axi_ram`'s
+  own `ADDR_W` comes from the DV-tier `region_bytes` (what stimulus actually touches), NOT the
+  mapped region size, so a 1 MB address window does not force a 1 MB dense array. Generator
+  computes all of it from the topology YAML; accesses past a RAM's own size alias inside it,
+  which is a stimulus-bounded assumption to state.
 - **Lint spike PASSED** (Verilator 5.048, 16 modules, zero warnings): `taxi_axi_crossbar_1s`
   `M_COUNT=2` / `DATA_W=512` with unpacked interface arrays and two `taxi_axi_ram` behind it.
   The module's own "TODO fix parametrization once verilator issue 5890 is fixed" note does not
