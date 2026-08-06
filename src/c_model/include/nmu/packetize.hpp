@@ -170,8 +170,9 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     assert((meta.collective_op == axi::COLLECTIVE_OP_UNICAST) == (meta.collective_mask == 0) &&
            "nmu::Packetize::push_aw_with_meta: collective_op and collective_mask disagree");
     // Narrow class rides the 81 b NarrowW payload (64 b data lane): AxSIZE > 3
-    // (8 B) does not fit. Same fatal-assert shape as the collective reject
-    // above -- a stimulus/SAM-config error, not backpressure.
+    // (8 B) does not fit. A stimulus/SAM-config error, not backpressure, so it
+    // takes the same fatal shape as addr_trans / depacketize / rob use for a
+    // permanent illegal input.
     if (meta.cls == axi::AxiClass::Narrow && b.size > 3) {
         assert(false &&
                "nmu::Packetize::push_aw_with_meta: narrow class (SAM config space) requires "
