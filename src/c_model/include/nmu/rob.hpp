@@ -234,6 +234,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         uint8_t base;
         uint16_t len_plus_1;  // up to 256
         bool ordering_req;
+        // Write side only: marks an in-flight collective AW, which nothing may
+        // follow until its merged B retires (R2, S4 design §2.3a).
+        bool collective = false;
     };
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> write_order_by_id_;
     std::array<std::deque<BeatRange>, AXI_ID_SPACE> read_order_by_id_;
@@ -312,8 +315,32 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
+    // AWUSER collective validate + translate at push_aw entry (S4 design §2.1):
+    // ahead of the outstanding pool, the per-id order list and all RoB slot math,
+    // so a permanent illegal input can never present as backpressure. Fatal on
+    // every reject row of design §2.3; returns the 8 b node mask.
+    const uint8_t collective_mask = addr_trans::collective_translate(sam_, b);
+    const uint8_t collective_op = axi::awuser_collective_op(b.user);
+    const bool collective = collective_op != axi::COLLECTIVE_OP_UNICAST;
+
+    // R2 (design §2.3a): at most one outstanding collective per (NMU, AXI id).
+    // Retryable backpressure, NOT an error -- the caller re-presents the AW.
+    //   collective in, list non-empty -> refuse. A collective is admitted only
+    //     into an idle id, so it always lands on the idle-ID bypass branch below
+    //     (ordering_req=0, no RoB slot) -- ruling 4, NoRobReduction.
+    //   anything in, front entry collective -> refuse. This closes the
+    //     same-destination bypass hole: a later same-id AW whose dst equals the
+    //     collective's anchor would otherwise stream past it without a RoB slot.
+    //     Testing the FRONT suffices -- a collective only ever enters an empty
+    //     list, so while in flight it is the only entry.
+    if (!write_order_by_id_[b.id].empty() &&
+        (collective || write_order_by_id_[b.id].front().collective)) {
+        return false;
+    }
+
     // Shared AW pool, all ids (floo_meta_buffer.sv:157 inp_gnt_o). Bypassed pushes
-    // allocate no RoB slot, so this is their only aggregate limiter.
+    // allocate no RoB slot, so this is their only aggregate limiter. A collective
+    // allocates here like any AW and releases at merged-B retire (design §2.3a).
     if (write_txns_ >= outstanding_depth_) return false;
     // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
     if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
@@ -343,14 +370,18 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         needs_rob = true;
         fallen_back = true;  // sticky
     }
+    // Guaranteed by the R2 gate above; ruling 4 (NoRobReduction) depends on it.
+    assert(!(collective && needs_rob) &&
+           "nmu::Rob::push_aw: collective AW must take the idle-ID bypass, never a RoB slot");
     std::size_t base = 0;
     if (needs_rob) {
         if (write_free_space() < 1) return false;
         base = b_rob_depth_ - write_free_space();
     }
     if (!next_pkt_.push_aw_with_meta(
-            b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
-                static_cast<uint8_t>(needs_rob ? base : 0), t.cls})) {
+            b,
+            {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
+             static_cast<uint8_t>(needs_rob ? base : 0), t.cls, collective_op, collective_mask})) {
         return false;  // downstream backpressure: no state mutation
     }
     prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
@@ -360,7 +391,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         alloc_write_.set(base);  // a 1-slot range: base is its own top
         write_entries_[base] = WriteEntry{/*occupied=*/true, /*ready=*/false, b.id, /*b_beat=*/{}};
     }
-    write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob});
+    write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob, collective});
     ++write_txns_;
     ++w_bursts_owed_;
     return true;

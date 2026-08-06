@@ -122,12 +122,30 @@ struct AwBeat {
     uint8_t cache, lock, prot, region;
     // AWUSER, 58 b (docs/noc-target-spec.md AWUSER layout): [7:0] user-defined
     // (rides into the AW payload `user` field), [9:8] collective_op, [57:10]
-    // collective_mask. Collective bits are consumed by the NMU at packetize
-    // time and never reach the flit payload; nonzero collective_op or
-    // collective_mask is rejected until S4 (nmu::Packetize::push_aw_with_meta).
+    // collective_mask. Collective bits are consumed by the NMU at admission
+    // (nmu::addr_trans::collective_translate, called from nmu::Rob::push_aw)
+    // and never reach the flit payload; the direct nmu::Packetize::push_aw
+    // interface bypasses that validation and rejects them outright.
     uint64_t user;
     uint8_t qos;
 };
+
+// collective_op encoding, shared by AWUSER[9:8] and the flit header field of
+// the same name (docs/noc-target-spec.md §6 header table). specgen carries the
+// field width, not an encoding table, so the two live codes sit here beside the
+// AWUSER accessors. 2-3 are reserved and reject.
+constexpr uint8_t COLLECTIVE_OP_UNICAST = 0;
+constexpr uint8_t COLLECTIVE_OP_MULTICAST = 1;
+
+// AWUSER[9:8]. The 48 b AWUSER[57:10] is an ADDRESS mask, not the 8 b node mask
+// the flit header carries: a set bit marks the matching AWADDR bit don't care.
+// nmu::addr_trans::collective_translate does the address-mask -> node-mask step.
+constexpr uint8_t awuser_collective_op(uint64_t user) {
+    return static_cast<uint8_t>((user >> 8) & 0x3u);
+}
+constexpr uint64_t awuser_collective_mask(uint64_t user) {
+    return (user >> 10) & ((uint64_t{1} << 48) - 1);
+}
 
 struct WBeat {
     std::array<uint8_t, DATA_BYTES> data;

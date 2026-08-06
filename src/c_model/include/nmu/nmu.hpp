@@ -74,8 +74,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
   public:
     bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) override {
         if (s1_aw_.full()) return false;
-        s1_aw_.accept(
-            {b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag, meta.cls});
+        s1_aw_.accept({b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag,
+                       meta.cls, meta.collective_op, meta.collective_mask});
         return true;
     }
     bool push_w(const axi::WBeat& b) override {
@@ -100,7 +100,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
         if (s1_aw_.full()) {
             const auto& e = s1_aw_.peek();
             if (packetize.push_aw_with_meta(
-                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag, e.cls})) {
+                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag, e.cls,
+                             e.collective_op, e.collective_mask})) {
                 s1_aw_.take();
             }
         }

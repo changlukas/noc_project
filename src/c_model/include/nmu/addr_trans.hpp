@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>  // std::abort
 #include <utility>  // std::move
 #include <vector>
 
@@ -153,6 +154,152 @@ inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::B
     // (axi_slave.hpp:316-318,:519-520 treats FIXED like INCR), so the SAM guard and the
     // slave agree at a tile edge. Conservative for FIXED, but consistent.
     return addr + total - 1;
+}
+
+// AWUSER collective validate + translate (S4 design §2.2 / §2.3), called from
+// nmu::Rob::push_aw before any admission gate. Returns the 8 b flit
+// collective_mask (node mask); 0 for a plain unicast AW.
+//
+// Upstream translates with a pure bit-select over SAM-provided node-index bit
+// offsets (floo_axi_chimney.sv:534-546). Our SAM is a first-match RANGE lookup
+// that stores no such offset, so the honest generalization is to ENUMERATE the
+// 2^n addresses the mask names and require the resulting node set to be exactly
+// a wildcard over dst_id. n is capped at X_WIDTH+Y_WIDTH, so at most 256 SAM
+// lookups per AW -- model-only cost, re-run on every backpressure retry of the
+// same AW (design K3: memoization is not warranted).
+//
+// Every reject here is a PERMANENT illegal input: it never clears on retry, so
+// returning false would wedge the caller indistinguishably from congestion.
+// Fail loud instead -- the convention this file already uses for a SAM miss.
+inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
+    const uint8_t op = axi::awuser_collective_op(b.user);
+    const uint64_t addr_mask = axi::awuser_collective_mask(b.user);
+
+    // op/mask consistency matrix. Upstream cannot mismatch -- it has no explicit
+    // op input and derives one from the mask (floo_axi_chimney.sv:580). Ours is
+    // explicit, so a mismatch is a stimulus contradiction, not a downgrade.
+    if (op == axi::COLLECTIVE_OP_UNICAST) {
+        if (addr_mask != 0) {
+            assert(false &&
+                   "nmu::addr_trans::collective_translate: AWUSER collective_mask nonzero with "
+                   "collective_op=UNICAST -- UNICAST requires a zero mask");
+            std::abort();
+        }
+        return 0;
+    }
+    if (op != axi::COLLECTIVE_OP_MULTICAST) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: reserved AWUSER collective_op (2-3)");
+        std::abort();
+    }
+    if (addr_mask == 0) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: collective_op=MULTICAST with a zero "
+               "AWUSER collective_mask -- empty destination set");
+        std::abort();
+    }
+    // Spec §6.1: AxLOCK is unicast only, a collective is not an exclusive access.
+    if (b.lock != 0) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: AWLOCK set on a collective AW -- AxLOCK "
+               "is unicast only");
+        std::abort();
+    }
+
+    const SamEntry* anchor = sam.lookup(b.addr);
+    if (anchor == nullptr) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: collective anchor address maps to no tile");
+        std::abort();
+    }
+    // Design Q4 (ruled): S4 multicasts the Data class only. The DAT router owns
+    // the only fork; a Narrow-class collective would additionally need one in
+    // the REQ SimpleRouter.
+    if (anchor->cls != axi::AxiClass::Data) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: narrow-class collective -- S4 supports "
+               "Data-class multicast only");
+        std::abort();
+    }
+
+    // Set-bit positions of the address mask. More set bits than a node id has
+    // bits names more wildcard addresses than the mesh has nodes to absorb.
+    constexpr unsigned kNodeIdBits = ni::width::X_WIDTH + ni::width::Y_WIDTH;
+    uint8_t pos[kNodeIdBits];
+    unsigned n = 0;
+    for (unsigned i = 0; i < 48; ++i) {
+        if (((addr_mask >> i) & 1u) == 0) continue;
+        if (n == kNodeIdBits) {
+            assert(false &&
+                   "nmu::addr_trans::collective_translate: AWUSER collective_mask sets more bits "
+                   "than a node id has -- destination set larger than the mesh");
+            std::abort();
+        }
+        pos[n++] = static_cast<uint8_t>(i);
+    }
+
+    const uint64_t base_addr = b.addr & ~addr_mask;
+    const std::size_t replicas = std::size_t{1} << n;
+    bool seen[std::size_t{1} << kNodeIdBits] = {};
+    uint8_t dst0 = 0;
+    uint64_t local0 = 0;
+    uint8_t node_mask = 0;
+    for (std::size_t v = 0; v < replicas; ++v) {
+        uint64_t addr = base_addr;
+        for (unsigned k = 0; k < n; ++k) {
+            if ((v >> k) & 1u) addr |= uint64_t{1} << pos[k];
+        }
+        const SamEntry* e = sam.lookup(addr);
+        if (e == nullptr) {
+            assert(false &&
+                   "nmu::addr_trans::collective_translate: collective replica address maps to no "
+                   "tile -- destination set leaves the mesh");
+            std::abort();
+        }
+        const uint64_t local = addr - e->base;
+        if (v == 0) {
+            dst0 = e->dst_id;
+            local0 = local;
+        }
+        // Spec :461-462: every replica carries the same node-local offset, one
+        // aligned region per node. A mask bit inside the tile offset breaks this.
+        if (local != local0 || e->cls != anchor->cls) {
+            assert(false &&
+                   "nmu::addr_trans::collective_translate: collective replicas disagree on "
+                   "node-local offset or address space");
+            std::abort();
+        }
+        if (seen[e->dst_id]) {
+            assert(false &&
+                   "nmu::addr_trans::collective_translate: collective mask names one node twice "
+                   "-- not a wildcard over dst_id");
+            std::abort();
+        }
+        seen[e->dst_id] = true;
+        node_mask |= static_cast<uint8_t>(e->dst_id ^ dst0);
+        if (!sam.burst_footprint_ok(addr, burst_last_byte(addr, b.len, b.size, b.burst))) {
+            assert(false &&
+                   "nmu::addr_trans::collective_translate: collective replica burst footprint "
+                   "crosses a tile boundary");
+            std::abort();
+        }
+    }
+
+    // The node set must be exactly the wildcard set over node_mask, so
+    // popcount(node_mask) == n. It already holds 2^n DISTINCT ids that all agree
+    // outside node_mask, hence all lie inside a span of 2^popcount ids: equal
+    // cardinality then forces the set to BE that span. dst0|node_mask is
+    // therefore one of the enumerated -- so SAM-real, so in-mesh -- ids, which
+    // is design §2.2's step-4 submesh check without needing the mesh dims here.
+    unsigned span_bits = 0;
+    for (unsigned i = 0; i < kNodeIdBits; ++i) span_bits += (node_mask >> i) & 1u;
+    if (span_bits != n) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: collective node set is not an aligned "
+               "wildcard over dst_id");
+        std::abort();
+    }
+    return node_mask;
 }
 
 }  // namespace ni::cmodel::nmu::addr_trans

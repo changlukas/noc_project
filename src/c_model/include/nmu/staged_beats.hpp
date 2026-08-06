@@ -14,6 +14,11 @@ struct AdmittedAw {
     uint8_t ordering_req;
     uint8_t ordering_tag;
     axi::AxiClass cls = axi::AxiClass::Data;
+    // Translated at admission and carried through the stage: Packetize asserts
+    // the meta still agrees with the beat's AWUSER. AR has no counterpart --
+    // ARUSER carries no collective field.
+    uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
+    uint8_t collective_mask = 0;
 };
 struct AdmittedAr {
     axi::ArBeat beat;

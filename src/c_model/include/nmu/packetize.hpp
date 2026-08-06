@@ -28,6 +28,10 @@
 //   ordering_req,
 //   ordering_tag     — 0 in direct-path interface (Disabled mode); Enabled mode
 //                 supplies via AwHeaderMeta.
+//   collective_op,
+//   collective_mask — AW: from AwHeaderMeta, translated from AWUSER at
+//                 Rob::push_aw entry; W: latched from its AW via the write-meta
+//                 FIFO; AR: always UNICAST / 0 (ARUSER has no collective field).
 //   commtype,
 //   multicast,
 //   noc_qos,
@@ -55,6 +59,11 @@ struct AwHeaderMeta {
     uint8_t ordering_req;                     // 0 in Disabled mode, 1 in Enabled mode
     uint8_t ordering_tag;                     // 0 in Disabled, allocated in Enabled
     axi::AxiClass cls = axi::AxiClass::Data;  // from addr_trans (SAM space)
+    // Collective header fields, validated and translated at Rob::push_aw entry
+    // (addr_trans::collective_translate). UNICAST / 0 on every other path,
+    // including the direct Packetizer interface and all AR pushes.
+    uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
+    uint8_t collective_mask = 0;  // 8 b NODE mask, not the 48 b AWUSER address mask
 };
 
 class NmuPacketizeSink {
@@ -83,6 +92,17 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
 
     // ---- RequestPacketizer interface ----
     bool push_aw(const axi::AwBeat& b) override {
+        // The direct interface bypasses Rob, which owns the collective validate
+        // and translate (S4 design §2.1). A collective AWUSER arriving here would
+        // be silently truncated to its 8 b payload field below, so it fails loud
+        // -- and permanently: `return false` is the retry-until-it-clears idiom
+        // (NoC-full, RoB-full) and this never clears.
+        if ((b.user >> 8) != 0) {
+            assert(false &&
+                   "nmu::Packetize::push_aw: nonzero AWUSER collective_op/collective_mask on the "
+                   "direct path -- collectives must enter through nmu::Rob::push_aw");
+            std::abort();  // belt-and-braces for NDEBUG
+        }
         auto t = sam_.translate(b.addr);
         assert(sam_.burst_footprint_ok(
                    b.addr, addr_trans::burst_last_byte(b.addr, b.len, b.size, b.burst)) &&
@@ -127,6 +147,11 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
         uint8_t len;
         uint8_t size;
         axi::Burst burst;
+        // Latched from the AW so every W beat of the worm forks to the same node
+        // set (floo_axi_chimney.sv:553-560 axi_aw_mask_q). A W flit carries no
+        // AWUSER of its own to re-derive them from.
+        uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
+        uint8_t collective_mask = 0;
         uint16_t beat_counter = 0;
     };
     std::deque<WMeta> w_meta_fifo_;
@@ -136,21 +161,14 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
 
 inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) {
     // AWUSER[57:8] (collective_op[9:8] + collective_mask[57:10]) is consumed
-    // here and never forwarded to the AW payload (spec: docs/noc-target-spec.md
-    // AWUSER layout). S4 will translate the mask into the flit's
-    // collective_mask/collective_op header fields and fan out; until then a
-    // nonzero collective request is a hard failure, not backpressure — `return
-    // false` is the retry-until-it-clears idiom (NoC-full, RoB-full) and a
-    // collective request never clears on retry, so it would wedge the S1
-    // AW/W stage forever indistinguishable from congestion. Fail loud instead,
-    // matching addr_trans.hpp / depacketize.hpp / rob.hpp for this class of
-    // permanent illegal-input condition.
-    if ((b.user >> 8) != 0) {
-        assert(false &&
-               "nmu::Packetize::push_aw_with_meta: nonzero AWUSER collective_op/collective_mask "
-               "unsupported until S4");
-        std::abort();  // belt-and-braces for NDEBUG
-    }
+    // upstream, at Rob::push_aw entry (S4 design §2.1), and never forwarded to
+    // the AW payload -- only AWUSER[7:0] rides on. What arrives here is already
+    // validated; these two only check the meta still agrees with the AWUSER it
+    // was derived from, which a mismatch makes a model bug in the layer above.
+    assert(meta.collective_op == axi::awuser_collective_op(b.user) &&
+           "nmu::Packetize::push_aw_with_meta: meta.collective_op disagrees with AWUSER[9:8]");
+    assert((meta.collective_op == axi::COLLECTIVE_OP_UNICAST) == (meta.collective_mask == 0) &&
+           "nmu::Packetize::push_aw_with_meta: collective_op and collective_mask disagree");
     // Narrow class rides the 81 b NarrowW payload (64 b data lane): AxSIZE > 3
     // (8 B) does not fit. Same fatal-assert shape as the collective reject
     // above -- a stimulus/SAM-config error, not backpressure.
@@ -171,6 +189,8 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_header_field("flit_tail", 0);  // AW starts wormhole packet (FlooNoC pattern)
     f.set_header_field("ordering_req", meta.ordering_req);
     f.set_header_field("ordering_tag", meta.ordering_tag);
+    f.set_header_field("collective_op", meta.collective_op);
+    f.set_header_field("collective_mask", meta.collective_mask);
     f.set_payload_field("AW", "awid", b.id);
     f.set_payload_field("AW", "awaddr", meta.local_addr);  // NOT b.addr (future remap-safe)
     f.set_payload_field("AW", "awlen", b.len);
@@ -185,7 +205,8 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     router::NocReqOut& out = is_data ? dat_aw_out_ : aw_out_;
     if (!out.push_flit(f)) return false;
     w_meta_fifo_.push_back({meta.dst_id, meta.ordering_req, meta.ordering_tag, meta.cls,
-                            meta.local_addr, b.len, b.size, b.burst, /*beat_counter=*/0});
+                            meta.local_addr, b.len, b.size, b.burst, meta.collective_op,
+                            meta.collective_mask, /*beat_counter=*/0});
     return true;
 }
 
@@ -210,6 +231,8 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     f.set_header_field("flit_tail", b.last ? 1u : 0u);  // W's wlast ends wormhole packet (FlooNoC)
     f.set_header_field("ordering_req", meta.ordering_req);
     f.set_header_field("ordering_tag", meta.ordering_tag);
+    f.set_header_field("collective_op", meta.collective_op);
+    f.set_header_field("collective_mask", meta.collective_mask);
     f.set_payload_field(ch, "wlast", b.last ? 1u : 0u);
     f.set_payload_field(ch, "wuser", b.user);
     if (is_data) {
