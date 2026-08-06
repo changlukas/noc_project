@@ -5,10 +5,16 @@ topology:
   num_vc: 1
 
 # S2 T2d config-space narrow smoke topology: every node gets its memory-space
-# (data class) tile, node (0,0) additionally gets a config-space (narrow
-# class) tile. docs/noc-target-spec.md §5 "SAM address spaces" -- a node may
-# carry one memory tile and, optionally, one config tile (nmu::addr_trans::
+# (data class) tile and a config-space (narrow class) tile.
+# docs/noc-target-spec.md §5 "SAM address spaces" -- a node may carry one
+# memory tile and, optionally, one config tile (nmu::addr_trans::
 # SamTable::validate).
+# S4 T6: config tiles extended from node (0,0) alone to ALL nodes, appended
+# AFTER the original (0,0) entry so every pre-existing base is unchanged.
+# Uniform sizes in raster order make both spaces AWUSER-mask friendly:
+# memory bases = idx * 0x100000 (node-index bits [21:20]), config bases =
+# 0x400000 + idx * 0x1000 (node-index bits [13:12]) -- required by the
+# multicast pattern (replica addresses differ only in node-index bits).
 address_map:
   tiles:
     - { x: 0, y: 0, size: 0x100000 }
@@ -16,3 +22,6 @@ address_map:
     - { x: 0, y: 1, size: 0x100000 }
     - { x: 1, y: 1, size: 0x100000 }
     - { x: 0, y: 0, size: 0x1000, space: config }
+    - { x: 1, y: 0, size: 0x1000, space: config }
+    - { x: 0, y: 1, size: 0x1000, space: config }
+    - { x: 1, y: 1, size: 0x1000, space: config }
