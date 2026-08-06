@@ -130,12 +130,14 @@ struct AwBeat {
     uint8_t qos;
 };
 
-// collective_op encoding, shared by AWUSER[9:8] and the flit header field of
-// the same name (docs/noc-target-spec.md §6 header table). specgen carries the
-// field width, not an encoding table, so the two live codes sit here beside the
-// AWUSER accessors. 2-3 are reserved and reject.
-constexpr uint8_t COLLECTIVE_OP_UNICAST = 0;
-constexpr uint8_t COLLECTIVE_OP_MULTICAST = 1;
+// AWUSER[9:8] carries the same encoding as the flit header field of the same
+// name, so both sides read one specgen table (ni_packet.json
+// header_fields[collective_op].encoding, generated into ni::COLLECTIVE_OP_*
+// and ni_flit_pkg::COLLECTIVE_OP_* for the SV side). Narrowed to uint8_t here
+// because that is the width every AXI-side field holding one uses. Codes 2-3
+// are absent from the table by design: they are reserved and reject.
+constexpr uint8_t COLLECTIVE_OP_UNICAST = ni::COLLECTIVE_OP_UNICAST;
+constexpr uint8_t COLLECTIVE_OP_MULTICAST = ni::COLLECTIVE_OP_MULTICAST;
 
 // AWUSER[9:8]. The 48 b AWUSER[57:10] is an ADDRESS mask, not the 8 b node mask
 // the flit header carries: a set bit marks the matching AWADDR bit don't care.

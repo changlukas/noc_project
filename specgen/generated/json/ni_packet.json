@@ -83,7 +83,10 @@
       {
         "name": "collective_op",
         "width_param": "COLLECTIVE_OP_WIDTH",
-        "enabled": true
+        "enabled": true,
+        "encoding": {
+          "0": "UNICAST", "1": "MULTICAST"
+        }
       },
       {
         "name": "collective_mask",

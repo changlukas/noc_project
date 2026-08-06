@@ -164,12 +164,15 @@ def emit(packet_json: Path, spec_version: str) -> str:
     out.append("}  // namespace width")
     out.append("")
 
-    # --- axi_ch encoding (from header_fields[axi_ch].encoding) ---
-    enc = C.axi_channel_encoding(spec)
-    if enc:
-        out.append("// --- axi_ch encoding (from flit.header_fields[axi_ch].encoding) ---")
+    # --- per-field encoding tables (any header field carrying `encoding`) ---
+    for field in spec["flit"]["header_fields"]:
+        enc = C.field_encoding(spec, field["name"])
+        if not enc:
+            continue
+        fname = field["name"]
+        out.append(f"// --- {fname} encoding (from flit.header_fields[{fname}].encoding) ---")
         for name, value in sorted(enc.items(), key=lambda kv: kv[1]):
-            out.append(f"constexpr int AXI_CH_{name:<3} = {value};")
+            out.append(f"constexpr int {fname.upper()}_{name:<3} = {value};")
         out.append("")
 
     # --- FieldDescriptor struct + arrays (for flit dispatch consumers) ---

@@ -92,11 +92,15 @@ def emit(packet_json: Path, spec_version: str) -> str:
         emit_param(f"  localparam int unsigned {name:<22} = {val};", name)
     out.append("")
 
-    enc = C.axi_channel_encoding(spec)
-    if enc:
-        out.append("  // --- axi_ch encoding (from flit.header_fields[axi_ch].encoding) ---")
+    # Any header field carrying an `encoding` table emits <FIELD>_<NAME> localparams.
+    for field in spec["flit"]["header_fields"]:
+        enc = C.field_encoding(spec, field["name"])
+        if not enc:
+            continue
+        fname = field["name"]
+        out.append(f"  // --- {fname} encoding (from flit.header_fields[{fname}].encoding) ---")
         for name, value in sorted(enc.items(), key=lambda kv: kv[1]):
-            out.append(f"  localparam int unsigned AXI_CH_{name:<3} = {value};")
+            out.append(f"  localparam int unsigned {fname.upper()}_{name:<3} = {value};")
         out.append("")
 
     out.append("endpackage")
