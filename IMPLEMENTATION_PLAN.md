@@ -60,6 +60,42 @@ semantics to settle with the xbar: config and memory tiles on the same node both
 0-based node-local offsets, so they alias in a single-slave tb today (S2 gate worked around
 it by disjoint probe offsets) — with the two-memory xbar the aliasing becomes intended
 (separate targets); state it in the spec either way.
+Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
+- **One shared 512 b AXI port** at the endpoint. Two per-class ports rejected, so the four
+  narrow-lane re-anchor sites stay as built.
+- **Tile decode = taxi** (`E:\03_Learning\taxi`): `taxi_axi_crossbar_1s` with `M_COUNT=2`
+  (one slave-side port fanning out to two targets — the right-sized piece, not the full
+  N x M crossbar) plus two `taxi_axi_ram` as the config and data memories. Range parameters
+  (`M_BASE_ADDR` / `M_ADDR_W`) come from the same topology YAML `address_map` as the SAM.
+- **One interface convention per side, zero adapters.** taxi's `wr`/`rd` are modports of ONE
+  `taxi_axi_if` instance, not two instances, so a single interface feeds both crossbar ports.
+  The endpoint's slave face is already hand-wired per field from the flat DPI signals
+  (`user_node_endpoint.sv:120-135` into `AXI_BUS_DV` today), so re-targeting those assigns at
+  a `taxi_axi_if` costs nothing. The master face stays pulp `AXI_BUS_DV` because the VIP
+  (`axi_file_master`, `axi_scoreboard`, S4's `mcast_preload_scoreboard`) lives there; the two
+  faces never meet, the NoC is between them.
+- **Licence**: taxi is CERN-OHL-S-2.0 (strongly reciprocal) while this repo is proprietary and
+  the vendored pulp/common_cells are Solderpad. User ruled: ignore, internal use only.
+- **`axi_rand_slave` is dropped** (option A). Accepted losses, recorded so nobody rediscovers
+  them as bugs: (1) randomized slave backpressure and response delay disappear —
+  `taxi_axi_ram` stalls only when genuinely busy, and taxi has no throttle component (their
+  randomization is cocotb-side, which we do not use); this is the pressure that surfaced the
+  WireSlavePort `push_aw` latch bug and the credit-depth bubble, so slave-path timing
+  exploration narrows. (2) `taxi_axi_ram` initializes `mem` to 0, not X, so the multicast
+  non-vacuity argument that leaned on unwritten replicas reading X now only bites when the
+  golden byte is non-zero (T6 measured 6 such bytes in 768); the MCAST_FAULT red run and the
+  per-node compare counter are unaffected. Option B (an LFSR-driven ready-gating shim on the
+  crossbar's master ports, using taxi's own `taxi_lfsr`) is deferred to a future verification
+  round, not built now.
+- **Integration constraints found while checking**: `taxi_axi_ram`'s `mem[2**VALID_ADDR_W]` is
+  a DENSE array, so `ADDR_W` must be sized to the tile region, never to the 48 b system
+  address (pulp's associative array hid this). Verilator include paths are
+  `src/axi/rtl` + `src/prim/rtl` (`taxi_arbiter`).
+- **Lint spike PASSED** (Verilator 5.048, 16 modules, zero warnings): `taxi_axi_crossbar_1s`
+  `M_COUNT=2` / `DATA_W=512` with unpacked interface arrays and two `taxi_axi_ram` behind it.
+  The module's own "TODO fix parametrization once verilator issue 5890 is fixed" note does not
+  bite at these parameters. The plan's earlier [UNVERIFIED] Verilator-compat flag is cleared.
+
 Success Criteria: FEATURE_INVENTORY.md and block specs match code; regression matrix
 re-baselined.
 Carry-in from S0 reviews: block-spec numeric drift vs constants.yaml (credit seed 4 vs
