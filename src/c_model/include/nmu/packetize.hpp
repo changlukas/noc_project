@@ -160,13 +160,13 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
 // ---- inline impl ----
 
 inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) {
-    // AWUSER is 58 b (spec §6 layout). Anything above the field is an illegal
-    // input on every path -- the AWUSER accessors mask to 2 b / 48 b, so without
-    // this a stray bit would be silently dropped rather than rejected. The
-    // direct-path guard covers it by testing AWUSER[57:8] as a whole.
-    if ((b.user >> 58) != 0) {
+    // Anything above the AWUSER field is an illegal input on every path -- the
+    // AWUSER accessors mask to 2 b / 48 b, so without this a stray bit would be
+    // silently dropped rather than rejected. The direct-path guard covers it by
+    // testing AWUSER[57:8] as a whole.
+    if ((b.user >> ni::AXI_AWUSER_WIDTH) != 0) {
         assert(false &&
-               "nmu::Packetize::push_aw_with_meta: AWUSER bits above the 58 b field are set");
+               "nmu::Packetize::push_aw_with_meta: AWUSER bits above the field width are set");
         std::abort();  // belt-and-braces for NDEBUG
     }
     // AWUSER[57:8] (collective_op[9:8] + collective_mask[57:10]) is consumed

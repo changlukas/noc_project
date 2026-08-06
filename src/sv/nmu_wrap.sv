@@ -46,10 +46,10 @@ module nmu_wrap #(
     parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
     parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
     parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
-    // AWUSER width, spec fixed 58 b (docs/noc-target-spec.md §6: [7:0] user,
-    // [9:8] collective_op, [57:10] collective address mask). Dedicated port
-    // beside axi_req_i: the generated axi_req_t struct has no awuser field.
-    parameter int unsigned AWUSER_WIDTH   = 58
+    // AWUSER width (docs/noc-target-spec.md §6: [7:0] user, [9:8] collective_op,
+    // [57:10] collective address mask). Dedicated port beside axi_req_i: the
+    // generated axi_req_t struct has no awuser field.
+    parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,

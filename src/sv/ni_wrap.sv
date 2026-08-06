@@ -49,8 +49,8 @@ module ni_wrap #(
     parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
     parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
     parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
-    // AWUSER width, spec fixed 58 b (see nmu_wrap.sv AWUSER_WIDTH).
-    parameter int unsigned AWUSER_WIDTH   = 58
+    // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH).
+    parameter int unsigned AWUSER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,

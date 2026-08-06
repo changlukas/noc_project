@@ -443,7 +443,7 @@ TEST(NmuCollectiveDeath, AwuserAboveTheFieldWidth) {
     auto aw = make_aw(0x05, tile_addr(0, 0));
     aw.user = uint64_t{1} << 60;
     EXPECT_DEATH(pkt.push_aw_with_meta(aw, ni::cmodel::nmu::AwHeaderMeta{0x00, 0, 0, 0}),
-                 "above the 58 b field");
+                 "above the field width");
 }
 
 TEST(NmuCollectiveDeath, ReplicaBurstOverrunsItsAperture) {

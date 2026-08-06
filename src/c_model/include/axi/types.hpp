@@ -1,5 +1,6 @@
 #pragma once
 #include "ni_flit_constants.h"
+#include "ni_params.h"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -148,6 +149,14 @@ constexpr uint8_t awuser_collective_op(uint64_t user) {
 constexpr uint64_t awuser_collective_mask(uint64_t user) {
     return (user >> 10) & ((uint64_t{1} << 48) - 1);
 }
+
+// The lifted AWUSER width (specgen constants.yaml) and the AWUSER layout the
+// accessors above hardcode come from two different specgen domains, so they
+// agree by construction only while this holds.
+static_assert(ni::AXI_AWUSER_WIDTH == ni::width::AXI_USER_WIDTH + ni::width::COLLECTIVE_OP_WIDTH +
+                                          ni::width::AXI_ADDR_WIDTH,
+              "AXI_AWUSER_WIDTH disagrees with the spec AWUSER layout "
+              "(user + collective_op + address mask)");
 
 struct WBeat {
     std::array<uint8_t, DATA_BYTES> data;

@@ -31,10 +31,10 @@ module user_node_endpoint #(
     parameter longint unsigned REGION_BYTES = 64'h1000,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
     parameter int unsigned DEFAULT_NUM_WRITES = 8,
-    // AWUSER width, spec fixed 58 b (see nmu_wrap.sv AWUSER_WIDTH). Master-side
-    // DV interfaces carry it (stimulus user field = AWUSER); the flat axi_req_t
-    // struct has no awuser member, so it leaves on the dedicated port below.
-    parameter int unsigned AWUSER_WIDTH = 58
+    // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH). Master-side DV interfaces
+    // carry it (stimulus user field = AWUSER); the flat axi_req_t struct has no
+    // awuser member, so it leaves on the dedicated port below.
+    parameter int unsigned AWUSER_WIDTH = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT
 ) (
     input  logic                       clk_i,
     input  logic                       rst_ni,

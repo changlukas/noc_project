@@ -7,6 +7,7 @@
 #include "dpi_boundary_macros.h"
 #include "dpi_marshal.hpp"
 #include "handle_block.hpp"
+#include "ni_params.h"
 #include "wrap/dat_merge_wrap.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nsu_wrap.hpp"
@@ -497,10 +498,10 @@ extern "C" void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svB
         in.awcache = static_cast<uint8_t>(awcache[0] & 0x0F);
         in.awprot = static_cast<uint8_t>(awprot[0] & 0x07);
         in.awqos = static_cast<uint8_t>(awqos[0] & 0x0F);
-        // 58-bit AWUSER, 2 words little-endian; mask to the field width so SV
-        // padding bits above [57] never reach axi::AwBeat::user.
+        // AWUSER, 2 words little-endian; mask to the field width so SV padding
+        // bits above the field never reach axi::AwBeat::user.
         in.awuser = (static_cast<uint64_t>(awuser[0]) | (static_cast<uint64_t>(awuser[1]) << 32)) &
-                    ((uint64_t{1} << 58) - 1);
+                    ((uint64_t{1} << ni::AXI_AWUSER_WIDTH) - 1);
         in.wvalid = static_cast<bool>(wvalid);
         in.wdata = unpack_axi_data(wdata);
         in.wstrb = unpack_wstrb(wstrb);

@@ -43,6 +43,19 @@ axi:
     # class rides the addressed 8 B lane of the same port (docs/noc-target-spec.md §5).
     sv_symbol: AXI_DATA_WIDTH_DFLT
     cpp_symbol: AXI_DATA_WIDTH
+  AWUSER_WIDTH:
+    type: int
+    units: bits
+    description: "AWUSER width at the NI slave port: 8 b opaque user + 2 b collective_op + 48 b collective address mask, per docs/noc-target-spec.md §6"
+    default: 58
+    min: 10
+    max: 64
+    # NOTE: the collective mask field is ADDR_WIDTH wide, so this default only
+    # holds while ADDR_WIDTH == 48. The DPI carries AWUSER in a 2-word
+    # svBitVecVal container (src/dpi/cmodel_dpi.cpp cmodel_nmu_set_inputs),
+    # which is what caps this at 64.
+    sv_symbol: AXI_AWUSER_WIDTH_DFLT
+    cpp_symbol: AXI_AWUSER_WIDTH
 
 noc:
   DAT_NUM_VC:
