@@ -6,6 +6,7 @@
 #include <vector>
 
 using ni::cmodel::Flit;
+using ni::cmodel::router::port_bit;
 using ni::cmodel::router::route_compute;
 using ni::cmodel::router::RouterConfig;
 using ni::cmodel::router::RouterPort;
@@ -257,7 +258,7 @@ TEST(SimpleRouterRouteLock, LatchedRouteSurvivesAMidWormDstChange) {
     r.tick();
     r.tick();
     ASSERT_EQ(east.received.size(), 1u);
-    EXPECT_EQ(r.route_locked(W, 0), RouterPort::EAST);
+    EXPECT_EQ(r.route_locked(W, 0), port_bit(RouterPort::EAST));
 
     // Body: dst now computes to SOUTH, flit_tail=0 still. A recompute would
     // route it SOUTH; the lock must keep it on EAST.
@@ -272,7 +273,7 @@ TEST(SimpleRouterRouteLock, LatchedRouteSurvivesAMidWormDstChange) {
     r.tick();
     r.tick();
     EXPECT_EQ(east.received.size(), 3u);
-    EXPECT_EQ(r.route_locked(W, 0), std::nullopt);
+    EXPECT_EQ(r.route_locked(W, 0), 0u);
     EXPECT_EQ(r.wormhole_locked_input(E), std::nullopt);
 }
 
