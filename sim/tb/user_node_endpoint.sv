@@ -187,6 +187,28 @@ module user_node_endpoint #(
         .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(AWUSER_WIDTH), .TT(TestTime)
     ) scoreboard_t;
 
+    // Preload-capable scoreboard: a multicast replica is written by a REMOTE
+    // node's fabric-replicated AW, so it never crosses this node's master
+    // AW/W wires and the base class golden model cannot learn it from
+    // monitoring -- its read check then flags the (correct) replica readback
+    // as unexpected. preload_byte() seeds the protected golden model
+    // directly; the multicast checker below calls it for every replica byte
+    // it captures, after which the base class checks replica reads exactly
+    // like locally written ones.
+    class mcast_preload_scoreboard extends scoreboard_t;
+        function new(
+            virtual AXI_BUS_DV #(
+                .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
+                .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
+            ) axi
+        );
+            super.new(axi);
+        endfunction
+        function void preload_byte(axi_addr_t addr, byte_t data);
+            this.memory_q[addr].push_back(data);
+        endfunction
+    endclass
+
     // run_done drives end_of_sim_o for ALL flavors: declare it exactly ONCE here,
     // above the ifdef, and delete the per-arm copies. run_done is set by the
     // stimulus initial (procedural, blocking); the output port is refreshed
@@ -201,7 +223,7 @@ module user_node_endpoint #(
 
     file_master_t file_master;
     rand_slave_t  rand_slave;
-    scoreboard_t  scoreboard;
+    mcast_preload_scoreboard scoreboard;
 
     // Stimulus root: <stim_dir>/node<NODE_ID>/{write,read}.txt (emitter output).
     string stim_dir = "sim/test_patterns/directed";
@@ -340,6 +362,10 @@ module user_node_endpoint #(
     mcast_txn_t  mcast_rd_active [2**ID_WIDTH];
     bit          mcast_rd_busy [2**ID_WIDTH];
     int unsigned mcast_rd_beat [2**ID_WIDTH];
+    // Non-vacuity: replica bytes actually compared. A node that captured
+    // multicast golden must also have compared some readback, or the check
+    // never ran (see the epilogue below).
+    int unsigned mcast_checked = 0;
 
     // Plain always + blocking assignments: this is testbench bookkeeping
     // (queues + associative array), not registered hardware state.
@@ -374,6 +400,14 @@ module user_node_endpoint #(
                             automatic bit done = 1'b0;
                             while (!done) begin
                                 mcast_mem[(byte_addr & ~mc_mask) | sub] = golden;
+                                // Seed the pulp scoreboard too: replicas at
+                                // remote nodes never appear on this node's
+                                // master wires, so without this its read
+                                // check has no golden for the replica
+                                // readback (under +mcast_fault the corrupted
+                                // byte flows here as well -- both checkers
+                                // then flag, which is the red test's point).
+                                scoreboard.preload_byte((byte_addr & ~mc_mask) | sub, golden);
                                 if (sub == 0) done = 1'b1;
                                 else sub = (sub - 1) & mc_mask;
                             end
@@ -421,6 +455,7 @@ module user_node_endpoint #(
                     if (mcast_mem.exists(ba)) begin
                         automatic logic [7:0] act =
                             master_axi_rsp_i.rdata[8 * (ba % MC_BUS_BYTES) +: 8];
+                        mcast_checked = mcast_checked + 1;
                         if (act !== mcast_mem[ba])
                             $fatal(1, "[mcast_sb] node%0d: replica readback mismatch addr=%h exp=%h act=%h (id=%0d beat=%0d)",
                                    NODE_ID, ba, mcast_mem[ba], act, rid, mcast_rd_beat[rid]);
@@ -518,6 +553,15 @@ module user_node_endpoint #(
             if (master_axi_rsp_i.bvalid)
                 $fatal(1, "[mcast_sb] node%0d: B still asserted after all writes retired -- extra B",
                        NODE_ID);
+            // Non-vacuity: a node that captured multicast golden read its own
+            // member replicas back (the pattern's readback phase), so zero
+            // compares means the checker never saw the readback -- vacuous.
+            if (mcast_mem.num() > 0 && mcast_checked == 0)
+                $fatal(1, "[mcast_sb] node%0d: multicast golden captured but zero replica bytes compared",
+                       NODE_ID);
+            if (mcast_mem.num() > 0)
+                $display("[mcast_sb] node%0d: %0d replica byte compares against %0d golden bytes",
+                         NODE_ID, mcast_checked, mcast_mem.num());
         end
     end
 
