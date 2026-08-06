@@ -48,7 +48,9 @@ module ni_wrap #(
     parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
     parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
     parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
+    // AWUSER width, spec fixed 58 b (see nmu_wrap.sv AWUSER_WIDTH).
+    parameter int unsigned AWUSER_WIDTH   = 58
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
@@ -56,8 +58,10 @@ module ni_wrap #(
     input  longint unsigned   nsu_ctx_i,
     input  longint unsigned   dat_merge_ctx_i,
 
-    // NMU AXI slave face (struct)
+    // NMU AXI slave face (struct) + dedicated AWUSER sideband (the generated
+    // axi_req_t struct has no awuser field; collective stimulus rides here).
     input  ni_signals_pkg::axi_req_t   master_axi_req_i,
+    input  logic [AWUSER_WIDTH-1:0]    master_awuser_i,
     output ni_signals_pkg::axi_rsp_t   master_axi_rsp_o,
     // NSU AXI master face (struct)
     output ni_signals_pkg::axi_req_t   slave_axi_req_o,
@@ -108,10 +112,11 @@ module ni_wrap #(
         .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),
         .DAT_NUM_VC(DAT_NUM_VC),
         .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH), .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH),
-        .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)
+        .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH), .AWUSER_WIDTH(AWUSER_WIDTH)
     ) u_nmu (
         .clk_i(clk_i), .rst_ni(rst_ni), .ctx_i(nmu_ctx_i),
-        .axi_req_i(master_axi_req_i), .axi_rsp_o(master_axi_rsp_o),
+        .axi_req_i(master_axi_req_i), .awuser_i(master_awuser_i),
+        .axi_rsp_o(master_axi_rsp_o),
         .tx_req_valid_o(tx_req_valid_o), .tx_req_flit_o(tx_req_flit_o),
         .tx_req_ready_i(tx_req_ready_i),
         .rx_rsp_valid_i(rx_rsp_valid_i), .rx_rsp_flit_i(rx_rsp_flit_i),

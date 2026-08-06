@@ -54,6 +54,10 @@ struct NmuInputs {
     uint8_t awcache;
     uint8_t awprot;
     uint8_t awqos;
+    // AWUSER, 58 b (docs/noc-target-spec.md §6 layout): [7:0] user-defined,
+    // [9:8] collective_op, [57:10] collective address mask. Carried whole into
+    // axi::AwBeat::user; the NMU consumes the collective bits at admission.
+    uint64_t awuser;
     // AXI slave side — W channel (master drives write data)
     bool wvalid;
     std::array<uint8_t, NMU_AXI_DATA_BYTES> wdata;

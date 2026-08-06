@@ -30,11 +30,16 @@ module user_node_endpoint #(
     parameter logic [NUM_NODES-1:0][63:0] REGION_BASE = '0,
     parameter longint unsigned REGION_BYTES = 64'h1000,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
-    parameter int unsigned DEFAULT_NUM_WRITES = 8
+    parameter int unsigned DEFAULT_NUM_WRITES = 8,
+    // AWUSER width, spec fixed 58 b (see nmu_wrap.sv AWUSER_WIDTH). Master-side
+    // DV interfaces carry it (stimulus user field = AWUSER); the flat axi_req_t
+    // struct has no awuser member, so it leaves on the dedicated port below.
+    parameter int unsigned AWUSER_WIDTH = 58
 ) (
     input  logic                       clk_i,
     input  logic                       rst_ni,
     output ni_signals_pkg::axi_req_t   master_axi_req_o,
+    output logic [AWUSER_WIDTH-1:0]    master_awuser_o,
     input  ni_signals_pkg::axi_rsp_t   master_axi_rsp_i,
     input  ni_signals_pkg::axi_req_t   slave_axi_req_i,
     output ni_signals_pkg::axi_rsp_t   slave_axi_rsp_o,
@@ -50,7 +55,7 @@ module user_node_endpoint #(
     // ------------------------------------------------------------------
     AXI_BUS_DV #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(1)
+        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) master_dv (clk_i);
 
     AXI_BUS_DV #(
@@ -90,6 +95,9 @@ module user_node_endpoint #(
         master_axi_req_o.arvalid  = master_dv.ar_valid;
         master_axi_req_o.rready   = master_dv.r_ready;
     end
+    // AWUSER sideband (58 b, collective op + address mask): the file_master's
+    // stimulus user field, forwarded whole to the NMU beside the flat struct.
+    assign master_awuser_o = master_dv.aw_user;
     assign master_dv.aw_ready = master_axi_rsp_i.awready;
     assign master_dv.w_ready  = master_axi_rsp_i.wready;
     assign master_dv.b_id     = master_axi_rsp_i.bid;
@@ -157,7 +165,7 @@ module user_node_endpoint #(
     // VIP classes
     // ------------------------------------------------------------------
     typedef axi_test::axi_file_master #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
+        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(AWUSER_WIDTH),
         .TA(ApplTime), .TT(TestTime)
     ) file_master_t;
     // Zero response wait: an ideal sink so the FABRIC is the bottleneck, not the
@@ -172,7 +180,7 @@ module user_node_endpoint #(
         .AX_MAX_WAIT_CYCLES(0), .R_MAX_WAIT_CYCLES(0), .RESP_MAX_WAIT_CYCLES(0)
     ) rand_slave_t;
     typedef axi_test::axi_scoreboard #(
-        .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(1), .TT(TestTime)
+        .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(AWUSER_WIDTH), .TT(TestTime)
     ) scoreboard_t;
 
     // run_done drives end_of_sim_o for ALL flavors: declare it exactly ONCE here,

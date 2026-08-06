@@ -471,15 +471,18 @@ extern "C" unsigned long long cmodel_nmu_create_ex(const char* name, int src_id,
         static_cast<std::size_t>(max_txns_per_id), static_cast<std::size_t>(outstanding_depth));
 }
 
-extern "C" void cmodel_nmu_set_inputs(
-    unsigned long long ctx, svBit awvalid, svBitVecVal* awid, svBitVecVal* awaddr,
-    svBitVecVal* awlen, svBitVecVal* awsize, svBitVecVal* awburst, svBit awlock,
-    svBitVecVal* awcache, svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid, svBitVecVal* wdata,
-    svBitVecVal* wstrb, svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
-    svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
-    svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
-    svBit tx_req_ready, svBit rx_rsp_valid, svBitVecVal* rx_rsp_flit, svBit rx_dat_valid,
-    svBitVecVal* rx_dat_flit, svBitVecVal* tx_dat_crdvalid) {
+extern "C" void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
+                                      svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
+                                      svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
+                                      svBitVecVal* awprot, svBitVecVal* awqos, svBitVecVal* awuser,
+                                      svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb,
+                                      svBit wlast, svBit bready, svBit arvalid, svBitVecVal* arid,
+                                      svBitVecVal* araddr, svBitVecVal* arlen, svBitVecVal* arsize,
+                                      svBitVecVal* arburst, svBit arlock, svBitVecVal* arcache,
+                                      svBitVecVal* arprot, svBitVecVal* arqos, svBit rready,
+                                      svBit tx_req_ready, svBit rx_rsp_valid,
+                                      svBitVecVal* rx_rsp_flit, svBit rx_dat_valid,
+                                      svBitVecVal* rx_dat_flit, svBitVecVal* tx_dat_crdvalid) {
     DPI_BOUNDARY_BEGIN(cmodel_nmu_set_inputs) {
         REQUIRE_HANDLE(ctx, WrapType::Nmu, "cmodel_nmu_set_inputs");
         auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
@@ -494,6 +497,10 @@ extern "C" void cmodel_nmu_set_inputs(
         in.awcache = static_cast<uint8_t>(awcache[0] & 0x0F);
         in.awprot = static_cast<uint8_t>(awprot[0] & 0x07);
         in.awqos = static_cast<uint8_t>(awqos[0] & 0x0F);
+        // 58-bit AWUSER, 2 words little-endian; mask to the field width so SV
+        // padding bits above [57] never reach axi::AwBeat::user.
+        in.awuser = (static_cast<uint64_t>(awuser[0]) | (static_cast<uint64_t>(awuser[1]) << 32)) &
+                    ((uint64_t{1} << 58) - 1);
         in.wvalid = static_cast<bool>(wvalid);
         in.wdata = unpack_axi_data(wdata);
         in.wstrb = unpack_wstrb(wstrb);

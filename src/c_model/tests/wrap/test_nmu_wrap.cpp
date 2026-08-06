@@ -249,6 +249,72 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     ASSERT_TRUE(saw_aw_flit) << "NmuWrap never produced an AW flit from the config-path SAM";
 }
 
+// ---------------------------------------------------------------------------
+// AWUSER plumb (S4 T6): NmuInputs.awuser reaches axi::AwBeat::user whole, so
+// a collective AWUSER driven through the wrap face is translated and stamped
+// into the AW flit header. This is the wrap-level weld the DPI awuser
+// argument lands on; the translate itself is T2-tested at the Rob level.
+// ---------------------------------------------------------------------------
+TEST(NmuWrap, awuser_collective_reaches_flit_header) {
+    SCENARIO(
+        "AWUSER = MULTICAST op + address mask 0x1000 on a 4 KB/tile 2x2 SAM "
+        "-> the emitted DataAw flit carries collective_op=MULTICAST and "
+        "collective_mask=0x01 (row pair (0,0)+(1,0))");
+
+    auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_awuser_sam.yaml");
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"
+                           "    - { x: 1, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n"
+                           "    - { x: 1, y: 1, size: 0x1000 }\n";
+
+    NmuWrap adapter;
+    adapter.init(/*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
+                 ni::cmodel::nmu::RobMode::Disabled, path.c_str());
+
+    NmuInputs in{};
+    NmuOutputs out{};
+
+    // Anchor (0,0) local 0x40; address-mask bit 12 wildcards the x tile bit
+    // under the 4 KB packing, naming {(0,0), (1,0)} -> node mask 0x01.
+    in.awvalid = true;
+    in.awid = 0x01;
+    in.awaddr = 0x40;
+    in.awlen = 0;
+    in.awsize = 2;
+    in.awburst = 1;  // INCR
+    in.awuser = (uint64_t{0x1000} << 10) | (uint64_t{1} << 8);
+    adapter.set_inputs(in);
+    adapter.tick();
+    adapter.get_outputs(out);
+    ASSERT_TRUE(out.awready) << "cycle 1: AWVALID observed -> awready pulses";
+
+    adapter.set_inputs(in);  // valid held; prev ready -> AW handshake tick
+    adapter.tick();
+    adapter.get_outputs(out);
+
+    bool saw_aw_flit = false;
+    in = NmuInputs{};
+    for (int i = 0; i < 32 && !saw_aw_flit; ++i) {
+        adapter.set_inputs(in);
+        adapter.tick();
+        adapter.get_outputs(out);
+        if (out.tx_dat_valid) {
+            auto flit = flit_from_bytes(out.tx_dat_flit);
+            if (flit.get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
+                EXPECT_EQ(flit.get_header_field("collective_op"), ni::COLLECTIVE_OP_MULTICAST);
+                EXPECT_EQ(flit.get_header_field("collective_mask"), 0x01u);
+                EXPECT_EQ(flit.get_header_field("dst_id"), 0x00u) << "anchor dst is (0,0)";
+                saw_aw_flit = true;
+            }
+        }
+    }
+    ASSERT_TRUE(saw_aw_flit) << "NmuWrap never emitted the collective DataAw flit -- the "
+                                "awuser plumb (NmuInputs.awuser -> AwBeat.user) is broken";
+}
+
 // Note: the wrap-level "odd num_vc rejected" death test was removed in S3a
 // T5. REQ/RSP are fixed single-VC now (S1 Q2), and the S3b VC collapse
 // retired the read/write virtual-network split that owned the even-num_vc

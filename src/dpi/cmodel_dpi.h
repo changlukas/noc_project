@@ -153,12 +153,14 @@ unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_nu
                                         int rob_enabled, int b_rob_depth, int r_rob_depth,
                                         int max_txns_per_id, int outstanding_depth,
                                         const char* config_path);
+// awuser: 58-bit AWUSER (spec §6 layout — [7:0] user, [9:8] collective_op,
+// [57:10] collective address mask) => 2 svBitVecVal words, little-endian.
 void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
                            svBitVecVal* awaddr, svBitVecVal* awlen, svBitVecVal* awsize,
                            svBitVecVal* awburst, svBit awlock, svBitVecVal* awcache,
-                           svBitVecVal* awprot, svBitVecVal* awqos, svBit wvalid,
-                           svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast, svBit bready,
-                           svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
+                           svBitVecVal* awprot, svBitVecVal* awqos, svBitVecVal* awuser,
+                           svBit wvalid, svBitVecVal* wdata, svBitVecVal* wstrb, svBit wlast,
+                           svBit bready, svBit arvalid, svBitVecVal* arid, svBitVecVal* araddr,
                            svBitVecVal* arlen, svBitVecVal* arsize, svBitVecVal* arburst,
                            svBit arlock, svBitVecVal* arcache, svBitVecVal* arprot,
                            svBitVecVal* arqos, svBit rready, svBit tx_req_ready, svBit rx_rsp_valid,

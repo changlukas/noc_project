@@ -168,7 +168,7 @@ class NmuWrap {
             aw.cache = in_.awcache;
             aw.prot = in_.awprot;
             aw.qos = in_.awqos;
-            aw.user = 0;
+            aw.user = in_.awuser;
             // Capacity was a condition of asserting ready last tick and only
             // this adapter pushes, so the push cannot fail here.
             (void)port.push_aw(aw);

@@ -45,12 +45,17 @@ module nmu_wrap #(
     parameter int unsigned DAT_NUM_VC     = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
     parameter int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT,
     parameter int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT,
-    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT
+    parameter int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT,
+    // AWUSER width, spec fixed 58 b (docs/noc-target-spec.md §6: [7:0] user,
+    // [9:8] collective_op, [57:10] collective address mask). Dedicated port
+    // beside axi_req_i: the generated axi_req_t struct has no awuser field.
+    parameter int unsigned AWUSER_WIDTH   = 58
 ) (
     input  logic              clk_i,
     input  logic              rst_ni,
     input  longint unsigned            ctx_i,
     input  ni_signals_pkg::axi_req_t   axi_req_i,
+    input  logic [AWUSER_WIDTH-1:0]    awuser_i,
     output ni_signals_pkg::axi_rsp_t   axi_rsp_o,
 
     // REQ face (egress, ready/valid).
@@ -88,6 +93,7 @@ module nmu_wrap #(
         input  bit [3:0]              awcache,
         input  bit [2:0]              awprot,
         input  bit [3:0]              awqos,
+        input  bit [AWUSER_WIDTH-1:0] awuser,
         input  bit                    wvalid,
         input  bit [DATA_WIDTH-1:0]   wdata,
         input  bit [DATA_WIDTH/8-1:0] wstrb,
@@ -203,6 +209,7 @@ module nmu_wrap #(
                 axi_req_i.awcache,
                 axi_req_i.awprot,
                 axi_req_i.awqos,
+                awuser_i,
                 axi_req_i.wvalid,
                 axi_req_i.wdata,
                 axi_req_i.wstrb,
