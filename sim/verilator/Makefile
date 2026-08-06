@@ -181,6 +181,9 @@ SEED       ?= 1
 # wait_b/wait_r would not terminate without it (booksim solves the same problem
 # with sim_type=throughput, which skips its drain).
 PATTERN         ?= neighbor
+# Multicast mask shape (multicast pattern only): row | col | submesh. One shape
+# per run -- concurrent multicast trees must stay pairwise disjoint (R1).
+MCAST_SHAPE     ?= row
 INJECTION_MODE  ?= 0
 INJECTION_RATE  ?= 1.0
 INJECTION_COUNT ?= $(if $(filter 1 2,$(INJECTION_MODE)),200,4)
@@ -210,11 +213,15 @@ BURST_LEN       ?= 0
 # the next line into the value.
 _CONTINUOUS    := $(filter 1,$(INJECTION_MODE))
 _CHECKED       := $(filter 2,$(INJECTION_MODE))
-STIM_ROOT      ?= $(COSIM_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(PATTERN)_n$(INJECTION_COUNT)
-SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(TOPOLOGY)_$(PATTERN)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(TOPOLOGY)_$(PATTERN)_r$(INJECTION_RATE)_s$(SEED),directed_$(TOPOLOGY)_$(PATTERN)_s$(SEED)))
+# Pattern tag: multicast runs are per-shape, so the shape joins the stim dir /
+# output tag (row and submesh runs must not share stimulus or logs).
+_PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
+STIM_ROOT      ?= $(COSIM_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
+SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(TOPOLOGY)_$(_PATTERN_TAG)_s$(SEED)))
 GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
 EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py
 _HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),--hotspot $(HOTSPOT),)
+_MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),)
 
 .PHONY: run-directed
 run-directed: $(TBTOP_EXE)
@@ -227,7 +234,7 @@ run-directed: $(TBTOP_EXE)
 	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
-	    --seed $(SEED) $(_HOTSPOT_ARGS) \
+	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
 	    $(if $(IDS_PER_TILE),--ids-per-tile $(IDS_PER_TILE))
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \

@@ -171,9 +171,17 @@ specgen_pytest:
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
 _TOPO   := $(TB:tb_%=%)
-_VALID_PATTERNS := neighbor transpose uniform_random hotspot beat_exact
+_VALID_PATTERNS := neighbor transpose uniform_random hotspot beat_exact multicast
 ifeq ($(filter $(PATTERN),$(_VALID_PATTERNS)),)
 $(error PATTERN must be one of: $(_VALID_PATTERNS) (got '$(PATTERN)'))
+endif
+# multicast readback is N reads per write (one per member replica), which breaks
+# the 1:1 read/write pairing INJECTION_MODE=2's per-id B interlock assumes, and
+# mode 1 disarms the scoreboard. Directed two-phase (mode 0) only.
+ifeq ($(PATTERN),multicast)
+ifneq ($(filter-out 0,$(INJECTION_MODE)),)
+$(error PATTERN=multicast supports INJECTION_MODE=0 only (got '$(INJECTION_MODE)'))
+endif
 endif
 # RANDOM is 0..32767; RANDOM*32768+RANDOM draws a uniform 30-bit seed (< 2**30),
 # staying under Verilator's +verilator+seed+ int32 ceiling (< 2147483648). The old
@@ -199,7 +207,8 @@ _INJ_ARGS := \
 sim:
 	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
 	$(MAKE) -C sim/verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
-	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT))
+	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT)) \
+	    $(if $(MCAST_SHAPE),MCAST_SHAPE=$(MCAST_SHAPE))
 
 # Injection-rate sweep: four VC configs x nine rates, one point per make sim.
 # MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped

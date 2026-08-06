@@ -48,6 +48,17 @@ beat_exact  (S2 gate: DPI word-packing fault injection, not a spatial pattern)
     config-space topology exercises both classes in one run. Ignores
     --transactions-per-node/--size/--len/--seed (own fixed shape).
 
+multicast  (S4 collectives; stimulus intent ported from FlooNoC
+            tb_floo_rob_multicast.sv:30-49,189-195,379-395 masked-region writes)
+    Source nodes issue multicast writes whose AWUSER carries the address mask
+    (row / column / 2x2-submesh member sets, --mcast-shape, ONE shape per run),
+    then read back every member replica; non-source nodes carry unicast filler
+    plus (config topologies) cross-node narrow probes. The issue schedule obeys
+    restriction R1: same-shape trees are pairwise disjoint across sources, and
+    each source's own multicasts share one AXI id so the NMU's R2 gate
+    serializes them on the merged B. See the "Multicast pattern" section below.
+    Ignores --ids-per-tile (one id per node is the serialization mechanism).
+
 Address allocation
 ------------------
 alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes, region_bytes, ...)
@@ -153,14 +164,18 @@ def encode_write_beats(addr, axi_size, axi_len, data_width):
     return lines
 
 
-def _ax_fields(axid, addr, axi_len, axi_size, include_atop):
+def _ax_fields(axid, addr, axi_len, axi_size, include_atop, user=0):
     """The AW/AR field lines in parse_write/parse_read order. Write includes atop
-    (12 fields); read omits it (11 fields, matching axi_file_master.parse_read)."""
+    (12 fields); read omits it (11 fields, matching axi_file_master.parse_read).
+
+    user: AWUSER value (58 b, decimal in the file; axi_file_master parses %d).
+    Nonzero only for collective writes: [9:8] collective_op, [57:10] the
+    address mask (docs/noc-target-spec.md AWUSER layout). Reads keep 0."""
     lines = [str(axid), f"0x{addr:x}", str(axi_len), str(axi_size),
              "1", "0", "0", "0", "0", "0"]          # burst=INCR lock cache prot qos region
     if include_atop:
         lines.append("0")                            # atop (write only)
-    lines.append("0")                                # user
+    lines.append(str(user))                          # user (AWUSER / ARUSER)
     return lines
 
 
@@ -447,14 +462,202 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 
 
 # ---------------------------------------------------------------------------
+# Multicast pattern (S4 collectives)
+# ---------------------------------------------------------------------------
+#
+# One mask SHAPE per run (--mcast-shape row|col|submesh): concurrent multicast
+# spanning trees must be pairwise disjoint (restriction R1, s4-phase0-design
+# §1.3). Row trees live in their own row's links, column trees in their own
+# column's, 2x2-block trees in their own block's -- disjoint across sources by
+# construction. Mixing shapes in one run would overlap trees at shared eject
+# outputs, which R1 forbids for concurrently in-flight multicasts.
+#
+# Within one source every transaction shares ONE AXI id, so the NMU's R2 gate
+# (one outstanding collective per (NMU, id); nmu/rob.hpp) serializes that
+# source's own multicasts on the merged B -- the "issuer waits for the merged
+# B" arm of R1, enforced by the DUT, not by file pacing.
+#
+# Per-node roles:
+#   source nodes  : T data-class multicast writes over the member set (anchor =
+#                   the source's own tile; AWUSER carries the address mask) +
+#                   on a config topology one narrow-class multicast into the
+#                   members' config tiles (config-space message replication).
+#                   Readback phase reads EVERY member replica (scoreboard keys
+#                   by (dst_id, local_addr) -- full address = base + offset).
+#   other nodes   : T unicast neighbor write+read pairs (filler traffic) + on
+#                   a config topology one narrow 2-beat write+read probe into
+#                   the NEXT node's config tile -- a transit NarrowR worm on
+#                   RSP, giving the CollectB join a live worm to hold behind
+#                   (design §3.2 step 5a).
+#
+# Local-offset partitions inside a tile (config offsets alias memory offsets
+# at the single-slave endpoint, so all four windows must be disjoint):
+#   [0x0,    0x10)                 config multicast slot (16 B narrow burst)
+#   [0x800,  0x800 + n*0x40)       cross-node config probes (one per node)
+#   [0x1000, 0x1000 + region)      unicast filler slots (alloc_unique_offset)
+#   [0x1000 + region, ... )        data multicast slots (seq * stride)
+
+_MCAST_SHAPES = ("row", "col", "submesh")
+_CONFIG_PROBE_BASE = 0x800  # cross-node config probe window, below base_local
+
+
+def collective_addr_mask(bases, member_cids, anchor_cid):
+    """OR of (base[m] XOR base[anchor]) with wildcard-closure validation.
+
+    The AWUSER mask semantics (spec §6) require the member set to be exactly a
+    wildcard over the mask bits: 2^popcount(mask) members whose bases cover
+    every masked combination.  The NMU's collective_translate re-checks this
+    and aborts the run; validating here turns a mask-unfriendly address map
+    into a stimulus-generation error instead of a co-sim abort.
+    """
+    anchor = bases[anchor_cid]
+    mask = 0
+    for m in member_cids:
+        mask |= bases[m] ^ anchor
+    n_bits = bin(mask).count("1")
+    if (1 << n_bits) != len(member_cids):
+        raise ValueError(
+            f"multicast member set of {len(member_cids)} needs a power-of-two wildcard; "
+            f"mask {mask:#x} has {n_bits} bits (address map not mask friendly)")
+    lo = anchor & ~mask
+    combos = set()
+    sub = mask
+    while True:
+        combos.add(lo | sub)
+        if sub == 0:
+            break
+        sub = (sub - 1) & mask
+    if combos != {bases[m] for m in member_cids}:
+        raise ValueError(
+            f"multicast member bases are not a wildcard over mask {mask:#x}: "
+            f"{sorted(hex(bases[m]) for m in member_cids)}")
+    if mask >> 48:
+        raise ValueError(f"collective address mask {mask:#x} exceeds AWUSER[57:10] (48 b)")
+    return mask
+
+
+def _awuser_multicast(addr_mask):
+    """AWUSER encode: [9:8] = MULTICAST (1), [57:10] = address mask."""
+    return (addr_mask << 10) | (1 << 8)
+
+
+def mcast_groups(shape, x_dim, y_dim):
+    """[(src_xy, [member_xy...]), ...] with pairwise-disjoint spanning trees."""
+    if shape == "row":
+        return [((0, y), [(x, y) for x in range(x_dim)]) for y in range(y_dim)]
+    if shape == "col":
+        return [((x, 0), [(x, y) for y in range(y_dim)]) for x in range(x_dim)]
+    if shape == "submesh":
+        if x_dim % 2 or y_dim % 2:
+            sys.exit(f"ERROR: --mcast-shape submesh requires even mesh dims (got {x_dim}x{y_dim})")
+        return [((bx, by), [(bx + dx, by + dy) for dy in (0, 1) for dx in (0, 1)])
+                for by in range(0, y_dim, 2) for bx in range(0, x_dim, 2)]
+    raise ValueError(f"unknown mcast shape {shape!r}")
+
+
+def multicast_lines(axid, anchor_addr, addr_mask, member_addrs, axi_size, axi_len, data_width):
+    """(write_lines, read_lines) for one multicast write + per-member readback.
+
+    The write is ONE AW (anchor address, AWUSER mask) + its beats; the fabric
+    replicates it.  Reads are plain unicasts, one per member replica address.
+    Address-in-data payload only uses addr[7:0], and replicas differ from the
+    anchor only in node-index bits (>= bit 12), so the anchor-encoded beats
+    compare equal at every replica.
+    """
+    write = _ax_fields(axid, anchor_addr, axi_len, axi_size, include_atop=True,
+                       user=_awuser_multicast(addr_mask))
+    write += encode_write_beats(anchor_addr, axi_size, axi_len, data_width)
+    read = []
+    for m_addr in member_addrs:
+        read += _ax_fields(axid, m_addr, axi_len, axi_size, include_atop=False)
+    return write, read
+
+
+def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
+                           sizes, shape, n_txn, axi_size, axi_len, data_width,
+                           base_local, region_bytes):
+    """Write node<i>/{write,read}.txt for every node of the multicast pattern."""
+    n_nodes = len(nodes)
+    groups = {coord_id(*src): members for src, members in mcast_groups(shape, x_dim, y_dim)}
+    burst_footprint = (axi_len + 1) * (1 << axi_size)
+    stride = max(_SLOT_STRIDE, burst_footprint)
+    mcast_base = base_local + region_bytes  # after the unicast filler window
+    # Config space is all-or-nothing for the multicast pattern: narrow
+    # multicast needs a config tile per member.
+    config_all = len(config_bases) == n_nodes
+    if config_bases and not config_all:
+        sys.exit("ERROR: multicast pattern needs a config tile on EVERY node "
+                 f"(got {len(config_bases)}/{n_nodes}); extend the topology's config tiles")
+    if config_all and _CONFIG_PROBE_BASE + n_nodes * _SLOT_STRIDE > base_local:
+        sys.exit("ERROR: cross-node config probe window overflows into base_local; "
+                 "reduce node count or move _CONFIG_PROBE_BASE")
+
+    for (idx, x, y, src_cid) in nodes:
+        write_lines, read_lines = [], []
+        axid = idx % 256
+        if src_cid in groups:
+            members = [coord_id(mx, my) for (mx, my) in groups[src_cid]]
+            addr_mask = collective_addr_mask(bases, members, src_cid)
+            for seq in range(n_txn):
+                off = mcast_base + seq * stride
+                tile_size = sizes["memory"][src_cid]
+                if off + burst_footprint > tile_size:
+                    raise ValueError(
+                        f"multicast slot {off:#x}+{burst_footprint:#x} exceeds tile "
+                        f"size {tile_size:#x}; reduce transactions-per-node or burst")
+                w, r = multicast_lines(axid, bases[src_cid] + off, addr_mask,
+                                       [bases[m] + off for m in members],
+                                       axi_size, axi_len, data_width)
+                write_lines += w
+                read_lines += r
+            if config_all:
+                # Narrow config-space multicast: 2-beat 8 B burst at config
+                # offset 0 (config-space message replication use case).
+                cfg_mask = collective_addr_mask(config_bases, members, src_cid)
+                w, r = multicast_lines(axid, config_bases[src_cid], cfg_mask,
+                                       [config_bases[m] for m in members],
+                                       axi_size=3, axi_len=1, data_width=data_width)
+                write_lines += w
+                read_lines += r
+        else:
+            # Filler: unicast neighbor write+read pairs (same shape as the
+            # neighbor pattern), src-partitioned offsets in the base_local
+            # window -- disjoint from every multicast slot by construction.
+            dst_cid = coord_id(*neighbor_dst(x, y, x_dim, y_dim))
+            reserved = burst_footprint
+            for seq in range(n_txn):
+                off = alloc_unique_offset(dst_cid, idx, seq, base_local,
+                                          n_nodes, region_bytes, reserved=reserved)
+                addr = bases[dst_cid] + off
+                write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
+                write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
+                read_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=False)
+            if config_all:
+                # Cross-node narrow probe (write then read back): a transit
+                # NarrowR worm on RSP for the CollectB join's mid-worm hold.
+                probe_cid = nodes[(idx + 1) % n_nodes][3]
+                probe_addr = config_bases[probe_cid] + _CONFIG_PROBE_BASE + idx * _SLOT_STRIDE
+                w, r = narrow_beat_exact_lines(axid, probe_addr, data_width)
+                write_lines += w
+                read_lines += r
+        out_dir = os.path.join(out_root, f"node{idx}")
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "write.txt"), "w") as f:
+            f.write("\n".join(write_lines) + "\n")
+        with open(os.path.join(out_dir, "read.txt"), "w") as f:
+            f.write("\n".join(read_lines) + "\n")
+
+
+# ---------------------------------------------------------------------------
 # Topology loader
 # ---------------------------------------------------------------------------
 
 def _load_topology(name):
-    """Return (nodes, x_dim, y_dim, bases, config_bases) where nodes =
+    """Return (nodes, x_dim, y_dim, bases, config_bases, sizes) where nodes =
     [(idx, x, y, cid), ...], bases = {dst_id: base} (memory space) and
     config_bases = {dst_id: base} (config space, sparse -- most topologies
-    have none), both from address_map.pack().
+    have none), both from address_map.pack(); sizes = {"memory": {dst_id:
+    size}, "config": {dst_id: size}} for capacity checks.
 
     `name` is either a topology name resolved against sim/topologies/<name>.yaml, or
     a direct path to a topology yaml (ends in .yaml or names an existing file).  The
@@ -472,13 +675,17 @@ def _load_topology(name):
     y_dim = topo["topology"]["y_dim"]
     bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
     config_bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "config"}
+    sizes = {
+        "memory": {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"},
+        "config": {e["dst_id"]: e["size"] for e in entries if e["space"] == "config"},
+    }
     nodes = []
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
             nodes.append((idx, x, y, coord_id(x, y)))
             idx += 1
-    return nodes, x_dim, y_dim, bases, config_bases
+    return nodes, x_dim, y_dim, bases, config_bases, sizes
 
 
 # ---------------------------------------------------------------------------
@@ -571,8 +778,13 @@ def main(argv=None):
         description="Emit per-node file_master write.txt/read.txt for a traffic pattern."
     )
     ap.add_argument("--pattern", required=True,
-                    choices=["neighbor", "transpose", "uniform_random", "hotspot", "beat_exact"],
+                    choices=["neighbor", "transpose", "uniform_random", "hotspot", "beat_exact",
+                             "multicast"],
                     help="Traffic pattern")
+    ap.add_argument("--mcast-shape", choices=list(_MCAST_SHAPES), default="row",
+                    help="Multicast mask shape (multicast pattern only). One shape "
+                         "per run: concurrent multicast trees must be pairwise "
+                         "disjoint (restriction R1)")
     ap.add_argument("--topology", default="mesh_4x4_vc1",
                     help="Topology name (matches sim/topologies/<name>.yaml) or a "
                          "direct path to a topology yaml")
@@ -604,7 +816,7 @@ def main(argv=None):
                          "Does not affect VC allocation (VC is id-agnostic).")
     a = ap.parse_args(argv)
 
-    nodes, x_dim, y_dim, bases, config_bases = _load_topology(a.topology)
+    nodes, x_dim, y_dim, bases, config_bases, sizes = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
 
@@ -623,6 +835,14 @@ def main(argv=None):
     rng = _random_module.Random(a.seed)
     if a.pattern == "transpose":
         _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
+    if a.pattern == "multicast":
+        # One AXI id per node (R2 serializes a source's own multicasts on the
+        # merged B); --ids-per-tile does not apply here.
+        emit_multicast_pattern(a.out, nodes, x_dim, y_dim, bases, config_bases,
+                               sizes, a.mcast_shape, a.transactions_per_node,
+                               a.size, a.burst_len, widths["data"],
+                               base_local, region_bytes)
+        return
     for (idx, x, y, src_cid) in nodes:
         # A node that owns a config-space tile also routes one narrow-class
         # probe to it (self-targeted; config space is per-node, not spatial),
