@@ -131,6 +131,23 @@ INSTANTIATE_TEST_SUITE_P(AlignedMasks, NmuCollectiveMaskP,
                              MaskCase{"full_mesh", 0, 0, 0xF000, 0x33}),
                          [](const ::testing::TestParamInfo<MaskCase>& i) { return i.param.name; });
 
+TEST(NmuCollective, NarrowClassCollectiveTranslates) {
+    SCENARIO(
+        "NMU collective Q4 revision 2: multicast is legal on BOTH classes -- config-space message "
+        "replication rides Narrow. The translate was always class-agnostic, so a narrow anchor "
+        "yields the same node mask; the flit lands on NarrowAw and so forks on REQ, not DAT");
+    CollectiveTestbench t(addr_trans::SamTable({{0x0000, kTile, 0x00, axi::AxiClass::Narrow},
+                                                {0x1000, kTile, 0x01, axi::AxiClass::Narrow}}));
+    auto aw = make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000));
+    aw.size = 3;  // narrow rides the 8 B lane: AWSIZE <= 3, as for a narrow unicast
+    ASSERT_TRUE(t.rob.push_aw(aw));
+    auto f = t.aw_cap.pop();
+    ASSERT_TRUE(f.has_value());
+    EXPECT_EQ(f->get_header_field("axi_ch"), static_cast<uint64_t>(ni::AXI_CH_NarrowAw));
+    EXPECT_EQ(f->get_header_field("collective_op"), axi::COLLECTIVE_OP_MULTICAST);
+    EXPECT_EQ(f->get_header_field("collective_mask"), 0x01u);
+}
+
 TEST(NmuCollective, UnicastAwLeavesCollectiveFieldsClear) {
     SCENARIO(
         "NMU collective: an AWUSER with only the 8 b user field set is an ordinary unicast AW -- "
@@ -257,14 +274,17 @@ TEST(NmuCollectiveDeath, AwLockOnCollective) {
     EXPECT_DEATH(t.rob.push_aw(aw), "AWLOCK set on a collective AW");
 }
 
-TEST(NmuCollectiveDeath, NarrowClassCollective) {
+TEST(NmuCollectiveDeath, ReplicasStraddleTheClasses) {
     SCENARIO(
-        "NMU collective §2.3 / Q4 (ruled): S4 multicasts Data class only -- the DAT router owns "
-        "the only fork, a Narrow collective would additionally need one in the REQ SimpleRouter");
+        "NMU collective §2.3: both classes multicast (Q4 revision 2), but ONE destination set "
+        "cannot straddle them -- the class picks the network the worm forks on (Narrow -> REQ, "
+        "Data -> DAT) and a packet rides exactly one. Separate rule from the node-local offset "
+        "check that shares its loop");
     CollectiveTestbench t(addr_trans::SamTable({{0x0000, kTile, 0x00, axi::AxiClass::Narrow},
-                                                {0x1000, kTile, 0x01, axi::AxiClass::Narrow}}));
-    EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000))),
-                 "Data-class multicast only");
+                                                {0x1000, kTile, 0x01, axi::AxiClass::Data}}));
+    auto aw = make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000));
+    aw.size = 3;  // narrow anchor: AWSIZE <= 3 (8 B), orthogonal to the class rule
+    EXPECT_DEATH(t.rob.push_aw(aw), "narrow and data classes");
 }
 
 TEST(NmuCollectiveDeath, MoreMaskBitsThanNodeIdBits) {

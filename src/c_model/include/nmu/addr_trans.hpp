@@ -212,15 +212,10 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
                "nmu::addr_trans::collective_translate: collective anchor address maps to no tile");
         std::abort();
     }
-    // Design Q4 (ruled): S4 multicasts the Data class only. The DAT router owns
-    // the only fork; a Narrow-class collective would additionally need one in
-    // the REQ SimpleRouter.
-    if (anchor->cls != axi::AxiClass::Data) {
-        assert(false &&
-               "nmu::addr_trans::collective_translate: narrow-class collective -- S4 supports "
-               "Data-class multicast only");
-        std::abort();
-    }
+    // No anchor-class gate: design Q4 revision 2 rules multicast legal on BOTH
+    // classes (config-space message replication rides Narrow/REQ). The class
+    // still has to be UNIFORM across the destination set -- that is the
+    // e->cls != anchor->cls check in the enumeration below, a different rule.
 
     // Set-bit positions of the address mask. More set bits than a node id has
     // bits names more wildcard addresses than the mesh has nodes to absorb.
@@ -269,10 +264,20 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
         }
         // Spec :461-462: every replica carries the same node-local offset, one
         // aligned region per node. A mask bit inside the tile offset breaks this.
-        if (local != local0 || e->cls != anchor->cls) {
+        if (local != local0) {
             assert(false &&
                    "nmu::addr_trans::collective_translate: collective replicas disagree on "
-                   "node-local offset or address space");
+                   "node-local offset");
+            std::abort();
+        }
+        // Uniform class across the set. Both classes multicast (design Q4
+        // revision 2), but ONE set cannot straddle them: the class picks the
+        // network the worm forks on (Narrow -> REQ, Data -> DAT), and a packet
+        // rides exactly one.
+        if (e->cls != anchor->cls) {
+            assert(false &&
+                   "nmu::addr_trans::collective_translate: collective replicas straddle the "
+                   "narrow and data classes");
             std::abort();
         }
         if (seen[e->dst_id]) {
