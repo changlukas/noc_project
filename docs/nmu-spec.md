@@ -129,6 +129,8 @@ Admission decision per AW / AR, evaluated per AXI ID (`Rob::push_aw` / `push_ar`
 2. Same-destination bypass: the ID is not sticky-fallen-back AND dst_id equals the previous accepted push's dst_id for this ID and direction. No slot, ordering_req=0.
 3. Fall-back: allocate slots, ordering_req=1, and set the sticky flag. Once sticky, every later push of this ID allocates until the ID goes idle again (branch 1 is the only reset).
 
+A collective AW (Section 2.8) is admitted only through branch 1, and while one is in flight nothing else for that ID is admitted at all.
+
 Example, ID = 8'h03, write direction: AW#1 dst 8'h02 (list empty, branch 1, bypass). AW#2 dst 8'h02 (same dest, branch 2, bypass). AW#3 dst 8'h05 (dest changed, branch 3, allocate, sticky). AW#4 dst 8'h05 (same dest as #3 but sticky, branch 3, allocate). All four complete and the list empties. AW#5 dst 8'h05 (branch 1 again, bypass). A counterexample for branch 2: AW#2 with dst 8'h07 would take branch 3, because 8'h07 != 8'h02.
 
 Slot pools, per direction: B pool depth `NMU_ROB_B_DEPTH` = 32, R pool depth `NMU_ROB_R_DEPTH` = 32. An AW reserves 1 slot (B is one beat). An AR reserves ARLEN+1 consecutive slots (one per R beat), refused when free space is short. The allocator is a high-water stack: one allocation bit marks each reserved range's top slot, free space is the slot count above the highest set bit (leading-zero-count in RTL), the next base is depth minus free space, and space returns only from the top (Appendix 7.1 walks it with numbers). ordering_tag stamps the base slot. On the response side, B fills its slot, the i-th R beat of a burst fills base+i, and beats release to the master only while the ID's oldest outstanding transaction is being served (per-ID issue order, one order list per ID per direction).
@@ -166,6 +168,7 @@ Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and 
 | AXI_ID_WIDTH | 8 | 1..32 (implementation locked at 8) | ID fields, RoB per-ID arrays (256 IDs) |
 | AXI_ADDR_WIDTH | 64 | 1..64 (implementation locked at 64) | Address fields |
 | AXI_DATA_WIDTH | 256 | {32,64,128,256,512,1024} (implementation locked at 256) | wdata / rdata, WSTRB_WIDTH = 32 |
+| AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
 | NOC_DAT_NUM_VC | 1 | 1 to 8 | VC arbiter, credit vectors |
 | NOC_FLIT_WIDTH | 408 | 64..1024 (implementation locked at 408 by the flit format) | Flit ports |
 | NOC_ROUTER_VC_DEPTH | 4 | 1..16 | Request sender credit seed per VC |
@@ -178,6 +181,52 @@ Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and 
 | NMU_ARBITER_FIFO_DEPTH | 4 | 1..64 | Wormhole per-input and VC pending queues |
 
 Runtime configuration per instance: src_id, SAM config path, RobMode, RoB depth and outstanding-depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`, `+outstanding_depth=`.
+
+### 2.8 Collective writes
+
+A collective write is one AW+W burst the master issues once and the fabric replicates to an aligned submesh, answered by one merged `B`. The master expresses it on AWUSER, `AXI_AWUSER_WIDTH` = 58 bits wide:
+
+| AWUSER bits | Field | Meaning |
+|---|---|---|
+| [7:0] | user | opaque, carried in the flit payload |
+| [9:8] | collective_op | 2'd0 UNICAST, 2'd1 MULTICAST, 2'd2-3 reserved |
+| [57:10] | collective address mask | wildcard bits over the 48-bit address |
+
+Reads have no collective surface: ARUSER is 8 bits, so every AR leaves with `collective_op` = UNICAST and a zero mask. Both AXI classes multicast. Narrow-class collectives are the config-space replication case, where one config write reaches every tile of a submesh at the same node-local offset, and they fork on the REQ network; Data-class collectives fork on DAT.
+
+**Translate.** A set address-mask bit is a don't-care, so a mask with n set bits names 2^n replica addresses. The SAM is a first-match range lookup with no stored node-index bit offset, so the translate enumerates rather than bit-selects (`addr_trans::collective_translate`):
+
+**INPUT** AWUSER, AWADDR, AWLEN / AWSIZE / AWBURST. **COMPUTE** enumerate all 2^n masked addresses and translate each through the SAM. Every replica must land in a tile, carry the same node-local offset, carry the same class, name a distinct `dst_id`, and pass the burst-footprint check for its own aperture. **OUTPUT** an 8-bit node mask, the OR of each replica's `dst_id` against the anchor's, stamped into the AW header beside `collective_op`. `dst_id` stays the anchor's. The W metadata FIFO latches both fields per AW and stamps every W beat of the burst, so the fabric forks the W beats to the AW's exact branch set.
+
+n is capped at X_WIDTH + Y_WIDTH = 8, so the enumeration is at most 256 SAM lookups. It re-runs on every backpressure retry of the same AW. That is a model-only cost.
+
+**Reject set.** These are permanent illegal inputs, not retryable backpressure, so each is a fatal assert and abort, the convention this block already uses for inputs that never clear on retry:
+
+| Condition | Why |
+|---|---|
+| `collective_op` = UNICAST with a nonzero mask | mask without op contradicts the spec |
+| `collective_op` = MULTICAST with a zero mask | empty destination set. Not downgraded to unicast: the op is explicit here, so a mismatch is a stimulus contradiction |
+| reserved `collective_op` (2'd2, 2'd3) | undefined encoding |
+| AWLOCK set on a collective | AxLOCK is unicast only |
+| more mask bits set than a node id has | destination set larger than the mesh |
+| an anchor or replica address maps to no tile | the set leaves the mesh |
+| replicas disagree on the node-local offset | one aligned region per node is what makes the replicas addressable |
+| replicas straddle the narrow and data classes | the class picks the network the worm forks on, and a packet rides one |
+| the mask names one node twice | the set is not a wildcard over `dst_id` |
+| a replica burst overruns its aperture | same footprint rule as a unicast burst |
+| AWUSER bits above [57] set | they would be silently dropped by the field accessors |
+| a collective on the direct `Packetize::push_aw` interface | that path bypasses `Rob`, which owns the validate and translate |
+
+**R2 admission.** At most one collective is outstanding per (NMU, AXI ID). Two gates at `Rob::push_aw` entry, both returning retryable backpressure rather than an error:
+
+1. An incoming collective is admitted only when the ID's write order list is empty. It then takes the idle-ID bypass: ordering_req = 0, no RoB slot, in both `RobMode` settings.
+2. While the front entry of an ID's order list is collective, nothing for that ID is admitted. Testing the front is enough, because a collective only ever enters an empty list and is therefore the only entry.
+
+Gate 2 is what closes the same-destination bypass: without it a later same-ID AW whose destination equals the collective's anchor would stream past it with no slot and no ordering. The collective still takes one entry of the shared outstanding pool like any AW, released when its merged `B` retires.
+
+**Merged B.** The merged `B` returns through the ordinary B ingress and releases the interlock exactly like a unicast `B`: the NMU stamps ordering_tag before fanout and the fabric's merge preserves it, so the response path needs no collective state. The `B` carries `collective_op` = MULTICAST and the echoed node mask; neither perturbs the `bid` / `bresp` decode.
+
+Exactly one `B` per collective AW is a structural invariant of the merge, and two independent checks catch a violation. The order-list head check in `pop_b_staged` fires first on both callers: the first `B` pops the ID's only order-list entry, so a duplicate finds an empty list and aborts on "bypassed B does not match the head of its id's order list". The `write_txns_ > 0` underflow assert in `retire_b` is the backstop behind it.
 
 ## 3. Inputs and Outputs
 

@@ -236,6 +236,8 @@ whose FIFO already holds `NOC_ROUTER_OUTPUT_FIFO_DEPTH` flits.
 
 ### 2.8 Two networks per node
 
+> Pre-S3a: this section predates the Stage 3a three-network split. As-built, `router_wrap` holds a REQ `SimpleRouter`, an RSP `SimpleRouter` (both ready/valid, single VC) and a DAT `Router` (credit, VC-assigning). RSP carries B of both classes plus Narrow-class R; Data-class R rides DAT. The single-flit property below still holds for RSP as-built. Re-synced in campaign Stage 5. Section 2.10 is written against the as-built shape.
+
 Each mesh node instantiates one `router_wrap` containing two independent Router
 instances: a REQ router (carries AW/W/AR flits, NMU -> NSU direction) and an RSP
 router (carries B/R flits, NSU -> NMU direction). They share nothing: separate FIFOs,
@@ -268,6 +270,100 @@ Flits enter A's `noc_nmu_req_i` at cycles 0, 1, 2. All credit counters start at 
 Head latency: injected cycle 0, at the destination NI cycle 6 = 2 hops x 3 cycles.
 Tail: cycle 2 -> cycle 8. A's `credit_[EAST][0]` bottoms at 1 (three flits in flight)
 and returns to 4 by cycle 8.
+
+### 2.10 Collectives: multicast fork and CollectB join
+
+A collective write is one AW+W worm the fabric replicates to an aligned submesh, and one
+merged `B` that retraces that tree. The header fields `collective_op` and
+`collective_mask` carry it. Every other flit has `collective_op = 2'd0` (UNICAST) and
+takes none of the paths below, so a run without collectives is bit-identical to the
+pre-collective model.
+
+**Route-mask dual function** (`route_mask.hpp`, ported from FlooNoC
+`floo_route_xymask.sv`). A set `collective_mask` bit is a don't-care on that bit of the
+node id, so a mask with n set bits names 2^n nodes. Two pure functions of (`dst_id`,
+`src_id`, `collective_mask`, this router's coordinate and mesh dims):
+
+| Function | Wildcard side | Result |
+|---|---|---|
+| `route_mask_fork` | `dst_id` | the output ports a multicast flit forks to here: X spread along the source's row, the N/S turn in every column the set covers, LOCAL where both coordinates match |
+| `route_mask_join` | `src_id` | the input ports a collector waits for replicas on: each member's own XY return path |
+
+They are not mirror images. Same member set and same hop count both ways, but the
+interior edges differ for any mask with both X and Y bits set.
+
+**Fork discipline (both request routers).** Data-class multicast forks in the DAT credit
+`Router`; narrow-class multicast forks in the REQ `SimpleRouter`. The rules are the same
+on both:
+
+1. A head flit with `collective_op != UNICAST` takes the multi-hot branch set of
+   `route_mask_fork` in place of the one-hot `route_compute` result. An empty branch set
+   at a router the flit reached is fatal.
+2. Each branch output arbitrates, locks, and grants on its own. A branch that has already
+   accepted the head is masked off (`done_mask`, per input and VC) and idles with its lock
+   held.
+3. The input FIFO pops, and the single upstream credit pulse leaves, only once every
+   expected branch has accepted. Never one pulse per branch.
+4. AW and W stay one indivisible worm: the AW carries `flit_tail = 1'b0` and the last W
+   beat closes the packet, so every W beat replicates to the AW's exact branch set. Each
+   continuation recomputes its branch set from its own header and aborts on divergence.
+5. All branches always sit on the same flit. A fast branch is throttled to the slowest
+   until the head advances. This is a performance property of the ported discipline, not
+   a correctness one.
+
+On DAT each branch additionally runs VC assignment for itself, so branches legitimately
+ride different output VCs; a `fixed_vc = 1` collective keeps the NI-pinned `vc_id` on
+every branch, credit-gated per output on that same index. The REQ router has neither
+credit nor VA, so its branch grants gate on downstream ready and output-FIFO space alone.
+
+**CollectB join (RSP `SimpleRouter` only).** The NSU echoes the AW's `collective_op` and
+`collective_mask` onto its `B` (nsu-spec section 2.4). The header has no third opcode: on
+RSP the only collective flits are Bs, so `collective_op != UNICAST` together with
+`axi_ch` in {`NarrowB`, `DataB`} is the CollectB case. A collective flit on an RSP read
+channel is fatal.
+
+| Step | Rule |
+|---|---|
+| Exclusion | a CollectB head is never a unicast candidate. This is what stops one `B` per member reaching the NMU instead of the one merged `B` it waits for |
+| Expected set | `route_mask_join` of the head. An empty set is fatal; so is a CollectB that arrived on a port outside its own expected set, which means the echoed mask disagrees with the delivery path |
+| Qualification | fires only when every expected input holds a head of the same collect, equal on `dst_id` and `collective_mask`. Joined heads disagreeing on `ordering_tag`, `axi_ch`, or `bid` is a model bug and aborts |
+| Grant | one whole input flit is forwarded, never a rebuilt header, and every contributing head pops in the same handshake |
+| Priority | with the output not mid-worm the reduction takes priority over a frozen unicast winner. That winner is delayed, never stolen |
+| State | none. Replicas that have not arrived wait in their input FIFOs and the join re-evaluates every tick |
+
+Four properties of the merge diverge from a reference, all deliberate:
+
+| Item | As built | Diverges from |
+|---|---|---|
+| BRESP precedence | scan the expected inputs in route-index order, first `SLVERR` wins and breaks; `DECERR` is never elevated | AXI worst-response. Ported verbatim from `floo_reduction_arbiter.sv:116-131` |
+| Survivor index domain | scan order LOCAL, N, E, S, W | upstream's North = 0 .. Eject = 4. Deterministic-first-`SLVERR` is preserved; the concrete survivor differs under multiple `SLVERR` and under all-OKAY |
+| Worm-boundary hold | the join holds while its output is mid-worm and grants at the boundary | upstream's per-beat prio arbiter. Today's NSU emits every RSP packet single-flit, so nothing on RSP is mid-worm and the hold does not engage in the fabric. It is what keeps the join correct if a multi-beat RSP packet ever exists: an unguarded grant inside a foreign worm either aborts legal traffic at the next hop's held route latch or, where the routes coincide, ends that worm's latch early and bypasses its own join, duplicating the `B` at the collector. Cost is latency only, since the join is stateless and re-fires |
+| Reduction priority | strict and unbounded | nothing. Faithful to the upstream prio arbiter, and the consequence is that back-to-back collects at one output can starve a frozen unicast winner indefinitely |
+
+**Restrictions.**
+
+| R# | Restriction | Enforced by |
+|---|---|---|
+| R1 | Two multicasts whose spanning trees overlap are never in flight together | Software (`docs/noc-target-spec.md`, Scope). Not fabric-enforced. The fork state `{expected_mask, done_mask}` per (input, VC) is exposed read-only, so a violation triages as a `done_mask != expected_mask` frozen across ticks with locks held, instead of a bare timeout |
+| R2 | At most one outstanding collective per (NMU, AXI id) | NMU `Rob::push_aw` admission (`docs/nmu-spec.md` Section 2.8) |
+| R3 | No dedicated multicast VC, no `fixed_vc` special case | Nothing to enforce. The wormhole lock is per output across VCs, so a VC restriction buys nothing |
+
+R1 exists because the ported discipline deadlocks when two multicast trees contend for two
+routers' outputs in opposite orders: each holds an output the other needs, neither worm
+can reach its tail, and no arbitration order avoids it once both heads are granted. The
+cycle is inherent to fork-with-hold and is present in the upstream ready/valid form as
+well.
+
+Verified by ctest `test_route_mask.cpp` (fork and join sets cell-verified against
+hand-computed meshes, square and not), `test_router_fork.cpp`,
+`test_simple_router_fork.cpp` and `test_simple_router_join.cpp`, including
+`RouterFork.OneHotForkSetIsBitIdenticalToPlainUnicast`,
+`SimpleRouterJoin.FirstSlverrInRouteIndexOrderWins`,
+`SimpleRouterJoin.DecerrIsNotElevated`,
+`SimpleRouterJoinChain.MidWormHoldKeepsTheDownstreamLatchIntact`, and the bounded-tick
+R1 wedge tests `RouterForkWedge.OverlappingTreesOppositeOrderWedgeDetectedWithinBound`
+and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
+(`docs/verification-environment.md`).
 
 ## 3. Inputs and Outputs
 

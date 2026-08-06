@@ -66,7 +66,7 @@ An AXI B or R beat carries only an id. It does not say which node asked, nor whi
 
 `{src_id, upstream_id, ordering_req, ordering_tag}`
 
-into the `MetaBuffer` (`nsu/meta_buffer.hpp`), keyed by the **downstream** id it presents to the slave. The buffer is a per-downstream-id FIFO bucket array (256 buckets per direction) with a **shared** occupancy pool of `NSU_META_BUFFER_MAX_OUTSTANDING` = 32 entries per direction (write and read pools are independent). AXI4 guarantees per-id in-order completion (IHI 0022, A6.3), so the front of a bucket is always the oldest outstanding request on that id, and every arriving B/R matches its bucket front.
+into the `MetaBuffer` (`nsu/meta_buffer.hpp`), keyed by the **downstream** id it presents to the slave. A write entry additionally captures the AW header's `collective_op` and `collective_mask` for the `B` to echo (Section 2.4). Read entries carry neither: ARUSER has no collective surface, so reads are always unicast. The buffer is a per-downstream-id FIFO bucket array (256 buckets per direction) with a **shared** occupancy pool of `NSU_META_BUFFER_MAX_OUTSTANDING` = 32 entries per direction (write and read pools are independent). AXI4 guarantees per-id in-order completion (IHI 0022, A6.3), so the front of a bucket is always the oldest outstanding request on that id, and every arriving B/R matches its bucket front.
 
 The downstream id is `remap_downstream_id(upstream_id, max_unique_ids)`:
 
@@ -80,6 +80,8 @@ Only {1, 256} are legal. The constructor throws on any other value (`nsu/depacke
 ### 2.4 Response packetization and VC selection
 
 Each B/R beat is looked up against its MetaBuffer bucket front, built into one flit (id restored, `dst_id` = stored `src_id`, `src_id` = NSU node id, `ordering_req`/`ordering_tag` echoed), then committed: a B entry is retired when its flit is accepted by the arbiter, an R entry is retired only when the beat with `rlast` = 1 is accepted (every earlier beat of the burst peeks the same front entry).
+
+**Collective B echo.** A `B` built from a write entry stamps back the AW's `collective_op` and `collective_mask`. `dst_id` is already the requester, so every replica's `B` shares one destination, which is what lets the RSP routers merge them into the single `B` the master is waiting for (`docs/router-spec.md` Section 2.10). There is no separate CollectB opcode: on RSP the only collective flits are Bs, so `collective_op` = MULTICAST together with `axi_ch` in {`NarrowB`, `DataB`} is what the join keys on. A wrong echoed mask does not pass silently. It surfaces at the first router as a CollectB arriving outside its own expected-input set, and aborts there.
 
 **IMPORTANT:** header `flit_tail` = 1 on every B flit and on **every** R beat flit. Header `flit_tail` is the packet delimiter for fabric wormhole arbitration only. AXI burst framing lives exclusively in the payload `rlast` bit. Every response packet is therefore single-flit, and no wormhole lock is ever taken on the response path. Example: a 4-beat read returns 4 R flits, each with header `flit_tail` = 1, and payload `rlast` = 1 only in the fourth.
 

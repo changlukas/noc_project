@@ -38,13 +38,16 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
 - 2x2 to 16x16 mesh, 256 nodes
 - Write multicast / Response reduction support
 - 1 to 8 virtual channels, credit-based on `DAT`, ready/valid on `REQ` / `RSP`
-- XY wormhole, deadlock-free
+- XY wormhole, deadlock-free for unicast and non-overlapping multicast trees; concurrent
+  overlapping multicasts are serialized by software (see Scope)
 - GALS, per-endpoint clocks
 
 **Scope.**
 
 - A multicast covers an aligned submesh, not an arbitrary node set. Software assigns it, the
   fabric provides the primitive
+- Two multicasts whose spanning trees share a node may not be in flight together. Software
+  either assigns disjoint trees or waits for the merged `B` before issuing the overlapping one
 - Write path only. Reads and read data are always unicast
 - No arithmetic on payload anywhere in the fabric. Tiles combine partial results, softmax
   statistics included, over ordinary unicast

@@ -141,6 +141,16 @@ classes (upstream reference in Provenance):
 | `uniform_random` | independent uniform draw per transaction | self-traffic permitted by default (`--exclude-self` opts out); seeded |
 | `hotspot` | one or more chosen nodes draw the traffic, weighted by `--hotspot-rates` | many-to-one congestion |
 | `beat_exact` | `dst = neighbor_dst(x, y)` (same bijection as `neighbor`) | DPI word-packing fault-injection gate, not a spatial pattern: one full-width beat plus an 8-position walking-strb sweep per node; a config-space tile additionally gets a narrow-class 2-beat burst; ignores `--transactions-per-node`/`--size`/`--len`/`--seed` |
+| `multicast` | source nodes issue masked AW writes over a row, column, or 2x2-submesh member set (`MCAST_SHAPE`, one shape per run), then read back every member replica; other nodes carry unicast filler | AWUSER carries the address mask. `INJECTION_MODE=0` only, since one write answers to N readbacks. On a config topology each source also issues one narrow-class multicast into the members' config tiles, the config-space replication case. Ignores `--ids-per-tile` |
+
+The `multicast` schedule is what satisfies restriction R1 (`docs/router-spec.md`
+Section 2.10), which the fabric does not enforce: trees of one shape are pairwise
+disjoint across sources, and each source's own multicasts share one AXI id so the
+NMU's R2 gate serializes them on the merged `B`. Mixing shapes in one run would
+overlap trees at shared eject outputs. Any future collective stimulus carries the
+same obligation: concurrently in-flight multicasts must have disjoint spanning
+trees or be serialized on the merged `B`. An R1 violation surfaces as a wedge, not
+as an error message.
 
 Addresses are allocated so converging sources never collide: local offset =
 `base + src_node * stride + seq * (n_nodes * stride)` inside the destination
@@ -200,6 +210,24 @@ same address.
   per-pair B interlock restores the scoreboard's write-before-read
   precondition, at the cost of a read stream that couples to response
   latency (so it does not measure offered injection rate).
+- The `multicast` pattern adds a second scoreboard in `user_node_endpoint.sv`,
+  keyed by replica address instead of by transaction. It captures a byte golden
+  from each W beat of a masked write, replicates it to every member address, and
+  compares the per-member readback:
+
+  | check | failure |
+  |---|---|
+  | replica readback | `[mcast_sb] node<i>: replica readback mismatch addr=... exp=... act=...` |
+  | non-vacuous | golden captured but zero replica bytes compared. A clean source node prints `[mcast_sb] node<i>: <n> replica byte compares against <m> golden bytes` |
+  | single merged B | B handshake count must equal the node's AW count, and no `B` may remain asserted after the last write retires: `duplicate or lost B` / `extra B` |
+  | merged BRESP | any non-OKAY merged `B` |
+
+  The unicast filler in the same run stays under the standard scoreboard, so a
+  clean multicast run also carries zero `Unexpected RData` from the AXI VIP
+  monitor.
+- `MCAST_FAULT=1` is the fault-injection proof for that scoreboard: it XORs
+  `8'h01` into the captured replica golden, so the run must fail on the replica
+  readback mismatch. A green `MCAST_FAULT=1` run means the compare is vacuous.
 - Checkers are trusted only once fault injection has shown they fire on a
   deliberately planted violation; a checker that has never caught a planted
   mismatch verifies nothing.
@@ -281,6 +309,14 @@ address back to `dst_id`. One source, so the two never disagree.
 be heterogeneous. `dst_id = (y << X_WIDTH) | x`. `mesh_2x2_nonuniform_vc1`
 shrinks tile (0,0) to a 256 MB window; every other real topology uses a
 uniform `0x100000000` per node.
+
+`mesh_2x2_config_narrow_vc1` and `mesh_2x4_config_narrow_vc1` give every node a
+memory tile and a config tile. The 4x2 one exists for narrow multicast: on a 2x2
+mesh the row, column, and submesh masks degenerate into each other, so the
+spanning trees are trivial. Its tile sizes are uniform and raster-ordered in both
+spaces (memory bases at `idx * 0x100000`, config bases at `0x800000 + idx *
+0x1000`), which is what makes the node index a contiguous bit field an AWUSER
+address mask can wildcard.
 
 `gen_tb_top.py` rejects a topology whose mesh dimensions or `num_vc` exceed
 the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit

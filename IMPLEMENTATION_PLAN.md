@@ -91,7 +91,9 @@ legal-input path, the mask translate + reject must move upstream of `Rob::push_a
 stage's own "before any fanout or RoB allocation". (2) `cmodel_nmu_set_inputs` carries no
 awuser argument — the DPI face needs it before any collective stimulus can be driven from
 co-sim.
-Status: Not Started
+Status: In Progress — T1-T7 landed (route-mask, NMU translate/reject/R2, DAT fork, REQ fork,
+RSP CollectB join, NSU echo + NMU ingress, co-sim chain, docs + the AWUSER specgen lift).
+Tier 3 gate set is the remaining item.
 
 ## Stage 5: Alignment tail
 Goal: endpoint interface option (one shared vs two per-class AXI ports) or documented
@@ -158,6 +160,24 @@ still open into that round's backlog "This round".
   and docs/image/pipeline_ref.jpg; send along if the recipient needs those flows.
 - Trade-off record 2026-08-04 (for the ledger): deleted flat-LRU arbitration, NoC-layer QoS,
   reduction-operator-set, collective-scope items; turn-model VA folded into S3b.
+- Stage 4 carry-out, model correctness: `remap_downstream_id` collapses ids to 8'hFF at
+  `max_unique_ids == 1`, so a slave that violates B ordering can stamp a collective mask onto
+  an unrelated B and inject a false CollectB into the join. Unicast AWs admitted through
+  `Rob::push_aw` get no `burst_footprint_ok` check — only the direct `Packetize::push_aw` path
+  asserts it (pre-existing asymmetry, now visible beside the collective translate, which does
+  check every replica).
+- Stage 4 carry-out, cost: 16x16 full-mesh mask enumeration is 256 x O(SAM entries) linear
+  scans per `push_aw` attempt, repeated on every backpressure retry. Design K3 accepted <= 256
+  lookups, not 256 x O(entries).
+- Stage 4 carry-out, dead code: `axi_channel_encoding` in specgen is orphaned by T2's emitter
+  refactor.
+- Stage 4 carry-out, test shape: multi-hot to multi-hot fork completion across a link and
+  `output_fifo_depth > 0` fork/join mode are untested; the held-join wait-for edge has
+  probabilistic co-sim coverage only; T3's `ContinuationBranchSetMismatchAborts` SCENARIO
+  string documents 2 of its 3 cases; no narrow-class red run.
+- Stage 4 carry-out, co-sim minors: the merged-B checks run for all patterns and modes, not
+  only multicast; the probe-window guard keys on `base_local` rather than the config tile size;
+  `multicast` with `INJECTION_MODE != 0` is guarded only at the root Makefile.
 - If REQ/RSP faces ever open >1 VC or AR/B steer to DAT, the ordering_req=0 same-(dst,id)
   bypass streak loses in-fabric ordering (AR pinning + B fixed-hash deleted in S3b).
   ChannelModel is vc-blind, so ctest cannot see it.
