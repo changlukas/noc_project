@@ -169,12 +169,9 @@ still open into that round's backlog "This round".
 - Stage 4 carry-out, cost: 16x16 full-mesh mask enumeration is 256 x O(SAM entries) linear
   scans per `push_aw` attempt, repeated on every backpressure retry. Design K3 accepted <= 256
   lookups, not 256 x O(entries).
-- Stage 4 carry-out, dead code: `axi_channel_encoding` in specgen is orphaned by T2's emitter
-  refactor.
 - Stage 4 carry-out, test shape: multi-hot to multi-hot fork completion across a link and
   `output_fifo_depth > 0` fork/join mode are untested; the held-join wait-for edge has
-  probabilistic co-sim coverage only; T3's `ContinuationBranchSetMismatchAborts` SCENARIO
-  string documents 2 of its 3 cases; no narrow-class red run.
+  probabilistic co-sim coverage only; no narrow-class red run.
 - Stage 4 carry-out, co-sim minors: the merged-B checks run for all patterns and modes, not
   only multicast; the probe-window guard keys on `base_local` rather than the config tile size;
   `multicast` with `INJECTION_MODE != 0` is guarded only at the root Makefile.

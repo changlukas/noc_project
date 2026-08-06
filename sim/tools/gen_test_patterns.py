@@ -486,9 +486,11 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 #                   by (dst_id, local_addr) -- full address = base + offset).
 #   other nodes   : T unicast neighbor write+read pairs (filler traffic) + on
 #                   a config topology one narrow 2-beat write+read probe into
-#                   the NEXT node's config tile -- a transit NarrowR worm on
-#                   RSP, giving the CollectB join a live worm to hold behind
-#                   (design §3.2 step 5a).
+#                   the NEXT node's config tile -- cross-node narrow transit
+#                   traffic, so the CollectB join contends on RSP with responses
+#                   it does not own. (Every B and R beat is stamped flit_tail=1
+#                   at nsu/packetize.hpp:99,125, so RSP carries no multi-flit
+#                   worm and this probe cannot exercise a mid-worm hold.)
 #
 # Local-offset partitions inside a tile (config offsets alias memory offsets
 # at the single-slave endpoint, so all four windows must be disjoint):
@@ -633,8 +635,8 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
                 write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
                 read_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=False)
             if config_all:
-                # Cross-node narrow probe (write then read back): a transit
-                # NarrowR worm on RSP for the CollectB join's mid-worm hold.
+                # Cross-node narrow probe (write then read back): transit
+                # NarrowB/NarrowR traffic on RSP contending with the CollectB join.
                 probe_cid = nodes[(idx + 1) % n_nodes][3]
                 probe_addr = config_bases[probe_cid] + _CONFIG_PROBE_BASE + idx * _SLOT_STRIDE
                 w, r = narrow_beat_exact_lines(axid, probe_addr, data_width)

@@ -49,14 +49,6 @@ def header_fields_padding(packet_spec) -> list:
             if not f.get("enabled", True)]
 
 
-def axi_channel_encoding(packet_spec) -> Dict[str, int]:
-    """axi_ch 欄位的 {channel_name: value}。沒有 encoding 欄位則回 {}。"""
-    for f in packet_spec["flit"]["header_fields"]:
-        if f["name"] == "axi_ch" and "encoding" in f:
-            return {name: int(v) for v, name in f["encoding"].items()}
-    return {}
-
-
 def field_encoding(packet_spec, field_name: str) -> Dict[str, int]:
     """通用：任何 header field 上的 encoding 表，{name: value}。"""
     for f in packet_spec["flit"]["header_fields"]:

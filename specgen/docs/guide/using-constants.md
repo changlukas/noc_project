@@ -66,7 +66,7 @@ C.flit_width_resolved(packet)                  # int -- total bits per flit
 C.header_field_position(packet, "dst_id")      # (lsb, msb) -- or None if width=0
 C.payload_field_position(packet, "AW", "addr")
 C.header_field_enabled(packet, "axi_ch")
-C.axi_channel_encoding(packet)                 # {"AW": 0, "W": 1, "AR": 2, ...}
+C.field_encoding(packet, "axi_ch")             # {"NarrowAw": 0, "NarrowW": 1, ...}
 ```
 
 ### Full API surface
@@ -96,7 +96,6 @@ All width/position accessors are pure functions of `field_widths` + `width_param
 | `all_field_widths(spec)` | `{name: width}` |
 | `header_field_enabled(spec, name)` | `bool` — `False` means padding. Raises `KeyError`. |
 | `header_fields_padding(spec)` | `list[str]` of padding field names. |
-| `axi_channel_encoding(spec)` | `{channel: int}` |
 | `field_encoding(spec, name)` | `{value: int}` for any field with an `encoding` table. |
 | `packet_eval_expr(spec, expr)` | `int`; safe AST evaluator over `field_widths`. |
 
