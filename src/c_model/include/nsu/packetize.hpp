@@ -99,6 +99,14 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", m.ordering_req);
     f.set_header_field("ordering_tag", m.ordering_tag);
+    // Collective echo (design §3.1): the AW's op/mask, unmodified. No third
+    // opcode is needed for the reverse direction -- on RSP the only collective
+    // flits are Bs, so (collective_op != UNICAST, axi_ch in {NarrowB, DataB})
+    // IS mainline's CollectB. The RSP router's join recomputes the B's
+    // expected-input set from dst_id + this mask, so a wrong echo aborts there
+    // rather than merging silently.
+    f.set_header_field("collective_op", m.collective_op);
+    f.set_header_field("collective_mask", m.collective_mask);
     f.set_payload_field("B", "bid", m.upstream_id);
     f.set_payload_field("B", "bresp", static_cast<uint64_t>(b.resp));
     f.set_payload_field("B", "buser", b.user);

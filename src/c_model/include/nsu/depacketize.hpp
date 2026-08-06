@@ -309,14 +309,19 @@ inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
     const AxiClass cls =
         (f.get_header_field("axi_ch") == ni::AXI_CH_DataAw) ? AxiClass::Data : AxiClass::Narrow;
-    meta_.allocate_write(downstream_id,
-                         {
-                             static_cast<uint8_t>(f.get_header_field("src_id")),
-                             b.id,
-                             static_cast<uint8_t>(f.get_header_field("ordering_req")),
-                             static_cast<uint8_t>(f.get_header_field("ordering_tag")),
-                             cls,
-                         });
+    MetaEntry e{
+        static_cast<uint8_t>(f.get_header_field("src_id")),
+        b.id,
+        static_cast<uint8_t>(f.get_header_field("ordering_req")),
+        static_cast<uint8_t>(f.get_header_field("ordering_tag")),
+        cls,
+    };
+    // Collective identity travels with the AW and comes back on its B (design
+    // §3.1). Buffered here rather than re-derived: the B has no address to
+    // translate from, and the RSP join matches on the exact echoed pair.
+    e.collective_op = static_cast<uint8_t>(f.get_header_field("collective_op"));
+    e.collective_mask = static_cast<uint8_t>(f.get_header_field("collective_mask"));
+    meta_.allocate_write(downstream_id, e);
     b.id = downstream_id;
     return b;
 }

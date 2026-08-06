@@ -28,6 +28,14 @@ struct MetaEntry {
     uint8_t len = 0;
     uint8_t size = 0;
     axi::Burst burst = axi::Burst::INCR;
+    // Collective identity of the AW, echoed unmodified onto its B (design
+    // §3.1; floo_axi_chimney.sv:557 mcast_mask[AxiB], :621-622). The RSP
+    // router's join derives the B's expected-input set from these two fields
+    // plus dst_id, so a wrong echo lands the B at a router that is not
+    // expecting it. Write entries only -- AR carries no collective surface
+    // (ARUSER is 8 b, spec :324), so read entries leave them at UNICAST / 0.
+    uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
+    uint8_t collective_mask = 0;
 };
 
 // Downstream AXI ID presented to the slave, from the master's upstream ID.
