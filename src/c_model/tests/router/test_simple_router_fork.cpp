@@ -595,4 +595,33 @@ TEST(SimpleRouterForkDeath, ContinuationBranchSetMismatchAborts) {
         "branch set diverges");
 }
 
+TEST(SimpleRouterForkDeath, UnicastFrontUnderAMultiHotLatchAborts) {
+    SCENARIO(
+        "Fault injection (T3b follow-up): a multi-hot route latch can only have been seeded by a "
+        "collective head, and in-order link delivery means the front under a held latch belongs "
+        "to that worm — so a UNICAST front there is a continuation that lost its collective_op "
+        "bit, and it aborts. Deliberately NOT extended to one-hot latches: that subcase is "
+        "bit-for-bit the legal latch-wins unicast shape");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(
+        {
+            SimpleRouter r(center_cfg());
+            FlitSink local;
+            FlitSink north;
+            r.set_downstream(L, local);
+            r.set_downstream(N, north);
+            // Head forks {L,N} (mask y=2) and latches both bits; the beat
+            // behind it lost collective_op, so it reads as unicast.
+            r.input(W).push_flit(make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), 0,
+                                              /*flit_tail=*/0, 0));
+            r.tick();
+            r.input(W).push_flit(make_unicast_flit(make_id(1, 1), make_id(0, 1), 0,
+                                                   /*flit_tail=*/0, 1));
+            r.tick();
+            r.tick();
+            r.tick();
+        },
+        "unicast front under a multi-hot route latch");
+}
+
 }  // namespace

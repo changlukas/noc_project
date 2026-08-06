@@ -367,7 +367,23 @@ inline void SimpleRouter::tick() {
             if (route_lock_[in][vc] == 0) continue;
             const auto& q = input_fifo_[in][vc];
             if (q.empty()) continue;
-            if (q.front().get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) continue;
+            if (q.front().get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
+                // T3b follow-up (OUR RULE): a MULTI-HOT latch can only have
+                // been seeded by a collective head, and in-order link delivery
+                // means the front under a held latch belongs to that same
+                // worm — so a unicast front here is a continuation that lost
+                // its collective_op bit, in every multi-branch case. One-hot
+                // latches are deliberately exempt: that subcase is bit-for-bit
+                // the legal latch-wins unicast shape
+                // (floo_route_select.sv:211-216).
+                if (is_fork_set(route_lock_[in][vc])) {
+                    assert(false &&
+                           "SimpleRouter: unicast front under a multi-hot route latch (fork worm "
+                           "continuation lost its collective_op bit)");
+                    std::abort();
+                }
+                continue;
+            }
             if (head_expected_mask(q.front()) != route_lock_[in][vc]) {
                 assert(false &&
                        "SimpleRouter: fork worm continuation branch set diverges from the "
