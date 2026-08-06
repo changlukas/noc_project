@@ -46,55 +46,6 @@ passing co-sim; suppress self-traffic via the generator's `--exclude-self`, not 
 SimpleRouter honors it via an explicit loopback-tie-off exemption (deliberate divergence from
 floo_router's blanket NoLoopback, cited in simple_router.hpp).
 
-## Stage 4: Collectives
-Goal: NMU 48 b address mask to 8 b node mask translate + reject; AxLOCK-with-collective and
-Ar-collective rejected at NMU packetize before any fanout or RoB allocation; router multicast
-fork on both routers (credit discipline on DAT, ready/valid on REQ); CollectB in-network merge
-with error BRESP precedence; collective
-traffic rides the RoB-bypass/interlock path only (NoRobReduction ruling below); scoreboard keys
-writes by (dst_id, local_addr).
-Blocking decisions RESOLVED against FlooNoC v0.8.4 RTL (2026-08-05, citations spot-verified;
-report cross-review/s4-tbd-floonoc-CODEX.md):
-- Merged-B ordering_tag: upstream stamps rob_idx at AW injection, the remote NI copies the
-  buffered AW's rob_idx onto its B (floo_nw_chimney.sv:1165-1167), so all replicas carry the
-  initiator's tag by construction and the merge just forwards one whole input flit
-  (floo_reduction_arbiter.sv:116-118); join qualifies on dst_id+collective_mask only
-  (floo_reduction_sync.sv:40-43). Port the same shape: NMU stamps ordering_tag pre-fanout,
-  NSU echoes it, merge selects a flit and never rebuilds a header. C++ adds an assert that
-  joined Bs agree on ordering_tag/axi_ch/bid (RTL only enforces the first two fields).
-- BRESP precedence: follow RTL exactly — default survivor = first-valid (lzc) input, then a
-  route-index-order scan where the first SLVERR wins (floo_reduction_arbiter.sv:116-131);
-  DECERR is NOT elevated (deliberate divergence from AXI worst-response, per the standing
-  copy-don't-invent principle; document in the spec).
-- Overlapping-multicast write-ordering deadlock: structurally closed upstream, port both
-  mechanisms — fork accepts per-output across cycles but releases the input only when ALL
-  expected outputs have handshaked (past_handshakes, floo_router.sv:358-394), and AW+W are one
-  indivisible worm (AW last=0, chimney selector locks on W until W.last,
-  floo_nw_chimney.sv:1294-1313), so no destination ever queues AW without its W. Residual
-  risks (slave backpressuring W after AW, RoB capacity) are outside the NoC, documented.
-- Class scope (user ruling 2026-08-06, supersedes the earlier Data-only lean): multicast
-  writes supported on BOTH classes — data (DataAw/W fork on the DAT credit router) AND narrow
-  (NarrowAw/W fork on the REQ SimpleRouter, the config-space replication use case; precedent:
-  the crossbar paper's narrow-network LSU multicast interrupts). Same route-mask geometry and
-  fork discipline on both routers; reads stay unicast (Ar-collective still rejected).
-- RoB x collectives (user ruling 2026-08-05, option a): follow upstream's NoRobReduction
-  restriction (floo_nw_chimney.sv:1834-1838 forces NoRoB when reduction is enabled) —
-  collective traffic rides the RoB-bypass/ordering-interlock path only; the RoB never
-  accepts a merged B; the NMU rejects collective+RoB combinations at packetize alongside the
-  AxLOCK/Ar-collective rejects.
-Success Criteria: multicast write matrix (row/col/submesh masks) green in co-sim; deliberate
-illegal-mask and lock-multicast stimulus rejected at NMU; single-B invariant checked by
-scoreboard.
-Kickoff notes from S1 (final review): (1) today's AWUSER collective reject sits in
-`Rob::push_aw` downstream of pool/RoB bookkeeping and is fatal (abort) — when S4 makes it a
-legal-input path, the mask translate + reject must move upstream of `Rob::push_aw`, per this
-stage's own "before any fanout or RoB allocation". (2) `cmodel_nmu_set_inputs` carries no
-awuser argument — the DPI face needs it before any collective stimulus can be driven from
-co-sim.
-Status: In Progress — T1-T7 landed (route-mask, NMU translate/reject/R2, DAT fork, REQ fork,
-RSP CollectB join, NSU echo + NMU ingress, co-sim chain, docs + the AWUSER specgen lift).
-Tier 3 gate set is the remaining item.
-
 ## Stage 5: Alignment tail
 Goal: endpoint interface option (one shared vs two per-class AXI ports) or documented
 unsupported; per-network perf metrics; block specs (nmu/nsu/router) re-synced to as-built;
@@ -120,6 +71,14 @@ paragraph uses unqualified "AW" in two channel-class senses (line ~111 DataAw vs
 NarrowAw) — add the "narrow" qualifier; residual "VC arbiter" prose in nmu-spec G9 /
 NOC_DAT_NUM_VC parameter row / nsu-spec §3.4; `cmodel_dpi.h:142` "vnet" wording. Also from
 S3b: ready_slack calibration still deferred (needs a measured wire-loop experiment).
+Carry-in from S4 (block-spec re-sync): (1) OPEN QUESTION, needs a ruling — should R bursts on
+RSP be wormhole packets at all? `nsu/packetize.hpp:99,125` stamp `flit_tail = 1` on every B and
+every R beat, so RSP carries per-beat packets and never a worm, while upstream FlooNoC sends R
+as one multi-flit packet with `last` on the final beat and the target spec frames the fabric as
+"XY wormhole". Decide as-built-vs-spec before the block specs claim either. (2) router-spec §4
+has no numbered SPEC entries for fork/join — §2.10 ends with ctest/co-sim pointers instead;
+add them if the numbered contract list is meant to carry them. (3) router-spec §2.8 still says
+two networks per node (carries the file's own Pre-S3a marker).
 Carry-in from S1: block-spec flit-format tables (nmu/nsu/router §2.2) still show the
 pre-S1 layout — 56 b header, 408 b flit — vs as-built 44 b header, 48 b addr, 396 b flit,
 axi_ch 4 b / 10-value enc, and the NMU_OUTSTANDING_DEPTH outstanding-pool params; re-sync
