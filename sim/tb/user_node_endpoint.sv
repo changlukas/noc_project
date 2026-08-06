@@ -58,9 +58,13 @@ module user_node_endpoint #(
         .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) master_dv (clk_i);
 
+    // Same AXI_USER_WIDTH as master_dv (user bits tied 0 on this face):
+    // mixed user widths would create two axi_test class specializations,
+    // and the file_master's class-scope beat typedefs mis-resolve (v5.048)
+    // when more than one axi_driver specialization exists.
     AXI_BUS_DV #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(1)
+        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) slave_dv (clk_i);
 
     // master face: file_master drives master_dv; forward to the flat NMU port.
@@ -175,7 +179,7 @@ module user_node_endpoint #(
     // The directed two-phase run is a data-integrity gate (scoreboard compares
     // read data vs golden, timing-independent), so a fast slave keeps it passing.
     typedef axi_test::axi_rand_slave #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(1),
+        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(AWUSER_WIDTH),
         .TA(ApplTime), .TT(TestTime), .MAPPED(1'b1),
         .AX_MAX_WAIT_CYCLES(0), .R_MAX_WAIT_CYCLES(0), .RESP_MAX_WAIT_CYCLES(0)
     ) rand_slave_t;
@@ -277,6 +281,11 @@ module user_node_endpoint #(
             b_returned <= '{default: '0};
         end else if (master_axi_rsp_i.bvalid && master_axi_req_o.bready) begin
             b_returned[master_axi_rsp_i.bid] <= b_returned[master_axi_rsp_i.bid] + 1;
+            // Directed runs use an always-OKAY MAPPED slave, so any error
+            // response here is a fabric bug (e.g. a corrupted merged B).
+            if (master_axi_rsp_i.bresp != axi_pkg::RESP_OKAY)
+                $fatal(1, "[mcast_sb] node%0d: BRESP=%0h on id=%0h, expected OKAY",
+                       NODE_ID, master_axi_rsp_i.bresp, master_axi_rsp_i.bid);
         end
     end
 
@@ -297,6 +306,130 @@ module user_node_endpoint #(
                       master_axi_req_o.awvalid, master_axi_rsp_i.awready,
                       master_axi_req_o.wvalid,  master_axi_rsp_i.wready,
                       master_axi_rsp_i.bvalid,  master_axi_req_o.bready);
+    end
+
+    // ------------------------------------------------------------------
+    // Multicast scoreboard (S4 collectives): replica golden + readback
+    // compare, keyed by full byte address (== (dst_id, local_addr): the tile
+    // base encodes dst_id, the offset is the node-local address). The pulp
+    // scoreboard models only the ANCHOR address of a multicast AW; the other
+    // replicas land at addresses it never saw written, which its x-wildcard
+    // read check accepts vacuously. This checker snoops AW/W to build golden
+    // for EVERY member replica (enumerated from the AWUSER address mask) and
+    // AR/R to compare the readback. Idle in runs without collective writes.
+    // +mcast_fault=1 XORs 0x01 into the captured golden (fault injection:
+    // proves the compare fires; standing red-test rule).
+    // ------------------------------------------------------------------
+    localparam int unsigned MC_BUS_SIZE  = $clog2(DATA_WIDTH / 8);
+    localparam int unsigned MC_BUS_BYTES = DATA_WIDTH / 8;
+
+    typedef struct {
+        logic [ADDR_WIDTH-1:0] addr;
+        logic [7:0]            len;
+        logic [2:0]            size;
+        longint unsigned       mask;  // AWUSER address mask; 0 = unicast
+    } mcast_txn_t;
+
+    bit mcast_fault = 1'b0;
+    initial void'($value$plusargs("mcast_fault=%d", mcast_fault));
+
+    logic [7:0]  mcast_mem [longint unsigned];       // replica byte golden
+    mcast_txn_t  mcast_wr_q [$];                     // W bursts follow AW order (AXI4)
+    int unsigned mcast_wr_beat = 0;
+    mcast_txn_t  mcast_ar_q [2**ID_WIDTH][$];        // same-id R follows AR order
+    mcast_txn_t  mcast_rd_active [2**ID_WIDTH];
+    bit          mcast_rd_busy [2**ID_WIDTH];
+    int unsigned mcast_rd_beat [2**ID_WIDTH];
+
+    // Plain always + blocking assignments: this is testbench bookkeeping
+    // (queues + associative array), not registered hardware state.
+    always @(posedge clk_i) begin
+        if (rst_ni) begin
+            // AW: descriptor capture (unicast too -- the W association below
+            // must walk every burst in AW order).
+            if (master_axi_req_o.awvalid && master_axi_rsp_i.awready) begin
+                mcast_wr_q.push_back('{addr: master_axi_req_o.awaddr,
+                                       len:  master_axi_req_o.awlen,
+                                       size: master_axi_req_o.awsize,
+                                       mask: (master_awuser_o[9:8] == 2'd1)
+                                             ? longint'(master_awuser_o[57:10]) : 0});
+            end
+            // W: golden capture for every member replica of a multicast burst.
+            if (master_axi_req_o.wvalid && master_axi_rsp_i.wready) begin
+                if (mcast_wr_q.size() == 0)
+                    $fatal(1, "[mcast_sb] node%0d: W beat with no open AW", NODE_ID);
+                if (mcast_wr_q[0].mask != 0) begin
+                    automatic longint unsigned mc_mask = mcast_wr_q[0].mask;
+                    automatic longint unsigned bus_addr = longint'(axi_pkg::aligned_addr(
+                        axi_pkg::beat_addr(axi_pkg::largest_addr_t'(mcast_wr_q[0].addr),
+                                           mcast_wr_q[0].size, mcast_wr_q[0].len,
+                                           axi_pkg::BURST_INCR,
+                                           shortint'(mcast_wr_beat)), MC_BUS_SIZE));
+                    for (int unsigned j = 0; j < MC_BUS_BYTES; j++) begin
+                        if (master_axi_req_o.wstrb[j]) begin
+                            automatic longint unsigned byte_addr = bus_addr + j;
+                            automatic logic [7:0] golden =
+                                master_axi_req_o.wdata[8*j +: 8] ^ (mcast_fault ? 8'h01 : 8'h00);
+                            automatic longint unsigned sub = mc_mask;
+                            automatic bit done = 1'b0;
+                            while (!done) begin
+                                mcast_mem[(byte_addr & ~mc_mask) | sub] = golden;
+                                if (sub == 0) done = 1'b1;
+                                else sub = (sub - 1) & mc_mask;
+                            end
+                        end
+                    end
+                end
+                if (master_axi_req_o.wlast) begin
+                    void'(mcast_wr_q.pop_front());
+                    mcast_wr_beat = 0;
+                end else begin
+                    mcast_wr_beat = mcast_wr_beat + 1;
+                end
+            end
+            // AR: read descriptor capture, per id.
+            if (master_axi_req_o.arvalid && master_axi_rsp_i.arready) begin
+                mcast_ar_q[master_axi_req_o.arid].push_back('{addr: master_axi_req_o.araddr,
+                                                              len:  master_axi_req_o.arlen,
+                                                              size: master_axi_req_o.arsize,
+                                                              mask: 0});
+            end
+            // R: compare any byte the multicast golden knows.
+            if (master_axi_rsp_i.rvalid && master_axi_req_o.rready) begin
+                automatic int unsigned rid = 32'(master_axi_rsp_i.rid);
+                automatic longint unsigned beat_address;
+                automatic int unsigned first_byte;
+                if (!mcast_rd_busy[rid]) begin
+                    if (mcast_ar_q[rid].size() == 0)
+                        $fatal(1, "[mcast_sb] node%0d: R beat with no open AR (id=%0d)",
+                               NODE_ID, rid);
+                    mcast_rd_active[rid] = mcast_ar_q[rid].pop_front();
+                    mcast_rd_beat[rid]   = 0;
+                    mcast_rd_busy[rid]   = 1'b1;
+                end
+                beat_address = longint'(axi_pkg::aligned_addr(
+                    axi_pkg::beat_addr(axi_pkg::largest_addr_t'(mcast_rd_active[rid].addr),
+                                       mcast_rd_active[rid].size, mcast_rd_active[rid].len,
+                                       axi_pkg::BURST_INCR,
+                                       shortint'(mcast_rd_beat[rid])),
+                    mcast_rd_active[rid].size));
+                first_byte = (mcast_rd_beat[rid] == 0)
+                    ? int'(mcast_rd_active[rid].addr - beat_address) : 0;
+                for (int unsigned j = first_byte;
+                     j < axi_pkg::num_bytes(mcast_rd_active[rid].size); j++) begin
+                    automatic longint unsigned ba = beat_address + j;
+                    if (mcast_mem.exists(ba)) begin
+                        automatic logic [7:0] act =
+                            master_axi_rsp_i.rdata[8 * (ba % MC_BUS_BYTES) +: 8];
+                        if (act !== mcast_mem[ba])
+                            $fatal(1, "[mcast_sb] node%0d: replica readback mismatch addr=%h exp=%h act=%h (id=%0d beat=%0d)",
+                                   NODE_ID, ba, mcast_mem[ba], act, rid, mcast_rd_beat[rid]);
+                    end
+                end
+                if (master_axi_rsp_i.rlast) mcast_rd_busy[rid] = 1'b0;
+                else mcast_rd_beat[rid] = mcast_rd_beat[rid] + 1;
+            end
+        end
     end
 
     // Mode 2: read i issues only after write i's B returns. Pair i is
@@ -367,6 +500,25 @@ module user_node_endpoint #(
             end
         endcase
         run_done = 1'b1;
+        // Single-merged-B invariant (S4 collectives): exactly one B reached
+        // the initiator per issued AW -- a multicast AW's member Bs must have
+        // merged in the fabric. Checked wire-side: total B handshakes equals
+        // the AW count, and no extra B is still pending after a settle window
+        // (a duplicate B past wait_b() has no consumer, so it parks as a held
+        // bvalid). The model-side write_txns_ underflow assert is the deeper
+        // net; this is the tb-visible half.
+        begin
+            int unsigned b_total;
+            repeat (50) @(posedge clk_i);
+            b_total = 0;
+            for (int i = 0; i < 2**ID_WIDTH; i++) b_total += b_returned[i];
+            if (b_total != int'(file_master.num_writes))
+                $fatal(1, "[mcast_sb] node%0d: %0d B handshakes for %0d AWs -- duplicate or lost B",
+                       NODE_ID, b_total, file_master.num_writes);
+            if (master_axi_rsp_i.bvalid)
+                $fatal(1, "[mcast_sb] node%0d: B still asserted after all writes retired -- extra B",
+                       NODE_ID);
+        end
     end
 
     // ------------------------------------------------------------------
