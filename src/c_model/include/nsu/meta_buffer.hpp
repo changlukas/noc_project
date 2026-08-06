@@ -34,6 +34,9 @@ struct MetaEntry {
     // plus dst_id, so a wrong echo lands the B at a router that is not
     // expecting it. Write entries only -- AR carries no collective surface
     // (ARUSER is 8 b, spec :324), so read entries leave them at UNICAST / 0.
+    // Appended, not inserted: Depacketize::pop_ar initializes this struct
+    // positionally (depacketize.hpp:340-353) and C++17 has no designated
+    // initializers to catch a reordering. Keep new fields at the end.
     uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
     uint8_t collective_mask = 0;
 };

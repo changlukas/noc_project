@@ -107,6 +107,33 @@ TEST(NsuCollective, NarrowBEchoesTheAwCollectiveIdentity) {
     EXPECT_EQ(f->get_header_field("axi_ch"), static_cast<uint64_t>(ni::AXI_CH_NarrowB));
     EXPECT_EQ(f->get_header_field("collective_op"), axi::COLLECTIVE_OP_MULTICAST);
     EXPECT_EQ(f->get_header_field("collective_mask"), 0x11u);
+    EXPECT_EQ(f->get_header_field("ordering_tag"), 0u);
+}
+
+TEST(NsuCollective, OneBucketHoldsACollectiveAheadOfAUnicast) {
+    SCENARIO(
+        "NSU echo: a collective and a unicast queued on the SAME downstream id share one "
+        "MetaBuffer "
+        "bucket, so the echo has to follow the bucket's order, not the arrival order of the B "
+        "beats. Reachable whenever a second NMU issues the same AXI id to this NSU (two concurrent "
+        "collectives at one NSU are excluded by R1). Popping the wrong entry ships op=MULTICAST on "
+        "a plain B, which enters the RSP join and waits forever for members that never arrive -- a "
+        "silent stall, not an abort");
+    EchoTestbench t;
+    t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_MULTICAST, 0x03));
+    t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_UNICAST, 0));
+
+    t.respond(0x05);
+    auto collective = t.b_cap.pop();
+    ASSERT_TRUE(collective.has_value());
+    EXPECT_EQ(collective->get_header_field("collective_op"), axi::COLLECTIVE_OP_MULTICAST);
+    EXPECT_EQ(collective->get_header_field("collective_mask"), 0x03u);
+
+    t.respond(0x05);
+    auto unicast = t.b_cap.pop();
+    ASSERT_TRUE(unicast.has_value());
+    EXPECT_EQ(unicast->get_header_field("collective_op"), axi::COLLECTIVE_OP_UNICAST);
+    EXPECT_EQ(unicast->get_header_field("collective_mask"), 0u);
 }
 
 TEST(NsuCollective, UnicastAwLeavesTheBFieldsClear) {

@@ -337,6 +337,9 @@ inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
     const AxiClass cls =
         (f.get_header_field("axi_ch") == ni::AXI_CH_DataAr) ? AxiClass::Data : AxiClass::Narrow;
+    // Positional init: MetaEntry is append-only for that reason. C++17 has no
+    // designated initializers to pin field names, so inserting a field ahead of
+    // the AR basis below would silently shift b.addr/len/size/burst.
     meta_.allocate_read(downstream_id, {
                                            static_cast<uint8_t>(f.get_header_field("src_id")),
                                            b.id,
