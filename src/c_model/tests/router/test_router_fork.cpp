@@ -714,12 +714,55 @@ TEST(RouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
         "empty fork set");
 }
 
+TEST(RouterForkDeath, ReservedCollectiveOpAborts) {
+    SCENARIO(
+        "Fault injection (spec §6 :356 reserved codes 2-3): a flit stamped with a reserved "
+        "collective_op is fatal — every collective classification keys on `!= UNICAST`, so "
+        "an unrejected reserved code would silently fork as a multicast");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(
+        {
+            Router r(center_cfg());
+            // Otherwise-legal collective geometry (anchor (1,1), src (0,1),
+            // mask y=2 -> {L,N}); only the opcode is corrupt.
+            Flit f = make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), /*vc=*/0,
+                                  /*flit_tail=*/0, /*fixed_vc=*/1, 0);
+            f.set_header_field("collective_op", 2);
+            r.input(W).push_flit(f);
+            r.tick();
+            r.tick();
+        },
+        "reserved collective_op");
+}
+
+TEST(RouterForkDeath, CollectiveOnReadChannelAborts) {
+    SCENARIO(
+        "Fault injection (design §3.1): a collective flit on a read channel is fatal — "
+        "ARUSER has no collective surface (spec §6 :324), so reads are unicast everywhere "
+        "and such a header is mis-stamped");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(
+        {
+            Router r(center_cfg());
+            Flit f = make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), /*vc=*/0,
+                                  /*flit_tail=*/0, /*fixed_vc=*/1, 0);
+            f.set_header_field("axi_ch", ni::AXI_CH_DataR);
+            r.input(W).push_flit(f);
+            r.tick();
+            r.tick();
+        },
+        "read channel");
+}
+
 TEST(RouterForkDeath, ContinuationBranchSetMismatchAborts) {
     SCENARIO(
         "Fault injection (F9, src-anchored): a W continuation whose recomputed branch set "
-        "differs from the head's — shrunk ({L,E,N} head, {L,N} beat) or enlarged ({L,N} "
-        "head, {L,E,N} beat) — trips the branch-set divergence assert; the enlarged case "
-        "also proves an unlocked output cannot join mid-worm");
+        "differs from the head's — shrunk ({L,E,N} head, {L,N} beat), enlarged ({L,N} head, "
+        "{L,E,N} beat), or corrupted to the ONE-HOT set {L} whose route_compute(dst) "
+        "coincidentally passes the unicast check — each trips the branch-set divergence "
+        "assert; the enlarged case also proves an unlocked output cannot join mid-worm, and "
+        "the one-hot case proves a collective continuation never takes the unicast locked "
+        "path");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     // Shrunk continuation set.
     EXPECT_DEATH(

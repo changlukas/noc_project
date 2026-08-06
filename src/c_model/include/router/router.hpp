@@ -282,6 +282,30 @@ class Router {
         if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
             return port_bit(route_compute(dst, cfg_));
         }
+        // Reserved-code guard (OUR RULE, spec §6 :356 leaves codes 2-3
+        // reserved), mirroring SimpleRouter::head_expected_mask. Collective
+        // classification everywhere keys on `!= UNICAST`, so a reserved code
+        // would silently become a fork; rejecting the code itself catches it at
+        // the one place the keying is read.
+        if (f.get_header_field("collective_op") != ni::COLLECTIVE_OP_MULTICAST) {
+            assert(false &&
+                   "Router: reserved collective_op code on a flit (only UNICAST "
+                   "and MULTICAST are defined)");
+            std::abort();
+        }
+        // Class guard (OUR RULE, design §3.1), mirroring SimpleRouter: reads are
+        // unicast everywhere (ARUSER has no collective surface, spec §6 :324),
+        // so a collective on a read channel is a mis-stamped header. DAT carries
+        // DataAr/DataR; the Narrow codes are checked too so both routers enforce
+        // one rule. A collective AW/W is legal fork traffic and is not rejected.
+        const auto axi_ch = f.get_header_field("axi_ch");
+        if (axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR ||
+            axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr) {
+            assert(false &&
+                   "Router: non-B collective flit on a read channel — reads are unicast "
+                   "everywhere, so the header is mis-stamped");
+            std::abort();
+        }
         const auto src = static_cast<uint8_t>(f.get_header_field("src_id"));
         const auto cmask = static_cast<uint8_t>(f.get_header_field("collective_mask"));
         const PortMask m = route_mask_fork(dst, src, cmask, cfg_);
