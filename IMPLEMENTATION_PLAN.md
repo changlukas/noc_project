@@ -71,6 +71,11 @@ report cross-review/s4-tbd-floonoc-CODEX.md):
   indivisible worm (AW last=0, chimney selector locks on W until W.last,
   floo_nw_chimney.sv:1294-1313), so no destination ever queues AW without its W. Residual
   risks (slave backpressuring W after AW, RoB capacity) are outside the NoC, documented.
+- Class scope (user ruling 2026-08-06, supersedes the earlier Data-only lean): multicast
+  writes supported on BOTH classes — data (DataAw/W fork on the DAT credit router) AND narrow
+  (NarrowAw/W fork on the REQ SimpleRouter, the config-space replication use case; precedent:
+  the crossbar paper's narrow-network LSU multicast interrupts). Same route-mask geometry and
+  fork discipline on both routers; reads stay unicast (Ar-collective still rejected).
 - RoB x collectives (user ruling 2026-08-05, option a): follow upstream's NoRobReduction
   restriction (floo_nw_chimney.sv:1834-1838 forces NoRoB when reduction is enabled) —
   collective traffic rides the RoB-bypass/ordering-interlock path only; the RoB never
