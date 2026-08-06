@@ -60,6 +60,18 @@
 // anyway (route_sel_q is NumRoutes-wide, floo_route_select.sv:46-57, :211-216).
 // Unicast traffic keeps the pre-S4 path: a one-hot branch set pops on its
 // single grant, exactly as before.
+//
+// S4 CollectB join (T4): the reverse-path counterpart, ported from the
+// reduction pair mainline hangs off the output arbiter — floo_reduction_sync
+// (the per-candidate stream_join_dynamic) and floo_reduction_arbiter (the lzc
+// pick, the expected-input mask, and the BRESP survivor scan), instantiated at
+// floo_router.sv:396-446 / floo_output_arbiter.sv:84-143. Where a multicast's
+// B replicas converge, they merge into ONE B: the input ports the collect
+// waits on come from route_mask_join(), the merge forwards a whole input flit,
+// and every contributing head is consumed in the same handshake. It carries no
+// state — partial arrivals simply wait in their input FIFOs, which is exactly
+// the RTL structure.
+#include "axi/types.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "ni_params.h"
@@ -251,6 +263,44 @@ class SimpleRouter {
 
     void accept_flit(std::size_t port, const Flit& f);
 
+    // Our header has no third collective opcode: on RSP the only collective
+    // flits are Bs (Ar/R are always UNICAST, spec §6 :356; AW/W never enter
+    // RSP), so `collective_op != UNICAST AND axi_ch in {NarrowB, DataB}` IS
+    // mainline's CollectB opcode (design §3.1 encoding note). The join keys on
+    // BOTH conditions, never on the opcode alone: upstream's arbiter may
+    // reduce by opcode alone (floo_output_arbiter.sv:57-64) because its
+    // CollectB is a distinct code — our overload of MULTICAST is not.
+    static bool is_b_channel(uint64_t axi_ch) {
+        return axi_ch == ni::AXI_CH_NarrowB || axi_ch == ni::AXI_CH_DataB;
+    }
+    static bool is_collect_b(const Flit& f) {
+        return f.get_header_field("collective_op") != ni::COLLECTIVE_OP_UNICAST &&
+               is_b_channel(f.get_header_field("axi_ch"));
+    }
+
+    // Does a CollectB join fire at `out` this tick, and with which anchor
+    // input / expected-input set (floo_reduction_arbiter.sv:69-106,
+    // floo_reduction_sync.sv:29-55)? Read-only: the merge itself is
+    // grant_join().
+    bool join_valid(std::size_t out, std::size_t* sel, PortMask* expected) const;
+    void grant_join(std::size_t out, std::size_t sel, PortMask expected);
+
+    // Output-side admission for one grant, and the push that follows it:
+    // downstream ready in direct mode (output_fifo_depth == 0), stage-3 FIFO
+    // space otherwise. Shared by the unicast grant and the join so the two
+    // cannot drift apart.
+    bool out_admits(std::size_t out) const {
+        if (cfg_.output_fifo_depth == 0) return downstream_[out] && downstream_[out]->ready(0);
+        return output_fifo_[out].size() < cfg_.output_fifo_depth;
+    }
+    void out_push(std::size_t out, const Flit& f) {
+        if (cfg_.output_fifo_depth == 0) {
+            downstream_[out]->push_flit(f);
+        } else {
+            output_fifo_[out].push_back(f);
+        }
+    }
+
     // route_compute() takes router::RouterConfig; SimpleRouterConfig is its
     // own type (distinct depth/slack fields from the credit router's config,
     // not a hardcoded RTL routing rule), so adapt the coordinate subset each
@@ -277,6 +327,28 @@ class SimpleRouter {
         if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
             return port_bit(compute_route(dst));
         }
+        // Class guard (OUR RULE, design §3.1). One class serves both the REQ
+        // and the RSP instance and carries no network field, so the guard is
+        // written on axi_ch: the read channels are the only NON-B channels a
+        // flit on RSP can carry, and a collective on them is illegal on both
+        // networks anyway (ARUSER has no collective surface, spec §6 :324, so
+        // reads are unicast everywhere). A collective AW/W is legal REQ fork
+        // traffic and is therefore neither rejected nor rejectable here.
+        const auto axi_ch = f.get_header_field("axi_ch");
+        if (axi_ch == ni::AXI_CH_NarrowR || axi_ch == ni::AXI_CH_DataR ||
+            axi_ch == ni::AXI_CH_NarrowAr || axi_ch == ni::AXI_CH_DataAr) {
+            assert(false &&
+                   "SimpleRouter: non-B collective flit on a read channel — reads are unicast "
+                   "everywhere, so the header is mis-stamped");
+            std::abort();
+        }
+        // A CollectB routes UNICAST toward its collector: upstream takes the
+        // mask route only for the Multicast opcode (floo_route_select.sv:
+        // 184-189), and a CollectB's dst_id names the single collecting node —
+        // the wildcard sits on src_id. Its expected-INPUT set is a separate
+        // computation, in join_valid().
+        if (is_b_channel(axi_ch)) return port_bit(compute_route(dst));
+
         const auto src = static_cast<uint8_t>(f.get_header_field("src_id"));
         const auto cmask = static_cast<uint8_t>(f.get_header_field("collective_mask"));
         const PortMask m = route_mask_fork(dst, src, cmask, route_cfg());
@@ -336,6 +408,127 @@ inline void SimpleRouter::accept_flit(std::size_t port, const Flit& f) {
         std::abort();
     }
     input_reg_[port] = f;
+}
+
+// floo_reduction_arbiter.sv:69-106 — one floo_reduction_sync per candidate
+// input, all fed the same output's valid set, with an lzc picking the first
+// candidate whose join is complete.
+//
+// lzc MODE, resolved (design §3.2 step 3 [UNVERIFIED]): common_cells 1.39.0
+// (FlooNoC Bender.lock rev 9ca8a76) declares `parameter bit MODE = 1'b0` with
+// the comment "0 -> trailing zero, 1 -> leading zero", and :100-106
+// instantiates it with WIDTH only — so cnt_o is the number of trailing zeros,
+// i.e. the index of the LOWEST set bit. Lowest-index-wins holds; the ascending
+// scan below is the direct translate.
+inline bool SimpleRouter::join_valid(std::size_t out, std::size_t* sel, PortMask* expected) const {
+    for (std::size_t in = 0; in < ROUTER_PORT_COUNT; ++in) {
+        if (tie_off(static_cast<RouterPort>(in), static_cast<RouterPort>(out))) continue;
+        const auto& q = input_fifo_[in][0];
+        if (q.empty()) continue;
+        const Flit& anchor = q.front();
+        if (!is_collect_b(anchor)) continue;
+        // masked_valid[out][in] (floo_router.sv:360-362): the arbiter at this
+        // output only ever sees the inputs whose head routes HERE.
+        if (!port_in_mask(head_mask(in, 0), static_cast<RouterPort>(out))) continue;
+
+        const auto dst = static_cast<uint8_t>(anchor.get_header_field("dst_id"));
+        const auto src = static_cast<uint8_t>(anchor.get_header_field("src_id"));
+        const auto cmask = static_cast<uint8_t>(anchor.get_header_field("collective_mask"));
+        // in_route_mask[i] (floo_reduction_arbiter.sv:72-82, FwdMode=0),
+        // through the frozen T1 API.
+        const PortMask exp = route_mask_join(dst, src, cmask, route_cfg());
+        // stream_join_dynamic fires on `&(inp_valid | ~sel) && |sel`, so an
+        // empty sel simply never fires upstream. Here it is FATAL: the
+        // all-satisfied-by-vacuity condition would otherwise swallow the B and
+        // hang the write, the same class of bug as the fork's empty-branch-set
+        // abort.
+        if (exp == 0) {
+            assert(false &&
+                   "SimpleRouter: CollectB with an empty expected-input set at this router "
+                   "(misrouted collect — silent drop forbidden)");
+            std::abort();
+        }
+        // OUR RULE: the port the B arrived on must be one of the ports the
+        // geometry expects it from. Upstream has the same hole — inp_ready_o[i]
+        // is gated on sel_i[i], so an anchor outside its own sel would be
+        // forwarded and never consumed, re-firing every cycle. Fatal instead.
+        if (!port_in_mask(exp, static_cast<RouterPort>(in))) {
+            assert(false &&
+                   "SimpleRouter: CollectB arrived on a port outside its own expected-input set "
+                   "(echoed collective_mask disagrees with the delivery path)");
+            std::abort();
+        }
+
+        // floo_reduction_sync.sv:39-45 — a member's valid only counts when its
+        // head belongs to the SAME collect (equal dst_id and collective_mask);
+        // anything else waits in its own FIFO. Equal dst_id also means every
+        // member routes to this same output, so no second route check is owed.
+        bool complete = true;
+        for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
+            if (!port_in_mask(exp, static_cast<RouterPort>(j))) continue;
+            const auto& qj = input_fifo_[j][0];
+            if (qj.empty()) {
+                complete = false;
+                break;
+            }
+            const Flit& m = qj.front();
+            if (!is_collect_b(m) ||
+                m.get_header_field("dst_id") != anchor.get_header_field("dst_id") ||
+                m.get_header_field("collective_mask") !=
+                    anchor.get_header_field("collective_mask")) {
+                complete = false;
+                break;
+            }
+            // OUR RULE on top of :41-43 (ruling 1): the replicas of ONE
+            // multicast AW carry the NMU's pre-fanout ordering_tag, the same
+            // class, and the same bid. Disagreement means two different writes
+            // were about to be merged into one B — a model bug, not
+            // backpressure, so it aborts instead of waiting.
+            if (m.get_header_field("ordering_tag") != anchor.get_header_field("ordering_tag") ||
+                m.get_header_field("axi_ch") != anchor.get_header_field("axi_ch") ||
+                m.get_payload_field("B", "bid") != anchor.get_payload_field("B", "bid")) {
+                assert(false &&
+                       "SimpleRouter: joined CollectB replicas disagree on "
+                       "ordering_tag/axi_ch/bid (two different writes merging into one B)");
+                std::abort();
+            }
+        }
+        if (!complete) continue;
+        *sel = in;
+        *expected = exp;
+        return true;
+    }
+    return false;
+}
+
+// The merge itself. popcount(expected) == 1 reaches here like any other size:
+// a single-member collect is a plain forward THROUGH the join path, never down
+// the unicast path — the unicast candidate scan excludes CollectB outright, so
+// routing it there would leave the B forwarded by nobody.
+inline void SimpleRouter::grant_join(std::size_t out, std::size_t sel, PortMask expected) {
+    // Survivor + BRESP precedence (floo_reduction_arbiter.sv:116-131): start
+    // from the lzc-selected flit, then scan the expected inputs in route-index
+    // order and let the FIRST SLVERR win and break. DECERR is NOT elevated — a
+    // deliberate divergence from AXI worst-response, recorded in
+    // docs/router-spec.md. A WHOLE input flit is forwarded and no header is
+    // ever rebuilt, so the survivor's src_id stays inside the member set and
+    // the echoed collective_mask passes through untouched (any member anchors
+    // the same tree).
+    Flit survivor = input_fifo_[sel][0].front();
+    for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
+        if (!port_in_mask(expected, static_cast<RouterPort>(j))) continue;
+        const Flit& m = input_fifo_[j][0].front();
+        if (m.get_payload_field("B", "bresp") == static_cast<uint64_t>(axi::Resp::SLVERR)) {
+            survivor = m;
+            break;
+        }
+    }
+    out_push(out, survivor);
+    // stream_join_dynamic's all-ready (inp_ready_o[i] = oup_valid & oup_ready
+    // & sel_i[i]): every contributing head is consumed in the SAME handshake.
+    for (std::size_t j = 0; j < ROUTER_PORT_COUNT; ++j) {
+        if (port_in_mask(expected, static_cast<RouterPort>(j))) input_fifo_[j][0].pop_front();
+    }
 }
 
 inline void SimpleRouter::tick() {
@@ -398,6 +591,24 @@ inline void SimpleRouter::tick() {
     for (std::size_t out = 0; out < ROUTER_PORT_COUNT; ++out) {
         auto& ws = wormhole_[out];
 
+        // Reduction (CollectB join), evaluated before the grant but NOT before
+        // the freeze: upstream's floo_reduction_arbiter and
+        // floo_wormhole_arbiter hang off the same output IN PARALLEL, and only
+        // the final prio stream_arbiter (index 0 = reduction,
+        // floo_output_arbiter.sv:126-139) decides which of the two gets
+        // ready_i. So the unicast winner still freezes this tick and simply
+        // grants on a later one — delayed, never stolen (design §3.2 step 5).
+        //
+        // Sequential-loop note: like the unicast grants around it, this reads
+        // FIFO state already mutated by earlier outputs in the same tick. Two
+        // joins can never share an input (all members of one collect carry the
+        // same dst_id, hence the same output), so the only order sensitivity
+        // is the pre-S4 one §1.1 rule 5 already blesses — a later output may
+        // see a front that an earlier output's grant uncovered.
+        std::size_t join_sel = 0;
+        PortMask join_expected = 0;
+        const bool join = join_valid(out, &join_sel, &join_expected);
+
         // Winner snapshot/freeze (floo_wormhole_arbiter.sv:61-77
         // valid_d/valid_q/last_q): determined the instant any input becomes
         // a valid, non-tied-off candidate, INDEPENDENT of downstream
@@ -411,6 +622,12 @@ inline void SimpleRouter::tick() {
                 const std::size_t in = (ws.rr + j) % ROUTER_PORT_COUNT;
                 if (tie_off(static_cast<RouterPort>(in), static_cast<RouterPort>(out))) continue;
                 if (input_fifo_[in][0].empty()) continue;
+                // reduce_mask exclusion (floo_output_arbiter.sv:57-67): a
+                // CollectB head is never a unicast candidate — it belongs to
+                // the reduction arbiter, which merges it with its siblings.
+                // Letting it win here would forward one B per member instead
+                // of the one merged B the NMU is waiting for.
+                if (is_collect_b(input_fifo_[in][0].front())) continue;
                 // F2 candidate filter (floo_router.sv:358-362, masked_valid &
                 // ~past_handshakes_q): this output must be a branch of the
                 // front flit's set that has not yet handshaked it. Unicast
@@ -420,6 +637,13 @@ inline void SimpleRouter::tick() {
                 ws.locked_input = in;
                 break;
             }
+        }
+        if (join) {
+            // The prio arbiter hands ready_i to the reduction branch whenever
+            // it is valid, so a valid join suppresses the unicast grant at this
+            // output this tick whether or not the output can accept.
+            if (out_admits(out)) grant_join(out, join_sel, join_expected);
+            continue;
         }
         if (!ws.locked_input.has_value()) continue;  // nothing valid for this output yet
 
@@ -435,12 +659,7 @@ inline void SimpleRouter::tick() {
 
         // Downstream/output-fifo readiness gates only the GRANT itself, not
         // who won — the winner was already frozen above.
-        const bool direct = (cfg_.output_fifo_depth == 0);
-        if (direct) {
-            if (!downstream_[out] || !downstream_[out]->ready(0)) continue;
-        } else {
-            if (output_fifo_[out].size() >= cfg_.output_fifo_depth) continue;
-        }
+        if (!out_admits(out)) continue;
 
         // Grant: single atomic event. Its route is not re-examined —
         // route_lock_ already pins it to `out` once locked (set at the same
@@ -460,11 +679,7 @@ inline void SimpleRouter::tick() {
         } else {
             q.pop_front();  // unicast (one-hot set): the pre-S4 immediate pop
         }
-        if (direct) {
-            downstream_[out]->push_flit(flit);
-        } else {
-            output_fifo_[out].push_back(flit);
-        }
+        out_push(out, flit);
         const uint64_t flit_tail = flit.get_header_field("flit_tail");
         if (flit_tail == 0) {
             // The latch takes the WHOLE branch set, not just this output —
