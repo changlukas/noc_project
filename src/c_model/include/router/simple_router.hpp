@@ -327,6 +327,20 @@ class SimpleRouter {
         if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
             return port_bit(compute_route(dst));
         }
+        // Reserved-code guard (OUR RULE, spec §6 :356 leaves codes 2-3
+        // reserved). Every collective classification in this class keys on
+        // `!= UNICAST`, which is what makes a one-hot collective still take the
+        // collective path (the T3 Critical) — so a reserved code would silently
+        // become a fork on REQ or a CollectB on RSP. Rejecting the code itself
+        // keeps that keying intact and catches BOTH cases in one place, which
+        // narrowing is_collect_b() to `== MULTICAST` would not (it would only
+        // hide the B case, turning it into a silently unmerged plain forward).
+        if (f.get_header_field("collective_op") != ni::COLLECTIVE_OP_MULTICAST) {
+            assert(false &&
+                   "SimpleRouter: reserved collective_op code on a flit (only UNICAST "
+                   "and MULTICAST are defined)");
+            std::abort();
+        }
         // Class guard (OUR RULE, design §3.1). One class serves both the REQ
         // and the RSP instance and carries no network field, so the guard is
         // written on axi_ch: the read channels are the only NON-B channels a
@@ -489,7 +503,9 @@ inline bool SimpleRouter::join_valid(std::size_t out, std::size_t* sel, PortMask
                 m.get_payload_field("B", "bid") != anchor.get_payload_field("B", "bid")) {
                 assert(false &&
                        "SimpleRouter: joined CollectB replicas disagree on "
-                       "ordering_tag/axi_ch/bid (two different writes merging into one B)");
+                       "ordering_tag/axi_ch/bid (two different writes merging into one B; "
+                       "triage: an R1 violation — concurrent collects with overlapping trees — "
+                       "reaches here too, since the same-collect filter is dst_id+mask only)");
                 std::abort();
             }
         }
@@ -638,13 +654,33 @@ inline void SimpleRouter::tick() {
                 break;
             }
         }
-        if (join) {
+        // OUR RULE — worm-boundary grant, a DELIBERATE divergence from
+        // floo_output_arbiter.sv:126-139, whose prio stream_arbiter arbitrates
+        // per BEAT (common_cells stream_arbiter's LockIn holds only within one
+        // stalled handshake, not across a worm). Upstream therefore shares this
+        // hazard; it is simply outside their tested envelope. On RSP an R burst
+        // IS a multi-beat worm, so granting the merged B between beats would
+        // put it at the front of a downstream input FIFO under that worm's held
+        // one-hot latch — either a FALSE continuation abort on legal traffic,
+        // or, where the routes coincide, a grant down the locked unicast path
+        // whose flit_tail=1 ends the worm's latch early AND bypasses the B's own
+        // join, duplicating it at the collector. Holding to the worm boundary
+        // costs latency only: the join is stateless and re-fires every tick.
+        //
+        // "Mid-worm" = this output's frozen winner has already granted a head
+        // (its route latch is held). A merely frozen winner that has not
+        // granted yet is NOT mid-worm — nothing is split — and the reduction
+        // still takes priority over it.
+        const bool mid_worm = ws.locked_input.has_value() && route_lock_[*ws.locked_input][0] != 0;
+        if (join && !mid_worm) {
             // The prio arbiter hands ready_i to the reduction branch whenever
             // it is valid, so a valid join suppresses the unicast grant at this
             // output this tick whether or not the output can accept.
             if (out_admits(out)) grant_join(out, join_sel, join_expected);
             continue;
         }
+        // A held join falls through so the worm can reach its tail — suppressing
+        // the unicast grant here instead would wedge both forever.
         if (!ws.locked_input.has_value()) continue;  // nothing valid for this output yet
 
         // Idle (no steal) while the frozen winner's FIFO is empty —

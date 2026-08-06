@@ -68,15 +68,34 @@ Flit make_collect_b(uint8_t dst, uint8_t src, uint8_t cmask, Resp resp, uint64_t
     return f;
 }
 
-Flit make_unicast_r(uint8_t dst, uint8_t src, uint64_t tag) {
+Flit make_unicast_r(uint8_t dst, uint8_t src, uint64_t tag, uint64_t flit_tail = 1) {
     Flit f;
     f.set_header_field("axi_ch", ni::AXI_CH_DataR);
     f.set_header_field("dst_id", dst);
     f.set_header_field("src_id", src);
     f.set_header_field("vc_id", 0);
-    f.set_header_field("flit_tail", 1);
+    f.set_header_field("flit_tail", flit_tail);
     f.set_header_field("ordering_tag", tag);
     return f;
+}
+
+// Multi-beat R burst: a real RSP worm, tags 0..n-1, tail on the last beat.
+std::vector<Flit> make_r_burst(uint8_t dst, uint8_t src, int n_beats) {
+    std::vector<Flit> worm;
+    for (int i = 0; i < n_beats; ++i) {
+        worm.push_back(make_unicast_r(dst, src, static_cast<uint64_t>(i),
+                                      /*flit_tail=*/i == n_beats - 1 ? 1 : 0));
+    }
+    return worm;
+}
+
+// Ready/valid-compliant upstream: one flit per port per tick, only while ready.
+void feed_worm(SimpleRouter& r, const std::vector<Flit>& worm, std::size_t& fed,
+               std::size_t in_port) {
+    if (fed >= worm.size()) return;
+    if (!r.ready(in_port, 0)) return;
+    r.input(in_port).push_flit(worm[fed]);
+    ++fed;
 }
 
 // --- Geometry of the fixtures ----------------------------------------------
@@ -263,6 +282,94 @@ TEST(SimpleRouterJoin, ReductionWinsPriorityWithoutStealingTheFrozenWinner) {
     EXPECT_EQ(local.received[1].get_header_field("axi_ch"), ni::AXI_CH_DataR);
 }
 
+// --- Worm integrity: the join must not preempt a worm in flight -------------
+
+TEST(SimpleRouterJoin, JoinHoldsWhileItsOutputIsMidWorm) {
+    SCENARIO(
+        "OUR RULE (deliberate divergence from floo_output_arbiter.sv:126-139, whose prio "
+        "stream_arbiter arbitrates per beat): a completed join whose output is INSIDE a worm "
+        "waits for the tail. RSP R bursts are multi-beat worms, so granting per beat would push "
+        "the merged B between R beats. The join is stateless and re-fires, so holding costs "
+        "latency only — the burst stays contiguous and the B lands after the tail");
+    SimpleRouter r(center_cfg());
+    FlitSink local;
+    r.set_downstream(L, local);
+
+    // 4-beat R burst from WEST, ejecting LOCAL — the same output the collect
+    // (expected inputs {LOCAL, NORTH, EAST}) merges to.
+    constexpr int kBeats = 4;
+    const auto burst = make_r_burst(kCollector, make_id(0, 1), kBeats);
+    std::size_t fed = 0;
+    bool bs_sent = false;
+    for (int t = 0; t < 30; ++t) {
+        feed_worm(r, burst, fed, W);
+        // Offer the whole collect once the burst is already streaming.
+        if (!bs_sent && !local.received.empty()) {
+            push_collector_set(r, Resp::OKAY, Resp::OKAY, Resp::OKAY);
+            bs_sent = true;
+        }
+        r.tick();
+    }
+    ASSERT_TRUE(bs_sent);
+    ASSERT_EQ(local.received.size(), static_cast<std::size_t>(kBeats) + 1);
+    for (int i = 0; i < kBeats; ++i) {
+        EXPECT_EQ(local.received[static_cast<std::size_t>(i)].get_header_field("axi_ch"),
+                  ni::AXI_CH_DataR)
+            << "the merged B interleaved into the R burst at beat " << i;
+        EXPECT_EQ(local.received[static_cast<std::size_t>(i)].get_header_field("ordering_tag"),
+                  static_cast<uint64_t>(i));
+    }
+    EXPECT_EQ(local.received.back().get_header_field("axi_ch"), ni::AXI_CH_DataB)
+        << "the merged B did not land after the burst tail";
+}
+
+TEST(SimpleRouterJoinChain, MidWormHoldKeepsTheDownstreamLatchIntact) {
+    SCENARIO(
+        "2-router chain, the shape that shows what a mid-worm join grant costs downstream. A "
+        "size-1 collect at (1,1) shares the EAST output with an R burst headed to (3,1). If the "
+        "B were pushed between beats, (2,1) would see it at the front of an input FIFO under the "
+        "R worm's held one-hot latch: its route ({LOCAL}, the collector) differs from the latch "
+        "({EAST}), so the continuation check would FALSELY ABORT on legal traffic. Holding to "
+        "the tail keeps the latch honest — the burst arrives contiguous and the B follows, "
+        "waiting there for its NORTH sibling");
+    SimpleRouterConfig ca = center_cfg();  // (1,1)
+    SimpleRouterConfig cb = center_cfg();
+    cb.x = 2;  // (2,1)
+    SimpleRouter ra(ca), rb(cb);
+    ra.set_downstream(E, rb.input(W));
+    FlitSink far_sink;
+    rb.set_downstream(E, far_sink);
+
+    constexpr int kBeats = 4;
+    const auto burst = make_r_burst(make_id(3, 1), make_id(0, 1), kBeats);
+    // Collector (2,1), members {(1,1),(1,3)} (mask y=2): expected inputs at
+    // (1,1) are {LOCAL} — a size-1 join — and the merged B routes EAST, the
+    // burst's output. At (2,1) the collect expects {NORTH, WEST}.
+    const auto b = make_collect_b(make_id(2, 1), make_id(1, 1), make_id(0, 2), Resp::OKAY);
+    std::size_t fed = 0;
+    bool b_sent = false;
+    for (int t = 0; t < 40; ++t) {
+        feed_worm(ra, burst, fed, W);
+        if (!b_sent && !far_sink.received.empty()) {
+            ra.input(L).push_flit(b);
+            b_sent = true;
+        }
+        ra.tick();
+        rb.tick();
+    }
+    ASSERT_TRUE(b_sent);
+    ASSERT_EQ(far_sink.received.size(), static_cast<std::size_t>(kBeats))
+        << "the burst did not cross the chain intact";
+    for (int i = 0; i < kBeats; ++i) {
+        EXPECT_EQ(far_sink.received[static_cast<std::size_t>(i)].get_header_field("ordering_tag"),
+                  static_cast<uint64_t>(i))
+            << "burst split at beat " << i;
+    }
+    EXPECT_EQ(rb.input_fifo_size(W, 0), 1u)
+        << "the merged B should be queued at (2,1) awaiting its NORTH sibling";
+    EXPECT_EQ(rb.route_locked(W, 0), 0u) << "downstream route latch left held";
+}
+
 // --- Fault injection --------------------------------------------------------
 
 TEST(SimpleRouterJoinDeath, NonBCollectiveOnRspAborts) {
@@ -282,6 +389,27 @@ TEST(SimpleRouterJoinDeath, NonBCollectiveOnRspAborts) {
             r.tick();
         },
         "non-B collective flit");
+}
+
+TEST(SimpleRouterJoinDeath, ReservedCollectiveOpCodeAborts) {
+    SCENARIO(
+        "Fault injection: collective_op codes 2-3 are reserved (spec §6 :356). Every collective "
+        "classification here keys on `!= UNICAST` — which is what keeps a one-hot collective on "
+        "the collective path — so a reserved code would silently become a CollectB on RSP (or a "
+        "fork on REQ). The code itself is rejected, catching both");
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(
+        {
+            SimpleRouter r(center_cfg());
+            FlitSink local;
+            r.set_downstream(L, local);
+            Flit f = make_collect_b(kCollector, kSrcLocal, kSetMask, Resp::OKAY);
+            f.set_header_field("collective_op", 2);
+            r.input(N).push_flit(f);
+            r.tick();
+            r.tick();
+        },
+        "reserved collective_op code");
 }
 
 TEST(SimpleRouterJoinDeath, EmptyExpectedInputSetAborts) {
