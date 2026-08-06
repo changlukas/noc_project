@@ -19,6 +19,12 @@
 // credit pulse keeps the INPUT-side VC (the FIFO slot freed). A flit with
 // header fixed_vc=1 bypasses assignment entirely: out_vc = vc_id (NI pin,
 // spec extension — not in the deprecated RTL).
+// S4 multicast fork: a collective head (collective_op != UNICAST) forks to
+// the multi-hot branch set of route_mask_fork() (route_mask.hpp). Branch
+// accept tracking is ported from the mainline multicast crossbar
+// (floo_router.sv:344-394 past_handshakes discipline); its composition with
+// the credit/VA base above is OUR RULE (design §1.1 F5-F10). Unicast traffic
+// takes the pre-S4 path unchanged.
 //
 // Convention: +y is NORTH. One Router instance per physical network
 // (REQ / RSP are separate objects).
@@ -112,6 +118,7 @@ class Router {
         for (std::size_t p = 0; p < ROUTER_PORT_COUNT; ++p) {
             input_fifo_[p].resize(cfg_.num_vc);
             credit_[p].assign(cfg_.num_vc, cfg_.vc_depth);
+            fork_done_[p].assign(cfg_.num_vc, 0);
             input_adapters_.emplace_back(this, p);
         }
     }
@@ -161,6 +168,22 @@ class Router {
     }
     std::optional<uint8_t> wormhole_locked_output_vc(std::size_t out_port) const {
         return wormhole_[out_port].locked_output_vc;
+    }
+    // Multicast fork state per (input, vc) — read-only introspection beside
+    // the wormhole_locked_* accessors, for the co-sim fabric state dump
+    // (design §1.3 detection b). expected is recomputed from the parked front
+    // flit (0 when the FIFO is empty); done holds the branch outputs that
+    // already granted it. A wedged multicast triages as done != expected
+    // frozen across ticks with the missing branches' outputs locked to
+    // another worm, instead of a bare timeout.
+    PortMask fork_expected_mask(std::size_t in_port, uint8_t vc) const {
+        if (in_port >= ROUTER_PORT_COUNT || vc >= cfg_.num_vc) return 0;
+        const auto& q = input_fifo_[in_port][vc];
+        return q.empty() ? PortMask{0} : head_expected_mask(q.front());
+    }
+    PortMask fork_done_mask(std::size_t in_port, uint8_t vc) const {
+        if (in_port >= ROUTER_PORT_COUNT || vc >= cfg_.num_vc) return 0;
+        return fork_done_[in_port][vc];
     }
     // Front flit's routed output port for (in_port, vc), or nullopt if empty.
     // Pure read; mirrors stage-2's route check without side effects.
@@ -244,6 +267,44 @@ class Router {
         return sel;
     }
 
+    // F1 composition: branch-output set of a flit at the head of an input
+    // FIFO. Unicast keeps the one-hot route_compute result; a collective head
+    // forks per the T1 route-mask function (route_mask.hpp,
+    // floo_route_xymask.sv:104-164). An empty collective fork set is fatal:
+    // F3's pop condition (done_mask == expected_mask) would be trivially true
+    // and silently drop + credit a misrouted multicast (T1 review hard rule).
+    PortMask head_expected_mask(const Flit& f) const {
+        const auto dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
+        if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
+            return port_bit(route_compute(dst, cfg_));
+        }
+        const auto src = static_cast<uint8_t>(f.get_header_field("src_id"));
+        const auto cmask = static_cast<uint8_t>(f.get_header_field("collective_mask"));
+        const PortMask m = route_mask_fork(dst, src, cmask, cfg_);
+        if (m == 0) {
+            assert(false &&
+                   "Router: collective head with empty fork set at this router "
+                   "(misrouted multicast — silent drop forbidden)");
+            std::abort();
+        }
+        return m;
+    }
+
+    static constexpr bool is_fork_set(PortMask m) { return (m & (m - 1)) != 0; }
+
+    // Outputs whose wormhole lock points at (in, vc). During a fork worm's
+    // continuation phase this is the head's full branch set (F6: every branch
+    // locked at its head grant, released at its own tail grant).
+    PortMask locked_branch_set(std::size_t in, uint8_t vc) const {
+        PortMask m = 0;
+        for (std::size_t o = 0; o < ROUTER_PORT_COUNT; ++o) {
+            if (wormhole_[o].locked_input == in && wormhole_[o].locked_input_vc == vc) {
+                m = static_cast<PortMask>(m | (1u << o));
+            }
+        }
+        return m;
+    }
+
     struct WormholeState {
         std::optional<std::size_t> locked_input;
         // Input-side VC of the in-flight worm: which input FIFO keeps draining.
@@ -259,6 +320,12 @@ class Router {
     // stage-1 input register, one flit/port/cycle
     std::array<std::optional<Flit>, ROUTER_PORT_COUNT> input_reg_{};
     std::array<std::vector<std::deque<Flit>>, ROUTER_PORT_COUNT> input_fifo_{};
+    // Multicast fork done_mask per (input, vc): the branch outputs that have
+    // already granted the parked front flit (floo_router.sv:338
+    // past_handshakes_q). The ONLY stored fork state — expected_mask is a
+    // pure function of the front flit's header, recomputed per tick
+    // (§1.1 rule 4).
+    std::array<std::vector<PortMask>, ROUTER_PORT_COUNT> fork_done_{};
     std::array<std::vector<std::size_t>, ROUTER_PORT_COUNT> credit_{};  // [out][vc]
     std::array<WormholeState, ROUTER_PORT_COUNT> wormhole_{};           // per-output (across VCs)
     std::array<std::size_t, ROUTER_PORT_COUNT> vc_rr_{};                // [out]
@@ -314,28 +381,55 @@ inline void Router::tick() {
             // flit; every continuation rides the head's assigned output VC
             // (mech 5, floo_vc_router.sv:295) and gates on THAT VC's credit.
             in_vc = *ws.locked_input_vc;
-            auto& lq = input_fifo_[*ws.locked_input][in_vc];
+            const std::size_t lin = *ws.locked_input;
+            auto& lq = input_fifo_[lin][in_vc];
             if (!lq.empty() && credit_[out][*ws.locked_output_vc] > 0) {
-                const auto dst = static_cast<uint8_t>(lq.front().get_header_field("dst_id"));
-                if (static_cast<std::size_t>(route_compute(dst, cfg_)) != out) {
-                    assert(false &&
-                           "Router: locked wormhole continuation routes to a different output "
-                           "(malformed packet: flit_tail=0 head not closed by flit_tail=1 on this "
-                           "(input,vc))");
-                    std::abort();
+                const PortMask exp = head_expected_mask(lq.front());
+                if (is_fork_set(exp)) {
+                    // Fork worm branch (F6 OUR RULE: one lock per branch, all
+                    // pointing at this (input, vc)). A set done bit means this
+                    // branch already granted the parked flit — idle until the
+                    // slowest branch takes it and the worm advances (§1.1
+                    // skew property).
+                    if ((fork_done_[lin][in_vc] & port_bit(static_cast<RouterPort>(out))) == 0) {
+                        // F9 (OUR RULE, src-anchored): a continuation's
+                        // branch set recomputed from ITS OWN header must equal
+                        // the branch set established at the head — locked
+                        // branches plus branches already released at their
+                        // tail grant (done). Same shape as the unicast
+                        // continuation route assert below.
+                        if (exp != static_cast<PortMask>(locked_branch_set(lin, in_vc) |
+                                                         fork_done_[lin][in_vc])) {
+                            assert(false &&
+                                   "Router: fork worm continuation branch set diverges from the "
+                                   "head's (corrupted W continuation header)");
+                            std::abort();
+                        }
+                        candidate = ws.locked_input;
+                        out_vc = *ws.locked_output_vc;
+                    }
+                } else {
+                    const auto dst = static_cast<uint8_t>(lq.front().get_header_field("dst_id"));
+                    if (static_cast<std::size_t>(route_compute(dst, cfg_)) != out) {
+                        assert(false &&
+                               "Router: locked wormhole continuation routes to a different output "
+                               "(malformed packet: flit_tail=0 head not closed by flit_tail=1 on "
+                               "this (input,vc))");
+                        std::abort();
+                    }
+                    // A non-pinned worm's locked output VC is always the head's
+                    // preferred VC; a pinned (fixed_vc=1) worm's NI-chosen VC
+                    // legitimately differs, so the check is conditioned.
+                    if (lq.front().get_header_field("fixed_vc") == 0 &&
+                        *ws.locked_output_vc != preferred_out_vc(out, dst)) {
+                        assert(false &&
+                               "Router: locked wormhole output VC diverges from the recomputed "
+                               "preferred VC (fixed_vc=0)");
+                        std::abort();
+                    }
+                    candidate = ws.locked_input;
+                    out_vc = *ws.locked_output_vc;
                 }
-                // A non-pinned worm's locked output VC is always the head's
-                // preferred VC; a pinned (fixed_vc=1) worm's NI-chosen VC
-                // legitimately differs, so the check is conditioned.
-                if (lq.front().get_header_field("fixed_vc") == 0 &&
-                    *ws.locked_output_vc != preferred_out_vc(out, dst)) {
-                    assert(false &&
-                           "Router: locked wormhole output VC diverges from the recomputed "
-                           "preferred VC (fixed_vc=0)");
-                    std::abort();
-                }
-                candidate = ws.locked_input;
-                out_vc = *ws.locked_output_vc;
             }
         } else {
             // Unlocked: VC round-robin, then input round-robin, over head flits
@@ -349,8 +443,29 @@ inline void Router::tick() {
                     const std::size_t in = (ws.rr + j) % ROUTER_PORT_COUNT;
                     const auto& q = input_fifo_[in][vc];
                     if (q.empty()) continue;
-                    const auto dst = static_cast<uint8_t>(q.front().get_header_field("dst_id"));
-                    if (static_cast<std::size_t>(route_compute(dst, cfg_)) != out) continue;
+                    // F1/F2 candidate filter: this output must be a branch of
+                    // the front flit's fork set (unicast: the one-hot
+                    // route_compute port) that has not yet granted it
+                    // (floo_router.sv:358-362, masked_valid &
+                    // ~past_handshakes_q).
+                    const PortMask exp = head_expected_mask(q.front());
+                    if (!port_in_mask(exp, static_cast<RouterPort>(out))) continue;
+                    if (is_fork_set(exp)) {
+                        if ((fork_done_[in][vc] & port_bit(static_cast<RouterPort>(out))) != 0) {
+                            continue;  // F2: this branch already granted the parked flit
+                        }
+                        // OUR RULE guard: an unlocked output may join a fork
+                        // only while the parked flit is the worm's HEAD —
+                        // i.e. every lock on this (input, vc) was set by a
+                        // branch granting this same flit (locked subset-of
+                        // done). A multi-hot CONTINUATION reaching an
+                        // unlocked output is a corrupted branch set: leave it
+                        // parked for the locked branches' F9 assert.
+                        if ((locked_branch_set(in, vc) &
+                             static_cast<PortMask>(~fork_done_[in][vc])) != 0) {
+                            continue;
+                        }
+                    }
                     const auto assigned = vc_assignment(out, q.front());
                     if (!assigned.has_value()) continue;  // VA failure: no grant (mech 7)
                     candidate = in;
@@ -362,18 +477,33 @@ inline void Router::tick() {
         }
         if (!candidate.has_value()) continue;
 
-        // Grant: single atomic event. Credit is consumed on the ASSIGNED
-        // output VC; the upstream pulse returns the INPUT-side VC.
+        // Grant: single atomic event per branch (F5 OUR RULE: output-FIFO
+        // admission + credit consume ARE the handshake). Credit is consumed
+        // on the ASSIGNED output VC; the upstream pulse returns the
+        // INPUT-side VC.
         auto& q = input_fifo_[*candidate][in_vc];
         Flit flit = q.front();
-        q.pop_front();
+        const bool fork_grant = is_fork_set(head_expected_mask(flit));
+        if (fork_grant) {
+            // §1.1 rule 1: a fork grant COPIES the head and marks this branch
+            // done — never pops, so every branch granting this tick reads the
+            // identical q.front() snapshot. Pop and upstream credit are
+            // deferred to the single post-loop pass (F3/F10).
+            fork_done_[*candidate][in_vc] =
+                static_cast<PortMask>(fork_done_[*candidate][in_vc] | (1u << out));
+        } else {
+            // Unicast (one-hot fork set): the pre-S4 immediate-pop path,
+            // §1.1 rule 5 — a later output may legally grant the next flit
+            // of this input FIFO within the same tick.
+            q.pop_front();
+        }
         assert(credit_[out][out_vc] > 0 && "Router: credit underflow");
         --credit_[out][out_vc];
         // Stamp the assigned VC into the departing header (mech 6,
         // floo_vc_router_switch.sv:61,88 hdr.vc_id = vc_assignment_id_i).
         flit.set_header_field("vc_id", out_vc);
         output_fifo_[out].push_back(flit);
-        credit_pulse_pending_.emplace_back(*candidate, in_vc);
+        if (!fork_grant) credit_pulse_pending_.emplace_back(*candidate, in_vc);
         const uint64_t flit_tail = flit.get_header_field("flit_tail");
         if (flit_tail == 0) {
             ws.locked_input = *candidate;
@@ -385,6 +515,27 @@ inline void Router::tick() {
             ws.locked_output_vc.reset();
             ws.rr = (*candidate + 1) % ROUTER_PORT_COUNT;
             vc_rr_[out] = static_cast<std::size_t>((in_vc + 1) % cfg_.num_vc);
+        }
+    }
+
+    // Fork pop pass (§1.1 rule 2; F3 floo_router.sv:374-388 cross_ready =
+    // &all_handshakes, :378 past_handshakes_d clear, :393-394 FF): a fork
+    // head/beat leaves its input FIFO only when EVERY expected branch has
+    // granted it, freeing exactly ONE upstream credit (F10 OUR RULE: upstream
+    // sent one flit against one credit; per-branch pulses would trip the
+    // receive_credit overflow guard). Deferring the pop past the output loop
+    // keeps one stage-advance per tick — no output can see the worm's next
+    // flit within the granting tick. OUR RULE divergence from :383-385: no
+    // ignore_routes loopback exclusion — LOCAL is a real branch (S3a ruling),
+    // so expected_mask keeps LOCAL.
+    for (std::size_t in = 0; in < ROUTER_PORT_COUNT; ++in) {
+        for (uint8_t vc = 0; vc < cfg_.num_vc; ++vc) {
+            if (fork_done_[in][vc] == 0) continue;
+            auto& q = input_fifo_[in][vc];
+            if (fork_done_[in][vc] != head_expected_mask(q.front())) continue;
+            q.pop_front();
+            credit_pulse_pending_.emplace_back(in, vc);
+            fork_done_[in][vc] = 0;
         }
     }
 
