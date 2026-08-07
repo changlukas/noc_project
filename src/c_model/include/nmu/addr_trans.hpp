@@ -61,8 +61,9 @@ class SamTable {
     }
 
     // Convenience: pack x_dim*y_dim equal-size tiles in row-major (x, then y)
-    // order. Used as the co-sim default SAM (no config_path) and by test
-    // fixtures that don't need heterogeneous tile sizes.
+    // order. Test fixtures only -- co-sim always loads a topology YAML, and
+    // NmuWrap::init rejects a missing one. The table it builds is memory-only,
+    // which is why derive_space_bases_ still skips an absent space.
     static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size) {
         std::vector<PackedTile> tiles;
         tiles.reserve(static_cast<std::size_t>(x_dim) * y_dim);
