@@ -1,12 +1,13 @@
 # NoC Performance Parameters
 
-Revision 0.1, 2026-07-24, draft.
+Revision 0.2, 2026-08-07.
 
 Every parameter below moves a specific part of the latency-throughput curve. Values are
 single-sourced in `specgen/source/constants.yaml`, which is authoritative. The parameters describe
-the current c_model configuration, one AXI data width on two physical networks. The target spec's
-two-class, three-network configuration is called out where the accounting differs. Defaults are
-quoted inline for convenience. Effects are stated as directions, not measured numbers.
+the shipped c_model configuration: two AXI classes over three physical networks, REQ 137 b,
+RSP 127 b and DAT 629 b, each with its own flit width and flow control (REQ and RSP ready/valid,
+DAT credit). Defaults are quoted inline for convenience. Effects are stated as directions, except
+in the measured baseline at the end.
 
 Latency has two parts. Structural latency is the packet's progress through the router pipeline and
 links with no contention, the floor. Queuing latency is the wait behind other traffic, and it
@@ -17,14 +18,15 @@ while buffer and outstanding depths move the queuing part.
 
 | Parameter | Affects | Effect | Default (range) |
 |---|---|---|---|
-| `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets flit width, so it sets both payload bandwidth and per-router buffer and crossbar area | 256 b (32, 64, 128, 256, 512, 1024) |
-| `NUM_VC` | Peak bandwidth, area | Recovers link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC`, so it scales with data width | 1 (1 to 8) |
+| `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets the data-class payload, hence the DAT flit width (`DAT_FLIT_WIDTH` = 629 b = 44 b header + 585 b payload) and per-router buffer and crossbar area | 512 b (32, 64, 128, 256, 512, 1024) |
+| `REQ_NUM_VC`, `RSP_NUM_VC`, `DAT_NUM_VC` | Peak bandwidth, area | Recover link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC` per network. Only DAT is swept by the topology set, REQ and RSP being scalar ready/valid | 1, 1, 1 (1 to 8) |
 | `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (2 to 16) |
-| `ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender, sized by rule 1 below | 4 (1 to 16) |
+| `ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender on DAT, sized by rule 1 below | 8 (1 to 16) |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 2 (1 to 16) |
-| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID, hence the memory latency a master can hide behind concurrency | 32 (1 to 256) |
-| `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return | 32, 32 (1 to 256) |
+| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID, a sub-limit inside the shared pool below | 32 (1 to 256) |
+| `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return | 128, 128 (1 to 256) |
 | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
+| `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 1 (1 or 256) |
 | `NMU_OUTSTANDING_DEPTH` | Latency hiding | Master-side shared outstanding pool per direction, all AXI IDs share it | 32 (1 to 256) |
 | `NMU_QUEUE_DEPTH`, `NSU_QUEUE_DEPTH` | Burst absorption | AXI-channel FIFO depth at the master-side (NMU) and slave-side (NSU) network interfaces, absorbs injection bursts | 16, 16 (1 to 1024) |
 | `NMU_DEPKT_Q_DEPTH` | Burst absorption | Depacketize demux FIFO depth | 16 (1 to 1024) |
@@ -61,16 +63,19 @@ MAX_TXNS_PER_ID  >=  T_rt  r_id      per AXI ID
 Below the bound a single ID stream is latency-limited, its throughput capped at
 `MAX_TXNS_PER_ID / T_rt` rather than the link rate. `ROB_B_DEPTH` and `META_BUFFER_MAX_OUTSTANDING`
 must not be the tighter bound on the same concurrency. `ROB_R_DEPTH` holds one read-data beat per
-slot, so for read bursts its required depth scales with beats, not transactions. Across several IDs
-a master multiplies concurrency, one `MAX_TXNS_PER_ID` window per ID, with aggregate admission
-limited by `NMU_OUTSTANDING_DEPTH`.
+slot, so for read bursts its required depth scales with beats, not transactions.
+
+Admission is a pool, not a per-ID multiplier. `NMU_OUTSTANDING_DEPTH` (32) bounds the total in
+flight per direction across every ID, and `MAX_TXNS_PER_ID` (32) is a sub-limit inside it. Adding
+IDs spreads that pool, it does not enlarge it, so the aggregate figure is the one every sizing
+expression below is written against.
 
 ## Worked example: absorbing a full outstanding window
 
 A master that fills its outstanding window in one shot is the peak-injection case. This example
 sizes what the network interface (NI) must hold for the master to see no backpressure, per
-direction. `n` and `m` are the example's local shorthand: `n` is the outstanding depth
-`MAX_TXNS_PER_ID` and `m` the AXI burst length in beats.
+direction. `n` and `m` are the example's local shorthand: `n` is the shared outstanding pool depth
+`NMU_OUTSTANDING_DEPTH` and `m` the AXI burst length in beats.
 
 **Write window.** At t = 0 the master drives both channels at full rate: `n` AW back to back at
 one per cycle, and `n x m` W beats contiguously at one per cycle. The NI egress injects one flit
@@ -82,7 +87,7 @@ aw_q peak = w_q peak = n m / (m + 1)          about n each, not n m
 full absorption:  aw_q, w_q  >=  ceil(n m / (m + 1))
 queues empty at n (m + 1) cycles
 
-  n  outstanding depth, MAX_TXNS_PER_ID
+  n  shared outstanding pool depth, NMU_OUTSTANDING_DEPTH
   m  AXI burst length, in beats
 ```
 
@@ -124,17 +129,18 @@ ROB_R  >=  (n - 1) m beats exact, n m as the conservative budget
    sustains full line rate on the response network, against `m / (m + 1)` for writes, whose
    headers share the request network with the data.
 
-Capacity of an 8 KB read reorder budget at n = 32, m = 4:
+Capacity of an 8 KB read reorder budget at n = 32, m = 4. `ROB_R_DEPTH` is 128 slots, which is
+exactly this budget at the shipped 512 b width:
 
-| `AXI_WDATA_WIDTH` | `n m` beats | Bytes | Against 8 KB |
+| `AXI_DATA_WIDTH` | `n m` beats | Bytes | Against 8 KB |
 |---|---:|---:|---|
 | 256 b | 128 | 4 KB | fits |
-| 512 b | 128 | 8 KB | exactly fills it |
+| 512 b (shipped) | 128 | 8 KB | exactly fills it |
 | 1024 b | 128 | 16 KB | exceeds it, 8 KB forces `m <= 2` |
 
-At a fixed budget and outstanding count, widening the data width shortens the admissible burst. On
-the target spec's three physical networks the same accounting moves to the `DAT` network, where
-write headers, write data, and read returns share one budget.
+At a fixed budget and outstanding count, widening the data width shortens the admissible burst.
+This accounting lands on the `DAT` network, which carries write headers, write data and read
+returns against one budget.
 
 **Efficiency versus round trip.** Moved from target spec §7.5, which keeps the qualitative
 conclusion only. Round trip = request issue to the last returned beat, in NoC cycles. Each
@@ -164,15 +170,61 @@ only 2 KB and covers 32 cycles.
 
 ## Risk in the current defaults
 
-The credit-path parameters are the ones to characterize first. `ROUTER_VC_DEPTH` is 4 today, and
-whether 4 covers `C_rt` in rule 1 is not characterized. It is the first item to measure, since every
-bandwidth figure in the spec assumes the bound is met.
+The credit-path gap is closed. `ROUTER_VC_DEPTH` is 8 against a `C_rt` of 5 cycles: at the earlier
+depth of 4 the link idled one cycle per credit loop and injection capped near 79 %, and depth 8
+sustains 98.7 to 99.5 % (measured in `422ccdc`).
 
-The bandwidth and area parameters, `AXI_DATA_WIDTH` and `NUM_VC`, are the largest knobs on both
-axes and interact. Router input buffering is their product, so raising the data class width and the
-channel count together raises buffer area faster than either alone.
+The bandwidth and area parameters, `AXI_DATA_WIDTH` and the per-network `NUM_VC`, are the largest
+knobs on both axes and interact. Router input buffering is their product, so raising the data class
+width and the channel count together raises buffer area faster than either alone.
 
-Full-window absorption is not covered at the current defaults. The port depth is 16 against the
-26 the write window needs, and `ROB_R_DEPTH` is 32 beats against the 128 the read window budgets.
-Only the read side can back up into the fabric, so its budget is fixed first, at 8 KB, which is
-128 slots at the 512 b width.
+Full-window absorption is still uncovered on the write side: the port depth is 16 against the 26
+the write window needs. The read side is covered, `ROB_R_DEPTH` being 128 beats, which is the 8 KB
+budget the read window asks for at the 512 b width. Only the read side can back up into the fabric,
+which is why it was sized first.
+
+## Measured baseline, 2026-08-07
+
+Tier 3 stage-gate set at commit `1d501e4` (campaign Stage 5 tail), Verilator 5.048, `SEED=20260807`
+on every run, so each row replays. Counters come from `sim/verilator/perf_cli_summary.py`'s
+per-network roll-up of `perf.json`; `cyc` is the perf window; `HWM` is the peak NMU read-reorder
+slot occupancy printed per node. `stall` is `valid && !ready` on REQ and RSP and a credit-starvation
+cycle on DAT, so the three stall figures measure different things and are not summable.
+
+A number outside a recorded row with no cause below it is a regression.
+
+| Run | cyc | REQ flit/stall | RSP flit/stall | DAT flit/stall | HWM |
+|---|---:|---:|---:|---:|---:|
+| `mesh_2x4_vc1` neighbor | 344 | 80 / 20 | 80 / 20 | 240 / 0 | 0 |
+| `mesh_2x2_config_narrow_vc1` neighbor | 326 | 32 / 8 | 32 / 8 | 96 / 0 | 0 |
+| `mesh_2x2_config_narrow_vc1` beat_exact | 521 | 72 / 8 | 72 / 8 | 216 / 0 | 0 |
+| `mesh_4x4_vc1` neighbor | 394 | 192 / 48 | 192 / 48 | 576 / 0 | 0 |
+| `mesh_4x4_vc4_rob` transpose | 251 | 160 / 48 | 160 / 48 | 480 / 2 | 0 |
+| `mesh_4x4_vc4_rob` uniform_random, `INJECTION_MODE=2 INJECTION_RATE=0.5 INJECTION_COUNT=50` | 491 | 1991 / 48 | 1991 / 48 | 5973 / 148 | 49 |
+| `mesh_2x4_config_narrow_vc1` neighbor (A/B pair for row 1, not a gate run) | 370 | 80 / 20 | 80 / 20 | 240 / 0 | 0 |
+
+HWM is 0 on every directed row: the five non-`_rob` rows run with the reorder buffer disabled, and
+the `_rob` transpose row gives each source one destination, which takes the bypass path. The
+checked-continuous row is the only one that parks reads, at 49 of 128 slots.
+
+### Causes behind this baseline
+
+The endpoint changed this stage: one shared 512 b tile port now feeds a `taxi_axi_crossbar_1s`
+that fans out to per-space memories. Each expected effect is listed with what the data does and
+does not show.
+
+| Cause | What the runs show |
+|---|---|
+| Crossbar admission limits, `S_ACCEPT` = 64 and `M_ISSUE` = 32 | **Cannot bind on any directed row.** The directed recipe is two-phase, so the read and write pools never overlap, and under neighbor and transpose exactly one source addresses a given tile, capping concurrent accepted transactions at `NMU_OUTSTANDING_DEPTH` = 32. On the checked-continuous row several sources can address one tile, but nothing counts crossbar occupancy, so there it is unmeasured rather than shown |
+| Master-port register slices | The AW/AR simple buffer and W skid are the identified structural term in the endpoint insertion cost below. Not separable from the rest of the crossbar path with the counters available |
+| Endpoint insertion, whole | `mesh_2x4_vc1` neighbor went 312 to 344 cycles and `mesh_2x2_config_narrow_vc1` neighbor 280 to 326, comparing the last run before the crossbar landed against this baseline, with **every flit and stall counter identical**. The added time is endpoint-local: the fabric moved the same traffic with the same backpressure |
+| Config path becoming deterministic | **Not isolated.** Config space exists only on the two `*_config_narrow_*` topologies, where the switch from randomized backpressure to `taxi_axi_ram` lands together with the second crossbar target and the extra probe transaction. No run separates them |
+| Tile-port head-of-line block | **No fabric-level effect in this set.** `mesh_2x4_config_narrow_vc1` and `mesh_2x4_vc1` differ only in the second tile space, and their REQ, RSP and DAT flit and stall counters are identical, so the block produced no backpressure that reached a link. The mechanism is real (`META_BUFFER_MAX_UNIQUE_IDS` = 1 collapses every tile transaction onto one ID, so a config-to-data alternation stalls the whole port) but the stimulus issues one node-local config probe per node per phase (`sim/tools/gen_test_patterns.py:860-870`), which is two alternations. Expect it to bite on a workload that interleaves the two spaces heavily |
+| Tile resize to 1 MB | **Perf-neutral.** The resize relabels addresses only, which the identical pre- and post-resize flit counts on every shared run confirm: no transaction count or size moved |
+| `TILE_TARGETS` 1 versus 2 | +26 cycles, 344 to 370, on the same 2x4 mesh, pattern and seed, at identical link flit and stall counts. The cost is entirely endpoint-local, and invisible on the links because the config probe is node-local and crosses none |
+
+Two caveats on the comparisons. The pre-change runs used different random seeds, but two
+post-change runs at different seeds return the same cycle count on these directed patterns, so the
+counter is seed-independent here. And the pre-change reference predates both the crossbar and the
+resize, so the deltas above are attributed to the crossbar only because the resize changes no
+transaction count or size, not because a crossbar-only run exists.
