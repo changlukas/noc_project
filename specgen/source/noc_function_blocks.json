@@ -43,7 +43,7 @@
         },
         {
           "id": "FEAT-NMU-VC_MAPPING",
-          "summary": "Maps outbound flits to a VC at flit-construct time (req-VC=0, rsp-VC=0 for NUM_VC=1), and stamps fixed_vc on the ordering_req=0 AW streak so routers keep that VC instead of restamping at VA.",
+          "summary": "Maps outbound flits to a VC at flit-construct time (VC 0 at DAT_NUM_VC=1; REQ/RSP always VC 0), and stamps fixed_vc on the ordering_req=0 AW streak so routers keep that VC instead of restamping at VA.",
           "modes": [],
           "compile_time_params": {},
           "uses_packet_fields": ["vc_id", "fixed_vc"],
