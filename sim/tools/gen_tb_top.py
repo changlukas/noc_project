@@ -164,10 +164,10 @@ def tile_targets(topo: dict):
     order = [s["space"] for s in spaces]
     # Spelled out here rather than read back from address_map.SPACE_ORDER: this
     # is the cross-check on that constant, not a restatement of it.
-    if order != [s for s in ("config", "memory") if s in order] or order[-1] != "memory":
+    if order != ["config", "memory"]:
         raise SystemExit(
-            f"gen_tb_top: tile space order {order} must be config-then-memory, ending in "
-            f"memory -- user_node_endpoint puts the config taxi_axi_ram on target 0 and the "
+            f"gen_tb_top: tile space order {order} must be config-then-memory -- "
+            f"user_node_endpoint puts the config taxi_axi_ram on target 0 and the "
             f"data memory on the last target (see address_map.SPACE_ORDER)")
     return [dict(s, addr_w=s["span"].bit_length() - 1) for s in spaces]
 

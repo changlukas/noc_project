@@ -43,9 +43,12 @@ module user_node_endpoint #(
     // Packed (not unpacked) arrays: Verilator 5.048 rejects an override
     // assignment pattern on an unpacked array param whose size depends on a
     // sibling param override (here TILE_TARGETS).
-    parameter int unsigned TILE_TARGETS = 1,
-    parameter logic [TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = '0,
-    parameter logic [TILE_TARGETS-1:0][31:0]           TILE_ADDR_W = '0,
+    // No defaults: only the generator knows a topology's tile layout, so a
+    // missing override is an elaboration error (IEEE 1800-2017 6.20.1) rather
+    // than a silent fallback to some window set nothing ships.
+    parameter int unsigned TILE_TARGETS,
+    parameter logic [TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR,
+    parameter logic [TILE_TARGETS-1:0][31:0]           TILE_ADDR_W,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
     parameter int unsigned DEFAULT_NUM_WRITES = 8,
     // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH). Master-side DV interfaces
@@ -247,17 +250,15 @@ module user_node_endpoint #(
         .m_axi_wr(target_axi), .m_axi_rd(target_axi)
     );
 
-    // At TILE_TARGETS = 1 the stamped array is all-zero, and taxi reads a zero
-    // M_BASE_ADDR as "use auto-addressing" (taxi_axi_crossbar_addr.sv:135), so
-    // the window in force there is calcBaseAddrs()'s, not the emitted array.
-    // Same answer for one region at base 0, but do not read the array as
-    // authoritative in that shape.
-
     // Config target (m0). ADDR_W is the CONFIG REGION width, never the system
     // width: taxi_axi_ram's mem is a dense 2**(ADDR_W-$clog2(STRB_W)) array, so
-    // the 4 KB window is 64 x 512 b. Present only when the topology gives this
-    // node a config space; with one space the memory target is m0 instead.
-    if (TILE_TARGETS > 1) begin : g_config_ram
+    // the 4 KB window is 64 x 512 b. Every topology gives this node a config
+    // space, so the condition is gone; the generate-if itself stays because a
+    // named block is only legal as part of a generate construct (IEEE 1800-2017
+    // A.4.2), and the label is what holds the hierarchy path
+    // ...u_endpoint.g_config_ram.u_config_ram that waveform scripts and
+    // hand-written probes name.
+    if (1) begin : g_config_ram
         taxi_axi_ram #(.ADDR_W(int'(TILE_ADDR_W[0]))) u_config_ram (
             .clk(clk_i), .rst(!rst_ni),
             .s_axi_wr(target_axi[0]), .s_axi_rd(target_axi[0])
