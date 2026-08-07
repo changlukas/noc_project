@@ -162,9 +162,13 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   decodes on `M_BASE_ADDR`/`M_ADDR_W` generated from the same source. Rejected alternative:
   demuxing on the AXI class instead of the address — taxi's crossbar decodes by address only,
   and it would permanently bind config to narrow.
-- **Bounded tile sizes (user ruling 2026-08-07; formulation corrected by design rev 2)** — the
-  default tile shape is `memory 0x100000` (1 MB) + `config 0x1000` (4 KB), which is what the two
-  config-narrow topologies already use. The other six carry a legacy `size: 0x100000000` (4 GB)
+- **Bounded tile sizes (user ruling 2026-08-07; formulation corrected TWICE — by design rev 2
+  and again at T3)** — the ruling unifies tile SIZE, not tile CONTENT. Every topology uses
+  `memory 0x100000` (1 MB); the two `*_config_narrow_*` topologies additionally carry
+  `config 0x1000` (4 KB) and the other five stay memory-only. Reading it as "every topology
+  gets a config tile" made the two 2x4 topologies byte-identical AND left `TILE_TARGETS = 1`
+  with zero co-sim coverage, despite T2 lint-verifying that path and handling taxi's
+  auto-addressing fallback at `M_COUNT = 1`. The other six carry a legacy `size: 0x100000000` (4 GB)
   that nothing needs and that leaves no room for a config region beside it. Tile-local map:
   config at 0x0, memory at 0x100000. Sizing is adequate by the stimulus formula
   (`gen_test_patterns.py:829-836`): the worst GATED case is 4x4 x 4 txns x 4 KB stride plus
