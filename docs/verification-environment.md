@@ -319,7 +319,10 @@ only in whether a config space exists beside it:
 | `mesh_2x2_config_narrow_vc1`, `mesh_2x4_config_narrow_vc1` | `0x100000` memory + `0x1000` config, config entries appended after all memory entries | 2 |
 
 Keeping both shapes is deliberate: they exercise the two tile-crossbar decode
-paths, the single-target auto-addressing one and the two-window one.
+paths, the single-target auto-addressing one and the two-window one. Only the
+two-window shape can catch a rebase error at the crossbar -- a single 1 MB
+window swallows every offset the stimulus generates, so a `TILE_TARGETS=1` run
+never DECERRs and the endpoint's RRESP gate stays silent there.
 
 Raster order is what makes the node index a contiguous bit field an AWUSER
 address mask can wildcard: memory bases at `idx * 0x100000`, config bases at
