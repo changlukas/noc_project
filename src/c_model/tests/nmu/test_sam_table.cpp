@@ -90,6 +90,14 @@ TEST(SamValidator, RejectsZeroSize) {
     EXPECT_DEATH(bad.validate(4, 4), "zero-size");
 }
 
+TEST(SamValidator, RejectsBasePlusSizeOverflow) {
+    // Non-zero and 4 KB aligned, so the two earlier field checks pass and this
+    // is the one that fires. base+size wraps to 0, which the overlap pass and
+    // lookup() would both read as an empty range instead of a top-of-space tile.
+    SamTable bad(std::vector<SamEntry>{{0xFFFFFFFFFFFFF000ull, 0x1000, 0x00}});
+    EXPECT_DEATH(bad.validate(2, 2), "overflow");
+}
+
 TEST(SamValidator, RejectsDstOutsideMesh) {
     SamTable bad(std::vector<SamEntry>{{0x0, 0x1000, 0x33}});  // x=3,y=3 outside 2x2
     EXPECT_DEATH(bad.validate(2, 2), "mesh");
