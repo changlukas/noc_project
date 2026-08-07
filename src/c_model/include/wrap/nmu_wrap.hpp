@@ -57,37 +57,37 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 namespace ni::cmodel::wrap {
 
 class NmuWrap {
   public:
     // init — construct NmuStandalone with the co-sim default NmuConfig.
+    // config_path is the topology YAML carrying the `address_map` block; it
+    // leads the argument list because there is no NMU without a SAM. Null or
+    // empty throws, so a topology missing at the DPI boundary surfaces through
+    // the same error latch as an unreadable YAML (load_sam_table throws too).
     // REQ/RSP are fixed single-VC (S1 Q2, spec TXREQREADY/TXRSPREADY are
     // scalar); dat_num_vc is the topology's VC count (mesh_4x4_vc{2,4,8}
     // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
-    // AXI channel. config_path: topology YAML with an `address_map` block.
-    // Null/empty (the default) keeps the legacy co-sim default SAM below so
-    // existing unit-test callers are unaffected.
-    void init(uint8_t src_id = 0, uint8_t dat_num_vc = 1,
+    // AXI channel.
+    void init(const char* config_path, uint8_t src_id = 0, uint8_t dat_num_vc = 1,
               std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
-              nmu::RobMode rob_mode = nmu::RobMode::Disabled, const char* config_path = nullptr,
+              nmu::RobMode rob_mode = nmu::RobMode::Disabled,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
               std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID,
               std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH) {
         using namespace ni::cmodel::nmu;
+        if (config_path == nullptr || config_path[0] == '\0') {
+            throw std::invalid_argument(
+                "NmuWrap::init: config_path is required (topology YAML with an address_map block)");
+        }
         dat_num_vc_ = dat_num_vc;
         NmuConfig cfg{};
         cfg.src_id = src_id;
-        if (config_path != nullptr && config_path[0] != '\0') {
-            cfg.sam = addr_trans::load_sam_table(config_path);
-        } else {
-            // Default SAM when no config path: 16x16 uniform, 4 GB/tile. dst =
-            // addr[39:32] (matches the retired xy_route decode); local_addr is
-            // rebased (addr - tile base), as in every real config.
-            cfg.sam = addr_trans::SamTable::uniform(16, 16, 0x100000000ull);
-        }
+        cfg.sam = addr_trans::load_sam_table(config_path);
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;
         cfg.dat_num_vc = dat_num_vc;

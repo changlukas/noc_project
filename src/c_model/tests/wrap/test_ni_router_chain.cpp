@@ -22,6 +22,11 @@ namespace {
 
 constexpr std::size_t LOCAL = 0, EAST = 2, WEST = 4;
 
+// NmuWrap::init takes a topology YAML, no default map. The chain runs on a
+// 2x2 mesh, so the shipped 2x2 is the map; tests needing a different shape
+// write their own YAML below.
+constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+
 struct Node {
     NmuWrap nmu;
     NsuWrap nsu;
@@ -97,7 +102,7 @@ static void run_chain(bool* ok_data) {
     MemSlave slave[2];
 
     for (int k = 0; k < 2; ++k) {
-        n[k].nmu.init(/*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
+        n[k].nmu.init(kTopologyYaml, /*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
         n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
         n[k].merge.init(1);
         n[k].router.init(/*x=*/static_cast<uint8_t>(k), /*y=*/0, /*mesh_x=*/2, /*mesh_y=*/2,
@@ -111,7 +116,7 @@ static void run_chain(bool* ok_data) {
     RouterOutputs rtr_q[2]{};
 
     // AXI master stimulus at node 0: write 1 beat to node 1, then read it back.
-    const uint64_t addr = 0x1'0000'0000ull;  // dst tile 1 (SAM uniform 4 GB/tile)
+    const uint64_t addr = 0x100000ull;  // dst tile 1 (mesh_2x2_vc1: 1 MB memory tiles)
     std::array<uint8_t, 64> wdata{};
     for (int b = 0; b < 64; ++b) wdata[b] = static_cast<uint8_t>(0xA0 + b);
 
@@ -302,14 +307,12 @@ TEST(NiRouterChain, TwoMastersOneNsuConcurrentWritesDoNotCrossWire) {
     MemSlave slave[3];
     const std::string sam_path = write_two_master_sam();
 
-    // A and B are masters (need the real SAM to translate their AW/AR
-    // addresses to C's tile); C's own master face is idle (default SAM
-    // unused). dst tile 1 (x=1,y=0, C's position) base = 0x100000.
-    n[A].nmu.init(/*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
-                  ni::cmodel::nmu::RobMode::Disabled, sam_path.c_str());
-    n[B].nmu.init(/*src_id=*/2, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
-                  ni::cmodel::nmu::RobMode::Disabled, sam_path.c_str());
-    n[C].nmu.init(/*src_id=*/1, /*dat_num_vc=*/1);
+    // A and B are masters (need the row SAM to translate their AW/AR
+    // addresses to C's tile); C's own master face is idle, so its topology is
+    // never consulted. dst tile 1 (x=1,y=0, C's position) base = 0x100000.
+    n[A].nmu.init(sam_path.c_str(), /*src_id=*/0, /*dat_num_vc=*/1);
+    n[B].nmu.init(sam_path.c_str(), /*src_id=*/2, /*dat_num_vc=*/1);
+    n[C].nmu.init(kTopologyYaml, /*src_id=*/1, /*dat_num_vc=*/1);
     for (std::size_t k : {A, C, B}) {
         n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
         n[k].merge.init(1);
@@ -530,7 +533,7 @@ TEST(NiRouterChain, TwoNodeWriteThenReadbackMatches) {
 // it does, a passing chain test proves nothing about the fabric.
 TEST(NiRouterChain, DeadFabricProducesNoResponses) {
     NmuWrap nmu;
-    nmu.init(/*src_id=*/0, /*dat_num_vc=*/1);
+    nmu.init(kTopologyYaml, /*src_id=*/0, /*dat_num_vc=*/1);
 
     NmuInputs in{};
     NmuOutputs q{};  // registered outputs (previous cycle)
@@ -549,7 +552,7 @@ TEST(NiRouterChain, DeadFabricProducesNoResponses) {
         in.rx_dat_valid = false;  // no DAT flit ever arrives
         in.awvalid = !aw_sent;
         in.awid = 3;
-        in.awaddr = 0x1'0000'0000ull;
+        in.awaddr = 0x100000ull;
         in.awlen = 0;
         in.awsize = 5;
         in.awburst = 1;
@@ -560,7 +563,7 @@ TEST(NiRouterChain, DeadFabricProducesNoResponses) {
         in.bready = true;
         in.arvalid = !ar_sent;
         in.arid = 4;
-        in.araddr = 0x1'0000'0000ull;
+        in.araddr = 0x100000ull;
         in.arlen = 0;
         in.arsize = 5;
         in.arburst = 1;
@@ -617,9 +620,9 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
     // ROB Enabled: the T3 guard's class-change-forces-RoB-fallback path only
     // exists in Enabled mode (Disabled mode's single-outstanding interlock is
     // already class-agnostic by construction, stage design §2 scope notes).
-    n[0].nmu.init(/*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
-                  ni::cmodel::nmu::RobMode::Enabled, path.c_str());
-    n[1].nmu.init(/*src_id=*/1, /*dat_num_vc=*/1);
+    n[0].nmu.init(path.c_str(), /*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
+                  ni::cmodel::nmu::RobMode::Enabled);
+    n[1].nmu.init(kTopologyYaml, /*src_id=*/1, /*dat_num_vc=*/1);
     for (int k = 0; k < 2; ++k) {
         n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
         n[k].merge.init(1);

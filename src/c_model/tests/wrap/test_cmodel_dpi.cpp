@@ -54,12 +54,20 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // === NMU multi-instance independence ===
 
     // Case: create 2 NMU adapters — distinct void* + both validate as live.
-    unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0, /*num_vc=*/1, /*config_path=*/nullptr);
-    unsigned long long nmu_b = cmodel_nmu_create("nmu_b", 0, /*num_vc=*/1, /*config_path=*/nullptr);
+    const char* topology = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+    unsigned long long nmu_a = cmodel_nmu_create("nmu_a", 0, /*num_vc=*/1, topology);
+    unsigned long long nmu_b = cmodel_nmu_create("nmu_b", 0, /*num_vc=*/1, topology);
     ASSERT_NE(nmu_a, 0ull);
     ASSERT_NE(nmu_b, 0ull);
     EXPECT_NE(nmu_a, nmu_b);
     check_and_clear_error(CMODEL_DPI_OK);
+
+    // Case: create with no topology → no handle, and the reason reaches the
+    // latch the SV side polls. The wrap used to invent a 16x16 / 4 GB SAM
+    // here, so a testbench that dropped its config_path ran to completion
+    // against a map nothing in the tree ships.
+    EXPECT_EQ(cmodel_nmu_create("nmu_no_sam", 0, /*num_vc=*/1, /*config_path=*/nullptr), 0ull);
+    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
 
     // Case: type-guard — an NMU handle passed to cmodel_nsu_tick (WrapType
     // mismatch) → HERMETIC_VIOLATION; the type tag rejects the wrong wrap.

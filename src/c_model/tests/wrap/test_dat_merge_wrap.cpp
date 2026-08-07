@@ -167,7 +167,7 @@ TEST(DatMergeWrap, IngressDemuxesByAxiCh) {
 // contending DataR land between them.
 TEST(DatMergeWrap, RealNmuSteeringKeepsAwWContiguousUnderNsuContention) {
     NmuWrap nmu;
-    nmu.init(/*src_id=*/0x01, /*dat_num_vc=*/1);
+    nmu.init(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml", /*src_id=*/0x01, /*dat_num_vc=*/1);
     DatMergeWrap merge;
     merge.init(/*dat_num_vc=*/1);
 
@@ -192,7 +192,7 @@ TEST(DatMergeWrap, RealNmuSteeringKeepsAwWContiguousUnderNsuContention) {
     for (int t = 0; t < 40; ++t) {
         nmu_in.awvalid = (aw_phase < 2);
         nmu_in.awid = 0x05;
-        nmu_in.awaddr = 0x1'0000'0000ull;  // default SAM (uniform): data class
+        nmu_in.awaddr = 0x100000ull;  // mesh_2x2_vc1 memory tile 1: data class
         nmu_in.awlen = 0;
         nmu_in.awsize = 5;
         nmu_in.awburst = 1;

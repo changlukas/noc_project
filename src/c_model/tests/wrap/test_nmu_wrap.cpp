@@ -14,7 +14,6 @@
 #include "common/scenario.hpp"
 #include "common/tmp_path.hpp"
 #include "ni_flit_constants.h"
-#include "ni_params.h"
 #include "wrap/flit_byte_conv.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nmu_wrap_io.hpp"
@@ -26,6 +25,11 @@ using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
 using ni::cmodel::wrap::NmuWrap;
 
+// NmuWrap::init takes a topology YAML, no default map. The handshake tests
+// below care only that the stimulus address resolves, so the smallest shipped
+// mesh serves; the SAM-specific tests write their own YAML.
+constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+
 // ---------------------------------------------------------------------------
 // Test 1: idle adapter keeps all readys LOW (wait_valid policy).
 // ---------------------------------------------------------------------------
@@ -33,7 +37,7 @@ TEST(NmuWrap, idle_adapter_keeps_readys_low) {
     SCENARIO("Idle NmuWrap keeps awready/wready/arready low (wait_valid)");
 
     NmuWrap adapter;
-    adapter.init();
+    adapter.init(kTopologyYaml);
 
     NmuInputs in{};  // all valid signals false — nothing presented
     adapter.set_inputs(in);
@@ -57,7 +61,7 @@ TEST(NmuWrap, single_aw_w_two_phase_handshake) {
     SCENARIO("Two-phase AW handshake; wready pre-asserts after AW, W beat consumed");
 
     NmuWrap adapter;
-    adapter.init();
+    adapter.init(kTopologyYaml);
 
     NmuInputs in{};
     NmuOutputs out{};
@@ -112,7 +116,7 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
     SCENARIO("8-beat W burst at full rate; mid-burst AW still gets its ready pulse");
 
     NmuWrap adapter;
-    adapter.init();
+    adapter.init(kTopologyYaml);
 
     NmuInputs in{};
     NmuOutputs out{};
@@ -200,17 +204,15 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
                            "    - { x: 1, y: 1, size: 0x1000 }\n";
 
     NmuWrap adapter;
-    adapter.init(/*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
-                 ni::cmodel::nmu::RobMode::Disabled, path.c_str());
+    adapter.init(path.c_str());
 
     NmuInputs in{};
     NmuOutputs out{};
 
     // Global 0x1040 -> under the 4 KB/tile 2x2 SAM this is tile (x=1,y=0),
-    // dst_id = (y<<X_WIDTH)|x = 1, rebased local_addr = 0x40. Under the
-    // legacy 4 GB/tile default it resolves to dst 0, local 0x1040 (tile 0,
-    // base 0, so rebase is a no-op) -- the two SAMs disagree on this address,
-    // so this pins the YAML load.
+    // dst_id = (y<<X_WIDTH)|x = 1, rebased local_addr = 0x40. Both the tile
+    // pick and the rebase come from this YAML's sizes, so observing them
+    // pins the load.
     in.awvalid = true;
     in.awid = 0x01;
     in.awaddr = 0x1040;
@@ -227,7 +229,7 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     adapter.get_outputs(out);
 
     // Drain the DAT egress face for the AW flit (S3a T6: Data-class AW/W
-    // steer to DAT, spec :348 -- the default SAM entry above has no "space"
+    // steer to DAT, spec :348 -- the tile entry above has no "space"
     // annotation, so it is Data class). DAT is credit-flow (init() pre-seeds
     // NMU_ARBITER_FIFO_DEPTH toward the DatMergeWrap stage), so no external
     // credit pulse is needed for one flit; tx_req_ready is irrelevant here.
@@ -271,8 +273,7 @@ TEST(NmuWrap, awuser_collective_reaches_flit_header) {
                            "    - { x: 1, y: 1, size: 0x1000 }\n";
 
     NmuWrap adapter;
-    adapter.init(/*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
-                 ni::cmodel::nmu::RobMode::Disabled, path.c_str());
+    adapter.init(path.c_str());
 
     NmuInputs in{};
     NmuOutputs out{};
@@ -313,6 +314,20 @@ TEST(NmuWrap, awuser_collective_reaches_flit_header) {
     }
     ASSERT_TRUE(saw_aw_flit) << "NmuWrap never emitted the collective DataAw flit -- the "
                                 "awuser plumb (NmuInputs.awuser -> AwBeat.user) is broken";
+}
+
+// ---------------------------------------------------------------------------
+// A missing topology is an error, not a fabricated mesh. init() used to fall
+// back to a 16x16 / 4 GB-per-tile map when config_path was absent, so a
+// testbench that forgot the YAML ran green against an address map nothing in
+// the tree ships.
+// ---------------------------------------------------------------------------
+TEST(NmuWrap, init_without_topology_throws) {
+    SCENARIO("NmuWrap::init rejects a null or empty config_path instead of inventing a SAM");
+
+    NmuWrap adapter;
+    EXPECT_THROW(adapter.init(nullptr), std::invalid_argument);
+    EXPECT_THROW(adapter.init(""), std::invalid_argument);
 }
 
 // Note: the wrap-level "odd num_vc rejected" death test was removed in S3a
