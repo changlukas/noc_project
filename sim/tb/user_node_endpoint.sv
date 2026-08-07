@@ -31,7 +31,6 @@ module user_node_endpoint #(
     parameter int unsigned ID_WIDTH     = ni_params_pkg::AXI_ID_WIDTH_DFLT,
     parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    parameter longint unsigned REGION_BYTES = 64'h1000,
     // Tile crossbar windows, stamped by gen_tb_top.py from the topology YAML
     // (address_map.tile_layout). Port order and field packing are ONE coupled
     // invariant: field t is target t, m0 = config at base 0x0, LAST = data.
@@ -238,6 +237,23 @@ module user_node_endpoint #(
         .s_axi_wr(tile_axi),   .s_axi_rd(tile_axi),
         .m_axi_wr(target_axi), .m_axi_rd(target_axi)
     );
+
+    // At TILE_TARGETS = 1 the stamped array is all-zero, and taxi reads a zero
+    // M_BASE_ADDR as "use auto-addressing" (taxi_axi_crossbar_addr.sv:135), so
+    // the window in force there is calcBaseAddrs()'s, not the emitted array.
+    // Same answer for one region at base 0, but do not read the array as
+    // authoritative in that shape.
+
+    // Endpoint half of the coupled invariant. The generator asserts the space
+    // ORDER; this asserts what the config taxi_axi_ram below depends on, that
+    // target 0's window starts at 0x0. Runtime, not elaboration: the build
+    // passes -Wno-fatal, under which an elaboration $fatal prints as a warning
+    // and the run continues.
+    initial begin
+        if (TILE_TARGETS > 1 && TILE_BASE_ADDR[0] != '0)
+            $fatal(1, "[tile_decode] node%0d: target 0 base is %h, expected 0x0 -- the config RAM indexes off the raw tile-local address",
+                   NODE_ID, TILE_BASE_ADDR[0]);
+    end
 
     // Config target (m0). ADDR_W is the CONFIG REGION width, never the system
     // width: taxi_axi_ram's mem is a dense 2**(ADDR_W-$clog2(STRB_W)) array, so
@@ -456,9 +472,21 @@ module user_node_endpoint #(
     // gate: the tile crossbar DECERRs any address outside every window, so a
     // disagreement between the SAM's space_base and the generated
     // TILE_BASE_ADDR / TILE_ADDR_W surfaces here by name instead of as an
-    // unexplained data mismatch. Unconditional, unlike the pulp scoreboard's
-    // R-resp check, which is disarmed at +injection_mode=1 -- the mode with the
-    // deepest queues. +decerr_fault=1 proves it fires.
+    // unexplained data mismatch. +decerr_fault=1 proves it fires.
+    //
+    // Nothing else checked RRESP in ANY mode: pulp's RRespCheck asserts only
+    // r_id and r_last (axi_test.sv:2153-2156), and its read-data compare is
+    // SKIPPED when r_resp leaves {OKAY, EXOKAY} (:2133-2134), so an error
+    // response silently passed the scoreboard rather than failing it.
+    //
+    // What this gate covers, precisely: an address that matches NO window. Two
+    // layout-divergence shapes escape it and need the model-side checks
+    // instead. A config/memory transposition only DECERRs its data half --
+    // config traffic at 0x100000+off lands inside the memory window, where the
+    // write and its readback agree. And a config access overrunning its SAM
+    // entry falls into the NEXT entry, routes to a different node's config RAM,
+    // rebases to a legal offset there, and also agrees; that one is held off
+    // upstream by gen_test_patterns' probe-window guard.
     always_ff @(posedge clk_i) begin
         if (rst_ni && master_axi_rsp_i.rvalid && master_axi_req_o.rready &&
                 master_axi_rsp_i.rresp != axi_pkg::RESP_OKAY)
@@ -604,16 +632,22 @@ module user_node_endpoint #(
                     mcast_rd_active[rid].size));
                 first_byte = (mcast_rd_beat[rid] == 0)
                     ? int'(mcast_rd_active[rid].addr - beat_address) : 0;
-                for (int unsigned j = first_byte;
-                     j < axi_pkg::num_bytes(mcast_rd_active[rid].size); j++) begin
-                    automatic longint unsigned ba = beat_address + j;
-                    if (mcast_mem.exists(ba)) begin
-                        automatic logic [7:0] act =
-                            master_axi_rsp_i.rdata[8 * (ba % MC_BUS_BYTES) +: 8];
-                        mcast_checked = mcast_checked + 1;
-                        if (act !== mcast_mem[ba])
-                            $fatal(1, "[mcast_sb] node%0d: replica readback mismatch addr=%h exp=%h act=%h (id=%0d beat=%0d)",
-                                   NODE_ID, ba, mcast_mem[ba], act, rid, mcast_rd_beat[rid]);
+                // An error response carries no read data, so comparing it would
+                // report a decode failure as a data mismatch. Same filter pulp's
+                // scoreboard applies (axi_test.sv:2133-2134); the RRESP fatal
+                // above is what actually reports the error.
+                if (master_axi_rsp_i.rresp inside {axi_pkg::RESP_OKAY, axi_pkg::RESP_EXOKAY}) begin
+                    for (int unsigned j = first_byte;
+                         j < axi_pkg::num_bytes(mcast_rd_active[rid].size); j++) begin
+                        automatic longint unsigned ba = beat_address + j;
+                        if (mcast_mem.exists(ba)) begin
+                            automatic logic [7:0] act =
+                                master_axi_rsp_i.rdata[8 * (ba % MC_BUS_BYTES) +: 8];
+                            mcast_checked = mcast_checked + 1;
+                            if (act !== mcast_mem[ba])
+                                $fatal(1, "[mcast_sb] node%0d: replica readback mismatch addr=%h exp=%h act=%h (id=%0d beat=%0d)",
+                                       NODE_ID, ba, mcast_mem[ba], act, rid, mcast_rd_beat[rid]);
+                        end
                     end
                 end
                 if (master_axi_rsp_i.rlast) mcast_rd_busy[rid] = 1'b0;

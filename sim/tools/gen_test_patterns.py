@@ -591,9 +591,19 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
     if config_bases and not config_all:
         sys.exit("ERROR: multicast pattern needs a config tile on EVERY node "
                  f"(got {len(config_bases)}/{n_nodes}); extend the topology's config tiles")
-    if config_all and _CONFIG_PROBE_BASE + n_nodes * _SLOT_STRIDE > base_local:
-        sys.exit("ERROR: cross-node config probe window overflows into base_local; "
-                 "reduce node count or move _CONFIG_PROBE_BASE")
+    # Bound the probe window by the CONFIG ENTRY, not by base_local: the two are
+    # both 0x1000 on today's maps, but base_local is a memory-space slot
+    # convention and has no say in how large a config aperture is. An overrun
+    # would not fault -- it falls into the next SAM entry, routes to a different
+    # node's config RAM, rebases to a legal tile-local offset there, and its
+    # readback agrees, so nothing downstream would notice.
+    if config_all:
+        config_bytes = min(sizes["config"].values())
+        if _CONFIG_PROBE_BASE + n_nodes * _SLOT_STRIDE > config_bytes:
+            sys.exit(f"ERROR: cross-node config probe window "
+                     f"{_CONFIG_PROBE_BASE:#x}+{n_nodes * _SLOT_STRIDE:#x} overruns the "
+                     f"{config_bytes:#x} B config entry; reduce node count, move "
+                     f"_CONFIG_PROBE_BASE, or enlarge the topology's config tiles")
 
     for (idx, x, y, src_cid) in nodes:
         write_lines, read_lines = [], []
