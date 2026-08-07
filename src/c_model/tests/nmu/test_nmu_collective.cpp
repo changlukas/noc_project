@@ -141,6 +141,43 @@ INSTANTIATE_TEST_SUITE_P(AlignedMasks, NmuCollectiveMaskP,
                              MaskCase{"full_mesh", 0, 0, 0xF000, 0x33}),
                          [](const ::testing::TestParamInfo<MaskCase>& i) { return i.param.name; });
 
+TEST(NmuCollective, TwoSpaceTableKeepsReplicasOnOneSpaceSlot) {
+    SCENARIO(
+        "NMU collective S5 §1.3: with both spaces present the tile-local address carries a "
+        "space_base term, and translate() is the only path that adds it. Replicas of one set are "
+        "class-uniform, so they all take the same term -- the offset they agree on is "
+        "space_base + tile offset, and the two spaces of one node no longer share it");
+    // 2x2 mesh, 4 KB memory tiles then 4 KB config tiles: config span takes
+    // [0x0, 0x1000) of the tile, memory starts at 0x1000.
+    addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Data},
+                              {0x1000, kTile, 0x01, axi::AxiClass::Data},
+                              {0x2000, kTile, 0x10, axi::AxiClass::Data},
+                              {0x3000, kTile, 0x11, axi::AxiClass::Data},
+                              {0x4000, kTile, 0x00, axi::AxiClass::Narrow},
+                              {0x5000, kTile, 0x01, axi::AxiClass::Narrow},
+                              {0x6000, kTile, 0x10, axi::AxiClass::Narrow},
+                              {0x7000, kTile, 0x11, axi::AxiClass::Narrow}});
+    CollectiveTestbench t(std::move(sam));
+
+    // Memory-class pair (nodes 0x00, 0x01), tile offset 0x40.
+    ASSERT_TRUE(t.rob.push_aw(make_aw(0x05, 0x0040, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000))));
+    auto data_flit = t.aw_cap.pop();
+    ASSERT_TRUE(data_flit.has_value());
+    EXPECT_EQ(data_flit->get_header_field("collective_mask"), 0x01u);
+    EXPECT_EQ(data_flit->get_payload_field("AW", "awaddr"), 0x1040u);  // memory slot + offset
+
+    // Same offset in the config space of the same two nodes: same node mask,
+    // different tile-local address. This separation is what the tile crossbar
+    // decodes on.
+    auto config_aw = make_aw(0x06, 0x4040, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000));
+    config_aw.size = 3;  // narrow rides the 8 B lane
+    ASSERT_TRUE(t.rob.push_aw(config_aw));
+    auto config_flit = t.aw_cap.pop();
+    ASSERT_TRUE(config_flit.has_value());
+    EXPECT_EQ(config_flit->get_header_field("collective_mask"), 0x01u);
+    EXPECT_EQ(config_flit->get_payload_field("AW", "awaddr"), 0x40u);  // config slot is at 0x0
+}
+
 TEST(NmuCollective, NarrowClassCollectiveTranslates) {
     SCENARIO(
         "NMU collective Q4 revision 2: multicast is legal on BOTH classes -- config-space message "

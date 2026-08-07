@@ -492,8 +492,9 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 #                   at nsu/packetize.hpp:99,125, so RSP carries no multi-flit
 #                   worm and this probe cannot exercise a mid-worm hold.)
 #
-# Local-offset partitions inside a tile (config offsets alias memory offsets
-# at the single-slave endpoint, so all four windows must be disjoint):
+# Local-offset partitions inside a tile. The NMU now layers the two spaces
+# (SamTable::derive_space_bases_), so a config offset can no longer collide
+# with a memory offset; these windows stay disjoint within their own space:
 #   [0x0,    0x10)                 config multicast slot (16 B narrow burst)
 #   [0x800,  0x800 + n*0x40)       cross-node config probes (one per node)
 #   [0x1000, 0x1000 + region)      unicast filler slots (alloc_unique_offset)

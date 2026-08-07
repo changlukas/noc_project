@@ -161,8 +161,10 @@ class SamTable {
                 if (e.cls == cls && e.size > largest) largest = e.size;
             }
             if (largest == 0) continue;
+            // span != 0 stops the shift from spinning on a size above 2^63:
+            // this runs in the ctor, before validate() can reject the overflow.
             uint64_t span = 0x1000;
-            while (span < largest) span <<= 1;
+            while (span < largest && span != 0) span <<= 1;
             const uint64_t base = (next + span - 1) & ~(span - 1);
             for (auto& e : entries_) {
                 if (e.cls == cls) e.space_base = base;

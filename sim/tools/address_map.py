@@ -110,7 +110,7 @@ def tile_layout(entries):
     spaces = []
     next_base = 0
     for space in SPACE_ORDER:
-        sizes = [e["size"] for e in entries if e["space"] == space]
+        sizes = [e["size"] for e in entries if e.get("space", "memory") == space]
         if not sizes:
             continue
         span = 0x1000

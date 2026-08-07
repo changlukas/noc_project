@@ -147,7 +147,9 @@ PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 # un-regenerated SV package, must not pass silently) and sim/tools (the stimulus
 # and testbench generators, including the Python half of the C++/Python address
 # packing agreement). Both run in one target; each suite imports from its own
-# directory, hence the two cd's. The pytest package is not present in every
+# directory, hence the two cd's. Both ALWAYS run -- the exit status is
+# accumulated rather than chained, so a red specgen suite cannot hide whether
+# sim/tools passed. The pytest package is not present in every
 # interpreter on this project's Windows setup (the MSYS2 mingw64 python lacks
 # it); probe a candidate list and run the first interpreter that can import
 # pytest. Fail loudly if none can -- a silent skip would defeat the gate.
@@ -162,7 +164,10 @@ pytest:
 	    exit 1; \
 	fi; \
 	echo "pytest: using interpreter '$$interp'"; \
-	(cd specgen && $$interp -m pytest tests/ -q) && (cd sim/tools && $$interp -m pytest . -q)
+	status=0; \
+	(cd specgen && $$interp -m pytest tests/ -q) || status=1; \
+	(cd sim/tools && $$interp -m pytest . -q) || status=1; \
+	exit $$status
 
 # Unified DV run launcher. TB selects the testbench (topology; accepts a tb_ prefix).
 # PATTERN selects one of the 4 spatial patterns or beat_exact (S2 gate DPI
