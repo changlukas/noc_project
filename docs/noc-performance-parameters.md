@@ -183,15 +183,19 @@ the write window needs. The read side is covered, `ROB_R_DEPTH` being 128 beats,
 budget the read window asks for at the 512 b width. Only the read side can back up into the fabric,
 which is why it was sized first.
 
-## Measured baseline, 2026-08-07
+## Measured baseline, 2026-08-07 — SUPERSEDED
+
+Every row below was measured against a topology set that no longer exists. The 4x4 rows ran at
+`TILE_TARGETS = 1`, memory-only. `mesh_2x4_vc1` and `mesh_2x4_config_narrow_vc1` were deleted as
+rectangular, and `mesh_2x2_config_narrow_vc1` was renamed `mesh_2x2_vc1`. Every shipped topology
+is now square and `TILE_TARGETS = 2`. The numbers are kept with their conditions stated, not as a
+regression bar. No row here replays and none has been re-measured.
 
 Tier 3 stage-gate set at commit `1d501e4` (campaign Stage 5 tail), Verilator 5.048, `SEED=20260807`
-on every run, so each row replays. Counters come from `sim/verilator/perf_cli_summary.py`'s
+on every run. Counters come from `sim/verilator/perf_cli_summary.py`'s
 per-network roll-up of `perf.json`; `cyc` is the perf window; `HWM` is the peak NMU read-reorder
 slot occupancy printed per node. `stall` is `valid && !ready` on REQ and RSP and a credit-starvation
 cycle on DAT, so the three stall figures measure different things and are not summable.
-
-A number outside a recorded row with no cause below it is a regression.
 
 | Run | cyc | REQ flit/stall | RSP flit/stall | DAT flit/stall | HWM |
 |---|---:|---:|---:|---:|---:|
@@ -218,10 +222,8 @@ does not show.
 | Crossbar admission limits, `S_ACCEPT` = 64 and `M_ISSUE` = 32 | **Cannot bind on any directed row.** The directed recipe is two-phase, so the read and write pools never overlap, and under neighbor and transpose exactly one source addresses a given tile, capping concurrent accepted transactions at `NMU_OUTSTANDING_DEPTH` = 32. On the checked-continuous row several sources can address one tile, but nothing counts crossbar occupancy, so there it is unmeasured rather than shown |
 | Master-port register slices | The AW/AR simple buffer and W skid are the identified structural term in the endpoint insertion cost below. Not separable from the rest of the crossbar path with the counters available |
 | Endpoint insertion, whole | `mesh_2x4_vc1` neighbor went 312 to 344 cycles and `mesh_2x2_config_narrow_vc1` neighbor 280 to 326, comparing the last run before the crossbar landed against this baseline, with **every flit and stall counter identical**. The added time is endpoint-local: the fabric moved the same traffic with the same backpressure |
-| Config path becoming deterministic | **Not isolated.** Config space exists only on the two `*_config_narrow_*` topologies, where the switch from randomized backpressure to `taxi_axi_ram` lands together with the second crossbar target and the extra probe transaction. No run separates them |
 | Tile-port head-of-line block | **No fabric-level effect in this set.** `mesh_2x4_config_narrow_vc1` and `mesh_2x4_vc1` differ only in the second tile space, and their REQ, RSP and DAT flit and stall counters are identical, so the block produced no backpressure that reached a link. The mechanism is real (`META_BUFFER_MAX_UNIQUE_IDS` = 1 collapses every tile transaction onto one ID, so a config-to-data alternation stalls the whole port) but the stimulus issues one node-local config probe per node per phase (`sim/tools/gen_test_patterns.py:860-870`), which is two alternations. Expect it to bite on a workload that interleaves the two spaces heavily |
 | Tile resize to 1 MB | **Perf-neutral.** The resize relabels addresses only, which the identical pre- and post-resize flit counts on every shared run confirm: no transaction count or size moved |
-| `TILE_TARGETS` 1 versus 2 | +26 cycles, 344 to 370, on the same 2x4 mesh, pattern and seed, at identical link flit and stall counts. The cost is entirely endpoint-local, and invisible on the links because the config probe is node-local and crosses none |
 
 Two caveats on the comparisons. The pre-change runs used different random seeds, but two
 post-change runs at different seeds return the same cycle count on these directed patterns, so the
