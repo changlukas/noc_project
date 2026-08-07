@@ -95,9 +95,11 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
         if (entry.path().extension() == ".yaml") files.push_back(entry.path().string());
     }
     std::sort(files.begin(), files.end());
-    // Same floor the Python twin asserts: an empty or unreachable directory must
-    // fail, not pass vacuously.
-    ASSERT_GE(files.size(), 6u) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
+    // Same floor the Python twin asserts. It guards the scan, not the inventory:
+    // an empty or unreachable directory must fail rather than pass vacuously.
+    // A count tied to how many topologies ship would have to be edited every time
+    // one is added or removed, which is exactly what the glob exists to avoid.
+    ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
     for (const auto& file : files) {
         SCOPED_TRACE(file);
         auto sam = load_sam_table(file);

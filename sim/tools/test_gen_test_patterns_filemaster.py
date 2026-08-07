@@ -426,7 +426,10 @@ def test_address_map_pack_real_topologies_gap_free():
 
     topo_dir = os.path.join(os.path.dirname(__file__), "..", "topologies")
     paths = sorted(glob.glob(os.path.join(topo_dir, "*.yaml")))
-    assert len(paths) >= 6, f"expected the real topology YAMLs, found {paths}"
+    # Guards the glob, not the inventory: an empty or unreachable directory must
+    # fail rather than pass vacuously. A count tied to how many topologies ship
+    # would need editing on every add or remove.
+    assert paths, f"expected the real topology YAMLs in {topo_dir}"
     for path in paths:
         topo = yaml.safe_load(open(path))["topology"]
         _bases, entries = address_map.pack(
