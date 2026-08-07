@@ -475,9 +475,14 @@ module user_node_endpoint #(
     // unexplained data mismatch. +decerr_fault=1 proves it fires.
     //
     // Nothing else checked RRESP in ANY mode: pulp's RRespCheck asserts only
-    // r_id and r_last (axi_test.sv:2153-2156), and its read-data compare is
+    // r_id and r_last (axi_test.sv:2154-2157), and its read-data compare is
     // SKIPPED when r_resp leaves {OKAY, EXOKAY} (:2133-2134), so an error
     // response silently passed the scoreboard rather than failing it.
+    //
+    // One predicate for "not an error response", {OKAY, EXOKAY}, the set pulp
+    // uses. The multicast replica compare below skips on the SAME set, so the
+    // two can never disagree about a beat. EXOKAY is unreachable today: no
+    // pattern issues exclusive accesses.
     //
     // What this gate covers, precisely: an address that matches NO window. Two
     // layout-divergence shapes escape it and need the model-side checks
@@ -489,7 +494,7 @@ module user_node_endpoint #(
     // upstream by gen_test_patterns' probe-window guard.
     always_ff @(posedge clk_i) begin
         if (rst_ni && master_axi_rsp_i.rvalid && master_axi_req_o.rready &&
-                master_axi_rsp_i.rresp != axi_pkg::RESP_OKAY)
+                !(master_axi_rsp_i.rresp inside {axi_pkg::RESP_OKAY, axi_pkg::RESP_EXOKAY}))
             $fatal(1, "[tile_decode] node%0d: RRESP=%0h on id=%0h, expected OKAY (address outside every tile window?)",
                    NODE_ID, master_axi_rsp_i.rresp, master_axi_rsp_i.rid);
     end

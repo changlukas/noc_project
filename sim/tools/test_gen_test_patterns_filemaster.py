@@ -457,3 +457,39 @@ def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
     topo = yaml.safe_load(topo_path.read_text())
     packed_bases, _entries = address_map.pack(topo["address_map"], x_dim=2, y_dim=2)
     assert bases_from_patterns == packed_bases
+
+
+def _mcast_topology(tmp_path, config_size, dim=8):
+    """dim x dim mesh, 1 MB memory + one config tile per node. Rows are a power
+    of two so the multicast mask stays wildcard-clean."""
+    tiles = [f"    - {{ x: {x}, y: {y}, size: 0x100000 }}"
+             for y in range(dim) for x in range(dim)]
+    tiles += [f"    - {{ x: {x}, y: {y}, size: {config_size:#x}, space: config }}"
+              for y in range(dim) for x in range(dim)]
+    path = tmp_path / f"mcast_cfg{config_size:x}.yaml"
+    path.write_text(f"topology: {{ name: t, x_dim: {dim}, y_dim: {dim}, num_vc: 1 }}\n"
+                    "address_map:\n  tiles:\n" + "\n".join(tiles) + "\n")
+    return path
+
+
+def _emit_mcast(tmp_path, config_size):
+    topo_path = _mcast_topology(tmp_path, config_size)
+    nodes, x_dim, y_dim, bases, config_bases, sizes = g._load_topology(str(topo_path))
+    g.emit_multicast_pattern(str(tmp_path / f"out{config_size:x}"), nodes, x_dim, y_dim,
+                             bases, config_bases, sizes, "row", 2, 5, 0, 512,
+                             0x1000, len(nodes) * 2 * g._SLOT_STRIDE)
+
+
+def test_config_probe_window_is_bounded_by_the_config_entry(tmp_path):
+    """The cross-node config probe must stay inside the config SAM entry. An
+    overrun does not fault -- it lands in the next entry, routes to another
+    node's config RAM, rebases to a legal offset and reads back consistently,
+    so the crossbar's DECERR gate never sees it.
+
+    8x8 discriminates the bound from base_local (0x1000), which the two happen
+    to share on every shipped topology: the probe window is
+    0x800 + 64*0x40 = 0x1800, legal in a 0x2000 config entry and an overrun in
+    a 0x1000 one."""
+    _emit_mcast(tmp_path, 0x2000)
+    with pytest.raises(SystemExit, match="overruns the 0x1000 B config entry"):
+        _emit_mcast(tmp_path, 0x1000)
