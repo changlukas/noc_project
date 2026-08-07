@@ -119,7 +119,7 @@ def test_emit_file_master_node_arbitrary_base_from_bases_dict(tmp_path):
 def test_load_topology_reads_packed_bases_from_address_map(tmp_path):
     topo_path = tmp_path / "t.yaml"
     topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000))
-    nodes, x_dim, y_dim, bases, _config_bases = g._load_topology(str(topo_path))
+    nodes, x_dim, y_dim, bases, _config_bases, _sizes = g._load_topology(str(topo_path))
     assert (x_dim, y_dim) == (4, 4)
     # packed in raster (y, x) order, matching _uniform_topology_yaml's emit order
     assert bases[g.coord_id(0, 0)] == 0
@@ -243,10 +243,9 @@ def test_narrow_beat_exact_lines_shape():
 
 
 def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
-    """End-to-end wiring check (S2 gate deliverable 2): on a topology with a
-    config-space tile, the owning node's write.txt gains one extra narrow
-    transaction after its beat-exact data-class sequence; a node without a
-    config tile does not."""
+    """End-to-end wiring check (S2 gate deliverable 2): a node owning a
+    config-space tile gains one extra narrow transaction after its beat-exact
+    data-class sequence, addressed at that node's own config tile base."""
     out = str(tmp_path / "scn")
     topo_path = os.path.join(os.path.dirname(__file__), "..", "topologies",
                               "mesh_2x2_config_narrow_vc1.yaml")
@@ -254,9 +253,12 @@ def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
     txns0 = _parse_write(os.path.join(out, "node0", "write.txt"))
     txns1 = _parse_write(os.path.join(out, "node1", "write.txt"))
     n_beat_exact = 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
+    # S4 T6 gave every node a config tile, packed after the 4 memory tiles:
+    # node i's config base is 0x400000 + i * 0x1000.
     assert len(txns0) == n_beat_exact + 1                 # + narrow probe
-    assert txns0[-1]["addr"] == 0x400000                  # config tile base
-    assert len(txns1) == n_beat_exact                     # no config tile on node1
+    assert txns0[-1]["addr"] == 0x400000
+    assert len(txns1) == n_beat_exact + 1
+    assert txns1[-1]["addr"] == 0x401000
 
 
 def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
@@ -388,7 +390,8 @@ def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
         "    - { x: 0, y: 1, size: 0x1000 }\n"
         "    - { x: 1, y: 1, size: 0x4000 }\n"
     )
-    _nodes, _x, _y, bases_from_patterns, _config_bases = g._load_topology(str(topo_path))
+    _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes = g._load_topology(
+        str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
     bases_from_tb_top = gt._address_map(topo)
     assert bases_from_patterns == bases_from_tb_top
