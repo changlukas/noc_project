@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+using ni::cmodel::nmu::addr_trans::collective_translate;
 using ni::cmodel::nmu::addr_trans::load_sam_table;
 namespace axi = ni::cmodel::axi;
 
@@ -137,6 +138,91 @@ TEST(SamYaml, SpaceAttributeSelectsClass) {
     // The two spaces of one node no longer collide at tile-local 0 -- this is
     // what the tile crossbar decodes on.
     EXPECT_NE(sam.translate(0x0).local_addr, sam.translate(0x400000).local_addr);
+}
+
+// The ranges the loader derives from the shipped YAMLs, spelled out. Memory
+// stride is 1 MB and config stride 4 KB in every topology, so the offsets are
+// 20 and 12; the lengths are clog2 of the mesh dimension.
+TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
+    struct Row {
+        const char* file;
+        unsigned dim_bits;
+    } rows[] = {{"/mesh_2x2_vc1.yaml", 1}, {"/mesh_4x4_vc1.yaml", 2}};
+    for (const auto& row : rows) {
+        SCOPED_TRACE(row.file);
+        auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + row.file);
+        const auto* memory = sam.collective_coords(axi::AxiClass::Data);
+        ASSERT_NE(memory, nullptr);
+        EXPECT_EQ(memory->x_range.offset, 20u);  // log2(1 MB)
+        EXPECT_EQ(memory->x_range.len, row.dim_bits);
+        EXPECT_EQ(memory->y_range.offset, 20u + row.dim_bits);
+        EXPECT_EQ(memory->y_range.len, row.dim_bits);
+        const auto* config = sam.collective_coords(axi::AxiClass::Narrow);
+        ASSERT_NE(config, nullptr);
+        EXPECT_EQ(config->x_range.offset, 12u);  // log2(4 KB)
+        EXPECT_EQ(config->x_range.len, row.dim_bits);
+        EXPECT_EQ(config->y_range.offset, 12u + row.dim_bits);
+        EXPECT_EQ(config->y_range.len, row.dim_bits);
+    }
+}
+
+// B1 differential: the node mask read off the declared ranges must equal the
+// one collective_translate derives today by enumerating the 2^n named
+// addresses. Exhaustive over every shipped topology, both spaces, every anchor
+// node and every legal mask shape -- at most 2^(x_bits + y_bits) masks per
+// space. This is the equivalence evidence for B2 replacing the enumeration.
+TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
+    std::vector<std::string> files;
+    for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
+        if (entry.path().extension() == ".yaml") files.push_back(entry.path().string());
+    }
+    std::sort(files.begin(), files.end());
+    ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
+
+    unsigned compared = 0;
+    for (const auto& file : files) {
+        SCOPED_TRACE(file);
+        auto sam = load_sam_table(file);
+        for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
+            const auto* c = sam.collective_coords(cls);
+            ASSERT_NE(c, nullptr) << "every shipped space is collective-eligible";
+            uint64_t origin = 0;
+            for (const auto& e : sam.entries()) {
+                if (e.cls == cls) {
+                    origin = e.base;
+                    break;
+                }
+            }
+            for (unsigned ay = 0; ay < c->y_count; ++ay) {
+                for (unsigned ax = 0; ax < c->x_count; ++ax) {
+                    const uint64_t anchor = origin | (uint64_t{ax} << c->x_range.offset) |
+                                            (uint64_t{ay} << c->y_range.offset);
+                    for (unsigned my = 0; my < (1u << c->y_range.len); ++my) {
+                        for (unsigned mx = 0; mx < (1u << c->x_range.len); ++mx) {
+                            if (mx == 0 && my == 0) continue;  // empty set: rejected, not compared
+                            const uint64_t addr_mask = (uint64_t{mx} << c->x_range.offset) |
+                                                       (uint64_t{my} << c->y_range.offset);
+                            axi::AwBeat b{};
+                            b.addr = anchor;
+                            b.size = 3;  // 8 B, fits the 4 KB config aperture
+                            b.burst = axi::Burst::INCR;
+                            b.user =
+                                (addr_mask << 10) | (uint64_t{axi::COLLECTIVE_OP_MULTICAST} << 8);
+                            const uint8_t sliced =
+                                static_cast<uint8_t>((my << ni::width::X_WIDTH) | mx);
+                            EXPECT_EQ(collective_translate(sam, b), sliced)
+                                << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
+                                << addr_mask;
+                            ++compared;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // 5 topologies x 2 spaces: 2x2 gives 4 anchors x 3 masks, each 4x4 gives
+    // 16 x 15. Guards against the loops silently collapsing to nothing.
+    EXPECT_EQ(compared, 2u * (4u * 3u + 4u * 16u * 15u));
 }
 
 TEST(SamYaml, UnknownSpaceRejected) {

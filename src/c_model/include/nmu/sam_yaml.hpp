@@ -22,6 +22,44 @@ inline axi::AxiClass parse_tile_space(const YAML::Node& tile) {
     std::abort();  // belt-and-braces for NDEBUG
 }
 
+// Per-space coordinate ranges, mirroring floogen's gen_collective_sam: the
+// loader is where x_dim, y_dim and the space's node stride are all in hand.
+//
+//   range.len      = clog2(dim)
+//   x_range.offset = log2(node_stride)
+//   y_range.offset = log2(node_stride) + clog2(x_dim)
+//
+// X sits below Y because this repo packs raster order, X fastest (see
+// SpaceCoords). A space the declaration does not fit is simply not a collective
+// target (spec §5.1), so the return value is not an error to raise here.
+inline void declare_space_coords(SamTable& table, unsigned x_dim, unsigned y_dim) {
+    for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
+        const SamEntry* first = nullptr;
+        const SamEntry* second = nullptr;
+        for (const auto& e : table.entries()) {
+            if (e.cls != cls) continue;
+            if (first == nullptr) {
+                first = &e;
+            } else {
+                second = &e;
+                break;
+            }
+        }
+        // One entry names no stride, so no coordinate field can be read off it.
+        if (second == nullptr) continue;
+        const uint64_t stride = second->base - first->base;
+        if (stride == 0 || (stride & (stride - 1)) != 0) continue;  // not a power of two
+        unsigned offset = 0;
+        while ((uint64_t{1} << offset) != stride) ++offset;
+        SpaceCoords c;
+        c.x_count = x_dim;
+        c.y_count = y_dim;
+        c.x_range = {offset, clog2(x_dim)};
+        c.y_range = {offset + clog2(x_dim), clog2(y_dim)};
+        table.declare_space_coords(cls, c);
+    }
+}
+
 // address_map.tiles: ordered list of { x, y, size, space? }; base(i) is derived
 // by SamTable::packed() as base(i-1) + size(i-1). No tile_size, no base, no
 // default base. A node may appear once per space (validate()).
@@ -45,6 +83,7 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
     }
     SamTable table = SamTable::packed(tiles);
     table.validate(x_dim, y_dim);
+    declare_space_coords(table, x_dim, y_dim);
     return table;
 }
 
