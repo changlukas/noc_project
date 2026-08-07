@@ -214,7 +214,7 @@ Both pointers advance only when a tail flit (`flit_tail = 1'b1`) is granted:
 round-robin, `router.hpp:273-274`). In the example above, if the (SOUTH, VC1) flit is a
 tail, the next unlocked scan starts at VC0 and input WEST. For streams of single-flit
 packets this degenerates to flit-level round-robin. There is no priority or QoS input:
-the flit header has no QoS field (`NOC_QOS_WIDTH = 0`).
+the flit header carries no QoS field.
 
 ### 2.6 Wormhole lock rules (per output, across VCs)
 

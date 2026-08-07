@@ -31,7 +31,6 @@ _HEADER_OVERRIDES = {
     "FEAT-ROUTER-WORMHOLE_ARBITRATION": "src/c_model/include/router/router.hpp",
     "FEAT-ROUTER-VC_ARBITRATION":       "src/c_model/include/router/router.hpp",
     "FEAT-ROUTER-CREDIT_FLOW_CONTROL":  "src/c_model/include/router/router.hpp",
-    "FEAT-ROUTER-ROUTE_PARITY_CHECK":   "src/c_model/include/router/router.hpp",
     # The NI wormhole arbiter is one shared implementation, instantiated with a
     # different input count by each block.
     "FEAT-NMU-WORMHOLE_ARB": "src/c_model/include/ni/wormhole_arbiter.hpp",

@@ -162,8 +162,7 @@
         {"id": "FEAT-ROUTER-VC_ARBITRATION", "summary": "DAT only: per-output VC-major, input-minor round-robin, credit-gated, plus the VA stage assigning the output VC (preferred map + FVADA overflow) and restamping vc_id on fixed_vc=0 flits.", "modes": []},
         {"id": "FEAT-ROUTER-CREDIT_FLOW_CONTROL", "summary": "DAT only: per-(output port, vc) credit counters seeded with downstream depth, reserved at grant, registered 1-cycle return. REQ/RSP use an almost-full ready computed off occupancy.", "modes": []},
         {"id": "FEAT-ROUTER-MULTICAST_FORK", "summary": "A collective_op != UNICAST head takes the multi-hot route_mask_fork branch set instead of the one-hot route; each branch grants on its own, and the input pops once every branch has accepted.", "modes": []},
-        {"id": "FEAT-ROUTER-COLLECTB_JOIN", "summary": "RSP only: a CollectB leaves unicast arbitration and is forwarded once, whole, when every route_mask_join input holds a head of that collect. BRESP precedence is first-SLVERR, DECERR never elevated.", "modes": []},
-        {"id": "FEAT-ROUTER-ROUTE_PARITY_CHECK", "summary": "Optional route_par screen at ingress; mismatch drops the flit and counts.", "modes": []}
+        {"id": "FEAT-ROUTER-COLLECTB_JOIN", "summary": "RSP only: a CollectB leaves unicast arbitration and is forwarded once, whole, when every route_mask_join input holds a head of that collect. BRESP precedence is first-SLVERR, DECERR never elevated.", "modes": []}
       ]
     }
   ]

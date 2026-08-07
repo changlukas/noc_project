@@ -4,10 +4,9 @@ topology:
   y_dim: 2
   num_vc: 1
 
-# Uniform tile shape: 1 MB memory + 4 KB config per node, memory entries in
-# raster order first, config entries appended in the same order. Node-index
-# bits stay a contiguous field per space (memory [22:20], config [14:12]),
-# which is what an AWUSER multicast mask wildcards.
+# Memory-only tile map: 1 MB per node, no config tile, so the tile decoder is
+# TILE_TARGETS = 1. The two *_config_narrow_* topologies carry the two-space
+# shape; between them both crossbar paths stay exercised.
 address_map:
   tiles:
     - { x: 0, y: 0, size: 0x100000 }
@@ -18,11 +17,3 @@ address_map:
     - { x: 1, y: 1, size: 0x100000 }
     - { x: 2, y: 1, size: 0x100000 }
     - { x: 3, y: 1, size: 0x100000 }
-    - { x: 0, y: 0, size: 0x1000, space: config }
-    - { x: 1, y: 0, size: 0x1000, space: config }
-    - { x: 2, y: 0, size: 0x1000, space: config }
-    - { x: 3, y: 0, size: 0x1000, space: config }
-    - { x: 0, y: 1, size: 0x1000, space: config }
-    - { x: 1, y: 1, size: 0x1000, space: config }
-    - { x: 2, y: 1, size: 0x1000, space: config }
-    - { x: 3, y: 1, size: 0x1000, space: config }

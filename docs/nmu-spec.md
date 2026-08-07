@@ -99,7 +99,7 @@ The tile-local layout is derived from the table itself, never given in the YAML 
 - `span(space)` = the largest entry of that space rounded up to a power of two, minimum 4 KiB.
 - `space_base` = spaces in the fixed order [config, memory], each aligned up to its own span. A space with no entries takes no slot, so a memory-only map has `space_base(memory)` = 0 and `local_addr` degenerates to `A - base`.
 
-On every shipped topology (config 0x1000, memory 0x100000 per node) that gives config span 0x1000 at tile-local 0x0 and memory span 0x100000 at tile-local 0x100000.
+On a two-space topology (config 0x1000 + memory 0x100000 per node) that gives config span 0x1000 at tile-local 0x0 and memory span 0x100000 at tile-local 0x100000. On a memory-only topology the config space takes no slot, so memory sits at tile-local 0x0 and the space term vanishes.
 
 The SAM is loaded at runtime from the topology YAML `address_map` block (`sim/topologies/*.yaml`, parsed by `nmu/sam_yaml.hpp`). When no config path is given, the default is a memory-only 16x16 uniform map with tile_size = 4 GiB = 0x1_0000_0000: entry i has dst_id = i = {y[3:0], x[3:0]} and base = i * 0x1_0000_0000, which makes dst_id = addr[39:32].
 
