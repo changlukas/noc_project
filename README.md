@@ -68,7 +68,7 @@ Artifacts land under `build/` (gitignored); `make clean` removes them.
 
 ~~~bash
 make test                                  # c_model ctest suite
-make specgen_pytest                        # specgen suite + golden drift gate
+make pytest                                # specgen + sim/tools suites, golden drift gate
 python3 specgen/tools/codegen.py --check   # committed generated code matches sources
 ~~~
 

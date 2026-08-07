@@ -19,7 +19,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-yamlcpp build-verilator test \
-        specgen_pytest sim \
+        pytest sim \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -143,24 +143,26 @@ test: build-cmodel
 # (Linux/macOS and MSYS2 shells without the launcher on PATH).
 PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
-# specgen codegen/golden drift gate. Runs the specgen pytest suite so a stale
-# golden (e.g. an un-regenerated SV package) cannot pass silently. The pytest
-# package is not present in every interpreter on this project's Windows setup
-# (the MSYS2 mingw64 python lacks it); probe a candidate list and run the first
-# interpreter that can import pytest. Fail loudly if none can -- a silent skip
-# would defeat the gate.
-SPECGEN_PYTEST_CANDIDATES := $(PYTHON3) python3 "py -3" python
-specgen_pytest:
+# Python suites: specgen (codegen/golden drift gate -- a stale golden, e.g. an
+# un-regenerated SV package, must not pass silently) and sim/tools (the stimulus
+# and testbench generators, including the Python half of the C++/Python address
+# packing agreement). Both run in one target; each suite imports from its own
+# directory, hence the two cd's. The pytest package is not present in every
+# interpreter on this project's Windows setup (the MSYS2 mingw64 python lacks
+# it); probe a candidate list and run the first interpreter that can import
+# pytest. Fail loudly if none can -- a silent skip would defeat the gate.
+PYTEST_CANDIDATES := $(PYTHON3) python3 "py -3" python
+pytest:
 	@interp=""; \
-	for cand in $(SPECGEN_PYTEST_CANDIDATES); do \
+	for cand in $(PYTEST_CANDIDATES); do \
 	    if $$cand -c "import pytest" >/dev/null 2>&1; then interp="$$cand"; break; fi; \
 	done; \
 	if [ -z "$$interp" ]; then \
-	    echo "ERROR: no interpreter in [$(SPECGEN_PYTEST_CANDIDATES)] can import pytest; specgen drift gate cannot run" >&2; \
+	    echo "ERROR: no interpreter in [$(PYTEST_CANDIDATES)] can import pytest; the drift gate cannot run" >&2; \
 	    exit 1; \
 	fi; \
-	echo "specgen_pytest: using interpreter '$$interp'"; \
-	cd specgen && $$interp -m pytest tests/ -q
+	echo "pytest: using interpreter '$$interp'"; \
+	(cd specgen && $$interp -m pytest tests/ -q) && (cd sim/tools && $$interp -m pytest . -q)
 
 # Unified DV run launcher. TB selects the testbench (topology; accepts a tb_ prefix).
 # PATTERN selects one of the 4 spatial patterns or beat_exact (S2 gate DPI
