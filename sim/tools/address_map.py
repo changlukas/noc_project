@@ -21,6 +21,10 @@ Packing rule: base(0) = 0x0; base(i) = base(i-1) + size(i-1), in list order
 
 X_WIDTH = 4  # mirrors ni_flit_constants.h width::X_WIDTH / addr_trans.hpp
 
+# Tile-local space order. Fixed, not inferred: the tile crossbar's config
+# target indexes off the raw tile-local address, so config must sit at 0x0.
+SPACE_ORDER = ("config", "memory")
+
 
 def dst_id(x, y):
     """Coordinate-encoded node id = (y << X_WIDTH) | x. Mirrors addr_trans.hpp."""
@@ -83,3 +87,36 @@ def pack(address_map, x_dim, y_dim):
 
     bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "memory"}
     return bases, entries
+
+
+def tile_layout(entries):
+    """Tile-local space layout. Mirrors SamTable::derive_space_bases_().
+
+    The NMU rebases an address to space_base + (addr - entry base), so the two
+    spaces of one node land in disjoint windows the tile crossbar can decode.
+    The layout is DERIVED from the entries -- change a tile size and the spans
+    move -- so the crossbar's M_BASE_ADDR / M_ADDR_W follow the topology YAML
+    instead of a hardcoded constant.
+
+        span(space) = the largest entry of that space rounded up to a power of
+                      two, minimum 4 KB
+        base(space) = spaces in SPACE_ORDER, each aligned up to its own span;
+                      a space with no entries takes no slot
+
+    Returns (spaces, tile_span):
+        spaces:    ordered [{"space", "base", "span"}, ...], present spaces only
+        tile_span: one past the last space's window
+    """
+    spaces = []
+    next_base = 0
+    for space in SPACE_ORDER:
+        sizes = [e["size"] for e in entries if e["space"] == space]
+        if not sizes:
+            continue
+        span = 0x1000
+        while span < max(sizes):
+            span <<= 1
+        base = (next_base + span - 1) & ~(span - 1)
+        spaces.append({"space": space, "base": base, "span": span})
+        next_base = base + span
+    return spaces, next_base

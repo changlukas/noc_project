@@ -307,6 +307,45 @@ def test_address_map_pack_accumulates_bases_in_list_order():
     assert [e["base"] for e in entries] == [0, 0x1000, 0x3000, 0x4000]
 
 
+def _two_space_tiles(memory_sizes):
+    """2x2 memory tiles of the given sizes plus one 4 KB config tile per node."""
+    nodes = [(0, 0), (1, 0), (0, 1), (1, 1)]
+    return ([{"x": x, "y": y, "size": s, "space": "memory"}
+             for (x, y), s in zip(nodes, memory_sizes)] +
+            [{"x": x, "y": y, "size": 0x1000, "space": "config"} for x, y in nodes])
+
+
+def test_address_map_tile_layout_derives_span_from_entries():
+    """The tile span is COMPUTED from the YAML, never a constant. A mixed-size
+    map (one 2 MB tile among 1 MB tiles) must double every memory-space number
+    against the uniform map -- the property the retired mesh_2x2_nonuniform_vc1
+    topology used to prove. Mirrored in C++ by
+    SamTable.SpaceBaseDerivedFromLargestEntryOfThatSpace."""
+    mixed = _two_space_tiles([0x200000, 0x100000, 0x100000, 0x100000])
+    spaces, tile_span = address_map.tile_layout(mixed)
+    assert spaces == [
+        {"space": "config", "base": 0x0, "span": 0x1000},
+        {"space": "memory", "base": 0x200000, "span": 0x200000},
+    ]
+    assert tile_span == 0x400000
+    # Heterogeneous sizes still pack: the mixed map is a valid pack() input.
+    address_map.pack({"tiles": mixed}, x_dim=2, y_dim=2)
+
+    uniform = _two_space_tiles([0x100000] * 4)
+    spaces, tile_span = address_map.tile_layout(uniform)
+    assert spaces[1] == {"space": "memory", "base": 0x100000, "span": 0x100000}
+    assert tile_span == 0x200000
+
+
+def test_address_map_tile_layout_skips_an_absent_space():
+    """A memory-only topology gets no config slot, so memory starts at 0x0."""
+    tiles = [{"x": x, "y": y, "size": 0x100000, "space": "memory"}
+             for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]
+    spaces, tile_span = address_map.tile_layout(tiles)
+    assert spaces == [{"space": "memory", "base": 0x0, "span": 0x100000}]
+    assert tile_span == 0x100000
+
+
 def test_address_map_pack_rejects_zero_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
     with pytest.raises(ValueError, match="positive"):
