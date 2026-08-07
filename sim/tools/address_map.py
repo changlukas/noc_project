@@ -9,10 +9,11 @@ address_map format (topology YAML):
       tiles:                                 # ordered list
         - { x: 0, y: 0, size: 0x100000000 }
         - { x: 1, y: 0, size: 0x100000000 }
-        - { x: 0, y: 0, size: 0x1000, space: config }  # optional narrow aperture
-        # ... one memory-space entry per node, in pack order; a node may
-        # additionally carry one config-space entry (docs/noc-target-spec.md
-        # §5 "SAM address spaces").
+        - { x: 0, y: 0, size: 0x1000, space: config }  # narrow aperture
+        - { x: 1, y: 0, size: 0x1000, space: config }
+        # ... one memory-space entry per node, then one config-space entry per
+        # node, both in raster order (docs/noc-target-spec.md §5 "SAM address
+        # spaces").
 No tile_size, no base, no default. space defaults to "memory".
 
 Packing rule: base(0) = 0x0; base(i) = base(i-1) + size(i-1), in list order
@@ -36,9 +37,15 @@ def pack(address_map, x_dim, y_dim):
 
     Raises ValueError (fail-loud, mirrors SamTable::validate) on: missing/empty
     tiles list, non-positive or non-4KB-aligned size, a tile outside the mesh,
-    an unrecognized space, or a missing/duplicate mesh node per space (memory
-    space must cover every node exactly once; config space is sparse, at most
-    one tile per node).
+    an unrecognized space, or a missing/duplicate mesh node per space -- both
+    spaces must cover every node exactly once.
+
+    Full config coverage is checked HERE and not in SamTable::validate(): this
+    function only ever sees a shipped topology YAML, while validate() also runs
+    on hand-built in-memory tables (SamTable::uniform() is memory-only and is
+    the fixture constructor for most c_model tests). Every C++ consumer of a
+    YAML reaches it through a generator that packed it first, so the YAML is
+    gated either way.
 
     Returns (bases, entries):
         bases:   {dst_id: base} for the memory-space tile only (existing
@@ -78,10 +85,11 @@ def pack(address_map, x_dim, y_dim):
             raise ValueError(
                 f"address_map: duplicate mesh node (x={e['x']},y={e['y']}) in {e['space']} space")
         seen.add(node)
-    if len(seen_memory) != x_dim * y_dim:
-        raise ValueError(
-            f"address_map.tiles memory space covers {len(seen_memory)} nodes, expected "
-            f"{x_dim * y_dim} ({x_dim}x{y_dim} mesh, one memory tile per node)")
+    for space, seen in (("memory", seen_memory), ("config", seen_config)):
+        if len(seen) != x_dim * y_dim:
+            raise ValueError(
+                f"address_map.tiles {space} space covers {len(seen)} nodes, expected "
+                f"{x_dim * y_dim} ({x_dim}x{y_dim} mesh, one {space} tile per node)")
     # No overlap check needed: sizes are validated positive above, so packing
     # (base(i) = base(i-1) + size(i-1)) always yields disjoint, contiguous ranges.
 

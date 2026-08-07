@@ -112,11 +112,11 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
     }
 }
 
-// S2 T2d: SAM class selection from the topology YAML's tile.space attribute
-// (docs/noc-target-spec.md §5). mesh_2x2_config_narrow_vc1.yaml gives node
-// (0,0) both a memory tile (default space) and a config tile.
+// SAM class selection from the topology YAML's tile.space attribute
+// (docs/noc-target-spec.md §5). mesh_2x2_vc1.yaml gives every node both a
+// memory tile (default space) and a config tile.
 TEST(SamYaml, SpaceAttributeSelectsClass) {
-    auto sam = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_config_narrow_vc1.yaml");
+    auto sam = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
     // Memory-space tiles pack first (list order): node (0,0)'s memory tile is
     // [0, 0x100000).
     auto memory = sam.translate(0x1000);

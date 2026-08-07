@@ -1,16 +1,14 @@
 topology:
-  name: mesh_2x2_config_narrow_vc1
+  name: mesh_2x2_vc1
   x_dim: 2
   y_dim: 2
   num_vc: 1
 
-# S2 T2d config-space narrow smoke topology: every node gets its memory-space
-# (data class) tile and a config-space (narrow class) tile.
-# docs/noc-target-spec.md §5 "SAM address spaces" -- a node may carry one
-# memory tile and, optionally, one config tile (nmu::addr_trans::
-# SamTable::validate).
-# S4 T6: config tiles extended from node (0,0) alone to ALL nodes, appended
-# AFTER the original (0,0) entry so every pre-existing base is unchanged.
+# Dual-space tile map: every node carries a memory-space (data class) tile and
+# a config-space (narrow class) tile.
+# docs/noc-target-spec.md §5 "SAM address spaces" -- a node carries one memory
+# tile and one config tile (nmu::addr_trans::SamTable::validate).
+# Config tiles are appended AFTER every memory tile, so no memory base moves.
 # Uniform sizes in raster order make both spaces AWUSER-mask friendly:
 # memory bases = idx * 0x100000 (node-index bits [21:20]), config bases =
 # 0x400000 + idx * 0x1000 (node-index bits [13:12]) -- required by the

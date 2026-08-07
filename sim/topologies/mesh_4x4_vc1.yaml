@@ -4,9 +4,15 @@ topology:
   y_dim: 4
   num_vc: 1
 
-# Memory-only tile map: 1 MB per node, no config tile, so the tile decoder is
-# TILE_TARGETS = 1. The two *_config_narrow_* topologies carry the two-space
-# shape; between them both crossbar paths stay exercised.
+# Dual-space tile map: every node carries a memory-space (data class) tile and
+# a config-space (narrow class) tile.
+# docs/noc-target-spec.md §5 "SAM address spaces" -- a node carries one memory
+# tile and one config tile (nmu::addr_trans::SamTable::validate).
+# Config tiles are appended AFTER every memory tile, so no memory base moves.
+# Uniform sizes in raster order make both spaces AWUSER-mask friendly:
+# memory bases = idx * 0x100000 (node-index bits [23:20]), config bases =
+# 0x1000000 + idx * 0x1000 (node-index bits [15:12]) -- required by the
+# multicast pattern (replica addresses differ only in node-index bits).
 address_map:
   tiles:
     - { x: 0, y: 0, size: 0x100000 }
@@ -25,3 +31,19 @@ address_map:
     - { x: 1, y: 3, size: 0x100000 }
     - { x: 2, y: 3, size: 0x100000 }
     - { x: 3, y: 3, size: 0x100000 }
+    - { x: 0, y: 0, size: 0x1000, space: config }
+    - { x: 1, y: 0, size: 0x1000, space: config }
+    - { x: 2, y: 0, size: 0x1000, space: config }
+    - { x: 3, y: 0, size: 0x1000, space: config }
+    - { x: 0, y: 1, size: 0x1000, space: config }
+    - { x: 1, y: 1, size: 0x1000, space: config }
+    - { x: 2, y: 1, size: 0x1000, space: config }
+    - { x: 3, y: 1, size: 0x1000, space: config }
+    - { x: 0, y: 2, size: 0x1000, space: config }
+    - { x: 1, y: 2, size: 0x1000, space: config }
+    - { x: 2, y: 2, size: 0x1000, space: config }
+    - { x: 3, y: 2, size: 0x1000, space: config }
+    - { x: 0, y: 3, size: 0x1000, space: config }
+    - { x: 1, y: 3, size: 0x1000, space: config }
+    - { x: 2, y: 3, size: 0x1000, space: config }
+    - { x: 3, y: 3, size: 0x1000, space: config }

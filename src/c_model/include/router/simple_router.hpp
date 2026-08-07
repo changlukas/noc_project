@@ -161,7 +161,7 @@ class SimpleRouterLink {
 // the LOCAL input. Tying that arc off (as floo_router.sv does) strands the
 // flit in the LOCAL input FIFO forever — invisible to the credit Router's
 // FABRIC-DUMP, which doesn't cover SimpleRouter queues (S3a T6 node0 hang,
-// mesh_2x2_config_narrow_vc1).
+// mesh_2x2_vc1).
 inline bool tie_off(RouterPort in, RouterPort out) {
     if (in == out && in != RouterPort::LOCAL) return true;  // NoLoopback, floo_router.sv:349
     if ((in == RouterPort::SOUTH || in == RouterPort::NORTH) &&

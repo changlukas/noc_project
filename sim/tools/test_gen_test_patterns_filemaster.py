@@ -64,13 +64,17 @@ def _parse_write(path):
 
 
 def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000):
-    """New packed-address_map topology YAML text, every tile the same size.
+    """New packed-address_map topology YAML text, every memory tile the same size.
 
     Builds a temp topology YAML in the packed `tiles:` format for the test.
+    The 4 KB config tiles after them are what address_map.pack() requires of
+    every node, and are packed last so no memory base moves.
     """
     tiles = "\n".join(
-        f"    - {{ x: {x}, y: {y}, size: {tile_size:#x} }}"
-        for y in range(y_dim) for x in range(x_dim)
+        [f"    - {{ x: {x}, y: {y}, size: {tile_size:#x} }}"
+         for y in range(y_dim) for x in range(x_dim)] +
+        [f"    - {{ x: {x}, y: {y}, size: 0x1000, space: config }}"
+         for y in range(y_dim) for x in range(x_dim)]
     )
     return (
         f"topology: {{ name: {name}, x_dim: {x_dim}, y_dim: {y_dim}, num_vc: {num_vc} }}\n"
@@ -189,8 +193,10 @@ def test_main_file_master_all_patterns(tmp_path, pat):
         assert os.path.isfile(os.path.join(n, "write.txt"))
         assert os.path.isfile(os.path.join(n, "read.txt"))
     w = _parse_write(os.path.join(nodes[0], "write.txt"))
-    assert len(w) == 2                              # transactions-per-node
-    for t in w:
+    # transactions-per-node, then the one narrow probe every config-tile owner
+    # gets regardless of pattern (main()'s narrow_extra).
+    assert len(w) == 2 + 1
+    for t in w[:2]:
         assert t["burst"] == 1 and t["size"] == 5 and t["len"] == 0
         assert len(t["beats"]) == 1
 
@@ -249,13 +255,13 @@ def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
     data-class sequence, addressed at that node's own config tile base."""
     out = str(tmp_path / "scn")
     topo_path = os.path.join(os.path.dirname(__file__), "..", "topologies",
-                              "mesh_2x2_config_narrow_vc1.yaml")
+                              "mesh_2x2_vc1.yaml")
     g.main(["--topology", topo_path, "--out", out, "--pattern", "beat_exact"])
     txns0 = _parse_write(os.path.join(out, "node0", "write.txt"))
     txns1 = _parse_write(os.path.join(out, "node1", "write.txt"))
     n_beat_exact = 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
-    # S4 T6 gave every node a config tile, packed after the 4 memory tiles:
-    # node i's config base is 0x400000 + i * 0x1000.
+    # Config tiles pack after the 4 memory tiles (0x100000 each), so node i's
+    # config base is 0x400000 + i * 0x1000.
     assert len(txns0) == n_beat_exact + 1                 # + narrow probe
     assert txns0[-1]["addr"] == 0x400000
     assert len(txns1) == n_beat_exact + 1
@@ -297,7 +303,8 @@ def test_address_map_pack_accumulates_bases_in_list_order():
         {"x": 1, "y": 0, "size": 0x2000},
         {"x": 0, "y": 1, "size": 0x1000},
         {"x": 1, "y": 1, "size": 0x1000},
-    ]}
+    ] + [{"x": x, "y": y, "size": 0x1000, "space": "config"}
+         for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]}
     bases, entries = address_map.pack(am, x_dim=2, y_dim=2)
     assert bases == {
         address_map.dst_id(0, 0): 0,
@@ -305,7 +312,8 @@ def test_address_map_pack_accumulates_bases_in_list_order():
         address_map.dst_id(0, 1): 0x3000,
         address_map.dst_id(1, 1): 0x4000,
     }
-    assert [e["base"] for e in entries] == [0, 0x1000, 0x3000, 0x4000]
+    assert [e["base"] for e in entries] == [0, 0x1000, 0x3000, 0x4000,
+                                            0x5000, 0x6000, 0x7000, 0x8000]
 
 
 def _two_space_tiles(memory_sizes):
@@ -401,6 +409,19 @@ def test_address_map_pack_rejects_missing_node():
         address_map.pack(am, x_dim=2, y_dim=1)
 
 
+def test_address_map_pack_rejects_missing_config_node():
+    """Config coverage is the same rule as memory coverage: a YAML one config
+    tile short packs to bases that are no longer a clean wildcard set, which
+    used to surface only under PATTERN=multicast."""
+    am = {"tiles": [
+        {"x": 0, "y": 0, "size": 0x1000},
+        {"x": 1, "y": 0, "size": 0x1000},
+        {"x": 0, "y": 0, "size": 0x1000, "space": "config"},
+    ]}
+    with pytest.raises(ValueError, match="config space covers 1 nodes, expected 2"):
+        address_map.pack(am, x_dim=2, y_dim=1)
+
+
 def test_address_map_pack_rejects_duplicate_node():
     am = {"tiles": [
         {"x": 0, "y": 0, "size": 0x1000},
@@ -454,6 +475,10 @@ def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
         "    - { x: 1, y: 0, size: 0x2000 }\n"
         "    - { x: 0, y: 1, size: 0x1000 }\n"
         "    - { x: 1, y: 1, size: 0x4000 }\n"
+        "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
+        "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
+        "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
+        "    - { x: 1, y: 1, size: 0x1000, space: config }\n"
     )
     _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes = g._load_topology(
         str(topo_path))

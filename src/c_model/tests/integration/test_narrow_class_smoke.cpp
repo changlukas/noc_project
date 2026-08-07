@@ -1,8 +1,8 @@
 // S2 T2d config-space narrow smoke: end-to-end through the real NMU/NSU
 // packetize/depacketize/Rob pipeline, oracled by the Scoreboard, using
-// sim/topologies/mesh_2x2_config_narrow_vc1.yaml's real SAM (loaded exactly
-// as co-sim would via nmu::addr_trans::load_sam_table). Node (0,0) carries
-// both a memory tile and a config tile, so one NSU serves both classes.
+// sim/topologies/mesh_2x2_vc1.yaml's real SAM (loaded exactly as co-sim
+// would via nmu::addr_trans::load_sam_table). Every node carries both a
+// memory tile and a config tile, so one NSU serves both classes.
 //
 // Three write+read pairs, same run (S2 design doc §7 Q2: narrow lands WITH
 // the flip, never after):
@@ -46,9 +46,9 @@ constexpr std::size_t kMaxCycles = 20'000;
 constexpr uint8_t kNmuSrcId = 0x01;
 constexpr uint8_t kNsuSrcId = 0x02;
 
-// Config tile base: mesh_2x2_config_narrow_vc1.yaml packs 4 memory tiles
-// (0x100000 each) before the one config tile, so the config aperture starts
-// at 4 * 0x100000 = 0x400000, size 0x1000.
+// Config tile base: mesh_2x2_vc1.yaml packs 4 memory tiles (0x100000 each)
+// before the config tiles, so node (0,0)'s config aperture starts at
+// 4 * 0x100000 = 0x400000, size 0x1000.
 constexpr uint64_t kConfigBase = 0x400000;
 constexpr uint64_t kMemoryAddr = 0x2000;  // inside node (0,0)'s memory tile
 
@@ -130,7 +130,7 @@ TEST(NarrowClassSmoke, ConfigSpaceEndToEndZeroMismatch) {
     slave.set_memory_bounds(sc.config.memory_base, sc.config.memory_size);
 
     // Real SAM, loaded exactly as co-sim's NmuWrap::init(config_path) would.
-    auto sam = nmu::addr_trans::load_sam_table(TOPOLOGY_DIR "/mesh_2x2_config_narrow_vc1.yaml");
+    auto sam = nmu::addr_trans::load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
 
     nmu::NmuConfig nmu_cfg{};
     nmu_cfg.src_id = kNmuSrcId;
