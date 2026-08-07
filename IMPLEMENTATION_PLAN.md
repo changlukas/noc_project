@@ -99,6 +99,12 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   rather than on RAM cost; the accepted-loss list narrows to the config path only (0 instead of
   X on unwritten, no randomized pressure); and the deferred LFSR ready-gating shim is
   CANCELLED, not deferred, because the pressure it would have restored is back.
+  Second parameter this ruling depends on: `taxi_axi_crossbar_1s`'s `S_THREADS` caps concurrent
+  unique IDs at the SLAVE interface, so the crossbar — not `taxi_axi_ram`, which now only sits
+  on config — is what would throttle the cross-ID concurrency this hybrid exists to restore.
+  Its default of 2 is too low; derive it from what the fabric can actually present (ids per
+  tile), not a magic number. Lint-verified clean at 2, 8, 16 and 32, so the module's own
+  "verilator issue 5890" caveat does not bite at these values.
   Watch item for the endpoint task: the crossbar's master-port register slices
   (`M_AW_REG_TYPE`, `M_W_REG_TYPE`, ...) absorb a cycle or two of the slave's randomized
   backpressure before it reaches the NSU. Set them to 0 (bypass) if the pressure needs to stay
@@ -124,21 +130,30 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   decodes on `M_BASE_ADDR`/`M_ADDR_W` generated from the same source. Rejected alternative:
   demuxing on the AXI class instead of the address — taxi's crossbar decodes by address only,
   and it would permanently bind config to narrow.
-- **Uniform tile layout (user ruling 2026-08-07)** — all topologies get the SAME tile shape:
-  `memory 0x100000` (1 MB) + `config 0x1000` (4 KB), which is what the two config-narrow
-  topologies already use. The other six carry a legacy `size: 0x100000000` (4 GB) that nothing
-  needs and that leaves no room for a config region beside it. Tile-local map: config at 0x0,
-  memory at 0x100000, span 2 MB, so the xbar's `ADDR_W` is 21 and each `taxi_axi_ram` takes its
-  own region size directly (memory 20, config 12). Sizing is adequate by the stimulus formula
+- **Bounded tile sizes (user ruling 2026-08-07; formulation corrected by design rev 2)** — the
+  default tile shape is `memory 0x100000` (1 MB) + `config 0x1000` (4 KB), which is what the two
+  config-narrow topologies already use. The other six carry a legacy `size: 0x100000000` (4 GB)
+  that nothing needs and that leaves no room for a config region beside it. Tile-local map:
+  config at 0x0, memory at 0x100000. Sizing is adequate by the stimulus formula
   (`gen_test_patterns.py:829-836`): the worst GATED case is 4x4 x 4 txns x 4 KB stride plus
   `base_local`, about 260 KB. Consequence, and the reason this ruling exists: no `TILE_RAM_BYTES`
-  constant, no run-derived RAM sizing, no dependence on which of the two `region_bytes` values
-  is meant, and no need to fold `BURST_LEN` into `TOPO_STAMP` — the RAM size comes from the same
-  YAML entry the SAM is built from, single source. The existing footprint guards
-  (`gen_test_patterns.py:459,609`) stay as the check. Dense-array cost lands at 1 MB per node.
-  Deferred: `INJECTION_MODE=1` injection sweeps run transaction counts that exceed 1 MB; they
-  are in no gate, and if they later need more they get their own topology rather than reshaping
-  the fabric address map (user, 2026-08-07 — 1 MB still exercises a meaningful data volume).
+  constant, no run-derived RAM sizing, no dependence on which of the two `region_bytes` values is
+  meant, and no need to fold `BURST_LEN` into `TOPO_STAMP` — sizes come from the same YAML entry
+  the SAM is built from, single source. The existing footprint guards
+  (`gen_test_patterns.py:459,609`) stay as the check.
+  Correction to the ruling as first written: "identical everywhere" over-reached.
+  `mesh_2x2_nonuniform_vc1` is the Tier 3 HETEROGENEOUS-SAM gate, so it keeps differing tile
+  sizes (bounded, e.g. one 2 MB tile among 1 MB tiles). That costs nothing now that the data
+  memory is sparse, and it is the only thing proving the tile span is DERIVED rather than
+  hardcoded. Read the ruling as "bounded and sane", not "uniform".
+  The crossbar's `ADDR_W` is the FULL 48 b system width, not the tile span: the DECERR path is
+  the free consistency gate for the three copies of the tile layout, and a narrow `ADDR_W` would
+  alias a stray high address silently into the tile instead of erroring, blinding the gate to
+  exactly the bug class it exists for. Per-target windows stay `M_ADDR_W` 12 (config) / 20
+  (memory); each `taxi_axi_ram` takes its own region size. Lint-verified at `ADDR_W=48`.
+  Deferred: `INJECTION_MODE=1` injection sweeps run transaction counts that exceed 1 MB; they are
+  in no gate, and if they later need more they get their own topology rather than reshaping the
+  fabric address map (user, 2026-08-07 — 1 MB still exercises a meaningful data volume).
 - **Lint spike PASSED** (Verilator 5.048, 16 modules, zero warnings): `taxi_axi_crossbar_1s`
   `M_COUNT=2` / `DATA_W=512` with unpacked interface arrays and two `taxi_axi_ram` behind it.
   The module's own "TODO fix parametrization once verilator issue 5890 is fixed" note does not
