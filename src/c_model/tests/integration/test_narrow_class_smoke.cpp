@@ -130,7 +130,7 @@ TEST(NarrowClassSmoke, ConfigSpaceEndToEndZeroMismatch) {
     slave.set_memory_bounds(sc.config.memory_base, sc.config.memory_size);
 
     // Real SAM, loaded exactly as co-sim's NmuWrap::init(config_path) would.
-    auto sam = nmu::addr_trans::load_sam_table("topologies/mesh_2x2_config_narrow_vc1.yaml");
+    auto sam = nmu::addr_trans::load_sam_table(TOPOLOGY_DIR "/mesh_2x2_config_narrow_vc1.yaml");
 
     nmu::NmuConfig nmu_cfg{};
     nmu_cfg.src_id = kNmuSrcId;

@@ -56,7 +56,6 @@ express a bus of 32 lanes or more. Outside `beat_exact`, the co-sim default beat
 
 | Item | Risk |
 |---|---|
-| `src/c_model/tests/integration/CMakeLists.txt` mirrors `sim/topologies/` with `cmake -E copy_directory`, which never prunes | its copy still carries `mesh_1x1_vc1.yaml` and `mesh_2x2_nonuniform_vc1.yaml`, both deleted in `6cb12b3`. Harmless while `test_narrow_class_smoke` names one file by hand, a trap the moment it enumerates. The `TOPOLOGY_DIR` compile definition already used by the nmu test fits here |
 | The AWUSER collective field layout is spelled with raw bit numbers in three places with no shared constant | `axi/types.hpp`, `sim/tools/gen_test_patterns.py`, `sim/tb/user_node_endpoint.sv`. The `static_assert` in `types.hpp` pins the width sum but not the offsets, so an offset change desynchronises all three silently. The SV copy also hardcodes `2'd1` where `ni_flit_pkg::COLLECTIVE_OP_MULTICAST` exists |
 | `axi_bw_monitor.sv` carries a two-line local edit | upstream it or wrap it |
 | The specgen pytest suite writes into the tree | it rewrites committed banners instead of using a temp dir |
