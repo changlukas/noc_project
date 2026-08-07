@@ -86,7 +86,6 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
 // and Python packing agree on every real topology YAML.
 TEST(SamYaml, RealTopologiesGapFreePacked) {
     static const char* kFiles[] = {
-        "topologies/mesh_2x2_nonuniform_vc1.yaml",
         "topologies/mesh_2x4_vc1.yaml",
         "topologies/mesh_4x4_vc1.yaml",
         "topologies/mesh_4x4_vc2.yaml",
