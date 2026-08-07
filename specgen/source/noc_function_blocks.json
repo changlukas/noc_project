@@ -25,8 +25,8 @@
         },
         {
           "id": "FEAT-NMU-ADDR_TRANS",
-          "summary": "Converts AXI awaddr/araddr to NoC dst_id + local_addr using XY-extraction, SourceRouting, or IDRouting (SAM table lookup).",
-          "modes": ["XYRouting", "SourceRouting", "IDRouting"],
+          "summary": "Converts AXI awaddr/araddr to NoC dst_id + tile-local address by first-match range lookup over the SAM table, loaded from the topology YAML at runtime.",
+          "modes": [],
           "compile_time_params": {},
           "uses_packet_fields": ["dst_id", "src_id"],
           "configured_by": [],
