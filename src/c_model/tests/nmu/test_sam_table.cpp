@@ -119,6 +119,74 @@ TEST(SamValidator, RejectsDuplicateNode) {
     EXPECT_DEATH(bad.validate(2, 2), "duplicate");
 }
 
+// === Collective coordinate declaration (B1) ===
+//
+// SamTable does not derive the ranges -- construction has no mesh dimensions --
+// so it checks what the builder states against the entries it holds. A
+// declaration that does not fit leaves the space not collective-eligible; it is
+// not an abort, because such a space is still a legal unicast target
+// (docs/noc-target-spec.md §5.1).
+
+using ni::cmodel::nmu::addr_trans::SpaceCoords;
+
+TEST(SamCoords, DeclarationMatchingTheEntriesIsEligible) {
+    auto sam = SamTable::uniform(2, 2, 0x1000);  // bases 0, 0x1000, 0x2000, 0x3000
+    EXPECT_TRUE(sam.declare_space_coords(axi::AxiClass::Data,
+                                         SpaceCoords{/*x=*/{12, 1}, /*y=*/{13, 1}, 2, 2}));
+    const auto* c = sam.collective_coords(axi::AxiClass::Data);
+    ASSERT_NE(c, nullptr);
+    EXPECT_EQ(c->x_range.offset, 12u);
+    EXPECT_EQ(c->y_range.offset, 13u);
+    EXPECT_EQ(c->x_count, 2u);
+    // The space that was never declared stays ineligible.
+    EXPECT_EQ(sam.collective_coords(axi::AxiClass::Narrow), nullptr);
+}
+
+TEST(SamCoords, NonUniformStrideIsNotEligible) {
+    // Node (1,0) sits at 0x3000, so the declared X range at bit 12 names 0x1000
+    // and reaches no entry: the entries contradict the declaration.
+    SamTable sam(std::vector<SamEntry>{{0x0000, 0x1000, 0x00},
+                                       {0x3000, 0x1000, 0x01},
+                                       {0x4000, 0x1000, 0x10},
+                                       {0x5000, 0x1000, 0x11}});
+    EXPECT_FALSE(
+        sam.declare_space_coords(axi::AxiClass::Data, SpaceCoords{{12, 1}, {13, 1}, 2, 2}));
+    EXPECT_EQ(sam.collective_coords(axi::AxiClass::Data), nullptr);
+}
+
+TEST(SamCoords, NonUniformApertureIsNotEligible) {
+    // Uniform stride, non-uniform aperture: the two are different claims, and
+    // the per-request burst-footprint check depends on the aperture claim.
+    SamTable sam(std::vector<SamEntry>{{0x0000, 0x1000, 0x00},
+                                       {0x1000, 0x800, 0x01},
+                                       {0x2000, 0x1000, 0x10},
+                                       {0x3000, 0x1000, 0x11}});
+    EXPECT_FALSE(
+        sam.declare_space_coords(axi::AxiClass::Data, SpaceCoords{{12, 1}, {13, 1}, 2, 2}));
+}
+
+TEST(SamCoords, NonRasterOrderIsNotEligible) {
+    // Uniform stride and aperture, but (1,0) and (0,1) are swapped, so the
+    // sliced coordinates would name the wrong node.
+    SamTable sam(std::vector<SamEntry>{{0x0000, 0x1000, 0x00},
+                                       {0x1000, 0x1000, 0x10},
+                                       {0x2000, 0x1000, 0x01},
+                                       {0x3000, 0x1000, 0x11}});
+    EXPECT_FALSE(
+        sam.declare_space_coords(axi::AxiClass::Data, SpaceCoords{{12, 1}, {13, 1}, 2, 2}));
+}
+
+TEST(SamCoords, DimensionsAreStatedNotInferred) {
+    // A 3-wide dimension needs 2 bits but only 3 of the 4 values are nodes.
+    // 1 << len would over-permit the fourth; x_count records the real bound.
+    auto sam = SamTable::packed({{0, 0, 0x1000}, {1, 0, 0x1000}, {2, 0, 0x1000}});
+    ASSERT_TRUE(sam.declare_space_coords(axi::AxiClass::Data, SpaceCoords{{12, 2}, {14, 0}, 3, 1}));
+    EXPECT_EQ(sam.collective_coords(axi::AxiClass::Data)->x_count, 3u);
+    // Claiming the full 4 does not fit: node (3,0) has no entry.
+    EXPECT_FALSE(
+        sam.declare_space_coords(axi::AxiClass::Data, SpaceCoords{{12, 2}, {14, 0}, 4, 1}));
+}
+
 TEST(SamFootprint, RejectsBurstCrossingTile) {
     auto sam = SamTable::packed({{0, 0, 0x100000000ull}, {1, 0, 0x100000000ull}});
     // burst inside tile 0: [0x40, 0x80] ok

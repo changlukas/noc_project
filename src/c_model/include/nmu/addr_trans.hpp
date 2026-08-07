@@ -39,6 +39,42 @@ struct PackedTile {
     axi::AxiClass cls = axi::AxiClass::Data;
 };
 
+// Smallest k with 2^k >= n. clog2(1) = 0, clog2(3) = 2.
+inline unsigned clog2(unsigned n) {
+    unsigned bits = 0;
+    while (bits < 32 && (1u << bits) < n) ++bits;
+    return bits;
+}
+
+struct BitRange {
+    unsigned offset = 0;
+    unsigned len = 0;
+};
+
+// Where one address space keeps its node coordinates. Upstream emits the same
+// numbers into every SAM rule at generation time (floogen/model/network.py
+// gen_collective_sam, read by floo_id_translation.sv), so the NI slices AWUSER
+// instead of walking the map. SamTable does not derive them -- construction has
+// no mesh dimensions -- so whoever builds the table states them and SamTable
+// checks the statement against the entries.
+//
+// Deviation from upstream, deliberate: floogen linearizes Y-major so its X
+// field sits ABOVE Y. This repo packs raster order, X fastest, so X sits BELOW
+// Y -- the same order dst_id = (y << X_WIDTH) | x uses.
+//
+// No base_id: upstream carries one because a collective array can sit at a
+// non-origin sub-mesh. Every space here spans all N nodes from node 0, so the
+// field would always be zero.
+struct SpaceCoords {
+    BitRange x_range;
+    BitRange y_range;
+    // Mesh dimensions, STATED not inferred. Recovering one as 1 << len
+    // over-permits every dimension that is not a power of two, and
+    // docs/noc-target-spec.md §5 allows 2 to 16 per dimension.
+    unsigned x_count = 0;
+    unsigned y_count = 0;
+};
+
 class SamTable {
   public:
     SamTable() = default;
@@ -141,12 +177,82 @@ class SamTable {
         }
     }
 
+    // Declare where this space keeps its node coordinates, per SpaceCoords.
+    // Returns false -- leaving the space NOT collective-eligible -- when the
+    // declaration disagrees with the entries the table already holds. Stated is
+    // not trusted: the constructor is public and test fixtures build tables by
+    // hand. A failing declaration is not an abort; per docs/noc-target-spec.md
+    // §5.1 such a space is a legal unicast target and not a legal collective
+    // target.
+    //
+    // This is a weaker, per-space property than validate(): it says nothing
+    // about the mesh, only that the declared ranges reach this space's own
+    // entries. A space that does not cover the mesh can still be eligible.
+    bool declare_space_coords(axi::AxiClass cls, const SpaceCoords& c) {
+        const unsigned slot = static_cast<unsigned>(cls);
+        eligible_[slot] = false;
+        if (c.x_count == 0 || c.y_count == 0) return false;
+        if (c.x_range.len != clog2(c.x_count) || c.y_range.len != clog2(c.y_count)) return false;
+        if (c.x_range.offset + c.x_range.len > 64 || c.y_range.offset + c.y_range.len > 64) {
+            return false;
+        }
+        // One address bit cannot carry two coordinates.
+        if (c.x_range.len != 0 && c.y_range.len != 0 &&
+            c.x_range.offset + c.x_range.len > c.y_range.offset &&
+            c.y_range.offset + c.y_range.len > c.x_range.offset) {
+            return false;
+        }
+        const SamEntry* origin = nullptr;
+        std::size_t space_entries = 0;
+        for (const auto& e : entries_) {
+            if (e.cls != cls) continue;
+            if (origin == nullptr) origin = &e;
+            ++space_entries;
+        }
+        if (origin == nullptr) return false;
+        // No entry of this space outside the slice: the declared ranges must
+        // account for the whole space, not a prefix of it.
+        if (space_entries != static_cast<std::size_t>(c.x_count) * c.y_count) return false;
+        const uint64_t field = range_mask(c.x_range) | range_mask(c.y_range);
+        // The origin sits at coordinate (0,0) -- no base_id to subtract.
+        if ((origin->base & field) != 0) return false;
+        // Uniform USABLE APERTURE is a separate claim from uniform stride: an
+        // aperture reaching into the coordinate bits would make a wildcard
+        // address land inside its own anchor's region.
+        if (field != 0 && origin->size > (field & (~field + 1))) return false;
+        for (unsigned y = 0; y < c.y_count; ++y) {
+            for (unsigned x = 0; x < c.x_count; ++x) {
+                const uint64_t addr = origin->base | (uint64_t{x} << c.x_range.offset) |
+                                      (uint64_t{y} << c.y_range.offset);
+                const SamEntry* e = lookup(addr);
+                if (e == nullptr || e->cls != cls) return false;  // reachable, one class
+                if (e->base != addr) return false;                // uniform stride
+                if (e->size != origin->size) return false;        // uniform aperture
+                if (e->dst_id != ((y << ni::width::X_WIDTH) | x)) return false;  // raster order
+            }
+        }
+        coords_[slot] = c;
+        eligible_[slot] = true;
+        return true;
+    }
+
+    // Declared coordinates of a collective-eligible space, else nullptr.
+    const SpaceCoords* collective_coords(axi::AxiClass cls) const {
+        const unsigned slot = static_cast<unsigned>(cls);
+        return eligible_[slot] ? &coords_[slot] : nullptr;
+    }
+
     bool burst_footprint_ok(uint64_t addr, uint64_t last_byte) const {
         const SamEntry* a = lookup(addr);
         return a != nullptr && last_byte >= a->base && last_byte < a->base + a->size;
     }
 
   private:
+    static uint64_t range_mask(const BitRange& r) {
+        if (r.len == 0) return 0;
+        return ((uint64_t{1} << r.len) - 1) << r.offset;
+    }
+
     // Tile-local layout, mirrored in sim/tools/address_map.py tile_layout():
     //   span(space)  = round_pow2(largest entry of that space), min 4 KB
     //   space_base   = spaces in the fixed order [config, memory], each aligned
@@ -175,6 +281,9 @@ class SamTable {
     }
 
     std::vector<SamEntry> entries_;
+    // Indexed by axi::AxiClass (Narrow = 0, Data = 1) -- one address space each.
+    SpaceCoords coords_[2];
+    bool eligible_[2] = {false, false};
 };
 
 // Highest byte a burst touches, for the SAM footprint guard.
