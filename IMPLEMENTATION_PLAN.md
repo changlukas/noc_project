@@ -304,3 +304,19 @@ still open into that round's backlog "This round".
   ChannelModel is vc-blind, so ctest cannot see it.
 - Router VA divergence assert sits behind the credit gate. A zero-credit diverging fixed_vc=0
   worm idles silently until credit arrives (checker liveness gap, S3b T5).
+- S5 whole-branch review carry-out, coverage: mixed-space sustained load on a `TILE_TARGETS=2`
+  tile is untested. `NSU_META_BUFFER_MAX_UNIQUE_IDS=1` collapses every tile transaction onto one
+  AXI ID, and taxi's `thread_match_dest` blocks a same-ID AX aimed at a different master, so
+  config-to-memory alternation serializes the tile port. The perf doc states the mechanism;
+  nothing exercises it. Reaching it needs `INJECTION_MODE=2` on a config topology, out of scope
+  this round.
+- S5 whole-branch review carry-out, S4 debt: the AWUSER collective field layout is spelled with
+  raw bit numbers in three places with no shared constant — `src/c_model/include/axi/types.hpp`
+  :146-151, `sim/tools/gen_test_patterns.py:544`, `sim/tb/user_node_endpoint.sv:568-569` (which
+  also hardcodes `2'd1` where `ni_flit_pkg::COLLECTIVE_OP_MULTICAST` exists). The `static_assert`
+  at types.hpp:156-159 pins the width sum but not the offsets.
+- S5 whole-branch review carry-out, build hygiene: `src/c_model/tests/integration/CMakeLists.txt`
+  still mirrors `sim/topologies/` with `cmake -E copy_directory`, which never prunes — its copy
+  carries `mesh_1x1_vc1.yaml` and `mesh_2x2_nonuniform_vc1.yaml`, both deleted in 6cb12b3. Harmless
+  while `test_narrow_class_smoke` names one file, a trap if it ever enumerates. The nmu test moved
+  off the mirror to a `TOPOLOGY_DIR` compile definition; the same move fits here.
