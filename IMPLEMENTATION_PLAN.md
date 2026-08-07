@@ -68,7 +68,8 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   actually present in the topology, not fixed at 2 (a config-less topology has no config
   entry at all). Range parameters (`M_BASE_ADDR` / `M_ADDR_W`) come from the same topology
   YAML `address_map` as the SAM.
-- **One interface convention per side, zero adapters.** taxi's `wr`/`rd` are modports of ONE
+- **One interface convention per side** (amended by the hybrid-memory ruling below: the data
+  port carries one deliberate wire adapter; everything else stays adapter-free). taxi's `wr`/`rd` are modports of ONE
   `taxi_axi_if` instance, not two instances, so a single interface feeds both crossbar ports.
   The endpoint's slave face is already hand-wired per field from the flat DPI signals
   (`user_node_endpoint.sv:120-135` into `AXI_BUS_DV` today), so re-targeting those assigns at
@@ -77,17 +78,33 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   faces never meet, the NoC is between them.
 - **Licence**: taxi is CERN-OHL-S-2.0 (strongly reciprocal) while this repo is proprietary and
   the vendored pulp/common_cells are Solderpad. User ruled: ignore, internal use only.
-- **`axi_rand_slave` is dropped** (option A). Accepted losses, recorded so nobody rediscovers
-  them as bugs: (1) randomized slave backpressure and response delay disappear —
-  `taxi_axi_ram` stalls only when genuinely busy, and taxi has no throttle component (their
-  randomization is cocotb-side, which we do not use); this is the pressure that surfaced the
-  WireSlavePort `push_aw` latch bug and the credit-depth bubble, so slave-path timing
-  exploration narrows. (2) `taxi_axi_ram` initializes `mem` to 0, not X, so the multicast
-  non-vacuity argument that leaned on unwritten replicas reading X now only bites when the
-  golden byte is non-zero (T6 measured 6 such bytes in 768); the MCAST_FAULT red run and the
-  per-node compare counter are unaffected. Option B (an LFSR-driven ready-gating shim on the
-  crossbar's master ports, using taxi's own `taxi_lfsr`) is deferred to a future verification
-  round, not built now.
+- **Hybrid memory models per target (user ruling 2026-08-07, supersedes the earlier
+  drop-`axi_rand_slave` decision).** The data memory keeps pulp `axi_rand_slave`; the config
+  memory is a `taxi_axi_ram`. Rationale: the verification pressure that matters lives on the
+  data path, and `axi_rand_slave` carries three capabilities `taxi_axi_ram` does not —
+  randomized backpressure and response delay, multiple outstanding transactions with cross-ID
+  selection (`rand_id_queue` for AR plus an unbounded `aw_queue`, `axi_test.sv:1346-1349,1359-1360,
+  1406,1470`), and X on unwritten addresses (its store is the sparse associative array
+  `byte_t memory_q[addr_t]`). Those three are exactly what surfaced the WireSlavePort `push_aw`
+  latch bug and the credit-depth bubble, and what keeps the S4 multicast non-vacuity argument
+  whole. The config path is low-rate control writes, where a deterministic RAM is adequate.
+  Price: ONE hand-wired adapter on the data port (`taxi_axi_if` to `AXI_BUS_DV`). It is pure
+  field-name wiring — both sides are AXI4 at the same widths, no protocol or width conversion —
+  so its failure mode is a mis-wired field, which any scoreboard data compare catches at once;
+  this is not the self-written protocol glue that S2's retrospective warned about. The existing
+  `slave_dv` + `rand_slave` instantiation survives almost unchanged: only what feeds `slave_dv`
+  moves, from the flat DPI signals to the crossbar's data master port.
+  Consequences: the dense-array concern shrinks to the 4 KB config RAM (about 64 KB across a
+  4x4 mesh); the uniform tile layout below still stands, now on address-map cleanliness alone
+  rather than on RAM cost; the accepted-loss list narrows to the config path only (0 instead of
+  X on unwritten, no randomized pressure); and the deferred LFSR ready-gating shim is
+  CANCELLED, not deferred, because the pressure it would have restored is back.
+  Watch item for the endpoint task: the crossbar's master-port register slices
+  (`M_AW_REG_TYPE`, `M_W_REG_TYPE`, ...) absorb a cycle or two of the slave's randomized
+  backpressure before it reaches the NSU. Set them to 0 (bypass) if the pressure needs to stay
+  as sharp as it is today, where `rand_slave` sits directly on the NSU port.
+  Two memory models inside one tile is deliberate, not drift: different roles, different
+  models, and the block spec must say so.
 - **Integration constraints found while checking**: `taxi_axi_ram`'s `mem[2**VALID_ADDR_W]` is
   a DENSE array, so `ADDR_W` must be sized to the tile region, never to the 48 b system
   address (pulp's associative array hid this). Verilator include paths are
