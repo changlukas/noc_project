@@ -4,6 +4,7 @@ import os
 import pytest
 
 import address_map
+import gen_tb_top
 import gen_test_patterns as g
 
 
@@ -346,6 +347,30 @@ def test_address_map_tile_layout_skips_an_absent_space():
     assert tile_span == 0x100000
 
 
+def _two_space_topology():
+    return {"topology": {"x_dim": 2, "y_dim": 2},
+            "address_map": {"tiles": _two_space_tiles([0x100000] * 4)}}
+
+
+def test_tile_targets_packs_config_first():
+    """Port order and field packing are one coupled invariant: target 0 is the
+    config window at base 0x0, the last target is the data window. addr_w is
+    the taxi M_ADDR_W field, log2 of the span."""
+    assert gen_tb_top.tile_targets(_two_space_topology()) == [
+        {"space": "config", "base": 0x0, "span": 0x1000, "addr_w": 12},
+        {"space": "memory", "base": 0x100000, "span": 0x100000, "addr_w": 20},
+    ]
+
+
+def test_tile_targets_rejects_a_transposed_space_order(monkeypatch):
+    """Fault injection for the invariant: transposing SPACE_ORDER would put the
+    memory window on target 0, where user_node_endpoint instantiates the config
+    taxi_axi_ram. It must fail in the generator, not silently mis-decode."""
+    monkeypatch.setattr(address_map, "SPACE_ORDER", ("memory", "config"))
+    with pytest.raises(SystemExit, match="must be config-then-memory"):
+        gen_tb_top.tile_targets(_two_space_topology())
+
+
 def test_address_map_pack_rejects_zero_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
     with pytest.raises(ValueError, match="positive"):
@@ -412,12 +437,10 @@ def test_address_map_pack_real_topologies_gap_free():
             expected_base += e["size"]
 
 
-def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
-    """Cross-site invariant: both generators must compute the same base(dst_id)
-    from the same address_map (they share address_map.pack())."""
+def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
+    """Cross-site invariant: the stimulus generator's base(dst_id) is
+    address_map.pack()'s, not a second packing rule of its own."""
     import yaml
-
-    import gen_tb_top as gt
 
     topo_path = tmp_path / "nonuniform.yaml"
     topo_path.write_text(
@@ -432,5 +455,5 @@ def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
     _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes = g._load_topology(
         str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
-    bases_from_tb_top = gt._address_map(topo)
-    assert bases_from_patterns == bases_from_tb_top
+    packed_bases, _entries = address_map.pack(topo["address_map"], x_dim=2, y_dim=2)
+    assert bases_from_patterns == packed_bases

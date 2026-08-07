@@ -20,9 +20,9 @@ Usage:
 Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
     - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
-    - per-node router/nmu/nsu ctx handles; REGION_BASE[s] = base(coord_id(s)),
-      packed from the topology's address_map.tiles list (see address_map.py),
-      stamped into each endpoint
+    - per-node router/nmu/nsu ctx handles; TILE_BASE_ADDR / TILE_ADDR_W, the tile
+      crossbar's per-target windows, from address_map.tile_layout() (see
+      tile_targets below), stamped into each endpoint
     - inter-router links wired per XY direction; boundary directions tied off
     - PASS guard: all endpoints done (end_of_sim) AND every node non-vacuous
       (txn_cnt > 0)
@@ -140,16 +140,36 @@ def _nodes(topo: dict):
 _DEFAULT_REGION_BYTES = 0x1000
 
 
-def _address_map(topo: dict) -> dict:
-    """Packed {dst_id: base} from the topology's address_map.tiles list.
+def tile_targets(topo: dict):
+    """Tile crossbar windows in taxi PORT ORDER, one entry per target.
 
-    REGION_BASE feeds off this (SAM base per tile). The c_model always rebases,
-    so the slave sees a tile-local address. See address_map.py for the packing
-    rule (must match c_model SamTable::packed byte-for-byte)."""
+    Port order and field packing are ONE coupled invariant: m0 = config,
+    m1 = data, and taxi packs M_BASE_ADDR / M_ADDR_W low-field-first
+    (taxi_axi_crossbar_addr.sv:136), so target t occupies field t. Three
+    things ride on it -- the crossbar forwards the address unmodified, so the
+    config taxi_axi_ram indexes mem off the raw tile-local address and is
+    correct only while config sits at base 0x0; user_node_endpoint puts that
+    RAM on target 0 and the rand_slave data memory on the LAST target; and
+    the data target works at any base only because rand_slave is
+    address-agnostic. The checks below are what stop an address_map.py
+    SPACE_ORDER edit from transposing the two silently.
+
+    Returns [{"space", "base", "span", "addr_w"}, ...]; addr_w = log2(span),
+    the taxi M_ADDR_W field.
+    """
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
-    bases, _entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
-    return bases
+    _bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    spaces, _tile_span = address_map.tile_layout(entries)
+    order = [s["space"] for s in spaces]
+    # Spelled out here rather than read back from address_map.SPACE_ORDER: this
+    # is the cross-check on that constant, not a restatement of it.
+    if order != [s for s in ("config", "memory") if s in order]:
+        raise SystemExit(
+            f"gen_tb_top: tile space order {order} must be config-then-memory -- "
+            f"user_node_endpoint puts the config taxi_axi_ram on target 0 and the data "
+            f"memory on the last target (see address_map.SPACE_ORDER)")
+    return [dict(s, addr_w=s["span"].bit_length() - 1) for s in spaces]
 
 
 # Live-neighbor map / opposite-port logic now lives in the emitted SV genvar
@@ -441,16 +461,17 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     num_vc = topo["topology"]["num_vc"]
     rob_enabled = requested_name.endswith("_rob")
 
-    # REGION_BASE[s] = SAM base for tile s, packed from address_map.tiles (mirrors
-    # c_model addr_trans.hpp SamTable::packed). Stamped into every endpoint so the
-    # file_master's MAPPED slave targets per-destination windows. Emitted as a
-    # PACKED-array concatenation in descending index order (element for index n-1
-    # first) so REGION_BASE[i] == base(coord_id(node i)). Packed because Verilator
-    # 5.048 mis-sizes an unpacked-array param override whose size depends on a
-    # sibling param override.
-    bases = _address_map(topo)
-    region_base = ", ".join(f"64'h{bases[c]:016X}"
-                            for (_i, _x, _y, c) in reversed(nodes))
+    # Tile crossbar windows, m0 first (see tile_targets). Emitted as PACKED-array
+    # concatenations in descending index order (last target first) so field t is
+    # target t, which is the packing taxi expects. Packed because Verilator 5.048
+    # mis-sizes an unpacked-array param override whose size depends on a sibling
+    # param override (here TILE_TARGETS).
+    targets = tile_targets(topo)
+    # ADDR_WIDTH'(...) casts, not sized literals: the field width has to follow
+    # ni_params_pkg::AXI_ADDR_WIDTH_DFLT, or a width change would silently
+    # mis-align the concatenation.
+    tile_base_addr = ", ".join(f"ADDR_WIDTH'(64'h{t['base']:X})" for t in reversed(targets))
+    tile_addr_w = ", ".join(f"32'd{t['addr_w']}" for t in reversed(targets))
 
     lines = []
     w = lines.append
@@ -500,12 +521,17 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // link_perf_monitor tracks the actual receiving buffer depth.")
     w("    localparam int unsigned ROUTER_VC_DEPTH       = "
       "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
-    w("    // Per-destination region windows: REGION_BASE[s] = SAM base for tile s")
-    w("    // (packed from topology address_map.tiles). Packed array: Verilator")
-    w("    // 5.048 mis-sizes an unpacked-array param override whose size depends")
-    w("    // on a sibling override. REGION_BYTES = the DV region_bytes constant")
-    w("    // (NOT a tile size -- that would blow up MAX_BURST_BEATS below).")
-    w(f"    localparam logic [NUM_NODES-1:0][63:0] REGION_BASE = {{{region_base}}};")
+    w("    // Tile crossbar windows, one field per target in taxi port order")
+    w("    // (m0 = config at base 0x0, last = data). Derived from the topology")
+    w("    // address_map by tile_layout(), the same source the c_model SAM's")
+    w("    // space_base comes from -- a divergence between the two shows up as a")
+    w("    // crossbar DECERR, which the endpoint turns into a named $fatal.")
+    w("    // REGION_BYTES = the DV region_bytes constant (NOT a tile size -- that")
+    w("    // would blow up MAX_BURST_BEATS below).")
+    w(f"    localparam int unsigned TILE_TARGETS = {len(targets)};")
+    w(f"    localparam logic [TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = "
+      f"{{{tile_base_addr}}};")
+    w(f"    localparam logic [TILE_TARGETS-1:0][31:0] TILE_ADDR_W = {{{tile_addr_w}}};")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w("")
     w("    // -------------------------------------------------------------------------")
@@ -658,21 +684,23 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("")
 
     # Test endpoints per node via genvar generate. user_node_endpoint = pulp
-    # file_master + rand_slave + bw monitor. user_node_endpoint.sv is
-    # USER-OWNED (committed, hand-written); the generator only INSTANTIATES it.
-    # REGION_BASE is stamped from the topology coord ids (dst tile in addr 32+).
+    # file_master + taxi tile crossbar + config RAM + rand_slave + bw monitor.
+    # user_node_endpoint.sv is USER-OWNED (committed, hand-written); the
+    # generator only INSTANTIATES it and stamps the tile windows.
     w("    // -------------------------------------------------------------------------")
     w("    // Test endpoints - one user_node_endpoint per node (pulp file_master +")
-    w("    // rand_slave + in-endpoint scoreboard + bw monitor). user_node_endpoint.sv")
-    w("    // is user-owned and NOT regenerated by this script.")
+    w("    // taxi tile crossbar + config RAM + rand_slave + in-endpoint scoreboard +")
+    w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT regenerated.")
     w("    // -------------------------------------------------------------------------")
     w(f"    logic        end_of_sim [{n}];")
     w(f"    int unsigned txn_cnt    [{n}];")
     w(f"    for (genvar i = 0; i < {n}; i++) begin : g_endpoint")
     w("        user_node_endpoint #(")
-    w("            .NODE_ID(i), .NUM_NODES(NUM_NODES),")
+    w("            .NODE_ID(i),")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-    w("            .REGION_BASE(REGION_BASE), .REGION_BYTES(REGION_BYTES)")
+    w("            .REGION_BYTES(REGION_BYTES),")
+    w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR),")
+    w("            .TILE_ADDR_W(TILE_ADDR_W)")
     w("        ) u_endpoint (")
     w("            .clk_i(clk_i), .rst_ni(rst_ni),")
     w("            .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),")
