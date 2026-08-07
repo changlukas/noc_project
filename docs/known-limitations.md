@@ -27,14 +27,19 @@ up to 256 lookups, not 256 x O(entries).
 | Multi-hot to multi-hot fork completion across a link, and fork/join at `output_fifo_depth > 0` | no stimulus generates either shape |
 | The held-join wait-for edge | probabilistic co-sim coverage only, never targeted |
 | Narrow-class collectives under a deliberate fault | no narrow-class red run exists |
-| Mixed-space sustained load on a `TILE_TARGETS = 2` tile | `NSU_META_BUFFER_MAX_UNIQUE_IDS = 1` collapses every tile transaction onto one AXI ID, and taxi's `thread_match_dest` blocks a same-ID AX aimed at a different master, so config-to-memory alternation serializes the tile port. `docs/noc-performance-parameters.md` states the mechanism. Reaching it needs `INJECTION_MODE = 2` on a config topology |
+| Mixed-space sustained load on a `TILE_TARGETS = 2` tile | `NSU_META_BUFFER_MAX_UNIQUE_IDS = 1` collapses every tile transaction onto one AXI ID, and taxi's `thread_match_dest` blocks a same-ID AX aimed at a different master, so config-to-memory alternation serializes the tile port. `docs/noc-performance-parameters.md` states the mechanism. Every shipped topology is `TILE_TARGETS = 2`, so reaching it needs only `INJECTION_MODE = 2` |
 | AXI-side perf DPI hooks | never driven, so the `axi_bw_monitor` against `perf.json` cross-check has never run |
 | Functional coverage, constrained-random stimulus, wire-level SVA | none exist |
 
-Three co-sim checks are wider or narrower than intended: the merged-B checks run for every
-pattern and mode rather than multicast alone, the probe-window guard keys on `base_local`
-instead of the config tile size, and `multicast` with `INJECTION_MODE != 0` is guarded only at
-the root Makefile.
+Two co-sim checks are wider or narrower than intended: the merged-B checks run for every
+pattern and mode rather than multicast alone, and `multicast` with `INJECTION_MODE != 0` is
+guarded only at the root Makefile.
+
+The cross-node config probe window carves one `0x40` slot per node from `0x800` up
+(`_CONFIG_PROBE_BASE`, `_SLOT_STRIDE` in `sim/tools/gen_test_patterns.py`), so a 4 KB config
+tile holds at most 32 nodes and the guard exits above that. This is a property of the stimulus,
+not of the architecture. At the spec's 16x16 maximum the fix is a smaller stride or slot reuse,
+not necessarily a larger config tile.
 
 ## Missing parameterization
 
@@ -56,6 +61,9 @@ express a bus of 32 lanes or more. Outside `beat_exact`, the co-sim default beat
 
 | Item | Risk |
 |---|---|
+| `make test` restamps `// Generated at: <ISO8601>` in the tracked `specgen/generated/*` files it regenerates, six of them on an observed run | only that line moves, `Source SHA` does not. `codegen.py --check` strips both lines (`_strip_provenance`), so it passes in either state and the drift gate cannot see it. Symptom is six permanently dirty tracked files after any build |
+| The mingw64 GCC throws non-deterministic internal compiler errors under parallel builds | `try_forward_edges at cfgcleanup.cc:580` and segfaults, on a different source file each run. Hit on four consecutive tasks. Retry cleared it three times, a serial `-j 1` build was needed once |
+| ctest discovery lists go stale in an incremental build tree and inflate the reported count | 665 tests registered against 705 present in the binaries after successive builds over each other. A pass count from a tree that was not wiped is not evidence |
 | The AWUSER collective field layout is spelled with raw bit numbers in three places with no shared constant | `axi/types.hpp`, `sim/tools/gen_test_patterns.py`, `sim/tb/user_node_endpoint.sv`. The `static_assert` in `types.hpp` pins the width sum but not the offsets, so an offset change desynchronises all three silently. The SV copy also hardcodes `2'd1` where `ni_flit_pkg::COLLECTIVE_OP_MULTICAST` exists |
 | `axi_bw_monitor.sv` carries a two-line local edit | upstream it or wrap it |
 | The specgen pytest suite writes into the tree | it rewrites committed banners instead of using a temp dir |
