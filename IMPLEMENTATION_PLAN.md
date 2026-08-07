@@ -76,6 +76,38 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   a `taxi_axi_if` costs nothing. The master face stays pulp `AXI_BUS_DV` because the VIP
   (`axi_file_master`, `axi_scoreboard`, S4's `mcast_preload_scoreboard`) lives there; the two
   faces never meet, the NoC is between them.
+- **Why taxi and not pulp or a bare demux (user, 2026-08-07)**: the forthcoming RTL will be
+  written in taxi style, so the testbench mirroring that style is worth more than a smaller
+  parameter surface. Alternatives considered and rejected on that basis: pulp `addr_decode`
+  (already vendored) + `axi_demux` (would need vendoring) with two `axi_rand_slave`, and a
+  no-demux shape with one sparse `axi_rand_slave` covering the whole tile-local span. Both are
+  simpler; neither rehearses the target RTL style.
+- **Crossbar parameters, reviewed against the RTL (Codex, report
+  `cross-review/s5-xbar-params-REVIEW_CODEX.md`)**. Principle for the tb-side values: a
+  testbench limit must never become the unintended bottleneck — the pressure is supposed to come
+  from `axi_rand_slave`'s randomized delays, not from a parameter someone forgot to raise. So
+  throughput limits are provisioned generously, while ID-tracking depth is sized to the ID
+  diversity that can actually occur.
+
+  | Parameter | Value | Basis |
+  |---|---|---|
+  | `M_COUNT` | spaces present on the node (2, or 1 without config) | topology YAML |
+  | port order | **m0 = config, m1 = data** | must be stated, not inferred: `M_BASE_ADDR`/`M_ADDR_W` are packed low-field-first (`taxi_axi_crossbar_addr.sv:136,320-321`) |
+  | `ADDR_W` | 48 | full system width so an out-of-window address DECERRs instead of aliasing into the tile. The connected `taxi_axi_if` must ALSO be 48 or the crossbar fatals (`taxi_axi_crossbar_wr.sv:112-113`) |
+  | `M_REGIONS` | 1 | one contiguous window per target |
+  | `M_BASE_ADDR` | `{0x100000, 0x0}` | config at 0, memory at 1 MB, derived from the YAML sizes |
+  | `M_ADDR_W` | `{20, 12}` | log2 of each region |
+  | `S_ACCEPT` | 64 | total concurrent accepted transactions on the slave side (`taxi_axi_crossbar_addr.sv:249-251`). 32 equals ONE NMU's pool, but under hotspot every node targets one tile, so 32 would throttle. Exceeding it stalls, it does not error |
+  | `S_THREADS` | 8 | concurrent unique IDs. Today exactly ONE id reaches a tile (`NSU_META_BUFFER_MAX_UNIQUE_IDS = 1` collapses everything to 0xFF), so this never binds; 8 is headroom. It CANNOT be raised past `S_ACCEPT` — the RTL clamps to `min(S_THREADS, S_ACCEPT)` and warns (`taxi_axi_crossbar_addr.sv:108,149-150`) |
+  | `M_ISSUE` | 32 on both ports | per-master in-flight limit. Do not use it to "enforce" the config RAM's single-outstanding behaviour: the RAM backpressures itself, and the crossbar should not second-guess a target |
+  | `M_SECURE` | 0 | no `aprot`-based rejection |
+  | `S_*_REG_TYPE` | defaults | passed through correctly by the `_1s` wrapper (`taxi_axi_crossbar_1s.sv:103-105,132-133`) |
+  | `M_*_REG_TYPE` | **leave alone** | `taxi_axi_crossbar_1s` declares them but never passes them down (`:93-105,122-133`), so setting them has NO effect; the lower defaults (AW/AR simple, W skid, B/R bypass) stand. Escaping that needs instantiating `taxi_axi_crossbar_wr`/`_rd` directly — not worth it. Record the mild backpressure smoothing in the perf cause column instead |
+
+  Also required and easy to miss: the master ports' `ID_W` must be >= the slave's
+  (`taxi_axi_crossbar_wr.sv:121-122`). DECERR needs no enable — a no-match returns
+  `BRESP`/`RRESP = 2'b11` (`taxi_axi_crossbar_wr.sv:341-343`, `_rd.sv:289-293`), which is what
+  makes the DECERR path usable as the tile-layout consistency gate.
 - **Licence**: taxi is CERN-OHL-S-2.0 (strongly reciprocal) while this repo is proprietary and
   the vendored pulp/common_cells are Solderpad. User ruled: ignore, internal use only.
 - **Hybrid memory models per target (user ruling 2026-08-07, supersedes the earlier
@@ -141,11 +173,12 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   meant, and no need to fold `BURST_LEN` into `TOPO_STAMP` — sizes come from the same YAML entry
   the SAM is built from, single source. The existing footprint guards
   (`gen_test_patterns.py:459,609`) stay as the check.
-  Correction to the ruling as first written: "identical everywhere" over-reached.
-  `mesh_2x2_nonuniform_vc1` is the Tier 3 HETEROGENEOUS-SAM gate, so it keeps differing tile
-  sizes (bounded, e.g. one 2 MB tile among 1 MB tiles). That costs nothing now that the data
-  memory is sparse, and it is the only thing proving the tile span is DERIVED rather than
-  hardcoded. Read the ruling as "bounded and sane", not "uniform".
+  `mesh_2x2_nonuniform_vc1` is REMOVED entirely (user, 2026-08-07 — nonuniform maps are out of
+  scope for now): delete the YAML and every Makefile/generator/test reference, and drop the
+  heterogeneous-SAM row from the Tier 3 gate in `docs/backlog.md`. Every remaining topology is
+  therefore uniform. The property that topology used to prove incidentally — that the tile span
+  is DERIVED from the YAML rather than hardcoded — moves to an `address_map.py` unit test with
+  mixed-size entries, which is where it belongs anyway: seconds instead of a co-sim run.
   The crossbar's `ADDR_W` is the FULL 48 b system width, not the tile span: the DECERR path is
   the free consistency gate for the three copies of the tile layout, and a narrow `ADDR_W` would
   alias a stray high address silently into the tile instead of erroring, blinding the gate to
