@@ -33,12 +33,13 @@ module user_node_endpoint #(
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     // Tile crossbar windows, stamped by gen_tb_top.py from the topology YAML
     // (address_map.tile_layout). Port order and field packing are ONE coupled
-    // invariant: field t is target t, m0 = config at base 0x0, LAST = data.
-    // taxi forwards the address unmodified, so the config taxi_axi_ram indexes
-    // its dense mem off the raw tile-local address and only decodes correctly
-    // at base 0x0; the data target is base-agnostic because axi_rand_slave is.
-    // gen_tb_top.tile_targets() asserts the order so an address_map.py
-    // SPACE_ORDER edit cannot transpose the two silently.
+    // invariant: field t is target t, m0 = config, LAST = data. Both targets
+    // are base-agnostic -- taxi_axi_ram truncates the forwarded address to its
+    // own ADDR_W (taxi_axi_ram.sv:145 write, :251 read) and axi_rand_slave is
+    // address-agnostic -- so what the invariant protects is the ROLE-to-target
+    // assignment, not any particular base. gen_tb_top.tile_targets() asserts
+    // that order so an address_map.py SPACE_ORDER edit cannot transpose the two
+    // silently.
     // Packed (not unpacked) arrays: Verilator 5.048 rejects an override
     // assignment pattern on an unpacked array param whose size depends on a
     // sibling param override (here TILE_TARGETS).
@@ -243,17 +244,6 @@ module user_node_endpoint #(
     // the window in force there is calcBaseAddrs()'s, not the emitted array.
     // Same answer for one region at base 0, but do not read the array as
     // authoritative in that shape.
-
-    // Endpoint half of the coupled invariant. The generator asserts the space
-    // ORDER; this asserts what the config taxi_axi_ram below depends on, that
-    // target 0's window starts at 0x0. Runtime, not elaboration: the build
-    // passes -Wno-fatal, under which an elaboration $fatal prints as a warning
-    // and the run continues.
-    initial begin
-        if (TILE_TARGETS > 1 && TILE_BASE_ADDR[0] != '0)
-            $fatal(1, "[tile_decode] node%0d: target 0 base is %h, expected 0x0 -- the config RAM indexes off the raw tile-local address",
-                   NODE_ID, TILE_BASE_ADDR[0]);
-    end
 
     // Config target (m0). ADDR_W is the CONFIG REGION width, never the system
     // width: taxi_axi_ram's mem is a dense 2**(ADDR_W-$clog2(STRB_W)) array, so

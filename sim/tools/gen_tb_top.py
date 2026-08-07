@@ -145,14 +145,14 @@ def tile_targets(topo: dict):
 
     Port order and field packing are ONE coupled invariant: m0 = config,
     m1 = data, and taxi packs M_BASE_ADDR / M_ADDR_W low-field-first
-    (taxi_axi_crossbar_addr.sv:136), so target t occupies field t. Three
-    things ride on it -- the crossbar forwards the address unmodified, so the
-    config taxi_axi_ram indexes mem off the raw tile-local address and is
-    correct only while config sits at base 0x0; user_node_endpoint puts that
-    RAM on target 0 and the rand_slave data memory on the LAST target; and
-    the data target works at any base only because rand_slave is
-    address-agnostic. The checks below are what stop an address_map.py
-    SPACE_ORDER edit from transposing the two silently.
+    (taxi_axi_crossbar_addr.sv:136), so target t occupies field t.
+    user_node_endpoint puts the config taxi_axi_ram on target 0 and the
+    rand_slave data memory on the LAST target. Neither target cares about its
+    base -- the RAM truncates the forwarded address to its own ADDR_W
+    (taxi_axi_ram.sv:145 write, :251 read) and rand_slave is address-agnostic
+    -- so the role-to-target assignment is the whole invariant, and the check
+    below is what stops an address_map.py SPACE_ORDER edit from transposing the
+    two silently.
 
     Returns [{"space", "base", "span", "addr_w"}, ...]; addr_w = log2(span),
     the taxi M_ADDR_W field.
