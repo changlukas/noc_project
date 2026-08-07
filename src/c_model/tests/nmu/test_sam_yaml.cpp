@@ -166,11 +166,39 @@ TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
     }
 }
 
-// B1 differential: the node mask read off the declared ranges must equal the
-// one collective_translate derives today by enumerating the 2^n named
-// addresses. Exhaustive over every shipped topology, both spaces, every anchor
-// node and every legal mask shape -- at most 2^(x_bits + y_bits) masks per
-// space. This is the equivalence evidence for B2 replacing the enumeration.
+// Reference model for the differential below: the 2^n walk over the SAM that
+// collective_translate ran before B2, kept here rather than deleted with it.
+// The production side now slices the declared ranges, so without an independent
+// second derivation the differential would compare the slice against itself.
+// Returns 0xFF -- never a legal node mask on a shipped topology -- if a named
+// address reaches no tile.
+uint8_t enumerated_node_mask(const ni::cmodel::nmu::addr_trans::SamTable& sam, uint64_t anchor,
+                             uint64_t addr_mask) {
+    std::vector<unsigned> pos;
+    for (unsigned i = 0; i < 48; ++i) {
+        if ((addr_mask >> i) & 1u) pos.push_back(i);
+    }
+    const uint64_t base = anchor & ~addr_mask;
+    const auto* origin = sam.lookup(base);
+    if (origin == nullptr) return 0xFF;
+    uint8_t node_mask = 0;
+    for (uint64_t v = 0; v < (uint64_t{1} << pos.size()); ++v) {
+        uint64_t addr = base;
+        for (std::size_t k = 0; k < pos.size(); ++k) {
+            if ((v >> k) & 1u) addr |= uint64_t{1} << pos[k];
+        }
+        const auto* e = sam.lookup(addr);
+        if (e == nullptr) return 0xFF;
+        node_mask |= static_cast<uint8_t>(e->dst_id ^ origin->dst_id);
+    }
+    return node_mask;
+}
+
+// B1/B2 differential: the node mask collective_translate reads off the declared
+// ranges must equal the one the enumeration above walks out of the SAM.
+// Exhaustive over every shipped topology, both spaces, every anchor node and
+// every legal mask shape -- at most 2^(x_bits + y_bits) masks per space. This
+// is the equivalence evidence for B2 replacing the enumeration in the datapath.
 TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
     std::vector<std::string> files;
     for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
@@ -208,9 +236,14 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                             b.burst = axi::Burst::INCR;
                             b.user =
                                 (addr_mask << 10) | (uint64_t{axi::COLLECTIVE_OP_MULTICAST} << 8);
-                            const uint8_t sliced =
-                                static_cast<uint8_t>((my << ni::width::X_WIDTH) | mx);
-                            EXPECT_EQ(collective_translate(sam, b), sliced)
+                            const uint8_t enumerated = enumerated_node_mask(sam, anchor, addr_mask);
+                            // The reference is not vacuous: an aligned wildcard
+                            // over a raster-packed space IS the (my, mx) pair.
+                            ASSERT_EQ(enumerated,
+                                      static_cast<uint8_t>((my << ni::width::X_WIDTH) | mx))
+                                << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
+                                << addr_mask;
+                            EXPECT_EQ(collective_translate(sam, b), enumerated)
                                 << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
                             ++compared;

@@ -51,6 +51,11 @@ struct BitRange {
     unsigned len = 0;
 };
 
+inline uint64_t range_mask(const BitRange& r) {
+    if (r.len == 0) return 0;
+    return ((uint64_t{1} << r.len) - 1) << r.offset;
+}
+
 // Where one address space keeps its node coordinates. Upstream emits the same
 // numbers into every SAM rule at generation time (floogen/model/network.py
 // gen_collective_sam, read by floo_id_translation.sv), so the NI slices AWUSER
@@ -248,11 +253,6 @@ class SamTable {
     }
 
   private:
-    static uint64_t range_mask(const BitRange& r) {
-        if (r.len == 0) return 0;
-        return ((uint64_t{1} << r.len) - 1) << r.offset;
-    }
-
     // Tile-local layout, mirrored in sim/tools/address_map.py tile_layout():
     //   span(space)  = round_pow2(largest entry of that space), min 4 KB
     //   space_base   = spaces in the fixed order [config, memory], each aligned
@@ -306,13 +306,12 @@ inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::B
 // nmu::Rob::push_aw before any admission gate. Returns the 8 b flit
 // collective_mask (node mask); 0 for a plain unicast AW.
 //
-// Upstream translates with a pure bit-select over SAM-provided node-index bit
-// offsets (floo_axi_chimney.sv:534-546). Our SAM is a first-match RANGE lookup
-// that stores no such offset, so the honest generalization is to ENUMERATE the
-// 2^n addresses the mask names and require the resulting node set to be exactly
-// a wildcard over dst_id. n is capped at X_WIDTH+Y_WIDTH, so at most 256 SAM
-// lookups per AW -- model-only cost, re-run on every backpressure retry of the
-// same AW (design K3: memoization is not warranted).
+// The node mask is a bit-select over the anchor space's declared coordinate
+// ranges, as upstream does it (floo_axi_chimney.sv:534-546) -- two shifts, no
+// walk over the map. Everything a per-replica scan would re-derive is a
+// property of the SPACE and was settled when the ranges were declared
+// (SamTable::declare_space_coords): one class, one node per coordinate pair, a
+// shared node-local offset, one aperture.
 //
 // Every reject here is a PERMANENT illegal input: it never clears on retry, so
 // returning false would wedge the caller indistinguishably from congestion.
@@ -360,105 +359,65 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     }
     // No anchor-class gate: design Q4 revision 2 rules multicast legal on BOTH
     // classes (config-space message replication rides Narrow/REQ). The class
-    // still has to be UNIFORM across the destination set -- that is the
-    // e->cls != anchor->cls check in the enumeration below, a different rule.
+    // stays UNIFORM across the destination set because the mask cannot leave
+    // the anchor's own space -- the outside-the-ranges check below.
+    const SpaceCoords* coords = sam.collective_coords(anchor->cls);
+    if (coords == nullptr) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: the anchor's address space declares no "
+               "coordinate ranges -- a legal unicast target, not a collective target");
+        std::abort();
+    }
 
-    // Set-bit positions of the address mask. More set bits than a node id has
-    // bits names more wildcard addresses than the mesh has nodes to absorb.
-    constexpr unsigned kNodeIdBits = ni::width::X_WIDTH + ni::width::Y_WIDTH;
+    // Spec §6: the mask is confined to the node-index field. A bit below it
+    // wildcards an address bit inside one region, so the named addresses stop
+    // sharing a node-local offset; a bit above it leaves the space, so they
+    // stop sharing a class.
+    const uint64_t field = range_mask(coords->x_range) | range_mask(coords->y_range);
+    if ((addr_mask & ~field) != 0) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: AWUSER collective_mask sets a bit outside "
+               "the coordinate ranges of the anchor's address space");
+        std::abort();
+    }
+    const unsigned mask_x = static_cast<unsigned>(addr_mask >> coords->x_range.offset) &
+                            ((1u << coords->x_range.len) - 1);
+    const unsigned mask_y = static_cast<unsigned>(addr_mask >> coords->y_range.offset) &
+                            ((1u << coords->y_range.len) - 1);
+
+    // Bound the HIGHEST member of the wildcard set, anchor | mask, PER
+    // COORDINATE: the set is [anchor & ~mask, anchor | mask], dst_id is
+    // (y << X_WIDTH) | x, and a dimension need not be a power of two. With
+    // x_count = 3, anchor x = 1 and mask_x = 0x2 names {1, 3} -- the mask alone
+    // is in range and node 3 does not exist.
+    constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
+    const unsigned anchor_x = anchor->dst_id & kXFieldMask;
+    const unsigned anchor_y = anchor->dst_id >> ni::width::X_WIDTH;
+    if ((anchor_x | mask_x) >= coords->x_count || (anchor_y | mask_y) >= coords->y_count) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: collective destination set names a node "
+               "outside the mesh");
+        std::abort();
+    }
+
+    // Stays per-request: AWADDR/AWLEN/AWSIZE/AWBURST are not space properties.
+    // The uniform region size the declaration checked is what lets the anchor's
+    // footprint stand for every replica's.
+    if (!sam.burst_footprint_ok(b.addr, burst_last_byte(b.addr, b.len, b.size, b.burst))) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: collective burst footprint crosses a tile "
+               "boundary");
+        std::abort();
+    }
+
     // The uint8_t return IS the flit's collective_mask, so the node id this
     // function reasons about and the header field it fills must stay the same
     // width. Same guard route_mask.hpp:43-46 puts on the consumer side.
-    static_assert(kNodeIdBits == ni::width::COLLECTIVE_MASK_WIDTH,
+    static_assert(ni::width::X_WIDTH + ni::width::Y_WIDTH == ni::width::COLLECTIVE_MASK_WIDTH,
                   "collective_mask must be one node id wide (X|Y) -- specgen drift");
-    static_assert(kNodeIdBits <= 8, "node id / collective_mask no longer fit uint8_t");
-    uint8_t pos[kNodeIdBits];
-    unsigned n = 0;
-    for (unsigned i = 0; i < 48; ++i) {
-        if (((addr_mask >> i) & 1u) == 0) continue;
-        if (n == kNodeIdBits) {
-            assert(false &&
-                   "nmu::addr_trans::collective_translate: AWUSER collective_mask sets more bits "
-                   "than a node id has -- destination set larger than the mesh");
-            std::abort();
-        }
-        pos[n++] = static_cast<uint8_t>(i);
-    }
-
-    const uint64_t base_addr = b.addr & ~addr_mask;
-    const std::size_t replicas = std::size_t{1} << n;
-    bool seen[std::size_t{1} << kNodeIdBits] = {};
-    uint8_t dst0 = 0;
-    uint64_t local0 = 0;
-    uint8_t node_mask = 0;
-    for (std::size_t v = 0; v < replicas; ++v) {
-        uint64_t addr = base_addr;
-        for (unsigned k = 0; k < n; ++k) {
-            if ((v >> k) & 1u) addr |= uint64_t{1} << pos[k];
-        }
-        const SamEntry* e = sam.lookup(addr);
-        if (e == nullptr) {
-            assert(false &&
-                   "nmu::addr_trans::collective_translate: collective replica address maps to no "
-                   "tile -- destination set leaves the mesh");
-            std::abort();
-        }
-        const uint64_t local = addr - e->base;
-        if (v == 0) {
-            dst0 = e->dst_id;
-            local0 = local;
-        }
-        // Spec :461-462: every replica carries the same node-local offset, one
-        // aligned region per node. A mask bit inside the tile offset breaks this.
-        if (local != local0) {
-            assert(false &&
-                   "nmu::addr_trans::collective_translate: collective replicas disagree on "
-                   "node-local offset");
-            std::abort();
-        }
-        // Uniform class across the set. Both classes multicast (design Q4
-        // revision 2), but ONE set cannot straddle them: the class picks the
-        // network the worm forks on (Narrow -> REQ, Data -> DAT), and a packet
-        // rides exactly one.
-        if (e->cls != anchor->cls) {
-            assert(false &&
-                   "nmu::addr_trans::collective_translate: collective replicas straddle the "
-                   "narrow and data classes");
-            std::abort();
-        }
-        if (seen[e->dst_id]) {
-            assert(false &&
-                   "nmu::addr_trans::collective_translate: collective mask names one node twice "
-                   "-- not a wildcard over dst_id");
-            std::abort();
-        }
-        seen[e->dst_id] = true;
-        node_mask |= static_cast<uint8_t>(e->dst_id ^ dst0);
-        if (!sam.burst_footprint_ok(addr, burst_last_byte(addr, b.len, b.size, b.burst))) {
-            assert(false &&
-                   "nmu::addr_trans::collective_translate: collective replica burst footprint "
-                   "crosses a tile boundary");
-            std::abort();
-        }
-    }
-
-    // The node set must be exactly the wildcard set over node_mask, so
-    // popcount(node_mask) == n. It already holds 2^n DISTINCT ids that all agree
-    // outside node_mask, hence all lie inside a span of 2^popcount ids: equal
-    // cardinality then forces the set to BE that span. dst0|node_mask is
-    // therefore one of the enumerated -- so SAM-real, so in-mesh -- ids, which
-    // is design §2.2's step-4 submesh check without needing the mesh dims here.
-    // "SAM-real implies in-mesh" is SamTable::validate's dst-outside-mesh check
-    // (:105-107), which the YAML loader runs; hand-built test tables bypass it.
-    unsigned span_bits = 0;
-    for (unsigned i = 0; i < kNodeIdBits; ++i) span_bits += (node_mask >> i) & 1u;
-    if (span_bits != n) {
-        assert(false &&
-               "nmu::addr_trans::collective_translate: collective node set is not an aligned "
-               "wildcard over dst_id");
-        std::abort();
-    }
-    return node_mask;
+    static_assert(ni::width::X_WIDTH + ni::width::Y_WIDTH <= 8,
+                  "node id / collective_mask no longer fit uint8_t");
+    return static_cast<uint8_t>((mask_y << ni::width::X_WIDTH) | mask_x);
 }
 
 }  // namespace ni::cmodel::nmu::addr_trans
