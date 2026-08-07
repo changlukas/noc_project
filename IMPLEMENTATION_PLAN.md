@@ -47,13 +47,12 @@ SimpleRouter honors it via an explicit loopback-tie-off exemption (deliberate di
 floo_router's blanket NoLoopback, cited in simple_router.hpp).
 
 ## Stage 5: Alignment tail
-Goal: endpoint interface option (one shared vs two per-class AXI ports) or documented
-unsupported; per-network perf metrics; block specs (nmu/nsu/router) re-synced to as-built;
+Goal: tile endpoint integration on the ruled one-shared-port shape; per-network perf metrics; block specs (nmu/nsu/router) re-synced to as-built;
 regression re-baseline. GALS explicitly ignored (user decision 2026-08-04).
 Tile endpoint integration (user direction 2026-08-05): each tile gains an AXI xbar behind the
 NSU feeding two memories — config-space and data-space — implementing the spec's second-level
-node-local-offset decode; xbar = off-the-shelf pulp axi_xbar RTL in the tb (Verilator compat
-[UNVERIFIED], validate at integration); xbar range parameters derived from the SAME topology
+node-local-offset decode; xbar = off-the-shelf taxi RTL in the tb (Verilator compat verified
+by lint spike, see the rulings below); xbar range parameters derived from the SAME topology
 YAML address_map as the SAM (single source, no second table). Couples with the endpoint-port
 decision: two per-class ports would reduce the xbar to a demux or nothing. Address-map
 semantics to settle with the xbar: config and memory tiles on the same node both rebase to
@@ -63,10 +62,12 @@ it by disjoint probe offsets) — with the two-memory xbar the aliasing becomes 
 Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
 - **One shared 512 b AXI port** at the endpoint. Two per-class ports rejected, so the four
   narrow-lane re-anchor sites stay as built.
-- **Tile decode = taxi** (`E:\03_Learning\taxi`): `taxi_axi_crossbar_1s` with `M_COUNT=2`
-  (one slave-side port fanning out to two targets — the right-sized piece, not the full
-  N x M crossbar) plus two `taxi_axi_ram` as the config and data memories. Range parameters
-  (`M_BASE_ADDR` / `M_ADDR_W`) come from the same topology YAML `address_map` as the SAM.
+- **Tile decode = taxi** (`E:_Learning	axi`): `taxi_axi_crossbar_1s` — one slave-side
+  port fanning out to the targets on that node, the right-sized piece rather than the full
+  N x M crossbar — with one `taxi_axi_ram` per target. `M_COUNT` is derived from the spaces
+  actually present in the topology, not fixed at 2 (a config-less topology has no config
+  entry at all). Range parameters (`M_BASE_ADDR` / `M_ADDR_W`) come from the same topology
+  YAML `address_map` as the SAM.
 - **One interface convention per side, zero adapters.** taxi's `wr`/`rd` are modports of ONE
   `taxi_axi_if` instance, not two instances, so a single interface feeds both crossbar ports.
   The endpoint's slave face is already hand-wired per field from the flat DPI signals
@@ -106,12 +107,21 @@ Endpoint rulings (user, 2026-08-06), lint-verified before adoption:
   decodes on `M_BASE_ADDR`/`M_ADDR_W` generated from the same source. Rejected alternative:
   demuxing on the AXI class instead of the address — taxi's crossbar decodes by address only,
   and it would permanently bind config to narrow.
-- **Sizing rule**: the xbar's `ADDR_W` is the tile-local span (21 b on today's map); each
-  target's `M_ADDR_W` is its rounded region size (config 12, memory 20); each `taxi_axi_ram`'s
-  own `ADDR_W` comes from the DV-tier `region_bytes` (what stimulus actually touches), NOT the
-  mapped region size, so a 1 MB address window does not force a 1 MB dense array. Generator
-  computes all of it from the topology YAML; accesses past a RAM's own size alias inside it,
-  which is a stimulus-bounded assumption to state.
+- **Uniform tile layout (user ruling 2026-08-07)** — all topologies get the SAME tile shape:
+  `memory 0x100000` (1 MB) + `config 0x1000` (4 KB), which is what the two config-narrow
+  topologies already use. The other six carry a legacy `size: 0x100000000` (4 GB) that nothing
+  needs and that leaves no room for a config region beside it. Tile-local map: config at 0x0,
+  memory at 0x100000, span 2 MB, so the xbar's `ADDR_W` is 21 and each `taxi_axi_ram` takes its
+  own region size directly (memory 20, config 12). Sizing is adequate by the stimulus formula
+  (`gen_test_patterns.py:829-836`): the worst GATED case is 4x4 x 4 txns x 4 KB stride plus
+  `base_local`, about 260 KB. Consequence, and the reason this ruling exists: no `TILE_RAM_BYTES`
+  constant, no run-derived RAM sizing, no dependence on which of the two `region_bytes` values
+  is meant, and no need to fold `BURST_LEN` into `TOPO_STAMP` — the RAM size comes from the same
+  YAML entry the SAM is built from, single source. The existing footprint guards
+  (`gen_test_patterns.py:459,609`) stay as the check. Dense-array cost lands at 1 MB per node.
+  Deferred: `INJECTION_MODE=1` injection sweeps run transaction counts that exceed 1 MB; they
+  are in no gate, and if they later need more they get their own topology rather than reshaping
+  the fabric address map (user, 2026-08-07 — 1 MB still exercises a meaningful data volume).
 - **Lint spike PASSED** (Verilator 5.048, 16 modules, zero warnings): `taxi_axi_crossbar_1s`
   `M_COUNT=2` / `DATA_W=512` with unpacked interface arrays and two `taxi_axi_ram` behind it.
   The module's own "TODO fix parametrization once verilator issue 5890 is fixed" note does not
@@ -128,39 +138,43 @@ paragraph uses unqualified "AW" in two channel-class senses (line ~111 DataAw vs
 NarrowAw) — add the "narrow" qualifier; residual "VC arbiter" prose in nmu-spec G9 /
 NOC_DAT_NUM_VC parameter row / nsu-spec §3.4; `cmodel_dpi.h:142` "vnet" wording. Also from
 S3b: ready_slack calibration still deferred (needs a measured wire-loop experiment).
-Carry-in from S4: (1) RULED per network (user, 2026-08-06). Read data is carried differently on
-the two networks, and the block specs must say so rather than calling the whole fabric
-"XY wormhole".
-
-**DAT (DataR): virtual-channel flow control.** A read burst is ONE multi-flit packet. VC
-allocation is packet-granular — the VC is allocated to the head flit at each hop and inherited
-by body and tail (the standard VC-router pipeline, where body and tail skip RC and VA); switch
-allocation stays flit-granular, so packets on different VCs interleave on the physical link.
-Rejected alternative: keeping per-beat packets pinned by `fixed_vc`. That mechanism exists to
-pin ordering-critical streaks (the S3b U1 hole); reusing it as the universal read-data carrier
-conflates two purposes and permanently excludes all read data from per-hop VC reallocation.
-Work implied: `nsu::Packetize::build_r_flit` marks only the final beat (burst length is already
-in the MetaEntry) instead of today's unconditional `flit_tail = 1` at `:125`; NSU R switches to
-`fixed_vc = 0` so VA runs per hop and the NI hash becomes only the first-hop pick; the DAT
-router needs no new mechanism (`locked_output_vc` already implements body-follows-head, ported
-and verified in S3b) but its continuation path must be exercised with R packets, not only
-DataAw+W. Cost to accept: a long burst now holds its VC for the burst's duration, though other
-VCs keep flowing.
-
-**RSP (NarrowR, NarrowB, DataB): single-flit packets, unchanged.** Packet and flit coincide, so
-no packet-granular link reservation is ever held; ordering within a burst follows from
-deterministic routing over in-order channels. Rationale for not extending the DAT ruling here:
-RSP is single-VC by spec (:40), so a multi-flit NarrowR would be wormhole-with-one-VC, the
-textbook anti-pattern — a blocked packet holds the link while every packet behind it stalls,
-and here those are the B flits of both classes, which have no ordering relationship to read
-data. The standard remedy (add VCs) is unavailable by spec, so single-flit packets ARE the
-head-of-line-blocking remedy on this network. Consequence: T4's join mid-worm hold stays
-dormant and the held-join wait-for edge stays closed, as S4's final review found.
-
-B stays single-flit on both networks. (2) router-spec §4
-has no numbered SPEC entries for fork/join — §2.10 ends with ctest/co-sim pointers instead;
-add them if the numbered contract list is meant to carry them. (3) router-spec §2.8 still says
-two networks per node (carries the file's own Pre-S3a marker).
+Carry-in from S4 (RULING REVERSED 2026-08-07 after a two-surveyor FlooNoC study; reports in
+`cross-review/s5-floonoc-survey-CODEX.md` and `-CLAUDE.md`): **read data stays single-flit on
+BOTH networks, so there is no work here — the model is already correct.** The earlier ruling to
+make DataR a multi-flit packet rested on a false premise (that packets on different VCs
+interleave on the link) and is withdrawn.
+- Upstream builds ONE packet per R beat and states why in the code:
+  `floo_axi_r.hdr.last = 1'b1; // There is no reason to do wormhole routing for R bursts`
+  (`floo_axi_chimney.sv:632`; narrow/wide at `floo_nw_chimney.sv:1197,1288`; B likewise `:616`).
+  The only multi-flit packet FlooNoC builds anywhere is AW+W (`floo_axi_chimney.sv:576,590`),
+  where AXI A5.3.3 forbids interleaving W and leaves no choice.
+- Our per-output wormhole lock MATCHES upstream: `wh_valid` is one bit per output port across
+  all VCs and forces SA-global to re-grant the same input every cycle until `last`
+  (`floo_vc_router.sv:124,340-342`, `floo_sa_global.sv:42-44`), so a credit-starved packet
+  idles the whole output there too. Per-flit switch allocation is NOT implemented upstream and
+  says so (`floo_vc_router.sv:315-316`), making it an invention rather than a port — recorded
+  as an optional post-campaign item, not S5 work.
+- Spec consequence: the fabric has exactly one wormhole packet type, AW+W on the request path;
+  every response packet is single-flit. The output-hold cost is confined to the request path,
+  which is where AXI forces it. Delete the earlier "other VCs keep flowing" and "switch
+  allocation stays flit-granular" claims — neither is true of our router or of upstream's.
+- Task-list consequence: the DAT read-data flow-control task disappears, and with it the
+  proposed R-interleaving guard (there is no open multi-flit R packet to protect, and upstream's
+  NI arbiter keys on `hdr.last`, not an AXI id, `floo_wormhole_arbiter.sv:51,69-74`).
+- Unverified upstream observation, recorded not acted on: the wormhole interleave check compares
+  input-port identity only (`floo_vc_router.sv:330`) and `floo_sa_local.sv` carries no wormhole
+  lock, so a second VC of the same input targeting the same output may pass the check if the
+  packet's VC runs dry. Absence-of-code evidence, not simulated.
+Also from S4: (2) router-spec §4 has no numbered SPEC entries for fork/join — §2.10 ends with
+ctest/co-sim pointers instead; add them if the numbered contract list is meant to carry them.
+(3) router-spec §2.8 still says two networks per node (carries the file's own Pre-S3a marker).
+Carry-in from the S5 cross-review (fix inside the endpoint task): taxi's field names (`awid`)
+do not match pulp's (`aw_id`), so moving the slave face is a per-field rename, not a change of
+target; `taxi_axi_ram` is single-outstanding with `S_THREADS=2`, so the endpoint task DOES
+change slave-side concurrency and must appear in the perf re-baseline's cause column; the tile
+layout will exist in three places (Python, C++, emitted SV params) and the free consistency gate
+is the crossbar's DECERR path (`taxi_axi_crossbar_addr.sv:343-345` into
+`user_node_endpoint.sv:308-310`), which must stay armed under every injection mode.
 Carry-in from S1: block-spec flit-format tables (nmu/nsu/router §2.2) still show the
 pre-S1 layout — 56 b header, 408 b flit — vs as-built 44 b header, 48 b addr, 396 b flit,
 axi_ch 4 b / 10-value enc, and the NMU_OUTSTANDING_DEPTH outstanding-pool params; re-sync
