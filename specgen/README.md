@@ -30,7 +30,7 @@ py -3 tools/codegen.py --target sv --domain noc_types --num-vc 4   # noc_types n
   against the committed output
 - `codegen_check` (CMake custom target, `src/c_model/CMakeLists.txt`) - runs
   the same check before the c_model build
-- `make specgen_pytest` - specgen test suite, includes the golden drift check
+- `make pytest` - specgen + sim/tools test suites, includes the golden drift check
 
 ## Boundary
 

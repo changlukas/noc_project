@@ -4,6 +4,7 @@ import os
 import pytest
 
 import address_map
+import gen_tb_top
 import gen_test_patterns as g
 
 
@@ -119,7 +120,7 @@ def test_emit_file_master_node_arbitrary_base_from_bases_dict(tmp_path):
 def test_load_topology_reads_packed_bases_from_address_map(tmp_path):
     topo_path = tmp_path / "t.yaml"
     topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000))
-    nodes, x_dim, y_dim, bases, _config_bases = g._load_topology(str(topo_path))
+    nodes, x_dim, y_dim, bases, _config_bases, _sizes = g._load_topology(str(topo_path))
     assert (x_dim, y_dim) == (4, 4)
     # packed in raster (y, x) order, matching _uniform_topology_yaml's emit order
     assert bases[g.coord_id(0, 0)] == 0
@@ -243,10 +244,9 @@ def test_narrow_beat_exact_lines_shape():
 
 
 def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
-    """End-to-end wiring check (S2 gate deliverable 2): on a topology with a
-    config-space tile, the owning node's write.txt gains one extra narrow
-    transaction after its beat-exact data-class sequence; a node without a
-    config tile does not."""
+    """End-to-end wiring check (S2 gate deliverable 2): a node owning a
+    config-space tile gains one extra narrow transaction after its beat-exact
+    data-class sequence, addressed at that node's own config tile base."""
     out = str(tmp_path / "scn")
     topo_path = os.path.join(os.path.dirname(__file__), "..", "topologies",
                               "mesh_2x2_config_narrow_vc1.yaml")
@@ -254,9 +254,12 @@ def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
     txns0 = _parse_write(os.path.join(out, "node0", "write.txt"))
     txns1 = _parse_write(os.path.join(out, "node1", "write.txt"))
     n_beat_exact = 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
+    # S4 T6 gave every node a config tile, packed after the 4 memory tiles:
+    # node i's config base is 0x400000 + i * 0x1000.
     assert len(txns0) == n_beat_exact + 1                 # + narrow probe
-    assert txns0[-1]["addr"] == 0x400000                  # config tile base
-    assert len(txns1) == n_beat_exact                     # no config tile on node1
+    assert txns0[-1]["addr"] == 0x400000
+    assert len(txns1) == n_beat_exact + 1
+    assert txns1[-1]["addr"] == 0x401000
 
 
 def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
@@ -303,6 +306,69 @@ def test_address_map_pack_accumulates_bases_in_list_order():
         address_map.dst_id(1, 1): 0x4000,
     }
     assert [e["base"] for e in entries] == [0, 0x1000, 0x3000, 0x4000]
+
+
+def _two_space_tiles(memory_sizes):
+    """2x2 memory tiles of the given sizes plus one 4 KB config tile per node."""
+    nodes = [(0, 0), (1, 0), (0, 1), (1, 1)]
+    return ([{"x": x, "y": y, "size": s, "space": "memory"}
+             for (x, y), s in zip(nodes, memory_sizes)] +
+            [{"x": x, "y": y, "size": 0x1000, "space": "config"} for x, y in nodes])
+
+
+def test_address_map_tile_layout_derives_span_from_entries():
+    """The tile span is COMPUTED from the YAML, never a constant. A mixed-size
+    map (one 2 MB tile among 1 MB tiles) must double every memory-space number
+    against the uniform map -- the property the retired mesh_2x2_nonuniform_vc1
+    topology used to prove. Mirrored in C++ by
+    SamTable.SpaceBaseDerivedFromLargestEntryOfThatSpace."""
+    mixed = _two_space_tiles([0x200000, 0x100000, 0x100000, 0x100000])
+    spaces, tile_span = address_map.tile_layout(mixed)
+    assert spaces == [
+        {"space": "config", "base": 0x0, "span": 0x1000},
+        {"space": "memory", "base": 0x200000, "span": 0x200000},
+    ]
+    assert tile_span == 0x400000
+    # Heterogeneous sizes still pack: the mixed map is a valid pack() input.
+    address_map.pack({"tiles": mixed}, x_dim=2, y_dim=2)
+
+    uniform = _two_space_tiles([0x100000] * 4)
+    spaces, tile_span = address_map.tile_layout(uniform)
+    assert spaces[1] == {"space": "memory", "base": 0x100000, "span": 0x100000}
+    assert tile_span == 0x200000
+
+
+def test_address_map_tile_layout_skips_an_absent_space():
+    """A memory-only topology gets no config slot, so memory starts at 0x0."""
+    tiles = [{"x": x, "y": y, "size": 0x100000, "space": "memory"}
+             for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]
+    spaces, tile_span = address_map.tile_layout(tiles)
+    assert spaces == [{"space": "memory", "base": 0x0, "span": 0x100000}]
+    assert tile_span == 0x100000
+
+
+def _two_space_topology():
+    return {"topology": {"x_dim": 2, "y_dim": 2},
+            "address_map": {"tiles": _two_space_tiles([0x100000] * 4)}}
+
+
+def test_tile_targets_packs_config_first():
+    """Port order and field packing are one coupled invariant: target 0 is the
+    config window at base 0x0, the last target is the data window. addr_w is
+    the taxi M_ADDR_W field, log2 of the span."""
+    assert gen_tb_top.tile_targets(_two_space_topology()) == [
+        {"space": "config", "base": 0x0, "span": 0x1000, "addr_w": 12},
+        {"space": "memory", "base": 0x100000, "span": 0x100000, "addr_w": 20},
+    ]
+
+
+def test_tile_targets_rejects_a_transposed_space_order(monkeypatch):
+    """Fault injection for the invariant: transposing SPACE_ORDER would put the
+    memory window on target 0, where user_node_endpoint instantiates the config
+    taxi_axi_ram. It must fail in the generator, not silently mis-decode."""
+    monkeypatch.setattr(address_map, "SPACE_ORDER", ("memory", "config"))
+    with pytest.raises(SystemExit, match="must be config-then-memory"):
+        gen_tb_top.tile_targets(_two_space_topology())
 
 
 def test_address_map_pack_rejects_zero_size():
@@ -371,12 +437,10 @@ def test_address_map_pack_real_topologies_gap_free():
             expected_base += e["size"]
 
 
-def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
-    """Cross-site invariant: both generators must compute the same base(dst_id)
-    from the same address_map (they share address_map.pack())."""
+def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
+    """Cross-site invariant: the stimulus generator's base(dst_id) is
+    address_map.pack()'s, not a second packing rule of its own."""
     import yaml
-
-    import gen_tb_top as gt
 
     topo_path = tmp_path / "nonuniform.yaml"
     topo_path.write_text(
@@ -388,7 +452,44 @@ def test_gen_test_patterns_and_gen_tb_top_agree_on_packed_bases(tmp_path):
         "    - { x: 0, y: 1, size: 0x1000 }\n"
         "    - { x: 1, y: 1, size: 0x4000 }\n"
     )
-    _nodes, _x, _y, bases_from_patterns, _config_bases = g._load_topology(str(topo_path))
+    _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes = g._load_topology(
+        str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
-    bases_from_tb_top = gt._address_map(topo)
-    assert bases_from_patterns == bases_from_tb_top
+    packed_bases, _entries = address_map.pack(topo["address_map"], x_dim=2, y_dim=2)
+    assert bases_from_patterns == packed_bases
+
+
+def _mcast_topology(tmp_path, config_size, dim=8):
+    """dim x dim mesh, 1 MB memory + one config tile per node. Rows are a power
+    of two so the multicast mask stays wildcard-clean."""
+    tiles = [f"    - {{ x: {x}, y: {y}, size: 0x100000 }}"
+             for y in range(dim) for x in range(dim)]
+    tiles += [f"    - {{ x: {x}, y: {y}, size: {config_size:#x}, space: config }}"
+              for y in range(dim) for x in range(dim)]
+    path = tmp_path / f"mcast_cfg{config_size:x}.yaml"
+    path.write_text(f"topology: {{ name: t, x_dim: {dim}, y_dim: {dim}, num_vc: 1 }}\n"
+                    "address_map:\n  tiles:\n" + "\n".join(tiles) + "\n")
+    return path
+
+
+def _emit_mcast(tmp_path, config_size):
+    topo_path = _mcast_topology(tmp_path, config_size)
+    nodes, x_dim, y_dim, bases, config_bases, sizes = g._load_topology(str(topo_path))
+    g.emit_multicast_pattern(str(tmp_path / f"out{config_size:x}"), nodes, x_dim, y_dim,
+                             bases, config_bases, sizes, "row", 2, 5, 0, 512,
+                             0x1000, len(nodes) * 2 * g._SLOT_STRIDE)
+
+
+def test_config_probe_window_is_bounded_by_the_config_entry(tmp_path):
+    """The cross-node config probe must stay inside the config SAM entry. An
+    overrun does not fault -- it lands in the next entry, routes to another
+    node's config RAM, rebases to a legal offset and reads back consistently,
+    so the crossbar's DECERR gate never sees it.
+
+    8x8 discriminates the bound from base_local (0x1000), which the two happen
+    to share on every shipped topology: the probe window is
+    0x800 + 64*0x40 = 0x1800, legal in a 0x2000 config entry and an overrun in
+    a 0x1000 one."""
+    _emit_mcast(tmp_path, 0x2000)
+    with pytest.raises(SystemExit, match="overruns the 0x1000 B config entry"):
+        _emit_mcast(tmp_path, 0x1000)

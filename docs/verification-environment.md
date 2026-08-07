@@ -287,8 +287,8 @@ topology:
 
 address_map:
   tiles:                      # ordered, every mesh node exactly once, row-major (y outer, x inner)
-    - { x: 0, y: 0, size: 0x100000000 }
-    - { x: 1, y: 0, size: 0x100000000 }
+    - { x: 0, y: 0, size: 0x100000 }
+    - { x: 1, y: 0, size: 0x100000 }
     # ... one entry per node
     - { x: 0, y: 0, size: 0x1000, space: config }  # optional second tile
 ```
@@ -306,17 +306,29 @@ address back to `dst_id`. One source, so the two never disagree.
 `tiles:` gives each node its own `size`; there is no `tile_size` and no
 `base` key. Bases are packed by accumulation in list order: `base(0) = 0`,
 `base(i) = base(i-1) + size(i-1)`, so the map is always gap-free and tiles can
-be heterogeneous. `dst_id = (y << X_WIDTH) | x`. `mesh_2x2_nonuniform_vc1`
-shrinks tile (0,0) to a 256 MB window; every other real topology uses a
-uniform `0x100000000` per node.
+be heterogeneous. `dst_id = (y << X_WIDTH) | x`. The loader accepts a
+heterogeneous map (covered by
+`test_address_map_tile_layout_derives_span_from_entries` in
+`sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology is
+uniform at `0x100000` per memory tile, in raster order. The two shapes differ
+only in whether a config space exists beside it:
 
-`mesh_2x2_config_narrow_vc1` and `mesh_2x4_config_narrow_vc1` give every node a
-memory tile and a config tile. The 4x2 one exists for narrow multicast: on a 2x2
-mesh the row, column, and submesh masks degenerate into each other, so the
-spanning trees are trivial. Its tile sizes are uniform and raster-ordered in both
-spaces (memory bases at `idx * 0x100000`, config bases at `0x800000 + idx *
-0x1000`), which is what makes the node index a contiguous bit field an AWUSER
-address mask can wildcard.
+| Topology | Tiles per node | `TILE_TARGETS` |
+|---|---|---|
+| `mesh_2x4_vc1`, `mesh_4x4_vc{1,2,4,8}` | `0x100000` memory | 1 |
+| `mesh_2x2_config_narrow_vc1`, `mesh_2x4_config_narrow_vc1` | `0x100000` memory + `0x1000` config, config entries appended after all memory entries | 2 |
+
+Keeping both shapes is deliberate: they exercise the two tile-crossbar decode
+paths, the single-target auto-addressing one and the two-window one. Only the
+two-window shape can catch a rebase error at the crossbar -- a single 1 MB
+window swallows every offset the stimulus generates, so a `TILE_TARGETS=1` run
+never DECERRs and the endpoint's RRESP gate stays silent there.
+
+Raster order is what makes the node index a contiguous bit field an AWUSER
+address mask can wildcard: memory bases at `idx * 0x100000`, config bases at
+`n_nodes * 0x100000 + idx * 0x1000`. `mesh_2x4_config_narrow_vc1` exists for
+narrow multicast on a rectangular mesh — on a 2x2 mesh the row, column, and
+submesh masks degenerate into each other, so the spanning trees are trivial.
 
 `gen_tb_top.py` rejects a topology whose mesh dimensions or `num_vc` exceed
 the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit
@@ -352,7 +364,7 @@ passing back the printed value reproduces the run exactly.
 | Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
 | AXI-side perf instrumentation absent | `perf.json` carries only the NoC section (dumped at the end of every run, all injection modes); no AXI-side per-transaction hooks exist, so nothing cross-checks `axi_bw_monitor` from the model side. |
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
-| Deferred header fields | `NOC_QOS_WIDTH`, `ROUTE_PAR_WIDTH`, `FLIT_ECC_WIDTH` are width-0 placeholders; QoS, route parity, and flit ECC are unbuilt. |
+| Deferred header fields | QoS, route parity, and flit ECC are unbuilt and have no header field at all: the 44 b header is fully assigned (`PADDING_FIELDS_COUNT` = 0) and carries no width-0 placeholder for them. |
 | Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |
 | NI ingress backpressure unmodelled | not modeled on any network as of S3a: `ready` tied true / DAT merge self-credits, ingress queues unbounded, LOCAL stall metrics 0 by construction. Reassessed at S3b: request-class (`DataAw`/`DataW`) and response-class (`DataR`) messages now share DAT VCs post-collapse. This stays deadlock-safe SOLELY because ingress queues are unbounded and always accept. Any future work that bounds ingress queues must first re-open message-class separation (or an equivalent VC-classing scheme). |
 | SimpleRouter multi-read ruling (S3b) | grants up to one flit per OUTPUT per tick from the same input FIFO, matching the credit `Router`. Mainline `floo_router.sv` has one FIFO read port, a resource limit, not a protocol requirement. Kept as a deliberate c_model-optimistic divergence: multi-output fan-out from one input in a single tick that RTL would need more than one cycle for. |

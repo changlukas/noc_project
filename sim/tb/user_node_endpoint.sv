@@ -1,8 +1,18 @@
-// user_node_endpoint — per-node test endpoint: pulp axi_file_master +
-// axi_rand_slave (MAPPED tile memory) + in-endpoint axi_scoreboard +
-// FlooNoC axi_bw_monitor. Bridges the fabric's flat ni_signals_pkg structs
-// to pulp AXI_BUS_DV interfaces with explicit per-field wiring (no protocol
-// logic).
+// user_node_endpoint — per-node test endpoint: pulp axi_file_master on the
+// master face, a taxi tile crossbar with two memory models on the slave face,
+// plus an in-endpoint axi_scoreboard and a FlooNoC axi_bw_monitor. Bridges the
+// fabric's flat ni_signals_pkg structs to interfaces with explicit per-field
+// wiring (no protocol logic).
+//
+// Slave face (tile decode): the NSU's tile-local address selects one of the
+// node's address spaces, config at 0x0 and memory above it, exactly the
+// windows the c_model SAM rebases into. Two memory models, one per role, is
+// deliberate. The data target keeps pulp axi_rand_slave for the three
+// properties that historically surfaced fabric bugs: randomized backpressure
+// and response delay, multiple outstanding with cross-ID selection, and X on
+// unwritten addresses. The config target is a taxi_axi_ram, deterministic,
+// dense, always-OKAY, single-outstanding, which is all a low-rate control path
+// needs.
 // pulp axi_scoreboard is usable on the Verilator directed axis: the 8'hxx->8'h00
 // 2-state collapse only bites reads of never-written addresses, which a
 // full-readback directed run never issues. Wired in-endpoint on master_dv.
@@ -18,17 +28,24 @@
 
 module user_node_endpoint #(
     parameter int unsigned NODE_ID      = 0,
-    parameter int unsigned NUM_NODES    = 1,
     parameter int unsigned ID_WIDTH     = ni_params_pkg::AXI_ID_WIDTH_DFLT,
     parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    // region contract (spec): master m targets REGION_BASE[NUM_NODES-1-m] only
-    // (permutation pairing). REGION_BASE[s] = coord_id(s) << 32 (dst tile in addr
-    // bits 32+), stamped by gen_tb_top.py from the topology YAML. Packed (not
-    // unpacked) array: Verilator 5.048 rejects an override assignment pattern on an
-    // unpacked array param whose size depends on a sibling param override.
-    parameter logic [NUM_NODES-1:0][63:0] REGION_BASE = '0,
-    parameter longint unsigned REGION_BYTES = 64'h1000,
+    // Tile crossbar windows, stamped by gen_tb_top.py from the topology YAML
+    // (address_map.tile_layout). Port order and field packing are ONE coupled
+    // invariant: field t is target t, m0 = config, LAST = data. Both targets
+    // are base-agnostic -- taxi_axi_ram truncates the forwarded address to its
+    // own ADDR_W (taxi_axi_ram.sv:145 write, :251 read) and axi_rand_slave is
+    // address-agnostic -- so what the invariant protects is the ROLE-to-target
+    // assignment, not any particular base. gen_tb_top.tile_targets() asserts
+    // that order so an address_map.py SPACE_ORDER edit cannot transpose the two
+    // silently.
+    // Packed (not unpacked) arrays: Verilator 5.048 rejects an override
+    // assignment pattern on an unpacked array param whose size depends on a
+    // sibling param override (here TILE_TARGETS).
+    parameter int unsigned TILE_TARGETS = 1,
+    parameter logic [TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = '0,
+    parameter logic [TILE_TARGETS-1:0][31:0]           TILE_ADDR_W = '0,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
     parameter int unsigned DEFAULT_NUM_WRITES = 8,
     // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH). Master-side DV interfaces
@@ -117,53 +134,187 @@ module user_node_endpoint #(
     assign master_dv.r_valid  = master_axi_rsp_i.rvalid;
     // aw_atop / *_user driven by the class are dropped (out of scope).
 
-    // slave face: forward the flat NSU port into slave_dv; rand_slave responds.
-    assign slave_dv.aw_id     = slave_axi_req_i.awid;
-    assign slave_dv.aw_addr   = slave_axi_req_i.awaddr;
-    assign slave_dv.aw_len    = slave_axi_req_i.awlen;
-    assign slave_dv.aw_size   = slave_axi_req_i.awsize;
-    assign slave_dv.aw_burst  = slave_axi_req_i.awburst;
-    assign slave_dv.aw_lock   = slave_axi_req_i.awlock;
-    assign slave_dv.aw_cache  = slave_axi_req_i.awcache;
-    assign slave_dv.aw_prot   = slave_axi_req_i.awprot;
-    assign slave_dv.aw_qos    = slave_axi_req_i.awqos;
-    assign slave_dv.aw_region = slave_axi_req_i.awregion;
-    assign slave_dv.aw_atop   = '0;
-    assign slave_dv.aw_user   = '0;
-    assign slave_dv.aw_valid  = slave_axi_req_i.awvalid;
-    assign slave_dv.w_data    = slave_axi_req_i.wdata;
-    assign slave_dv.w_strb    = slave_axi_req_i.wstrb;
-    assign slave_dv.w_last    = slave_axi_req_i.wlast;
-    assign slave_dv.w_user    = '0;
-    assign slave_dv.w_valid   = slave_axi_req_i.wvalid;
-    assign slave_dv.b_ready   = slave_axi_req_i.bready;
-    assign slave_dv.ar_id     = slave_axi_req_i.arid;
-    assign slave_dv.ar_addr   = slave_axi_req_i.araddr;
-    assign slave_dv.ar_len    = slave_axi_req_i.arlen;
-    assign slave_dv.ar_size   = slave_axi_req_i.arsize;
-    assign slave_dv.ar_burst  = slave_axi_req_i.arburst;
-    assign slave_dv.ar_lock   = slave_axi_req_i.arlock;
-    assign slave_dv.ar_cache  = slave_axi_req_i.arcache;
-    assign slave_dv.ar_prot   = slave_axi_req_i.arprot;
-    assign slave_dv.ar_qos    = slave_axi_req_i.arqos;
-    assign slave_dv.ar_region = slave_axi_req_i.arregion;
-    assign slave_dv.ar_user   = '0;
-    assign slave_dv.ar_valid  = slave_axi_req_i.arvalid;
-    assign slave_dv.r_ready   = slave_axi_req_i.rready;
+    // ------------------------------------------------------------------
+    // Slave face: NSU port -> taxi tile crossbar -> config RAM / data memory
+    // ------------------------------------------------------------------
+    // taxi's wr and rd are modports of ONE interface instance, so a single
+    // taxi_axi_if feeds both halves of the crossbar and both halves of a
+    // target. Field names already match the flat struct (taxi uses plain AXI
+    // names), so this face is a straight rename-free forward.
+    taxi_axi_if #(
+        .DATA_W(DATA_WIDTH), .ADDR_W(ADDR_WIDTH), .ID_W(ID_WIDTH)
+    ) tile_axi ();
+
+    taxi_axi_if #(
+        .DATA_W(DATA_WIDTH), .ADDR_W(ADDR_WIDTH), .ID_W(ID_WIDTH)
+    ) target_axi [TILE_TARGETS] ();
+
+    localparam int unsigned DATA_TARGET = TILE_TARGETS - 1;
+
+    // Fault injection for the DECERR gate (standing red-test rule, same shape
+    // as +mcast_fault above): +decerr_fault=1 sets the top address bit on this
+    // node's inbound AR, which lands outside every crossbar window exactly as a
+    // Python/C++ tile-layout divergence would. The crossbar answers RRESP =
+    // DECERR and the master-face fatal below names it.
+    // The write twin, +decerr_fault_wr=1, is a SEPARATE plusarg on purpose:
+    // faulting AW and AR together would rebase a pair to the same wrong window,
+    // where the readback still agrees and nothing fires. On the AW alone the
+    // crossbar drops the burst's W beats (taxi_axi_crossbar_wr.sv:287 w_drop_reg)
+    // and its dedicated B port answers BRESP = DECERR (:384), which travels the
+    // NSU -> NMU B path and is named by the BRESP fatal below.
+    localparam logic [ADDR_WIDTH-1:0] DECERR_FAULT_BIT = 1 << (ADDR_WIDTH - 1);
+    bit decerr_fault = 1'b0;
+    bit decerr_fault_wr = 1'b0;
+    initial void'($value$plusargs("decerr_fault=%d", decerr_fault));
+    initial void'($value$plusargs("decerr_fault_wr=%d", decerr_fault_wr));
+
+    assign tile_axi.awid     = slave_axi_req_i.awid;
+    assign tile_axi.awaddr   = slave_axi_req_i.awaddr | (decerr_fault_wr ? DECERR_FAULT_BIT : '0);
+    assign tile_axi.awlen    = slave_axi_req_i.awlen;
+    assign tile_axi.awsize   = slave_axi_req_i.awsize;
+    assign tile_axi.awburst  = slave_axi_req_i.awburst;
+    assign tile_axi.awlock   = slave_axi_req_i.awlock;
+    assign tile_axi.awcache  = slave_axi_req_i.awcache;
+    assign tile_axi.awprot   = slave_axi_req_i.awprot;
+    assign tile_axi.awqos    = slave_axi_req_i.awqos;
+    assign tile_axi.awregion = slave_axi_req_i.awregion;
+    assign tile_axi.awuser   = '0;
+    assign tile_axi.awvalid  = slave_axi_req_i.awvalid;
+    assign tile_axi.wdata    = slave_axi_req_i.wdata;
+    assign tile_axi.wstrb    = slave_axi_req_i.wstrb;
+    assign tile_axi.wlast    = slave_axi_req_i.wlast;
+    assign tile_axi.wuser    = '0;
+    assign tile_axi.wvalid   = slave_axi_req_i.wvalid;
+    assign tile_axi.bready   = slave_axi_req_i.bready;
+    assign tile_axi.arid     = slave_axi_req_i.arid;
+    assign tile_axi.araddr   = slave_axi_req_i.araddr | (decerr_fault ? DECERR_FAULT_BIT : '0);
+    assign tile_axi.arlen    = slave_axi_req_i.arlen;
+    assign tile_axi.arsize   = slave_axi_req_i.arsize;
+    assign tile_axi.arburst  = slave_axi_req_i.arburst;
+    assign tile_axi.arlock   = slave_axi_req_i.arlock;
+    assign tile_axi.arcache  = slave_axi_req_i.arcache;
+    assign tile_axi.arprot   = slave_axi_req_i.arprot;
+    assign tile_axi.arqos    = slave_axi_req_i.arqos;
+    assign tile_axi.arregion = slave_axi_req_i.arregion;
+    assign tile_axi.aruser   = '0;
+    assign tile_axi.arvalid  = slave_axi_req_i.arvalid;
+    assign tile_axi.rready   = slave_axi_req_i.rready;
     always_comb begin
         slave_axi_rsp_o = '0;
-        slave_axi_rsp_o.awready = slave_dv.aw_ready;
-        slave_axi_rsp_o.wready  = slave_dv.w_ready;
-        slave_axi_rsp_o.bid     = slave_dv.b_id;
-        slave_axi_rsp_o.bresp   = slave_dv.b_resp;
-        slave_axi_rsp_o.bvalid  = slave_dv.b_valid;
-        slave_axi_rsp_o.arready = slave_dv.ar_ready;
-        slave_axi_rsp_o.rid     = slave_dv.r_id;
-        slave_axi_rsp_o.rdata   = slave_dv.r_data;
-        slave_axi_rsp_o.rresp   = slave_dv.r_resp;
-        slave_axi_rsp_o.rlast   = slave_dv.r_last;
-        slave_axi_rsp_o.rvalid  = slave_dv.r_valid;
+        slave_axi_rsp_o.awready = tile_axi.awready;
+        slave_axi_rsp_o.wready  = tile_axi.wready;
+        slave_axi_rsp_o.bid     = tile_axi.bid;
+        slave_axi_rsp_o.bresp   = tile_axi.bresp;
+        slave_axi_rsp_o.bvalid  = tile_axi.bvalid;
+        slave_axi_rsp_o.arready = tile_axi.arready;
+        slave_axi_rsp_o.rid     = tile_axi.rid;
+        slave_axi_rsp_o.rdata   = tile_axi.rdata;
+        slave_axi_rsp_o.rresp   = tile_axi.rresp;
+        slave_axi_rsp_o.rlast   = tile_axi.rlast;
+        slave_axi_rsp_o.rvalid  = tile_axi.rvalid;
     end
+
+    // Crossbar sizing. These are testbench limits, provisioned generously so
+    // none of them becomes the bottleneck: the pressure is supposed to come
+    // from rand_slave's randomized delays. S_ACCEPT 64 is total accepted
+    // transactions at the tile port -- one NMU's pool is 32, but under hotspot
+    // every node targets one tile, so 32 would throttle; overflow stalls, it
+    // never errors. S_THREADS 8 is concurrent unique IDs and cannot exceed
+    // S_ACCEPT (the RTL clamps and warns); today NSU_META_BUFFER_MAX_UNIQUE_IDS
+    // collapses everything onto one id, so it never binds. M_ISSUE 32 is the
+    // per-target in-flight limit -- deliberately NOT 1 on the config port: the
+    // RAM backpressures itself and the crossbar should not second-guess a
+    // target. M_*_REG_TYPE is left alone: taxi_axi_crossbar_1s declares those
+    // parameters but never forwards them, so the lower defaults (AW/AR simple
+    // buffer, W skid, B/R bypass) stand and setting them would have no effect.
+    localparam int unsigned XBAR_S_ACCEPT  = 64;
+    localparam int unsigned XBAR_S_THREADS = 8;
+    localparam int unsigned XBAR_M_ISSUE   = 32;
+
+    taxi_axi_crossbar_1s #(
+        .M_COUNT(TILE_TARGETS),
+        .ADDR_W(ADDR_WIDTH),
+        .S_THREADS(XBAR_S_THREADS),
+        .S_ACCEPT(XBAR_S_ACCEPT),
+        .M_REGIONS(1),
+        .M_BASE_ADDR(TILE_BASE_ADDR),
+        .M_ADDR_W(TILE_ADDR_W),
+        .M_ISSUE({TILE_TARGETS{XBAR_M_ISSUE[31:0]}}),
+        .M_SECURE({TILE_TARGETS{1'b0}})
+    ) u_tile_xbar (
+        .clk(clk_i), .rst(!rst_ni),
+        .s_axi_wr(tile_axi),   .s_axi_rd(tile_axi),
+        .m_axi_wr(target_axi), .m_axi_rd(target_axi)
+    );
+
+    // At TILE_TARGETS = 1 the stamped array is all-zero, and taxi reads a zero
+    // M_BASE_ADDR as "use auto-addressing" (taxi_axi_crossbar_addr.sv:135), so
+    // the window in force there is calcBaseAddrs()'s, not the emitted array.
+    // Same answer for one region at base 0, but do not read the array as
+    // authoritative in that shape.
+
+    // Config target (m0). ADDR_W is the CONFIG REGION width, never the system
+    // width: taxi_axi_ram's mem is a dense 2**(ADDR_W-$clog2(STRB_W)) array, so
+    // the 4 KB window is 64 x 512 b. Present only when the topology gives this
+    // node a config space; with one space the memory target is m0 instead.
+    if (TILE_TARGETS > 1) begin : g_config_ram
+        taxi_axi_ram #(.ADDR_W(int'(TILE_ADDR_W[0]))) u_config_ram (
+            .clk(clk_i), .rst(!rst_ni),
+            .s_axi_wr(target_axi[0]), .s_axi_rd(target_axi[0])
+        );
+    end
+
+    // Data target -> slave_dv: the one permitted adapter, a per-field rename
+    // between two AXI4 faces at identical widths (taxi `awid` vs pulp `aw_id`).
+    // No protocol or width conversion, so its only failure mode is a mis-wired
+    // field, which the master-face scoreboard catches on the first readback.
+    // aw_atop / *_user have no taxi counterpart in this configuration.
+    assign slave_dv.aw_id     = target_axi[DATA_TARGET].awid;
+    assign slave_dv.aw_addr   = target_axi[DATA_TARGET].awaddr;
+    assign slave_dv.aw_len    = target_axi[DATA_TARGET].awlen;
+    assign slave_dv.aw_size   = target_axi[DATA_TARGET].awsize;
+    assign slave_dv.aw_burst  = target_axi[DATA_TARGET].awburst;
+    assign slave_dv.aw_lock   = target_axi[DATA_TARGET].awlock;
+    assign slave_dv.aw_cache  = target_axi[DATA_TARGET].awcache;
+    assign slave_dv.aw_prot   = target_axi[DATA_TARGET].awprot;
+    assign slave_dv.aw_qos    = target_axi[DATA_TARGET].awqos;
+    assign slave_dv.aw_region = target_axi[DATA_TARGET].awregion;
+    assign slave_dv.aw_atop   = '0;
+    assign slave_dv.aw_user   = '0;
+    assign slave_dv.aw_valid  = target_axi[DATA_TARGET].awvalid;
+    assign slave_dv.w_data    = target_axi[DATA_TARGET].wdata;
+    assign slave_dv.w_strb    = target_axi[DATA_TARGET].wstrb;
+    assign slave_dv.w_last    = target_axi[DATA_TARGET].wlast;
+    assign slave_dv.w_user    = '0;
+    assign slave_dv.w_valid   = target_axi[DATA_TARGET].wvalid;
+    assign slave_dv.b_ready   = target_axi[DATA_TARGET].bready;
+    assign slave_dv.ar_id     = target_axi[DATA_TARGET].arid;
+    assign slave_dv.ar_addr   = target_axi[DATA_TARGET].araddr;
+    assign slave_dv.ar_len    = target_axi[DATA_TARGET].arlen;
+    assign slave_dv.ar_size   = target_axi[DATA_TARGET].arsize;
+    assign slave_dv.ar_burst  = target_axi[DATA_TARGET].arburst;
+    assign slave_dv.ar_lock   = target_axi[DATA_TARGET].arlock;
+    assign slave_dv.ar_cache  = target_axi[DATA_TARGET].arcache;
+    assign slave_dv.ar_prot   = target_axi[DATA_TARGET].arprot;
+    assign slave_dv.ar_qos    = target_axi[DATA_TARGET].arqos;
+    assign slave_dv.ar_region = target_axi[DATA_TARGET].arregion;
+    assign slave_dv.ar_user   = '0;
+    assign slave_dv.ar_valid  = target_axi[DATA_TARGET].arvalid;
+    assign slave_dv.r_ready   = target_axi[DATA_TARGET].rready;
+
+    assign target_axi[DATA_TARGET].awready = slave_dv.aw_ready;
+    assign target_axi[DATA_TARGET].wready  = slave_dv.w_ready;
+    assign target_axi[DATA_TARGET].bid     = slave_dv.b_id;
+    assign target_axi[DATA_TARGET].bresp   = slave_dv.b_resp;
+    assign target_axi[DATA_TARGET].buser   = '0;
+    assign target_axi[DATA_TARGET].bvalid  = slave_dv.b_valid;
+    assign target_axi[DATA_TARGET].arready = slave_dv.ar_ready;
+    assign target_axi[DATA_TARGET].rid     = slave_dv.r_id;
+    assign target_axi[DATA_TARGET].rdata   = slave_dv.r_data;
+    assign target_axi[DATA_TARGET].rresp   = slave_dv.r_resp;
+    assign target_axi[DATA_TARGET].rlast   = slave_dv.r_last;
+    assign target_axi[DATA_TARGET].ruser   = '0;
+    assign target_axi[DATA_TARGET].rvalid  = slave_dv.r_valid;
 
     // ------------------------------------------------------------------
     // VIP classes
@@ -173,7 +324,11 @@ module user_node_endpoint #(
         .TA(ApplTime), .TT(TestTime)
     ) file_master_t;
     // Zero response wait: an ideal sink so the FABRIC is the bottleneck, not the
-    // slave. The pulp default (AX_MAX_WAIT_CYCLES=100, RESP=20, R=5) throttles
+    // slave. It now sits behind the tile crossbar, whose master-port AW/AR
+    // simple buffer and W skid (taxi defaults, not settable through the _1s
+    // wrapper) add a cycle or two and smooth the randomized backpressure a
+    // little before it reaches the NSU. The pulp default
+    // (AX_MAX_WAIT_CYCLES=100, RESP=20, R=5) throttles
     // responses and hides fabric saturation (measured util ~1.2% at greedy
     // injection). Standard NoC-eval practice (booksim2 consumes at the sink).
     // The directed two-phase run is a data-integrity gate (scoreboard compares
@@ -249,6 +404,15 @@ module user_node_endpoint #(
         return m;
     endfunction
 
+    // The one "not an error response" predicate, {OKAY, EXOKAY}, the set pulp
+    // uses (axi_test.sv:2133-2134). Both readers below call it -- the RRESP
+    // fatal and the multicast replica compare -- so the two can never disagree
+    // about a beat. EXOKAY is unreachable today: no pattern issues exclusive
+    // accesses.
+    function automatic bit resp_ok(input logic [1:0] resp);
+        return resp inside {axi_pkg::RESP_OKAY, axi_pkg::RESP_EXOKAY};
+    endfunction
+
     initial begin
         scoreboard = new(master_dv);
         scoreboard.reset();
@@ -304,11 +468,39 @@ module user_node_endpoint #(
         end else if (master_axi_rsp_i.bvalid && master_axi_req_o.bready) begin
             b_returned[master_axi_rsp_i.bid] <= b_returned[master_axi_rsp_i.bid] + 1;
             // Directed runs use an always-OKAY MAPPED slave, so any error
-            // response here is a fabric bug (e.g. a corrupted merged B).
+            // response here is a fabric bug (e.g. a corrupted merged B), or a
+            // write that missed every tile window. +decerr_fault_wr=1 proves it
+            // fires.
             if (master_axi_rsp_i.bresp != axi_pkg::RESP_OKAY)
                 $fatal(1, "[mcast_sb] node%0d: BRESP=%0h on id=%0h, expected OKAY",
                        NODE_ID, master_axi_rsp_i.bresp, master_axi_rsp_i.bid);
         end
+    end
+
+    // RRESP twin of the BRESP fatal above, and the read half of the tile-layout
+    // gate: the tile crossbar DECERRs any address outside every window, so a
+    // disagreement between the SAM's space_base and the generated
+    // TILE_BASE_ADDR / TILE_ADDR_W surfaces here by name instead of as an
+    // unexplained data mismatch. +decerr_fault=1 proves it fires.
+    //
+    // Nothing else checked RRESP in ANY mode: pulp's RRespCheck asserts only
+    // r_id and r_last (axi_test.sv:2154-2157), and its read-data compare is
+    // SKIPPED when r_resp leaves {OKAY, EXOKAY} (:2133-2134), so an error
+    // response silently passed the scoreboard rather than failing it.
+    //
+    // What this gate covers, precisely: an address that matches NO window. Two
+    // layout-divergence shapes escape it and need the model-side checks
+    // instead. A config/memory transposition only DECERRs its data half --
+    // config traffic at 0x100000+off lands inside the memory window, where the
+    // write and its readback agree. And a config access overrunning its SAM
+    // entry falls into the NEXT entry, routes to a different node's config RAM,
+    // rebases to a legal offset there, and also agrees; that one is held off
+    // upstream by gen_test_patterns' probe-window guard.
+    always_ff @(posedge clk_i) begin
+        if (rst_ni && master_axi_rsp_i.rvalid && master_axi_req_o.rready &&
+                !resp_ok(master_axi_rsp_i.rresp))
+            $fatal(1, "[tile_decode] node%0d: RRESP=%0h on id=%0h, expected OKAY (address outside every tile window?)",
+                   NODE_ID, master_axi_rsp_i.rresp, master_axi_rsp_i.rid);
     end
 
     // Debug handshake trace: +hs_trace_node=<id> dumps per-cycle AW/W/B
@@ -449,16 +641,21 @@ module user_node_endpoint #(
                     mcast_rd_active[rid].size));
                 first_byte = (mcast_rd_beat[rid] == 0)
                     ? int'(mcast_rd_active[rid].addr - beat_address) : 0;
-                for (int unsigned j = first_byte;
-                     j < axi_pkg::num_bytes(mcast_rd_active[rid].size); j++) begin
-                    automatic longint unsigned ba = beat_address + j;
-                    if (mcast_mem.exists(ba)) begin
-                        automatic logic [7:0] act =
-                            master_axi_rsp_i.rdata[8 * (ba % MC_BUS_BYTES) +: 8];
-                        mcast_checked = mcast_checked + 1;
-                        if (act !== mcast_mem[ba])
-                            $fatal(1, "[mcast_sb] node%0d: replica readback mismatch addr=%h exp=%h act=%h (id=%0d beat=%0d)",
-                                   NODE_ID, ba, mcast_mem[ba], act, rid, mcast_rd_beat[rid]);
+                // An error response carries no read data, so comparing it would
+                // report a decode failure as a data mismatch. The RRESP fatal
+                // above is what actually reports the error.
+                if (resp_ok(master_axi_rsp_i.rresp)) begin
+                    for (int unsigned j = first_byte;
+                         j < axi_pkg::num_bytes(mcast_rd_active[rid].size); j++) begin
+                        automatic longint unsigned ba = beat_address + j;
+                        if (mcast_mem.exists(ba)) begin
+                            automatic logic [7:0] act =
+                                master_axi_rsp_i.rdata[8 * (ba % MC_BUS_BYTES) +: 8];
+                            mcast_checked = mcast_checked + 1;
+                            if (act !== mcast_mem[ba])
+                                $fatal(1, "[mcast_sb] node%0d: replica readback mismatch addr=%h exp=%h act=%h (id=%0d beat=%0d)",
+                                       NODE_ID, ba, mcast_mem[ba], act, rid, mcast_rd_beat[rid]);
+                        end
                     end
                 end
                 if (master_axi_rsp_i.rlast) mcast_rd_busy[rid] = 1'b0;

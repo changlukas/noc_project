@@ -3,7 +3,6 @@
 Layer 2 不變量同時是 C-model packer 的 runtime assertion 來源：
 - per-channel width sum: payload_width 必須等於 channel fields 寬度總和
 - SECDED bound: ECC 寬度必須滿足 Hamming inequality
-- route_par_coverage 參照的 header 欄位必須存在
 
 JSON 已不再儲存 lsb/msb/width/derived，欄位位置由
 ``ni_spec.constants`` 的 *_resolved helpers 在 read time 推算；所以
@@ -117,14 +116,7 @@ def check_flit_arithmetic(packet_spec) -> List[Issue]:
                     issues.append(_warn(TAG, f"FLIT_ECC_WIDTH={ecc} is conservative; "
                                              f"theoretical minimum is {margin}"))
 
-    # 4) route_par_coverage references must exist in the header field list.
-    hdr_names = {f["name"] for f in hdr}
-    for cov in flit.get("route_par_coverage", []):
-        if cov not in hdr_names:
-            issues.append(_err(TAG, f"route_par_coverage references '{cov}' "
-                                    f"which is not a header field"))
-
-    # 5) Header derived padding: at most one field may declare width_param='derived'.
+    # 4) Header derived padding: at most one field may declare width_param='derived'.
     #    The derived field anchors a fixed-size header (HEADER_TOTAL_WIDTH); allowing
     #    multiple derived fields would make the remainder split ambiguous.
     derived_hdr = [f["name"] for f in hdr if f.get("width_param") == "derived"]

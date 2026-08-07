@@ -3,7 +3,8 @@
 
 Usage: perf_cli_summary.py <perf.json>
 
-Prints per-router fifo occupancy and per-link flit/stall counters.
+Prints per-router fifo occupancy, per-link flit/stall counters, and a
+per-network roll-up of those links.
 """
 
 import json
@@ -47,6 +48,34 @@ def print_noc(noc):
                 lk.get("stall_cyc", 0),
             )
         print(r_part + l_part)
+
+    print_net_rollup(links)
+
+
+def print_net_rollup(links):
+    """Per-network totals over the links.
+
+    gen_tb_top.py:420 names every link monitor "{net}_{i}to{peer}", so the
+    network is the name up to the first underscore (req / rsp / dat).
+
+    No grand total across networks: stall_cyc means valid && !ready on the
+    ready/valid networks (req, rsp) and a credit-starvation cycle on dat
+    (gen_tb_top.py:414-421), so the three columns are not the same quantity.
+    """
+    nets = {}
+    for lk in links:
+        net = lk.get("name", "?").split("_", 1)[0]
+        flit, stall = nets.get(net, (0, 0))
+        nets[net] = (flit + lk.get("flit_count", 0),
+                     stall + lk.get("stall_cyc", 0))
+    if not nets:
+        return
+    fmt = "    {:<16} {:>10} {:>11}"
+    print("")
+    print(fmt.format("network", "flit", "stall"))
+    for net in sorted(nets):
+        flit, stall = nets[net]
+        print(fmt.format(net, flit, stall))
 
 
 def main():

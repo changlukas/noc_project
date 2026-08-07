@@ -32,10 +32,11 @@ decides whether this NoC pays for itself.
 - **Single-port ingress.** One AXI master port per endpoint, plane classified in the NI by SAM address decode.
 - **Scalable mesh.** 2D mesh with GALS decoupling between the NoC and IP clock domains.
 
-**Motivation from the current single-format design.** Every channel, including a 64-bit `B`
-response, is carried in the same 408-bit flit, so control channels use only 18 to 31 % of the
-payload (`AW/AR` 108/352 = 31 %, `B` 64/352 = 18 %) and the header is 13.7 % overhead. A
-dedicated narrow plane is what recovers this.
+**Motivation from the superseded single-format design.** Every channel, including a 64-bit
+`B` response, used to be carried in the same 408-bit flit, so control channels used only 18
+to 31 % of the payload (`AW/AR` 108/352 = 31 %, `B` 64/352 = 18 %) and the header cost
+13.7 % overhead. Recovering that is why the narrow plane was split out; the fabric now
+carries three per-network widths (REQ 137 b, RSP 127 b, DAT 629 b) over a 44 b header.
 
 ---
 

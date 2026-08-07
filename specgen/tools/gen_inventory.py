@@ -21,17 +21,23 @@ DEFAULT_OUT  = SPECGEN_ROOT.parent / "src" / "c_model" / "FEATURE_INVENTORY.md"
 
 # Implemented filenames that differ from the ID-derived short name.
 # Project naming convention is full words (vc_allocator, not vc_arb); the
-# VC mapping policy is implemented inside the arbiter header (enum
-# VcMode), not a standalone file.
+# VC mapping policy is implemented inside the same allocator header, not a
+# standalone file.
 _HEADER_OVERRIDES = {
     "FEAT-NMU-VC_ARB":     "src/c_model/include/nmu/vc_allocator.hpp",
     "FEAT-NSU-VC_ARB":     "src/c_model/include/nsu/vc_allocator.hpp",
-    "FEAT-NMU-VC_MAPPING": "src/c_model/include/nmu/vc_allocator.hpp (VcMode)",
+    "FEAT-NMU-VC_MAPPING": "src/c_model/include/nmu/vc_allocator.hpp",
     "FEAT-ROUTER-ROUTE_COMPUTATION":    "src/c_model/include/router/router.hpp (route_compute)",
     "FEAT-ROUTER-WORMHOLE_ARBITRATION": "src/c_model/include/router/router.hpp",
     "FEAT-ROUTER-VC_ARBITRATION":       "src/c_model/include/router/router.hpp",
     "FEAT-ROUTER-CREDIT_FLOW_CONTROL":  "src/c_model/include/router/router.hpp",
-    "FEAT-ROUTER-ROUTE_PARITY_CHECK":   "src/c_model/include/router/router.hpp",
+    # The NI wormhole arbiter is one shared implementation, instantiated with a
+    # different input count by each block.
+    "FEAT-NMU-WORMHOLE_ARB": "src/c_model/include/ni/wormhole_arbiter.hpp",
+    "FEAT-NSU-WORMHOLE_ARB": "src/c_model/include/ni/wormhole_arbiter.hpp",
+    # Fork and join live in the two router cores beside the mask functions.
+    "FEAT-ROUTER-MULTICAST_FORK": "src/c_model/include/router/route_mask.hpp (route_mask_fork), router.hpp, simple_router.hpp",
+    "FEAT-ROUTER-COLLECTB_JOIN":  "src/c_model/include/router/route_mask.hpp (route_mask_join), simple_router.hpp",
 }
 
 

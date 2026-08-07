@@ -120,10 +120,6 @@
               "payload_channel": {"type": "string"}
             }
           }
-        },
-        "route_par_coverage": {
-          "type": "array",
-          "items": {"type": "string"}
         }
       }
     }

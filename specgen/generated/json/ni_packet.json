@@ -321,10 +321,6 @@
       "DataAw":   {"network": "DAT", "payload_channel": "AW"},
       "DataW":    {"network": "DAT", "payload_channel": "DATA_W"},
       "DataR":    {"network": "DAT", "payload_channel": "DATA_R"}
-    },
-    "route_par_coverage": [
-      "dst_id",
-      "flit_tail"
-    ]
+    }
   }
 }

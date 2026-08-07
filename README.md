@@ -68,7 +68,7 @@ Artifacts land under `build/` (gitignored); `make clean` removes them.
 
 ~~~bash
 make test                                  # c_model ctest suite
-make specgen_pytest                        # specgen suite + golden drift gate
+make pytest                                # specgen + sim/tools suites, golden drift gate
 python3 specgen/tools/codegen.py --check   # committed generated code matches sources
 ~~~
 
@@ -80,7 +80,7 @@ On Windows, invoke Python scripts with `py -3` instead of `python3`.
 
 | var | values |
 |---|---|
-| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_nonuniform_vc1`, `mesh_2x2_config_narrow_vc1` (adds a config-space narrow-class aperture on node 0), `mesh_2x4_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`; append `_rob` for the reorder-buffer variant |
+| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_config_narrow_vc1`, `mesh_2x4_config_narrow_vc1`, `mesh_2x4_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`; append `_rob` for the reorder-buffer variant. Every node gets a 1 MB memory tile; the two `*_config_narrow_*` maps add a 4 KB config tile beside it |
 | `PATTERN` | `neighbor`, `transpose`, `uniform_random`, `hotspot` (`transpose` needs a square power-of-two mesh), `beat_exact` (per-lane-distinct bytes + walking WSTRB, DPI word-boundary check) |
 
 `SEED` unset draws and prints a random seed; pass `SEED=<n>` to replay
@@ -155,6 +155,7 @@ python3 specgen/tools/codegen.py --check
 - [Router design spec](docs/router-spec.md)
 - [Response-ordering trade-off record](docs/trade-off.md)
 - [Verification environment](docs/verification-environment.md)
+- [Known limitations](docs/known-limitations.md)
 - [specgen sub-project guide](specgen/docs/guide/index.md)
 
 ## Contributing

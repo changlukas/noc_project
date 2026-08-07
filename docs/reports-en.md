@@ -59,13 +59,15 @@ topology:
   num_vc: 1
 address_map:
   tiles:
-    - { x: 0, y: 0, size: 0x100000000 }
-    - { x: 1, y: 0, size: 0x100000000 }
-    - { x: 2, y: 0, size: 0x100000000 }
-    - { x: 3, y: 0, size: 0x100000000 }
-    - { x: 0, y: 1, size: 0x100000000 }
+    - { x: 0, y: 0, size: 0x100000 }
+    - { x: 1, y: 0, size: 0x100000 }
+    - { x: 2, y: 0, size: 0x100000 }
+    - { x: 3, y: 0, size: 0x100000 }
+    - { x: 0, y: 1, size: 0x100000 }
     # ... one entry per node, 16 total
-    - { x: 3, y: 3, size: 0x100000000 }
+    - { x: 3, y: 3, size: 0x100000 }
+    # a `space: config` entry per node makes it a two-space map; the
+    # *_config_narrow_* topologies use that shape, this one does not
 ```
 
 **Packed base addresses, contiguous and gap-free**
@@ -73,9 +75,9 @@ address_map:
 | node | (x, y) | Base |
 |---|---|---|
 | 0 | (0, 0) | 0x0 |
-| 3 | (3, 0) | 0x3_0000_0000 |
-| 4 | (0, 1) | 0x4_0000_0000 |
-| 15 | (3, 3) | 0xF_0000_0000 |
+| 3 | (3, 0) | 0x30_0000 |
+| 4 | (0, 1) | 0x40_0000 |
+| 15 | (3, 3) | 0xF0_0000 |
 
 **Flow** (`gen_test_patterns.py`)
 1. Read the topology YAML with its `address_map` tiles.

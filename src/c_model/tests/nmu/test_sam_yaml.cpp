@@ -2,7 +2,11 @@
 #include "axi/types.hpp"
 #include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <filesystem>
 #include <fstream>
+#include <string>
+#include <vector>
 
 using ni::cmodel::nmu::addr_trans::load_sam_table;
 namespace axi = ni::cmodel::axi;
@@ -79,22 +83,22 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
     EXPECT_DEATH(load_sam_table(path_y), "mesh dimensions must be >= 2");
 }
 
-// Guards the real topology configs: sim/topologies/ is copied next to the
-// test binary at build time (CMakeLists.txt). Cross-checked against the
-// Python loader on the same files (test_address_map_pack_real_topologies_gap_free
-// in sim/tools/test_gen_test_patterns_filemaster.py) -- if both pass, the C++
-// and Python packing agree on every real topology YAML.
+// Guards the real topology configs. TOPOLOGY_DIR is sim/topologies/ itself
+// (CMakeLists.txt), globbed rather than listed, so a new topology YAML cannot
+// fall out of coverage. Same files and same shape as the Python twin
+// (test_address_map_pack_real_topologies_gap_free in
+// sim/tools/test_gen_test_patterns_filemaster.py) -- if both pass, the C++ and
+// Python packing agree on every real topology YAML.
 TEST(SamYaml, RealTopologiesGapFreePacked) {
-    static const char* kFiles[] = {
-        "topologies/mesh_2x2_nonuniform_vc1.yaml",
-        "topologies/mesh_2x4_vc1.yaml",
-        "topologies/mesh_4x4_vc1.yaml",
-        "topologies/mesh_4x4_vc2.yaml",
-        "topologies/mesh_4x4_vc4.yaml",
-        "topologies/mesh_4x4_vc8.yaml",
-        "topologies/mesh_2x2_config_narrow_vc1.yaml",
-    };
-    for (const char* file : kFiles) {
+    std::vector<std::string> files;
+    for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
+        if (entry.path().extension() == ".yaml") files.push_back(entry.path().string());
+    }
+    std::sort(files.begin(), files.end());
+    // Same floor the Python twin asserts: an empty or unreachable directory must
+    // fail, not pass vacuously.
+    ASSERT_GE(files.size(), 6u) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
+    for (const auto& file : files) {
         SCOPED_TRACE(file);
         auto sam = load_sam_table(file);
         ASSERT_FALSE(sam.entries().empty());
@@ -110,19 +114,27 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
 // (docs/noc-target-spec.md §5). mesh_2x2_config_narrow_vc1.yaml gives node
 // (0,0) both a memory tile (default space) and a config tile.
 TEST(SamYaml, SpaceAttributeSelectsClass) {
-    auto sam = load_sam_table("topologies/mesh_2x2_config_narrow_vc1.yaml");
+    auto sam = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_config_narrow_vc1.yaml");
     // Memory-space tiles pack first (list order): node (0,0)'s memory tile is
     // [0, 0x100000).
     auto memory = sam.translate(0x1000);
     EXPECT_EQ(memory.dst_id, 0x00u);
     EXPECT_EQ(memory.cls, axi::AxiClass::Data);
+    // Tile-local layering: config span 0x1000 takes [0x0, 0x1000), memory span
+    // 0x100000 starts at 0x100000, so the memory tile's offset 0x1000 lands at
+    // 0x101000 -- outside the config window.
+    EXPECT_EQ(memory.local_addr, 0x101000ull);
 
-    // The config tile is the 5th (last) entry: base = sum of the 4 memory
-    // tiles' sizes = 4 * 0x100000 = 0x400000, size 0x1000.
+    // The config tile is the 5th entry: base = sum of the 4 memory tiles'
+    // sizes = 4 * 0x100000 = 0x400000, size 0x1000.
     auto config = sam.translate(0x400010);
     EXPECT_EQ(config.dst_id, 0x00u);
     EXPECT_EQ(config.cls, axi::AxiClass::Narrow);
-    EXPECT_EQ(config.local_addr, 0x10ull);  // rebased against the config tile's own base
+    EXPECT_EQ(config.local_addr, 0x10ull);  // config space sits at tile-local 0x0
+
+    // The two spaces of one node no longer collide at tile-local 0 -- this is
+    // what the tile crossbar decodes on.
+    EXPECT_NE(sam.translate(0x0).local_addr, sam.translate(0x400000).local_addr);
 }
 
 TEST(SamYaml, UnknownSpaceRejected) {

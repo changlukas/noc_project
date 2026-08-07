@@ -35,6 +35,35 @@ TEST(SamTable, PackedTranslateRebasesFromAccumulatedBase) {
     EXPECT_EQ(t.local_addr, 0x40ull);  // rebased: addr - base
 }
 
+// Tile-local layering: the memory space's slot is DERIVED from the largest
+// memory entry, not fixed. Same numbers as the Python twin's mixed-size case
+// (test_address_map_tile_layout_derives_span_from_entries in
+// sim/tools/test_gen_test_patterns_filemaster.py) -- if the two rules diverge,
+// one of the pair fails.
+TEST(SamTable, SpaceBaseDerivedFromLargestEntryOfThatSpace) {
+    auto sam = SamTable::packed({
+        {0, 0, 0x200000, axi::AxiClass::Data},  // largest memory tile
+        {1, 0, 0x100000, axi::AxiClass::Data},
+        {0, 1, 0x100000, axi::AxiClass::Data},
+        {1, 1, 0x100000, axi::AxiClass::Data},
+        {0, 0, 0x1000, axi::AxiClass::Narrow},
+        {1, 0, 0x1000, axi::AxiClass::Narrow},
+        {0, 1, 0x1000, axi::AxiClass::Narrow},
+        {1, 1, 0x1000, axi::AxiClass::Narrow},
+    });
+    // config span 0x1000 at 0x0; memory span 0x200000 aligned up from 0x1000.
+    EXPECT_EQ(sam.entries()[0].space_base, 0x200000ull);
+    EXPECT_EQ(sam.entries()[4].space_base, 0x0ull);
+    // A smaller memory tile shares the space's slot -- the span is per space,
+    // not per entry, so multicast replicas keep the same term (design §1.3).
+    EXPECT_EQ(sam.entries()[1].space_base, 0x200000ull);
+}
+
+TEST(SamTable, SpaceBaseIsZeroWhenOnlyOneSpacePresent) {
+    auto sam = SamTable::packed({{0, 0, 0x100000}, {1, 0, 0x100000}});
+    EXPECT_EQ(sam.entries()[0].space_base, 0x0ull);  // memory-only tile: no config slot to skip
+}
+
 TEST(SamTable, LookupMissReturnsNull) {
     auto sam = SamTable::packed({{0, 0, 0x1000}});
     EXPECT_EQ(sam.lookup(0x2000ull), nullptr);
@@ -59,6 +88,14 @@ TEST(SamValidator, RejectsNon4KBSize) {
 TEST(SamValidator, RejectsZeroSize) {
     SamTable bad(std::vector<SamEntry>{{0x0, 0x0, 0x00}});
     EXPECT_DEATH(bad.validate(4, 4), "zero-size");
+}
+
+TEST(SamValidator, RejectsBasePlusSizeOverflow) {
+    // Non-zero and 4 KB aligned, so the two earlier field checks pass and this
+    // is the one that fires. base+size wraps to 0, which the overlap pass and
+    // lookup() would both read as an empty range instead of a top-of-space tile.
+    SamTable bad(std::vector<SamEntry>{{0xFFFFFFFFFFFFF000ull, 0x1000, 0x00}});
+    EXPECT_DEATH(bad.validate(2, 2), "overflow");
 }
 
 TEST(SamValidator, RejectsDstOutsideMesh) {

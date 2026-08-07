@@ -38,8 +38,10 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
 - 2x2 to 16x16 mesh, 256 nodes
 - Write multicast / Response reduction support
 - 1 to 8 virtual channels, credit-based on `DAT`, ready/valid on `REQ` / `RSP`
-- XY wormhole, deadlock-free for unicast and non-overlapping multicast trees; concurrent
-  overlapping multicasts are serialized by software (see Scope)
+- XY routing on all three networks, wormhole switching for the one multi-flit packet type
+  (`AW`+`W`; every response packet is single-flit). Deadlock-free for unicast and
+  non-overlapping multicast trees; concurrent overlapping multicasts are serialized by
+  software (see Scope)
 - GALS, per-endpoint clocks
 
 **Scope.**

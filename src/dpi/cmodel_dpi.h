@@ -135,11 +135,12 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus, little-endian)
 //   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
-//   flit fields   : DAT_VEC_WORDS = 20 words (629-bit flit, little-endian,
-//                   tail word explicitly masked to the last DAT_FLIT_WIDTH bits)
+//   flit fields   : per network, little-endian, tail word explicitly masked to
+//                   that network's width: REQ 5 words (137 b), RSP 4 (127 b),
+//                   DAT 20 (629 b)
 //   other attribs : 1 word each (low bits used per width)
 // dat_num_vc threads the topology VC count into the NmuConfig DAT face
-// (REQ/RSP are fixed single-VC, S1 Q2 — no VC/vnet split on them anymore).
+// (REQ/RSP are fixed single-VC and carry no per-VC credit).
 // tx_dat_crdvalid / rx_dat_crdvalid are per-VC: ONE svBitVecVal word, bit vc
 // = credit pulse on VC vc.
 // config_path: topology YAML with an `address_map` block (NULL/empty ->
@@ -187,8 +188,9 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus = 16 x 32-bit words, little-endian)
 //   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
-//   flit fields   : DAT_VEC_WORDS = 20 words (629-bit flit, little-endian,
-//                   tail word explicitly masked to the last DAT_FLIT_WIDTH bits)
+//   flit fields   : per network, little-endian, tail word explicitly masked to
+//                   that network's width: REQ 5 words (137 b), RSP 4 (127 b),
+//                   DAT 20 (629 b)
 //   other attribs : 1 word each (low bits used per width)
 // dat_num_vc threads the topology VC count into the NsuConfig DAT face
 // (REQ/RSP are fixed single-VC, S1 Q2). tx_dat_crdvalid / rx_dat_crdvalid

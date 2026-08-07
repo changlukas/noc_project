@@ -83,6 +83,26 @@ TB_TOP_SV = $(COSIM_ROOT)/tb/tb_top_$(TOPOLOGY).sv
 # always lands on the vc word (vc2), not "vc2_rob" which has no matching noc_types_pkg file.
 # $(lastword $(subst _vc, vc,...)) then splits on "_vc" and takes the last word (e.g. "vc2").
 TOPOLOGY_BASE = $(TOPOLOGY:_rob=)
+# taxi tile-decode subset (sim/dv/README.md): the crossbar + RAM behind every
+# NSU port in user_node_endpoint.sv. Declaration order matters -- taxi_axi_if is
+# an interface, so it precedes every module that takes it as a port.
+TAXI_RTL := $(DV_ROOT)/taxi-d5d38c2/src
+TAXI_SRC := \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_if.sv \
+    $(TAXI_RTL)/prim/rtl/taxi_penc.sv \
+    $(TAXI_RTL)/prim/rtl/taxi_arbiter.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_register_wr.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_register_rd.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_tie_wr.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_tie_rd.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_addr.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_wr.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_rd.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_1s_wr.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_1s_rd.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_1s.sv \
+    $(TAXI_RTL)/axi/rtl/taxi_axi_ram.sv
+
 # noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
 # BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
 # twice). It is still a real compile input: each simulator's binary rule lists it
@@ -103,6 +123,7 @@ TB_TOP_SV_SRC := \
     $(DV_ROOT)/axi-0.39.7/src/axi_intf.sv \
     $(DV_ROOT)/axi-0.39.7/src/axi_test.sv \
     $(DV_ROOT)/floonoc-test/axi_bw_monitor.sv \
+    $(TAXI_SRC) \
     $(COSIM_ROOT)/tb/axi_vip_types_pkg.sv \
     $(SRC_SV)/nmu_wrap.sv \
     $(SRC_SV)/router_wrap.sv \
