@@ -396,6 +396,15 @@ module user_node_endpoint #(
         return m;
     endfunction
 
+    // The one "not an error response" predicate, {OKAY, EXOKAY}, the set pulp
+    // uses (axi_test.sv:2133-2134). Both readers below call it -- the RRESP
+    // fatal and the multicast replica compare -- so the two can never disagree
+    // about a beat. EXOKAY is unreachable today: no pattern issues exclusive
+    // accesses.
+    function automatic bit resp_ok(input logic [1:0] resp);
+        return resp inside {axi_pkg::RESP_OKAY, axi_pkg::RESP_EXOKAY};
+    endfunction
+
     initial begin
         scoreboard = new(master_dv);
         scoreboard.reset();
@@ -469,11 +478,6 @@ module user_node_endpoint #(
     // SKIPPED when r_resp leaves {OKAY, EXOKAY} (:2133-2134), so an error
     // response silently passed the scoreboard rather than failing it.
     //
-    // One predicate for "not an error response", {OKAY, EXOKAY}, the set pulp
-    // uses. The multicast replica compare below skips on the SAME set, so the
-    // two can never disagree about a beat. EXOKAY is unreachable today: no
-    // pattern issues exclusive accesses.
-    //
     // What this gate covers, precisely: an address that matches NO window. Two
     // layout-divergence shapes escape it and need the model-side checks
     // instead. A config/memory transposition only DECERRs its data half --
@@ -484,7 +488,7 @@ module user_node_endpoint #(
     // upstream by gen_test_patterns' probe-window guard.
     always_ff @(posedge clk_i) begin
         if (rst_ni && master_axi_rsp_i.rvalid && master_axi_req_o.rready &&
-                !(master_axi_rsp_i.rresp inside {axi_pkg::RESP_OKAY, axi_pkg::RESP_EXOKAY}))
+                !resp_ok(master_axi_rsp_i.rresp))
             $fatal(1, "[tile_decode] node%0d: RRESP=%0h on id=%0h, expected OKAY (address outside every tile window?)",
                    NODE_ID, master_axi_rsp_i.rresp, master_axi_rsp_i.rid);
     end
@@ -628,10 +632,9 @@ module user_node_endpoint #(
                 first_byte = (mcast_rd_beat[rid] == 0)
                     ? int'(mcast_rd_active[rid].addr - beat_address) : 0;
                 // An error response carries no read data, so comparing it would
-                // report a decode failure as a data mismatch. Same filter pulp's
-                // scoreboard applies (axi_test.sv:2133-2134); the RRESP fatal
+                // report a decode failure as a data mismatch. The RRESP fatal
                 // above is what actually reports the error.
-                if (master_axi_rsp_i.rresp inside {axi_pkg::RESP_OKAY, axi_pkg::RESP_EXOKAY}) begin
+                if (resp_ok(master_axi_rsp_i.rresp)) begin
                     for (int unsigned j = first_byte;
                          j < axi_pkg::num_bytes(mcast_rd_active[rid].size); j++) begin
                         automatic longint unsigned ba = beat_address + j;
