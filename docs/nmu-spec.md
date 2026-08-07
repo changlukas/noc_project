@@ -90,7 +90,7 @@ R payload, `NarrowR` 83 b / `DataR` 531 b, consumed by the response path:
 
 ### 2.3 SAM address translation
 
-Destination derivation is a System Address Map (SAM) range lookup, not a bit-slice decode. The SAM is a list of entries {base, size, dst_id, class} (`nmu::addr_trans::SamTable`). A node owns one memory-space entry and, optionally, one config-space entry, and the two are far apart in the system map. Translation therefore rebases into the TILE, not into the entry, so the two spaces land in disjoint windows the tile's address decoder can tell apart:
+Destination derivation is a System Address Map (SAM) range lookup, not a bit-slice decode. The SAM is a list of entries {base, size, dst_id, class} (`nmu::addr_trans::SamTable`). On every shipped topology a node owns one memory-space entry and one config-space entry, and the two are far apart in the system map. `SamTable` itself accepts a memory-only table, which is what the hand-built C++ test fixtures use (`SamTable::uniform`). Translation therefore rebases into the TILE, not into the entry, so the two spaces land in disjoint windows the tile's address decoder can tell apart:
 
 **INPUT** wire address A. **COMPUTE** scan entries in list order, first entry with base <= A < base+size wins; add that entry's space base. **OUTPUT** {dst_id, class, local_addr = space_base(class) + (A - base)}.
 
@@ -101,11 +101,11 @@ The tile-local layout is derived from the table itself, never given in the YAML 
 
 On a two-space topology (config 0x1000 + memory 0x100000 per node) that gives config span 0x1000 at tile-local 0x0 and memory span 0x100000 at tile-local 0x100000. On a memory-only topology the config space takes no slot, so memory sits at tile-local 0x0 and the space term vanishes.
 
-The SAM is loaded at runtime from the topology YAML `address_map` block (`sim/topologies/*.yaml`, parsed by `nmu/sam_yaml.hpp`). When no config path is given the model falls back to a built-in default map, which is NOT any shipped topology and is the only 4 GiB map left in the repo (`wrap/nmu_wrap.hpp:89`): a memory-only 16x16 uniform map with tile_size = 4 GiB = 0x1_0000_0000, where entry i has dst_id = i = {y[3:0], x[3:0]} and base = i * 0x1_0000_0000, which makes dst_id = addr[39:32].
+The SAM is loaded at runtime from the topology YAML `address_map` block (`sim/topologies/*.yaml`, parsed by `nmu/sam_yaml.hpp`). There is no built-in default map: `NmuWrap::init` rejects a null or empty `config_path` with `std::invalid_argument`.
 
-Example (default SAM): A = 0x12_0000_0080. Matching entry: base = 0x12 * 0x1_0000_0000 = 0x12_0000_0000, size 0x1_0000_0000, dst_id = 8'h12 (x=2, y=1), memory space. The map has no config entry, so `space_base(memory)` = 0. Result: dst_id = 8'h12, local_addr = 0x80. Non-matching entry for contrast: the dst_id = 8'h11 entry covers [0x11_0000_0000, 0x12_0000_0000), which excludes A because A >= its base+size.
+Example (`mesh_4x4_vc1`): A = 0x60_0080. Matching entry: raster index 6, base = 6 * 0x100000 = 0x60_0000, size 0x100000, dst_id = 8'h12 (x=2, y=1), memory space. Result: dst_id = 8'h12, local_addr = 0x100000 + 0x80 = 0x10_0080. Non-matching entry for contrast: the dst_id = 8'h11 entry covers [0x50_0000, 0x60_0000), which excludes A because A >= its base+size.
 
-Counter-example with both spaces, on `mesh_2x2_config_narrow_vc1`: A = 0x1000 hits node (0,0)'s memory entry [0x0, 0x100000) and translates to local_addr = 0x100000 + 0x1000 = 0x101000, above the config window. A = 0x400010 hits the same node's config entry at base 0x400000 and translates to local_addr = 0x0 + 0x10 = 0x10.
+Both windows of one node, on `mesh_2x2_vc1`: A = 0x1000 hits node (0,0)'s memory entry [0x0, 0x100000) and translates to local_addr = 0x100000 + 0x1000 = 0x101000, above the config window. A = 0x400010 hits the same node's config entry at base 0x400000 and translates to local_addr = 0x0 + 0x10 = 0x10.
 
 A SAM miss (address covered by no entry) cannot happen (Section 3.5, guarantee G1). The model aborts if violated. There is no DECERR generation in this block.
 
@@ -159,9 +159,9 @@ Shared outstanding gate, both modes, both directions: at most `NMU_OUTSTANDING_D
 
 ### 2.6 Worked example: 2-beat write burst
 
-NMU at node (x=0, y=0), src_id = 8'h00, default SAM, DAT_NUM_VC = 1. The master issues AW {awid = 8'h05, awaddr = 0x12_0000_0080, awlen = 8'h01, awsize = 3'h6, awburst = 2'b01} then W0 {wdata = 512'h...11, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 0} and W1 {wdata = 512'h...22, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 1}.
+NMU at node (x=0, y=0), src_id = 8'h00, `mesh_4x4_vc1` SAM, DAT_NUM_VC = 1. The master issues AW {awid = 8'h05, awaddr = 0x60_0080, awlen = 8'h01, awsize = 3'h6, awburst = 2'b01} then W0 {wdata = 512'h...11, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 0} and W1 {wdata = 512'h...22, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 1}.
 
-SAM: 0x12_0000_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x80. ID 5 is idle, so admission takes the idle-ID bypass: ordering_req = 0, ordering_tag = 0. The burst is data class, so the three flits leave on the DAT face, in this exact order, as one wormhole packet:
+SAM: 0x60_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x10_0080. ID 5 is idle, so admission takes the idle-ID bypass: ordering_req = 0, ordering_tag = 0. The burst is data class, so the three flits leave on the DAT face, in this exact order, as one wormhole packet:
 
 | Field | AW flit | W flit 0 | W flit 1 |
 |---|---|---|---|
@@ -172,7 +172,7 @@ SAM: 0x12_0000_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x
 | header.flit_tail | 1'b0 (opens packet) | 1'b0 | 1'b1 (closes packet) |
 | header.ordering_req / ordering_tag | 0 / 8'h00 | 0 / 8'h00 | 0 / 8'h00 |
 | header.collective_op / collective_mask | 0 / 8'h00 | 0 / 8'h00 | 0 / 8'h00 |
-| payload | awid=8'h05, awaddr=48'h80, awlen=8'h01, awsize=3'h6, awburst=2'b01, others 0 | wlast=0, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...11, wuser=0 | wlast=1, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...22 |
+| payload | awid=8'h05, awaddr=48'h10_0080, awlen=8'h01, awsize=3'h6, awburst=2'b01, others 0 | wlast=0, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...11, wuser=0 | wlast=1, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...22 |
 
 Later one B flit returns on the RSP face {axi_ch = 4'd8 (DataB), bid = 8'h05, bresp = 2'b00} and the NMU presents bvalid / bid = 8'h05 / bresp = 2'b00, held until bready.
 
@@ -308,7 +308,7 @@ The SV wrap holds no behavior. Each posedge it runs the 3-call discipline: `cmod
 
 | Function | Signature (summary) | Semantics |
 |---|---|---|
-| cmodel_nmu_create | `unsigned long long (const char* name, int src_id, int dat_num_vc, const char* config_path)` | Constructs the instance, RobMode::Disabled (R side), default depths. `dat_num_vc` sizes the DAT face only; REQ and RSP are fixed single-VC. NULL/empty config_path selects the built-in default SAM of Section 2.3 (memory-only 16x16 / 4 GiB, not a shipped topology). Returns the 64-bit handle for ctx_i. |
+| cmodel_nmu_create | `unsigned long long (const char* name, int src_id, int dat_num_vc, const char* config_path)` | Constructs the instance, RobMode::Disabled (R side), default depths. `dat_num_vc` sizes the DAT face only; REQ and RSP are fixed single-VC. `config_path` is required: NULL or empty throws inside `NmuWrap::init`, which the DPI boundary catches into the error latch and returns handle 0. Returns the 64-bit handle for ctx_i. |
 | cmodel_nmu_create_ex | `(..., int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, int outstanding_depth, const char* config_path)` | As create, plus R-RoB enable and depth overrides. The generated testbench calls this in both RoB modes, since the outstanding pool applies to either. |
 | cmodel_nmu_set_inputs | `(ctx, AXI args incl. a 58 b awuser, then the three NoC faces: tx_req_ready, rx_rsp_valid + flit, rx_dat_valid + flit, tx_dat_crdvalid)` | Latches inputs only. Packing: 8-bit fields in word[0] low byte, addresses 2 words little-endian, data 16 words little-endian, wstrb 2 words, awuser 2 words, flits little-endian at their own network's word count (REQ 5, RSP 4, DAT 20), credit vector 1 word bit-per-VC. |
 | cmodel_nmu_tick | `(ctx)` | One full model cycle. One call = one clock edge. |
@@ -356,7 +356,7 @@ Each item names its verification and the failure condition. "ctest" items run in
 6. Acceptance atomicity: a beat is consumed exactly on its valid-and-ready cycle, and ready is never asserted without guaranteed FIFO space, so an accepted beat is never dropped or duplicated. Verified: `TEST(NmuAxiSlavePort, AwBoundary_FailedPushDoesNotDuplicateOnRetry)` and co-sim scoreboard compare. Failure: lost or duplicated beat (scoreboard miscompare).
 7. Per-channel FIFO order: beats of one channel travel in acceptance order regardless of AXI ID, through every request stage. Verified: `TEST(NmuAxiSlavePort, AwFifoOrder_PreservedAcrossMixedIds)`, `ArFifoOrder_PreservedAcrossMixedIds`. Failure: any same-channel reorder.
 8. Flit format: emitted flits match Section 2.2 bit-exactly, every header field assigned (the header has no `rsvd`, `PADDING_FIELDS_COUNT` = 0), unused payload bits above the channel's width 0. Verified: `TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields)` for the header fields, `AwPayloadBitPerfect`, `WPayloadBitPerfect`, `ArEncodesAxiChAndOrderingTag` for the payloads (`src/c_model/tests/nmu/test_packetize.cpp`). Failure: any mismatched bit. Note: `RsvdAndDisabledFieldsZero` is NOT evidence here — it calls `check_padding_is_zero()`, which is vacuously true once the header has no padding fields.
-9. One beat, one flit, rebased address: each accepted AW / W / AR beat emits exactly one flit, address payloads carry local_addr = space_base(class) + (addr - entry base) (Section 2.3 example: 0x12_0000_0080 becomes 48'h80 with dst_id = 8'h12, the space term being 0 on a memory-only map). awregion / arregion and all user fields are carried in the flit and are 0 at the co-sim boundary. Verified: `TEST(NmuPacketize, SamTranslateRebasesAddrAndSetsDstFromTable)`, `TEST(AddrTrans, RebasedLocalIsTileOffset)`, `TEST(SamTable, SpaceBaseDerivedFromLargestEntryOfThatSpace)`. Failure: wire address in the payload, a missing space term, or wrong dst_id.
+9. One beat, one flit, rebased address: each accepted AW / W / AR beat emits exactly one flit, address payloads carry local_addr = space_base(class) + (addr - entry base) (Section 2.3 example: 0x60_0080 becomes 48'h10_0080 with dst_id = 8'h12, the space term being 0x100000 on a two-space map). awregion / arregion and all user fields are carried in the flit and are 0 at the co-sim boundary. Verified: `TEST(NmuPacketize, SamTranslateRebasesAddrAndSetsDstFromTable)`, `TEST(AddrTrans, RebasedLocalIsTileOffset)`, `TEST(SamTable, SpaceBaseDerivedFromLargestEntryOfThatSpace)`. Failure: wire address in the payload, a missing space term, or wrong dst_id.
 10. header.flit_tail stamping: AW = 0, W = wlast, AR = 1. Verified: `TEST(NmuPacketize, WHeaderFlitTailMatchesWlast)`, malformed stamping aborts in the wormhole arbiter (`WormholeArbiter::tick` defensive guards). Failure: assert abort or a wormhole packet that never closes.
 11. AW before W: a W flit never enters the network before its AW flit. The RoB refuses W beats while no AW-accepted burst owes beats, and W flits inherit dst_id / ordering_req / ordering_tag from the AW-ordered metadata FIFO. Verified: `TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw)`, `TEST(NmuPacketize, WMetaFifoInheritsAwDst)`, `TEST(NmuReqBridge, PushWBackpressuresOnEmptyMeta)`. Failure: W flit precedes its AW flit or carries wrong metadata.
 12. Wormhole atomicity: after an AW flit drains, only W flits of that burst drain until the header.flit_tail = 1 W flit, AR flits wait. Verified: `TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock)`, `MultiBeatWBurstFlowsAndUnlocks` (`src/c_model/tests/router/test_wormhole_arbiter.cpp`). Failure: any foreign flit between AW and its final W.
