@@ -7,9 +7,9 @@ by the existing testbench. As-built references:
 | Layer | File |
 |---|---|
 | Router core (per network) | `src/c_model/include/router/router.hpp` |
-| Per-node wrap (REQ + RSP routers, DPI I/O latch) | `src/c_model/include/wrap/router_wrap.hpp` |
+| Per-node wrap (REQ + RSP `SimpleRouter`, DAT `Router`, DPI I/O latch) | `src/c_model/include/wrap/router_wrap.hpp` |
 | SV DPI module (top-level pin contract) | `src/sv/router_wrap.sv` |
-| Unit tests | `src/c_model/tests/router/test_router.cpp` |
+| Unit tests | `src/c_model/tests/router/test_router.cpp` (DAT), `test_simple_router.cpp` (REQ/RSP), `test_route_mask.cpp` + `test_*_fork.cpp` + `test_simple_router_join.cpp` (collectives) |
 | Wire-level credit assertions | `sim/tb/link_perf_monitor.sv` |
 | Generated fabric wiring | `sim/tools/gen_tb_top.py` |
 
@@ -20,9 +20,22 @@ posedge N of `clk_i`. An output registered at posedge K is first sampled at pose
 
 ### 2.1 Concepts
 
-**Flit.** The unit of transfer on every NoC link is one flit: a fixed 408-bit
-(= 0x198 = 51-byte) word carrying a 56-bit header and a 352-bit payload. A link moves
-at most one flit per direction per cycle.
+**Three networks per node.** `router_wrap` holds three independent routers, one per
+physical network: a REQ `SimpleRouter` and an RSP `SimpleRouter` (ready/valid,
+single-VC, no credit, no VC assignment) and a DAT `Router` (credit, VC-assigning). They
+share nothing — separate FIFOs, locks, and pins. Every rule below that names credit,
+VC assignment, or `NUM_VC` is a DAT rule; where the two shapes differ the section says
+which one it is describing.
+
+**Flit.** The unit of transfer on a NoC link is one flit: a fixed-width word carrying a
+44-bit header and a per-network payload. A link moves at most one flit per direction
+per cycle.
+
+| Network | flit width | payload | Flow control |
+|---|---|---|---|
+| REQ | 137 | [136:44], 93 b | ready/valid, 1 VC |
+| RSP | 127 | [126:44], 83 b | ready/valid, 1 VC |
+| DAT | 629 | [628:44], 585 b | credit, `NUM_VC` 1..8 |
 
 **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
 or more flits sharing the same header `dst_id`. The header bit `flit_tail` marks packet
@@ -33,43 +46,65 @@ packet's head flit has been granted to an output, that output serves only that p
 until its tail (`flit_tail = 1'b1`) passes. Flits of two packets therefore never interleave
 on one output.
 
-**Virtual channels (VC).** Each input port holds `NUM_VC` independent FIFOs. A flit's
-header `vc_id` selects which FIFO it lands in and which credit counter it consumes.
-The physical link is one flit-wide channel per direction per network. `vc_id` travels
-in the header. There are no per-VC lanes on the wire. The router never changes a
-flit's VC: a flit that enters on VC 1 leaves on VC 1 and is filed under VC 1 by the
-next hop. VC assignment is done once, at the NI.
+The fabric builds exactly one multi-flit packet type, AW+W on the request path, because
+AXI4 IHI 0022 A5.3.3 forbids interleaving the W beats of different transactions. Every
+response packet — B and every R beat alike — is single-flit, so the output-hold cost of
+the lock is confined to the request path.
 
-**Credit-based flow control.** There is no ready signal. A sender may drive a flit on
-VC v only when its credit counter for that (output, VC) is nonzero. The counter is
-seeded to the receiver's per-VC input FIFO depth (`NOC_ROUTER_VC_DEPTH = 4`), decrements
-by 1 when a flit is committed toward that output, and increments by 1 for each
-single-cycle credit pulse the receiver returns after draining one flit from that input
-FIFO. Example with depth 4: a sender can fire 4 back-to-back flits on VC 0, must then
-idle at credit 0, and resumes one flit per returned pulse.
+**Virtual channels (VC), DAT only.** Each DAT input port holds `NUM_VC` independent
+FIFOs. A flit's header `vc_id` selects which FIFO it lands in and which credit counter
+it consumes. The physical link is one flit-wide channel per direction per network;
+`vc_id` travels in the header and there are no per-VC lanes on the wire. The arrival VC
+is not necessarily the departure VC: the VA stage (section 2.5) assigns an output VC per
+grant and restamps the header, except on `fixed_vc = 1` flits, which the NI pinned and
+the router carries through unchanged. REQ and RSP hold one FIFO per input port and
+never restamp.
+
+**Flow control, per network.** DAT is credit-based, with no ready signal: a sender may
+drive a flit on VC v only when its credit counter for that (output, VC) is nonzero. The
+counter is seeded to the receiver's per-VC input FIFO depth
+(`NOC_ROUTER_VC_DEPTH` = 8), decrements by 1 when a flit is committed toward that
+output, and increments by 1 for each single-cycle credit pulse the receiver returns
+after draining one flit from that input FIFO. Example with depth 8: a sender can fire 8
+back-to-back flits on VC 0, must then idle at credit 0, and resumes one flit per
+returned pulse.
+
+REQ and RSP use ready/valid instead. `ready` is an almost-full early ready computed off
+current occupancy, `ready = (occupancy + ready_slack <= depth)`, so it deasserts
+`ready_slack` flits before the FIFO physically fills — that covers the multi-cycle round
+trip of a registered ready wire between two nodes. It is advisory, not a same-cycle
+accept: the sender grants against a `ready` sampled two registrations earlier and the
+receiver pushes unconditionally on `valid`, so the transfer is `valid` alone. The
+shipped `ready_slack` = 2 is PROVISIONAL and awaits a measured wire-loop calibration
+(`simple_router.hpp` `SimpleRouterConfig::ready_slack`).
 
 ### 2.2 Flit format
 
-> Pre-S1: this table predates the Stage 1 flit-layout change (44 b header, 48 b addr, 396 b flit) and is re-synced in campaign Stage 5.
-
-Bit positions inside the 408-bit flit, from `specgen/generated/cpp/ni_flit_constants.h`.
-Header occupies flit bits [55:0], payload occupies flit bits [407:56].
+One 44-bit header layout on all three networks, from
+`specgen/generated/cpp/ni_flit_constants.h`. Header occupies flit bits [43:0], payload
+occupies the rest (REQ [136:44], RSP [126:44], DAT [628:44]).
 
 | Field | Flit bits | Width | Meaning |
 |---|---|---|---|
-| `axi_ch` | [2:0] | 3 | AXI channel code: 3'd0 AW, 3'd1 W, 3'd2 AR, 3'd3 B, 3'd4 R. Values 3'd5..3'd7 never occur. |
-| `src_id` | [10:3] | 8 | Source node id, `{y[3:0], x[3:0]}`. |
-| `dst_id` | [18:11] | 8 | Destination node id, `{y[3:0], x[3:0]}`. Read by the router for routing. |
-| `vc_id` | [21:19] | 3 | Virtual channel index, `0 <= vc_id < NUM_VC`. Read by the router. |
-| `flit_tail` | [22] | 1 | 1'b1 on the final flit of a packet. Read by the router. |
-| `ordering_req` | [23] | 1 | NI reorder-buffer flag. Transparent to the router. |
-| `ordering_tag` | [31:24] | 8 | NI reorder-buffer index. Transparent to the router. |
-| `rsvd` | [55:32] | 24 | Header padding, driven 0 by the NI. Transparent to the router. |
-| payload | [407:56] | 352 | AXI channel payload. Transparent to the router. |
+| `axi_ch` | [3:0] | 4 | AXI channel code: 4'd0 `NarrowAw`, 4'd1 `NarrowW`, 4'd2 `NarrowAr`, 4'd3 `NarrowB`, 4'd4 `NarrowR`, 4'd5 `DataAw`, 4'd6 `DataW`, 4'd7 `DataAr`, 4'd8 `DataB`, 4'd9 `DataR`. Values 4'd10..4'd15 never occur. Read by the RSP router only, to identify a CollectB (section 2.10). |
+| `src_id` | [11:4] | 8 | Source node id, `{y[3:0], x[3:0]}`. Read for the join's expected-input set (section 2.10). |
+| `dst_id` | [19:12] | 8 | Destination node id, `{y[3:0], x[3:0]}`. Read by the router for routing. |
+| `fixed_vc` | [20] | 1 | 1'b1: the NI pinned `vc_id`; the DAT router keeps it instead of restamping at VA (SPEC 6). |
+| `vc_id` | [23:21] | 3 | Virtual channel index, `0 <= vc_id < NUM_VC`. Read and, for `fixed_vc = 0`, rewritten by the DAT router. |
+| `flit_tail` | [24] | 1 | 1'b1 on the final flit of a packet. Read by the router. |
+| `ordering_req` | [25] | 1 | NI reorder-buffer flag. Transparent to the router. |
+| `ordering_tag` | [33:26] | 8 | NI reorder-buffer index. Transparent to the router, except that the join checks joined heads agree on it. |
+| `collective_op` | [35:34] | 2 | 2'd0 UNICAST, 2'd1 MULTICAST. Read by both request routers (fork) and the RSP router (join). |
+| `collective_mask` | [43:36] | 8 | Node-id wildcard mask. Read with `collective_op`. |
+| payload | per network | 93 / 83 / 585 | AXI channel payload. Transparent to the router. |
 
-IMPORTANT: the router reads only `dst_id`, `vc_id`, and `flit_tail`. Every other bit,
-header and payload alike, passes through unmodified, byte for byte. Payload layout is
-owned by the NMU/NSU specs and is out of scope here.
+There is no `rsvd` field: `PADDING_FIELDS_COUNT` = 0, the header is fully assigned.
+
+IMPORTANT: on unicast traffic the router reads only `dst_id`, `vc_id`, `fixed_vc` and
+`flit_tail`. Collectives add `collective_op` and `collective_mask` on all three networks,
+plus `axi_ch`, `src_id`, `ordering_tag` and the payload's `bresp` / `bid` at the RSP
+join. Every other bit, header and payload alike, passes through unmodified, byte for
+byte, and only `vc_id` is ever rewritten. Payload layout is owned by the NMU/NSU specs and is out of scope here.
 
 Node id composition: `node_id = (y << 4) | x` (X_WIDTH = Y_WIDTH = 4). Example: node
 (x=3, y=2) has id `(2 << 4) | 3` = 8'h23 = 8'b0010_0011 = 35.
@@ -96,13 +131,16 @@ never turns from a Y move back to an X move (deadlock-free on the mesh).
 A `dst_id` outside the mesh cannot occur (see Input Guarantees, G3). The model aborts
 if it ever does (`route_compute`, `router.hpp:65-68`).
 
-### 2.4 Pipeline: three stages, one stage per cycle
+### 2.4 Pipeline: three stages, one stage per cycle (DAT)
 
-Each Router is a 3-stage pipeline. A flit advances exactly one stage per cycle.
+The DAT `Router` is a 3-stage pipeline. A flit advances exactly one stage per cycle.
+The REQ/RSP `SimpleRouter` runs the same stages 1 and 2 but with `output_fifo_depth` = 0,
+so stage 2 drives the downstream link directly and there is no stage 3 — 2 cycles per
+hop instead of 3 (`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`).
 
 | Stage | Storage | Action per cycle |
 |---|---|---|
-| 1. Input | per-port 1-deep input register, then per-(port, VC) FIFO, depth `NOC_ROUTER_VC_DEPTH` = 4 | file the registered flit into the FIFO selected by header `vc_id` |
+| 1. Input | per-port 1-deep input register, then per-(port, VC) FIFO, depth `NOC_ROUTER_VC_DEPTH` = 8 | file the registered flit into the FIFO selected by header `vc_id` |
 | 2. Grant | per-output wormhole lock + RR state + credit counters | per output: pick one (input, VC) candidate, assign the output-side VC `out_vc` (VA, section 2.5), pop its FIFO front, decrement `credit_[out][out_vc]`, restamp header `vc_id = out_vc`, push into the output FIFO, schedule one credit pulse (input-side VC) to the upstream of that input |
 | 3. Link | per-output FIFO, depth `NOC_ROUTER_OUTPUT_FIFO_DEPTH` = 2 | drive at most one flit from each output FIFO onto the link |
 
@@ -125,9 +163,10 @@ The model evaluates stages in reverse order (3, then 2, then 1) within one tick
   most one per (port, VC) per cycle. The surplus pulse is delivered on the following
   cycle (drained one per VC per cycle by the wrap, `router_adapters.hpp` `LinkCreditOut`).
 
-Zero-load latency is exactly 3 cycles per hop: a flit sampled from the input wire at
-posedge N is sampled on the output wire (by the neighbor or the NI) at posedge N+3.
-Verified by `ZeroLoadLatencyIsThreeTicks`.
+Zero-load latency is exactly 3 cycles per hop on DAT and exactly 2 on REQ/RSP: a flit
+sampled from the input wire at posedge N is sampled on the output wire (by the neighbor
+or the NI) at posedge N+3 / N+2. Verified by `RouterDatapath.ZeroLoadLatencyIsThreeTicks`
+and `SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`.
 
 ### 2.5 Arbitration: two-level round-robin per output
 
@@ -204,14 +243,15 @@ packet at (WEST, VC1) routing EAST waits cycles k..k+2 even though VC1 has credi
 The lock never spans different outputs: locking is a per-output property, so a packet
 to EAST and a packet to NORTH from two inputs proceed in parallel.
 
-### 2.7 Credit flow control rules
+### 2.7 Credit flow control rules (DAT only)
 
-Counter granularity is per (output port, VC): `credit_[out][vc]`.
+Counter granularity is per (output port, VC): `credit_[out][vc]`. REQ and RSP have no
+counters; they gate on the almost-full `ready` of section 2.1.
 
-1. **Seed**: every counter starts at `NOC_ROUTER_VC_DEPTH` = 4, equal to the
+1. **Seed**: every counter starts at `NOC_ROUTER_VC_DEPTH` = 8, equal to the
    downstream input VC FIFO depth (`router.hpp:91`).
 2. **Decrement**: by 1 at the grant event (stage-2 admission into the output FIFO,
-   `router.hpp:262-263`), not at link traversal. With seed 4, four grants toward one
+   `router.hpp:262-263`), not at link traversal. With seed 8, eight grants toward one
    (output, VC) with no returns leave the counter at 0 and stall further grants on
    that VC.
 3. **Increment**: by 1 per received credit pulse on that (output, VC). A pulse means
@@ -234,42 +274,51 @@ The stage-3 output FIFO (depth 2) is an architectural parameter of this design
 neighbor. Its only flow effect is the stage-2 admission gate: no grant to an output
 whose FIFO already holds `NOC_ROUTER_OUTPUT_FIFO_DEPTH` flits.
 
-### 2.8 Two networks per node
+### 2.8 Three networks per node
 
-> Pre-S3a: this section predates the Stage 3a three-network split. As-built, `router_wrap` holds a REQ `SimpleRouter`, an RSP `SimpleRouter` (both ready/valid, single VC) and a DAT `Router` (credit, VC-assigning). RSP carries B of both classes plus Narrow-class R; Data-class R rides DAT. The single-flit property below still holds for RSP as-built. Re-synced in campaign Stage 5. Section 2.10 is written against the as-built shape.
+Each mesh node instantiates one `router_wrap` containing three independent router
+instances. They share nothing: separate FIFOs, locks, credit or ready state, and
+separate `tx_*` / `rx_*` pin groups.
 
-Each mesh node instantiates one `router_wrap` containing two independent Router
-instances: a REQ router (carries AW/W/AR flits, NMU -> NSU direction) and an RSP
-router (carries B/R flits, NSU -> NMU direction). They share nothing: separate FIFOs,
-credits, locks, and separate `link_req_*` / `link_rsp_*` pins. This REQ/RSP physical
-split removes request-response protocol deadlock.
+| Network | Class | Carries | Direction |
+|---|---|---|---|
+| REQ `SimpleRouter` | ready/valid, 1 VC | `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` | NMU -> NSU |
+| RSP `SimpleRouter` | ready/valid, 1 VC | `NarrowB`, `DataB`, `NarrowR` | NSU -> NMU |
+| DAT `Router` | credit, `NUM_VC` VCs | `DataAw`, `DataW`, `DataR` | both |
+
+Splitting request from response is what removes request-response protocol deadlock;
+splitting the wide data class off REQ/RSP is what keeps a 585-bit payload off the two
+narrow links.
 
 On the RSP network every packet is single-flit: the NSU emits `flit_tail = 1'b1` on every B
 flit and on every R beat flit. The RSP router's wormhole lock therefore only ever
 engages degenerately (lock and release within one grant, rule 2.6.4), and RSP
-arbitration behaves as flit-level round-robin.
+arbitration behaves as flit-level round-robin. The same holds for `DataR` on DAT, so the
+only worm any router ever holds open across cycles is an AW+W request packet.
 
-### 2.9 Worked example: 3-flit packet, 2 hops
+### 2.9 Worked example: 3-flit packet, 2 hops (DAT)
 
-Topology: nodes A = (0,0) and B = (1,0). The NMU at A sends one 3-flit REQ packet
-(F0 `flit_tail=0`, F1 `flit_tail=0`, F2 `flit_tail=1`, all VC0, `dst_id` = 8'h01) to the NSU at B.
-Flits enter A's `noc_nmu_req_i` at cycles 0, 1, 2. All credit counters start at 4.
+Topology: nodes A = (0,0) and B = (1,0). The NMU at A sends one 3-flit `DataAw` + `DataW`
+packet (F0 `flit_tail=0`, F1 `flit_tail=0`, F2 `flit_tail=1`, all VC0, `dst_id` = 8'h01) to
+the NSU at B. Flits enter A's `rx_dat_*[LOCAL]` at cycles 0, 1, 2. All credit counters
+start at 8.
 
 | Cycle | Router A (x=0,y=0) | Router B (x=1,y=0) | Wires (sampled this cycle) |
 |---|---|---|---|
-| 0 | stage 1: F0 -> fifo[LOCAL][0] | idle | `noc_nmu_req_i.valid` = 1 (F0) |
-| 1 | stage 2: grant F0 to EAST, `credit_[EAST][0]` 4->3, lock EAST to (LOCAL,0). stage 1: F1 filed | idle | F1 in |
-| 2 | stage 3: F0 -> link. stage 2: grant F1 (3->2). stage 1: F2 filed | idle | F2 in |
-| 3 | stage 3: F1. stage 2: grant F2 (2->1), tail -> unlock, RR advance | stage 1: F0 filed | `link_req_out_valid[EAST]` = 1 (F0). `noc_nmu_req_cred_o[0]` pulse (F0's LOCAL dequeue at cycle 1) |
+| 0 | stage 1: F0 -> fifo[LOCAL][0] | idle | A `rx_dat_valid[LOCAL]` = 1 (F0) |
+| 1 | stage 2: grant F0 to EAST, `credit_[EAST][0]` 8->7, lock EAST to (LOCAL,0). stage 1: F1 filed | idle | F1 in |
+| 2 | stage 3: F0 -> link. stage 2: grant F1 (7->6). stage 1: F2 filed | idle | F2 in |
+| 3 | stage 3: F1. stage 2: grant F2 (6->5), tail -> unlock, RR advance | stage 1: F0 filed | A `tx_dat_valid[EAST]` = 1 (F0). A `rx_dat_crdvalid[LOCAL][0]` pulse (F0's LOCAL dequeue at cycle 1) |
 | 4 | stage 3: F2 | stage 2: grant F0 to LOCAL | F1 on link. NMU credit pulse (F1) |
 | 5 | idle | stage 3: F0 -> eject. stage 2: grant F1 | F2 on link. NMU credit pulse (F2) |
-| 6 | `credit_[EAST][0]` 1->2 (B's pulse for F0) | stage 3: F1. stage 2: grant F2 | B's `noc_nsu_req_o.valid` = 1 (F0). B's `link_req_in_credit[WEST][0]` pulse reaches A |
-| 7 | 2->3 | stage 3: F2 | F1 to NSU. Credit pulse (F1) |
-| 8 | 3->4 (fully replenished) | idle | F2 to NSU. Credit pulse (F2) |
+| 6 | `credit_[EAST][0]` 5->6 (B's pulse for F0) | stage 3: F1. stage 2: grant F2 | B `tx_dat_valid[LOCAL]` = 1 (F0). B's `rx_dat_crdvalid[WEST][0]` pulse reaches A |
+| 7 | 6->7 | stage 3: F2 | F1 to NSU. Credit pulse (F1) |
+| 8 | 7->8 (fully replenished) | idle | F2 to NSU. Credit pulse (F2) |
 
 Head latency: injected cycle 0, at the destination NI cycle 6 = 2 hops x 3 cycles.
-Tail: cycle 2 -> cycle 8. A's `credit_[EAST][0]` bottoms at 1 (three flits in flight)
-and returns to 4 by cycle 8.
+Tail: cycle 2 -> cycle 8. A's `credit_[EAST][0]` bottoms at 5 (three flits in flight)
+and returns to 8 by cycle 8. The same packet on REQ would take 2 cycles a hop and gate on
+`tx_req_ready` instead of a counter.
 
 ### 2.10 Collectives: multicast fork and CollectB join
 
@@ -363,28 +412,29 @@ hand-computed meshes, square and not), `test_router_fork.cpp`,
 `SimpleRouterJoinChain.MidWormHoldKeepsTheDownstreamLatchIntact`, and the bounded-tick
 R1 wedge tests `RouterForkWedge.OverlappingTreesOppositeOrderWedgeDetectedWithinBound`
 and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
-(`docs/verification-environment.md`).
+(`docs/verification-environment.md`). Contract entries: SPEC 20 (fork) and SPEC 21 (join).
 
 ## 3. Inputs and Outputs
 
 ### 3.1 Parameters
 
-`router_wrap` SV parameters (`src/sv/router_wrap.sv:39-46`):
-
-> Pre-S3a: the single `FLIT_WIDTH` row below predates the Stage 3a three-network split. As-built, `router_wrap` takes three per-network flit-width parameters instead (`REQ_FLIT_WIDTH` = 137, `RSP_FLIT_WIDTH` = 127, `DAT_FLIT_WIDTH` = 629); `NOC_FLIT_WIDTH_DFLT` no longer exists. Re-synced in campaign Stage 5.
+`router_wrap` SV parameters (`src/sv/router_wrap.sv:54-63`):
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs per link, per network. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != NUM_VC`. |
-| `FLIT_WIDTH` | `NOC_FLIT_WIDTH_DFLT` = 408 | fixed 408 in this design | flit bus width, bits |
+| `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
+| `REQ_FLIT_WIDTH` | 137 | 64..1024 | REQ flit bus width, bits |
+| `RSP_FLIT_WIDTH` | 127 | 64..1024 | RSP flit bus width, bits |
+| `DAT_FLIT_WIDTH` | 629 | 64..1024 | DAT flit bus width, bits |
 | `LINK_PORTS` | 5 | fixed 5 | port array size = {LOCAL, NORTH, EAST, SOUTH, WEST} |
 
 Router model configuration, fixed at `cmodel_router_create` time:
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `NOC_ROUTER_VC_DEPTH` | 4 | 1..16 | input VC FIFO depth and the upstream credit seed |
-| `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 2 | 1..16 | stage-3 output FIFO depth, not credit-counted |
+| `NOC_ROUTER_VC_DEPTH` | 8 | 1..16 | input VC FIFO depth; on DAT it is also the upstream credit seed, on REQ/RSP the depth the almost-full `ready` is computed against |
+| `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 2 | 1..16 | DAT stage-3 output FIFO depth, not credit-counted. REQ/RSP run with output FIFO depth 0 (stage 2 drives the link directly) |
+| `ready_slack` (REQ/RSP) | 2 | 1..`NOC_ROUTER_VC_DEPTH` - 1 | flits of headroom the almost-full `ready` reserves. PROVISIONAL, awaits a measured wire-loop calibration |
 | `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2..16 each | mesh dimensions. Minimum 2 per dimension: a mesh communicating through NI + router needs at least 2x2; 1x1 and 1xN meshes are illegal. |
 | `x_coord`, `y_coord` | per node | `x < mesh_x_dim`, `y < mesh_y_dim` | this node's coordinate |
 
@@ -394,7 +444,7 @@ All `[LINK_PORTS]` arrays are indexed by direction:
 
 | Index | Direction | LINK-face use |
 |---|---|---|
-| 0 | LOCAL | unused on the LINK face (NI traffic uses the `noc_nmu_*` / `noc_nsu_*` pins). Slot 0 of every LINK array is tied 0 / ignored. |
+| 0 | LOCAL | this node's own NI traffic (NMU injection, NSU ejection, and the shared DAT merge point). Not a link direction. |
 | 1 | NORTH (+y) | link to node (x, y+1) |
 | 2 | EAST (+x) | link to node (x+1, y) |
 | 3 | SOUTH | link to node (x, y-1) |
@@ -405,12 +455,12 @@ to 0, outputs must stay 0 (SPEC 17).
 
 ### 3.3 Signal tables
 
-> Pre-S3a: the single `noc_chan_t` struct below predates the Stage 3a three-network split. As-built, `router_wrap` ports are per-network scalars (`tx_req_*`/`rx_req_*`, `tx_rsp_*`/`rx_rsp_*` ready/valid; `tx_dat_*`/`rx_dat_*` credit) with per-network flit widths (REQ 137 b, RSP 127 b, DAT 629 b), not one `noc_chan_t` struct. Re-synced in campaign Stage 5.
+Every network's pins are ONE uniform per-port array indexed {LOCAL, N, E, S, W}: LOCAL
+carries this node's own NI traffic, N/E/S/W the inter-router links. There is no separate
+`noc_nmu_*` / `noc_nsu_*` pin group. `noc_types_pkg::noc_credit_t` =
+`{credit[DAT_NUM_VC-1:0]}`, one bit per VC.
 
 > REQ/RSP `ready` is advisory, not a same-cycle accept: the sender grants against a `ready` sampled ~2 registrations earlier, and the receiver pushes unconditionally on `valid`, so a real transfer is `valid` alone.
-
-Struct types: `ni_signals_pkg::noc_chan_t` = `{valid (1 bit), flit[407:0]}`, 409 bits.
-`noc_types_pkg::noc_credit_t` = `{credit[NUM_VC-1:0]}`, one bit per VC.
 
 Inputs:
 
@@ -419,73 +469,72 @@ Inputs:
 | `clk_i` | 1 | Clock. All sequential behavior on the posedge. |
 | `rst_ni` | 1 | Synchronous active-low reset. Given only once, at the beginning of simulation (rule R9). |
 | `ctx_i` | 64 | Model handle returned by `cmodel_router_create`. Constant after reset. From tb_top. |
-| `noc_nmu_req_i` | 409 | REQ flit injection from this node's NMU. `.valid` high for 1 cycle per flit. `.flit` valid only when `.valid` is high, all zeros otherwise. |
-| `noc_nmu_rsp_cred_i` | NUM_VC | Per-VC credit pulse from the NMU: bit v = the NMU consumed one ejected RSP flit on VC v. Increments the RSP router's LOCAL-output credit. |
-| `noc_nsu_req_cred_i` | NUM_VC | Per-VC credit pulse from the NSU: bit v = the NSU consumed one ejected REQ flit on VC v. Increments the REQ router's LOCAL-output credit. |
-| `noc_nsu_rsp_i` | 409 | RSP flit injection from this node's NSU. Same valid/flit rules as `noc_nmu_req_i`. |
-| `link_req_in_valid` | 5 | Bit p: the neighbor at direction p drives one REQ flit this cycle. Bit 0 (LOCAL) always 0. |
-| `link_req_in_flit` | 408 x 5 (unpacked `[LINK_PORTS]`) | REQ flit from the neighbor at direction p. Valid only when `link_req_in_valid[p]` is high, all zeros otherwise. |
-| `link_req_out_credit` | NUM_VC x 5 (unpacked) | Per-VC credit pulse from the neighbor at direction p, for a REQ flit this node previously sent out of its p output. Increments `credit_[p][vc]` of the REQ router. |
-| `link_rsp_in_valid` | 5 | RSP mirror of `link_req_in_valid`. |
-| `link_rsp_in_flit` | 408 x 5 | RSP mirror of `link_req_in_flit`. |
-| `link_rsp_out_credit` | NUM_VC x 5 | RSP mirror of `link_req_out_credit`. |
+| `rx_req_valid` | 5 | Bit p: the sender at port p drives one REQ flit this cycle. Bit 0 is the local NI's injection. |
+| `rx_req_flit` | 137 x 5 (unpacked `[LINK_PORTS]`) | REQ flit from port p. Valid only when `rx_req_valid[p]` is high, all zeros otherwise. |
+| `tx_req_ready` | 5 | Bit p: the receiver at port p can take a REQ flit. Advisory (see above). |
+| `rx_rsp_valid` / `rx_rsp_flit` / `tx_rsp_ready` | 5 / 127 x 5 / 5 | RSP mirror. |
+| `rx_dat_valid` | 5 | Bit p: the sender at port p drives one DAT flit this cycle. |
+| `rx_dat_flit` | 629 x 5 | DAT flit from port p. |
+| `tx_dat_crdvalid` | DAT_NUM_VC x 5 (unpacked) | Per-VC credit pulse from the receiver at port p, for a DAT flit this node previously sent out of its p output. Increments `credit_[p][vc]`. |
 
 Outputs (all registered, reset to 0):
 
 | Signal | Bit width | Definition |
 |---|---|---|
-| `noc_nmu_req_cred_o` | NUM_VC | Per-VC credit pulse to the NMU: bit v = the REQ router drained one flit from its LOCAL input FIFO, VC v. The NMU may inject one more flit on VC v. |
-| `noc_nmu_rsp_o` | 409 | RSP flit ejected toward the NMU. `.valid` high 1 cycle per flit, `.flit` all zeros when `.valid` is low. |
-| `noc_nsu_req_o` | 409 | REQ flit ejected toward the NSU. Same rules. |
-| `noc_nsu_rsp_cred_o` | NUM_VC | Per-VC credit pulse to the NSU: RSP router drained one flit from its LOCAL input FIFO. |
-| `link_req_out_valid` | 5 | Bit p: one REQ flit driven toward the neighbor at direction p this cycle. Bit 0 always 0. Boundary bits always 0. |
-| `link_req_out_flit` | 408 x 5 | REQ flit toward the neighbor at direction p. All zeros when `link_req_out_valid[p]` is low. |
-| `link_req_in_credit` | NUM_VC x 5 | Per-VC credit pulse to the neighbor at direction p: this node drained one flit from its p-direction REQ input FIFO, VC v. |
-| `link_rsp_out_valid` | 5 | RSP mirror. |
-| `link_rsp_out_flit` | 408 x 5 | RSP mirror. |
-| `link_rsp_in_credit` | NUM_VC x 5 | RSP mirror. |
+| `tx_req_valid` | 5 | Bit p: one REQ flit driven toward port p this cycle. Boundary bits always 0. |
+| `tx_req_flit` | 137 x 5 | REQ flit toward port p. All zeros when `tx_req_valid[p]` is low. |
+| `rx_req_ready` | 5 | Bit p: this node can take a REQ flit on port p (almost-full ready, section 2.1). |
+| `tx_rsp_valid` / `tx_rsp_flit` / `rx_rsp_ready` | 5 / 127 x 5 / 5 | RSP mirror. |
+| `tx_dat_valid` | 5 | Bit p: one DAT flit driven toward port p this cycle. Boundary bits always 0. |
+| `tx_dat_flit` | 629 x 5 | DAT flit toward port p. All zeros when `tx_dat_valid[p]` is low. |
+| `rx_dat_crdvalid` | DAT_NUM_VC x 5 | Per-VC credit pulse to the sender at port p: this node drained one flit from its p-direction DAT input FIFO, VC v. |
 
-NI-edge credit crossing (who returns which credit): the NI that consumes an ejected
-flit returns the eject credit, and the router returns the injection credit.
+NI-edge flow control (LOCAL port, who answers whom): on REQ/RSP the receiver drives the
+`ready` back; on DAT the entity that consumes a flit returns its credit.
 
-| Flow | Flit pin | Credit pin (opposite direction) |
+| Flow | Flit pin | Back-pressure pin (opposite direction) |
 |---|---|---|
-| NMU injects REQ | `noc_nmu_req_i` | `noc_nmu_req_cred_o` (router -> NMU) |
-| Router ejects REQ to NSU | `noc_nsu_req_o` | `noc_nsu_req_cred_i` (NSU -> router) |
-| NSU injects RSP | `noc_nsu_rsp_i` | `noc_nsu_rsp_cred_o` (router -> NSU) |
-| Router ejects RSP to NMU | `noc_nmu_rsp_o` | `noc_nmu_rsp_cred_i` (NMU -> router) |
+| NMU injects REQ | `rx_req_valid/flit[LOCAL]` | `rx_req_ready[LOCAL]` (router -> NMU) |
+| Router ejects REQ to NSU | `tx_req_valid/flit[LOCAL]` | `tx_req_ready[LOCAL]` (NSU -> router, tied true) |
+| NSU injects RSP | `rx_rsp_valid/flit[LOCAL]` | `rx_rsp_ready[LOCAL]` (router -> NSU) |
+| Router ejects RSP to NMU | `tx_rsp_valid/flit[LOCAL]` | `tx_rsp_ready[LOCAL]` (NMU -> router, tied true) |
+| NI injects DAT | `rx_dat_valid/flit[LOCAL]` | `rx_dat_crdvalid[LOCAL]` (router -> NI) |
+| Router ejects DAT to the NI | `tx_dat_valid/flit[LOCAL]` | `tx_dat_crdvalid[LOCAL]` (NI -> router) |
 
-Fabric wiring between nodes pairs opposite ports: node i's `link_*_in_valid/flit[NORTH]`
-comes from its north peer's `link_*_out_valid/flit[SOUTH]`, and node i's
-`link_*_out_credit[NORTH]` comes from that peer's `link_*_in_credit[SOUTH]`
-(`gen_tb_top.py:330-352`).
+The LOCAL DAT port is shared: `dat_merge_wrap` sits between it and the NMU/NSU DAT pins,
+merging `DataAw`/`DataW` from the NMU with `DataR` from the NSU on egress and demuxing on
+`axi_ch` on ingress.
+
+Fabric wiring between nodes pairs opposite ports: node i's `rx_*_valid/flit[NORTH]` comes
+from its north peer's `tx_*_valid/flit[SOUTH]`, and node i's `tx_dat_crdvalid[NORTH]`
+comes from that peer's `rx_dat_crdvalid[SOUTH]` (`gen_tb_top.py`).
 
 ### 3.4 DPI function table
 
 The SV module drives the model with three calls per posedge, in this order
 (`router_wrap.sv:160-267`). One `cmodel_router_tick` = one modeled clock cycle for
-both the REQ and RSP routers.
+all three routers.
 
 | Function | When | Semantics |
 |---|---|---|
-| `cmodel_router_create(name, x_coord, y_coord, mesh_x_dim, mesh_y_dim, num_vc)` | once, from the tb_top `initial` block, after `rst_ni` deassertion | constructs both routers. Construction is reset: all FIFOs empty, all credits at seed. Returns the 64-bit `ctx` handle. |
-| `cmodel_router_set_inputs(ctx, ...)` | posedge, step 1 | samples the current SV wire values (the previous cycle's registered outputs of the peers) into the model input latch |
-| `cmodel_router_tick(ctx)` | posedge, step 2 | advances both routers exactly one cycle |
-| `cmodel_router_get_outputs(ctx, ...)` | posedge, step 3 | reads the model output latch. The SV module registers these values nonblocking, so they appear on the output pins one cycle later. |
+| `cmodel_router_create(name, x_coord, y_coord, mesh_x_dim, mesh_y_dim, dat_num_vc)` | once, from the tb_top `initial` block, after `rst_ni` deassertion | constructs all three routers. Construction is reset: all FIFOs empty, all credits at seed. Returns the 64-bit `ctx` handle. |
+| `cmodel_router_{req,rsp,dat}_set_inputs(ctx, ...)` | posedge, step 1 (one call per network) | samples the current SV wire values (the previous cycle's registered outputs of the peers) into the model input latch. Split per network so no DPI signature marshals more than one flit width |
+| `cmodel_router_tick(ctx)` | posedge, step 2 | advances all three routers exactly one cycle |
+| `cmodel_router_{req,rsp,dat}_get_outputs(ctx, ...)` | posedge, step 3 (one call per network) | reads the model output latch. The SV module registers these values nonblocking, so they appear on the output pins one cycle later. |
 
-LINK-face marshalling is port-major: flit = 13 x 32-bit words per port, credit = one
-`[NUM_VC-1:0]` word per port, valid = one bit per port in a packed vector.
+Marshalling is port-major, at each network's own word count: flit = 5 (REQ) / 4 (RSP) /
+20 (DAT) 32-bit words per port, DAT credit = one `[DAT_NUM_VC-1:0]` word per port,
+valid and ready = one bit per port in a packed vector.
 
 ### 3.5 Protocol rules
 
-R1 (input rhythm). At most one flit per network per input face per cycle: one on
-`noc_nmu_req_i`, one on `noc_nsu_rsp_i`, and one per direction on
-`link_req_in_*` / `link_rsp_in_*`. Back-to-back flits on consecutive cycles are legal
+R1 (input rhythm). At most one flit per network per input port per cycle: one on each
+of `rx_req_*`, `rx_rsp_*`, `rx_dat_*` per port, LOCAL included. Back-to-back flits on consecutive cycles are legal
 without limit while credit lasts. Flits of one packet need not be contiguous: gaps of
 any length may separate them (the wormhole lock holds across gaps, rule 2.6.2).
 
-R2 (idle bus state). When a `valid` bit is low, the corresponding 408-bit flit bus
-carries all zeros. This holds for the module's own outputs (registered zeros) and for
+R2 (idle bus state). When a `valid` bit is low, the corresponding flit bus carries all
+zeros. This holds for the module's own outputs (registered zeros) and for
 its inputs (each input wire is a peer's registered output or a fabric tie-off).
 Credit vectors carry 0 in every non-pulsing bit position.
 
@@ -494,23 +543,23 @@ registered and change only at the posedge. The verification environment (co-sim
 scoreboard, `link_perf_monitor` assertions, boundary `$fatal` checks) samples at the
 posedge.
 
-R4 (valid behavior). Each `valid` bit is high for exactly 1 cycle per flit. There is
-no ready signal and no retraction: a driven flit is committed. A sender may assert
-valid on VC v toward a port only while its credit counter for that (port, VC) is
-nonzero.
+R4 (valid behavior). Each `valid` bit is high for exactly 1 cycle per flit, and there is
+no retraction: a driven flit is committed. On DAT a sender may assert valid on VC v
+toward a port only while its credit counter for that (port, VC) is nonzero. On REQ/RSP
+the sender grants against the port's `ready`, sampled two registrations earlier, so
+`ready` never gates the transfer in the same cycle.
 
-R5 (credit pulse shape). Every credit signal bit is a single-cycle pulse. At most one
-pulse per (port, VC) per cycle. Each pulse means exactly one freed buffer slot.
+R5 (credit pulse shape, DAT). Every credit signal bit is a single-cycle pulse. At most
+one pulse per (port, VC) per cycle. Each pulse means exactly one freed buffer slot.
 Example: two same-cycle stage-2 dequeues from (WEST, VC0) (section 2.4) produce pulses
-on `link_req_in_credit[WEST][0]` in two consecutive cycles, never a 2-cycle-wide level
+on `rx_dat_crdvalid[WEST][0]` in two consecutive cycles, never a 2-cycle-wide level
 or a double-count.
 
-R6 (credit seed). After reset, the sender-side counter for every (port, VC) equals
-`NOC_ROUTER_VC_DEPTH` = 4. The `link_perf_monitor` on every directed edge seeds its
-mirror counter with the same value (`BUFFER_DEPTH = ROUTER_VC_DEPTH`,
-`gen_tb_top.py:387`).
+R6 (credit seed, DAT). After reset, the sender-side counter for every (port, VC) equals
+`NOC_ROUTER_VC_DEPTH` = 8. The `link_perf_monitor` on every directed DAT edge seeds its
+mirror counter with the same value (`BUFFER_DEPTH = ROUTER_VC_DEPTH`, `gen_tb_top.py`).
 
-R7 (credit-return latency). A flit granted (stage-2 dequeue) in cycle N produces its
+R7 (credit-return latency, DAT). A flit granted (stage-2 dequeue) in cycle N produces its
 credit pulse on the upstream-facing output wire at cycle N+2: the core registers the
 pulse one cycle (dequeue N -> core pulse N+1, verified by
 `CreditDecrementAtGrantAndPulseAfterDequeue`), and the SV output register adds one more
@@ -529,12 +578,12 @@ R10 (latency definition). Per-hop latency is measured from the posedge at which 
 is sampled on an input pin to the posedge at which it is sampled on the corresponding
 output pin (this module's registered output, as seen by the next sampler). At zero
 load (no contention on the granted output, nonzero credit, output FIFO below depth)
-this latency is exactly 3 cycles, every hop, both networks.
+this latency is exactly 3 cycles per hop on DAT and 2 on REQ/RSP (section 2.4).
 
 R11 (output uniqueness). At most one flit per output port per network per cycle: each
-`link_*_out_valid` bit and each NI-face `.valid` covers exactly one 408-bit flit bus.
+bit of `tx_req_valid` / `tx_rsp_valid` / `tx_dat_valid` covers exactly one flit bus.
 
-R12 (VC on the wire). The `vc_id` field of an output flit equals the `vc_id` it
+R12 (VC on the wire, DAT). The `vc_id` field of an output flit equals the `vc_id` it
 arrived with ONLY when `fixed_vc = 1` (NI-pinned); for `fixed_vc = 0` the VA stage
 restamps `vc_id` with the assigned output VC, which may differ from the arrival VC.
 Per hop, the credit pulse back to the sender carries the ARRIVAL (input-side) VC —
@@ -551,14 +600,14 @@ router obligation.
 | # | Guarantee | Model enforcement |
 |---|---|---|
 | G1 | Never two flits on one input port of one network in one cycle | abort, `router.hpp:194-197` |
-| G2 | Every valid flit has `vc_id < NUM_VC` | abort, `router.hpp:182-185`; SVA `link_perf_monitor.sv:69-72` |
+| G2 | Every valid DAT flit has `vc_id < DAT_NUM_VC`; REQ/RSP flits carry `vc_id` = 0 | abort, `router.hpp:182-185`; SVA `link_perf_monitor.sv:69-72` |
 | G3 | Every valid flit has `dst_id` inside the mesh (`dst_x < mesh_x_dim`, `dst_y < mesh_y_dim`). The NMU SAM lookup validates destinations at packetize time, so an out-of-mesh `dst_id` cannot happen | abort, `router.hpp:65-68` |
-| G4 | No sender drives a flit on VC v while its credit for that (port, VC) is 0 | input FIFO overflow assert, `router.hpp:284-286`; SVA `link_perf_monitor.sv:61-64` |
+| G4 | On DAT, no sender drives a flit on VC v while its credit for that (port, VC) is 0 | input FIFO overflow assert, `router.hpp:284-286`; SVA `link_perf_monitor.sv:61-64` |
 | G5 | Packets are well-formed per (input, VC): after a head (`flit_tail=0`), every following flit on that (input, VC) routes to the same output until a tail (`flit_tail=1`) closes the packet. Guaranteed because all flits of a packet share `dst_id` | abort, `router.hpp:228-234` |
-| G6 | No credit pulse arrives beyond the outstanding flit count (counter never exceeds the seed of 4) | abort, `router.hpp:111-114` |
-| G7 | On the RSP network every flit has `flit_tail = 1'b1` (the NSU emits each B and each R beat as a single-flit packet) | consequence: RSP wormhole lock only engages degenerately |
-| G8 | `rst_ni` is given once at simulation start; the handle from `cmodel_router_create` is valid and constant | tb_top sequencing, `gen_tb_top.py:585-587` |
-| G9 | Boundary-direction inputs are tied to 0 and never pulse | generated tie-off, `gen_tb_top.py:330-336` |
+| G6 | On DAT, no credit pulse arrives beyond the outstanding flit count (counter never exceeds the seed of 8) | abort, `router.hpp:111-114` |
+| G7 | Every response flit has `flit_tail = 1'b1` — every B and every R beat is a single-flit packet, on RSP and on DAT alike | consequence: only an AW+W request packet ever holds a wormhole lock across cycles |
+| G8 | `rst_ni` is given once at simulation start; the handle from `cmodel_router_create` is valid and constant | tb_top sequencing, `gen_tb_top.py` |
+| G9 | Boundary-direction inputs are tied to 0 and never pulse | generated tie-off, `gen_tb_top.py` |
 
 ## 4. Specifications
 
@@ -570,10 +619,10 @@ which fails on any data or ordering divergence from this model.
 SPEC 1 (interface). The top module is `router_wrap` with exactly the ports and
 parameters of sections 3.1-3.3. Verified at build and at the start of the generated
 testbench. Failure: build/port-binding error, or the `initial`-block `$fatal` guard
-that fires at time 0 when `$bits(noc_credit_t) != NUM_VC` (`router_wrap.sv:81-86`).
+that fires at time 0 when `$bits(noc_credit_t) != DAT_NUM_VC` (`router_wrap.sv`).
 
 SPEC 2 (reset). While `rst_ni` is 0, every output signal is 0. After the single
-reset, the block starts with empty FIFOs, no locks, and all credit counters at 4.
+reset, the block starts with empty FIFOs, no locks, and all DAT credit counters at 8.
 Verified by the tb_top reset window preceding all traffic. Failure: any nonzero
 output during reset trips the boundary checks or the co-sim scoreboard.
 
@@ -582,16 +631,18 @@ of its `dst_id` (section 2.3), recomputed at every hop. Verified by ctest
 `RouterRouteCompute.XyDimensionOrder` and the co-sim scoreboard (a misroute delivers
 data to the wrong NSU). Failure: wrong output port on any flit.
 
-SPEC 4 (zero-load latency). Input-pin sample edge to output-pin sample edge is
-exactly 3 cycles when the granted output is uncontended, has credit, and its output
-FIFO is below depth. Verified by ctest `RouterDatapath.ZeroLoadLatencyIsThreeTicks`.
-Failure: the flit appears on the output wire earlier or later than cycle N+3.
+SPEC 4 (zero-load latency). Input-pin sample edge to output-pin sample edge is exactly
+3 cycles on DAT and 2 on REQ/RSP, when the granted output is uncontended, has credit or
+ready, and its output FIFO is below depth. Verified by ctest
+`RouterDatapath.ZeroLoadLatencyIsThreeTicks` and
+`SimpleRouterDatapath.ZeroLoadLatencyDirectModeTwoTicks`. Failure: the flit appears on
+the output wire earlier or later than that edge.
 
 SPEC 5 (bit transparency). Every flit leaves bit-identical to how it entered — all
 bits, header and payload — except the header `vc_id` field, which the VA stage
 restamps for `fixed_vc = 0` flits (rule R12). The router writes nothing else.
 Verified by ctest `RouterDatapath.HeaderTransparency` (byte-for-byte compare of the
-whole flit at `NUM_VC = 1`, where the restamp is the identity) and by the co-sim
+whole flit at `DAT_NUM_VC = 1`, where the restamp is the identity) and by the co-sim
 scoreboard readback. Failure: any flipped bit outside `vc_id`.
 
 SPEC 6 (VC handling). A `fixed_vc = 1` flit keeps its header `vc_id` end to end:
@@ -607,10 +658,11 @@ consumed on the assigned VC, upstream pulse on the arrival VC),
 Failure: a pinned flit's `vc_id` differs between ingress and egress, or credit
 activity on a VC the flit was not assigned to.
 
-SPEC 7 (credit decrement point). The per-(output, VC) counter is seeded to 4 and
-decremented exactly at the grant event (admission into the output FIFO), not at link
-traversal. Verified by ctest `RouterDatapath.CreditDecrementAtGrantAndPulseAfterDequeue`
-(counter reads 4 after stage 1, 3 after the stage-2 grant). Failure: counter value
+SPEC 7 (credit decrement point, DAT). The per-(output, VC) counter is seeded to
+`NOC_ROUTER_VC_DEPTH` and decremented exactly at the grant event (admission into the
+output FIFO), not at link traversal. Verified by ctest
+`RouterDatapath.CreditDecrementAtGrantAndPulseAfterDequeue` (counter reads the seed after
+stage 1, one less after the stage-2 grant). Failure: counter value
 wrong at either observation point, or the model underflow assert (`router.hpp:262`).
 
 SPEC 8 (credit pulse discipline). Each credit output bit pulses for exactly 1 cycle
@@ -674,14 +726,14 @@ SPEC 17 (boundary silence). A boundary direction (no neighbor) never asserts
 "noc_fabric: node%0d drove a flit on tied-off ...")` (`gen_tb_top.py:354-368`).
 Failure: that `$fatal`.
 
-SPEC 18 (network independence). The REQ and RSP routers share no state: traffic,
-stalls, or credit exhaustion on one network never affects the other. Verified by
-structure (two separate model instances) and by the co-sim scoreboard under
-bidirectional regression traffic. Failure: cross-network coupling observable as a
+SPEC 18 (network independence). The REQ, RSP and DAT routers share no state: traffic,
+stalls, ready deassertion, or credit exhaustion on one network never affects the other
+two. Verified by structure (three separate model instances) and by the co-sim scoreboard
+under bidirectional regression traffic. Failure: cross-network coupling observable as a
 scoreboard divergence.
 
 SPEC 19 (parameter legality). Construction rejects (assert then abort) exactly three
-conditions: `NUM_VC` outside 1..8 (= 2^VC_ID_WIDTH), a zero VC depth or zero output
+conditions: `DAT_NUM_VC` outside 1..8 (= 2^VC_ID_WIDTH), a zero VC depth or zero output
 FIFO depth, and an own coordinate outside the mesh (`router.hpp:77-88`). The upper
 bounds on VC depth, output FIFO depth, and mesh dims (VC depth and output FIFO depth
 stated as 1..16, mesh dims stated as 2..16) are design assumptions bounded by the
@@ -692,8 +744,35 @@ needs at least 2x2; 1x1/1xN illegal) is enforced at topology load time
 Router construction. Verified by ctest death tests
 `RouterConstructionDeath.BadParametersAbort` (covers `num_vc = 9` and `vc_depth = 0`),
 `RouterRouteComputeDeath.DstOutsideMeshAborts`, `RouterDatapathDeath.BadVcIdAborts`.
-Failure: construction succeeds on `num_vc` outside 1..8, a zero depth, or an
+Failure: construction succeeds on `dat_num_vc` outside 1..8, a zero depth, or an
 out-of-mesh coordinate.
+
+SPEC 20 (multicast fork). A head flit with `collective_op != UNICAST` leaves on the
+multi-hot branch set of `route_mask_fork` instead of the one-hot `route_compute` result;
+each branch arbitrates and locks on its own; the input FIFO pops and the single upstream
+credit pulse leaves only once every expected branch has accepted; every continuation of
+the worm recomputes its own branch set and aborts on divergence (section 2.10). An empty
+branch set at a router the flit reached is fatal. Verified by ctest
+`RouterFork.OneHotForkSetIsBitIdenticalToPlainUnicast` and the `test_router_fork.cpp` /
+`test_simple_router_fork.cpp` suites, and by the co-sim `multicast` pattern. Failure: a
+replica short of the branch set, more than one credit pulse per forked flit, or a
+continuation on a branch set its own header does not name.
+
+SPEC 21 (CollectB join, RSP only). A CollectB (`collective_op != UNICAST` with `axi_ch`
+in {`NarrowB`, `DataB`}) is never a unicast candidate; it is forwarded once, as one whole
+input flit, only when every input of `route_mask_join` holds a head of the same collect,
+and every contributing head pops in that same handshake. `BRESP` precedence is
+first-`SLVERR` in route-index order with `DECERR` never elevated; the join is stateless
+and re-evaluates every tick; it holds while its output is mid-worm and grants at the
+boundary. An empty expected set, a CollectB arriving outside its own expected set, a
+collective on an RSP read channel, or joined heads disagreeing on `ordering_tag` /
+`axi_ch` / `bid` are each fatal (section 2.10). Verified by ctest
+`SimpleRouterJoin.FirstSlverrInRouteIndexOrderWins`,
+`SimpleRouterJoin.DecerrIsNotElevated`,
+`SimpleRouterJoinChain.MidWormHoldKeepsTheDownstreamLatchIntact` and the rest of
+`test_simple_router_join.cpp`, plus the co-sim `multicast` pattern's merged-B checks.
+Failure: more than one `B` per collective reaching the NMU, a merge before every replica
+arrived, or a rebuilt rather than forwarded header.
 
 ## 5. Block Diagram
 
@@ -701,35 +780,40 @@ Fabric context (generated per topology YAML, one `router_wrap` per node):
 
 ```
                           node (x, y+1)
-                     link[SOUTH] out ^ | in
-        flit + valid down, credit up | v  (opposite-port pairing)
+                    port[SOUTH] tx ^ | rx
+   flit + valid down, ready/credit up | v  (opposite-port pairing)
    +---------------------------------------------------------+
    |  node (x, y)               router_wrap                   |
    |                                                          |
-   |   NMU --noc_nmu_req_i-->  +-----------+ --link_req_out--> EAST peer
-   |   NMU <-noc_nmu_req_cred- | REQ Router| <-link_req_in---  (per dir
-   |   NSU <--noc_nsu_req_o--  |           | <-link_req_out_credit  N/E/S/W,
-   |   NSU --noc_nsu_req_cred> +-----------+ --link_req_in_credit-> LOCAL slot
-   |                                                          |     unused)
-   |   NSU --noc_nsu_rsp_i-->  +-----------+ --link_rsp_out-->
-   |   NSU <-noc_nsu_rsp_cred- | RSP Router| <-link_rsp_in---
-   |   NMU <--noc_nmu_rsp_o--  |           |   ...
-   |   NMU --noc_nmu_rsp_cred> +-----------+                  |
+   |   NMU --rx_req[LOCAL]-->  +--------------+ --tx_req[E]--> EAST peer
+   |   NMU <-rx_req_ready------|REQ SimpleRtr | <-rx_req[E]--- (ports
+   |   NSU <--tx_req[LOCAL]--  | ready/valid  | --rx_req_ready[E]->  N/E/S/W
+   |   NSU --tx_req_ready----> +--------------+                |    + LOCAL)
+   |                                                          |
+   |   NSU --rx_rsp[LOCAL]-->  +--------------+ --tx_rsp[E]-->
+   |   NSU <-rx_rsp_ready------|RSP SimpleRtr | <-rx_rsp[E]---
+   |   NMU <--tx_rsp[LOCAL]--  | ready/valid  |   ...
+   |   NMU --tx_rsp_ready----> +--------------+                |
+   |                                                          |
+   |  DatMerge --rx_dat[LOCAL]-> +------------+ --tx_dat[E]-->
+   |  (NMU AW/W + NSU R)         | DAT Router | <-rx_dat[E]---
+   |  DatMerge <-tx_dat[LOCAL]-- | credit, VA | --rx_dat_crdvalid[E]->
+   |  (axi_ch demux to NMU/NSU)  +------------+ <-tx_dat_crdvalid[E]-
    +---------------------------------------------------------+
-                     link[NORTH] of node (x, y-1)
+                     port[NORTH] of node (x, y-1)
 
-   one passive link_perf_monitor per live directed edge (req + rsp),
+   one passive link_perf_monitor per live directed edge (req + rsp + dat),
    BUFFER_DEPTH = ROUTER_VC_DEPTH, asserts SPEC 9 / G2 on the wire
 ```
 
 One Router (per network), 3-stage pipeline, 5 in / 5 out ports:
 
 ```
- input port p (x5: LOCAL,N,E,S,W)                      output port q (x5)
+ DAT Router: input port p (x5: LOCAL,N,E,S,W)          output port q (x5)
  --------------------------------                      -----------------
                     stage 1              stage 2                stage 3
- flit ---> [input_reg_ 1-deep] --vc_id--> [FIFO vc0, depth 4] \
-                                          [FIFO vc1, depth 4] -+--> per-output q:
+ flit ---> [input_reg_ 1-deep] --vc_id--> [FIFO vc0, depth 8] \
+                                          [FIFO vc1, depth 8] -+--> per-output q:
                                               ...              |    wormhole lock
                                           [FIFO vcN-1]        -+    (locked_input,
                                                                |     locked_input_vc,
@@ -737,7 +821,7 @@ One Router (per network), 3-stage pipeline, 5 in / 5 out ports:
                                        route_compute(dst_id)   |    VC RR vc_rr_[q]
                                        at each FIFO head ------+    input RR ws.rr
                                                                |    credit_[q][vc]
-                                                               |    (seed 4, -- at
+                                                               |    (seed 8, -- at
                                                                |     grant)
                                                                v
                                             [output_fifo_[q], depth 2] --> link
@@ -750,19 +834,19 @@ One Router (per network), 3-stage pipeline, 5 in / 5 out ports:
 Both waveforms use the sampling convention of section 1: the value shown in column N
 is the value sampled at posedge N.
 
-Waveform 1: zero-load single-flit hop plus credit return. Node A (0,0), single-flit
+Waveform 1: zero-load single-flit DAT hop plus credit return. Node A (0,0), single-flit
 packet F (`flit_tail=1`, VC0, `dst_id`=8'h01) injected by the NMU, routed EAST.
 
 ```
 cycle (posedge idx)      |  0 |  1 |  2 |  3 |  4 |
 -------------------------+----+----+----+----+----+
-noc_nmu_req_i.valid      |  1 |  0 |  0 |  0 |  0 |   <- valid exactly 1 cycle (R4)
-noc_nmu_req_i.flit       |  F |  0 |  0 |  0 |  0 |   <- all-zero when valid low (R2)
+rx_dat_valid[LOCAL]      |  1 |  0 |  0 |  0 |  0 |   <- valid exactly 1 cycle (R4)
+rx_dat_flit[LOCAL]       |  F |  0 |  0 |  0 |  0 |   <- all-zero when valid low (R2)
 A internal stage of F    | S1 | S2 | S3 |    |    |   <- one stage per cycle
-A credit_[EAST][0]       |  4 |  3 |  3 |  3 |  3 |   <- decrement at grant (SPEC 7)
-link_req_out_valid[EAST] |  0 |  0 |  0 |  1 |  0 |   <- sampled by peer at N+3:
-link_req_out_flit[EAST]  |  0 |  0 |  0 |  F |  0 |      zero-load latency 3 (SPEC 4)
-noc_nmu_req_cred_o[0]    |  0 |  0 |  0 |  1 |  0 |   <- LOCAL dequeue at cycle 1,
+A credit_[EAST][0]       |  8 |  7 |  7 |  7 |  7 |   <- decrement at grant (SPEC 7)
+tx_dat_valid[EAST]       |  0 |  0 |  0 |  1 |  0 |   <- sampled by peer at N+3:
+tx_dat_flit[EAST]        |  0 |  0 |  0 |  F |  0 |      zero-load latency 3 (SPEC 4)
+rx_dat_crdvalid[LOCAL][0]|  0 |  0 |  0 |  1 |  0 |   <- LOCAL dequeue at cycle 1,
                                                          pulse on wire at 1+2 = 3 (R7)
 ```
 
@@ -770,27 +854,27 @@ Annotations: reset was given once, before cycle 0 (R9). The grant is at cycle 1,
 core-internal credit pulse fires at cycle 2, the registered wire pulse is sampled at
 cycle 3 (grant N -> core pulse N+1 -> SV wire N+2).
 
-Waveform 2: 3-flit wormhole packet (section 2.9), link A(0,0).EAST -> B(1,0).WEST,
+Waveform 2: 3-flit DAT wormhole packet (section 2.9), link A(0,0).EAST -> B(1,0).WEST,
 VC0, injected cycles 0..2. Credit counter shown as its value entering each cycle.
 
 ```
 cycle (posedge idx)         |  0 |  1 |  2 |  3 |  4 |  5 |  6 |  7 |  8 |
 ----------------------------+----+----+----+----+----+----+----+----+----+
-A noc_nmu_req_i.valid       |  1 |  1 |  1 |  0 |  0 |  0 |  0 |  0 |  0 |  3 flits,
-A noc_nmu_req_i.flit        | F0 | F1 | F2 |  0 |  0 |  0 |  0 |  0 |  0 |  0-gap (R8)
+A rx_dat_valid[LOCAL]       |  1 |  1 |  1 |  0 |  0 |  0 |  0 |  0 |  0 |  3 flits,
+A rx_dat_flit[LOCAL]        | F0 | F1 | F2 |  0 |  0 |  0 |  0 |  0 |  0 |  0-gap (R8)
 A wormhole_[EAST] lock      |  - |  L |  L |  - |  - |  - |  - |  - |  - |  head locks,
-A credit_[EAST][0]          |  4 |  4 |  3 |  2 |  1 |  1 |  1 |  2 |  3 |  tail frees
-A link_req_out_valid[EAST]  |  0 |  0 |  0 |  1 |  1 |  1 |  0 |  0 |  0 |  no
-A link_req_out_flit[EAST]   |  0 |  0 |  0 | F0 | F1 | F2 |  0 |  0 |  0 |  interleave
-A noc_nmu_req_cred_o[0]     |  0 |  0 |  0 |  1 |  1 |  1 |  0 |  0 |  0 |  (SPEC 10)
-B link_req_in_credit[WEST][0]| 0 |  0 |  0 |  0 |  0 |  0 |  1 |  1 |  1 |  B grants at
-B noc_nsu_req_o.valid       |  0 |  0 |  0 |  0 |  0 |  0 |  1 |  1 |  1 |  4,5,6 ->
-B noc_nsu_req_o.flit        |  0 |  0 |  0 |  0 |  0 |  0 | F0 | F1 | F2 |  wire 6,7,8
+A credit_[EAST][0]          |  8 |  8 |  7 |  6 |  5 |  5 |  5 |  6 |  7 |  tail frees
+A tx_dat_valid[EAST]        |  0 |  0 |  0 |  1 |  1 |  1 |  0 |  0 |  0 |  no
+A tx_dat_flit[EAST]         |  0 |  0 |  0 | F0 | F1 | F2 |  0 |  0 |  0 |  interleave
+A rx_dat_crdvalid[LOCAL][0] |  0 |  0 |  0 |  1 |  1 |  1 |  0 |  0 |  0 |  (SPEC 10)
+B rx_dat_crdvalid[WEST][0]  |  0 |  0 |  0 |  0 |  0 |  0 |  1 |  1 |  1 |  B grants at
+B tx_dat_valid[LOCAL]       |  0 |  0 |  0 |  0 |  0 |  0 |  1 |  1 |  1 |  4,5,6 ->
+B tx_dat_flit[LOCAL]        |  0 |  0 |  0 |  0 |  0 |  0 | F0 | F1 | F2 |  wire 6,7,8
 ```
 
 Annotations: lock row `L` = EAST locked to (LOCAL, VC0), set by the F0 grant at
-cycle 1, released by the F2 tail grant at cycle 3. `credit_[EAST][0]` bottoms at 1
-with three flits outstanding and is back to the seed 4 after cycle 8 (conservation,
+cycle 1, released by the F2 tail grant at cycle 3. `credit_[EAST][0]` bottoms at 5
+with three flits outstanding and is back to the seed 8 after cycle 8 (conservation,
 SPEC 8). Head latency 6 = 2 hops x 3 cycles. Each credit wire pulse is exactly 1 cycle
 wide, one per freed slot (R5).
 
@@ -804,9 +888,12 @@ stage per cycle, and a full output FIFO that drains in stage 3 accepts a grant i
 same cycle (SPEC 14). Any structure with the same observable cycle behavior is
 equally acceptable.
 
-Hint: no datapath logic ever needs to decode `axi_ch`, `src_id`, `ordering_req`, `ordering_tag`,
-or the payload. Flit bits [10:0] and [407:23] form an opaque bundle steered by the
-12 control bits [22:11] = {`flit_tail` [22], `vc_id` [21:19], `dst_id` [18:11]}.
+Hint: on unicast traffic no datapath logic ever needs to decode `axi_ch`, `src_id`,
+`ordering_req`, `ordering_tag`, or the payload. Flit bits [11:0] and [43:25] plus the
+whole payload form an opaque bundle steered by the 13 control bits
+{`flit_tail` [24], `vc_id` [23:21], `fixed_vc` [20], `dst_id` [19:12]}. Collectives add
+`collective_op` [35:34] and `collective_mask` [43:36], and the RSP join additionally
+reads `axi_ch`, `src_id`, `ordering_tag` and the payload's `bresp` / `bid`.
 
-Hint: the per-(port, VC) credit counter needs ceil(log2(`NOC_ROUTER_VC_DEPTH`+1)) = 3
-bits at the default depth 4 (values 0..4).
+Hint: the per-(port, VC) DAT credit counter needs
+ceil(log2(`NOC_ROUTER_VC_DEPTH` + 1)) = 4 bits at the default depth 8 (values 0..8).

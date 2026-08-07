@@ -43,12 +43,12 @@
         },
         {
           "id": "FEAT-NMU-VC_MAPPING",
-          "summary": "Maps outbound flits to a VC at flit-construct time (design-time fixed policy; req-VC=0, rsp-VC=0 for NUM_VC=1). VC egress arbitration is in FEAT-NMU-VC_ARB.",
+          "summary": "Maps outbound flits to a VC at flit-construct time (req-VC=0, rsp-VC=0 for NUM_VC=1), and stamps fixed_vc on the ordering_req=0 AW streak so routers keep that VC instead of restamping at VA.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["vc_id", "flit_tail"],
+          "uses_packet_fields": ["vc_id", "fixed_vc"],
           "configured_by": [],
-          "related_features": ["FEAT-NMU-VC_ARB", "FEAT-NMU-PACKETIZE"]
+          "related_features": ["FEAT-NMU-VC_ARB", "FEAT-NMU-PACKETIZE", "FEAT-NMU-WORMHOLE_ARB"]
         },
         {
           "id": "FEAT-NMU-VC_ARB",
@@ -73,12 +73,21 @@
         },
         {
           "id": "FEAT-NMU-DEPACKETIZE",
-          "summary": "Parses inbound NoC response flit streams into AXI B/R beats (with last) before delivery to the AXI slave port.",
+          "summary": "Parses inbound response flits into AXI B/R beats (with last) for the AXI slave port; reads ordering_req/ordering_tag to hand the beat back to the RoB.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["B", "NARROW_R", "DATA_R"],
+          "uses_packet_fields": ["B", "NARROW_R", "DATA_R", "ordering_req", "ordering_tag"],
           "configured_by": [],
           "related_features": ["FEAT-NMU-AXI_SLAVE_PORT", "FEAT-NMU-ROB"]
+        },
+        {
+          "id": "FEAT-NMU-WORMHOLE_ARB",
+          "summary": "Shared NI wormhole arbiter, 3 inputs (AW, W, AR) with the AW->W pairing lock: an AW flit (flit_tail=0) locks it to W until the flit_tail=1 beat drains, so AW+W stays one packet. AR never locks.",
+          "modes": ["RoundRobin"],
+          "compile_time_params": {},
+          "uses_packet_fields": ["flit_tail"],
+          "configured_by": [],
+          "related_features": ["FEAT-NMU-PACKETIZE", "FEAT-NMU-VC_MAPPING", "FEAT-NSU-WORMHOLE_ARB"]
         }
       ]
     },
@@ -101,7 +110,7 @@
           "summary": "Parses inbound NoC request flit streams into AXI AW/W/AR transactions before delivery to the AXI master port.",
           "modes": [],
           "compile_time_params": {},
-          "uses_packet_fields": ["AW", "NARROW_W", "DATA_W", "AR", "src_id"],
+          "uses_packet_fields": ["AW", "NARROW_W", "DATA_W", "AR", "src_id", "ordering_req", "ordering_tag"],
           "configured_by": [],
           "related_features": ["FEAT-NSU-AXI_MASTER_PORT", "FEAT-NSU-META_BUFFER"]
         },
@@ -131,18 +140,29 @@
           "uses_packet_fields": ["vc_id"],
           "configured_by": [],
           "related_features": ["FEAT-NSU-PACKETIZE"]
+        },
+        {
+          "id": "FEAT-NSU-WORMHOLE_ARB",
+          "summary": "Shared NI wormhole arbiter, 2 inputs (B, R), no channel pairing: every response flit carries flit_tail=1, so the lock engages degenerately and the stage is flit-level round-robin.",
+          "modes": ["RoundRobin"],
+          "compile_time_params": {},
+          "uses_packet_fields": ["flit_tail"],
+          "configured_by": [],
+          "related_features": ["FEAT-NSU-PACKETIZE", "FEAT-NSU-VC_ARB", "FEAT-NMU-WORMHOLE_ARB"]
         }
       ]
     },
     {
       "name": "ROUTER",
       "fullname": "NoC Router",
-      "role": "Fixed-vc 3-stage wormhole switch; one instance per physical network",
+      "role": "Per-node wormhole switch, one instance per physical network: REQ/RSP are 2-stage ready/valid single-VC SimpleRouters, DAT is a 3-stage credit Router with per-hop VC assignment",
       "features": [
         {"id": "FEAT-ROUTER-ROUTE_COMPUTATION", "summary": "XY dimension-order route computation on the head flit; minimal, deterministic, no Y-to-X turns.", "modes": []},
-        {"id": "FEAT-ROUTER-WORMHOLE_ARBITRATION", "summary": "Per-(output port, vc) packet-level lock from head grant to tail grant; round-robin advances per packet.", "modes": []},
-        {"id": "FEAT-ROUTER-VC_ARBITRATION", "summary": "Per-output flit-level round-robin across VCs, credit-gated.", "modes": []},
-        {"id": "FEAT-ROUTER-CREDIT_FLOW_CONTROL", "summary": "Per-(output port, vc) credit counters seeded with downstream depth; reserve at grant, registered 1-cycle credit return.", "modes": []},
+        {"id": "FEAT-ROUTER-WORMHOLE_ARBITRATION", "summary": "Per-output packet-level lock ACROSS VCs, head grant to tail grant; RR advances per packet. A credit-starved worm idles the whole output. AW+W is the only packet whose lock spans cycles.", "modes": []},
+        {"id": "FEAT-ROUTER-VC_ARBITRATION", "summary": "DAT only: per-output VC-major, input-minor round-robin, credit-gated, plus the VA stage assigning the output VC (preferred map + FVADA overflow) and restamping vc_id on fixed_vc=0 flits.", "modes": []},
+        {"id": "FEAT-ROUTER-CREDIT_FLOW_CONTROL", "summary": "DAT only: per-(output port, vc) credit counters seeded with downstream depth, reserved at grant, registered 1-cycle return. REQ/RSP use an almost-full ready computed off occupancy.", "modes": []},
+        {"id": "FEAT-ROUTER-MULTICAST_FORK", "summary": "A collective_op != UNICAST head takes the multi-hot route_mask_fork branch set instead of the one-hot route; each branch grants on its own, and the input pops once every branch has accepted.", "modes": []},
+        {"id": "FEAT-ROUTER-COLLECTB_JOIN", "summary": "RSP only: a CollectB leaves unicast arbitration and is forwarded once, whole, when every route_mask_join input holds a head of that collect. BRESP precedence is first-SLVERR, DECERR never elevated.", "modes": []},
         {"id": "FEAT-ROUTER-ROUTE_PARITY_CHECK", "summary": "Optional route_par screen at ingress; mismatch drops the flit and counts.", "modes": []}
       ]
     }

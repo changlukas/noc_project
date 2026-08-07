@@ -59,23 +59,26 @@ topology:
   num_vc: 1
 address_map:
   tiles:
-    - { x: 0, y: 0, size: 0x100000000 }
-    - { x: 1, y: 0, size: 0x100000000 }
-    - { x: 2, y: 0, size: 0x100000000 }
-    - { x: 3, y: 0, size: 0x100000000 }
-    - { x: 0, y: 1, size: 0x100000000 }
-    # ... one entry per node, 16 total
-    - { x: 3, y: 3, size: 0x100000000 }
+    - { x: 0, y: 0, size: 0x100000 }
+    - { x: 1, y: 0, size: 0x100000 }
+    - { x: 2, y: 0, size: 0x100000 }
+    - { x: 3, y: 0, size: 0x100000 }
+    - { x: 0, y: 1, size: 0x100000 }
+    # ... one memory entry per node, 16 total
+    - { x: 3, y: 3, size: 0x100000 }
+    - { x: 0, y: 0, size: 0x1000, space: config }
+    # ... one config entry per node, 16 total
+    - { x: 3, y: 3, size: 0x1000, space: config }
 ```
 
 **Packed base addresses, contiguous and gap-free**
 
-| node | (x, y) | Base |
-|---|---|---|
-| 0 | (0, 0) | 0x0 |
-| 3 | (3, 0) | 0x3_0000_0000 |
-| 4 | (0, 1) | 0x4_0000_0000 |
-| 15 | (3, 3) | 0xF_0000_0000 |
+| node | (x, y) | Memory base | Config base |
+|---|---|---|---|
+| 0 | (0, 0) | 0x0 | 0x100_0000 |
+| 3 | (3, 0) | 0x30_0000 | 0x100_3000 |
+| 4 | (0, 1) | 0x40_0000 | 0x100_4000 |
+| 15 | (3, 3) | 0xF0_0000 | 0x100_F000 |
 
 **Flow** (`gen_test_patterns.py`)
 1. Read the topology YAML with its `address_map` tiles.
