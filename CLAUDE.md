@@ -23,7 +23,7 @@
 ## Key Design Docs
 
 - `docs/nmu-spec.md`, `docs/nsu-spec.md`, `docs/router-spec.md` - block-level design specs (interface, timing, functional behavior, verifiable per cycle)
-- `docs/backlog.md` - local, gitignored; rolling journal ("Last round" / "This round") plus one STANDING "Verification (acceptance)" section — the per-task/per-stage pass bar, kept across rolls. Read it at session start; when a round ends, fold results into "Last round", write the next "This round", keep the verification section, delete the rest. Longer-horizon items live in `IMPLEMENTATION_PLAN.md` (campaign stages + deferred list); standing design rationale in `docs/trade-off.md`.
+- `docs/backlog.md` - local, gitignored; rolling journal ("Last round" / "This round") plus one STANDING "Verification (acceptance)" section — the per-task/per-stage pass bar, kept across rolls. Read it at session start; when a round ends, fold results into "Last round", write the next "This round", keep the verification section, delete the rest. Known model gaps and technical debt live in `docs/known-limitations.md` (tracked); an in-flight campaign's stages live in `IMPLEMENTATION_PLAN.md`, deleted when the campaign ends; standing design rationale in `docs/trade-off.md`.
 
 ## Doc Writing Rules
 
