@@ -290,13 +290,13 @@ address_map:
     - { x: 0, y: 0, size: 0x100000 }
     - { x: 1, y: 0, size: 0x100000 }
     # ... one entry per node
-    - { x: 0, y: 0, size: 0x1000, space: config }  # optional second tile
+    - { x: 0, y: 0, size: 0x1000, space: config }  # config tiles, one per node
 ```
 
 `space` selects the AXI class the tile decodes into: `config` maps to the
 narrow class, `memory` (the default when `space` is omitted) maps to the data
-class. A node may carry one memory tile and, optionally, one config tile
-(`nmu::addr_trans::SamTable::validate`).
+class. Every shipped topology gives each node one memory tile and one config
+tile (`nmu::addr_trans::SamTable::validate`).
 
 The SAM is a first-match `{base, size, dst_id}` range table, loaded from this
 block and shared by the C++ loader and both Python generators: the generator
@@ -310,25 +310,16 @@ be heterogeneous. `dst_id = (y << X_WIDTH) | x`. The loader accepts a
 heterogeneous map (covered by
 `test_address_map_tile_layout_derives_span_from_entries` in
 `sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology is
-uniform at `0x100000` per memory tile, in raster order. The two shapes differ
-only in whether a config space exists beside it:
-
-| Topology | Tiles per node | `TILE_TARGETS` |
-|---|---|---|
-| `mesh_2x4_vc1`, `mesh_4x4_vc{1,2,4,8}` | `0x100000` memory | 1 |
-| `mesh_2x2_config_narrow_vc1`, `mesh_2x4_config_narrow_vc1` | `0x100000` memory + `0x1000` config, config entries appended after all memory entries | 2 |
-
-Keeping both shapes is deliberate: they exercise the two tile-crossbar decode
-paths, the single-target auto-addressing one and the two-window one. Only the
-two-window shape can catch a rebase error at the crossbar -- a single 1 MB
-window swallows every offset the stimulus generates, so a `TILE_TARGETS=1` run
-never DECERRs and the endpoint's RRESP gate stays silent there.
+uniform at `0x100000` per memory tile plus `0x1000` per config tile, in raster
+order, config entries appended after all memory entries. `TILE_TARGETS` is
+therefore 2 on every topology, and the endpoint carries one decode path, the
+two-window one. That is the shape a rebase error at the crossbar is visible in:
+an address outside both windows DECERRs, which the endpoint's `DECERR_FAULT_BIT`
+fault injection and the RRESP fatal in `sim/tb/user_node_endpoint.sv` check.
 
 Raster order is what makes the node index a contiguous bit field an AWUSER
 address mask can wildcard: memory bases at `idx * 0x100000`, config bases at
-`n_nodes * 0x100000 + idx * 0x1000`. `mesh_2x4_config_narrow_vc1` exists for
-narrow multicast on a rectangular mesh — on a 2x2 mesh the row, column, and
-submesh masks degenerate into each other, so the spanning trees are trivial.
+`n_nodes * 0x100000 + idx * 0x1000`.
 
 `gen_tb_top.py` rejects a topology whose mesh dimensions or `num_vc` exceed
 the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit
