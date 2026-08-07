@@ -249,6 +249,7 @@ run-directed: $(TBTOP_EXE)
 	    $(if $(OUTSTANDING_DEPTH),"+outstanding_depth=$(OUTSTANDING_DEPTH)") \
 	    $(if $(MCAST_FAULT),"+mcast_fault=$(MCAST_FAULT)") \
 	    $(if $(DECERR_FAULT),"+decerr_fault=$(DECERR_FAULT)") \
+	    $(if $(DECERR_FAULT_WR),"+decerr_fault_wr=$(DECERR_FAULT_WR)") \
 	    "+verilator+seed+$(SEED)" \
 	    "+sam_config=$(TB_TOP_TOPO)" \
 	    "+perf_out=output/$(SIM_TAG)/perf.json" \

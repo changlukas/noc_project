@@ -156,12 +156,20 @@ module user_node_endpoint #(
     // node's inbound AR, which lands outside every crossbar window exactly as a
     // Python/C++ tile-layout divergence would. The crossbar answers RRESP =
     // DECERR and the master-face fatal below names it.
+    // The write twin, +decerr_fault_wr=1, is a SEPARATE plusarg on purpose:
+    // faulting AW and AR together would rebase a pair to the same wrong window,
+    // where the readback still agrees and nothing fires. On the AW alone the
+    // crossbar drops the burst's W beats (taxi_axi_crossbar_wr.sv:287 w_drop_reg)
+    // and its dedicated B port answers BRESP = DECERR (:384), which travels the
+    // NSU -> NMU B path and is named by the BRESP fatal below.
     localparam logic [ADDR_WIDTH-1:0] DECERR_FAULT_BIT = 1 << (ADDR_WIDTH - 1);
     bit decerr_fault = 1'b0;
+    bit decerr_fault_wr = 1'b0;
     initial void'($value$plusargs("decerr_fault=%d", decerr_fault));
+    initial void'($value$plusargs("decerr_fault_wr=%d", decerr_fault_wr));
 
     assign tile_axi.awid     = slave_axi_req_i.awid;
-    assign tile_axi.awaddr   = slave_axi_req_i.awaddr;
+    assign tile_axi.awaddr   = slave_axi_req_i.awaddr | (decerr_fault_wr ? DECERR_FAULT_BIT : '0);
     assign tile_axi.awlen    = slave_axi_req_i.awlen;
     assign tile_axi.awsize   = slave_axi_req_i.awsize;
     assign tile_axi.awburst  = slave_axi_req_i.awburst;
@@ -460,7 +468,9 @@ module user_node_endpoint #(
         end else if (master_axi_rsp_i.bvalid && master_axi_req_o.bready) begin
             b_returned[master_axi_rsp_i.bid] <= b_returned[master_axi_rsp_i.bid] + 1;
             // Directed runs use an always-OKAY MAPPED slave, so any error
-            // response here is a fabric bug (e.g. a corrupted merged B).
+            // response here is a fabric bug (e.g. a corrupted merged B), or a
+            // write that missed every tile window. +decerr_fault_wr=1 proves it
+            // fires.
             if (master_axi_rsp_i.bresp != axi_pkg::RESP_OKAY)
                 $fatal(1, "[mcast_sb] node%0d: BRESP=%0h on id=%0h, expected OKAY",
                        NODE_ID, master_axi_rsp_i.bresp, master_axi_rsp_i.bid);
