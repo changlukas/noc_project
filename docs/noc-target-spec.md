@@ -395,11 +395,16 @@ requires table decode.
 The mode is declared with the address map and validated against it at load.
 
 **Collective targets carry a further requirement.** A collective names its destination set with
-an address mask (§6), so the set can only be named if the space keeps its node index in a
-contiguous bit field. That holds when the space has one region per node, uniform in size, at a
-power-of-two stride, in coordinate order. A space that declares which bits hold X and which hold
-Y, and satisfies those conditions, is a legal collective target. A space that does not is still a
-legal unicast target.
+an address mask (§6), which can only name a set if the space keeps its node index in a
+contiguous bit field. Require every multicast-targetable region
+
+- be a power-of-two in size
+- be aligned to an integer multiple of its size
+
+One such region per node, placed in coordinate order, puts the node index in a contiguous field
+at `log2(size)` and makes the stride uniform without stating it separately. A space that meets
+this and declares which bits hold X and which hold Y is a legal collective target. A space that
+does not is still a legal unicast target.
 
 Under table decode the field position is per space, so the same 48-bit address carries its
 coordinates at different bits depending on which space it lands in, and a collective mask sets
@@ -523,8 +528,8 @@ region base.
 The `AWUSER` mask is an address mask:
 
 - A set bit marks the matching `AWADDR` bit as don't care, `n` set bits name `2^n` addresses
-- Set bits are limited to the node-index field of the address, one aligned region per node, so
-  the named addresses differ only in destination node
+- Set bits are limited to the node-index field of the address, so the named addresses differ
+  only in destination node. §5.1 gives the region conditions that put that field in place
 - The NMU translates the address mask into the 8 b flit `collective_mask` at SAM lookup and
   rejects a mask outside these constraints
 - Every replica carries the same node-local offset. Nodes of a multicast group share one local
