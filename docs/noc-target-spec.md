@@ -383,14 +383,19 @@ TABLE decode, the address is one value
 | | Table decode | Offset decode |
 |---|---|---|
 | Destination | a property of the matched region | read from fixed address bits |
-| AXI class | a property of the matched region | not derivable |
-| Region boundaries | anywhere the map places them | uniform node stride, whole map |
-| Address spaces | any number | one |
-| Address matching no region | rejected at the NI | not detected |
+| Node index field | one per address space | one, shared by every space |
+| Address spaces | any number | any number |
+| Region boundaries | anywhere the map places them | one uniform node slot, spaces placed inside it |
+| Address matching no region | rejected at the NI | rejected by the space-window compare |
 
-Offset decode matches no region, so it identifies no address space and selects no AXI class. It
-is admissible only for a system carrying one class. A map with both a config and a memory space
-requires table decode.
+Obtaining the destination and obtaining the AXI class are separate. Either mode selects the
+class by comparing the address against the address-space windows, which is a compare per space
+and not a compare per node. Offset decode therefore supports several classes, and what it fixes
+is only how `dst_id` is reached.
+
+What offset decode does fix is that one node index field serves every space, so the spaces sit
+inside a single per-node slot rather than each having its own stride. A space smaller than the
+slot leaves the rest of that slot unmapped.
 
 The mode is declared with the address map and validated against it at load.
 
@@ -410,6 +415,11 @@ Under table decode the field position is per space, so the same 48-bit address c
 coordinates at different bits depending on which space it lands in, and a collective mask sets
 its bits at the position belonging to the space its anchor matched. Under offset decode there is
 one position and it is the same for every request.
+
+Spaces need not be contiguous. Under offset decode each space occupies a fixed window inside the
+per-node slot, so the regions of one space are separated by the regions of the others. That
+breaks nothing: the conditions above are per region, and the node index field is the slot index,
+which both spaces share.
 
 ---
 
