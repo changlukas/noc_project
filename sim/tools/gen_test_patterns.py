@@ -512,6 +512,16 @@ def collective_addr_mask(bases, member_cids, anchor_cid):
     every masked combination.  The NMU's collective_translate re-checks this
     and aborts the run; validating here turns a mask-unfriendly address map
     into a stimulus-generation error instead of a co-sim abort.
+
+    `bases` must be the bases of ONE address space, and the caller is expected
+    to have picked the space its anchor lands in.  The node-index field sits at
+    log2 of that space's region size (spec §5.1), so the mask bits land at
+    different address bits per space -- on the shipped 4x4, bits [21:20] for a
+    1 MB memory region and [13:12] for a 4 KB config region.  Deriving the mask
+    from the bases rather than from a constant is what keeps this correct
+    without the caller naming a bit position: mixing two spaces' bases in one
+    call produces a mask spanning both fields, which the wildcard check below
+    rejects.
     """
     anchor = bases[anchor_cid]
     mask = 0
