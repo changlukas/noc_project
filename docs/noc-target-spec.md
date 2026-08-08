@@ -341,6 +341,70 @@ below are from the port's own view. No wire is shared between the two instances.
 | Ordering | Same-ID response reordering | enabled, disabled (enabled) | The §3 ordering requirement holds in either setting |
 | Address map | SAM address spaces | config, memory | Config space selects the narrow class, memory space the data class. Uniform across nodes, loaded at runtime |
 | Address map | Space region size | power of two | - |
+| Address map | Destination decode | table, offset (table) | Table decode matches an address against the SAM regions. Offset decode reads the node coordinates from fixed address bit ranges. See §5.1 |
+
+### 5.1 Address map requirements
+
+The two modes differ in whether the address carries its destination. Offset decode reads the
+coordinates out of fixed bit positions. Table decode does not: the address is one value compared
+against every region, and the destination is a property of the region it matched.
+
+```
+OFFSET decode, the address is a structured word
+
+  +----------------+--------+--------+--------------------+
+  |    RESERVED    |    Y   |    X   |    tile offset     |
+  +----------------+--------+--------+--------------------+
+                        |        |            |
+      dst_id  <---------+--------+            |
+      local_addr  <---------------------------+
+
+  Field positions are fixed for the whole map, so every region
+  shares one node stride.
+
+
+TABLE decode, the address is one value
+
+  +--------------------------------------------------------+
+  |             compared whole against each region          |
+  +--------------------------------------------------------+
+                              |
+                              v
+                        region match
+                              |
+      dst_id      <-----------+  a property of the region
+      AXI class   <-----------+  a property of the region
+      local_addr  <-----------+  address minus the region base
+
+  Region boundaries are wherever the map places them. No field
+  position is implied and nothing is sliced from the address.
+```
+
+| | Table decode | Offset decode |
+|---|---|---|
+| Destination | a property of the matched region | read from fixed address bits |
+| AXI class | a property of the matched region | not derivable |
+| Region boundaries | anywhere the map places them | uniform node stride, whole map |
+| Address spaces | any number | one |
+| Address matching no region | rejected at the NI | not detected |
+
+Offset decode matches no region, so it identifies no address space and selects no AXI class. It
+is admissible only for a system carrying one class. A map with both a config and a memory space
+requires table decode.
+
+The mode is declared with the address map and validated against it at load.
+
+**Collective targets carry a further requirement.** A collective names its destination set with
+an address mask (§6), so the set can only be named if the space keeps its node index in a
+contiguous bit field. That holds when the space has one region per node, uniform in size, at a
+power-of-two stride, in coordinate order. A space that declares which bits hold X and which hold
+Y, and satisfies those conditions, is a legal collective target. A space that does not is still a
+legal unicast target.
+
+Under table decode the field position is per space, so the same 48-bit address carries its
+coordinates at different bits depending on which space it lands in, and a collective mask sets
+its bits at the position belonging to the space its anchor matched. Under offset decode there is
+one position and it is the same for every request.
 
 ---
 
