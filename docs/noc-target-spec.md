@@ -494,8 +494,13 @@ The `AWUSER` mask is an address mask:
 - A set bit marks the matching `AWADDR` bit as don't care, `n` set bits name `2^n` addresses
 - Set bits are limited to the node-index field of the address, so the named addresses differ
   only in destination node. §5.1 gives the region conditions that put that field in place
+- The node-index field sits at `log2(size)` of the space the anchor falls in, so a space with a
+  smaller region size holds its field at lower bits. A master must know which space it is
+  addressing before it can place the mask bits
 - The NMU translates the address mask into the 8 b flit `collective_mask` at SAM lookup and
-  rejects a mask outside these constraints
+  rejects a mask outside these constraints. Nothing downstream of the NMU sees an address mask,
+  a global address, or an address space: a router is given `dst_id`, `collective_mask` and the
+  node-local address only
 - Every replica carries the same node-local offset. Nodes of a multicast group share one local
   address map, and each aperture covers the full burst footprint
 
