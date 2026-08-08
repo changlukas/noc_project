@@ -345,81 +345,35 @@ below are from the port's own view. No wire is shared between the two instances.
 
 ### 5.1 Address map requirements
 
-The two modes differ in whether the address carries its destination. Offset decode reads the
-coordinates out of fixed bit positions. Table decode does not: the address is one value compared
-against every region, and the destination is a property of the region it matched.
+Every node owns one region per address space. Within a space those regions must
 
-```
-OFFSET decode, the address is a structured word
-
-  +----------------+--------+--------+--------------------+
-  |    RESERVED    |    Y   |    X   |    tile offset     |
-  +----------------+--------+--------+--------------------+
-                        |        |            |
-      dst_id  <---------+--------+            |
-      local_addr  <---------------------------+
-
-  Field positions are fixed for the whole map, so every region
-  shares one node stride.
-
-
-TABLE decode, the address is one value
-
-  +--------------------------------------------------------+
-  |             compared whole against each region          |
-  +--------------------------------------------------------+
-                              |
-                              v
-                        region match
-                              |
-      dst_id      <-----------+  a property of the region
-      AXI class   <-----------+  a property of the region
-      local_addr  <-----------+  address minus the region base
-
-  Region boundaries are wherever the map places them. No field
-  position is implied and nothing is sliced from the address.
-```
-
-| | Table decode | Offset decode |
-|---|---|---|
-| Destination | a property of the matched region | read from fixed address bits |
-| Node index field | one per address space | one, shared by every space |
-| Address spaces | any number | any number |
-| Region boundaries | anywhere the map places them | one uniform node slot, spaces placed inside it |
-| Address matching no region | rejected at the NI | rejected by the space-window compare |
-
-Obtaining the destination and obtaining the AXI class are separate. Either mode selects the
-class by comparing the address against the address-space windows, which is a compare per space
-and not a compare per node. Offset decode therefore supports several classes, and what it fixes
-is only how `dst_id` is reached.
-
-What offset decode does fix is that one node index field serves every space, so the spaces sit
-inside a single per-node slot rather than each having its own stride. A space smaller than the
-slot leaves the rest of that slot unmapped.
-
-The mode is declared with the address map and validated against it at load.
-
-**Collective targets carry a further requirement.** A collective names its destination set with
-an address mask (§6), which can only name a set if the space keeps its node index in a
-contiguous bit field. Require every multicast-targetable region
-
+- be equal in size across all nodes
 - be a power-of-two in size
-- be aligned to an integer multiple of its size
+- be aligned to an integer multiple of that size
+- be mapped consecutively in coordinate order
 
-One such region per node, placed in coordinate order, puts the node index in a contiguous field
-at `log2(size)` and makes the stride uniform without stating it separately. A space that meets
-this and declares which bits hold X and which hold Y is a legal collective target. A space that
-does not is still a legal unicast target.
+The node index then occupies a contiguous address field at `log2(size)`, `clog2(x_dim)` bits of
+X below `clog2(y_dim)` bits of Y. A space meeting these conditions is a legal collective target,
+because a mask over that field names an aligned set of nodes at one shared node-local offset. A
+space that does not meet them is a legal unicast target and not a collective target.
 
-Under table decode the field position is per space, so the same 48-bit address carries its
-coordinates at different bits depending on which space it lands in, and a collective mask sets
-its bits at the position belonging to the space its anchor matched. Under offset decode there is
-one position and it is the same for every request.
+A mesh dimension that is not a power of two leaves the field non-contiguous. Pad the row or
+column count up to a power of two and leave the surplus indices unmapped.
 
-Spaces need not be contiguous. Under offset decode each space occupies a fixed window inside the
-per-node slot, so the regions of one space are separated by the regions of the others. That
-breaks nothing: the conditions above are per region, and the node index field is the slot index,
-which both spaces share.
+**Class.** The address space a request falls in selects the AXI class, config space narrow and
+memory space data. This is one compare per space, not per node, and it is independent of how the
+destination is reached.
+
+**Destination.** Two ways to reach it, both requiring XY routing and both supporting collectives.
+
+| | Where the coordinate ranges come from |
+|---|---|
+| Table decode | each address-map entry carries its own range pair |
+| Offset decode | one range pair, global to the map |
+
+The conditions above make both modes read the same address map, so the choice is where the
+ranges are held rather than how the map is laid out. The mode is declared with the address map
+and validated against it at load.
 
 ---
 
