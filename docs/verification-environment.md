@@ -193,7 +193,7 @@ same address.
 - `tb_top` counts AW/AR handshakes per node (`txn_cnt_o`). `PASS` requires
   `txn_cnt_o > 0` on every node, so a run where a node completed zero
   transactions cannot report clean.
-- `DIRECTED PASS` (the `make sim` console line) additionally requires the
+- `DIRECTED PASS` (the `make -C sim` console line) additionally requires the
   scoreboard to report zero mismatches: the run log must reach `PASS: all N
   nodes done, non-vacuous` and carry no scoreboard-mismatch or protocol-error
   string.
@@ -326,13 +326,13 @@ the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit
 spec) before emitting anything. `sim/verilator/Makefile` regenerates
 `tb_top_<TOPOLOGY>.sv` whenever the topology YAML, the generator, or the
 `TOPOLOGY` make variable changes. Adding a topology needs only a new YAML
-file; `make sim TB=<name> PATTERN=<p>` picks it up with no other change.
+file; `make -C sim TB=<name> PATTERN=<p>` picks it up with no other change.
 `_rob` appended to the topology name (e.g. `mesh_4x4_vc8_rob`) selects the
 NMU reorder-buffer-enabled build of the same mesh.
 
 ## Seed handling
 
-`make sim` accepts `SEED=<n>`. Left unset, it draws a random 30-bit seed
+`make -C sim` accepts `SEED=<n>`. Left unset, it draws a random 30-bit seed
 (`RANDOM*32768+RANDOM`, under Verilator's `+verilator+seed+` int32 ceiling)
 and prints it:
 
@@ -351,7 +351,7 @@ passing back the printed value reproduces the run exactly.
 | SAM failure mode | `translate()` miss and a topology YAML without `address_map` fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
 | Unswept sizing | `NMU_MAX_TXNS_PER_ID` = 32 (per-ID order-list depth) and `NMU_OUTSTANDING_DEPTH` = 32 (shared outstanding pool, per direction, S1) are placeholders, never depth-swept [TBD]. `NMU_ROB_B_DEPTH`/`NMU_ROB_R_DEPTH` default to 128 (S2) and are expressible up to 256 (the full `ordering_tag` space) via `B_ROB_DEPTH`/`R_ROB_DEPTH`; a burst whose beats (len+1) exceed the RoB depth fails loud (`Rob::push_ar` assert) instead of wedging. Equally unswept at every setting. |
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
-| Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
+| Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make -C sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
 | Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
 | AXI-side perf instrumentation absent | `perf.json` carries only the NoC section (dumped at the end of every run, all injection modes); no AXI-side per-transaction hooks exist, so nothing cross-checks `axi_bw_monitor` from the model side. |
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |

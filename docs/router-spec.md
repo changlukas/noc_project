@@ -613,7 +613,7 @@ router obligation.
 
 Each item names where it is verified and what constitutes failure. ctest names refer
 to `src/c_model/tests/router/test_router.cpp`. "Co-sim scoreboard" is the per-transaction
-write -> readback compare of the co-simulation testbench (`make sim TB=<topology>`),
+write -> readback compare of the co-simulation testbench (`make -C sim TB=<topology>`),
 which fails on any data or ordering divergence from this model.
 
 SPEC 1 (interface). The top module is `router_wrap` with exactly the ports and

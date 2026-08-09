@@ -283,7 +283,7 @@ The implementer does not handle any of the following, they are guaranteed not to
 
 ## 4. Specifications
 
-Each item names its verification and failure condition. ctest paths are under `src/c_model/tests/`. "Co-sim scoreboard" means the per-transaction write-then-readback compare of the generated testbench (`make sim`), where any lost, duplicated, or corrupted beat fails the run.
+Each item names its verification and failure condition. ctest paths are under `src/c_model/tests/`. "Co-sim scoreboard" means the per-transaction write-then-readback compare of the generated testbench (`make -C sim`), where any lost, duplicated, or corrupted beat fails the run.
 
 1. Module name `nsu_wrap`, ports exactly per 3.1/3.2, DPI functions exactly per 3.3. Verify: elaboration (credit-width `$fatal` guard) and `wrap/test_cmodel_dpi.cpp` (handle type guards, create-after-init). Fail: elaboration fatal or DPI error latch raised.
 2. One flit maps to exactly one AXI beat in both directions, no burst split or merge. Verify: `nsu/test_nsu_depacketize.cpp` `DemuxMixedAwWAr`, co-sim scoreboard. Fail: beat count differs from flit count for any transaction.

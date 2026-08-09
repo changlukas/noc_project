@@ -1,7 +1,6 @@
-# Top-level Makefile — BUILD ONLY. Run all targets from repo root.
+# Top-level Makefile — build and test gates. Run these targets from repo root.
 #
-# Convention: the root builds (c_model + Verilator), runs the test gates, and
-# runs simulations via `make sim TB=... PATTERN=...`.
+# Simulation is not here: `make -C sim TB=... PATTERN=...`, see sim/Makefile.
 # Run logs land in sim/verilator/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
@@ -19,7 +18,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-yamlcpp build-verilator test \
-        pytest sim \
+        pytest \
         clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
 
 help:
@@ -28,11 +27,9 @@ help:
 	@echo "  make build-cmodel     c_model only -> build/cmodel/"
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
-	@echo "Simulate:"
-	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot/beat_exact)"
-	@echo "  make sim TB=mesh_4x4_vc1 PATTERN=neighbor"
-	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_TILE= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT=; SEED unset draws + prints a random seed"
-	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
+	@echo "Simulate (runs from sim/):"
+	@echo "  make -C sim TB=<topo> PATTERN=<p> [SEED=<n>]"
+	@echo "  make -C sim help      every simulation variable"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -73,7 +70,8 @@ TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/Syst
 #   BUILD_ROOT := $(HOME)/noc_build   # native-Linux build dir (WSL rejects /mnt COFF)
 #   PYTHON3    := python3
 #   VERILATOR  := verilator
-# Then `make sim TB=tb_mesh_4x4_vc1 PATTERN=hotspot` needs no path/tool args.
+# Then `make -C sim TB=tb_mesh_4x4_vc1 PATTERN=hotspot` needs no path/tool args
+# either: sim/build_config.mk reads this same file through PROJ_ROOT.
 -include local.mk
 
 # CMake binary — auto-detected so the same `make build` works on every host.
@@ -120,7 +118,7 @@ $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
 # Default topology for standalone build-verilator.
-# make sim overrides this by passing TOPOLOGY=$(TB) explicitly.
+# sim/Makefile overrides this by passing TOPOLOGY=$(TB) explicitly.
 TOPOLOGY  ?= mesh_4x4_vc1
 RUN_CLASS ?= directed
 
@@ -170,76 +168,14 @@ pytest:
 	(cd sim/tools && $$interp -m pytest . -q) || status=1; \
 	exit $$status
 
-# Unified DV run launcher. TB selects the testbench (topology; accepts a tb_ prefix).
-# PATTERN selects one of the 4 spatial patterns or beat_exact (S2 gate DPI
-# fault-injection probe), run directed (file_master + scoreboard). SEED unset
-# -> a random 30-bit seed is drawn and printed so any run is replayable.
-# BUILD_ROOT/PYTHON3/VERILATOR/FILELIST_F are NOT passed here -- they flow from
-# root local.mk through sim/build_config.mk (see the local.mk note above).
-TB      ?= mesh_4x4_vc1
-PATTERN ?= neighbor
-_TOPO   := $(TB:tb_%=%)
-_VALID_PATTERNS := neighbor transpose uniform_random hotspot beat_exact multicast
-ifeq ($(filter $(PATTERN),$(_VALID_PATTERNS)),)
-$(error PATTERN must be one of: $(_VALID_PATTERNS) (got '$(PATTERN)'))
-endif
-# multicast readback is N reads per write (one per member replica), which breaks
-# the 1:1 read/write pairing INJECTION_MODE=2's per-id B interlock assumes, and
-# mode 1 disarms the scoreboard. Directed two-phase (mode 0) only.
-ifeq ($(PATTERN),multicast)
-ifneq ($(filter-out 0,$(INJECTION_MODE)),)
-$(error PATTERN=multicast supports INJECTION_MODE=0 only (got '$(INJECTION_MODE)'))
-endif
-endif
-# RANDOM is 0..32767; RANDOM*32768+RANDOM draws a uniform 30-bit seed (< 2**30),
-# staying under Verilator's +verilator+seed+ int32 ceiling (< 2147483648). The old
-# $RANDOM$RANDOM string-concat could reach 10 digits (~3.3e9) and abort the run.
-_SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$(( RANDOM * 32768 + RANDOM ))'))
-
-# Forwarded only when set, so sim/verilator/Makefile's own defaults apply otherwise.
-# INJECTION_COUNT's default depends on INJECTION_MODE and is computed there.
-_INJ_ARGS := \
-    $(if $(INJECTION_MODE),INJECTION_MODE=$(INJECTION_MODE)) \
-    $(if $(INJECTION_RATE),INJECTION_RATE=$(INJECTION_RATE)) \
-    $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT)) \
-    $(if $(IDS_PER_TILE),IDS_PER_TILE=$(IDS_PER_TILE)) \
-    $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
-    $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) \
-    $(if $(B_ROB_DEPTH),B_ROB_DEPTH=$(B_ROB_DEPTH)) \
-    $(if $(R_ROB_DEPTH),R_ROB_DEPTH=$(R_ROB_DEPTH)) \
-    $(if $(MAX_TXNS_PER_ID),MAX_TXNS_PER_ID=$(MAX_TXNS_PER_ID)) \
-    $(if $(OUTSTANDING_DEPTH),OUTSTANDING_DEPTH=$(OUTSTANDING_DEPTH)) \
-    $(if $(BURST_LEN),BURST_LEN=$(BURST_LEN)) \
-    $(if $(MCAST_FAULT),MCAST_FAULT=$(MCAST_FAULT)) \
-    $(if $(TIMEOUT_CYCLES),TIMEOUT_CYCLES=$(TIMEOUT_CYCLES))
-
-.PHONY: sim
-sim:
-	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
-	$(MAKE) -C sim/verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
-	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT)) \
-	    $(if $(MCAST_SHAPE),MCAST_SHAPE=$(MCAST_SHAPE))
-
-# Injection-rate sweep: four VC configs x nine rates, one point per make sim.
-# MAX_UNIQUE_IDS and MAX_OUTSTANDING are inherited, not forced. Both are shipped
-# NI parameters, and the figure's subject is the machine as built. The bring-up
-# step measures what other settings would buy, and reports it as a number.
-# Heavy: rebuilds Verilator once per VC config. Run on WSL.
-SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
-SWEEP_VCS   ?= 1 2 4 8
-
-.PHONY: sim-injection-sweep
-sim-injection-sweep:
-	@for vc in $(SWEEP_VCS); do \
-	    for r in $(SWEEP_RATES); do \
-	        echo ">>> sweep vc$$vc rate $$r"; \
-	        $(MAKE) sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=$(PATTERN) SEED=$(_SEED) \
-	            INJECTION_MODE=1 INJECTION_RATE=$$r \
-	            $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
-	            $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
-	    done; \
-	done
-	$(PYTHON3) sim/tools/plot_injection_sweep.py $(PATTERN)
+# Simulation runs from sim/, not here. `sim` is also a directory name, so
+# without these two make would answer the old command with "'sim' is up to
+# date" and run nothing — a silent no-op is worse than an error.
+.PHONY: sim sim-injection-sweep
+sim sim-injection-sweep:
+	@echo "Simulation moved to sim/. Use: make -C sim $(if $(filter sim-injection-sweep,$@),sim-injection-sweep )TB=<topo> PATTERN=<p>" >&2
+	@echo "  make -C sim help   for every variable" >&2
+	@false
 
 # --- clean ---
 

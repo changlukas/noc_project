@@ -76,7 +76,7 @@ On Windows, invoke Python scripts with `py -3` instead of `python3`.
 
 ## Simulate (cosim)
 
-`make sim` builds the chosen topology and runs one directed pattern.
+`make -C sim` builds the chosen topology and runs one directed pattern.
 
 | var | values |
 |---|---|
@@ -88,8 +88,8 @@ On Windows, invoke Python scripts with `py -3` instead of `python3`.
 a run.
 
 ~~~bash
-make sim TB=mesh_4x4_vc1 PATTERN=neighbor
-make sim TB=mesh_4x4_vc8_rob PATTERN=transpose
+make -C sim TB=mesh_4x4_vc1 PATTERN=neighbor
+make -C sim TB=mesh_4x4_vc8_rob PATTERN=transpose
 ~~~
 
 On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
@@ -121,8 +121,8 @@ injection rate and mode 1 stays the saturation-curve instrument.
 | `HOTSPOT` | `5` | target node for the `hotspot` pattern |
 
 ~~~bash
-make sim TB=mesh_4x4_vc4_rob PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
-make sim TB=mesh_4x4_vc4_rob PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
+make -C sim TB=mesh_4x4_vc4_rob PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
+make -C sim TB=mesh_4x4_vc4_rob PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
 ~~~
 
 On success mode 1 prints `CONTINUOUS PASS: <run-tag>` and writes
@@ -131,7 +131,7 @@ with the monitor's bandwidth and latency numbers; mode 2 prints
 `CHECKED PASS: <run-tag> scoreboard clean, non-vacuous` with run tag
 `checked_<topo>_<pattern>_r<rate>_s<seed>`.
 
-`make sim-injection-sweep PATTERN=<p>` runs the full saturation sweep
+`make -C sim sim-injection-sweep PATTERN=<p>` runs the full saturation sweep
 (VC configs 1/2/4/8, nine rates each, overridable via `SWEEP_VCS` and
 `SWEEP_RATES`), then merges every `result.csv` and plots
 `sim/tools/injection_sweep.png`. The sweep rebuilds Verilator once per
