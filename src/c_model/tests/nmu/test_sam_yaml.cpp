@@ -294,3 +294,69 @@ TEST(SamYaml, NonAlignedSizeRejected) {
     // when GTEST_USES_POSIX_RE=0, e.g. MSVC/MinGW) -- keep this a plain literal.
     EXPECT_DEATH(load_sam_table(path), "aligned");
 }
+
+// === Decode mode (spec §5.1) ===
+//
+// Offset decode holds one coordinate range pair for the whole map, so it is
+// legal only where every space puts its node index at the same address bits.
+// Nothing else about the map changes, which is why the same tile list is legal
+// under table decode and rejected under offset decode below.
+
+// Equal region size in both spaces: memory 4 KB at 0x0, config 4 KB at 0x4000,
+// so both node-index fields land at [13:12] and one pair reaches both.
+static const char* kEqualSizedSpaces =
+    "    - { x: 0, y: 0, size: 0x1000 }\n"
+    "    - { x: 1, y: 0, size: 0x1000 }\n"
+    "    - { x: 0, y: 1, size: 0x1000 }\n"
+    "    - { x: 1, y: 1, size: 0x1000 }\n"
+    "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
+    "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
+    "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
+    "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
+
+// The shipped shape: memory 1 MB, config 4 KB. Node index at [21:20] and
+// [13:12] -- legal under table decode, unreachable by one global pair.
+static const char* kShippedSizedSpaces =
+    "    - { x: 0, y: 0, size: 0x100000 }\n"
+    "    - { x: 1, y: 0, size: 0x100000 }\n"
+    "    - { x: 0, y: 1, size: 0x100000 }\n"
+    "    - { x: 1, y: 1, size: 0x100000 }\n"
+    "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
+    "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
+    "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
+    "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
+
+static std::filesystem::path write_map(const char* name, const char* decode, const char* tiles) {
+    auto path = ni::cmodel::testing::unique_temp_path(name);
+    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
+                           "address_map:\n"
+                        << "  decode: " << decode << "\n"
+                        << "  tiles:\n"
+                        << tiles;
+    return path;
+}
+
+TEST(SamYaml, OffsetDecodeAcceptsEqualSizedSpaces) {
+    auto sam = load_sam_table(write_map("sam_offset_ok.yaml", "offset", kEqualSizedSpaces));
+    const auto* mem = sam.collective_coords(axi::AxiClass::Data);
+    const auto* cfg = sam.collective_coords(axi::AxiClass::Narrow);
+    ASSERT_NE(mem, nullptr);
+    ASSERT_NE(cfg, nullptr);
+    EXPECT_EQ(mem->x_range.offset, cfg->x_range.offset);  // the one global pair
+    EXPECT_EQ(mem->y_range.offset, cfg->y_range.offset);
+}
+
+TEST(SamYaml, OffsetDecodeRejectsUnequalSpaceSizes) {
+    auto path = write_map("sam_offset_unequal.yaml", "offset", kShippedSizedSpaces);
+    EXPECT_DEATH(load_sam_table(path), "same region size");
+}
+
+TEST(SamYaml, TableDecodeAcceptsWhatOffsetRejects) {
+    auto sam = load_sam_table(write_map("sam_table_unequal.yaml", "table", kShippedSizedSpaces));
+    EXPECT_EQ(sam.entries().size(), 8u);
+}
+
+TEST(SamYaml, UnknownDecodeModeRejected) {
+    auto path = write_map("sam_bad_decode.yaml", "slice", kEqualSizedSpaces);
+    EXPECT_DEATH(load_sam_table(path), "table");
+}

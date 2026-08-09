@@ -13,6 +13,7 @@ invalidate a row.
 | The `ordering_req = 0` same-`(dst, id)` bypass streak holds order only while REQ/RSP stay single-VC and AR/B stay off DAT | opening a second REQ/RSP VC, or steering AR/B to DAT, loses in-fabric ordering. AR pinning and the B fixed hash were deleted in S3b. `ChannelModel` is VC-blind, so ctest cannot see it | `nmu/rob.hpp`, admission tree |
 | The router's VA divergence assert sits behind the credit gate | a zero-credit diverging `fixed_vc = 0` worm idles silently instead of tripping the checker, a liveness gap rather than a wrong answer | `router/router.hpp`, VA stage |
 | `SamTable::translate` asserts on a lookup miss, so a release build null-derefs instead of throwing | only under `NDEBUG`; every shipped test build keeps asserts on | `nmu/addr_trans.hpp`, `SamTable::translate` |
+| `address_map.decode: offset` is validated, not implemented: the loader checks the map would be legal under one global coordinate range pair, then every lookup still range-matches the SAM | never at the AXI boundary, since on a map meeting spec 5.1 both modes reach the same node at the same node-local offset. It bites at RTL handover, where the two are different hardware: 2N range compares against one bit slice | `nmu/sam_yaml.hpp`, `check_decode_mode` |
 
 ## Performance cost
 
@@ -79,3 +80,15 @@ generated fabric drives one packed vector from a port connection (bit 0) alongsi
 
 The WSL host is unstable under load. Working practice: rsync to `~/noc_project`, one foreground
 session at a time, and an echo-marker retry around each invocation.
+
+Two hazards come with that mirror. The CMake cache under `$HOME/noc_build` records the mirror as
+its source directory, so a `make` invoked from `/mnt/e` fails on the source-directory mismatch
+rather than building the working tree, and a `cmake --build` aimed straight at the build
+directory silently compiles the mirror instead. A pass count is evidence only once the mirror has
+been re-synced. Separately, `cmake --build ... -j` in the root `Makefile` carries no job limit,
+which on a 28-thread host has taken WSL down mid-build; `-j 6` completed the same build.
+
+`SamTable::packed()` derives each base by accumulating sizes in list order, so an unmapped index
+cannot be expressed. A mesh dimension that is not a power of two therefore cannot carry the
+surplus padding `docs/noc-target-spec.md` §5.1 requires, and no such space can be a collective
+target. Every shipped topology is 2x2 or 4x4, so nothing is affected today.

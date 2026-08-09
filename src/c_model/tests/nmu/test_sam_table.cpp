@@ -110,6 +110,22 @@ TEST(SamValidator, RejectsMissingNode) {
     EXPECT_DEATH(bad.validate(2, 2), "exactly once");
 }
 
+TEST(SamValidator, RejectsPartialConfigCoverage) {
+    // Spec §5.1: every node owns one region per address space. Memory covers the
+    // 2x2 mesh; config reaches two nodes. A memory-only table stays legal -- see
+    // SpaceBaseIsZeroWhenOnlyOneSpacePresent -- so the check is gated on the
+    // config space being present, not on it being absent.
+    SamTable bad(std::vector<SamEntry>{
+        {0x0000, 0x1000, 0x00},
+        {0x1000, 0x1000, 0x01},
+        {0x2000, 0x1000, 0x10},
+        {0x3000, 0x1000, 0x11},
+        {0x4000, 0x1000, 0x00, axi::AxiClass::Narrow},
+        {0x5000, 0x1000, 0x01, axi::AxiClass::Narrow},
+    });
+    EXPECT_DEATH(bad.validate(2, 2), "config space");
+}
+
 TEST(SamValidator, RejectsDuplicateNode) {
     // 2x2 mesh: dst 0x00 listed twice, (1,1) missing.
     SamTable bad(std::vector<SamEntry>{{0x0, 0x1000, 0x00},

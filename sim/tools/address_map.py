@@ -40,12 +40,12 @@ def pack(address_map, x_dim, y_dim):
     an unrecognized space, or a missing/duplicate mesh node per space -- both
     spaces must cover every node exactly once.
 
-    Full config coverage is checked HERE and not in SamTable::validate(): this
-    function only ever sees a shipped topology YAML, while validate() also runs
-    on hand-built in-memory tables (SamTable::uniform() is memory-only and is
-    the fixture constructor for most c_model tests). Every C++ consumer of a
-    YAML reaches it through a generator that packed it first, so the YAML is
-    gated either way.
+    Config coverage is required unconditionally here and only when the space is
+    present in SamTable::validate(): this function only ever sees a shipped
+    topology YAML, where spec §5.1 "every node owns one region per address
+    space" holds outright, while validate() also runs on hand-built in-memory
+    tables (SamTable::uniform() is memory-only and is the fixture constructor
+    for most c_model tests).
 
     Returns (bases, entries):
         bases:   {dst_id: base} for the memory-space tile only (existing

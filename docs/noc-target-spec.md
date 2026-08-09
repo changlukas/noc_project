@@ -345,20 +345,23 @@ below are from the port's own view. No wire is shared between the two instances.
 
 ### 5.1 Address map requirements
 
-Every node owns one region per address space. Within a space those regions must
+A space the map declares must give every node exactly one region. A space that leaves a node
+without one is rejected at load. A map may omit a space entirely.
+
+Four further conditions decide whether that space is also a collective target. Its regions must
 
 - be equal in size across all nodes
-- be a power-of-two in size
+- be a power of two in size
 - be aligned to an integer multiple of that size
 - be mapped consecutively in coordinate order
 
 The node index then occupies a contiguous address field at `log2(size)`, `clog2(x_dim)` bits of
-X below `clog2(y_dim)` bits of Y. A space meeting these conditions is a legal collective target,
-because a mask over that field names an aligned set of nodes at one shared node-local offset. A
-space that does not meet them is a legal unicast target and not a collective target.
+X below `clog2(y_dim)` bits of Y, and a mask over that field names an aligned set of nodes at one
+shared node-local offset. A space meeting all four conditions is a legal collective target. A
+space failing any of them is a legal unicast target and not a collective target.
 
 A mesh dimension that is not a power of two leaves the field non-contiguous. Pad the row or
-column count up to a power of two and leave the surplus indices unmapped.
+column count up to a power of two; the surplus indices are not nodes and carry no region.
 
 **Class.** The address space a request falls in selects the AXI class, config space narrow and
 memory space data. This is one compare per space, not per node, and it is independent of how the
@@ -366,10 +369,10 @@ destination is reached.
 
 **Destination.** Two ways to reach it, both requiring XY routing and both supporting collectives.
 
-| | Where the coordinate ranges come from |
-|---|---|
-| Table decode | each address-map entry carries its own range pair |
-| Offset decode | one range pair, global to the map |
+| | Where the coordinate ranges come from | Region size across spaces |
+|---|---|---|
+| Table decode | each address-map entry carries its own range pair | may differ per space |
+| Offset decode | one range pair, global to the map | must be equal, one pair reaches one field position |
 
 The conditions above make both modes read the same address map, so the choice is where the
 ranges are held rather than how the map is laid out. The mode is declared with the address map

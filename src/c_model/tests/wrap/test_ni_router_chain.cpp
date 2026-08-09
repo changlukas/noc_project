@@ -615,7 +615,14 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
                            "    - { x: 1, y: 0, size: 0x100000 }\n"
                            "    - { x: 0, y: 1, size: 0x100000 }\n"
                            "    - { x: 1, y: 1, size: 0x100000 }\n"
-                           "    - { x: 1, y: 0, size: 0x1000, space: config }\n";
+                           // Spec §5.1: every node owns one region per space, so
+                           // config covers the mesh even though only node 1's tile
+                           // is addressed below. Raster order after the memory
+                           // tiles, matching the shipped topology YAMLs.
+                           "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
+                           "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
+                           "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
+                           "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
 
     // ROB Enabled: the T3 guard's class-change-forces-RoB-fallback path only
     // exists in Enabled mode (Disabled mode's single-outstanding interlock is
@@ -641,7 +648,8 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
     // and config tiles would collide on key 0 if both used their bare base.
     // Offset the memory address so the two land on distinct MemSlave keys.
     constexpr uint64_t kMemAddr = 0x100000 + 0x100;  // node 1's memory tile, local offset 0x100
-    constexpr uint64_t kCfgAddr = 0x400000;          // node 1's config tile base (local offset 0)
+    // Config bases follow the four memory tiles: (0,0) at 0x400000, node 1 next.
+    constexpr uint64_t kCfgAddr = 0x401000;  // node 1's config tile base (local offset 0)
     constexpr uint8_t kWriteId = 3, kOrderId = 9;
     std::array<uint8_t, 64> wdata_mem{}, wdata_cfg{};
     for (int b = 0; b < 64; ++b) wdata_mem[b] = static_cast<uint8_t>(0xA0 + b);

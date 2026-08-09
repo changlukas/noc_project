@@ -60,6 +60,51 @@ inline void declare_space_coords(SamTable& table, unsigned x_dim, unsigned y_dim
     }
 }
 
+// address_map.decode: "table" | "offset", default "table" (spec §5.1).
+//
+// Table decode holds the coordinate ranges per address-map entry, offset decode
+// one pair global to the map (upstream RouteCfg.XYAddrOffsetX/Y, floo_pkg.sv).
+// One global pair reaches one field position, so offset decode additionally
+// requires every space to place its node index at the same address bits -- that
+// is, equal region size across spaces.
+//
+// On a map meeting §5.1 both modes decode every address to the same node and
+// the same node-local offset, so the mode changes which maps are legal rather
+// than how an address is read, and the model validates it here instead of
+// carrying a second lookup that would return the same answer. The 2N range
+// compares a table decoder costs against one slice is a hardware difference.
+inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
+    if (!am["decode"]) return;
+    const std::string mode = am["decode"].as<std::string>();
+    if (mode == "table") return;
+    if (mode != "offset") {
+        assert(false && "address_map: decode must be 'table' or 'offset'");
+        std::abort();
+    }
+    const SpaceCoords* first = nullptr;
+    for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
+        bool present = false;
+        for (const auto& e : table.entries()) {
+            if (e.cls == cls) {
+                present = true;
+                break;
+            }
+        }
+        if (!present) continue;
+        const SpaceCoords* c = table.collective_coords(cls);
+        assert(c && "address_map: decode 'offset' needs every space to meet spec 5.1");
+        if (c == nullptr) std::abort();
+        if (first == nullptr) {
+            first = c;
+            continue;
+        }
+        assert(c->x_range.offset == first->x_range.offset &&
+               c->y_range.offset == first->y_range.offset &&
+               "address_map: decode 'offset' holds one range pair for the whole map, so "
+               "every space must use the same region size");
+    }
+}
+
 // address_map.tiles: ordered list of { x, y, size, space? }; base(i) is derived
 // by SamTable::packed() as base(i-1) + size(i-1). No tile_size, no base, no
 // default base. A node may appear once per space (validate()).
@@ -84,6 +129,7 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
     SamTable table = SamTable::packed(tiles);
     table.validate(x_dim, y_dim);
     declare_space_coords(table, x_dim, y_dim);
+    check_decode_mode(am, table);  // after the ranges exist -- offset mode is checked against them
     return table;
 }
 

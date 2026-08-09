@@ -141,11 +141,13 @@ class SamTable {
     // checks first (so base+size doesn't overflow), then per-space coverage,
     // then overlap (which also relies on base+size not overflowing).
     //
-    // Per-space coverage (spec §5 "A node may appear once per space"): a node
-    // may carry one memory-space tile and, optionally, one config-space tile.
-    // Memory space must cover the mesh exactly once per node (every node has a
-    // data-class home); config space is sparse -- at most one tile per node,
-    // no full-mesh requirement.
+    // Per-space coverage (spec §5.1 "Every node owns one region per address
+    // space"): a present space covers the mesh exactly once. Memory space is
+    // always required; config space is gated on being present at all, because
+    // SamTable::uniform() builds memory-only tables and is the fixture
+    // constructor for most c_model tests. The Python twin
+    // (sim/tools/address_map.py pack()) requires both unconditionally -- it
+    // only ever sees a shipped topology YAML.
     void validate(unsigned x_dim, unsigned y_dim) const {
         constexpr uint64_t k4k = 0x1000;
         for (const auto& e : entries_) {
@@ -161,6 +163,7 @@ class SamTable {
         std::vector<bool> seen_memory(mesh_nodes, false);
         std::vector<bool> seen_config(mesh_nodes, false);
         std::size_t memory_count = 0;
+        std::size_t config_count = 0;
         for (const auto& e : entries_) {
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
@@ -168,10 +171,12 @@ class SamTable {
             std::vector<bool>& seen = (e.cls == axi::AxiClass::Data) ? seen_memory : seen_config;
             assert(!seen[idx] && "SAM: duplicate mesh node (same space)");
             seen[idx] = true;
-            if (e.cls == axi::AxiClass::Data) ++memory_count;
+            ((e.cls == axi::AxiClass::Data) ? memory_count : config_count) += 1;
         }
         assert(memory_count == mesh_nodes &&
                "SAM: memory space must cover the mesh exactly once (tile count mismatch)");
+        assert((config_count == 0 || config_count == mesh_nodes) &&
+               "SAM: config space must cover the mesh exactly once when present");
         for (std::size_t i = 0; i < entries_.size(); ++i) {
             for (std::size_t j = i + 1; j < entries_.size(); ++j) {
                 const auto& e = entries_[i];
