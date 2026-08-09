@@ -79,8 +79,8 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
 
 TEST(NsuDepacketize, DataAwFlitAcceptedAndRecordsDataClass) {
     SCENARIO(
-        "NSU Depacketize: a DataAw flit (axi_ch=AXI_CH_DataAw) is accepted into the same s1_aw_ "
-        "register as NarrowAw (no abort) and the MetaBuffer entry records cls=Data, so the "
+        "NSU Depacketize: a DataAw flit (axi_ch=AXI_CH_DataAw) is accepted into the data-class "
+        "s1 AW register (no abort) and the MetaBuffer entry records cls=Data, so the "
         "eventual B response is stamped in the same class");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
@@ -104,8 +104,14 @@ TEST(NsuDepacketize, DataWFlitDecodesFromDataWChannel) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    // The W stream follows the AW stream (AXI Channel Assignment), so a beat is
+    // only poppable once its AW has been admitted. One single-beat DataAw ahead
+    // of it is the smallest setup that satisfies that; the decode under test is
+    // unaffected by it.
+    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000, 0x10, 0, 0, ni::AXI_CH_DataAw)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xAB, true, ni::AXI_CH_DataW)));
     depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
     auto w = depkt.pop_w();
     ASSERT_TRUE(w.has_value());
     EXPECT_EQ(w->strb, 0xABu);
@@ -163,11 +169,13 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
-    // Data class: no preceding AW needed (unlike narrow, whose lane re-anchor
-    // reads the AW's address basis) -- this test is about MetaBuffer
-    // independence, not the AW-before-W address dependency.
+    // The AW ahead of it only satisfies the W-follows-AW order; it allocates
+    // under its own id (0x05, identity remap at max_unique_ids 256), so key 0
+    // stays the untouched-by-W witness this test is about.
+    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000, 0x10, 0, 0, ni::AXI_CH_DataAw)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFFFF, true, ni::AXI_CH_DataW)));
     depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
     EXPECT_TRUE(depkt.pop_w().has_value());
     // MetaBuffer untouched
     EXPECT_FALSE(mb.peek_write(0).has_value());
@@ -270,13 +278,18 @@ TEST(NsuDepacketize, PendingHolBlockingS1WFullBlocksAwBehind) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
-    // Order: W, W, AW -- data class, so the two W beats (deliberately with no
-    // preceding AW, to isolate the HoL blocking mechanics under test) don't
-    // need a staged address basis.
-    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xAA, true, ni::AXI_CH_DataW)));
+    // Order: AW(2 beats), W, W, AW -- data class throughout. The leading AW owns
+    // both W beats, which is what makes them poppable at all now; the mechanic
+    // under test is unchanged, the second W still stalls in the ingress stash
+    // and the AW behind it is still blocked.
+    auto aw_owner = make_aw_flit(0x06, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw);
+    aw_owner.set_payload_field("AW", "awlen", 1);  // 2 beats
+    ASSERT_TRUE(noc.req_out().push_flit(aw_owner));
+    ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xAA, false, ni::AXI_CH_DataW)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xBB, true, ni::AXI_CH_DataW)));
-    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x07, 0x0)));
+    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x07, 0x0, 0x10, 0, 0, ni::AXI_CH_DataAw)));
     depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());   // owning AW admitted
     EXPECT_TRUE(depkt.pop_w().has_value());    // first W (0xAA) demuxed
     EXPECT_FALSE(depkt.pop_aw().has_value());  // AW blocked behind pending W
     depkt.tick();

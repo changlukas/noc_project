@@ -49,6 +49,8 @@
 #include "flit.hpp"
 #include "nsu/nsu_standalone.hpp"
 #include <array>
+#include <cassert>
+#include <deque>
 #include <memory>
 #include <optional>
 
@@ -104,6 +106,8 @@ class NsuWrap {
         outstanding_w_ = 0;
         expected_r_beats_ = 0;
         w_pop_budget_ = 0;
+        w_expect_.clear();
+        w_seen_ = 0;
     }
 
     void set_inputs(const NsuInputs& in) { in_ = in; }
@@ -150,6 +154,7 @@ class NsuWrap {
         // completed.)
         if (held_aw_ && in_.awready) {
             w_pop_budget_ += static_cast<uint32_t>(held_aw_->len) + 1u;
+            w_expect_.push_back(static_cast<uint32_t>(held_aw_->len) + 1u);
             held_aw_ = std::nullopt;
         }
         if (!held_aw_) {
@@ -179,7 +184,24 @@ class NsuWrap {
         }
         if (!held_w_ && w_pop_budget_ > 0) {
             held_w_ = port.pop_w();
-            if (held_w_) --w_pop_budget_;
+            if (held_w_) {
+                --w_pop_budget_;
+                // The popped beat must belong to the burst the front AW named.
+                assert(!w_expect_.empty() &&
+                       "NsuWrap: W beat popped with no handshaken AW owing beats");
+                ++w_seen_;
+                if (held_w_->last) {
+                    assert(w_seen_ == w_expect_.front() &&
+                           "NsuWrap: WLAST at the wrong beat -- the AW queue and the W queue "
+                           "disagree on burst boundaries (narrow REQ / data DAT arrival order)");
+                    w_expect_.pop_front();
+                    w_seen_ = 0;
+                } else {
+                    assert(w_seen_ < w_expect_.front() &&
+                           "NsuWrap: W beats overran the burst the front AW named -- the AW "
+                           "queue and the W queue disagree on burst boundaries");
+                }
+            }
         }
         if (held_w_) {
             out_.wvalid = true;
@@ -297,6 +319,19 @@ class NsuWrap {
     uint32_t outstanding_w_ = 0;     // writes issued, B response still owed
     uint32_t expected_r_beats_ = 0;  // R beats owed from issued ARs
     uint32_t w_pop_budget_ = 0;      // W beats presentable (AWs already handshaken)
+
+    // Burst-boundary agreement between the two streams. w_pop_budget_ is a beat
+    // COUNT, so it silently assumes the AW queue and the W queue are ordered the
+    // same way. They are filled independently (nsu/axi_master_port.hpp pop_aw /
+    // pop_w) from one shared S1 stage per channel that both classes pass through
+    // (nsu/depacketize.hpp s1_occupancy), and the classes reach that stage over
+    // two different physical networks -- narrow on REQ, data on DAT. Nothing
+    // holds their relative order. If it slips, this NSU hands its slave a burst
+    // whose W beats belong to a different AW: wrong data, wrong length, WLAST in
+    // the wrong place. Each handshaken AW pushes the beat count it owes; every
+    // W pop checks the stream still agrees.
+    std::deque<uint32_t> w_expect_;  // beats owed, one entry per handshaken AW
+    uint32_t w_seen_ = 0;            // beats popped for the burst at the front
 
     // Flit <-> FlitBytes helpers live in wrap/flit_byte_conv.hpp; calls use
     // flit_from_bytes(...) / flit_to_bytes(...) directly via ADL.

@@ -20,10 +20,11 @@ namespace ni::cmodel::nsu {
 // independent NocReqIn ingresses -- REQ and DAT (S3a T4 ingress + T6
 // steering: NMU's Packetize steers Data-class AW/W here; DAT never carries
 // Narrow* or DataAr -- see drain_ingress_'s defensive assert) -- reads
-// axi_ch, and parks the flit in the SAME per-channel S1 stage register
-// (S3a stage design §5.2: "second ingress + per-network pending_; s1_aw_/
-// s1_w_/s1_ar_ stay shared" -- both classes already share s1_w_ today).
-// tick() touches no MetaBuffer state and decodes nothing but W.
+// axi_ch, and parks the flit in that class's own S1 stage register for AW and
+// W, per docs/image/nsu.jpg. S3a shared one register per channel across both
+// classes; that holds only while arrivals are one ordered stream, and narrow
+// on REQ against data on DAT are two. tick() touches no MetaBuffer state and
+// decodes nothing but W.
 //
 // pop_aw() / pop_ar() are the drain stage. Each decodes its flit, remaps the
 // master's AXI id to the downstream id, allocates the MetaBuffer entry under
@@ -78,11 +79,13 @@ class Depacketize : public RequestDepacketizer {
     std::size_t s1_occupancy(uint8_t axi_ch) const noexcept {
         switch (axi_ch) {
             case ni::AXI_CH_NarrowAw:
+                return s1_narrow_aw_.occupancy();
             case ni::AXI_CH_DataAw:
-                return s1_aw_.occupancy();
+                return s1_data_aw_.occupancy();
             case ni::AXI_CH_NarrowW:
+                return s1_narrow_w_.occupancy();
             case ni::AXI_CH_DataW:
-                return s1_w_.occupancy();
+                return s1_data_w_.occupancy();
             case ni::AXI_CH_NarrowAr:
             case ni::AXI_CH_DataAr:
                 return s1_ar_.occupancy();
@@ -103,9 +106,37 @@ class Depacketize : public RequestDepacketizer {
     // needs the header's src_id / ordering_req / ordering_tag to allocate the MetaBuffer
     // entry, and decoding is pure. W carries no id and no metadata, so it stays
     // a decoded beat.
-    router::PipelineStage<Flit> s1_aw_;
-    router::PipelineStage<axi::WBeat> s1_w_;
+    //
+    // AW and W are held PER CLASS, per docs/image/nsu.jpg: narrow storage and
+    // data storage stay separate up to the AXI Channel Assignment. They were
+    // shared through S3a, which assumed one ordered arrival stream -- true
+    // within a network, false across two. Narrow rides REQ and data rides DAT,
+    // so a shared stage lets the two classes interleave and the W stream stops
+    // agreeing with the AW stream on burst boundaries.
+    //
+    // AR needs no split: DAT carries DataAw/DataW only, so every AR -- narrow
+    // and data alike -- arrives on REQ already ordered (drain_ingress_'s
+    // is_dat_ingress assert pins that), and AR owns no second channel to stay
+    // in step with.
+    router::PipelineStage<Flit> s1_narrow_aw_;
+    router::PipelineStage<Flit> s1_data_aw_;
+    router::PipelineStage<axi::WBeat> s1_narrow_w_;
+    router::PipelineStage<axi::WBeat> s1_data_w_;
     router::PipelineStage<Flit> s1_ar_;
+
+    // AXI Channel Assignment (docs/image/nsu.jpg). Every admitted AW enqueues
+    // the class and beat count of the burst it owes, and pop_w serves the
+    // classes in exactly that order. This is what makes the W stream follow the
+    // AW stream: AXI4 W beats carry no id, so their only binding to a write is
+    // position. A burst whose beats have not arrived stalls the W stream rather
+    // than letting the next class jump the queue.
+    struct WBurst {
+        AxiClass cls;
+        uint32_t beats;
+    };
+    std::deque<WBurst> w_order_;
+    uint32_t w_beats_done_ = 0;    // beats served for w_order_.front()
+    bool aw_prefer_data_ = false;  // round-robin between classes at pop_aw
 
     // Narrow-class W lane re-anchor (S2 design doc §2 site 2): the AW basis a
     // W burst's beats need is decoded eagerly here, at AW arrival, and staged
@@ -227,12 +258,13 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
                "{DataAw, DataW} -- spec :348 keeps Narrow*/DataAr off DAT");
         switch (ch) {
             case ni::AXI_CH_NarrowAw:
-            case ni::AXI_CH_DataAw:
-                if (s1_aw_.full()) {
+            case ni::AXI_CH_DataAw: {
+                auto& stage = (ch == ni::AXI_CH_DataAw) ? s1_data_aw_ : s1_narrow_aw_;
+                if (stage.full()) {
                     pending = f;
                     return;
                 }
-                s1_aw_.accept(f);
+                stage.accept(f);
                 // Eager decode (in addition to the raw stash above): the W
                 // beats that follow need the AW's address basis before pop_aw
                 // ever runs (W is decoded here, at arrival; pop_aw may drain
@@ -245,14 +277,17 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
                         {aw.addr, aw.len, aw.size, aw.burst, /*beat_counter=*/0});
                 }
                 break;
+            }
             case ni::AXI_CH_NarrowW:
-            case ni::AXI_CH_DataW:
-                if (s1_w_.full()) {
+            case ni::AXI_CH_DataW: {
+                auto& stage = (ch == ni::AXI_CH_DataW) ? s1_data_w_ : s1_narrow_w_;
+                if (stage.full()) {
                     pending = f;
                     return;
                 }
-                s1_w_.accept(decode_w(f));
+                stage.accept(decode_w(f));
                 break;
+            }
             case ni::AXI_CH_NarrowAr:
             case ni::AXI_CH_DataAr:
                 if (s1_ar_.full()) {
@@ -290,8 +325,8 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
     }
 }
 
-// tick(): drain both physical ingresses (REQ, DAT) into the shared S1
-// registers. See the class comment for why sharing is correct.
+// tick(): drain both physical ingresses (REQ, DAT) into the per-class S1
+// registers. The two ingresses never contend for the same AW or W register.
 inline void Depacketize::tick() {
     drain_ingress_(req_in_, pending_req_, /*is_dat_ingress=*/false);
     drain_ingress_(dat_req_in_, pending_dat_, /*is_dat_ingress=*/true);
@@ -302,10 +337,18 @@ inline void Depacketize::tick() {
 // Returns nullopt when the S1 register is empty, or when this channel's
 // MetaBuffer pool is full (backpressure: the flit stays in S1).
 inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
-    if (!s1_aw_.full()) return std::nullopt;
+    // Class select, round-robin so neither class starves the other. Whichever
+    // is taken defines the next entry of the W order below.
+    const bool narrow_ready = s1_narrow_aw_.full();
+    const bool data_ready = s1_data_aw_.full();
+    if (!narrow_ready && !data_ready) return std::nullopt;
+    const bool take_data = data_ready && (!narrow_ready || aw_prefer_data_);
+    if (narrow_ready && data_ready) aw_prefer_data_ = !aw_prefer_data_;
     if (meta_.write_full()) return std::nullopt;
-    const Flit f = s1_aw_.take();
+    const Flit f = take_data ? s1_data_aw_.take() : s1_narrow_aw_.take();
     axi::AwBeat b = decode_aw(f);
+    w_order_.push_back(
+        {take_data ? AxiClass::Data : AxiClass::Narrow, static_cast<uint32_t>(b.len) + 1u});
     const uint8_t downstream_id = remap_downstream_id(b.id, max_unique_ids_);
     const AxiClass cls =
         (f.get_header_field("axi_ch") == ni::AXI_CH_DataAw) ? AxiClass::Data : AxiClass::Narrow;
@@ -326,8 +369,21 @@ inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     return b;
 }
 inline std::optional<axi::WBeat> Depacketize::pop_w() {
-    if (!s1_w_.full()) return std::nullopt;
-    return s1_w_.take();
+    // Serve strictly in AW order. An admitted burst whose next beat has not
+    // arrived stalls the W stream; letting the other class through here is
+    // exactly the reordering that breaks the AW/W binding.
+    if (w_order_.empty()) return std::nullopt;
+    auto& stage = (w_order_.front().cls == AxiClass::Data) ? s1_data_w_ : s1_narrow_w_;
+    if (!stage.full()) return std::nullopt;
+    axi::WBeat b = stage.take();
+    if (++w_beats_done_ >= w_order_.front().beats) {
+        assert(b.last &&
+               "nsu::Depacketize::pop_w: burst ended without WLAST -- the W stream and "
+               "the AW that named it disagree on beat count");
+        w_order_.pop_front();
+        w_beats_done_ = 0;
+    }
+    return b;
 }
 inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
     if (!s1_ar_.full()) return std::nullopt;
