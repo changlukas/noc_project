@@ -27,7 +27,7 @@ TEST(SamYaml, PackedTilesAccumulateBases) {
     EXPECT_EQ(sam.entries()[1].base, 0x1000ull);  // base(1) = base(0) + size(0)
 }
 
-TEST(SamYaml, TranslateRebasesAgainstPackedBase) {
+TEST(SamYaml, TranslateForwardsTheAddressFromAPackedMap) {
     auto path = ni::cmodel::testing::unique_temp_path("sam_packed_translate.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
@@ -39,7 +39,7 @@ TEST(SamYaml, TranslateRebasesAgainstPackedBase) {
     auto sam = load_sam_table(path);
     auto t = sam.translate(0x300000040ull);  // 4th tile (x=1,y=1), base 0x300000000
     EXPECT_EQ(t.dst_id, 0x11u);
-    EXPECT_EQ(t.local_addr, 0x40ull);  // rebased: addr - base
+    EXPECT_EQ(t.local_addr, 0x300000040ull);  // forwarded unchanged
 }
 
 TEST(SamYaml, MissingNodeRejected) {
@@ -123,20 +123,18 @@ TEST(SamYaml, SpaceAttributeSelectsClass) {
     auto memory = sam.translate(0x1000);
     EXPECT_EQ(memory.dst_id, 0x00u);
     EXPECT_EQ(memory.cls, axi::AxiClass::Data);
-    // Tile-local layering: config span 0x1000 takes [0x0, 0x1000), memory span
-    // 0x100000 starts at 0x100000, so the memory tile's offset 0x1000 lands at
-    // 0x101000 -- outside the config window.
-    EXPECT_EQ(memory.local_addr, 0x101000ull);
+    EXPECT_EQ(memory.local_addr, 0x1000ull);  // forwarded unchanged
 
     // The config tile is the 5th entry: base = sum of the 4 memory tiles'
     // sizes = 4 * 0x100000 = 0x400000, size 0x1000.
     auto config = sam.translate(0x400010);
     EXPECT_EQ(config.dst_id, 0x00u);
     EXPECT_EQ(config.cls, axi::AxiClass::Narrow);
-    EXPECT_EQ(config.local_addr, 0x10ull);  // config space sits at tile-local 0x0
+    EXPECT_EQ(config.local_addr, 0x400010ull);
 
-    // The two spaces of one node no longer collide at tile-local 0 -- this is
-    // what the tile crossbar decodes on.
+    // One node's two spaces stay at distinct addresses, which is what the tile
+    // decoder needs. They are distinct because the map itself put them apart,
+    // not because anything rebased them.
     EXPECT_NE(sam.translate(0x0).local_addr, sam.translate(0x400000).local_addr);
 }
 

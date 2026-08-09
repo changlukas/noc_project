@@ -307,15 +307,16 @@ address back to `dst_id`. One source, so the two never disagree.
 `base` key. Bases are packed by accumulation in list order: `base(0) = 0`,
 `base(i) = base(i-1) + size(i-1)`, so the map is always gap-free and tiles can
 be heterogeneous. `dst_id = (y << X_WIDTH) | x`. The loader accepts a
-heterogeneous map (covered by
-`test_address_map_tile_layout_derives_span_from_entries` in
-`sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology is
-uniform at `0x100000` per memory tile plus `0x1000` per config tile, in raster
+heterogeneous map (covered by `test_node_windows_are_that_node_s_own_map_entries`
+in `sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology
+is uniform at `0x100000` per memory tile plus `0x1000` per config tile, in raster
 order, config entries appended after all memory entries. `TILE_TARGETS` is
 therefore 2 on every topology, and the endpoint carries one decode path, the
-two-window one. That is the shape a rebase error at the crossbar is visible in:
-an address outside both windows DECERRs, which the endpoint's `DECERR_FAULT_BIT`
-fault injection and the RRESP fatal in `sim/tb/user_node_endpoint.sv` check.
+two-window one. The windows are per node and global — nothing rebases, so the
+tile decodes on the same bases the SAM matched. A disagreement between the two
+shows up as an address outside both windows, which DECERRs; the endpoint's
+`DECERR_FAULT_BIT` fault injection and the RRESP fatal in
+`sim/tb/user_node_endpoint.sv` check that path.
 
 Raster order is what makes the node index a contiguous bit field an AWUSER
 address mask can wildcard: memory bases at `idx * 0x100000`, config bases at

@@ -642,14 +642,11 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
     DatMergeOutputs merge_q[2]{};
     RouterOutputs rtr_q[2]{};
 
-    // SamTable::translate rebases each address to its OWN tile-local offset
-    // (addr - tile base), so a bare tile base always rebases to local 0 --
-    // MemSlave's map is keyed by that rebased local address, so the memory
-    // and config tiles would collide on key 0 if both used their bare base.
-    // Offset the memory address so the two land on distinct MemSlave keys.
-    constexpr uint64_t kMemAddr = 0x100000 + 0x100;  // node 1's memory tile, local offset 0x100
+    // Addresses ride through untouched, so MemSlave is keyed by the request
+    // address itself and the two spaces are already distinct.
+    constexpr uint64_t kMemAddr = 0x100000 + 0x100;  // node 1's memory tile
     // Config bases follow the four memory tiles: (0,0) at 0x400000, node 1 next.
-    constexpr uint64_t kCfgAddr = 0x401000;  // node 1's config tile base (local offset 0)
+    constexpr uint64_t kCfgAddr = 0x401000;  // node 1's config tile base
     constexpr uint8_t kWriteId = 3, kOrderId = 9;
     std::array<uint8_t, 64> wdata_mem{}, wdata_cfg{};
     for (int b = 0; b < 64; ++b) wdata_mem[b] = static_cast<uint8_t>(0xA0 + b);

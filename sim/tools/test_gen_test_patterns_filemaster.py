@@ -324,35 +324,41 @@ def _two_space_tiles(memory_sizes):
             [{"x": x, "y": y, "size": 0x1000, "space": "config"} for x, y in nodes])
 
 
-def test_address_map_tile_layout_derives_span_from_entries():
-    """The tile span is COMPUTED from the YAML, never a constant. A mixed-size
-    map (one 2 MB tile among 1 MB tiles) must double every memory-space number
-    against the uniform map -- the property the retired mesh_2x2_nonuniform_vc1
-    topology used to prove. Mirrored in C++ by
-    SamTable.SpaceBaseDerivedFromLargestEntryOfThatSpace."""
-    mixed = _two_space_tiles([0x200000, 0x100000, 0x100000, 0x100000])
-    spaces, tile_span = address_map.tile_layout(mixed)
-    assert spaces == [
-        {"space": "config", "base": 0x0, "span": 0x1000},
-        {"space": "memory", "base": 0x200000, "span": 0x200000},
+def test_space_windows_span_every_node_slot():
+    """A window covers the whole space, not one node's slot: a multicast replica
+    carries the anchor's address, so a per-node window would DECERR it.
+    node_addr_w is the per-node slot width the endpoint masks with."""
+    tiles = _two_space_tiles([0x100000] * 4)
+    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    assert address_map.space_windows(entries) == [
+        {"space": "config", "base": 0x400000, "span": 0x4000, "node_addr_w": 12},
+        {"space": "memory", "base": 0x0, "span": 0x400000, "node_addr_w": 20},
     ]
-    assert tile_span == 0x400000
-    # Heterogeneous sizes still pack: the mixed map is a valid pack() input.
-    address_map.pack({"tiles": mixed}, x_dim=2, y_dim=2)
-
-    uniform = _two_space_tiles([0x100000] * 4)
-    spaces, tile_span = address_map.tile_layout(uniform)
-    assert spaces[1] == {"space": "memory", "base": 0x100000, "span": 0x100000}
-    assert tile_span == 0x200000
 
 
-def test_address_map_tile_layout_skips_an_absent_space():
-    """A memory-only topology gets no config slot, so memory starts at 0x0."""
-    tiles = [{"x": x, "y": y, "size": 0x100000, "space": "memory"}
-             for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]
-    spaces, tile_span = address_map.tile_layout(tiles)
-    assert spaces == [{"space": "memory", "base": 0x0, "span": 0x100000}]
-    assert tile_span == 0x100000
+def test_space_windows_reject_a_base_the_window_cannot_express():
+    """taxi masks a region's base with its own address width, so an unaligned
+    base would decode a range the map never granted. Fail in the generator
+    rather than emit a testbench that lies."""
+    entries = [{"x": 0, "y": 0, "size": 0x1000, "space": "memory",
+                "base": 0x1000, "dst_id": address_map.dst_id(0, 0)},
+               {"x": 1, "y": 0, "size": 0x1000, "space": "memory",
+                "base": 0x2000, "dst_id": address_map.dst_id(1, 0)},
+               {"x": 0, "y": 1, "size": 0x1000, "space": "memory",
+                "base": 0x3000, "dst_id": address_map.dst_id(0, 1)},
+               {"x": 1, "y": 1, "size": 0x1000, "space": "memory",
+                "base": 0x4000, "dst_id": address_map.dst_id(1, 1)}]
+    with pytest.raises(ValueError, match="not aligned"):
+        address_map.space_windows(entries)
+
+
+def test_space_windows_skip_an_absent_space():
+    """A map with no config entries contributes no config window."""
+    entries = [{"x": 0, "y": 0, "size": 0x100000, "space": "memory",
+                "base": 0x0, "dst_id": address_map.dst_id(0, 0)}]
+    assert address_map.space_windows(entries) == [
+        {"space": "memory", "base": 0x0, "span": 0x100000, "node_addr_w": 20},
+    ]
 
 
 def _two_space_topology():
@@ -362,11 +368,11 @@ def _two_space_topology():
 
 def test_tile_targets_packs_config_first():
     """Port order and field packing are one coupled invariant: target 0 is the
-    config window at base 0x0, the last target is the data window. addr_w is
-    the taxi M_ADDR_W field, log2 of the span."""
+    config window, the last target is the data window. addr_w is the taxi
+    M_ADDR_W field, log2 of the span. Windows are that node's own global bases."""
     assert gen_tb_top.tile_targets(_two_space_topology()) == [
-        {"space": "config", "base": 0x0, "span": 0x1000, "addr_w": 12},
-        {"space": "memory", "base": 0x100000, "span": 0x100000, "addr_w": 20},
+        {"space": "config", "base": 0x400000, "span": 0x4000, "node_addr_w": 12, "addr_w": 14},
+        {"space": "memory", "base": 0x0, "span": 0x400000, "node_addr_w": 20, "addr_w": 22},
     ]
 
 

@@ -1,5 +1,6 @@
 #include "nmu/addr_trans.hpp"
 #include "axi/types.hpp"
+#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -25,43 +26,36 @@ TEST(SamTable, PackedDstIdFromXY) {
     EXPECT_EQ(sam.entries()[0].dst_id, 0x12u);
 }
 
-TEST(SamTable, PackedTranslateRebasesFromAccumulatedBase) {
+TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged) {
+    SCENARIO(
+        "SamTable: translate() names the destination and leaves the address alone. The tile-local "
+        "rebase it used to apply was removed so a tile's own initiator and its NI decode in one "
+        "address domain; upstream does the same (floo_id_translation returns a node id only)");
     auto sam = SamTable::packed({
         {0, 0, 0x100000000ull},
         {1, 0, 0x100000000ull},
     });
     auto t = sam.translate(0x100000040ull);  // tile 1, offset 0x40
     EXPECT_EQ(t.dst_id, 0x01u);
-    EXPECT_EQ(t.local_addr, 0x40ull);  // rebased: addr - base
+    EXPECT_EQ(t.local_addr, 0x100000040ull);  // the request address, untouched
 }
 
-// Tile-local layering: the memory space's slot is DERIVED from the largest
-// memory entry, not fixed. Same numbers as the Python twin's mixed-size case
-// (test_address_map_tile_layout_derives_span_from_entries in
-// sim/tools/test_gen_test_patterns_filemaster.py) -- if the two rules diverge,
-// one of the pair fails.
-TEST(SamTable, SpaceBaseDerivedFromLargestEntryOfThatSpace) {
+TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode) {
+    SCENARIO(
+        "SamTable: a node's config and memory addresses stay distinct after translate(), which is "
+        "what the tile decoder needs to tell the two apart. Under the old rebase both landed at "
+        "their own space's slot; now they keep their own bases");
     auto sam = SamTable::packed({
-        {0, 0, 0x200000, axi::AxiClass::Data},  // largest memory tile
+        {0, 0, 0x100000, axi::AxiClass::Data},
         {1, 0, 0x100000, axi::AxiClass::Data},
-        {0, 1, 0x100000, axi::AxiClass::Data},
-        {1, 1, 0x100000, axi::AxiClass::Data},
         {0, 0, 0x1000, axi::AxiClass::Narrow},
         {1, 0, 0x1000, axi::AxiClass::Narrow},
-        {0, 1, 0x1000, axi::AxiClass::Narrow},
-        {1, 1, 0x1000, axi::AxiClass::Narrow},
     });
-    // config span 0x1000 at 0x0; memory span 0x200000 aligned up from 0x1000.
-    EXPECT_EQ(sam.entries()[0].space_base, 0x200000ull);
-    EXPECT_EQ(sam.entries()[4].space_base, 0x0ull);
-    // A smaller memory tile shares the space's slot -- the span is per space,
-    // not per entry, so multicast replicas keep the same term (design §1.3).
-    EXPECT_EQ(sam.entries()[1].space_base, 0x200000ull);
-}
-
-TEST(SamTable, SpaceBaseIsZeroWhenOnlyOneSpacePresent) {
-    auto sam = SamTable::packed({{0, 0, 0x100000}, {1, 0, 0x100000}});
-    EXPECT_EQ(sam.entries()[0].space_base, 0x0ull);  // memory-only tile: no config slot to skip
+    const auto memory = sam.translate(0x40);      // node 0, memory space
+    const auto config = sam.translate(0x200040);  // node 0, config space
+    EXPECT_EQ(memory.dst_id, config.dst_id);      // same node
+    EXPECT_NE(memory.cls, config.cls);            // different class
+    EXPECT_NE(memory.local_addr, config.local_addr);
 }
 
 TEST(SamTable, LookupMissReturnsNull) {
@@ -112,9 +106,9 @@ TEST(SamValidator, RejectsMissingNode) {
 
 TEST(SamValidator, RejectsPartialConfigCoverage) {
     // Spec §5.1: every node owns one region per address space. Memory covers the
-    // 2x2 mesh; config reaches two nodes. A memory-only table stays legal -- see
-    // SpaceBaseIsZeroWhenOnlyOneSpacePresent -- so the check is gated on the
-    // config space being present, not on it being absent.
+    // 2x2 mesh; config reaches two nodes. A memory-only table stays legal -- it
+    // is what SamTable::uniform() builds for most fixtures -- so the check is
+    // gated on the config space being present, not on it being absent.
     SamTable bad(std::vector<SamEntry>{
         {0x0000, 0x1000, 0x00},
         {0x1000, 0x1000, 0x01},

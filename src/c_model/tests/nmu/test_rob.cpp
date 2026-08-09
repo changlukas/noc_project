@@ -23,7 +23,7 @@ namespace addr_trans = ni::cmodel::nmu::addr_trans;
 namespace {
 constexpr uint8_t kSrcId = 0x01;
 
-// 16x16 uniform, 4 GB/tile, no rebase: dst = addr/4GB, local_addr = addr
+// 16x16 uniform, 4 GB/tile: dst = addr/4GB, address forwarded
 // unchanged -- reproduces the retired addr_trans::xy_route mapping exactly,
 // so every legacy dst-from-addr[39:32] expectation below holds unchanged.
 addr_trans::SamTable legacy_sam() {

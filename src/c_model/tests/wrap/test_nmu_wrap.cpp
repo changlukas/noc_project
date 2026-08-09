@@ -209,10 +209,9 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     NmuInputs in{};
     NmuOutputs out{};
 
-    // Global 0x1040 -> under the 4 KB/tile 2x2 SAM this is tile (x=1,y=0),
-    // dst_id = (y<<X_WIDTH)|x = 1, rebased local_addr = 0x40. Both the tile
-    // pick and the rebase come from this YAML's sizes, so observing them
-    // pins the load.
+    // 0x1040 -> under the 4 KB/tile 2x2 SAM this is tile (x=1,y=0),
+    // dst_id = (y<<X_WIDTH)|x = 1, and the address rides through untouched.
+    // The tile pick comes from this YAML's sizes, so observing it pins the load.
     in.awvalid = true;
     in.awid = 0x01;
     in.awaddr = 0x1040;
@@ -243,7 +242,7 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
             auto flit = flit_from_bytes(out.tx_dat_flit);
             if (flit.get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
                 EXPECT_EQ(flit.get_header_field("dst_id"), 0x01u);
-                EXPECT_EQ(flit.get_payload_field("AW", "awaddr"), 0x40ull);
+                EXPECT_EQ(flit.get_payload_field("AW", "awaddr"), 0x1040ull);
                 saw_aw_flit = true;
             }
         }

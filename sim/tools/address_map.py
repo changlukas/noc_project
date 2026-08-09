@@ -97,34 +97,49 @@ def pack(address_map, x_dim, y_dim):
     return bases, entries
 
 
-def tile_layout(entries):
-    """Tile-local space layout. Mirrors SamTable::derive_space_bases_().
+def space_windows(entries):
+    """One window per address space, spanning EVERY node's slot in that space.
 
-    The NMU rebases an address to space_base + (addr - entry base), so the two
-    spaces of one node land in disjoint windows the tile crossbar can decode.
-    The layout is DERIVED from the entries -- change a tile size and the spans
-    move -- so the crossbar's M_BASE_ADDR / M_ADDR_W follow the topology YAML
-    instead of a hardcoded constant.
+    The tile decoder tells the two CLASSES apart; it does not tell nodes apart.
+    That is deliberate, and it is what makes a collective work. A multicast AW
+    reaches N nodes carrying ONE address -- the anchor's -- because nothing on
+    the path rewrites it (upstream is the same: floo_axi_chimney.sv:744 hands
+    the destination the flit payload verbatim). Every replica therefore has to
+    accept an address naming a different node's slot and land at the same offset
+    inside its own. A per-node window would DECERR every replica but the
+    anchor's.
 
-        span(space) = the largest entry of that space rounded up to a power of
-                      two, minimum 4 KB
-        base(space) = spaces in SPACE_ORDER, each aligned up to its own span;
-                      a space with no entries takes no slot
+    So the window covers the whole space, and node_addr_w is what strips the
+    node index back off before the memory sees the address. Upstream's own
+    multicast testbench is built the same way: node regions differ only in high
+    bits, and the destination memory sits at [0, 0x8000)
+    (hw/tb/tb_floo_rob_multicast.sv).
 
-    Returns (spaces, tile_span):
-        spaces:    ordered [{"space", "base", "span"}, ...], present spaces only
-        tile_span: one past the last space's window
+    Returns [{"space", "base", "span", "node_addr_w"}, ...] in SPACE_ORDER,
+    present spaces only:
+        base / span   the whole space, for the crossbar's decode
+        node_addr_w   log2 of one node's slot, for the offset mask
     """
-    spaces = []
-    next_base = 0
+    windows = []
     for space in SPACE_ORDER:
-        sizes = [e["size"] for e in entries if e.get("space", "memory") == space]
-        if not sizes:
+        members = [e for e in entries if e.get("space", "memory") == space]
+        if not members:
             continue
+        base = min(e["base"] for e in members)
+        end = max(e["base"] + e["size"] for e in members)
         span = 0x1000
-        while span < max(sizes):
+        while span < end - base:
             span <<= 1
-        base = (next_base + span - 1) & ~(span - 1)
-        spaces.append({"space": space, "base": base, "span": span})
-        next_base = base + span
-    return spaces, next_base
+        slot = 0x1000
+        while slot < max(e["size"] for e in members):
+            slot <<= 1
+        # taxi masks a region's base with its own address width, so a base that
+        # is not span-aligned would silently decode a window the map never
+        # granted. Fail loud rather than emit a testbench that lies.
+        if base & (span - 1):
+            raise ValueError(
+                f"address_map: {space} space base {base:#x} is not aligned to its {span:#x} "
+                f"window; taxi would decode a different range")
+        windows.append({"space": space, "base": base, "span": span,
+                        "node_addr_w": slot.bit_length() - 1})
+    return windows

@@ -12,7 +12,7 @@ namespace ni::cmodel::nmu::addr_trans {
 
 struct Translated {
     uint8_t dst_id;       // X_WIDTH + Y_WIDTH bits per ni_packet.json
-    uint64_t local_addr;  // tile-local: space_base(cls) + (addr - entry base)
+    uint64_t local_addr;  // the request address, forwarded unchanged
     // Default Data: every SamTable built without a "space" annotation (the
     // uniform()/packed() C++ test helpers, and the co-sim no-config_path
     // fallback) is memory space. sam_yaml.hpp's YAML loader picks the real
@@ -25,9 +25,6 @@ struct SamEntry {
     uint64_t size;
     uint8_t dst_id;
     axi::AxiClass cls = axi::AxiClass::Data;
-    // Where this entry's space starts inside the tile. Derived from the table
-    // (SamTable::derive_space_bases_), never given in the YAML.
-    uint64_t space_base = 0;
 };
 
 // One packed-map input tile: mesh coordinate + size. Bases are not given here;
@@ -83,9 +80,7 @@ struct SpaceCoords {
 class SamTable {
   public:
     SamTable() = default;
-    explicit SamTable(std::vector<SamEntry> entries) : entries_(std::move(entries)) {
-        derive_space_bases_();
-    }
+    explicit SamTable(std::vector<SamEntry> entries) : entries_(std::move(entries)) {}
 
     // Packed map: base(0) = 0, base(i) = base(i-1) + size(i-1), in list order.
     // dst_id = (y << X_WIDTH) | x per tile.
@@ -103,8 +98,7 @@ class SamTable {
 
     // Convenience: pack x_dim*y_dim equal-size tiles in row-major (x, then y)
     // order. Test fixtures only -- co-sim always loads a topology YAML, and
-    // NmuWrap::init rejects a missing one. The table it builds is memory-only,
-    // which is why derive_space_bases_ still skips an absent space.
+    // NmuWrap::init rejects a missing one. The table it builds is memory-only.
     static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size) {
         std::vector<PackedTile> tiles;
         tiles.reserve(static_cast<std::size_t>(x_dim) * y_dim);
@@ -124,14 +118,16 @@ class SamTable {
         return nullptr;
     }
 
-    // Tile-local address: the space's slot inside the tile, plus the offset
-    // within the matched entry. Without the space term a node's config and
-    // memory entries both arrive at local 0 and the tile crossbar has no bits
-    // to decode on.
+    // Destination and class only; the address is forwarded untouched. Upstream
+    // does the same -- floo_id_translation turns an address into a node id and
+    // nothing else, and a grep for addr_decode across FlooNoC's hw/ finds it at
+    // exactly two sites, the source NI and the router, with no endpoint-local
+    // decoder anywhere (cross-review/s5-floonoc-survey-*.md). One address domain
+    // end to end is what lets a tile's own initiator and its NI share a decoder.
     Translated translate(uint64_t addr) const {
         const SamEntry* e = lookup(addr);
         assert(e && "SAM miss: address maps to no tile (config/stimulus bug)");
-        return {e->dst_id, e->space_base + (addr - e->base), e->cls};
+        return {e->dst_id, addr, e->cls};
     }
 
     const std::vector<SamEntry>& entries() const { return entries_; }
@@ -258,33 +254,6 @@ class SamTable {
     }
 
   private:
-    // Tile-local layout, mirrored in sim/tools/address_map.py tile_layout():
-    //   span(space)  = round_pow2(largest entry of that space), min 4 KB
-    //   space_base   = spaces in the fixed order [config, memory], each aligned
-    //                  up to its own span; a space with no entries takes no slot
-    // The inputs are the cls and size already in the table, so hand-built tables
-    // get the layout for free and no second map has to be kept in step.
-    void derive_space_bases_() {
-        constexpr axi::AxiClass kSpaceOrder[] = {axi::AxiClass::Narrow, axi::AxiClass::Data};
-        uint64_t next = 0;
-        for (axi::AxiClass cls : kSpaceOrder) {
-            uint64_t largest = 0;
-            for (const auto& e : entries_) {
-                if (e.cls == cls && e.size > largest) largest = e.size;
-            }
-            if (largest == 0) continue;
-            // span != 0 stops the shift from spinning on a size above 2^63:
-            // this runs in the ctor, before validate() can reject the overflow.
-            uint64_t span = 0x1000;
-            while (span < largest && span != 0) span <<= 1;
-            const uint64_t base = (next + span - 1) & ~(span - 1);
-            for (auto& e : entries_) {
-                if (e.cls == cls) e.space_base = base;
-            }
-            next = base + span;
-        }
-    }
-
     std::vector<SamEntry> entries_;
     // Indexed by axi::AxiClass (Narrow = 0, Data = 1) -- one address space each.
     SpaceCoords coords_[2];

@@ -136,9 +136,9 @@ One `DAT` network, not a request and response pair, even though it carries reque
 - Owns the system address map (SAM): global config space and global memory space
 - Address lookup selects the destination node and the AXI class, config space narrow, memory
   space data
-- Flit addresses are node-local: the NMU rebases `AxADDR` to the offset within the matched SAM
-  region, the NSU presents that zero-based address to the AXI slave. Address decode below the
-  node boundary belongs to the endpoint
+- Addresses are global end to end: the NMU names a destination and forwards `AxADDR` unchanged,
+  the NSU presents that same address to the AXI slave. Address decode below the node boundary
+  belongs to the endpoint, on the bases the map already assigned
 - Packetizes, depacketizes, orders responses
 
 **Router.** Route selection, multicast replication, response aggregation. No AXI address

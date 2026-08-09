@@ -4,9 +4,10 @@
 // fabric's flat ni_signals_pkg structs to interfaces with explicit per-field
 // wiring (no protocol logic).
 //
-// Slave face (tile decode): the NSU's tile-local address selects one of the
-// node's address spaces, config at 0x0 and memory above it, exactly the
-// windows the c_model SAM rebases into. Two memory models, one per role, is
+// Slave face (tile decode): the NSU forwards the request's own address --
+// nothing rebases anywhere -- so the crossbar decodes on this node's two
+// windows exactly as the topology address_map placed them, config and memory
+// at their own global bases. Two memory models, one per role, is
 // deliberate. The data target keeps pulp axi_rand_slave for the three
 // properties that historically surfaced fabric bugs: randomized backpressure
 // and response delay, multiple outstanding with cross-ID selection, and X on
@@ -31,9 +32,10 @@ module user_node_endpoint #(
     parameter int unsigned ID_WIDTH     = ni_params_pkg::AXI_ID_WIDTH_DFLT,
     parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
-    // Tile crossbar windows, stamped by gen_tb_top.py from the topology YAML
-    // (address_map.tile_layout). Port order and field packing are ONE coupled
-    // invariant: field t is target t, m0 = config, LAST = data. Both targets
+    // Tile crossbar windows for THIS node, stamped by gen_tb_top.py from the
+    // topology YAML (address_map.node_windows). Port order and field packing
+    // are ONE coupled invariant: field t is target t, m0 = config, LAST = data.
+    // Both targets
     // are base-agnostic -- taxi_axi_ram truncates the forwarded address to its
     // own ADDR_W (taxi_axi_ram.sv:145 write, :251 read) and axi_rand_slave is
     // address-agnostic -- so what the invariant protects is the ROLE-to-target
@@ -49,6 +51,12 @@ module user_node_endpoint #(
     parameter int unsigned TILE_TARGETS,
     parameter logic [TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR,
     parameter logic [TILE_TARGETS-1:0][31:0]           TILE_ADDR_W,
+    // Per-node slot width inside a space. TILE_ADDR_W decodes the class; this
+    // strips the node index, so a request lands at its offset within whichever
+    // node's memory it reached. That is what a collective needs: one masked AW
+    // reaches N nodes carrying the anchor's address, unrewritten, and every
+    // replica must land at the same offset in its own memory.
+    parameter logic [TILE_TARGETS-1:0][31:0]           TILE_NODE_ADDR_W,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
     parameter int unsigned DEFAULT_NUM_WRITES = 8,
     // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH). Master-side DV interfaces
@@ -259,7 +267,7 @@ module user_node_endpoint #(
     // ...u_endpoint.g_config_ram.u_config_ram that waveform scripts and
     // hand-written probes name.
     if (1) begin : g_config_ram
-        taxi_axi_ram #(.ADDR_W(int'(TILE_ADDR_W[0]))) u_config_ram (
+        taxi_axi_ram #(.ADDR_W(int'(TILE_NODE_ADDR_W[0]))) u_config_ram (
             .clk(clk_i), .rst(!rst_ni),
             .s_axi_wr(target_axi[0]), .s_axi_rd(target_axi[0])
         );
@@ -270,8 +278,16 @@ module user_node_endpoint #(
     // No protocol or width conversion, so its only failure mode is a mis-wired
     // field, which the master-face scoreboard catches on the first readback.
     // aw_atop / *_user have no taxi counterpart in this configuration.
+    // Node-index bits are masked off here, the one place a data-target address
+    // is narrowed. taxi_axi_ram does the same internally for the config target
+    // (it indexes a dense 2**ADDR_W array), so both memories see the offset
+    // within a node's slot and a collective replica lands where its own node's
+    // readback will look for it.
+    localparam logic [ADDR_WIDTH-1:0] DATA_OFFSET_MASK =
+        (ADDR_WIDTH'(1) << TILE_NODE_ADDR_W[DATA_TARGET]) - ADDR_WIDTH'(1);
+
     assign slave_dv.aw_id     = target_axi[DATA_TARGET].awid;
-    assign slave_dv.aw_addr   = target_axi[DATA_TARGET].awaddr;
+    assign slave_dv.aw_addr   = target_axi[DATA_TARGET].awaddr & DATA_OFFSET_MASK;
     assign slave_dv.aw_len    = target_axi[DATA_TARGET].awlen;
     assign slave_dv.aw_size   = target_axi[DATA_TARGET].awsize;
     assign slave_dv.aw_burst  = target_axi[DATA_TARGET].awburst;
@@ -290,7 +306,7 @@ module user_node_endpoint #(
     assign slave_dv.w_valid   = target_axi[DATA_TARGET].wvalid;
     assign slave_dv.b_ready   = target_axi[DATA_TARGET].bready;
     assign slave_dv.ar_id     = target_axi[DATA_TARGET].arid;
-    assign slave_dv.ar_addr   = target_axi[DATA_TARGET].araddr;
+    assign slave_dv.ar_addr   = target_axi[DATA_TARGET].araddr & DATA_OFFSET_MASK;
     assign slave_dv.ar_len    = target_axi[DATA_TARGET].arlen;
     assign slave_dv.ar_size   = target_axi[DATA_TARGET].arsize;
     assign slave_dv.ar_burst  = target_axi[DATA_TARGET].arburst;
@@ -478,9 +494,9 @@ module user_node_endpoint #(
         end
     end
 
-    // RRESP twin of the BRESP fatal above, and the read half of the tile-layout
+    // RRESP twin of the BRESP fatal above, and the read half of the tile-window
     // gate: the tile crossbar DECERRs any address outside every window, so a
-    // disagreement between the SAM's space_base and the generated
+    // disagreement between the address map the SAM matched and the generated
     // TILE_BASE_ADDR / TILE_ADDR_W surfaces here by name instead of as an
     // unexplained data mismatch. +decerr_fault=1 proves it fires.
     //

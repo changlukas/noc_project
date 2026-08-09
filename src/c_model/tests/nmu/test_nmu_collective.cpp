@@ -137,7 +137,11 @@ TEST_P(NmuCollectiveMaskP, AddressMaskTranslatesToNodeMask) {
     EXPECT_EQ(f->get_header_field("collective_op"), axi::COLLECTIVE_OP_MULTICAST);
     EXPECT_EQ(f->get_header_field("collective_mask"), c.expect_node_mask);
     EXPECT_EQ(f->get_header_field("dst_id"), (c.anchor_y << 4) | c.anchor_x);
-    EXPECT_EQ(f->get_payload_field("AW", "awaddr"), 0u);  // node-local offset, shared by replicas
+    // The ANCHOR's address rides the flit, unrewritten, to every replica. What
+    // the replicas share is the offset inside their own node's slot, which each
+    // endpoint recovers by masking the node index off (space_windows'
+    // node_addr_w) -- the same shape upstream uses.
+    EXPECT_EQ(f->get_payload_field("AW", "awaddr"), anchor);
 }
 
 INSTANTIATE_TEST_SUITE_P(AlignedMasks, NmuCollectiveMaskP,
@@ -154,14 +158,13 @@ INSTANTIATE_TEST_SUITE_P(AlignedMasks, NmuCollectiveMaskP,
                              MaskCase{"full_mesh", 0, 0, 0xF000, 0x33}),
                          [](const ::testing::TestParamInfo<MaskCase>& i) { return i.param.name; });
 
-TEST(NmuCollective, TwoSpaceTableKeepsReplicasOnOneSpaceSlot) {
+TEST(NmuCollective, TwoSpaceTableKeepsTheSpacesApart) {
     SCENARIO(
-        "NMU collective S5 §1.3: with both spaces present the tile-local address carries a "
-        "space_base term, and translate() is the only path that adds it. Replicas of one set are "
-        "class-uniform, so they all take the same term -- the offset they agree on is "
-        "space_base + tile offset, and the two spaces of one node no longer share it");
-    // 2x2 mesh, 4 KB memory tiles then 4 KB config tiles: config span takes
-    // [0x0, 0x1000) of the tile, memory starts at 0x1000.
+        "NMU collective S5 §1.3: with both spaces present, one node's memory and config anchors "
+        "stay at different addresses, so the tile decoder can tell them apart. They differ because "
+        "the map placed them apart -- translate() forwards the address untouched -- and a "
+        "replica set is class-uniform, so every member shifts by the same amount");
+    // 2x2 mesh, 4 KB memory tiles then 4 KB config tiles, packed in list order.
     addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Data},
                               {0x1000, kTile, 0x01, axi::AxiClass::Data},
                               {0x2000, kTile, 0x10, axi::AxiClass::Data},
@@ -179,18 +182,17 @@ TEST(NmuCollective, TwoSpaceTableKeepsReplicasOnOneSpaceSlot) {
     auto data_flit = t.aw_cap.pop();
     ASSERT_TRUE(data_flit.has_value());
     EXPECT_EQ(data_flit->get_header_field("collective_mask"), 0x01u);
-    EXPECT_EQ(data_flit->get_payload_field("AW", "awaddr"), 0x1040u);  // memory slot + offset
+    EXPECT_EQ(data_flit->get_payload_field("AW", "awaddr"), 0x0040u);  // the anchor, unchanged
 
     // Same offset in the config space of the same two nodes: same node mask,
-    // different tile-local address. This separation is what the tile crossbar
-    // decodes on.
+    // different address. That separation is what the tile decoder reads.
     auto config_aw = make_aw(0x06, 0x4040, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000));
     config_aw.size = 3;  // narrow rides the 8 B lane
     ASSERT_TRUE(t.rob.push_aw(config_aw));
     auto config_flit = t.aw_cap.pop();
     ASSERT_TRUE(config_flit.has_value());
     EXPECT_EQ(config_flit->get_header_field("collective_mask"), 0x01u);
-    EXPECT_EQ(config_flit->get_payload_field("AW", "awaddr"), 0x40u);  // config slot is at 0x0
+    EXPECT_EQ(config_flit->get_payload_field("AW", "awaddr"), 0x4040u);
 }
 
 TEST(NmuCollective, NarrowClassCollectiveTranslates) {
