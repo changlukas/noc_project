@@ -32,6 +32,7 @@ help:
 	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   directed (neighbor/transpose/uniform_random/hotspot/beat_exact)"
 	@echo "  make sim TB=mesh_4x4_vc1 PATTERN=neighbor"
 	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_TILE= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT=; SEED unset draws + prints a random seed"
+	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
@@ -209,7 +210,8 @@ _INJ_ARGS := \
     $(if $(MAX_TXNS_PER_ID),MAX_TXNS_PER_ID=$(MAX_TXNS_PER_ID)) \
     $(if $(OUTSTANDING_DEPTH),OUTSTANDING_DEPTH=$(OUTSTANDING_DEPTH)) \
     $(if $(BURST_LEN),BURST_LEN=$(BURST_LEN)) \
-    $(if $(MCAST_FAULT),MCAST_FAULT=$(MCAST_FAULT))
+    $(if $(MCAST_FAULT),MCAST_FAULT=$(MCAST_FAULT)) \
+    $(if $(TIMEOUT_CYCLES),TIMEOUT_CYCLES=$(TIMEOUT_CYCLES))
 
 .PHONY: sim
 sim:
