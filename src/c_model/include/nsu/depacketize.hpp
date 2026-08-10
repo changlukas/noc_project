@@ -4,9 +4,12 @@
 #include "ni_flit_constants.h"
 #include "router/null_adapters.hpp"
 #include "router/req_in.hpp"
+#include "router/route_mask.hpp"
+#include "ni/address_map.hpp"
 #include "ni/pipeline_stage.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "request_io.hpp"
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -44,8 +47,14 @@ namespace ni::cmodel::nsu {
 class Depacketize : public RequestDepacketizer {
   public:
     Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t max_unique_ids,
-                router::NocReqIn& dat_req_in = router::null_req_in())
-        : req_in_(req_in), dat_req_in_(dat_req_in), meta_(meta), max_unique_ids_(max_unique_ids) {
+                router::NocReqIn& dat_req_in = router::null_req_in(), uint8_t src_id = 0,
+                std::array<address_map::SpaceCoords, 2> space_coords = {})
+        : req_in_(req_in),
+          dat_req_in_(dat_req_in),
+          meta_(meta),
+          max_unique_ids_(max_unique_ids),
+          node_(router::detail::split_node_id(src_id)),
+          space_coords_(space_coords) {
         // Every path that configures an NSU funnels through here (YAML loader, co-sim
         // wrap defaults, direct NsuConfig test fixtures), so this is the config trust
         // boundary: validate with a throw, not an assert, so a misconfigured value fails
@@ -157,16 +166,35 @@ class Depacketize : public RequestDepacketizer {
     };
     std::deque<WAddrMeta> w_addr_fifo_;
 
-    static axi::AwBeat decode_aw(const Flit& f);
+    // This node's mesh coordinates, and where each space keeps them.
+    router::detail::NodeCoord node_;
+    std::array<address_map::SpaceCoords, 2> space_coords_;
+
+    // The address a request carries names the node the SENDER addressed. For a
+    // unicast that is this node and the rewrite is the identity. For a
+    // collective replica it is the anchor's node, because one masked AW reaches
+    // N nodes unchanged -- so the tile behind this NSU would decode an address
+    // belonging to someone else. Overwriting the coordinate field with this
+    // node's own is what makes every replica land at the same offset in its own
+    // tile. Unconditional, so there is no case left unhandled: no branch on
+    // collective_op, no mask to inspect.
+    uint64_t rebase_(uint64_t addr, uint8_t axi_ch) const {
+        const bool is_data = axi_ch == ni::AXI_CH_DataAw || axi_ch == ni::AXI_CH_DataAr;
+        const auto& c = space_coords_[is_data ? 1u : 0u];
+        return address_map::rebase_node_coords(addr, c, node_.x, node_.y);
+    }
+
+    axi::AwBeat decode_aw(const Flit& f) const;
     axi::WBeat decode_w(const Flit& f);
-    static axi::ArBeat decode_ar(const Flit& f);
+    axi::ArBeat decode_ar(const Flit& f) const;
     void drain_ingress_(router::NocReqIn& src, std::optional<Flit>& pending, bool is_dat_ingress);
 };
 
-inline axi::AwBeat Depacketize::decode_aw(const Flit& f) {
+inline axi::AwBeat Depacketize::decode_aw(const Flit& f) const {
     axi::AwBeat b{};
     b.id = static_cast<uint8_t>(f.get_payload_field("AW", "awid"));
-    b.addr = f.get_payload_field("AW", "awaddr");
+    b.addr = rebase_(f.get_payload_field("AW", "awaddr"),
+                     static_cast<uint8_t>(f.get_header_field("axi_ch")));
     b.len = static_cast<uint8_t>(f.get_payload_field("AW", "awlen"));
     b.size = static_cast<uint8_t>(f.get_payload_field("AW", "awsize"));
     b.burst = static_cast<axi::Burst>(f.get_payload_field("AW", "awburst"));
@@ -206,10 +234,11 @@ inline axi::WBeat Depacketize::decode_w(const Flit& f) {
     return b;
 }
 
-inline axi::ArBeat Depacketize::decode_ar(const Flit& f) {
+inline axi::ArBeat Depacketize::decode_ar(const Flit& f) const {
     axi::ArBeat b{};
     b.id = static_cast<uint8_t>(f.get_payload_field("AR", "arid"));
-    b.addr = f.get_payload_field("AR", "araddr");
+    b.addr = rebase_(f.get_payload_field("AR", "araddr"),
+                     static_cast<uint8_t>(f.get_header_field("axi_ch")));
     b.len = static_cast<uint8_t>(f.get_payload_field("AR", "arlen"));
     b.size = static_cast<uint8_t>(f.get_payload_field("AR", "arsize"));
     b.burst = static_cast<axi::Burst>(f.get_payload_field("AR", "arburst"));

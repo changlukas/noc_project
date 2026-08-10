@@ -79,7 +79,8 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     // Case: nsu_create after init succeeds.
     unsigned long long nsu_handle = cmodel_nsu_create("nsu_test", 0, /*num_vc=*/1,
                                                       /*max_unique_ids=*/1,
-                                                      /*max_outstanding=*/32);
+                                                      /*max_outstanding=*/32,
+                                                      /*config_path=*/"");
     ASSERT_NE(nsu_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
 

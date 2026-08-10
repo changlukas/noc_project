@@ -336,3 +336,68 @@ TEST(NsuDepacketize, CtorRejectsIntermediateMaxUniqueIds) {
     EXPECT_NO_THROW(Depacketize(noc.req_in(), mb, /*collapse*/ 1));
     EXPECT_NO_THROW(Depacketize(noc.req_in(), mb, axi::AXI_ID_SPACE));
 }
+
+// --- Node-coordinate rebase (Stage 2b) -------------------------------------
+// A collective replica arrives carrying the ANCHOR's address, because one
+// masked AW reaches N nodes unchanged. The NSU overwrites the coordinate field
+// with its own so the tile behind it decodes an address that names itself.
+
+namespace {
+// A 4x4 memory space of 0x100000-byte tiles: node index in addr[23:20], X in
+// [21:20] and Y in [23:22] (raster order, X fastest).
+ni::cmodel::address_map::SpaceCoords mem_coords_4x4() {
+    ni::cmodel::address_map::SpaceCoords c;
+    c.x_count = 4;
+    c.y_count = 4;
+    c.x_range = {20, 2};
+    c.y_range = {22, 2};
+    return c;
+}
+std::array<ni::cmodel::address_map::SpaceCoords, 2> coords_for_narrow() {
+    std::array<ni::cmodel::address_map::SpaceCoords, 2> a{};
+    a[static_cast<unsigned>(axi::AxiClass::Narrow)] = mem_coords_4x4();
+    return a;
+}
+}  // namespace
+
+TEST(NsuDepacketize, RebasesAReplicaAddressOntoThisNode) {
+    SCENARIO("NSU Depacketize: an AW carrying another node's address is rewritten to this node");
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    // src_id 0x21 = (y=2 << X_WIDTH) | x=1.
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256, ni::cmodel::router::null_req_in(),
+                      /*src_id*/ 0x21, coords_for_narrow());
+    // Anchor address names node (0,0); the offset inside the tile is 0x3c0.
+    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x0003c0)));
+    depkt.tick();
+    auto aw = depkt.pop_aw();
+    ASSERT_TRUE(aw.has_value());
+    // x=1 at bit 20, y=2 at bit 22 -> 0x9003c0.
+    EXPECT_EQ(aw->addr, 0x9003c0u);
+}
+
+TEST(NsuDepacketize, RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode) {
+    SCENARIO("NSU Depacketize: an address already naming this node survives the rebase unchanged");
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256, ni::cmodel::router::null_req_in(),
+                      /*src_id*/ 0x21, coords_for_narrow());
+    ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x07, 0x9003c0)));
+    depkt.tick();
+    auto ar = depkt.pop_ar();
+    ASSERT_TRUE(ar.has_value());
+    EXPECT_EQ(ar->addr, 0x9003c0u);
+}
+
+TEST(NsuDepacketize, UndeclaredCoordsLeaveTheAddressAlone) {
+    SCENARIO("NSU Depacketize: with no coordinate field declared the address is forwarded as-is");
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256, ni::cmodel::router::null_req_in(),
+                      /*src_id*/ 0x21);
+    ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x0003c0)));
+    depkt.tick();
+    auto aw = depkt.pop_aw();
+    ASSERT_TRUE(aw.has_value());
+    EXPECT_EQ(aw->addr, 0x0003c0u);
+}

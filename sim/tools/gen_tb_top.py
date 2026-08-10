@@ -145,7 +145,7 @@ def tile_targets(topo: dict):
 
     Port order and field packing are ONE coupled invariant: m0 = config,
     m1 = data, and target t occupies field t of the packed parameters.
-    user_node_endpoint puts the config axi_sim_mem on target 0 and the
+    user_node_endpoint puts the config memory on target 0 and the
     rand_slave data memory on the LAST target. Neither target cares about its
     base -- the endpoint masks every forwarded address down to the node slot
     before either memory sees it -- so the role-to-target assignment is the
@@ -169,7 +169,7 @@ def tile_targets(topo: dict):
     if order != ["config", "memory"]:
         raise SystemExit(
             f"gen_tb_top: tile space order {order} must be config-then-memory -- "
-            f"user_node_endpoint puts the config axi_sim_mem on target 0 and the "
+            f"user_node_endpoint puts the config memory on target 0 and the "
             f"data memory on the last target (see address_map.SPACE_ORDER)")
     return [dict(s, addr_w=s["span"].bit_length() - 1) for s in windows]
 
@@ -642,7 +642,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
     w('                                                              input int src_id, input int num_vc,')
     w('                                                              input int max_unique_ids,')
-    w('                                                              input int max_outstanding);')
+    w('                                                              input int max_outstanding,')
+    w('                                                              input string config_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_dat_merge_create(input string name,')
     w('                                                                    input int dat_num_vc);')
     w("")
@@ -695,7 +696,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
           f'{1 if rob_enabled else 0}, b_rob_depth, r_rob_depth, max_txns_per_id, '
           f'outstanding_depth, sam_config_path);  '
           f'// src_id = node{i} coord {c}, ROB {"Enabled" if rob_enabled else "Disabled"}')
-        w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, max_outstanding);')
+        w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, '
+          f'max_outstanding, sam_config_path);')
         w(f'        dat_merge_ctx[{i}] = cmodel_dat_merge_create("dat_merge_{i}", DAT_NUM_VC);')
     w("    end")
     w("")

@@ -47,6 +47,7 @@
 #include "wrap/nsu_wrap_io.hpp"
 #include "ni_params.h"  // NOC_ROUTER_VC_DEPTH — DAT sender credit seed
 #include "flit.hpp"
+#include "nmu/sam_yaml.hpp"  // load_sam_table -- the NSU reads the coordinate field only
 #include "nsu/nsu_standalone.hpp"
 #include <array>
 #include <cassert>
@@ -63,14 +64,28 @@ class NsuWrap {
     // scalar); dat_num_vc is the topology's VC count (mesh_4x4_vc{2,4,8}
     // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
     // AXI channel.
+    // config_path is the topology YAML the NMU already loads. The NSU needs one
+    // thing out of it -- where each space keeps its node coordinates -- so it
+    // can rewrite an arriving address to name this node (nsu::Depacketize's
+    // rebase_). Empty means "no address map", and the NSU forwards addresses
+    // untouched, which is what the pure-C++ fixtures want.
     void init(uint8_t src_id = 0, uint8_t dat_num_vc = 1,
               std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
               std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
-              std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING) {
+              std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING,
+              const char* config_path = nullptr) {
         using namespace ni::cmodel::nsu;
         dat_num_vc_ = dat_num_vc;
         NsuConfig cfg{};
         cfg.src_id = src_id;
+        if (config_path != nullptr && config_path[0] != '\0') {
+            const auto sam = nmu::addr_trans::load_sam_table(config_path);
+            for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
+                if (const auto* c = sam.collective_coords(cls)) {
+                    cfg.space_coords[static_cast<unsigned>(cls)] = *c;
+                }
+            }
+        }
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;
         cfg.dat_num_vc = dat_num_vc;

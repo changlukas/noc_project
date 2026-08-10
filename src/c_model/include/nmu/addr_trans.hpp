@@ -1,6 +1,7 @@
 #pragma once
 #include "ni_flit_constants.h"  // ni::width::X_WIDTH / Y_WIDTH (DST_ID composition)
 #include "axi/types.hpp"        // axi::Burst (used by burst_last_byte)
+#include "ni/address_map.hpp"   // BitRange / SpaceCoords / clog2 / range_mask
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -36,46 +37,13 @@ struct PackedTile {
     axi::AxiClass cls = axi::AxiClass::Data;
 };
 
-// Smallest k with 2^k >= n. clog2(1) = 0, clog2(3) = 2.
-inline unsigned clog2(unsigned n) {
-    unsigned bits = 0;
-    while (bits < 32 && (1u << bits) < n) ++bits;
-    return bits;
-}
-
-struct BitRange {
-    unsigned offset = 0;
-    unsigned len = 0;
-};
-
-inline uint64_t range_mask(const BitRange& r) {
-    if (r.len == 0) return 0;
-    return ((uint64_t{1} << r.len) - 1) << r.offset;
-}
-
-// Where one address space keeps its node coordinates. Upstream emits the same
-// numbers into every SAM rule at generation time (floogen/model/network.py
-// gen_collective_sam, read by floo_id_translation.sv), so the NI slices AWUSER
-// instead of walking the map. SamTable does not derive them -- construction has
-// no mesh dimensions -- so whoever builds the table states them and SamTable
-// checks the statement against the entries.
-//
-// Deviation from upstream, deliberate: floogen linearizes Y-major so its X
-// field sits ABOVE Y. This repo packs raster order, X fastest, so X sits BELOW
-// Y -- the same order dst_id = (y << X_WIDTH) | x uses.
-//
-// No base_id: upstream carries one because a collective array can sit at a
-// non-origin sub-mesh. Every space here spans all N nodes from node 0, so the
-// field would always be zero.
-struct SpaceCoords {
-    BitRange x_range;
-    BitRange y_range;
-    // Mesh dimensions, STATED not inferred. Recovering one as 1 << len
-    // over-permits every dimension that is not a power of two, and
-    // docs/noc-target-spec.md §5 allows 2 to 16 per dimension.
-    unsigned x_count = 0;
-    unsigned y_count = 0;
-};
+// The coordinate-field vocabulary lives at the NI layer: the NMU reads the
+// field, the NSU writes it (ni/address_map.hpp). Re-exported here so every
+// existing addr_trans:: caller keeps its spelling.
+using address_map::BitRange;
+using address_map::clog2;
+using address_map::range_mask;
+using address_map::SpaceCoords;
 
 class SamTable {
   public:

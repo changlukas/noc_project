@@ -199,8 +199,12 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 // (FlooNoC's ChimneyDefaultCfg); 256 passes the master's id through. No other
 // value is legal, and the Depacketize constructor asserts it.
 // max_outstanding: shared MetaBuffer pool size per direction (FlooNoC MaxTxns).
+// config_path: the topology YAML. The NSU reads one thing out of it -- where
+// each space keeps its node coordinates -- so it can rewrite an arriving
+// address to name this node. "" or NULL forwards addresses untouched.
 unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,
-                                     int max_unique_ids, int max_outstanding);
+                                     int max_unique_ids, int max_outstanding,
+                                     const char* config_path);
 void cmodel_nsu_set_inputs(unsigned long long ctx, svBit rx_req_valid, svBitVecVal* rx_req_flit,
                            svBit tx_rsp_ready, svBit rx_dat_valid, svBitVecVal* rx_dat_flit,
                            svBitVecVal* tx_dat_crdvalid, svBit awready, svBit wready, svBit bvalid,

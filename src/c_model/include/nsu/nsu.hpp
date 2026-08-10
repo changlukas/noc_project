@@ -61,6 +61,10 @@ namespace ni::cmodel::nsu {
 
 struct NsuConfig {
     uint8_t src_id = 0;
+    // Where each space keeps its node coordinates, indexed by axi::AxiClass.
+    // Left undeclared (x_count == 0) the NSU forwards addresses untouched,
+    // which is what a map with no readable coordinate field asks for.
+    std::array<address_map::SpaceCoords, 2> space_coords{};
     nsu::PortParams port_params{};
     std::size_t num_vc = 1;
     // DAT face VC count (S3a T4; R only -- no B rides DAT, per network map §1).
@@ -174,7 +178,7 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), dat_vc_allocator_,
                  meta_buffer_, cfg_.src_id),
       depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids,
-                   upstream_dat_req_),
+                   upstream_dat_req_, cfg_.src_id, cfg_.space_coords),
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {
