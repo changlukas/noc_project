@@ -133,13 +133,14 @@ def space_windows(entries):
         slot = 0x1000
         while slot < max(e["size"] for e in members):
             slot <<= 1
-        # taxi masks a region's base with its own address width, so a base that
-        # is not span-aligned would silently decode a window the map never
-        # granted. Fail loud rather than emit a testbench that lies.
+        # node_addr_w is applied as a power-of-two mask, which only yields the
+        # offset within a node's slot if the space starts on a slot boundary. A
+        # span-aligned base guarantees that (span >= slot). Fail loud rather than
+        # emit a testbench whose replicas land at the wrong offset.
         if base & (span - 1):
             raise ValueError(
                 f"address_map: {space} space base {base:#x} is not aligned to its {span:#x} "
-                f"window; taxi would decode a different range")
+                f"window; the endpoint's offset mask would strip the wrong bits")
         windows.append({"space": space, "base": base, "span": span,
                         "node_addr_w": slot.bit_length() - 1})
     return windows

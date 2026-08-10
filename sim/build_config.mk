@@ -83,25 +83,35 @@ TB_TOP_SV = $(COSIM_ROOT)/tb/tb_top_$(TOPOLOGY).sv
 # always lands on the vc word (vc2), not "vc2_rob" which has no matching noc_types_pkg file.
 # $(lastword $(subst _vc, vc,...)) then splits on "_vc" and takes the last word (e.g. "vc2").
 TOPOLOGY_BASE = $(TOPOLOGY:_rob=)
-# taxi tile-decode subset (sim/dv/README.md): the crossbar + RAM behind every
-# NSU port in user_node_endpoint.sv. Declaration order matters -- taxi_axi_if is
-# an interface, so it precedes every module that takes it as a port.
-TAXI_RTL := $(DV_ROOT)/taxi-d5d38c2/src
-TAXI_SRC := \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_if.sv \
-    $(TAXI_RTL)/prim/rtl/taxi_penc.sv \
-    $(TAXI_RTL)/prim/rtl/taxi_arbiter.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_register_wr.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_register_rd.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_tie_wr.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_tie_rd.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_addr.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_wr.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_rd.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_1s_wr.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_1s_rd.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_crossbar_1s.sv \
-    $(TAXI_RTL)/axi/rtl/taxi_axi_ram.sv
+# pulp AXI crossbar subset (sim/dv/README.md): the tile decoder and the memory
+# behind it in user_node_endpoint.sv. Taken at v0.39.7 / v1.37.0, the versions
+# already vendored, so nothing here mixes releases -- at v0.39.7
+# axi_demux_id_counters is a second module inside axi_demux_simple.sv rather
+# than its own file, which a master-branch copy would get wrong.
+#
+# Declaration order matters for the packages and for common_cells, which the
+# axi modules instantiate.
+PULP_AXI  := $(DV_ROOT)/axi-0.39.7/src
+PULP_CC   := $(DV_ROOT)/common_cells-1.37.0/src
+XBAR_SRC := \
+    $(PULP_CC)/lzc.sv \
+    $(PULP_CC)/rr_arb_tree.sv \
+    $(PULP_CC)/fifo_v3.sv \
+    $(PULP_CC)/delta_counter.sv \
+    $(PULP_CC)/counter.sv \
+    $(PULP_CC)/spill_register_flushable.sv \
+    $(PULP_CC)/spill_register.sv \
+    $(PULP_CC)/stream_register.sv \
+    $(PULP_AXI)/axi_id_prepend.sv \
+    $(PULP_AXI)/axi_atop_filter.sv \
+    $(PULP_AXI)/axi_err_slv.sv \
+    $(PULP_AXI)/axi_cut.sv \
+    $(PULP_AXI)/axi_multicut.sv \
+    $(PULP_AXI)/axi_demux_simple.sv \
+    $(PULP_AXI)/axi_demux.sv \
+    $(PULP_AXI)/axi_mux.sv \
+    $(PULP_AXI)/axi_xbar_unmuxed.sv \
+    $(PULP_AXI)/axi_xbar.sv
 
 # noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
 # BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
@@ -123,7 +133,7 @@ TB_TOP_SV_SRC := \
     $(DV_ROOT)/axi-0.39.7/src/axi_intf.sv \
     $(DV_ROOT)/axi-0.39.7/src/axi_test.sv \
     $(DV_ROOT)/floonoc-test/axi_bw_monitor.sv \
-    $(TAXI_SRC) \
+    $(XBAR_SRC) \
     $(COSIM_ROOT)/tb/axi_vip_types_pkg.sv \
     $(SRC_SV)/nmu_wrap.sv \
     $(SRC_SV)/router_wrap.sv \
@@ -144,7 +154,7 @@ FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY).f
 # -I/+incdir+ the simulators already pass; listing them in the .f makes it
 # self-contained for tool-native -f consumption.
 FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/tb $(SRC_SV) \
-    $(DV_ROOT)/axi-0.39.7/include -- $(TB_TOP_SV_SRC)
+    $(DV_ROOT)/axi-0.39.7/include $(DV_ROOT)/common_cells-1.37.0/include -- $(TB_TOP_SV_SRC)
 
 # DPI implementation shared by every simulator; the C++ *main* driver
 # (main.cpp) is Verilator-only and listed in sim/verilator/Makefile, NOT here

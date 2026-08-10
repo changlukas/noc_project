@@ -21,7 +21,7 @@ Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
     - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
     - per-node router/nmu/nsu ctx handles; TILE_BASE_ADDR / TILE_ADDR_W, the tile
-      crossbar's per-target windows, from address_map.tile_layout() (see
+      crossbar's per-target windows, from address_map.space_windows() (see
       tile_targets below), stamped into each endpoint
     - inter-router links wired per XY direction; boundary directions tied off
     - PASS guard: all endpoints done (end_of_sim) AND every node non-vacuous
@@ -141,25 +141,23 @@ _DEFAULT_REGION_BYTES = 0x1000
 
 
 def tile_targets(topo: dict):
-    """Tile crossbar windows in taxi PORT ORDER, one per target.
+    """Tile crossbar windows in crossbar PORT ORDER, one per target.
 
     Port order and field packing are ONE coupled invariant: m0 = config,
-    m1 = data, and taxi packs M_BASE_ADDR / M_ADDR_W low-field-first
-    (taxi_axi_crossbar_addr.sv:136), so target t occupies field t.
-    user_node_endpoint puts the config taxi_axi_ram on target 0 and the
+    m1 = data, and target t occupies field t of the packed parameters.
+    user_node_endpoint puts the config axi_sim_mem on target 0 and the
     rand_slave data memory on the LAST target. Neither target cares about its
-    base -- the RAM truncates the forwarded address to its own ADDR_W
-    (taxi_axi_ram.sv:145 write, :251 read) and rand_slave is address-agnostic
-    -- so the role-to-target assignment is the whole invariant, and the check
-    below is what stops an address_map.py SPACE_ORDER edit from transposing the
-    two silently.
+    base -- the endpoint masks every forwarded address down to the node slot
+    before either memory sees it -- so the role-to-target assignment is the
+    whole invariant, and the check below is what stops an address_map.py
+    SPACE_ORDER edit from transposing the two silently.
 
     A window spans the WHOLE space, every node's slot, not just this node's --
     see address_map.space_windows for why a collective needs that. node_addr_w
     is the per-node slot width the endpoint masks with.
 
     Returns [{"space", "base", "span", "node_addr_w", "addr_w"}, ...];
-    addr_w = log2(span), the taxi M_ADDR_W field.
+    addr_w = log2(span), which the endpoint turns into the window's end address.
     """
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
@@ -171,7 +169,7 @@ def tile_targets(topo: dict):
     if order != ["config", "memory"]:
         raise SystemExit(
             f"gen_tb_top: tile space order {order} must be config-then-memory -- "
-            f"user_node_endpoint puts the config taxi_axi_ram on target 0 and the "
+            f"user_node_endpoint puts the config axi_sim_mem on target 0 and the "
             f"data memory on the last target (see address_map.SPACE_ORDER)")
     return [dict(s, addr_w=s["span"].bit_length() - 1) for s in windows]
 
@@ -467,7 +465,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
 
     # Tile crossbar windows, m0 first (see tile_targets). Emitted as PACKED-array
     # concatenations in descending index order (last target first) so field t is
-    # target t, which is the packing taxi expects. Packed because Verilator 5.048
+    # target t, the packing user_node_endpoint indexes. Packed because Verilator 5.048
     # mis-sizes an unpacked-array param override whose size depends on a sibling
     # param override (here TILE_TARGETS).
     #

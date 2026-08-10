@@ -48,6 +48,7 @@ VERILATOR_COMMON_FLAGS := \
     -I$(SRC_SV) \
     -I$(SPECGEN_SV_INC) \
     -I$(DV_ROOT)/axi-0.39.7/include \
+    -I$(DV_ROOT)/common_cells-1.37.0/include \
     -CFLAGS "-std=c++17" \
     -CFLAGS "-DYAML_CPP_STATIC_DEFINE" \
     $(foreach i,$(CPP_INCLUDE_FLAGS),-CFLAGS "$(i)") \
