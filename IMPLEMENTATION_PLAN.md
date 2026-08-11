@@ -165,12 +165,35 @@ Every previously-unrun axis in this project has yielded a defect on first contac
 binding, hotspot slot overlap, and the `MAPPED` `axi_rand_slave` race in Stage 4. Budget for
 triage rather than assuming a clean pass.
 
+### The named question: why the RoB mark moves both ways with id count
+
+5b measured 75 at four ids against 58 at one at `INJECTION_COUNT = 128`, and 60 against 63 at 64.
+Destinations are identical inside each pair, so it is the ids. Admission classifies every AW and
+AR into exactly one of three branches (`nmu-spec.md:364`, priority order):
+
+| | branch | slot | what raising the id count does to it |
+|---|---|---|---|
+| 1 | idle-ID bypass — nothing in flight for this id | none | **more often**: more ids means more first-of-streak pushes |
+| 2 | same-destination bypass — dst and class match this id's previous push, `fixed_vc` pins the streak to one VC so the fabric cannot split it (`vc_allocator.hpp:11-20`, `trade-off.md:89-96`) | none | **less often**: spreading a node's traffic over more ids shortens each id's same-dest run, and under `uniform_random` the chance the next same-id push repeats a destination falls as ids rise |
+| 3 | sticky fall-back | one | **more often**, as the mirror of 2 |
+
+So id count pushes clause 1 and clause 3 up together and clause 2 down, and the mark follows
+whichever wins. The count-per-id is the variable that decides it — 16 per id at
+`INJECTION_COUNT = 64`, 32 per id at 128. That is a hypothesis with one measurement each side of
+the crossover, not a result.
+
+Settle it by measurement, not argument: the clause-1/2/3 admission counts per run are not
+exposed anywhere today. Counting them is the same class of work as 5d's telemetry and belongs in
+the same change — a run that reports its own clause split explains its own high-water mark.
+
 **Success criteria**
 - `mesh_4x4_vc4_rob uniform_random` at `--ids-per-initiator 4` and at the full 16 reaches a
   non-vacuous PASS, or the failure is root-caused and either fixed or recorded in
   `docs/known-limitations.md` with the evidence that separates fabric from stimulus.
 - Same for `mesh_2x2_vc1`, where 4 nodes x 4 IDs fits the space exactly with no block overlap —
   this is the control that tells overlap-induced failures apart from multi-ID-induced ones.
+- The clause split is reported per run, and it accounts for the direction the high-water mark
+  moved at both counts. "The mark went up" without the split is not an explanation.
 
 **Status**: Not Started
 
