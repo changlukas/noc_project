@@ -309,7 +309,53 @@ exist. For "how full did it get" it is an overestimate, and every earlier statem
 that read it as occupancy — including the Stage 5b direction analysis the whole of 5c was scoped
 around — was reading it as something it is not.
 
-**Status**: Pools swept; RoB depths and the multi-id case remain.
+### Multi-id: the pool binds, the per-ID list does not
+
+Four ids, 64 transactions, so 16 per id. Only this case separates the two parameters.
+
+| | default | per_id 16 | per_id 8 | per_id 4 | pool 16 | pool 8 | pool 4 |
+|---|---|---|---|---|---|---|---|
+| `order_list_hwm` (limit 32) | **12** | 12 | 8 | 4 | 9 | 6 | 4 |
+| `write_txns_hwm` (limit 32) | **30** | 30 | 25 | 14 | 16 | 8 | 4 |
+
+At the shipped settings the shared pool reaches 30 of 32 while the deepest per-ID list reaches 12
+of 32. Dropping `MAX_TXNS_PER_ID` to 16 changes nothing, because 16 is still above the 12 the
+traffic produces. **`NMU_MAX_TXNS_PER_ID = 32` does not bind at four ids; the pool binds first**,
+and the per-ID limit only becomes the limiter below about 12, which is under the spread the
+traffic naturally has.
+
+That is the answer the parameter was waiting for. At one id the two are the same knob; at several
+ids the per-ID limit is slack by roughly 2.5x. It earns its place only as a fairness cap against
+one id monopolising the pool, and no stimulus in the suite produces that shape.
+
+### RoB depths: both stall cleanly, and both are sized well above need
+
+One id, the worst case for the read frontier.
+
+| `NMU_ROB_R_DEPTH` | 128 | 64 | 32 | 16 | 8 |
+|---|---|---|---|---|---|
+| `read_slot_hwm` | 63 | 63 | 32 | 16 | 8 |
+| result | PASS | PASS | PASS | PASS | PASS |
+
+| `NMU_ROB_B_DEPTH` | 128 | 64 | 32 | 16 | 8 |
+|---|---|---|---|---|---|
+| `write_txns_hwm` | 32 | 32 | 28 | 17 | 9 |
+| result | PASS | PASS | PASS | PASS | PASS |
+
+The frontier clamps to whatever depth it is given and the run still completes, down to 8 of the
+128 shipped. So the 63 measured at depth 128 is not a requirement — it is how far a bump
+allocator wanders when nothing forces it to reuse. Read `read_slot_hwm` at a generous depth as an
+upper bound on wandering, not as a floor on what the design needs.
+
+`NMU_ROB_R_DEPTH` is the one that costs area: one slot per read **beat**, each holding a full data
+word, so 128 x 512 b is 8 KB. The design completes at 8.
+
+**What this sweep does not establish**: the throughput cost of a smaller depth. Every point
+passes, so correctness is settled and the stall-not-error claim holds, but a shallower buffer
+stalls more often and nothing here measures that. Changing a shipped default needs that number
+first.
+
+**Status**: Complete.
 
 ---
 
