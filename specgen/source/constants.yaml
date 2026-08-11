@@ -190,7 +190,7 @@ nmu:
   MAX_TXNS_PER_ID:
     type: int
     units: transactions
-    description: "NMU per-AXI-ID order-list depth (FlooNoC MaxTxnsPerId)."
+    description: "Transactions in flight per AXI ID at the NMU. Bounds the per-ID order list, which holds bypassed and reordered transactions alike -- a bypassed push allocates no RoB slot but still takes a list entry (FlooNoC MaxTxnsPerId)."
     default: 32
     min: 1
     max: 256
