@@ -142,7 +142,7 @@ classes (upstream reference in Provenance):
 | `uniform_random` | independent uniform draw per transaction | self-traffic permitted by default (`--exclude-self` opts out); seeded |
 | `hotspot` | one or more chosen nodes draw the traffic, weighted by `--hotspot-rates` | many-to-one congestion |
 | `beat_exact` | `dst = neighbor_dst(x, y)` (same bijection as `neighbor`) | DPI word-packing fault-injection gate, not a spatial pattern: one full-width beat plus an 8-position walking-strb sweep per node; a config-space tile additionally gets a narrow-class 2-beat burst; ignores `--transactions-per-node`/`--size`/`--len`/`--seed` |
-| `multicast` | source nodes issue masked AW writes over a row, column, or 2x2-submesh member set (`MCAST_SHAPE`, one shape per run), then read back every member replica; other nodes carry unicast filler | AWUSER carries the address mask. `INJECTION_MODE=0` only, since one write answers to N readbacks. On a config topology each source also issues one narrow-class multicast into the members' config tiles, the config-space replication case. Ignores `--ids-per-tile` |
+| `multicast` | source nodes issue masked AW writes over a row, column, or 2x2-submesh member set (`MCAST_SHAPE`, one shape per run), then read back every member replica; other nodes carry unicast filler | AWUSER carries the address mask. `INJECTION_MODE=0` only, since one write answers to N readbacks. On a config topology each source also issues one narrow-class multicast into the members' config tiles, the config-space replication case. Ignores `--ids-per-initiator` |
 
 The `multicast` schedule is what satisfies restriction R1 (`docs/router-spec.md`
 Section 2.10), which the fabric does not enforce: trees of one shape are pairwise

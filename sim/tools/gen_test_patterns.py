@@ -57,7 +57,7 @@ multicast  (S4 collectives; stimulus intent ported from FlooNoC
     restriction R1: same-shape trees are pairwise disjoint across sources, and
     each source's own multicasts share one AXI id so the NMU's R2 gate
     serializes them on the merged B. See the "Multicast pattern" section below.
-    Ignores --ids-per-tile (one id per node is the serialization mechanism).
+    Ignores --ids-per-initiator (one id per node is the serialization mechanism).
 
 Address allocation
 ------------------
@@ -181,18 +181,26 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop, user=0):
 
 def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
                           base_local, region_bytes, axi_size, axi_len, data_width,
-                          ids_per_tile=1, num_axi_ids=256, bases=None, extra=None):
+                          id_rng, ids_per_initiator=1, num_axi_ids=256,
+                          bases=None, extra=None):
     """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
     src-partitioned address, address-in-data payload. INCR, atop=0, full strobe.
 
     bases: {dst_id: base}, from address_map.pack() -- the packed tile base for
     each dst_cid in dst_cids.
 
-    AXI ids: each tile owns an independent, non-overlapping block of `ids_per_tile`
-    ids starting at src_idx*ids_per_tile (mod num_axi_ids), so no two tiles share
-    an id. ids_per_tile=1 gives each tile one distinct id (= src_idx); >1 lets a
-    tile keep several transactions outstanding (distinct ids escape same-id
-    ordering), raising injected concurrency for saturation runs. VC allocation is
+    AXI ids: each initiator draws uniformly at random from a block of
+    `ids_per_initiator` ids starting at src_idx*ids_per_initiator (mod
+    num_axi_ids), mirroring axi_rand_master's `rand logic [IW-1:0] ax_id`
+    (sim/dv/axi-0.39.7/src/axi_test.sv:233) over N_AXI_IDS = 2**IW (:715).
+    Ids repeat within an initiator (upstream UNIQUE_IDS = 1'b0, :710), so a run
+    carries both same-id pairs (must stay ordered) and cross-id pairs (may
+    reorder). Blocks overlap across initiators once
+    ids_per_initiator * n_nodes > num_axi_ids -- legal, because responses route
+    by the flit's src_id, not by AXI id (nsu/meta_buffer.hpp:21,
+    nsu/packetize.hpp:97,123), and upstream shares ids across nodes by
+    construction (each test node draws the full space). ids_per_initiator=1
+    gives each tile one id (= src_idx) and draws no randomness. VC allocation is
     id-agnostic (VC id only), so this changes concurrency, not VC spread.
 
     extra: optional (write_lines, read_lines) tuple appended after the regular
@@ -200,13 +208,18 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
     node that owns a config tile, so a single node routes both classes."""
     os.makedirs(out_dir, exist_ok=True)
     reserved = (axi_len + 1) * (1 << axi_size)
-    id_base = (src_idx * ids_per_tile) % num_axi_ids
+    id_base = (src_idx * ids_per_initiator) % num_axi_ids
     write_lines, read_lines = [], []
     for seq, dst_cid in enumerate(dst_cids):
         local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
                                         n_nodes, region_bytes, reserved=reserved)
         addr = bases[dst_cid] + local_off
-        axid = (id_base + (seq % ids_per_tile)) % num_axi_ids
+        # Uniform over the tile's block, reuse allowed: axi_test.sv:233 draws
+        # ax_id over the whole space and axi_rand_master's UNIQUE_IDS defaults
+        # to 0 (:710), so same-id pairs (ordered) and cross-id pairs
+        # (reorderable) both occur. randrange(1) is 0, so a one-id block still
+        # emits id == src_idx.
+        axid = (id_base + id_rng.randrange(ids_per_initiator)) % num_axi_ids
         write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
         write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
         read_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=False)
@@ -901,6 +914,10 @@ def _check_tornado_guard(x_dim, y_dim):
 # emission branch below and _dst_for read the SAME list: a pattern present in one
 # and missing from the other used to fall through to hotspot and emit the wrong
 # traffic silently.
+# Separates the AXI-id stream from the destination stream, both seeded from
+# --seed. Any fixed non-zero value works; it only has to keep the two apart.
+_ID_STREAM_SALT = 0x5A17
+
 _DETERMINISTIC_PATTERNS = ("neighbor", "transpose", "bit_complement", "bit_reverse",
                            "shuffle", "bit_rotation", "tornado")
 
@@ -963,11 +980,13 @@ def main(argv=None):
                     help="AxSIZE for synthetic transactions (0..7; default 2 = 4 bytes)")
     ap.add_argument("--len", type=int, default=0, dest="burst_len",
                     help="AxLEN for synthetic transactions (0..255; default 0 = single beat)")
-    ap.add_argument("--ids-per-tile", type=int, default=1,
-                    help="Distinct AXI ids per tile (default 1 = one independent id "
-                         "per tile). >1 gives each tile a non-overlapping id block, "
-                         "round-robin within the tile, so more transactions stay "
-                         "outstanding (escape same-id ordering) to load the fabric. "
+    ap.add_argument("--ids-per-initiator", type=int, default=1,
+                    help="Distinct AXI ids one initiator draws from (default 1 = one "
+                         "id per tile, = src_idx). >1 draws uniformly at random from "
+                         "the initiator's id block, ids repeating, so a run carries "
+                         "same-id and cross-id pairs at once and more transactions "
+                         "stay outstanding. Blocks overlap across initiators once "
+                         "ids_per_initiator x n_nodes exceeds the id space. "
                          "Does not affect VC allocation (VC is id-agnostic).")
     a = ap.parse_args(argv)
 
@@ -976,10 +995,6 @@ def main(argv=None):
     n_nodes = len(nodes)
 
     widths = axi_widths()
-    if n_nodes * a.ids_per_tile > (1 << widths["id"]):
-        ap.error(f"--ids-per-tile {a.ids_per_tile} x {n_nodes} nodes exceeds the "
-                 f"{1 << widths['id']} AXI id space one initiator may drive "
-                 f"(constants.yaml INITIATOR_ID_WIDTH); per-tile id blocks would overlap")
     base_local = 0x1000
     # Auto-derived dst-tile window: n_nodes * transactions_per_node slots, each
     # `stride` bytes apart. stride matches alloc_unique_offset's own
@@ -989,6 +1004,10 @@ def main(argv=None):
     stride = max(_SLOT_STRIDE, burst_footprint)
     region_bytes = n_nodes * a.transactions_per_node * stride
     rng = _random_module.Random(a.seed)
+    # Ids draw from their own stream, so changing --ids-per-initiator moves the
+    # ids and nothing else. Sharing `rng` would shift every later destination
+    # too, and a multi-id run could not be compared against its one-id baseline.
+    id_rng = _random_module.Random(a.seed ^ _ID_STREAM_SALT)
     if a.pattern == "transpose":
         _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
     if a.pattern in ("bit_complement", "bit_reverse", "shuffle", "bit_rotation"):
@@ -997,7 +1016,7 @@ def main(argv=None):
         _check_tornado_guard(x_dim, y_dim)
     if a.pattern == "multicast":
         # One AXI id per node (R2 serializes a source's own multicasts on the
-        # merged B); --ids-per-tile does not apply here.
+        # merged B); --ids-per-initiator does not apply here.
         emit_multicast_pattern(a.out, nodes, x_dim, y_dim, bases, config_bases,
                                sizes, a.mcast_shape, a.transactions_per_node,
                                a.size, a.burst_len, widths["data"],
@@ -1032,7 +1051,8 @@ def main(argv=None):
         emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
                               n_nodes, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
-                              ids_per_tile=a.ids_per_tile, num_axi_ids=(1 << widths["id"]),
+                              ids_per_initiator=a.ids_per_initiator,
+                              num_axi_ids=(1 << widths["id"]), id_rng=id_rng,
                               bases=bases, extra=narrow_extra)
 
 

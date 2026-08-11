@@ -105,7 +105,7 @@ The generator already seeds `random.Random(a.seed)` at `:991`, so replay costs n
 - A pytest asserts both, plus that every emitted ID fits `INITIATOR_ID_WIDTH` — the endpoint's
   `a_mst_id_fits` assertion is the runtime backstop and it should never be what catches this.
 
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 5b — Raise the load
 
@@ -144,7 +144,7 @@ binding, hotspot slot overlap, and the `MAPPED` `axi_rand_slave` race in Stage 4
 triage rather than assuming a clean pass.
 
 **Success criteria**
-- `mesh_4x4_vc4_rob uniform_random` at `--ids-per-tile 4` and at the full 16 reaches a
+- `mesh_4x4_vc4_rob uniform_random` at `--ids-per-initiator 4` and at the full 16 reaches a
   non-vacuous PASS, or the failure is root-caused and either fixed or recorded in
   `docs/known-limitations.md` with the evidence that separates fabric from stimulus.
 - Same for `mesh_2x2_vc1`, where 4 nodes x 4 IDs fits the space exactly with no block overlap —

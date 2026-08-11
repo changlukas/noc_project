@@ -1,5 +1,6 @@
 import glob
 import os
+import random
 import re
 
 import pytest
@@ -91,7 +92,8 @@ def test_emit_file_master_node_format_and_partition(tmp_path):
     bases = {1: 0x100000000}
     g.emit_file_master_node(d, src_idx=0, dst_cids=[1, 1], n_nodes=16,
                             base_local=0x1000, region_bytes=0x40000,
-                            axi_size=5, axi_len=0, data_width=256, bases=bases)
+                            axi_size=5, axi_len=0, data_width=256,
+                            id_rng=random.Random(0), bases=bases)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert len(w) == 2
     for t in w:
@@ -110,7 +112,8 @@ def test_emit_file_master_node_addr_from_bases_dict(tmp_path):
     bases = {0x12: 0x12 * 0x100000000}
     g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
                             base_local=0x40, region_bytes=0x40000,
-                            axi_size=5, axi_len=0, data_width=256, bases=bases)
+                            axi_size=5, axi_len=0, data_width=256,
+                            id_rng=random.Random(0), bases=bases)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert w[0]["addr"] == 0x1200000040
 
@@ -120,7 +123,8 @@ def test_emit_file_master_node_arbitrary_base_from_bases_dict(tmp_path):
     bases = {0x12: 0x12 * 0x40000000}
     g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
                             base_local=0x40, region_bytes=0x40000,
-                            axi_size=5, axi_len=0, data_width=256, bases=bases)
+                            axi_size=5, axi_len=0, data_width=256,
+                            id_rng=random.Random(0), bases=bases)
     w = _parse_write(os.path.join(d, "write.txt"))
     assert w[0]["addr"] == 0x12 * 0x40000000 + 0x40
 
@@ -294,6 +298,55 @@ def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
     intervals.sort()
     for (s0, e0), (s1, e1) in zip(intervals, intervals[1:]):
         assert e0 <= s1, f"overlapping slots: [{s0:#x},{e0:#x}) vs [{s1:#x},{e1:#x})"
+
+
+def _gen_ids(tmp_path, tag, x_dim, y_dim, n_txn, extra_argv):
+    """Run main() on an x_dim*y_dim mesh, return {node index: [axi id, ...]} for
+    the pattern transactions only -- main() appends one narrow config-space probe
+    per node after them, which carries its own id."""
+    topo_path = tmp_path / f"{tag}.yaml"
+    topo_path.write_text(_uniform_topology_yaml(tag, x_dim, y_dim))
+    out = str(tmp_path / tag)
+    g.main(["--topology", str(topo_path), "--out", out,
+            "--pattern", "uniform_random", "--seed", "1",
+            "--transactions-per-node", str(n_txn),
+            "--size", "5", "--len", "0"] + extra_argv)
+    return {int(re.search(r"node(\d+)$", n).group(1)):
+            [t["id"] for t in _parse_write(os.path.join(n, "write.txt"))[:n_txn]]
+            for n in sorted(glob.glob(os.path.join(out, "node*")))}
+
+
+def test_ids_per_initiator_one_is_the_pre_random_stimulus(tmp_path):
+    """One id per initiator, = src_idx, and the random draw must not run: it
+    shares main()'s rng with the destination stream, so consuming from it would
+    move every address in a uniform_random run."""
+    ids = _gen_ids(tmp_path, "one", 4, 4, 4, ["--ids-per-initiator", "1"])
+    assert all(set(v) == {idx} for idx, v in ids.items())
+    dflt = _gen_ids(tmp_path, "dflt", 4, 4, 4, [])
+    assert ids == dflt
+
+
+def test_ids_per_initiator_multi_repeats_and_varies_per_node(tmp_path):
+    """axi_test.sv:233 draws ax_id at random and :710 leaves UNIQUE_IDS = 1'b0,
+    so one seed must give a repeated id (same-id ordering) and several distinct
+    ids (cross-id reordering) on every node, reproducibly."""
+    ids = _gen_ids(tmp_path, "multi", 4, 4, 16, ["--ids-per-initiator", "4"])
+    for idx, v in ids.items():
+        assert len(set(v)) > 1, f"node {idx} drew one id: {v}"
+        assert len(set(v)) < len(v), f"node {idx} never reused an id: {v}"
+    assert ids == _gen_ids(tmp_path, "multi_replay", 4, 4, 16,
+                           ["--ids-per-initiator", "4"])
+
+
+def test_ids_per_initiator_overlapping_blocks_fit_the_id_width(tmp_path):
+    """16 nodes x 4 ids overruns the 2**INITIATOR_ID_WIDTH space, so the blocks
+    overlap across tiles. That is legal -- responses route by the flit src_id,
+    not the AXI id (nsu/meta_buffer.hpp:21) -- but every emitted id must still
+    fit the width the endpoint's a_mst_id_fits assertion checks."""
+    ids = _gen_ids(tmp_path, "overlap", 4, 4, 16, ["--ids-per-initiator", "4"])
+    id_space = 1 << g.axi_widths()["id"]
+    assert 16 * 4 > id_space
+    assert all(0 <= i < id_space for v in ids.values() for i in v)
 
 
 # ---------------------------------------------------------------------------

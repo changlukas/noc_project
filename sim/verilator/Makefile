@@ -190,9 +190,10 @@ INJECTION_RATE  ?= 1.0
 INJECTION_COUNT ?= $(if $(filter 1 2,$(INJECTION_MODE)),200,4)
 HOTSPOT         ?= 5
 
-# Distinct AXI ids per tile (gen_test_patterns --ids-per-tile). Unset leaves the
-# generator default (1). >1 exercises cross-id B reordering (per-id interlock).
-IDS_PER_TILE    ?=
+# Distinct AXI ids one initiator draws from (gen_test_patterns
+# --ids-per-initiator). Unset leaves the generator default (1). >1 exercises
+# cross-id B reordering (per-id interlock).
+IDS_PER_INITIATOR ?=
 
 # NSU MetaBuffer depths. No ?= default: unset leaves the plusarg unpassed (see
 # the $(if) guards below) and the tb falls back to its
@@ -236,7 +237,7 @@ run-directed: $(TBTOP_EXE)
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
 	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
-	    $(if $(IDS_PER_TILE),--ids-per-tile $(IDS_PER_TILE))
+	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR))
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \

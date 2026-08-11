@@ -631,7 +631,7 @@ module user_node_endpoint #(
 
     // Mode-2 interlock state: B responses returned per AXI id, snooped off the
     // flat wires (same sampling pattern as txn_cnt_o). Per-id, not total: with
-    // stimulus ids_per_tile > 1, B responses reorder across ids; within one id
+    // stimulus ids_per_initiator > 1, B responses reorder across ids; within one id
     // AXI returns B in AW issue order, so a per-id count identifies the paired
     // write's B exactly.
     int unsigned b_returned[2**ID_WIDTH];
