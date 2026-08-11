@@ -155,6 +155,29 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // allocates a slot in Enabled mode. Measurement-only; no behaviour effect.
     std::size_t read_slot_hwm() const noexcept { return read_slot_hwm_; }
 
+    // Admission clause counts (spec SPEC 17 / Section 2.5): every ACCEPTED push
+    // lands in exactly one of the three branches, so the three sum to the
+    // accepted-push count for that direction. AW and AR are counted separately
+    // because they answer different questions -- the R-RoB high-water mark moves
+    // with the AR split alone, and the AR path classifies only in
+    // RobMode::Enabled (Disabled reads take the single-outstanding interlock and
+    // are counted nowhere). Measurement-only; no behaviour effect.
+    std::size_t aw_idle_bypass_count() const noexcept { return aw_idle_bypass_count_; }
+    std::size_t aw_same_dest_bypass_count() const noexcept { return aw_same_dest_bypass_count_; }
+    std::size_t aw_fallback_alloc_count() const noexcept { return aw_fallback_alloc_count_; }
+    std::size_t ar_idle_bypass_count() const noexcept { return ar_idle_bypass_count_; }
+    std::size_t ar_same_dest_bypass_count() const noexcept { return ar_same_dest_bypass_count_; }
+    std::size_t ar_fallback_alloc_count() const noexcept { return ar_fallback_alloc_count_; }
+
+    // Deepest any single per-id order list got, over both directions -- the one
+    // number max_txns_per_id_ bounds. Measurement-only; no behaviour effect.
+    std::size_t order_list_hwm() const noexcept { return order_list_hwm_; }
+
+    // Peak occupancy of each shared outstanding pool -- what outstanding_depth_
+    // bounds. Measurement-only; no behaviour effect.
+    std::size_t write_txns_hwm() const noexcept { return write_txns_hwm_; }
+    std::size_t read_txns_hwm() const noexcept { return read_txns_hwm_; }
+
   private:
     // Drain ready order-list heads into the committed queues (the pop-side loops,
     // reused by the direct-forward bypass arms). Stops at a bypassed head, which
@@ -288,6 +311,20 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // High-water mark backing read_slot_hwm(). See getter for details.
     std::size_t read_slot_hwm_ = 0;
 
+    // Admission telemetry backing the count / hwm getters above. See those for
+    // details. Written only on the accepted-push tail of push_aw / push_ar, read
+    // by nothing inside this class: no admission, ordering or timing decision
+    // may depend on them.
+    std::size_t aw_idle_bypass_count_ = 0;
+    std::size_t aw_same_dest_bypass_count_ = 0;
+    std::size_t aw_fallback_alloc_count_ = 0;
+    std::size_t ar_idle_bypass_count_ = 0;
+    std::size_t ar_same_dest_bypass_count_ = 0;
+    std::size_t ar_fallback_alloc_count_ = 0;
+    std::size_t order_list_hwm_ = 0;
+    std::size_t write_txns_hwm_ = 0;
+    std::size_t read_txns_hwm_ = 0;
+
     // Narrow-class lane re-anchor for read beats that never touch
     // read_entries_ -- Enabled-mode bypass and Disabled/RoBless reads. Both
     // stream FIFO-order per id (AXI4 IHI 0022 §A5.3), so a per-id FIFO of the
@@ -394,6 +431,20 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob, collective});
     ++write_txns_;
     ++w_bursts_owed_;
+    // Telemetry tail, past every early return: needs_rob / fallen_back above are
+    // trial values and the push can still be refused after them, so counting
+    // there would count pushes that never happened. (empty, needs_rob) names the
+    // branch that ran -- empty: idle-ID bypass; !empty && !needs_rob:
+    // same-destination bypass; needs_rob: fall-back allocate.
+    if (empty) {
+        ++aw_idle_bypass_count_;
+    } else if (needs_rob) {
+        ++aw_fallback_alloc_count_;
+    } else {
+        ++aw_same_dest_bypass_count_;
+    }
+    order_list_hwm_ = std::max(order_list_hwm_, write_order_by_id_[b.id].size());
+    write_txns_hwm_ = std::max(write_txns_hwm_, write_txns_);
     return true;
 }
 
@@ -483,6 +534,16 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         read_order_by_id_[b.id].push_back(
             {static_cast<uint8_t>(base), static_cast<uint16_t>(n), needs_rob});
         ++read_txns_;
+        // Telemetry tail; same reasoning as push_aw's.
+        if (empty) {
+            ++ar_idle_bypass_count_;
+        } else if (needs_rob) {
+            ++ar_fallback_alloc_count_;
+        } else {
+            ++ar_same_dest_bypass_count_;
+        }
+        order_list_hwm_ = std::max(order_list_hwm_, read_order_by_id_[b.id].size());
+        read_txns_hwm_ = std::max(read_txns_hwm_, read_txns_);
         return true;
     }
     auto t = sam_.translate(b.addr);
@@ -495,6 +556,9 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     }
     read_outstanding_[b.id] = true;
     ++read_txns_;
+    // Disabled reads run the single-outstanding interlock instead of the three
+    // admission branches, so there is no clause to count here -- only the pool.
+    read_txns_hwm_ = std::max(read_txns_hwm_, read_txns_);
     return true;
 }
 

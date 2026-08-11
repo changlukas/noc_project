@@ -272,8 +272,10 @@ transactions per node against a fast slave; read PASS and latency, ignore Util;
 throughput questions belong to the mode-1 rate sweep). Latency tracks hop
 distance: on a 4x4 mesh the `neighbor` pattern shows three tiers, interior 2
 hops, one-axis wrap 4, corner 6, because the mesh has no torus links and the
-wrap routes back across the array. The `[HWM]` lines report one high-water
-mark: the per-node R-RoB slot peak from `cmodel_nmu_read_slot_hwm`.
+wrap routes back across the array. The `[HWM]` lines report the per-node NMU
+sizing telemetry: the R-RoB slot peak from `cmodel_nmu_read_slot_hwm`, plus the
+order-list peak, the two shared outstanding-pool peaks and the admission clause
+split (AW and AR separately) from `cmodel_nmu_admission_telemetry`.
 
 ## Topology YAML to generator to testbench
 

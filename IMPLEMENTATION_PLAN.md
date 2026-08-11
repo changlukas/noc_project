@@ -177,14 +177,39 @@ AR into exactly one of three branches (`nmu-spec.md:364`, priority order):
 | 2 | same-destination bypass — dst and class match this id's previous push, `fixed_vc` pins the streak to one VC so the fabric cannot split it (`vc_allocator.hpp:11-20`, `trade-off.md:89-96`) | none | **less often**: spreading a node's traffic over more ids shortens each id's same-dest run, and under `uniform_random` the chance the next same-id push repeats a destination falls as ids rise |
 | 3 | sticky fall-back | one | **more often**, as the mirror of 2 |
 
-So id count pushes clause 1 and clause 3 up together and clause 2 down, and the mark follows
-whichever wins. The count-per-id is the variable that decides it — 16 per id at
-`INJECTION_COUNT = 64`, 32 per id at 128. That is a hypothesis with one measurement each side of
-the crossover, not a result.
+### Measured — and clause 2 is not part of it
 
-Settle it by measurement, not argument: the clause-1/2/3 admission counts per run are not
-exposed anywhere today. Counting them is the same class of work as 5d's telemetry and belongs in
-the same change — a run that reports its own clause split explains its own high-water mark.
+The telemetry landed and the first numbers refute the paragraph above. Per-node AW split:
+
+| run | idle | same_dest | alloc | `read_slot_hwm` | `order_list_hwm` | `write_txns_hwm` |
+|---|---|---|---|---|---|---|
+| `4x4_vc1 neighbor`, 1 id | 1 | **63** | **0** | **0** | 26 | 27 |
+| `4x4_vc4_rob uniform_random`, 1 id | 6 | **0** | 50 | 25 | 22 | 23 |
+| same, 4 ids | 15 | **1** | 40 | 22 | 11 | 22 |
+| same at count 128, 1 id | 13 | **0** | 100 | 26 | 22 | 22 |
+| same at count 128, 4 ids | 33 | **3** | 77 | 26 | 11 | 22 |
+
+**Clause 2 cannot be falling as ids rise, because under `uniform_random` it is already zero.** A
+fresh destination is drawn per transaction out of 16, so the chance the next same-id push repeats
+one is 1/16. The live trade is clause 1 against clause 3 alone: idle bypasses rise with id count
+(6 -> 15, 13 -> 33) and allocations fall to match (50 -> 40, 100 -> 77).
+
+That leaves the original question open rather than answered. Fewer allocations should mean a
+lower mark, and at count 64 it is (25 -> 22), but at 128 it is not (26 -> 26 here, 58 -> 75 taken
+as the max across nodes). Node-level and max-across-nodes disagree, so the next measurement is
+the clause split **for the node that owns the maximum**, not for node 0 or node 15.
+
+`neighbor` is the mirror image and explains why every neighbor run has reported a zero mark: 63
+of 64 AWs take clause 2, nothing allocates, and the RoB is never used.
+
+### What the pools say, which was not the question but matters more
+
+`4x4_vc1 neighbor` reaches `write_txns_hwm = 27` against `NMU_OUTSTANDING_DEPTH = 32` and
+`order_list_hwm = 26` against `NMU_MAX_TXNS_PER_ID = 32` — 84% and 81% — while its RoB sits at
+zero. The two pools are close to binding on the plainest pattern in the suite, and the RoB, which
+this stage was scoped around, is idle there.
+
+5d's sweep order follows from that: `OUTSTANDING_DEPTH` first.
 
 **Success criteria**
 - `mesh_4x4_vc4_rob uniform_random` at `--ids-per-initiator 4` and at the full 16 reaches a

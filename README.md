@@ -96,7 +96,9 @@ On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
 clean, non-vacuous` to the console. The full log at
 `sim/verilator/output/<run-tag>/run.log` ends with `PASS: all N nodes
 done, non-vacuous` and carries per-node `[Monitor nodeN.master]`
-latency/bandwidth lines and `[HWM]` R-RoB slot high-water marks.
+latency/bandwidth lines and `[HWM]` NMU sizing telemetry (RoB slot,
+order-list and outstanding-pool high-water marks plus the admission clause
+split).
 
 ### Injection modes
 

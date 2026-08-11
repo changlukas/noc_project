@@ -1472,6 +1472,68 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
         << "the idle-ID bypass re-enables bypass once the id's order list fully drains";
 }
 
+// === Admission telemetry (measurement-only counters) ===
+//
+// Pins each counter to the branch it is supposed to count, so a counter wired to
+// the wrong arm of the push_aw / push_ar chain fails here rather than silently
+// producing a plausible-looking clause split in a co-sim run. The write trace is
+// the spec Section 2.5 worked example (SPEC 17) up to AW#4, the one that
+// allocates although its destination matches AW#3. AW#5 (list drained, branch 1
+// again) is not repeated: RobSameDestBypass.DestChangeTriggersStickyFallback
+// already proves the drain reopens the idle-ID bypass, and the counters read the
+// same branch variables.
+TEST(RobAdmissionTelemetry, ClauseCountsFollowTheSpecTraceBranches) {
+    SCENARIO(
+        "Rob Enabled: the AW clause counters split the Section 2.5 trace 1/1/2 across "
+        "{idle-ID bypass, same-destination bypass, fall-back allocate}, an AR same-dest streak "
+        "splits 1/2/0, and the two directions never cross-count");
+    ChannelModel noc(16, 16);
+    ReqCapture w_cap, ar_cap;
+    Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
+    Depacketize depkt(noc.rsp_in(), 16, 16);
+    Rob rob(pkt, depkt, RobMode::Enabled, legacy_sam());
+
+    // Section 2.5: AW#1 dst 2 (branch 1), AW#2 dst 2 (branch 2), AW#3 dst 5
+    // (branch 3, sticky), AW#4 dst 5 (branch 3 despite the dest match).
+    const uint8_t w_id = 3;
+    const uint64_t dst_2 = 0x100000000ull * 2;
+    const uint64_t dst_5 = 0x100000000ull * 5;
+    for (uint64_t addr : {dst_2, dst_2, dst_5, dst_5}) {
+        ASSERT_TRUE(rob.push_aw(make_aw(w_id, addr)));
+    }
+    EXPECT_EQ(rob.aw_idle_bypass_count(), 1u) << "only AW#1 found the id idle";
+    EXPECT_EQ(rob.aw_same_dest_bypass_count(), 1u) << "only AW#2 matched a non-sticky dest";
+    EXPECT_EQ(rob.aw_fallback_alloc_count(), 2u) << "AW#3 by dest change, AW#4 by the sticky flag";
+    EXPECT_EQ(rob.aw_idle_bypass_count() + rob.aw_same_dest_bypass_count() +
+                  rob.aw_fallback_alloc_count(),
+              4u)
+        << "the three branches partition the accepted AWs, none counted twice or dropped";
+    EXPECT_EQ(rob.ar_idle_bypass_count() + rob.ar_same_dest_bypass_count() +
+                  rob.ar_fallback_alloc_count(),
+              0u)
+        << "AW pushes must not touch the AR counters";
+
+    // A same-dest AR streak on its own id: branch 1 once, then branch 2.
+    const uint8_t r_id = 7;
+    for (int i = 0; i < 3; ++i) {
+        ASSERT_TRUE(rob.push_ar(make_ar(r_id, dst_2)));
+        ar_cap.pop();
+    }
+    EXPECT_EQ(rob.ar_idle_bypass_count(), 1u);
+    EXPECT_EQ(rob.ar_same_dest_bypass_count(), 2u);
+    EXPECT_EQ(rob.ar_fallback_alloc_count(), 0u)
+        << "an unbroken same-dest streak allocates nothing";
+    EXPECT_EQ(rob.aw_fallback_alloc_count(), 2u) << "AR pushes must not touch the AW counters";
+    EXPECT_EQ(rob.read_slot_hwm(), 0u) << "no AR allocated, so the R-RoB mark stays put";
+
+    // The order-list mark is the deepest single list over both directions (4 writes
+    // vs 3 reads); the pool marks are per direction. Nothing retired, so each mark
+    // equals its current occupancy.
+    EXPECT_EQ(rob.order_list_hwm(), 4u);
+    EXPECT_EQ(rob.write_txns_hwm(), 4u);
+    EXPECT_EQ(rob.read_txns_hwm(), 3u);
+}
+
 TEST(RobSameDestBypass, MaxTxnsPerIdStillBoundsBypassedEntries) {
     SCENARIO("Rob Enabled: max_txns_per_id gates a same-id same-dest bypass streak too");
     ChannelModel noc(16, 16);

@@ -311,6 +311,7 @@ The SV wrap holds no behavior. Each posedge it runs the 3-call discipline: `cmod
 | cmodel_nmu_tick | `(ctx)` | One full model cycle. One call = one clock edge. |
 | cmodel_nmu_get_outputs | `(ctx, AXI response args, tx_req_valid + flit, rx_rsp_ready, tx_dat_valid + flit, rx_dat_crdvalid)` | Copies the output latch. bresp / rresp masked with 2'b11. |
 | cmodel_nmu_read_slot_hwm | `unsigned int (ctx)` | Telemetry: peak R-RoB slot occupancy. 0 when the handle is invalid or the R RoB is Disabled. Printed per node at testbench exit. |
+| cmodel_nmu_admission_telemetry | `void (ctx, out aw_idle_bypass, aw_same_dest_bypass, aw_fallback_alloc, ar_idle_bypass, ar_same_dest_bypass, ar_fallback_alloc, order_list_hwm, write_txns_hwm, read_txns_hwm)` | Telemetry: the SPEC 17 admission clause counts over accepted pushes (AW and AR counted separately, AR only in RobMode::Enabled), the deepest per-ID order list and the two shared-pool peaks. All outputs 0 when the handle is invalid. Printed per node at testbench exit on the same `[HWM]` line. |
 
 An invalid handle raises a categorized model error which the testbench error poll turns into `$fatal`.
 
