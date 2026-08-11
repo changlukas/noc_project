@@ -42,7 +42,8 @@ PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
 _TOPO   := $(TB:tb_%=%)
-_VALID_PATTERNS := neighbor transpose uniform_random hotspot beat_exact multicast
+_VALID_PATTERNS := neighbor transpose uniform_random hotspot beat_exact multicast \
+                   bit_complement bit_reverse shuffle bit_rotation tornado
 ifeq ($(filter $(PATTERN),$(_VALID_PATTERNS)),)
 $(error PATTERN must be one of: $(_VALID_PATTERNS) (got '$(PATTERN)'))
 endif

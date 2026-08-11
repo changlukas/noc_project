@@ -540,3 +540,50 @@ def test_noc_egress_aperture_sits_above_every_window():
     assert base & (base - 1) == 0          # power of two
     # The aperture is [base, 2*base), so the whole map offset into it still fits.
     assert top <= base
+
+
+@pytest.mark.parametrize("pattern", ["bit_complement", "bit_reverse", "shuffle",
+                                     "bit_rotation", "tornado"])
+def test_permutation_patterns_are_bijections(pattern):
+    """A permutation traffic pattern must map the node set onto itself: every
+    node sends exactly one stream and receives exactly one. A formula that is
+    not a bijection silently overloads some nodes and starves others, which
+    reads as a fabric result rather than a stimulus bug."""
+    nodes = [(x, y) for y in range(4) for x in range(4)]
+    dsts = [g._dst_for(pattern, x, y, 4, 4) for (x, y) in nodes]
+    assert sorted(dsts) == sorted(nodes)
+
+
+def test_permutation_patterns_match_booksim():
+    """Spot values against the booksim2 formulas the ports cite, on a 4x4 whose
+    row-major index is idx = y*4 + x."""
+    # bitcomp: ~idx & 15. idx(1,2) = 9 -> 6 -> (2,1)
+    assert g._dst_for("bit_complement", 1, 2, 4, 4) == (2, 1)
+    # bitrev: idx 9 = 0b1001 reversed is 0b1001 -> itself
+    assert g._dst_for("bit_reverse", 1, 2, 4, 4) == (1, 2)
+    # shuffle: rotate left. idx 9 -> 0b0011 = 3 -> (3,0)
+    assert g._dst_for("shuffle", 1, 2, 4, 4) == (3, 0)
+    # bit_rotation: rotate right. idx 9 odd -> 9//2 + 8 = 12 -> (0,3)
+    assert g._dst_for("bit_rotation", 1, 2, 4, 4) == (0, 3)
+    # tornado at k=4: shift (4+1)//2 - 1 = 1 in both dimensions
+    assert g._dst_for("tornado", 1, 2, 4, 4) == (2, 3)
+
+
+def test_every_deterministic_pattern_is_dispatched():
+    """The emission branch and _dst_for read one list. A pattern in _dst_for but
+    missing from that list used to fall through to hotspot and emit the wrong
+    traffic without saying so."""
+    for pattern in g._DETERMINISTIC_PATTERNS:
+        assert g._dst_for(pattern, 1, 2, 4, 4) is not None
+
+
+def test_bit_permutation_guard_rejects_a_non_power_of_two_mesh():
+    """Booksim BitPermutationTrafficPattern exit(-1)s unless the node count is a
+    power of two -- a permutation of the id bits is a bijection only then."""
+    with pytest.raises(SystemExit, match="power-of-two node count"):
+        g._check_bit_permutation_guard("shuffle", 3, 2)
+
+
+def test_tornado_guard_rejects_a_non_uniform_radix():
+    with pytest.raises(SystemExit, match="uniform radix"):
+        g._check_tornado_guard(4, 2)

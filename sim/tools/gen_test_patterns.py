@@ -321,6 +321,97 @@ def transpose_dst(x, y):
     return y, x
 
 
+# Bit and digit permutations operate on booksim's linear node id, which is
+# row-major (idx = y * x_dim + x) -- the same index this generator's node list
+# already carries. _linear / _coords are the two conversions, spelled out once so
+# each pattern below reads like its source.
+def _linear(x, y, x_dim):
+    return y * x_dim + x
+
+
+def _coords(idx, x_dim):
+    return idx % x_dim, idx // x_dim
+
+
+def bit_complement_dst(x, y, x_dim, y_dim):
+    """Booksim2 BitCompTrafficPattern::dest (traffic.cpp:220-225): ~src, masked.
+
+    Every node pairs with the one diagonally opposite, so every packet crosses
+    the full diameter in both dimensions. Table 7.2 of On-Chip Networks 2e puts
+    it at 0.25 of capacity on an 8x8 with XY routing.
+
+    Caller MUST have validated the node count is a power of two
+    (_check_bit_permutation_guard).
+    """
+    mask = x_dim * y_dim - 1
+    return _coords(~_linear(x, y, x_dim) & mask, x_dim)
+
+
+def bit_reverse_dst(x, y, x_dim, y_dim):
+    """Booksim2 BitRevTrafficPattern::dest (traffic.cpp:257-266): reverse the id bits.
+
+    The tightest of the standard permutations at 0.14 on an 8x8, alongside
+    transpose -- it concentrates traffic on the few nodes whose id is its own
+    reverse.
+
+    Caller MUST have validated the node count is a power of two.
+    """
+    nodes = x_dim * y_dim
+    src = _linear(x, y, x_dim)
+    result = 0
+    n = nodes
+    while n > 1:
+        result = (result << 1) | (src & 1)
+        src >>= 1
+        n >>= 1
+    return _coords(result, x_dim)
+
+
+def shuffle_dst(x, y, x_dim, y_dim):
+    """Booksim2 ShuffleTrafficPattern::dest (traffic.cpp:275-280): rotate the id left.
+
+    0.25 on an 8x8. FlooNoC's gen_jobs.py writes the same permutation as a
+    halves split (util/gen_jobs.py, traffic_type "shuffle").
+
+    Caller MUST have validated the node count is a power of two.
+    """
+    nodes = x_dim * y_dim
+    shifted = _linear(x, y, x_dim) << 1
+    return _coords((shifted & (nodes - 1)) | bool(shifted & nodes), x_dim)
+
+
+def bit_rotation_dst(x, y, x_dim, y_dim):
+    """FlooNoC util/gen_jobs.py traffic_type "bit_rotation": rotate the id right.
+
+    The inverse of shuffle, and the one member of the standard permutation set
+    booksim2 does not carry -- hence the different source.
+
+    Caller MUST have validated the node count is a power of two.
+    """
+    nodes = x_dim * y_dim
+    src = _linear(x, y, x_dim)
+    dst = src // 2 if src % 2 == 0 else src // 2 + nodes // 2
+    return _coords(dst, x_dim)
+
+
+def tornado_dst(x, y, x_dim, y_dim):
+    """Booksim2 TornadoTrafficPattern::dest (traffic.cpp:295-308) at xr=1.
+
+    Each coordinate advances by ceil(k/2) - 1, so every packet travels just under
+    half the ring in both dimensions. This is the middle of the band the set
+    covers -- 0.33 on an 8x8 -- which nothing else in the suite occupies.
+
+    Caller MUST have validated a uniform radix (_check_tornado_guard); a mesh
+    whose dimensions differ has no single k.
+
+    Booksim shifts every dimension (its dest() loops over _n); FlooNoC's
+    gen_jobs.py shifts X only. This follows booksim, like the rest of the suite.
+    """
+    k = x_dim
+    shift = (k + 1) // 2 - 1
+    return (x + shift) % k, (y + shift) % k
+
+
 def uniform_random_dsts(src_node, n_nodes, n_txn, rng, exclude_self=False):
     """Booksim2 UniformRandomTrafficPattern::dest (traffic.cpp:386-390): uniform random node.
 
@@ -779,9 +870,40 @@ def _check_transpose_guard(x_dim, y_dim):
         )
 
 
+def _check_bit_permutation_guard(pattern, x_dim, y_dim):
+    """Booksim2 BitPermutationTrafficPattern (traffic.cpp:207-215) exit(-1)s unless
+    the node count is a power of two: a permutation of the id bits is only a
+    bijection over nodes when every bit pattern names a node."""
+    nodes = x_dim * y_dim
+    if nodes == 0 or (nodes & (nodes - 1)) != 0:
+        sys.exit(
+            f"ERROR: {pattern} pattern requires a power-of-two node count "
+            f"(booksim BitPermutationTrafficPattern); got {x_dim}x{y_dim} = {nodes}."
+        )
+
+
+def _check_tornado_guard(x_dim, y_dim):
+    """Tornado shifts every coordinate by the same ceil(k/2)-1, so the mesh needs
+    one radix. Booksim states k as a parameter of a k-ary n-cube; a mesh whose
+    dimensions differ has no single k to state."""
+    if x_dim != y_dim:
+        sys.exit(
+            f"ERROR: tornado pattern requires a uniform radix (x_dim == y_dim); "
+            f"got {x_dim}x{y_dim}."
+        )
+
+
 # ---------------------------------------------------------------------------
 # Pattern dispatch
 # ---------------------------------------------------------------------------
+
+# Patterns whose destination is a pure function of the source coordinates. The
+# emission branch below and _dst_for read the SAME list: a pattern present in one
+# and missing from the other used to fall through to hotspot and emit the wrong
+# traffic silently.
+_DETERMINISTIC_PATTERNS = ("neighbor", "transpose", "bit_complement", "bit_reverse",
+                           "shuffle", "bit_rotation", "tornado")
+
 
 def _dst_for(pattern, x, y, x_dim, y_dim):
     """Return (dst_x, dst_y) for the given pattern and source coordinates (deterministic)."""
@@ -789,6 +911,16 @@ def _dst_for(pattern, x, y, x_dim, y_dim):
         return neighbor_dst(x, y, x_dim, y_dim)
     if pattern == "transpose":
         return transpose_dst(x, y)
+    if pattern == "bit_complement":
+        return bit_complement_dst(x, y, x_dim, y_dim)
+    if pattern == "bit_reverse":
+        return bit_reverse_dst(x, y, x_dim, y_dim)
+    if pattern == "shuffle":
+        return shuffle_dst(x, y, x_dim, y_dim)
+    if pattern == "bit_rotation":
+        return bit_rotation_dst(x, y, x_dim, y_dim)
+    if pattern == "tornado":
+        return tornado_dst(x, y, x_dim, y_dim)
     raise ValueError(f"Unknown pattern: {pattern!r} (use per-packet sampler for random patterns)")
 
 
@@ -801,8 +933,8 @@ def main(argv=None):
         description="Emit per-node file_master write.txt/read.txt for a traffic pattern."
     )
     ap.add_argument("--pattern", required=True,
-                    choices=["neighbor", "transpose", "uniform_random", "hotspot", "beat_exact",
-                             "multicast"],
+                    choices=list(_DETERMINISTIC_PATTERNS) + ["uniform_random", "hotspot",
+                                                             "beat_exact", "multicast"],
                     help="Traffic pattern")
     ap.add_argument("--mcast-shape", choices=list(_MCAST_SHAPES), default="row",
                     help="Multicast mask shape (multicast pattern only). One shape "
@@ -859,6 +991,10 @@ def main(argv=None):
     rng = _random_module.Random(a.seed)
     if a.pattern == "transpose":
         _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
+    if a.pattern in ("bit_complement", "bit_reverse", "shuffle", "bit_rotation"):
+        _check_bit_permutation_guard(a.pattern, x_dim, y_dim)
+    if a.pattern == "tornado":
+        _check_tornado_guard(x_dim, y_dim)
     if a.pattern == "multicast":
         # One AXI id per node (R2 serializes a source's own multicasts on the
         # merged B); --ids-per-tile does not apply here.
@@ -880,7 +1016,7 @@ def main(argv=None):
             emit_beat_exact_node(os.path.join(a.out, f"node{idx}"), idx, dst_base,
                                  widths["data"], extra=narrow_extra, base_local=base_local)
             continue
-        if a.pattern in ("neighbor", "transpose"):
+        if a.pattern in _DETERMINISTIC_PATTERNS:
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
             dst_cids = [coord_id(dst_x, dst_y)] * a.transactions_per_node
         elif a.pattern == "uniform_random":
