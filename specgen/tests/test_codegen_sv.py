@@ -202,14 +202,13 @@ class TestSvSignalsEmit:
 # ---------------------------------------------------------------------------
 
 class TestCheckModeWithSv:
-    def setup_method(self):
-        """Ensure all SV files are freshly generated before each check test."""
-        for domain in ("packet", "signals", "params"):
-            run_codegen("--target", "sv", "--domain", domain, "--out", str(RTL_PKG_DIR))
-        # Also ensure C++ headers are fresh.
-        from tests.test_codegen import INCLUDE_DIR
-        for domain in ("packet", "signals", "params"):
-            run_codegen("--target", "cpp", "--domain", domain, "--out", str(INCLUDE_DIR))
+    # No setup regenerating into specgen/generated/. It used to, and that did
+    # two things wrong: it restamped six tracked files on every pytest run, so
+    # a plain `make pytest` left the working tree dirty with nothing but new
+    # timestamps; and it made these tests tautological, since regenerating and
+    # then asserting that a regen matches cannot fail. --check compares the
+    # committed tree against a fresh regen in a temp dir, so the committed tree
+    # is exactly what it should be reading.
 
     def test_check_exits_zero_when_sv_clean(self):
         """--check must exit 0 when all SV files match fresh regen."""

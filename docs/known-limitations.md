@@ -69,7 +69,8 @@ express a bus of 32 lanes or more. Outside `beat_exact`, the co-sim default beat
 | ctest discovery lists go stale in an incremental build tree and inflate the reported count | 665 tests registered against 705 present in the binaries after successive builds over each other. A pass count from a tree that was not wiped is not evidence |
 | The AWUSER collective field layout is spelled with raw bit numbers in three places with no shared constant | `axi/types.hpp`, `sim/tools/gen_test_patterns.py`, `sim/tb/user_node_endpoint.sv`. The `static_assert` in `types.hpp` pins the width sum but not the offsets, so an offset change desynchronises all three silently. The SV copy also hardcodes `2'd1` where `ni_flit_pkg::COLLECTIVE_OP_MULTICAST` exists |
 | `axi_bw_monitor.sv` carries a two-line local edit | upstream it or wrap it |
-| The specgen pytest suite writes into the tree | it rewrites committed banners instead of using a temp dir |
+| The specgen pytest suite writes into the tree | `test_codegen.py` and `test_codegen_sv.py` each regenerate into `specgen/generated/` rather than a temp dir, so `make pytest` leaves six tracked files dirty with nothing but new timestamps. One such fixture is gone (`TestCheckModeWithSv.setup_method`, which also made its own tests tautological: regenerate, then assert a regen matches). Each file still dirties three. **This is the one thing standing between the repo and "build + sim + clean returns to what git tracks"** |
+| Two specgen golden tests fail on column alignment | `emitted cpp output differs from spec-derived golden`, `WIDTH     = 8;` against `WIDTH           = 8;`. Adding `AXI_INITIATOR_ID_WIDTH` in Stage 2c lengthened the longest constant name, so the emitter's alignment column moved and the checked-in golden was never regenerated. Cosmetic in output, but it holds `make pytest` red |
 | specgen `examples/quickstart` printf column padding | misaligned since the S0 rename, cosmetic |
 
 ## Simulator flows
