@@ -19,7 +19,7 @@ COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-yamlcpp build-verilator test \
         pytest \
-        clean clean-cmodel clean-verilator clean-vcs clean-specgen-cache
+        clean clean-cmodel clean-verilator clean-vcs clean-generated
 
 help:
 	@echo "Build (from repo root):"
@@ -39,7 +39,7 @@ help:
 	@echo "  make clean-cmodel           build/cmodel/"
 	@echo "  make clean-verilator        build/verilator/ + sim/verilator/output/"
 	@echo "  make clean-vcs              build/vcs/ + sim/vcs/output/ + Verdi droppings"
-	@echo "  make clean-specgen-cache    specgen __pycache__/"
+	@echo "  make clean-generated        generated SV/stimulus + __pycache__"
 
 # --- build ---
 
@@ -151,13 +151,28 @@ sim sim-injection-sweep:
 
 # --- clean ---
 
-clean: clean-cmodel clean-verilator clean-vcs clean-specgen-cache
+# After clean the tree must hold nothing but what git tracks, apart from the
+# three files that are deliberately per-host and gitignored: local.mk,
+# docs/backlog.md and .vscode/. Anything else surviving is a bug in here.
+#
+# The generated SV matters most. tb_top_<topo>.sv, noc_fabric_<topo>.sv and
+# filelist_<topo>.f used to survive clean, which is why every co-sim script
+# carried its own `rm -f` preamble: a stale filelist holding paths from another
+# host, or a tb_top from another topology, silently builds the wrong thing.
+clean: clean-cmodel clean-verilator clean-vcs clean-generated
 	rm -rf $(BUILD_ROOT)
-	rm -rf $(COSIM_VERILATOR)/../test_patterns/stim_*
 	rm -f master_wrap_read_dump*.txt
 
 clean-cmodel:
 	rm -rf $(CMODEL_BUILD)
+	rm -rf Testing
+
+# Generated sources and stimulus, plus every __pycache__ the generators leave.
+clean-generated:
+	rm -f sim/tb/tb_top_*.sv src/sv/noc_fabric_*.sv sim/filelist_*.f
+	rm -rf sim/test_patterns
+	find . -type d -name __pycache__ -prune -exec rm -rf {} +
+	find . -type d -name .pytest_cache -prune -exec rm -rf {} +
 
 clean-verilator:
 	$(MAKE) -C $(COSIM_VERILATOR) clean
@@ -165,5 +180,3 @@ clean-verilator:
 clean-vcs:
 	$(MAKE) -C sim/vcs clean
 
-clean-specgen-cache:
-	find specgen -type d -name __pycache__ -prune -exec rm -rf {} +
