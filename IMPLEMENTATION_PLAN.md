@@ -270,7 +270,46 @@ tests a limiter already known to be live.
   written where the value lives (`specgen/source/constants.yaml`) and the
   `docs/known-limitations.md` "never-swept placeholder" row retired.
 
-**Status**: Not Started
+**Measured** on `mesh_4x4_vc4_rob all_to_all`, one id per initiator, count 64. Every point
+reaches a non-vacuous PASS — no depth produced an error or a lost transaction, which is what the
+spec claims (overflow stalls).
+
+| `OUTSTANDING_DEPTH` | 32 | 16 | 8 | 4 | 2 | 1 |
+|---|---|---|---|---|---|---|
+| `write_txns_hwm` | 32 | 16 | 8 | 4 | 2 | 1 |
+| `order_list_hwm` | 32 | 16 | 8 | 4 | 2 | 1 |
+
+| `MAX_TXNS_PER_ID` (pool 32) | 32 | 16 | 8 | 4 | 2 | 1 |
+|---|---|---|---|---|---|---|
+| `order_list_hwm` | 32 | 16 | 8 | 4 | 2 | 1 |
+| `write_txns_hwm` | 32 | **17** | **9** | **5** | **3** | **2** |
+
+Two results.
+
+**The pool holds exactly one more than the per-ID list, at every point.** That is the release
+asymmetry written into 5d above, now measured rather than argued: `retire_b` frees the pool slot
+when the fabric delivers the response, `pop_b_staged` frees the list entry when the master takes
+it, so one transaction sits in the pool without a list entry. `MAX_TXNS_PER_ID` is therefore
+reachable at any pool depth, and the "it can never bind" reading was wrong for this reason.
+
+**At one id the two parameters are the same knob.** The upper table shows the list following the
+pool exactly, because a single id's list is the pool. They separate only with several ids, which
+is the case the sweep still has to cover.
+
+### `read_slot_hwm` does not mean what its name suggests
+
+`read_free_space` (`rob.hpp:141-144`) returns `r_rob_depth_ - 1 - highest_set(alloc_read_)`, so
+`read_slot_hwm` is the peak **allocation frontier** — the highest live slot index — not the count
+of simultaneously occupied slots. It reads 63 on a run whose read outstanding never exceeds 26,
+which is not a contradiction: allocation bumps forward and only reclaims from the top, so a freed
+slot below the frontier does not pull it back.
+
+For sizing the RoB that is the number that matters, since the frontier is the depth that has to
+exist. For "how full did it get" it is an overestimate, and every earlier statement in this plan
+that read it as occupancy — including the Stage 5b direction analysis the whole of 5c was scoped
+around — was reading it as something it is not.
+
+**Status**: Pools swept; RoB depths and the multi-id case remain.
 
 ---
 
