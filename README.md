@@ -81,7 +81,7 @@ On Windows, invoke Python scripts with `py -3` instead of `python3`.
 | var | values |
 |---|---|
 | `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Append `_rob` for the reorder-buffer variant. Every node gets a 1 MB memory tile and a 4 KB config tile |
-| `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `hotspot` (`HOTSPOT=` names the target node), `beat_exact` (per-lane-distinct bytes + walking WSTRB, DPI word-boundary check), `multicast` (collective write, shape from `MCAST_SHAPE`) |
+| `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `all_to_all` (each node walks every other node in turn, so the destination changes on every transaction and, at one id per initiator, every one of them allocates a reorder-buffer slot), `hotspot` (`HOTSPOT=` names the target node), `beat_exact` (per-lane-distinct bytes + walking WSTRB, DPI word-boundary check), `multicast` (collective write, shape from `MCAST_SHAPE`) |
 | `MCAST_SHAPE` | `row` (default), `col`, `submesh`. `multicast` only. One shape per run, concurrent multicast trees must stay pairwise disjoint |
 
 `SEED` unset draws and prints a random seed; pass `SEED=<n>` to replay

@@ -467,6 +467,26 @@ def test_watchdog_grows_with_the_memory_latency_profile(monkeypatch):
     assert k("random") == gen_tb_top._STALL_RANDOM_MAX_CYCLES
 
 
+def test_all_to_all_never_repeats_a_destination_and_never_targets_self():
+    """The whole reason the pattern exists: with one id per initiator, a
+    destination change on every transaction forces the NMU's allocating branch,
+    where uniform_random's 1/n repeats fall into the same-destination bypass.
+    Self is excluded because a tile-local request never reaches the NMU."""
+    n = 16
+    for src in (0, 7, 15):
+        d = g.all_to_all_dsts(src, n, 64)
+        assert len(d) == 64
+        assert src not in d
+        assert all(d[i] != d[i + 1] for i in range(len(d) - 1)), f"repeat at src {src}"
+        assert set(d) == {k for k in range(n) if k != src}, "must reach every other node"
+
+
+def test_all_to_all_is_deterministic():
+    """No rng argument at all -- the same call must give the same list, so a run
+    replays without carrying a seed for the spatial pattern."""
+    assert g.all_to_all_dsts(3, 16, 40) == g.all_to_all_dsts(3, 16, 40)
+
+
 def test_address_map_pack_rejects_zero_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
     with pytest.raises(ValueError, match="positive"):

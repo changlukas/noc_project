@@ -447,6 +447,29 @@ def uniform_random_dsts(src_node, n_nodes, n_txn, rng, exclude_self=False):
     return dsts
 
 
+def all_to_all_dsts(src_node, n_nodes, n_txn):
+    """Every node walks every other node in turn (MPI_Alltoall's spatial shape).
+
+    Booksim2 and FlooNoC both lack this one: their sets are permutations, which
+    give a node ONE destination, plus uniform/hotspot, which draw randomly. This
+    is the deterministic complement -- the destination changes on every
+    transaction by construction.
+
+    That is the point of it. The NMU allocates a reorder-buffer slot only when a
+    same-id transaction goes somewhere other than the previous one; a repeat
+    takes the same-destination bypass and no slot (nmu-spec.md:142). Under
+    uniform_random a repeat comes up 1/n_nodes of the time, so the RoB is never
+    fully loaded. Here it never repeats, so with one id per initiator every
+    transaction takes the allocating branch.
+
+    Starts at src_node + 1 and skips src_node itself, so no transaction is
+    tile-local -- a local request is answered by the tile crossbar and never
+    reaches the NMU (user_node_endpoint.sv), which would break the guarantee.
+    """
+    others = [(src_node + 1 + k) % n_nodes for k in range(n_nodes - 1)]
+    return [others[i % len(others)] for i in range(n_txn)]
+
+
 def hotspot_dsts(src_node, n_nodes, n_txn, rng, hotspots, rates=None, exclude_self=False):
     """Booksim2 HotSpotTrafficPattern::dest (traffic.cpp:506-526): weighted hotspot selection.
 
@@ -950,7 +973,8 @@ def main(argv=None):
         description="Emit per-node file_master write.txt/read.txt for a traffic pattern."
     )
     ap.add_argument("--pattern", required=True,
-                    choices=list(_DETERMINISTIC_PATTERNS) + ["uniform_random", "hotspot",
+                    choices=list(_DETERMINISTIC_PATTERNS) + ["uniform_random", "all_to_all",
+                                                             "hotspot",
                                                              "beat_exact", "multicast"],
                     help="Traffic pattern")
     ap.add_argument("--mcast-shape", choices=list(_MCAST_SHAPES), default="row",
@@ -1041,6 +1065,9 @@ def main(argv=None):
         elif a.pattern == "uniform_random":
             dst_lin = uniform_random_dsts(idx, n_nodes, a.transactions_per_node,
                                           rng, a.exclude_self)
+            dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+        elif a.pattern == "all_to_all":
+            dst_lin = all_to_all_dsts(idx, n_nodes, a.transactions_per_node)
             dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
         else:  # hotspot
             if a.hotspot is None:
