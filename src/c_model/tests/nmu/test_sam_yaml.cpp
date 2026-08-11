@@ -324,7 +324,11 @@ static const char* kShippedSizedSpaces =
     "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
     "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
 
-static std::filesystem::path write_map(const char* name, const char* decode, const char* tiles) {
+// Returns what unique_temp_path already gives, a std::string. Declaring
+// filesystem::path here converted it on the way out and left load_sam_table's
+// const std::string& with no way back: string -> path is implicit, path ->
+// string is not.
+static std::string write_map(const char* name, const char* decode, const char* tiles) {
     auto path = ni::cmodel::testing::unique_temp_path(name);
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"

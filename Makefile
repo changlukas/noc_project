@@ -105,14 +105,21 @@ else
 CMAKE_DEPS_FLAGS :=
 endif
 
+# Bounded, not a bare -j. Unlimited parallelism starts one compiler per core --
+# 28 on the WSL host against 15 GB of RAM -- and the gtest translation units are
+# template-heavy enough that the machine goes to swap and g++ dies with an
+# internal compiler error. That is the whole story behind the "host GCC ICE"
+# this file used to route around. Override with JOBS= for a bigger machine.
+JOBS ?= 6
+
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
-	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) -j
+	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) -j $(JOBS)
 
 # Sim needs only the yaml-cpp static lib (+ c_model/yaml-cpp headers via -I).
-# Build that one target, not the whole c_model tree, so the gtest unit-test
-# executables are never compiled (two of them hit a host GCC ICE).
+# Build that one target, not the whole c_model tree: the sim flow has no use for
+# the unit-test executables.
 build-yamlcpp: $(CMODEL_BUILD)/CMakeCache.txt
-	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) --target yaml-cpp -j
+	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) --target yaml-cpp -j $(JOBS)
 
 $(CMODEL_BUILD)/CMakeCache.txt:
 	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)

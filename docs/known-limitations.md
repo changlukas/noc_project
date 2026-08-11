@@ -64,7 +64,7 @@ express a bus of 32 lanes or more. Outside `beat_exact`, the co-sim default beat
 |---|---|
 | `make test` restamps the provenance header in the tracked `specgen/generated/*` files it regenerates, six of them on an observed run | `codegen.py --check` strips both provenance lines (`_strip_provenance`), so it passes in either state and the drift gate cannot see the change. Symptom is six permanently dirty tracked files after any build |
 | The regenerated `Source SHA` sometimes moves while git reports the input unchanged | observed on `ni_flit_constants.h` and `ni_flit_pkg.sv`, `13cc288fc4ad` to `123021553f78`, with `specgen/generated/json/ni_packet.json` clean in `git status`. The hash sees something git does not, most likely line-ending normalisation. Combined with the row above this means the drift gate can pass across a real input difference, so a clean `--check` is weaker evidence than it reads |
-| The mingw64 GCC throws non-deterministic internal compiler errors under parallel builds | `try_forward_edges at cfgcleanup.cc:580` and segfaults, on a different source file each run. Hit on four consecutive tasks. Retry cleared it three times, a serial `-j 1` build was needed once |
+| GCC threw non-deterministic internal compiler errors, on both hosts | **Cause found 2026-08-11, both sites fixed.** The root `Makefile` ran `cmake --build -j` with no limit, starting one compiler per core -- 28 against 15 GB on the WSL host -- so template-heavy gtest units drove it to swap; it now runs `-j $(JOBS)`, default 6. Separately `sim/verilator/Makefile` forced `--output-split 0`, emitting unsplit generated C++ in which one function reached 12648 lines; g++ 15 died on it during its own `no-opt dfinit` RTL pass. The flag is gone, Verilator's default splits the design into 247 files, and four consecutive clean builds produced no ICE. The failure rate was roughly one build in ten, so four is suggestive rather than conclusive |
 | ctest discovery lists go stale in an incremental build tree and inflate the reported count | 665 tests registered against 705 present in the binaries after successive builds over each other. A pass count from a tree that was not wiped is not evidence |
 | The AWUSER collective field layout is spelled with raw bit numbers in three places with no shared constant | `axi/types.hpp`, `sim/tools/gen_test_patterns.py`, `sim/tb/user_node_endpoint.sv`. The `static_assert` in `types.hpp` pins the width sum but not the offsets, so an offset change desynchronises all three silently. The SV copy also hardcodes `2'd1` where `ni_flit_pkg::COLLECTIVE_OP_MULTICAST` exists |
 | `axi_bw_monitor.sv` carries a two-line local edit | upstream it or wrap it |
@@ -85,8 +85,8 @@ Two hazards come with that mirror. The CMake cache under `$HOME/noc_build` recor
 its source directory, so a `make` invoked from `/mnt/e` fails on the source-directory mismatch
 rather than building the working tree, and a `cmake --build` aimed straight at the build
 directory silently compiles the mirror instead. A pass count is evidence only once the mirror has
-been re-synced. Separately, `cmake --build ... -j` in the root `Makefile` carries no job limit,
-which on a 28-thread host has taken WSL down mid-build; `-j 6` completed the same build.
+been re-synced. The unbounded `-j` that used to take the host down mid-build is fixed; see the
+compiler-error row above.
 
 `SamTable::packed()` derives each base by accumulating sizes in list order, so an unmapped index
 cannot be expressed. A mesh dimension that is not a power of two therefore cannot carry the

@@ -64,11 +64,17 @@ VERILATOR_COMMON_FLAGS := \
 # -Wno-attributes (g++): verilator's own svdpi.h triggers "'dllimport'
 # attribute ignored" under MinGW for every DPI-bearing translation unit —
 # toolchain header noise, not project code.
+# --output-split is left at Verilator's default (20000 bytes). It used to be
+# forced to 0, which emits the whole design as unsplit .cpp files: one generated
+# function reached 12648 lines and g++ 15 died on it with an internal compiler
+# error during its own "no-opt dfinit" RTL pass, intermittently and only under
+# memory pressure, which reads as a flaky environment rather than a build
+# setting. Splitting keeps every translation unit small enough that no compiler
+# has to hold a function that size.
 VERILATOR_FLAGS := \
     $(VERILATOR_COMMON_FLAGS) \
     --top-module $(TOP) \
     --timing \
-    --output-split 0 \
     --Mdir $(OBJ_DIR) \
     -CFLAGS "-g" \
     -CFLAGS "-O0"
