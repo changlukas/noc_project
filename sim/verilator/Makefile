@@ -59,11 +59,7 @@ VERILATOR_COMMON_FLAGS := \
     -Wno-REDEFMACRO \
     -Wno-WIDTHEXPAND \
     -Wno-WIDTHTRUNC \
-    -Wno-ASCRANGE \
-    -CFLAGS "-Wno-attributes"
-# -Wno-attributes (g++): verilator's own svdpi.h triggers "'dllimport'
-# attribute ignored" under MinGW for every DPI-bearing translation unit —
-# toolchain header noise, not project code.
+    -Wno-ASCRANGE
 # --output-split is left at Verilator's default (20000 bytes). It used to be
 # forced to 0, which emits the whole design as unsplit .cpp files: one generated
 # function reached 12648 lines and g++ 15 died on it with an internal compiler
@@ -84,24 +80,13 @@ VERILATOR_FLAGS := \
 VERILATOR_EXTRA_FLAGS ?=
 VERILATOR_FLAGS += $(VERILATOR_EXTRA_FLAGS)
 
-# Linked binary name is platform-dependent: MinGW ld appends .exe, Linux
-# does not. Naming the real artifact makes the source-dependency check
-# fire correctly on both (a phony or wrong-name target rebuilds always).
-EXEEXT := $(if $(findstring NT,$(shell uname -s)),.exe,)
-TBTOP_EXE := $(OBJ_DIR)/V$(TOP)$(EXEEXT)
-
-# PE stack-reserve ldflag (see USER_LDFLAGS note at the link recipe below):
-# Windows-only, Linux GNU ld rejects --stack.
-ifneq ($(EXEEXT),)
-STACK_LDFLAGS := -Wl,--stack,67108864
-endif
+# Name the real artifact, not a phony: a wrong-name target rebuilds always.
+TBTOP_EXE := $(OBJ_DIR)/V$(TOP)
 
 all: $(TBTOP_EXE)
 
 # filelist.f recipe: placed after `all:` so it is not the default goal.
-# Use Python3 for path resolution: Verilator under MSYS2 Perl does not accept
-# /e/05_... POSIX drive paths in -f filelists (treats them as module names);
-# Python3 on Windows returns E:/... native paths that Verilator handles correctly.
+# gen_filelist.py absolutizes the relative paths build_config.mk carries.
 # Duplicated (intentionally) in sim/vcs/Makefile so a standalone `cd sim/vcs &&
 # make` regenerates it too; gen_filelist.py + FILELIST_GEN_ARGS keep them in sync.
 $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
@@ -139,12 +124,8 @@ $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_pa
 # binary below so a hand-edited fabric actually rebuilds).
 $(NOC_FABRIC_SV): $(TB_TOP_SV) ;
 
-# Python3 executable — auto-detected so build/run commands stay identical on
-# Windows and Linux. Prefer the Windows `py -3` launcher when present (the
-# canonical interpreter with PyYAML; the MSYS2 mingw64 `python3` often lacks
-# it, which breaks the scenario/perf scripts below). Falls back to `python3`
-# on Linux/macOS. Mirrors the root Makefile. Override via local.mk if needed.
-PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
+# Mirrors the root Makefile. Override via local.mk if needed.
+PYTHON3 ?= python3
 
 # yaml-cpp comes from the c_model CMake build; surface a clear hint instead
 # of a mysterious linker failure when it has not been built yet.
@@ -160,20 +141,11 @@ check-yamlcpp:
 # Two-phase build: Verilator generates C++ in $(VL_BUILD)/obj_dir, then make
 # compiles it.
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
-# USER_LDFLAGS: set PE stack reserve to 64 MiB so MinGW pthread initialises
-#   correctly on Windows (avoids STATUS_STACK_OVERFLOW 0xc00000fd).
-#   --stack is PE-only; Linux GNU ld rejects it, so gate on EXEEXT (Windows).
-# sed pass (--timing): Verilator 5.036 on Windows joins fork-sync done() debug
-#   source paths with backslashes in generated C-string literals — rewrite them
-#   to forward slashes before g++ sees them.
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
-	sed -i -E ':a; s|([A-Za-z]:/[A-Za-z0-9_./]*)[\\]([A-Za-z0-9_])|\1/\2|; ta' \
-	    $(OBJ_DIR)/*.cpp $(OBJ_DIR)/*.h
 	$(MAKE) -C $(OBJ_DIR) -f V$(TOP).mk \
-	    PYTHON3="$(PYTHON3)" \
-	    "USER_LDFLAGS=$(STACK_LDFLAGS)"
+	    PYTHON3="$(PYTHON3)"
 
 SEED       ?= 1
 

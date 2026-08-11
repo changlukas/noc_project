@@ -1,5 +1,10 @@
 # sim/dv — imported DV IP (do not edit; one flagged local modification below)
 
+Take files with `git show <tag>:<path>` against the upstream clone, never `cp` from its working
+tree. A clone sits at whatever revision it was last left on: copying `axi_sim_mem.sv` out of one
+parked at v0.39.10 into the v0.39.7 directory here mixed two releases, and the two versions of
+that file differ. The directory name is the contract; the fetch has to name the same tag.
+
 | package | upstream | rev | files | license | modified |
 |---------|----------|-----|-------|---------|----------|
 | axi-0.39.7 | github.com/pulp-platform/axi | v0.39.7 | src/{axi_pkg,axi_intf,axi_test}.sv src/{axi_xbar,axi_xbar_unmuxed,axi_mux,axi_demux,axi_demux_simple,axi_err_slv,axi_atop_filter,axi_multicut,axi_cut,axi_id_prepend,axi_delayer,axi_sim_mem}.sv include/axi/{typedef,assign}.svh | Solderpad 0.51 | - |

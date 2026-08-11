@@ -49,22 +49,10 @@ build: build-cmodel build-verilator
 # clean-cmodel). Subsequent `make build-cmodel` is pure `cmake --build`, which
 # avoids reconfigure triggering ninja to re-run side-effect custom targets
 # (e.g. codegen_check) under a different subprocess env.
-#
-# TOOLPATH hardening: recipes run regardless of how complete the invoking
-# shell's PATH is. Three deficits seen in practice on Windows/Git Bash:
-# - mingw64/bin missing -> verilator (perl script) + g++ unresolvable
-# - usr/bin missing     -> MSYS make/coreutils unresolvable
-# - System32 missing    -> ninja's `cmd.exe /C` link rules (gtest discovery
-#   POST_BUILD) fail with "'cmd.exe' is not recognized"
-# MSYS dirs are PREpended (their coreutils must shadow Windows homonyms like
-# find/sort); System32 is APPended (only cmd.exe is needed from there).
-# All three are no-ops on Linux/macOS. LC_ALL=C silences MSYS perl locale
-# complaints under non-UTF-8 Windows locales.
-TOOLPATH := PATH="/c/msys64/mingw64/bin:/c/msys64/usr/bin:$$PATH:/c/Windows/System32" LC_ALL=C
 
 # Per-host overrides (gitignored). Lets a machine pin CMAKE / DEPS_SRC / etc.
 # once so the command line stays identical everywhere. Optional — the
-# auto-detection below covers the common Windows + RHEL cases with no file.
+# auto-detection below covers the common distribution layouts with no file.
 #
 # Per-host WSL config: create a gitignored `local.mk` at the repo root with:
 #   BUILD_ROOT := $(HOME)/noc_build   # native-Linux build dir (WSL rejects /mnt COFF)
@@ -113,16 +101,16 @@ endif
 JOBS ?= 6
 
 build-cmodel: $(CMODEL_BUILD)/CMakeCache.txt
-	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) -j $(JOBS)
+	@$(CMAKE) --build $(CMODEL_BUILD) -j $(JOBS)
 
 # Sim needs only the yaml-cpp static lib (+ c_model/yaml-cpp headers via -I).
 # Build that one target, not the whole c_model tree: the sim flow has no use for
 # the unit-test executables.
 build-yamlcpp: $(CMODEL_BUILD)/CMakeCache.txt
-	@$(TOOLPATH) $(CMAKE) --build $(CMODEL_BUILD) --target yaml-cpp -j $(JOBS)
+	@$(CMAKE) --build $(CMODEL_BUILD) --target yaml-cpp -j $(JOBS)
 
 $(CMODEL_BUILD)/CMakeCache.txt:
-	@$(TOOLPATH) $(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
+	@$(CMAKE) -S $(CMODEL_DIR) -B $(CMODEL_BUILD) $(CMAKE_DEPS_FLAGS) $(CMAKE_EXTRA)
 
 # Default topology for standalone build-verilator.
 # sim/Makefile overrides this by passing TOPOLOGY=$(TB) explicitly.
@@ -130,24 +118,14 @@ TOPOLOGY  ?= mesh_4x4_vc1
 RUN_CLASS ?= directed
 
 build-verilator: build-yamlcpp
-	@$(TOOLPATH) $(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY) RUN_CLASS=$(RUN_CLASS)
+	@$(MAKE) -C $(COSIM_VERILATOR) TOPOLOGY=$(TOPOLOGY) RUN_CLASS=$(RUN_CLASS)
 
 # --- test ---
 
-# TEST_TMPDIR: gtest's TempDir() checks TEST_TMPDIR before TEMP. MSYS sh
-# (which executes make recipes) can strip/empty TEMP, making TempDir() fall
-# back to a nonexistent temp dir and failing every test that writes a
-# read-dump. Point it at a build-tree dir using a native path (`pwd -W` in
-# MSYS sh; plain pwd elsewhere).
-CTEST_CMD = mkdir -p $(CMODEL_BUILD)/test_tmp && cd $(CMODEL_BUILD) &&     TEST_TMPDIR="$$(pwd -W 2>/dev/null || pwd)/test_tmp" ctest --output-on-failure
-
 test: build-cmodel
-	@$(TOOLPATH) sh -c '$(CTEST_CMD)'
+	@cd $(CMODEL_BUILD) && ctest --output-on-failure
 
-# Python interpreter: prefer the Windows `py -3` launcher when present
-# (canonical on this project's Windows setup), fall back to python3
-# (Linux/macOS and MSYS2 shells without the launcher on PATH).
-PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
+PYTHON3 ?= python3
 
 # Python suites: specgen (codegen/golden drift gate -- a stale golden, e.g. an
 # un-regenerated SV package, must not pass silently) and sim/tools (the stimulus
@@ -155,24 +133,11 @@ PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 # packing agreement). Both run in one target; each suite imports from its own
 # directory, hence the two cd's. Both ALWAYS run -- the exit status is
 # accumulated rather than chained, so a red specgen suite cannot hide whether
-# sim/tools passed. The pytest package is not present in every
-# interpreter on this project's Windows setup (the MSYS2 mingw64 python lacks
-# it); probe a candidate list and run the first interpreter that can import
-# pytest. Fail loudly if none can -- a silent skip would defeat the gate.
-PYTEST_CANDIDATES := $(PYTHON3) python3 "py -3" python
+# sim/tools passed.
 pytest:
-	@interp=""; \
-	for cand in $(PYTEST_CANDIDATES); do \
-	    if $$cand -c "import pytest" >/dev/null 2>&1; then interp="$$cand"; break; fi; \
-	done; \
-	if [ -z "$$interp" ]; then \
-	    echo "ERROR: no interpreter in [$(PYTEST_CANDIDATES)] can import pytest; the drift gate cannot run" >&2; \
-	    exit 1; \
-	fi; \
-	echo "pytest: using interpreter '$$interp'"; \
-	status=0; \
-	(cd specgen && $$interp -m pytest tests/ -q) || status=1; \
-	(cd sim/tools && $$interp -m pytest . -q) || status=1; \
+	@status=0; \
+	(cd specgen && $(PYTHON3) -m pytest tests/ -q) || status=1; \
+	(cd sim/tools && $(PYTHON3) -m pytest . -q) || status=1; \
 	exit $$status
 
 # Simulation runs from sim/, not here. `sim` is also a directory name, so

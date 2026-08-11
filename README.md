@@ -39,9 +39,12 @@ AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
 
 | Platform | Scope | Verified |
 |---|---|---|
-| Linux (WSL Ubuntu, Verilator 5.048) | build + ctest + cosim | full flow (dry-run verified) |
-| Windows 11 + MSYS2 mingw64 (Verilator 5.036) | build + ctest | declared |
+| Linux (WSL Ubuntu, Verilator 5.048) | build + ctest + cosim | full flow |
 | Linux workstation (VCS) | testbench build | declared |
+
+Linux only. The build used to carry a native-Windows path (MSYS2 mingw64) and
+it is gone: it doubled every toolchain behaviour, which is how a test file that
+compiled under one and not the other went unnoticed.
 
 On WSL, work from a native-filesystem copy of the repo; `/mnt/*` mounts
 are slow and unreliable under parallel builds. Per-host settings
@@ -72,7 +75,6 @@ make pytest                                # specgen + sim/tools suites, golden 
 python3 specgen/tools/codegen.py --check   # committed generated code matches sources
 ~~~
 
-On Windows, invoke Python scripts with `py -3` instead of `python3`.
 
 ## Simulate (cosim)
 

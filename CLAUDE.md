@@ -11,9 +11,8 @@
 - **Wrap layer**: `NmuWrap` / `NsuWrap` / `RouterWrap` in `src/c_model/include/wrap/`. Per-instance via a 64-bit integer handle ABI — `unsigned long long cmodel_<component>_create(name)` returns an integer-encoded `HandleBlock*` registered in a process-wide `g_handle_registry`; cycle ops take `unsigned long long ctx` (SV `longint unsigned`) and validate via `REQUIRE_HANDLE`. (chandle is avoided because VCS rejects it as a module port.) No cross-component pointers.
 - **Config**: parameters and packet/signal types are specgen-generated from JSON/YAML sources (`specgen/source/`) into `specgen/generated/cpp/` and `specgen/generated/sv/`, drift-gated at build (`codegen.py --check`). The SAM address map is topology YAML (`sim/topologies/*.yaml`, `address_map:` block), loaded at runtime — not compiled in.
 
-**Build**: C++17, CMake 3.20+, GoogleTest.
-- Use `py -3` instead of `python3` (Windows).
-- Path separators: forward slash `/` or double backslash `\\`.
+**Build**: C++17, CMake 3.20+, GoogleTest. Linux only — build, ctest and co-sim
+all run there (WSL for development, workstation for VCS).
 
 **Communication**:
 - Reply in Traditional Chinese; keep technical terms in English.

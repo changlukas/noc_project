@@ -29,10 +29,9 @@ help:
 	@echo ""
 	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
 
-# Python interpreter: prefer the Windows `py -3` launcher when present, fall
-# back to python3. Same probe verilator/Makefile uses; PYTHON3 is not part of
-# build_config.mk, so each Makefile that needs it carries the line.
-PYTHON3 ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
+# PYTHON3 is not part of build_config.mk, so each Makefile that needs it
+# carries the line.
+PYTHON3 ?= python3
 
 # TB selects the testbench (topology; accepts a tb_ prefix). PATTERN selects a
 # spatial pattern, beat_exact (the DPI word-packing probe) or multicast. SEED
