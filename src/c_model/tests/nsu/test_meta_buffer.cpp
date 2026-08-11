@@ -69,11 +69,15 @@ TEST(MetaBuffer, PeekEmptyReturnsNullopt) {
 
 using ni::cmodel::nsu::remap_downstream_id;
 
-TEST(RemapDownstreamId, CollapsesToAllOnesWhenSingleUniqueId) {
-    SCENARIO("remap_downstream_id: max_unique_ids=1 maps every upstream id to 0xFF");
-    EXPECT_EQ(remap_downstream_id(0x00, 1), 0xFF);
-    EXPECT_EQ(remap_downstream_id(0x05, 1), 0xFF);
-    EXPECT_EQ(remap_downstream_id(0xFF, 1), 0xFF);
+TEST(RemapDownstreamId, CollapsesToAllOnesOfTheInitiatorShare) {
+    SCENARIO("remap_downstream_id: max_unique_ids=1 maps every upstream id to all-ones of "
+             "AXI_INITIATOR_ID_WIDTH, the width the NSU drives -- not of the NI-facing "
+             "AXI_ID_WIDTH, which has to keep room for a tile interconnect's master-port index");
+    constexpr uint8_t collapsed = (1u << ni::AXI_INITIATOR_ID_WIDTH) - 1u;
+    EXPECT_LT(collapsed, 1u << ni::AXI_ID_WIDTH);
+    EXPECT_EQ(remap_downstream_id(0x00, 1), collapsed);
+    EXPECT_EQ(remap_downstream_id(0x05, 1), collapsed);
+    EXPECT_EQ(remap_downstream_id(0xFF, 1), collapsed);
 }
 
 TEST(RemapDownstreamId, IdentityWhenFullIdSpace) {

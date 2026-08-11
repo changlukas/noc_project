@@ -92,3 +92,17 @@ which on a 28-thread host has taken WSL down mid-build; `-j 6` completed the sam
 cannot be expressed. A mesh dimension that is not a power of two therefore cannot carry the
 surplus padding `docs/noc-target-spec.md` §5.1 requires, and no such space can be a collective
 target. Every shipped topology is 2x2 or 4x4, so nothing is affected today.
+
+A tile interconnect decodes addresses and nothing else, so it cannot tell a collective write from
+a unicast. A collective anchored at the issuing node's own region therefore looks local, and the
+`user_node_endpoint` crossbar answers it instead of handing it to the NI. The endpoint works
+around this by offsetting such a write into a NoC egress aperture derived from the address map
+(`address_map.noc_egress_base`) and taking the offset back off at the NI port, which keeps the
+crossbar stock pulp `axi_xbar`.
+
+The structural answer is a decode that reads the transaction's sideband -- the collective op
+already travels in AWUSER -- and selects the NI port directly, leaving `AWADDR` untouched end to
+end. pulp `axi_xbar` exposes no such hook: its rules are address ranges (`addr_decode_dync.sv`)
+and its per-slave-port default and `Connectivity` are both static. Reaching the select would mean
+assembling a crossbar out of `axi_demux` and `axi_mux` and owning it. Not worth it for testbench
+scaffolding; it is worth it for a real tile.

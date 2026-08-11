@@ -1,5 +1,6 @@
 #pragma once
 #include "axi/types.hpp"
+#include "ni_params.h"  // AXI_INITIATOR_ID_WIDTH
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -45,12 +46,21 @@ struct MetaEntry {
 // Ported from FlooNoC floo_meta_buffer.sv:89-91 (collapse to '1) and :138-139
 // (offset by MaxAtomicTxns, which is 0 here because AtopSupport is off).
 //
+// '1 is all-ones of the width the NSU DRIVES, which is one initiator's share of
+// the ID field (ni::AXI_INITIATOR_ID_WIDTH), not the NI-facing ID_WIDTH the flit
+// carries. Upstream keeps the two apart as axi_cfg_t.InIdWidth and .OutIdWidth
+// (floo_pkg.sv:182-184) and its '1 is OutIdWidth-wide; collapsing them here
+// would hand a tile interconnect an ID with no room left for the master-port
+// index it must append (AXI4 IHI 0022 §A5.3.5).
+//
 // The remap is a function of upstream_id ALONE, matching the ported source
 // above. Ordering no longer depends on this choice: the response-path fixed
 // VC map keys on (dst_id ^ id), so same-id streams from different sources
 // land on distinct keys instead of contending.
 inline uint8_t remap_downstream_id(uint8_t upstream_id, std::size_t max_unique_ids) {
-    return max_unique_ids == 1 ? static_cast<uint8_t>(axi::AXI_ID_SPACE - 1) : upstream_id;
+    constexpr uint8_t collapsed =
+        static_cast<uint8_t>((1u << ni::AXI_INITIATOR_ID_WIDTH) - 1u);
+    return max_unique_ids == 1 ? collapsed : upstream_id;
 }
 
 // Per-downstream-AXI-ID FIFO of {src_id, upstream_id, ordering_req, ordering_tag} entries,

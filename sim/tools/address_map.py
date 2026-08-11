@@ -22,8 +22,8 @@ Packing rule: base(0) = 0x0; base(i) = base(i-1) + size(i-1), in list order
 
 X_WIDTH = 4  # mirrors ni_flit_constants.h width::X_WIDTH / addr_trans.hpp
 
-# Tile-local space order. Fixed, not inferred: the tile crossbar's config
-# target indexes off the raw tile-local address, so config must sit at 0x0.
+# Tile crossbar target order. Fixed, not inferred: it is what pins m0 to the
+# config memory and the last target to the data memory in user_node_endpoint.
 SPACE_ORDER = ("config", "memory")
 
 
@@ -97,50 +97,48 @@ def pack(address_map, x_dim, y_dim):
     return bases, entries
 
 
-def space_windows(entries):
-    """One window per address space, spanning EVERY node's slot in that space.
+def node_windows(entries, node_id):
+    """One node's own region per space, in SPACE_ORDER, present spaces only.
 
-    The tile decoder tells the two CLASSES apart; it does not tell nodes apart.
-    That is deliberate, and it is what makes a collective work. A multicast AW
-    reaches N nodes carrying ONE address -- the anchor's -- because nothing on
-    the path rewrites it (upstream is the same: floo_axi_chimney.sv:744 hands
-    the destination the flit payload verbatim). Every replica therefore has to
-    accept an address naming a different node's slot and land at the same offset
-    inside its own. A per-node window would DECERR every replica but the
-    anchor's.
+    This is what the tile crossbar decodes on: a request that reached this node
+    -- either from its own initiator or from the fabric -- names an address in
+    one of these two ranges, or it is not this node's. The NSU rewrites an
+    arriving address's node-coordinate field to this node before the crossbar
+    sees it (nsu::Depacketize::rebase_), so a collective replica carrying the
+    anchor's address lands here like any unicast.
 
-    So the window covers the whole space, and node_addr_w is what strips the
-    node index back off before the memory sees the address. Upstream's own
-    multicast testbench is built the same way: node regions differ only in high
-    bits, and the destination memory sits at [0, 0x8000)
-    (hw/tb/tb_floo_rob_multicast.sv).
+    Sizes are exact, not rounded: pulp axi_xbar states a rule as start/end, so
+    a window need not be a power of two.
 
-    Returns [{"space", "base", "span", "node_addr_w"}, ...] in SPACE_ORDER,
-    present spaces only:
-        base / span   the whole space, for the crossbar's decode
-        node_addr_w   log2 of one node's slot, for the offset mask
+    Returns [{"space", "base", "size"}, ...].
     """
-    windows = []
+    out = []
     for space in SPACE_ORDER:
-        members = [e for e in entries if e.get("space", "memory") == space]
-        if not members:
-            continue
-        base = min(e["base"] for e in members)
-        end = max(e["base"] + e["size"] for e in members)
-        span = 0x1000
-        while span < end - base:
-            span <<= 1
-        slot = 0x1000
-        while slot < max(e["size"] for e in members):
-            slot <<= 1
-        # node_addr_w is applied as a power-of-two mask, which only yields the
-        # offset within a node's slot if the space starts on a slot boundary. A
-        # span-aligned base guarantees that (span >= slot). Fail loud rather than
-        # emit a testbench whose replicas land at the wrong offset.
-        if base & (span - 1):
-            raise ValueError(
-                f"address_map: {space} space base {base:#x} is not aligned to its {span:#x} "
-                f"window; the endpoint's offset mask would strip the wrong bits")
-        windows.append({"space": space, "base": base, "span": span,
-                        "node_addr_w": slot.bit_length() - 1})
-    return windows
+        for e in entries:
+            if e["dst_id"] == node_id and e.get("space", "memory") == space:
+                out.append({"space": space, "base": e["base"], "size": e["size"]})
+                break
+    return out
+
+
+def noc_egress_base(entries):
+    """Base of the tile crossbar's NoC egress aperture.
+
+    A collective write names a SET of nodes, so "is this address mine" has no
+    answer -- but a tile crossbar decodes addresses and nothing else. A
+    collective anchored at the issuing node's own region would be answered
+    locally and never reach the NI, and the fabric would never replicate it.
+    The endpoint offsets such a write into this aperture, which the crossbar
+    has a rule for pointing at the NI, and takes the offset back off on the way
+    out (user_node_endpoint.sv).
+
+    Derived from the map, never declared: the first power of two at or above
+    the top of the map. Every node window therefore sits below it by
+    construction, so the aperture cannot collide with a real region however the
+    map grows -- which a hand-picked spare address bit could not promise.
+    """
+    top = max(e["base"] + e["size"] for e in entries)
+    base = 0x1000
+    while base < top:
+        base <<= 1
+    return base

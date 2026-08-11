@@ -10,9 +10,12 @@ import gen_test_patterns as g
 
 def test_axi_widths_follow_constants_ssot():
     w = g.axi_widths()
+    # id is INITIATOR_ID_WIDTH, not ID_WIDTH: stimulus ids are what ONE tile
+    # initiator drives, and the tile crossbar appends the master-port index on
+    # top of them (constants.yaml axi.INITIATOR_ID_WIDTH).
     # addr=48 per docs/noc-target-spec.md §6 (pre-S2); data=512 is S2 T2d's
     # data-class flip (specgen/source/constants.yaml axi.DATA_WIDTH).
-    assert w == {"id": 8, "addr": 48, "data": 512}
+    assert w == {"id": 4, "addr": 48, "data": 512}
 
 
 def test_encode_write_beats_full_width_addr_in_data():
@@ -324,40 +327,28 @@ def _two_space_tiles(memory_sizes):
             [{"x": x, "y": y, "size": 0x1000, "space": "config"} for x, y in nodes])
 
 
-def test_space_windows_span_every_node_slot():
-    """A window covers the whole space, not one node's slot: a multicast replica
-    carries the anchor's address, so a per-node window would DECERR it.
-    node_addr_w is the per-node slot width the endpoint masks with."""
+def test_node_windows_are_that_node_s_own_regions():
+    """The tile crossbar decodes on THIS node's windows, so a local initiator's
+    address that belongs to another node misses both rules and falls through to
+    the NMU. Sizes are exact -- axi_xbar states a rule as start/end."""
     tiles = _two_space_tiles([0x100000] * 4)
     _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
-    assert address_map.space_windows(entries) == [
-        {"space": "config", "base": 0x400000, "span": 0x4000, "node_addr_w": 12},
-        {"space": "memory", "base": 0x0, "span": 0x400000, "node_addr_w": 20},
+    assert address_map.node_windows(entries, address_map.dst_id(0, 0)) == [
+        {"space": "config", "base": 0x400000, "size": 0x1000},
+        {"space": "memory", "base": 0x0, "size": 0x100000},
+    ]
+    assert address_map.node_windows(entries, address_map.dst_id(1, 1)) == [
+        {"space": "config", "base": 0x403000, "size": 0x1000},
+        {"space": "memory", "base": 0x300000, "size": 0x100000},
     ]
 
 
-def test_space_windows_reject_a_base_the_window_cannot_express():
-    """taxi masks a region's base with its own address width, so an unaligned
-    base would decode a range the map never granted. Fail in the generator
-    rather than emit a testbench that lies."""
-    entries = [{"x": 0, "y": 0, "size": 0x1000, "space": "memory",
-                "base": 0x1000, "dst_id": address_map.dst_id(0, 0)},
-               {"x": 1, "y": 0, "size": 0x1000, "space": "memory",
-                "base": 0x2000, "dst_id": address_map.dst_id(1, 0)},
-               {"x": 0, "y": 1, "size": 0x1000, "space": "memory",
-                "base": 0x3000, "dst_id": address_map.dst_id(0, 1)},
-               {"x": 1, "y": 1, "size": 0x1000, "space": "memory",
-                "base": 0x4000, "dst_id": address_map.dst_id(1, 1)}]
-    with pytest.raises(ValueError, match="not aligned"):
-        address_map.space_windows(entries)
-
-
-def test_space_windows_skip_an_absent_space():
+def test_node_windows_skip_an_absent_space():
     """A map with no config entries contributes no config window."""
     entries = [{"x": 0, "y": 0, "size": 0x100000, "space": "memory",
                 "base": 0x0, "dst_id": address_map.dst_id(0, 0)}]
-    assert address_map.space_windows(entries) == [
-        {"space": "memory", "base": 0x0, "span": 0x100000, "node_addr_w": 20},
+    assert address_map.node_windows(entries, address_map.dst_id(0, 0)) == [
+        {"space": "memory", "base": 0x0, "size": 0x100000},
     ]
 
 
@@ -368,21 +359,28 @@ def _two_space_topology():
 
 def test_tile_targets_packs_config_first():
     """Port order and field packing are one coupled invariant: target 0 is the
-    config window, the last target is the data window. addr_w is the taxi
-    M_ADDR_W field, log2 of the span. Windows are that node's own global bases."""
-    assert gen_tb_top.tile_targets(_two_space_topology()) == [
-        {"space": "config", "base": 0x400000, "span": 0x4000, "node_addr_w": 12, "addr_w": 14},
-        {"space": "memory", "base": 0x0, "span": 0x400000, "node_addr_w": 20, "addr_w": 22},
+    config window, the last target is the data window. One entry per node, each
+    holding that node's own global bases."""
+    nodes = [(0, 0, 0, address_map.dst_id(0, 0)), (1, 1, 0, address_map.dst_id(1, 0)),
+             (2, 0, 1, address_map.dst_id(0, 1)), (3, 1, 1, address_map.dst_id(1, 1))]
+    per_node, _egress = gen_tb_top.tile_targets(_two_space_topology(), nodes)
+    assert per_node[0] == [
+        {"space": "config", "base": 0x400000, "size": 0x1000},
+        {"space": "memory", "base": 0x0, "size": 0x100000},
+    ]
+    assert per_node[3] == [
+        {"space": "config", "base": 0x403000, "size": 0x1000},
+        {"space": "memory", "base": 0x300000, "size": 0x100000},
     ]
 
 
 def test_tile_targets_rejects_a_transposed_space_order(monkeypatch):
-    """Fault injection for the invariant: transposing SPACE_ORDER would put the
-    memory window on target 0, where user_node_endpoint instantiates the config
-    taxi_axi_ram. It must fail in the generator, not silently mis-decode."""
+    """An address_map.SPACE_ORDER edit must not silently transpose the two
+    targets: the endpoint puts the config memory on target 0."""
     monkeypatch.setattr(address_map, "SPACE_ORDER", ("memory", "config"))
-    with pytest.raises(SystemExit, match="must be config-then-memory"):
-        gen_tb_top.tile_targets(_two_space_topology())
+    nodes = [(0, 0, 0, address_map.dst_id(0, 0))]
+    with pytest.raises(SystemExit, match="config-then-memory"):
+        gen_tb_top.tile_targets(_two_space_topology(), nodes)
 
 
 def test_address_map_pack_rejects_zero_size():
@@ -527,3 +525,18 @@ def test_config_probe_window_is_bounded_by_the_config_entry(tmp_path):
     _emit_mcast(tmp_path, 0x2000)
     with pytest.raises(SystemExit, match="overruns the 0x1000 B config entry"):
         _emit_mcast(tmp_path, 0x1000)
+
+
+def test_noc_egress_aperture_sits_above_every_window():
+    """A collective anchored at the issuing node's own region would be answered
+    by the tile crossbar and never reach the NI. The endpoint offsets it into
+    this aperture, which is the first power of two at or above the map's top --
+    so no node window can ever reach it, however the map grows."""
+    tiles = _two_space_tiles([0x100000] * 4)
+    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    base = address_map.noc_egress_base(entries)
+    top = max(e["base"] + e["size"] for e in entries)
+    assert base >= top
+    assert base & (base - 1) == 0          # power of two
+    # The aperture is [base, 2*base), so the whole map offset into it still fits.
+    assert top <= base

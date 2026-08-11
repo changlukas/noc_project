@@ -345,7 +345,8 @@ below are from the port's own view. No wire is shared between the two instances.
 
 ### 5.1 Address map requirements
 
-A space the map declares must give every node exactly one region. A space that leaves a node
+A space the map declares must give every node exactly one region. A region is a node's
+allocation, not an endpoint's: several endpoints may share one. A space that leaves a node
 without one is rejected at load. A map may omit a space entirely.
 
 Four further conditions decide whether that space is also a collective target. Its regions must

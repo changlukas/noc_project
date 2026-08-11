@@ -20,8 +20,8 @@ Usage:
 Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
     - node_id = (y << X_WIDTH) | x  (coordinate-encoded; == linear index for 1-D)
-    - per-node router/nmu/nsu ctx handles; TILE_BASE_ADDR / TILE_ADDR_W, the tile
-      crossbar's per-target windows, from address_map.space_windows() (see
+    - per-node router/nmu/nsu ctx handles; TILE_BASE_ADDR / TILE_SIZE, each node's
+      own tile-crossbar windows, from address_map.node_windows() (see
       tile_targets below), stamped into each endpoint
     - inter-router links wired per XY direction; boundary directions tied off
     - PASS guard: all endpoints done (end_of_sim) AND every node non-vacuous
@@ -140,38 +140,41 @@ def _nodes(topo: dict):
 _DEFAULT_REGION_BYTES = 0x1000
 
 
-def tile_targets(topo: dict):
-    """Tile crossbar windows in crossbar PORT ORDER, one per target.
+def tile_targets(topo: dict, nodes):
+    """Each node's own crossbar windows, in target PORT ORDER (m0 = config,
+    m1 = data).
 
-    Port order and field packing are ONE coupled invariant: m0 = config,
-    m1 = data, and target t occupies field t of the packed parameters.
-    user_node_endpoint puts the config memory on target 0 and the
-    rand_slave data memory on the LAST target. Neither target cares about its
-    base -- the endpoint masks every forwarded address down to the node slot
-    before either memory sees it -- so the role-to-target assignment is the
-    whole invariant, and the check below is what stops an address_map.py
-    SPACE_ORDER edit from transposing the two silently.
+    Port order and field packing are ONE coupled invariant: target t occupies
+    field t of the packed parameters, and user_node_endpoint puts the config
+    memory on target 0 and the data memory on the last target. The check below
+    is what stops an address_map.py SPACE_ORDER edit from transposing the two
+    silently.
 
-    A window spans the WHOLE space, every node's slot, not just this node's --
-    see address_map.space_windows for why a collective needs that. node_addr_w
-    is the per-node slot width the endpoint masks with.
+    Per node, not shared: the crossbar decodes on THIS node's windows so that
+    anything the local initiator addresses elsewhere falls through to the
+    default master port and goes onto the NoC. A request arriving from the
+    fabric always lands in these windows -- the NSU rewrites its
+    node-coordinate field to this node first (nsu::Depacketize::rebase_).
 
-    Returns [{"space", "base", "span", "node_addr_w", "addr_w"}, ...];
-    addr_w = log2(span), which the endpoint turns into the window's end address.
+    Returns ({node_idx: [{"space", "base", "size"}, ...]}, noc_egress_base).
     """
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
     _bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
-    windows = address_map.space_windows(entries)
-    order = [s["space"] for s in windows]
-    # Spelled out here rather than read back from address_map.SPACE_ORDER: this
-    # is the cross-check on that constant, not a restatement of it.
-    if order != ["config", "memory"]:
-        raise SystemExit(
-            f"gen_tb_top: tile space order {order} must be config-then-memory -- "
-            f"user_node_endpoint puts the config memory on target 0 and the "
-            f"data memory on the last target (see address_map.SPACE_ORDER)")
-    return [dict(s, addr_w=s["span"].bit_length() - 1) for s in windows]
+    out = {}
+    for idx, _x, _y, cid in nodes:
+        windows = address_map.node_windows(entries, cid)
+        order = [w["space"] for w in windows]
+        # Spelled out here rather than read back from address_map.SPACE_ORDER:
+        # this is the cross-check on that constant, not a restatement of it.
+        if order != ["config", "memory"]:
+            raise SystemExit(
+                f"gen_tb_top: node {idx} tile space order {order} must be "
+                f"config-then-memory -- user_node_endpoint puts the config memory "
+                f"on target 0 and the data memory on the last target "
+                f"(see address_map.SPACE_ORDER)")
+        out[idx] = windows
+    return out, address_map.noc_egress_base(entries)
 
 
 # Live-neighbor map / opposite-port logic now lives in the emitted SV genvar
@@ -464,21 +467,26 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     rob_enabled = requested_name.endswith("_rob")
 
     # Tile crossbar windows, m0 first (see tile_targets). Emitted as PACKED-array
-    # concatenations in descending index order (last target first) so field t is
-    # target t, the packing user_node_endpoint indexes. Packed because Verilator 5.048
-    # mis-sizes an unpacked-array param override whose size depends on a sibling
-    # param override (here TILE_TARGETS).
+    # concatenations in descending index order (last first) so field t is target t
+    # and row i is node i. Packed because Verilator 5.048 mis-sizes an
+    # unpacked-array param override whose size depends on a sibling param
+    # override (here TILE_TARGETS).
     #
-    # Shared across nodes: a window covers the whole space, so every endpoint
-    # decodes the same two ranges. Only the offset mask below is node-relative,
-    # and it is a width, not a base.
-    targets = tile_targets(topo)
+    # Per node, not shared: each endpoint decodes on its OWN windows, so anything
+    # its initiator addresses elsewhere misses both rules and falls through to the
+    # default master port, which is the NMU.
+    per_node, noc_egress_base = tile_targets(topo, nodes)
+    n_targets = len(per_node[0])
     # ADDR_WIDTH'(...) casts, not sized literals: the field width has to follow
     # ni_params_pkg::AXI_ADDR_WIDTH_DFLT, or a width change would silently
     # mis-align the concatenation.
-    tile_base_addr = ", ".join(f"ADDR_WIDTH'(64'h{t['base']:X})" for t in reversed(targets))
-    tile_addr_w = ", ".join(f"32'd{t['addr_w']}" for t in reversed(targets))
-    tile_node_addr_w = ", ".join(f"32'd{t['node_addr_w']}" for t in reversed(targets))
+    def _rows(key):
+        return ", ".join(
+            "{" + ", ".join(f"ADDR_WIDTH'(64'h{t[key]:X})"
+                             for t in reversed(per_node[i])) + "}"
+            for i in reversed(range(n)))
+    tile_base_addr = _rows("base")
+    tile_size = _rows("size")
 
     lines = []
     w = lines.append
@@ -528,20 +536,22 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // link_perf_monitor tracks the actual receiving buffer depth.")
     w("    localparam int unsigned ROUTER_VC_DEPTH       = "
       "ni_params_pkg::NOC_ROUTER_VC_DEPTH_DFLT;")
-    w("    // Tile crossbar windows, one field per target in taxi port order")
-    w("    // (m0 = config, last = data). A window spans the WHOLE space, every")
-    w("    // node's slot: a multicast AW reaches N nodes carrying the anchor's")
-    w("    // address and nothing rewrites it, so a per-node window would DECERR")
-    w("    // every replica but one. TILE_NODE_ADDR_W is the per-node slot width the")
-    w("    // endpoint masks with to put every replica at the same local offset.")
+    w("    // Tile crossbar windows, one field per target in port order (m0 =")
+    w("    // config, last = data), one row per node. Each endpoint decodes on its")
+    w("    // OWN windows: a hit is tile-local and never touches the NoC, a miss")
+    w("    // falls through to the default master port and goes onto the NoC.")
     w("    // REGION_BYTES = the DV region_bytes constant (NOT a tile size -- that")
     w("    // would blow up MAX_BURST_BEATS below).")
-    w(f"    localparam int unsigned TILE_TARGETS = {len(targets)};")
-    w("    localparam logic [TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = "
+    w(f"    localparam int unsigned TILE_TARGETS = {n_targets};")
+    w(f"    localparam logic [{n - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = "
       f"{{{tile_base_addr}}};")
-    w(f"    localparam logic [TILE_TARGETS-1:0][31:0] TILE_ADDR_W = {{{tile_addr_w}}};")
-    w("    localparam logic [TILE_TARGETS-1:0][31:0] TILE_NODE_ADDR_W = "
-      f"{{{tile_node_addr_w}}};")
+    w(f"    localparam logic [{n - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_SIZE = "
+      f"{{{tile_size}}};")
+    w("    // NoC egress aperture: where a collective write is offset to so the tile")
+    w("    // crossbar routes it to the NI instead of answering it locally. Derived")
+    w("    // from the map (address_map.noc_egress_base), so it can never collide.")
+    w(f"    localparam logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE = "
+      f"ADDR_WIDTH'(64'h{noc_egress_base:X});")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w("")
     w("    // -------------------------------------------------------------------------")
@@ -748,8 +758,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("        user_node_endpoint #(")
     w("            .NODE_ID(i),")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
-    w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR),")
-    w("            .TILE_ADDR_W(TILE_ADDR_W), .TILE_NODE_ADDR_W(TILE_NODE_ADDR_W)")
+    w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
+    w("            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE)")
     w("        ) u_endpoint (")
     w("            .clk_i(clk_i), .rst_ni(rst_ni),")
     w("            .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),")

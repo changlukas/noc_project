@@ -7,16 +7,35 @@ axi:
   ID_WIDTH:
     type: int
     units: bits
-    description: "AXI transaction ID width"
+    description: "AXI transaction ID width at the NI interface and in the flit"
     default: 8
     min: 1
     max: 32
+    # This is the SLAVE-side width in AXI4 IHI 0022 §A5.3.6 terms: an initiator's
+    # own ID plus the master-port index a tile interconnect appends (§A5.3.5).
+    # 8 is that section's recommended slave-component width. INITIATOR_ID_WIDTH
+    # below states the initiator's share; the rest is the index budget, so a tile
+    # may carry 2^(ID_WIDTH - INITIATOR_ID_WIDTH) initiators.
     # NOTE: spec range is 1..32 per AXI4 IHI 0022 §A2.2.1, but c_model + DPI
     # currently hardcode 8 (see static_assert in c_model/include/axi/types.hpp
     # AXI_ID_SPACE check, and the AXI_ID_WIDTH wiring in sim/c/cmodel_dpi.cpp).
     # Widen the impl side before relaxing this max.
     sv_symbol: AXI_ID_WIDTH_DFLT
     cpp_symbol: AXI_ID_WIDTH
+  INITIATOR_ID_WIDTH:
+    type: int
+    units: bits
+    description: "AXI transaction ID width one tile initiator may drive"
+    default: 4
+    min: 1
+    max: 32
+    # AXI4 IHI 0022 §A5.3.6 recommends up to 4 bits at a master component and up
+    # to 4 more for the interconnect's master-port number. Same split as pulp
+    # axi_xbar (AxiIdWidthSlvPorts + $clog2(NoSlvPorts), doc/axi_xbar.md) and as
+    # FlooNoC's per-manager id_width (3..5 across floogen/examples).
+    # Must satisfy INITIATOR_ID_WIDTH + clog2(initiators per tile) <= ID_WIDTH.
+    sv_symbol: AXI_INITIATOR_ID_WIDTH_DFLT
+    cpp_symbol: AXI_INITIATOR_ID_WIDTH
   ADDR_WIDTH:
     type: int
     units: bits

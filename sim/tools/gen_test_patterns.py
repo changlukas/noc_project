@@ -135,7 +135,7 @@ def axi_widths():
     Read directly (values only); the specgen validator owns schema checking."""
     axi = yaml.safe_load(_CONSTANTS_YAML.read_text(encoding="utf-8"))["axi"]
     return {
-        "id":   int(axi["ID_WIDTH"]["default"]),
+        "id":   int(axi["INITIATOR_ID_WIDTH"]["default"]),
         "addr": int(axi["ADDR_WIDTH"]["default"]),
         "data": int(axi["DATA_WIDTH"]["default"]),
     }
@@ -846,7 +846,8 @@ def main(argv=None):
     widths = axi_widths()
     if n_nodes * a.ids_per_tile > (1 << widths["id"]):
         ap.error(f"--ids-per-tile {a.ids_per_tile} x {n_nodes} nodes exceeds the "
-                 f"{1 << widths['id']} AXI id space; per-tile id blocks would overlap")
+                 f"{1 << widths['id']} AXI id space one initiator may drive "
+                 f"(constants.yaml INITIATOR_ID_WIDTH); per-tile id blocks would overlap")
     base_local = 0x1000
     # Auto-derived dst-tile window: n_nodes * transactions_per_node slots, each
     # `stride` bytes apart. stride matches alloc_unique_offset's own
