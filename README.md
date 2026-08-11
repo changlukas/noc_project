@@ -116,7 +116,7 @@ injection rate and mode 1 stays the saturation-curve instrument.
 | var | default | meaning |
 |---|---|---|
 | `INJECTION_RATE` | `1.0` | per-cycle injection probability; `0.0` never injects and the run ends at the testbench watchdog |
-| `INJECTION_COUNT` | `200` (modes 1, 2), `4` (mode 0) | transactions per node |
+| `INJECTION_COUNT` | `200` (modes 1, 2), `64` (mode 0) | transactions per node |
 | `IDS_PER_INITIATOR` | generator default (1) | distinct AXI ids one initiator draws from |
 | `HOTSPOT` | `5` | target node for the `hotspot` pattern |
 

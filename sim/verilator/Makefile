@@ -187,7 +187,12 @@ PATTERN         ?= neighbor
 MCAST_SHAPE     ?= row
 INJECTION_MODE  ?= 0
 INJECTION_RATE  ?= 1.0
-INJECTION_COUNT ?= $(if $(filter 1 2,$(INJECTION_MODE)),200,4)
+# Directed default is 64: measured on mesh_4x4_vc4_rob uniform_random at 4 ids,
+# the RoB high-water mark rises 3 -> 12 -> 60 (of 128) across counts 4, 16, 64
+# and then saturates at 75 by 128, so 64 is the largest count where injection
+# still sets the load rather than the fabric. At 4 the RoB sat at 2% and no
+# depth was anywhere near binding.
+INJECTION_COUNT ?= $(if $(filter 1 2,$(INJECTION_MODE)),200,64)
 HOTSPOT         ?= 5
 
 # Distinct AXI ids one initiator draws from (gen_test_patterns

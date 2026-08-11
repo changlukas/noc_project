@@ -133,7 +133,29 @@ scales with the count through the `+num_reads` / `+num_writes` plusargs
 - `read_slot_hwm` is materially above 3 — if it is not, the load still is not the limiter and
   the number goes up again before 5c starts.
 
-**Status**: Not Started
+**Measured**, `mesh_4x4_vc4_rob uniform_random`, `read_slot_hwm` of 128:
+
+| `INJECTION_COUNT` | 4 | 16 | 64 | 128 |
+|---|---|---|---|---|
+| at 4 ids | 3 | 12 | **60** | 75 |
+| at 1 id | — | — | 63 | 58 |
+
+64 was taken rather than 128: the mark rises almost linearly to 64 and then saturates, so past
+that the fabric sets the load and the count no longer does. 60 of 128 is 47% occupancy against
+the 2% the stage started from.
+
+**The id axis does not move the mark in one direction, and 5c has to explain why.** At 128 four
+ids give 75 against one id's 58; at 64 the order reverses, 60 against 63. Destinations are
+identical across those pairs — Stage 5a put ids on their own rng stream precisely so this
+comparison would be clean — so the difference is the ids alone.
+
+A candidate mechanism, to be tested rather than assumed: a fresh id's first transaction takes the
+idle-ID bypass and allocates no slot (`rob.hpp`, "Idle-ID bypass"), so spreading traffic over
+more ids buys more bypasses while the lists are short, and stops buying them once every list is
+busy. If that is right the crossover is a property of count-per-id, not of count. One
+measurement each side of it is not enough to claim it.
+
+**Status**: Complete
 
 ## Stage 5c — Run the multi-ID axis and triage
 
