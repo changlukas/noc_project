@@ -106,3 +106,21 @@ end. pulp `axi_xbar` exposes no such hook: its rules are address ranges (`addr_d
 and its per-slave-port default and `Connectivity` are both static. Reaching the select would mean
 assembling a crossbar out of `axi_demux` and `axi_mux` and owning it. Not worth it for testbench
 scaffolding; it is worth it for a real tile.
+
+`axi_test::axi_rand_slave` in `MAPPED` mode aborts with a null-pointer dereference at
+`axi_test.sv:1489` as soon as any of its wait bounds is non-zero: `recv_ws` reads `aw_queue[0]`
+one line after `wait (aw_queue.size() > 0)`, and `send_bs` can `pop_front` the same entry in
+between. The tile memory no longer uses it -- `axi_delayer` in front of `axi_sim_mem` replaced it
+-- but `axi_test.sv` stays vendored for `axi_file_master` and `axi_scoreboard`, so the next
+`MAPPED` user meets it again.
+
+| | |
+|---|---|
+| trigger | `RESP_MAX_WAIT` or `R_MAX_WAIT` > 0. `AX_MAX_WAIT = 100` alone passes |
+| not the trigger | write concurrency -- `MAX_OUTSTANDING=1` aborts identically |
+| not the cause | Verilator `wait (q.size() > 0)` blocks correctly in a standalone 5.048 probe |
+| why upstream never sees it | `MAPPED` appears nowhere in FlooNoC's `hw/` or pulp's `axi/test/`, and the whole `aw_queue` read is inside `if (MAPPED)` |
+
+The last row is inference from reading, not measurement: a `$display` inserted at the read never
+reached the built binary, so its silence proved nothing, and the fix landed by retiring the model
+rather than by confirming the race directly.

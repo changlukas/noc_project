@@ -102,6 +102,8 @@ XBAR_SRC := \
     $(PULP_CC)/spill_register_flushable.sv \
     $(PULP_CC)/spill_register.sv \
     $(PULP_CC)/stream_register.sv \
+    $(PULP_CC)/lfsr_16bit.sv \
+    $(PULP_CC)/stream_delay.sv \
     $(PULP_AXI)/axi_id_prepend.sv \
     $(PULP_AXI)/axi_atop_filter.sv \
     $(PULP_AXI)/axi_err_slv.sv \
@@ -111,7 +113,9 @@ XBAR_SRC := \
     $(PULP_AXI)/axi_demux.sv \
     $(PULP_AXI)/axi_mux.sv \
     $(PULP_AXI)/axi_xbar_unmuxed.sv \
-    $(PULP_AXI)/axi_xbar.sv
+    $(PULP_AXI)/axi_xbar.sv \
+    $(PULP_AXI)/axi_delayer.sv \
+    $(PULP_AXI)/axi_sim_mem.sv
 
 # noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
 # BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module

@@ -1,5 +1,6 @@
 import glob
 import os
+import re
 
 import pytest
 
@@ -381,6 +382,36 @@ def test_tile_targets_rejects_a_transposed_space_order(monkeypatch):
     nodes = [(0, 0, 0, address_map.dst_id(0, 0))]
     with pytest.raises(SystemExit, match="config-then-memory"):
         gen_tb_top.tile_targets(_two_space_topology(), nodes)
+
+
+@pytest.mark.parametrize("profile", sorted(gen_tb_top._MEM_LATENCY_PROFILES))
+def test_mem_latency_profile_reaches_the_right_four_parameters(monkeypatch, profile):
+    """The profile tuple is (stall_in, stall_out, delay_in, delay_out) but the
+    endpoint takes four separately named parameters, so a transposition would
+    silently run the wrong latency -- and input/output transposed is invisible on
+    a symmetric profile. Emit each one and read the values back off the names."""
+    monkeypatch.setattr(gen_tb_top, "_MEM_LATENCY", profile)
+    sv = gen_tb_top.emit_tb_top(gen_tb_top.load_topology("mesh_2x2_vc1"))
+    stall_in, stall_out, delay_in, delay_out = gen_tb_top._MEM_LATENCY_PROFILES[profile]
+    for name, want in (("MEM_STALL_RANDOM_INPUT", f"1'b{stall_in}"),
+                       ("MEM_STALL_RANDOM_OUTPUT", f"1'b{stall_out}"),
+                       ("MEM_FIXED_DELAY_INPUT", str(delay_in)),
+                       ("MEM_FIXED_DELAY_OUTPUT", str(delay_out))):
+        assert re.search(rf"localparam\s[^;]*\b{name}\s*=\s*{re.escape(want)};", sv), \
+            f"{profile}: {name} != {want}"
+        # And it must actually reach the endpoint, not just sit in tb_top.
+        assert f".{name}({name})" in sv
+
+
+def test_watchdog_grows_with_the_memory_latency_profile(monkeypatch):
+    """A stalling memory that the watchdog is not sized for reads as a hang."""
+    def k(profile):
+        monkeypatch.setattr(gen_tb_top, "_MEM_LATENCY", profile)
+        sv = gen_tb_top.emit_tb_top(gen_tb_top.load_topology("mesh_2x2_vc1"))
+        return int(re.search(r"MEM_CYC_PER_BEAT\s*=\s*(\d+);", sv).group(1))
+
+    assert k("ideal") == 0
+    assert k("random") == gen_tb_top._STALL_RANDOM_MAX_CYCLES
 
 
 def test_address_map_pack_rejects_zero_size():

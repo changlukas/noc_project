@@ -85,7 +85,8 @@ where noted.
 | VIP | role | connects to |
 |---|---|---|
 | `axi_file_master` | directed driver, two-phase (drain writes, then issue reads) from per-node stimulus files | `master_dv` |
-| `axi_rand_slave` (`MAPPED` mode) | tile memory backing the node's address window | `slave_dv` |
+| `axi_sim_mem` | tile memory backing the node's address window, one per space | `tile_mem[t]` |
+| `axi_delayer` | the tile memory's latency, separate from its storage; profile in `gen_tb_top.py` `_MEM_LATENCY` | between `tile_mst[t]` and `tile_mem[t]` |
 | `axi_scoreboard` | in-endpoint, wired on `master_dv`; per-transaction write-vs-readback data-integrity check | `master_dv` |
 | `axi_bw_monitor` | passive throughput and latency monitor | `master_dv` |
 

@@ -8,7 +8,8 @@ The fabric/tb split:
     DPI `ctx` handles arrive as PORTS — the fabric itself does no cmodel_*_create.
   - tb_top_<topology>.sv : clk/rst, watchdog, cmodel_*_create (router/nmu/nsu ctx),
     instantiates the fabric, attaches a user_node_endpoint (pulp axi_file_master +
-    axi_rand_slave + in-endpoint scoreboard + bw monitor) per node + exit logic.
+    axi_delayer + axi_sim_mem + in-endpoint scoreboard + bw monitor) per node + exit
+    logic.
 
 Generated artifacts: edit the generator or the topology YAML, never the emitted
 .sv directly. tb_top_<topology>.sv includes the fabric (SV `include), resolved via
@@ -133,11 +134,37 @@ def _nodes(topo: dict):
     return out, x_dim, y_dim
 
 
-# REGION_BYTES: the per-node MAPPED-slave memory window. DV-side tb constant
+# REGION_BYTES: the per-node tile-memory window. DV-side tb constant
 # (FlooNoC mesh tb pattern), not a runtime knob. Distinct from
 # gen_test_patterns.py's auto-derived directed-side region_bytes (a different,
 # per-run-derived value of the same name).
 _DEFAULT_REGION_BYTES = 0x1000
+
+# Tile-memory latency, as axi_delayer settings for every endpoint's two
+# memories: (stall_random_input, stall_random_output, fixed_delay_input,
+# fixed_delay_output). Input covers AW/W/AR, output covers B/R. DV-side tb
+# constants like REGION_BYTES above, not a runtime knob: switch profile by
+# editing _MEM_LATENCY and rebuilding.
+#
+#   ideal   fixed delay 0 with no random stall takes stream_delay's
+#           gen_pass_through branch, so the delayer is wires. The FABRIC is the
+#           bottleneck, which is what every measurement to date assumed and
+#           what the injection sweep needs -- a stalling memory hides fabric
+#           saturation.
+#   random  upstream's random-stall mode, both directions. lfsr_16bit drives a
+#           $clog2(16)=4-bit reload, so a stalled handshake waits 0-15 cycles.
+#           Backpressure reaches the NSU and travels back through the fabric,
+#           which is how the NMU outstanding pool and the RoB fill get
+#           exercised at all.
+_MEM_LATENCY_PROFILES = {
+    "ideal": (0, 0, 0, 0),
+    "random": (1, 1, 0, 0),
+}
+_MEM_LATENCY = "ideal"
+
+# Worst-case cycles a stalled handshake holds, from lfsr_16bit's
+# refill_way_bin width ($clog2(16) = 4 bits). The watchdog is sized off it.
+_STALL_RANDOM_MAX_CYCLES = 15
 
 
 def tile_targets(topo: dict, nodes):
@@ -475,6 +502,12 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     # Per node, not shared: each endpoint decodes on its OWN windows, so anything
     # its initiator addresses elsewhere misses both rules and falls through to the
     # default master port, which is the NMU.
+    stall_in, stall_out, delay_in, delay_out = _MEM_LATENCY_PROFILES[_MEM_LATENCY]
+    # Per handshake, whichever of the two mechanisms is armed on that direction.
+    mem_cyc_per_beat = max(
+        _STALL_RANDOM_MAX_CYCLES if stall_in else delay_in,
+        _STALL_RANDOM_MAX_CYCLES if stall_out else delay_out,
+    )
     per_node, noc_egress_base = tile_targets(topo, nodes)
     n_targets = len(per_node[0])
     # ADDR_WIDTH'(...) casts, not sized literals: the field width has to follow
@@ -499,7 +532,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("//")
     w(f"// {n} nodes live inside noc_fabric_{name} (ni_wrap=NMU+NSU + REQ/RSP router per")
     w("// node, joined by directional links). tb_top creates the DPI handles, attaches a")
-    w("// user_node_endpoint (pulp axi_file_master + axi_rand_slave + FlooNoC")
+    w("// user_node_endpoint (pulp axi_file_master + axi_delayer/axi_sim_mem + FlooNoC")
     w("// axi_bw_monitor) to each node's master/slave AXI faces, and owns the exit logic.")
     w("// Checking: pulp axi_scoreboard lives inside each endpoint on master_dv,")
     w("// comparing read data end-to-end through the NoC against golden write data.")
@@ -553,6 +586,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w(f"    localparam logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE = "
       f"ADDR_WIDTH'(64'h{noc_egress_base:X});")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
+    w(f'    // Tile-memory latency profile "{_MEM_LATENCY}" (gen_tb_top.py')
+    w("    // _MEM_LATENCY_PROFILES). Every endpoint's two memories sit behind an")
+    w("    // axi_delayer carrying these settings; input covers AW/W/AR, output B/R.")
+    w(f"    localparam bit          MEM_STALL_RANDOM_INPUT  = 1'b{stall_in};")
+    w(f"    localparam bit          MEM_STALL_RANDOM_OUTPUT = 1'b{stall_out};")
+    w(f"    localparam int unsigned MEM_FIXED_DELAY_INPUT   = {delay_in};")
+    w(f"    localparam int unsigned MEM_FIXED_DELAY_OUTPUT  = {delay_out};")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Liveness trace. The watchdog below reports that time ran out; these two")
@@ -592,12 +632,21 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    end")
     w("")
     w("    // -------------------------------------------------------------------------")
-    w("    // Watchdog - sized by worst-case beats in flight: measured vc1 fabric rate is")
-    w("    // ~15-30 cycles per R/W beat (credit window 4, all nodes contending), K=40")
-    w("    // adds margin. MAX_BURST_BEATS caps the largest burst per REGION_BYTES.")
+    w("    // Watchdog - sized by worst-case beats in flight. Two per-beat costs,")
+    w("    // named separately because only one of them moves with the latency")
+    w("    // profile:")
+    w("    //   fabric  measured vc1 rate is ~15-30 cycles per R/W beat (credit window")
+    w("    //           4, all nodes contending); 40 adds margin.")
+    w("    //   memory  the axi_delayer above. stream_delay holds one handshake at a")
+    w("    //           time on each channel, so its bound is per beat on the")
+    w("    //           request side and again on the response side, not per")
+    w("    //           transaction.")
+    w("    // MAX_BURST_BEATS caps the largest burst per REGION_BYTES.")
     w("    // -------------------------------------------------------------------------")
-    w("    localparam int unsigned TIMEOUT_BASE    = 100000;")
-    w("    localparam int unsigned K_CYC_PER_BEAT  = 40;")
+    w("    localparam int unsigned TIMEOUT_BASE        = 100000;")
+    w("    localparam int unsigned FABRIC_CYC_PER_BEAT = 40;")
+    w(f"    localparam int unsigned MEM_CYC_PER_BEAT    = {mem_cyc_per_beat};")
+    w("    localparam int unsigned K_CYC_PER_BEAT  = FABRIC_CYC_PER_BEAT + MEM_CYC_PER_BEAT;")
     w("    localparam int unsigned MAX_BURST_BEATS = "
       "int'(REGION_BYTES) / (DATA_WIDTH / 8);")
     w("    int unsigned tb_num_reads  = 8;   // mirror endpoint defaults")
@@ -744,12 +793,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("")
 
     # Test endpoints per node via genvar generate. user_node_endpoint = pulp
-    # file_master + taxi tile crossbar + config RAM + rand_slave + bw monitor.
+    # file_master + pulp axi_xbar tile crossbar + two delayed sim memories + bw monitor.
     # user_node_endpoint.sv is USER-OWNED (committed, hand-written); the
     # generator only INSTANTIATES it and stamps the tile windows.
     w("    // -------------------------------------------------------------------------")
     w("    // Test endpoints - one user_node_endpoint per node (pulp file_master +")
-    w("    // taxi tile crossbar + config RAM + rand_slave + in-endpoint scoreboard +")
+    w("    // axi_xbar tile crossbar + two axi_delayer/axi_sim_mem targets +")
+    w("    // in-endpoint scoreboard +")
     w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT regenerated.")
     w("    // -------------------------------------------------------------------------")
     w(f"    logic        end_of_sim [{n}];")
@@ -759,7 +809,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("            .NODE_ID(i),")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
-    w("            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE)")
+    w("            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE),")
+    w("            .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),")
+    w("            .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),")
+    w("            .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),")
+    w("            .MEM_FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)")
     w("        ) u_endpoint (")
     w("            .clk_i(clk_i), .rst_ni(rst_ni),")
     w("            .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),")

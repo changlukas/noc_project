@@ -7,17 +7,17 @@
 // Slave face (tile decode): the NSU forwards the request's own address --
 // nothing rebases anywhere -- so the crossbar decodes on this node's two
 // windows exactly as the topology address_map placed them, config and memory
-// at their own global bases. Both targets are pulp axi_rand_slave, MAPPED, for
-// the three properties that historically surfaced fabric bugs: randomized
-// backpressure and response delay, multiple outstanding with cross-ID
-// selection, and X on unwritten addresses.
+// at their own global bases. Each target is a pulp axi_sim_mem behind a pulp
+// axi_delayer: storage and timing are separate modules, so the latency profile
+// moves without touching the memory and a DRAM behavioural model can later
+// replace the memory without touching the timing.
 // pulp axi_scoreboard is usable on the Verilator directed axis: the 8'hxx->8'h00
 // 2-state collapse only bites reads of never-written addresses, which a
 // full-readback directed run never issues. Wired in-endpoint on master_dv.
 //
 // Run flavor: data integrity — axi_file_master two-phase (write -> barrier ->
-// read) + in-endpoint axi_scoreboard on master_dv, MAPPED rand_slave as tile
-// memory. Stimulus from <stim_dir>/node<ID>/{write,read}.txt (+stim_dir=).
+// read) + in-endpoint axi_scoreboard on master_dv, axi_sim_mem as tile memory.
+// Stimulus from <stim_dir>/node<ID>/{write,read}.txt (+stim_dir=).
 //
 // Plusargs: +num_reads=<n> +num_writes=<n> (per node, defaults below).
 
@@ -49,6 +49,20 @@ module user_node_endpoint #(
     // NI. Derived from the address map (address_map.noc_egress_base), so every
     // node window sits below it by construction. See g_tile_xbar below.
     parameter logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE,
+    // Tile-memory latency, one profile stamped by gen_tb_top.py from
+    // _MEM_LATENCY. Input covers AW/W/AR, output covers B/R (axi_delayer.sv
+    // splits its stream_delay instances exactly that way). The defaults are the
+    // "ideal" profile: FIXED_DELAY 0 with no random stall takes
+    // stream_delay's gen_pass_through branch, so the memory answers the cycle
+    // it is asked and the FABRIC is the bottleneck -- standard NoC-eval
+    // practice, booksim2 consumes at the sink.
+    // STALL_RANDOM draws from lfsr_16bit, whose refill_way_bin is
+    // $clog2(WIDTH)=4 bits, so a stalled handshake waits 0-15 cycles. The
+    // watchdog in tb_top is sized off that bound.
+    parameter bit          MEM_STALL_RANDOM_INPUT  = 1'b0,
+    parameter bit          MEM_STALL_RANDOM_OUTPUT = 1'b0,
+    parameter int unsigned MEM_FIXED_DELAY_INPUT   = 0,
+    parameter int unsigned MEM_FIXED_DELAY_OUTPUT  = 0,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
     parameter int unsigned DEFAULT_NUM_WRITES = 8,
     // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH). Master-side DV interfaces
@@ -77,22 +91,6 @@ module user_node_endpoint #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
         .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) master_dv (clk_i);
-
-    // Same AXI_USER_WIDTH as master_dv (user bits tied 0 on this face):
-    // mixed user widths would create two axi_test class specializations,
-    // and the file_master's class-scope beat typedefs mis-resolve (v5.048)
-    // when more than one axi_driver specialization exists.
-    AXI_BUS_DV #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
-    ) slave_dv (clk_i);
-
-    // Config target's face, same widths so it shares the axi_rand_slave
-    // specialization (see above).
-    AXI_BUS_DV #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
-    ) config_dv (clk_i);
 
     // Master face. The file_master's own traffic is what every in-endpoint
     // checker watches, so it is flattened once here and the checkers read that
@@ -342,8 +340,8 @@ module user_node_endpoint #(
         else $fatal(1, "node%0d: NSU drove an AXI id above the initiator share", NODE_ID);
 
     // Crossbar sizing. Testbench limits, provisioned so none of them becomes the
-    // bottleneck: the pressure is supposed to come from rand_slave's randomized
-    // delays. MaxMstTrans 64 is what one initiator may have in flight -- an
+    // bottleneck: the pressure is supposed to come from the fabric, or from the
+    // tile memory's delayer. MaxMstTrans 64 is what one initiator may have in flight -- an
     // NMU's pool is 32, but under hotspot every node targets one tile, so 32
     // would throttle; overflow stalls, it never errors. MaxSlvTrans 32 is the
     // per-target in-flight limit -- deliberately NOT 1 on the config port: the
@@ -424,13 +422,47 @@ module user_node_endpoint #(
         .default_mst_port_i(tile_default_mst)
     );
 
-    // m0 / m1 -> the two memories. AXI_BUS and AXI_BUS_DV carry the same field
-    // names at the same widths, so pulp's own assign macro is the whole bridge.
-    // One memory model for both roles is a placeholder, not a ruling: what sits
-    // behind each window is undecided -- an SRAM or a DRAM model are both on the
-    // table -- so both share the model the data target already used.
-    `AXI_ASSIGN(config_dv, tile_mst[0])
-    `AXI_ASSIGN(slave_dv,  tile_mst[DATA_TARGET])
+    // m0 / m1 -> the two tile memories, each behind its own delayer. Storage and
+    // timing are separate modules on purpose: what sits behind each window is
+    // undecided -- an SRAM or a DRAM model are both on the table -- and when a
+    // DRAM behavioural model arrives it replaces axi_sim_mem alone, leaving the
+    // decode, the delayer and this wiring untouched.
+    //
+    // axi_sim_mem addresses every beat through axi_pkg::beat_addr, so INCR,
+    // FIXED and WRAP all land correctly. UNINITIALIZED_DATA("undefined") gives
+    // X on a never-written address, which the directed run never reads.
+    AXI_BUS #(
+        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
+        .AXI_ID_WIDTH(ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH)
+    ) tile_mem [TILE_TARGETS-1:0] ();
+
+    for (genvar t = 0; t < TILE_TARGETS; t++) begin : g_tile_mem
+        axi_delayer_intf #(
+            .AXI_ID_WIDTH(ID_WIDTH), .AXI_ADDR_WIDTH(ADDR_WIDTH),
+            .AXI_DATA_WIDTH(DATA_WIDTH),  .AXI_USER_WIDTH(AWUSER_WIDTH),
+            .STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
+            .STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),
+            .FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),
+            .FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)
+        ) i_delayer (
+            .clk_i(clk_i), .rst_ni(rst_ni),
+            .slv(tile_mst[t]), .mst(tile_mem[t])
+        );
+
+        axi_sim_mem_intf #(
+            .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
+            .AXI_ID_WIDTH(ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH),
+            .WARN_UNINITIALIZED(1'b0), .UNINITIALIZED_DATA("undefined"),
+            .APPL_DELAY(ApplTime), .ACQ_DELAY(TestTime)
+        ) i_mem (
+            .clk_i(clk_i), .rst_ni(rst_ni),
+            .axi_slv(tile_mem[t]),
+            .mon_w_valid_o(), .mon_w_addr_o(), .mon_w_data_o(),
+            .mon_w_id_o(), .mon_w_user_o(), .mon_w_beat_count_o(), .mon_w_last_o(),
+            .mon_r_valid_o(), .mon_r_addr_o(), .mon_r_data_o(),
+            .mon_r_id_o(), .mon_r_user_o(), .mon_r_beat_count_o(), .mon_r_last_o()
+        );
+    end
 
     // m2 -> the NMU: this node's share of the traffic that goes on the NoC.
     assign master_axi_req_o.awid     = tile_mst[NMU_TARGET].aw_id;
@@ -489,20 +521,6 @@ module user_node_endpoint #(
         .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(AWUSER_WIDTH),
         .TA(ApplTime), .TT(TestTime)
     ) file_master_t;
-    // Zero response wait: an ideal sink so the FABRIC is the bottleneck, not the
-    // slave. It now sits behind the tile crossbar, whose CUT_ALL_AX spill
-    // registers add a cycle or two and smooth the randomized backpressure a
-    // little before it reaches the NSU. The pulp default
-    // (AX_MAX_WAIT_CYCLES=100, RESP=20, R=5) throttles
-    // responses and hides fabric saturation (measured util ~1.2% at greedy
-    // injection). Standard NoC-eval practice (booksim2 consumes at the sink).
-    // The directed two-phase run is a data-integrity gate (scoreboard compares
-    // read data vs golden, timing-independent), so a fast slave keeps it passing.
-    typedef axi_test::axi_rand_slave #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(AWUSER_WIDTH),
-        .TA(ApplTime), .TT(TestTime), .MAPPED(1'b1),
-        .AX_MAX_WAIT_CYCLES(0), .R_MAX_WAIT_CYCLES(0), .RESP_MAX_WAIT_CYCLES(0)
-    ) rand_slave_t;
     typedef axi_test::axi_scoreboard #(
         .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(AWUSER_WIDTH), .TT(TestTime)
     ) scoreboard_t;
@@ -542,31 +560,12 @@ module user_node_endpoint #(
     end
 
     file_master_t file_master;
-    rand_slave_t  rand_slave;
-    rand_slave_t  config_slave;
     mcast_preload_scoreboard scoreboard;
 
     // Stimulus root: <stim_dir>/node<NODE_ID>/{write,read}.txt (emitter output).
     string stim_dir = "sim/test_patterns/directed";
     string write_path;
     string read_path;
-
-    // MAPPED memory slaves = this node's two tile memories (they persist across
-    // both phases). Same class for both roles, so neither can reorder a read
-    // past a write the other would have held.
-    initial begin
-        rand_slave = new(slave_dv);
-        rand_slave.reset();
-        @(posedge rst_ni);
-        rand_slave.run();
-    end
-
-    initial begin
-        config_slave = new(config_dv);
-        config_slave.reset();
-        @(posedge rst_ni);
-        config_slave.run();
-    end
 
     // In-endpoint scoreboard on master_dv: golden from this node's W, check on
     // its R (end-to-end round trip through the NoC). enable_all_checks turns on
@@ -642,7 +641,7 @@ module user_node_endpoint #(
             b_returned <= '{default: '0};
         end else if (mst_flat_rsp.bvalid && mst_flat_req.bready) begin
             b_returned[mst_flat_rsp.bid] <= b_returned[mst_flat_rsp.bid] + 1;
-            // Directed runs use an always-OKAY MAPPED slave, so any error
+            // axi_sim_mem answers every mapped access OKAY, so any error
             // response here is a fabric bug (e.g. a corrupted merged B), or a
             // write that missed every tile window. +decerr_fault_wr=1 proves it
             // fires.
