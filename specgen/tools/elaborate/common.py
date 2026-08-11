@@ -24,12 +24,13 @@ def provenance_banner(
 ) -> str:
     """Return the provenance banner required by design doc §6.6.
 
-    The '// Generated at:' line is last so --check mode can strip it by
-    matching that prefix without disturbing the other stable lines.
+    No timestamp. It carried no meaning -- --check already stripped it before
+    comparing -- and its only effect was to make every regeneration differ from
+    the committed file, so any run that emitted into the tree left it dirty.
+    Without it, regeneration is idempotent: same source, same bytes.
     """
     json_bytes = source_json_path.read_bytes()
     sha = hashlib.sha256(json_bytes).hexdigest()[:12]
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     rel_path = _repo_relative(source_json_path)
     sep = f"{comment_prefix} " + "-" * 76
     lines = [
@@ -38,7 +39,6 @@ def provenance_banner(
         f"{comment_prefix} Source:    {rel_path}",
         f"{comment_prefix} Source SHA: {sha}",
         f"{comment_prefix} Generator version: {generator_version}",
-        f"{comment_prefix} Generated at: {ts}",
         sep,
         "",
     ]
