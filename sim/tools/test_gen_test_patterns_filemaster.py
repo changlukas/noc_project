@@ -164,6 +164,17 @@ def test_check_flit_capacity_rejects_dim_below_minimum(x_dim, y_dim):
         gt._check_flit_capacity(topo, "dummy_path.yaml")
 
 
+@pytest.mark.parametrize("span_key,dim_key", [("x_span", "x_dim"), ("y_span", "y_dim")])
+def test_check_flit_capacity_rejects_span_wider_than_array_with_no_stated_region(span_key, dim_key):
+    """A wider span with no stated tile region must not silently disarm the
+    cross-row reachability guard -- the region's extent must equal the array's."""
+    import gen_tb_top as gt
+
+    topo = {"topology": {"x_dim": 2, "y_dim": 2, "num_vc": 1, span_key: 3}}
+    with pytest.raises(SystemExit, match=f"tile {dim_key[0]} region"):
+        gt._check_flit_capacity(topo, "dummy_path.yaml")
+
+
 def test_main_sources_tile_base_from_address_map(tmp_path):
     """End-to-end: main() threads the packed address_map base into the emitted address."""
     topo_path = tmp_path / "custom.yaml"

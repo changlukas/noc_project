@@ -128,6 +128,17 @@ def _check_flit_capacity(topo: dict, path) -> None:
         errors.append(f"tile x region [{tx_first},{tx_last}] outside 0..{x_span - 1}")
     if not 0 <= ty_first <= ty_last < y_span:
         errors.append(f"tile y region [{ty_first},{ty_last}] outside 0..{y_span - 1}")
+    # A span wider than the array with no stated region defaults to the whole
+    # span, which would silently disarm the cross-row reachability guard
+    # (check_dst_reachable) -- the region's extent must equal the array's.
+    if tx_last - tx_first + 1 != x_dim:
+        errors.append(
+            f"tile x region [{tx_first},{tx_last}] extent {tx_last - tx_first + 1} != "
+            f"x_dim={x_dim} (region must equal the router array)")
+    if ty_last - ty_first + 1 != y_dim:
+        errors.append(
+            f"tile y region [{ty_first},{ty_last}] extent {ty_last - ty_first + 1} != "
+            f"y_dim={y_dim} (region must equal the router array)")
     if num_vc > cap_vc:
         errors.append(f"num_vc={num_vc} > 2^VC_ID_WIDTH={cap_vc}")
     if errors:

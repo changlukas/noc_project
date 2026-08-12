@@ -154,6 +154,14 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
            "topology: tile x region must sit inside the route span");
     assert(tile_y_first <= tile_y_last && tile_y_last < y_span &&
            "topology: tile y region must sit inside the route span");
+    // A span wider than the array with no stated region defaults to the whole
+    // span, which is exactly the silent mis-delivery check_dst_reachable's
+    // cross-row guard exists to remove -- so the region's extent is required
+    // to equal the array's regardless of whether it was stated or defaulted.
+    assert(tile_x_last - tile_x_first + 1 == x_dim &&
+           "topology: tile x region extent must equal the router array (x_dim)");
+    assert(tile_y_last - tile_y_first + 1 == y_dim &&
+           "topology: tile y region extent must equal the router array (y_dim)");
     YAML::Node am = root["address_map"];
     assert(am && "address_map block missing from topology YAML");
     YAML::Node tiles_node = am["tiles"];

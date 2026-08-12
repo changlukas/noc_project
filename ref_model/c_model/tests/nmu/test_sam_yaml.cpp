@@ -189,6 +189,47 @@ TEST(SamYaml, StatedSpanPacksOverTheSpanAndKeepsTheTileRegion) {
     EXPECT_EQ(memory->y_last, 1u);
 }
 
+// A wider span with no stated tile region defaults the region to the whole
+// span (x = 0..2), which must still have extent == x_dim -- otherwise the
+// region silently covers the peripheral column and disarms
+// check_dst_reachable's cross-row guard by omission instead of by a rejected
+// declaration. Symmetric on y.
+TEST(SamYamlDeath, TileRegionExtentMustEqualTheRouterArray) {
+    auto path_x = ni::cmodel::testing::unique_temp_path("sam_region_extent_x.yaml");
+    std::ofstream(path_x) << "topology:\n"
+                             "  name: t\n"
+                             "  x_dim: 2\n"
+                             "  y_dim: 2\n"
+                             "  num_vc: 1\n"
+                             "  x_span: 3\n"
+                             "address_map:\n"
+                             "  tiles:\n"
+                             "    - { x: 0, y: 0, size: 0x100000 }\n"
+                             "    - { x: 1, y: 0, size: 0x100000 }\n"
+                             "    - { x: 2, y: 0, size: 0x100000 }\n"
+                             "    - { x: 0, y: 1, size: 0x100000 }\n"
+                             "    - { x: 1, y: 1, size: 0x100000 }\n"
+                             "    - { x: 2, y: 1, size: 0x100000 }\n";
+    EXPECT_DEATH(load_sam_table(path_x), "tile x region extent");
+
+    auto path_y = ni::cmodel::testing::unique_temp_path("sam_region_extent_y.yaml");
+    std::ofstream(path_y) << "topology:\n"
+                             "  name: t\n"
+                             "  x_dim: 2\n"
+                             "  y_dim: 2\n"
+                             "  num_vc: 1\n"
+                             "  y_span: 3\n"
+                             "address_map:\n"
+                             "  tiles:\n"
+                             "    - { x: 0, y: 0, size: 0x100000 }\n"
+                             "    - { x: 1, y: 0, size: 0x100000 }\n"
+                             "    - { x: 0, y: 1, size: 0x100000 }\n"
+                             "    - { x: 1, y: 1, size: 0x100000 }\n"
+                             "    - { x: 0, y: 2, size: 0x100000 }\n"
+                             "    - { x: 1, y: 2, size: 0x100000 }\n";
+    EXPECT_DEATH(load_sam_table(path_y), "tile y region extent");
+}
+
 // A stated tile region is what arms check_dst_reachable, and the guard reads
 // the same declaration collective eligibility does -- so a declaration the
 // entries reject would take the guard down with it, silently. Same topology as
