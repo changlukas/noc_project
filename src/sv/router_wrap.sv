@@ -31,7 +31,7 @@
 // DPI split one-call-per-network (S3a T5 debug finding): set_inputs/
 // get_outputs are split into three calls each (req/rsp/dat), one tick() call
 // shared. The original single combined call married three DIFFERENT flit
-// widths (137/127/629 b) as [LINK_PORTS]-sized unpacked-array arguments in
+// widths (132/122/629 b) as [LINK_PORTS]-sized unpacked-array arguments in
 // one DPI signature -- the only place in this codebase asking one DPI call to
 // marshal more than one parameterized per-element width. Co-sim showed
 // rx_req_ready/rx_rsp_ready permanently stuck at 0 despite the standalone

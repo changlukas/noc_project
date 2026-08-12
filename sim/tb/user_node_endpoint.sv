@@ -362,9 +362,9 @@ module user_node_endpoint #(
 
     // Crossbar sizing. Testbench limits, provisioned so none of them becomes the
     // bottleneck: the pressure is supposed to come from the fabric, or from the
-    // tile memory's delayer. MaxMstTrans 64 is what one initiator may have in flight -- an
-    // NMU's pool is 32, but under hotspot every node targets one tile, so 32
-    // would throttle; overflow stalls, it never errors. MaxSlvTrans 32 is the
+    // tile memory's delayer. MaxMstTrans 64 is what one initiator may have in flight, above
+    // NMU_MAX_TXNS_PER_ID (32): under hotspot every node targets one tile, so sizing at that
+    // depth would throttle; overflow stalls, it never errors. MaxSlvTrans 32 is the
     // per-target in-flight limit -- deliberately NOT 1 on the config port: the
     // memory backpressures itself and the crossbar should not second-guess a
     // target. AxiIdUsedSlvPorts 3 is the ID portion axi_demux tracks per target,

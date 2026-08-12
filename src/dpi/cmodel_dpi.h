@@ -63,7 +63,7 @@ void cmodel_dump_fabric_state(void);
 //     ONE svBitVecVal word (scalar per port, single-VC, spec TXREQREADY).
 //   - REQ/RSP flit arrays are <NET>_VEC_WORDS-per-port, contiguous
 //     (port-major): word index = port * <NET>_VEC_WORDS + w. REQ
-//     <NET>_VEC_WORDS = 5 (137 b); RSP = 4 (127 b) — see dpi_marshal.hpp
+//     <NET>_VEC_WORDS = 5 (132 b); RSP = 4 (122 b) — see dpi_marshal.hpp
 //     ReqFlitMarshal/RspFlitMarshal.
 //   - DAT valid/flit mirror the pre-S3a LINK-only shape (DAT_VEC_WORDS = 20,
 //     629 b) now applied uniformly to LOCAL too; DAT credit
@@ -72,7 +72,7 @@ void cmodel_dump_fabric_state(void);
 //     2^VC_ID_WIDTH = 8.
 // Split one-call-per-network (S3a T5 debug finding): cmodel_router_set_inputs/
 // get_outputs originally married REQ/RSP/DAT's three DIFFERENT flit widths
-// (137/127/629 b) as [LINK_PORTS]-sized unpacked-array arguments in ONE DPI
+// (132/122/629 b) as [LINK_PORTS]-sized unpacked-array arguments in ONE DPI
 // call -- the only place in this codebase asking a DPI signature to marshal
 // more than one parameterized per-element width in the same call. Co-sim
 // showed the router's ready outputs stuck at 0 forever despite the
@@ -136,7 +136,7 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus, little-endian)
 //   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
 //   flit fields   : per network, little-endian, tail word explicitly masked to
-//                   that network's width: REQ 5 words (137 b), RSP 4 (127 b),
+//                   that network's width: REQ 5 words (132 b), RSP 4 (122 b),
 //                   DAT 20 (629 b)
 //   other attribs : 1 word each (low bits used per width)
 // dat_num_vc threads the topology VC count into the NmuConfig DAT face
@@ -197,7 +197,7 @@ void cmodel_nmu_admission_telemetry(unsigned long long ctx, unsigned int* aw_idl
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus = 16 x 32-bit words, little-endian)
 //   wstrb         : WSTRB_VEC_WORDS = 2 words (64-bit strobe)
 //   flit fields   : per network, little-endian, tail word explicitly masked to
-//                   that network's width: REQ 5 words (137 b), RSP 4 (127 b),
+//                   that network's width: REQ 5 words (132 b), RSP 4 (122 b),
 //                   DAT 20 (629 b)
 //   other attribs : 1 word each (low bits used per width)
 // dat_num_vc threads the topology VC count into the NsuConfig DAT face

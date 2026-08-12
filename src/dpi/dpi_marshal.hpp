@@ -28,7 +28,7 @@ constexpr int WSTRB_VEC_WORDS = (axi::DATA_BYTES + 31) / 32;
 
 // --- flit tail masking, templated on per-network width (S3a T5) ------------
 //
-// Each physical network has its own flit width (REQ 137 b, RSP 127 b, DAT
+// Each physical network has its own flit width (REQ 132 b, RSP 122 b, DAT
 // 629 b, docs/noc-target-spec.md §6); the C++ Flit/FlitBytes container stays
 // fixed at the max (ni::FLIT_WIDTH = DAT's width, S3a stage design §6) --
 // only the DPI wire word count narrows per network. FlitMarshalT<WIDTH_BITS>

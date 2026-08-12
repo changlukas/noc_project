@@ -201,7 +201,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t read_txns_ = 0;
 
     // Per-AXI-ID single-outstanding flag for the R Disabled path. True while one AR
-    // is in flight for that id; cleared by R(last) in retire_r, with the pool entry.
+    // is in flight for that id; cleared by R(last) in retire_r.
     std::array<bool, axi::AXI_ID_SPACE> read_outstanding_{};
 
     // AW-before-W interlock: AW-accepted bursts whose W beats are still owed.
@@ -350,6 +350,14 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 // ===== inline impl =====
 
 inline bool Rob::push_aw(const axi::AwBeat& b) {
+    // Every per-id array below is AXI_ID_SPACE deep, which is 8 and no longer the
+    // full uint8_t range, so an over-range id is a silent out-of-bounds rather than
+    // a structural impossibility. Both admission points check it once at entry;
+    // this is a permanent input error, not backpressure.
+    if (b.id >= AXI_ID_SPACE) {
+        assert(false && "nmu::Rob::push_aw: AXI id outside AXI_ID_SPACE");
+        std::abort();  // belt-and-braces for NDEBUG
+    }
     // AWUSER collective validate + translate at push_aw entry (S4 design §2.1):
     // ahead of the outstanding pool, the per-id order list and all RoB slot math,
     // so a permanent illegal input can never present as backpressure. Fatal on
@@ -451,6 +459,11 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 }
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
+    // See push_aw: the per-id arrays are AXI_ID_SPACE deep, not 256.
+    if (b.id >= AXI_ID_SPACE) {
+        assert(false && "nmu::Rob::push_ar: AXI id outside AXI_ID_SPACE");
+        std::abort();  // belt-and-braces for NDEBUG
+    }
     if (mode_r_ == RobMode::Enabled) {
         if (read_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
         const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
