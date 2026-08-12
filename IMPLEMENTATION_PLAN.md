@@ -104,7 +104,7 @@ would show it.
 | `src/dpi/cmodel_dpi.cpp` | `cmodel_nmu_create_ex` loses its `outstanding_depth` argument; id handling stays `uint8_t`, which still holds 3 b |
 | `src/sv/*_wrap.sv` | port widths, and with them the contract `rtl/README.md` records |
 | generated flit | the id rides the per-channel payload, not the 44 b header — `specgen/generated/json/ni_packet.json:20` and `ni_flit_pkg.sv:78-111,168-195` carry the AW/AR/B/R widths, so `REQ` (137 b) and `RSP` (127 b) move and `DAT` does not |
-| `sim/tb/user_node_endpoint.sv` | `XBAR_SLV_ID_W`, `tile_mst` width, `SLV_ID_LIMIT`, the remap instance |
+| `sim/tb/user_node_endpoint.sv` | `XBAR_SLV_ID_W`, `tile_mst` width, the remap instance. `SLV_ID_LIMIT` and the two id assertions it fed were deleted rather than resized: both were tautologies of their own parameterization, not guards |
 | `sim/tb/axi_vip_types_pkg.sv:13` | VIP id type follows `AXI_ID_WIDTH_DFLT` |
 | `sim/tools/gen_tb_top.py:701-766` | the `+outstanding_depth=` plusarg |
 | `sim/verilator/Makefile:233-234` | forwards `OUTSTANDING_DEPTH` as a plusarg |
@@ -134,6 +134,23 @@ Carried to B: the master-face VIP typedefs (`file_master_t`, `scoreboard_t`, `ma
 sized by `ID_WIDTH` and must move to `XBAR_SLV_ID_W`, since a 3 b VIP cannot carry the stimulus
 ids 0..15. `a_mst_id_fits` becomes vacuous once it does, and the width enforces what it asserted.
 
+**B landed** in four commits plus three fix rounds, all reviewed. What the plan did not know going
+in: the id width has TWO independent spec sources. `constants.yaml` feeds `ni_params.h`, while
+`specgen/generated/json/ni_packet.json` — a spec input despite its path, loaded by
+`specgen/ni_spec/loader.py:45-47` — feeds `ni_flit_constants.h`, and `axi::AXI_ID_SPACE` is built
+from the latter. Both moved to 3, kept consistent by hand, and a new `static_assert` in
+`types.hpp` binds them; it was fault-injected to prove it fires where the pre-existing
+`AXI_ID_SPACE` assert could not. Also unknown going in: the master face reaches the crossbar
+through `ni_signals_pkg` structs whose id fields are the NI's width, so the four master-face ids
+now ride beside the structs; and `SLV_ID_LIMIT` had been silently truncating to zero since the id
+widths split, making both id assertions dead. The assertions were deleted, not repaired — an
+over-range id is now unrepresentable rather than unasserted.
+
+Flit widths moved with it: `REQ` 137 -> 132 b, `RSP` 127 -> 122 b, `DAT` unchanged at 629 b since
+the 512 b data beat sets it. Peak bandwidth is therefore unchanged; the saving is five wires each
+on `REQ` and `RSP`. `docs/noc-target-spec.md` was updated by owner ruling, the one exception to
+its standing forward-authority rule, because the narrowing was decided after it was written.
+
 **B — narrow the width.** `constants.yaml`, regenerate, fix the `static_assert`, drop
 `OUTSTANDING_DEPTH`, set the remap to 3 b out and `AxiSlvPortMaxUniqIds = 8`, fix
 `remap_downstream_id`. Let ctest say what else breaks.
@@ -148,4 +165,4 @@ Tier 2 after C and after B. Stage 5d's `all_to_all` sweep is the acceptance for 
 only stimulus that makes any depth bind. `make pytest` and `codegen.py --check` after B, since
 the payload field widths move.
 
-**Status**: Stage A and C complete, uncommitted. B not started.
+**Status**: Stages A, C and B complete. D not started.
