@@ -102,6 +102,54 @@ struct Cell {
 
 }  // namespace
 
+// --- clip to the tile region -------------------------------------------------
+
+TEST(RouteMaskClip, RowWildcardStopsAtTheTileRegion) {
+    // Tiles at x = 1..2, a peripheral coordinate at x = 0. A row wildcard names
+    // 0..3 before clipping; only 1..2 exist as tiles.
+    router::RouterConfig cfg{};
+    cfg.x = 1;
+    cfg.y = 0;
+    cfg.mesh_x_dim = 3;
+    cfg.mesh_y_dim = 2;  // route span
+    cfg.tile_x_first = 1;
+    cfg.tile_x_last = 2;
+    cfg.tile_y_first = 0;
+    cfg.tile_y_last = 1;
+
+    const uint8_t anchor = static_cast<uint8_t>((0u << ni::width::X_WIDTH) | 1u);
+    const uint8_t src = anchor;  // the originator is this node
+    const uint8_t mask = static_cast<uint8_t>((0u << ni::width::X_WIDTH) | 3u);
+
+    // At x = 1 the fork goes EAST toward x = 2 and ejects locally. It must NOT
+    // go WEST toward the clipped-out coordinate 0. The X spread runs on the
+    // source's row, so src must name this router's row for WEST to be
+    // reachable at all -- otherwise the test would pass for the wrong reason.
+    const auto route = router::route_mask_fork(anchor, src, mask, cfg);
+    EXPECT_TRUE(router::port_in_mask(route, router::RouterPort::LOCAL));
+    EXPECT_TRUE(router::port_in_mask(route, router::RouterPort::EAST));
+    EXPECT_FALSE(router::port_in_mask(route, router::RouterPort::WEST));
+}
+
+TEST(RouteMaskClip, JoinExpectsNoInputFromTheClippedSide) {
+    router::RouterConfig cfg{};
+    cfg.x = 1;
+    cfg.y = 0;
+    cfg.mesh_x_dim = 3;
+    cfg.mesh_y_dim = 2;
+    cfg.tile_x_first = 1;
+    cfg.tile_x_last = 2;
+    cfg.tile_y_first = 0;
+    cfg.tile_y_last = 1;
+
+    const uint8_t collector = static_cast<uint8_t>((0u << ni::width::X_WIDTH) | 1u);
+    const uint8_t src = collector;
+    const uint8_t mask = static_cast<uint8_t>((0u << ni::width::X_WIDTH) | 3u);
+
+    const auto route = router::route_mask_join(collector, src, mask, cfg);
+    EXPECT_FALSE(router::port_in_mask(route, router::RouterPort::WEST));
+}
+
 // --- fork, hand-computed tables ---------------------------------------------
 
 // 4x4, offset submesh with a non-contiguous Y mask: anchor (2,1), mask (1,2)
