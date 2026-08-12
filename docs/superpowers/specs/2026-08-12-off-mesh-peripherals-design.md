@@ -255,7 +255,7 @@ So the walk covers the tile region instead:
 | `:189` entry count | `x_count * y_count` | the tile count |
 | `:192` origin coordinate bits are zero | origin is `(0,0)` | origin is `(tile_min_x, tile_min_y)`, and its coordinate bits equal that |
 | `:197-199` the walk bounds | `[0, x_count) x [0, y_count)` | `[tile_min, tile_max]` on each axis |
-| `:203` uniform aperture | every entry in the space | every **tile**, so a peripheral may be any size |
+| `:203` uniform aperture | every entry in the space | every **tile**. A peripheral need not match a tile's size, but see the bound below |
 
 `x_range.len` still sizes to the route span, because the field has to hold a border coordinate. So
 `declare_space_coords` needs both numbers: the span for the field width, the tile region for the
@@ -270,10 +270,16 @@ entries of a class (`sam_yaml.hpp:50`), so entries are listed in coordinate orde
 are adjacent tiles. The worked example below assumes it; the loader should enforce it rather than
 leave it to the author.
 
-**Per-declaration base stays out of this round.** It existed to stop peripherals widening the
-tiles' node-index field, which the route-span field makes moot, and the relaxed aperture check now
-also lets a differently-sized peripheral share the space. A separate space remains available if a
-peripheral ever needs its own coordinate geometry rather than just its own size.
+**A peripheral sharing the tile space fits within one coordinate slot.** Its base is fixed at its
+coordinate, so a window larger than the slot runs into the next one and `addr_trans.hpp:149`
+rejects it as an overlapping range. Smaller or equal is fine; larger is not. The check is loud, so
+this is a bound to know rather than a trap.
+
+**Per-declaration base stays out of this round, but it is what a real peripheral will need.** It
+existed to stop peripherals widening the tiles' node-index field, which the route-span field makes
+moot. The remaining reason to want it is the size bound above: a memory controller fronting far
+more than one slot cannot share the tile space and needs its own, with its own base. This round's
+peripheral is tile-sized, so that is deferred rather than dismissed.
 
 ### Worked example
 
@@ -305,8 +311,8 @@ Route span `x` is `0..2`, so `X_WIDTH = clog2(3) = 2` and a row strides four slo
 
 The walk covers the tile region, `x = 1..2` and `y = 0..1`, so the entry count it checks is
 `4 == 2 * 2` and its origin is `T(1,0)` at `0x100000`, whose coordinate bits read `x = 1, y = 0`.
-The two peripherals are entries but not walked, so they may be any size. `(3,0)` is padding beyond
-the span and is never visited.
+The two peripherals are entries but not walked, so they need not match the tile size, within the
+one-slot bound. `(3,0)` is padding beyond the span and is never visited.
 
 **The multicast that the clip exists for.** Anchor `T(1,0)`, target the tile row `{(1,0), (2,0)}`.
 Wildcarding the x field gives `mask_x = 0b11`, and the raw wildcard set is
