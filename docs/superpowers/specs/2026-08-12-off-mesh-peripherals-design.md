@@ -11,79 +11,77 @@ worth targeting.
 This round builds the mechanism only. What gets attached, how many, and on which edges is a later
 decision, and nothing here should constrain it.
 
-## What was surveyed
+## What was surveyed, and what of it we do not need
 
-FlooNoC, from source. Three findings shape this design.
+FlooNoC, from source.
 
-**An off-grid endpoint is not given an off-grid coordinate.** It hangs off the boundary router
-port that a plain mesh ties off, and its coordinate is derived:
+**An off-grid endpoint is not given an off-grid coordinate.** It hangs off the boundary router port
+that a plain mesh ties off, and the router array is not enlarged: `degree` stays 5
+(`floogen/examples/axi_mesh_xy.yml`). That part we take.
 
-```python
-# floogen/model/network.py, compile_ids()
-node_xy_id = graph.nodes[neighbor]["id"] + XYDirections.to_coords(edge["dst_dir"])
-```
-
-West of router `(0, y)` gives `(-1, y)`. The router array is not enlarged and `degree` stays 5
-(`floogen/examples/axi_mesh_xy.yml`).
-
-**Negative coordinates never reach hardware.** The whole space is normalised once, at generation:
+**Its coordinate is derived, then normalised.** floogen infers a coordinate from the connection
+graph and then shifts the whole space so nothing is negative:
 
 ```python
-# gen_xy_routing_info()
-min_x = min(ni.id.x for ni in ni_nodes)
-xy_id_offset = Coord(x=min_x, y=min_y)
-num_x_bits = clog2(max_x - min_x + 1)
+# floogen/model/network.py
+node_xy_id = graph.nodes[neighbor]["id"] + XYDirections.to_coords(edge["dst_dir"])   # west -> -1
+min_x = min(ni.id.x for ni in ni_nodes); xy_id_offset = Coord(x=min_x, y=min_y)
 # gen_sam():  dest -= xy_id_offset
 ```
 
-The subtraction lands in the address decode at the source, so routers compare unsigned.
+**That part we do not need, and copying it was the first draft's mistake.** floogen needs it because
+it derives coordinates from a graph. Our topology files state them:
 
-**There is no "peripheral" concept.** `hbm` is declared exactly like `cluster`, same fields, same
-code path. What differs is that each endpoint declaration carries its own independent address
-base, and an array index is a linear offset inside that declaration's region:
-
-```python
-# routing.py, AddrRange.set_arr()
-case (m,):    self.start = self.base + size * m
-case (m, n):  self.start = self.base + size * (m * arr_dim[1] + n)
+```yaml
+tiles:
+  - { x: 0, y: 0, size: 0x100000 }
 ```
 
-## Four quantities that are currently one
+A peripheral west of the mesh is written as `x: 0` with the tiles at `x: 1..n`. There is no
+derivation, so there is nothing to normalise: no direction vector, no negative intermediate, no
+offset applied at SAM generation, and no asymmetry where some topologies shift and others do not.
+The author writes the final coordinate.
 
-The design rests on separating four things the code treats as a single pair of numbers today.
+**There is no "peripheral" concept.** `hbm` is declared exactly like `cluster`, same fields, same
+code path. What differs is that each endpoint declaration carries its own independent address base,
+and an array index is a linear offset inside that declaration's region
+(`routing.py`, `AddrRange.set_arr`).
 
-| quantity | what it is | who uses it | changes with a border |
-|---|---|---|---|
-| physical router array | how many routers exist, per axis | fabric generator, for neighbour wiring | no |
-| route-coordinate span | physical span plus any populated border ring | `X_WIDTH` / `Y_WIDTH`, and the range check in `route_compute` | yes |
-| per-router coordinate | that router's own normalised `(x, y)` | each router's config, the SAM | shifts by the offset |
-| tile region | which stretch of the span holds tiles rather than peripherals | the collective clip, see below | is what the border creates |
+## Three quantities that are currently one
+
+| quantity | what it is | who uses it |
+|---|---|---|
+| physical router array | how many routers exist, per axis | the fabric generator, for neighbour wiring |
+| route-coordinate span | the full coordinate range, tiles plus any border positions | `X_WIDTH` / `Y_WIDTH`, and the range check in `route_compute` |
+| tile region | which stretch of that span holds tiles | the collective clip |
 
 `sim/tools/gen_tb_top.py:354` derives each router's neighbours from `X_DIM`/`Y_DIM` and a linear
-node index. If `X_DIM` were widened to the route span, the generator would wire routers that do
-not exist. It keeps the physical array.
+node index. If that were widened to the route span the generator would wire routers that do not
+exist, so it keeps the physical array.
 
 `ref_model/c_model/include/router/router.hpp:69` rejects a `dst_id` outside
-`cfg.mesh_x_dim`/`cfg.mesh_y_dim`. Those fields must come to mean the route span, or a tile at the
-far edge fails its own range check once the tiles shift.
+`cfg.mesh_x_dim`/`cfg.mesh_y_dim`. Those fields come to mean the route span, or a peripheral fails
+the range check of the router forwarding toward it.
+
+All three are stated in the topology file. None is inferred.
 
 ## Design
 
-### Routing needs no new logic, only new meanings
+### Routing needs no new logic
 
-`route_compute` steers X first and ejects when both coordinates match
-(`router.hpp:65-74`). A peripheral west of the mesh is reached by "keep going west", and at the
-boundary router west is the port the peripheral hangs on. The decision is already correct.
+`route_compute` steers X first and ejects when both coordinates match (`router.hpp:65-74`). A
+peripheral west of the mesh is reached by "keep going west", and at the westmost router west is the
+port it hangs on. The decision is already correct, because the router cannot tell a peripheral from
+another router in that direction.
 
-What changes is the meaning of two existing fields, `cfg.mesh_x_dim` and `cfg.mesh_y_dim`, from
-router count to route span, and the value of `cfg.x` / `cfg.y`, which become the router's
-normalised coordinate. A field that keeps its name and changes its meaning is the easiest thing to
-miss in review, so both are called out here rather than left to the diff.
+What changes is that `cfg.mesh_x_dim` / `cfg.mesh_y_dim` mean the route span rather than the router
+count. A field that keeps its name and changes its meaning is the easiest thing to miss in review,
+so it is called out here rather than left to the diff.
 
 ### Attachment
 
-A peripheral occupies the boundary router port that is tied off today. Router degree stays 5 and
-no router differs from its neighbours.
+A peripheral occupies the boundary router port that is tied off today. Router degree stays 5 and no
+router differs from its neighbours.
 
 **A peripheral NI attaches exactly the way a tile NI attaches, at a different port index.** The
 fabric already declares all five ports with one signal set:
@@ -104,11 +102,11 @@ tie-off that zeroes it.
 There is no second kind of link and no new credit scheme. The far side is the same NI a tile has.
 
 `noc_fabric_<topo>.sv` today zeroes REQ/RSP ready returns and DAT credit returns on boundary
-directions (`noc_fabric_mesh_2x2_vc1.sv:153,207`) and makes a valid flit on one a `$fatal`
-(`:233`). The generator learns which boundary ports are populated, from the topology file: an
-entry whose coordinate lies on the border ring names one boundary router and one direction. Those
-ports get the full link wiring. The rest keep the tie-off and the `$fatal`, which now keys off
-"unpopulated boundary port" rather than "boundary port".
+directions (`noc_fabric_mesh_2x2_vc1.sv:153,207`) and makes a valid flit on one a `$fatal` (`:233`).
+The generator learns which boundary ports are populated from the topology file: an entry whose
+coordinate lies outside the tile region names one boundary router and one direction. Those ports get
+the full link wiring. The rest keep the tie-off and the `$fatal`, which now keys off "unpopulated
+boundary port" rather than "boundary port".
 
 **That check stays.** It is the only thing that catches a packet routed somewhere that does not
 exist, and it needs a fault-injection proof it still fires once the wiring became conditional.
@@ -125,8 +123,8 @@ that does not exist today.
 
 ### The peripheral's own identity
 
-A peripheral NI is constructed with its normalised coordinate exactly as a tile's NI is. Three
-places consume it and all three are already correct once the constructor argument is right:
+A peripheral NI is constructed with the coordinate its topology entry states, exactly as a tile's NI
+is. Three places consume it and all three are already correct once the constructor argument is:
 
 | site | what it does with the coordinate |
 |---|---|
@@ -134,59 +132,17 @@ places consume it and all three are already correct once the constructor argumen
 | `nsu/depacketize.hpp:56,181` | derives its node coordinate from `src_id` and rebases arriving addresses onto it |
 | `nsu/meta_buffer.hpp:21` | captures the requester's `src_id` so the response routes back |
 
-The return path therefore works with no new mechanism, but it works **only** if the peripheral's
-`src_id` is its normalised coordinate. A peripheral stamped with an unnormalised or invented id
-would route its responses to the wrong node, and the failure would look like a fabric bug.
+The return path needs no new mechanism, but it works **only** if the peripheral's `src_id` is the
+coordinate the topology states. A peripheral stamped with an invented id would route its responses
+to the wrong node, and the failure would look like a fabric bug.
 
-### Coordinates
-
-| step | rule |
-|---|---|
-| derive | peripheral coordinate = boundary router coordinate + direction vector |
-| normalise | subtract the per-axis minimum, so the axis starts at 0 |
-| size | `X_WIDTH = clog2(x span)`, `Y_WIDTH = clog2(y span)`, per topology |
-| apply | the offset is applied where the SAM is generated, not in the router |
-
-An axis with no peripherals has minimum 0, so its offset is 0 and its coordinates are unchanged.
-**No tile in the five existing topologies changes coordinate.** A topology that adds a west border
-shifts its tiles from `x = 0..n-1` to `x = 1..n`, and only that topology.
-
-Their coordinate *widths* do change, because width now follows the mesh rather than a fixed 4:
-`mesh_2x2` goes to `1 + 1` bits and `mesh_4x4` to `2 + 2`. The values are the same, the fields
-holding them are narrower.
-
-**There is no cap on the coordinate width.** The span follows the mesh, and the id types follow the
-span.
-
-`addr_trans.hpp:358-361` already carries the invariant that matters:
-
-```cpp
-static_assert(X_WIDTH + Y_WIDTH == COLLECTIVE_MASK_WIDTH,
-              "collective_mask must be one node id wide (X|Y) -- specgen drift");
-static_assert(X_WIDTH + Y_WIDTH <= 8,
-              "node id / collective_mask no longer fit uint8_t");
-```
-
-The first is the real rule and it stays: a collective mask is one node id wide, because the mask
-is over the coordinate bits themselves (`(mask_y << X_WIDTH) | mask_x`), not a list of target
-nodes. Widen the coordinate and the mask widens with it, which is what the assert enforces.
-
-The second is a container limit, not a design one, and it goes. A generated `node_id_t` sized from
-`X_WIDTH + Y_WIDTH` replaces the `uint8_t` that carries a node id or a collective mask, in the
-model and in the flit field. The same guard exists on the consumer side at `route_mask.hpp:43-46`
-and moves with it.
-
-A coordinate mask can therefore select the border ring, since the border occupies ordinary
-coordinate values. That is not a detail: it decides where peripherals may be placed. The next
-section is the mechanism that settles it.
-
-### Collectives exclude peripherals by construction
+### Collectives are clipped to the tile region
 
 A multicast names its members as a coordinate wildcard: the set is
-`{v : v & ~mask == anchor & ~mask}`, a block of `2^k` values aligned to `2^k` per axis. Peripherals
-sit on ordinary coordinates, so a block that covers the tiles can cover them too. On a low edge it
-is worse than that: with tiles at `1..N` the set `{1..N}` is not aligned and is not expressible at
-all, so a peripheral on the west would cost row-wise multicast entirely.
+`{v : v & ~mask == anchor & ~mask}`, a block of `2^k` values aligned to `2^k` per axis. Tiles that do
+not start at 0 are therefore not expressible: with tiles at `1..4`, `{1,2,3,4}` is not aligned, and
+the only covering block is `[0,7]`, which names the peripheral and three coordinates that do not
+exist.
 
 Two obvious fixes do not work, and both were checked rather than assumed.
 
@@ -197,24 +153,42 @@ Two obvious fixes do not work, and both were checked rather than assumed.
 
 **The member set is the mask rectangle intersected with the tile region.**
 
-`RouterConfig` gains `tile_min` and `tile_max` per axis, beside the existing `mesh_x_dim` /
-`mesh_y_dim`. The three now read unambiguously:
+`RouterConfig` gains `tile_min` and `tile_max` per axis, beside `mesh_x_dim` / `mesh_y_dim`:
 
 | field | meaning |
 |---|---|
-| `mesh_x_dim`, `mesh_y_dim` | route-coordinate span, including any populated border. The range check |
-| `tile_min`, `tile_max` | which stretch of that span holds tiles. The collective clip |
+| `mesh_x_dim`, `mesh_y_dim` | route span. The range check |
+| `tile_min`, `tile_max` | **inclusive** coordinates of the first and last tile on that axis, matching the existing `dst_min` / `dst_max` convention. The collective clip |
 
-These are elaboration-time parameters, exactly as `mesh_x_dim` is today, **not control registers.**
-The values are a property of the topology and never change after synthesis. Making them writable
-would convert a structural guarantee into a runtime convention: one router configured differently
-from the rest would break the member set on one side of the fork/join pair, and the symptom would
-look like a fabric bug rather than a configuration error.
+The algorithm in `route_mask.hpp` is one clamp on each path, before the existing comparisons:
 
-`route_mask.hpp` clips `dst_min`/`dst_max` on the fork path and `src_min`/`src_max` on the join
-path before its range comparisons. Both directions clip with the same bounds, so membership stays
-identical everywhere it is recomputed. `addr_trans.hpp`'s guard changes from "the highest wildcard
-member is inside the mesh" to "the clipped set is non-empty and every member is a tile".
+```
+fork:  dst_min = max(anchor & ~mask, tile_min)    dst_max = min(anchor | mask, tile_max)
+join:  src_min = max(src    & ~mask, tile_min)    src_max = min(src    | mask, tile_max)
+```
+
+**Local membership is unchanged.** A router only ever sits at a tile coordinate, so the
+`coord_matched` test at `route_mask.hpp:108,150` already answers correctly. Only the forwarding
+bounds move, which is exactly what stops a worm travelling out to the border and stops the join
+expecting an input from there. Fork and join clamp with the same two numbers, so the member set is
+identical wherever it is recomputed.
+
+An empty intersection (`min > max`) is a source error, not a runtime condition. The source rejects
+it; a router that sees one aborts, in the style of the guards already in that file.
+
+`addr_trans.hpp`'s guard changes from "the highest wildcard member is inside the mesh" (`:338`) to
+"the clipped set is non-empty and every member of it is a tile". For the source to compute the same
+clip, `SpaceCoords` (`ni/address_map.hpp:43`) gains the tile region beside its counts, stated rather
+than inferred, which is what its own comment already argues for: recovering a dimension as
+`1 << len` over-permits every dimension that is not a power of two. `tile_min` / `tile_max` in
+`RouterConfig` and the tile region in `SpaceCoords` are read from the same topology entries, which
+is what makes source and router agree by construction rather than by convention.
+
+These are elaboration-time parameters, **not control registers.** The values are a property of the
+topology and never change after synthesis. Making them writable would convert a structural guarantee
+into a runtime convention: one router configured differently from the rest would break the member
+set on one side of the fork/join pair, and the symptom would look like a fabric bug rather than a
+configuration error.
 
 What it costs and what it buys:
 
@@ -222,43 +196,73 @@ What it costs and what it buys:
 |---|---|
 | flit header | unchanged |
 | AWUSER interface | unchanged, still an address mask confined to the node-index field |
-| router config | two node-id-sized bounds per axis |
-| peripheral placement | **unconstrained. Any edge, high or low** |
+| router config | two inclusive coordinates per axis |
+| peripheral placement | **unconstrained. Any edge** |
 | side effect | fixes the pre-existing case that a non-power-of-two axis cannot express a full row: a 3-wide row encodes as `[0..3]` and clips to `[0..2]` |
 
 **Deliberately not built:** a mode bit separating tile-only multicast from full-span multicast.
 Peripherals are not collective targets in this round, and `collective_op` is 2 bits whose values 2
-and 3 are reserved today (`addr_trans.hpp` aborts on them), so adding the mode later costs no
-header bits. Building it now would double the semantics under test for a case nothing needs.
+and 3 are reserved today (`addr_trans.hpp` aborts on them), so adding the mode later costs no header
+bits.
 
 ### Address map
 
-Adopt FlooNoC's per-declaration base. A group of entries may declare its own `base`; without one
-the running accumulator continues as today. The five existing topology files stay textually
-unchanged, but **both loaders gain a real explicit-base model**: `sim/tools/address_map.py:17,61`
-and `ref_model/c_model/include/nmu/sam_yaml.hpp:108,129`, which today both state that there is no
-base and derive every one by accumulation.
+Two changes.
 
-Two validators also have to widen. `address_map.py:72,89` rejects a coordinate outside
-`x_dim`/`y_dim` and requires every mesh node exactly once per space. Those become "inside the
-route span" and "every declared node exactly once per space".
+**Per-declaration base.** A group of entries may declare its own `base`; without one the running
+accumulator continues as today. The five existing topology files stay textually unchanged, but both
+loaders gain a real explicit-base model: `sim/tools/address_map.py:17,61` and
+`ref_model/c_model/include/nmu/sam_yaml.hpp:108,129`, which today both state that there is no base
+and derive every one by accumulation.
 
-The consequence that matters: compute tiles keep their own contiguous node-index bit field inside
-their own region, and peripherals get theirs inside a separate region. Neither perturbs the other.
-The `address_map:` comment in each topology file states why that field has to stay contiguous:
-multicast replica addresses differ only in node-index bits. A single accumulator shared with
-peripherals would have widened that field and moved the multicast mask layout. Independent bases
-avoid it without introducing a third address space.
+Compute tiles then keep their own contiguous node-index bit field inside their own region, and
+peripherals get theirs inside a separate region. Neither perturbs the other. The `address_map:`
+comment in each topology file states why that field has to stay contiguous: multicast replica
+addresses differ only in node-index bits. A single accumulator shared with peripherals would have
+widened that field. Independent bases avoid it without introducing a third address space.
 
-Addresses do not move when coordinates shift. `address_map.py:61,75` packs bases in list order and
-carries the coordinate alongside, so a shift changes `dst_id` and nothing else.
+**The address coordinate field spans the route span, not the tile count.** `rebase_node_coords`
+(`ni/address_map.hpp:60`) writes a coordinate into the address's coordinate field, so that field and
+the route coordinate are the same number. With tiles at `1..4` the field covers `0..4`, and the slot
+at 0 belongs to the peripheral or to nothing. One numbering, no translation.
 
-### Coordinate width scales per topology
+The cost is the reserved slot, accepted deliberately: two numberings would be paid for on every read
+of the code, a reserved address slot is paid for once.
 
-Decided: `X_WIDTH` and `Y_WIDTH` are computed per topology on **both** `ref_model/` and `rtl/`,
-bit for bit, rather than fixed at 4 each.
+Three validators relax from "dense from `(0,0)`" to "dense within the stated tile region":
+`address_map.py:72,91` and `addr_trans.hpp:115`. `sam_yaml.hpp:55` declares `x_count = x_dim` today
+and must declare the tile region instead.
 
-The accepted cost, recorded so it is not rediscovered:
+Addresses are packed in list order (`address_map.py:61,75`), so nothing about coordinates moves an
+address.
+
+### Coordinate width follows the topology
+
+`X_WIDTH` and `Y_WIDTH` are computed from the route span per topology, on **both** `ref_model/` and
+`rtl/`, bit for bit, rather than fixed at 4 each.
+
+`addr_trans.hpp:358-361` carries the invariant that stays:
+
+```cpp
+static_assert(X_WIDTH + Y_WIDTH == COLLECTIVE_MASK_WIDTH,
+              "collective_mask must be one node id wide (X|Y) -- specgen drift");
+```
+
+A collective mask is one node id wide because the mask is over the coordinate bits themselves, not a
+list of targets. Widen the coordinate and the mask widens with it.
+
+The second assert in that pair, `X_WIDTH + Y_WIDTH <= 8`, is a container limit and goes. A generated
+`node_id_t` sized from `X_WIDTH + Y_WIDTH` replaces the `uint8_t` that carries a node id or a
+collective mask: `RouterConfig` (`router_types.hpp:17`), the `route_mask.hpp` API, SAM entries and
+`collective_translate`'s return (`addr_trans.hpp:24,261`), NSU metadata (`meta_buffer.hpp:21`), and
+the matching guard at `route_mask.hpp:43-46`. The SV side gets the same typedef from specgen.
+
+**The real bound is the header field accessor**, which passes values as `uint64_t`, so
+`X_WIDTH + Y_WIDTH <= 64`. That is a limit of the accessor rather than of the design, and it is far
+above any mesh this project will build. It is stated so that "the width follows the topology" is not
+read as "there is no limit anywhere".
+
+The accepted cost of per-topology widths, recorded so it is not rediscovered:
 
 | | today | after |
 |---|---|---|
@@ -268,9 +272,6 @@ The accepted cost, recorded so it is not rediscovered:
 | c_model binary | serves every topology | built per topology |
 | ctest | one run | multiplied by topology count |
 | generated package, filelist, build rules | one set | per topology |
-
-What it buys: a 4x4 mesh carries `2 + 2` coordinate bits per id instead of `4 + 4`, so `REQ`
-drops 8 b, and the 16x16 ceiling stated in `constants.yaml` stops being a property of the flit.
 
 ## Validation
 
@@ -282,11 +283,15 @@ and a file master on its NMU, identical to a compute node. Two directed checks:
 | 1 | a tile writes the peripheral's window and reads it back | no, this is an ordinary SAM target |
 | 2 | the peripheral writes a tile's window and reads it back | **yes, nothing outside the mesh originates traffic today** |
 
-Check 2 is the round's deliverable. A run where only check 1 passes has not exercised the
-mechanism, because check 1 never requires the peripheral to stamp a `src_id` or to consult the SAM.
+Check 2 is the round's deliverable. A run where only check 1 passes has not exercised the mechanism,
+because check 1 never requires the peripheral to stamp a `src_id` or to consult the SAM.
 
-The unpopulated-boundary `$fatal` needs a fault-injection proof it still fires, per the standing
-rule that a checker's silence counts only after it has been shown to fire.
+The unpopulated-boundary `$fatal` needs a fault-injection proof it still fires, per the standing rule
+that a checker's silence counts only after it has been shown to fire.
+
+A multicast over a full tile row, on a topology whose tiles do not start at 0, is the check that the
+clip works. Without the clip that mask is rejected at the source; with it the replicas reach every
+tile in the row and no peripheral.
 
 ## Out of scope
 
@@ -296,5 +301,5 @@ Whether peripherals are multicast or collective targets. They are not, and the c
 structural rather than a convention. The reserved `collective_op` values leave the door open at no
 header cost if that changes.
 
-`hotspot_boundary` becomes meaningful once an edge has a target, but the pattern is not restored
-in this round.
+`hotspot_boundary` becomes meaningful once an edge has a target, but the pattern is not restored in
+this round.
