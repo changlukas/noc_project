@@ -4,14 +4,14 @@
 
 module nmu #(
     parameter int unsigned AXI_ADDR_WIDTH = 48,   // §5 fixed
-    parameter int unsigned AXI_ID_WIDTH   = 8,    // §5 fixed
+    parameter int unsigned AXI_ID_WIDTH   = 3,    // §5 fixed
     parameter int unsigned AXI_DATA_WIDTH = 512,  // 64 narrow class, 512 data class
     parameter int unsigned AWUSER_WIDTH   = 58,   // 50 b collective attributes, §6
     parameter int unsigned XUSER_WIDTH    = 8,    // ARUSER / WUSER / RUSER / BUSER
     parameter int unsigned NUM_VC         = 1,    // §5, 1-8
     // Flit widths, §6: 44 b header + the network's largest payload. Fixed.
-    localparam int unsigned REQ_FLIT_WIDTH = 137, // 44 + 93  (Aw/Ar)
-    localparam int unsigned RSP_FLIT_WIDTH = 127, // 44 + 83  (NarrowR)
+    localparam int unsigned REQ_FLIT_WIDTH = 132, // 44 + 88  (Aw/Ar)
+    localparam int unsigned RSP_FLIT_WIDTH = 122, // 44 + 78  (NarrowR)
     localparam int unsigned DAT_FLIT_WIDTH = 629  // 44 + 585 (DataW)
 ) (
     // ----- global, §4.1: two asynchronous domains, CDC at the AXI boundary -----

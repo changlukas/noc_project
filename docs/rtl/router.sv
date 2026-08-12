@@ -8,8 +8,8 @@ module router #(
     parameter int unsigned NUM_VC    = 1,          // §5, 1-8, DAT only
     parameter int unsigned NUM_PORTS = 5,          // LOCAL, N, E, S, W
     // Flit widths, §6: 44 b header + the network's largest payload. Fixed.
-    localparam int unsigned REQ_FLIT_WIDTH = 137,  // 44 + 93  (Aw/Ar)
-    localparam int unsigned RSP_FLIT_WIDTH = 127,  // 44 + 83  (NarrowR)
+    localparam int unsigned REQ_FLIT_WIDTH = 132,  // 44 + 88  (Aw/Ar)
+    localparam int unsigned RSP_FLIT_WIDTH = 122,  // 44 + 78  (NarrowR)
     localparam int unsigned DAT_FLIT_WIDTH = 629   // 44 + 585 (DataW)
 ) (
     // ----- global, §4.1 -----
