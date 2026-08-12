@@ -118,16 +118,40 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
 // address_map.tiles: ordered list of { x, y, size, space? }; base(x, y) is
 // derived by SamTable::packed() from the coordinate and the space's slot
 // size. No tile_size, no base, no default base. A node may appear once per
-// space (validate()). No peripheral declaration yet (Task 4), so the tile
-// region passed to declare_space_coords is the full x_dim/y_dim span.
+// space (validate()).
+//
+// x_dim/y_dim are the router array. The map is packed over the route SPAN
+// (x_span/y_span), which additionally covers any border coordinate a
+// peripheral occupies, and the tile region (tile_x_first..tile_x_last,
+// tile_y_first..tile_y_last, inclusive) says which of those coordinates are
+// tiles. All six keys are optional and default to a plain mesh, so a topology
+// stating none of them means today exactly what it meant before they existed.
+// Same six keys, same defaults, as gen_tb_top.py's _route_span.
 inline SamTable load_sam_table(const std::string& yaml_path) {
     YAML::Node root = YAML::LoadFile(yaml_path);
-    unsigned x_dim = root["topology"]["x_dim"].as<unsigned>();
-    unsigned y_dim = root["topology"]["y_dim"].as<unsigned>();
+    YAML::Node topo = root["topology"];
+    unsigned x_dim = topo["x_dim"].as<unsigned>();
+    unsigned y_dim = topo["y_dim"].as<unsigned>();
     // Mesh dim minimum is 2 per dimension: a mesh communicating through NI +
     // router needs at least 2x2. 1x1 and 1xN meshes are illegal.
     assert(x_dim >= 2 && y_dim >= 2 &&
            "topology: mesh dimensions must be >= 2 per dimension (1x1/1xN mesh illegal)");
+    unsigned x_span = topo["x_span"] ? topo["x_span"].as<unsigned>() : x_dim;
+    unsigned y_span = topo["y_span"] ? topo["y_span"].as<unsigned>() : y_dim;
+    unsigned tile_x_first = topo["tile_x_first"] ? topo["tile_x_first"].as<unsigned>() : 0;
+    unsigned tile_y_first = topo["tile_y_first"] ? topo["tile_y_first"].as<unsigned>() : 0;
+    unsigned tile_x_last = topo["tile_x_last"] ? topo["tile_x_last"].as<unsigned>() : x_span - 1;
+    unsigned tile_y_last = topo["tile_y_last"] ? topo["tile_y_last"].as<unsigned>() : y_span - 1;
+    // This is the one place a tile region enters the C++ model, so it is where
+    // the region is checked: SpaceCoords' four bounds default to zero, which
+    // is a one-column region, and nothing downstream can tell a stated region
+    // from a forgotten one. Same relationships gen_tb_top.py validates.
+    assert(x_span >= x_dim && y_span >= y_dim &&
+           "topology: route span must cover the router array (x_span >= x_dim)");
+    assert(tile_x_first <= tile_x_last && tile_x_last < x_span &&
+           "topology: tile x region must sit inside the route span");
+    assert(tile_y_first <= tile_y_last && tile_y_last < y_span &&
+           "topology: tile y region must sit inside the route span");
     YAML::Node am = root["address_map"];
     assert(am && "address_map block missing from topology YAML");
     YAML::Node tiles_node = am["tiles"];
@@ -138,9 +162,10 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
         tiles.push_back({t["x"].as<unsigned>(), t["y"].as<unsigned>(), t["size"].as<uint64_t>(),
                          parse_tile_space(t)});
     }
-    SamTable table = SamTable::packed(tiles, x_dim, y_dim);
-    table.validate(x_dim, y_dim);
-    declare_space_coords(table, x_dim, y_dim, 0, x_dim - 1, 0, y_dim - 1);
+    SamTable table = SamTable::packed(tiles, x_span, y_span);
+    table.validate(x_span, y_span);
+    declare_space_coords(table, x_span, y_span, tile_x_first, tile_x_last, tile_y_first,
+                         tile_y_last);
     check_decode_mode(am, table);  // after the ranges exist -- offset mode is checked against them
     return table;
 }

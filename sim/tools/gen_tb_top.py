@@ -66,14 +66,35 @@ VC_ID_WIDTH = 3
 DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
 
 
+def _route_span(t: dict):
+    """(x_span, y_span, tile_x_first, tile_x_last, tile_y_first, tile_y_last).
+
+    Six optional topology keys. x_span/y_span are the route-coordinate span --
+    the router array plus any border coordinate a peripheral sits on -- and
+    default to x_dim/y_dim. The tile region is inclusive and defaults to the
+    whole span. A topology stating none of the six is a plain mesh, where the
+    span is the array and every coordinate in it is a tile.
+    """
+    x_span = int(t.get("x_span", t["x_dim"]))
+    y_span = int(t.get("y_span", t["y_dim"]))
+    return (x_span, y_span,
+            int(t.get("tile_x_first", 0)), int(t.get("tile_x_last", x_span - 1)),
+            int(t.get("tile_y_first", 0)), int(t.get("tile_y_last", y_span - 1)))
+
+
 def _check_flit_capacity(topo: dict, path) -> None:
-    """Reject a topology whose mesh dims / num_vc exceed the flit field capacity,
-    or whose mesh dims are below the per-dimension minimum.
+    """Reject a topology whose route span / num_vc exceed the flit field capacity,
+    whose mesh dims are below the per-dimension minimum, or whose span and tile
+    region do not contain the router array.
 
     Mirrors specgen/ni_spec/invariants.py:check_mesh_within_flit for the
     sim-topology-YAML path (X/Y/node + VC bounds).  Fails with a clear message so
     the user knows to reduce dims / num_vc or widen the flit fields (via the
     specgen constants).
+
+    The capacity caps sit on the SPAN, not on x_dim/y_dim: the coordinate field
+    has to hold every route coordinate, including a border one no router array
+    element occupies.
 
     Mesh dim minimum is 2 per dimension (mesh_x_dim >= 2 AND mesh_y_dim >= 2):
     a mesh communicating through NI + router needs at least 2x2. 1x1 and 1xN
@@ -83,6 +104,7 @@ def _check_flit_capacity(topo: dict, path) -> None:
     x_dim = int(t["x_dim"])
     y_dim = int(t["y_dim"])
     num_vc = int(t["num_vc"])
+    x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(t)
     cap_x = 1 << X_WIDTH
     cap_y = 1 << Y_WIDTH
     cap_nodes = 1 << DST_ID_WIDTH
@@ -92,12 +114,20 @@ def _check_flit_capacity(topo: dict, path) -> None:
         errors.append(f"x_dim={x_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
     if y_dim < 2:
         errors.append(f"y_dim={y_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
-    if x_dim > cap_x:
-        errors.append(f"x_dim={x_dim} > 2^X_WIDTH={cap_x}")
-    if y_dim > cap_y:
-        errors.append(f"y_dim={y_dim} > 2^Y_WIDTH={cap_y}")
-    if x_dim * y_dim > cap_nodes:
-        errors.append(f"x_dim*y_dim={x_dim * y_dim} > 2^DST_ID_WIDTH={cap_nodes}")
+    if x_span > cap_x:
+        errors.append(f"x_span={x_span} > 2^X_WIDTH={cap_x}")
+    if y_span > cap_y:
+        errors.append(f"y_span={y_span} > 2^Y_WIDTH={cap_y}")
+    if x_span * y_span > cap_nodes:
+        errors.append(f"x_span*y_span={x_span * y_span} > 2^DST_ID_WIDTH={cap_nodes}")
+    if x_span < x_dim:
+        errors.append(f"x_span={x_span} < x_dim={x_dim} (the span must cover the router array)")
+    if y_span < y_dim:
+        errors.append(f"y_span={y_span} < y_dim={y_dim} (the span must cover the router array)")
+    if not 0 <= tx_first <= tx_last < x_span:
+        errors.append(f"tile x region [{tx_first},{tx_last}] outside 0..{x_span - 1}")
+    if not 0 <= ty_first <= ty_last < y_span:
+        errors.append(f"tile y region [{ty_first},{ty_last}] outside 0..{y_span - 1}")
     if num_vc > cap_vc:
         errors.append(f"num_vc={num_vc} > 2^VC_ID_WIDTH={cap_vc}")
     if errors:
@@ -203,9 +233,8 @@ def tile_targets(topo: dict, nodes):
 
     Returns ({node_idx: [{"space", "base", "size"}, ...]}, noc_egress_base).
     """
-    x_dim = topo["topology"]["x_dim"]
-    y_dim = topo["topology"]["y_dim"]
-    _bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    x_span, y_span = _route_span(topo["topology"])[:2]
+    _bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
     out = {}
     for idx, _x, _y, cid in nodes:
         windows = address_map.node_windows(entries, cid)
@@ -509,6 +538,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
     num_vc = topo["topology"]["num_vc"]
+    x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(topo["topology"])
     rob_enabled = requested_name.endswith("_rob")
 
     # Tile crossbar windows, m0 first (see tile_targets). Emitted as PACKED-array
@@ -715,7 +745,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('    import "DPI-C" context function longint unsigned cmodel_router_create(input string name,')
     w('                                                                  input int x_coord, input int y_coord,')
     w('                                                                  input int mesh_x_dim, input int mesh_y_dim,')
-    w('                                                                  input int num_vc);')
+    w('                                                                  input int num_vc,')
+    w('                                                                  input int tile_x_first, input int tile_x_last,')
+    w('                                                                  input int tile_y_first, input int tile_y_last);')
     w('    import "DPI-C" context function int unsigned cmodel_nmu_read_slot_hwm(input longint unsigned ctx);')
     w('    import "DPI-C" context function void cmodel_nmu_admission_stats(input longint unsigned ctx,')
     w("                                                                 output int unsigned aw_idle_bypass,")
@@ -780,9 +812,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w('        void\'($value$plusargs("b_rob_depth=%d", b_rob_depth));')
         w('        void\'($value$plusargs("r_rob_depth=%d", r_rob_depth));')
         w('        void\'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));')
+    # The router takes the SPAN, not the router array: it range-checks route
+    # coordinates, and a border coordinate is one. Neighbour wiring in the
+    # fabric keeps using x_dim/y_dim.
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
-          f'{x_dim}, {y_dim}, DAT_NUM_VC);')
+          f'{x_span}, {y_span}, DAT_NUM_VC, '
+          f'{tx_first}, {tx_last}, {ty_first}, {ty_last});')
     for (i, x, y, c) in nodes:
         w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, DAT_NUM_VC, '
           f'{1 if rob_enabled else 0}, b_rob_depth, r_rob_depth, max_txns_per_id, '

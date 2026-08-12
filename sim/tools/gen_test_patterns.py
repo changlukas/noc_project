@@ -824,7 +824,12 @@ def _load_topology(name):
         topo = yaml.safe_load(f)
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
-    bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    # The map is packed over the route SPAN (x_span/y_span, defaulting to the
+    # router array), so a border coordinate a peripheral sits on still takes a
+    # slot. The node list below stays the router array.
+    x_span = int(topo["topology"].get("x_span", x_dim))
+    y_span = int(topo["topology"].get("y_span", y_dim))
+    bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
     config_bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "config"}
     sizes = {
         "memory": {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"},

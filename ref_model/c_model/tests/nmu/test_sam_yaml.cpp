@@ -2,6 +2,7 @@
 #include "axi/types.hpp"
 #include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
+#include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -89,11 +90,16 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
 
 // Guards the real topology configs. TOPOLOGY_DIR is sim/topologies/ itself
 // (CMakeLists.txt), globbed rather than listed, so a new topology YAML cannot
-// fall out of coverage. Same files and same shape as the Python twin
-// (test_address_map_pack_real_topologies_gap_free in
-// sim/tools/test_gen_test_patterns_filemaster.py) -- if both pass, the C++ and
-// Python packing agree on every real topology YAML.
-TEST(SamYaml, RealTopologiesGapFreePacked) {
+// fall out of coverage.
+//
+// The claim is the packing formula, base = space_base + ((y << clog2(x_span))
+// | x) * slot, spelled out here from the YAML keys instead of read back from
+// SamTable::packed(). That is the bit-identity with sim/tools/address_map.py
+// that the model and the stimulus generator both depend on. List-order
+// accumulation (base += size) agrees with the formula only where the span is a
+// power of two and every entry in a space is one slot, which is true of every
+// topology shipped today and not of a span with a border coordinate.
+TEST(SamYaml, RealTopologiesPackedAtTheCoordinateFormula) {
     std::vector<std::string> files;
     for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
         if (entry.path().extension() == ".yaml") files.push_back(entry.path().string());
@@ -106,14 +112,77 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
     ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
     for (const auto& file : files) {
         SCOPED_TRACE(file);
+        YAML::Node root = YAML::LoadFile(file);
+        YAML::Node topo = root["topology"];
+        const unsigned x_span =
+            topo["x_span"] ? topo["x_span"].as<unsigned>() : topo["x_dim"].as<unsigned>();
+        const unsigned y_span =
+            topo["y_span"] ? topo["y_span"].as<unsigned>() : topo["y_dim"].as<unsigned>();
+        // Slot per space: the largest size declared in it.
+        uint64_t memory_slot = 0;
+        uint64_t config_slot = 0;
+        for (const auto& tile : root["address_map"]["tiles"]) {
+            const bool is_config = tile["space"] && tile["space"].as<std::string>() == "config";
+            uint64_t& slot = is_config ? config_slot : memory_slot;
+            slot = std::max(slot, tile["size"].as<uint64_t>());
+        }
+        const unsigned x_bits = ni::cmodel::address_map::clog2(x_span);
+        // Config sits above every base memory could take.
+        const uint64_t config_base = (uint64_t{1} << x_bits) * y_span * memory_slot;
+
         auto sam = load_sam_table(file);
         ASSERT_FALSE(sam.entries().empty());
-        uint64_t expected_base = 0;
         for (const auto& e : sam.entries()) {
-            EXPECT_EQ(e.base, expected_base);
-            expected_base += e.size;
+            const unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
+            const unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            const bool is_config = e.cls == axi::AxiClass::Narrow;
+            const uint64_t expected =
+                (is_config ? config_base : 0) +
+                ((uint64_t{(y << x_bits) | x}) * (is_config ? config_slot : memory_slot));
+            EXPECT_EQ(e.base, expected) << "dst_id " << std::hex << unsigned{e.dst_id};
         }
     }
+}
+
+// A route span wider than the router array, with the tile region naming which
+// coordinates are tiles: the design's worked example, x = 0 a peripheral column
+// on both rows. x_span = 3 gives x_bits = clog2(3) = 2, so a row strides four
+// slots and row 1 starts at 0x400000 -- 3 * 0x100000, which a 2-wide span would
+// give, is what this guards against.
+TEST(SamYaml, StatedSpanPacksOverTheSpanAndKeepsTheTileRegion) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_span_region.yaml");
+    std::ofstream(path) << "topology:\n"
+                           "  name: t\n"
+                           "  x_dim: 2\n"
+                           "  y_dim: 2\n"
+                           "  num_vc: 1\n"
+                           "  x_span: 3\n"
+                           "  tile_x_first: 1\n"
+                           "  tile_x_last: 2\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x100000 }\n"
+                           "    - { x: 1, y: 0, size: 0x100000 }\n"
+                           "    - { x: 2, y: 0, size: 0x100000 }\n"
+                           "    - { x: 0, y: 1, size: 0x100000 }\n"
+                           "    - { x: 1, y: 1, size: 0x100000 }\n"
+                           "    - { x: 2, y: 1, size: 0x100000 }\n";
+    auto sam = load_sam_table(path);
+    ASSERT_EQ(sam.entries().size(), 6u);
+    const uint64_t expected[] = {0x000000ull, 0x100000ull, 0x200000ull,
+                                 0x400000ull, 0x500000ull, 0x600000ull};
+    for (std::size_t i = 0; i < sam.entries().size(); ++i) {
+        EXPECT_EQ(sam.entries()[i].base, expected[i]) << "entry " << i;
+    }
+    // The peripheral column is inside the span but outside the tile region, so
+    // it is an addressable node and not a collective member.
+    const auto* memory = sam.collective_coords(axi::AxiClass::Data);
+    ASSERT_NE(memory, nullptr);
+    EXPECT_EQ(memory->x_count, 3u);
+    EXPECT_EQ(memory->x_first, 1u);
+    EXPECT_EQ(memory->x_last, 2u);
+    EXPECT_EQ(memory->y_first, 0u);
+    EXPECT_EQ(memory->y_last, 1u);
 }
 
 // SAM class selection from the topology YAML's tile.space attribute
