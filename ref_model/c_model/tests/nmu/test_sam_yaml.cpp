@@ -268,6 +268,30 @@ uint8_t enumerated_node_mask(const ni::cmodel::nmu::addr_trans::SamTable& sam, u
     return node_mask;
 }
 
+// How many (anchor, mask) pairs on ONE axis have their wildcard box inside
+// [first, last], which is what the walk below filters on. Counted from the BOX
+// side rather than by re-testing each (anchor, mask): one box per (mask, fixed
+// bits) pair, holding the 2^popcount(mask) anchors that differ only in masked
+// bits. A second expression of the same set, so an edit to the walk's own
+// filter moves one side and not the other.
+//
+// `count` is the span, which need not be 2^len: a peripheral topology's span is
+// as wide as its coordinates reach, so the anchors above it are not walked.
+unsigned axis_pairs_inside_region(unsigned count, unsigned len, unsigned first, unsigned last) {
+    unsigned n = 0;
+    for (unsigned m = 0; m < (1u << len); ++m) {
+        for (unsigned f = 0; f < (1u << len); ++f) {
+            if (f & m) continue;                        // f holds the box's FIXED bits
+            if (f < first || (f | m) > last) continue;  // box leaves the region
+            for (unsigned s = m;; s = (s - 1) & m) {    // the box's own members
+                if ((f | s) < count) ++n;
+                if (s == 0) break;
+            }
+        }
+    }
+    return n;
+}
+
 // B1/B2 differential: the node mask collective_translate reads off the declared
 // ranges must equal the one the enumeration above walks out of the SAM.
 // Exhaustive over every shipped topology, both spaces, every anchor node and
@@ -291,6 +315,7 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
     ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
 
     unsigned compared = 0;
+    unsigned expected = 0;
     for (const auto& file : files) {
         SCOPED_TRACE(file);
         auto sam = load_sam_table(file);
@@ -342,17 +367,28 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                     }
                 }
             }
-            // Non-vacuity, per topology and space rather than one total: the
-            // filter above makes the legal pair count a property of each
-            // topology's own tile region, and a hard-coded total would read
-            // every new topology as a regression. Every space reaches at least
-            // one legal collective -- a 4x4 gives 16 anchors x 15 masks, the
-            // 3-wide peripheral span gives 4 anchors x 1 (only the y mask keeps
-            // its closure inside a 2-wide tile region).
-            EXPECT_GT(compared_here, 0u) << "no legal (anchor, mask) pair in this space";
+            // Exact count, derived from THIS space's own coordinates rather
+            // than hard-coded, so a new topology adds coverage instead of
+            // reading as a regression. The two axes filter independently, so
+            // the surviving pairs are their product, less the mask-0 corner the
+            // walk skips: that is one pair per (anchor_x, anchor_y) inside the
+            // region. Where the region IS the span this reduces to the old
+            // constant, x_count * y_count * (2^(xlen+ylen) - 1) -- 240 for a
+            // 4x4, 12 for a 2x2. The 3-wide peripheral span gives 4: no x mask
+            // keeps its closure inside a 2-wide tile region, so only the y mask
+            // survives, over 4 anchors.
+            // Catches a coverage collapse, which is what the per-pair
+            // ASSERT_EQ above cannot see -- it only guards the pairs walked.
+            const unsigned expected_here =
+                axis_pairs_inside_region(c->x_count, c->x_range.len, c->x_first, c->x_last) *
+                    axis_pairs_inside_region(c->y_count, c->y_range.len, c->y_first, c->y_last) -
+                (c->x_last - c->x_first + 1) * (c->y_last - c->y_first + 1);
+            EXPECT_EQ(compared_here, expected_here);
+            expected += expected_here;
         }
     }
-    EXPECT_GT(compared, 0u);
+    EXPECT_EQ(compared, expected);
+    EXPECT_GT(compared, 0u) << "the topology directory produced no legal collective at all";
 }
 
 TEST(SamYaml, UnknownSpaceRejected) {

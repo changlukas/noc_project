@@ -130,6 +130,11 @@ NOC_FABRIC_SV = $(SRC_SV)/noc_fabric_$(TOPOLOGY_BASE).sv
 # would pre-empt each Makefile's own default.
 TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
     $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY_BASE) --print-num-vc)
+# An empty result means the generator failed -- unknown TOPOLOGY, missing YAML,
+# flit-capacity violation. Without this the symptom is a missing
+# noc_types_pkg_vc.sv instead of the generator's own message.
+$(if $(TOPOLOGY_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
+TOPOLOGY=$(TOPOLOGY); run it directly to see why))
 TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
