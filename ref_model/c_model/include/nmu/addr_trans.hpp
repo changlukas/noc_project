@@ -290,7 +290,8 @@ inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::B
 // Every reject here is a PERMANENT illegal input: it never clears on retry, so
 // returning false would wedge the caller indistinguishably from congestion.
 // Fail loud instead -- the convention this file already uses for a SAM miss.
-inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
+inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, uint8_t src_id) {
+    constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
     const uint8_t op = axi::awuser_collective_op(b.user);
     const uint64_t addr_mask = axi::awuser_collective_mask(b.user);
 
@@ -342,6 +343,24 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
                "coordinate ranges -- a legal unicast target, not a collective target");
         std::abort();
     }
+    // Only a tile may ISSUE a collective. Both trees are built out of the
+    // issuer's own coordinates -- the fork spreads X along its row and the join
+    // collects Y in its column (route_mask.hpp, the cfg.y == src.y and
+    // cfg.x == dst.x gates) -- and routers exist only at tile coordinates, so
+    // an off-region issuer has no router that recognises its row or its column.
+    // An x-border issuer forks, then no router lists a cross-row replica as an
+    // expected input and the CollectB never completes; a y-border issuer never
+    // forks at all and the replicas are dropped. Refuse rather than hang.
+    const unsigned src_x = src_id & kXFieldMask;
+    const unsigned src_y = src_id >> ni::width::X_WIDTH;
+    if (src_x < coords->x_first || src_x > coords->x_last || src_y < coords->y_first ||
+        src_y > coords->y_last) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: a collective issued from outside the tile "
+               "region -- the fork spreads along the issuer's row and the join collects in its "
+               "column, and no router sits outside the region to do either");
+        std::abort();
+    }
 
     // Spec §6: the mask is confined to the node-index field. A bit below it
     // wildcards an address bit inside one region, so the named addresses stop
@@ -363,7 +382,6 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     // dst_id is (y << X_WIDTH) | x, and a dimension need not be a power of
     // two, so the set may reach a coordinate that names no tile (a peripheral,
     // or padding above a non-power-of-two dimension).
-    constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
     const unsigned anchor_x = anchor->dst_id & kXFieldMask;
     const unsigned anchor_y = anchor->dst_id >> ni::width::X_WIDTH;
     // Clip to the tile region exactly as route_mask.hpp does, so the source and
@@ -418,38 +436,52 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     return static_cast<uint8_t>((mask_y << ni::width::X_WIDTH) | mask_x);
 }
 
-// Reject a destination the fabric cannot deliver to, called from Packetize for
-// every AW and AR (collective or not) once the destination is known.
+// Reject a request the fabric cannot deliver, called from Packetize for every
+// AW and AR (collective or not) once the destination is known.
 //
-// XY routing resolves X before Y (router::route_compute), so a destination
-// outside the tile region on the x axis -- a peripheral on a border router's
-// WEST or EAST port -- is reached by running out of x hops, which happens on
-// the SOURCE's row. From another row the flit leaves the region one row early
-// and lands in whichever peripheral borders that row; that peripheral's NSU
-// rebases the address to its own tile and answers it, so nothing downstream can
-// tell. The y axis is not row-sensitive: a destination outside the region on y
-// is reached after x has already resolved, from any column.
+// XY routing resolves X before Y (router::route_compute), so a node outside the
+// tile region on the x axis -- a peripheral on a border router's WEST or EAST
+// port -- is reached by running out of x hops, which happens on whichever row
+// the flit started from. That constrains BOTH directions of a transaction, one
+// rule read twice:
+//   request  -- an off-region destination is reached from its own row only.
+//   response -- a response's destination is the request's source (nsu's
+//               Packetize::build_b_flit stamps dst_id from the buffered
+//               src_id) and it takes the same route_compute, so an off-region
+//               SOURCE is answered on its own row only.
+// The flit that misses leaves the region one row early and lands in whichever
+// peripheral borders that row; that peripheral's NSU rebases the address to its
+// own tile and answers it, so nothing downstream can tell.
+//
+// The y axis is not row-sensitive either way: a node outside the region on y is
+// reached after x has already resolved, from any column.
 //
 // Same permanent-illegal-input shape as collective_translate above: a rejected
 // request never becomes legal on retry, so it fails loud instead of returning.
 inline void check_dst_reachable(const SpaceCoords* coords, uint8_t src_id, uint8_t dst_id) {
     // A space that declares no coordinate ranges states no tile region. The
     // tables that skip the declaration are the uniform fixtures, whose every
-    // coordinate is a tile, so no destination can be outside one.
+    // coordinate is a tile, so neither endpoint can be outside one.
     if (coords == nullptr) return;
     constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
     const unsigned dst_x = dst_id & kXFieldMask;
     const unsigned dst_y = dst_id >> ni::width::X_WIDTH;
+    const unsigned src_x = src_id & kXFieldMask;
     const unsigned src_y = src_id >> ni::width::X_WIDTH;
-    if (dst_x >= coords->x_first && dst_x <= coords->x_last) return;
     if (dst_y == src_y) return;
+    const bool dst_off = dst_x < coords->x_first || dst_x > coords->x_last;
+    const bool src_off = src_x < coords->x_first || src_x > coords->x_last;
+    if (!dst_off && !src_off) return;
+    const unsigned off_x = dst_off ? dst_x : src_x;
+    const unsigned off_y = dst_off ? dst_y : src_y;
     std::fprintf(stderr,
-                 "nmu::addr_trans::check_dst_reachable: node (%u,%u) addressed (%u,%u), which "
-                 "sits outside the tile region [%u,%u] on x. Such a destination is reached by "
-                 "running out of x hops, which happens on the source's own row, so address it "
-                 "from row %u.\n",
-                 src_id & kXFieldMask, src_y, dst_x, dst_y, coords->x_first, coords->x_last, dst_y);
-    assert(false && "check_dst_reachable: off-mesh destination on another row");
+                 "nmu::addr_trans::check_dst_reachable: node (%u,%u) addressed (%u,%u); (%u,%u) "
+                 "sits outside the tile region [%u,%u] on x, so it exchanges requests and "
+                 "responses with row %u only -- both directions run out of x hops on the row "
+                 "they started from. Put both endpoints on row %u.\n",
+                 src_x, src_y, dst_x, dst_y, off_x, off_y, coords->x_first, coords->x_last, off_y,
+                 off_y);
+    assert(false && "check_dst_reachable: off-mesh node paired with a node on another row");
     std::abort();  // belt-and-braces for NDEBUG
 }
 

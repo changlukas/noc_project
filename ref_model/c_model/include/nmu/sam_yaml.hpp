@@ -70,6 +70,15 @@ inline void declare_space_coords(SamTable& table, unsigned x_span, unsigned y_sp
     }
 }
 
+// Does this address space appear in the map at all? Memory always does; config
+// is optional (spec §5.1 covers the spaces a topology declares).
+inline bool space_present(const SamTable& table, axi::AxiClass cls) {
+    for (const auto& e : table.entries()) {
+        if (e.cls == cls) return true;
+    }
+    return false;
+}
+
 // address_map.decode: "table" | "offset", default "table" (spec §5.1).
 //
 // Table decode holds the coordinate ranges per address-map entry, offset decode
@@ -93,14 +102,7 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
     }
     const SpaceCoords* first = nullptr;
     for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
-        bool present = false;
-        for (const auto& e : table.entries()) {
-            if (e.cls == cls) {
-                present = true;
-                break;
-            }
-        }
-        if (!present) continue;
+        if (!space_present(table, cls)) continue;
         const SpaceCoords* c = table.collective_coords(cls);
         assert(c && "address_map: decode 'offset' needs every space to meet spec 5.1");
         if (c == nullptr) std::abort();
@@ -166,6 +168,25 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
     table.validate(x_span, y_span);
     declare_space_coords(table, x_span, y_span, tile_x_first, tile_x_last, tile_y_first,
                          tile_y_last);
+    // A rejected declaration costs a space its collective eligibility, which is
+    // intended, and it also costs it check_dst_reachable's cross-row guard,
+    // which is not: both read the same declared ranges, and a space that has
+    // none is waved through. On a topology whose tile region is the whole span
+    // there is nothing to guard, so only a stated region insists here -- a
+    // peripheral window of a different size, or a stride that is not a power of
+    // two, would otherwise disarm the guard silently.
+    const bool region_stated = tile_x_first != 0 || tile_y_first != 0 ||
+                               tile_x_last != x_span - 1 || tile_y_last != y_span - 1;
+    if (region_stated) {
+        for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
+            if (!space_present(table, cls)) continue;
+            assert(table.collective_coords(cls) &&
+                   "topology: a stated tile region needs every address space to declare its "
+                   "coordinate ranges, and this one's entries reject the declaration -- the "
+                   "off-region reachability guard reads those ranges");
+            if (table.collective_coords(cls) == nullptr) std::abort();
+        }
+    }
     check_decode_mode(am, table);  // after the ranges exist -- offset mode is checked against them
     return table;
 }

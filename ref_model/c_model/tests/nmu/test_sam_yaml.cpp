@@ -189,6 +189,32 @@ TEST(SamYaml, StatedSpanPacksOverTheSpanAndKeepsTheTileRegion) {
     EXPECT_EQ(memory->y_last, 1u);
 }
 
+// A stated tile region is what arms check_dst_reachable, and the guard reads
+// the same declaration collective eligibility does -- so a declaration the
+// entries reject would take the guard down with it, silently. Same topology as
+// above with a 0x3000 window: the stride is no longer a power of two, so no
+// coordinate field can be read off the map and the declaration is refused.
+TEST(SamYamlDeath, AStatedTileRegionWhoseDeclarationIsRejected) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_region_undeclarable.yaml");
+    std::ofstream(path) << "topology:\n"
+                           "  name: t\n"
+                           "  x_dim: 2\n"
+                           "  y_dim: 2\n"
+                           "  num_vc: 1\n"
+                           "  x_span: 3\n"
+                           "  tile_x_first: 1\n"
+                           "  tile_x_last: 2\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x3000 }\n"
+                           "    - { x: 1, y: 0, size: 0x3000 }\n"
+                           "    - { x: 2, y: 0, size: 0x3000 }\n"
+                           "    - { x: 0, y: 1, size: 0x3000 }\n"
+                           "    - { x: 1, y: 1, size: 0x3000 }\n"
+                           "    - { x: 2, y: 1, size: 0x3000 }\n";
+    EXPECT_DEATH(load_sam_table(path), "a stated tile region needs every address space");
+}
+
 // SAM class selection from the topology YAML's tile.space attribute
 // (docs/noc-target-spec.md §5). mesh_2x2_vc1.yaml gives every node both a
 // memory tile (default space) and a config tile.
@@ -358,7 +384,13 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                                       static_cast<uint8_t>((my << ni::width::X_WIDTH) | mx))
                                 << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
-                            EXPECT_EQ(collective_translate(sam, b), enumerated)
+                            // The issuer must be a tile, and every anchor that
+                            // survives the closure filter above is one: a
+                            // closure containing the anchor cannot lie inside
+                            // the tile region unless the anchor does.
+                            const uint8_t issuer =
+                                static_cast<uint8_t>((ay << ni::width::X_WIDTH) | ax);
+                            EXPECT_EQ(collective_translate(sam, b, issuer), enumerated)
                                 << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
                             ++compared;

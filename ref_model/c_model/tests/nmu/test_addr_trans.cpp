@@ -80,7 +80,7 @@ TEST(CollectiveClip, FullTileRowIsAcceptedWhenTilesDoNotStartAtZero) {
     b.addr = 0x100000;  // anchor is the tile at (1, 0)
     b.burst = axi::Burst::INCR;
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);
-    const uint8_t mask = addr_trans::collective_translate(sam, b);
+    const uint8_t mask = addr_trans::collective_translate(sam, b, /*src_id=*/0x01);
     EXPECT_EQ(mask & ((1u << ni::width::X_WIDTH) - 1u), 0x3u);
 }
 
@@ -95,7 +95,8 @@ TEST(CollectiveClipDeath, EmptyAfterClippingAborts) {
     b.addr = 0x0;  // anchor is the peripheral at (0, 0), outside the tile region
     b.burst = axi::Burst::INCR;
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x400000);  // wildcards y only
-    EXPECT_DEATH(addr_trans::collective_translate(sam, b), "after clipping to the tile region");
+    EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x01),
+                 "after clipping to the tile region");
 }
 
 TEST(CollectiveClipDeath, ClippedBoundNotAMemberAborts) {
@@ -111,7 +112,41 @@ TEST(CollectiveClipDeath, ClippedBoundNotAMemberAborts) {
     b.addr = 0x100000;  // anchor is the tile at (1, 0)
     b.burst = axi::Burst::INCR;
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x200000);  // mask_x = 0x2
-    EXPECT_DEATH(addr_trans::collective_translate(sam, b), "member of the wildcard set");
+    EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x01),
+                 "member of the wildcard set");
+}
+
+TEST(CollectiveIssuer, ATileMayIssueACollectiveAnchoredAtAPeripheral) {
+    SCENARIO(
+        "nmu::addr_trans::collective_translate: the ISSUER is what has to be a tile, not the "
+        "anchor. Tile (1,0) anchors at the peripheral (0,0) and wildcards x over the whole row; "
+        "the closure {0,1,2,3} clips to the two tiles and both bounds are members, so the issuer "
+        "check leaves it alone -- a memory controller multicasting to every tile is the case the "
+        "clip exists for");
+    auto sam = make_sam_with_border_column();
+    axi::AwBeat b{};
+    b.addr = 0x0;  // anchor is the peripheral at (0, 0)
+    b.burst = axi::Burst::INCR;
+    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);  // mask_x = 0x3
+    const uint8_t mask = addr_trans::collective_translate(sam, b, /*src_id=*/0x01);
+    EXPECT_EQ(mask & ((1u << ni::width::X_WIDTH) - 1u), 0x3u);
+}
+
+TEST(CollectiveIssuerDeath, APeripheralMayNotIssueACollective) {
+    SCENARIO(
+        "nmu::addr_trans::collective_translate: the same legal mask issued BY the peripheral at "
+        "(0,0) is refused. Both trees are built from the issuer's own coordinates -- route_mask "
+        "spreads the fork along cfg.y == src.y and collects the join in cfg.x == dst.x -- and no "
+        "router sits at x = 0, so an x-border issuer forks but never collects the cross-row "
+        "replicas (the CollectB hangs) and a y-border one never forks at all (the replicas are "
+        "dropped). Refuse, rather than hang or drop silently");
+    auto sam = make_sam_with_border_column();
+    axi::AwBeat b{};
+    b.addr = 0x0;
+    b.burst = axi::Burst::INCR;
+    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);
+    EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x00),
+                 "a collective issued from outside the tile");
 }
 
 TEST(OffMeshDst, SameRowPeripheralIsReachable) {
@@ -126,8 +161,9 @@ TEST(OffMeshDst, SameRowPeripheralIsReachable) {
     addr_trans::check_dst_reachable(coords, /*src_id=*/0x01, /*dst_id=*/0x00);  // (1,0) -> (0,0)
     addr_trans::check_dst_reachable(coords, /*src_id=*/0x02, /*dst_id=*/0x00);  // (2,0) -> (0,0)
     addr_trans::check_dst_reachable(coords, /*src_id=*/0x11, /*dst_id=*/0x10);  // (1,1) -> (0,1)
-    // A tile destination is inside the region and is reachable from anywhere.
-    addr_trans::check_dst_reachable(coords, /*src_id=*/0x00, /*dst_id=*/0x12);  // (0,0) -> (2,1)
+    // A tile destination is inside the region and is reachable from any row --
+    // as long as the source is a tile too. Row 0 to row 1, both in region.
+    addr_trans::check_dst_reachable(coords, /*src_id=*/0x01, /*dst_id=*/0x12);  // (1,0) -> (2,1)
 }
 
 TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
@@ -141,4 +177,31 @@ TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
     ASSERT_NE(coords, nullptr);
     EXPECT_DEATH(addr_trans::check_dst_reachable(coords, /*src_id=*/0x12, /*dst_id=*/0x00),
                  "outside the tile region");
+}
+
+TEST(OffMeshSrc, APeripheralIsAnInitiatorOnItsOwnRow) {
+    SCENARIO(
+        "nmu::addr_trans::check_dst_reachable: the peripheral at (0,1) is an initiator, and the "
+        "response to its request is routed back the same way the request went out -- the same "
+        "rule read from the other end. Both tiles of row 1 are on its row, so neither request is "
+        "refused");
+    auto sam = make_sam_with_border_column();
+    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    ASSERT_NE(coords, nullptr);
+    addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x11);  // (0,1) -> (1,1)
+    addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x12);  // (0,1) -> (2,1)
+}
+
+TEST(OffMeshSrcDeath, APeripheralAddressingAnotherRowIsRefused) {
+    SCENARIO(
+        "nmu::addr_trans::check_dst_reachable: the peripheral at (0,1) writing the tile at (2,0) "
+        "is delivered, and its B is not. The response carries dst_id = (0,1) (nsu's "
+        "build_b_flit), leaves (2,0) WEST, runs out of x hops on row 0 and lands in the "
+        "peripheral at (0,0), which takes a B it never issued -- invisible to both scoreboards. "
+        "The source's own row is required in this direction too");
+    auto sam = make_sam_with_border_column();
+    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    ASSERT_NE(coords, nullptr);
+    EXPECT_DEATH(addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x02),
+                 "sits outside the tile region");
 }
