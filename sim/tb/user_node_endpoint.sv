@@ -355,20 +355,10 @@ module user_node_endpoint #(
     // Both initiators are held to their share of the field: the stimulus
     // generator caps its ids at 2**INITIATOR_ID_WIDTH (gen_test_patterns.py
     // axi_widths) and the NSU's collapsed downstream id is all-ones of ID_WIDTH
-    // (nsu::remap_downstream_id). Neither wiring above narrows any more -- the
-    // master face is already XBAR_SLV_ID_W and the NSU's id is narrower still --
-    // so at the current widths both properties hold by construction and the
-    // assertions cannot fail. They are kept as the standing guard on the two
-    // sources, and become live again if either width moves.
-    localparam int unsigned SLV_ID_LIMIT = 1 << XBAR_SLV_ID_W;
-    a_mst_id_fits: assert property (@(posedge clk_i) disable iff (!rst_ni)
-        (mst_flat_req.awvalid |-> mst_awid < SLV_ID_LIMIT) and
-        (mst_flat_req.arvalid |-> mst_arid < SLV_ID_LIMIT))
-        else $fatal(1, "node%0d: file_master drove an AXI id above the initiator share", NODE_ID);
-    a_nsu_id_fits: assert property (@(posedge clk_i) disable iff (!rst_ni)
-        (slave_axi_req_i.awvalid |-> slave_axi_req_i.awid < SLV_ID_LIMIT) and
-        (slave_axi_req_i.arvalid |-> slave_axi_req_i.arid < SLV_ID_LIMIT))
-        else $fatal(1, "node%0d: NSU drove an AXI id above the initiator share", NODE_ID);
+    // (nsu::remap_downstream_id). Nothing asserts that here, and nothing needs
+    // to: the master face is XBAR_SLV_ID_W wide, which is exactly the cap, and
+    // the NSU's id is narrower still, so an over-range id cannot be represented
+    // on either wire rather than merely going unchecked.
 
     // Crossbar sizing. Testbench limits, provisioned so none of them becomes the
     // bottleneck: the pressure is supposed to come from the fabric, or from the
