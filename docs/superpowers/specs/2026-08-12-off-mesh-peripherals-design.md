@@ -230,23 +230,50 @@ The cost is the rounding: a row of `n` positions occupies `2^clog2(n)` slots. Th
 occupy four. That is a static waste paid once, against a second numbering that would be paid on
 every read of the code.
 
-**What does not change.** Because the peripheral occupies the border coordinate as an ordinary
-entry, the space stays dense over its own span, and the checks that assume that stay valid:
+**The coordinate walk moves to the tile region.** `declare_space_coords` (`sam_yaml.hpp:35-60`)
+validates a space by walking every coordinate in it and requiring an entry at each
+(`addr_trans.hpp:189-205`). Two things follow from that walk, and an earlier draft of this spec got
+both wrong by claiming the checks were untouched.
 
-| site | check | why it still passes |
+The walk requires the rectangle to be **fully populated**. With tiles at `x = 1..2` and a peripheral
+on only one of two rows, `(0,1)` has no entry, `space_entries` is 5 against `x_count * y_count` of
+6, and validation fails. It does not fail loudly: `x_count` stays 0, `declared()` returns false, and
+the space is "simply not a collective target" per its own comment. Collectives would turn
+themselves off and nothing would say so.
+
+The walk also requires a **uniform aperture**, `e->size == origin->size`. A peripheral whose window
+is not tile-sized fails that, which is every real memory controller.
+
+Requiring the border ring to be fully populated would fix both and is rejected: it would mean
+inventing filler entries for coordinates with no NI behind them, so the SAM would name nodes the
+fabric ties off. The `$fatal` and the address map would disagree about what exists.
+
+So the walk covers the tile region instead:
+
+| check, `addr_trans.hpp` | today | after |
 |---|---|---|
-| `addr_trans.hpp:189` | `space_entries == x_count * y_count` | the border coordinates are entries, so the space is full |
-| `addr_trans.hpp:192` | origin coordinate bits are zero | coordinate `(0,0)` exists, it is a peripheral |
-| `addr_trans.hpp:199` | the walk starts at coordinate zero | same |
-| `ni/address_map.hpp:60` | `rebase_node_coords` | the field is the route coordinate, so an NSU writes its own id unchanged |
+| `:189` entry count | `x_count * y_count` | the tile count |
+| `:192` origin coordinate bits are zero | origin is `(0,0)` | origin is `(tile_min_x, tile_min_y)`, and its coordinate bits equal that |
+| `:197-199` the walk bounds | `[0, x_count) x [0, y_count)` | `[tile_min, tile_max]` on each axis |
+| `:203` uniform aperture | every entry in the space | every **tile**, so a peripheral may be any size |
 
-`declare_space_coords` (`sam_yaml.hpp:35-60`) also stays, with one change at its call site: `x_dim`
-and `y_dim` become the route span rather than the tile count, so `x_range.len` sizes the field to
-the span.
+`x_range.len` still sizes to the route span, because the field has to hold a border coordinate. So
+`declare_space_coords` needs both numbers: the span for the field width, the tile region for the
+walk. Those are the same two numbers the clip already needs, which is why this costs no new concept.
 
-**Per-declaration base is not needed this round.** It was in an earlier draft to stop peripherals
-widening the tiles' node-index field, which the route-span field makes moot. It stays available for
-a later peripheral whose window is not tile-sized, as a separate space with its own coordinates.
+**An unpopulated border coordinate simply has no entry.** It is not a filler and not a legal
+target: a request naming it misses the SAM, which `SamTable::translate` already treats as fatal.
+Nothing new is needed to make it loud.
+
+**Entry order is part of the contract.** `declare_space_coords` reads its stride from the first two
+entries of a class (`sam_yaml.hpp:50`), so entries are listed in coordinate order and the first two
+are adjacent tiles. The worked example below assumes it; the loader should enforce it rather than
+leave it to the author.
+
+**Per-declaration base stays out of this round.** It existed to stop peripherals widening the
+tiles' node-index field, which the route-span field makes moot, and the relaxed aperture check now
+also lets a differently-sized peripheral share the space. A separate space remains available if a
+peripheral ever needs its own coordinate geometry rather than just its own size.
 
 ### Worked example
 
@@ -274,7 +301,12 @@ Route span `x` is `0..2`, so `X_WIDTH = clog2(3) = 2` and a row strides four slo
 `x = 2`. The field is the coordinate.
 
 `declare_space_coords` reads `stride = 0x100000` from the first two entries, a power of two, giving
-`offset = 20`, `x_range = {20, 2}`, `y_range = {22, 1}`. The dense check is `6 == 3 * 2`.
+`offset = 20`, `x_range = {20, 2}`, `y_range = {22, 1}`.
+
+The walk covers the tile region, `x = 1..2` and `y = 0..1`, so the entry count it checks is
+`4 == 2 * 2` and its origin is `T(1,0)` at `0x100000`, whose coordinate bits read `x = 1, y = 0`.
+The two peripherals are entries but not walked, so they may be any size. `(3,0)` is padding beyond
+the span and is never visited.
 
 **The multicast that the clip exists for.** Anchor `T(1,0)`, target the tile row `{(1,0), (2,0)}`.
 Wildcarding the x field gives `mask_x = 0b11`, and the raw wildcard set is
