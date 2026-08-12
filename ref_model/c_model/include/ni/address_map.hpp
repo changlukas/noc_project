@@ -48,6 +48,13 @@ struct SpaceCoords {
     // docs/noc-target-spec.md §5 allows 2 to 16 per dimension.
     unsigned x_count = 0;
     unsigned y_count = 0;
+    // Inclusive tile-region bounds inside the route span. Peripherals occupy
+    // coordinates outside them. Default 0 with x_count/y_count as the span
+    // reduces every rule below to a plain mesh.
+    unsigned x_first = 0;
+    unsigned x_last = 0;
+    unsigned y_first = 0;
+    unsigned y_last = 0;
     // x_count == 0 marks a space whose coordinate field could not be read off
     // the map (one entry names no stride, a non-power-of-two stride names no
     // field). Such a space is simply not a collective target, spec §5.1.

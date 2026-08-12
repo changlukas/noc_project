@@ -354,7 +354,55 @@ def test_ids_per_initiator_overlapping_blocks_fit_the_id_width(tmp_path):
 # SamTable::validate, nmu/addr_trans.hpp).
 # ---------------------------------------------------------------------------
 
-def test_address_map_pack_accumulates_bases_in_list_order():
+def test_pack_bases_are_coordinate_derived_with_a_border_column():
+    from address_map import pack
+    # Tiles at x=1..2, peripherals at x=0, so the route span is 3 and a row
+    # strides four slots. Both spaces are declared: pack() requires full
+    # coverage of memory AND config, which is a real invariant of every
+    # topology and is not relaxed for a test.
+    mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1, 2)]
+    cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
+           for y in (0, 1) for x in (0, 1, 2)]
+    _, entries = pack({"tiles": mem + cfg}, 3, 2)
+    got = {(e["x"], e["y"], e["space"]): e["base"] for e in entries}
+    assert got == {
+        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x100000,
+        (2, 0, "memory"): 0x200000, (0, 1, "memory"): 0x400000,
+        (1, 1, "memory"): 0x500000, (2, 1, "memory"): 0x600000,
+        # config space starts above every slot memory could occupy:
+        # (1 << clog2(3)) * 2 * 0x100000 = 0x800000
+        (0, 0, "config"): 0x800000, (1, 0, "config"): 0x801000,
+        (2, 0, "config"): 0x802000, (0, 1, "config"): 0x804000,
+        (1, 1, "config"): 0x805000, (2, 1, "config"): 0x806000,
+    }
+
+
+def test_pack_is_unchanged_for_a_plain_mesh():
+    from address_map import pack
+    # The regression guard. These are the bases today's list-order accumulator
+    # produces, and the coordinate formula must reproduce them exactly --
+    # memory at idx * 0x100000, config at 0x400000 + idx * 0x1000, which is
+    # what every shipped topology file's own comment states.
+    mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1)]
+    cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
+           for y in (0, 1) for x in (0, 1)]
+    _, entries = pack({"tiles": mem + cfg}, 2, 2)
+    got = {(e["x"], e["y"], e["space"]): e["base"] for e in entries}
+    assert got == {
+        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x100000,
+        (0, 1, "memory"): 0x200000, (1, 1, "memory"): 0x300000,
+        (0, 0, "config"): 0x400000, (1, 0, "config"): 0x401000,
+        (0, 1, "config"): 0x402000, (1, 1, "config"): 0x403000,
+    }
+
+
+def test_pack_places_a_smaller_entry_on_its_own_slot():
+    """Mixed sizes are still accepted, bounded by the space's slot (here
+    max(0x1000, 0x2000) = 0x2000) -- but a smaller entry no longer drags its
+    neighbours down. Every entry sits at its own coordinate's slot, so the
+    address's coordinate field reads back correctly no matter which entry is
+    smaller. Under the old accumulator a single undersized tile shifted every
+    base after it; this is the sharpest case of that in the suite."""
     am = {"tiles": [
         {"x": 0, "y": 0, "size": 0x1000},
         {"x": 1, "y": 0, "size": 0x2000},
@@ -362,15 +410,15 @@ def test_address_map_pack_accumulates_bases_in_list_order():
         {"x": 1, "y": 1, "size": 0x1000},
     ] + [{"x": x, "y": y, "size": 0x1000, "space": "config"}
          for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]}
-    bases, entries = address_map.pack(am, x_dim=2, y_dim=2)
+    bases, entries = address_map.pack(am, x_span=2, y_span=2)
     assert bases == {
         address_map.dst_id(0, 0): 0,
-        address_map.dst_id(1, 0): 0x1000,
-        address_map.dst_id(0, 1): 0x3000,
-        address_map.dst_id(1, 1): 0x4000,
+        address_map.dst_id(1, 0): 0x2000,
+        address_map.dst_id(0, 1): 0x4000,
+        address_map.dst_id(1, 1): 0x6000,
     }
-    assert [e["base"] for e in entries] == [0, 0x1000, 0x3000, 0x4000,
-                                            0x5000, 0x6000, 0x7000, 0x8000]
+    assert [e["base"] for e in entries] == [0, 0x2000, 0x4000, 0x6000,
+                                            0x8000, 0x9000, 0xA000, 0xB000]
 
 
 def _two_space_tiles(memory_sizes):
@@ -386,7 +434,7 @@ def test_node_windows_are_that_node_s_own_regions():
     address that belongs to another node misses both rules and falls through to
     the NMU. Sizes are exact -- axi_xbar states a rule as start/end."""
     tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    _bases, entries = address_map.pack({"tiles": tiles}, x_span=2, y_span=2)
     assert address_map.node_windows(entries, address_map.dst_id(0, 0)) == [
         {"space": "config", "base": 0x400000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
@@ -490,31 +538,31 @@ def test_all_to_all_is_deterministic():
 def test_address_map_pack_rejects_zero_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
     with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_dim=1, y_dim=1)
+        address_map.pack(am, x_span=1, y_span=1)
 
 
 def test_address_map_pack_rejects_negative_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": -0x1000}]}
     with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_dim=1, y_dim=1)
+        address_map.pack(am, x_span=1, y_span=1)
 
 
 def test_address_map_pack_rejects_non_4k_aligned_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0x1234}]}
     with pytest.raises(ValueError, match="4 KB aligned"):
-        address_map.pack(am, x_dim=1, y_dim=1)
+        address_map.pack(am, x_span=1, y_span=1)
 
 
 def test_address_map_pack_rejects_node_outside_mesh():
     am = {"tiles": [{"x": 2, "y": 0, "size": 0x1000}]}
     with pytest.raises(ValueError, match="outside mesh"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+        address_map.pack(am, x_span=2, y_span=1)
 
 
 def test_address_map_pack_rejects_missing_node():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0x1000}]}  # 2x1 mesh needs 2 tiles
     with pytest.raises(ValueError, match="expected 2"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+        address_map.pack(am, x_span=2, y_span=1)
 
 
 def test_address_map_pack_rejects_missing_config_node():
@@ -527,7 +575,7 @@ def test_address_map_pack_rejects_missing_config_node():
         {"x": 0, "y": 0, "size": 0x1000, "space": "config"},
     ]}
     with pytest.raises(ValueError, match="config space covers 1 nodes, expected 2"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+        address_map.pack(am, x_span=2, y_span=1)
 
 
 def test_address_map_pack_rejects_duplicate_node():
@@ -536,14 +584,14 @@ def test_address_map_pack_rejects_duplicate_node():
         {"x": 0, "y": 0, "size": 0x1000},
     ]}
     with pytest.raises(ValueError, match="duplicate mesh node"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+        address_map.pack(am, x_span=2, y_span=1)
 
 
 def test_address_map_pack_rejects_missing_tiles_key():
     with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack({}, x_dim=1, y_dim=1)
+        address_map.pack({}, x_span=1, y_span=1)
     with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack(None, x_dim=1, y_dim=1)
+        address_map.pack(None, x_span=1, y_span=1)
 
 
 def test_address_map_pack_real_topologies_gap_free():
@@ -591,7 +639,7 @@ def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
     _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes = g._load_topology(
         str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
-    packed_bases, _entries = address_map.pack(topo["address_map"], x_dim=2, y_dim=2)
+    packed_bases, _entries = address_map.pack(topo["address_map"], x_span=2, y_span=2)
     assert bases_from_patterns == packed_bases
 
 
@@ -637,7 +685,7 @@ def test_noc_egress_aperture_sits_above_every_window():
     this aperture, which is the first power of two at or above the map's top --
     so no node window can ever reach it, however the map grows."""
     tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    _bases, entries = address_map.pack({"tiles": tiles}, x_span=2, y_span=2)
     base = address_map.noc_egress_base(entries)
     top = max(e["base"] + e["size"] for e in entries)
     assert base >= top
