@@ -78,10 +78,8 @@ endif
 # TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
 # (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
 TB_TOP_SV = $(COSIM_ROOT)/tb/tb_top_$(TOPOLOGY).sv
-# Extract num_vc suffix from TOPOLOGY name (e.g. mesh_4x4_vc4 -> vc4 -> noc_types_pkg_vc4.sv).
-# Strip a trailing _rob suffix first (e.g. mesh_4x4_vc2_rob -> mesh_4x4_vc2) so the _vc split
-# always lands on the vc word (vc2), not "vc2_rob" which has no matching noc_types_pkg file.
-# $(lastword $(subst _vc, vc,...)) then splits on "_vc" and takes the last word (e.g. "vc2").
+# Strip a trailing _rob suffix to get the YAML filename (e.g. mesh_4x4_vc2_rob ->
+# mesh_4x4_vc2): the reorder-buffer build is a tb_top flavour, not its own topology.
 TOPOLOGY_BASE = $(TOPOLOGY:_rob=)
 # pulp AXI crossbar subset (sim/dv/README.md): the tile decoder and the memory
 # behind it in user_node_endpoint.sv. Taken at v0.39.7 / v1.37.0, the versions
@@ -124,7 +122,15 @@ XBAR_SRC := \
 # separately, otherwise a hand-edit (e.g. a debug probe) leaves the binary "up to
 # date" and the edit is silently never compiled.
 NOC_FABRIC_SV = $(SRC_SV)/noc_fabric_$(TOPOLOGY_BASE).sv
-TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_$(lastword $(subst _vc, vc,$(TOPOLOGY_BASE))).sv
+# num_vc comes from the topology YAML, never from the topology NAME: a name
+# carries suffixes that are not the vc word (_rob, _periph), and reading a
+# declared value out of a filename needs a new strip per suffix. gen_tb_top.py
+# already loads and validates the YAML, so it answers rather than a second
+# reader here. $(or ...) honours a local.mk PYTHON3 without defining one, which
+# would pre-empt each Makefile's own default.
+TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
+    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY_BASE) --print-num-vc)
+TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \

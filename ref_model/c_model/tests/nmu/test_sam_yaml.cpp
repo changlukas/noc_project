@@ -273,6 +273,15 @@ uint8_t enumerated_node_mask(const ni::cmodel::nmu::addr_trans::SamTable& sam, u
 // Exhaustive over every shipped topology, both spaces, every anchor node and
 // every legal mask shape -- at most 2^(x_bits + y_bits) masks per space. This
 // is the equivalence evidence for B2 replacing the enumeration in the datapath.
+//
+// Walks only the (anchor, mask) pairs whose raw wildcard closure already lies
+// inside the tile region, which is where clipping is a no-op. The subject here
+// is the slice against the enumeration, not the clip: on a span carrying a
+// peripheral, collective_translate deliberately refuses a mask whose clipped
+// bound is not a member (addr_trans.hpp:391-398), so asserting every pair over
+// the whole span is legal would assert against that guard. On every topology
+// whose tile region IS the span nothing is filtered and the coverage is the
+// same set of pairs as before.
 TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
     std::vector<std::string> files;
     for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
@@ -295,6 +304,7 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                     break;
                 }
             }
+            unsigned compared_here = 0;
             for (unsigned ay = 0; ay < c->y_count; ++ay) {
                 for (unsigned ax = 0; ax < c->x_count; ++ax) {
                     const uint64_t anchor = origin | (uint64_t{ax} << c->x_range.offset) |
@@ -302,6 +312,12 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                     for (unsigned my = 0; my < (1u << c->y_range.len); ++my) {
                         for (unsigned mx = 0; mx < (1u << c->x_range.len); ++mx) {
                             if (mx == 0 && my == 0) continue;  // empty set: rejected, not compared
+                            // Closure inside the tile region, so the clip below
+                            // is a no-op and the mask is legal by construction.
+                            // The closure is a wildcard box, so its per-axis
+                            // extremes bound every member.
+                            if ((ax & ~mx) < c->x_first || (ax | mx) > c->x_last) continue;
+                            if ((ay & ~my) < c->y_first || (ay | my) > c->y_last) continue;
                             const uint64_t addr_mask = (uint64_t{mx} << c->x_range.offset) |
                                                        (uint64_t{my} << c->y_range.offset);
                             axi::AwBeat b{};
@@ -321,15 +337,22 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                                 << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
                             ++compared;
+                            ++compared_here;
                         }
                     }
                 }
             }
+            // Non-vacuity, per topology and space rather than one total: the
+            // filter above makes the legal pair count a property of each
+            // topology's own tile region, and a hard-coded total would read
+            // every new topology as a regression. Every space reaches at least
+            // one legal collective -- a 4x4 gives 16 anchors x 15 masks, the
+            // 3-wide peripheral span gives 4 anchors x 1 (only the y mask keeps
+            // its closure inside a 2-wide tile region).
+            EXPECT_GT(compared_here, 0u) << "no legal (anchor, mask) pair in this space";
         }
     }
-    // 5 topologies x 2 spaces: 2x2 gives 4 anchors x 3 masks, each 4x4 gives
-    // 16 x 15. Guards against the loops silently collapsing to nothing.
-    EXPECT_EQ(compared, 2u * (4u * 3u + 4u * 16u * 15u));
+    EXPECT_GT(compared, 0u);
 }
 
 TEST(SamYaml, UnknownSpaceRejected) {

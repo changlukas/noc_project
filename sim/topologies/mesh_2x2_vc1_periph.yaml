@@ -1,0 +1,43 @@
+topology:
+  name: mesh_2x2_vc1_periph
+  x_dim: 2
+  y_dim: 2
+  # Route-coordinate span, wider than the router array: the tiles occupy
+  # x = 1..2, y = 0..1 and the west border coordinate x = 0 carries a
+  # peripheral on each row. A peripheral has an NI and an endpoint but no
+  # router, so the array stays 2x2 while every routable coordinate -- tile or
+  # border -- has to fit the span.
+  x_span: 3
+  y_span: 2
+  tile_x_first: 1
+  tile_x_last: 2
+  tile_y_first: 0
+  tile_y_last: 1
+  num_vc: 1
+
+# Dual-space tile map: every coordinate in the span carries a memory-space
+# (data class) tile and a config-space (narrow class) tile, the peripherals at
+# x = 0 included -- a peripheral is addressed exactly as a tile is.
+# docs/noc-target-spec.md §5 "SAM address spaces".
+# Config tiles are appended AFTER every memory tile, so no memory base moves.
+# Bases come from the coordinate and the space's slot size, not from list
+# order: base = space_base + ((y << clog2(x_span)) | x) * slot. With
+# x_span = 3 that is clog2(3) = 2 index bits, so memory bases = idx * 0x100000
+# (index bits [21:20], row bit [22]) and config bases = 0x800000 + idx * 0x1000
+# (index bits [13:12], row bit [14]).
+# No memory_slot_size / config_slot_size: both packers derive the slot as the
+# largest declared size in the space.
+address_map:
+  tiles:
+    - { x: 0, y: 0, size: 0x100000 }
+    - { x: 1, y: 0, size: 0x100000 }
+    - { x: 2, y: 0, size: 0x100000 }
+    - { x: 0, y: 1, size: 0x100000 }
+    - { x: 1, y: 1, size: 0x100000 }
+    - { x: 2, y: 1, size: 0x100000 }
+    - { x: 0, y: 0, size: 0x1000, space: config }
+    - { x: 1, y: 0, size: 0x1000, space: config }
+    - { x: 2, y: 0, size: 0x1000, space: config }
+    - { x: 0, y: 1, size: 0x1000, space: config }
+    - { x: 1, y: 1, size: 0x1000, space: config }
+    - { x: 2, y: 1, size: 0x1000, space: config }

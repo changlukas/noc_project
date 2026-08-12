@@ -310,6 +310,11 @@ def coord_id(x, y):
     return (y << X_WIDTH) | x
 
 
+def coord_xy(cid):
+    """(x, y) of a coordinate-encoded node id.  Inverse of coord_id."""
+    return cid & ((1 << X_WIDTH) - 1), cid >> X_WIDTH
+
+
 def neighbor_dst(x, y, x_dim, y_dim):
     """Booksim2 NeighborTrafficPattern::dest (traffic.cpp:316): +1 per dimension, wrap.
 
@@ -632,14 +637,28 @@ _MCAST_SHAPES = ("row", "col", "submesh")
 _CONFIG_PROBE_BASE = 0x800  # cross-node config probe window, below base_local
 
 
-def collective_addr_mask(bases, member_cids, anchor_cid):
+def collective_addr_mask(bases, member_cids, anchor_cid, tile_bases=None):
     """OR of (base[m] XOR base[anchor]) with wildcard-closure validation.
 
     The AWUSER mask semantics (spec §6) require the member set to be exactly a
-    wildcard over the mask bits: 2^popcount(mask) members whose bases cover
-    every masked combination.  The NMU's collective_translate re-checks this
-    and aborts the run; validating here turns a mask-unfriendly address map
-    into a stimulus-generation error instead of a co-sim abort.
+    wildcard over the mask bits, CLIPPED to the tiles: the NMU and every router
+    expand the mask over the whole node-index field and then drop the
+    coordinates that are not tiles (nmu::addr_trans::collective_translate,
+    router::route_mask), so on a span carrying a peripheral the delivered set is
+    the wildcard closure intersected with the tile region rather than the whole
+    closure.  `tile_bases` is that subset of `bases`; it defaults to `bases`,
+    which is every span coordinate and therefore no clip at all -- the case of
+    every topology with no peripheral.  The NMU re-checks this and aborts the
+    run; validating here turns a mask-unfriendly address map into a
+    stimulus-generation error instead of a co-sim abort.
+
+    Both of collective_translate's rejections are mirrored: the clipped set
+    must be non-empty, and each clipped BOUND must itself be a wildcard member
+    (addr_trans.hpp:381-398).  Clamping a range is not the same as clipping a
+    set -- anchor x=1 with mask_x=0b10 names {1,3}, and clamping to a tile
+    region ending at 2 gives a bound of 2, which is not a member.  A terminal
+    router there would fork to nothing and abort, so a generator that can emit
+    such a mask cannot produce valid stimulus on a topology with a peripheral.
 
     `bases` must be the bases of ONE address space, and the caller is expected
     to have picked the space its anchor lands in.  The node-index field sits at
@@ -651,15 +670,12 @@ def collective_addr_mask(bases, member_cids, anchor_cid):
     call produces a mask spanning both fields, which the wildcard check below
     rejects.
     """
+    if tile_bases is None:
+        tile_bases = bases
     anchor = bases[anchor_cid]
     mask = 0
     for m in member_cids:
         mask |= bases[m] ^ anchor
-    n_bits = bin(mask).count("1")
-    if (1 << n_bits) != len(member_cids):
-        raise ValueError(
-            f"multicast member set of {len(member_cids)} needs a power-of-two wildcard; "
-            f"mask {mask:#x} has {n_bits} bits (address map not mask friendly)")
     lo = anchor & ~mask
     combos = set()
     sub = mask
@@ -668,10 +684,38 @@ def collective_addr_mask(bases, member_cids, anchor_cid):
         if sub == 0:
             break
         sub = (sub - 1) & mask
-    if combos != {bases[m] for m in member_cids}:
+    delivered = combos & set(tile_bases.values())
+    if delivered != {bases[m] for m in member_cids}:
         raise ValueError(
-            f"multicast member bases are not a wildcard over mask {mask:#x}: "
-            f"{sorted(hex(bases[m]) for m in member_cids)}")
+            f"multicast member bases are not the wildcard over mask {mask:#x} clipped to "
+            f"the tiles: named {sorted(hex(bases[m]) for m in member_cids)}, "
+            f"the fabric would deliver {sorted(hex(b) for b in delivered)}")
+
+    # Clipped-bound membership, per coordinate, mirroring addr_trans.hpp:371-398.
+    # collective_translate shifts mask_x / mask_y out of the space's declared
+    # ranges; this function sees no ranges, so it reads the same two numbers off
+    # the coordinate ids instead. They ARE the same numbers: the masked address
+    # bits are the node index (base = space_base + ((y << x_bits) | x) * slot),
+    # so the mask's x part is the OR of the members' x XOR the anchor's, and
+    # likewise on y. The tile region is the coordinate box tile_bases spans.
+    for axis, i in (("x", 0), ("y", 1)):
+        anchor_c = coord_xy(anchor_cid)[i]
+        span_mask = 0
+        for m in member_cids:
+            span_mask |= coord_xy(m)[i] ^ anchor_c
+        first = min(coord_xy(c)[i] for c in tile_bases)
+        last = max(coord_xy(c)[i] for c in tile_bases)
+        clip_lo = max(anchor_c & ~span_mask, first)
+        clip_hi = min(anchor_c | span_mask, last)
+        if clip_lo > clip_hi:
+            raise ValueError(
+                f"multicast {axis} range is empty after clipping to the tile region "
+                f"[{first},{last}] (mask {mask:#x}, anchor {anchor_cid:#x})")
+        if ((clip_lo ^ anchor_c) & ~span_mask) or ((clip_hi ^ anchor_c) & ~span_mask):
+            raise ValueError(
+                f"multicast {axis} bound clipped to the tile region [{first},{last}] is not a "
+                f"wildcard member (mask {mask:#x}, anchor {anchor_cid:#x}): the source and a "
+                f"terminal router would disagree on the member set")
     if mask >> 48:
         raise ValueError(f"collective address mask {mask:#x} exceeds AWUSER[57:10] (48 b)")
     return mask
@@ -719,16 +763,22 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
                            base_local, region_bytes):
     """Write node<i>/{write,read}.txt for every node of the multicast pattern."""
     n_nodes = len(nodes)
-    groups = {coord_id(*src): members for src, members in mcast_groups(shape, x_dim, y_dim)}
+    # mcast_groups permutes ARRAY positions like every other pattern; the node
+    # list is what turns one into a route coordinate id.
+    cid_of = {(x, y): cid for _idx, x, y, cid in nodes}
+    tile_bases = {cid: bases[cid] for cid in cid_of.values()}
+    groups = {cid_of[src]: [cid_of[m] for m in members]
+              for src, members in mcast_groups(shape, x_dim, y_dim)}
     burst_footprint = (axi_len + 1) * (1 << axi_size)
     stride = max(_SLOT_STRIDE, burst_footprint)
     mcast_base = base_local + region_bytes  # after the unicast filler window
     # Config space is all-or-nothing for the multicast pattern: narrow
     # multicast needs a config tile per member.
-    config_all = len(config_bases) == n_nodes
+    config_all = all(cid in config_bases for cid in cid_of.values())
     if config_bases and not config_all:
+        missing = [cid for cid in cid_of.values() if cid not in config_bases]
         sys.exit("ERROR: multicast pattern needs a config tile on EVERY node "
-                 f"(got {len(config_bases)}/{n_nodes}); extend the topology's config tiles")
+                 f"(missing {len(missing)}/{n_nodes}); extend the topology's config tiles")
     # Bound the probe window by the CONFIG ENTRY, not by base_local: the two are
     # both 0x1000 on today's maps, but base_local is a memory-space slot
     # convention and has no say in how large a config aperture is. An overrun
@@ -747,8 +797,8 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
         write_lines, read_lines = [], []
         axid = idx % 256
         if src_cid in groups:
-            members = [coord_id(mx, my) for (mx, my) in groups[src_cid]]
-            addr_mask = collective_addr_mask(bases, members, src_cid)
+            members = groups[src_cid]
+            addr_mask = collective_addr_mask(bases, members, src_cid, tile_bases)
             for seq in range(n_txn):
                 off = mcast_base + seq * stride
                 tile_size = sizes["memory"][src_cid]
@@ -764,7 +814,9 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             if config_all:
                 # Narrow config-space multicast: 2-beat 8 B burst at config
                 # offset 0 (config-space message replication use case).
-                cfg_mask = collective_addr_mask(config_bases, members, src_cid)
+                tile_cfg_bases = {cid: config_bases[cid] for cid in cid_of.values()}
+                cfg_mask = collective_addr_mask(config_bases, members, src_cid,
+                                                tile_cfg_bases)
                 w, r = multicast_lines(axid, config_bases[src_cid], cfg_mask,
                                        [config_bases[m] for m in members],
                                        axi_size=3, axi_len=1, data_width=data_width)
@@ -774,7 +826,7 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             # Filler: unicast neighbor write+read pairs (same shape as the
             # neighbor pattern), src-partitioned offsets in the base_local
             # window -- disjoint from every multicast slot by construction.
-            dst_cid = coord_id(*neighbor_dst(x, y, x_dim, y_dim))
+            dst_cid = cid_of[neighbor_dst(x, y, x_dim, y_dim)]
             reserved = burst_footprint
             for seq in range(n_txn):
                 off = alloc_unique_offset(dst_cid, idx, seq, base_local,
@@ -799,13 +851,31 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             f.write("\n".join(read_lines) + "\n")
 
 
+def emit_idle_nodes(out_root, first_idx, count):
+    """Empty write.txt/read.txt for `count` endpoints starting at `first_idx`.
+
+    Peripherals occupy endpoint indices past the router-node count and carry no
+    stimulus, but every endpoint instantiates a pulp axi_file_master and
+    load_files $fatals on a file it cannot open (axi_test.sv:2513-2528). An
+    empty pair leaves both queues empty, which is the idle the topology asks
+    for.
+    """
+    for idx in range(first_idx, first_idx + count):
+        out_dir = os.path.join(out_root, f"node{idx}")
+        os.makedirs(out_dir, exist_ok=True)
+        for name in ("write.txt", "read.txt"):
+            with open(os.path.join(out_dir, name), "w"):
+                pass
+
+
 # ---------------------------------------------------------------------------
 # Topology loader
 # ---------------------------------------------------------------------------
 
 def _load_topology(name):
     """Return (nodes, x_dim, y_dim, bases, config_bases, sizes) where nodes =
-    [(idx, x, y, cid), ...], bases = {dst_id: base} (memory space) and
+    [(idx, x, y, cid), ...] with x/y the ARRAY position and cid the ROUTE
+    coordinate id, bases = {dst_id: base} (memory space) and
     config_bases = {dst_id: base} (config space, sparse -- most topologies
     have none), both from address_map.pack(); sizes = {"memory": {dst_id:
     size}, "config": {dst_id: size}} for capacity checks.
@@ -829,6 +899,13 @@ def _load_topology(name):
     # slot. The node list below stays the router array.
     x_span = int(topo["topology"].get("x_span", x_dim))
     y_span = int(topo["topology"].get("y_span", y_dim))
+    # The router at ARRAY position (x, y) sits at ROUTE coordinate
+    # (tile_x_first + x, tile_y_first + y): a topology whose tiles start at a
+    # border-offset coordinate leaves a span coordinate for a peripheral below
+    # them. x/y in the node list below stay the array position, which is what
+    # every spatial pattern permutes; only the coord id moves.
+    tx_first = int(topo["topology"].get("tile_x_first", 0))
+    ty_first = int(topo["topology"].get("tile_y_first", 0))
     bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
     config_bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "config"}
     sizes = {
@@ -839,7 +916,7 @@ def _load_topology(name):
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
-            nodes.append((idx, x, y, coord_id(x, y)))
+            nodes.append((idx, x, y, coord_id(x + tx_first, y + ty_first)))
             idx += 1
     return nodes, x_dim, y_dim, bases, config_bases, sizes
 
@@ -1023,6 +1100,14 @@ def main(argv=None):
     nodes, x_dim, y_dim, bases, config_bases, sizes = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
+    # Spatial patterns permute ARRAY positions; the node list turns one into a
+    # route coordinate id, which is what the address map is keyed by.
+    cid_of = {(x, y): cid for _idx, x, y, cid in nodes}
+    # Every route coordinate owns a memory tile, so the coordinates the router
+    # array does not cover are the peripherals. They have an NI and an endpoint
+    # but no stimulus of their own, and the endpoint's file master $fatals on a
+    # missing file, so each gets an empty pair at its own endpoint index.
+    emit_idle_nodes(a.out, n_nodes, len(bases) - n_nodes)
 
     widths = axi_widths()
     base_local = 0x1000
@@ -1061,26 +1146,26 @@ def main(argv=None):
                         if src_cid in config_bases else None)
         if a.pattern == "beat_exact":
             dst_x, dst_y = neighbor_dst(x, y, x_dim, y_dim)
-            dst_base = bases[coord_id(dst_x, dst_y)]
+            dst_base = bases[cid_of[(dst_x, dst_y)]]
             emit_beat_exact_node(os.path.join(a.out, f"node{idx}"), idx, dst_base,
                                  widths["data"], extra=narrow_extra, base_local=base_local)
             continue
         if a.pattern in _DETERMINISTIC_PATTERNS:
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
-            dst_cids = [coord_id(dst_x, dst_y)] * a.transactions_per_node
+            dst_cids = [cid_of[(dst_x, dst_y)]] * a.transactions_per_node
         elif a.pattern == "uniform_random":
             dst_lin = uniform_random_dsts(idx, n_nodes, a.transactions_per_node,
                                           rng, a.exclude_self)
-            dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+            dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
         elif a.pattern == "all_to_all":
             dst_lin = all_to_all_dsts(idx, n_nodes, a.transactions_per_node)
-            dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+            dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
         else:  # hotspot
             if a.hotspot is None:
                 ap.error("--hotspot is required for the hotspot pattern")
             dst_lin = hotspot_dsts(idx, n_nodes, a.transactions_per_node, rng,
                                    a.hotspot, a.hotspot_rates, a.exclude_self)
-            dst_cids = [coord_id(*_linear_to_coord(d, x_dim)) for d in dst_lin]
+            dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
         emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
                               n_nodes, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
