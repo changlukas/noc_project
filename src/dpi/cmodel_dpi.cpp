@@ -570,7 +570,7 @@ extern "C" void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, s
     DPI_BOUNDARY_END(cmodel_nmu_get_outputs);
 }
 
-// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing telemetry readout.
+// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing statistic readout.
 // 0 if the handle is invalid or RoB is Disabled.
 extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
     DPI_BOUNDARY_BEGIN_R(cmodel_nmu_read_slot_hwm, 0u) {
@@ -585,7 +585,7 @@ extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
     DPI_BOUNDARY_END_R(cmodel_nmu_read_slot_hwm);
 }
 
-// Admission telemetry (Rob) — sizing readout, measurement-only on the model side.
+// Admission counters (Rob) — sizing readout, measurement-only on the model side.
 // The three aw_* counts partition the accepted AWs across the SPEC 17 branches,
 // the three ar_* counts do the same for accepted ARs (Enabled mode only),
 // order_list_hwm is the deepest per-id order list (NMU_MAX_TXNS_PER_ID) and the
@@ -593,12 +593,12 @@ extern "C" unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx) {
 // One call rather than nine cmodel_nmu_read_slot_hwm-shaped scalar functions:
 // every consumer wants the whole set for the same node in the same line.
 // All outputs are 0 if the handle is invalid or the NMU has no standalone Rob.
-extern "C" void cmodel_nmu_admission_telemetry(
+extern "C" void cmodel_nmu_admission_stats(
     unsigned long long ctx, unsigned int* aw_idle_bypass, unsigned int* aw_same_dest_bypass,
     unsigned int* aw_fallback_alloc, unsigned int* ar_idle_bypass,
     unsigned int* ar_same_dest_bypass, unsigned int* ar_fallback_alloc,
     unsigned int* order_list_hwm, unsigned int* write_txns_hwm, unsigned int* read_txns_hwm) {
-    DPI_BOUNDARY_BEGIN(cmodel_nmu_admission_telemetry) {
+    DPI_BOUNDARY_BEGIN(cmodel_nmu_admission_stats) {
         *aw_idle_bypass = 0u;
         *aw_same_dest_bypass = 0u;
         *aw_fallback_alloc = 0u;
@@ -609,7 +609,7 @@ extern "C" void cmodel_nmu_admission_telemetry(
         *write_txns_hwm = 0u;
         *read_txns_hwm = 0u;
         auto* _h =
-            ni::cmodel::wrap::validate_handle(ctx, WrapType::Nmu, "cmodel_nmu_admission_telemetry");
+            ni::cmodel::wrap::validate_handle(ctx, WrapType::Nmu, "cmodel_nmu_admission_stats");
         if (!_h) return;
         auto* nmu = static_cast<NmuWrap*>(_h->adapter.get());
         auto* sa = nmu->standalone();
@@ -625,7 +625,7 @@ extern "C" void cmodel_nmu_admission_telemetry(
         *write_txns_hwm = static_cast<unsigned int>(rob.write_txns_hwm());
         *read_txns_hwm = static_cast<unsigned int>(rob.read_txns_hwm());
     }
-    DPI_BOUNDARY_END(cmodel_nmu_admission_telemetry);
+    DPI_BOUNDARY_END(cmodel_nmu_admission_stats);
 }
 
 // Nsu DPI handlers.

@@ -309,7 +309,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // High-water mark backing read_slot_hwm(). See getter for details.
     std::size_t read_slot_hwm_ = 0;
 
-    // Admission telemetry backing the count / hwm getters above. See those for
+    // Admission counters backing the count / hwm getters above. See those for
     // details. Written only on the accepted-push tail of push_aw / push_ar, read
     // by nothing inside this class: no admission, ordering or timing decision
     // may depend on them.
@@ -434,7 +434,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     write_order_by_id_[b.id].push_back({static_cast<uint8_t>(base), 1, needs_rob, collective});
     ++write_txns_;
     ++w_bursts_owed_;
-    // Telemetry tail, past every early return: needs_rob / fallen_back above are
+    // Counter tail, past every early return: needs_rob / fallen_back above are
     // trial values and the push can still be refused after them, so counting
     // there would count pushes that never happened. (empty, needs_rob) names the
     // branch that ran -- empty: idle-ID bypass; !empty && !needs_rob:
@@ -540,7 +540,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
         read_order_by_id_[b.id].push_back(
             {static_cast<uint8_t>(base), static_cast<uint16_t>(n), needs_rob});
         ++read_txns_;
-        // Telemetry tail; same reasoning as push_aw's.
+        // Counter tail; same reasoning as push_aw's.
         if (empty) {
             ++ar_idle_bypass_count_;
         } else if (needs_rob) {

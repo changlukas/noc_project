@@ -276,10 +276,10 @@ throughput questions belong to the mode-1 rate sweep). Latency tracks hop
 distance: on a 4x4 mesh the `neighbor` pattern shows three tiers, interior 2
 hops, one-axis wrap 4, corner 6, because the mesh has no torus links and the
 wrap routes back across the array. The `[HWM]` lines report the per-node NMU
-sizing telemetry: the R-RoB slot peak from `cmodel_nmu_read_slot_hwm`, plus the
+sizing statistics: the R-RoB slot peak from `cmodel_nmu_read_slot_hwm`, plus the
 order-list peak, the peak in-flight transaction count per direction and the
 admission clause
-split (AW and AR separately) from `cmodel_nmu_admission_telemetry`.
+split (AW and AR separately) from `cmodel_nmu_admission_stats`.
 
 ## Topology YAML to generator to testbench
 

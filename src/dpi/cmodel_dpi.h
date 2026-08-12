@@ -173,13 +173,13 @@ void cmodel_nmu_get_outputs(unsigned long long ctx, svBit* awready, svBit* wread
                             svBit* tx_req_valid, svBitVecVal* tx_req_flit, svBit* rx_rsp_ready,
                             svBit* tx_dat_valid, svBitVecVal* tx_dat_flit,
                             svBitVecVal* rx_dat_crdvalid);
-// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing telemetry. 0 if the
+// Peak R-RoB slot occupancy (Rob::read_slot_hwm) — sizing statistics. 0 if the
 // handle is invalid or RoB is Disabled.
 unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
-// Admission telemetry — SPEC 17 branch counts (AW and AR separately), the peak
+// Admission counters — SPEC 17 branch counts (AW and AR separately), the peak
 // per-id order-list depth and the two shared-pool peaks. All outputs 0 if the
 // handle is invalid or the RoB is not standalone.
-void cmodel_nmu_admission_telemetry(unsigned long long ctx, unsigned int* aw_idle_bypass,
+void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_bypass,
                                     unsigned int* aw_same_dest_bypass,
                                     unsigned int* aw_fallback_alloc, unsigned int* ar_idle_bypass,
                                     unsigned int* ar_same_dest_bypass,

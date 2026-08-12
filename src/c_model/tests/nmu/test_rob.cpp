@@ -1469,7 +1469,7 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
         << "the idle-ID bypass re-enables bypass once the id's order list fully drains";
 }
 
-// === Admission telemetry (measurement-only counters) ===
+// === Admission counters (measurement-only) ===
 //
 // Pins each counter to the branch it is supposed to count, so a counter wired to
 // the wrong arm of the push_aw / push_ar chain fails here rather than silently
@@ -1479,7 +1479,7 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
 // again) is not repeated: RobSameDestBypass.DestChangeTriggersStickyFallback
 // already proves the drain reopens the idle-ID bypass, and the counters read the
 // same branch variables.
-TEST(RobAdmissionTelemetry, ClauseCountsFollowTheSpecTraceBranches) {
+TEST(RobAdmissionStats, ClauseCountsFollowTheSpecTraceBranches) {
     SCENARIO(
         "Rob Enabled: the AW clause counters split the Section 2.5 trace 1/1/2 across "
         "{idle-ID bypass, same-destination bypass, fall-back allocate}, an AR same-dest streak "
