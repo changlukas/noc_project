@@ -184,13 +184,16 @@ module user_node_endpoint #(
     localparam int unsigned NMU_TARGET     = TILE_TARGETS;  // last master port
     localparam int unsigned XBAR_SLV_PORTS = 2;
     localparam int unsigned XBAR_MST_PORTS = TILE_TARGETS + 1;
-    // Slave-port ID width, derived so the master-port width lands exactly on the
-    // NI's: axi_xbar appends $clog2(NoSlvPorts) bits to route responses back
-    // (axi/doc/axi_xbar.md:15), the master-port index of AXI4 IHI 0022 A5.3.5.
-    // ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT is one initiator's share of the
-    // field and must fit under this; the assertions below hold the initiators to
-    // it, because a bit driven above it is indistinguishable from an index bit.
-    localparam int unsigned XBAR_SLV_ID_W  = ID_WIDTH - 1;
+    // Slave-port ID width is one initiator's own share of the field, and the
+    // master-port width adds the $clog2(NoSlvPorts) index axi_xbar appends to
+    // route responses back (axi/doc/axi_xbar.md:15, the master-port index of
+    // AXI4 IHI 0022 A5.3.5). Neither follows ID_WIDTH: the tile's id space is a
+    // property of its initiators, the NI's is a property of the NoC, and
+    // i_noc_id_remap below converts between them. The assertions further down
+    // hold the initiators to their share, because a bit driven above it is
+    // indistinguishable from an index bit.
+    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
+    localparam int unsigned XBAR_MST_ID_W  = XBAR_SLV_ID_W + $clog2(XBAR_SLV_PORTS);
 
     // DESCENDING ranges, not [N]. axi_xbar_intf declares its ports
     // [NoSlvPorts-1:0] / [NoMstPorts-1:0] and SystemVerilog binds an interface
@@ -202,9 +205,21 @@ module user_node_endpoint #(
     ) tile_axi [XBAR_SLV_PORTS-1:0] ();
 
     AXI_BUS #(
+        .AXI_ADDR_WIDTH(ADDR_WIDTH),  .AXI_DATA_WIDTH(DATA_WIDTH),
+        .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
+    ) tile_mst [XBAR_MST_PORTS-1:0] ();
+
+    // m2 after the id remap: the NoC-facing face of the tile, at the NI's id
+    // width. A tile initiator may drive 2**XBAR_SLV_ID_W ids and the crossbar
+    // appends its index, so up to 2**XBAR_MST_ID_W distinct ids arrive here and
+    // fold into the NI's space. axi_id_remap stalls an id that finds no free
+    // downstream id rather than erroring, and unlike axi_id_serialize it never
+    // puts two distinct upstream ids on one downstream id, so per-id ordering
+    // survives the fold.
+    AXI_BUS #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
         .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
-    ) tile_mst [XBAR_MST_PORTS-1:0] ();
+    ) noc_mst ();
 
     // Fault injection for the DECERR gate (standing red-test rule, same shape
     // as +mcast_fault above): +decerr_fault=1 sets the top address bit on this
@@ -433,12 +448,12 @@ module user_node_endpoint #(
     // X on a never-written address, which the directed run never reads.
     AXI_BUS #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) tile_mem [TILE_TARGETS-1:0] ();
 
     for (genvar t = 0; t < TILE_TARGETS; t++) begin : g_tile_mem
         axi_delayer_intf #(
-            .AXI_ID_WIDTH(ID_WIDTH), .AXI_ADDR_WIDTH(ADDR_WIDTH),
+            .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_ADDR_WIDTH(ADDR_WIDTH),
             .AXI_DATA_WIDTH(DATA_WIDTH),  .AXI_USER_WIDTH(AWUSER_WIDTH),
             .STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
             .STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),
@@ -451,7 +466,7 @@ module user_node_endpoint #(
 
         axi_sim_mem_intf #(
             .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-            .AXI_ID_WIDTH(ID_WIDTH), .AXI_USER_WIDTH(AWUSER_WIDTH),
+            .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH),
             .WARN_UNINITIALIZED(1'b0), .UNINITIALIZED_DATA("undefined"),
             .APPL_DELAY(ApplTime), .ACQ_DELAY(TestTime)
         ) i_mem (
@@ -464,55 +479,71 @@ module user_node_endpoint #(
         );
     end
 
-    // m2 -> the NMU: this node's share of the traffic that goes on the NoC.
-    assign master_axi_req_o.awid     = tile_mst[NMU_TARGET].aw_id;
+    // m2 -> the NMU: this node's share of the traffic that goes on the NoC,
+    // through the id remap that converts the tile's id space into the NI's.
+    axi_id_remap_intf #(
+        .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
+        .AXI_SLV_PORT_MAX_UNIQ_IDS(1 << XBAR_MST_ID_W),
+        .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT),
+        .AXI_MST_PORT_ID_WIDTH(ID_WIDTH),
+        .AXI_ADDR_WIDTH(ADDR_WIDTH),
+        .AXI_DATA_WIDTH(DATA_WIDTH),
+        .AXI_USER_WIDTH(AWUSER_WIDTH)
+    ) i_noc_id_remap (
+        .clk_i(clk_i),
+        .rst_ni(rst_ni),
+        .slv(tile_mst[NMU_TARGET]),
+        .mst(noc_mst)
+    );
+
+    assign master_axi_req_o.awid     = noc_mst.aw_id;
     // Stateless restore: no real region reaches NOC_EGRESS_BASE, so an address
     // at or above it can only be one this endpoint offset on the way in.
     assign master_axi_req_o.awaddr   =
-        (tile_mst[NMU_TARGET].aw_addr >= NOC_EGRESS_BASE)
-            ? tile_mst[NMU_TARGET].aw_addr - NOC_EGRESS_BASE
-            : tile_mst[NMU_TARGET].aw_addr;
-    assign master_axi_req_o.awlen    = tile_mst[NMU_TARGET].aw_len;
-    assign master_axi_req_o.awsize   = tile_mst[NMU_TARGET].aw_size;
-    assign master_axi_req_o.awburst  = tile_mst[NMU_TARGET].aw_burst;
-    assign master_axi_req_o.awlock   = tile_mst[NMU_TARGET].aw_lock;
-    assign master_axi_req_o.awcache  = tile_mst[NMU_TARGET].aw_cache;
-    assign master_axi_req_o.awprot   = tile_mst[NMU_TARGET].aw_prot;
-    assign master_axi_req_o.awqos    = tile_mst[NMU_TARGET].aw_qos;
-    assign master_axi_req_o.awregion = tile_mst[NMU_TARGET].aw_region;
-    assign master_axi_req_o.awvalid  = tile_mst[NMU_TARGET].aw_valid;
-    assign master_awuser_o           = tile_mst[NMU_TARGET].aw_user;
-    assign master_axi_req_o.wdata    = tile_mst[NMU_TARGET].w_data;
-    assign master_axi_req_o.wstrb    = tile_mst[NMU_TARGET].w_strb;
-    assign master_axi_req_o.wlast    = tile_mst[NMU_TARGET].w_last;
-    assign master_axi_req_o.wvalid   = tile_mst[NMU_TARGET].w_valid;
-    assign master_axi_req_o.bready   = tile_mst[NMU_TARGET].b_ready;
-    assign master_axi_req_o.arid     = tile_mst[NMU_TARGET].ar_id;
-    assign master_axi_req_o.araddr   = tile_mst[NMU_TARGET].ar_addr;
-    assign master_axi_req_o.arlen    = tile_mst[NMU_TARGET].ar_len;
-    assign master_axi_req_o.arsize   = tile_mst[NMU_TARGET].ar_size;
-    assign master_axi_req_o.arburst  = tile_mst[NMU_TARGET].ar_burst;
-    assign master_axi_req_o.arlock   = tile_mst[NMU_TARGET].ar_lock;
-    assign master_axi_req_o.arcache  = tile_mst[NMU_TARGET].ar_cache;
-    assign master_axi_req_o.arprot   = tile_mst[NMU_TARGET].ar_prot;
-    assign master_axi_req_o.arqos    = tile_mst[NMU_TARGET].ar_qos;
-    assign master_axi_req_o.arregion = tile_mst[NMU_TARGET].ar_region;
-    assign master_axi_req_o.arvalid  = tile_mst[NMU_TARGET].ar_valid;
-    assign master_axi_req_o.rready   = tile_mst[NMU_TARGET].r_ready;
+        (noc_mst.aw_addr >= NOC_EGRESS_BASE)
+            ? noc_mst.aw_addr - NOC_EGRESS_BASE
+            : noc_mst.aw_addr;
+    assign master_axi_req_o.awlen    = noc_mst.aw_len;
+    assign master_axi_req_o.awsize   = noc_mst.aw_size;
+    assign master_axi_req_o.awburst  = noc_mst.aw_burst;
+    assign master_axi_req_o.awlock   = noc_mst.aw_lock;
+    assign master_axi_req_o.awcache  = noc_mst.aw_cache;
+    assign master_axi_req_o.awprot   = noc_mst.aw_prot;
+    assign master_axi_req_o.awqos    = noc_mst.aw_qos;
+    assign master_axi_req_o.awregion = noc_mst.aw_region;
+    assign master_axi_req_o.awvalid  = noc_mst.aw_valid;
+    assign master_awuser_o           = noc_mst.aw_user;
+    assign master_axi_req_o.wdata    = noc_mst.w_data;
+    assign master_axi_req_o.wstrb    = noc_mst.w_strb;
+    assign master_axi_req_o.wlast    = noc_mst.w_last;
+    assign master_axi_req_o.wvalid   = noc_mst.w_valid;
+    assign master_axi_req_o.bready   = noc_mst.b_ready;
+    assign master_axi_req_o.arid     = noc_mst.ar_id;
+    assign master_axi_req_o.araddr   = noc_mst.ar_addr;
+    assign master_axi_req_o.arlen    = noc_mst.ar_len;
+    assign master_axi_req_o.arsize   = noc_mst.ar_size;
+    assign master_axi_req_o.arburst  = noc_mst.ar_burst;
+    assign master_axi_req_o.arlock   = noc_mst.ar_lock;
+    assign master_axi_req_o.arcache  = noc_mst.ar_cache;
+    assign master_axi_req_o.arprot   = noc_mst.ar_prot;
+    assign master_axi_req_o.arqos    = noc_mst.ar_qos;
+    assign master_axi_req_o.arregion = noc_mst.ar_region;
+    assign master_axi_req_o.arvalid  = noc_mst.ar_valid;
+    assign master_axi_req_o.rready   = noc_mst.r_ready;
 
-    assign tile_mst[NMU_TARGET].aw_ready  = master_axi_rsp_i.awready;
-    assign tile_mst[NMU_TARGET].w_ready   = master_axi_rsp_i.wready;
-    assign tile_mst[NMU_TARGET].b_id      = master_axi_rsp_i.bid;
-    assign tile_mst[NMU_TARGET].b_resp    = master_axi_rsp_i.bresp;
-    assign tile_mst[NMU_TARGET].b_valid   = master_axi_rsp_i.bvalid;
-    assign tile_mst[NMU_TARGET].ar_ready  = master_axi_rsp_i.arready;
-    assign tile_mst[NMU_TARGET].r_id      = master_axi_rsp_i.rid;
-    assign tile_mst[NMU_TARGET].r_data    = master_axi_rsp_i.rdata;
-    assign tile_mst[NMU_TARGET].r_resp    = master_axi_rsp_i.rresp;
-    assign tile_mst[NMU_TARGET].r_last    = master_axi_rsp_i.rlast;
-    assign tile_mst[NMU_TARGET].r_valid   = master_axi_rsp_i.rvalid;
-    assign tile_mst[NMU_TARGET].b_user    = '0;
-    assign tile_mst[NMU_TARGET].r_user    = '0;
+    assign noc_mst.aw_ready  = master_axi_rsp_i.awready;
+    assign noc_mst.w_ready   = master_axi_rsp_i.wready;
+    assign noc_mst.b_id      = master_axi_rsp_i.bid;
+    assign noc_mst.b_resp    = master_axi_rsp_i.bresp;
+    assign noc_mst.b_valid   = master_axi_rsp_i.bvalid;
+    assign noc_mst.ar_ready  = master_axi_rsp_i.arready;
+    assign noc_mst.r_id      = master_axi_rsp_i.rid;
+    assign noc_mst.r_data    = master_axi_rsp_i.rdata;
+    assign noc_mst.r_resp    = master_axi_rsp_i.rresp;
+    assign noc_mst.r_last    = master_axi_rsp_i.rlast;
+    assign noc_mst.r_valid   = master_axi_rsp_i.rvalid;
+    assign noc_mst.b_user    = '0;
+    assign noc_mst.r_user    = '0;
 
     // ------------------------------------------------------------------
     // VIP classes

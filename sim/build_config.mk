@@ -105,6 +105,7 @@ XBAR_SRC := \
     $(PULP_CC)/lfsr_16bit.sv \
     $(PULP_CC)/stream_delay.sv \
     $(PULP_AXI)/axi_id_prepend.sv \
+    $(PULP_AXI)/axi_id_remap.sv \
     $(PULP_AXI)/axi_atop_filter.sv \
     $(PULP_AXI)/axi_err_slv.sv \
     $(PULP_AXI)/axi_cut.sv \
