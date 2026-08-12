@@ -231,7 +231,6 @@ run-directed: $(TBTOP_EXE)
 	    $(if $(B_ROB_DEPTH),"+b_rob_depth=$(B_ROB_DEPTH)") \
 	    $(if $(R_ROB_DEPTH),"+r_rob_depth=$(R_ROB_DEPTH)") \
 	    $(if $(MAX_TXNS_PER_ID),"+max_txns_per_id=$(MAX_TXNS_PER_ID)") \
-	    $(if $(OUTSTANDING_DEPTH),"+outstanding_depth=$(OUTSTANDING_DEPTH)") \
 	    $(if $(MCAST_FAULT),"+mcast_fault=$(MCAST_FAULT)") \
 	    $(if $(TIMEOUT_CYCLES),"+timeout_cycles=$(TIMEOUT_CYCLES)") \
 	    $(if $(DECERR_FAULT),"+decerr_fault=$(DECERR_FAULT)") \

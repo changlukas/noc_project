@@ -84,12 +84,26 @@ module user_node_endpoint #(
     localparam time ApplTime = 2ns;   // FlooNoC values; clk is 10 ns
     localparam time TestTime = 8ns;
 
+    // Tile id widths, declared here because the master-face VIP below is sized
+    // by them. Slave-port ID width is one initiator's own share of the field,
+    // and the master-port width adds the $clog2(NoSlvPorts) index axi_xbar
+    // appends to route responses back (axi/doc/axi_xbar.md:15, the master-port
+    // index of AXI4 IHI 0022 A5.3.5). Neither follows ID_WIDTH: the tile's id
+    // space is a property of its initiators, the NI's is a property of the NoC,
+    // and i_noc_id_remap below converts between them -- the tile's is the WIDER
+    // of the two.
+    localparam int unsigned XBAR_SLV_PORTS = 2;
+    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
+    localparam int unsigned XBAR_MST_ID_W  = XBAR_SLV_ID_W + $clog2(XBAR_SLV_PORTS);
+
     // ------------------------------------------------------------------
     // DV interfaces + flat-struct bridging (explicit wiring, both faces)
     // ------------------------------------------------------------------
+    // The master face is upstream of the crossbar and of the id remap, so its
+    // id width is the tile initiator's, not the NI's.
     AXI_BUS_DV #(
-        .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-        .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
+        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
+        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) master_dv (clk_i);
 
     // Master face. The file_master's own traffic is what every in-endpoint
@@ -100,10 +114,18 @@ module user_node_endpoint #(
     ni_signals_pkg::axi_req_t mst_flat_req;
     ni_signals_pkg::axi_rsp_t mst_flat_rsp;
     logic [AWUSER_WIDTH-1:0]  mst_flat_awuser;
+    // The flat structs are the NI's types, so their id fields are ID_WIDTH
+    // wide -- narrower than one initiator's share. The master face's four ids
+    // therefore ride BESIDE the structs at XBAR_SLV_ID_W and the corresponding
+    // struct fields stay unused (zero). Every id-bearing reader below takes
+    // these instead.
+    logic [XBAR_SLV_ID_W-1:0] mst_awid, mst_arid, mst_bid, mst_rid;
+
+    assign mst_awid = master_dv.aw_id;
+    assign mst_arid = master_dv.ar_id;
 
     always_comb begin
         mst_flat_req = '0;
-        mst_flat_req.awid     = master_dv.aw_id;
         mst_flat_req.awaddr   = master_dv.aw_addr;
         mst_flat_req.awlen    = master_dv.aw_len;
         mst_flat_req.awsize   = master_dv.aw_size;
@@ -119,7 +141,6 @@ module user_node_endpoint #(
         mst_flat_req.wlast    = master_dv.w_last;
         mst_flat_req.wvalid   = master_dv.w_valid;
         mst_flat_req.bready   = master_dv.b_ready;
-        mst_flat_req.arid     = master_dv.ar_id;
         mst_flat_req.araddr   = master_dv.ar_addr;
         mst_flat_req.arlen    = master_dv.ar_len;
         mst_flat_req.arsize   = master_dv.ar_size;
@@ -137,12 +158,12 @@ module user_node_endpoint #(
     assign mst_flat_awuser = master_dv.aw_user;
     assign master_dv.aw_ready = mst_flat_rsp.awready;
     assign master_dv.w_ready  = mst_flat_rsp.wready;
-    assign master_dv.b_id     = mst_flat_rsp.bid;
+    assign master_dv.b_id     = mst_bid;
     assign master_dv.b_resp   = mst_flat_rsp.bresp;
     assign master_dv.b_user   = '0;
     assign master_dv.b_valid  = mst_flat_rsp.bvalid;
     assign master_dv.ar_ready = mst_flat_rsp.arready;
-    assign master_dv.r_id     = mst_flat_rsp.rid;
+    assign master_dv.r_id     = mst_rid;
     assign master_dv.r_data   = mst_flat_rsp.rdata;
     assign master_dv.r_resp   = mst_flat_rsp.rresp;
     assign master_dv.r_last   = mst_flat_rsp.rlast;
@@ -182,18 +203,7 @@ module user_node_endpoint #(
     // DECERR the fault test is looking for.
     localparam int unsigned DATA_TARGET    = TILE_TARGETS - 1;
     localparam int unsigned NMU_TARGET     = TILE_TARGETS;  // last master port
-    localparam int unsigned XBAR_SLV_PORTS = 2;
     localparam int unsigned XBAR_MST_PORTS = TILE_TARGETS + 1;
-    // Slave-port ID width is one initiator's own share of the field, and the
-    // master-port width adds the $clog2(NoSlvPorts) index axi_xbar appends to
-    // route responses back (axi/doc/axi_xbar.md:15, the master-port index of
-    // AXI4 IHI 0022 A5.3.5). Neither follows ID_WIDTH: the tile's id space is a
-    // property of its initiators, the NI's is a property of the NoC, and
-    // i_noc_id_remap below converts between them. The assertions further down
-    // hold the initiators to their share, because a bit driven above it is
-    // indistinguishable from an index bit.
-    localparam int unsigned XBAR_SLV_ID_W  = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
-    localparam int unsigned XBAR_MST_ID_W  = XBAR_SLV_ID_W + $clog2(XBAR_SLV_PORTS);
 
     // DESCENDING ranges, not [N]. axi_xbar_intf declares its ports
     // [NoSlvPorts-1:0] / [NoMstPorts-1:0] and SystemVerilog binds an interface
@@ -212,10 +222,13 @@ module user_node_endpoint #(
     // m2 after the id remap: the NoC-facing face of the tile, at the NI's id
     // width. A tile initiator may drive 2**XBAR_SLV_ID_W ids and the crossbar
     // appends its index, so up to 2**XBAR_MST_ID_W distinct ids arrive here and
-    // fold into the NI's space. axi_id_remap stalls an id that finds no free
-    // downstream id rather than erroring, and unlike axi_id_serialize it never
-    // puts two distinct upstream ids on one downstream id, so per-id ordering
-    // survives the fold.
+    // fold into the NI's space, 2**ID_WIDTH of them concurrently -- which is
+    // what AXI_SLV_PORT_MAX_UNIQ_IDS below sizes the remap's tables for, since
+    // the master port cannot encode more than that at once. axi_id_remap stalls
+    // an id that finds no free downstream id rather than erroring (its own
+    // AxiSlvPortMaxUniqIds doc, axi_id_remap.sv:39-41), and unlike
+    // axi_id_serialize it never puts two distinct upstream ids on one
+    // downstream id, so per-id ordering survives the fold.
     AXI_BUS #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
         .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
@@ -238,7 +251,7 @@ module user_node_endpoint #(
     initial void'($value$plusargs("decerr_fault_wr=%d", decerr_fault_wr));
 
     // s0: the file_master's own traffic.
-    assign tile_axi[0].aw_id     = mst_flat_req.awid[XBAR_SLV_ID_W-1:0];
+    assign tile_axi[0].aw_id     = mst_awid;
     // COLLECTIVE_OP_UNICAST is 0 (ni_flit_pkg), so any non-zero op is a collective.
     assign tile_axi[0].aw_addr   = mst_flat_req.awaddr
                                    + ((mst_flat_awuser[9:8] != 2'd0) ? NOC_EGRESS_BASE
@@ -260,7 +273,7 @@ module user_node_endpoint #(
     assign tile_axi[0].w_valid   = mst_flat_req.wvalid;
     assign tile_axi[0].b_ready   = mst_flat_req.bready;
     assign tile_axi[0].w_user    = '0;
-    assign tile_axi[0].ar_id     = mst_flat_req.arid[XBAR_SLV_ID_W-1:0];
+    assign tile_axi[0].ar_id     = mst_arid;
     assign tile_axi[0].ar_addr   = mst_flat_req.araddr;
     assign tile_axi[0].ar_len    = mst_flat_req.arlen;
     assign tile_axi[0].ar_size   = mst_flat_req.arsize;
@@ -277,22 +290,22 @@ module user_node_endpoint #(
         mst_flat_rsp = '0;
         mst_flat_rsp.awready = tile_axi[0].aw_ready;
         mst_flat_rsp.wready  = tile_axi[0].w_ready;
-        mst_flat_rsp.bid     = tile_axi[0].b_id;
         mst_flat_rsp.bresp   = tile_axi[0].b_resp;
         mst_flat_rsp.bvalid  = tile_axi[0].b_valid;
         mst_flat_rsp.arready = tile_axi[0].ar_ready;
-        mst_flat_rsp.rid     = tile_axi[0].r_id;
         mst_flat_rsp.rdata   = tile_axi[0].r_data;
         mst_flat_rsp.rresp   = tile_axi[0].r_resp;
         mst_flat_rsp.rlast   = tile_axi[0].r_last;
         mst_flat_rsp.rvalid  = tile_axi[0].r_valid;
     end
+    assign mst_bid = tile_axi[0].b_id;
+    assign mst_rid = tile_axi[0].r_id;
 
     // s1: requests delivered by the fabric. The NSU has already rewritten the
     // node-coordinate field to this node (nsu::Depacketize::rebase_), so a
     // collective replica carrying the anchor's address decodes here like any
     // unicast.
-    assign tile_axi[1].aw_id     = slave_axi_req_i.awid[XBAR_SLV_ID_W-1:0];
+    assign tile_axi[1].aw_id     = slave_axi_req_i.awid;
     assign tile_axi[1].aw_addr   = slave_axi_req_i.awaddr | (decerr_fault_wr ? DECERR_FAULT_BIT : '0);
     assign tile_axi[1].aw_len    = slave_axi_req_i.awlen;
     assign tile_axi[1].aw_size   = slave_axi_req_i.awsize;
@@ -311,7 +324,7 @@ module user_node_endpoint #(
     assign tile_axi[1].w_valid   = slave_axi_req_i.wvalid;
     assign tile_axi[1].b_ready   = slave_axi_req_i.bready;
     assign tile_axi[1].w_user    = '0;
-    assign tile_axi[1].ar_id     = slave_axi_req_i.arid[XBAR_SLV_ID_W-1:0];
+    assign tile_axi[1].ar_id     = slave_axi_req_i.arid;
     assign tile_axi[1].ar_addr   = slave_axi_req_i.araddr | (decerr_fault ? DECERR_FAULT_BIT : '0);
     assign tile_axi[1].ar_len    = slave_axi_req_i.arlen;
     assign tile_axi[1].ar_size   = slave_axi_req_i.arsize;
@@ -339,15 +352,18 @@ module user_node_endpoint #(
         slave_axi_rsp_o.rvalid  = tile_axi[1].r_valid;
     end
 
-    // The two ID truncations above are only lossless while every initiator
-    // keeps to its share of the field. Both sources are meant to: the stimulus
+    // Both initiators are held to their share of the field: the stimulus
     // generator caps its ids at 2**INITIATOR_ID_WIDTH (gen_test_patterns.py
-    // axi_widths) and the NSU's collapsed downstream id is all-ones of the same
-    // width (nsu::remap_downstream_id). These fire if either stops.
-    localparam logic [ID_WIDTH-1:0] SLV_ID_LIMIT = ID_WIDTH'(1) << XBAR_SLV_ID_W;
+    // axi_widths) and the NSU's collapsed downstream id is all-ones of ID_WIDTH
+    // (nsu::remap_downstream_id). Neither wiring above narrows any more -- the
+    // master face is already XBAR_SLV_ID_W and the NSU's id is narrower still --
+    // so at the current widths both properties hold by construction and the
+    // assertions cannot fail. They are kept as the standing guard on the two
+    // sources, and become live again if either width moves.
+    localparam int unsigned SLV_ID_LIMIT = 1 << XBAR_SLV_ID_W;
     a_mst_id_fits: assert property (@(posedge clk_i) disable iff (!rst_ni)
-        (mst_flat_req.awvalid |-> mst_flat_req.awid < SLV_ID_LIMIT) and
-        (mst_flat_req.arvalid |-> mst_flat_req.arid < SLV_ID_LIMIT))
+        (mst_flat_req.awvalid |-> mst_awid < SLV_ID_LIMIT) and
+        (mst_flat_req.arvalid |-> mst_arid < SLV_ID_LIMIT))
         else $fatal(1, "node%0d: file_master drove an AXI id above the initiator share", NODE_ID);
     a_nsu_id_fits: assert property (@(posedge clk_i) disable iff (!rst_ni)
         (slave_axi_req_i.awvalid |-> slave_axi_req_i.awid < SLV_ID_LIMIT) and
@@ -483,7 +499,7 @@ module user_node_endpoint #(
     // through the id remap that converts the tile's id space into the NI's.
     axi_id_remap_intf #(
         .AXI_SLV_PORT_ID_WIDTH(XBAR_MST_ID_W),
-        .AXI_SLV_PORT_MAX_UNIQ_IDS(1 << XBAR_MST_ID_W),
+        .AXI_SLV_PORT_MAX_UNIQ_IDS(1 << ID_WIDTH),
         .AXI_MAX_TXNS_PER_ID(ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT),
         .AXI_MST_PORT_ID_WIDTH(ID_WIDTH),
         .AXI_ADDR_WIDTH(ADDR_WIDTH),
@@ -549,11 +565,11 @@ module user_node_endpoint #(
     // VIP classes
     // ------------------------------------------------------------------
     typedef axi_test::axi_file_master #(
-        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(ID_WIDTH), .UW(AWUSER_WIDTH),
+        .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .IW(XBAR_SLV_ID_W), .UW(AWUSER_WIDTH),
         .TA(ApplTime), .TT(TestTime)
     ) file_master_t;
     typedef axi_test::axi_scoreboard #(
-        .IW(ID_WIDTH), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(AWUSER_WIDTH), .TT(TestTime)
+        .IW(XBAR_SLV_ID_W), .AW(ADDR_WIDTH), .DW(DATA_WIDTH), .UW(AWUSER_WIDTH), .TT(TestTime)
     ) scoreboard_t;
 
     // Preload-capable scoreboard: a multicast replica is written by a REMOTE
@@ -567,8 +583,8 @@ module user_node_endpoint #(
     class mcast_preload_scoreboard extends scoreboard_t;
         function new(
             virtual AXI_BUS_DV #(
-                .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
-                .AXI_ID_WIDTH(ID_WIDTH),     .AXI_USER_WIDTH(AWUSER_WIDTH)
+                .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
+                .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
             ) axi
         );
             super.new(axi);
@@ -665,20 +681,20 @@ module user_node_endpoint #(
     // stimulus ids_per_initiator > 1, B responses reorder across ids; within one id
     // AXI returns B in AW issue order, so a per-id count identifies the paired
     // write's B exactly.
-    int unsigned b_returned[2**ID_WIDTH];
+    int unsigned b_returned[2**XBAR_SLV_ID_W];
 
     always_ff @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) begin
             b_returned <= '{default: '0};
         end else if (mst_flat_rsp.bvalid && mst_flat_req.bready) begin
-            b_returned[mst_flat_rsp.bid] <= b_returned[mst_flat_rsp.bid] + 1;
+            b_returned[mst_bid] <= b_returned[mst_bid] + 1;
             // axi_sim_mem answers every mapped access OKAY, so any error
             // response here is a fabric bug (e.g. a corrupted merged B), or a
             // write that missed every tile window. +decerr_fault_wr=1 proves it
             // fires.
             if (mst_flat_rsp.bresp != axi_pkg::RESP_OKAY)
                 $fatal(1, "[mcast_sb] node%0d: BRESP=%0h on id=%0h, expected OKAY",
-                       NODE_ID, mst_flat_rsp.bresp, mst_flat_rsp.bid);
+                       NODE_ID, mst_flat_rsp.bresp, mst_bid);
         end
     end
 
@@ -705,7 +721,7 @@ module user_node_endpoint #(
         if (rst_ni && mst_flat_rsp.rvalid && mst_flat_req.rready &&
                 !resp_ok(mst_flat_rsp.rresp))
             $fatal(1, "[tile_decode] node%0d: RRESP=%0h on id=%0h, expected OKAY (address outside every tile window?)",
-                   NODE_ID, mst_flat_rsp.rresp, mst_flat_rsp.rid);
+                   NODE_ID, mst_flat_rsp.rresp, mst_rid);
     end
 
     // Debug handshake trace: +hs_trace_node=<id> dumps per-cycle AW/W/B
@@ -755,10 +771,10 @@ module user_node_endpoint #(
     logic [7:0]  mcast_mem [longint unsigned];       // replica byte golden
     mcast_txn_t  mcast_wr_q [$];                     // W bursts follow AW order (AXI4)
     int unsigned mcast_wr_beat = 0;
-    mcast_txn_t  mcast_ar_q [2**ID_WIDTH][$];        // same-id R follows AR order
-    mcast_txn_t  mcast_rd_active [2**ID_WIDTH];
-    bit          mcast_rd_busy [2**ID_WIDTH];
-    int unsigned mcast_rd_beat [2**ID_WIDTH];
+    mcast_txn_t  mcast_ar_q [2**XBAR_SLV_ID_W][$];   // same-id R follows AR order
+    mcast_txn_t  mcast_rd_active [2**XBAR_SLV_ID_W];
+    bit          mcast_rd_busy [2**XBAR_SLV_ID_W];
+    int unsigned mcast_rd_beat [2**XBAR_SLV_ID_W];
     // Non-vacuity: replica bytes actually compared. A node that captured
     // multicast golden must also have compared some readback, or the check
     // never ran (see the epilogue below).
@@ -820,14 +836,14 @@ module user_node_endpoint #(
             end
             // AR: read descriptor capture, per id.
             if (mst_flat_req.arvalid && mst_flat_rsp.arready) begin
-                mcast_ar_q[mst_flat_req.arid].push_back('{addr: mst_flat_req.araddr,
-                                                              len:  mst_flat_req.arlen,
-                                                              size: mst_flat_req.arsize,
-                                                              mask: 0});
+                mcast_ar_q[mst_arid].push_back('{addr: mst_flat_req.araddr,
+                                                 len:  mst_flat_req.arlen,
+                                                 size: mst_flat_req.arsize,
+                                                 mask: 0});
             end
             // R: compare any byte the multicast golden knows.
             if (mst_flat_rsp.rvalid && mst_flat_req.rready) begin
-                automatic int unsigned rid = 32'(mst_flat_rsp.rid);
+                automatic int unsigned rid = 32'(mst_rid);
                 automatic longint unsigned beat_address;
                 automatic int unsigned first_byte;
                 if (!mcast_rd_busy[rid]) begin
@@ -874,7 +890,7 @@ module user_node_endpoint #(
     // paired write is the issued[id]-th write with that id and
     // b_returned[id] >= issued[id] is the exact release condition.
     task automatic run_ar_after_b();
-        int unsigned issued[2**ID_WIDTH];
+        int unsigned issued[2**XBAR_SLV_ID_W];
         int unsigned id;
         issued = '{default: '0};
         while (file_master.ar_queue.size() > 0) begin
@@ -948,7 +964,7 @@ module user_node_endpoint #(
             int unsigned b_total;
             repeat (50) @(posedge clk_i);
             b_total = 0;
-            for (int i = 0; i < 2**ID_WIDTH; i++) b_total += b_returned[i];
+            for (int i = 0; i < 2**XBAR_SLV_ID_W; i++) b_total += b_returned[i];
             if (b_total != int'(file_master.num_writes))
                 $fatal(1, "[mcast_sb] node%0d: %0d B handshakes for %0d AWs -- duplicate or lost B",
                        NODE_ID, b_total, file_master.num_writes);

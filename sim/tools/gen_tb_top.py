@@ -698,15 +698,14 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("                                                                 output int unsigned order_list_hwm,")
     w("                                                                 output int unsigned write_txns_hwm,")
     w("                                                                 output int unsigned read_txns_hwm);")
-    # create_ex in both RoB modes: the outstanding pool applies to either, so its
-    # depth has to be settable either way, and create_ex is the call that carries it.
+    # create_ex in both RoB modes: the RoB depths and the per-id order-list depth
+    # apply to either, and create_ex is the call that carries them.
     w('    import "DPI-C" context function longint unsigned cmodel_nmu_create_ex(input string name,')
     w('                                                                 input int src_id, input int num_vc,')
     w('                                                                 input int rob_enabled,')
     w('                                                                 input int b_rob_depth,')
     w('                                                                 input int r_rob_depth,')
     w('                                                                 input int max_txns_per_id,')
-    w('                                                                 input int outstanding_depth,')
     w('                                                                 input string config_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
     w('                                                              input int src_id, input int num_vc,')
@@ -729,7 +728,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('    string sam_config_path = "";')
     w("")
     w("    // NSU knobs. max_unique_ids=1 collapses every master onto one downstream")
-    w("    // AXI id (FlooNoC default); 256 passes the master's id through.")
+    w("    // AXI id (FlooNoC default); 2**AXI_ID_WIDTH passes the master's id through.")
     w("    // max_outstanding is the shared MetaBuffer pool per direction.")
     w("    int unsigned max_unique_ids  = ni_params_pkg::NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT;")
     w("    int unsigned max_outstanding = ni_params_pkg::NSU_META_BUFFER_MAX_OUTSTANDING_DFLT;")
@@ -739,9 +738,6 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    int unsigned r_rob_depth = ni_params_pkg::NMU_ROB_R_DEPTH_DFLT;")
     w("    // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId).")
     w("    int unsigned max_txns_per_id = ni_params_pkg::NMU_MAX_TXNS_PER_ID_DFLT;")
-    w("    // Shared outstanding pool per direction, all AXI ids (FlooNoC MaxTxns).")
-    w("    // The master-side injection budget; applies in both RoB modes.")
-    w("    int unsigned outstanding_depth = ni_params_pkg::NMU_OUTSTANDING_DEPTH_DFLT;")
     w("")
 
     # cmodel_init (no-arg) + per-node router/nmu/nsu create.
@@ -751,8 +747,6 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('        void\'($value$plusargs("max_unique_ids=%d", max_unique_ids));')
     w('        void\'($value$plusargs("max_outstanding=%d", max_outstanding));')
     w('        $display("[Config] max_unique_ids=%0d max_outstanding=%0d", max_unique_ids, max_outstanding);')
-    w('        void\'($value$plusargs("outstanding_depth=%d", outstanding_depth));')
-    w('        $display("[Config] outstanding_depth=%0d", outstanding_depth);')
     if rob_enabled:
         w('        void\'($value$plusargs("b_rob_depth=%d", b_rob_depth));')
         w('        void\'($value$plusargs("r_rob_depth=%d", r_rob_depth));')
@@ -763,7 +757,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     for (i, x, y, c) in nodes:
         w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, DAT_NUM_VC, '
           f'{1 if rob_enabled else 0}, b_rob_depth, r_rob_depth, max_txns_per_id, '
-          f'outstanding_depth, sam_config_path);  '
+          f'sam_config_path);  '
           f'// src_id = node{i} coord {c}, ROB {"Enabled" if rob_enabled else "Disabled"}')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, '
           f'max_outstanding, sam_config_path);')
