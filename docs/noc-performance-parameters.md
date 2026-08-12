@@ -23,7 +23,7 @@ while buffer and outstanding depths move the queuing part.
 | `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (2 to 16) |
 | `ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender on DAT, sized by rule 1 below | 8 (1 to 16) |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 2 (1 to 16) |
-| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID. Nothing sits above it, so it is the master-side admission limit and `MAX_TXNS_PER_ID x 2^AXI_ID_WIDTH` is the whole window | 32 (1 to 256) |
+| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID. Nothing sits above it, so it is the master-side admission limit and `MAX_TXNS_PER_ID x 2^AXI_ID_WIDTH` is the whole window. Measured: it reaches its cap exactly on `mesh_4x4_vc4_rob` `all_to_all` at one id per initiator, and 21 of 32 at four, so whether it binds follows the id count of the traffic | 32 (1 to 256) |
 | `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return | 128, 128 (1 to 256) |
 | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
 | `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 1 (1 or 8) |
