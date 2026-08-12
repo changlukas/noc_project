@@ -43,7 +43,7 @@ emits two generated files, never hand-edited:
 | `sim/tb/tb_top_<topology>.sv` | self-clocked (10 ns clock, 4-cycle reset) top: DPI create calls for every router/NMU/NSU context, the fabric instance, one `user_node_endpoint` per node, the watchdog, and the exit logic. |
 
 `router_wrap` carries three physical networks, each with its own flit width
-(`ni_params_pkg`: REQ 137 b, RSP 127 b, DAT 629 b):
+(`ni_params_pkg`: REQ 132 b, RSP 122 b, DAT 629 b):
 
 | network | flow control | carries |
 |---|---|---|
@@ -120,8 +120,9 @@ Upstream references:
   `RRoBSize`, `MaxTxnsPerId`, `MaxTxns`), `axi_bw_monitor.sv` (DV bandwidth
   monitor, imported with one flagged modification).
 - ID-space narrowing for a small-`NumIds` RoB: `axi_id_remap.sv`
-  (pulp-platform axi v0.39.7) is the standard component, noted as the RTL
-  path if a dense ID space is ever needed.
+  (pulp-platform axi v0.39.7), instantiated as `i_noc_id_remap` in
+  `user_node_endpoint.sv` to compress the tile's `AXI_INITIATOR_ID_WIDTH` = 4
+  id space onto the NI's `AXI_ID_WIDTH` = 3.
 - Traffic patterns and injection process: BookSim2 `src/traffic.cpp`
   (`NeighborTrafficPattern`, `TransposeTrafficPattern`,
   `UniformRandomTrafficPattern`, `HotSpotTrafficPattern`) and
@@ -353,10 +354,10 @@ passing back the printed value reproduces the run exactly.
 | limitation | detail |
 |---|---|
 | SAM failure mode | `translate()` miss and a topology YAML without `address_map` fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
-| Unswept sizing | `NMU_MAX_TXNS_PER_ID` = 32 (per-ID order-list depth) and `NMU_OUTSTANDING_DEPTH` = 32 (shared outstanding pool, per direction, S1) are placeholders, never depth-swept [TBD]. `NMU_ROB_B_DEPTH`/`NMU_ROB_R_DEPTH` default to 128 (S2) and are expressible up to 256 (the full `ordering_tag` space) via `B_ROB_DEPTH`/`R_ROB_DEPTH`; a burst whose beats (len+1) exceed the RoB depth fails loud (`Rob::push_ar` assert) instead of wedging. Equally unswept at every setting. |
+| Unswept sizing | `NMU_MAX_TXNS_PER_ID` = 32 (per-ID order-list depth) is the one depth that was swept: 32 down to 1, every point a non-vacuous PASS. At four ids the run peaked at 30 of the then-32-entry shared pool against a deepest per-ID list of 12, which is what identified the pool rather than the per-ID depth as the binding limit. No throughput figure was taken at any point of the sweep. `NMU_ROB_B_DEPTH`/`NMU_ROB_R_DEPTH` default to 128 (S2) and are expressible up to 256 (the full `ordering_tag` space) via `B_ROB_DEPTH`/`R_ROB_DEPTH`; a burst whose beats (len+1) exceed the RoB depth fails loud (`Rob::push_ar` assert) instead of wedging. Equally unswept at every setting. |
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
 | Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make -C sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |
-| Meta buffer storage | the 256-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
+| Meta buffer storage | the 8-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
 | AXI-side perf instrumentation absent | `perf.json` carries only the NoC section (dumped at the end of every run, all injection modes); no AXI-side per-transaction hooks exist, so nothing cross-checks `axi_bw_monitor` from the model side. |
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
 | Deferred header fields | QoS, route parity, and flit ECC are unbuilt and have no header field at all: the 44 b header is fully assigned (`PADDING_FIELDS_COUNT` = 0) and carries no width-0 placeholder for them. |

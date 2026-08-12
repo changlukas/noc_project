@@ -6,7 +6,7 @@ The NMU is the master-side network interface of the NoC. It sits between an exte
 
 ### 2.1 Packetization
 
-The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted AXI request beat becomes exactly one flit, and every response flit becomes exactly one AXI response beat. A flit is a 44-bit header plus a payload sized per network (REQ 137 b, RSP 127 b, DAT 629 b total). The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the AXI channel fields verbatim.
+The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted AXI request beat becomes exactly one flit, and every response flit becomes exactly one AXI response beat. A flit is a 44-bit header plus a payload sized per network (REQ 132 b, RSP 122 b, DAT 629 b total). The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the AXI channel fields verbatim.
 
 A write transaction of AWLEN+1 beats therefore becomes 1 AW flit followed by AWLEN+1 W flits. A read request becomes 1 AR flit. The write's flits form one wormhole packet (the AW flit opens it, the W flit with `wlast=1` closes it) so no other request flit from this NMU can interleave between an AW and its W beats on the link. AW+W is the only multi-flit packet the fabric builds, and AXI4 IHI 0022 A5.3.3 is why: W beats of different transactions may not interleave, so the AW and its burst have to travel as one indivisible unit. A read request and every response are single-flit packets, R beats included.
 
@@ -22,8 +22,8 @@ Source of truth: `specgen/generated/cpp/ni_flit_constants.h` (generated from `sp
 
 | Network | `FLIT_WIDTH` | Payload region | Channels carried |
 |---|---|---|---|
-| REQ | 137 | `flit[136:44]`, 93 b | `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` |
-| RSP | 127 | `flit[126:44]`, 83 b | `NarrowB`, `DataB`, `NarrowR` |
+| REQ | 132 | `flit[131:44]`, 88 b | `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` |
+| RSP | 122 | `flit[121:44]`, 78 b | `NarrowB`, `DataB`, `NarrowR` |
 | DAT | 629 | `flit[628:44]`, 585 b | `DataAw`, `DataW`, `DataR` |
 
 Each network's width is the widest payload it carries plus the header. Payload field positions below are relative to the payload region: payload bit p is flit bit p+44. A payload shorter than its network's region leaves the upper bits 0.
@@ -45,21 +45,21 @@ Header (`flit[43:0]`), identical on all three networks:
 
 There is no `rsvd` field: `PADDING_FIELDS_COUNT` = 0, the header is fully assigned.
 
-AW payload (93 bits). AR payload is field-for-field identical with `ar*` names:
+AW payload (88 bits). AR payload is field-for-field identical with `ar*` names:
 
 | Field | Payload bits | Width | Definition |
 |---|---|---|---|
-| awid | [7:0] | 8 | AXI ID. |
-| awaddr | [55:8] | 48 | The request address, forwarded unchanged (Section 2.3). |
-| awlen | [63:56] | 8 | Burst length minus 1. |
-| awsize | [66:64] | 3 | Bytes per beat = 2^awsize, awsize <= 3'h6 (64 B, the 512-bit data bus). |
-| awburst | [68:67] | 2 | 2'b00: FIXED. 2'b01: INCR. 2'b10: WRAP. 2'b11 never occurs. |
-| awcache | [72:69] | 4 | Pass-through. |
-| awlock | [73] | 1 | Pass-through. |
-| awprot | [76:74] | 3 | Pass-through. |
-| awregion | [80:77] | 4 | Carried in the flit, tied to 0 at the co-sim boundary (not in the DPI signature). |
-| awqos | [84:81] | 4 | Pass-through. |
-| awuser | [92:85] | 8 | Carried in the flit, tied to 0 at the co-sim boundary. The 58-bit AWUSER of Section 2.8 is consumed at the slave port, not carried here. |
+| awid | [2:0] | 3 | AXI ID. |
+| awaddr | [50:3] | 48 | The request address, forwarded unchanged (Section 2.3). |
+| awlen | [58:51] | 8 | Burst length minus 1. |
+| awsize | [61:59] | 3 | Bytes per beat = 2^awsize, awsize <= 3'h6 (64 B, the 512-bit data bus). |
+| awburst | [63:62] | 2 | 2'b00: FIXED. 2'b01: INCR. 2'b10: WRAP. 2'b11 never occurs. |
+| awcache | [67:64] | 4 | Pass-through. |
+| awlock | [68] | 1 | Pass-through. |
+| awprot | [71:69] | 3 | Pass-through. |
+| awregion | [75:72] | 4 | Carried in the flit, tied to 0 at the co-sim boundary (not in the DPI signature). |
+| awqos | [79:76] | 4 | Pass-through. |
+| awuser | [87:80] | 8 | Carried in the flit, tied to 0 at the co-sim boundary. The 58-bit AWUSER of Section 2.8 is consumed at the slave port, not carried here. |
 
 W payload, `NarrowW` 81 b / `DataW` 585 b. The two differ only in the data and strobe widths:
 
@@ -70,23 +70,23 @@ W payload, `NarrowW` 81 b / `DataW` 585 b. The two differ only in the data and s
 | wstrb | [16:9], 8 b | [72:9], 64 b | Byte strobes, one bit per data lane. |
 | wdata | [80:17], 64 b | [584:73], 512 b | Write data. |
 
-B payload (18 bits), consumed by the response path:
+B payload (13 bits), consumed by the response path:
 
 | Field | Payload bits | Width | Definition |
 |---|---|---|---|
-| bid | [7:0] | 8 | AXI ID of the completed write. |
-| bresp | [9:8] | 2 | 2'b00 OKAY, 2'b01 EXOKAY, 2'b10 SLVERR, 2'b11 DECERR. |
-| buser | [17:10] | 8 | Decoded from the flit, not driven onto the co-sim AXI face. |
+| bid | [2:0] | 3 | AXI ID of the completed write. |
+| bresp | [4:3] | 2 | 2'b00 OKAY, 2'b01 EXOKAY, 2'b10 SLVERR, 2'b11 DECERR. |
+| buser | [12:5] | 8 | Decoded from the flit, not driven onto the co-sim AXI face. |
 
-R payload, `NarrowR` 83 b / `DataR` 531 b, consumed by the response path:
+R payload, `NarrowR` 78 b / `DataR` 526 b, consumed by the response path:
 
 | Field | NarrowR bits | DataR bits | Definition |
 |---|---|---|---|
 | rlast | [0] | [0] | Last beat of the read burst. |
-| rid | [8:1] | [8:1] | AXI ID. |
-| rresp | [10:9] | [10:9] | Same encoding as bresp. |
-| ruser | [18:11] | [18:11] | Decoded from the flit, not driven onto the co-sim AXI face. |
-| rdata | [82:19], 64 b | [530:19], 512 b | Read data. |
+| rid | [3:1] | [3:1] | AXI ID. |
+| rresp | [5:4] | [5:4] | Same encoding as bresp. |
+| ruser | [13:6] | [13:6] | Decoded from the flit, not driven onto the co-sim AXI face. |
+| rdata | [77:14], 64 b | [525:14], 512 b | Read data. |
 
 ### 2.3 SAM address translation
 
@@ -144,19 +144,19 @@ Admission decision per AW / AR, evaluated per AXI ID (`Rob::push_aw` / `push_ar`
 
 A collective AW (Section 2.8) is admitted only through branch 1, and while one is in flight nothing else for that ID is admitted at all.
 
-Example, ID = 8'h03, write direction: AW#1 dst 8'h02 (list empty, branch 1, bypass). AW#2 dst 8'h02 (same dest, branch 2, bypass). AW#3 dst 8'h05 (dest changed, branch 3, allocate, sticky). AW#4 dst 8'h05 (same dest as #3 but sticky, branch 3, allocate). All four complete and the list empties. AW#5 dst 8'h05 (branch 1 again, bypass). A counterexample for branch 2: AW#2 with dst 8'h07 would take branch 3, because 8'h07 != 8'h02.
+Example, ID = 3'h3, write direction: AW#1 dst 8'h02 (list empty, branch 1, bypass). AW#2 dst 8'h02 (same dest, branch 2, bypass). AW#3 dst 8'h05 (dest changed, branch 3, allocate, sticky). AW#4 dst 8'h05 (same dest as #3 but sticky, branch 3, allocate). All four complete and the list empties. AW#5 dst 8'h05 (branch 1 again, bypass). A counterexample for branch 2: AW#2 with dst 8'h07 would take branch 3, because 8'h07 != 8'h02.
 
 Slot pools, per direction: B pool depth `NMU_ROB_B_DEPTH` = 128, R pool depth `NMU_ROB_R_DEPTH` = 128. An AW reserves 1 slot (B is one beat). An AR reserves ARLEN+1 consecutive slots (one per R beat), refused when free space is short. The allocator is a high-water stack: one allocation bit marks each reserved range's top slot, free space is the slot count above the highest set bit (leading-zero-count in RTL), the next base is depth minus free space, and space returns only from the top (Appendix 7.1 walks it with numbers). ordering_tag stamps the base slot. On the response side, B fills its slot, the i-th R beat of a burst fills base+i, and beats release to the master only while the ID's oldest outstanding transaction is being served (per-ID issue order, one order list per ID per direction).
 
 `RobMode` selects the R side only. `RobMode::Enabled`: R responses use the slot pool as above. `RobMode::Disabled` (co-sim default): the R RoB is off and same-ID read ordering is enforced by a per-ID single-outstanding interlock, a second AR for an ID stalls until the first read's rlast returns. The B-side RoB always runs in both modes, writes never use an interlock. Wherever this document says "RobMode", it governs reads only.
 
-Per-ID transaction gate, both modes' write side and Enabled reads: at most `NMU_MAX_TXNS_PER_ID` = 32 outstanding transactions per ID per direction (order-list depth). The 33rd same-ID AW is refused until one completes, even with free slots.
+Per-ID transaction gate, both modes' write side and Enabled reads: at most `NMU_MAX_TXNS_PER_ID` = 32 outstanding transactions per ID per direction (order-list depth). A burst is one entry regardless of ARLEN. An entry is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. The 33rd same-ID AW is refused until one completes, even with free slots, which backpressures through the AxiSlavePort queue to awready / arready.
 
-Shared outstanding gate, both modes, both directions: at most `NMU_OUTSTANDING_DEPTH` = 32 transactions in flight per direction, shared across all IDs. AW and AR draw from independent pools. A burst is one entry regardless of ARLEN. An entry is taken when the request is accepted and released when the response is accepted at the AXI side, B on its single beat and R on rlast. Full refuses the next request, which backpressures through the AxiSlavePort queue to awready / arready. This is the only aggregate gate on bypassed traffic, which reserves no slot: three limiters coexist and which one binds depends on the configuration. With `NMU_OUTSTANDING_DEPTH` at or below `NMU_MAX_TXNS_PER_ID` the per-ID gate never binds first; above it, a single-ID stream hits the per-ID gate while the shared pool still has room.
+There is no aggregate pool above the per-ID gate, so the order list is the admission bound and in-flight requests cap at `NMU_MAX_TXNS_PER_ID` x 2^`AXI_ID_WIDTH` = 32 x 8 = 256 writes per direction, and at 1 x 8 = 8 reads under `RobMode::Disabled`, where the per-ID single-outstanding interlock replaces the order-list depth. Two limiters coexist on the write side and on Enabled reads, the per-ID order-list depth and the RoB slot pool, and which one binds depends on the traffic: a bypassed transaction takes a list entry and reserves no slot, so a stream that stays in branches 1 and 2 meets only the per-ID gate.
 
 ### 2.6 Worked example: 2-beat write burst
 
-NMU at node (x=0, y=0), src_id = 8'h00, `mesh_4x4_vc1` SAM, DAT_NUM_VC = 1. The master issues AW {awid = 8'h05, awaddr = 0x60_0080, awlen = 8'h01, awsize = 3'h6, awburst = 2'b01} then W0 {wdata = 512'h...11, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 0} and W1 {wdata = 512'h...22, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 1}.
+NMU at node (x=0, y=0), src_id = 8'h00, `mesh_4x4_vc1` SAM, DAT_NUM_VC = 1. The master issues AW {awid = 3'h5, awaddr = 0x60_0080, awlen = 8'h01, awsize = 3'h6, awburst = 2'b01} then W0 {wdata = 512'h...11, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 0} and W1 {wdata = 512'h...22, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 1}.
 
 SAM: 0x60_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x10_0080. ID 5 is idle, so admission takes the idle-ID bypass: ordering_req = 0, ordering_tag = 0. The burst is data class, so the three flits leave on the DAT face, in this exact order, as one wormhole packet:
 
@@ -169,9 +169,9 @@ SAM: 0x60_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x10_00
 | header.flit_tail | 1'b0 (opens packet) | 1'b0 | 1'b1 (closes packet) |
 | header.ordering_req / ordering_tag | 0 / 8'h00 | 0 / 8'h00 | 0 / 8'h00 |
 | header.collective_op / collective_mask | 0 / 8'h00 | 0 / 8'h00 | 0 / 8'h00 |
-| payload | awid=8'h05, awaddr=48'h10_0080, awlen=8'h01, awsize=3'h6, awburst=2'b01, others 0 | wlast=0, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...11, wuser=0 | wlast=1, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...22 |
+| payload | awid=3'h5, awaddr=48'h10_0080, awlen=8'h01, awsize=3'h6, awburst=2'b01, others 0 | wlast=0, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...11, wuser=0 | wlast=1, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...22 |
 
-Later one B flit returns on the RSP face {axi_ch = 4'd8 (DataB), bid = 8'h05, bresp = 2'b00} and the NMU presents bvalid / bid = 8'h05 / bresp = 2'b00, held until bready.
+Later one B flit returns on the RSP face {axi_ch = 4'd8 (DataB), bid = 3'h5, bresp = 2'b00} and the NMU presents bvalid / bid = 3'h5 / bresp = 2'b00, held until bready.
 
 ### 2.7 Parameters
 
@@ -179,24 +179,23 @@ Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and 
 
 | Parameter | Default | Legal range | Consumed by |
 |---|---|---|---|
-| AXI_ID_WIDTH | 8 | 1..32 (implementation locked at 8) | ID fields, RoB per-ID arrays (256 IDs) |
+| AXI_ID_WIDTH | 3 | 1..32 (implementation locked at 3) | ID fields, RoB per-ID arrays (8 IDs) |
 | AXI_ADDR_WIDTH | 48 | 1..64 | Address fields |
 | AXI_DATA_WIDTH | 512 | {32,64,128,256,512,1024} | wdata / rdata, WSTRB_WIDTH = 64 |
 | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
 | NOC_DAT_NUM_VC | 1 | 1 to 8 | `VcAllocator`, DAT credit vectors |
-| NOC_REQ_FLIT_WIDTH | 137 | 64..1024 | REQ egress flit port |
-| NOC_RSP_FLIT_WIDTH | 127 | 64..1024 | RSP ingress flit port |
+| NOC_REQ_FLIT_WIDTH | 132 | 64..1024 | REQ egress flit port |
+| NOC_RSP_FLIT_WIDTH | 122 | 64..1024 | RSP ingress flit port |
 | NOC_DAT_FLIT_WIDTH | 629 | 64..1024 | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | 1..16 | DAT request sender credit seed per VC |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
 | NMU_MAX_TXNS_PER_ID | 32 | 1..256 | Per-ID order-list depth |
-| NMU_OUTSTANDING_DEPTH | 32 | 1..256 | Shared outstanding pool, per direction |
 | NMU_QUEUE_DEPTH | 16 | 1..1024 | AxiSlavePort AW/W/AR/B/R FIFOs |
 | NMU_DEPKT_Q_DEPTH | 16 | 1..1024 | Depacketize B/R queues |
 | NMU_ARBITER_FIFO_DEPTH | 4 | 1..64 | Wormhole per-input and VC pending queues |
 
-Runtime configuration per instance: src_id, SAM config path, RobMode, RoB depth and outstanding-depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`, `+outstanding_depth=`.
+Runtime configuration per instance: src_id, SAM config path, RobMode and RoB depth overrides come through `cmodel_nmu_create` / `cmodel_nmu_create_ex` (Section 3.3). The generated testbench sets src_id = {y[3:0], x[3:0]} per node and forwards the plusargs `+sam_config=`, `+b_rob_depth=`, `+r_rob_depth=`, `+max_txns_per_id=`.
 
 ### 2.8 Collective writes
 
@@ -256,7 +255,7 @@ All ports below are the real `nmu_wrap` ports (`src/sv/nmu_wrap.sv:54-77`). AXI 
 | rst_ni | 1 | Synchronous active-low reset. Given only once, at the beginning of simulation. |
 | ctx_i | 64 | Model instance handle returned by `cmodel_nmu_create`. Constant after creation. |
 | axi_req_i.awvalid | 1 | AW valid. Must stay high until awready is observed. |
-| axi_req_i.awid | 8 | Write transaction ID. Sampled only on the awvalid && awready cycle. |
+| axi_req_i.awid | 3 | Write transaction ID. Sampled only on the awvalid && awready cycle. |
 | axi_req_i.awaddr | 48 | Write address. Must hit a SAM entry (guarantee G1). |
 | axi_req_i.awlen | 8 | Burst length minus 1, 0 <= awlen <= 8'hFF (256 beats max). |
 | axi_req_i.awsize | 3 | Beats of 2^awsize bytes, awsize <= 3'h6 = 64 bytes. |
@@ -273,7 +272,7 @@ All ports below are the real `nmu_wrap` ports (`src/sv/nmu_wrap.sv:54-77`). AXI 
 | axi_req_i.rready | 1 | Master ready for R. |
 | tx_req_ready_i | 1 | REQ egress ready. Advisory, sampled two registrations late (Section 3.4 rule P4). |
 | rx_rsp_valid_i | 1 | An RSP flit is on the wire this cycle. |
-| rx_rsp_flit_i | 127 | RSP flit, format of Section 2.2. axi_ch must be `NarrowB`, `DataB` or `NarrowR` (guarantee G2). Unknown when valid is low. |
+| rx_rsp_flit_i | 122 | RSP flit, format of Section 2.2. axi_ch must be `NarrowB`, `DataB` or `NarrowR` (guarantee G2). Unknown when valid is low. |
 | rx_dat_valid_i | 1 | A DAT flit is on the wire this cycle. |
 | rx_dat_flit_i | 629 | DAT flit. axi_ch must be `DataR` (guarantee G2). Unknown when valid is low. |
 | tx_dat_crdvalid_i | DAT_NUM_VC | Per-VC one-cycle credit pulse: bit v high means the router drained one NMU DAT request flit from VC v. Multiple bits may pulse in one cycle. |
@@ -288,12 +287,12 @@ Every output is a registered signal: it changes only at posedge clk_i and reflec
 | axi_rsp_o.wready | 1 | Pre-asserted: high whenever accepted AWs still owe W beats and the W FIFO has space. Does not wait for wvalid. |
 | axi_rsp_o.arready | 1 | One-shot, same policy as awready, independent of the write side. |
 | axi_rsp_o.bvalid | 1 | B beat available. Held high until bready is observed (AXI4 IHI 0022 A3.2.1). |
-| axi_rsp_o.bid | 8 | B transaction ID. 0 when bvalid is low. |
+| axi_rsp_o.bid | 3 | B transaction ID. 0 when bvalid is low. |
 | axi_rsp_o.bresp | 2 | Write response, masked to 2 bits. 0 when bvalid is low. |
 | axi_rsp_o.rvalid | 1 | R beat available. Held high until rready is observed. |
-| axi_rsp_o.rid, rdata, rresp, rlast | 8, 512, 2, 1 | Read response fields. 0 when rvalid is low. |
+| axi_rsp_o.rid, rdata, rresp, rlast | 3, 512, 2, 1 | Read response fields. 0 when rvalid is low. |
 | tx_req_valid_o | 1 | REQ request flit on the wire this cycle. At most one flit per cycle, not held. |
-| tx_req_flit_o | 137 | REQ request flit, format of Section 2.2. 0 when valid is low. |
+| tx_req_flit_o | 132 | REQ request flit, format of Section 2.2. 0 when valid is low. |
 | rx_rsp_ready_o | 1 | RSP ingress ready. Tied true: the model's ingress queue is unbounded (`nmu_wrap.hpp`). |
 | tx_dat_valid_o | 1 | DAT request flit on the wire this cycle. At most one flit per cycle. Not held: the flit is consumed by the credit protocol, there is no ready wire. |
 | tx_dat_flit_o | 629 | DAT request flit. 0 when valid is low. |
@@ -306,12 +305,12 @@ The SV wrap holds no behavior. Each posedge it runs the 3-call discipline: `cmod
 | Function | Signature (summary) | Semantics |
 |---|---|---|
 | cmodel_nmu_create | `unsigned long long (const char* name, int src_id, int dat_num_vc, const char* config_path)` | Constructs the instance, RobMode::Disabled (R side), default depths. `dat_num_vc` sizes the DAT face only; REQ and RSP are fixed single-VC. `config_path` is required: NULL or empty throws inside `NmuWrap::init`, which the DPI boundary catches into the error latch and returns handle 0. Returns the 64-bit handle for ctx_i. |
-| cmodel_nmu_create_ex | `(..., int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, int outstanding_depth, const char* config_path)` | As create, plus R-RoB enable and depth overrides. The generated testbench calls this in both RoB modes, since the outstanding pool applies to either. |
+| cmodel_nmu_create_ex | `unsigned long long (const char* name, int src_id, int dat_num_vc, int rob_enabled, int b_rob_depth, int r_rob_depth, int max_txns_per_id, const char* config_path)` | As create, plus R-RoB enable and depth overrides. The generated testbench calls this in both RoB modes: it is the only entry point carrying the overrides, and the B-side RoB runs whatever `rob_enabled` says (Section 2.5). |
 | cmodel_nmu_set_inputs | `(ctx, AXI args incl. a 58 b awuser, then the three NoC faces: tx_req_ready, rx_rsp_valid + flit, rx_dat_valid + flit, tx_dat_crdvalid)` | Latches inputs only. Packing: 8-bit fields in word[0] low byte, addresses 2 words little-endian, data 16 words little-endian, wstrb 2 words, awuser 2 words, flits little-endian at their own network's word count (REQ 5, RSP 4, DAT 20), credit vector 1 word bit-per-VC. |
 | cmodel_nmu_tick | `(ctx)` | One full model cycle. One call = one clock edge. |
 | cmodel_nmu_get_outputs | `(ctx, AXI response args, tx_req_valid + flit, rx_rsp_ready, tx_dat_valid + flit, rx_dat_crdvalid)` | Copies the output latch. bresp / rresp masked with 2'b11. |
 | cmodel_nmu_read_slot_hwm | `unsigned int (ctx)` | Telemetry: peak R-RoB slot occupancy. 0 when the handle is invalid or the R RoB is Disabled. Printed per node at testbench exit. |
-| cmodel_nmu_admission_telemetry | `void (ctx, out aw_idle_bypass, aw_same_dest_bypass, aw_fallback_alloc, ar_idle_bypass, ar_same_dest_bypass, ar_fallback_alloc, order_list_hwm, write_txns_hwm, read_txns_hwm)` | Telemetry: the SPEC 17 admission clause counts over accepted pushes (AW and AR counted separately, AR only in RobMode::Enabled), the deepest per-ID order list and the two shared-pool peaks. All outputs 0 when the handle is invalid. Printed per node at testbench exit on the same `[HWM]` line. |
+| cmodel_nmu_admission_telemetry | `void (ctx, out aw_idle_bypass, aw_same_dest_bypass, aw_fallback_alloc, ar_idle_bypass, ar_same_dest_bypass, ar_fallback_alloc, order_list_hwm, write_txns_hwm, read_txns_hwm)` | Telemetry: the SPEC 17 admission clause counts over accepted pushes (AW and AR counted separately, AR only in RobMode::Enabled), the deepest per-ID order list and the peak in-flight transaction count per direction. All outputs 0 when the handle is invalid. Printed per node at testbench exit on the same `[HWM]` line. |
 
 An invalid handle raises a categorized model error which the testbench error poll turns into `$fatal`.
 
@@ -346,7 +345,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 
 Each item names its verification and the failure condition. "ctest" items run in the pure C++ suite (`src/c_model/tests/`), "co-sim" items run under the generated testbench (`make -C sim TB=<topology> PATTERN=<pattern>`, regression via `sim/run_regress.py`) where correctness is judged by the scoreboard's per-transaction write-to-readback compare plus the model's internal asserts (any assert abort fails the run).
 
-1. Interface: the block implements exactly the Section 3.1 / 3.2 ports of `nmu_wrap` with the given widths (REQ 137 b, RSP 127 b, DAT 629 b flits; DAT_NUM_VC-wide credit vectors). Verified: co-sim elaboration (AXI struct port binding, scalar NoC-face binding, `$fatal` width guard in `nmu_wrap.sv`). Failure: elaboration error or width-guard fatal.
+1. Interface: the block implements exactly the Section 3.1 / 3.2 ports of `nmu_wrap` with the given widths (REQ 132 b, RSP 122 b, DAT 629 b flits; DAT_NUM_VC-wide credit vectors). Verified: co-sim elaboration (AXI struct port binding, scalar NoC-face binding, `$fatal` width guard in `nmu_wrap.sv`). Failure: elaboration error or width-guard fatal.
 2. Reset: after the single initial rst_ni assertion, every output is 0, and outputs stay 0 until traffic (rule P6). Verified: `TEST(NmuWrap, idle_adapter_keeps_readys_low)` (`src/c_model/tests/wrap/test_nmu_wrap.cpp`) and cycle-1 sampling in co-sim. Failure: any nonzero output during or immediately after reset.
 3. Registered outputs: outputs are functions of state as of the previous posedge, never combinational paths from same-cycle inputs (rule P3). Verified: `TEST(NmuWrap, single_aw_w_two_phase_handshake)`, which requires the 1-cycle valid-to-ready offset. Failure: same-cycle input-to-output dependence changes the handshake cycle count.
 4. One-shot address ready: awready (arready) asserts only when awvalid (arvalid) was high the previous sampled cycle with FIFO space, stays high 1 cycle, and is low the cycle after a handshake. Consequence: at most one address handshake per 2 cycles per channel. Example: awvalid from cycle 1 gives awready only in cycle 2, and a second AW held from cycle 3 handshakes in cycle 4. Verified: `TEST(NmuWrap, single_aw_w_two_phase_handshake)`, `TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available)`. Failure: ready asserted before valid observed, held more than 1 cycle, or back-to-back address handshakes.
@@ -439,7 +438,7 @@ rx_rsp_ready_o                                     1    1    1    1    1    1
                                                    ^ tied true, the ingress queue is unbounded
 bvalid                                             0    0    0    1    1    0
 bready                                             0    0    0    0    1    0
-bid / bresp                                        0    0    0    8'h05/2'b00 held
+bid / bresp                                        0    0    0    3'h5/2'b00 held
                                                    |--------------|    ^
                                                    3 cycles: B flit    B handshake,
                                                    -> bvalid (SPEC 30) bvalid held 2 cycles

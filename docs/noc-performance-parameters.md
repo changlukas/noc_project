@@ -4,8 +4,8 @@ Revision 0.2, 2026-08-07.
 
 Every parameter below moves a specific part of the latency-throughput curve. Values are
 single-sourced in `specgen/source/constants.yaml`, which is authoritative. The parameters describe
-the shipped c_model configuration: two AXI classes over three physical networks, REQ 137 b,
-RSP 127 b and DAT 629 b, each with its own flit width and flow control (REQ and RSP ready/valid,
+the shipped c_model configuration: two AXI classes over three physical networks, REQ 132 b,
+RSP 122 b and DAT 629 b, each with its own flit width and flow control (REQ and RSP ready/valid,
 DAT credit). Defaults are quoted inline for convenience. Effects are stated as directions, except
 in the measured baseline at the end.
 
@@ -23,11 +23,10 @@ while buffer and outstanding depths move the queuing part.
 | `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (2 to 16) |
 | `ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender on DAT, sized by rule 1 below | 8 (1 to 16) |
 | `ROUTER_OUTPUT_FIFO_DEPTH` | Sustained throughput | Output staging, not credit-counted, absorbs transient output-port contention | 2 (1 to 16) |
-| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID, a sub-limit inside the shared pool below | 32 (1 to 256) |
+| `MAX_TXNS_PER_ID` | Latency hiding | Bounds outstanding transactions per AXI ID. Nothing sits above it, so it is the master-side admission limit and `MAX_TXNS_PER_ID x 2^AXI_ID_WIDTH` is the whole window | 32 (1 to 256) |
 | `ROB_B_DEPTH`, `ROB_R_DEPTH` | Latency hiding | Reorder buffer pool depths, bound in-flight write and read responses awaiting in-order return | 128, 128 (1 to 256) |
 | `META_BUFFER_MAX_OUTSTANDING` | Latency hiding | Slave-side outstanding pool per direction, bounds concurrency the slave sustains | 32 (1 to 256) |
-| `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 1 (1 or 256) |
-| `NMU_OUTSTANDING_DEPTH` | Latency hiding | Master-side shared outstanding pool per direction, all AXI IDs share it | 32 (1 to 256) |
+| `META_BUFFER_MAX_UNIQUE_IDS` | Endpoint concurrency | Distinct AXI IDs the NSU presents downstream. At 1 every transaction reaching a tile carries the same ID, so an endpoint that tracks IDs sees no concurrency to exploit | 1 (1 or 8) |
 | `NMU_QUEUE_DEPTH`, `NSU_QUEUE_DEPTH` | Burst absorption | AXI-channel FIFO depth at the master-side (NMU) and slave-side (NSU) network interfaces, absorbs injection bursts | 16, 16 (1 to 1024) |
 | `NMU_DEPKT_Q_DEPTH` | Burst absorption | Depacketize demux FIFO depth | 16 (1 to 1024) |
 | `NMU_ARBITER_FIFO_DEPTH`, `NSU_ARBITER_FIFO_DEPTH` | Burst absorption | Wormhole and VC-arbiter staging depth | 4, 4 (1 to 64) |
@@ -65,17 +64,20 @@ Below the bound a single ID stream is latency-limited, its throughput capped at
 must not be the tighter bound on the same concurrency. `ROB_R_DEPTH` holds one read-data beat per
 slot, so for read bursts its required depth scales with beats, not transactions.
 
-Admission is a pool, not a per-ID multiplier. `NMU_OUTSTANDING_DEPTH` (32) bounds the total in
-flight per direction across every ID, and `MAX_TXNS_PER_ID` (32) is a sub-limit inside it. Adding
-IDs spreads that pool, it does not enlarge it, so the aggregate figure is the one every sizing
-expression below is written against.
+Admission is a per-ID multiplier, not a pool. `MAX_TXNS_PER_ID` (32) bounds each ID's order list
+and nothing sits above it, so the master-side bound per direction is
+`MAX_TXNS_PER_ID x 2^AXI_ID_WIDTH` = 32 x 8 = 256. Adding IDs enlarges the window instead of
+sharing one out, and a single-ID stream still sees 32. `ROB_B_DEPTH` and `ROB_R_DEPTH` gate only
+the transactions that reserve a slot, so they bind before 256 as soon as traffic leaves the
+bypass branches.
 
 ## Worked example: absorbing a full outstanding window
 
 A master that fills its outstanding window in one shot is the peak-injection case. This example
 sizes what the network interface (NI) must hold for the master to see no backpressure, per
-direction. `n` and `m` are the example's local shorthand: `n` is the shared outstanding pool depth
-`NMU_OUTSTANDING_DEPTH` and `m` the AXI burst length in beats.
+direction. `n` and `m` are the example's local shorthand: `n` is the master-side outstanding bound
+`MAX_TXNS_PER_ID x 2^AXI_ID_WIDTH` = 256, reachable only with all 8 IDs in use, and `m` the AXI
+burst length in beats.
 
 **Write window.** At t = 0 the master drives both channels at full rate: `n` AW back to back at
 one per cycle, and `n x m` W beats contiguously at one per cycle. The NI egress injects one flit
@@ -87,11 +89,11 @@ aw_q peak = w_q peak = n m / (m + 1)          about n each, not n m
 full absorption:  aw_q, w_q  >=  ceil(n m / (m + 1))
 queues empty at n (m + 1) cycles
 
-  n  shared outstanding pool depth, NMU_OUTSTANDING_DEPTH
+  n  master-side outstanding bound, MAX_TXNS_PER_ID x 2^AXI_ID_WIDTH
   m  AXI burst length, in beats
 ```
 
-At n = 32, m = 4 the peak is 25.6, so 26 entries each, and the window clears in 160 cycles. The
+At n = 256, m = 4 the peak is 204.8, so 205 entries each, and the window clears in 1280 cycles. The
 current port depth of 16 absorbs part of the window, after which the master sees ready fall.
 Throughput is identical either way, since the egress caps it at `m / (m + 1)`:
 
@@ -102,8 +104,9 @@ Throughput is identical either way, since the egress caps it at `m / (m + 1)`:
 
 The router needs no added depth. The NI egress injects one flit per cycle, so no router sees more
 than line rate, which rule 1 already covers. The window is absorbed at the NI. The return side
-is `n` single-flit B responses, tracked by `ROB_B_DEPTH >= n`, which counts transactions and
-does not scale with burst beats.
+is `n` single-flit B responses. `ROB_B_DEPTH` tracks only the ones that reserve a slot and
+refuses an allocating AW when the pool is short, so the shipped 128 caps the slot-allocating
+share of a 256-deep window. It counts transactions and does not scale with burst beats.
 
 **Read window.** The master issues `n` AR back to back, to several destinations so responses can
 return out of order. It differs from the write window in three ways:
@@ -114,11 +117,14 @@ return out of order. It differs from the write window in three ways:
 2. The return parks in the reorder buffer, and undersizing it backpressures the fabric, not the
    master. The master accepts R at one beat per cycle, rate-matched, but a same-ID window spread
    over several destinations returns out of order and parks in `ROB_R` until in-order commit. In
-   the worst case the first-issued burst returns last. That burst commits as it arrives, so the
-   exact parked peak is `(n - 1) m` beats and `n m` is the conservative budget:
+   the worst case the first-issued burst returns last. That burst commits as it arrives, so
+   covering `k` concurrent reordered bursts needs `(k - 1) m` beats exactly, `k m` as the
+   conservative budget:
 
 ```text
-ROB_R  >=  (n - 1) m beats exact, n m as the conservative budget
+ROB_R  >=  (k - 1) m beats exact, k m as the conservative budget
+
+  k  concurrent reordered read bursts, at most n
 ```
 
    Below that, the response path fills, credits stop returning, and the stall spreads into the
@@ -129,10 +135,11 @@ ROB_R  >=  (n - 1) m beats exact, n m as the conservative budget
    sustains full line rate on the response network, against `m / (m + 1)` for writes, whose
    headers share the request network with the data.
 
-Capacity of an 8 KB read reorder budget at n = 32, m = 4. `ROB_R_DEPTH` is 128 slots, which is
-exactly this budget at the shipped 512 b width:
+The pool is its own admission gate: an allocating AR is refused when free slots are short, so `k`
+never exceeds `ROB_R_DEPTH / m`, which is 32 reordered bursts at the shipped 128 slots and m = 4.
+Those 128 slots are exactly the 8 KB budget at the shipped 512 b width:
 
-| `AXI_DATA_WIDTH` | `n m` beats | Bytes | Against 8 KB |
+| `AXI_DATA_WIDTH` | Beats parked | Bytes | Against 8 KB |
 |---|---:|---:|---|
 | 256 b | 128 | 4 KB | fits |
 | 512 b (shipped) | 128 | 8 KB | exactly fills it |
@@ -148,10 +155,14 @@ depth covers a round trip as long as its own streaming time (target spec numbers
 class, 4 KB bursts):
 
 ```text
-write               32 bursts x 65 flits          = 2080 cycles
-in-order read       32 bursts x 64 beats          = 2048 cycles
-out-of-order read   8 KB reorder buffer / 64 B    =  128 cycles
+write                     256 bursts x 65 flits         = 16640 cycles
+in-order read, Enabled    256 bursts x 64 beats         = 16384 cycles
+in-order read, Disabled     8 bursts x 64 beats         =   512 cycles
+out-of-order read         8 KB reorder buffer / 64 B    =   128 cycles
 ```
+
+`RobMode::Disabled`, the co-sim default, replaces the per-ID order-list depth with a per-ID
+single-outstanding read interlock, so its in-order read window is 1 x 8 IDs rather than 32 x 8.
 
 Write and in-order read coverage sits far beyond any zero-load round trip, so those streams
 hold the service rate unconditionally. The out-of-order read is the tight one:
@@ -164,9 +175,9 @@ read efficiency = min(1, 128 / round_trip_cycles)
 |---|---:|---:|---:|---:|
 | Read efficiency | 100 % | 50 % | 25 % | 12.5 % |
 
-Burst size does not change the 128-cycle coverage once the buffer fills (any burst `>= 256 B`
-pends the full 8 KB). Below 256 B the 32-request cap binds first: a single-beat stream pends
-only 2 KB and covers 32 cycles.
+Burst size does not change the 128-cycle coverage: the 128-slot pool pends the full 8 KB at any
+burst length, and the 256-transaction admission bound never binds first, a single-beat stream
+needing 128 requests to fill the pool.
 
 ## Risk in the current defaults
 
@@ -178,7 +189,7 @@ The bandwidth and area parameters, `AXI_DATA_WIDTH` and the per-network `NUM_VC`
 knobs on both axes and interact. Router input buffering is their product, so raising the data class
 width and the channel count together raises buffer area faster than either alone.
 
-Full-window absorption is still uncovered on the write side: the port depth is 16 against the 26
+Full-window absorption is still uncovered on the write side: the port depth is 16 against the 205
 the write window needs. The read side is covered, `ROB_R_DEPTH` being 128 beats, which is the 8 KB
 budget the read window asks for at the 512 b width. Only the read side can back up into the fabric,
 which is why it was sized first.

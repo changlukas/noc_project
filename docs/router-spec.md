@@ -33,8 +33,8 @@ per cycle.
 
 | Network | flit width | payload | Flow control |
 |---|---|---|---|
-| REQ | 137 | [136:44], 93 b | ready/valid, 1 VC |
-| RSP | 127 | [126:44], 83 b | ready/valid, 1 VC |
+| REQ | 132 | [131:44], 88 b | ready/valid, 1 VC |
+| RSP | 122 | [121:44], 78 b | ready/valid, 1 VC |
 | DAT | 629 | [628:44], 585 b | credit, `NUM_VC` 1..8 |
 
 **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
@@ -423,8 +423,8 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
 | `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
-| `REQ_FLIT_WIDTH` | 137 | 64..1024 | REQ flit bus width, bits |
-| `RSP_FLIT_WIDTH` | 127 | 64..1024 | RSP flit bus width, bits |
+| `REQ_FLIT_WIDTH` | 132 | 64..1024 | REQ flit bus width, bits |
+| `RSP_FLIT_WIDTH` | 122 | 64..1024 | RSP flit bus width, bits |
 | `DAT_FLIT_WIDTH` | 629 | 64..1024 | DAT flit bus width, bits |
 | `LINK_PORTS` | 5 | fixed 5 | port array size = {LOCAL, NORTH, EAST, SOUTH, WEST} |
 
@@ -470,9 +470,9 @@ Inputs:
 | `rst_ni` | 1 | Synchronous active-low reset. Given only once, at the beginning of simulation (rule R9). |
 | `ctx_i` | 64 | Model handle returned by `cmodel_router_create`. Constant after reset. From tb_top. |
 | `rx_req_valid` | 5 | Bit p: the sender at port p drives one REQ flit this cycle. Bit 0 is the local NI's injection. |
-| `rx_req_flit` | 137 x 5 (unpacked `[LINK_PORTS]`) | REQ flit from port p. Valid only when `rx_req_valid[p]` is high, all zeros otherwise. |
+| `rx_req_flit` | 132 x 5 (unpacked `[LINK_PORTS]`) | REQ flit from port p. Valid only when `rx_req_valid[p]` is high, all zeros otherwise. |
 | `tx_req_ready` | 5 | Bit p: the receiver at port p can take a REQ flit. Advisory (see above). |
-| `rx_rsp_valid` / `rx_rsp_flit` / `tx_rsp_ready` | 5 / 127 x 5 / 5 | RSP mirror. |
+| `rx_rsp_valid` / `rx_rsp_flit` / `tx_rsp_ready` | 5 / 122 x 5 / 5 | RSP mirror. |
 | `rx_dat_valid` | 5 | Bit p: the sender at port p drives one DAT flit this cycle. |
 | `rx_dat_flit` | 629 x 5 | DAT flit from port p. |
 | `tx_dat_crdvalid` | DAT_NUM_VC x 5 (unpacked) | Per-VC credit pulse from the receiver at port p, for a DAT flit this node previously sent out of its p output. Increments `credit_[p][vc]`. |
@@ -482,9 +482,9 @@ Outputs (all registered, reset to 0):
 | Signal | Bit width | Definition |
 |---|---|---|
 | `tx_req_valid` | 5 | Bit p: one REQ flit driven toward port p this cycle. Boundary bits always 0. |
-| `tx_req_flit` | 137 x 5 | REQ flit toward port p. All zeros when `tx_req_valid[p]` is low. |
+| `tx_req_flit` | 132 x 5 | REQ flit toward port p. All zeros when `tx_req_valid[p]` is low. |
 | `rx_req_ready` | 5 | Bit p: this node can take a REQ flit on port p (almost-full ready, section 2.1). |
-| `tx_rsp_valid` / `tx_rsp_flit` / `rx_rsp_ready` | 5 / 127 x 5 / 5 | RSP mirror. |
+| `tx_rsp_valid` / `tx_rsp_flit` / `rx_rsp_ready` | 5 / 122 x 5 / 5 | RSP mirror. |
 | `tx_dat_valid` | 5 | Bit p: one DAT flit driven toward port p this cycle. Boundary bits always 0. |
 | `tx_dat_flit` | 629 x 5 | DAT flit toward port p. All zeros when `tx_dat_valid[p]` is low. |
 | `rx_dat_crdvalid` | DAT_NUM_VC x 5 | Per-VC credit pulse to the sender at port p: this node drained one flit from its p-direction DAT input FIFO, VC v. |
