@@ -91,6 +91,10 @@ sim:
 SWEEP_RATES ?= 0.05 0.1 0.2 0.3 0.4 0.5 0.7 0.85 1.0
 SWEEP_VCS   ?= 1 2 4 8
 
+# Set tools/gen_tb_top.py's _MST_BACKPRESSURE to "ideal" before running this,
+# and put it back afterwards. The default is "random", which stalls the master's
+# R and B channels, and a consumer that stalls first is what the curve then
+# measures instead of fabric saturation. Same reason _MEM_LATENCY stays "ideal".
 sim-injection-sweep:
 	@for vc in $(SWEEP_VCS); do \
 	    for r in $(SWEEP_RATES); do \

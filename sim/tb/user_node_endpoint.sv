@@ -148,6 +148,20 @@ module user_node_endpoint #(
         .mst(mst_post_delay)
     );
 
+    // Evidence the knob acts, reported once per node at $finish. Counts cycles
+    // where the NMU has read data to hand over and this endpoint refuses it.
+    // Zero by construction under "ideal", where the delayer is wires, so a run
+    // that reports zero under "random" means the backpressure never engaged and
+    // the run proves nothing about a stalling consumer.
+    int unsigned mst_r_stall_cycles = 0;
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) mst_r_stall_cycles <= 0;
+        else if (master_axi_rsp_i.rvalid && !master_axi_req_o.rready)
+            mst_r_stall_cycles <= mst_r_stall_cycles + 1;
+    end
+    final $display("[mst_bp] node%0d: R backpressure held %0d cycles",
+                   NODE_ID, mst_r_stall_cycles);
+
     // Master face. The file_master's own traffic is what every in-endpoint
     // checker watches, so it is flattened once here and the checkers read that
     // view. It is NOT the NoC-bound port: a request this node addresses to its

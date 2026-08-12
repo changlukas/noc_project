@@ -29,6 +29,7 @@ up to 256 lookups, not 256 x O(entries).
 | Multi-hot to multi-hot fork completion across a link, and fork/join at `output_fifo_depth > 0` | no stimulus generates either shape |
 | The held-join wait-for edge | probabilistic co-sim coverage only, never targeted |
 | Narrow-class collectives under a deliberate fault | no narrow-class red run exists |
+| Independent per-node master-face stall patterns | `axi_delayer_intf` does not expose `stream_delay`'s `Seed` and `axi_delayer` does not forward one, so every endpoint's LFSR starts from the same state. It advances per handshake, so instances decorrelate once their traffic differs, but symmetric traffic keeps them aligned: `neighbor` on a square mesh reports an identical stall count on every node, `multicast` does not. Reaching independent patterns means bypassing the component and wiring `stream_delay` directly (`sim/tb/user_node_endpoint.sv`, `i_mst_backpressure`) |
 | Mixed-space sustained load on a `TILE_TARGETS = 2` tile | `NSU_META_BUFFER_MAX_UNIQUE_IDS = 1` collapses every tile transaction onto one AXI ID, and taxi's `thread_match_dest` blocks a same-ID AX aimed at a different master, so config-to-memory alternation serializes the tile port. Every shipped topology is `TILE_TARGETS = 2`, so reaching it needs only `INJECTION_MODE = 2` |
 | AXI-side perf DPI hooks | never driven, so the `axi_bw_monitor` against `perf.json` cross-check has never run |
 | Functional coverage, constrained-random stimulus, wire-level SVA | none exist |

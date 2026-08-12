@@ -182,7 +182,7 @@ _MST_BACKPRESSURE_PROFILES = {
     "ideal": (0, 0),
     "random": (1, 0),
 }
-_MST_BACKPRESSURE = "ideal"
+_MST_BACKPRESSURE = "random"
 
 
 def tile_targets(topo: dict, nodes):

@@ -41,7 +41,7 @@ Success Criteria:
 - `sim-injection-sweep`'s `"ideal"` requirement written where the sweep is run from
 - The `Seed` limitation recorded in `docs/known-limitations.md`
 
-Status: Not Started
+Status: Complete
 
 ## Next
 
