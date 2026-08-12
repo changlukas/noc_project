@@ -130,7 +130,7 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 // port); AXI slave side + three NoC faces (REQ egress ready/valid, RSP
 // ingress ready/valid, DAT ingress+egress credit).
 // Packing conventions (little-endian word order; word counts derived from
-// ni::FLIT_WIDTH / axi::DATA_WIDTH in src/dpi/dpi_marshal.hpp):
+// ni::FLIT_WIDTH / axi::DATA_WIDTH in ref_model/dpi/dpi_marshal.hpp):
 //   id fields     : 1 word (8-bit value in low byte)
 //   addr fields   : 2 words (64-bit, word[0] = bits[31:0], word[1] = bits[63:32])
 //   data fields   : DATA_VEC_WORDS = 16 words (512-bit bus, little-endian)

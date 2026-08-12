@@ -23,9 +23,11 @@ AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
 
 ### Where code lives
 
-- `src/c_model/` - C++17 model (`axi`, `nmu`, `nsu`, `router`, `wrap`) + GoogleTest suites
-- `src/sv/` - SV wrapper modules around the model components
-- `src/dpi/` - DPI bridge between SV wraps and the C++ model
+- `ref_model/` - the reference model, what `rtl/` is checked against
+  - `c_model/` - C++17 model (`axi`, `nmu`, `nsu`, `router`, `wrap`) + GoogleTest suites
+  - `top/` - SV wrapper modules around the model components
+  - `dpi/` - DPI bridge between SV wraps and the C++ model
+- `rtl/` - the synthesizable implementation, per block
 - `sim/` - testbench sources, topology YAMLs, stimulus/plot tooling, `verilator/` and `vcs/` flows
 - `specgen/` - spec-to-code generator (C++ headers + SV packages)
 - `docs/` - spec, trade-off record, verification environment

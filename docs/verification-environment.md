@@ -39,7 +39,7 @@ emits two generated files, never hand-edited:
 
 | file | content |
 |---|---|
-| `src/sv/noc_fabric_<topology>.sv` | N nodes (`ni_wrap` = NMU + NSU + `dat_merge_wrap`, plus `router_wrap`), joined by directional (N/E/S/W) inter-router links via a `genvar` generate loop. Boundary directions are tied off; a tied-off direction driving a valid flit is a `$fatal`. |
+| `ref_model/top/noc_fabric_<topology>.sv` | N nodes (`ni_wrap` = NMU + NSU + `dat_merge_wrap`, plus `router_wrap`), joined by directional (N/E/S/W) inter-router links via a `genvar` generate loop. Boundary directions are tied off; a tied-off direction driving a valid flit is a `$fatal`. |
 | `sim/tb/tb_top_<topology>.sv` | self-clocked (10 ns clock, 4-cycle reset) top: DPI create calls for every router/NMU/NSU context, the fabric instance, one `user_node_endpoint` per node, the watchdog, and the exit logic. |
 
 `router_wrap` carries three physical networks, each with its own flit width
@@ -55,7 +55,7 @@ Link ports use a `tx_<net>_*`/`rx_<net>_*` pin contract (`<net>` = `req`/`rsp`/`
 `tx` is this router's output to the peer, `rx` is the peer's output into this
 router; adjacent nodes cross-wire `tx` to `rx`. DAT is the one shared
 physical LOCAL port between NMU and NSU (NMU sources DataAw/DataW, NSU
-sources DataR); `dat_merge_wrap` (`src/sv/dat_merge_wrap.sv`) arbitrates the
+sources DataR); `dat_merge_wrap` (`ref_model/top/dat_merge_wrap.sv`) arbitrates the
 two onto `router_wrap`'s single DAT LOCAL rx/tx pair, sitting between
 `nmu_wrap`/`nsu_wrap` and `router_wrap` inside `ni_wrap`.
 
@@ -92,7 +92,7 @@ where noted.
 
 ## Provenance
 
-The AXI master/slave/memory model algorithms in `src/c_model/include/axi/`
+The AXI master/slave/memory model algorithms in `ref_model/c_model/include/axi/`
 are ported to C++17 from cocotbext-axi (MIT license). The VIP set above is
 vendored under `sim/dv/` from the pulp `axi` / `common_verification` /
 `common_cells` packages and a FlooNoC test component (Solderpad 0.51);

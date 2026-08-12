@@ -6,12 +6,12 @@
 # (build/cmodel, build/verilator, build/vcs)
 /build/
 Testing/
-src/c_model/Testing/
+ref_model/c_model/Testing/
 # Legacy locations (pre build/-tree restructure); keep ignored so stale
 # checkouts don't show noise
 sim/verilator/obj_dir/
 sim/verilator/obj_genamba/
-src/c_model/build/
+ref_model/c_model/build/
 
 # Temporary files
 *.tmp
@@ -34,14 +34,7 @@ sim/output/
 # Stray generated perf summary (canonical copy lives under sim/*/output/)
 sim/verilator/perf.json
 
-# Generated per-node scenario variants (node2+ created by gen_test_patterns at runtime;
-# node0/node1 are the committed curated-subset gate markers and stay tracked).
-sim/test_patterns/*/node[2-9]/
-sim/test_patterns/*/node1[0-9]/
 
-# Generated file_master stimulus (emitter --format file_master; all nodes)
-sim/test_patterns/*/node*/write.txt
-sim/test_patterns/*/node*/read.txt
 
 # Generated tb_top filelists (regenerated from build_config.mk's TB_TOP_SV_SRC
 # by both sim flows; bakes in host-absolute paths so they must not be committed)
@@ -52,7 +45,7 @@ sim/filelist_*.f
 # both sim/verilator/Makefile and sim/vcs/Makefile regenerates them). Edit the
 # generator or sim/topologies/*.yaml, never these files directly.
 sim/tb/tb_top_*.sv
-src/sv/noc_fabric_*.sv
+ref_model/top/noc_fabric_*.sv
 
 # Local Python installs (project-local 3.14, ~278 MB total)
 /Python/

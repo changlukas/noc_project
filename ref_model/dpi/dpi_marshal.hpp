@@ -5,8 +5,8 @@
 // and this header kept producing the right word count / tail mask without
 // editing a single formula here. Extracted out of cmodel_dpi.cpp (rather than
 // left as an anonymous-namespace block) so ctest can round-trip pack/unpack
-// directly; the svdpi.h dependency confines this header to src/dpi/, not
-// src/c_model/include/wrap/ (whose other headers stay DPI-agnostic).
+// directly; the svdpi.h dependency confines this header to ref_model/dpi/, not
+// ref_model/c_model/include/wrap/ (whose other headers stay DPI-agnostic).
 #pragma once
 #include "svdpi.h"
 #include "axi/types.hpp"        // ni::cmodel::axi::DATA_BYTES / DATA_WIDTH

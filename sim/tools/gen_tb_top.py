@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate sim/tb/tb_top_<topology>.sv + src/sv/noc_fabric_<topo>.sv from a topology config.
+"""Generate sim/tb/tb_top_<topology>.sv + ref_model/top/noc_fabric_<topo>.sv from a topology config.
 
 The fabric/tb split:
   - noc_fabric_<topo>.sv : N nodes, each = NMU + REQ/RSP router_wrap + NSU, joined
@@ -13,7 +13,7 @@ The fabric/tb split:
 
 Generated artifacts: edit the generator or the topology YAML, never the emitted
 .sv directly. tb_top_<topology>.sv includes the fabric (SV `include), resolved via
-the -I src/sv include path.
+the -I ref_model/top include path.
 
 Usage:
     python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/tb/tb_top_<topology>.sv]
@@ -973,7 +973,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
 # ---------------------------------------------------------------------------
 
 def _fabric_path(out_path: Path, topo: dict) -> Path:
-    return ROOT / "src" / "sv" / f"noc_fabric_{topo['topology']['name']}.sv"
+    return ROOT / "ref_model" / "top" / f"noc_fabric_{topo['topology']['name']}.sv"
 
 
 def main() -> int:

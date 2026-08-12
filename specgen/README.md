@@ -12,7 +12,7 @@ regenerate it from the source instead.
   codegen input)
 - `generated/json/` - hand-curated JSON SSoT (`ni_packet.json`, `ni_signals.json`)
   plus their schemas; codegen input, not codegen output
-- `generated/cpp/` - elaborated C++ headers for `src/c_model/`
+- `generated/cpp/` - elaborated C++ headers for `ref_model/c_model/`
 - `generated/sv/` - elaborated SystemVerilog packages for the testbench
 - `tools/codegen.py` - the elaborator; `tools/elaborate/` - per-domain emitters
 
@@ -28,7 +28,7 @@ py -3 tools/codegen.py --target sv --domain noc_types --num-vc 4   # noc_types n
 
 - `py -3 tools/codegen.py --check` - re-elaborates every domain and diffs
   against the committed output
-- `codegen_check` (CMake custom target, `src/c_model/CMakeLists.txt`) - runs
+- `codegen_check` (CMake custom target, `ref_model/c_model/CMakeLists.txt`) - runs
   the same check before the c_model build
 - `make pytest` - specgen + sim/tools test suites, includes the golden drift check
 

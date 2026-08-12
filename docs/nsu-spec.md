@@ -1,6 +1,6 @@
 # Design: Network Slave Unit (NSU)
 
-Top module: `nsu_wrap` (`src/sv/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`src/c_model/include/nsu/`) through the DPI handle ABI. This document specifies the as-built behavior of that model. An RTL implementation of the NSU is verified cycle-by-cycle against it by the existing co-sim testbench.
+Top module: `nsu_wrap` (`ref_model/top/nsu_wrap.sv`), driving a cycle-accurate C++ model core (`ref_model/c_model/include/nsu/`) through the DPI handle ABI. This document specifies the as-built behavior of that model. An RTL implementation of the NSU is verified cycle-by-cycle against it by the existing co-sim testbench.
 
 ## 2. Design Description
 
@@ -220,7 +220,7 @@ Widths from `ni_params_pkg`: ID 3, ADDR 48, DATA 512, WSTRB 64. Column From/To n
 
 No `*user` and no `*region` signals cross this face in either direction.
 
-### 3.3 DPI functions (`src/dpi/cmodel_dpi.cpp`)
+### 3.3 DPI functions (`ref_model/dpi/cmodel_dpi.cpp`)
 
 | Function | Signature | Cycle semantics |
 |---|---|---|
@@ -283,7 +283,7 @@ The implementer does not handle any of the following, they are guaranteed not to
 
 ## 4. Specifications
 
-Each item names its verification and failure condition. ctest paths are under `src/c_model/tests/`. "Co-sim scoreboard" means the per-transaction write-then-readback compare of the generated testbench (`make -C sim`), where any lost, duplicated, or corrupted beat fails the run.
+Each item names its verification and failure condition. ctest paths are under `ref_model/c_model/tests/`. "Co-sim scoreboard" means the per-transaction write-then-readback compare of the generated testbench (`make -C sim`), where any lost, duplicated, or corrupted beat fails the run.
 
 1. Module name `nsu_wrap`, ports exactly per 3.1/3.2, DPI functions exactly per 3.3. Verify: elaboration (credit-width `$fatal` guard) and `wrap/test_cmodel_dpi.cpp` (handle type guards, create-after-init). Fail: elaboration fatal or DPI error latch raised.
 2. One flit maps to exactly one AXI beat in both directions, no burst split or merge. Verify: `nsu/test_nsu_depacketize.cpp` `DemuxMixedAwWAr`, co-sim scoreboard. Fail: beat count differs from flit count for any transaction.

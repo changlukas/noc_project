@@ -51,7 +51,7 @@ axi:
     max: 64
     # NOTE: spec range is 1..64 per AXI4 IHI 0022 §A2.2.1; default fixed at 48 b
     # per docs/noc-target-spec.md §6. The DPI pack_addr64 helper in
-    # src/dpi/cmodel_dpi.cpp packs into a 2-word svBitVecVal[2] container
+    # ref_model/dpi/cmodel_dpi.cpp packs into a 2-word svBitVecVal[2] container
     # (unchanged: ceil(48/32) == ceil(64/32) == 2); widening past 64 still
     # needs pack_addr64 reparameterized.
     sv_symbol: AXI_ADDR_WIDTH_DFLT
@@ -77,7 +77,7 @@ axi:
     max: 64
     # NOTE: the collective mask field is ADDR_WIDTH wide, so this default only
     # holds while ADDR_WIDTH == 48. The DPI carries AWUSER in a 2-word
-    # svBitVecVal container (src/dpi/cmodel_dpi.cpp cmodel_nmu_set_inputs),
+    # svBitVecVal container (ref_model/dpi/cmodel_dpi.cpp cmodel_nmu_set_inputs),
     # which is what caps this at 64.
     sv_symbol: AXI_AWUSER_WIDTH_DFLT
     cpp_symbol: AXI_AWUSER_WIDTH

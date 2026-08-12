@@ -8,7 +8,7 @@
 #   build/verilator/ obj_dir (tb_top)
 #   build/vcs/       simv_* + csrc_* (workstation)
 
-CMODEL_DIR      := src/c_model
+CMODEL_DIR      := ref_model/c_model
 BUILD_ROOT      := build
 # Recursive (=) not immediate (:=): BUILD_ROOT can be overridden by `-include
 # local.mk` below (e.g. $(HOME)/noc_build on WSL), and CMODEL_BUILD must pick up
@@ -169,8 +169,7 @@ clean-cmodel:
 
 # Generated sources and stimulus, plus every __pycache__ the generators leave.
 clean-generated:
-	rm -f sim/tb/tb_top_*.sv src/sv/noc_fabric_*.sv sim/filelist_*.f
-	rm -rf sim/test_patterns
+	rm -f sim/tb/tb_top_*.sv ref_model/top/noc_fabric_*.sv sim/filelist_*.f
 	rm -f sim/tools/injection_sweep.csv sim/tools/injection_sweep.png
 	rm -f sim/verilator/hs_trace_node*.log
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +

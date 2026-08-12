@@ -101,7 +101,7 @@ GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
 # tb_top_<TOPOLOGY>.sv does `include "noc_fabric_<topo>.sv"` (bare filename);
-# the fabric is emitted into src/sv/, already implied by -I$(SRC_SV) above.
+# the fabric is emitted into ref_model/top/, already implied by -I$(SRC_SV) above.
 VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 
 # TOPOLOGY stamp records the last-built topology name. The FORCE-driven rule
@@ -201,7 +201,7 @@ _CHECKED       := $(filter 2,$(INJECTION_MODE))
 # Pattern tag: multicast runs are per-shape, so the shape joins the stim dir /
 # output tag (row and submesh runs must not share stimulus or logs).
 _PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
-STIM_ROOT      ?= $(COSIM_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
+STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
 SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(TOPOLOGY)_$(_PATTERN_TAG)_s$(SEED)))
 GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
 EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py

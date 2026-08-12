@@ -24,12 +24,12 @@ PROJ_ROOT   := $(patsubst %/,%,$(dir $(COSIM_ROOT)))
 # A command-line BUILD_ROOT= still wins over both.
 BUILD_ROOT     ?= $(PROJ_ROOT)/build
 
-CMODEL_INC     := $(PROJ_ROOT)/src/c_model/include
-CMODEL_TESTS   := $(PROJ_ROOT)/src/c_model/tests
+CMODEL_INC     := $(PROJ_ROOT)/ref_model/c_model/include
+CMODEL_TESTS   := $(PROJ_ROOT)/ref_model/c_model/tests
 SPECGEN_INC    := $(PROJ_ROOT)/specgen/generated/cpp
 SPECGEN_SV_INC := $(PROJ_ROOT)/specgen/generated/sv
-SRC_SV         := $(PROJ_ROOT)/src/sv
-SRC_DPI        := $(PROJ_ROOT)/src/dpi
+SRC_SV         := $(PROJ_ROOT)/ref_model/top
+SRC_DPI        := $(PROJ_ROOT)/ref_model/dpi
 # Imported DV/VIP source set (pulp axi + common_verification + FlooNoC monitors).
 # NEVER edit files under $(DV_ROOT) — they are vendored verbatim.
 DV_ROOT        := $(COSIM_ROOT)/dv
@@ -171,10 +171,10 @@ DPI_C_SRC := $(SRC_DPI)/cmodel_dpi.cpp
 # the TOP-level rules must list them too — otherwise a header-only change
 # leaves the simulator binary stale because the sub-make never runs.
 DPI_HDR_DEPS := \
-    $(wildcard $(PROJ_ROOT)/src/c_model/include/*.hpp) \
-    $(wildcard $(PROJ_ROOT)/src/c_model/include/*/*.hpp) \
-    $(wildcard $(PROJ_ROOT)/src/c_model/include/*/*/*.hpp) \
-    $(wildcard $(PROJ_ROOT)/src/c_model/tests/common/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*/*.hpp) \
+    $(wildcard $(PROJ_ROOT)/ref_model/c_model/tests/common/*.hpp) \
     $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.hpp)
 
 CPP_INCLUDE_FLAGS := \

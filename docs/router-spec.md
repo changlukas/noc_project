@@ -6,10 +6,10 @@ by the existing testbench. As-built references:
 
 | Layer | File |
 |---|---|
-| Router core (per network) | `src/c_model/include/router/router.hpp` |
-| Per-node wrap (REQ + RSP `SimpleRouter`, DAT `Router`, DPI I/O latch) | `src/c_model/include/wrap/router_wrap.hpp` |
-| SV DPI module (top-level pin contract) | `src/sv/router_wrap.sv` |
-| Unit tests | `src/c_model/tests/router/test_router.cpp` (DAT), `test_simple_router.cpp` (REQ/RSP), `test_route_mask.cpp` + `test_*_fork.cpp` + `test_simple_router_join.cpp` (collectives) |
+| Router core (per network) | `ref_model/c_model/include/router/router.hpp` |
+| Per-node wrap (REQ + RSP `SimpleRouter`, DAT `Router`, DPI I/O latch) | `ref_model/c_model/include/wrap/router_wrap.hpp` |
+| SV DPI module (top-level pin contract) | `ref_model/top/router_wrap.sv` |
+| Unit tests | `ref_model/c_model/tests/router/test_router.cpp` (DAT), `test_simple_router.cpp` (REQ/RSP), `test_route_mask.cpp` + `test_*_fork.cpp` + `test_simple_router_join.cpp` (collectives) |
 | Wire-level credit assertions | `sim/tb/link_perf_monitor.sv` |
 | Generated fabric wiring | `sim/tools/gen_tb_top.py` |
 
@@ -418,7 +418,7 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 
 ### 3.1 Parameters
 
-`router_wrap` SV parameters (`src/sv/router_wrap.sv:54-63`):
+`router_wrap` SV parameters (`ref_model/top/router_wrap.sv:54-63`):
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
@@ -612,7 +612,7 @@ router obligation.
 ## 4. Specifications
 
 Each item names where it is verified and what constitutes failure. ctest names refer
-to `src/c_model/tests/router/test_router.cpp`. "Co-sim scoreboard" is the per-transaction
+to `ref_model/c_model/tests/router/test_router.cpp`. "Co-sim scoreboard" is the per-transaction
 write -> readback compare of the co-simulation testbench (`make -C sim TB=<topology>`),
 which fails on any data or ordering divergence from this model.
 
