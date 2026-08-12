@@ -46,6 +46,10 @@ Task 1. Everything below implements it and nothing below overrides it.
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `address_map.pack(address_map, x_dim, y_dim)` keeps its signature and return shape.
+  **Its two dimension arguments now mean the route span, not the router array.** For a topology
+  with no peripheral the two are equal, so every existing caller is unaffected and every existing
+  base is unchanged; Task 4's caller passes the span. Rename them `x_span` / `y_span` in the
+  signature so the shift is visible at every call site rather than implied.
   `SpaceCoords` gains four fields, all `unsigned`: `x_first`, `x_last`, `y_first`, `y_last`,
   inclusive tile-region bounds, defaulting to `0`. Task 2 and Task 3 read them.
 
