@@ -737,6 +737,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     num_vc = topo["topology"]["num_vc"]
     x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(topo["topology"])
     rob_enabled = requested_name.endswith("_rob")
+    # Every loop that walks the initiators walks ENDPOINTS on a topology with a
+    # peripheral: each one injects, each one can wedge, and each one has an NMU.
+    exit_n = "NUM_ENDPOINTS" if peripherals else "NUM_NODES"
 
     # Tile crossbar windows, m0 first (see tile_targets). Emitted as PACKED-array
     # concatenations in descending index order (last first) so field t is target t
@@ -884,19 +887,19 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // separate a freeze at cycle 500 from one at cycle 99999.")
     w("    // -------------------------------------------------------------------------")
     w("    int unsigned live_cyc = 0;")
-    w("    int unsigned last_progress  [NUM_NODES];")
-    w("    int unsigned axi_outstanding[NUM_NODES];")
+    w(f"    int unsigned last_progress  [{exit_n}];")
+    w(f"    int unsigned axi_outstanding[{exit_n}];")
     w("")
     w("    always_ff @(posedge clk_i) begin")
     w("        if (!rst_ni) begin")
     w("            live_cyc <= 0;")
-    w("            for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"            for (int i = 0; i < {exit_n}; i++) begin")
     w("                last_progress[i]   <= 0;")
     w("                axi_outstanding[i] <= 0;")
     w("            end")
     w("        end else begin")
     w("            live_cyc <= live_cyc + 1;")
-    w("            for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"            for (int i = 0; i < {exit_n}; i++) begin")
     w("                automatic logic aw = master_axi_req[i].awvalid && master_axi_rsp[i].awready;")
     w("                automatic logic ar = master_axi_req[i].arvalid && master_axi_rsp[i].arready;")
     w("                automatic logic wb = master_axi_req[i].wvalid  && master_axi_rsp[i].wready;")
@@ -939,13 +942,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('        void\'($value$plusargs("num_reads=%d",  tb_num_reads));')
     w('        void\'($value$plusargs("num_writes=%d", tb_num_writes));')
     w("        timeout_cycles = TIMEOUT_BASE")
-    w("            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * NUM_NODES;")
+    w(f"            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * {exit_n};")
     w("        // Forensics override: fire the watchdog just past a known freeze")
     w("        // point so the state dump lands without waiting out the formula.")
     w('        void\'($value$plusargs("timeout_cycles=%d", timeout_cycles));')
     w("        repeat (timeout_cycles) @(posedge clk_i);")
     w("        // Per-node SV-side summary, then the c_model fabric state dump.")
-    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"        for (int i = 0; i < {exit_n}; i++) begin")
     w('            $display("[WATCHDOG] node%0d txn_cnt=%0d end_of_sim=%0d outstanding=%0d last_progress=%0d (idle %0d cyc) mst[awv=%0d wv=%0d arv=%0d rr=%0d br=%0d] slv[awv=%0d wv=%0d arv=%0d rv=%0d bv=%0d]",')
     w("                     i, txn_cnt[i], end_of_sim[i],")
     w("                     axi_outstanding[i], last_progress[i], live_cyc - last_progress[i],")
@@ -1175,7 +1178,6 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // -------------------------------------------------------------------------")
     w("    // Exit logic - non-vacuous PASS guard")
     w("    // -------------------------------------------------------------------------")
-    exit_n = "NUM_ENDPOINTS" if peripherals else "NUM_NODES"
     w("    localparam int unsigned SETTLE_CYCLES = 100;")
     w("    initial begin")
     w("        bit vacuous;")
@@ -1201,7 +1203,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('        if (vacuous) $fatal(1, "tb_top: vacuous run");')
     w("        // Sizing statistics per node: RoB slot peak, the SPEC 17 admission")
     w("        // clause split, the per-id order-list peak and the shared-pool peaks.")
-    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"        for (int i = 0; i < {exit_n}; i++) begin")
     w("            cmodel_nmu_admission_stats(nmu_ctx[i], aw_idle, aw_same, aw_alloc,")
     w("                                           ar_idle, ar_same, ar_alloc,")
     w("                                           list_hwm, wtxn_hwm, rtxn_hwm);")

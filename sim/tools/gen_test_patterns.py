@@ -865,21 +865,26 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
 
 
 def peripheral_partner(periph_cid, nodes):
-    """The tile a peripheral exchanges traffic with: the nearest one on its own row.
+    """The tile a peripheral exchanges traffic with: the FARTHEST legal one.
 
-    A peripheral sits outside the tile region on x, and XY routing reaches such
-    a coordinate by running out of x hops -- which happens on the SOURCE's row.
-    From another row the flit leaves the region one row early and lands in
-    whichever peripheral borders that row, so the NMU refuses it
-    (nmu::addr_trans::check_dst_reachable). Both directions therefore pair the
-    peripheral with a tile on its own row.
+    Farthest, not nearest: the nearest tile is the router the peripheral hangs
+    off, so the pair would never take an inter-router hop and multi-hop
+    addressability would go untested.
+
+    Legal follows the same axis rule the NMU enforces
+    (nmu::addr_trans::check_dst_reachable). A peripheral outside the tile region
+    on X is reached by running out of x hops, which happens on the SOURCE's row,
+    so only its own row may address it. One outside on Y is reached after x has
+    already resolved onto the destination's column, so any column may.
     """
     px, py = coord_xy(periph_cid)
-    same_row = [t for t in nodes if coord_xy(t[3])[1] == py]
-    if not same_row:
-        sys.exit(f"ERROR: peripheral at ({px},{py}) has no tile on its own row to address; "
-                 f"XY routing cannot reach it from any other row")
-    return min(same_row, key=lambda t: abs(coord_xy(t[3])[0] - px))
+    xs = [coord_xy(t[3])[0] for t in nodes]
+    off_x = px < min(xs) or px > max(xs)
+    legal = [t for t in nodes if not off_x or coord_xy(t[3])[1] == py]
+    if not legal:
+        sys.exit(f"ERROR: peripheral at ({px},{py}) sits outside the tile region on x and has no "
+                 f"tile on its own row; XY routing cannot reach it from any other row")
+    return max(legal, key=lambda t: abs(coord_xy(t[3])[0] - px) + abs(coord_xy(t[3])[1] - py))
 
 
 def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_local, region_bytes,
@@ -922,7 +927,9 @@ def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_loc
                                       axi_size, axi_len, data_width)
             write_lines += w
             read_lines += r
-        extras[partner[0]] = (write_lines, read_lines)
+        # merge, not assign: two peripherals can share a partner tile, and an
+        # overwrite would drop one peripheral's traffic while the run still passed.
+        extras[partner[0]] = merge_extra(extras.get(partner[0]), (write_lines, read_lines))
     return extras
 
 

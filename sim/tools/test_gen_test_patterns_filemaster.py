@@ -753,3 +753,20 @@ def test_bit_permutation_guard_rejects_a_non_power_of_two_mesh():
 def test_tornado_guard_rejects_a_non_uniform_radix():
     with pytest.raises(SystemExit, match="uniform radix"):
         g._check_tornado_guard(4, 2)
+
+
+def test_peripheral_slots_do_not_land_on_a_multicast_anchor(tmp_path):
+    """Every address the run writes has exactly one writer.
+
+    The multicast window opens at base_local + region_bytes, and both that and
+    every alloc_unique_offset band count ENDPOINTS. Counted in router nodes, a
+    peripheral's slot walks past the window into the collective anchors -- on
+    mesh_2x2_vc1_periph 0x1100 is both endpoint 4's slot and node0's anchor.
+    Nothing else holds the two apart: reverting the band fails this test.
+    """
+    out = tmp_path / "mc"
+    g.main(["--pattern", "multicast", "--topology", "mesh_2x2_vc1_periph",
+            "--out", str(out), "--transactions-per-node", "2"])
+    addrs = [t["addr"] for node in sorted(out.iterdir())
+             for t in _parse_write(node / "write.txt")]
+    assert len(addrs) == len(set(addrs))
