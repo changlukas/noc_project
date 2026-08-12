@@ -28,7 +28,7 @@ up to 256 lookups, not 256 x O(entries).
 
 | Untested | Why it is not reachable today |
 |---|---|
-| Over-delivery of a collective replica to a non-member node | neither scoreboard can see it: both compare only bytes the SOURCE reads -- `mcast_mem` walks the source's own readback set and the pulp scoreboard sits on `master_dv` -- so a replica landing where nothing reads is silent. The direct evidence is the peripheral link's flit count in `perf.json` and the armed tie-off `$fatal` on the unpopulated boundary ports, not the checkers (`sim/tools/gen_tb_top.py`, `sim/tools/gen_test_patterns.py`) |
+| Over-delivery of a collective replica to a non-member node | neither scoreboard can see it: both compare only bytes the SOURCE reads -- `mcast_mem` walks the source's own readback set and the pulp scoreboard sits on `master_dv` -- so a replica landing where nothing reads is silent. The direct evidence is the peripheral link's flit count in `perf.json` and the armed tie-off `$fatal` on the unpopulated boundary ports, not the checkers (`sim/tb/user_node_endpoint.sv`, `sim/tools/gen_tb_top.py`) |
 | Multi-hot to multi-hot fork completion across a link, and fork/join at `output_fifo_depth > 0` | no stimulus generates either shape |
 | The held-join wait-for edge | probabilistic co-sim coverage only, never targeted |
 | Narrow-class collectives under a deliberate fault | no narrow-class red run exists |
