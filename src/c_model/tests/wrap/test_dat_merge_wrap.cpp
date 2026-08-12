@@ -76,7 +76,7 @@ TEST(DatMergeWrap, EgressPreservesNmuAwWAtomicityUnderNsuContention) {
     in.nmu_tx_dat_valid = true;
     in.nmu_tx_dat_flit = flit_to_bytes(make_data_aw(0x05, /*vc=*/0));
     in.nsu_tx_dat_valid = true;
-    in.nsu_tx_dat_flit = flit_to_bytes(make_data_r(0x09, /*vc=*/0));
+    in.nsu_tx_dat_flit = flit_to_bytes(make_data_r(0x01, /*vc=*/0));
     m.set_inputs(in);
     m.tick();  // both pushed; the arbiter may already grant one this tick
     observe();
@@ -208,7 +208,7 @@ TEST(DatMergeWrap, RealNmuSteeringKeepsAwWContiguousUnderNsuContention) {
         // model). Racing at t=0 is the worst case for the arbiter's lock: NSU's
         // R and NMU's AW both arrive before either is granted.
         merge_in.nsu_tx_dat_valid = (t == 0);
-        if (t == 0) merge_in.nsu_tx_dat_flit = flit_to_bytes(make_data_r(0x09, /*vc=*/0));
+        if (t == 0) merge_in.nsu_tx_dat_flit = flit_to_bytes(make_data_r(0x01, /*vc=*/0));
 
         nmu.set_inputs(nmu_in);
         nmu.tick();

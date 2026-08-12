@@ -193,10 +193,10 @@ TEST(NmuVcAllocatorRoundRobin, DistinctReadIdsSpreadAcrossVcs) {
     SCENARIO("NMU VcAllocator: distinct unbound arids round-robin over every VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/4);
-    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x10));
-    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x11));
-    uint8_t vc_c = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x12));
-    uint8_t vc_d = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x13));
+    uint8_t vc_a = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x00));
+    uint8_t vc_b = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x01));
+    uint8_t vc_c = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x02));
+    uint8_t vc_d = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x03));
     EXPECT_EQ(vc_a, 0u);
     EXPECT_EQ(vc_b, 1u);
     EXPECT_EQ(vc_c, 2u);
@@ -210,10 +210,10 @@ TEST(NmuVcAllocatorRoundRobin, SameWriteIdDifferentDestRoundRobins) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/4);
     uint8_t a =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04));
     ASSERT_EQ(push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)), a);
     uint8_t b =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/1, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/1, 0, 0, /*id=*/0x04));
     EXPECT_EQ(a, 0u);
     EXPECT_EQ(b, 1u) << "different dst_id -- no fixed VC yet, round-robin advances";
 }
@@ -225,9 +225,9 @@ TEST(NmuVcAllocatorRoundRobin, RobbedFlitsRoundRobinRegardlessOfDest) {
     SCENARIO("NMU VcAllocator: ordering_req=1 flits round-robin even with same (dst,id)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/4);
-    Flit f1 = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    Flit f1 = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04);
     f1.set_header_field("ordering_req", 1);
-    Flit f2 = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    Flit f2 = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04);
     f2.set_header_field("ordering_req", 1);
     uint8_t a = push_and_vc(arb, noc, f1);
     ASSERT_EQ(push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1)), a);
@@ -243,9 +243,9 @@ TEST(NmuVcAllocatorRoundRobin, NumVc1SameIdSameDestUnaffected) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/1);
     uint8_t a =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/0, 0, 0, /*id=*/0x04));
     uint8_t b =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/1, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAr, /*dst_id=*/1, 0, 0, /*id=*/0x04));
     EXPECT_EQ(a, 0u);
     EXPECT_EQ(b, 0u);
 }
@@ -260,9 +260,9 @@ TEST(NmuVcAllocator, WFollowsAW_ReusedFixedVc) {
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.req_out(), /*num_vc=*/4);
 
-    // AW1 (dst=0, id=0x20): first sighting -> round-robin picks VC 0.
+    // AW1 (dst=0, id=0x04): first sighting -> round-robin picks VC 0.
     uint8_t aw1_vc =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04));
     EXPECT_EQ(aw1_vc, 0u);
     uint8_t w1_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
     EXPECT_EQ(w1_vc, 0u);
@@ -270,7 +270,7 @@ TEST(NmuVcAllocator, WFollowsAW_ReusedFixedVc) {
 
     // AW2 same (dst,id): fixed VC hit -> reuses VC 0 (round-robin would pick VC 1).
     uint8_t aw2_vc =
-        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20));
+        push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04));
     EXPECT_EQ(aw2_vc, 0u) << "fixed VC hit must reuse VC0, not round-robin to VC1";
     uint8_t w2_vc = push_and_vc(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
     EXPECT_EQ(w2_vc, 0u) << "W must follow AW2's reused VC";
@@ -292,7 +292,7 @@ TEST_P(NmuVcAllocatorParam, FixedVcStampedOnOrderedAwStreak) {
     for (int i = 0; i < 2; ++i) {  // i=0 records the (dst,VC) pair, i=1 reuses it
         Flit aw = push_and_pop(arb, noc,
                                make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0,
-                                         /*id=*/0x20));
+                                         /*id=*/0x04));
         EXPECT_EQ(aw.get_header_field("fixed_vc"), 1u) << "AW #" << i << " of an ordered streak";
         Flit w = push_and_pop(arb, noc, make_flit(ni::AXI_CH_NarrowW, 0, 0, /*wlast=*/1));
         EXPECT_EQ(w.get_header_field("fixed_vc"), 1u) << "W must carry its AW's fixed_vc";
@@ -311,7 +311,7 @@ TEST_P(NmuVcAllocatorParam, FixedVcClearOnRobbedAwAndAr) {
     VcAllocator arb(noc.req_out(), num_vc);
 
     // Inputs arrive with fixed_vc=1 so a pass-through (no stamp) would show up here.
-    Flit aw_in = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x20);
+    Flit aw_in = make_flit(ni::AXI_CH_NarrowAw, /*dst_id=*/0, 0, 0, /*id=*/0x04);
     aw_in.set_header_field("ordering_req", 1);
     aw_in.set_header_field("fixed_vc", 1);
     EXPECT_EQ(push_and_pop(arb, noc, aw_in).get_header_field("fixed_vc"), 0u);
@@ -319,7 +319,7 @@ TEST_P(NmuVcAllocatorParam, FixedVcClearOnRobbedAwAndAr) {
     w_in.set_header_field("fixed_vc", 1);
     EXPECT_EQ(push_and_pop(arb, noc, w_in).get_header_field("fixed_vc"), 0u)
         << "W must carry its AW's fixed_vc, not its own";
-    Flit ar_in = make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x20);
+    Flit ar_in = make_flit(ni::AXI_CH_NarrowAr, 0, 0, 0, /*id=*/0x04);
     ar_in.set_header_field("fixed_vc", 1);
     EXPECT_EQ(push_and_pop(arb, noc, ar_in).get_header_field("fixed_vc"), 0u);
 }

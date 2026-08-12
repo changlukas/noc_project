@@ -17,7 +17,7 @@
       "COLLECTIVE_OP_WIDTH": 2,
       "COLLECTIVE_MASK_WIDTH": 8,
       "AXI_ADDR_WIDTH": 48,
-      "AXI_ID_WIDTH": 8,
+      "AXI_ID_WIDTH": 3,
       "NOC_DATA_WIDTH": 512,
       "NOC_NARROW_DATA_WIDTH": 64,
       "AXI_USER_WIDTH": 8,
@@ -97,7 +97,7 @@
     "payload_channels": [
       {
         "name": "AW",
-        "payload_width": 93,
+        "payload_width": 88,
         "fields": [
           {
             "name": "awid",
@@ -147,7 +147,7 @@
       },
       {
         "name": "AR",
-        "payload_width": 93,
+        "payload_width": 88,
         "fields": [
           {
             "name": "arid",
@@ -241,7 +241,7 @@
       },
       {
         "name": "B",
-        "payload_width": 18,
+        "payload_width": 13,
         "fields": [
           {
             "name": "bid",
@@ -259,7 +259,7 @@
       },
       {
         "name": "NARROW_R",
-        "payload_width": 83,
+        "payload_width": 78,
         "fields": [
           {
             "name": "rlast",
@@ -285,7 +285,7 @@
       },
       {
         "name": "DATA_R",
-        "payload_width": 531,
+        "payload_width": 526,
         "fields": [
           {
             "name": "rlast",

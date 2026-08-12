@@ -94,17 +94,17 @@ def test_header_field_not_found(packet_spec):
 
 # -- payload_field_width / position (incl. "derived") ---------------
 def test_payload_field_width_basic(packet_spec):
-    assert C.payload_field_width(packet_spec, "AW", "awid") == 8
+    assert C.payload_field_width(packet_spec, "AW", "awid") == 3
 
 
 def test_payload_field_position(packet_spec):
-    assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 7)
+    assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 2)
 
 
 # -- payload field positions (added with codegen extension) -----------
 def test_payload_field_position_aw(packet_spec):
-    assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 7)
-    assert C.payload_field_position(packet_spec, "AW", "awaddr") == (8, 55)
+    assert C.payload_field_position(packet_spec, "AW", "awid") == (0, 2)
+    assert C.payload_field_position(packet_spec, "AW", "awaddr") == (3, 50)
 
 
 def test_payload_field_position_narrow_w_with_reorder(packet_spec):
@@ -117,9 +117,9 @@ def test_payload_field_position_narrow_w_with_reorder(packet_spec):
 
 
 def test_payload_field_position_b(packet_spec):
-    assert C.payload_field_position(packet_spec, "B", "bid")   == (0, 7)
-    assert C.payload_field_position(packet_spec, "B", "bresp") == (8, 9)
-    assert C.payload_field_position(packet_spec, "B", "buser") == (10, 17)
+    assert C.payload_field_position(packet_spec, "B", "bid")   == (0, 2)
+    assert C.payload_field_position(packet_spec, "B", "bresp") == (3, 4)
+    assert C.payload_field_position(packet_spec, "B", "buser") == (5, 12)
 
 
 # -- derived totals -------------------------------------------------

@@ -66,8 +66,8 @@ class Depacketize : public RequestDepacketizer {
         // the unique-id count is set by OutIdWidth, floo_meta_buffer.sv:129). FlooNoC
         // provides no arbitrary-N remap (nothing in the chimney instantiates
         // axi_id_remap), so an intermediate value is intentionally unsupported, not a
-        // modelling gap: with InIdWidth==OutIdWidth==8 it would silently degenerate to
-        // the identity (full 256) remap.
+        // modelling gap: with InIdWidth==OutIdWidth it would silently degenerate to
+        // the identity (full AXI_ID_SPACE) remap.
         if (max_unique_ids != 1 && max_unique_ids != axi::AXI_ID_SPACE) {
             throw std::invalid_argument(
                 "max_unique_ids must be 1 (collapse) or AXI_ID_SPACE (passthrough); "

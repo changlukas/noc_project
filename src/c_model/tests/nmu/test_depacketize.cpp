@@ -36,11 +36,11 @@ TEST(NmuDepacketize, PopRDecodesDataRFromDataRChannel) {
         "its rid from the DATA_R payload channel, not NARROW_R");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), /*b*/ 16, /*r*/ 16);
-    ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(0x09, /*rlast*/ true, ni::AXI_CH_DataR)));
+    ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(0x01, /*rlast*/ true, ni::AXI_CH_DataR)));
     depkt.tick();
     auto r = depkt.pop_r();
     ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(r->id, 0x09);
+    EXPECT_EQ(r->id, 0x01);
     EXPECT_TRUE(r->last);
 }
 
@@ -149,7 +149,7 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", 1);
     f.set_header_field("ordering_tag", 5);
-    f.set_payload_field("B", "bid", 0x42);
+    f.set_payload_field("B", "bid", 0x02);
     f.set_payload_field("B", "bresp", 0);
     f.set_payload_field("B", "buser", 0);
 
@@ -159,7 +159,7 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
     auto opt = depkt.pop_b_with_meta();
     ASSERT_TRUE(opt.has_value());
     auto [b, meta] = *opt;
-    EXPECT_EQ(b.id, 0x42u);
+    EXPECT_EQ(b.id, 0x02u);
     EXPECT_EQ(meta.ordering_tag, 5u);
     EXPECT_EQ(meta.ordering_req, 1u);
 }
@@ -181,7 +181,7 @@ TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
         f.set_header_field("flit_tail", 1);
         f.set_header_field("ordering_req", 1);
         f.set_header_field("ordering_tag", 5 + i);
-        f.set_payload_field("NARROW_R", "rid", 0x42);
+        f.set_payload_field("NARROW_R", "rid", 0x02);
         f.set_payload_field("NARROW_R", "rresp", 0);
         f.set_payload_field("NARROW_R", "ruser", 0);
         f.set_payload_field("NARROW_R", "rlast", (i == 3) ? 1u : 0u);

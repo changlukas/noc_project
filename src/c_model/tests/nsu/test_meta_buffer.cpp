@@ -63,28 +63,31 @@ TEST(MetaBuffer, ReadPeekCommitMultiBeat) {
 TEST(MetaBuffer, PeekEmptyReturnsNullopt) {
     SCENARIO("MetaBuffer: peek_write/peek_read on unknown id returns nullopt (no spurious entry)");
     MetaBuffer mb(4);
-    EXPECT_FALSE(mb.peek_write(0xAA).has_value());
-    EXPECT_FALSE(mb.peek_read(0xBB).has_value());
+    EXPECT_FALSE(mb.peek_write(0x06).has_value());
+    EXPECT_FALSE(mb.peek_read(0x07).has_value());
 }
 
 using ni::cmodel::nsu::remap_downstream_id;
 
-TEST(RemapDownstreamId, CollapsesToAllOnesOfTheInitiatorShare) {
-    SCENARIO("remap_downstream_id: max_unique_ids=1 maps every upstream id to all-ones of "
-             "AXI_INITIATOR_ID_WIDTH, the width the NSU drives -- not of the NI-facing "
-             "AXI_ID_WIDTH, which has to keep room for a tile interconnect's master-port index");
-    constexpr uint8_t collapsed = (1u << ni::AXI_INITIATOR_ID_WIDTH) - 1u;
-    EXPECT_LT(collapsed, 1u << ni::AXI_ID_WIDTH);
+TEST(RemapDownstreamId, CollapsesToAllOnesOfTheDrivenIdWidth) {
+    SCENARIO(
+        "remap_downstream_id: max_unique_ids=1 maps every upstream id to all-ones of "
+        "AXI_ID_WIDTH, the width the NSU drives -- matching floo_meta_buffer's '1 of "
+        "its OUTPUT id width. The value must be addressable on the port it drives.");
+    constexpr uint8_t collapsed = (1u << ni::AXI_ID_WIDTH) - 1u;
+    EXPECT_EQ(collapsed, (1u << ni::AXI_ID_WIDTH) - 1u) << "all-ones of the driven width";
+    EXPECT_LT(collapsed, ni::cmodel::axi::AXI_ID_SPACE) << "must fit the port it is driven onto";
     EXPECT_EQ(remap_downstream_id(0x00, 1), collapsed);
     EXPECT_EQ(remap_downstream_id(0x05, 1), collapsed);
-    EXPECT_EQ(remap_downstream_id(0xFF, 1), collapsed);
+    EXPECT_EQ(remap_downstream_id(collapsed, 1), collapsed);
 }
 
 TEST(RemapDownstreamId, IdentityWhenFullIdSpace) {
     SCENARIO("remap_downstream_id: max_unique_ids=AXI_ID_SPACE passes the id through");
+    constexpr uint8_t kMaxId = ni::cmodel::axi::AXI_ID_SPACE - 1u;
     EXPECT_EQ(remap_downstream_id(0x00, ni::cmodel::axi::AXI_ID_SPACE), 0x00);
     EXPECT_EQ(remap_downstream_id(0x05, ni::cmodel::axi::AXI_ID_SPACE), 0x05);
-    EXPECT_EQ(remap_downstream_id(0xFF, ni::cmodel::axi::AXI_ID_SPACE), 0xFF);
+    EXPECT_EQ(remap_downstream_id(kMaxId, ni::cmodel::axi::AXI_ID_SPACE), kMaxId);
 }
 
 TEST(MetaBuffer, SharedPoolFullReportsInsteadOfAborting) {

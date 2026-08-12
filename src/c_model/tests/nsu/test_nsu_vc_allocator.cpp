@@ -121,8 +121,8 @@ TEST(NsuVcAllocator, SameBidRoundRobins) {
     SCENARIO("NSU VcAllocator: same-bid B responses round-robin the VC set");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
-    uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12));
-    uint8_t b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40, 1, 0x12));
+    uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x04, 1, 0x12));
+    uint8_t b = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x04, 1, 0x12));
     EXPECT_EQ(a, 0u);
     EXPECT_EQ(b, 1u) << "B is order-free; round-robins";
 }
@@ -177,7 +177,7 @@ TEST_P(NsuVcAllocatorParam, FixedVcStampedOnRNotB) {
     VcAllocator arb(noc.rsp_out(), num_vc);
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, /*id=*/0x05, /*rlast=*/0)));
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, /*id=*/0x05, /*rlast=*/1)));
-    Flit b_in = make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x40);
+    Flit b_in = make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x04);
     b_in.set_header_field("fixed_vc", 1);  // a pass-through (no stamp) would show up here
     ASSERT_TRUE(arb.push_flit(b_in));
 

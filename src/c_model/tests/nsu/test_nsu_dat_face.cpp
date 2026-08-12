@@ -41,7 +41,7 @@ NsuConfig make_cfg(uint8_t src_id) {
     cfg.port_params.b_queue_depth = 16;
     cfg.port_params.r_queue_depth = 16;
     cfg.port_params.meta_buffer_max_outstanding = 32;
-    cfg.port_params.meta_buffer_max_unique_ids = 256;
+    cfg.port_params.meta_buffer_max_unique_ids = axi::AXI_ID_SPACE;
     return cfg;
 }
 
@@ -113,7 +113,7 @@ TEST(NsuDatFace, EgressPushPopViaMock) {
         "with axi_ch/rid intact.");
 
     NsuStandalone nsu(make_cfg(kNsuSrcId));
-    ASSERT_TRUE(nsu.nsu().dat_vc_allocator().push_flit(make_data_r_flit(0x09)));
+    ASSERT_TRUE(nsu.nsu().dat_vc_allocator().push_flit(make_data_r_flit(0x01)));
 
     std::optional<Flit> out;
     for (int t = 0; t < 8 && !out; ++t) {
@@ -122,7 +122,7 @@ TEST(NsuDatFace, EgressPushPopViaMock) {
     }
     ASSERT_TRUE(out.has_value()) << "DAT egress never produced the R flit";
     EXPECT_EQ(out->get_header_field("axi_ch"), static_cast<uint64_t>(ni::AXI_CH_DataR));
-    EXPECT_EQ(out->get_payload_field("DATA_R", "rid"), 0x09u);
+    EXPECT_EQ(out->get_payload_field("DATA_R", "rid"), 0x01u);
 }
 
 // Per-network face independence: block RSP's credit (seed=0) and confirm a
@@ -224,7 +224,7 @@ TEST(NsuDatFace, ReqArAndDatAwWDrainIndependently) {
 
     NsuStandalone nsu(make_cfg(kNsuSrcId));
     nsu.inject_req_flit(make_narrow_ar(0x07, 0x300));
-    nsu.inject_dat_req_flit(make_data_aw(0x08, 0x400));
+    nsu.inject_dat_req_flit(make_data_aw(0x06, 0x400));
     nsu.inject_dat_req_flit(make_data_w());
 
     std::optional<axi::ArBeat> ar_out;

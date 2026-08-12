@@ -164,104 +164,20 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
     EXPECT_EQ(b_out->resp, axi::Resp::OKAY);
 }
 
-// === Shared outstanding pool, at the assembled-pipeline level ===
+// === Transaction retire point, at the assembled-pipeline level ===
 //
-// The release point is only observable here. Rob-level tests see the pool
-// released at pop_b(); inside Nmu the response still has to cross s2_rsp_b_,
-// the optional extra shift stages and the slave-port output queue before the
-// master sees it (nmu.hpp:388,335,321). Releasing at the Rob exit instead of
-// at AXI-side acceptance would let the NI admit one extra transaction per
-// intervening stage while completed responses are still in flight.
+// The release point is only observable here. Rob-level tests see the id released
+// at pop_r(); inside Nmu the response still has to cross s2_rsp_r_, the optional
+// extra shift stages and the slave-port output queue before the master sees it
+// (nmu.hpp:388,335,321). Releasing at the Rob exit instead of at AXI-side
+// acceptance would let the NI admit the next same-id read while the completed
+// response is still in flight.
 
-namespace {
-
-// One-beat write into the assembled NMU, all on the same id and destination so
-// every push takes the bypass arm and the pool is the only limiter.
-void push_write(NmuStandalone& nmu, uint8_t id, uint64_t addr) {
-    axi::AwBeat aw{};
-    aw.id = id;
-    aw.addr = addr;
-    aw.len = 0;
-    aw.size = 2;
-    aw.burst = axi::Burst::INCR;
-    ASSERT_TRUE(nmu.axi_slave_port().push_aw(aw));
-    axi::WBeat w{};
-    w.strb = 0xF;
-    w.last = true;
-    ASSERT_TRUE(nmu.axi_slave_port().push_w(w));
-}
-
-Flit bypassed_b_flit(uint8_t id, uint8_t src_id) {
-    Flit f;
-    f.set_header_field("axi_ch", ni::AXI_CH_DataB);
-    f.set_header_field("src_id", 0x00);
-    f.set_header_field("dst_id", src_id);
-    f.set_header_field("vc_id", 0);
-    f.set_header_field("flit_tail", 1);
-    f.set_header_field("ordering_req", 0);
-    f.set_header_field("ordering_tag", 0);
-    f.set_payload_field("B", "bid", id);
-    f.set_payload_field("B", "bresp", static_cast<uint64_t>(axi::Resp::OKAY));
-    f.set_payload_field("B", "buser", 0);
-    return f;
-}
-
-}  // namespace
-
-TEST(NmuOutstandingPool, PoolEntryIsHeldUntilTheAxiSideAcceptsTheResponse) {
+TEST(NmuOutstandingCount, RoblessReadRetiresAtTheAxiSideAndReopensTheId) {
     SCENARIO(
-        "Nmu: with the master never accepting B, the NI issues exactly "
-        "outstanding_depth + b_queue_depth writes and then wedges. Every stage between "
-        "the Rob and the slave-port queue that released the pool early would show up as "
-        "an extra transaction on the NoC face.");
-
-    constexpr uint8_t kSrcId = 0x12;
-    constexpr uint8_t kAxiId = 0x05;
-    constexpr uint64_t kAddr = 0x100;  // one destination, so every push is bypassed
-    constexpr std::size_t kPool = 2;
-    constexpr std::size_t kBQueue = 1;
-
-    NmuConfig cfg{};
-    cfg.src_id = kSrcId;
-    cfg.sam = legacy_sam();
-    cfg.outstanding_depth = kPool;
-    cfg.port_params.aw_queue_depth = 16;
-    cfg.port_params.w_queue_depth = 16;
-    cfg.port_params.ar_queue_depth = 16;
-    cfg.port_params.b_queue_depth = kBQueue;
-    cfg.port_params.r_queue_depth = 16;
-    cfg.port_params.depkt_b_q_depth = 16;
-    cfg.port_params.depkt_r_q_depth = 16;
-    NmuStandalone nmu(cfg);
-
-    // Offer writes continuously and answer every AW that reaches the NoC face, but never
-    // pop B at the AXI side. Each answered transaction can retire only when its B is
-    // accepted into b_q_ (depth kBQueue); after that the pool stays full for good.
-    std::size_t aw_flits = 0;
-    for (int cycle = 0; cycle < 200; ++cycle) {
-        // Both channel queues must have room: W beats behind a refused AW never drain,
-        // so gating on AW alone would overrun w_q_.
-        if (nmu.axi_slave_port().can_accept_aw() && nmu.axi_slave_port().can_accept_w()) {
-            push_write(nmu, kAxiId, kAddr);
-        }
-        nmu.tick();
-        while (auto f = nmu.pop_dat_req_flit()) {
-            if (f->get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
-                ++aw_flits;
-                nmu.inject_rsp_flit(bypassed_b_flit(kAxiId, kSrcId));
-            }
-        }
-    }
-
-    EXPECT_EQ(aw_flits, kPool + kBQueue)
-        << "transactions issued past the pool: " << aw_flits << ", budget " << kPool << " plus the "
-        << kBQueue << " response(s) the AXI output queue accepted";
-}
-
-TEST(NmuOutstandingPool, RoblessReadRetiresAtTheAxiSideAndReopensThePool) {
-    SCENARIO(
-        "Nmu RoBless reads: the pool entry survives the pop out of the Rob and is released "
-        "when the R beat is accepted at the AXI side, after which the next AR is admitted.");
+        "Nmu RoBless reads: the per-id single-outstanding interlock survives the pop out of "
+        "the Rob and is released when the R beat is accepted at the AXI side, after which "
+        "the next AR on that id is admitted.");
 
     constexpr uint8_t kSrcId = 0x12;
     constexpr uint8_t kAxiId = 0x07;
@@ -271,7 +187,6 @@ TEST(NmuOutstandingPool, RoblessReadRetiresAtTheAxiSideAndReopensThePool) {
     cfg.src_id = kSrcId;
     cfg.sam = legacy_sam();
     cfg.read_rob_mode = ni::cmodel::nmu::RobMode::Disabled;
-    cfg.outstanding_depth = 1;  // one read in flight, so the retire is what unblocks the next
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;
     cfg.port_params.ar_queue_depth = 16;
@@ -321,9 +236,9 @@ TEST(NmuOutstandingPool, RoblessReadRetiresAtTheAxiSideAndReopensThePool) {
         r_out = nmu.axi_slave_port().pop_r();
     }
     ASSERT_TRUE(r_out.has_value()) << "RoBless R never reached the AXI side";
-    EXPECT_EQ(nmu.rob().read_txns(), 0u) << "the pool entry retires with the AXI-side acceptance";
+    EXPECT_EQ(nmu.rob().read_txns(), 0u) << "the transaction retires with the AXI-side acceptance";
 
-    // The pool of 1 is free again, so the next read is admitted.
+    // The id's interlock is clear again, so the next read on it is admitted.
     ASSERT_TRUE(nmu.axi_slave_port().push_ar(ar));
     bool saw_second_ar = false;
     for (int i = 0; i < 32 && !saw_second_ar; ++i) {
@@ -332,5 +247,5 @@ TEST(NmuOutstandingPool, RoblessReadRetiresAtTheAxiSideAndReopensThePool) {
             if (f->get_header_field("axi_ch") == ni::AXI_CH_DataAr) saw_second_ar = true;
         }
     }
-    EXPECT_TRUE(saw_second_ar) << "the retired entry never reopened the pool";
+    EXPECT_TRUE(saw_second_ar) << "the retired transaction never reopened the id";
 }

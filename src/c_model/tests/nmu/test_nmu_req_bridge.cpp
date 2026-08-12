@@ -94,13 +94,13 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
     EXPECT_EQ(wh.pending_size(0), kAwInputDepth) << "AW input full";
 
     // A further AW is stuck in the bridge slot (wormhole AW input full).
-    ASSERT_TRUE(bridge.push_aw_with_meta(make_aw(99), meta()));
+    ASSERT_TRUE(bridge.push_aw_with_meta(make_aw(5), meta()));
     step();
     EXPECT_EQ(bridge.occupancy(ni::AXI_CH_NarrowAw), 1u) << "5th AW stuck in bridge";
 
     // The locked write's W and an independent AR are now offered.
     ASSERT_TRUE(bridge.push_w(make_w(/*last=*/true)));
-    ASSERT_TRUE(bridge.push_ar_with_meta(make_ar(9), meta()));
+    ASSERT_TRUE(bridge.push_ar_with_meta(make_ar(6), meta()));
     for (int i = 0; i < 6; ++i) step();
 
     bool got_w = false;

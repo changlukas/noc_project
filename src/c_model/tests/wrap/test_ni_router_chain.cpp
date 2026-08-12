@@ -647,7 +647,7 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
     constexpr uint64_t kMemAddr = 0x100000 + 0x100;  // node 1's memory tile
     // Config bases follow the four memory tiles: (0,0) at 0x400000, node 1 next.
     constexpr uint64_t kCfgAddr = 0x401000;  // node 1's config tile base
-    constexpr uint8_t kWriteId = 3, kOrderId = 9;
+    constexpr uint8_t kWriteId = 3, kOrderId = 5;
     std::array<uint8_t, 64> wdata_mem{}, wdata_cfg{};
     for (int b = 0; b < 64; ++b) wdata_mem[b] = static_cast<uint8_t>(0xA0 + b);
     wdata_cfg.fill(0);

@@ -166,7 +166,7 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, legacy_sam());
     // Address is the low 40 bits of the original 0x123456789ABCDEF0 ascending
     // pattern: the legacy SAM covers addr < 2^40 (256 tiles x 4GB).
-    auto aw = make_aw(/*id*/ 0xAB, /*addr*/ 0x789ABCDEF0ull, /*len*/ 0xFF);
+    auto aw = make_aw(/*id*/ 0x03, /*addr*/ 0x789ABCDEF0ull, /*len*/ 0xFF);
     aw.size = 5;
     aw.burst = axi::Burst::WRAP;
     aw.cache = 0xF;
@@ -177,7 +177,7 @@ TEST(NmuPacketize, AwPayloadBitPerfect) {
     aw.qos = 0xF;
     ASSERT_TRUE(pkt.push_aw(aw));
     auto f = *aw_cap.pop();
-    EXPECT_EQ(f.get_payload_field("AW", "awid"), 0xABu);
+    EXPECT_EQ(f.get_payload_field("AW", "awid"), 0x03u);
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x789ABCDEF0ull);  // forwarded unchanged
     EXPECT_EQ(f.get_payload_field("AW", "awlen"), 0xFFu);
     EXPECT_EQ(f.get_payload_field("AW", "awsize"), 5u);
@@ -285,7 +285,7 @@ TEST(NmuPacketize, NarrowWUnalignedAddrExtractsCorrectLane) {
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId,
                   addr_trans::SamTable{});  // sam_ unused by *_with_meta
 
-    axi::AwBeat b = make_aw(/*id=*/0x09, /*addr=*/0);  // addr unused: meta.local_addr supplies it
+    axi::AwBeat b = make_aw(/*id=*/0x01, /*addr=*/0);  // addr unused: meta.local_addr supplies it
     b.size = 2;                                        // 4 B/beat -- legal narrow (<=3)
     constexpr uint64_t kUnalignedAddr = 0x1B;          // 27, not a multiple of 4 (the beat size)
     ni::cmodel::nmu::AwHeaderMeta meta{/*dst_id=*/0x03, kUnalignedAddr, /*ordering_req=*/0,
@@ -371,7 +371,7 @@ TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
     axi::AwBeat b = make_aw(/*id=*/0x05, /*addr=*/0x100000100);
     ASSERT_TRUE(pkt.push_aw(b));  // direct-path interface auto-computes
     auto f = *aw_cap.pop();
-    EXPECT_EQ(f.get_header_field("dst_id"), 0x01u);            // from SamTable::translate
+    EXPECT_EQ(f.get_header_field("dst_id"), 0x01u);                  // from SamTable::translate
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x100000100ull);  // forwarded unchanged
 }
 

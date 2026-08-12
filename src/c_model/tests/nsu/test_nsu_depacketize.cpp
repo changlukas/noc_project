@@ -60,7 +60,7 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
         "beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000,
                                                      /*src*/ 0x12, /*ordering_req*/ 1,
                                                      /*ordering_tag*/ 3)));
@@ -84,7 +84,7 @@ TEST(NsuDepacketize, DataAwFlitAcceptedAndRecordsDataClass) {
         "eventual B response is stamped in the same class");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000, /*src*/ 0x12,
                                                      /*ordering_req*/ 0, /*ordering_tag*/ 0,
                                                      ni::AXI_CH_DataAw)));
@@ -103,7 +103,7 @@ TEST(NsuDepacketize, DataWFlitDecodesFromDataWChannel) {
         "DATA_W payload channel, not NARROW_W");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     // The W stream follows the AW stream (AXI Channel Assignment), so a beat is
     // only poppable once its AW has been admitted. One single-beat DataAw ahead
     // of it is the smallest setup that satisfies that; the decode under test is
@@ -124,7 +124,7 @@ TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
         "(verifies awqos is not forced to 0)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     auto flit = make_aw_flit(0x05, 0x1000, /*src*/ 0x12, /*ordering_req*/ 0, /*ordering_tag*/ 0);
     flit.set_payload_field("AW", "awqos", 0xA);
     ASSERT_TRUE(noc.req_out().push_flit(flit));
@@ -140,7 +140,7 @@ TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
         "(verifies arqos is not forced to 0)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     auto flit = make_ar_flit(0x07, 0x2000, /*src*/ 0x12);
     flit.set_payload_field("AR", "arqos", 0xA);
     ASSERT_TRUE(noc.req_out().push_flit(flit));
@@ -154,7 +154,7 @@ TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
     SCENARIO("NSU Depacketize: AR flit allocates read-side meta into MetaBuffer + emits AR beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x07, 0x2000, 0x12)));
     depkt.tick();
     EXPECT_TRUE(depkt.pop_ar().has_value());
@@ -168,9 +168,9 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
         "AW)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     // The AW ahead of it only satisfies the W-follows-AW order; it allocates
-    // under its own id (0x05, identity remap at max_unique_ids 256), so key 0
+    // under its own id (0x05, identity remap at max_unique_ids AXI_ID_SPACE), so key 0
     // stays the untouched-by-W witness this test is about.
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x1000, 0x10, 0, 0, ni::AXI_CH_DataAw)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFFFF, true, ni::AXI_CH_DataW)));
@@ -191,7 +191,7 @@ TEST(NsuDepacketize, NarrowWAfterDataWReadsOwnAwNotStaleFifoEntry) {
         "else's address basis)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
 
     // 1. Data-class AW+W, fully drained through pop_aw/pop_w (real usage).
     ASSERT_TRUE(
@@ -230,7 +230,7 @@ TEST(NsuDepacketize, NarrowWUnalignedAddrInsertsAtCorrectLane) {
         "design doc's lane re-anchor table");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
 
     constexpr uint64_t kUnalignedAddr = 0x1B;      // 27, not a multiple of 4 (the beat size)
     auto aw = make_aw_flit(0x02, kUnalignedAddr);  // axi_ch defaults to AXI_CH_NarrowAw
@@ -261,7 +261,7 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
         "NSU Depacketize: interleaved AW/W/AR flits demux to per-channel queues by axi_ch header");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x01, 0x0)));
     ASSERT_TRUE(noc.req_out().push_flit(make_w_flit(0xFF, true)));
     ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x02, 0x1000)));
@@ -277,7 +277,7 @@ TEST(NsuDepacketize, PendingHolBlockingS1WFullBlocksAwBehind) {
         "drained");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     // Order: AW(2 beats), W, W, AW -- data class throughout. The leading AW owns
     // both W beats, which is what makes them poppable at all now; the mechanic
     // under test is unchanged, the second W still stalls in the ingress stash
@@ -311,7 +311,7 @@ TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
         "(one per tick per staged S1 contract)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(1, 0x0)));
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(2, 0x0)));
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(3, 0x0)));
@@ -365,7 +365,8 @@ TEST(NsuDepacketize, RebasesAReplicaAddressOntoThisNode) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     // src_id 0x21 = (y=2 << X_WIDTH) | x=1.
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256, ni::cmodel::router::null_req_in(),
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
+                      ni::cmodel::router::null_req_in(),
                       /*src_id*/ 0x21, coords_for_narrow());
     // Anchor address names node (0,0); the offset inside the tile is 0x3c0.
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x0003c0)));
@@ -380,7 +381,8 @@ TEST(NsuDepacketize, RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode) {
     SCENARIO("NSU Depacketize: an address already naming this node survives the rebase unchanged");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256, ni::cmodel::router::null_req_in(),
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
+                      ni::cmodel::router::null_req_in(),
                       /*src_id*/ 0x21, coords_for_narrow());
     ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x07, 0x9003c0)));
     depkt.tick();
@@ -393,7 +395,8 @@ TEST(NsuDepacketize, UndeclaredCoordsLeaveTheAddressAlone) {
     SCENARIO("NSU Depacketize: with no coordinate field declared the address is forwarded as-is");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ 256, ni::cmodel::router::null_req_in(),
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
+                      ni::cmodel::router::null_req_in(),
                       /*src_id*/ 0x21);
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x0003c0)));
     depkt.tick();

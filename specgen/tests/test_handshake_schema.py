@@ -19,7 +19,7 @@ SOURCE_DIR = Path(__file__).resolve().parent.parent / "source"
 def test_load_constants_returns_expected_shape():
     c = load_constants(SOURCE_DIR / "constants.yaml")
     assert c["schema_version"] == "1.0"
-    assert c["axi"]["ID_WIDTH"]["default"] == 8
+    assert c["axi"]["ID_WIDTH"]["default"] == 3
     assert c["axi"]["DATA_WIDTH"]["allowed"] == [32, 64, 128, 256, 512, 1024]
     assert c["noc"]["DAT_FLIT_WIDTH"]["sv_symbol"] == "NOC_DAT_FLIT_WIDTH_DFLT"
     assert c["derived"]["WSTRB_WIDTH"]["expression"] == "DATA_WIDTH / 8"

@@ -32,10 +32,13 @@ enum class RobMode { Disabled, Enabled };
 // Enabled mode: per-beat slot pool + ordering_tag allocator (implemented; the
 //   asserts in the pop paths are integrity guards, not stubs).
 //
-// Both modes: two shared outstanding-transaction pools of outstanding_depth_ each,
-// one for AW and one for AR, shared across all AXI ids. Pushed on an accepted
-// request, released at AXI-side response acceptance (retire_b / retire_r). This is
-// the only aggregate limiter on bypassed traffic, which allocates no RoB slot.
+// Both modes: no aggregate outstanding-transaction pool. The per-id order list
+// is the admission bound, so in-flight requests cap at max_txns_per_id_ x
+// 2**AXI_ID_WIDTH = 32 x 8 = 256 writes, and at 1 x 8 = 8 reads in
+// RobMode::Disabled where the per-id single-outstanding interlock applies.
+// write_txns_ / read_txns_ still count the in-flight transactions per direction,
+// but only as the unmatched-response guard (retire_b / retire_r) and as the
+// high-water measurement.
 //
 // Single-threaded tick model: state mutations from RequestPacketizer-side (push_aw/ar)
 // and ResponseDepacketizer-side (pop_b/r) happen in the same thread, no synchronization.
@@ -55,16 +58,14 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_r,
         addr_trans::SamTable sam, std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
         std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
-        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID,
-        std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH)
+        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
           mode_r_(mode_r),
           sam_(std::move(sam)),
           b_rob_depth_(b_rob_depth),
           r_rob_depth_(r_rob_depth),
-          max_txns_per_id_(max_txns_per_id),
-          outstanding_depth_(outstanding_depth) {
+          max_txns_per_id_(max_txns_per_id) {
         assert(b_rob_depth_ >= 1 && b_rob_depth_ <= ORDERING_TAG_SPACE &&
                "nmu::Rob: b_rob_depth outside [1, ORDERING_TAG_SPACE]");
         assert(r_rob_depth_ >= 1 && r_rob_depth_ <= ORDERING_TAG_SPACE &&
@@ -73,8 +74,6 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
         if (r_rob_depth_ < 1 || r_rob_depth_ > ORDERING_TAG_SPACE) std::abort();
         assert(max_txns_per_id_ >= 1 && "nmu::Rob: max_txns_per_id must be positive");
         if (max_txns_per_id_ < 1) std::abort();
-        assert(outstanding_depth_ >= 1 && "nmu::Rob: outstanding_depth must be positive");
-        if (outstanding_depth_ < 1) std::abort();
     }
 
     // ===== RequestPacketizer interface =====
@@ -105,8 +104,8 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
 
     // Transaction retirement, at the AXI-side response acceptance point and nowhere
     // else (floo_meta_buffer.sv:205-206,210 pops on the AXI response handshake). One
-    // event releases the shared outstanding-pool entry, the RoB slot when the response
-    // owns one, and -- Disabled mode only -- the per-id single-outstanding flag.
+    // event decrements the in-flight count, releases the RoB slot when the response
+    // owns one, and -- Disabled mode only -- clears the per-id single-outstanding flag.
     // Callers: Nmu::push_rsp_{b,r}_to_axi_ integrated; Rob::pop_{b,r} standalone, where
     // AxiSlavePort pops only into a slot it already has room for.
     // R retires on its last beat: a burst is one transaction, n RoB slots.
@@ -121,14 +120,13 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // Pool depths are b_rob_depth_ / r_rob_depth_ and may be smaller.
     static constexpr std::size_t ORDERING_TAG_SPACE = 1u << ni::header::ORDERING_TAG_WIDTH;  // 256
     // AXI ID space alias — single source of truth lives in axi::AXI_ID_SPACE.
-    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 256
+    static constexpr std::size_t AXI_ID_SPACE = axi::AXI_ID_SPACE;  // 8
 
     std::size_t b_rob_depth() const noexcept { return b_rob_depth_; }
     std::size_t r_rob_depth() const noexcept { return r_rob_depth_; }
     std::size_t max_txns_per_id() const noexcept { return max_txns_per_id_; }
-    std::size_t outstanding_depth() const noexcept { return outstanding_depth_; }
 
-    // Shared outstanding-pool occupancy, per direction. Test introspection.
+    // In-flight transaction count, per direction. Test introspection.
     std::size_t write_txns() const noexcept { return write_txns_; }
     std::size_t read_txns() const noexcept { return read_txns_; }
 
@@ -173,8 +171,9 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     // number max_txns_per_id_ bounds. Measurement-only; no behaviour effect.
     std::size_t order_list_hwm() const noexcept { return order_list_hwm_; }
 
-    // Peak occupancy of each shared outstanding pool -- what outstanding_depth_
-    // bounds. Measurement-only; no behaviour effect.
+    // Peak in-flight transaction count per direction. Nothing bounds it directly;
+    // it is bounded transitively by max_txns_per_id_ x AXI_ID_SPACE.
+    // Measurement-only; no behaviour effect.
     std::size_t write_txns_hwm() const noexcept { return write_txns_hwm_; }
     std::size_t read_txns_hwm() const noexcept { return read_txns_hwm_; }
 
@@ -193,12 +192,11 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t r_rob_depth_;
     std::size_t max_txns_per_id_;
 
-    // Shared outstanding-transaction pools, one per direction, shared across all AXI
-    // ids -- FlooNoC's MaxTxns (floo_meta_buffer.sv:148,173, the id_queue branch:
-    // shared CAPACITY, per-id order). Only the capacity is ported, not the storage:
-    // responses are self-describing (b.id / r.id return in the flit), so a counter
-    // plus the per-id order lists below carries what id_queue carries.
-    std::size_t outstanding_depth_;
+    // In-flight transaction count, one per direction, summed over all AXI ids.
+    // Incremented on an accepted request, decremented at response retire. Admits
+    // nothing and refuses nothing: the per-id order list is the admission bound.
+    // What these are for is the retire-side unmatched-response check and the
+    // high-water marks below.
     std::size_t write_txns_ = 0;
     std::size_t read_txns_ = 0;
 
@@ -375,11 +373,8 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         return false;
     }
 
-    // Shared AW pool, all ids (floo_meta_buffer.sv:157 inp_gnt_o). Bypassed pushes
-    // allocate no RoB slot, so this is their only aggregate limiter. A collective
-    // allocates here like any AW and releases at merged-B retire (design §2.3a).
-    if (write_txns_ >= outstanding_depth_) return false;
     // ax_gnt_o: the per-id order list is FlooNoC's status FIFO (floo_rob.sv:414).
+    // Bypassed pushes allocate no RoB slot, so this list is their only limiter.
     if (write_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
     auto t = sam_.translate(b.addr);
     const uint8_t dst = t.dst_id;
@@ -456,8 +451,6 @@ inline bool Rob::push_w(const axi::WBeat& b) {
 }
 
 inline bool Rob::push_ar(const axi::ArBeat& b) {
-    // Shared AR pool, all ids, both modes. A burst is one entry regardless of length.
-    if (read_txns_ >= outstanding_depth_) return false;
     if (mode_r_ == RobMode::Enabled) {
         if (read_order_by_id_[b.id].size() >= max_txns_per_id_) return false;
         const std::size_t n = static_cast<std::size_t>(b.len) + 1u;
@@ -557,7 +550,7 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     read_outstanding_[b.id] = true;
     ++read_txns_;
     // Disabled reads run the single-outstanding interlock instead of the three
-    // admission branches, so there is no clause to count here -- only the pool.
+    // admission branches, so there is no clause to count here.
     read_txns_hwm_ = std::max(read_txns_hwm_, read_txns_);
     return true;
 }

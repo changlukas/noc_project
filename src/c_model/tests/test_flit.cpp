@@ -41,11 +41,11 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
 TEST(Flit, SetGetPayloadAwFields) {
     SCENARIO("Flit: AW payload fields (awid/awaddr/awlen/awsize) set/get bit-perfect");
     Flit f;
-    f.set_payload_field("AW", "awid", 0x55);
+    f.set_payload_field("AW", "awid", 0x05);
     f.set_payload_field("AW", "awaddr", 0xBEEFCAFEBABEull);  // 48 b, max representable
     f.set_payload_field("AW", "awlen", 0xFF);
     f.set_payload_field("AW", "awsize", 0x5);
-    EXPECT_EQ(f.get_payload_field("AW", "awid"), 0x55u);
+    EXPECT_EQ(f.get_payload_field("AW", "awid"), 0x05u);
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xBEEFCAFEBABEull);
     EXPECT_EQ(f.get_payload_field("AW", "awlen"), 0xFFu);
     EXPECT_EQ(f.get_payload_field("AW", "awsize"), 0x5u);
@@ -106,10 +106,10 @@ TEST(FlitDispatch, EnabledHeaderFieldsStillResolve) {
 TEST(Flit, SetGetPayloadBFields) {
     SCENARIO("Flit: B payload fields (bid/bresp/buser) set/get bit-perfect");
     Flit f;
-    f.set_payload_field("B", "bid", 0x42);
+    f.set_payload_field("B", "bid", 0x02);
     f.set_payload_field("B", "bresp", 0x2);  // SLVERR
     f.set_payload_field("B", "buser", 0x55);
-    EXPECT_EQ(f.get_payload_field("B", "bid"), 0x42u);
+    EXPECT_EQ(f.get_payload_field("B", "bid"), 0x02u);
     EXPECT_EQ(f.get_payload_field("B", "bresp"), 0x2u);
     EXPECT_EQ(f.get_payload_field("B", "buser"), 0x55u);
 }
@@ -117,10 +117,10 @@ TEST(Flit, SetGetPayloadBFields) {
 TEST(Flit, SetGetPayloadRFields) {
     SCENARIO("Flit: R payload fields (rid/rresp/rlast) set/get bit-perfect");
     Flit f;
-    f.set_payload_field("NARROW_R", "rid", 0x37);
+    f.set_payload_field("NARROW_R", "rid", 0x07);
     f.set_payload_field("NARROW_R", "rresp", 0x3);  // DECERR
     f.set_payload_field("NARROW_R", "rlast", 0x1);
-    EXPECT_EQ(f.get_payload_field("NARROW_R", "rid"), 0x37u);
+    EXPECT_EQ(f.get_payload_field("NARROW_R", "rid"), 0x07u);
     EXPECT_EQ(f.get_payload_field("NARROW_R", "rresp"), 0x3u);
     EXPECT_EQ(f.get_payload_field("NARROW_R", "rlast"), 0x1u);
 }

@@ -22,8 +22,8 @@ constexpr int NOC_DATA_WIDTH_BITS = DATA_BYTES * 8;
 // the NMU Rob and NSU MetaBuffer. Locked to the codegen'd AXI_ID_WIDTH so any
 // future widening of the ID field is caught at static_assert below.
 constexpr std::size_t AXI_ID_SPACE = 1u << ni::width::AXI_ID_WIDTH;
-static_assert(AXI_ID_SPACE == 256,
-              "AXI_ID_SPACE locked to 256 (AXI_ID_WIDTH=8); update per-id "
+static_assert(AXI_ID_SPACE == 8,
+              "AXI_ID_SPACE locked to 8 (AXI_ID_WIDTH=3); update per-id "
               "container sizes if AXI_ID_WIDTH changes");
 
 static_assert(DATA_BYTES * 8 == ni::width::NOC_DATA_WIDTH,

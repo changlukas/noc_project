@@ -158,9 +158,6 @@ struct NmuConfig {
     std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;
     // Per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). Enabled mode only.
     std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID;
-    // Shared outstanding-transaction pool depth, per direction (FlooNoC MaxTxns).
-    // AW and AR pools are independent; each is shared across all AXI ids. Both modes.
-    std::size_t outstanding_depth = ni::NMU_OUTSTANDING_DEPTH;
     nmu::PortParams port_params{};
     std::size_t num_vc = 1;
     // DAT face VC count (S3a T4; AW/W only -- no AR rides DAT). REQ/RSP got
@@ -332,7 +329,7 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
                  cfg_.sam),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.read_rob_mode, cfg_.sam, cfg_.b_rob_depth,
-           cfg_.r_rob_depth, cfg_.max_txns_per_id, cfg_.outstanding_depth),
+           cfg_.r_rob_depth, cfg_.max_txns_per_id),
       axi_slave_port_(rob_, rob_, cfg_.port_params),
       s2_rsp_b_(),
       s2_rsp_r_(),
