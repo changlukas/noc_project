@@ -280,15 +280,22 @@ Three things follow from that one change, and they are the whole of what was sti
 | field offset | `x_range.offset = log2(slot_size)`, stated rather than read off a difference |
 | per-entry bound | every entry, tile or peripheral, satisfies `base == base(x, y)` and `size <= slot_size` |
 
-The per-entry bound is a new validator and it is needed: `addr_trans.hpp:145` only catches an
-overlap with another entry, so a peripheral on a high edge could overrun its slot into unused
-padding without colliding with anything, and its coordinate bits would then name a slot it does not
-own. The bound makes that a load-time error instead.
+The per-entry bound is a new validator and it is needed twice over. `addr_trans.hpp:145` only
+catches an overlap with another entry, so a peripheral on a high edge could overrun its slot into
+unused padding without colliding with anything, and its coordinate bits would then name a slot it
+does not own. And the existing aperture guard at `addr_trans.hpp:196` tests only the origin.
+
+That guard is subsumed rather than kept alongside: with `x_range.offset` defined as
+`log2(slot_size)`, the lowest coordinate bit it compares against IS `slot_size`, so
+`size <= slot_size` is the same condition applied to every entry instead of one.
 
 **A peripheral sharing the tile space fits within one coordinate slot.** Its base is fixed at its
-coordinate, so a window larger than the slot runs into the next one and `addr_trans.hpp:149`
-rejects it as an overlapping range. Smaller or equal is fine; larger is not. The check is loud, so
-this is a bound to know rather than a trap.
+coordinate, so a window larger than the slot reaches into the next slot's addresses and its
+coordinate bits stop naming the slot it owns. Smaller or equal is fine; larger is not.
+
+That bound is enforced by the per-entry rule below, not by the overlap check. `addr_trans.hpp:149`
+catches an oversized entry only when something else already occupies the range it runs into, which
+is not the case on a high edge where the next slot is unused padding.
 
 **Per-declaration base stays out of this round, but it is what a real peripheral will need.** It
 existed to stop peripherals widening the tiles' node-index field, which the route-span field makes
