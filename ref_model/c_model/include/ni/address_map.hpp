@@ -49,8 +49,10 @@ struct SpaceCoords {
     unsigned x_count = 0;
     unsigned y_count = 0;
     // Inclusive tile-region bounds inside the route span. Peripherals occupy
-    // coordinates outside them. Default 0 with x_count/y_count as the span
-    // reduces every rule below to a plain mesh.
+    // coordinates outside them. The default 0/0/0/0 is NOT "a plain mesh" --
+    // x_last = 0 is a one-column region. A caller states all four fields; a
+    // plain mesh is x_first = y_first = 0, x_last = x_count - 1,
+    // y_last = y_count - 1.
     unsigned x_first = 0;
     unsigned x_last = 0;
     unsigned y_first = 0;

@@ -471,10 +471,11 @@ TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
     SCENARIO(
         "NMU collective §2.2 check 4, the case only a non-power-of-two dimension can reach: a "
         "3-wide row needs a 2 bit X range, so mask_x = 0x2 sits inside the range yet the raw "
-        "wildcard set anchored at x = 1 is {1, 3} and node 3 does not exist -- it is padding above "
-        "the dimension, the same as an out-of-tile-region peripheral coordinate. off-mesh "
-        "peripherals design 'side effect': this used to abort (anchor_x | mask_x >= x_count); it "
-        "now clips to the tile region like any other out-of-region coordinate, giving {1}");
+        "wildcard set anchored at x = 1 is {1, 3} and node 3 does not exist. Clamping x_last down "
+        "to 2 does NOT make this a legal clip: 2 was never a member of {1, 3} (only bit 1 is a "
+        "don't-care, and 2 differs from anchor 1 in bit 0), so a terminal router's fork set there "
+        "would be empty. Rejected, unlike the design's worked example mask 0b11 = {0,1,2,3}, which "
+        "clips to a full, member-only range {1,2}");
     auto sam = addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}},
                                             /*x_span=*/3, /*y_span=*/1);
     ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 3, 1));
@@ -484,14 +485,10 @@ TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
     auto f = t.aw_cap.pop();
     ASSERT_TRUE(f.has_value());
     EXPECT_EQ(f->get_header_field("collective_mask"), 0x02u);
-    // Anchored at x = 1 the raw set {1, 3} clips to {1}: node 3 falls outside
-    // the tile region (x_last = 2) and is dropped, same as route_mask_fork
-    // would drop it at the router. The mask field itself is unchanged --
-    // clipping happens identically wherever the set is recomputed.
-    ASSERT_TRUE(t.rob.push_aw(make_aw(0x06, kTile, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))));
-    auto f2 = t.aw_cap.pop();
-    ASSERT_TRUE(f2.has_value());
-    EXPECT_EQ(f2->get_header_field("collective_mask"), 0x02u);
+    // Anchored at x = 1 the raw set is {1, 3}; clip_max_x clamps to 2, which is
+    // not a member of {1, 3} -- rejected rather than silently forwarded as {1}.
+    EXPECT_DEATH(t.rob.push_aw(make_aw(0x06, kTile, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))),
+                 "member of the wildcard set");
 }
 
 TEST(NmuCollectiveDeath, NodeSetIsNotAnAlignedWildcard) {

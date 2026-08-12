@@ -378,6 +378,24 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
                "after clipping to the tile region");
         std::abort();
     }
+    // Clamping a bound is not the same as clipping the set: the range
+    // [clip_min, clip_max] can include a coordinate the wildcard never named
+    // (e.g. anchor_x=1, mask_x=0x2 names {1, 3}; clamping x_last=2 down from 3
+    // gives clip_max_x=2, which is not a member). A terminal router's fork set
+    // would then be empty at that coordinate and abort (route_mask.hpp uses
+    // coord_matched, not a range test), so this must reject here instead.
+    // Checking only the two clipped bounds is sufficient: any non-member
+    // strictly between them still has a member neighbour to forward from/to,
+    // so only an endpoint that got clamped away from the raw min/max can ever
+    // be a non-member.
+    if (((clip_min_x ^ anchor_x) & ~mask_x) || ((clip_max_x ^ anchor_x) & ~mask_x) ||
+        ((clip_min_y ^ anchor_y) & ~mask_y) || ((clip_max_y ^ anchor_y) & ~mask_y)) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: a clipped tile-region bound is not a "
+               "member of the wildcard set -- the source and a terminal router would disagree "
+               "on the collective member set");
+        std::abort();
+    }
 
     // Stays per-request: AWADDR/AWLEN/AWSIZE/AWBURST are not space properties.
     // The uniform region size the declaration checked is what lets the anchor's
