@@ -594,11 +594,16 @@ def test_address_map_pack_rejects_missing_tiles_key():
         address_map.pack(None, x_span=1, y_span=1)
 
 
-def test_address_map_pack_real_topologies_gap_free():
-    """Cross-check: every real sim/topologies/*.yaml packs cleanly and the
-    resulting bases are gap-free contiguous (base(0)=0, base(i)=base(i-1)+size(i-1)).
-    Proves the Python loader accepts the migrated real YAMLs (see also the C++
-    SamYaml.RealTopologies test loading the same files)."""
+def test_address_map_pack_real_topologies_at_the_coordinate_formula():
+    """Cross-check: every real sim/topologies/*.yaml packs at
+    base = space_base + ((y << clog2(x_span)) | x) * slot, spelled out here from
+    the YAML keys rather than read back from pack(). This is the Python half of
+    the packing agreement; the C++ half is
+    SamYaml.RealTopologiesPackedAtTheCoordinateFormula, asserting the same
+    formula against SamTable::packed(). List-order accumulation (base += size)
+    agrees with the formula only where the span is a power of two and every
+    entry in a space is one slot, which is true of every topology shipped today
+    and not of a span with a border coordinate."""
     import yaml
 
     topo_dir = os.path.join(os.path.dirname(__file__), "..", "topologies")
@@ -608,13 +613,22 @@ def test_address_map_pack_real_topologies_gap_free():
     # would need editing on every add or remove.
     assert paths, f"expected the real topology YAMLs in {topo_dir}"
     for path in paths:
-        topo = yaml.safe_load(open(path))["topology"]
-        _bases, entries = address_map.pack(
-            yaml.safe_load(open(path))["address_map"], topo["x_dim"], topo["y_dim"])
-        expected_base = 0
+        doc = yaml.safe_load(open(path))
+        # Same span resolution the testbench generator uses.
+        x_span, y_span = gen_tb_top._route_span(doc["topology"])[:2]
+        tiles = doc["address_map"]["tiles"]
+        _bases, entries = address_map.pack(doc["address_map"], x_span, y_span)
+        x_bits = (x_span - 1).bit_length()
+        # Slot per space: the largest size declared in it. Config sits above
+        # every base memory could take.
+        slot = {sp: max((int(t["size"]) for t in tiles if t.get("space", "memory") == sp),
+                        default=0)
+                for sp in ("memory", "config")}
+        space_base = {"memory": 0, "config": (1 << x_bits) * y_span * slot["memory"]}
         for e in entries:
-            assert e["base"] == expected_base, f"{path}: gap at dst_id {e['dst_id']:#x}"
-            expected_base += e["size"]
+            expected = space_base[e["space"]] + (((e["y"] << x_bits) | e["x"]) * slot[e["space"]])
+            assert e["base"] == expected, \
+                f"{path}: {e['space']} tile ({e['x']},{e['y']}) base {e['base']:#x} != {expected:#x}"
 
 
 def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):

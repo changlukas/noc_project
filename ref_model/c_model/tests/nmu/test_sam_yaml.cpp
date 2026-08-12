@@ -94,8 +94,12 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
 //
 // The claim is the packing formula, base = space_base + ((y << clog2(x_span))
 // | x) * slot, spelled out here from the YAML keys instead of read back from
-// SamTable::packed(). That is the bit-identity with sim/tools/address_map.py
-// that the model and the stimulus generator both depend on. List-order
+// SamTable::packed(). This is one half of the bit-identity with
+// sim/tools/address_map.py that the model and the stimulus generator both
+// depend on: this test holds SamTable::packed() to the formula, and the Python
+// twin (test_address_map_pack_real_topologies_at_the_coordinate_formula in
+// sim/tools/test_gen_test_patterns_filemaster.py) holds pack() to it over the
+// same files. Both passing is what makes the two sides identical. List-order
 // accumulation (base += size) agrees with the formula only where the span is a
 // power of two and every entry in a space is one slot, which is true of every
 // topology shipped today and not of a span with a border coordinate.
