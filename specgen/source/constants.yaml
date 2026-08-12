@@ -15,9 +15,11 @@ axi:
     # (sim/tb/user_node_endpoint.sv, i_noc_id_remap), not a share of a wider
     # tile id: the remap compresses the tile-side id space into this one, so
     # INITIATOR_ID_WIDTH sits UPSTREAM of the converter and carries no budget
-    # relationship to this field. What bounds this width instead is the id
-    # space the NI's own per-ID structures must address:
-    # ID_WIDTH >= $clog2(nsu.META_BUFFER_MAX_UNIQUE_IDS max, 8) == 3.
+    # relationship to this field. Nothing bounds this width from below: it is
+    # what SETS how many distinct AXI ids the NI can hold in flight at once,
+    # and the things downstream take their bound FROM it. Both
+    # nsu.META_BUFFER_MAX_UNIQUE_IDS and the endpoint remap's
+    # AxiSlvPortMaxUniqIds cap at 2^ID_WIDTH.
     # NOTE: spec range is 1..32 per AXI4 IHI 0022 §A2.2.1; the c_model derives
     # its per-ID container sizes from this value (AXI_ID_SPACE static_assert in
     # c_model/include/axi/types.hpp), so widening costs 2^ID_WIDTH entries per

@@ -204,8 +204,10 @@ void cmodel_nmu_admission_telemetry(unsigned long long ctx, unsigned int* aw_idl
 // (REQ/RSP are fixed single-VC, S1 Q2). tx_dat_crdvalid / rx_dat_crdvalid
 // are per-VC: ONE svBitVecVal word, bit vc = credit pulse on VC vc.
 // max_unique_ids: 1 collapses every master onto the all-ones downstream AXI id
-// (FlooNoC's ChimneyDefaultCfg); 256 passes the master's id through. No other
-// value is legal, and the Depacketize constructor asserts it.
+// (FlooNoC's ChimneyDefaultCfg); 2**AXI_ID_WIDTH passes the master's id
+// through. No other value is legal, and the Depacketize constructor throws on
+// one. Pass the width symbolically (ni_params_pkg::AXI_ID_WIDTH_DFLT on the SV
+// side) -- a literal goes stale the next time the id width moves.
 // max_outstanding: shared MetaBuffer pool size per direction (FlooNoC MaxTxns).
 // config_path: the topology YAML. The NSU reads one thing out of it -- where
 // each space keeps its node coordinates -- so it can rewrite an arriving

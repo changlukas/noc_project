@@ -18,6 +18,17 @@ constexpr uint64_t kFullStrbMask = (DATA_BYTES >= 64) ? ~0ull : ((1ull << DATA_B
 // (set_payload_bytes / get_payload_bytes for wdata / rdata).
 constexpr int NOC_DATA_WIDTH_BITS = DATA_BYTES * 8;
 
+// The id width has two independent spec sources kept consistent by hand:
+// ni::AXI_ID_WIDTH from constants.yaml (the NI port width) and
+// ni::width::AXI_ID_WIDTH from ni_packet.json (the flit field width). Values
+// cross between them -- nsu::remap_downstream_id builds its collapsed id from
+// the port width and the NSU then writes it into the flit field -- so a
+// divergence is a runtime abort at flit.hpp's field-width assert, not a
+// compile error. Bind them here instead.
+static_assert(ni::AXI_ID_WIDTH == ni::width::AXI_ID_WIDTH,
+              "constants.yaml axi.ID_WIDTH and ni_packet.json flit.field_widths.AXI_ID_WIDTH "
+              "must agree; regenerate both after changing either");
+
 // AXI ID space (1 << AXI_ID_WIDTH). Used to size per-id container arrays in
 // the NMU Rob and NSU MetaBuffer. Locked to the codegen'd AXI_ID_WIDTH so any
 // future widening of the ID field is caught at static_assert below.
