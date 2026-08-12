@@ -662,7 +662,7 @@ def collective_addr_mask(bases, member_cids, anchor_cid, tile_bases=None):
 
     Both of collective_translate's rejections are mirrored: the clipped set
     must be non-empty, and each clipped BOUND must itself be a wildcard member
-    (addr_trans.hpp:381-398).  Clamping a range is not the same as clipping a
+    (`collective_translate`).  Clamping a range is not the same as clipping a
     set -- anchor x=1 with mask_x=0b10 names {1,3}, and clamping to a tile
     region ending at 2 gives a bound of 2, which is not a member.  A terminal
     router there would fork to nothing and abort, so a generator that can emit
@@ -699,7 +699,12 @@ def collective_addr_mask(bases, member_cids, anchor_cid, tile_bases=None):
             f"the tiles: named {sorted(hex(bases[m]) for m in member_cids)}, "
             f"the fabric would deliver {sorted(hex(b) for b in delivered)}")
 
-    # Clipped-bound membership, per coordinate, mirroring addr_trans.hpp:371-398.
+    # Clipped-bound membership, per coordinate, mirroring
+    # nmu::addr_trans::collective_translate.  Hand-kept twins of this
+    # arithmetic: that function, and route_mask_fork / route_mask_join in
+    # ref_model/c_model/include/router/route_mask.hpp (two copies of their own,
+    # because a stateless join hangs on a one-node disagreement).  Not shared:
+    # they are C++ and this is the generator.  Change one, change all four.
     # collective_translate shifts mask_x / mask_y out of the space's declared
     # ranges; this function sees no ranges, so it reads the same two numbers off
     # the coordinate ids instead. They ARE the same numbers: the masked address

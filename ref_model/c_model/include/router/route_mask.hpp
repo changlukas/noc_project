@@ -102,6 +102,14 @@ inline PortMask route_mask_fork(uint8_t dst_id, uint8_t src_id, uint8_t collecti
     // coordinate or a coordinate that does not exist; both are clipped here, in
     // the same way on the fork and the join, so every router computes the same
     // member set (spec, "Collectives are clipped to the tile region").
+    //
+    // Hand-kept twins of this arithmetic: route_mask_join below,
+    // nmu::addr_trans::collective_translate (the source-side refusal), and
+    // collective_addr_mask in sim/tools/gen_test_patterns.py (the generator).
+    // Not shared: the join is stateless, so the two router copies must agree
+    // node by node or a collect hangs, and the other two sit the far side of
+    // the nmu/router layer boundary and of the C++/Python one. Change one,
+    // change all four.
     dst_min.x = std::max<uint8_t>(dst_min.x, cfg.tile_x_first);
     dst_min.y = std::max<uint8_t>(dst_min.y, cfg.tile_y_first);
     dst_max.x = std::min<uint8_t>(dst_max.x, cfg.tile_x_last);
@@ -159,6 +167,11 @@ inline PortMask route_mask_join(uint8_t dst_id, uint8_t src_id, uint8_t collecti
     // coordinate or a coordinate that does not exist; both are clipped here, in
     // the same way on the fork and the join, so every router computes the same
     // member set (spec, "Collectives are clipped to the tile region").
+    //
+    // Hand-kept twins: route_mask_fork above (the copy this one must agree with
+    // node by node, since a stateless join hangs on a one-node disagreement),
+    // nmu::addr_trans::collective_translate, and collective_addr_mask in
+    // sim/tools/gen_test_patterns.py. Change one, change all four.
     src_min.x = std::max<uint8_t>(src_min.x, cfg.tile_x_first);
     src_min.y = std::max<uint8_t>(src_min.y, cfg.tile_y_first);
     src_max.x = std::min<uint8_t>(src_max.x, cfg.tile_x_last);

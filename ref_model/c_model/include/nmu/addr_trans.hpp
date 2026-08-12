@@ -386,6 +386,13 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     // Clip to the tile region exactly as route_mask.hpp does, so the source and
     // every router agree on the member set. A set that is empty after clipping
     // names no tile at all and is a stimulus error.
+    //
+    // Hand-kept twins of this arithmetic: route_mask_fork and route_mask_join
+    // (router/route_mask.hpp, deliberately two copies because a stateless join
+    // hangs on a one-node disagreement) and collective_addr_mask in
+    // sim/tools/gen_test_patterns.py. Not shared: the router pair sits the far
+    // side of the nmu/router layer boundary and the generator's is Python.
+    // Change one, change all four.
     const unsigned clip_min_x = std::max(anchor_x & ~mask_x, coords->x_first);
     const unsigned clip_max_x = std::min(anchor_x | mask_x, coords->x_last);
     const unsigned clip_min_y = std::max(anchor_y & ~mask_y, coords->y_first);
