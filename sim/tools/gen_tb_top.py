@@ -510,28 +510,40 @@ def emit_fabric(topo: dict) -> str:
         # boundary port is a live link, and its flit count is the only direct
         # evidence that the collective clip kept a mask block off a peripheral:
         # without it a quiet peripheral and a delivered one look alike.
-        w(f"    // Link perf monitor on node{r}'s {d} port, named "
-          f"{{net}}_{r}to{ep} after the endpoint index.")
+        w(f"    // Link perf monitors on node{r}'s {d} port, one per directed edge as")
+        w(f"    // every inter-router link carries, named {{net}}_{r}to{ep} and {{net}}_{ep}to{r}")
+        w(f"    // after the endpoint index. The router-to-peripheral edge answers 'did the")
+        w(f"    // fabric send at the peripheral' (the collective clip); the")
+        w(f"    // peripheral-to-router edge answers 'did the peripheral put a flit on the")
+        w(f"    // wire' -- without it a silent peripheral and a working one look alike.")
         for net, _width_sym, flow in _NETWORKS:
-            flit_wire = f"tx_{net}_flit[{r}][RP_{d}]"
-            vc_slice = f"{flit_wire}[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]"
-            w(f"    link_perf_monitor #(")
-            w(f'        .LINK_NAME("{net}_{r}to{ep}"),')
-            w(f'        .FLOW("{flow}"),')
-            w(f"        .BUFFER_DEPTH(ROUTER_VC_DEPTH),")
-            w(f"        .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)")
-            w(f"    ) u_perf_periph{pi}_{net} (")
-            w(f"        .clk_i, .rst_ni,")
-            w(f"        .valid(tx_{net}_valid[{r}][RP_{d}]),")
-            if flow == "ready_valid":
-                w(f"        .ready(tx_{net}_ready[{r}][RP_{d}]),")
-                w(f"        .vc_id('0),")
-                w(f"        .credit_pulse('0)")
-            else:
-                w(f"        .ready(1'b0),")
-                w(f"        .vc_id({vc_slice}),")
-                w(f"        .credit_pulse(tx_{net}_crdvalid[{r}][RP_{d}])")
-            w(f"    );")
+            ret = "ready" if flow == "ready_valid" else "crdvalid"
+            for src, dst, suffix, valid, flit in (
+                    (r, ep, "", f"tx_{net}_valid[{r}][RP_{d}]", f"tx_{net}_flit[{r}][RP_{d}]"),
+                    (ep, r, "_out", f"periph{pi}_tx_{net}_valid", f"periph{pi}_tx_{net}_flit")):
+                # The return wire is the OTHER end's: a monitor watches flits
+                # leaving one end and the ready/credit coming back from the one
+                # they arrive at.
+                back = (f"tx_{net}_{ret}[{r}][RP_{d}]" if suffix == ""
+                        else f"rx_{net}_{ret}[{r}][RP_{d}]")
+                vc_slice = f"{flit}[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]"
+                w(f"    link_perf_monitor #(")
+                w(f'        .LINK_NAME("{net}_{src}to{dst}"),')
+                w(f'        .FLOW("{flow}"),')
+                w(f"        .BUFFER_DEPTH(ROUTER_VC_DEPTH),")
+                w(f"        .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)")
+                w(f"    ) u_perf_periph{pi}_{net}{suffix} (")
+                w(f"        .clk_i, .rst_ni,")
+                w(f"        .valid({valid}),")
+                if flow == "ready_valid":
+                    w(f"        .ready({back}),")
+                    w(f"        .vc_id('0),")
+                    w(f"        .credit_pulse('0)")
+                else:
+                    w(f"        .ready(1'b0),")
+                    w(f"        .vc_id({vc_slice}),")
+                    w(f"        .credit_pulse({back})")
+                w(f"    );")
         w("")
 
     # ------------------------------------------------------------------
@@ -757,6 +769,17 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
             for i in reversed(range(n_ep)))
     tile_base_addr = _rows("base")
     tile_size = _rows("size")
+    # The tile region as address windows: every window of every ROUTER node, in
+    # the same field order. The endpoint's multicast checker seeds golden for
+    # the wildcard closure, and the NMU and every router clip that closure to
+    # the tile region, so a replica address outside it is never written. Only
+    # emitted for a topology that has a coordinate outside the region -- with
+    # none, the closure is inside it by construction and the endpoint's own
+    # default (no clip) is already exact.
+    mesh_windows = [w for i in range(n) for w in per_node[i]] if peripherals else []
+    def _window_row(key):
+        return "{" + ", ".join(f"ADDR_WIDTH'(64'h{w[key]:X})"
+                               for w in reversed(mesh_windows)) + "}"
 
     lines = []
     w = lines.append
@@ -795,6 +818,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // Parameters")
     w("    // -------------------------------------------------------------------------")
     w(f"    localparam int unsigned NUM_NODES     = {n};")
+    if peripherals:
+        w(f"    // Endpoints, not nodes: {len(peripherals)} peripheral(s) have an NI and an")
+        w("    // endpoint but no router. Each carries stimulus of its own, so the exit")
+        w("    // logic gates on all of them.")
+        w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
     w("    localparam int unsigned ID_WIDTH      = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH    = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
@@ -822,6 +850,16 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // from the map (address_map.noc_egress_base), so it can never collide.")
     w(f"    localparam logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE = "
       f"ADDR_WIDTH'(64'h{noc_egress_base:X});")
+    if mesh_windows:
+        w("    // The tile region, as the windows of every node inside it. A collective's")
+        w("    // wildcard closure is clipped to this set by the NMU and by every router,")
+        w("    // so a replica address outside it is never written; the endpoint seeds")
+        w("    // multicast golden for these windows only.")
+        w(f"    localparam int unsigned MESH_TILE_WINDOWS = {len(mesh_windows)};")
+        w(f"    localparam logic [MESH_TILE_WINDOWS-1:0][ADDR_WIDTH-1:0] MESH_TILE_BASE_ADDR = "
+          f"{_window_row('base')};")
+        w(f"    localparam logic [MESH_TILE_WINDOWS-1:0][ADDR_WIDTH-1:0] MESH_TILE_SIZE = "
+          f"{_window_row('size')};")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w(f'    // Tile-memory latency profile "{_MEM_LATENCY}" (gen_tb_top.py')
     w("    // _MEM_LATENCY_PROFILES). Every endpoint's two memories sit behind an")
@@ -1062,10 +1100,8 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT regenerated.")
     if peripherals:
         w(f"    // {n_ep} endpoints, not NUM_NODES: endpoints {n}..{n_ep - 1} are the")
-        w("    // peripherals, which have an NI and an endpoint but no router. The exit")
-        w("    // logic below still gates on the NUM_NODES router nodes -- a peripheral")
-        w("    // carries no stimulus of its own, so a non-vacuity check over it would")
-        w("    // fail on an idle endpoint that is behaving exactly as intended.")
+        w("    // peripherals, which have an NI and an endpoint but no router. They carry")
+        w("    // their own stimulus, so the exit logic below gates on all of them.")
     w("    // -------------------------------------------------------------------------")
     w(f"    logic        end_of_sim [{n_ep}];")
     w(f"    int unsigned txn_cnt    [{n_ep}];")
@@ -1075,6 +1111,10 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
     w("            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE),")
+    if mesh_windows:
+        w("            .MESH_TILE_WINDOWS(MESH_TILE_WINDOWS),")
+        w("            .MESH_TILE_BASE_ADDR(MESH_TILE_BASE_ADDR),")
+        w("            .MESH_TILE_SIZE(MESH_TILE_SIZE),")
     w("            .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),")
     w("            .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),")
     w("            .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),")
@@ -1135,6 +1175,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // -------------------------------------------------------------------------")
     w("    // Exit logic - non-vacuous PASS guard")
     w("    // -------------------------------------------------------------------------")
+    exit_n = "NUM_ENDPOINTS" if peripherals else "NUM_NODES"
     w("    localparam int unsigned SETTLE_CYCLES = 100;")
     w("    initial begin")
     w("        bit vacuous;")
@@ -1146,12 +1187,12 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("        do begin")
     w("            @(posedge clk_i);")
     w("            all_done = rst_ni;")
-    w("            for (int i = 0; i < NUM_NODES; i++)")
+    w(f"            for (int i = 0; i < {exit_n}; i++)")
     w("                all_done &= end_of_sim[i];  // scoreboard is in-endpoint")
     w("        end while (!all_done);")
     w("        repeat (SETTLE_CYCLES) @(posedge clk_i);")
     w("        vacuous = 1'b0;")
-    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"        for (int i = 0; i < {exit_n}; i++) begin")
     w("            if (txn_cnt[i] == 0) begin")
     w("                vacuous = 1'b1;")
     w('                $display("FAIL: node%0d completed zero transactions (vacuous)", i);')
@@ -1169,7 +1210,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("                     list_hwm, wtxn_hwm, rtxn_hwm,")
     w("                     aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc);")
     w("        end")
-    w('        $display("PASS: all %0d nodes done, non-vacuous", NUM_NODES);')
+    w(f'        $display("PASS: all %0d nodes done, non-vacuous", {exit_n});')
     w("        $finish(0);")
     w("    end")
     w("")

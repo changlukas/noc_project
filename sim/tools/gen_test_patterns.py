@@ -284,6 +284,14 @@ def emit_beat_exact_node(out_dir, src_idx, dst_base, data_width, extra=None, bas
         f.write("\n".join(read_lines) + "\n")
 
 
+def unicast_pair_lines(axid, addr, axi_size, axi_len, data_width):
+    """(write_lines, read_lines) for one unicast write and its readback at addr."""
+    write = _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
+    write += encode_write_beats(addr, axi_size, axi_len, data_width)
+    read = _ax_fields(axid, addr, axi_len, axi_size, include_atop=False)
+    return write, read
+
+
 def narrow_beat_exact_lines(axid, config_base, data_width):
     """(write_lines, read_lines) for one narrow-class beat-exact probe: a
     2-beat INCR burst at AxSIZE=3 (8 B, the narrow lane width) targeting a
@@ -760,8 +768,13 @@ def multicast_lines(axid, anchor_addr, addr_mask, member_addrs, axi_size, axi_le
 
 def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
                            sizes, shape, n_txn, axi_size, axi_len, data_width,
-                           base_local, region_bytes):
-    """Write node<i>/{write,read}.txt for every node of the multicast pattern."""
+                           base_local, region_bytes, n_slots):
+    """Write node<i>/{write,read}.txt for every node of the multicast pattern.
+
+    n_slots is the allocator band (endpoints, not router nodes): a peripheral
+    draws filler slots from the same band, and two initiators drawing from
+    bands of different widths can land on the same slot.
+    """
     n_nodes = len(nodes)
     # mcast_groups permutes ARRAY positions like every other pattern; the node
     # list is what turns one into a route coordinate id.
@@ -830,7 +843,7 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             reserved = burst_footprint
             for seq in range(n_txn):
                 off = alloc_unique_offset(dst_cid, idx, seq, base_local,
-                                          n_nodes, region_bytes, reserved=reserved)
+                                          n_slots, region_bytes, reserved=reserved)
                 addr = bases[dst_cid] + off
                 write_lines += _ax_fields(axid, addr, axi_len, axi_size, include_atop=True)
                 write_lines += encode_write_beats(addr, axi_size, axi_len, data_width)
@@ -851,21 +864,79 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             f.write("\n".join(read_lines) + "\n")
 
 
-def emit_idle_nodes(out_root, first_idx, count):
-    """Empty write.txt/read.txt for `count` endpoints starting at `first_idx`.
+def peripheral_partner(periph_cid, nodes):
+    """The tile a peripheral exchanges traffic with: the nearest one on its own row.
 
-    Peripherals occupy endpoint indices past the router-node count and carry no
-    stimulus, but every endpoint instantiates a pulp axi_file_master and
-    load_files $fatals on a file it cannot open (axi_test.sv:2513-2528). An
-    empty pair leaves both queues empty, which is the idle the topology asks
-    for.
+    A peripheral sits outside the tile region on x, and XY routing reaches such
+    a coordinate by running out of x hops -- which happens on the SOURCE's row.
+    From another row the flit leaves the region one row early and lands in
+    whichever peripheral borders that row, so the NMU refuses it
+    (nmu::addr_trans::check_dst_reachable). Both directions therefore pair the
+    peripheral with a tile on its own row.
     """
-    for idx in range(first_idx, first_idx + count):
-        out_dir = os.path.join(out_root, f"node{idx}")
-        os.makedirs(out_dir, exist_ok=True)
-        for name in ("write.txt", "read.txt"):
-            with open(os.path.join(out_dir, name), "w"):
-                pass
+    px, py = coord_xy(periph_cid)
+    same_row = [t for t in nodes if coord_xy(t[3])[1] == py]
+    if not same_row:
+        sys.exit(f"ERROR: peripheral at ({px},{py}) has no tile on its own row to address; "
+                 f"XY routing cannot reach it from any other row")
+    return min(same_row, key=lambda t: abs(coord_xy(t[3])[0] - px))
+
+
+def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_local, region_bytes,
+                          axi_size, axi_len, data_width, n_txn, id_rng, num_axi_ids,
+                          address_the_peripheral=True):
+    """Stimulus for every peripheral endpoint, and the lines that address it back.
+
+    A peripheral has an NI and an endpoint but no router, and is addressed
+    exactly as a tile is. Each one writes its partner tile's window and reads it
+    back (the peripheral as initiator); with address_the_peripheral, that tile
+    writes the peripheral's window and reads it back too (the peripheral as
+    target).
+
+    Slots come from alloc_unique_offset like every other initiator's, keyed by
+    the peripheral's own ENDPOINT index -- which is why n_slots (endpoints, not
+    router nodes) is the allocator's band everywhere: two initiators drawing
+    from bands of different widths can land on the same slot.
+
+    Returns {node_idx: (write_lines, read_lines)} to append to the partner
+    tile's own stimulus. Empty when address_the_peripheral is False, which is
+    the multicast pattern: the router-to-peripheral link is where that run's
+    collective-clip evidence is measured, so nothing but the peripheral's own
+    responses may travel it.
+    """
+    extras = {}
+    reserved = (axi_len + 1) * (1 << axi_size)
+    for ep_idx, periph_cid in peripherals:
+        partner = peripheral_partner(periph_cid, nodes)
+        emit_file_master_node(os.path.join(out_root, f"node{ep_idx}"), ep_idx,
+                              [partner[3]] * n_txn, n_slots, base_local, region_bytes,
+                              axi_size, axi_len, data_width, id_rng,
+                              num_axi_ids=num_axi_ids, bases=bases)
+        if not address_the_peripheral:
+            continue
+        write_lines, read_lines = [], []
+        for seq in range(n_txn):
+            off = alloc_unique_offset(periph_cid, partner[0], seq, base_local, n_slots,
+                                      region_bytes, reserved=reserved)
+            w, r = unicast_pair_lines(partner[0] % num_axi_ids, bases[periph_cid] + off,
+                                      axi_size, axi_len, data_width)
+            write_lines += w
+            read_lines += r
+        extras[partner[0]] = (write_lines, read_lines)
+    return extras
+
+
+def merge_extra(*parts):
+    """Concatenate (write_lines, read_lines) tuples; None for nothing at all.
+
+    emit_file_master_node / emit_beat_exact_node take ONE extra, and a node can
+    now owe two: its own config-space probe and a peripheral's traffic.
+    """
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    return ([line for p in parts for line in p[0]],
+            [line for p in parts for line in p[1]])
 
 
 # ---------------------------------------------------------------------------
@@ -1104,25 +1175,32 @@ def main(argv=None):
     # route coordinate id, which is what the address map is keyed by.
     cid_of = {(x, y): cid for _idx, x, y, cid in nodes}
     # Every route coordinate owns a memory tile, so the coordinates the router
-    # array does not cover are the peripherals. They have an NI and an endpoint
-    # but no stimulus of their own, and the endpoint's file master $fatals on a
-    # missing file, so each gets an empty pair at its own endpoint index.
-    emit_idle_nodes(a.out, n_nodes, len(bases) - n_nodes)
+    # array does not cover are the peripherals. They extend the ENDPOINT index
+    # space (peripheral p is endpoint n_nodes + p), in the map order
+    # gen_tb_top.py's _peripherals walks.
+    node_cids = set(cid_of.values())
+    peripherals = [(n_nodes + p, cid)
+                   for p, cid in enumerate(c for c in bases if c not in node_cids)]
+    n_slots = n_nodes + len(peripherals)
 
     widths = axi_widths()
     base_local = 0x1000
-    # Auto-derived dst-tile window: n_nodes * transactions_per_node slots, each
+    # Auto-derived dst-tile window: one slot per endpoint per transaction, each
     # `stride` bytes apart. stride matches alloc_unique_offset's own
     # max(_SLOT_STRIDE, reserved) so this is a tight upper bound on its max
     # offset + reserved (see alloc_unique_offset docstring).
     burst_footprint = (a.burst_len + 1) * (1 << a.size)
     stride = max(_SLOT_STRIDE, burst_footprint)
-    region_bytes = n_nodes * a.transactions_per_node * stride
+    region_bytes = n_slots * a.transactions_per_node * stride
     rng = _random_module.Random(a.seed)
     # Ids draw from their own stream, so changing --ids-per-initiator moves the
     # ids and nothing else. Sharing `rng` would shift every later destination
     # too, and a multi-id run could not be compared against its one-id baseline.
     id_rng = _random_module.Random(a.seed ^ _ID_STREAM_SALT)
+    periph_extra = emit_peripheral_nodes(
+        a.out, peripherals, nodes, bases, n_slots, base_local, region_bytes, a.size, a.burst_len,
+        widths["data"], a.transactions_per_node, id_rng, num_axi_ids=(1 << widths["id"]),
+        address_the_peripheral=(a.pattern != "multicast"))
     if a.pattern == "transpose":
         _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
     if a.pattern in ("bit_complement", "bit_reverse", "shuffle", "bit_rotation"):
@@ -1135,7 +1213,7 @@ def main(argv=None):
         emit_multicast_pattern(a.out, nodes, x_dim, y_dim, bases, config_bases,
                                sizes, a.mcast_shape, a.transactions_per_node,
                                a.size, a.burst_len, widths["data"],
-                               base_local, region_bytes)
+                               base_local, region_bytes, n_slots)
         return
     for (idx, x, y, src_cid) in nodes:
         # A node that owns a config-space tile also routes one narrow-class
@@ -1144,11 +1222,13 @@ def main(argv=None):
         # regardless of which pattern drives the data-class traffic below.
         narrow_extra = (narrow_beat_exact_lines(idx, config_bases[src_cid], widths["data"])
                         if src_cid in config_bases else None)
+        # A node bordering a peripheral also addresses it (emit_peripheral_nodes).
+        extra = merge_extra(narrow_extra, periph_extra.get(idx))
         if a.pattern == "beat_exact":
             dst_x, dst_y = neighbor_dst(x, y, x_dim, y_dim)
             dst_base = bases[cid_of[(dst_x, dst_y)]]
             emit_beat_exact_node(os.path.join(a.out, f"node{idx}"), idx, dst_base,
-                                 widths["data"], extra=narrow_extra, base_local=base_local)
+                                 widths["data"], extra=extra, base_local=base_local)
             continue
         if a.pattern in _DETERMINISTIC_PATTERNS:
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
@@ -1167,11 +1247,11 @@ def main(argv=None):
                                    a.hotspot, a.hotspot_rates, a.exclude_self)
             dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
         emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
-                              n_nodes, base_local, region_bytes,
+                              n_slots, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
                               ids_per_initiator=a.ids_per_initiator,
                               num_axi_ids=(1 << widths["id"]), id_rng=id_rng,
-                              bases=bases, extra=narrow_extra)
+                              bases=bases, extra=extra)
 
 
 if __name__ == "__main__":

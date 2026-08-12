@@ -675,7 +675,7 @@ def _emit_mcast(tmp_path, config_size):
     nodes, x_dim, y_dim, bases, config_bases, sizes = g._load_topology(str(topo_path))
     g.emit_multicast_pattern(str(tmp_path / f"out{config_size:x}"), nodes, x_dim, y_dim,
                              bases, config_bases, sizes, "row", 2, 5, 0, 512,
-                             0x1000, len(nodes) * 2 * g._SLOT_STRIDE)
+                             0x1000, len(nodes) * 2 * g._SLOT_STRIDE, len(nodes))
 
 
 def test_config_probe_window_is_bounded_by_the_config_entry(tmp_path):
