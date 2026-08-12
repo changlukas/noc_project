@@ -207,34 +207,112 @@ bits.
 
 ### Address map
 
-Two changes.
+**A peripheral is an entry in the same address space as the tiles**, at the border coordinate.
+That one decision is what keeps the rest small, and it is checked below against a worked example
+rather than asserted.
 
-**Per-declaration base.** A group of entries may declare its own `base`; without one the running
-accumulator continues as today. The five existing topology files stay textually unchanged, but both
-loaders gain a real explicit-base model: `sim/tools/address_map.py:17,61` and
-`ref_model/c_model/include/nmu/sam_yaml.hpp:108,129`, which today both state that there is no base
-and derive every one by accumulation.
+**One rule changes: a row is strided to a power of two, not to the number of entries.**
 
-Compute tiles then keep their own contiguous node-index bit field inside their own region, and
-peripherals get theirs inside a separate region. Neither perturbs the other. The `address_map:`
-comment in each topology file states why that field has to stay contiguous: multicast replica
-addresses differ only in node-index bits. A single accumulator shared with peripherals would have
-widened that field. Independent bases avoid it without introducing a third address space.
+```
+base(x, y) = base_zero + ((y << X_WIDTH) | x) * size
+```
 
-**The address coordinate field spans the route span, not the tile count.** `rebase_node_coords`
-(`ni/address_map.hpp:60`) writes a coordinate into the address's coordinate field, so that field and
-the route coordinate are the same number. With tiles at `1..4` the field covers `0..4`, and the slot
-at 0 belongs to the peripheral or to nothing. One numbering, no translation.
+where `X_WIDTH = clog2(route span)`. Today's packing accumulates in list order
+(`address_map.py:61,75`), which produces the same result only when the row length happens to be a
+power of two. Deriving the base from the coordinate makes the identity structural instead of
+accidental, and it is what lets the address coordinate field and the route coordinate be the same
+number.
 
-The cost is the reserved slot, accepted deliberately: two numberings would be paid for on every read
-of the code, a reserved address slot is paid for once.
+`rebase_node_coords` (`ni/address_map.hpp:60`) writes an NSU's own coordinate into that field, so
+one numbering is not a preference here, it is what makes rebasing correct without a conversion.
 
-Three validators relax from "dense from `(0,0)`" to "dense within the stated tile region":
-`address_map.py:72,91` and `addr_trans.hpp:115`. `sam_yaml.hpp:55` declares `x_count = x_dim` today
-and must declare the tile region instead.
+The cost is the rounding: a row of `n` positions occupies `2^clog2(n)` slots. Three positions
+occupy four. That is a static waste paid once, against a second numbering that would be paid on
+every read of the code.
 
-Addresses are packed in list order (`address_map.py:61,75`), so nothing about coordinates moves an
-address.
+**What does not change.** Because the peripheral occupies the border coordinate as an ordinary
+entry, the space stays dense over its own span, and the checks that assume that stay valid:
+
+| site | check | why it still passes |
+|---|---|---|
+| `addr_trans.hpp:189` | `space_entries == x_count * y_count` | the border coordinates are entries, so the space is full |
+| `addr_trans.hpp:192` | origin coordinate bits are zero | coordinate `(0,0)` exists, it is a peripheral |
+| `addr_trans.hpp:199` | the walk starts at coordinate zero | same |
+| `ni/address_map.hpp:60` | `rebase_node_coords` | the field is the route coordinate, so an NSU writes its own id unchanged |
+
+`declare_space_coords` (`sam_yaml.hpp:35-60`) also stays, with one change at its call site: `x_dim`
+and `y_dim` become the route span rather than the tile count, so `x_range.len` sizes the field to
+the span.
+
+**Per-declaration base is not needed this round.** It was in an earlier draft to stop peripherals
+widening the tiles' node-index field, which the route-span field makes moot. It stays available for
+a later peripheral whose window is not tile-sized, as a separate space with its own coordinates.
+
+### Worked example
+
+Two tiles wide, two rows, one peripheral on the west of each row.
+
+```
+        x=0      x=1     x=2
+ y=1   [P]      [T]     [T]
+ y=0   [P]      [T]     [T]
+```
+
+Route span `x` is `0..2`, so `X_WIDTH = clog2(3) = 2` and a row strides four slots.
+`Y_WIDTH = clog2(2) = 1`. Every entry is `0x100000`, so the offset field is 20 bits.
+
+| node | `base` | bit[22] = y | bit[21:20] = x |
+|---|---|---|---|
+| P (0,0) | `0x000000` | 0 | `00` |
+| T (1,0) | `0x100000` | 0 | `01` |
+| T (2,0) | `0x200000` | 0 | `10` |
+| P (0,1) | `0x400000` | 1 | `00` |
+| T (1,1) | `0x500000` | 1 | `01` |
+| T (2,1) | `0x600000` | 1 | `10` |
+
+`0x500000` is `0b0101` in bits [23:20], so `y = 1`, `x = 1`. `0x600000` is `0b0110`, so `y = 1`,
+`x = 2`. The field is the coordinate.
+
+`declare_space_coords` reads `stride = 0x100000` from the first two entries, a power of two, giving
+`offset = 20`, `x_range = {20, 2}`, `y_range = {22, 1}`. The dense check is `6 == 3 * 2`.
+
+**The multicast that the clip exists for.** Anchor `T(1,0)`, target the tile row `{(1,0), (2,0)}`.
+Wildcarding the x field gives `mask_x = 0b11`, and the raw wildcard set is
+
+```
+{v : v & ~3 == 1 & ~3 == 0}  =  {0, 1, 2, 3}
+                                 ^        ^
+                            peripheral   does not exist
+```
+
+Today that is rejected outright: `(anchor_x | mask_x) = 3 >= x_count = 3`. With the clip,
+
+```
+dst_min = max(1 & ~3, tile_min) = max(0, 1) = 1
+dst_max = min(1 |  3, tile_max) = min(3, 2) = 2      ->  {1, 2}
+```
+
+which is exactly the two tiles. The peripheral and the non-existent coordinate are both removed by
+the same clamp.
+
+**Rebasing.** `T(2,1)` receives a replica whose address names the anchor. `rebase_node_coords`
+writes its own `(2, 1)` into bits [22:20], giving `0x6xxxxx` with the low twenty bits untouched. No
+conversion, because the field is the coordinate.
+
+### Considered and rejected: collectives in tile-index space
+
+Expressing the wildcard over tile indices `0..N-1` instead of route coordinates is attractive,
+because indices are power-of-two aligned by construction and the clip would not be needed at all.
+It fails on `nsu/depacketize.hpp:50-57,181-184`: the NSU rebases an arriving address using the
+coordinate it was constructed with, and writes it into the address coordinate field. Under an
+index-space scheme that field holds indices while the constructor argument is a route coordinate,
+so a tile at route `x = 1` whose index is 0 writes the wrong value and the rebased address names
+the wrong tile. Silently.
+
+Making it work needs the conversion at four sites, `route_mask` fork and join,
+`collective_translate`, and that rebase. Three of them are loud on error and the fourth is not.
+This project has been bitten twice by a field whose meaning depends on context, so the record is
+kept here to stop the idea being re-proposed.
 
 ### Coordinate width follows the topology
 
