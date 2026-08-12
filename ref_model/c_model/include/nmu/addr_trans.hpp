@@ -132,7 +132,7 @@ class SamTable {
     // constructor for most c_model tests. The Python twin
     // (sim/tools/address_map.py pack()) requires both unconditionally -- it
     // only ever sees a shipped topology YAML.
-    void validate(unsigned x_dim, unsigned y_dim) const {
+    void validate(unsigned x_span, unsigned y_span) const {
         constexpr uint64_t k4k = 0x1000;
         for (const auto& e : entries_) {
             assert(e.size != 0 && "SAM: zero-size tile");
@@ -141,9 +141,9 @@ class SamTable {
             assert(e.base + e.size > e.base && "SAM: base+size overflow");
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
-            assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");
+            assert(x < x_span && y < y_span && "SAM: dst outside mesh");
         }
-        const std::size_t mesh_nodes = static_cast<std::size_t>(x_dim) * y_dim;
+        const std::size_t mesh_nodes = static_cast<std::size_t>(x_span) * y_span;
         std::vector<bool> seen_memory(mesh_nodes, false);
         std::vector<bool> seen_config(mesh_nodes, false);
         std::size_t memory_count = 0;
@@ -151,7 +151,7 @@ class SamTable {
         for (const auto& e : entries_) {
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
-            std::size_t idx = static_cast<std::size_t>(y) * x_dim + x;
+            std::size_t idx = static_cast<std::size_t>(y) * x_span + x;
             std::vector<bool>& seen = (e.cls == axi::AxiClass::Data) ? seen_memory : seen_config;
             assert(!seen[idx] && "SAM: duplicate mesh node (same space)");
             seen[idx] = true;

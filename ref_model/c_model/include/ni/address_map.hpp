@@ -43,7 +43,7 @@ inline uint64_t range_mask(const BitRange& r) {
 struct SpaceCoords {
     BitRange x_range;
     BitRange y_range;
-    // Mesh dimensions, STATED not inferred. Recovering one as 1 << len
+    // Route span, STATED not inferred. Recovering one as 1 << len
     // over-permits every dimension that is not a power of two, and
     // docs/noc-target-spec.md §5 allows 2 to 16 per dimension.
     unsigned x_count = 0;

@@ -184,10 +184,11 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 // per-id order-list depth and the two shared-pool peaks. All outputs 0 if the
 // handle is invalid or the RoB is not standalone.
 void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_bypass,
-                                unsigned int* aw_same_dest_bypass, unsigned int* aw_fallback_alloc,
-                                unsigned int* ar_idle_bypass, unsigned int* ar_same_dest_bypass,
-                                unsigned int* ar_fallback_alloc, unsigned int* order_list_hwm,
-                                unsigned int* write_txns_hwm, unsigned int* read_txns_hwm);
+                                    unsigned int* aw_same_dest_bypass,
+                                    unsigned int* aw_fallback_alloc, unsigned int* ar_idle_bypass,
+                                    unsigned int* ar_same_dest_bypass,
+                                    unsigned int* ar_fallback_alloc, unsigned int* order_list_hwm,
+                                    unsigned int* write_txns_hwm, unsigned int* read_txns_hwm);
 
 // Nsu — three NoC faces (REQ ingress ready/valid, RSP egress ready/valid,
 // DAT ingress+egress credit) + AXI master side.
