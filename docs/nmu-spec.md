@@ -237,7 +237,7 @@ n is capped at X_WIDTH + Y_WIDTH = 8, so the enumeration is at most 256 SAM look
 1. An incoming collective is admitted only when the ID's write order list is empty. It then takes the idle-ID bypass: ordering_req = 0, no RoB slot, in both `RobMode` settings.
 2. While the front entry of an ID's order list is collective, nothing for that ID is admitted. Testing the front is enough, because a collective only ever enters an empty list and is therefore the only entry.
 
-Gate 2 is what closes the same-destination bypass: without it a later same-ID AW whose destination equals the collective's anchor would stream past it with no slot and no ordering. The collective still takes one entry of the shared outstanding pool like any AW, released when its merged `B` retires.
+Gate 2 is what closes the same-destination bypass: without it a later same-ID AW whose destination equals the collective's anchor would stream past it with no slot and no ordering. The collective still takes one entry of the ID's write order list like any AW, released when its merged `B` retires.
 
 **Merged B.** The merged `B` returns through the ordinary B ingress and releases the interlock exactly like a unicast `B`: the NMU stamps ordering_tag before fanout and the fabric's merge preserves it, so the response path needs no collective state. The `B` carries `collective_op` = MULTICAST and the echoed node mask; neither perturbs the `bid` / `bresp` decode.
 

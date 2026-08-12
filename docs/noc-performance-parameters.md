@@ -175,9 +175,10 @@ read efficiency = min(1, 128 / round_trip_cycles)
 |---|---:|---:|---:|---:|
 | Read efficiency | 100 % | 50 % | 25 % | 12.5 % |
 
-Burst size does not change the 128-cycle coverage: the 128-slot pool pends the full 8 KB at any
-burst length, and the 256-transaction admission bound never binds first, a single-beat stream
-needing 128 requests to fill the pool.
+Burst size does not change the 128-cycle coverage as long as enough IDs are in play: the 128-slot
+pool pends the full 8 KB at any burst length, but filling it with single-beat requests takes 128
+concurrent transactions, which needs at least 4 IDs at `MAX_TXNS_PER_ID` = 32 each. A single-ID
+single-beat stream hits the per-ID gate at 32 requests, pends only 2 KB and covers 32 cycles.
 
 ## Risk in the current defaults
 

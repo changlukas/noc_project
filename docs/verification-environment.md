@@ -121,8 +121,10 @@ Upstream references:
   monitor, imported with one flagged modification).
 - ID-space narrowing for a small-`NumIds` RoB: `axi_id_remap.sv`
   (pulp-platform axi v0.39.7), instantiated as `i_noc_id_remap` in
-  `user_node_endpoint.sv` to compress the tile's `AXI_INITIATOR_ID_WIDTH` = 4
-  id space onto the NI's `AXI_ID_WIDTH` = 3.
+  `user_node_endpoint.sv`. Its input is the crossbar master-port id space,
+  `AXI_INITIATOR_ID_WIDTH` + `$clog2(XBAR_SLV_PORTS)` = 5 b, not
+  `AXI_INITIATOR_ID_WIDTH` itself, so it folds 32 tile ids onto the NI's
+  `AXI_ID_WIDTH` = 3, 8 ids.
 - Traffic patterns and injection process: BookSim2 `src/traffic.cpp`
   (`NeighborTrafficPattern`, `TransposeTrafficPattern`,
   `UniformRandomTrafficPattern`, `HotSpotTrafficPattern`) and
@@ -275,7 +277,8 @@ distance: on a 4x4 mesh the `neighbor` pattern shows three tiers, interior 2
 hops, one-axis wrap 4, corner 6, because the mesh has no torus links and the
 wrap routes back across the array. The `[HWM]` lines report the per-node NMU
 sizing telemetry: the R-RoB slot peak from `cmodel_nmu_read_slot_hwm`, plus the
-order-list peak, the two shared outstanding-pool peaks and the admission clause
+order-list peak, the peak in-flight transaction count per direction and the
+admission clause
 split (AW and AR separately) from `cmodel_nmu_admission_telemetry`.
 
 ## Topology YAML to generator to testbench
