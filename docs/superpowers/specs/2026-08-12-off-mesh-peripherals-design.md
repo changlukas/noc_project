@@ -84,10 +84,23 @@ miss in review, so both are called out here rather than left to the diff.
 A peripheral occupies the boundary router port that is tied off today. Router degree stays 5 and
 no router differs from its neighbours.
 
-A populated boundary link is wired **identically to an inter-router link**: the same ready/valid
-in both directions, the same DAT credit seed and return path, the same depth. This is the
-simplifying rule of the whole design, and it holds because the thing on the far side is the same
-NI a tile has. There is no second kind of link.
+**A peripheral NI attaches exactly the way a tile NI attaches, at a different port index.** The
+fabric already declares all five ports with one signal set:
+
+```systemverilog
+// noc_fabric_mesh_2x2_vc1.sv:52,60
+localparam int unsigned LINK_PORTS = 5;  // LOCAL + N/E/S/W
+// Per-network per-node per-port arrays (LOCAL + N/E/S/W uniformly).
+logic [LINK_PORTS-1:0] tx_req_valid [4];
+logic [DAT_NUM_VC-1:0] tx_dat_crdvalid [4][LINK_PORTS];
+```
+
+A tile's `ni_wrap` binds to `[i][RP_LOCAL]` (`:109-119`). A peripheral's binds to `[i][RP_WEST]`,
+or whichever direction it sits on, with the same port map and the same tx/rx crossing. Ready,
+valid, flit and DAT credit are per-port already, so the plumbing exists; what is removed is the
+tie-off that zeroes it.
+
+There is no second kind of link and no new credit scheme. The far side is the same NI a tile has.
 
 `noc_fabric_<topo>.sv` today zeroes REQ/RSP ready returns and DAT credit returns on boundary
 directions (`noc_fabric_mesh_2x2_vc1.sv:153,207`) and makes a valid flit on one a `$fatal`
@@ -141,10 +154,31 @@ Their coordinate *widths* do change, because width now follows the mesh rather t
 `mesh_2x2` goes to `1 + 1` bits and `mesh_4x4` to `2 + 2`. The values are the same, the fields
 holding them are narrower.
 
-**Standing bound: `X_WIDTH + Y_WIDTH <= 8`.** `dst_id` is a `uint8_t` and the collective mask is
-tied to that sum (`addr_trans.hpp:121,358`). Per-topology widths make small meshes cheaper but do
-not lift the ceiling, so a border ring is supported only where the resulting span still fits.
-Lifting it is a separate piece of work and is not attempted here.
+**There is no cap on the coordinate width.** The span follows the mesh, and the id types follow the
+span.
+
+`addr_trans.hpp:358-361` already carries the invariant that matters:
+
+```cpp
+static_assert(X_WIDTH + Y_WIDTH == COLLECTIVE_MASK_WIDTH,
+              "collective_mask must be one node id wide (X|Y) -- specgen drift");
+static_assert(X_WIDTH + Y_WIDTH <= 8,
+              "node id / collective_mask no longer fit uint8_t");
+```
+
+The first is the real rule and it stays: a collective mask is one node id wide, because the mask
+is over the coordinate bits themselves (`(mask_y << X_WIDTH) | mask_x`), not a list of target
+nodes. Widen the coordinate and the mask widens with it, which is what the assert enforces.
+
+The second is a container limit, not a design one, and it goes. A generated `node_id_t` sized from
+`X_WIDTH + Y_WIDTH` replaces the `uint8_t` that carries a node id or a collective mask, in the
+model and in the flit field. The same guard exists on the consumer side at `route_mask.hpp:43-46`
+and moves with it.
+
+**Consequence worth stating, because it is not obvious:** a coordinate mask can select the border
+ring, since the border occupies ordinary coordinate values. "Peripherals are not multicast targets"
+is therefore not free. The mask generator has to avoid border coordinates, or a mask meaning "the
+whole of row y" silently includes the peripheral on that row.
 
 ### Address map
 
@@ -207,10 +241,8 @@ rule that a checker's silence counts only after it has been shown to fire.
 
 Which peripherals, how many, and on which edges. The mechanism must not assume an answer.
 
-Whether peripherals are multicast or collective targets. They are not in this round, and the
-`COLLECTIVE_MASK_WIDTH` interaction is not designed here.
-
-Lifting `X_WIDTH + Y_WIDTH <= 8`.
+Whether peripherals are multicast or collective targets. They are not in this round. The mask
+generator avoiding border coordinates is named above as a consequence, not designed here.
 
 `hotspot_boundary` becomes meaningful once an edge has a target, but the pattern is not restored
 in this round.
