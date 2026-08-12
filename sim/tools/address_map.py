@@ -122,9 +122,10 @@ def pack(address_map, x_span, y_span):
             raise ValueError(
                 f"address_map.tiles {space} space covers {len(seen)} nodes, expected "
                 f"{x_span * y_span} ({x_span}x{y_span} mesh, one {space} tile per node)")
-    # No overlap check needed: (x, y) maps to a unique slot index below x_span *
-    # y_span, every tile's size is checked <= slot[space] above, and space_base
-    # keeps memory and config apart -- so slots are always disjoint.
+    # No overlap check needed: (x, y) maps to a unique slot index below
+    # (1 << x_bits) * y_span, every tile's size is checked <= slot[space]
+    # above, and space_base keeps memory and config apart -- so slots are
+    # always disjoint.
 
     bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "memory"}
     return bases, entries

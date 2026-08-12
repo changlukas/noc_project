@@ -84,7 +84,8 @@ DST_ID_WIDTH = 8  -- mirrors ni_flit_constants.h header::DST_ID_WIDTH (X_WIDTH +
 
 Per-tile base address = base(dst_id), packed from the topology YAML's
 address_map.tiles list (see address_map.py). Mirrors c_model SamTable::packed's
-base formula (addr_trans.hpp).
+base formula (addr_trans.hpp): base = space_base[space] + ((y << x_bits) | x) *
+slot[space].
 """
 
 import argparse
@@ -99,7 +100,7 @@ import address_map
 
 # Must mirror c_model addr_trans.hpp SamTable::packed:
 #   dst_id = (y << X_WIDTH) | x
-#   base(i) = base(i-1) + size(i-1), in address_map.tiles list order
+#   base = space_base[space] + ((y << x_bits) | x) * slot[space]
 X_WIDTH = 4
 Y_WIDTH = 4          # mirrors ni_flit_constants.h width::Y_WIDTH
 DST_ID_WIDTH = 8     # header::DST_ID_WIDTH = X_WIDTH + Y_WIDTH; max nodes = 2**8 = 256
