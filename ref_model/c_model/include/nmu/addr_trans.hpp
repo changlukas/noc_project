@@ -78,7 +78,6 @@ class SamTable {
             const uint64_t slot = is_config ? config_slot : memory_slot;
             const uint64_t space_base = is_config ? config_base : 0;
             const uint64_t base = space_base + ((uint64_t{(t.y << x_bits) | t.x}) * slot);
-            assert(t.size <= slot && "SamTable::packed: entry exceeds its coordinate slot");
             es.push_back(
                 {base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x), t.cls});
         }

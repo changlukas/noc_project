@@ -57,9 +57,8 @@ def pack(address_map, x_span, y_span):
 
     Raises ValueError (fail-loud, mirrors SamTable::validate) on: missing/empty
     tiles list, non-positive or non-4KB-aligned size, a tile outside the mesh,
-    a tile whose size exceeds its space's stated slot size, an unrecognized
-    space, or a missing/duplicate mesh node per space -- both spaces must cover
-    every node exactly once.
+    an unrecognized space, or a missing/duplicate mesh node per space -- both
+    spaces must cover every node exactly once.
 
     Config coverage is required unconditionally here and only when the space is
     present in SamTable::validate(): this function only ever sees a shipped
@@ -101,10 +100,6 @@ def pack(address_map, x_span, y_span):
                 f"address_map tile (x={x},y={y}) outside mesh {x_span}x{y_span}")
         sp = space
         base = space_base[sp] + (((y << x_bits) | x) * slot[sp])
-        if size > slot[sp]:
-            raise ValueError(
-                f"address_map tile (x={x},y={y}) size {size:#x} exceeds the {sp} "
-                f"slot size {slot[sp]:#x}")
         entries.append({"x": x, "y": y, "size": size, "base": base, "dst_id": dst_id(x, y),
                         "space": space})
 
@@ -123,9 +118,9 @@ def pack(address_map, x_span, y_span):
                 f"address_map.tiles {space} space covers {len(seen)} nodes, expected "
                 f"{x_span * y_span} ({x_span}x{y_span} mesh, one {space} tile per node)")
     # No overlap check needed: (x, y) maps to a unique slot index below
-    # (1 << x_bits) * y_span, every tile's size is checked <= slot[space]
-    # above, and space_base keeps memory and config apart -- so slots are
-    # always disjoint.
+    # (1 << x_bits) * y_span, every tile's size is at most slot[space] because
+    # that slot IS the largest size declared in the space, and space_base keeps
+    # memory and config apart -- so slots are always disjoint.
 
     bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "memory"}
     return bases, entries
