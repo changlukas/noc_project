@@ -63,6 +63,11 @@ module user_node_endpoint #(
     parameter bit          MEM_STALL_RANDOM_OUTPUT = 1'b0,
     parameter int unsigned MEM_FIXED_DELAY_INPUT   = 0,
     parameter int unsigned MEM_FIXED_DELAY_OUTPUT  = 0,
+    // Master-face consumer backpressure, response side only. Same profile
+    // mechanism and the same 0-15 cycle bound as the memory pair above; "ideal"
+    // is (0, 0) and takes the same gen_pass_through branch.
+    parameter bit          MST_STALL_RANDOM_OUTPUT = 1'b0,
+    parameter int unsigned MST_FIXED_DELAY_OUTPUT  = 0,
     parameter int unsigned DEFAULT_NUM_READS  = 8,
     parameter int unsigned DEFAULT_NUM_WRITES = 8,
     // AWUSER width (see nmu_wrap.sv AWUSER_WIDTH). Master-side DV interfaces
@@ -106,6 +111,43 @@ module user_node_endpoint #(
         .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
     ) master_dv (clk_i);
 
+    // Consumer backpressure. The file master never stalls its R channel --
+    // wait_r consumes a beat whenever r_outst is non-empty (axi_test.sv) -- so
+    // without this the NMU always sinks R, R never backs up into DAT, and the
+    // dependency cycle noc-target-spec.md argues against cannot form. The
+    // delayer sits where a slow compute engine would, between the master and
+    // the tile crossbar, so a stall travels the crossbar to
+    // master_axi_req_o.rready and back into the fabric.
+    // Response side only: stalling AW/W/AR here is injection-rate control,
+    // which INJECTION_MODE owns.
+    AXI_BUS #(
+        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
+        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+    ) mst_pre_delay ();
+
+    AXI_BUS #(
+        .AXI_ADDR_WIDTH(ADDR_WIDTH),   .AXI_DATA_WIDTH(DATA_WIDTH),
+        .AXI_ID_WIDTH(XBAR_SLV_ID_W),  .AXI_USER_WIDTH(AWUSER_WIDTH)
+    ) mst_post_delay ();
+
+    `AXI_ASSIGN(mst_pre_delay, master_dv)
+
+    axi_delayer_intf #(
+        .AXI_ID_WIDTH(XBAR_SLV_ID_W),
+        .AXI_ADDR_WIDTH(ADDR_WIDTH),
+        .AXI_DATA_WIDTH(DATA_WIDTH),
+        .AXI_USER_WIDTH(AWUSER_WIDTH),
+        .STALL_RANDOM_INPUT(1'b0),
+        .STALL_RANDOM_OUTPUT(MST_STALL_RANDOM_OUTPUT),
+        .FIXED_DELAY_INPUT(0),
+        .FIXED_DELAY_OUTPUT(MST_FIXED_DELAY_OUTPUT)
+    ) i_mst_backpressure (
+        .clk_i(clk_i),
+        .rst_ni(rst_ni),
+        .slv(mst_pre_delay),
+        .mst(mst_post_delay)
+    );
+
     // Master face. The file_master's own traffic is what every in-endpoint
     // checker watches, so it is flattened once here and the checkers read that
     // view. It is NOT the NoC-bound port: a request this node addresses to its
@@ -121,54 +163,54 @@ module user_node_endpoint #(
     // these instead.
     logic [XBAR_SLV_ID_W-1:0] mst_awid, mst_arid, mst_bid, mst_rid;
 
-    assign mst_awid = master_dv.aw_id;
-    assign mst_arid = master_dv.ar_id;
+    assign mst_awid = mst_post_delay.aw_id;
+    assign mst_arid = mst_post_delay.ar_id;
 
     always_comb begin
         mst_flat_req = '0;
-        mst_flat_req.awaddr   = master_dv.aw_addr;
-        mst_flat_req.awlen    = master_dv.aw_len;
-        mst_flat_req.awsize   = master_dv.aw_size;
-        mst_flat_req.awburst  = master_dv.aw_burst;
-        mst_flat_req.awlock   = master_dv.aw_lock;
-        mst_flat_req.awcache  = master_dv.aw_cache;
-        mst_flat_req.awprot   = master_dv.aw_prot;
-        mst_flat_req.awqos    = master_dv.aw_qos;
-        mst_flat_req.awregion = master_dv.aw_region;
-        mst_flat_req.awvalid  = master_dv.aw_valid;
-        mst_flat_req.wdata    = master_dv.w_data;
-        mst_flat_req.wstrb    = master_dv.w_strb;
-        mst_flat_req.wlast    = master_dv.w_last;
-        mst_flat_req.wvalid   = master_dv.w_valid;
-        mst_flat_req.bready   = master_dv.b_ready;
-        mst_flat_req.araddr   = master_dv.ar_addr;
-        mst_flat_req.arlen    = master_dv.ar_len;
-        mst_flat_req.arsize   = master_dv.ar_size;
-        mst_flat_req.arburst  = master_dv.ar_burst;
-        mst_flat_req.arlock   = master_dv.ar_lock;
-        mst_flat_req.arcache  = master_dv.ar_cache;
-        mst_flat_req.arprot   = master_dv.ar_prot;
-        mst_flat_req.arqos    = master_dv.ar_qos;
-        mst_flat_req.arregion = master_dv.ar_region;
-        mst_flat_req.arvalid  = master_dv.ar_valid;
-        mst_flat_req.rready   = master_dv.r_ready;
+        mst_flat_req.awaddr   = mst_post_delay.aw_addr;
+        mst_flat_req.awlen    = mst_post_delay.aw_len;
+        mst_flat_req.awsize   = mst_post_delay.aw_size;
+        mst_flat_req.awburst  = mst_post_delay.aw_burst;
+        mst_flat_req.awlock   = mst_post_delay.aw_lock;
+        mst_flat_req.awcache  = mst_post_delay.aw_cache;
+        mst_flat_req.awprot   = mst_post_delay.aw_prot;
+        mst_flat_req.awqos    = mst_post_delay.aw_qos;
+        mst_flat_req.awregion = mst_post_delay.aw_region;
+        mst_flat_req.awvalid  = mst_post_delay.aw_valid;
+        mst_flat_req.wdata    = mst_post_delay.w_data;
+        mst_flat_req.wstrb    = mst_post_delay.w_strb;
+        mst_flat_req.wlast    = mst_post_delay.w_last;
+        mst_flat_req.wvalid   = mst_post_delay.w_valid;
+        mst_flat_req.bready   = mst_post_delay.b_ready;
+        mst_flat_req.araddr   = mst_post_delay.ar_addr;
+        mst_flat_req.arlen    = mst_post_delay.ar_len;
+        mst_flat_req.arsize   = mst_post_delay.ar_size;
+        mst_flat_req.arburst  = mst_post_delay.ar_burst;
+        mst_flat_req.arlock   = mst_post_delay.ar_lock;
+        mst_flat_req.arcache  = mst_post_delay.ar_cache;
+        mst_flat_req.arprot   = mst_post_delay.ar_prot;
+        mst_flat_req.arqos    = mst_post_delay.ar_qos;
+        mst_flat_req.arregion = mst_post_delay.ar_region;
+        mst_flat_req.arvalid  = mst_post_delay.ar_valid;
+        mst_flat_req.rready   = mst_post_delay.r_ready;
     end
     // AWUSER sideband (58 b, collective op + address mask): the file_master's
     // stimulus user field. It rides the crossbar to reach the NMU.
-    assign mst_flat_awuser = master_dv.aw_user;
-    assign master_dv.aw_ready = mst_flat_rsp.awready;
-    assign master_dv.w_ready  = mst_flat_rsp.wready;
-    assign master_dv.b_id     = mst_bid;
-    assign master_dv.b_resp   = mst_flat_rsp.bresp;
-    assign master_dv.b_user   = '0;
-    assign master_dv.b_valid  = mst_flat_rsp.bvalid;
-    assign master_dv.ar_ready = mst_flat_rsp.arready;
-    assign master_dv.r_id     = mst_rid;
-    assign master_dv.r_data   = mst_flat_rsp.rdata;
-    assign master_dv.r_resp   = mst_flat_rsp.rresp;
-    assign master_dv.r_last   = mst_flat_rsp.rlast;
-    assign master_dv.r_user   = '0;
-    assign master_dv.r_valid  = mst_flat_rsp.rvalid;
+    assign mst_flat_awuser = mst_post_delay.aw_user;
+    assign mst_post_delay.aw_ready = mst_flat_rsp.awready;
+    assign mst_post_delay.w_ready  = mst_flat_rsp.wready;
+    assign mst_post_delay.b_id     = mst_bid;
+    assign mst_post_delay.b_resp   = mst_flat_rsp.bresp;
+    assign mst_post_delay.b_user   = '0;
+    assign mst_post_delay.b_valid  = mst_flat_rsp.bvalid;
+    assign mst_post_delay.ar_ready = mst_flat_rsp.arready;
+    assign mst_post_delay.r_id     = mst_rid;
+    assign mst_post_delay.r_data   = mst_flat_rsp.rdata;
+    assign mst_post_delay.r_resp   = mst_flat_rsp.rresp;
+    assign mst_post_delay.r_last   = mst_flat_rsp.rlast;
+    assign mst_post_delay.r_user   = '0;
+    assign mst_post_delay.r_valid  = mst_flat_rsp.rvalid;
     // aw_atop / *_user driven by the class are dropped (out of scope).
 
     // ------------------------------------------------------------------

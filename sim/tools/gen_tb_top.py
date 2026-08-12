@@ -166,6 +166,24 @@ _MEM_LATENCY = "ideal"
 # refill_way_bin width ($clog2(16) = 4 bits). The watchdog is sized off it.
 _STALL_RANDOM_MAX_CYCLES = 15
 
+# Master-face consumer backpressure, response side only. Same two mechanisms as
+# the memory profile above, on the delayer between the file master and the tile
+# crossbar.
+#
+#   ideal   the delayer is wires. The master accepts R the cycle it arrives, so
+#           the NMU always sinks read data and the DAT dependency cycle
+#           noc-target-spec.md argues against cannot form. Every measurement to
+#           date assumed this, and sim-injection-sweep needs it: a consumer that
+#           stalls first measures the consumer, not fabric saturation.
+#   random  the master sometimes cannot keep up. R backs up through the
+#           crossbar into the NMU, which is what makes the deadlock question
+#           reachable at all.
+_MST_BACKPRESSURE_PROFILES = {
+    "ideal": (0, 0),
+    "random": (1, 0),
+}
+_MST_BACKPRESSURE = "ideal"
+
 
 def tile_targets(topo: dict, nodes):
     """Each node's own crossbar windows, in target PORT ORDER (m0 = config,
@@ -508,6 +526,10 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         _STALL_RANDOM_MAX_CYCLES if stall_in else delay_in,
         _STALL_RANDOM_MAX_CYCLES if stall_out else delay_out,
     )
+    mst_stall_out, mst_delay_out = _MST_BACKPRESSURE_PROFILES[_MST_BACKPRESSURE]
+    # A third per-beat stall source on the response path, so it lands in the
+    # watchdog budget beside the memory's. Zero under "ideal".
+    mst_cyc_per_beat = _STALL_RANDOM_MAX_CYCLES if mst_stall_out else mst_delay_out
     per_node, noc_egress_base = tile_targets(topo, nodes)
     n_targets = len(per_node[0])
     # ADDR_WIDTH'(...) casts, not sized literals: the field width has to follow
@@ -593,6 +615,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w(f"    localparam bit          MEM_STALL_RANDOM_OUTPUT = 1'b{stall_out};")
     w(f"    localparam int unsigned MEM_FIXED_DELAY_INPUT   = {delay_in};")
     w(f"    localparam int unsigned MEM_FIXED_DELAY_OUTPUT  = {delay_out};")
+    w(f'    // Master-face backpressure profile "{_MST_BACKPRESSURE}" (gen_tb_top.py')
+    w("    // _MST_BACKPRESSURE_PROFILES). One axi_delayer per endpoint between the")
+    w("    // file master and the tile crossbar, response side only.")
+    w(f"    localparam bit          MST_STALL_RANDOM_OUTPUT = 1'b{mst_stall_out};")
+    w(f"    localparam int unsigned MST_FIXED_DELAY_OUTPUT  = {mst_delay_out};")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Liveness trace. The watchdog below reports that time ran out; these two")
@@ -646,7 +673,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    localparam int unsigned TIMEOUT_BASE        = 100000;")
     w("    localparam int unsigned FABRIC_CYC_PER_BEAT = 40;")
     w(f"    localparam int unsigned MEM_CYC_PER_BEAT    = {mem_cyc_per_beat};")
-    w("    localparam int unsigned K_CYC_PER_BEAT  = FABRIC_CYC_PER_BEAT + MEM_CYC_PER_BEAT;")
+    w(f"    localparam int unsigned MST_CYC_PER_BEAT    = {mst_cyc_per_beat};")
+    w("    localparam int unsigned K_CYC_PER_BEAT  = FABRIC_CYC_PER_BEAT + MEM_CYC_PER_BEAT")
+    w("                                            + MST_CYC_PER_BEAT;")
     w("    localparam int unsigned MAX_BURST_BEATS = "
       "int'(REGION_BYTES) / (DATA_WIDTH / 8);")
     w("    int unsigned tb_num_reads  = 8;   // mirror endpoint defaults")
@@ -817,7 +846,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("            .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),")
     w("            .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),")
     w("            .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),")
-    w("            .MEM_FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT)")
+    w("            .MEM_FIXED_DELAY_OUTPUT(MEM_FIXED_DELAY_OUTPUT),")
+    w("            .MST_STALL_RANDOM_OUTPUT(MST_STALL_RANDOM_OUTPUT),")
+    w("            .MST_FIXED_DELAY_OUTPUT(MST_FIXED_DELAY_OUTPUT)")
     w("        ) u_endpoint (")
     w("            .clk_i(clk_i), .rst_ni(rst_ni),")
     w("            .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),")

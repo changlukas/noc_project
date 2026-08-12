@@ -22,7 +22,7 @@ Success Criteria:
 - The four id signals follow the design's table. `mst_awid` / `mst_arid` move to
   `mst_post_delay`, `mst_bid` / `mst_rid` stay on `tile_axi[0]`
 
-Status: Not Started
+Status: Complete
 
 ## Stage 2: turn it on
 
