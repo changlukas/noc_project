@@ -380,11 +380,12 @@ TEST(NmuPacketize, SamTranslateSetsDstFromTableAndKeepsTheAddress) {
         "NMU Packetize: push_aw runs SamTable::translate; dst_id comes from the table and "
         "awaddr is the request address, unchanged");
     ReqCapture aw_cap, w_cap, ar_cap;
-    // Single packed tile at (2,1) -> dst_id 0x12, base 0 (only entry in the list).
-    auto sam = addr_trans::SamTable::packed({{2, 1, 0x100000000ull}});
+    // Single packed tile at (2,1) -> dst_id 0x12, base ((1<<2)|2) * 4 GB =
+    // 0x600000000 (x_span = 3 -> x_bits = 2).
+    auto sam = addr_trans::SamTable::packed({{2, 1, 0x100000000ull}}, /*x_span=*/3, /*y_span=*/2);
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, /*src_id=*/0, sam);
     axi::AwBeat aw{};
-    aw.addr = 0x40ull;
+    aw.addr = 0x600000040ull;
     aw.id = 5;
     aw.len = 0;
     aw.size = 3;
@@ -392,5 +393,5 @@ TEST(NmuPacketize, SamTranslateSetsDstFromTableAndKeepsTheAddress) {
     ASSERT_TRUE(pkt.push_aw(aw));
     auto f = *aw_cap.pop();
     EXPECT_EQ(f.get_header_field("dst_id"), 0x12u);
-    EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x40ull);
+    EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0x600000040ull);
 }

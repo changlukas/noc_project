@@ -20,6 +20,7 @@ target_include_directories(test_depacketize PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 add_cmodel_test(test_addr_trans)
+target_link_libraries(test_addr_trans PRIVATE yaml-cpp::yaml-cpp)
 
 add_cmodel_test(test_sam_table)
 

@@ -23,16 +23,22 @@ inline axi::AxiClass parse_tile_space(const YAML::Node& tile) {
 }
 
 // Per-space coordinate ranges, mirroring floogen's gen_collective_sam: the
-// loader is where x_dim, y_dim and the space's node stride are all in hand.
+// loader is where x_span, y_span and the space's node stride are all in hand.
 //
-//   range.len      = clog2(dim)
+//   range.len      = clog2(span)
 //   x_range.offset = log2(node_stride)
-//   y_range.offset = log2(node_stride) + clog2(x_dim)
+//   y_range.offset = log2(node_stride) + clog2(x_span)
 //
 // X sits below Y because this repo packs raster order, X fastest (see
 // SpaceCoords). A space the declaration does not fit is simply not a collective
 // target (spec §5.1), so the return value is not an error to raise here.
-inline void declare_space_coords(SamTable& table, unsigned x_dim, unsigned y_dim) {
+//
+// tile_x_first/tile_x_last/tile_y_first/tile_y_last are the inclusive tile
+// region inside the route span (SpaceCoords); a coordinate outside them is a
+// peripheral or unpopulated padding and is not walked by declare_space_coords.
+inline void declare_space_coords(SamTable& table, unsigned x_span, unsigned y_span,
+                                 unsigned tile_x_first, unsigned tile_x_last, unsigned tile_y_first,
+                                 unsigned tile_y_last) {
     for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
         const SamEntry* first = nullptr;
         const SamEntry* second = nullptr;
@@ -52,10 +58,14 @@ inline void declare_space_coords(SamTable& table, unsigned x_dim, unsigned y_dim
         unsigned offset = 0;
         while ((uint64_t{1} << offset) != stride) ++offset;
         SpaceCoords c;
-        c.x_count = x_dim;
-        c.y_count = y_dim;
-        c.x_range = {offset, clog2(x_dim)};
-        c.y_range = {offset + clog2(x_dim), clog2(y_dim)};
+        c.x_count = x_span;
+        c.y_count = y_span;
+        c.x_range = {offset, clog2(x_span)};
+        c.y_range = {offset + clog2(x_span), clog2(y_span)};
+        c.x_first = tile_x_first;
+        c.x_last = tile_x_last;
+        c.y_first = tile_y_first;
+        c.y_last = tile_y_last;
         table.declare_space_coords(cls, c);
     }
 }
@@ -105,9 +115,11 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
     }
 }
 
-// address_map.tiles: ordered list of { x, y, size, space? }; base(i) is derived
-// by SamTable::packed() as base(i-1) + size(i-1). No tile_size, no base, no
-// default base. A node may appear once per space (validate()).
+// address_map.tiles: ordered list of { x, y, size, space? }; base(x, y) is
+// derived by SamTable::packed() from the coordinate and the space's slot
+// size. No tile_size, no base, no default base. A node may appear once per
+// space (validate()). No peripheral declaration yet (Task 4), so the tile
+// region passed to declare_space_coords is the full x_dim/y_dim span.
 inline SamTable load_sam_table(const std::string& yaml_path) {
     YAML::Node root = YAML::LoadFile(yaml_path);
     unsigned x_dim = root["topology"]["x_dim"].as<unsigned>();
@@ -126,9 +138,9 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
         tiles.push_back({t["x"].as<unsigned>(), t["y"].as<unsigned>(), t["size"].as<uint64_t>(),
                          parse_tile_space(t)});
     }
-    SamTable table = SamTable::packed(tiles);
+    SamTable table = SamTable::packed(tiles, x_dim, y_dim);
     table.validate(x_dim, y_dim);
-    declare_space_coords(table, x_dim, y_dim);
+    declare_space_coords(table, x_dim, y_dim, 0, x_dim - 1, 0, y_dim - 1);
     check_decode_mode(am, table);  // after the ranges exist -- offset mode is checked against them
     return table;
 }

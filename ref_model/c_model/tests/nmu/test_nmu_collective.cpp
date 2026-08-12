@@ -33,11 +33,19 @@ constexpr uint64_t kTile = 0x1000;
 // coordinate ranges the way sam_yaml's loader does for a shipped topology.
 // Returns false when the entries contradict the declaration, which leaves the
 // space a unicast-only target (spec §5.1).
+// No peripheral in any fixture here, so the tile region is the full span --
+// x_first/y_first = 0, x_last/y_last = count - 1.
 bool declare(addr_trans::SamTable& t, axi::AxiClass cls, unsigned offset, unsigned x_count,
              unsigned y_count) {
     const unsigned x_bits = addr_trans::clog2(x_count);
-    return t.declare_space_coords(
-        cls, {{offset, x_bits}, {offset + x_bits, addr_trans::clog2(y_count)}, x_count, y_count});
+    return t.declare_space_coords(cls, {{offset, x_bits},
+                                        {offset + x_bits, addr_trans::clog2(y_count)},
+                                        x_count,
+                                        y_count,
+                                        0,
+                                        x_count - 1,
+                                        0,
+                                        y_count - 1});
 }
 
 // 4x4 mesh, one 4 KB tile per node, packed row-major. dst_id = (y << 4) | x and
@@ -440,8 +448,8 @@ TEST(NmuCollectiveDeath, DuplicateNodeInTheDestinationSet) {
         "third and fourth tiles both carry dst 0x02, so no X range accounts for the space and the "
         "declaration is refused -- the space is a unicast-only target and the collective anchored "
         "in it is rejected at the gate, once, instead of on every request");
-    auto sam =
-        addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}});
+    auto sam = addr_trans::SamTable::packed(
+        {{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}}, /*x_span=*/4, /*y_span=*/1);
     EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 4, 1));
     CollectiveTestbench t(std::move(sam));
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))),
@@ -459,23 +467,31 @@ TEST(NmuCollectiveDeath, MaskBitOutsideTheMesh) {
                  "coordinate ranges of the anchor");
 }
 
-TEST(NmuCollectiveDeath, MaskNamesACoordinateThatIsNotAMeshNode) {
+TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
     SCENARIO(
         "NMU collective §2.2 check 4, the case only a non-power-of-two dimension can reach: a "
-        "3-wide row needs a 2 bit X range, so mask_x = 0x2 sits inside the range yet the wildcard "
-        "set anchored at x = 1 is {1, 3} and node 3 does not exist. The bound is on the highest "
-        "member, anchor | mask -- the mask alone is in range here");
-    auto sam = addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}});
+        "3-wide row needs a 2 bit X range, so mask_x = 0x2 sits inside the range yet the raw "
+        "wildcard set anchored at x = 1 is {1, 3} and node 3 does not exist -- it is padding above "
+        "the dimension, the same as an out-of-tile-region peripheral coordinate. off-mesh "
+        "peripherals design 'side effect': this used to abort (anchor_x | mask_x >= x_count); it "
+        "now clips to the tile region like any other out-of-region coordinate, giving {1}");
+    auto sam = addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}},
+                                            /*x_span=*/3, /*y_span=*/1);
     ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 3, 1));
     CollectiveTestbench t(std::move(sam));
-    // Anchored at x = 0 the same mask names {0, 2}, both real nodes: the bound
-    // rejects the set that leaves the row, not the mask shape.
+    // Anchored at x = 0 the mask names {0, 2}, both real nodes -- no clipping.
     ASSERT_TRUE(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))));
     auto f = t.aw_cap.pop();
     ASSERT_TRUE(f.has_value());
     EXPECT_EQ(f->get_header_field("collective_mask"), 0x02u);
-    EXPECT_DEATH(t.rob.push_aw(make_aw(0x06, kTile, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))),
-                 "outside the mesh");
+    // Anchored at x = 1 the raw set {1, 3} clips to {1}: node 3 falls outside
+    // the tile region (x_last = 2) and is dropped, same as route_mask_fork
+    // would drop it at the router. The mask field itself is unchanged --
+    // clipping happens identically wherever the set is recomputed.
+    ASSERT_TRUE(t.rob.push_aw(make_aw(0x06, kTile, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))));
+    auto f2 = t.aw_cap.pop();
+    ASSERT_TRUE(f2.has_value());
+    EXPECT_EQ(f2->get_header_field("collective_mask"), 0x02u);
 }
 
 TEST(NmuCollectiveDeath, NodeSetIsNotAnAlignedWildcard) {
@@ -484,8 +500,8 @@ TEST(NmuCollectiveDeath, NodeSetIsNotAnAlignedWildcard) {
         "dst_id. Here the tiles run (0,0), (1,0), (2,1), (3,1), so the third tile's dst is 0x12 "
         "where a 2x2 raster wants 0x10: no X/Y range pair accounts for the space, the declaration "
         "is refused, and the anchor is not a collective target");
-    auto sam =
-        addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}});
+    auto sam = addr_trans::SamTable::packed(
+        {{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}}, /*x_span=*/4, /*y_span=*/2);
     EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 2, 2));
     CollectiveTestbench t(std::move(sam));
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))),

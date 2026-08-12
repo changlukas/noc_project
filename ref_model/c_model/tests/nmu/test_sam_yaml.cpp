@@ -12,7 +12,10 @@ using ni::cmodel::nmu::addr_trans::collective_translate;
 using ni::cmodel::nmu::addr_trans::load_sam_table;
 namespace axi = ni::cmodel::axi;
 
-TEST(SamYaml, PackedTilesAccumulateBases) {
+TEST(SamYaml, PackedTilesBaseFromCoordinateAndSlot) {
+    // x_dim = 2 -> x_bits = 1, slot = largest declared size = 0x2000.
+    // base(1,0) = ((0<<1)|1) * 0x2000 -- the coordinate times the slot, not
+    // list-order accumulation.
     auto path = ni::cmodel::testing::unique_temp_path("sam_packed.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
@@ -24,7 +27,7 @@ TEST(SamYaml, PackedTilesAccumulateBases) {
     auto sam = load_sam_table(path);
     ASSERT_EQ(sam.entries().size(), 4u);
     EXPECT_EQ(sam.entries()[0].base, 0x0ull);
-    EXPECT_EQ(sam.entries()[1].base, 0x1000ull);  // base(1) = base(0) + size(0)
+    EXPECT_EQ(sam.entries()[1].base, 0x2000ull);
 }
 
 TEST(SamYaml, TranslateForwardsTheAddressFromAPackedMap) {
