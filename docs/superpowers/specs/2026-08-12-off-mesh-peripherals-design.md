@@ -214,10 +214,10 @@ rather than asserted.
 **One rule changes: a row is strided to a power of two, not to the number of entries.**
 
 ```
-base(x, y) = base_zero + ((y << X_WIDTH) | x) * size
+base(x, y) = base_zero + ((y << X_WIDTH) | x) * slot_size
 ```
 
-where `X_WIDTH = clog2(route span)`. Today's packing accumulates in list order
+where `X_WIDTH = clog2(route span)` and `slot_size` is declared by the space, not inferred. Today's packing accumulates in list order
 (`address_map.py:61,75`), which produces the same result only when the row length happens to be a
 power of two. Deriving the base from the coordinate makes the identity structural instead of
 accidental, and it is what lets the address coordinate field and the route coordinate be the same
@@ -265,10 +265,25 @@ walk. Those are the same two numbers the clip already needs, which is why this c
 target: a request naming it misses the SAM, which `SamTable::translate` already treats as fatal.
 Nothing new is needed to make it loud.
 
-**Entry order is part of the contract.** `declare_space_coords` reads its stride from the first two
-entries of a class (`sam_yaml.hpp:50`), so entries are listed in coordinate order and the first two
-are adjacent tiles. The worked example below assumes it; the loader should enforce it rather than
-leave it to the author.
+**The coordinate slot size is stated, not inferred.** `declare_space_coords` today derives it as
+`second->base - first->base` from the first two entries of a class (`sam_yaml.hpp:50`). That
+inference breaks as soon as a peripheral precedes the tiles in coordinate order, or is not the same
+size as a tile. The space declares its slot size instead, which is the same preference the file
+already argues for one struct above: a dimension recovered as `1 << len` over-permits, so it is
+stated.
+
+Three things follow from that one change, and they are the whole of what was still loose:
+
+| | rule |
+|---|---|
+| base | `base(x, y) = base_zero + ((y << X_WIDTH) | x) * slot_size`, using the space's slot size and never an individual entry's `size` |
+| field offset | `x_range.offset = log2(slot_size)`, stated rather than read off a difference |
+| per-entry bound | every entry, tile or peripheral, satisfies `base == base(x, y)` and `size <= slot_size` |
+
+The per-entry bound is a new validator and it is needed: `addr_trans.hpp:145` only catches an
+overlap with another entry, so a peripheral on a high edge could overrun its slot into unused
+padding without colliding with anything, and its coordinate bits would then name a slot it does not
+own. The bound makes that a load-time error instead.
 
 **A peripheral sharing the tile space fits within one coordinate slot.** Its base is fixed at its
 coordinate, so a window larger than the slot runs into the next one and `addr_trans.hpp:149`
@@ -306,8 +321,9 @@ Route span `x` is `0..2`, so `X_WIDTH = clog2(3) = 2` and a row strides four slo
 `0x500000` is `0b0101` in bits [23:20], so `y = 1`, `x = 1`. `0x600000` is `0b0110`, so `y = 1`,
 `x = 2`. The field is the coordinate.
 
-`declare_space_coords` reads `stride = 0x100000` from the first two entries, a power of two, giving
-`offset = 20`, `x_range = {20, 2}`, `y_range = {22, 1}`.
+The space declares `slot_size = 0x100000`, so `offset = 20`, `x_range = {20, 2}` and
+`y_range = {22, 1}`. Every entry here happens to be one slot, but only the bound `size <= slot_size`
+is required.
 
 The walk covers the tile region, `x = 1..2` and `y = 0..1`, so the entry count it checks is
 `4 == 2 * 2` and its origin is `T(1,0)` at `0x100000`, whose coordinate bits read `x = 1, y = 0`.
