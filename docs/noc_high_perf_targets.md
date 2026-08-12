@@ -36,7 +36,7 @@ decides whether this NoC pays for itself.
 `B` response, used to be carried in the same 408-bit flit, so control channels used only 18
 to 31 % of the payload (`AW/AR` 108/352 = 31 %, `B` 64/352 = 18 %) and the header cost
 13.7 % overhead. Recovering that is why the narrow plane was split out; the fabric now
-carries three per-network widths (REQ 137 b, RSP 127 b, DAT 629 b) over a 44 b header.
+carries three per-network widths (REQ 132 b, RSP 122 b, DAT 629 b) over a 44 b header.
 
 ---
 

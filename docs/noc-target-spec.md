@@ -83,7 +83,7 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
           └───────┘   └───────┘   └───────┘   └───────┘
 
           every link, per direction, flit wires only
-          REQ 137 b + RSP 127 b + DAT 629 b
+          REQ 132 b + RSP 122 b + DAT 629 b
           4 x 4 shown, 16 x 16 max
 ~~~
 
@@ -96,7 +96,7 @@ Inside one node:
    │  Compute   │   AXI4   │   │   Network      │       │    Router    │  REQ  ══▶
    │  tile      │ ────────────▶│   interface    │──────▶│  XY route    │
    │            │  addr 48 │   │                │       │  VC allocate │  RSP  ══▶
-   │  (master)  │  ID 8    │   │  address map   │       │  replicate   │  DAT  ══▶
+   │  (master)  │  ID 3    │   │  address map   │       │  replicate   │  DAT  ══▶
    │            │◀═════════════│  packetize     │◀──────│  merge       │  ◀══ 4 neighbours
    │            │          │   │  depacketize   │       │              │
    └────────────┘          │   │  response order│       │              │
@@ -117,8 +117,8 @@ Physically separate networks, not virtual channels on a shared link:
 
 | Physical link | Size | Narrow class | Data class |
 |---|---|---|---|
-| `REQ` | 137 b | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
-| `RSP` | 127 b | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
+| `REQ` | 132 b | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
+| `RSP` | 122 b | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
 | `DAT` | 629 b | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
 
 One `DAT` network, not a request and response pair, even though it carries request-direction
@@ -216,7 +216,7 @@ cover both.
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `AWID` | 8 | Master | Write address ID |
+| `AWID` | 3 | Master | Write address ID |
 | `AWADDR` | 48 | Master | Write address |
 | `AWLEN` | 8 | Master | Burst length |
 | `AWSIZE` | 3 | Master | Burst size |
@@ -245,7 +245,7 @@ cover both.
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `BID` | 8 | Slave | Write response ID |
+| `BID` | 3 | Slave | Write response ID |
 | `BRESP` | 2 | Slave | Write response |
 | `BUSER` | 8 | Slave | User signal |
 | `BVALID` | 1 | Slave | Write response valid |
@@ -255,7 +255,7 @@ cover both.
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `ARID` | 8 | Master | Read address ID |
+| `ARID` | 3 | Master | Read address ID |
 | `ARADDR` | 48 | Master | Read address |
 | `ARLEN` | 8 | Master | Burst length |
 | `ARSIZE` | 3 | Master | Burst size |
@@ -273,7 +273,7 @@ cover both.
 
 | Signal | Width | Source | Description |
 |---|---:|---|---|
-| `RID` | 8 | Slave | Read ID tag |
+| `RID` | 3 | Slave | Read ID tag |
 | `RDATA` | 64 or 512 | Slave | Read data, 64 b narrow class, 512 b data class |
 | `RRESP` | 2 | Slave | Read response |
 | `RLAST` | 1 | Slave | Read last, the last transfer in a read burst |
@@ -296,16 +296,16 @@ below are from the port's own view. No wire is shared between the two instances.
 
 | Signal | Width | Direction | Description |
 |---|---:|---|---|
-| `TXREQFLIT` | 137 | Output | `REQ` transmit flit, header and payload |
+| `TXREQFLIT` | 132 | Output | `REQ` transmit flit, header and payload |
 | `TXREQVALID` | 1 | Output | `REQ` transmit valid |
 | `TXREQREADY` | 1 | Input | `REQ` transmit ready, from the receiver |
-| `RXREQFLIT` | 137 | Input | `REQ` receive flit |
+| `RXREQFLIT` | 132 | Input | `REQ` receive flit |
 | `RXREQVALID` | 1 | Input | `REQ` receive valid |
 | `RXREQREADY` | 1 | Output | `REQ` receive ready |
-| `TXRSPFLIT` | 127 | Output | `RSP` transmit flit, header and payload |
+| `TXRSPFLIT` | 122 | Output | `RSP` transmit flit, header and payload |
 | `TXRSPVALID` | 1 | Output | `RSP` transmit valid |
 | `TXRSPREADY` | 1 | Input | `RSP` transmit ready, from the receiver |
-| `RXRSPFLIT` | 127 | Input | `RSP` receive flit |
+| `RXRSPFLIT` | 122 | Input | `RSP` receive flit |
 | `RXRSPVALID` | 1 | Input | `RSP` receive valid |
 | `RXRSPREADY` | 1 | Output | `RSP` receive ready |
 | `TXDATFLIT` | 629 | Output | `DAT` transmit flit, flit type in `axi_ch`, see §6 |
@@ -324,7 +324,7 @@ below are from the port's own view. No wire is shared between the two instances.
 | Attribute | Value | Comments |
 |---|---|---|
 | Address width | 48 b | - |
-| ID width | 8 b | - |
+| ID width | 3 b | - |
 | `AWUSER` width | 58 b | 50 bits hold collective attributes, see §6 |
 | `ARUSER`, `WUSER`, `RUSER`, `BUSER` width | 8 b | - |
 | Narrow class data width | 64 b | - |
@@ -403,39 +403,39 @@ and validated against it at load.
 `addr` in `Aw` and `Ar` carries the node-local offset, `AWADDR` / `ARADDR` minus the matched SAM
 region base.
 
-`Aw`, 93 b:
+`Aw`, 88 b:
 
 | Field | Bits | Width |
 |---|---|---:|
-| `id` | [7:0] | 8 |
-| `addr` | [55:8] | 48 |
-| `len` | [63:56] | 8 |
-| `size` | [66:64] | 3 |
-| `burst` | [68:67] | 2 |
-| `cache` | [72:69] | 4 |
-| `lock` | [73] | 1 |
-| `prot` | [76:74] | 3 |
-| `region` | [80:77] | 4 |
-| `qos` | [84:81] | 4 |
-| `user` | [92:85] | 8 |
+| `id` | [2:0] | 3 |
+| `addr` | [50:3] | 48 |
+| `len` | [58:51] | 8 |
+| `size` | [61:59] | 3 |
+| `burst` | [63:62] | 2 |
+| `cache` | [67:64] | 4 |
+| `lock` | [68] | 1 |
+| `prot` | [71:69] | 3 |
+| `region` | [75:72] | 4 |
+| `qos` | [79:76] | 4 |
+| `user` | [87:80] | 8 |
 
 `user` carries `AWUSER[7:0]`, user defined. `AWUSER[57:8]` holds `collective_op` and `collective_mask`, consumed by the NMU at packetize time, not carried in the payload.
 
-`Ar`, 93 b:
+`Ar`, 88 b:
 
 | Field | Bits | Width |
 |---|---|---:|
-| `id` | [7:0] | 8 |
-| `addr` | [55:8] | 48 |
-| `len` | [63:56] | 8 |
-| `size` | [66:64] | 3 |
-| `burst` | [68:67] | 2 |
-| `cache` | [72:69] | 4 |
-| `lock` | [73] | 1 |
-| `prot` | [76:74] | 3 |
-| `region` | [80:77] | 4 |
-| `qos` | [84:81] | 4 |
-| `user` | [92:85] | 8 |
+| `id` | [2:0] | 3 |
+| `addr` | [50:3] | 48 |
+| `len` | [58:51] | 8 |
+| `size` | [61:59] | 3 |
+| `burst` | [63:62] | 2 |
+| `cache` | [67:64] | 4 |
+| `lock` | [68] | 1 |
+| `prot` | [71:69] | 3 |
+| `region` | [75:72] | 4 |
+| `qos` | [79:76] | 4 |
+| `user` | [87:80] | 8 |
 
 `user` carries the full 8 b `ARUSER`.
 
@@ -457,33 +457,33 @@ region base.
 | `strb` | [72:9] | 64 |
 | `data` | [584:73] | 512 |
 
-`B`, 18 b:
+`B`, 13 b:
 
 | Field | Bits | Width |
 |---|---|---:|
-| `id` | [7:0] | 8 |
-| `resp` | [9:8] | 2 |
-| `user` | [17:10] | 8 |
+| `id` | [2:0] | 3 |
+| `resp` | [4:3] | 2 |
+| `user` | [12:5] | 8 |
 
-`NarrowR`, 83 b:
-
-| Field | Bits | Width |
-|---|---|---:|
-| `last` | [0] | 1 |
-| `id` | [8:1] | 8 |
-| `resp` | [10:9] | 2 |
-| `user` | [18:11] | 8 |
-| `data` | [82:19] | 64 |
-
-`DataR`, 531 b:
+`NarrowR`, 78 b:
 
 | Field | Bits | Width |
 |---|---|---:|
 | `last` | [0] | 1 |
-| `id` | [8:1] | 8 |
-| `resp` | [10:9] | 2 |
-| `user` | [18:11] | 8 |
-| `data` | [530:19] | 512 |
+| `id` | [3:1] | 3 |
+| `resp` | [5:4] | 2 |
+| `user` | [13:6] | 8 |
+| `data` | [77:14] | 64 |
+
+`DataR`, 526 b:
+
+| Field | Bits | Width |
+|---|---|---:|
+| `last` | [0] | 1 |
+| `id` | [3:1] | 3 |
+| `resp` | [5:4] | 2 |
+| `user` | [13:6] | 8 |
+| `data` | [525:14] | 512 |
 
 **`AWUSER` layout, 58 b.** `ARUSER` is 8 b.
 
@@ -513,8 +513,8 @@ width. W and R utilization count the AXI data field over the flit width.
 
 | Network | Header overhead | `W` utilization | `R` utilization |
 |---|---:|---:|---:|
-| `REQ` 137 b | 32.1 % | 46.7 %, `NarrowW` | - |
-| `RSP` 127 b | 34.6 % | - | 50.4 %, `NarrowR` |
+| `REQ` 132 b | 33.3 % | 48.5 %, `NarrowW` | - |
+| `RSP` 122 b | 36.1 % | - | 52.5 %, `NarrowR` |
 | `DAT` 629 b | **7.0 %** | 81.4 %, `DataW` | 81.4 %, `DataR` |
 
 `DataAw` rides `DAT` for ordering, not size: AXI4 write data carries no ID, a slave pairs data
@@ -558,8 +558,8 @@ AXI payload.
 
 **NoC channel**, per link direction:
 
-- `REQ`: flit 137 b @ 1 GHz = 17.1 GB/s channel, 8 GB/s payload
-- `RSP`: flit 127 b @ 1 GHz = 15.9 GB/s channel, 8 GB/s payload
+- `REQ`: flit 132 b @ 1 GHz = 16.5 GB/s channel, 8 GB/s payload
+- `RSP`: flit 122 b @ 1 GHz = 15.25 GB/s channel, 8 GB/s payload
 - `DAT`: flit 629 b @ 1 GHz = 78.6 GB/s channel, **64 GB/s** payload
 
 - `NarrowW` rides `REQ`, `NarrowR` rides `RSP`: concurrent.
