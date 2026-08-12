@@ -113,3 +113,32 @@ TEST(CollectiveClipDeath, ClippedBoundNotAMemberAborts) {
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x200000);  // mask_x = 0x2
     EXPECT_DEATH(addr_trans::collective_translate(sam, b), "member of the wildcard set");
 }
+
+TEST(OffMeshDst, SameRowPeripheralIsReachable) {
+    SCENARIO(
+        "nmu::addr_trans::check_dst_reachable: a peripheral sits outside the tile region on x and "
+        "is reached by running out of x hops, which happens on the source's own row. Both tiles of "
+        "row 0 address the peripheral at (0,0), and the tile at (1,1) addresses the one at (0,1) "
+        "-- every one of them is on its destination's row, so none is refused");
+    auto sam = make_sam_with_border_column();
+    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    ASSERT_NE(coords, nullptr);
+    addr_trans::check_dst_reachable(coords, /*src_id=*/0x01, /*dst_id=*/0x00);  // (1,0) -> (0,0)
+    addr_trans::check_dst_reachable(coords, /*src_id=*/0x02, /*dst_id=*/0x00);  // (2,0) -> (0,0)
+    addr_trans::check_dst_reachable(coords, /*src_id=*/0x11, /*dst_id=*/0x10);  // (1,1) -> (0,1)
+    // A tile destination is inside the region and is reachable from anywhere.
+    addr_trans::check_dst_reachable(coords, /*src_id=*/0x00, /*dst_id=*/0x12);  // (0,0) -> (2,1)
+}
+
+TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
+    SCENARIO(
+        "nmu::addr_trans::check_dst_reachable: the tile at (2,1) addressing the peripheral at "
+        "(0,0) exhausts its x hops while still on row 1 (router.hpp resolves X before Y), leaves "
+        "the region WEST there and lands in the peripheral at (0,1), whose NSU rebases the address "
+        "to its own tile and answers it. Nothing downstream can tell, so the source refuses it");
+    auto sam = make_sam_with_border_column();
+    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    ASSERT_NE(coords, nullptr);
+    EXPECT_DEATH(addr_trans::check_dst_reachable(coords, /*src_id=*/0x12, /*dst_id=*/0x00),
+                 "outside the tile region");
+}

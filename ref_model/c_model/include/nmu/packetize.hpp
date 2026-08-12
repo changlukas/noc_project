@@ -178,6 +178,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
            "nmu::Packetize::push_aw_with_meta: meta.collective_op disagrees with AWUSER[9:8]");
     assert((meta.collective_op == axi::COLLECTIVE_OP_UNICAST) == (meta.collective_mask == 0) &&
            "nmu::Packetize::push_aw_with_meta: collective_op and collective_mask disagree");
+    addr_trans::check_dst_reachable(sam_.collective_coords(meta.cls), src_id_, meta.dst_id);
     // Narrow class rides the 81 b NarrowW payload (64 b data lane): AxSIZE > 3
     // (8 B) does not fit. A stimulus/SAM-config error, not backpressure, so it
     // takes the same fatal shape as addr_trans / depacketize / rob use for a
@@ -268,6 +269,7 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
 }
 
 inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) {
+    addr_trans::check_dst_reachable(sam_.collective_coords(meta.cls), src_id_, meta.dst_id);
     // Same narrow-size reject as push_aw_with_meta (see comment there).
     if (meta.cls == axi::AxiClass::Narrow && b.size > 3) {
         assert(false &&

@@ -6,6 +6,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>   // std::fprintf (fatal-message style, flit.hpp)
 #include <cstdlib>  // std::abort
 #include <utility>  // std::move
 #include <vector>
@@ -415,6 +416,41 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     static_assert(ni::width::X_WIDTH + ni::width::Y_WIDTH <= 8,
                   "node id / collective_mask no longer fit uint8_t");
     return static_cast<uint8_t>((mask_y << ni::width::X_WIDTH) | mask_x);
+}
+
+// Reject a destination the fabric cannot deliver to, called from Packetize for
+// every AW and AR (collective or not) once the destination is known.
+//
+// XY routing resolves X before Y (router::route_compute), so a destination
+// outside the tile region on the x axis -- a peripheral on a border router's
+// WEST or EAST port -- is reached by running out of x hops, which happens on
+// the SOURCE's row. From another row the flit leaves the region one row early
+// and lands in whichever peripheral borders that row; that peripheral's NSU
+// rebases the address to its own tile and answers it, so nothing downstream can
+// tell. The y axis is not row-sensitive: a destination outside the region on y
+// is reached after x has already resolved, from any column.
+//
+// Same permanent-illegal-input shape as collective_translate above: a rejected
+// request never becomes legal on retry, so it fails loud instead of returning.
+inline void check_dst_reachable(const SpaceCoords* coords, uint8_t src_id, uint8_t dst_id) {
+    // A space that declares no coordinate ranges states no tile region. The
+    // tables that skip the declaration are the uniform fixtures, whose every
+    // coordinate is a tile, so no destination can be outside one.
+    if (coords == nullptr) return;
+    constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
+    const unsigned dst_x = dst_id & kXFieldMask;
+    const unsigned dst_y = dst_id >> ni::width::X_WIDTH;
+    const unsigned src_y = src_id >> ni::width::X_WIDTH;
+    if (dst_x >= coords->x_first && dst_x <= coords->x_last) return;
+    if (dst_y == src_y) return;
+    std::fprintf(stderr,
+                 "nmu::addr_trans::check_dst_reachable: node (%u,%u) addressed (%u,%u), which "
+                 "sits outside the tile region [%u,%u] on x. Such a destination is reached by "
+                 "running out of x hops, which happens on the source's own row, so address it "
+                 "from row %u.\n",
+                 src_id & kXFieldMask, src_y, dst_x, dst_y, coords->x_first, coords->x_last, dst_y);
+    assert(false && "check_dst_reachable: off-mesh destination on another row");
+    std::abort();  // belt-and-braces for NDEBUG
 }
 
 }  // namespace ni::cmodel::nmu::addr_trans
