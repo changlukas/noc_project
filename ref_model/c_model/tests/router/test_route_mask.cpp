@@ -150,6 +150,53 @@ TEST(RouteMaskClip, JoinExpectsNoInputFromTheClippedSide) {
     EXPECT_FALSE(router::port_in_mask(route, router::RouterPort::WEST));
 }
 
+// --- clip to the tile region: the empty-set guard ---------------------------
+
+// Both RouteMaskClip tests above clip a set that stays non-empty; neither
+// exercises the abort. A non-wildcarded coordinate naming a tile outside
+// [tile_first, tile_last] does: dst.x = 0 (mask.x = 0, no wildcard) against
+// tile_x_first = 1 clamps dst_min.x up to 1 while dst_max.x clamps down to 0,
+// so dst_min.x > dst_max.x and the guard fires.
+TEST(RouteMaskClipDeath, ForkAbortsOnEmptyMemberSet) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    router::RouterConfig cfg{};
+    cfg.x = 1;
+    cfg.y = 0;
+    cfg.mesh_x_dim = 3;
+    cfg.mesh_y_dim = 2;
+    cfg.tile_x_first = 1;
+    cfg.tile_x_last = 2;
+    cfg.tile_y_first = 0;
+    cfg.tile_y_last = 1;
+
+    const uint8_t dst = node_id(0, 0);  // outside the tile region, no wildcard
+    const uint8_t src = node_id(1, 0);
+    const uint8_t mask = 0;
+
+    EXPECT_DEATH(router::route_mask_fork(dst, src, mask, cfg), "empty after clipping");
+}
+
+// Mirror of the fork case: src_id is the wildcarded side of a join, and names
+// x = 0 with no wildcard, outside the tile region.
+TEST(RouteMaskClipDeath, JoinAbortsOnEmptyMemberSet) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    router::RouterConfig cfg{};
+    cfg.x = 1;
+    cfg.y = 0;
+    cfg.mesh_x_dim = 3;
+    cfg.mesh_y_dim = 2;
+    cfg.tile_x_first = 1;
+    cfg.tile_x_last = 2;
+    cfg.tile_y_first = 0;
+    cfg.tile_y_last = 1;
+
+    const uint8_t collector = node_id(1, 0);
+    const uint8_t src = node_id(0, 0);  // outside the tile region, no wildcard
+    const uint8_t mask = 0;
+
+    EXPECT_DEATH(router::route_mask_join(collector, src, mask, cfg), "empty after clipping");
+}
+
 // --- fork, hand-computed tables ---------------------------------------------
 
 // 4x4, offset submesh with a non-contiguous Y mask: anchor (2,1), mask (1,2)
