@@ -48,15 +48,16 @@ case (m,):    self.start = self.base + size * m
 case (m, n):  self.start = self.base + size * (m * arr_dim[1] + n)
 ```
 
-## Three quantities that are currently one
+## Four quantities that are currently one
 
-The design rests on separating three things the code treats as a single pair of numbers today.
+The design rests on separating four things the code treats as a single pair of numbers today.
 
 | quantity | what it is | who uses it | changes with a border |
 |---|---|---|---|
 | physical router array | how many routers exist, per axis | fabric generator, for neighbour wiring | no |
 | route-coordinate span | physical span plus any populated border ring | `X_WIDTH` / `Y_WIDTH`, and the range check in `route_compute` | yes |
 | per-router coordinate | that router's own normalised `(x, y)` | each router's config, the SAM | shifts by the offset |
+| tile region | which stretch of the span holds tiles rather than peripherals | the collective clip, see below | is what the border creates |
 
 `sim/tools/gen_tb_top.py:354` derives each router's neighbours from `X_DIM`/`Y_DIM` and a linear
 node index. If `X_DIM` were widened to the route span, the generator would wire routers that do
@@ -175,10 +176,60 @@ The second is a container limit, not a design one, and it goes. A generated `nod
 model and in the flit field. The same guard exists on the consumer side at `route_mask.hpp:43-46`
 and moves with it.
 
-**Consequence worth stating, because it is not obvious:** a coordinate mask can select the border
-ring, since the border occupies ordinary coordinate values. "Peripherals are not multicast targets"
-is therefore not free. The mask generator has to avoid border coordinates, or a mask meaning "the
-whole of row y" silently includes the peripheral on that row.
+A coordinate mask can therefore select the border ring, since the border occupies ordinary
+coordinate values. That is not a detail: it decides where peripherals may be placed. The next
+section is the mechanism that settles it.
+
+### Collectives exclude peripherals by construction
+
+A multicast names its members as a coordinate wildcard: the set is
+`{v : v & ~mask == anchor & ~mask}`, a block of `2^k` values aligned to `2^k` per axis. Peripherals
+sit on ordinary coordinates, so a block that covers the tiles can cover them too. On a low edge it
+is worse than that: with tiles at `1..N` the set `{1..N}` is not aligned and is not expressible at
+all, so a peripheral on the west would cost row-wise multicast entirely.
+
+Two obvious fixes do not work, and both were checked rather than assumed.
+
+| attempted fix | why it fails |
+|---|---|
+| the peripheral's leaf declines to eject a replica | `CollectB` join is stateless: every router recomputes the expected input set from the B header (`simple_router.hpp:450`). A member that does not respond is still counted, and the collect hangs |
+| concentration, so the peripheral shares a coordinate and differs by port | the multicast predicate has no port dimension. Upstream's `floo_route_xymask.sv` never mentions `port_id`, and neither does the port of it in `route_mask.hpp` |
+
+**The member set is the mask rectangle intersected with the tile region.**
+
+`RouterConfig` gains `tile_min` and `tile_max` per axis, beside the existing `mesh_x_dim` /
+`mesh_y_dim`. The three now read unambiguously:
+
+| field | meaning |
+|---|---|
+| `mesh_x_dim`, `mesh_y_dim` | route-coordinate span, including any populated border. The range check |
+| `tile_min`, `tile_max` | which stretch of that span holds tiles. The collective clip |
+
+These are elaboration-time parameters, exactly as `mesh_x_dim` is today, **not control registers.**
+The values are a property of the topology and never change after synthesis. Making them writable
+would convert a structural guarantee into a runtime convention: one router configured differently
+from the rest would break the member set on one side of the fork/join pair, and the symptom would
+look like a fabric bug rather than a configuration error.
+
+`route_mask.hpp` clips `dst_min`/`dst_max` on the fork path and `src_min`/`src_max` on the join
+path before its range comparisons. Both directions clip with the same bounds, so membership stays
+identical everywhere it is recomputed. `addr_trans.hpp`'s guard changes from "the highest wildcard
+member is inside the mesh" to "the clipped set is non-empty and every member is a tile".
+
+What it costs and what it buys:
+
+| | |
+|---|---|
+| flit header | unchanged |
+| AWUSER interface | unchanged, still an address mask confined to the node-index field |
+| router config | two node-id-sized bounds per axis |
+| peripheral placement | **unconstrained. Any edge, high or low** |
+| side effect | fixes the pre-existing case that a non-power-of-two axis cannot express a full row: a 3-wide row encodes as `[0..3]` and clips to `[0..2]` |
+
+**Deliberately not built:** a mode bit separating tile-only multicast from full-span multicast.
+Peripherals are not collective targets in this round, and `collective_op` is 2 bits whose values 2
+and 3 are reserved today (`addr_trans.hpp` aborts on them), so adding the mode later costs no
+header bits. Building it now would double the semantics under test for a case nothing needs.
 
 ### Address map
 
@@ -241,8 +292,9 @@ rule that a checker's silence counts only after it has been shown to fire.
 
 Which peripherals, how many, and on which edges. The mechanism must not assume an answer.
 
-Whether peripherals are multicast or collective targets. They are not in this round. The mask
-generator avoiding border coordinates is named above as a consequence, not designed here.
+Whether peripherals are multicast or collective targets. They are not, and the clip makes that
+structural rather than a convention. The reserved `collective_op` values leave the door open at no
+header cost if that changes.
 
 `hotspot_boundary` becomes meaningful once an edge has a target, but the pattern is not restored
 in this round.
