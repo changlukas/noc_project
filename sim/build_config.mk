@@ -87,6 +87,14 @@ TB_TOP_SV = $(COSIM_ROOT)/tb/dma/tb_top_dma_$(TOPOLOGY).sv
 else
 TB_TOP_SV = $(COSIM_ROOT)/tb/tb_top_$(TOPOLOGY).sv
 endif
+# DMA job geometry. One pair of values feeds BOTH the job files gen_dma_jobs.py
+# writes and the memory preload / region compare gen_tb_top.py stamps into the
+# DMA top, so it lives here rather than in one simulator's Makefile -- a top
+# built with one geometry and stimulus emitted with another compares the wrong
+# bytes.
+DMA_JOBS_PER_NODE ?= 4
+DMA_LENGTH        ?= 0x400
+_DMA_JOB_ARGS     := --jobs-per-node $(DMA_JOBS_PER_NODE) --length $(DMA_LENGTH)
 # NMU read reorder buffer. 1 (the default, and what docs/noc-target-spec.md
 # section 3 describes) emits the reorder-buffer response path; 0 emits the
 # RoBless bypass. Reaches the tb as its READ_ROB_ENABLED localparam.

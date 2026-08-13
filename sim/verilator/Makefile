@@ -115,13 +115,18 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH))" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH))" > $@; \
 	fi
+
+# DMA_JOBS_PER_NODE / DMA_LENGTH / _DMA_JOB_ARGS come from build_config.mk, so
+# the top's compare and the job files it compares cannot be built from different
+# geometries.
+GEN_DMA_JOBS := $(COSIM_ROOT)/tools/gen_dma_jobs.py
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
-	    $(if $(filter 1,$(DMA)),--dma) --out $(TB_TOP_SV)
+	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
 
 # The same generator run writes the fabric; the empty recipe just tells make the
 # file is up to date once tb_top has been made (it is a prerequisite of the
@@ -211,12 +216,23 @@ _CHECKED       := $(filter 2,$(INJECTION_MODE))
 # Pattern tag: multicast runs are per-shape, so the shape joins the stim dir /
 # output tag (row and submesh runs must not share stimulus or logs).
 _PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
+# DMA=1 replaces the pattern stimulus with iDMA job files, so its stimulus and
+# its run tag key on the job geometry rather than on PATTERN / INJECTION_COUNT,
+# neither of which a DMA run reads.
+ifeq ($(DMA),1)
+STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/dma_$(TOPOLOGY)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)
+else
 STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
+endif
 # READ_ROB joins the run tag, not STIM_ROOT: it changes what the NI does with a
 # response, not the stimulus, so two READ_ROB values share generated patterns and
 # must not share output/<tag>/ (run.log, result.csv, perf.json all live there).
 _TOPO_TAG      := $(TOPOLOGY)_rob$(READ_ROB)
+ifeq ($(DMA),1)
+SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)
+else
 SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(_TOPO_TAG)_$(_PATTERN_TAG)_s$(SEED)))
+endif
 GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
 EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py
 # HOTSPOT_PERIPHERALS=1 moves the hotspot set off the router array (every tile
@@ -232,11 +248,13 @@ run-directed: $(TBTOP_EXE)
 	# specific override cannot re-key them; the cost is a wasted wrong-flavor build.
 	@[ "$(RUN_CLASS)" = "directed" ] || { echo "ERROR: run-directed requires RUN_CLASS=directed (got '$(RUN_CLASS)')"; exit 1; }
 	@mkdir -p output/$(SIM_TAG)
-	$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
+	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
 	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
-	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR))
+	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
+	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY) \
+	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
 	@echo "running $(SIM_TAG) (mode=$(INJECTION_MODE) rate=$(INJECTION_RATE) count=$(INJECTION_COUNT) pattern=$(PATTERN))"
 	$(TBTOP_EXE) \
 	    "+stim_dir=$(STIM_ROOT)" \
@@ -277,6 +295,8 @@ run-directed: $(TBTOP_EXE)
 	    echo "CONTINUOUS PASS: $(SIM_TAG)"; \
 	elif [ $$rc -ne 0 ] || ! grep -q 'PASS: all' output/$(SIM_TAG)/run.log; then \
 	    echo "DIRECTED FAIL: run did not reach non-vacuous PASS (rc=$$rc)"; exit 1; \
+	elif [ "$(DMA)" = "1" ]; then \
+	    echo "DMA PASS: $(SIM_TAG) every job retired, every region intact"; \
 	else \
 	    echo "$(if $(_CHECKED),CHECKED,DIRECTED) PASS: $(SIM_TAG) scoreboard clean, non-vacuous"; \
 	fi

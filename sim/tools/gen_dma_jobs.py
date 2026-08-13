@@ -75,17 +75,25 @@ def job_lines(length, src_addr, dst_addr, axi_id):
             str(axi_id)]
 
 
-def emit_jobs(out_root, nodes, bases, sizes, jobs_per_node, length, num_axi_ids):
-    """Write node<i>/jobs.txt for every node.
+def job_table(topo, jobs_per_node, length):
+    """Every node's jobs as [(src_idx, dst_idx, src_addr, dst_addr, axi_id), ...].
 
-    nodes: [(idx, x, y, coord_id), ...] from gen_tb_top._nodes().
-    bases/sizes: {coord_id: base} and {coord_id: size} of the MEMORY space,
-    from address_map.pack().
+    The ONE place a job's geometry is computed.  This file writes it to
+    jobs.txt; gen_tb_top.py stamps the same addresses into the DMA top's
+    memory preload and region compare, so the stimulus and the check that
+    reads it back cannot disagree about where a job's bytes are.
     """
+    x_span, y_span = gen_tb_top._route_span(topo["topology"])[:2]
+    bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
+    # The router array only: a peripheral is an endpoint, not a node, so every
+    # job is router to router and XY reaches between any two of them.
+    nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
+    sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
+    num_axi_ids = 1 << axi_widths()["id"]
     n_nodes = len(nodes)
+    out = []
     for (idx, _x, _y, src_cid) in nodes:
-        dst_cid = nodes[(idx + 1) % n_nodes][3]
-        lines = []
+        dst_idx, _dx, _dy, dst_cid = nodes[(idx + 1) % n_nodes]
         for job in range(jobs_per_node):
             seq = idx * jobs_per_node + job
             offset = _BASE_LOCAL + seq * length
@@ -94,8 +102,18 @@ def emit_jobs(out_root, nodes, bases, sizes, jobs_per_node, length, num_axi_ids)
                 sys.exit(f"ERROR: node{idx} job {job} window {offset:#x}+{length:#x} "
                          f"overruns the {limit:#x} B memory tile; reduce "
                          f"--jobs-per-node or --length")
-            lines += job_lines(length, bases[src_cid] + offset,
-                               bases[dst_cid] + offset, seq % num_axi_ids)
+            out.append((idx, dst_idx, bases[src_cid] + offset, bases[dst_cid] + offset,
+                        seq % num_axi_ids))
+    return out
+
+
+def emit_jobs(out_root, jobs, length):
+    """Write node<i>/jobs.txt from job_table()'s rows."""
+    per_node = {}
+    for (src_idx, _dst_idx, src_addr, dst_addr, axi_id) in jobs:
+        per_node.setdefault(src_idx, []).extend(
+            job_lines(length, src_addr, dst_addr, axi_id))
+    for idx, lines in per_node.items():
         node_dir = os.path.join(out_root, f"node{idx}")
         os.makedirs(node_dir, exist_ok=True)
         with open(os.path.join(node_dir, "jobs.txt"), "w") as f:
@@ -116,14 +134,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     topo = gen_tb_top.load_topology(a.topology)
-    x_span, y_span = gen_tb_top._route_span(topo["topology"])[:2]
-    bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
-    # The router array only: a peripheral is an endpoint, not a node, so every
-    # job is router to router and XY reaches between any two of them.
-    nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
-    sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
-    emit_jobs(a.out, nodes, bases, sizes, a.jobs_per_node, a.length,
-              1 << axi_widths()["id"])
+    emit_jobs(a.out, job_table(topo, a.jobs_per_node, a.length), a.length)
 
 
 if __name__ == "__main__":

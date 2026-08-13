@@ -25,6 +25,12 @@ help:
 	@echo "  Vars: INJECTION_MODE=0|1|2 READ_ROB=0|1 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
 	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
 	@echo ""
+	@echo "  make -C sim TB=mesh_2x2_vc1 DMA=1            pulp iDMA on every master face"
+	@echo "  DMA=1 ignores PATTERN: stimulus is gen_dma_jobs.py's per-node job files, and"
+	@echo "  the run ends when every DMA has retired every job and every destination"
+	@echo "  region matches its source. Vars: DMA_JOBS_PER_NODE= DMA_LENGTH= (both feed"
+	@echo "  the job files AND the top's compare) DECERR_FAULT=1 DECERR_FAULT_WR=1"
+	@echo ""
 	@echo "  make -C sim sim-injection-sweep PATTERN=<p>   saturation sweep, long"
 	@echo ""
 	@echo "Build and test gates stay at the repo root: make build / make test / make pytest"
@@ -78,14 +84,10 @@ _INJ_ARGS := \
     $(if $(DECERR_FAULT_WR),DECERR_FAULT_WR=$(DECERR_FAULT_WR)) \
     $(if $(TIMEOUT_CYCLES),TIMEOUT_CYCLES=$(TIMEOUT_CYCLES))
 
-# DMA=1 puts a pulp iDMA on every endpoint's master face, on its own top. It has
-# no run path yet -- nothing decides when a DMA run is over -- so elaboration is
-# the only goal it serves, and asking for a run says so rather than hanging.
-ifeq ($(DMA),1)
-ifneq ($(ELABORATE_ONLY),1)
-$(error DMA=1 supports ELABORATE_ONLY=1 only for now)
-endif
-endif
+# DMA=1 puts a pulp iDMA on every endpoint's master face, on its own top. It
+# reads sim/tools/gen_dma_jobs.py's job files instead of a spatial PATTERN, and
+# ends when every DMA has retired every job its file holds and every
+# destination region matches its source, so PATTERN names nothing on this path.
 
 sim:
 	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"

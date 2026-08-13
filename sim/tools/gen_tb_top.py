@@ -365,6 +365,226 @@ _LINK_DIRS = (
 )
 
 
+# Job geometry defaults for the DMA top. Mirror gen_dma_jobs.py's own argparse
+# defaults: the top's preload and region compare address the bytes jobs.txt
+# names, so the two generators have to be run with the same pair.
+_DMA_JOBS_PER_NODE = 4
+_DMA_JOB_BYTES = 0x400
+
+
+def _dma_check(topo, n_ep, jobs_per_node, job_bytes):
+    """The DMA top's memory backdoor, preload, region compare and exit logic.
+
+    Emitted only under --dma. The job geometry comes from
+    gen_dma_jobs.job_table() -- the same function that writes jobs.txt -- so
+    what is preloaded and compared is what the stimulus moves.
+    """
+    import gen_dma_jobs   # deferred: gen_dma_jobs imports this module
+
+    # job_table rows are (src_idx, dst_idx, src_addr, dst_addr, axi_id), grouped
+    # by node in node order.
+    _DST_IDX, _SRC_ADDR, _DST_ADDR = 1, 2, 3
+    jobs = gen_dma_jobs.job_table(topo, jobs_per_node, job_bytes)
+    n = len(jobs) // jobs_per_node
+    # Packed, descending, as the tile-window parameters above: field j is job j
+    # and row i is node i.
+    def _rows(col):
+        return "{" + ", ".join(
+            "{" + ", ".join(f"ADDR_WIDTH'(64'h{jobs[i * jobs_per_node + j][col]:X})"
+                            for j in reversed(range(jobs_per_node))) + "}"
+            for i in reversed(range(n))) + "}"
+
+    lines = []
+    w = lines.append
+    w("    // -------------------------------------------------------------------------")
+    w("    // Job geometry - stamped from sim/tools/gen_dma_jobs.job_table(), the same")
+    w("    // function that writes the jobs.txt this run replays. A run whose job files")
+    w("    // were emitted with a different --jobs-per-node / --length disagrees with")
+    w("    // these tables, and the retired-vs-issued check below is what says so.")
+    w("    // -------------------------------------------------------------------------")
+    w(f"    localparam int unsigned JOBS_PER_NODE = {jobs_per_node};")
+    w(f"    localparam int unsigned JOB_BYTES     = {job_bytes};")
+    w("    // The data memory. Target 0 is the config aperture and the LAST target is")
+    w("    // the memory-space window (gen_tb_top.tile_targets).")
+    w("    localparam int unsigned MEM_TARGET    = TILE_TARGETS - 1;")
+    w(f"    localparam logic [{n - 1}:0][JOBS_PER_NODE-1:0][ADDR_WIDTH-1:0] JOB_SRC_ADDR = "
+      f"{_rows(_SRC_ADDR)};")
+    w(f"    localparam logic [{n - 1}:0][JOBS_PER_NODE-1:0][ADDR_WIDTH-1:0] JOB_DST_ADDR = "
+      f"{_rows(_DST_ADDR)};")
+    w("    // Endpoint each node's jobs write into. 8 b is the flit's own node-index")
+    w("    // field width, so it holds every endpoint a topology can carry.")
+    w(f"    localparam logic [{n - 1}:0][7:0] JOB_DST_EP = {{"
+      + ", ".join(f"8'd{jobs[i * jobs_per_node][_DST_IDX]}" for i in reversed(range(n)))
+      + "};")
+    w("")
+    w("    // -------------------------------------------------------------------------")
+    w("    // Memory backdoor (iDMA test/include/tb_tasks.svh compares regions the same")
+    w("    // way). The endpoint index is a case over CONSTANTS: Verilator 5.048 rejects")
+    w("    // g_endpoint[<non-constant>] with \"Could not expand constant selection inside")
+    w("    // dotted reference\", so a function cannot take the endpoint as an index.")
+    w("    // -------------------------------------------------------------------------")
+    mem = "u_endpoint.g_tile_mem[MEM_TARGET].i_mem.i_sim_mem.mem"
+    w("    function automatic logic [7:0] mem_byte(input int unsigned ep,")
+    w("                                           input logic [ADDR_WIDTH-1:0] a);")
+    w("        case (ep)")
+    for i in range(n_ep):
+        w(f"            {i}: return g_endpoint[{i}].{mem}[a];")
+    w("            default: begin")
+    w('                $fatal(1, "tb_top_dma: mem_byte endpoint %0d out of range", ep);')
+    w("                return 'x;")
+    w("            end")
+    w("        endcase")
+    w("    endfunction")
+    w("")
+    w("    task automatic mem_poke(input int unsigned ep, input logic [ADDR_WIDTH-1:0] a,")
+    w("                            input logic [7:0] d);")
+    w("        case (ep)")
+    for i in range(n_ep):
+        w(f"            {i}: g_endpoint[{i}].{mem}[a] = d;")
+    w('            default: $fatal(1, "tb_top_dma: mem_poke endpoint %0d out of range", ep);')
+    w("        endcase")
+    w("    endtask")
+    w("")
+    w("    // Preload: a byte's value is a function of its OWN address, so a byte that")
+    w("    // lands at the wrong offset is caught instead of matching by luck. Source")
+    w("    // regions only -- a destination byte the DMA never wrote reads X and fails")
+    w("    // the compare below.")
+    w("    function automatic logic [7:0] mem_pattern(input logic [ADDR_WIDTH-1:0] a);")
+    w("        return a[7:0] ^ a[15:8] ^ a[23:16] ^ 8'ha5;")
+    w("    endfunction")
+    w("")
+    w("    initial begin")
+    w("        for (int unsigned i = 0; i < NUM_NODES; i++)")
+    w("            for (int unsigned j = 0; j < JOBS_PER_NODE; j++)")
+    w("                for (int unsigned k = 0; k < JOB_BYTES; k++)")
+    w("                    mem_poke(i, JOB_SRC_ADDR[i][j] + k,")
+    w("                             mem_pattern(JOB_SRC_ADDR[i][j] + k));")
+    w("    end")
+    w("")
+    w("    function automatic int unsigned compare_region(input int unsigned src_ep,")
+    w("                                                   input int unsigned dst_ep,")
+    w("                                                   input logic [ADDR_WIDTH-1:0] src_base,")
+    w("                                                   input logic [ADDR_WIDTH-1:0] dst_base,")
+    w("                                                   input int unsigned n_bytes);")
+    w("        int unsigned bad = 0;")
+    w("        for (int unsigned k = 0; k < n_bytes; k++) begin")
+    w("            logic [7:0] a = mem_byte(src_ep, src_base + k);")
+    w("            logic [7:0] b = mem_byte(dst_ep, dst_base + k);")
+    w("            if (a !== b) begin")
+    w('                if (bad < 8) $display("[DMA] mismatch ep%0d+%0h = %02h, ep%0d+%0h = %02h",')
+    w("                                      src_ep, src_base + k, a, dst_ep, dst_base + k, b);")
+    w("                bad++;")
+    w("            end")
+    w("        end")
+    w("        return bad;")
+    w("    endfunction")
+    w("")
+    w("    // -------------------------------------------------------------------------")
+    w("    // Exit logic - every DMA retires every job its file holds, and every")
+    w("    // destination has answered the write bursts that carry them.")
+    w("    //")
+    w("    // The B counted here is the DESTINATION memory's own: axi_sim_mem writes")
+    w("    // mem[] on W acceptance and pushes B only inside its last-beat branch")
+    w("    // (axi_sim_mem.sv:177 then :182-187), so a B leaving this endpoint's slave")
+    w("    // face proves the payload is in the array the compare reads. Observed at")
+    w("    // the destination rather than inferred from the source's completion.")
+    w("    //")
+    w("    // NOT axi_sim_mem's write monitor, which is what this was meant to be:")
+    w("    // mon_w_valid_o / mon_w_last_o read 0 at every posedge under Verilator")
+    w("    // 5.048, through the endpoint's ports AND read directly off i_sim_mem, so")
+    w("    // an exit condition gating on them never fires. Measured, not assumed.")
+    w("    //")
+    w("    // Each node is the destination of exactly JOBS_PER_NODE jobs (its")
+    w("    // predecessor's); a legalizer split raises the count, hence >= not ==.")
+    w("    // -------------------------------------------------------------------------")
+    w(f"    int unsigned dst_b_cnt [{n_ep}];")
+    w("    always_ff @(posedge clk_i) begin")
+    w(f"        for (int i = 0; i < {n_ep}; i++) begin")
+    w("            if (!rst_ni) dst_b_cnt[i] <= 0;")
+    w("            else if (slave_axi_rsp[i].bvalid && slave_axi_req[i].bready)")
+    w("                dst_b_cnt[i] <= dst_b_cnt[i] + 1;")
+    w("        end")
+    w("    end")
+    w("")
+    w("    localparam int unsigned SETTLE_CYCLES = 100;")
+    w("    initial begin")
+    w("        bit all_done;")
+    w("        int unsigned bad, bad_total;")
+    w("        int unsigned aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc;")
+    w("        int unsigned list_hwm, wtxn_hwm, rtxn_hwm;")
+    w("        bad_total = 0;")
+    w("        do begin")
+    w("            @(posedge clk_i);")
+    w("            all_done = rst_ni;")
+    w("            for (int i = 0; i < NUM_NODES; i++)")
+    w("                all_done &= (jobs_retired[i] >= JOBS_PER_NODE)")
+    w("                            && (dst_b_cnt[JOB_DST_EP[i]] >= JOBS_PER_NODE);")
+    w("        end while (!all_done);")
+    w("        repeat (SETTLE_CYCLES) @(posedge clk_i);")
+    w("        // A file holding more jobs than these tables describe leaves issued")
+    w("        // ahead of retired here, and its extra jobs are neither preloaded nor")
+    w("        // compared. Without this an empty job file would pass.")
+    w("        for (int i = 0; i < NUM_NODES; i++)")
+    w("            if (jobs_retired[i] != jobs_issued[i])")
+    w('                $fatal(1, "tb_top_dma: node%0d retired %0d of %0d jobs",')
+    w("                       i, jobs_retired[i], jobs_issued[i]);")
+    w("        for (int i = 0; i < NUM_NODES; i++)")
+    w("            for (int j = 0; j < JOBS_PER_NODE; j++) begin")
+    w("                bad = compare_region(i, JOB_DST_EP[i], JOB_SRC_ADDR[i][j],")
+    w("                                     JOB_DST_ADDR[i][j], JOB_BYTES);")
+    w("                if (bad != 0)")
+    w('                    $display("FAIL: node%0d job%0d: %0d of %0d bytes differ",')
+    w("                             i, j, bad, JOB_BYTES);")
+    w("                bad_total += bad;")
+    w("            end")
+    w('        if (bad_total != 0) $fatal(1, "tb_top_dma: %0d bytes differ", bad_total);')
+    w(f"        for (int i = 0; i < {n_ep}; i++) begin")
+    w("            cmodel_nmu_admission_stats(nmu_ctx[i], aw_idle, aw_same, aw_alloc,")
+    w("                                           ar_idle, ar_same, ar_alloc,")
+    w("                                           list_hwm, wtxn_hwm, rtxn_hwm);")
+    w('            $display("[HWM] node=%0d read_slot_hwm=%0d order_list_hwm=%0d write_txns_hwm=%0d read_txns_hwm=%0d aw_clause={idle=%0d same_dest=%0d alloc=%0d} ar_clause={idle=%0d same_dest=%0d alloc=%0d}",')
+    w("                     i, cmodel_nmu_read_slot_hwm(nmu_ctx[i]),")
+    w("                     list_hwm, wtxn_hwm, rtxn_hwm,")
+    w("                     aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc);")
+    w("        end")
+    w('        $display("PASS: all %0d nodes retired %0d jobs, every region intact",')
+    w("                 NUM_NODES, JOBS_PER_NODE);")
+    w("        $finish(0);")
+    w("    end")
+    return lines
+
+
+def _dpi_error_poll():
+    """The DPI error poll and the module tail, shared by both tops."""
+    return [
+        "",
+        "    // -------------------------------------------------------------------------",
+        "    // Centralized DPI error poll",
+        "    // -------------------------------------------------------------------------",
+        '    import "DPI-C" context function int cmodel_check_error(output string msg);',
+        "",
+        "    always_ff @(posedge clk_i) begin",
+        "        /* verilator lint_off WIDTHTRUNC */",
+        "        if (rst_ni) begin",
+        "            string dpi_err_msg;",
+        "            int    dpi_err_code;",
+        "            dpi_err_code = cmodel_check_error(dpi_err_msg);",
+        "            if (dpi_err_code != 0) begin",
+        '                $display("[tb_top] DPI fatal (code=%0d): %s",',
+        "                         dpi_err_code, dpi_err_msg);",
+        "                cmodel_finalize();",
+        '                $fatal(1, "tb_top: DPI error, simulation aborted");',
+        "            end",
+        "        end",
+        "        /* verilator lint_on WIDTHTRUNC */",
+        "    end",
+        "",
+        "endmodule",
+        "",
+        "`endif  // TB_TOP_SV",
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Fabric emitter — noc_fabric_<topo>.sv
 # ---------------------------------------------------------------------------
@@ -737,7 +957,9 @@ def emit_fabric(topo: dict) -> str:
 # tb_top emitter — instantiates the fabric + pulp VIP endpoints + exit logic
 # ---------------------------------------------------------------------------
 
-def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
+def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
+                jobs_per_node: int = _DMA_JOBS_PER_NODE,
+                job_bytes: int = _DMA_JOB_BYTES) -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -983,6 +1205,12 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
     w("                     slave_axi_req[i].awvalid, slave_axi_req[i].wvalid,")
     w("                     slave_axi_req[i].arvalid,")
     w("                     slave_axi_rsp[i].rvalid, slave_axi_rsp[i].bvalid);")
+    if dma:
+        w("            // What the DMA exit condition is waiting on: a node short of its")
+        w("            // job count stalled in the backend, one short of its inbound B")
+        w("            // count never had its predecessor's payload committed here.")
+        w('            $display("[WATCHDOG] node%0d dma issued=%0d retired=%0d inbound_b=%0d",')
+        w("                     i, jobs_issued[i], jobs_retired[i], dst_b_cnt[i]);")
     w("        end")
     w("        cmodel_dump_fabric_state();")
     w('        $fatal(1, "tb_top: timeout after %0d cycles", timeout_cycles);')
@@ -1138,11 +1366,11 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
     w(f"    logic        end_of_sim [{n_ep}];")
     w(f"    int unsigned txn_cnt    [{n_ep}];")
     if dma:
-        w("    // Write side of each endpoint's tile memories. A DMA's payload is written")
-        w("    // by a REMOTE node, so this is where it lands on wires the testbench can")
-        w("    // watch.")
-        w(f"    logic [TILE_TARGETS-1:0] mem_w_valid [{n_ep}];")
-        w(f"    logic [TILE_TARGETS-1:0] mem_w_last  [{n_ep}];")
+        w("    // The job driver's own counts, brought up one endpoint at a time: the")
+        w("    // exit logic indexes them with a variable, which a hierarchical name")
+        w("    // through g_endpoint cannot be.")
+        w(f"    int unsigned jobs_issued  [{n_ep}];")
+        w(f"    int unsigned jobs_retired [{n_ep}];")
     w(f"    for (genvar i = 0; i < {n_ep}; i++) begin : g_endpoint")
     w(f"        {'dma_node_endpoint' if dma else 'user_node_endpoint'} #(")
     w("            .NODE_ID(i),")
@@ -1165,9 +1393,16 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
     w("            .master_axi_rsp_i(master_axi_rsp[i]),")
     w("            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),")
     if dma:
-        w("            .mon_w_valid_o(mem_w_valid[i]), .mon_w_last_o(mem_w_last[i]),")
+        # Left unconnected: axi_sim_mem's write monitor reads 0 at every posedge
+        # under Verilator 5.048, at the endpoint's ports and read straight off
+        # i_sim_mem alike, so nothing can gate on it. The destination's own B
+        # handshake carries the same fact (see the exit logic below).
+        w("            .mon_w_valid_o(), .mon_w_last_o(),")
     w("            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i])")
     w("        );")
+    if dma:
+        w("        assign jobs_issued[i]  = u_endpoint.jobs_issued;")
+        w("        assign jobs_retired[i] = u_endpoint.jobs_retired;")
     w("    end : g_endpoint")
     w("")
 
@@ -1211,7 +1446,13 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
     w("")
 
     # Exit logic — non-vacuous PASS guard: wait all endpoints done, settle, then
-    # require every node moved at least one AW/AR handshake.
+    # require every node moved at least one AW/AR handshake. Under --dma the DMA
+    # top's own version replaces it: end_of_sim is tied 0 there, and "every job
+    # retired, every region intact" is what done means for a DMA.
+    if dma:
+        lines.extend(_dma_check(topo, n_ep, jobs_per_node, job_bytes))
+        lines.extend(_dpi_error_poll())
+        return "\n".join(lines) + "\n"
     w("    // -------------------------------------------------------------------------")
     w("    // Exit logic - non-vacuous PASS guard")
     w("    // -------------------------------------------------------------------------")
@@ -1252,31 +1493,7 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
     w(f'        $display("PASS: all %0d nodes done, non-vacuous", {exit_n});')
     w("        $finish(0);")
     w("    end")
-    w("")
-    w("    // -------------------------------------------------------------------------")
-    w("    // Centralized DPI error poll")
-    w("    // -------------------------------------------------------------------------")
-    w('    import "DPI-C" context function int cmodel_check_error(output string msg);')
-    w("")
-    w("    always_ff @(posedge clk_i) begin")
-    w("        /* verilator lint_off WIDTHTRUNC */")
-    w("        if (rst_ni) begin")
-    w("            string dpi_err_msg;")
-    w("            int    dpi_err_code;")
-    w("            dpi_err_code = cmodel_check_error(dpi_err_msg);")
-    w("            if (dpi_err_code != 0) begin")
-    w('                $display("[tb_top] DPI fatal (code=%0d): %s",')
-    w("                         dpi_err_code, dpi_err_msg);")
-    w("                cmodel_finalize();")
-    w('                $fatal(1, "tb_top: DPI error, simulation aborted");')
-    w("            end")
-    w("        end")
-    w("        /* verilator lint_on WIDTHTRUNC */")
-    w("    end")
-    w("")
-    w("endmodule")
-    w("")
-    w("`endif  // TB_TOP_SV")
+    lines.extend(_dpi_error_poll())
     return "\n".join(lines) + "\n"
 
 
@@ -1304,6 +1521,12 @@ def main() -> int:
                          "sim/tb/dma/tb_top_dma_<topology>.sv as the default output. The "
                          "fabric is emitted unchanged and shared -- the endpoint's port "
                          "list toward it does not move.")
+    ap.add_argument("--jobs-per-node", type=int, default=_DMA_JOBS_PER_NODE,
+                    help="--dma only: jobs each node's file holds. Must match the "
+                         "gen_dma_jobs.py run that wrote them -- the top preloads and "
+                         "compares the regions those jobs name.")
+    ap.add_argument("--length", type=lambda v: int(v, 0), default=_DMA_JOB_BYTES,
+                    help="--dma only: bytes moved per job. Must match gen_dma_jobs.py.")
     ap.add_argument("--print-num-vc", action="store_true",
                     help="Print the topology's num_vc and exit. sim/build_config.mk picks "
                          "the per-VC noc_types_pkg with it, so that value is read where it "
@@ -1314,7 +1537,7 @@ def main() -> int:
     if a.print_num_vc:
         print(topo["topology"]["num_vc"])
         return 0
-    tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma)
+    tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma, a.jobs_per_node, a.length)
     fab_text = emit_fabric(topo)
     default_out = ROOT / "sim" / "tb" / "dma" / f"tb_top_dma_{a.topology}.sv" if a.dma \
         else ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"
