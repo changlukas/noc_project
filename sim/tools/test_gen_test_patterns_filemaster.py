@@ -837,6 +837,20 @@ def test_hotspot_peripherals_writes_every_address_once(tmp_path):
     assert len(addrs) == len(set(addrs))
 
 
+def test_hotspot_peripherals_is_rejected_on_another_pattern(tmp_path):
+    """The selector reaches two places and only one is inside the pattern
+    dispatch: it steers destinations for `hotspot` alone, but suppresses the
+    partner tile's inbound lines for whatever pattern runs. On any other pattern
+    that leaves nothing aimed at the peripheral, and the run still passes because
+    the peripheral's own initiator stream keeps it non-vacuous.
+    """
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "neighbor", "--hotspot-peripherals",
+                "--topology", "mesh_2x2_vc1_periph", "--out", str(tmp_path / "np"),
+                "--transactions-per-node", str(_HOTSPOT_PERIPH_TXNS),
+                "--size", "5", "--len", "0"])
+
+
 def test_hotspot_peripherals_rejects_a_source_that_reaches_none():
     """A row with no peripheral has no hotspot; the source is named and the run
     stops, rather than the tile silently falling back to another row's."""

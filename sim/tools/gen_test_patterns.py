@@ -1255,6 +1255,15 @@ def main(argv=None):
     # ids and nothing else. Sharing `rng` would shift every later destination
     # too, and a multi-id run could not be compared against its one-id baseline.
     id_rng = _random_module.Random(a.seed ^ _ID_STREAM_SALT)
+    # The selector reaches two places, and only one of them is inside the pattern
+    # dispatch. It steers destinations for `hotspot` alone, but it suppresses the
+    # partner tile's inbound lines below for whatever pattern is running, so on
+    # any other pattern it would silently leave the peripheral with no traffic
+    # aimed at it and still pass, the peripheral's own initiator stream keeping
+    # the run non-vacuous.
+    if a.hotspot_peripherals and a.pattern != "hotspot":
+        ap.error(f"--hotspot-peripherals names the hotspot pattern's target set; with "
+                 f"--pattern {a.pattern} it would only drop the traffic aimed at the peripheral")
     periph_extra = emit_peripheral_nodes(
         a.out, peripherals, nodes, bases, n_slots, base_local, region_bytes, a.size, a.burst_len,
         widths["data"], a.transactions_per_node, id_rng, num_axi_ids=(1 << widths["id"]),
