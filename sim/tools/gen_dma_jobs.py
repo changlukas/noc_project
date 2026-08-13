@@ -50,9 +50,15 @@ from gen_test_patterns import axi_widths
 # gen_test_patterns.py's base_local: offset 0 stays clear.
 _BASE_LOCAL = 0x1000
 
-# AxLEN is 8 b, so 256 beats is the longest AXI burst; the legalizer takes the
-# bound as a beat count minus one, like AxLEN itself.
-_MAX_BURST_LEN = 255
+# max_src_len / max_dst_len reach the backend as beo.*_max_llen, a THREE-BIT LOG
+# length that only acts when the matching *_reduce_len bit is set
+# (idma_pkg.sv:75-82, idma_legalizer_page_splitter.sv:37:
+# page_addr_width = OffsetWidth + (reduce_len_i ? max_llen_i : 'd8)).  So the
+# field states log2(beats), 0 to 7, and 8 -- outside the field -- encodes "no
+# reduction", the same 'd8 the splitter uses when reduce_len is clear: the
+# legalizer then splits on the 4 KiB page alone.  A beat COUNT here would be
+# silently mistranslated, most values to the 1-beat minimum.
+_MAX_LOG_LEN_NONE = 8
 
 # idma_pkg::protocol_e AXI (sim/dv/idma-0.6.5/src/idma_pkg.sv:91).  Both ends
 # of every job are the tile's AXI.
@@ -63,7 +69,7 @@ def job_lines(length, src_addr, dst_addr, axi_id):
     """The eleven field lines of one job, in idma_job_driver.sv's read order."""
     return [str(length), f"0x{src_addr:x}", f"0x{dst_addr:x}",
             str(_PROTOCOL_AXI), str(_PROTOCOL_AXI),
-            str(_MAX_BURST_LEN), str(_MAX_BURST_LEN),
+            str(_MAX_LOG_LEN_NONE), str(_MAX_LOG_LEN_NONE),
             "0", "0",     # aw_decoupled, rw_decoupled -- the backend's defaults
             "0",          # num_errors -- the error path is out of scope
             str(axi_id)]

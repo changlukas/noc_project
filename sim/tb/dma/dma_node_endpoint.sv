@@ -12,6 +12,9 @@
 // the checks that do: the memory write monitors leave on mon_w_valid_o /
 // mon_w_last_o and the job counts leave the driver for it.
 //
+// The BRESP and RRESP fatals below are NOT among the dropped set: they read the
+// response wires rather than the stimulus, so they hold for any master.
+//
 // Slave face (tile decode): unchanged from user_node_endpoint -- the NSU
 // forwards the request's own address, so the crossbar decodes on this node's
 // windows exactly as the topology address_map placed them.
@@ -472,6 +475,61 @@ module dma_node_endpoint #(
     assign noc_mst.r_valid   = master_axi_rsp_i.rvalid;
     assign noc_mst.b_user    = '0;
     assign noc_mst.r_user    = '0;
+
+    // ------------------------------------------------------------------
+    // Response checks (ported verbatim in intent from user_node_endpoint:
+    // neither depends on the file master -- both read the master-face response
+    // wires, which here are the DMA's)
+    // ------------------------------------------------------------------
+    // The one "not an error response" predicate, {OKAY, EXOKAY}, the set pulp
+    // uses (axi_test.sv:2133-2134). EXOKAY is unreachable today: nothing issues
+    // exclusive accesses.
+    function automatic bit resp_ok(input logic [1:0] resp);
+        return resp inside {axi_pkg::RESP_OKAY, axi_pkg::RESP_EXOKAY};
+    endfunction
+
+    // axi_sim_mem answers every mapped access OKAY, so an error response here is
+    // a fabric bug (a corrupted merged B) or a write that missed every tile
+    // window.
+    always_ff @(posedge clk_i) begin
+        if (rst_ni && mst_post_delay.b_valid && mst_post_delay.b_ready &&
+                mst_post_delay.b_resp != axi_pkg::RESP_OKAY)
+            $fatal(1, "[dma_ep] node%0d: BRESP=%0h on id=%0h, expected OKAY",
+                   NODE_ID, mst_post_delay.b_resp, mst_post_delay.b_id);
+    end
+
+    // The read half of the tile-window gate, and the only thing in the testbench
+    // that catches an address matching NO window: the crossbar DECERRs it, and
+    // pulp's read-data compare is SKIPPED once r_resp leaves {OKAY, EXOKAY}
+    // (axi_test.sv:2133-2134), so an error response would otherwise pass
+    // silently. A DMA reaches this failure mode more easily than the file
+    // master did: gen_dma_jobs.py recomputes the window bases through
+    // address_map.pack(), and a disagreement with the SAM lands here.
+    always_ff @(posedge clk_i) begin
+        if (rst_ni && mst_post_delay.r_valid && mst_post_delay.r_ready &&
+                !resp_ok(mst_post_delay.r_resp))
+            $fatal(1, "[dma_ep] node%0d: RRESP=%0h on id=%0h, expected OKAY (address outside every tile window?)",
+                   NODE_ID, mst_post_delay.r_resp, mst_post_delay.r_id);
+    end
+
+    // Debug handshake trace: +hs_trace_node=<id> dumps per-cycle AW/W/B
+    // valid/ready pairs of that node's master port to hs_trace_node<id>.log.
+    // Off unless the plusarg names this node.
+    int unsigned hs_trace_node;
+    int hs_fd = 0;
+    int unsigned hs_cyc = 0;
+    initial begin
+        if ($value$plusargs("hs_trace_node=%d", hs_trace_node) && hs_trace_node == NODE_ID)
+            hs_fd = $fopen($sformatf("hs_trace_node%0d.log", NODE_ID), "w");
+    end
+    always_ff @(posedge clk_i) begin
+        hs_cyc <= hs_cyc + 1;
+        if (hs_fd != 0 && rst_ni)
+            $fdisplay(hs_fd, "%0d %b%b %b%b %b%b", hs_cyc,
+                      mst_post_delay.aw_valid, mst_post_delay.aw_ready,
+                      mst_post_delay.w_valid,  mst_post_delay.w_ready,
+                      mst_post_delay.b_valid,  mst_post_delay.b_ready);
+    end
 
     // ------------------------------------------------------------------
     // Exit

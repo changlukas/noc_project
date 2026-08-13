@@ -788,7 +788,13 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
     # emitted for a topology that has a coordinate outside the region -- with
     # none, the closure is inside it by construction and the endpoint's own
     # default (no clip) is already exact.
-    mesh_windows = [w for i in range(n) for w in per_node[i]] if peripherals else []
+    # Empty under --dma: these three parameters exist for the multicast checker's
+    # replica golden, which lives in user_node_endpoint alone. dma_node_endpoint
+    # declares none of them, so stamping them would name a parameter that does
+    # not exist -- which is an elaboration error on any topology with a
+    # peripheral, the only case where the set is non-empty.
+    mesh_windows = [w for i in range(n) for w in per_node[i]] \
+        if peripherals and not dma else []
     def _window_row(key):
         return "{" + ", ".join(f"ADDR_WIDTH'(64'h{w[key]:X})"
                                for w in reversed(mesh_windows)) + "}"

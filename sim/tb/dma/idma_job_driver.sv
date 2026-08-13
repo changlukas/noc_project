@@ -31,11 +31,14 @@ module idma_job_driver #(
     output int unsigned                jobs_retired_o
 );
 
-    // AxLEN is 8 b, so 255 is the largest burst bound the emitter can state;
-    // it means "do not reduce" (see the beo assignment below).
-    localparam int unsigned NO_LEN_REDUCTION = 255;
+    // beo.*_max_llen is a 3-bit LOG length, so the file states 0..7; 8 is
+    // outside the field and encodes "no reduction", which is the value
+    // idma_legalizer_page_splitter.sv:37 uses internally when reduce_len is
+    // clear. Anything above 8 is a malformed file, not a large burst.
+    localparam int unsigned MAX_LOG_LEN_NONE = 8;
 
     string stim_dir = "sim/test_patterns/dma";
+    string jobs_path;
 
     int unsigned issued  = 0;   // the file-reading process below owns this
     int unsigned retired = 0;
@@ -49,19 +52,58 @@ module idma_job_driver #(
         jobs_retired_o <= retired;
     end
 
-    // One address field: an 0x-prefixed hex token. string.atohex() stops at the
-    // 'x', so the prefix comes off first.
-    function automatic longint unsigned read_hex(input int fd);
+    // One decimal field. $fscanf leaves its target UNMODIFIED on a failed match,
+    // so an unchecked read assembles a record out of the previous job's
+    // leftovers; every field is checked and a bad one stops the run.
+    function automatic int unsigned read_dec(input int fd, input string field);
+        int unsigned v;
+        if ($fscanf(fd, "%d", v) != 1)
+            $fatal(1, "[dma_jobs] node%0d: %s: short or malformed job file %s",
+                   NODE_ID, field, jobs_path);
+        return v;
+    endfunction
+
+    // One address field: an 0x-prefixed hex token, accumulated here rather than
+    // through string.atohex() -- IEEE 1800-2017 declares atohex() as returning
+    // `integer`, 32 bits signed, and an address is ADDR_WIDTH (48).
+    function automatic longint unsigned read_hex(input int fd, input string field);
         string tok;
-        void'($fscanf(fd, "%s", tok));
-        if (tok.substr(0, 1) == "0x") tok = tok.substr(2, tok.len() - 1);
-        return tok.atohex();
+        longint unsigned v = 0;
+        byte c;
+        int unsigned d;
+        if ($fscanf(fd, "%s", tok) != 1)
+            $fatal(1, "[dma_jobs] node%0d: %s: short or malformed job file %s",
+                   NODE_ID, field, jobs_path);
+        if (tok.len() < 3 || tok.substr(0, 1) != "0x")
+            $fatal(1, "[dma_jobs] node%0d: %s: expected an 0x-prefixed address, got '%s'",
+                   NODE_ID, field, tok);
+        for (int i = 2; i < tok.len(); i++) begin
+            c = tok.getc(i);
+            if (c >= "0" && c <= "9")      d = c - "0";
+            else if (c >= "a" && c <= "f") d = c - "a" + 10;
+            else if (c >= "A" && c <= "F") d = c - "A" + 10;
+            else $fatal(1, "[dma_jobs] node%0d: %s: '%s' is not a hex address",
+                        NODE_ID, field, tok);
+            v = (v << 4) | longint'(d);
+        end
+        if (v >= (64'd1 << idma_types_pkg::ADDR_WIDTH))
+            $fatal(1, "[dma_jobs] node%0d: %s: address %s exceeds ADDR_WIDTH (%0d b)",
+                   NODE_ID, field, tok, idma_types_pkg::ADDR_WIDTH);
+        return v;
+    endfunction
+
+    // The file states a log length; the field is three bits wide plus its own
+    // reduce bit, so an out-of-range value is rejected rather than truncated --
+    // 3'(8) and 3'(16) are both 0, which would silently ask for 1-beat bursts.
+    function automatic logic [2:0] log_len(input int unsigned v, input string field);
+        if (v > MAX_LOG_LEN_NONE)
+            $fatal(1, "[dma_jobs] node%0d: %s=%0d is out of range (0..%0d)",
+                   NODE_ID, field, v, MAX_LOG_LEN_NONE);
+        return 3'(v);
     endfunction
 
     initial begin
         int fd;
-        int code;
-        string path;
         idma_types_pkg::idma_req_t r;
         int unsigned length, src_protocol, dst_protocol, max_src_len, max_dst_len;
         int unsigned aw_decoupled, rw_decoupled, num_errors, axi_id;
@@ -72,25 +114,26 @@ module idma_job_driver #(
         req_valid_o <= 1'b0;
 
         void'($value$plusargs("stim_dir=%s", stim_dir));
-        path = $sformatf("%s/node%0d/jobs.txt", stim_dir, NODE_ID);
-        fd = $fopen(path, "r");
-        if (fd == 0) $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, path);
+        jobs_path = $sformatf("%s/node%0d/jobs.txt", stim_dir, NODE_ID);
+        fd = $fopen(jobs_path, "r");
+        if (fd == 0) $fatal(1, "[dma_jobs] node%0d: cannot open %s", NODE_ID, jobs_path);
 
         @(posedge rst_ni);
 
         forever begin
-            code = $fscanf(fd, "%d", length);
-            if (code != 1) break;   // end of file
-            src_addr = read_hex(fd);
-            dst_addr = read_hex(fd);
-            void'($fscanf(fd, "%d", src_protocol));
-            void'($fscanf(fd, "%d", dst_protocol));
-            void'($fscanf(fd, "%d", max_src_len));
-            void'($fscanf(fd, "%d", max_dst_len));
-            void'($fscanf(fd, "%d", aw_decoupled));
-            void'($fscanf(fd, "%d", rw_decoupled));
-            void'($fscanf(fd, "%d", num_errors));   // the error path is out of scope
-            void'($fscanf(fd, "%d", axi_id));
+            // Only the first field of a record may be absent: that is the end of
+            // the file. Every field after it is checked inside the readers.
+            if ($fscanf(fd, "%d", length) != 1) break;
+            src_addr     = read_hex(fd, "src_addr");
+            dst_addr     = read_hex(fd, "dst_addr");
+            src_protocol = read_dec(fd, "src_protocol");
+            dst_protocol = read_dec(fd, "dst_protocol");
+            max_src_len  = read_dec(fd, "max_src_len");
+            max_dst_len  = read_dec(fd, "max_dst_len");
+            aw_decoupled = read_dec(fd, "aw_decoupled");
+            rw_decoupled = read_dec(fd, "rw_decoupled");
+            num_errors   = read_dec(fd, "num_errors");   // the error path is out of scope
+            axi_id       = read_dec(fd, "axi_id");
 
             r = '0;
             r.length   = idma_types_pkg::tf_len_t'(length);
@@ -105,14 +148,13 @@ module idma_job_driver #(
             r.opt.dst = r.opt.src;
             r.opt.beo.decouple_aw = aw_decoupled[0];
             r.opt.beo.decouple_rw = rw_decoupled[0];
-            // *_max_llen is a LOG length and only acts when the matching
-            // reduce_len bit is set (idma_legalizer_page_splitter.sv:37); with
-            // it clear the legalizer splits on the 4 KiB page alone, which is
-            // what the emitter's 255 asks for.
-            r.opt.beo.src_reduce_len = (max_src_len != NO_LEN_REDUCTION);
-            r.opt.beo.dst_reduce_len = (max_dst_len != NO_LEN_REDUCTION);
-            r.opt.beo.src_max_llen   = 3'(max_src_len);
-            r.opt.beo.dst_max_llen   = 3'(max_dst_len);
+            // *_max_llen only acts when the matching reduce_len bit is set
+            // (idma_legalizer_page_splitter.sv:37); with it clear the legalizer
+            // splits on the 4 KiB page alone.
+            r.opt.beo.src_reduce_len = (max_src_len != MAX_LOG_LEN_NONE);
+            r.opt.beo.dst_reduce_len = (max_dst_len != MAX_LOG_LEN_NONE);
+            r.opt.beo.src_max_llen   = log_len(max_src_len, "max_src_len");
+            r.opt.beo.dst_max_llen   = log_len(max_dst_len, "max_dst_len");
             // One request per job: every job is the last of its own transfer.
             r.opt.last = 1'b1;
 
@@ -125,7 +167,7 @@ module idma_job_driver #(
             issued = issued + 1;
         end
         $fclose(fd);
-        $display("[dma_jobs] node%0d: %0d jobs issued from %s", NODE_ID, issued, path);
+        $display("[dma_jobs] node%0d: %0d jobs issued from %s", NODE_ID, issued, jobs_path);
     end
 
 endmodule

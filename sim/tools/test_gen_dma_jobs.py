@@ -43,6 +43,19 @@ def test_every_job_addresses_a_real_sam_region(tmp_path):
             assert _owner(job["src_addr"]) != _owner(job["dst_addr"])
 
 
+def test_burst_bound_is_a_log_length(tmp_path):
+    """max_src_len / max_dst_len reach the backend as beo.*_max_llen, a 3-bit
+    LOG length gated by *_reduce_len, so the file states log2(beats) 0..7 with 8
+    for "no reduction". A beat count truncates instead of erroring -- 3'(8) and
+    3'(16) are both 0, which asks for 1-beat bursts -- so idma_job_driver.sv
+    rejects anything above 8 and this pins the emitter to the same range."""
+    out = tmp_path / "jobs"
+    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out)])
+    for job in _parse_jobs(out / "node0" / "jobs.txt"):
+        assert job["max_src_len"] <= g._MAX_LOG_LEN_NONE
+        assert job["max_dst_len"] <= g._MAX_LOG_LEN_NONE
+
+
 def test_jobs_use_more_than_one_axi_id(tmp_path):
     """FlooNoC leaves idma_job.id at '0, so every transfer uses one ID. This
     NMU keeps a reorder-buffer slot and a meta-buffer bucket per ID, so a
