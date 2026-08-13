@@ -111,7 +111,8 @@ $(TOPO_STAMP): FORCE
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) --out $(TB_TOP_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
+	    $(if $(filter 1,$(DMA)),--dma) --out $(TB_TOP_SV)
 
 # The same generator run writes the fabric; the empty recipe just tells make the
 # file is up to date once tb_top has been made (it is a prerequisite of simv

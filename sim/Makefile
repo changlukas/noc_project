@@ -78,9 +78,19 @@ _INJ_ARGS := \
     $(if $(DECERR_FAULT_WR),DECERR_FAULT_WR=$(DECERR_FAULT_WR)) \
     $(if $(TIMEOUT_CYCLES),TIMEOUT_CYCLES=$(TIMEOUT_CYCLES))
 
+# DMA=1 puts a pulp iDMA on every endpoint's master face, on its own top. It has
+# no run path yet -- nothing decides when a DMA run is over -- so elaboration is
+# the only goal it serves, and asking for a run says so rather than hanging.
+ifeq ($(DMA),1)
+ifneq ($(ELABORATE_ONLY),1)
+$(error DMA=1 supports ELABORATE_ONLY=1 only for now)
+endif
+endif
+
 sim:
 	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
-	$(MAKE) -C verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
+	$(MAKE) -C verilator $(if $(ELABORATE_ONLY),elaborate,run-directed) \
+	    TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
 	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT)) \
 	    $(if $(HOTSPOT_PERIPHERALS),HOTSPOT_PERIPHERALS=$(HOTSPOT_PERIPHERALS)) \
 	    $(if $(MCAST_SHAPE),MCAST_SHAPE=$(MCAST_SHAPE))

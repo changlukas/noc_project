@@ -26,7 +26,8 @@ VL_BUILD := $(BUILD_ROOT)/verilator
 # Per-topology, per-run-class, per-READ_ROB obj dir: building one flavor must
 # not clobber another. READ_ROB is in the name because it changes the emitted
 # tb_top, so two READ_ROB values are two different builds of the same topology.
-OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)
+# DMA joins it for the same reason -- it swaps the endpoint and the top.
+OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(if $(filter 1,$(DMA)),_dma)
 
 # FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<TOPOLOGY>.f
 # is a generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
@@ -114,12 +115,13 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)" > $@; \
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) --out $(TB_TOP_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
+	    $(if $(filter 1,$(DMA)),--dma) --out $(TB_TOP_SV)
 
 # The same generator run writes the fabric; the empty recipe just tells make the
 # file is up to date once tb_top has been made (it is a prerequisite of the
@@ -146,8 +148,14 @@ check-yamlcpp:
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
-	$(MAKE) -C $(OBJ_DIR) -f V$(TOP).mk \
-	    PYTHON3="$(PYTHON3)"
+	$(if $(ELABORATE_ONLY),echo "ELABORATE_ONLY: elaborated - C++ build skipped",$(MAKE) -C $(OBJ_DIR) -f V$(TOP).mk PYTHON3="$(PYTHON3)")
+
+# Elaboration alone: Verilator reads the SV and emits its C++, and the g++ build
+# of that C++ is skipped. Enough to prove a top elaborates, an order of magnitude
+# cheaper, and the only goal a top with no run path yet can serve.
+.PHONY: elaborate
+elaborate: ELABORATE_ONLY := 1
+elaborate: $(TBTOP_EXE)
 
 SEED       ?= 1
 

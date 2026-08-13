@@ -77,7 +77,16 @@ endif
 # the variable stays readable; gen_filelist.py absolutizes them.
 # TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
 # (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
+#
+# DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
+# every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
+# below the endpoint -- the fabric, the NI wraps, the tile crossbar sources --
+# is the same build, so the two tops differ only in who generates the traffic.
+ifeq ($(DMA),1)
+TB_TOP_SV = $(COSIM_ROOT)/tb/dma/tb_top_dma_$(TOPOLOGY).sv
+else
 TB_TOP_SV = $(COSIM_ROOT)/tb/tb_top_$(TOPOLOGY).sv
+endif
 # NMU read reorder buffer. 1 (the default, and what docs/noc-target-spec.md
 # section 3 describes) emits the reorder-buffer response path; 0 emits the
 # RoBless bypass. Reaches the tb as its READ_ROB_ENABLED localparam.
@@ -116,6 +125,34 @@ XBAR_SRC := \
     $(PULP_AXI)/axi_xbar.sv \
     $(PULP_AXI)/axi_delayer.sv \
     $(PULP_AXI)/axi_sim_mem.sv
+
+# The endpoint on the master face, one flavor per build. The DMA flavor pulls in
+# pulp iDMA v0.6.5 and the five common_cells it needs on top of XBAR_SRC above;
+# declaration order is bottom-up, as the rest of this file (idma_pkg first, the
+# backend last, the tb's own type binding after both).
+IDMA_SRC := $(DV_ROOT)/idma-0.6.5/src
+DMA_ENDPOINT_SRC := \
+    $(PULP_CC)/stream_fifo.sv \
+    $(PULP_CC)/stream_fifo_optimal_wrap.sv \
+    $(PULP_CC)/stream_fork.sv \
+    $(PULP_CC)/passthrough_stream_fifo.sv \
+    $(PULP_CC)/fall_through_register.sv \
+    $(PULP_AXI)/axi_rw_join.sv \
+    $(IDMA_SRC)/idma_pkg.sv \
+    $(IDMA_SRC)/idma_legalizer_page_splitter.sv \
+    $(IDMA_SRC)/idma_legalizer_rw_axi.sv \
+    $(IDMA_SRC)/idma_dataflow_element.sv \
+    $(IDMA_SRC)/idma_axi_read.sv \
+    $(IDMA_SRC)/idma_axi_write.sv \
+    $(IDMA_SRC)/idma_transport_layer_rw_axi.sv \
+    $(IDMA_SRC)/idma_channel_coupler.sv \
+    $(IDMA_SRC)/idma_error_handler.sv \
+    $(IDMA_SRC)/idma_backend_rw_axi.sv \
+    $(COSIM_ROOT)/tb/dma/idma_types_pkg.sv \
+    $(COSIM_ROOT)/tb/dma/idma_job_driver.sv \
+    $(COSIM_ROOT)/tb/dma/dma_node_endpoint.sv
+ENDPOINT_SRC := $(if $(filter 1,$(DMA)),$(DMA_ENDPOINT_SRC),\
+    $(COSIM_ROOT)/tb/user_node_endpoint.sv)
 
 # noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
 # BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
@@ -156,7 +193,7 @@ TB_TOP_SV_SRC := \
     $(SRC_SV)/router_wrap.sv \
     $(SRC_SV)/nsu_wrap.sv \
     $(SRC_SV)/ni_wrap.sv \
-    $(COSIM_ROOT)/tb/user_node_endpoint.sv \
+    $(ENDPOINT_SRC) \
     $(COSIM_ROOT)/tb/link_perf_monitor.sv \
     $(TB_TOP_SV)
 
@@ -166,12 +203,15 @@ TB_TOP_SV_SRC := \
 # in each Makefile (rather than defined here) so it never becomes the default
 # goal of an includer. FILELIST_F / FILELIST_GEN_ARGS centralize the shared
 # bits so the two recipes stay in sync.
-FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY).f
+# Per-flavor as well as per-topology: the two endpoints compile different source
+# sets, and a stale list from the other flavor would build the wrong one.
+FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY)$(if $(filter 1,$(DMA)),_dma).f
 # gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
 # -I/+incdir+ the simulators already pass; listing them in the .f makes it
 # self-contained for tool-native -f consumption.
 FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/tb $(SRC_SV) \
-    $(DV_ROOT)/axi-0.39.7/include $(DV_ROOT)/common_cells-1.37.0/include -- $(TB_TOP_SV_SRC)
+    $(DV_ROOT)/axi-0.39.7/include $(DV_ROOT)/common_cells-1.37.0/include \
+    $(if $(filter 1,$(DMA)),$(DV_ROOT)/idma-0.6.5/include) -- $(TB_TOP_SV_SRC)
 
 # DPI implementation shared by every simulator; the C++ *main* driver
 # (main.cpp) is Verilator-only and listed in sim/verilator/Makefile, NOT here

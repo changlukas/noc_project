@@ -737,7 +737,7 @@ def emit_fabric(topo: dict) -> str:
 # tb_top emitter — instantiates the fabric + pulp VIP endpoints + exit logic
 # ---------------------------------------------------------------------------
 
-def emit_tb_top(topo: dict, rob_enabled: bool = True) -> str:
+def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False) -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -804,10 +804,15 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True) -> str:
     w("//")
     w(f"// {n} nodes live inside noc_fabric_{name} (ni_wrap=NMU+NSU + REQ/RSP router per")
     w("// node, joined by directional links). tb_top creates the DPI handles, attaches a")
-    w("// user_node_endpoint (pulp axi_file_master + axi_delayer/axi_sim_mem + FlooNoC")
-    w("// axi_bw_monitor) to each node's master/slave AXI faces, and owns the exit logic.")
-    w("// Checking: pulp axi_scoreboard lives inside each endpoint on master_dv,")
-    w("// comparing read data end-to-end through the NoC against golden write data.")
+    if dma:
+        w("// dma_node_endpoint (pulp iDMA backend + axi_delayer/axi_sim_mem + FlooNoC")
+        w("// axi_bw_monitor) to each node's master/slave AXI faces, and owns the exit logic.")
+        w("// Stimulus: <stim_dir>/node<i>/jobs.txt, one iDMA job per eleven fields.")
+    else:
+        w("// user_node_endpoint (pulp axi_file_master + axi_delayer/axi_sim_mem + FlooNoC")
+        w("// axi_bw_monitor) to each node's master/slave AXI faces, and owns the exit logic.")
+        w("// Checking: pulp axi_scoreboard lives inside each endpoint on master_dv,")
+        w("// comparing read data end-to-end through the NoC against golden write data.")
     w("//")
     w("// Self-clocked: clk_i/rst_ni are internal logic (10 ns clock, 4-cycle reset).")
     w("// Plusargs: +num_reads=<n> +num_writes=<n> (per node); seed via +verilator+seed+<N>.")
@@ -1110,10 +1115,15 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True) -> str:
     # user_node_endpoint.sv is USER-OWNED (committed, hand-written); the
     # generator only INSTANTIATES it and stamps the tile windows.
     w("    // -------------------------------------------------------------------------")
-    w("    // Test endpoints - one user_node_endpoint per node (pulp file_master +")
-    w("    // axi_xbar tile crossbar + two axi_delayer/axi_sim_mem targets +")
-    w("    // in-endpoint scoreboard +")
-    w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT regenerated.")
+    if dma:
+        w("    // Test endpoints - one dma_node_endpoint per node (pulp iDMA backend +")
+        w("    // axi_xbar tile crossbar + two axi_delayer/axi_sim_mem targets +")
+        w("    // bw monitor). dma_node_endpoint.sv is user-owned and NOT regenerated.")
+    else:
+        w("    // Test endpoints - one user_node_endpoint per node (pulp file_master +")
+        w("    // axi_xbar tile crossbar + two axi_delayer/axi_sim_mem targets +")
+        w("    // in-endpoint scoreboard +")
+        w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT regenerated.")
     if peripherals:
         w(f"    // {n_ep} endpoints, not NUM_NODES: endpoints {n}..{n_ep - 1} are the")
         w("    // peripherals, which have an NI and an endpoint but no router. They carry")
@@ -1121,8 +1131,14 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True) -> str:
     w("    // -------------------------------------------------------------------------")
     w(f"    logic        end_of_sim [{n_ep}];")
     w(f"    int unsigned txn_cnt    [{n_ep}];")
+    if dma:
+        w("    // Write side of each endpoint's tile memories. A DMA's payload is written")
+        w("    // by a REMOTE node, so this is where it lands on wires the testbench can")
+        w("    // watch.")
+        w(f"    logic [TILE_TARGETS-1:0] mem_w_valid [{n_ep}];")
+        w(f"    logic [TILE_TARGETS-1:0] mem_w_last  [{n_ep}];")
     w(f"    for (genvar i = 0; i < {n_ep}; i++) begin : g_endpoint")
-    w("        user_node_endpoint #(")
+    w(f"        {'dma_node_endpoint' if dma else 'user_node_endpoint'} #(")
     w("            .NODE_ID(i),")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
@@ -1142,6 +1158,8 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True) -> str:
     w("            .master_axi_req_o(master_axi_req[i]), .master_awuser_o(master_awuser[i]),")
     w("            .master_axi_rsp_i(master_axi_rsp[i]),")
     w("            .slave_axi_req_i(slave_axi_req[i]),   .slave_axi_rsp_o(slave_axi_rsp[i]),")
+    if dma:
+        w("            .mon_w_valid_o(mem_w_valid[i]), .mon_w_last_o(mem_w_last[i]),")
     w("            .end_of_sim_o(end_of_sim[i]), .txn_cnt_o(txn_cnt[i])")
     w("        );")
     w("    end : g_endpoint")
@@ -1275,6 +1293,11 @@ def main() -> int:
                     help="NMU read reorder buffer: 1 (default) emits the reorder-buffer "
                          "response path, 0 the RoBless bypass. Emitted as the tb's "
                          "READ_ROB_ENABLED localparam.")
+    ap.add_argument("--dma", action="store_true",
+                    help="Emit the iDMA top instead: dma_node_endpoint per node and "
+                         "sim/tb/dma/tb_top_dma_<topology>.sv as the default output. The "
+                         "fabric is emitted unchanged and shared -- the endpoint's port "
+                         "list toward it does not move.")
     ap.add_argument("--print-num-vc", action="store_true",
                     help="Print the topology's num_vc and exit. sim/build_config.mk picks "
                          "the per-VC noc_types_pkg with it, so that value is read where it "
@@ -1285,10 +1308,11 @@ def main() -> int:
     if a.print_num_vc:
         print(topo["topology"]["num_vc"])
         return 0
-    tb_text = emit_tb_top(topo, bool(a.read_rob))
+    tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma)
     fab_text = emit_fabric(topo)
-    out_path = Path(a.out) if a.out is not None else \
-        ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"
+    default_out = ROOT / "sim" / "tb" / "dma" / f"tb_top_dma_{a.topology}.sv" if a.dma \
+        else ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"
+    out_path = Path(a.out) if a.out is not None else default_out
     fab_path = _fabric_path(out_path, topo)
 
     out_path.write_text(tb_text, encoding="utf-8")
