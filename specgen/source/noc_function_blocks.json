@@ -65,7 +65,7 @@
           "modes": ["Disabled", "Enabled"],
           "compile_time_params": {
             "write_rob_mode": "Disabled",
-            "read_rob_mode": "Disabled"
+            "read_rob_mode": "Enabled"
           },
           "uses_packet_fields": ["ordering_req", "ordering_tag", "B", "NARROW_R", "DATA_R"],
           "configured_by": [],

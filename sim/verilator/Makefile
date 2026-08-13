@@ -23,9 +23,10 @@ include ../build_config.mk
 
 VL_BUILD := $(BUILD_ROOT)/verilator
 
-# Per-topology, per-run-class obj dir (uniform naming for both classes — the
-# regression runner keys on it): building one flavor must not clobber another.
-OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)
+# Per-topology, per-run-class, per-READ_ROB obj dir: building one flavor must
+# not clobber another. READ_ROB is in the name because it changes the emitted
+# tb_top, so two READ_ROB values are two different builds of the same topology.
+OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)
 
 # FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<TOPOLOGY>.f
 # is a generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
@@ -203,7 +204,11 @@ _CHECKED       := $(filter 2,$(INJECTION_MODE))
 # output tag (row and submesh runs must not share stimulus or logs).
 _PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
 STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
-SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(TOPOLOGY)_$(_PATTERN_TAG)_s$(SEED)))
+# READ_ROB joins the run tag, not STIM_ROOT: it changes what the NI does with a
+# response, not the stimulus, so two READ_ROB values share generated patterns and
+# must not share output/<tag>/ (run.log, result.csv, perf.json all live there).
+_TOPO_TAG      := $(TOPOLOGY)_rob$(READ_ROB)
+SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(_TOPO_TAG)_$(_PATTERN_TAG)_s$(SEED)))
 GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
 EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py
 # HOTSPOT_PERIPHERALS=1 moves the hotspot set off the router array (every tile

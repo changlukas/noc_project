@@ -142,15 +142,15 @@ endif
 # --- tb_top cosim (self-clocked) ---
 PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
-# Per-topology, per-run-class simv + csrc dir (mirrors the Verilator
-# obj_dir_$(TOPOLOGY)_$(RUN_CLASS) isolation): building one flavor must not
-# clobber another's binary.
-SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(FSDB_SUFFIX)
+# Per-topology, per-run-class, per-READ_ROB simv + csrc dir (mirrors the
+# Verilator obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB) isolation): building
+# one flavor must not clobber another's binary.
+SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(FSDB_SUFFIX)
 
 $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(FSDB_SUFFIX) \
+	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(FSDB_SUFFIX) \
 	    -top tb_top \
 	    -f $(FILELIST_F) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)

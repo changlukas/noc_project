@@ -133,10 +133,10 @@ make -C sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RA
 ~~~
 
 On success mode 1 prints `CONTINUOUS PASS: <run-tag>` and writes
-`sim/verilator/output/continuous_<topo>_<pattern>_r<rate>_s<seed>/result.csv`
+`sim/verilator/output/continuous_<topo>_rob<READ_ROB>_<pattern>_r<rate>_s<seed>/result.csv`
 with the monitor's bandwidth and latency numbers; mode 2 prints
 `CHECKED PASS: <run-tag> scoreboard clean, non-vacuous` with run tag
-`checked_<topo>_<pattern>_r<rate>_s<seed>`.
+`checked_<topo>_rob<READ_ROB>_<pattern>_r<rate>_s<seed>`.
 
 `make -C sim sim-injection-sweep PATTERN=<p>` runs the full saturation sweep
 (VC configs 1/2/4/8, nine rates each, overridable via `SWEEP_VCS` and
