@@ -93,25 +93,25 @@ $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
 # tb_top_<TOPOLOGY>.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate
 # from the topology config before building. TB_TOP_SV comes from build_config.mk
 # (deferred = so TOPOLOGY expands correctly).
-TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY_BASE).yaml
+TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VCS_BUILD)/.topology
 
 # TOPOLOGY stamp records the last-built topology. The FORCE-driven rule rewrites
 # the stamp ONLY when TOPOLOGY changed (content compare), bumping its mtime so the
-# tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch. Mirrors
-# the Verilator Makefile's mechanism exactly. Unchanged topology leaves the stamp
-# alone.
+# tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch. READ_ROB
+# joins it because it also changes what the generator emits. Mirrors the Verilator
+# Makefile's mechanism exactly. Unchanged stamp leaves the file alone.
 .PHONY: FORCE
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VCS_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" > $@; \
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) --out $(TB_TOP_SV)
 
 # The same generator run writes the fabric; the empty recipe just tells make the
 # file is up to date once tb_top has been made (it is a prerequisite of simv

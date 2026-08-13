@@ -335,8 +335,10 @@ spec) before emitting anything. `sim/verilator/Makefile` regenerates
 `tb_top_<TOPOLOGY>.sv` whenever the topology YAML, the generator, or the
 `TOPOLOGY` make variable changes. Adding a topology needs only a new YAML
 file; `make -C sim TB=<name> PATTERN=<p>` picks it up with no other change.
-`_rob` appended to the topology name (e.g. `mesh_4x4_vc8_rob`) selects the
-NMU reorder-buffer-enabled build of the same mesh.
+`READ_ROB=0|1` selects the NMU read response path: 1 (the default) the
+reorder buffer, 0 the RoBless bypass. It reaches the generated top as its
+`READ_ROB_ENABLED` localparam, and joins the topology stamp so a switch
+re-emits the tb.
 
 ## Seed handling
 

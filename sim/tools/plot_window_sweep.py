@@ -24,7 +24,7 @@ _MON = re.compile(
 
 def load():
     points = {}
-    for log in sorted(_OUTPUT.glob("continuous_*_rob_*/run.log")):
+    for log in sorted(_OUTPUT.glob("continuous_*/run.log")):
         m = _TAG.search(log.parent.name)
         if not m:
             continue

@@ -74,7 +74,7 @@ class NmuWrap {
     // AXI channel.
     void init(const char* config_path, uint8_t src_id = 0, uint8_t dat_num_vc = 1,
               std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
-              nmu::RobMode rob_mode = nmu::RobMode::Disabled,
+              nmu::RobMode rob_mode = nmu::RobMode::Enabled,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
               std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID) {
@@ -90,7 +90,7 @@ class NmuWrap {
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;
         cfg.dat_num_vc = dat_num_vc;
-        // rob_mode / the tb's `_rob` suffix controls the R RoB only; B RoB is always on.
+        // rob_mode / the tb's READ_ROB parameter controls the R RoB only; B RoB is always on.
         cfg.read_rob_mode = rob_mode;
         cfg.b_rob_depth = b_rob_depth;
         cfg.r_rob_depth = r_rob_depth;

@@ -53,8 +53,7 @@ LINK_PORTS = 5
 
 def load_topology(name: str) -> dict:
     import yaml
-    base = name[:-4] if name.endswith("_rob") else name
-    path = ROOT / "sim" / "topologies" / f"{base}.yaml"
+    path = ROOT / "sim" / "topologies" / f"{name}.yaml"
     topo = yaml.safe_load(path.read_text())
     _check_flit_capacity(topo, path)
     return topo
@@ -738,7 +737,7 @@ def emit_fabric(topo: dict) -> str:
 # tb_top emitter — instantiates the fabric + pulp VIP endpoints + exit logic
 # ---------------------------------------------------------------------------
 
-def emit_tb_top(topo: dict, requested_name: str = "") -> str:
+def emit_tb_top(topo: dict, rob_enabled: bool = True) -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -747,7 +746,6 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     n_ep = len(endpoints)
     num_vc = topo["topology"]["num_vc"]
     x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(topo["topology"])
-    rob_enabled = requested_name.endswith("_rob")
     # Every loop that walks the initiators walks ENDPOINTS on a topology with a
     # peripheral: each one injects, each one can wedge, and each one has an NMU.
     exit_n = "NUM_ENDPOINTS" if peripherals else "NUM_NODES"
@@ -841,6 +839,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    localparam int unsigned ADDR_WIDTH    = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
     w(f"    localparam int unsigned DAT_NUM_VC     = {num_vc};  // from topology YAML")
+    w("    // NMU read reorder buffer (READ_ROB): 1 = the reorder-buffer response path")
+    w("    // docs/noc-target-spec.md section 3 describes, 0 = the RoBless bypass with")
+    w("    // its per-id single-outstanding interlock. int unsigned, not bit: it goes")
+    w("    // straight into cmodel_nmu_create_ex's `input int rob_enabled`.")
+    w(f"    localparam int unsigned READ_ROB_ENABLED = {1 if rob_enabled else 0};")
     w("    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT;")
     w("    localparam int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT;")
     w("    localparam int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT;")
@@ -1062,10 +1065,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     # its responses come back to.
     for (i, x, y, c) in endpoints:
         w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, DAT_NUM_VC, '
-          f'{1 if rob_enabled else 0}, b_rob_depth, r_rob_depth, max_txns_per_id, '
+          f'READ_ROB_ENABLED, b_rob_depth, r_rob_depth, max_txns_per_id, '
           f'sam_config_path);  '
-          f'// src_id = {"node" if i < n else "peripheral"}{i} coord {c}, '
-          f'ROB {"Enabled" if rob_enabled else "Disabled"}')
+          f'// src_id = {"node" if i < n else "peripheral"}{i} coord {c}')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, '
           f'max_outstanding, sam_config_path);')
         w(f'        dat_merge_ctx[{i}] = cmodel_dat_merge_create("dat_merge_{i}", DAT_NUM_VC);')
@@ -1269,6 +1271,10 @@ def main() -> int:
     ap.add_argument("--out", default=None,
                     help="Output tb_top.sv path (default: sim/tb/tb_top_<topology>.sv; "
                          "fabric emitted alongside)")
+    ap.add_argument("--read-rob", type=int, choices=(0, 1), default=1,
+                    help="NMU read reorder buffer: 1 (default) emits the reorder-buffer "
+                         "response path, 0 the RoBless bypass. Emitted as the tb's "
+                         "READ_ROB_ENABLED localparam.")
     ap.add_argument("--print-num-vc", action="store_true",
                     help="Print the topology's num_vc and exit. sim/build_config.mk picks "
                          "the per-VC noc_types_pkg with it, so that value is read where it "
@@ -1279,7 +1285,7 @@ def main() -> int:
     if a.print_num_vc:
         print(topo["topology"]["num_vc"])
         return 0
-    tb_text = emit_tb_top(topo, a.topology)
+    tb_text = emit_tb_top(topo, bool(a.read_rob))
     fab_text = emit_fabric(topo)
     out_path = Path(a.out) if a.out is not None else \
         ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"

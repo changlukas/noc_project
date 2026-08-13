@@ -96,7 +96,7 @@ $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
 # from the topology config before Verilating. Depends on the generator script, the
 # topology YAML, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
 # (deferred = so TOPOLOGY expands correctly).
-TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY_BASE).yaml
+TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
@@ -107,17 +107,18 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 # TOPOLOGY stamp records the last-built topology name. The FORCE-driven rule
 # rewrites it ONLY when TOPOLOGY changed (content compare), bumping its mtime so
 # the tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch even
-# if the YAML itself hasn't changed. Unchanged topology leaves the stamp alone.
+# if the YAML itself hasn't changed. READ_ROB joins it because it also changes
+# what the generator emits. Unchanged stamp leaves the file alone.
 .PHONY: FORCE
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" > $@; \
 	fi
 
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --out $(TB_TOP_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) --out $(TB_TOP_SV)
 
 # The same generator run writes the fabric; the empty recipe just tells make the
 # file is up to date once tb_top has been made (it is a prerequisite of the
@@ -165,7 +166,7 @@ PATTERN         ?= neighbor
 MCAST_SHAPE     ?= row
 INJECTION_MODE  ?= 0
 INJECTION_RATE  ?= 1.0
-# Directed default is 64: measured on mesh_4x4_vc4_rob uniform_random at 4 ids,
+# Directed default is 64: measured on mesh_4x4_vc4 uniform_random at 4 ids,
 # the RoB high-water mark rises 3 -> 12 -> 60 (of 128) across counts 4, 16, 64
 # and then saturates at 75 by 128, so 64 is the largest count where injection
 # still sets the load rather than the fabric. At 4 the RoB sat at 2% and no

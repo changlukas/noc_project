@@ -20,9 +20,9 @@ help:
 	@echo "Simulate (from repo root, or drop the -C sim if you are already here):"
 	@echo "  make -C sim TB=<topo> PATTERN=<p> [SEED=<n>]"
 	@echo "  make -C sim TB=mesh_4x4_vc1 PATTERN=neighbor"
-	@echo "  TB:      topology from topologies/, append _rob for the reorder-buffer build"
+	@echo "  TB:      topology from topologies/"
 	@echo "  PATTERN: $(_VALID_PATTERNS)"
-	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
+	@echo "  Vars: INJECTION_MODE=0|1|2 READ_ROB=0|1 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
 	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
 	@echo ""
 	@echo "  make -C sim sim-injection-sweep PATTERN=<p>   saturation sweep, long"
@@ -63,6 +63,7 @@ _SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$(( RANDOM * 32768 + RAND
 # INJECTION_COUNT's default depends on INJECTION_MODE and is computed there.
 _INJ_ARGS := \
     $(if $(INJECTION_MODE),INJECTION_MODE=$(INJECTION_MODE)) \
+    $(if $(READ_ROB),READ_ROB=$(READ_ROB)) \
     $(if $(INJECTION_RATE),INJECTION_RATE=$(INJECTION_RATE)) \
     $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT)) \
     $(if $(IDS_PER_INITIATOR),IDS_PER_INITIATOR=$(IDS_PER_INITIATOR)) \
@@ -100,8 +101,8 @@ sim-injection-sweep:
 	@for vc in $(SWEEP_VCS); do \
 	    for r in $(SWEEP_RATES); do \
 	        echo ">>> sweep vc$$vc rate $$r"; \
-	        $(MAKE) sim TB=tb_mesh_4x4_vc$${vc}_rob PATTERN=$(PATTERN) SEED=$(_SEED) \
-	            INJECTION_MODE=1 INJECTION_RATE=$$r \
+	        $(MAKE) sim TB=tb_mesh_4x4_vc$${vc} PATTERN=$(PATTERN) SEED=$(_SEED) \
+	            INJECTION_MODE=1 READ_ROB=1 INJECTION_RATE=$$r \
 	            $(if $(MAX_UNIQUE_IDS),MAX_UNIQUE_IDS=$(MAX_UNIQUE_IDS)) \
 	            $(if $(MAX_OUTSTANDING),MAX_OUTSTANDING=$(MAX_OUTSTANDING)) || exit 1; \
 	    done; \

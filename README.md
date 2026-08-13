@@ -84,7 +84,7 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 
 | var | values |
 |---|---|
-| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Append `_rob` for the reorder-buffer variant. Every node gets a 1 MB memory tile and a 4 KB config tile |
+| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Every node gets a 1 MB memory tile and a 4 KB config tile |
 | `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `all_to_all` (each node walks every other node in turn, so the destination changes on every transaction and, at one id per initiator, every one of them allocates a reorder-buffer slot), `hotspot` (`HOTSPOT=` names the target node), `beat_exact` (per-lane-distinct bytes + walking WSTRB, DPI word-boundary check), `multicast` (collective write, shape from `MCAST_SHAPE`) |
 | `MCAST_SHAPE` | `row` (default), `col`, `submesh`. `multicast` only. One shape per run, concurrent multicast trees must stay pairwise disjoint |
 
@@ -93,7 +93,7 @@ a run.
 
 ~~~bash
 make -C sim TB=mesh_4x4_vc1 PATTERN=neighbor
-make -C sim TB=mesh_4x4_vc8_rob PATTERN=transpose
+make -C sim TB=mesh_4x4_vc8 PATTERN=transpose
 ~~~
 
 On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
@@ -125,10 +125,11 @@ injection rate and mode 1 stays the saturation-curve instrument.
 | `INJECTION_COUNT` | `200` (modes 1, 2), `64` (mode 0) | transactions per node |
 | `IDS_PER_INITIATOR` | generator default (1) | distinct AXI ids one initiator draws from |
 | `HOTSPOT` | `5` | target node for the `hotspot` pattern |
+| `READ_ROB` | `1` | NMU read response path: `1` the reorder buffer, `0` the RoBless bypass |
 
 ~~~bash
-make -C sim TB=mesh_4x4_vc4_rob PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
-make -C sim TB=mesh_4x4_vc4_rob PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
+make -C sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
+make -C sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
 ~~~
 
 On success mode 1 prints `CONTINUOUS PASS: <run-tag>` and writes

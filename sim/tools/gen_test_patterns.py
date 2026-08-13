@@ -1013,8 +1013,7 @@ def _load_topology(name):
         topo_path = name
     else:
         here = os.path.dirname(os.path.abspath(__file__))
-        base = name[:-4] if name.endswith("_rob") else name
-        topo_path = os.path.join(here, "..", "topologies", f"{base}.yaml")
+        topo_path = os.path.join(here, "..", "topologies", f"{name}.yaml")
     with open(topo_path) as f:
         topo = yaml.safe_load(f)
     x_dim = topo["topology"]["x_dim"]

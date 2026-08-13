@@ -458,9 +458,8 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int dat_
 
 extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id, int dat_num_vc,
                                                 const char* config_path) {
-    return nmu_create_impl(name, src_id, dat_num_vc, ni::cmodel::nmu::RobMode::Disabled,
-                           config_path, ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH,
-                           ni::NMU_MAX_TXNS_PER_ID);
+    return nmu_create_impl(name, src_id, dat_num_vc, ni::cmodel::nmu::RobMode::Enabled, config_path,
+                           ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH, ni::NMU_MAX_TXNS_PER_ID);
 }
 
 extern "C" unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_num_vc,

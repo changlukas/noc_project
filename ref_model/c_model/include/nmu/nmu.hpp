@@ -152,7 +152,7 @@ struct NmuRspREntry {
 struct NmuConfig {
     uint8_t src_id = 0;
     addr_trans::SamTable sam{};
-    RobMode read_rob_mode = RobMode::Disabled;
+    RobMode read_rob_mode = RobMode::Enabled;
     // RoB pool depths, per direction. Enabled mode only.
     std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH;
     std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;

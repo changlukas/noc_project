@@ -249,3 +249,11 @@ TEST(NmuOutstandingCount, RoblessReadRetiresAtTheAxiSideAndReopensTheId) {
     }
     EXPECT_TRUE(saw_second_ar) << "the retired transaction never reopened the id";
 }
+
+TEST(NmuTopLevel, ReadReorderBufferIsOnByDefault) {
+    // docs/noc-target-spec.md section 3 puts a reorder buffer on the response
+    // path. A default-constructed config is what every test and the plain DPI
+    // entry point get, so this is the one that decides which path they run.
+    NmuConfig cfg;
+    EXPECT_EQ(cfg.read_rob_mode, ni::cmodel::nmu::RobMode::Enabled);
+}
