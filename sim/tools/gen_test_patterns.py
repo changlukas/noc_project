@@ -38,6 +38,10 @@ hotspot  (ported from booksim2 HotSpotTrafficPattern::dest, src/traffic.cpp:506-
     Single hotspot: all packets go to that node.
     Multiple hotspots: weighted selection by --hotspot-rates (default: equal weight).
     Uses random.Random(seed) for reproducibility.
+    --hotspot-peripherals moves the hotspot set off the router array: every tile
+    hammers the peripheral it can reach (peripheral_hotspot), which is the
+    many-to-one shape a memory controller or host bridge sees. Same booksim
+    selection, different target set -- see peripheral_hotspot.
 
 beat_exact  (S2 gate: DPI word-packing fault injection, not a spatial pattern)
     Every node writes one full-width beat (per-lane-distinct bytes, full
@@ -871,23 +875,57 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             f.write("\n".join(read_lines) + "\n")
 
 
+def peripheral_reaches(periph_cid, tile_cid, tile_xs):
+    """Whether a peripheral and a tile may exchange traffic under XY routing.
+
+    The same axis rule the NMU enforces
+    (nmu::addr_trans::check_dst_reachable, nmu-spec.md G11;
+    docs/noc-target-spec.md section 2). A peripheral outside the tile region on
+    X is reached by running out of x hops, which happens on the tile's own row,
+    so only its own row may address it. One outside on Y is reached after x has
+    already resolved onto the destination's column, so any column may.
+
+    tile_xs: the x of every tile, i.e. the region the peripheral sits outside of.
+    """
+    px, py = coord_xy(periph_cid)
+    off_x = px < min(tile_xs) or px > max(tile_xs)
+    return not off_x or coord_xy(tile_cid)[1] == py
+
+
+def peripheral_hotspot(src_cid, peripherals, nodes):
+    """The peripheral a tile targets under --hotspot-peripherals.
+
+    Booksim's single-hotspot fast path (HotSpotTrafficPattern::dest,
+    src/traffic.cpp:510) with the hotspot named per source rather than
+    globally: a peripheral off an x face exchanges traffic with its own row
+    only (peripheral_reaches), so a source has exactly one legal target and
+    every packet goes to it. Filtering a global weighted list per source would
+    have changed booksim's distribution instead, so the target is chosen per
+    source from the start.
+
+    A source left with no reachable peripheral, or with more than one, has no
+    such fast path and exits rather than emitting some other node's traffic.
+    """
+    tile_xs = [coord_xy(t[3])[0] for t in nodes]
+    reachable = [cid for _ep_idx, cid in peripherals
+                 if peripheral_reaches(cid, src_cid, tile_xs)]
+    if len(reachable) != 1:
+        sys.exit(f"ERROR: --hotspot-peripherals needs exactly one peripheral reachable from "
+                 f"the tile at {coord_xy(src_cid)}; found {len(reachable)} "
+                 f"{[coord_xy(c) for c in reachable]}")
+    return reachable[0]
+
+
 def peripheral_partner(periph_cid, nodes):
     """The tile a peripheral exchanges traffic with: the FARTHEST legal one.
 
     Farthest, not nearest: the nearest tile is the router the peripheral hangs
     off, so the pair would never take an inter-router hop and multi-hop
-    addressability would go untested.
-
-    Legal follows the same axis rule the NMU enforces
-    (nmu::addr_trans::check_dst_reachable). A peripheral outside the tile region
-    on X is reached by running out of x hops, which happens on the SOURCE's row,
-    so only its own row may address it. One outside on Y is reached after x has
-    already resolved onto the destination's column, so any column may.
+    addressability would go untested. Legal is peripheral_reaches.
     """
     px, py = coord_xy(periph_cid)
     xs = [coord_xy(t[3])[0] for t in nodes]
-    off_x = px < min(xs) or px > max(xs)
-    legal = [t for t in nodes if not off_x or coord_xy(t[3])[1] == py]
+    legal = [t for t in nodes if peripheral_reaches(periph_cid, t[3], xs)]
     if not legal:
         sys.exit(f"ERROR: peripheral at ({px},{py}) sits outside the tile region on x and has no "
                  f"tile on its own row; XY routing cannot reach it from any other row")
@@ -912,9 +950,11 @@ def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_loc
 
     Returns {node_idx: (write_lines, read_lines)} to append to the partner
     tile's own stimulus. Empty when address_the_peripheral is False, which is
-    the multicast pattern: the router-to-peripheral link is where that run's
+    the multicast pattern -- the router-to-peripheral link is where that run's
     collective-clip evidence is measured, so nothing but the peripheral's own
-    responses may travel it.
+    responses may travel it -- and --hotspot-peripherals, where every tile
+    already addresses the peripheral and the partner's slots would be written
+    twice over.
     """
     extras = {}
     reserved = (axi_len + 1) * (1 << axi_size)
@@ -1167,6 +1207,10 @@ def main(argv=None):
                     help="Linear node id(s) for hotspot pattern (0..N-1)")
     ap.add_argument("--hotspot-rates", type=int, nargs="+", default=None,
                     help="Weights for each hotspot (parallel to --hotspot; default: equal)")
+    ap.add_argument("--hotspot-peripherals", action="store_true",
+                    help="Hotspot pattern targets peripherals instead of --hotspot "
+                         "node ids: every tile targets the peripheral it can reach "
+                         "(one per row), the many-to-one shape a memory controller sees")
     # Synthetic payload shape
     ap.add_argument("--size", type=int, default=2,
                     help="AxSIZE for synthetic transactions (0..7; default 2 = 4 bytes)")
@@ -1214,7 +1258,7 @@ def main(argv=None):
     periph_extra = emit_peripheral_nodes(
         a.out, peripherals, nodes, bases, n_slots, base_local, region_bytes, a.size, a.burst_len,
         widths["data"], a.transactions_per_node, id_rng, num_axi_ids=(1 << widths["id"]),
-        address_the_peripheral=(a.pattern != "multicast"))
+        address_the_peripheral=(a.pattern != "multicast" and not a.hotspot_peripherals))
     if a.pattern == "transpose":
         _check_transpose_guard(x_dim, y_dim)   # square-mesh precondition (legacy parity)
     if a.pattern in ("bit_complement", "bit_reverse", "shuffle", "bit_rotation"):
@@ -1254,6 +1298,8 @@ def main(argv=None):
         elif a.pattern == "all_to_all":
             dst_lin = all_to_all_dsts(idx, n_nodes, a.transactions_per_node)
             dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
+        elif a.hotspot_peripherals:  # hotspot, off the router array
+            dst_cids = [peripheral_hotspot(src_cid, peripherals, nodes)] * a.transactions_per_node
         else:  # hotspot
             if a.hotspot is None:
                 ap.error("--hotspot is required for the hotspot pattern")

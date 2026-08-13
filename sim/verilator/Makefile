@@ -205,7 +205,9 @@ STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n
 SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(TOPOLOGY)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(TOPOLOGY)_$(_PATTERN_TAG)_s$(SEED)))
 GEN_PATTERNS   := $(COSIM_ROOT)/tools/gen_test_patterns.py
 EMIT_CSV       := $(COSIM_ROOT)/tools/emit_result_csv.py
-_HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),--hotspot $(HOTSPOT),)
+# HOTSPOT_PERIPHERALS=1 moves the hotspot set off the router array (every tile
+# targets the peripheral on its row), so HOTSPOT names nothing and is not passed.
+_HOTSPOT_ARGS  := $(if $(filter hotspot,$(PATTERN)),$(if $(HOTSPOT_PERIPHERALS),--hotspot-peripherals,--hotspot $(HOTSPOT)),)
 _MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAPE),)
 
 .PHONY: run-directed

@@ -782,3 +782,76 @@ def test_peripheral_slots_do_not_land_on_a_multicast_address(tmp_path):
     addrs = [t["addr"] for node in sorted(out.iterdir())
              for t in _parse_write(node / "write.txt")]
     assert len(addrs) == len(set(addrs))
+
+
+_HOTSPOT_PERIPH_TXNS = 2
+
+
+def _emit_hotspot_peripherals(tmp_path):
+    """mesh_2x2_vc1_periph under --hotspot-peripherals; returns (out dir, topology)."""
+    out = tmp_path / "hp"
+    g.main(["--pattern", "hotspot", "--hotspot-peripherals",
+            "--topology", "mesh_2x2_vc1_periph", "--out", str(out),
+            "--transactions-per-node", str(_HOTSPOT_PERIPH_TXNS),
+            "--size", "5", "--len", "0"])
+    return out, g._load_topology("mesh_2x2_vc1_periph")
+
+
+def test_hotspot_peripherals_sends_every_tile_to_its_own_row_peripheral(tmp_path):
+    """The peripheral on a tile's own row is the only destination it may have.
+
+    A peripheral off the x face is reached by running out of x hops, which
+    happens on the source's row (check_dst_reachable), so a tile that targeted
+    the other row's peripheral would be aborted by the NMU at packetize time.
+    """
+    out, (nodes, _x_dim, _y_dim, bases, _config_bases, sizes) = _emit_hotspot_peripherals(tmp_path)
+    periph_of_row = {g.coord_xy(c)[1]: c
+                     for c in bases if c not in {n[3] for n in nodes}}
+    for (idx, _x, _y, cid) in nodes:
+        w = _parse_write(out / f"node{idx}" / "write.txt")
+        # The pattern's own transactions come first; the tail is the narrow
+        # config probe every config-tile owner gets regardless of pattern.
+        assert len(w) == _HOTSPOT_PERIPH_TXNS + 1
+        periph = periph_of_row[g.coord_xy(cid)[1]]
+        for t in w[:_HOTSPOT_PERIPH_TXNS]:
+            assert bases[periph] <= t["addr"] < bases[periph] + sizes["memory"][periph]
+
+
+def test_hotspot_peripherals_keeps_the_peripheral_s_own_traffic(tmp_path):
+    """A peripheral endpoint that completes zero transactions fails the run as
+    vacuous (gen_tb_top's PASS guard counts endpoints, not router nodes), so its
+    initiator traffic toward its partner tile has to survive the new stimulus."""
+    out, (nodes, _x_dim, _y_dim, bases, _config_bases, _sizes) = _emit_hotspot_peripherals(tmp_path)
+    periph_cids = [c for c in bases if c not in {n[3] for n in nodes}]
+    for ep_idx, _cid in enumerate(periph_cids, start=len(nodes)):
+        assert len(_parse_write(out / f"node{ep_idx}" / "write.txt")) == _HOTSPOT_PERIPH_TXNS
+
+
+def test_hotspot_peripherals_writes_every_address_once(tmp_path):
+    """Each slot has exactly one writer. The partner tile draws the peripheral's
+    extras from the same (src, seq) band as its own hotspot traffic, so leaving
+    both in would write one set of addresses twice."""
+    out, _topo = _emit_hotspot_peripherals(tmp_path)
+    addrs = [t["addr"] for node in sorted(out.iterdir())
+             for t in _parse_write(node / "write.txt")]
+    assert len(addrs) == len(set(addrs))
+
+
+def test_hotspot_peripherals_rejects_a_source_that_reaches_none():
+    """A row with no peripheral has no hotspot; the source is named and the run
+    stops, rather than the tile silently falling back to another row's."""
+    nodes, _x_dim, _y_dim, _bases, _config_bases, _sizes = g._load_topology("mesh_2x2_vc1_periph")
+    row0_only = [(len(nodes), g.coord_id(0, 0))]
+    src_on_row1 = next(cid for (_i, _x, _y, cid) in nodes if g.coord_xy(cid)[1] == 1)
+    with pytest.raises(SystemExit, match="found 0"):
+        g.peripheral_hotspot(src_on_row1, row0_only, nodes)
+
+
+def test_hotspot_peripherals_rejects_a_source_that_reaches_two():
+    """Two peripherals on one row (west and east face) leave the selection
+    ambiguous. Weighting them would change booksim's distribution, so it stops."""
+    nodes, _x_dim, _y_dim, _bases, _config_bases, _sizes = g._load_topology("mesh_2x2_vc1_periph")
+    both_faces = [(len(nodes), g.coord_id(0, 0)), (len(nodes) + 1, g.coord_id(3, 0))]
+    src_on_row0 = next(cid for (_i, _x, _y, cid) in nodes if g.coord_xy(cid)[1] == 0)
+    with pytest.raises(SystemExit, match="found 2"):
+        g.peripheral_hotspot(src_on_row0, both_faces, nodes)

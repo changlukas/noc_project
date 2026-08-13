@@ -22,7 +22,7 @@ help:
 	@echo "  make -C sim TB=mesh_4x4_vc1 PATTERN=neighbor"
 	@echo "  TB:      topology from topologies/, append _rob for the reorder-buffer build"
 	@echo "  PATTERN: $(_VALID_PATTERNS)"
-	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT=; SEED unset draws + prints a random seed"
+	@echo "  Vars: INJECTION_MODE=0|1|2 INJECTION_RATE= INJECTION_COUNT= IDS_PER_INITIATOR= MAX_UNIQUE_IDS= MAX_OUTSTANDING= HOTSPOT= HOTSPOT_PERIPHERALS=1; SEED unset draws + prints a random seed"
 	@echo "  Forensics: TIMEOUT_CYCLES=<n> fires the watchdog early, so a hang dumps per-node outstanding and last_progress without waiting out the formula"
 	@echo ""
 	@echo "  make -C sim sim-injection-sweep PATTERN=<p>   saturation sweep, long"
@@ -81,6 +81,7 @@ sim:
 	@echo ">>> sim TB=$(_TOPO) PATTERN=$(PATTERN) SEED=$(_SEED)"
 	$(MAKE) -C verilator run-directed TOPOLOGY=$(_TOPO) RUN_CLASS=directed \
 	    PATTERN=$(PATTERN) SEED=$(_SEED) $(_INJ_ARGS) $(if $(HOTSPOT),HOTSPOT=$(HOTSPOT)) \
+	    $(if $(HOTSPOT_PERIPHERALS),HOTSPOT_PERIPHERALS=$(HOTSPOT_PERIPHERALS)) \
 	    $(if $(MCAST_SHAPE),MCAST_SHAPE=$(MCAST_SHAPE))
 
 # Injection-rate sweep: four VC configs x nine rates, one point per make sim.
