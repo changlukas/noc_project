@@ -172,18 +172,53 @@ which is the DMA-side equivalent of the existing vacuity check.
 - No AI dataflow patterns. Those need a traffic generator on top of the job emitter and are the
   round after this one.
 
-## Open at plan time
+## Settled before planning
 
-Three things this document does not settle, listed so the plan answers them rather than
-discovering them.
+Five things the design left open. Four are closed, one is reduced to a measurement.
 
-| | |
-|---|---|
-| Backdoor reach | the comparison reads two nodes' `axi_sim_mem` arrays from one place. Whether the testbench hierarchy exposes both, and from where, is not established here |
-| Retirement versus in flight | comparing after a DMA retires a job assumes nothing of that job is still moving. iDMA reports on its own response channel, which is upstream of the NI's response path and of the memory's write acceptance, so the plan states what it waits on beyond `rsp_valid` |
-| What the flip moves | the six gates run `Disabled` today. Which of their reported numbers are expected to move under `Enabled`, and by roughly how much, is not derived here. The plan records the before and after rather than re-baselining silently |
-| ctest under the flip | `nmu.hpp:155` is a struct default, so every C++ test that does not set the mode inherits it. How many change behaviour is not counted here |
-| `BufferDepth`, `TFLenWidth`, `MemSysDepth` | free parameters with no derivation yet, see above |
+**The backdoor reaches, and needs nothing built.** The path is
+`tb_top_<topology>.g_endpoint[n].u_endpoint.g_tile_mem[t].i_mem.i_sim_mem.mem[addr]`, two generate
+levels deep. Verilator's support for that was the doubt, so it was run rather than argued: a probe
+of the same shape, a function naming two different iterations and both reading and writing the
+array, elaborates on 5.048 with `--timing` and zero errors. No DPI backdoor, no per-endpoint
+exported task.
+
+**The comparison cannot race the write.** iDMA's completion waits for the write response, not the
+last W beat: `idma_axi_write.sv:267` drives `w_dp_valid_o` from `write_rsp_i.b_valid`, and the
+backend raises `rsp_valid` on `w_dp_rsp_valid & w_last_burst`. On this side `axi_sim_mem` writes
+`mem[]` on W acceptance and only queues B after the last W beat, so by the time iDMA sees B the
+destination array already holds the data.
+
+Connect the memory's own `mon_w_valid_o` / `mon_w_last_o` anyway. They exist on
+`axi_sim_mem_intf` and `user_node_endpoint.sv:552-553` leaves them unconnected; wiring them in the
+DMA endpoint turns "the ordering argument says it has landed" into an observed event, which is
+what the check should wait on.
+
+**Two of the three free parameters are decisions, one is a measurement.**
+
+| | value | why |
+|---|---|---|
+| `BufferDepth` | 3 | the source's own recommendation for misaligned transfers, and the only hard rule is `> 1`. FlooNoC's 16 is its number, and at 64 FIFOs per DMA the difference is not free |
+| `TFLenWidth` | fixed by the job emitter's longest transfer | the bound is 12 to `AddrWidth`. Today's `REGION_BYTES` of `0x1000` needs 12; a whole `0x100000` tile window needs 20 |
+| `MemSysDepth` | 0 to start | iDMA calls it the memory system's depth. Here that is a round trip through the NoC, and this repo has no constant for it. Settling it means measuring cycles from issue at the joined port to return, across DMA, NI, fabric, NI, crossbar, delayer, memory. Starting at 0 costs throughput, not correctness |
+
+**The flip moves numbers, not expectations.** `RobMode` selects the R path only; B always runs
+through the reorder buffer. What necessarily changes is the counters the generated top prints —
+`read_slot_hwm`, `order_list_hwm`, `write_txns_hwm`, `read_txns_hwm` and the AR admission clauses,
+since `Disabled` reads do not count AR admission branches at all. R beat ordering and latency change
+only where same-ID reads can overlap, because `Disabled` refuses a second same-ID AR while one is
+outstanding.
+
+The scoreboard is not affected: it compares read data against golden writes, and is not written as
+a latency or occupancy checker. So re-baselining the six gates is reading new numbers, not
+re-deriving what they should be.
+
+**ctest should not move.** 21 cases construct an NMU without setting the mode and so inherit it,
+across `test_nmu`, `test_nmu_dat_face`, `test_nmu_credit`, `test_nmu_wrap`, `test_dat_merge_wrap`,
+`test_cmodel_dpi` and `test_ni_router_chain`. None asserts something that necessarily changes: they
+use single ARs, distinct IDs, or completion and readback assertions rather than exact latency or
+the `Disabled` same-ID interlock. The one test that pins RoBless behaviour sets `Disabled`
+explicitly. A test that does move is therefore a finding, not a re-baseline.
 
 ## Gate
 
