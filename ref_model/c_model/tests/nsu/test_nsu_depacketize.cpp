@@ -338,7 +338,7 @@ TEST(NsuDepacketize, CtorRejectsIntermediateMaxUniqueIds) {
 }
 
 // --- Node-coordinate rebase (Stage 2b) -------------------------------------
-// A collective replica arrives carrying the ANCHOR's address, because one
+// A collective replica arrives carrying the REQUEST's own address, because one
 // masked AW reaches N nodes unchanged. The NSU overwrites the coordinate field
 // with its own so the tile behind it decodes an address that names itself.
 
@@ -368,7 +368,7 @@ TEST(NsuDepacketize, RebasesAReplicaAddressOntoThisNode) {
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
                       ni::cmodel::router::null_req_in(),
                       /*src_id*/ 0x21, coords_for_narrow());
-    // Anchor address names node (0,0); the offset inside the tile is 0x3c0.
+    // The request address names node (0,0); the offset inside the tile is 0x3c0.
     ASSERT_TRUE(noc.req_out().push_flit(make_aw_flit(0x05, 0x0003c0)));
     depkt.tick();
     auto aw = depkt.pop_aw();

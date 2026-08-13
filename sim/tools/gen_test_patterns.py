@@ -619,8 +619,9 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
 # B" arm of R1, enforced by the DUT, not by file pacing.
 #
 # Per-node roles:
-#   source nodes  : T data-class multicast writes over the member set (anchor =
-#                   the source's own tile; AWUSER carries the address mask) +
+#   source nodes  : T data-class multicast writes over the member set (the AW
+#                   names the source's own tile; AWUSER carries the address
+#                   mask) +
 #                   on a config topology one narrow-class multicast into the
 #                   members' config tiles (config-space message replication).
 #                   Readback phase reads EVERY member replica (scoreboard keys
@@ -645,8 +646,8 @@ _MCAST_SHAPES = ("row", "col", "submesh")
 _CONFIG_PROBE_BASE = 0x800  # cross-node config probe window, below base_local
 
 
-def collective_addr_mask(bases, member_cids, anchor_cid, tile_bases=None):
-    """OR of (base[m] XOR base[anchor]) with wildcard-closure validation.
+def collective_addr_mask(bases, member_cids, addr_cid, tile_bases=None):
+    """OR of (base[m] XOR the named base) with wildcard-closure validation.
 
     The AWUSER mask semantics (spec §6) require the member set to be exactly a
     wildcard over the mask bits, CLIPPED to the tiles: the NMU and every router
@@ -663,13 +664,13 @@ def collective_addr_mask(bases, member_cids, anchor_cid, tile_bases=None):
     Both of collective_translate's rejections are mirrored: the clipped set
     must be non-empty, and each clipped BOUND must itself be a wildcard member
     (`collective_translate`).  Clamping a range is not the same as clipping a
-    set -- anchor x=1 with mask_x=0b10 names {1,3}, and clamping to a tile
+    set -- an address at x=1 with mask_x=0b10 names {1,3}, and clamping to a tile
     region ending at 2 gives a bound of 2, which is not a member.  A terminal
     router there would fork to nothing and abort, so a generator that can emit
     such a mask cannot produce valid stimulus on a topology with a peripheral.
 
     `bases` must be the bases of ONE address space, and the caller is expected
-    to have picked the space its anchor lands in.  The node-index field sits at
+    to have picked the space that address lands in.  The node-index field sits at
     log2 of that space's region size (spec §5.1), so the mask bits land at
     different address bits per space -- on the shipped 4x4, bits [21:20] for a
     1 MB memory region and [13:12] for a 4 KB config region.  Deriving the mask
@@ -680,11 +681,11 @@ def collective_addr_mask(bases, member_cids, anchor_cid, tile_bases=None):
     """
     if tile_bases is None:
         tile_bases = bases
-    anchor = bases[anchor_cid]
+    addr = bases[addr_cid]
     mask = 0
     for m in member_cids:
-        mask |= bases[m] ^ anchor
-    lo = anchor & ~mask
+        mask |= bases[m] ^ addr
+    lo = addr & ~mask
     combos = set()
     sub = mask
     while True:
@@ -709,25 +710,26 @@ def collective_addr_mask(bases, member_cids, anchor_cid, tile_bases=None):
     # ranges; this function sees no ranges, so it reads the same two numbers off
     # the coordinate ids instead. They ARE the same numbers: the masked address
     # bits are the node index (base = space_base + ((y << x_bits) | x) * slot),
-    # so the mask's x part is the OR of the members' x XOR the anchor's, and
+    # so the mask's x part is the OR of the members' x XOR the named address's,
+    # and
     # likewise on y. The tile region is the coordinate box tile_bases spans.
     for axis, i in (("x", 0), ("y", 1)):
-        anchor_c = coord_xy(anchor_cid)[i]
+        addr_c = coord_xy(addr_cid)[i]
         span_mask = 0
         for m in member_cids:
-            span_mask |= coord_xy(m)[i] ^ anchor_c
+            span_mask |= coord_xy(m)[i] ^ addr_c
         first = min(coord_xy(c)[i] for c in tile_bases)
         last = max(coord_xy(c)[i] for c in tile_bases)
-        clip_lo = max(anchor_c & ~span_mask, first)
-        clip_hi = min(anchor_c | span_mask, last)
+        clip_lo = max(addr_c & ~span_mask, first)
+        clip_hi = min(addr_c | span_mask, last)
         if clip_lo > clip_hi:
             raise ValueError(
                 f"multicast {axis} range is empty after clipping to the tile region "
-                f"[{first},{last}] (mask {mask:#x}, anchor {anchor_cid:#x})")
-        if ((clip_lo ^ anchor_c) & ~span_mask) or ((clip_hi ^ anchor_c) & ~span_mask):
+                f"[{first},{last}] (mask {mask:#x}, address {addr_cid:#x})")
+        if ((clip_lo ^ addr_c) & ~span_mask) or ((clip_hi ^ addr_c) & ~span_mask):
             raise ValueError(
                 f"multicast {axis} bound clipped to the tile region [{first},{last}] is not a "
-                f"wildcard member (mask {mask:#x}, anchor {anchor_cid:#x}): the source and a "
+                f"wildcard member (mask {mask:#x}, address {addr_cid:#x}): the source and a "
                 f"terminal router would disagree on the member set")
     if mask >> 48:
         raise ValueError(f"collective address mask {mask:#x} exceeds AWUSER[57:10] (48 b)")
@@ -753,18 +755,18 @@ def mcast_groups(shape, x_dim, y_dim):
     raise ValueError(f"unknown mcast shape {shape!r}")
 
 
-def multicast_lines(axid, anchor_addr, addr_mask, member_addrs, axi_size, axi_len, data_width):
+def multicast_lines(axid, addr, addr_mask, member_addrs, axi_size, axi_len, data_width):
     """(write_lines, read_lines) for one multicast write + per-member readback.
 
-    The write is ONE AW (anchor address, AWUSER mask) + its beats; the fabric
-    replicates it.  Reads are plain unicasts, one per member replica address.
-    Address-in-data payload only uses addr[7:0], and replicas differ from the
-    anchor only in node-index bits (>= bit 12), so the anchor-encoded beats
-    compare equal at every replica.
+    The write is ONE AW (the address it names, AWUSER mask) + its beats; the
+    fabric replicates it.  Reads are plain unicasts, one per member replica
+    address.  Address-in-data payload only uses addr[7:0], and replicas differ
+    from that address only in node-index bits (>= bit 12), so the beats it
+    encodes compare equal at every replica.
     """
-    write = _ax_fields(axid, anchor_addr, axi_len, axi_size, include_atop=True,
+    write = _ax_fields(axid, addr, axi_len, axi_size, include_atop=True,
                        user=_awuser_multicast(addr_mask))
-    write += encode_write_beats(anchor_addr, axi_size, axi_len, data_width)
+    write += encode_write_beats(addr, axi_size, axi_len, data_width)
     read = []
     for m_addr in member_addrs:
         read += _ax_fields(axid, m_addr, axi_len, axi_size, include_atop=False)

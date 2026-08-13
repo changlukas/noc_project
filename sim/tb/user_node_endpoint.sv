@@ -258,10 +258,11 @@ module user_node_endpoint #(
     // A third rule covers the NoC egress aperture and points at m2. A collective
     // write names a SET of nodes, so "is this address mine" has no answer, but
     // the crossbar decodes addresses and nothing else -- and a collective
-    // anchored at this node's own region would be answered locally and never
-    // reach the NI. s0 offsets such a write into the aperture and m2 takes the
-    // offset back off, so the crossbar stays stock and the address the NMU sees
-    // is the anchor. The local replica still arrives, the long way: the router
+    // write whose address names this node's own region would be answered
+    // locally and never reach the NI. s0 offsets such a write into the aperture
+    // and m2 takes the offset back off, so the crossbar stays stock and the
+    // address the NMU sees is the one the request named. The local replica
+    // still arrives, the long way: the router
     // keeps LOCAL in a multicast's output set (route_mask.hpp:108-112), so the
     // fabric delivers this node's copy back through its own NSU.
     //
@@ -373,7 +374,7 @@ module user_node_endpoint #(
 
     // s1: requests delivered by the fabric. The NSU has already rewritten the
     // node-coordinate field to this node (nsu::Depacketize::rebase_), so a
-    // collective replica carrying the anchor's address decodes here like any
+    // collective replica carrying the request's own address decodes here like any
     // unicast.
     assign tile_axi[1].aw_id     = slave_axi_req_i.awid;
     assign tile_axi[1].aw_addr   = slave_axi_req_i.awaddr | (decerr_fault_wr ? DECERR_FAULT_BIT : '0);
@@ -807,7 +808,7 @@ module user_node_endpoint #(
     // Multicast scoreboard (S4 collectives): replica golden + readback
     // compare, keyed by full byte address (== (dst_id, local_addr): the tile
     // base encodes dst_id, the offset is the node-local address). The pulp
-    // scoreboard models only the ANCHOR address of a multicast AW; the other
+    // scoreboard models only the address the multicast AW names; the other
     // replicas land at addresses it never saw written, which its x-wildcard
     // read check accepts vacuously. This checker snoops AW/W to build golden
     // for EVERY member replica (enumerated from the AWUSER address mask) and

@@ -134,7 +134,7 @@ def node_windows(entries, node_id):
     one of these two ranges, or it is not this node's. The NSU rewrites an
     arriving address's node-coordinate field to this node before the crossbar
     sees it (nsu::Depacketize::rebase_), so a collective replica carrying the
-    anchor's address lands here like any unicast.
+    request's own address lands here like any unicast.
 
     Sizes are exact, not rounded: pulp axi_xbar states a rule as start/end, so
     a window need not be a power of two.
@@ -155,8 +155,9 @@ def noc_egress_base(entries):
 
     A collective write names a SET of nodes, so "is this address mine" has no
     answer -- but a tile crossbar decodes addresses and nothing else. A
-    collective anchored at the issuing node's own region would be answered
-    locally and never reach the NI, and the fabric would never replicate it.
+    collective whose address names the issuing node's own region would be
+    answered locally and never reach the NI, and the fabric would never
+    replicate it.
     The endpoint offsets such a write into this aperture, which the crossbar
     has a rule for pointing at the NI, and takes the offset back off on the way
     out (user_node_endpoint.sv).

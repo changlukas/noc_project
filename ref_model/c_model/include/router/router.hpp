@@ -189,8 +189,9 @@ class Router {
     }
     // Front flit's routed output port for (in_port, vc), or nullopt if empty.
     // Pure read; mirrors stage-2's route check without side effects — for
-    // UNICAST fronts only. A collective front reports the anchor dst_id's XY
-    // route, which is not the fork set; use fork_expected_mask() for those.
+    // UNICAST fronts only. A collective front reports the XY route to the
+    // header's dst_id, which is not the fork set; use fork_expected_mask()
+    // for those.
     std::optional<RouterPort> front_route(std::size_t in_port, uint8_t vc) const {
         if (in_port >= ROUTER_PORT_COUNT || vc >= cfg_.num_vc) return std::nullopt;
         const auto& q = input_fifo_[in_port][vc];
@@ -416,7 +417,7 @@ inline void Router::tick() {
                     // Collective continuation — EVERY collective flit takes
                     // this branch, one-hot included: at a pass-through /
                     // spread-end hop the one-hot fork direction legally
-                    // diverges from the anchor's XY route, so the unicast
+                    // diverges from the header's dst_id XY route, so the unicast
                     // route_compute check below must never see it (F6 OUR
                     // RULE: one lock per branch, all pointing at this
                     // (input, vc)). A set done bit means this branch already

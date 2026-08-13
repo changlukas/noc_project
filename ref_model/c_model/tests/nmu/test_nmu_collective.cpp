@@ -121,7 +121,7 @@ void retire_b(CollectiveTestbench& t, uint8_t id) {
 
 struct MaskCase {
     const char* name;
-    unsigned anchor_x, anchor_y;
+    unsigned addr_x, addr_y;
     uint64_t addr_mask;
     uint8_t expect_node_mask;
 };
@@ -134,22 +134,23 @@ class NmuCollectiveMaskP : public ::testing::TestWithParam<MaskCase> {};
 TEST_P(NmuCollectiveMaskP, AddressMaskTranslatesToNodeMask) {
     SCENARIO(
         "NMU collective: the 48 b AWUSER address mask translates to the 8 b flit collective_mask "
-        "by slicing the anchor space's declared X/Y ranges; dst_id stays the anchor's");
+        "by slicing the declared X/Y ranges of the space the request address falls in; dst_id "
+        "stays the address's");
     const MaskCase& c = GetParam();
     CollectiveTestbench t;
-    const uint64_t anchor = tile_addr(c.anchor_x, c.anchor_y);
+    const uint64_t addr = tile_addr(c.addr_x, c.addr_y);
     ASSERT_TRUE(
-        t.rob.push_aw(make_aw(0x05, anchor, awuser(axi::COLLECTIVE_OP_MULTICAST, c.addr_mask))));
+        t.rob.push_aw(make_aw(0x05, addr, awuser(axi::COLLECTIVE_OP_MULTICAST, c.addr_mask))));
     auto f = t.aw_cap.pop();
     ASSERT_TRUE(f.has_value());
     EXPECT_EQ(f->get_header_field("collective_op"), axi::COLLECTIVE_OP_MULTICAST);
     EXPECT_EQ(f->get_header_field("collective_mask"), c.expect_node_mask);
-    EXPECT_EQ(f->get_header_field("dst_id"), (c.anchor_y << 4) | c.anchor_x);
-    // The ANCHOR's address rides the flit, unrewritten, to every replica. What
+    EXPECT_EQ(f->get_header_field("dst_id"), (c.addr_y << 4) | c.addr_x);
+    // The REQUEST's address rides the flit, unrewritten, to every replica. What
     // the replicas share is the offset inside their own node's slot, which each
     // endpoint recovers by masking the node index off (space_windows'
     // node_addr_w) -- the same shape upstream uses.
-    EXPECT_EQ(f->get_payload_field("AW", "awaddr"), anchor);
+    EXPECT_EQ(f->get_payload_field("AW", "awaddr"), addr);
 }
 
 INSTANTIATE_TEST_SUITE_P(AlignedMasks, NmuCollectiveMaskP,
@@ -168,8 +169,8 @@ INSTANTIATE_TEST_SUITE_P(AlignedMasks, NmuCollectiveMaskP,
 
 TEST(NmuCollective, TwoSpaceTableKeepsTheSpacesApart) {
     SCENARIO(
-        "NMU collective S5 §1.3: with both spaces present, one node's memory and config anchors "
-        "stay at different addresses, so the tile decoder can tell them apart. They differ because "
+        "NMU collective S5 §1.3: with both spaces present, one node's memory and config base "
+        "addresses stay apart, so the tile decoder can tell them apart. They differ because "
         "the map placed them apart -- translate() forwards the address untouched -- and a "
         "replica set is class-uniform, so every member shifts by the same amount");
     // 2x2 mesh, 4 KB memory tiles then 4 KB config tiles, packed in list order.
@@ -190,7 +191,8 @@ TEST(NmuCollective, TwoSpaceTableKeepsTheSpacesApart) {
     auto data_flit = t.aw_cap.pop();
     ASSERT_TRUE(data_flit.has_value());
     EXPECT_EQ(data_flit->get_header_field("collective_mask"), 0x01u);
-    EXPECT_EQ(data_flit->get_payload_field("AW", "awaddr"), 0x0040u);  // the anchor, unchanged
+    // The request address, unchanged.
+    EXPECT_EQ(data_flit->get_payload_field("AW", "awaddr"), 0x0040u);
 
     // Same offset in the config space of the same two nodes: same node mask,
     // different address. That separation is what the tile decoder reads.
@@ -206,8 +208,9 @@ TEST(NmuCollective, TwoSpaceTableKeepsTheSpacesApart) {
 TEST(NmuCollective, NarrowClassCollectiveTranslates) {
     SCENARIO(
         "NMU collective Q4 revision 2: multicast is legal on BOTH classes -- config-space message "
-        "replication rides Narrow. The translate was always class-agnostic, so a narrow anchor "
-        "yields the same node mask; the flit lands on NarrowAw and so forks on REQ, not DAT");
+        "replication rides Narrow. The translate was always class-agnostic, so a narrow request "
+        "address yields the same node mask; the flit lands on NarrowAw and so forks on REQ, not "
+        "DAT");
     addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Narrow},
                               {0x1000, kTile, 0x01, axi::AxiClass::Narrow}});
     ASSERT_TRUE(declare(sam, axi::AxiClass::Narrow, 12, 2, 1));
@@ -292,14 +295,14 @@ TEST(NmuCollective, CollectiveWaitsForAnIdleId) {
 TEST(NmuCollective, NothingStreamsPastAnInFlightCollective) {
     SCENARIO(
         "NMU collective R2: the front-entry collective flag closes the same-destination bypass -- "
-        "a later same-id AW to the collective's own anchor would otherwise stream past without a "
+        "a later same-id AW to the collective's own dst_id would otherwise stream past without a "
         "RoB slot. Refused until the collective's merged B retires; the shared write pool holds "
         "one entry for it meanwhile");
     CollectiveTestbench t;
     ASSERT_TRUE(t.rob.push_aw(
         make_aw(0x05, tile_addr(0, 1), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))));
     EXPECT_EQ(t.rob.write_txns(), 1u);  // collective allocates the shared pool like any AW
-    // Same dest as the collective's anchor: exactly the same-destination bypass case.
+    // Same dest as the collective's dst_id: exactly the same-destination bypass case.
     EXPECT_FALSE(t.rob.push_aw(make_aw(0x05, tile_addr(0, 1))));
     EXPECT_FALSE(t.rob.push_aw(make_aw(0x05, tile_addr(3, 3))));
     retire_b(t, 0x05);
@@ -405,9 +408,10 @@ TEST(NmuCollectiveDeath, ReplicasStraddleTheClasses) {
         "NMU collective §2.3: both classes multicast (Q4 revision 2), but ONE destination set "
         "cannot straddle them -- the class picks the network the worm forks on (Narrow -> REQ, "
         "Data -> DAT) and a packet rides exactly one. Both spaces here are collective-eligible in "
-        "their own right, and the mask is still confined to the anchor's: bit 13 selects the data "
-        "space, is outside the narrow space's X range, and is rejected as such. Class uniformity "
-        "is now a consequence of that confinement rather than a per-replica comparison");
+        "their own right, and the mask is still confined to the address's space: bit 13 selects "
+        "the data space, is outside the narrow space's X range, and is rejected as such. Class "
+        "uniformity is now a consequence of that confinement rather than a per-replica "
+        "comparison");
     addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Narrow},
                               {0x1000, kTile, 0x01, axi::AxiClass::Narrow},
                               {0x2000, kTile, 0x00, axi::AxiClass::Data},
@@ -416,8 +420,8 @@ TEST(NmuCollectiveDeath, ReplicasStraddleTheClasses) {
     ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 2, 1));
     CollectiveTestbench t(std::move(sam));
     auto aw = make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000));
-    aw.size = 3;  // narrow anchor: AWSIZE <= 3 (8 B), orthogonal to the class rule
-    EXPECT_DEATH(t.rob.push_aw(aw), "coordinate ranges of the anchor");
+    aw.size = 3;  // narrow request address: AWSIZE <= 3 (8 B), orthogonal to the class rule
+    EXPECT_DEATH(t.rob.push_aw(aw), "coordinate ranges of the request address");
 }
 
 TEST(NmuCollectiveDeath, MoreMaskBitsThanNodeIdBits) {
@@ -428,7 +432,7 @@ TEST(NmuCollectiveDeath, MoreMaskBitsThanNodeIdBits) {
     CollectiveTestbench t;
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, tile_addr(0, 0),
                                        awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1FF000))),
-                 "coordinate ranges of the anchor");
+                 "coordinate ranges of the request address");
 }
 
 TEST(NmuCollectiveDeath, MaskBitInsideTheTileOffset) {
@@ -439,15 +443,15 @@ TEST(NmuCollectiveDeath, MaskBitInsideTheTileOffset) {
     CollectiveTestbench t;
     EXPECT_DEATH(
         t.rob.push_aw(make_aw(0x05, tile_addr(0, 0), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x20))),
-        "coordinate ranges of the anchor");
+        "coordinate ranges of the request address");
 }
 
 TEST(NmuCollectiveDeath, DuplicateNodeInTheDestinationSet) {
     SCENARIO(
         "NMU collective §2.2 check 3: the named addresses must reach DISTINCT nodes. Here the "
         "third and fourth tiles both carry dst 0x02, so no X range accounts for the space and the "
-        "declaration is refused -- the space is a unicast-only target and the collective anchored "
-        "in it is rejected at the gate, once, instead of on every request");
+        "declaration is refused -- the space is a unicast-only target and a collective addressed "
+        "into it is rejected at the gate, once, instead of on every request");
     auto sam = addr_trans::SamTable::packed(
         {{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}}, /*x_span=*/4, /*y_span=*/1);
     EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 4, 1));
@@ -464,28 +468,28 @@ TEST(NmuCollectiveDeath, MaskBitOutsideTheMesh) {
     CollectiveTestbench t;
     EXPECT_DEATH(t.rob.push_aw(
                      make_aw(0x05, tile_addr(0, 0), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x10000))),
-                 "coordinate ranges of the anchor");
+                 "coordinate ranges of the request address");
 }
 
 TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
     SCENARIO(
         "NMU collective §2.2 check 4, the case only a non-power-of-two dimension can reach: a "
         "3-wide row needs a 2 bit X range, so mask_x = 0x2 sits inside the range yet the raw "
-        "wildcard set anchored at x = 1 is {1, 3} and node 3 does not exist. Clamping x_last down "
+        "wildcard set based at x = 1 is {1, 3} and node 3 does not exist. Clamping x_last down "
         "to 2 does NOT make this a legal clip: 2 was never a member of {1, 3} (only bit 1 is a "
-        "don't-care, and 2 differs from anchor 1 in bit 0), so a terminal router's fork set there "
-        "would be empty. Rejected, unlike the design's worked example mask 0b11 = {0,1,2,3}, which "
-        "clips to a full, member-only range {1,2}");
+        "don't-care, and 2 differs from the address's 1 in bit 0), so a terminal router's fork "
+        "set there would be empty. Rejected, unlike the design's worked example mask 0b11 = "
+        "{0,1,2,3}, which clips to a full, member-only range {1,2}");
     auto sam = addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}},
                                             /*x_span=*/3, /*y_span=*/1);
     ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 3, 1));
     CollectiveTestbench t(std::move(sam));
-    // Anchored at x = 0 the mask names {0, 2}, both real nodes -- no clipping.
+    // Based at x = 0 the mask names {0, 2}, both real nodes -- no clipping.
     ASSERT_TRUE(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))));
     auto f = t.aw_cap.pop();
     ASSERT_TRUE(f.has_value());
     EXPECT_EQ(f->get_header_field("collective_mask"), 0x02u);
-    // Anchored at x = 1 the raw set is {1, 3}; clip_max_x clamps to 2, which is
+    // Based at x = 1 the raw set is {1, 3}; clip_max_x clamps to 2, which is
     // not a member of {1, 3} -- rejected rather than silently forwarded as {1}.
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x06, kTile, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))),
                  "member of the wildcard set");
@@ -496,7 +500,7 @@ TEST(NmuCollectiveDeath, NodeSetIsNotAnAlignedWildcard) {
         "NMU collective §2.2 check 3: the nodes a mask names must form an ALIGNED wildcard over "
         "dst_id. Here the tiles run (0,0), (1,0), (2,1), (3,1), so the third tile's dst is 0x12 "
         "where a 2x2 raster wants 0x10: no X/Y range pair accounts for the space, the declaration "
-        "is refused, and the anchor is not a collective target");
+        "is refused, and the address is not a collective target");
     auto sam = addr_trans::SamTable::packed(
         {{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}}, /*x_span=*/4, /*y_span=*/2);
     EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 2, 2));
@@ -552,8 +556,8 @@ TEST(NmuCollectiveDeath, BurstOverrunsTheRegion) {
     SCENARIO(
         "NMU collective §2.2 check 5 (spec :461-462): every replica's region must cover the full "
         "burst footprint. AWADDR/AWLEN/AWSIZE/AWBURST are per-request, so this check is too -- but "
-        "the region size is uniform across a collective-eligible space, so testing the anchor's "
-        "footprint tests every replica's. 192 beats x 32 B = 6 KB in a 4 KB tile");
+        "the region size is uniform across a collective-eligible space, so testing the request "
+        "address's footprint tests every replica's. 192 beats x 32 B = 6 KB in a 4 KB tile");
     CollectiveTestbench t;
     EXPECT_DEATH(
         t.rob.push_aw(make_aw(0x05, tile_addr(0, 0), awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000),

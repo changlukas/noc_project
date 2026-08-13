@@ -222,7 +222,7 @@ class SamTable {
         if ((origin->base & field) != origin_field) return false;
         // Uniform USABLE APERTURE is a separate claim from uniform stride: an
         // aperture reaching into the coordinate bits would make a wildcard
-        // address land inside its own anchor's region.
+        // address land inside the region of the address it wildcards.
         if (field != 0 && origin->size > (field & (~field + 1))) return false;
         const uint64_t base_zero = origin->base & ~field;
         for (unsigned y = c.y_first; y <= c.y_last; ++y) {
@@ -279,9 +279,10 @@ inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::B
 // nmu::Rob::push_aw before any admission gate. Returns the 8 b flit
 // collective_mask (node mask); 0 for a plain unicast AW.
 //
-// The node mask is a bit-select over the anchor space's declared coordinate
-// ranges, as upstream does it (floo_axi_chimney.sv:534-546) -- two shifts, no
-// walk over the map. Everything a per-replica scan would re-derive is a
+// The node mask is a bit-select over the declared coordinate ranges of the
+// space the request address falls in, as upstream does it
+// (floo_axi_chimney.sv:534-546) -- two shifts, no walk over the map.
+// Everything a per-replica scan would re-derive is a
 // property of the SPACE and was settled when the ranges were declared
 // (SamTable::declare_space_coords): one class, one node per coordinate pair, a
 // shared node-local offset, one aperture.
@@ -325,20 +326,22 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
         std::abort();
     }
 
-    const SamEntry* anchor = sam.lookup(b.addr);
-    if (anchor == nullptr) {
+    const SamEntry* entry = sam.lookup(b.addr);
+    if (entry == nullptr) {
         assert(false &&
-               "nmu::addr_trans::collective_translate: collective anchor address maps to no tile");
+               "nmu::addr_trans::collective_translate: collective request address maps to no "
+               "tile");
         std::abort();
     }
-    // No anchor-class gate: design Q4 revision 2 rules multicast legal on BOTH
+    // No class gate: design Q4 revision 2 rules multicast legal on BOTH
     // classes (config-space message replication rides Narrow/REQ). The class
     // stays UNIFORM across the destination set because the mask cannot leave
-    // the anchor's own space -- the outside-the-ranges check below.
-    const SpaceCoords* coords = sam.collective_coords(anchor->cls);
+    // the space the request address falls in -- the outside-the-ranges check
+    // below.
+    const SpaceCoords* coords = sam.collective_coords(entry->cls);
     if (coords == nullptr) {
         assert(false &&
-               "nmu::addr_trans::collective_translate: the anchor's address space declares no "
+               "nmu::addr_trans::collective_translate: the request address's space declares no "
                "coordinate ranges -- a legal unicast target, not a collective target");
         std::abort();
     }
@@ -369,7 +372,7 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     if ((addr_mask & ~field) != 0) {
         assert(false &&
                "nmu::addr_trans::collective_translate: AWUSER collective_mask sets a bit outside "
-               "the coordinate ranges of the anchor's address space");
+               "the coordinate ranges of the request address's space");
         std::abort();
     }
     const unsigned mask_x = static_cast<unsigned>(addr_mask >> coords->x_range.offset) &
@@ -377,12 +380,12 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     const unsigned mask_y = static_cast<unsigned>(addr_mask >> coords->y_range.offset) &
                             ((1u << coords->y_range.len) - 1);
 
-    // The raw wildcard set is [anchor & ~mask, anchor | mask] PER COORDINATE:
+    // The raw wildcard set is [addr & ~mask, addr | mask] PER COORDINATE:
     // dst_id is (y << X_WIDTH) | x, and a dimension need not be a power of
     // two, so the set may reach a coordinate that names no tile (a peripheral,
     // or padding above a non-power-of-two dimension).
-    const unsigned anchor_x = anchor->dst_id & kXFieldMask;
-    const unsigned anchor_y = anchor->dst_id >> ni::width::X_WIDTH;
+    const unsigned addr_x = entry->dst_id & kXFieldMask;
+    const unsigned addr_y = entry->dst_id >> ni::width::X_WIDTH;
     // Clip to the tile region exactly as route_mask.hpp does, so the source and
     // every router agree on the member set. A set that is empty after clipping
     // names no tile at all and is a stimulus error.
@@ -393,10 +396,10 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     // sim/tools/gen_test_patterns.py. Not shared: the router pair sits the far
     // side of the nmu/router layer boundary and the generator's is Python.
     // Change one, change all four.
-    const unsigned clip_min_x = std::max(anchor_x & ~mask_x, coords->x_first);
-    const unsigned clip_max_x = std::min(anchor_x | mask_x, coords->x_last);
-    const unsigned clip_min_y = std::max(anchor_y & ~mask_y, coords->y_first);
-    const unsigned clip_max_y = std::min(anchor_y | mask_y, coords->y_last);
+    const unsigned clip_min_x = std::max(addr_x & ~mask_x, coords->x_first);
+    const unsigned clip_max_x = std::min(addr_x | mask_x, coords->x_last);
+    const unsigned clip_min_y = std::max(addr_y & ~mask_y, coords->y_first);
+    const unsigned clip_max_y = std::min(addr_y | mask_y, coords->y_last);
     if (clip_min_x > clip_max_x || clip_min_y > clip_max_y) {
         assert(false &&
                "nmu::addr_trans::collective_translate: collective destination set is empty "
@@ -405,7 +408,7 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     }
     // Clamping a bound is not the same as clipping the set: the range
     // [clip_min, clip_max] can include a coordinate the wildcard never named
-    // (e.g. anchor_x=1, mask_x=0x2 names {1, 3}; clamping x_last=2 down from 3
+    // (e.g. addr_x=1, mask_x=0x2 names {1, 3}; clamping x_last=2 down from 3
     // gives clip_max_x=2, which is not a member). A terminal router's fork set
     // would then be empty at that coordinate and abort (route_mask.hpp uses
     // coord_matched, not a range test), so this must reject here instead.
@@ -413,8 +416,8 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     // strictly between them still has a member neighbour to forward from/to,
     // so only an endpoint that got clamped away from the raw min/max can ever
     // be a non-member.
-    if (((clip_min_x ^ anchor_x) & ~mask_x) || ((clip_max_x ^ anchor_x) & ~mask_x) ||
-        ((clip_min_y ^ anchor_y) & ~mask_y) || ((clip_max_y ^ anchor_y) & ~mask_y)) {
+    if (((clip_min_x ^ addr_x) & ~mask_x) || ((clip_max_x ^ addr_x) & ~mask_x) ||
+        ((clip_min_y ^ addr_y) & ~mask_y) || ((clip_max_y ^ addr_y) & ~mask_y)) {
         assert(false &&
                "nmu::addr_trans::collective_translate: a clipped tile-region bound is not a "
                "member of the wildcard set -- the source and a terminal router would disagree "
@@ -423,8 +426,8 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     }
 
     // Stays per-request: AWADDR/AWLEN/AWSIZE/AWBURST are not space properties.
-    // The uniform region size the declaration checked is what lets the anchor's
-    // footprint stand for every replica's.
+    // The uniform region size the declaration checked is what lets the request
+    // address's footprint stand for every replica's.
     if (!sam.burst_footprint_ok(b.addr, burst_last_byte(b.addr, b.len, b.size, b.burst))) {
         assert(false &&
                "nmu::addr_trans::collective_translate: collective burst footprint crosses a tile "

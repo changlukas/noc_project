@@ -277,7 +277,7 @@ TEST(NmuWrap, awuser_collective_reaches_flit_header) {
     NmuInputs in{};
     NmuOutputs out{};
 
-    // Anchor (0,0) local 0x40; address-mask bit 12 wildcards the x tile bit
+    // The address names (0,0) local 0x40; address-mask bit 12 wildcards the x tile bit
     // under the 4 KB packing, naming {(0,0), (1,0)} -> node mask 0x01.
     in.awvalid = true;
     in.awid = 0x01;
@@ -306,7 +306,7 @@ TEST(NmuWrap, awuser_collective_reaches_flit_header) {
             if (flit.get_header_field("axi_ch") == ni::AXI_CH_DataAw) {
                 EXPECT_EQ(flit.get_header_field("collective_op"), ni::COLLECTIVE_OP_MULTICAST);
                 EXPECT_EQ(flit.get_header_field("collective_mask"), 0x01u);
-                EXPECT_EQ(flit.get_header_field("dst_id"), 0x00u) << "anchor dst is (0,0)";
+                EXPECT_EQ(flit.get_header_field("dst_id"), 0x00u) << "the address names dst (0,0)";
                 saw_aw_flit = true;
             }
         }

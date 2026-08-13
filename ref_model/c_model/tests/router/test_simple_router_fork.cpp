@@ -53,7 +53,7 @@ struct FlitSink : SimpleRouterLink {
     void push_flit(const Flit& f) override { received.push_back(f); }
 };
 
-// A collective flit: dst_id is the set anchor, src_id the tree source,
+// A collective flit: dst_id is the node the address names, src_id the tree source,
 // collective_mask the wildcard (T2 stamps AW and every W beat identically).
 // ordering_tag carries the test's beat sequence number.
 Flit make_mc_flit(uint8_t dst, uint8_t src, uint8_t cmask, uint8_t vc, uint64_t flit_tail,
@@ -119,7 +119,7 @@ TEST(SimpleRouterFork, ThreeWayInclLocalReplicatesWholeWorm) {
     r.set_downstream(L, local);
     r.set_downstream(N, north);
     r.set_downstream(E, east);
-    // src (0,1), anchor (1,1), mask (x=2,y=2): members {1,3}x{1,3} -> fork
+    // src (0,1), dst (1,1), mask (x=2,y=2): members {1,3}x{1,3} -> fork
     // {L,E,N} at (1,1) (x/y matched -> LOCAL; East spread; North turn).
     constexpr int kFlits = 4;
     const auto worm = make_mc_worm(make_id(1, 1), make_id(0, 1), make_id(2, 2), /*vc=*/0, kFlits);
@@ -153,7 +153,7 @@ TEST(SimpleRouterFork, LocalInputWithLocalBranch) {
     FlitSink local, north;
     r.set_downstream(L, local);
     r.set_downstream(N, north);
-    // src (1,1) = this node, anchor (1,1), mask (y=2): members (1,1),(1,3).
+    // src (1,1) = this node, dst (1,1), mask (y=2): members (1,1),(1,3).
     constexpr int kFlits = 3;
     const auto worm = make_mc_worm(make_id(1, 1), make_id(1, 1), make_id(0, 2), /*vc=*/0, kFlits);
     std::size_t fed = 0;
@@ -178,7 +178,7 @@ TEST(SimpleRouterFork, MidBurstBranchStallStallsWormWithoutSkipOrReorder) {
     FlitSink north, east;
     r.set_downstream(N, north);
     r.set_downstream(E, east);
-    // src (0,1), anchor (1,3), mask (x=2): members (1,3),(3,3) -> fork {E,N}
+    // src (0,1), dst (1,3), mask (x=2): members (1,3),(3,3) -> fork {E,N}
     // at (1,1) (no LOCAL: y unmatched).
     constexpr int kFlits = 6;
     const auto worm = make_mc_worm(make_id(1, 3), make_id(0, 1), make_id(2, 0), /*vc=*/0, kFlits);
@@ -223,7 +223,7 @@ TEST(SimpleRouterFork, OneHotForkSetIsBitIdenticalToPlainUnicast) {
     FlitSink ea, eb;
     ra.set_downstream(E, ea);
     rb.set_downstream(E, eb);
-    // A: collective, src (0,1), anchor (3,1), mask (y=2): members (3,1),(3,3)
+    // A: collective, src (0,1), dst (3,1), mask (y=2): members (3,1),(3,3)
     // -> fork at (1,1) is {EAST} only (x unmatched, East spread).
     // B: plain unicast to (3,1), same src.
     constexpr int kFlits = 3;
@@ -267,9 +267,9 @@ TEST(SimpleRouterFork, DisjointTreesProgressConcurrently) {
     r.set_downstream(E, east);
     r.set_downstream(S, south);
     constexpr int kFlits = 4;
-    // M1: src (0,1), anchor (1,3), mask (x=2) -> {E,N}.
+    // M1: src (0,1), dst (1,3), mask (x=2) -> {E,N}.
     const auto m1 = make_mc_worm(make_id(1, 3), make_id(0, 1), make_id(2, 0), 0, kFlits);
-    // M2: src (1,2), anchor (1,0), mask (y=1): members (1,0),(1,1) -> {L,S}.
+    // M2: src (1,2), dst (1,0), mask (y=1): members (1,0),(1,1) -> {L,S}.
     const auto m2 = make_mc_worm(make_id(1, 0), make_id(1, 2), make_id(0, 1), 0, kFlits);
     std::size_t fed1 = 0, fed2 = 0;
     int m1_first = -1, m1_last = -1, m2_first = -1, m2_last = -1;
@@ -366,9 +366,9 @@ TEST(SimpleRouterFork, PreFrozenArDelaysABranchButNeverInterleavesTheWorm) {
 
 TEST(SimpleRouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
     SCENARIO(
-        "2-router chain: a multicast worm (anchor (0,1), src (0,0), mask x=3) forks {E,N} at "
+        "2-router chain: a multicast worm (dst (0,1), src (0,0), mask x=3) forks {E,N} at "
         "(2,0) and {N} at (3,0) — at the spread-end hop the one-hot fork direction (NORTH) "
-        "diverges from the anchor's XY route (WEST). The worm must traverse cleanly end to "
+        "diverges from the header's dst_id XY route (WEST). The worm must traverse cleanly end to "
         "end: the continuation branch-set check keys on collective_op, so a legal one-hot "
         "collective hop is set-checked but never mistaken for unicast (T3's Critical)");
     SimpleRouterConfig ca;
@@ -411,7 +411,7 @@ TEST(SimpleRouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBoun
         "DAT. This test PASSES by detecting the no-progress state within the derived tick "
         "bound and attributing it through the fork introspection");
     // Row y=0 of a 4x2 mesh. M1 from (0,0) and M2 from (3,0) both multicast to
-    // the full row above (anchor (0,1), mask x=3): fork {E,N} at every
+    // the full row above (dst (0,1), mask x=3): fork {E,N} at every
     // source-row router for M1, {W,N} for M2. M1 locks N@R1 then needs N@R2;
     // M2 locks N@R2 then needs N@R1.
     SimpleRouterConfig cfg1;
@@ -514,7 +514,7 @@ TEST(SimpleRouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
     EXPECT_DEATH(
         {
             SimpleRouter r(center_cfg());
-            // src (0,0), anchor (0,0), mask (x=2): members (0,0),(2,0) — the
+            // src (0,0), dst (0,0), mask (x=2): members (0,0),(2,0) — the
             // tree never touches (1,1) (x unmatched, not on the source row).
             r.input(W).push_flit(make_mc_flit(make_id(0, 0), make_id(0, 0), make_id(2, 0),
                                               /*vc=*/0, /*flit_tail=*/0, 0));

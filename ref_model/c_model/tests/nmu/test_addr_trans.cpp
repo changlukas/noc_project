@@ -77,7 +77,7 @@ TEST(CollectiveClip, FullTileRowIsAcceptedWhenTilesDoNotStartAtZero) {
         "2, so the source must accept it rather than refuse it as out of mesh");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
-    b.addr = 0x100000;  // anchor is the tile at (1, 0)
+    b.addr = 0x100000;  // the address names the tile at (1, 0)
     b.burst = axi::Burst::INCR;
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);
     const uint8_t mask = addr_trans::collective_translate(sam, b, /*src_id=*/0x01);
@@ -86,13 +86,13 @@ TEST(CollectiveClip, FullTileRowIsAcceptedWhenTilesDoNotStartAtZero) {
 
 TEST(CollectiveClipDeath, EmptyAfterClippingAborts) {
     SCENARIO(
-        "nmu::addr_trans::collective_translate: anchoring at a peripheral and wildcarding a "
-        "coordinate the tile region doesn't reach clips the set to empty. Anchor P(0,0), "
+        "nmu::addr_trans::collective_translate: an address naming a peripheral, wildcarding a "
+        "coordinate the tile region doesn't reach, clips the set to empty. Address P(0,0), "
         "wildcarding y only: clip_min_x = max(0, tile_x_first=1) = 1, clip_max_x = min(0, "
         "tile_x_last=2) = 0 -- rejected rather than silently forwarding an empty set");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
-    b.addr = 0x0;  // anchor is the peripheral at (0, 0), outside the tile region
+    b.addr = 0x0;  // the address names the peripheral at (0, 0), outside the tile region
     b.burst = axi::Burst::INCR;
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x400000);  // wildcards y only
     EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x01),
@@ -102,30 +102,32 @@ TEST(CollectiveClipDeath, EmptyAfterClippingAborts) {
 TEST(CollectiveClipDeath, ClippedBoundNotAMemberAborts) {
     SCENARIO(
         "nmu::addr_trans::collective_translate: clamping a bound down to the tile region can land "
-        "on a coordinate the raw wildcard set never named. Anchor T(1,0), mask_x = 0x2 -> raw set "
+        "on a coordinate the raw wildcard set never named. Address T(1,0), mask_x = 0x2 -> raw set "
         "{1, 3}; clamping x_last from 3 down to 2 gives a non-empty clip [1,2], but 2 is not a "
-        "member of {1, 3} (bit 0 differs from anchor and bit 0 is not a don't-care in mask_x = "
-        "0x2). A terminal router's fork set at x=2 would be empty and abort -- must reject here "
+        "member of {1, 3} (bit 0 differs from the address and bit 0 is not a don't-care in "
+        "mask_x = 0x2). A terminal router's fork set at x=2 would be empty and abort -- must "
+        "reject here "
         "instead of forwarding a set the source and a router would disagree on");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
-    b.addr = 0x100000;  // anchor is the tile at (1, 0)
+    b.addr = 0x100000;  // the address names the tile at (1, 0)
     b.burst = axi::Burst::INCR;
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x200000);  // mask_x = 0x2
     EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x01),
                  "member of the wildcard set");
 }
 
-TEST(CollectiveIssuer, ATileMayIssueACollectiveAnchoredAtAPeripheral) {
+TEST(CollectiveIssuer, ATileMayIssueACollectiveAddressedAtAPeripheral) {
     SCENARIO(
-        "nmu::addr_trans::collective_translate: the ISSUER is what has to be a tile, not the "
-        "anchor. Tile (1,0) anchors at the peripheral (0,0) and wildcards x over the whole row; "
-        "the closure {0,1,2,3} clips to the two tiles and both bounds are members, so the issuer "
+        "nmu::addr_trans::collective_translate: the ISSUER is what has to be a tile, not the node "
+        "the address names. Tile (1,0) addresses the peripheral (0,0) and wildcards x over the "
+        "whole row; the closure {0,1,2,3} clips to the two tiles and both bounds are members, so "
+        "the issuer "
         "check leaves it alone -- a memory controller multicasting to every tile is the case the "
         "clip exists for");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
-    b.addr = 0x0;  // anchor is the peripheral at (0, 0)
+    b.addr = 0x0;  // the address names the peripheral at (0, 0)
     b.burst = axi::Burst::INCR;
     b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);  // mask_x = 0x3
     const uint8_t mask = addr_trans::collective_translate(sam, b, /*src_id=*/0x01);

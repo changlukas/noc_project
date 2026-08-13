@@ -313,37 +313,37 @@ TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
 // second derivation the differential would compare the slice against itself.
 // Returns 0xFF -- never a legal node mask on a shipped topology -- if a named
 // address reaches no tile.
-uint8_t enumerated_node_mask(const ni::cmodel::nmu::addr_trans::SamTable& sam, uint64_t anchor,
+uint8_t enumerated_node_mask(const ni::cmodel::nmu::addr_trans::SamTable& sam, uint64_t addr,
                              uint64_t addr_mask) {
     std::vector<unsigned> pos;
     for (unsigned i = 0; i < 48; ++i) {
         if ((addr_mask >> i) & 1u) pos.push_back(i);
     }
-    const uint64_t base = anchor & ~addr_mask;
+    const uint64_t base = addr & ~addr_mask;
     const auto* origin = sam.lookup(base);
     if (origin == nullptr) return 0xFF;
     uint8_t node_mask = 0;
     for (uint64_t v = 0; v < (uint64_t{1} << pos.size()); ++v) {
-        uint64_t addr = base;
+        uint64_t member = base;
         for (std::size_t k = 0; k < pos.size(); ++k) {
-            if ((v >> k) & 1u) addr |= uint64_t{1} << pos[k];
+            if ((v >> k) & 1u) member |= uint64_t{1} << pos[k];
         }
-        const auto* e = sam.lookup(addr);
+        const auto* e = sam.lookup(member);
         if (e == nullptr) return 0xFF;
         node_mask |= static_cast<uint8_t>(e->dst_id ^ origin->dst_id);
     }
     return node_mask;
 }
 
-// How many (anchor, mask) pairs on ONE axis have their wildcard box inside
+// How many (address, mask) pairs on ONE axis have their wildcard box inside
 // [first, last], which is what the walk below filters on. Counted from the BOX
-// side rather than by re-testing each (anchor, mask): one box per (mask, fixed
-// bits) pair, holding the 2^popcount(mask) anchors that differ only in masked
+// side rather than by re-testing each (address, mask): one box per (mask, fixed
+// bits) pair, holding the 2^popcount(mask) addresses that differ only in masked
 // bits. A second expression of the same set, so an edit to the walk's own
 // filter moves one side and not the other.
 //
 // `count` is the span, which need not be 2^len: a peripheral topology's span is
-// as wide as its coordinates reach, so the anchors above it are not walked.
+// as wide as its coordinates reach, so the addresses above it are not walked.
 unsigned axis_pairs_inside_region(unsigned count, unsigned len, unsigned first, unsigned last) {
     unsigned n = 0;
     for (unsigned m = 0; m < (1u << len); ++m) {
@@ -361,11 +361,11 @@ unsigned axis_pairs_inside_region(unsigned count, unsigned len, unsigned first, 
 
 // B1/B2 differential: the node mask collective_translate reads off the declared
 // ranges must equal the one the enumeration above walks out of the SAM.
-// Exhaustive over every shipped topology, both spaces, every anchor node and
+// Exhaustive over every shipped topology, both spaces, every addressed node and
 // every legal mask shape -- at most 2^(x_bits + y_bits) masks per space. This
 // is the equivalence evidence for B2 replacing the enumeration in the datapath.
 //
-// Walks only the (anchor, mask) pairs whose raw wildcard closure already lies
+// Walks only the (address, mask) pairs whose raw wildcard closure already lies
 // inside the tile region, which is where clipping is a no-op. The subject here
 // is the slice against the enumeration, not the clip: on a span carrying a
 // peripheral, collective_translate deliberately refuses a mask whose clipped
@@ -399,8 +399,8 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
             unsigned compared_here = 0;
             for (unsigned ay = 0; ay < c->y_count; ++ay) {
                 for (unsigned ax = 0; ax < c->x_count; ++ax) {
-                    const uint64_t anchor = origin | (uint64_t{ax} << c->x_range.offset) |
-                                            (uint64_t{ay} << c->y_range.offset);
+                    const uint64_t addr = origin | (uint64_t{ax} << c->x_range.offset) |
+                                          (uint64_t{ay} << c->y_range.offset);
                     for (unsigned my = 0; my < (1u << c->y_range.len); ++my) {
                         for (unsigned mx = 0; mx < (1u << c->x_range.len); ++mx) {
                             if (mx == 0 && my == 0) continue;  // empty set: rejected, not compared
@@ -413,26 +413,26 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                             const uint64_t addr_mask = (uint64_t{mx} << c->x_range.offset) |
                                                        (uint64_t{my} << c->y_range.offset);
                             axi::AwBeat b{};
-                            b.addr = anchor;
+                            b.addr = addr;
                             b.size = 3;  // 8 B, fits the 4 KB config aperture
                             b.burst = axi::Burst::INCR;
                             b.user =
                                 (addr_mask << 10) | (uint64_t{axi::COLLECTIVE_OP_MULTICAST} << 8);
-                            const uint8_t enumerated = enumerated_node_mask(sam, anchor, addr_mask);
+                            const uint8_t enumerated = enumerated_node_mask(sam, addr, addr_mask);
                             // The reference is not vacuous: an aligned wildcard
                             // over a raster-packed space IS the (my, mx) pair.
                             ASSERT_EQ(enumerated,
                                       static_cast<uint8_t>((my << ni::width::X_WIDTH) | mx))
-                                << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
+                                << "address (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
-                            // The issuer must be a tile, and every anchor that
-                            // survives the closure filter above is one: a
-                            // closure containing the anchor cannot lie inside
-                            // the tile region unless the anchor does.
+                            // The issuer must be a tile, and every address
+                            // that survives the closure filter above names
+                            // one: a closure containing the address cannot lie
+                            // inside the tile region unless the address does.
                             const uint8_t issuer =
                                 static_cast<uint8_t>((ay << ni::width::X_WIDTH) | ax);
                             EXPECT_EQ(collective_translate(sam, b, issuer), enumerated)
-                                << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
+                                << "address (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
                             ++compared;
                             ++compared_here;
@@ -444,12 +444,12 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
             // than hard-coded, so a new topology adds coverage instead of
             // reading as a regression. The two axes filter independently, so
             // the surviving pairs are their product, less the mask-0 corner the
-            // walk skips: that is one pair per (anchor_x, anchor_y) inside the
+            // walk skips: that is one pair per (addr_x, addr_y) inside the
             // region. Where the region IS the span this reduces to the old
             // constant, x_count * y_count * (2^(xlen+ylen) - 1) -- 240 for a
             // 4x4, 12 for a 2x2. The 3-wide peripheral span gives 4: no x mask
             // keeps its closure inside a 2-wide tile region, so only the y mask
-            // survives, over 4 anchors.
+            // survives, over 4 addresses.
             // Catches a coverage collapse, which is what the per-pair
             // ASSERT_EQ above cannot see -- it only guards the pairs walked.
             const unsigned expected_here =

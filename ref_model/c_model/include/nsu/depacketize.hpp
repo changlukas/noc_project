@@ -172,12 +172,12 @@ class Depacketize : public RequestDepacketizer {
 
     // The address a request carries names the node the SENDER addressed. For a
     // unicast that is this node and the rewrite is the identity. For a
-    // collective replica it is the anchor's node, because one masked AW reaches
-    // N nodes unchanged -- so the tile behind this NSU would decode an address
-    // belonging to someone else. Overwriting the coordinate field with this
-    // node's own is what makes every replica land at the same offset in its own
-    // tile. Unconditional, so there is no case left unhandled: no branch on
-    // collective_op, no mask to inspect.
+    // collective replica it is the node the AW's own address resolves to, not
+    // this one, because one masked AW reaches N nodes unchanged -- so the tile
+    // behind this NSU would decode an address belonging to someone else.
+    // Overwriting the coordinate field with this node's own is what makes every
+    // replica land at the same offset in its own tile. Unconditional, so there
+    // is no case left unhandled: no branch on collective_op, no mask to inspect.
     uint64_t rebase_(uint64_t addr, uint8_t axi_ch) const {
         const bool is_data = axi_ch == ni::AXI_CH_DataAw || axi_ch == ni::AXI_CH_DataAr;
         const auto& c = space_coords_[is_data ? 1u : 0u];

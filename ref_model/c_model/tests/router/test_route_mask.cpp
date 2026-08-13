@@ -65,9 +65,9 @@ constexpr uint8_t id_y(uint8_t id) {
 // A node belongs to a masked set when every differing coordinate bit is a
 // don't-care. Computed per coordinate with the test's own arithmetic, not the
 // header's helper — the test must not check the implementation against itself.
-bool is_member(uint8_t id, uint8_t anchor, uint8_t mask) {
-    return ((id_x(id) ^ id_x(anchor)) & static_cast<uint8_t>(~id_x(mask) & kXFieldMask)) == 0 &&
-           ((id_y(id) ^ id_y(anchor)) & static_cast<uint8_t>(~id_y(mask) & kYFieldMask)) == 0;
+bool is_member(uint8_t id, uint8_t dst_id, uint8_t mask) {
+    return ((id_x(id) ^ id_x(dst_id)) & static_cast<uint8_t>(~id_x(mask) & kXFieldMask)) == 0 &&
+           ((id_y(id) ^ id_y(dst_id)) & static_cast<uint8_t>(~id_y(mask) & kYFieldMask)) == 0;
 }
 
 int popcount8(uint8_t v) {
@@ -85,13 +85,13 @@ struct Mesh {
 // coordinates in opposite orders, so a square mesh can hide a swapped axis.
 const Mesh kMeshes[] = {{2, 2}, {2, 4}, {4, 2}, {4, 4}};
 
-// A mask is legal for an anchor when the whole masked set lands inside the
-// mesh; every member is <= (anchor | mask) coordinate-wise, so this one test
+// A mask is legal for a dst_id when the whole masked set lands inside the
+// mesh; every member is <= (dst_id | mask) coordinate-wise, so this one test
 // covers all 2^n of them.
-bool mask_legal(uint8_t anchor_x, uint8_t anchor_y, uint8_t mask, const Mesh& m) {
+bool mask_legal(uint8_t addr_x, uint8_t addr_y, uint8_t mask, const Mesh& m) {
     // A bit outside the X|Y fields is not a coordinate don't-care at all.
     if (node_id(id_x(mask), id_y(mask)) != mask) return false;
-    return (anchor_x | id_x(mask)) < m.x_dim && (anchor_y | id_y(mask)) < m.y_dim;
+    return (addr_x | id_x(mask)) < m.x_dim && (addr_y | id_y(mask)) < m.y_dim;
 }
 
 struct Cell {
@@ -117,15 +117,15 @@ TEST(RouteMaskClip, RowWildcardStopsAtTheTileRegion) {
     cfg.tile_y_first = 0;
     cfg.tile_y_last = 1;
 
-    const uint8_t anchor = static_cast<uint8_t>((0u << ni::width::X_WIDTH) | 1u);
-    const uint8_t src = anchor;  // the originator is this node
+    const uint8_t dst_id = static_cast<uint8_t>((0u << ni::width::X_WIDTH) | 1u);
+    const uint8_t src = dst_id;  // the originator is this node
     const uint8_t mask = static_cast<uint8_t>((0u << ni::width::X_WIDTH) | 3u);
 
     // At x = 1 the fork goes EAST toward x = 2 and ejects locally. It must NOT
     // go WEST toward the clipped-out coordinate 0. The X spread runs on the
     // source's row, so src must name this router's row for WEST to be
     // reachable at all -- otherwise the test would pass for the wrong reason.
-    const auto route = router::route_mask_fork(anchor, src, mask, cfg);
+    const auto route = router::route_mask_fork(dst_id, src, mask, cfg);
     EXPECT_TRUE(router::port_in_mask(route, router::RouterPort::LOCAL));
     EXPECT_TRUE(router::port_in_mask(route, router::RouterPort::EAST));
     EXPECT_FALSE(router::port_in_mask(route, router::RouterPort::WEST));
@@ -199,7 +199,7 @@ TEST(RouteMaskClipDeath, JoinAbortsOnEmptyMemberSet) {
 
 // --- fork, hand-computed tables ---------------------------------------------
 
-// 4x4, offset submesh with a non-contiguous Y mask: anchor (2,1), mask (1,2)
+// 4x4, offset submesh with a non-contiguous Y mask: dst_id (2,1), mask (1,2)
 // => members {(2,1),(3,1),(2,3),(3,3)} (row y=2 is skipped). Source (0,0) is a
 // corner OUTSIDE the destination set, so the table also pins the X spread that
 // carries the flit into the set's column range.
@@ -280,7 +280,7 @@ TEST(RouteMaskFork, Mesh4x2FullRowFromOtherRow) {
 
 // --- join, hand-computed table ----------------------------------------------
 
-// Same member set as the 4x4 fork table (anchor (2,1), mask (1,2)) collecting
+// Same member set as the 4x4 fork table (dst_id (2,1), mask (1,2)) collecting
 // at (0,0). The shape is NOT the fork tree reversed: replicas merge along X
 // inside each member row first, then down the collector's column. (0,1) is the
 // only 2-way join; (0,0), (0,2), (1,3), (1,1) are single-input forwards.
@@ -306,30 +306,30 @@ TEST(RouteMaskJoin, Mesh4x4OffsetSubmeshToCorner) {
     }
 }
 
-// --- properties, exhaustive over every mesh / anchor / peer / legal mask -----
+// --- properties, exhaustive over every mesh / dst_id / peer / legal mask ----
 
 // Membership: n masked bits name exactly 2^n nodes, and the LOCAL bit is set at
 // exactly those nodes. Holds identically for both directions — the fork's
 // receivers and the join's contributors are the same masked set.
 TEST(RouteMaskProperty, LocalBitMarksExactlyThePowerOfTwoMemberSet) {
     for (const Mesh& m : kMeshes) {
-        for (uint8_t anchor_y = 0; anchor_y < m.y_dim; ++anchor_y) {
-            for (uint8_t anchor_x = 0; anchor_x < m.x_dim; ++anchor_x) {
+        for (uint8_t addr_y = 0; addr_y < m.y_dim; ++addr_y) {
+            for (uint8_t addr_x = 0; addr_x < m.x_dim; ++addr_x) {
                 for (int mask_i = 0; mask_i < 256; ++mask_i) {
                     const uint8_t mask = static_cast<uint8_t>(mask_i);
-                    if (!mask_legal(anchor_x, anchor_y, mask, m)) continue;
-                    const uint8_t anchor = node_id(anchor_x, anchor_y);
+                    if (!mask_legal(addr_x, addr_y, mask, m)) continue;
+                    const uint8_t dst_id = node_id(addr_x, addr_y);
                     const uint8_t peer = node_id(0, 0);  // source / collector, a corner
                     int fork_members = 0, join_members = 0;
                     for (uint8_t y = 0; y < m.y_dim; ++y) {
                         for (uint8_t x = 0; x < m.x_dim; ++x) {
                             const RouterConfig cfg = cfg_at(x, y, m.x_dim, m.y_dim);
-                            const bool member = is_member(node_id(x, y), anchor, mask);
-                            const PortMask fork = router::route_mask_fork(anchor, peer, mask, cfg);
-                            const PortMask join = router::route_mask_join(peer, anchor, mask, cfg);
+                            const bool member = is_member(node_id(x, y), dst_id, mask);
+                            const PortMask fork = router::route_mask_fork(dst_id, peer, mask, cfg);
+                            const PortMask join = router::route_mask_join(peer, dst_id, mask, cfg);
                             SCOPED_TRACE(testing::Message()
                                          << "mesh " << int(m.x_dim) << "x" << int(m.y_dim)
-                                         << " anchor " << int(anchor) << " mask " << int(mask)
+                                         << " dst_id " << int(dst_id) << " mask " << int(mask)
                                          << " router (" << int(x) << "," << int(y) << ")");
                             EXPECT_EQ(router::port_in_mask(fork, RouterPort::LOCAL), member);
                             EXPECT_EQ(router::port_in_mask(join, RouterPort::LOCAL), member);
@@ -352,16 +352,16 @@ TEST(RouteMaskProperty, ForkSetSpansATreeOverExactlyTheMembers) {
     for (const Mesh& m : kMeshes) {
         for (uint8_t src_y = 0; src_y < m.y_dim; ++src_y) {
             for (uint8_t src_x = 0; src_x < m.x_dim; ++src_x) {
-                for (uint8_t anchor_y = 0; anchor_y < m.y_dim; ++anchor_y) {
-                    for (uint8_t anchor_x = 0; anchor_x < m.x_dim; ++anchor_x) {
+                for (uint8_t addr_y = 0; addr_y < m.y_dim; ++addr_y) {
+                    for (uint8_t addr_x = 0; addr_x < m.x_dim; ++addr_x) {
                         for (int mask_i = 0; mask_i < 256; ++mask_i) {
                             const uint8_t mask = static_cast<uint8_t>(mask_i);
-                            if (!mask_legal(anchor_x, anchor_y, mask, m)) continue;
-                            const uint8_t anchor = node_id(anchor_x, anchor_y);
+                            if (!mask_legal(addr_x, addr_y, mask, m)) continue;
+                            const uint8_t dst_id = node_id(addr_x, addr_y);
                             const uint8_t src = node_id(src_x, src_y);
                             SCOPED_TRACE(testing::Message()
                                          << "mesh " << int(m.x_dim) << "x" << int(m.y_dim)
-                                         << " dst " << int(anchor) << " src " << int(src)
+                                         << " dst " << int(dst_id) << " src " << int(src)
                                          << " mask " << int(mask));
                             std::vector<uint8_t> seen(m.x_dim * m.y_dim, 0);
                             std::vector<std::pair<uint8_t, uint8_t>> pending{{src_x, src_y}};
@@ -371,12 +371,12 @@ TEST(RouteMaskProperty, ForkSetSpansATreeOverExactlyTheMembers) {
                                 const auto [hx, hy] = pending.back();
                                 pending.pop_back();
                                 const PortMask set = router::route_mask_fork(
-                                    anchor, src, mask, cfg_at(hx, hy, m.x_dim, m.y_dim));
+                                    dst_id, src, mask, cfg_at(hx, hy, m.x_dim, m.y_dim));
                                 ASSERT_NE(set, 0)
                                     << "dead end at (" << int(hx) << "," << int(hy) << ")";
                                 if (router::port_in_mask(set, RouterPort::LOCAL)) {
                                     ++delivered;
-                                    EXPECT_TRUE(is_member(node_id(hx, hy), anchor, mask));
+                                    EXPECT_TRUE(is_member(node_id(hx, hy), dst_id, mask));
                                 }
                                 const RouterPort dirs[] = {RouterPort::NORTH, RouterPort::EAST,
                                                            RouterPort::SOUTH, RouterPort::WEST};
@@ -449,23 +449,23 @@ TEST(RouteMaskProperty, JoinSetMatchesTheActualUnicastReturnPaths) {
     for (const Mesh& m : kMeshes) {
         for (uint8_t col_y = 0; col_y < m.y_dim; ++col_y) {
             for (uint8_t col_x = 0; col_x < m.x_dim; ++col_x) {
-                for (uint8_t anchor_y = 0; anchor_y < m.y_dim; ++anchor_y) {
-                    for (uint8_t anchor_x = 0; anchor_x < m.x_dim; ++anchor_x) {
+                for (uint8_t addr_y = 0; addr_y < m.y_dim; ++addr_y) {
+                    for (uint8_t addr_x = 0; addr_x < m.x_dim; ++addr_x) {
                         for (int mask_i = 0; mask_i < 256; ++mask_i) {
                             const uint8_t mask = static_cast<uint8_t>(mask_i);
-                            if (!mask_legal(anchor_x, anchor_y, mask, m)) continue;
-                            const uint8_t anchor = node_id(anchor_x, anchor_y);
+                            if (!mask_legal(addr_x, addr_y, mask, m)) continue;
+                            const uint8_t dst_id = node_id(addr_x, addr_y);
                             const uint8_t collector = node_id(col_x, col_y);
                             SCOPED_TRACE(testing::Message()
                                          << "mesh " << int(m.x_dim) << "x" << int(m.y_dim)
-                                         << " collector " << int(collector) << " src anchor "
-                                         << int(anchor) << " mask " << int(mask));
+                                         << " collector " << int(collector) << " collective dst_id "
+                                         << int(dst_id) << " mask " << int(mask));
                             // Replay every member's unicast response and record
                             // the input port it arrives on at each router.
                             std::vector<PortMask> arrivals(m.x_dim * m.y_dim, 0);
                             for (uint8_t y = 0; y < m.y_dim; ++y) {
                                 for (uint8_t x = 0; x < m.x_dim; ++x) {
-                                    if (!is_member(node_id(x, y), anchor, mask)) continue;
+                                    if (!is_member(node_id(x, y), dst_id, mask)) continue;
                                     uint8_t hx = x, hy = y;
                                     RouterPort arrival = RouterPort::LOCAL;
                                     for (int hop = 0; hop <= m.x_dim + m.y_dim; ++hop) {
@@ -484,7 +484,7 @@ TEST(RouteMaskProperty, JoinSetMatchesTheActualUnicastReturnPaths) {
                             for (uint8_t y = 0; y < m.y_dim; ++y) {
                                 for (uint8_t x = 0; x < m.x_dim; ++x) {
                                     EXPECT_EQ(
-                                        router::route_mask_join(collector, anchor, mask,
+                                        router::route_mask_join(collector, dst_id, mask,
                                                                 cfg_at(x, y, m.x_dim, m.y_dim)),
                                         arrivals[y * m.x_dim + x])
                                         << "router (" << int(x) << "," << int(y) << ")";

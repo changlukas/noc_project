@@ -578,7 +578,7 @@ inline void SimpleRouter::tick() {
     // translate of floo_route_select.sv:222-226, which only $warnings on a
     // locked-route mismatch). Keyed on `collective_op != UNICAST`, NEVER on
     // multi-hotness: at a spread-end hop a collective worm's fork set is
-    // legally ONE-HOT and legally diverges from the anchor's XY route, so a
+    // legally ONE-HOT and legally diverges from the header's dst_id XY route, so a
     // one-hot collective must still be set-checked (this is exactly the T3
     // Critical). Unicast is deliberately exempt — this class latches the route
     // and lets the latch win over any mid-worm dst change

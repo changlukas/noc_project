@@ -147,7 +147,7 @@ would look like a fabric bug.
 ### Collectives are clipped to the tile region
 
 A multicast names its members as a coordinate wildcard: the set is
-`{v : v & ~mask == anchor & ~mask}`, a block of `2^k` values aligned to `2^k` per axis. Tiles that do
+`{v : v & ~mask == addr & ~mask}`, a block of `2^k` values aligned to `2^k` per axis. Tiles that do
 not start at 0 are therefore not expressible: with tiles at `1..4`, `{1,2,3,4}` is not aligned, and
 the only covering block is `[0,7]`, which names the peripheral and three coordinates that do not
 exist.
@@ -171,7 +171,7 @@ Two obvious fixes do not work, and both were checked rather than assumed.
 The algorithm in `route_mask.hpp` is one clamp on each path, before the existing comparisons:
 
 ```
-fork:  dst_min = max(anchor & ~mask, tile_min)    dst_max = min(anchor | mask, tile_max)
+fork:  dst_min = max(addr   & ~mask, tile_min)    dst_max = min(addr   | mask, tile_max)
 join:  src_min = max(src    & ~mask, tile_min)    src_max = min(src    | mask, tile_max)
 ```
 
@@ -345,7 +345,8 @@ The walk covers the tile region, `x = 1..2` and `y = 0..1`, so the entry count i
 The two peripherals are entries but not walked, so they need not match the tile size, within the
 one-slot bound. `(3,0)` is padding beyond the span and is never visited.
 
-**The multicast that the clip exists for.** Anchor `T(1,0)`, target the tile row `{(1,0), (2,0)}`.
+**The multicast that the clip exists for.** The AW names `T(1,0)`, targeting the tile row
+`{(1,0), (2,0)}`.
 Wildcarding the x field gives `mask_x = 0b11`, and the raw wildcard set is
 
 ```
@@ -354,7 +355,7 @@ Wildcarding the x field gives `mask_x = 0b11`, and the raw wildcard set is
                             peripheral   does not exist
 ```
 
-Today that is rejected outright: `(anchor_x | mask_x) = 3 >= x_count = 3`. With the clip,
+Today that is rejected outright: `(addr_x | mask_x) = 3 >= x_count = 3`. With the clip,
 
 ```
 dst_min = max(1 & ~3, tile_min) = max(0, 1) = 1
@@ -364,7 +365,7 @@ dst_max = min(1 |  3, tile_max) = min(3, 2) = 2      ->  {1, 2}
 which is exactly the two tiles. The peripheral and the non-existent coordinate are both removed by
 the same clamp.
 
-**Rebasing.** `T(2,1)` receives a replica whose address names the anchor. `rebase_node_coords`
+**Rebasing.** `T(2,1)` receives a replica carrying the request's own address. `rebase_node_coords`
 writes its own `(2, 1)` into bits [22:20], giving `0x6xxxxx` with the low twenty bits untouched. No
 conversion, because the field is the coordinate.
 

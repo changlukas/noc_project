@@ -53,7 +53,7 @@ struct CreditCounter : ni::cmodel::router::RouterCreditSink {
     void receive_credit(uint8_t vc) override { pulses.push_back(vc); }
 };
 
-// A collective flit: dst_id is the set anchor, src_id the tree source,
+// A collective flit: dst_id is the node the address names, src_id the tree source,
 // collective_mask the wildcard (T2 stamps AW and every W beat identically).
 // ordering_tag carries the test's beat sequence number (src_id is taken).
 Flit make_mc_flit(uint8_t dst, uint8_t src, uint8_t cmask, uint8_t vc, uint64_t flit_tail,
@@ -132,7 +132,7 @@ TEST(RouterFork, ThreeWayInclLocalReplicatesWholeWorm) {
     r.set_downstream(N, north);
     r.set_downstream(E, east);
     r.set_upstream_credit(W, west_up);
-    // src (0,1), anchor (1,1), mask (x=2,y=2): members {1,3}x{1,3} -> fork
+    // src (0,1), dst (1,1), mask (x=2,y=2): members {1,3}x{1,3} -> fork
     // {L,E,N} at (1,1) (x/y matched -> LOCAL; East spread; North turn).
     constexpr int kFlits = 4;
     const auto worm = make_mc_worm(make_id(1, 1), make_id(0, 1), make_id(2, 2), /*vc=*/0,
@@ -175,7 +175,7 @@ TEST(RouterFork, LocalInputWithLocalBranch) {
     FlitSink local, north;
     r.set_downstream(L, local);
     r.set_downstream(N, north);
-    // src (1,1) = this node, anchor (1,1), mask (y=2): members (1,1),(1,3).
+    // src (1,1) = this node, dst (1,1), mask (y=2): members (1,1),(1,3).
     constexpr int kFlits = 3;
     const auto worm = make_mc_worm(make_id(1, 1), make_id(1, 1), make_id(0, 2), /*vc=*/0,
                                    /*fixed_vc=*/1, kFlits);
@@ -207,7 +207,7 @@ TEST(RouterFork, MidBurstBranchStarvationStallsWormWithoutSkipOrReorder) {
     r.set_downstream(N, north);
     r.set_downstream(E, east);
     r.set_upstream_credit(W, west_up);
-    // src (0,1), anchor (1,3), mask (x=2): members (1,3),(3,3) -> fork {E,N}
+    // src (0,1), dst (1,3), mask (x=2): members (1,3),(3,3) -> fork {E,N}
     // at (1,1) (no LOCAL: y unmatched).
     constexpr int kFlits = 6;
     const uint8_t dst = make_id(1, 3), src = make_id(0, 1), cmask = make_id(2, 0);
@@ -309,7 +309,7 @@ TEST(RouterFork, OneHotForkSetIsBitIdenticalToPlainUnicast) {
     FlitSink ea, eb;
     ra.set_downstream(E, ea);
     rb.set_downstream(E, eb);
-    // A: collective, src (0,1), anchor (3,1), mask (y=2): members (3,1),(3,3)
+    // A: collective, src (0,1), dst (3,1), mask (y=2): members (3,1),(3,3)
     // -> fork at (1,1) is {EAST} only (x unmatched, East spread).
     // B: plain unicast to (3,1), same src.
     constexpr int kFlits = 3;
@@ -360,9 +360,9 @@ TEST(RouterFork, DisjointTreesProgressConcurrently) {
     r.set_downstream(E, east);
     r.set_downstream(S, south);
     constexpr int kFlits = 4;
-    // M1: src (0,1), anchor (1,3), mask (x=2) -> {E,N}.
+    // M1: src (0,1), dst (1,3), mask (x=2) -> {E,N}.
     const auto m1 = make_mc_worm(make_id(1, 3), make_id(0, 1), make_id(2, 0), 0, 1, kFlits);
-    // M2: src (1,2), anchor (1,0), mask (y=1): members (1,0),(1,1) -> {L,S}.
+    // M2: src (1,2), dst (1,0), mask (y=1): members (1,0),(1,1) -> {L,S}.
     const auto m2 = make_mc_worm(make_id(1, 0), make_id(1, 2), make_id(0, 1), 0, 1, kFlits);
     std::size_t fed1 = 0, fed2 = 0;
     int m1_first = -1, m1_last = -1, m2_first = -1, m2_last = -1;
@@ -514,7 +514,7 @@ TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
         "locked to the other worm. This is the R1 restriction's documented hazard "
         "demonstration, not a bug in the fork");
     // Row y=0 of a 4x2 mesh. M1 from (0,0) and M2 from (3,0) both multicast
-    // to the full row above (anchor (0,1), mask x=3): fork {E,N} at every
+    // to the full row above (dst (0,1), mask x=3): fork {E,N} at every
     // source-row router for M1, {W,N} for M2. M1 locks N@R1 then needs N@R2;
     // M2 locks N@R2 then needs N@R1. vc_depth 4 << worm length 8 exhausts
     // the R1<->R2 link credits, freezing both worms mid-burst.
@@ -641,9 +641,9 @@ TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
 
 TEST(RouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
     SCENARIO(
-        "2-router chain: a multicast worm (anchor (0,1), src (0,0), mask x=3) forks {E,N} "
+        "2-router chain: a multicast worm (dst (0,1), src (0,0), mask x=3) forks {E,N} "
         "at (2,0) and {N} at (3,0) — at the spread-end hop the one-hot fork direction "
-        "(NORTH) diverges from the anchor's XY route (WEST). The worm must traverse "
+        "(NORTH) diverges from the header's dst_id XY route (WEST). The worm must traverse "
         "cleanly end to end: the locked continuation check keys on the fork set, never "
         "route_compute, for ANY collective flit (review fix)");
     RouterConfig ca;
@@ -704,7 +704,7 @@ TEST(RouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
     EXPECT_DEATH(
         {
             Router r(center_cfg());
-            // src (0,0), anchor (0,0), mask (x=2): members (0,0),(2,0) — the
+            // src (0,0), dst (0,0), mask (x=2): members (0,0),(2,0) — the
             // tree never touches (1,1) (x unmatched, not on the source row).
             r.input(W).push_flit(make_mc_flit(make_id(0, 0), make_id(0, 0), make_id(2, 0),
                                               /*vc=*/0, /*flit_tail=*/0, /*fixed_vc=*/1, 0));
@@ -723,7 +723,7 @@ TEST(RouterForkDeath, ReservedCollectiveOpAborts) {
     EXPECT_DEATH(
         {
             Router r(center_cfg());
-            // Otherwise-legal collective geometry (anchor (1,1), src (0,1),
+            // Otherwise-legal collective geometry (dst (1,1), src (0,1),
             // mask y=2 -> {L,N}); only the opcode is corrupt.
             Flit f = make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), /*vc=*/0,
                                   /*flit_tail=*/0, /*fixed_vc=*/1, 0);
@@ -797,7 +797,7 @@ TEST(RouterForkDeath, ContinuationBranchSetMismatchAborts) {
             r.set_downstream(L, local);
             r.set_downstream(N, north);
             r.set_downstream(E, east);
-            // Head: {L,N} (mask y=2, anchor (1,1), src (0,1)).
+            // Head: {L,N} (mask y=2, dst (1,1), src (0,1)).
             r.input(W).push_flit(make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), 0,
                                               /*flit_tail=*/0, 1, 0));
             r.tick();
@@ -810,7 +810,7 @@ TEST(RouterForkDeath, ContinuationBranchSetMismatchAborts) {
             r.tick();
         },
         "branch set diverges");
-    // ONE-HOT corrupted continuation (review Important): anchor (1,1),
+    // ONE-HOT corrupted continuation (review Important): dst (1,1),
     // mask 0 -> set {L} at this router, and route_compute(dst)==LOCAL
     // coincidentally passes — the pre-fix unicast locked path would grant
     // and pop it, silently skipping the still-locked NORTH branch. The
@@ -823,7 +823,7 @@ TEST(RouterForkDeath, ContinuationBranchSetMismatchAborts) {
             FlitSink north;
             r.set_downstream(L, local);
             r.set_downstream(N, north);
-            // Head: {L,N} (mask y=2, anchor (1,1), src (0,1)).
+            // Head: {L,N} (mask y=2, dst (1,1), src (0,1)).
             r.input(W).push_flit(make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), 0,
                                               /*flit_tail=*/0, 1, 0));
             r.tick();

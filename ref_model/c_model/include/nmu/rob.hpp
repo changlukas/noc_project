@@ -380,7 +380,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     //     (ordering_req=0, no RoB slot) -- ruling 4, NoRobReduction.
     //   anything in, front entry collective -> refuse. This closes the
     //     same-destination bypass hole: a later same-id AW whose dst equals the
-    //     collective's anchor would otherwise stream past it without a RoB slot.
+    //     collective's dst_id would otherwise stream past it without a RoB slot.
     //     Testing the FRONT suffices -- a collective only ever enters an empty
     //     list, so while in flight it is the only entry.
     if (!write_order_by_id_[b.id].empty() &&

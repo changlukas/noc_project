@@ -705,7 +705,7 @@ def test_config_probe_window_is_bounded_by_the_config_entry(tmp_path):
 
 
 def test_noc_egress_aperture_sits_above_every_window():
-    """A collective anchored at the issuing node's own region would be answered
+    """A collective whose address names the issuing node's own region would be answered
     by the tile crossbar and never reach the NI. The endpoint offsets it into
     this aperture, which is the first power of two at or above the map's top --
     so no node window can ever reach it, however the map grows."""
@@ -766,13 +766,14 @@ def test_tornado_guard_rejects_a_non_uniform_radix():
         g._check_tornado_guard(4, 2)
 
 
-def test_peripheral_slots_do_not_land_on_a_multicast_anchor(tmp_path):
+def test_peripheral_slots_do_not_land_on_a_multicast_address(tmp_path):
     """Every address the run writes has exactly one writer.
 
     The multicast window opens at base_local + region_bytes, and both that and
     every alloc_unique_offset band count ENDPOINTS. Counted in router nodes, a
-    peripheral's slot walks past the window into the collective anchors -- on
-    mesh_2x2_vc1_periph 0x1100 is both endpoint 4's slot and node0's anchor.
+    peripheral's slot walks past the window into the collective addresses -- on
+    mesh_2x2_vc1_periph 0x1100 is both endpoint 4's slot and node0's multicast
+    address.
     Nothing else holds the two apart: reverting the band fails this test.
     """
     out = tmp_path / "mc"
