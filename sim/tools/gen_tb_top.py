@@ -66,14 +66,35 @@ VC_ID_WIDTH = 3
 DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
 
 
+def _route_span(t: dict):
+    """(x_span, y_span, tile_x_first, tile_x_last, tile_y_first, tile_y_last).
+
+    Six optional topology keys. x_span/y_span are the route-coordinate span --
+    the router array plus any border coordinate a peripheral sits on -- and
+    default to x_dim/y_dim. The tile region is inclusive and defaults to the
+    whole span. A topology stating none of the six is a plain mesh, where the
+    span is the array and every coordinate in it is a tile.
+    """
+    x_span = int(t.get("x_span", t["x_dim"]))
+    y_span = int(t.get("y_span", t["y_dim"]))
+    return (x_span, y_span,
+            int(t.get("tile_x_first", 0)), int(t.get("tile_x_last", x_span - 1)),
+            int(t.get("tile_y_first", 0)), int(t.get("tile_y_last", y_span - 1)))
+
+
 def _check_flit_capacity(topo: dict, path) -> None:
-    """Reject a topology whose mesh dims / num_vc exceed the flit field capacity,
-    or whose mesh dims are below the per-dimension minimum.
+    """Reject a topology whose route span / num_vc exceed the flit field capacity,
+    whose mesh dims are below the per-dimension minimum, or whose span and tile
+    region do not contain the router array.
 
     Mirrors specgen/ni_spec/invariants.py:check_mesh_within_flit for the
     sim-topology-YAML path (X/Y/node + VC bounds).  Fails with a clear message so
     the user knows to reduce dims / num_vc or widen the flit fields (via the
     specgen constants).
+
+    The capacity caps sit on the SPAN, not on x_dim/y_dim: the coordinate field
+    has to hold every route coordinate, including a border one no router array
+    element occupies.
 
     Mesh dim minimum is 2 per dimension (mesh_x_dim >= 2 AND mesh_y_dim >= 2):
     a mesh communicating through NI + router needs at least 2x2. 1x1 and 1xN
@@ -83,6 +104,7 @@ def _check_flit_capacity(topo: dict, path) -> None:
     x_dim = int(t["x_dim"])
     y_dim = int(t["y_dim"])
     num_vc = int(t["num_vc"])
+    x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(t)
     cap_x = 1 << X_WIDTH
     cap_y = 1 << Y_WIDTH
     cap_nodes = 1 << DST_ID_WIDTH
@@ -92,12 +114,31 @@ def _check_flit_capacity(topo: dict, path) -> None:
         errors.append(f"x_dim={x_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
     if y_dim < 2:
         errors.append(f"y_dim={y_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
-    if x_dim > cap_x:
-        errors.append(f"x_dim={x_dim} > 2^X_WIDTH={cap_x}")
-    if y_dim > cap_y:
-        errors.append(f"y_dim={y_dim} > 2^Y_WIDTH={cap_y}")
-    if x_dim * y_dim > cap_nodes:
-        errors.append(f"x_dim*y_dim={x_dim * y_dim} > 2^DST_ID_WIDTH={cap_nodes}")
+    if x_span > cap_x:
+        errors.append(f"x_span={x_span} > 2^X_WIDTH={cap_x}")
+    if y_span > cap_y:
+        errors.append(f"y_span={y_span} > 2^Y_WIDTH={cap_y}")
+    if x_span * y_span > cap_nodes:
+        errors.append(f"x_span*y_span={x_span * y_span} > 2^DST_ID_WIDTH={cap_nodes}")
+    if x_span < x_dim:
+        errors.append(f"x_span={x_span} < x_dim={x_dim} (the span must cover the router array)")
+    if y_span < y_dim:
+        errors.append(f"y_span={y_span} < y_dim={y_dim} (the span must cover the router array)")
+    if not 0 <= tx_first <= tx_last < x_span:
+        errors.append(f"tile x region [{tx_first},{tx_last}] outside 0..{x_span - 1}")
+    if not 0 <= ty_first <= ty_last < y_span:
+        errors.append(f"tile y region [{ty_first},{ty_last}] outside 0..{y_span - 1}")
+    # A span wider than the array with no stated region defaults to the whole
+    # span, which would silently disarm the cross-row reachability guard
+    # (check_dst_reachable) -- the region's extent must equal the array's.
+    if tx_last - tx_first + 1 != x_dim:
+        errors.append(
+            f"tile x region [{tx_first},{tx_last}] extent {tx_last - tx_first + 1} != "
+            f"x_dim={x_dim} (region must equal the router array)")
+    if ty_last - ty_first + 1 != y_dim:
+        errors.append(
+            f"tile y region [{ty_first},{ty_last}] extent {ty_last - ty_first + 1} != "
+            f"y_dim={y_dim} (region must equal the router array)")
     if num_vc > cap_vc:
         errors.append(f"num_vc={num_vc} > 2^VC_ID_WIDTH={cap_vc}")
     if errors:
@@ -119,19 +160,89 @@ def _coord_id(x: int, y: int) -> int:
 def _nodes(topo: dict):
     """Return ordered node list: [(idx, x, y, coord_id), ...] in (y,x) raster order.
 
-    idx is the linear emit index (0..N-1); coord_id is the routing id. The two
-    coincide only for nodes in mesh row y=0 (coord_id's y field is 0 there), so
-    a 2x2 mesh's first row stays byte-identical to the prior 1-D gen.
+    idx is the linear emit index (0..N-1) and doubles as the ARRAY position:
+    array x = idx % x_dim, array y = idx // x_dim, which is what the emitted
+    generate loop derives its neighbour wiring and boundary tie-off from. x/y
+    here are the ROUTE coordinate of the router at that array position --
+    tile_x_first + array x, tile_y_first + array y -- and coord_id is the
+    routing id built from them. A topology whose tile region starts at 0, which
+    is every topology with no peripheral, has the two equal.
     """
-    x_dim = topo["topology"]["x_dim"]
-    y_dim = topo["topology"]["y_dim"]
+    t = topo["topology"]
+    x_dim = t["x_dim"]
+    y_dim = t["y_dim"]
+    _xs, _ys, tx_first, _txl, ty_first, _tyl = _route_span(t)
     out = []
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
-            out.append((idx, x, y, _coord_id(x, y)))
+            out.append((idx, tx_first + x, ty_first + y,
+                        _coord_id(tx_first + x, ty_first + y)))
             idx += 1
     return out, x_dim, y_dim
+
+
+def _peripherals(topo: dict):
+    """Address-map coordinates outside the tile region, in map order.
+
+    A peripheral has an NI and a test endpoint but no router, so it hangs off
+    ONE boundary port of ONE router: the coordinate it borders on the axis it
+    left the region on. x < tile_x_first is that router's WEST port, x >
+    tile_x_last its EAST, and the same on y with SOUTH and NORTH.
+
+    Returns [{"x", "y", "cid", "router_idx", "dir"}, ...]. Peripherals extend
+    the ENDPOINT index space, not the node index space: nodes 0..N-1 stay the
+    routers and peripheral p is endpoint N + p.
+    """
+    t = topo["topology"]
+    x_dim, y_dim = int(t["x_dim"]), int(t["y_dim"])
+    _xs, _ys, txf, txl, tyf, tyl = _route_span(t)
+    out = []
+    seen = set()
+    taken = {}
+    for tile in (topo.get("address_map") or {}).get("tiles", []):
+        x, y = int(tile["x"]), int(tile["y"])
+        if txf <= x <= txl and tyf <= y <= tyl:
+            continue  # a tile, not a peripheral
+        if (x, y) in seen:
+            continue  # the same coordinate again in the other address space
+        seen.add((x, y))
+        out_x = not txf <= x <= txl
+        out_y = not tyf <= y <= tyl
+        if out_x and out_y:
+            raise SystemExit(
+                f"gen_tb_top: peripheral (x={x},y={y}) leaves the tile region on both axes "
+                f"-- a corner coordinate borders no router port")
+        if out_x:
+            direction = "WEST" if x < txf else "EAST"
+            ax, ay = (0 if x < txf else x_dim - 1), y - tyf
+        else:
+            direction = "SOUTH" if y < tyf else "NORTH"
+            ax, ay = x - txf, (0 if y < tyf else y_dim - 1)
+        if not (0 <= ax < x_dim and 0 <= ay < y_dim):
+            raise SystemExit(
+                f"gen_tb_top: peripheral (x={x},y={y}) borders no router -- its in-region "
+                f"coordinate lies outside the {x_dim}x{y_dim} router array")
+        router_idx = ay * x_dim + ax
+        if (router_idx, direction) in taken:
+            raise SystemExit(
+                f"gen_tb_top: peripherals {taken[(router_idx, direction)]} and (x={x},y={y}) "
+                f"both claim node{router_idx}'s {direction} port")
+        taken[(router_idx, direction)] = f"(x={x},y={y})"
+        out.append({"x": x, "y": y, "cid": _coord_id(x, y),
+                    "router_idx": router_idx, "dir": direction})
+    return out
+
+
+def _endpoints(nodes, peripherals):
+    """Router nodes followed by peripherals, in (idx, x, y, coord_id) shape.
+
+    The endpoint index space: 0..N-1 are the routers, N..N+P-1 the peripherals.
+    Each entry carries its own ni_wrap, user_node_endpoint and NMU / NSU /
+    dat_merge context; only the first N carry a router.
+    """
+    return list(nodes) + [(len(nodes) + p, per["x"], per["y"], per["cid"])
+                          for p, per in enumerate(peripherals)]
 
 
 # REGION_BYTES: the per-node tile-memory window. DV-side tb constant
@@ -185,8 +296,8 @@ _MST_BACKPRESSURE_PROFILES = {
 _MST_BACKPRESSURE = "random"
 
 
-def tile_targets(topo: dict, nodes):
-    """Each node's own crossbar windows, in target PORT ORDER (m0 = config,
+def tile_targets(topo: dict, endpoints):
+    """Each endpoint's own crossbar windows, in target PORT ORDER (m0 = config,
     m1 = data).
 
     Port order and field packing are ONE coupled invariant: target t occupies
@@ -201,13 +312,12 @@ def tile_targets(topo: dict, nodes):
     fabric always lands in these windows -- the NSU rewrites its
     node-coordinate field to this node first (nsu::Depacketize::rebase_).
 
-    Returns ({node_idx: [{"space", "base", "size"}, ...]}, noc_egress_base).
+    Returns ({endpoint_idx: [{"space", "base", "size"}, ...]}, noc_egress_base).
     """
-    x_dim = topo["topology"]["x_dim"]
-    y_dim = topo["topology"]["y_dim"]
-    _bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
+    x_span, y_span = _route_span(topo["topology"])[:2]
+    _bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
     out = {}
-    for idx, _x, _y, cid in nodes:
+    for idx, _x, _y, cid in endpoints:
         windows = address_map.node_windows(entries, cid)
         order = [w["space"] for w in windows]
         # Spelled out here rather than read back from address_map.SPACE_ORDER:
@@ -264,6 +374,8 @@ def emit_fabric(topo: dict) -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
+    peripherals = _peripherals(topo)
+    n_ep = n + len(peripherals)
     num_vc = topo["topology"]["num_vc"]
     guard = f"NOC_FABRIC_{name.upper()}_SV"
 
@@ -283,6 +395,12 @@ def emit_fabric(topo: dict) -> str:
     w("// route_compute's abort). The DPI ctx handles arrive as ports; the fabric")
     w("// does no cmodel_*_create. Each node exposes a master-side AXI port (NMU")
     w("// ingress) and a slave-side AXI port (NSU egress).")
+    if peripherals:
+        w("//")
+        w(f"// {len(peripherals)} peripheral(s) sit at a border coordinate outside the tile region:")
+        w("// an ni_wrap on a router's boundary port, with no router of their own. They")
+        w("// extend the ENDPOINT index space (nmu/nsu/dat_merge ctx and the AXI faces)")
+        w("// past the router-node count, which router_ctx keeps.")
     w("")
     w(f"`ifndef {guard}")
     w(f"`define {guard}")
@@ -307,18 +425,18 @@ def emit_fabric(topo: dict) -> str:
     # + packed-struct), so the node instances collapse into a genvar generate.
     w(f"    // Per-node DPI ctx handle arrays (chandle-substitute longint unsigned).")
     w(f"    input  longint unsigned router_ctx     [{n}],")
-    w(f"    input  longint unsigned nmu_ctx        [{n}],")
-    w(f"    input  longint unsigned nsu_ctx        [{n}],")
-    w(f"    input  longint unsigned dat_merge_ctx  [{n}],")
+    w(f"    input  longint unsigned nmu_ctx        [{n_ep}],")
+    w(f"    input  longint unsigned nsu_ctx        [{n_ep}],")
+    w(f"    input  longint unsigned dat_merge_ctx  [{n_ep}],")
     w(f"    // Per-node AXI faces (struct arrays): NMU ingress (driven by tb master)")
-    w(f"    input  ni_signals_pkg::axi_req_t  master_axi_req [{n}],")
+    w(f"    input  ni_signals_pkg::axi_req_t  master_axi_req [{n_ep}],")
     w(f"    // AWUSER sideband: collective op + address mask.")
     w(f"    // Dedicated array beside the struct (axi_req_t has no awuser field).")
-    w(f"    input  logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] master_awuser [{n}],")
-    w(f"    output ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n}],")
+    w(f"    input  logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] master_awuser [{n_ep}],")
+    w(f"    output ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n_ep}],")
     w(f"    // Per-node AXI faces (struct arrays): NSU egress (consumed by tb slave)")
-    w(f"    output ni_signals_pkg::axi_req_t  slave_axi_req  [{n}],")
-    w(f"    input  ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n}]")
+    w(f"    output ni_signals_pkg::axi_req_t  slave_axi_req  [{n_ep}],")
+    w(f"    input  ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n_ep}]")
     w(");")
     w("")
     w(f"    localparam int unsigned NUM_NODES = {n};")
@@ -349,6 +467,97 @@ def emit_fabric(topo: dict) -> str:
         w("")
 
     # ------------------------------------------------------------------
+    # Peripherals: an ni_wrap on a boundary port, with no router of its own.
+    # Its three link OUTPUTS land on wires rather than on the per-node arrays
+    # directly, because the tie-off always_comb in the node loop below already
+    # drives those arrays and a variable cannot take both a procedural and a
+    # continuous driver; that always_comb picks these wires up at the one
+    # (node, port) each peripheral occupies. The link INPUTS read the router's
+    # own outputs, which needs no intermediary.
+    # ------------------------------------------------------------------
+    if peripherals:
+        w("    // -------------------------------------------------------------------------")
+        w("    // Peripherals: an NI on a populated boundary port, no router of its own")
+        w("    // -------------------------------------------------------------------------")
+    for pi, per in enumerate(peripherals):
+        ep = n + pi
+        r, d = per["router_idx"], per["dir"]
+        w(f"    // peripheral{pi}: route ({per['x']},{per['y']}) = coord id {per['cid']}, on")
+        w(f"    // node{r}'s {d} port. Endpoint index {ep}; it carries no router.")
+        for net, width_sym, flow in _NETWORKS:
+            W = f"ni_params_pkg::{width_sym}"
+            w(f"    logic                        periph{pi}_tx_{net}_valid;")
+            w(f"    logic [{W}-1:0]  periph{pi}_tx_{net}_flit;")
+            if flow == "ready_valid":
+                w(f"    logic                        periph{pi}_rx_{net}_ready;")
+            else:
+                w(f"    logic [DAT_NUM_VC-1:0]       periph{pi}_rx_{net}_crdvalid;")
+        w("")
+        w("    ni_wrap #(")
+        w("        .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
+        w("        .DAT_NUM_VC(DAT_NUM_VC), .REQ_FLIT_WIDTH(REQ_FLIT_WIDTH),")
+        w("        .RSP_FLIT_WIDTH(RSP_FLIT_WIDTH), .DAT_FLIT_WIDTH(DAT_FLIT_WIDTH)")
+        w(f"    ) u_periph{pi} (")
+        w("        .clk_i(clk_i), .rst_ni(rst_ni),")
+        w(f"        .nmu_ctx_i(nmu_ctx[{ep}]), .nsu_ctx_i(nsu_ctx[{ep}]),")
+        w(f"        .dat_merge_ctx_i(dat_merge_ctx[{ep}]),")
+        w(f"        .master_axi_req_i(master_axi_req[{ep}]),")
+        w(f"        .master_awuser_i(master_awuser[{ep}]),")
+        w(f"        .master_axi_rsp_o(master_axi_rsp[{ep}]),")
+        w(f"        .slave_axi_req_o(slave_axi_req[{ep}]),")
+        w(f"        .slave_axi_rsp_i(slave_axi_rsp[{ep}]),")
+        for net, _width_sym, flow in _NETWORKS:
+            ret = "ready" if flow == "ready_valid" else "crdvalid"
+            w(f"        .tx_{net}_valid_o(periph{pi}_tx_{net}_valid),")
+            w(f"        .tx_{net}_flit_o(periph{pi}_tx_{net}_flit),")
+            w(f"        .tx_{net}_{ret}_i(rx_{net}_{ret}[{r}][RP_{d}]),")
+            w(f"        .rx_{net}_valid_i(tx_{net}_valid[{r}][RP_{d}]),")
+            w(f"        .rx_{net}_flit_i(tx_{net}_flit[{r}][RP_{d}]),")
+            w(f"        .rx_{net}_{ret}_o(periph{pi}_rx_{net}_{ret})"
+              + ("," if net != _NETWORKS[-1][0] else ""))
+        w("    );")
+        w("")
+        # Same monitor every live inter-router link carries. A populated
+        # boundary port is a live link, and its flit count is the only direct
+        # evidence that the collective clip kept a mask block off a peripheral:
+        # without it a quiet peripheral and a delivered one look alike.
+        w(f"    // Link perf monitors on node{r}'s {d} port, one per directed edge as")
+        w(f"    // every inter-router link carries, named {{net}}_{r}to{ep} and {{net}}_{ep}to{r}")
+        w(f"    // after the endpoint index. The router-to-peripheral edge answers 'did the")
+        w(f"    // fabric send at the peripheral' (the collective clip); the")
+        w(f"    // peripheral-to-router edge answers 'did the peripheral put a flit on the")
+        w(f"    // wire' -- without it a silent peripheral and a working one look alike.")
+        for net, _width_sym, flow in _NETWORKS:
+            ret = "ready" if flow == "ready_valid" else "crdvalid"
+            for src, dst, suffix, valid, flit in (
+                    (r, ep, "", f"tx_{net}_valid[{r}][RP_{d}]", f"tx_{net}_flit[{r}][RP_{d}]"),
+                    (ep, r, "_out", f"periph{pi}_tx_{net}_valid", f"periph{pi}_tx_{net}_flit")):
+                # The return wire is the OTHER end's: a monitor watches flits
+                # leaving one end and the ready/credit coming back from the one
+                # they arrive at.
+                back = (f"tx_{net}_{ret}[{r}][RP_{d}]" if suffix == ""
+                        else f"rx_{net}_{ret}[{r}][RP_{d}]")
+                vc_slice = f"{flit}[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]"
+                w(f"    link_perf_monitor #(")
+                w(f'        .LINK_NAME("{net}_{src}to{dst}"),')
+                w(f'        .FLOW("{flow}"),')
+                w(f"        .BUFFER_DEPTH(ROUTER_VC_DEPTH),")
+                w(f"        .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)")
+                w(f"    ) u_perf_periph{pi}_{net}{suffix} (")
+                w(f"        .clk_i, .rst_ni,")
+                w(f"        .valid({valid}),")
+                if flow == "ready_valid":
+                    w(f"        .ready({back}),")
+                    w(f"        .vc_id('0),")
+                    w(f"        .credit_pulse('0)")
+                else:
+                    w(f"        .ready(1'b0),")
+                    w(f"        .vc_id({vc_slice}),")
+                    w(f"        .credit_pulse({back})")
+                w(f"    );")
+        w("")
+
+    # ------------------------------------------------------------------
     # Node generate loop: ni_wrap (= NMU+NSU+dat_merge) + router_wrap +
     # per-node link wiring + boundary tie-off + perf monitors. Coordinates
     # from the linear index mirror _nodes() raster order: X = i % X_DIM,
@@ -372,6 +581,17 @@ def emit_fabric(topo: dict) -> str:
     w("        localparam int unsigned PEER_E = i + 1;")
     w("        localparam int unsigned PEER_S = i - X_DIM;")
     w("        localparam int unsigned PEER_W = i - 1;")
+    # A boundary port carrying a peripheral is driven, not tied off. One
+    # localparam per direction that has one, naming the nodes it sits on, so
+    # the tie-off and its $fatal below can step around exactly those ports.
+    periph_dirs = {}
+    for per in peripherals:
+        periph_dirs.setdefault(per["dir"], []).append(per["router_idx"])
+    for d, has, _peer, _pd in _LINK_DIRS:
+        if d in periph_dirs:
+            terms = " || ".join(f"(i == {r})" for r in periph_dirs[d])
+            w(f"        localparam bit {has.replace('HAS_', 'PERIPH_')} = {terms};"
+              f"  // {d} port carries a peripheral NI")
     w("")
     w("        ni_wrap #(")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
@@ -443,6 +663,15 @@ def emit_fabric(topo: dict) -> str:
             w(f"                rx_{net}_flit[i][RP_{d}]  = tx_{net}_flit[{peer}][RP_{pd}];")
             w(f"                tx_{net}_{ret}[i][RP_{d}] = rx_{net}_{ret}[{peer}][RP_{pd}];")
             w(f"            end")
+        # A populated boundary port takes the peripheral's NI instead of the
+        # tie-off default, with the same tx/rx crossing the LOCAL port uses.
+        for pi, per in enumerate(peripherals):
+            w(f"            if (i == {per['router_idx']}) begin"
+              f"  // {per['dir']}: <- peripheral{pi} at route ({per['x']},{per['y']})")
+            w(f"                rx_{net}_valid[i][RP_{per['dir']}] = periph{pi}_tx_{net}_valid;")
+            w(f"                rx_{net}_flit[i][RP_{per['dir']}]  = periph{pi}_tx_{net}_flit;")
+            w(f"                tx_{net}_{ret}[i][RP_{per['dir']}] = periph{pi}_rx_{net}_{ret};")
+            w(f"            end")
         w(f"        end")
         w("")
     # Boundary tie-off assertion: a boundary direction must never drive OUT valid.
@@ -453,8 +682,13 @@ def emit_fabric(topo: dict) -> str:
     w("        always_ff @(posedge clk_i) begin")
     w("            if (rst_ni) begin")
     for d, has, _peer, _pd in _LINK_DIRS:
+        # A port with a peripheral on it is driven, so it is not tied off and
+        # the check does not apply; every other boundary port keeps it.
+        tied = f"!{has}"
+        if d in periph_dirs:
+            tied += f" && !{has.replace('HAS_', 'PERIPH_')}"
         for net, _width_sym, _flow in _NETWORKS:
-            w(f"                if (!{has} && tx_{net}_valid[i][RP_{d}])")
+            w(f"                if ({tied} && tx_{net}_valid[i][RP_{d}])")
             w(f'                    $fatal(1, "noc_fabric: node%0d drove a flit on '
               f'tied-off {d} ({net}) - fabric link wiring mistake", i);')
     w("        end")
@@ -508,8 +742,15 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
+    peripherals = _peripherals(topo)
+    endpoints = _endpoints(nodes, peripherals)
+    n_ep = len(endpoints)
     num_vc = topo["topology"]["num_vc"]
+    x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(topo["topology"])
     rob_enabled = requested_name.endswith("_rob")
+    # Every loop that walks the initiators walks ENDPOINTS on a topology with a
+    # peripheral: each one injects, each one can wedge, and each one has an NMU.
+    exit_n = "NUM_ENDPOINTS" if peripherals else "NUM_NODES"
 
     # Tile crossbar windows, m0 first (see tile_targets). Emitted as PACKED-array
     # concatenations in descending index order (last first) so field t is target t
@@ -530,7 +771,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     # A third per-beat stall source on the response path, so it lands in the
     # watchdog budget beside the memory's. Zero under "ideal".
     mst_cyc_per_beat = _STALL_RANDOM_MAX_CYCLES if mst_stall_out else mst_delay_out
-    per_node, noc_egress_base = tile_targets(topo, nodes)
+    per_node, noc_egress_base = tile_targets(topo, endpoints)
     n_targets = len(per_node[0])
     # ADDR_WIDTH'(...) casts, not sized literals: the field width has to follow
     # ni_params_pkg::AXI_ADDR_WIDTH_DFLT, or a width change would silently
@@ -539,9 +780,20 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         return ", ".join(
             "{" + ", ".join(f"ADDR_WIDTH'(64'h{t[key]:X})"
                              for t in reversed(per_node[i])) + "}"
-            for i in reversed(range(n)))
+            for i in reversed(range(n_ep)))
     tile_base_addr = _rows("base")
     tile_size = _rows("size")
+    # The tile region as address windows: every window of every ROUTER node, in
+    # the same field order. The endpoint's multicast checker seeds golden for
+    # the wildcard closure, and the NMU and every router clip that closure to
+    # the tile region, so a replica address outside it is never written. Only
+    # emitted for a topology that has a coordinate outside the region -- with
+    # none, the closure is inside it by construction and the endpoint's own
+    # default (no clip) is already exact.
+    mesh_windows = [w for i in range(n) for w in per_node[i]] if peripherals else []
+    def _window_row(key):
+        return "{" + ", ".join(f"ADDR_WIDTH'(64'h{w[key]:X})"
+                               for w in reversed(mesh_windows)) + "}"
 
     lines = []
     w = lines.append
@@ -580,6 +832,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // Parameters")
     w("    // -------------------------------------------------------------------------")
     w(f"    localparam int unsigned NUM_NODES     = {n};")
+    if peripherals:
+        w(f"    // Endpoints, not nodes: {len(peripherals)} peripheral(s) have an NI and an")
+        w("    // endpoint but no router. Each carries stimulus of its own, so the exit")
+        w("    // logic gates on all of them.")
+        w(f"    localparam int unsigned NUM_ENDPOINTS = {n_ep};")
     w("    localparam int unsigned ID_WIDTH      = ni_params_pkg::AXI_ID_WIDTH_DFLT;")
     w("    localparam int unsigned ADDR_WIDTH    = ni_params_pkg::AXI_ADDR_WIDTH_DFLT;")
     w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
@@ -598,15 +855,25 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // REGION_BYTES = the DV region_bytes constant (NOT a tile size -- that")
     w("    // would blow up MAX_BURST_BEATS below).")
     w(f"    localparam int unsigned TILE_TARGETS = {n_targets};")
-    w(f"    localparam logic [{n - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = "
+    w(f"    localparam logic [{n_ep - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_BASE_ADDR = "
       f"{{{tile_base_addr}}};")
-    w(f"    localparam logic [{n - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_SIZE = "
+    w(f"    localparam logic [{n_ep - 1}:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0] TILE_SIZE = "
       f"{{{tile_size}}};")
     w("    // NoC egress aperture: where a collective write is offset to so the tile")
     w("    // crossbar routes it to the NI instead of answering it locally. Derived")
     w("    // from the map (address_map.noc_egress_base), so it can never collide.")
     w(f"    localparam logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE = "
       f"ADDR_WIDTH'(64'h{noc_egress_base:X});")
+    if mesh_windows:
+        w("    // The tile region, as the windows of every node inside it. A collective's")
+        w("    // wildcard closure is clipped to this set by the NMU and by every router,")
+        w("    // so a replica address outside it is never written; the endpoint seeds")
+        w("    // multicast golden for these windows only.")
+        w(f"    localparam int unsigned MESH_TILE_WINDOWS = {len(mesh_windows)};")
+        w(f"    localparam logic [MESH_TILE_WINDOWS-1:0][ADDR_WIDTH-1:0] MESH_TILE_BASE_ADDR = "
+          f"{_window_row('base')};")
+        w(f"    localparam logic [MESH_TILE_WINDOWS-1:0][ADDR_WIDTH-1:0] MESH_TILE_SIZE = "
+          f"{_window_row('size')};")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w(f'    // Tile-memory latency profile "{_MEM_LATENCY}" (gen_tb_top.py')
     w("    // _MEM_LATENCY_PROFILES). Every endpoint's two memories sit behind an")
@@ -631,19 +898,19 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // separate a freeze at cycle 500 from one at cycle 99999.")
     w("    // -------------------------------------------------------------------------")
     w("    int unsigned live_cyc = 0;")
-    w("    int unsigned last_progress  [NUM_NODES];")
-    w("    int unsigned axi_outstanding[NUM_NODES];")
+    w(f"    int unsigned last_progress  [{exit_n}];")
+    w(f"    int unsigned axi_outstanding[{exit_n}];")
     w("")
     w("    always_ff @(posedge clk_i) begin")
     w("        if (!rst_ni) begin")
     w("            live_cyc <= 0;")
-    w("            for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"            for (int i = 0; i < {exit_n}; i++) begin")
     w("                last_progress[i]   <= 0;")
     w("                axi_outstanding[i] <= 0;")
     w("            end")
     w("        end else begin")
     w("            live_cyc <= live_cyc + 1;")
-    w("            for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"            for (int i = 0; i < {exit_n}; i++) begin")
     w("                automatic logic aw = master_axi_req[i].awvalid && master_axi_rsp[i].awready;")
     w("                automatic logic ar = master_axi_req[i].arvalid && master_axi_rsp[i].arready;")
     w("                automatic logic wb = master_axi_req[i].wvalid  && master_axi_rsp[i].wready;")
@@ -686,13 +953,13 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('        void\'($value$plusargs("num_reads=%d",  tb_num_reads));')
     w('        void\'($value$plusargs("num_writes=%d", tb_num_writes));')
     w("        timeout_cycles = TIMEOUT_BASE")
-    w("            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * NUM_NODES;")
+    w(f"            + K_CYC_PER_BEAT * (tb_num_reads + tb_num_writes) * MAX_BURST_BEATS * {exit_n};")
     w("        // Forensics override: fire the watchdog just past a known freeze")
     w("        // point so the state dump lands without waiting out the formula.")
     w('        void\'($value$plusargs("timeout_cycles=%d", timeout_cycles));')
     w("        repeat (timeout_cycles) @(posedge clk_i);")
     w("        // Per-node SV-side summary, then the c_model fabric state dump.")
-    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"        for (int i = 0; i < {exit_n}; i++) begin")
     w('            $display("[WATCHDOG] node%0d txn_cnt=%0d end_of_sim=%0d outstanding=%0d last_progress=%0d (idle %0d cyc) mst[awv=%0d wv=%0d arv=%0d rr=%0d br=%0d] slv[awv=%0d wv=%0d arv=%0d rv=%0d bv=%0d]",')
     w("                     i, txn_cnt[i], end_of_sim[i],")
     w("                     axi_outstanding[i], last_progress[i], live_cyc - last_progress[i],")
@@ -715,7 +982,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('    import "DPI-C" context function longint unsigned cmodel_router_create(input string name,')
     w('                                                                  input int x_coord, input int y_coord,')
     w('                                                                  input int mesh_x_dim, input int mesh_y_dim,')
-    w('                                                                  input int num_vc);')
+    w('                                                                  input int num_vc,')
+    w('                                                                  input int tile_x_first, input int tile_x_last,')
+    w('                                                                  input int tile_y_first, input int tile_y_last);')
     w('    import "DPI-C" context function int unsigned cmodel_nmu_read_slot_hwm(input longint unsigned ctx);')
     w('    import "DPI-C" context function void cmodel_nmu_admission_stats(input longint unsigned ctx,')
     w("                                                                 output int unsigned aw_idle_bypass,")
@@ -748,9 +1017,9 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     # ctx handle ARRAYS (chandle-substitute longint unsigned). Arrays let the
     # fabric take them as array ports and instantiate nodes via a genvar loop.
     w(f"    longint unsigned router_ctx     [{n}];")
-    w(f"    longint unsigned nmu_ctx        [{n}];")
-    w(f"    longint unsigned nsu_ctx        [{n}];")
-    w(f"    longint unsigned dat_merge_ctx  [{n}];")
+    w(f"    longint unsigned nmu_ctx        [{n_ep}];")
+    w(f"    longint unsigned nsu_ctx        [{n_ep}];")
+    w(f"    longint unsigned dat_merge_ctx  [{n_ep}];")
     w("")
     w("    // SAM config: topology YAML with an address_map block. Empty (the")
     w("    // default) keeps each NMU's default 16x16 uniform, 4 GB/tile SAM.")
@@ -780,14 +1049,23 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
         w('        void\'($value$plusargs("b_rob_depth=%d", b_rob_depth));')
         w('        void\'($value$plusargs("r_rob_depth=%d", r_rob_depth));')
         w('        void\'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));')
+    # The router takes the SPAN, not the router array: it range-checks route
+    # coordinates, and a border coordinate is one. Neighbour wiring in the
+    # fabric keeps using x_dim/y_dim.
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
-          f'{x_dim}, {y_dim}, DAT_NUM_VC);')
-    for (i, x, y, c) in nodes:
+          f'{x_span}, {y_span}, DAT_NUM_VC, '
+          f'{tx_first}, {tx_last}, {ty_first}, {ty_last});')
+    # NI creates cover the ENDPOINT space: the routers first, then one per
+    # peripheral. src_id is the route coordinate the topology states for it --
+    # that id is stamped into every request the peripheral emits and is what
+    # its responses come back to.
+    for (i, x, y, c) in endpoints:
         w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, DAT_NUM_VC, '
           f'{1 if rob_enabled else 0}, b_rob_depth, r_rob_depth, max_txns_per_id, '
           f'sam_config_path);  '
-          f'// src_id = node{i} coord {c}, ROB {"Enabled" if rob_enabled else "Disabled"}')
+          f'// src_id = {"node" if i < n else "peripheral"}{i} coord {c}, '
+          f'ROB {"Enabled" if rob_enabled else "Disabled"}')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, '
           f'max_outstanding, sam_config_path);')
         w(f'        dat_merge_ctx[{i}] = cmodel_dat_merge_create("dat_merge_{i}", DAT_NUM_VC);')
@@ -799,11 +1077,11 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // -------------------------------------------------------------------------")
     w("    // Per-node AXI buses (struct arrays): master-side into NMU, slave-side out of NSU")
     w("    // -------------------------------------------------------------------------")
-    w(f"    ni_signals_pkg::axi_req_t  master_axi_req [{n}];  // tb master -> NMU")
-    w(f"    logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] master_awuser [{n}];  // AWUSER sideband")
-    w(f"    ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n}];  // NMU -> tb master")
-    w(f"    ni_signals_pkg::axi_req_t  slave_axi_req  [{n}];  // NSU -> tb slave")
-    w(f"    ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n}];  // tb slave -> NSU")
+    w(f"    ni_signals_pkg::axi_req_t  master_axi_req [{n_ep}];  // tb master -> NMU")
+    w(f"    logic [ni_params_pkg::AXI_AWUSER_WIDTH_DFLT-1:0] master_awuser [{n_ep}];  // AWUSER sideband")
+    w(f"    ni_signals_pkg::axi_rsp_t  master_axi_rsp [{n_ep}];  // NMU -> tb master")
+    w(f"    ni_signals_pkg::axi_req_t  slave_axi_req  [{n_ep}];  // NSU -> tb slave")
+    w(f"    ni_signals_pkg::axi_rsp_t  slave_axi_rsp  [{n_ep}];  // tb slave -> NSU")
     w("")
 
     # Fabric instance: ctx + AXI arrays passed whole.
@@ -834,15 +1112,23 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("    // axi_xbar tile crossbar + two axi_delayer/axi_sim_mem targets +")
     w("    // in-endpoint scoreboard +")
     w("    // bw monitor). user_node_endpoint.sv is user-owned and NOT regenerated.")
+    if peripherals:
+        w(f"    // {n_ep} endpoints, not NUM_NODES: endpoints {n}..{n_ep - 1} are the")
+        w("    // peripherals, which have an NI and an endpoint but no router. They carry")
+        w("    // their own stimulus, so the exit logic below gates on all of them.")
     w("    // -------------------------------------------------------------------------")
-    w(f"    logic        end_of_sim [{n}];")
-    w(f"    int unsigned txn_cnt    [{n}];")
-    w(f"    for (genvar i = 0; i < {n}; i++) begin : g_endpoint")
+    w(f"    logic        end_of_sim [{n_ep}];")
+    w(f"    int unsigned txn_cnt    [{n_ep}];")
+    w(f"    for (genvar i = 0; i < {n_ep}; i++) begin : g_endpoint")
     w("        user_node_endpoint #(")
     w("            .NODE_ID(i),")
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
     w("            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE),")
+    if mesh_windows:
+        w("            .MESH_TILE_WINDOWS(MESH_TILE_WINDOWS),")
+        w("            .MESH_TILE_BASE_ADDR(MESH_TILE_BASE_ADDR),")
+        w("            .MESH_TILE_SIZE(MESH_TILE_SIZE),")
     w("            .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),")
     w("            .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),")
     w("            .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),")
@@ -914,12 +1200,12 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("        do begin")
     w("            @(posedge clk_i);")
     w("            all_done = rst_ni;")
-    w("            for (int i = 0; i < NUM_NODES; i++)")
+    w(f"            for (int i = 0; i < {exit_n}; i++)")
     w("                all_done &= end_of_sim[i];  // scoreboard is in-endpoint")
     w("        end while (!all_done);")
     w("        repeat (SETTLE_CYCLES) @(posedge clk_i);")
     w("        vacuous = 1'b0;")
-    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"        for (int i = 0; i < {exit_n}; i++) begin")
     w("            if (txn_cnt[i] == 0) begin")
     w("                vacuous = 1'b1;")
     w('                $display("FAIL: node%0d completed zero transactions (vacuous)", i);')
@@ -928,7 +1214,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w('        if (vacuous) $fatal(1, "tb_top: vacuous run");')
     w("        // Sizing statistics per node: RoB slot peak, the SPEC 17 admission")
     w("        // clause split, the per-id order-list peak and the shared-pool peaks.")
-    w("        for (int i = 0; i < NUM_NODES; i++) begin")
+    w(f"        for (int i = 0; i < {exit_n}; i++) begin")
     w("            cmodel_nmu_admission_stats(nmu_ctx[i], aw_idle, aw_same, aw_alloc,")
     w("                                           ar_idle, ar_same, ar_alloc,")
     w("                                           list_hwm, wtxn_hwm, rtxn_hwm);")
@@ -937,7 +1223,7 @@ def emit_tb_top(topo: dict, requested_name: str = "") -> str:
     w("                     list_hwm, wtxn_hwm, rtxn_hwm,")
     w("                     aw_idle, aw_same, aw_alloc, ar_idle, ar_same, ar_alloc);")
     w("        end")
-    w('        $display("PASS: all %0d nodes done, non-vacuous", NUM_NODES);')
+    w(f'        $display("PASS: all %0d nodes done, non-vacuous", {exit_n});')
     w("        $finish(0);")
     w("    end")
     w("")
@@ -983,9 +1269,16 @@ def main() -> int:
     ap.add_argument("--out", default=None,
                     help="Output tb_top.sv path (default: sim/tb/tb_top_<topology>.sv; "
                          "fabric emitted alongside)")
+    ap.add_argument("--print-num-vc", action="store_true",
+                    help="Print the topology's num_vc and exit. sim/build_config.mk picks "
+                         "the per-VC noc_types_pkg with it, so that value is read where it "
+                         "is declared instead of parsed back out of the topology name.")
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
+    if a.print_num_vc:
+        print(topo["topology"]["num_vc"])
+        return 0
     tb_text = emit_tb_top(topo, a.topology)
     fab_text = emit_fabric(topo)
     out_path = Path(a.out) if a.out is not None else \

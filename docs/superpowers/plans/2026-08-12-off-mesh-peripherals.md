@@ -381,13 +381,50 @@ declared slot size, and set the new fields:
         c.y_first = tile_y_first; c.y_last = tile_y_last;
 ```
 
-- [ ] **Step 6: Run the full suite**
+- [ ] **Step 6: Bring the C++ packer onto the same formula**
+
+`SamTable::packed` (`ref_model/c_model/include/nmu/addr_trans.hpp:55-65`) still accumulates,
+`base += t.size`, and it is what the co-sim model actually runs. Task 1 changed only the Python
+twin, so on a topology whose span is not a power of two the two disagree: at `x_span = 3` the tile
+at `(0,1)` lands on `0x300000` here and `0x400000` there. Everything else in this task assumes the
+base's bits already encode the coordinate, so this must land with it.
+
+Give `packed` the span and the per-space slot size and compute the same base:
+
+```cpp
+    // Base from the coordinate, not from an accumulator. Twin of
+    // sim/tools/address_map.py's pack(); the two must agree bit for bit,
+    // because the stimulus generator and this model address the same map.
+    static SamTable packed(const std::vector<PackedTile>& tiles, unsigned x_span, unsigned y_span,
+                           uint64_t memory_slot, uint64_t config_slot) {
+        const unsigned x_bits = clog2(x_span);
+        const uint64_t config_base = (uint64_t{1} << x_bits) * y_span * memory_slot;
+        std::vector<SamEntry> es;
+        es.reserve(tiles.size());
+        for (const auto& t : tiles) {
+            const bool is_config = t.cls == axi::AxiClass::Narrow;
+            const uint64_t slot = is_config ? config_slot : memory_slot;
+            const uint64_t space_base = is_config ? config_base : 0;
+            const uint64_t base = space_base + ((uint64_t{(t.y << x_bits) | t.x}) * slot);
+            assert(t.size <= slot && "SamTable::packed: entry exceeds its coordinate slot");
+            es.push_back({base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x),
+                          t.cls});
+        }
+        return SamTable(std::move(es));
+    }
+```
+
+Update its callers: `sam_yaml.hpp:129` passes the span and the slot sizes it already reads from the
+topology, and the test fixtures pass their own dimensions with the sizes they already use. A
+fixture that packed a plain mesh keeps its exact bases, because span equals dim there.
+
+- [ ] **Step 7: Run the full suite**
 
 Run: `wsl -e bash -lc 'cd ~/noc_project && export BUILD_ROOT=$HOME/noc_build && export PYTHON3=python3 && make test 2>&1 | tail -5'`
 Expected: the new test passes and every existing test still passes. A failure in an existing SAM
 test means a plain mesh stopped reducing to the old behaviour, which is a bug in this task.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add ref_model/c_model/include/nmu/addr_trans.hpp \

@@ -132,9 +132,17 @@ is. Three places consume it and all three are already correct once the construct
 | `nsu/depacketize.hpp:56,181` | derives its node coordinate from `src_id` and rebases arriving addresses onto it |
 | `nsu/meta_buffer.hpp:21` | captures the requester's `src_id` so the response routes back |
 
-The return path needs no new mechanism, but it works **only** if the peripheral's `src_id` is the
-coordinate the topology states. A peripheral stamped with an invented id would route its responses
-to the wrong node, and the failure would look like a fabric bug.
+The return path adds no block, but it is not free of the routing constraint the outbound path has.
+A response's destination is the request's source (`nsu/packetize.hpp`, `build_b_flit` stamps
+`dst_id` from the buffered `src_id`) and it takes the same X-before-Y `route_compute`, so a
+peripheral outside the tile region on x is answered on its own row only: a request it issues to
+another row arrives, and the response for it leaves the region one row early and lands in whichever
+peripheral borders that row. `nmu::addr_trans::check_dst_reachable` refuses the pairing at
+packetize time, in either direction, for exactly that reason.
+
+It also works **only** if the peripheral's `src_id` is the coordinate the topology states. A
+peripheral stamped with an invented id would route its responses to the wrong node, and the failure
+would look like a fabric bug.
 
 ### Collectives are clipped to the tile region
 

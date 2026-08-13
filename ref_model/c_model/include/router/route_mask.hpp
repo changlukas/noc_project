@@ -31,6 +31,7 @@
 #include "ni_flit_constants.h"
 #include "router/router_types.hpp"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -92,15 +93,38 @@ inline PortMask route_mask_fork(uint8_t dst_id, uint8_t src_id, uint8_t collecti
     const detail::NodeCoord mask = detail::split_node_id(collective_mask);
 
     // :104-107 — span of the destination set.
-    const detail::NodeCoord dst_max{static_cast<uint8_t>(dst.x | mask.x),
-                                    static_cast<uint8_t>(dst.y | mask.y)};
-    const detail::NodeCoord dst_min{static_cast<uint8_t>(dst.x & ~mask.x),
-                                    static_cast<uint8_t>(dst.y & ~mask.y)};
+    detail::NodeCoord dst_max{static_cast<uint8_t>(dst.x | mask.x),
+                              static_cast<uint8_t>(dst.y | mask.y)};
+    detail::NodeCoord dst_min{static_cast<uint8_t>(dst.x & ~mask.x),
+                              static_cast<uint8_t>(dst.y & ~mask.y)};
 
-    // Every node of the set is <= dst_max coordinate-wise, so one bound check
-    // covers all 2^n of them. Same fatal shape as route_compute (router.hpp:74).
-    if (!detail::in_mesh(dst_max, cfg) || !detail::in_mesh(src, cfg)) {
-        assert(false && "route_mask_fork: destination set or source outside mesh range");
+    // Collectives name tiles only. The wildcard block may reach a border
+    // coordinate or a coordinate that does not exist; both are clipped here, in
+    // the same way on the fork and the join, so every router computes the same
+    // member set (spec, "Collectives are clipped to the tile region").
+    //
+    // Hand-kept twins of this arithmetic: route_mask_join below,
+    // nmu::addr_trans::collective_translate (the source-side refusal), and
+    // collective_addr_mask in sim/tools/gen_test_patterns.py (the generator).
+    // Not shared: the join is stateless, so the two router copies must agree
+    // node by node or a collect hangs, and the other two sit the far side of
+    // the nmu/router layer boundary and of the C++/Python one. Change one,
+    // change all four.
+    dst_min.x = std::max<uint8_t>(dst_min.x, cfg.tile_x_first);
+    dst_min.y = std::max<uint8_t>(dst_min.y, cfg.tile_y_first);
+    dst_max.x = std::min<uint8_t>(dst_max.x, cfg.tile_x_last);
+    dst_max.y = std::min<uint8_t>(dst_max.y, cfg.tile_y_last);
+    if (dst_min.x > dst_max.x || dst_min.y > dst_max.y) {
+        assert(false &&
+               "route_mask_fork: collective member set is empty after clipping "
+               "to the tile region -- the source should have refused it");
+        std::abort();
+    }
+
+    // dst_max is now <= tile_max, inside the mesh span by construction, so
+    // only the (unclamped) source still needs the range check.
+    if (!detail::in_mesh(src, cfg)) {
+        assert(false && "route_mask_fork: source outside mesh range");
         std::abort();
     }
 
@@ -134,13 +158,35 @@ inline PortMask route_mask_join(uint8_t dst_id, uint8_t src_id, uint8_t collecti
     const detail::NodeCoord mask = detail::split_node_id(collective_mask);
 
     // :111-114 — span of the source set.
-    const detail::NodeCoord src_max{static_cast<uint8_t>(src.x | mask.x),
-                                    static_cast<uint8_t>(src.y | mask.y)};
-    const detail::NodeCoord src_min{static_cast<uint8_t>(src.x & ~mask.x),
-                                    static_cast<uint8_t>(src.y & ~mask.y)};
+    detail::NodeCoord src_max{static_cast<uint8_t>(src.x | mask.x),
+                              static_cast<uint8_t>(src.y | mask.y)};
+    detail::NodeCoord src_min{static_cast<uint8_t>(src.x & ~mask.x),
+                              static_cast<uint8_t>(src.y & ~mask.y)};
 
-    if (!detail::in_mesh(src_max, cfg) || !detail::in_mesh(dst, cfg)) {
-        assert(false && "route_mask_join: source set or destination outside mesh range");
+    // Collectives name tiles only. The wildcard block may reach a border
+    // coordinate or a coordinate that does not exist; both are clipped here, in
+    // the same way on the fork and the join, so every router computes the same
+    // member set (spec, "Collectives are clipped to the tile region").
+    //
+    // Hand-kept twins: route_mask_fork above (the copy this one must agree with
+    // node by node, since a stateless join hangs on a one-node disagreement),
+    // nmu::addr_trans::collective_translate, and collective_addr_mask in
+    // sim/tools/gen_test_patterns.py. Change one, change all four.
+    src_min.x = std::max<uint8_t>(src_min.x, cfg.tile_x_first);
+    src_min.y = std::max<uint8_t>(src_min.y, cfg.tile_y_first);
+    src_max.x = std::min<uint8_t>(src_max.x, cfg.tile_x_last);
+    src_max.y = std::min<uint8_t>(src_max.y, cfg.tile_y_last);
+    if (src_min.x > src_max.x || src_min.y > src_max.y) {
+        assert(false &&
+               "route_mask_join: collective member set is empty after clipping "
+               "to the tile region -- the source should have refused it");
+        std::abort();
+    }
+
+    // src_max is now <= tile_max, inside the mesh span by construction, so
+    // only the (unclamped) collector still needs the range check.
+    if (!detail::in_mesh(dst, cfg)) {
+        assert(false && "route_mask_join: destination outside mesh range");
         std::abort();
     }
 

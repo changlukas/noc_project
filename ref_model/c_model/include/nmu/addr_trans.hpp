@@ -2,9 +2,11 @@
 #include "ni_flit_constants.h"  // ni::width::X_WIDTH / Y_WIDTH (DST_ID composition)
 #include "axi/types.hpp"        // axi::Burst (used by burst_last_byte)
 #include "ni/address_map.hpp"   // BitRange / SpaceCoords / clog2 / range_mask
+#include <algorithm>            // std::max / std::min
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>   // std::fprintf (fatal-message style, flit.hpp)
 #include <cstdlib>  // std::abort
 #include <utility>  // std::move
 #include <vector>
@@ -29,7 +31,8 @@ struct SamEntry {
 };
 
 // One packed-map input tile: mesh coordinate + size. Bases are not given here;
-// SamTable::packed() derives them by accumulation in list order.
+// SamTable::packed() derives them from the coordinate and the space's slot
+// size, not from list order.
 struct PackedTile {
     unsigned x;
     unsigned y;
@@ -50,16 +53,33 @@ class SamTable {
     SamTable() = default;
     explicit SamTable(std::vector<SamEntry> entries) : entries_(std::move(entries)) {}
 
-    // Packed map: base(0) = 0, base(i) = base(i-1) + size(i-1), in list order.
-    // dst_id = (y << X_WIDTH) | x per tile.
-    static SamTable packed(const std::vector<PackedTile>& tiles) {
+    // Base from the coordinate and the space's slot size, not accumulation.
+    // Twin of sim/tools/address_map.py's pack(): the two must agree bit for
+    // bit, because the stimulus generator and this model address the same
+    // map. x_span/y_span are the route span (docs/noc-target-spec.md), not
+    // necessarily the tile count -- a peripheral coordinate outside the tile
+    // region still counts. Every topology with no peripheral has the two
+    // equal. dst_id = (y << X_WIDTH) | x per tile.
+    static SamTable packed(const std::vector<PackedTile>& tiles, unsigned x_span, unsigned y_span) {
+        const unsigned x_bits = clog2(x_span);
+        uint64_t memory_slot = 0;
+        uint64_t config_slot = 0;
+        for (const auto& t : tiles) {
+            uint64_t& slot = (t.cls == axi::AxiClass::Narrow) ? config_slot : memory_slot;
+            slot = std::max(slot, t.size);
+        }
+        // Config starts above every base memory could take, so the coordinate
+        // field of one space never reaches into the other's.
+        const uint64_t config_base = (uint64_t{1} << x_bits) * y_span * memory_slot;
         std::vector<SamEntry> es;
         es.reserve(tiles.size());
-        uint64_t base = 0;
         for (const auto& t : tiles) {
-            uint8_t dst = static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x);
-            es.push_back({base, t.size, dst, t.cls});
-            base += t.size;
+            const bool is_config = t.cls == axi::AxiClass::Narrow;
+            const uint64_t slot = is_config ? config_slot : memory_slot;
+            const uint64_t space_base = is_config ? config_base : 0;
+            const uint64_t base = space_base + ((uint64_t{(t.y << x_bits) | t.x}) * slot);
+            es.push_back(
+                {base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x), t.cls});
         }
         return SamTable(std::move(es));
     }
@@ -75,7 +95,7 @@ class SamTable {
                 tiles.push_back({x, y, tile_size});
             }
         }
-        return packed(tiles);
+        return packed(tiles, x_dim, y_dim);
     }
 
     // First-match by start address (FlooNoC get_entry). Miss -> nullptr.
@@ -112,7 +132,7 @@ class SamTable {
     // constructor for most c_model tests. The Python twin
     // (sim/tools/address_map.py pack()) requires both unconditionally -- it
     // only ever sees a shipped topology YAML.
-    void validate(unsigned x_dim, unsigned y_dim) const {
+    void validate(unsigned x_span, unsigned y_span) const {
         constexpr uint64_t k4k = 0x1000;
         for (const auto& e : entries_) {
             assert(e.size != 0 && "SAM: zero-size tile");
@@ -121,9 +141,9 @@ class SamTable {
             assert(e.base + e.size > e.base && "SAM: base+size overflow");
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
-            assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");
+            assert(x < x_span && y < y_span && "SAM: dst outside mesh");
         }
-        const std::size_t mesh_nodes = static_cast<std::size_t>(x_dim) * y_dim;
+        const std::size_t mesh_nodes = static_cast<std::size_t>(x_span) * y_span;
         std::vector<bool> seen_memory(mesh_nodes, false);
         std::vector<bool> seen_config(mesh_nodes, false);
         std::size_t memory_count = 0;
@@ -131,7 +151,7 @@ class SamTable {
         for (const auto& e : entries_) {
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
-            std::size_t idx = static_cast<std::size_t>(y) * x_dim + x;
+            std::size_t idx = static_cast<std::size_t>(y) * x_span + x;
             std::vector<bool>& seen = (e.cls == axi::AxiClass::Data) ? seen_memory : seen_config;
             assert(!seen[idx] && "SAM: duplicate mesh node (same space)");
             seen[idx] = true;
@@ -176,27 +196,38 @@ class SamTable {
             c.y_range.offset + c.y_range.len > c.x_range.offset) {
             return false;
         }
+        const unsigned tiles_x = c.x_last - c.x_first + 1;
+        const unsigned tiles_y = c.y_last - c.y_first + 1;
         const SamEntry* origin = nullptr;
-        std::size_t space_entries = 0;
+        std::size_t tile_entries = 0;
         for (const auto& e : entries_) {
             if (e.cls != cls) continue;
-            if (origin == nullptr) origin = &e;
-            ++space_entries;
+            const unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
+            const unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            if (x == c.x_first && y == c.y_first) origin = &e;
+            if (x < c.x_first || x > c.x_last || y < c.y_first || y > c.y_last) continue;
+            ++tile_entries;
         }
         if (origin == nullptr) return false;
-        // No entry of this space outside the slice: the declared ranges must
-        // account for the whole space, not a prefix of it.
-        if (space_entries != static_cast<std::size_t>(c.x_count) * c.y_count) return false;
+        // No tile-region entry outside the slice: the declared ranges must
+        // account for the whole tile region, not a prefix of it. A peripheral
+        // outside the tile region is not walked and does not have to fit.
+        if (tile_entries != static_cast<std::size_t>(tiles_x) * tiles_y) return false;
         const uint64_t field = range_mask(c.x_range) | range_mask(c.y_range);
-        // The origin sits at coordinate (0,0) -- no base_id to subtract.
-        if ((origin->base & field) != 0) return false;
+        // The origin sits at the tile region's own corner (c.x_first,
+        // c.y_first), not necessarily (0,0) -- a peripheral may occupy a
+        // lower coordinate.
+        const uint64_t origin_field =
+            (uint64_t{c.x_first} << c.x_range.offset) | (uint64_t{c.y_first} << c.y_range.offset);
+        if ((origin->base & field) != origin_field) return false;
         // Uniform USABLE APERTURE is a separate claim from uniform stride: an
         // aperture reaching into the coordinate bits would make a wildcard
         // address land inside its own anchor's region.
         if (field != 0 && origin->size > (field & (~field + 1))) return false;
-        for (unsigned y = 0; y < c.y_count; ++y) {
-            for (unsigned x = 0; x < c.x_count; ++x) {
-                const uint64_t addr = origin->base | (uint64_t{x} << c.x_range.offset) |
+        const uint64_t base_zero = origin->base & ~field;
+        for (unsigned y = c.y_first; y <= c.y_last; ++y) {
+            for (unsigned x = c.x_first; x <= c.x_last; ++x) {
+                const uint64_t addr = base_zero | (uint64_t{x} << c.x_range.offset) |
                                       (uint64_t{y} << c.y_range.offset);
                 const SamEntry* e = lookup(addr);
                 if (e == nullptr || e->cls != cls) return false;  // reachable, one class
@@ -258,7 +289,8 @@ inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::B
 // Every reject here is a PERMANENT illegal input: it never clears on retry, so
 // returning false would wedge the caller indistinguishably from congestion.
 // Fail loud instead -- the convention this file already uses for a SAM miss.
-inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
+inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, uint8_t src_id) {
+    constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
     const uint8_t op = axi::awuser_collective_op(b.user);
     const uint64_t addr_mask = axi::awuser_collective_mask(b.user);
 
@@ -310,6 +342,24 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
                "coordinate ranges -- a legal unicast target, not a collective target");
         std::abort();
     }
+    // Only a tile may ISSUE a collective. Both trees are built out of the
+    // issuer's own coordinates -- the fork spreads X along its row and the join
+    // collects Y in its column (route_mask.hpp, the cfg.y == src.y and
+    // cfg.x == dst.x gates) -- and routers exist only at tile coordinates, so
+    // an off-region issuer has no router that recognises its row or its column.
+    // An x-border issuer forks, then no router lists a cross-row replica as an
+    // expected input and the CollectB never completes; a y-border issuer never
+    // forks at all and the replicas are dropped. Refuse rather than hang.
+    const unsigned src_x = src_id & kXFieldMask;
+    const unsigned src_y = src_id >> ni::width::X_WIDTH;
+    if (src_x < coords->x_first || src_x > coords->x_last || src_y < coords->y_first ||
+        src_y > coords->y_last) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: a collective issued from outside the tile "
+               "region -- the fork spreads along the issuer's row and the join collects in its "
+               "column, and no router sits outside the region to do either");
+        std::abort();
+    }
 
     // Spec §6: the mask is confined to the node-index field. A bit below it
     // wildcards an address bit inside one region, so the named addresses stop
@@ -327,18 +377,48 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     const unsigned mask_y = static_cast<unsigned>(addr_mask >> coords->y_range.offset) &
                             ((1u << coords->y_range.len) - 1);
 
-    // Bound the HIGHEST member of the wildcard set, anchor | mask, PER
-    // COORDINATE: the set is [anchor & ~mask, anchor | mask], dst_id is
-    // (y << X_WIDTH) | x, and a dimension need not be a power of two. With
-    // x_count = 3, anchor x = 1 and mask_x = 0x2 names {1, 3} -- the mask alone
-    // is in range and node 3 does not exist.
-    constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
+    // The raw wildcard set is [anchor & ~mask, anchor | mask] PER COORDINATE:
+    // dst_id is (y << X_WIDTH) | x, and a dimension need not be a power of
+    // two, so the set may reach a coordinate that names no tile (a peripheral,
+    // or padding above a non-power-of-two dimension).
     const unsigned anchor_x = anchor->dst_id & kXFieldMask;
     const unsigned anchor_y = anchor->dst_id >> ni::width::X_WIDTH;
-    if ((anchor_x | mask_x) >= coords->x_count || (anchor_y | mask_y) >= coords->y_count) {
+    // Clip to the tile region exactly as route_mask.hpp does, so the source and
+    // every router agree on the member set. A set that is empty after clipping
+    // names no tile at all and is a stimulus error.
+    //
+    // Hand-kept twins of this arithmetic: route_mask_fork and route_mask_join
+    // (router/route_mask.hpp, deliberately two copies because a stateless join
+    // hangs on a one-node disagreement) and collective_addr_mask in
+    // sim/tools/gen_test_patterns.py. Not shared: the router pair sits the far
+    // side of the nmu/router layer boundary and the generator's is Python.
+    // Change one, change all four.
+    const unsigned clip_min_x = std::max(anchor_x & ~mask_x, coords->x_first);
+    const unsigned clip_max_x = std::min(anchor_x | mask_x, coords->x_last);
+    const unsigned clip_min_y = std::max(anchor_y & ~mask_y, coords->y_first);
+    const unsigned clip_max_y = std::min(anchor_y | mask_y, coords->y_last);
+    if (clip_min_x > clip_max_x || clip_min_y > clip_max_y) {
         assert(false &&
-               "nmu::addr_trans::collective_translate: collective destination set names a node "
-               "outside the mesh");
+               "nmu::addr_trans::collective_translate: collective destination set is empty "
+               "after clipping to the tile region");
+        std::abort();
+    }
+    // Clamping a bound is not the same as clipping the set: the range
+    // [clip_min, clip_max] can include a coordinate the wildcard never named
+    // (e.g. anchor_x=1, mask_x=0x2 names {1, 3}; clamping x_last=2 down from 3
+    // gives clip_max_x=2, which is not a member). A terminal router's fork set
+    // would then be empty at that coordinate and abort (route_mask.hpp uses
+    // coord_matched, not a range test), so this must reject here instead.
+    // Checking only the two clipped bounds is sufficient: any non-member
+    // strictly between them still has a member neighbour to forward from/to,
+    // so only an endpoint that got clamped away from the raw min/max can ever
+    // be a non-member.
+    if (((clip_min_x ^ anchor_x) & ~mask_x) || ((clip_max_x ^ anchor_x) & ~mask_x) ||
+        ((clip_min_y ^ anchor_y) & ~mask_y) || ((clip_max_y ^ anchor_y) & ~mask_y)) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: a clipped tile-region bound is not a "
+               "member of the wildcard set -- the source and a terminal router would disagree "
+               "on the collective member set");
         std::abort();
     }
 
@@ -360,6 +440,55 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b) {
     static_assert(ni::width::X_WIDTH + ni::width::Y_WIDTH <= 8,
                   "node id / collective_mask no longer fit uint8_t");
     return static_cast<uint8_t>((mask_y << ni::width::X_WIDTH) | mask_x);
+}
+
+// Reject a request the fabric cannot deliver, called from Packetize for every
+// AW and AR (collective or not) once the destination is known.
+//
+// XY routing resolves X before Y (router::route_compute), so a node outside the
+// tile region on the x axis -- a peripheral on a border router's WEST or EAST
+// port -- is reached by running out of x hops, which happens on whichever row
+// the flit started from. That constrains BOTH directions of a transaction, one
+// rule read twice:
+//   request  -- an off-region destination is reached from its own row only.
+//   response -- a response's destination is the request's source (nsu's
+//               Packetize::build_b_flit stamps dst_id from the buffered
+//               src_id) and it takes the same route_compute, so an off-region
+//               SOURCE is answered on its own row only.
+// The flit that misses leaves the region one row early and lands in whichever
+// peripheral borders that row; that peripheral's NSU rebases the address to its
+// own tile and answers it, so nothing downstream can tell.
+//
+// The y axis is not row-sensitive either way: a node outside the region on y is
+// reached after x has already resolved, from any column.
+//
+// Same permanent-illegal-input shape as collective_translate above: a rejected
+// request never becomes legal on retry, so it fails loud instead of returning.
+inline void check_dst_reachable(const SpaceCoords* coords, uint8_t src_id, uint8_t dst_id) {
+    // A space that declares no coordinate ranges states no tile region. The
+    // tables that skip the declaration are the uniform fixtures, whose every
+    // coordinate is a tile, so neither endpoint can be outside one.
+    if (coords == nullptr) return;
+    constexpr unsigned kXFieldMask = (1u << ni::width::X_WIDTH) - 1;
+    const unsigned dst_x = dst_id & kXFieldMask;
+    const unsigned dst_y = dst_id >> ni::width::X_WIDTH;
+    const unsigned src_x = src_id & kXFieldMask;
+    const unsigned src_y = src_id >> ni::width::X_WIDTH;
+    if (dst_y == src_y) return;
+    const bool dst_off = dst_x < coords->x_first || dst_x > coords->x_last;
+    const bool src_off = src_x < coords->x_first || src_x > coords->x_last;
+    if (!dst_off && !src_off) return;
+    const unsigned off_x = dst_off ? dst_x : src_x;
+    const unsigned off_y = dst_off ? dst_y : src_y;
+    std::fprintf(stderr,
+                 "nmu::addr_trans::check_dst_reachable: node (%u,%u) addressed (%u,%u); (%u,%u) "
+                 "sits outside the tile region [%u,%u] on x, so it exchanges requests and "
+                 "responses with row %u only -- both directions run out of x hops on the row "
+                 "they started from. Put both endpoints on row %u.\n",
+                 src_x, src_y, dst_x, dst_y, off_x, off_y, coords->x_first, coords->x_last, off_y,
+                 off_y);
+    assert(false && "check_dst_reachable: off-mesh node paired with a node on another row");
+    std::abort();  // belt-and-braces for NDEBUG
 }
 
 }  // namespace ni::cmodel::nmu::addr_trans

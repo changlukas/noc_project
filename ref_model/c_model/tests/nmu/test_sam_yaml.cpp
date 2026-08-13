@@ -2,6 +2,7 @@
 #include "axi/types.hpp"
 #include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
+#include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -12,7 +13,10 @@ using ni::cmodel::nmu::addr_trans::collective_translate;
 using ni::cmodel::nmu::addr_trans::load_sam_table;
 namespace axi = ni::cmodel::axi;
 
-TEST(SamYaml, PackedTilesAccumulateBases) {
+TEST(SamYaml, PackedTilesBaseFromCoordinateAndSlot) {
+    // x_dim = 2 -> x_bits = 1, slot = largest declared size = 0x2000.
+    // base(1,0) = ((0<<1)|1) * 0x2000 -- the coordinate times the slot, not
+    // list-order accumulation.
     auto path = ni::cmodel::testing::unique_temp_path("sam_packed.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
@@ -24,7 +28,7 @@ TEST(SamYaml, PackedTilesAccumulateBases) {
     auto sam = load_sam_table(path);
     ASSERT_EQ(sam.entries().size(), 4u);
     EXPECT_EQ(sam.entries()[0].base, 0x0ull);
-    EXPECT_EQ(sam.entries()[1].base, 0x1000ull);  // base(1) = base(0) + size(0)
+    EXPECT_EQ(sam.entries()[1].base, 0x2000ull);
 }
 
 TEST(SamYaml, TranslateForwardsTheAddressFromAPackedMap) {
@@ -86,11 +90,20 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
 
 // Guards the real topology configs. TOPOLOGY_DIR is sim/topologies/ itself
 // (CMakeLists.txt), globbed rather than listed, so a new topology YAML cannot
-// fall out of coverage. Same files and same shape as the Python twin
-// (test_address_map_pack_real_topologies_gap_free in
-// sim/tools/test_gen_test_patterns_filemaster.py) -- if both pass, the C++ and
-// Python packing agree on every real topology YAML.
-TEST(SamYaml, RealTopologiesGapFreePacked) {
+// fall out of coverage.
+//
+// The claim is the packing formula, base = space_base + ((y << clog2(x_span))
+// | x) * slot, spelled out here from the YAML keys instead of read back from
+// SamTable::packed(). This is one half of the bit-identity with
+// sim/tools/address_map.py that the model and the stimulus generator both
+// depend on: this test holds SamTable::packed() to the formula, and the Python
+// twin (test_address_map_pack_real_topologies_at_the_coordinate_formula in
+// sim/tools/test_gen_test_patterns_filemaster.py) holds pack() to it over the
+// same files. Both passing is what makes the two sides identical. List-order
+// accumulation (base += size) agrees with the formula only where the span is a
+// power of two and every entry in a space is one slot, which is true of every
+// topology shipped today and not of a span with a border coordinate.
+TEST(SamYaml, RealTopologiesPackedAtTheCoordinateFormula) {
     std::vector<std::string> files;
     for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
         if (entry.path().extension() == ".yaml") files.push_back(entry.path().string());
@@ -103,14 +116,144 @@ TEST(SamYaml, RealTopologiesGapFreePacked) {
     ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
     for (const auto& file : files) {
         SCOPED_TRACE(file);
+        YAML::Node root = YAML::LoadFile(file);
+        YAML::Node topo = root["topology"];
+        const unsigned x_span =
+            topo["x_span"] ? topo["x_span"].as<unsigned>() : topo["x_dim"].as<unsigned>();
+        const unsigned y_span =
+            topo["y_span"] ? topo["y_span"].as<unsigned>() : topo["y_dim"].as<unsigned>();
+        // Slot per space: the largest size declared in it.
+        uint64_t memory_slot = 0;
+        uint64_t config_slot = 0;
+        for (const auto& tile : root["address_map"]["tiles"]) {
+            const bool is_config = tile["space"] && tile["space"].as<std::string>() == "config";
+            uint64_t& slot = is_config ? config_slot : memory_slot;
+            slot = std::max(slot, tile["size"].as<uint64_t>());
+        }
+        const unsigned x_bits = ni::cmodel::address_map::clog2(x_span);
+        // Config sits above every base memory could take.
+        const uint64_t config_base = (uint64_t{1} << x_bits) * y_span * memory_slot;
+
         auto sam = load_sam_table(file);
         ASSERT_FALSE(sam.entries().empty());
-        uint64_t expected_base = 0;
         for (const auto& e : sam.entries()) {
-            EXPECT_EQ(e.base, expected_base);
-            expected_base += e.size;
+            const unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
+            const unsigned y = e.dst_id >> ni::width::X_WIDTH;
+            const bool is_config = e.cls == axi::AxiClass::Narrow;
+            const uint64_t expected =
+                (is_config ? config_base : 0) +
+                ((uint64_t{(y << x_bits) | x}) * (is_config ? config_slot : memory_slot));
+            EXPECT_EQ(e.base, expected) << "dst_id " << std::hex << unsigned{e.dst_id};
         }
     }
+}
+
+// A route span wider than the router array, with the tile region naming which
+// coordinates are tiles: the design's worked example, x = 0 a peripheral column
+// on both rows. x_span = 3 gives x_bits = clog2(3) = 2, so a row strides four
+// slots and row 1 starts at 0x400000 -- 3 * 0x100000, which a 2-wide span would
+// give, is what this guards against.
+TEST(SamYaml, StatedSpanPacksOverTheSpanAndKeepsTheTileRegion) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_span_region.yaml");
+    std::ofstream(path) << "topology:\n"
+                           "  name: t\n"
+                           "  x_dim: 2\n"
+                           "  y_dim: 2\n"
+                           "  num_vc: 1\n"
+                           "  x_span: 3\n"
+                           "  tile_x_first: 1\n"
+                           "  tile_x_last: 2\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x100000 }\n"
+                           "    - { x: 1, y: 0, size: 0x100000 }\n"
+                           "    - { x: 2, y: 0, size: 0x100000 }\n"
+                           "    - { x: 0, y: 1, size: 0x100000 }\n"
+                           "    - { x: 1, y: 1, size: 0x100000 }\n"
+                           "    - { x: 2, y: 1, size: 0x100000 }\n";
+    auto sam = load_sam_table(path);
+    ASSERT_EQ(sam.entries().size(), 6u);
+    const uint64_t expected[] = {0x000000ull, 0x100000ull, 0x200000ull,
+                                 0x400000ull, 0x500000ull, 0x600000ull};
+    for (std::size_t i = 0; i < sam.entries().size(); ++i) {
+        EXPECT_EQ(sam.entries()[i].base, expected[i]) << "entry " << i;
+    }
+    // The peripheral column is inside the span but outside the tile region, so
+    // it is an addressable node and not a collective member.
+    const auto* memory = sam.collective_coords(axi::AxiClass::Data);
+    ASSERT_NE(memory, nullptr);
+    EXPECT_EQ(memory->x_count, 3u);
+    EXPECT_EQ(memory->x_first, 1u);
+    EXPECT_EQ(memory->x_last, 2u);
+    EXPECT_EQ(memory->y_first, 0u);
+    EXPECT_EQ(memory->y_last, 1u);
+}
+
+// A wider span with no stated tile region defaults the region to the whole
+// span (x = 0..2), which must still have extent == x_dim -- otherwise the
+// region silently covers the peripheral column and disarms
+// check_dst_reachable's cross-row guard by omission instead of by a rejected
+// declaration. Symmetric on y.
+TEST(SamYamlDeath, TileRegionExtentMustEqualTheRouterArray) {
+    auto path_x = ni::cmodel::testing::unique_temp_path("sam_region_extent_x.yaml");
+    std::ofstream(path_x) << "topology:\n"
+                             "  name: t\n"
+                             "  x_dim: 2\n"
+                             "  y_dim: 2\n"
+                             "  num_vc: 1\n"
+                             "  x_span: 3\n"
+                             "address_map:\n"
+                             "  tiles:\n"
+                             "    - { x: 0, y: 0, size: 0x100000 }\n"
+                             "    - { x: 1, y: 0, size: 0x100000 }\n"
+                             "    - { x: 2, y: 0, size: 0x100000 }\n"
+                             "    - { x: 0, y: 1, size: 0x100000 }\n"
+                             "    - { x: 1, y: 1, size: 0x100000 }\n"
+                             "    - { x: 2, y: 1, size: 0x100000 }\n";
+    EXPECT_DEATH(load_sam_table(path_x), "tile x region extent");
+
+    auto path_y = ni::cmodel::testing::unique_temp_path("sam_region_extent_y.yaml");
+    std::ofstream(path_y) << "topology:\n"
+                             "  name: t\n"
+                             "  x_dim: 2\n"
+                             "  y_dim: 2\n"
+                             "  num_vc: 1\n"
+                             "  y_span: 3\n"
+                             "address_map:\n"
+                             "  tiles:\n"
+                             "    - { x: 0, y: 0, size: 0x100000 }\n"
+                             "    - { x: 1, y: 0, size: 0x100000 }\n"
+                             "    - { x: 0, y: 1, size: 0x100000 }\n"
+                             "    - { x: 1, y: 1, size: 0x100000 }\n"
+                             "    - { x: 0, y: 2, size: 0x100000 }\n"
+                             "    - { x: 1, y: 2, size: 0x100000 }\n";
+    EXPECT_DEATH(load_sam_table(path_y), "tile y region extent");
+}
+
+// A stated tile region is what arms check_dst_reachable, and the guard reads
+// the same declaration collective eligibility does -- so a declaration the
+// entries reject would take the guard down with it, silently. Same topology as
+// above with a 0x3000 window: the stride is no longer a power of two, so no
+// coordinate field can be read off the map and the declaration is refused.
+TEST(SamYamlDeath, AStatedTileRegionWhoseDeclarationIsRejected) {
+    auto path = ni::cmodel::testing::unique_temp_path("sam_region_undeclarable.yaml");
+    std::ofstream(path) << "topology:\n"
+                           "  name: t\n"
+                           "  x_dim: 2\n"
+                           "  y_dim: 2\n"
+                           "  num_vc: 1\n"
+                           "  x_span: 3\n"
+                           "  tile_x_first: 1\n"
+                           "  tile_x_last: 2\n"
+                           "address_map:\n"
+                           "  tiles:\n"
+                           "    - { x: 0, y: 0, size: 0x3000 }\n"
+                           "    - { x: 1, y: 0, size: 0x3000 }\n"
+                           "    - { x: 2, y: 0, size: 0x3000 }\n"
+                           "    - { x: 0, y: 1, size: 0x3000 }\n"
+                           "    - { x: 1, y: 1, size: 0x3000 }\n"
+                           "    - { x: 2, y: 1, size: 0x3000 }\n";
+    EXPECT_DEATH(load_sam_table(path), "a stated tile region needs every address space");
 }
 
 // SAM class selection from the topology YAML's tile.space attribute
@@ -192,11 +335,44 @@ uint8_t enumerated_node_mask(const ni::cmodel::nmu::addr_trans::SamTable& sam, u
     return node_mask;
 }
 
+// How many (anchor, mask) pairs on ONE axis have their wildcard box inside
+// [first, last], which is what the walk below filters on. Counted from the BOX
+// side rather than by re-testing each (anchor, mask): one box per (mask, fixed
+// bits) pair, holding the 2^popcount(mask) anchors that differ only in masked
+// bits. A second expression of the same set, so an edit to the walk's own
+// filter moves one side and not the other.
+//
+// `count` is the span, which need not be 2^len: a peripheral topology's span is
+// as wide as its coordinates reach, so the anchors above it are not walked.
+unsigned axis_pairs_inside_region(unsigned count, unsigned len, unsigned first, unsigned last) {
+    unsigned n = 0;
+    for (unsigned m = 0; m < (1u << len); ++m) {
+        for (unsigned f = 0; f < (1u << len); ++f) {
+            if (f & m) continue;                        // f holds the box's FIXED bits
+            if (f < first || (f | m) > last) continue;  // box leaves the region
+            for (unsigned s = m;; s = (s - 1) & m) {    // the box's own members
+                if ((f | s) < count) ++n;
+                if (s == 0) break;
+            }
+        }
+    }
+    return n;
+}
+
 // B1/B2 differential: the node mask collective_translate reads off the declared
 // ranges must equal the one the enumeration above walks out of the SAM.
 // Exhaustive over every shipped topology, both spaces, every anchor node and
 // every legal mask shape -- at most 2^(x_bits + y_bits) masks per space. This
 // is the equivalence evidence for B2 replacing the enumeration in the datapath.
+//
+// Walks only the (anchor, mask) pairs whose raw wildcard closure already lies
+// inside the tile region, which is where clipping is a no-op. The subject here
+// is the slice against the enumeration, not the clip: on a span carrying a
+// peripheral, collective_translate deliberately refuses a mask whose clipped
+// bound is not a member (addr_trans.hpp:391-398), so asserting every pair over
+// the whole span is legal would assert against that guard. On every topology
+// whose tile region IS the span nothing is filtered and the coverage is the
+// same set of pairs as before.
 TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
     std::vector<std::string> files;
     for (const auto& entry : std::filesystem::directory_iterator(TOPOLOGY_DIR)) {
@@ -206,6 +382,7 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
     ASSERT_FALSE(files.empty()) << "expected the real topology YAMLs in " TOPOLOGY_DIR;
 
     unsigned compared = 0;
+    unsigned expected = 0;
     for (const auto& file : files) {
         SCOPED_TRACE(file);
         auto sam = load_sam_table(file);
@@ -219,6 +396,7 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                     break;
                 }
             }
+            unsigned compared_here = 0;
             for (unsigned ay = 0; ay < c->y_count; ++ay) {
                 for (unsigned ax = 0; ax < c->x_count; ++ax) {
                     const uint64_t anchor = origin | (uint64_t{ax} << c->x_range.offset) |
@@ -226,6 +404,12 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                     for (unsigned my = 0; my < (1u << c->y_range.len); ++my) {
                         for (unsigned mx = 0; mx < (1u << c->x_range.len); ++mx) {
                             if (mx == 0 && my == 0) continue;  // empty set: rejected, not compared
+                            // Closure inside the tile region, so the clip below
+                            // is a no-op and the mask is legal by construction.
+                            // The closure is a wildcard box, so its per-axis
+                            // extremes bound every member.
+                            if ((ax & ~mx) < c->x_first || (ax | mx) > c->x_last) continue;
+                            if ((ay & ~my) < c->y_first || (ay | my) > c->y_last) continue;
                             const uint64_t addr_mask = (uint64_t{mx} << c->x_range.offset) |
                                                        (uint64_t{my} << c->y_range.offset);
                             axi::AwBeat b{};
@@ -241,19 +425,43 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
                                       static_cast<uint8_t>((my << ni::width::X_WIDTH) | mx))
                                 << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
-                            EXPECT_EQ(collective_translate(sam, b), enumerated)
+                            // The issuer must be a tile, and every anchor that
+                            // survives the closure filter above is one: a
+                            // closure containing the anchor cannot lie inside
+                            // the tile region unless the anchor does.
+                            const uint8_t issuer =
+                                static_cast<uint8_t>((ay << ni::width::X_WIDTH) | ax);
+                            EXPECT_EQ(collective_translate(sam, b, issuer), enumerated)
                                 << "anchor (" << ax << "," << ay << ") mask 0x" << std::hex
                                 << addr_mask;
                             ++compared;
+                            ++compared_here;
                         }
                     }
                 }
             }
+            // Exact count, derived from THIS space's own coordinates rather
+            // than hard-coded, so a new topology adds coverage instead of
+            // reading as a regression. The two axes filter independently, so
+            // the surviving pairs are their product, less the mask-0 corner the
+            // walk skips: that is one pair per (anchor_x, anchor_y) inside the
+            // region. Where the region IS the span this reduces to the old
+            // constant, x_count * y_count * (2^(xlen+ylen) - 1) -- 240 for a
+            // 4x4, 12 for a 2x2. The 3-wide peripheral span gives 4: no x mask
+            // keeps its closure inside a 2-wide tile region, so only the y mask
+            // survives, over 4 anchors.
+            // Catches a coverage collapse, which is what the per-pair
+            // ASSERT_EQ above cannot see -- it only guards the pairs walked.
+            const unsigned expected_here =
+                axis_pairs_inside_region(c->x_count, c->x_range.len, c->x_first, c->x_last) *
+                    axis_pairs_inside_region(c->y_count, c->y_range.len, c->y_first, c->y_last) -
+                (c->x_last - c->x_first + 1) * (c->y_last - c->y_first + 1);
+            EXPECT_EQ(compared_here, expected_here);
+            expected += expected_here;
         }
     }
-    // 5 topologies x 2 spaces: 2x2 gives 4 anchors x 3 masks, each 4x4 gives
-    // 16 x 15. Guards against the loops silently collapsing to nothing.
-    EXPECT_EQ(compared, 2u * (4u * 3u + 4u * 16u * 15u));
+    EXPECT_EQ(compared, expected);
+    EXPECT_GT(compared, 0u) << "the topology directory produced no legal collective at all";
 }
 
 TEST(SamYaml, UnknownSpaceRejected) {

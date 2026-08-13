@@ -14,6 +14,7 @@ invalidate a row.
 | The router's VA divergence assert sits behind the credit gate | a zero-credit diverging `fixed_vc = 0` worm idles silently instead of tripping the checker, a liveness gap rather than a wrong answer | `router/router.hpp`, VA stage |
 | `SamTable::translate` asserts on a lookup miss, so a release build null-derefs instead of throwing | only under `NDEBUG`; every shipped test build keeps asserts on | `nmu/addr_trans.hpp`, `SamTable::translate` |
 | `docs/noc-target-spec.md` derives DAT deadlock freedom from read data landing in reorder-buffer space reserved at request issue, and a bypassed read reserves no slot, so the argument does not cover it. This predates the 3 b id round; what that round changed is the count. Removing the shared outstanding pool takes the `RobMode::Enabled` read bound from 32 to 256, worst case all 256 unreserved -- 8 ids each running a 32-deep same-destination bypass streak allocates no RoB slot at all. `RobMode::Disabled`, the shipped default, moves the other way: `min(pool 32, per-id 256)` = 32 becomes 1 x 8 = 8 through the per-id single-outstanding interlock | only in a `RobMode::Enabled` build, and nothing constructs one: no topology YAML or generated fabric names it, `gen_tb_top.py` selects it from a topology name ending `_rob`, and the only user is the manual `sim-injection-sweep` target. Measuring it needs a consumer that backpressures R, which this testbench has not got: pulp's `axi_file_master` never stalls its R channel -- `wait_r` is a resident forked task that consumes a beat whenever `r_outst` is non-empty (`sim/dv/axi-0.39.7/src/axi_test.sv:2577-2586`) -- so the NMU always sinks R and the dependency cycle cannot form. A clean run on it shows occupancy and congestion and says nothing about deadlock freedom | `nmu/rob.hpp`, the `ordering_req = 0` branches of `push_ar`; `sim/tools/gen_tb_top.py`, `rob_enabled` |
+| A peripheral cannot issue a collective. The fork spreads along the issuer's row and the join collects in the issuer's column, and routers exist only at tile coordinates, so an x-border issuer's `CollectB` never completes and a y-border issuer's replicas are never forked | any collective anchored anywhere but issued by a peripheral. Refused at `collective_translate`; a peripheral remains a legal collective *anchor*, which is the memory-controller-to-every-tile case | `nmu/addr_trans.hpp`, `collective_translate`; `router/route_mask.hpp` |
 | `address_map.decode: offset` is validated, not implemented: the loader checks the map would be legal under one global coordinate range pair, then every lookup still range-matches the SAM | never at the AXI boundary, since on a map meeting spec 5.1 both modes reach the same node at the same node-local offset. It bites at RTL handover, where the two are different hardware: 2N range compares against one bit slice | `nmu/sam_yaml.hpp`, `check_decode_mode` |
 
 ## Performance cost
@@ -26,6 +27,7 @@ up to 256 lookups, not 256 x O(entries).
 
 | Untested | Why it is not reachable today |
 |---|---|
+| Over-delivery of a collective replica to a non-member node | neither scoreboard can see it: both compare only bytes the SOURCE reads -- `mcast_mem` walks the source's own readback set and the pulp scoreboard sits on `master_dv` -- so a replica landing where nothing reads is silent. The direct evidence is the peripheral link's flit count in `perf.json` and the armed tie-off `$fatal` on the unpopulated boundary ports, not the checkers (`sim/tb/user_node_endpoint.sv`, `sim/tools/gen_tb_top.py`) |
 | Multi-hot to multi-hot fork completion across a link, and fork/join at `output_fifo_depth > 0` | no stimulus generates either shape |
 | The held-join wait-for edge | probabilistic co-sim coverage only, never targeted |
 | Narrow-class collectives under a deliberate fault | no narrow-class red run exists |
@@ -91,11 +93,6 @@ rather than building the working tree, and a `cmake --build` aimed straight at t
 directory silently compiles the mirror instead. A pass count is evidence only once the mirror has
 been re-synced. The unbounded `-j` that used to take the host down mid-build is fixed; see the
 compiler-error row above.
-
-`SamTable::packed()` derives each base by accumulating sizes in list order, so an unmapped index
-cannot be expressed. A mesh dimension that is not a power of two therefore cannot carry the
-surplus padding `docs/noc-target-spec.md` §5.1 requires, and no such space can be a collective
-target. Every shipped topology is 2x2 or 4x4, so nothing is affected today.
 
 A tile interconnect decodes addresses and nothing else, so it cannot tell a collective write from
 a unicast. A collective anchored at the issuing node's own region therefore looks local, and the

@@ -19,6 +19,13 @@ struct RouterConfig {
     uint8_t y = 0;
     uint8_t mesh_x_dim = NOC_MESH_X_DIM;
     uint8_t mesh_y_dim = NOC_MESH_Y_DIM;
+    // Inclusive tile-region bounds inside the route span. mesh_*_dim is the
+    // span and bounds the range check; these bound collectives. Defaults make
+    // a plain mesh, where the two coincide.
+    uint8_t tile_x_first = 0;
+    uint8_t tile_x_last = static_cast<uint8_t>(NOC_MESH_X_DIM - 1);
+    uint8_t tile_y_first = 0;
+    uint8_t tile_y_last = static_cast<uint8_t>(NOC_MESH_Y_DIM - 1);
     uint8_t num_vc = NOC_DAT_NUM_VC;
     std::size_t vc_depth = NOC_ROUTER_VC_DEPTH;
     std::size_t output_fifo_depth = NOC_ROUTER_OUTPUT_FIFO_DEPTH;

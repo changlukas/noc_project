@@ -50,8 +50,21 @@ namespace ni::cmodel::wrap {
 
 class RouterWrap {
   public:
+    // Plain mesh: the tile region is the whole span. Stated as an overload
+    // rather than a default argument because the region follows mesh_x_dim /
+    // mesh_y_dim, which a default argument cannot read.
     void init(uint8_t x_coord, uint8_t y_coord = 0, uint8_t mesh_x_dim = 2, uint8_t mesh_y_dim = 1,
               uint8_t dat_num_vc = 1) {
+        init(x_coord, y_coord, mesh_x_dim, mesh_y_dim, dat_num_vc, 0,
+             static_cast<uint8_t>(mesh_x_dim - 1), 0, static_cast<uint8_t>(mesh_y_dim - 1));
+    }
+
+    // tile_*: inclusive tile-region bounds inside the route span (mesh_*_dim).
+    // Set on ALL THREE routers: REQ and RSP are SimpleRouter, and a collective
+    // clipped differently on one network than another wedges the transfer.
+    void init(uint8_t x_coord, uint8_t y_coord, uint8_t mesh_x_dim, uint8_t mesh_y_dim,
+              uint8_t dat_num_vc, uint8_t tile_x_first, uint8_t tile_x_last, uint8_t tile_y_first,
+              uint8_t tile_y_last) {
         dat_num_vc_ = dat_num_vc;
 
         router::SimpleRouterConfig sc;
@@ -59,6 +72,10 @@ class RouterWrap {
         sc.y = y_coord;
         sc.mesh_x_dim = mesh_x_dim;
         sc.mesh_y_dim = mesh_y_dim;
+        sc.tile_x_first = tile_x_first;
+        sc.tile_x_last = tile_x_last;
+        sc.tile_y_first = tile_y_first;
+        sc.tile_y_last = tile_y_last;
         sc.num_vc = 1;  // S1 Q2: REQ/RSP are ratified single-VC networks.
         req_router_ = std::make_unique<router::SimpleRouter>(sc);
         rsp_router_ = std::make_unique<router::SimpleRouter>(sc);
@@ -72,6 +89,10 @@ class RouterWrap {
         dc.y = y_coord;
         dc.mesh_x_dim = mesh_x_dim;
         dc.mesh_y_dim = mesh_y_dim;
+        dc.tile_x_first = tile_x_first;
+        dc.tile_x_last = tile_x_last;
+        dc.tile_y_first = tile_y_first;
+        dc.tile_y_last = tile_y_last;
         dc.num_vc = dat_num_vc;
         dc.vc_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_VC_DEPTH);
         dc.output_fifo_depth = static_cast<std::size_t>(::ni::NOC_ROUTER_OUTPUT_FIFO_DEPTH);

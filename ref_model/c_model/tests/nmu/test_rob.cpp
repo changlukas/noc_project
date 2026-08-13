@@ -1566,9 +1566,11 @@ TEST(RobSameDestBypass, MaxTxnsPerIdStillBoundsBypassedEntries) {
 // shape the design's "config read then memory read to the same node" hazard
 // requires: same dst_id, different axi::AxiClass.
 addr_trans::SamTable cross_class_sam() {
-    return addr_trans::SamTable::packed({
-        {0, 0, 0x1000, axi::AxiClass::Narrow},        // [0, 0x1000): config space, dst 0
-        {0, 0, 0x100000000ull, axi::AxiClass::Data},  // [0x1000, ...): memory space, dst 0
+    // Hand-built rather than SamTable::packed(): a single-node table has no
+    // coordinate to derive a base from, so the bases are just stated.
+    return addr_trans::SamTable(std::vector<addr_trans::SamEntry>{
+        {0x0000, 0x1000, 0x00, axi::AxiClass::Narrow},        // [0, 0x1000): config space, dst 0
+        {0x1000, 0x100000000ull, 0x00, axi::AxiClass::Data},  // [0x1000, ...): memory space, dst 0
     });
 }
 constexpr uint64_t kCrossClassNarrowAddr = 0x100;          // dst 0, Narrow
@@ -1740,7 +1742,7 @@ TEST(NmuRob, Enabled_NarrowReadUnalignedAddrReanchorsToCorrectLane) {
     for (unsigned y = 0; y < 16; ++y)
         for (unsigned x = 0; x < 16; ++x)
             tiles.push_back({x, y, 0x100000000ull, axi::AxiClass::Narrow});
-    auto narrow_sam = addr_trans::SamTable::packed(tiles);
+    auto narrow_sam = addr_trans::SamTable::packed(tiles, /*x_span=*/16, /*y_span=*/16);
 
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
