@@ -340,6 +340,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 | G7 | On DAT, the router never pulses more request credits than flits it drained, and never presents a response flit without holding a credit for it. | Credit conservation: per VC, sender credit + in-flight flits = seed (`NOC_ROUTER_VC_DEPTH` = 8). A credit lie downstream of the `VcAllocator` aborts (`VcAllocator::tick`). |
 | G8 | awburst / arburst = 2'b11 never occurs, and header.axi_ch values 4'd10 to 4'd15 never occur. | Reserved encodings. |
 | G9 | DAT_NUM_VC is 1 to 8 and the elaborated `noc_credit_t` width equals DAT_NUM_VC. | Out-of-range DAT_NUM_VC aborts at `VcAllocator` construction, width mismatch is `$fatal` at elaboration (`nmu_wrap.sv`). |
+| G10 | A transaction never pairs a node outside the tile region on x with a node on another row, in either direction. | A node outside the region attaches to one boundary port, so that x is a set of leaves, not a column a flit can travel along. XY resolves x before y, so such a flit runs out of x hops on the row it started from and reaches whichever node borders that row. A response inherits the hazard because its destination is the request's source. Both directions abort (`check_dst_reachable`, from `Packetize::push_aw` / `push_ar`). |
 
 ## 4. Specifications
 
