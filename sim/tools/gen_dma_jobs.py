@@ -112,15 +112,9 @@ def main(argv=None):
     topo = gen_tb_top.load_topology(a.topology)
     x_span, y_span = gen_tb_top._route_span(topo["topology"])[:2]
     bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
+    # The router array only: a peripheral is an endpoint, not a node, so every
+    # job is router to router and XY reaches between any two of them.
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
-    # A peripheral sits outside the tile region and XY routing reaches it from
-    # its own row only (gen_test_patterns.peripheral_reaches), so "the next
-    # node" is not a legal destination rule there.  Refuse rather than emit
-    # stimulus the NMU's reachability check would abort on.
-    if gen_tb_top._peripherals(topo):
-        sys.exit(f"ERROR: topology {a.topology} carries a peripheral; the job emitter's "
-                 f"destination rule (the next node) does not respect XY reachability "
-                 f"from one")
     sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
     emit_jobs(a.out, nodes, bases, sizes, a.jobs_per_node, a.length,
               1 << axi_widths()["id"])

@@ -29,10 +29,18 @@ def test_every_job_addresses_a_real_sam_region(tmp_path):
     g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", "4"])
     _bases, entries = address_map.pack(_topology("mesh_2x2_vc1")["address_map"], 2, 2)
     windows = [(e["base"], e["base"] + e["size"]) for e in entries]
+
+    def _owner(addr):
+        return [e["dst_id"] for e in entries if e["base"] <= addr < e["base"] + e["size"]][0]
+
     for node in range(4):
         for job in _parse_jobs(out / f"node{node}" / "jobs.txt"):
             assert any(lo <= job["src_addr"] < hi for lo, hi in windows)
             assert any(lo <= job["dst_addr"] < hi for lo, hi in windows)
+            # The write has to cross the fabric: the two windows are different
+            # nodes. Without this, both addresses in the emitting node's own
+            # window would pass -- and never leave the tile crossbar.
+            assert _owner(job["src_addr"]) != _owner(job["dst_addr"])
 
 
 def test_jobs_use_more_than_one_axi_id(tmp_path):
