@@ -521,8 +521,10 @@ module user_node_endpoint #(
     // decode, the delayer and this wiring untouched.
     //
     // axi_sim_mem addresses every beat through axi_pkg::beat_addr, so INCR,
-    // FIXED and WRAP all land correctly. UNINITIALIZED_DATA("undefined") gives
-    // X on a never-written address, which the directed run never reads.
+    // FIXED and WRAP all land correctly. A never-written address returns the
+    // associative array's type default, which this simulator renders 0 rather
+    // than X, since axi_sim_mem creates no entry for a byte nothing wrote. The
+    // directed run never reads one either way.
     AXI_BUS #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
         .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
