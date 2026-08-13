@@ -74,23 +74,52 @@ parameters are not free choices.
 are its numbers, read from its testbench, not derived for this fabric, and the plan states what it
 picks and why rather than inheriting them silently.
 
-### The ID interaction that makes the job field matter
+### The ID field
 
 `options_t.axi_id` is per request, and the legalizer drives the AW channel's `id` straight from it
 (`idma_legalizer_rw_axi.sv:339`), so a per-job ID is honoured to the wire. Nothing in iDMA
 allocates or rotates IDs: `NumAxInFlight` sizes internal request FIFOs and is independent of the ID
-value, so a job stream that reuses one ID issues same-ID traffic and leans on downstream ordering
-and backpressure.
+value, so a job stream that reuses one ID issues same-ID traffic and leans on downstream ordering.
 
-Downstream here is an NMU whose shipped `RobMode::Disabled` enforces per-ID single-outstanding. A
-single-ID job stream therefore serialises at the NI regardless of `NumAxInFlight`, which would read
-as a fabric throughput result when it is a stimulus artefact. That is the concrete reason the job
-format gains the field.
+The NMU's per-ID structures are a reorder buffer slot and a meta buffer bucket per ID. A single-ID
+stream reaches one of each, so the field is a coverage requirement: without it the round would
+report that a DMA runs on this fabric while never touching seven eighths of the structures that
+carry its responses.
 
 `sim/tb/dma/dma_node_endpoint.sv` is a new file rather than a mode inside the existing endpoint.
 The existing one is named-dependent on `axi_file_master` in its injection-mode `case`, its
 `run_ar_after_b` sequencing and its `b_total != file_master.num_writes` epilogue, and its
 scoreboard's write-then-read golden model does not hold for a DMA.
+
+## The reorder buffer becomes the default, and that is the interesting part
+
+`RobMode::Disabled` is what ships (`nmu_wrap.hpp:77`, `nmu.hpp:155`), selected the other way only
+by a topology name ending `_rob`. The target spec describes the other one: its response path is
+"packet buffer, reorder buffer, depacketizer" with an 8 KB reorder buffer (§3). So `Enabled`
+becomes the default in this round, and the implementation catches up with the specification.
+
+**That wakes a dormant limitation, and the DMA is what supplies the missing half.**
+`known-limitations.md` records that the target spec derives DAT deadlock freedom from read data
+landing in reorder-buffer space reserved at request issue, while a bypassed read reserves nothing,
+so the argument does not cover it. Its "when it bites" is two conditions, and today neither holds:
+nothing constructs an `Enabled` build, and reaching the cycle needs a consumer that backpressures
+R, which `axi_file_master` is not — its `wait_r` is a resident forked task that consumes a beat
+whenever one is owed, so the NMU always sinks R.
+
+Both conditions hold after this round. The default supplies the first. iDMA supplies the second:
+its read side is gated by the per-lane buffer's ready, which is gated by the write side draining,
+so a congested write path stops it accepting R. The previous round's master-face backpressure work
+closed by saying that forcing the dependency cycle needed a directed hold on `RREADY` while writes
+accumulate, and that its random 15-cycle stall was not it. A DMA does it as a matter of course.
+
+This is not a reason to avoid either change. It is the most valuable thing the round can produce,
+and it is written down here so that a hang in this configuration is read as the known gap in the
+deadlock argument rather than as a DMA integration fault.
+
+**The two changes are staged rather than simultaneous.** The default flips first and the six
+existing gates are re-baselined against it; only then does the DMA arrive. One round and one
+re-baseline of the new gate either way, but a failure after the second step has one new variable
+rather than two. Whichever step turns a gate red, the other step is not a suspect.
 
 ## Jobs
 
@@ -152,6 +181,8 @@ discovering them.
 |---|---|
 | Backdoor reach | the comparison reads two nodes' `axi_sim_mem` arrays from one place. Whether the testbench hierarchy exposes both, and from where, is not established here |
 | Retirement versus in flight | comparing after a DMA retires a job assumes nothing of that job is still moving. iDMA reports on its own response channel, which is upstream of the NI's response path and of the memory's write acceptance, so the plan states what it waits on beyond `rsp_valid` |
+| What the flip moves | the six gates run `Disabled` today. Which of their reported numbers are expected to move under `Enabled`, and by roughly how much, is not derived here. The plan records the before and after rather than re-baselining silently |
+| ctest under the flip | `nmu.hpp:155` is a struct default, so every C++ test that does not set the mode inherits it. How many change behaviour is not counted here |
 | `BufferDepth`, `TFLenWidth`, `MemSysDepth` | free parameters with no derivation yet, see above |
 
 ## Gate
