@@ -8,9 +8,11 @@
 // every checker built on it -- the injection-mode case, the read-after-B
 // interlock, the B-count epilogue, the axi_scoreboard and its multicast golden
 // -- reads that master's own wires and assumes its write-then-read stimulus.
-// A DMA issues what its legalizer decides, so none of those hold. Task 6 adds
-// the checks that do: the memory write monitors leave on mon_w_valid_o /
-// mon_w_last_o and the job counts leave the driver for it.
+// A DMA issues what its legalizer decides, so none of those hold. The check
+// that does is in the generated top: it preloads every source region, waits for
+// every job to retire, and compares each destination region against its source
+// through a backdoor into axi_sim_mem's array. The job counts leave the driver
+// on jobs_issued / jobs_retired for it.
 //
 // The BRESP and RRESP fatals below are NOT among the dropped set: they read the
 // response wires rather than the stimulus, so they hold for any master.
@@ -63,11 +65,6 @@ module dma_node_endpoint #(
     input  ni_signals_pkg::axi_rsp_t   master_axi_rsp_i,
     input  ni_signals_pkg::axi_req_t   slave_axi_req_i,
     output ni_signals_pkg::axi_rsp_t   slave_axi_rsp_o,
-    // Write side of each tile memory's monitor, one bit per target in port
-    // order. A DMA's writes arrive from a REMOTE node, so this is the only
-    // place the payload lands on wires this endpoint can see.
-    output logic [TILE_TARGETS-1:0]    mon_w_valid_o,
-    output logic [TILE_TARGETS-1:0]    mon_w_last_o,
     output logic                       end_of_sim_o,
     output int unsigned                txn_cnt_o
 );
@@ -421,9 +418,9 @@ module dma_node_endpoint #(
         ) i_mem (
             .clk_i(clk_i), .rst_ni(rst_ni),
             .axi_slv(tile_mem[t]),
-            .mon_w_valid_o(mon_w_valid_o[t]), .mon_w_addr_o(), .mon_w_data_o(),
+            .mon_w_valid_o(), .mon_w_addr_o(), .mon_w_data_o(),
             .mon_w_id_o(), .mon_w_user_o(), .mon_w_beat_count_o(),
-            .mon_w_last_o(mon_w_last_o[t]),
+            .mon_w_last_o(),
             .mon_r_valid_o(), .mon_r_addr_o(), .mon_r_data_o(),
             .mon_r_id_o(), .mon_r_user_o(), .mon_r_beat_count_o(), .mon_r_last_o()
         );
@@ -548,10 +545,10 @@ module dma_node_endpoint #(
     // ------------------------------------------------------------------
     // Exit
     // ------------------------------------------------------------------
-    // Nothing here decides when the run is over: what "done" means for a DMA
-    // (every job retired AND every write committed at the destination memory)
-    // is Task 6's, and it is what jobs_issued / jobs_retired and the mon_w_*
-    // ports above are exported for.
+    // Nothing here decides when the run is over. The generated top does: every
+    // DMA has retired every job its file holds and every destination has
+    // answered the write bursts that carry them, read off jobs_issued /
+    // jobs_retired above and the endpoints' own slave-face B handshakes.
     assign end_of_sim_o = 1'b0;
 
     // ------------------------------------------------------------------
