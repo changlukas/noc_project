@@ -52,8 +52,11 @@ def test_burst_bound_is_a_log_length(tmp_path):
     out = tmp_path / "jobs"
     g.main(["--topology", "mesh_2x2_vc1", "--out", str(out)])
     for job in _parse_jobs(out / "node0" / "jobs.txt"):
-        assert job["max_src_len"] <= g._MAX_LOG_LEN_NONE
-        assert job["max_dst_len"] <= g._MAX_LOG_LEN_NONE
+        # Equality, not a range: 0 is inside the field and means reduce_len = 1
+        # with page_addr_width = OffsetWidth, i.e. one-beat bursts -- the exact
+        # regression this pins against.
+        assert job["max_src_len"] == g._MAX_LOG_LEN_NONE
+        assert job["max_dst_len"] == g._MAX_LOG_LEN_NONE
 
 
 def test_jobs_use_more_than_one_axi_id(tmp_path):

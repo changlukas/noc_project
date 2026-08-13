@@ -252,10 +252,24 @@ module dma_node_endpoint #(
     // s0: the DMA's own traffic.
     `AXI_ASSIGN(tile_axi[0], mst_post_delay)
 
+    // Fault injection for the DECERR gate: +decerr_fault=1 sets the top address
+    // bit on this node's inbound AR, which lands outside every window exactly as
+    // a Python/C++ tile-layout divergence would. The crossbar routes it to its
+    // internal axi_err_slv and the RRESP fatal below names it. The write twin,
+    // +decerr_fault_wr=1, is a SEPARATE plusarg: faulting AW and AR together
+    // would rebase a pair to the same wrong window, where nothing disagrees. On
+    // the AW alone the err slave absorbs the W beats and answers BRESP = DECERR.
+    // Without these two the fatals below are checkers nobody has watched fire.
+    localparam logic [ADDR_WIDTH-1:0] DECERR_FAULT_BIT = 1 << (ADDR_WIDTH - 1);
+    bit decerr_fault = 1'b0;
+    bit decerr_fault_wr = 1'b0;
+    initial void'($value$plusargs("decerr_fault=%d", decerr_fault));
+    initial void'($value$plusargs("decerr_fault_wr=%d", decerr_fault_wr));
+
     // s1: requests delivered by the fabric. The NSU has already rewritten the
     // node-coordinate field to this node (nsu::Depacketize::rebase_).
     assign tile_axi[1].aw_id     = slave_axi_req_i.awid;
-    assign tile_axi[1].aw_addr   = slave_axi_req_i.awaddr;
+    assign tile_axi[1].aw_addr   = slave_axi_req_i.awaddr | (decerr_fault_wr ? DECERR_FAULT_BIT : '0);
     assign tile_axi[1].aw_len    = slave_axi_req_i.awlen;
     assign tile_axi[1].aw_size   = slave_axi_req_i.awsize;
     assign tile_axi[1].aw_burst  = slave_axi_req_i.awburst;
@@ -274,7 +288,7 @@ module dma_node_endpoint #(
     assign tile_axi[1].b_ready   = slave_axi_req_i.bready;
     assign tile_axi[1].w_user    = '0;
     assign tile_axi[1].ar_id     = slave_axi_req_i.arid;
-    assign tile_axi[1].ar_addr   = slave_axi_req_i.araddr;
+    assign tile_axi[1].ar_addr   = slave_axi_req_i.araddr | (decerr_fault ? DECERR_FAULT_BIT : '0);
     assign tile_axi[1].ar_len    = slave_axi_req_i.arlen;
     assign tile_axi[1].ar_size   = slave_axi_req_i.arsize;
     assign tile_axi[1].ar_burst  = slave_axi_req_i.arburst;

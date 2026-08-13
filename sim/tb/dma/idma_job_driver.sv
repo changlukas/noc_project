@@ -77,6 +77,12 @@ module idma_job_driver #(
         if (tok.len() < 3 || tok.substr(0, 1) != "0x")
             $fatal(1, "[dma_jobs] node%0d: %s: expected an 0x-prefixed address, got '%s'",
                    NODE_ID, field, tok);
+        // Before accumulating, not after: past 16 digits the top of the token
+        // shifts out of v and the range check below would pass on a value that
+        // was never in range.
+        if (tok.len() > 18)
+            $fatal(1, "[dma_jobs] node%0d: %s: address '%s' is wider than 64 b",
+                   NODE_ID, field, tok);
         for (int i = 2; i < tok.len(); i++) begin
             c = tok.getc(i);
             if (c >= "0" && c <= "9")      d = c - "0";
@@ -104,6 +110,7 @@ module idma_job_driver #(
 
     initial begin
         int fd;
+        int code;
         idma_types_pkg::idma_req_t r;
         int unsigned length, src_protocol, dst_protocol, max_src_len, max_dst_len;
         int unsigned aw_decoupled, rw_decoupled, num_errors, axi_id;
@@ -121,9 +128,16 @@ module idma_job_driver #(
         @(posedge rst_ni);
 
         forever begin
-            // Only the first field of a record may be absent: that is the end of
-            // the file. Every field after it is checked inside the readers.
-            if ($fscanf(fd, "%d", length) != 1) break;
+            // Only the first field of a record may be ABSENT: that is the end of
+            // the file, and $fscanf answers EOF (negative) for it. A field that
+            // is present but unreadable answers 0, which is a corrupt file and
+            // not a shorter run. Every field after this one is checked inside
+            // the readers.
+            code = $fscanf(fd, "%d", length);
+            if (code < 0) break;
+            if (code != 1)
+                $fatal(1, "[dma_jobs] node%0d: length: malformed job file %s",
+                       NODE_ID, jobs_path);
             src_addr     = read_hex(fd, "src_addr");
             dst_addr     = read_hex(fd, "dst_addr");
             src_protocol = read_dec(fd, "src_protocol");
