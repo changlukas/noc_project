@@ -280,7 +280,7 @@ The implementer does not handle any of the following, they are guaranteed not to
 | G8 | Downstream credit is truthful: a VC reported as having credit accepts the push. The model asserts and aborts otherwise. |
 | G9 | Reset is given once, before traffic. No mid-run reset. |
 | G10 | Since W flits carry no id, the fabric wormhole serialization guarantees every W flit follows its AW flit on the same stream. |
-| G11 | Every arriving request came from a node its response can reach. The response's destination is the request's `src_id`, and the NSU does not re-check it: the issuing NMU refuses the unreachable pairing (`nmu-spec.md` G10), so such a request never exists. |
+| G11 | Every arriving request came from a node its response can reach. The response's destination is the request's `src_id`, and the NSU does not re-check it: the issuing NMU refuses the unreachable pairing (`nmu-spec.md` G11), so such a request never exists. |
 
 ## 4. Specifications
 

@@ -211,7 +211,7 @@ Reads have no collective surface: ARUSER is 8 bits, so every AR leaves with `col
 
 **Translate.** A set address-mask bit is a don't-care, so a mask with n set bits names 2^n replica addresses. The SAM is a first-match range lookup with no stored node-index bit offset, so the translate enumerates rather than bit-selects (`addr_trans::collective_translate`):
 
-**INPUT** AWUSER, AWADDR, AWLEN / AWSIZE / AWBURST. **COMPUTE** enumerate all 2^n masked addresses and translate each through the SAM. Every replica must land in a tile, carry the same node-local offset, carry the same class, name a distinct `dst_id`, and pass the burst-footprint check for its own aperture. **OUTPUT** an 8-bit node mask, the OR of each replica's `dst_id` against the anchor's, stamped into the AW header beside `collective_op`. `dst_id` stays the anchor's. The W metadata FIFO latches both fields per AW and stamps every W beat of the burst, so the fabric forks the W beats to the AW's exact branch set.
+**INPUT** AWUSER, AWADDR, AWLEN / AWSIZE / AWBURST. **COMPUTE** enumerate all 2^n masked addresses and translate each through the SAM. Every replica must land in a tile, carry the same node-local offset, carry the same class, name a distinct `dst_id`, and pass the burst-footprint check for its own aperture. **OUTPUT** an 8-bit node mask, the OR of each replica's `dst_id` against the one the request address resolves to, stamped into the AW header beside `collective_op`. `dst_id` stays the one the request address resolves to. The W metadata FIFO latches both fields per AW and stamps every W beat of the burst, so the fabric forks the W beats to the AW's exact branch set.
 
 n is capped at X_WIDTH + Y_WIDTH = 8, so the enumeration is at most 256 SAM lookups. It re-runs on every backpressure retry of the same AW. That is a model-only cost.
 
@@ -224,7 +224,7 @@ n is capped at X_WIDTH + Y_WIDTH = 8, so the enumeration is at most 256 SAM look
 | reserved `collective_op` (2'd2, 2'd3) | undefined encoding |
 | AWLOCK set on a collective | AxLOCK is unicast only |
 | more mask bits set than a node id has | destination set larger than the mesh |
-| an anchor or replica address maps to no tile | the set leaves the mesh |
+| the request address or a replica address maps to no tile | the set leaves the mesh |
 | replicas disagree on the node-local offset | one aligned region per node is what makes the replicas addressable |
 | replicas straddle the narrow and data classes | the class picks the network the worm forks on, and a packet rides one |
 | the mask names one node twice | the set is not a wildcard over `dst_id` |
@@ -237,7 +237,7 @@ n is capped at X_WIDTH + Y_WIDTH = 8, so the enumeration is at most 256 SAM look
 1. An incoming collective is admitted only when the ID's write order list is empty. It then takes the idle-ID bypass: ordering_req = 0, no RoB slot, in both `RobMode` settings.
 2. While the front entry of an ID's order list is collective, nothing for that ID is admitted. Testing the front is enough, because a collective only ever enters an empty list and is therefore the only entry.
 
-Gate 2 is what closes the same-destination bypass: without it a later same-ID AW whose destination equals the collective's anchor would stream past it with no slot and no ordering. The collective still takes one entry of the ID's write order list like any AW, released when its merged `B` retires.
+Gate 2 is what closes the same-destination bypass: without it a later same-ID AW whose destination equals the collective's `dst_id` would stream past it with no slot and no ordering. The collective still takes one entry of the ID's write order list like any AW, released when its merged `B` retires.
 
 **Merged B.** The merged `B` returns through the ordinary B ingress and releases the interlock exactly like a unicast `B`: the NMU stamps ordering_tag before fanout and the fabric's merge preserves it, so the response path needs no collective state. The `B` carries `collective_op` = MULTICAST and the echoed node mask; neither perturbs the `bid` / `bresp` decode.
 
@@ -340,7 +340,8 @@ The implementation does not handle the following, they are guaranteed not to hap
 | G7 | On DAT, the router never pulses more request credits than flits it drained, and never presents a response flit without holding a credit for it. | Credit conservation: per VC, sender credit + in-flight flits = seed (`NOC_ROUTER_VC_DEPTH` = 8). A credit lie downstream of the `VcAllocator` aborts (`VcAllocator::tick`). |
 | G8 | awburst / arburst = 2'b11 never occurs, and header.axi_ch values 4'd10 to 4'd15 never occur. | Reserved encodings. |
 | G9 | DAT_NUM_VC is 1 to 8 and the elaborated `noc_credit_t` width equals DAT_NUM_VC. | Out-of-range DAT_NUM_VC aborts at `VcAllocator` construction, width mismatch is `$fatal` at elaboration (`nmu_wrap.sv`). |
-| G10 | A transaction never pairs a node outside the tile region on x with a node on another row, in either direction. | A node outside the region attaches to one boundary port, so that x is a set of leaves, not a column a flit can travel along. XY resolves x before y, so such a flit runs out of x hops on the row it started from and reaches whichever node borders that row. A response inherits the hazard because its destination is the request's source. Both directions abort (`check_dst_reachable`, from `Packetize::push_aw` / `push_ar`). |
+| G10 | A collective is never issued by a node outside the tile region. | Collectives are a tile-to-tile primitive (`noc-target-spec.md` Scope). A node outside the region is also never a member: the fork and join clip every member set to the tile region. Aborts (`collective_translate`). |
+| G11 | A transaction never pairs a node outside the tile region on x with a node on another row, in either direction. | A node outside the region attaches to one boundary port, so that x is a set of leaves, not a column a flit can travel along. XY resolves x before y, so such a flit runs out of x hops on the row it started from and reaches whichever node borders that row. A response inherits the hazard because its destination is the request's source. Both directions abort (`check_dst_reachable`, from `Packetize::push_aw` / `push_ar`). |
 
 ## 4. Specifications
 

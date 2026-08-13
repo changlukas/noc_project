@@ -33,6 +33,7 @@ does not serve it.
 | Same-ID ordering by reorder buffer in the network interface | CONFIRMED | per-chimney B and R RoBs, `ordering_tag` in header |
 | Credit-based flow control | **Not FlooNoC** | FlooNoC baseline links are valid-ready. Credits existed only in the deprecated VC router. This is an own design decision |
 | GALS, endpoint clocks independent of NoC clock | **Not FlooNoC** | the paper claims one synchronous domain. The repo has an optional link-level CDC module only. Own requirement, own cost |
+| A multicast's merged response retraces the multicast path in reverse (§3) | **REFUTED** | neither this model nor FlooNoC does it. Both aggregate along the union of the XY unicast paths from each member back to the collector, which is a different tree: here `route_mask_join` gates the Y leg on `cfg.x == dst.x`, upstream `floo_route_xymask.sv` at `FwdMode=0` gates it identically, and `floo_route_select.sv` takes the fork mask only for `Multicast`. On a 4x4 the fork holds `(1,0)` north to `(1,1)` where the collect holds `(1,1)` west to `(0,1)`. Spec sentence corrected in r0.2 |
 
 ### Arithmetic
 
@@ -105,6 +106,43 @@ rather than member lists** everywhere, which the spec's mask encoding matches. R
 router is universally described as free, and the design pressure is on **late fork**. **No vendor
 publishes how multicast fork interacts with virtual channels or credit flow control.**
 
+### Endpoints that are not at a grid position
+
+Surveyed when peripherals were attached at mesh-border coordinates. Six structural approaches
+exist, each with a reachable source.
+
+| Approach | Where it is used |
+|---|---|
+| An extra router column outside the array | `bsg_manycore_hor_io_router`, placed one minus the leftmost tile x coordinate and chained north/south |
+| The endpoint is an ordinary grid tile | ESP memory and auxiliary tiles |
+| A designated in-grid gateway plus an ejection-direction field | OpenPiton routes to a real `(XPOS, YPOS)` and uses `FBITS` only at the destination router |
+| Concentration, one router serving several endpoints | FlooNoC `Eject` with `port_id`, gem5 `cntrls_per_router` |
+| A leaf on an edge port carrying a coordinate no router occupies | floogen, and this repo |
+| One endpoint aliased over several coordinates | BaseJump "virtual mesh" |
+
+Memory controllers placed **inside** a fabric sit on grid positions co-located with tiles, never
+off-grid; a diamond or diagonal placement beats an edge row by 33 % (Abts, ISCA 2009).
+
+**The leaf approach is inherited, limitation included.** floogen's `compile_ids()` maps a west
+attachment to `Coord(x=-1, y=0)` and then shifts the whole map so peripherals land at x = 0 and
+routers at x >= 1, after which routers apply plain XY to that coordinate with no special case.
+Upstream names the failure class in its own documentation, that a flit entering from one boundary
+cannot reach another, and its traffic generator only ever exercises the endpoints row-locally, one
+HBM channel per core row. The cross-row case is unexercised upstream rather than solved.
+
+**Neither relaxation is free.** Two were considered and rejected.
+
+| Idea | Status |
+|---|---|
+| Route Y before X when the destination lies outside the grid on x | Not a named technique, and no source analyses a per-destination switch. Its named relatives both need extra channels: O1TURN and CDR, where Abts states XY-YX needs additional virtual channels to break routing deadlock as well as protocol deadlock. The one verified precedent is one-sided, BaseJump allowing south-to-east and south-to-west while forbidding NW and NE, which is a Glass-Ni turn model and adds no channels |
+| Aggregate the response back along the request's own path | Not established in NoC work. The name "reverse path forwarding" belongs to an IP multicast check, not a collect. The closest precedent is Cray US 5721921 FANIN/FANOUT, explicitly reverse-path, reached with a per-router parent-pointer register. FlooNoC argues its collect deadlock freedom locally rather than citing anyone |
+
+Both are also blocked in this model by structure rather than by policy: `SimpleRouter::tie_off`
+deletes every north/south to east/west turn, the `XYRouteOpt` optimization ported from
+`floo_router.sv`, so the crossbar has no path a reversed collect could take; and sharing one
+response virtual channel between XY unicast and a reversed collect closes rectangle cycles, while
+`REQ` and `RSP` are ratified single-VC.
+
 ## 3. Positioning
 
 The combination not found in any single published work: AXI4 **mesh** NoC carrying row/column
@@ -154,3 +192,8 @@ Push Multicast HPCA 2025.
 Cerebras collectives HPDC 2024 [2404.15888](https://arxiv.org/abs/2404.15888).
 Groq ISCA 2022. TPU v4 [2304.01433](https://arxiv.org/abs/2304.01433).
 Tenstorrent tt-metal documentation. Intel US9923730B2.
+Off-grid endpoints: Abts et al., memory controller placement, ISCA 2009. Glass and Ni, the turn
+model for adaptive routing, ISCA 1992. Cray US5721921 FANIN/FANOUT. Repositories
+[bespoke-silicon-group/basejump_stl](https://github.com/bespoke-silicon-group/basejump_stl),
+[PrincetonUniversity/openpiton](https://github.com/PrincetonUniversity/openpiton),
+[sld-columbia/esp](https://github.com/sld-columbia/esp), [gem5](https://github.com/gem5/gem5).

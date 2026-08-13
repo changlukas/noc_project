@@ -50,6 +50,10 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
   fabric provides the primitive
 - Two multicasts whose spanning trees share a node may not be in flight together. Software
   either assigns disjoint trees or waits for the merged `B` before issuing the overlapping one
+- Collectives are issued and received by mesh tiles. A peripheral outside the tile region neither
+  issues one nor appears in a destination set, and reaches the mesh by unicast only
+- A peripheral placed on an x face exchanges unicast traffic with the tiles on its own row. One
+  placed on a y face is reachable from any tile
 - Write path only. Reads and read data are always unicast
 - No arithmetic on payload anywhere in the fabric. Tiles combine partial results, softmax
   statistics included, over ordinary unicast
@@ -59,7 +63,9 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
 ## 3. Architecture
 
 - Each node holds one compute tile and its local memory, so it is both an AXI master and an AXI slave
-- XY routing fixes the path a multicast takes, its merged response retraces that path in reverse
+- XY routing fixes both the path a multicast takes and the path its merged response is aggregated
+  along. The two are different trees: the request spreads from the issuer, the response aggregates
+  along each member's own route back to it
 
 ~~~
                  K, V column-wise multicast
@@ -498,7 +504,7 @@ The `AWUSER` mask is an address mask:
 - A set bit marks the matching `AWADDR` bit as don't care, `n` set bits name `2^n` addresses
 - Set bits are limited to the node-index field of the address, so the named addresses differ
   only in destination node. §5.1 gives the region conditions that put that field in place
-- The node-index field sits at `log2(size)` of the space the anchor falls in, so a space with a
+- The node-index field sits at `log2(size)` of the space the address falls in, so a space with a
   smaller region size holds its field at lower bits. A master must know which space it is
   addressing before it can place the mask bits
 - The NMU translates the address mask into the 8 b flit `collective_mask` at SAM lookup and
