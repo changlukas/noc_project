@@ -42,9 +42,11 @@
 
 ## Stage A: the reorder buffer becomes the default
 
-### Task 1: Flip the default and retire the `_rob` suffix
+### Task 1: Flip the default, and make the mode a parameter instead of a filename
 
-`RobMode::Enabled` is what `docs/noc-target-spec.md` §3 describes. `Disabled` is what ships, selected the other way by a topology name ending `_rob`. After the flip that suffix selects nothing, so it goes: keeping a mechanism whose only value is now the default is the kind of thing this project deletes.
+`RobMode::Enabled` is what `docs/noc-target-spec.md` §3 describes. `Disabled` is what ships, and it is selected by a **topology name ending `_rob`** — the mode is decided by parsing a string. That is the wrong control for it twice over: the topology name is not where a mode belongs, and a reader cannot tell from the tb what it is running.
+
+It becomes a parameter, reaching the generated top the way `INJECTION_MODE` already does, so toggling it is one Make variable and reading it is one line of the emitted SystemVerilog. `cmodel_nmu_create_ex` already takes `rob_enabled` explicitly and is unchanged; what moves is only how `gen_tb_top.py` decides what to pass.
 
 **Files:**
 - Modify: `ref_model/c_model/include/nmu/nmu.hpp:155`
@@ -99,11 +101,15 @@ Expected: FAIL, the value is `Disabled`.
 
 Leave `cmodel_nmu_create_ex` alone. It takes `rob_enabled` explicitly and the generated tb passes it explicitly; that is the path Step 4 changes.
 
-- [ ] **Step 4: Make the generator emit Enabled, and delete the suffix**
+- [ ] **Step 4: Make the mode a parameter**
 
-`gen_tb_top.py:750` currently reads `rob_enabled = requested_name.endswith("_rob")`. Replace it with a constant `True` and a comment naming the spec section, then remove the suffix strip at `:56` and every other site that special-cases the name. Grep `_rob` across `sim/` and `docs/` and deal with each hit: `sim/Makefile`'s help text, `sim/build_config.mk`'s `$(TOPOLOGY:_rob=)`, and any topology name that carries it.
+`gen_tb_top.py:750` currently reads `rob_enabled = requested_name.endswith("_rob")`. The mode becomes an argument to the generator, defaulting to enabled, emitted as a named `localparam` in the tb and passed to `cmodel_nmu_create_ex` from it rather than as a bare literal — so the emitted SystemVerilog says what it is running.
 
-A topology file named `*_rob` is renamed to drop the suffix, and its callers follow. `sim-injection-sweep` in `sim/Makefile` is the only consumer.
+It reaches the generator the way `INJECTION_MODE` does: `sim/Makefile` forwards it when set (`sim/Makefile:65` is the pattern to copy), `sim/build_config.mk` carries it, and the help text at `sim/Makefile:25` gains it beside the other run variables. Default enabled, so a plain `make -C sim TB=... PATTERN=...` runs the mode the spec describes.
+
+Then remove the filename mechanism: the suffix strip at `gen_tb_top.py:56`, `$(TOPOLOGY:_rob=)` in `sim/build_config.mk`, the suffix's mention in `sim/Makefile`'s help, and any topology file whose name carries it, whose callers follow. Grep `_rob` across `sim/` and `docs/` and deal with every hit. `sim-injection-sweep` is the only consumer of the `_rob` topology and it moves to the plain name plus the new variable.
+
+Both halves matter: leaving the filename path in beside the parameter would give the mode two controls that can disagree.
 
 - [ ] **Step 5: Run the full C++ suite**
 
