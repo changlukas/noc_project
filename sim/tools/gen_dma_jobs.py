@@ -33,9 +33,14 @@ axi_id
 ------
 FlooNoC leaves idma_job.id at '0, so every transfer of a run carries one AXI
 id.  The NMU keeps a reorder-buffer slot and a meta-buffer bucket per id, so a
-single-id stream reaches one of each.  The field cycles over the id space
-(2**INITIATOR_ID_WIDTH, the tile crossbar's slave port) so every per-id
-structure is reached.  A coverage requirement, not a performance one.
+single-id stream reaches one of each.  The field walks the id space
+(2**INITIATOR_ID_WIDTH, the tile crossbar's slave port) across the RUN, not
+within a node: a node's ids are seq % 16 over consecutive seq, so at the shipped
+four jobs per node each node emits four ids and no two nodes emit the same one.
+After i_noc_id_remap folds 4 b to 3 b that reaches at most four of an NMU's
+eight write buckets, and none of its read buckets -- a job reads its own window
+and the tile crossbar answers it.  Reaching all eight takes eight jobs per node,
+which is a geometry, not an emission rule.
 """
 
 import argparse

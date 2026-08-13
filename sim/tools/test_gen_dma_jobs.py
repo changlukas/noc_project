@@ -63,8 +63,16 @@ def test_jobs_use_more_than_one_axi_id(tmp_path):
     """FlooNoC leaves idma_job.id at '0, so every transfer uses one ID. This
     NMU keeps a reorder-buffer slot and a meta-buffer bucket per ID, so a
     single-ID stream would report that a DMA runs while touching one of
-    eight."""
+    eight.
+
+    At the SHIPPED geometry -- the one the gate builds, not a larger one --
+    each node emits jobs_per_node distinct IDs and no two nodes share one."""
+    n = gen_tb_top._DMA_JOBS_PER_NODE
     out = tmp_path / "jobs"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", "8"])
-    ids = {job["axi_id"] for job in _parse_jobs(out / "node0" / "jobs.txt")}
-    assert len(ids) > 1
+    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", str(n)])
+    per_node = [{job["axi_id"] for job in _parse_jobs(out / f"node{i}" / "jobs.txt")}
+                for i in range(4)]
+    for ids in per_node:
+        assert len(ids) == n
+    # A node's IDs are its own slice of the space, not the whole of it.
+    assert not (per_node[0] & per_node[1])
