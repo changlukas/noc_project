@@ -1,5 +1,14 @@
 # A standard DMA on the master face
 
+> **Amendment, 2026-08-13, written after the round shipped.** Three statements below did not survive
+> implementation. The body is left as it was decided.
+>
+> | section | what it says | what the round established |
+> |---|---|---|
+> | *The reorder buffer becomes the default* | both DAT deadlock conditions hold after this round, iDMA supplying the second | Neither the cycle nor the second condition is reached. The shipped jobs have each node read its OWN window, which the tile crossbar answers at m0/m1, so no read crosses the fabric and no AR reaches the NMU: a gate run reports `read_txns_hwm=0` on every node. `docs/known-limitations.md` records the gap as open: Stage B does NOT close it, and closing it needs jobs sourced from another node's window, which nothing emits |
+> | *Settled before planning*, the `mon_w_valid_o` / `mon_w_last_o` paragraph | connect them, and let the check wait on the observed event | Removed. Both read 0 at every posedge under Verilator 5.048, counted two ways in an instrumented run. The top gates on job retirement instead, and the write monitor is a recorded limitation |
+> | *Gate* | a standard AXI manager, configured by someone else, moved data across this fabric | Write path only: 16 transfers of 1 KiB, byte-exact against an address-derived preload. Not evidence about the fabric read path, the `RobMode` flip or the address-decode gate |
+
 Put pulp iDMA where the stimulus replayer is, and find out whether a real AXI manager runs on this
 fabric. The traffic change is secondary: `axi_file_master` replays a transaction list this project
 wrote, so every AXI shape the fabric has ever seen is one this project chose. A DMA picks its own

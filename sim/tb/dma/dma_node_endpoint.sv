@@ -390,8 +390,9 @@ module dma_node_endpoint #(
     // axi_sim_mem without touching the decode, the delayer or this wiring.
     //
     // axi_sim_mem addresses every beat through axi_pkg::beat_addr, so INCR,
-    // FIXED and WRAP all land correctly. UNINITIALIZED_DATA("undefined") gives
-    // X on a never-written address.
+    // FIXED and WRAP all land correctly. A byte nothing wrote has no mem[] key
+    // and a backdoor read of it returns the type default, which this simulator
+    // renders 0 and not X (gen_tb_top.py, compare_region).
     AXI_BUS #(
         .AXI_ADDR_WIDTH(ADDR_WIDTH), .AXI_DATA_WIDTH(DATA_WIDTH),
         .AXI_ID_WIDTH(XBAR_MST_ID_W), .AXI_USER_WIDTH(AWUSER_WIDTH)
