@@ -370,6 +370,21 @@ space failing any of them is a legal unicast target and not a collective target.
 A mesh dimension that is not a power of two leaves the field non-contiguous. Pad the row or
 column count up to a power of two; the surplus indices are not nodes and carry no region.
 
+**Peripherals.** A node outside the tile region takes a region in the same space as the tiles,
+which is what makes it a unicast target. Three things follow for the conditions above.
+
+- They are read over the **tile region**, not over the whole space. A peripheral's region may
+  differ in size and alignment without costing the space its collective eligibility, because a
+  peripheral is never a collective member
+- A mask names an aligned set over the whole coordinate field, and that set is then **clipped to
+  the tile region**: a mask reaching a border coordinate delivers nothing there. A mask whose
+  clipped bound is no longer a member of the masked set names a set the fabric and the source would
+  disagree about, and is refused
+- A collective's request address names the region its burst footprint is measured against, and that
+  one measurement stands for every replica. **The address must name a region the same size as its
+  members'.** Where every region in the space is one size this holds by construction; it constrains
+  only a map that gives a peripheral a different one
+
 **Class.** The address space a request falls in selects the AXI class, config space narrow and
 memory space data. This is one compare per space, not per node, and it is independent of how the
 destination is reached.
