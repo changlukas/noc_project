@@ -775,7 +775,7 @@ module user_node_endpoint #(
     // What this gate covers, precisely: an address that matches NO window. Two
     // layout-divergence shapes escape it and need the model-side checks
     // instead. A config/memory transposition only DECERRs its data half --
-    // config traffic at 0x100000+off lands inside the memory window, where the
+    // config traffic at 0x100000000+off lands inside the memory window, where the
     // write and its readback agree. And a config access overrunning its SAM
     // entry falls into the NEXT entry, routes to a different node's config RAM,
     // rebases to a legal offset there, and also agrees; that one is held off

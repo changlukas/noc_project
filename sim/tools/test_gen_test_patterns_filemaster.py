@@ -279,12 +279,12 @@ def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
     txns0 = _parse_write(os.path.join(out, "node0", "write.txt"))
     txns1 = _parse_write(os.path.join(out, "node1", "write.txt"))
     n_beat_exact = 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
-    # Config tiles pack after the 4 memory tiles (0x100000 each), so node i's
-    # config base is 0x400000 + i * 0x1000.
+    # Config tiles pack after the 4 memory tiles (0x100000000 each), so node
+    # i's config base is 0x400000000 + i * 0x1000.
     assert len(txns0) == n_beat_exact + 1                 # + narrow probe
-    assert txns0[-1]["addr"] == 0x400000
+    assert txns0[-1]["addr"] == 0x400000000
     assert len(txns1) == n_beat_exact + 1
-    assert txns1[-1]["addr"] == 0x401000
+    assert txns1[-1]["addr"] == 0x400001000
 
 
 def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):

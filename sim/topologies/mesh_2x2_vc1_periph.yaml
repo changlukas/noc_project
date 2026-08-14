@@ -22,19 +22,19 @@ topology:
 # Config tiles are appended AFTER every memory tile, so no memory base moves.
 # Bases come from the coordinate and the space's slot size, not from list
 # order: base = space_base + ((y << clog2(x_span)) | x) * slot. With
-# x_span = 3 that is clog2(3) = 2 index bits, so memory bases = idx * 0x100000
-# (index bits [21:20], row bit [22]) and config bases = 0x800000 + idx * 0x1000
-# (index bits [13:12], row bit [14]).
+# x_span = 3 that is clog2(3) = 2 index bits, so memory bases =
+# idx * 0x100000000 (index bits [33:32], row bit [34]) and config bases =
+# 0x800000000 + idx * 0x1000 (index bits [13:12], row bit [14]).
 # No memory_slot_size / config_slot_size: both packers derive the slot as the
 # largest declared size in the space.
 address_map:
   tiles:
-    - { x: 0, y: 0, size: 0x100000 }
-    - { x: 1, y: 0, size: 0x100000 }
-    - { x: 2, y: 0, size: 0x100000 }
-    - { x: 0, y: 1, size: 0x100000 }
-    - { x: 1, y: 1, size: 0x100000 }
-    - { x: 2, y: 1, size: 0x100000 }
+    - { x: 0, y: 0, size: 0x100000000 }
+    - { x: 1, y: 0, size: 0x100000000 }
+    - { x: 2, y: 0, size: 0x100000000 }
+    - { x: 0, y: 1, size: 0x100000000 }
+    - { x: 1, y: 1, size: 0x100000000 }
+    - { x: 2, y: 1, size: 0x100000000 }
     - { x: 0, y: 0, size: 0x1000, space: config }
     - { x: 1, y: 0, size: 0x1000, space: config }
     - { x: 2, y: 0, size: 0x1000, space: config }
