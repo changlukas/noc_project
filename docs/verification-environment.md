@@ -311,9 +311,13 @@ places each request at `base(dst) + offset`, and the NMU SAM translates the
 address back to `dst_id`. One source, so the two never disagree.
 
 `tiles:` gives each node its own `size`; there is no `tile_size` and no
-`base` key. Bases are packed by accumulation in list order: `base(0) = 0`,
-`base(i) = base(i-1) + size(i-1)`, so the map is always gap-free and tiles can
-be heterogeneous. `dst_id = (y << X_WIDTH) | x`. The loader accepts a
+`base` key. Bases come from the coordinate, not from accumulation:
+`base = space_base + ((y << x_bits) | x) * slot`, where `slot` is the largest
+size declared in that space, `x_bits` is `clog2(x_span)`, and `space_base` puts
+config above every base memory could take. A tile smaller than its space's slot
+leaves a gap rather than pulling the next tile down, so the map is gap-free only
+when the space is uniform, as every shipped one is. The slot index and the
+routing id use different shifts: `dst_id = (y << X_WIDTH) | x`. The loader accepts a
 heterogeneous map (covered by `test_node_windows_are_that_node_s_own_map_entries`
 in `sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology
 is uniform at `0x100000000` per memory tile plus `0x1000` per config tile, in raster
