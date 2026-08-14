@@ -100,9 +100,9 @@ That is also what upstream does. `floo_id_translation` turns an address into a n
 
 The SAM is loaded at runtime from the topology YAML `address_map` block (`sim/topologies/*.yaml`, parsed by `nmu/sam_yaml.hpp`). There is no built-in default map: `NmuWrap::init` rejects a null or empty `config_path` with `std::invalid_argument`.
 
-Example (`mesh_4x4_vc1`): A = 0x60_0080. Matching entry: raster index 6, base = 6 * 0x100000 = 0x60_0000, size 0x100000, dst_id = 8'h12 (x=2, y=1), memory space. Result: dst_id = 8'h12, local_addr = 0x100000 + 0x80 = 0x10_0080. Non-matching entry for contrast: the dst_id = 8'h11 entry covers [0x50_0000, 0x60_0000), which excludes A because A >= its base+size.
+Example (`mesh_4x4_vc1`): A = 0x6_0000_0080. Matching entry: raster index 6, base = 6 * 0x1_0000_0000 = 0x6_0000_0000, size 0x1_0000_0000, dst_id = 8'h12 (x=2, y=1), memory space. Result: dst_id = 8'h12, local_addr = 0x6_0000_0080 (forwarded unchanged). Non-matching entry for contrast: the dst_id = 8'h11 entry covers [0x5_0000_0000, 0x6_0000_0000), which excludes A because A >= its base+size.
 
-Both windows of one node, on `mesh_2x2_vc1`: A = 0x1000 hits node (0,0)'s memory entry [0x0, 0x100000) and translates to local_addr = 0x100000 + 0x1000 = 0x101000, above the config window. A = 0x400010 hits the same node's config entry at base 0x400000 and translates to local_addr = 0x0 + 0x10 = 0x10.
+Both windows of one node, on `mesh_2x2_vc1`: A = 0x1000 hits node (0,0)'s memory entry [0x0, 0x1_0000_0000) and translates to local_addr = 0x1000 (forwarded unchanged). A = 0x4_0000_0010 hits the same node's config entry at base 0x4_0000_0000 and translates to local_addr = 0x4_0000_0010 (forwarded unchanged) -- the two windows sit at distinct addresses because the map put them apart, not because either address was rebased.
 
 A SAM miss (address covered by no entry) cannot happen (Section 3.5, guarantee G1). The model aborts if violated. There is no DECERR generation in this block.
 
@@ -156,9 +156,9 @@ There is no aggregate pool above the per-ID gate, so the order list is the admis
 
 ### 2.6 Worked example: 2-beat write burst
 
-NMU at node (x=0, y=0), src_id = 8'h00, `mesh_4x4_vc1` SAM, DAT_NUM_VC = 1. The master issues AW {awid = 3'h5, awaddr = 0x60_0080, awlen = 8'h01, awsize = 3'h6, awburst = 2'b01} then W0 {wdata = 512'h...11, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 0} and W1 {wdata = 512'h...22, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 1}.
+NMU at node (x=0, y=0), src_id = 8'h00, `mesh_4x4_vc1` SAM, DAT_NUM_VC = 1. The master issues AW {awid = 3'h5, awaddr = 0x6_0000_0080, awlen = 8'h01, awsize = 3'h6, awburst = 2'b01} then W0 {wdata = 512'h...11, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 0} and W1 {wdata = 512'h...22, wstrb = 64'hFFFF_FFFF_FFFF_FFFF, wlast = 1}.
 
-SAM: 0x60_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x10_0080. ID 5 is idle, so admission takes the idle-ID bypass: ordering_req = 0, ordering_tag = 0. The burst is data class, so the three flits leave on the DAT face, in this exact order, as one wormhole packet:
+SAM: 0x6_0000_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x6_0000_0080 (forwarded unchanged). ID 5 is idle, so admission takes the idle-ID bypass: ordering_req = 0, ordering_tag = 0. The burst is data class, so the three flits leave on the DAT face, in this exact order, as one wormhole packet:
 
 | Field | AW flit | W flit 0 | W flit 1 |
 |---|---|---|---|
@@ -169,7 +169,7 @@ SAM: 0x60_0080 hits the dst_id = 8'h12 entry, memory space, local_addr = 0x10_00
 | header.flit_tail | 1'b0 (opens packet) | 1'b0 | 1'b1 (closes packet) |
 | header.ordering_req / ordering_tag | 0 / 8'h00 | 0 / 8'h00 | 0 / 8'h00 |
 | header.collective_op / collective_mask | 0 / 8'h00 | 0 / 8'h00 | 0 / 8'h00 |
-| payload | awid=3'h5, awaddr=48'h10_0080, awlen=8'h01, awsize=3'h6, awburst=2'b01, others 0 | wlast=0, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...11, wuser=0 | wlast=1, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...22 |
+| payload | awid=3'h5, awaddr=48'h6_0000_0080, awlen=8'h01, awsize=3'h6, awburst=2'b01, others 0 | wlast=0, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...11, wuser=0 | wlast=1, wstrb=64'hFFFF_FFFF_FFFF_FFFF, wdata=512'h...22 |
 
 Later one B flit returns on the RSP face {axi_ch = 4'd8 (DataB), bid = 3'h5, bresp = 2'b00} and the NMU presents bvalid / bid = 3'h5 / bresp = 2'b00, held until bready.
 

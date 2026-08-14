@@ -294,8 +294,8 @@ topology:
 
 address_map:
   tiles:                      # ordered, every mesh node exactly once, row-major (y outer, x inner)
-    - { x: 0, y: 0, size: 0x100000 }
-    - { x: 1, y: 0, size: 0x100000 }
+    - { x: 0, y: 0, size: 0x100000000 }
+    - { x: 1, y: 0, size: 0x100000000 }
     # ... one entry per node
     - { x: 0, y: 0, size: 0x1000, space: config }  # config tiles, one per node
 ```
@@ -316,7 +316,7 @@ address back to `dst_id`. One source, so the two never disagree.
 be heterogeneous. `dst_id = (y << X_WIDTH) | x`. The loader accepts a
 heterogeneous map (covered by `test_node_windows_are_that_node_s_own_map_entries`
 in `sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology
-is uniform at `0x100000` per memory tile plus `0x1000` per config tile, in raster
+is uniform at `0x100000000` per memory tile plus `0x1000` per config tile, in raster
 order, config entries appended after all memory entries. `TILE_TARGETS` is
 therefore 2 on every topology, and the endpoint carries one decode path, the
 two-window one. The windows are per node and global — nothing rebases, so the
@@ -326,8 +326,8 @@ shows up as an address outside both windows, which DECERRs; the endpoint's
 `sim/tb/user_node_endpoint.sv` check that path.
 
 Raster order is what makes the node index a contiguous bit field an AWUSER
-address mask can wildcard: memory bases at `idx * 0x100000`, config bases at
-`n_nodes * 0x100000 + idx * 0x1000`.
+address mask can wildcard: memory bases at `idx * 0x100000000`, config bases at
+`n_nodes * 0x100000000 + idx * 0x1000`.
 
 `gen_tb_top.py` rejects a topology whose mesh dimensions or `num_vc` exceed
 the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit

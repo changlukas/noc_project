@@ -30,6 +30,7 @@
 #include "nmu/sam_yaml.hpp"
 #include "nsu/nsu.hpp"
 #include "nsu/port_params.hpp"
+#include <cassert>
 #include <deque>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -46,10 +47,11 @@ constexpr std::size_t kMaxCycles = 20'000;
 constexpr uint8_t kNmuSrcId = 0x01;
 constexpr uint8_t kNsuSrcId = 0x02;
 
-// Config tile base: mesh_2x2_vc1.yaml packs 4 memory tiles (0x100000 each)
-// before the config tiles, so node (0,0)'s config aperture starts at
-// 4 * 0x100000 = 0x400000, size 0x1000.
-constexpr uint64_t kConfigBase = 0x400000;
+// Config tile base: mesh_2x2_vc1.yaml packs 4 memory tiles (0x100000000
+// each) before the config tiles, so node (0,0)'s config aperture starts at
+// 4 * 0x100000000 = 0x400000000, size 0x1000.
+constexpr uint64_t kConfigBase = 0x400000000;
+constexpr std::size_t kConfigWindowSize = 0x1000;  // the SAM's config tile size
 constexpr uint64_t kMemoryAddr = 0x2000;  // inside node (0,0)'s memory tile
 
 std::string hex_bytes(unsigned first, unsigned count) {
@@ -71,6 +73,62 @@ std::string hex0x(uint64_t v) {
     std::snprintf(buf, sizeof(buf), "0x%llx", static_cast<unsigned long long>(v));
     return buf;
 }
+
+// Two memory windows behind one IMemoryPort, one per AXI class -- what
+// sim/tb/user_node_endpoint.sv's tile crossbar does in real hardware (one RAM
+// per address space, decoded from the master's address, not one RAM spanning
+// the gap between them). A single flat axi::Memory can no longer stand in
+// for the destination: the data-class and config-class windows are ~16 GB
+// apart now that the tile is 4 GiB, and stretching one axi::Memory across
+// that gap would mean allocating ~16 GB for a unit test.
+class DualWindowMemoryPort : public axi::IMemoryPort {
+  public:
+    DualWindowMemoryPort(uint64_t data_base, std::size_t data_size, uint64_t config_base,
+                          std::size_t config_size, std::size_t write_lat, std::size_t read_lat)
+        : data_base_(data_base),
+          data_size_(data_size),
+          config_base_(config_base),
+          config_size_(config_size),
+          data_(data_base, data_size, write_lat, read_lat),
+          config_(config_base, config_size, write_lat, read_lat) {}
+
+    bool submit_write(const axi::MemWriteReq& req) override {
+        return window_for_(req.addr).submit_write(req);
+    }
+    bool submit_read(const axi::MemReadReq& req) override {
+        return window_for_(req.addr).submit_read(req);
+    }
+    std::optional<axi::MemWriteResp> pop_write_resp() override {
+        if (auto r = data_.pop_write_resp()) return r;
+        return config_.pop_write_resp();
+    }
+    std::optional<axi::MemReadResp> pop_read_resp() override {
+        if (auto r = data_.pop_read_resp()) return r;
+        return config_.pop_read_resp();
+    }
+    void tick() {
+        data_.tick();
+        config_.tick();
+    }
+
+  private:
+    axi::Memory& window_for_(uint64_t addr) {
+        if (addr >= data_base_ && addr < data_base_ + data_size_) return data_;
+        if (addr >= config_base_ && addr < config_base_ + config_size_) return config_;
+        // Neither window claims this address: a bug in the test's own
+        // stimulus (or the SAM it was derived from), not a case to paper
+        // over by defaulting into one of the two.
+        assert(false && "address lands in neither the data nor the config window");
+        std::abort();
+    }
+
+    uint64_t data_base_;
+    std::size_t data_size_;
+    uint64_t config_base_;
+    std::size_t config_size_;
+    axi::Memory data_;
+    axi::Memory config_;
+};
 
 std::string write_narrow_smoke_scenario() {
     const std::string dir = test::unique_temp_dir("narrow_smoke");
@@ -124,13 +182,23 @@ TEST(NarrowClassSmoke, ConfigSpaceEndToEndZeroMismatch) {
     const std::string yaml_path = write_narrow_smoke_scenario();
     auto sc = axi::load_scenario(yaml_path);
 
-    axi::Memory mem(sc.config.memory_base, sc.config.memory_size, sc.config.write_latency,
-                    sc.config.read_latency);
-    axi::AxiSlave slave(mem);
-    slave.set_memory_bounds(sc.config.memory_base, sc.config.memory_size);
+    DualWindowMemoryPort mem_port(sc.config.memory_base, sc.config.memory_size, kConfigBase,
+                                  kConfigWindowSize, sc.config.write_latency,
+                                  sc.config.read_latency);
+    axi::AxiSlave slave(mem_port);
 
     // Real SAM, loaded exactly as co-sim's NmuWrap::init(config_path) would.
     auto sam = nmu::addr_trans::load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
+
+    // This test's subject is the narrow-class lane re-anchor path, but
+    // sb.mismatch_count() below is class-agnostic -- it would pass just as
+    // well if kConfigBase silently decoded as Data class. Assert the class
+    // directly off the same SAM the pipeline uses, so a config base that
+    // drifts back inside the memory tile fails here for the right reason
+    // instead of testing the wrong datapath in green.
+    EXPECT_EQ(sam.translate(kConfigBase + 0x8).cls, axi::AxiClass::Narrow);
+    EXPECT_EQ(sam.translate(kConfigBase + 0x120).cls, axi::AxiClass::Narrow);
+    EXPECT_EQ(sam.translate(kMemoryAddr).cls, axi::AxiClass::Data);
 
     nmu::NmuConfig nmu_cfg{};
     nmu_cfg.src_id = kNmuSrcId;
@@ -177,7 +245,7 @@ TEST(NarrowClassSmoke, ConfigSpaceEndToEndZeroMismatch) {
         while (auto ar = port.pop_ar()) ASSERT_TRUE(slave.push_ar(*ar));
 
         slave.tick();
-        mem.tick();
+        mem_port.tick();
 
         while (!b_holdover.empty()) {
             if (!port.push_b(b_holdover.front())) break;

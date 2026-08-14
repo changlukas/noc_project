@@ -262,28 +262,32 @@ TEST(SamYamlDeath, AStatedTileRegionWhoseDeclarationIsRejected) {
 TEST(SamYaml, SpaceAttributeSelectsClass) {
     auto sam = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
     // Memory-space tiles pack first (list order): node (0,0)'s memory tile is
-    // [0, 0x100000).
+    // [0, 0x100000000).
     auto memory = sam.translate(0x1000);
     EXPECT_EQ(memory.dst_id, 0x00u);
     EXPECT_EQ(memory.cls, axi::AxiClass::Data);
     EXPECT_EQ(memory.local_addr, 0x1000ull);  // forwarded unchanged
 
     // The config tile is the 5th entry: base = sum of the 4 memory tiles'
-    // sizes = 4 * 0x100000 = 0x400000, size 0x1000.
-    auto config = sam.translate(0x400010);
+    // sizes = 4 * 0x100000000 = 0x400000000, size 0x1000.
+    auto config = sam.translate(0x400000010ull);
     EXPECT_EQ(config.dst_id, 0x00u);
     EXPECT_EQ(config.cls, axi::AxiClass::Narrow);
-    EXPECT_EQ(config.local_addr, 0x400010ull);
+    EXPECT_EQ(config.local_addr, 0x400000010ull);
 
     // One node's two spaces stay at distinct addresses, which is what the tile
     // decoder needs. They are distinct because the map itself put them apart,
-    // not because anything rebased them.
-    EXPECT_NE(sam.translate(0x0).local_addr, sam.translate(0x400000).local_addr);
+    // not because anything rebased them -- and they are two different SPACES
+    // (Data vs Narrow), not just two offsets inside the same one, which the
+    // local_addr compare alone cannot tell apart since translate() forwards
+    // the address unchanged.
+    EXPECT_NE(memory.local_addr, config.local_addr);
+    EXPECT_NE(memory.cls, config.cls);
 }
 
 // The ranges the loader derives from the shipped YAMLs, spelled out. Memory
-// stride is 1 MB and config stride 4 KB in every topology, so the offsets are
-// 20 and 12; the lengths are clog2 of the mesh dimension.
+// stride is 4 GiB and config stride 4 KB in every topology, so the offsets
+// are 32 and 12; the lengths are clog2 of the mesh dimension.
 TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
     struct Row {
         const char* file;
@@ -294,9 +298,9 @@ TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
         auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + row.file);
         const auto* memory = sam.collective_coords(axi::AxiClass::Data);
         ASSERT_NE(memory, nullptr);
-        EXPECT_EQ(memory->x_range.offset, 20u);  // log2(1 MB)
+        EXPECT_EQ(memory->x_range.offset, 32u);  // log2(4 GiB)
         EXPECT_EQ(memory->x_range.len, row.dim_bits);
-        EXPECT_EQ(memory->y_range.offset, 20u + row.dim_bits);
+        EXPECT_EQ(memory->y_range.offset, 32u + row.dim_bits);
         EXPECT_EQ(memory->y_range.len, row.dim_bits);
         const auto* config = sam.collective_coords(axi::AxiClass::Narrow);
         ASSERT_NE(config, nullptr);
@@ -520,8 +524,9 @@ static const char* kEqualSizedSpaces =
     "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
     "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
 
-// The shipped shape: memory 1 MB, config 4 KB. Node index at [21:20] and
-// [13:12] -- legal under table decode, unreachable by one global pair.
+// Unequal-sized spaces, self-contained (not the shipped tile size, which is
+// now 4 GiB): memory 1 MB, config 4 KB. Node index at [21:20] and [13:12] --
+// legal under table decode, unreachable by one global pair.
 static const char* kShippedSizedSpaces =
     "    - { x: 0, y: 0, size: 0x100000 }\n"
     "    - { x: 1, y: 0, size: 0x100000 }\n"
