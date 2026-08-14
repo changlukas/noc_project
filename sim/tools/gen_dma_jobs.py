@@ -17,30 +17,42 @@ lexical shape gen_test_patterns.py writes write.txt in.
 
 Addresses
 ---------
-A job reads the node's OWN memory window and writes the next node's, so the
-read is answered by the tile crossbar and the write crosses the fabric.  Both
-addresses are base(dst_id) + offset with the base packed by address_map.pack()
-over the topology's route span -- the base c_model's SamTable::packed computes
-from the same YAML, never a restatement of its formula.
+Every job names two windows: the issuing node's own (`local`) and the next
+node's (`ext`).  Direction decides which is the source, the swap FlooNoC's
+traffic generator makes on `flow.rw` (floogen/model/traffic.py:286-287).  A
+WRITE job reads local and writes ext, so its write crosses the fabric and the
+tile crossbar answers its read; a READ job swaps them, so its READ crosses the
+fabric.  Both addresses are base(dst_id) + offset with the base packed by
+address_map.pack() over the topology's route span -- the base c_model's
+SamTable::packed computes from the same YAML, never a restatement of its
+formula.
 
     offset(node, job) = _BASE_LOCAL + (node * jobs_per_node + job) * length
 
-The offset carries the source node, so two sources writing one destination
-cannot overlap whatever destination rule this grows.  Both windows are checked
-against the memory tile's declared size.
+The offset carries the ISSUING node, not the source, so the two windows one job
+touches are reached by that job alone whichever way its direction points them.
+Both windows are checked against the memory tile's declared size.
 
 axi_id
 ------
-FlooNoC leaves idma_job.id at '0, so every transfer of a run carries one AXI
-id.  The NMU keeps a reorder-buffer slot and a meta-buffer bucket per id, so a
-single-id stream reaches one of each.  The field walks the id space
-(2**INITIATOR_ID_WIDTH, the tile crossbar's slave port) across the RUN, not
-within a node: a node's ids are seq % 16 over consecutive seq, so at the shipped
-four jobs per node each node emits four ids and no two nodes emit the same one.
-After i_noc_id_remap folds 4 b to 3 b that reaches at most four of an NMU's
-eight write buckets, and none of its read buckets -- a job reads its own window
-and the tile crossbar answers it.  Reaching all eight takes eight jobs per node,
-which is a geometry, not an emission rule.
+Every job of every node carries _AXI_ID, and it has to: idma_axi_read.sv never
+reads r.id.  Each arriving R beat is pushed against the head of the read
+datapath queue, which the legalizer fills in AR-issue order ACROSS job
+boundaries, so the backend requires read data in global AR order -- an ordering
+AXI guarantees per id and not between ids.  Two ids reaching two slaves at two
+latencies is what breaks it, and this emitter's jobs do exactly that: a read
+job's source is another node's window and the next job's is the local memory.
+
+Upstream agrees on both sides.  FlooNoC's job format has no id field at all --
+ten fields, and the job class constructor sets id = '0.  iDMA's own multi-channel
+frontend (idma_inst64_top) does give each channel its own id, by replicating the
+whole backend onto its own top-level AXI port in a genvar loop, so the ordering
+requirement is enforced by port separation rather than lifted.
+
+Walking the id space would buy nothing anyway.  NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT
+is 1, so meta_buffer.hpp collapses every upstream id onto one downstream id;
+multi-id traffic would exercise that collapse rather than any per-id structure.
+Reaching those structures is a parameter change, not a stimulus change.
 """
 
 import argparse
@@ -49,7 +61,6 @@ import sys
 
 import address_map
 import gen_tb_top
-from gen_test_patterns import axi_widths
 
 # Local offset of the job window inside a tile's memory region.  Matches
 # gen_test_patterns.py's base_local: offset 0 stays clear.
@@ -69,6 +80,18 @@ _MAX_LOG_LEN_NONE = 8
 # of every job are the tile's AXI.
 _PROTOCOL_AXI = 0
 
+# The one AXI id every job carries, upstream's own value: FlooNoC's job class
+# constructor sets id = '0.  See the module docstring for why one id is the
+# correct usage of an iDMA backend rather than a concession.
+_AXI_ID = 0
+
+# Which of a job's two windows is the source.  "write" is what the endpoint's
+# first round shipped: source local, destination remote.  "read" swaps them, so
+# the fabric carries AR/R instead of AW/W/B.  "both" alternates by job index, so
+# a run exercises each direction on every node -- one direction alone leaves the
+# opposite path of the NMU untouched, which is the gap this default closes.
+_DIRECTION = "both"
+
 
 def job_lines(length, src_addr, dst_addr, axi_id):
     """The eleven field lines of one job, in idma_job_driver.sv's read order."""
@@ -80,13 +103,18 @@ def job_lines(length, src_addr, dst_addr, axi_id):
             str(axi_id)]
 
 
-def job_table(topo, jobs_per_node, length):
-    """Every node's jobs as [(src_idx, dst_idx, src_addr, dst_addr, axi_id), ...].
+def job_table(topo, jobs_per_node, length, direction=_DIRECTION):
+    """Every node's jobs as
+    [(node_idx, src_ep, dst_ep, src_addr, dst_addr, axi_id), ...].
+
+    node_idx is the node whose jobs.txt the row lands in.  src_ep and dst_ep are
+    the endpoints whose memories the bytes leave and arrive at, which is a
+    different question: a read job's source is another node's window.
 
     The ONE place a job's geometry is computed.  This file writes it to
-    jobs.txt; gen_tb_top.py stamps the same addresses into the DMA top's
-    memory preload and region compare, so the stimulus and the check that
-    reads it back cannot disagree about where a job's bytes are.
+    jobs.txt; gen_tb_top.py stamps the same addresses AND the same endpoints
+    into the DMA top's memory preload and region compare, so the stimulus and
+    the check that reads it back cannot disagree about where a job's bytes are.
     """
     x_span, y_span = gen_tb_top._route_span(topo["topology"])[:2]
     bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
@@ -94,29 +122,31 @@ def job_table(topo, jobs_per_node, length):
     # job is router to router and XY reaches between any two of them.
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
     sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
-    num_axi_ids = 1 << axi_widths()["id"]
     n_nodes = len(nodes)
     out = []
-    for (idx, _x, _y, src_cid) in nodes:
-        dst_idx, _dx, _dy, dst_cid = nodes[(idx + 1) % n_nodes]
+    for (idx, _x, _y, local_cid) in nodes:
+        ext_idx, _ex, _ey, ext_cid = nodes[(idx + 1) % n_nodes]
         for job in range(jobs_per_node):
             seq = idx * jobs_per_node + job
             offset = _BASE_LOCAL + seq * length
-            limit = min(sizes[src_cid], sizes[dst_cid])
+            limit = min(sizes[local_cid], sizes[ext_cid])
             if offset + length > limit:
                 sys.exit(f"ERROR: node{idx} job {job} window {offset:#x}+{length:#x} "
                          f"overruns the {limit:#x} B memory tile; reduce "
                          f"--jobs-per-node or --length")
-            out.append((idx, dst_idx, bases[src_cid] + offset, bases[dst_cid] + offset,
-                        seq % num_axi_ids))
+            is_read = direction == "read" or (direction == "both" and job % 2 == 1)
+            src_ep, src_cid = (ext_idx, ext_cid) if is_read else (idx, local_cid)
+            dst_ep, dst_cid = (idx, local_cid) if is_read else (ext_idx, ext_cid)
+            out.append((idx, src_ep, dst_ep, bases[src_cid] + offset,
+                        bases[dst_cid] + offset, _AXI_ID))
     return out
 
 
 def emit_jobs(out_root, jobs, length):
     """Write node<i>/jobs.txt from job_table()'s rows."""
     per_node = {}
-    for (src_idx, _dst_idx, src_addr, dst_addr, axi_id) in jobs:
-        per_node.setdefault(src_idx, []).extend(
+    for (node_idx, _src_ep, _dst_ep, src_addr, dst_addr, axi_id) in jobs:
+        per_node.setdefault(node_idx, []).extend(
             job_lines(length, src_addr, dst_addr, axi_id))
     for idx, lines in per_node.items():
         node_dir = os.path.join(out_root, f"node{idx}")

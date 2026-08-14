@@ -381,16 +381,17 @@ def _dma_check(topo, n_ep, jobs_per_node, job_bytes):
     """
     import gen_dma_jobs   # deferred: gen_dma_jobs imports this module
 
-    # job_table rows are (src_idx, dst_idx, src_addr, dst_addr, axi_id), grouped
-    # by node in node order.
-    _DST_IDX, _SRC_ADDR, _DST_ADDR = 1, 2, 3
+    # job_table rows are (node_idx, src_ep, dst_ep, src_addr, dst_addr, axi_id),
+    # grouped by node in node order. src_ep is NOT node_idx: a read job's source
+    # is another node's window.
+    _SRC_EP, _DST_EP, _SRC_ADDR, _DST_ADDR = 1, 2, 3, 4
     jobs = gen_dma_jobs.job_table(topo, jobs_per_node, job_bytes)
     n = len(jobs) // jobs_per_node
     # Packed, descending, as the tile-window parameters above: field j is job j
     # and row i is node i.
-    def _rows(col):
+    def _rows(col, fmt="ADDR_WIDTH'(64'h{:X})"):
         return "{" + ", ".join(
-            "{" + ", ".join(f"ADDR_WIDTH'(64'h{jobs[i * jobs_per_node + j][col]:X})"
+            "{" + ", ".join(fmt.format(jobs[i * jobs_per_node + j][col])
                             for j in reversed(range(jobs_per_node))) + "}"
             for i in reversed(range(n))) + "}"
 
@@ -411,11 +412,15 @@ def _dma_check(topo, n_ep, jobs_per_node, job_bytes):
       f"{_rows(_SRC_ADDR)};")
     w(f"    localparam logic [{n - 1}:0][JOBS_PER_NODE-1:0][ADDR_WIDTH-1:0] JOB_DST_ADDR = "
       f"{_rows(_DST_ADDR)};")
-    w("    // Endpoint each node's jobs write into. 8 b is the flit's own node-index")
-    w("    // field width, so it holds every endpoint a topology can carry.")
-    w(f"    localparam logic [{n - 1}:0][7:0] JOB_DST_EP = {{"
-      + ", ".join(f"8'd{jobs[i * jobs_per_node][_DST_IDX]}" for i in reversed(range(n)))
-      + "};")
+    w("    // Endpoints a job's bytes leave and arrive at, PER JOB: a read job takes")
+    w("    // its source from another node's window, so neither end follows the node")
+    w("    // whose file issued the job. 8 b is the flit's own node-index field width,")
+    w("    // so it holds every endpoint a topology can carry.")
+    ep_fmt = "8'd{}"
+    w(f"    localparam logic [{n - 1}:0][JOBS_PER_NODE-1:0][7:0] JOB_SRC_EP = "
+      f"{_rows(_SRC_EP, ep_fmt)};")
+    w(f"    localparam logic [{n - 1}:0][JOBS_PER_NODE-1:0][7:0] JOB_DST_EP = "
+      f"{_rows(_DST_EP, ep_fmt)};")
     w("")
     w("    // -------------------------------------------------------------------------")
     w("    // Memory backdoor (iDMA test/include/tb_tasks.svh compares regions the same")
@@ -458,7 +463,7 @@ def _dma_check(topo, n_ep, jobs_per_node, job_bytes):
     w("        for (int unsigned i = 0; i < NUM_NODES; i++)")
     w("            for (int unsigned j = 0; j < JOBS_PER_NODE; j++)")
     w("                for (int unsigned k = 0; k < JOB_BYTES; k++)")
-    w("                    mem_poke(i, JOB_SRC_ADDR[i][j] + k,")
+    w("                    mem_poke(JOB_SRC_EP[i][j], JOB_SRC_ADDR[i][j] + k,")
     w("                             mem_pattern(JOB_SRC_ADDR[i][j] + k));")
     w("    end")
     w("")
@@ -522,8 +527,9 @@ def _dma_check(topo, n_ep, jobs_per_node, job_bytes):
     w("                       i, jobs_issued[i], jobs_retired[i], JOBS_PER_NODE);")
     w("        for (int i = 0; i < NUM_NODES; i++)")
     w("            for (int j = 0; j < JOBS_PER_NODE; j++) begin")
-    w("                bad = compare_region(i, JOB_DST_EP[i], JOB_SRC_ADDR[i][j],")
-    w("                                     JOB_DST_ADDR[i][j], JOB_BYTES);")
+    w("                bad = compare_region(JOB_SRC_EP[i][j], JOB_DST_EP[i][j],")
+    w("                                     JOB_SRC_ADDR[i][j], JOB_DST_ADDR[i][j],")
+    w("                                     JOB_BYTES);")
     w("                if (bad != 0)")
     w('                    $display("FAIL: node%0d job%0d: %0d of %0d bytes differ",')
     w("                             i, j, bad, JOB_BYTES);")

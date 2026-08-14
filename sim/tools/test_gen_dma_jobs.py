@@ -43,6 +43,31 @@ def test_every_job_addresses_a_real_sam_region(tmp_path):
             assert _owner(job["src_addr"]) != _owner(job["dst_addr"])
 
 
+def test_both_directions_cross_the_fabric(tmp_path):
+    """A job whose source is the issuing node's OWN window has its read answered
+    by the tile crossbar, so a run of those alone never puts an AR on the NoC --
+    the NMU's reorder buffer and its read admission clauses stay at zero. Some
+    job must source another node's window, and some must not, or the run has one
+    blind spot in place of the other.
+
+    At the SHIPPED geometry -- the one the gate builds, not a larger one."""
+    n = gen_tb_top._DMA_JOBS_PER_NODE
+    topo = _topology("mesh_2x2_vc1")
+    out = tmp_path / "jobs"
+    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", str(n)])
+    bases, entries = address_map.pack(topo["address_map"], 2, 2)
+    sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
+    nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
+
+    remote, total = 0, 0
+    for (idx, _x, _y, cid) in nodes:
+        own = range(bases[cid], bases[cid] + sizes[cid])
+        for job in _parse_jobs(out / f"node{idx}" / "jobs.txt"):
+            remote += job["src_addr"] not in own
+            total += 1
+    assert 0 < remote < total, f"{remote} of {total} jobs read a remote window"
+
+
 def test_burst_bound_is_a_log_length(tmp_path):
     """max_src_len / max_dst_len reach the backend as beo.*_max_llen, a 3-bit
     LOG length gated by *_reduce_len, so the file states log2(beats) 0..7 with 8
@@ -59,20 +84,21 @@ def test_burst_bound_is_a_log_length(tmp_path):
         assert job["max_dst_len"] == g._MAX_LOG_LEN_NONE
 
 
-def test_jobs_use_more_than_one_axi_id(tmp_path):
-    """FlooNoC leaves idma_job.id at '0, so every transfer uses one ID. This
-    NMU keeps a reorder-buffer slot and a meta-buffer bucket per ID, so a
-    single-ID stream would report that a DMA runs while touching one of
-    eight.
+def test_every_job_carries_one_axi_id(tmp_path):
+    """One ID for the whole run, because an iDMA backend cannot take two.
+    idma_axi_read.sv never reads r.id: an R beat is pushed against the head of
+    the read datapath queue, which the legalizer fills in AR-issue order across
+    job boundaries, so the backend needs read data in global AR order. AXI
+    guarantees that per ID only.
 
-    At the SHIPPED geometry -- the one the gate builds, not a larger one --
-    each node emits jobs_per_node distinct IDs and no two nodes share one."""
-    n = gen_tb_top._DMA_JOBS_PER_NODE
+    Emitting one ID per job passed while every read was answered by the local
+    memory. It stopped passing the moment a read crossed the fabric: the fabric
+    read and the local read of the next job returned out of order, and the two
+    jobs wrote each other's payload byte for byte. The constraint is pinned here
+    rather than left to be rediscovered."""
     out = tmp_path / "jobs"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", str(n)])
-    per_node = [{job["axi_id"] for job in _parse_jobs(out / f"node{i}" / "jobs.txt")}
-                for i in range(4)]
-    for ids in per_node:
-        assert len(ids) == n
-    # A node's IDs are its own slice of the space, not the whole of it.
-    assert not (per_node[0] & per_node[1])
+    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out),
+            "--jobs-per-node", str(gen_tb_top._DMA_JOBS_PER_NODE)])
+    ids = {job["axi_id"] for i in range(4)
+           for job in _parse_jobs(out / f"node{i}" / "jobs.txt")}
+    assert ids == {g._AXI_ID}
