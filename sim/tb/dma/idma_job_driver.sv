@@ -37,6 +37,11 @@ module idma_job_driver #(
     // clear. Anything above 8 is a malformed file, not a large burst.
     localparam int unsigned MAX_LOG_LEN_NONE = 8;
 
+    // r.length is tf_len_t, TF_LEN_WIDTH bits. A cast past that truncates
+    // silently rather than failing, so a length the field can't hold is
+    // rejected here first.
+    localparam int unsigned MAX_LEN = (32'd1 << idma_types_pkg::TF_LEN_WIDTH) - 1;
+
     string stim_dir = "sim/test_patterns/dma";
     string jobs_path;
 
@@ -108,6 +113,16 @@ module idma_job_driver #(
         return 3'(v);
     endfunction
 
+    // The length field: %d into an int unsigned that is wider than tf_len_t, so
+    // a job past MAX_LEN is rejected here rather than truncated by the cast to
+    // tf_len_t that would otherwise silently follow.
+    function automatic idma_types_pkg::tf_len_t check_len(input int unsigned v, input string field);
+        if (v > MAX_LEN)
+            $fatal(1, "[dma_jobs] node%0d: %s=%0d exceeds TF_LEN_WIDTH (%0d b, max %0d)",
+                   NODE_ID, field, v, idma_types_pkg::TF_LEN_WIDTH, MAX_LEN);
+        return idma_types_pkg::tf_len_t'(v);
+    endfunction
+
     initial begin
         int fd;
         int code;
@@ -150,7 +165,7 @@ module idma_job_driver #(
             axi_id       = read_dec(fd, "axi_id");
 
             r = '0;
-            r.length   = idma_types_pkg::tf_len_t'(length);
+            r.length   = check_len(length, "length");
             r.src_addr = idma_types_pkg::addr_t'(src_addr);
             r.dst_addr = idma_types_pkg::addr_t'(dst_addr);
             r.user     = '0;   // AWUSER carries the collective encoding; a DMA emits none

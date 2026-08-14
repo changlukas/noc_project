@@ -15,8 +15,9 @@ package idma_types_pkg;
     // The tile crossbar's slave port, which is what the DMA drives.
     localparam int unsigned AXI_ID_WIDTH = ni_params_pkg::AXI_INITIATOR_ID_WIDTH_DFLT;
     localparam int unsigned USER_WIDTH   = ni_params_pkg::AXI_AWUSER_WIDTH_DFLT;
-    // Transfer length in bytes. 20 covers a whole 0x100000 tile window; the
-    // legal range is 12 to ADDR_WIDTH.
+    // Transfer length in bytes. Not a tile-size consequence -- tiles are 4 GiB
+    // as of Stage 1 -- 20 bits is a deliberate cap on job length; jobs are 1 KiB
+    // today, well inside it.
     localparam int unsigned TF_LEN_WIDTH = 20;
 
     typedef logic [ADDR_WIDTH-1:0]   addr_t;
