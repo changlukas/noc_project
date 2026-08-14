@@ -37,9 +37,10 @@ def test_every_job_addresses_a_real_sam_region(tmp_path):
         for job in _parse_jobs(out / f"node{node}" / "jobs.txt"):
             assert any(lo <= job["src_addr"] < hi for lo, hi in windows)
             assert any(lo <= job["dst_addr"] < hi for lo, hi in windows)
-            # The write has to cross the fabric: the two windows are different
-            # nodes. Without this, both addresses in the emitting node's own
-            # window would pass -- and never leave the tile crossbar.
+            # One end of every job has to cross the fabric -- the write for a
+            # write job, the read for a read job -- so the two windows are
+            # different nodes. Without this, both addresses in the emitting
+            # node's own window would pass and never leave the tile crossbar.
             assert _owner(job["src_addr"]) != _owner(job["dst_addr"])
 
 

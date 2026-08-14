@@ -49,10 +49,14 @@ frontend (idma_inst64_top) does give each channel its own id, by replicating the
 whole backend onto its own top-level AXI port in a genvar loop, so the ordering
 requirement is enforced by port separation rather than lifted.
 
-Walking the id space would buy nothing anyway.  NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT
-is 1, so meta_buffer.hpp collapses every upstream id onto one downstream id;
-multi-id traffic would exercise that collapse rather than any per-id structure.
-Reaching those structures is a parameter change, not a stimulus change.
+It costs coverage, on the NMU side.  nmu/rob.hpp keeps write_order_by_id_ and
+read_order_by_id_ as arrays of AXI_ID_SPACE = 8, and every admission decision
+keys on the id, so a single-id stream reaches one bucket of the eight and cannot
+form the shape the DAT deadlock argument is about -- one id's fallback-allocate
+interleaved with another id's bypass streak.  Downstream is where nothing is
+lost: NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT is 1, so meta_buffer.hpp collapses
+every upstream id onto one anyway.  Both gaps are recorded in
+docs/known-limitations.md.
 """
 
 import argparse
@@ -85,13 +89,6 @@ _PROTOCOL_AXI = 0
 # correct usage of an iDMA backend rather than a concession.
 _AXI_ID = 0
 
-# Which of a job's two windows is the source.  "write" is what the endpoint's
-# first round shipped: source local, destination remote.  "read" swaps them, so
-# the fabric carries AR/R instead of AW/W/B.  "both" alternates by job index, so
-# a run exercises each direction on every node -- one direction alone leaves the
-# opposite path of the NMU untouched, which is the gap this default closes.
-_DIRECTION = "both"
-
 
 def job_lines(length, src_addr, dst_addr, axi_id):
     """The eleven field lines of one job, in idma_job_driver.sv's read order."""
@@ -103,7 +100,7 @@ def job_lines(length, src_addr, dst_addr, axi_id):
             str(axi_id)]
 
 
-def job_table(topo, jobs_per_node, length, direction=_DIRECTION):
+def job_table(topo, jobs_per_node, length):
     """Every node's jobs as
     [(node_idx, src_ep, dst_ep, src_addr, dst_addr, axi_id), ...].
 
@@ -134,7 +131,9 @@ def job_table(topo, jobs_per_node, length, direction=_DIRECTION):
                 sys.exit(f"ERROR: node{idx} job {job} window {offset:#x}+{length:#x} "
                          f"overruns the {limit:#x} B memory tile; reduce "
                          f"--jobs-per-node or --length")
-            is_read = direction == "read" or (direction == "both" and job % 2 == 1)
+            # Odd jobs read, even jobs write, so every node issues both. One
+            # direction alone leaves the opposite path of the NMU untouched.
+            is_read = job % 2 == 1
             src_ep, src_cid = (ext_idx, ext_cid) if is_read else (idx, local_cid)
             dst_ep, dst_cid = (idx, local_cid) if is_read else (ext_idx, ext_cid)
             out.append((idx, src_ep, dst_ep, bases[src_cid] + offset,
