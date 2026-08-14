@@ -676,12 +676,12 @@ def collective_addr_mask(bases, member_cids, addr_cid, tile_bases=None):
     `bases` must be the bases of ONE address space, and the caller is expected
     to have picked the space that address lands in.  The node-index field sits at
     log2 of that space's region size (spec §5.1), so the mask bits land at
-    different address bits per space -- on the shipped 4x4, bits [21:20] for a
-    1 MB memory region and [13:12] for a 4 KB config region.  Deriving the mask
-    from the bases rather than from a constant is what keeps this correct
-    without the caller naming a bit position: mixing two spaces' bases in one
-    call produces a mask spanning both fields, which the wildcard check below
-    rejects.
+    different address bits per space -- on the shipped 4x4, an x-varying mask
+    lands at bits [33:32] for a 4 GiB memory region and [13:12] for a 4 KB
+    config region.  Deriving the mask from the bases rather than from a
+    constant is what keeps this correct without the caller naming a bit
+    position: mixing two spaces' bases in one call produces a mask spanning
+    both fields, which the wildcard check below rejects.
     """
     if tile_bases is None:
         tile_bases = bases

@@ -41,9 +41,13 @@ Every job of every node carries _AXI_ID, and it has to: idma_axi_read.sv never
 reads r.id.  Each arriving R beat is pushed against the head of the read
 datapath queue, which the legalizer fills in AR-issue order ACROSS job
 boundaries, so the backend requires read data in global AR order -- an ordering
-AXI guarantees per id and not between ids.  Two ids reaching two slaves at two
-latencies is what breaks it, and this emitter's jobs do exactly that: a read
-job's source is another node's window and the next job's is the local memory.
+AXI guarantees per id and not between ids.  Two ids racing that queue is what
+breaks it, and this emitter's jobs can do exactly that: idma_job_driver.sv
+issues job N+1's request as soon as the backend accepts it, not after job N's
+response, so consecutive jobs' AR bursts land outstanding together against the
+same source window.  Different ids on those overlapping jobs would leave
+nothing upstream of the read datapath queue guaranteeing their R data comes
+back in AR-issue order.
 
 Upstream agrees on both sides.  FlooNoC's job format has no id field at all --
 ten fields, and the job class constructor sets id = '0.  iDMA's own multi-channel
