@@ -5,7 +5,6 @@
 #include "nmu/packetize.hpp"
 #include "ni/wormhole_arbiter.hpp"
 #include "common/per_channel_capture.hpp"
-#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include "ni_flit_constants.h"
 #include <gtest/gtest.h>
@@ -63,10 +62,6 @@ AwHeaderMeta meta() {
 // one helper step keeps the isolated regression deterministic. The deadlock
 // under test is order-independent (a held lock never releases either way).
 TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
-    SCENARIO(
-        "Bridge must drain W (for the locked write) and admit AR even when the "
-        "wormhole AW-input is full and a later AW is stuck in the bridge. Pre-fix "
-        "this self-deadlocks (line-78 HOL); post-fix W/AR flow.");
     ReqCapture out;
     WormholeArbiter<NocReqOut> wh(out, /*num_inputs=*/3, std::vector<ChannelPairing>{{0, 1}},
                                   kAwInputDepth);
@@ -114,7 +109,6 @@ TEST(NmuReqBridge, WAndArDrainDespiteFullAwInput) {
 // push_w with no prior push_aw must backpressure (return false), not assert, so
 // a W whose AW is not yet admitted waits without aborting or blocking AW/AR.
 TEST(NmuReqBridge, PushWBackpressuresOnEmptyMeta) {
-    SCENARIO("Packetize::push_w returns false when w_meta_fifo_ is empty.");
     ReqCapture aw_out, w_out, ar_out;
     Packetize pkt(aw_out, w_out, ar_out, aw_out, w_out, kSrcId, {});  // push_w never touches sam_
     EXPECT_FALSE(pkt.push_w(make_w(/*last=*/true)))

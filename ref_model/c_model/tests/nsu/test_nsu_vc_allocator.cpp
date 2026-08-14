@@ -1,6 +1,5 @@
 #include "nsu/vc_allocator.hpp"
 #include "common/channel_model.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include <gtest/gtest.h>
@@ -50,9 +49,6 @@ uint8_t push_and_vc(VcAllocator& arb, ChannelModel& /*noc*/, const Flit& flit) {
 //
 // A multi-beat R burst (one rid) keeps every beat on its single mapped VC.
 TEST(NsuVcAllocator, RBurstStaysOnOneVc) {
-    SCENARIO(
-        "NSU VcAllocator: all beats of one rid's R burst map to one VC (static map, not "
-        "follow-state)");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // 4-beat burst, dst_id=0x12, rid=0x05 -> (0x12^0x05)%4=3 -> VC3.
@@ -70,7 +66,6 @@ TEST(NsuVcAllocator, RBurstStaysOnOneVc) {
 // the NMU RoB will reorder by ordering_tag; the map only needs to keep one burst's
 // beats together, which a pure function of (dst_id,rid) does unconditionally).
 TEST(NsuVcAllocator, RobbedRBurstStaysOnOneVcToo) {
-    SCENARIO("NSU VcAllocator: ordering_req=1 R burst still maps every beat to one VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     ASSERT_TRUE(
@@ -84,7 +79,6 @@ TEST(NsuVcAllocator, RobbedRBurstStaysOnOneVcToo) {
 // Distinct rids (each a single-beat read) hash to different VCs -- the static
 // map replaces round-robin spread with deterministic (dst,id) spread.
 TEST(NsuVcAllocator, DistinctRidsSpreadAcrossVcs) {
-    SCENARIO("NSU VcAllocator: distinct rids hash across the VC set via the static map");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // dst_id=0x12 for all: rid5 -> (0x12^0x05)%4=3; rid6 -> (0x12^0x06)%4=0;
@@ -101,7 +95,6 @@ TEST(NsuVcAllocator, DistinctRidsSpreadAcrossVcs) {
 // each stay on their own mapped VC -- the invariant per-(dst,id) hashing
 // exists for (a single VC choice would misroute the interleaved beats).
 TEST(NsuVcAllocator, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
-    SCENARIO("NSU VcAllocator: interleaved rid5/rid6 multi-beat R bursts each map to one VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // rid5 -> VC3, rid6 -> VC0 (same hash as DistinctRidsSpreadAcrossVcs above).
@@ -118,7 +111,6 @@ TEST(NsuVcAllocator, InterleavedMultiBeatBurstsStayOnTheirOwnVc) {
 // B carries no fixed VC: it is order-free at the NMU slot path (and single-VC
 // on the RSP face), so same-bid responses round-robin the VC set.
 TEST(NsuVcAllocator, SameBidRoundRobins) {
-    SCENARIO("NSU VcAllocator: same-bid B responses round-robin the VC set");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     uint8_t a = push_and_vc(arb, noc, make_rsp_flit(ni::AXI_CH_NarrowB, 0, /*id=*/0x04, 1, 0x12));
@@ -131,7 +123,6 @@ TEST(NsuVcAllocator, SameBidRoundRobins) {
 // old r_burst_vc_[id] array had -- two sources (different dst_id) with the
 // same rid now get distinct VCs instead of contending one array slot.
 TEST(NsuVcAllocator, SameRidDifferentDstYieldsDistinctVcs) {
-    SCENARIO("NSU VcAllocator: same rid from different dst_id can land on different VCs");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // Same rid (0x05), different dst_id: (0x10^0x05)%4=1 vs (0x11^0x05)%4=0.
@@ -145,7 +136,6 @@ TEST(NsuVcAllocator, SameRidDifferentDstYieldsDistinctVcs) {
 // the fixed VC exists to prevent). Fill the mapped VC to pending_depth_, then
 // a same-(dst,id) push must fail, and no flit lands on any other VC.
 TEST(NsuVcAllocator, FixedVcFullRefusesInsteadOfSpilling) {
-    SCENARIO("NSU VcAllocator: fixed VC full -> push_flit refuses, never spills to another VC");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/4);
     // dst_id=0x12, rid=0x05 -> (0x12^0x05)%4=3 -> VC3. Fill VC3 to the default
@@ -159,10 +149,7 @@ TEST(NsuVcAllocator, FixedVcFullRefusesInsteadOfSpilling) {
     EXPECT_EQ(arb.pending_size(0), 0u) << "refused push must not land on another VC";
 }
 
-// ---------------------------------------------------------------------------
 // Parameterized fixture — NUM_VC ∈ {1, 2, 4} (see INSTANTIATE below)
-// ---------------------------------------------------------------------------
-
 class NsuVcAllocatorParam : public ::testing::TestWithParam<std::size_t> {};
 
 // R is an ordered same-destination stream held on its mapped VC end to end, so
@@ -172,7 +159,6 @@ class NsuVcAllocatorParam : public ::testing::TestWithParam<std::size_t> {};
 TEST_P(NsuVcAllocatorParam, FixedVcStampedOnRNotB) {
     const std::size_t num_vc = GetParam();
 
-    SCENARIO("NSU VcAllocator: R leaves with fixed_vc=1, B with fixed_vc=0");
     ChannelModel noc(/*req*/ 64, /*rsp*/ 64);
     VcAllocator arb(noc.rsp_out(), num_vc);
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowR, 0, /*id=*/0x05, /*rlast=*/0)));
@@ -197,14 +183,10 @@ INSTANTIATE_TEST_SUITE_P(NumVcMatrix, NsuVcAllocatorParam,
                              return "NumVc" + std::to_string(info.param);
                          });
 
-// ---------------------------------------------------------------------------
 // Plain TEST() — not parameterized:
 //   Nsu_Degenerate_NumVc1_Passthrough : specifically tests NUM_VC=1 behavior
-// ---------------------------------------------------------------------------
 
 TEST(NsuVcAllocator, Nsu_Degenerate_NumVc1_Passthrough) {
-    SCENARIO("NSU VcAllocator: NUM_VC=1 routes B + R -> VC=0");
-
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     VcAllocator arb(noc.rsp_out(), /*num_vc=*/1);
     ASSERT_TRUE(arb.push_flit(make_rsp_flit(ni::AXI_CH_NarrowB)));

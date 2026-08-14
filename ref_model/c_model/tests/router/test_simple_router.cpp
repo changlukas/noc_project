@@ -1,5 +1,4 @@
 #include "router/simple_router.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 #include <optional>
 #include <tuple>
@@ -51,12 +50,9 @@ Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail, uint8_t src_i
 
 // --- tie_off(): pure-function translate of floo_router.sv:349-357 ----------
 
+// Standing ruling (IMPLEMENTATION_PLAN.md Stage 3b): LOCAL->LOCAL is exempt from tie_off's
+// NoLoopback rule -- self-targeted traffic is legal.
 TEST(SimpleRouterTieOff, LoopbackAndXYIllegalTurnsSkipped) {
-    SCENARIO(
-        "SimpleRouter tie_off(): NoLoopback (in==out on the four mesh directions) and XYRouteOpt "
-        "(South/North input -> East/West output) are skipped before arbitration; LOCAL->LOCAL is "
-        "exempt from NoLoopback (standing ruling, IMPLEMENTATION_PLAN.md Stage 3b: self-targeted "
-        "traffic is legal); every other pair stays connected");
     using RP = RouterPort;
     for (RP p : {RP::NORTH, RP::EAST, RP::SOUTH, RP::WEST}) EXPECT_TRUE(tie_off(p, p));
     EXPECT_FALSE(tie_off(RP::LOCAL, RP::LOCAL))
@@ -76,10 +72,6 @@ TEST(SimpleRouterTieOff, LoopbackAndXYIllegalTurnsSkipped) {
 // --- Construction / discipline guards ---------------------------------------
 
 TEST(SimpleRouterConstructionDeath, BadParametersAbort) {
-    SCENARIO(
-        "SimpleRouter: construction asserts — num_vc must be 1 (no VC arbiter translated), "
-        "ready_slack >= 1 (0 is unconditionally wrong, not a calibration point), "
-        "input_fifo_depth >= ready_slack + 1, own coordinate inside the mesh");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     SimpleRouterConfig bad_vc = center_cfg();
     bad_vc.num_vc = 2;
@@ -97,7 +89,6 @@ TEST(SimpleRouterConstructionDeath, BadParametersAbort) {
 }
 
 TEST(SimpleRouterDatapathDeath, MoreThanOneFlitPerLinkPerCycleAborts) {
-    SCENARIO("SimpleRouter: two push_flit calls on the same port before tick() -> assert+abort");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     SimpleRouter r(center_cfg());
     const auto W = static_cast<std::size_t>(RouterPort::WEST);
@@ -106,9 +97,6 @@ TEST(SimpleRouterDatapathDeath, MoreThanOneFlitPerLinkPerCycleAborts) {
 }
 
 TEST(SimpleRouterDatapathDeath, OverflowIgnoringReadyAborts) {
-    SCENARIO(
-        "SimpleRouter: a sender that ignores ready() and keeps pushing overflows the input FIFO "
-        "-> assert+abort loud, not silent (guard carried over from router::Router)");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     SimpleRouterConfig cfg = center_cfg();
     cfg.input_fifo_depth = 2;
@@ -135,11 +123,9 @@ TEST(SimpleRouterDatapathDeath, OverflowIgnoringReadyAborts) {
 
 // --- Zero-load latency: direct (output_fifo_depth==0) vs buffered ----------
 
+// floo_router.sv:466-470 (gen_no_out_fifo): with output_fifo_depth=0, delivery is 1 tick faster
+// than router::Router's registered path.
 TEST(SimpleRouterDatapath, ZeroLoadLatencyDirectModeTwoTicks) {
-    SCENARIO(
-        "SimpleRouter output_fifo_depth=0 (default): push at T, downstream receives after 2 "
-        "ticks — 1 fewer than router::Router's 3, no stage-3 register "
-        "(floo_router.sv:466-470 gen_no_out_fifo)");
     SimpleRouter r(center_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -152,10 +138,9 @@ TEST(SimpleRouterDatapath, ZeroLoadLatencyDirectModeTwoTicks) {
     ASSERT_EQ(east.received.size(), 1u);
 }
 
+// floo_router.sv:448-465 (gen_out_fifo): with output_fifo_depth>0, delivery matches
+// router::Router's 3-tick pipeline depth.
 TEST(SimpleRouterDatapath, ZeroLoadLatencyBufferedModeThreeTicks) {
-    SCENARIO(
-        "SimpleRouter output_fifo_depth>0: push at T, downstream receives after 3 ticks — "
-        "matches router::Router's pipeline depth (floo_router.sv:448-465 gen_out_fifo)");
     SimpleRouterConfig cfg = center_cfg();
     cfg.output_fifo_depth = 2;
     SimpleRouter r(cfg);
@@ -172,14 +157,9 @@ TEST(SimpleRouterDatapath, ZeroLoadLatencyBufferedModeThreeTicks) {
     ASSERT_EQ(east.received.size(), 1u);
 }
 
+// Regression guard for the S3a T6 node0 hang: tie_off's NoLoopback previously excluded LOCAL->LOCAL
+// from arbitration, stranding the flit in the LOCAL input FIFO forever.
 TEST(SimpleRouterDatapath, LocalToLocalSelfTrafficDelivers) {
-    SCENARIO(
-        "SimpleRouter: a flit injected on LOCAL addressed to this router's own coordinates "
-        "routes LOCAL->LOCAL and delivers to the LOCAL downstream -- the self-transaction path "
-        "(IMPLEMENTATION_PLAN.md Stage 3b standing ruling: 'LOCAL->LOCAL is LEGAL by design'). "
-        "Regression test for the S3a T6 node0 hang: tie_off's NoLoopback previously excluded "
-        "this arc from arbitration entirely, stranding the flit in the LOCAL input FIFO forever "
-        "(invisible to the credit Router's FABRIC-DUMP).");
     SimpleRouter r(center_cfg());
     FlitSink local;
     const auto L = static_cast<std::size_t>(RouterPort::LOCAL);
@@ -196,10 +176,6 @@ class SimpleRouterBackpressure
     : public ::testing::TestWithParam<std::tuple<std::size_t, std::size_t>> {};
 
 TEST_P(SimpleRouterBackpressure, ReadyDeassertsAtAlmostFullNoOverflow) {
-    SCENARIO(
-        "SimpleRouter: ready = (size + SLACK <= depth) — a sender that only pushes while ready() "
-        "holds never overflows the input FIFO, and ready deasserts before physically full "
-        "whenever slack > 0");
     auto [depth, slack] = GetParam();
     SimpleRouterConfig cfg = center_cfg();
     cfg.input_fifo_depth = depth;
@@ -238,11 +214,9 @@ INSTANTIATE_TEST_SUITE_P(DepthSlackGrid, SimpleRouterBackpressure,
 
 // --- Route lock: floo_route_select.sv:200-220 -------------------------------
 
+// floo_route_select.sv:200-220: a worm's body flit rides the head's latched route, never a fresh
+// recompute, even on a malformed mid-worm dst change.
 TEST(SimpleRouterRouteLock, LatchedRouteSurvivesAMidWormDstChange) {
-    SCENARIO(
-        "SimpleRouter route lock: a worm's body flit uses the head's latched route, not a fresh "
-        "recompute — even a malformed mid-worm dst change does not re-route it "
-        "(floo_route_select.sv:200-220, not recompute+assert)");
     SimpleRouter r(center_cfg());
     FlitSink east, south;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -293,10 +267,9 @@ void feed_packet(SimpleRouter& r, Packet& pkt, uint8_t dst, uint8_t vc) {
     ++pkt.next;
 }
 
+// floo_wormhole_arbiter.sv:40 (LockIn=1'b1): the per-output wormhole lock keeps a contending
+// packet's flits from interleaving into another packet.
 TEST(SimpleRouterWormhole, PacketsDoNotInterleavePerOutput) {
-    SCENARIO(
-        "SimpleRouter per-output wormhole lock: two inputs contend for the same output — packet "
-        "B's flits never appear inside packet A (floo_wormhole_arbiter.sv:40 LockIn=1'b1)");
     SimpleRouter r(center_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -323,9 +296,6 @@ TEST(SimpleRouterWormhole, PacketsDoNotInterleavePerOutput) {
 }
 
 TEST(SimpleRouterWormhole, LockedEmptyInputIdlesButDoesNotLoseLock) {
-    SCENARIO(
-        "SimpleRouter: a locked input's FIFO drains empty mid-worm — the output idles rather "
-        "than letting a competitor steal it (floo_wormhole_arbiter holds valid_q until last_q)");
     SimpleRouter r(center_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -367,10 +337,6 @@ TEST(SimpleRouterWormhole, LockedEmptyInputIdlesButDoesNotLoseLock) {
 }
 
 TEST(SimpleRouterWormhole, RrAdvancesPerPacket) {
-    SCENARIO(
-        "SimpleRouter: packet-level round-robin pointer advances on release — sustained "
-        "single-flit contention alternates grants (floo_wormhole_arbiter.sv rr_arb_tree, "
-        "LockIn=1'b1)");
     SimpleRouter r(center_cfg());
     FlitSink east;
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
@@ -394,12 +360,9 @@ TEST(SimpleRouterWormhole, RrAdvancesPerPacket) {
     }
 }
 
+// floo_wormhole_arbiter.sv:61-77 (valid_d/valid_q/last_q): the arbitration winner freezes the
+// instant a candidate goes valid, so a late-valid input cannot join that round.
 TEST(SimpleRouterWormhole, WinnerFrozenBeforeReadyExcludesLaterArrival) {
-    SCENARIO(
-        "SimpleRouter per-output arbitration winner is frozen the instant a candidate goes "
-        "valid, independent of downstream ready (floo_wormhole_arbiter.sv:61-77 "
-        "valid_d/valid_q/last_q) -- an input that goes valid AFTER the freeze must not join, let "
-        "alone win, that arbitration round even though backpressure has delayed the grant");
     SimpleRouter r(center_cfg());
     FlitSink east;
     east.always_ready = false;  // hold backpressure while both candidates arrive

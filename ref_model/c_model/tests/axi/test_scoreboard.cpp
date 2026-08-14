@@ -1,5 +1,4 @@
 #include "axi/scoreboard.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 namespace axi = ni::cmodel::axi;
@@ -9,7 +8,6 @@ namespace axi = ni::cmodel::axi;
 // pass size=5, len=0, burst=INCR (1-beat, full-bus) unless the case requires
 // otherwise — that combination matches the original full-width aligned geometry.
 TEST(Scoreboard, NoUpdateOnDecerr) {
-    SCENARIO("scoreboard: DECERR write does not update expected_, so later read sees no mismatch");
     axi::Scoreboard sb;
     std::vector<uint64_t> strb1(1, 0xFFFF'FFFFu);
     sb.handle_write_completed(axi::WriteResult{0x100,
@@ -29,7 +27,6 @@ TEST(Scoreboard, NoUpdateOnDecerr) {
 }
 
 TEST(Scoreboard, MismatchDetected) {
-    SCENARIO("scoreboard: read returning altered byte vs OKAY-written data raises 1 mismatch");
     axi::Scoreboard sb;
     std::vector<uint64_t> strb1(1, 0xFFFF'FFFFu);
     std::vector<uint8_t> wdata(axi::DATA_BYTES, 0x00u);
@@ -54,7 +51,6 @@ TEST(Scoreboard, MismatchDetected) {
 }
 
 TEST(Scoreboard, MatchPassesSilent) {
-    SCENARIO("scoreboard: exact write-then-read byte match produces zero mismatches");
     axi::Scoreboard sb;
     std::vector<uint64_t> strb1(1, 0xFFFF'FFFFu);
     std::vector<uint8_t> wdata(axi::DATA_BYTES, 0x00u);
@@ -79,8 +75,6 @@ TEST(Scoreboard, MatchPassesSilent) {
 }
 
 TEST(Scoreboard, ReadFromUnwrittenAddrReturnsFillDefault) {
-    SCENARIO(
-        "scoreboard: read of never-written addr returning fill-default value is not a mismatch");
     axi::Scoreboard sb;
     sb.handle_read_observed(axi::ReadResult{0x400,
                                             /*size*/ 5,
@@ -93,12 +87,10 @@ TEST(Scoreboard, ReadFromUnwrittenAddrReturnsFillDefault) {
     EXPECT_EQ(sb.mismatch_count(), 0u);
 }
 
+// IHI 0022 A3.4.1: unaligned-write masking must mirror axi_master.hpp's first-beat WSTRB mask --
+// this is the test that would have caught the scoreboard/master divergence when the two were fixed
+// separately.
 TEST(Scoreboard, UnalignedWriteBeat0PrefixNotCommitted) {
-    SCENARIO(
-        "scoreboard: unaligned write (addr=0x1003 size=5) must not mark the aligned-window "
-        "prefix bytes [0x1000,0x1003) as written -- mirrors axi_master.hpp's wire-level "
-        "first-beat WSTRB mask (IHI 0022 A3.4.1); this is the test that would have caught the "
-        "scoreboard/master divergence when the two were fixed separately");
     axi::Scoreboard sb;
     std::vector<uint8_t> data(axi::DATA_BYTES, 0x00u);
     for (int i = 0; i < axi::DATA_BYTES; ++i) data[i] = static_cast<uint8_t>(i + 1);  // never 0x00
@@ -124,7 +116,6 @@ TEST(Scoreboard, UnalignedWriteBeat0PrefixNotCommitted) {
 }
 
 TEST(Scoreboard, SparseWstrbByteMerge) {
-    SCENARIO("scoreboard: sparse WSTRB (0x0F) merges only enabled byte lanes into expected_");
     // 1-beat write with strb=0x0F: only byte lanes 0-3 land in expected_;
     // the remaining bytes stay at the default-fill (0x00). A subsequent read
     // observing 0xAA in lanes 0-3 and 0x00 elsewhere must produce zero mismatches.

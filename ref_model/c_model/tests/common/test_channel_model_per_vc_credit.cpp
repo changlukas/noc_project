@@ -1,5 +1,4 @@
 #include "common/channel_model.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include <gtest/gtest.h>
@@ -21,9 +20,6 @@ Flit make_flit_on_vc(uint8_t vc_id, uint8_t dst_id, uint8_t axi_ch) {
 }  // namespace
 
 TEST(ChannelModelPerVcCredit, ConfiguredDepth16ExhaustsAfter16Pushes) {
-    SCENARIO(
-        "ChannelModel: set_per_vc_depth(16) -> 16 successive pushes on VC=0 "
-        "exhaust credit; 17th push_flit and credit_avail both return false");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(16);
     for (int i = 0; i < 16; ++i) {
@@ -35,9 +31,6 @@ TEST(ChannelModelPerVcCredit, ConfiguredDepth16ExhaustsAfter16Pushes) {
 }
 
 TEST(ChannelModelPerVcCredit, PerVcDepthEnforcedIndependently) {
-    SCENARIO(
-        "ChannelModel: per_vc_depth=2 -> 2 pushes on VC=0 exhaust credit; "
-        "VC=1 still has full credit (per-VC counters independent)");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
@@ -47,9 +40,6 @@ TEST(ChannelModelPerVcCredit, PerVcDepthEnforcedIndependently) {
 }
 
 TEST(ChannelModelPerVcCredit, PopReleasesCredit) {
-    SCENARIO(
-        "ChannelModel: pop_flit on NSU side decrements NMU per-VC counter, "
-        "restoring credit_avail for the popped flit's VC");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
     ASSERT_TRUE(noc.req_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowAw)));
@@ -62,9 +52,6 @@ TEST(ChannelModelPerVcCredit, PopReleasesCredit) {
 }
 
 TEST(ChannelModelPerVcCredit, RspSidePerVcCreditMirrorsReq) {
-    SCENARIO(
-        "ChannelModel: NSU rsp side has symmetric per-VC credit; "
-        "credit_avail on NSU rsp_out queries response-direction counter");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 32);
     noc.set_per_vc_depth(2);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowB)));
@@ -76,11 +63,6 @@ TEST(ChannelModelPerVcCredit, RspSidePerVcCreditMirrorsReq) {
 }
 
 TEST(ChannelModelPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
-    SCENARIO(
-        "ChannelModel: credit_avail must return false when per-NSU queue is "
-        "full even if per-VC counter still has room (contract: credit_avail=true "
-        "must imply push_flit will succeed; otherwise VcAllocator tick aborts on "
-        "the 'lying downstream' guard)");
     // 1-NSU, req-queue depth 2, default per_vc_depth (unlimited)
     ChannelModel noc(/*req*/ 2, /*rsp*/ 32);
     // Fill the per-NSU queue to capacity on VC=0.
@@ -93,9 +75,6 @@ TEST(ChannelModelPerVcCredit, CreditAvailMatchesPushFlitForPerNsuFull) {
 }
 
 TEST(ChannelModelPerVcCredit, RspSideCreditAvailMatchesPushFlitForRspQueueFull) {
-    SCENARIO(
-        "ChannelModel rsp side: credit_avail returns false when rsp_q is full "
-        "even if per-VC counter has room (same contract as req side)");
     ChannelModel noc(/*req*/ 32, /*rsp*/ 2);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowB)));
     ASSERT_TRUE(noc.rsp_out().push_flit(make_flit_on_vc(0, 0, ni::AXI_CH_NarrowB)));

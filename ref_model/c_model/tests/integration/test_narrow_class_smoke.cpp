@@ -23,7 +23,6 @@
 #include "axi/scoreboard.hpp"
 #include "common/channel_model.hpp"
 #include "common/channel_model_params.hpp"
-#include "common/scenario.hpp"
 #include "common/tmp_path.hpp"
 #include "nmu/nmu.hpp"
 #include "nmu/port_params.hpp"
@@ -52,7 +51,7 @@ constexpr uint8_t kNsuSrcId = 0x02;
 // 4 * 0x100000000 = 0x400000000, size 0x1000.
 constexpr uint64_t kConfigBase = 0x400000000;
 constexpr std::size_t kConfigWindowSize = 0x1000;  // the SAM's config tile size
-constexpr uint64_t kMemoryAddr = 0x2000;  // inside node (0,0)'s memory tile
+constexpr uint64_t kMemoryAddr = 0x2000;           // inside node (0,0)'s memory tile
 
 std::string hex_bytes(unsigned first, unsigned count) {
     std::string out;
@@ -84,7 +83,7 @@ std::string hex0x(uint64_t v) {
 class DualWindowMemoryPort : public axi::IMemoryPort {
   public:
     DualWindowMemoryPort(uint64_t data_base, std::size_t data_size, uint64_t config_base,
-                          std::size_t config_size, std::size_t write_lat, std::size_t read_lat)
+                         std::size_t config_size, std::size_t write_lat, std::size_t read_lat)
         : data_base_(data_base),
           data_size_(data_size),
           config_base_(config_base),
@@ -175,10 +174,6 @@ transactions:
 }  // namespace
 
 TEST(NarrowClassSmoke, ConfigSpaceEndToEndZeroMismatch) {
-    SCENARIO(
-        "S2 T2d narrow class smoke: WRAP + INCR narrow writes at 3 distinct byte lanes, one "
-        "data-class write, all read back bit-perfect through the real NMU/NSU pipeline");
-
     const std::string yaml_path = write_narrow_smoke_scenario();
     auto sc = axi::load_scenario(yaml_path);
 

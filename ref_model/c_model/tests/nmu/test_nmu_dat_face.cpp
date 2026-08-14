@@ -12,7 +12,6 @@
 // (backpressure one face, the other still flows), and that the two Nmu::tick()
 // ingresses (RSP + DAT) drain independently within a single tick.
 #include "axi/types.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nmu/nmu_standalone.hpp"
@@ -90,12 +89,6 @@ Flit make_data_r(uint8_t rid, uint8_t src_id, uint8_t dst_id) {
 // pop_dat_req_flit(). The {AW,W} lock must hold on the DAT pair exactly as it
 // does on REQ's (same WormholeArbiter class, per-network instance).
 TEST(NmuDatFace, EgressPushPopViaMocksPreservesAwWOrder) {
-    SCENARIO(
-        "NMU DAT egress: push DataAw into dat_wormhole_arbiter().input(0), DataW into input(1) "
-        "(bypassing Packetize's own real steering, to test the arbiter in isolation). AW drains "
-        "first (locks {AW,W}), then W (unlocks). pop_dat_req_flit() must return them in that "
-        "order with axi_ch preserved.");
-
     NmuStandalone nmu(make_cfg(0x12));
     ASSERT_TRUE(nmu.nmu().dat_wormhole_arbiter().input(0).push_flit(make_data_aw(0x05, 0x01)));
     ASSERT_TRUE(nmu.nmu().dat_wormhole_arbiter().input(1).push_flit(make_data_w(0x01)));
@@ -118,11 +111,6 @@ TEST(NmuDatFace, EgressPushPopViaMocksPreservesAwWOrder) {
 // WormholeArbiter+VcAllocator pair with its own downstream sink -- still
 // drains normally. REQ backpressure must not reach DAT.
 TEST(NmuDatFace, ReqBackpressureDoesNotStallDat) {
-    SCENARIO(
-        "NMU: REQ face credit-blocked (seed=0) while a DAT AW+W pair is pushed directly. The DAT "
-        "face must still drain to pop_dat_req_flit() -- proving the two per-network arbiter pairs "
-        "do not share backpressure state.");
-
     NmuStandalone nmu(make_cfg(0x12));
     nmu.enable_req_ready_track();  // ready defaults false: REQ face blocked from tick 0
     ASSERT_FALSE(nmu.req_credit_avail());
@@ -142,11 +130,6 @@ TEST(NmuDatFace, ReqBackpressureDoesNotStallDat) {
 // (an AR pushed through the real AxiSlavePort -> Rob -> Packetize -> REQ
 // wormhole/VC path, exactly as today).
 TEST(NmuDatFace, DatBackpressureDoesNotStallReq) {
-    SCENARIO(
-        "NMU: DAT face credit-blocked (seed=0) while a normal AR is issued through the AXI slave "
-        "port. The REQ face (default credit-OFF, i.e. the ready/valid predicate -- no counter "
-        "consulted) must still produce the AR flit.");
-
     NmuStandalone nmu(make_cfg(0x12));
     nmu.enable_dat_noc_credit(/*seed=*/0);
     ASSERT_FALSE(nmu.dat_req_credit_avail());
@@ -173,11 +156,6 @@ TEST(NmuDatFace, DatBackpressureDoesNotStallReq) {
 // nmu::Depacketize's b_q_/r_q_ output queues with the RSP ingress and the
 // RoBless drain path (default RobMode) picks it up identically.
 TEST(NmuDatFace, DatIngressDeliversDataRToAxiSlavePort) {
-    SCENARIO(
-        "NMU: issue an AR (drains on REQ, unaffected by S3a T4), then inject the matching R "
-        "response via inject_dat_rsp_flit() (the DAT ingress) instead of inject_rsp_flit() (RSP). "
-        "The beat must still surface at axi_slave_port().pop_r().");
-
     constexpr uint8_t kSrcId = 0x12;
     constexpr uint8_t kArId = 0x07;
     NmuStandalone nmu(make_cfg(kSrcId));
@@ -212,12 +190,6 @@ TEST(NmuDatFace, DatIngressDeliversDataRToAxiSlavePort) {
 // Nmu::tick() call (Depacketize::tick() drains both ingresses per S3a §5.4 —
 // neither one's pending_ stash blocks the other).
 TEST(NmuDatFace, RspAndDatIngressesDrainIndependentlyInOneTick) {
-    SCENARIO(
-        "NMU: outstanding AR for id=1 and id=2, then inject the two R responses in the same "
-        "cycle -- id=1 via inject_rsp_flit (RSP ingress), id=2 via inject_dat_rsp_flit (DAT "
-        "ingress). A single Depacketize.tick() must drain both ingresses (each up to their own "
-        "queue depth), matching the class comment's independent-pending_ claim.");
-
     constexpr uint8_t kSrcId = 0x12;
     NmuStandalone nmu(make_cfg(kSrcId));
 

@@ -21,7 +21,6 @@
 #include "axi/axi_master.hpp"
 #include "axi/axi_slave.hpp"
 #include "axi/memory.hpp"
-#include "common/scenario.hpp"
 #include "common/tmp_path.hpp"
 #include <filesystem>
 #include <fstream>

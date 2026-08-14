@@ -1,12 +1,9 @@
 #include "axi/memory.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 namespace axi = ni::cmodel::axi;
 
 TEST(Memory, InBoundsWriteImmediateResp_ZeroLatency) {
-    SCENARIO(
-        "Memory: zero-latency in-bounds write yields immediate OKAY response with matching tag/id");
     axi::Memory mem(0x1000, 0x1000, 0, 0);
     axi::MemWriteReq req{};
     req.addr = 0x1000;
@@ -25,7 +22,6 @@ TEST(Memory, InBoundsWriteImmediateResp_ZeroLatency) {
 }
 
 TEST(Memory, WriteLatencyCountdown) {
-    SCENARIO("Memory: write_latency=5 holds response for 4 ticks, emits OKAY on 5th tick");
     axi::Memory mem(0x1000, 0x1000, 5, 0);
     axi::MemWriteReq req{};
     req.addr = 0x1000;
@@ -48,7 +44,6 @@ TEST(Memory, WriteLatencyCountdown) {
 }
 
 TEST(Memory, ReadLatencyCountdown) {
-    SCENARIO("Memory: read_latency=3 holds response for 2 ticks, emits OKAY on 3rd tick");
     axi::Memory mem(0x1000, 0x1000, 0, 3);
     axi::MemReadReq req{};
     req.addr = 0x1000;
@@ -69,7 +64,6 @@ TEST(Memory, ReadLatencyCountdown) {
 // (or past) a word that is itself out of bounds — e.g., addr=0x1100 in a
 // [0x1000, 0x1100) region.
 TEST(Memory, OobWriteReturnsDecerr) {
-    SCENARIO("Memory: write to addr past region returns DECERR (lane-positioned bounds check)");
     axi::Memory mem(0x1000, 0x100, 0, 0);
     axi::MemWriteReq req{};
     req.addr = 0x1100;
@@ -86,7 +80,6 @@ TEST(Memory, OobWriteReturnsDecerr) {
 }
 
 TEST(Memory, OobReadReturnsDecerr) {
-    SCENARIO("Memory: read from addr past region returns DECERR (lane-positioned bounds check)");
     axi::Memory mem(0x1000, 0x100, 0, 0);
     axi::MemReadReq req{};
     req.addr = 0x1100;
@@ -102,7 +95,6 @@ TEST(Memory, OobReadReturnsDecerr) {
 }
 
 TEST(Memory, OobWriteDoesNotMutateStorage) {
-    SCENARIO("Memory: DECERR write short-circuits before strb apply, sentinel bytes unchanged");
     // Lay down a sentinel byte inside the in-bounds last word (0x10E0..0x10FF),
     // then issue an OOB write at the next word boundary. No storage byte should
     // change (DECERR short-circuits the strb apply loop).
@@ -121,7 +113,6 @@ TEST(Memory, OobWriteDoesNotMutateStorage) {
 }
 
 TEST(Memory, WstrbByteMaskMergeWithFill) {
-    SCENARIO("Memory: WSTRB=0b1010 writes 0x00 only to enabled lanes, others keep fill=0xFF");
     axi::Memory mem(0x1000, 0x100, 0, 0, 32, 0xFF);
     axi::MemWriteReq req{};
     req.addr = 0x1000;
@@ -140,7 +131,6 @@ TEST(Memory, WstrbByteMaskMergeWithFill) {
 }
 
 TEST(Memory, BackpressureSubmitReturnsFalseWhenQueueFull) {
-    SCENARIO("Memory: submit_write returns false at queue full (depth=4), accepts again after pop");
     axi::Memory mem(0x1000, 0x10000, 10, 10, 4);
     axi::MemWriteReq req{};
     req.addr = 0x1000;

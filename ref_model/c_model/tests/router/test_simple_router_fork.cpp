@@ -4,7 +4,6 @@
 // overlapping-tree wedge on REQ. Branch geometry cells are hand-computed from
 // floo_route_xymask.sv:104-164 the same way test_route_mask.cpp verifies them;
 // this file tests the ROUTER's use of the fork set, not the mask math.
-#include "common/scenario.hpp"
 #include "router/route_mask.hpp"
 #include "router/simple_router.hpp"
 
@@ -110,10 +109,6 @@ void expect_worm_in_order(const FlitSink& sink, int n_flits, const char* label) 
 // --- Fork delivery ---------------------------------------------------------
 
 TEST(SimpleRouterFork, ThreeWayInclLocalReplicatesWholeWorm) {
-    SCENARIO(
-        "3-way fork {LOCAL,EAST,NORTH} at (1,1): a 4-flit collective worm is replicated "
-        "byte-for-byte and in order to all three branches; the input FIFO slot frees once per "
-        "flit (all-branches-handshaked, F3); every branch lock releases at its own tail grant");
     SimpleRouter r(center_cfg());
     FlitSink local, north, east;
     r.set_downstream(L, local);
@@ -144,11 +139,9 @@ TEST(SimpleRouterFork, ThreeWayInclLocalReplicatesWholeWorm) {
     EXPECT_EQ(r.route_locked(W, 0), 0u) << "route latch not released at the tail";
 }
 
+// S3a ruling: LOCAL->LOCAL is a real fork branch -- floo_router.sv:383-385's ignore_routes loopback
+// exclusion was not ported.
 TEST(SimpleRouterFork, LocalInputWithLocalBranch) {
-    SCENARIO(
-        "LOCAL->LOCAL is a real branch (S3a ruling; no ignore_routes loopback exclusion, "
-        "floo_router.sv:383-385 not ported): a worm injected at the LOCAL input with fork "
-        "{LOCAL,NORTH} ejects locally AND spreads north");
     SimpleRouter r(center_cfg());
     FlitSink local, north;
     r.set_downstream(L, local);
@@ -168,12 +161,6 @@ TEST(SimpleRouterFork, LocalInputWithLocalBranch) {
 // --- W replication under branch backpressure -------------------------------
 
 TEST(SimpleRouterFork, MidBurstBranchStallStallsWormWithoutSkipOrReorder) {
-    SCENARIO(
-        "2-way fork {E,N}: NORTH deasserts ready mid-worm — the worm stalls at the beat NORTH "
-        "cannot take, EAST leads by at most the one parked beat (F2/F3), no beat is skipped or "
-        "reordered, and the introspection shows the live {expected,done} masks with both branch "
-        "locks held; NORTH re-asserting ready completes the worm and releases per-branch at the "
-        "tail");
     SimpleRouter r(center_cfg());
     FlitSink north, east;
     r.set_downstream(N, north);
@@ -214,11 +201,6 @@ TEST(SimpleRouterFork, MidBurstBranchStallStallsWormWithoutSkipOrReorder) {
 // --- Unicast degeneracy -----------------------------------------------------
 
 TEST(SimpleRouterFork, OneHotForkSetIsBitIdenticalToPlainUnicast) {
-    SCENARIO(
-        "Unicast-degenerate: a collective worm whose fork set at this router is one-hot "
-        "({EAST} pass-through) takes the immediate-pop path — lockstep-identical to a plain "
-        "unicast worm in per-tick deliveries and FIFO occupancy, and byte-for-byte identical "
-        "after clearing the two collective header fields");
     SimpleRouter ra(center_cfg()), rb(center_cfg());
     FlitSink ea, eb;
     ra.set_downstream(E, ea);
@@ -256,10 +238,6 @@ TEST(SimpleRouterFork, OneHotForkSetIsBitIdenticalToPlainUnicast) {
 // --- Concurrent trees -------------------------------------------------------
 
 TEST(SimpleRouterFork, DisjointTreesProgressConcurrently) {
-    SCENARIO(
-        "Two forks with disjoint branch sets through one router ({E,N} from WEST, {L,S} from "
-        "NORTH) both complete, and their delivery windows overlap in time — neither tree "
-        "serializes behind the other");
     SimpleRouter r(center_cfg());
     FlitSink local, north, east, south;
     r.set_downstream(L, local);
@@ -299,12 +277,6 @@ TEST(SimpleRouterFork, DisjointTreesProgressConcurrently) {
 // --- AR interleave (design T3b row, Codex-constructed case) ------------------
 
 TEST(SimpleRouterFork, PreFrozenArDelaysABranchButNeverInterleavesTheWorm) {
-    SCENARIO(
-        "A branch output freezes on a competing unicast AR BEFORE the multicast AW head "
-        "arrives (the winner freeze is independent of downstream ready). Precise claim: no AR "
-        "lands inside an already-started branch worm — the early NORTH branch sits idle between "
-        "AW and W while EAST is still owed to the AR, and a second AR offered mid-worm waits "
-        "behind the tail");
     SimpleRouter r(center_cfg());
     FlitSink local, north, east;
     r.set_downstream(L, local);
@@ -365,12 +337,6 @@ TEST(SimpleRouterFork, PreFrozenArDelaysABranchButNeverInterleavesTheWorm) {
 // --- Multi-hop traversal (divergent one-hot pass-through hop) ---------------
 
 TEST(SimpleRouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
-    SCENARIO(
-        "2-router chain: a multicast worm (dst (0,1), src (0,0), mask x=3) forks {E,N} at "
-        "(2,0) and {N} at (3,0) — at the spread-end hop the one-hot fork direction (NORTH) "
-        "diverges from the header's dst_id XY route (WEST). The worm must traverse cleanly end to "
-        "end: the continuation branch-set check keys on collective_op, so a legal one-hot "
-        "collective hop is set-checked but never mistaken for unicast (T3's Critical)");
     SimpleRouterConfig ca;
     ca.mesh_x_dim = 4;
     ca.mesh_y_dim = 2;
@@ -403,13 +369,10 @@ TEST(SimpleRouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
 
 // --- §1.2 wedge on REQ: overlapping trees, opposite acquisition order -------
 
+// spec §1.2/1.3: R1 (class-independent) DEADLOCKS on REQ under opposite-order multicast tree
+// acquisition exactly as on DAT; this test passes by detecting the no-progress state, not by
+// avoiding it.
 TEST(SimpleRouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
-    SCENARIO(
-        "§1.2/§1.3 detection a, REQ side: two overlapping multicast trees acquire N@R1 and "
-        "N@R2 in opposite orders under ready/valid backpressure (worm >> input FIFO depth). "
-        "R1 is class-independent — the ported discipline DEADLOCKS here exactly as it does on "
-        "DAT. This test PASSES by detecting the no-progress state within the derived tick "
-        "bound and attributing it through the fork introspection");
     // Row y=0 of a 4x2 mesh. M1 from (0,0) and M2 from (3,0) both multicast to
     // the full row above (dst (0,1), mask x=3): fork {E,N} at every
     // source-row router for M1, {W,N} for M2. M1 locks N@R1 then needs N@R2;
@@ -506,10 +469,6 @@ TEST(SimpleRouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBoun
 // --- Fault injection --------------------------------------------------------
 
 TEST(SimpleRouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
-    SCENARIO(
-        "Fault injection: a collective flit whose fork set at this router is EMPTY (misrouted "
-        "multicast) is fatal — the all-branches-done pop condition would otherwise be "
-        "trivially true and silently drop the flit while freeing its FIFO slot");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -525,11 +484,6 @@ TEST(SimpleRouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
 }
 
 TEST(SimpleRouterForkDeath, ContinuationBranchSetMismatchAborts) {
-    SCENARIO(
-        "Fault injection (src-anchored continuation check): a W continuation whose recomputed "
-        "branch set differs from the latched head set — shrunk, enlarged, or corrupted to "
-        "ONE-HOT — aborts. The one-hot case is the T3 Critical in reverse: keying the check on "
-        "multi-hotness would skip it, so it keys on collective_op");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     // Shrunk continuation set: head {L,E,N} (mask x=2,y=2), beat {L,N}.
     EXPECT_DEATH(
@@ -596,12 +550,6 @@ TEST(SimpleRouterForkDeath, ContinuationBranchSetMismatchAborts) {
 }
 
 TEST(SimpleRouterForkDeath, UnicastFrontUnderAMultiHotLatchAborts) {
-    SCENARIO(
-        "Fault injection (T3b follow-up): a multi-hot route latch can only have been seeded by a "
-        "collective head, and in-order link delivery means the front under a held latch belongs "
-        "to that worm — so a UNICAST front there is a continuation that lost its collective_op "
-        "bit, and it aborts. Deliberately NOT extended to one-hot latches: that subcase is "
-        "bit-for-bit the legal latch-wins unicast shape");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {

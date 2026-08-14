@@ -6,7 +6,6 @@
 // floo_route_xymask.sv:200-237 the same way test_route_mask.cpp verifies them;
 // this file tests the ROUTER's use of that set, not the mask math.
 #include "axi/types.hpp"
-#include "common/scenario.hpp"
 #include "router/route_mask.hpp"
 #include "router/simple_router.hpp"
 
@@ -121,12 +120,9 @@ void push_collector_set(SimpleRouter& r, Resp local, Resp north, Resp east) {
 
 // --- Fire condition ---------------------------------------------------------
 
+// floo_reduction_sync.sv:39-45 (stream_join_dynamic): the join fires only once every expected input
+// holds a head of the same collect; partial arrivals wait with no partial merge.
 TEST(SimpleRouterJoin, PartialArrivalWaitsForEveryExpectedInput) {
-    SCENARIO(
-        "floo_reduction_sync.sv:39-45 + stream_join_dynamic: the join fires only when EVERY "
-        "expected input holds a head of the same collect. With two of three replicas present "
-        "nothing is forwarded and both wait in their input FIFOs (no state, no partial merge); "
-        "the third arriving completes the merge into exactly ONE B");
     SimpleRouter r(center_cfg());
     FlitSink local;
     r.set_downstream(L, local);
@@ -144,10 +140,6 @@ TEST(SimpleRouterJoin, PartialArrivalWaitsForEveryExpectedInput) {
 }
 
 TEST(SimpleRouterJoin, GrantConsumesEveryContributorExactlyOnce) {
-    SCENARIO(
-        "stream_join_dynamic all-ready (inp_ready_o[i] = oup_valid & oup_ready & sel_i[i]): the "
-        "merge consumes every contributing head in the SAME handshake — all three input FIFOs "
-        "empty, one B out, and no re-fire on later ticks");
     SimpleRouter r(center_cfg());
     FlitSink local;
     r.set_downstream(L, local);
@@ -162,12 +154,6 @@ TEST(SimpleRouterJoin, GrantConsumesEveryContributorExactlyOnce) {
 }
 
 TEST(SimpleRouterJoin, SizeOneExpectedSetForwardsThroughTheJoinPath) {
-    SCENARIO(
-        "A one-member expected set is a legitimate join, not a unicast: the geometry produces it "
-        "routinely at pass-through hops. CollectB is excluded from the unicast candidate scan "
-        "outright, so a size-1 set that fell through to that path would be forwarded by nobody — "
-        "a hang. Router (2,1), collector (0,1), member set {(1,1),(3,1)}: expected inputs "
-        "{EAST}, merged B leaves WEST");
     SimpleRouterConfig cfg;
     cfg.x = 2;
     cfg.y = 1;
@@ -184,12 +170,9 @@ TEST(SimpleRouterJoin, SizeOneExpectedSetForwardsThroughTheJoinPath) {
 
 // --- Survivor selection -----------------------------------------------------
 
+// floo_reduction_arbiter.sv:100-106,117: with no error, the survivor is the lzc-selected
+// (lowest-index) input -- common_cells lzc defaults to trailing-zero mode.
 TEST(SimpleRouterJoin, AllOkaySurvivorIsTheLowestIndexInput) {
-    SCENARIO(
-        "floo_reduction_arbiter.sv:100-106,117 — with no error anywhere the survivor is the "
-        "lzc-selected input. common_cells lzc defaults to MODE=1'b0 (trailing zero) and is "
-        "instantiated with WIDTH only, so cnt_o is the LOWEST set index: the LOCAL replica "
-        "(route index 0) survives, forwarded as a whole flit");
     SimpleRouter r(center_cfg());
     FlitSink local;
     r.set_downstream(L, local);
@@ -204,11 +187,9 @@ TEST(SimpleRouterJoin, AllOkaySurvivorIsTheLowestIndexInput) {
               make_collect_b(kCollector, kSrcLocal, kSetMask, Resp::OKAY).raw());
 }
 
+// floo_reduction_arbiter.sv:116-131: expected inputs are scanned in route-index order; an SLVERR
+// member replaces the default lzc-selected survivor wholesale.
 TEST(SimpleRouterJoin, SingleSlverrAnywhereBecomesTheSurvivor) {
-    SCENARIO(
-        "floo_reduction_arbiter.sv:116-131: the expected inputs are scanned in route-index order "
-        "and an SLVERR replaces the default survivor wholesale — here the EAST member (index 2) "
-        "wins over the lzc-selected LOCAL one");
     SimpleRouter r(center_cfg());
     FlitSink local;
     r.set_downstream(L, local);
@@ -221,9 +202,6 @@ TEST(SimpleRouterJoin, SingleSlverrAnywhereBecomesTheSurvivor) {
 }
 
 TEST(SimpleRouterJoin, FirstSlverrInRouteIndexOrderWins) {
-    SCENARIO(
-        "Two members report SLVERR (NORTH index 1, EAST index 2). The scan breaks at the FIRST "
-        "one, so the survivor is deterministic for a given same-cycle valid set: NORTH");
     SimpleRouter r(center_cfg());
     FlitSink local;
     r.set_downstream(L, local);
@@ -233,11 +211,9 @@ TEST(SimpleRouterJoin, FirstSlverrInRouteIndexOrderWins) {
     EXPECT_EQ(local.received[0].get_header_field("src_id"), kSrcNorth);
 }
 
+// design §3.2 step 4: documented divergence from AXI worst-response -- the RTL scan tests SLVERR
+// only, so a DECERR member does not win the merge.
 TEST(SimpleRouterJoin, DecerrIsNotElevated) {
-    SCENARIO(
-        "Documented divergence from AXI worst-response (design §3.2 step 4): the RTL scan tests "
-        "for RESP_SLVERR only, so a DECERR member does NOT win. With DECERR at EAST and OKAY "
-        "elsewhere the merged B is the lzc-selected OKAY one");
     SimpleRouter r(center_cfg());
     FlitSink local;
     r.set_downstream(L, local);
@@ -250,12 +226,9 @@ TEST(SimpleRouterJoin, DecerrIsNotElevated) {
 
 // --- Priority vs the frozen unicast winner ----------------------------------
 
+// floo_output_arbiter.sv:126-139: a unicast R that already froze the output keeps its freeze -- an
+// arriving merged B does not steal it.
 TEST(SimpleRouterJoin, ReductionWinsPriorityWithoutStealingTheFrozenWinner) {
-    SCENARIO(
-        "floo_output_arbiter.sv:126-139 (prio stream_arbiter, reduction at index 0): a unicast R "
-        "has already frozen the LOCAL output while it is backpressured. When the output accepts "
-        "again the merged B goes first, but the R is not stolen — its freeze holds and it grants "
-        "on the next tick, so the sink sees B then R");
     SimpleRouter r(center_cfg());
     FlitSink local;
     local.always_ready = false;
@@ -284,13 +257,10 @@ TEST(SimpleRouterJoin, ReductionWinsPriorityWithoutStealingTheFrozenWinner) {
 
 // --- Worm integrity: the join must not preempt a worm in flight -------------
 
+// Deliberate divergence from floo_output_arbiter.sv:126-139 (which arbitrates per beat): a
+// completed join inside an in-progress worm waits for the tail so the merged B never splits an R
+// burst.
 TEST(SimpleRouterJoin, JoinHoldsWhileItsOutputIsMidWorm) {
-    SCENARIO(
-        "OUR RULE (deliberate divergence from floo_output_arbiter.sv:126-139, whose prio "
-        "stream_arbiter arbitrates per beat): a completed join whose output is INSIDE a worm "
-        "waits for the tail. RSP R bursts are multi-beat worms, so granting per beat would push "
-        "the merged B between R beats. The join is stateless and re-fires, so holding costs "
-        "latency only — the burst stays contiguous and the B lands after the tail");
     SimpleRouter r(center_cfg());
     FlitSink local;
     r.set_downstream(L, local);
@@ -324,14 +294,6 @@ TEST(SimpleRouterJoin, JoinHoldsWhileItsOutputIsMidWorm) {
 }
 
 TEST(SimpleRouterJoinChain, MidWormHoldKeepsTheDownstreamLatchIntact) {
-    SCENARIO(
-        "2-router chain, the shape that shows what a mid-worm join grant costs downstream. A "
-        "size-1 collect at (1,1) shares the EAST output with an R burst headed to (3,1). If the "
-        "B were pushed between beats, (2,1) would see it at the front of an input FIFO under the "
-        "R worm's held one-hot latch: its route ({LOCAL}, the collector) differs from the latch "
-        "({EAST}), so the continuation check would FALSELY ABORT on legal traffic. Holding to "
-        "the tail keeps the latch honest — the burst arrives contiguous and the B follows, "
-        "waiting there for its NORTH sibling");
     SimpleRouterConfig ca = center_cfg();  // (1,1)
     SimpleRouterConfig cb = center_cfg();
     cb.x = 2;  // (2,1)
@@ -372,11 +334,9 @@ TEST(SimpleRouterJoinChain, MidWormHoldKeepsTheDownstreamLatchIntact) {
 
 // --- Fault injection --------------------------------------------------------
 
+// design §3.1: CollectB is the (opcode, axi_ch) pair, not the opcode alone -- a collective flit on
+// a read channel is fatal since reads are unicast everywhere.
 TEST(SimpleRouterJoinDeath, NonBCollectiveOnRspAborts) {
-    SCENARIO(
-        "Fault injection for the class guard (design §3.1): CollectB is the (opcode, axi_ch) "
-        "PAIR, not the opcode alone. A collective flit on a read channel — the only non-B "
-        "channel that can reach an RSP router — is fatal; reads are unicast everywhere");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -391,12 +351,9 @@ TEST(SimpleRouterJoinDeath, NonBCollectiveOnRspAborts) {
         "non-B collective flit");
 }
 
+// spec §6 :356: collective_op codes 2-3 are reserved; classification keys on `!= UNICAST`, so an
+// unrejected reserved code would silently become a CollectB or fork.
 TEST(SimpleRouterJoinDeath, ReservedCollectiveOpCodeAborts) {
-    SCENARIO(
-        "Fault injection: collective_op codes 2-3 are reserved (spec §6 :356). Every collective "
-        "classification here keys on `!= UNICAST` — which is what keeps a one-hot collective on "
-        "the collective path — so a reserved code would silently become a CollectB on RSP (or a "
-        "fork on REQ). The code itself is rejected, catching both");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -413,11 +370,6 @@ TEST(SimpleRouterJoinDeath, ReservedCollectiveOpCodeAborts) {
 }
 
 TEST(SimpleRouterJoinDeath, EmptyExpectedInputSetAborts) {
-    SCENARIO(
-        "Fault injection: a CollectB whose expected-input set at this router is EMPTY. Upstream "
-        "stream_join_dynamic simply never fires on an empty sel; here it is fatal, because an "
-        "all-satisfied-by-vacuity join would swallow the B and hang the write. Router (1,1), "
-        "collector (0,0), member set {(2,2),(3,2)} — the collect tree never touches (1,1)");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -433,11 +385,6 @@ TEST(SimpleRouterJoinDeath, EmptyExpectedInputSetAborts) {
 }
 
 TEST(SimpleRouterJoinDeath, CollectBOffItsOwnExpectedInputSetAborts) {
-    SCENARIO(
-        "Fault injection: a CollectB arriving on a port the geometry does not expect it from "
-        "(echoed mask disagrees with the delivery path). Upstream would forward it and never "
-        "consume it — sel_i[i] gates inp_ready_o[i] — so it would re-fire every cycle. Same "
-        "size-1 fixture as the forward test, but injected at LOCAL instead of EAST");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -456,11 +403,6 @@ TEST(SimpleRouterJoinDeath, CollectBOffItsOwnExpectedInputSetAborts) {
 }
 
 TEST(SimpleRouterJoinDeath, JoinedReplicasDisagreeAborts) {
-    SCENARIO(
-        "Fault injection for the OUR RULE agreement assert on top of floo_reduction_sync.sv:"
-        "41-43 (which enforces only dst_id + collective_mask): replicas of ONE multicast AW "
-        "carry the NMU's pre-fanout ordering_tag, the same class, and the same bid. Each "
-        "disagreement means two different writes were about to become one B");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     // ordering_tag mismatch
     EXPECT_DEATH(

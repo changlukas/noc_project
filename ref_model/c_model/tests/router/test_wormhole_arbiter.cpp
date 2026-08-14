@@ -1,6 +1,5 @@
 #include "ni/wormhole_arbiter.hpp"
 #include "common/per_channel_capture.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include <gtest/gtest.h>
@@ -30,9 +29,6 @@ Flit make_flit(uint8_t axi_ch, uint64_t flit_tail, uint64_t wlast = 0) {
 // ---- Functional tests (8) ----
 
 TEST(NocWormholeArbiter, PassThroughNoPairing) {
-    SCENARIO(
-        "WormholeArbiter NSU mode (2 inputs, no pairing): each pushed flit "
-        "is its own packet (flit_tail=1), alternating push + tick drain in round-robin order");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/2, {});
 
@@ -44,12 +40,9 @@ TEST(NocWormholeArbiter, PassThroughNoPairing) {
     EXPECT_FALSE(arb.is_locked());
 }
 
+// Self-lock is the default S3a T5's DatMergeWrap relies on: a multi-flit worm locks the arbiter to
+// its own input until the tail drains.
 TEST(NocWormholeArbiter, SelfLockNoPairingExcludesOtherInputUntilTail) {
-    SCENARIO(
-        "WormholeArbiter with no pairing: a multi-flit worm on one input (head "
-        "flit_tail=0) locks the arbiter to that SAME input (self-lock, the default "
-        "used by S3a T5's DatMergeWrap); a competing flit on the other input is "
-        "excluded from arbitration until the locked worm's tail (flit_tail=1) drains");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/2, {});
 
@@ -78,9 +71,6 @@ TEST(NocWormholeArbiter, SelfLockNoPairingExcludesOtherInputUntilTail) {
 }
 
 TEST(NocWormholeArbiter, AwTriggersLock) {
-    SCENARIO(
-        "WormholeArbiter NMU mode (3 inputs, pairing aw->w): pushing an AW "
-        "(header.flit_tail=0) to aw input + tick locks the arbiter to the w input");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
@@ -92,9 +82,6 @@ TEST(NocWormholeArbiter, AwTriggersLock) {
 }
 
 TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock) {
-    SCENARIO(
-        "WormholeArbiter NMU mode: while locked to w input (after AW), an "
-        "AR pushed to ar input cannot be drained until W with wlast unlocks");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
@@ -109,10 +96,6 @@ TEST(NocWormholeArbiter, ArCannotInterleaveDuringLock) {
 }
 
 TEST(NocWormholeArbiter, MultiBeatWBurstFlowsAndUnlocks) {
-    SCENARIO(
-        "WormholeArbiter NMU mode: AW + 3 W beats (last 2 non-wlast, 3rd "
-        "wlast) flow through in ORDER (AW, W, W, W-last) and arbiter "
-        "unlocks after W with wlast");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
@@ -151,10 +134,6 @@ TEST(NocWormholeArbiter, MultiBeatWBurstFlowsAndUnlocks) {
 }
 
 TEST(NocWormholeArbiter, NocRspOutVariantPassThrough) {
-    SCENARIO(
-        "WormholeArbiter<NocRspOut> NSU instantiation: 2 inputs (B + R), "
-        "no pairing, each flit is its own packet; verify template "
-        "compiles + behaves identically for NocRspOut downstream type");
     using ni::cmodel::testing::RspCapture;
     RspCapture down;
     WormholeArbiter<ni::cmodel::router::NocRspOut> arb(down, /*num_inputs=*/2, {});
@@ -168,10 +147,6 @@ TEST(NocWormholeArbiter, NocRspOutVariantPassThrough) {
 }
 
 TEST(NocWormholeArbiter, BackpressureUpstreamAndDownstream) {
-    SCENARIO(
-        "WormholeArbiter backpressure: input pending full -> push_flit returns "
-        "false (upstream). A downstream that refuses push_flit (downstream "
-        "backpressure) makes tick retain the front flit -> idle, no drain.");
     // Downstream with no room: push_flit returns false. The arbiter does not
     // inspect VC or track credit; push_flit's return value is the authoritative
     // ready signal, and a false return is retried (front flit retained).
@@ -190,12 +165,6 @@ TEST(NocWormholeArbiter, BackpressureUpstreamAndDownstream) {
 }
 
 TEST(NocWormholeArbiter, DownstreamBackpressureRetriesNoAbort) {
-    SCENARIO(
-        "WormholeArbiter try-push handshake: a downstream that transiently "
-        "refuses push_flit (e.g. NMU VcAllocator where the flit's selected VC is "
-        "full while header.vc_id reports VC0) is legitimate backpressure, NOT a "
-        "protocol violation. The arbiter must retain the front flit and retry "
-        "until accepted -- no abort, no flit loss/duplication.");
     // Refuses the first 2 push attempts (credit_avail still true), then accepts.
     // Models the multi-VC case: credit_avail(header.vc_id) cannot predict
     // which VC VcAllocator::push_flit actually selects.
@@ -225,10 +194,6 @@ TEST(NocWormholeArbiter, DownstreamBackpressureRetriesNoAbort) {
 }
 
 TEST(NocWormholeArbiter, LockLeakIdleStallNoDeadlock) {
-    SCENARIO(
-        "WormholeArbiter lock-leak / idle stall: AW emits and triggers lock, "
-        "but no W ever arrives. tick many times -> arbiter idles (no spurious "
-        "emit, no deadlock; AR remains pending, lock held).");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
 
@@ -244,10 +209,6 @@ TEST(NocWormholeArbiter, LockLeakIdleStallNoDeadlock) {
 // ---- Death tests (3) ----
 
 TEST(NocWormholeArbiterDeath, WBeforeAW) {
-    SCENARIO(
-        "WormholeArbiter NMU mode: pushing W to w input while unlocked "
-        "(no preceding AW) violates upstream serialization; tick must "
-        "assert+abort to fail fast");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
     ASSERT_TRUE(
@@ -256,9 +217,6 @@ TEST(NocWormholeArbiterDeath, WBeforeAW) {
 }
 
 TEST(NocWormholeArbiterDeath, MalformedAwFlitTailEquals1) {
-    SCENARIO(
-        "WormholeArbiter NMU mode: AW pushed with header.flit_tail=1 is malformed "
-        "(violates FlooNoC wormhole AW=0 stamping); tick must assert+abort");
     ReqCapture down;
     WormholeArbiter<ni::cmodel::router::NocReqOut> arb(down, /*num_inputs=*/3, {{0, 1}});
     ASSERT_TRUE(arb.input(0).push_flit(make_flit(ni::AXI_CH_NarrowAw, /*flit_tail=*/1)));
@@ -266,10 +224,6 @@ TEST(NocWormholeArbiterDeath, MalformedAwFlitTailEquals1) {
 }
 
 TEST(NocWormholeArbiterDeath, CtorPairingValidation) {
-    SCENARIO(
-        "WormholeArbiter ctor validates pairings: out-of-range index, "
-        "from==to, duplicate from, nested chain (to is also a from). "
-        "Each violation triggers assert+abort.");
     ReqCapture down;
     // Out of range
     EXPECT_DEATH(

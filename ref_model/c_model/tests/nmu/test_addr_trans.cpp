@@ -1,7 +1,6 @@
 #include "nmu/addr_trans.hpp"
 #include "nmu/sam_yaml.hpp"
 #include "axi/types.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -46,14 +45,12 @@ SamTable make_sam_with_border_column() {
 }  // namespace
 
 TEST(AddrTrans, Tile0_AddressForwardedUnchanged) {
-    SCENARIO("addr_trans: tile 0 (base 0) -> the address is forwarded as it arrived");
     auto t = sam().translate(0x1234);
     EXPECT_EQ(t.dst_id, 0x00u);
     EXPECT_EQ(t.local_addr, 0x1234u);
 }
 
 TEST(AddrTrans, HighBitsDecodeDstId) {
-    SCENARIO("addr_trans: addr[39:32] decodes to dst_id (x in [35:32], y in [39:36])");
     // addr[35:32]=0xF (x), addr[39:36]=0xF (y) -> dst_id = (0xF << 4) | 0xF = 0xFF
     auto t = sam().translate(0xFF00000000ull);
     EXPECT_EQ(t.dst_id, 0xFFu);
@@ -61,20 +58,12 @@ TEST(AddrTrans, HighBitsDecodeDstId) {
 }
 
 TEST(AddrTrans, TileBaseStaysInTheForwardedAddress) {
-    SCENARIO(
-        "addr_trans: the tile base is NOT stripped. A destination that decodes to a high tile "
-        "keeps the whole address, so every hop and the destination tile read one address domain");
     auto t = sam().translate(0x12ABCDEF01ull);  // tile 0x12, base 0x1200000000
     EXPECT_EQ(t.dst_id, 0x12u);
     EXPECT_EQ(t.local_addr, 0x12ABCDEF01ull);
 }
 
 TEST(CollectiveClip, FullTileRowIsAcceptedWhenTilesDoNotStartAtZero) {
-    SCENARIO(
-        "nmu::addr_trans::collective_translate: off-mesh peripherals move the tile region off the "
-        "route span's origin. Tiles at x = 1..2 with a peripheral at x = 0. The wildcard covering "
-        "the tile row also names 0 and 3; after clipping to the tile region it names exactly 1 and "
-        "2, so the source must accept it rather than refuse it as out of mesh");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
     b.addr = 0x100000;  // the address names the tile at (1, 0)
@@ -85,11 +74,6 @@ TEST(CollectiveClip, FullTileRowIsAcceptedWhenTilesDoNotStartAtZero) {
 }
 
 TEST(CollectiveClipDeath, EmptyAfterClippingAborts) {
-    SCENARIO(
-        "nmu::addr_trans::collective_translate: an address naming a peripheral, wildcarding a "
-        "coordinate the tile region doesn't reach, clips the set to empty. Address P(0,0), "
-        "wildcarding y only: clip_min_x = max(0, tile_x_first=1) = 1, clip_max_x = min(0, "
-        "tile_x_last=2) = 0 -- rejected rather than silently forwarding an empty set");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
     b.addr = 0x0;  // the address names the peripheral at (0, 0), outside the tile region
@@ -100,14 +84,6 @@ TEST(CollectiveClipDeath, EmptyAfterClippingAborts) {
 }
 
 TEST(CollectiveClipDeath, ClippedBoundNotAMemberAborts) {
-    SCENARIO(
-        "nmu::addr_trans::collective_translate: clamping a bound down to the tile region can land "
-        "on a coordinate the raw wildcard set never named. Address T(1,0), mask_x = 0x2 -> raw set "
-        "{1, 3}; clamping x_last from 3 down to 2 gives a non-empty clip [1,2], but 2 is not a "
-        "member of {1, 3} (bit 0 differs from the address and bit 0 is not a don't-care in "
-        "mask_x = 0x2). A terminal router's fork set at x=2 would be empty and abort -- must "
-        "reject here "
-        "instead of forwarding a set the source and a router would disagree on");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
     b.addr = 0x100000;  // the address names the tile at (1, 0)
@@ -118,13 +94,6 @@ TEST(CollectiveClipDeath, ClippedBoundNotAMemberAborts) {
 }
 
 TEST(CollectiveIssuer, ATileMayIssueACollectiveAddressedAtAPeripheral) {
-    SCENARIO(
-        "nmu::addr_trans::collective_translate: the ISSUER is what has to be a tile, not the node "
-        "the address names. Tile (1,0) addresses the peripheral (0,0) and wildcards x over the "
-        "whole row; the closure {0,1,2,3} clips to the two tiles and both bounds are members, so "
-        "the issuer "
-        "check leaves it alone -- a memory controller multicasting to every tile is the case the "
-        "clip exists for");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
     b.addr = 0x0;  // the address names the peripheral at (0, 0)
@@ -135,13 +104,6 @@ TEST(CollectiveIssuer, ATileMayIssueACollectiveAddressedAtAPeripheral) {
 }
 
 TEST(CollectiveIssuerDeath, APeripheralMayNotIssueACollective) {
-    SCENARIO(
-        "nmu::addr_trans::collective_translate: the same legal mask issued BY the peripheral at "
-        "(0,0) is refused. Both trees are built from the issuer's own coordinates -- route_mask "
-        "spreads the fork along cfg.y == src.y and collects the join in cfg.x == dst.x -- and no "
-        "router sits at x = 0, so an x-border issuer forks but never collects the cross-row "
-        "replicas (the CollectB hangs) and a y-border one never forks at all (the replicas are "
-        "dropped). Refuse, rather than hang or drop silently");
     auto sam = make_sam_with_border_column();
     axi::AwBeat b{};
     b.addr = 0x0;
@@ -152,11 +114,6 @@ TEST(CollectiveIssuerDeath, APeripheralMayNotIssueACollective) {
 }
 
 TEST(OffMeshDst, SameRowPeripheralIsReachable) {
-    SCENARIO(
-        "nmu::addr_trans::check_dst_reachable: a peripheral sits outside the tile region on x and "
-        "is reached by running out of x hops, which happens on the source's own row. Both tiles of "
-        "row 0 address the peripheral at (0,0), and the tile at (1,1) addresses the one at (0,1) "
-        "-- every one of them is on its destination's row, so none is refused");
     auto sam = make_sam_with_border_column();
     const auto* coords = sam.collective_coords(axi::AxiClass::Data);
     ASSERT_NE(coords, nullptr);
@@ -169,11 +126,6 @@ TEST(OffMeshDst, SameRowPeripheralIsReachable) {
 }
 
 TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
-    SCENARIO(
-        "nmu::addr_trans::check_dst_reachable: the tile at (2,1) addressing the peripheral at "
-        "(0,0) exhausts its x hops while still on row 1 (router.hpp resolves X before Y), leaves "
-        "the region WEST there and lands in the peripheral at (0,1), whose NSU rebases the address "
-        "to its own tile and answers it. Nothing downstream can tell, so the source refuses it");
     auto sam = make_sam_with_border_column();
     const auto* coords = sam.collective_coords(axi::AxiClass::Data);
     ASSERT_NE(coords, nullptr);
@@ -182,11 +134,6 @@ TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
 }
 
 TEST(OffMeshSrc, APeripheralIsAnInitiatorOnItsOwnRow) {
-    SCENARIO(
-        "nmu::addr_trans::check_dst_reachable: the peripheral at (0,1) is an initiator, and the "
-        "response to its request is routed back the same way the request went out -- the same "
-        "rule read from the other end. Both tiles of row 1 are on its row, so neither request is "
-        "refused");
     auto sam = make_sam_with_border_column();
     const auto* coords = sam.collective_coords(axi::AxiClass::Data);
     ASSERT_NE(coords, nullptr);
@@ -195,12 +142,6 @@ TEST(OffMeshSrc, APeripheralIsAnInitiatorOnItsOwnRow) {
 }
 
 TEST(OffMeshSrcDeath, APeripheralAddressingAnotherRowIsRefused) {
-    SCENARIO(
-        "nmu::addr_trans::check_dst_reachable: the peripheral at (0,1) writing the tile at (2,0) "
-        "is delivered, and its B is not. The response carries dst_id = (0,1) (nsu's "
-        "build_b_flit), leaves (2,0) WEST, runs out of x hops on row 0 and lands in the "
-        "peripheral at (0,0), which takes a B it never issued -- invisible to both scoreboards. "
-        "The source's own row is required in this direction too");
     auto sam = make_sam_with_border_column();
     const auto* coords = sam.collective_coords(axi::AxiClass::Data);
     ASSERT_NE(coords, nullptr);

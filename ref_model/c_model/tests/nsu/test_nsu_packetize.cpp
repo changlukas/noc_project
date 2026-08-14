@@ -12,7 +12,6 @@
 #include "nsu/meta_buffer.hpp"
 #include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
-#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <array>
 #include <gtest/gtest.h>
@@ -49,9 +48,6 @@ axi::RBeat make_r(uint8_t id, bool last, axi::Resp resp = axi::Resp::OKAY) {
 // push_b() accepts beat into S1 register; tick() peeks meta, builds flit,
 // commits MetaBuffer on successful push to b_out_.
 TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
-    SCENARIO(
-        "NSU Packetize: push_b accepts beat into S1; tick() reads MetaBuffer "
-        "(src/ordering_req/ordering_tag), stamps onto B flit header, commits meta");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_write(0x05,
@@ -79,9 +75,6 @@ TEST(NsuPacketize, PushBLooksUpMetaAndEmitsFlit) {
 
 // tick() with S1 occupied and no matching MetaBuffer entry triggers assert+abort.
 TEST(NsuPacketize, TickAssertsOnBWithoutMatchingMeta) {
-    SCENARIO(
-        "NSU Packetize: tick() with B in S1 but no matching MetaBuffer entry aborts "
-        "(pipeline protocol violation — B without prior AW allocate)");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId);
@@ -91,7 +84,6 @@ TEST(NsuPacketize, TickAssertsOnBWithoutMatchingMeta) {
 
 // S1 backpressure: second push_b() returns false when S1 is occupied.
 TEST(NsuPacketize, PushBBackpressureWhenS1Full) {
-    SCENARIO("NSU Packetize: push_b returns false when S1 register is occupied");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_write(0x05, {0x12, 0x05, 0, 0});
@@ -107,9 +99,6 @@ TEST(NsuPacketize, PushBBackpressureWhenS1Full) {
 // Peek+commit: if b_out_ is full, tick() does NOT consume S1 or commit meta.
 // The beat stays in S1 until the downstream has space (no desync).
 TEST(NsuPacketize, PushBNoCommitOnNocFull) {
-    SCENARIO(
-        "NSU Packetize: tick() with b_out_ full keeps S1 beat and MetaBuffer entry; "
-        "peek+commit never desyncs meta from beat");
     ChannelModel noc(/*req*/ 16, /*rsp*/ 1);
     RspCapture r_cap;
     MetaBuffer mb(4);
@@ -139,9 +128,6 @@ TEST(NsuPacketize, PushBNoCommitOnNocFull) {
 // Multi-beat R burst: MetaBuffer entry kept until rlast=1.
 // Each R beat uses push_r() + tick() (S1 only holds one beat at a time).
 TEST(NsuPacketize, PushRMultiBeatPeekUntilRLast) {
-    SCENARIO(
-        "NSU Packetize: tick() with R rlast=0 keeps MetaBuffer entry; "
-        "tick() with R rlast=1 commits (multi-beat read burst)");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_read(0x03, {0x12, 0x03, 0, 5});
@@ -162,9 +148,6 @@ TEST(NsuPacketize, PushRMultiBeatPeekUntilRLast) {
 
 // R payload bit-perfect: all fields (rid/rresp/rlast/rdata) survive push_r+tick.
 TEST(NsuPacketize, RPayloadBitPerfect) {
-    SCENARIO(
-        "NSU Packetize: R payload (rid/rresp/rlast/8B narrow rdata) round-trips bit-perfect "
-        "through flit after push_r()+tick() (default MetaEntry.cls -> narrow, lane 0)");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_read(0x03, {0x12, 0x03, 0, 0});
@@ -183,10 +166,6 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
 }
 
 TEST(NsuPacketize, NarrowRUnalignedAddrExtractsCorrectLane) {
-    SCENARIO(
-        "NSU Packetize: narrow class build_r_flit extracts the addressed 8B lane from a "
-        "genuinely unaligned AR local_addr (not a multiple of the beat size) -- site 3 of the S2 "
-        "design doc's lane re-anchor table");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     constexpr uint64_t kUnalignedAddr = 0x1B;  // 27, not a multiple of 4 (the beat size)
@@ -217,10 +196,6 @@ TEST(NsuPacketize, NarrowRUnalignedAddrExtractsCorrectLane) {
 // MetaBuffer.cls threads the request's class into the response: B/R responses
 // stamp axi_ch/payload channel matching the class recorded at AW/AR allocate.
 TEST(NsuPacketize, DataClassMetaStampsDataAxiChAndChannel) {
-    SCENARIO(
-        "NSU Packetize: a MetaBuffer entry with cls=Data makes tick() stamp "
-        "AXI_CH_DataB / AXI_CH_DataR and build the R payload in the DATA_R "
-        "channel instead of NARROW_R");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     mb.allocate_write(0x05, {/*src=*/0x12, /*upstream_id=*/0x05, /*ordering_req=*/0,
@@ -253,11 +228,6 @@ TEST(NsuPacketize, DataClassMetaStampsDataAxiChAndChannel) {
 // rlast=1), so ordering_tag is identical for all beats. This documents the
 // source of the past-reserved-slot-range hazard caught by the NMU ROB guard.
 TEST(NsuPacketize, MultiBeatR_AllFlitsCarrySameOrderingTag) {
-    SCENARIO(
-        "NSU Packetize: three R beats for the same AR share one MetaBuffer entry "
-        "(peeked, not committed, until rlast=1). Every emitted R flit carries the "
-        "same ordering_tag, documenting the NSU same-base stamping that the NMU ROB "
-        "reserved-slot-range guard catches.");
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
     constexpr uint8_t kOrderingTag = 7;

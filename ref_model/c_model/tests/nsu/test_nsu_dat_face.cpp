@@ -15,7 +15,6 @@
 // ingresses drain independently within a single Nsu::tick() when they don't
 // contend for the same shared S1 register.
 #include "axi/types.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nsu/nsu_standalone.hpp"
@@ -107,11 +106,6 @@ Flit make_data_r_flit(uint8_t rid) {
 // mechanics from steering; no wormhole arbiter in front either, per §5.2's
 // "single input" ruling), tick, drain via pop_dat_rsp_flit().
 TEST(NsuDatFace, EgressPushPopViaMock) {
-    SCENARIO(
-        "NSU DAT egress: push a DataR flit directly into dat_vc_allocator() (bypassing Packetize's "
-        "own real steering, to test the arbiter in isolation). pop_dat_rsp_flit() must return it "
-        "with axi_ch/rid intact.");
-
     NsuStandalone nsu(make_cfg(kNsuSrcId));
     ASSERT_TRUE(nsu.nsu().dat_vc_allocator().push_flit(make_data_r_flit(0x01)));
 
@@ -129,10 +123,6 @@ TEST(NsuDatFace, EgressPushPopViaMock) {
 // DAT flit pushed directly into dat_vc_allocator() still drains -- the two are
 // independent VcAllocator instances with independent downstream sinks.
 TEST(NsuDatFace, RspBackpressureDoesNotStallDat) {
-    SCENARIO(
-        "NSU: RSP face credit-blocked (seed=0) while a DataR flit is pushed directly into the "
-        "DAT face. The DAT face must still drain to pop_dat_rsp_flit().");
-
     NsuStandalone nsu(make_cfg(kNsuSrcId));
     nsu.enable_rsp_ready_track();  // ready defaults false: RSP face blocked from tick 0
     ASSERT_FALSE(nsu.rsp_credit_avail());
@@ -150,10 +140,6 @@ TEST(NsuDatFace, RspBackpressureDoesNotStallDat) {
 // (AW+W in via REQ ingress, B out via RSP egress -- default credit-OFF, the
 // ready/valid predicate) still completes.
 TEST(NsuDatFace, DatBackpressureDoesNotStallRsp) {
-    SCENARIO(
-        "NSU: DAT face credit-blocked (seed=0) while a normal AW+W write round-trips through the "
-        "REQ ingress and RSP egress. RSP (default credit-OFF) must still produce the B flit.");
-
     NsuStandalone nsu(make_cfg(kNsuSrcId));
     nsu.enable_dat_noc_credit(/*seed=*/0);
     ASSERT_FALSE(nsu.dat_rsp_credit_avail());
@@ -190,11 +176,6 @@ TEST(NsuDatFace, DatBackpressureDoesNotStallRsp) {
 // SAME s1_aw_/s1_w_ registers and surface at AxiMasterPort exactly as a
 // REQ-ingress AW/W would.
 TEST(NsuDatFace, DatIngressDeliversDataAwDataW) {
-    SCENARIO(
-        "NSU: inject a DataAw+DataW pair via inject_dat_req_flit() (the DAT ingress). Both must "
-        "surface at axi_master_port().pop_aw()/pop_w(), proving the DAT ingress shares the same "
-        "S1 registers as REQ.");
-
     NsuStandalone nsu(make_cfg(kNsuSrcId));
     nsu.inject_dat_req_flit(make_data_aw(0x06, 0x200));
     nsu.inject_dat_req_flit(make_data_w());
@@ -217,11 +198,6 @@ TEST(NsuDatFace, DatIngressDeliversDataAwDataW) {
 // (s1_ar_ vs s1_aw_/s1_w_) so neither ingress's per-network `pending` stash
 // blocks the other -- both must be observable within a few ticks.
 TEST(NsuDatFace, ReqArAndDatAwWDrainIndependently) {
-    SCENARIO(
-        "NSU: inject a NarrowAr via the REQ ingress and a DataAw+DataW pair via the DAT ingress "
-        "in the same cycle. All three land in independent S1 registers (AR vs AW vs W), so a few "
-        "ticks must surface all of them -- proving the two physical ingresses do not contend.");
-
     NsuStandalone nsu(make_cfg(kNsuSrcId));
     nsu.inject_req_flit(make_narrow_ar(0x07, 0x300));
     nsu.inject_dat_req_flit(make_data_aw(0x06, 0x400));

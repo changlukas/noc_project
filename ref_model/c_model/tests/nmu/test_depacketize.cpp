@@ -1,6 +1,5 @@
 #include "nmu/depacketize.hpp"
 #include "common/channel_model.hpp"
-#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
 
@@ -31,9 +30,6 @@ ni::cmodel::Flit make_r_flit(uint8_t rid, bool rlast, uint8_t axi_ch = ni::AXI_C
 }  // namespace
 
 TEST(NmuDepacketize, PopRDecodesDataRFromDataRChannel) {
-    SCENARIO(
-        "NMU Depacketize: an R flit with axi_ch=AXI_CH_DataR is accepted (no abort) and decodes "
-        "its rid from the DATA_R payload channel, not NARROW_R");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), /*b*/ 16, /*r*/ 16);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_r_flit(0x01, /*rlast*/ true, ni::AXI_CH_DataR)));
@@ -45,7 +41,6 @@ TEST(NmuDepacketize, PopRDecodesDataRFromDataRChannel) {
 }
 
 TEST(NmuDepacketize, PopBDecodesFromFlit) {
-    SCENARIO("NMU Depacketize: B flit decodes to BBeat with id and resp from payload fields");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), /*b*/ 16, /*r*/ 16);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_b_flit(0x05, axi::Resp::SLVERR)));
@@ -57,7 +52,6 @@ TEST(NmuDepacketize, PopBDecodesFromFlit) {
 }
 
 TEST(NmuDepacketize, DemuxMixedFlitsByAxiCh) {
-    SCENARIO("NMU Depacketize: B/R interleaved flits demux to per-channel queues by axi_ch header");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     ASSERT_TRUE(noc.rsp_out().push_flit(make_b_flit(0x01)));
@@ -70,7 +64,6 @@ TEST(NmuDepacketize, DemuxMixedFlitsByAxiCh) {
 }
 
 TEST(NmuDepacketize, PendingFlitHolBlockingBFullStallsR) {
-    SCENARIO("NMU Depacketize: HoL B-queue full holds pending B; R behind blocked until B drained");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), /*b cap=*/1, /*r cap=*/16);
     // Queue order: B, B, R
@@ -88,7 +81,6 @@ TEST(NmuDepacketize, PendingFlitHolBlockingBFullStallsR) {
 }
 
 TEST(NmuDepacketize, PopBEmptyReturnsNullopt) {
-    SCENARIO("NMU Depacketize: pop_b/pop_r on empty queues return nullopt (no spurious values)");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     EXPECT_FALSE(depkt.pop_b().has_value());
@@ -100,7 +92,6 @@ TEST(NmuDepacketize, PopBEmptyReturnsNullopt) {
 // calls are now caught at compile time. Test removed.
 
 TEST(NmuDepacketize, BFifoOrderPreserved) {
-    SCENARIO("NMU Depacketize: B queue preserves NoC arrival order across 5 sequential B flits");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     for (uint8_t i = 0; i < 5; ++i) ASSERT_TRUE(noc.rsp_out().push_flit(make_b_flit(i)));
@@ -109,9 +100,6 @@ TEST(NmuDepacketize, BFifoOrderPreserved) {
 }
 
 TEST(NmuDepacketize, RPayloadBytesDecoded) {
-    SCENARIO(
-        "NMU Depacketize: NARROW_R rdata (8B lane) decodes bit-perfect to RBeat.data offset 0 "
-        "(lane re-anchor is Rob's job, not Depacketize's -- it has no address)");
     ChannelModel noc(16, 16);
     Depacketize depkt(noc.rsp_in(), 16, 16);
     ni::cmodel::Flit f;
@@ -134,9 +122,6 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
 }
 
 TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
-    SCENARIO(
-        "NMU Depacketize: pop_b_with_meta returns ordering_req/ordering_tag from header for ROB "
-        "routing");
     using namespace ni::cmodel;
     ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);
@@ -165,9 +150,6 @@ TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
 }
 
 TEST(NmuDepacketize, PopRWithMeta_ExtractsPerBeatOrderingTag) {
-    SCENARIO(
-        "NMU Depacketize: pop_r_with_meta returns per-beat ordering_tag (5,6,7,8) for 4-beat "
-        "burst");
     using namespace ni::cmodel;
     ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
     nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16);

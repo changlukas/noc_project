@@ -11,7 +11,6 @@
 #include "nsu/packetize.hpp"
 #include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
-#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -73,10 +72,6 @@ struct EchoTestbench {
 }  // namespace
 
 TEST(NsuCollective, DataBEchoesTheAwCollectiveIdentity) {
-    SCENARIO(
-        "NSU echo: a collective DataAw's op/mask/ordering_tag come back on its DataB unmodified. "
-        "dst_id is the requesting node (the collector) and src_id this responder -- the pair the "
-        "RSP join turns back into an expected-input set");
     EchoTestbench t;
     t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_MULTICAST, 0x03,
                              /*ordering_tag=*/7));
@@ -94,10 +89,6 @@ TEST(NsuCollective, DataBEchoesTheAwCollectiveIdentity) {
 }
 
 TEST(NsuCollective, NarrowBEchoesTheAwCollectiveIdentity) {
-    SCENARIO(
-        "NSU echo, narrow mirror (Q4 revision 2 -- both classes multicast): the echo is one "
-        "mechanism in the shared MetaEntry, so a NarrowAw collective returns a NarrowB carrying "
-        "the same op/mask. Class only picks the axi_ch");
     EchoTestbench t;
     t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_NarrowAw, axi::COLLECTIVE_OP_MULTICAST, 0x11));
     t.respond(0x05);
@@ -111,14 +102,6 @@ TEST(NsuCollective, NarrowBEchoesTheAwCollectiveIdentity) {
 }
 
 TEST(NsuCollective, OneBucketHoldsACollectiveAheadOfAUnicast) {
-    SCENARIO(
-        "NSU echo: a collective and a unicast queued on the SAME downstream id share one "
-        "MetaBuffer "
-        "bucket, so the echo has to follow the bucket's order, not the arrival order of the B "
-        "beats. Reachable whenever a second NMU issues the same AXI id to this NSU (two concurrent "
-        "collectives at one NSU are excluded by R1). Popping the wrong entry ships op=MULTICAST on "
-        "a plain B, which enters the RSP join and waits forever for members that never arrive -- a "
-        "silent stall, not an abort");
     EchoTestbench t;
     t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_MULTICAST, 0x03));
     t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_UNICAST, 0));
@@ -137,10 +120,6 @@ TEST(NsuCollective, OneBucketHoldsACollectiveAheadOfAUnicast) {
 }
 
 TEST(NsuCollective, UnicastAwLeavesTheBFieldsClear) {
-    SCENARIO(
-        "NSU echo: a unicast AW must not stamp anything. op=UNICAST with a zero mask is what the "
-        "RSP router's is_collect_b() reads as 'not a CollectB' -- an accidental stamp would send a "
-        "plain B into the join and hang the write behind members that never arrive");
     EchoTestbench t;
     t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_UNICAST, 0));
     t.respond(0x05);
@@ -152,10 +131,6 @@ TEST(NsuCollective, UnicastAwLeavesTheBFieldsClear) {
 }
 
 TEST(NsuCollective, ConcurrentCollectivesEchoTheirOwnMasks) {
-    SCENARIO(
-        "NSU echo: two collectives outstanding at once (different AXI ids, different destination "
-        "sets). The identity is per-MetaEntry, not per-NSU state, so neither B picks up the "
-        "other's mask -- cross-contamination would misroute one join and abort the other");
     EchoTestbench t;
     t.accept_aw(make_aw_flit(0x05, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_MULTICAST, 0x03));
     t.accept_aw(make_aw_flit(0x06, ni::AXI_CH_DataAw, axi::COLLECTIVE_OP_MULTICAST, 0x30));

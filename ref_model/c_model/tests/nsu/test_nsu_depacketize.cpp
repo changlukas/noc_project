@@ -1,7 +1,6 @@
 #include "nsu/depacketize.hpp"
 #include "nsu/meta_buffer.hpp"
 #include "common/channel_model.hpp"
-#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <array>
 #include <gtest/gtest.h>
@@ -54,10 +53,6 @@ ni::cmodel::Flit make_ar_flit(uint8_t arid, uint64_t addr, uint8_t src_id = 0x10
 }  // namespace
 
 TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
-    SCENARIO(
-        "NSU Depacketize: AW flit allocates src_id/ordering_req/ordering_tag into MetaBuffer + "
-        "emits AW "
-        "beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -78,10 +73,6 @@ TEST(NsuDepacketize, AwFlitSnapshotsMetadataAndPopsBeat) {
 }
 
 TEST(NsuDepacketize, DataAwFlitAcceptedAndRecordsDataClass) {
-    SCENARIO(
-        "NSU Depacketize: a DataAw flit (axi_ch=AXI_CH_DataAw) is accepted into the data-class "
-        "s1 AW register (no abort) and the MetaBuffer entry records cls=Data, so the "
-        "eventual B response is stamped in the same class");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -98,9 +89,6 @@ TEST(NsuDepacketize, DataAwFlitAcceptedAndRecordsDataClass) {
 }
 
 TEST(NsuDepacketize, DataWFlitDecodesFromDataWChannel) {
-    SCENARIO(
-        "NSU Depacketize: a DataW flit (axi_ch=AXI_CH_DataW) decodes its wstrb/wlast from the "
-        "DATA_W payload channel, not NARROW_W");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -119,9 +107,6 @@ TEST(NsuDepacketize, DataWFlitDecodesFromDataWChannel) {
 }
 
 TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
-    SCENARIO(
-        "NSU Depacketize: awqos=0xA in AW flit payload is recovered into AwBeat.qos "
-        "(verifies awqos is not forced to 0)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -135,9 +120,6 @@ TEST(NsuDepacketize, AwqosRecoveredFromFlit) {
 }
 
 TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
-    SCENARIO(
-        "NSU Depacketize: arqos=0xA in AR flit payload is recovered into ArBeat.qos "
-        "(verifies arqos is not forced to 0)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -151,7 +133,6 @@ TEST(NsuDepacketize, ArqosRecoveredFromFlit) {
 }
 
 TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
-    SCENARIO("NSU Depacketize: AR flit allocates read-side meta into MetaBuffer + emits AR beat");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -163,9 +144,6 @@ TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
 }
 
 TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
-    SCENARIO(
-        "NSU Depacketize: W flit emits W beat but does NOT touch MetaBuffer (write-meta belongs to "
-        "AW)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -182,13 +160,6 @@ TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
 }
 
 TEST(NsuDepacketize, NarrowWAfterDataWReadsOwnAwNotStaleFifoEntry) {
-    SCENARIO(
-        "NSU Depacketize: a data-class AW+W fully drained, then a narrow-class AW+W at byte_lane "
-        "32 -- the narrow W must decode its lane from its OWN AW, not a leaked/stale data-class "
-        "w_addr_fifo_ entry (site 2's FIFO must be narrow-only, mirroring nmu::Rob's "
-        "ar_lane_meta_: decode_w's data branch never pops, so an unconditional push on every AW "
-        "either leaks -- data class -- or, worse, hands the next narrow AW's W beats someone "
-        "else's address basis)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -224,10 +195,6 @@ TEST(NsuDepacketize, NarrowWAfterDataWReadsOwnAwNotStaleFifoEntry) {
 }
 
 TEST(NsuDepacketize, NarrowWUnalignedAddrInsertsAtCorrectLane) {
-    SCENARIO(
-        "NSU Depacketize: narrow class decode_w re-inserts the addressed 8B lane from a "
-        "genuinely unaligned AW local_addr (not a multiple of the beat size) -- site 2 of the S2 "
-        "design doc's lane re-anchor table");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -257,8 +224,6 @@ TEST(NsuDepacketize, NarrowWUnalignedAddrInsertsAtCorrectLane) {
 }
 
 TEST(NsuDepacketize, DemuxMixedAwWAr) {
-    SCENARIO(
-        "NSU Depacketize: interleaved AW/W/AR flits demux to per-channel queues by axi_ch header");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -272,9 +237,6 @@ TEST(NsuDepacketize, DemuxMixedAwWAr) {
 }
 
 TEST(NsuDepacketize, PendingHolBlockingS1WFullBlocksAwBehind) {
-    SCENARIO(
-        "NSU Depacketize: HoL S1 W register full holds pending W; AW behind blocked until W "
-        "drained");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -306,9 +268,6 @@ TEST(NsuDepacketize, PendingHolBlockingS1WFullBlocksAwBehind) {
 // For 3 sequential AW flits on the same channel, tick 3 times — one flit
 // per tick — to drain all 3. FIFO order coverage is unchanged.
 TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
-    SCENARIO(
-        "NSU Depacketize: AW S1 register preserves NoC arrival order across 3 sequential AW flits "
-        "(one per tick per staged S1 contract)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
@@ -324,9 +283,6 @@ TEST(NsuDepacketize, FifoOrderPreservedAcrossChannels) {
 }
 
 TEST(NsuDepacketize, CtorRejectsIntermediateMaxUniqueIds) {
-    SCENARIO(
-        "NSU Depacketize: max_unique_ids must be 1 (collapse) or AXI_ID_SPACE (passthrough); an "
-        "intermediate value throws (config trust boundary, fail-loud even under NDEBUG)");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     // FlooNoC provides only collapse-or-passthrough; an intermediate N is unsupported.
@@ -361,7 +317,6 @@ std::array<ni::cmodel::address_map::SpaceCoords, 2> coords_for_narrow() {
 }  // namespace
 
 TEST(NsuDepacketize, RebasesAReplicaAddressOntoThisNode) {
-    SCENARIO("NSU Depacketize: an AW carrying another node's address is rewritten to this node");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     // src_id 0x21 = (y=2 << X_WIDTH) | x=1.
@@ -378,7 +333,6 @@ TEST(NsuDepacketize, RebasesAReplicaAddressOntoThisNode) {
 }
 
 TEST(NsuDepacketize, RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode) {
-    SCENARIO("NSU Depacketize: an address already naming this node survives the rebase unchanged");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
@@ -392,7 +346,6 @@ TEST(NsuDepacketize, RebaseIsTheIdentityForAUnicastAlreadyNamingThisNode) {
 }
 
 TEST(NsuDepacketize, UndeclaredCoordsLeaveTheAddressAlone) {
-    SCENARIO("NSU Depacketize: with no coordinate field declared the address is forwarded as-is");
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,

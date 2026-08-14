@@ -3,7 +3,6 @@
 // geometry cells are hand-computed from floo_route_xymask.sv:104-164 the same
 // way test_route_mask.cpp verifies them; this file tests the ROUTER's use of
 // the fork set, not the mask math.
-#include "common/scenario.hpp"
 #include "router/route_mask.hpp"
 #include "router/router.hpp"
 
@@ -121,10 +120,6 @@ void expect_worm_in_order(const FlitSink& sink, int n_flits, const char* label) 
 // --- Fork delivery ---------------------------------------------------------
 
 TEST(RouterFork, ThreeWayInclLocalReplicatesWholeWorm) {
-    SCENARIO(
-        "3-way fork {LOCAL,EAST,NORTH} at (1,1): a 4-flit collective worm is replicated "
-        "byte-for-byte and in order to all three branches; ONE upstream credit pulse per "
-        "flit (F10); all branch locks released after the tail (per-branch WLAST release)");
     Router r(center_cfg());
     FlitSink local, north, east;
     CreditCounter west_up;
@@ -167,10 +162,6 @@ TEST(RouterFork, ThreeWayInclLocalReplicatesWholeWorm) {
 }
 
 TEST(RouterFork, LocalInputWithLocalBranch) {
-    SCENARIO(
-        "LOCAL->LOCAL is a real branch (S3a ruling; F3 OUR RULE keeps LOCAL in "
-        "expected_mask — no ignore_routes port): a worm injected at the LOCAL input with "
-        "fork {LOCAL,NORTH} ejects locally AND spreads north");
     Router r(center_cfg());
     FlitSink local, north;
     r.set_downstream(L, local);
@@ -194,11 +185,6 @@ TEST(RouterFork, LocalInputWithLocalBranch) {
 // --- W replication under branch starvation ---------------------------------
 
 TEST(RouterFork, MidBurstBranchStarvationStallsWormWithoutSkipOrReorder) {
-    SCENARIO(
-        "2-way fork {E,N}: NORTH credit dries mid-worm — the worm stalls at the beat NORTH "
-        "cannot take (EAST leads by at most the one parked beat, F2/F3), no beat is skipped "
-        "or reordered, introspection shows the live {expected,done} masks and both branch "
-        "locks; returning NORTH credit completes the worm and releases per-branch at WLAST");
     RouterConfig cfg = center_cfg();
     cfg.vc_depth = 2;  // NORTH holds 2 credits -> dries after head+1 beat
     Router r(cfg);
@@ -253,10 +239,6 @@ TEST(RouterFork, MidBurstBranchStarvationStallsWormWithoutSkipOrReorder) {
 }
 
 TEST(RouterFork, BranchStarvationStallsOnlyTheWorm) {
-    SCENARIO(
-        "While a fork worm is credit-starved on its NORTH branch, unicast traffic through "
-        "an uninvolved output (SOUTH->WEST) keeps flowing — the work-conserving stage-2 "
-        "scan is unaffected (D7); the starved worm itself stays frozen");
     RouterConfig cfg = center_cfg();
     cfg.vc_depth = 2;
     Router r(cfg);
@@ -297,12 +279,9 @@ TEST(RouterFork, BranchStarvationStallsOnlyTheWorm) {
 
 // --- Unicast degeneracy -----------------------------------------------------
 
+// spec §1.1 rule 5: a one-hot fork set takes the immediate-pop path, lockstep-identical to plain
+// unicast.
 TEST(RouterFork, OneHotForkSetIsBitIdenticalToPlainUnicast) {
-    SCENARIO(
-        "Unicast-degenerate (§1.1 rule 5): a collective worm whose fork set at this router "
-        "is one-hot ({EAST} pass-through) takes the immediate-pop path — lockstep-identical "
-        "to a plain unicast worm in per-tick deliveries, credits and FIFO occupancy, and "
-        "byte-for-byte identical after clearing the two collective header fields");
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;  // VA restamp active (fixed_vc=0): identity must survive it
     Router ra(cfg), rb(cfg);
@@ -349,10 +328,6 @@ TEST(RouterFork, OneHotForkSetIsBitIdenticalToPlainUnicast) {
 // --- Concurrent trees -------------------------------------------------------
 
 TEST(RouterFork, DisjointTreesProgressConcurrently) {
-    SCENARIO(
-        "Two forks with disjoint branch sets through one router ({E,N} from WEST, {L,S} "
-        "from NORTH) both complete, and their delivery windows overlap in time — neither "
-        "tree serializes behind the other");
     Router r(center_cfg());
     FlitSink local, north, east, south;
     r.set_downstream(L, local);
@@ -397,10 +372,6 @@ TEST(RouterFork, DisjointTreesProgressConcurrently) {
 // --- Per-branch VA (F7) and fixed_vc pinning (F8) ---------------------------
 
 TEST(RouterFork, PerBranchVaAssignsEachBranchItsOwnPreferredVc) {
-    SCENARIO(
-        "F7: a fixed_vc=0 fork head runs vc_assignment per branch — EAST's next hop "
-        "prefers vc1 while NORTH's straight run prefers vc0; each branch restamps and "
-        "locks its own output VC and consumes its own credit");
     RouterConfig cfg = center_cfg();
     cfg.num_vc = 2;
     Router r(cfg);
@@ -441,9 +412,6 @@ TEST(RouterFork, PerBranchVaAssignsEachBranchItsOwnPreferredVc) {
 class RouterForkPinnedVc : public ::testing::TestWithParam<int> {};
 
 TEST_P(RouterForkPinnedVc, PinnedVcRidesEveryBranchAcrossNumVc) {
-    SCENARIO(
-        "F8/D8: a fixed_vc=1 collective worm keeps its NI-pinned vc_id on EVERY branch "
-        "(num_vc parameterized 1/2/4); only the pinned VC's credit is consumed per branch");
     const int num_vc = GetParam();
     RouterConfig cfg = center_cfg();
     cfg.num_vc = static_cast<uint8_t>(num_vc);
@@ -504,15 +472,10 @@ struct DrainingSink : ni::cmodel::router::RouterLink {
     }
 };
 
+// spec §1.2/1.3: the ported F2/F3 discipline DEADLOCKS under opposite-order multicast tree
+// acquisition with credit exhaustion; this is the R1 restriction's documented hazard, not a fork
+// bug.
 TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
-    SCENARIO(
-        "§1.2/§1.3 detection a: two overlapping multicast trees acquire N@R1 and N@R2 in "
-        "opposite orders under credit exhaustion (burst >> vc_depth). The ported F2/F3 "
-        "discipline DEADLOCKS — this test PASSES by detecting the no-progress state within "
-        "the derived tick bound and attributing it through the fork introspection: both "
-        "fork done_masks frozen short of expected with the missing branches' outputs "
-        "locked to the other worm. This is the R1 restriction's documented hazard "
-        "demonstration, not a bug in the fork");
     // Row y=0 of a 4x2 mesh. M1 from (0,0) and M2 from (3,0) both multicast
     // to the full row above (dst (0,1), mask x=3): fork {E,N} at every
     // source-row router for M1, {W,N} for M2. M1 locks N@R1 then needs N@R2;
@@ -640,12 +603,6 @@ TEST(RouterForkWedge, OverlappingTreesOppositeOrderWedgeDetectedWithinBound) {
 // --- Multi-hop traversal (divergent one-hot pass-through hop) ---------------
 
 TEST(RouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
-    SCENARIO(
-        "2-router chain: a multicast worm (dst (0,1), src (0,0), mask x=3) forks {E,N} "
-        "at (2,0) and {N} at (3,0) — at the spread-end hop the one-hot fork direction "
-        "(NORTH) diverges from the header's dst_id XY route (WEST). The worm must traverse "
-        "cleanly end to end: the locked continuation check keys on the fork set, never "
-        "route_compute, for ANY collective flit (review fix)");
     RouterConfig ca;
     ca.mesh_x_dim = 4;
     ca.mesh_y_dim = 2;
@@ -696,10 +653,6 @@ TEST(RouterForkChain, MultiHopWormCrossesDivergentOneHotHop) {
 // --- Fault injection --------------------------------------------------------
 
 TEST(RouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
-    SCENARIO(
-        "Fault injection (T3 hard rule 2): a collective flit whose fork set at this router "
-        "is EMPTY (misrouted multicast) is fatal — F3's pop condition would otherwise be "
-        "trivially true and silently drop + credit the flit");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -714,11 +667,9 @@ TEST(RouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
         "empty fork set");
 }
 
+// spec §6 :356: collective_op codes 2-3 are reserved; unrejected they'd silently fork as multicast
+// since classification keys on `!= UNICAST`.
 TEST(RouterForkDeath, ReservedCollectiveOpAborts) {
-    SCENARIO(
-        "Fault injection (spec §6 :356 reserved codes 2-3): a flit stamped with a reserved "
-        "collective_op is fatal — every collective classification keys on `!= UNICAST`, so "
-        "an unrejected reserved code would silently fork as a multicast");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -735,11 +686,9 @@ TEST(RouterForkDeath, ReservedCollectiveOpAborts) {
         "reserved collective_op");
 }
 
+// design §3.1 / spec §6 :324: ARUSER has no collective surface, so a collective flit on a read
+// channel is a mis-stamped header, not a legal case.
 TEST(RouterForkDeath, CollectiveOnReadChannelAborts) {
-    SCENARIO(
-        "Fault injection (design §3.1): a collective flit on a read channel is fatal — "
-        "ARUSER has no collective surface (spec §6 :324), so reads are unicast everywhere "
-        "and such a header is mis-stamped");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     EXPECT_DEATH(
         {
@@ -755,14 +704,6 @@ TEST(RouterForkDeath, CollectiveOnReadChannelAborts) {
 }
 
 TEST(RouterForkDeath, ContinuationBranchSetMismatchAborts) {
-    SCENARIO(
-        "Fault injection (F9, src-anchored): a W continuation whose recomputed branch set "
-        "differs from the head's — shrunk ({L,E,N} head, {L,N} beat), enlarged ({L,N} head, "
-        "{L,E,N} beat), or corrupted to the ONE-HOT set {L} whose route_compute(dst) "
-        "coincidentally passes the unicast check — each trips the branch-set divergence "
-        "assert; the enlarged case also proves an unlocked output cannot join mid-worm, and "
-        "the one-hot case proves a collective continuation never takes the unicast locked "
-        "path");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     // Shrunk continuation set.
     EXPECT_DEATH(

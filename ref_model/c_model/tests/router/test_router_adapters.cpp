@@ -1,7 +1,6 @@
 #include "router/router.hpp"
 #include "router/router_adapters.hpp"
 #include "router/two_node_fabric.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 using ni::NOC_ROUTER_VC_DEPTH;
@@ -36,7 +35,6 @@ Flit req_flit(uint8_t dst, uint8_t vc, uint8_t tag = 0) {
 }
 
 TEST(InjectAdapter, CreditMirrorGatesPush) {
-    SCENARIO("InjectAdapter: push_flit honors the per-VC credit mirror (seeded to vc_depth)");
     Router r(cfg_at(0, 0));
     InjectAdapter inj(r, static_cast<std::size_t>(RouterPort::LOCAL), /*num_vc=*/2, /*depth=*/2);
     r.set_upstream_credit(static_cast<std::size_t>(RouterPort::LOCAL), inj);
@@ -47,7 +45,6 @@ TEST(InjectAdapter, CreditMirrorGatesPush) {
 }
 
 TEST(InjectAdapter, InputRegGuardResetsOnTick) {
-    SCENARIO("InjectAdapter: the per-tick push flag resets so the next tick accepts again");
     Router r(cfg_at(0, 0));
     InjectAdapter inj(r, static_cast<std::size_t>(RouterPort::LOCAL), 2, 2);
     r.set_upstream_credit(static_cast<std::size_t>(RouterPort::LOCAL), inj);
@@ -59,7 +56,6 @@ TEST(InjectAdapter, InputRegGuardResetsOnTick) {
 }
 
 TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
-    SCENARIO("EjectAdapter: router push buffers; pop_flit serves it and returns a credit");
     Router r(cfg_at(0, 0));
     const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
     InjectAdapter inj(r, LOCAL, 2, 2);
@@ -82,8 +78,6 @@ TEST(EjectAdapter, BuffersEjectedFlitAndReturnsCredit) {
 }
 
 TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
-    SCENARIO(
-        "CreditRelay: after the upstream output credit is spent, relay.receive_credit restores it");
     Router up(cfg_at(1, 0));  // node (1,0); a flit to dst=(0,0) routes out WEST
     const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
     const auto WEST = static_cast<std::size_t>(RouterPort::WEST);
@@ -101,7 +95,6 @@ TEST(CreditRelay, DecrementThenRelayRestoresUpstreamCredit) {
 }
 
 TEST(TwoNodeFabric, SingleFlitReqEndToEnd) {
-    SCENARIO("TwoNodeFabric: a REQ flit injected at NMU(1,0) ejects at NSU(0,0) through 2 routers");
     TwoNodeFabric ch(/*num_vc=*/2);
     Flit f = req_flit(/*dst=*/0x00, /*vc=*/0);
     f.set_header_field("src_id", 0x10);
@@ -117,7 +110,6 @@ TEST(TwoNodeFabric, SingleFlitReqEndToEnd) {
 }
 
 TEST(TwoNodeFabric, SingleFlitRspEndToEnd) {
-    SCENARIO("TwoNodeFabric: a RSP flit injected at NSU(0,0) ejects at NMU(1,0) (spec both nets)");
     TwoNodeFabric ch(/*num_vc=*/2);
     Flit f = req_flit(/*dst=*/0x01, /*vc=*/0);  // dst=(1,0)
     f.set_header_field("src_id", 0x20);
@@ -132,8 +124,6 @@ TEST(TwoNodeFabric, SingleFlitRspEndToEnd) {
 }
 
 TEST(TwoNodeFabric, FullBackpressureWhenConsumerStalls) {
-    SCENARIO(
-        "TwoNodeFabric: NSU never pops -> credit drains -> NMU inject backpressures (no assert)");
     TwoNodeFabric ch(/*num_vc=*/2);
     int accepted = 0;
     for (int t = 0; t < 200; ++t) {
@@ -147,9 +137,6 @@ TEST(TwoNodeFabric, FullBackpressureWhenConsumerStalls) {
 }
 
 TEST(TwoNodeFabric, EjectBoundaryCreditConservation) {
-    SCENARIO(
-        "TwoNodeFabric: credit(LOCAL,vc) + output_fifo_size(LOCAL) + eject_buffered == vc_depth "
-        "every tick");
     constexpr std::size_t kDepth = NOC_ROUTER_VC_DEPTH;
     TwoNodeFabric ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
     const auto LOCAL = static_cast<std::size_t>(RouterPort::LOCAL);
@@ -165,9 +152,6 @@ TEST(TwoNodeFabric, EjectBoundaryCreditConservation) {
 }
 
 TEST(TwoNodeFabric, EjectQueueHoldsAggregateMultiVcCredit) {
-    SCENARIO(
-        "TwoNodeFabric: with NSU stalled, the shared eject queue must hold num_vc*vc_depth "
-        "flits (not just vc_depth)");
     constexpr std::size_t kDepth = 4;
     TwoNodeFabric ch(/*num_vc=*/2, /*vc_depth=*/kDepth);
     // Alternate vc0/vc1 single-flit requests to dst=(0,0); never pop at NSU(0).
@@ -184,12 +168,9 @@ TEST(TwoNodeFabric, EjectQueueHoldsAggregateMultiVcCredit) {
         << "eject queue must hold more than one VC's worth (aggregate num_vc*vc_depth)";
 }
 
-// ---------------------------------------------------------------------------
 // Link adapters (cross-DPI FlooNoC pulse credit).
-// ---------------------------------------------------------------------------
 
 TEST(LinkEjectAdapter, FifoOrderAndNoRouterCredit) {
-    SCENARIO("LinkEjectAdapter: push N flits, pop returns them FIFO; pop returns no router credit");
     using ni::cmodel::router::LinkEjectAdapter;
     constexpr std::size_t kDepth = 4;
     LinkEjectAdapter le(kDepth);
@@ -209,7 +190,6 @@ TEST(LinkEjectAdapter, FifoOrderAndNoRouterCredit) {
 }
 
 TEST(LinkEjectAdapterDeath, OverflowAssertsAtDepth) {
-    SCENARIO("LinkEjectAdapter: pushing past depth trips the overflow assert");
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     using ni::cmodel::router::LinkEjectAdapter;
     LinkEjectAdapter le(/*depth=*/2);
@@ -219,8 +199,6 @@ TEST(LinkEjectAdapterDeath, OverflowAssertsAtDepth) {
 }
 
 TEST(LinkCreditOut, AccumulatesAndDrainsOnePerTake) {
-    SCENARIO(
-        "LinkCreditOut: receive_credit accumulates pending; take drains one, false when empty");
     using ni::cmodel::router::LinkCreditOut;
     LinkCreditOut co(/*num_vc=*/2);
     EXPECT_EQ(co.pending(0), 0u);
@@ -247,9 +225,6 @@ TEST(LinkCreditOut, AccumulatesAndDrainsOnePerTake) {
 // input-drain pulses with no double-count, (c) the output port's credit_ drains
 // to 0 and no flit is lost or over-pushed.
 TEST(LinkAdapterConservation, StalledCreditDrainsOutputAndConservesFlits) {
-    SCENARIO(
-        "Router + LinkEjectAdapter(out) + LinkCreditOut(in): stalled credit drains output credit "
-        "to 0, no eject overflow, pending == drained, flit count conserved");
     using ni::cmodel::router::LinkCreditOut;
     using ni::cmodel::router::LinkEjectAdapter;
     // node (1,0): a flit arriving on the WEST link input addressed to this node's

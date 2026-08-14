@@ -1,6 +1,5 @@
 #include "nmu/addr_trans.hpp"
 #include "axi/types.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -32,10 +31,6 @@ TEST(SamTable, PackedDstIdFromXY) {
 }
 
 TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged) {
-    SCENARIO(
-        "SamTable: translate() names the destination and leaves the address alone. The tile-local "
-        "rebase it used to apply was removed so a tile's own initiator and its NI decode in one "
-        "address domain; upstream does the same (floo_id_translation returns a node id only)");
     auto sam = SamTable::packed(
         {
             {0, 0, 0x100000000ull},
@@ -48,10 +43,6 @@ TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged) {
 }
 
 TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode) {
-    SCENARIO(
-        "SamTable: a node's config and memory addresses stay distinct after translate(), which is "
-        "what the tile decoder needs to tell the two apart. Under the old rebase both landed at "
-        "their own space's slot; now they keep their own bases");
     auto sam = SamTable::packed(
         {
             {0, 0, 0x100000, axi::AxiClass::Data},

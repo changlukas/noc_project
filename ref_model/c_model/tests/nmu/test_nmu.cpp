@@ -4,7 +4,6 @@
 // NOT exercise full e2e flow; that's integration testbench.
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nmu/nmu_standalone.hpp"
@@ -31,9 +30,6 @@ SamTable legacy_sam() {
 }
 
 TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
-    SCENARIO(
-        "Nmu top-level smoke: NUM_VC=1 default config, construct + tick 10x "
-        "should not crash. Verifies ctor sequence + member init order.");
     ChannelModel channel(/*req*/ 64, /*rsp*/ 64);
     NmuConfig cfg{};
     cfg.src_id = 0x12;
@@ -72,12 +68,6 @@ TEST(NmuTopLevel, ConstructsAndTicksWithoutCrash) {
 // the ChannelModel / NSU side; any break in Nmu-internal wiring surfaces
 // here even if the integration testbench's harness happens to mask it.
 TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
-    SCENARIO(
-        "Nmu write round-trip: push AW+W into AxiSlavePort, drain AW+W "
-        "flits from null NoC req-out, inject synthetic B flit into null "
-        "NoC rsp-in, expect BBeat at AxiSlavePort.pop_b(). Regression "
-        "gate for assembled-pipeline wiring + tick order.");
-
     constexpr uint8_t kSrcId = 0x12;
     constexpr uint8_t kAxiId = 0x05;
     constexpr uint64_t kAddr = 0x100;  // dst_id = (0x100 >> 32) & 0xff = 0
@@ -174,11 +164,6 @@ TEST(NmuTopLevel, WriteRoundTripProducesReqFlitsAndObservesBResp) {
 // response is still in flight.
 
 TEST(NmuOutstandingCount, RoblessReadRetiresAtTheAxiSideAndReopensTheId) {
-    SCENARIO(
-        "Nmu RoBless reads: the per-id single-outstanding interlock survives the pop out of "
-        "the Rob and is released when the R beat is accepted at the AXI side, after which "
-        "the next AR on that id is admitted.");
-
     constexpr uint8_t kSrcId = 0x12;
     constexpr uint8_t kAxiId = 0x07;
     constexpr uint64_t kAddr = 0x200;

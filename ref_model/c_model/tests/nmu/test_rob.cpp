@@ -3,7 +3,6 @@
 #include "nmu/depacketize.hpp"
 #include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
-#include "common/scenario.hpp"
 #include "axi/types.hpp"
 #include <array>
 #include <set>
@@ -156,7 +155,6 @@ struct RobTestbench {
 // tests below.
 
 TEST(NmuRob, Disabled_StallReleaseOnRlast) {
-    SCENARIO("Rob Disabled: AR stall on second same-id released when matching R(rlast=1) arrives");
     RobTestbench r;
     ASSERT_TRUE(r.rob.push_ar(make_ar(0x05, 0x100)));
     EXPECT_FALSE(r.rob.push_ar(make_ar(0x05, 0x200)));
@@ -170,7 +168,6 @@ TEST(NmuRob, Disabled_StallReleaseOnRlast) {
 }
 
 TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
-    SCENARIO("Rob Disabled: W-burst credit starts at 0; push_w before any push_aw returns false");
     RobTestbench r;
     // No push_aw yet -> credit=0 -> push_w must return false
     EXPECT_FALSE(r.rob.push_w(make_w(/*last=*/true)));
@@ -179,7 +176,6 @@ TEST(NmuRob, Disabled_WCreditBlocksWBeforeAw) {
 // === ROB invariants (3 tests) ===
 
 TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
-    SCENARIO("Rob Disabled: push_aw failing on downstream backpressure leaves ROB state unchanged");
     // Force downstream NoC full via small req_depth.
     // All 3 Packetize outputs share the same ChannelModel req_out.
     ChannelModel noc(/*req*/ 1, /*rsp*/ 16);
@@ -198,8 +194,6 @@ TEST(NmuRob, Disabled_BackpressureAtomicityPushAw) {
 }
 
 TEST(NmuRob, Disabled_WCreditMultiOutstandingCorrectDecrement) {
-    SCENARIO(
-        "Rob Disabled: W credit increments per AW, decrements per wlast=1; 3rd wlast fails at 0");
     RobTestbench r;
     // Two AWs for different ids: each adds 1 to the global W credit.
     ASSERT_TRUE(r.rob.push_aw(make_aw(0x05, 0x100)));
@@ -214,9 +208,6 @@ TEST(NmuRob, Disabled_WCreditMultiOutstandingCorrectDecrement) {
 // === Edge cases (2 tests) ===
 
 TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
-    SCENARIO(
-        "Rob Disabled: push_w failing on downstream backpressure preserves W credit (no "
-        "decrement)");
     // Trigger backpressure: small req_depth fills after AW + W beats.
     // All 3 Packetize outputs share the same ChannelModel req_out so depth
     // limits apply regardless of which channel (AW or W) is being pushed.
@@ -242,9 +233,6 @@ TEST(NmuRob, Disabled_WBackpressureDoesNotConsumeCredit) {
 // === ROB Enabled mode: push-side tests ===
 
 TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsOrderingTag) {
-    SCENARIO(
-        "Rob Enabled: push_aw allocates ROB slot, stamps ordering_req=1 + ordering_tag on AW "
-        "header");
     ChannelModel noc(/*req=*/16, /*rsp=*/16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -260,10 +248,6 @@ TEST(NmuRob, Enabled_PushAw_AllocatesSlotAndStampsOrderingTag) {
 }
 
 TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
-    SCENARIO(
-        "Rob Enabled: AR len=3 (4 beats) -> 4 consecutive ROB slots, base ordering_tag stamped to "
-        "AR "
-        "header");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -289,7 +273,6 @@ TEST(NmuRob, Enabled_PushAr_AllocatesConsecutiveSlotsForBurst) {
 }
 
 TEST(NmuRob, Enabled_ConstructorMarksOnlyDepthSlotsFree) {
-    SCENARIO("Rob Enabled: only [0, depth) is free at construction; slots above it never are");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -302,7 +285,6 @@ TEST(NmuRob, Enabled_ConstructorMarksOnlyDepthSlotsFree) {
 }
 
 TEST(NmuRob, Enabled_DefaultDepthIsOneTwentyEight) {
-    SCENARIO("Rob Enabled: the default pool is 128 entries, not the 256-entry index space");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -314,7 +296,6 @@ TEST(NmuRob, Enabled_DefaultDepthIsOneTwentyEight) {
 }
 
 TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
-    SCENARIO("Rob Enabled: a 256-beat AR into a 256-deep read pool allocates 256 slots");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -333,7 +314,6 @@ TEST(NmuRob, Enabled_MaxBurst_AllocatesEveryEntry) {
 }
 
 TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
-    SCENARIO("Rob Enabled: all 256 beats of a max-length burst land and release in order");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -382,8 +362,6 @@ TEST(NmuRob, Enabled_MaxBurst_AllBeatsLandInOrder) {
 }
 
 TEST(NmuRob, Enabled_LzcAllocator_IsAStack) {
-    SCENARIO(
-        "Rob Enabled: freeing a low range does not return its space while a higher range lives");
     ChannelModel noc(64, 64);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -441,7 +419,6 @@ TEST(NmuRob, Enabled_LzcAllocator_IsAStack) {
 }
 
 TEST(NmuRob, Enabled_LzcAllocator_NonTopReleaseDoesNotGrowFreeSpace) {
-    SCENARIO("Rob Enabled: clearing a non-highest range top leaves free_space unchanged");
     ChannelModel noc(64, 64);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -481,7 +458,6 @@ TEST(NmuRob, Enabled_LzcAllocator_NonTopReleaseDoesNotGrowFreeSpace) {
 class RobDepthParam : public ::testing::TestWithParam<std::size_t> {};
 
 TEST_P(RobDepthParam, Enabled_AllocationNeverExceedsDepth) {
-    SCENARIO("Rob Enabled: free_space starts at depth and no base ever reaches it");
     const std::size_t depth = GetParam();
     ChannelModel noc(512, 512);
     ReqCapture w_cap, ar_cap;
@@ -509,7 +485,6 @@ INSTANTIATE_TEST_SUITE_P(Depths, RobDepthParam,
                          ::testing::Values(1u, 2u, 4u, 8u, 16u, 32u, 64u, 128u, 256u));
 
 TEST(NmuRob, Enabled_LzcAllocator_ReusesFromTheTop) {
-    SCENARIO("Rob Enabled: once the bitmap is empty the next base is 0");
     ChannelModel noc(64, 64);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -558,8 +533,6 @@ TEST(NmuRob, Enabled_LzcAllocator_ReusesFromTheTop) {
 }
 
 TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
-    SCENARIO(
-        "Rob Enabled: push_ar rolled back on downstream backpressure; slots stay free for retry");
     // req queue depth = 1: pkt.push_ar_with_meta will fail after 1st push.
     // All 3 Packetize outputs share the same ChannelModel req_out so the
     // depth limit applies to AR pushes as well as AW.
@@ -593,7 +566,6 @@ TEST(NmuRob, Enabled_PushAr_DownstreamBackpressure_AtomicRollback) {
 }
 
 TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
-    SCENARIO("Rob Enabled: b_rob_depth AWs fill the write pool; the next push_aw returns false");
     ChannelModel noc(64, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId,
@@ -614,7 +586,6 @@ TEST(NmuRob, Enabled_PushAw_PoolFull_ReturnFalseAtomic) {
 }
 
 TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable) {
-    SCENARIO("Rob Enabled: the (max_txns_per_id+1)-th same-id AW is refused while slots remain");
     ChannelModel noc(256, 256);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -636,7 +607,6 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdGate_RefusesWithFreeSlotsAvailable) {
 }
 
 TEST(NmuRob, Enabled_MaxTxnsPerIdGate_AppliesToReadsIndependently) {
-    SCENARIO("Rob Enabled: the per-id cap gates AR independently of AW");
     ChannelModel noc(256, 256);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -652,7 +622,6 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdGate_AppliesToReadsIndependently) {
 }
 
 TEST(NmuRob, Enabled_MaxTxnsPerIdDefaultIsThirtyTwo) {
-    SCENARIO("Rob Enabled: the default per-id cap is FlooNoC's MaxRoTxnsPerId = 32");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -662,8 +631,6 @@ TEST(NmuRob, Enabled_MaxTxnsPerIdDefaultIsThirtyTwo) {
 }
 
 TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
-    SCENARIO(
-        "Rob Enabled: push_aw rolled back on downstream backpressure; slot stays free for retry");
     ChannelModel noc(/*req=*/1, /*rsp=*/16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId,
@@ -684,7 +651,6 @@ TEST(NmuRob, Enabled_PushAw_DownstreamBackpressure_AtomicRollback) {
 // === ROB Enabled mode: pop-side tests ===
 
 TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
-    SCENARIO("Rob Enabled: B for ordering_tag=0 (per-id head) commits immediately on pop_b");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -711,8 +677,6 @@ TEST(NmuRob, Enabled_PopB_InOrder_ImmediateCommit) {
 }
 
 TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
-    SCENARIO(
-        "Rob Enabled: out-of-order B (slot 1 before 0) held; chain-flushes when head (0) arrives");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -748,9 +712,6 @@ TEST(NmuRob, Enabled_PopB_OutOfOrder_HeldUntilHeadReady) {
 }
 
 TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
-    SCENARIO(
-        "Rob Enabled: AR1 4-beat then AR2 2-beat R flits arrive reversed; commit in submission "
-        "order");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -811,7 +772,6 @@ TEST(NmuRob, Enabled_PopR_MultiBeatBurstCommitInOrder) {
 }
 
 TEST(NmuRob, Enabled_PerBeatRelease_HeadBurstStreams) {
-    SCENARIO("Rob Enabled: beat 0 of the head burst leaves before beats 1-3 have arrived");
     ChannelModel noc(64, 64);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -863,9 +823,6 @@ TEST(NmuRob, Enabled_PerBeatRelease_HeadBurstStreams) {
 }
 
 TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
-    SCENARIO(
-        "Rob Enabled: different-id Rs may commit interleaved (per-id order preserved within each "
-        "id)");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -910,8 +867,6 @@ TEST(NmuRob, Enabled_DifferentIdsInterleaveAtTransactionBoundary) {
 }
 
 TEST(NmuRobDeath, Enabled_PopBWithUnallocatedOrderingTag_Abort) {
-    SCENARIO(
-        "Rob Enabled: pop_b on B flit with unallocated ordering_tag aborts (defensive assert)");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -933,7 +888,6 @@ TEST(NmuRobDeath, Enabled_PopBWithUnallocatedOrderingTag_Abort) {
 }
 
 TEST(NmuRobDeath, Enabled_DepthZeroAborts) {
-    SCENARIO("Rob: b_rob_depth = 0 is rejected at construction");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -942,7 +896,6 @@ TEST(NmuRobDeath, Enabled_DepthZeroAborts) {
 }
 
 TEST(NmuRobDeath, Enabled_DepthAboveIdxSpaceAborts) {
-    SCENARIO("Rob: r_rob_depth > ORDERING_TAG_SPACE is rejected at construction");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -953,7 +906,6 @@ TEST(NmuRobDeath, Enabled_DepthAboveIdxSpaceAborts) {
 }
 
 TEST(NmuRobDeath, Enabled_MaxTxnsPerIdZeroAborts) {
-    SCENARIO("Rob: max_txns_per_id = 0 is rejected at construction");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -962,9 +914,6 @@ TEST(NmuRobDeath, Enabled_MaxTxnsPerIdZeroAborts) {
 }
 
 TEST(NmuRob, ReadFillSameBaseOrderingTagLandsInOrder) {
-    SCENARIO(
-        "Enabled read ROB: two R beats stamped with the same base ordering_tag (real NSU "
-        "stamping) land at base+0 and base+1 via the per-base arrival counter, in order.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1010,9 +959,6 @@ TEST(NmuRob, ReadFillSameBaseOrderingTagLandsInOrder) {
 // === Defensive boundary tests (lock the computed-slot guard) ===
 
 TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
-    SCENARIO(
-        "Enabled read ROB: a 3rd R beat for a 2-beat burst (offset == len) aborts "
-        "rather than writing into an adjacent burst's slot.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1050,9 +996,6 @@ TEST(NmuRobDeath, ReadExtraBeatPastBurstLengthAborts) {
 }
 
 TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
-    SCENARIO(
-        "Enabled read ROB: after a burst fully commits and frees base 0, a new "
-        "burst that reuses base 0 starts its arrival counter at 0.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1112,9 +1055,6 @@ TEST(NmuRob, ReadSameBaseReuseStartsAtZero) {
 }
 
 TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
-    SCENARIO(
-        "Enabled read ROB: two same-id bursts to different dst get distinct bases; "
-        "interleaved R beats fill per base, not per id. Egress holds AR order.");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1170,8 +1110,6 @@ TEST(NmuRob, ReadSameIdDifferentDstInterleavedFilesPerBase) {
 // === Idle-ID bypass ===
 
 TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
-    SCENARIO(
-        "Rob Enabled: an ordering_req=0 B whose id's list head owns a slot is malformed, aborts");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1196,8 +1134,6 @@ TEST(NmuRobDeath, Enabled_PopBBypassFlitOnRobbedHead_Abort) {
 }
 
 TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
-    SCENARIO(
-        "Rob Enabled: a 256-beat AR on an idle id is admitted with ordering_req=0, no slots taken");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1215,9 +1151,6 @@ TEST(NmuRob, Enabled_PushAr_OversizedBurst_AdmittedViaBypass) {
 }
 
 TEST(NmuRobDeath, Enabled_PushAr_OversizedBurst_SecondSameIdAbortsNotWedged) {
-    SCENARIO(
-        "Rob Enabled: a second oversized (needs_rob) AR whose beats exceed r_rob_depth_ aborts "
-        "fail-loud instead of wedging retry-forever; an unrelated id is unaffected");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1242,8 +1175,6 @@ TEST(NmuRobDeath, Enabled_PushAr_OversizedBurst_SecondSameIdAbortsNotWedged) {
 }
 
 TEST(NmuRob, Enabled_IdleIdBypass_FirstTxnPerIdAllocatesNoSlot) {
-    SCENARIO(
-        "Rob Enabled: the first AW of an id takes no slot, stamps ordering_req=0; the second does");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1266,7 +1197,6 @@ TEST(NmuRob, Enabled_IdleIdBypass_FirstTxnPerIdAllocatesNoSlot) {
 }
 
 TEST(NmuRob, Enabled_BypassedBeat_ReleasesNoSlot) {
-    SCENARIO("Rob Enabled: a bypassed B forwards without touching the allocation bitmap");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1299,7 +1229,6 @@ TEST(NmuRob, Enabled_BypassedBeat_ReleasesNoSlot) {
 }
 
 TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
-    SCENARIO("Rob Enabled: id 5 holds [bypassed, robbed]; the robbed B arrives first and waits");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1341,7 +1270,6 @@ TEST(NmuRob, Enabled_MixedList_OrderPreserved) {
 }
 
 TEST(NmuRob, Enabled_MaxTxnsPerId1_MatchesDisabled) {
-    SCENARIO("Rob Enabled with max_txns_per_id=1 emits the same AR flits as Rob Disabled");
     ChannelModel noc_e(64, 64);
     ReqCapture w_e, ar_e;
     Packetize pkt_e(noc_e.req_out(), w_e, ar_e, noc_e.req_out(), w_e, kSrcId, {});
@@ -1376,9 +1304,6 @@ TEST(NmuRob, Enabled_MaxTxnsPerId1_MatchesDisabled) {
 // === Same-destination bypass (same-dest, sticky prev_dest) ===
 
 TEST(RobSameDestBypass, SameDestStreakBypassesAll) {
-    SCENARIO(
-        "Rob Enabled: a same-id same-dest AR streak bypasses in full (idle-ID bypass the 1st, "
-        "same-destination bypass the rest); read_slot_hwm stays 0");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1398,10 +1323,6 @@ TEST(RobSameDestBypass, SameDestStreakBypassesAll) {
 }
 
 TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
-    SCENARIO(
-        "Rob Enabled: a dest change mid-streak allocates a RoB slot and stays sticky-allocated "
-        "even after the dest "
-        "reverts, until the id's list fully drains, at which point the idle-ID bypass re-opens");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1480,10 +1401,6 @@ TEST(RobSameDestBypass, DestChangeTriggersStickyFallback) {
 // already proves the drain reopens the idle-ID bypass, and the counters read the
 // same branch variables.
 TEST(RobAdmissionStats, ClauseCountsFollowTheSpecTraceBranches) {
-    SCENARIO(
-        "Rob Enabled: the AW clause counters split the Section 2.5 trace 1/1/2 across "
-        "{idle-ID bypass, same-destination bypass, fall-back allocate}, an AR same-dest streak "
-        "splits 1/2/0, and the two directions never cross-count");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1532,7 +1449,6 @@ TEST(RobAdmissionStats, ClauseCountsFollowTheSpecTraceBranches) {
 }
 
 TEST(RobSameDestBypass, MaxTxnsPerIdStillBoundsBypassedEntries) {
-    SCENARIO("Rob Enabled: max_txns_per_id gates a same-id same-dest bypass streak too");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1595,12 +1511,9 @@ axi::AwBeat make_narrow_aw(uint8_t id, uint64_t addr) {
     return b;
 }
 
+// AXI4 A5.3: a class change (Narrow->Data) forces ordering_req=1, closing the same-dest-bypass
+// ordering hole S3a T6 opens across the two response networks.
 TEST(RobCrossClassRead, NarrowThenDataSameDestFallsBackToRob) {
-    SCENARIO(
-        "Rob Enabled: a config-space (Narrow) read followed by a same-id same-dest memory-space "
-        "(Data) read does NOT take the same-destination bypass -- the class change forces "
-        "ordering_req=1, closing the AXI4 A5.3 hole S3a T6 opens (NarrowR stays on RSP, DataR "
-        "moves to DAT)");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1618,9 +1531,6 @@ TEST(RobCrossClassRead, NarrowThenDataSameDestFallsBackToRob) {
 }
 
 TEST(RobCrossClassRead, DataThenNarrowSameDestFallsBackToRob) {
-    SCENARIO(
-        "Rob Enabled: symmetric case -- memory-space (Data) read then config-space (Narrow) read "
-        "to the same dst also falls back to the RoB path");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1638,10 +1548,6 @@ TEST(RobCrossClassRead, DataThenNarrowSameDestFallsBackToRob) {
 }
 
 TEST(RobCrossClassRead, SameClassSameDestStillBypasses) {
-    SCENARIO(
-        "Rob Enabled: no regression -- a same-id same-dest same-class (Narrow-Narrow) streak "
-        "still takes the same-destination bypass, matching the existing Data-class coverage in "
-        "RobSameDestBypass.SameDestStreakBypassesAll");
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;
     Packetize pkt(noc.req_out(), w_cap, ar_cap, noc.req_out(), w_cap, kSrcId, {});
@@ -1670,12 +1576,9 @@ TEST(RobCrossClassRead, SameClassSameDestStillBypasses) {
 // and dat_aw_out_ so it captures the AW header regardless of which network
 // steering sends it to, mirroring how ar_cap captures AR unconditionally
 // (AR never splits by class).
+// AXI4 A5.3: symmetric to the read case -- a class change on a same-id same-dest write also forces
+// ordering_req=1 to close the S3a T6 ordering hole.
 TEST(RobCrossClassWrite, NarrowThenDataSameDestFallsBackToRob) {
-    SCENARIO(
-        "Rob Enabled: a config-space (Narrow) write followed by a same-id same-dest memory-space "
-        "(Data) write does NOT take the same-destination bypass -- the class change forces "
-        "ordering_req=1, closing the AXI4 A5.3 hole S3a T6 opens (NarrowAw stays on REQ, DataAw "
-        "moves to DAT)");
     ChannelModel noc(16, 16);
     ReqCapture aw_cap, w_cap;
     Packetize pkt(aw_cap, w_cap, w_cap, aw_cap, w_cap, kSrcId, cross_class_sam());
@@ -1693,9 +1596,6 @@ TEST(RobCrossClassWrite, NarrowThenDataSameDestFallsBackToRob) {
 }
 
 TEST(RobCrossClassWrite, DataThenNarrowSameDestFallsBackToRob) {
-    SCENARIO(
-        "Rob Enabled: symmetric case -- memory-space (Data) write then config-space (Narrow) "
-        "write to the same dst also falls back to the RoB path");
     ChannelModel noc(16, 16);
     ReqCapture aw_cap, w_cap;
     Packetize pkt(aw_cap, w_cap, w_cap, aw_cap, w_cap, kSrcId, cross_class_sam());
@@ -1713,9 +1613,6 @@ TEST(RobCrossClassWrite, DataThenNarrowSameDestFallsBackToRob) {
 }
 
 TEST(RobCrossClassWrite, SameClassSameDestStillBypasses) {
-    SCENARIO(
-        "Rob Enabled: no regression -- a same-id same-dest same-class (Narrow-Narrow) write "
-        "streak still takes the same-destination bypass");
     ChannelModel noc(16, 16);
     ReqCapture aw_cap, w_cap;
     Packetize pkt(aw_cap, w_cap, w_cap, aw_cap, w_cap, kSrcId, cross_class_sam());
@@ -1732,11 +1629,6 @@ TEST(RobCrossClassWrite, SameClassSameDestStillBypasses) {
 }
 
 TEST(NmuRob, Enabled_NarrowReadUnalignedAddrReanchorsToCorrectLane) {
-    SCENARIO(
-        "Rob Enabled (robbed): narrow class read-entry lane re-anchor recovers the correct byte "
-        "lane from a genuinely unaligned AR local_addr (not a multiple of the beat size) -- site "
-        "4 of the S2 design doc's lane re-anchor table, the flagged 'risky' site (the R flit "
-        "carries no address; the RoB read entry supplies the AR basis push_ar computed)");
     // Narrow-class SAM: every tile is config space, unlike legacy_sam()'s memory-space default.
     std::vector<addr_trans::PackedTile> tiles;
     for (unsigned y = 0; y < 16; ++y)
@@ -1845,9 +1737,6 @@ ni::cmodel::Flit make_bypassed_r_flit(uint8_t rid, bool rlast) {
 class OutstandingCountParam : public ::testing::TestWithParam<std::size_t> {};
 
 TEST_P(OutstandingCountParam, BypassStreakCountsTransactionsButTakesNoRobSlots) {
-    SCENARIO(
-        "Rob Enabled: an idle-ID / same-destination streak allocates zero RoB slots while "
-        "still counting one in-flight transaction per push");
     const std::size_t cap = GetParam();
     constexpr std::size_t kRobDepth = 32;
     PoolTestbench t;
@@ -1864,9 +1753,6 @@ TEST_P(OutstandingCountParam, BypassStreakCountsTransactionsButTakesNoRobSlots) 
 }
 
 TEST_P(OutstandingCountParam, MultiBeatReadCountsOneTransactionAndRetiresOnLast) {
-    SCENARIO(
-        "Rob Enabled: an 8-beat AR burst counts as one in-flight transaction; it is "
-        "released on rlast, not per beat");
     const std::size_t cap = GetParam();
     PoolTestbench t;
     Rob rob(t.pkt, t.depkt, RobMode::Enabled, legacy_sam(), 32, 32, /*max_txns_per_id=*/cap);
@@ -1887,9 +1773,6 @@ TEST_P(OutstandingCountParam, MultiBeatReadCountsOneTransactionAndRetiresOnLast)
 }
 
 TEST_P(OutstandingCountParam, RoblessMultiBeatReadCountsOneTransaction) {
-    SCENARIO(
-        "Rob Disabled: the RoBless read path also counts one transaction per burst, "
-        "released on rlast");
     const std::size_t cap = GetParam();
     PoolTestbench t;
     Rob rob(t.pkt, t.depkt, RobMode::Disabled, legacy_sam(), 32, 32, /*max_txns_per_id=*/cap);
@@ -1914,9 +1797,6 @@ INSTANTIATE_TEST_SUITE_P(Caps, OutstandingCountParam,
                          ::testing::Values(1u, 2u, 4u, 8u, 16u, 32u, 64u, 128u, 256u));
 
 TEST(NmuRobOutstandingCount, BypassedThenRobbedOnOneIdCountOneEach) {
-    SCENARIO(
-        "Rob Enabled: an id that starts bypassed then falls back to the RoB counts one "
-        "transaction on both arms, while only the robbed one takes a slot");
     constexpr std::size_t kRobDepth = 32;
     PoolTestbench t;
     Rob rob(t.pkt, t.depkt, RobMode::Enabled, legacy_sam(), kRobDepth, kRobDepth,
@@ -1937,9 +1817,6 @@ TEST(NmuRobOutstandingCount, BypassedThenRobbedOnOneIdCountOneEach) {
 }
 
 TEST(NmuRobOutstandingCount, WBeatsOfAdmittedBurstsFlowWhileAwIsRefused) {
-    SCENARIO(
-        "Rob: an AW refusal does not stall the W beats of already-admitted bursts, "
-        "and the refused burst's own W beat is rejected once the credit runs out");
     PoolTestbench t;
     // The per-id cap is what refuses here; the subject is w_bursts_owed_, which must
     // count admitted AWs only, whatever refused the rest.

@@ -3,7 +3,6 @@
 // asymmetry vs Nmu) in isolation.
 #include "axi/types.hpp"
 #include "common/channel_model.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nsu/nsu_standalone.hpp"
@@ -19,10 +18,6 @@ using ni::cmodel::testing::ChannelModel;
 namespace axi = ni::cmodel::axi;
 
 TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
-    SCENARIO(
-        "Nsu top-level smoke: NUM_VC=1 default config, construct + tick 10x "
-        "should not crash. Verifies ctor sequence (no Rob, MetaBuffer shared "
-        "between Depacketize and Packetize).");
     ChannelModel channel(/*req*/ 64, /*rsp*/ 64);
     NsuConfig cfg{};
     cfg.src_id = 0x34;
@@ -60,13 +55,6 @@ TEST(NsuTopLevel, ConstructsAndTicksWithoutCrash) {
 // -> VcAllocator -> NocRspOut wiring. Uses NsuStandalone so the test
 // does not depend on ChannelModel / NMU side.
 TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
-    SCENARIO(
-        "Nsu write round-trip: inject AW+W flits into null NoC req-in, "
-        "drain AW+W beats from AxiMasterPort, push synthetic B beat into "
-        "AxiMasterPort, expect B flit on null NoC rsp-out with dst_id == "
-        "original requester. Regression gate for assembled-pipeline wiring "
-        "+ MetaBuffer share + tick order.");
-
     constexpr uint8_t kNsuSrcId = 0x34;
     constexpr uint8_t kRequesterSrcId = 0x12;
     constexpr uint8_t kAxiId = 0x07;

@@ -15,7 +15,6 @@
 //       consumer pulse MUST be an accumulating counter — take_credit then drains
 //       exactly one per call with no loss / double-count.
 #include "axi/types.hpp"
-#include "common/scenario.hpp"
 #include "flit.hpp"
 #include "ni_flit_constants.h"
 #include "nmu/nmu_standalone.hpp"
@@ -96,12 +95,6 @@ Flit make_data_r(uint8_t rid, uint8_t src_id, uint8_t dst_id) {
 // mock-pushed AW+W pair (a 2-flit worm) is one "unit"; the credit seed is
 // counted in flits (AW consumes one credit, W consumes the next).
 TEST(NmuDatCreditConservation, BackpressureStallsAtSeedThenReopens) {
-    SCENARIO(
-        "NMU DAT credit ON, seed=3: push 4 AW+W pairs (8 flits) directly into "
-        "dat_wormhole_arbiter, no receive_credit. After 3 flits drain, "
-        "dat_req_credit_avail goes false and pop_dat_req_flit dries up. Then 2 "
-        "receive_credit pulses release exactly 2 more flits.");
-
     constexpr uint8_t kSrcId = 0x12;
     constexpr std::size_t kSeed = 3;
     constexpr int kPairs = 4;  // 8 flits > seed, so the surplus is held by backpressure
@@ -152,13 +145,6 @@ TEST(NmuDatCreditConservation, BackpressureStallsAtSeedThenReopens) {
 // tick. The consumer pulse must accumulate ALL of them; take_credit then
 // drains exactly one per call.
 TEST(NmuDatCreditConservation, ConsumerPulseAccumulatesMultiConsumePerTick) {
-    SCENARIO(
-        "Issue 5 AR reads on REQ (so the Rob has outstanding entries), then inject the 5 "
-        "matching R(last) rsp flits via inject_dat_rsp_flit (DAT ingress) and run a SINGLE "
-        "nmu.tick(): Depacketize dequeues all 5 in that one tick. dat_rsp_take_credit must "
-        "then drain exactly 5 pulses (one per consumed flit) and no more — proving the pulse "
-        "is an accumulating counter, not a one-bit latch.");
-
     constexpr uint8_t kSrcId = 0x12;
     constexpr int kRspFlits = 5;
     NmuStandalone nmu(make_cfg(kSrcId));

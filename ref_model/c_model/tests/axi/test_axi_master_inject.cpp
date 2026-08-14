@@ -1,5 +1,4 @@
 #include "axi/scenario_parser.hpp"
-#include "common/scenario.hpp"
 #include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
 #include <fstream>
@@ -20,7 +19,6 @@ std::string write_temp_yaml(const std::string& content) {
 }  // namespace
 
 TEST(AxiMasterInject, unknown_mode_throws_at_parse) {
-    SCENARIO("YAML config.inject with unknown mode is rejected by parser allowlist");
     const std::string yaml =
         "config:\n"
         "  inject:\n"
@@ -39,7 +37,6 @@ TEST(AxiMasterInject, unknown_mode_throws_at_parse) {
 }
 
 TEST(AxiMasterInject, no_inject_field_means_mode_none) {
-    SCENARIO("scenario without config.inject field defaults to InjectConfig::Mode::None");
     const std::string yaml =
         "transactions:\n"
         "  - op: read\n"
@@ -56,7 +53,6 @@ TEST(AxiMasterInject, no_inject_field_means_mode_none) {
 }
 
 TEST(AxiMasterInject, aw_unstable_at_cycle_n_parsed_correctly) {
-    SCENARIO("aw_unstable mode and cycle field parsed correctly into ScenarioConfig::inject");
     const std::string yaml =
         "config:\n"
         "  inject:\n"

@@ -164,7 +164,6 @@ python3 specgen/tools/codegen.py --check
 - [Response-ordering trade-off record](docs/trade-off.md)
 - [Verification environment](docs/verification-environment.md)
 - [Known limitations](docs/known-limitations.md)
-- [specgen sub-project guide](specgen/docs/guide/index.md)
 
 ## Contributing
 

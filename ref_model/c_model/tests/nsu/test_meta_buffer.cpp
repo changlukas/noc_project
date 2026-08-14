@@ -1,12 +1,10 @@
 #include "nsu/meta_buffer.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::nsu::MetaBuffer;
 using ni::cmodel::nsu::MetaEntry;
 
 TEST(MetaBuffer, WriteSnapshotPeekCommit) {
-    SCENARIO("MetaBuffer: allocate_write -> peek_write returns entry; commit_write erases it");
     MetaBuffer mb(/*max_outstanding=*/4);
     mb.allocate_write(0x05, {0x10, 0x05, 1, 7});
     auto e = mb.peek_write(0x05);
@@ -25,8 +23,6 @@ TEST(MetaBuffer, WriteSnapshotPeekCommit) {
 }
 
 TEST(MetaBuffer, MultiOutstandingSameIdFifoOrder) {
-    SCENARIO(
-        "MetaBuffer: 3 same-id writes returned by peek+commit in FIFO order (ordering_tag 1,2,3)");
     MetaBuffer mb(4);
     mb.allocate_write(0x05, {0x10, 0x05, 0, 1});
     mb.allocate_write(0x05, {0x10, 0x05, 0, 2});
@@ -41,7 +37,6 @@ TEST(MetaBuffer, MultiOutstandingSameIdFifoOrder) {
 }
 
 TEST(MetaBuffer, DifferentIdsIndependent) {
-    SCENARIO("MetaBuffer: id=0x05 ops do not touch id=0x07 state (per-id deques are independent)");
     MetaBuffer mb(4);
     mb.allocate_write(0x05, {0x10, 0x05, 0, 0});
     mb.allocate_write(0x07, {0x20, 0x07, 0, 0});
@@ -50,7 +45,6 @@ TEST(MetaBuffer, DifferentIdsIndependent) {
 }
 
 TEST(MetaBuffer, ReadPeekCommitMultiBeat) {
-    SCENARIO("MetaBuffer: read entry survives repeated peek_read; commit_read on rlast erases");
     MetaBuffer mb(4);
     mb.allocate_read(0x03, {0x10, 0x03, 0, 5});
     // R burst: peek twice for r0/r1, commit only on r1 (last)
@@ -61,7 +55,6 @@ TEST(MetaBuffer, ReadPeekCommitMultiBeat) {
 }
 
 TEST(MetaBuffer, PeekEmptyReturnsNullopt) {
-    SCENARIO("MetaBuffer: peek_write/peek_read on unknown id returns nullopt (no spurious entry)");
     MetaBuffer mb(4);
     EXPECT_FALSE(mb.peek_write(0x06).has_value());
     EXPECT_FALSE(mb.peek_read(0x07).has_value());
@@ -70,12 +63,7 @@ TEST(MetaBuffer, PeekEmptyReturnsNullopt) {
 using ni::cmodel::nsu::remap_downstream_id;
 
 TEST(RemapDownstreamId, CollapsesToAllOnesOfTheDrivenIdWidth) {
-    SCENARIO(
-        "remap_downstream_id: max_unique_ids=1 maps every upstream id to all-ones of "
-        "AXI_ID_WIDTH, the width the NSU drives -- matching floo_meta_buffer's '1 of "
-        "its OUTPUT id width. The value must be addressable on the port it drives.");
     constexpr uint8_t collapsed = (1u << ni::AXI_ID_WIDTH) - 1u;
-    EXPECT_EQ(collapsed, (1u << ni::AXI_ID_WIDTH) - 1u) << "all-ones of the driven width";
     EXPECT_LT(collapsed, ni::cmodel::axi::AXI_ID_SPACE) << "must fit the port it is driven onto";
     EXPECT_EQ(remap_downstream_id(0x00, 1), collapsed);
     EXPECT_EQ(remap_downstream_id(0x05, 1), collapsed);
@@ -83,7 +71,6 @@ TEST(RemapDownstreamId, CollapsesToAllOnesOfTheDrivenIdWidth) {
 }
 
 TEST(RemapDownstreamId, IdentityWhenFullIdSpace) {
-    SCENARIO("remap_downstream_id: max_unique_ids=AXI_ID_SPACE passes the id through");
     constexpr uint8_t kMaxId = ni::cmodel::axi::AXI_ID_SPACE - 1u;
     EXPECT_EQ(remap_downstream_id(0x00, ni::cmodel::axi::AXI_ID_SPACE), 0x00);
     EXPECT_EQ(remap_downstream_id(0x05, ni::cmodel::axi::AXI_ID_SPACE), 0x05);
@@ -91,11 +78,6 @@ TEST(RemapDownstreamId, IdentityWhenFullIdSpace) {
 }
 
 TEST(MetaBuffer, SharedPoolFullReportsInsteadOfAborting) {
-    SCENARIO(
-        "MetaBuffer: the write pool is shared across ids, not bounded per-id. Allocations "
-        "spread across 3 downstream ids (bucket sizes 2/1/1, none reaching max_outstanding) "
-        "still trip write_full() on the global count; read pool is unaffected; FIFO order "
-        "within a bucket and commit_write's freed slot both hold.");
     constexpr std::size_t kMaxOutstanding = 4;
     MetaBuffer mb(kMaxOutstanding);
     constexpr uint8_t kDownA = 0x01;  // bucket ends up with 2 entries

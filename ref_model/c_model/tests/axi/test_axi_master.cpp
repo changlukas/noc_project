@@ -1,12 +1,12 @@
 #include "axi/scenario_parser.hpp"
 #include "axi/axi_slave.hpp"
 #include "axi/memory.hpp"
-#include "common/scenario.hpp"
 #include "common/tmp_path.hpp"
 #include <gtest/gtest.h>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 namespace axi = ni::cmodel::axi;
 
@@ -24,7 +24,6 @@ class ScenarioParser : public ::testing::Test {
 };
 
 TEST_F(ScenarioParser, MinimalWriteReadScenario) {
-    SCENARIO("scenario_parser: minimal YAML with 1 write + 1 read parses to 2 transactions");
     auto path = write_tmp(R"YAML(
 config:
   memory_base: 0x1000
@@ -57,7 +56,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, DefaultsAppliedWhenConfigOmitted) {
-    SCENARIO("scenario_parser: missing config section falls back to documented defaults");
     auto path = write_tmp(R"YAML(
 transactions:
   - op: read
@@ -76,7 +74,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, UnknownConfigFieldThrows) {
-    SCENARIO("scenario_parser: unrecognized config key throws runtime_error (no silent ignore)");
     auto path = write_tmp(R"YAML(
 config:
   bogus_field: 123
@@ -94,9 +91,8 @@ transactions:
 
 // WRAP burst is now accepted with constraints (len ∈ {1,3,7,15}
 // and addr aligned to (1<<size)). FIXED is accepted unconditionally.
+// IHI 0022 §A3.4.1: WRAP burst length is restricted to {1,3,7,15} (2/4/8/16 beats).
 TEST_F(ScenarioParser, WrapAcceptedWithValidLen) {
-    SCENARIO(
-        "scenario_parser: WRAP accepts len in {1,3,7,15} (2/4/8/16 beats) per IHI 0022 §A3.4.1");
     for (uint8_t len : {uint8_t(1), uint8_t(3), uint8_t(7), uint8_t(15)}) {
         std::ostringstream y;
         y << "\ntransactions:\n"
@@ -115,8 +111,6 @@ TEST_F(ScenarioParser, WrapAcceptedWithValidLen) {
 }
 
 TEST_F(ScenarioParser, WrapRejectedWithInvalidLen) {
-    SCENARIO(
-        "scenario_parser: WRAP rejects len not in {1,3,7,15} (must be power-of-two beat count)");
     for (uint8_t len : {uint8_t(0), uint8_t(2), uint8_t(4), uint8_t(5), uint8_t(6), uint8_t(8),
                         uint8_t(9), uint8_t(16)}) {
         std::ostringstream y;
@@ -136,7 +130,6 @@ TEST_F(ScenarioParser, WrapRejectedWithInvalidLen) {
 }
 
 TEST_F(ScenarioParser, WrapRejectedWithUnalignedAddr) {
-    SCENARIO("scenario_parser: WRAP with addr not aligned to (1<<size) throws");
     auto path = write_tmp(R"YAML(
 transactions:
   - op: read
@@ -151,7 +144,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, FixedAccepted) {
-    SCENARIO("scenario_parser: FIXED burst accepted unconditionally (no len/addr constraint)");
     auto path = write_tmp(R"YAML(
 transactions:
   - op: read
@@ -168,7 +160,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, IncrUnalignedAccepted_PhaseB) {
-    SCENARIO("scenario_parser: INCR with unaligned start addr accepted (master handles alignment)");
     auto path = write_tmp(R"YAML(
 transactions:
   - op: read
@@ -186,7 +177,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, StrbFileFieldAccepted) {
-    SCENARIO("scenario_parser: write txn parses optional strb_file field correctly");
     auto path = write_tmp(R"YAML(
 transactions:
   - op: write
@@ -205,8 +195,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, StrbFileOptional) {
-    SCENARIO(
-        "scenario_parser: write txn without strb_file leaves field empty (defaults to all-1s)");
     auto path = write_tmp(R"YAML(
 transactions:
   - op: write
@@ -223,7 +211,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, ReadTxnIgnoresStrbFile) {
-    SCENARIO("scenario_parser: read txn silently ignores strb_file (WSTRB is W-channel only)");
     auto path = write_tmp(R"YAML(
 transactions:
   - op: read
@@ -243,7 +230,6 @@ transactions:
 // Lock field parsing. Uses per-test unique tempfile names because
 // the shared write_tmp() helper races with parallel ctest runners.
 TEST_F(ScenarioParser, LockNormalAccepted) {
-    SCENARIO("scenario_parser: lock=normal parses to LockType::Normal");
     std::string tmp_name = std::string("/lock_normal_") +
                            ::testing::UnitTest::GetInstance()->current_test_info()->name() +
                            ".yaml";
@@ -264,8 +250,8 @@ transactions:
     EXPECT_EQ(sc.transactions[0].lock, axi::LockType::Normal);
 }
 
+// AXI4 §A7: lock=exclusive maps to LockType::Exclusive.
 TEST_F(ScenarioParser, LockExclusiveAccepted) {
-    SCENARIO("scenario_parser: lock=exclusive parses to LockType::Exclusive (AXI4 §A7)");
     std::string tmp_name = std::string("/lock_excl_") +
                            ::testing::UnitTest::GetInstance()->current_test_info()->name() +
                            ".yaml";
@@ -287,7 +273,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, LockDefaultsToNormal) {
-    SCENARIO("scenario_parser: missing lock field defaults to LockType::Normal");
     std::string tmp_name = std::string("/lock_default_") +
                            ::testing::UnitTest::GetInstance()->current_test_info()->name() +
                            ".yaml";
@@ -308,7 +293,6 @@ transactions:
 }
 
 TEST_F(ScenarioParser, LockInvalidStringThrows) {
-    SCENARIO("scenario_parser: lock=<unknown string> throws (no silent fallback)");
     std::string tmp_name = std::string("/lock_invalid_") +
                            ::testing::UnitTest::GetInstance()->current_test_info()->name() +
                            ".yaml";
@@ -333,7 +317,6 @@ transactions:
 class AxiMasterTest : public ScenarioParser {};
 
 TEST_F(AxiMasterTest, ConstructsFromYamlAndOpensDump) {
-    SCENARIO("AxiMaster: constructs from YAML, opens dump file, reports done()==false initially");
     auto wpath = std::string(::testing::TempDir()) + "/w.txt";
     std::ofstream(wpath) << "AB CD EF 12 34 56 78 9A BC DE F0 11 22 33 44 55 "
                             "66 77 88 99 AA BB CC DD EE FF 00 11 22 33 44 55\n";
@@ -354,8 +337,6 @@ transactions:
 }
 
 TEST_F(AxiMasterTest, SingleWriteTransactionExecutes) {
-    SCENARIO(
-        "AxiMaster: 1-beat write emits AW+W, B response fires WriteResult callback then done()");
     auto wpath = std::string(::testing::TempDir()) + "/w_single.txt";
     std::ofstream(wpath) << "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 "
                             "11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20\n";
@@ -395,7 +376,6 @@ transactions:
 }
 
 TEST_F(AxiMasterTest, SingleReadTransactionDumpsToFile) {
-    SCENARIO("AxiMaster: single read emits AR, accepts R beat, writes hex bytes to dump file");
     auto dumpPath = std::string(::testing::TempDir()) + "/r_single.txt";
     auto yaml = write_tmp(std::string(R"YAML(
 transactions:
@@ -431,7 +411,6 @@ transactions:
 }
 
 TEST_F(AxiMasterTest, MaxOutstandingWriteLimitsConcurrency) {
-    SCENARIO("AxiMaster: max_outstanding_write=2 admits 2 AWs, 3rd waits until first B drains");
     auto wpath = std::string(::testing::TempDir()) + "/w_concur.txt";
     std::ofstream(wpath) << "00 11 22 33 44 55 66 77 88 99 AA BB CC DD EE FF "
                             "00 11 22 33 44 55 66 77 88 99 AA BB CC DD EE FF\n";
@@ -479,7 +458,6 @@ transactions:
 }
 
 TEST_F(AxiMasterTest, StrbFileMissingThrows) {
-    SCENARIO("AxiMaster: referenced strb_file that does not exist throws runtime_error on tick");
     auto wpath = std::string(::testing::TempDir()) + "/w_missing_strb.txt";
     std::ofstream(wpath) << "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 "
                             "11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20\n";
@@ -504,7 +482,6 @@ transactions:
 }
 
 TEST_F(AxiMasterTest, StrbFileLineCountMismatchThrows) {
-    SCENARIO("AxiMaster: strb_file with token count != (len+1) throws (mismatched per-beat strb)");
     auto wpath = std::string(::testing::TempDir()) + "/w_lc.txt";
     std::ofstream(wpath) << "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10 "
                             "11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F 20\n";
@@ -574,7 +551,6 @@ class AxiMasterUnalignedP : public AxiMasterTest,
                             public ::testing::WithParamInterface<UnalignedCase> {};
 
 TEST_P(AxiMasterUnalignedP, FirstBeatStrbMaskedAndAwAligned) {
-    SCENARIO("AxiMaster: unaligned addr → AW.addr aligned down, first-beat WSTRB masks low lanes");
     const auto& c = GetParam();
     auto wpath = write_32byte_tmp_data(std::string("u_") + c.label);
     std::ostringstream yaml_src;
@@ -624,9 +600,6 @@ class AxiMasterReadUnalignedP : public AxiMasterTest,
                                 public ::testing::WithParamInterface<UnalignedCase> {};
 
 TEST_P(AxiMasterReadUnalignedP, ArAlignedAndAccumulatorReadsAlignedLane) {
-    SCENARIO(
-        "AxiMaster: unaligned addr -> AR.addr aligned down, read accumulator pulls the full "
-        "beat from the ALIGNED bus lane (mirrors the W-loop fix)");
     const auto& c = GetParam();
     std::ostringstream yaml_src;
     yaml_src << "\ntransactions:\n"
@@ -691,10 +664,6 @@ INSTANTIATE_TEST_SUITE_P(UnalignedReadCases, AxiMasterReadUnalignedP,
 // the aligned AWADDR it receives), and the byte the scenario asked to write
 // lands at the address it asked for, not shifted by the aligned-down offset.
 TEST_F(AxiMasterTest, UnalignedWriteReadbackMatchesRealSlave) {
-    SCENARIO(
-        "AxiMaster+AxiSlave end-to-end: unaligned write (addr=0x1003 size=5) does not trip "
-        "STRB_SPARSE_LEGAL and a size=0 readback at the true start address returns the byte "
-        "the scenario wrote there");
     // write_32byte_tmp_data content: byte[j] = 0x40 + (j & 0x3F). aligned_addr =
     // 0x1000, prefix = txn_addr - aligned_addr = 3, so local offset 3 (value 0x43)
     // is the first byte actually written, landing at addr 0x1000+3 = 0x1003.
@@ -745,8 +714,6 @@ transactions:
 }
 
 TEST_F(AxiMasterTest, StrbFilePropagatesToWChannel) {
-    SCENARIO(
-        "AxiMaster: per-beat strb_file values appear in order on captured W.strb (no override)");
     // 2-beat write with sparse first beat (0x0F) and full second beat (0xFFFFFFFF).
     // Verify both strb masks ride the W channel in order.
     auto wpath = std::string(::testing::TempDir()) + "/w_strb_prop.txt";
@@ -819,9 +786,6 @@ std::string write_hex_tmp_data(const std::string& tag, const std::string& hex_by
 // tick_drain_r_resp_'s aligned lane math (mirroring the W-loop fix) extracts
 // from the same lanes a real slave places data on.
 TEST_F(AxiMasterTest, UnalignedReadFromRealSlaveMatchesMemory) {
-    SCENARIO(
-        "AxiMaster+AxiSlave end-to-end: an unaligned read (addr=0x2003 size=5) through a real "
-        "AxiSlave returns the bytes written at their true addresses, not lane-shifted ones");
     std::string full_window;
     for (int i = 0; i < axi::DATA_BYTES; ++i) {
         char buf[4];
@@ -877,143 +841,72 @@ transactions:
     }
 }
 
-TEST_F(AxiMasterTest, NarrowSize0_1BytePerBeat) {
-    SCENARIO("AxiMaster narrow size=0: 4 beats x 1B, per-beat byte_lane increments, strb=1<<n");
-    // addr=0x1000 size=0 len=3: 4 beats x 1 byte. Beat n: byte_lane = n,
-    // strb = 1 << n, data[n] = user[n].
-    auto wpath = write_hex_tmp_data("narrow_s0", "AA BB CC DD");
-    auto yaml = write_tmp(std::string(R"YAML(
-transactions:
-  - op: write
-    addr: 0x1000
-    id: 0x1
-    len: 3
-    size: 0
-    burst: INCR
-    data_file: )YAML") + wpath +
-                          "\n");
+// Sweeps AxSIZE 0..3: beat n's byte_lane = (addr % 64) + n * bytes_per_beat,
+// strb = ((1 << bytes_per_beat) - 1) << byte_lane, data[byte_lane..) = the
+// next bytes_per_beat bytes of data_hex (beat-major order). size=2 (4 B/beat)
+// is the canonical narrow case.
+struct NarrowSizeCase {
+    uint8_t size;
+    uint64_t addr;  // pre-aligned to (1 << size)
+    uint8_t id;
+    const char* data_hex;
+};
+
+class AxiMasterNarrowSize : public AxiMasterTest,
+                            public ::testing::WithParamInterface<NarrowSizeCase> {};
+
+TEST_P(AxiMasterNarrowSize, PerBeatByteLaneAndStrb) {
+    const NarrowSizeCase& c = GetParam();
+    const uint8_t bytes_per_beat = 1u << c.size;
+    const uint8_t beats = (c.size == 0) ? 4 : 2;
+
+    auto wpath = write_hex_tmp_data("narrow_size", c.data_hex);
+    std::ostringstream yaml_src;
+    yaml_src << "transactions:\n"
+                "  - op: write\n"
+                "    addr: 0x"
+             << std::hex << c.addr << "\n    id: 0x" << static_cast<unsigned>(c.id)
+             << "\n    len: " << std::dec << (beats - 1)
+             << "\n    size: " << static_cast<unsigned>(c.size)
+             << "\n    burst: INCR\n    data_file: " << wpath << "\n";
+    auto yaml = write_tmp(yaml_src.str());
+
     ni::cmodel::axi::testing::MockSlave mock;
     axi::AxiMasterT<ni::cmodel::axi::testing::MockSlave> master(
-        yaml, mock, std::string(::testing::TempDir()) + "/r_narrow_s0.txt");
+        yaml, mock, std::string(::testing::TempDir()) + "/r_narrow_size.txt");
     master.tick();
     ASSERT_EQ(mock.captured_aw.size(), 1u);
-    EXPECT_EQ(mock.captured_aw[0].addr, 0x1000u);
-    EXPECT_EQ(mock.captured_aw[0].size, 0u);
-    EXPECT_EQ(mock.captured_aw[0].len, 3u);
-    ASSERT_EQ(mock.captured_w.size(), 4u);
-    const uint8_t expected_bytes[4] = {0xAA, 0xBB, 0xCC, 0xDD};
-    for (std::size_t n = 0; n < 4; ++n) {
-        EXPECT_EQ(mock.captured_w[n].strb, 1u << n) << "beat " << n;
-        EXPECT_EQ(mock.captured_w[n].data[n], expected_bytes[n]) << "beat " << n;
-        EXPECT_EQ(mock.captured_w[n].last, n == 3u) << "beat " << n;
+    EXPECT_EQ(mock.captured_aw[0].addr, c.addr);
+    EXPECT_EQ(mock.captured_aw[0].size, c.size);
+    EXPECT_EQ(mock.captured_aw[0].len, static_cast<unsigned>(beats - 1));
+    ASSERT_EQ(mock.captured_w.size(), static_cast<std::size_t>(beats));
+
+    std::istringstream hex_stream(c.data_hex);
+    std::vector<uint8_t> src;
+    unsigned byte;
+    while (hex_stream >> std::hex >> byte) src.push_back(static_cast<uint8_t>(byte));
+    ASSERT_EQ(src.size(), static_cast<std::size_t>(beats) * bytes_per_beat);
+
+    const uint8_t base_lane = static_cast<uint8_t>(c.addr % axi::DATA_BYTES);
+    for (uint8_t n = 0; n < beats; ++n) {
+        const uint8_t byte_lane = static_cast<uint8_t>(base_lane + n * bytes_per_beat);
+        const uint32_t strb = ((1u << bytes_per_beat) - 1u) << byte_lane;
+        EXPECT_EQ(mock.captured_w[n].strb, strb) << "beat " << +n;
+        for (uint8_t k = 0; k < bytes_per_beat; ++k) {
+            EXPECT_EQ(mock.captured_w[n].data[byte_lane + k], src[n * bytes_per_beat + k])
+                << "beat " << +n << " byte " << +k;
+        }
+        EXPECT_EQ(mock.captured_w[n].last, n + 1 == beats) << "beat " << +n;
     }
 }
 
-TEST_F(AxiMasterTest, NarrowSize1_2BytePerBeat) {
-    SCENARIO(
-        "AxiMaster narrow size=1: 2 beats x 2B, lane-positioned data on bus lanes [byte_lane..)");
-    // addr=0x1002 size=1 len=1: 2 beats x 2 bytes.
-    // Beat 0: addr=0x1002, byte_lane=2, strb=0x3<<2=0xC, data[2..3]=user[0..1].
-    // Beat 1: addr=0x1004, byte_lane=4, strb=0x3<<4=0x30, data[4..5]=user[2..3].
-    auto wpath = write_hex_tmp_data("narrow_s1", "11 22 33 44");
-    auto yaml = write_tmp(std::string(R"YAML(
-transactions:
-  - op: write
-    addr: 0x1002
-    id: 0x2
-    len: 1
-    size: 1
-    burst: INCR
-    data_file: )YAML") + wpath +
-                          "\n");
-    ni::cmodel::axi::testing::MockSlave mock;
-    axi::AxiMasterT<ni::cmodel::axi::testing::MockSlave> master(
-        yaml, mock, std::string(::testing::TempDir()) + "/r_narrow_s1.txt");
-    master.tick();
-    ASSERT_EQ(mock.captured_aw.size(), 1u);
-    EXPECT_EQ(mock.captured_aw[0].addr, 0x1002u);  // aligned to bpb=2
-    ASSERT_EQ(mock.captured_w.size(), 2u);
-    EXPECT_EQ(mock.captured_w[0].strb, 0x0000000Cu);
-    EXPECT_EQ(mock.captured_w[0].data[2], 0x11);
-    EXPECT_EQ(mock.captured_w[0].data[3], 0x22);
-    EXPECT_EQ(mock.captured_w[0].last, false);
-    EXPECT_EQ(mock.captured_w[1].strb, 0x00000030u);
-    EXPECT_EQ(mock.captured_w[1].data[4], 0x33);
-    EXPECT_EQ(mock.captured_w[1].data[5], 0x44);
-    EXPECT_EQ(mock.captured_w[1].last, true);
-}
-
-TEST_F(AxiMasterTest, NarrowSize2_4BytePerBeat) {
-    SCENARIO("AxiMaster narrow size=2: 2 beats x 4B, byte_lane=4 then 8, strb=0xF0 then 0xF00");
-    // The canonical narrow case. addr=0x1004 size=2 len=1: 2 beats x 4 bytes.
-    // Beat 0: byte_lane=4, strb=0xF<<4=0xF0,  data[4..7]=user[0..3].
-    // Beat 1: byte_lane=8, strb=0xF<<8=0xF00, data[8..11]=user[4..7].
-    auto wpath = write_hex_tmp_data("narrow_s2", "AB CD EF 12 34 56 78 9A");
-    auto yaml = write_tmp(std::string(R"YAML(
-transactions:
-  - op: write
-    addr: 0x1004
-    id: 0x3
-    len: 1
-    size: 2
-    burst: INCR
-    data_file: )YAML") + wpath +
-                          "\n");
-    ni::cmodel::axi::testing::MockSlave mock;
-    axi::AxiMasterT<ni::cmodel::axi::testing::MockSlave> master(
-        yaml, mock, std::string(::testing::TempDir()) + "/r_narrow_s2.txt");
-    master.tick();
-    ASSERT_EQ(mock.captured_aw.size(), 1u);
-    EXPECT_EQ(mock.captured_aw[0].addr, 0x1004u);
-    ASSERT_EQ(mock.captured_w.size(), 2u);
-    EXPECT_EQ(mock.captured_w[0].strb, 0x000000F0u);
-    EXPECT_EQ(mock.captured_w[0].data[4], 0xAB);
-    EXPECT_EQ(mock.captured_w[0].data[5], 0xCD);
-    EXPECT_EQ(mock.captured_w[0].data[6], 0xEF);
-    EXPECT_EQ(mock.captured_w[0].data[7], 0x12);
-    EXPECT_EQ(mock.captured_w[0].last, false);
-    EXPECT_EQ(mock.captured_w[1].strb, 0x00000F00u);
-    EXPECT_EQ(mock.captured_w[1].data[8], 0x34);
-    EXPECT_EQ(mock.captured_w[1].data[9], 0x56);
-    EXPECT_EQ(mock.captured_w[1].data[10], 0x78);
-    EXPECT_EQ(mock.captured_w[1].data[11], 0x9A);
-    EXPECT_EQ(mock.captured_w[1].last, true);
-}
-
-TEST_F(AxiMasterTest, NarrowSize3_8BytePerBeat) {
-    SCENARIO("AxiMaster narrow size=3: 2 beats x 8B, byte_lane=0 then 8, strb=0xFF then 0xFF00");
-    // addr=0x1000 size=3 len=1: 2 beats x 8 bytes.
-    // Beat 0: byte_lane=0, strb=0xFF,    data[0..7] =user[0..7].
-    // Beat 1: byte_lane=8, strb=0xFF<<8, data[8..15]=user[8..15].
-    auto wpath = write_hex_tmp_data("narrow_s3", "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10");
-    auto yaml = write_tmp(std::string(R"YAML(
-transactions:
-  - op: write
-    addr: 0x1000
-    id: 0x4
-    len: 1
-    size: 3
-    burst: INCR
-    data_file: )YAML") + wpath +
-                          "\n");
-    ni::cmodel::axi::testing::MockSlave mock;
-    axi::AxiMasterT<ni::cmodel::axi::testing::MockSlave> master(
-        yaml, mock, std::string(::testing::TempDir()) + "/r_narrow_s3.txt");
-    master.tick();
-    ASSERT_EQ(mock.captured_aw.size(), 1u);
-    EXPECT_EQ(mock.captured_aw[0].addr, 0x1000u);
-    ASSERT_EQ(mock.captured_w.size(), 2u);
-    EXPECT_EQ(mock.captured_w[0].strb, 0x000000FFu);
-    for (std::size_t j = 0; j < 8; ++j) {
-        EXPECT_EQ(mock.captured_w[0].data[j], static_cast<uint8_t>(0x01 + j));
-    }
-    EXPECT_EQ(mock.captured_w[0].last, false);
-    EXPECT_EQ(mock.captured_w[1].strb, 0x0000FF00u);
-    for (std::size_t j = 0; j < 8; ++j) {
-        EXPECT_EQ(mock.captured_w[1].data[8 + j], static_cast<uint8_t>(0x09 + j));
-    }
-    EXPECT_EQ(mock.captured_w[1].last, true);
-}
+INSTANTIATE_TEST_SUITE_P(
+    AxSize, AxiMasterNarrowSize,
+    ::testing::Values(NarrowSizeCase{0, 0x1000, 0x1, "AA BB CC DD"},
+                      NarrowSizeCase{1, 0x1002, 0x2, "11 22 33 44"},
+                      NarrowSizeCase{2, 0x1004, 0x3, "AB CD EF 12 34 56 78 9A"},
+                      NarrowSizeCase{3, 0x1000, 0x4,
+                                     "01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F 10"}));
 
 // split_into_sub_bursts. AXI4 (IHI 0022 A3.4.1) forbids INCR
 // bursts crossing a 4KB boundary and caps a single burst at 256 beats. The
@@ -1031,7 +924,6 @@ axi::ScenarioTransaction make_txn(uint64_t addr, uint8_t len, uint8_t size, axi:
 }  // namespace
 
 TEST(SplitIntoSubBursts, NoSplit_AlignedAt4KBStart) {
-    SCENARIO("split_into_sub_bursts: 1-beat INCR at 4KB-aligned addr stays as single sub-burst");
     auto subs = axi::split_into_sub_bursts(make_txn(0x1000, 0, 5, axi::Burst::INCR));
     ASSERT_EQ(subs.size(), 1u);
     EXPECT_EQ(subs[0].addr, 0x1000u);
@@ -1039,7 +931,6 @@ TEST(SplitIntoSubBursts, NoSplit_AlignedAt4KBStart) {
 }
 
 TEST(SplitIntoSubBursts, NoSplit_WithinPage) {
-    SCENARIO("split_into_sub_bursts: burst that stays inside one 4KB page is not split");
     // 0x1040 size=5 len=3 → 4 beats × 32B = 128B. Spans 0x1040..0x10C0,
     // entirely within page 0x1000..0x2000. 1 sub-burst.
     auto subs = axi::split_into_sub_bursts(make_txn(0x1040, 3, 5, axi::Burst::INCR));
@@ -1049,8 +940,6 @@ TEST(SplitIntoSubBursts, NoSplit_WithinPage) {
 }
 
 TEST(SplitIntoSubBursts, Split4KBCross_2SubBursts) {
-    SCENARIO(
-        "split_into_sub_bursts: INCR crossing 4KB → 2 sub-bursts, second starts at page boundary");
     // 0x0FE0 size=5 len=7 → 8 beats × 32B = 256B spans 0x0FE0..0x10E0.
     // Crosses 4KB at 0x1000. Beat 0 at 0x0FE0; beats 1..7 at 0x1000..0x10C0.
     auto subs = axi::split_into_sub_bursts(make_txn(0x0FE0, 7, 5, axi::Burst::INCR));
@@ -1062,7 +951,6 @@ TEST(SplitIntoSubBursts, Split4KBCross_2SubBursts) {
 }
 
 TEST(SplitIntoSubBursts, Split256BeatCap) {
-    SCENARIO("split_into_sub_bursts: 256-beat INCR spanning 2 pages → 2 halves of 128 beats each");
     // 0x0000 size=5 len=255 → 256 beats × 32B = 8KB. Spans 2 pages.
     // Split into 128-beat halves: 128*32 = 4KB each.
     auto subs = axi::split_into_sub_bursts(make_txn(0x0000, 255, 5, axi::Burst::INCR));
@@ -1074,7 +962,6 @@ TEST(SplitIntoSubBursts, Split256BeatCap) {
 }
 
 TEST(SplitIntoSubBursts, WrapNoSplit) {
-    SCENARIO("split_into_sub_bursts: WRAP is never segmented (wrap window confines beats)");
     // WRAP confines beats inside [wrap_lower, wrap_upper) by construction.
     // The split helper must NOT segment WRAP — its semantics differ from INCR.
     auto subs = axi::split_into_sub_bursts(make_txn(0x0FE0, 3, 5, axi::Burst::WRAP));
@@ -1083,7 +970,6 @@ TEST(SplitIntoSubBursts, WrapNoSplit) {
 }
 
 TEST(SplitIntoSubBursts, FixedNoSplit) {
-    SCENARIO("split_into_sub_bursts: FIXED is never segmented (same addr every beat)");
     // FIXED reuses one address for every beat — no boundary cross to worry about.
     auto subs = axi::split_into_sub_bursts(make_txn(0x1000, 3, 5, axi::Burst::FIXED));
     ASSERT_EQ(subs.size(), 1u);
@@ -1094,8 +980,6 @@ TEST(SplitIntoSubBursts, FixedNoSplit) {
 // (one per sub-burst) sharing the same id. WriteResult fires ONCE after the
 // final sub-burst's B response.
 TEST_F(AxiMasterTest, Cross4KB_EmitsTwoAwsOneWriteResult) {
-    SCENARIO(
-        "AxiMaster: 4KB-crossing write → 2 AWs, WriteResult fires once after BOTH Bs received");
     // 8 beats × 32B = 256B starting at 0x0FE0 → 1 beat at 0x0FE0 + 7 beats at
     // 0x1000. Data file holds 8 × 32 = 256 user bytes.
     auto wpath = std::string(::testing::TempDir()) + "/w_cross_4kb.txt";
@@ -1170,8 +1054,6 @@ transactions:
 // 4KB-crossing read scenario_txn emits multiple ARs; the master
 // accumulates R beats across sub-bursts into a single ReadResult.
 TEST_F(AxiMasterTest, Cross4KB_EmitsTwoArsOneReadResult) {
-    SCENARIO(
-        "AxiMaster: 4KB-crossing read → 2 ARs, ReadResult fires once after ALL R beats received");
     auto yaml = write_tmp(R"YAML(
 transactions:
   - op: read
@@ -1233,7 +1115,6 @@ transactions:
 // a 1-bit value (LockType::Exclusive → 1, Normal → 0). Pure wire-through —
 // the master does not interpret the lock; the slave's exclusive monitor does.
 TEST_F(AxiMasterTest, LockFieldPropagatesToAwLock) {
-    SCENARIO("AxiMaster: scenario lock=exclusive sets AW.lock=1 (wire-through, no interpretation)");
     auto wpath = write_hex_tmp_data("w_lock_excl",
                                     "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F "
                                     "10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F");
@@ -1260,7 +1141,6 @@ transactions:
 // scenario_txn must surface as ar.lock=1. The master never interprets the
 // field; it only routes it onto the AR bus for the slave's exclusive monitor.
 TEST_F(AxiMasterTest, LockFieldPropagatesToArLock) {
-    SCENARIO("AxiMaster: scenario lock=exclusive on read sets AR.lock=1 (wire-through)");
     auto yaml = write_tmp(std::string(R"YAML(
 transactions:
   - op: read
@@ -1281,7 +1161,6 @@ transactions:
 }
 
 TEST_F(AxiMasterTest, LockDefaultsToZero_OnNormalTxn) {
-    SCENARIO("AxiMaster: normal (non-exclusive) write defaults AW.lock to 0");
     auto wpath = write_hex_tmp_data("w_lock_norm",
                                     "00 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 0E 0F "
                                     "10 11 12 13 14 15 16 17 18 19 1A 1B 1C 1D 1E 1F");
@@ -1313,10 +1192,8 @@ transactions:
 // writes still eventually completed, so a simple done()-within-budget check
 // would NOT detect the regression. This test directly observes the in-flight
 // counter mid-run to gate the regression.
+// IHI 0022 §A5.3: two same-id writes may be concurrently outstanding.
 TEST_F(AxiMasterTest, SameIdConcurrentAdmissionVisibleInPipeline) {
-    SCENARIO(
-        "AxiMaster: two same-id writes admitted concurrently (active_write_count==2) per IHI 0022 "
-        "§A5.3");
     auto wpath = write_hex_tmp_data("same_id_concurrent_obs",
                                     "AB CD EF 12 34 56 78 9A BC DE F0 11 22 33 44 55 "
                                     "66 77 88 99 AA BB CC DD EE FF 00 11 22 33 44 55");
@@ -1375,7 +1252,6 @@ transactions:
 // against Memory + AxiSlave (B responses route to the per-id deque front in
 // submission order). Companion to the concurrency-observing test above.
 TEST_F(AxiMasterTest, SameIdMultiWriteScenarioCompletes) {
-    SCENARIO("AxiMaster: same-id multi-write scenario runs end-to-end against Memory+AxiSlave");
     auto wpath = write_hex_tmp_data("same_id_concurrent",
                                     "AB CD EF 12 34 56 78 9A BC DE F0 11 22 33 44 55 "
                                     "66 77 88 99 AA BB CC DD EE FF 00 11 22 33 44 55");

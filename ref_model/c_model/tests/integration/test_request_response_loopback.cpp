@@ -50,7 +50,6 @@
 #include "axi/scoreboard.hpp"
 #include "common/channel_model.hpp"
 #include "common/channel_model_params.hpp"
-#include "common/scenario.hpp"
 #include "common/test_logger.hpp"
 #include "nmu/nmu.hpp"
 #include "nmu/port_params.hpp"
@@ -434,8 +433,6 @@ struct FixtureParam {
 class PacketizeLoopbackFixture : public ::testing::TestWithParam<FixtureParam> {};
 
 TEST_P(PacketizeLoopbackFixture, ScoreboardZeroMismatch) {
-    SCENARIO(
-        "req/rsp loopback: NMU+NSU packetize/depacketize + ChannelModel end-to-end zero mismatch");
     auto p = GetParam();
     std::string yaml_path = write_ord003_scenario();
     std::string rpath = std::string(::testing::TempDir()) + "/" + p.yaml + ".pkt_e2e_q" +

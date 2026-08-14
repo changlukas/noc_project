@@ -1,9 +1,4 @@
-// Test logger: SCENARIO macro + AxiMasterObserver.
-//
-// SCENARIO("<English desc>") prints a one-line, always-emitted, human-readable
-// scenario description at the start of a TEST() body so the cryptic C++
-// identifier-based test name does not have to carry the full intent of the
-// scenario.
+// Test logger: AxiMasterObserver.
 //
 // AxiMasterObserver hooks AxiMaster's existing on_write_completed /
 // on_read_observed callbacks (zero production-code change) and:
@@ -19,11 +14,6 @@
 //   // ... run test loop ...
 //   // Summary auto-prints at scope exit, OR call obs.print_summary() early.
 #pragma once
-
-// SCENARIO macro lives in the standalone scenario.hpp so tests that only need
-// the per-TEST description can include it without dragging in the AxiMaster +
-// yaml-cpp dependency chain pulled in by AxiMasterObserver below.
-#include "common/scenario.hpp"
 
 #include "axi/axi_master.hpp"
 #include "axi/types.hpp"

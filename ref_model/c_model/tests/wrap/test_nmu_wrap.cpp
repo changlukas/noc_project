@@ -11,7 +11,6 @@
 //      at burst start, then full rate). A second AW presented mid-burst still
 //      gets its ready pulse — multi-outstanding AW (post addresses ahead of
 //      data) is legitimate AXI4 and load-bearing for the RoB/multi-ID paths.
-#include "common/scenario.hpp"
 #include "common/tmp_path.hpp"
 #include "ni_flit_constants.h"
 #include "wrap/flit_byte_conv.hpp"
@@ -30,12 +29,7 @@ using ni::cmodel::wrap::NmuWrap;
 // mesh serves; the SAM-specific tests write their own YAML.
 constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
 
-// ---------------------------------------------------------------------------
-// Test 1: idle adapter keeps all readys LOW (wait_valid policy).
-// ---------------------------------------------------------------------------
 TEST(NmuWrap, idle_adapter_keeps_readys_low) {
-    SCENARIO("Idle NmuWrap keeps awready/wready/arready low (wait_valid)");
-
     NmuWrap adapter;
     adapter.init(kTopologyYaml);
 
@@ -54,12 +48,7 @@ TEST(NmuWrap, idle_adapter_keeps_readys_low) {
     EXPECT_FALSE(out.tx_req_valid) << "no REQ flit without any AXI request";
 }
 
-// ---------------------------------------------------------------------------
-// Test 2: single AW + W beat — two-phase AW handshake, then W window.
-// ---------------------------------------------------------------------------
 TEST(NmuWrap, single_aw_w_two_phase_handshake) {
-    SCENARIO("Two-phase AW handshake; wready pre-asserts after AW, W beat consumed");
-
     NmuWrap adapter;
     adapter.init(kTopologyYaml);
 
@@ -102,19 +91,7 @@ TEST(NmuWrap, single_aw_w_two_phase_handshake) {
     EXPECT_FALSE(out.wready) << "cycle 3: WLAST consumed -> W window closed";
 }
 
-// ---------------------------------------------------------------------------
-// Test 3: AWLEN=7 (8-beat W burst) — burst-hold wready; AW stays available.
-//
-// After the AW handshake the W window holds wready high for the full burst
-// (capacity permitting): one bubble at burst start, then full rate — all 8
-// beats accepted back-to-back. A second AWVALID presented mid-burst still
-// receives its one-shot ready pulse (multi-outstanding AW preserved; any
-// stricter single-outstanding view lives in the scenario skip list, not in
-// the model).
-// ---------------------------------------------------------------------------
 TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
-    SCENARIO("8-beat W burst at full rate; mid-burst AW still gets its ready pulse");
-
     NmuWrap adapter;
     adapter.init(kTopologyYaml);
 
@@ -182,18 +159,10 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
     EXPECT_FALSE(out.wready) << "after WLAST the window closes -> wready low";
 }
 
-// ---------------------------------------------------------------------------
-// init(config_path) loads the topology YAML's address_map into
-// NmuConfig.sam instead of the legacy 16x16-uniform default.
-// ---------------------------------------------------------------------------
+// The legacy default (4 GB tiles) resolves the same address to a different dst_id/local_addr, so
+// observing the YAML-mapped values proves init(config_path) actually loaded the topology YAML's
+// address_map.
 TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
-    SCENARIO(
-        "NmuWrap::init(config_path) loads a hand-written topology YAML's "
-        "address_map (4 KB tiles, 2x2 mesh) into NmuConfig.sam; "
-        "the legacy default (4 GB tiles) would resolve the same "
-        "address to a different dst_id/local_addr, so observing the "
-        "YAML-mapped values proves the config path was actually loaded.");
-
     auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_sam.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
@@ -250,18 +219,11 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
     ASSERT_TRUE(saw_aw_flit) << "NmuWrap never produced an AW flit from the config-path SAM";
 }
 
-// ---------------------------------------------------------------------------
 // AWUSER plumb (S4 T6): NmuInputs.awuser reaches axi::AwBeat::user whole, so
 // a collective AWUSER driven through the wrap face is translated and stamped
 // into the AW flit header. This is the wrap-level weld the DPI awuser
 // argument lands on; the translate itself is T2-tested at the Rob level.
-// ---------------------------------------------------------------------------
 TEST(NmuWrap, awuser_collective_reaches_flit_header) {
-    SCENARIO(
-        "AWUSER = MULTICAST op + address mask 0x1000 on a 4 KB/tile 2x2 SAM "
-        "-> the emitted DataAw flit carries collective_op=MULTICAST and "
-        "collective_mask=0x01 (row pair (0,0)+(1,0))");
-
     auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_awuser_sam.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
@@ -315,15 +277,11 @@ TEST(NmuWrap, awuser_collective_reaches_flit_header) {
                                 "awuser plumb (NmuInputs.awuser -> AwBeat.user) is broken";
 }
 
-// ---------------------------------------------------------------------------
 // A missing topology is an error, not a fabricated mesh. init() used to fall
 // back to a 16x16 / 4 GB-per-tile map when config_path was absent, so a
 // testbench that forgot the YAML ran green against an address map nothing in
 // the tree ships.
-// ---------------------------------------------------------------------------
 TEST(NmuWrap, init_without_topology_throws) {
-    SCENARIO("NmuWrap::init rejects a null or empty config_path instead of inventing a SAM");
-
     NmuWrap adapter;
     EXPECT_THROW(adapter.init(nullptr), std::invalid_argument);
     EXPECT_THROW(adapter.init(""), std::invalid_argument);

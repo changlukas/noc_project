@@ -1,20 +1,14 @@
 #include "flit.hpp"
-#include "common/scenario.hpp"
 #include <gtest/gtest.h>
 
 using ni::cmodel::Flit;
 
 TEST(Flit, ConstructFromRawHasMatchingWidth) {
-    SCENARIO("Flit: WIDTH_BITS/WIDTH_BYTES match codegen FLIT_WIDTH constant");
     EXPECT_EQ(Flit::WIDTH_BITS, ni::FLIT_WIDTH);
     EXPECT_EQ(Flit::WIDTH_BYTES, (ni::FLIT_WIDTH + 7) / 8);
 }
 
 TEST(Flit, SetGetHeaderRoundtripAllFields) {
-    SCENARIO(
-        "Flit: every header field (axi_ch/src_id/dst_id/fixed_vc/vc_id/"
-        "flit_tail/ordering_req/ordering_tag/collective_op/collective_mask) "
-        "set/get bit-perfect");
     Flit f;
     f.set_header_field("axi_ch", 0x4);  // NarrowR
     f.set_header_field("src_id", 0x12);
@@ -39,7 +33,6 @@ TEST(Flit, SetGetHeaderRoundtripAllFields) {
 }
 
 TEST(Flit, SetGetPayloadAwFields) {
-    SCENARIO("Flit: AW payload fields (awid/awaddr/awlen/awsize) set/get bit-perfect");
     Flit f;
     f.set_payload_field("AW", "awid", 0x05);
     f.set_payload_field("AW", "awaddr", 0xBEEFCAFEBABEull);  // 48 b, max representable
@@ -52,7 +45,6 @@ TEST(Flit, SetGetPayloadAwFields) {
 }
 
 TEST(Flit, SetGetPayloadBytesWdata) {
-    SCENARIO("Flit: DATA_W payload wdata (64B) byte-array set/get round-trips bit-perfect");
     Flit f;
     constexpr int kBytes = ni::width::NOC_DATA_WIDTH / 8;
     std::array<uint8_t, kBytes> wdata{};
@@ -64,7 +56,6 @@ TEST(Flit, SetGetPayloadBytesWdata) {
 }
 
 TEST(Flit, SetGetPayloadBytesNarrowWdata) {
-    SCENARIO("Flit: NARROW_W payload wdata (8B lane) byte-array set/get round-trips bit-perfect");
     Flit f;
     constexpr int kBytes = ni::width::NOC_NARROW_DATA_WIDTH / 8;
     std::array<uint8_t, kBytes> wdata{};
@@ -79,8 +70,6 @@ TEST(Flit, PaddingCheckPassesWhenZero) {
     // The 44 b header has no reserved bits (spec drops the padding/rsvd
     // field entirely), so PADDING_FIELDS_COUNT is 0 and check_padding_is_zero
     // is vacuously true.
-    SCENARIO(
-        "Flit: default-constructed flit has all padding bits zero, 44 b header has no padding");
     Flit f;
     EXPECT_TRUE(f.check_padding_is_zero());
     EXPECT_EQ(ni::header::PADDING_FIELDS_COUNT, 0u);
@@ -104,7 +93,6 @@ TEST(FlitDispatch, EnabledHeaderFieldsStillResolve) {
 }
 
 TEST(Flit, SetGetPayloadBFields) {
-    SCENARIO("Flit: B payload fields (bid/bresp/buser) set/get bit-perfect");
     Flit f;
     f.set_payload_field("B", "bid", 0x02);
     f.set_payload_field("B", "bresp", 0x2);  // SLVERR
@@ -115,7 +103,6 @@ TEST(Flit, SetGetPayloadBFields) {
 }
 
 TEST(Flit, SetGetPayloadRFields) {
-    SCENARIO("Flit: R payload fields (rid/rresp/rlast) set/get bit-perfect");
     Flit f;
     f.set_payload_field("NARROW_R", "rid", 0x07);
     f.set_payload_field("NARROW_R", "rresp", 0x3);  // DECERR
