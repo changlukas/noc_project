@@ -67,7 +67,14 @@ build-verilator` builds the yaml-cpp library and the Verilator testbench
 and nothing else. `make build` (or `make build-cmodel`) is needed only
 before `make test`.
 
-Artifacts land under `build/` (gitignored); `make clean` removes them.
+Artifacts land under `$(BUILD_ROOT)` (gitignored), which defaults to
+`build/` in the repo; `make clean` removes them. On WSL set
+`BUILD_ROOT := $(HOME)/noc_build` in `local.mk` — a build under `/mnt/`
+produces a Windows-COFF yaml-cpp that the Linux linker rejects. The CMake
+cache records the source directory it was configured against, and
+`make build-cmodel` honours whatever the cache names, so after moving the
+checkout delete the cache rather than editing it, and confirm with
+`grep CMAKE_HOME_DIRECTORY $BUILD_ROOT/cmodel/CMakeCache.txt`.
 
 ## Test
 
@@ -84,7 +91,7 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 
 | var | values |
 |---|---|
-| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Every node gets a 4 GiB memory tile and a 4 KB config tile |
+| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_2x2_vc1_periph`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Every node gets a 4 GiB memory tile and a 4 KB config tile. The `_periph` map adds an off-mesh peripheral at a border route coordinate outside the tile region |
 | `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `all_to_all` (each node walks every other node in turn, so the destination changes on every transaction and, at one id per initiator, every one of them allocates a reorder-buffer slot), `hotspot` (`HOTSPOT=` names the target node), `beat_exact` (per-lane-distinct bytes + walking WSTRB, DPI word-boundary check), `multicast` (collective write, shape from `MCAST_SHAPE`) |
 | `MCAST_SHAPE` | `row` (default), `col`, `submesh`. `multicast` only. One shape per run, concurrent multicast trees must stay pairwise disjoint |
 
@@ -125,7 +132,26 @@ injection rate and mode 1 stays the saturation-curve instrument.
 | `INJECTION_COUNT` | `200` (modes 1, 2), `64` (mode 0) | transactions per node |
 | `IDS_PER_INITIATOR` | generator default (1) | distinct AXI ids one initiator draws from |
 | `HOTSPOT` | `5` | target node for the `hotspot` pattern |
+| `HOTSPOT_PERIPHERALS` | unset | `1` aims `hotspot` at the peripherals instead of a tile |
 | `READ_ROB` | `1` | NMU read response path: `1` the reorder buffer, `0` the RoBless bypass |
+| `BURST_LEN` | `0` | AXI `len` for the generated stimulus; `0` is a single beat. At `--size 5` (32 B/beat) `63` gives 64 beats = 2048 B, inside the 4 KB boundary |
+| `MAX_UNIQUE_IDS` | `NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT` | NSU meta buffer: distinct upstream ids tracked at once |
+| `MAX_OUTSTANDING` | `NSU_META_BUFFER_*_DFLT` | NSU meta buffer: outstanding entries |
+| `B_ROB_DEPTH`, `R_ROB_DEPTH` | `NMU_ROB_*_DFLT` | NMU reorder-buffer pool depth per direction. Both ≤ 256 — `ordering_tag` is 8 bits |
+| `MAX_TXNS_PER_ID` | tb local | per-AXI-id order-list depth (FlooNoC `MaxRoTxnsPerId`, `floo_rob.sv:12`) |
+
+Leaving one of the last four unset passes no plusarg, so the testbench keeps
+its `ni_params_pkg` default. That is not the same as passing the default
+value — it is what the shipped parameter set actually builds.
+
+Fault injection, for proving a checker fires rather than assuming it does:
+
+| var | effect |
+|---|---|
+| `MCAST_FAULT=1` | corrupts one multicast replica so the collective checker must fire |
+| `DECERR_FAULT=1` / `DECERR_FAULT_WR=1` | forces a DECERR on the read / write path |
+| `TIMEOUT_CYCLES=<n>` | fires the watchdog early, so a hang dumps per-node outstanding and `last_progress` instead of waiting out the formula |
+| `ELABORATE_ONLY=1` | elaborates and stops, without running |
 
 ~~~bash
 make -C sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
@@ -143,6 +169,41 @@ with the monitor's bandwidth and latency numbers; mode 2 prints
 `SWEEP_RATES`), then merges every `result.csv` and plots
 `sim/tools/injection_sweep.png`. The sweep rebuilds Verilator once per
 VC config; expect a long run.
+
+### DMA endpoint
+
+`DMA=1` selects a separate top that puts a pulp iDMA backend on every node's
+master face, in place of the stimulus replayer. The point is conformance: the
+replayer issues transactions this project chose, while a real AXI manager picks
+its own bursts, outstanding depth and alignment.
+
+`DMA=1` ignores `PATTERN`. Stimulus is `sim/tools/gen_dma_jobs.py`'s per-node
+job files, and the run ends when every DMA has retired every job it was given
+and every destination region matches its source byte for byte.
+
+| var | default | meaning |
+|---|---|---|
+| `DMA_RW` | `read` | direction for the whole run. `read` sources from the neighbour's window, `write` from the node's own. One direction per run, as upstream does it |
+| `DMA_JOBS_PER_NODE` | `100` | jobs each node issues |
+| `DMA_LENGTH` | `0x400` | bytes per job. Capped at `0xFFFFF` by `TF_LEN_WIDTH`; a larger value is rejected rather than truncated |
+
+The three defaults are FlooNoC's own (`util/gen_jobs.py`: `num_wide_bursts`,
+`wide_burst_length` × 512 b, run-level `--rw`). Concurrency comes from many
+back-to-back same-direction jobs, not from large ones — a job under 4 KB is one
+burst, so alternating direction or lowering the count is what suppresses
+outstanding transactions.
+
+All three feed the job files **and** the generated top's compare, so they cannot
+disagree. Each direction gets its own stimulus directory and run tag, so a read
+run and a write run do not overwrite one another.
+
+~~~bash
+make -C sim TB=mesh_4x4_vc1 DMA=1                 # 100 read jobs per node
+make -C sim TB=mesh_4x4_vc1 DMA=1 DMA_RW=write
+~~~
+
+On success the wrapper prints `DMA PASS: <run-tag> every job retired, every
+region intact`. `DECERR_FAULT=1` and `DECERR_FAULT_WR=1` work here too.
 
 ## Regenerate
 

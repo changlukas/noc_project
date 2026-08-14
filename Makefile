@@ -33,6 +33,7 @@ help:
 	@echo ""
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
+	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/ + generated stimulus)"
