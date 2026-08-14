@@ -1,3 +1,5 @@
+import pytest
+
 import address_map
 import gen_dma_jobs as g
 import gen_tb_top
@@ -44,29 +46,52 @@ def test_every_job_addresses_a_real_sam_region(tmp_path):
             assert _owner(job["src_addr"]) != _owner(job["dst_addr"])
 
 
-def test_both_directions_cross_the_fabric(tmp_path):
+@pytest.mark.parametrize("rw", ["read", "write"])
+def test_direction_crosses_the_fabric(tmp_path, rw):
     """A job whose source is the issuing node's OWN window has its read answered
     by the tile crossbar, so a run of those alone never puts an AR on the NoC --
-    the NMU's reorder buffer and its read admission clauses stay at zero. Some
-    job must source another node's window, and some must not, or the run has one
-    blind spot in place of the other.
+    the NMU's reorder buffer and its read admission clauses stay at zero.
+    Direction is run-level (FlooNoC's util/gen_jobs.py --rw), not per-job: a
+    read run sources every job from the next node's window, a write run sources
+    every job from its own, so the two directions have to run as two gates, not
+    one file with both mixed in.
 
     At the SHIPPED geometry -- the one the gate builds, not a larger one."""
     n = gen_tb_top._DMA_JOBS_PER_NODE
     topo = _topology("mesh_2x2_vc1")
     out = tmp_path / "jobs"
-    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", str(n)])
+    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out), "--jobs-per-node", str(n),
+            "--rw", rw])
     bases, entries = address_map.pack(topo["address_map"], 2, 2)
     sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
 
-    remote, total = 0, 0
     for (idx, _x, _y, cid) in nodes:
         own = range(bases[cid], bases[cid] + sizes[cid])
         for job in _parse_jobs(out / f"node{idx}" / "jobs.txt"):
-            remote += job["src_addr"] not in own
-            total += 1
-    assert 0 < remote < total, f"{remote} of {total} jobs read a remote window"
+            # read: source is the next node's window (remote), so every AR
+            # crosses the fabric. write: source is the issuing node's own
+            # window (local); the AW crosses instead.
+            assert (job["src_addr"] not in own) == (rw == "read")
+
+
+def test_read_write_swap_src_dst(tmp_path):
+    """The same job index has src and dst swapped between --rw read and
+    --rw write -- job_table's is_read flips which end is source, and nothing
+    else about the geometry moves."""
+    n = gen_tb_top._DMA_JOBS_PER_NODE
+    out_read = tmp_path / "read"
+    out_write = tmp_path / "write"
+    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out_read),
+            "--jobs-per-node", str(n), "--rw", "read"])
+    g.main(["--topology", "mesh_2x2_vc1", "--out", str(out_write),
+            "--jobs-per-node", str(n), "--rw", "write"])
+    for idx in range(4):
+        reads = _parse_jobs(out_read / f"node{idx}" / "jobs.txt")
+        writes = _parse_jobs(out_write / f"node{idx}" / "jobs.txt")
+        for read_job, write_job in zip(reads, writes):
+            assert read_job["src_addr"] == write_job["dst_addr"]
+            assert read_job["dst_addr"] == write_job["src_addr"]
 
 
 def test_burst_bound_is_a_log_length(tmp_path):

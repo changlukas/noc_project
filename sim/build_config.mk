@@ -92,9 +92,10 @@ endif
 # DMA top, so it lives here rather than in one simulator's Makefile -- a top
 # built with one geometry and stimulus emitted with another compares the wrong
 # bytes.
-DMA_JOBS_PER_NODE ?= 4
+DMA_JOBS_PER_NODE ?= 100
 DMA_LENGTH        ?= 0x400
-_DMA_JOB_ARGS     := --jobs-per-node $(DMA_JOBS_PER_NODE) --length $(DMA_LENGTH)
+DMA_RW            ?= read
+_DMA_JOB_ARGS     := --jobs-per-node $(DMA_JOBS_PER_NODE) --length $(DMA_LENGTH) --rw $(DMA_RW)
 # NMU read reorder buffer. 1 (the default, and what docs/noc-target-spec.md
 # section 3 describes) emits the reorder-buffer response path; 0 emits the
 # RoBless bypass. Reaches the tb as its READ_ROB_ENABLED localparam.

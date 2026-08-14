@@ -368,11 +368,12 @@ _LINK_DIRS = (
 # Job geometry defaults for the DMA top. Mirror gen_dma_jobs.py's own argparse
 # defaults: the top's preload and region compare address the bytes jobs.txt
 # names, so the two generators have to be run with the same pair.
-_DMA_JOBS_PER_NODE = 4
+_DMA_JOBS_PER_NODE = 100
 _DMA_JOB_BYTES = 0x400
+_DMA_RW = "read"
 
 
-def _dma_check(topo, n_ep, jobs_per_node, job_bytes):
+def _dma_check(topo, n_ep, jobs_per_node, job_bytes, rw):
     """The DMA top's memory backdoor, preload, region compare and exit logic.
 
     Emitted only under --dma. The job geometry comes from
@@ -385,7 +386,7 @@ def _dma_check(topo, n_ep, jobs_per_node, job_bytes):
     # grouped by node in node order. src_ep is NOT node_idx: a read job's source
     # is another node's window.
     _SRC_EP, _DST_EP, _SRC_ADDR, _DST_ADDR = 1, 2, 3, 4
-    jobs = gen_dma_jobs.job_table(topo, jobs_per_node, job_bytes)
+    jobs = gen_dma_jobs.job_table(topo, jobs_per_node, job_bytes, rw)
     n = len(jobs) // jobs_per_node
     # Packed, descending, as the tile-window parameters above: field j is job j
     # and row i is node i.
@@ -957,7 +958,8 @@ def emit_fabric(topo: dict) -> str:
 
 def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
                 jobs_per_node: int = _DMA_JOBS_PER_NODE,
-                job_bytes: int = _DMA_JOB_BYTES) -> str:
+                job_bytes: int = _DMA_JOB_BYTES,
+                rw: str = _DMA_RW) -> str:
     name = topo["topology"]["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -1442,7 +1444,7 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     # top's own version replaces it: end_of_sim is tied 0 there, and "every job
     # retired, every region intact" is what done means for a DMA.
     if dma:
-        lines.extend(_dma_check(topo, n_ep, jobs_per_node, job_bytes))
+        lines.extend(_dma_check(topo, n_ep, jobs_per_node, job_bytes, rw))
         lines.extend(_dpi_error_poll())
         return "\n".join(lines) + "\n"
     w("    // -------------------------------------------------------------------------")
@@ -1519,6 +1521,9 @@ def main() -> int:
                          "compares the regions those jobs name.")
     ap.add_argument("--length", type=lambda v: int(v, 0), default=_DMA_JOB_BYTES,
                     help="--dma only: bytes moved per job. Must match gen_dma_jobs.py.")
+    ap.add_argument("--rw", choices=("read", "write"), default=_DMA_RW,
+                    help="--dma only: direction for every job. Must match the "
+                         "gen_dma_jobs.py run that wrote them.")
     ap.add_argument("--print-num-vc", action="store_true",
                     help="Print the topology's num_vc and exit. sim/build_config.mk picks "
                          "the per-VC noc_types_pkg with it, so that value is read where it "
@@ -1529,7 +1534,7 @@ def main() -> int:
     if a.print_num_vc:
         print(topo["topology"]["num_vc"])
         return 0
-    tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma, a.jobs_per_node, a.length)
+    tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma, a.jobs_per_node, a.length, a.rw)
     fab_text = emit_fabric(topo)
     default_out = ROOT / "sim" / "tb" / "dma" / f"tb_top_dma_{a.topology}.sv" if a.dma \
         else ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"

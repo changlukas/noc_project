@@ -3,7 +3,7 @@
 
 Usage:
     gen_dma_jobs.py --topology mesh_2x2_vc1 --out <dir> \\
-        [--jobs-per-node 4] [--length 0x400]
+        [--jobs-per-node 100] [--length 0x400] [--rw read]
 
 Writes <out>/node<i>/jobs.txt for each node i. Eleven lines per job, in
 idma_job_driver.sv's read order:
@@ -19,11 +19,13 @@ Addresses
 ---------
 Every job names two windows: the issuing node's own (`local`) and the next
 node's (`ext`).  Direction decides which is the source, the swap FlooNoC's
-traffic generator makes on `flow.rw` (floogen/model/traffic.py:286-287).  A
-WRITE job reads local and writes ext, so its write crosses the fabric and the
-tile crossbar answers its read; a READ job swaps them, so its READ crosses the
-fabric.  Both addresses are base(dst_id) + offset with the base packed by
-address_map.pack() over the topology's route span -- the base c_model's
+own generator makes on `rw` (util/gen_jobs.py:242-243), where `--rw` is a
+run-level argument (util/gen_jobs.py:266) rather than a per-job choice -- the
+same shape this file follows.  A WRITE job reads local and writes ext, so its
+write crosses the fabric and the tile crossbar answers its read; a READ job
+swaps them, so its READ crosses the fabric.  Both addresses are base(dst_id) +
+offset with the base packed by address_map.pack() over the topology's route
+span -- the base c_model's
 SamTable::packed computes from the same YAML, never a restatement of its
 formula.
 
@@ -100,7 +102,7 @@ def job_lines(length, src_addr, dst_addr, axi_id):
             str(axi_id)]
 
 
-def job_table(topo, jobs_per_node, length):
+def job_table(topo, jobs_per_node, length, rw):
     """Every node's jobs as
     [(node_idx, src_ep, dst_ep, src_addr, dst_addr, axi_id), ...].
 
@@ -131,9 +133,11 @@ def job_table(topo, jobs_per_node, length):
                 sys.exit(f"ERROR: node{idx} job {job} window {offset:#x}+{length:#x} "
                          f"overruns the {limit:#x} B memory tile; reduce "
                          f"--jobs-per-node or --length")
-            # Odd jobs read, even jobs write, so every node issues both. One
-            # direction alone leaves the opposite path of the NMU untouched.
-            is_read = job % 2 == 1
+            # Direction is run-level, not per-job (FlooNoC's util/gen_jobs.py
+            # --rw, default read: :266). Every job in this file takes the same
+            # shape; the opposite NMU path is exercised by a second run with
+            # the other --rw, not by alternating within one.
+            is_read = rw == "read"
             src_ep, src_cid = (ext_idx, ext_cid) if is_read else (idx, local_cid)
             dst_ep, dst_cid = (idx, local_cid) if is_read else (ext_idx, ext_cid)
             out.append((idx, src_ep, dst_ep, bases[src_cid] + offset,
@@ -161,14 +165,18 @@ def main(argv=None):
                     help="Topology name (matches sim/topologies/<name>.yaml)")
     ap.add_argument("--out", required=True,
                     help="Output directory; writes <out>/node<i>/jobs.txt")
-    ap.add_argument("--jobs-per-node", type=int, default=4,
-                    help="Jobs in each node's file")
+    ap.add_argument("--jobs-per-node", type=int, default=100,
+                    help="Jobs in each node's file (FlooNoC's num_wide_bursts default, "
+                         "util/gen_jobs.py:260)")
     ap.add_argument("--length", type=lambda v: int(v, 0), default=0x400,
                     help="Bytes moved per job (default 0x400 = 16 beats of the 512 b bus)")
+    ap.add_argument("--rw", choices=("read", "write"), default="read",
+                    help="Direction for every job in the run, mirroring FlooNoC's "
+                         "run-level --rw (util/gen_jobs.py:266)")
     a = ap.parse_args(argv)
 
     topo = gen_tb_top.load_topology(a.topology)
-    emit_jobs(a.out, job_table(topo, a.jobs_per_node, a.length), a.length)
+    emit_jobs(a.out, job_table(topo, a.jobs_per_node, a.length, a.rw), a.length)
 
 
 if __name__ == "__main__":

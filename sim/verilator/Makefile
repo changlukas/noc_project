@@ -115,8 +115,8 @@ VERILATOR_FLAGS += -I$(dir $(TB_TOP_SV))
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VL_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH))" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH))" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
 	fi
 
 # DMA_JOBS_PER_NODE / DMA_LENGTH / _DMA_JOB_ARGS come from build_config.mk, so
@@ -220,7 +220,7 @@ _PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
 # its run tag key on the job geometry rather than on PATTERN / INJECTION_COUNT,
 # neither of which a DMA run reads.
 ifeq ($(DMA),1)
-STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/dma_$(TOPOLOGY)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)
+STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/dma_$(TOPOLOGY)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
 STIM_ROOT      ?= $(BUILD_ROOT)/test_patterns/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
 endif
@@ -229,7 +229,7 @@ endif
 # must not share output/<tag>/ (run.log, result.csv, perf.json all live there).
 _TOPO_TAG      := $(TOPOLOGY)_rob$(READ_ROB)
 ifeq ($(DMA),1)
-SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)
+SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
 SIM_TAG        ?= $(if $(_CONTINUOUS),continuous_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),$(if $(_CHECKED),checked_$(_TOPO_TAG)_$(_PATTERN_TAG)_r$(INJECTION_RATE)_s$(SEED),directed_$(_TOPO_TAG)_$(_PATTERN_TAG)_s$(SEED)))
 endif
