@@ -42,6 +42,13 @@ and the round 3 row of the Rounds table.
   `rm -f sim/filelist_*.f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv; rm -rf $BUILD_ROOT/verilator/obj_dir_*`
 - One synchronous foreground `wsl` call per unit of work. Never poll a running WSL job with a second
   `wsl.exe` call. A single call past ~15 minutes with no output is wedged, not slow — report it.
+- **Log to a Windows-visible path so a launch failure and a wedged job tell themselves apart.** They
+  look identical from the Windows side when output is buffered through `tail`: both show a live
+  `wsl.exe` and flat `vmmemWSL` CPU. Put the redirect INSIDE the WSL command —
+  `... > /mnt/c/Users/USER/AppData/Local/Temp/claude/<scratch>/build.log 2>&1` — and check the log
+  from Windows. A zero-byte log means the distro never ran the job; a log that stops mid-output means
+  it did and stalled. Task 1 spent 18 minutes reading a restarted distro (`up 0 min`) as a wedged
+  build.
 - New asserts need a fault-injection proof that they fire.
 - Round 3 verifies `sim/tb/test/` only. The DMA flavour cannot run a peripheral topology
   (`docs/known-limitations.md`).
