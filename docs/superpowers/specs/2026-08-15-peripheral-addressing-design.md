@@ -96,10 +96,17 @@ stops needing one instance per class for the offset.
 The DPI signature change reaches the generated SystemVerilog, so the create calls in
 `gen_tb_top.py` move with it.
 
-Kept and re-bounded: the collective clip in `route_mask_fork` / `route_mask_join`
-(`router/route_mask.hpp:113-121,175-184`) and its twin in `collective_translate`. The bound moves
-from the tile region to `0 .. mesh_*_dim - 1`. It is still needed: a wildcard mask can name a
-coordinate that does not exist when a mesh dimension is not a power of two.
+The four bounds exist as a wall against a collective reaching a peripheral, and scheme B takes
+that job away from them twice over. A peripheral region sits in a space with no coordinate field,
+so a mask over the coordinate field cannot name it, and `route_mask_fork`'s only terminal output
+is LOCAL, so no boundary port is ever selected.
+
+The clip arithmetic they feed survives for a different reason. Kept and re-bounded: the clip in
+`route_mask_fork` / `route_mask_join` (`router/route_mask.hpp:113-121,175-184`) and its twin in
+`collective_translate`, with the bound moving from the tile region to `0 .. mesh_*_dim - 1`. A
+wildcard mask can still name a coordinate that does not exist when a mesh dimension is not a power
+of two. What goes is the four configurable bounds; what stays is a clamp to the mesh's own
+dimensions, which `RouterConfig` already carries.
 
 ## Decision 4: the space becomes the SAM key, not the class
 
@@ -147,6 +154,27 @@ peripheral cannot receive a replica even if one were issued.
 `SamEntry` also gains `uint8_t port`, for delivery and for the per-endpoint windows, not for the
 coverage or collective logic.
 
+Two further consequences the space key does not by itself cover.
+
+**Per-space coverage rules.** `SamTable::validate` requires the memory space to cover the mesh
+exactly once and config to cover it or be absent (`addr_trans.hpp:160-163`). A peripheral space
+covers nothing in particular, so coverage becomes a per-space property rather than a rule applied
+to whichever class is being counted.
+
+**The NSU's rebase.** `nsu_wrap.hpp:82-87` populates `NsuConfig::space_coords` from a global
+per-class SAM lookup, so every endpoint receives the same coordinates. A peripheral's NSU would be
+handed the memory space's field and `rebase_` (`nsu/depacketize.hpp:181-184`) would rewrite those
+bits in an address that has no coordinate field, corrupting it. The `port_id` config this design
+already adds is the gate: an endpoint with `port_id != 0` leaves `space_coords` undeclared, and
+`rebase_node_coords` returns the address unchanged (`ni/address_map.hpp:69`), which is correct
+because a peripheral is never a collective member and its address needs no rebasing.
+
+**Eligibility is loader policy, not a failed declaration.** `sam_yaml::declare_space_coords`
+attempts a declaration for every class and ignores the result (`sam_yaml.hpp:42-69`), so a space
+that is not a collective target today is indistinguishable from one whose declaration happened to
+fail. The loader declares only the tile spaces and asserts that the peripheral space's
+`collective_coords` is null, so the property is stated rather than inferred.
+
 ## Decision 5: the eight things an implementer would otherwise invent
 
 | # | item | decision |
@@ -156,6 +184,7 @@ coverage or collective logic.
 | 3 | duplicate face | the generator rejects two peripherals sharing (x, y, face), the shape `gen_tb_top.py:226` already uses for (router, direction) |
 | 4 | peripheral windows | bases assigned in declaration order above the tile array, each aligned to its own size, not coordinate-derived. They are SAM entries, so `lookup` resolves them, and they carry a non-zero port so nothing that walks tiles counts them |
 | 5 | SAM returns the port and the space | `SamEntry` and `Translated` gain `port` and `space`, both set by the loader from the block the entry came from |
+| 5c | the space's concrete form | an enum `Space { Config, Memory, Peripheral }` in `axi/types.hpp` beside `AxiClass`, the YAML strings `config` / `memory` / `peripheral`, and the same three in `sim/tools/address_map.py`. `parse_tile_space` returns the space, and a separate one-line map gives the class |
 | 5b | the generated tb's per-endpoint windows | `node_windows(entries, dst_id)` becomes `node_windows(entries, dst_id, port)`. A router endpoint takes port 0's windows, memory and config, exactly as today; a peripheral endpoint takes its own single window. `TILE_BASE_ADDR` and `TILE_SIZE` are stamped per endpoint from that call, unchanged in shape |
 | 6 | `src_port_id` config | `NmuConfig` and `NsuConfig` gain `port_id`, passed at create like `src_id`, through the DPI create calls |
 | 7 | corner wiring | `_peripherals` already keys on (router, direction) and already emits all four; deleting the corner rejection is the whole change |
