@@ -131,6 +131,38 @@ TEST(RouteComputeDeath, TheReservedPortEncodingAborts) {
     EXPECT_DEATH(route_compute(0x00, /*dst_port_id=*/3, cfg), "reserved");
 }
 
+// An ejection has no next hop, so a flit leaving by a boundary face takes VC 0
+// exactly as a LOCAL ejection does (floo_vc_assignment.sv:86).
+//
+// Without that guard the fallback is not merely different, it is nonsense:
+// next_hop_route steps x == 0 west to 255, route_compute reads that as a WEST
+// next hop, and preferred_vc(WEST, WEST) yields 2 -- a lookahead value the RTL
+// never stores, which is a co-sim mismatch rather than a performance wobble.
+// num_vc = 4 keeps 0 and 2 distinct; at num_vc = 1 (every chain fixture) the
+// two collapse and the guard is unobservable. fixed_vc = 0 so VA actually runs
+// instead of taking the NI-pinned bypass.
+TEST(RouterEjectionVc, BoundaryFaceEjectionTakesVcZero) {
+    RouterConfig cfg;
+    cfg.x = 0;  // west edge, so dst_port_id 1 resolves to WEST
+    cfg.y = 0;
+    cfg.mesh_x_dim = 2;
+    cfg.mesh_y_dim = 2;
+    cfg.num_vc = 4;
+    Router r(cfg);
+    FlitSink west;
+    r.set_downstream(static_cast<std::size_t>(RouterPort::WEST), west);
+
+    auto f = make_flit(make_dst(0, 0), /*vc=*/0, /*flit_tail=*/1);
+    f.set_header_field("dst_port_id", 1);  // the peripheral on this router's x face
+    f.set_header_field("fixed_vc", 0);
+    r.input(static_cast<std::size_t>(RouterPort::LOCAL)).push_flit(f);
+    for (int t = 0; t < kPipelineDepth; ++t) r.tick();
+
+    ASSERT_EQ(west.received.size(), 1u) << "peripheral-bound flit never ejected to the x face";
+    EXPECT_EQ(west.received[0].get_header_field("vc_id"), 0u)
+        << "boundary-face ejection took a VC derived from a next hop that does not exist";
+}
+
 TEST(RouterConstructionDeath, BadParametersAbort) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     RouterConfig bad_vc = center_cfg();

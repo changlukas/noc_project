@@ -240,11 +240,21 @@ class Router {
 
     void accept_flit(std::size_t port, const Flit& f);
 
-    // dst names this router's own coordinate, so whatever port route_compute
-    // picks here is an ejection and not a hop.
-    bool is_ejection(uint8_t dst) const {
+    // `out` is where this flit LEAVES the network at this router: dst names our
+    // own coordinate AND out is the port route_compute ejects it to (LOCAL for
+    // a tile, a boundary face for a peripheral).
+    //
+    // Both conjuncts are load-bearing. "dst is my coordinate" alone would also
+    // catch a MULTICAST head, whose dst_id is the wildcard BASE and not a
+    // routing target: route_mask_fork can return EAST or NORTH at the very
+    // router the base sits on, and those branches are real hops that keep their
+    // own preferred VC. "out is what route_compute picks" alone would catch
+    // every ordinary through-hop, since vc_assignment is only ever called for
+    // the port the flit routed to.
+    bool is_ejection_port(std::size_t out, uint8_t dst, uint8_t dst_port) const {
         const detail::NodeCoord c = detail::split_node_id(dst);
-        return c.x == cfg_.x && c.y == cfg_.y;
+        if (c.x != cfg_.x || c.y != cfg_.y) return false;
+        return route_compute(dst, dst_port, cfg_) == static_cast<RouterPort>(out);
     }
 
     // Next-hop XY route seen from the neighbor behind `out` (D3: computed on
@@ -255,8 +265,8 @@ class Router {
     // coordinate there walks off the mesh (--n.x at x == 0 wraps to 255) and
     // invents a lookahead the RTL never stores.
     RouterPort next_hop_route(std::size_t out, uint8_t dst, uint8_t dst_port) const {
-        if (is_ejection(dst)) {
-            assert(false && "Router: next_hop_route on an ejection (dst is this coordinate)");
+        if (is_ejection_port(out, dst, dst_port)) {
+            assert(false && "Router: next_hop_route on an ejection port");
             std::abort();
         }
         RouterConfig n = cfg_;
@@ -285,7 +295,7 @@ class Router {
         if (o == RouterPort::LOCAL) return 0;  // floo_vc_assignment.sv:86
         // A boundary face with a peripheral behind it is LOCAL with a different
         // pin — the same terminal port, so it takes the same VC 0.
-        if (is_ejection(dst)) return 0;
+        if (is_ejection_port(out, dst, dst_port)) return 0;
         return preferred_vc(o, next_hop_route(out, dst, dst_port), cfg_.num_vc);
     }
 
