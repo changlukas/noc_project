@@ -271,16 +271,22 @@ TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
     }
 }
 
+// Every shipped topology that declares peripherals, so a four-face map is held
+// to the policy the one-peripheral map states.
 TEST(SamYaml, PeripheralSpaceIsNotACollectiveTarget) {
     // The loader declares only the tile spaces. A peripheral space's bases are
     // assigned in declaration order at arbitrary sizes, so there is no uniform
     // power-of-two stride to read a coordinate field from -- the declaration is
     // not attempted, rather than attempted and failed.
-    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
-    EXPECT_NE(sam.collective_coords(axi::Space::Memory), nullptr);
-    EXPECT_NE(sam.collective_coords(axi::Space::Config), nullptr);
-    EXPECT_EQ(sam.collective_coords(axi::Space::Peripheral), nullptr)
-        << "a peripheral must never be a collective target";
+    const char* files[] = {"/mesh_2x2_vc1_periph.yaml", "/mesh_4x4_vc1_periph4.yaml"};
+    for (const char* file : files) {
+        SCOPED_TRACE(file);
+        auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + file);
+        EXPECT_NE(sam.collective_coords(axi::Space::Memory), nullptr);
+        EXPECT_NE(sam.collective_coords(axi::Space::Config), nullptr);
+        EXPECT_EQ(sam.collective_coords(axi::Space::Peripheral), nullptr)
+            << "a peripheral must never be a collective target";
+    }
 }
 
 TEST(SamYaml, APeripheralRegionIsReachableAndCarriesItsPortAndSpace) {
