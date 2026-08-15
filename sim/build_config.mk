@@ -83,9 +83,9 @@ endif
 # below the endpoint -- the fabric, the NI wraps, the tile crossbar sources --
 # is the same build, so the two tops differ only in who generates the traffic.
 ifeq ($(DMA),1)
-TB_TOP_SV = $(COSIM_ROOT)/tb/dma/tb_top_dma_$(TOPOLOGY).sv
+TB_TOP_SV = $(COSIM_ROOT)/tb/soc/tb_top_dma_$(TOPOLOGY).sv
 else
-TB_TOP_SV = $(COSIM_ROOT)/tb/tb_top_$(TOPOLOGY).sv
+TB_TOP_SV = $(COSIM_ROOT)/tb/test/tb_top_$(TOPOLOGY).sv
 endif
 # DMA job geometry. One pair of values feeds BOTH the job files gen_dma_jobs.py
 # writes and the memory preload / region compare gen_tb_top.py stamps into the
@@ -157,11 +157,11 @@ DMA_ENDPOINT_SRC := \
     $(IDMA_SRC)/idma_channel_coupler.sv \
     $(IDMA_SRC)/idma_error_handler.sv \
     $(IDMA_SRC)/idma_backend_rw_axi.sv \
-    $(COSIM_ROOT)/tb/dma/idma_types_pkg.sv \
-    $(COSIM_ROOT)/tb/dma/idma_job_driver.sv \
-    $(COSIM_ROOT)/tb/dma/dma_node_endpoint.sv
+    $(COSIM_ROOT)/tb/soc/idma_types_pkg.sv \
+    $(COSIM_ROOT)/tb/soc/idma_job_driver.sv \
+    $(COSIM_ROOT)/tb/soc/dma_node_endpoint.sv
 ENDPOINT_SRC := $(if $(filter 1,$(DMA)),$(DMA_ENDPOINT_SRC),\
-    $(COSIM_ROOT)/tb/user_node_endpoint.sv)
+    $(COSIM_ROOT)/tb/test/user_node_endpoint.sv)
 
 # noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
 # BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module

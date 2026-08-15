@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate sim/tb/tb_top_<topology>.sv + ref_model/top/noc_fabric_<topo>.sv from a topology config.
+"""Generate sim/tb/test/tb_top_<topology>.sv + ref_model/top/noc_fabric_<topo>.sv from a topology config.
 
 The fabric/tb split:
   - noc_fabric_<topo>.sv : N nodes, each = NMU + REQ/RSP router_wrap + NSU, joined
@@ -16,7 +16,7 @@ Generated artifacts: edit the generator or the topology YAML, never the emitted
 the -I ref_model/top include path.
 
 Usage:
-    python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/tb/tb_top_<topology>.sv]
+    python3 gen_tb_top.py [--topology mesh_4x4_vc1] [--out sim/tb/test/tb_top_<topology>.sv]
 
 Parameterised from topology YAML:
     - nodes list [(x,y), ...] from x_dim x y_dim
@@ -1516,7 +1516,7 @@ def main() -> int:
     ap.add_argument("--topology", default="mesh_4x4_vc1",
                     help="Topology name (matches sim/topologies/<name>.yaml)")
     ap.add_argument("--out", default=None,
-                    help="Output tb_top.sv path (default: sim/tb/tb_top_<topology>.sv; "
+                    help="Output tb_top.sv path (default: sim/tb/test/tb_top_<topology>.sv; "
                          "fabric emitted alongside)")
     ap.add_argument("--read-rob", type=int, choices=(0, 1), default=1,
                     help="NMU read reorder buffer: 1 (default) emits the reorder-buffer "
@@ -1524,7 +1524,7 @@ def main() -> int:
                          "READ_ROB_ENABLED localparam.")
     ap.add_argument("--dma", action="store_true",
                     help="Emit the iDMA top instead: dma_node_endpoint per node and "
-                         "sim/tb/dma/tb_top_dma_<topology>.sv as the default output. The "
+                         "sim/tb/soc/tb_top_dma_<topology>.sv as the default output. The "
                          "fabric is emitted unchanged and shared -- the endpoint's port "
                          "list toward it does not move.")
     ap.add_argument("--jobs-per-node", type=int, default=_DMA_JOBS_PER_NODE,
@@ -1548,8 +1548,8 @@ def main() -> int:
         return 0
     tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma, a.jobs_per_node, a.length, a.rw)
     fab_text = emit_fabric(topo)
-    default_out = ROOT / "sim" / "tb" / "dma" / f"tb_top_dma_{a.topology}.sv" if a.dma \
-        else ROOT / "sim" / "tb" / f"tb_top_{a.topology}.sv"
+    default_out = ROOT / "sim" / "tb" / "soc" / f"tb_top_dma_{a.topology}.sv" if a.dma \
+        else ROOT / "sim" / "tb" / "test" / f"tb_top_{a.topology}.sv"
     out_path = Path(a.out) if a.out is not None else default_out
     fab_path = _fabric_path(out_path, topo)
 

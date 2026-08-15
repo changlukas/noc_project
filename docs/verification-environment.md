@@ -34,13 +34,22 @@ Excluded, with reasons:
 
 ## Testbench architecture
 
+The testbench sources sit in two directories, one per endpoint flavour, plus
+what both compile:
+
+| directory | endpoint | what it is |
+|---|---|---|
+| `sim/tb/test/` | `user_node_endpoint` | a pulp `axi_file_master` replaying generated stimulus against a tile crossbar of `axi_sim_mem` targets. The DV layer: the traffic is what a pattern named, so a run measures the fabric |
+| `sim/tb/soc/` | `dma_node_endpoint` | a pulp iDMA backend in place of the replayer. The SoC layer: a real AXI manager picks its own bursts, outstanding depth and alignment, so a run measures conformance to one |
+| `sim/tb/` | — | `axi_vip_types_pkg.sv` and `link_perf_monitor.sv`, compiled into both |
+
 `sim/tools/gen_tb_top.py` reads a topology YAML (`sim/topologies/*.yaml`) and
 emits two generated files, never hand-edited:
 
 | file | content |
 |---|---|
 | `ref_model/top/noc_fabric_<topology>.sv` | N nodes (`ni_wrap` = NMU + NSU + `dat_merge_wrap`, plus `router_wrap`), joined by directional (N/E/S/W) inter-router links via a `genvar` generate loop. Boundary directions are tied off; a tied-off direction driving a valid flit is a `$fatal`. |
-| `sim/tb/tb_top_<topology>.sv` | self-clocked (10 ns clock, 4-cycle reset) top: DPI create calls for every router/NMU/NSU context, the fabric instance, one `user_node_endpoint` per node, the watchdog, and the exit logic. |
+| `sim/tb/test/tb_top_<topology>.sv` | self-clocked (10 ns clock, 4-cycle reset) top: DPI create calls for every router/NMU/NSU context, the fabric instance, one `user_node_endpoint` per node, the watchdog, and the exit logic. |
 
 `router_wrap` carries three physical networks, each with its own flit width
 (`ni_params_pkg`: REQ 132 b, RSP 122 b, DAT 629 b):
@@ -59,7 +68,7 @@ sources DataR); `dat_merge_wrap` (`ref_model/top/dat_merge_wrap.sv`) arbitrates 
 two onto `router_wrap`'s single DAT LOCAL rx/tx pair, sitting between
 `nmu_wrap`/`nsu_wrap` and `router_wrap` inside `ni_wrap`.
 
-Each node's `user_node_endpoint` (`sim/tb/user_node_endpoint.sv`, hand-written,
+Each node's `user_node_endpoint` (`sim/tb/test/user_node_endpoint.sv`, hand-written,
 instantiated by the generator but not itself generated) presents two
 `AXI_BUS_DV` interfaces and bridges them to the flat wire structs field by
 field:
@@ -327,7 +336,7 @@ two-window one. The windows are per node and global — nothing rebases, so the
 tile decodes on the same bases the SAM matched. A disagreement between the two
 shows up as an address outside both windows, which DECERRs; the endpoint's
 `DECERR_FAULT_BIT` fault injection and the RRESP fatal in
-`sim/tb/user_node_endpoint.sv` check that path.
+`sim/tb/test/user_node_endpoint.sv` check that path.
 
 Raster order is what makes the node index a contiguous bit field an AWUSER
 address mask can wildcard: memory bases at `idx * 0x100000000`, config bases at
