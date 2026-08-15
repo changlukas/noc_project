@@ -9,10 +9,10 @@ module nmu #(
     parameter int unsigned AWUSER_WIDTH   = 58,   // 50 b collective attributes, §6
     parameter int unsigned XUSER_WIDTH    = 8,    // ARUSER / WUSER / RUSER / BUSER
     parameter int unsigned NUM_VC         = 1,    // §5, 1-8
-    // Flit widths, §6: 44 b header + the network's largest payload. Fixed.
-    localparam int unsigned REQ_FLIT_WIDTH = 132, // 44 + 88  (Aw/Ar)
-    localparam int unsigned RSP_FLIT_WIDTH = 122, // 44 + 78  (NarrowR)
-    localparam int unsigned DAT_FLIT_WIDTH = 629  // 44 + 585 (DataW)
+    // Flit widths, §6: 48 b header + the network's largest payload. Fixed.
+    localparam int unsigned REQ_FLIT_WIDTH = 136, // 48 + 88  (Aw/Ar)
+    localparam int unsigned RSP_FLIT_WIDTH = 126, // 48 + 78  (NarrowR)
+    localparam int unsigned DAT_FLIT_WIDTH = 633  // 48 + 585 (DataW)
 ) (
     // ----- global, §4.1: two asynchronous domains, CDC at the AXI boundary -----
     input  logic                        ACLK,
