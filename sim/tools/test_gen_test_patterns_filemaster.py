@@ -476,11 +476,11 @@ def test_node_windows_are_that_node_s_own_regions():
     # next power of two 0x200000. Node stride is 0x200000.
     tiles = _two_space_tiles([0x100000] * 4)
     _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
-    assert address_map.node_windows(entries, address_map.dst_id(0, 0)) == [
+    assert address_map.node_windows(entries, address_map.dst_id(0, 0), 0) == [
         {"space": "config", "base": 0x100000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
     ]
-    assert address_map.node_windows(entries, address_map.dst_id(1, 1)) == [
+    assert address_map.node_windows(entries, address_map.dst_id(1, 1), 0) == [
         {"space": "config", "base": 0x700000, "size": 0x1000},
         {"space": "memory", "base": 0x600000, "size": 0x100000},
     ]
@@ -490,9 +490,28 @@ def test_node_windows_skip_an_absent_space():
     """A map with no config entries contributes no config window."""
     entries = [{"x": 0, "y": 0, "size": 0x100000, "space": "memory",
                 "base": 0x0, "dst_id": address_map.dst_id(0, 0)}]
-    assert address_map.node_windows(entries, address_map.dst_id(0, 0)) == [
+    assert address_map.node_windows(entries, address_map.dst_id(0, 0), 0) == [
         {"space": "memory", "base": 0x0, "size": 0x100000},
     ]
+
+
+def test_node_windows_key_on_the_port_not_the_coordinate():
+    """A peripheral shares its router's coordinate, so a coordinate-only match
+    would stamp the peripheral's window into that router's crossbar decode as if
+    it were the tile's -- and the tile would answer the peripheral's addresses
+    locally, so nothing would ever reach the peripheral. The port is what tells
+    the two endpoints apart."""
+    topo = gen_tb_top.load_topology("mesh_2x2_vc1_periph")
+    _bases, entries = address_map.pack(topo["address_map"], 2, 2)
+    cid = address_map.dst_id(0, 0)
+    tile = address_map.node_windows(entries, cid, 0)
+    periph = address_map.node_windows(entries, cid, 1)
+    assert [w["space"] for w in tile] == ["config", "memory"]
+    assert [w["space"] for w in periph] == ["peripheral"]
+    # Disjoint: the peripheral's region sits above the whole tile array.
+    assert periph[0]["base"] >= max(w["base"] + w["size"] for w in tile)
+    # The y face at this coordinate carries nothing on this topology.
+    assert address_map.node_windows(entries, cid, 2) == []
 
 
 def _two_space_topology():
@@ -502,10 +521,10 @@ def _two_space_topology():
 
 def test_tile_targets_packs_config_first():
     """Port order and field packing are one coupled invariant: target 0 is the
-    config window, the last target is the data window. One entry per node, each
-    holding that node's own global bases."""
-    nodes = [(0, 0, 0, address_map.dst_id(0, 0)), (1, 1, 0, address_map.dst_id(1, 0)),
-             (2, 0, 1, address_map.dst_id(0, 1)), (3, 1, 1, address_map.dst_id(1, 1))]
+    config window, the last target is the data window. One entry per endpoint,
+    each holding that endpoint's own global bases."""
+    nodes = [(0, 0, 0, address_map.dst_id(0, 0), 0), (1, 1, 0, address_map.dst_id(1, 0), 0),
+             (2, 0, 1, address_map.dst_id(0, 1), 0), (3, 1, 1, address_map.dst_id(1, 1), 0)]
     per_node, _egress = gen_tb_top.tile_targets(_two_space_topology(), nodes)
     assert per_node[0] == [
         {"space": "config", "base": 0x100000, "size": 0x1000},
@@ -520,10 +539,38 @@ def test_tile_targets_packs_config_first():
 def test_tile_targets_rejects_a_transposed_space_order(monkeypatch):
     """An address_map.SPACE_ORDER edit must not silently transpose the two
     targets: the endpoint puts the config memory on target 0."""
-    monkeypatch.setattr(address_map, "SPACE_ORDER", ("memory", "config"))
-    nodes = [(0, 0, 0, address_map.dst_id(0, 0))]
-    with pytest.raises(SystemExit, match="config-then-memory"):
+    monkeypatch.setattr(address_map, "SPACE_ORDER", ("memory", "config", "peripheral"))
+    nodes = [(0, 0, 0, address_map.dst_id(0, 0), 0)]
+    with pytest.raises(SystemExit, match=r"must be \['config', 'memory'\]"):
         gen_tb_top.tile_targets(_two_space_topology(), nodes)
+
+
+def test_tile_targets_pads_a_peripheral_row_to_the_widest():
+    """The emitted TILE_BASE_ADDR / TILE_SIZE are RECTANGULAR, so a one-window
+    peripheral row beside a two-window tile row would not elaborate. Short rows
+    are padded with a zero-SIZE window, which pulp addr_decode treats as inert
+    (it fatals only when start_addr is higher than end_addr, and start == end is
+    not higher). A one-byte pad would instead be a live target at address 0."""
+    topo = gen_tb_top.load_topology("mesh_2x2_vc1_periph")
+    endpoints = gen_tb_top._endpoints(gen_tb_top._nodes(topo)[0], gen_tb_top._peripherals(topo))
+    per_ep, _egress = gen_tb_top.tile_targets(topo, endpoints)
+    assert len(per_ep) == 6                      # 4 routers + 2 peripherals
+    assert len({len(w) for w in per_ep.values()}) == 1, "rows must be rectangular"
+    assert [w["space"] for w in per_ep[0]] == ["config", "memory"]
+    # Endpoint 4 is the peripheral at (0,0): its own window, then the pad.
+    assert per_ep[4][0]["space"] == "peripheral"
+    assert per_ep[4][1] == {"space": None, "base": 0, "size": 0}
+
+
+def test_tile_targets_rejects_a_peripheral_whose_order_is_not_its_own_space(monkeypatch):
+    """The order cross-check is per PORT and runs BEFORE the padding. Compared
+    after, every short row would read as ragged-then-padded and the check would
+    say nothing at all."""
+    monkeypatch.setattr(address_map, "SPACE_ORDER", ("config", "memory"))
+    topo = gen_tb_top.load_topology("mesh_2x2_vc1_periph")
+    endpoints = gen_tb_top._endpoints(gen_tb_top._nodes(topo)[0], gen_tb_top._peripherals(topo))
+    with pytest.raises(SystemExit, match=r"\(port 1\) window order \[\] must be \['peripheral'\]"):
+        gen_tb_top.tile_targets(topo, endpoints)
 
 
 @pytest.mark.parametrize("profile", sorted(gen_tb_top._MEM_LATENCY_PROFILES))

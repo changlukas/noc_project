@@ -145,66 +145,73 @@ def _nodes(topo: dict):
 
 
 def _peripherals(topo: dict):
-    """Address-map coordinates outside the tile region, in map order.
+    """address_map.peripherals, in declaration order.
 
-    A peripheral has an NI and a test endpoint but no router, so it hangs off
-    ONE boundary port of ONE router: the coordinate it borders on the axis it
-    left the region on. x < tile_x_first is that router's WEST port, x >
-    tile_x_last its EAST, and the same on y with SOUTH and NORTH.
+    A peripheral has an NI and a test endpoint but no router. It SHARES its host
+    router's coordinate and is told apart by the boundary port it hangs off:
+    face "x" is port 1, face "y" is port 2. Which direction that port is follows
+    from the router's own edge -- an x face on column 0 is WEST, on the last
+    column EAST -- so the face names the axis and the coordinate names the side.
 
-    Returns [{"x", "y", "cid", "router_idx", "dir"}, ...]. Peripherals extend
-    the ENDPOINT index space, not the node index space: nodes 0..N-1 stay the
-    routers and peripheral p is endpoint N + p.
+    A corner router is legal: it has two free faces, and the face says which one
+    is meant.
+
+    Returns [{"x", "y", "cid", "port", "face", "router_idx", "dir"}, ...].
+    Peripherals extend the ENDPOINT index space, not the node index space:
+    nodes 0..N-1 stay the routers and peripheral p is endpoint N + p.
     """
     t = topo["topology"]
     x_dim, y_dim = int(t["x_dim"]), int(t["y_dim"])
-    txf, txl, tyf, tyl = 0, x_dim - 1, 0, y_dim - 1
     out = []
-    seen = set()
     taken = {}
-    for tile in (topo.get("address_map") or {}).get("tiles", []):
-        x, y = int(tile["x"]), int(tile["y"])
-        if txf <= x <= txl and tyf <= y <= tyl:
-            continue  # a tile, not a peripheral
-        if (x, y) in seen:
-            continue  # the same coordinate again in the other address space
-        seen.add((x, y))
-        out_x = not txf <= x <= txl
-        out_y = not tyf <= y <= tyl
-        if out_x and out_y:
+    for per in (topo.get("address_map") or {}).get("peripherals") or []:
+        x, y, face = int(per["x"]), int(per["y"]), per["face"]
+        if face not in ("x", "y"):
             raise SystemExit(
-                f"gen_tb_top: peripheral (x={x},y={y}) leaves the tile region on both axes "
-                f"-- a corner coordinate borders no router port")
-        if out_x:
-            direction = "WEST" if x < txf else "EAST"
-            ax, ay = (0 if x < txf else x_dim - 1), y - tyf
+                f"gen_tb_top: peripheral (x={x},y={y}) face {face!r} must be 'x' or 'y'")
+        if not (0 <= x < x_dim and 0 <= y < y_dim):
+            raise SystemExit(
+                f"gen_tb_top: peripheral (x={x},y={y}) is outside the {x_dim}x{y_dim} router "
+                f"array -- a peripheral shares a router's coordinate, it does not take one of "
+                f"its own")
+        # Same rule sam_yaml.hpp's loader applies, checked here because the
+        # generator is a second, independent reader of the same YAML: on an edge
+        # router the named face has no neighbour and the port is terminal, while
+        # on an interior router it carries a live inter-router link and hanging a
+        # peripheral off it closes a channel dependency cycle.
+        if face == "x":
+            direction = "WEST" if x == 0 else "EAST" if x == x_dim - 1 else None
         else:
-            direction = "SOUTH" if y < tyf else "NORTH"
-            ax, ay = x - txf, (0 if y < tyf else y_dim - 1)
-        if not (0 <= ax < x_dim and 0 <= ay < y_dim):
+            direction = "SOUTH" if y == 0 else "NORTH" if y == y_dim - 1 else None
+        if direction is None:
             raise SystemExit(
-                f"gen_tb_top: peripheral (x={x},y={y}) borders no router -- its in-region "
-                f"coordinate lies outside the {x_dim}x{y_dim} router array")
-        router_idx = ay * x_dim + ax
-        if (router_idx, direction) in taken:
+                f"gen_tb_top: peripheral (x={x},y={y}) face {face!r} names an edge this "
+                f"coordinate is not on -- an interior router's port carries a live "
+                f"inter-router link, and hanging a peripheral off it closes a channel "
+                f"dependency cycle")
+        if (x, y, face) in taken:
             raise SystemExit(
-                f"gen_tb_top: peripherals {taken[(router_idx, direction)]} and (x={x},y={y}) "
-                f"both claim node{router_idx}'s {direction} port")
-        taken[(router_idx, direction)] = f"(x={x},y={y})"
+                f"gen_tb_top: two peripherals both claim (x={x},y={y}) face {face!r}")
+        taken[(x, y, face)] = True
         out.append({"x": x, "y": y, "cid": _coord_id(x, y),
-                    "router_idx": router_idx, "dir": direction})
+                    "port": 1 if face == "x" else 2, "face": face,
+                    "router_idx": y * x_dim + x, "dir": direction})
     return out
 
 
 def _endpoints(nodes, peripherals):
-    """Router nodes followed by peripherals, in (idx, x, y, coord_id) shape.
+    """Router nodes followed by peripherals, in (idx, x, y, coord_id, port) shape.
 
     The endpoint index space: 0..N-1 are the routers, N..N+P-1 the peripherals.
     Each entry carries its own ni_wrap, user_node_endpoint and NMU / NSU /
     dat_merge context; only the first N carry a router.
+
+    port is what separates two endpoints at one coordinate: a router node is the
+    tile on port 0 (LOCAL), a peripheral is the boundary port it hangs off.
     """
-    return list(nodes) + [(len(nodes) + p, per["x"], per["y"], per["cid"])
-                          for p, per in enumerate(peripherals)]
+    return [(idx, x, y, cid, 0) for (idx, x, y, cid) in nodes] + \
+           [(len(nodes) + p, per["x"], per["y"], per["cid"], per["port"])
+            for p, per in enumerate(peripherals)]
 
 
 # REGION_BYTES: the per-node tile-memory window. DV-side tb constant
@@ -289,18 +296,34 @@ def tile_targets(topo: dict, endpoints):
     t = topo["topology"]
     _bases, entries = address_map.pack(topo.get("address_map"), int(t["x_dim"]), int(t["y_dim"]))
     out = {}
-    for idx, _x, _y, cid in endpoints:
-        windows = address_map.node_windows(entries, cid)
+    for idx, _x, _y, cid, port in endpoints:
+        windows = address_map.node_windows(entries, cid, port)
         order = [w["space"] for w in windows]
         # Spelled out here rather than read back from address_map.SPACE_ORDER:
         # this is the cross-check on that constant, not a restatement of it.
-        if order != ["config", "memory"]:
+        # Checked BEFORE the padding below, or every short row would read as
+        # ragged-then-padded and the check would say nothing.
+        expected = ["config", "memory"] if port == 0 else ["peripheral"]
+        if order != expected:
             raise SystemExit(
-                f"gen_tb_top: node {idx} tile space order {order} must be "
-                f"config-then-memory -- user_node_endpoint puts the config memory "
-                f"on target 0 and the data memory on the last target "
-                f"(see address_map.SPACE_ORDER)")
+                f"gen_tb_top: endpoint {idx} (port {port}) window order {order} must be "
+                f"{expected} -- user_node_endpoint puts the config memory on target 0 and "
+                f"the data memory on the last target (see address_map.SPACE_ORDER)")
         out[idx] = windows
+    # The emitted parameters are RECTANGULAR -- [n_ep-1:0][TILE_TARGETS-1:0] --
+    # so a one-window peripheral row beside a two-window tile row will not
+    # elaborate. Pad the short rows to the widest instead of reshaping.
+    #
+    # A zero-size window is inert, not a one-byte target: pulp addr_decode
+    # (sim/dv/common_cells-1.37.0/src/addr_decode.sv) states a rule as
+    # start/end and fatals only when start_addr is HIGHER than end_addr, and
+    # base == base is not higher; overlap only warns, and an empty range
+    # overlaps nothing. Do not "fix" this into size 1 -- that would be a live
+    # one-byte target aliasing whatever sits at address 0.
+    width = max(len(w) for w in out.values())
+    for idx, windows in out.items():
+        windows.extend({"space": None, "base": 0, "size": 0}
+                       for _ in range(width - len(windows)))
     return out, address_map.noc_egress_base(entries)
 
 
@@ -589,10 +612,11 @@ def emit_fabric(topo: dict) -> str:
     w("// ingress) and a slave-side AXI port (NSU egress).")
     if peripherals:
         w("//")
-        w(f"// {len(peripherals)} peripheral(s) sit at a border coordinate outside the tile region:")
-        w("// an ni_wrap on a router's boundary port, with no router of their own. They")
-        w("// extend the ENDPOINT index space (nmu/nsu/dat_merge ctx and the AXI faces)")
-        w("// past the router-node count, which router_ctx keeps.")
+        w(f"// {len(peripherals)} peripheral(s): an ni_wrap on a router's boundary port, with no")
+        w("// router of their own. Each SHARES its host router's coordinate and is told")
+        w("// apart by the port it hangs off (the flit header's dst_port_id). They extend")
+        w("// the ENDPOINT index space (nmu/nsu/dat_merge ctx and the AXI faces) past the")
+        w("// router-node count, which router_ctx keeps.")
     w("")
     w(f"`ifndef {guard}")
     w(f"`define {guard}")
@@ -674,8 +698,9 @@ def emit_fabric(topo: dict) -> str:
     for pi, per in enumerate(peripherals):
         ep = n + pi
         r, d = per["router_idx"], per["dir"]
-        w(f"    // peripheral{pi}: route ({per['x']},{per['y']}) = coord id {per['cid']}, on")
-        w(f"    // node{r}'s {d} port. Endpoint index {ep}; it carries no router.")
+        w(f"    // peripheral{pi}: node{r}'s own coordinate ({per['x']},{per['y']}) = coord id")
+        w(f"    // {per['cid']}, told apart from that router's tile by port {per['port']} (face")
+        w(f"    // {per['face']} = the {d} port). Endpoint index {ep}; it carries no router.")
         for net, width_sym, flow in _NETWORKS:
             W = f"ni_params_pkg::{width_sym}"
             w(f"    logic                        periph{pi}_tx_{net}_valid;")
@@ -711,19 +736,31 @@ def emit_fabric(topo: dict) -> str:
         w("")
         # Same monitor every live inter-router link carries. A populated
         # boundary port is a live link, and its flit count is the only direct
-        # evidence that the collective clip kept a mask block off a peripheral:
-        # without it a quiet peripheral and a delivered one look alike.
+        # evidence that the two endpoints at this coordinate are being told
+        # apart: a peripheral whose traffic went to its router's tile instead
+        # reads as a quiet link, not as a failure.
         w(f"    // Link perf monitors on node{r}'s {d} port, one per directed edge as")
-        w(f"    // every inter-router link carries, named {{net}}_{r}to{ep} and {{net}}_{ep}to{r}")
-        w(f"    // after the endpoint index. The router-to-peripheral edge answers 'did the")
-        w(f"    // fabric send at the peripheral' (the collective clip); the")
-        w(f"    // peripheral-to-router edge answers 'did the peripheral put a flit on the")
-        w(f"    // wire' -- without it a silent peripheral and a working one look alike.")
+        w(f"    // every inter-router link carries, named after the two ENDPOINTS rather")
+        w(f"    // than the endpoint index. The router-to-peripheral edge answers 'did the")
+        w(f"    // fabric eject at port {per['port']} rather than at the tile sharing this")
+        w(f"    // coordinate'; the peripheral-to-router edge answers 'did the peripheral put")
+        w(f"    // a flit on the wire' -- without it a silent peripheral and a working one")
+        w(f"    // look alike.")
+        # An endpoint is named node<router>.<port>, not by its endpoint index:
+        # two peripherals can hang off one router, so the index alone says
+        # WHICH endpoint but not which physical port carries it. "local" is the
+        # tile on the router's LOCAL port, the face letter a peripheral. The
+        # network is still the name up to the first underscore, which is all
+        # sim/verilator/perf_cli_summary.py parses.
+        tile_name = f"node{r}.local"
+        periph_name = f"node{r}.{per['face']}"
         for net, _width_sym, flow in _NETWORKS:
             ret = "ready" if flow == "ready_valid" else "crdvalid"
             for src, dst, suffix, valid, flit in (
-                    (r, ep, "", f"tx_{net}_valid[{r}][RP_{d}]", f"tx_{net}_flit[{r}][RP_{d}]"),
-                    (ep, r, "_out", f"periph{pi}_tx_{net}_valid", f"periph{pi}_tx_{net}_flit")):
+                    (tile_name, periph_name, "",
+                     f"tx_{net}_valid[{r}][RP_{d}]", f"tx_{net}_flit[{r}][RP_{d}]"),
+                    (periph_name, tile_name, "_out",
+                     f"periph{pi}_tx_{net}_valid", f"periph{pi}_tx_{net}_flit")):
                 # The return wire is the OTHER end's: a monitor watches flits
                 # leaving one end and the ready/credit coming back from the one
                 # they arrive at.
@@ -731,7 +768,7 @@ def emit_fabric(topo: dict) -> str:
                         else f"rx_{net}_{ret}[{r}][RP_{d}]")
                 vc_slice = f"{flit}[ni_flit_pkg::VC_ID_MSB:ni_flit_pkg::VC_ID_LSB]"
                 w(f"    link_perf_monitor #(")
-                w(f'        .LINK_NAME("{net}_{src}to{dst}"),')
+                w(f'        .LINK_NAME("{net}_{src}_to_{dst}"),')
                 w(f'        .FLOW("{flow}"),')
                 w(f"        .BUFFER_DEPTH(ROUTER_VC_DEPTH),")
                 w(f"        .NUM_VC(DAT_NUM_VC), .VC_ID_WIDTH(ni_flit_pkg::VC_ID_WIDTH)")
@@ -859,7 +896,7 @@ def emit_fabric(topo: dict) -> str:
         # tie-off default, with the same tx/rx crossing the LOCAL port uses.
         for pi, per in enumerate(peripherals):
             w(f"            if (i == {per['router_idx']}) begin"
-              f"  // {per['dir']}: <- peripheral{pi} at route ({per['x']},{per['y']})")
+              f"  // {per['dir']}: <- peripheral{pi}, port {per['port']} of this router")
             w(f"                rx_{net}_valid[i][RP_{per['dir']}] = periph{pi}_tx_{net}_valid;")
             w(f"                rx_{net}_flit[i][RP_{per['dir']}]  = periph{pi}_tx_{net}_flit;")
             w(f"                tx_{net}_{ret}[i][RP_{per['dir']}] = periph{pi}_rx_{net}_{ret};")
@@ -966,7 +1003,9 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     # watchdog budget beside the memory's. Zero under "ideal".
     mst_cyc_per_beat = _STALL_RANDOM_MAX_CYCLES if mst_stall_out else mst_delay_out
     per_node, noc_egress_base = tile_targets(topo, endpoints)
-    n_targets = len(per_node[0])
+    # The widest row, not endpoint 0's: a peripheral owns one window where a
+    # tile owns two, and tile_targets pads the short rows out to this width.
+    n_targets = max(len(w) for w in per_node.values())
     # ADDR_WIDTH'(...) casts, not sized literals: the field width has to follow
     # ni_params_pkg::AXI_ADDR_WIDTH_DFLT, or a width change would silently
     # mis-align the concatenation.
@@ -1242,15 +1281,18 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
           f'{x_dim}, {y_dim}, DAT_NUM_VC);')
     # NI creates cover the ENDPOINT space: the routers first, then one per
     # peripheral. src_id is the route coordinate the topology states for it --
-    # that id is stamped into every request the peripheral emits and is what
-    # its responses come back to.
-    for (i, x, y, c) in endpoints:
+    # that id is stamped into every request the endpoint emits and is what its
+    # responses come back to. A peripheral now SHARES its router's coordinate,
+    # so src_id no longer tells the two apart: port_id does, and it is the same
+    # port the SAM entry for this endpoint's region carries.
+    for (i, x, y, c, port) in endpoints:
+        which = f"node{i}, port 0 = LOCAL" if port == 0 else f"peripheral{i - n}, port {port}"
         w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, DAT_NUM_VC, '
-          f'READ_ROB_ENABLED, b_rob_depth, r_rob_depth, max_txns_per_id, 0, '
+          f'READ_ROB_ENABLED, b_rob_depth, r_rob_depth, max_txns_per_id, {port}, '
           f'sam_config_path);  '
-          f'// src_id = {"node" if i < n else "peripheral"}{i} coord {c}, port 0 = LOCAL')
+          f'// src_id = coord {c}, {which}')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, '
-          f'max_outstanding, 0, sam_config_path);')
+          f'max_outstanding, {port}, sam_config_path);')
         w(f'        dat_merge_ctx[{i}] = cmodel_dat_merge_create("dat_merge_{i}", DAT_NUM_VC);')
     w("    end")
     w("")

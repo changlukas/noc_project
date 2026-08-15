@@ -84,7 +84,16 @@ class NsuWrap {
         NsuConfig cfg{};
         cfg.src_id = src_id;
         cfg.port_id = port_id;
-        if (config_path != nullptr && config_path[0] != '\0') {
+        // port_id == 0 only. The lookup below is per SPACE, global to the map,
+        // so every endpoint would otherwise be handed the tile spaces' fields
+        // -- including a peripheral, whose addresses live in a third space that
+        // has no coordinate field at all. rebase_ (nsu/depacketize.hpp:181-184)
+        // would then rewrite those bits in an address that does not carry them
+        // and corrupt it. Left undeclared, rebase_node_coords returns the
+        // address unchanged (ni/address_map.hpp:60-64), which is correct: a
+        // peripheral is never a collective member, so nothing arrives at one
+        // carrying another node's coordinates.
+        if (port_id == 0 && config_path != nullptr && config_path[0] != '\0') {
             const auto sam = nmu::addr_trans::load_sam_table(config_path);
             // The tile spaces only: a peripheral region has no coordinate
             // field, so there is nothing for the NSU to rebase. NsuConfig's

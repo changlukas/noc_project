@@ -55,8 +55,9 @@ def print_noc(noc):
 def print_net_rollup(links):
     """Per-network totals over the links.
 
-    gen_tb_top.py:420 names every link monitor "{net}_{i}to{peer}", so the
-    network is the name up to the first underscore (req / rsp / dat).
+    gen_tb_top.py names an inter-router link monitor "{net}_{i}to{peer}" and a
+    peripheral one "{net}_{endpoint}_to_{endpoint}", so in both the network is
+    the name up to the first underscore (req / rsp / dat).
 
     No grand total across networks: stall_cyc means valid && !ready on the
     ready/valid networks (req, rsp) and a credit-starvation cycle on dat

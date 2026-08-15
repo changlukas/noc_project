@@ -184,15 +184,22 @@ def pack(address_map, x_dim, y_dim):
     return bases, entries
 
 
-def node_windows(entries, node_id):
-    """One node's own region per space, in SPACE_ORDER, present spaces only.
+def node_windows(entries, node_id, port):
+    """One endpoint's own region per space, in SPACE_ORDER, present spaces only.
 
-    This is what the tile crossbar decodes on: a request that reached this node
-    -- either from its own initiator or from the fabric -- names an address in
-    one of these two ranges, or it is not this node's. The NSU rewrites an
-    arriving address's node-coordinate field to this node before the crossbar
-    sees it (nsu::Depacketize::rebase_), so a collective replica carrying the
-    request's own address lands here like any unicast.
+    Keyed on (node_id, port), not on node_id alone: a peripheral shares its host
+    router's coordinate and is told apart by the boundary port it hangs off, so
+    matching the coordinate alone would stamp a peripheral's window into that
+    router's crossbar decode as if it were the tile's. Port 0 is the tile on the
+    router's LOCAL port and takes the config and memory windows; a peripheral
+    port takes its own single window.
+
+    This is what the tile crossbar decodes on: a request that reached this
+    endpoint -- either from its own initiator or from the fabric -- names an
+    address in one of these ranges, or it is not this endpoint's. The NSU
+    rewrites an arriving address's node-coordinate field to this node before the
+    crossbar sees it (nsu::Depacketize::rebase_), so a collective replica
+    carrying the request's own address lands here like any unicast.
 
     Sizes are exact, not rounded: pulp axi_xbar states a rule as start/end, so
     a window need not be a power of two.
@@ -202,7 +209,8 @@ def node_windows(entries, node_id):
     out = []
     for space in SPACE_ORDER:
         for e in entries:
-            if e["dst_id"] == node_id and e.get("space", "memory") == space:
+            if (e["dst_id"] == node_id and e.get("port", 0) == port
+                    and e.get("space", "memory") == space):
                 out.append({"space": space, "base": e["base"], "size": e["size"]})
                 break
     return out

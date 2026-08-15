@@ -292,7 +292,37 @@ TEST(NmuWrap, init_without_topology_throws) {
 TEST(NmuWrap, init_with_reserved_port_id_throws) {
     NmuWrap adapter;
     EXPECT_THROW(adapter.init(kTopologyYaml, /*src_id=*/0, /*port_id=*/3), std::invalid_argument);
-    EXPECT_NO_THROW(adapter.init(kTopologyYaml, /*src_id=*/0, /*port_id=*/2));
+}
+
+// An ENCODABLE port_id that this topology declares no endpoint at. Nothing
+// downstream catches it: route_compute resolves an ejection port from the flit
+// header without asking whether an NI sits behind it, so the responses to this
+// NI's requests route to an empty boundary port and the packets are lost with
+// no error anywhere. The fault injections below are the three ways to get it
+// wrong on a topology that DOES declare peripherals.
+TEST(NmuWrap, init_with_a_port_id_no_endpoint_declares_throws) {
+    constexpr const char* periph = TOPOLOGY_DIR "/mesh_2x2_vc1_periph.yaml";
+    // mesh_2x2_vc1_periph declares an x-face peripheral (port 1) at (0,0) and
+    // at (0,1), and no y-face peripheral anywhere.
+    constexpr uint8_t kNode00 = 0;  // (x=0, y=0)
+    constexpr uint8_t kNode10 = 1;  // (x=1, y=0)
+    NmuWrap adapter;
+
+    // The declared endpoints: the tile on LOCAL, and the peripheral on port 1.
+    EXPECT_NO_THROW(adapter.init(periph, kNode00, /*port_id=*/0));
+    EXPECT_NO_THROW(adapter.init(periph, kNode00, /*port_id=*/1));
+
+    // Fault 1: the y face at a coordinate whose peripheral is on the x face.
+    EXPECT_THROW(adapter.init(periph, kNode00, /*port_id=*/2), std::invalid_argument);
+    // Fault 2: the right face, the wrong coordinate -- (1,0) declares no peripheral.
+    EXPECT_THROW(adapter.init(periph, kNode10, /*port_id=*/1), std::invalid_argument);
+    // Fault 3: a peripheral port on a topology with no peripherals block at all.
+    EXPECT_THROW(adapter.init(kTopologyYaml, kNode00, /*port_id=*/1), std::invalid_argument);
+    EXPECT_THROW(adapter.init(kTopologyYaml, kNode00, /*port_id=*/2), std::invalid_argument);
+
+    // And a coordinate outside the mesh has no endpoint on any port.
+    EXPECT_THROW(adapter.init(kTopologyYaml, /*src_id=*/0x77, /*port_id=*/0),
+                 std::invalid_argument);
 }
 
 // Note: the wrap-level "odd num_vc rejected" death test was removed in S3a

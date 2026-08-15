@@ -58,6 +58,7 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
 
 namespace ni::cmodel::wrap {
 
@@ -94,6 +95,28 @@ class NmuWrap {
         cfg.src_id = src_id;
         cfg.port_id = port_id;
         cfg.sam = addr_trans::load_sam_table(config_path);
+        // (src_id, port_id) has to name an endpoint this topology declares.
+        // Nothing else checks it: the range check above only says the field is
+        // encodable, and route_compute resolves an ejection port from the flit
+        // header without asking whether anything sits behind it. An NI claiming
+        // a port the map never declared is therefore silent -- it emits
+        // requests whose responses route back to an empty boundary port, and
+        // the packets are simply lost. The SAM is already loaded here, so this
+        // is the cheap place and the right trust boundary.
+        bool endpoint_declared = false;
+        for (const auto& e : cfg.sam.entries()) {
+            if (e.dst_id == src_id && e.port == port_id) {
+                endpoint_declared = true;
+                break;
+            }
+        }
+        if (!endpoint_declared) {
+            throw std::invalid_argument(
+                "NmuWrap::init: no endpoint at this (src_id, port_id) in " +
+                std::string(config_path) +
+                " -- port 0 is the tile at src_id, a non-zero port is a peripheral the "
+                "address_map.peripherals block must declare at that coordinate and face");
+        }
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;
         cfg.dat_num_vc = dat_num_vc;
