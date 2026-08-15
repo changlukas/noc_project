@@ -288,11 +288,21 @@ _STALL_RANDOM_MAX_CYCLES = 15
 #   random  the master sometimes cannot keep up. R backs up through the
 #           crossbar into the NMU, which is what makes the deadlock question
 #           reachable at all.
+#
+# The two tops take different profiles because they answer different questions.
+# The directed and continuous tops replay transactions this project chose, so a
+# stalling consumer costs them nothing they were measuring. The DMA top exists to
+# put a real AXI manager under the fabric, and a manager whose every response
+# beat waits a random 0 to 15 cycles never gets to issue: at "random" the busiest
+# link of a 4x4 write run carried 0.101 flits per cycle and the run took 16908
+# cycles, against 0.912 and 1864 for the same run at "ideal". Nine tenths of that
+# gate was measuring the delayer.
 _MST_BACKPRESSURE_PROFILES = {
     "ideal": (0, 0),
     "random": (1, 0),
 }
 _MST_BACKPRESSURE = "random"
+_MST_BACKPRESSURE_DMA = "ideal"
 
 
 def tile_targets(topo: dict, endpoints):
@@ -988,7 +998,8 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
         _STALL_RANDOM_MAX_CYCLES if stall_in else delay_in,
         _STALL_RANDOM_MAX_CYCLES if stall_out else delay_out,
     )
-    mst_stall_out, mst_delay_out = _MST_BACKPRESSURE_PROFILES[_MST_BACKPRESSURE]
+    mst_backpressure = _MST_BACKPRESSURE_DMA if dma else _MST_BACKPRESSURE
+    mst_stall_out, mst_delay_out = _MST_BACKPRESSURE_PROFILES[mst_backpressure]
     # A third per-beat stall source on the response path, so it lands in the
     # watchdog budget beside the memory's. Zero under "ideal".
     mst_cyc_per_beat = _STALL_RANDOM_MAX_CYCLES if mst_stall_out else mst_delay_out
@@ -1119,7 +1130,7 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w(f"    localparam bit          MEM_STALL_RANDOM_OUTPUT = 1'b{stall_out};")
     w(f"    localparam int unsigned MEM_FIXED_DELAY_INPUT   = {delay_in};")
     w(f"    localparam int unsigned MEM_FIXED_DELAY_OUTPUT  = {delay_out};")
-    w(f'    // Master-face backpressure profile "{_MST_BACKPRESSURE}" (gen_tb_top.py')
+    w(f'    // Master-face backpressure profile "{mst_backpressure}" (gen_tb_top.py')
     w("    // _MST_BACKPRESSURE_PROFILES). One axi_delayer per endpoint between the")
     w("    // file master and the tile crossbar, response side only.")
     w(f"    localparam bit          MST_STALL_RANDOM_OUTPUT = 1'b{mst_stall_out};")

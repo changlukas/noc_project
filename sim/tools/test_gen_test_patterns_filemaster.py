@@ -526,6 +526,28 @@ def test_watchdog_grows_with_the_memory_latency_profile(monkeypatch):
     assert k("random") == gen_tb_top._STALL_RANDOM_MAX_CYCLES
 
 
+def test_the_dma_top_alone_takes_ideal_master_backpressure():
+    """A random 0-to-15-cycle stall on every response beat costs the directed top
+    nothing -- it replays transactions this project chose -- but it decides what
+    the DMA top measures, because a real AXI manager that cannot retire a beat
+    cannot issue the next one.  At "random" the busiest link of a 4x4 write run
+    carried 0.101 flits per cycle; at "ideal" the same run carried 0.912.  The
+    two tops therefore take different profiles, and this pins the split: one
+    top's profile is not the other's, and neither is a hardcoded literal."""
+    topo = gen_tb_top.load_topology("mesh_2x2_vc1")
+    for dma, profile in ((False, gen_tb_top._MST_BACKPRESSURE),
+                         (True, gen_tb_top._MST_BACKPRESSURE_DMA)):
+        stall_out, delay_out = gen_tb_top._MST_BACKPRESSURE_PROFILES[profile]
+        sv = gen_tb_top.emit_tb_top(topo, dma=dma)
+        assert re.search(
+            rf"MST_STALL_RANDOM_OUTPUT\s*=\s*1'b{stall_out};", sv), f"dma={dma}"
+        assert re.search(rf"MST_FIXED_DELAY_OUTPUT\s*=\s*{delay_out};", sv)
+        # The watchdog budget follows the profile, or an "ideal" run would carry
+        # the stalling profile's slack and a real hang would sit undetected.
+        want = gen_tb_top._STALL_RANDOM_MAX_CYCLES if stall_out else delay_out
+        assert int(re.search(r"MST_CYC_PER_BEAT\s*=\s*(\d+);", sv).group(1)) == want
+
+
 def test_all_to_all_never_repeats_a_destination_and_never_targets_self():
     """The whole reason the pattern exists: with one id per initiator, a
     destination change on every transaction forces the NMU's allocating branch,
