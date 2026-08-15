@@ -93,11 +93,18 @@ TEST(NmuPacketize, StampsItsOwnPortAndTheSamEntrysPortIntoTheHeader) {
     ReqCapture aw_cap, w_cap, ar_cap;
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, std::move(sam), /*port_id=*/2);
     ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x40)));
+    ASSERT_TRUE(pkt.push_w(make_w(0xFFFFFFFF, /*last*/ true)));
 
     auto flit_opt = aw_cap.pop();
     ASSERT_TRUE(flit_opt.has_value());
     EXPECT_EQ(flit_opt->get_header_field("dst_port_id"), 1u);
     EXPECT_EQ(flit_opt->get_header_field("src_port_id"), 2u);
+    // The W beat inherits dst_port from its AW through w_meta_fifo_, the same
+    // way it inherits dst_id -- both halves of the worm must reach one endpoint.
+    auto w_flit_opt = w_cap.pop();
+    ASSERT_TRUE(w_flit_opt.has_value());
+    EXPECT_EQ(w_flit_opt->get_header_field("dst_port_id"), 1u);
+    EXPECT_EQ(w_flit_opt->get_header_field("src_port_id"), 2u);
 }
 
 TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
