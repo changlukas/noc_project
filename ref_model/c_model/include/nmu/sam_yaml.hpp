@@ -83,9 +83,10 @@ inline bool space_present(const SamTable& table, axi::AxiClass cls) {
 //
 // Table decode holds the coordinate ranges per address-map entry, offset decode
 // one pair global to the map (upstream RouteCfg.XYAddrOffsetX/Y, floo_pkg.sv).
-// One global pair reaches one field position, so offset decode additionally
-// requires every space to place its node index at the same address bits -- that
-// is, equal region size across spaces.
+// One global pair reaches one field position. Tile-major gives every space
+// the same node stride (block_size), so every space's node index already
+// sits at the same address bits regardless of its own region size -- a
+// YAML-loaded map satisfies offset decode by construction.
 //
 // On a map meeting §5.1 both modes decode every address to the same node and
 // the same node-local offset, so the mode changes which maps are legal rather

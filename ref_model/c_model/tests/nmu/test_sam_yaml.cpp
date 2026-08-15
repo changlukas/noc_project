@@ -317,7 +317,7 @@ TEST(SamYaml, SpaceAttributeSelectsClass) {
 // Tile-major packing gives every space the same node stride (block_size,
 // 4 GiB in every shipped topology), so both spaces' offsets are 32; the
 // lengths are clog2 of the mesh dimension.
-TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
+TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
     struct Row {
         const char* file;
         unsigned dim_bits;
@@ -607,7 +607,7 @@ TEST(SamYaml, OffsetDecodeIsSatisfiedByConstructionUnderTileMajor) {
     EXPECT_EQ(mem->y_range.offset, cfg->y_range.offset);
 }
 
-TEST(SamYaml, TableDecodeAcceptsWhatOffsetRejects) {
+TEST(SamYaml, TableDecodeAcceptsUnequalSpaceSizes) {
     auto sam = load_sam_table(write_map("sam_table_unequal.yaml", "table", kShippedSizedSpaces));
     EXPECT_EQ(sam.entries().size(), 8u);
 }

@@ -116,7 +116,8 @@ static void run_chain(bool* ok_data) {
     RouterOutputs rtr_q[2]{};
 
     // AXI master stimulus at node 0: write 1 beat to node 1, then read it back.
-    const uint64_t addr = 0x100000000ull;  // dst tile 1 (mesh_2x2_vc1: 4 GiB memory tiles)
+    const uint64_t addr =
+        0x100000000ull;  // dst tile 1 (mesh_2x2_vc1: 4 GiB block stride, 32 MB memory tile)
     std::array<uint8_t, 64> wdata{};
     for (int b = 0; b < 64; ++b) wdata[b] = static_cast<uint8_t>(0xA0 + b);
 

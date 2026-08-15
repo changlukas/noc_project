@@ -98,7 +98,9 @@ def pack(address_map, x_span, y_span):
     # each aligned to its own slot. block_size is the one declared number.
     offset = {"memory": 0}
     offset["config"] = _align_up(slot["memory"], slot["config"]) if slot["config"] else 0
-    extent = offset["config"] + slot["config"]
+    # No config tile: the block only has to hold memory. With one, config
+    # sits after it and dominates. Mirrors sam_yaml.hpp's default_block_size.
+    extent = slot["memory"] if slot["config"] == 0 else offset["config"] + slot["config"]
     declared = (address_map or {}).get("block_size")
     block_size = int(declared) if declared is not None else _next_pow2(extent)
     if block_size & (block_size - 1):
