@@ -63,7 +63,7 @@ becomes the port the field names, and a face illegal for this router's position 
 Today it is space-major: every memory region packed from 0, every config region stacked above
 (`sim/tools/address_map.py:80-104`). A node's two regions sit a full memory space apart.
 
-    block = 4 GiB per node, a customisation point, and the node stride
+    block_size = 4 GiB per node, the node stride
       +0x0_00000000  memory   32 MB   2^25, the collective target
       +0x0_02000000  config    4 KB
       +0x0_02001000  reserved, deliberately free for further memory regions
@@ -74,6 +74,28 @@ Today it is space-major: every memory region packed from 0, every config region 
 A peripheral region is not inside a node's block. An HBM channel wants more address space than a
 block, and a peripheral is never a collective member, so none of the four collective-eligibility
 conditions in `docs/noc-target-spec.md` 5.1 apply to it.
+
+**The packing rule.** Today the stride IS the region size: `slot[space]` is the largest declared
+size in that space and `base = space_base[space] + coord_idx * slot[space]`
+(`sim/tools/address_map.py:43-47,80-104`, `addr_trans.hpp:56-84`). Tile-major separates the two,
+so the stride needs its own representation.
+
+    block_size              one new topology YAML key under address_map, a power of two.
+                            The customisation point, and the node stride.
+    slot[space]             unchanged: the largest declared size in that space
+    offset[memory]          0
+    offset[config]          align_up(slot[memory], slot[config])
+    base(space, x, y)       coord_idx * block_size + offset[space]
+
+Spaces are laid out inside the block in a fixed order, memory first at offset 0, each aligned to
+its own slot. Nothing is hand-written: `block_size` is the single declared number and every offset
+is derived, the same property the current rule has. Loading rejects a `block_size` that is not a
+power of two or that is smaller than the last space's offset plus its slot.
+
+`PackedTile::size` and the YAML `size` keep their meaning, the aperture a node gets in that space.
+`SamTable::packed` takes `block_size` as a new argument. The default when a topology omits the key
+is the next power of two at or above the packed extent, which reproduces today's numbers for a
+single-space map.
 
 Both spaces keep the same coordinate field. `sam_yaml::declare_space_coords` derives the field
 offset from the observed stride (`sam_yaml.hpp:57`, `stride = second->base - first->base`), and
@@ -175,7 +197,7 @@ that is not a collective target today is indistinguishable from one whose declar
 fail. The loader declares only the tile spaces and asserts that the peripheral space's
 `collective_coords` is null, so the property is stated rather than inferred.
 
-## Decision 5: the eight things an implementer would otherwise invent
+## Decision 5: what an implementer would otherwise invent
 
 | # | item | decision |
 |---|---|---|
@@ -207,8 +229,8 @@ Round 2 is behaviour-neutral because every shipped topology has only tiles, so e
 `00` and every route resolves as it does today. It exists so that a failure in round 3 is a
 peripheral failure and not a header-width failure.
 
-Round 3 has an internal ordering constraint: the port-based collective refusal goes in before the
-tile-region clip bound comes out. Reversed, peripherals are legal collective members in between.
+Round 3 has an internal ordering constraint: the space-keyed SAM and the loader's eligibility
+policy go in before the tile-region clip bound comes out. Reversed, peripherals are legal collective members in between.
 
 Round 1 verifies both testbench flavours because moving addresses changes what `gen_dma_jobs`
 computes. Round 3 verifies `sim/tb/test/` only, since the DMA flavour cannot run a peripheral
@@ -219,10 +241,16 @@ topology (`docs/known-limitations.md`).
 Both spaces must stay collective targets, and the failure mode is silent. Every round asserts it
 directly rather than inferring it from a passing multicast run.
 
-- round 1 adds a ctest asserting `SamTable::collective_coords(Narrow)` and `(Data)` are both
-  non-null on every shipped topology
-- round 3 re-runs that assertion with peripherals present, and fault-injects it by removing the
-  `port == 0` filter to prove the assertion fails
+- round 1 adds a ctest asserting `collective_coords` is non-null for both tile spaces on every
+  shipped topology, and that its declared `x_range.offset` equals `log2(block_size)`. The offset
+  check is what distinguishes a correct declaration from one that agreed by accident under the old
+  space-major layout, where the offset was `log2(region size)`
+- round 2 re-runs it unchanged. The header fields do not touch the SAM
+- round 3 re-runs it with peripherals present, and adds the negative assertion that
+  `collective_coords(Space::Peripheral)` is null. The fault injection is on the loader policy:
+  declaring the peripheral space collective-eligible must make the negative assertion fail. The
+  `port == 0` filter is not the subject here, since Decision 4 keeps the port out of the coverage
+  and collective logic
 
 ### Round 1 work the blast radius makes explicit
 
