@@ -44,21 +44,38 @@ and the round 3 row of the Rounds table.
 - Round 3 verifies `sim/tb/test/` only. The DMA flavour cannot run a peripheral topology
   (`docs/known-limitations.md`).
 
-## The four-copy landmine
+## The clip is deleted, not re-bounded
 
-`route_mask.hpp:108-112` states it in its own comment: the tile-region clip exists in **four**
-places that must agree node by node, because the join is stateless and a one-node disagreement
-hangs a collect.
+`route_mask.hpp:108-112` names four copies of the tile-region clip that must agree node by node,
+because the join is stateless and a one-node disagreement hangs a collect:
 
 | # | site |
 |---|---|
 | 1 | `router/route_mask.hpp` `route_mask_fork` (`:113-121`) |
 | 2 | `router/route_mask.hpp` `route_mask_join` (`:175-184`) |
-| 3 | `nmu/addr_trans.hpp` `collective_translate` |
+| 3 | `nmu/addr_trans.hpp` `collective_translate` (`:416-419`) |
 | 4 | `sim/tools/gen_test_patterns.py` `collective_addr_mask` |
 
-Task 4 re-bounds all four from the tile region to `0 .. mesh_*_dim - 1`. Changing three of them is
-worse than changing none: three-of-four passes ctest and hangs a co-sim collect.
+The spec (Decision 3) proposed re-bounding all four from the tile region to the mesh, justified by
+exactly one case: "a wildcard mask can still name a coordinate that does not exist when a mesh
+dimension is not a power of two."
+
+**Mesh dimensions are power-of-two only, so that case cannot arise and all four copies go.** The
+argument is short. `declare_space_coords` requires `x_range.len == clog2(x_count)`
+(`addr_trans.hpp:206`), and `collective_translate` already refuses a mask with any bit outside the
+coordinate field. A wildcard therefore expands over exactly `0 .. 2^len - 1` per axis, and with a
+power-of-two dimension that is exactly `0 .. dim - 1` — every coordinate it names exists. The clip
+has nothing to clip. `detail::in_mesh` still catches a malformed `dst_id`; that is a separate check
+and it stays.
+
+Deleting beats re-bounding twice over: four structurally different sites stop having to agree, and
+the "Change one, change all four" coupling that made this the round's biggest hazard disappears with
+them.
+
+**The convention has to become a check.** Nothing in the tree enforces power-of-two today — the only
+validation is `x_dim >= 2` (`sam_yaml.hpp:159`, `gen_tb_top.py:112`), and every shipped topology
+happens to be 2 or 4. Task 4 adds the assert, because a deletion resting on an unenforced convention
+is precisely the failure mode "The guard that disappears" is about.
 
 ## The guard that disappears
 
@@ -378,13 +395,12 @@ regions in DECLARATION ORDER above the tile array, each aligned to its own size.
 coordinate-derived, because a peripheral region has no uniform stride and is not collective-eligible:
 
 ```cpp
-    // Above the LAST tile index, not above the tile COUNT. packed() derives a
-    // tile base as ((y << x_bits) | x) * block_size with x_bits = clog2(x_dim)
-    // (addr_trans.hpp:78,96-97), so at x_dim = 3 the top index is 10, not 8.
-    // Using the count would overlap the first peripheral onto tile (2, 2) --
-    // latent on every shipped 2x2 and 4x4, fatal on the first 3x3.
-    const unsigned x_bits = clog2(x_dim);
-    uint64_t next = (uint64_t{1} << x_bits) * y_dim * block_size;
+    // packed() derives a tile base as ((y << x_bits) | x) * block_size with
+    // x_bits = clog2(x_dim) (addr_trans.hpp:78,96-97). Mesh dimensions are
+    // powers of two -- Task 4 Step 2 asserts it -- so 1 << x_bits == x_dim, the
+    // top tile index is exactly x_dim * y_dim - 1, and this is the address just
+    // above the whole array.
+    uint64_t next = static_cast<uint64_t>(x_dim) * y_dim * block_size;
     for (const auto& p : peripherals) {
         next = (next + p.size - 1) & ~(p.size - 1);  // align up to its own size
         es.push_back({next, p.size, static_cast<uint8_t>((p.y << ni::width::X_WIDTH) | p.x),
@@ -657,57 +673,46 @@ TEST(CollectiveTranslateDeath, APeripheralCannotIssueACollective) {
 Check the file's existing collective fixtures for how they build a collective AWUSER before writing
 this — the helper name above is illustrative, the assertion is exact.
 
-- [ ] **Step 2: Write the clip's own failing test**
+- [ ] **Step 2: Make the power-of-two rule a check, with a test**
 
-The clip survives for a different reason than the one being deleted, and that reason needs a test of
-its own — otherwise the next reader deletes it too:
+The clip deletion in Step 3 rests on mesh dimensions being powers of two. Nothing enforces that
+today, so enforce it first — in the YAML loader, beside the existing `x_dim >= 2` assert
+(`sam_yaml.hpp:159`), which is the config trust boundary:
 
 ```cpp
-TEST(RouteMaskFork, ClipsAWildcardToTheMeshWhenADimensionIsNotAPowerOfTwo) {
-    // A wildcard mask can name a coordinate that does not exist when a mesh
-    // dimension is not a power of two: a 3-wide mesh has a 2-bit x field, so
-    // the mask spans x = 0..3 and x = 3 has no router. The clip is now to the
-    // mesh's own dimensions, which RouterConfig already carries -- not to a
-    // configurable tile region.
-    RouterConfig cfg{};
-    cfg.x = 0;
-    cfg.y = 0;
-    cfg.mesh_x_dim = 3;
-    cfg.mesh_y_dim = 1;
-    // ... build a head flit whose collective_mask wildcards the whole x field,
-    //     matching the fixture shape in the neighbouring fork tests ...
-    const auto branches = route_mask_fork(f, cfg);
-    // x = 3 must not appear in the branch set.
+    assert((x_dim & (x_dim - 1)) == 0 && (y_dim & (y_dim - 1)) == 0 &&
+           "topology: mesh dimensions must be powers of two -- the collective coordinate field is "
+           "clog2(dim) bits wide, so a non-power-of-two dimension leaves a wildcard address naming "
+           "a coordinate with no router");
+```
+
+and its death test:
+
+```cpp
+TEST(SamYamlDeath, ANonPowerOfTwoMeshDimensionIsRejected) {
+    // 3x3 gives a 2-bit x field spanning four coordinates while only three
+    // exist, so a collective wildcard would name a node with no router.
+    // Refused at load, while the topology is still a document and not a mesh.
+    EXPECT_DEATH(load_sam_table(kThreeByThreeTopology), "powers of two");
 }
 ```
 
-Read `ref_model/c_model/tests/router/test_router_fork.cpp` for the fixture shape before writing
-this; the assertion above is exact, the setup is by reference.
+Read how the neighbouring `SamYamlDeath` cases stand up a rejected topology before writing this —
+some write a temp file, some point at a fixture. The assertion is exact; the fixture is by
+reference.
 
-- [ ] **Step 3: Re-bound all four copies — each in its own idiom**
+- [ ] **Step 3: Delete all four clips**
 
-The four sites are structurally different and DO NOT take the same snippet. The lower bound becomes
-0, which on an unsigned type means the two `std::max` lines simply go away; only the upper bound
-needs writing. Where the upper bound comes from differs per site:
+Read "The clip is deleted, not re-bounded" above. In each of the four sites the clamp lines go
+entirely, and so does the empty-set assert that follows them — with nothing clipped, the set cannot
+become empty by clipping.
 
-| site | upper bound reads |
-|---|---|
-| `route_mask_fork` (`route_mask.hpp:113-121`) | `cfg.mesh_x_dim - 1`, `cfg.mesh_y_dim - 1` |
-| `route_mask_join` (`route_mask.hpp:175-184`) | the same |
-| `collective_translate` (`addr_trans.hpp:416-419`) | **no `RouterConfig` in scope** — use `coords->x_count - 1`, `coords->y_count - 1` |
-| `collective_addr_mask` (`gen_test_patterns.py`) | Python, and it reads the topology dict |
+Delete the "Change one, change all four" cross-reference comment in `route_mask.hpp:104-112` as
+well. It describes a coupling that no longer exists, and leaving it sends the next reader hunting
+for three siblings that are not there.
 
-So the router pair reads:
-
-```cpp
-    dst_max.x = std::min<uint8_t>(dst_max.x, cfg.mesh_x_dim - 1);
-    dst_max.y = std::min<uint8_t>(dst_max.y, cfg.mesh_y_dim - 1);
-```
-
-Update each site's comment to say the bound is the mesh, not the tile region, and keep the
-"Change one, change all four" cross-reference — the list of four is still right, its description of
-what is clipped is not. Keep the empty-set assert; it still fires when a mask names nothing that
-exists.
+`detail::in_mesh(dst, cfg)` stays. It catches a malformed `dst_id`, which is a different claim from
+clipping a wildcard, and Task 3's `route_compute` relies on it.
 
 Update the "Change one, change all four" comment in `route_mask.hpp` — the list of four is still
 right, but its description of what is clipped is not.
