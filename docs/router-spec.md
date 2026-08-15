@@ -98,7 +98,7 @@ occupies the rest (REQ [135:48], RSP [125:48], DAT [632:48]).
 | `collective_mask` | [43:36] | 8 | Node-id wildcard mask. Read with `collective_op`. |
 | `dst_port_id` | [45:44] | 2 | Which endpoint at `dst_id` receives. 0 is the tile on the router's LOCAL port. Transparent to the router. |
 | `src_port_id` | [47:46] | 2 | Which endpoint at `src_id` issued. The response is addressed back to it. Transparent to the router. |
-| payload | per network | 93 / 83 / 585 | AXI channel payload. Transparent to the router. |
+| payload | per network | 88 / 78 / 585 | AXI channel payload. Transparent to the router. |
 
 There is no `rsvd` field: `PADDING_FIELDS_COUNT` = 0, the header is fully assigned.
 
