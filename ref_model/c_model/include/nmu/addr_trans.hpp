@@ -190,6 +190,10 @@ class SamTable {
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
             assert(x < x_dim && y < y_dim && "SAM: dst outside mesh");
+            // cls is derivable from space and both are stored, so a hand-built
+            // table can disagree with itself: the map keys on space while
+            // translate() hands the class to the packetizer.
+            assert(e.cls == axi::class_of(e.space) && "SAM: entry cls disagrees with its space");
         }
         const std::size_t mesh_nodes = static_cast<std::size_t>(x_dim) * y_dim;
         std::vector<bool> seen_memory(mesh_nodes, false);
@@ -260,8 +264,11 @@ class SamTable {
             ++tile_entries;
         }
         if (origin == nullptr) return false;
-        // No entry outside the declared dimensions: the ranges must account for
-        // the whole space, not a prefix of it.
+        // The declared dimensions are filled: this space has one in-range entry
+        // per declared coordinate pair, so the ranges name a whole rectangle and
+        // not a sparse subset of one. An entry OUTSIDE the dimensions is skipped
+        // by the continue above and does not fail here -- validate() is what
+        // rejects a dst outside the mesh.
         if (tile_entries != static_cast<std::size_t>(c.x_count) * c.y_count) return false;
         const uint64_t field = range_mask(c.x_range) | range_mask(c.y_range);
         // The origin is node (0, 0), so its coordinate field reads zero.

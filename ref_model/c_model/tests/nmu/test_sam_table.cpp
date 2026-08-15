@@ -122,6 +122,25 @@ TEST(SamValidator, RejectsPartialConfigCoverage) {
     EXPECT_DEATH(bad.validate(2, 2), "config space");
 }
 
+TEST(SamValidator, RejectsClsDisagreeingWithSpace) {
+    // cls is derivable from space (axi::class_of) and both are stored, so an
+    // entry can disagree with itself and nothing downstream would notice: the
+    // map keys on space, while translate() hands the class to the packetizer.
+    // A config region carrying the Data class would be packetized as a wide
+    // burst into a 4 KB narrow aperture.
+    SamTable bad(std::vector<SamEntry>{
+        {0x0000, 0x1000, 0x00},
+        {0x1000, 0x1000, 0x01},
+        {0x2000, 0x1000, 0x10},
+        {0x3000, 0x1000, 0x11},
+        {0x4000, 0x1000, 0x00, axi::AxiClass::Data, /*port=*/0, axi::Space::Config},
+        {0x5000, 0x1000, 0x01, axi::AxiClass::Data, /*port=*/0, axi::Space::Config},
+        {0x6000, 0x1000, 0x10, axi::AxiClass::Data, /*port=*/0, axi::Space::Config},
+        {0x7000, 0x1000, 0x11, axi::AxiClass::Data, /*port=*/0, axi::Space::Config},
+    });
+    EXPECT_DEATH(bad.validate(2, 2), "cls disagrees with its space");
+}
+
 TEST(SamValidator, RejectsDuplicateNode) {
     // 2x2 mesh: dst 0x00 listed twice, (1,1) missing.
     SamTable bad(std::vector<SamEntry>{{0x0, 0x1000, 0x00},
