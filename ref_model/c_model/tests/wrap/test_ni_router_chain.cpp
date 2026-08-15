@@ -97,12 +97,13 @@ struct MemSlave {
 
 }  // namespace
 
-static void run_chain(bool* ok_data) {
+static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
     Node n[2];
     MemSlave slave[2];
 
     for (int k = 0; k < 2; ++k) {
-        n[k].nmu.init(kTopologyYaml, /*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0,
+        n[k].nmu.init(kTopologyYaml, /*src_id=*/static_cast<uint8_t>(k),
+                      /*port_id=*/(k == 0) ? requester_port_id : 0,
                       /*dat_num_vc=*/1);
         n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0, /*dat_num_vc=*/1);
         n[k].merge.init(1);
@@ -528,6 +529,18 @@ TEST(NiRouterChain, TwoNodeWriteThenReadbackMatches) {
     bool ok = false;
     run_chain(&ok);
     EXPECT_TRUE(ok) << "readback data does not match what was written";
+}
+
+// The same chain with the requesting NMU on port 1 -- what a face endpoint
+// looks like, and legal today because port_id is an NmuWrap::init argument
+// while the SAM still names every target as port 0. The write and the read
+// both have to complete: the NSU echoes src_port_id back as dst_port_id, and
+// nmu::Depacketize aborts on any response whose dst_port_id is not 1, so a
+// dropped or zeroed echo anywhere on the return path kills this run.
+TEST(NiRouterChain, NonZeroRequesterPortCompletesAndTheEchoNamesItBack) {
+    bool ok = false;
+    run_chain(&ok, /*requester_port_id=*/1);
+    EXPECT_TRUE(ok) << "readback data does not match what was written from the port-1 NMU";
 }
 
 // Negative control for the test above: with REQ egress ready held low and no

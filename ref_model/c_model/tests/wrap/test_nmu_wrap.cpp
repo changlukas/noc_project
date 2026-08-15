@@ -287,6 +287,14 @@ TEST(NmuWrap, init_without_topology_throws) {
     EXPECT_THROW(adapter.init(""), std::invalid_argument);
 }
 
+// port_id is a 2-bit header field, so 3 is encodable but names no endpoint --
+// a testbench that passes it must be told, not silently given a fourth port.
+TEST(NmuWrap, init_with_reserved_port_id_throws) {
+    NmuWrap adapter;
+    EXPECT_THROW(adapter.init(kTopologyYaml, /*src_id=*/0, /*port_id=*/3), std::invalid_argument);
+    EXPECT_NO_THROW(adapter.init(kTopologyYaml, /*src_id=*/0, /*port_id=*/2));
+}
+
 // Note: the wrap-level "odd num_vc rejected" death test was removed in S3a
 // T5. REQ/RSP are fixed single-VC now (S1 Q2), and the S3b VC collapse
 // retired the read/write virtual-network split that owned the even-num_vc

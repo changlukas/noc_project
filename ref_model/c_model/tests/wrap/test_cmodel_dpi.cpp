@@ -84,6 +84,14 @@ TEST_F(CmodelDpiLifecycleTest, walk_session_state_machine) {
     ASSERT_NE(nsu_handle, 0ull);
     check_and_clear_error(CMODEL_DPI_OK);
 
+    // Case: port_id 3 → no handle. The field is 2 b, so 3 fits on the wire but
+    // names no endpoint; the wrap's guard must reach the latch the SV side
+    // polls rather than a silently created fourth port.
+    EXPECT_EQ(cmodel_nsu_create("nsu_bad_port", 0, /*num_vc=*/1, /*max_unique_ids=*/1,
+                                /*max_outstanding=*/32, /*port_id=*/3, /*config_path=*/""),
+              0ull);
+    check_and_clear_error(CMODEL_DPI_ERR_GENERIC);
+
     // === FINALIZED phase ===
 
     // Case: finalize from INITIALIZED → registry destroyed, state = FINALIZED.

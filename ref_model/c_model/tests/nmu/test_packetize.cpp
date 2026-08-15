@@ -105,6 +105,13 @@ TEST(NmuPacketize, StampsItsOwnPortAndTheSamEntrysPortIntoTheHeader) {
     ASSERT_TRUE(w_flit_opt.has_value());
     EXPECT_EQ(w_flit_opt->get_header_field("dst_port_id"), 1u);
     EXPECT_EQ(w_flit_opt->get_header_field("src_port_id"), 2u);
+    // The read path reaches the SAM through its own push_ar, so the AW's
+    // coverage says nothing about it.
+    ASSERT_TRUE(pkt.push_ar(make_ar(0x06, 0x40)));
+    auto ar_flit_opt = ar_cap.pop();
+    ASSERT_TRUE(ar_flit_opt.has_value());
+    EXPECT_EQ(ar_flit_opt->get_header_field("dst_port_id"), 1u);
+    EXPECT_EQ(ar_flit_opt->get_header_field("src_port_id"), 2u);
 }
 
 TEST(NmuPacketize, WMetaFifoInheritsAwDst) {
