@@ -1543,8 +1543,11 @@ def main() -> int:
     # $fatals on the missing file. Refused here rather than emitted, because the
     # top it would emit is also wrong in a quieter way -- _dma_check's
     # MEM_TARGET is the LAST target, which on a peripheral's padded row is the
-    # zero-size pad, so the preload and the region compare would address a
-    # window that decodes nothing.
+    # pad rather than that endpoint's memory, so the preload and the region
+    # compare would address a window parked above the map with nothing behind
+    # it. Not a zero-size window: addr_decode_dync reads a zero end_addr as the
+    # END-OF-ADDRESS-SPACE WILDCARD, which is why the pad is a real
+    # _PAD_BYTES range instead.
     if a.dma and (topo.get("address_map") or {}).get("peripherals"):
         raise SystemExit(
             f"gen_tb_top: --dma does not support topology {a.topology}, which declares "
