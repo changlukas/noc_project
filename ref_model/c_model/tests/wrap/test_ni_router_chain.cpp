@@ -1,7 +1,7 @@
 // Two-node NI/router chain at the wrap layer — the shape noc_fabric_*.sv
 // wires: NmuWrap + NsuWrap + DatMergeWrap + RouterWrap per node, ni<->router
-// LOCAL crossing, EAST/WEST inter-router link, one AXI write + readback from
-// node 0 to node 1.
+// crossing at LOCAL (tile) or at a face port (peripheral), EAST/WEST
+// inter-router link, one AXI write + readback from node 0 to node 1.
 //
 // Fills the gap that let S3a T5 ship broken: every other wrap test drives one
 // wrap against mocks, so nothing exercised the four of them wired together and
@@ -26,6 +26,9 @@ constexpr std::size_t LOCAL = 0, EAST = 2, WEST = 4;
 // 2x2 mesh, so the shipped 2x2 is the map; tests needing a different shape
 // write their own YAML below.
 constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+// Same 2x2 plus a peripherals block. Declares { x: 0, y: 0, face: x }, which is
+// port 1 at (0,0) -- the configuration a non-zero requester port needs.
+constexpr const char* kPeriphTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1_periph.yaml";
 
 struct Node {
     NmuWrap nmu;
@@ -101,8 +104,20 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
     Node n[2];
     MemSlave slave[2];
 
+    // A requester on a non-zero port is a peripheral, so its NI crosses at the
+    // face port the port_id names rather than at LOCAL -- port 1 at (0,0) is
+    // the x face, and x == 0 makes that WEST. The whole NI crossing moves, not
+    // just the NMU: DatMergeWrap is the NI's DAT port adapter and owns the
+    // router-facing credit pool (nmu_wrap.hpp:123-126 seeds the NMU's own DAT
+    // credit to NMU_ARBITER_FIFO_DEPTH, the merge's per-input depth, expressly
+    // NOT the router's input depth), so an NMU wired straight at the router
+    // would send against the wrong pool. Node 0's WEST is free -- the
+    // inter-router link is node0 EAST <-> node1 WEST.
+    const std::size_t ni_port[2] = {requester_port_id != 0 ? WEST : LOCAL, LOCAL};
+    const char* topology = requester_port_id != 0 ? kPeriphTopologyYaml : kTopologyYaml;
+
     for (int k = 0; k < 2; ++k) {
-        n[k].nmu.init(kTopologyYaml, /*src_id=*/static_cast<uint8_t>(k),
+        n[k].nmu.init(topology, /*src_id=*/static_cast<uint8_t>(k),
                       /*port_id=*/(k == 0) ? requester_port_id : 0,
                       /*dat_num_vc=*/1);
         n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0, /*dat_num_vc=*/1);
@@ -134,28 +149,30 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
     for (int cyc = 0; cyc < 400; ++cyc) {
         // ---------------- comb wiring from registered outputs ----------------
         for (int k = 0; k < 2; ++k) {
-            // NI LOCAL crossing (gen_tb_top.py: ni.tx_* -> router rx_*[LOCAL]).
-            n[k].rtr_in.rx_req_valid[LOCAL] = nmu_q[k].tx_req_valid;
-            n[k].rtr_in.rx_req_flit[LOCAL] = nmu_q[k].tx_req_flit;
-            n[k].rtr_in.tx_req_ready[LOCAL] = nsu_q[k].rx_req_ready;
-            n[k].nmu_in.tx_req_ready = rtr_q[k].rx_req_ready[LOCAL];
-            n[k].nsu_in.rx_req_valid = rtr_q[k].tx_req_valid[LOCAL];
-            n[k].nsu_in.rx_req_flit = rtr_q[k].tx_req_flit[LOCAL];
+            // NI crossing (gen_tb_top.py: ni.tx_* -> router rx_*[port]). LOCAL
+            // for a tile NI, the face port for a peripheral one -- see ni_port.
+            const std::size_t p = ni_port[k];
+            n[k].rtr_in.rx_req_valid[p] = nmu_q[k].tx_req_valid;
+            n[k].rtr_in.rx_req_flit[p] = nmu_q[k].tx_req_flit;
+            n[k].rtr_in.tx_req_ready[p] = nsu_q[k].rx_req_ready;
+            n[k].nmu_in.tx_req_ready = rtr_q[k].rx_req_ready[p];
+            n[k].nsu_in.rx_req_valid = rtr_q[k].tx_req_valid[p];
+            n[k].nsu_in.rx_req_flit = rtr_q[k].tx_req_flit[p];
 
-            n[k].rtr_in.rx_rsp_valid[LOCAL] = nsu_q[k].tx_rsp_valid;
-            n[k].rtr_in.rx_rsp_flit[LOCAL] = nsu_q[k].tx_rsp_flit;
-            n[k].rtr_in.tx_rsp_ready[LOCAL] = nmu_q[k].rx_rsp_ready;
-            n[k].nsu_in.tx_rsp_ready = rtr_q[k].rx_rsp_ready[LOCAL];
-            n[k].nmu_in.rx_rsp_valid = rtr_q[k].tx_rsp_valid[LOCAL];
-            n[k].nmu_in.rx_rsp_flit = rtr_q[k].tx_rsp_flit[LOCAL];
+            n[k].rtr_in.rx_rsp_valid[p] = nsu_q[k].tx_rsp_valid;
+            n[k].rtr_in.rx_rsp_flit[p] = nsu_q[k].tx_rsp_flit;
+            n[k].rtr_in.tx_rsp_ready[p] = nmu_q[k].rx_rsp_ready;
+            n[k].nsu_in.tx_rsp_ready = rtr_q[k].rx_rsp_ready[p];
+            n[k].nmu_in.rx_rsp_valid = rtr_q[k].tx_rsp_valid[p];
+            n[k].nmu_in.rx_rsp_flit = rtr_q[k].tx_rsp_flit[p];
 
             // DAT via merge.
-            n[k].rtr_in.rx_dat_valid[LOCAL] = merge_q[k].tx_dat_valid;
-            n[k].rtr_in.rx_dat_flit[LOCAL] = merge_q[k].tx_dat_flit;
-            n[k].rtr_in.tx_dat_crdvalid[LOCAL] = merge_q[k].rx_dat_crdvalid;
-            n[k].merge_in.rx_dat_valid = rtr_q[k].tx_dat_valid[LOCAL];
-            n[k].merge_in.rx_dat_flit = rtr_q[k].tx_dat_flit[LOCAL];
-            n[k].merge_in.tx_dat_crdvalid = rtr_q[k].rx_dat_crdvalid[LOCAL];
+            n[k].rtr_in.rx_dat_valid[p] = merge_q[k].tx_dat_valid;
+            n[k].rtr_in.rx_dat_flit[p] = merge_q[k].tx_dat_flit;
+            n[k].rtr_in.tx_dat_crdvalid[p] = merge_q[k].rx_dat_crdvalid;
+            n[k].merge_in.rx_dat_valid = rtr_q[k].tx_dat_valid[p];
+            n[k].merge_in.rx_dat_flit = rtr_q[k].tx_dat_flit[p];
+            n[k].merge_in.tx_dat_crdvalid = rtr_q[k].rx_dat_crdvalid[p];
             n[k].merge_in.nmu_tx_dat_valid = nmu_q[k].tx_dat_valid;
             n[k].merge_in.nmu_tx_dat_flit = nmu_q[k].tx_dat_flit;
             n[k].merge_in.nsu_tx_dat_valid = nsu_q[k].tx_dat_valid;
@@ -248,7 +265,7 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
         }
         if (first_req_flit_cycle < 0 && nmu_q[0].tx_req_valid) first_req_flit_cycle = cyc;
         if (first_dat_flit_cycle < 0 && nmu_q[0].tx_dat_valid) first_dat_flit_cycle = cyc;
-        if (first_local_ready_cycle < 0 && rtr_q[0].rx_req_ready[LOCAL])
+        if (first_local_ready_cycle < 0 && rtr_q[0].rx_req_ready[ni_port[0]])
             first_local_ready_cycle = cyc;
 
         // ---------------- register ----------------
@@ -262,7 +279,7 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
 
     // Staged expectations: each one names the link in the chain that broke, so a
     // failure points at a stage instead of just "no data".
-    EXPECT_GE(first_local_ready_cycle, 0) << "router LOCAL rx_req_ready never asserted";
+    EXPECT_GE(first_local_ready_cycle, 0) << "router rx_req_ready never asserted at the NI port";
     EXPECT_GE(first_req_flit_cycle, 0) << "NMU never emitted a REQ flit";
     // S3a T6 steering: this write's addr is data class (default SAM), so AW+W
     // must ride DAT -- confirms the stage's "three networks carry traffic"
@@ -531,12 +548,19 @@ TEST(NiRouterChain, TwoNodeWriteThenReadbackMatches) {
     EXPECT_TRUE(ok) << "readback data does not match what was written";
 }
 
-// The same chain with the requesting NMU on port 1 -- what a face endpoint
-// looks like, and legal today because port_id is an NmuWrap::init argument
-// while the SAM still names every target as port 0. The write and the read
-// both have to complete: the NSU echoes src_port_id back as dst_port_id, and
-// nmu::Depacketize aborts on any response whose dst_port_id is not 1, so a
-// dropped or zeroed echo anywhere on the return path kills this run.
+// The same chain with the requesting NI on port 1 -- a real x-face peripheral
+// at (0,0), crossing at WEST instead of LOCAL, declared by the peripherals
+// block of mesh_2x2_vc1_periph.yaml. The target is still a port-0 tile at node
+// 1, so only the return path carries a non-zero port.
+//
+// Two things have to hold at once, and each fails a different way. The echo:
+// the NSU stamps src_port_id back as dst_port_id, and nmu::Depacketize aborts
+// on any response whose dst_port_id is not 1, so a hardcoded or zeroed echo
+// anywhere on the return path kills the run -- a bug invisible to every port-0
+// test, which is why this test exists. The ejection: route_compute resolves
+// dst_port_id 1 to WEST at x == 0, so a response reaching node 0 leaves by the
+// face port. Wire the NI at LOCAL instead and the B is ejected to an
+// unconnected port and silently lost.
 TEST(NiRouterChain, NonZeroRequesterPortCompletesAndTheEchoNamesItBack) {
     bool ok = false;
     run_chain(&ok, /*requester_port_id=*/1);

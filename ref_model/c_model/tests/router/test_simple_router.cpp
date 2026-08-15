@@ -48,19 +48,22 @@ Flit make_tagged_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail, uint8_t src_i
     return f;
 }
 
-// --- tie_off(): pure-function translate of floo_router.sv:349-357 ----------
+// --- tie_off(): pure-function translate of floo_router.sv:349 --------------
 
 // Standing ruling (IMPLEMENTATION_PLAN.md Stage 3b): LOCAL->LOCAL is exempt from tie_off's
 // NoLoopback rule -- self-targeted traffic is legal.
-TEST(SimpleRouterTieOff, LoopbackAndXYIllegalTurnsSkipped) {
+TEST(SimpleRouterTieOff, OnlyLoopbackIsSkipped) {
     using RP = RouterPort;
     for (RP p : {RP::NORTH, RP::EAST, RP::SOUTH, RP::WEST}) EXPECT_TRUE(tie_off(p, p));
     EXPECT_FALSE(tie_off(RP::LOCAL, RP::LOCAL))
         << "LOCAL->LOCAL must stay connected (self-transaction path)";
-    EXPECT_TRUE(tie_off(RP::SOUTH, RP::EAST));
-    EXPECT_TRUE(tie_off(RP::SOUTH, RP::WEST));
-    EXPECT_TRUE(tie_off(RP::NORTH, RP::EAST));
-    EXPECT_TRUE(tie_off(RP::NORTH, RP::WEST));
+    // The Y->X arcs stay connected: an x-face peripheral is ejected to a
+    // boundary port, and a flit reaching its destination coordinate on North or
+    // South ejects across exactly this turn.
+    EXPECT_FALSE(tie_off(RP::SOUTH, RP::EAST));
+    EXPECT_FALSE(tie_off(RP::SOUTH, RP::WEST));
+    EXPECT_FALSE(tie_off(RP::NORTH, RP::EAST));
+    EXPECT_FALSE(tie_off(RP::NORTH, RP::WEST));
     EXPECT_FALSE(tie_off(RP::WEST, RP::EAST));    // straight through X
     EXPECT_FALSE(tie_off(RP::SOUTH, RP::NORTH));  // straight through Y
     EXPECT_FALSE(tie_off(RP::EAST, RP::NORTH));   // X->Y turn: legal
@@ -275,9 +278,9 @@ TEST(SimpleRouterWormhole, PacketsDoNotInterleavePerOutput) {
     const auto E = static_cast<std::size_t>(RouterPort::EAST);
     r.set_downstream(E, east);
     const uint8_t dst = make_dst(3, 1);  // routes EAST from center
-    // WEST (straight-through X) and LOCAL (fresh injection) are the only two
-    // ports that can legally target EAST under XY tie-off: NORTH/SOUTH -> EAST
-    // is the Y->X turn floo_router.sv:349-357 ties off (SimpleRouterTieOff).
+    // WEST (straight-through X) and LOCAL (fresh injection) are the two ports
+    // XY-DOR can deliver EAST-bound through-traffic on: X resolves first, so a
+    // flit that is still moving on X has not yet turned onto Y.
     Packet a{static_cast<std::size_t>(RouterPort::WEST), /*src_id=*/0x10};
     Packet b{static_cast<std::size_t>(RouterPort::LOCAL), /*src_id=*/0x20};
     for (int t = 0; t < 20; ++t) {

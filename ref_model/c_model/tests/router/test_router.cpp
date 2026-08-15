@@ -26,6 +26,10 @@ RouterConfig center_cfg() {
     return cfg;
 }
 
+// dst_port_id naming the tile on the router's LOCAL port, for the routing
+// cases below that have no peripheral destination.
+constexpr uint8_t kTilePort = 0;
+
 uint8_t make_dst(uint8_t x, uint8_t y) {
     return static_cast<uint8_t>((y << ni::width::X_WIDTH) | x);
 }
@@ -48,21 +52,83 @@ ni::cmodel::Flit make_flit(uint8_t dst, uint8_t vc, uint64_t flit_tail) {
     return f;
 }
 
+// The XY walk itself: dst_port_id 0 throughout, the tile on LOCAL.
 TEST(RouterRouteCompute, XyDimensionOrder) {
     const auto cfg = center_cfg();
-    EXPECT_EQ(route_compute(make_dst(3, 1), cfg), RouterPort::EAST);
-    EXPECT_EQ(route_compute(make_dst(0, 1), cfg), RouterPort::WEST);
-    EXPECT_EQ(route_compute(make_dst(1, 3), cfg), RouterPort::NORTH);
-    EXPECT_EQ(route_compute(make_dst(1, 0), cfg), RouterPort::SOUTH);
-    EXPECT_EQ(route_compute(make_dst(1, 1), cfg), RouterPort::LOCAL);
+    EXPECT_EQ(route_compute(make_dst(3, 1), kTilePort, cfg), RouterPort::EAST);
+    EXPECT_EQ(route_compute(make_dst(0, 1), kTilePort, cfg), RouterPort::WEST);
+    EXPECT_EQ(route_compute(make_dst(1, 3), kTilePort, cfg), RouterPort::NORTH);
+    EXPECT_EQ(route_compute(make_dst(1, 0), kTilePort, cfg), RouterPort::SOUTH);
+    EXPECT_EQ(route_compute(make_dst(1, 1), kTilePort, cfg), RouterPort::LOCAL);
     // X precedence: both differ -> X resolved first
-    EXPECT_EQ(route_compute(make_dst(3, 3), cfg), RouterPort::EAST);
+    EXPECT_EQ(route_compute(make_dst(3, 3), kTilePort, cfg), RouterPort::EAST);
 }
 
 TEST(RouterRouteComputeDeath, DstOutsideMeshAborts) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     const auto cfg = center_cfg();
-    EXPECT_DEATH(route_compute(make_dst(5, 1), cfg), "outside mesh");
+    EXPECT_DEATH(route_compute(make_dst(5, 1), kTilePort, cfg), "outside mesh");
+}
+
+TEST(RouteCompute, PortZeroEjectsLocalAtTheDestinationCoordinate) {
+    RouterConfig cfg{};
+    cfg.x = 1;
+    cfg.y = 1;
+    cfg.mesh_x_dim = 2;
+    cfg.mesh_y_dim = 2;
+    EXPECT_EQ(route_compute(/*dst_id=*/0x11, /*dst_port_id=*/0, cfg), RouterPort::LOCAL);
+}
+
+TEST(RouteCompute, XFaceResolvesByTheRoutersOwnEdge) {
+    RouterConfig cfg{};
+    cfg.mesh_x_dim = 2;
+    cfg.mesh_y_dim = 2;
+    cfg.x = 0;
+    cfg.y = 0;
+    EXPECT_EQ(route_compute(0x00, /*dst_port_id=*/1, cfg), RouterPort::WEST);
+    cfg.x = 1;
+    EXPECT_EQ(route_compute(0x01, /*dst_port_id=*/1, cfg), RouterPort::EAST);
+}
+
+TEST(RouteCompute, YFaceResolvesByTheRoutersOwnEdge) {
+    RouterConfig cfg{};
+    cfg.mesh_x_dim = 2;
+    cfg.mesh_y_dim = 2;
+    cfg.x = 0;
+    cfg.y = 0;
+    EXPECT_EQ(route_compute(0x00, /*dst_port_id=*/2, cfg), RouterPort::SOUTH);
+    cfg.y = 1;
+    EXPECT_EQ(route_compute(0x10, /*dst_port_id=*/2, cfg), RouterPort::NORTH);
+}
+
+TEST(RouteComputeDeath, AnInteriorRouterHasNoFace) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    RouterConfig cfg{};
+    cfg.x = 1;
+    cfg.y = 1;
+    cfg.mesh_x_dim = 4;
+    cfg.mesh_y_dim = 4;
+    EXPECT_DEATH(route_compute(0x11, /*dst_port_id=*/1, cfg), "no x face");
+}
+
+TEST(RouteComputeDeath, AnInteriorRouterHasNoYFace) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    RouterConfig cfg{};
+    cfg.x = 1;
+    cfg.y = 1;
+    cfg.mesh_x_dim = 4;
+    cfg.mesh_y_dim = 4;
+    EXPECT_DEATH(route_compute(0x11, /*dst_port_id=*/2, cfg), "no y face");
+}
+
+TEST(RouteComputeDeath, TheReservedPortEncodingAborts) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    RouterConfig cfg{};
+    cfg.x = 0;
+    cfg.y = 0;
+    cfg.mesh_x_dim = 2;
+    cfg.mesh_y_dim = 2;
+    EXPECT_DEATH(route_compute(0x00, /*dst_port_id=*/3, cfg), "reserved");
 }
 
 TEST(RouterConstructionDeath, BadParametersAbort) {

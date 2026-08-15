@@ -60,9 +60,10 @@ class RouterCreditSink {
     virtual void receive_credit(uint8_t vc_id) = 0;
 };
 
-// XY dimension-order route: X first, then Y, equal ejects LOCAL.
+// XY dimension-order route: X first, then Y; at the destination coordinate
+// dst_port_id names which endpoint here receives.
 // dst_id layout matches nmu::addr_trans (X in low bits).
-inline RouterPort route_compute(uint8_t dst_id, const RouterConfig& cfg) {
+inline RouterPort route_compute(uint8_t dst_id, uint8_t dst_port_id, const RouterConfig& cfg) {
     const uint8_t dst_x = dst_id & static_cast<uint8_t>((1u << ni::width::X_WIDTH) - 1);
     const uint8_t dst_y = static_cast<uint8_t>(dst_id >> ni::width::X_WIDTH) &
                           static_cast<uint8_t>((1u << ni::width::Y_WIDTH) - 1);
@@ -72,7 +73,35 @@ inline RouterPort route_compute(uint8_t dst_id, const RouterConfig& cfg) {
     }
     if (dst_x != cfg.x) return dst_x > cfg.x ? RouterPort::EAST : RouterPort::WEST;
     if (dst_y != cfg.y) return dst_y > cfg.y ? RouterPort::NORTH : RouterPort::SOUTH;
-    return RouterPort::LOCAL;
+    // Arrived at the destination coordinate. Which endpoint here receives is
+    // the header's, not the coordinate's: port 0 is the tile on LOCAL, and a
+    // non-zero port names a boundary-port peripheral. The face follows from
+    // which edge this router sits on, so the field states the axis only --
+    // minimum mesh dimension is 2, so one router cannot be at both x == 0 and
+    // x == mesh_x_dim - 1.
+    switch (dst_port_id) {
+        case 0:
+            return RouterPort::LOCAL;
+        case 1:
+            if (cfg.x == 0) return RouterPort::WEST;
+            if (cfg.x == cfg.mesh_x_dim - 1) return RouterPort::EAST;
+            // A peripheral may hang only off a router on the matching edge,
+            // where the boundary port is terminal: nothing downstream requests
+            // a further channel, so ejecting to it cannot join a channel
+            // dependency cycle. Here the port carries a live inter-router link,
+            // so the ejection would be a real Y-to-X turn that closes one.
+            assert(false &&
+                   "route_compute: dst_port_id names an x face, this router has no x face");
+            std::abort();
+        case 2:
+            if (cfg.y == 0) return RouterPort::SOUTH;
+            if (cfg.y == cfg.mesh_y_dim - 1) return RouterPort::NORTH;
+            assert(false && "route_compute: dst_port_id names a y face, this router has no y face");
+            std::abort();
+        default:
+            assert(false && "route_compute: dst_port_id 3 is the reserved encoding");
+            std::abort();
+    }
 }
 
 // Preferred output VC as a function of (this-hop output, next-hop route).
@@ -197,7 +226,8 @@ class Router {
         const auto& q = input_fifo_[in_port][vc];
         if (q.empty()) return std::nullopt;
         const auto dst = static_cast<uint8_t>(q.front().get_header_field("dst_id"));
-        return route_compute(dst, cfg_);
+        const auto dst_port = static_cast<uint8_t>(q.front().get_header_field("dst_port_id"));
+        return route_compute(dst, dst_port, cfg_);
     }
 
   private:
@@ -210,10 +240,25 @@ class Router {
 
     void accept_flit(std::size_t port, const Flit& f);
 
+    // dst names this router's own coordinate, so whatever port route_compute
+    // picks here is an ejection and not a hop.
+    bool is_ejection(uint8_t dst) const {
+        const detail::NodeCoord c = detail::split_node_id(dst);
+        return c.x == cfg_.x && c.y == cfg_.y;
+    }
+
     // Next-hop XY route seen from the neighbor behind `out` (D3: computed on
     // the fly from dst_id; bit-identical to the RTL's stored hdr.lookahead for
-    // deterministic XY, floo_vc_assignment.sv:55-65). Never called for LOCAL.
-    RouterPort next_hop_route(std::size_t out, uint8_t dst) const {
+    // deterministic XY, floo_vc_assignment.sv:55-65). Never called for an
+    // ejection, of either kind: LOCAL has no neighbor behind it, and neither
+    // does a boundary face with a peripheral behind it — stepping the
+    // coordinate there walks off the mesh (--n.x at x == 0 wraps to 255) and
+    // invents a lookahead the RTL never stores.
+    RouterPort next_hop_route(std::size_t out, uint8_t dst, uint8_t dst_port) const {
+        if (is_ejection(dst)) {
+            assert(false && "Router: next_hop_route on an ejection (dst is this coordinate)");
+            std::abort();
+        }
         RouterConfig n = cfg_;
         switch (static_cast<RouterPort>(out)) {
             case RouterPort::NORTH:
@@ -232,13 +277,16 @@ class Router {
                 assert(false && "Router: next_hop_route on LOCAL output");
                 std::abort();
         }
-        return route_compute(dst, n);
+        return route_compute(dst, dst_port, n);
     }
 
-    uint8_t preferred_out_vc(std::size_t out, uint8_t dst) const {
+    uint8_t preferred_out_vc(std::size_t out, uint8_t dst, uint8_t dst_port) const {
         const auto o = static_cast<RouterPort>(out);
         if (o == RouterPort::LOCAL) return 0;  // floo_vc_assignment.sv:86
-        return preferred_vc(o, next_hop_route(out, dst), cfg_.num_vc);
+        // A boundary face with a peripheral behind it is LOCAL with a different
+        // pin — the same terminal port, so it takes the same VC 0.
+        if (is_ejection(dst)) return 0;
+        return preferred_vc(o, next_hop_route(out, dst, dst_port), cfg_.num_vc);
     }
 
     // VA: floo_vc_assignment + floo_vc_selection translate, run per candidate
@@ -255,7 +303,8 @@ class Router {
             return std::nullopt;
         }
         const auto dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
-        const uint8_t pref = preferred_out_vc(out, dst);
+        const auto dst_port = static_cast<uint8_t>(f.get_header_field("dst_port_id"));
+        const uint8_t pref = preferred_out_vc(out, dst, dst_port);
         // FVADA: preferred VC not-full -> take it (floo_vc_selection.sv:32-34).
         if (credit_[out][pref] > 0) return pref;
         // Wormhole head (flit_tail=0): preferred VC only, no overflow, so the
@@ -281,7 +330,8 @@ class Router {
     PortMask head_expected_mask(const Flit& f) const {
         const auto dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
         if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
-            return port_bit(route_compute(dst, cfg_));
+            const auto dst_port = static_cast<uint8_t>(f.get_header_field("dst_port_id"));
+            return port_bit(route_compute(dst, dst_port, cfg_));
         }
         // Reserved-code guard (OUR RULE, spec §6 :356 leaves codes 2-3
         // reserved), mirroring SimpleRouter::head_expected_mask. Collective
@@ -445,7 +495,9 @@ inline void Router::tick() {
                     }
                 } else {
                     const auto dst = static_cast<uint8_t>(lq.front().get_header_field("dst_id"));
-                    if (static_cast<std::size_t>(route_compute(dst, cfg_)) != out) {
+                    const auto dst_port =
+                        static_cast<uint8_t>(lq.front().get_header_field("dst_port_id"));
+                    if (static_cast<std::size_t>(route_compute(dst, dst_port, cfg_)) != out) {
                         assert(false &&
                                "Router: locked wormhole continuation routes to a different output "
                                "(malformed packet: flit_tail=0 head not closed by flit_tail=1 on "
@@ -456,7 +508,7 @@ inline void Router::tick() {
                     // preferred VC; a pinned (fixed_vc=1) worm's NI-chosen VC
                     // legitimately differs, so the check is conditioned.
                     if (lq.front().get_header_field("fixed_vc") == 0 &&
-                        *ws.locked_output_vc != preferred_out_vc(out, dst)) {
+                        *ws.locked_output_vc != preferred_out_vc(out, dst, dst_port)) {
                         assert(false &&
                                "Router: locked wormhole output VC diverges from the recomputed "
                                "preferred VC (fixed_vc=0)");

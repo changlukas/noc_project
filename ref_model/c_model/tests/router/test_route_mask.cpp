@@ -18,6 +18,11 @@ using router::RouterPort;
 
 namespace {
 
+// dst_port_id naming the tile on the router's LOCAL port. Collective route
+// masks are a pure coordinate computation, so every route_compute() call in
+// this file is a tile destination.
+constexpr uint8_t kTilePort = 0;
+
 constexpr uint8_t node_id(uint8_t x, uint8_t y) {
     return static_cast<uint8_t>(x | (y << ni::width::X_WIDTH));
 }
@@ -418,7 +423,7 @@ TEST(RouteMaskProperty, ZeroMaskFollowsRouteComputeAlongThePath) {
                         uint8_t hx = src_x, hy = src_y;
                         for (int hop = 0; hop <= m.x_dim + m.y_dim; ++hop) {
                             const RouterConfig cfg = cfg_at(hx, hy, m.x_dim, m.y_dim);
-                            const RouterPort unicast = router::route_compute(dst, cfg);
+                            const RouterPort unicast = router::route_compute(dst, kTilePort, cfg);
                             SCOPED_TRACE(testing::Message()
                                          << "mesh " << int(m.x_dim) << "x" << int(m.y_dim)
                                          << " src " << int(src) << " dst " << int(dst) << " at ("
@@ -471,7 +476,7 @@ TEST(RouteMaskProperty, JoinSetMatchesTheActualUnicastReturnPaths) {
                                     for (int hop = 0; hop <= m.x_dim + m.y_dim; ++hop) {
                                         arrivals[hy * m.x_dim + hx] |= router::port_bit(arrival);
                                         const RouterPort out = router::route_compute(
-                                            collector, cfg_at(hx, hy, m.x_dim, m.y_dim));
+                                            collector, kTilePort, cfg_at(hx, hy, m.x_dim, m.y_dim));
                                         if (out == RouterPort::LOCAL) break;
                                         if (out == RouterPort::NORTH) ++hy;
                                         if (out == RouterPort::SOUTH) --hy;

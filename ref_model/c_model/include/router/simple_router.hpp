@@ -1,7 +1,8 @@
 #pragma once
 // Ready/valid single-VC router for the c_model NoC fabric — line-translate of
 // mainline floo_router.sv for REQ/RSP (RouteAlgo=XYRouting, NumPhysChannels=1,
-// LockRouting=1'b1, NoLoopback=1'b1, XYRouteOpt=1'b1, VcImpl degenerates to
+// LockRouting=1'b1, NoLoopback=1'b1, XYRouteOpt=1'b1 minus its Y->X tie-offs
+// (see tie_off), VcImpl degenerates to
 // passthrough at NumVirtChannels==NumPhysChannels==1). The credit Router
 // (router.hpp) stays DAT's translate, untouched.
 //
@@ -149,15 +150,21 @@ class SimpleRouterLink {
     virtual void push_flit(const Flit& flit) = 0;
 };
 
-// floo_router.sv:349-357 (NoLoopback && XYRouteOpt): structural tie-offs that
-// delete connectivity BEFORE arbitration, not an assert checked after the
-// fact. Named by RouterPort, per the port-index convention above.
+// floo_router.sv:349 (NoLoopback): a structural tie-off that deletes
+// connectivity BEFORE arbitration, not an assert checked after the fact. Named
+// by RouterPort, per the port-index convention above.
 //
-// The XYRouteOpt turn is unreachable anyway: route_compute is XY-DOR, so it
-// never turns South/North input traffic onto East/West (X is already
-// resolved before a flit starts moving on Y). The skip is required translate
-// fidelity regardless — floo_router.sv physically disconnects the arc, it
-// does not rely on route_compute's invariant.
+// The XYRouteOpt Y->X arcs (floo_router.sv:350-351) are DELIBERATELY not tied
+// off. Upstream may disconnect them because every destination there sits on the
+// router's LOCAL port, so no route can ever end on a Y->X movement. Here a
+// peripheral hangs off a boundary port, and route_compute ejects to that port at
+// the destination coordinate — an x-face ejection of a flit that arrived on
+// North/South IS a Y->X movement, and a route resolving to a port the crossbar
+// cannot reach is not resolved. The credit Router (router.hpp) carries these
+// arcs already and works; keeping the pair consistent removes an asymmetry
+// rather than adding a mechanism. The alternative — tying off only the boundary
+// ports with no peripheral behind them — would make the crossbar depend on
+// topology config this class does not have.
 //
 // NoLoopback's in==out skip is NOT applied to LOCAL — divergence from
 // floo_router.sv's blanket in==out tie-off, per this project's standing
@@ -172,10 +179,6 @@ class SimpleRouterLink {
 // mesh_2x2_vc1).
 inline bool tie_off(RouterPort in, RouterPort out) {
     if (in == out && in != RouterPort::LOCAL) return true;  // NoLoopback, floo_router.sv:349
-    if ((in == RouterPort::SOUTH || in == RouterPort::NORTH) &&
-        (out == RouterPort::EAST || out == RouterPort::WEST)) {
-        return true;  // XYRouteOpt Y->X turn, floo_router.sv:350-351
-    }
     return false;
 }
 
@@ -326,7 +329,9 @@ class SimpleRouter {
         rc.tile_y_last = cfg_.tile_y_last;
         return rc;
     }
-    RouterPort compute_route(uint8_t dst) const { return route_compute(dst, route_cfg()); }
+    RouterPort compute_route(uint8_t dst, uint8_t dst_port) const {
+        return route_compute(dst, dst_port, route_cfg());
+    }
 
     // Branch set of a flit at an input FIFO head: the one-hot XY route for
     // unicast, the multi-hot fork set for a collective (F1,
@@ -336,8 +341,9 @@ class SimpleRouter {
     // multicast (T3 hard rule, router.hpp:280-295).
     PortMask head_expected_mask(const Flit& f) const {
         const auto dst = static_cast<uint8_t>(f.get_header_field("dst_id"));
+        const auto dst_port = static_cast<uint8_t>(f.get_header_field("dst_port_id"));
         if (f.get_header_field("collective_op") == ni::COLLECTIVE_OP_UNICAST) {
-            return port_bit(compute_route(dst));
+            return port_bit(compute_route(dst, dst_port));
         }
         // Reserved-code guard (OUR RULE, spec §6 :356 leaves codes 2-3
         // reserved). Every collective classification in this class keys on
@@ -373,7 +379,7 @@ class SimpleRouter {
         // 184-189), and a CollectB's dst_id names the single collecting node —
         // the wildcard sits on src_id. Its expected-INPUT set is a separate
         // computation, in join_valid().
-        if (is_b_channel(axi_ch)) return port_bit(compute_route(dst));
+        if (is_b_channel(axi_ch)) return port_bit(compute_route(dst, dst_port));
 
         const auto src = static_cast<uint8_t>(f.get_header_field("src_id"));
         const auto cmask = static_cast<uint8_t>(f.get_header_field("collective_mask"));
