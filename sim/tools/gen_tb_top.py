@@ -220,6 +220,12 @@ def _endpoints(nodes, peripherals):
 # per-run-derived value of the same name).
 _DEFAULT_REGION_BYTES = 0x1000
 
+# Size of a crossbar-window pad. A pad exists only to square off the rectangular
+# TILE_BASE_ADDR / TILE_SIZE arrays for an endpoint owning fewer windows than the
+# widest one; it is parked above every real window and nothing addresses it. It
+# still has to be a NON-EMPTY range -- see the note in tile_targets().
+_PAD_BYTES = 0x1000
+
 # Tile-memory latency, as axi_delayer settings for every endpoint's two
 # memories: (stall_random_input, stall_random_output, fixed_delay_input,
 # fixed_delay_output). Input covers AW/W/AR, output covers B/R. DV-side tb
@@ -314,17 +320,33 @@ def tile_targets(topo: dict, endpoints):
     # so a one-window peripheral row beside a two-window tile row will not
     # elaborate. Pad the short rows to the widest instead of reshaping.
     #
-    # A zero-size window is inert, not a one-byte target: pulp addr_decode
-    # (sim/dv/common_cells-1.37.0/src/addr_decode.sv) states a rule as
-    # start/end and fatals only when start_addr is HIGHER than end_addr, and
-    # base == base is not higher; overlap only warns, and an empty range
-    # overlaps nothing. Do not "fix" this into size 1 -- that would be a live
-    # one-byte target aliasing whatever sits at address 0.
+    # A pad is a REAL range parked above every window, never an empty one.
+    # size 0 at base 0 looks inert and is the opposite: addr_decode
+    # (sim/dv/common_cells-1.37.0/src/addr_decode_dync.sv:110-112) matches on
+    #     addr >= start_addr && (addr < end_addr || end_addr == '0)
+    # and end_addr == '0 means "end of address space" (documented at :56-57),
+    # so start = end = 0 is a WILDCARD that matches every address. The match
+    # loop has no break and the last match wins, and a pad sits at a higher
+    # rule index than the real window it pads, so it would swallow the whole
+    # map: fabric traffic would land in the pad's memory instead of the real
+    # one, the local initiator would stop falling through to the NMU, and
+    # nothing would ever be undecoded so the DECERR gate would go dead. None of
+    # that fails elaboration.
+    #
+    # base = 2 * noc_egress_base is the first address above the egress aperture
+    # -- user_node_endpoint.sv makes it [NOC_EGRESS_BASE, 2 * NOC_EGRESS_BASE),
+    # end-exclusive -- so the pad overlaps nothing and warns about nothing.
+    # start < end keeps check_start quiet (it fatals on start == end unless end
+    # is the wildcard zero) and end != 0 keeps the pad out of the wildcard
+    # branch. A zero SIZE is not an option here in either direction.
+    egress = address_map.noc_egress_base(entries)
     width = max(len(w) for w in out.values())
     for idx, windows in out.items():
-        windows.extend({"space": None, "base": 0, "size": 0}
-                       for _ in range(width - len(windows)))
-    return out, address_map.noc_egress_base(entries)
+        # Staggered, so two pads in one row could never be the same rule twice.
+        windows.extend({"space": None, "base": 2 * egress + k * _PAD_BYTES,
+                        "size": _PAD_BYTES}
+                       for k in range(width - len(windows)))
+    return out, egress
 
 
 # Live-neighbor map / opposite-port logic now lives in the emitted SV genvar
@@ -746,20 +768,21 @@ def emit_fabric(topo: dict) -> str:
         w(f"    // coordinate'; the peripheral-to-router edge answers 'did the peripheral put")
         w(f"    // a flit on the wire' -- without it a silent peripheral and a working one")
         w(f"    // look alike.")
-        # An endpoint is named node<router>.<port>, not by its endpoint index:
-        # two peripherals can hang off one router, so the index alone says
-        # WHICH endpoint but not which physical port carries it. "local" is the
-        # tile on the router's LOCAL port, the face letter a peripheral. The
-        # network is still the name up to the first underscore, which is all
-        # sim/verilator/perf_cli_summary.py parses.
-        tile_name = f"node{r}.local"
+        # Named by the two ends of THIS link, not by endpoint index: two
+        # peripherals can hang off one router, so the index alone says which
+        # endpoint but not which physical port carries it. The router end is
+        # ".router", not ".local" -- this link terminates at router r's face
+        # port, and a flit on it has not been near the tile on the LOCAL port.
+        # The network is still the name up to the first underscore, which is
+        # all sim/verilator/perf_cli_summary.py parses.
+        router_name = f"node{r}.router"
         periph_name = f"node{r}.{per['face']}"
         for net, _width_sym, flow in _NETWORKS:
             ret = "ready" if flow == "ready_valid" else "crdvalid"
             for src, dst, suffix, valid, flit in (
-                    (tile_name, periph_name, "",
+                    (router_name, periph_name, "",
                      f"tx_{net}_valid[{r}][RP_{d}]", f"tx_{net}_flit[{r}][RP_{d}]"),
-                    (periph_name, tile_name, "_out",
+                    (periph_name, router_name, "_out",
                      f"periph{pi}_tx_{net}_valid", f"periph{pi}_tx_{net}_flit")):
                 # The return wire is the OTHER end's: a monitor watches flits
                 # leaving one end and the ready/credit coming back from the one

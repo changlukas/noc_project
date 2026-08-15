@@ -548,18 +548,47 @@ def test_tile_targets_rejects_a_transposed_space_order(monkeypatch):
 def test_tile_targets_pads_a_peripheral_row_to_the_widest():
     """The emitted TILE_BASE_ADDR / TILE_SIZE are RECTANGULAR, so a one-window
     peripheral row beside a two-window tile row would not elaborate. Short rows
-    are padded with a zero-SIZE window, which pulp addr_decode treats as inert
-    (it fatals only when start_addr is higher than end_addr, and start == end is
-    not higher). A one-byte pad would instead be a live target at address 0."""
+    are padded to the widest.
+
+    A pad is a REAL range parked above the egress aperture, never an empty one.
+    A zero-size pad at base 0 looks inert and is the exact opposite:
+    addr_decode_dync.sv:110-112 matches on
+
+        addr >= start_addr && (addr < end_addr || end_addr == '0)
+
+    and `end_addr == '0` is the decoder's END-OF-ADDRESS-SPACE WILDCARD
+    (documented at :56-57), so start = end = 0 matches EVERY address. That is
+    the trap: the check that rejects a bad rule (check_start) passes it happily,
+    because check_start also exempts the wildcard.
+    """
     topo = gen_tb_top.load_topology("mesh_2x2_vc1_periph")
     endpoints = gen_tb_top._endpoints(gen_tb_top._nodes(topo)[0], gen_tb_top._peripherals(topo))
-    per_ep, _egress = gen_tb_top.tile_targets(topo, endpoints)
+    per_ep, egress = gen_tb_top.tile_targets(topo, endpoints)
     assert len(per_ep) == 6                      # 4 routers + 2 peripherals
     assert len({len(w) for w in per_ep.values()}) == 1, "rows must be rectangular"
     assert [w["space"] for w in per_ep[0]] == ["config", "memory"]
     # Endpoint 4 is the peripheral at (0,0): its own window, then the pad.
     assert per_ep[4][0]["space"] == "peripheral"
-    assert per_ep[4][1] == {"space": None, "base": 0, "size": 0}
+    assert per_ep[4][1]["space"] is None
+
+    # DECODE SEMANTICS, not just shape. Rectangularity is what elaboration would
+    # have caught; this is what it would NOT have -- a wildcard pad elaborates
+    # fine and silently swallows the map. Every pad in every row:
+    real_top = max(w["base"] + w["size"]
+                   for row in per_ep.values() for w in row if w["space"] is not None)
+    pads = [w for row in per_ep.values() for w in row if w["space"] is None]
+    assert pads, "the peripheral rows must actually be padded"
+    for pad in pads:
+        start, end = pad["base"], pad["base"] + pad["size"]
+        # Not the wildcard: end_addr == 0 matches every address.
+        assert end != 0, f"pad {pad} is the end-of-address-space wildcard"
+        # Non-empty: check_start fatals on start == end unless end is the
+        # wildcard, so an "empty" rule is either a fatal or a wildcard, never
+        # inert.
+        assert start < end, f"pad {pad} is empty; addr_decode has no inert rule"
+        # Above every real window AND above the egress aperture
+        # [egress, 2*egress), so it can never shadow a live target.
+        assert start >= 2 * egress >= real_top, f"pad {pad} overlaps the live map"
 
 
 def test_dma_refuses_a_peripheral_topology(tmp_path, monkeypatch):
