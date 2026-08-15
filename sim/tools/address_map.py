@@ -75,9 +75,9 @@ def pack(address_map, x_dim, y_dim):
     tile count per axis.
 
     Raises ValueError (fail-loud, mirrors SamTable::validate) on: missing/empty
-    tiles list, non-positive or non-4KB-aligned size, a tile outside the mesh,
-    an unrecognized space, or a missing/duplicate mesh node per space -- both
-    spaces must cover every node exactly once.
+    tiles list, non-positive or non-4KB-aligned size, a tile outside the mesh, a
+    non-power-of-two x_dim, an unrecognized space, or a missing/duplicate mesh
+    node per space -- both spaces must cover every node exactly once.
 
     Config coverage is required unconditionally here and only when the space is
     present in SamTable::validate(): this function only ever sees a shipped
@@ -130,6 +130,19 @@ def pack(address_map, x_dim, y_dim):
         if not (x < x_dim and y < y_dim):
             raise ValueError(
                 f"address_map tile (x={x},y={y}) outside mesh {x_dim}x{y_dim}")
+        # A tile base is ((y << x_bits) | x) * block_size, so the top tile index
+        # is x_dim * y_dim - 1 -- and next_base below is above the array -- only
+        # when 1 << x_bits == x_dim. On a 3x2 array the top index is
+        # (1 << 2) | 2 = 6 while next_base is 3 * 2 = 6 blocks, which IS tile
+        # (2,1)'s own base: the first peripheral region would land on a tile
+        # silently. Rejected here rather than in each caller, because this is
+        # the arithmetic that depends on it -- sam_yaml.hpp and
+        # gen_tb_top._check_flit_capacity reject the same shape independently.
+        if (1 << x_bits) != x_dim:
+            raise ValueError(
+                f"address_map: x_dim {x_dim} must be a power of two -- the tile base packs x "
+                f"into {x_bits} bits, so a non-power-of-two x_dim leaves gaps in the block "
+                f"index and puts the first peripheral region on top of a tile")
         sp = space
         base = (((y << x_bits) | x) * block_size) + offset[sp]
         entries.append({"x": x, "y": y, "size": size, "base": base, "dst_id": dst_id(x, y),
@@ -154,6 +167,9 @@ def pack(address_map, x_dim, y_dim):
     # above the tile array, each region aligned to its own size -- the same
     # placement SamTable::packed() does, which is what keeps noc_egress_base()
     # above every real region rather than inside a peripheral's window.
+    # This is above the whole tile array because x_dim is a power of two
+    # (checked above), which makes x_dim * y_dim the block index just past the
+    # top tile.
     next_base = x_dim * y_dim * block_size
     for p in (address_map or {}).get("peripherals") or []:
         x, y, face, size = int(p["x"]), int(p["y"]), p["face"], int(p["size"])
@@ -177,8 +193,8 @@ def pack(address_map, x_dim, y_dim):
     # keeps the two spaces apart inside a block, and block_size >= extent keeps
     # a block's own entries inside it -- so blocks, and the spaces inside them,
     # are always disjoint. Peripherals: next_base starts above the whole tile
-    # array and only ever moves up, so each region sits above every entry
-    # placed before it.
+    # array -- which the power-of-two x_dim check makes true -- and only ever
+    # moves up, so each region sits above every entry placed before it.
 
     bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "memory"}
     return bases, entries

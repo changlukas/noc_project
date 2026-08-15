@@ -384,30 +384,20 @@ def test_tile_major_packs_each_node_into_one_block():
         assert got[("config", x, y)] == idx * block + 0x2000000
 
 
-def test_pack_bases_are_coordinate_derived_on_a_non_power_of_two_row():
+def test_pack_rejects_a_non_power_of_two_row():
+    """x_dim 3 means clog2(3) = 2 index bits, so a row strides four slots with
+    one unused and the top tile index is (1 << 2) | 2 = 6 -- while the
+    peripheral placement starts at x_dim * y_dim = 6 blocks, tile (2,1)'s own
+    base. The overlap is silent, so pack() refuses the shape rather than
+    packing it. sam_yaml.hpp and gen_tb_top._check_flit_capacity refuse it too;
+    this is the copy gen_test_patterns.py reaches first, since it calls pack()
+    before its own capacity check."""
     from address_map import pack
-    # x_dim 3, so clog2(3) = 2 index bits and a row strides four slots, one of
-    # them unused. Both spaces are declared: pack() requires full coverage of
-    # memory AND config, which is a real invariant of every topology and is not
-    # relaxed for a test.
     mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1, 2)]
     cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
            for y in (0, 1) for x in (0, 1, 2)]
-    _, entries = pack({"tiles": mem + cfg}, 3, 2)
-    got = {(e["x"], e["y"], e["space"]): e["base"] for e in entries}
-    assert got == {
-        # No declared block_size: it defaults to the next power of two above
-        # what one node's memory + config need, 0x101000 -> 0x200000. Node
-        # stride is therefore 0x200000, not the 0x100000 memory slot alone.
-        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x200000,
-        (2, 0, "memory"): 0x400000, (0, 1, "memory"): 0x800000,
-        (1, 1, "memory"): 0xA00000, (2, 1, "memory"): 0xC00000,
-        # config sits inside each node's own block, above its memory tile:
-        # idx * 0x200000 + 0x100000.
-        (0, 0, "config"): 0x100000, (1, 0, "config"): 0x300000,
-        (2, 0, "config"): 0x500000, (0, 1, "config"): 0x900000,
-        (1, 1, "config"): 0xB00000, (2, 1, "config"): 0xD00000,
-    }
+    with pytest.raises(ValueError, match="must be a power of two"):
+        pack({"tiles": mem + cfg}, 3, 2)
 
 
 def test_pack_default_block_size_doubles_the_stride_to_fit_config():
@@ -593,8 +583,9 @@ def test_dma_refuses_a_peripheral_topology(tmp_path, monkeypatch):
     gen_dma_jobs walks the router array, so a peripheral endpoint gets no
     jobs.txt and its driver $fatals on the missing file. It used to GENERATE --
     and the top it produced was wrong a second way, because _dma_check's
-    MEM_TARGET is the last target, which on a padded peripheral row is the
-    zero-size pad. Refusing beats emitting either defect.
+    MEM_TARGET is the last target, which on a padded peripheral row is the pad
+    parked above the map, not that endpoint's memory. Refusing beats emitting
+    either defect.
 
     gen_tb_top.main() reads sys.argv rather than taking an argv list, so the
     command line is monkeypatched instead of passed.
@@ -625,6 +616,46 @@ def test_tile_targets_rejects_a_peripheral_whose_order_is_not_its_own_space(monk
     endpoints = gen_tb_top._endpoints(gen_tb_top._nodes(topo)[0], gen_tb_top._peripherals(topo))
     with pytest.raises(SystemExit, match=r"\(port 1\) window order \[\] must be \['peripheral'\]"):
         gen_tb_top.tile_targets(topo, endpoints)
+
+
+def _periph_topology(peripherals):
+    return {"topology": {"x_dim": 4, "y_dim": 4},
+            "address_map": {"peripherals": peripherals}}
+
+
+@pytest.mark.parametrize("peripherals, want", [
+    # An interior router's named port carries a live inter-router link, so
+    # hanging a peripheral off it closes a channel dependency cycle. This is the
+    # generator's copy of the deadlock precondition sam_yaml.hpp enforces on the
+    # C++ side; both readers of the same YAML must reject it.
+    ([{"x": 1, "y": 1, "face": "x", "size": 0x1000}], "names an edge this coordinate is not on"),
+    ([{"x": 1, "y": 1, "face": "y", "size": 0x1000}], "names an edge this coordinate is not on"),
+    # A peripheral shares a router's coordinate, so a coordinate off the array
+    # names no router to hang off.
+    ([{"x": 4, "y": 0, "face": "x", "size": 0x1000}], "outside the 4x4 router array"),
+    # One port, one peripheral: two on the same face would both drive it.
+    ([{"x": 0, "y": 0, "face": "x", "size": 0x1000},
+      {"x": 0, "y": 0, "face": "x", "size": 0x1000}], "two peripherals both claim"),
+    ([{"x": 0, "y": 0, "face": "z", "size": 0x1000}], "must be 'x' or 'y'"),
+])
+def test_peripherals_rejects_an_illegal_placement(peripherals, want):
+    with pytest.raises(SystemExit, match=re.escape(want)):
+        gen_tb_top._peripherals(_periph_topology(peripherals))
+
+
+def test_peripherals_resolves_each_face_to_its_edge_direction():
+    """Positive control for the rejections above, and the mapping they guard:
+    the face names the AXIS and the coordinate names the SIDE. Both faces of a
+    corner router are legal, which is why the face is declared at all."""
+    out = gen_tb_top._peripherals(_periph_topology([
+        {"x": 0, "y": 1, "face": "x", "size": 0x1000},
+        {"x": 3, "y": 2, "face": "x", "size": 0x1000},
+        {"x": 1, "y": 0, "face": "y", "size": 0x1000},
+        {"x": 2, "y": 3, "face": "y", "size": 0x1000},
+        {"x": 0, "y": 0, "face": "x", "size": 0x1000},
+        {"x": 0, "y": 0, "face": "y", "size": 0x1000}]))
+    assert [p["dir"] for p in out] == ["WEST", "EAST", "SOUTH", "NORTH", "WEST", "SOUTH"]
+    assert [p["port"] for p in out] == [1, 1, 2, 2, 1, 2]
 
 
 @pytest.mark.parametrize("profile", sorted(gen_tb_top._MEM_LATENCY_PROFILES))
