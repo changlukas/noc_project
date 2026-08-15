@@ -350,11 +350,11 @@ git commit -m "test(sam): pin both tile spaces to a collective field at the bloc
 
 ---
 
-### Task 3: Two stale sentences
+### Task 3: The docs that state the old rule
 
-Both say the coordinate field sits at `log2(region size)`. True while the stride was the region size, not now. Neither is code — both implementations were always stride-based (`sam_yaml.hpp:57`, `gen_test_patterns.py:690`), which is why nothing broke.
+Two sentences say the coordinate field sits at `log2(region size)`. True while the stride was the region size, not now. Neither is code — both implementations were always stride-based (`sam_yaml.hpp:57`, `gen_test_patterns.py:690`), which is why nothing broke. A third file states the shipped map's old numbers outright.
 
-**Files:** Modify `docs/noc-target-spec.md:365` and its repeat at `:521-522`; `sim/tools/gen_test_patterns.py`, `collective_addr_mask` docstring.
+**Files:** Modify `docs/noc-target-spec.md:365` and its repeat at `:521-522`; `sim/tools/gen_test_patterns.py`, `collective_addr_mask` docstring; `docs/verification-environment.md:306-307,332,342-343`.
 
 - [ ] **Step 1: Target spec**
 
@@ -378,14 +378,26 @@ In `collective_addr_mask`, the sentence naming `log2` of the region size and the
 
 Keep the rest of the docstring.
 
-- [ ] **Step 3: Check nothing else states the old rule**
+- [ ] **Step 3: The verification environment doc**
+
+`docs/verification-environment.md` states the shipped map's old numbers in three places. The Task 1 review found these; the plan had missed the file.
+
+- `:306-307` shows a topology excerpt with `size: 0x100000000` memory tiles. Update to `size: 0x2000000` and add the `block_size: 0x100000000` line, matching what `sim/topologies/mesh_2x2_vc1.yaml` now says.
+- `:332` states the map "is uniform at `0x100000000` per memory tile". The stride is `0x100000000`; the memory tile is `0x2000000`. Say both.
+- `:342-343` gives config bases as `n_nodes * 0x100000000 + idx * 0x1000`. Under tile-major a node's config sits inside its own block: `idx * block_size + 0x2000000`.
+
+Read the surrounding paragraphs before editing — the point each sentence is making has to survive the correction.
+
+- [ ] **Step 4: Check nothing else states the old rule**
 
 `grep -rn 'log2(size)\|log2 of that space' docs/ sim/tools/ ref_model/` — expect no hits.
 
-- [ ] **Step 4: Commit**
+`grep -rn '0x400000000\|0x100000000' docs/*.md` — every remaining hit must be a stride, not a memory tile size. Fix any that is not.
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add docs/noc-target-spec.md sim/tools/gen_test_patterns.py
+git add docs/noc-target-spec.md docs/verification-environment.md sim/tools/gen_test_patterns.py
 git commit -m "docs(sam): the node index sits at the block stride, not the region size"
 ```
 
