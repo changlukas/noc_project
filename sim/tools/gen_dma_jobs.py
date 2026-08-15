@@ -95,13 +95,30 @@ _PROTOCOL_AXI = 0
 # correct usage of an iDMA backend rather than a concession.
 _AXI_ID = 0
 
+# decouple_aw.  Clear -- the backend's own default -- idma_channel_coupler.sv
+# releases an AW only against `first`, the first R beat of the matching read
+# (:91, :141), so a write job's read and its write run strictly in series and a
+# node never holds more than two writes outstanding.  Set, `aw_sent` is
+# `aw_decoupled_head & aw_valid` (:137): the AW leaves as soon as it reaches the
+# coupler's queue, which is what puts the write path under the outstanding depth
+# the read path already reaches.  The write data still cannot precede its own
+# read, so this changes when AW is issued, not where the bytes come from.
+_AW_DECOUPLED = 1
+
 
 def job_lines(length, src_addr, dst_addr, axi_id):
     """The eleven field lines of one job, in idma_job_driver.sv's read order."""
     return [str(length), f"0x{src_addr:x}", f"0x{dst_addr:x}",
             str(_PROTOCOL_AXI), str(_PROTOCOL_AXI),
             str(_MAX_LOG_LEN_NONE), str(_MAX_LOG_LEN_NONE),
-            "0", "0",     # aw_decoupled, rw_decoupled -- the backend's defaults
+            str(_AW_DECOUPLED),
+            # rw_decoupled stays at the backend's default. Set, the legalizer's
+            # read and write machines advance independently
+            # (idma_legalizer_rw_axi.sv:381-385) instead of together; measured on
+            # mesh_4x4_vc4 it moved nothing -- 1864 cycles and 0.912 flits per
+            # cycle on the busiest link either way -- and idma_pkg.sv:72 warns it
+            # "can cause deadlocks".
+            "0",
             "0",          # num_errors -- the error path is out of scope
             str(axi_id)]
 
