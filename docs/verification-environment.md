@@ -302,9 +302,10 @@ topology:
   num_vc: 1
 
 address_map:
+  block_size: 0x100000000     # every node's block; memory sits at offset 0, config above it
   tiles:                      # ordered, every mesh node exactly once, row-major (y outer, x inner)
-    - { x: 0, y: 0, size: 0x100000000 }
-    - { x: 1, y: 0, size: 0x100000000 }
+    - { x: 0, y: 0, size: 0x2000000 }
+    - { x: 1, y: 0, size: 0x2000000 }
     # ... one entry per node
     - { x: 0, y: 0, size: 0x1000, space: config }  # config tiles, one per node
 ```
@@ -320,27 +321,33 @@ places each request at `base(dst) + offset`, and the NMU SAM translates the
 address back to `dst_id`. One source, so the two never disagree.
 
 `tiles:` gives each node its own `size`; there is no `tile_size` and no
-`base` key. Bases come from the coordinate, not from accumulation:
-`base = space_base + ((y << x_bits) | x) * slot`, where `slot` is the largest
-size declared in that space, `x_bits` is `clog2(x_span)`, and `space_base` puts
-config above every base memory could take. A tile smaller than its space's slot
-leaves a gap rather than pulling the next tile down, so the map is gap-free only
-when the space is uniform, as every shipped one is. The slot index and the
-routing id use different shifts: `dst_id = (y << X_WIDTH) | x`. The loader accepts a
-heterogeneous map (covered by `test_node_windows_are_that_node_s_own_map_entries`
-in `sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology
-is uniform at `0x100000000` per memory tile plus `0x1000` per config tile, in raster
-order, config entries appended after all memory entries. `TILE_TARGETS` is
-therefore 2 on every topology, and the endpoint carries one decode path, the
-two-window one. The windows are per node and global — nothing rebases, so the
-tile decodes on the same bases the SAM matched. A disagreement between the two
+`base` key. Bases come from the coordinate and the block stride, not
+accumulation: `base = idx * block_size + offset[space]`, where
+`idx = (y << x_bits) | x`, `x_bits` is `clog2(x_span)`, and `offset[space]` is
+0 for memory and the memory slot rounded up to the config slot for config
+(`nmu::addr_trans::SamTable::packed`), `slot` being the largest size declared
+in that space. `block_size` is either declared (`address_map.block_size`) or
+defaults to the next power of two at or above what the spaces occupy
+(`sam_yaml.hpp`'s `default_block_size`). A tile smaller than its space's slot
+leaves a gap inside its own node's block; nothing shifts, because every
+node's base already comes from `idx * block_size`, never from a neighbor's
+extent. The node index and the routing id use different shifts: `dst_id =
+(y << X_WIDTH) | x`. The loader accepts a heterogeneous map (covered by
+`test_node_windows_are_that_node_s_own_map_entries` in
+`sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology
+uses a `0x100000000` block per node, holding a `0x2000000` memory tile at
+offset 0 and a `0x1000` config tile at `0x2000000`, in raster order, config
+entries appended after the memory entries. `TILE_TARGETS` is therefore 2 on
+every topology, and the endpoint carries one decode path, the two-window
+one. The windows are per node and global — nothing rebases, so the tile
+decodes on the same bases the SAM matched. A disagreement between the two
 shows up as an address outside both windows, which DECERRs; the endpoint's
 `DECERR_FAULT_BIT` fault injection and the RRESP fatal in
 `sim/tb/test/user_node_endpoint.sv` check that path.
 
 Raster order is what makes the node index a contiguous bit field an AWUSER
-address mask can wildcard: memory bases at `idx * 0x100000000`, config bases at
-`n_nodes * 0x100000000 + idx * 0x1000`.
+address mask can wildcard: memory bases at `idx * block_size`, config bases
+at `idx * block_size + 0x2000000`.
 
 `gen_tb_top.py` rejects a topology whose mesh dimensions or `num_vc` exceed
 the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit

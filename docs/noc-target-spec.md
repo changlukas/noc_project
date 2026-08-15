@@ -360,12 +360,14 @@ Four further conditions decide whether that space is also a collective target. I
 - be equal in size across all nodes
 - be a power of two in size
 - be aligned to an integer multiple of that size
-- be mapped consecutively in coordinate order
+- be mapped at a uniform power-of-two stride in coordinate order
 
-The node index then occupies a contiguous address field at `log2(size)`, `clog2(x_dim)` bits of
-X below `clog2(y_dim)` bits of Y, and a mask over that field names an aligned set of nodes at one
-shared node-local offset. A space meeting all four conditions is a legal collective target. A
-space failing any of them is a legal unicast target and not a collective target.
+The node index then occupies a contiguous address field at `log2(node_stride)`, `clog2(x_dim)`
+bits of X below `clog2(y_dim)` bits of Y, and a mask over that field names an aligned set of
+nodes at one shared node-local offset. `node_stride` is the power-of-two block a node's regions
+are laid out inside. Where a space is packed with its stride equal to its region size the two
+coincide. A space meeting all four conditions is a legal collective target. A space failing any
+of them is a legal unicast target and not a collective target.
 
 A mesh dimension that is not a power of two leaves the field non-contiguous. Pad the row or
 column count up to a power of two; the surplus indices are not nodes and carry no region.
@@ -519,9 +521,11 @@ The `AWUSER` mask is an address mask:
 - A set bit marks the matching `AWADDR` bit as don't care, `n` set bits name `2^n` addresses
 - Set bits are limited to the node-index field of the address, so the named addresses differ
   only in destination node. §5.1 gives the region conditions that put that field in place
-- The node-index field sits at `log2(size)` of the space the address falls in, so a space with a
-  smaller region size holds its field at lower bits. A master must know which space it is
-  addressing before it can place the mask bits
+- The node-index field sits at `log2(node_stride)` of the space the address falls in, so a space
+  with a smaller `node_stride` holds its field at lower bits. `node_stride` is the power-of-two
+  block a node's regions are laid out inside; where a space is packed with its stride equal to
+  its region size the two coincide. A master must know which space it is addressing before it can
+  place the mask bits
 - The NMU translates the address mask into the 8 b flit `collective_mask` at SAM lookup and
   rejects a mask outside these constraints. Nothing downstream of the NMU sees an address mask,
   a global address, or an address space: a router is given `dst_id`, `collective_mask` and the
