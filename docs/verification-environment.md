@@ -52,7 +52,7 @@ emits two generated files, never hand-edited:
 | `sim/tb/test/tb_top_<topology>.sv` | self-clocked (10 ns clock, 4-cycle reset) top: DPI create calls for every router/NMU/NSU context, the fabric instance, one `user_node_endpoint` per node, the watchdog, and the exit logic. |
 
 `router_wrap` carries three physical networks, each with its own flit width
-(`ni_params_pkg`: REQ 132 b, RSP 122 b, DAT 629 b):
+(`ni_params_pkg`: REQ 136 b, RSP 126 b, DAT 633 b):
 
 | network | flow control | carries |
 |---|---|---|
@@ -387,7 +387,7 @@ passing back the printed value reproduces the run exactly.
 | Meta buffer storage | the 8-bucket array is kept under both `max_unique_ids` settings; the FIFO-vs-ID-queue cost difference is not modelled. |
 | AXI-side perf instrumentation absent | `perf.json` carries only the NoC section (dumped at the end of every run, all injection modes); no AXI-side per-transaction hooks exist, so nothing cross-checks `axi_bw_monitor` from the model side. |
 | VCS flow | build-only; no directed run target, never executed on a real VCS install. |
-| Deferred header fields | QoS, route parity, and flit ECC are unbuilt and have no header field at all: the 44 b header is fully assigned (`PADDING_FIELDS_COUNT` = 0) and carries no width-0 placeholder for them. |
+| Deferred header fields | QoS, route parity, and flit ECC are unbuilt and have no header field at all: the 48 b header is fully assigned (`PADDING_FIELDS_COUNT` = 0) and carries no width-0 placeholder for them. |
 | Conformity exclusions | exclusive access is unit-level only; SLVERR unexercised; single-clock CDC approximation (see Conformity scope). |
 | NI ingress backpressure unmodelled | not modeled on any network as of S3a: `ready` tied true / DAT merge self-credits, ingress queues unbounded, LOCAL stall metrics 0 by construction. Reassessed at S3b: request-class (`DataAw`/`DataW`) and response-class (`DataR`) messages now share DAT VCs post-collapse. This stays deadlock-safe SOLELY because ingress queues are unbounded and always accept. Any future work that bounds ingress queues must first re-open message-class separation (or an equivalent VC-classing scheme). |
 | SimpleRouter multi-read ruling (S3b) | grants up to one flit per OUTPUT per tick from the same input FIFO, matching the credit `Router`. Mainline `floo_router.sv` has one FIFO read port, a resource limit, not a protocol requirement. Kept as a deliberate c_model-optimistic divergence: multi-output fan-out from one input in a single tick that RTL would need more than one cycle for. |

@@ -5,7 +5,7 @@
 //
 // Also covers the DPI marshal round-trip (dpi_marshal.hpp): beat-exact
 // verification at the wire boundary (S2 T2c) — per-lane-distinct data bytes
-// and walking-1 WSTRB, at the widths current today (629-bit flit, 512-bit
+// and walking-1 WSTRB, at the widths current today (633-bit flit, 512-bit
 // data bus). A word swap, lane slip, tail-bit leak, or strb truncation
 // changes a compared byte.
 #include "cmodel_dpi.h"
@@ -115,7 +115,7 @@ using namespace ni::cmodel::wrap;
 TEST(DpiMarshalTest, PackUnpackFlit_RoundTrip_PerByteDistinctPattern) {
     // Every flit byte gets a distinct value; the last byte's padding bits
     // (beyond FLIT_WIDTH) are left at 0, as a real Flit::raw() produces.
-    constexpr int kLastByteValidBits = ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;  // 629-624=5
+    constexpr int kLastByteValidBits = ni::FLIT_WIDTH - (FLIT_BYTES - 1) * 8;  // 633-632=1
     FlitBytes b{};
     for (int i = 0; i < FLIT_BYTES; ++i) b[i] = static_cast<uint8_t>(i * 7 + 3);
     b[FLIT_BYTES - 1] &= static_cast<uint8_t>((1u << kLastByteValidBits) - 1u);

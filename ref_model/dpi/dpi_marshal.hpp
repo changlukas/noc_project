@@ -1,7 +1,7 @@
 // DPI wire-format marshal helpers — svBitVecVal[] <-> c_model byte/word types.
 //
 // Word counts are derived from ni::FLIT_WIDTH / axi::DATA_WIDTH, not pinned to
-// today's values (629-bit flit, 512-bit data bus): S2 T2d widened both constants
+// today's values (633-bit flit, 512-bit data bus): S2 T2d widened both constants
 // and this header kept producing the right word count / tail mask without
 // editing a single formula here. Extracted out of cmodel_dpi.cpp (rather than
 // left as an anonymous-namespace block) so ctest can round-trip pack/unpack
@@ -28,8 +28,8 @@ constexpr int WSTRB_VEC_WORDS = (axi::DATA_BYTES + 31) / 32;
 
 // --- flit tail masking, templated on per-network width (S3a T5) ------------
 //
-// Each physical network has its own flit width (REQ 132 b, RSP 122 b, DAT
-// 629 b, docs/noc-target-spec.md §6); the C++ Flit/FlitBytes container stays
+// Each physical network has its own flit width (REQ 136 b, RSP 126 b, DAT
+// 633 b, docs/noc-target-spec.md §6); the C++ Flit/FlitBytes container stays
 // fixed at the max (ni::FLIT_WIDTH = DAT's width, S3a stage design §6) --
 // only the DPI wire word count narrows per network. FlitMarshalT<WIDTH_BITS>
 // VEC_WORDS * 32 bits are reserved on the wire, but only WIDTH_BITS of them

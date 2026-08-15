@@ -19,7 +19,7 @@
 // node's transmit side (`noc_req_*` before this stage), rx_* = receive side
 // (`noc_rsp_*` before this stage).
 //
-// FLIT_BYTES = 79 (ni::FLIT_WIDTH = 629 bits, rounded to bytes; stays the max
+// FLIT_BYTES = 80 (ni::FLIT_WIDTH = 633 bits, rounded to bytes; stays the max
 // over networks, per-network widths bite only at the DPI/SV wire).
 // AXI_DATA_BYTES = 64 (512-bit data bus).
 // All multi-byte fields are byte-array little-endian, matching DPI wire packing.

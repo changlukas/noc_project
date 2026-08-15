@@ -99,18 +99,20 @@ class TestSvPacketEmit:
         assert "_ENABLED" in text
 
     def test_no_padding_fields(self):
-        """The 44 b header has no reserved bits: no _ENABLED = 1'b0 header field."""
+        """The 48 b header has no reserved bits: no _ENABLED = 1'b0 header field."""
         text = _sv_text("ni_flit_pkg.sv")
         for field in ("AXI_CH", "SRC_ID", "DST_ID", "FIXED_VC", "VC_ID", "FLIT_TAIL",
-                      "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK"):
+                      "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK",
+                      "DST_PORT_ID", "SRC_PORT_ID"):
             assert f"localparam bit          {field}_ENABLED = 1'b0;" not in text
 
     def test_functional_fields_enabled_one(self):
         """Functional fields must emit ENABLED = 1'b1 in SV package."""
         text = _sv_text("ni_flit_pkg.sv")
-        # All 10 header fields are functional (44 b header has no reserved bits).
+        # All 12 header fields are functional (48 b header has no reserved bits).
         for field in ("AXI_CH", "SRC_ID", "DST_ID", "FIXED_VC", "VC_ID", "FLIT_TAIL",
-                      "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK"):
+                      "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK",
+                      "DST_PORT_ID", "SRC_PORT_ID"):
             assert f"localparam bit          {field}_ENABLED = 1'b1;" in text, (
                 f"Expected {field}_ENABLED = 1'b1; not found in ni_flit_pkg.sv"
             )

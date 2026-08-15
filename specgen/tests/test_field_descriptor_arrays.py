@@ -14,17 +14,18 @@ def test_field_descriptor_struct_present():
     assert "int msb" in text
 
 
-def test_header_fields_array_lists_all_ten_fields():
+def test_header_fields_array_lists_all_twelve_fields():
     text = GENERATED.read_text()
     # Non-greedy match the array body; stops at `};` not at the first `}`.
     m = re.search(r"constexpr FieldDescriptor HEADER_FIELDS\[\]\s*=\s*\{(.*?)\};",
                   text, re.DOTALL)
     assert m, "HEADER_FIELDS[] array not emitted"
     body = m.group(1)
-    # All 10 header fields present (in declaration order); the 44 b header
+    # All 12 header fields present (in declaration order); the 48 b header
     # has no reserved bits, so none are skipped.
     for name in ["axi_ch", "src_id", "dst_id", "fixed_vc", "vc_id", "flit_tail",
-                "ordering_req", "ordering_tag", "collective_op", "collective_mask"]:
+                "ordering_req", "ordering_tag", "collective_op", "collective_mask",
+                "dst_port_id", "src_port_id"]:
         assert f'"{name}"' in body, f"missing {name} in HEADER_FIELDS"
 
 

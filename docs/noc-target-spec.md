@@ -89,7 +89,7 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
           └───────┘   └───────┘   └───────┘   └───────┘
 
           every link, per direction, flit wires only
-          REQ 132 b + RSP 122 b + DAT 629 b
+          REQ 136 b + RSP 126 b + DAT 633 b
           4 x 4 shown, 16 x 16 max
 ~~~
 
@@ -123,9 +123,9 @@ Physically separate networks, not virtual channels on a shared link:
 
 | Physical link | Size | Narrow class | Data class |
 |---|---|---|---|
-| `REQ` | 132 b | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
-| `RSP` | 122 b | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
-| `DAT` | 629 b | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
+| `REQ` | 136 b | `Aw`, `Ar`: 48 b address. `W`: 64 b data | `Ar`: 48 b address |
+| `RSP` | 126 b | `R`: 64 b data. `B`: 2 b response | `B`: 2 b response |
+| `DAT` | 633 b | - | `Aw`: 48 b address. `W`, `R`: 512 b data |
 
 One `DAT` network, not a request and response pair, even though it carries request-direction
 `DataW` and response-direction `DataR`:
@@ -302,22 +302,22 @@ below are from the port's own view. No wire is shared between the two instances.
 
 | Signal | Width | Direction | Description |
 |---|---:|---|---|
-| `TXREQFLIT` | 132 | Output | `REQ` transmit flit, header and payload |
+| `TXREQFLIT` | 136 | Output | `REQ` transmit flit, header and payload |
 | `TXREQVALID` | 1 | Output | `REQ` transmit valid |
 | `TXREQREADY` | 1 | Input | `REQ` transmit ready, from the receiver |
-| `RXREQFLIT` | 132 | Input | `REQ` receive flit |
+| `RXREQFLIT` | 136 | Input | `REQ` receive flit |
 | `RXREQVALID` | 1 | Input | `REQ` receive valid |
 | `RXREQREADY` | 1 | Output | `REQ` receive ready |
-| `TXRSPFLIT` | 122 | Output | `RSP` transmit flit, header and payload |
+| `TXRSPFLIT` | 126 | Output | `RSP` transmit flit, header and payload |
 | `TXRSPVALID` | 1 | Output | `RSP` transmit valid |
 | `TXRSPREADY` | 1 | Input | `RSP` transmit ready, from the receiver |
-| `RXRSPFLIT` | 122 | Input | `RSP` receive flit |
+| `RXRSPFLIT` | 126 | Input | `RSP` receive flit |
 | `RXRSPVALID` | 1 | Input | `RSP` receive valid |
 | `RXRSPREADY` | 1 | Output | `RSP` receive ready |
-| `TXDATFLIT` | 629 | Output | `DAT` transmit flit, flit type in `axi_ch`, see §6 |
+| `TXDATFLIT` | 633 | Output | `DAT` transmit flit, flit type in `axi_ch`, see §6 |
 | `TXDATVALID` | 1 | Output | `DAT` transmit valid |
 | `TXDATCRDVALID` | `NUM_VC` | Input | `DAT` credit valid, credit return from the receiver, one bit per virtual channel |
-| `RXDATFLIT` | 629 | Input | `DAT` receive flit |
+| `RXDATFLIT` | 633 | Input | `DAT` receive flit |
 | `RXDATVALID` | 1 | Input | `DAT` receive valid |
 | `RXDATCRDVALID` | `NUM_VC` | Output | `DAT` credit valid, credit return to the sender |
 
@@ -407,7 +407,7 @@ and validated against it at load.
 
 ## 6. Packet Format
 
-**Flit header, 44 b.**
+**Flit header, 48 b.**
 
 | Field | Bits | Width | Description |
 |---|---|---|---|
@@ -421,6 +421,8 @@ and validated against it at load.
 | `ordering_tag` | [33:26] | 8 | Reorder slot handle, allocated per transaction. Bounds a master to 256 outstanding transactions |
 | `collective_op` | [35:34] | 2 | Collective operation.<br>0: `UNICAST`, single destination, `collective_mask` zero<br>1: `MULTICAST`, replicate a request to the node set of `collective_mask`, merge its responses, error `BRESP` first<br>2-3: reserved<br>Write path only, `Ar` and `R` are always `UNICAST` |
 | `collective_mask` | [43:36] | 8 | Names the multicast node set: wildcard over `dst_id` on a request, `src_id` on its response. Derived from the `AWUSER` address mask |
+| `dst_port_id` | [45:44] | 2 | Which endpoint at `dst_id` receives. 0 is the tile on the router's LOCAL port |
+| `src_port_id` | [47:46] | 2 | Which endpoint at `src_id` issued. The response is addressed back to it |
 
 **Flit payload.**
 
@@ -531,14 +533,14 @@ The `AWUSER` mask is an address mask:
 - Every replica carries the same node-local offset. Nodes of a multicast group share one local
   address map, and each aperture covers the full burst footprint
 
-**Header overhead and W/R utilization.** Header overhead counts the 44 b header over the flit
+**Header overhead and W/R utilization.** Header overhead counts the 48 b header over the flit
 width. W and R utilization count the AXI data field over the flit width.
 
 | Network | Header overhead | `W` utilization | `R` utilization |
 |---|---:|---:|---:|
-| `REQ` 132 b | 33.3 % | 48.5 %, `NarrowW` | - |
-| `RSP` 122 b | 36.1 % | - | 52.5 %, `NarrowR` |
-| `DAT` 629 b | **7.0 %** | 81.4 %, `DataW` | 81.4 %, `DataR` |
+| `REQ` 136 b | 35.3 % | 47.1 %, `NarrowW` | - |
+| `RSP` 126 b | 38.1 % | - | 50.8 %, `NarrowR` |
+| `DAT` 633 b | **7.6 %** | 80.9 %, `DataW` | 80.9 %, `DataR` |
 
 `DataAw` rides `DAT` for ordering, not size: AXI4 write data carries no ID, a slave pairs data
 with requests by arrival order, so the request travels bundled ahead of its data. The cost is
@@ -581,9 +583,9 @@ AXI payload.
 
 **NoC channel**, per link direction:
 
-- `REQ`: flit 132 b @ 1 GHz = 16.5 GB/s channel, 8 GB/s payload
-- `RSP`: flit 122 b @ 1 GHz = 15.25 GB/s channel, 8 GB/s payload
-- `DAT`: flit 629 b @ 1 GHz = 78.6 GB/s channel, **64 GB/s** payload
+- `REQ`: flit 136 b @ 1 GHz = 17.0 GB/s channel, 8 GB/s payload
+- `RSP`: flit 126 b @ 1 GHz = 15.75 GB/s channel, 8 GB/s payload
+- `DAT`: flit 633 b @ 1 GHz = 79.1 GB/s channel, **64 GB/s** payload
 
 - `NarrowW` rides `REQ`, `NarrowR` rides `RSP`: concurrent.
 - Each `DAT` direction is its own wire bundle, a node's write data outbound and its read data

@@ -185,7 +185,7 @@ def test_packet_cpp_has_enabled_constants():
 
 
 def test_packet_cpp_padding_fields_have_enabled_false():
-    """The 44 b header has no reserved bits: PADDING_FIELDS_COUNT must be 0."""
+    """The 48 b header has no reserved bits: PADDING_FIELDS_COUNT must be 0."""
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
     assert "constexpr std::size_t PADDING_FIELDS_COUNT = 0;" in text, (
         "Expected PADDING_FIELDS_COUNT = 0; not found in ni_flit_constants.h"
@@ -195,9 +195,10 @@ def test_packet_cpp_padding_fields_have_enabled_false():
 def test_packet_cpp_functional_fields_have_enabled_true():
     """Functional fields must emit ENABLED = true in C++ header."""
     text = (INCLUDE_DIR / "ni_flit_constants.h").read_text(encoding="ascii")
-    # All 10 header fields are functional (44 b header has no reserved bits).
+    # All 12 header fields are functional (48 b header has no reserved bits).
     for field in ("AXI_CH", "SRC_ID", "DST_ID", "FIXED_VC", "VC_ID", "FLIT_TAIL",
-                  "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK"):
+                  "ORDERING_REQ", "ORDERING_TAG", "COLLECTIVE_OP", "COLLECTIVE_MASK",
+                  "DST_PORT_ID", "SRC_PORT_ID"):
         assert f"constexpr bool {field}_ENABLED = true;" in text, (
             f"Expected {field}_ENABLED = true; not found in ni_flit_constants.h"
         )
@@ -210,7 +211,7 @@ def test_packet_cpp_functional_fields_have_enabled_true():
 def test_padding_fields_array_elaborated():
     """ni_flit_constants.h must expose PaddingFieldPos struct + PADDING_FIELDS array.
 
-    The 44 b header has no reserved bits, so PADDING_FIELDS is a size-1 dummy
+    The 48 b header has no reserved bits, so PADDING_FIELDS is a size-1 dummy
     array (never read; consumers bound their loop with PADDING_FIELDS_COUNT,
     which is 0) rather than a zero-size array, which ISO C++ forbids.
     """

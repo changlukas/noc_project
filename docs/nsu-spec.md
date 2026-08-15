@@ -26,15 +26,15 @@ Depacketization is a one-flit-one-beat mapping. There is no burst splitting, mer
 
 ### 2.2 Flit format
 
-One 44-bit header layout, three flit widths, one per network (`specgen/generated/cpp/ni_flit_constants.h`). Bit numbering is LSB-first over the whole flit. Payload bit 0 is flit bit 44.
+One 48-bit header layout, three flit widths, one per network (`specgen/generated/cpp/ni_flit_constants.h`). Bit numbering is LSB-first over the whole flit. Payload bit 0 is flit bit 48.
 
 | network | `FLIT_WIDTH` | payload region | channels the NSU sees |
 |---|---|---|---|
-| REQ | 132 | [131:44], 88 b | in: `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` |
-| RSP | 122 | [121:44], 78 b | out: `NarrowB`, `DataB`, `NarrowR` |
-| DAT | 629 | [628:44], 585 b | in: `DataAw`, `DataW`; out: `DataR` |
+| REQ | 136 | [135:48], 88 b | in: `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` |
+| RSP | 126 | [125:48], 78 b | out: `NarrowB`, `DataB`, `NarrowR` |
+| DAT | 633 | [632:48], 585 b | in: `DataAw`, `DataW`; out: `DataR` |
 
-Header, flit bits [43:0], identical on all three:
+Header, flit bits [47:0], identical on all three:
 
 | field | flit bits | width | definition |
 |---|---|---|---|
@@ -48,6 +48,8 @@ Header, flit bits [43:0], identical on all three:
 | `ordering_tag` | [33:26] | 8 | Reorder-buffer slot from the source NI. Echoed verbatim. |
 | `collective_op` | [35:34] | 2 | 2'd0 UNICAST, 2'd1 MULTICAST. Captured from the AW, echoed onto the `B` (2.4). |
 | `collective_mask` | [43:36] | 8 | Node-id wildcard mask. Captured and echoed with `collective_op`. |
+| `dst_port_id` | [45:44] | 2 | Which endpoint at `dst_id` receives. 0 is the tile on the router's LOCAL port. |
+| `src_port_id` | [47:46] | 2 | Which endpoint at `src_id` issued. The response is addressed back to it. |
 
 There is no `rsvd` field: `PADDING_FIELDS_COUNT` = 0.
 
@@ -172,13 +174,13 @@ Three scalar faces, not structs: REQ ingress and RSP egress are ready/valid and 
 | `clk_i` | 1 | Clock. All sampling and registration on the positive edge. |
 | `rst_ni` | 1 | Synchronous active-low reset. Given only once at the beginning of simulation. |
 | `ctx_i` | 64 | Model handle from `cmodel_nsu_create`. Constant after time 0. |
-| `rx_req_valid_i` / `rx_req_flit_i` | 1 / 132 | From router LOCAL output. Request flit, valid 1 cycle per flit. Flit ignored while `valid` is low. |
+| `rx_req_valid_i` / `rx_req_flit_i` | 1 / 136 | From router LOCAL output. Request flit, valid 1 cycle per flit. Flit ignored while `valid` is low. |
 | `rx_req_ready_o` | 1 | To router. Tied constant true: the model's ingress queue is unbounded (`nsu_wrap.hpp`), so REQ backpressure is not exercised at this face. |
-| `tx_rsp_valid_o` / `tx_rsp_flit_o` | 1 / 122 | To router LOCAL input. Response flit, `valid` high exactly 1 cycle per flit, at most 1 flit per cycle, back-to-back cycles legal. `flit` = 122'h0 while `valid` is low. |
+| `tx_rsp_valid_o` / `tx_rsp_flit_o` | 1 / 126 | To router LOCAL input. Response flit, `valid` high exactly 1 cycle per flit, at most 1 flit per cycle, back-to-back cycles legal. `flit` = 126'h0 while `valid` is low. |
 | `tx_rsp_ready_i` | 1 | From router. Advisory, sampled two registrations late; the receiver pushes unconditionally on `valid`. |
-| `rx_dat_valid_i` / `rx_dat_flit_i` | 1 / 629 | From router LOCAL output. `DataAw` / `DataW` flits. No ready wire, flow control is pure credit: the router sends only while it holds sender credit, the NSU accepts every valid flit. |
+| `rx_dat_valid_i` / `rx_dat_flit_i` | 1 / 633 | From router LOCAL output. `DataAw` / `DataW` flits. No ready wire, flow control is pure credit: the router sends only while it holds sender credit, the NSU accepts every valid flit. |
 | `rx_dat_crdvalid_o` | DAT_NUM_VC | To router. Consumer credit pulse vector: bit v pulses for exactly 1 cycle when the depacketizer consumed one DAT request flit whose header `vc_id` = v. At most 1 pulse per VC per cycle. Replenishes the router LOCAL sender counter. |
-| `tx_dat_valid_o` / `tx_dat_flit_o` | 1 / 629 | To router LOCAL input. `DataR` flits, same valid rules as `tx_rsp_*`. |
+| `tx_dat_valid_o` / `tx_dat_flit_o` | 1 / 633 | To router LOCAL input. `DataR` flits, same valid rules as `tx_rsp_*`. |
 | `tx_dat_crdvalid_i` | DAT_NUM_VC | From router. Credit pulse vector: bit v pulses when the router drained one NSU DAT response flit from VC v. Replenishes the NSU per-VC sender counter (seed `NOC_ROUTER_VC_DEPTH` = 8). |
 
 ### 3.2 AXI master face (`axi_req_t` driven, `axi_rsp_t` consumed)
@@ -229,7 +231,7 @@ No `*user` and no `*region` signals cross this face in either direction.
 | `cmodel_nsu_tick` | `void cmodel_nsu_tick(ctx)` | Second call. Advances the model exactly one clock. |
 | `cmodel_nsu_get_outputs` | `void cmodel_nsu_get_outputs(ctx, rx_req_ready, tx_rsp_valid, tx_rsp_flit, tx_dat_valid, tx_dat_flit, rx_dat_crdvalid, awvalid, awid, awaddr, awlen, awsize, awburst, awlock, awcache, awprot, awqos, wvalid, wdata, wstrb, wlast, bready, arvalid, arid, araddr, arlen, arsize, arburst, arlock, arcache, arprot, arqos, rready)` | Third call. Results are registered nonblocking, visible on the wires from the next cycle. |
 
-Marshalling: each flit is little-endian `svBitVecVal` words at its own network's count (REQ 132 b = 5 words, RSP 122 b = 4, DAT 629 b = 20), 48-bit addresses occupy 2 words, 512-bit data is 16 words, the credit vector is 1 word with bit v = VC v. Handles are validated per call, a wrong-type or dead handle latches a DPI error polled centrally by `tb_top`.
+Marshalling: each flit is little-endian `svBitVecVal` words at its own network's count (REQ 136 b = 5 words, RSP 126 b = 4, DAT 633 b = 20), 48-bit addresses occupy 2 words, 512-bit data is 16 words, the credit vector is 1 word with bit v = VC v. Handles are validated per call, a wrong-type or dead handle latches a DPI error polled centrally by `tb_top`.
 
 ### 3.4 Parameters
 
@@ -243,7 +245,7 @@ Single-sourced in `specgen/source/constants.yaml`, generated into `ni_params.h` 
 | `NSU_ARBITER_FIFO_DEPTH` | 4 | 1 to 64 | wormhole per-input and VC-arbiter per-VC pending depths |
 | `NOC_DAT_NUM_VC` | 1 | 1 to 8 | DAT VC count, credit vector widths |
 | `NOC_ROUTER_VC_DEPTH` | 8 | 1 to 16 | DAT response sender credit seed per VC |
-| `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 132 / 122 / 629 | 64 to 1024 each | per-network flit containers and DPI marshalling |
+| `NOC_REQ_FLIT_WIDTH` / `NOC_RSP_FLIT_WIDTH` / `NOC_DAT_FLIT_WIDTH` | 136 / 126 / 633 | 64 to 1024 each | per-network flit containers and DPI marshalling |
 | `AXI_ID_WIDTH` / `AXI_ADDR_WIDTH` / `AXI_DATA_WIDTH` | 3 / 48 / 512 | 1..32 / 1..64 / {32,64,128,256,512,1024} | beat structs and DPI |
 | create-time `src_id` | 0 | 8 bit | stamped into every response flit `src_id` |
 
@@ -255,7 +257,7 @@ The request ingress stage is a 1-entry register per channel plus the single pend
 2. **Input idle state.** While a face's `valid` is low its `flit` may carry any value and is ignored.
 3. **Sampling edge.** All inputs are sampled at the positive edge of `clk_i` by the 3-call DPI sequence `set_inputs`, `tick`, `get_outputs`, in that order, every non-reset posedge. Outputs are registered at the same posedge and visible from the next cycle. The verification pattern checks outputs at the positive edge.
 4. **Output valid behavior.** `awvalid`, `wvalid`, `arvalid`, once high, stay high with stable fields until the corresponding ready is sampled high (IHI 0022, A3.2.1). `tx_rsp_valid_o` and `tx_dat_valid_o` are each high exactly 1 cycle per flit, at most 1 flit per cycle per face, and may be high in consecutive cycles for distinct flits.
-5. **Output idle value.** Every output field whose valid is low is 0. Example: with `awvalid` = 0, `awaddr` = 48'h0. `tx_rsp_flit_o` = 122'h0 while `tx_rsp_valid_o` = 0, and `tx_dat_flit_o` = 629'h0 while `tx_dat_valid_o` = 0. `bready`/`rready` are policy levels (rule 10) and carry meaning while low.
+5. **Output idle value.** Every output field whose valid is low is 0. Example: with `awvalid` = 0, `awaddr` = 48'h0. `tx_rsp_flit_o` = 126'h0 while `tx_rsp_valid_o` = 0, and `tx_dat_flit_o` = 633'h0 while `tx_dat_valid_o` = 0. `bready`/`rready` are policy levels (rule 10) and carry meaning while low.
 6. **Reset.** `rst_ni` is synchronous active-low, asserted only once at the beginning of simulation. All `nsu_wrap` output registers clear to 0 during reset. Model state is initialized by `cmodel_nsu_create` at time 0. There is no mid-run reset.
 7. **Gap and rate.** No minimum gap anywhere: request flits may arrive every cycle, response flits may leave every cycle, subject only to credit. Each credit pulse is exactly 1 cycle wide, at most 1 per VC per cycle on each credit port.
 8. **Latency.** Request: from the posedge at which an AW (or AR) flit is sampled on its ingress face to the posedge at which the slave first samples `awvalid` (`arvalid`) high is exactly 2 cycles when uncontended (empty queues, MetaBuffer pool not full, slave ready). Response: from the posedge at which the B/R wire handshake is sampled to the posedge at which the router first samples the egress face's `valid` high is exactly 4 cycles when uncontended (empty queues, sender credit available). Under contention the latency grows with backpressure and has no bound in this spec.

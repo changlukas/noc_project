@@ -4,8 +4,8 @@ Revision 0.2, 2026-08-07.
 
 Every parameter below moves a specific part of the latency-throughput curve. Values are
 single-sourced in `specgen/source/constants.yaml`, which is authoritative. The parameters describe
-the shipped c_model configuration: two AXI classes over three physical networks, REQ 132 b,
-RSP 122 b and DAT 629 b, each with its own flit width and flow control (REQ and RSP ready/valid,
+the shipped c_model configuration: two AXI classes over three physical networks, REQ 136 b,
+RSP 126 b and DAT 633 b, each with its own flit width and flow control (REQ and RSP ready/valid,
 DAT credit). Defaults are quoted inline for convenience. Effects are stated as directions, except
 in the measured baseline at the end.
 
@@ -18,7 +18,7 @@ while buffer and outstanding depths move the queuing part.
 
 | Parameter | Affects | Effect | Default (range) |
 |---|---|---|---|
-| `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets the data-class payload, hence the DAT flit width (`DAT_FLIT_WIDTH` = 629 b = 44 b header + 585 b payload) and per-router buffer and crossbar area | 512 b (32, 64, 128, 256, 512, 1024) |
+| `AXI_DATA_WIDTH` | Peak bandwidth, area | Sets the data-class payload, hence the DAT flit width (`DAT_FLIT_WIDTH` = 633 b = 48 b header + 585 b payload) and per-router buffer and crossbar area | 512 b (32, 64, 128, 256, 512, 1024) |
 | `REQ_NUM_VC`, `RSP_NUM_VC`, `DAT_NUM_VC` | Peak bandwidth, area | Recover link bandwidth lost to head-of-line blocking, at a buffer cost that is `flit width x depth x NUM_VC` per network. Only DAT is swept by the topology set, REQ and RSP being scalar ready/valid | 1, 1, 1 (1 to 8) |
 | `MESH_X_DIM`, `MESH_Y_DIM` | Latency floor | Set hop count, hence the structural transport term of every latency form in the spec | 4, 4 (2 to 16) |
 | `ROUTER_VC_DEPTH` | Sustained throughput | Credit seed of the upstream sender on DAT, sized by rule 1 below | 8 (1 to 16) |

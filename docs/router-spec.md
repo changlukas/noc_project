@@ -28,14 +28,14 @@ VC assignment, or `NUM_VC` is a DAT rule; where the two shapes differ the sectio
 which one it is describing.
 
 **Flit.** The unit of transfer on a NoC link is one flit: a fixed-width word carrying a
-44-bit header and a per-network payload. A link moves at most one flit per direction
+48-bit header and a per-network payload. A link moves at most one flit per direction
 per cycle.
 
 | Network | flit width | payload | Flow control |
 |---|---|---|---|
-| REQ | 132 | [131:44], 88 b | ready/valid, 1 VC |
-| RSP | 122 | [121:44], 78 b | ready/valid, 1 VC |
-| DAT | 629 | [628:44], 585 b | credit, `NUM_VC` 1..8 |
+| REQ | 136 | [135:48], 88 b | ready/valid, 1 VC |
+| RSP | 126 | [125:48], 78 b | ready/valid, 1 VC |
+| DAT | 633 | [632:48], 585 b | credit, `NUM_VC` 1..8 |
 
 **Packet and wormhole switching.** An AXI transaction is packetized by the NI into one
 or more flits sharing the same header `dst_id`. The header bit `flit_tail` marks packet
@@ -80,9 +80,9 @@ shipped `ready_slack` = 2 is PROVISIONAL and awaits a measured wire-loop calibra
 
 ### 2.2 Flit format
 
-One 44-bit header layout on all three networks, from
-`specgen/generated/cpp/ni_flit_constants.h`. Header occupies flit bits [43:0], payload
-occupies the rest (REQ [136:44], RSP [126:44], DAT [628:44]).
+One 48-bit header layout on all three networks, from
+`specgen/generated/cpp/ni_flit_constants.h`. Header occupies flit bits [47:0], payload
+occupies the rest (REQ [135:48], RSP [125:48], DAT [632:48]).
 
 | Field | Flit bits | Width | Meaning |
 |---|---|---|---|
@@ -96,6 +96,8 @@ occupies the rest (REQ [136:44], RSP [126:44], DAT [628:44]).
 | `ordering_tag` | [33:26] | 8 | NI reorder-buffer index. Transparent to the router, except that the join checks joined heads agree on it. |
 | `collective_op` | [35:34] | 2 | 2'd0 UNICAST, 2'd1 MULTICAST. Read by both request routers (fork) and the RSP router (join). |
 | `collective_mask` | [43:36] | 8 | Node-id wildcard mask. Read with `collective_op`. |
+| `dst_port_id` | [45:44] | 2 | Which endpoint at `dst_id` receives. 0 is the tile on the router's LOCAL port. Transparent to the router. |
+| `src_port_id` | [47:46] | 2 | Which endpoint at `src_id` issued. The response is addressed back to it. Transparent to the router. |
 | payload | per network | 93 / 83 / 585 | AXI channel payload. Transparent to the router. |
 
 There is no `rsvd` field: `PADDING_FIELDS_COUNT` = 0, the header is fully assigned.
@@ -423,9 +425,9 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
 | `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
-| `REQ_FLIT_WIDTH` | 132 | 64..1024 | REQ flit bus width, bits |
-| `RSP_FLIT_WIDTH` | 122 | 64..1024 | RSP flit bus width, bits |
-| `DAT_FLIT_WIDTH` | 629 | 64..1024 | DAT flit bus width, bits |
+| `REQ_FLIT_WIDTH` | 136 | 64..1024 | REQ flit bus width, bits |
+| `RSP_FLIT_WIDTH` | 126 | 64..1024 | RSP flit bus width, bits |
+| `DAT_FLIT_WIDTH` | 633 | 64..1024 | DAT flit bus width, bits |
 | `LINK_PORTS` | 5 | fixed 5 | port array size = {LOCAL, NORTH, EAST, SOUTH, WEST} |
 
 Router model configuration, fixed at `cmodel_router_create` time:
@@ -471,11 +473,11 @@ Inputs:
 | `rst_ni` | 1 | Synchronous active-low reset. Given only once, at the beginning of simulation (rule R9). |
 | `ctx_i` | 64 | Model handle returned by `cmodel_router_create`. Constant after reset. From tb_top. |
 | `rx_req_valid` | 5 | Bit p: the sender at port p drives one REQ flit this cycle. Bit 0 is the local NI's injection. |
-| `rx_req_flit` | 132 x 5 (unpacked `[LINK_PORTS]`) | REQ flit from port p. Valid only when `rx_req_valid[p]` is high, all zeros otherwise. |
+| `rx_req_flit` | 136 x 5 (unpacked `[LINK_PORTS]`) | REQ flit from port p. Valid only when `rx_req_valid[p]` is high, all zeros otherwise. |
 | `tx_req_ready` | 5 | Bit p: the receiver at port p can take a REQ flit. Advisory (see above). |
-| `rx_rsp_valid` / `rx_rsp_flit` / `tx_rsp_ready` | 5 / 122 x 5 / 5 | RSP mirror. |
+| `rx_rsp_valid` / `rx_rsp_flit` / `tx_rsp_ready` | 5 / 126 x 5 / 5 | RSP mirror. |
 | `rx_dat_valid` | 5 | Bit p: the sender at port p drives one DAT flit this cycle. |
-| `rx_dat_flit` | 629 x 5 | DAT flit from port p. |
+| `rx_dat_flit` | 633 x 5 | DAT flit from port p. |
 | `tx_dat_crdvalid` | DAT_NUM_VC x 5 (unpacked) | Per-VC credit pulse from the receiver at port p, for a DAT flit this node previously sent out of its p output. Increments `credit_[p][vc]`. |
 
 Outputs (all registered, reset to 0):
@@ -483,11 +485,11 @@ Outputs (all registered, reset to 0):
 | Signal | Bit width | Definition |
 |---|---|---|
 | `tx_req_valid` | 5 | Bit p: one REQ flit driven toward port p this cycle. Boundary bits always 0. |
-| `tx_req_flit` | 132 x 5 | REQ flit toward port p. All zeros when `tx_req_valid[p]` is low. |
+| `tx_req_flit` | 136 x 5 | REQ flit toward port p. All zeros when `tx_req_valid[p]` is low. |
 | `rx_req_ready` | 5 | Bit p: this node can take a REQ flit on port p (almost-full ready, section 2.1). |
-| `tx_rsp_valid` / `tx_rsp_flit` / `rx_rsp_ready` | 5 / 122 x 5 / 5 | RSP mirror. |
+| `tx_rsp_valid` / `tx_rsp_flit` / `rx_rsp_ready` | 5 / 126 x 5 / 5 | RSP mirror. |
 | `tx_dat_valid` | 5 | Bit p: one DAT flit driven toward port p this cycle. Boundary bits always 0. |
-| `tx_dat_flit` | 629 x 5 | DAT flit toward port p. All zeros when `tx_dat_valid[p]` is low. |
+| `tx_dat_flit` | 633 x 5 | DAT flit toward port p. All zeros when `tx_dat_valid[p]` is low. |
 | `rx_dat_crdvalid` | DAT_NUM_VC x 5 | Per-VC credit pulse to the sender at port p: this node drained one flit from its p-direction DAT input FIFO, VC v. |
 
 NI-edge flow control (LOCAL port, who answers whom): on REQ/RSP the receiver drives the

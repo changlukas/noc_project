@@ -6,7 +6,7 @@ The NMU is the master-side network interface of the NoC. It sits between an exte
 
 ### 2.1 Packetization
 
-The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted AXI request beat becomes exactly one flit, and every response flit becomes exactly one AXI response beat. A flit is a 44-bit header plus a payload sized per network (REQ 132 b, RSP 122 b, DAT 629 b total). The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the AXI channel fields verbatim.
+The NoC fabric moves fixed-size flits, not AXI beats. Packetization is a 1-to-1 mapping: every accepted AXI request beat becomes exactly one flit, and every response flit becomes exactly one AXI response beat. A flit is a 48-bit header plus a payload sized per network (REQ 136 b, RSP 126 b, DAT 633 b total). The header carries routing and ordering metadata (source node, destination node, virtual channel, wormhole packet boundary, reorder-buffer tag, collective op and mask). The payload carries the AXI channel fields verbatim.
 
 A write transaction of AWLEN+1 beats therefore becomes 1 AW flit followed by AWLEN+1 W flits. A read request becomes 1 AR flit. The write's flits form one wormhole packet (the AW flit opens it, the W flit with `wlast=1` closes it) so no other request flit from this NMU can interleave between an AW and its W beats on the link. AW+W is the only multi-flit packet the fabric builds, and AXI4 IHI 0022 A5.3.3 is why: W beats of different transactions may not interleave, so the AW and its burst have to travel as one indivisible unit. A read request and every response are single-flit packets, R beats included.
 
@@ -18,17 +18,17 @@ The NMU has three flit faces, one per physical network (Section 3.1):
 
 ### 2.2 Flit format
 
-Source of truth: `specgen/generated/cpp/ni_flit_constants.h` (generated from `specgen/generated/json/ni_packet.json`, drift-gated at build). One 44-bit header layout, three flit widths, one per network:
+Source of truth: `specgen/generated/cpp/ni_flit_constants.h` (generated from `specgen/generated/json/ni_packet.json`, drift-gated at build). One 48-bit header layout, three flit widths, one per network:
 
 | Network | `FLIT_WIDTH` | Payload region | Channels carried |
 |---|---|---|---|
-| REQ | 132 | `flit[131:44]`, 88 b | `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` |
-| RSP | 122 | `flit[121:44]`, 78 b | `NarrowB`, `DataB`, `NarrowR` |
-| DAT | 629 | `flit[628:44]`, 585 b | `DataAw`, `DataW`, `DataR` |
+| REQ | 136 | `flit[135:48]`, 88 b | `NarrowAw`, `NarrowW`, `NarrowAr`, `DataAr` |
+| RSP | 126 | `flit[125:48]`, 78 b | `NarrowB`, `DataB`, `NarrowR` |
+| DAT | 633 | `flit[632:48]`, 585 b | `DataAw`, `DataW`, `DataR` |
 
-Each network's width is the widest payload it carries plus the header. Payload field positions below are relative to the payload region: payload bit p is flit bit p+44. A payload shorter than its network's region leaves the upper bits 0.
+Each network's width is the widest payload it carries plus the header. Payload field positions below are relative to the payload region: payload bit p is flit bit p+48. A payload shorter than its network's region leaves the upper bits 0.
 
-Header (`flit[43:0]`), identical on all three networks:
+Header (`flit[47:0]`), identical on all three networks:
 
 | Field | Bits | Width | Definition |
 |---|---|---|---|
@@ -42,6 +42,8 @@ Header (`flit[43:0]`), identical on all three networks:
 | ordering_tag | [33:26] | 8 | RoB slot tag. AW: the single slot. AR: base of the len+1 consecutive slots. 0 when ordering_req=0. |
 | collective_op | [35:34] | 2 | 2'd0 UNICAST, 2'd1 MULTICAST, 2'd2-3 reserved (Section 2.8). |
 | collective_mask | [43:36] | 8 | Node-id wildcard mask of a multicast. 0 on every unicast flit. |
+| dst_port_id | [45:44] | 2 | Which endpoint at `dst_id` receives. 0 is the tile on the router's LOCAL port. |
+| src_port_id | [47:46] | 2 | Which endpoint at `src_id` issued. The response is addressed back to it. |
 
 There is no `rsvd` field: `PADDING_FIELDS_COUNT` = 0, the header is fully assigned.
 
@@ -184,9 +186,9 @@ Single source `specgen/source/constants.yaml`, generated into `ni_params.h` and 
 | AXI_DATA_WIDTH | 512 | {32,64,128,256,512,1024} | wdata / rdata, WSTRB_WIDTH = 64 |
 | AXI_AWUSER_WIDTH | 58 | 10..64 | AWUSER slave-port field and the DPI unpack mask: 8 b user + 2 b collective_op + 48 b collective address mask (Section 2.8) |
 | NOC_DAT_NUM_VC | 1 | 1 to 8 | `VcAllocator`, DAT credit vectors |
-| NOC_REQ_FLIT_WIDTH | 132 | 64..1024 | REQ egress flit port |
-| NOC_RSP_FLIT_WIDTH | 122 | 64..1024 | RSP ingress flit port |
-| NOC_DAT_FLIT_WIDTH | 629 | 64..1024 | DAT flit ports, both directions |
+| NOC_REQ_FLIT_WIDTH | 136 | 64..1024 | REQ egress flit port |
+| NOC_RSP_FLIT_WIDTH | 126 | 64..1024 | RSP ingress flit port |
+| NOC_DAT_FLIT_WIDTH | 633 | 64..1024 | DAT flit ports, both directions |
 | NOC_ROUTER_VC_DEPTH | 8 | 1..16 | DAT request sender credit seed per VC |
 | NMU_ROB_B_DEPTH | 128 | 1..256 | B slot pool |
 | NMU_ROB_R_DEPTH | 128 | 1..256 | R slot pool |
@@ -272,9 +274,9 @@ All ports below are the real `nmu_wrap` ports (`ref_model/top/nmu_wrap.sv:54-77`
 | axi_req_i.rready | 1 | Master ready for R. |
 | tx_req_ready_i | 1 | REQ egress ready. Advisory, sampled two registrations late (Section 3.4 rule P4). |
 | rx_rsp_valid_i | 1 | An RSP flit is on the wire this cycle. |
-| rx_rsp_flit_i | 122 | RSP flit, format of Section 2.2. axi_ch must be `NarrowB`, `DataB` or `NarrowR` (guarantee G2). Unknown when valid is low. |
+| rx_rsp_flit_i | 126 | RSP flit, format of Section 2.2. axi_ch must be `NarrowB`, `DataB` or `NarrowR` (guarantee G2). Unknown when valid is low. |
 | rx_dat_valid_i | 1 | A DAT flit is on the wire this cycle. |
-| rx_dat_flit_i | 629 | DAT flit. axi_ch must be `DataR` (guarantee G2). Unknown when valid is low. |
+| rx_dat_flit_i | 633 | DAT flit. axi_ch must be `DataR` (guarantee G2). Unknown when valid is low. |
 | tx_dat_crdvalid_i | DAT_NUM_VC | Per-VC one-cycle credit pulse: bit v high means the router drained one NMU DAT request flit from VC v. Multiple bits may pulse in one cycle. |
 
 ### 3.2 Outputs
@@ -292,10 +294,10 @@ Every output is a registered signal: it changes only at posedge clk_i and reflec
 | axi_rsp_o.rvalid | 1 | R beat available. Held high until rready is observed. |
 | axi_rsp_o.rid, rdata, rresp, rlast | 3, 512, 2, 1 | Read response fields. 0 when rvalid is low. |
 | tx_req_valid_o | 1 | REQ request flit on the wire this cycle. At most one flit per cycle, not held. |
-| tx_req_flit_o | 132 | REQ request flit, format of Section 2.2. 0 when valid is low. |
+| tx_req_flit_o | 136 | REQ request flit, format of Section 2.2. 0 when valid is low. |
 | rx_rsp_ready_o | 1 | RSP ingress ready. Tied true: the model's ingress queue is unbounded (`nmu_wrap.hpp`). |
 | tx_dat_valid_o | 1 | DAT request flit on the wire this cycle. At most one flit per cycle. Not held: the flit is consumed by the credit protocol, there is no ready wire. |
-| tx_dat_flit_o | 629 | DAT request flit. 0 when valid is low. |
+| tx_dat_flit_o | 633 | DAT request flit. 0 when valid is low. |
 | rx_dat_crdvalid_o | DAT_NUM_VC | Per-VC one-cycle consumer credit pulse: bit v high means the NMU consumed one DAT response flit from VC v. At most one pulse per VC per cycle (pending consumptions queue up and drain one per cycle). |
 
 ### 3.3 DPI functions
@@ -317,7 +319,7 @@ An invalid handle raises a categorized model error which the testbench error pol
 ### 3.4 Protocol rules
 
 1. Input rhythm: the AXI face is handshake-paced, there is no fixed delivery rhythm. Within one write, exactly awlen+1 W beats follow their AW in issue order and bursts never interleave W beats (AXI4 has no WID). Example: AW with awlen = 8'h01 is followed by 2 W beats, the second with wlast = 1. Each response face presents at most one flit per cycle. Credit vectors may pulse any subset of bits in any cycle.
-2. Idle state: input payload buses are don't-care while their valid is low, the model reads them only on the handshake cycle (valid and ready both high) and reads a response flit only while that face's valid is high. All output payload buses are driven to 0 while their valid is low (example: `tx_dat_flit_o` = 629'h0 whenever `tx_dat_valid_o` = 0).
+2. Idle state: input payload buses are don't-care while their valid is low, the model reads them only on the handshake cycle (valid and ready both high) and reads a response flit only while that face's valid is high. All output payload buses are driven to 0 while their valid is low (example: `tx_dat_flit_o` = 633'h0 whenever `tx_dat_valid_o` = 0).
 3. Sampling edge: all inputs are sampled at the positive edge of clk_i. One posedge = one model cycle via the 3-call DPI discipline of Section 3.3, and the outputs computed from cycle-N inputs appear on the wires during cycle N+1 (registered outputs). The verification pattern captures outputs at the positive edge.
 4. Valid behavior: bvalid and rvalid, once asserted, stay asserted with stable payload until the cycle their ready is high (AXI4 IHI 0022 A3.2.1). `tx_req_valid_o` and `tx_dat_valid_o` are per-flit strobes, high only on cycles that carry a flit, at most one flit per cycle. `tx_dat_valid_o` never waits on a ready: the per-VC credit counter guarantees the receiver has buffer space. `tx_req_ready_i` is advisory, not a same-cycle accept — the NMU grants against a ready sampled two registrations earlier and the receiver pushes unconditionally on valid, so the transfer is `valid` alone.
 5. Output idle value: bid, bresp, rid, rdata, rresp, rlast are 0 when their valid is low. `tx_req_flit_o` and `tx_dat_flit_o` are 0 when their valid is low. Credit outputs are 0 in non-pulse cycles.
@@ -347,7 +349,7 @@ The implementation does not handle the following, they are guaranteed not to hap
 
 Each item names its verification and the failure condition. "ctest" items run in the pure C++ suite (`ref_model/c_model/tests/`), "co-sim" items run under the generated testbench (`make -C sim TB=<topology> PATTERN=<pattern>`, regression via `sim/run_regress.py`) where correctness is judged by the scoreboard's per-transaction write-to-readback compare plus the model's internal asserts (any assert abort fails the run).
 
-1. Interface: the block implements exactly the Section 3.1 / 3.2 ports of `nmu_wrap` with the given widths (REQ 132 b, RSP 122 b, DAT 629 b flits; DAT_NUM_VC-wide credit vectors). Verified: co-sim elaboration (AXI struct port binding, scalar NoC-face binding, `$fatal` width guard in `nmu_wrap.sv`). Failure: elaboration error or width-guard fatal.
+1. Interface: the block implements exactly the Section 3.1 / 3.2 ports of `nmu_wrap` with the given widths (REQ 136 b, RSP 126 b, DAT 633 b flits; DAT_NUM_VC-wide credit vectors). Verified: co-sim elaboration (AXI struct port binding, scalar NoC-face binding, `$fatal` width guard in `nmu_wrap.sv`). Failure: elaboration error or width-guard fatal.
 2. Reset: after the single initial rst_ni assertion, every output is 0, and outputs stay 0 until traffic (rule P6). Verified: `TEST(NmuWrap, idle_adapter_keeps_readys_low)` (`ref_model/c_model/tests/wrap/test_nmu_wrap.cpp`) and cycle-1 sampling in co-sim. Failure: any nonzero output during or immediately after reset.
 3. Registered outputs: outputs are functions of state as of the previous posedge, never combinational paths from same-cycle inputs (rule P3). Verified: `TEST(NmuWrap, single_aw_w_two_phase_handshake)`, which requires the 1-cycle valid-to-ready offset. Failure: same-cycle input-to-output dependence changes the handshake cycle count.
 4. One-shot address ready: awready (arready) asserts only when awvalid (arvalid) was high the previous sampled cycle with FIFO space, stays high 1 cycle, and is low the cycle after a handshake. Consequence: at most one address handshake per 2 cycles per channel. Example: awvalid from cycle 1 gives awready only in cycle 2, and a second AW held from cycle 3 handshakes in cycle 4. Verified: `TEST(NmuWrap, single_aw_w_two_phase_handshake)`, `TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available)`. Failure: ready asserted before valid observed, held more than 1 cycle, or back-to-back address handshakes.
@@ -428,7 +430,7 @@ wready             0    0    1    1    0    0    0     <- pre-asserted from cycl
                              ^    ^                       (2 owed beats), drops after wlast
                              W0   W1(wlast=1)
 tx_dat_valid_o     0    0    0    0    1    1    1     <- 3 flits back-to-back
-tx_dat_flit_o      0    0    0    0    AW   W0   W1    <- 629'h0 while valid low
+tx_dat_flit_o      0    0    0    0    AW   W0   W1    <- 633'h0 while valid low
                         |--------------|
                         3 cycles: AW handshake -> AW flit (SPEC 30)
 

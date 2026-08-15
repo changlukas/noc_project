@@ -11,7 +11,7 @@
 namespace ni::cmodel::wrap {
 
 // Full c_model flit stored as a byte array, size = ni::FLIT_WIDTH rounded up to bytes.
-static constexpr int FLIT_BYTES = (ni::FLIT_WIDTH + 7) / 8;  // 79
+static constexpr int FLIT_BYTES = (ni::FLIT_WIDTH + 7) / 8;  // 80
 using FlitBytes = std::array<uint8_t, FLIT_BYTES>;
 
 // Number of 32-bit svBitVecVal words needed to carry one flit.

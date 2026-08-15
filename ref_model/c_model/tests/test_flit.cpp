@@ -67,7 +67,7 @@ TEST(Flit, SetGetPayloadBytesNarrowWdata) {
 }
 
 TEST(Flit, PaddingCheckPassesWhenZero) {
-    // The 44 b header has no reserved bits (spec drops the padding/rsvd
+    // The 48 b header has no reserved bits (spec drops the padding/rsvd
     // field entirely), so PADDING_FIELDS_COUNT is 0 and check_padding_is_zero
     // is vacuously true.
     Flit f;

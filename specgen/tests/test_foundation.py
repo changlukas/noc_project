@@ -47,7 +47,7 @@ def test_header_field_enabled_raises_for_unknown():
 
 
 def test_header_fields_padding_list_is_empty():
-    """header_fields_padding returns no fields: the 44 b header has no reserved bits."""
+    """header_fields_padding returns no fields: the 48 b header has no reserved bits."""
     spec = _load_packet()
     assert C.header_fields_padding(spec) == []
 
