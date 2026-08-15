@@ -93,11 +93,10 @@ def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000, 
 
 def test_emit_file_master_node_format_and_partition(tmp_path):
     d = str(tmp_path / "node0")
-    bases = {1: 0x100000000}
-    g.emit_file_master_node(d, src_idx=0, dst_cids=[1, 1], n_nodes=16,
+    g.emit_file_master_node(d, src_idx=0, dst_bases=[0x100000000] * 2, n_nodes=16,
                             base_local=0x1000, region_bytes=0x40000,
                             axi_size=5, axi_len=0, data_width=256,
-                            id_rng=random.Random(0), bases=bases)
+                            id_rng=random.Random(0))
     w = _parse_write(os.path.join(d, "write.txt"))
     assert len(w) == 2
     for t in w:
@@ -109,26 +108,24 @@ def test_emit_file_master_node_format_and_partition(tmp_path):
     assert len(rlines) == 2 * 11                    # 11 ax fields, no atop, no beats
 
 
-def test_emit_file_master_node_addr_from_bases_dict(tmp_path):
-    """addr = bases[dst_cid] + local_off -- dst coord_id 0x12, base 0x12*4GB,
-    offset 0x40 -> 0x1200000040 (byte-for-byte the legacy dst_cid<<32 layout)."""
+def test_emit_file_master_node_addr_is_the_destination_window(tmp_path):
+    """addr = dst_base + local_off -- base 0x12*4GB, offset 0x40 ->
+    0x1200000040 (byte-for-byte the legacy dst_cid<<32 layout)."""
     d = str(tmp_path / "node0")
-    bases = {0x12: 0x12 * 0x100000000}
-    g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
+    g.emit_file_master_node(d, src_idx=0, dst_bases=[0x12 * 0x100000000], n_nodes=1,
                             base_local=0x40, region_bytes=0x40000,
                             axi_size=5, axi_len=0, data_width=256,
-                            id_rng=random.Random(0), bases=bases)
+                            id_rng=random.Random(0))
     w = _parse_write(os.path.join(d, "write.txt"))
     assert w[0]["addr"] == 0x1200000040
 
 
-def test_emit_file_master_node_arbitrary_base_from_bases_dict(tmp_path):
+def test_emit_file_master_node_takes_an_arbitrary_window_base(tmp_path):
     d = str(tmp_path / "node0")
-    bases = {0x12: 0x12 * 0x40000000}
-    g.emit_file_master_node(d, src_idx=0, dst_cids=[0x12], n_nodes=1,
+    g.emit_file_master_node(d, src_idx=0, dst_bases=[0x12 * 0x40000000], n_nodes=1,
                             base_local=0x40, region_bytes=0x40000,
                             axi_size=5, axi_len=0, data_width=256,
-                            id_rng=random.Random(0), bases=bases)
+                            id_rng=random.Random(0))
     w = _parse_write(os.path.join(d, "write.txt"))
     assert w[0]["addr"] == 0x12 * 0x40000000 + 0x40
 
@@ -139,7 +136,7 @@ def test_load_topology_reads_packed_bases_from_address_map(tmp_path):
     topo_path = tmp_path / "t.yaml"
     topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000,
                                                 block_size=0x80000000))
-    nodes, x_dim, y_dim, bases, _config_bases, _sizes = g._load_topology(str(topo_path))
+    nodes, x_dim, y_dim, bases, _config_bases, _sizes, _periph = g._load_topology(str(topo_path))
     assert (x_dim, y_dim) == (4, 4)
     # packed in raster (y, x) order, matching _uniform_topology_yaml's emit order
     assert bases[g.coord_id(0, 0)] == 0
@@ -387,12 +384,12 @@ def test_tile_major_packs_each_node_into_one_block():
         assert got[("config", x, y)] == idx * block + 0x2000000
 
 
-def test_pack_bases_are_coordinate_derived_with_a_border_column():
+def test_pack_bases_are_coordinate_derived_on_a_non_power_of_two_row():
     from address_map import pack
-    # Tiles at x=1..2, peripherals at x=0, so the route span is 3 and a row
-    # strides four slots. Both spaces are declared: pack() requires full
-    # coverage of memory AND config, which is a real invariant of every
-    # topology and is not relaxed for a test.
+    # x_dim 3, so clog2(3) = 2 index bits and a row strides four slots, one of
+    # them unused. Both spaces are declared: pack() requires full coverage of
+    # memory AND config, which is a real invariant of every topology and is not
+    # relaxed for a test.
     mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1, 2)]
     cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
            for y in (0, 1) for x in (0, 1, 2)]
@@ -826,7 +823,7 @@ def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
         "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
         "    - { x: 1, y: 1, size: 0x1000, space: config }\n"
     )
-    _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes = g._load_topology(
+    _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes, _periph = g._load_topology(
         str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
     packed_bases, _entries = address_map.pack(topo["address_map"], x_dim=2, y_dim=2)
@@ -848,7 +845,7 @@ def _mcast_topology(tmp_path, config_size, dim=8):
 
 def _emit_mcast(tmp_path, config_size):
     topo_path = _mcast_topology(tmp_path, config_size)
-    nodes, x_dim, y_dim, bases, config_bases, sizes = g._load_topology(str(topo_path))
+    nodes, x_dim, y_dim, bases, config_bases, sizes, _periph = g._load_topology(str(topo_path))
     g.emit_multicast_pattern(str(tmp_path / f"out{config_size:x}"), nodes, x_dim, y_dim,
                              bases, config_bases, sizes, "row", 2, 5, 0, 512,
                              0x1000, len(nodes) * 2 * g._SLOT_STRIDE, len(nodes))
@@ -887,7 +884,7 @@ def test_footprint_guard_rejects_a_region_bytes_overrun_of_the_memory_tile(tmp_p
     # computed numbers (not a mock) are checked in the captured message.
     err = capsys.readouterr().err
     assert "extent(0xa00)" in err
-    assert "overruns the smallest memory aperture 0x1000" in err
+    assert "overruns the smallest addressable window 0x1000" in err
 
 
 def test_footprint_guard_accounts_for_the_multicast_pattern_s_wider_extent(tmp_path, capsys):
@@ -909,7 +906,58 @@ def test_footprint_guard_accounts_for_the_multicast_pattern_s_wider_extent(tmp_p
                 "--out", str(tmp_path / "out_mcast"), "--transactions-per-node", "16"])
     err = capsys.readouterr().err
     assert "extent(0x1400)" in err
-    assert "overruns the smallest memory aperture 0x2000" in err
+    assert "overruns the smallest addressable window 0x2000" in err
+
+
+_SMALL_PERIPHERAL_TOPOLOGY = """\
+topology: { name: smallperiph, x_dim: 2, y_dim: 2, num_vc: 1 }
+address_map:
+  block_size: 0x100000000
+  tiles:
+    - { x: 0, y: 0, size: 0x2000000 }
+    - { x: 1, y: 0, size: 0x2000000 }
+    - { x: 0, y: 1, size: 0x2000000 }
+    - { x: 1, y: 1, size: 0x2000000 }
+    - { x: 0, y: 0, size: 0x1000, space: config }
+    - { x: 1, y: 0, size: 0x1000, space: config }
+    - { x: 0, y: 1, size: 0x1000, space: config }
+    - { x: 1, y: 1, size: 0x1000, space: config }
+  peripherals:
+    - { x: 0, y: 0, face: x, size: %s }
+    - { x: 0, y: 1, face: x, size: %s }
+"""
+
+
+def test_footprint_guard_covers_a_peripheral_window(tmp_path, capsys):
+    """Fault injection on the guard's peripheral arm, which is the one that went
+    missing: peripherals used to be memory tiles and were inside this min, and
+    when they became their own space nothing bounded them.
+
+    An unbounded peripheral window does not fault. The slot walks past the
+    region into the NEXT peripheral's, the SAM routes it to that endpoint, and
+    the readback of the same address agrees -- so the run passes with every
+    peripheral transaction delivered to the wrong place. The tiles here are
+    0x2000000, so only the peripheral can trip the guard.
+
+    2x2 + 2 peripherals (n_slots=6), transactions_per_node=4, default size/len
+    -> stride=0x40, region_bytes=6*4*0x40=0x600. base_local+region_bytes=0x1600
+    overruns a 0x1000 peripheral and fits a 0x2000 one.
+    """
+    small = tmp_path / "small_periph.yaml"
+    small.write_text(_SMALL_PERIPHERAL_TOPOLOGY % ("0x1000", "0x1000"))
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "neighbor", "--topology", str(small),
+                "--out", str(tmp_path / "out_small"), "--transactions-per-node", "4"])
+    err = capsys.readouterr().err
+    assert "extent(0x600)" in err
+    assert "overruns the smallest addressable window 0x1000" in err
+
+    # Widened, the same run passes -- so the guard is reading the peripheral
+    # window and not failing for some other reason.
+    big = tmp_path / "big_periph.yaml"
+    big.write_text(_SMALL_PERIPHERAL_TOPOLOGY % ("0x2000", "0x2000"))
+    g.main(["--pattern", "neighbor", "--topology", str(big),
+            "--out", str(tmp_path / "out_big"), "--transactions-per-node", "4"])
 
 
 def test_noc_egress_aperture_sits_above_every_window():
@@ -994,44 +1042,57 @@ def test_peripheral_slots_do_not_land_on_a_multicast_address(tmp_path):
 
 _HOTSPOT_PERIPH_TXNS = 2
 
+# Four peripherals, one per face, so the target set is large enough for the
+# weighted select to be doing something and every face is represented.
+_PERIPH4 = "mesh_4x4_vc1_periph4"
+
 
 def _emit_hotspot_peripherals(tmp_path):
-    """mesh_2x2_vc1_periph under --hotspot-peripherals; returns (out dir, topology)."""
+    """_PERIPH4 under --hotspot-peripherals; returns (out dir, loaded topology)."""
     out = tmp_path / "hp"
     g.main(["--pattern", "hotspot", "--hotspot-peripherals",
-            "--topology", "mesh_2x2_vc1_periph", "--out", str(out),
+            "--topology", _PERIPH4, "--out", str(out),
             "--transactions-per-node", str(_HOTSPOT_PERIPH_TXNS),
             "--size", "5", "--len", "0"])
-    return out, g._load_topology("mesh_2x2_vc1_periph")
+    return out, g._load_topology(_PERIPH4)
 
 
-def test_hotspot_peripherals_sends_every_tile_to_its_own_row_peripheral(tmp_path):
-    """The peripheral on a tile's own row is the only destination it may have.
+def test_hotspot_peripherals_sends_every_tile_into_a_peripheral_region(tmp_path):
+    """Every tile reaches every peripheral now, so what a destination must
+    satisfy is no longer "the one on my row" but "a peripheral region at all".
 
-    A peripheral off the x face is reached by running out of x hops, which
-    happens on the source's row (check_dst_reachable), so a tile that targeted
-    the other row's peripheral would be aborted by the NMU at packetize time.
+    Two ways this goes wrong and both are caught here: a coordinate-keyed base
+    lookup sends the traffic to the host ROUTER'S TILE (a peripheral shares its
+    coordinate), and a peripheral window too small to hold the slot band walks
+    the address past its region. Neither faults in co-sim -- the first is a
+    legal tile and the second is the next peripheral's window.
     """
-    out, (nodes, _x_dim, _y_dim, bases, _config_bases, sizes) = _emit_hotspot_peripherals(tmp_path)
-    periph_of_row = {g.coord_xy(c)[1]: c
-                     for c in bases if c not in {n[3] for n in nodes}}
-    for (idx, _x, _y, cid) in nodes:
+    out, (nodes, _x, _y, _bases, _config_bases, _sizes, peripherals) = \
+        _emit_hotspot_peripherals(tmp_path)
+    hit = set()
+    for (idx, _x, _y, _cid) in nodes:
         w = _parse_write(out / f"node{idx}" / "write.txt")
         # The pattern's own transactions come first; the tail is the narrow
         # config probe every config-tile owner gets regardless of pattern.
         assert len(w) == _HOTSPOT_PERIPH_TXNS + 1
-        periph = periph_of_row[g.coord_xy(cid)[1]]
         for t in w[:_HOTSPOT_PERIPH_TXNS]:
-            assert bases[periph] <= t["addr"] < bases[periph] + sizes["memory"][periph]
+            inside = [p for p in peripherals
+                      if p["base"] <= t["addr"] < p["base"] + p["size"]]
+            assert len(inside) == 1, f"node{idx} addr {t['addr']:#x} is in no peripheral region"
+            hit.add(inside[0]["base"])
+    # A target set that silently dropped a peripheral would satisfy every
+    # assertion above and leave that endpoint with no inbound traffic.
+    assert hit == {p["base"] for p in peripherals}
 
 
 def test_hotspot_peripherals_keeps_the_peripheral_s_own_traffic(tmp_path):
     """A peripheral endpoint that completes zero transactions fails the run as
     vacuous (gen_tb_top's PASS guard counts endpoints, not router nodes), so its
     initiator traffic toward its partner tile has to survive the new stimulus."""
-    out, (nodes, _x_dim, _y_dim, bases, _config_bases, _sizes) = _emit_hotspot_peripherals(tmp_path)
-    periph_cids = [c for c in bases if c not in {n[3] for n in nodes}]
-    for ep_idx, _cid in enumerate(periph_cids, start=len(nodes)):
+    out, (nodes, _x, _y, _bases, _config_bases, _sizes, peripherals) = \
+        _emit_hotspot_peripherals(tmp_path)
+    for p in range(len(peripherals)):
+        ep_idx = len(nodes) + p
         assert len(_parse_write(out / f"node{ep_idx}" / "write.txt")) == _HOTSPOT_PERIPH_TXNS
 
 
@@ -1054,26 +1115,30 @@ def test_hotspot_peripherals_is_rejected_on_another_pattern(tmp_path):
     """
     with pytest.raises(SystemExit):
         g.main(["--pattern", "neighbor", "--hotspot-peripherals",
-                "--topology", "mesh_2x2_vc1_periph", "--out", str(tmp_path / "np"),
+                "--topology", _PERIPH4, "--out", str(tmp_path / "np"),
                 "--transactions-per-node", str(_HOTSPOT_PERIPH_TXNS),
                 "--size", "5", "--len", "0"])
 
 
-def test_hotspot_peripherals_rejects_a_source_that_reaches_none():
-    """A row with no peripheral has no hotspot; the source is named and the run
-    stops, rather than the tile silently falling back to another row's."""
-    nodes, _x_dim, _y_dim, _bases, _config_bases, _sizes = g._load_topology("mesh_2x2_vc1_periph")
-    row0_only = [(len(nodes), g.coord_id(0, 0))]
-    src_on_row1 = next(cid for (_i, _x, _y, cid) in nodes if g.coord_xy(cid)[1] == 1)
-    with pytest.raises(SystemExit, match="found 0"):
-        g.peripheral_hotspot(src_on_row1, row0_only, nodes)
+def test_hotspot_peripherals_rejects_a_topology_with_no_peripherals(tmp_path, capsys):
+    """The empty target set is what is left of "this source can reach nothing"
+    once every tile reaches every peripheral. Unguarded it reaches hotspot_dsts,
+    which raises about --hotspot node ids -- a message about the argument the
+    caller did not pass."""
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "hotspot", "--hotspot-peripherals",
+                "--topology", "mesh_2x2_vc1", "--out", str(tmp_path / "none"),
+                "--transactions-per-node", str(_HOTSPOT_PERIPH_TXNS)])
+    assert "needs a topology that declares peripherals" in capsys.readouterr().err
 
 
-def test_hotspot_peripherals_rejects_a_source_that_reaches_two():
-    """Two peripherals on one row (west and east face) leave the selection
-    ambiguous. Weighting them would change booksim's distribution, so it stops."""
-    nodes, _x_dim, _y_dim, _bases, _config_bases, _sizes = g._load_topology("mesh_2x2_vc1_periph")
-    both_faces = [(len(nodes), g.coord_id(0, 0)), (len(nodes) + 1, g.coord_id(3, 0))]
-    src_on_row0 = next(cid for (_i, _x, _y, cid) in nodes if g.coord_xy(cid)[1] == 0)
-    with pytest.raises(SystemExit, match="found 2"):
-        g.peripheral_hotspot(src_on_row0, both_faces, nodes)
+def test_hotspot_peripherals_weights_the_target_set(tmp_path):
+    """--hotspot-rates reaches the peripheral draw, which is the whole reason
+    this reuses booksim's weighted select (traffic.cpp:514-525) instead of
+    naming one target per source. A rates argument that never arrived would
+    still produce a legal, uniform run."""
+    _out, (_nodes, _x, _y, _b, _cb, _sizes, peripherals) = _emit_hotspot_peripherals(tmp_path)
+    rng = random.Random(0)
+    skewed = g.peripheral_hotspot_dsts(0, peripherals, 400, rng, rates=[7, 1, 1, 1])
+    counts = [sum(1 for p in skewed if p["base"] == q["base"]) for q in peripherals]
+    assert counts[0] > sum(counts[1:])

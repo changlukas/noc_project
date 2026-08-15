@@ -38,10 +38,10 @@ hotspot  (ported from booksim2 HotSpotTrafficPattern::dest, src/traffic.cpp:506-
     Single hotspot: all packets go to that node.
     Multiple hotspots: weighted selection by --hotspot-rates (default: equal weight).
     Uses random.Random(seed) for reproducibility.
-    --hotspot-peripherals moves the hotspot set off the router array: every tile
-    hammers the peripheral it can reach (peripheral_hotspot), which is the
-    many-to-one shape a memory controller or host bridge sees. Same booksim
-    selection, different target set -- see peripheral_hotspot.
+    --hotspot-peripherals names the peripheral endpoints as the hotspot set
+    instead of node ids, which is the many-to-one shape a memory controller or
+    host bridge sees. Same booksim selection, --hotspot-rates included; only the
+    target set differs -- see peripheral_hotspot_dsts.
 
 beat_exact  (S2 gate: DPI word-packing fault injection, not a spatial pattern)
     Every node writes one full-width beat (per-lane-distinct bytes, full
@@ -184,15 +184,18 @@ def _ax_fields(axid, addr, axi_len, axi_size, include_atop, user=0):
     return lines
 
 
-def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
+def emit_file_master_node(out_dir, src_idx, dst_bases, n_nodes,
                           base_local, region_bytes, axi_size, axi_len, data_width,
                           id_rng, ids_per_initiator=1, num_axi_ids=256,
-                          bases=None, extra=None):
-    """Write out_dir/{write,read}.txt for one node. One write+read pair per dst_cid,
-    src-partitioned address, address-in-data payload. INCR, atop=0, full strobe.
+                          extra=None):
+    """Write out_dir/{write,read}.txt for one node. One write+read pair per entry of
+    dst_bases, src-partitioned address, address-in-data payload. INCR, atop=0,
+    full strobe.
 
-    bases: {dst_id: base}, from address_map.pack() -- the packed tile base for
-    each dst_cid in dst_cids.
+    dst_bases: the destination WINDOW BASE per transaction, from
+    address_map.pack(). A base, not a coordinate: a peripheral shares its host
+    router's coordinate and is told apart by the port it hangs off, so the
+    coordinate no longer names one destination and the base does.
 
     AXI ids: each initiator draws uniformly at random from a block of
     `ids_per_initiator` ids starting at src_idx*ids_per_initiator (mod
@@ -215,10 +218,10 @@ def emit_file_master_node(out_dir, src_idx, dst_cids, n_nodes,
     reserved = (axi_len + 1) * (1 << axi_size)
     id_base = (src_idx * ids_per_initiator) % num_axi_ids
     write_lines, read_lines = [], []
-    for seq, dst_cid in enumerate(dst_cids):
-        local_off = alloc_unique_offset(dst_cid, src_idx, seq, base_local,
+    for seq, dst_base in enumerate(dst_bases):
+        local_off = alloc_unique_offset(dst_base, src_idx, seq, base_local,
                                         n_nodes, region_bytes, reserved=reserved)
-        addr = bases[dst_cid] + local_off
+        addr = dst_base + local_off
         # Uniform over the tile's block, reuse allowed: axi_test.sv:233 draws
         # ax_id over the whole space and axi_rand_master's UNIQUE_IDS defaults
         # to 0 (:710), so same-id pairs (ordered) and cross-id pairs
@@ -575,8 +578,8 @@ def alloc_unique_offset(dst_node, src_node, seq, base_offset, n_nodes,
     raises ValueError instead of silently overflowing into the next dst tile.
 
     Args:
-        dst_node: linear node index of the destination (informational only — not
-                  used in the formula; the caller encodes it in addr bits 32+).
+        dst_node: the destination window (informational only — not used in the
+                  formula; the caller adds the returned offset to it).
         src_node: linear index of the sending node.
         seq:      0-based transaction-pair index within this src_node's sequence.
         base_offset: base local address from the scenario (memory_base & 0xFFFFFFFF).
@@ -826,61 +829,35 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             f.write("\n".join(read_lines) + "\n")
 
 
-def peripheral_reaches(periph_cid, tile_cid, tile_xs):
-    """Whether a peripheral and a tile may exchange traffic under XY routing.
+def peripheral_hotspot_dsts(src_idx, peripherals, n_txn, rng, rates=None):
+    """The peripherals a tile targets under --hotspot-peripherals.
 
-    The same axis rule the NMU enforces
-    (nmu::addr_trans::check_dst_reachable, nmu-spec.md G11;
-    docs/noc-target-spec.md section 2). A peripheral outside the tile region on
-    X is reached by running out of x hops, which happens on the tile's own row,
-    so only its own row may address it. One outside on Y is reached after x has
-    already resolved onto the destination's column, so any column may.
+    Booksim2 HotSpotTrafficPattern::dest (src/traffic.cpp:506-526) with the
+    peripheral endpoints as the target set instead of node ids: one peripheral
+    takes the single-hotspot fast path (:510) and every packet goes to it,
+    several draw from the weighted cumulative select (:514-525) that
+    --hotspot-rates parameterizes. A tile reaches every peripheral now, so the
+    target set needs no per-source filtering and booksim's own distribution is
+    what runs.
 
-    tile_xs: the x of every tile, i.e. the region the peripheral sits outside of.
+    exclude_self does not apply: the source is a tile and the targets are
+    peripherals, so no draw can return the source.
+
+    Returns the peripheral records, in draw order.
     """
-    px, py = coord_xy(periph_cid)
-    off_x = px < min(tile_xs) or px > max(tile_xs)
-    return not off_x or coord_xy(tile_cid)[1] == py
+    picks = hotspot_dsts(src_idx, len(peripherals), n_txn, rng,
+                         list(range(len(peripherals))), rates)
+    return [peripherals[p] for p in picks]
 
 
-def peripheral_hotspot(src_cid, peripherals, nodes):
-    """The peripheral a tile targets under --hotspot-peripherals.
-
-    Booksim's single-hotspot fast path (HotSpotTrafficPattern::dest,
-    src/traffic.cpp:510) with the hotspot named per source rather than
-    globally: a peripheral off an x face exchanges traffic with its own row
-    only (peripheral_reaches), so a source has exactly one legal target and
-    every packet goes to it. Filtering a global weighted list per source would
-    have changed booksim's distribution instead, so the target is chosen per
-    source from the start.
-
-    A source left with no reachable peripheral, or with more than one, has no
-    such fast path and exits rather than emitting some other node's traffic.
-    """
-    tile_xs = [coord_xy(t[3])[0] for t in nodes]
-    reachable = [cid for _ep_idx, cid in peripherals
-                 if peripheral_reaches(cid, src_cid, tile_xs)]
-    if len(reachable) != 1:
-        sys.exit(f"ERROR: --hotspot-peripherals needs exactly one peripheral reachable from "
-                 f"the tile at {coord_xy(src_cid)}; found {len(reachable)} "
-                 f"{[coord_xy(c) for c in reachable]}")
-    return reachable[0]
-
-
-def peripheral_partner(periph_cid, nodes):
-    """The tile a peripheral exchanges traffic with: the FARTHEST legal one.
+def peripheral_partner(periph, nodes):
+    """The tile a peripheral exchanges traffic with: the FARTHEST one.
 
     Farthest, not nearest: the nearest tile is the router the peripheral hangs
     off, so the pair would never take an inter-router hop and multi-hop
-    addressability would go untested. Legal is peripheral_reaches.
+    addressability would go untested.
     """
-    px, py = coord_xy(periph_cid)
-    xs = [coord_xy(t[3])[0] for t in nodes]
-    legal = [t for t in nodes if peripheral_reaches(periph_cid, t[3], xs)]
-    if not legal:
-        sys.exit(f"ERROR: peripheral at ({px},{py}) sits outside the tile region on x and has no "
-                 f"tile on its own row; XY routing cannot reach it from any other row")
-    return max(legal, key=lambda t: abs(coord_xy(t[3])[0] - px) + abs(coord_xy(t[3])[1] - py))
+    return max(nodes, key=lambda t: abs(t[1] - periph["x"]) + abs(t[2] - periph["y"]))
 
 
 def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_local, region_bytes,
@@ -889,10 +866,11 @@ def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_loc
     """Stimulus for every peripheral endpoint, and the lines that address it back.
 
     A peripheral has an NI and an endpoint but no router, and is addressed
-    exactly as a tile is. Each one writes its partner tile's window and reads it
-    back (the peripheral as initiator); with address_the_peripheral, that tile
-    writes the peripheral's window and reads it back too (the peripheral as
-    target).
+    through its own region -- NOT through bases[cid], which is its host router's
+    tile: the two share a coordinate and only the region tells them apart. Each
+    peripheral writes its partner tile's window and reads it back (the
+    peripheral as initiator); with address_the_peripheral, that tile writes the
+    peripheral's region and reads it back too (the peripheral as target).
 
     Slots come from alloc_unique_offset like every other initiator's, keyed by
     the peripheral's own ENDPOINT index -- which is why n_slots (endpoints, not
@@ -909,19 +887,20 @@ def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_loc
     """
     extras = {}
     reserved = (axi_len + 1) * (1 << axi_size)
-    for ep_idx, periph_cid in peripherals:
-        partner = peripheral_partner(periph_cid, nodes)
+    for p, periph in enumerate(peripherals):
+        ep_idx = len(nodes) + p
+        partner = peripheral_partner(periph, nodes)
         emit_file_master_node(os.path.join(out_root, f"node{ep_idx}"), ep_idx,
-                              [partner[3]] * n_txn, n_slots, base_local, region_bytes,
+                              [bases[partner[3]]] * n_txn, n_slots, base_local, region_bytes,
                               axi_size, axi_len, data_width, id_rng,
-                              num_axi_ids=num_axi_ids, bases=bases)
+                              num_axi_ids=num_axi_ids)
         if not address_the_peripheral:
             continue
         write_lines, read_lines = [], []
         for seq in range(n_txn):
-            off = alloc_unique_offset(periph_cid, partner[0], seq, base_local, n_slots,
+            off = alloc_unique_offset(periph["base"], partner[0], seq, base_local, n_slots,
                                       region_bytes, reserved=reserved)
-            w, r = unicast_pair_lines(partner[0] % num_axi_ids, bases[periph_cid] + off,
+            w, r = unicast_pair_lines(partner[0] % num_axi_ids, periph["base"] + off,
                                       axi_size, axi_len, data_width)
             write_lines += w
             read_lines += r
@@ -949,12 +928,20 @@ def merge_extra(*parts):
 # ---------------------------------------------------------------------------
 
 def _load_topology(name):
-    """Return (nodes, x_dim, y_dim, bases, config_bases, sizes) where nodes =
-    [(idx, x, y, cid), ...] with x/y the ARRAY position and cid the ROUTE
+    """Return (nodes, x_dim, y_dim, bases, config_bases, sizes, peripherals) where
+    nodes = [(idx, x, y, cid), ...] with x/y the ARRAY position and cid the ROUTE
     coordinate id, bases = {dst_id: base} (memory space) and
     config_bases = {dst_id: base} (config space, sparse -- most topologies
     have none), both from address_map.pack(); sizes = {"memory": {dst_id:
-    size}, "config": {dst_id: size}} for capacity checks.
+    size}, "config": {dst_id: size}} for capacity checks; peripherals =
+    address_map.pack()'s peripheral entries in declaration order, each carrying
+    its own base and size.
+
+    Peripherals come back as their own list because they cannot be recovered
+    from bases: a peripheral shares its host router's coordinate, so
+    bases[periph_cid] is the ROUTER'S TILE. They extend the ENDPOINT index space
+    (peripheral p is endpoint len(nodes) + p), in the order gen_tb_top.py's
+    _peripherals walks.
 
     `name` is either a topology name resolved against sim/topologies/<name>.yaml, or
     a direct path to a topology yaml (ends in .yaml or names an existing file).  The
@@ -969,31 +956,23 @@ def _load_topology(name):
         topo = yaml.safe_load(f)
     x_dim = topo["topology"]["x_dim"]
     y_dim = topo["topology"]["y_dim"]
-    # The map is packed over the route SPAN (x_span/y_span, defaulting to the
-    # router array), so a border coordinate a peripheral sits on still takes a
-    # slot. The node list below stays the router array.
-    x_span = int(topo["topology"].get("x_span", x_dim))
-    y_span = int(topo["topology"].get("y_span", y_dim))
-    # The router at ARRAY position (x, y) sits at ROUTE coordinate
-    # (tile_x_first + x, tile_y_first + y): a topology whose tiles start at a
-    # border-offset coordinate leaves a span coordinate for a peripheral below
-    # them. x/y in the node list below stay the array position, which is what
-    # every spatial pattern permutes; only the coord id moves.
-    tx_first = int(topo["topology"].get("tile_x_first", 0))
-    ty_first = int(topo["topology"].get("tile_y_first", 0))
-    bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
+    # The router array IS the route coordinate space: a peripheral shares its
+    # host router's coordinate and takes none of its own, so a tile's array
+    # position is its coordinate.
+    bases, entries = address_map.pack(topo.get("address_map"), x_dim, y_dim)
     config_bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "config"}
     sizes = {
         "memory": {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"},
         "config": {e["dst_id"]: e["size"] for e in entries if e["space"] == "config"},
     }
+    peripherals = [e for e in entries if e["space"] == "peripheral"]
     nodes = []
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
-            nodes.append((idx, x, y, coord_id(x + tx_first, y + ty_first)))
+            nodes.append((idx, x, y, coord_id(x, y)))
             idx += 1
-    return nodes, x_dim, y_dim, bases, config_bases, sizes
+    return nodes, x_dim, y_dim, bases, config_bases, sizes, peripherals
 
 
 # ---------------------------------------------------------------------------
@@ -1159,8 +1138,8 @@ def main(argv=None):
                     help="Weights for each hotspot (parallel to --hotspot; default: equal)")
     ap.add_argument("--hotspot-peripherals", action="store_true",
                     help="Hotspot pattern targets peripherals instead of --hotspot "
-                         "node ids: every tile targets the peripheral it can reach "
-                         "(one per row), the many-to-one shape a memory controller sees")
+                         "node ids: every tile draws from the peripheral endpoints, "
+                         "the many-to-one shape a memory controller sees")
     # Synthetic payload shape
     ap.add_argument("--size", type=int, default=2,
                     help="AxSIZE for synthetic transactions (0..7; default 2 = 4 bytes)")
@@ -1176,19 +1155,12 @@ def main(argv=None):
                          "Does not affect VC allocation (VC is id-agnostic).")
     a = ap.parse_args(argv)
 
-    nodes, x_dim, y_dim, bases, config_bases, sizes = _load_topology(a.topology)
+    nodes, x_dim, y_dim, bases, config_bases, sizes, peripherals = _load_topology(a.topology)
     _check_mesh_capacity(x_dim, y_dim)
     n_nodes = len(nodes)
     # Spatial patterns permute ARRAY positions; the node list turns one into a
     # route coordinate id, which is what the address map is keyed by.
     cid_of = {(x, y): cid for _idx, x, y, cid in nodes}
-    # Every route coordinate owns a memory tile, so the coordinates the router
-    # array does not cover are the peripherals. They extend the ENDPOINT index
-    # space (peripheral p is endpoint n_nodes + p), in the map order
-    # gen_tb_top.py's _peripherals walks.
-    node_cids = set(cid_of.values())
-    peripherals = [(n_nodes + p, cid)
-                   for p, cid in enumerate(c for c in bases if c not in node_cids)]
     n_slots = n_nodes + len(peripherals)
 
     widths = axi_widths()
@@ -1207,11 +1179,18 @@ def main(argv=None):
     # base_local + region_bytes, emit_multicast_pattern), so it needs a wider
     # extent checked here too.
     extent = region_bytes + (a.transactions_per_node * stride if a.pattern == "multicast" else 0)
-    smallest_tile = min(sizes["memory"].values())
-    if base_local + extent > smallest_tile:
+    # Peripheral regions are in the min, not just memory tiles. They are
+    # addressed out of the same slot band, and they used to be memory tiles
+    # (so this min covered them) until they became their own space -- at which
+    # point nothing bounded them, and an overrun does not fault: it walks into
+    # the NEXT peripheral's region, the SAM routes it to that endpoint, and the
+    # readback of the same address agrees, so the run passes having delivered
+    # every peripheral transaction to the wrong place.
+    smallest_window = min(list(sizes["memory"].values()) + [p["size"] for p in peripherals])
+    if base_local + extent > smallest_window:
         ap.error(f"footprint base_local({base_local:#x}) + extent({extent:#x}) = "
-                 f"{base_local + extent:#x} overruns the smallest memory aperture "
-                 f"{smallest_tile:#x}; reduce --transactions-per-node, --len, or --size")
+                 f"{base_local + extent:#x} overruns the smallest addressable window "
+                 f"{smallest_window:#x}; reduce --transactions-per-node, --len, or --size")
     rng = _random_module.Random(a.seed)
     # Ids draw from their own stream, so changing --ids-per-initiator moves the
     # ids and nothing else. Sharing `rng` would shift every later destination
@@ -1226,6 +1205,12 @@ def main(argv=None):
     if a.hotspot_peripherals and a.pattern != "hotspot":
         ap.error(f"--hotspot-peripherals names the hotspot pattern's target set; with "
                  f"--pattern {a.pattern} it would only drop the traffic aimed at the peripheral")
+    # An empty target set is the one way this selector can still have nothing to
+    # choose from. hotspot_dsts would raise ValueError naming --hotspot node ids,
+    # which is not what the caller asked for.
+    if a.hotspot_peripherals and not peripherals:
+        ap.error(f"--hotspot-peripherals needs a topology that declares peripherals; "
+                 f"{a.topology} has none")
     periph_extra = emit_peripheral_nodes(
         a.out, peripherals, nodes, bases, n_slots, base_local, region_bytes, a.size, a.burst_len,
         widths["data"], a.transactions_per_node, id_rng, num_axi_ids=(1 << widths["id"]),
@@ -1259,30 +1244,36 @@ def main(argv=None):
             emit_beat_exact_node(os.path.join(a.out, f"node{idx}"), idx, dst_base,
                                  widths["data"], extra=extra, base_local=base_local)
             continue
+        # Every branch names its destinations by WINDOW BASE. A peripheral
+        # shares its host router's coordinate, so a coordinate no longer names
+        # one destination and bases[cid] would send a peripheral's traffic to
+        # that router's tile.
         if a.pattern in _DETERMINISTIC_PATTERNS:
             dst_x, dst_y = _dst_for(a.pattern, x, y, x_dim, y_dim)
-            dst_cids = [cid_of[(dst_x, dst_y)]] * a.transactions_per_node
+            dst_bases = [bases[cid_of[(dst_x, dst_y)]]] * a.transactions_per_node
         elif a.pattern == "uniform_random":
             dst_lin = uniform_random_dsts(idx, n_nodes, a.transactions_per_node,
                                           rng, a.exclude_self)
-            dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
+            dst_bases = [bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
         elif a.pattern == "all_to_all":
             dst_lin = all_to_all_dsts(idx, n_nodes, a.transactions_per_node)
-            dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
-        elif a.hotspot_peripherals:  # hotspot, off the router array
-            dst_cids = [peripheral_hotspot(src_cid, peripherals, nodes)] * a.transactions_per_node
+            dst_bases = [bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
+        elif a.hotspot_peripherals:  # hotspot, on the boundary ports
+            dst_bases = [p["base"] for p in
+                         peripheral_hotspot_dsts(idx, peripherals, a.transactions_per_node,
+                                                 rng, a.hotspot_rates)]
         else:  # hotspot
             if a.hotspot is None:
                 ap.error("--hotspot is required for the hotspot pattern")
             dst_lin = hotspot_dsts(idx, n_nodes, a.transactions_per_node, rng,
                                    a.hotspot, a.hotspot_rates, a.exclude_self)
-            dst_cids = [cid_of[_linear_to_coord(d, x_dim)] for d in dst_lin]
-        emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_cids,
+            dst_bases = [bases[cid_of[_linear_to_coord(d, x_dim)]] for d in dst_lin]
+        emit_file_master_node(os.path.join(a.out, f"node{idx}"), idx, dst_bases,
                               n_slots, base_local, region_bytes,
                               a.size, a.burst_len, widths["data"],
                               ids_per_initiator=a.ids_per_initiator,
                               num_axi_ids=(1 << widths["id"]), id_rng=id_rng,
-                              bases=bases, extra=extra)
+                              extra=extra)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,67 @@
+topology:
+  name: mesh_4x4_vc1_periph4
+  x_dim: 4
+  y_dim: 4
+  num_vc: 1
+
+# Tile-major tile map: every node's memory-space (data class) and config-space
+# (narrow class) tiles sit inside that node's own 0x100000000 block, memory at
+# offset 0, config at 0x2000000.
+# docs/noc-target-spec.md §5 "SAM address spaces" -- a node carries one memory
+# tile and one config tile (nmu::addr_trans::SamTable::validate).
+# Bases come from the coordinate and block_size, not list order: base =
+# idx * block_size + offset[space].
+address_map:
+  block_size: 0x100000000
+  tiles:
+    - { x: 0, y: 0, size: 0x2000000 }
+    - { x: 1, y: 0, size: 0x2000000 }
+    - { x: 2, y: 0, size: 0x2000000 }
+    - { x: 3, y: 0, size: 0x2000000 }
+    - { x: 0, y: 1, size: 0x2000000 }
+    - { x: 1, y: 1, size: 0x2000000 }
+    - { x: 2, y: 1, size: 0x2000000 }
+    - { x: 3, y: 1, size: 0x2000000 }
+    - { x: 0, y: 2, size: 0x2000000 }
+    - { x: 1, y: 2, size: 0x2000000 }
+    - { x: 2, y: 2, size: 0x2000000 }
+    - { x: 3, y: 2, size: 0x2000000 }
+    - { x: 0, y: 3, size: 0x2000000 }
+    - { x: 1, y: 3, size: 0x2000000 }
+    - { x: 2, y: 3, size: 0x2000000 }
+    - { x: 3, y: 3, size: 0x2000000 }
+    - { x: 0, y: 0, size: 0x1000, space: config }
+    - { x: 1, y: 0, size: 0x1000, space: config }
+    - { x: 2, y: 0, size: 0x1000, space: config }
+    - { x: 3, y: 0, size: 0x1000, space: config }
+    - { x: 0, y: 1, size: 0x1000, space: config }
+    - { x: 1, y: 1, size: 0x1000, space: config }
+    - { x: 2, y: 1, size: 0x1000, space: config }
+    - { x: 3, y: 1, size: 0x1000, space: config }
+    - { x: 0, y: 2, size: 0x1000, space: config }
+    - { x: 1, y: 2, size: 0x1000, space: config }
+    - { x: 2, y: 2, size: 0x1000, space: config }
+    - { x: 3, y: 2, size: 0x1000, space: config }
+    - { x: 0, y: 3, size: 0x1000, space: config }
+    - { x: 1, y: 3, size: 0x1000, space: config }
+    - { x: 2, y: 3, size: 0x1000, space: config }
+    - { x: 3, y: 3, size: 0x1000, space: config }
+  # One peripheral per face. A face peripheral shares its router's coordinate
+  # and is told apart by the port it hangs off: west/east are port 1, south/north
+  # port 2, and which of the pair a router means follows from its own edge.
+  # The four routers are distinct, so no router carries two peripherals -- legal
+  # under this design, but a run that mixed it in could not say which property a
+  # failure came from.
+  #
+  # size holds what the stimulus generator aims at a peripheral:
+  # base_local + n_slots * transactions_per_node * stride, where n_slots counts
+  # ENDPOINTS (16 routers + 4 peripherals) and stride is the burst footprint,
+  # 0x40 at --size 5 --len 0. That is 0x15000 at the directed INJECTION_COUNT of
+  # 64 and 0x3F800 at the continuous/checked 200; 0x100000 covers both. A
+  # peripheral is never a collective member, so none of the four
+  # collective-eligibility conditions in docs/noc-target-spec.md 5.1 apply to it.
+  peripherals:
+    - { x: 0, y: 1, face: x, size: 0x100000 }   # west
+    - { x: 3, y: 2, face: x, size: 0x100000 }   # east
+    - { x: 1, y: 0, face: y, size: 0x100000 }   # south
+    - { x: 2, y: 3, face: y, size: 0x100000 }   # north
