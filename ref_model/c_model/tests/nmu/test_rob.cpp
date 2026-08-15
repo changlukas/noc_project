@@ -1486,7 +1486,8 @@ addr_trans::SamTable cross_class_sam() {
     // Hand-built rather than SamTable::packed(): a single-node table has no
     // coordinate to derive a base from, so the bases are just stated.
     return addr_trans::SamTable(std::vector<addr_trans::SamEntry>{
-        {0x0000, 0x1000, 0x00, axi::AxiClass::Narrow},        // [0, 0x1000): config space, dst 0
+        // [0, 0x1000): config space, dst 0
+        {0x0000, 0x1000, 0x00, axi::AxiClass::Narrow, /*port=*/0, axi::Space::Config},
         {0x1000, 0x100000000ull, 0x00, axi::AxiClass::Data},  // [0x1000, ...): memory space, dst 0
     });
 }
@@ -1634,7 +1635,7 @@ TEST(NmuRob, Enabled_NarrowReadUnalignedAddrReanchorsToCorrectLane) {
     std::vector<addr_trans::PackedTile> tiles;
     for (unsigned y = 0; y < 16; ++y)
         for (unsigned x = 0; x < 16; ++x)
-            tiles.push_back({x, y, 0x100000000ull, axi::AxiClass::Narrow});
+            tiles.push_back({x, y, 0x100000000ull, axi::AxiClass::Narrow, axi::Space::Config});
     auto narrow_sam = addr_trans::SamTable::packed(tiles, /*x_span=*/16, /*y_span=*/16,
                                                    /*block_size=*/0x100000000ull);
 

@@ -116,7 +116,7 @@ TEST(CollectiveIssuerDeath, APeripheralMayNotIssueACollective) {
 
 TEST(OffMeshDst, SameRowPeripheralIsReachable) {
     auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    const auto* coords = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(coords, nullptr);
     addr_trans::check_dst_reachable(coords, /*src_id=*/0x01, /*dst_id=*/0x00);  // (1,0) -> (0,0)
     addr_trans::check_dst_reachable(coords, /*src_id=*/0x02, /*dst_id=*/0x00);  // (2,0) -> (0,0)
@@ -128,7 +128,7 @@ TEST(OffMeshDst, SameRowPeripheralIsReachable) {
 
 TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
     auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    const auto* coords = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(coords, nullptr);
     EXPECT_DEATH(addr_trans::check_dst_reachable(coords, /*src_id=*/0x12, /*dst_id=*/0x00),
                  "outside the tile region");
@@ -136,7 +136,7 @@ TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
 
 TEST(OffMeshSrc, APeripheralIsAnInitiatorOnItsOwnRow) {
     auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    const auto* coords = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(coords, nullptr);
     addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x11);  // (0,1) -> (1,1)
     addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x12);  // (0,1) -> (2,1)
@@ -144,7 +144,7 @@ TEST(OffMeshSrc, APeripheralIsAnInitiatorOnItsOwnRow) {
 
 TEST(OffMeshSrcDeath, APeripheralAddressingAnotherRowIsRefused) {
     auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::AxiClass::Data);
+    const auto* coords = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(coords, nullptr);
     EXPECT_DEATH(addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x02),
                  "sits outside the tile region");

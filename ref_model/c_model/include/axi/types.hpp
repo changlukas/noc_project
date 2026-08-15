@@ -71,6 +71,16 @@ enum class Resp : uint8_t { OKAY = 0, EXOKAY = 1, SLVERR = 2, DECERR = 3 };
 // second address decode.
 enum class AxiClass : uint8_t { Narrow = 0, Data = 1 };
 
+// SAM address space. Distinct from AxiClass: the two agreed one-to-one while
+// there were two spaces and two classes, but a peripheral region is a third
+// space carrying the Data class. The SAM keys on this; the flit still carries
+// only the class, through axi_ch.
+enum class Space : uint8_t { Config = 0, Memory = 1, Peripheral = 2 };
+
+inline constexpr AxiClass class_of(Space space) {
+    return space == Space::Config ? AxiClass::Narrow : AxiClass::Data;
+}
+
 // AXI4 IHI 0022 §A7.2: AxLOCK is 1-bit in AXI4 (0=Normal, 1=Exclusive).
 // AXI3 deprecated LOCKED bit is not modeled. AwBeat/ArBeat::lock keeps
 // uint8_t wire fidelity; LockType is the typed scenario-level abstraction.

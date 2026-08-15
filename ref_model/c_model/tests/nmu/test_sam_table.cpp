@@ -46,10 +46,10 @@ TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged) {
 TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode) {
     auto sam = SamTable::packed(
         {
-            {0, 0, 0x100000, axi::AxiClass::Data},
-            {1, 0, 0x100000, axi::AxiClass::Data},
-            {0, 0, 0x1000, axi::AxiClass::Narrow},
-            {1, 0, 0x1000, axi::AxiClass::Narrow},
+            {0, 0, 0x100000, axi::AxiClass::Data, axi::Space::Memory},
+            {1, 0, 0x100000, axi::AxiClass::Data, axi::Space::Memory},
+            {0, 0, 0x1000, axi::AxiClass::Narrow, axi::Space::Config},
+            {1, 0, 0x1000, axi::AxiClass::Narrow, axi::Space::Config},
         },
         /*x_span=*/2, /*y_span=*/1, /*block_size=*/0x200000);
     const auto memory = sam.translate(0x40);  // node 0, memory space
@@ -118,8 +118,8 @@ TEST(SamValidator, RejectsPartialConfigCoverage) {
         {0x1000, 0x1000, 0x01},
         {0x2000, 0x1000, 0x10},
         {0x3000, 0x1000, 0x11},
-        {0x4000, 0x1000, 0x00, axi::AxiClass::Narrow},
-        {0x5000, 0x1000, 0x01, axi::AxiClass::Narrow},
+        {0x4000, 0x1000, 0x00, axi::AxiClass::Narrow, /*port=*/0, axi::Space::Config},
+        {0x5000, 0x1000, 0x01, axi::AxiClass::Narrow, /*port=*/0, axi::Space::Config},
     });
     EXPECT_DEATH(bad.validate(2, 2), "config space");
 }
@@ -149,14 +149,14 @@ using ni::cmodel::nmu::addr_trans::SpaceCoords;
 TEST(SamCoords, DeclarationMatchingTheEntriesIsEligible) {
     auto sam = SamTable::uniform(2, 2, 0x1000);  // bases 0, 0x1000, 0x2000, 0x3000
     EXPECT_TRUE(sam.declare_space_coords(
-        axi::AxiClass::Data, SpaceCoords{/*x=*/{12, 1}, /*y=*/{13, 1}, 2, 2, 0, 1, 0, 1}));
-    const auto* c = sam.collective_coords(axi::AxiClass::Data);
+        axi::Space::Memory, SpaceCoords{/*x=*/{12, 1}, /*y=*/{13, 1}, 2, 2, 0, 1, 0, 1}));
+    const auto* c = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(c, nullptr);
     EXPECT_EQ(c->x_range.offset, 12u);
     EXPECT_EQ(c->y_range.offset, 13u);
     EXPECT_EQ(c->x_count, 2u);
     // The space that was never declared stays ineligible.
-    EXPECT_EQ(sam.collective_coords(axi::AxiClass::Narrow), nullptr);
+    EXPECT_EQ(sam.collective_coords(axi::Space::Config), nullptr);
 }
 
 TEST(SamCoords, NonUniformStrideIsNotEligible) {
@@ -166,9 +166,9 @@ TEST(SamCoords, NonUniformStrideIsNotEligible) {
                                        {0x3000, 0x1000, 0x01},
                                        {0x4000, 0x1000, 0x10},
                                        {0x5000, 0x1000, 0x11}});
-    EXPECT_FALSE(sam.declare_space_coords(axi::AxiClass::Data,
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
                                           SpaceCoords{{12, 1}, {13, 1}, 2, 2, 0, 1, 0, 1}));
-    EXPECT_EQ(sam.collective_coords(axi::AxiClass::Data), nullptr);
+    EXPECT_EQ(sam.collective_coords(axi::Space::Memory), nullptr);
 }
 
 TEST(SamCoords, NonUniformApertureIsNotEligible) {
@@ -178,7 +178,7 @@ TEST(SamCoords, NonUniformApertureIsNotEligible) {
                                        {0x1000, 0x800, 0x01},
                                        {0x2000, 0x1000, 0x10},
                                        {0x3000, 0x1000, 0x11}});
-    EXPECT_FALSE(sam.declare_space_coords(axi::AxiClass::Data,
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
                                           SpaceCoords{{12, 1}, {13, 1}, 2, 2, 0, 1, 0, 1}));
 }
 
@@ -189,7 +189,7 @@ TEST(SamCoords, NonRasterOrderIsNotEligible) {
                                        {0x1000, 0x1000, 0x10},
                                        {0x2000, 0x1000, 0x01},
                                        {0x3000, 0x1000, 0x11}});
-    EXPECT_FALSE(sam.declare_space_coords(axi::AxiClass::Data,
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
                                           SpaceCoords{{12, 1}, {13, 1}, 2, 2, 0, 1, 0, 1}));
 }
 
@@ -198,12 +198,33 @@ TEST(SamCoords, DimensionsAreStatedNotInferred) {
     // 1 << len would over-permit the fourth; x_count records the real bound.
     auto sam = SamTable::packed({{0, 0, 0x1000}, {1, 0, 0x1000}, {2, 0, 0x1000}}, /*x_span=*/3,
                                 /*y_span=*/1, /*block_size=*/0x1000);
-    ASSERT_TRUE(sam.declare_space_coords(axi::AxiClass::Data,
+    ASSERT_TRUE(sam.declare_space_coords(axi::Space::Memory,
                                          SpaceCoords{{12, 2}, {14, 0}, 3, 1, 0, 2, 0, 0}));
-    EXPECT_EQ(sam.collective_coords(axi::AxiClass::Data)->x_count, 3u);
+    EXPECT_EQ(sam.collective_coords(axi::Space::Memory)->x_count, 3u);
     // Claiming the full 4 does not fit: node (3,0) has no entry.
-    EXPECT_FALSE(sam.declare_space_coords(axi::AxiClass::Data,
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
                                           SpaceCoords{{12, 2}, {14, 0}, 4, 1, 0, 3, 0, 0}));
+}
+
+TEST(SamTable, PeripheralEntryDoesNotJoinTheMemorySpacesTileWalk) {
+    // Four memory tiles in a 2x2, plus one peripheral entry that also carries
+    // the Data class. Keyed on class the walk counts five and rejects; keyed on
+    // space it counts four and declares.
+    std::vector<SamEntry> es;
+    for (unsigned y = 0; y < 2; ++y) {
+        for (unsigned x = 0; x < 2; ++x) {
+            const uint64_t base = ((y << 1) | x) * 0x100000000ull;
+            es.push_back({base, 0x2000000, static_cast<uint8_t>((y << 4) | x), axi::AxiClass::Data,
+                          /*port=*/0, axi::Space::Memory});
+        }
+    }
+    es.push_back({0x400000000ull, 0x1000, /*dst_id=*/0x00, axi::AxiClass::Data, /*port=*/1,
+                  axi::Space::Peripheral});
+    SamTable sam{std::move(es)};
+    EXPECT_TRUE(sam.declare_space_coords(
+        axi::Space::Memory, SpaceCoords{/*x=*/{32, 1}, /*y=*/{33, 1}, 2, 2, 0, 1, 0, 1}));
+    EXPECT_NE(sam.collective_coords(axi::Space::Memory), nullptr);
+    EXPECT_EQ(sam.collective_coords(axi::Space::Peripheral), nullptr);
 }
 
 TEST(SamFootprint, RejectsBurstCrossingTile) {

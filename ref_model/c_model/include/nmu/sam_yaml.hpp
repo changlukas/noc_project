@@ -13,11 +13,11 @@ namespace ni::cmodel::nmu::addr_trans {
 // tile.space: "config" | "memory", default "memory" (spec §5: config selects
 // the narrow class, memory the data class). Fail-loud on anything else --
 // same shape as the other config/stimulus-trust-boundary checks in this file.
-inline axi::AxiClass parse_tile_space(const YAML::Node& tile) {
-    if (!tile["space"]) return axi::AxiClass::Data;
+inline axi::Space parse_tile_space(const YAML::Node& tile) {
+    if (!tile["space"]) return axi::Space::Memory;
     const std::string space = tile["space"].as<std::string>();
-    if (space == "config") return axi::AxiClass::Narrow;
-    if (space == "memory") return axi::AxiClass::Data;
+    if (space == "config") return axi::Space::Config;
+    if (space == "memory") return axi::Space::Memory;
     assert(false && "address_map tile: space must be 'config' or 'memory'");
     std::abort();  // belt-and-braces for NDEBUG
 }
@@ -39,11 +39,15 @@ inline axi::AxiClass parse_tile_space(const YAML::Node& tile) {
 inline void declare_space_coords(SamTable& table, unsigned x_span, unsigned y_span,
                                  unsigned tile_x_first, unsigned tile_x_last, unsigned tile_y_first,
                                  unsigned tile_y_last) {
-    for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
+    // The tile spaces only. A peripheral region is placed in declaration order
+    // at its own size, so it names no stride to read a coordinate field from --
+    // not attempting the declaration is what makes "never a collective target"
+    // a stated policy instead of a declaration that happened to fail.
+    for (axi::Space space : {axi::Space::Config, axi::Space::Memory}) {
         const SamEntry* first = nullptr;
         const SamEntry* second = nullptr;
         for (const auto& e : table.entries()) {
-            if (e.cls != cls) continue;
+            if (e.space != space) continue;
             if (first == nullptr) {
                 first = &e;
             } else {
@@ -66,15 +70,17 @@ inline void declare_space_coords(SamTable& table, unsigned x_span, unsigned y_sp
         c.x_last = tile_x_last;
         c.y_first = tile_y_first;
         c.y_last = tile_y_last;
-        table.declare_space_coords(cls, c);
+        table.declare_space_coords(space, c);
     }
+    assert(table.collective_coords(axi::Space::Peripheral) == nullptr &&
+           "sam_yaml: the peripheral space must not be collective-eligible");
 }
 
 // Does this address space appear in the map at all? Memory always does; config
 // is optional (spec §5.1 covers the spaces a topology declares).
-inline bool space_present(const SamTable& table, axi::AxiClass cls) {
+inline bool space_present(const SamTable& table, axi::Space space) {
     for (const auto& e : table.entries()) {
-        if (e.cls == cls) return true;
+        if (e.space == space) return true;
     }
     return false;
 }
@@ -102,9 +108,13 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
         std::abort();
     }
     const SpaceCoords* first = nullptr;
-    for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
-        if (!space_present(table, cls)) continue;
-        const SpaceCoords* c = table.collective_coords(cls);
+    // The tile spaces only. Offset decode is a claim about where a node stride
+    // puts the node index, and a peripheral region has no node stride -- it is
+    // placed in declaration order at its own size, one region per peripheral.
+    // Including it would abort on a legal peripheral topology.
+    for (axi::Space space : {axi::Space::Config, axi::Space::Memory}) {
+        if (!space_present(table, space)) continue;
+        const SpaceCoords* c = table.collective_coords(space);
         assert(c && "address_map: decode 'offset' needs every space to meet spec 5.1");
         if (c == nullptr) std::abort();
         if (first == nullptr) {
@@ -189,8 +199,9 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
 
     std::vector<PackedTile> tiles;
     for (const auto& t : tiles_node) {
+        const axi::Space space = parse_tile_space(t);
         tiles.push_back({t["x"].as<unsigned>(), t["y"].as<unsigned>(), t["size"].as<uint64_t>(),
-                         parse_tile_space(t)});
+                         axi::class_of(space), space});
     }
     const uint64_t block_size =
         am["block_size"] ? am["block_size"].as<uint64_t>() : default_block_size(tiles);
@@ -208,13 +219,13 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
     const bool region_stated = tile_x_first != 0 || tile_y_first != 0 ||
                                tile_x_last != x_span - 1 || tile_y_last != y_span - 1;
     if (region_stated) {
-        for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
-            if (!space_present(table, cls)) continue;
-            assert(table.collective_coords(cls) &&
+        for (axi::Space space : {axi::Space::Config, axi::Space::Memory}) {
+            if (!space_present(table, space)) continue;
+            assert(table.collective_coords(space) &&
                    "topology: a stated tile region needs every address space to declare its "
                    "coordinate ranges, and this one's entries reject the declaration -- the "
                    "off-region reachability guard reads those ranges");
-            if (table.collective_coords(cls) == nullptr) std::abort();
+            if (table.collective_coords(space) == nullptr) std::abort();
         }
     }
     check_decode_mode(am, table);  // after the ranges exist -- offset mode is checked against them

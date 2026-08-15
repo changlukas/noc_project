@@ -184,7 +184,7 @@ TEST(SamYaml, StatedSpanPacksOverTheSpanAndKeepsTheTileRegion) {
     }
     // The peripheral column is inside the span but outside the tile region, so
     // it is an addressable node and not a collective member.
-    const auto* memory = sam.collective_coords(axi::AxiClass::Data);
+    const auto* memory = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(memory, nullptr);
     EXPECT_EQ(memory->x_count, 3u);
     EXPECT_EQ(memory->x_first, 1u);
@@ -336,13 +336,13 @@ TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
     for (const auto& row : rows) {
         SCOPED_TRACE(row.file);
         auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + row.file);
-        const auto* memory = sam.collective_coords(axi::AxiClass::Data);
+        const auto* memory = sam.collective_coords(axi::Space::Memory);
         ASSERT_NE(memory, nullptr) << "memory space is not a collective target";
         EXPECT_EQ(memory->x_range.offset, 32u);  // log2(block_size, 4 GiB)
         EXPECT_EQ(memory->x_range.len, row.dim_bits);
         EXPECT_EQ(memory->y_range.offset, 32u + row.dim_bits);
         EXPECT_EQ(memory->y_range.len, row.dim_bits);
-        const auto* config = sam.collective_coords(axi::AxiClass::Narrow);
+        const auto* config = sam.collective_coords(axi::Space::Config);
         ASSERT_NE(config, nullptr) << "config space is not a collective target";
         EXPECT_EQ(config->x_range.offset, 32u);  // same block_size stride
         EXPECT_EQ(config->x_range.len, row.dim_bits);
@@ -352,6 +352,28 @@ TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
         // x offset -- the property offset decode (spec §5.1) needs.
         EXPECT_EQ(memory->y_range.offset, config->y_range.offset);
     }
+}
+
+TEST(SamYaml, PeripheralSpaceIsNotACollectiveTarget) {
+    // The loader declares only the tile spaces. A peripheral space's bases are
+    // assigned in declaration order at arbitrary sizes, so there is no uniform
+    // power-of-two stride to read a coordinate field from -- the declaration is
+    // not attempted, rather than attempted and failed.
+    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    EXPECT_NE(sam.collective_coords(axi::Space::Memory), nullptr);
+    EXPECT_NE(sam.collective_coords(axi::Space::Config), nullptr);
+    EXPECT_EQ(sam.collective_coords(axi::Space::Peripheral), nullptr)
+        << "a peripheral must never be a collective target";
+}
+
+TEST(SamYaml, MemorySpaceStaysACollectiveTargetAlongsideAPeripheral) {
+    // The regression this task exists to prevent: keyed on class, a peripheral
+    // carrying the Data class joins the memory space's tile walk, the walk's
+    // count check fails, and the memory space silently loses eligibility.
+    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    const auto* memory = sam.collective_coords(axi::Space::Memory);
+    ASSERT_NE(memory, nullptr);
+    EXPECT_EQ(memory->x_range.offset, 32u);  // log2(block_size, 4 GiB)
 }
 
 // Reference model for the differential below: the 2^n walk over the SAM that
@@ -433,12 +455,12 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
     for (const auto& file : files) {
         SCOPED_TRACE(file);
         auto sam = load_sam_table(file);
-        for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
-            const auto* c = sam.collective_coords(cls);
-            ASSERT_NE(c, nullptr) << "every shipped space is collective-eligible";
+        for (axi::Space space : {axi::Space::Config, axi::Space::Memory}) {
+            const auto* c = sam.collective_coords(space);
+            ASSERT_NE(c, nullptr) << "every shipped tile space is collective-eligible";
             uint64_t origin = 0;
             for (const auto& e : sam.entries()) {
-                if (e.cls == cls) {
+                if (e.space == space) {
                     origin = e.base;
                     break;
                 }
@@ -599,8 +621,8 @@ static std::string write_map(const char* name, const char* decode, const char* t
 
 TEST(SamYaml, OffsetDecodeAcceptsEqualSizedSpaces) {
     auto sam = load_sam_table(write_map("sam_offset_ok.yaml", "offset", kEqualSizedSpaces));
-    const auto* mem = sam.collective_coords(axi::AxiClass::Data);
-    const auto* cfg = sam.collective_coords(axi::AxiClass::Narrow);
+    const auto* mem = sam.collective_coords(axi::Space::Memory);
+    const auto* cfg = sam.collective_coords(axi::Space::Config);
     ASSERT_NE(mem, nullptr);
     ASSERT_NE(cfg, nullptr);
     EXPECT_EQ(mem->x_range.offset, cfg->x_range.offset);  // the one global pair
@@ -613,8 +635,8 @@ TEST(SamYaml, OffsetDecodeAcceptsEqualSizedSpaces) {
 // to be the offset-decode rejection case; it is not one anymore.
 TEST(SamYaml, OffsetDecodeIsSatisfiedByConstructionUnderTileMajor) {
     auto sam = load_sam_table(write_map("sam_offset_unequal.yaml", "offset", kShippedSizedSpaces));
-    const auto* mem = sam.collective_coords(axi::AxiClass::Data);
-    const auto* cfg = sam.collective_coords(axi::AxiClass::Narrow);
+    const auto* mem = sam.collective_coords(axi::Space::Memory);
+    const auto* cfg = sam.collective_coords(axi::Space::Config);
     ASSERT_NE(mem, nullptr);
     ASSERT_NE(cfg, nullptr);
     EXPECT_EQ(mem->x_range.offset, cfg->x_range.offset);  // the one global pair

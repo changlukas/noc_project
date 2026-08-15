@@ -34,17 +34,17 @@ constexpr uint64_t kTile = 0x1000;
 // space a unicast-only target (spec §5.1).
 // No peripheral in any fixture here, so the tile region is the full span --
 // x_first/y_first = 0, x_last/y_last = count - 1.
-bool declare(addr_trans::SamTable& t, axi::AxiClass cls, unsigned offset, unsigned x_count,
+bool declare(addr_trans::SamTable& t, axi::Space space, unsigned offset, unsigned x_count,
              unsigned y_count) {
     const unsigned x_bits = addr_trans::clog2(x_count);
-    return t.declare_space_coords(cls, {{offset, x_bits},
-                                        {offset + x_bits, addr_trans::clog2(y_count)},
-                                        x_count,
-                                        y_count,
-                                        0,
-                                        x_count - 1,
-                                        0,
-                                        y_count - 1});
+    return t.declare_space_coords(space, {{offset, x_bits},
+                                          {offset + x_bits, addr_trans::clog2(y_count)},
+                                          x_count,
+                                          y_count,
+                                          0,
+                                          x_count - 1,
+                                          0,
+                                          y_count - 1});
 }
 
 // 4x4 mesh, one 4 KB tile per node, packed row-major. dst_id = (y << 4) | x and
@@ -52,7 +52,7 @@ bool declare(addr_trans::SamTable& t, axi::AxiClass cls, unsigned offset, unsign
 // y[1] -- the equal-region map the collective bit-select reads.
 addr_trans::SamTable mesh_sam() {
     auto t = addr_trans::SamTable::uniform(4, 4, kTile);
-    declare(t, axi::AxiClass::Data, 12, 4, 4);
+    declare(t, axi::Space::Memory, 12, 4, 4);
     return t;
 }
 
@@ -170,12 +170,12 @@ TEST(NmuCollective, TwoSpaceTableKeepsTheSpacesApart) {
                               {0x1000, kTile, 0x01, axi::AxiClass::Data},
                               {0x2000, kTile, 0x10, axi::AxiClass::Data},
                               {0x3000, kTile, 0x11, axi::AxiClass::Data},
-                              {0x4000, kTile, 0x00, axi::AxiClass::Narrow},
-                              {0x5000, kTile, 0x01, axi::AxiClass::Narrow},
-                              {0x6000, kTile, 0x10, axi::AxiClass::Narrow},
-                              {0x7000, kTile, 0x11, axi::AxiClass::Narrow}});
-    ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 2, 2));
-    ASSERT_TRUE(declare(sam, axi::AxiClass::Narrow, 12, 2, 2));
+                              {0x4000, kTile, 0x00, axi::AxiClass::Narrow, 0, axi::Space::Config},
+                              {0x5000, kTile, 0x01, axi::AxiClass::Narrow, 0, axi::Space::Config},
+                              {0x6000, kTile, 0x10, axi::AxiClass::Narrow, 0, axi::Space::Config},
+                              {0x7000, kTile, 0x11, axi::AxiClass::Narrow, 0, axi::Space::Config}});
+    ASSERT_TRUE(declare(sam, axi::Space::Memory, 12, 2, 2));
+    ASSERT_TRUE(declare(sam, axi::Space::Config, 12, 2, 2));
     CollectiveTestbench t(std::move(sam));
 
     // Memory-class pair (nodes 0x00, 0x01), tile offset 0x40.
@@ -198,9 +198,9 @@ TEST(NmuCollective, TwoSpaceTableKeepsTheSpacesApart) {
 }
 
 TEST(NmuCollective, NarrowClassCollectiveTranslates) {
-    addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Narrow},
-                              {0x1000, kTile, 0x01, axi::AxiClass::Narrow}});
-    ASSERT_TRUE(declare(sam, axi::AxiClass::Narrow, 12, 2, 1));
+    addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Narrow, 0, axi::Space::Config},
+                              {0x1000, kTile, 0x01, axi::AxiClass::Narrow, 0, axi::Space::Config}});
+    ASSERT_TRUE(declare(sam, axi::Space::Config, 12, 2, 1));
     CollectiveTestbench t(std::move(sam));
     auto aw = make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x1000));
     aw.size = 3;  // narrow rides the 8 B lane: AWSIZE <= 3, as for a narrow unicast
@@ -355,12 +355,12 @@ TEST(NmuCollectiveDeath, AwLockOnCollective) {
 // spec §2.3: a collective's destination set cannot straddle the Narrow/Data classes even though
 // both are multicast-eligible; the class picks the network.
 TEST(NmuCollectiveDeath, ReplicasStraddleTheClasses) {
-    addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Narrow},
-                              {0x1000, kTile, 0x01, axi::AxiClass::Narrow},
+    addr_trans::SamTable sam({{0x0000, kTile, 0x00, axi::AxiClass::Narrow, 0, axi::Space::Config},
+                              {0x1000, kTile, 0x01, axi::AxiClass::Narrow, 0, axi::Space::Config},
                               {0x2000, kTile, 0x00, axi::AxiClass::Data},
                               {0x3000, kTile, 0x01, axi::AxiClass::Data}});
-    ASSERT_TRUE(declare(sam, axi::AxiClass::Narrow, 12, 2, 1));
-    ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 2, 1));
+    ASSERT_TRUE(declare(sam, axi::Space::Config, 12, 2, 1));
+    ASSERT_TRUE(declare(sam, axi::Space::Memory, 12, 2, 1));
     CollectiveTestbench t(std::move(sam));
     auto aw = make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000));
     aw.size = 3;  // narrow request address: AWSIZE <= 3 (8 B), orthogonal to the class rule
@@ -391,7 +391,7 @@ TEST(NmuCollectiveDeath, DuplicateNodeInTheDestinationSet) {
     auto sam = addr_trans::SamTable::packed(
         {{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}}, /*x_span=*/4, /*y_span=*/1,
         /*block_size=*/kTile);
-    EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 4, 1));
+    EXPECT_FALSE(declare(sam, axi::Space::Memory, 12, 4, 1));
     CollectiveTestbench t(std::move(sam));
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))),
                  "not a collective target");
@@ -412,7 +412,7 @@ TEST(NmuCollectiveDeath, MaskBitOutsideTheMesh) {
 TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
     auto sam = addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}},
                                             /*x_span=*/3, /*y_span=*/1, /*block_size=*/kTile);
-    ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 3, 1));
+    ASSERT_TRUE(declare(sam, axi::Space::Memory, 12, 3, 1));
     CollectiveTestbench t(std::move(sam));
     // Based at x = 0 the mask names {0, 2}, both real nodes -- no clipping.
     ASSERT_TRUE(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))));
@@ -431,7 +431,7 @@ TEST(NmuCollectiveDeath, NodeSetIsNotAnAlignedWildcard) {
     auto sam = addr_trans::SamTable::packed(
         {{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}}, /*x_span=*/4, /*y_span=*/2,
         /*block_size=*/kTile);
-    EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 2, 2));
+    EXPECT_FALSE(declare(sam, axi::Space::Memory, 12, 2, 2));
     CollectiveTestbench t(std::move(sam));
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))),
                  "not a collective target");
@@ -488,7 +488,7 @@ TEST(NmuCollectiveDeath, BurstOverrunsTheRegion) {
 TEST(NmuCollectiveDeath, NonUniformRegionSizeIsNotACollectiveTarget) {
     addr_trans::SamTable sam(
         {{0x0000, 2 * kTile, 0x00}, {0x2000, kTile, 0x01}, {0x3000, kTile, 0x02}});
-    EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 3, 1));
+    EXPECT_FALSE(declare(sam, axi::Space::Memory, 12, 3, 1));
     CollectiveTestbench t(std::move(sam));
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))),
                  "not a collective target");

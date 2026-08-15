@@ -86,9 +86,13 @@ class NsuWrap {
         cfg.port_id = port_id;
         if (config_path != nullptr && config_path[0] != '\0') {
             const auto sam = nmu::addr_trans::load_sam_table(config_path);
-            for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {
-                if (const auto* c = sam.collective_coords(cls)) {
-                    cfg.space_coords[static_cast<unsigned>(cls)] = *c;
+            // The tile spaces only: a peripheral region has no coordinate
+            // field, so there is nothing for the NSU to rebase. NsuConfig's
+            // array is indexed by class (Narrow = 0, Data = 1,
+            // nsu/depacketize.hpp), which Config = 0 / Memory = 1 matches.
+            for (axi::Space space : {axi::Space::Config, axi::Space::Memory}) {
+                if (const auto* c = sam.collective_coords(space)) {
+                    cfg.space_coords[static_cast<unsigned>(axi::class_of(space))] = *c;
                 }
             }
         }

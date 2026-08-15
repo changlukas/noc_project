@@ -25,6 +25,9 @@ struct Translated {
     // non-zero names a boundary-port peripheral (round 3). Every entry a
     // shipped topology declares today is a tile, so this is 0 throughout.
     uint8_t port = 0;
+    // Which address space the request fell in. Not derivable from cls: a
+    // peripheral region is a third space carrying the Data class.
+    axi::Space space = axi::Space::Memory;
 };
 
 struct SamEntry {
@@ -36,6 +39,9 @@ struct SamEntry {
     // non-zero names a boundary-port peripheral (round 3). Every entry a
     // shipped topology declares today is a tile, so this is 0 throughout.
     uint8_t port = 0;
+    // The space this entry belongs to, and what every per-space property in
+    // this file keys on. Two spaces carry the Data class, so cls cannot.
+    axi::Space space = axi::Space::Memory;
 };
 
 // One packed-map input tile: mesh coordinate + size. Bases are not given here;
@@ -46,6 +52,7 @@ struct PackedTile {
     unsigned y;
     uint64_t size;
     axi::AxiClass cls = axi::AxiClass::Data;
+    axi::Space space = axi::Space::Memory;
 };
 
 // The coordinate-field vocabulary lives at the NI layer: the NMU reads the
@@ -95,8 +102,8 @@ class SamTable {
             const bool is_config = t.cls == axi::AxiClass::Narrow;
             const uint64_t base =
                 (uint64_t{(t.y << x_bits) | t.x}) * block_size + (is_config ? config_offset : 0);
-            es.push_back(
-                {base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x), t.cls});
+            es.push_back({base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x),
+                          t.cls, /*port=*/0, t.space});
         }
         return SamTable(std::move(es));
     }
@@ -132,7 +139,7 @@ class SamTable {
     Translated translate(uint64_t addr) const {
         const SamEntry* e = lookup(addr);
         assert(e && "SAM miss: address maps to no tile (config/stimulus bug)");
-        return {e->dst_id, addr, e->cls, e->port};
+        return {e->dst_id, addr, e->cls, e->port, e->space};
     }
 
     const std::vector<SamEntry>& entries() const { return entries_; }
@@ -166,13 +173,18 @@ class SamTable {
         std::size_t memory_count = 0;
         std::size_t config_count = 0;
         for (const auto& e : entries_) {
+            // Coverage is a property of the tile spaces only. A peripheral
+            // region sits at a coordinate its router's tile already covers, so
+            // it is neither a duplicate of that tile nor part of any count.
+            if (e.space != axi::Space::Memory && e.space != axi::Space::Config) continue;
             unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             unsigned y = e.dst_id >> ni::width::X_WIDTH;
             std::size_t idx = static_cast<std::size_t>(y) * x_span + x;
-            std::vector<bool>& seen = (e.cls == axi::AxiClass::Data) ? seen_memory : seen_config;
+            const bool is_memory = e.space == axi::Space::Memory;
+            std::vector<bool>& seen = is_memory ? seen_memory : seen_config;
             assert(!seen[idx] && "SAM: duplicate mesh node (same space)");
             seen[idx] = true;
-            ((e.cls == axi::AxiClass::Data) ? memory_count : config_count) += 1;
+            (is_memory ? memory_count : config_count) += 1;
         }
         assert(memory_count == mesh_nodes &&
                "SAM: memory space must cover the mesh exactly once (tile count mismatch)");
@@ -199,8 +211,8 @@ class SamTable {
     // This is a weaker, per-space property than validate(): it says nothing
     // about the mesh, only that the declared ranges reach this space's own
     // entries. A space that does not cover the mesh can still be eligible.
-    bool declare_space_coords(axi::AxiClass cls, const SpaceCoords& c) {
-        const unsigned slot = static_cast<unsigned>(cls);
+    bool declare_space_coords(axi::Space space, const SpaceCoords& c) {
+        const unsigned slot = static_cast<unsigned>(space);
         eligible_[slot] = false;
         if (c.x_count == 0 || c.y_count == 0) return false;
         if (c.x_range.len != clog2(c.x_count) || c.y_range.len != clog2(c.y_count)) return false;
@@ -218,7 +230,7 @@ class SamTable {
         const SamEntry* origin = nullptr;
         std::size_t tile_entries = 0;
         for (const auto& e : entries_) {
-            if (e.cls != cls) continue;
+            if (e.space != space) continue;
             const unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             const unsigned y = e.dst_id >> ni::width::X_WIDTH;
             if (x == c.x_first && y == c.y_first) origin = &e;
@@ -247,9 +259,9 @@ class SamTable {
                 const uint64_t addr = base_zero | (uint64_t{x} << c.x_range.offset) |
                                       (uint64_t{y} << c.y_range.offset);
                 const SamEntry* e = lookup(addr);
-                if (e == nullptr || e->cls != cls) return false;  // reachable, one class
-                if (e->base != addr) return false;                // uniform stride
-                if (e->size != origin->size) return false;        // uniform aperture
+                if (e == nullptr || e->space != space) return false;  // reachable, one space
+                if (e->base != addr) return false;                    // uniform stride
+                if (e->size != origin->size) return false;            // uniform aperture
                 if (e->dst_id != ((y << ni::width::X_WIDTH) | x)) return false;  // raster order
             }
         }
@@ -259,8 +271,8 @@ class SamTable {
     }
 
     // Declared coordinates of a collective-eligible space, else nullptr.
-    const SpaceCoords* collective_coords(axi::AxiClass cls) const {
-        const unsigned slot = static_cast<unsigned>(cls);
+    const SpaceCoords* collective_coords(axi::Space space) const {
+        const unsigned slot = static_cast<unsigned>(space);
         return eligible_[slot] ? &coords_[slot] : nullptr;
     }
 
@@ -271,9 +283,11 @@ class SamTable {
 
   private:
     std::vector<SamEntry> entries_;
-    // Indexed by axi::AxiClass (Narrow = 0, Data = 1) -- one address space each.
-    SpaceCoords coords_[2];
-    bool eligible_[2] = {false, false};
+    // Indexed by axi::Space (Config = 0, Memory = 1, Peripheral = 2). The
+    // peripheral slot exists so a lookup on it answers "not a collective
+    // target" rather than aliasing a tile space's answer.
+    SpaceCoords coords_[3];
+    bool eligible_[3] = {false, false, false};
 };
 
 // Highest byte a burst touches, for the SAM footprint guard.
@@ -301,7 +315,7 @@ inline uint64_t burst_last_byte(uint64_t addr, uint8_t len, uint8_t size, axi::B
 // (floo_axi_chimney.sv:534-546) -- two shifts, no walk over the map.
 // Everything a per-replica scan would re-derive is a
 // property of the SPACE and was settled when the ranges were declared
-// (SamTable::declare_space_coords): one class, one node per coordinate pair, a
+// (SamTable::declare_space_coords): one space, one node per coordinate pair, a
 // shared node-local offset, one aperture.
 //
 // Every reject here is a PERMANENT illegal input: it never clears on retry, so
@@ -355,7 +369,7 @@ inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, u
     // stays UNIFORM across the destination set because the mask cannot leave
     // the space the request address falls in -- the outside-the-ranges check
     // below.
-    const SpaceCoords* coords = sam.collective_coords(entry->cls);
+    const SpaceCoords* coords = sam.collective_coords(entry->space);
     if (coords == nullptr) {
         assert(false &&
                "nmu::addr_trans::collective_translate: the request address's space declares no "
