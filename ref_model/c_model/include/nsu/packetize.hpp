@@ -37,8 +37,13 @@ class Packetize : public ResponsePacketizer {
     // dat_r_out: DAT face for Data-class R (S3a T6 steering). B has no DAT
     // counterpart -- b_out_ (RSP) is the only B sink, both classes.
     Packetize(router::NocRspOut& b_out, router::NocRspOut& r_out, router::NocRspOut& dat_r_out,
-              MetaBuffer& meta, uint8_t src_id)
-        : b_out_(b_out), r_out_(r_out), dat_r_out_(dat_r_out), meta_(meta), src_id_(src_id) {}
+              MetaBuffer& meta, uint8_t src_id, uint8_t port_id = 0)
+        : b_out_(b_out),
+          r_out_(r_out),
+          dat_r_out_(dat_r_out),
+          meta_(meta),
+          src_id_(src_id),
+          port_id_(port_id) {}
 
     // ---- ResponsePacketizer interface (S1 accept) ----
     // Accepts ≤1 beat/channel into the S1 stage register.
@@ -62,15 +67,18 @@ class Packetize : public ResponsePacketizer {
     router::NocRspOut& dat_r_out_;
     MetaBuffer& meta_;
     uint8_t src_id_;
+    // This NI's own endpoint at src_id, stamped into every response it issues.
+    uint8_t port_id_ = 0;
 
     // S1 stage registers: one per response channel. push_b/r() fills them;
     // tick() (S2) drains and transforms into Flits toward the arbiter.
     router::PipelineStage<axi::BBeat> s1_b_;
     router::PipelineStage<axi::RBeat> s1_r_;
 
-    static Flit build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id);
+    static Flit build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id,
+                             uint8_t port_id);
     static Flit build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id,
-                             uint16_t beat_idx);
+                             uint8_t port_id, uint16_t beat_idx);
 };
 
 // S1 accept: write into stage register (backpressure if full).
@@ -90,11 +98,14 @@ inline bool Packetize::push_r(const axi::RBeat& b) {
 // must carry the master's original id, recovered from the buffered entry (FlooNoC
 // floo_meta_buffer.sv:344-346, "Use original, buffered ID again for responses").
 // nsu::VcAllocator's same-destination-bypass fixed VC map keys on this restored rid.
-inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id) {
+inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uint8_t src_id,
+                                    uint8_t port_id) {
     Flit f;
     f.set_header_field("axi_ch", m.cls == AxiClass::Data ? ni::AXI_CH_DataB : ni::AXI_CH_NarrowB);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
+    f.set_header_field("dst_port_id", m.src_port);
+    f.set_header_field("src_port_id", port_id);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", m.ordering_req);
@@ -114,13 +125,15 @@ inline Flit Packetize::build_b_flit(const axi::BBeat& b, const MetaEntry& m, uin
 }
 
 inline Flit Packetize::build_r_flit(const axi::RBeat& b, const MetaEntry& m, uint8_t src_id,
-                                    uint16_t beat_idx) {
+                                    uint8_t port_id, uint16_t beat_idx) {
     const bool is_data = (m.cls == AxiClass::Data);
     const char* ch = is_data ? "DATA_R" : "NARROW_R";
     Flit f;
     f.set_header_field("axi_ch", is_data ? ni::AXI_CH_DataR : ni::AXI_CH_NarrowR);
     f.set_header_field("src_id", src_id);
     f.set_header_field("dst_id", m.src_id);
+    f.set_header_field("dst_port_id", m.src_port);
+    f.set_header_field("src_port_id", port_id);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", m.ordering_req);
@@ -158,7 +171,7 @@ inline void Packetize::tick() {
             assert(false && "Packetize::tick: B in S1 with no matching AW MetaBuffer entry");
             std::abort();
         }
-        Flit f = build_b_flit(b, *meta_opt, src_id_);
+        Flit f = build_b_flit(b, *meta_opt, src_id_, port_id_);
         if (b_out_.push_flit(f)) {
             s1_b_.take();
             meta_.commit_write(b.id);  // commit on successful S2→S3 push
@@ -175,7 +188,7 @@ inline void Packetize::tick() {
             assert(false && "Packetize::tick: R in S1 with no matching AR MetaBuffer entry");
             std::abort();
         }
-        Flit f = build_r_flit(b, *meta_opt, src_id_, meta_.read_beat_index(b.id));
+        Flit f = build_r_flit(b, *meta_opt, src_id_, port_id_, meta_.read_beat_index(b.id));
         router::NocRspOut& r_sink = (meta_opt->cls == AxiClass::Data) ? dat_r_out_ : r_out_;
         if (r_sink.push_flit(f)) {
             s1_r_.take();

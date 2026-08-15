@@ -141,3 +141,77 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
     EXPECT_EQ(b_flit->get_payload_field("B", "bid"), kAxiId);
     EXPECT_EQ(b_flit->get_payload_field("B", "bresp"), static_cast<uint64_t>(axi::Resp::OKAY));
 }
+
+// Same drive as the round-trip above, except the requester sits on port 1 at
+// its own coordinate. The B must name that port, so it reaches the requester
+// and not the tile beside it.
+TEST(NsuTopLevel, EchoesTheRequestersPortBackOntoTheBResponse) {
+    constexpr uint8_t kNsuSrcId = 0x34;
+    constexpr uint8_t kRequesterSrcId = 0x12;
+    constexpr uint8_t kAxiId = 0x07;
+    constexpr uint64_t kAddr = 0x200;
+
+    NsuConfig cfg{};
+    cfg.src_id = kNsuSrcId;
+    cfg.port_params.aw_queue_depth = 16;
+    cfg.port_params.w_queue_depth = 16;
+    cfg.port_params.ar_queue_depth = 16;
+    cfg.port_params.b_queue_depth = 16;
+    cfg.port_params.r_queue_depth = 16;
+    cfg.port_params.meta_buffer_max_outstanding = 32;
+    cfg.port_params.meta_buffer_max_unique_ids = axi::AXI_ID_SPACE;
+    NsuStandalone nsu(cfg);
+
+    Flit aw_flit;
+    aw_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowAw);
+    aw_flit.set_header_field("src_id", kRequesterSrcId);
+    aw_flit.set_header_field("dst_id", kNsuSrcId);
+    aw_flit.set_header_field("src_port_id", 1);
+    aw_flit.set_header_field("vc_id", 0);
+    aw_flit.set_header_field("flit_tail", 0);
+    aw_flit.set_header_field("ordering_req", 0);
+    aw_flit.set_header_field("ordering_tag", 0);
+    aw_flit.set_payload_field("AW", "awid", kAxiId);
+    aw_flit.set_payload_field("AW", "awaddr", kAddr);
+    aw_flit.set_payload_field("AW", "awlen", 0);
+    aw_flit.set_payload_field("AW", "awsize", 2);
+    aw_flit.set_payload_field("AW", "awburst", static_cast<uint64_t>(axi::Burst::INCR));
+    nsu.inject_req_flit(aw_flit);
+
+    Flit w_flit;
+    w_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
+    w_flit.set_header_field("src_id", kRequesterSrcId);
+    w_flit.set_header_field("dst_id", kNsuSrcId);
+    w_flit.set_header_field("src_port_id", 1);
+    w_flit.set_header_field("vc_id", 0);
+    w_flit.set_header_field("flit_tail", 1);
+    w_flit.set_payload_field("NARROW_W", "wlast", 1);
+    w_flit.set_payload_field("NARROW_W", "wstrb", 0xF);
+    nsu.inject_req_flit(w_flit);
+
+    std::optional<axi::AwBeat> aw_out;
+    std::optional<axi::WBeat> w_out;
+    for (int i = 0; i < 16 && !(aw_out && w_out); ++i) {
+        nsu.tick();
+        if (!aw_out) aw_out = nsu.axi_master_port().pop_aw();
+        if (!w_out) w_out = nsu.axi_master_port().pop_w();
+    }
+    ASSERT_TRUE(aw_out.has_value()) << "Nsu never surfaced AW beat to AxiMasterPort";
+    ASSERT_TRUE(w_out.has_value()) << "Nsu never surfaced W beat to AxiMasterPort";
+
+    axi::BBeat b{};
+    b.id = kAxiId;
+    b.resp = axi::Resp::OKAY;
+    ASSERT_TRUE(nsu.axi_master_port().push_b(b));
+
+    std::optional<Flit> b_flit;
+    for (int i = 0; i < 32 && !b_flit; ++i) {
+        nsu.tick();
+        b_flit = nsu.pop_rsp_flit();
+    }
+    ASSERT_TRUE(b_flit.has_value()) << "Nsu never produced B flit on NoC rsp-out face";
+    EXPECT_EQ(b_flit->get_header_field("dst_port_id"), 1u)
+        << "B should be addressed back to the port that issued the AW";
+    EXPECT_EQ(b_flit->get_header_field("src_port_id"), 0u)
+        << "this NSU is the tile on the router's LOCAL port";
+}

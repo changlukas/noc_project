@@ -143,6 +143,32 @@ TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
     EXPECT_EQ(mb.peek_read(0x07)->src_id, 0x12);
 }
 
+TEST(NsuDepacketize, RecordsTheRequestersPortInTheMetaEntry) {
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
+    auto f = make_aw_flit(0x05, 0x1000, /*src_id=*/0x12);
+    f.set_header_field("src_port_id", 1);
+    ASSERT_TRUE(noc.req_out().push_flit(f));
+    depkt.tick();
+    ASSERT_TRUE(depkt.pop_aw().has_value());
+    EXPECT_EQ(mb.peek_write(0x05)->src_port, 1u);
+}
+
+// Fault injection: a request naming a port that is not this NSU's must abort.
+TEST(NsuDepacketizeDeath, RejectsARequestAddressedToAnotherPort) {
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    // port_id is the seventh constructor argument, after space_coords.
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
+                      ni::cmodel::router::null_req_in(), /*src_id=*/0x02, /*space_coords=*/{},
+                      /*port_id=*/0);
+    auto f = make_aw_flit(0x05, 0x1000, /*src_id=*/0x12);
+    f.set_header_field("dst_port_id", 1);
+    ASSERT_TRUE(noc.req_out().push_flit(f));
+    EXPECT_DEATH(depkt.tick(), "dst_port_id");
+}
+
 TEST(NsuDepacketize, WFlitNoMetaSideEffect) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);

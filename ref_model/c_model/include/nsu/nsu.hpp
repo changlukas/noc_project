@@ -181,9 +181,9 @@ inline Nsu::Nsu(NsuConfig cfg, router::NocReqIn& upstream_req, router::NocRspOut
       dat_vc_allocator_(downstream_dat_rsp_, cfg_.dat_num_vc, cfg_.vc_allocator_pending_depth),
       meta_buffer_(cfg_.port_params.meta_buffer_max_outstanding),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), dat_vc_allocator_,
-                 meta_buffer_, cfg_.src_id),
+                 meta_buffer_, cfg_.src_id, cfg_.port_id),
       depacketize_(upstream_req_, meta_buffer_, cfg_.port_params.meta_buffer_max_unique_ids,
-                   upstream_dat_req_, cfg_.src_id, cfg_.space_coords),
+                   upstream_dat_req_, cfg_.src_id, cfg_.space_coords, cfg_.port_id),
       axi_master_port_(depacketize_, packetize_, cfg_.port_params) {}
 
 inline void Nsu::tick() {

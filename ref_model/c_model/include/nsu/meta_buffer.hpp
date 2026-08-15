@@ -40,6 +40,9 @@ struct MetaEntry {
     // initializers to catch a reordering. Keep new fields at the end.
     uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
     uint8_t collective_mask = 0;
+    // Which endpoint at src_id issued this. Echoed back as the response's
+    // dst_port_id so it reaches the requester and not the tile beside it.
+    uint8_t src_port = 0;
 };
 
 // Downstream AXI ID presented to the slave, from the master's upstream ID.

@@ -48,13 +48,14 @@ class Depacketize : public RequestDepacketizer {
   public:
     Depacketize(router::NocReqIn& req_in, MetaBuffer& meta, std::size_t max_unique_ids,
                 router::NocReqIn& dat_req_in = router::null_req_in(), uint8_t src_id = 0,
-                std::array<address_map::SpaceCoords, 2> space_coords = {})
+                std::array<address_map::SpaceCoords, 2> space_coords = {}, uint8_t port_id = 0)
         : req_in_(req_in),
           dat_req_in_(dat_req_in),
           meta_(meta),
           max_unique_ids_(max_unique_ids),
           node_(router::detail::split_node_id(src_id)),
-          space_coords_(space_coords) {
+          space_coords_(space_coords),
+          port_id_(port_id) {
         // Every path that configures an NSU funnels through here (YAML loader, co-sim
         // wrap defaults, direct NsuConfig test fixtures), so this is the config trust
         // boundary: validate with a throw, not an assert, so a misconfigured value fails
@@ -169,6 +170,8 @@ class Depacketize : public RequestDepacketizer {
     // This node's mesh coordinates, and where each space keeps them.
     router::detail::NodeCoord node_;
     std::array<address_map::SpaceCoords, 2> space_coords_;
+    // This NI's own endpoint at its coordinate; every request must name it.
+    uint8_t port_id_ = 0;
 
     // The address a request carries names the node the SENDER addressed. For a
     // unicast that is this node and the rewrite is the identity. For a
@@ -275,6 +278,12 @@ inline void Depacketize::drain_ingress_(router::NocReqIn& src, std::optional<Fli
             auto opt = src.pop_flit();
             if (!opt) return;
             f = *opt;
+        }
+        // dst_port_id names which endpoint at this coordinate the request is for.
+        // The router delivers by coordinate, so a wrong value lands here silently.
+        if (f.get_header_field("dst_port_id") != port_id_) {
+            assert(false && "nsu::Depacketize: request dst_port_id names another endpoint");
+            std::abort();
         }
         uint64_t ch = f.get_header_field("axi_ch");
         // DAT carries DataAw/DataW only (spec :348; DataAr and every Narrow*
@@ -393,6 +402,7 @@ inline std::optional<axi::AwBeat> Depacketize::pop_aw() {
     // translate from, and the RSP join matches on the exact echoed pair.
     e.collective_op = static_cast<uint8_t>(f.get_header_field("collective_op"));
     e.collective_mask = static_cast<uint8_t>(f.get_header_field("collective_mask"));
+    e.src_port = static_cast<uint8_t>(f.get_header_field("src_port_id"));
     meta_.allocate_write(downstream_id, e);
     b.id = downstream_id;
     return b;
@@ -424,18 +434,23 @@ inline std::optional<axi::ArBeat> Depacketize::pop_ar() {
         (f.get_header_field("axi_ch") == ni::AXI_CH_DataAr) ? AxiClass::Data : AxiClass::Narrow;
     // Positional init: MetaEntry is append-only for that reason. C++17 has no
     // designated initializers to pin field names, so inserting a field ahead of
-    // the AR basis below would silently shift b.addr/len/size/burst.
-    meta_.allocate_read(downstream_id, {
-                                           static_cast<uint8_t>(f.get_header_field("src_id")),
-                                           b.id,
-                                           static_cast<uint8_t>(f.get_header_field("ordering_req")),
-                                           static_cast<uint8_t>(f.get_header_field("ordering_tag")),
-                                           cls,
-                                           b.addr,
-                                           b.len,
-                                           b.size,
-                                           b.burst,
-                                       });
+    // the AR basis below would silently shift b.addr/len/size/burst. Members
+    // past burst are set by name, not position: they carry defaults an AR is
+    // meant to keep (collective_op = UNICAST), and restating those to reach a
+    // later member is how a default drifts out of step with the struct.
+    MetaEntry e{
+        static_cast<uint8_t>(f.get_header_field("src_id")),
+        b.id,
+        static_cast<uint8_t>(f.get_header_field("ordering_req")),
+        static_cast<uint8_t>(f.get_header_field("ordering_tag")),
+        cls,
+        b.addr,
+        b.len,
+        b.size,
+        b.burst,
+    };
+    e.src_port = static_cast<uint8_t>(f.get_header_field("src_port_id"));
+    meta_.allocate_read(downstream_id, e);
     b.id = downstream_id;
     return b;
 }
