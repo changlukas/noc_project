@@ -109,15 +109,27 @@ Pair them with the ordinary XY turns and a cycle closes: N→E (face eject), E�
 eject), W→N (XY).
 
 It is not a cycle, because **a boundary port on an edge router is terminal**. There is no western
-neighbour at `x == 0`, so the WEST port feeds a peripheral NI that consumes the flit — it is not an
-input to any other router's routing decision, and a channel dependency cycle needs one. Ejecting to
-a face is LOCAL with a different pin, not a turn.
+neighbour at `x == 0`, so the WEST port feeds a peripheral NI that consumes the flit. Stated against
+the definition: a dependency edge A -> B exists when a packet holding A can request B. The ejection
+channel can be B — a vertical mesh channel depends on it — but it can never be A, because there is
+no router at its far end to make a further routing decision. A cycle needs every edge to be both.
+
+Peripheral INJECTION is the opposite directed channel, peripheral -> router. It can request a normal
+XY output, but it is a source channel, not the continuation of the ejection channel the paper cycle
+uses. The two do not compose.
 
 That argument holds only while peripherals sit on edge routers. Task 2's face-legality assert
-(`face: x` needs `x == 0` or `x == x_dim - 1`) is what guarantees it. **That assert is the
-deadlock-freedom precondition, not input tidiness.** If a later round wants a peripheral on an
-interior router, the port it hangs off is a live inter-router link, the eject becomes a real turn,
-and the cycle above closes for real. Say so in the assert's message.
+(`face: x` needs `x == 0` or `x == x_dim - 1`, `face: y` needs `y == 0` or `y == y_dim - 1`) is what
+guarantees it, and `route_compute`'s "this router has no x face" abort is the runtime backstop.
+**Those two are the deadlock-freedom precondition, not input tidiness.** On an interior router the
+port also carries a live inter-router link, so the ejection channel stops being terminal, the added
+Y-to-X turn becomes a real mesh dependency, and the cycle above closes for real. Say so in the
+assert's message.
+
+Derived independently twice and agreed — once here, once by Codex working from the turn definitions
+with no access to this conclusion. Both enumerate the same four Y-to-X turns, the same 2x2 cycle,
+and the same terminal-channel reason it does not close. That is the bar the spec set for itself when
+it rejected alternative A'.
 
 ## Rulings carried in from round 2
 
