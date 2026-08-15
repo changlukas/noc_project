@@ -212,7 +212,7 @@ def emit_file_master_node(out_dir, src_idx, dst_bases, n_nodes,
     id-agnostic (VC id only), so this changes concurrency, not VC spread.
 
     extra: optional (write_lines, read_lines) tuple appended after the regular
-    dst_cids transactions -- e.g. one narrow-class (config-space) probe for a
+    dst_bases transactions -- e.g. one narrow-class (config-space) probe for a
     node that owns a config tile, so a single node routes both classes."""
     os.makedirs(out_dir, exist_ok=True)
     reserved = (axi_len + 1) * (1 << axi_size)
@@ -323,11 +323,6 @@ def narrow_beat_exact_lines(axid, config_base, data_width):
 def coord_id(x, y):
     """Coordinate-encoded node id = (y << X_WIDTH) | x.  Mirrors addr_trans.xy_route."""
     return (y << X_WIDTH) | x
-
-
-def coord_xy(cid):
-    """(x, y) of a coordinate-encoded node id.  Inverse of coord_id."""
-    return cid & ((1 << X_WIDTH) - 1), cid >> X_WIDTH
 
 
 def neighbor_dst(x, y, x_dim, y_dim):

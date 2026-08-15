@@ -25,11 +25,21 @@ address_map:
   # peripheral is never a collective member, so none of the four
   # collective-eligibility conditions in docs/noc-target-spec.md 5.1 apply to it.
   #
-  # size holds what the stimulus generator aims at a peripheral:
-  # base_local + n_slots * transactions_per_node * stride, where n_slots counts
-  # ENDPOINTS (4 routers + 2 peripherals) and stride is the burst footprint,
-  # 0x40 at --size 5 --len 0. That is 0x7000 at the directed INJECTION_COUNT of
-  # 64 and 0x13000 at the continuous/checked 200; 0x100000 covers both.
+  # size holds what the stimulus generator aims at a peripheral, which is what
+  # gen_test_patterns.py's footprint guard checks:
+  #   base_local + n_slots * transactions_per_node * stride
+  # plus one further transactions_per_node * stride for the multicast pattern's
+  # own window. n_slots counts ENDPOINTS (4 routers + 2 peripherals) and stride
+  # is the burst footprint, 0x40 at --size 5 --len 0:
+  #
+  #   INJECTION_COUNT   unicast    multicast
+  #   64  (directed)    0x7000     0x8000
+  #   200 (continuous)  0x13C00    0x16E00
+  #
+  # 0x100000 is the size mesh_4x4_vc1_periph4 needs (that topology's 20
+  # endpoints put its multicast extent at 0x42A00, and 0x40000 fails it); the
+  # two peripheral topologies declare the same window so a footprint that fits
+  # one fits the other.
   peripherals:
     - { x: 0, y: 0, face: x, size: 0x100000 }
     - { x: 0, y: 1, face: x, size: 0x100000 }

@@ -1136,9 +1136,26 @@ def test_hotspot_peripherals_weights_the_target_set(tmp_path):
     """--hotspot-rates reaches the peripheral draw, which is the whole reason
     this reuses booksim's weighted select (traffic.cpp:514-525) instead of
     naming one target per source. A rates argument that never arrived would
-    still produce a legal, uniform run."""
-    _out, (_nodes, _x, _y, _b, _cb, _sizes, peripherals) = _emit_hotspot_peripherals(tmp_path)
-    rng = random.Random(0)
-    skewed = g.peripheral_hotspot_dsts(0, peripherals, 400, rng, rates=[7, 1, 1, 1])
-    counts = [sum(1 for p in skewed if p["base"] == q["base"]) for q in peripherals]
-    assert counts[0] > sum(counts[1:])
+    still produce a legal, uniform run.
+
+    Driven through main() rather than by calling peripheral_hotspot_dsts: the
+    claim is that the rates are PASSED, so dropping them at the call site has to
+    fail this. Calling the function directly would only prove it honours an
+    argument the caller might never hand it.
+
+    --hotspot-peripherals suppresses the partner tile's inbound lines, so the
+    only writes landing in a peripheral region are these draws.
+    """
+    out = tmp_path / "rates"
+    g.main(["--pattern", "hotspot", "--hotspot-peripherals",
+            "--hotspot-rates", "7", "1", "1", "1",
+            "--topology", _PERIPH4, "--out", str(out),
+            "--transactions-per-node", "8", "--size", "5", "--len", "0"])
+    _n, _x, _y, _b, _cb, _s, peripherals = g._load_topology(_PERIPH4)
+    counts = [0] * len(peripherals)
+    for node in sorted(out.iterdir()):
+        for t in _parse_write(node / "write.txt"):
+            for i, p in enumerate(peripherals):
+                if p["base"] <= t["addr"] < p["base"] + p["size"]:
+                    counts[i] += 1
+    assert counts[0] > sum(counts[1:]), counts

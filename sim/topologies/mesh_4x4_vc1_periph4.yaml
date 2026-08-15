@@ -53,12 +53,25 @@ address_map:
   # under this design, but a run that mixed it in could not say which property a
   # failure came from.
   #
-  # size holds what the stimulus generator aims at a peripheral:
-  # base_local + n_slots * transactions_per_node * stride, where n_slots counts
-  # ENDPOINTS (16 routers + 4 peripherals) and stride is the burst footprint,
-  # 0x40 at --size 5 --len 0. That is 0x15000 at the directed INJECTION_COUNT of
-  # 64 and 0x3F800 at the continuous/checked 200; 0x100000 covers both. A
-  # peripheral is never a collective member, so none of the four
+  # size holds what the stimulus generator aims at a peripheral, which is what
+  # gen_test_patterns.py's footprint guard checks:
+  #   base_local + n_slots * transactions_per_node * stride
+  # plus one further transactions_per_node * stride for the multicast pattern's
+  # own window. n_slots counts ENDPOINTS (16 routers + 4 peripherals) and stride
+  # is the burst footprint, 0x40 at --size 5 --len 0:
+  #
+  #   INJECTION_COUNT   unicast    multicast
+  #   64  (directed)    0x15000    0x16000
+  #   200 (continuous)  0x3F800    0x42A00
+  #
+  # NOT the next power of two above the largest of those. 0x40000 holds the
+  # 200-transaction unicast footprint and fails that same count's multicast
+  # extent, so it would reject one pattern out of the set at a count every other
+  # pattern accepts. 0x80000 is the first size that clears 0x42A00; 0x100000
+  # doubles it, because the window costs nothing (axi_sim_mem is sparse) and a
+  # ceiling one step above the largest shipped run is a ceiling someone hits.
+  #
+  # A peripheral is never a collective member, so none of the four
   # collective-eligibility conditions in docs/noc-target-spec.md 5.1 apply to it.
   peripherals:
     - { x: 0, y: 1, face: x, size: 0x100000 }   # west
