@@ -16,9 +16,11 @@ address_map format (topology YAML):
         # spaces").
 No tile_size, no base, no default. space defaults to "memory".
 
-Packing rule: base = space_base[space] + ((y << x_bits) | x) * slot[space],
-where slot[space] is the largest declared size in that space and space_base
-offsets config above every base memory could take. dst_id = (y << X_WIDTH) | x.
+Packing rule: base = ((y << x_bits) | x) * block_size + offset[space], where
+block_size is address_map.block_size (a power of two, the node stride) and
+offset[space] lays the spaces out inside a node's block, memory first at 0.
+slot[space] is the largest declared size in that space and now bounds the
+aperture, not the stride. dst_id = (y << X_WIDTH) | x.
 """
 
 X_WIDTH = 4  # mirrors ni_flit_constants.h width::X_WIDTH / addr_trans.hpp
@@ -38,6 +40,19 @@ def _clog2(n):
     while (1 << b) < n:
         b += 1
     return b
+
+
+def _align_up(value, alignment):
+    if alignment == 0:
+        return value
+    return (value + alignment - 1) // alignment * alignment
+
+
+def _next_pow2(n):
+    p = 1
+    while p < n:
+        p <<= 1
+    return p
 
 
 def _slot_size(tiles, space):
@@ -79,10 +94,19 @@ def pack(address_map, x_span, y_span):
 
     x_bits = _clog2(x_span)
     slot = {sp: _slot_size(tiles, sp) for sp in ("memory", "config")}
-    # Each space starts above every slot the previous one could occupy, so the
-    # coordinate field of one space never reaches into another's.
-    space_base = {"memory": 0,
-                  "config": (1 << x_bits) * y_span * slot["memory"]}
+    # Spaces sit inside a node's block in a fixed order, memory first at 0,
+    # each aligned to its own slot. block_size is the one declared number.
+    offset = {"memory": 0}
+    offset["config"] = _align_up(slot["memory"], slot["config"]) if slot["config"] else 0
+    extent = offset["config"] + slot["config"]
+    declared = (address_map or {}).get("block_size")
+    block_size = int(declared) if declared is not None else _next_pow2(extent)
+    if block_size & (block_size - 1):
+        raise ValueError(f"address_map.block_size {block_size:#x} must be a power of two")
+    if block_size < extent:
+        raise ValueError(
+            f"address_map.block_size {block_size:#x} is smaller than the spaces it must hold "
+            f"({extent:#x})")
 
     entries = []
     for t in tiles:
@@ -99,7 +123,7 @@ def pack(address_map, x_span, y_span):
             raise ValueError(
                 f"address_map tile (x={x},y={y}) outside mesh {x_span}x{y_span}")
         sp = space
-        base = space_base[sp] + (((y << x_bits) | x) * slot[sp])
+        base = (((y << x_bits) | x) * block_size) + offset[sp]
         entries.append({"x": x, "y": y, "size": size, "base": base, "dst_id": dst_id(x, y),
                         "space": space})
 
@@ -117,10 +141,12 @@ def pack(address_map, x_span, y_span):
             raise ValueError(
                 f"address_map.tiles {space} space covers {len(seen)} nodes, expected "
                 f"{x_span * y_span} ({x_span}x{y_span} mesh, one {space} tile per node)")
-    # No overlap check needed: (x, y) maps to a unique slot index below
-    # (1 << x_bits) * y_span, every tile's size is at most slot[space] because
-    # that slot IS the largest size declared in the space, and space_base keeps
-    # memory and config apart -- so slots are always disjoint.
+    # No overlap check needed: (x, y) maps to a unique block below block_size,
+    # every tile's size is at most slot[space] because that slot IS the
+    # largest size declared in the space, offset[config] >= slot[memory] keeps
+    # the two spaces apart inside a block, and block_size >= extent keeps a
+    # block's own entries inside it -- so blocks, and the spaces inside them,
+    # are always disjoint.
 
     bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "memory"}
     return bases, entries

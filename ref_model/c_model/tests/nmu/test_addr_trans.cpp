@@ -36,7 +36,8 @@ SamTable make_sam_with_border_column() {
         {1, 1, 0x100000},  // tile
         {2, 1, 0x100000},  // tile
     };
-    auto table = addr_trans::SamTable::packed(tiles, /*x_span=*/3, /*y_span=*/2);
+    auto table = addr_trans::SamTable::packed(tiles, /*x_span=*/3, /*y_span=*/2,
+                                              /*block_size=*/0x100000);
     addr_trans::declare_space_coords(table, /*x_span=*/3, /*y_span=*/2,
                                      /*tile_x_first=*/1, /*tile_x_last=*/2,
                                      /*tile_y_first=*/0, /*tile_y_last=*/1);

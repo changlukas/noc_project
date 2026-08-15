@@ -389,7 +389,8 @@ TEST(NmuCollectiveDeath, MaskBitInsideTheTileOffset) {
 // declaration, not on every request.
 TEST(NmuCollectiveDeath, DuplicateNodeInTheDestinationSet) {
     auto sam = addr_trans::SamTable::packed(
-        {{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}}, /*x_span=*/4, /*y_span=*/1);
+        {{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}}, /*x_span=*/4, /*y_span=*/1,
+        /*block_size=*/kTile);
     EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 4, 1));
     CollectiveTestbench t(std::move(sam));
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))),
@@ -410,7 +411,7 @@ TEST(NmuCollectiveDeath, MaskBitOutsideTheMesh) {
 // unlike the design's worked full-range example 0b11={0,1,2,3}.
 TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
     auto sam = addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}},
-                                            /*x_span=*/3, /*y_span=*/1);
+                                            /*x_span=*/3, /*y_span=*/1, /*block_size=*/kTile);
     ASSERT_TRUE(declare(sam, axi::AxiClass::Data, 12, 3, 1));
     CollectiveTestbench t(std::move(sam));
     // Based at x = 0 the mask names {0, 2}, both real nodes -- no clipping.
@@ -428,7 +429,8 @@ TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
 // same-count set.
 TEST(NmuCollectiveDeath, NodeSetIsNotAnAlignedWildcard) {
     auto sam = addr_trans::SamTable::packed(
-        {{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}}, /*x_span=*/4, /*y_span=*/2);
+        {{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}}, /*x_span=*/4, /*y_span=*/2,
+        /*block_size=*/kTile);
     EXPECT_FALSE(declare(sam, axi::AxiClass::Data, 12, 2, 2));
     CollectiveTestbench t(std::move(sam));
     EXPECT_DEATH(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x3000))),

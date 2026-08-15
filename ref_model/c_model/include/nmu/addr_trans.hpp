@@ -53,14 +53,17 @@ class SamTable {
     SamTable() = default;
     explicit SamTable(std::vector<SamEntry> entries) : entries_(std::move(entries)) {}
 
-    // Base from the coordinate and the space's slot size, not accumulation.
+    // Base from the coordinate and block_size, not accumulation. Spaces sit
+    // inside a node's block, memory first at 0, each aligned to its own slot.
     // Twin of sim/tools/address_map.py's pack(): the two must agree bit for
     // bit, because the stimulus generator and this model address the same
     // map. x_span/y_span are the route span (docs/noc-target-spec.md), not
     // necessarily the tile count -- a peripheral coordinate outside the tile
     // region still counts. Every topology with no peripheral has the two
     // equal. dst_id = (y << X_WIDTH) | x per tile.
-    static SamTable packed(const std::vector<PackedTile>& tiles, unsigned x_span, unsigned y_span) {
+    static SamTable packed(const std::vector<PackedTile>& tiles, unsigned x_span, unsigned y_span,
+                           uint64_t block_size) {
+        (void)y_span;  // the caller still needs it for validate()
         const unsigned x_bits = clog2(x_span);
         uint64_t memory_slot = 0;
         uint64_t config_slot = 0;
@@ -68,16 +71,19 @@ class SamTable {
             uint64_t& slot = (t.cls == axi::AxiClass::Narrow) ? config_slot : memory_slot;
             slot = std::max(slot, t.size);
         }
-        // Config starts above every base memory could take, so the coordinate
-        // field of one space never reaches into the other's.
-        const uint64_t config_base = (uint64_t{1} << x_bits) * y_span * memory_slot;
+        // Spaces sit inside a node's block, memory first at 0, each aligned to
+        // its own slot. block_size is the stride and is declared.
+        const uint64_t config_offset =
+            config_slot == 0 ? 0 : ((memory_slot + config_slot - 1) / config_slot) * config_slot;
+        assert((block_size & (block_size - 1)) == 0 && "SAM: block_size must be a power of two");
+        assert(block_size >= config_offset + config_slot &&
+               "SAM: block_size smaller than the spaces it must hold");
         std::vector<SamEntry> es;
         es.reserve(tiles.size());
         for (const auto& t : tiles) {
             const bool is_config = t.cls == axi::AxiClass::Narrow;
-            const uint64_t slot = is_config ? config_slot : memory_slot;
-            const uint64_t space_base = is_config ? config_base : 0;
-            const uint64_t base = space_base + ((uint64_t{(t.y << x_bits) | t.x}) * slot);
+            const uint64_t base =
+                (uint64_t{(t.y << x_bits) | t.x}) * block_size + (is_config ? config_offset : 0);
             es.push_back(
                 {base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x), t.cls});
         }
@@ -95,7 +101,7 @@ class SamTable {
                 tiles.push_back({x, y, tile_size});
             }
         }
-        return packed(tiles, x_dim, y_dim);
+        return packed(tiles, x_dim, y_dim, tile_size);
     }
 
     // First-match by start address (FlooNoC get_entry). Miss -> nullptr.

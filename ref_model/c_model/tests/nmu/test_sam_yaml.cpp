@@ -11,6 +11,8 @@
 
 using ni::cmodel::nmu::addr_trans::collective_translate;
 using ni::cmodel::nmu::addr_trans::load_sam_table;
+using ni::cmodel::nmu::addr_trans::SamEntry;
+using ni::cmodel::nmu::addr_trans::SamTable;
 namespace axi = ni::cmodel::axi;
 
 TEST(SamYaml, PackedTilesBaseFromCoordinateAndSlot) {
@@ -254,6 +256,23 @@ TEST(SamYamlDeath, AStatedTileRegionWhoseDeclarationIsRejected) {
                            "    - { x: 1, y: 1, size: 0x3000 }\n"
                            "    - { x: 2, y: 1, size: 0x3000 }\n";
     EXPECT_DEATH(load_sam_table(path), "a stated tile region needs every address space");
+}
+
+TEST(SamYaml, TileMajorPacksEachNodeIntoOneBlock) {
+    const SamTable t = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
+    constexpr uint64_t kBlock = 0x100000000ull;
+    for (unsigned idx = 0; idx < 4; ++idx) {
+        const SamEntry* mem = t.lookup(idx * kBlock);
+        ASSERT_NE(mem, nullptr);
+        EXPECT_EQ(mem->base, idx * kBlock);
+        EXPECT_EQ(mem->size, 0x2000000ull);
+        EXPECT_EQ(mem->cls, axi::AxiClass::Data);
+        const SamEntry* cfg = t.lookup(idx * kBlock + 0x2000000ull);
+        ASSERT_NE(cfg, nullptr);
+        EXPECT_EQ(cfg->base, idx * kBlock + 0x2000000ull);
+        EXPECT_EQ(cfg->size, 0x1000ull);
+        EXPECT_EQ(cfg->cls, axi::AxiClass::Narrow);
+    }
 }
 
 // SAM class selection from the topology YAML's tile.space attribute

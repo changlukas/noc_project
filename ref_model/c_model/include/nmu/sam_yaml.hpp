@@ -129,6 +129,25 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
 // tiles. All six keys are optional and default to a plain mesh, so a topology
 // stating none of them means today exactly what it meant before they existed.
 // Same six keys, same defaults, as gen_tb_top.py's _route_span.
+// The stride a topology gets when it declares none: the next power of two at
+// or above what the spaces occupy.
+inline uint64_t default_block_size(const std::vector<PackedTile>& tiles) {
+    uint64_t memory_slot = 0;
+    uint64_t config_slot = 0;
+    for (const auto& t : tiles) {
+        uint64_t& slot = (t.cls == axi::AxiClass::Narrow) ? config_slot : memory_slot;
+        slot = std::max(slot, t.size);
+    }
+    const uint64_t config_offset =
+        config_slot == 0 ? 0 : ((memory_slot + config_slot - 1) / config_slot) * config_slot;
+    // No config tile: the block only has to hold memory. With one, config
+    // sits after it and dominates.
+    const uint64_t extent = config_slot == 0 ? memory_slot : config_offset + config_slot;
+    uint64_t p = 1;
+    while (p < extent) p <<= 1;
+    return p;
+}
+
 inline SamTable load_sam_table(const std::string& yaml_path) {
     YAML::Node root = YAML::LoadFile(yaml_path);
     YAML::Node topo = root["topology"];
@@ -172,7 +191,9 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
         tiles.push_back({t["x"].as<unsigned>(), t["y"].as<unsigned>(), t["size"].as<uint64_t>(),
                          parse_tile_space(t)});
     }
-    SamTable table = SamTable::packed(tiles, x_span, y_span);
+    const uint64_t block_size =
+        am["block_size"] ? am["block_size"].as<uint64_t>() : default_block_size(tiles);
+    SamTable table = SamTable::packed(tiles, x_span, y_span, block_size);
     table.validate(x_span, y_span);
     declare_space_coords(table, x_span, y_span, tile_x_first, tile_x_last, tile_y_first,
                          tile_y_last);

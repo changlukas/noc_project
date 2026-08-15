@@ -1634,7 +1634,8 @@ TEST(NmuRob, Enabled_NarrowReadUnalignedAddrReanchorsToCorrectLane) {
     for (unsigned y = 0; y < 16; ++y)
         for (unsigned x = 0; x < 16; ++x)
             tiles.push_back({x, y, 0x100000000ull, axi::AxiClass::Narrow});
-    auto narrow_sam = addr_trans::SamTable::packed(tiles, /*x_span=*/16, /*y_span=*/16);
+    auto narrow_sam = addr_trans::SamTable::packed(tiles, /*x_span=*/16, /*y_span=*/16,
+                                                   /*block_size=*/0x100000000ull);
 
     ChannelModel noc(16, 16);
     ReqCapture w_cap, ar_cap;

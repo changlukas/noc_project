@@ -279,12 +279,11 @@ def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
     txns0 = _parse_write(os.path.join(out, "node0", "write.txt"))
     txns1 = _parse_write(os.path.join(out, "node1", "write.txt"))
     n_beat_exact = 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
-    # Config tiles pack after the 4 memory tiles (0x100000000 each), so node
-    # i's config base is 0x400000000 + i * 0x1000.
-    assert len(txns0) == n_beat_exact + 1                 # + narrow probe
-    assert txns0[-1]["addr"] == 0x400000000
+    # Each node's config aperture sits inside that node's own block, above its
+    # memory aperture: idx * block_size + 0x2000000.
+    assert txns0[-1]["addr"] == 0x2000000
     assert len(txns1) == n_beat_exact + 1
-    assert txns1[-1]["addr"] == 0x400001000
+    assert txns1[-1]["addr"] == 0x100000000 + 0x2000000
 
 
 def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
@@ -364,6 +363,18 @@ def test_ids_per_initiator_overlapping_blocks_fit_the_id_width(tmp_path):
 # address_map.py: packing + validation (mirrors c_model SamTable::packed /
 # SamTable::validate, nmu/addr_trans.hpp).
 # ---------------------------------------------------------------------------
+
+def test_tile_major_packs_each_node_into_one_block():
+    """A node's regions are contiguous inside its own block, and the stride is
+    declared rather than taken from the largest region size."""
+    topo = gen_tb_top.load_topology("mesh_2x2_vc1")
+    _bases, entries = address_map.pack(topo["address_map"], 2, 2)
+    got = {(e["space"], e["x"], e["y"]): e["base"] for e in entries}
+    block = 0x100000000
+    for idx, (x, y) in enumerate([(0, 0), (1, 0), (0, 1), (1, 1)]):
+        assert got[("memory", x, y)] == idx * block
+        assert got[("config", x, y)] == idx * block + 0x2000000
+
 
 def test_pack_bases_are_coordinate_derived_with_a_border_column():
     from address_map import pack
@@ -629,8 +640,8 @@ def test_address_map_pack_rejects_missing_tiles_key():
 
 def test_address_map_pack_real_topologies_at_the_coordinate_formula():
     """Cross-check: every real sim/topologies/*.yaml packs at
-    base = space_base + ((y << clog2(x_span)) | x) * slot, spelled out here from
-    the YAML keys rather than read back from pack(). This is the Python half of
+    base = ((y << clog2(x_span)) | x) * block_size + offset[space], spelled out
+    here from the YAML keys rather than read back from pack(). This is the Python half of
     the packing agreement; the C++ half is
     SamYaml.RealTopologiesPackedAtTheCoordinateFormula, asserting the same
     formula against SamTable::packed(). List-order accumulation (base += size)
@@ -652,14 +663,17 @@ def test_address_map_pack_real_topologies_at_the_coordinate_formula():
         tiles = doc["address_map"]["tiles"]
         _bases, entries = address_map.pack(doc["address_map"], x_span, y_span)
         x_bits = (x_span - 1).bit_length()
-        # Slot per space: the largest size declared in it. Config sits above
-        # every base memory could take.
+        # Slot per space: the largest size declared in it, bounding the
+        # aperture. block_size is the declared node stride.
         slot = {sp: max((int(t["size"]) for t in tiles if t.get("space", "memory") == sp),
                         default=0)
                 for sp in ("memory", "config")}
-        space_base = {"memory": 0, "config": (1 << x_bits) * y_span * slot["memory"]}
+        block = int(doc["address_map"]["block_size"])
+        offset = {"memory": 0,
+                  "config": ((slot["memory"] + slot["config"] - 1) // slot["config"])
+                            * slot["config"]}
         for e in entries:
-            expected = space_base[e["space"]] + (((e["y"] << x_bits) | e["x"]) * slot[e["space"]])
+            expected = (((e["y"] << x_bits) | e["x"]) * block) + offset[e["space"]]
             assert e["base"] == expected, \
                 f"{path}: {e['space']} tile ({e['x']},{e['y']}) base {e['base']:#x} != {expected:#x}"
 
