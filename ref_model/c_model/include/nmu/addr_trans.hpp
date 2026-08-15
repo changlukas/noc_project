@@ -55,6 +55,19 @@ struct PackedTile {
     axi::Space space = axi::Space::Memory;
 };
 
+// One peripheral hanging off a boundary port of the router at (x, y). port is
+// the boundary port it occupies (1 = the x face, 2 = the y face); the coordinate
+// is the router's own. Unlike a tile, its base is NOT coordinate-derived --
+// SamTable::packed() places the regions in declaration order above the tile
+// array, each aligned to its own size, because a peripheral region has no
+// uniform stride and is never a collective member.
+struct PeripheralRegion {
+    unsigned x;
+    unsigned y;
+    uint8_t port;
+    uint64_t size;
+};
+
 // The coordinate-field vocabulary lives at the NI layer: the NMU reads the
 // field, the NSU writes it (ni/address_map.hpp). Re-exported here so every
 // existing addr_trans:: caller keeps its spelling.
@@ -77,11 +90,8 @@ class SamTable {
     // region still counts. Every topology with no peripheral has the two
     // equal. dst_id = (y << X_WIDTH) | x per tile.
     static SamTable packed(const std::vector<PackedTile>& tiles, unsigned x_span, unsigned y_span,
-                           uint64_t block_size) {
-        // Unused here: this signature mirrors address_map.py's pack(tiles, x_span,
-        // y_span), which validates y_span inline. packed() only computes bases;
-        // validate() is the separate call that checks y_span, with its own copy.
-        (void)y_span;
+                           uint64_t block_size,
+                           const std::vector<PeripheralRegion>& peripherals = {}) {
         const unsigned x_bits = clog2(x_span);
         uint64_t memory_slot = 0;
         uint64_t config_slot = 0;
@@ -97,13 +107,29 @@ class SamTable {
         assert(block_size >= std::max(memory_slot, config_offset + config_slot) &&
                "SAM: block_size smaller than the spaces it must hold");
         std::vector<SamEntry> es;
-        es.reserve(tiles.size());
+        es.reserve(tiles.size() + peripherals.size());
         for (const auto& t : tiles) {
             const bool is_config = t.cls == axi::AxiClass::Narrow;
             const uint64_t base =
                 (uint64_t{(t.y << x_bits) | t.x}) * block_size + (is_config ? config_offset : 0);
             es.push_back({base, t.size, static_cast<uint8_t>((t.y << ni::width::X_WIDTH) | t.x),
                           t.cls, /*port=*/0, t.space});
+        }
+        // A tile base is ((y << x_bits) | x) * block_size with x_bits =
+        // clog2(x_span). Mesh dimensions are powers of two, so 1 << x_bits ==
+        // x_span, the top tile index is exactly x_span * y_span - 1, and this is
+        // the address just above the whole array.
+        uint64_t next = static_cast<uint64_t>(x_span) * y_span * block_size;
+        for (const auto& p : peripherals) {
+            // The align-up below assumes a non-zero power of two. Zero passes a
+            // power-of-two test on its own -- 0 & (0 - 1) is 0 -- then aligns to
+            // base 0 and overlaps the entire tile array.
+            assert(p.size != 0 && (p.size & (p.size - 1)) == 0 &&
+                   "SAM: peripheral region size must be a non-zero power of two");
+            next = (next + p.size - 1) & ~(p.size - 1);  // align up to its own size
+            es.push_back({next, p.size, static_cast<uint8_t>((p.y << ni::width::X_WIDTH) | p.x),
+                          axi::AxiClass::Data, p.port, axi::Space::Peripheral});
+            next += p.size;
         }
         return SamTable(std::move(es));
     }

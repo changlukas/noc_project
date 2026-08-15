@@ -142,6 +142,11 @@ TEST(SamYaml, RealTopologiesPackedAtTheCoordinateFormula) {
         auto sam = load_sam_table(file);
         ASSERT_FALSE(sam.entries().empty());
         for (const auto& e : sam.entries()) {
+            // The tile spaces only. A peripheral region is placed in declaration
+            // order above the tile array, so the coordinate formula says nothing
+            // about it -- it shares its host router's coordinate, which the
+            // router's own tile already packs at.
+            if (e.space == axi::Space::Peripheral) continue;
             const unsigned x = e.dst_id & ((1u << ni::width::X_WIDTH) - 1);
             const unsigned y = e.dst_id >> ni::width::X_WIDTH;
             const bool is_config = e.cls == axi::AxiClass::Narrow;
@@ -364,6 +369,17 @@ TEST(SamYaml, PeripheralSpaceIsNotACollectiveTarget) {
     EXPECT_NE(sam.collective_coords(axi::Space::Config), nullptr);
     EXPECT_EQ(sam.collective_coords(axi::Space::Peripheral), nullptr)
         << "a peripheral must never be a collective target";
+}
+
+TEST(SamYaml, APeripheralRegionIsReachableAndCarriesItsPortAndSpace) {
+    // The block's first entry: (0, 0) face x, so port 1, sharing router (0, 0)'s
+    // coordinate. Its region sits above the tile array -- 2x2 tiles at a
+    // 0x100000000 block stride put the top of the array at 0x400000000.
+    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    const auto t = sam.translate(0x400000000ull);
+    EXPECT_EQ(t.space, axi::Space::Peripheral);
+    EXPECT_EQ(t.port, 1u);
+    EXPECT_EQ(t.dst_id, 0x00u) << "a peripheral shares its host router's coordinate";
 }
 
 TEST(SamYaml, MemorySpaceStaysACollectiveTargetAlongsideAPeripheral) {

@@ -203,9 +203,37 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
         tiles.push_back({t["x"].as<unsigned>(), t["y"].as<unsigned>(), t["size"].as<uint64_t>(),
                          axi::class_of(space), space});
     }
+    // address_map.peripherals: ordered list of { x, y, face, size }. A peripheral
+    // hangs off a boundary port of the router at (x, y) -- face "x" is port 1,
+    // face "y" is port 2 -- and its region is placed above the tile array in
+    // declaration order, not derived from the coordinate.
+    std::vector<PeripheralRegion> peripherals;
+    for (const auto& p : am["peripherals"]) {
+        const unsigned x = p["x"].as<unsigned>();
+        const unsigned y = p["y"].as<unsigned>();
+        const std::string face = p["face"].as<std::string>();
+        assert((face == "x" || face == "y") && "address_map peripheral: face must be 'x' or 'y'");
+        const bool on_x_edge = (x == 0 || x == x_dim - 1);
+        const bool on_y_edge = (y == 0 || y == y_dim - 1);
+        // Deadlock freedom, not input tidiness. On an edge router the named face
+        // has no neighbour, so the port is terminal: nothing downstream of the
+        // peripheral requests a further channel. On an interior router that port
+        // carries a live inter-router link, and the Y-to-X ejection turn the
+        // peripheral adds there closes a real channel dependency cycle.
+        assert((face == "x" ? on_x_edge : on_y_edge) &&
+               "address_map peripheral: face names an edge this coordinate is not on -- an "
+               "interior router's port carries a live inter-router link, and hanging a "
+               "peripheral off it closes a channel dependency cycle");
+        for (const auto& q : peripherals) {
+            assert(!(q.x == x && q.y == y && q.port == (face == "x" ? 1 : 2)) &&
+                   "address_map: two peripherals share the same (x, y, face)");
+        }
+        peripherals.push_back(
+            {x, y, static_cast<uint8_t>(face == "x" ? 1 : 2), p["size"].as<uint64_t>()});
+    }
     const uint64_t block_size =
         am["block_size"] ? am["block_size"].as<uint64_t>() : default_block_size(tiles);
-    SamTable table = SamTable::packed(tiles, x_span, y_span, block_size);
+    SamTable table = SamTable::packed(tiles, x_span, y_span, block_size, peripherals);
     table.validate(x_span, y_span);
     declare_space_coords(table, x_span, y_span, tile_x_first, tile_x_last, tile_y_first,
                          tile_y_last);

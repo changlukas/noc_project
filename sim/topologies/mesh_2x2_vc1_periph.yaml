@@ -2,41 +2,28 @@ topology:
   name: mesh_2x2_vc1_periph
   x_dim: 2
   y_dim: 2
-  # Route-coordinate span, wider than the router array: the tiles occupy
-  # x = 1..2, y = 0..1 and the west border coordinate x = 0 carries a
-  # peripheral on each row. A peripheral has an NI and an endpoint but no
-  # router, so the array stays 2x2 while every routable coordinate -- tile or
-  # border -- has to fit the span.
-  x_span: 3
-  y_span: 2
-  tile_x_first: 1
-  tile_x_last: 2
-  tile_y_first: 0
-  tile_y_last: 1
   num_vc: 1
 
-# Tile-major tile map: every coordinate in the span carries a memory-space
-# (data class) tile and a config-space (narrow class) tile inside its own
-# 0x100000000 block, the peripherals at x = 0 included -- a peripheral is
-# addressed exactly as a tile is.
+# Tile-major tile map: every coordinate carries a memory-space (data class) tile
+# and a config-space (narrow class) tile inside its own 0x100000000 block.
 # docs/noc-target-spec.md §5 "SAM address spaces".
 # Bases come from the coordinate and block_size, not from list order:
-# base = ((y << clog2(x_span)) | x) * block_size + offset[space]. With
-# x_span = 3 that is clog2(3) = 2 index bits, so memory bases =
-# idx * 0x100000000 (index bits [33:32], row bit [34]) and config bases =
-# idx * 0x100000000 + 0x2000000 (index bits also [33:32], row bit [34]).
+# base = ((y << clog2(x_dim)) | x) * block_size + offset[space].
 address_map:
   block_size: 0x100000000
   tiles:
     - { x: 0, y: 0, size: 0x2000000 }
     - { x: 1, y: 0, size: 0x2000000 }
-    - { x: 2, y: 0, size: 0x2000000 }
     - { x: 0, y: 1, size: 0x2000000 }
     - { x: 1, y: 1, size: 0x2000000 }
-    - { x: 2, y: 1, size: 0x2000000 }
     - { x: 0, y: 0, size: 0x1000, space: config }
     - { x: 1, y: 0, size: 0x1000, space: config }
-    - { x: 2, y: 0, size: 0x1000, space: config }
     - { x: 0, y: 1, size: 0x1000, space: config }
     - { x: 1, y: 1, size: 0x1000, space: config }
-    - { x: 2, y: 1, size: 0x1000, space: config }
+  # A peripheral shares its router's coordinate and is told apart by the port it
+  # hangs off. Its region sits above the tile array, sized independently -- a
+  # peripheral is never a collective member, so none of the four
+  # collective-eligibility conditions in docs/noc-target-spec.md 5.1 apply to it.
+  peripherals:
+    - { x: 0, y: 0, face: x, size: 0x1000 }
+    - { x: 0, y: 1, face: x, size: 0x1000 }

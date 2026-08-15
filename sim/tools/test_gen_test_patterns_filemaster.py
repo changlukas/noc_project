@@ -691,6 +691,12 @@ def test_address_map_pack_real_topologies_at_the_coordinate_formula():
                   "config": ((slot["memory"] + slot["config"] - 1) // slot["config"])
                             * slot["config"]}
         for e in entries:
+            # The tile spaces only. A peripheral region is placed in declaration
+            # order above the tile array, so the coordinate formula says nothing
+            # about it -- it shares its host router's coordinate, which the
+            # router's own tile already packs at.
+            if e["space"] == "peripheral":
+                continue
             expected = (((e["y"] << x_bits) | e["x"]) * block) + offset[e["space"]]
             assert e["base"] == expected, \
                 f"{path}: {e['space']} tile ({e['x']},{e['y']}) base {e['base']:#x} != {expected:#x}"

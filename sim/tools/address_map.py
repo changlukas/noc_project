@@ -14,6 +14,11 @@ address_map format (topology YAML):
         # ... one memory-space entry per node, then one config-space entry per
         # node, both in raster order (docs/noc-target-spec.md §5 "SAM address
         # spaces").
+      peripherals:                           # optional, ordered list
+        - { x: 0, y: 0, face: x, size: 0x1000 }
+        # A peripheral hangs off a boundary port of the router at (x, y) --
+        # face "x" is port 1, face "y" is port 2 -- and its region is placed
+        # above the tile array in declaration order, not coordinate-derived.
 No tile_size, no base, no default. space defaults to "memory".
 
 Packing rule: base = ((y << x_bits) | x) * block_size + offset[space], where
@@ -27,7 +32,7 @@ X_WIDTH = 4  # mirrors ni_flit_constants.h width::X_WIDTH / addr_trans.hpp
 
 # Tile crossbar target order. Fixed, not inferred: it is what pins m0 to the
 # config memory and the last target to the data memory in user_node_endpoint.
-SPACE_ORDER = ("config", "memory")
+SPACE_ORDER = ("config", "memory", "peripheral")
 
 
 def dst_id(x, y):
@@ -86,7 +91,9 @@ def pack(address_map, x_span, y_span):
         bases:   {dst_id: base} for the memory-space tile only (existing
                  consumers -- gen_test_patterns.py / gen_tb_top.py -- want the
                  node's default/data-class base, not a config aperture).
-        entries: ordered [{"x", "y", "size", "base", "dst_id", "space"}, ...]
+        entries: ordered [{"x", "y", "size", "base", "dst_id", "space"}, ...],
+                 tiles first, then one entry per address_map.peripherals member
+                 (space "peripheral", carrying the "port" it hangs off).
     """
     tiles = (address_map or {}).get("tiles")
     if not tiles:
@@ -143,6 +150,28 @@ def pack(address_map, x_span, y_span):
             raise ValueError(
                 f"address_map.tiles {space} space covers {len(seen)} nodes, expected "
                 f"{x_span * y_span} ({x_span}x{y_span} mesh, one {space} tile per node)")
+    # address_map.peripherals, placed after the coverage checks above so a
+    # peripheral is never counted as a tile of either space. Declaration order,
+    # above the tile array, each region aligned to its own size -- the same
+    # placement SamTable::packed() does, which is what keeps noc_egress_base()
+    # above every real region rather than inside a peripheral's window.
+    next_base = x_span * y_span * block_size
+    for p in (address_map or {}).get("peripherals") or []:
+        x, y, face, size = int(p["x"]), int(p["y"]), p["face"], int(p["size"])
+        if face not in ("x", "y"):
+            raise ValueError(
+                f"address_map peripheral (x={x},y={y}) face {face!r} must be 'x' or 'y'")
+        # Zero passes a power-of-two test on its own and would align to base 0,
+        # overlapping the whole tile array.
+        if size <= 0 or size & (size - 1):
+            raise ValueError(
+                f"address_map peripheral (x={x},y={y}) size {size:#x} must be a non-zero "
+                f"power of two")
+        next_base = _align_up(next_base, size)
+        entries.append({"x": x, "y": y, "size": size, "base": next_base, "dst_id": dst_id(x, y),
+                        "space": "peripheral", "port": 1 if face == "x" else 2})
+        next_base += size
+
     # No overlap check needed: (x, y) maps to a unique block below block_size,
     # every tile's size is at most slot[space] because that slot IS the
     # largest size declared in the space, offset[config] >= slot[memory] keeps
