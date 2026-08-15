@@ -81,12 +81,11 @@ void cmodel_dump_fabric_state(void);
 // math) -- i.e. the fault is in DPI/SV marshalling, not model logic. Splitting
 // per network removes the mixed-width construct outright: every one of these
 // six calls now marshals exactly one flit width.
-// mesh_x_dim/mesh_y_dim are the ROUTE SPAN (the router array plus any border
-// coordinate a peripheral occupies); tile_* are the inclusive tile region
-// inside it, which is what collectives are clipped to.
+// mesh_x_dim/mesh_y_dim are the router array. A peripheral shares its host
+// router's coordinate and is told apart by dst_port_id, so it adds no
+// coordinate of its own.
 unsigned long long cmodel_router_create(const char* name, int x_coord, int y_coord, int mesh_x_dim,
-                                        int mesh_y_dim, int dat_num_vc, int tile_x_first,
-                                        int tile_x_last, int tile_y_first, int tile_y_last);
+                                        int mesh_y_dim, int dat_num_vc);
 void cmodel_router_req_set_inputs(unsigned long long ctx, svBitVecVal* rx_req_valid,
                                   svBitVecVal* rx_req_flit, svBitVecVal* tx_req_ready);
 void cmodel_router_rsp_set_inputs(unsigned long long ctx, svBitVecVal* rx_rsp_valid,

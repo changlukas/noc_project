@@ -650,28 +650,17 @@ _MCAST_SHAPES = ("row", "col", "submesh")
 _CONFIG_PROBE_BASE = 0x800  # cross-node config probe window, below base_local
 
 
-def collective_addr_mask(bases, member_cids, addr_cid, tile_bases=None):
+def collective_addr_mask(bases, member_cids, addr_cid):
     """OR of (base[m] XOR the named base) with wildcard-closure validation.
 
-    The AWUSER mask semantics (spec §6) require the member set to be exactly a
-    wildcard over the mask bits, CLIPPED to the tiles: the NMU and every router
-    expand the mask over the whole node-index field and then drop the
-    coordinates that are not tiles (nmu::addr_trans::collective_translate,
-    router::route_mask), so on a span carrying a peripheral the delivered set is
-    the wildcard closure intersected with the tile region rather than the whole
-    closure.  `tile_bases` is that subset of `bases`; it defaults to `bases`,
-    which is every span coordinate and therefore no clip at all -- the case of
-    every topology with no peripheral.  The NMU re-checks this and aborts the
-    run; validating here turns a mask-unfriendly address map into a
+    The AWUSER mask semantics (spec §6) require the member set to be exactly the
+    wildcard closure over the mask bits: the NMU and every router expand the
+    mask over the whole node-index field and deliver to every coordinate it
+    names (nmu::addr_trans::collective_translate, router::route_mask).  Mesh
+    dimensions are powers of two, so every coordinate the closure names is a
+    node and nothing is dropped.  The NMU re-checks this and aborts the run;
+    validating here turns a mask-unfriendly address map into a
     stimulus-generation error instead of a co-sim abort.
-
-    Both of collective_translate's rejections are mirrored: the clipped set
-    must be non-empty, and each clipped BOUND must itself be a wildcard member
-    (`collective_translate`).  Clamping a range is not the same as clipping a
-    set -- an address at x=1 with mask_x=0b10 names {1,3}, and clamping to a tile
-    region ending at 2 gives a bound of 2, which is not a member.  A terminal
-    router there would fork to nothing and abort, so a generator that can emit
-    such a mask cannot produce valid stimulus on a topology with a peripheral.
 
     `bases` must be the bases of ONE address space, and the caller is expected
     to have picked the space that address lands in.  The node-index field sits
@@ -681,8 +670,6 @@ def collective_addr_mask(bases, member_cids, addr_cid, tile_bases=None):
     the caller naming a bit position: mixing two spaces' bases in one call
     still produces an invalid mask, which the wildcard check below rejects.
     """
-    if tile_bases is None:
-        tile_bases = bases
     addr = bases[addr_cid]
     mask = 0
     for m in member_cids:
@@ -695,44 +682,13 @@ def collective_addr_mask(bases, member_cids, addr_cid, tile_bases=None):
         if sub == 0:
             break
         sub = (sub - 1) & mask
-    delivered = combos & set(tile_bases.values())
+    delivered = combos & set(bases.values())
     if delivered != {bases[m] for m in member_cids}:
         raise ValueError(
-            f"multicast member bases are not the wildcard over mask {mask:#x} clipped to "
-            f"the tiles: named {sorted(hex(bases[m]) for m in member_cids)}, "
+            f"multicast member bases are not the wildcard over mask {mask:#x}: "
+            f"named {sorted(hex(bases[m]) for m in member_cids)}, "
             f"the fabric would deliver {sorted(hex(b) for b in delivered)}")
 
-    # Clipped-bound membership, per coordinate, mirroring
-    # nmu::addr_trans::collective_translate.  Hand-kept twins of this
-    # arithmetic: that function, and route_mask_fork / route_mask_join in
-    # ref_model/c_model/include/router/route_mask.hpp (two copies of their own,
-    # because a stateless join hangs on a one-node disagreement).  Not shared:
-    # they are C++ and this is the generator.  Change one, change all four.
-    # collective_translate shifts mask_x / mask_y out of the space's declared
-    # ranges; this function sees no ranges, so it reads the same two numbers off
-    # the coordinate ids instead. They ARE the same numbers: the masked address
-    # bits are the node index (base = space_base + ((y << x_bits) | x) * slot),
-    # so the mask's x part is the OR of the members' x XOR the named address's,
-    # and
-    # likewise on y. The tile region is the coordinate box tile_bases spans.
-    for axis, i in (("x", 0), ("y", 1)):
-        addr_c = coord_xy(addr_cid)[i]
-        span_mask = 0
-        for m in member_cids:
-            span_mask |= coord_xy(m)[i] ^ addr_c
-        first = min(coord_xy(c)[i] for c in tile_bases)
-        last = max(coord_xy(c)[i] for c in tile_bases)
-        clip_lo = max(addr_c & ~span_mask, first)
-        clip_hi = min(addr_c | span_mask, last)
-        if clip_lo > clip_hi:
-            raise ValueError(
-                f"multicast {axis} range is empty after clipping to the tile region "
-                f"[{first},{last}] (mask {mask:#x}, address {addr_cid:#x})")
-        if ((clip_lo ^ addr_c) & ~span_mask) or ((clip_hi ^ addr_c) & ~span_mask):
-            raise ValueError(
-                f"multicast {axis} bound clipped to the tile region [{first},{last}] is not a "
-                f"wildcard member (mask {mask:#x}, address {addr_cid:#x}): the source and a "
-                f"terminal router would disagree on the member set")
     if mask >> 48:
         raise ValueError(f"collective address mask {mask:#x} exceeds AWUSER[57:10] (48 b)")
     return mask
@@ -788,7 +744,6 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
     # mcast_groups permutes ARRAY positions like every other pattern; the node
     # list is what turns one into a route coordinate id.
     cid_of = {(x, y): cid for _idx, x, y, cid in nodes}
-    tile_bases = {cid: bases[cid] for cid in cid_of.values()}
     groups = {cid_of[src]: [cid_of[m] for m in members]
               for src, members in mcast_groups(shape, x_dim, y_dim)}
     burst_footprint = (axi_len + 1) * (1 << axi_size)
@@ -820,7 +775,7 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
         axid = idx % 256
         if src_cid in groups:
             members = groups[src_cid]
-            addr_mask = collective_addr_mask(bases, members, src_cid, tile_bases)
+            addr_mask = collective_addr_mask(bases, members, src_cid)
             for seq in range(n_txn):
                 off = mcast_base + seq * stride
                 tile_size = sizes["memory"][src_cid]
@@ -836,9 +791,7 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
             if config_all:
                 # Narrow config-space multicast: 2-beat 8 B burst at config
                 # offset 0 (config-space message replication use case).
-                tile_cfg_bases = {cid: config_bases[cid] for cid in cid_of.values()}
-                cfg_mask = collective_addr_mask(config_bases, members, src_cid,
-                                                tile_cfg_bases)
+                cfg_mask = collective_addr_mask(config_bases, members, src_cid)
                 w, r = multicast_lines(axid, config_bases[src_cid], cfg_mask,
                                        [config_bases[m] for m in members],
                                        axi_size=3, axi_len=1, data_width=data_width)

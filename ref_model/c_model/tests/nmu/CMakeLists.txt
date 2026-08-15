@@ -21,6 +21,11 @@ target_include_directories(test_depacketize PRIVATE
 
 add_cmodel_test(test_addr_trans)
 target_link_libraries(test_addr_trans PRIVATE yaml-cpp::yaml-cpp)
+# The collective issuer cases load the shipped peripheral topology: a peripheral
+# and its host router share a coordinate there, which is the case the issuer gate
+# has to tell apart and no hand-built fixture states.
+target_compile_definitions(test_addr_trans PRIVATE
+  TOPOLOGY_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/topologies")
 
 add_cmodel_test(test_sam_table)
 

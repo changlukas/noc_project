@@ -356,8 +356,8 @@ TEST(NmuPacketize, AddrTransIntegratedDstIdInHeader) {
 TEST(NmuPacketize, SamTranslateSetsDstFromTableAndKeepsTheAddress) {
     ReqCapture aw_cap, w_cap, ar_cap;
     // Single packed tile at (2,1) -> dst_id 0x12, base ((1<<2)|2) * 4 GB =
-    // 0x600000000 (x_span = 3 -> x_bits = 2).
-    auto sam = addr_trans::SamTable::packed({{2, 1, 0x100000000ull}}, /*x_span=*/3, /*y_span=*/2,
+    // 0x600000000 (x_dim = 3 -> x_bits = 2).
+    auto sam = addr_trans::SamTable::packed({{2, 1, 0x100000000ull}}, /*x_dim=*/3, /*y_dim=*/2,
                                             /*block_size=*/0x100000000ull);
     Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, /*src_id=*/0, sam);
     axi::AwBeat aw{};

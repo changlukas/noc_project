@@ -65,35 +65,14 @@ VC_ID_WIDTH = 3
 DST_ID_WIDTH = X_WIDTH + Y_WIDTH  # 8 bits → 256 max nodes
 
 
-def _route_span(t: dict):
-    """(x_span, y_span, tile_x_first, tile_x_last, tile_y_first, tile_y_last).
-
-    Six optional topology keys. x_span/y_span are the route-coordinate span --
-    the router array plus any border coordinate a peripheral sits on -- and
-    default to x_dim/y_dim. The tile region is inclusive and defaults to the
-    whole span. A topology stating none of the six is a plain mesh, where the
-    span is the array and every coordinate in it is a tile.
-    """
-    x_span = int(t.get("x_span", t["x_dim"]))
-    y_span = int(t.get("y_span", t["y_dim"]))
-    return (x_span, y_span,
-            int(t.get("tile_x_first", 0)), int(t.get("tile_x_last", x_span - 1)),
-            int(t.get("tile_y_first", 0)), int(t.get("tile_y_last", y_span - 1)))
-
-
 def _check_flit_capacity(topo: dict, path) -> None:
-    """Reject a topology whose route span / num_vc exceed the flit field capacity,
-    whose mesh dims are below the per-dimension minimum, or whose span and tile
-    region do not contain the router array.
+    """Reject a topology whose mesh dims / num_vc exceed the flit field capacity,
+    or whose mesh dims fall below the per-dimension minimum.
 
     Mirrors specgen/ni_spec/invariants.py:check_mesh_within_flit for the
     sim-topology-YAML path (X/Y/node + VC bounds).  Fails with a clear message so
     the user knows to reduce dims / num_vc or widen the flit fields (via the
     specgen constants).
-
-    The capacity caps sit on the SPAN, not on x_dim/y_dim: the coordinate field
-    has to hold every route coordinate, including a border one no router array
-    element occupies.
 
     Mesh dim minimum is 2 per dimension (mesh_x_dim >= 2 AND mesh_y_dim >= 2):
     a mesh communicating through NI + router needs at least 2x2. 1x1 and 1xN
@@ -103,7 +82,6 @@ def _check_flit_capacity(topo: dict, path) -> None:
     x_dim = int(t["x_dim"])
     y_dim = int(t["y_dim"])
     num_vc = int(t["num_vc"])
-    x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(t)
     cap_x = 1 << X_WIDTH
     cap_y = 1 << Y_WIDTH
     cap_nodes = 1 << DST_ID_WIDTH
@@ -113,31 +91,12 @@ def _check_flit_capacity(topo: dict, path) -> None:
         errors.append(f"x_dim={x_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
     if y_dim < 2:
         errors.append(f"y_dim={y_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
-    if x_span > cap_x:
-        errors.append(f"x_span={x_span} > 2^X_WIDTH={cap_x}")
-    if y_span > cap_y:
-        errors.append(f"y_span={y_span} > 2^Y_WIDTH={cap_y}")
-    if x_span * y_span > cap_nodes:
-        errors.append(f"x_span*y_span={x_span * y_span} > 2^DST_ID_WIDTH={cap_nodes}")
-    if x_span < x_dim:
-        errors.append(f"x_span={x_span} < x_dim={x_dim} (the span must cover the router array)")
-    if y_span < y_dim:
-        errors.append(f"y_span={y_span} < y_dim={y_dim} (the span must cover the router array)")
-    if not 0 <= tx_first <= tx_last < x_span:
-        errors.append(f"tile x region [{tx_first},{tx_last}] outside 0..{x_span - 1}")
-    if not 0 <= ty_first <= ty_last < y_span:
-        errors.append(f"tile y region [{ty_first},{ty_last}] outside 0..{y_span - 1}")
-    # A span wider than the array with no stated region defaults to the whole
-    # span, which would silently disarm the cross-row reachability guard
-    # (check_dst_reachable) -- the region's extent must equal the array's.
-    if tx_last - tx_first + 1 != x_dim:
-        errors.append(
-            f"tile x region [{tx_first},{tx_last}] extent {tx_last - tx_first + 1} != "
-            f"x_dim={x_dim} (region must equal the router array)")
-    if ty_last - ty_first + 1 != y_dim:
-        errors.append(
-            f"tile y region [{ty_first},{ty_last}] extent {ty_last - ty_first + 1} != "
-            f"y_dim={y_dim} (region must equal the router array)")
+    if x_dim > cap_x:
+        errors.append(f"x_dim={x_dim} > 2^X_WIDTH={cap_x}")
+    if y_dim > cap_y:
+        errors.append(f"y_dim={y_dim} > 2^Y_WIDTH={cap_y}")
+    if x_dim * y_dim > cap_nodes:
+        errors.append(f"x_dim*y_dim={x_dim * y_dim} > 2^DST_ID_WIDTH={cap_nodes}")
     if num_vc > cap_vc:
         errors.append(f"num_vc={num_vc} > 2^VC_ID_WIDTH={cap_vc}")
     if errors:
@@ -161,22 +120,18 @@ def _nodes(topo: dict):
 
     idx is the linear emit index (0..N-1) and doubles as the ARRAY position:
     array x = idx % x_dim, array y = idx // x_dim, which is what the emitted
-    generate loop derives its neighbour wiring and boundary tie-off from. x/y
-    here are the ROUTE coordinate of the router at that array position --
-    tile_x_first + array x, tile_y_first + array y -- and coord_id is the
-    routing id built from them. A topology whose tile region starts at 0, which
-    is every topology with no peripheral, has the two equal.
+    generate loop derives its neighbour wiring and boundary tie-off from. A
+    router's route coordinate IS its array position, and coord_id is the routing
+    id built from it.
     """
     t = topo["topology"]
     x_dim = t["x_dim"]
     y_dim = t["y_dim"]
-    _xs, _ys, tx_first, _txl, ty_first, _tyl = _route_span(t)
     out = []
     idx = 0
     for y in range(y_dim):
         for x in range(x_dim):
-            out.append((idx, tx_first + x, ty_first + y,
-                        _coord_id(tx_first + x, ty_first + y)))
+            out.append((idx, x, y, _coord_id(x, y)))
             idx += 1
     return out, x_dim, y_dim
 
@@ -195,7 +150,7 @@ def _peripherals(topo: dict):
     """
     t = topo["topology"]
     x_dim, y_dim = int(t["x_dim"]), int(t["y_dim"])
-    _xs, _ys, txf, txl, tyf, tyl = _route_span(t)
+    txf, txl, tyf, tyl = 0, x_dim - 1, 0, y_dim - 1
     out = []
     seen = set()
     taken = {}
@@ -323,8 +278,8 @@ def tile_targets(topo: dict, endpoints):
 
     Returns ({endpoint_idx: [{"space", "base", "size"}, ...]}, noc_egress_base).
     """
-    x_span, y_span = _route_span(topo["topology"])[:2]
-    _bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
+    t = topo["topology"]
+    _bases, entries = address_map.pack(topo.get("address_map"), int(t["x_dim"]), int(t["y_dim"]))
     out = {}
     for idx, _x, _y, cid in endpoints:
         windows = address_map.node_windows(entries, cid)
@@ -978,7 +933,6 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     endpoints = _endpoints(nodes, peripherals)
     n_ep = len(endpoints)
     num_vc = topo["topology"]["num_vc"]
-    x_span, y_span, tx_first, tx_last, ty_first, ty_last = _route_span(topo["topology"])
     # Every loop that walks the initiators walks ENDPOINTS on a topology with a
     # peripheral: each one injects, each one can wedge, and each one has an NMU.
     exit_n = "NUM_ENDPOINTS" if peripherals else "NUM_NODES"
@@ -1236,9 +1190,7 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w('    import "DPI-C" context function longint unsigned cmodel_router_create(input string name,')
     w('                                                                  input int x_coord, input int y_coord,')
     w('                                                                  input int mesh_x_dim, input int mesh_y_dim,')
-    w('                                                                  input int num_vc,')
-    w('                                                                  input int tile_x_first, input int tile_x_last,')
-    w('                                                                  input int tile_y_first, input int tile_y_last);')
+    w('                                                                  input int num_vc);')
     w('    import "DPI-C" context function int unsigned cmodel_nmu_read_slot_hwm(input longint unsigned ctx);')
     w('    import "DPI-C" context function void cmodel_nmu_admission_stats(input longint unsigned ctx,')
     w("                                                                 output int unsigned aw_idle_bypass,")
@@ -1305,13 +1257,9 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
         w('        void\'($value$plusargs("b_rob_depth=%d", b_rob_depth));')
         w('        void\'($value$plusargs("r_rob_depth=%d", r_rob_depth));')
         w('        void\'($value$plusargs("max_txns_per_id=%d", max_txns_per_id));')
-    # The router takes the SPAN, not the router array: it range-checks route
-    # coordinates, and a border coordinate is one. Neighbour wiring in the
-    # fabric keeps using x_dim/y_dim.
     for (i, x, y, _c) in nodes:
         w(f'        router_ctx[{i}] = cmodel_router_create("router_{i}", {x}, {y}, '
-          f'{x_span}, {y_span}, DAT_NUM_VC, '
-          f'{tx_first}, {tx_last}, {ty_first}, {ty_last});')
+          f'{x_dim}, {y_dim}, DAT_NUM_VC);')
     # NI creates cover the ENDPOINT space: the routers first, then one per
     # peripheral. src_id is the route coordinate the topology states for it --
     # that id is stamped into every request the peripheral emits and is what

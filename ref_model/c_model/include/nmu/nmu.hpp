@@ -335,7 +335,7 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
                  cfg_.sam, cfg_.port_id),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.read_rob_mode, cfg_.sam, cfg_.b_rob_depth,
-           cfg_.r_rob_depth, cfg_.max_txns_per_id, cfg_.src_id),
+           cfg_.r_rob_depth, cfg_.max_txns_per_id, cfg_.port_id),
       axi_slave_port_(rob_, rob_, cfg_.port_params),
       s2_rsp_b_(),
       s2_rsp_r_(),

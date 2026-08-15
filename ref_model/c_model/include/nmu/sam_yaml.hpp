@@ -23,22 +23,16 @@ inline axi::Space parse_tile_space(const YAML::Node& tile) {
 }
 
 // Per-space coordinate ranges, mirroring floogen's gen_collective_sam: the
-// loader is where x_span, y_span and the space's node stride are all in hand.
+// loader is where x_dim, y_dim and the space's node stride are all in hand.
 //
-//   range.len      = clog2(span)
+//   range.len      = clog2(dim)
 //   x_range.offset = log2(node_stride)
-//   y_range.offset = log2(node_stride) + clog2(x_span)
+//   y_range.offset = log2(node_stride) + clog2(x_dim)
 //
 // X sits below Y because this repo packs raster order, X fastest (see
 // SpaceCoords). A space the declaration does not fit is simply not a collective
 // target (spec §5.1), so the return value is not an error to raise here.
-//
-// tile_x_first/tile_x_last/tile_y_first/tile_y_last are the inclusive tile
-// region inside the route span (SpaceCoords); a coordinate outside them is a
-// peripheral or unpopulated padding and is not walked by declare_space_coords.
-inline void declare_space_coords(SamTable& table, unsigned x_span, unsigned y_span,
-                                 unsigned tile_x_first, unsigned tile_x_last, unsigned tile_y_first,
-                                 unsigned tile_y_last) {
+inline void declare_space_coords(SamTable& table, unsigned x_dim, unsigned y_dim) {
     // The tile spaces only. A peripheral region is placed in declaration order
     // at its own size, so it names no stride to read a coordinate field from --
     // not attempting the declaration is what makes "never a collective target"
@@ -62,14 +56,10 @@ inline void declare_space_coords(SamTable& table, unsigned x_span, unsigned y_sp
         unsigned offset = 0;
         while ((uint64_t{1} << offset) != stride) ++offset;
         SpaceCoords c;
-        c.x_count = x_span;
-        c.y_count = y_span;
-        c.x_range = {offset, clog2(x_span)};
-        c.y_range = {offset + clog2(x_span), clog2(y_span)};
-        c.x_first = tile_x_first;
-        c.x_last = tile_x_last;
-        c.y_first = tile_y_first;
-        c.y_last = tile_y_last;
+        c.x_count = x_dim;
+        c.y_count = y_dim;
+        c.x_range = {offset, clog2(x_dim)};
+        c.y_range = {offset + clog2(x_dim), clog2(y_dim)};
         table.declare_space_coords(space, c);
     }
     assert(table.collective_coords(axi::Space::Peripheral) == nullptr &&
@@ -131,15 +121,10 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
 // address_map.tiles: ordered list of { x, y, size, space? }; base(x, y) is
 // derived by SamTable::packed() from the coordinate and the space's slot
 // size. No tile_size, no base, no default base. A node may appear once per
-// space (validate()).
+// space (validate()). The map is packed over the router array (x_dim, y_dim);
+// a peripheral shares its host router's coordinate and takes no coordinate of
+// its own.
 //
-// x_dim/y_dim are the router array. The map is packed over the route SPAN
-// (x_span/y_span), which additionally covers any border coordinate a
-// peripheral occupies, and the tile region (tile_x_first..tile_x_last,
-// tile_y_first..tile_y_last, inclusive) says which of those coordinates are
-// tiles. All six keys are optional and default to a plain mesh, so a topology
-// stating none of them means today exactly what it meant before they existed.
-// Same six keys, same defaults, as gen_tb_top.py's _route_span.
 // The stride a topology gets when it declares none: the next power of two at
 // or above what the spaces occupy.
 inline uint64_t default_block_size(const std::vector<PackedTile>& tiles) {
@@ -168,30 +153,14 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
     // router needs at least 2x2. 1x1 and 1xN meshes are illegal.
     assert(x_dim >= 2 && y_dim >= 2 &&
            "topology: mesh dimensions must be >= 2 per dimension (1x1/1xN mesh illegal)");
-    unsigned x_span = topo["x_span"] ? topo["x_span"].as<unsigned>() : x_dim;
-    unsigned y_span = topo["y_span"] ? topo["y_span"].as<unsigned>() : y_dim;
-    unsigned tile_x_first = topo["tile_x_first"] ? topo["tile_x_first"].as<unsigned>() : 0;
-    unsigned tile_y_first = topo["tile_y_first"] ? topo["tile_y_first"].as<unsigned>() : 0;
-    unsigned tile_x_last = topo["tile_x_last"] ? topo["tile_x_last"].as<unsigned>() : x_span - 1;
-    unsigned tile_y_last = topo["tile_y_last"] ? topo["tile_y_last"].as<unsigned>() : y_span - 1;
-    // This is the one place a tile region enters the C++ model, so it is where
-    // the region is checked: SpaceCoords' four bounds default to zero, which
-    // is a one-column region, and nothing downstream can tell a stated region
-    // from a forgotten one. Same relationships gen_tb_top.py validates.
-    assert(x_span >= x_dim && y_span >= y_dim &&
-           "topology: route span must cover the router array (x_span >= x_dim)");
-    assert(tile_x_first <= tile_x_last && tile_x_last < x_span &&
-           "topology: tile x region must sit inside the route span");
-    assert(tile_y_first <= tile_y_last && tile_y_last < y_span &&
-           "topology: tile y region must sit inside the route span");
-    // A span wider than the array with no stated region defaults to the whole
-    // span, which is exactly the silent mis-delivery check_dst_reachable's
-    // cross-row guard exists to remove -- so the region's extent is required
-    // to equal the array's regardless of whether it was stated or defaulted.
-    assert(tile_x_last - tile_x_first + 1 == x_dim &&
-           "topology: tile x region extent must equal the router array (x_dim)");
-    assert(tile_y_last - tile_y_first + 1 == y_dim &&
-           "topology: tile y region extent must equal the router array (y_dim)");
+    // A collective names its destination set by wildcarding the coordinate
+    // field, and nothing clips the expansion back to the coordinates that
+    // exist -- the field being exactly as wide as the dimension is what makes
+    // clipping unnecessary (addr_trans.hpp collective_translate, route_mask.hpp).
+    assert((x_dim & (x_dim - 1)) == 0 && (y_dim & (y_dim - 1)) == 0 &&
+           "topology: mesh dimensions must be powers of two -- the collective coordinate field is "
+           "clog2(dim) bits wide, so a non-power-of-two dimension leaves a wildcard address naming "
+           "a coordinate with no router");
     YAML::Node am = root["address_map"];
     assert(am && "address_map block missing from topology YAML");
     YAML::Node tiles_node = am["tiles"];
@@ -233,29 +202,9 @@ inline SamTable load_sam_table(const std::string& yaml_path) {
     }
     const uint64_t block_size =
         am["block_size"] ? am["block_size"].as<uint64_t>() : default_block_size(tiles);
-    SamTable table = SamTable::packed(tiles, x_span, y_span, block_size, peripherals);
-    table.validate(x_span, y_span);
-    declare_space_coords(table, x_span, y_span, tile_x_first, tile_x_last, tile_y_first,
-                         tile_y_last);
-    // A rejected declaration costs a space its collective eligibility, which is
-    // intended, and it also costs it check_dst_reachable's cross-row guard,
-    // which is not: both read the same declared ranges, and a space that has
-    // none is waved through. On a topology whose tile region is the whole span
-    // there is nothing to guard, so only a stated region insists here -- a
-    // peripheral window of a different size, or a stride that is not a power of
-    // two, would otherwise disarm the guard silently.
-    const bool region_stated = tile_x_first != 0 || tile_y_first != 0 ||
-                               tile_x_last != x_span - 1 || tile_y_last != y_span - 1;
-    if (region_stated) {
-        for (axi::Space space : {axi::Space::Config, axi::Space::Memory}) {
-            if (!space_present(table, space)) continue;
-            assert(table.collective_coords(space) &&
-                   "topology: a stated tile region needs every address space to declare its "
-                   "coordinate ranges, and this one's entries reject the declaration -- the "
-                   "off-region reachability guard reads those ranges");
-            if (table.collective_coords(space) == nullptr) std::abort();
-        }
-    }
+    SamTable table = SamTable::packed(tiles, x_dim, y_dim, block_size, peripherals);
+    table.validate(x_dim, y_dim);
+    declare_space_coords(table, x_dim, y_dim);
     check_decode_mode(am, table);  // after the ranges exist -- offset mode is checked against them
     return table;
 }

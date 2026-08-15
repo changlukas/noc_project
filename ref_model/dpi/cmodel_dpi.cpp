@@ -183,9 +183,7 @@ using ni::cmodel::wrap::RouterWrap;
 using ni::cmodel::wrap::VcCreditVec;
 
 extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord, int y_coord,
-                                                   int mesh_x_dim, int mesh_y_dim, int dat_num_vc,
-                                                   int tile_x_first, int tile_x_last,
-                                                   int tile_y_first, int tile_y_last) {
+                                                   int mesh_x_dim, int mesh_y_dim, int dat_num_vc) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED,
                              "cmodel_router_create: not initialized");
@@ -195,9 +193,7 @@ extern "C" unsigned long long cmodel_router_create(const char* name, int x_coord
         auto adapter = std::make_unique<RouterWrap>();
         adapter->init(static_cast<uint8_t>(x_coord), static_cast<uint8_t>(y_coord),
                       static_cast<uint8_t>(mesh_x_dim), static_cast<uint8_t>(mesh_y_dim),
-                      static_cast<uint8_t>(dat_num_vc), static_cast<uint8_t>(tile_x_first),
-                      static_cast<uint8_t>(tile_x_last), static_cast<uint8_t>(tile_y_first),
-                      static_cast<uint8_t>(tile_y_last));
+                      static_cast<uint8_t>(dat_num_vc));
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Router), WrapType::Router, HandleState::Live,
             std::string(name),

@@ -136,8 +136,8 @@ def job_table(topo, jobs_per_node, length, rw):
     into the DMA top's memory preload and region compare, so the stimulus and
     the check that reads it back cannot disagree about where a job's bytes are.
     """
-    x_span, y_span = gen_tb_top._route_span(topo["topology"])[:2]
-    bases, entries = address_map.pack(topo.get("address_map"), x_span, y_span)
+    t = topo["topology"]
+    bases, entries = address_map.pack(topo.get("address_map"), int(t["x_dim"]), int(t["y_dim"]))
     # The router array only: a peripheral is an endpoint, not a node, so every
     # job is router to router and XY reaches between any two of them.
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)

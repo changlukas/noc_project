@@ -303,20 +303,26 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
 //
 // Row topology A(0,0) - C(1,0) - B(2,0), mesh_x=3: both masters are one XY
 // hop from the target, so contention lands at C's own inbound arbitration,
-// not multi-hop routing noise. SAM declares a 3x2 mesh (x_dim/y_dim minimum
-// is 2x2, addr_trans::SamTable::validate) with y=1 filler tiles never
-// targeted -- only the y=0 row is physically wired.
+// not multi-hop routing noise. The SAM declares a 4x2 mesh while the routers
+// are wired as a 3-wide row: the map states the smallest LEGAL mesh containing
+// that row, because mesh dimensions are powers of two (sam_yaml.hpp), and the
+// x=3 and y=1 tiles are filler nothing targets -- only the y=0 row is
+// physically wired. The fourth column moves no address this test uses: clog2(3)
+// and clog2(4) are both 2, so the coordinate field and every tile base in the
+// y=0 row sit exactly where they did.
 static std::string write_two_master_sam() {
     auto path = ni::cmodel::testing::unique_temp_path("two_master_sam.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 3, y_dim: 2, num_vc: 1 }\n"
+    std::ofstream(path) << "topology: { name: t, x_dim: 4, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
                            "  tiles:\n"
                            "    - { x: 0, y: 0, size: 0x100000 }\n"
                            "    - { x: 1, y: 0, size: 0x100000 }\n"
                            "    - { x: 2, y: 0, size: 0x100000 }\n"
+                           "    - { x: 3, y: 0, size: 0x100000 }\n"
                            "    - { x: 0, y: 1, size: 0x100000 }\n"
                            "    - { x: 1, y: 1, size: 0x100000 }\n"
-                           "    - { x: 2, y: 1, size: 0x100000 }\n";
+                           "    - { x: 2, y: 1, size: 0x100000 }\n"
+                           "    - { x: 3, y: 1, size: 0x100000 }\n";
     return path;
 }
 

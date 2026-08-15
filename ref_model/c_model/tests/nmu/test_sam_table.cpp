@@ -9,7 +9,7 @@ namespace axi = ni::cmodel::axi;
 
 TEST(SamTable, PackedBasesFromCoordinateAndSlot) {
     // base(x, y) = ((y << x_bits) | x) * slot, slot = largest declared size in
-    // the space -- not list-order accumulation. x_span = 3 -> x_bits = 2, slot
+    // the space -- not list-order accumulation. x_dim = 3 -> x_bits = 2, slot
     // = max(0x1000, 0x2000, 0x1000) = 0x2000.
     auto sam = SamTable::packed(
         {
@@ -17,7 +17,7 @@ TEST(SamTable, PackedBasesFromCoordinateAndSlot) {
             {1, 0, 0x2000},
             {2, 0, 0x1000},
         },
-        /*x_span=*/3, /*y_span=*/1, /*block_size=*/0x2000);
+        /*x_dim=*/3, /*y_dim=*/1, /*block_size=*/0x2000);
     ASSERT_EQ(sam.entries().size(), 3u);
     EXPECT_EQ(sam.entries()[0].base, 0x0ull);
     EXPECT_EQ(sam.entries()[1].base, 0x2000ull);
@@ -25,9 +25,8 @@ TEST(SamTable, PackedBasesFromCoordinateAndSlot) {
 }
 
 TEST(SamTable, PackedDstIdFromXY) {
-    // dst = (1<<X_WIDTH)|2 = 0x12, independent of x_span/y_span.
-    auto sam =
-        SamTable::packed({{2, 1, 0x1000}}, /*x_span=*/3, /*y_span=*/2, /*block_size=*/0x1000);
+    // dst = (1<<X_WIDTH)|2 = 0x12, independent of x_dim/y_dim.
+    auto sam = SamTable::packed({{2, 1, 0x1000}}, /*x_dim=*/3, /*y_dim=*/2, /*block_size=*/0x1000);
     EXPECT_EQ(sam.entries()[0].dst_id, 0x12u);
 }
 
@@ -37,7 +36,7 @@ TEST(SamTable, PackedTranslateForwardsTheAddressUnchanged) {
             {0, 0, 0x100000000ull},
             {1, 0, 0x100000000ull},
         },
-        /*x_span=*/2, /*y_span=*/1, /*block_size=*/0x100000000ull);
+        /*x_dim=*/2, /*y_dim=*/1, /*block_size=*/0x100000000ull);
     auto t = sam.translate(0x100000040ull);  // tile 1, offset 0x40
     EXPECT_EQ(t.dst_id, 0x01u);
     EXPECT_EQ(t.local_addr, 0x100000040ull);  // the request address, untouched
@@ -51,7 +50,7 @@ TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode) {
             {0, 0, 0x1000, axi::AxiClass::Narrow, axi::Space::Config},
             {1, 0, 0x1000, axi::AxiClass::Narrow, axi::Space::Config},
         },
-        /*x_span=*/2, /*y_span=*/1, /*block_size=*/0x200000);
+        /*x_dim=*/2, /*y_dim=*/1, /*block_size=*/0x200000);
     const auto memory = sam.translate(0x40);  // node 0, memory space
     // node 0's config tile sits inside its own block, above its memory tile:
     // offset 0x100000 (memory_slot 0x100000, config_slot 0x1000, aligned).
@@ -62,8 +61,7 @@ TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode) {
 }
 
 TEST(SamTable, LookupMissReturnsNull) {
-    auto sam =
-        SamTable::packed({{0, 0, 0x1000}}, /*x_span=*/1, /*y_span=*/1, /*block_size=*/0x1000);
+    auto sam = SamTable::packed({{0, 0, 0x1000}}, /*x_dim=*/1, /*y_dim=*/1, /*block_size=*/0x1000);
     EXPECT_EQ(sam.lookup(0x2000ull), nullptr);
 }
 
@@ -143,13 +141,10 @@ TEST(SamValidator, RejectsDuplicateNode) {
 
 using ni::cmodel::nmu::addr_trans::SpaceCoords;
 
-// No peripheral in any fixture below, so the tile region is the full span --
-// x_first/y_first = 0, x_last/y_last = count - 1.
-
 TEST(SamCoords, DeclarationMatchingTheEntriesIsEligible) {
     auto sam = SamTable::uniform(2, 2, 0x1000);  // bases 0, 0x1000, 0x2000, 0x3000
-    EXPECT_TRUE(sam.declare_space_coords(
-        axi::Space::Memory, SpaceCoords{/*x=*/{12, 1}, /*y=*/{13, 1}, 2, 2, 0, 1, 0, 1}));
+    EXPECT_TRUE(sam.declare_space_coords(axi::Space::Memory,
+                                         SpaceCoords{/*x=*/{12, 1}, /*y=*/{13, 1}, 2, 2}));
     const auto* c = sam.collective_coords(axi::Space::Memory);
     ASSERT_NE(c, nullptr);
     EXPECT_EQ(c->x_range.offset, 12u);
@@ -166,8 +161,7 @@ TEST(SamCoords, NonUniformStrideIsNotEligible) {
                                        {0x3000, 0x1000, 0x01},
                                        {0x4000, 0x1000, 0x10},
                                        {0x5000, 0x1000, 0x11}});
-    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
-                                          SpaceCoords{{12, 1}, {13, 1}, 2, 2, 0, 1, 0, 1}));
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory, SpaceCoords{{12, 1}, {13, 1}, 2, 2}));
     EXPECT_EQ(sam.collective_coords(axi::Space::Memory), nullptr);
 }
 
@@ -178,8 +172,7 @@ TEST(SamCoords, NonUniformApertureIsNotEligible) {
                                        {0x1000, 0x800, 0x01},
                                        {0x2000, 0x1000, 0x10},
                                        {0x3000, 0x1000, 0x11}});
-    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
-                                          SpaceCoords{{12, 1}, {13, 1}, 2, 2, 0, 1, 0, 1}));
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory, SpaceCoords{{12, 1}, {13, 1}, 2, 2}));
 }
 
 TEST(SamCoords, NonRasterOrderIsNotEligible) {
@@ -189,21 +182,18 @@ TEST(SamCoords, NonRasterOrderIsNotEligible) {
                                        {0x1000, 0x1000, 0x10},
                                        {0x2000, 0x1000, 0x01},
                                        {0x3000, 0x1000, 0x11}});
-    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
-                                          SpaceCoords{{12, 1}, {13, 1}, 2, 2, 0, 1, 0, 1}));
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory, SpaceCoords{{12, 1}, {13, 1}, 2, 2}));
 }
 
 TEST(SamCoords, DimensionsAreStatedNotInferred) {
     // A 3-wide dimension needs 2 bits but only 3 of the 4 values are nodes.
     // 1 << len would over-permit the fourth; x_count records the real bound.
-    auto sam = SamTable::packed({{0, 0, 0x1000}, {1, 0, 0x1000}, {2, 0, 0x1000}}, /*x_span=*/3,
-                                /*y_span=*/1, /*block_size=*/0x1000);
-    ASSERT_TRUE(sam.declare_space_coords(axi::Space::Memory,
-                                         SpaceCoords{{12, 2}, {14, 0}, 3, 1, 0, 2, 0, 0}));
+    auto sam = SamTable::packed({{0, 0, 0x1000}, {1, 0, 0x1000}, {2, 0, 0x1000}}, /*x_dim=*/3,
+                                /*y_dim=*/1, /*block_size=*/0x1000);
+    ASSERT_TRUE(sam.declare_space_coords(axi::Space::Memory, SpaceCoords{{12, 2}, {14, 0}, 3, 1}));
     EXPECT_EQ(sam.collective_coords(axi::Space::Memory)->x_count, 3u);
     // Claiming the full 4 does not fit: node (3,0) has no entry.
-    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory,
-                                          SpaceCoords{{12, 2}, {14, 0}, 4, 1, 0, 3, 0, 0}));
+    EXPECT_FALSE(sam.declare_space_coords(axi::Space::Memory, SpaceCoords{{12, 2}, {14, 0}, 4, 1}));
 }
 
 TEST(SamTable, PeripheralEntryDoesNotJoinTheMemorySpacesTileWalk) {
@@ -221,15 +211,15 @@ TEST(SamTable, PeripheralEntryDoesNotJoinTheMemorySpacesTileWalk) {
     es.push_back({0x400000000ull, 0x1000, /*dst_id=*/0x00, axi::AxiClass::Data, /*port=*/1,
                   axi::Space::Peripheral});
     SamTable sam{std::move(es)};
-    EXPECT_TRUE(sam.declare_space_coords(
-        axi::Space::Memory, SpaceCoords{/*x=*/{32, 1}, /*y=*/{33, 1}, 2, 2, 0, 1, 0, 1}));
+    EXPECT_TRUE(sam.declare_space_coords(axi::Space::Memory,
+                                         SpaceCoords{/*x=*/{32, 1}, /*y=*/{33, 1}, 2, 2}));
     EXPECT_NE(sam.collective_coords(axi::Space::Memory), nullptr);
     EXPECT_EQ(sam.collective_coords(axi::Space::Peripheral), nullptr);
 }
 
 TEST(SamFootprint, RejectsBurstCrossingTile) {
-    auto sam = SamTable::packed({{0, 0, 0x100000000ull}, {1, 0, 0x100000000ull}}, /*x_span=*/2,
-                                /*y_span=*/1, /*block_size=*/0x100000000ull);
+    auto sam = SamTable::packed({{0, 0, 0x100000000ull}, {1, 0, 0x100000000ull}}, /*x_dim=*/2,
+                                /*y_dim=*/1, /*block_size=*/0x100000000ull);
     // burst inside tile 0: [0x40, 0x80] ok
     EXPECT_TRUE(sam.burst_footprint_ok(0x40, 0x80));
     // burst spilling past tile 0 end into tile 1: not ok

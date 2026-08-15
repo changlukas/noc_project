@@ -96,7 +96,7 @@ occupies the rest (REQ [135:48], RSP [125:48], DAT [632:48]).
 | `ordering_tag` | [33:26] | 8 | NI reorder-buffer index. Transparent to the router, except that the join checks joined heads agree on it. |
 | `collective_op` | [35:34] | 2 | 2'd0 UNICAST, 2'd1 MULTICAST. Read by both request routers (fork) and the RSP router (join). |
 | `collective_mask` | [43:36] | 8 | Node-id wildcard mask. Read with `collective_op`. |
-| `dst_port_id` | [45:44] | 2 | Which endpoint at `dst_id` receives. 0 is the tile on the router's LOCAL port. Transparent to the router. |
+| `dst_port_id` | [45:44] | 2 | Which endpoint at `dst_id` receives. 0 is the tile on the router's LOCAL port, non-zero a boundary-port peripheral. Read by the router at the destination coordinate: it selects the ejection port. |
 | `src_port_id` | [47:46] | 2 | Which endpoint at `src_id` issued. The response is addressed back to it. Transparent to the router. |
 | payload | per network | 88 / 78 / 585 | AXI channel payload. Transparent to the router. |
 
@@ -437,8 +437,7 @@ Router model configuration, fixed at `cmodel_router_create` time:
 | `NOC_ROUTER_VC_DEPTH` | 8 | 1..16 | input VC FIFO depth; on DAT it is also the upstream credit seed, on REQ/RSP the depth the almost-full `ready` is computed against |
 | `NOC_ROUTER_OUTPUT_FIFO_DEPTH` | 2 | 1..16 | DAT stage-3 output FIFO depth, not credit-counted. REQ/RSP run with output FIFO depth 0 (stage 2 drives the link directly) |
 | `ready_slack` (REQ/RSP) | 2 | 1..`NOC_ROUTER_VC_DEPTH` - 1 | flits of headroom the almost-full `ready` reserves. PROVISIONAL, awaits a measured wire-loop calibration |
-| `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2..16 each | route-coordinate span: the router array plus any border coordinate a peripheral sits on. The generated tb_top passes the topology's `x_span` / `y_span`, which default to `x_dim` / `y_dim`, so a topology naming no peripheral passes the array. Minimum 2 per dimension: a mesh communicating through NI + router needs at least 2x2; 1x1 and 1xN meshes are illegal. |
-| `tile_x_first`, `tile_x_last`, `tile_y_first`, `tile_y_last` | 0, `mesh_x_dim` - 1, 0, `mesh_y_dim` - 1 | `0 <= first <= last < mesh_*_dim` | inclusive tile region inside the span. Collective member sets are clipped to it, identically on the fork and the join, so a border coordinate is a unicast target and never a collective member. Defaults make a plain mesh, where the region is the whole span. |
+| `mesh_x_dim`, `mesh_y_dim` | 4, 4 | 2, 4, 8, 16 each | the router array, which the generated tb_top passes from the topology's `x_dim` / `y_dim`. A peripheral shares its host router's coordinate, so it adds none. Powers of two only, because a collective mask wildcards a `clog2(dim)`-bit coordinate field and every index it names must be a node. Minimum 2 per dimension: a mesh communicating through NI + router needs at least 2x2; 1x1 and 1xN meshes are illegal. |
 | `x_coord`, `y_coord` | per node | `x < mesh_x_dim`, `y < mesh_y_dim` | this node's coordinate |
 
 ### 3.2 Port index encoding
@@ -520,7 +519,7 @@ all three routers.
 
 | Function | When | Semantics |
 |---|---|---|
-| `cmodel_router_create(name, x_coord, y_coord, mesh_x_dim, mesh_y_dim, dat_num_vc, tile_x_first, tile_x_last, tile_y_first, tile_y_last)` | once, from the tb_top `initial` block, after `rst_ni` deassertion | constructs all three routers. Construction is reset: all FIFOs empty, all credits at seed. Returns the 64-bit `ctx` handle. |
+| `cmodel_router_create(name, x_coord, y_coord, mesh_x_dim, mesh_y_dim, dat_num_vc)` | once, from the tb_top `initial` block, after `rst_ni` deassertion | constructs all three routers. Construction is reset: all FIFOs empty, all credits at seed. Returns the 64-bit `ctx` handle. |
 | `cmodel_router_{req,rsp,dat}_set_inputs(ctx, ...)` | posedge, step 1 (one call per network) | samples the current SV wire values (the previous cycle's registered outputs of the peers) into the model input latch. Split per network so no DPI signature marshals more than one flit width |
 | `cmodel_router_tick(ctx)` | posedge, step 2 | advances all three routers exactly one cycle |
 | `cmodel_router_{req,rsp,dat}_get_outputs(ctx, ...)` | posedge, step 3 (one call per network) | reads the model output latch. The SV module registers these values nonblocking, so they appear on the output pins one cycle later. |

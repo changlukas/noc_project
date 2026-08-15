@@ -171,17 +171,6 @@ def test_check_flit_capacity_rejects_dim_below_minimum(x_dim, y_dim):
         gt._check_flit_capacity(topo, "dummy_path.yaml")
 
 
-@pytest.mark.parametrize("span_key,dim_key", [("x_span", "x_dim"), ("y_span", "y_dim")])
-def test_check_flit_capacity_rejects_span_wider_than_array_with_no_stated_region(span_key, dim_key):
-    """A wider span with no stated tile region must not silently disarm the
-    cross-row reachability guard -- the region's extent must equal the array's."""
-    import gen_tb_top as gt
-
-    topo = {"topology": {"x_dim": 2, "y_dim": 2, "num_vc": 1, span_key: 3}}
-    with pytest.raises(SystemExit, match=f"tile {dim_key[0]} region"):
-        gt._check_flit_capacity(topo, "dummy_path.yaml")
-
-
 def test_main_sources_tile_base_from_address_map(tmp_path):
     """End-to-end: main() threads the packed address_map base into the emitted address."""
     tile_size = 0x40000000
@@ -446,7 +435,7 @@ def test_pack_places_a_smaller_entry_on_its_own_slot():
         {"x": 1, "y": 1, "size": 0x1000},
     ] + [{"x": x, "y": y, "size": 0x1000, "space": "config"}
          for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]}
-    bases, entries = address_map.pack(am, x_span=2, y_span=2)
+    bases, entries = address_map.pack(am, x_dim=2, y_dim=2)
     # No declared block_size: memory slot 0x2000 + config slot 0x1000 ->
     # extent 0x3000 -> next power of two 0x4000. Node stride is 0x4000.
     assert bases == {
@@ -474,7 +463,7 @@ def test_node_windows_are_that_node_s_own_regions():
     # No declared block_size: memory slot 0x100000 + config slot 0x1000 ->
     # next power of two 0x200000. Node stride is 0x200000.
     tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_span=2, y_span=2)
+    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
     assert address_map.node_windows(entries, address_map.dst_id(0, 0)) == [
         {"space": "config", "base": 0x100000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
@@ -600,31 +589,31 @@ def test_all_to_all_is_deterministic():
 def test_address_map_pack_rejects_zero_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
     with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_span=1, y_span=1)
+        address_map.pack(am, x_dim=1, y_dim=1)
 
 
 def test_address_map_pack_rejects_negative_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": -0x1000}]}
     with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_span=1, y_span=1)
+        address_map.pack(am, x_dim=1, y_dim=1)
 
 
 def test_address_map_pack_rejects_non_4k_aligned_size():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0x1234}]}
     with pytest.raises(ValueError, match="4 KB aligned"):
-        address_map.pack(am, x_span=1, y_span=1)
+        address_map.pack(am, x_dim=1, y_dim=1)
 
 
 def test_address_map_pack_rejects_node_outside_mesh():
     am = {"tiles": [{"x": 2, "y": 0, "size": 0x1000}]}
     with pytest.raises(ValueError, match="outside mesh"):
-        address_map.pack(am, x_span=2, y_span=1)
+        address_map.pack(am, x_dim=2, y_dim=1)
 
 
 def test_address_map_pack_rejects_missing_node():
     am = {"tiles": [{"x": 0, "y": 0, "size": 0x1000}]}  # 2x1 mesh needs 2 tiles
     with pytest.raises(ValueError, match="expected 2"):
-        address_map.pack(am, x_span=2, y_span=1)
+        address_map.pack(am, x_dim=2, y_dim=1)
 
 
 def test_address_map_pack_rejects_missing_config_node():
@@ -637,7 +626,7 @@ def test_address_map_pack_rejects_missing_config_node():
         {"x": 0, "y": 0, "size": 0x1000, "space": "config"},
     ]}
     with pytest.raises(ValueError, match="config space covers 1 nodes, expected 2"):
-        address_map.pack(am, x_span=2, y_span=1)
+        address_map.pack(am, x_dim=2, y_dim=1)
 
 
 def test_address_map_pack_rejects_duplicate_node():
@@ -646,19 +635,19 @@ def test_address_map_pack_rejects_duplicate_node():
         {"x": 0, "y": 0, "size": 0x1000},
     ]}
     with pytest.raises(ValueError, match="duplicate mesh node"):
-        address_map.pack(am, x_span=2, y_span=1)
+        address_map.pack(am, x_dim=2, y_dim=1)
 
 
 def test_address_map_pack_rejects_missing_tiles_key():
     with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack({}, x_span=1, y_span=1)
+        address_map.pack({}, x_dim=1, y_dim=1)
     with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack(None, x_span=1, y_span=1)
+        address_map.pack(None, x_dim=1, y_dim=1)
 
 
 def test_address_map_pack_real_topologies_at_the_coordinate_formula():
     """Cross-check: every real sim/topologies/*.yaml packs at
-    base = ((y << clog2(x_span)) | x) * block_size + offset[space], spelled out
+    base = ((y << clog2(x_dim)) | x) * block_size + offset[space], spelled out
     here from the YAML keys rather than read back from pack(). This is the Python half of
     the packing agreement; the C++ half is
     SamYaml.RealTopologiesPackedAtTheCoordinateFormula, asserting the same
@@ -676,11 +665,11 @@ def test_address_map_pack_real_topologies_at_the_coordinate_formula():
     assert paths, f"expected the real topology YAMLs in {topo_dir}"
     for path in paths:
         doc = yaml.safe_load(open(path))
-        # Same span resolution the testbench generator uses.
-        x_span, y_span = gen_tb_top._route_span(doc["topology"])[:2]
+        x_dim = int(doc["topology"]["x_dim"])
+        y_dim = int(doc["topology"]["y_dim"])
         tiles = doc["address_map"]["tiles"]
-        _bases, entries = address_map.pack(doc["address_map"], x_span, y_span)
-        x_bits = (x_span - 1).bit_length()
+        _bases, entries = address_map.pack(doc["address_map"], x_dim, y_dim)
+        x_bits = (x_dim - 1).bit_length()
         # Slot per space: the largest size declared in it, bounding the
         # aperture. block_size is the declared node stride.
         slot = {sp: max((int(t["size"]) for t in tiles if t.get("space", "memory") == sp),
@@ -724,7 +713,7 @@ def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
     _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes = g._load_topology(
         str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
-    packed_bases, _entries = address_map.pack(topo["address_map"], x_span=2, y_span=2)
+    packed_bases, _entries = address_map.pack(topo["address_map"], x_dim=2, y_dim=2)
     assert bases_from_patterns == packed_bases
 
 
@@ -813,7 +802,7 @@ def test_noc_egress_aperture_sits_above_every_window():
     this aperture, which is the first power of two at or above the map's top --
     so no node window can ever reach it, however the map grows."""
     tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_span=2, y_span=2)
+    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
     base = address_map.noc_egress_base(entries)
     top = max(e["base"] + e["size"] for e in entries)
     assert base >= top

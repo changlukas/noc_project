@@ -55,15 +55,15 @@ enum class RobMode { Disabled, Enabled };
 // divergence from FlooNoC's optional BRoBType=NoRoB. Only R keeps a Disabled mode.
 class Rob : public RequestPacketizer, public ResponseDepacketizer {
   public:
-    // src_id is this NMU's own node id, needed by collective_translate to check
-    // that a collective is issued from a tile. It sits last, after the depths,
-    // so the existing positional call sites keep their meaning; every assembly
-    // site (Nmu's constructor) passes cfg_.src_id, and the default names node
-    // (0,0), which is a tile on every topology with no peripheral.
+    // port_id is this NMU's own boundary port, needed by collective_translate to
+    // check that a collective is issued from a tile and not from a peripheral.
+    // It sits last, after the depths, so the existing positional call sites keep
+    // their meaning; every assembly site (Nmu's constructor) passes cfg_.port_id,
+    // and the default names the router's LOCAL port, which is a tile.
     Rob(NmuPacketizeSink& next_pkt, ResponseDepacketizer& next_depkt, RobMode mode_r,
         addr_trans::SamTable sam, std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
         std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
-        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID, uint8_t src_id = 0)
+        std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID, uint8_t port_id = 0)
         : next_pkt_(next_pkt),
           next_depkt_(next_depkt),
           mode_r_(mode_r),
@@ -71,7 +71,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
           b_rob_depth_(b_rob_depth),
           r_rob_depth_(r_rob_depth),
           max_txns_per_id_(max_txns_per_id),
-          src_id_(src_id) {
+          port_id_(port_id) {
         assert(b_rob_depth_ >= 1 && b_rob_depth_ <= ORDERING_TAG_SPACE &&
                "nmu::Rob: b_rob_depth outside [1, ORDERING_TAG_SPACE]");
         assert(r_rob_depth_ >= 1 && r_rob_depth_ <= ORDERING_TAG_SPACE &&
@@ -197,7 +197,7 @@ class Rob : public RequestPacketizer, public ResponseDepacketizer {
     std::size_t b_rob_depth_;
     std::size_t r_rob_depth_;
     std::size_t max_txns_per_id_;
-    uint8_t src_id_;
+    uint8_t port_id_;
 
     // In-flight transaction count, one per direction, summed over all AXI ids.
     // Incremented on an accepted request, decremented at response retire. Admits
@@ -369,7 +369,7 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
     // ahead of the outstanding pool, the per-id order list and all RoB slot math,
     // so a permanent illegal input can never present as backpressure. Fatal on
     // every reject row of design §2.3; returns the 8 b node mask.
-    const uint8_t collective_mask = addr_trans::collective_translate(sam_, b, src_id_);
+    const uint8_t collective_mask = addr_trans::collective_translate(sam_, b, port_id_);
     const uint8_t collective_op = axi::awuser_collective_op(b.user);
     const bool collective = collective_op != axi::COLLECTIVE_OP_UNICAST;
 

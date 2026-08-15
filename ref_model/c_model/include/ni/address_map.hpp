@@ -43,20 +43,11 @@ inline uint64_t range_mask(const BitRange& r) {
 struct SpaceCoords {
     BitRange x_range;
     BitRange y_range;
-    // Route span, STATED not inferred. Recovering one as 1 << len
+    // Mesh dimension, STATED not inferred. Recovering one as 1 << len
     // over-permits every dimension that is not a power of two, and
     // docs/noc-target-spec.md §5 allows 2 to 16 per dimension.
     unsigned x_count = 0;
     unsigned y_count = 0;
-    // Inclusive tile-region bounds inside the route span. Peripherals occupy
-    // coordinates outside them. The default 0/0/0/0 is NOT "a plain mesh" --
-    // x_last = 0 is a one-column region. A caller states all four fields; a
-    // plain mesh is x_first = y_first = 0, x_last = x_count - 1,
-    // y_last = y_count - 1.
-    unsigned x_first = 0;
-    unsigned x_last = 0;
-    unsigned y_first = 0;
-    unsigned y_last = 0;
     // x_count == 0 marks a space whose coordinate field could not be read off
     // the map (one entry names no stride, a non-power-of-two stride names no
     // field). Such a space is simply not a collective target, spec §5.1.

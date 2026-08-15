@@ -324,7 +324,7 @@ address back to `dst_id`. One source, so the two never disagree.
 `base` key. Bases come from the coordinate and the block stride -- the sim
 YAML's `block_size` key, what `docs/noc-target-spec.md` §5.1 calls
 `node_stride` -- not accumulation: `base = idx * block_size + offset[space]`, where
-`idx = (y << x_bits) | x`, `x_bits` is `clog2(x_span)`, and `offset[space]` is
+`idx = (y << x_bits) | x`, `x_bits` is `clog2(x_dim)`, and `offset[space]` is
 0 for memory and the memory slot rounded up to the config slot for config
 (`nmu::addr_trans::SamTable::packed`), `slot` being the largest size declared
 in that space. `block_size` is either declared (`address_map.block_size`) or

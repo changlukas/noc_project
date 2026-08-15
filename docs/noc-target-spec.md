@@ -50,10 +50,8 @@ compute tile per node on a 2D mesh, standard AXI4 at every endpoint.
   fabric provides the primitive
 - Two multicasts whose spanning trees share a node may not be in flight together. Software
   either assigns disjoint trees or waits for the merged `B` before issuing the overlapping one
-- Collectives are issued and received by mesh tiles. A peripheral outside the tile region neither
-  issues one nor appears in a destination set, and reaches the mesh by unicast only
-- A peripheral placed on an x face exchanges unicast traffic with the tiles on its own row. One
-  placed on a y face is reachable from any tile
+- Collectives are issued and received by mesh tiles. A peripheral neither issues one nor appears
+  in a destination set, and reaches the mesh by unicast only
 - Write path only. Reads and read data are always unicast
 - No arithmetic on payload anywhere in the fabric. Tiles combine partial results, softmax
   statistics included, over ordinary unicast
@@ -370,23 +368,21 @@ equal to its region size the two coincide. A space meeting all four conditions i
 collective target. A space failing any of them is a legal unicast target and not a collective
 target.
 
-A mesh dimension that is not a power of two leaves the field non-contiguous. Pad the row or
-column count up to a power of two; the surplus indices are not nodes and carry no region.
+**Mesh dimensions are powers of two**, so the coordinate field is exactly as wide as the
+dimension and every index a mask names is a node. The topology loader refuses anything else.
 
-**Peripherals.** A node outside the tile region takes a region in the same space as the tiles,
-which is what makes it a unicast target. Three things follow for the conditions above.
+**Peripherals.** A peripheral shares the coordinate of the router it hangs off and is told apart
+by the port, `dst_port_id`: 0 is the tile on the router's LOCAL port, non-zero a boundary port.
+Two things follow for the conditions above.
 
-- They are read over the **tile region**, not over the whole space. A peripheral's region may
-  differ in size and alignment without costing the space its collective eligibility, because a
-  peripheral is never a collective member
-- A mask names an aligned set over the whole coordinate field, and that set is then **clipped to
-  the tile region**: a mask reaching a border coordinate delivers nothing there. A mask whose
-  clipped bound is no longer a member of the masked set names a set the fabric and the source would
-  disagree about, and is refused
+- A peripheral takes its own region, in its own address space, placed above the tile array rather
+  than derived from a coordinate. That space declares no coordinate ranges, so it is a unicast
+  target and never a collective target
+- The conditions are read over the **tile spaces**. A peripheral's region may differ in size and
+  alignment without costing a tile space its collective eligibility
 - A collective's request address names the region its burst footprint is measured against, and that
-  one measurement stands for every replica. **The address must name a region the same size as its
-  members'.** Where every region in the space is one size this holds by construction; it constrains
-  only a map that gives a peripheral a different one
+  one measurement stands for every replica, so **every region in the space must be one size**. The
+  uniform-aperture condition above is what holds it
 
 **Class.** The address space a request falls in selects the AXI class, config space narrow and
 memory space data. This is one compare per space, not per node, and it is independent of how the

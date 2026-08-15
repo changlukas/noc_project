@@ -67,13 +67,12 @@ def _slot_size(tiles, space):
     return max(sizes)
 
 
-def pack(address_map, x_span, y_span):
+def pack(address_map, x_dim, y_dim):
     """Pack address_map["tiles"] into {dst_id: base} + ordered entries.
 
-    x_span/y_span is the route span (docs/noc-target-spec.md), not necessarily
-    the router array: a peripheral coordinate outside the tile region still
-    counts. Every topology with no peripheral has the two equal, so this is a
-    no-op rename for every caller today.
+    x_dim/y_dim is the router array. A peripheral shares its host router's
+    coordinate and takes no coordinate of its own, so the array is also the
+    tile count per axis.
 
     Raises ValueError (fail-loud, mirrors SamTable::validate) on: missing/empty
     tiles list, non-positive or non-4KB-aligned size, a tile outside the mesh,
@@ -99,7 +98,7 @@ def pack(address_map, x_span, y_span):
     if not tiles:
         raise ValueError("address_map.tiles missing or empty")
 
-    x_bits = _clog2(x_span)
+    x_bits = _clog2(x_dim)
     slot = {sp: _slot_size(tiles, sp) for sp in ("memory", "config")}
     # Spaces sit inside a node's block in a fixed order, memory first at 0,
     # each aligned to its own slot. block_size is the one declared number.
@@ -128,9 +127,9 @@ def pack(address_map, x_span, y_span):
             raise ValueError(
                 f"address_map tile (x={x},y={y}) size {size:#x} must be positive "
                 f"and 4 KB aligned")
-        if not (x < x_span and y < y_span):
+        if not (x < x_dim and y < y_dim):
             raise ValueError(
-                f"address_map tile (x={x},y={y}) outside mesh {x_span}x{y_span}")
+                f"address_map tile (x={x},y={y}) outside mesh {x_dim}x{y_dim}")
         sp = space
         base = (((y << x_bits) | x) * block_size) + offset[sp]
         entries.append({"x": x, "y": y, "size": size, "base": base, "dst_id": dst_id(x, y),
@@ -146,16 +145,16 @@ def pack(address_map, x_span, y_span):
                 f"address_map: duplicate mesh node (x={e['x']},y={e['y']}) in {e['space']} space")
         seen.add(node)
     for space, seen in (("memory", seen_memory), ("config", seen_config)):
-        if len(seen) != x_span * y_span:
+        if len(seen) != x_dim * y_dim:
             raise ValueError(
                 f"address_map.tiles {space} space covers {len(seen)} nodes, expected "
-                f"{x_span * y_span} ({x_span}x{y_span} mesh, one {space} tile per node)")
+                f"{x_dim * y_dim} ({x_dim}x{y_dim} mesh, one {space} tile per node)")
     # address_map.peripherals, placed after the coverage checks above so a
     # peripheral is never counted as a tile of either space. Declaration order,
     # above the tile array, each region aligned to its own size -- the same
     # placement SamTable::packed() does, which is what keeps noc_egress_base()
     # above every real region rather than inside a peripheral's window.
-    next_base = x_span * y_span * block_size
+    next_base = x_dim * y_dim * block_size
     for p in (address_map or {}).get("peripherals") or []:
         x, y, face, size = int(p["x"]), int(p["y"]), p["face"], int(p["size"])
         if face not in ("x", "y"):
@@ -172,12 +171,14 @@ def pack(address_map, x_span, y_span):
                         "space": "peripheral", "port": 1 if face == "x" else 2})
         next_base += size
 
-    # No overlap check needed: (x, y) maps to a unique block below block_size,
-    # every tile's size is at most slot[space] because that slot IS the
-    # largest size declared in the space, offset[config] >= slot[memory] keeps
-    # the two spaces apart inside a block, and block_size >= extent keeps a
-    # block's own entries inside it -- so blocks, and the spaces inside them,
-    # are always disjoint.
+    # No overlap check needed. Tiles: (x, y) maps to a unique block below
+    # block_size, every tile's size is at most slot[space] because that slot IS
+    # the largest size declared in the space, offset[config] >= slot[memory]
+    # keeps the two spaces apart inside a block, and block_size >= extent keeps
+    # a block's own entries inside it -- so blocks, and the spaces inside them,
+    # are always disjoint. Peripherals: next_base starts above the whole tile
+    # array and only ever moves up, so each region sits above every entry
+    # placed before it.
 
     bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "memory"}
     return bases, entries

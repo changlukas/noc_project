@@ -2,7 +2,7 @@
 #include "nmu/sam_yaml.hpp"
 #include "axi/types.hpp"
 #include <gtest/gtest.h>
-#include <vector>
+#include <string>
 
 using ni::cmodel::nmu::addr_trans::SamTable;
 namespace addr_trans = ni::cmodel::nmu::addr_trans;
@@ -20,28 +20,6 @@ SamTable sam() {
 // axi::make_awuser_collective does not exist.
 uint64_t awuser(uint8_t op, uint64_t addr_mask, uint8_t user = 0) {
     return (addr_mask << 10) | (uint64_t{op} << 8) | user;
-}
-
-// The design's worked example (2026-08-12-off-mesh-peripherals-design.md,
-// "Worked example"): route span x = 0..2, y = 0..1; a peripheral occupies
-// x = 0 on each row, so the tile region is x = 1..2, y = 0..1. Six 1 MB
-// entries, memory class, built through the same loader path a topology YAML
-// uses (SamTable::packed + addr_trans::declare_space_coords).
-SamTable make_sam_with_border_column() {
-    std::vector<addr_trans::PackedTile> tiles = {
-        {0, 0, 0x100000},  // peripheral
-        {1, 0, 0x100000},  // tile
-        {2, 0, 0x100000},  // tile
-        {0, 1, 0x100000},  // peripheral
-        {1, 1, 0x100000},  // tile
-        {2, 1, 0x100000},  // tile
-    };
-    auto table = addr_trans::SamTable::packed(tiles, /*x_span=*/3, /*y_span=*/2,
-                                              /*block_size=*/0x100000);
-    addr_trans::declare_space_coords(table, /*x_span=*/3, /*y_span=*/2,
-                                     /*tile_x_first=*/1, /*tile_x_last=*/2,
-                                     /*tile_y_first=*/0, /*tile_y_last=*/1);
-    return table;
 }
 }  // namespace
 
@@ -64,88 +42,31 @@ TEST(AddrTrans, TileBaseStaysInTheForwardedAddress) {
     EXPECT_EQ(t.local_addr, 0x12ABCDEF01ull);
 }
 
-TEST(CollectiveClip, FullTileRowIsAcceptedWhenTilesDoNotStartAtZero) {
-    auto sam = make_sam_with_border_column();
+// mesh_2x2_vc1_periph.yaml declares a peripheral on router (0, 0)'s x face, so
+// the peripheral and the tile that issue below share the coordinate 0x00 and
+// differ only in the port. A 4 GiB block stride puts the memory space's
+// coordinate field at [33:32], so 0x100000000 wildcards x.
+constexpr uint64_t kWildcardX = 0x100000000ull;
+
+TEST(CollectiveIssuer, ATileMayIssueACollective) {
+    auto sam = addr_trans::load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
     axi::AwBeat b{};
-    b.addr = 0x100000;  // the address names the tile at (1, 0)
+    b.addr = 0x0;  // node (0, 0)'s memory tile
     b.burst = axi::Burst::INCR;
-    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);
-    const uint8_t mask = addr_trans::collective_translate(sam, b, /*src_id=*/0x01);
-    EXPECT_EQ(mask & ((1u << ni::width::X_WIDTH) - 1u), 0x3u);
+    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, kWildcardX);
+    const uint8_t mask = addr_trans::collective_translate(sam, b, /*src_port=*/0);
+    EXPECT_EQ(mask & ((1u << ni::width::X_WIDTH) - 1u), 0x1u);
 }
 
-TEST(CollectiveClipDeath, EmptyAfterClippingAborts) {
-    auto sam = make_sam_with_border_column();
-    axi::AwBeat b{};
-    b.addr = 0x0;  // the address names the peripheral at (0, 0), outside the tile region
-    b.burst = axi::Burst::INCR;
-    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x400000);  // wildcards y only
-    EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x01),
-                 "after clipping to the tile region");
-}
-
-TEST(CollectiveClipDeath, ClippedBoundNotAMemberAborts) {
-    auto sam = make_sam_with_border_column();
-    axi::AwBeat b{};
-    b.addr = 0x100000;  // the address names the tile at (1, 0)
-    b.burst = axi::Burst::INCR;
-    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x200000);  // mask_x = 0x2
-    EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x01),
-                 "member of the wildcard set");
-}
-
-TEST(CollectiveIssuer, ATileMayIssueACollectiveAddressedAtAPeripheral) {
-    auto sam = make_sam_with_border_column();
-    axi::AwBeat b{};
-    b.addr = 0x0;  // the address names the peripheral at (0, 0)
-    b.burst = axi::Burst::INCR;
-    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);  // mask_x = 0x3
-    const uint8_t mask = addr_trans::collective_translate(sam, b, /*src_id=*/0x01);
-    EXPECT_EQ(mask & ((1u << ni::width::X_WIDTH) - 1u), 0x3u);
-}
-
-TEST(CollectiveIssuerDeath, APeripheralMayNotIssueACollective) {
-    auto sam = make_sam_with_border_column();
+TEST(CollectiveIssuerDeath, APeripheralCannotIssueACollective) {
+    // Round 2 gave every endpoint a port. A peripheral's is non-zero, and that
+    // is now the only thing that distinguishes it -- it shares its router's
+    // coordinate, so the old outside-the-tile-region test would pass.
+    auto sam = addr_trans::load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
     axi::AwBeat b{};
     b.addr = 0x0;
     b.burst = axi::Burst::INCR;
-    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, /*addr_mask=*/0x300000);
-    EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_id=*/0x00),
-                 "a collective issued from outside the tile");
-}
-
-TEST(OffMeshDst, SameRowPeripheralIsReachable) {
-    auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::Space::Memory);
-    ASSERT_NE(coords, nullptr);
-    addr_trans::check_dst_reachable(coords, /*src_id=*/0x01, /*dst_id=*/0x00);  // (1,0) -> (0,0)
-    addr_trans::check_dst_reachable(coords, /*src_id=*/0x02, /*dst_id=*/0x00);  // (2,0) -> (0,0)
-    addr_trans::check_dst_reachable(coords, /*src_id=*/0x11, /*dst_id=*/0x10);  // (1,1) -> (0,1)
-    // A tile destination is inside the region and is reachable from any row --
-    // as long as the source is a tile too. Row 0 to row 1, both in region.
-    addr_trans::check_dst_reachable(coords, /*src_id=*/0x01, /*dst_id=*/0x12);  // (1,0) -> (2,1)
-}
-
-TEST(OffMeshDstDeath, CrossRowPeripheralIsRefused) {
-    auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::Space::Memory);
-    ASSERT_NE(coords, nullptr);
-    EXPECT_DEATH(addr_trans::check_dst_reachable(coords, /*src_id=*/0x12, /*dst_id=*/0x00),
-                 "outside the tile region");
-}
-
-TEST(OffMeshSrc, APeripheralIsAnInitiatorOnItsOwnRow) {
-    auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::Space::Memory);
-    ASSERT_NE(coords, nullptr);
-    addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x11);  // (0,1) -> (1,1)
-    addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x12);  // (0,1) -> (2,1)
-}
-
-TEST(OffMeshSrcDeath, APeripheralAddressingAnotherRowIsRefused) {
-    auto sam = make_sam_with_border_column();
-    const auto* coords = sam.collective_coords(axi::Space::Memory);
-    ASSERT_NE(coords, nullptr);
-    EXPECT_DEATH(addr_trans::check_dst_reachable(coords, /*src_id=*/0x10, /*dst_id=*/0x02),
-                 "sits outside the tile region");
+    b.user = awuser(axi::COLLECTIVE_OP_MULTICAST, kWildcardX);
+    EXPECT_DEATH(addr_trans::collective_translate(sam, b, /*src_port=*/1),
+                 "issued from a peripheral");
 }

@@ -91,7 +91,7 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 
 | var | values |
 |---|---|
-| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_2x2_vc1_periph`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Every node gets a 4 GiB memory tile and a 4 KB config tile. The `_periph` map adds an off-mesh peripheral at a border route coordinate outside the tile region |
+| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_2x2_vc1_periph`, `mesh_4x4_vc1`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Every node gets a 4 GiB memory tile and a 4 KB config tile. The `_periph` map hangs peripherals off the x face of the routers at (0,0) and (0,1); a peripheral shares its router's coordinate and is told apart by `dst_port_id` |
 | `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `all_to_all` (each node walks every other node in turn, so the destination changes on every transaction and, at one id per initiator, every one of them allocates a reorder-buffer slot), `hotspot` (`HOTSPOT=` names the target node), `beat_exact` (per-lane-distinct bytes + walking WSTRB, DPI word-boundary check), `multicast` (collective write, shape from `MCAST_SHAPE`) |
 | `MCAST_SHAPE` | `row` (default), `col`, `submesh`. `multicast` only. One shape per run, concurrent multicast trees must stay pairwise disjoint |
 

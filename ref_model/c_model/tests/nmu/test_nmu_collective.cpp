@@ -32,19 +32,11 @@ constexpr uint64_t kTile = 0x1000;
 // coordinate ranges the way sam_yaml's loader does for a shipped topology.
 // Returns false when the entries contradict the declaration, which leaves the
 // space a unicast-only target (spec §5.1).
-// No peripheral in any fixture here, so the tile region is the full span --
-// x_first/y_first = 0, x_last/y_last = count - 1.
 bool declare(addr_trans::SamTable& t, axi::Space space, unsigned offset, unsigned x_count,
              unsigned y_count) {
     const unsigned x_bits = addr_trans::clog2(x_count);
-    return t.declare_space_coords(space, {{offset, x_bits},
-                                          {offset + x_bits, addr_trans::clog2(y_count)},
-                                          x_count,
-                                          y_count,
-                                          0,
-                                          x_count - 1,
-                                          0,
-                                          y_count - 1});
+    return t.declare_space_coords(
+        space, {{offset, x_bits}, {offset + x_bits, addr_trans::clog2(y_count)}, x_count, y_count});
 }
 
 // 4x4 mesh, one 4 KB tile per node, packed row-major. dst_id = (y << 4) | x and
@@ -389,7 +381,7 @@ TEST(NmuCollectiveDeath, MaskBitInsideTheTileOffset) {
 // declaration, not on every request.
 TEST(NmuCollectiveDeath, DuplicateNodeInTheDestinationSet) {
     auto sam = addr_trans::SamTable::packed(
-        {{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}}, /*x_span=*/4, /*y_span=*/1,
+        {{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}, {2, 0, kTile}}, /*x_dim=*/4, /*y_dim=*/1,
         /*block_size=*/kTile);
     EXPECT_FALSE(declare(sam, axi::Space::Memory, 12, 4, 1));
     CollectiveTestbench t(std::move(sam));
@@ -406,30 +398,11 @@ TEST(NmuCollectiveDeath, MaskBitOutsideTheMesh) {
                  "coordinate ranges of the request address");
 }
 
-// spec §2.2 check 4: on a non-power-of-two dimension, clamping a wildcard bound can land on a
-// coordinate the raw set never named (mask 0x2 at x=1 -> raw {1,3}, clip lands on 2) -- rejected,
-// unlike the design's worked full-range example 0b11={0,1,2,3}.
-TEST(NmuCollective, MaskReachingAPaddingCoordinateClipsToTheTileRegion) {
-    auto sam = addr_trans::SamTable::packed({{0, 0, kTile}, {1, 0, kTile}, {2, 0, kTile}},
-                                            /*x_span=*/3, /*y_span=*/1, /*block_size=*/kTile);
-    ASSERT_TRUE(declare(sam, axi::Space::Memory, 12, 3, 1));
-    CollectiveTestbench t(std::move(sam));
-    // Based at x = 0 the mask names {0, 2}, both real nodes -- no clipping.
-    ASSERT_TRUE(t.rob.push_aw(make_aw(0x05, 0x0000, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))));
-    auto f = t.aw_cap.pop();
-    ASSERT_TRUE(f.has_value());
-    EXPECT_EQ(f->get_header_field("collective_mask"), 0x02u);
-    // Based at x = 1 the raw set is {1, 3}; clip_max_x clamps to 2, which is
-    // not a member of {1, 3} -- rejected rather than silently forwarded as {1}.
-    EXPECT_DEATH(t.rob.push_aw(make_aw(0x06, kTile, awuser(axi::COLLECTIVE_OP_MULTICAST, 0x2000))),
-                 "member of the wildcard set");
-}
-
 // spec §2.2 check 3: the nodes a mask names must form an aligned wildcard over dst_id, not just a
 // same-count set.
 TEST(NmuCollectiveDeath, NodeSetIsNotAnAlignedWildcard) {
     auto sam = addr_trans::SamTable::packed(
-        {{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}}, /*x_span=*/4, /*y_span=*/2,
+        {{0, 0, kTile}, {1, 0, kTile}, {2, 1, kTile}, {3, 1, kTile}}, /*x_dim=*/4, /*y_dim=*/2,
         /*block_size=*/kTile);
     EXPECT_FALSE(declare(sam, axi::Space::Memory, 12, 2, 2));
     CollectiveTestbench t(std::move(sam));
