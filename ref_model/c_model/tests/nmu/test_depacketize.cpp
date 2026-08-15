@@ -121,6 +121,36 @@ TEST(NmuDepacketize, RPayloadBytesDecoded) {
     EXPECT_EQ(r->data, expected);
 }
 
+TEST(NmuDepacketize, AcceptsAResponseAddressedToItsOwnPort) {
+    using namespace ni::cmodel;
+    ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
+    nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16,
+                           router::null_rsp_in(), /*port_id=*/1);
+    Flit f;
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("src_id", 0x10);
+    f.set_header_field("dst_id", 0x01);
+    f.set_header_field("dst_port_id", 1);
+    ASSERT_TRUE(channel.rsp_out().push_flit(f));
+    depkt.tick();
+    EXPECT_TRUE(depkt.pop_b().has_value());
+}
+
+// Fault injection: the same flit with a port that is not this NI's must abort.
+TEST(NmuDepacketizeDeath, RejectsAResponseAddressedToAnotherPort) {
+    using namespace ni::cmodel;
+    ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);
+    nmu::Depacketize depkt(channel.rsp_in(), /*b_q_depth=*/16, /*r_q_depth=*/16,
+                           router::null_rsp_in(), /*port_id=*/1);
+    Flit f;
+    f.set_header_field("axi_ch", ni::AXI_CH_NarrowB);
+    f.set_header_field("src_id", 0x10);
+    f.set_header_field("dst_id", 0x01);
+    f.set_header_field("dst_port_id", 2);
+    ASSERT_TRUE(channel.rsp_out().push_flit(f));
+    EXPECT_DEATH({ depkt.tick(); }, "dst_port_id");
+}
+
 TEST(NmuDepacketize, PopBWithMeta_ExtractsOrderingTagAndOrderingReq) {
     using namespace ni::cmodel;
     ChannelModel channel(/*req_depth=*/16, /*rsp_depth=*/16);

@@ -1,6 +1,7 @@
 #include "nmu/rob.hpp"
 #include "nmu/packetize.hpp"
 #include "nmu/depacketize.hpp"
+#include "nmu/nmu.hpp"
 #include "common/channel_model.hpp"
 #include "common/per_channel_capture.hpp"
 #include "axi/types.hpp"
@@ -1832,4 +1833,58 @@ TEST(NmuRobOutstandingCount, WBeatsOfAdmittedBurstsFlowWhileAwIsRefused) {
     EXPECT_TRUE(rob.push_w(make_w(/*last=*/true)));
     EXPECT_FALSE(rob.push_w(make_w(/*last=*/true)))
         << "the refused burst's W beat has no admitted AW to pair with";
+}
+
+// === Port id carried through the production request path ===
+//
+// The production path is Rob -> NmuReqS1Bridge -> Packetize, and each hop
+// rebuilds AwHeaderMeta positionally (C++17 has no designated initializers). A
+// dropped member shows up here and nowhere else while every shipped port is 0,
+// so these two cases wire the real bridge rather than calling Packetize direct.
+namespace {
+// A SAM entry whose port is 1 is what a peripheral destination will look like
+// in round 3. No shipped topology declares one yet, so the value is the
+// fixture's.
+addr_trans::SamTable port_sam() {
+    return addr_trans::SamTable{
+        {{/*base=*/0x0, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Data, /*port=*/1}}};
+}
+
+struct PortIdTestbench {
+    ChannelModel noc{16, 16};
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt{aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, addr_trans::SamTable{}};
+    Depacketize depkt{noc.rsp_in(), 16, 16};
+    ni::cmodel::nmu::NmuReqS1Bridge bridge;
+};
+}  // namespace
+
+TEST(NmuRob, CarriesTheSamEntrysPortThroughToTheFlit) {
+    PortIdTestbench t;
+    Rob rob(t.bridge, t.depkt, RobMode::Enabled, port_sam());
+
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x40)));
+    ASSERT_TRUE(rob.push_ar(make_ar(0x05, 0x40)));
+    t.bridge.tick(t.pkt);
+
+    auto aw_flit = t.aw_cap.pop();
+    ASSERT_TRUE(aw_flit.has_value());
+    EXPECT_EQ(aw_flit->get_header_field("dst_port_id"), 1u);
+    auto ar_flit = t.ar_cap.pop();
+    ASSERT_TRUE(ar_flit.has_value());
+    EXPECT_EQ(ar_flit->get_header_field("dst_port_id"), 1u);
+}
+
+// The Disabled AR path builds its own meta at a separate site from the Enabled
+// one, so it can diverge.
+TEST(NmuRob, Disabled_CarriesTheSamEntrysPortThroughToTheArFlit) {
+    PortIdTestbench t;
+    Rob rob(t.bridge, t.depkt, RobMode::Disabled, port_sam());
+
+    ASSERT_TRUE(rob.push_ar(make_ar(0x05, 0x40)));
+    t.bridge.tick(t.pkt);
+
+    auto ar_flit = t.ar_cap.pop();
+    ASSERT_TRUE(ar_flit.has_value());
+    EXPECT_EQ(ar_flit->get_header_field("dst_port_id"), 1u);
 }

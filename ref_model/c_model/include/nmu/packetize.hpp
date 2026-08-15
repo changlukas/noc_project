@@ -19,6 +19,9 @@
 //                 AwHeaderMeta, computed from Rob's own SamTable member
 //                 (sam_.translate). For W beats, dst inherited from
 //                 the AW write-meta FIFO front.
+//   dst_port_id — which endpoint at dst_id; from addr_trans (SamEntry::port),
+//                 inherited by W beats from their AW like dst_id.
+//   src_port_id — constructor arg (this NI's own endpoint at src_id).
 //   vc_id       — placeholder 0; the downstream VcAllocator stamps the real VC
 //   axi_ch      — implicit per push_* method
 //   flit_tail   — wormhole packet boundary marker (FlooNoC pattern):
@@ -64,6 +67,7 @@ struct AwHeaderMeta {
     // including the direct Packetizer interface and all AR pushes.
     uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
     uint8_t collective_mask = 0;  // 8 b NODE mask, not the 48 b AWUSER address mask
+    uint8_t dst_port = 0;         // from addr_trans; which endpoint at dst_id receives
 };
 
 class NmuPacketizeSink {
@@ -81,14 +85,15 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     // class -- DataAr stays on REQ; only DataAw/DataW move to DAT.
     Packetize(router::NocReqOut& aw_out, router::NocReqOut& w_out, router::NocReqOut& ar_out,
               router::NocReqOut& dat_aw_out, router::NocReqOut& dat_w_out, uint8_t src_id,
-              addr_trans::SamTable sam)
+              addr_trans::SamTable sam, uint8_t port_id = 0)
         : aw_out_(aw_out),
           w_out_(w_out),
           ar_out_(ar_out),
           dat_aw_out_(dat_aw_out),
           dat_w_out_(dat_w_out),
           src_id_(src_id),
-          sam_(std::move(sam)) {}
+          sam_(std::move(sam)),
+          port_id_(port_id) {}
 
     // ---- RequestPacketizer interface ----
     bool push_aw(const axi::AwBeat& b) override {
@@ -107,7 +112,8 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
         assert(sam_.burst_footprint_ok(
                    b.addr, addr_trans::burst_last_byte(b.addr, b.len, b.size, b.burst)) &&
                "SAM: AW burst footprint crosses a tile boundary");
-        return push_aw_with_meta(b, {t.dst_id, t.local_addr, 0, 0, t.cls});
+        return push_aw_with_meta(
+            b, {t.dst_id, t.local_addr, 0, 0, t.cls, axi::COLLECTIVE_OP_UNICAST, 0, t.port});
     }
     // INVARIANT: caller must push_aw before push_w for the same write txn. W
     // FIFO ordering inherits AW issue order; Rob layer enforces this via
@@ -118,7 +124,8 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
         assert(sam_.burst_footprint_ok(
                    b.addr, addr_trans::burst_last_byte(b.addr, b.len, b.size, b.burst)) &&
                "SAM: AR burst footprint crosses a tile boundary");
-        return push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0, t.cls});
+        return push_ar_with_meta(
+            b, {t.dst_id, t.local_addr, 0, 0, t.cls, axi::COLLECTIVE_OP_UNICAST, 0, t.port});
     }
 
     // ---- Non-interface methods, called by Rob with full metadata ----
@@ -134,6 +141,8 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
     router::NocReqOut& dat_w_out_;
     uint8_t src_id_;
     addr_trans::SamTable sam_;
+    // This NI's own endpoint at src_id, stamped into every request it issues.
+    uint8_t port_id_ = 0;
 
     // W FIFO carries the meta inherited from AW. local_addr/len/size/burst +
     // beat_counter feed the narrow class's lane re-anchor (axi::beat_addr):
@@ -152,6 +161,7 @@ class Packetize : public RequestPacketizer, public NmuPacketizeSink {
         // AWUSER of its own to re-derive them from.
         uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
         uint8_t collective_mask = 0;
+        uint8_t dst_port = 0;
         uint16_t beat_counter = 0;
     };
     std::deque<WMeta> w_meta_fifo_;
@@ -196,6 +206,8 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     f.set_header_field("axi_ch", is_data ? ni::AXI_CH_DataAw : ni::AXI_CH_NarrowAw);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
+    f.set_header_field("dst_port_id", meta.dst_port);
+    f.set_header_field("src_port_id", port_id_);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", 0);  // AW starts wormhole packet (FlooNoC pattern)
     f.set_header_field("ordering_req", meta.ordering_req);
@@ -217,7 +229,7 @@ inline bool Packetize::push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta
     if (!out.push_flit(f)) return false;
     w_meta_fifo_.push_back({meta.dst_id, meta.ordering_req, meta.ordering_tag, meta.cls,
                             meta.local_addr, b.len, b.size, b.burst, meta.collective_op,
-                            meta.collective_mask, /*beat_counter=*/0});
+                            meta.collective_mask, meta.dst_port, /*beat_counter=*/0});
     return true;
 }
 
@@ -238,6 +250,8 @@ inline bool Packetize::push_w(const axi::WBeat& b) {
     f.set_header_field("axi_ch", is_data ? ni::AXI_CH_DataW : ni::AXI_CH_NarrowW);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
+    f.set_header_field("dst_port_id", meta.dst_port);
+    f.set_header_field("src_port_id", port_id_);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", b.last ? 1u : 0u);  // W's wlast ends wormhole packet (FlooNoC)
     f.set_header_field("ordering_req", meta.ordering_req);
@@ -282,6 +296,8 @@ inline bool Packetize::push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta
                        meta.cls == axi::AxiClass::Data ? ni::AXI_CH_DataAr : ni::AXI_CH_NarrowAr);
     f.set_header_field("src_id", src_id_);
     f.set_header_field("dst_id", meta.dst_id);
+    f.set_header_field("dst_port_id", meta.dst_port);
+    f.set_header_field("src_port_id", port_id_);
     f.set_header_field("vc_id", 0);
     f.set_header_field("flit_tail", 1);
     f.set_header_field("ordering_req", meta.ordering_req);

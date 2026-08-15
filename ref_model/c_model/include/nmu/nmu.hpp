@@ -75,7 +75,7 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     bool push_aw_with_meta(const axi::AwBeat& b, AwHeaderMeta meta) override {
         if (s1_aw_.full()) return false;
         s1_aw_.accept({b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag,
-                       meta.cls, meta.collective_op, meta.collective_mask});
+                       meta.cls, meta.collective_op, meta.collective_mask, meta.dst_port});
         return true;
     }
     bool push_w(const axi::WBeat& b) override {
@@ -85,8 +85,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
     }
     bool push_ar_with_meta(const axi::ArBeat& b, AwHeaderMeta meta) override {
         if (s1_ar_.full()) return false;
-        s1_ar_.accept(
-            {b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag, meta.cls});
+        s1_ar_.accept({b, meta.dst_id, meta.local_addr, meta.ordering_req, meta.ordering_tag,
+                       meta.cls, meta.dst_port});
         return true;
     }
 
@@ -101,7 +101,7 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
             const auto& e = s1_aw_.peek();
             if (packetize.push_aw_with_meta(
                     e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag, e.cls,
-                             e.collective_op, e.collective_mask})) {
+                             e.collective_op, e.collective_mask, e.dst_port})) {
                 s1_aw_.take();
             }
         }
@@ -114,7 +114,8 @@ class NmuReqS1Bridge : public NmuPacketizeSink {
         if (s1_ar_.full()) {
             const auto& e = s1_ar_.peek();
             if (packetize.push_ar_with_meta(
-                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag, e.cls})) {
+                    e.beat, {e.dst_id, e.local_addr, e.ordering_req, e.ordering_tag, e.cls,
+                             axi::COLLECTIVE_OP_UNICAST, 0, e.dst_port})) {
                 s1_ar_.take();
             }
         }
@@ -328,10 +329,10 @@ inline Nmu::Nmu(NmuConfig cfg, router::NocReqOut& downstream_req, router::NocRsp
                             std::vector<router::ChannelPairing>{{0, 1}},
                             cfg_.wormhole_per_input_depth),
       depacketize_(downstream_rsp_, cfg_.port_params.depkt_b_q_depth,
-                   cfg_.port_params.depkt_r_q_depth, downstream_dat_rsp_),
+                   cfg_.port_params.depkt_r_q_depth, downstream_dat_rsp_, cfg_.port_id),
       packetize_(wormhole_arbiter_.input(0), wormhole_arbiter_.input(1), wormhole_arbiter_.input(2),
                  dat_wormhole_arbiter_.input(0), dat_wormhole_arbiter_.input(1), cfg_.src_id,
-                 cfg_.sam),
+                 cfg_.sam, cfg_.port_id),
       req_s1_bridge_(),
       rob_(req_s1_bridge_, depacketize_, cfg_.read_rob_mode, cfg_.sam, cfg_.b_rob_depth,
            cfg_.r_rob_depth, cfg_.max_txns_per_id, cfg_.src_id),

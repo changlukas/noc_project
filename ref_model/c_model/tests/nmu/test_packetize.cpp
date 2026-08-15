@@ -3,6 +3,7 @@
 #include "common/per_channel_capture.hpp"
 #include "axi/types.hpp"
 #include <array>
+#include <utility>
 #include <gtest/gtest.h>
 
 using ni::cmodel::nmu::Packetize;
@@ -81,6 +82,22 @@ TEST(NmuPacketize, PushAwEmitsFlitWithCorrectFields) {
     EXPECT_EQ(f.get_header_field("flit_tail"), 0u);  // AW starts wormhole packet (FlooNoC)
     EXPECT_EQ(f.get_payload_field("AW", "awid"), 0x05u);
     EXPECT_EQ(f.get_payload_field("AW", "awaddr"), 0xEFCAFEBABEull);  // forwarded unchanged
+}
+
+TEST(NmuPacketize, StampsItsOwnPortAndTheSamEntrysPortIntoTheHeader) {
+    // A SAM entry whose port is 1 is what a peripheral destination will look
+    // like in round 3. No shipped topology declares one yet, so the value is
+    // the fixture's.
+    addr_trans::SamTable sam{
+        {{/*base=*/0x0, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Data, /*port=*/1}}};
+    ReqCapture aw_cap, w_cap, ar_cap;
+    Packetize pkt(aw_cap, w_cap, ar_cap, aw_cap, w_cap, kSrcId, std::move(sam), /*port_id=*/2);
+    ASSERT_TRUE(pkt.push_aw(make_aw(0x05, 0x40)));
+
+    auto flit_opt = aw_cap.pop();
+    ASSERT_TRUE(flit_opt.has_value());
+    EXPECT_EQ(flit_opt->get_header_field("dst_port_id"), 1u);
+    EXPECT_EQ(flit_opt->get_header_field("src_port_id"), 2u);
 }
 
 TEST(NmuPacketize, WMetaFifoInheritsAwDst) {

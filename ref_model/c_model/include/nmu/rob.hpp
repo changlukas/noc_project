@@ -426,9 +426,9 @@ inline bool Rob::push_aw(const axi::AwBeat& b) {
         base = b_rob_depth_ - write_free_space();
     }
     if (!next_pkt_.push_aw_with_meta(
-            b,
-            {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
-             static_cast<uint8_t>(needs_rob ? base : 0), t.cls, collective_op, collective_mask})) {
+            b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
+                static_cast<uint8_t>(needs_rob ? base : 0), t.cls, collective_op, collective_mask,
+                t.port})) {
         return false;  // downstream backpressure: no state mutation
     }
     prev_dest_write_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
@@ -515,9 +515,13 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
             if (read_free_space() < n) return false;
             base = r_rob_depth_ - read_free_space();
         }
-        if (!next_pkt_.push_ar_with_meta(
-                b, {t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
-                    static_cast<uint8_t>(needs_rob ? base : 0), t.cls})) {
+        // Hoisted into a named local so dst_port -- which sits behind the two
+        // collective members AR never sets -- can be assigned instead of the
+        // brace having to spell them out (nsu::Depacketize::pop_aw does the same).
+        AwHeaderMeta meta{t.dst_id, t.local_addr, static_cast<uint8_t>(needs_rob ? 1 : 0),
+                          static_cast<uint8_t>(needs_rob ? base : 0), t.cls};
+        meta.dst_port = t.port;
+        if (!next_pkt_.push_ar_with_meta(b, meta)) {
             return false;  // downstream backpressure: no state mutation
         }
         prev_dest_read_[b.id] = dst;  // updated on every accepted push (floo_rob.sv:417-420)
@@ -561,7 +565,9 @@ inline bool Rob::push_ar(const axi::ArBeat& b) {
     }
     auto t = sam_.translate(b.addr);
     if (read_outstanding_[b.id]) return false;  // single-outstanding per id
-    if (!next_pkt_.push_ar_with_meta(b, {t.dst_id, t.local_addr, 0, 0, t.cls})) {
+    AwHeaderMeta meta{t.dst_id, t.local_addr, 0, 0, t.cls};
+    meta.dst_port = t.port;
+    if (!next_pkt_.push_ar_with_meta(b, meta)) {
         return false;
     }
     if (t.cls == axi::AxiClass::Narrow) {

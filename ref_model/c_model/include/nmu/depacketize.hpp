@@ -28,8 +28,12 @@ namespace ni::cmodel::nmu {
 class Depacketize : public ResponseDepacketizer {
   public:
     Depacketize(router::NocRspIn& rsp_in, std::size_t b_q_depth, std::size_t r_q_depth,
-                router::NocRspIn& dat_rsp_in = router::null_rsp_in())
-        : rsp_in_(rsp_in), dat_rsp_in_(dat_rsp_in), b_q_depth_(b_q_depth), r_q_depth_(r_q_depth) {}
+                router::NocRspIn& dat_rsp_in = router::null_rsp_in(), uint8_t port_id = 0)
+        : rsp_in_(rsp_in),
+          dat_rsp_in_(dat_rsp_in),
+          b_q_depth_(b_q_depth),
+          r_q_depth_(r_q_depth),
+          port_id_(port_id) {}
 
     void tick();
 
@@ -58,6 +62,8 @@ class Depacketize : public ResponseDepacketizer {
     std::deque<BWithMeta> b_q_;
     std::deque<RWithMeta> r_q_;
     std::size_t b_q_depth_, r_q_depth_;
+    // This NI's own endpoint at its coordinate; every response must name it.
+    uint8_t port_id_ = 0;
     std::optional<Flit> pending_rsp_;
     std::optional<Flit> pending_dat_;
 
@@ -101,6 +107,13 @@ inline void Depacketize::drain_ingress_(router::NocRspIn& src, std::optional<Fli
             auto opt = src.pop_flit();
             if (!opt) return;
             f = *opt;
+        }
+        // The NSU echoes the requester's src_port_id back as dst_port_id. A
+        // mismatch means the response reached the wrong endpoint at this
+        // coordinate, which no amount of downstream decoding can detect.
+        if (f.get_header_field("dst_port_id") != port_id_) {
+            assert(false && "nmu::Depacketize: response dst_port_id names another endpoint");
+            std::abort();
         }
         uint64_t ch = f.get_header_field("axi_ch");
         // DAT carries DataR only (spec :348; NarrowB/NarrowR/DataB stay on

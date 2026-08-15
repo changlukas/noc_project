@@ -19,6 +19,7 @@ struct AdmittedAw {
     // ARUSER carries no collective field.
     uint8_t collective_op = axi::COLLECTIVE_OP_UNICAST;
     uint8_t collective_mask = 0;
+    uint8_t dst_port = 0;  // mirrors AwHeaderMeta::dst_port
 };
 struct AdmittedAr {
     axi::ArBeat beat;
@@ -27,6 +28,7 @@ struct AdmittedAr {
     uint8_t ordering_req;
     uint8_t ordering_tag;
     axi::AxiClass cls = axi::AxiClass::Data;
+    uint8_t dst_port = 0;  // mirrors AwHeaderMeta::dst_port
 };
 // W carries AW-inherited meta (matches packetize.hpp w_meta_fifo_ contract).
 struct AdmittedW {

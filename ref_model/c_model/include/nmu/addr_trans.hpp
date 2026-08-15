@@ -21,6 +21,10 @@ struct Translated {
     // fallback) is memory space. sam_yaml.hpp's YAML loader picks the real
     // per-tile default explicitly instead of relying on this one.
     axi::AxiClass cls = axi::AxiClass::Data;
+    // Which endpoint at dst_id. 0 is the tile on the router's LOCAL port;
+    // non-zero names a boundary-port peripheral (round 3). Every entry a
+    // shipped topology declares today is a tile, so this is 0 throughout.
+    uint8_t port = 0;
 };
 
 struct SamEntry {
@@ -28,6 +32,10 @@ struct SamEntry {
     uint64_t size;
     uint8_t dst_id;
     axi::AxiClass cls = axi::AxiClass::Data;
+    // Which endpoint at dst_id. 0 is the tile on the router's LOCAL port;
+    // non-zero names a boundary-port peripheral (round 3). Every entry a
+    // shipped topology declares today is a tile, so this is 0 throughout.
+    uint8_t port = 0;
 };
 
 // One packed-map input tile: mesh coordinate + size. Bases are not given here;
@@ -124,7 +132,7 @@ class SamTable {
     Translated translate(uint64_t addr) const {
         const SamEntry* e = lookup(addr);
         assert(e && "SAM miss: address maps to no tile (config/stimulus bug)");
-        return {e->dst_id, addr, e->cls};
+        return {e->dst_id, addr, e->cls, e->port};
     }
 
     const std::vector<SamEntry>& entries() const { return entries_; }
