@@ -317,26 +317,40 @@ TEST(SamYaml, SpaceAttributeSelectsClass) {
 // Tile-major packing gives every space the same node stride (block_size,
 // 4 GiB in every shipped topology), so both spaces' offsets are 32; the
 // lengths are clog2 of the mesh dimension.
+//
+// declare_space_coords (sam_yaml.hpp) RETURNS FALSE rather than aborting when
+// a space stops being collective-eligible, and the shipped topologies below
+// state no tile region, so sam_yaml.hpp's own abort guard (region_stated)
+// never arms for them -- a regression here would surface only as a
+// multicast refused at the source, nothing at build time. The ASSERT_NE
+// below is what stands in for that missing abort. mesh_4x4_vc4 adds the
+// third shipped topology to the walk; the y_range cross-space EXPECT_EQ is
+// the field-identity offset decode requires (spec §5.1) and that offset == 32
+// alone does not pin, since both spaces could each be internally offset-32
+// with a mismatched y term.
 TEST(SamYaml, CoordRangesDerivedFromTheBlockStride) {
     struct Row {
         const char* file;
         unsigned dim_bits;
-    } rows[] = {{"/mesh_2x2_vc1.yaml", 1}, {"/mesh_4x4_vc1.yaml", 2}};
+    } rows[] = {{"/mesh_2x2_vc1.yaml", 1}, {"/mesh_4x4_vc1.yaml", 2}, {"/mesh_4x4_vc4.yaml", 2}};
     for (const auto& row : rows) {
         SCOPED_TRACE(row.file);
         auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + row.file);
         const auto* memory = sam.collective_coords(axi::AxiClass::Data);
-        ASSERT_NE(memory, nullptr);
+        ASSERT_NE(memory, nullptr) << "memory space is not a collective target";
         EXPECT_EQ(memory->x_range.offset, 32u);  // log2(block_size, 4 GiB)
         EXPECT_EQ(memory->x_range.len, row.dim_bits);
         EXPECT_EQ(memory->y_range.offset, 32u + row.dim_bits);
         EXPECT_EQ(memory->y_range.len, row.dim_bits);
         const auto* config = sam.collective_coords(axi::AxiClass::Narrow);
-        ASSERT_NE(config, nullptr);
+        ASSERT_NE(config, nullptr) << "config space is not a collective target";
         EXPECT_EQ(config->x_range.offset, 32u);  // same block_size stride
         EXPECT_EQ(config->x_range.len, row.dim_bits);
         EXPECT_EQ(config->y_range.offset, 32u + row.dim_bits);
         EXPECT_EQ(config->y_range.len, row.dim_bits);
+        // Both spaces put the node index at the same bits, not just the same
+        // x offset -- the property offset decode (spec §5.1) needs.
+        EXPECT_EQ(memory->y_range.offset, config->y_range.offset);
     }
 }
 
