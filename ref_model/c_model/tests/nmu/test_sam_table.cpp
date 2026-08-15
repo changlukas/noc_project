@@ -52,8 +52,10 @@ TEST(SamTable, TranslateIsInjectiveAcrossSpacesOfOneNode) {
             {1, 0, 0x1000, axi::AxiClass::Narrow},
         },
         /*x_span=*/2, /*y_span=*/1, /*block_size=*/0x200000);
-    const auto memory = sam.translate(0x40);      // node 0, memory space
-    const auto config = sam.translate(0x200040);  // node 0, config space
+    const auto memory = sam.translate(0x40);  // node 0, memory space
+    // node 0's config tile sits inside its own block, above its memory tile:
+    // offset 0x100000 (memory_slot 0x100000, config_slot 0x1000, aligned).
+    const auto config = sam.translate(0x100040);  // node 0, config space
     EXPECT_EQ(memory.dst_id, config.dst_id);      // same node
     EXPECT_NE(memory.cls, config.cls);            // different class
     EXPECT_NE(memory.local_addr, config.local_addr);

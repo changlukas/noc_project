@@ -610,6 +610,10 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
     auto path = ni::cmodel::testing::unique_temp_path("dual_class_sam.yaml");
     std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
                            "address_map:\n"
+                           // block_size declared explicitly, as every shipped topology
+                           // does: node stride is 2x the memory tile so the node's
+                           // config tile fits inside it.
+                           "  block_size: 0x200000\n"
                            "  tiles:\n"
                            "    - { x: 0, y: 0, size: 0x100000 }\n"
                            "    - { x: 1, y: 0, size: 0x100000 }\n"
@@ -644,9 +648,10 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
 
     // Addresses ride through untouched, so MemSlave is keyed by the request
     // address itself and the two spaces are already distinct.
-    constexpr uint64_t kMemAddr = 0x100000 + 0x100;  // node 1's memory tile
-    // Config bases follow the four memory tiles: (0,0) at 0x400000, node 1 next.
-    constexpr uint64_t kCfgAddr = 0x401000;  // node 1's config tile base
+    constexpr uint64_t kMemAddr = 0x200000 + 0x100;  // node 1's memory tile (base = 1 * block_size)
+    // Node 1's config tile sits inside its own block, above its memory tile:
+    // base = 1 * block_size + 0x100000.
+    constexpr uint64_t kCfgAddr = 0x300000;  // node 1's config tile base
     constexpr uint8_t kWriteId = 3, kOrderId = 5;
     std::array<uint8_t, 64> wdata_mem{}, wdata_cfg{};
     for (int b = 0; b < 64; ++b) wdata_mem[b] = static_cast<uint8_t>(0xA0 + b);

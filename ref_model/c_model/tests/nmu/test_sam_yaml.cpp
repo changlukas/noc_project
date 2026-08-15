@@ -94,9 +94,9 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
 // (CMakeLists.txt), globbed rather than listed, so a new topology YAML cannot
 // fall out of coverage.
 //
-// The claim is the packing formula, base = space_base + ((y << clog2(x_span))
-// | x) * slot, spelled out here from the YAML keys instead of read back from
-// SamTable::packed(). This is one half of the bit-identity with
+// The claim is the packing formula, base = ((y << clog2(x_span)) | x) *
+// block_size + offset[space], spelled out here from the YAML keys instead of
+// read back from SamTable::packed(). This is one half of the bit-identity with
 // sim/tools/address_map.py that the model and the stimulus generator both
 // depend on: this test holds SamTable::packed() to the formula, and the Python
 // twin (test_address_map_pack_real_topologies_at_the_coordinate_formula in
@@ -124,7 +124,8 @@ TEST(SamYaml, RealTopologiesPackedAtTheCoordinateFormula) {
             topo["x_span"] ? topo["x_span"].as<unsigned>() : topo["x_dim"].as<unsigned>();
         const unsigned y_span =
             topo["y_span"] ? topo["y_span"].as<unsigned>() : topo["y_dim"].as<unsigned>();
-        // Slot per space: the largest size declared in it.
+        // Slot per space: the largest size declared in it, bounding the
+        // aperture. block_size is the declared node stride.
         uint64_t memory_slot = 0;
         uint64_t config_slot = 0;
         for (const auto& tile : root["address_map"]["tiles"]) {
@@ -133,8 +134,10 @@ TEST(SamYaml, RealTopologiesPackedAtTheCoordinateFormula) {
             slot = std::max(slot, tile["size"].as<uint64_t>());
         }
         const unsigned x_bits = ni::cmodel::address_map::clog2(x_span);
-        // Config sits above every base memory could take.
-        const uint64_t config_base = (uint64_t{1} << x_bits) * y_span * memory_slot;
+        const uint64_t block = root["address_map"]["block_size"].as<uint64_t>();
+        // Spaces sit inside a node's block, memory first at 0.
+        const uint64_t config_offset =
+            ((memory_slot + config_slot - 1) / config_slot) * config_slot;
 
         auto sam = load_sam_table(file);
         ASSERT_FALSE(sam.entries().empty());
@@ -143,8 +146,7 @@ TEST(SamYaml, RealTopologiesPackedAtTheCoordinateFormula) {
             const unsigned y = e.dst_id >> ni::width::X_WIDTH;
             const bool is_config = e.cls == axi::AxiClass::Narrow;
             const uint64_t expected =
-                (is_config ? config_base : 0) +
-                ((uint64_t{(y << x_bits) | x}) * (is_config ? config_slot : memory_slot));
+                ((uint64_t{(y << x_bits) | x}) * block) + (is_config ? config_offset : 0);
             EXPECT_EQ(e.base, expected) << "dst_id " << std::hex << unsigned{e.dst_id};
         }
     }
@@ -234,9 +236,16 @@ TEST(SamYamlDeath, TileRegionExtentMustEqualTheRouterArray) {
 
 // A stated tile region is what arms check_dst_reachable, and the guard reads
 // the same declaration collective eligibility does -- so a declaration the
-// entries reject would take the guard down with it, silently. Same topology as
-// above with a 0x3000 window: the stride is no longer a power of two, so no
-// coordinate field can be read off the map and the declaration is refused.
+// entries reject would take the guard down with it, silently.
+//
+// Tile-major gives every space one power-of-two stride (block_size, enforced
+// by SamTable::packed()), so a non-power-of-two SIZE can no longer defeat the
+// declaration the way it used to. What still can: declare_space_coords
+// (sam_yaml.hpp) derives the stride from the first two SAME-CLASS entries in
+// table.entries() ORDER, not from their coordinates -- so tiles listed out of
+// raster order still give a non-power-of-two stride between them. Here the
+// list's second memory tile is (1,1), five slots from the first (0,0)'s, and
+// 5 is not a power of two.
 TEST(SamYamlDeath, AStatedTileRegionWhoseDeclarationIsRejected) {
     auto path = ni::cmodel::testing::unique_temp_path("sam_region_undeclarable.yaml");
     std::ofstream(path) << "topology:\n"
@@ -249,12 +258,12 @@ TEST(SamYamlDeath, AStatedTileRegionWhoseDeclarationIsRejected) {
                            "  tile_x_last: 2\n"
                            "address_map:\n"
                            "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x3000 }\n"
-                           "    - { x: 1, y: 0, size: 0x3000 }\n"
-                           "    - { x: 2, y: 0, size: 0x3000 }\n"
-                           "    - { x: 0, y: 1, size: 0x3000 }\n"
-                           "    - { x: 1, y: 1, size: 0x3000 }\n"
-                           "    - { x: 2, y: 1, size: 0x3000 }\n";
+                           "    - { x: 0, y: 0, size: 0x1000 }\n"
+                           "    - { x: 1, y: 1, size: 0x1000 }\n"
+                           "    - { x: 1, y: 0, size: 0x1000 }\n"
+                           "    - { x: 2, y: 0, size: 0x1000 }\n"
+                           "    - { x: 0, y: 1, size: 0x1000 }\n"
+                           "    - { x: 2, y: 1, size: 0x1000 }\n";
     EXPECT_DEATH(load_sam_table(path), "a stated tile region needs every address space");
 }
 
@@ -280,19 +289,19 @@ TEST(SamYaml, TileMajorPacksEachNodeIntoOneBlock) {
 // memory tile (default space) and a config tile.
 TEST(SamYaml, SpaceAttributeSelectsClass) {
     auto sam = load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
-    // Memory-space tiles pack first (list order): node (0,0)'s memory tile is
-    // [0, 0x100000000).
+    // Node (0,0)'s memory tile is [0, 0x2000000), inside its own
+    // 0x100000000 block.
     auto memory = sam.translate(0x1000);
     EXPECT_EQ(memory.dst_id, 0x00u);
     EXPECT_EQ(memory.cls, axi::AxiClass::Data);
     EXPECT_EQ(memory.local_addr, 0x1000ull);  // forwarded unchanged
 
-    // The config tile is the 5th entry: base = sum of the 4 memory tiles'
-    // sizes = 4 * 0x100000000 = 0x400000000, size 0x1000.
-    auto config = sam.translate(0x400000010ull);
+    // The config tile sits inside node (0,0)'s own block, above its memory
+    // tile: base = 0x2000000, size 0x1000.
+    auto config = sam.translate(0x2000010ull);
     EXPECT_EQ(config.dst_id, 0x00u);
     EXPECT_EQ(config.cls, axi::AxiClass::Narrow);
-    EXPECT_EQ(config.local_addr, 0x400000010ull);
+    EXPECT_EQ(config.local_addr, 0x2000010ull);
 
     // One node's two spaces stay at distinct addresses, which is what the tile
     // decoder needs. They are distinct because the map itself put them apart,
@@ -304,9 +313,10 @@ TEST(SamYaml, SpaceAttributeSelectsClass) {
     EXPECT_NE(memory.cls, config.cls);
 }
 
-// The ranges the loader derives from the shipped YAMLs, spelled out. Memory
-// stride is 4 GiB and config stride 4 KB in every topology, so the offsets
-// are 32 and 12; the lengths are clog2 of the mesh dimension.
+// The ranges the loader derives from the shipped YAMLs, spelled out.
+// Tile-major packing gives every space the same node stride (block_size,
+// 4 GiB in every shipped topology), so both spaces' offsets are 32; the
+// lengths are clog2 of the mesh dimension.
 TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
     struct Row {
         const char* file;
@@ -317,15 +327,15 @@ TEST(SamYaml, CoordRangesDerivedFromTheSpaceStride) {
         auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + row.file);
         const auto* memory = sam.collective_coords(axi::AxiClass::Data);
         ASSERT_NE(memory, nullptr);
-        EXPECT_EQ(memory->x_range.offset, 32u);  // log2(4 GiB)
+        EXPECT_EQ(memory->x_range.offset, 32u);  // log2(block_size, 4 GiB)
         EXPECT_EQ(memory->x_range.len, row.dim_bits);
         EXPECT_EQ(memory->y_range.offset, 32u + row.dim_bits);
         EXPECT_EQ(memory->y_range.len, row.dim_bits);
         const auto* config = sam.collective_coords(axi::AxiClass::Narrow);
         ASSERT_NE(config, nullptr);
-        EXPECT_EQ(config->x_range.offset, 12u);  // log2(4 KB)
+        EXPECT_EQ(config->x_range.offset, 32u);  // same block_size stride
         EXPECT_EQ(config->x_range.len, row.dim_bits);
-        EXPECT_EQ(config->y_range.offset, 12u + row.dim_bits);
+        EXPECT_EQ(config->y_range.offset, 32u + row.dim_bits);
         EXPECT_EQ(config->y_range.len, row.dim_bits);
     }
 }
@@ -544,8 +554,11 @@ static const char* kEqualSizedSpaces =
     "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
 
 // Unequal-sized spaces, self-contained (not the shipped tile size, which is
-// now 4 GiB): memory 1 MB, config 4 KB. Node index at [21:20] and [13:12] --
-// legal under table decode, unreachable by one global pair.
+// now 4 GiB): memory 1 MB, config 4 KB. Under tile-major both spaces still
+// share one node stride (block_size, not the individual region sizes), so the
+// node index sits at the same bit position in both -- legal under table
+// decode AND offset decode, unlike the old per-space-sized stride this
+// fixture used to demonstrate the rejection of.
 static const char* kShippedSizedSpaces =
     "    - { x: 0, y: 0, size: 0x100000 }\n"
     "    - { x: 1, y: 0, size: 0x100000 }\n"
@@ -580,9 +593,18 @@ TEST(SamYaml, OffsetDecodeAcceptsEqualSizedSpaces) {
     EXPECT_EQ(mem->y_range.offset, cfg->y_range.offset);
 }
 
-TEST(SamYaml, OffsetDecodeRejectsUnequalSpaceSizes) {
-    auto path = write_map("sam_offset_unequal.yaml", "offset", kShippedSizedSpaces);
-    EXPECT_DEATH(load_sam_table(path), "same region size");
+// Tile-major gives every space the same node stride (block_size), so decode
+// 'offset' -- one coordinate range pair for the whole map -- is satisfied by
+// construction, whatever the spaces' own region sizes are. This fixture used
+// to be the offset-decode rejection case; it is not one anymore.
+TEST(SamYaml, OffsetDecodeIsSatisfiedByConstructionUnderTileMajor) {
+    auto sam = load_sam_table(write_map("sam_offset_unequal.yaml", "offset", kShippedSizedSpaces));
+    const auto* mem = sam.collective_coords(axi::AxiClass::Data);
+    const auto* cfg = sam.collective_coords(axi::AxiClass::Narrow);
+    ASSERT_NE(mem, nullptr);
+    ASSERT_NE(cfg, nullptr);
+    EXPECT_EQ(mem->x_range.offset, cfg->x_range.offset);  // the one global pair
+    EXPECT_EQ(mem->y_range.offset, cfg->y_range.offset);
 }
 
 TEST(SamYaml, TableDecodeAcceptsWhatOffsetRejects) {

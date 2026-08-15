@@ -46,10 +46,10 @@ constexpr std::size_t kMaxCycles = 20'000;
 constexpr uint8_t kNmuSrcId = 0x01;
 constexpr uint8_t kNsuSrcId = 0x02;
 
-// Config tile base: mesh_2x2_vc1.yaml packs 4 memory tiles (0x100000000
-// each) before the config tiles, so node (0,0)'s config aperture starts at
-// 4 * 0x100000000 = 0x400000000, size 0x1000.
-constexpr uint64_t kConfigBase = 0x400000000;
+// Config tile base: mesh_2x2_vc1.yaml packs each node's config tile inside
+// that node's own 0x100000000 block, above its 0x2000000 memory tile, so
+// node (0,0)'s config aperture starts at 0x2000000, size 0x1000.
+constexpr uint64_t kConfigBase = 0x2000000;
 constexpr std::size_t kConfigWindowSize = 0x1000;  // the SAM's config tile size
 constexpr uint64_t kMemoryAddr = 0x2000;           // inside node (0,0)'s memory tile
 
@@ -77,9 +77,9 @@ std::string hex0x(uint64_t v) {
 // sim/tb/user_node_endpoint.sv's tile crossbar does in real hardware (one RAM
 // per address space, decoded from the master's address, not one RAM spanning
 // the gap between them). A single flat axi::Memory can no longer stand in
-// for the destination: the data-class and config-class windows are ~16 GB
-// apart now that the tile is 4 GiB, and stretching one axi::Memory across
-// that gap would mean allocating ~16 GB for a unit test.
+// for the destination: the data-class and config-class windows are ~32 MB
+// apart (the node's memory tile size), and stretching one axi::Memory across
+// that gap would mean allocating ~32 MB for a unit test.
 class DualWindowMemoryPort : public axi::IMemoryPort {
   public:
     DualWindowMemoryPort(uint64_t data_base, std::size_t data_size, uint64_t config_base,

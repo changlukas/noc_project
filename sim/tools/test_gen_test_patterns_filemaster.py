@@ -68,12 +68,15 @@ def _parse_write(path):
     return txns
 
 
-def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000):
+def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000, block_size=None):
     """New packed-address_map topology YAML text, every memory tile the same size.
 
     Builds a temp topology YAML in the packed `tiles:` format for the test.
-    The 4 KB config tiles after them are what address_map.pack() requires of
-    every node, and are packed last so no memory base moves.
+    The 4 KB config tile after each node's memory tile is what
+    address_map.pack() requires of every node. block_size=None omits the key
+    (the shipped-topology default: next power of two above what the spaces
+    occupy); pass it explicitly to pin the node stride, as every shipped
+    topology now does.
     """
     tiles = "\n".join(
         [f"    - {{ x: {x}, y: {y}, size: {tile_size:#x} }}"
@@ -81,9 +84,10 @@ def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000):
         [f"    - {{ x: {x}, y: {y}, size: 0x1000, space: config }}"
          for y in range(y_dim) for x in range(x_dim)]
     )
+    block_line = f"  block_size: {block_size:#x}\n" if block_size is not None else ""
     return (
         f"topology: {{ name: {name}, x_dim: {x_dim}, y_dim: {y_dim}, num_vc: {num_vc} }}\n"
-        f"address_map:\n  tiles:\n{tiles}\n"
+        f"address_map:\n{block_line}  tiles:\n{tiles}\n"
     )
 
 
@@ -130,14 +134,17 @@ def test_emit_file_master_node_arbitrary_base_from_bases_dict(tmp_path):
 
 
 def test_load_topology_reads_packed_bases_from_address_map(tmp_path):
+    # block_size declared explicitly, as every shipped topology does: node
+    # stride is 2x the memory tile so the node's config tile fits inside it.
     topo_path = tmp_path / "t.yaml"
-    topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000))
+    topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000,
+                                                block_size=0x80000000))
     nodes, x_dim, y_dim, bases, _config_bases, _sizes = g._load_topology(str(topo_path))
     assert (x_dim, y_dim) == (4, 4)
     # packed in raster (y, x) order, matching _uniform_topology_yaml's emit order
     assert bases[g.coord_id(0, 0)] == 0
-    assert bases[g.coord_id(1, 0)] == 0x40000000
-    assert bases[g.coord_id(0, 1)] == 4 * 0x40000000
+    assert bases[g.coord_id(1, 0)] == 0x80000000
+    assert bases[g.coord_id(0, 1)] == 4 * 0x80000000
 
 
 def test_load_topology_raises_when_address_map_missing(tmp_path):
@@ -177,17 +184,20 @@ def test_check_flit_capacity_rejects_span_wider_than_array_with_no_stated_region
 
 def test_main_sources_tile_base_from_address_map(tmp_path):
     """End-to-end: main() threads the packed address_map base into the emitted address."""
+    tile_size = 0x40000000
+    block_size = 2 * tile_size  # declared explicitly, room for the node's config tile
     topo_path = tmp_path / "custom.yaml"
-    topo_path.write_text(_uniform_topology_yaml("custom", 2, 2, tile_size=0x40000000))
+    topo_path.write_text(_uniform_topology_yaml("custom", 2, 2, tile_size=tile_size,
+                                                block_size=block_size))
     out = str(tmp_path / "scn")
     g.main(["--topology", str(topo_path), "--out", out,
             "--pattern", "neighbor", "--transactions-per-node", "1",
             "--size", "5", "--len", "0"])
     w = _parse_write(os.path.join(out, "node0", "write.txt"))
     # node0 = (x=0,y=0); neighbor wraps to (1,1) on a 2x2 mesh -> coord_id (1<<4)|1 = 0x11
-    # raster order (0,0),(1,0),(0,1),(1,1) -> (1,1) is the 4th packed tile -> base 3*tile_size
-    expected_base = 3 * 0x40000000
-    assert expected_base <= w[0]["addr"] < expected_base + 0x40000000
+    # raster order (0,0),(1,0),(0,1),(1,1) -> (1,1) is the 4th packed tile -> base 3*block_size
+    expected_base = 3 * block_size
+    assert expected_base <= w[0]["addr"] < expected_base + tile_size
 
 
 PATTERNS = [
@@ -388,33 +398,37 @@ def test_pack_bases_are_coordinate_derived_with_a_border_column():
     _, entries = pack({"tiles": mem + cfg}, 3, 2)
     got = {(e["x"], e["y"], e["space"]): e["base"] for e in entries}
     assert got == {
-        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x100000,
-        (2, 0, "memory"): 0x200000, (0, 1, "memory"): 0x400000,
-        (1, 1, "memory"): 0x500000, (2, 1, "memory"): 0x600000,
-        # config space starts above every slot memory could occupy:
-        # (1 << clog2(3)) * 2 * 0x100000 = 0x800000
-        (0, 0, "config"): 0x800000, (1, 0, "config"): 0x801000,
-        (2, 0, "config"): 0x802000, (0, 1, "config"): 0x804000,
-        (1, 1, "config"): 0x805000, (2, 1, "config"): 0x806000,
+        # No declared block_size: it defaults to the next power of two above
+        # what one node's memory + config need, 0x101000 -> 0x200000. Node
+        # stride is therefore 0x200000, not the 0x100000 memory slot alone.
+        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x200000,
+        (2, 0, "memory"): 0x400000, (0, 1, "memory"): 0x800000,
+        (1, 1, "memory"): 0xA00000, (2, 1, "memory"): 0xC00000,
+        # config sits inside each node's own block, above its memory tile:
+        # idx * 0x200000 + 0x100000.
+        (0, 0, "config"): 0x100000, (1, 0, "config"): 0x300000,
+        (2, 0, "config"): 0x500000, (0, 1, "config"): 0x900000,
+        (1, 1, "config"): 0xB00000, (2, 1, "config"): 0xD00000,
     }
 
 
-def test_pack_is_unchanged_for_a_plain_mesh():
+def test_pack_default_block_size_doubles_the_stride_to_fit_config():
+    """The regression guard for a plain mesh, updated for tile-major packing.
+    No declared block_size, so it defaults to the next power of two above one
+    node's memory + config: 0x101000 -> 0x200000. That is double the memory
+    tile alone -- the stride is no longer just the memory slot, the way it was
+    before every space shared one node's block."""
     from address_map import pack
-    # The regression guard. These are the bases today's list-order accumulator
-    # produces, and the coordinate formula must reproduce them exactly --
-    # memory at idx * 0x100000, config at 0x400000 + idx * 0x1000, which is
-    # what every shipped topology file's own comment states.
     mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1)]
     cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
            for y in (0, 1) for x in (0, 1)]
     _, entries = pack({"tiles": mem + cfg}, 2, 2)
     got = {(e["x"], e["y"], e["space"]): e["base"] for e in entries}
     assert got == {
-        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x100000,
-        (0, 1, "memory"): 0x200000, (1, 1, "memory"): 0x300000,
-        (0, 0, "config"): 0x400000, (1, 0, "config"): 0x401000,
-        (0, 1, "config"): 0x402000, (1, 1, "config"): 0x403000,
+        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x200000,
+        (0, 1, "memory"): 0x400000, (1, 1, "memory"): 0x600000,
+        (0, 0, "config"): 0x100000, (1, 0, "config"): 0x300000,
+        (0, 1, "config"): 0x500000, (1, 1, "config"): 0x700000,
     }
 
 
@@ -433,14 +447,16 @@ def test_pack_places_a_smaller_entry_on_its_own_slot():
     ] + [{"x": x, "y": y, "size": 0x1000, "space": "config"}
          for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]}
     bases, entries = address_map.pack(am, x_span=2, y_span=2)
+    # No declared block_size: memory slot 0x2000 + config slot 0x1000 ->
+    # extent 0x3000 -> next power of two 0x4000. Node stride is 0x4000.
     assert bases == {
         address_map.dst_id(0, 0): 0,
-        address_map.dst_id(1, 0): 0x2000,
-        address_map.dst_id(0, 1): 0x4000,
-        address_map.dst_id(1, 1): 0x6000,
+        address_map.dst_id(1, 0): 0x4000,
+        address_map.dst_id(0, 1): 0x8000,
+        address_map.dst_id(1, 1): 0xC000,
     }
-    assert [e["base"] for e in entries] == [0, 0x2000, 0x4000, 0x6000,
-                                            0x8000, 0x9000, 0xA000, 0xB000]
+    assert [e["base"] for e in entries] == [0, 0x4000, 0x8000, 0xC000,
+                                            0x2000, 0x6000, 0xA000, 0xE000]
 
 
 def _two_space_tiles(memory_sizes):
@@ -455,15 +471,17 @@ def test_node_windows_are_that_node_s_own_regions():
     """The tile crossbar decodes on THIS node's windows, so a local initiator's
     address that belongs to another node misses both rules and falls through to
     the NMU. Sizes are exact -- axi_xbar states a rule as start/end."""
+    # No declared block_size: memory slot 0x100000 + config slot 0x1000 ->
+    # next power of two 0x200000. Node stride is 0x200000.
     tiles = _two_space_tiles([0x100000] * 4)
     _bases, entries = address_map.pack({"tiles": tiles}, x_span=2, y_span=2)
     assert address_map.node_windows(entries, address_map.dst_id(0, 0)) == [
-        {"space": "config", "base": 0x400000, "size": 0x1000},
+        {"space": "config", "base": 0x100000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
     ]
     assert address_map.node_windows(entries, address_map.dst_id(1, 1)) == [
-        {"space": "config", "base": 0x403000, "size": 0x1000},
-        {"space": "memory", "base": 0x300000, "size": 0x100000},
+        {"space": "config", "base": 0x700000, "size": 0x1000},
+        {"space": "memory", "base": 0x600000, "size": 0x100000},
     ]
 
 
@@ -489,12 +507,12 @@ def test_tile_targets_packs_config_first():
              (2, 0, 1, address_map.dst_id(0, 1)), (3, 1, 1, address_map.dst_id(1, 1))]
     per_node, _egress = gen_tb_top.tile_targets(_two_space_topology(), nodes)
     assert per_node[0] == [
-        {"space": "config", "base": 0x400000, "size": 0x1000},
+        {"space": "config", "base": 0x100000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
     ]
     assert per_node[3] == [
-        {"space": "config", "base": 0x403000, "size": 0x1000},
-        {"space": "memory", "base": 0x300000, "size": 0x100000},
+        {"space": "config", "base": 0x700000, "size": 0x1000},
+        {"space": "memory", "base": 0x600000, "size": 0x100000},
     ]
 
 
