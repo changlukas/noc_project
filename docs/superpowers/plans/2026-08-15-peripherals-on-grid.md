@@ -22,7 +22,8 @@ and the round 3 row of the Rounds table.
 - **Task order is load-bearing.** The space-keyed SAM and the loader's eligibility policy (Tasks 1
   and 2) land BEFORE the tile-region clip bound comes out (Task 4). Reversed, peripherals are legal
   collective members in the window between.
-- A peripheral is never a collective member and never a collective target.
+- A peripheral is never a collective member, never a collective target, and **never a collective
+  issuer**. The issuer half is the one with no structural backstop — see "The guard that disappears".
 - `port_id` encoding, unchanged from round 2: `00` LOCAL (the tile), `01` x face, `10` y face,
   `11` reserved. Which face `01`/`10` mean follows from the router's position: `cfg.x == 0` gives
   WEST, `cfg.x == mesh_x_dim - 1` gives EAST; `cfg.y == 0` gives SOUTH, `cfg.y == mesh_y_dim - 1`
@@ -59,6 +60,26 @@ hangs a collect.
 Task 4 re-bounds all four from the tile region to `0 .. mesh_*_dim - 1`. Changing three of them is
 worse than changing none: three-of-four passes ctest and hangs a co-sim collect.
 
+## The guard that disappears
+
+`addr_trans.hpp:373-382` refuses a collective whose ISSUER sits outside the tile region:
+
+```cpp
+    if (src_x < coords->x_first || src_x > coords->x_last || src_y < coords->y_first ||
+        src_y > coords->y_last) {
+        assert(false && "... a collective issued from outside the tile region ...");
+```
+
+It works today only because a peripheral has an off-grid coordinate. Round 3 puts the peripheral on
+its router's coordinate, so `src_x` / `src_y` land inside the region and the check passes — and
+Task 4 deletes the `SpaceCoords` bounds it reads. The guard does not fail; it evaporates, with no
+compile error and no failing test, and a peripheral-issued collective then forks along a row where
+no router expects the replicas and the CollectB never completes.
+
+The replacement is the port, not the coordinate: an issuer with `src_port_id != 0` is a peripheral.
+Task 4 Step 1 threads it in, BEFORE the same task deletes the bounds. That ordering is the whole
+point — a deletion and its replacement land in one commit or the guard is gone in between.
+
 ## Rulings carried in from round 2
 
 **A heterogeneous-port multicast fork is not implemented, it is ruled illegal.** The router copies a
@@ -77,7 +98,7 @@ nothing anywhere reads a response's `src_port_id`.
 
 ### Task 1: The SAM keys on space, not class
 
-The class currently stands in for the space. `addr_trans.hpp:257` states the assumption in a
+The class currently stands in for the space. `addr_trans.hpp:274` states the assumption in a
 comment: `// Indexed by axi::AxiClass (Narrow = 0, Data = 1) -- one address space each.` A
 peripheral is a third space carrying the Data class, so the correspondence ends and five sites stop
 being correct. One of them fails silently and expensively: `declare_space_coords`' tile walk returns
@@ -86,8 +107,17 @@ false and **the memory space stops being a collective target**, with no error.
 **Files:**
 - Modify: `ref_model/c_model/include/axi/types.hpp:72` (add `Space` beside `AxiClass`)
 - Modify: `ref_model/c_model/include/nmu/addr_trans.hpp:16-48` (`Translated`, `SamEntry`, `PackedTile`), `:154-188` (`validate`), `:202-266` (`declare_space_coords`, `collective_coords`), `:329-360` (`collective_translate`)
-- Modify: `ref_model/c_model/include/nmu/sam_yaml.hpp:15-23` (`parse_tile_space`), `:36-69` (`declare_space_coords`), `:190-210` (the loader tail)
+- Modify: `ref_model/c_model/include/nmu/sam_yaml.hpp:15-23` (`parse_tile_space`), `:36-69` (`declare_space_coords`), `:75-80` (`space_present`), `:96-119` (`check_decode_mode`), `:190-218` (the loader tail and the `region_stated` loop)
+- Modify: `ref_model/c_model/include/wrap/nsu_wrap.hpp:88-92` (its `collective_coords` loop over `AxiClass`)
 - Test: `ref_model/c_model/tests/nmu/test_sam_table.cpp`, `test_sam_yaml.cpp`, `test_addr_trans.cpp`
+
+**The signature change reaches four call sites this task's own narrative does not name.**
+`declare_space_coords` and `collective_coords` change type, so every caller changes with them:
+`space_present`, `check_decode_mode`, the `region_stated` loop in the loader tail, and
+`nsu_wrap.hpp`'s loop that fills `NsuConfig::space_coords`. All four iterate
+`{AxiClass::Narrow, AxiClass::Data}` and become `{Space::Config, Space::Memory}` — the peripheral
+space is deliberately not in that set. These are compile-visible, so they will not escape, but the
+"five class-keyed sites" framing above undercounts and you should expect nine edits, not five.
 
 **Interfaces:**
 - Produces: `axi::Space { Config = 0, Memory = 1, Peripheral = 2 }`; `axi::class_of(Space)`;
@@ -348,7 +378,13 @@ regions in DECLARATION ORDER above the tile array, each aligned to its own size.
 coordinate-derived, because a peripheral region has no uniform stride and is not collective-eligible:
 
 ```cpp
-    uint64_t next = static_cast<uint64_t>(x_dim) * y_dim * block_size;
+    // Above the LAST tile index, not above the tile COUNT. packed() derives a
+    // tile base as ((y << x_bits) | x) * block_size with x_bits = clog2(x_dim)
+    // (addr_trans.hpp:78,96-97), so at x_dim = 3 the top index is 10, not 8.
+    // Using the count would overlap the first peripheral onto tile (2, 2) --
+    // latent on every shipped 2x2 and 4x4, fatal on the first 3x3.
+    const unsigned x_bits = clog2(x_dim);
+    uint64_t next = (uint64_t{1} << x_bits) * y_dim * block_size;
     for (const auto& p : peripherals) {
         next = (next + p.size - 1) & ~(p.size - 1);  // align up to its own size
         es.push_back({next, p.size, static_cast<uint8_t>((p.y << ni::width::X_WIDTH) | p.x),
@@ -357,8 +393,9 @@ coordinate-derived, because a peripheral region has no uniform stride and is not
     }
 ```
 
-The align-up expression assumes a power-of-two size; assert that (`(p.size & (p.size - 1)) == 0`)
-rather than letting a non-power-of-two size compute a silently wrong base.
+The align-up expression assumes a non-zero power-of-two size. Assert BOTH — `p.size != 0` and
+`(p.size & (p.size - 1)) == 0` — because `0 & (0 - 1)` is 0 and passes a power-of-two test on its
+own, then aligns to base 0 and overlaps the whole tile array.
 
 - [ ] **Step 4: Teach the Python packer the third space**
 
@@ -367,12 +404,18 @@ regions are packed above the tile array in declaration order, matching the C++ l
 two packers have twin formulas and have drifted before; make the peripheral arithmetic identical, not
 merely equivalent.
 
-- [ ] **Step 5: Run the tests**
+- [ ] **Step 5: Run the C++ tests only**
 
 ```bash
 ctest --test-dir $HOME/noc_build/cmodel --output-on-failure
-python3 -m pytest sim/tools -q
 ```
+
+**Do NOT run `pytest sim/tools` here, and do not try to make it green.** This task rewrites the
+topology and adds `"peripheral"` to `SPACE_ORDER`, but the readers do not learn about either until
+Task 5: `gen_tb_top._peripherals` still derives peripherals from off-region tiles, and
+`node_windows` still keys on the coordinate alone, so a router endpoint would now pick up its
+peripheral's window as a third target. `pytest sim/tools` is Task 5's gate, and it is red in between
+by construction. Say so in your report rather than papering over it.
 
 - [ ] **Step 6: Commit**
 
@@ -489,9 +532,33 @@ to its router first, exactly like a tile, and the port only decides the ejection
 
 - [ ] **Step 4: Feed it at every call site**
 
-Every caller reads `dst_port_id` off the same flit it already reads `dst_id` from. Find them with
-`grep -rn "route_compute(" ref_model/` and change all of them — `router.hpp`, `simple_router.hpp`
-and their test fixtures. A caller that has no flit (a pure routing unit test) passes 0 explicitly.
+Most callers read `dst_port_id` off the same flit they already read `dst_id` from. Find them with
+`grep -rn "route_compute(" ref_model/`.
+
+**Two callers have no flit and must not be given a literal 0.** `Router::next_hop_route(out, dst)`
+(`router.hpp:216`) and `Router::preferred_out_vc(out, dst)` (`:238`) take a bare `dst` — the flit is
+at `:257`. They feed the VC lookahead, and `router.hpp:213-215` states that lookahead is
+bit-identical to the RTL's stored `hdr.lookahead`. Leave them at 0 and a peripheral-bound flit's
+next hop resolves LOCAL instead of WEST/EAST, the preferred VC comes out wrong, and the co-sim
+compare fails — not a performance wobble, a mismatch.
+
+Both gain a `dst_port` parameter beside `dst`, threaded from the same flit at `:257`:
+
+```cpp
+    RouterPort next_hop_route(std::size_t out, uint8_t dst, uint8_t dst_port) const {
+        ...
+        return route_compute(dst, dst_port, n);
+    }
+
+    uint8_t preferred_out_vc(std::size_t out, uint8_t dst, uint8_t dst_port) const {
+        const auto o = static_cast<RouterPort>(out);
+        if (o == RouterPort::LOCAL) return 0;  // floo_vc_assignment.sv:86
+        return preferred_vc(o, next_hop_route(out, dst, dst_port), cfg_.num_vc);
+    }
+```
+
+A pure routing unit test that genuinely has no destination port passes 0 explicitly, with a comment
+saying it means the tile.
 
 - [ ] **Step 5: Run the tests, then fault-inject**
 
@@ -526,14 +593,71 @@ the four.
 - Modify: `ref_model/c_model/include/router/router_types.hpp:25-28`, `router/simple_router.hpp:100,323,380,465`, `wrap/router_wrap.hpp:66,75,92`, `ref_model/dpi/cmodel_dpi.h:87`, `ref_model/dpi/cmodel_dpi.cpp:185,198`, `ref_model/c_model/include/ni/address_map.hpp` (`SpaceCoords`)
 - Modify: `ref_model/c_model/include/nmu/sam_yaml.hpp:163-210` (the six span keys)
 - Modify: `sim/tools/gen_tb_top.py:68` (`_route_span`) and `:1236-1242,1310` (the DPI create signature and calls)
+- Modify: `sim/tools/gen_dma_jobs.py:139` — the OTHER `_route_span` caller. Round 3 verifies
+  `sim/tb/test/` only, which is about which co-sim runs, not about leaving a dead import behind:
+  deleting `_route_span` breaks this file, and `test_gen_dma_jobs.py` will say so.
+- Modify: `ref_model/c_model/include/nmu/rob.hpp:372` and its constructor (the issuer gate, Step 1)
 - Modify: `sim/topologies/*.yaml` — remove `x_span`, `y_span`, `tile_*` wherever they appear
+- Modify: the docs that describe the deleted concepts — `docs/noc-target-spec.md:53-56,376-389`
+  (off-grid peripheral semantics and the row restriction) and `docs/router-spec.md:99-100`
+  (both port fields called "Transparent to the router", which Task 3 falsifies), `:440-441`
+  (`mesh_*_dim` documented as the span, plus the tile-region bounds), `:523` (the 10-argument
+  `cmodel_router_create`)
 
 **Interfaces:**
 - Produces: `route_compute`, `route_mask_fork`, `route_mask_join` and `RouterConfig` with no
   tile-region concept; `cmodel_router_create(name, x, y, mesh_x_dim, mesh_y_dim, num_vc)` — four
   fewer arguments.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Replace the issuer guard BEFORE deleting what it reads**
+
+Read "The guard that disappears" above first. `collective_translate` gains the issuer's port and
+gates on it instead of on the coordinate:
+
+```cpp
+inline uint8_t collective_translate(const SamTable& sam, const axi::AwBeat& b, uint8_t src_id,
+                                    uint8_t src_port) {
+```
+
+and the coordinate test at `:373-382` becomes:
+
+```cpp
+    // A peripheral hangs off a boundary port, not off a router's LOCAL port, so
+    // no router sits where its fork would have to spread or its join collect.
+    // Round 2's port field is what says so -- the coordinate no longer can,
+    // because a peripheral now shares its router's.
+    if (src_port != 0) {
+        assert(false &&
+               "nmu::addr_trans::collective_translate: a collective issued from a peripheral -- "
+               "the fork spreads along the issuer's row and the join collects in its column, and "
+               "a boundary port sits outside both");
+        std::abort();
+    }
+```
+
+The single call site is `rob.hpp:372`. `Rob` gains a `uint8_t port_id_` from `NmuConfig::port_id`
+(round 2 added it) as a TRAILING defaulted constructor parameter, matching how round 2 threaded
+`port_id` into `nmu::Packetize` and `nmu::Depacketize`, so no existing `Rob` fixture changes.
+
+Write the death test first:
+
+```cpp
+TEST(CollectiveTranslateDeath, APeripheralCannotIssueACollective) {
+    // Round 2 gave every endpoint a port. A peripheral's is non-zero, and that
+    // is now the only thing that distinguishes it -- it shares its router's
+    // coordinate, so the old outside-the-tile-region test would pass.
+    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    axi::AwBeat b{};
+    b.addr = 0x0;
+    b.user = axi::make_awuser_collective(axi::COLLECTIVE_OP_MULTICAST, /*mask=*/0x100000000ull);
+    EXPECT_DEATH(collective_translate(sam, b, /*src_id=*/0x00, /*src_port=*/1), "peripheral");
+}
+```
+
+Check the file's existing collective fixtures for how they build a collective AWUSER before writing
+this — the helper name above is illustrative, the assertion is exact.
+
+- [ ] **Step 2: Write the clip's own failing test**
 
 The clip survives for a different reason than the one being deleted, and that reason needs a test of
 its own — otherwise the next reader deletes it too:
@@ -560,33 +684,48 @@ TEST(RouteMaskFork, ClipsAWildcardToTheMeshWhenADimensionIsNotAPowerOfTwo) {
 Read `ref_model/c_model/tests/router/test_router_fork.cpp` for the fixture shape before writing
 this; the assertion above is exact, the setup is by reference.
 
-- [ ] **Step 2: Re-bound all four copies**
+- [ ] **Step 3: Re-bound all four copies — each in its own idiom**
 
-In each of the four sites named in "The four-copy landmine", the clip changes from the tile region to
-the mesh:
+The four sites are structurally different and DO NOT take the same snippet. The lower bound becomes
+0, which on an unsigned type means the two `std::max` lines simply go away; only the upper bound
+needs writing. Where the upper bound comes from differs per site:
+
+| site | upper bound reads |
+|---|---|
+| `route_mask_fork` (`route_mask.hpp:113-121`) | `cfg.mesh_x_dim - 1`, `cfg.mesh_y_dim - 1` |
+| `route_mask_join` (`route_mask.hpp:175-184`) | the same |
+| `collective_translate` (`addr_trans.hpp:416-419`) | **no `RouterConfig` in scope** — use `coords->x_count - 1`, `coords->y_count - 1` |
+| `collective_addr_mask` (`gen_test_patterns.py`) | Python, and it reads the topology dict |
+
+So the router pair reads:
 
 ```cpp
-    dst_min.x = std::max<uint8_t>(dst_min.x, 0);
-    dst_min.y = std::max<uint8_t>(dst_min.y, 0);
     dst_max.x = std::min<uint8_t>(dst_max.x, cfg.mesh_x_dim - 1);
     dst_max.y = std::min<uint8_t>(dst_max.y, cfg.mesh_y_dim - 1);
 ```
 
-The two `std::max` lines against 0 are no-ops on an unsigned type — write the clip as the two
-`std::min` lines only, and update each site's comment to say the bound is the mesh, not the tile
-region. Keep the empty-set assert; it still fires when a mask names nothing that exists.
+Update each site's comment to say the bound is the mesh, not the tile region, and keep the
+"Change one, change all four" cross-reference — the list of four is still right, its description of
+what is clipped is not. Keep the empty-set assert; it still fires when a mask names nothing that
+exists.
 
 Update the "Change one, change all four" comment in `route_mask.hpp` — the list of four is still
 right, but its description of what is clipped is not.
 
-- [ ] **Step 3: Delete check_dst_reachable**
+- [ ] **Step 4: Delete check_dst_reachable**
 
-Delete the function (`addr_trans.hpp:487`) and its two call sites (`packetize.hpp:181,272`). Also
-delete `docs/noc-target-spec.md:55`, which states the row restriction as spec — the restriction no
-longer exists, and a spec that states a constraint the implementation does not have is worse than
-one that omits it.
+Delete the function (`addr_trans.hpp:487`) and its two call sites (`packetize.hpp:191,286`).
 
-- [ ] **Step 4: Delete the four bounds everywhere**
+Then fix the docs that state the restriction as spec — a spec asserting a constraint the
+implementation does not have is worse than one that omits it. `docs/noc-target-spec.md:53-56` is a
+sentence spanning four lines: delete the whole sentence, not line `:55` alone, or `:56` is left a
+dangling fragment. `:376-389` describes off-grid peripheral addressing and needs rewriting to the
+(coordinate, port) scheme. In `docs/router-spec.md`, `:99-100` says both port fields are
+"Transparent to the router" — `dst_port_id` no longer is, since Task 3 makes it select the ejection
+port; `:440-441` documents `mesh_*_dim` as the route span and lists the tile-region bounds; `:523`
+carries the 10-argument `cmodel_router_create`.
+
+- [ ] **Step 5: Delete the four bounds everywhere**
 
 `RouterConfig` (`router_types.hpp:25-28`), `SimpleRouterConfig` and its users, `RouterWrap`, the DPI
 signature and `SpaceCoords`. The DPI change reaches the generated SystemVerilog, so
@@ -599,14 +738,17 @@ compile time.
 
 Remove the keys from every `sim/topologies/*.yaml` that carries them.
 
-- [ ] **Step 5: Run everything**
+- [ ] **Step 6: Run everything**
 
 ```bash
 ctest --test-dir $HOME/noc_build/cmodel --output-on-failure
-python3 -m pytest sim/tools -q
 ```
 
-- [ ] **Step 6: Commit**
+Then fault-inject the new issuer gate: change `src_port != 0` to `false` and confirm
+`CollectiveTranslateDeath.APeripheralCannotIssueACollective` stops dying. Revert, rebuild green,
+report the output. `pytest sim/tools` stays red until Task 5, as Task 2 recorded.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 clang-format -i ref_model/c_model/include/router/*.hpp ref_model/c_model/include/nmu/*.hpp ref_model/c_model/include/ni/address_map.hpp
@@ -629,25 +771,59 @@ git commit -m "refactor(router): drop the tile-region bounds and clip collective
 - Produces: `node_windows(entries, dst_id, port)`; peripheral endpoints created with a non-zero
   `port_id`; perf-monitor endpoint names `node<idx>.local` / `node<idx>.<face>`.
 
-- [ ] **Step 1: Key the windows on the port**
+- [ ] **Step 1: Key the windows on the port, and pad the rows**
 
 `node_windows(entries, node_id)` becomes `node_windows(entries, node_id, port)`. It currently
 matches on `dst_id` alone, so under scheme B a peripheral's window would be stamped into its
-router's crossbar decode as that tile's. A router endpoint takes port 0's windows — memory and
-config, exactly as today; a peripheral endpoint takes its own single window.
+router's crossbar decode as that tile's. A router endpoint takes port 0's windows — config and
+memory, exactly as today; a peripheral endpoint takes its own single window.
 
-`TILE_BASE_ADDR` and `TILE_SIZE` are stamped per endpoint from that call, unchanged in shape.
+**The emitted array is rectangular and a 1-window endpoint does not fit it.** `gen_tb_top.py:1007`
+takes `n_targets = len(per_node[0])` — one global count, from endpoint 0 — and `:1106-1109` emits
+`TILE_BASE_ADDR` / `TILE_SIZE` as `logic [n_ep-1:0][TILE_TARGETS-1:0][ADDR_WIDTH-1:0]`. A peripheral
+row of length 1 beside tile rows of length 2 is ragged and will not elaborate. This is the one place
+the plan's "unchanged in shape" would have been false: the shape IS the problem.
 
-- [ ] **Step 2: Read peripherals from the block, not from the span**
+Pad instead of reshaping. `TILE_TARGETS` becomes `max(len(w) for w in per_node.values())`, and every
+short row is padded to that length with `{"space": None, "base": 0, "size": 0}`. A zero-size window
+matches nothing in the pulp `axi_xbar` rule, which is start/end — so the padding is inert decode,
+not a live target, and the SV genvar loop and `user_node_endpoint` need no change at all.
+
+Say in a comment beside the padding why a zero size is safe, so the next reader does not "fix" it
+into a one-byte window.
+
+- [ ] **Step 2: Loosen the window-order cross-check**
+
+`gen_tb_top.py:331-339` raises `SystemExit` unless an endpoint's window order is exactly
+`["config", "memory"]`. A peripheral's is `["peripheral"]`, so the check rejects the topology before
+anything else runs. It is a real cross-check on `address_map.SPACE_ORDER` and worth keeping — widen
+it rather than deleting it:
+
+```python
+        if port == 0:
+            expected = ["config", "memory"]
+        else:
+            expected = ["peripheral"]
+        if order != expected:
+            raise SystemExit(
+                f"gen_tb_top: endpoint {idx} (port {port}) window order {order} must be "
+                f"{expected} -- user_node_endpoint puts the config memory on target 0 and the "
+                f"data memory on the last target (see address_map.SPACE_ORDER)")
+```
+
+Compare the order BEFORE padding, or every row reads as ragged-then-padded and the check says
+nothing.
+
+- [ ] **Step 3: Read peripherals from the block, not from the span**
 
 `_peripherals` currently derives peripherals by finding coordinates outside the tile region. It now
 reads `address_map.peripherals` directly, and each entry keys on `(x, y, face)`. Delete the
-corner-coordinate rejection (`:210-215`) — a peripheral on a corner router is now legal, because the
+corner-coordinate rejection (`:213-216`) — a peripheral on a corner router is now legal, because the
 face names which port it hangs off and a corner router has two free faces.
 
-Keep the duplicate rejection at `:226`, re-keyed from (router, direction) to (x, y, face).
+Keep the duplicate rejection at `:227`, re-keyed from (router, direction) to (x, y, face).
 
-- [ ] **Step 3: Gate the NSU's rebase on the port**
+- [ ] **Step 4: Gate the NSU's rebase on the port**
 
 `nsu_wrap.hpp:80-90` populates `NsuConfig::space_coords` from a global per-space SAM lookup, so
 every endpoint receives the same coordinates. A peripheral's NSU would be handed the memory space's
@@ -659,18 +835,22 @@ The gate is the `port_id` this NI already carries: an endpoint with `port_id != 
 (`ni/address_map.hpp:69`) — correct, because a peripheral is never a collective member and its
 address needs no rebasing.
 
-- [ ] **Step 4: Name the endpoints**
+- [ ] **Step 5: Name the endpoints**
 
 The perf monitor names an endpoint `node<idx>.local` or `node<idx>.<face>`. Two peripherals on one
 router now share a coordinate, so an index-only name is ambiguous.
 
-- [ ] **Step 5: Run the generator tests**
+- [ ] **Step 6: Run the generator tests**
 
 ```bash
 python3 -m pytest sim/tools -q
 ```
 
-- [ ] **Step 6: Commit**
+This is where `pytest sim/tools` goes green again. Task 2 left it red on purpose — it rewrote the
+topology and `SPACE_ORDER` before the readers here learned about either. If it is still red after
+this task, that is a finding, not a leftover.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 clang-format -i ref_model/c_model/include/wrap/nsu_wrap.hpp
@@ -799,4 +979,6 @@ Write a pass/fail line per run into the task report.
 - every co-sim run in Task 7 green, including the four-face topology
 - `SamYaml.PeripheralSpaceIsNotACollectiveTarget` passes on every shipped peripheral topology, and
   fails when the loader is made to declare the peripheral space eligible
-- `grep -rn "tile_x_first\|x_span" ref_model/ sim/ docs/` returns nothing
+- `grep -rn "tile_x_first\|x_span" ref_model/ sim/` returns nothing. `docs/` is deliberately out of
+  scope: this plan and the spec both quote the old keys as the subject of the change, the same way
+  round 2's plan kept its pre-round flit widths
