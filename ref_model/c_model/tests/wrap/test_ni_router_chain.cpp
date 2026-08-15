@@ -120,7 +120,12 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
         n[k].nmu.init(topology, /*src_id=*/static_cast<uint8_t>(k),
                       /*port_id=*/(k == 0) ? requester_port_id : 0,
                       /*dat_num_vc=*/1);
-        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0, /*dat_num_vc=*/1);
+        // The NSU sits at the same endpoint as its NMU, so it takes the same
+        // port_id: nsu/depacketize.hpp asserts dst_port_id == port_id_ on every
+        // arriving request, and a peripheral NSU left at 0 would reject anything
+        // addressed to it. Inert while node 0 is never a request target here.
+        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k),
+                      /*port_id=*/(k == 0) ? requester_port_id : 0, /*dat_num_vc=*/1);
         n[k].merge.init(1);
         n[k].router.init(/*x=*/static_cast<uint8_t>(k), /*y=*/0, /*mesh_x=*/2, /*mesh_y=*/2,
                          /*dat_num_vc=*/1);
