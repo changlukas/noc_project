@@ -103,8 +103,9 @@ coordinate that does not exist when a mesh dimension is not a power of two.
 
 ## Decision 4: the port is part of the SAM key
 
-A peripheral shares a tile's coordinate and carries the Data class, the same class as memory.
-Three sites currently key on (class, coordinate) and would count a peripheral as a second tile.
+A peripheral shares a tile's coordinate and carries the Data class, the same class as memory. Six
+sites currently key on (class, coordinate) or on coordinate alone, and would take a peripheral for
+a tile.
 
 | site | today | consequence if unfixed |
 |---|---|---|
@@ -112,10 +113,15 @@ Three sites currently key on (class, coordinate) and would count a peripheral as
 | `SamTable::validate` `memory_count == mesh_nodes` | `:161` | count mismatch assert |
 | `SamTable::declare_space_coords` tile walk | `:200-215` | returns false, and **memory space silently stops being a collective target** |
 | `sam_yaml::declare_space_coords` stride pair | `sam_yaml.hpp:44-57` | takes the first two entries of the class, so a peripheral listed before a memory tile yields a silently wrong field offset |
+| `collective_translate` after `sam.lookup` | `addr_trans.hpp:329,341` | it reaches `collective_coords(entry->cls)` on the class alone, so a collective addressed at a peripheral region is **treated as a tile collective** |
+| `node_windows` and `tile_targets` | `sim/tools/address_map.py:129-148`, `sim/tools/gen_tb_top.py:308-330` | keyed on `dst_id` alone, so a peripheral's window is stamped into its router's crossbar decode as if it were that tile's |
 
-`SamEntry` and `Translated` gain `uint8_t port`. All four sites filter on `port == 0`. The third
-is the dangerous one: it does not assert, it returns false, and the symptom is a multicast
-refused at the source rather than a build failure.
+`SamEntry` and `Translated` gain `uint8_t port`. All six filter on it. The third and fifth are the
+dangerous ones: neither asserts. The third returns false and the symptom is a multicast refused at
+the source; the fifth silently builds a collective around a coordinate the request did not name.
+
+`collective_translate` therefore refuses `entry->port != 0` before it reads `collective_coords`,
+and this refusal lands in round 3 before the tile-region bound comes out.
 
 ## Decision 5: the eight things an implementer would otherwise invent
 
@@ -124,8 +130,9 @@ refused at the source rather than a build failure.
 | 1 | flit schema | two fields in `specgen/source/`, appended above `collective_mask`, so every existing offset is unchanged |
 | 2 | topology YAML | a `peripherals:` block separate from `address_map.tiles`, entries `{ x, y, face: x\|y, size }` |
 | 3 | duplicate face | the generator rejects two peripherals sharing (x, y, face), the shape `gen_tb_top.py:226` already uses for (router, direction) |
-| 4 | peripheral windows | bases assigned in declaration order above the tile array, each aligned to its own size, not coordinate-derived |
+| 4 | peripheral windows | bases assigned in declaration order above the tile array, each aligned to its own size, not coordinate-derived. They are SAM entries, so `lookup` resolves them, and they carry a non-zero port so nothing that walks tiles counts them |
 | 5 | SAM returns the port | `SamEntry.port` and `Translated.port`, set by the loader from the `peripherals:` block |
+| 5b | the generated tb's per-endpoint windows | `node_windows(entries, dst_id)` becomes `node_windows(entries, dst_id, port)`. A router endpoint takes port 0's windows, memory and config, exactly as today; a peripheral endpoint takes its own single window. `TILE_BASE_ADDR` and `TILE_SIZE` are stamped per endpoint from that call, unchanged in shape |
 | 6 | `src_port_id` config | `NmuConfig` and `NsuConfig` gain `port_id`, passed at create like `src_id`, through the DPI create calls |
 | 7 | corner wiring | `_peripherals` already keys on (router, direction) and already emits all four; deleting the corner rejection is the whole change |
 | 8 | perf monitor names | endpoint named `node<idx>.local` or `node<idx>.<face>` |
@@ -140,7 +147,7 @@ Each round ends green on its own acceptance bar.
 | round | content | acceptance |
 |---|---|---|
 | 1 | address map to tile-major, memory 32 MB, config inside the block | behaviour identical. Full ctest, Tier 2 co-sim, DMA both directions, both testbench flavours |
-| 2 | the two header fields and their plumbing end to end, every port `00` | behaviour identical again. Same bar as round 1 |
+| 2 | the two header fields and their plumbing end to end, every port `00` | behaviour identical with every port field zero. NOT bit-identical on the wire: the flit widths are generated from `HEADER_TOTAL_WIDTH` (`ni_flit_constants.h:16`, `ni_params.h:24-26`, `ref_model/top/router_wrap.sv:55-89`), so every link vector widens by 4 b whatever the fields carry |
 | 3 | peripherals move on-grid, deletions, four-face topology, patterns | every tile reaches every peripheral on all four faces |
 
 Round 2 is behaviour-neutral because every shipped topology has only tiles, so every port field is
@@ -174,12 +181,16 @@ when the implementation derives it from the stride: `docs/noc-target-spec.md:365
 repeat at `:521-522`, and the `collective_addr_mask` docstring in
 `sim/tools/gen_test_patterns.py`.
 
-Everything else in the blast radius is value-driven and needs no code change: `SpaceCoords`
-offsets, `collective_translate`'s mask-confinement check, `burst_footprint_ok` (a burst is at most
-4 KB against a 32 MB region), the tile crossbar windows from `node_windows()`, `noc_egress_base`,
+Everything else in the blast radius is value-driven and needs no code change IN ROUND 1, where no
+peripheral exists yet: `SpaceCoords` offsets, `collective_translate`'s mask-confinement check,
+`burst_footprint_ok` (a burst is at most 4 KB against a 32 MB region), the tile crossbar windows
+from `node_windows()`, `noc_egress_base`,
 the `gen_dma_jobs` window check (largest offset about 1.6 MB), the pattern slot allocator
 (`_DEFAULT_REGION_BYTES` is 0x1000), and the testbench collective AW restore path
 (`sim/tb/test/user_node_endpoint.sv:328,577-582`).
+
+Two of those become port-sensitive in round 3 and are listed in Decision 4: `node_windows()` and
+`collective_translate`.
 
 ## Rejected alternatives
 
