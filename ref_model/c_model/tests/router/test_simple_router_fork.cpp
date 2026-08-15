@@ -483,6 +483,30 @@ TEST(SimpleRouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
         "empty fork set");
 }
 
+// Decision 4: a peripheral is never a collective member. The invariant holds
+// three layers away (SamTable::packed() stamps port 0 on every tile,
+// collective_coords() has no entry for the peripheral space, and a fork replica
+// is copied verbatim), so the router that would misbehave states it nowhere
+// else: the fork ignores dst_port_id while the CollectB branch above it routes
+// on the field, so a non-zero one forks to LOCAL at every member and then
+// ejects its B at a face.
+TEST(SimpleRouterForkDeath, CollectiveNamingABoundaryPortAborts) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(
+        {
+            SimpleRouter r(center_cfg());
+            // Legal geometry (dst (1,1), src (0,1), mask y=2 -> {L,N}); only
+            // dst_port_id is corrupt.
+            Flit f = make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), /*vc=*/0,
+                                  /*flit_tail=*/0, 0);
+            f.set_header_field("dst_port_id", 1);
+            r.input(W).push_flit(f);
+            r.tick();
+            r.tick();
+        },
+        "names a boundary port");
+}
+
 TEST(SimpleRouterForkDeath, ContinuationBranchSetMismatchAborts) {
     GTEST_FLAG_SET(death_test_style, "threadsafe");
     // Shrunk continuation set: head {L,E,N} (mask x=2,y=2), beat {L,N}.

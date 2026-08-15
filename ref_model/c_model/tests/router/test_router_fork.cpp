@@ -667,6 +667,29 @@ TEST(RouterForkDeath, EmptyForkSetOnCollectiveHeadAborts) {
         "empty fork set");
 }
 
+// Decision 4: a peripheral is never a collective member. The invariant holds
+// three layers away (SamTable::packed() stamps port 0 on every tile,
+// collective_coords() has no entry for the peripheral space, and a fork replica
+// is copied verbatim), so the router that would misbehave states it nowhere
+// else: the fork below ignores dst_port_id, and a non-zero one would fork to
+// LOCAL at every member while the returning CollectB routed on the field.
+TEST(RouterForkDeath, CollectiveNamingABoundaryPortAborts) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    EXPECT_DEATH(
+        {
+            Router r(center_cfg());
+            // Same legal geometry as the case below (dst (1,1), src (0,1),
+            // mask y=2 -> {L,N}); only dst_port_id is corrupt.
+            Flit f = make_mc_flit(make_id(1, 1), make_id(0, 1), make_id(0, 2), /*vc=*/0,
+                                  /*flit_tail=*/0, /*fixed_vc=*/1, 0);
+            f.set_header_field("dst_port_id", 1);
+            r.input(W).push_flit(f);
+            r.tick();
+            r.tick();
+        },
+        "names a boundary port");
+}
+
 // spec §6 :356: collective_op codes 2-3 are reserved; unrejected they'd silently fork as multicast
 // since classification keys on `!= UNICAST`.
 TEST(RouterForkDeath, ReservedCollectiveOpAborts) {

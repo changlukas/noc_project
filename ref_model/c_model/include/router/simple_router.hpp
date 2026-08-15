@@ -369,6 +369,13 @@ class SimpleRouter {
         // computation, in join_valid().
         if (is_b_channel(axi_ch)) return port_bit(compute_route(dst, dst_port));
 
+        // Boundary-port guard (OUR RULE, design Decision 4). The fork below
+        // ignores dst_port_id, so a non-zero one would fork to LOCAL at every
+        // member while the CollectB branch above still routes on it.
+        assert(f.get_header_field("dst_port_id") == 0 &&
+               "collective flit names a boundary port -- a fork replica is copied verbatim, so "
+               "one dst_port_id would reach every member (Decision 4: a peripheral is never a "
+               "member)");
         const auto src = static_cast<uint8_t>(f.get_header_field("src_id"));
         const auto cmask = static_cast<uint8_t>(f.get_header_field("collective_mask"));
         const PortMask m = route_mask_fork(dst, src, cmask, route_cfg());
