@@ -49,20 +49,6 @@ module user_node_endpoint #(
     // NI. Derived from the address map (address_map.noc_egress_base), so every
     // node window sits below it by construction. See g_tile_xbar below.
     parameter logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE,
-    // The tile region, as the crossbar windows of every node inside it. The NMU
-    // and every router clip a collective's wildcard closure to the tile region
-    // (nmu::addr_trans::collective_translate, router::route_mask), so a replica
-    // address outside it -- a peripheral's own tile, or a span coordinate no
-    // node occupies -- is never written. The multicast checker below seeds
-    // golden for these windows only; golden anywhere else would be compared
-    // against a byte the fabric never wrote. WINDOWS = 0 states no region:
-    // every route coordinate is a tile, which is every topology with no
-    // peripheral, and nothing is clipped.
-    parameter int unsigned MESH_TILE_WINDOWS = 0,
-    parameter logic [(MESH_TILE_WINDOWS == 0 ? 1 : MESH_TILE_WINDOWS)-1:0][ADDR_WIDTH-1:0]
-        MESH_TILE_BASE_ADDR = '0,
-    parameter logic [(MESH_TILE_WINDOWS == 0 ? 1 : MESH_TILE_WINDOWS)-1:0][ADDR_WIDTH-1:0]
-        MESH_TILE_SIZE = '0,
     // Tile-memory latency, one profile stamped by gen_tb_top.py from
     // _MEM_LATENCY. Input covers AW/W/AR, output covers B/R (axi_delayer.sv
     // splits its stream_delay instances exactly that way). The defaults are the
@@ -843,17 +829,6 @@ module user_node_endpoint #(
     // never ran (see the epilogue below).
     int unsigned mcast_checked = 0;
 
-    // Is this replica address one the fabric delivers to? A member the clip
-    // drops is never written, so seeding golden for it would compare a
-    // readback against a byte that was never sent (see MESH_TILE_WINDOWS).
-    function automatic bit delivered_replica(input longint unsigned addr);
-        for (int unsigned k = 0; k < MESH_TILE_WINDOWS; k++)
-            if (addr >= MESH_TILE_BASE_ADDR[k] &&
-                addr < MESH_TILE_BASE_ADDR[k] + MESH_TILE_SIZE[k])
-                return 1'b1;
-        return MESH_TILE_WINDOWS == 0;
-    endfunction
-
     // Plain always + blocking assignments: this is testbench bookkeeping
     // (queues + associative array), not registered hardware state.
     always @(posedge clk_i) begin
@@ -895,10 +870,11 @@ module user_node_endpoint #(
                                 // readback (under +mcast_fault the corrupted
                                 // byte flows here as well -- both checkers
                                 // then flag, which is the red test's point).
-                                if (delivered_replica(replica)) begin
-                                    mcast_mem[replica] = golden;
-                                    scoreboard.preload_byte(replica, golden);
-                                end
+                                // Every replica the wildcard names is delivered:
+                                // nothing clips the closure, and the NMU refuses
+                                // a mask that reaches a coordinate with no node.
+                                mcast_mem[replica] = golden;
+                                scoreboard.preload_byte(replica, golden);
                                 if (sub == 0) done = 1'b1;
                                 else sub = (sub - 1) & mc_mask;
                             end

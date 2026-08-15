@@ -97,11 +97,24 @@ inline PortMask route_mask_fork(uint8_t dst_id, uint8_t src_id, uint8_t collecti
     detail::NodeCoord dst_min{static_cast<uint8_t>(dst.x & ~mask.x),
                               static_cast<uint8_t>(dst.y & ~mask.y)};
 
-    // Every coordinate the wildcard block names is a node: the source refused
-    // any mask reaching outside the coordinate field, the field is clog2(dim)
-    // bits wide, and mesh dimensions are powers of two (sam_yaml.hpp's
-    // load-time assert). The block is [dst_min, dst_max] per axis and both ends
-    // are members, so there is nothing to clip and no empty set to guard.
+    // Nothing is clipped: the source refused any mask reaching outside the
+    // coordinate field, the field is clog2(dim) bits wide, and mesh dimensions
+    // are powers of two (sam_yaml.hpp's load-time assert), so the block expands
+    // over exactly the coordinates that exist.
+    //
+    // That reasoning is checked, not assumed. dst_max is the per-axis maximum
+    // of the block, so one range test on it covers every member, and it is the
+    // only test the wildcard side gets -- the range check below reads the
+    // SOURCE. An out-of-range dst_max would otherwise light EAST/NORTH at the
+    // boundary router and fork the flit into a tie-off, while the join waits
+    // forever for a member that cannot contribute: a silent misroute, which is
+    // the one outcome this model never accepts.
+    if (!detail::in_mesh(dst_max, cfg)) {
+        assert(false &&
+               "route_mask_fork: collective destination set reaches outside the mesh -- the "
+               "wildcard block names a coordinate with no router");
+        std::abort();
+    }
     if (!detail::in_mesh(src, cfg)) {
         assert(false && "route_mask_fork: source outside mesh range");
         std::abort();
@@ -142,9 +155,17 @@ inline PortMask route_mask_join(uint8_t dst_id, uint8_t src_id, uint8_t collecti
     detail::NodeCoord src_min{static_cast<uint8_t>(src.x & ~mask.x),
                               static_cast<uint8_t>(src.y & ~mask.y)};
 
-    // Same reasoning as route_mask_fork: the wildcard block names only nodes
-    // that exist, so there is nothing to clip. The collector is the unmasked
-    // side and still needs the range check.
+    // Same as route_mask_fork, with the sides swapped: src_max is the wildcard
+    // block's per-axis maximum and gets the range test the clip used to provide
+    // as a side effect, and the collector is the unmasked side. The fork and the
+    // join must agree on the member set node by node -- a stateless join hangs
+    // on a one-node disagreement -- so both refuse the same block.
+    if (!detail::in_mesh(src_max, cfg)) {
+        assert(false &&
+               "route_mask_join: collective source set reaches outside the mesh -- the wildcard "
+               "block names a coordinate with no router");
+        std::abort();
+    }
     if (!detail::in_mesh(dst, cfg)) {
         assert(false && "route_mask_join: destination outside mesh range");
         std::abort();

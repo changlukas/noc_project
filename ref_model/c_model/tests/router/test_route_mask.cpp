@@ -107,6 +107,39 @@ struct Cell {
 
 }  // namespace
 
+// --- the wildcard block must stay inside the mesh ----------------------------
+
+// Round 3 deleted the tile-region clamp from both directions. The clamp was
+// also what put the WILDCARD side in range -- the range checks that survive it
+// read the fork's source and the join's collector, neither of which is masked.
+// These two cover what the clamp used to cover as a side effect.
+//
+// A 3-wide mesh is the case that reaches it: the coordinate field is
+// clog2(3) = 2 bits, so a mask may name x = 3 where no router exists. The
+// topology loader refuses a non-power-of-two dimension (sam_yaml.hpp), so this
+// is unreachable from a loaded map and reachable from a hand-built config,
+// which is exactly what these tests are.
+TEST(RouteMaskRangeDeath, ForkAbortsWhenTheWildcardBlockLeavesTheMesh) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    RouterConfig cfg = cfg_at(1, 0, /*mesh_x_dim=*/3, /*mesh_y_dim=*/2);
+    const uint8_t dst = node_id(1, 0);
+    const uint8_t src = node_id(1, 0);
+    const uint8_t mask = node_id(2, 0);  // dst_max.x = 1 | 2 = 3, one past the mesh
+    EXPECT_DEATH(router::route_mask_fork(dst, src, mask, cfg), "reaches outside the mesh");
+}
+
+// The join must refuse the same block the fork refuses: a stateless join hangs
+// on a one-node disagreement, so a block one direction accepts and the other
+// rejects would be worse than either refusing it.
+TEST(RouteMaskRangeDeath, JoinAbortsWhenTheWildcardBlockLeavesTheMesh) {
+    GTEST_FLAG_SET(death_test_style, "threadsafe");
+    RouterConfig cfg = cfg_at(1, 0, /*mesh_x_dim=*/3, /*mesh_y_dim=*/2);
+    const uint8_t collector = node_id(0, 0);
+    const uint8_t src = node_id(1, 0);
+    const uint8_t mask = node_id(2, 0);  // src_max.x = 3
+    EXPECT_DEATH(router::route_mask_join(collector, src, mask, cfg), "reaches outside the mesh");
+}
+
 // --- fork, hand-computed tables ---------------------------------------------
 
 // 4x4, offset submesh with a non-contiguous Y mask: dst_id (2,1), mask (1,2)

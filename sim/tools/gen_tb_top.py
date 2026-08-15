@@ -91,6 +91,14 @@ def _check_flit_capacity(topo: dict, path) -> None:
         errors.append(f"x_dim={x_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
     if y_dim < 2:
         errors.append(f"y_dim={y_dim} < 2 (mesh dimension minimum is 2; 1x1/1xN meshes are illegal)")
+    # Mirrors sam_yaml.hpp's load-time assert. Caught here so a non-power-of-two
+    # topology fails at generate time rather than after elaborating a testbench
+    # the model then aborts on.
+    for axis, dim in (("x", x_dim), ("y", y_dim)):
+        if dim & (dim - 1):
+            errors.append(
+                f"{axis}_dim={dim} is not a power of two (a collective mask wildcards a "
+                f"clog2(dim)-bit coordinate field, so every index it names must be a node)")
     if x_dim > cap_x:
         errors.append(f"x_dim={x_dim} > 2^X_WIDTH={cap_x}")
     if y_dim > cap_y:
@@ -969,24 +977,6 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
             for i in reversed(range(n_ep)))
     tile_base_addr = _rows("base")
     tile_size = _rows("size")
-    # The tile region as address windows: every window of every ROUTER node, in
-    # the same field order. The endpoint's multicast checker seeds golden for
-    # the wildcard closure, and the NMU and every router clip that closure to
-    # the tile region, so a replica address outside it is never written. Only
-    # emitted for a topology that has a coordinate outside the region -- with
-    # none, the closure is inside it by construction and the endpoint's own
-    # default (no clip) is already exact.
-    # Empty under --dma: these three parameters exist for the multicast checker's
-    # replica golden, which lives in user_node_endpoint alone. dma_node_endpoint
-    # declares none of them, so stamping them would name a parameter that does
-    # not exist -- which is an elaboration error on any topology with a
-    # peripheral, the only case where the set is non-empty.
-    mesh_windows = [w for i in range(n) for w in per_node[i]] \
-        if peripherals and not dma else []
-    def _window_row(key):
-        return "{" + ", ".join(f"ADDR_WIDTH'(64'h{w[key]:X})"
-                               for w in reversed(mesh_windows)) + "}"
-
     lines = []
     w = lines.append
 
@@ -1066,16 +1056,6 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w("    // from the map (address_map.noc_egress_base), so it can never collide.")
     w(f"    localparam logic [ADDR_WIDTH-1:0] NOC_EGRESS_BASE = "
       f"ADDR_WIDTH'(64'h{noc_egress_base:X});")
-    if mesh_windows:
-        w("    // The tile region, as the windows of every node inside it. A collective's")
-        w("    // wildcard closure is clipped to this set by the NMU and by every router,")
-        w("    // so a replica address outside it is never written; the endpoint seeds")
-        w("    // multicast golden for these windows only.")
-        w(f"    localparam int unsigned MESH_TILE_WINDOWS = {len(mesh_windows)};")
-        w(f"    localparam logic [MESH_TILE_WINDOWS-1:0][ADDR_WIDTH-1:0] MESH_TILE_BASE_ADDR = "
-          f"{_window_row('base')};")
-        w(f"    localparam logic [MESH_TILE_WINDOWS-1:0][ADDR_WIDTH-1:0] MESH_TILE_SIZE = "
-          f"{_window_row('size')};")
     w(f"    localparam longint unsigned REGION_BYTES = 64'h{_DEFAULT_REGION_BYTES:X};")
     w(f'    // Tile-memory latency profile "{_MEM_LATENCY}" (gen_tb_top.py')
     w("    // _MEM_LATENCY_PROFILES). Every endpoint's two memories sit behind an")
@@ -1339,10 +1319,6 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w("            .ID_WIDTH(ID_WIDTH), .ADDR_WIDTH(ADDR_WIDTH), .DATA_WIDTH(DATA_WIDTH),")
     w("            .TILE_TARGETS(TILE_TARGETS), .TILE_BASE_ADDR(TILE_BASE_ADDR[i]),")
     w("            .TILE_SIZE(TILE_SIZE[i]), .NOC_EGRESS_BASE(NOC_EGRESS_BASE),")
-    if mesh_windows:
-        w("            .MESH_TILE_WINDOWS(MESH_TILE_WINDOWS),")
-        w("            .MESH_TILE_BASE_ADDR(MESH_TILE_BASE_ADDR),")
-        w("            .MESH_TILE_SIZE(MESH_TILE_SIZE),")
     w("            .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),")
     w("            .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),")
     w("            .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),")

@@ -171,6 +171,18 @@ def test_check_flit_capacity_rejects_dim_below_minimum(x_dim, y_dim):
         gt._check_flit_capacity(topo, "dummy_path.yaml")
 
 
+@pytest.mark.parametrize("x_dim,y_dim", [(3, 2), (2, 3), (6, 4)])
+def test_check_flit_capacity_rejects_non_power_of_two_dims(x_dim, y_dim):
+    """Mirrors sam_yaml.hpp's load-time assert: a collective mask wildcards a
+    clog2(dim)-bit field, so a non-power-of-two dim names a coordinate with no
+    node. Caught at generate time rather than after elaboration."""
+    import gen_tb_top as gt
+
+    topo = {"topology": {"x_dim": x_dim, "y_dim": y_dim, "num_vc": 1}}
+    with pytest.raises(SystemExit, match="not a power of two"):
+        gt._check_flit_capacity(topo, "dummy_path.yaml")
+
+
 def test_main_sources_tile_base_from_address_map(tmp_path):
     """End-to-end: main() threads the packed address_map base into the emitted address."""
     tile_size = 0x40000000
