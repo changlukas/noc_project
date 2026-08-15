@@ -101,27 +101,51 @@ Kept and re-bounded: the collective clip in `route_mask_fork` / `route_mask_join
 from the tile region to `0 .. mesh_*_dim - 1`. It is still needed: a wildcard mask can name a
 coordinate that does not exist when a mesh dimension is not a power of two.
 
-## Decision 4: the port is part of the SAM key
+## Decision 4: the space becomes the SAM key, not the class
 
-A peripheral shares a tile's coordinate and carries the Data class, the same class as memory. Six
-sites currently key on (class, coordinate) or on coordinate alone, and would take a peripheral for
-a tile.
+The class currently stands in for the space. `addr_trans.hpp:257` states the assumption:
 
-| site | today | consequence if unfixed |
+    // Indexed by axi::AxiClass (Narrow = 0, Data = 1) -- one address space each.
+    SpaceCoords coords_[2];
+
+and `sam_yaml.hpp:15-22` is where the space is lost: `parse_tile_space` reads the YAML's `space:`
+field and returns a class. The two agree today because there are two spaces and two classes in
+one-to-one correspondence.
+
+A peripheral region is a third space carrying the Data class, so the correspondence ends. Five
+sites keyed on class stop being correct, and one is keyed on coordinate alone.
+
+| site | keyed on today | under scheme B |
 |---|---|---|
-| `SamTable::validate` duplicate check | `addr_trans.hpp:154-157` | `duplicate mesh node` assert |
-| `SamTable::validate` `memory_count == mesh_nodes` | `:161` | count mismatch assert |
-| `SamTable::declare_space_coords` tile walk | `:200-215` | returns false, and **memory space silently stops being a collective target** |
-| `sam_yaml::declare_space_coords` stride pair | `sam_yaml.hpp:44-57` | takes the first two entries of the class, so a peripheral listed before a memory tile yields a silently wrong field offset |
-| `collective_translate` after `sam.lookup` | `addr_trans.hpp:329,341` | it reaches `collective_coords(entry->cls)` on the class alone, so a collective addressed at a peripheral region is **treated as a tile collective** |
-| `node_windows` and `tile_targets` | `sim/tools/address_map.py:129-148`, `sim/tools/gen_tb_top.py:308-330` | keyed on `dst_id` alone, so a peripheral's window is stamped into its router's crossbar decode as if it were that tile's |
+| `SamTable::validate` duplicate check (`addr_trans.hpp:154-157`) | class | `duplicate mesh node` assert |
+| `SamTable::validate` `memory_count == mesh_nodes` (`:161`) | class | count mismatch assert |
+| `SamTable::declare_space_coords` tile walk (`:200-215`) | class | returns false, and **memory space silently stops being a collective target** |
+| `sam_yaml::declare_space_coords` stride pair (`sam_yaml.hpp:44-57`) | class | takes the class's first two entries, so a peripheral listed before a memory tile yields a silently wrong field offset |
+| `collective_translate` (`addr_trans.hpp:329,341`) | class | reaches `collective_coords(entry->cls)`, so a collective addressed at a peripheral region is **built around the tile sharing its coordinate** |
+| `node_windows` / `tile_targets` (`sim/tools/address_map.py:129-148`, `sim/tools/gen_tb_top.py:308-330`) | coordinate | a peripheral's window is stamped into its router's crossbar decode as that tile's |
 
-`SamEntry` and `Translated` gain `uint8_t port`. All six filter on it. The third and fifth are the
-dangerous ones: neither asserts. The third returns false and the symptom is a multicast refused at
-the source; the fifth silently builds a collective around a coordinate the request did not name.
+`SamEntry` and `Translated` gain a `space` field, filled from the YAML block the entry came from.
+`coords_` and `eligible_` become space-indexed, and `declare_space_coords` / `collective_coords`
+take a space. The first five sites then ask the question they meant to ask and are correct without
+any further check.
 
-`collective_translate` therefore refuses `entry->port != 0` before it reads `collective_coords`,
-and this refusal lands in round 3 before the tile-region bound comes out.
+The sixth still needs the port: two peripherals on one router share both coordinate and space, and
+only the port separates them.
+
+**Why this refuses a collective at a peripheral address, with no new check.** The peripheral space
+is never declared collective-eligible: its bases are assigned in declaration order at arbitrary
+sizes, so there is no uniform power-of-two stride to read a coordinate field from, and the loader
+does not attempt the declaration. `collective_coords(entry->space)` then returns nullptr and
+`collective_translate` aborts through the message it already carries (`addr_trans.hpp:341-346`,
+"a legal unicast target, not a collective target").
+
+Delivery is separately safe by construction. `route_mask_fork`'s only terminal output is LOCAL
+(`route_mask.hpp:131`), and the N/E/S/W spread is bounded by `dst_min` / `dst_max` inside the mesh,
+so at the west edge `cfg.x > dst_min.x` is `0 > 0` and no boundary port is ever selected. A
+peripheral cannot receive a replica even if one were issued.
+
+`SamEntry` also gains `uint8_t port`, for delivery and for the per-endpoint windows, not for the
+coverage or collective logic.
 
 ## Decision 5: the eight things an implementer would otherwise invent
 
@@ -131,7 +155,7 @@ and this refusal lands in round 3 before the tile-region bound comes out.
 | 2 | topology YAML | a `peripherals:` block separate from `address_map.tiles`, entries `{ x, y, face: x\|y, size }` |
 | 3 | duplicate face | the generator rejects two peripherals sharing (x, y, face), the shape `gen_tb_top.py:226` already uses for (router, direction) |
 | 4 | peripheral windows | bases assigned in declaration order above the tile array, each aligned to its own size, not coordinate-derived. They are SAM entries, so `lookup` resolves them, and they carry a non-zero port so nothing that walks tiles counts them |
-| 5 | SAM returns the port | `SamEntry.port` and `Translated.port`, set by the loader from the `peripherals:` block |
+| 5 | SAM returns the port and the space | `SamEntry` and `Translated` gain `port` and `space`, both set by the loader from the block the entry came from |
 | 5b | the generated tb's per-endpoint windows | `node_windows(entries, dst_id)` becomes `node_windows(entries, dst_id, port)`. A router endpoint takes port 0's windows, memory and config, exactly as today; a peripheral endpoint takes its own single window. `TILE_BASE_ADDR` and `TILE_SIZE` are stamped per endpoint from that call, unchanged in shape |
 | 6 | `src_port_id` config | `NmuConfig` and `NsuConfig` gain `port_id`, passed at create like `src_id`, through the DPI create calls |
 | 7 | corner wiring | `_peripherals` already keys on (router, direction) and already emits all four; deleting the corner rejection is the whole change |
@@ -189,8 +213,8 @@ the `gen_dma_jobs` window check (largest offset about 1.6 MB), the pattern slot 
 (`_DEFAULT_REGION_BYTES` is 0x1000), and the testbench collective AW restore path
 (`sim/tb/test/user_node_endpoint.sv:328,577-582`).
 
-Two of those become port-sensitive in round 3 and are listed in Decision 4: `node_windows()` and
-`collective_translate`.
+Two of those stop being value-driven in round 3 and are listed in Decision 4: `collective_translate`
+becomes space-keyed, `node_windows()` becomes port-keyed.
 
 ## Rejected alternatives
 
