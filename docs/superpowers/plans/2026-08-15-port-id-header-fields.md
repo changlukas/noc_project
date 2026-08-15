@@ -698,8 +698,8 @@ same counts as before, so this should pass unchanged — confirm it rather than 
 
 ```bash
 make -C sim TB=mesh_4x4_vc4 PATTERN=transpose
-make -C sim TB=mesh_4x4_vc1 PATTERN=multicast MULTICAST_SHAPE=row
-make -C sim TB=mesh_4x4_vc1 PATTERN=multicast MULTICAST_SHAPE=col
+make -C sim TB=mesh_4x4_vc1 PATTERN=multicast MCAST_SHAPE=row
+make -C sim TB=mesh_4x4_vc1 PATTERN=multicast MCAST_SHAPE=col
 ```
 
 The collective runs matter here: a B flit's `dst_port_id` travels through the RSP router's join,
@@ -708,8 +708,13 @@ which recomputes the expected-input set from `dst_id` plus the mask.
 - [ ] **Step 3: Run the DMA flavour**
 
 ```bash
-make -C sim TB=mesh_2x2_vc1_dma
+make -C sim TB=mesh_2x2_vc1 DMA=1
 ```
+
+The DMA flavour is a flag over an existing topology, not a topology of its own — there is no
+`mesh_2x2_vc1_dma.yaml`, and `TB=mesh_2x2_vc1_dma` dies in `build_config.mk`'s `--print-num-vc`
+guard. Likewise the multicast variable is `MCAST_SHAPE` (`sim/verilator/Makefile:180`), which
+defaults to `row`: `MULTICAST_SHAPE=col` is silently ignored and re-runs row under a row tag.
 
 - [ ] **Step 4: Record the results**
 
