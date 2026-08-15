@@ -325,6 +325,27 @@ TEST(NmuWrap, init_with_a_port_id_no_endpoint_declares_throws) {
                  std::invalid_argument);
 }
 
+// Port 2 ACCEPTED. Every other port_id 2 in this file is an EXPECT_THROW, because
+// mesh_2x2_vc1_periph declares x-face peripherals only -- so narrowing the range
+// check above to `port_id > 1` would pass the whole suite: the endpoint-declaration
+// check throws the same exception type and would stand in for it everywhere. The
+// four-face topology is the one that puts a y-face peripheral behind port 2.
+TEST(NmuWrap, init_accepts_a_y_face_peripheral_port) {
+    constexpr const char* periph4 = TOPOLOGY_DIR "/mesh_4x4_vc1_periph4.yaml";
+    // dst_id = (y << 4) | x. The y-face peripherals are at (1,0) south and (2,3) north.
+    constexpr uint8_t kSouth = 0x01;  // (x=1, y=0)
+    constexpr uint8_t kNorth = 0x32;  // (x=2, y=3)
+    NmuWrap adapter;
+
+    EXPECT_NO_THROW(adapter.init(periph4, kSouth, /*port_id=*/2));
+    EXPECT_NO_THROW(adapter.init(periph4, kNorth, /*port_id=*/2));
+
+    // The same coordinates on the OTHER face are undeclared, so this stays a
+    // statement about the port and not about the coordinate.
+    EXPECT_THROW(adapter.init(periph4, kSouth, /*port_id=*/1), std::invalid_argument);
+    EXPECT_THROW(adapter.init(periph4, kNorth, /*port_id=*/1), std::invalid_argument);
+}
+
 // Note: the wrap-level "odd num_vc rejected" death test was removed in S3a
 // T5. REQ/RSP are fixed single-VC now (S1 Q2), and the S3b VC collapse
 // retired the read/write virtual-network split that owned the even-num_vc
