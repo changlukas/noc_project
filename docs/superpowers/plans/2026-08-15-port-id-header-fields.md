@@ -33,19 +33,28 @@ every transaction rather than by one unit test.
 - Every co-sim invocation opens with the pre-clean from `docs/backlog.md`:
   `rm -f sim/filelist_*.f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv; rm -rf $BUILD_ROOT/verilator/obj_dir_*`
 - New asserts need a fault-injection proof that they fire.
-- Every class that gains a `port_id` constructor argument takes it as a TRAILING parameter
+- Each of the four PUBLIC constructors that gains a `port_id` takes it as a TRAILING parameter
   defaulted to 0 — `nmu::Packetize`, `nmu::Depacketize`, `nsu::Packetize`, `nsu::Depacketize`.
   One rule for all four, and no existing call site changes. `Nmu` / `Nsu` pass `cfg.port_id`
-  explicitly.
+  explicitly. The rule does not bind private helpers: `nsu::Packetize::build_b_flit` /
+  `build_r_flit` are private statics with two callers each, and take `port_id` beside the
+  `src_id` it belongs with.
 
 ## Rulings made while writing this plan
 
 **`SamEntry::port` comes forward into round 2.** The spec lists it under Decision 5 without naming
 a round, and round 3 is where a non-zero value first appears. It lands here because `dst_port_id`
 otherwise has no source and the NMU would stamp a literal 0, which is a placeholder rather than a
-value. The field is a defaulted `uint8_t`; the YAML loader needs no change, since every entry a
-shipped topology declares is a tile. Cost if wrong: a three-line struct member arrives one round
-early.
+value. The field is a defaulted `uint8_t` and the YAML loader needs no change: every endpoint in
+every shipped topology sits on its router's LOCAL port today, `sim/topologies/mesh_2x2_vc1_periph.yaml`
+included, because peripherals there are still coordinate-addressed and do not move on-grid until
+round 3. Cost if wrong: a three-line struct member arrives one round early.
+
+Spec line 248 says "the header fields do not touch the SAM". That sentence sits inside the
+collective-eligibility acceptance section and means the eligibility declaration is unaffected,
+which stays true — a defaulted member changes no `collective_coords` result. `SamEntry::space`,
+the other half of Decision 5, stays in round 3: it is the space-indexed re-keying of the whole
+table, not an additive field.
 
 **`route_compute` stays in round 3.** The spec's Decision 1 says its `return LOCAL` becomes the
 port the field names. That is peripheral delivery, not header plumbing: it changes nothing while
@@ -121,8 +130,9 @@ python3 specgen/tools/codegen.py --target sv  --domain params
 for v in 1 2 4 8; do python3 specgen/tools/codegen.py --target sv --domain noc_types --num-vc $v; done
 ```
 
-Then refresh the goldens. They are byte-identical copies of the generated files
-(`specgen/tests/test_byte_identical_golden.py`), so copy, do not edit:
+Then refresh the goldens. They are byte-identical copies of the generated files, so copy, do
+not edit. The packet goldens are checked by `specgen/tests/test_byte_identical_golden.py`; the
+params goldens by `test_codegen.py:296` and `test_codegen_sv.py:313`:
 
 ```bash
 cp specgen/generated/cpp/ni_flit_constants.h specgen/tests/golden/ni_flit_constants.h.golden
@@ -201,6 +211,17 @@ In `NsuConfig`, after `uint8_t src_id = 0;`, the same field with the responder's
 `NmuWrap::init` — add `uint8_t port_id = 0` to the parameter list immediately after
 `uint8_t src_id = 0`, and `cfg.port_id = port_id;` immediately after `cfg.src_id = src_id;`.
 
+Both wraps are a config trust boundary, so both reject the reserved encoding here, where the value
+enters. Spec Decision 1 assigns `11` to reserved; `00`, `01` and `10` are the legal set:
+
+```cpp
+        if (port_id > 2) {
+            throw std::invalid_argument(
+                "NmuWrap::init: port_id 3 is the reserved encoding (0 = LOCAL, 1 = x face, "
+                "2 = y face)");
+        }
+```
+
 `NsuWrap::init` — the same two edits, same positions.
 
 - [ ] **Step 3: Extend the DPI create calls**
@@ -275,9 +296,21 @@ git commit -m "feat(ni): carry a per-endpoint port_id from the testbench to NmuC
 **Files:**
 - Modify: `ref_model/c_model/include/nmu/addr_trans.hpp:16-31` (`Translated`, `SamEntry`) and `translate()`
 - Modify: `ref_model/c_model/include/nmu/packetize.hpp:56-69,80-91,196-204,238-245,282-290` and the `WMeta` struct
+- Modify: `ref_model/c_model/include/nmu/staged_beats.hpp:10-30` (`AdmittedAw`, `AdmittedAr`)
+- Modify: `ref_model/c_model/include/nmu/rob.hpp:428-431,518-520,564`
 - Modify: `ref_model/c_model/include/nmu/depacketize.hpp:29-31` and `drain_ingress_`
-- Modify: `ref_model/c_model/include/nmu/nmu.hpp` (the `Packetize` and `Depacketize` construction)
-- Test: `ref_model/c_model/tests/nmu/test_packetize.cpp`, `ref_model/c_model/tests/nmu/test_depacketize.cpp`
+- Modify: `ref_model/c_model/include/nmu/nmu.hpp:75-91,99-107` (`NmuReqS1Bridge`) and the `Packetize` / `Depacketize` construction
+- Test: `ref_model/c_model/tests/nmu/test_packetize.cpp`, `ref_model/c_model/tests/nmu/test_depacketize.cpp`, `ref_model/c_model/tests/nmu/test_rob.cpp`
+
+**The production path does not go through `Packetize::push_aw`.** It goes
+`AxiSlavePort -> nmu::Rob -> NmuReqS1Bridge -> Packetize::push_aw_with_meta`, and the metadata is
+rebuilt member-by-member three times along it: `Rob` builds an `AwHeaderMeta` brace, the bridge
+unpacks it into an `AdmittedAw` and repacks it into a fresh `AwHeaderMeta`. Every one of those is
+positional — C++17 has no designated initializers, which is why `staged_beats.hpp:8` documents the
+field set as mirroring `AwHeaderMeta`. A member not named at all three points is silently dropped.
+Miss this and every production flit carries `dst_port_id = 0` whatever the SAM says, and round 2
+cannot detect it because every port IS 0. It surfaces in round 3 as "peripherals unreachable",
+which is the exact failure this round exists to rule out.
 
 **Interfaces:**
 - Consumes: `ni::header::DST_PORT_ID_*` / `SRC_PORT_ID_*` (Task 1); `NmuConfig::port_id` (Task 2).
@@ -344,6 +377,28 @@ TEST(NmuDepacketizeDeath, RejectsAResponseAddressedToAnotherPort) {
 The death test is the fault-injection proof the standing rules require. Match the existing
 `*Death` tests in this directory for the exact death-test macro and fixture spelling.
 
+Add to `ref_model/c_model/tests/nmu/test_rob.cpp`. This is the one that catches a break anywhere
+along the three-hop metadata rebuild, which the `Packetize`-only test above cannot see:
+
+```cpp
+TEST(NmuRob, CarriesTheSamEntrysPortThroughToTheFlit) {
+    // The production path is Rob -> NmuReqS1Bridge -> Packetize, and each hop
+    // rebuilds AwHeaderMeta positionally. A dropped member shows up here and
+    // nowhere else while every shipped port is 0.
+    addr_trans::SamTable sam{
+        {{/*base=*/0x0, /*size=*/0x1000, /*dst_id=*/0x11, axi::AxiClass::Data, /*port=*/1}}};
+    // ... build the Rob + Packetize fixture the way the neighbouring tests do,
+    //     passing this sam instead of the file's default ...
+    ASSERT_TRUE(rob.push_aw(make_aw(0x05, 0x40)));
+    // ... tick until the AW flit reaches the capture ...
+    EXPECT_EQ(aw_flit->get_header_field("dst_port_id"), 1u);
+}
+```
+
+Add the AR twin in the same shape. Both RoB modes reach `push_ar_with_meta`, through
+`rob.hpp:518-520` when Enabled and `rob.hpp:564` when Disabled, so run this test in whichever mode
+the surrounding fixtures use and add a second case for the other.
+
 - [ ] **Step 2: Run them and watch them fail**
 
 ```bash
@@ -394,7 +449,37 @@ All three flit builders gain two lines beside their existing `set_header_field("
 
 For the W builder the source is the `WMeta` front, matching how it reads `dst_id`.
 
-- [ ] **Step 5: Check the returning port**
+- [ ] **Step 5: Carry it down the production path**
+
+`AdmittedAw` and `AdmittedAr` in `staged_beats.hpp` each gain the same member, appended LAST:
+
+```cpp
+    uint8_t dst_port = 0;  // mirrors AwHeaderMeta::dst_port
+```
+
+`NmuReqS1Bridge` names it at both conversions. `push_aw_with_meta` (`nmu.hpp:77-78`) appends
+`meta.dst_port` to its `s1_aw_.accept({...})` brace; `push_ar_with_meta` (`:87-88`) appends it to
+`s1_ar_.accept({...})`. In `tick()` (`:99-107`), the AW re-pack appends `e.dst_port` and the AR
+re-pack appends `axi::COLLECTIVE_OP_UNICAST, 0, e.dst_port` — the AR brace stops short at `cls`
+today, and `dst_port` sits behind the two collective members.
+
+The three `Rob` sites: rather than spelling the collective members out at the AR sites just to
+reach a trailing one, hoist the meta into a named local and assign. This is the same shape
+`nsu::Depacketize::pop_aw` already uses for its collective fields:
+
+```cpp
+    AwHeaderMeta meta{t.dst_id, t.local_addr, 0, 0, t.cls};
+    meta.dst_port = t.port;
+    if (!next_pkt_.push_ar_with_meta(b, meta)) {
+        return false;  // downstream backpressure: no state mutation
+    }
+```
+
+Apply that at `rob.hpp:564` (Disabled AR) and `:518-520` (Enabled AR, whose `ordering_req` /
+`ordering_tag` are the `needs_rob` expressions, not 0). At `:428-431` (AW) the brace already runs
+to `collective_mask`, so `t.port` appends directly as the next member.
+
+- [ ] **Step 6: Check the returning port**
 
 `nmu::Depacketize`'s constructor gains a trailing defaulted argument, so no existing call site
 changes:
@@ -420,10 +505,10 @@ In `drain_ingress_`, where a pulled flit is first inspected, before it is decode
 
 `Nmu`'s constructor passes `cfg.port_id` into both `Packetize` and `Depacketize`.
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 7: Run the tests**
 
 ```bash
-ctest --test-dir $HOME/noc_build/cmodel -R "NmuPacketize|NmuDepacketize" --output-on-failure
+ctest --test-dir $HOME/noc_build/cmodel -R "NmuPacketize|NmuDepacketize|NmuRob" --output-on-failure
 ctest --test-dir $HOME/noc_build/cmodel --output-on-failure
 ```
 
@@ -431,7 +516,7 @@ Expect the new tests to pass and the full suite to stay green. Every response th
 still leaves `dst_port_id` at 0 until Task 4, and every NMU has `port_id` 0, so the new check
 passes trivially — that is the correct round-2 behaviour.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 clang-format -i ref_model/c_model/include/nmu/*.hpp ref_model/c_model/tests/nmu/test_packetize.cpp ref_model/c_model/tests/nmu/test_depacketize.cpp
@@ -497,7 +582,7 @@ TEST(NsuDepacketize, RecordsTheRequestersPortInTheMetaEntry) {
 TEST(NsuDepacketizeDeath, RejectsARequestAddressedToAnotherPort) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
-    // port_id is the sixth constructor argument, after space_coords.
+    // port_id is the seventh constructor argument, after space_coords.
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
                       router::null_req_in(), /*src_id=*/0x02, /*space_coords=*/{},
                       /*port_id=*/0);
@@ -636,18 +721,30 @@ a peripheral bug. That separation is the whole reason this round exists.
 
 ### Task 6: Docs
 
-The three flit widths and the 44 b header appear across seven documents. Every one is now wrong.
+The three flit widths and the 44 b header appear across seven documents and three source files.
+Every one is now wrong.
 
 **Files:**
 - Modify: `docs/noc-target-spec.md` (13 mentions), `docs/nmu-spec.md` (11), `docs/nsu-spec.md` (9),
   `docs/router-spec.md` (9), `docs/noc-performance-parameters.md` (3),
   `docs/verification-environment.md` (2), `docs/noc_high_perf_targets.md` (1)
+- Modify: `ref_model/top/router_wrap.sv:34`, `ref_model/dpi/cmodel_dpi.h:69,75,144,205`,
+  `ref_model/dpi/dpi_marshal.hpp:4,32` — comments only, but they state the widths as fact
 
 - [ ] **Step 1: Find every mention**
 
+The search covers `ref_model/` as well as `docs/`: seven of the stale mentions are in source
+comments, not documentation.
+
 ```bash
-grep -rn "629\|132 b\|122 b\|44-bit header\|44 b header\|\[131:44\]\|\[121:44\]\|\[628:44\]\|NOC_REQ_FLIT_WIDTH\|NOC_RSP_FLIT_WIDTH\|NOC_DAT_FLIT_WIDTH" docs/*.md
+grep -rn "629\|132 b\|122 b\|132/122\|44-bit header\|44 b header\|\[131:44\]\|\[121:44\]\|\[628:44\]\|\[136:44\]\|\[126:44\]\|NOC_REQ_FLIT_WIDTH\|NOC_RSP_FLIT_WIDTH\|NOC_DAT_FLIT_WIDTH" docs/*.md ref_model/
 ```
+
+`docs/router-spec.md:83-85` needs reading before editing. It already says
+`REQ [136:44], RSP [126:44]`, which are wrong TODAY — they should read `[131:44]` and `[121:44]`.
+The substitution table below turns them into `[135:48]` and `[125:48]`, which fixes both the
+pre-existing error and this round's change in one edit. Do not let the `136` already sitting in
+that line collide with the `132 -> 136` row.
 
 - [ ] **Step 2: Apply the substitutions**
 
@@ -657,10 +754,11 @@ grep -rn "629\|132 b\|122 b\|44-bit header\|44 b header\|\[131:44\]\|\[121:44\]\
 | REQ 132 b / `132` | REQ 136 b / `136` |
 | RSP 122 b / `122` | RSP 126 b / `126` |
 | DAT 629 b / `629` | DAT 633 b / `633` |
-| `flit[131:44]` | `flit[135:48]` |
-| `flit[121:44]` | `flit[125:48]` |
-| `flit[628:44]` | `flit[632:48]` |
+| `[131:44]` and the stale `[136:44]` in router-spec | `[135:48]` |
+| `[121:44]` and the stale `[126:44]` in router-spec | `[125:48]` |
+| `[628:44]` | `[632:48]` |
 | `629'h0` | `633'h0` |
+| `132/122/629 b` (source comments) | `136/126/633 b` |
 
 Read each hit in context before editing. A `132` that is not a flit width must not change; the
 grep is a candidate list, not a substitution script.
@@ -681,7 +779,7 @@ there.
 - [ ] **Step 4: Verify nothing was missed**
 
 ```bash
-grep -rn "44 b header\|44-bit header\|\[131:44\]\|\[121:44\]\|\[628:44\]" docs/*.md
+grep -rn "44 b header\|44-bit header\|\[131:44\]\|\[121:44\]\|\[628:44\]\|\[136:44\]\|\[126:44\]\|629\|132/122" docs/*.md ref_model/
 ```
 
 Expect no output.
@@ -689,7 +787,7 @@ Expect no output.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add docs/
+git add docs/ ref_model/
 git commit -m "docs: header is 48 b and flits are 136/126/633 b after the port_id fields"
 ```
 
@@ -699,6 +797,8 @@ git commit -m "docs: header is 48 b and flits are 136/126/633 b after the port_i
 
 - `codegen.py --check` exits 0
 - `python3 -m pytest specgen/tests sim/tools -q` green
-- full `ctest` green
+- full `ctest` green, and specifically `SamYaml.CoordRangesDerivedFromTheBlockStride` — the
+  spec (lines 246-248) assigns round 2 an unchanged re-run of round 1's collective-eligibility
+  assertion, and a silent loss of eligibility is the failure mode it exists to catch
 - every co-sim run in Task 5 green
 - `grep -rn "dst_port_id" ref_model/ | wc -l` shows the field is both written and read on each side
