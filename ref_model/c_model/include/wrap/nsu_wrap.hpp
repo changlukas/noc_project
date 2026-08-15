@@ -78,8 +78,7 @@ class NsuWrap {
         using namespace ni::cmodel::nsu;
         if (port_id > 2) {
             throw std::invalid_argument(
-                "NsuWrap::init: port_id 3 is the reserved encoding (0 = LOCAL, 1 = x face, "
-                "2 = y face)");
+                "NsuWrap::init: port_id must be 0, 1 or 2 (0 = LOCAL, 1 = x face, 2 = y face)");
         }
         dat_num_vc_ = dat_num_vc;
         NsuConfig cfg{};

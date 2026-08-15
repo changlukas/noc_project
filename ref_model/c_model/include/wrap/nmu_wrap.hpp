@@ -68,6 +68,8 @@ class NmuWrap {
     // leads the argument list because there is no NMU without a SAM. Null or
     // empty throws, so a topology missing at the DPI boundary surfaces through
     // the same error latch as an unreadable YAML (load_sam_table throws too).
+    // port_id names which endpoint at src_id this NMU is: 0 = the tile on the
+    // router's LOCAL port, 1 = the x face, 2 = the y face.
     // REQ/RSP are fixed single-VC (S1 Q2, spec TXREQREADY/TXRSPREADY are
     // scalar); dat_num_vc is the topology's VC count (mesh_4x4_vc{2,4,8}
     // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
@@ -85,8 +87,7 @@ class NmuWrap {
         }
         if (port_id > 2) {
             throw std::invalid_argument(
-                "NmuWrap::init: port_id 3 is the reserved encoding (0 = LOCAL, 1 = x face, "
-                "2 = y face)");
+                "NmuWrap::init: port_id must be 0, 1 or 2 (0 = LOCAL, 1 = x face, 2 = y face)");
         }
         dat_num_vc_ = dat_num_vc;
         NmuConfig cfg{};
