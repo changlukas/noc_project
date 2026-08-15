@@ -143,16 +143,19 @@ TEST(NsuTopLevel, WriteRoundTripDecodesReqFlitsAndProducesBRspFlit) {
 }
 
 // Same drive as the round-trip above, except the requester sits on port 1 at
-// its own coordinate. The B must name that port, so it reaches the requester
-// and not the tile beside it.
+// its own coordinate and this NSU sits on port 2 at its own. The B must name
+// the requester's port, so it reaches the requester and not the tile beside
+// it, and must name this NSU's own port as its source.
 TEST(NsuTopLevel, EchoesTheRequestersPortBackOntoTheBResponse) {
     constexpr uint8_t kNsuSrcId = 0x34;
+    constexpr uint8_t kNsuPortId = 2;
     constexpr uint8_t kRequesterSrcId = 0x12;
     constexpr uint8_t kAxiId = 0x07;
     constexpr uint64_t kAddr = 0x200;
 
     NsuConfig cfg{};
     cfg.src_id = kNsuSrcId;
+    cfg.port_id = kNsuPortId;
     cfg.port_params.aw_queue_depth = 16;
     cfg.port_params.w_queue_depth = 16;
     cfg.port_params.ar_queue_depth = 16;
@@ -166,6 +169,8 @@ TEST(NsuTopLevel, EchoesTheRequestersPortBackOntoTheBResponse) {
     aw_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowAw);
     aw_flit.set_header_field("src_id", kRequesterSrcId);
     aw_flit.set_header_field("dst_id", kNsuSrcId);
+    // Addressed to this NSU's own port; a wrong value here aborts at ingress.
+    aw_flit.set_header_field("dst_port_id", kNsuPortId);
     aw_flit.set_header_field("src_port_id", 1);
     aw_flit.set_header_field("vc_id", 0);
     aw_flit.set_header_field("flit_tail", 0);
@@ -182,6 +187,7 @@ TEST(NsuTopLevel, EchoesTheRequestersPortBackOntoTheBResponse) {
     w_flit.set_header_field("axi_ch", ni::AXI_CH_NarrowW);
     w_flit.set_header_field("src_id", kRequesterSrcId);
     w_flit.set_header_field("dst_id", kNsuSrcId);
+    w_flit.set_header_field("dst_port_id", kNsuPortId);
     w_flit.set_header_field("src_port_id", 1);
     w_flit.set_header_field("vc_id", 0);
     w_flit.set_header_field("flit_tail", 1);
@@ -212,6 +218,6 @@ TEST(NsuTopLevel, EchoesTheRequestersPortBackOntoTheBResponse) {
     ASSERT_TRUE(b_flit.has_value()) << "Nsu never produced B flit on NoC rsp-out face";
     EXPECT_EQ(b_flit->get_header_field("dst_port_id"), 1u)
         << "B should be addressed back to the port that issued the AW";
-    EXPECT_EQ(b_flit->get_header_field("src_port_id"), 0u)
-        << "this NSU is the tile on the router's LOCAL port";
+    EXPECT_EQ(b_flit->get_header_field("src_port_id"), kNsuPortId)
+        << "the B should name this NSU's own port, from cfg.port_id";
 }

@@ -136,11 +136,14 @@ TEST(NsuDepacketize, ArFlitSnapshotsReadMeta) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE);
-    ASSERT_TRUE(noc.req_out().push_flit(make_ar_flit(0x07, 0x2000, 0x12)));
+    auto f = make_ar_flit(0x07, 0x2000, 0x12);
+    f.set_header_field("src_port_id", 1);
+    ASSERT_TRUE(noc.req_out().push_flit(f));
     depkt.tick();
     EXPECT_TRUE(depkt.pop_ar().has_value());
     EXPECT_TRUE(mb.peek_read(0x07).has_value());
     EXPECT_EQ(mb.peek_read(0x07)->src_id, 0x12);
+    EXPECT_EQ(mb.peek_read(0x07)->src_port, 1u);
 }
 
 TEST(NsuDepacketize, RecordsTheRequestersPortInTheMetaEntry) {
@@ -155,16 +158,33 @@ TEST(NsuDepacketize, RecordsTheRequestersPortInTheMetaEntry) {
     EXPECT_EQ(mb.peek_write(0x05)->src_port, 1u);
 }
 
-// Fault injection: a request naming a port that is not this NSU's must abort.
-TEST(NsuDepacketizeDeath, RejectsARequestAddressedToAnotherPort) {
+// This NSU sits on port 1, so a request naming port 1 is its own. Twin of the
+// death test below: same drive, only the flit's dst_port_id differs.
+TEST(NsuDepacketize, AcceptsARequestAddressedToItsOwnPort) {
     ChannelModel noc(16, 16);
     MetaBuffer mb(4);
     // port_id is the seventh constructor argument, after space_coords.
     Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
                       ni::cmodel::router::null_req_in(), /*src_id=*/0x02, /*space_coords=*/{},
-                      /*port_id=*/0);
+                      /*port_id=*/1);
     auto f = make_aw_flit(0x05, 0x1000, /*src_id=*/0x12);
     f.set_header_field("dst_port_id", 1);
+    ASSERT_TRUE(noc.req_out().push_flit(f));
+    depkt.tick();
+    EXPECT_TRUE(depkt.pop_aw().has_value());
+}
+
+// Fault injection: a request naming a port that is not this NSU's must abort.
+// The NSU is on port 1 and the flit names port 0, so a port_id_ hardwired to 0
+// cannot satisfy this.
+TEST(NsuDepacketizeDeath, RejectsARequestAddressedToAnotherPort) {
+    ChannelModel noc(16, 16);
+    MetaBuffer mb(4);
+    Depacketize depkt(noc.req_in(), mb, /*max_unique_ids*/ axi::AXI_ID_SPACE,
+                      ni::cmodel::router::null_req_in(), /*src_id=*/0x02, /*space_coords=*/{},
+                      /*port_id=*/1);
+    auto f = make_aw_flit(0x05, 0x1000, /*src_id=*/0x12);
+    f.set_header_field("dst_port_id", 0);
     ASSERT_TRUE(noc.req_out().push_flit(f));
     EXPECT_DEATH(depkt.tick(), "dst_port_id");
 }

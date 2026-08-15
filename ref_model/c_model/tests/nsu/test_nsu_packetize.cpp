@@ -165,6 +165,24 @@ TEST(NsuPacketize, RPayloadBitPerfect) {
         EXPECT_EQ(out[i], static_cast<uint8_t>(0xC0 + i));
 }
 
+// The read path's half of the port echo: the AR's requester sat on port 1, so
+// its R must name port 1, and this NSU stamps its own port 2 as the source.
+TEST(NsuPacketize, REchoesTheRequestersPortAndStampsItsOwn) {
+    RspCapture b_cap, r_cap;
+    MetaBuffer mb(4);
+    MetaEntry m{0x12, 0x03, 0, 0};
+    m.src_port = 1;
+    mb.allocate_read(0x03, m);
+    Packetize pkt(b_cap, r_cap, r_cap, mb, kNsuSrcId, /*port_id=*/2);
+    ASSERT_TRUE(pkt.push_r(make_r(0x03, /*last*/ true)));
+    pkt.tick();
+    auto f = r_cap.pop();
+    ASSERT_TRUE(f.has_value());
+    EXPECT_EQ(f->get_header_field("dst_port_id"), 1u)
+        << "R should be addressed back to the port that issued the AR";
+    EXPECT_EQ(f->get_header_field("src_port_id"), 2u) << "this NSU's own port, from its ctor arg";
+}
+
 TEST(NsuPacketize, NarrowRUnalignedAddrExtractsCorrectLane) {
     RspCapture b_cap, r_cap;
     MetaBuffer mb(4);
