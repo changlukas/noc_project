@@ -16,6 +16,8 @@
       "ORDERING_TAG_WIDTH": 8,
       "COLLECTIVE_OP_WIDTH": 2,
       "COLLECTIVE_MASK_WIDTH": 8,
+      "DST_PORT_ID_WIDTH": 2,
+      "SRC_PORT_ID_WIDTH": 2,
       "AXI_ADDR_WIDTH": 48,
       "AXI_ID_WIDTH": 3,
       "NOC_DATA_WIDTH": 512,
@@ -33,7 +35,7 @@
       "AXI_LAST_WIDTH": 1,
       "WSTRB_WIDTH": 64,
       "NARROW_WSTRB_WIDTH": 8,
-      "HEADER_TOTAL_WIDTH": 44
+      "HEADER_TOTAL_WIDTH": 48
     },
     "header_fields": [
       {
@@ -91,6 +93,16 @@
       {
         "name": "collective_mask",
         "width_param": "COLLECTIVE_MASK_WIDTH",
+        "enabled": true
+      },
+      {
+        "name": "dst_port_id",
+        "width_param": "DST_PORT_ID_WIDTH",
+        "enabled": true
+      },
+      {
+        "name": "src_port_id",
+        "width_param": "SRC_PORT_ID_WIDTH",
         "enabled": true
       }
     ],

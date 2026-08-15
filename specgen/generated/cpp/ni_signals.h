@@ -117,10 +117,10 @@ struct AxiSlavePortPins {
 
 struct NocIntfUpstreamPins {
   uint8_t    noc_req_valid_o;
-  std::array<uint8_t, 79> noc_req_flit_o;
+  std::array<uint8_t, 80> noc_req_flit_o;
   uint8_t    noc_req_credit_i;
   uint8_t    noc_rsp_valid_i;
-  std::array<uint8_t, 79> noc_rsp_flit_i;
+  std::array<uint8_t, 80> noc_rsp_flit_i;
   uint8_t    noc_rsp_credit_o;
 
   void reset_outputs() {
@@ -180,10 +180,10 @@ struct CsrPins {
 
 struct NocIntfDownstreamPins {
   uint8_t    noc_req_valid_i;
-  std::array<uint8_t, 79> noc_req_flit_i;
+  std::array<uint8_t, 80> noc_req_flit_i;
   uint8_t    noc_req_credit_o;
   uint8_t    noc_rsp_valid_o;
-  std::array<uint8_t, 79> noc_rsp_flit_o;
+  std::array<uint8_t, 80> noc_rsp_flit_o;
   uint8_t    noc_rsp_credit_i;
 
   void reset_outputs() {

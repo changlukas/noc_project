@@ -90,9 +90,9 @@ def test_pin_width_cross_domain_flit_width(signals_spec, packet_spec):
                                 "NOC_INTF_UPSTREAM", "noc_req_flit_o")
     assert actual == expected
     # Sanity: this is the real composed width, not just the legacy default.
-    # S2 T2d (final dual-width flip): HEADER_WIDTH=44, PAYLOAD_WIDTH=585
-    # (DATA_W, the widest channel), FLIT_WIDTH=629.
-    assert actual == 629
+    # S2 T2d (final dual-width flip): HEADER_WIDTH=48, PAYLOAD_WIDTH=585
+    # (DATA_W, the widest channel), FLIT_WIDTH=633.
+    assert actual == 633
 
 
 def test_pin_width_from_interface_port_parameter(signals_spec, packet_spec):

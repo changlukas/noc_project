@@ -113,8 +113,8 @@ noc:
   REQ_FLIT_WIDTH:
     type: int
     units: bits
-    description: "REQ network flit width: HEADER_WIDTH(44) + max(AW/AR payload, 88) = 132, per docs/noc-target-spec.md §6"
-    default: 132
+    description: "REQ network flit width: HEADER_WIDTH(48) + max(AW/AR payload, 88) = 136, per docs/noc-target-spec.md §6"
+    default: 136
     min: 64
     max: 1024
     sv_symbol: NOC_REQ_FLIT_WIDTH_DFLT
@@ -122,8 +122,8 @@ noc:
   RSP_FLIT_WIDTH:
     type: int
     units: bits
-    description: "RSP network flit width: HEADER_WIDTH(44) + max(B/NARROW_R payload, 78) = 122, per docs/noc-target-spec.md §6"
-    default: 122
+    description: "RSP network flit width: HEADER_WIDTH(48) + max(B/NARROW_R payload, 78) = 126, per docs/noc-target-spec.md §6"
+    default: 126
     min: 64
     max: 1024
     sv_symbol: NOC_RSP_FLIT_WIDTH_DFLT
@@ -131,8 +131,8 @@ noc:
   DAT_FLIT_WIDTH:
     type: int
     units: bits
-    description: "DAT network flit width: HEADER_WIDTH(44) + max(AW/DATA_W/DATA_R payload, 585) = 629, per docs/noc-target-spec.md §6"
-    default: 629
+    description: "DAT network flit width: HEADER_WIDTH(48) + max(AW/DATA_W/DATA_R payload, 585) = 633, per docs/noc-target-spec.md §6"
+    default: 633
     min: 64
     max: 1024
     sv_symbol: NOC_DAT_FLIT_WIDTH_DFLT
