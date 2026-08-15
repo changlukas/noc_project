@@ -97,6 +97,28 @@ The replacement is the port, not the coordinate: an issuer with `src_port_id != 
 Task 4 Step 1 threads it in, BEFORE the same task deletes the bounds. That ordering is the whole
 point — a deletion and its replacement land in one commit or the guard is gone in between.
 
+## Why scheme B does not deadlock, and what that rests on
+
+The spec rejected alternative A' (turn the packet early) because with both x faces populated the
+admitted turn set closes a channel dependency cycle. Scheme B is not obviously safer, and the reason
+it is safe is worth writing down, because a later change can take it away.
+
+Ejecting to a face admits turns XY forbids. A flit that has already resolved X is travelling in Y;
+ejecting it out a WEST or EAST port is an N→W, S→W, N→E or S→E turn, and XY admits none of those.
+Pair them with the ordinary XY turns and a cycle closes: N→E (face eject), E→S (XY), S→W (face
+eject), W→N (XY).
+
+It is not a cycle, because **a boundary port on an edge router is terminal**. There is no western
+neighbour at `x == 0`, so the WEST port feeds a peripheral NI that consumes the flit — it is not an
+input to any other router's routing decision, and a channel dependency cycle needs one. Ejecting to
+a face is LOCAL with a different pin, not a turn.
+
+That argument holds only while peripherals sit on edge routers. Task 2's face-legality assert
+(`face: x` needs `x == 0` or `x == x_dim - 1`) is what guarantees it. **That assert is the
+deadlock-freedom precondition, not input tidiness.** If a later round wants a peripheral on an
+interior router, the port it hangs off is a live inter-router link, the eject becomes a real turn,
+and the cycle above closes for real. Say so in the assert's message.
+
 ## Rulings carried in from round 2
 
 **A heterogeneous-port multicast fork is not implemented, it is ruled illegal.** The router copies a
@@ -135,6 +157,15 @@ false and **the memory space stops being a collective target**, with no error.
 `{AxiClass::Narrow, AxiClass::Data}` and become `{Space::Config, Space::Memory}` — the peripheral
 space is deliberately not in that set. These are compile-visible, so they will not escape, but the
 "five class-keyed sites" framing above undercounts and you should expect nine edits, not five.
+
+**One of the four is more than a type change.** `check_decode_mode` (`sam_yaml.hpp:96-119`) asserts
+that EVERY present space has non-null `collective_coords` when a topology declares `decode: offset`.
+The peripheral space is deliberately null, so a peripheral topology that also declares
+`decode: offset` would abort on a legal configuration. Restricting the loop to
+`{Space::Config, Space::Memory}` fixes it, but do it deliberately and say why in the comment: the
+check is about the spaces that carry a node stride, and a peripheral region has none. No shipped
+topology declares `decode` today, so this is latent rather than failing — which is exactly why it
+needs the comment.
 
 **Interfaces:**
 - Produces: `axi::Space { Config = 0, Memory = 1, Peripheral = 2 }`; `axi::class_of(Space)`;
@@ -415,10 +446,26 @@ own, then aligns to base 0 and overlaps the whole tile array.
 
 - [ ] **Step 4: Teach the Python packer the third space**
 
-`sim/tools/address_map.py:30` — `SPACE_ORDER = ("config", "memory")` gains `"peripheral"`. Peripheral
-regions are packed above the tile array in declaration order, matching the C++ loader exactly. The
-two packers have twin formulas and have drifted before; make the peripheral arithmetic identical, not
-merely equivalent.
+`sim/tools/address_map.py:30` — `SPACE_ORDER = ("config", "memory")` gains `"peripheral"`.
+
+**`pack()` must emit peripheral entries, not just order them.** `pack(address_map, ...)` reads
+`address_map["tiles"]` and nothing else (`address_map.py:91`). Widening `SPACE_ORDER` alone changes
+how `node_windows` sorts what it is given; it does not put peripherals into `entries`. Give `pack()`
+the same declaration-ordered placement the C++ loader does, above the tile array, aligned to each
+region's own size.
+
+**This is not cosmetic — `noc_egress_base` collides without it.** `noc_egress_base(entries)`
+(`address_map.py:181-201`) is "the first power of two at or above the top of the map", and its
+docstring promises the aperture "cannot collide with a real region however the map grows". That
+promise holds only if `entries` contains every region. With peripherals missing, `top` is the top of
+the TILE array, the aperture lands below the peripheral regions, and `NOC_EGRESS_BASE` — stamped
+into the SV at `gen_tb_top.py:1113` and used by `user_node_endpoint.sv` to offset collective writes
+toward the NI — points inside a peripheral's window. A collective write would be decoded as a
+peripheral access instead of reaching the NI.
+
+The two packers have twin formulas and have drifted before. Make the peripheral arithmetic
+identical, not merely equivalent, and assert in the C++ loader that its own top-of-map matches what
+`noc_egress_base` would compute, so a future drift fails loudly rather than aliasing.
 
 - [ ] **Step 5: Run the C++ tests only**
 
