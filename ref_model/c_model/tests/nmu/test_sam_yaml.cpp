@@ -382,6 +382,45 @@ TEST(SamYaml, APeripheralRegionIsReachableAndCarriesItsPortAndSpace) {
     EXPECT_EQ(t.dst_id, 0x00u) << "a peripheral shares its host router's coordinate";
 }
 
+// A memory-only x_dim by y_dim mesh plus one peripheral, for the face-legality
+// death cases below. Written out rather than listed because the smallest mesh
+// with an INTERIOR coordinate is 4 wide, and a hand-listed 4x2 tile map is eight
+// lines per fixture that say nothing.
+static std::string write_peripheral_map(const char* name, unsigned x_dim, unsigned y_dim,
+                                        unsigned px, unsigned py, const char* face) {
+    auto path = ni::cmodel::testing::unique_temp_path(name);
+    std::ofstream out(path);
+    out << "topology: { name: t, x_dim: " << x_dim << ", y_dim: " << y_dim
+        << ", num_vc: 1 }\naddress_map:\n  block_size: 0x100000000\n  tiles:\n";
+    for (unsigned y = 0; y < y_dim; ++y) {
+        for (unsigned x = 0; x < x_dim; ++x) {
+            out << "    - { x: " << x << ", y: " << y << ", size: 0x1000 }\n";
+        }
+    }
+    out << "  peripherals:\n    - { x: " << px << ", y: " << py << ", face: " << face
+        << ", size: 0x1000 }\n";
+    return path;
+}
+
+// The face assert is the deadlock-freedom precondition, not input tidiness: a
+// boundary port on an edge router is terminal, while the same port on an
+// interior router carries a live inter-router link and the peripheral's Y-to-X
+// ejection turn closes a channel dependency cycle. No shipped topology can make
+// it fire -- on a 2x2 every coordinate is on both edges, and the four-face
+// topology puts every peripheral on an edge deliberately -- so this is the only
+// place the guard is exercised at all.
+//
+// A dimension of 4 is the smallest with an interior coordinate: x = 1 on a
+// 4-wide mesh is on neither x edge, y = 1 on a 4-tall one is on neither y edge.
+// Both axes, because the condition reversed -- on_y_edge for face "x" -- would
+// still pass an x-only case.
+TEST(SamYamlDeath, APeripheralFaceMustNameAnEdgeItsCoordinateIsOn) {
+    EXPECT_DEATH(load_sam_table(write_peripheral_map("sam_face_x.yaml", 4, 2, 1, 0, "x")),
+                 "face names an edge");
+    EXPECT_DEATH(load_sam_table(write_peripheral_map("sam_face_y.yaml", 2, 4, 0, 1, "y")),
+                 "face names an edge");
+}
+
 TEST(SamYaml, MemorySpaceStaysACollectiveTargetAlongsideAPeripheral) {
     // The regression this task exists to prevent: keyed on class, a peripheral
     // carrying the Data class joins the memory space's tile walk, the walk's
