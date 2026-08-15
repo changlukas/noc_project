@@ -562,6 +562,34 @@ def test_tile_targets_pads_a_peripheral_row_to_the_widest():
     assert per_ep[4][1] == {"space": None, "base": 0, "size": 0}
 
 
+def test_dma_refuses_a_peripheral_topology(tmp_path, monkeypatch):
+    """The DMA flavour cannot run a peripheral topology (known-limitations):
+    gen_dma_jobs walks the router array, so a peripheral endpoint gets no
+    jobs.txt and its driver $fatals on the missing file. It used to GENERATE --
+    and the top it produced was wrong a second way, because _dma_check's
+    MEM_TARGET is the last target, which on a padded peripheral row is the
+    zero-size pad. Refusing beats emitting either defect.
+
+    gen_tb_top.main() reads sys.argv rather than taking an argv list, so the
+    command line is monkeypatched instead of passed.
+    """
+    import sys as _sys
+
+    out = str(tmp_path / "tb.sv")
+
+    def _run(topology):
+        monkeypatch.setattr(_sys, "argv",
+                            ["gen_tb_top.py", "--topology", topology, "--dma", "--out", out])
+        return gen_tb_top.main()
+
+    with pytest.raises(SystemExit, match="--dma does not support"):
+        _run("mesh_2x2_vc1_periph")
+    # Not a blanket ban on --dma: the same call on a peripheral-free topology
+    # still emits, or the guard would be indistinguishable from deleting --dma.
+    assert _run("mesh_2x2_vc1") == 0
+    assert os.path.isfile(out)
+
+
 def test_tile_targets_rejects_a_peripheral_whose_order_is_not_its_own_space(monkeypatch):
     """The order cross-check is per PORT and runs BEFORE the padding. Compared
     after, every short row would read as ragged-then-padded and the check would

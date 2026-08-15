@@ -1514,6 +1514,21 @@ def main() -> int:
     if a.print_num_vc:
         print(topo["topology"]["num_vc"])
         return 0
+    # The DMA flavour cannot run a peripheral topology at all
+    # (docs/known-limitations.md): gen_dma_jobs.job_table walks the router array
+    # only, so a peripheral endpoint gets no jobs.txt and its idma_job_driver
+    # $fatals on the missing file. Refused here rather than emitted, because the
+    # top it would emit is also wrong in a quieter way -- _dma_check's
+    # MEM_TARGET is the LAST target, which on a peripheral's padded row is the
+    # zero-size pad, so the preload and the region compare would address a
+    # window that decodes nothing.
+    if a.dma and (topo.get("address_map") or {}).get("peripherals"):
+        raise SystemExit(
+            f"gen_tb_top: --dma does not support topology {a.topology}, which declares "
+            f"address_map.peripherals -- gen_dma_jobs.job_table emits jobs for the router "
+            f"array only, so a peripheral endpoint has no jobs.txt and its idma_job_driver "
+            f"$fatals on the missing file (docs/known-limitations.md). Use a topology with "
+            f"no peripherals block, or the directed top (no --dma)")
     tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma, a.jobs_per_node, a.length, a.rw)
     fab_text = emit_fabric(topo)
     default_out = ROOT / "sim" / "tb" / "soc" / f"tb_top_dma_{a.topology}.sv" if a.dma \
