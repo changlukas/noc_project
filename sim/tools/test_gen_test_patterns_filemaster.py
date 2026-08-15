@@ -758,6 +758,49 @@ def test_config_probe_window_is_bounded_by_the_config_entry(tmp_path):
         _emit_mcast(tmp_path, 0x1000)
 
 
+def test_footprint_guard_rejects_a_region_bytes_overrun_of_the_memory_tile(tmp_path, capsys):
+    """region_bytes is a formula over node/transaction count and burst footprint;
+    it never looks at the destination tile's real size. On a shrunk tile the
+    old behaviour was a co-sim DECERR, not a generator error -- this asserts
+    the generator now catches it itself.
+
+    2x2 (n_slots=4), transactions_per_node=10, default size/len -> stride=0x40,
+    region_bytes=4*10*0x40=0xa00. base_local+region_bytes=0x1000+0xa00=0x1a00,
+    which overruns a 0x1000 B (4 KB aligned) tile."""
+    topo_path = tmp_path / "small.yaml"
+    topo_path.write_text(_uniform_topology_yaml("small", 2, 2, tile_size=0x1000))
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "neighbor", "--topology", str(topo_path),
+                "--out", str(tmp_path / "out"), "--transactions-per-node", "10"])
+    # ap.error() prints to stderr and exits with a bare status code, so the
+    # computed numbers (not a mock) are checked in the captured message.
+    err = capsys.readouterr().err
+    assert "extent(0xa00)" in err
+    assert "overruns the smallest memory aperture 0x1000" in err
+
+
+def test_footprint_guard_accounts_for_the_multicast_pattern_s_wider_extent(tmp_path, capsys):
+    """The multicast pattern stacks its collective window on top of region_bytes
+    (mcast_base = base_local + region_bytes, emit_multicast_pattern), so the
+    same tile can hold region_bytes alone yet still be too small once the
+    multicast window is counted.
+
+    2x2, transactions_per_node=16, default size/len -> stride=0x40,
+    region_bytes=4*16*0x40=0x1000. A 0x2000 B (4 KB aligned) tile exactly holds
+    base_local+region_bytes=0x2000 (neighbor passes) but not
+    base_local+region_bytes+txn*stride=0x2400 (multicast)."""
+    topo_path = tmp_path / "small.yaml"
+    topo_path.write_text(_uniform_topology_yaml("small", 2, 2, tile_size=0x2000))
+    g.main(["--pattern", "neighbor", "--topology", str(topo_path),
+            "--out", str(tmp_path / "out_neighbor"), "--transactions-per-node", "16"])
+    with pytest.raises(SystemExit):
+        g.main(["--pattern", "multicast", "--topology", str(topo_path),
+                "--out", str(tmp_path / "out_mcast"), "--transactions-per-node", "16"])
+    err = capsys.readouterr().err
+    assert "extent(0x1400)" in err
+    assert "overruns the smallest memory aperture 0x2000" in err
+
+
 def test_noc_egress_aperture_sits_above_every_window():
     """A collective whose address names the issuing node's own region would be answered
     by the tile crossbar and never reach the NI. The endpoint offsets it into

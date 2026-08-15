@@ -1247,6 +1247,18 @@ def main(argv=None):
     burst_footprint = (a.burst_len + 1) * (1 << a.size)
     stride = max(_SLOT_STRIDE, burst_footprint)
     region_bytes = n_slots * a.transactions_per_node * stride
+    # region_bytes is a formula over node/transaction count and burst footprint;
+    # it never looks at the destination tile's actual size, so nothing above
+    # would notice a footprint that overruns a shrunk tile until co-sim faults.
+    # The multicast pattern stacks its own window on top (mcast_base =
+    # base_local + region_bytes, emit_multicast_pattern), so it needs a wider
+    # extent checked here too.
+    extent = region_bytes + (a.transactions_per_node * stride if a.pattern == "multicast" else 0)
+    smallest_tile = min(sizes["memory"].values())
+    if base_local + extent > smallest_tile:
+        ap.error(f"footprint base_local({base_local:#x}) + extent({extent:#x}) = "
+                 f"{base_local + extent:#x} overruns the smallest memory aperture "
+                 f"{smallest_tile:#x}; reduce --transactions-per-node, --len, or --size")
     rng = _random_module.Random(a.seed)
     # Ids draw from their own stream, so changing --ids-per-initiator moves the
     # ids and nothing else. Sharing `rng` would shift every later destination
