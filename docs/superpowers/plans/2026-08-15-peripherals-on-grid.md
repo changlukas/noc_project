@@ -464,8 +464,8 @@ toward the NI — points inside a peripheral's window. A collective write would 
 peripheral access instead of reaching the NI.
 
 The two packers have twin formulas and have drifted before. Make the peripheral arithmetic
-identical, not merely equivalent, and assert in the C++ loader that its own top-of-map matches what
-`noc_egress_base` would compute, so a future drift fails loudly rather than aliasing.
+identical, not merely equivalent — the existing pytest fixtures that pin generated addresses are
+what catches a drift, and they already do that job for the tile bases.
 
 - [ ] **Step 5: Run the C++ tests only**
 
