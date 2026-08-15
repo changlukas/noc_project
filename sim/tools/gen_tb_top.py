@@ -1258,11 +1258,13 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w('                                                                 input int b_rob_depth,')
     w('                                                                 input int r_rob_depth,')
     w('                                                                 input int max_txns_per_id,')
+    w('                                                                 input int port_id,')
     w('                                                                 input string config_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_nsu_create(input string name,')
     w('                                                              input int src_id, input int num_vc,')
     w('                                                              input int max_unique_ids,')
     w('                                                              input int max_outstanding,')
+    w('                                                              input int port_id,')
     w('                                                              input string config_path);')
     w('    import "DPI-C" context function longint unsigned cmodel_dat_merge_create(input string name,')
     w('                                                                    input int dat_num_vc);')
@@ -1316,11 +1318,11 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     # its responses come back to.
     for (i, x, y, c) in endpoints:
         w(f'        nmu_ctx[{i}] = cmodel_nmu_create_ex("nmu_{i}", {c}, DAT_NUM_VC, '
-          f'READ_ROB_ENABLED, b_rob_depth, r_rob_depth, max_txns_per_id, '
+          f'READ_ROB_ENABLED, b_rob_depth, r_rob_depth, max_txns_per_id, 0, '
           f'sam_config_path);  '
-          f'// src_id = {"node" if i < n else "peripheral"}{i} coord {c}')
+          f'// src_id = {"node" if i < n else "peripheral"}{i} coord {c}, port 0 = LOCAL')
         w(f'        nsu_ctx[{i}] = cmodel_nsu_create("nsu_{i}", {c}, DAT_NUM_VC, max_unique_ids, '
-          f'max_outstanding, sam_config_path);')
+          f'max_outstanding, 0, sam_config_path);')
         w(f'        dat_merge_ctx[{i}] = cmodel_dat_merge_create("dat_merge_{i}", DAT_NUM_VC);')
     w("    end")
     w("")

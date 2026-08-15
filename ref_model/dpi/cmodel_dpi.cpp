@@ -436,15 +436,17 @@ using ni::cmodel::wrap::NmuOutputs;
 static unsigned long long nmu_create_impl(const char* name, int src_id, int dat_num_vc,
                                           ni::cmodel::nmu::RobMode rob_mode,
                                           const char* config_path, std::size_t b_rob_depth,
-                                          std::size_t r_rob_depth, std::size_t max_txns_per_id) {
+                                          std::size_t r_rob_depth, std::size_t max_txns_per_id,
+                                          int port_id) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nmu_create: not initialized");
         return 0ull;
     }
     DPI_BOUNDARY_BEGIN_R(nmu_create_impl, 0ull) {
         auto adapter = std::make_unique<NmuWrap>();
-        adapter->init(config_path, static_cast<uint8_t>(src_id), static_cast<uint8_t>(dat_num_vc),
-                      ni::NMU_QUEUE_DEPTH, rob_mode, b_rob_depth, r_rob_depth, max_txns_per_id);
+        adapter->init(config_path, static_cast<uint8_t>(src_id), static_cast<uint8_t>(port_id),
+                      static_cast<uint8_t>(dat_num_vc), ni::NMU_QUEUE_DEPTH, rob_mode, b_rob_depth,
+                      r_rob_depth, max_txns_per_id);
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nmu), WrapType::Nmu, HandleState::Live,
             std::string(name),
@@ -459,18 +461,19 @@ static unsigned long long nmu_create_impl(const char* name, int src_id, int dat_
 extern "C" unsigned long long cmodel_nmu_create(const char* name, int src_id, int dat_num_vc,
                                                 const char* config_path) {
     return nmu_create_impl(name, src_id, dat_num_vc, ni::cmodel::nmu::RobMode::Enabled, config_path,
-                           ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH, ni::NMU_MAX_TXNS_PER_ID);
+                           ni::NMU_ROB_B_DEPTH, ni::NMU_ROB_R_DEPTH, ni::NMU_MAX_TXNS_PER_ID,
+                           /*port_id=*/0);
 }
 
 extern "C" unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_num_vc,
                                                    int rob_enabled, int b_rob_depth,
                                                    int r_rob_depth, int max_txns_per_id,
-                                                   const char* config_path) {
+                                                   int port_id, const char* config_path) {
     return nmu_create_impl(
         name, src_id, dat_num_vc,
         rob_enabled ? ni::cmodel::nmu::RobMode::Enabled : ni::cmodel::nmu::RobMode::Disabled,
         config_path, static_cast<std::size_t>(b_rob_depth), static_cast<std::size_t>(r_rob_depth),
-        static_cast<std::size_t>(max_txns_per_id));
+        static_cast<std::size_t>(max_txns_per_id), port_id);
 }
 
 extern "C" void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
@@ -643,15 +646,16 @@ using ni::cmodel::wrap::NsuOutputs;
 
 extern "C" unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,
                                                 int max_unique_ids, int max_outstanding,
-                                                const char* config_path) {
+                                                int port_id, const char* config_path) {
     if (g_session_state != SessionState::Initialized) {
         DPI_SET_ERR_IF_CLEAR(CMODEL_DPI_ERR_NOT_INITIALIZED, "cmodel_nsu_create: not initialized");
         return 0ull;
     }
     DPI_BOUNDARY_BEGIN_R(cmodel_nsu_create, 0ull) {
         auto adapter = std::make_unique<NsuWrap>();
-        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(dat_num_vc),
-                      ni::NSU_QUEUE_DEPTH, static_cast<std::size_t>(max_unique_ids),
+        adapter->init(static_cast<uint8_t>(src_id), static_cast<uint8_t>(port_id),
+                      static_cast<uint8_t>(dat_num_vc), ni::NSU_QUEUE_DEPTH,
+                      static_cast<std::size_t>(max_unique_ids),
                       static_cast<std::size_t>(max_outstanding), config_path);
         auto* h = new HandleBlock{
             static_cast<uint32_t>(WrapType::Nsu), WrapType::Nsu, HandleState::Live,

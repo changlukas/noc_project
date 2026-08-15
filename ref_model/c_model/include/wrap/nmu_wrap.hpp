@@ -72,8 +72,8 @@ class NmuWrap {
     // scalar); dat_num_vc is the topology's VC count (mesh_4x4_vc{2,4,8}
     // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
     // AXI channel.
-    void init(const char* config_path, uint8_t src_id = 0, uint8_t dat_num_vc = 1,
-              std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
+    void init(const char* config_path, uint8_t src_id = 0, uint8_t port_id = 0,
+              uint8_t dat_num_vc = 1, std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
               nmu::RobMode rob_mode = nmu::RobMode::Enabled,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
@@ -83,9 +83,15 @@ class NmuWrap {
             throw std::invalid_argument(
                 "NmuWrap::init: config_path is required (topology YAML with an address_map block)");
         }
+        if (port_id > 2) {
+            throw std::invalid_argument(
+                "NmuWrap::init: port_id 3 is the reserved encoding (0 = LOCAL, 1 = x face, "
+                "2 = y face)");
+        }
         dat_num_vc_ = dat_num_vc;
         NmuConfig cfg{};
         cfg.src_id = src_id;
+        cfg.port_id = port_id;
         cfg.sam = addr_trans::load_sam_table(config_path);
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;

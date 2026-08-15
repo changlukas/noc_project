@@ -54,6 +54,7 @@
 #include <deque>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 
 namespace ni::cmodel::wrap {
 
@@ -69,15 +70,21 @@ class NsuWrap {
     // can rewrite an arriving address to name this node (nsu::Depacketize's
     // rebase_). Empty means "no address map", and the NSU forwards addresses
     // untouched, which is what the pure-C++ fixtures want.
-    void init(uint8_t src_id = 0, uint8_t dat_num_vc = 1,
+    void init(uint8_t src_id = 0, uint8_t port_id = 0, uint8_t dat_num_vc = 1,
               std::size_t queue_depth = ni::NSU_QUEUE_DEPTH,
               std::size_t max_unique_ids = ni::NSU_META_BUFFER_MAX_UNIQUE_IDS,
               std::size_t max_outstanding = ni::NSU_META_BUFFER_MAX_OUTSTANDING,
               const char* config_path = nullptr) {
         using namespace ni::cmodel::nsu;
+        if (port_id > 2) {
+            throw std::invalid_argument(
+                "NsuWrap::init: port_id 3 is the reserved encoding (0 = LOCAL, 1 = x face, "
+                "2 = y face)");
+        }
         dat_num_vc_ = dat_num_vc;
         NsuConfig cfg{};
         cfg.src_id = src_id;
+        cfg.port_id = port_id;
         if (config_path != nullptr && config_path[0] != '\0') {
             const auto sam = nmu::addr_trans::load_sam_table(config_path);
             for (axi::AxiClass cls : {axi::AxiClass::Narrow, axi::AxiClass::Data}) {

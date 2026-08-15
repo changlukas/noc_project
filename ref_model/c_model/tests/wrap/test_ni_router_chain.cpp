@@ -102,8 +102,9 @@ static void run_chain(bool* ok_data) {
     MemSlave slave[2];
 
     for (int k = 0; k < 2; ++k) {
-        n[k].nmu.init(kTopologyYaml, /*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
-        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
+        n[k].nmu.init(kTopologyYaml, /*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0,
+                      /*dat_num_vc=*/1);
+        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0, /*dat_num_vc=*/1);
         n[k].merge.init(1);
         n[k].router.init(/*x=*/static_cast<uint8_t>(k), /*y=*/0, /*mesh_x=*/2, /*mesh_y=*/2,
                          /*dat_num_vc=*/1);
@@ -311,11 +312,11 @@ TEST(NiRouterChain, TwoMastersOneNsuConcurrentWritesDoNotCrossWire) {
     // A and B are masters (need the row SAM to translate their AW/AR
     // addresses to C's tile); C's own master face is idle, so its topology is
     // never consulted. dst tile 1 (x=1,y=0, C's position) base = 0x100000.
-    n[A].nmu.init(sam_path.c_str(), /*src_id=*/0, /*dat_num_vc=*/1);
-    n[B].nmu.init(sam_path.c_str(), /*src_id=*/2, /*dat_num_vc=*/1);
-    n[C].nmu.init(kTopologyYaml, /*src_id=*/1, /*dat_num_vc=*/1);
+    n[A].nmu.init(sam_path.c_str(), /*src_id=*/0, /*port_id=*/0, /*dat_num_vc=*/1);
+    n[B].nmu.init(sam_path.c_str(), /*src_id=*/2, /*port_id=*/0, /*dat_num_vc=*/1);
+    n[C].nmu.init(kTopologyYaml, /*src_id=*/1, /*port_id=*/0, /*dat_num_vc=*/1);
     for (std::size_t k : {A, C, B}) {
-        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
+        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0, /*dat_num_vc=*/1);
         n[k].merge.init(1);
     }
     n[A].router.init(/*x=*/0, /*y=*/0, /*mesh_x=*/3, /*mesh_y=*/1, /*dat_num_vc=*/1);
@@ -534,7 +535,7 @@ TEST(NiRouterChain, TwoNodeWriteThenReadbackMatches) {
 // it does, a passing chain test proves nothing about the fabric.
 TEST(NiRouterChain, DeadFabricProducesNoResponses) {
     NmuWrap nmu;
-    nmu.init(kTopologyYaml, /*src_id=*/0, /*dat_num_vc=*/1);
+    nmu.init(kTopologyYaml, /*src_id=*/0, /*port_id=*/0, /*dat_num_vc=*/1);
 
     NmuInputs in{};
     NmuOutputs q{};  // registered outputs (previous cycle)
@@ -632,11 +633,11 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
     // ROB Enabled: the T3 guard's class-change-forces-RoB-fallback path only
     // exists in Enabled mode (Disabled mode's single-outstanding interlock is
     // already class-agnostic by construction, stage design §2 scope notes).
-    n[0].nmu.init(path.c_str(), /*src_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
+    n[0].nmu.init(path.c_str(), /*src_id=*/0, /*port_id=*/0, /*dat_num_vc=*/1, ni::NMU_QUEUE_DEPTH,
                   ni::cmodel::nmu::RobMode::Enabled);
-    n[1].nmu.init(kTopologyYaml, /*src_id=*/1, /*dat_num_vc=*/1);
+    n[1].nmu.init(kTopologyYaml, /*src_id=*/1, /*port_id=*/0, /*dat_num_vc=*/1);
     for (int k = 0; k < 2; ++k) {
-        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*dat_num_vc=*/1);
+        n[k].nsu.init(/*src_id=*/static_cast<uint8_t>(k), /*port_id=*/0, /*dat_num_vc=*/1);
         n[k].merge.init(1);
         n[k].router.init(/*x=*/static_cast<uint8_t>(k), /*y=*/0, /*mesh_x=*/2, /*mesh_y=*/2,
                          /*dat_num_vc=*/1);

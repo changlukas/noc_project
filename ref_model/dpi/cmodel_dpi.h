@@ -156,7 +156,7 @@ unsigned long long cmodel_nmu_create(const char* name, int src_id, int dat_num_v
                                      const char* config_path);
 unsigned long long cmodel_nmu_create_ex(const char* name, int src_id, int dat_num_vc,
                                         int rob_enabled, int b_rob_depth, int r_rob_depth,
-                                        int max_txns_per_id, const char* config_path);
+                                        int max_txns_per_id, int port_id, const char* config_path);
 // awuser: 58-bit AWUSER (spec §6 layout — [7:0] user, [9:8] collective_op,
 // [57:10] collective address mask) => 2 svBitVecVal words, little-endian.
 void cmodel_nmu_set_inputs(unsigned long long ctx, svBit awvalid, svBitVecVal* awid,
@@ -184,11 +184,10 @@ unsigned int cmodel_nmu_read_slot_hwm(unsigned long long ctx);
 // per-id order-list depth and the two shared-pool peaks. All outputs 0 if the
 // handle is invalid or the RoB is not standalone.
 void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_bypass,
-                                    unsigned int* aw_same_dest_bypass,
-                                    unsigned int* aw_fallback_alloc, unsigned int* ar_idle_bypass,
-                                    unsigned int* ar_same_dest_bypass,
-                                    unsigned int* ar_fallback_alloc, unsigned int* order_list_hwm,
-                                    unsigned int* write_txns_hwm, unsigned int* read_txns_hwm);
+                                unsigned int* aw_same_dest_bypass, unsigned int* aw_fallback_alloc,
+                                unsigned int* ar_idle_bypass, unsigned int* ar_same_dest_bypass,
+                                unsigned int* ar_fallback_alloc, unsigned int* order_list_hwm,
+                                unsigned int* write_txns_hwm, unsigned int* read_txns_hwm);
 
 // Nsu — three NoC faces (REQ ingress ready/valid, RSP egress ready/valid,
 // DAT ingress+egress credit) + AXI master side.
@@ -217,7 +216,7 @@ void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_by
 // each space keeps its node coordinates -- so it can rewrite an arriving
 // address to name this node. "" or NULL forwards addresses untouched.
 unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,
-                                     int max_unique_ids, int max_outstanding,
+                                     int max_unique_ids, int max_outstanding, int port_id,
                                      const char* config_path);
 void cmodel_nsu_set_inputs(unsigned long long ctx, svBit rx_req_valid, svBitVecVal* rx_req_flit,
                            svBit tx_rsp_ready, svBit rx_dat_valid, svBitVecVal* rx_dat_flit,

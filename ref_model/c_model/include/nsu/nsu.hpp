@@ -61,6 +61,11 @@ namespace ni::cmodel::nsu {
 
 struct NsuConfig {
     uint8_t src_id = 0;
+    // Which endpoint at this coordinate. 0 is the router's LOCAL port, the
+    // tile. Non-zero names a boundary-port peripheral (round 3). Checked
+    // against the dst_port_id of every request that arrives, and stamped into
+    // every response as src_port_id.
+    uint8_t port_id = 0;
     // Where each space keeps its node coordinates, indexed by axi::AxiClass.
     // Left undeclared (x_count == 0) the NSU forwards addresses untouched,
     // which is what a map with no readable coordinate field asks for.

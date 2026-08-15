@@ -151,6 +151,11 @@ struct NmuRspREntry {
 
 struct NmuConfig {
     uint8_t src_id = 0;
+    // Which endpoint at this coordinate. 0 is the router's LOCAL port, the
+    // tile. Non-zero names a boundary-port peripheral (round 3). Stamped into
+    // every request this NI issues as src_port_id, and checked against the
+    // dst_port_id of every response that comes back.
+    uint8_t port_id = 0;
     addr_trans::SamTable sam{};
     RobMode read_rob_mode = RobMode::Enabled;
     // RoB pool depths, per direction. Enabled mode only.
