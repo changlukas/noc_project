@@ -321,14 +321,16 @@ places each request at `base(dst) + offset`, and the NMU SAM translates the
 address back to `dst_id`. One source, so the two never disagree.
 
 `tiles:` gives each node its own `size`; there is no `tile_size` and no
-`base` key. Bases come from the coordinate and the block stride, not
-accumulation: `base = idx * block_size + offset[space]`, where
+`base` key. Bases come from the coordinate and the block stride -- the sim
+YAML's `block_size` key, what `docs/noc-target-spec.md` §5.1 calls
+`node_stride` -- not accumulation: `base = idx * block_size + offset[space]`, where
 `idx = (y << x_bits) | x`, `x_bits` is `clog2(x_span)`, and `offset[space]` is
 0 for memory and the memory slot rounded up to the config slot for config
 (`nmu::addr_trans::SamTable::packed`), `slot` being the largest size declared
 in that space. `block_size` is either declared (`address_map.block_size`) or
 defaults to the next power of two at or above what the spaces occupy
-(`sam_yaml.hpp`'s `default_block_size`). A tile smaller than its space's slot
+(`sam_yaml.hpp`'s `default_block_size`, mirrored in `sim/tools/address_map.py`'s
+`pack()`). A tile smaller than its space's slot
 leaves a gap inside its own node's block; nothing shifts, because every
 node's base already comes from `idx * block_size`, never from a neighbor's
 extent. The node index and the routing id use different shifts: `dst_id =

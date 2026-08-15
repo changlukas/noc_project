@@ -63,7 +63,10 @@ class SamTable {
     // equal. dst_id = (y << X_WIDTH) | x per tile.
     static SamTable packed(const std::vector<PackedTile>& tiles, unsigned x_span, unsigned y_span,
                            uint64_t block_size) {
-        (void)y_span;  // the caller still needs it for validate()
+        // Unused here: this signature mirrors address_map.py's pack(tiles, x_span,
+        // y_span), which validates y_span inline. packed() only computes bases;
+        // validate() is the separate call that checks y_span, with its own copy.
+        (void)y_span;
         const unsigned x_bits = clog2(x_span);
         uint64_t memory_slot = 0;
         uint64_t config_slot = 0;
@@ -76,7 +79,7 @@ class SamTable {
         const uint64_t config_offset =
             config_slot == 0 ? 0 : ((memory_slot + config_slot - 1) / config_slot) * config_slot;
         assert((block_size & (block_size - 1)) == 0 && "SAM: block_size must be a power of two");
-        assert(block_size >= config_offset + config_slot &&
+        assert(block_size >= std::max(memory_slot, config_offset + config_slot) &&
                "SAM: block_size smaller than the spaces it must hold");
         std::vector<SamEntry> es;
         es.reserve(tiles.size());

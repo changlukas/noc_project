@@ -114,7 +114,7 @@ inline void check_decode_mode(const YAML::Node& am, const SamTable& table) {
         assert(c->x_range.offset == first->x_range.offset &&
                c->y_range.offset == first->y_range.offset &&
                "address_map: decode 'offset' holds one range pair for the whole map, so "
-               "every space must use the same region size");
+               "every space must use the same node stride");
     }
 }
 

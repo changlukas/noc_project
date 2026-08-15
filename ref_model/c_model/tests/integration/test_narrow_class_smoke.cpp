@@ -76,10 +76,12 @@ std::string hex0x(uint64_t v) {
 // Two memory windows behind one IMemoryPort, one per AXI class -- what
 // sim/tb/user_node_endpoint.sv's tile crossbar does in real hardware (one RAM
 // per address space, decoded from the master's address, not one RAM spanning
-// the gap between them). A single flat axi::Memory can no longer stand in
-// for the destination: the data-class and config-class windows are ~32 MB
-// apart (the node's memory tile size), and stretching one axi::Memory across
-// that gap would mean allocating ~32 MB for a unit test.
+// both). Under tile-major the two windows are adjacent (config starts right
+// where the 32 MB memory tile ends), so a single flat axi::Memory could now
+// cover both cheaply -- but it would accept an address that drifted across the
+// class boundary as ordinary in-range traffic. window_for_'s bounds check
+// below is what still requires two windows: a lane re-anchor bug that crosses
+// classes hits its assert instead of landing silently in the other window.
 class DualWindowMemoryPort : public axi::IMemoryPort {
   public:
     DualWindowMemoryPort(uint64_t data_base, std::size_t data_size, uint64_t config_base,
