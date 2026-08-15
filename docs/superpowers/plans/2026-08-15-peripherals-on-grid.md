@@ -33,6 +33,8 @@ and the round 3 row of the Rounds table.
   initialised positionally somewhere.
 - snake_case for variables and methods, PascalCase for types, no camelCase. Full words, no
   abbreviations. 4-space indent, 100 columns, repo-root `.clang-format` on every touched `.hpp`/`.cpp`.
+- `clang-format` is NOT installed on the WSL distro. Run it from the Windows side:
+  `C:\msys64\mingw64\bin\clang-format -i <files>`, against the repo-root `.clang-format`.
 - Commit message format `type(scope): description`, English.
 - Build and test on WSL, from `/mnt/e/05_NoC/noc_project`, with `BUILD_ROOT=$HOME/noc_build`.
   Use `python3`, never `py -3`. Prefix `wsl` calls carrying POSIX paths with `MSYS_NO_PATHCONV=1`.
@@ -213,9 +215,12 @@ TEST(SamYaml, MemorySpaceStaysACollectiveTargetAlongsideAPeripheral) {
 }
 ```
 
-Both need the round-3 `mesh_2x2_vc1_periph.yaml`, which Task 2 writes. **Until Task 2 lands they
-fail on the current YAML.** That is expected; Step 2 records which way they fail so Task 2's
-reviewer can tell a fixed test from a still-broken one.
+**Both of these pass on the CURRENT YAML, and must stay green through Task 2.** The shipped
+`mesh_2x2_vc1_periph.yaml` has no `peripherals:` block — its peripherals are ordinary tiles at an
+off-grid coordinate — so there is no peripheral-space entry, `collective_coords(Space::Peripheral)`
+is legitimately null, and memory's stride is already 2^32. They are the right regression to hold,
+but they are NOT Task 2's acceptance: neither would notice if Task 2 forgot to write the block. See
+Task 2 Step 2 for the case that does notice.
 
 Add to `ref_model/c_model/tests/nmu/test_sam_table.cpp`:
 
@@ -397,15 +402,34 @@ address_map:
 Rewrite the file's header comment to describe this layout. The current one explains the off-grid
 span at length and every sentence of it is now false.
 
-- [ ] **Step 2: Run the Task 1 tests and watch them pass**
+- [ ] **Step 2: Write the case that fails without the block**
+
+Task 1's two `SamYaml` cases already pass on the pre-round-3 YAML, so neither would notice if this
+task forgot to write the `peripherals:` block or forgot to read it. This task needs its own
+acceptance — a case that is red before Step 1 and green after Step 3:
+
+```cpp
+TEST(SamYaml, APeripheralRegionIsReachableAndCarriesItsPortAndSpace) {
+    // The block's first entry: (0, 0) face x, so port 1, sharing router (0, 0)'s
+    // coordinate. Its region sits above the tile array -- 2x2 tiles at a
+    // 0x100000000 block stride put the top of the array at 0x400000000.
+    auto sam = load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    const auto t = sam.translate(0x400000000ull);
+    EXPECT_EQ(t.space, axi::Space::Peripheral);
+    EXPECT_EQ(t.port, 1u);
+    EXPECT_EQ(t.dst_id, 0x00u) << "a peripheral shares its host router's coordinate";
+}
+```
+
+Run it before Step 3 and confirm it fails — on the current YAML `translate(0x400000000)` finds no
+entry at all. Then keep Task 1's two cases green alongside it:
 
 ```bash
 ctest --test-dir $HOME/noc_build/cmodel -R "SamYaml" --output-on-failure
 ```
 
-`PeripheralSpaceIsNotACollectiveTarget` and `MemorySpaceStaysACollectiveTargetAlongsideAPeripheral`
-were written in Task 1 and have been failing since. They must pass once the loader reads the block —
-they are this task's acceptance, not decoration.
+Check the address arithmetic against what your Step 1 YAML actually declares before writing the
+literal — the assertion shape is exact, the constant follows from the tile map.
 
 - [ ] **Step 3: Read the block in the loader**
 
