@@ -167,7 +167,7 @@ def emit_file_master_node(out_dir, src_idx, dst_bases, n_nodes,
     full strobe.
 
     dst_bases: the destination WINDOW BASE per transaction, from
-    address_map.pack(). A base, not a coordinate: a peripheral shares its host
+    address_map.pack_config(). A base, not a coordinate: a peripheral shares its host
     router's coordinate and is told apart by the port it hangs off, so the
     coordinate no longer names one destination and the base does.
 
@@ -853,9 +853,9 @@ def _load_topology(name):
     nodes = [(idx, x, y, cid), ...] with x/y the ARRAY position and cid the ROUTE
     coordinate id, bases = {dst_id: base} (memory space) and
     config_bases = {dst_id: base} (config space, sparse -- most topologies
-    have none), both from address_map.pack(); sizes = {"memory": {dst_id:
+    have none), both from address_map.pack_config(); sizes = {"memory": {dst_id:
     size}, "config": {dst_id: size}} for capacity checks; peripherals =
-    address_map.pack()'s peripheral entries in declaration order, each carrying
+    address_map.pack_config()'s peripheral entries in declaration order, each carrying
     its own base and size.
 
     Peripherals come back as their own list because they cannot be recovered
@@ -879,7 +879,7 @@ def _load_topology(name):
     # host router's coordinate and takes none of its own, so a tile's array
     # position is its coordinate.
     x_dim, y_dim = address_map.router_array(topo)
-    bases, entries = address_map.pack_document(topo)
+    bases, entries = address_map.pack_config(topo)
     config_bases = {e["dst_id"]: e["base"] for e in entries if e["space"] == "config"}
     sizes = {
         "memory": {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"},

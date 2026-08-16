@@ -11,7 +11,7 @@
 //      at burst start, then full rate). A second AW presented mid-burst still
 //      gets its ready pulse — multi-outstanding AW (post addresses ahead of
 //      data) is legitimate AXI4 and load-bearing for the RoB/multi-ID paths.
-#include "common/tmp_path.hpp"
+#include "common/mesh_config.hpp"
 #include "ni_flit_constants.h"
 #include "wrap/flit_byte_conv.hpp"
 #include "wrap/nmu_wrap.hpp"
@@ -160,17 +160,13 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
 }
 
 // The legacy default (4 GB tiles) resolves the same address to a different dst_id/local_addr, so
-// observing the YAML-mapped values proves init(config_path) actually loaded the topology YAML's
-// address_map.
+// observing the config-mapped values proves init(config_path) actually loaded the config file's
+// address ranges.
 TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
-    auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_sam.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n"
-                           "    - { x: 1, y: 1, size: 0x1000 }\n";
+    const std::string path = ni::cmodel::testing::write_config(
+        "nmu_wrap_sam.yml",
+        ni::cmodel::testing::mesh_config_yaml(
+            2, 2, "      - { base: 0x0, size: 0x1000, stride: 0x1000, space: memory }\n"));
 
     NmuWrap adapter;
     adapter.init(path.c_str());
@@ -224,14 +220,10 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
 // into the AW flit header. This is the wrap-level weld the DPI awuser
 // argument lands on; the translate itself is T2-tested at the Rob level.
 TEST(NmuWrap, awuser_collective_reaches_flit_header) {
-    auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_awuser_sam.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n"
-                           "    - { x: 1, y: 1, size: 0x1000 }\n";
+    const std::string path = ni::cmodel::testing::write_config(
+        "nmu_wrap_awuser_sam.yml",
+        ni::cmodel::testing::mesh_config_yaml(
+            2, 2, "      - { base: 0x0, size: 0x1000, stride: 0x1000, space: memory }\n"));
 
     NmuWrap adapter;
     adapter.init(path.c_str());

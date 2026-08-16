@@ -516,7 +516,7 @@ module dma_node_endpoint #(
     // (axi_test.sv:2133-2134), so an error response would otherwise pass
     // silently. A DMA reaches this failure mode more easily than the file
     // master did: gen_dma_jobs.py recomputes the window bases through
-    // address_map.pack(), and a disagreement with the SAM lands here.
+    // address_map.pack_config(), and a disagreement with the SAM lands here.
     always_ff @(posedge clk_i) begin
         if (rst_ni && mst_post_delay.r_valid && mst_post_delay.r_ready &&
                 !resp_ok(mst_post_delay.r_resp))

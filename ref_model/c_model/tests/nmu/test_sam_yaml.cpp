@@ -1,11 +1,10 @@
 #include "nmu/sam_yaml.hpp"
 #include "axi/types.hpp"
-#include "common/tmp_path.hpp"
+#include "common/mesh_config.hpp"
 #include <gtest/gtest.h>
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -13,81 +12,41 @@ using ni::cmodel::nmu::addr_trans::collective_translate;
 using ni::cmodel::nmu::addr_trans::load_sam_table;
 using ni::cmodel::nmu::addr_trans::SamEntry;
 using ni::cmodel::nmu::addr_trans::SamTable;
+using ni::cmodel::testing::mesh_config_yaml;
+using ni::cmodel::testing::write_config;
+using ni::cmodel::testing::write_mesh_config;
 namespace axi = ni::cmodel::axi;
 
-TEST(SamYaml, PackedTilesBaseFromCoordinateAndSlot) {
-    // x_dim = 2 -> x_bits = 1, slot = largest declared size = 0x2000.
-    // base(1,0) = ((0<<1)|1) * 0x2000 -- the coordinate times the slot, not
-    // list-order accumulation.
-    auto path = ni::cmodel::testing::unique_temp_path("sam_packed.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x2000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n"
-                           "    - { x: 1, y: 1, size: 0x1000 }\n";
-    auto sam = load_sam_table(path);
-    ASSERT_EQ(sam.entries().size(), 4u);
-    EXPECT_EQ(sam.entries()[0].base, 0x0ull);
-    EXPECT_EQ(sam.entries()[1].base, 0x2000ull);
-}
-
-TEST(SamYaml, TranslateForwardsTheAddressFromAPackedMap) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_packed_translate.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x100000000 }\n"
-                           "    - { x: 1, y: 0, size: 0x100000000 }\n"
-                           "    - { x: 0, y: 1, size: 0x100000000 }\n"
-                           "    - { x: 1, y: 1, size: 0x100000000 }\n";
-    auto sam = load_sam_table(path);
-    auto t = sam.translate(0x300000040ull);  // 4th tile (x=1,y=1), base 0x300000000
-    EXPECT_EQ(t.dst_id, 0x11u);
-    EXPECT_EQ(t.local_addr, 0x300000040ull);  // forwarded unchanged
-}
-
-TEST(SamYaml, MissingNodeRejected) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_missing_node.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n";  // (1,1) missing
-    EXPECT_DEATH(load_sam_table(path), "exactly once");
-}
-
-TEST(SamYaml, DuplicateNodeRejected) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_dup_node.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"  // dup (0,0)
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n";  // (1,1) missing
-    EXPECT_DEATH(load_sam_table(path), "duplicate");
+// SamTable::validate() is what rejects a map that misses a node, duplicates
+// one, or declares a misaligned region, and tests/nmu/test_sam_table.cpp holds
+// it to each of those directly. What is only checkable here is that the config
+// reader actually RUNS it -- an expansion that skipped validate() would load
+// this file happily and hand the model a three-node map for a four-node mesh.
+TEST(SamYaml, AnExpandedConfigIsValidated) {
+    // num 3 with an explicit member list: the tile endpoint covers three of the
+    // four routers, which no array: form can express.
+    const std::string text =
+        "name: t\n"
+        "endpoints:\n"
+        "  - name: \"tile\"\n"
+        "    num: 3\n"
+        "    sbr_port_protocol: [\"axi\"]\n"
+        "    addr_range:\n"
+        "      - { base: 0x0, size: 0x1000, stride: 0x1000, space: memory }\n"
+        "routers:\n"
+        "  - { name: \"router\", array: [2, 2] }\n"
+        "connections:\n"
+        "  - { src: \"tile\", dst: \"router\", src_idx: [0, 1, 2], dst_idx: [0, 1, 2], "
+        "dst_dir: 4 }\n";
+    EXPECT_DEATH(load_sam_table(write_config("sam_short_mesh.yml", text)), "exactly once");
 }
 
 TEST(SamYaml, MeshDimBelowMinimumRejected) {
-    auto path_x = ni::cmodel::testing::unique_temp_path("sam_mesh_x1.yaml");
-    std::ofstream(path_x) << "topology: { name: t, x_dim: 1, y_dim: 4, num_vc: 1 }\n"
-                             "address_map:\n"
-                             "  tiles:\n"
-                             "    - { x: 0, y: 0, size: 0x1000 }\n"
-                             "    - { x: 0, y: 1, size: 0x1000 }\n"
-                             "    - { x: 0, y: 2, size: 0x1000 }\n"
-                             "    - { x: 0, y: 3, size: 0x1000 }\n";
-    EXPECT_DEATH(load_sam_table(path_x), "mesh dimensions must be >= 2");
-
-    auto path_y = ni::cmodel::testing::unique_temp_path("sam_mesh_y1.yaml");
-    std::ofstream(path_y) << "topology: { name: t, x_dim: 1, y_dim: 1, num_vc: 1 }\n"
-                             "address_map:\n"
-                             "  tiles:\n"
-                             "    - { x: 0, y: 0, size: 0x1000 }\n";
-    EXPECT_DEATH(load_sam_table(path_y), "mesh dimensions must be >= 2");
+    const std::string ranges = "      - { base: 0x0, size: 0x1000, stride: 0x1000 }\n";
+    EXPECT_DEATH(load_sam_table(write_config("sam_mesh_x1.yml", mesh_config_yaml(1, 4, ranges))),
+                 "mesh dimensions must be >= 2");
+    EXPECT_DEATH(load_sam_table(write_config("sam_mesh_y1.yml", mesh_config_yaml(2, 1, ranges))),
+                 "mesh dimensions must be >= 2");
 }
 
 // Guards the real shipped configs. CONFIG_DIR is sim/configs/ itself
@@ -96,11 +55,11 @@ TEST(SamYaml, MeshDimBelowMinimumRejected) {
 //
 // The claim is the packing formula, base = range.base + range.stride *
 // ((y << clog2(x_dim)) | x), spelled out here from the config keys instead of
-// read back from SamTable::packed(). This is one half of the bit-identity with
+// read back from the expansion. This is one half of the bit-identity with
 // sim/tools/address_map.py that the model and the stimulus generator both
-// depend on: this test holds SamTable::packed() to the formula, and the Python
+// depend on: this test holds load_config_table() to the formula, and the Python
 // twin (test_address_map_pack_real_configs_at_the_coordinate_formula in
-// sim/tools/test_gen_test_patterns_filemaster.py) holds pack_document() to it
+// sim/tools/test_gen_test_patterns_filemaster.py) holds pack_config() to it
 // over the same files. Both passing is what makes the two sides identical.
 // The member index is X-fast, which is this repo's node numbering and not
 // FlooNoC's Y-fast one -- on a square mesh the two produce the same SET of
@@ -161,30 +120,12 @@ TEST(SamYaml, RealConfigsPackedAtTheCoordinateFormula) {
 // collective wildcard would name a node with no router. Refused at load, while
 // the topology is still a document and not a mesh.
 TEST(SamYamlDeath, ANonPowerOfTwoMeshDimensionIsRejected) {
-    auto path_x = ni::cmodel::testing::unique_temp_path("sam_dim_x3.yaml");
-    std::ofstream(path_x) << "topology: { name: t, x_dim: 3, y_dim: 2, num_vc: 1 }\n"
-                             "address_map:\n"
-                             "  tiles:\n"
-                             "    - { x: 0, y: 0, size: 0x1000 }\n"
-                             "    - { x: 1, y: 0, size: 0x1000 }\n"
-                             "    - { x: 2, y: 0, size: 0x1000 }\n"
-                             "    - { x: 0, y: 1, size: 0x1000 }\n"
-                             "    - { x: 1, y: 1, size: 0x1000 }\n"
-                             "    - { x: 2, y: 1, size: 0x1000 }\n";
-    EXPECT_DEATH(load_sam_table(path_x), "powers of two");
-
+    const std::string ranges = "      - { base: 0x0, size: 0x1000, stride: 0x1000 }\n";
+    EXPECT_DEATH(load_sam_table(write_config("sam_dim_x3.yml", mesh_config_yaml(3, 2, ranges))),
+                 "powers of two");
     // Both axes, because a check written against x alone would still pass here.
-    auto path_y = ni::cmodel::testing::unique_temp_path("sam_dim_y3.yaml");
-    std::ofstream(path_y) << "topology: { name: t, x_dim: 2, y_dim: 3, num_vc: 1 }\n"
-                             "address_map:\n"
-                             "  tiles:\n"
-                             "    - { x: 0, y: 0, size: 0x1000 }\n"
-                             "    - { x: 1, y: 0, size: 0x1000 }\n"
-                             "    - { x: 0, y: 1, size: 0x1000 }\n"
-                             "    - { x: 1, y: 1, size: 0x1000 }\n"
-                             "    - { x: 0, y: 2, size: 0x1000 }\n"
-                             "    - { x: 1, y: 2, size: 0x1000 }\n";
-    EXPECT_DEATH(load_sam_table(path_y), "powers of two");
+    EXPECT_DEATH(load_sam_table(write_config("sam_dim_y3.yml", mesh_config_yaml(2, 3, ranges))),
+                 "powers of two");
 }
 
 TEST(SamYaml, TileMajorPacksEachNodeIntoOneBlock) {
@@ -305,43 +246,71 @@ TEST(SamYaml, APeripheralRegionIsReachableAndCarriesItsPortAndSpace) {
     EXPECT_EQ(t.dst_id, 0x00u) << "a peripheral shares its host router's coordinate";
 }
 
-// A memory-only x_dim by y_dim mesh plus one peripheral, for the face-legality
-// death cases below. Written out rather than listed because the smallest mesh
-// with an INTERIOR coordinate is 4 wide, and a hand-listed 4x2 tile map is eight
-// lines per fixture that say nothing.
-static std::string write_peripheral_map(const char* name, unsigned x_dim, unsigned y_dim,
-                                        unsigned px, unsigned py, const char* face) {
-    auto path = ni::cmodel::testing::unique_temp_path(name);
-    std::ofstream out(path);
-    out << "topology: { name: t, x_dim: " << x_dim << ", y_dim: " << y_dim
-        << ", num_vc: 1 }\naddress_map:\n  block_size: 0x100000000\n  tiles:\n";
-    for (unsigned y = 0; y < y_dim; ++y) {
-        for (unsigned x = 0; x < x_dim; ++x) {
-            out << "    - { x: " << x << ", y: " << y << ", size: 0x1000 }\n";
-        }
-    }
-    out << "  peripherals:\n    - { x: " << px << ", y: " << py << ", face: " << face
-        << ", size: 0x1000 }\n";
-    return path;
+// A mesh plus `num` peripherals, whose connections the caller spells out. The
+// endpoint belongs under endpoints: and its connection under connections:, so
+// the two halves are spliced in at their own keys -- mesh_config_yaml ends on
+// the connections list, which is why the second half appends.
+static std::string write_peripheral_config(const char* name, unsigned x_dim, unsigned y_dim,
+                                           unsigned num, const std::string& connections) {
+    std::string text = mesh_config_yaml(
+        x_dim, y_dim, "      - { base: 0x0, size: 0x1000, stride: 0x100000000, space: memory }\n");
+    text.insert(text.find("routers:\n"),
+                "  - name: \"peripheral\"\n"
+                "    num: " + std::to_string(num) + "\n" +
+                    "    sbr_port_protocol: [\"axi\"]\n"
+                    "    addr_range:\n"
+                    "      - { base: 0x1000000000, size: 0x1000, stride: 0x1000, "
+                    "space: peripheral }\n");
+    return write_config(name, text + connections);
 }
 
-// The face assert is the deadlock-freedom precondition, not input tidiness: a
-// boundary port on an edge router is terminal, while the same port on an
-// interior router carries a live inter-router link and the peripheral's Y-to-X
-// ejection turn closes a channel dependency cycle. No shipped topology can make
-// it fire -- on a 2x2 every coordinate is on both edges, and the four-face
-// topology puts every peripheral on an edge deliberately -- so this is the only
-// place the guard is exercised at all.
+// The placement asserts are the deadlock-freedom precondition, not input
+// tidiness: a boundary port on an edge router is terminal, while the same port
+// on an interior router carries a live inter-router link and the peripheral's
+// Y-to-X ejection turn closes a channel dependency cycle. No shipped config can
+// make them fire -- on a 2x2 every coordinate is on both edges, and the
+// four-peripheral config puts every one on an edge deliberately -- so this is
+// the only place the guard is exercised at all.
+//
+// gen_tb_top.py's _peripherals() refuses the same three shapes with the same
+// reasons; both readers of one config must reject it, and the generator's copy
+// is tested in sim/tools/test_gen_test_patterns_filemaster.py.
 //
 // A dimension of 4 is the smallest with an interior coordinate: x = 1 on a
 // 4-wide mesh is on neither x edge, y = 1 on a 4-tall one is on neither y edge.
-// Both axes, because the condition reversed -- on_y_edge for face "x" -- would
-// still pass an x-only case.
-TEST(SamYamlDeath, APeripheralFaceMustNameAnEdgeItsCoordinateIsOn) {
-    EXPECT_DEATH(load_sam_table(write_peripheral_map("sam_face_x.yaml", 4, 2, 1, 0, "x")),
-                 "face names an edge");
-    EXPECT_DEATH(load_sam_table(write_peripheral_map("sam_face_y.yaml", 2, 4, 0, 1, "y")),
-                 "face names an edge");
+// Both axes, because a check written against x alone would still pass the y
+// case.
+TEST(SamYamlDeath, APeripheralDirectionMustNameAnEdgeItsCoordinateIsOn) {
+    // 4x2, router index 1 = (1, 0), WEST: x is 1, not the west edge.
+    EXPECT_DEATH(load_sam_table(write_peripheral_config(
+                     "sam_face_x.yml", 4, 2, 1,
+                     "  - { src: \"peripheral\", dst: \"router\", src_idx: [0], dst_idx: [1], "
+                     "dst_dir: 3 }\n")),
+                 "names an edge this coordinate is not on");
+    // 2x4, router index 2 = (0, 1), NORTH: y is 1, not the north edge.
+    EXPECT_DEATH(load_sam_table(write_peripheral_config(
+                     "sam_face_y.yml", 2, 4, 1,
+                     "  - { src: \"peripheral\", dst: \"router\", src_idx: [0], dst_idx: [2], "
+                     "dst_dir: 0 }\n")),
+                 "names an edge this coordinate is not on");
+}
+
+TEST(SamYamlDeath, APeripheralOutsideTheRouterArrayIsRejected) {
+    // A peripheral shares a router's coordinate, so index 8 on a 4x2 array
+    // names no router to hang off.
+    EXPECT_DEATH(load_sam_table(write_peripheral_config(
+                     "sam_periph_off_array.yml", 4, 2, 1,
+                     "  - { src: \"peripheral\", dst: \"router\", src_idx: [0], dst_idx: [8], "
+                     "dst_dir: 3 }\n")),
+                 "outside the array");
+}
+
+TEST(SamYamlDeath, TwoPeripheralsOnOneRouterPortAreRejected) {
+    EXPECT_DEATH(load_sam_table(write_peripheral_config(
+                     "sam_periph_dup_port.yml", 2, 2, 2,
+                     "  - { src: \"peripheral\", dst: \"router\", src_idx: [0, 1], "
+                     "dst_idx: [0, 0], dst_dir: 3 }\n")),
+                 "both claim the same router port");
 }
 
 TEST(SamYaml, MemorySpaceStaysACollectiveTargetAlongsideAPeripheral) {
@@ -465,93 +434,52 @@ TEST(SamYaml, SlicedNodeMaskMatchesTheEnumeratedOne) {
 }
 
 TEST(SamYaml, UnknownSpaceRejected) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_bad_space.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000, space: bogus }\n"
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n"
-                           "    - { x: 1, y: 1, size: 0x1000 }\n";
-    EXPECT_DEATH(load_sam_table(path), "space");
-}
-
-TEST(SamYaml, ConfigSpaceDuplicateNodeRejected) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_dup_config.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n"
-                           "    - { x: 1, y: 1, size: 0x1000 }\n"
-                           "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
-                           "    - { x: 0, y: 0, size: 0x1000, space: config }\n";  // dup config
-    EXPECT_DEATH(load_sam_table(path), "duplicate");
-}
-
-TEST(SamYaml, NonAlignedSizeRejected) {
-    auto path = ni::cmodel::testing::unique_temp_path("sam_bad_size.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1800 }\n";  // 6 KB, not 4 KB aligned
-    // "|" alternation is unsupported by gtest's simple regex engine (used
-    // when GTEST_USES_POSIX_RE=0, e.g. MSVC/MinGW) -- keep this a plain literal.
-    EXPECT_DEATH(load_sam_table(path), "aligned");
+    const std::string ranges =
+        "      - { base: 0x0, size: 0x1000, stride: 0x1000, space: bogus }\n";
+    EXPECT_DEATH(load_sam_table(write_config("sam_bad_space.yml", mesh_config_yaml(2, 2, ranges))),
+                 "space must be");
 }
 
 // === Decode mode (spec §5.1) ===
 //
-// Offset decode holds one coordinate range pair for the whole map, so it is
-// legal only where every space puts its node index at the same address bits.
-// Nothing else about the map changes, which is why the same tile list is legal
-// under table decode and rejected under offset decode below.
+// routing.use_id_table false is offset decode, which holds ONE coordinate range
+// pair for the whole map and is therefore legal only where every space puts its
+// node index at the same address bits. Each addr_range authors its own stride,
+// so that is a property of the file: the same map is legal under table decode
+// and rejected under offset decode below.
+//
+// This is also the only place use_id_table: false is exercised at all -- every
+// shipped config leaves it at the default.
 
-// Equal region size in both spaces: memory 4 KB at 0x0, config 4 KB at 0x4000,
-// so both node-index fields land at [13:12] and one pair reaches both.
-static const char* kEqualSizedSpaces =
-    "    - { x: 0, y: 0, size: 0x1000 }\n"
-    "    - { x: 1, y: 0, size: 0x1000 }\n"
-    "    - { x: 0, y: 1, size: 0x1000 }\n"
-    "    - { x: 1, y: 1, size: 0x1000 }\n"
-    "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
-    "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
-    "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
-    "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
-
-// Unequal-sized spaces, self-contained (not the shipped tile size, which is
-// now 4 GiB): memory 1 MB, config 4 KB. Under tile-major both spaces still
-// share one node stride (block_size, not the individual region sizes), so the
-// node index sits at the same bit position in both -- legal under table
-// decode AND offset decode, unlike the old per-space-sized stride this
-// fixture used to demonstrate the rejection of.
-static const char* kShippedSizedSpaces =
-    "    - { x: 0, y: 0, size: 0x100000 }\n"
-    "    - { x: 1, y: 0, size: 0x100000 }\n"
-    "    - { x: 0, y: 1, size: 0x100000 }\n"
-    "    - { x: 1, y: 1, size: 0x100000 }\n"
-    "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
-    "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
-    "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
-    "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
-
-// Returns what unique_temp_path already gives, a std::string. Declaring
-// filesystem::path here converted it on the way out and left load_sam_table's
-// const std::string& with no way back: string -> path is implicit, path ->
-// string is not.
-static std::string write_map(const char* name, const char* decode, const char* tiles) {
-    auto path = ni::cmodel::testing::unique_temp_path(name);
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                        << "  decode: " << decode << "\n"
-                        << "  tiles:\n"
-                        << tiles;
-    return path;
+// One stride for both spaces: memory 4 KB at 0x0, config 4 KB at 0x100000, node
+// stride 0x200000 in both, so one range pair reaches both.
+static std::string one_stride_config(const char* name, const char* routing) {
+    return write_config(
+        name, mesh_config_yaml(
+                  2, 2,
+                  "      - { base: 0x0, size: 0x1000, stride: 0x200000, space: memory }\n"
+                  "      - { base: 0x100000, size: 0x1000, stride: 0x200000, space: config }\n",
+                  routing));
 }
 
-TEST(SamYaml, OffsetDecodeAcceptsEqualSizedSpaces) {
-    auto sam = load_sam_table(write_map("sam_offset_ok.yaml", "offset", kEqualSizedSpaces));
+// Two strides: memory strides 0x100000 and config 0x200000, so the node index
+// sits at bit 20 in one space and bit 21 in the other. The regions still do not
+// overlap and every node is covered exactly once, so nothing but the decode mode
+// has anything to say about this map.
+static std::string two_stride_config(const char* name, const char* routing) {
+    return write_config(
+        name, mesh_config_yaml(
+                  2, 2,
+                  "      - { base: 0x0, size: 0x1000, stride: 0x100000, space: memory }\n"
+                  "      - { base: 0x800000, size: 0x1000, stride: 0x200000, space: config }\n",
+                  routing));
+}
+
+static const char* kOffsetDecode = "routing:\n  use_id_table: false\n";
+static const char* kTableDecode = "routing:\n  use_id_table: true\n";
+
+TEST(SamYaml, OffsetDecodeAcceptsOneStrideAcrossSpaces) {
+    auto sam = load_sam_table(one_stride_config("sam_offset_ok.yml", kOffsetDecode));
     const auto* mem = sam.collective_coords(axi::Space::Memory);
     const auto* cfg = sam.collective_coords(axi::Space::Config);
     ASSERT_NE(mem, nullptr);
@@ -560,26 +488,22 @@ TEST(SamYaml, OffsetDecodeAcceptsEqualSizedSpaces) {
     EXPECT_EQ(mem->y_range.offset, cfg->y_range.offset);
 }
 
-// Tile-major gives every space the same node stride (block_size), so decode
-// 'offset' -- one coordinate range pair for the whole map -- is satisfied by
-// construction, whatever the spaces' own region sizes are. This fixture used
-// to be the offset-decode rejection case; it is not one anymore.
-TEST(SamYaml, OffsetDecodeIsSatisfiedByConstructionUnderTileMajor) {
-    auto sam = load_sam_table(write_map("sam_offset_unequal.yaml", "offset", kShippedSizedSpaces));
-    const auto* mem = sam.collective_coords(axi::Space::Memory);
-    const auto* cfg = sam.collective_coords(axi::Space::Config);
-    ASSERT_NE(mem, nullptr);
-    ASSERT_NE(cfg, nullptr);
-    EXPECT_EQ(mem->x_range.offset, cfg->x_range.offset);  // the one global pair
-    EXPECT_EQ(mem->y_range.offset, cfg->y_range.offset);
+TEST(SamYamlDeath, OffsetDecodeRejectsTwoStridesAcrossSpaces) {
+    EXPECT_DEATH(load_sam_table(two_stride_config("sam_offset_two.yml", kOffsetDecode)),
+                 "same node stride");
 }
 
-TEST(SamYaml, TableDecodeAcceptsUnequalSpaceSizes) {
-    auto sam = load_sam_table(write_map("sam_table_unequal.yaml", "table", kShippedSizedSpaces));
+// The same map under table decode, which holds the ranges per entry and so has
+// nothing to say about the two strides disagreeing. Without this the rejection
+// above would be indistinguishable from the map simply being malformed.
+TEST(SamYaml, TableDecodeAcceptsTwoStridesAcrossSpaces) {
+    auto sam = load_sam_table(two_stride_config("sam_table_two.yml", kTableDecode));
     EXPECT_EQ(sam.entries().size(), 8u);
 }
 
-TEST(SamYaml, UnknownDecodeModeRejected) {
-    auto path = write_map("sam_bad_decode.yaml", "slice", kEqualSizedSpaces);
-    EXPECT_DEATH(load_sam_table(path), "table");
+// Omitting routing: entirely must decode as table, or a config that never
+// mentions the mode would silently take the stricter one.
+TEST(SamYaml, TableDecodeIsTheDefault) {
+    auto sam = load_sam_table(two_stride_config("sam_default_decode.yml", ""));
+    EXPECT_EQ(sam.entries().size(), 8u);
 }

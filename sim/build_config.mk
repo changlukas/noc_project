@@ -198,7 +198,7 @@ SPECGEN_CONSTANTS := $(PROJ_ROOT)/specgen/source/constants.yaml
 CODEGEN           := $(PROJ_ROOT)/specgen/tools/codegen.py
 NI_PARAMS_SV      := $(SPECGEN_SV_INC)/ni_params_pkg.sv
 NI_PARAMS_H       := $(SPECGEN_INC)/ni_params.h
-# gen_tb_top.py imports address_map, whose router_array / pack_document /
+# gen_tb_top.py imports address_map, whose router_array / pack_config /
 # noc_egress_base produce what topology_pkg.sv and the DMA top contain, so it
 # is a prerequisite of both wherever the generator is.
 GEN_TB_TOP_DEPS   := $(COSIM_ROOT)/tools/gen_tb_top.py $(COSIM_ROOT)/tools/address_map.py

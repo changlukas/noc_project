@@ -325,7 +325,7 @@ def tile_targets(topo: dict, endpoints):
 
     Returns ({endpoint_idx: [{"space", "base", "size"}, ...]}, noc_egress_base).
     """
-    _bases, entries = address_map.pack_document(topo)
+    _bases, entries = address_map.pack_config(topo)
     out = {}
     for idx, _x, _y, cid, port in endpoints:
         windows = address_map.node_windows(entries, cid, port)

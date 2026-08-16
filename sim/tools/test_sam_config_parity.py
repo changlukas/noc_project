@@ -46,7 +46,7 @@ def rule_line(name, entry):
 def rule_lines():
     out = []
     for path in configs():
-        _bases, entries = address_map.pack_document(yaml.safe_load(path.read_text()))
+        _bases, entries = address_map.pack_config(yaml.safe_load(path.read_text()))
         out += [rule_line(path.stem, e) for e in entries]
     return out
 

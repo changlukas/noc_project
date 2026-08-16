@@ -29,7 +29,7 @@ def test_every_job_addresses_a_real_sam_region(tmp_path):
     than ported."""
     out = tmp_path / "jobs"
     g.main(["--topology", "mesh_2x2", "--out", str(out), "--jobs-per-node", "4"])
-    _bases, entries = address_map.pack_document(_topology("mesh_2x2"))
+    _bases, entries = address_map.pack_config(_topology("mesh_2x2"))
     windows = [(e["base"], e["base"] + e["size"]) for e in entries]
 
     def _owner(addr):
@@ -62,7 +62,7 @@ def test_direction_crosses_the_fabric(tmp_path, rw):
     out = tmp_path / "jobs"
     g.main(["--topology", "mesh_2x2", "--out", str(out), "--jobs-per-node", str(n),
             "--rw", rw])
-    bases, entries = address_map.pack_document(topo)
+    bases, entries = address_map.pack_config(topo)
     sizes = {e["dst_id"]: e["size"] for e in entries if e["space"] == "memory"}
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
 

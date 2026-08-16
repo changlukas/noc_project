@@ -387,15 +387,15 @@ def test_ids_per_initiator_overlapping_blocks_fit_the_id_width(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# address_map.py: packing + validation (mirrors c_model SamTable::packed /
-# SamTable::validate, nmu/addr_trans.hpp).
+# address_map.py: expansion + validation (mirrors c_model load_config_table /
+# SamTable::validate, nmu/sam_yaml.hpp, nmu/addr_trans.hpp).
 # ---------------------------------------------------------------------------
 
 def test_tile_major_packs_each_node_into_one_block():
     """A node's regions are contiguous inside its own block, and the stride is
     declared rather than taken from the largest region size."""
     topo = gen_tb_top.load_topology("mesh_2x2")
-    _bases, entries = address_map.pack_document(topo)
+    _bases, entries = address_map.pack_config(topo)
     got = {(e["space"], e["x"], e["y"]): e["base"] for e in entries}
     block = 0x100000000
     for idx, (x, y) in enumerate([(0, 0), (1, 0), (0, 1), (1, 1)]):
@@ -404,84 +404,21 @@ def test_tile_major_packs_each_node_into_one_block():
 
 
 def test_pack_rejects_a_non_power_of_two_row():
-    """x_dim 3 means clog2(3) = 2 index bits, so a row strides four slots with
-    one unused and the top tile index is (1 << 2) | 2 = 6 -- while the
-    peripheral placement starts at x_dim * y_dim = 6 blocks, tile (2,1)'s own
-    base. The overlap is silent, so pack() refuses the shape rather than
-    packing it. sam_yaml.hpp and gen_tb_top._check_flit_capacity refuse it too;
-    this is the copy gen_test_patterns.py reaches first, since it calls pack()
-    before its own capacity check."""
-    from address_map import pack
-    mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1, 2)]
-    cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
-           for y in (0, 1) for x in (0, 1, 2)]
+    """x_dim 3 means clog2(3) = 2 index bits, so the array index leaves a gap in
+    every row and the member index no longer names the coordinate it packs at.
+    Refused at the router array, before any range is expanded.
+    sam_yaml.hpp's load_config_table and gen_tb_top._check_flit_capacity refuse
+    the same shape independently."""
     with pytest.raises(ValueError, match="must be a power of two"):
-        pack({"tiles": mem + cfg}, 3, 2)
-
-
-def test_pack_default_block_size_doubles_the_stride_to_fit_config():
-    """The regression guard for a plain mesh, updated for tile-major packing.
-    No declared block_size, so it defaults to the next power of two above one
-    node's memory + config: 0x101000 -> 0x200000. That is double the memory
-    tile alone -- the stride is no longer just the memory slot, the way it was
-    before every space shared one node's block."""
-    from address_map import pack
-    mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1)]
-    cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
-           for y in (0, 1) for x in (0, 1)]
-    _, entries = pack({"tiles": mem + cfg}, 2, 2)
-    got = {(e["x"], e["y"], e["space"]): e["base"] for e in entries}
-    assert got == {
-        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x200000,
-        (0, 1, "memory"): 0x400000, (1, 1, "memory"): 0x600000,
-        (0, 0, "config"): 0x100000, (1, 0, "config"): 0x300000,
-        (0, 1, "config"): 0x500000, (1, 1, "config"): 0x700000,
-    }
-
-
-def test_pack_places_a_smaller_entry_on_its_own_slot():
-    """Mixed sizes are still accepted, bounded by the space's slot (here
-    max(0x1000, 0x2000) = 0x2000) -- but a smaller entry no longer drags its
-    neighbours down. Every entry sits at its own coordinate's slot, so the
-    address's coordinate field reads back correctly no matter which entry is
-    smaller. Under the old accumulator a single undersized tile shifted every
-    base after it; this is the sharpest case of that in the suite."""
-    am = {"tiles": [
-        {"x": 0, "y": 0, "size": 0x1000},
-        {"x": 1, "y": 0, "size": 0x2000},
-        {"x": 0, "y": 1, "size": 0x1000},
-        {"x": 1, "y": 1, "size": 0x1000},
-    ] + [{"x": x, "y": y, "size": 0x1000, "space": "config"}
-         for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]}
-    bases, entries = address_map.pack(am, x_dim=2, y_dim=2)
-    # No declared block_size: memory slot 0x2000 + config slot 0x1000 ->
-    # extent 0x3000 -> next power of two 0x4000. Node stride is 0x4000.
-    assert bases == {
-        address_map.dst_id(0, 0): 0,
-        address_map.dst_id(1, 0): 0x4000,
-        address_map.dst_id(0, 1): 0x8000,
-        address_map.dst_id(1, 1): 0xC000,
-    }
-    assert [e["base"] for e in entries] == [0, 0x4000, 0x8000, 0xC000,
-                                            0x2000, 0x6000, 0xA000, 0xE000]
-
-
-def _two_space_tiles(memory_sizes):
-    """2x2 memory tiles of the given sizes plus one 4 KB config tile per node."""
-    nodes = [(0, 0), (1, 0), (0, 1), (1, 1)]
-    return ([{"x": x, "y": y, "size": s, "space": "memory"}
-             for (x, y), s in zip(nodes, memory_sizes)] +
-            [{"x": x, "y": y, "size": 0x1000, "space": "config"} for x, y in nodes])
+        address_map.pack_config(_config_doc(3, 2, ranges=[
+            {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}]))
 
 
 def test_node_windows_are_that_node_s_own_regions():
     """The tile crossbar decodes on THIS node's windows, so a local initiator's
     address that belongs to another node misses both rules and falls through to
     the NMU. Sizes are exact -- axi_xbar states a rule as start/end."""
-    # No declared block_size: memory slot 0x100000 + config slot 0x1000 ->
-    # next power of two 0x200000. Node stride is 0x200000.
-    tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    _bases, entries = address_map.pack_config(_two_space_config())
     assert address_map.node_windows(entries, address_map.dst_id(0, 0), 0) == [
         {"space": "config", "base": 0x100000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
@@ -508,7 +445,7 @@ def test_node_windows_key_on_the_port_not_the_coordinate():
     locally, so nothing would ever reach the peripheral. The port is what tells
     the two endpoints apart."""
     topo = gen_tb_top.load_topology("mesh_2x2_periph")
-    _bases, entries = address_map.pack_document(topo)
+    _bases, entries = address_map.pack_config(topo)
     cid = address_map.dst_id(0, 0)
     tile = address_map.node_windows(entries, cid, 0)
     periph = address_map.node_windows(entries, cid, 1)
@@ -521,8 +458,7 @@ def test_node_windows_key_on_the_port_not_the_coordinate():
 
 
 def _two_space_config():
-    """The config twin of _two_space_tiles: 0x100000 memory + 4 KB config per
-    node, node stride 0x200000 (the next power of two above the two spaces)."""
+    """0x100000 memory + 4 KB config per node, node stride 0x200000."""
     return _config_doc(2, 2, ranges=[
         {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"},
         {"base": 0x100000, "size": 0x1000, "stride": 0x200000, "space": "config"}])
@@ -759,69 +695,39 @@ def test_all_to_all_is_deterministic():
     assert g.all_to_all_dsts(3, 16, 40) == g.all_to_all_dsts(3, 16, 40)
 
 
-def test_address_map_pack_rejects_zero_size():
-    am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
-    with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_dim=1, y_dim=1)
-
-
-def test_address_map_pack_rejects_negative_size():
-    am = {"tiles": [{"x": 0, "y": 0, "size": -0x1000}]}
-    with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_dim=1, y_dim=1)
-
-
-def test_address_map_pack_rejects_non_4k_aligned_size():
-    am = {"tiles": [{"x": 0, "y": 0, "size": 0x1234}]}
-    with pytest.raises(ValueError, match="4 KB aligned"):
-        address_map.pack(am, x_dim=1, y_dim=1)
-
-
-def test_address_map_pack_rejects_node_outside_mesh():
-    am = {"tiles": [{"x": 2, "y": 0, "size": 0x1000}]}
+def test_address_map_pack_rejects_a_member_outside_the_mesh():
+    """A peripheral shares a router's coordinate, so a dst_idx past the router
+    array names no router to hang off and the member has no coordinate at all."""
+    doc = _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}])
+    doc["connections"][0] = {"src": "tile", "dst": "router",
+                             "src_idx": [0, 1, 2, 3], "dst_idx": [0, 1, 2, 7], "dst_dir": 4}
     with pytest.raises(ValueError, match="outside mesh"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+        address_map.pack_config(doc)
 
 
-def test_address_map_pack_rejects_missing_node():
-    am = {"tiles": [{"x": 0, "y": 0, "size": 0x1000}]}  # 2x1 mesh needs 2 tiles
-    with pytest.raises(ValueError, match="expected 2"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+def test_address_map_pack_rejects_an_unattached_member():
+    """Every member takes its coordinate from a connection, so a member no
+    connection names would otherwise pack at whatever the list left behind."""
+    doc = _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}])
+    doc["connections"][0] = {"src": "tile", "dst": "router",
+                             "src_idx": [0, 1, 2], "dst_idx": [0, 1, 2], "dst_dir": 4}
+    with pytest.raises(ValueError, match="member 3 has no connection"):
+        address_map.pack_config(doc)
 
 
-def test_address_map_pack_rejects_missing_config_node():
-    """Config coverage is the same rule as memory coverage: a YAML one config
-    tile short packs to bases that are no longer a clean wildcard set, which
-    used to surface only under PATTERN=multicast."""
-    am = {"tiles": [
-        {"x": 0, "y": 0, "size": 0x1000},
-        {"x": 1, "y": 0, "size": 0x1000},
-        {"x": 0, "y": 0, "size": 0x1000, "space": "config"},
-    ]}
-    with pytest.raises(ValueError, match="config space covers 1 nodes, expected 2"):
-        address_map.pack(am, x_dim=2, y_dim=1)
-
-
-def test_address_map_pack_rejects_duplicate_node():
-    am = {"tiles": [
-        {"x": 0, "y": 0, "size": 0x1000},
-        {"x": 0, "y": 0, "size": 0x1000},
-    ]}
-    with pytest.raises(ValueError, match="duplicate mesh node"):
-        address_map.pack(am, x_dim=2, y_dim=1)
-
-
-def test_address_map_pack_rejects_missing_tiles_key():
-    with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack({}, x_dim=1, y_dim=1)
-    with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack(None, x_dim=1, y_dim=1)
+def test_address_map_pack_rejects_an_undeclared_space():
+    doc = _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "scratch"}])
+    with pytest.raises(ValueError, match="is not a declared space"):
+        address_map.pack_config(doc)
 
 
 def test_address_map_pack_real_configs_at_the_coordinate_formula():
     """Cross-check: every real sim/configs/*.yml packs at
     base = range.base + range.stride * ((y << clog2(x_dim)) | x), spelled out
-    here from the config keys rather than read back from pack_document(). This
+    here from the config keys rather than read back from pack_config(). This
     is the Python half of the packing agreement; the C++ half is
     SamYaml.RealConfigsPackedAtTheCoordinateFormula, asserting the same formula
     against SamTable::packed(). The member index is X-fast, which is this
@@ -846,7 +752,7 @@ def test_address_map_pack_real_configs_at_the_coordinate_formula():
         declared = {r.get("space", "memory"): (int(r["base"]),
                                                int(r.get("stride", r["size"])))
                     for r in tile["addr_range"]}
-        _bases, entries = address_map.pack_document(doc)
+        _bases, entries = address_map.pack_config(doc)
         for e in entries:
             if e["space"] == "peripheral":
                 continue
@@ -858,7 +764,7 @@ def test_address_map_pack_real_configs_at_the_coordinate_formula():
 
 def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
     """Cross-site invariant: the stimulus generator's base(dst_id) is
-    address_map.pack_document()'s, not a second packing rule of its own.
+    address_map.pack_config()'s, not a second packing rule of its own.
 
     The stride is deliberately larger than the aperture, so a packer that
     accumulated sizes instead of striding would land somewhere else."""
@@ -870,7 +776,7 @@ def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
     _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes, _periph = g._load_topology(
         str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
-    packed_bases, _entries = address_map.pack_document(topo)
+    packed_bases, _entries = address_map.pack_config(topo)
     assert bases_from_patterns == packed_bases
 
 
@@ -1011,8 +917,7 @@ def test_noc_egress_aperture_sits_above_every_window():
     by the tile crossbar and never reach the NI. The endpoint offsets it into
     this aperture, which is the first power of two at or above the map's top --
     so no node window can ever reach it, however the map grows."""
-    tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    _bases, entries = address_map.pack_config(_two_space_config())
     base = address_map.noc_egress_base(entries)
     top = max(e["base"] + e["size"] for e in entries)
     assert base >= top

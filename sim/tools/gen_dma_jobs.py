@@ -24,7 +24,7 @@ run-level argument (util/gen_jobs.py:266) rather than a per-job choice -- the
 same shape this file follows.  A WRITE job reads local and writes ext, so its
 write crosses the fabric and the tile crossbar answers its read; a READ job
 swaps them, so its READ crosses the fabric.  Both addresses are base(dst_id) +
-offset with the base packed by address_map.pack_document() over the topology's
+offset with the base packed by address_map.pack_config() over the topology's
 route span -- the base c_model's SamTable::packed computes from the same config
 file, never a restatement of its formula.
 
@@ -135,7 +135,7 @@ def job_table(topo, jobs_per_node, length, rw):
     into the DMA top's memory preload and region compare, so the stimulus and
     the check that reads it back cannot disagree about where a job's bytes are.
     """
-    bases, entries = address_map.pack_document(topo)
+    bases, entries = address_map.pack_config(topo)
     # The router array only: a peripheral is an endpoint, not a node, so every
     # job is router to router and XY reaches between any two of them.
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
