@@ -5,9 +5,6 @@ network_type: "axi"
 routing:
   route_algo: "XY"
   use_id_table: true
-  rob_idx_bits: 8
-  port_id_bits: 2
-  num_vc_id_bits: 3           # header field width; the VC COUNT is in constants.yaml
   collective:
     en_narrow_multicast: true
     en_wide_multicast: true

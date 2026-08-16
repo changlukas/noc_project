@@ -223,9 +223,6 @@ routing:
   route_algo: "XY"
   use_id_table: true           # our `decode: table`. false + addr_offset_bits is `offset`,
                                # whose validation is ours to keep — see 3.5
-  rob_idx_bits: 8
-  port_id_bits: 2
-  num_vc_id_bits: 3           # header field width; the VC COUNT is in constants.yaml
   collective:
     en_narrow_multicast: true
     en_wide_multicast: true
@@ -269,7 +266,7 @@ endpoints:
     num: 4
     sbr_port_protocol: ["axi"]
     addr_range:
-      - base: 0x400000000
+      - base: 0x1000000000        # 4x4 value; a 2x2 mesh's is 0x400000000
         size: 0x100000
         stride: 0x100000
         space: peripheral
@@ -312,7 +309,7 @@ schema:
 |---|---|---|
 | 0 | do we run floogen? | **No.** We adopt the schema shape and write our own readers. FlooNoC's pydantic validation is a reference, not a runtime constraint — so `network.py:395-405`'s rejection of `axi` with a nonzero `num_vc_id_bits` does not bind us. `noc_fabric.sv` and `noc_tb_top.sv` are kept. |
 | 1 | `network_type` | **`axi`** — determined by fact, not preference. `constants.yaml:60-70` records that the shared endpoint carries the data class at 512 b and **the narrow class rides the addressed 8 B lane of the same port**. One AXI interface per endpoint. FlooNoC's `narrow-wide` means two separate interfaces (occamy's `mgr_port_protocol: ["narrow_in", "wide_in"]`), which we do not have. |
-| 2 | `protocols:` | **Omitted.** The four AXI widths do not vary per configuration, so they stay in `constants.yaml` as the single source with its drift gate. FlooNoC makes the block required; we deviate, because copying it would put the same numbers in nine files with nothing comparing them. |
+| 2 | `protocols:` | **Omitted.** The four AXI widths do not vary per configuration, so they stay in `constants.yaml` as the single source with its drift gate. FlooNoC makes the block required; we deviate, because copying it would put the same numbers in nine files with nothing comparing them. The same reasoning removes `rob_idx_bits`, `port_id_bits` and `num_vc_id_bits` from `routing:`: the flit header layout does not vary per geometry and is already defined in `specgen/generated/json/ni_packet.json` (`VC_ID_WIDTH: 3`, `DST_PORT_ID_WIDTH: 2`, `SRC_PORT_ID_WIDTH: 2`). FlooNoC carries one `port_id_bits` where we carry a separate dst and src width, so the field was never a one-to-one copy either. `route_algo` and `use_id_table` stay — they describe the configuration and have no specgen definition. |
 | 3 | `num_vc` | **`constants.yaml` only. Not in the config files.** VC count is a DUT parameter, and the owner's rule puts it where it is defined. |
 | 4 | RoB mode | **`constants.yaml` only**, by the same rule. FlooNoC's own precedent agrees: its RoB enable/type is a chimney parameter (`hw/floo_nw_chimney.sv:43-45`), the chimney being its NMU/NSU, and `constants.yaml` already has an `nmu:` section. |
 | 5 | grouping key | **Superseded.** With `num_vc` and the RoB mode out of the config files, the eight configurations collapse to four geometries and there is one file per geometry. Nothing is left to group. See 8.1. |
