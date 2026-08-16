@@ -84,7 +84,8 @@ class NmuWrap {
         using namespace ni::cmodel::nmu;
         if (config_path == nullptr || config_path[0] == '\0') {
             throw std::invalid_argument(
-                "NmuWrap::init: config_path is required (a sim/configs file with an endpoints block)");
+                "NmuWrap::init: config_path is required (a sim/configs file with an endpoints "
+                "block)");
         }
         if (port_id > 2) {
             throw std::invalid_argument(

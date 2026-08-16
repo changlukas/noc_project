@@ -235,12 +235,11 @@ inline void check_boundary_attachments(const std::vector<Attachment>& attach, un
         // An endpoint on a boundary port takes no coordinate of its own, so an
         // index past the array names no router to hang off. Checked before the
         // edge test, which would otherwise report the wrong reason.
-        assert(x < x_dim && y < y_dim &&
-               "connection: dst_idx names a router outside the array");
-        const bool on_edge = a.dir == 3   ? x == 0            // WEST
-                             : a.dir == 1 ? x == x_dim - 1    // EAST
-                             : a.dir == 2 ? y == 0            // SOUTH
-                                          : y == y_dim - 1;   // NORTH
+        assert(x < x_dim && y < y_dim && "connection: dst_idx names a router outside the array");
+        const bool on_edge = a.dir == 3   ? x == 0           // WEST
+                             : a.dir == 1 ? x == x_dim - 1   // EAST
+                             : a.dir == 2 ? y == 0           // SOUTH
+                                          : y == y_dim - 1;  // NORTH
         assert(on_edge &&
                "connection: dst_dir names an edge this coordinate is not on -- an interior "
                "router's port carries a live inter-router link, and hanging an endpoint off it "

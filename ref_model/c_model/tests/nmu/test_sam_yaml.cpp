@@ -256,7 +256,8 @@ static std::string write_peripheral_config(const char* name, unsigned x_dim, uns
         x_dim, y_dim, "      - { base: 0x0, size: 0x1000, stride: 0x100000000, space: memory }\n");
     text.insert(text.find("routers:\n"),
                 "  - name: \"peripheral\"\n"
-                "    num: " + std::to_string(num) + "\n" +
+                "    num: " +
+                    std::to_string(num) + "\n" +
                     "    sbr_port_protocol: [\"axi\"]\n"
                     "    addr_range:\n"
                     "      - { base: 0x1000000000, size: 0x1000, stride: 0x1000, "
