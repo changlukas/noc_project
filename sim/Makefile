@@ -132,7 +132,7 @@ SWEEP_VCS   ?= 1 2 4 8
 # covers every point in the loop below.
 sim-injection-sweep:
 	$(MAKE) gen TB=tb_mesh_4x4_vc$(firstword $(SWEEP_VCS)) PATTERN=$(PATTERN) SEED=$(_SEED) \
-	    $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT))
+	    INJECTION_MODE=1 $(if $(INJECTION_COUNT),INJECTION_COUNT=$(INJECTION_COUNT))
 	@for vc in $(SWEEP_VCS); do \
 	    for r in $(SWEEP_RATES); do \
 	        echo ">>> sweep vc$$vc rate $$r"; \
