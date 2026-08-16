@@ -88,6 +88,38 @@ TB_GEOMETRY    := mesh_2x2
 TB_NUM_VC      := 1
 TB_READ_ROB    := 1
 endif
+ifeq ($(TOPOLOGY),mesh_4x4_vc1)
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_4x4
+TB_NUM_VC      := 1
+TB_READ_ROB    := 1
+endif
+ifeq ($(TOPOLOGY),mesh_4x4_vc2)
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_4x4
+TB_NUM_VC      := 2
+TB_READ_ROB    := 1
+endif
+ifeq ($(TOPOLOGY),mesh_4x4_vc4)
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_4x4
+TB_NUM_VC      := 4
+TB_READ_ROB    := 1
+endif
+ifeq ($(TOPOLOGY),mesh_4x4_vc8)
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_4x4
+TB_NUM_VC      := 8
+TB_READ_ROB    := 1
+endif
+# Geometry is mesh_4x4_periph4, not mesh_4x4: the peripherals change the address
+# map and the endpoint count, so this configuration imports a package of its own.
+ifeq ($(TOPOLOGY),mesh_4x4_vc1_periph4)
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_4x4_periph4
+TB_NUM_VC      := 1
+TB_READ_ROB    := 1
+endif
 
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
 # every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
