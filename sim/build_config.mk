@@ -242,16 +242,30 @@ NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
 # value out of a filename needs a new strip per suffix. gen_tb_top.py already
 # loads and validates the YAML, so it answers rather than a second reader here.
 # $(or ...) honours a local.mk PYTHON3 without defining one, which would
-# pre-empt each Makefile's own default. A checked-in testbench states its VC
-# count in the table above -- it has to, its flit package is compiled in -- so
-# the query runs only for the topologies still on the generated path.
-TOPOLOGY_NUM_VC := $(if $(TB_NUM_VC),$(TB_NUM_VC),$(shell $(or $(PYTHON3),python3) \
-    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc))
+# pre-empt each Makefile's own default.
+TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
+    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc)
 # An empty result means the generator failed -- unknown TOPOLOGY, missing YAML,
 # flit-capacity violation. Without this the symptom is a missing
 # noc_types_pkg_vc.sv instead of the generator's own message.
 $(if $(TOPOLOGY_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
 TOPOLOGY=$(TOPOLOGY); run it directly to see why))
+# A checked-in testbench states its VC count twice and derives neither from the
+# YAML: TB_NUM_VC above picks the flit package compiled in, DAT_NUM_VC in the
+# testbench source parameterizes the fabric and the NIs. Editing num_vc in the
+# YAML regenerates the address-map package and passes the flit-capacity check
+# while still compiling the old noc_types_pkg_vc<N> and building the NIs at the
+# old width -- a build that agrees with nothing, and silent. The query above
+# therefore runs for the hand-written topologies too, one interpreter start per
+# make parse, and the answer is compared rather than skipped.
+ifdef TB_NUM_VC
+ifneq ($(TB_NUM_VC),$(TOPOLOGY_NUM_VC))
+$(error TB_NUM_VC=$(TB_NUM_VC) for TOPOLOGY=$(TOPOLOGY) but \
+$(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml declares num_vc=$(TOPOLOGY_NUM_VC). \
+Update the table above AND the DAT_NUM_VC localparam in \
+$(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv, or put the YAML back)
+endif
+endif
 TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 
 # Per-geometry address-map package (topology_<geometry>_pkg.sv): TILE_BASE_ADDR
