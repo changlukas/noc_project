@@ -65,7 +65,7 @@ namespace ni::cmodel::wrap {
 class NmuWrap {
   public:
     // init — construct NmuStandalone with the co-sim default NmuConfig.
-    // config_path is the topology YAML carrying the `address_map` block; it
+    // config_path is the config file carrying the `endpoints` block; it
     // leads the argument list because there is no NMU without a SAM. Null or
     // empty throws, so a topology missing at the DPI boundary surfaces through
     // the same error latch as an unreadable YAML (load_sam_table throws too).
@@ -77,14 +77,15 @@ class NmuWrap {
     // AXI channel.
     void init(const char* config_path, uint8_t src_id = 0, uint8_t port_id = 0,
               uint8_t dat_num_vc = 1, std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
-              nmu::RobMode rob_mode = nmu::RobMode::Enabled,
+              nmu::RobMode rob_mode = nmu::DEFAULT_ROB_MODE,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
               std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID) {
         using namespace ni::cmodel::nmu;
         if (config_path == nullptr || config_path[0] == '\0') {
             throw std::invalid_argument(
-                "NmuWrap::init: config_path is required (topology YAML with an address_map block)");
+                "NmuWrap::init: config_path is required (a sim/configs file with an endpoints "
+                "block)");
         }
         if (port_id > 2) {
             throw std::invalid_argument(
@@ -114,8 +115,8 @@ class NmuWrap {
             throw std::invalid_argument(
                 "NmuWrap::init: no endpoint at this (src_id, port_id) in " +
                 std::string(config_path) +
-                " -- port 0 is the tile at src_id, a non-zero port is a peripheral the "
-                "address_map.peripherals block must declare at that coordinate and face");
+                " -- port 0 is the tile at src_id, a non-zero port is a peripheral an "
+                "endpoints entry must attach to that coordinate and face");
         }
         // REQ/RSP fixed single-VC (S1 Q2); DAT keeps the topology's VC count.
         cfg.num_vc = 1;

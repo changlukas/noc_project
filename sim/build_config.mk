@@ -1,8 +1,8 @@
 # Build environment config and simulator-neutral source lists shared by
 # sim/verilator/Makefile and sim/vcs/Makefile.
 #
-# tb_top SV sources live in sim/filelist_<TOPOLOGY>.f (generated from
-# TB_TOP_SV_SRC below); both Makefiles use -f filelist_<TOPOLOGY>.f for the
+# tb_top SV sources live in sim/filelist_<CONFIG>.f (generated from
+# TB_TOP_SV_SRC below); both Makefiles use -f filelist_<CONFIG>.f for the
 # tb_top verilate/compile step.
 #
 # COSIM_ROOT is derived from this file's own location so any includer depth
@@ -72,12 +72,20 @@ endif
 endif
 
 # --- tb_top sim ---
-# TB_TOP_SV_SRC is consumed by the filelist_<TOPOLOGY>.f generation recipe below
-# and by VCS (via -f filelist_<TOPOLOGY>.f). Paths are relative to COSIM_ROOT so
+# TB_TOP_SV_SRC is consumed by the filelist_<CONFIG>.f generation recipe below
+# and by VCS (via -f filelist_<CONFIG>.f). Paths are relative to COSIM_ROOT so
 # the variable stays readable; gen_filelist.py absolutizes them.
-# TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
-# (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
+# TB_TOP_SV is the top file; per-configuration on the DMA path
+# (tb_top_dma_<CONFIG>.sv). Use deferred = so CONFIG expansion is lazy.
 #
+# CONFIG names the one file the build reads: sim/configs/<CONFIG>.yml. It is
+# also the generator's --topology argument, the SAM config passed at runtime,
+# the stimulus generators' --topology, and the stimulus directory key in
+# sim/verilator/Makefile. There is no table between the name and the file: the
+# two parameters that used to turn one geometry into several configurations --
+# the VC count and the RoB mode -- are specgen constants now.
+TOPOLOGY_CONFIG   := $(COSIM_ROOT)/configs/$(TOPOLOGY).yml
+
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
 # every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
 # below the endpoint -- the fabric, the NI wraps, the tile crossbar sources --
@@ -85,8 +93,9 @@ endif
 ifeq ($(DMA),1)
 TB_TOP_SV = $(COSIM_ROOT)/tb/soc/tb_top_dma_$(TOPOLOGY).sv
 else
-TB_TOP_SV = $(COSIM_ROOT)/tb/test/tb_top_$(TOPOLOGY).sv
+TB_TOP_SV = $(COSIM_ROOT)/tb/tb_noc_mesh.sv
 endif
+
 # DMA job geometry. One pair of values feeds BOTH the job files gen_dma_jobs.py
 # writes and the memory preload / region compare gen_tb_top.py stamps into the
 # DMA top, so it lives here rather than in one simulator's Makefile -- a top
@@ -96,10 +105,6 @@ DMA_JOBS_PER_NODE ?= 100
 DMA_LENGTH        ?= 0x400
 DMA_RW            ?= read
 _DMA_JOB_ARGS     := --jobs-per-node $(DMA_JOBS_PER_NODE) --length $(DMA_LENGTH) --rw $(DMA_RW)
-# NMU read reorder buffer. 1 (the default, and what docs/noc-target-spec.md
-# section 3 describes) emits the reorder-buffer response path; 0 emits the
-# RoBless bypass. Reaches the tb as its READ_ROB_ENABLED localparam.
-READ_ROB ?= 1
 # pulp AXI crossbar subset (sim/dv/README.md): the tile decoder and the memory
 # behind it in user_node_endpoint.sv. Taken at v0.39.7 / v1.37.0, the versions
 # already vendored, so nothing here mixes releases -- at v0.39.7
@@ -163,28 +168,64 @@ DMA_ENDPOINT_SRC := \
 ENDPOINT_SRC := $(if $(filter 1,$(DMA)),$(DMA_ENDPOINT_SRC),\
     $(COSIM_ROOT)/tb/test/user_node_endpoint.sv)
 
-# noc_fabric_<topo>.sv is emitted alongside tb_top by gen_tb_top.py and `include`d
-# BY tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
+# noc_fabric.sv is one parameterized module for every topology, `include`d BY
+# tb_top, so it must never enter TB_TOP_SV_SRC (that would define the module
 # twice). It is still a real compile input: each simulator's binary rule lists it
-# separately, otherwise a hand-edit (e.g. a debug probe) leaves the binary "up to
-# date" and the edit is silently never compiled.
-NOC_FABRIC_SV = $(SRC_SV)/noc_fabric_$(TOPOLOGY).sv
-# num_vc comes from the topology YAML, never from the topology NAME: a name
-# carries suffixes that are not the vc word (_periph), and reading a declared
-# value out of a filename needs a new strip per suffix. gen_tb_top.py already
-# loads and validates the YAML, so it answers rather than a second reader here.
+# separately, otherwise an edit to it leaves the binary "up to date" and is
+# silently never compiled.
+NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
+# num_vc is a DUT parameter, so it comes from where it is defined:
+# specgen/source/constants.yaml noc.DAT_NUM_VC. The config files do not carry
+# it and neither does the CONFIG name. gen_tb_top.py answers, rather than a
+# second reader here, and loading the config first means this query also runs
+# the flit-capacity check once per make parse.
 # $(or ...) honours a local.mk PYTHON3 without defining one, which would
 # pre-empt each Makefile's own default.
+# The file the two DUT parameters are defined in. A prerequisite of the
+# filelist rule in both simulator Makefiles: the VC count selects which
+# noc_types_pkg_vc<N>.sv enters TB_TOP_SV_SRC, and nothing else in that list
+# moves when it changes -- a filelist regenerated only on a build_config.mk
+# edit would keep naming the previous width, and the build would come out
+# with the NIs at one width against a flit package of another.
+SPECGEN_CONSTANTS := $(PROJ_ROOT)/specgen/source/constants.yaml
+# constants.yaml is read TWICE at different freshness: build_config.mk reads
+# the source directly (--print-num-vc below), the testbench reads the
+# GENERATED ni_params_pkg.sv. Only the c_model CMake build gated regeneration,
+# so an unregenerated edit put the two out of step -- silently for the RoB
+# mode, which has no width assertion behind it. Each simulator Makefile carries
+# a rule making the generated files depend on the source; the recipe lives
+# there rather than here so it never becomes an includer's default goal.
+CODEGEN           := $(PROJ_ROOT)/specgen/tools/codegen.py
+NI_PARAMS_SV      := $(SPECGEN_SV_INC)/ni_params_pkg.sv
+NI_PARAMS_H       := $(SPECGEN_INC)/ni_params.h
+# gen_tb_top.py imports address_map, whose router_array / pack_config /
+# noc_egress_base produce what topology_pkg.sv and the DMA top contain, so it
+# is a prerequisite of both wherever the generator is.
+GEN_TB_TOP_DEPS   := $(COSIM_ROOT)/tools/gen_tb_top.py $(COSIM_ROOT)/tools/address_map.py
+
 TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
     $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc)
-# An empty result means the generator failed -- unknown TOPOLOGY, missing YAML,
-# flit-capacity violation. Without this the symptom is a missing
+# An empty result means the generator failed -- unknown CONFIG, missing config
+# file, flit-capacity violation. Without this the symptom is a missing
 # noc_types_pkg_vc.sv instead of the generator's own message.
 $(if $(TOPOLOGY_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
-TOPOLOGY=$(TOPOLOGY); run it directly to see why))
+CONFIG=$(TOPOLOGY); run it directly to see why))
 TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
+
+# Address-map package (topology_pkg.sv): TILE_BASE_ADDR / TILE_SIZE /
+# NOC_EGRESS_BASE / the peripheral table, for tb_noc_mesh.sv to `import`.
+# Gitignored like FlooNoC's generated/ -- derived from a tracked config file,
+# rebuilt when it, the CONFIG stamp or the generator changes. The stamp is a
+# prerequisite because the NAME no longer carries the configuration: switching
+# CONFIG must rewrite this file, and the new config file is not necessarily
+# newer than the one the last build wrote.
+# Naming only -- the WRITE is a file-target recipe in each simulator Makefile
+# (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
+TOPOLOGY_PKG_SV := $(COSIM_ROOT)/tb/test/topology_pkg.sv
+
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
+    $(TOPOLOGY_PKG_SV) \
     $(SPECGEN_SV_INC)/ni_signals_pkg.sv \
     $(TOPOLOGY_NOC_TYPES_PKG) \
     $(SPECGEN_SV_INC)/ni_flit_pkg.sv \
@@ -204,15 +245,16 @@ TB_TOP_SV_SRC := \
     $(SRC_SV)/ni_wrap.sv \
     $(ENDPOINT_SRC) \
     $(COSIM_ROOT)/tb/link_perf_monitor.sv \
+    $(if $(filter 1,$(DMA)),,$(COSIM_ROOT)/tb/noc_tb_top.sv) \
     $(TB_TOP_SV)
 
-# sim/filelist_<TOPOLOGY>.f is a GENERATED build artifact (gitignored), not
+# sim/filelist_<CONFIG>.f is a GENERATED build artifact (gitignored), not
 # committed — it bakes in host-absolute paths. Both sim flows regenerate it
 # from TB_TOP_SV_SRC via gen_filelist.py before use. The recipe is duplicated
 # in each Makefile (rather than defined here) so it never becomes the default
 # goal of an includer. FILELIST_F / FILELIST_GEN_ARGS centralize the shared
 # bits so the two recipes stay in sync.
-# Per-flavor as well as per-topology: the two endpoints compile different source
+# Per-flavor as well as per-config: the two endpoints compile different source
 # sets, and a stale list from the other flavor would build the wrong one.
 FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY)$(if $(filter 1,$(DMA)),_dma).f
 # gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
@@ -228,15 +270,19 @@ FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/tb $(SRC_SV) \
 DPI_C_SRC := $(SRC_DPI)/cmodel_dpi.cpp
 
 # DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (wrap adapters and
-# their transitive includes). The obj-dir sub-make tracks them via -MMD, but
-# the TOP-level rules must list them too — otherwise a header-only change
-# leaves the simulator binary stale because the sub-make never runs.
+# their transitive includes) and its own boundary headers from SRC_DPI. The
+# obj-dir sub-make tracks them via -MMD, but the TOP-level rules must list them
+# too — otherwise a header-only change leaves the simulator binary stale because
+# the sub-make never runs.
+# The include tree is one level of sub-namespace directories deep, so the glob
+# stops there; a third level would match nothing and hide the miss.
 DPI_HDR_DEPS := \
+    $(wildcard $(SRC_DPI)/*.h) \
+    $(wildcard $(SRC_DPI)/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*.hpp) \
-    $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/tests/common/*.hpp) \
-    $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.hpp)
+    $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.h)
 
 CPP_INCLUDE_FLAGS := \
     -I$(SRC_DPI) \

@@ -49,7 +49,7 @@ TEST(AddrTrans, TileBaseStaysInTheForwardedAddress) {
 constexpr uint64_t kWildcardX = 0x100000000ull;
 
 TEST(CollectiveIssuer, ATileMayIssueACollective) {
-    auto sam = addr_trans::load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    auto sam = addr_trans::load_sam_table(std::string(CONFIG_DIR) + "/mesh_2x2_periph.yml");
     axi::AwBeat b{};
     b.addr = 0x0;  // node (0, 0)'s memory tile
     b.burst = axi::Burst::INCR;
@@ -62,7 +62,7 @@ TEST(CollectiveIssuerDeath, APeripheralCannotIssueACollective) {
     // Round 2 gave every endpoint a port. A peripheral's is non-zero, and that
     // is now the only thing that distinguishes it -- it shares its router's
     // coordinate, so the old outside-the-tile-region test would pass.
-    auto sam = addr_trans::load_sam_table(std::string(TOPOLOGY_DIR) + "/mesh_2x2_vc1_periph.yaml");
+    auto sam = addr_trans::load_sam_table(std::string(CONFIG_DIR) + "/mesh_2x2_periph.yml");
     axi::AwBeat b{};
     b.addr = 0x0;
     b.burst = axi::Burst::INCR;

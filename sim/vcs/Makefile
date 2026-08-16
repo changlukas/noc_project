@@ -1,7 +1,8 @@
 # VCS build for the cosim testbenches. Source lists are shared with the
 # Verilator flow via sim/build_config.mk; everything VCS-specific lives here.
-# Topology used to generate tb_top_<TOPOLOGY>.sv. Override to switch topologies.
-TOPOLOGY ?= mesh_4x4_vc1
+# Configuration: sim/configs/<TOPOLOGY>.yml. Override to switch configurations.
+# sim/Makefile spells it CONFIG= and forwards it here.
+TOPOLOGY ?= mesh_4x4
 # Run class (mirrors sim/verilator/Makefile): directed only.
 RUN_CLASS ?= directed
 ifeq ($(filter $(RUN_CLASS),directed),)
@@ -87,37 +88,50 @@ check-yamlcpp:
 # Duplicated from sim/verilator/Makefile (intentionally) so a standalone
 # `cd sim/vcs && make` regenerates filelist.f on a fresh clone where it is
 # absent; gen_filelist.py + FILELIST_GEN_ARGS keep the two recipes in sync.
-$(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
+$(FILELIST_F): ../build_config.mk $(SPECGEN_CONSTANTS) $(COSIM_ROOT)/tools/gen_filelist.py
 	$(PYTHON3) $(COSIM_ROOT)/tools/gen_filelist.py $@ $(FILELIST_GEN_ARGS)
 
-# tb_top_<TOPOLOGY>.sv + noc_fabric_<topo>.sv are generated artifacts; regenerate
-# from the topology config before building. TB_TOP_SV comes from build_config.mk
-# (deferred = so TOPOLOGY expands correctly).
-TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
+# The generated parameter files, from the source both they and build_config.mk's
+# --print-num-vc read. Without this an edit to constants.yaml left the testbench
+# elaborating at the previous DAT_NUM_VC / READ_ROB_ENABLED while the filelist
+# already named the new VC width. Duplicated in sim/vcs/Makefile, as FILELIST_F.
+$(NI_PARAMS_SV): $(SPECGEN_CONSTANTS) $(CODEGEN)
+	$(PYTHON3) $(CODEGEN) --target sv --domain params
+$(NI_PARAMS_H): $(SPECGEN_CONSTANTS) $(CODEGEN)
+	$(PYTHON3) $(CODEGEN) --target cpp --domain params
+
+# tb_top_dma_<CONFIG>.sv is a generated artifact; regenerate from the config
+# file before building. TB_TOP_SV comes from build_config.mk (deferred = so
+# CONFIG expands correctly).
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VCS_BUILD)/.topology
 
-# TOPOLOGY stamp records the last-built topology. The FORCE-driven rule rewrites
-# the stamp ONLY when TOPOLOGY changed (content compare), bumping its mtime so the
-# tb_top_<TOPOLOGY>.sv prerequisite check re-emits on a topology switch. READ_ROB
-# joins it because it also changes what the generator emits. Mirrors the Verilator
-# Makefile's mechanism exactly. Unchanged stamp leaves the file alone.
+# CONFIG stamp records the last-built configuration. The FORCE-driven rule
+# rewrites the stamp ONLY when it changed (content compare), bumping its mtime so
+# the generated-file prerequisite checks re-emit on a switch. Mirrors the
+# Verilator Makefile's mechanism exactly. Unchanged stamp leaves the files alone.
 .PHONY: FORCE
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VCS_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
 	fi
 
-$(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
-	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
+# DMA only, as in sim/verilator/Makefile: on the directed path TB_TOP_SV is
+# sim/tb/tb_noc_mesh.sv, a SOURCE file, and a rule with this recipe would
+# overwrite it with generator output.
+ifeq ($(DMA),1)
+$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP) $(NI_PARAMS_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
+endif
 
-# The same generator run writes the fabric; the empty recipe just tells make the
-# file is up to date once tb_top has been made (it is a prerequisite of simv
-# below so a hand-edited fabric actually rebuilds).
-$(NOC_FABRIC_SV): $(TB_TOP_SV) ;
+# topology_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV). Duplicated from
+# sim/verilator/Makefile (intentionally, same convention as FILELIST_F above),
+# TOPO_STAMP included: the file name is fixed, so switching CONFIG must rewrite
+# it even when the newly selected config file is older than the last build.
+$(TOPOLOGY_PKG_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.
@@ -143,15 +157,16 @@ endif
 # --- tb_top cosim (self-clocked) ---
 PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
-# Per-topology, per-run-class, per-READ_ROB simv + csrc dir (mirrors the
-# Verilator obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB) isolation): building
-# one flavor must not clobber another's binary.
-SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX)
+# Per-config, per-run-class simv + csrc dir (mirrors the Verilator obj_dir
+# isolation): building one flavor must not clobber another's binary. The VC
+# count and the RoB mode do not key it -- both are specgen constants, and the
+# regenerated ni_params_pkg.sv is a prerequisite of the binary below.
+SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX)
 
 $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX) \
+	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX) \
 	    -top tb_top \
 	    -f $(FILELIST_F) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)

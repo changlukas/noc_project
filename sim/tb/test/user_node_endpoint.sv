@@ -32,7 +32,7 @@ module user_node_endpoint #(
     parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     // THIS node's own crossbar windows, stamped by gen_tb_top.py from the
-    // topology YAML (address_map.node_windows). Port order and field packing
+    // config file (address_map.node_windows). Port order and field packing
     // are ONE coupled invariant: field t is target t, m0 = config, LAST = data.
     // gen_tb_top.tile_targets() asserts that order so an address_map.py
     // SPACE_ORDER edit cannot transpose the two silently.

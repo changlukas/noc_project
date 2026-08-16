@@ -1,6 +1,6 @@
 // S2 T2d config-space narrow smoke: end-to-end through the real NMU/NSU
 // packetize/depacketize/Rob pipeline, oracled by the Scoreboard, using
-// sim/topologies/mesh_2x2_vc1.yaml's real SAM (loaded exactly as co-sim
+// sim/configs/mesh_2x2.yml's real SAM (loaded exactly as co-sim
 // would via nmu::addr_trans::load_sam_table). Every node carries both a
 // memory tile and a config tile, so one NSU serves both classes.
 //
@@ -185,7 +185,7 @@ TEST(NarrowClassSmoke, ConfigSpaceEndToEndZeroMismatch) {
     axi::AxiSlave slave(mem_port);
 
     // Real SAM, loaded exactly as co-sim's NmuWrap::init(config_path) would.
-    auto sam = nmu::addr_trans::load_sam_table(TOPOLOGY_DIR "/mesh_2x2_vc1.yaml");
+    auto sam = nmu::addr_trans::load_sam_table(CONFIG_DIR "/mesh_2x2.yml");
 
     // This test's subject is the narrow-class lane re-anchor path, but
     // sb.mismatch_count() below is class-agnostic -- it would pass just as

@@ -23,8 +23,8 @@ _MON = re.compile(
     r"N:\s*(\d+),\s*BW:\s*([\d.]+)\s*Bits/cycle",
     re.I,
 )
-_VC = re.compile(r"_vc(\d+)")
-_CONFIG = re.compile(r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)")
+_CONFIG = re.compile(
+    r"\[Config\]\s+max_unique_ids=(\d+)\s+max_outstanding=(\d+)\s+dat_num_vc=(\d+)")
 
 
 def parse_monitors(log_text):
@@ -42,28 +42,24 @@ def parse_monitors(log_text):
     return total_bw, weighted_latency / total_samples
 
 
-def vc_count(topology):
-    m = _VC.search(topology)
-    if not m:
-        sys.exit(f"emit_result_csv: no _vc<N> in topology name {topology!r}")
-    return int(m.group(1))
+def parse_config(log_text, cli_max_unique_ids, cli_max_outstanding):
+    """(max_unique_ids, max_outstanding, dat_num_vc) from the tb's own `[Config]`
+    line, which reflects the ni_params_pkg values the tb actually ran with. A CLI
+    arg wins for the two meta-buffer depths as an explicit override.
 
-
-def resolve_meta_buffer_depths(log_text, cli_max_unique_ids, cli_max_outstanding):
-    """CLI arg wins as an explicit override; otherwise fall back to the tb's own
-    `[Config] max_unique_ids=... max_outstanding=...` line, which reflects the
-    ni_params_pkg::NSU_META_BUFFER_*_DFLT the tb actually ran with."""
-    if cli_max_unique_ids is not None and cli_max_outstanding is not None:
-        return cli_max_unique_ids, cli_max_outstanding
+    dat_num_vc has no override and is read here only. It used to be parsed out of
+    the `_vc<N>` in the configuration name; the VC count now lives in
+    specgen/source/constants.yaml and the config files are named for geometry
+    alone, so the log is where the number meets the run that produced it."""
     m = _CONFIG.search(log_text)
     if not m:
         sys.exit(
-            "emit_result_csv: --max-unique-ids/--max-outstanding not given and no "
-            "[Config] max_unique_ids=... line found in the log"
+            "emit_result_csv: no [Config] max_unique_ids=... dat_num_vc=... line in the log"
         )
     return (
         cli_max_unique_ids if cli_max_unique_ids is not None else m.group(1),
         cli_max_outstanding if cli_max_outstanding is not None else m.group(2),
+        int(m.group(3)),
     )
 
 
@@ -83,12 +79,12 @@ def main():
 
     log_text = pathlib.Path(a.log).read_text()
     bw, latency = parse_monitors(log_text)
-    max_unique_ids, max_outstanding = resolve_meta_buffer_depths(
+    max_unique_ids, max_outstanding, dat_num_vc = parse_config(
         log_text, a.max_unique_ids, a.max_outstanding
     )
     row = {
         "topology": a.topology,
-        "vc": vc_count(a.topology),
+        "vc": dat_num_vc,
         "pattern": a.pattern,
         "injection_mode": a.injection_mode,
         "injection_rate": a.injection_rate,

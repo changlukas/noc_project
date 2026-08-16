@@ -2,7 +2,7 @@
 """Emit per-node iDMA job files (jobs.txt) from a topology's address map.
 
 Usage:
-    gen_dma_jobs.py --topology mesh_2x2_vc1 --out <dir> \\
+    gen_dma_jobs.py --topology mesh_2x2 --out <dir> \\
         [--jobs-per-node 100] [--length 0x400] [--rw read]
 
 Writes <out>/node<i>/jobs.txt for each node i. Eleven lines per job, in
@@ -24,10 +24,9 @@ run-level argument (util/gen_jobs.py:266) rather than a per-job choice -- the
 same shape this file follows.  A WRITE job reads local and writes ext, so its
 write crosses the fabric and the tile crossbar answers its read; a READ job
 swaps them, so its READ crosses the fabric.  Both addresses are base(dst_id) +
-offset with the base packed by address_map.pack() over the topology's route
-span -- the base c_model's
-SamTable::packed computes from the same YAML, never a restatement of its
-formula.
+offset with the base packed by address_map.pack_config() over the topology's
+route span -- the base c_model's SamTable::packed computes from the same config
+file, never a restatement of its formula.
 
     offset(node, job) = _BASE_LOCAL + (node * jobs_per_node + job) * length
 
@@ -136,8 +135,7 @@ def job_table(topo, jobs_per_node, length, rw):
     into the DMA top's memory preload and region compare, so the stimulus and
     the check that reads it back cannot disagree about where a job's bytes are.
     """
-    t = topo["topology"]
-    bases, entries = address_map.pack(topo.get("address_map"), int(t["x_dim"]), int(t["y_dim"]))
+    bases, entries = address_map.pack_config(topo)
     # The router array only: a peripheral is an endpoint, not a node, so every
     # job is router to router and XY reaches between any two of them.
     nodes, _x_dim, _y_dim = gen_tb_top._nodes(topo)
@@ -182,8 +180,8 @@ def emit_jobs(out_root, jobs, length):
 def main(argv=None):
     ap = argparse.ArgumentParser(
         description="Emit per-node iDMA job files (jobs.txt) from a topology's address map.")
-    ap.add_argument("--topology", default="mesh_4x4_vc1",
-                    help="Topology name (matches sim/topologies/<name>.yaml)")
+    ap.add_argument("--topology", default="mesh_4x4",
+                    help="Configuration name (matches sim/configs/<name>.yml)")
     ap.add_argument("--out", required=True,
                     help="Output directory; writes <out>/node<i>/jobs.txt")
     ap.add_argument("--jobs-per-node", type=int, default=100,

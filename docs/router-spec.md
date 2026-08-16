@@ -424,7 +424,7 @@ and its `SimpleRouterForkWedge` twin, and by the co-sim `multicast` pattern
 
 | Parameter | Default | Legal range | Meaning |
 |---|---|---|---|
-| `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Topology YAML overrides per run. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
+| `DAT_NUM_VC` | `ni_params_pkg::NOC_DAT_NUM_VC_DFLT` = 1 | 1..8 (= 2^VC_ID_WIDTH) | VCs on the DAT link. REQ/RSP are fixed single-VC. Set in `specgen/source/constants.yaml` (`noc.DAT_NUM_VC`), not a run knob. `initial`-block `$fatal` at time 0 if `$bits(noc_types_pkg::noc_credit_t) != DAT_NUM_VC`. |
 | `REQ_FLIT_WIDTH` | 136 | 64..1024 | REQ flit bus width, bits |
 | `RSP_FLIT_WIDTH` | 126 | 64..1024 | RSP flit bus width, bits |
 | `DAT_FLIT_WIDTH` | 633 | 64..1024 | DAT flit bus width, bits |
@@ -615,7 +615,7 @@ router obligation.
 
 Each item names where it is verified and what constitutes failure. ctest names refer
 to `ref_model/c_model/tests/router/test_router.cpp`. "Co-sim scoreboard" is the per-transaction
-write -> readback compare of the co-simulation testbench (`make sim TB=<topology>`),
+write -> readback compare of the co-simulation testbench (`make sim CONFIG=<config>`),
 which fails on any data or ordering divergence from this model.
 
 SPEC 1 (interface). The top module is `router_wrap` with exactly the ports and
@@ -714,8 +714,8 @@ SPEC 15 (multi-grant per cycle). Stage 2 evaluates the five outputs in fixed ind
 order LOCAL, NORTH, EAST, SOUTH, WEST and may grant up to 5 flits per cycle, including
 several pops of the same input VC FIFO in one cycle (section 2.4). Wire behavior stays
 bounded by R5 and R11. Verified by the co-sim cycle compare against this model under
-the regression patterns (`sim/run_regress.py`), with `link_perf_monitor` guarding the
-wire bounds. Failure: cycle-level divergence from the model, or a wire-bound
+the shipped patterns (`make sim CONFIG=<config> PATTERN=<pattern>`), with
+`link_perf_monitor` guarding the wire bounds. Failure: cycle-level divergence from the model, or a wire-bound
 assertion.
 
 SPEC 16 (fairness). Under sustained contention, every competing (input, VC) is
@@ -778,7 +778,7 @@ arrived, or a rebuilt rather than forwarded header.
 
 ## 5. Block Diagram
 
-Fabric context (generated per topology YAML, one `router_wrap` per node):
+Fabric context (one `router_wrap` per node, sized from the selected config file):
 
 ```
                           node (x, y+1)

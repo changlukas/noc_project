@@ -11,12 +11,11 @@
 //      at burst start, then full rate). A second AW presented mid-burst still
 //      gets its ready pulse — multi-outstanding AW (post addresses ahead of
 //      data) is legitimate AXI4 and load-bearing for the RoB/multi-ID paths.
-#include "common/tmp_path.hpp"
+#include "common/mesh_config.hpp"
 #include "ni_flit_constants.h"
 #include "wrap/flit_byte_conv.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nmu_wrap_io.hpp"
-#include <fstream>
 #include <gtest/gtest.h>
 
 using ni::cmodel::wrap::flit_from_bytes;
@@ -24,10 +23,10 @@ using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
 using ni::cmodel::wrap::NmuWrap;
 
-// NmuWrap::init takes a topology YAML, no default map. The handshake tests
+// NmuWrap::init takes a config file, no default map. The handshake tests
 // below care only that the stimulus address resolves, so the smallest shipped
 // mesh serves; the SAM-specific tests write their own YAML.
-constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
+constexpr const char* kTopologyYaml = CONFIG_DIR "/mesh_2x2.yml";
 
 TEST(NmuWrap, idle_adapter_keeps_readys_low) {
     NmuWrap adapter;
@@ -160,17 +159,13 @@ TEST(NmuWrap, multi_beat_w_burst_full_rate_aw_available) {
 }
 
 // The legacy default (4 GB tiles) resolves the same address to a different dst_id/local_addr, so
-// observing the YAML-mapped values proves init(config_path) actually loaded the topology YAML's
-// address_map.
+// observing the config-mapped values proves init(config_path) actually loaded the config file's
+// address ranges.
 TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
-    auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_sam.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n"
-                           "    - { x: 1, y: 1, size: 0x1000 }\n";
+    const std::string path = ni::cmodel::testing::write_config(
+        "nmu_wrap_sam.yml",
+        ni::cmodel::testing::mesh_config_yaml(
+            2, 2, "      - { base: 0x0, size: 0x1000, stride: 0x1000, space: memory }\n"));
 
     NmuWrap adapter;
     adapter.init(path.c_str());
@@ -224,14 +219,10 @@ TEST(NmuWrap, init_with_config_path_loads_sam_from_yaml) {
 // into the AW flit header. This is the wrap-level weld the DPI awuser
 // argument lands on; the translate itself is T2-tested at the Rob level.
 TEST(NmuWrap, awuser_collective_reaches_flit_header) {
-    auto path = ni::cmodel::testing::unique_temp_path("nmu_wrap_awuser_sam.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x1000 }\n"
-                           "    - { x: 1, y: 0, size: 0x1000 }\n"
-                           "    - { x: 0, y: 1, size: 0x1000 }\n"
-                           "    - { x: 1, y: 1, size: 0x1000 }\n";
+    const std::string path = ni::cmodel::testing::write_config(
+        "nmu_wrap_awuser_sam.yml",
+        ni::cmodel::testing::mesh_config_yaml(
+            2, 2, "      - { base: 0x0, size: 0x1000, stride: 0x1000, space: memory }\n"));
 
     NmuWrap adapter;
     adapter.init(path.c_str());
@@ -301,7 +292,7 @@ TEST(NmuWrap, init_with_reserved_port_id_throws) {
 // no error anywhere. The fault injections below are the three ways to get it
 // wrong on a topology that DOES declare peripherals.
 TEST(NmuWrap, init_with_a_port_id_no_endpoint_declares_throws) {
-    constexpr const char* periph = TOPOLOGY_DIR "/mesh_2x2_vc1_periph.yaml";
+    constexpr const char* periph = CONFIG_DIR "/mesh_2x2_periph.yml";
     // mesh_2x2_vc1_periph declares an x-face peripheral (port 1) at (0,0) and
     // at (0,1), and no y-face peripheral anywhere.
     constexpr uint8_t kNode00 = 0;  // (x=0, y=0)
@@ -331,7 +322,7 @@ TEST(NmuWrap, init_with_a_port_id_no_endpoint_declares_throws) {
 // check throws the same exception type and would stand in for it everywhere. The
 // four-face topology is the one that puts a y-face peripheral behind port 2.
 TEST(NmuWrap, init_accepts_a_y_face_peripheral_port) {
-    constexpr const char* periph4 = TOPOLOGY_DIR "/mesh_4x4_vc1_periph4.yaml";
+    constexpr const char* periph4 = CONFIG_DIR "/mesh_4x4_periph4.yml";
     // dst_id = (y << 4) | x. The y-face peripherals are at (1,0) south and (2,3) north.
     constexpr uint8_t kSouth = 0x01;  // (x=1, y=0)
     constexpr uint8_t kNorth = 0x32;  // (x=2, y=3)

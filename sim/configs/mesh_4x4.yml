@@ -1,0 +1,42 @@
+name: mesh_4x4
+description: "4x4 mesh of tiles"
+network_type: "axi"
+
+routing:
+  route_algo: "XY"
+  use_id_table: true
+  collective:
+    en_narrow_multicast: true
+    en_wide_multicast: true
+
+endpoints:
+  # Array member k holds coordinate (x, y) with k = (y << clog2(x_dim)) | x --
+  # x is the fast axis, which is the order the packed SAM base uses.
+  - name: "tile"
+    array: [4, 4]
+    mgr_port_protocol: ["axi"]           # presence marker: no protocols: block to resolve against
+    sbr_port_protocol: ["axi"]           # required: is_sbr() gates SAM participation
+    addr_range:
+      - base: 0x0
+        size: 0x2000000
+        stride: 0x100000000              # node block stride, not the aperture
+        space: memory
+        en_collective: true
+      - base: 0x2000000
+        size: 0x1000
+        stride: 0x100000000
+        space: config
+        en_collective: true
+
+routers:
+  - name: "router"
+    array: [4, 4]
+    degree: 5
+    # auto_connect defaults true: N/E/S/W inter-router links are implicit
+
+connections:
+  - src: "tile"
+    dst: "router"
+    src_range: [[0, 3], [0, 3]]
+    dst_range: [[0, 3], [0, 3]]
+    dst_dir: 4                           # XYDirections.EJECT

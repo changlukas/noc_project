@@ -1,0 +1,63 @@
+name: mesh_2x2_periph
+description: "2x2 mesh of tiles with two west-face peripherals"
+network_type: "axi"
+
+routing:
+  route_algo: "XY"
+  use_id_table: true
+  collective:
+    en_narrow_multicast: true
+    en_wide_multicast: true
+
+endpoints:
+  # Array member k holds coordinate (x, y) with k = (y << clog2(x_dim)) | x --
+  # x is the fast axis, which is the order the packed SAM base uses.
+  - name: "tile"
+    array: [2, 2]
+    mgr_port_protocol: ["axi"]           # presence marker: no protocols: block to resolve against
+    sbr_port_protocol: ["axi"]           # required: is_sbr() gates SAM participation
+    addr_range:
+      - base: 0x0
+        size: 0x2000000
+        stride: 0x100000000              # node block stride, not the aperture
+        space: memory
+        en_collective: true
+      - base: 0x2000000
+        size: 0x1000
+        stride: 0x100000000
+        space: config
+        en_collective: true
+  # Above the whole tile array: 2 * 2 * 0x100000000.
+  # size is what the stimulus generator aims at a peripheral, which is what
+  # gen_test_patterns.py's footprint guard checks; 0x100000 is the window
+  # mesh_4x4_periph4 needs, and both peripheral configs declare the same one so
+  # a footprint that fits one fits the other.
+  - name: "peripheral"
+    num: 2
+    sbr_port_protocol: ["axi"]
+    addr_range:
+      - base: 0x400000000
+        size: 0x100000
+        stride: 0x100000
+        space: peripheral
+        # no en_collective: peripherals are unicast destinations only
+
+routers:
+  - name: "router"
+    array: [2, 2]
+    degree: 5
+    # auto_connect defaults true: N/E/S/W inter-router links are implicit
+
+connections:
+  - src: "tile"
+    dst: "router"
+    src_range: [[0, 1], [0, 1]]
+    dst_range: [[0, 1], [0, 1]]
+    dst_dir: 4                           # XYDirections.EJECT
+  # A peripheral shares its host router's coordinate; dst_dir is the port it
+  # hangs off, not a coordinate offset. Both sit on the west column.
+  - src: "peripheral"
+    dst: "router"
+    src_idx: [0, 1]
+    dst_idx: [0, 2]                      # routers (0,0) and (0,1)
+    dst_dir: 3                           # XYDirections.WEST

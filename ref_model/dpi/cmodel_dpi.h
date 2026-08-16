@@ -146,7 +146,7 @@ void cmodel_dat_merge_get_outputs(unsigned long long ctx, svBitVecVal* nmu_tx_da
 // (REQ/RSP are fixed single-VC and carry no per-VC credit).
 // tx_dat_crdvalid / rx_dat_crdvalid are per-VC: ONE svBitVecVal word, bit vc
 // = credit pulse on VC vc.
-// config_path: topology YAML with an `address_map` block (NULL/empty ->
+// config_path: a sim/configs file with an `endpoints` block (NULL/empty ->
 // legacy 16x16 uniform, no-rebase SAM).
 // max_txns_per_id: per-AXI-ID order-list depth (FlooNoC MaxRoTxnsPerId). With no
 // aggregate pool above it, this times 2**AXI_ID_WIDTH is the master-side
@@ -211,7 +211,7 @@ void cmodel_nmu_admission_stats(unsigned long long ctx, unsigned int* aw_idle_by
 // one. Pass the width symbolically (ni_params_pkg::AXI_ID_WIDTH_DFLT on the SV
 // side) -- a literal goes stale the next time the id width moves.
 // max_outstanding: shared MetaBuffer pool size per direction (FlooNoC MaxTxns).
-// config_path: the topology YAML. The NSU reads one thing out of it -- where
+// config_path: the config file. The NSU reads one thing out of it -- where
 // each space keeps its node coordinates -- so it can rewrite an arriving
 // address to name this node. "" or NULL forwards addresses untouched.
 unsigned long long cmodel_nsu_create(const char* name, int src_id, int dat_num_vc,

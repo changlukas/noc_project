@@ -175,6 +175,15 @@ noc:
     cpp_symbol: NOC_MESH_Y_DIM
 
 nmu:
+  READ_ROB_ENABLED:
+    type: int
+    units: mode
+    description: "NMU read reorder buffer. 1 = the reorder-buffer response path docs/noc-target-spec.md section 3 describes; 0 = the RoBless bypass with its per-AXI-ID single-outstanding interlock. Write responses take the RoB in both modes."
+    default: 1
+    min: 0
+    max: 1
+    sv_symbol: NMU_READ_ROB_ENABLED_DFLT
+    cpp_symbol: NMU_READ_ROB_ENABLED
   ROB_B_DEPTH:
     type: int
     units: entries

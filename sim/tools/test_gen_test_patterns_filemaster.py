@@ -68,27 +68,68 @@ def _parse_write(path):
     return txns
 
 
-def _uniform_topology_yaml(name, x_dim, y_dim, num_vc=1, tile_size=0x100000000, block_size=None):
-    """New packed-address_map topology YAML text, every memory tile the same size.
+def _uniform_config_yaml(name, x_dim, y_dim, tile_size=0x100000000, block_size=None,
+                         config_size=0x1000):
+    """FlooNoC-shaped config text, every memory aperture the same size.
 
-    Builds a temp topology YAML in the packed `tiles:` format for the test.
-    The 4 KB config tile after each node's memory tile is what
-    address_map.pack() requires of every node. block_size=None omits the key
-    (the shipped-topology default: next power of two above what the spaces
-    occupy); pass it explicitly to pin the node stride, as every shipped
-    topology now does.
+    Builds a temp config in the shipped `endpoints:` shape for the test. The
+    4 KB config aperture above each node's memory aperture is what
+    address_map requires of every node. block_size=None derives the node stride
+    the way an undeclared one used to be derived -- the next power of two above
+    what the two spaces occupy; pass it explicitly to pin the stride, as every
+    shipped config does.
     """
-    tiles = "\n".join(
-        [f"    - {{ x: {x}, y: {y}, size: {tile_size:#x} }}"
-         for y in range(y_dim) for x in range(x_dim)] +
-        [f"    - {{ x: {x}, y: {y}, size: 0x1000, space: config }}"
-         for y in range(y_dim) for x in range(x_dim)]
-    )
-    block_line = f"  block_size: {block_size:#x}\n" if block_size is not None else ""
+    config_base = (tile_size + config_size - 1) // config_size * config_size
+    if block_size is None:
+        block_size = 1
+        while block_size < config_base + config_size:
+            block_size <<= 1
+    rng = [[0, x_dim - 1], [0, y_dim - 1]]
     return (
-        f"topology: {{ name: {name}, x_dim: {x_dim}, y_dim: {y_dim}, num_vc: {num_vc} }}\n"
-        f"address_map:\n{block_line}  tiles:\n{tiles}\n"
+        f"name: {name}\n"
+        f"network_type: \"axi\"\n"
+        f"endpoints:\n"
+        f"  - name: \"tile\"\n"
+        f"    array: [{x_dim}, {y_dim}]\n"
+        f"    sbr_port_protocol: [\"axi\"]\n"
+        f"    addr_range:\n"
+        f"      - {{ base: 0x0, size: {tile_size:#x}, stride: {block_size:#x}, space: memory }}\n"
+        f"      - {{ base: {config_base:#x}, size: {config_size:#x}, "
+        f"stride: {block_size:#x}, space: config }}\n"
+        f"routers:\n"
+        f"  - {{ name: \"router\", array: [{x_dim}, {y_dim}] }}\n"
+        f"connections:\n"
+        f"  - {{ src: \"tile\", dst: \"router\", src_range: {rng}, dst_range: {rng}, "
+        f"dst_dir: 4 }}\n"
     )
+
+
+def _config_doc(x_dim, y_dim, ranges=(), peripherals=()):
+    """FlooNoC-shaped config document: one tile array plus optional peripherals.
+
+    Each peripheral is (dst_idx, dst_dir) -- the router it hangs off and the
+    XYDirections port it takes. Peripheral member k is connection k, so the
+    member order the readers walk is the order given here.
+    """
+    rng = [[0, x_dim - 1], [0, y_dim - 1]]
+    doc = {
+        "name": f"mesh_{x_dim}x{y_dim}",
+        "endpoints": [{"name": "tile", "array": [x_dim, y_dim],
+                       "sbr_port_protocol": ["axi"], "addr_range": list(ranges)}],
+        "routers": [{"name": "router", "array": [x_dim, y_dim]}],
+        "connections": [{"src": "tile", "dst": "router", "src_range": rng,
+                         "dst_range": rng, "dst_dir": 4}],
+    }
+    if peripherals:
+        doc["endpoints"].append(
+            {"name": "peripheral", "num": len(peripherals), "sbr_port_protocol": ["axi"],
+             "addr_range": [{"base": 0x10000000, "size": 0x1000, "stride": 0x1000,
+                             "space": "peripheral"}]})
+        doc["connections"] += [
+            {"src": "peripheral", "dst": "router", "src_idx": [k], "dst_idx": [idx],
+             "dst_dir": direction}
+            for k, (idx, direction) in enumerate(peripherals)]
+    return doc
 
 
 def test_emit_file_master_node_format_and_partition(tmp_path):
@@ -133,21 +174,23 @@ def test_emit_file_master_node_takes_an_arbitrary_window_base(tmp_path):
 def test_load_topology_reads_packed_bases_from_address_map(tmp_path):
     # block_size declared explicitly, as every shipped topology does: node
     # stride is 2x the memory tile so the node's config tile fits inside it.
-    topo_path = tmp_path / "t.yaml"
-    topo_path.write_text(_uniform_topology_yaml("t", 4, 4, tile_size=0x40000000,
+    topo_path = tmp_path / "t.yml"
+    topo_path.write_text(_uniform_config_yaml("t", 4, 4, tile_size=0x40000000,
                                                 block_size=0x80000000))
     nodes, x_dim, y_dim, bases, _config_bases, _sizes, _periph = g._load_topology(str(topo_path))
     assert (x_dim, y_dim) == (4, 4)
-    # packed in raster (y, x) order, matching _uniform_topology_yaml's emit order
+    # packed in raster (y, x) order, matching _uniform_config_yaml's emit order
     assert bases[g.coord_id(0, 0)] == 0
     assert bases[g.coord_id(1, 0)] == 0x80000000
     assert bases[g.coord_id(0, 1)] == 4 * 0x80000000
 
 
-def test_load_topology_raises_when_address_map_missing(tmp_path):
-    topo_path = tmp_path / "t.yaml"
-    topo_path.write_text("topology: { name: t, x_dim: 4, y_dim: 4, num_vc: 1 }\n")
-    with pytest.raises(ValueError, match="address_map.tiles"):
+def test_load_topology_raises_when_the_router_array_is_missing(tmp_path):
+    """The router array is the route coordinate space, so a config without one
+    has no geometry to pack against."""
+    topo_path = tmp_path / "t.yml"
+    topo_path.write_text("name: t\nendpoints: []\nconnections: []\n")
+    with pytest.raises(KeyError, match="routers"):
         g._load_topology(str(topo_path))
 
 
@@ -163,9 +206,9 @@ def test_check_flit_capacity_rejects_dim_below_minimum(x_dim, y_dim):
     """gen_tb_top's own topology-load gate must reject the same illegal dims."""
     import gen_tb_top as gt
 
-    topo = {"topology": {"x_dim": x_dim, "y_dim": y_dim, "num_vc": 1}}
+    cfg = {"routers": [{"array": [x_dim, y_dim]}]}
     with pytest.raises(SystemExit, match="< 2"):
-        gt._check_flit_capacity(topo, "dummy_path.yaml")
+        gt._check_flit_capacity(cfg, "dummy_path.yml")
 
 
 @pytest.mark.parametrize("x_dim,y_dim", [(3, 2), (2, 3), (6, 4)])
@@ -175,17 +218,17 @@ def test_check_flit_capacity_rejects_non_power_of_two_dims(x_dim, y_dim):
     node. Caught at generate time rather than after elaboration."""
     import gen_tb_top as gt
 
-    topo = {"topology": {"x_dim": x_dim, "y_dim": y_dim, "num_vc": 1}}
+    cfg = {"routers": [{"array": [x_dim, y_dim]}]}
     with pytest.raises(SystemExit, match="not a power of two"):
-        gt._check_flit_capacity(topo, "dummy_path.yaml")
+        gt._check_flit_capacity(cfg, "dummy_path.yml")
 
 
 def test_main_sources_tile_base_from_address_map(tmp_path):
     """End-to-end: main() threads the packed address_map base into the emitted address."""
     tile_size = 0x40000000
     block_size = 2 * tile_size  # declared explicitly, room for the node's config tile
-    topo_path = tmp_path / "custom.yaml"
-    topo_path.write_text(_uniform_topology_yaml("custom", 2, 2, tile_size=tile_size,
+    topo_path = tmp_path / "custom.yml"
+    topo_path.write_text(_uniform_config_yaml("custom", 2, 2, tile_size=tile_size,
                                                 block_size=block_size))
     out = str(tmp_path / "scn")
     g.main(["--topology", str(topo_path), "--out", out,
@@ -208,8 +251,8 @@ PATTERNS = [
 
 @pytest.mark.parametrize("pat", PATTERNS, ids=lambda p: p[1])
 def test_main_file_master_all_patterns(tmp_path, pat):
-    topo_path = tmp_path / "mesh_4x4.yaml"
-    topo_path.write_text(_uniform_topology_yaml("mesh_4x4", 4, 4))
+    topo_path = tmp_path / "mesh_4x4.yml"
+    topo_path.write_text(_uniform_config_yaml("mesh_4x4", 4, 4))
     out = str(tmp_path / "scn")
     g.main(["--topology", str(topo_path),
             "--out", out, "--transactions-per-node", "2",
@@ -256,8 +299,8 @@ def test_main_routes_both_classes_on_a_config_topology(tmp_path):
     base. The narrow probe is not tied to any one pattern, so any spatial
     pattern drives it -- neighbor here."""
     out = str(tmp_path / "scn")
-    topo_path = os.path.join(os.path.dirname(__file__), "..", "topologies",
-                              "mesh_2x2_vc1.yaml")
+    topo_path = os.path.join(os.path.dirname(__file__), "..", "configs",
+                              "mesh_2x2.yml")
     n_txn = 4
     g.main(["--topology", topo_path, "--out", out, "--pattern", "neighbor",
             "--transactions-per-node", str(n_txn)])
@@ -275,8 +318,8 @@ def test_injection_mode_burst_hotspot_no_overflow_and_disjoint(tmp_path):
     non-zero burst footprint on a 16-node topology used to overflow the old fixed
     0x40000 window (ValueError). region_bytes is now auto-derived, so this must
     generate cleanly, and every hotspot-converging slot must stay disjoint."""
-    topo_path = tmp_path / "mesh_4x4.yaml"
-    topo_path.write_text(_uniform_topology_yaml("mesh_4x4", 4, 4))
+    topo_path = tmp_path / "mesh_4x4.yml"
+    topo_path.write_text(_uniform_config_yaml("mesh_4x4", 4, 4))
     out = str(tmp_path / "scn")
     g.main(["--topology", str(topo_path), "--out", out,
             "--pattern", "hotspot", "--hotspot", "5", "--seed", "1",
@@ -298,8 +341,8 @@ def _gen_ids(tmp_path, tag, x_dim, y_dim, n_txn, extra_argv):
     """Run main() on an x_dim*y_dim mesh, return {node index: [axi id, ...]} for
     the pattern transactions only -- main() appends one narrow config-space probe
     per node after them, which carries its own id."""
-    topo_path = tmp_path / f"{tag}.yaml"
-    topo_path.write_text(_uniform_topology_yaml(tag, x_dim, y_dim))
+    topo_path = tmp_path / f"{tag}.yml"
+    topo_path.write_text(_uniform_config_yaml(tag, x_dim, y_dim))
     out = str(tmp_path / tag)
     g.main(["--topology", str(topo_path), "--out", out,
             "--pattern", "uniform_random", "--seed", "1",
@@ -344,15 +387,15 @@ def test_ids_per_initiator_overlapping_blocks_fit_the_id_width(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# address_map.py: packing + validation (mirrors c_model SamTable::packed /
-# SamTable::validate, nmu/addr_trans.hpp).
+# address_map.py: expansion + validation (mirrors c_model load_config_table /
+# SamTable::validate, nmu/sam_yaml.hpp, nmu/addr_trans.hpp).
 # ---------------------------------------------------------------------------
 
 def test_tile_major_packs_each_node_into_one_block():
     """A node's regions are contiguous inside its own block, and the stride is
     declared rather than taken from the largest region size."""
-    topo = gen_tb_top.load_topology("mesh_2x2_vc1")
-    _bases, entries = address_map.pack(topo["address_map"], 2, 2)
+    topo = gen_tb_top.load_topology("mesh_2x2")
+    _bases, entries = address_map.pack_config(topo)
     got = {(e["space"], e["x"], e["y"]): e["base"] for e in entries}
     block = 0x100000000
     for idx, (x, y) in enumerate([(0, 0), (1, 0), (0, 1), (1, 1)]):
@@ -361,84 +404,32 @@ def test_tile_major_packs_each_node_into_one_block():
 
 
 def test_pack_rejects_a_non_power_of_two_row():
-    """x_dim 3 means clog2(3) = 2 index bits, so a row strides four slots with
-    one unused and the top tile index is (1 << 2) | 2 = 6 -- while the
-    peripheral placement starts at x_dim * y_dim = 6 blocks, tile (2,1)'s own
-    base. The overlap is silent, so pack() refuses the shape rather than
-    packing it. sam_yaml.hpp and gen_tb_top._check_flit_capacity refuse it too;
-    this is the copy gen_test_patterns.py reaches first, since it calls pack()
-    before its own capacity check."""
-    from address_map import pack
-    mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1, 2)]
-    cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
-           for y in (0, 1) for x in (0, 1, 2)]
+    """x_dim 3 means clog2(3) = 2 index bits, so the array index leaves a gap in
+    every row and the member index no longer names the coordinate it packs at.
+    Refused at the router array, before any range is expanded.
+    sam_yaml.hpp's load_config_table and gen_tb_top._check_flit_capacity refuse
+    the same shape independently."""
     with pytest.raises(ValueError, match="must be a power of two"):
-        pack({"tiles": mem + cfg}, 3, 2)
+        address_map.pack_config(_config_doc(3, 2, ranges=[
+            {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}]))
 
 
-def test_pack_default_block_size_doubles_the_stride_to_fit_config():
-    """The regression guard for a plain mesh, updated for tile-major packing.
-    No declared block_size, so it defaults to the next power of two above one
-    node's memory + config: 0x101000 -> 0x200000. That is double the memory
-    tile alone -- the stride is no longer just the memory slot, the way it was
-    before every space shared one node's block."""
-    from address_map import pack
-    mem = [{"x": x, "y": y, "size": 0x100000} for y in (0, 1) for x in (0, 1)]
-    cfg = [{"x": x, "y": y, "size": 0x1000, "space": "config"}
-           for y in (0, 1) for x in (0, 1)]
-    _, entries = pack({"tiles": mem + cfg}, 2, 2)
-    got = {(e["x"], e["y"], e["space"]): e["base"] for e in entries}
-    assert got == {
-        (0, 0, "memory"): 0x000000, (1, 0, "memory"): 0x200000,
-        (0, 1, "memory"): 0x400000, (1, 1, "memory"): 0x600000,
-        (0, 0, "config"): 0x100000, (1, 0, "config"): 0x300000,
-        (0, 1, "config"): 0x500000, (1, 1, "config"): 0x700000,
-    }
-
-
-def test_pack_places_a_smaller_entry_on_its_own_slot():
-    """Mixed sizes are still accepted, bounded by the space's slot (here
-    max(0x1000, 0x2000) = 0x2000) -- but a smaller entry no longer drags its
-    neighbours down. Every entry sits at its own coordinate's slot, so the
-    address's coordinate field reads back correctly no matter which entry is
-    smaller. Under the old accumulator a single undersized tile shifted every
-    base after it; this is the sharpest case of that in the suite."""
-    am = {"tiles": [
-        {"x": 0, "y": 0, "size": 0x1000},
-        {"x": 1, "y": 0, "size": 0x2000},
-        {"x": 0, "y": 1, "size": 0x1000},
-        {"x": 1, "y": 1, "size": 0x1000},
-    ] + [{"x": x, "y": y, "size": 0x1000, "space": "config"}
-         for x, y in [(0, 0), (1, 0), (0, 1), (1, 1)]]}
-    bases, entries = address_map.pack(am, x_dim=2, y_dim=2)
-    # No declared block_size: memory slot 0x2000 + config slot 0x1000 ->
-    # extent 0x3000 -> next power of two 0x4000. Node stride is 0x4000.
-    assert bases == {
-        address_map.dst_id(0, 0): 0,
-        address_map.dst_id(1, 0): 0x4000,
-        address_map.dst_id(0, 1): 0x8000,
-        address_map.dst_id(1, 1): 0xC000,
-    }
-    assert [e["base"] for e in entries] == [0, 0x4000, 0x8000, 0xC000,
-                                            0x2000, 0x6000, 0xA000, 0xE000]
-
-
-def _two_space_tiles(memory_sizes):
-    """2x2 memory tiles of the given sizes plus one 4 KB config tile per node."""
-    nodes = [(0, 0), (1, 0), (0, 1), (1, 1)]
-    return ([{"x": x, "y": y, "size": s, "space": "memory"}
-             for (x, y), s in zip(nodes, memory_sizes)] +
-            [{"x": x, "y": y, "size": 0x1000, "space": "config"} for x, y in nodes])
+@pytest.mark.parametrize("size", [0, -0x1000, 0x1234])
+def test_pack_rejects_a_size_that_is_not_a_positive_4k_multiple(size):
+    """Zero and misaligned sizes are what SamTable::validate asserts on at
+    simulation load; a negative one reaches that assert only through the
+    base+size overflow check beside it, so pack_config refuses all three where
+    the config is read."""
+    with pytest.raises(ValueError, match="must be positive and 4 KB aligned"):
+        address_map.pack_config(_config_doc(2, 2, ranges=[
+            {"base": 0x0, "size": size, "stride": 0x200000, "space": "memory"}]))
 
 
 def test_node_windows_are_that_node_s_own_regions():
     """The tile crossbar decodes on THIS node's windows, so a local initiator's
     address that belongs to another node misses both rules and falls through to
     the NMU. Sizes are exact -- axi_xbar states a rule as start/end."""
-    # No declared block_size: memory slot 0x100000 + config slot 0x1000 ->
-    # next power of two 0x200000. Node stride is 0x200000.
-    tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    _bases, entries = address_map.pack_config(_two_space_config())
     assert address_map.node_windows(entries, address_map.dst_id(0, 0), 0) == [
         {"space": "config", "base": 0x100000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
@@ -464,8 +455,8 @@ def test_node_windows_key_on_the_port_not_the_coordinate():
     it were the tile's -- and the tile would answer the peripheral's addresses
     locally, so nothing would ever reach the peripheral. The port is what tells
     the two endpoints apart."""
-    topo = gen_tb_top.load_topology("mesh_2x2_vc1_periph")
-    _bases, entries = address_map.pack(topo["address_map"], 2, 2)
+    topo = gen_tb_top.load_topology("mesh_2x2_periph")
+    _bases, entries = address_map.pack_config(topo)
     cid = address_map.dst_id(0, 0)
     tile = address_map.node_windows(entries, cid, 0)
     periph = address_map.node_windows(entries, cid, 1)
@@ -477,9 +468,11 @@ def test_node_windows_key_on_the_port_not_the_coordinate():
     assert address_map.node_windows(entries, cid, 2) == []
 
 
-def _two_space_topology():
-    return {"topology": {"x_dim": 2, "y_dim": 2},
-            "address_map": {"tiles": _two_space_tiles([0x100000] * 4)}}
+def _two_space_config():
+    """0x100000 memory + 4 KB config per node, node stride 0x200000."""
+    return _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"},
+        {"base": 0x100000, "size": 0x1000, "stride": 0x200000, "space": "config"}])
 
 
 def test_tile_targets_packs_config_first():
@@ -488,7 +481,7 @@ def test_tile_targets_packs_config_first():
     each holding that endpoint's own global bases."""
     nodes = [(0, 0, 0, address_map.dst_id(0, 0), 0), (1, 1, 0, address_map.dst_id(1, 0), 0),
              (2, 0, 1, address_map.dst_id(0, 1), 0), (3, 1, 1, address_map.dst_id(1, 1), 0)]
-    per_node, _egress = gen_tb_top.tile_targets(_two_space_topology(), nodes)
+    per_node, _egress = gen_tb_top.tile_targets(_two_space_config(), nodes)
     assert per_node[0] == [
         {"space": "config", "base": 0x100000, "size": 0x1000},
         {"space": "memory", "base": 0x0, "size": 0x100000},
@@ -505,7 +498,7 @@ def test_tile_targets_rejects_a_transposed_space_order(monkeypatch):
     monkeypatch.setattr(address_map, "SPACE_ORDER", ("memory", "config", "peripheral"))
     nodes = [(0, 0, 0, address_map.dst_id(0, 0), 0)]
     with pytest.raises(SystemExit, match=r"must be \['config', 'memory'\]"):
-        gen_tb_top.tile_targets(_two_space_topology(), nodes)
+        gen_tb_top.tile_targets(_two_space_config(), nodes)
 
 
 def test_tile_targets_pads_a_peripheral_row_to_the_widest():
@@ -524,7 +517,7 @@ def test_tile_targets_pads_a_peripheral_row_to_the_widest():
     the trap: the check that rejects a bad rule (check_start) passes it happily,
     because check_start also exempts the wildcard.
     """
-    topo = gen_tb_top.load_topology("mesh_2x2_vc1_periph")
+    topo = gen_tb_top.load_topology("mesh_2x2_periph")
     endpoints = gen_tb_top._endpoints(gen_tb_top._nodes(topo)[0], gen_tb_top._peripherals(topo))
     per_ep, egress = gen_tb_top.tile_targets(topo, endpoints)
     assert len(per_ep) == 6                      # 4 routers + 2 peripherals
@@ -576,10 +569,10 @@ def test_dma_refuses_a_peripheral_topology(tmp_path, monkeypatch):
         return gen_tb_top.main()
 
     with pytest.raises(SystemExit, match="--dma does not support"):
-        _run("mesh_2x2_vc1_periph")
+        _run("mesh_2x2_periph")
     # Not a blanket ban on --dma: the same call on a peripheral-free topology
     # still emits, or the guard would be indistinguishable from deleting --dma.
-    assert _run("mesh_2x2_vc1") == 0
+    assert _run("mesh_2x2") == 0
     assert os.path.isfile(out)
 
 
@@ -588,48 +581,55 @@ def test_tile_targets_rejects_a_peripheral_whose_order_is_not_its_own_space(monk
     after, every short row would read as ragged-then-padded and the check would
     say nothing at all."""
     monkeypatch.setattr(address_map, "SPACE_ORDER", ("config", "memory"))
-    topo = gen_tb_top.load_topology("mesh_2x2_vc1_periph")
+    topo = gen_tb_top.load_topology("mesh_2x2_periph")
     endpoints = gen_tb_top._endpoints(gen_tb_top._nodes(topo)[0], gen_tb_top._peripherals(topo))
     with pytest.raises(SystemExit, match=r"\(port 1\) window order \[\] must be \['peripheral'\]"):
         gen_tb_top.tile_targets(topo, endpoints)
 
 
-def _periph_topology(peripherals):
-    return {"topology": {"x_dim": 4, "y_dim": 4},
-            "address_map": {"peripherals": peripherals}}
+def _periph_config(peripherals):
+    """4x4 mesh with the given (dst_idx, dst_dir) peripheral attachments."""
+    return _config_doc(4, 4, peripherals=peripherals)
 
 
+# XYDirections: NORTH 0, EAST 1, SOUTH 2, WEST 3, EJECT 4.
 @pytest.mark.parametrize("peripherals, want", [
     # An interior router's named port carries a live inter-router link, so
     # hanging a peripheral off it closes a channel dependency cycle. This is the
     # generator's copy of the deadlock precondition sam_yaml.hpp enforces on the
-    # C++ side; both readers of the same YAML must reject it.
-    ([{"x": 1, "y": 1, "face": "x", "size": 0x1000}], "names an edge this coordinate is not on"),
-    ([{"x": 1, "y": 1, "face": "y", "size": 0x1000}], "names an edge this coordinate is not on"),
-    # A peripheral shares a router's coordinate, so a coordinate off the array
-    # names no router to hang off.
-    ([{"x": 4, "y": 0, "face": "x", "size": 0x1000}], "outside the 4x4 router array"),
-    # One port, one peripheral: two on the same face would both drive it.
-    ([{"x": 0, "y": 0, "face": "x", "size": 0x1000},
-      {"x": 0, "y": 0, "face": "x", "size": 0x1000}], "two peripherals both claim"),
-    ([{"x": 0, "y": 0, "face": "z", "size": 0x1000}], "must be 'x' or 'y'"),
+    # C++ side; both readers of the same config must reject it.
+    ([(5, 3)], "an edge this coordinate is not on"),   # router (1,1), WEST
+    ([(5, 0)], "an edge this coordinate is not on"),   # router (1,1), NORTH
+    # A peripheral shares a router's coordinate, so an index off the array names
+    # no router to hang off.
+    ([(16, 3)], "outside the 4x4 router array"),       # index 16 -> (0,4)
+    # One port, one peripheral: two on the same port would both drive it.
+    ([(0, 3), (0, 3)], "two peripherals both claim"),
 ])
 def test_peripherals_rejects_an_illegal_placement(peripherals, want):
     with pytest.raises(SystemExit, match=re.escape(want)):
-        gen_tb_top._peripherals(_periph_topology(peripherals))
+        gen_tb_top._peripherals(_periph_config(peripherals))
 
 
-def test_peripherals_resolves_each_face_to_its_edge_direction():
+def test_peripherals_rejects_a_dst_dir_that_is_not_a_direction():
+    """dst_dir is an XYDirections value and nothing else, so a port number that
+    is not one of the five is refused rather than read as some other port."""
+    with pytest.raises(ValueError, match="not an XYDirections value"):
+        gen_tb_top._peripherals(_periph_config([(0, 7)]))
+
+
+def test_peripherals_resolves_each_dst_dir_to_its_edge_direction():
     """Positive control for the rejections above, and the mapping they guard:
-    the face names the AXIS and the coordinate names the SIDE. Both faces of a
-    corner router are legal, which is why the face is declared at all."""
-    out = gen_tb_top._peripherals(_periph_topology([
-        {"x": 0, "y": 1, "face": "x", "size": 0x1000},
-        {"x": 3, "y": 2, "face": "x", "size": 0x1000},
-        {"x": 1, "y": 0, "face": "y", "size": 0x1000},
-        {"x": 2, "y": 3, "face": "y", "size": 0x1000},
-        {"x": 0, "y": 0, "face": "x", "size": 0x1000},
-        {"x": 0, "y": 0, "face": "y", "size": 0x1000}]))
+    dst_dir names the PORT, and the coordinate it shares with its host router
+    has to be on that edge. Both free ports of a corner router are legal, which
+    is why the direction is declared at all."""
+    out = gen_tb_top._peripherals(_periph_config([
+        (4, 3),    # router (0,1), WEST
+        (11, 1),   # router (3,2), EAST
+        (1, 2),    # router (1,0), SOUTH
+        (14, 0),   # router (2,3), NORTH
+        (0, 3),    # router (0,0), WEST
+        (0, 2)]))  # router (0,0), SOUTH
     assert [p["dir"] for p in out] == ["WEST", "EAST", "SOUTH", "NORTH", "WEST", "SOUTH"]
     assert [p["port"] for p in out] == [1, 1, 2, 2, 1, 2]
 
@@ -641,7 +641,7 @@ def test_mem_latency_profile_reaches_the_right_four_parameters(monkeypatch, prof
     silently run the wrong latency -- and input/output transposed is invisible on
     a symmetric profile. Emit each one and read the values back off the names."""
     monkeypatch.setattr(gen_tb_top, "_MEM_LATENCY", profile)
-    sv = gen_tb_top.emit_tb_top(gen_tb_top.load_topology("mesh_2x2_vc1"))
+    sv = gen_tb_top.emit_tb_top(gen_tb_top.load_topology("mesh_2x2"))
     stall_in, stall_out, delay_in, delay_out = gen_tb_top._MEM_LATENCY_PROFILES[profile]
     for name, want in (("MEM_STALL_RANDOM_INPUT", f"1'b{stall_in}"),
                        ("MEM_STALL_RANDOM_OUTPUT", f"1'b{stall_out}"),
@@ -657,7 +657,7 @@ def test_watchdog_grows_with_the_memory_latency_profile(monkeypatch):
     """A stalling memory that the watchdog is not sized for reads as a hang."""
     def k(profile):
         monkeypatch.setattr(gen_tb_top, "_MEM_LATENCY", profile)
-        sv = gen_tb_top.emit_tb_top(gen_tb_top.load_topology("mesh_2x2_vc1"))
+        sv = gen_tb_top.emit_tb_top(gen_tb_top.load_topology("mesh_2x2"))
         return int(re.search(r"MEM_CYC_PER_BEAT\s*=\s*(\d+);", sv).group(1))
 
     assert k("ideal") == 0
@@ -672,7 +672,7 @@ def test_the_dma_top_alone_takes_ideal_master_backpressure():
     carried 0.101 flits per cycle; at "ideal" the same run carried 0.912.  The
     two tops therefore take different profiles, and this pins the split: one
     top's profile is not the other's, and neither is a hardcoded literal."""
-    topo = gen_tb_top.load_topology("mesh_2x2_vc1")
+    topo = gen_tb_top.load_topology("mesh_2x2")
     for dma, profile in ((False, gen_tb_top._MST_BACKPRESSURE),
                          (True, gen_tb_top._MST_BACKPRESSURE_DMA)):
         stall_out, delay_out = gen_tb_top._MST_BACKPRESSURE_PROFILES[profile]
@@ -706,147 +706,97 @@ def test_all_to_all_is_deterministic():
     assert g.all_to_all_dsts(3, 16, 40) == g.all_to_all_dsts(3, 16, 40)
 
 
-def test_address_map_pack_rejects_zero_size():
-    am = {"tiles": [{"x": 0, "y": 0, "size": 0}]}
-    with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_dim=1, y_dim=1)
-
-
-def test_address_map_pack_rejects_negative_size():
-    am = {"tiles": [{"x": 0, "y": 0, "size": -0x1000}]}
-    with pytest.raises(ValueError, match="positive"):
-        address_map.pack(am, x_dim=1, y_dim=1)
-
-
-def test_address_map_pack_rejects_non_4k_aligned_size():
-    am = {"tiles": [{"x": 0, "y": 0, "size": 0x1234}]}
-    with pytest.raises(ValueError, match="4 KB aligned"):
-        address_map.pack(am, x_dim=1, y_dim=1)
-
-
-def test_address_map_pack_rejects_node_outside_mesh():
-    am = {"tiles": [{"x": 2, "y": 0, "size": 0x1000}]}
+def test_address_map_pack_rejects_a_member_outside_the_mesh():
+    """A peripheral shares a router's coordinate, so a dst_idx past the router
+    array names no router to hang off and the member has no coordinate at all."""
+    doc = _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}])
+    doc["connections"][0] = {"src": "tile", "dst": "router",
+                             "src_idx": [0, 1, 2, 3], "dst_idx": [0, 1, 2, 7], "dst_dir": 4}
     with pytest.raises(ValueError, match="outside mesh"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+        address_map.pack_config(doc)
 
 
-def test_address_map_pack_rejects_missing_node():
-    am = {"tiles": [{"x": 0, "y": 0, "size": 0x1000}]}  # 2x1 mesh needs 2 tiles
-    with pytest.raises(ValueError, match="expected 2"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+def test_address_map_pack_rejects_an_unattached_member():
+    """Every member takes its coordinate from a connection, so a member no
+    connection names would otherwise pack at whatever the list left behind."""
+    doc = _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "memory"}])
+    doc["connections"][0] = {"src": "tile", "dst": "router",
+                             "src_idx": [0, 1, 2], "dst_idx": [0, 1, 2], "dst_dir": 4}
+    with pytest.raises(ValueError, match="member 3 has no connection"):
+        address_map.pack_config(doc)
 
 
-def test_address_map_pack_rejects_missing_config_node():
-    """Config coverage is the same rule as memory coverage: a YAML one config
-    tile short packs to bases that are no longer a clean wildcard set, which
-    used to surface only under PATTERN=multicast."""
-    am = {"tiles": [
-        {"x": 0, "y": 0, "size": 0x1000},
-        {"x": 1, "y": 0, "size": 0x1000},
-        {"x": 0, "y": 0, "size": 0x1000, "space": "config"},
-    ]}
-    with pytest.raises(ValueError, match="config space covers 1 nodes, expected 2"):
-        address_map.pack(am, x_dim=2, y_dim=1)
+def test_address_map_pack_rejects_an_undeclared_space():
+    doc = _config_doc(2, 2, ranges=[
+        {"base": 0x0, "size": 0x100000, "stride": 0x200000, "space": "scratch"}])
+    with pytest.raises(ValueError, match="is not a declared space"):
+        address_map.pack_config(doc)
 
 
-def test_address_map_pack_rejects_duplicate_node():
-    am = {"tiles": [
-        {"x": 0, "y": 0, "size": 0x1000},
-        {"x": 0, "y": 0, "size": 0x1000},
-    ]}
-    with pytest.raises(ValueError, match="duplicate mesh node"):
-        address_map.pack(am, x_dim=2, y_dim=1)
-
-
-def test_address_map_pack_rejects_missing_tiles_key():
-    with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack({}, x_dim=1, y_dim=1)
-    with pytest.raises(ValueError, match="address_map.tiles"):
-        address_map.pack(None, x_dim=1, y_dim=1)
-
-
-def test_address_map_pack_real_topologies_at_the_coordinate_formula():
-    """Cross-check: every real sim/topologies/*.yaml packs at
-    base = ((y << clog2(x_dim)) | x) * block_size + offset[space], spelled out
-    here from the YAML keys rather than read back from pack(). This is the Python half of
-    the packing agreement; the C++ half is
-    SamYaml.RealTopologiesPackedAtTheCoordinateFormula, asserting the same
-    formula against SamTable::packed(). List-order accumulation (base += size)
-    agrees with the formula only where the span is a power of two and every
-    entry in a space is one slot, which is true of every topology shipped today
-    and not of a span with a border coordinate."""
+def test_address_map_pack_real_configs_at_the_coordinate_formula():
+    """Cross-check: every real sim/configs/*.yml packs at
+    base = range.base + range.stride * ((y << clog2(x_dim)) | x), spelled out
+    here from the config keys rather than read back from pack_config(). This
+    is the Python half of the packing agreement; the C++ half is
+    SamYaml.RealConfigsPackedAtTheCoordinateFormula, asserting the same formula
+    against SamTable::packed(). The member index is X-fast, which is this
+    repo's node numbering and not FlooNoC's Y-fast one -- on a square mesh the
+    two produce the same SET of bases and transpose every coordinate."""
     import yaml
 
-    topo_dir = os.path.join(os.path.dirname(__file__), "..", "topologies")
-    paths = sorted(glob.glob(os.path.join(topo_dir, "*.yaml")))
+    cfg_dir = os.path.join(os.path.dirname(__file__), "..", "configs")
+    paths = sorted(glob.glob(os.path.join(cfg_dir, "*.yml")))
     # Guards the glob, not the inventory: an empty or unreachable directory must
-    # fail rather than pass vacuously. A count tied to how many topologies ship
+    # fail rather than pass vacuously. A count tied to how many configs ship
     # would need editing on every add or remove.
-    assert paths, f"expected the real topology YAMLs in {topo_dir}"
+    assert paths, f"expected the real configs in {cfg_dir}"
     for path in paths:
         doc = yaml.safe_load(open(path))
-        x_dim = int(doc["topology"]["x_dim"])
-        y_dim = int(doc["topology"]["y_dim"])
-        tiles = doc["address_map"]["tiles"]
-        _bases, entries = address_map.pack(doc["address_map"], x_dim, y_dim)
+        x_dim = int(doc["routers"][0]["array"][0])
         x_bits = (x_dim - 1).bit_length()
-        # Slot per space: the largest size declared in it, bounding the
-        # aperture. block_size is the declared node stride.
-        slot = {sp: max((int(t["size"]) for t in tiles if t.get("space", "memory") == sp),
-                        default=0)
-                for sp in ("memory", "config")}
-        block = int(doc["address_map"]["block_size"])
-        offset = {"memory": 0,
-                  "config": ((slot["memory"] + slot["config"] - 1) // slot["config"])
-                            * slot["config"]}
+        # The tile endpoint's declared ranges, by space. A peripheral endpoint's
+        # members are placed by their own connections, so the tile coordinate
+        # formula says nothing about them.
+        tile = next(ep for ep in doc["endpoints"] if ep.get("array"))
+        declared = {r.get("space", "memory"): (int(r["base"]),
+                                               int(r.get("stride", r["size"])))
+                    for r in tile["addr_range"]}
+        _bases, entries = address_map.pack_config(doc)
         for e in entries:
-            # The tile spaces only. A peripheral region is placed in declaration
-            # order above the tile array, so the coordinate formula says nothing
-            # about it -- it shares its host router's coordinate, which the
-            # router's own tile already packs at.
             if e["space"] == "peripheral":
                 continue
-            expected = (((e["y"] << x_bits) | e["x"]) * block) + offset[e["space"]]
+            base, stride = declared[e["space"]]
+            expected = base + stride * ((e["y"] << x_bits) | e["x"])
             assert e["base"] == expected, \
                 f"{path}: {e['space']} tile ({e['x']},{e['y']}) base {e['base']:#x} != {expected:#x}"
 
 
 def test_gen_test_patterns_bases_come_from_the_shared_packer(tmp_path):
     """Cross-site invariant: the stimulus generator's base(dst_id) is
-    address_map.pack()'s, not a second packing rule of its own."""
+    address_map.pack_config()'s, not a second packing rule of its own.
+
+    The stride is deliberately larger than the aperture, so a packer that
+    accumulated sizes instead of striding would land somewhere else."""
     import yaml
 
-    topo_path = tmp_path / "nonuniform.yaml"
-    topo_path.write_text(
-        "topology: { name: nonuniform, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-        "address_map:\n"
-        "  tiles:\n"
-        "    - { x: 0, y: 0, size: 0x1000 }\n"
-        "    - { x: 1, y: 0, size: 0x2000 }\n"
-        "    - { x: 0, y: 1, size: 0x1000 }\n"
-        "    - { x: 1, y: 1, size: 0x4000 }\n"
-        "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
-        "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
-        "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
-        "    - { x: 1, y: 1, size: 0x1000, space: config }\n"
-    )
+    topo_path = tmp_path / "strided.yml"
+    topo_path.write_text(_uniform_config_yaml("strided", 2, 2, tile_size=0x1000,
+                                              block_size=0x10000))
     _nodes, _x, _y, bases_from_patterns, _config_bases, _sizes, _periph = g._load_topology(
         str(topo_path))
     topo = yaml.safe_load(topo_path.read_text())
-    packed_bases, _entries = address_map.pack(topo["address_map"], x_dim=2, y_dim=2)
+    packed_bases, _entries = address_map.pack_config(topo)
     assert bases_from_patterns == packed_bases
 
 
 def _mcast_topology(tmp_path, config_size, dim=8):
-    """dim x dim mesh, 1 MB memory + one config tile per node. Rows are a power
-    of two so the multicast mask stays wildcard-clean."""
-    tiles = [f"    - {{ x: {x}, y: {y}, size: 0x100000 }}"
-             for y in range(dim) for x in range(dim)]
-    tiles += [f"    - {{ x: {x}, y: {y}, size: {config_size:#x}, space: config }}"
-              for y in range(dim) for x in range(dim)]
-    path = tmp_path / f"mcast_cfg{config_size:x}.yaml"
-    path.write_text(f"topology: {{ name: t, x_dim: {dim}, y_dim: {dim}, num_vc: 1 }}\n"
-                    "address_map:\n  tiles:\n" + "\n".join(tiles) + "\n")
+    """dim x dim mesh, 1 MB memory + one config aperture per node. Rows are a
+    power of two so the multicast mask stays wildcard-clean."""
+    path = tmp_path / f"mcast_cfg{config_size:x}.yml"
+    path.write_text(_uniform_config_yaml("t", dim, dim, tile_size=0x100000,
+                                         config_size=config_size))
     return path
 
 
@@ -883,7 +833,7 @@ def test_footprint_guard_rejects_a_region_bytes_overrun_of_the_memory_tile(tmp_p
     region_bytes=4*10*0x40=0xa00. base_local+region_bytes=0x1000+0xa00=0x1a00,
     which overruns a 0x1000 B (4 KB aligned) tile."""
     topo_path = tmp_path / "small.yaml"
-    topo_path.write_text(_uniform_topology_yaml("small", 2, 2, tile_size=0x1000))
+    topo_path.write_text(_uniform_config_yaml("small", 2, 2, tile_size=0x1000))
     with pytest.raises(SystemExit):
         g.main(["--pattern", "neighbor", "--topology", str(topo_path),
                 "--out", str(tmp_path / "out"), "--transactions-per-node", "10"])
@@ -905,7 +855,7 @@ def test_footprint_guard_accounts_for_the_multicast_pattern_s_wider_extent(tmp_p
     base_local+region_bytes=0x2000 (neighbor passes) but not
     base_local+region_bytes+txn*stride=0x2400 (multicast)."""
     topo_path = tmp_path / "small.yaml"
-    topo_path.write_text(_uniform_topology_yaml("small", 2, 2, tile_size=0x2000))
+    topo_path.write_text(_uniform_config_yaml("small", 2, 2, tile_size=0x2000))
     g.main(["--pattern", "neighbor", "--topology", str(topo_path),
             "--out", str(tmp_path / "out_neighbor"), "--transactions-per-node", "16"])
     with pytest.raises(SystemExit):
@@ -916,22 +866,28 @@ def test_footprint_guard_accounts_for_the_multicast_pattern_s_wider_extent(tmp_p
     assert "overruns the smallest addressable window 0x2000" in err
 
 
-_SMALL_PERIPHERAL_TOPOLOGY = """\
-topology: { name: smallperiph, x_dim: 2, y_dim: 2, num_vc: 1 }
-address_map:
-  block_size: 0x100000000
-  tiles:
-    - { x: 0, y: 0, size: 0x2000000 }
-    - { x: 1, y: 0, size: 0x2000000 }
-    - { x: 0, y: 1, size: 0x2000000 }
-    - { x: 1, y: 1, size: 0x2000000 }
-    - { x: 0, y: 0, size: 0x1000, space: config }
-    - { x: 1, y: 0, size: 0x1000, space: config }
-    - { x: 0, y: 1, size: 0x1000, space: config }
-    - { x: 1, y: 1, size: 0x1000, space: config }
-  peripherals:
-    - { x: 0, y: 0, face: x, size: %s }
-    - { x: 0, y: 1, face: x, size: %s }
+# Two west-face peripherals above the whole tile array (2 * 2 * 0x100000000),
+# their window size left open so the footprint guard can be tripped and cleared.
+_SMALL_PERIPHERAL_CONFIG = """\
+name: smallperiph
+endpoints:
+  - name: "tile"
+    array: [2, 2]
+    sbr_port_protocol: ["axi"]
+    addr_range:
+      - { base: 0x0, size: 0x2000000, stride: 0x100000000, space: memory }
+      - { base: 0x2000000, size: 0x1000, stride: 0x100000000, space: config }
+  - name: "peripheral"
+    num: 2
+    sbr_port_protocol: ["axi"]
+    addr_range:
+      - { base: 0x400000000, size: %s, stride: %s, space: peripheral }
+routers:
+  - { name: "router", array: [2, 2] }
+connections:
+  - { src: "tile", dst: "router", src_range: [[0, 1], [0, 1]],
+      dst_range: [[0, 1], [0, 1]], dst_dir: 4 }
+  - { src: "peripheral", dst: "router", src_idx: [0, 1], dst_idx: [0, 2], dst_dir: 3 }
 """
 
 
@@ -950,8 +906,8 @@ def test_footprint_guard_covers_a_peripheral_window(tmp_path, capsys):
     -> stride=0x40, region_bytes=6*4*0x40=0x600. base_local+region_bytes=0x1600
     overruns a 0x1000 peripheral and fits a 0x2000 one.
     """
-    small = tmp_path / "small_periph.yaml"
-    small.write_text(_SMALL_PERIPHERAL_TOPOLOGY % ("0x1000", "0x1000"))
+    small = tmp_path / "small_periph.yml"
+    small.write_text(_SMALL_PERIPHERAL_CONFIG % ("0x1000", "0x1000"))
     with pytest.raises(SystemExit):
         g.main(["--pattern", "neighbor", "--topology", str(small),
                 "--out", str(tmp_path / "out_small"), "--transactions-per-node", "4"])
@@ -961,8 +917,8 @@ def test_footprint_guard_covers_a_peripheral_window(tmp_path, capsys):
 
     # Widened, the same run passes -- so the guard is reading the peripheral
     # window and not failing for some other reason.
-    big = tmp_path / "big_periph.yaml"
-    big.write_text(_SMALL_PERIPHERAL_TOPOLOGY % ("0x2000", "0x2000"))
+    big = tmp_path / "big_periph.yml"
+    big.write_text(_SMALL_PERIPHERAL_CONFIG % ("0x2000", "0x2000"))
     g.main(["--pattern", "neighbor", "--topology", str(big),
             "--out", str(tmp_path / "out_big"), "--transactions-per-node", "4"])
 
@@ -972,8 +928,7 @@ def test_noc_egress_aperture_sits_above_every_window():
     by the tile crossbar and never reach the NI. The endpoint offsets it into
     this aperture, which is the first power of two at or above the map's top --
     so no node window can ever reach it, however the map grows."""
-    tiles = _two_space_tiles([0x100000] * 4)
-    _bases, entries = address_map.pack({"tiles": tiles}, x_dim=2, y_dim=2)
+    _bases, entries = address_map.pack_config(_two_space_config())
     base = address_map.noc_egress_base(entries)
     top = max(e["base"] + e["size"] for e in entries)
     assert base >= top
@@ -1035,12 +990,12 @@ def test_peripheral_slots_do_not_land_on_a_multicast_address(tmp_path):
     The multicast window opens at base_local + region_bytes, and both that and
     every alloc_unique_offset band count ENDPOINTS. Counted in router nodes, a
     peripheral's slot walks past the window into the collective addresses -- on
-    mesh_2x2_vc1_periph 0x1100 is both endpoint 4's slot and node0's multicast
+    mesh_2x2_periph 0x1100 is both endpoint 4's slot and node0's multicast
     address.
     Nothing else holds the two apart: reverting the band fails this test.
     """
     out = tmp_path / "mc"
-    g.main(["--pattern", "multicast", "--topology", "mesh_2x2_vc1_periph",
+    g.main(["--pattern", "multicast", "--topology", "mesh_2x2_periph",
             "--out", str(out), "--transactions-per-node", "2"])
     addrs = [t["addr"] for node in sorted(out.iterdir())
              for t in _parse_write(node / "write.txt")]
@@ -1051,7 +1006,7 @@ _HOTSPOT_PERIPH_TXNS = 2
 
 # Four peripherals, one per face, so the target set is large enough for the
 # weighted select to be doing something and every face is represented.
-_PERIPH4 = "mesh_4x4_vc1_periph4"
+_PERIPH4 = "mesh_4x4_periph4"
 
 
 def _emit_hotspot_peripherals(tmp_path):
@@ -1134,7 +1089,7 @@ def test_hotspot_peripherals_rejects_a_topology_with_no_peripherals(tmp_path, ca
     caller did not pass."""
     with pytest.raises(SystemExit):
         g.main(["--pattern", "hotspot", "--hotspot-peripherals",
-                "--topology", "mesh_2x2_vc1", "--out", str(tmp_path / "none"),
+                "--topology", "mesh_2x2", "--out", str(tmp_path / "none"),
                 "--transactions-per-node", str(_HOTSPOT_PERIPH_TXNS)])
     assert "needs a topology that declares peripherals" in capsys.readouterr().err
 

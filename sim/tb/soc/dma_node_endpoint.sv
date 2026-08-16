@@ -39,7 +39,7 @@ module dma_node_endpoint #(
     parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     // THIS node's own crossbar windows, stamped by gen_tb_top.py from the
-    // topology YAML. Field t is target t, m0 = config, LAST = data (see
+    // config file. Field t is target t, m0 = config, LAST = data (see
     // gen_tb_top.tile_targets). No defaults: only the generator knows a
     // topology's tile layout.
     parameter int unsigned TILE_TARGETS,
@@ -516,7 +516,7 @@ module dma_node_endpoint #(
     // (axi_test.sv:2133-2134), so an error response would otherwise pass
     // silently. A DMA reaches this failure mode more easily than the file
     // master did: gen_dma_jobs.py recomputes the window bases through
-    // address_map.pack(), and a disagreement with the SAM lands here.
+    // address_map.pack_config(), and a disagreement with the SAM lands here.
     always_ff @(posedge clk_i) begin
         if (rst_ni && mst_post_delay.r_valid && mst_post_delay.r_ready &&
                 !resp_ok(mst_post_delay.r_resp))

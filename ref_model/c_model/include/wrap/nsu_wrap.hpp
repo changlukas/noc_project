@@ -65,7 +65,7 @@ class NsuWrap {
     // scalar); dat_num_vc is the topology's VC count (mesh_4x4_vc{2,4,8}
     // reinterpret as DAT_NUM_VC per specgen T1 note). queue_depth = one per
     // AXI channel.
-    // config_path is the topology YAML the NMU already loads. The NSU needs one
+    // config_path is the config file the NMU already loads. The NSU needs one
     // thing out of it -- where each space keeps its node coordinates -- so it
     // can rewrite an arriving address to name this node (nsu::Depacketize's
     // rebase_). Empty means "no address map", and the NSU forwards addresses

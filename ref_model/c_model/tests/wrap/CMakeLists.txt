@@ -2,18 +2,18 @@ add_cmodel_test(test_router_wrap)
 target_include_directories(test_router_wrap PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-# NmuWrap::init requires a topology YAML, so every test that builds one reads
-# sim/topologies/ directly -- same definition the nmu tests use, and for the
-# same reason: a `cmake -E copy_directory` mirror never prunes a deleted YAML.
-set(NI_TOPOLOGY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/topologies")
+# NmuWrap::init requires a SAM config, so every test that builds one reads
+# sim/configs/ directly -- same definition the nmu tests use, and for the
+# same reason: a copy_directory mirror never prunes a deleted file.
+set(NI_CONFIG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../sim/configs")
 
 add_cmodel_test(test_nmu_wrap test_nmu_wrap.cpp)
 target_link_libraries(test_nmu_wrap PRIVATE yaml-cpp::yaml-cpp)
-target_compile_definitions(test_nmu_wrap PRIVATE TOPOLOGY_DIR="${NI_TOPOLOGY_DIR}")
+target_compile_definitions(test_nmu_wrap PRIVATE CONFIG_DIR="${NI_CONFIG_DIR}")
 
 add_cmodel_test(test_dat_merge_wrap)
 target_link_libraries(test_dat_merge_wrap PRIVATE yaml-cpp::yaml-cpp)
-target_compile_definitions(test_dat_merge_wrap PRIVATE TOPOLOGY_DIR="${NI_TOPOLOGY_DIR}")
+target_compile_definitions(test_dat_merge_wrap PRIVATE CONFIG_DIR="${NI_CONFIG_DIR}")
 
 
 # test_cmodel_dpi — DPI session state-machine / lifecycle test.
@@ -45,9 +45,9 @@ target_include_directories(test_cmodel_dpi PRIVATE
     ${CMAKE_SOURCE_DIR}/../dpi
     ${VERILATOR_INCLUDE_DIR}
     ${VERILATOR_INCLUDE_DIR}/vltstd)
-target_compile_definitions(test_cmodel_dpi PRIVATE TOPOLOGY_DIR="${NI_TOPOLOGY_DIR}")
+target_compile_definitions(test_cmodel_dpi PRIVATE CONFIG_DIR="${NI_CONFIG_DIR}")
 gtest_discover_tests(test_cmodel_dpi)
 
 add_cmodel_test(test_ni_router_chain)
 target_link_libraries(test_ni_router_chain PRIVATE yaml-cpp::yaml-cpp)
-target_compile_definitions(test_ni_router_chain PRIVATE TOPOLOGY_DIR="${NI_TOPOLOGY_DIR}")
+target_compile_definitions(test_ni_router_chain PRIVATE CONFIG_DIR="${NI_CONFIG_DIR}")

@@ -11,9 +11,8 @@
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nsu_wrap.hpp"
 #include "wrap/router_wrap.hpp"
-#include "common/tmp_path.hpp"
+#include "common/mesh_config.hpp"
 
-#include <fstream>
 #include <gtest/gtest.h>
 
 using namespace ni::cmodel::wrap;
@@ -22,13 +21,13 @@ namespace {
 
 constexpr std::size_t LOCAL = 0, EAST = 2, WEST = 4;
 
-// NmuWrap::init takes a topology YAML, no default map. The chain runs on a
+// NmuWrap::init takes a config file, no default map. The chain runs on a
 // 2x2 mesh, so the shipped 2x2 is the map; tests needing a different shape
 // write their own YAML below.
-constexpr const char* kTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1.yaml";
-// Same 2x2 plus a peripherals block. Declares { x: 0, y: 0, face: x }, which is
-// port 1 at (0,0) -- the configuration a non-zero requester port needs.
-constexpr const char* kPeriphTopologyYaml = TOPOLOGY_DIR "/mesh_2x2_vc1_periph.yaml";
+constexpr const char* kTopologyYaml = CONFIG_DIR "/mesh_2x2.yml";
+// Same 2x2 plus a peripheral endpoint on router 0's WEST port, which is port 1
+// at (0,0) -- the configuration a non-zero requester port needs.
+constexpr const char* kPeriphTopologyYaml = CONFIG_DIR "/mesh_2x2_periph.yml";
 
 struct Node {
     NmuWrap nmu;
@@ -316,19 +315,10 @@ static void run_chain(bool* ok_data, uint8_t requester_port_id = 0) {
 // and clog2(4) are both 2, so the coordinate field and every tile base in the
 // y=0 row sit exactly where they did.
 static std::string write_two_master_sam() {
-    auto path = ni::cmodel::testing::unique_temp_path("two_master_sam.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 4, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x100000 }\n"
-                           "    - { x: 1, y: 0, size: 0x100000 }\n"
-                           "    - { x: 2, y: 0, size: 0x100000 }\n"
-                           "    - { x: 3, y: 0, size: 0x100000 }\n"
-                           "    - { x: 0, y: 1, size: 0x100000 }\n"
-                           "    - { x: 1, y: 1, size: 0x100000 }\n"
-                           "    - { x: 2, y: 1, size: 0x100000 }\n"
-                           "    - { x: 3, y: 1, size: 0x100000 }\n";
-    return path;
+    return ni::cmodel::testing::write_config(
+        "two_master_sam.yml",
+        ni::cmodel::testing::mesh_config_yaml(
+            4, 2, "      - { base: 0x0, size: 0x100000, stride: 0x100000, space: memory }\n"));
 }
 
 TEST(NiRouterChain, TwoMastersOneNsuConcurrentWritesDoNotCrossWire) {
@@ -657,26 +647,13 @@ TEST(NiRouterChain, DualClassEndToEndAndCrossClassReadOrder) {
     Node n[2];
     MemSlave slave[2];
 
-    auto path = ni::cmodel::testing::unique_temp_path("dual_class_sam.yaml");
-    std::ofstream(path) << "topology: { name: t, x_dim: 2, y_dim: 2, num_vc: 1 }\n"
-                           "address_map:\n"
-                           // block_size declared explicitly, as every shipped topology
-                           // does: node stride is 2x the memory tile so the node's
-                           // config tile fits inside it.
-                           "  block_size: 0x200000\n"
-                           "  tiles:\n"
-                           "    - { x: 0, y: 0, size: 0x100000 }\n"
-                           "    - { x: 1, y: 0, size: 0x100000 }\n"
-                           "    - { x: 0, y: 1, size: 0x100000 }\n"
-                           "    - { x: 1, y: 1, size: 0x100000 }\n"
-                           // Spec §5.1: every node owns one region per space, so
-                           // config covers the mesh even though only node 1's tile
-                           // is addressed below. Raster order after the memory
-                           // tiles, matching the shipped topology YAMLs.
-                           "    - { x: 0, y: 0, size: 0x1000, space: config }\n"
-                           "    - { x: 1, y: 0, size: 0x1000, space: config }\n"
-                           "    - { x: 0, y: 1, size: 0x1000, space: config }\n"
-                           "    - { x: 1, y: 1, size: 0x1000, space: config }\n";
+    // The node stride is 2x the memory aperture so the node's config aperture
+    // fits inside its own block. Spec §5.1: every node owns one region per
+    // space, so the config range covers the mesh even though only node 1's
+    // aperture is addressed below.
+    const std::string path = ni::cmodel::testing::write_mesh_config(
+        "dual_class_sam.yml", 2, 2, /*memory_size=*/0x100000, /*config_base=*/0x100000,
+        /*stride=*/0x200000);
 
     // ROB Enabled: the T3 guard's class-change-forces-RoB-fallback path only
     // exists in Enabled mode (Disabled mode's single-outstanding interlock is
