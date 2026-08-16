@@ -91,13 +91,16 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 
 ## Simulate (cosim)
 
-`make sim` builds the chosen topology and runs one directed pattern. The two
-halves are also separate targets, so a run can be timed without a build hiding
-inside it:
+`make sim` builds the chosen topology and runs one directed pattern. Build,
+generate and run are three separate targets, so a run can be timed without a
+build or a generation hiding inside it. A run never generates stimulus itself:
+it errors naming the missing directory if `make sim-gen` has not written it
+first.
 
 | target | does |
 |---|---|
-| `make sim TB= PATTERN=` | build, then run |
+| `make sim TB= PATTERN=` | build, then run. Errors if stimulus is missing |
+| `make sim-gen TB= PATTERN=` | generate stimulus only, keyed on topology geometry. One generation covers every VC count sharing that geometry |
 | `make sim-build TB=` | build only. `PATTERN` names nothing here: a pattern is stimulus read at runtime, so every pattern runs on the same binary |
 | `make sim-run TB= PATTERN=` | run only. Reports the missing binary rather than building it |
 
@@ -111,8 +114,8 @@ inside it:
 a run.
 
 ~~~bash
-make sim TB=mesh_4x4_vc1 PATTERN=neighbor
-make sim TB=mesh_4x4_vc8 PATTERN=transpose
+make sim-gen TB=mesh_4x4_vc1 PATTERN=neighbor && make sim TB=mesh_4x4_vc1 PATTERN=neighbor
+make sim-gen TB=mesh_4x4_vc8 PATTERN=transpose && make sim TB=mesh_4x4_vc8 PATTERN=transpose
 ~~~
 
 On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
@@ -166,6 +169,7 @@ Fault injection, for proving a checker fires rather than assuming it does:
 | `ELABORATE_ONLY=1` | elaborates and stops, without running |
 
 ~~~bash
+make sim-gen TB=mesh_4x4_vc4 PATTERN=uniform_random
 make sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
 make sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
 ~~~
@@ -210,8 +214,8 @@ disagree. Each direction gets its own stimulus directory and run tag, so a read
 run and a write run do not overwrite one another.
 
 ~~~bash
-make sim TB=mesh_4x4_vc1 DMA=1                 # 100 read jobs per node
-make sim TB=mesh_4x4_vc1 DMA=1 DMA_RW=write
+make sim-gen TB=mesh_4x4_vc1 DMA=1 && make sim TB=mesh_4x4_vc1 DMA=1                 # 100 read jobs per node
+make sim-gen TB=mesh_4x4_vc1 DMA=1 DMA_RW=write && make sim TB=mesh_4x4_vc1 DMA=1 DMA_RW=write
 ~~~
 
 On success the wrapper prints `DMA PASS: <run-tag> every job retired, every

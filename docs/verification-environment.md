@@ -363,17 +363,20 @@ re-emits the tb.
 
 ## Seed handling
 
-`make -C sim` accepts `SEED=<n>`. Left unset, it draws a random 30-bit seed
-(`RANDOM*32768+RANDOM`, under Verilator's `+verilator+seed+` int32 ceiling)
-and prints it:
+`make -C sim gen` and `make -C sim sim` each accept `SEED=<n>`. Left unset,
+each draws its own random 30-bit seed (`RANDOM*32768+RANDOM`, under
+Verilator's `+verilator+seed+` int32 ceiling) and prints it:
 
 ```
+>>> gen TB=mesh_4x4_vc1 PATTERN=neighbor SEED=538912734
 >>> sim TB=mesh_4x4_vc1 PATTERN=neighbor SEED=538912734
 ```
 
-The same seed drives both the stimulus generator (`--seed`, used by
-`uniform_random`/`hotspot`) and the simulator's own `+verilator+seed+`, so
-passing back the printed value reproduces the run exactly.
+`gen` uses `SEED` for the stimulus generator (`--seed`, used by
+`uniform_random`/`hotspot`); `sim` uses it for the simulator's own
+`+verilator+seed+`. Passing the same value to both reproduces a run exactly:
+generation and simulation are separate commands, so the value has to be
+supplied to each rather than drawn once and shared.
 
 ## Known limitations
 
