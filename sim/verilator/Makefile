@@ -147,13 +147,20 @@ check-yamlcpp:
 	    exit 1; \
 	fi
 
+# Parallelism for the generated C++ build only, not for this makefile. Four and
+# not $(nproc): the g++ 15 ICE documented above is memory pressure, and six
+# concurrent cc1plus with their PCHs exhausted a 15 GB host mid-build. Measured
+# on mesh_4x4_vc1_periph4 with a warm ccache, cold obj_dir: 18 s serial, 5 s at
+# -j4, against 14 s of Verilator elaboration that is single-threaded either way.
+BUILD_JOBS ?= 4
+
 # Two-phase build: Verilator generates C++ in $(VL_BUILD)/obj_dir, then make
 # compiles it.
 # PYTHON3 override: verilator_includer needs a real Python3 interpreter.
 $(TBTOP_EXE): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(OBJ_DIR)
 	$(VERILATOR) $(VERILATOR_FLAGS) -f $(FILELIST_F) $(C_SRC)
-	$(if $(ELABORATE_ONLY),echo "ELABORATE_ONLY: elaborated - C++ build skipped",$(MAKE) -C $(OBJ_DIR) -f V$(TOP).mk PYTHON3="$(PYTHON3)")
+	$(if $(ELABORATE_ONLY),echo "ELABORATE_ONLY: elaborated - C++ build skipped",$(MAKE) -j $(BUILD_JOBS) -C $(OBJ_DIR) -f V$(TOP).mk PYTHON3="$(PYTHON3)")
 
 # Elaboration alone: Verilator reads the SV and emits its C++, and the g++ build
 # of that C++ is skipped. Enough to prove a top elaborates, an order of magnitude
