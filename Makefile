@@ -18,7 +18,7 @@ COSIM_VERILATOR := sim/verilator
 COSIM_VCS       := sim/vcs
 
 .PHONY: help build build-cmodel build-yamlcpp build-verilator test \
-        pytest \
+        pytest check \
         clean clean-cmodel clean-verilator clean-vcs clean-generated
 
 help:
@@ -36,6 +36,7 @@ help:
 	@echo "Test:"
 	@echo "  make test             run c_model ctest suite"
 	@echo "  make pytest           specgen + sim/tools suites, golden drift gate"
+	@echo "  make check            both of the above -- run this before committing"
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean                  everything (build/ + per-sim output/ + generated stimulus)"
@@ -142,6 +143,14 @@ pytest:
 	(cd specgen && $(PYTHON3) -m pytest tests/ -q) || status=1; \
 	(cd sim/tools && $(PYTHON3) -m pytest . -q) || status=1; \
 	exit $$status
+
+# Run before committing. The SAM parity proof lives half in each suite: ctest
+# holds nmu/sam_yaml.hpp to sim/configs/sam_rules.golden and pytest holds
+# sim/tools/address_map.py to the same file, so the two readers are only
+# compared when both have run. A change to a helper they share (address_map.py's
+# dst_id(), say) moves both sides of the Python-side cross-format check
+# together, leaves pytest green, and shows up in ctest alone.
+check: test pytest
 
 # Simulation runs from sim/, whose Makefiles reach tools/ and output/ by
 # relative path, so these forward with -C rather than include. TB, PATTERN and
