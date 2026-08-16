@@ -114,15 +114,15 @@ TOPO_STAMP    := $(VCS_BUILD)/.topology
 FORCE:
 $(TOPO_STAMP): FORCE
 	@mkdir -p $(VCS_BUILD)
-	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)" ]; then \
-	    echo "$(TOPOLOGY)_$(RUN_CLASS)" > $@; \
+	@if [ "$$(cat $@ 2>/dev/null)" != "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" ]; then \
+	    echo "$(TOPOLOGY)_$(RUN_CLASS)$(DMA)$(if $(filter 1,$(DMA)),_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW))" > $@; \
 	fi
 
 # DMA only, as in sim/verilator/Makefile: on the directed path TB_TOP_SV is
 # sim/tb/tb_noc_mesh.sv, a SOURCE file, and a rule with this recipe would
 # overwrite it with generator output.
 ifeq ($(DMA),1)
-$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP)
+$(TB_TOP_SV): $(TOPOLOGY_CONFIG) $(GEN_TB_TOP_DEPS) $(TOPO_STAMP) $(NI_PARAMS_SV)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --dma $(_DMA_JOB_ARGS) --out $(TB_TOP_SV)
 endif
 

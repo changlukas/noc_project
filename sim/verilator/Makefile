@@ -263,9 +263,10 @@ STIM_BASE      ?= test_patterns
 # reuses the files a previous run generated rather than writing identical ones.
 # The leaf is the pattern exactly as PATTERN= spells it, so `ls` over a geometry
 # IS the pattern list. INJECTION_COUNT is deliberately not in the path: it is a
-# property of the batch, not of one pattern, and the recipe below regenerates
-# unconditionally before every run, so a differing count overwrites rather than
-# going stale. Set STIM_BASE to hold two batches side by side.
+# property of the batch, not of one pattern, and gen-directed overwrites the
+# tree in place, so the next generation replaces a differing count rather than
+# leaving it beside the new one. A run reads what is there and regenerates
+# nothing. Set STIM_BASE to hold two batches side by side.
 ifeq ($(DMA),1)
 STIM_ROOT      ?= $(STIM_BASE)/$(TOPOLOGY)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
