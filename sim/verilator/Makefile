@@ -232,10 +232,21 @@ _PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
 # live under $(BUILD_ROOT): the Linux linker rejects a yaml-cpp built on a /mnt
 # mount, which is a constraint on object files and binaries, not on text.
 STIM_BASE      ?= test_patterns
+# Stimulus keys on the GEOMETRY, not on the topology file name: gen_test_patterns
+# reads x_dim, y_dim and address_map and never reads num_vc, so mesh_4x4_vc1,
+# _vc2, _vc4 and _vc8 emit byte-identical files. Stripping _vc<N> collapses those
+# four onto one directory instead of four copies under four names. VC count is a
+# router parameter -- it changes buffering and arbitration, not who sends what.
+_GEOMETRY      := $(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//')
+# The leaf is the pattern exactly as PATTERN= spells it, so `ls` over a geometry
+# IS the pattern list. INJECTION_COUNT is deliberately not in the path: it is a
+# property of the batch, not of one pattern, and the recipe below regenerates
+# unconditionally before every run, so a differing count overwrites rather than
+# going stale. Set STIM_BASE to hold two batches side by side.
 ifeq ($(DMA),1)
-STIM_ROOT      ?= $(STIM_BASE)/dma_$(TOPOLOGY)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
+STIM_ROOT      ?= $(STIM_BASE)/$(_GEOMETRY)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
-STIM_ROOT      ?= $(STIM_BASE)/stim_$(TOPOLOGY)_$(_PATTERN_TAG)_n$(INJECTION_COUNT)
+STIM_ROOT      ?= $(STIM_BASE)/$(_GEOMETRY)/$(_PATTERN_TAG)
 endif
 # READ_ROB joins the run tag, not STIM_ROOT: it changes what the NI does with a
 # response, not the stimulus, so two READ_ROB values share generated patterns and
