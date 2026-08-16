@@ -114,6 +114,13 @@ $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
 
+# topology_<geometry>_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV). Duplicated
+# from sim/verilator/Makefile (intentionally, same convention as FILELIST_F
+# above): no TOPO_STAMP, the package doesn't vary with RUN_CLASS/READ_ROB/DMA,
+# only with the address map the topology YAML declares.
+$(TOPOLOGY_PKG_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
+
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.
 VCS_COMMON_FLAGS := \

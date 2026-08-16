@@ -128,6 +128,15 @@ $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_pa
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
 
+# topology_<geometry>_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV): the
+# per-geometry address-map package tb_top's own TILE_BASE_ADDR / TILE_SIZE /
+# NOC_EGRESS_BASE / peripheral table are relocated from. No TOPO_STAMP, unlike
+# TB_TOP_SV above: the package doesn't vary with RUN_CLASS/READ_ROB/DMA, only
+# with the address map the topology YAML declares, so it rebuilds only when
+# that YAML or the generator changes.
+$(TOPOLOGY_PKG_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
+
 # Mirrors the root Makefile. Override via local.mk if needed.
 PYTHON3 ?= python3
 

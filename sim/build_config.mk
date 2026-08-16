@@ -187,18 +187,13 @@ TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 # Per-geometry address-map package (topology_<geometry>_pkg.sv): TILE_BASE_ADDR
 # / TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, for a hand-written
 # testbench to `import`. Gitignored like FlooNoC's generated/ -- derived from a
-# tracked YAML, so the build reproduces it unconditionally here (same
-# $(shell)-at-parse-time pattern as TOPOLOGY_NUM_VC above) rather than gating a
-# drift check on it. Geometry = TOPOLOGY minus its _vc<N> suffix (mirrors
-# sim/verilator/Makefile's _GEOMETRY sed), so mesh_4x4_vc1/_vc8/_vc8_robless
-# share one topology_mesh_4x4_pkg.
+# tracked YAML, rebuilt only when it or the generator changes. Geometry =
+# TOPOLOGY minus its _vc<N> suffix (mirrors sim/verilator/Makefile's _GEOMETRY
+# sed), so mesh_4x4_vc1/_vc8/_vc8_robless share one topology_mesh_4x4_pkg.
+# Naming only -- the WRITE is a file-target recipe in each simulator Makefile
+# (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
 TOPOLOGY_GEOMETRY := $(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//')
 TOPOLOGY_PKG_SV := $(COSIM_ROOT)/tb/test/topology_$(TOPOLOGY_GEOMETRY)_pkg.sv
-TOPOLOGY_PKG_STATUS := $(shell $(or $(PYTHON3),python3) \
-    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --emit-topology-pkg \
-    --out $(TOPOLOGY_PKG_SV) && echo OK)
-$(if $(filter OK,$(TOPOLOGY_PKG_STATUS)),,$(error gen_tb_top.py --emit-topology-pkg \
-failed for TOPOLOGY=$(TOPOLOGY); run it directly to see why))
 
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
