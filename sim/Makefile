@@ -75,6 +75,22 @@ endif
 # $RANDOM$RANDOM string-concat could reach 10 digits (~3.3e9) and abort the run.
 _SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$(( RANDOM * 32768 + RANDOM ))'))
 
+# verilator/test_patterns/mesh_2x2/neighbor/ is TRACKED: it is the worked
+# example README.md walks through, and the README spells the SEED=1 that
+# produced it. Nothing enforced it, so generating that one config-and-pattern
+# pair without a seed overwrote the tracked files with random-seed content and
+# left the tree dirty for the next reader to explain. Naming the seed is what an
+# intentional regeneration looks like; every other pair is untracked and free.
+# Scoped to `gen`, the only goal that writes the tree -- a run reads it.
+ifneq ($(filter gen,$(MAKECMDGOALS)),)
+ifeq ($(SEED),)
+ifeq ($(CONFIG)-$(PATTERN),mesh_2x2-neighbor)
+$(error regenerating the tracked mesh_2x2/neighbor example needs an explicit SEED; \
+the committed files are SEED=1)
+endif
+endif
+endif
+
 # Forwarded only when set, so verilator/Makefile's own defaults apply otherwise.
 # INJECTION_COUNT's default depends on INJECTION_MODE and is computed there.
 _INJ_ARGS := \
