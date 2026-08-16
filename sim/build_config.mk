@@ -270,13 +270,17 @@ FILELIST_GEN_ARGS = $(SPECGEN_SV_INC) $(COSIM_ROOT)/tb $(SRC_SV) \
 DPI_C_SRC := $(SRC_DPI)/cmodel_dpi.cpp
 
 # DPI C++ (cmodel_dpi.cpp) pulls in the c_model headers (wrap adapters and
-# their transitive includes). The obj-dir sub-make tracks them via -MMD, but
-# the TOP-level rules must list them too — otherwise a header-only change
-# leaves the simulator binary stale because the sub-make never runs.
+# their transitive includes) and its own boundary headers from SRC_DPI. The
+# obj-dir sub-make tracks them via -MMD, but the TOP-level rules must list them
+# too — otherwise a header-only change leaves the simulator binary stale because
+# the sub-make never runs.
+# The include tree is one level of sub-namespace directories deep, so the glob
+# stops there; a third level would match nothing and hide the miss.
 DPI_HDR_DEPS := \
+    $(wildcard $(SRC_DPI)/*.h) \
+    $(wildcard $(SRC_DPI)/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*.hpp) \
-    $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/tests/common/*.hpp) \
     $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.h)
 
