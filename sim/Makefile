@@ -81,12 +81,17 @@ _SEED   := $(if $(SEED),$(SEED),$(shell bash -c 'echo $$(( RANDOM * 32768 + RAND
 # pair without a seed overwrote the tracked files with random-seed content and
 # left the tree dirty for the next reader to explain. Naming the seed is what an
 # intentional regeneration looks like; every other pair is untracked and free.
-# Scoped to `gen`, the only goal that writes the tree -- a run reads it.
+# Scoped to `gen`, the only goal that writes the tree -- a run reads it -- and
+# to the directed path. PATTERN defaults to neighbor and DMA=1 ignores it, so a
+# DMA generation arrives here spelling the tracked pair while writing
+# dma_j<N>_l<L>_rw<RW>/ instead, a directory nothing tracks.
 ifneq ($(filter gen,$(MAKECMDGOALS)),)
+ifeq ($(filter 1,$(DMA)),)
 ifeq ($(SEED),)
 ifeq ($(CONFIG)-$(PATTERN),mesh_2x2-neighbor)
 $(error regenerating the tracked mesh_2x2/neighbor example needs an explicit SEED; \
 the committed files are SEED=1)
+endif
 endif
 endif
 endif
