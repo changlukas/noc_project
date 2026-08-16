@@ -3,9 +3,9 @@
 // The testbench body every configuration shares: clock and reset, the DPI
 // handle lifecycle, the fabric, one user_node_endpoint per endpoint, the
 // watchdog, the perf instrumentation and the exit logic. A configuration is
-// then a parameter list rather than a file -- see sim/tb/tb_<topology>.sv,
-// which supplies the geometry and the address map from
-// topology_<geometry>_pkg and instantiates this module.
+// then a parameter list rather than a file -- see sim/tb/tb_noc_mesh.sv, which
+// supplies the geometry and the address map from topology_pkg and instantiates
+// this module.
 //
 // Checking: pulp axi_scoreboard lives inside each endpoint on master_dv,
 // comparing read data end-to-end through the NoC against golden write data.
@@ -54,7 +54,10 @@ module noc_tb_top #(
     parameter int unsigned N_PERIPH_MAX = (N_PERIPH > 0) ? N_PERIPH : 1,
     parameter logic [N_PERIPH_MAX-1:0][7:0] PERIPH_NODE = '0,
     parameter logic [N_PERIPH_MAX-1:0][7:0] PERIPH_PORT = '0,
-    parameter int unsigned DAT_NUM_VC = 1,
+    // DAT face VC count. Default from where the parameter is defined:
+    // noc.DAT_NUM_VC in specgen/source/constants.yaml, the same value
+    // build_config.mk picks the noc_types_pkg_vc<N> flit package with.
+    parameter int unsigned DAT_NUM_VC = ni_params_pkg::NOC_DAT_NUM_VC_DFLT,
     // NMU read reorder buffer: 1 = the reorder-buffer response path
     // docs/noc-target-spec.md section 3 describes, 0 = the RoBless bypass with
     // its per-id single-outstanding interlock. int unsigned, not bit: it goes

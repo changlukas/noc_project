@@ -64,9 +64,23 @@ def num_vc() -> int:
     carry it: it is a DUT parameter and does not vary with the geometry, so
     changing it is an edit to that file and a rebuild.
     """
+    return _constant("noc", "DAT_NUM_VC")
+
+
+def read_rob_enabled() -> int:
+    """NMU read reorder buffer mode, from where the parameter is defined.
+
+    nmu.READ_ROB_ENABLED in specgen/source/constants.yaml. Like num_vc() above:
+    a DUT parameter, not a property of the geometry, so switching modes is an
+    edit to that file and a rebuild.
+    """
+    return _constant("nmu", "READ_ROB_ENABLED")
+
+
+def _constant(domain: str, name: str) -> int:
     import yaml
     c = yaml.safe_load((ROOT / "specgen" / "source" / "constants.yaml").read_text())
-    return int(c["noc"]["DAT_NUM_VC"]["default"])
+    return int(c[domain][name]["default"])
 
 
 # Y_WIDTH / VC_ID_WIDTH mirror the flit spec (ni_packet.json field_widths).
@@ -589,10 +603,11 @@ def _dpi_error_poll():
 # tb_top emitter — instantiates the fabric + pulp VIP endpoints + exit logic
 # ---------------------------------------------------------------------------
 
-def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
+def emit_tb_top(topo: dict, dma: bool = False,
                 jobs_per_node: int = _DMA_JOBS_PER_NODE,
                 job_bytes: int = _DMA_JOB_BYTES,
                 rw: str = _DMA_RW) -> str:
+    rob_enabled = bool(read_rob_enabled())
     name = topo["name"]
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -690,11 +705,12 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
     w("    localparam int unsigned DATA_WIDTH    = ni_params_pkg::AXI_DATA_WIDTH_DFLT;")
     w(f"    localparam int unsigned DAT_NUM_VC     = {dat_num_vc};"
       "  // specgen constants.yaml noc.DAT_NUM_VC")
-    w("    // NMU read reorder buffer (READ_ROB): 1 = the reorder-buffer response path")
+    w("    // NMU read reorder buffer: 1 = the reorder-buffer response path")
     w("    // docs/noc-target-spec.md section 3 describes, 0 = the RoBless bypass with")
     w("    // its per-id single-outstanding interlock. int unsigned, not bit: it goes")
     w("    // straight into cmodel_nmu_create_ex's `input int rob_enabled`.")
-    w(f"    localparam int unsigned READ_ROB_ENABLED = {1 if rob_enabled else 0};")
+    w(f"    localparam int unsigned READ_ROB_ENABLED = {1 if rob_enabled else 0};"
+      "  // specgen constants.yaml nmu.READ_ROB_ENABLED")
     w("    localparam int unsigned REQ_FLIT_WIDTH = ni_params_pkg::NOC_REQ_FLIT_WIDTH_DFLT;")
     w("    localparam int unsigned RSP_FLIT_WIDTH = ni_params_pkg::NOC_RSP_FLIT_WIDTH_DFLT;")
     w("    localparam int unsigned DAT_FLIT_WIDTH = ni_params_pkg::NOC_DAT_FLIT_WIDTH_DFLT;")
@@ -1110,17 +1126,20 @@ def emit_tb_top(topo: dict, rob_enabled: bool = True, dma: bool = False,
 
 
 # ---------------------------------------------------------------------------
-# topology_<geometry>_pkg emitter -- the address map, for a hand-written
-# testbench to `import` instead of a generated top declaring it inline.
+# topology_pkg emitter -- the address map, for the testbench to `import`
+# instead of a generated top declaring it inline.
 # ---------------------------------------------------------------------------
 
 def emit_topology_pkg(topo: dict) -> str:
-    """Per-geometry address-map package: TILE_BASE_ADDR / TILE_SIZE /
-    NOC_EGRESS_BASE / the peripheral table, computed exactly as emit_tb_top
-    computes them for tb_top's own parameter block -- relocated here, not
-    re-derived. One package per geometry, not per topology: mesh_4x4_vc1,
-    _vc8 and _vc8_robless share topology_mesh_4x4_pkg. Mirrors FlooNoC's
-    floo_axi_mesh_noc_pkg supplying Sam[] to tb_floo_axi_mesh.sv.
+    """Address-map package for the selected configuration: TILE_BASE_ADDR /
+    TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, computed exactly as
+    emit_tb_top computes them for tb_top's own parameter block -- relocated
+    here, not re-derived. Mirrors FlooNoC's floo_axi_mesh_noc_pkg supplying
+    Sam[] to tb_floo_axi_mesh.sv.
+
+    The package NAME is fixed, its CONTENTS vary with CONFIG: sim/tb/
+    tb_noc_mesh.sv carries one `import`, so two configurations cannot coexist
+    in a build tree without regenerating -- FlooNoC's property too.
     """
     nodes, x_dim, y_dim = _nodes(topo)
     n = len(nodes)
@@ -1140,7 +1159,7 @@ def emit_topology_pkg(topo: dict) -> str:
     tile_size = _rows("size")
 
     geom = topo["name"]
-    pkg = f"topology_{geom}_pkg"
+    pkg = "topology_pkg"
     guard = pkg.upper() + "_SVH"
     # Sized max(N_PERIPH, 1): a packed array cannot have zero elements
     # (noc_fabric.sv's N_PERIPH_MAX parameter mirrors the same constraint).
@@ -1160,9 +1179,8 @@ def emit_topology_pkg(topo: dict) -> str:
     w(f"// Geometry: {geom}  ({x_dim}x{y_dim}, {len(peripherals)} peripheral(s))")
     w("// DO NOT EDIT - modify the generator or sim/configs/*.yml instead.")
     w("//")
-    w("// Address-map constants for every topology sharing this geometry (e.g.")
-    w("// mesh_4x4_vc1/_vc8/_vc8_robless): TILE_BASE_ADDR / TILE_SIZE /")
-    w("// NOC_EGRESS_BASE / the peripheral table, the same values emit_tb_top")
+    w("// Address-map constants for the selected configuration: TILE_BASE_ADDR /")
+    w("// TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, the same values emit_tb_top")
     w("// stamps into tb_top's own parameter block. Mirrors FlooNoC's")
     w("// floo_axi_mesh_noc_pkg supplying Sam[] to tb_floo_axi_mesh.sv.")
     w("")
@@ -1205,10 +1223,6 @@ def main() -> int:
                     help="Configuration name (matches sim/configs/<name>.yml)")
     ap.add_argument("--out", default=None,
                     help="Output tb_top.sv path (default: sim/tb/test/tb_top_<topology>.sv)")
-    ap.add_argument("--read-rob", type=int, choices=(0, 1), default=1,
-                    help="NMU read reorder buffer: 1 (default) emits the reorder-buffer "
-                         "response path, 0 the RoBless bypass. Emitted as the tb's "
-                         "READ_ROB_ENABLED localparam.")
     ap.add_argument("--dma", action="store_true",
                     help="Emit the iDMA top instead: dma_node_endpoint per node and "
                          "sim/tb/soc/tb_top_dma_<topology>.sv as the default output. It "
@@ -1230,12 +1244,12 @@ def main() -> int:
                          "the topology name. The config is still loaded first, so the "
                          "flit-capacity check runs on this branch too.")
     ap.add_argument("--emit-topology-pkg", action="store_true",
-                    help="Emit the per-geometry address-map package instead of tb_top: "
-                         "topology_<geometry>_pkg.sv, exporting the same TILE_BASE_ADDR / "
-                         "TILE_SIZE / NOC_EGRESS_BASE / peripheral table tb_top stamps "
-                         "inline, for a hand-written testbench to `import`. Default output "
-                         "is sim/tb/test/topology_<geometry>_pkg.sv, one per geometry "
-                         "(the config file's own name).")
+                    help="Emit the address-map package instead of tb_top: topology_pkg.sv, "
+                         "exporting the same TILE_BASE_ADDR / TILE_SIZE / NOC_EGRESS_BASE / "
+                         "peripheral table tb_top stamps inline, for sim/tb/tb_noc_mesh.sv "
+                         "to `import`. Default output is sim/tb/test/topology_pkg.sv. The "
+                         "name is fixed and the contents follow --topology, so switching "
+                         "configuration means regenerating it.")
     a = ap.parse_args()
 
     topo = load_topology(a.topology)
@@ -1243,7 +1257,7 @@ def main() -> int:
         print(num_vc())
         return 0
     if a.emit_topology_pkg:
-        default_out = ROOT / "sim" / "tb" / "test" / f"topology_{a.topology}_pkg.sv"
+        default_out = ROOT / "sim" / "tb" / "test" / "topology_pkg.sv"
         out_path = Path(a.out) if a.out is not None else default_out
         out_path.write_text(emit_topology_pkg(topo), encoding="utf-8")
         return 0
@@ -1265,7 +1279,7 @@ def main() -> int:
             f"array only, so a peripheral endpoint has no jobs.txt and its idma_job_driver "
             f"$fatals on the missing file (docs/known-limitations.md). Use a configuration "
             f"whose endpoints are all on EJECT, or the directed top (no --dma)")
-    tb_text = emit_tb_top(topo, bool(a.read_rob), a.dma, a.jobs_per_node, a.length, a.rw)
+    tb_text = emit_tb_top(topo, a.dma, a.jobs_per_node, a.length, a.rw)
     default_out = ROOT / "sim" / "tb" / "soc" / f"tb_top_dma_{a.topology}.sv" if a.dma \
         else ROOT / "sim" / "tb" / "test" / f"tb_top_{a.topology}.sv"
     out_path = Path(a.out) if a.out is not None else default_out

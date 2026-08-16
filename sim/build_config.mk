@@ -1,8 +1,8 @@
 # Build environment config and simulator-neutral source lists shared by
 # sim/verilator/Makefile and sim/vcs/Makefile.
 #
-# tb_top SV sources live in sim/filelist_<TOPOLOGY>.f (generated from
-# TB_TOP_SV_SRC below); both Makefiles use -f filelist_<TOPOLOGY>.f for the
+# tb_top SV sources live in sim/filelist_<CONFIG>.f (generated from
+# TB_TOP_SV_SRC below); both Makefiles use -f filelist_<CONFIG>.f for the
 # tb_top verilate/compile step.
 #
 # COSIM_ROOT is derived from this file's own location so any includer depth
@@ -72,118 +72,30 @@ endif
 endif
 
 # --- tb_top sim ---
-# TB_TOP_SV_SRC is consumed by the filelist_<TOPOLOGY>.f generation recipe below
-# and by VCS (via -f filelist_<TOPOLOGY>.f). Paths are relative to COSIM_ROOT so
+# TB_TOP_SV_SRC is consumed by the filelist_<CONFIG>.f generation recipe below
+# and by VCS (via -f filelist_<CONFIG>.f). Paths are relative to COSIM_ROOT so
 # the variable stays readable; gen_filelist.py absolutizes them.
-# TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
-# (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
+# TB_TOP_SV is the top file; per-configuration on the DMA path
+# (tb_top_dma_<CONFIG>.sv). Use deferred = so CONFIG expansion is lazy.
 #
-# One line per checked-in testbench: which geometry package it imports, which
-# VC-count flit package it needs, and which READ_ROB mode its source fixes. No
-# filename parsing -- a suffix like _robless is not a geometry, and a scrape
-# would have to learn every suffix.
-#
-# TB_GEOMETRY doubles as the config file basename: sim/configs/<geometry>.yml is
-# the one file the configuration reads, so mesh_4x4_vc1/_vc2/_vc4/_vc8/
-# _vc8_robless all read sim/configs/mesh_4x4.yml.
-ifeq ($(TOPOLOGY),mesh_2x2_vc1)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_2x2
-TB_NUM_VC      := 1
-TB_READ_ROB    := 1
-endif
-# Geometry is mesh_2x2_periph, not mesh_2x2: the peripherals change the address
-# map and the endpoint count, so this configuration imports a package of its own.
-ifeq ($(TOPOLOGY),mesh_2x2_vc1_periph)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_2x2_periph
-TB_NUM_VC      := 1
-TB_READ_ROB    := 1
-endif
-ifeq ($(TOPOLOGY),mesh_4x4_vc1)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_4x4
-TB_NUM_VC      := 1
-TB_READ_ROB    := 1
-endif
-ifeq ($(TOPOLOGY),mesh_4x4_vc2)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_4x4
-TB_NUM_VC      := 2
-TB_READ_ROB    := 1
-endif
-ifeq ($(TOPOLOGY),mesh_4x4_vc4)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_4x4
-TB_NUM_VC      := 4
-TB_READ_ROB    := 1
-endif
-ifeq ($(TOPOLOGY),mesh_4x4_vc8)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_4x4
-TB_NUM_VC      := 8
-TB_READ_ROB    := 1
-endif
-ifeq ($(TOPOLOGY),mesh_4x4_vc8_robless)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_4x4
-TB_NUM_VC      := 8
-TB_READ_ROB    := 0
-endif
-# Geometry is mesh_4x4_periph4, not mesh_4x4: the peripherals change the address
-# map and the endpoint count, so this configuration imports a package of its own.
-ifeq ($(TOPOLOGY),mesh_4x4_vc1_periph4)
-TB_HANDWRITTEN := 1
-TB_GEOMETRY    := mesh_4x4_periph4
-TB_NUM_VC      := 1
-TB_READ_ROB    := 1
-endif
-
-# The config file every topology query reads: the generator's --topology
-# argument, the SAM config passed at runtime, and the stimulus generators'
-# --topology. Geometry = TOPOLOGY minus its _vc<N> suffix, so mesh_4x4_vc1/_vc8/
-# _vc8_robless share one sim/configs/mesh_4x4.yml and one topology_mesh_4x4_pkg.
-# It also keys the stimulus directory in sim/verilator/Makefile, which reads
-# this variable rather than repeating the sed.
-# A checked-in testbench names its geometry in the table above, for the same
-# reason it names its VC count: the package it imports is compiled in.
-# Kept on one line: a backslash continuation would fold the next line's leading
-# whitespace into the else branch, and the geometry is half a file name.
-TOPOLOGY_GEOMETRY := $(if $(TB_GEOMETRY),$(TB_GEOMETRY),$(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//'))
-TOPOLOGY_CONFIG   := $(COSIM_ROOT)/configs/$(TOPOLOGY_GEOMETRY).yml
+# CONFIG names the one file the build reads: sim/configs/<CONFIG>.yml. It is
+# also the generator's --topology argument, the SAM config passed at runtime,
+# the stimulus generators' --topology, and the stimulus directory key in
+# sim/verilator/Makefile. There is no table between the name and the file: the
+# two parameters that used to turn one geometry into several configurations --
+# the VC count and the RoB mode -- are specgen constants now.
+TOPOLOGY_CONFIG   := $(COSIM_ROOT)/configs/$(TOPOLOGY).yml
 
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
 # every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
 # below the endpoint -- the fabric, the NI wraps, the tile crossbar sources --
 # is the same build, so the two tops differ only in who generates the traffic.
-# It stays generated whatever the table above says, so the DMA branch also
-# clears TB_HANDWRITTEN: everything keyed on it below must follow the file
-# actually selected here.
 ifeq ($(DMA),1)
 TB_TOP_SV = $(COSIM_ROOT)/tb/soc/tb_top_dma_$(TOPOLOGY).sv
-TB_HANDWRITTEN :=
-else ifdef TB_HANDWRITTEN
-TB_TOP_SV = $(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv
 else
-TB_TOP_SV = $(COSIM_ROOT)/tb/test/tb_top_$(TOPOLOGY).sv
+TB_TOP_SV = $(COSIM_ROOT)/tb/tb_noc_mesh.sv
 endif
 
-# READ_ROB reaches the GENERATED path only: it is a gen_tb_top.py argument. A
-# checked-in testbench states READ_ROB_ENABLED in its own source, so a
-# non-matching READ_ROB would build the mode the source names while keying
-# OBJ_DIR and the run tag with the mode the command line named -- a rob0
-# directory and a rob0 log holding a RoB-enabled result. An error, not a
-# warning: the failure it prevents is a mislabelled result, which survives
-# longer than a scrolled-past line. Placed after the DMA branch above, which
-# clears TB_HANDWRITTEN, so a DMA build still honours READ_ROB.
-ifdef TB_HANDWRITTEN
-ifneq ($(filter-out $(TB_READ_ROB),$(READ_ROB)),)
-$(error READ_ROB=$(READ_ROB) is not honoured by TOPOLOGY=$(TOPOLOGY): its \
-testbench $(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv fixes READ_ROB_ENABLED=$(TB_READ_ROB) \
-in its own source. Drop READ_ROB, or use a topology whose testbench names the \
-mode you want)
-endif
-endif
 # DMA job geometry. One pair of values feeds BOTH the job files gen_dma_jobs.py
 # writes and the memory preload / region compare gen_tb_top.py stamps into the
 # DMA top, so it lives here rather than in one simulator's Makefile -- a top
@@ -193,12 +105,6 @@ DMA_JOBS_PER_NODE ?= 100
 DMA_LENGTH        ?= 0x400
 DMA_RW            ?= read
 _DMA_JOB_ARGS     := --jobs-per-node $(DMA_JOBS_PER_NODE) --length $(DMA_LENGTH) --rw $(DMA_RW)
-# NMU read reorder buffer. 1 (the default, and what docs/noc-target-spec.md
-# section 3 describes) emits the reorder-buffer response path; 0 emits the
-# RoBless bypass. A gen_tb_top.py argument, so it reaches the GENERATED tops
-# only, as their READ_ROB_ENABLED localparam; a checked-in testbench fixes the
-# mode in its own source and the guard above rejects a READ_ROB that disagrees.
-READ_ROB ?= 1
 # pulp AXI crossbar subset (sim/dv/README.md): the tile decoder and the memory
 # behind it in user_node_endpoint.sv. Taken at v0.39.7 / v1.37.0, the versions
 # already vendored, so nothing here mixes releases -- at v0.39.7
@@ -269,38 +175,39 @@ ENDPOINT_SRC := $(if $(filter 1,$(DMA)),$(DMA_ENDPOINT_SRC),\
 # silently never compiled.
 NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
 # num_vc is a DUT parameter, so it comes from where it is defined:
-# specgen/source/constants.yaml noc.DAT_NUM_VC. The config files do not carry it
-# and neither does the topology NAME -- a name carries suffixes that are not the
-# vc word (_periph), and reading a declared value out of a filename needs a new
-# strip per suffix. gen_tb_top.py answers, rather than a second reader here, and
-# loading the config first means this query also runs the flit-capacity check
-# once per make parse.
+# specgen/source/constants.yaml noc.DAT_NUM_VC. The config files do not carry
+# it and neither does the CONFIG name. gen_tb_top.py answers, rather than a
+# second reader here, and loading the config first means this query also runs
+# the flit-capacity check once per make parse.
 # $(or ...) honours a local.mk PYTHON3 without defining one, which would
 # pre-empt each Makefile's own default.
-CONSTANTS_NUM_VC := $(shell $(or $(PYTHON3),python3) \
-    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY_GEOMETRY) --print-num-vc)
-# An empty result means the generator failed -- unknown TOPOLOGY, missing config,
-# flit-capacity violation. Without this the symptom is a missing
+# The file the two DUT parameters are defined in. A prerequisite of the
+# filelist rule in both simulator Makefiles: the VC count selects which
+# noc_types_pkg_vc<N>.sv enters TB_TOP_SV_SRC, and nothing else in that list
+# moves when it changes -- a filelist regenerated only on a build_config.mk
+# edit would keep naming the previous width, and the build would come out
+# with the NIs at one width against a flit package of another.
+SPECGEN_CONSTANTS := $(PROJ_ROOT)/specgen/source/constants.yaml
+
+TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
+    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc)
+# An empty result means the generator failed -- unknown CONFIG, missing config
+# file, flit-capacity violation. Without this the symptom is a missing
 # noc_types_pkg_vc.sv instead of the generator's own message.
-$(if $(CONSTANTS_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
-TOPOLOGY=$(TOPOLOGY); run it directly to see why))
-# A checked-in testbench fixes DAT_NUM_VC in its own source, so its table entry
-# -- not constants.yaml -- picks the flit package it is compiled against; the
-# two would otherwise disagree, and the NIs would be built at one width against
-# a flit package of another. A GENERATED top takes DAT_NUM_VC from the query
-# above, so it and its flit package come from the same place. When the table
-# goes, every configuration takes the constants.yaml value and one source is
-# left.
-TOPOLOGY_NUM_VC := $(if $(TB_HANDWRITTEN),$(TB_NUM_VC),$(CONSTANTS_NUM_VC))
+$(if $(TOPOLOGY_NUM_VC),,$(error gen_tb_top.py --print-num-vc produced nothing for \
+CONFIG=$(TOPOLOGY); run it directly to see why))
 TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 
-# Per-geometry address-map package (topology_<geometry>_pkg.sv): TILE_BASE_ADDR
-# / TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, for a hand-written
-# testbench to `import`. Gitignored like FlooNoC's generated/ -- derived from a
-# tracked config file, rebuilt only when it or the generator changes.
+# Address-map package (topology_pkg.sv): TILE_BASE_ADDR / TILE_SIZE /
+# NOC_EGRESS_BASE / the peripheral table, for tb_noc_mesh.sv to `import`.
+# Gitignored like FlooNoC's generated/ -- derived from a tracked config file,
+# rebuilt when it, the CONFIG stamp or the generator changes. The stamp is a
+# prerequisite because the NAME no longer carries the configuration: switching
+# CONFIG must rewrite this file, and the new config file is not necessarily
+# newer than the one the last build wrote.
 # Naming only -- the WRITE is a file-target recipe in each simulator Makefile
 # (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
-TOPOLOGY_PKG_SV := $(COSIM_ROOT)/tb/test/topology_$(TOPOLOGY_GEOMETRY)_pkg.sv
+TOPOLOGY_PKG_SV := $(COSIM_ROOT)/tb/test/topology_pkg.sv
 
 TB_TOP_SV_SRC := \
     $(SPECGEN_SV_INC)/ni_params_pkg.sv \
@@ -324,16 +231,16 @@ TB_TOP_SV_SRC := \
     $(SRC_SV)/ni_wrap.sv \
     $(ENDPOINT_SRC) \
     $(COSIM_ROOT)/tb/link_perf_monitor.sv \
-    $(if $(TB_HANDWRITTEN),$(COSIM_ROOT)/tb/noc_tb_top.sv) \
+    $(if $(filter 1,$(DMA)),,$(COSIM_ROOT)/tb/noc_tb_top.sv) \
     $(TB_TOP_SV)
 
-# sim/filelist_<TOPOLOGY>.f is a GENERATED build artifact (gitignored), not
+# sim/filelist_<CONFIG>.f is a GENERATED build artifact (gitignored), not
 # committed — it bakes in host-absolute paths. Both sim flows regenerate it
 # from TB_TOP_SV_SRC via gen_filelist.py before use. The recipe is duplicated
 # in each Makefile (rather than defined here) so it never becomes the default
 # goal of an includer. FILELIST_F / FILELIST_GEN_ARGS centralize the shared
 # bits so the two recipes stay in sync.
-# Per-flavor as well as per-topology: the two endpoints compile different source
+# Per-flavor as well as per-config: the two endpoints compile different source
 # sets, and a stale list from the other flavor would build the wrong one.
 FILELIST_F = $(COSIM_ROOT)/filelist_$(TOPOLOGY)$(if $(filter 1,$(DMA)),_dma).f
 # gen_filelist.py args: <out> <incdir...> -- <src...>. The incdirs mirror the
@@ -357,7 +264,7 @@ DPI_HDR_DEPS := \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/include/*/*/*.hpp) \
     $(wildcard $(PROJ_ROOT)/ref_model/c_model/tests/common/*.hpp) \
-    $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.hpp)
+    $(wildcard $(PROJ_ROOT)/specgen/generated/cpp/*.h)
 
 CPP_INCLUDE_FLAGS := \
     -I$(SRC_DPI) \

@@ -1,29 +1,20 @@
 `timescale 1ns/1ps
 
-// Configuration: 2x2 mesh with two off-mesh peripherals on the x face, 1 DAT VC,
-// NMU read reorder buffer enabled.
+// The one testbench. Geometry and address map come from topology_pkg, generated
+// from the sim/configs/<CONFIG>.yml the build selected; the DAT VC count and the
+// NMU read RoB mode come from specgen/source/constants.yaml through
+// noc_tb_top's own defaults. Nothing here varies per configuration, which is why
+// there is one file instead of eight.
 //
-// The geometry and the address map come from topology_mesh_2x2_periph_pkg,
-// generated from sim/configs/mesh_2x2_periph.yml. Everything below the
-// module boundary is noc_tb_top, shared with every other configuration.
-//
-// NUM_ENDPOINTS is 6, not 4: a peripheral has an NI and an endpoint but no
-// router, and it carries stimulus of its own, so the exit logic gates on it too.
-// That count is what the PASS line reports, and it is the only wire-visible
-// evidence that both peripherals were attached.
-//
-// PERIPH_NODE / PERIPH_PORT are PACKED vectors whose field p is peripheral p, so
-// element [0] is the LSB byte and the order must reach noc_fabric unreversed --
-// the package already emits them in that layout.
+// The package name is fixed and its contents follow CONFIG, so two
+// configurations cannot coexist in a build tree without regenerating -- the
+// same property FlooNoC's generated packages have.
 //
 // The module is named tb_top so --top-module needs no per-configuration value.
 
 module tb_top;
 
-    import topology_mesh_2x2_periph_pkg::*;
-
-    localparam int unsigned DAT_NUM_VC       = 1;
-    localparam int unsigned READ_ROB_ENABLED = 1;
+    import topology_pkg::*;
 
     // Tile-memory latency profile "ideal": the delayer in front of each memory
     // is wires, so the memory is never the bottleneck and a run measures the
@@ -50,8 +41,6 @@ module tb_top;
         .N_PERIPH(N_PERIPH),
         .PERIPH_NODE(PERIPH_NODE),
         .PERIPH_PORT(PERIPH_PORT),
-        .DAT_NUM_VC(DAT_NUM_VC),
-        .READ_ROB_ENABLED(READ_ROB_ENABLED),
         .MEM_STALL_RANDOM_INPUT(MEM_STALL_RANDOM_INPUT),
         .MEM_STALL_RANDOM_OUTPUT(MEM_STALL_RANDOM_OUTPUT),
         .MEM_FIXED_DELAY_INPUT(MEM_FIXED_DELAY_INPUT),

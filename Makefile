@@ -1,6 +1,6 @@
 # Top-level Makefile — build and test gates. Run these targets from repo root.
 #
-# Simulation is not here: `make sim TB=... PATTERN=...`, see sim/Makefile.
+# Simulation is not here: `make sim CONFIG=... PATTERN=...`, see sim/Makefile.
 # Run logs land in sim/verilator/output/<scenario>/run.log.
 #
 # All build artifacts live under the top-level build/ tree (gitignored):
@@ -28,9 +28,9 @@ help:
 	@echo "  make build-verilator  Verilator binaries -> build/verilator/"
 	@echo ""
 	@echo "Simulate:"
-	@echo "  make sim TB=<topo> PATTERN=<p> [SEED=<n>]   build, then run"
-	@echo "  make sim-build TB=<topo>                    build only, no run"
-	@echo "  make sim-run TB=<topo> PATTERN=<p>          run only; errors if not built"
+	@echo "  make sim CONFIG=<config> PATTERN=<p> [SEED=<n>]  build, then run"
+	@echo "  make sim-build CONFIG=<config>                   build only, no run"
+	@echo "  make sim-run CONFIG=<config> PATTERN=<p>         run only; errors if not built"
 	@echo "  make -C sim help                            every simulation variable"
 	@echo ""
 	@echo "Test:"
@@ -62,7 +62,7 @@ build: build-cmodel build-verilator
 #   BUILD_ROOT := $(HOME)/noc_build   # native-Linux build dir (WSL rejects /mnt COFF)
 #   PYTHON3    := python3
 #   VERILATOR  := verilator
-# Then `make sim TB=tb_mesh_4x4_vc1 PATTERN=hotspot` needs no path/tool args
+# Then `make sim CONFIG=mesh_4x4 PATTERN=hotspot` needs no path/tool args
 # either: sim/build_config.mk reads this same file through PROJ_ROOT.
 -include local.mk
 
@@ -118,7 +118,7 @@ $(CMODEL_BUILD)/CMakeCache.txt:
 
 # Default topology for standalone build-verilator.
 # sim/Makefile overrides this by passing TOPOLOGY=$(TB) explicitly.
-TOPOLOGY  ?= mesh_4x4_vc1
+TOPOLOGY  ?= mesh_4x4
 RUN_CLASS ?= directed
 
 build-verilator: build-yamlcpp
@@ -191,7 +191,7 @@ clean-cmodel:
 # Generated sources and stimulus, plus every __pycache__ the generators leave.
 clean-generated:
 	rm -f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv sim/filelist_*.f
-	rm -f sim/tb/test/topology_*_pkg.sv
+	rm -f sim/tb/test/topology_pkg.sv
 	rm -f sim/tools/injection_sweep.csv sim/tools/injection_sweep.png
 	rm -f sim/verilator/hs_trace_node*.log
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
