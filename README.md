@@ -48,8 +48,12 @@ Linux only. The build used to carry a native-Windows path (MSYS2 mingw64) and
 it is gone: it doubled every toolchain behaviour, which is how a test file that
 compiled under one and not the other went unnoticed.
 
-On WSL, work from a native-filesystem copy of the repo; `/mnt/*` mounts
-are slow and unreliable under parallel builds. Per-host settings
+On WSL, build and run directly from the `/mnt/*` checkout — there is no
+source copy. Only the build OUTPUT has to live on the native filesystem,
+which is what `BUILD_ROOT` is for. A mirror under `$HOME` is worse than
+none: `$BUILD_ROOT/cmodel` records the source directory CMake configured
+against, so a second copy leaves ctest compiling one tree while you edit
+the other. Per-host settings
 (`BUILD_ROOT`, `PYTHON3`, `VERILATOR`, `CMAKE`) go in a gitignored
 `local.mk` at the repo root. Offline hosts: unpack pre-fetched
 `googletest-src/` and `yaml-cpp-src/` into `~/noc_offline_deps`; the
@@ -91,7 +95,7 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 
 | var | values |
 |---|---|
-| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_2x2_vc1_periph`, `mesh_4x4_vc1`, `mesh_4x4_vc1_periph4`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Every node gets a 4 GiB memory tile and a 4 KB config tile. `mesh_2x2_vc1_periph` hangs peripherals off the x face of the routers at (0,0) and (0,1); `mesh_4x4_vc1_periph4` puts one on each of the four faces. A peripheral shares its router's coordinate and is told apart by `dst_port_id` |
+| `TB` | topology YAML name from `sim/topologies/`: `mesh_2x2_vc1`, `mesh_2x2_vc1_periph`, `mesh_4x4_vc1`, `mesh_4x4_vc1_periph4`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`. Every node owns a 4 GiB block, which holds a 32 MB memory tile at offset 0 and a 4 KB config tile above it; the rest of the block is reserved for further memory regions. The block size is the node stride, declared as `address_map.block_size`. `mesh_2x2_vc1_periph` hangs peripherals off the x face of the routers at (0,0) and (0,1); `mesh_4x4_vc1_periph4` puts one on each of the four faces. A peripheral shares its router's coordinate and is told apart by `dst_port_id` |
 | `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `all_to_all` (each node walks every other node in turn, so the destination changes on every transaction and, at one id per initiator, every one of them allocates a reorder-buffer slot), `hotspot` (`HOTSPOT=` names the target node), `beat_exact` (per-lane-distinct bytes + walking WSTRB, DPI word-boundary check), `multicast` (collective write, shape from `MCAST_SHAPE`) |
 | `MCAST_SHAPE` | `row` (default), `col`, `submesh`. `multicast` only. One shape per run, concurrent multicast trees must stay pairwise disjoint |
 
