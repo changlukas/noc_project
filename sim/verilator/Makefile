@@ -124,9 +124,14 @@ $(TOPO_STAMP): FORCE
 # geometries.
 GEN_DMA_JOBS := $(COSIM_ROOT)/tools/gen_dma_jobs.py
 
+# Guarded on TB_HANDWRITTEN: for a checked-in testbench TB_TOP_SV names a
+# SOURCE file, and a rule with this recipe would overwrite it with generator
+# output the first time the stamp or the generator was newer.
+ifndef TB_HANDWRITTEN
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
+endif
 
 # topology_<geometry>_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV): the
 # per-geometry address-map package tb_top's own TILE_BASE_ADDR / TILE_SIZE /

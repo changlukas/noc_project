@@ -78,12 +78,27 @@ endif
 # TB_TOP_SV is the generated top file; per-topology so multiple tbs coexist
 # (tb_top_<TOPOLOGY>.sv). Use deferred = so TOPOLOGY expansion is lazy.
 #
+# One line per checked-in testbench: which geometry package it imports and
+# which VC-count flit package it needs. No filename parsing -- a suffix like
+# _robless is not a geometry, and a scrape would have to learn every suffix.
+ifeq ($(TOPOLOGY),mesh_2x2_vc1)
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_2x2
+TB_NUM_VC      := 1
+endif
+
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
 # every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
 # below the endpoint -- the fabric, the NI wraps, the tile crossbar sources --
 # is the same build, so the two tops differ only in who generates the traffic.
+# It stays generated whatever the table above says, so the DMA branch also
+# clears TB_HANDWRITTEN: everything keyed on it below must follow the file
+# actually selected here.
 ifeq ($(DMA),1)
 TB_TOP_SV = $(COSIM_ROOT)/tb/soc/tb_top_dma_$(TOPOLOGY).sv
+TB_HANDWRITTEN :=
+else ifdef TB_HANDWRITTEN
+TB_TOP_SV = $(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv
 else
 TB_TOP_SV = $(COSIM_ROOT)/tb/test/tb_top_$(TOPOLOGY).sv
 endif
@@ -174,9 +189,11 @@ NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
 # value out of a filename needs a new strip per suffix. gen_tb_top.py already
 # loads and validates the YAML, so it answers rather than a second reader here.
 # $(or ...) honours a local.mk PYTHON3 without defining one, which would
-# pre-empt each Makefile's own default.
-TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
-    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc)
+# pre-empt each Makefile's own default. A checked-in testbench states its VC
+# count in the table above -- it has to, its flit package is compiled in -- so
+# the query runs only for the topologies still on the generated path.
+TOPOLOGY_NUM_VC := $(if $(TB_NUM_VC),$(TB_NUM_VC),$(shell $(or $(PYTHON3),python3) \
+    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc))
 # An empty result means the generator failed -- unknown TOPOLOGY, missing YAML,
 # flit-capacity violation. Without this the symptom is a missing
 # noc_types_pkg_vc.sv instead of the generator's own message.
@@ -192,7 +209,11 @@ TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 # sed), so mesh_4x4_vc1/_vc8/_vc8_robless share one topology_mesh_4x4_pkg.
 # Naming only -- the WRITE is a file-target recipe in each simulator Makefile
 # (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
-TOPOLOGY_GEOMETRY := $(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//')
+# A checked-in testbench names its geometry in the table above, for the same
+# reason it names its VC count: the package it imports is compiled in.
+# Kept on one line: a backslash continuation would fold the next line's leading
+# whitespace into the else branch, and the geometry is half a file name.
+TOPOLOGY_GEOMETRY := $(if $(TB_GEOMETRY),$(TB_GEOMETRY),$(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//'))
 TOPOLOGY_PKG_SV := $(COSIM_ROOT)/tb/test/topology_$(TOPOLOGY_GEOMETRY)_pkg.sv
 
 TB_TOP_SV_SRC := \
@@ -217,6 +238,7 @@ TB_TOP_SV_SRC := \
     $(SRC_SV)/ni_wrap.sv \
     $(ENDPOINT_SRC) \
     $(COSIM_ROOT)/tb/link_perf_monitor.sv \
+    $(if $(TB_HANDWRITTEN),$(COSIM_ROOT)/tb/noc_tb_top.sv) \
     $(TB_TOP_SV)
 
 # sim/filelist_<TOPOLOGY>.f is a GENERATED build artifact (gitignored), not

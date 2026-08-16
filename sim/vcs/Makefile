@@ -110,9 +110,14 @@ $(TOPO_STAMP): FORCE
 	    echo "$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)" > $@; \
 	fi
 
+# Guarded on TB_HANDWRITTEN, as in sim/verilator/Makefile: for a checked-in
+# testbench TB_TOP_SV names a SOURCE file, and a rule with this recipe would
+# overwrite it with generator output.
+ifndef TB_HANDWRITTEN
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
 	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
+endif
 
 # topology_<geometry>_pkg.sv (build_config.mk's TOPOLOGY_PKG_SV). Duplicated
 # from sim/verilator/Makefile (intentionally, same convention as FILELIST_F
