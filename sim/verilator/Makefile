@@ -23,14 +23,22 @@ include ../build_config.mk
 
 VL_BUILD := $(BUILD_ROOT)/verilator
 
-# Per-topology, per-run-class, per-READ_ROB obj dir: building one flavor must
-# not clobber another. READ_ROB is in the name because it changes the emitted
-# tb_top, so two READ_ROB values are two different builds of the same topology.
-# That holds on the GENERATED path; a checked-in testbench fixes the mode in its
-# own source, and build_config.mk's TB_READ_ROB guard rejects a READ_ROB that
-# disagrees rather than let it name a directory it did not build.
+# The RoB mode that was actually BUILT, which is what may name a directory or a
+# log. READ_ROB reaches the generated path only; a checked-in testbench fixes the
+# mode in its own source and states it as TB_READ_ROB. Without this,
+# tb_mesh_4x4_vc8 and tb_mesh_4x4_vc8_robless -- the RoB-versus-RoBless pair --
+# both tag their runs rob1, and the comparison ships two results claiming the
+# same mode. build_config.mk's TB_READ_ROB guard closes the same defect for an
+# explicit READ_ROB=; this closes it for the default.
+_BUILT_READ_ROB := $(if $(TB_HANDWRITTEN),$(TB_READ_ROB),$(READ_ROB))
+
+# Per-topology, per-run-class, per-RoB-mode obj dir: building one flavor must not
+# clobber another. The mode is in the name because it changes the emitted tb_top,
+# so two modes are two different builds of the same topology. _BUILT_READ_ROB,
+# not READ_ROB: on the generated path they are the same value, and on the
+# checked-in path only the former is what got compiled.
 # DMA joins it for the same reason -- it swaps the endpoint and the top.
-OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(if $(filter 1,$(DMA)),_dma)
+OBJ_DIR := $(VL_BUILD)/obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(_BUILT_READ_ROB)$(if $(filter 1,$(DMA)),_dma)
 
 # FILELIST_F / FILELIST_GEN_ARGS come from build_config.mk. sim/filelist_<TOPOLOGY>.f
 # is a generated artifact (gitignored): regenerated below from TB_TOP_SV_SRC with
@@ -101,7 +109,7 @@ $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
 # from the topology config before Verilating. Depends on the generator script, the
 # topology YAML, and a TOPOLOGY stamp. TB_TOP_SV comes from build_config.mk
 # (deferred = so TOPOLOGY expands correctly).
-TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
+TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY_YAML).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VL_BUILD)/.topology
 
@@ -132,7 +140,7 @@ GEN_DMA_JOBS := $(COSIM_ROOT)/tools/gen_dma_jobs.py
 # output the first time the stamp or the generator was newer.
 ifndef TB_HANDWRITTEN
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP) $(SPECGEN_SV_INC)/ni_params_pkg.sv
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_YAML) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
 endif
 
@@ -143,7 +151,7 @@ endif
 # with the address map the topology YAML declares, so it rebuilds only when
 # that YAML or the generator changes.
 $(TOPOLOGY_PKG_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_YAML) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # Mirrors the root Makefile. Override via local.mk if needed.
 PYTHON3 ?= python3
@@ -257,24 +265,26 @@ _PATTERN_TAG   := $(PATTERN)$(if $(filter multicast,$(PATTERN)),_$(MCAST_SHAPE))
 STIM_BASE      ?= test_patterns
 # Stimulus keys on the GEOMETRY, not on the topology file name: gen_test_patterns
 # reads x_dim, y_dim and address_map and never reads num_vc, so mesh_4x4_vc1,
-# _vc2, _vc4 and _vc8 emit byte-identical files. Stripping _vc<N> collapses those
-# four onto one directory instead of four copies under four names. VC count is a
-# router parameter -- it changes buffering and arbitration, not who sends what.
-_GEOMETRY      := $(shell echo $(TOPOLOGY) | sed 's/_vc[0-9]*//')
+# _vc2, _vc4, _vc8 and _vc8_robless emit byte-identical files and share one
+# directory instead of five copies under five names. VC count is a router
+# parameter and the RoB mode an NI parameter -- neither changes who sends what.
+# TOPOLOGY_GEOMETRY (build_config.mk) rather than a sed of TOPOLOGY: a
+# configuration name is not parseable into its parts, which is why the table
+# there names the geometry, and _robless is not a _vc<N> suffix to strip.
 # The leaf is the pattern exactly as PATTERN= spells it, so `ls` over a geometry
 # IS the pattern list. INJECTION_COUNT is deliberately not in the path: it is a
 # property of the batch, not of one pattern, and the recipe below regenerates
 # unconditionally before every run, so a differing count overwrites rather than
 # going stale. Set STIM_BASE to hold two batches side by side.
 ifeq ($(DMA),1)
-STIM_ROOT      ?= $(STIM_BASE)/$(_GEOMETRY)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
+STIM_ROOT      ?= $(STIM_BASE)/$(TOPOLOGY_GEOMETRY)/dma_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
-STIM_ROOT      ?= $(STIM_BASE)/$(_GEOMETRY)/$(_PATTERN_TAG)
+STIM_ROOT      ?= $(STIM_BASE)/$(TOPOLOGY_GEOMETRY)/$(_PATTERN_TAG)
 endif
 # READ_ROB joins the run tag, not STIM_ROOT: it changes what the NI does with a
 # response, not the stimulus, so two READ_ROB values share generated patterns and
 # must not share output/<tag>/ (run.log, result.csv, perf.json all live there).
-_TOPO_TAG      := $(TOPOLOGY)_rob$(READ_ROB)
+_TOPO_TAG      := $(TOPOLOGY)_rob$(_BUILT_READ_ROB)
 ifeq ($(DMA),1)
 SIM_TAG        ?= dma_$(_TOPO_TAG)_j$(DMA_JOBS_PER_NODE)_l$(DMA_LENGTH)_rw$(DMA_RW)
 else
@@ -290,12 +300,12 @@ _MCAST_ARGS    := $(if $(filter multicast,$(PATTERN)),--mcast-shape $(MCAST_SHAP
 .PHONY: gen-directed
 gen-directed:
 	@mkdir -p $(STIM_ROOT)
-	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY) \
+	$(if $(filter 1,$(DMA)),,$(PYTHON3) $(GEN_PATTERNS) --topology $(TOPOLOGY_YAML) \
 	    --out $(STIM_ROOT) --pattern $(PATTERN) \
 	    --transactions-per-node $(INJECTION_COUNT) --size 5 --len $(BURST_LEN) \
 	    --seed $(SEED) $(_HOTSPOT_ARGS) $(_MCAST_ARGS) \
 	    $(if $(IDS_PER_INITIATOR),--ids-per-initiator $(IDS_PER_INITIATOR)))
-	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY) \
+	$(if $(filter 1,$(DMA)),$(PYTHON3) $(GEN_DMA_JOBS) --topology $(TOPOLOGY_YAML) \
 	    --out $(STIM_ROOT) $(_DMA_JOB_ARGS))
 	@echo "stimulus: $(STIM_ROOT)"
 
@@ -349,7 +359,7 @@ run-directed: $(if $(NO_BUILD),check-built,$(TBTOP_EXE))
 	    fi; \
 	    $(PYTHON3) $(EMIT_CSV) --log output/$(SIM_TAG)/run.log \
 	        --out output/$(SIM_TAG)/result.csv \
-	        --topology $(TOPOLOGY) --pattern $(PATTERN) \
+	        --topology $(TOPOLOGY_YAML) --pattern $(PATTERN) \
 	        --injection-mode $(INJECTION_MODE) --injection-rate $(INJECTION_RATE) \
 	        --injection-count $(INJECTION_COUNT) --seed $(SEED) \
 	        $(if $(MAX_UNIQUE_IDS),--max-unique-ids $(MAX_UNIQUE_IDS)) \

@@ -93,7 +93,7 @@ $(FILELIST_F): ../build_config.mk $(COSIM_ROOT)/tools/gen_filelist.py
 # tb_top_<TOPOLOGY>.sv is a generated artifact; regenerate
 # from the topology config before building. TB_TOP_SV comes from build_config.mk
 # (deferred = so TOPOLOGY expands correctly).
-TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml
+TB_TOP_TOPO   := $(COSIM_ROOT)/topologies/$(TOPOLOGY_YAML).yaml
 GEN_TB_TOP    := $(COSIM_ROOT)/tools/gen_tb_top.py
 TOPO_STAMP    := $(VCS_BUILD)/.topology
 
@@ -115,7 +115,7 @@ $(TOPO_STAMP): FORCE
 # overwrite it with generator output.
 ifndef TB_HANDWRITTEN
 $(TB_TOP_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP) $(TOPO_STAMP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --read-rob $(READ_ROB) \
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_YAML) --read-rob $(READ_ROB) \
 	    $(if $(filter 1,$(DMA)),--dma $(_DMA_JOB_ARGS)) --out $(TB_TOP_SV)
 endif
 
@@ -124,7 +124,7 @@ endif
 # above): no TOPO_STAMP, the package doesn't vary with RUN_CLASS/READ_ROB/DMA,
 # only with the address map the topology YAML declares.
 $(TOPOLOGY_PKG_SV): $(TB_TOP_TOPO) $(GEN_TB_TOP)
-	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
+	$(PYTHON3) $(GEN_TB_TOP) --topology $(TOPOLOGY_YAML) --emit-topology-pkg --out $(TOPOLOGY_PKG_SV)
 
 # DPI C++ is compiled and linked into simv by VCS itself; pass include dirs
 # through -CFLAGS and the yaml-cpp static archive directly on the link line.
@@ -150,15 +150,18 @@ endif
 # --- tb_top cosim (self-clocked) ---
 PYTHON3    ?= $(if $(shell command -v py 2>/dev/null),py -3,python3)
 
-# Per-topology, per-run-class, per-READ_ROB simv + csrc dir (mirrors the
-# Verilator obj_dir_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB) isolation): building
-# one flavor must not clobber another's binary.
-SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX)
+# Per-topology, per-run-class, per-RoB-mode simv + csrc dir (mirrors the
+# Verilator obj_dir isolation): building one flavor must not clobber another's
+# binary. _BUILT_READ_ROB, as on the Verilator side: READ_ROB reaches the
+# generated path only, so for a checked-in testbench the mode that got compiled
+# is the TB_READ_ROB its table entry names.
+_BUILT_READ_ROB := $(if $(TB_HANDWRITTEN),$(TB_READ_ROB),$(READ_ROB))
+SIMV_TB_TOP := $(VCS_BUILD)/simv_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(_BUILT_READ_ROB)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX)
 
 $(SIMV_TB_TOP): $(FILELIST_F) $(TB_TOP_SV_SRC) $(NOC_FABRIC_SV) $(DPI_C_SRC) $(DPI_HDR_DEPS) | check-yamlcpp
 	@mkdir -p $(VCS_BUILD)
 	$(VCS) $(VCS_COMMON_FLAGS) \
-	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(READ_ROB)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX) \
+	    -Mdir=$(VCS_BUILD)/csrc_tb_top_$(TOPOLOGY)_$(RUN_CLASS)_rob$(_BUILT_READ_ROB)$(if $(filter 1,$(DMA)),_dma)$(FSDB_SUFFIX) \
 	    -top tb_top \
 	    -f $(FILELIST_F) $(DPI_C_SRC) $(YAMLCPP_LIB) \
 	    -o $(SIMV_TB_TOP)

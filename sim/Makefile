@@ -128,7 +128,7 @@ SWEEP_VCS   ?= 1 2 4 8
 # R and B channels, and a consumer that stalls first is what the curve then
 # measures instead of fabric saturation. Same reason _MEM_LATENCY stays "ideal".
 # Generate once, up front: all four VC configs share the mesh_4x4 geometry
-# (_GEOMETRY strips _vc<N>, sim/verilator/Makefile:251), so one generation
+# (TOPOLOGY_GEOMETRY strips _vc<N>, sim/build_config.mk), so one generation
 # covers every point in the loop below.
 sim-injection-sweep:
 	$(MAKE) gen TB=tb_mesh_4x4_vc$(firstword $(SWEEP_VCS)) PATTERN=$(PATTERN) SEED=$(_SEED) \

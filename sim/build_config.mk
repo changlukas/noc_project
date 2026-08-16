@@ -82,9 +82,25 @@ endif
 # VC-count flit package it needs, and which READ_ROB mode its source fixes. No
 # filename parsing -- a suffix like _robless is not a geometry, and a scrape
 # would have to learn every suffix.
+#
+# TB_TOPOLOGY_YAML names the topology YAML the configuration reads, for the one
+# entry whose name is not a YAML name (mesh_4x4_vc8_robless shares
+# mesh_4x4_vc8.yaml -- it differs in an NI parameter, not in a topology).
+# Everywhere else TOPOLOGY is its own YAML and the field is omitted.
+# TRANSITIONAL: once the YAMLs are renamed to geometry names (mesh_4x4_vc1/_vc2/
+# _vc4/_vc8 collapsing into one mesh_4x4.yaml), the YAML basename IS TB_GEOMETRY
+# and this field says nothing TB_GEOMETRY does not. Delete it in that stage.
 ifeq ($(TOPOLOGY),mesh_2x2_vc1)
 TB_HANDWRITTEN := 1
 TB_GEOMETRY    := mesh_2x2
+TB_NUM_VC      := 1
+TB_READ_ROB    := 1
+endif
+# Geometry is mesh_2x2_periph, not mesh_2x2: the peripherals change the address
+# map and the endpoint count, so this configuration imports a package of its own.
+ifeq ($(TOPOLOGY),mesh_2x2_vc1_periph)
+TB_HANDWRITTEN := 1
+TB_GEOMETRY    := mesh_2x2_periph
 TB_NUM_VC      := 1
 TB_READ_ROB    := 1
 endif
@@ -112,6 +128,13 @@ TB_GEOMETRY    := mesh_4x4
 TB_NUM_VC      := 8
 TB_READ_ROB    := 1
 endif
+ifeq ($(TOPOLOGY),mesh_4x4_vc8_robless)
+TB_HANDWRITTEN   := 1
+TB_GEOMETRY      := mesh_4x4
+TB_NUM_VC        := 8
+TB_READ_ROB      := 0
+TB_TOPOLOGY_YAML := mesh_4x4_vc8
+endif
 # Geometry is mesh_4x4_periph4, not mesh_4x4: the peripherals change the address
 # map and the endpoint count, so this configuration imports a package of its own.
 ifeq ($(TOPOLOGY),mesh_4x4_vc1_periph4)
@@ -120,6 +143,12 @@ TB_GEOMETRY    := mesh_4x4_periph4
 TB_NUM_VC      := 1
 TB_READ_ROB    := 1
 endif
+
+# The YAML every topology query reads: the generator's --topology argument, the
+# SAM config passed at runtime, and the stimulus generators' --topology. Falls
+# back to TOPOLOGY, which is the YAML name for every configuration but the one
+# above.
+TOPOLOGY_YAML := $(if $(TB_TOPOLOGY_YAML),$(TB_TOPOLOGY_YAML),$(TOPOLOGY))
 
 # DMA=1 selects the iDMA top instead: a pulp iDMA backend on the master face of
 # every endpoint, on its own generated top (gen_tb_top.py --dma). Everything
@@ -244,7 +273,7 @@ NOC_FABRIC_SV = $(SRC_SV)/noc_fabric.sv
 # $(or ...) honours a local.mk PYTHON3 without defining one, which would
 # pre-empt each Makefile's own default.
 TOPOLOGY_NUM_VC := $(shell $(or $(PYTHON3),python3) \
-    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY) --print-num-vc)
+    $(COSIM_ROOT)/tools/gen_tb_top.py --topology $(TOPOLOGY_YAML) --print-num-vc)
 # An empty result means the generator failed -- unknown TOPOLOGY, missing YAML,
 # flit-capacity violation. Without this the symptom is a missing
 # noc_types_pkg_vc.sv instead of the generator's own message.
@@ -261,7 +290,7 @@ TOPOLOGY=$(TOPOLOGY); run it directly to see why))
 ifdef TB_NUM_VC
 ifneq ($(TB_NUM_VC),$(TOPOLOGY_NUM_VC))
 $(error TB_NUM_VC=$(TB_NUM_VC) for TOPOLOGY=$(TOPOLOGY) but \
-$(COSIM_ROOT)/topologies/$(TOPOLOGY).yaml declares num_vc=$(TOPOLOGY_NUM_VC). \
+$(COSIM_ROOT)/topologies/$(TOPOLOGY_YAML).yaml declares num_vc=$(TOPOLOGY_NUM_VC). \
 Update the table above AND the DAT_NUM_VC localparam in \
 $(COSIM_ROOT)/tb/tb_$(TOPOLOGY).sv, or put the YAML back)
 endif
@@ -272,8 +301,9 @@ TOPOLOGY_NOC_TYPES_PKG = $(SPECGEN_SV_INC)/noc_types_pkg_vc$(TOPOLOGY_NUM_VC).sv
 # / TILE_SIZE / NOC_EGRESS_BASE / the peripheral table, for a hand-written
 # testbench to `import`. Gitignored like FlooNoC's generated/ -- derived from a
 # tracked YAML, rebuilt only when it or the generator changes. Geometry =
-# TOPOLOGY minus its _vc<N> suffix (mirrors sim/verilator/Makefile's _GEOMETRY
-# sed), so mesh_4x4_vc1/_vc8/_vc8_robless share one topology_mesh_4x4_pkg.
+# TOPOLOGY minus its _vc<N> suffix, so mesh_4x4_vc1/_vc8/_vc8_robless share one
+# topology_mesh_4x4_pkg. It also keys the stimulus directory in
+# sim/verilator/Makefile, which reads this variable rather than repeating the sed.
 # Naming only -- the WRITE is a file-target recipe in each simulator Makefile
 # (mirrors the $(TB_TOP_SV) rule there), not a parse-time side effect here.
 # A checked-in testbench names its geometry in the table above, for the same
