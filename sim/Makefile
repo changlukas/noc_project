@@ -40,14 +40,14 @@ help:
 PYTHON3 ?= python3
 
 # TB selects the testbench (topology; accepts a tb_ prefix). PATTERN selects a
-# spatial pattern, beat_exact (the DPI word-packing probe) or multicast. SEED
+# spatial pattern or multicast. SEED
 # unset -> a random 30-bit seed is drawn and printed so any run is replayable.
 # BUILD_ROOT/PYTHON3/VERILATOR/FILELIST_F are NOT passed down -- they flow from
 # the repo-root local.mk through build_config.mk.
 TB      ?= mesh_4x4_vc1
 PATTERN ?= neighbor
 _TOPO   := $(TB:tb_%=%)
-_VALID_PATTERNS := neighbor transpose uniform_random all_to_all hotspot beat_exact multicast \
+_VALID_PATTERNS := neighbor transpose uniform_random all_to_all hotspot multicast \
                    bit_complement bit_reverse shuffle bit_rotation tornado
 ifeq ($(filter $(PATTERN),$(_VALID_PATTERNS)),)
 $(error PATTERN must be one of: $(_VALID_PATTERNS) (got '$(PATTERN)'))

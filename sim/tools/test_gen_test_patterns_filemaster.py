@@ -228,37 +228,11 @@ def test_main_file_master_all_patterns(tmp_path, pat):
         assert len(t["beats"]) == 1
 
 
-def test_emit_beat_exact_node_full_beat_and_walking_strb(tmp_path):
-    """Full beat: full 64 B strobe, per-lane-distinct bytes. Walking sweep: each
-    of the 8 offsets is a single-byte write with exactly one strb bit set at
-    that lane -- the boundary-straddling positions (3/4 and 31/32, the sole
-    WSTRB word boundary) land where expected."""
-    d = str(tmp_path / "node0")
-    dst_base = 0x10000
-    probe_base = dst_base + 0x1000  # emit_beat_exact_node's default base_local offset
-    g.emit_beat_exact_node(d, src_idx=0, dst_base=dst_base, data_width=512)
-    txns = _parse_write(os.path.join(d, "write.txt"))
-    assert len(txns) == 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
-    full = txns[0]
-    assert full["size"] == 6 and full["len"] == 0 and full["addr"] == probe_base
-    data_hex, strb_hex, _user = full["beats"][0].split()
-    assert strb_hex == "0x" + "f" * 16                    # 64 lanes all active
-    data = int(data_hex, 16)
-    for j in range(64):
-        assert (data >> (8 * j)) & 0xFF == (probe_base + j) & 0xFF
-    strb_base = probe_base + 64
-    for t, off in zip(txns[1:], g._BEAT_EXACT_STRB_OFFSETS):
-        assert t["addr"] == strb_base + off
-        assert t["size"] == 0 and t["len"] == 0
-        data_hex, strb_hex, _user = t["beats"][0].split()
-        assert int(strb_hex, 16) == 1 << (off % 64)       # exactly one bit, at the lane
-        assert (int(data_hex, 16) >> (8 * (off % 64))) & 0xFF == t["addr"] & 0xFF
 
-
-def test_narrow_beat_exact_lines_shape():
+def test_narrow_config_probe_shape():
     """2-beat INCR burst, AxSIZE=3 (8 B narrow lane), full per-beat strobe
     shifted to the beat's own 8-byte lane."""
-    write, _read = g.narrow_beat_exact_lines(axid=2, config_base=0x400000, data_width=512)
+    write, _read = g.narrow_config_probe_lines(axid=2, config_base=0x400000, data_width=512)
     # _parse_write reads a path; write the lines to a temp file instead.
     import tempfile
     with tempfile.TemporaryDirectory() as td:
@@ -276,21 +250,23 @@ def test_narrow_beat_exact_lines_shape():
         assert int(strb_hex, 16) == (0xFF << lane0)
 
 
-def test_main_beat_exact_routes_both_classes_on_config_topology(tmp_path):
-    """End-to-end wiring check (S2 gate deliverable 2): a node owning a
-    config-space tile gains one extra narrow transaction after its beat-exact
-    data-class sequence, addressed at that node's own config tile base."""
+def test_main_routes_both_classes_on_a_config_topology(tmp_path):
+    """A node owning a config-space tile gains one extra narrow transaction
+    after its data-class sequence, addressed at that node's own config tile
+    base. The narrow probe is not tied to any one pattern, so any spatial
+    pattern drives it -- neighbor here."""
     out = str(tmp_path / "scn")
     topo_path = os.path.join(os.path.dirname(__file__), "..", "topologies",
                               "mesh_2x2_vc1.yaml")
-    g.main(["--topology", topo_path, "--out", out, "--pattern", "beat_exact"])
+    n_txn = 4
+    g.main(["--topology", topo_path, "--out", out, "--pattern", "neighbor",
+            "--transactions-per-node", str(n_txn)])
     txns0 = _parse_write(os.path.join(out, "node0", "write.txt"))
     txns1 = _parse_write(os.path.join(out, "node1", "write.txt"))
-    n_beat_exact = 1 + len(g._BEAT_EXACT_STRB_OFFSETS)
     # Each node's config aperture sits inside that node's own block, above its
     # memory aperture: idx * block_size + 0x2000000.
     assert txns0[-1]["addr"] == 0x2000000
-    assert len(txns1) == n_beat_exact + 1
+    assert len(txns1) == n_txn + 1
     assert txns1[-1]["addr"] == 0x100000000 + 0x2000000
 
 

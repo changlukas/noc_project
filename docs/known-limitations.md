@@ -63,8 +63,9 @@ not necessarily a larger config tile.
 `BURST_LEN` surfaces as the RoB's oversized-burst abort rather than a stimulus error.
 `sam_yaml` reports a missing `address_map` without naming it, `gen_tb_top` accepts an empty
 `requested_name`, and some test helpers still take `uint32_t` strb parameters, which cannot
-express a bus of 32 lanes or more. Outside `beat_exact`, the co-sim default beat is half-bus
-(`--size 5` on a 64 B bus).
+express a bus of 32 lanes or more. The co-sim default beat is half-bus (`--size 5` on a 64 B
+bus), and since `beat_exact` was removed no pattern sets a write-strobe bit above lane 15, so
+no run exercises a strobe crossing a DPI 32-bit word boundary.
 
 ## Build and tooling
 

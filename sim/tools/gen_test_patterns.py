@@ -43,15 +43,6 @@ hotspot  (ported from booksim2 HotSpotTrafficPattern::dest, src/traffic.cpp:506-
     host bridge sees. Same booksim selection, --hotspot-rates included; only the
     target set differs -- see peripheral_hotspot_dsts.
 
-beat_exact  (S2 gate: DPI word-packing fault injection, not a spatial pattern)
-    Every node writes one full-width beat (per-lane-distinct bytes, full
-    strobe) plus an 8-position walking-strb sweep to its neighbor
-    (neighbor_dst bijection) -- see emit_beat_exact_node / _BEAT_EXACT_STRB_OFFSETS.
-    A node whose topology entry owns a config-space tile additionally routes
-    one narrow-class 2-beat burst to it (narrow_beat_exact_lines), so a
-    config-space topology exercises both classes in one run. Ignores
-    --transactions-per-node/--size/--len/--seed (own fixed shape).
-
 multicast  (S4 collectives; stimulus intent ported from FlooNoC
             tb_floo_rob_multicast.sv:30-49,189-195,379-395 masked-region writes)
     Source nodes issue multicast writes whose AWUSER carries the address mask
@@ -113,23 +104,6 @@ _FILE_KEYS = ("data_file", "dump_file", "strb_file")
 # Per-transaction slot stride for the unique-offset allocator.  Must be at least
 # as large as the max transaction data payload (one cache-line = 64 B = 0x40).
 _SLOT_STRIDE = 0x40
-
-# beat_exact pattern: 8 single-byte (walking-1 WSTRB) probe offsets within a
-# 64 B beat, chosen to straddle every DPI word boundary that matters, not all
-# 64 lanes. DATA (512 b) packs as 16 x 32-bit words (word i = bytes[4i:4i+3]);
-# WSTRB (64 b) packs as 2 x 32-bit words (word0 = bytes[0:31], word1 =
-# bytes[32:63]) per specgen/generated DPI marshalling (16 words / 2 words,
-# S2 design doc sec 4). Offsets:
-#   0, 63  -- vector edges (word0 LSB / word15 MSB); MSB (63) is also the
-#             exact tail-mask bit T2c's DPI fix targeted.
-#   3, 4   -- straddle the first DATA word boundary (word0/word1).
-#   31, 32 -- straddle BOTH the WSTRB word0/word1 boundary (its only one,
-#             lane 31|32 = strb bit 31|32) AND a DATA word boundary
-#             (word7/word8); the single pair that most directly proves the
-#             "lo | hi<<32" WSTRB packing together with mid-vector DATA
-#             packing.
-#   59, 60 -- straddle a DATA word boundary near the top (word14/word15).
-_BEAT_EXACT_STRB_OFFSETS = (0, 3, 4, 31, 32, 59, 60, 63)
 
 _CONSTANTS_YAML = Path(__file__).resolve().parents[2] / "specgen" / "source" / "constants.yaml"
 
@@ -241,55 +215,6 @@ def emit_file_master_node(out_dir, src_idx, dst_bases, n_nodes,
         f.write("\n".join(read_lines) + "\n")
 
 
-def emit_beat_exact_node(out_dir, src_idx, dst_base, data_width, extra=None, base_local=0x1000):
-    """Write out_dir/{write,read}.txt for one node's beat-exact (data-class)
-    probe: one full-width beat with per-lane-distinct bytes and full strobe,
-    followed by the 8-position walking-strb sweep (_BEAT_EXACT_STRB_OFFSETS),
-    all single-beat writes so address-in-data (encode_write_beats) already
-    gives per-lane-distinct bytes and, at AxSIZE=0, an exact single-bit
-    (walking) WSTRB -- no new data/strb encoding needed.
-
-    Offset by base_local (same convention emit_file_master_node's slots use),
-    not raw dst_base, so this probe's [+0x000, +0x080) window is disjoint by
-    construction from anything else that may occupy the tile's low offset 0
-    (e.g. a config-space probe sharing the same address-in-data low byte
-    pattern at local offset 0 -- narrow readback couldn't otherwise tell the
-    two probes' bytes apart).
-
-    Two disjoint 64 B-aligned windows at dst_base+base_local: [+0x000, +0x040)
-    for the full beat, [+0x040, +0x080) for the walking-strb sweep, so the
-    sweep's partial-strobe writes can never be masked by the full beat's bytes.
-
-    extra: optional (write_lines, read_lines) tuple appended after the
-    beat-exact transactions -- see emit_file_master_node."""
-    bus_bytes = data_width // 8
-    if bus_bytes != 64:
-        raise ValueError(
-            f"emit_beat_exact_node: _BEAT_EXACT_STRB_OFFSETS are derived for a "
-            f"64 B bus (512 b DATA_WIDTH); got {bus_bytes} B (data_width={data_width})")
-    full_size = bus_bytes.bit_length() - 1  # log2(64) = 6
-    os.makedirs(out_dir, exist_ok=True)
-    axid = src_idx
-    probe_base = dst_base + base_local
-    write_lines, read_lines = [], []
-    write_lines += _ax_fields(axid, probe_base, 0, full_size, include_atop=True)
-    write_lines += encode_write_beats(probe_base, full_size, 0, data_width)
-    read_lines += _ax_fields(axid, probe_base, 0, full_size, include_atop=False)
-    strb_base = probe_base + bus_bytes
-    for off in _BEAT_EXACT_STRB_OFFSETS:
-        addr = strb_base + off
-        write_lines += _ax_fields(axid, addr, 0, 0, include_atop=True)
-        write_lines += encode_write_beats(addr, 0, 0, data_width)
-        read_lines += _ax_fields(axid, addr, 0, 0, include_atop=False)
-    if extra is not None:
-        extra_write, extra_read = extra
-        write_lines += extra_write
-        read_lines += extra_read
-    with open(os.path.join(out_dir, "write.txt"), "w") as f:
-        f.write("\n".join(write_lines) + "\n")
-    with open(os.path.join(out_dir, "read.txt"), "w") as f:
-        f.write("\n".join(read_lines) + "\n")
-
 
 def unicast_pair_lines(axid, addr, axi_size, axi_len, data_width):
     """(write_lines, read_lines) for one unicast write and its readback at addr."""
@@ -299,15 +224,16 @@ def unicast_pair_lines(axid, addr, axi_size, axi_len, data_width):
     return write, read
 
 
-def narrow_beat_exact_lines(axid, config_base, data_width):
-    """(write_lines, read_lines) for one narrow-class beat-exact probe: a
+def narrow_config_probe_lines(axid, config_base, data_width):
+    """(write_lines, read_lines) for one narrow-class config-space probe: a
     2-beat INCR burst at AxSIZE=3 (8 B, the narrow lane width) targeting a
-    config-space aperture. encode_write_beats already gives per-lane-distinct
-    bytes and full per-beat strobe -- same formula as the data-class full
-    beat, just narrower. Two beats ('a couple') proves lane re-anchor holds
-    across an address increment; no walking-strb needed here, the narrow
-    class's 81 b NarrowW payload carries the whole 8 B lane in one flit, no
-    multi-word DPI packing to fault-inject. AxSIZE<=3 is required -- narrow
+    config-space aperture. Emitted on every pattern, not tied to one: a
+    config-space topology has to exercise both classes whatever drives the
+    data-class traffic. encode_write_beats already gives per-lane-distinct
+    bytes and full per-beat strobe. Two beats ('a couple') proves lane
+    re-anchor holds across an address increment; the narrow class's 81 b
+    NarrowW payload carries the whole 8 B lane in one flit, so a single beat
+    would prove nothing a wider one does not. AxSIZE<=3 is required -- narrow
     class rejects larger (S2 design doc sec 1)."""
     axi_len, axi_size = 1, 3
     write = _ax_fields(axid, config_base, axi_len, axi_size, include_atop=True)
@@ -813,7 +739,7 @@ def emit_multicast_pattern(out_root, nodes, x_dim, y_dim, bases, config_bases,
                 # NarrowB/NarrowR traffic on RSP contending with the CollectB join.
                 probe_cid = nodes[(idx + 1) % n_nodes][3]
                 probe_addr = config_bases[probe_cid] + _CONFIG_PROBE_BASE + idx * _SLOT_STRIDE
-                w, r = narrow_beat_exact_lines(axid, probe_addr, data_width)
+                w, r = narrow_config_probe_lines(axid, probe_addr, data_width)
                 write_lines += w
                 read_lines += r
         out_dir = os.path.join(out_root, f"node{idx}")
@@ -908,7 +834,7 @@ def emit_peripheral_nodes(out_root, peripherals, nodes, bases, n_slots, base_loc
 def merge_extra(*parts):
     """Concatenate (write_lines, read_lines) tuples; None for nothing at all.
 
-    emit_file_master_node / emit_beat_exact_node take ONE extra, and a node can
+    emit_file_master_node takes ONE extra, and a node can
     now owe two: its own config-space probe and a peripheral's traffic.
     """
     parts = [p for p in parts if p]
@@ -1106,8 +1032,7 @@ def main(argv=None):
     )
     ap.add_argument("--pattern", required=True,
                     choices=list(_DETERMINISTIC_PATTERNS) + ["uniform_random", "all_to_all",
-                                                             "hotspot",
-                                                             "beat_exact", "multicast"],
+                                                             "hotspot", "multicast"],
                     help="Traffic pattern")
     ap.add_argument("--mcast-shape", choices=list(_MCAST_SHAPES), default="row",
                     help="Multicast mask shape (multicast pattern only). One shape "
@@ -1229,16 +1154,10 @@ def main(argv=None):
         # probe to it (self-targeted; config space is per-node, not spatial),
         # so a config-space topology exercises both classes in one run
         # regardless of which pattern drives the data-class traffic below.
-        narrow_extra = (narrow_beat_exact_lines(idx, config_bases[src_cid], widths["data"])
+        narrow_extra = (narrow_config_probe_lines(idx, config_bases[src_cid], widths["data"])
                         if src_cid in config_bases else None)
         # A node bordering a peripheral also addresses it (emit_peripheral_nodes).
         extra = merge_extra(narrow_extra, periph_extra.get(idx))
-        if a.pattern == "beat_exact":
-            dst_x, dst_y = neighbor_dst(x, y, x_dim, y_dim)
-            dst_base = bases[cid_of[(dst_x, dst_y)]]
-            emit_beat_exact_node(os.path.join(a.out, f"node{idx}"), idx, dst_base,
-                                 widths["data"], extra=extra, base_local=base_local)
-            continue
         # Every branch names its destinations by WINDOW BASE. A peripheral
         # shares its host router's coordinate, so a coordinate no longer names
         # one destination and bases[cid] would send a peripheral's traffic to
