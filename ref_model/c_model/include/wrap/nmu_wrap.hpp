@@ -65,7 +65,7 @@ namespace ni::cmodel::wrap {
 class NmuWrap {
   public:
     // init — construct NmuStandalone with the co-sim default NmuConfig.
-    // config_path is the topology YAML carrying the `address_map` block; it
+    // config_path is the config file carrying the `endpoints` block; it
     // leads the argument list because there is no NMU without a SAM. Null or
     // empty throws, so a topology missing at the DPI boundary surfaces through
     // the same error latch as an unreadable YAML (load_sam_table throws too).
@@ -84,7 +84,7 @@ class NmuWrap {
         using namespace ni::cmodel::nmu;
         if (config_path == nullptr || config_path[0] == '\0') {
             throw std::invalid_argument(
-                "NmuWrap::init: config_path is required (topology YAML with an address_map block)");
+                "NmuWrap::init: config_path is required (a sim/configs file with an endpoints block)");
         }
         if (port_id > 2) {
             throw std::invalid_argument(

@@ -887,7 +887,7 @@ def emit_tb_top(topo: dict, dma: bool = False,
     w(f"    longint unsigned nsu_ctx        [{n_ep}];")
     w(f"    longint unsigned dat_merge_ctx  [{n_ep}];")
     w("")
-    w("    // SAM config: topology YAML with an address_map block. Empty (the")
+    w("    // SAM config: the sim/configs/ file, with its endpoints block. Empty (the")
     w("    // default) keeps each NMU's default 16x16 uniform, 4 GB/tile SAM.")
     w('    string sam_config_path = "";')
     w("")

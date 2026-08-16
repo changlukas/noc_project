@@ -17,11 +17,12 @@
 .DEFAULT_GOAL := sim
 
 help:
-	@echo "Simulate (from the repo root; inside sim/ they are sim, build, run):"
+	@echo "Simulate (from the repo root; inside sim/ they are sim, build, run, gen):"
+	@echo "  make sim-gen CONFIG=<config> PATTERN=<p>          stimulus only; a run needs this first"
 	@echo "  make sim CONFIG=<config> PATTERN=<p> [SEED=<n>]   build, then run"
 	@echo "  make sim-build CONFIG=<config>                    build only, no run"
 	@echo "  make sim-run CONFIG=<config> PATTERN=<p>          run only; errors if not built"
-	@echo "  make sim CONFIG=mesh_4x4 PATTERN=neighbor"
+	@echo "  make sim-gen CONFIG=mesh_4x4 PATTERN=neighbor && make sim CONFIG=mesh_4x4 PATTERN=neighbor"
 	@echo "  CONFIG:  a sim/configs/*.yml basename: $(_VALID_CONFIGS)"
 	@echo "  PATTERN: $(_VALID_PATTERNS)"
 	@echo "  The DAT VC count (noc.DAT_NUM_VC) and the NMU read RoB mode"

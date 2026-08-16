@@ -39,7 +39,7 @@ module dma_node_endpoint #(
     parameter int unsigned ADDR_WIDTH   = ni_params_pkg::AXI_ADDR_WIDTH_DFLT,
     parameter int unsigned DATA_WIDTH   = ni_params_pkg::AXI_DATA_WIDTH_DFLT,
     // THIS node's own crossbar windows, stamped by gen_tb_top.py from the
-    // topology YAML. Field t is target t, m0 = config, LAST = data (see
+    // config file. Field t is target t, m0 = config, LAST = data (see
     // gen_tb_top.tile_targets). No defaults: only the generator knows a
     // topology's tile layout.
     parameter int unsigned TILE_TARGETS,

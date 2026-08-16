@@ -43,13 +43,22 @@ what both compile:
 | `sim/tb/soc/` | `dma_node_endpoint` | a pulp iDMA backend in place of the replayer. The SoC layer: a real AXI manager picks its own bursts, outstanding depth and alignment, so a run measures conformance to one |
 | `sim/tb/` | — | `axi_vip_types_pkg.sv` and `link_perf_monitor.sv`, compiled into both |
 
-`sim/tools/gen_tb_top.py` reads a topology YAML (`sim/topologies/*.yaml`) and
-emits two generated files, never hand-edited:
+`sim/tools/gen_tb_top.py` reads a config file (`sim/configs/<CONFIG>.yml`) and
+emits one generated file per run class, never hand-edited:
 
 | file | content |
 |---|---|
-| `ref_model/top/noc_fabric_<topology>.sv` | N nodes (`ni_wrap` = NMU + NSU + `dat_merge_wrap`, plus `router_wrap`), joined by directional (N/E/S/W) inter-router links via a `genvar` generate loop. Boundary directions are tied off; a tied-off direction driving a valid flit is a `$fatal`. |
-| `sim/tb/test/tb_top_<topology>.sv` | self-clocked (10 ns clock, 4-cycle reset) top: DPI create calls for every router/NMU/NSU context, the fabric instance, one `user_node_endpoint` per node, the watchdog, and the exit logic. |
+| `sim/tb/test/topology_pkg.sv` | the geometry and address-map package `tb_noc_mesh.sv` imports: node count, mesh dimensions, per-endpoint crossbar windows, the NoC egress aperture. The file name is fixed and its contents follow `CONFIG`, so switching configuration regenerates it. |
+| `sim/tb/soc/tb_top_dma_<CONFIG>.sv` | `DMA=1` only: the SoC-layer top, whose per-node region compare has to come from the same geometry as the job files. |
+
+The directed top is not generated. `sim/tb/tb_noc_mesh.sv` names the latency
+profiles and instantiates `sim/tb/noc_tb_top.sv`, the shared body: self-clocked
+(10 ns clock, 4-cycle reset), DPI create calls for every router/NMU/NSU context,
+the fabric instance, one `user_node_endpoint` per endpoint, the watchdog and the
+exit logic. `ref_model/top/noc_fabric.sv` holds N nodes (`ni_wrap` = NMU + NSU +
+`dat_merge_wrap`, plus `router_wrap`) joined by directional (N/E/S/W)
+inter-router links through a `genvar` generate loop. Boundary directions are
+tied off; a tied-off direction driving a valid flit is a `$fatal`.
 
 `router_wrap` carries three physical networks, each with its own flit width
 (`ni_params_pkg`: REQ 136 b, RSP 126 b, DAT 633 b):
@@ -289,77 +298,94 @@ order-list peak, the peak in-flight transaction count per direction and the
 admission clause
 split (AW and AR separately) from `cmodel_nmu_admission_stats`.
 
-## Topology YAML to generator to testbench
+## Config file to generator to testbench
 
-A topology is one YAML file under `sim/topologies/`:
+A configuration is one YAML file under `sim/configs/`, in FlooNoC's schema
+(`floogen/model/*.py`): endpoints, a router array, the connections between
+them, and the address ranges each endpoint owns.
 
 ```yaml
-topology:
-  name: mesh_4x4_vc1
-  x_dim: 4
-  y_dim: 4
-  num_vc: 1
+name: mesh_4x4
+network_type: "axi"
 
-address_map:
-  block_size: 0x100000000     # every node's block; memory sits at offset 0, config above it
-  tiles:                      # ordered, every mesh node exactly once, row-major (y outer, x inner)
-    - { x: 0, y: 0, size: 0x2000000 }
-    - { x: 1, y: 0, size: 0x2000000 }
-    # ... one entry per node
-    - { x: 0, y: 0, size: 0x1000, space: config }  # config tiles, one per node
+routing:
+  route_algo: "XY"
+  use_id_table: true          # table decode; false is the address-offset slice
+
+endpoints:
+  - name: "tile"
+    array: [4, 4]             # member k is coordinate (x, y), k = (y << clog2(x_dim)) | x
+    sbr_port_protocol: ["axi"]        # is_sbr() gates SAM participation
+    addr_range:
+      - { base: 0x0,       size: 0x2000000, stride: 0x100000000, space: memory }
+      - { base: 0x2000000, size: 0x1000,    stride: 0x100000000, space: config }
+
+routers:
+  - { name: "router", array: [4, 4], degree: 5 }   # N/E/S/W links are implicit
+
+connections:
+  - src: "tile"
+    dst: "router"
+    src_range: [[0, 3], [0, 3]]
+    dst_range: [[0, 3], [0, 3]]
+    dst_dir: 4                # XYDirections.EJECT
 ```
 
-`space` selects the AXI class the tile decodes into: `config` maps to the
-narrow class, `memory` (the default when `space` is omitted) maps to the data
-class. Every shipped topology gives each node one memory tile and one config
-tile (`nmu::addr_trans::SamTable::validate`).
+`stride` and `space` are this project's two additions to `AddrRange`.
+FlooNoC places array member k at `base + size * k`, stride equal to size; here
+a node's two apertures sit at different offsets inside one 4 GiB block, so the
+stride is declared and defaults to `size` when it is not. `space` selects the
+AXI class the range decodes into: `config` maps to the narrow class, `memory`
+(the default) to the data class, `peripheral` to a unicast-only region above the
+tile array. Every shipped configuration gives each node one memory range and one
+config range (`nmu::addr_trans::SamTable::validate`).
 
-The SAM is a first-match `{base, size, dst_id}` range table, loaded from this
-block and shared by the C++ loader and both Python generators: the generator
-places each request at `base(dst) + offset`, and the NMU SAM translates the
-address back to `dst_id`. One source, so the two never disagree.
+A peripheral endpoint declares `num` instead of `array` and takes its
+coordinate from the router it hangs off; `dst_dir` names the port, never a
+coordinate offset. Both readers refuse a peripheral whose direction names an
+edge its coordinate is not on: on an edge router that port is terminal, while on
+an interior router it carries a live inter-router link and the peripheral's
+Y-to-X ejection turn closes a channel dependency cycle.
 
-`tiles:` gives each node its own `size`; there is no `tile_size` and no
-`base` key. Bases come from the coordinate and the block stride -- the sim
-YAML's `block_size` key, what `docs/noc-target-spec.md` §5.1 calls
-`node_stride` -- not accumulation: `base = idx * block_size + offset[space]`, where
-`idx = (y << x_bits) | x`, `x_bits` is `clog2(x_dim)`, and `offset[space]` is
-0 for memory and the memory slot rounded up to the config slot for config
-(`nmu::addr_trans::SamTable::packed`), `slot` being the largest size declared
-in that space. `block_size` is either declared (`address_map.block_size`) or
-defaults to the next power of two at or above what the spaces occupy
-(`sam_yaml.hpp`'s `default_block_size`, mirrored in `sim/tools/address_map.py`'s
-`pack()`). A tile smaller than its space's slot
-leaves a gap inside its own node's block; nothing shifts, because every
-node's base already comes from `idx * block_size`, never from a neighbor's
-extent. The node index and the routing id use different shifts: `dst_id =
-(y << X_WIDTH) | x`. The loader accepts a heterogeneous map (covered by
-`test_node_windows_are_that_node_s_own_map_entries` in
-`sim/tools/test_gen_test_patterns_filemaster.py`), but every shipped topology
-uses a `0x100000000` block per node, holding a `0x2000000` memory tile at
-offset 0 and a `0x1000` config tile at `0x2000000`, in raster order, config
-entries appended after the memory entries. `TILE_TARGETS` is therefore 2 on
-every topology, and the endpoint carries one decode path, the two-window
-one. The windows are per node and global — nothing rebases, so the tile
-decodes on the same bases the SAM matched. A disagreement between the two
-shows up as an address outside both windows, which DECERRs; the endpoint's
-`DECERR_FAULT_BIT` fault injection and the RRESP fatal in
-`sim/tb/test/user_node_endpoint.sv` check that path.
+The SAM is a first-match `{base, size, dst_id}` range table, expanded from
+these ranges by two readers that must agree rule for rule: `sim/tools/
+address_map.py` `pack_config()` at generate time, and `nmu/sam_yaml.hpp`
+`load_config_table()` at simulation time through `+sam_config`. The generator
+places each request at `base(dst) + offset` and the NMU SAM translates the
+address back to `dst_id`, so a divergence would leave the generated package and
+the generated stimulus agreeing with each other and disagreeing with the runtime
+translator. `sim/configs/sam_rules.golden` is where the two meet:
+`tests/nmu/test_sam_config.cpp` holds the C++ expansion to it and
+`sim/tools/test_sam_config_parity.py` holds the Python one, and equality is
+transitive. Both suites are one gate — `make check` — because regenerating the
+golden from one side alone would move that side's goalposts silently.
 
-Raster order is what makes the node index a contiguous bit field an AWUSER
-address mask can wildcard: memory bases at `idx * block_size`, config bases
-at `idx * block_size + 0x2000000`.
+Member k of a range lands at `base + stride * k`, where k is the host router's
+array index, X-fast: `k = (y << x_bits) | x` with `x_bits = clog2(x_dim)`. That
+index is not the routing id, which uses a fixed shift: `dst_id = (y << X_WIDTH)
+| x`. The two coincide only at 16 wide. Every shipped configuration gives each
+node a `0x100000000` block holding a `0x2000000` memory aperture at offset 0 and
+a `0x1000` config aperture at `0x2000000`. `TILE_TARGETS` is therefore 2
+everywhere, and the endpoint carries one decode path, the two-window one. The
+windows are per node and global — nothing rebases, so the tile decodes on the
+same bases the SAM matched. A disagreement between the two shows up as an
+address outside both windows, which DECERRs; the endpoint's `DECERR_FAULT_BIT`
+fault injection and the RRESP fatal in `sim/tb/test/user_node_endpoint.sv` check
+that path.
 
-`gen_tb_top.py` rejects a topology whose mesh dimensions or `num_vc` exceed
-the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit
-spec) before emitting anything. `sim/verilator/Makefile` regenerates
-`tb_top_<TOPOLOGY>.sv` whenever the topology YAML, the generator, or the
-`TOPOLOGY` make variable changes. Adding a topology needs only a new YAML
-file; `make -C sim TB=<name> PATTERN=<p>` picks it up with no other change.
-`READ_ROB=0|1` selects the NMU read response path: 1 (the default) the
-reorder buffer, 0 the RoBless bypass. It reaches the generated top as its
-`READ_ROB_ENABLED` localparam, and joins the topology stamp so a switch
-re-emits the tb.
+A uniform stride is what makes the node index a contiguous bit field an AWUSER
+address mask can wildcard: memory bases at `k * stride`, config bases at
+`k * stride + 0x2000000`.
+
+`gen_tb_top.py` rejects a configuration whose mesh dimensions or VC count exceed
+the flit field capacity (`X_WIDTH`/`Y_WIDTH`/`VC_ID_WIDTH` from the flit spec)
+before emitting anything. `sim/verilator/Makefile` regenerates
+`topology_pkg.sv` whenever the config file, the generator, or the `CONFIG` make
+variable changes. Adding a geometry needs only a new file under `sim/configs/`;
+`make -C sim CONFIG=<name> PATTERN=<p>` picks it up with no other change. The VC
+count and the NMU read RoB mode are not configuration: they are
+`noc.DAT_NUM_VC` and `nmu.READ_ROB_ENABLED` in `specgen/source/constants.yaml`,
+and changing either is an edit and a rebuild.
 
 ## Seed handling
 
@@ -368,8 +394,8 @@ each draws its own random 30-bit seed (`RANDOM*32768+RANDOM`, under
 Verilator's `+verilator+seed+` int32 ceiling) and prints it:
 
 ```
->>> gen TB=mesh_4x4_vc1 PATTERN=neighbor SEED=538912734
->>> sim TB=mesh_4x4_vc1 PATTERN=neighbor SEED=538912734
+>>> gen CONFIG=mesh_4x4 PATTERN=neighbor SEED=538912734
+>>> sim CONFIG=mesh_4x4 PATTERN=neighbor SEED=538912734
 ```
 
 `gen` uses `SEED` for the stimulus generator (`--seed`, used by
@@ -382,7 +408,7 @@ supplied to each rather than drawn once and shared.
 
 | limitation | detail |
 |---|---|
-| SAM failure mode | `translate()` miss and a topology YAML without `address_map` fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
+| SAM failure mode | `translate()` miss and a config file without an `endpoints:` block fail via bare `assert`: fail-loud in a debug build, undefined under `NDEBUG`. Model policy only; a real interconnect returns DECERR on a decode miss, which the NI does not model. |
 | Unswept sizing | `NMU_MAX_TXNS_PER_ID` = 32 (per-ID order-list depth) is the one depth that was swept: 32 down to 1, every point a non-vacuous PASS. At four ids the run peaked at 30 of the then-32-entry shared pool against a deepest per-ID list of 12, which is what identified the pool rather than the per-ID depth as the binding limit. No throughput figure was taken at any point of the sweep. `NMU_ROB_B_DEPTH`/`NMU_ROB_R_DEPTH` default to 128 (S2) and are expressible up to 256 (the full `ordering_tag` space) via `B_ROB_DEPTH`/`R_ROB_DEPTH`; a burst whose beats (len+1) exceed the RoB depth fails loud (`Rob::push_ar` assert) instead of wedging. Equally unswept at every setting. |
 | RoB physical shape unmodelled | no SRAM/flip-flop distinction, no allocator timing (the model's linear scan stands in for a combinational leading-zero count), no area reporting. |
 | Verification framework gaps | no covergroups, no wire-side SVA framework, no standing co-sim regression harness (fabric coverage relies on manual `make -C sim` runs), no slave-latency sweep axis. The retired constrained-random axis is covered under Checkers. |

@@ -231,7 +231,7 @@ module noc_tb_top #(
     longint unsigned nsu_ctx        [NUM_ENDPOINTS];
     longint unsigned dat_merge_ctx  [NUM_ENDPOINTS];
 
-    // SAM config: topology YAML with an address_map block. Empty (the
+    // SAM config: the sim/configs/ file, with its endpoints block. Empty (the
     // default) keeps each NMU's default 16x16 uniform, 4 GB/tile SAM.
     string sam_config_path = "";
 

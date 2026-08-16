@@ -77,7 +77,7 @@ Constants
 X_WIDTH = 4  -- mirrors c_model addr_trans.hpp / ni_flit_constants.h
 DST_ID_WIDTH = 8  -- mirrors ni_flit_constants.h header::DST_ID_WIDTH (X_WIDTH + Y_WIDTH)
 
-Per-tile base address = base(dst_id), packed from the topology YAML's
+Per-tile base address = base(dst_id), expanded from the config file's
 address_map.tiles list (see address_map.py). Mirrors c_model SamTable::packed's
 base formula (addr_trans.hpp): base = space_base[space] + ((y << x_bits) | x) *
 slot[space].

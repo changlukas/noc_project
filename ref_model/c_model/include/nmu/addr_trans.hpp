@@ -133,7 +133,7 @@ class SamTable {
     }
 
     // Convenience: pack x_dim*y_dim equal-size tiles in row-major (x, then y)
-    // order. Test fixtures only -- co-sim always loads a topology YAML, and
+    // order. Test fixtures only -- co-sim always loads a config file, and
     // NmuWrap::init rejects a missing one. The table it builds is memory-only.
     static SamTable uniform(unsigned x_dim, unsigned y_dim, uint64_t tile_size) {
         std::vector<PackedTile> tiles;
@@ -179,7 +179,7 @@ class SamTable {
     // SamTable::uniform() builds memory-only tables and is the fixture
     // constructor for most c_model tests. The Python twin
     // (sim/tools/address_map.py pack()) requires both unconditionally -- it
-    // only ever sees a shipped topology YAML.
+    // only ever sees a shipped config file.
     void validate(unsigned x_dim, unsigned y_dim) const {
         constexpr uint64_t k4k = 0x1000;
         for (const auto& e : entries_) {

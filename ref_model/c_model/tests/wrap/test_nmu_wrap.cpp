@@ -16,7 +16,6 @@
 #include "wrap/flit_byte_conv.hpp"
 #include "wrap/nmu_wrap.hpp"
 #include "wrap/nmu_wrap_io.hpp"
-#include <fstream>
 #include <gtest/gtest.h>
 
 using ni::cmodel::wrap::flit_from_bytes;
@@ -24,7 +23,7 @@ using ni::cmodel::wrap::NmuInputs;
 using ni::cmodel::wrap::NmuOutputs;
 using ni::cmodel::wrap::NmuWrap;
 
-// NmuWrap::init takes a topology YAML, no default map. The handshake tests
+// NmuWrap::init takes a config file, no default map. The handshake tests
 // below care only that the stimulus address resolves, so the smallest shipped
 // mesh serves; the SAM-specific tests write their own YAML.
 constexpr const char* kTopologyYaml = CONFIG_DIR "/mesh_2x2.yml";

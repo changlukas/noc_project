@@ -13,7 +13,6 @@
 #include "wrap/router_wrap.hpp"
 #include "common/mesh_config.hpp"
 
-#include <fstream>
 #include <gtest/gtest.h>
 
 using namespace ni::cmodel::wrap;
@@ -22,12 +21,12 @@ namespace {
 
 constexpr std::size_t LOCAL = 0, EAST = 2, WEST = 4;
 
-// NmuWrap::init takes a topology YAML, no default map. The chain runs on a
+// NmuWrap::init takes a config file, no default map. The chain runs on a
 // 2x2 mesh, so the shipped 2x2 is the map; tests needing a different shape
 // write their own YAML below.
 constexpr const char* kTopologyYaml = CONFIG_DIR "/mesh_2x2.yml";
-// Same 2x2 plus a peripherals block. Declares { x: 0, y: 0, face: x }, which is
-// port 1 at (0,0) -- the configuration a non-zero requester port needs.
+// Same 2x2 plus a peripheral endpoint on router 0's WEST port, which is port 1
+// at (0,0) -- the configuration a non-zero requester port needs.
 constexpr const char* kPeriphTopologyYaml = CONFIG_DIR "/mesh_2x2_periph.yml";
 
 struct Node {

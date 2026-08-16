@@ -2,7 +2,7 @@
 
 A behavioural C++ model of an AXI4 Network-on-Chip interface (NMU, NSU,
 router mesh) with a Verilator wire-level co-simulation. The cosim drives
-generated traffic through a per-topology testbench and checks every
+generated traffic through one configurable testbench and checks every
 transaction with a write-to-readback scoreboard plus AXI protocol
 assertions.
 
@@ -18,7 +18,7 @@ the platforms below. `make test` reports the current unit suite;
 ~~~
 AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
                 C++17 model, one SV wrap per component (DPI handle ABI)
-                generated per-topology tb_top + scoreboard
+                one testbench, one config file per geometry
 ~~~
 
 ### Where code lives
@@ -28,7 +28,7 @@ AXI4 Master --> NMU --> router mesh --> NSU --> AXI4 Slave
   - `top/` - SV wrapper modules around the model components
   - `dpi/` - DPI bridge between SV wraps and the C++ model
 - `rtl/` - the synthesizable implementation, per block
-- `sim/` - testbench sources, topology YAMLs, stimulus/plot tooling, `verilator/` and `vcs/` flows
+- `sim/` - testbench sources, `configs/` geometry files, stimulus/plot tooling, `verilator/` and `vcs/` flows
 - `specgen/` - spec-to-code generator (C++ headers + SV packages)
 - `docs/` - spec, trade-off record, verification environment
 
@@ -91,31 +91,56 @@ python3 specgen/tools/codegen.py --check   # committed generated code matches so
 
 ## Simulate (cosim)
 
-`make sim` builds the chosen topology and runs one directed pattern. Build,
-generate and run are three separate targets, so a run can be timed without a
-build or a generation hiding inside it. A run never generates stimulus itself:
-it errors naming the missing directory if `make sim-gen` has not written it
-first.
+`make sim` builds the chosen configuration and runs one directed pattern.
+Build, generate and run are three separate targets, so a run can be timed
+without a build or a generation hiding inside it. A run never generates
+stimulus itself: it errors naming the missing directory if `make sim-gen` has
+not written it first.
 
 | target | does |
 |---|---|
-| `make sim TB= PATTERN=` | build, then run. Errors if stimulus is missing |
-| `make sim-gen TB= PATTERN=` | generate stimulus only, keyed on topology geometry. One generation covers every VC count sharing that geometry |
-| `make sim-build TB=` | build only. `PATTERN` names nothing here: a pattern is stimulus read at runtime, so every pattern runs on the same binary |
-| `make sim-run TB= PATTERN=` | run only. Reports the missing binary rather than building it |
+| `make sim CONFIG= PATTERN=` | build, then run. Errors if stimulus is missing |
+| `make sim-gen CONFIG= PATTERN=` | generate stimulus only |
+| `make sim-build CONFIG=` | build only. `PATTERN` names nothing here: a pattern is stimulus read at runtime, so every pattern runs on the same binary |
+| `make sim-run CONFIG= PATTERN=` | run only. Reports the missing binary rather than building it |
+
+One testbench serves every configuration, and one file describes each: a
+FlooNoC-shaped config under `sim/configs/`, holding the endpoints, the router
+array, the connections between them and the address ranges each endpoint owns.
 
 | var | values |
 |---|---|
-| `TB` | configuration, one per testbench in `sim/tb/` — `ls sim/tb/tb_*.sv` is the list: `mesh_2x2_vc1`, `mesh_2x2_vc1_periph`, `mesh_4x4_vc1`, `mesh_4x4_vc1_periph4`, `mesh_4x4_vc2`, `mesh_4x4_vc4`, `mesh_4x4_vc8`, `mesh_4x4_vc8_robless`. Every node owns a 4 GiB block, which holds a 32 MB memory tile at offset 0 and a 4 KB config tile above it; the rest of the block is reserved for further memory regions. The block size is the node stride, declared as `address_map.block_size`. `mesh_2x2_vc1_periph` hangs peripherals off the x face of the routers at (0,0) and (0,1); `mesh_4x4_vc1_periph4` puts one on each of the four faces. A peripheral shares its router's coordinate and is told apart by `dst_port_id`. `mesh_4x4_vc8_robless` is `mesh_4x4_vc8` with the NMU read reorder buffer bypassed, so the two differ in an NI parameter and share one topology YAML |
+| `CONFIG` | a `sim/configs/*.yml` basename — `mesh_2x2`, `mesh_2x2_periph`, `mesh_4x4`, `mesh_4x4_periph4`. Four geometries, no VC or RoB variants: those are build parameters, not configurations (see below). Every node owns a 4 GiB block holding a 32 MB memory aperture at offset 0 and a 4 KB config aperture above it; the block is the node stride, declared as the `addr_range` `stride`. `mesh_2x2_periph` hangs a peripheral off the WEST port of the routers at (0,0) and (0,1); `mesh_4x4_periph4` puts one on each of the four faces. A peripheral shares its host router's coordinate and is told apart by the port it hangs off, named as an `XYDirections` value in `dst_dir` |
 | `PATTERN` | `neighbor`, `transpose`, `bit_complement`, `bit_reverse`, `shuffle`, `bit_rotation`, `tornado` (the booksim2 permutation set; the bit permutations need a power-of-two node count, `transpose` and `tornado` a square mesh), `uniform_random`, `all_to_all` (each node walks every other node in turn, so the destination changes on every transaction and, at one id per initiator, every one of them allocates a reorder-buffer slot), `hotspot` (`HOTSPOT=` names the target node), `multicast` (collective write, shape from `MCAST_SHAPE`) |
 | `MCAST_SHAPE` | `row` (default), `col`, `submesh`. `multicast` only. One shape per run, concurrent multicast trees must stay pairwise disjoint |
 
 `SEED` unset draws and prints a random seed; pass `SEED=<n>` to replay
 a run.
 
+### Where each parameter is defined
+
+One rule, and it decides every question below: **a parameter is defined in
+exactly one file.** A value that varies per configuration is selected in the
+config file; a value that does not vary lives only in
+`specgen/source/constants.yaml`. Nothing is defined in two places, so nothing
+can disagree with itself.
+
+| what | defined in | to change it |
+|---|---|---|
+| mesh dimensions, address map, peripheral attachment | `sim/configs/<CONFIG>.yml` | pass a different `CONFIG=`, or edit the file |
+| DAT VC count (`noc.DAT_NUM_VC`), NMU read RoB mode (`nmu.READ_ROB_ENABLED`) | `specgen/source/constants.yaml` | edit, then `make build` |
+| flit header layout, AXI channel widths, NI queue depths | `specgen/source/` | edit, then `make build` — the drift gate fails the build if the committed generated code no longer matches |
+| DV sizing — test region bytes, master and memory latency profiles | named constants in `sim/tb/tb_noc_mesh.sv` (directed) and `sim/tools/gen_tb_top.py` (DMA) | edit the constant; these are not run knobs |
+| pattern, seed, injection mode and rate, per-run NI overrides | the `make` command line | the tables above and below |
+
+The VC count and the RoB mode are DUT parameters, so they sit with the other
+DUT parameters rather than in the config files. Comparing 1 VC against 8, or
+the reorder buffer against the RoBless bypass, is two edits and two builds
+rather than two configurations.
+
 ~~~bash
-make sim-gen TB=mesh_4x4_vc1 PATTERN=neighbor && make sim TB=mesh_4x4_vc1 PATTERN=neighbor
-make sim-gen TB=mesh_4x4_vc8 PATTERN=transpose && make sim TB=mesh_4x4_vc8 PATTERN=transpose
+make sim-gen CONFIG=mesh_4x4 PATTERN=neighbor && make sim CONFIG=mesh_4x4 PATTERN=neighbor
+make sim-gen CONFIG=mesh_4x4 PATTERN=transpose && make sim CONFIG=mesh_4x4 PATTERN=transpose
 ~~~
 
 On success the make wrapper prints `DIRECTED PASS: <run-tag> scoreboard
@@ -148,7 +173,6 @@ injection rate and mode 1 stays the saturation-curve instrument.
 | `IDS_PER_INITIATOR` | generator default (1) | distinct AXI ids one initiator draws from |
 | `HOTSPOT` | `5` | target node for the `hotspot` pattern |
 | `HOTSPOT_PERIPHERALS` | unset | `1` aims `hotspot` at the peripherals instead of a tile |
-| `READ_ROB` | `1` | NMU read response path: `1` the reorder buffer, `0` the RoBless bypass |
 | `BURST_LEN` | `0` | AXI `len` for the generated stimulus; `0` is a single beat. At `--size 5` (32 B/beat) `63` gives 64 beats = 2048 B, inside the 4 KB boundary |
 | `MAX_UNIQUE_IDS` | `NSU_META_BUFFER_MAX_UNIQUE_IDS_DFLT` | NSU meta buffer: distinct upstream ids tracked at once |
 | `MAX_OUTSTANDING` | `NSU_META_BUFFER_*_DFLT` | NSU meta buffer: outstanding entries |
@@ -169,22 +193,24 @@ Fault injection, for proving a checker fires rather than assuming it does:
 | `ELABORATE_ONLY=1` | elaborates and stops, without running |
 
 ~~~bash
-make sim-gen TB=mesh_4x4_vc4 PATTERN=uniform_random
-make sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
-make sim TB=mesh_4x4_vc4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
+make sim-gen CONFIG=mesh_4x4 PATTERN=uniform_random
+make sim CONFIG=mesh_4x4 PATTERN=uniform_random INJECTION_MODE=1 INJECTION_RATE=0.3
+make sim CONFIG=mesh_4x4 PATTERN=uniform_random INJECTION_MODE=2 INJECTION_RATE=0.5
 ~~~
 
 On success mode 1 prints `CONTINUOUS PASS: <run-tag>` and writes
-`sim/verilator/output/continuous_<topo>_rob<READ_ROB>_<pattern>_r<rate>_s<seed>/result.csv`
+`sim/verilator/output/continuous_<config>_<pattern>_r<rate>_s<seed>/result.csv`
 with the monitor's bandwidth and latency numbers; mode 2 prints
 `CHECKED PASS: <run-tag> scoreboard clean, non-vacuous` with run tag
-`checked_<topo>_rob<READ_ROB>_<pattern>_r<rate>_s<seed>`.
+`checked_<config>_<pattern>_r<rate>_s<seed>`.
 
-`make sim-injection-sweep PATTERN=<p>` runs the full saturation sweep
-(VC configs 1/2/4/8, nine rates each, overridable via `SWEEP_VCS` and
-`SWEEP_RATES`), then merges every `result.csv` and plots
-`sim/tools/injection_sweep.png`. The sweep rebuilds Verilator once per
-VC config; expect a long run.
+`make sim-injection-sweep PATTERN=<p>` sweeps the injection rate — nine rates
+by default, overridable via `SWEEP_RATES` — then merges every `result.csv` and
+plots `sim/tools/injection_sweep.png`. It sweeps rate only, at whatever VC
+count `constants.yaml` holds: the VC count is a tracked file, so a sweep across
+it would have to edit that file mid-run. Each row records the VC count it ran
+at and the plotter globs every result, so four curves is four edits and four
+sweeps, accumulating into one figure. Expect a long run.
 
 ### DMA endpoint
 
@@ -214,8 +240,8 @@ disagree. Each direction gets its own stimulus directory and run tag, so a read
 run and a write run do not overwrite one another.
 
 ~~~bash
-make sim-gen TB=mesh_4x4_vc1 DMA=1 && make sim TB=mesh_4x4_vc1 DMA=1                 # 100 read jobs per node
-make sim-gen TB=mesh_4x4_vc1 DMA=1 DMA_RW=write && make sim TB=mesh_4x4_vc1 DMA=1 DMA_RW=write
+make sim-gen CONFIG=mesh_4x4 DMA=1 && make sim CONFIG=mesh_4x4 DMA=1                 # 100 read jobs per node
+make sim-gen CONFIG=mesh_4x4 DMA=1 DMA_RW=write && make sim CONFIG=mesh_4x4 DMA=1 DMA_RW=write
 ~~~
 
 On success the wrapper prints `DMA PASS: <run-tag> every job retired, every
