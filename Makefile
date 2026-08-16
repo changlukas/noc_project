@@ -182,6 +182,7 @@ clean-cmodel:
 # Generated sources and stimulus, plus every __pycache__ the generators leave.
 clean-generated:
 	rm -f sim/tb/test/tb_top_*.sv sim/tb/soc/tb_top_dma_*.sv sim/filelist_*.f
+	rm -f sim/tb/test/topology_*_pkg.sv
 	rm -f sim/tools/injection_sweep.csv sim/tools/injection_sweep.png
 	rm -f sim/verilator/hs_trace_node*.log
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
