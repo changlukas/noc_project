@@ -58,8 +58,10 @@ module noc_tb_top #(
     // NMU read reorder buffer: 1 = the reorder-buffer response path
     // docs/noc-target-spec.md section 3 describes, 0 = the RoBless bypass with
     // its per-id single-outstanding interlock. int unsigned, not bit: it goes
-    // straight into cmodel_nmu_create_ex's `input int rob_enabled`.
-    parameter int unsigned READ_ROB_ENABLED = 1,
+    // straight into cmodel_nmu_create_ex's `input int rob_enabled`. Default from
+    // where the parameter is defined: nmu.READ_ROB_ENABLED in
+    // specgen/source/constants.yaml.
+    parameter int unsigned READ_ROB_ENABLED = ni_params_pkg::NMU_READ_ROB_ENABLED_DFLT,
     // Tile-memory latency profile. Every endpoint's two memories sit behind an
     // axi_delayer carrying these settings; input covers AW/W/AR, output B/R.
     parameter bit          MEM_STALL_RANDOM_INPUT  = 1'b0,

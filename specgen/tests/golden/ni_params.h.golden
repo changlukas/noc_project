@@ -24,6 +24,7 @@ constexpr int NOC_MESH_X_DIM               = 4;
 constexpr int NOC_MESH_Y_DIM               = 4;
 
 // NMU depth defaults
+constexpr int NMU_READ_ROB_ENABLED   = 1;
 constexpr int NMU_ROB_B_DEPTH        = 128;
 constexpr int NMU_ROB_R_DEPTH        = 128;
 constexpr int NMU_MAX_TXNS_PER_ID    = 32;

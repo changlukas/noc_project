@@ -158,7 +158,7 @@ struct NmuConfig {
     // dst_port_id of every response that comes back.
     uint8_t port_id = 0;
     addr_trans::SamTable sam{};
-    RobMode read_rob_mode = RobMode::Enabled;
+    RobMode read_rob_mode = DEFAULT_ROB_MODE;
     // RoB pool depths, per direction. Enabled mode only.
     std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH;
     std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH;

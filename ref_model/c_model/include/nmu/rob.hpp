@@ -20,6 +20,13 @@ namespace ni::cmodel::nmu {
 
 enum class RobMode { Disabled, Enabled };
 
+// The read RoB mode, from where it is defined: nmu.READ_ROB_ENABLED in
+// specgen/source/constants.yaml. The testbench parameter READ_ROB_ENABLED
+// reads the SV half of the same definition, so a build cannot come out with
+// the model in one mode and the top in the other.
+inline constexpr RobMode DEFAULT_ROB_MODE =
+    ni::NMU_READ_ROB_ENABLED ? RobMode::Enabled : RobMode::Disabled;
+
 // In-line layer between AxiSlavePort and {Packetize, Depacketize}.
 // Implements RequestPacketizer (request gate: push_aw/w/ar) and
 // ResponseDepacketizer (response observe: pop_b/r).

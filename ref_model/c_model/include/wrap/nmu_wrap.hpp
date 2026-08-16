@@ -77,7 +77,7 @@ class NmuWrap {
     // AXI channel.
     void init(const char* config_path, uint8_t src_id = 0, uint8_t port_id = 0,
               uint8_t dat_num_vc = 1, std::size_t queue_depth = ni::NMU_QUEUE_DEPTH,
-              nmu::RobMode rob_mode = nmu::RobMode::Enabled,
+              nmu::RobMode rob_mode = nmu::DEFAULT_ROB_MODE,
               std::size_t b_rob_depth = ni::NMU_ROB_B_DEPTH,
               std::size_t r_rob_depth = ni::NMU_ROB_R_DEPTH,
               std::size_t max_txns_per_id = ni::NMU_MAX_TXNS_PER_ID) {
